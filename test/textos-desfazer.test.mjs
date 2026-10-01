@@ -109,6 +109,7 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
     enviarPendenciasDoLightbox: () => {},
     aprovacoesNoAr: new Set(),   // nenhuma aprovação de foto no ar (R5-2-04)
+    aprovacoesDaQueda: new Map(),   // nem de uma sessão que caiu
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',

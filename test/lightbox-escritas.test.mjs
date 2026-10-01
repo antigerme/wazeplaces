@@ -204,7 +204,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     // A volta do pedido numa fila refeita (V9) é medida em test/lote-autor.test.mjs.
     voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
-    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     // O foco que fica no card trocado debaixo dele (R5-3-07) é medido à parte,
     // em test/lightbox-foco-card.test.mjs: aqui só redesenha.
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
@@ -423,7 +423,7 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
     marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
-    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     ...extra,
   };
@@ -846,7 +846,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
     voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
-    aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
@@ -1272,7 +1272,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const respostas = [];
   let app = null;
   const deps = {
-    AppState, Lightbox: L, Treino: { ativo: false }, pedidosEmAndamento: new Set(), aprovacoesNoAr: new Set(),
+    AppState, Lightbox: L, Treino: { ativo: false }, pedidosEmAndamento: new Set(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     canDisableUndo: () => true, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true, manterFocoNoLightbox: () => {},
     API: { aprovarPedido: () => new Promise((ok) => { respostas.push(() => ok(resposta)); }),
       getRegion: () => 'row', getCountry: () => 30 },
@@ -1289,10 +1289,14 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     // do lightbox, V2): aqui só se anota — o que se mede é a trava do card.
     escritaDoLightboxSemSessao: () => log.push('sem-sessao'),
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    // A resposta que POUSA depois da queda (R5-2-03): anotada; o que ela faz com a
+    // fila está nos testes do R5-2-03, abaixo.
+    pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),
+    aprovacaoPousouDepoisDaQueda: () => log.push('pousou-depois-da-queda'),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
-    'agirNoPedidoDoGesto', 'contarIdasSemResposta'];
+    'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -1359,32 +1363,73 @@ test('A1: CONTROLE — a aprovação no ar de OUTRO pedido não trava o card que
   await m.responder();
 });
 
-test('A1: a aprovação no ar é da SESSÃO — a queda a solta, e a resposta velha não solta a da sessão nova', async () => {
+// ── A aprovação no ar ATRAVESSA a queda (follow-up do R5-2-03) ────────────────
+// A queda solta as aprovações da sessão (V6) e a renovação com a MESMA conta
+// mantém a fila — e o card do pedido aprovado voltava DESTRAVADO até a resposta
+// chegar: MEDIDO no navegador (s18b), o ✕ mandava uma segunda decisão ao Waze, e
+// o placar e a reincidência do autor contavam a rejeição de uma foto APROVADA
+// (com a recusa automática, contra quem não errou). Na fila que atravessa a
+// queda, o card segue travado até a resposta — pousando ou não.
+test('A1 × queda: na fila que ATRAVESSA a queda, o card do pedido aprovado segue travado até a resposta — pousando ou não', async () => {
+  for (const resposta of [{ success: true }, { success: false, errorCategory: 'unknown' }]) {
+    const rotulo = resposta.success ? 'pousou' : 'não pousou';
+    const m = montarAprovacaoNoCard({ resposta });
+    m.app.aprovarFotoAtual();
+    assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: travado com a aprovação no ar');
+    // A queda (`derrubarSessao`: a época sobe e as aprovações no ar atravessam) e
+    // a renovação com a MESMA conta: a fila fica (o `fetchEpoch` não muda).
+    m.ep.v++;
+    m.app.aprovacoesAtravessamAQueda();
+    assert.equal(m.app.acoesTravadas(), true,
+      `${rotulo}: DEFEITO — a sessão renovada destravou o card do pedido com a aprovação no ar`);
+    assert.equal(m.app.avisoDaTrava(), 'toast.esperaAprovacao', `${rotulo}: o aviso manda esperar outra coisa`);
+    m.app.handleReject();
+    m.app.handleMarkAsRead();
+    let decidiu = false;
+    m.app.agirNoPedidoDoGesto(m.A, () => { decidiu = true; });
+    assert.ok(!m.log.some((l) => l.startsWith('agendou')), `${rotulo}: uma segunda decisão saiu com a aprovação no ar: ${m.log}`);
+    assert.equal(decidiu, false, `${rotulo}: o gesto decidiu o pedido com a aprovação no ar`);
+    assert.equal(m.AppState.stats.rejected + m.AppState.stats.read, 0, `${rotulo}: o placar contou uma decisão que não pode sair`);
+    // A resposta (velha) chega: o caminho da queda, e o card solta.
+    await m.responder();
+    assert.ok(m.log.includes(resposta.success ? 'pousou-depois-da-queda' : 'sem-sessao'),
+      `${rotulo}: PRÉ-CONDIÇÃO — a resposta não passou pelo caminho da queda: ${m.log}`);
+    assert.equal(m.app.acoesTravadas(), false, `${rotulo}: a resposta chegou e o card ficou travado`);
+    assert.equal(m.log.at(-1), 'trava:false', `${rotulo}: a trava não foi reaplicada quando a resposta chegou`);
+  }
+});
+
+test('A1 × queda: CONTROLES — a fila REFEITA (outra conta, ↻) não trava, e a resposta velha não solta a aprovação da sessão nova', async () => {
   const m = montarAprovacaoNoCard();
   m.app.aprovarFotoAtual();
-  assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: travado com a aprovação no ar');
-  // A queda (o `derrubarSessao`: a época sobe e as aprovações no ar saem) e a
-  // renovação: a sessão que volta não nasce travada pela resposta da que caiu.
   m.ep.v++;
-  m.deps.aprovacoesNoAr.clear();
-  assert.equal(m.app.acoesTravadas(), false, 'a sessão que volta nasceu travada pela aprovação da que caiu');
-  // Na sessão nova a pessoa aprova de novo; a resposta VELHA chega depois.
+  m.app.aprovacoesAtravessamAQueda();
+  assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: na fila que atravessou, travado');
+  // A fila refeita: outra conta (`esquecerOutraConta` → `resetQueue`), ↻, filtro.
+  m.AppState.fetchEpoch++;
+  assert.equal(m.app.acoesTravadas(), false, 'a fila refeita nasceu travada pela aprovação da sessão que caiu (V6)');
+  // Na sessão nova a pessoa aprova o mesmo pedido (no app ele nem voltaria à fila
+  // refeita: está em `pedidosEmAndamento`); a resposta VELHA chega depois.
   m.app.aprovarFotoAtual();
   assert.equal(m.respostas.length, 2, 'PRÉ-CONDIÇÃO: a aprovação da sessão nova saiu');
+  assert.equal(m.app.acoesTravadas(), true);
   await m.responder();                               // a da sessão que caiu
   assert.equal(m.app.acoesTravadas(), true, 'a resposta da sessão que caiu soltou a trava da aprovação da sessão nova');
   await m.responder();
   assert.equal(m.app.acoesTravadas(), false);
 });
 
-test('A1: a queda e o "Sair" soltam as aprovações no ar (a mesma regra do lote de lidos, V6)', () => {
+test('A1: a queda passa as aprovações no ar pra fila que a atravessa; o "Sair" solta todas (V6)', () => {
   const SEM = APP_SEM;
-  for (const nome of ['derrubarSessao', 'handleLogout']) {
-    const f = fatiar(nome);
-    assert.match(f, /loteDeLidosEmVoo = false;\s*aprovacoesNoAr\.clear\(\);/,
-      `${nome} não solta as aprovações no ar: a sessão seguinte nasce travada pela resposta da anterior`);
-  }
+  assert.match(fatiar('derrubarSessao'), /loteDeLidosEmVoo = false;\s*aprovacoesAtravessamAQueda\(\);/,
+    'a queda não passa as aprovações no ar adiante: o card do pedido aprovado volta destravado na fila que fica');
+  assert.match(fatiar('aprovacoesAtravessamAQueda'),
+    /for \(const chave of aprovacoesNoAr\) aprovacoesDaQueda\.set\(chave, AppState\.fetchEpoch\);\s*aprovacoesNoAr\.clear\(\);/,
+    'as aprovações da sessão que caiu não levam a fila em que estavam (ou seguem travando a sessão que vem)');
+  assert.match(fatiar('handleLogout'), /loteDeLidosEmVoo = false;\s*aprovacoesNoAr\.clear\(\);\s*aprovacoesDaQueda\.clear\(\);/,
+    'o "Sair" não solta as aprovações no ar: quem entra depois nasce travado pela resposta de quem saiu');
   assert.ok(SEM.includes('const aprovacoesNoAr = new Set();'));
+  assert.ok(SEM.includes('const aprovacoesDaQueda = new Map();'));
 });
 
 // ── R5-3-04 (R56-4): a retentativa que volta "já feito" é a escrita DESTA pessoa
@@ -1503,7 +1548,7 @@ function montarAprovacaoNaQueda() {
     stats: { read: 0, rejected: 0, skipped: 0 } };
   const respostas = [];
   const deps = {
-    AppState, aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    AppState, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     callWithRetry: (fn) => fn(), API: { aprovarPedido: () => new Promise((ok) => respostas.push(ok)) },
     refazerDepoisDo401: async () => null, marcarEmAndamento: () => {}, refazerSelosSeOutroNaTela: () => {},
     aplicarTravaDeAcao: () => {}, contarConquista: () => log.push('conquista'), showToast: (m) => log.push('toast:' + m),

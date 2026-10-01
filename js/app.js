@@ -3115,9 +3115,26 @@ function pedirExclusaoDaFoto() {
 let aprovacaoPendente = null;
 // As aprovações que SAÍRAM e esperam a resposta, pela chave do pedido (ver
 // `aprovacaoDaTelaNoAr`). São da SESSÃO que as mandou, como o lote de lidos
-// (V6): a queda e o "Sair" as soltam, e a resposta velha não trava a sessão que
-// vem.
+// (V6): o "Sair" as solta, a queda as passa pra `aprovacoesDaQueda`, e a
+// resposta velha não solta a aprovação de uma sessão que vem.
 const aprovacoesNoAr = new Set();
+// As da sessão que CAIU com a resposta ainda no ar, com a fila (`fetchEpoch`) em
+// que estavam. A renovação com a MESMA conta mantém a fila, e o card do pedido
+// aprovado voltava DESTRAVADO até a resposta chegar: um ✕ ali mandava uma
+// segunda decisão ao Waze, e o placar e a reincidência do autor contavam a
+// rejeição de uma foto que a pessoa tinha aprovado — com a recusa automática,
+// contra quem não errou (MEDIDO no navegador, follow-up do R5-2-03). Elas seguem
+// travando o card SÓ nessa fila: a fila refeita (outra conta, ↻, filtro, o
+// "Sair") não as vê, e o pedido nem volta a ela, porque segue em
+// `pedidosEmAndamento` até a resposta. Saem quando a resposta chega, pousando ou
+// não (`enviarAprovacao`), e no "Sair". Nunca duram mais que a própria ida: ela
+// tem teto, e a retentativa não sai depois da queda (`callWithRetry`).
+const aprovacoesDaQueda = new Map();
+
+function aprovacoesAtravessamAQueda() {
+    for (const chave of aprovacoesNoAr) aprovacoesDaQueda.set(chave, AppState.fetchEpoch);
+    aprovacoesNoAr.clear();
+}
 
 // O card fica na tela depois de aprovar (decisão do owner) e só avança quando o
 // lightbox fechar. Sem isto, o pedido ficaria resolvido no Waze e pendurado na
@@ -3208,10 +3225,13 @@ async function enviarAprovacao(alvo) {
         // A aprovação que FALHOU devolve o pedido à série do autor: o "Ver +N" do
         // card da frente volta a contá-lo (R5-2-02).
         refazerSelosSeOutroNaTela(alvo.place);
-        // E o card destrava — travar tem volta (gotcha #63). Só a aprovação
-        // DESTA sessão solta: a queda e o "Sair" já soltaram as dela, e uma
-        // resposta velha não solta a de uma sessão nova.
+        // E o card destrava — travar tem volta (gotcha #63). A aprovação DESTA
+        // sessão sai do conjunto dela; a de uma sessão que CAIU sai das que
+        // atravessaram a queda (`aprovacoesDaQueda`), tenha pousado ou não: a
+        // resposta chegou. Uma resposta velha nunca toca no conjunto de uma
+        // sessão nova.
         if (epoca === epocaDaSessao) aprovacoesNoAr.delete(chave);
+        else aprovacoesDaQueda.delete(chave);
         aplicarTravaDeAcao();
     }
 }
@@ -8027,10 +8047,11 @@ function derrubarSessao(errorKey, { depois } = {}) {
         saveStats();
     }
     // O lote de lidos que estava no ar era da sessão que morreu: ele não trava
-    // a sessão que vem (ver `loteDeLidosEmVoo`). Nem a aprovação no ar (ver
-    // `aprovacoesNoAr`).
+    // a sessão que vem (ver `loteDeLidosEmVoo`). A aprovação no ar sai da
+    // sessão também, mas segue travando o card dela na fila que atravessa a
+    // queda, até a resposta chegar (ver `aprovacoesDaQueda`).
     loteDeLidosEmVoo = false;
-    aprovacoesNoAr.clear();
+    aprovacoesAtravessamAQueda();
     // E as do lightbox, que têm janela própria (ver a função).
     cancelarPendenciasDoLightbox();
     removeUndoBanner();
@@ -8385,9 +8406,11 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
     // token de quem entrasse depois (ver a função).
     cancelarPendenciasDoLightbox();
     // O "Marcar todos" que ficou no ar é de quem saiu: ele não trava quem
-    // entrar (ver `loteDeLidosEmVoo`). Nem a aprovação no ar.
+    // entrar (ver `loteDeLidosEmVoo`). Nem a aprovação no ar, desta sessão ou
+    // de uma que caiu antes (ver `aprovacoesDaQueda`).
     loteDeLidosEmVoo = false;
     aprovacoesNoAr.clear();
+    aprovacoesDaQueda.clear();
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
     // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
     // serve pra exclusão no servidor, que vai depois, com retentativa. Na outra
@@ -11438,10 +11461,14 @@ function acoesTravadas() {
 //
 // É um conjunto PRÓPRIO, e não o `pedidosEmAndamento`: lá também moram os
 // pedidos do "Marcar todos" de uma sessão que caiu, e travar por ele devolvia a
-// trava que o V6 tirou da sessão que volta (medido no teste do V6).
+// trava que o V6 tirou da sessão que volta (medido no teste do V6). A aprovação
+// de uma sessão que CAIU trava também, mas só na fila em que estava (ver
+// `aprovacoesDaQueda`).
 function aprovacaoDaTelaNoAr() {
     const p = AppState.currentPlace;
-    return !!(p && aprovacoesNoAr.has(chaveDoPedido(p)));
+    if (!p) return false;
+    const chave = chaveDoPedido(p);
+    return aprovacoesNoAr.has(chave) || (aprovacoesDaQueda.has(chave) && aprovacoesDaQueda.get(chave) === AppState.fetchEpoch);
 }
 
 // O que dizer a quem tocou com as ações travadas: cada trava pede uma espera, e
@@ -17467,8 +17494,12 @@ const Treino = {
         // procura na fila de treino) e voltava no `sair()` como card, destravado —
         // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
         // (R5-2-04). Depois de despachar as pendências: a da janela acabou de sair
-        // e também é esperada.
-        if (aprovacoesNoAr.size) { showToast(t('toast.esperaAprovacao'), 'info'); return; }
+        // e também é esperada. E a de uma sessão que CAIU, na fila que atravessou
+        // a queda: o pouso dela tira o pedido desta fila (ver `aprovacoesDaQueda`).
+        if (aprovacoesNoAr.size || [...aprovacoesDaQueda.values()].includes(AppState.fetchEpoch)) {
+            showToast(t('toast.esperaAprovacao'), 'info');
+            return;
+        }
         // A busca que estiver em voo é DESCARTADA (a época muda): sem isto os
         // pedidos reais pousavam na fila de TREINO, crus e registrados como "já
         // passaram pela fila", e sumiam no `sair()`. Quem busca de novo é o

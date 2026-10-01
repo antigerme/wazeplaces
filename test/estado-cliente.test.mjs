@@ -186,11 +186,14 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false } = {}) {
+function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false, aprovacaoDaQueda = null } = {}) {
   const log = [];
   // A aprovação de foto no ar (R5-2-04): já saiu (`aprovacaoNoAr`), ou estava na
   // janela do Desfazer e SAI no despacho das pendências do lightbox ao entrar.
   const aprovacoes = new Set(aprovacaoNoAr ? ['vF|uF'] : []);
+  // A de uma sessão que CAIU, com a fila em que estava (`aprovacoesDaQueda`):
+  // 'nestaFila' (a fila que atravessou a queda) ou 'outraFila' (já refeita).
+  const daQueda = new Map(aprovacaoDaQueda ? [['vF|uF', aprovacaoDaQueda === 'nestaFila' ? 0 : -1]] : []);
   const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true,
     queue: [], currentPlace: null, stats: { read: 7, rejected: 3, skipped: 1 }, serverTotal: 40,
     preferences: { comoFuncionaVisto: false }, ...estado };
@@ -205,7 +208,7 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
     loteDeLidosEmVoo: loteNoAr,
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
     enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
-    aprovacoesNoAr: aprovacoes,
+    aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -272,6 +275,23 @@ test('R5-2-04: a aprovação que estava na JANELA sai ao entrar — e o treino e
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
   c.Treino.entrar();
   assert.equal(c.Treino.ativo, true);
+});
+
+// A aprovação de uma sessão que CAIU, com a resposta ainda no ar, na fila que
+// atravessou a queda (a renovação com a MESMA conta): o pouso dela tira o pedido
+// DESTA fila (`aprovacaoPousouDepoisDaQueda`), e com a de treino no lugar ele
+// voltava no `sair()` como card — o R5-2-04 de novo, pela porta da queda.
+test('R5-2-04 × queda: a aprovação da sessão que caiu, ainda no ar NA FILA que ficou, segura o treino — a de uma fila refeita não', () => {
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoDaQueda: 'nestaFila' });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo da aprovação que atravessou a queda');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
+  // CONTROLE: a de uma fila que já foi refeita (outra conta, ↻) não pousa nesta, e não segura.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { aprovacaoDaQueda: 'outraFila' });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true, 'a aprovação de uma fila que já foi refeita segurou o treino');
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {
