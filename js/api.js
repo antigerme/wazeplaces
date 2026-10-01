@@ -276,6 +276,9 @@ const API = {
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 45000);
+        // A resposta INTEIRA chegou (status, cabeçalhos e corpo)? É o que separa
+        // "a rede falhou" de "chegou e não era JSON" no `catch` (ver `_motivo`).
+        let chegou = false;
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
                 method: 'POST',
@@ -300,6 +303,7 @@ const API = {
                 if (v) cab[h] = v;
             }
             const bruto = await response.text();
+            chegou = true;
             let data, naoEraJson = null;
             try {
                 data = JSON.parse(bruto);
@@ -343,8 +347,17 @@ const API = {
             // `http: 0` é a marca de "nem chegou a responder" — aborto por
             // timeout, rede caída, DNS. Sem distinguir isso de um 500, todo
             // problema de rede vira "erro do servidor" na análise.
+            //
+            // `_motivo` é a marca de "a resposta NEM CHEGOU" (rede, DNS, tempo
+            // esgotado, corpo cortado no meio), e só ela. A que chega mas não é
+            // JSON (502 da borda com a origem fora, 429 da cota do plano grátis,
+            // desafio do WAF) PROVA a rede e segue `transient`, sem a marca: com
+            // ela, a conversa dizia "sem conexão" com a rede boa e os tetos de
+            // um pedido por minuto se soltavam (auditoria de 2026-09-30,
+            // R5-5-3). E sem `httpCode`, que é o status do WAZE pra fila de
+            // saída (um 502 da borda não é o Waze recusando AQUELE pedido).
             const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
-                            _motivo: String((error && error.name) || error).slice(0, 60) };
+                            ...(chegou ? {} : { _motivo: String((error && error.name) || error).slice(0, 60) }) };
             // Só registra aqui o que NÃO passou pelo `finally` do try — ou seja,
             // falha antes da resposta existir (rede, DNS, timeout). Corpo não
             // JSON já foi registrado lá com o status REAL; registrar de novo
