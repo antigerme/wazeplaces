@@ -22,7 +22,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   mais os follow-ups (Alt/⌘+← no card, a fila não coberta do offline, a aprovação que atravessa a queda, o
   "Ver os N" pelo teclado). CI verde; smokes locais no HEAD final: layout e fluxo (saída 0), offline (199 ✓),
   diagnóstico da tela (46 ✓), presença (63 ✓ no Chromium e no WebKit).
-- **Verificação em produção** com as duas contas: `scratchpad/prod-auditoria.mjs` (saída em `prod-l9.log`).
+- **Verificação em produção** com as duas contas (`scratchpad/prod-auditoria.mjs`): 89 ✓ · 0 ✗ no roteiro inteiro (`prod-l9.log`), e a seção nova "12. Lote 9 no ar" (`prod-auditoria.mjs l9`, `prod-l9b.log`) 20 ✓ · 0 ✗: Alt/⌘/Ctrl com as setas não decidem o pedido (com o controle da ← sozinha) e o "Lida" da corrida do `abrir` chegou 3 de 3.
 - **Rodada 6 em andamento**: sete auditores sobre a main `b270ffc` (worktree `/home/user/wp-r6`), ids em
   `scratchpad/r6-agentes.txt`, prompts `scratchpad/r6-prompt-{1..7}.txt`, relatórios em
   `scratchpad/r6-<n>/relatorio.md`. O 7º cobre Histórico, conquistas, Resumo, Ajuda, treino e Preferências.
