@@ -6185,19 +6185,22 @@ function diagRetratoCompacto(reg, teto) {
     if (texto.length <= teto) return texto;
     // Corta do mais VELHO (as listas estão em ordem de tempo), e o diário
     // primeiro: é ele que cresce; chamadas e erros têm anel curto. A folga de
-    // 200 é o campo `cortados`, que entra depois da conta.
-    let sobra = texto.length - (teto - 200);
-    const cortados = {};
+    // 300 é a dos campos `cortados` e `cortadosDesde`, que entram depois da conta.
+    let sobra = texto.length - (teto - 300);
+    const cortados = {}, cortadosDesde = {};
     for (const nome of listas) {
         const l = r[nome];
         let i = 0;
         while (sobra > 0 && i < l.length) { sobra -= JSON.stringify(l[i]).length + 1; i++; }
-        if (i) { r[nome] = l.slice(i); cortados[nome] = i; }
+        if (i) { r[nome] = l.slice(i); cortados[nome] = i; cortadosDesde[nome] = l[0].t; }
         if (sobra <= 0) break;
     }
     // Cortado até esvaziar, não sobra o que guardar.
     if (!listas.some((nome) => r[nome].length)) return null;
+    // `cortadosDesde`: a hora do PRIMEIRO cortado. É com ela que a junção com a
+    // base conta quantos dos cortados a base já tinha (`diagJuntarRetrato`).
     r.cortados = cortados;
+    r.cortadosDesde = cortadosDesde;
     texto = JSON.stringify(r);
     return texto.length <= teto ? texto : null;
 }
@@ -6256,21 +6259,51 @@ function diagEsquecerRetratos(lidos) {
 // NOVO. Das listas fica, da base, o que é ANTERIOR ao começo do retrato (o que
 // o teto cortou), e o retrato dali em diante. Base mais nova que o retrato (a
 // gravação do `pagehide` chegou a terminar) já tem tudo: fica como está.
+//
+// O que o teto cortou (os mais VELHOS do retrato) só falta no COMEÇO quando a
+// base não tinha nada antes dele. Com a base, o começo vem dela, e a falta
+// fica no MEIO — entre o último dela e o primeiro do retrato —, e a triagem
+// dizia "faltam no começo" com o começo ali (auditoria de 2026-10-01, R5-4-5).
+// Por isso a junção troca `cortados` por `lacunas`, por lista: onde falta
+// (`de` = a hora do último que ficou antes, `null` no começo; `ate` = a do
+// primeiro depois) e quantos — os cortados menos os que a base tinha no mesmo
+// trecho, contados desde o primeiro cortado (`cortadosDesde`; o retrato da
+// versão anterior não o tem, e aí conta tudo o que a base tinha antes dele).
 function diagJuntarRetrato(guardado, retrato) {
-    if (!guardado) return { ...retrato, momentos: [] };
-    if (!(retrato.salvoEm > guardado.salvoEm)) return guardado;
+    if (guardado && !(retrato.salvoEm > guardado.salvoEm)) return guardado;
+    const base = guardado || {};
     const quando = (x) => (typeof x.t === 'number' ? x.t : Date.parse(x.t));
+    const primeiro = (l) => (Array.isArray(l) && l.length ? Math.min(...l.map(quando)) : null);
     const juntar = (velha, nova) => {
         const v = Array.isArray(velha) ? velha : [];
-        if (!Array.isArray(nova) || !nova.length) return v;
-        const desde = Math.min(...nova.map(quando));
+        const desde = primeiro(nova);
+        if (desde === null) return v;
         return [...v.filter((x) => quando(x) < desde), ...nova];
     };
-    return { ...guardado, ...retrato,
-             momentos: Array.isArray(guardado.momentos) ? guardado.momentos : [],
-             diario: juntar(guardado.diario, retrato.diario),
-             chamadas: juntar(guardado.chamadas, retrato.chamadas),
-             erros: juntar(guardado.erros, retrato.erros) };
+    const { cortados, cortadosDesde, ...resto } = retrato;
+    const j = { ...base, ...resto,
+                momentos: Array.isArray(base.momentos) ? base.momentos : [],
+                diario: juntar(base.diario, retrato.diario),
+                chamadas: juntar(base.chamadas, retrato.chamadas),
+                erros: juntar(base.erros, retrato.erros) };
+    // As lacunas da base que seguem de pé (inteiras antes do retrato); as novas
+    // vêm por cima.
+    const lacunas = {};
+    for (const [nome, lac] of Object.entries(base.lacunas || {})) {
+        const desde = primeiro(retrato[nome]);
+        if (lac && desde !== null && lac.ate <= desde) lacunas[nome] = lac;
+    }
+    for (const [nome, n] of Object.entries(cortados || {})) {
+        if (!(n > 0)) continue;
+        const ate = primeiro(retrato[nome]) ?? retrato.salvoEm;
+        const inicio = cortadosDesde && cortadosDesde[nome] !== undefined ? quando({ t: cortadosDesde[nome] }) : -Infinity;
+        const antes = (Array.isArray(base[nome]) ? base[nome] : []).filter((x) => quando(x) < ate);
+        const faltam = n - antes.filter((x) => quando(x) >= inicio).length;
+        if (faltam > 0) lacunas[nome] = { n: faltam, de: antes.length ? Math.max(...antes.map(quando)) : null, ate };
+    }
+    delete j.lacunas;
+    if (Object.keys(lacunas).length) j.lacunas = lacunas;
+    return j;
 }
 
 function setupGuardaDoDiagnostico() {

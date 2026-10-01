@@ -204,10 +204,34 @@ test('diag-resumo: a abertura que veio do RETRATO do fechar se identifica, e o c
     'a abertura que veio do retrato do fechar não se identifica');
   assert.match(s, /o retrato cortou pelo TETO os mais antigos: diário 340 · chamadas 2 — faltam no começo/,
     'o corte pelo teto não é dito — o começo que falta leria como "não aconteceu"');
+  // Este relatório (de antes das `lacunas`) não diz ONDE falta: juntado à base,
+  // o começo pode ter vindo dela e a falta ficar no meio (R5-4-5) — a triagem não
+  // pode afirmar "no começo".
+  assert.match(s, /faltam no começo, ou no meio se a abertura já tinha sido gravada antes \(este relatório não diz onde\)/,
+    'a triagem afirma "no começo" num relatório que não sabe onde falta');
   assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe no retrato');
   // CONTROLE: a abertura da base não ganha a marca nem o aviso.
   assert.match(s, /abertura base-2 · .* \(guardada por: oculta\) · v2026093001\n  diário 0 · chamadas 0 \(falhas 0\) · erros 0 · capturas 0\n/,
     'CONTROLE: a abertura gravada na base ganhou a marca do retrato ou o aviso do corte');
+});
+
+test('diag-resumo: as LACUNAS da junção dizem onde falta — no meio, entre o que a base tinha e o retrato; ou no começo (R5-4-5)', () => {
+  // Auditoria de 2026-10-01: juntado o retrato cortado à base, a triagem dizia
+  // "faltam 273 no começo", com o começo ali (veio da base) e 172 faltando no MEIO.
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  const T = Date.parse('2026-10-01T12:00:00.000Z');
+  d.aberturasAnteriores = [{
+    id: 'meio-1', inicio: T, salvoEm: T + 700000, salvoPor: 'saida', retrato: true, versao: '2026100101',
+    lacunas: { diario: { n: 172, de: T + 100000, ate: T + 273000 }, chamadas: { n: 1, de: null, ate: T + 5000 }, lixo: { n: 3 } },
+    diario: [{ t: T, k: 'a' }, { t: T + 100000, k: 'b' }, { t: T + 273000, k: 'c' }], chamadas: [], erros: [], momentos: [] }];
+  const s = rodar(d);
+  assert.match(s, /o retrato cortou pelo TETO: faltam 172 registros do diário no meio, entre 12:01:40\.000 e 12:04:33\.000 — o que veio antes estava gravado/,
+    'a falta no MEIO não é dita com o intervalo');
+  assert.match(s, /o retrato cortou pelo TETO: falta 1 chamada no começo, antes de 12:00:05\.000/,
+    'a falta no COMEÇO (sem base antes) não é dita, ou o singular saiu errado');
+  assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe');
+  assert.doesNotMatch(s, /este relatório não diz onde/, 'com as lacunas, a triagem sabe onde falta e não pode hesitar');
 });
 
 test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {

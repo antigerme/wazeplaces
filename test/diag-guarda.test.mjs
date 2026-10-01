@@ -778,3 +778,61 @@ test('D2: apagar os retratos leva TODOS os da chave e nenhum outro; o da leitura
   assert.deepEqual([...ls.m.keys()].sort(), ['waze_places_diag_outra', 'waze_places_stats'],
     'sem lista, sobrou retrato — ou saiu chave que não é retrato');
 });
+
+// ── R5-4-5 (auditoria de 2026-10-01): ONDE falta o que o teto cortou ─────────
+// O teto do retrato corta os mais VELHOS. Juntado à base da mesma abertura, o
+// começo vem dela, e a falta fica no MEIO — a junção mantinha o `cortados` do
+// retrato e a triagem dizia "faltam 273 no começo", com 172 faltando no meio.
+// A junção agora troca `cortados` por `lacunas` (onde e quantos).
+const T5 = 1_790_000_000_000;
+const ent5 = (i) => ({ t: T5 + i * 1000, k: 'acao', n: i, d: 'x'.repeat(100) });
+const diario5 = (de, ate) => Array.from({ length: ate - de + 1 }, (_, i) => ent5(de + i));
+const retrato5 = (de, ate) => JSON.parse(compacto({ id: 'ab', inicio: T5, salvoEm: T5 + ate * 1000, salvoPor: 'saida',
+  diario: diario5(de, ate), chamadas: [], erros: [] }, DIAG_RETRATO_TETO));
+const base5 = (ate, extra = {}) => ({ id: 'ab', inicio: T5, salvoEm: T5 + ate * 1000 + 500, salvoPor: 'oculta',
+  diario: diario5(0, ate), chamadas: [], erros: [], momentos: [{ t: 'cap', motivo: 'manual' }], ...extra });
+
+test('R5-4-5: o retrato guarda a hora do PRIMEIRO cortado de cada lista', () => {
+  const r = retrato5(0, 700);
+  assert.ok(r.cortados.diario > 0, 'PRÉ-CONDIÇÃO: o teto não cortou');
+  assert.equal(r.cortadosDesde.diario, T5, 'sem a hora do primeiro cortado, a junção não sabe quantos dos cortados a base já tinha');
+});
+
+test('R5-4-5: juntado à base, o que o teto cortou falta no MEIO — a junção diz onde e quantos', () => {
+  const r = retrato5(0, 700);
+  const C = r.cortados.diario;
+  assert.ok(C > 101, `PRÉ-CONDIÇÃO: o teto cortou ${C}, e o caso precisa cortar além do que a base tem (101)`);
+  const j = juntarRetrato(base5(100), r);
+  const ns = j.diario.map((e) => e.n);
+  assert.deepEqual(j.lacunas, { diario: { n: C - 101, de: T5 + 100 * 1000, ate: T5 + C * 1000 } },
+    'a junção não marcou a falta no MEIO, entre o último da base e o primeiro do retrato');
+  assert.ok(!('cortados' in j) && !('cortadosDesde' in j), 'o `cortados` do retrato ficou — e a triagem diria "no começo"');
+  // CONTROLE: o diário juntado tem MESMO esse buraco, com esse tamanho.
+  assert.equal(701 - ns.length, j.lacunas.diario.n, 'a conta da lacuna não bate com o que falta no diário juntado');
+  assert.ok(ns.includes(100) && !ns.includes(101) && !ns.includes(C - 1) && ns.includes(C), 'o buraco não está onde a lacuna diz');
+  assert.equal(j.momentos.length, 1, 'a captura da base sumiu na junção');
+});
+
+test('R5-4-5: a conta da lacuna — o anel girado, o retrato da versão anterior, a base que cobre tudo, e sem base', () => {
+  // O anel girou antes do fechar: o retrato começa no 50, e só o que a base
+  // tinha DESDE o primeiro cortado conta (51 de 101).
+  const girado = retrato5(50, 750);
+  const jg = juntarRetrato(base5(100), girado);
+  assert.equal(jg.lacunas.diario.n, girado.cortados.diario - 51, 'contou a base inteira, e não só o trecho que o teto cortou');
+  // O retrato da versão anterior (sem `cortadosDesde`): conta tudo o que a base tinha antes dele.
+  const r = retrato5(0, 700);
+  const { cortadosDesde, ...antigo } = r;
+  assert.equal(juntarRetrato(base5(100), antigo).lacunas.diario.n, r.cortados.diario - 101);
+  // A base tinha tudo o que o teto cortou: não falta nada.
+  assert.equal(juntarRetrato(base5(400), r).lacunas, undefined, 'a base cobria o corte inteiro, e a junção acusou falta');
+  // Sem base: falta no COMEÇO (`de` nulo), e os cortados inteiros.
+  assert.deepEqual(juntarRetrato(null, r).lacunas, { diario: { n: r.cortados.diario, de: null, ate: T5 + r.cortados.diario * 1000 } });
+  // A base mais NOVA que o retrato fica como está.
+  const nova = base5(800);
+  assert.equal(juntarRetrato(nova, r), nova);
+  // A lacuna que a base já tinha segue, se está inteira antes do retrato; a que ele cobre, sai.
+  const comLacuna = base5(100, { lacunas: { diario: { n: 5, de: T5 + 10000, ate: T5 + 20000 }, chamadas: { n: 2, de: null, ate: T5 + 900000 } } });
+  const jl = juntarRetrato(comLacuna, { ...r, chamadas: [{ t: new Date(T5 + 600000).toISOString(), rota: 'perfil' }] });
+  assert.deepEqual(jl.lacunas.chamadas, undefined, 'a lacuna da base que o retrato cobre ficou');
+  assert.equal(jl.lacunas.diario.n, r.cortados.diario - 101, 'a lacuna nova não veio por cima');
+});

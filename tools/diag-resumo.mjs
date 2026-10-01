@@ -318,15 +318,30 @@ else {
     const ms = Array.isArray(a.momentos) ? a.momentos : [];
     // `retrato`: veio do retrato SÍNCRONO do fechar (auditoria de 2026-09-29, D2), não da base —
     // a gravação da base não chegou ao fim. Se o teto do retrato cortou, o que
-    // falta no começo NÃO quer dizer "não aconteceu": a contagem diz quanto.
+    // falta NÃO quer dizer "não aconteceu": as linhas abaixo dizem onde e quanto.
     out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}${a.retrato ? ', retrato do fechar' : ''}) · v${a.versao ?? '?'}`);
     out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => estadoDaChamada(c) === 'FALHOU').length}) · erros ${er.length} · capturas ${ms.length}`);
     const NOMES_DO_CORTE = { diario: 'diário', chamadas: 'chamadas', erros: 'erros' };
-    const cortes = Object.entries(a.cortados && typeof a.cortados === 'object' ? a.cortados : {})
+    // ONDE o teto do retrato deixou falta (auditoria de 2026-10-01, R5-4-5). O
+    // app de hoje grava `lacunas`, com o lugar e a conta da JUNÇÃO com a base: o
+    // começo pode ter vindo da base, e aí a falta fica no MEIO. O de antes
+    // trazia só `cortados` (os mais antigos do RETRATO), e a triagem afirmava
+    // "no começo" mesmo quando a base o tinha — desse, não dá pra saber onde.
+    const UNIDADE = { diario: ['registro do diário', 'registros do diário'], chamadas: ['chamada', 'chamadas'], erros: ['erro', 'erros'] };
+    const lacunas = Object.entries(a.lacunas && typeof a.lacunas === 'object' ? a.lacunas : {})
+      .filter(([lista, l]) => UNIDADE[lista] && l && Number(l.n) > 0);
+    for (const [lista, l] of lacunas) {
+      const n = Number(l.n);
+      const onde = l.de === null || l.de === undefined
+        ? `no começo, antes de ${hora(l.ate)}`
+        : `no meio, entre ${hora(l.de)} e ${hora(l.ate)} — o que veio antes estava gravado`;
+      out(`  o retrato cortou pelo TETO: ${n === 1 ? 'falta' : 'faltam'} ${n} ${UNIDADE[lista][n === 1 ? 0 : 1]} ${onde}; não quer dizer "não aconteceram"`);
+    }
+    const cortes = lacunas.length ? [] : Object.entries(a.cortados && typeof a.cortados === 'object' ? a.cortados : {})
       .filter(([lista, n]) => NOMES_DO_CORTE[lista] && Number(n) > 0);
     if (cortes.length) {
       out(`  o retrato cortou pelo TETO os mais antigos: ${cortes.map(([lista, n]) => `${NOMES_DO_CORTE[lista]} ${Number(n)}`).join(' · ')}`
-        + ' — faltam no começo, não "não aconteceram"');
+        + ' — faltam no começo, ou no meio se a abertura já tinha sido gravada antes (este relatório não diz onde); não quer dizer "não aconteceram"');
     }
     const t0a = di.length ? di[0].t : 0;
     for (const e of di) {
