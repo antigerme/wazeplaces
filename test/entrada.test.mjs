@@ -1055,7 +1055,7 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
+function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
@@ -1090,8 +1090,9 @@ function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
     pareamentosEmitidos: new Set(),
     openModal() {}, closeModal() {},
     // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
+    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5).
     API: { criarPareamento: async (op) => (op && op.comCodigo
-      ? { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg }
+      ? (respostaCurto ? respostaCurto() : { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg })
       : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
     showToast: (m, tipo) => toasts.push([m, tipo]),
     msgDoServidor: (r, f) => f,
@@ -1110,7 +1111,7 @@ function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
   const api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
      'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
-     'devolverFocoNoPareamento', 'focavelNaTela'],
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado'],
     deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
     APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
   return {
@@ -1259,6 +1260,63 @@ test('R56-5: QR vencido com o foco no "Sem câmera?" ou no "Copiar link" — o f
   assert.equal(f.document.activeElement.id, 'pairShowClose', 'CONTROLE: o modal não abriu com o foco no "Fechar"');
   f.andar(300_000); f.tique();
   assert.equal(f.document.activeElement.id, 'pairShowClose');
+});
+
+// E o mesmo botão no outro caminho: o Enter no "Sem câmera?" o trava no pedido
+// e o esconde quando o código chega — MEDIDO no Chromium, o foco ia pro BODY (o
+// Tab seguinte achava o "Copiar link" pela posição que o navegador guarda, mas o
+// leitor de tela já tinha perdido o lugar).
+test('R56-5: Enter no "Sem câmera?" — o código aparece e o foco vai ao "Copiar link"; falhou, volta ao botão', async () => {
+  // O clique do TECLADO (e do leitor de tela): `detail` 0, com o botão focado.
+  const teclado = (q) => ({ detail: 0, currentTarget: q.registro.pairShowCodeBtn });
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  p.registro.pairShowCodeBtn.focus();
+  assert.equal(p.document.activeElement.id, 'pairShowCodeBtn', 'PRÉ-CONDIÇÃO: o foco não pousou no "Sem câmera?"');
+  await p.revelarCodigoPareamento(teclado(p));
+  assert.ok(p.registro.pairShowCodeBtn.classList.contains('hidden'), 'CONTROLE: o "Sem câmera?" não sumiu');
+  assert.equal(p.document.activeElement.id, 'pairCopyLinkBtn',
+    `o código apareceu e o foco foi pro ${p.document.activeElement.id}, não pro "Copiar link"`);
+
+  // O QR vence com o pedido no ar: o link apagou, então o foco vai ao "Fechar".
+  let soltar;
+  const v = pareamentoDeMentira({ respostaCurto: () => new Promise((ok) => { soltar = ok; }) });
+  await v.abrirPareamento();
+  v.andar(299_000);
+  v.registro.pairShowCodeBtn.focus();
+  const pedido = v.revelarCodigoPareamento(teclado(v));
+  v.andar(1_000); v.tique();
+  assert.equal(v.registro.pairCopyLinkBtn.disabled, true, 'CONTROLE: o QR não venceu no meio do pedido');
+  soltar({ success: true, code: 'ABC234', curto: true, expiresIn: 300 });
+  await pedido;
+  assert.equal(v.document.activeElement.id, 'pairShowClose',
+    `o código chegou com o QR vencido e o foco foi pro ${v.document.activeElement.id}`);
+
+  // Falhou: o botão volta, e o foco com ele.
+  const f = pareamentoDeMentira({ respostaCurto: async () => ({ success: false }) });
+  await f.abrirPareamento();
+  f.registro.pairShowCodeBtn.focus();
+  await f.revelarCodigoPareamento(teclado(f));
+  assert.equal(f.registro.pairShowCodeBtn.disabled, false, 'CONTROLE: o botão não voltou depois da falha');
+  assert.equal(f.document.activeElement.id, 'pairShowCodeBtn', `o pedido falhou e o foco foi pro ${f.document.activeElement.id}`);
+
+  // CONTROLE: quem levou o foco a outro lugar durante o pedido fica onde está.
+  let soltar2;
+  const t = pareamentoDeMentira({ respostaCurto: () => new Promise((ok) => { soltar2 = ok; }) });
+  await t.abrirPareamento();
+  t.registro.pairShowCodeBtn.focus();
+  const pedido2 = t.revelarCodigoPareamento(teclado(t));
+  t.registro.pairShowClose.focus();
+  soltar2({ success: true, code: 'ABC234', curto: true, expiresIn: 300 });
+  await pedido2;
+  assert.equal(t.document.activeElement.id, 'pairShowClose', 'o foco que a pessoa levou ao "Fechar" durante o pedido foi arrastado');
+  // CONTROLE: o toque (`detail` 1) não move o foco, mesmo no Chrome, que foca o
+  // botão tocado — a regra do C10 (`veioDoTeclado`).
+  const d = pareamentoDeMentira();
+  await d.abrirPareamento();
+  d.registro.pairShowCodeBtn.focus();
+  await d.revelarCodigoPareamento({ detail: 1, currentTarget: d.registro.pairShowCodeBtn });
+  assert.equal(d.document.activeElement.id, 'BODY', `o toque no "Sem câmera?" moveu o foco pro ${d.document.activeElement.id}`);
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────

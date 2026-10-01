@@ -33,7 +33,9 @@ test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', 
   // Exibição: quem mostra o código não pode formatar por conta própria.
   // Mora em `revelarCodigoPareamento` desde que o código passou a nascer sob
   // demanda (o `abrirPareamento` só desenha o QR, cujo segredo ninguém digita).
-  const revelar = APP.match(/async function revelarCodigoPareamento\(\)[\s\S]*?\n\}/);
+  // A assinatura pode ter parâmetro (o evento do clique, pra saber se veio do
+  // teclado): âncora no NOME, não nos parênteses vazios.
+  const revelar = APP.match(/async function revelarCodigoPareamento\([^)]*\)[\s\S]*?\n\}/);
   assert.ok(revelar, 'sumiu o revelarCodigoPareamento()');
   assert.match(revelar[0], /formatarCodigoPareamento\(/, 'a tela que MOSTRA o código voltou a formatar sozinha');
   assert.doesNotMatch(

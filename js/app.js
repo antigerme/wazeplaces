@@ -1595,14 +1595,21 @@ function pararTickerPareamento(elemento) {
 // Cria um registro de pareamento CURTO (6 chars, digitável) — só quando pedido.
 // Ver o comentário no index.html: o curto é fraco por construção, e existir só
 // sob demanda é o que impede que ele enfraqueça o QR de todo mundo.
-async function revelarCodigoPareamento() {
+async function revelarCodigoPareamento(ev) {
     const btn = document.getElementById('pairShowCodeBtn');
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairCodeExpiry');
+    // O botão trava no pedido e SOME quando o código chega: o Enter que pediu o
+    // código deixava o foco no <body> (a mesma costura do R56-5, no mesmo botão).
+    // Só pelo teclado (`veioDoTeclado`, a regra do C10): quem toca não tem o
+    // foco movido.
+    const tinhaFoco = veioDoTeclado(ev);
     btn.disabled = true;
     const r = await API.criarPareamento({ comCodigo: true, conta: contaAgora() });
     if (!r.success) {
         btn.disabled = false;
+        // O botão volta, e o foco com ele — ou o "Fechar", se o QR venceu nesse meio.
+        if (tinhaFoco) devolverFocoNoPareamento(btn, ['pairShowCodeBtn', 'pairShowClose']);
         showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
@@ -1623,6 +1630,9 @@ async function revelarCodigoPareamento() {
         // da câmera sobre o QR vencido (A15): sai junto.
         document.getElementById('pairOrType')?.classList.add('hidden');
     });
+    // O código está na tela: o foco vai ao "Copiar link", o controle seguinte
+    // (onde o próximo Tab iria) — ou ao "Fechar", com o QR já vencido.
+    if (tinhaFoco) devolverFocoNoPareamento(btn, ['pairCopyLinkBtn', 'pairShowClose']);
 }
 
 async function copiarLinkPareamento() {

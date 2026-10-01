@@ -3475,8 +3475,9 @@ for (const sistema of ['dark', 'light']) {
   checa(fim.riscado && !fim.digite, 'pareamento: código curto vencido, e a tela segue mandando digitá-lo', JSON.stringify(fim));
   // 3) O FOCO do teclado (auditoria de 2026-10-01, R56-5). O QR vencendo com o
   // foco no "Copiar link" (que apaga) ou no "Sem câmera?" (que some) largava o
-  // foco no <body>: o leitor de tela perdia a posição. O foco vai ao "Fechar",
-  // o passo que o aviso de vencido manda dar. A PRÉ-CONDIÇÃO é o foco no botão
+  // foco no <body>, e o Enter no "Sem câmera?" também (ele some quando o código
+  // chega): o leitor de tela perdia a posição. O foco vai ao "Fechar" no
+  // vencimento e ao "Copiar link" no código. A PRÉ-CONDIÇÃO é o foco no botão
   // antes (sem ela, o "Fechar", foco da abertura, passaria por ele), e o
   // CONTROLE prova que neste motor o botão focado que apaga perde o foco pro
   // <body> — sem isso a medida não enxergaria o defeito.
@@ -3503,6 +3504,24 @@ for (const sistema of ['dark', 'light']) {
     await doisQuadros(page);
     const depois = await foco();
     checa(depois === 'pairShowClose', `pareamento: o QR venceu com o foco do teclado no ${id}, e o foco foi pro ${depois}`);
+    await page.click('#pairShowClose');
+  }
+  // O Enter no "Sem câmera?" (QR de 60 s: o código chega com ele valendo), e o
+  // CONTROLE do clique de mouse, que não move o foco (a regra do C10).
+  prazoDoQr = 60;
+  for (const pelo of ['teclado', 'mouse']) {
+    await abrir();
+    if (pelo === 'teclado') {
+      await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab');
+      checa(await foco() === 'pairShowCodeBtn', 'pareamento · PRÉ-CONDIÇÃO: o Shift+Tab não pôs o foco no "Sem câmera?"', await foco());
+      await page.keyboard.press('Enter');
+    } else await page.click('#pairShowCodeBtn');
+    const chegou = await esperarNaPagina(page, () => !document.getElementById('pairCodeReveal').classList.contains('hidden'), 8000);
+    checa(chegou.ok, `pareamento · CONTROLE: o código curto não apareceu (${pelo})`);
+    await doisQuadros(page);
+    const depois = await foco();
+    if (pelo === 'teclado') checa(depois === 'pairCopyLinkBtn', `pareamento: o Enter no "Sem câmera?" mostrou o código e o foco foi pro ${depois}`);
+    else checa(depois !== 'pairCopyLinkBtn', 'pareamento: o clique de MOUSE no "Sem câmera?" moveu o foco pro "Copiar link"', depois);
     await page.click('#pairShowClose');
   }
   checa(erros.length === 0, 'pareamento: erro de JS', erros[0]);
@@ -9058,7 +9077,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
   + `, + tema trocado pelo BOTÃO pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida e volta; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
-  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence; e o foco do TECLADO nos botões que saem de cena indo ao "Fechar" quando o QR vence, com o CONTROLE do motor largando o foco no <body>)`
+  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence; e o foco do TECLADO nos botões que saem de cena — no "Fechar" quando o QR vence, no "Copiar link" quando o código chega —, com o CONTROLE do motor largando o foco no <body> e o do mouse, que não move o foco)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra nem ligar a rede de segurança — teto de duas linhas com o nome inteiro no title, e o CONTROLE sem teto ligando a rede no Fold)`
