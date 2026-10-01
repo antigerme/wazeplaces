@@ -1,6 +1,6 @@
 // A presença e a conversa depois da auditoria de 2026-09-30 (rodada 5, R5-5):
-// a resposta que chega e não é JSON. Os rótulos R5-5-n são os do relatório
-// dessa rodada.
+// o "Lida" na corrida do `abrir` (V2, V2b e V3) e a resposta que chega e não é
+// JSON. Os rótulos R5-5-n são os do relatório dessa rodada.
 //
 // Mesmo instrumento dos outros: o js/presenca.js roda INTEIRO no navegador de
 // mentira do `_presenca-cliente.mjs`, e o api.js de verdade roda numa `vm`.
@@ -26,6 +26,91 @@ const lidas = (c) => c.chamadas.chat.filter((x) => x.acao === 'lida');
 const abrirs = (c) => c.chamadas.chat.filter((x) => x.acao === 'abrir');
 // Uma promessa que o teste solta quando quer (a resposta "no ar").
 function noAr() { let ok; const p = new Promise((r) => { ok = r; }); return { p, ok }; }
+
+// ── R5-5-1: o "Lida" na corrida do `abrir` ──────────────────────────────────
+
+test('R5-5-1 V3: o "lida" do `abrir` não cobre a mensagem guardada com ele NO AR — a rajada a marca (um pedido, só na corrida)', async () => {
+  // O servidor lê o histórico e marca como lida EM PARALELO: a mensagem M,
+  // guardada depois de o pedido SAIR (T), vem no histórico sem ter sido marcada.
+  const caso = async (tsM) => {
+    const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir'
+      ? { success: true, mensagens: [doWaze(1, T - 60000, CAF, 'antiga'), doWaze(2, tsM, CAF, 'M')], maisAntigas: false, lida: true }
+      : { success: true }) } });
+    c.P.presencaAbrirConversa(CAF);
+    await tick();
+    assert.equal(c.P.Presenca.historico.get(CAF).carregada, true, 'CONTROLE: o histórico tem que ter chegado');
+    await c.rodarTimers();
+    await tick();
+    return lidas(c).length;
+  };
+  assert.equal(await caso(T + 300), 1, 'a mensagem guardada com o `abrir` no ar ficou sem "lida": não lida no Waze, e quem mandou nunca vê "Lida"');
+  // CONTROLE: M guardada ANTES de o pedido sair — o `abrir` a cobre, e nada a mais sai.
+  assert.equal(await caso(T - 300), 0, 'sem corrida, saiu um "lida" a mais');
+});
+
+test('R5-5-1 V3: o corte é a SAÍDA do pedido no relógio do Waze (pelo `desvio`)', async () => {
+  // Aparelho 2 min ATRASADO: o relógio do Waze está 120 s na frente. M foi
+  // guardada 300 ms depois de o pedido sair — no relógio do Waze.
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir'
+    ? { success: true, mensagens: [doWaze(2, T + 120000 + 300, CAF, 'M')], maisAntigas: false, lida: true }
+    : { success: true }) } });
+  c.P.Presenca.desvio = 120000;
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  await c.rodarTimers();
+  await tick();
+  assert.equal(lidas(c).length, 1, 'com o aparelho atrasado, o corte no relógio DAQUI deixou a mensagem da corrida coberta');
+});
+
+test('R5-5-1 V2: o recibo que CITA a minha mensagem pelo id a marca como lida, mesmo com hora anterior à dela', async () => {
+  const caso = async (citada) => {
+    const c = novoCliente({ agora: T });
+    const M = { id: uuid(20), ts: T + 300, meu: true, texto: 'M', estado: 'enviada' };
+    c.P.Presenca.historico.set(CAF, { msgs: [M], carregada: true, maisAntigas: false });
+    // O "lida" que a outra pessoa fez ao abrir a conversa sai com a hora do PEDIDO (T).
+    const recibo = await bytesDeRecibo({ id: uuid(21), de: CAF, para: EU, tipo: 'lida', ids: [citada], ts: T });
+    c.P.presencaQuadro(fluxoDe(c), inbox(recibo));
+    return c.P.presencaEstadoDaMinha(M, c.P.chatLidaAte(CAF), 0);
+  };
+  assert.equal(await caso(uuid(20)), 'lida', 'a mensagem citada pelo recibo seguiu "Enviada" (o app só olhava a hora)');
+  // CONTROLE: o recibo que NÃO cita a mensagem não a marca (a hora dele é anterior).
+  assert.equal(await caso(uuid(99)), 'enviada', 'um recibo que não a cita a marcou como lida');
+});
+
+test('R5-5-1 V2b: citada ainda SAINDO, ela vira "Lida" quando a hora do Waze chega — pela resposta do `enviar`', async () => {
+  const resposta = noAr();
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'enviar' ? resposta.p : { success: true }) } });
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true, maisAntigas: false });
+  c.P.presencaEnviar('M', null);
+  const M = c.P.Presenca.historico.get(CAF).msgs[0];
+  assert.equal(M.estado, 'enviando', 'CONTROLE: a mensagem tem que estar saindo');
+  const recibo = await bytesDeRecibo({ id: uuid(22), de: CAF, para: EU, tipo: 'lida', ids: [M.id], ts: T });
+  c.P.presencaQuadro(fluxoDe(c), inbox(recibo));
+  resposta.ok({ success: true, id: M.id, ts: T + 300 });
+  await tick();
+  assert.equal(M.ts, T + 300, 'CONTROLE: a hora do Waze tem que ter chegado na resposta');
+  assert.equal(c.P.presencaEstadoDaMinha(M, c.P.chatLidaAte(CAF), 0), 'lida', 'a citada que estava saindo não virou "Lida" com a hora do Waze');
+});
+
+test('R5-5-1 V2b: citada ainda SAINDO, ela vira "Lida" quando a hora do Waze chega — pelo eco do tempo real', async () => {
+  const resposta = noAr();   // a resposta do `enviar` NÃO chega neste teste: só o eco
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'enviar' ? resposta.p : { success: true }) } });
+  c.P.Presenca.aberta = CAF;
+  c.$('conversaModal').classList.remove('hidden');
+  c.P.Presenca.historico.set(CAF, { msgs: [], carregada: true, maisAntigas: false });
+  c.P.presencaEnviar('M', null);
+  const M = c.P.Presenca.historico.get(CAF).msgs[0];
+  const recibo = await bytesDeRecibo({ id: uuid(23), de: CAF, para: EU, tipo: 'lida', ids: [M.id], ts: T });
+  c.P.presencaQuadro(fluxoDe(c), inbox(recibo, 1));
+  const eco = await bytesDeMensagem({ id: M.id, de: EU, para: CAF, texto: 'M', ctx: APP, ts: T + 300 });
+  c.P.presencaQuadro(fluxoDe(c), inbox(eco, 2));
+  assert.equal(M.estado, 'enviada', 'CONTROLE: o eco tem que ter virado a mensagem pra "enviada"');
+  assert.equal(c.P.presencaEstadoDaMinha(M, c.P.chatLidaAte(CAF), 0), 'lida', 'a citada que estava saindo não virou "Lida" com o eco');
+  resposta.ok({ success: true, id: M.id, ts: T + 300 });
+  await tick();
+});
 
 // ── R5-5-3: a resposta que CHEGA e não é JSON ───────────────────────────────
 

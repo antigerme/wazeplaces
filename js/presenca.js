@@ -132,6 +132,9 @@ const Presenca = {
     fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
     lidaPendente: null,     // de quem é o "lida" que espera a rajada ou o perfil (ver `presencaPagarLida`)
+    // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
+    // do Waze delas chegar (ver `presencaLidaPorId`).
+    lidasPorId: new Set(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
@@ -572,6 +575,7 @@ function presencaDesligar() {
     Presenca.vistas.clear();
     Presenca.historico.clear();
     Presenca.lidaEnviadaAte.clear();
+    Presenca.lidasPorId.clear();
     Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
@@ -991,8 +995,24 @@ function presencaMensagemDoFluxo(m, doLote) {
         if (!de || de === eu || !PRESENCA_ID.test(de)) return;
         Presenca.fluxoDiag.recibos += 1;
         // Ler a conversa marca TUDO até ali: o recibo vale pra toda mensagem
-        // minha mandada antes dele.
-        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio);
+        // minha mandada antes dele. E pras que ele CITA pelo id, que podem ter
+        // hora DEPOIS da dele: o "lida" que a pessoa fez ao abrir a conversa sai
+        // com a hora do pedido, e a minha mensagem guardada com esse pedido no
+        // ar vem citada nos `ids` com hora maior — só pela hora, ela nunca
+        // virava "Lida" (auditoria de 2026-09-30, R5-5-1, V2). A citada que
+        // ainda não tem a hora do Waze (saindo) espera por ela
+        // (`presencaLidaPorId`).
+        let ate = Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio;
+        const citadas = new Set((m.recibo.ids || []).map((x) => String(x || '').toLowerCase()).filter(Boolean));
+        const hDela = citadas.size ? Presenca.historico.get(de) : null;
+        if (hDela) {
+            for (const x of hDela.msgs) {
+                if (!x.meu || !citadas.has(String(x.id).toLowerCase())) continue;
+                if (x.estado === 'enviada') ate = Math.max(ate, x.ts);
+                else Presenca.lidasPorId.add(x.id);
+            }
+        }
+        chatMarcarLidaAte(de, ate);
         if (Presenca.aberta === de) presencaRenderConversa();
         return;
     }
@@ -1013,6 +1033,7 @@ function presencaMensagemDoFluxo(m, doLote) {
     // sumia da conversa — e o "lida" saía por uma mensagem que ninguém viu.
     const h = Presenca.historico.get(com);
     if (h) presencaJuntarMsgs(h, [msg]);
+    if (deMim) presencaLidaPorId(com, msg);
     presencaAtualizarPrevia(com, msg);
     const nova = !Presenca.vistas.has(msg.id);
     presencaMarcarVista(msg.id);
@@ -1060,6 +1081,14 @@ function presencaJuntarMsgs(h, novas) {
         if (Number.isFinite(m.ts)) velha.ts = m.ts;
     }
     h.msgs.sort((a, b) => a.ts - b.ts);
+}
+
+// A minha mensagem que um recibo de "lida" citou pelo id quando ela ainda não
+// tinha a hora do Waze (ver o recibo em `presencaMensagemDoFluxo`): com a hora
+// (a resposta do `enviar` ou o eco), ela entra na marca do "lida".
+function presencaLidaPorId(com, msg) {
+    if (!msg || !Presenca.lidasPorId.delete(msg.id)) return;
+    chatMarcarLidaAte(com, msg.ts);
 }
 
 function presencaAtualizarPrevia(com, msg) {
@@ -1257,6 +1286,9 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     presencaRenderConversa();
     const epoca = Presenca.epoca;
     const carona = chatCarona();
+    // A hora em que o `abrir` SAI: o "lida" dele só cobre o que já estava
+    // guardado (ver o `corte`, abaixo).
+    const saiuEm = Date.now();
     const r = await API.chat({ acao: 'abrir', com: id, ...(antes ? { antesDe: antes } : {}), ...carona });
     h.carregando = false;
     if (epoca !== Presenca.epoca) return;
@@ -1282,7 +1314,17 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (antes) h.antigas = null;
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
-        const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu).map((m) => m.ts));
+        // O "lida" do `abrir` cobre só o que já estava guardado quando ele
+        // SAIU: o servidor lê o histórico e marca como lida EM PARALELO, e a
+        // mensagem guardada entre os dois vem no histórico sem ter sido marcada.
+        // Contada como coberta, nem a rajada nem o fechamento a marcavam: ela
+        // ficava não lida no Waze, quem mandou nunca via "Lida", e a lista
+        // seguinte a devolvia como "1 mensagem nova" (auditoria de 2026-09-30,
+        // R5-5-1, V3). O corte é a saída do pedido no relógio do Waze (pelo
+        // `desvio`); o que passou dele o `presencaAgendarLida` do fim marca —
+        // um pedido a mais, só nessa corrida.
+        const corte = saiuEm + Presenca.desvio;
+        const ultimaDela = Math.max(0, ...msgs.filter((m) => !m.meu && m.ts <= corte).map((m) => m.ts));
         // Só com o "lida" CONFIRMADO pelo servidor (`lida: true`). Falhou no
         // Waze, a resposta vinha igual à de "nada a marcar", o app dava a
         // conversa como lida e nunca mais pedia com ela aberta (auditoria de
@@ -1409,6 +1451,7 @@ async function presencaMandar(com, msg) {
         msg.estado = 'enviada';
         if (Number.isFinite(r.ts)) msg.ts = r.ts;
         presencaMarcarVista(msg.id);
+        presencaLidaPorId(com, msg);
     } else if (msg.estado === 'enviada') {
         // O ECO já voltou pelo tempo real (`presencaJuntarMsgs`): o Waze RECEBEU
         // a mensagem, e foi a resposta que se perdeu no caminho. Rebaixar pra
