@@ -14024,6 +14024,19 @@ function rejeitarPelaFolha(ev, place, contados) {
     rejeitarLoteDoAutor(place, contados);
 }
 
+// O "Ver os N" da folha. Pelo TECLADO, fechar a folha devolve o foco ao "✕ N", e
+// o `focarAutor` remonta o card — o selo sai com ele, e o foco caía no <body>
+// (MEDIDO no lote 9 da fila; o CONTROLE, a folha fechada com Esc, devolve ao
+// "✕ N"). O foco vai à barra "Primeiro os de…", o caminho de volta — o mesmo
+// par do Enter no selo "Ver +N" (`focarDepoisDoFocoNoAutor`). Decidido ANTES de
+// fechar: fechar move o foco.
+function verPelaFolha(ev, place) {
+    const peloTeclado = veioDoTeclado(ev);
+    closeModal('autorModal');
+    focarAutor(place.creatorId);
+    if (peloTeclado) focarDepoisDoFocoNoAutor(true);
+}
+
 // A folha se adapta ao TAMANHO da fila, e é essa adaptação que justifica o selo
 // vermelho ser sempre tocável.
 //
@@ -14104,10 +14117,7 @@ function abrirFolhaDoAutor(place) {
               + `${t(semJanela ? 'autor.sheet.avisoSemDesfazer' : 'autor.sheet.aviso')}</p>`
             : '');
     if (emLote) {
-        document.getElementById('autorVer').addEventListener('click', () => {
-            closeModal('autorModal');
-            focarAutor(place.creatorId);
-        });
+        document.getElementById('autorVer').addEventListener('click', (ev) => verPelaFolha(ev, place));
         // Só os que a folha CONTOU e mostrou no botão (L21): a busca que pousa
         // com ela aberta traz mais pedidos do autor, e o toque rejeitava esses
         // também — "Rejeitar os 2", e saíam 4. É a régua do "Marcar todos"

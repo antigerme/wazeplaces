@@ -677,3 +677,63 @@ test('R5-2-05/06: os pontos de entrada — a trava guarda ANTES de desabilitar, 
   assert.match(fatiar('aoMudarAFilaPorBaixo'), /const seloFocado = seloComFoco\(velho\);\s*if \(velho\) velho\.remove\(\);/,
     'o selo focado é lido DEPOIS de os selos velhos saírem (o foco já caiu no <body>)');
 });
+
+// ── O "Ver os N" da FOLHA pelo teclado (follow-up do R5-2-06) ────────────────
+// Enter no "✕ N" abre a folha; Enter em "Ver os N" fecha a folha — que devolve
+// o foco ao "✕ N" — e o `focarAutor` remonta o card: o selo sai com ele e o foco
+// caía no <body> (MEDIDO no navegador, s19b). Vai à barra "Primeiro os de…", o
+// caminho de volta, como no Enter do selo "Ver +N". As funções de verdade.
+function montarFolhaVer({ comSerie = true } = {}) {
+  const d = documentoDeMentira();
+  const seloReinc = botaoQuePerde(d, '✕ N');
+  let barraNaTela = false;
+  const barra = botaoQuePerde(d, 'Primeiro os de…', { getClientRects: () => (barraNaTela ? [1] : []) });
+  d.getElementById = (id) => (id === 'focoAutorBar' ? barra : null);
+  const chamou = [];
+  const deps = {
+    document: d,
+    closeModal: () => seloReinc.focus(),           // a folha devolve o foco a quem a abriu
+    focarAutor: (id) => {
+      chamou.push(id);
+      if (!comSerie) return;                       // nenhum pedido do autor na fila: nada muda
+      seloReinc.isConnected = false;               // o card é remontado e o selo sai com ele
+      if (d.activeElement === seloReinc) d.activeElement = d.body;
+      barraNaTela = true;                          // a barra "Primeiro os de…" aparece
+    },
+    cardDaFrente: () => null,
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let focoDoTeclado = null;', fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'),
+    fatiar('veioDoTeclado'), fatiar('focarDepoisDoFocoNoAutor'), fatiar('verPelaFolha'),
+    'return { verPelaFolha };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, d, ver: botaoQuePerde(d, 'Ver os 2'), barra, seloReinc, chamou };
+}
+
+test('"Ver os N" da FOLHA pelo TECLADO leva o foco à barra "Primeiro os de…" — como o Enter no selo "Ver +N"', () => {
+  const m = montarFolhaVer();
+  m.ver.focus();
+  m.app.verPelaFolha({ detail: 0, currentTarget: m.ver }, { creatorId: 777 });
+  assert.deepEqual(m.chamou, [777], 'o "Ver os N" deixou de pôr a série do autor na frente');
+  assert.equal(m.d.activeElement, m.barra,
+    `DEFEITO: pelo teclado o foco ficou em ${m.d.activeElement && m.d.activeElement.nome} em vez da barra`);
+  // CONTROLES: o mouse e o dedo (detail 1) e o .click() de script não movem o foco.
+  for (const [rotulo, ev, focado] of [['mouse', { detail: 1 }, true], ['script', { detail: 0 }, false]]) {
+    const c = montarFolhaVer();
+    if (focado) c.ver.focus(); else c.d.activeElement = c.d.body;
+    c.app.verPelaFolha({ ...ev, currentTarget: c.ver }, { creatorId: 777 });
+    assert.deepEqual(c.chamou, [777], `${rotulo}: o "Ver os N" deixou de pôr a série na frente`);
+    assert.notEqual(c.d.activeElement, c.barra, `${rotulo}: o foco foi pra barra sem o teclado (o foco pulando pela tela)`);
+  }
+  // Sem pedidos do autor na fila (nada é remontado): o foco fica no "✕ N" que a folha devolveu.
+  const s = montarFolhaVer({ comSerie: false });
+  s.ver.focus();
+  s.app.verPelaFolha({ detail: 0, currentTarget: s.ver }, { creatorId: 777 });
+  assert.equal(s.d.activeElement, s.seloReinc, 'sem série a remontar, o foco saiu do "✕ N" que a folha devolveu');
+});
+
+test('"Ver os N" da FOLHA: o ouvinte passa o evento (sem ele o teclado não é reconhecido)', () => {
+  assert.match(fatiar('abrirFolhaDoAutor'), /getElementById\('autorVer'\)\.addEventListener\('click', \(ev\) => verPelaFolha\(ev, place\)\);/,
+    'o "Ver os N" da folha voltou a não saber se veio do teclado');
+});
