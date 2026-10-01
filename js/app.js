@@ -16387,9 +16387,21 @@ function marcarCardSemFoto(card, place) {
         + `<strong>${escapeHtml(t('card.semFoto.titulo'))}</strong>`
         + `<span>${escapeHtml(t('card.semFoto.desc'))}</span>`;
     caixa.appendChild(av);
+    // Quem tinha o foco no ✕ ou no ✓ — o teclado, que o C10 põe no botão do
+    // card novo antes de a foto chegar — vai pro ↑, o único vivo, que é o que o
+    // `aplicarFocoDoTeclado` escolhe num card sem a foto. Sem isto o botão focado
+    // virava `disabled` e o foco caía no <body> (MEDIDO nos dois motores, com a
+    // foto falhando DEPOIS de o foco pousar; auditoria do card, 2026-09-29). O
+    // dedo não põe foco nos botões do card, então nada muda pra quem toca.
+    const focado = document.activeElement;
+    const perdeFoco = !!(focado && card.contains(focado) && focado.matches('.card-btn-reject, .card-btn-read'));
     for (const sel of ['.card-btn-reject', '.card-btn-read']) {
         const b = card.querySelector(sel);
         if (b) { b.disabled = true; b.classList.add('acoes-travadas'); }
+    }
+    if (perdeFoco) {
+        const pular = card.querySelector('.card-btn-skip');
+        if (focavelNaTela(pular)) pular.focus({ preventScroll: true });
     }
     return true;
 }

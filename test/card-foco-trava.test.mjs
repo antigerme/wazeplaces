@@ -365,3 +365,46 @@ test('família do C10: a barra e o "Ver +N" passam pelo foco SÓ pelo teclado, e
   assert.match(selos, /const peloTeclado = veioDoTeclado\(ev\);\s*focarAutor\(s\.acao\);\s*if \(peloTeclado\) focarDepoisDoFocoNoAutor\(true\);/,
     'Enter no "Ver +N" voltou a largar o foco no <body>');
 });
+
+// O foco pousa no ✕ de um card de FOTO (o C10) e a foto falha DEPOIS: a
+// `marcarCardSemFoto` desabilita o ✕ focado, e o focado que vira `disabled`
+// PERDE o foco pro <body> (MEDIDO nos dois motores; na tela, o bloco "O CARD").
+// Aqui roda a `marcarCardSemFoto` de verdade, com o card e o documento de mentira.
+function montarSemFoto() {
+  const caixa = { children: [], querySelector: () => null, appendChild() {} };
+  const bs = { '.card-btn-reject': botao('✕'), '.card-btn-skip': botao('↑'), '.card-btn-read': botao('✓') };
+  for (const b of Object.values(bs)) { b.classList = { add() {} }; b.matches = (sel) => sel.split(',').some((s) => bs[s.trim()] === b); }
+  const card = {
+    bs, querySelector: (sel) => (sel === '.card-photo' ? caixa : bs[sel] || null),
+    contains: (el) => Object.values(bs).includes(el),
+  };
+  const deps = {
+    document: { ...doc, get activeElement() { return doc.activeElement; }, createElement: () => ({ className: '', innerHTML: '' }) },
+    navigator: { onLine: false }, escapeHtml: (s) => s, t: (k) => k,
+  };
+  const nomes = Object.keys(deps);
+  const marcar = new Function(...nomes, fatiar('focavelNaTela') + '\n' + fatiar('marcarCardSemFoto') + '\nreturn marcarCardSemFoto;')(
+    ...nomes.map((n) => deps[n]));
+  return { card, marcar };
+}
+
+test('família do C10: a foto que falha DEPOIS de o foco pousar no ✕ (ou no ✓) leva o foco ao ↑, o vivo', () => {
+  for (const sel of ['.card-btn-reject', '.card-btn-read']) {
+    const m = montarSemFoto();
+    doc.activeElement = m.card.bs[sel];
+    m.marcar(m.card, { purType: 'NEW_PHOTO' });
+    assert.equal(m.card.bs[sel].disabled, true, `PRÉ-CONDIÇÃO: o ${sel} não travou sem a foto`);
+    assert.equal(doc.activeElement, m.card.bs['.card-btn-skip'],
+      `DEFEITO: com o foco no ${sel}, a foto falhou e o foco ficou num botão travado (o navegador o joga no <body>)`);
+  }
+  // CONTROLE: o foco fora dos botões (o dedo não põe foco neles) não é mexido.
+  const c = montarSemFoto();
+  const fora = botao('Filtros');
+  doc.activeElement = fora;
+  c.marcar(c.card, { purType: 'NEW_PHOTO' });
+  assert.equal(doc.activeElement, fora, 'a foto que falhou arrancou o foco de fora do card');
+  doc.activeElement = doc.body;
+  const d = montarSemFoto();
+  d.marcar(d.card, { purType: 'NEW_PHOTO' });
+  assert.equal(doc.activeElement, doc.body, 'sem foco nenhum no card, a foto que falhou pôs o foco no ↑ (o foco pulando pela tela)');
+});

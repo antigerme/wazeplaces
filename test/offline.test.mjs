@@ -199,7 +199,14 @@ test('o card de FOTO sem foto trava ✕ e ✓ e deixa o ↑ vivo', () => {
   assert.match(corpo, /NEW_PHOTO|FLAGGED_PHOTO/, 'só vale pros dois tipos em que a foto decide');
   assert.match(corpo, /navigator\.onLine !== false/, 'com rede não há por que avisar nada');
   assert.match(corpo, /card-btn-reject/); assert.match(corpo, /card-btn-read/);
-  assert.ok(!/card-btn-skip/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
+  // O ↑ tem que continuar vivo: é a única ação verdadeira. Ele aparece no corpo
+  // só como o DESTINO do foco que o ✕/✓ travado perderia (a família do C10,
+  // test/card-foco-trava) — então a conferência é na lista do que TRAVA, e em
+  // nenhum `disabled` escrito no ↑.
+  const trava = corpo.match(/for \(const sel of \[([^\]]*)\]\) \{\s*const b = card\.querySelector\(sel\);\s*if \(b\) \{ b\.disabled = true;/);
+  assert.ok(trava, 'sumiu a trava de ✕ e ✓ no card sem foto');
+  assert.ok(!/card-btn-skip/.test(trava[1]), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
+  assert.ok(!/pular\.disabled|card-btn-skip'\)\.disabled/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
   assert.match(corpo, /disabled = true/); assert.match(corpo, /acoes-travadas/,
     'disabled sem esmaecer é botão morto com cara de vivo');
 });

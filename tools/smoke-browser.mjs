@@ -8225,6 +8225,51 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
 
+  // ── A foto que falha DEPOIS de o foco do teclado pousar no ✕ ────────────
+  // A família do C10: o foco pousa no ✕ do card novo (o de FOTO, ainda
+  // carregando), a foto falha sem rede, a `marcarCardSemFoto` trava ✕ e ✓ — e o
+  // ✕ focado que vira `disabled` perdia o foco pro <body> (medido nos dois
+  // motores). Tem de ir ao ↑. CONTROLE: com a foto chegando, o foco fica no ✕.
+  for (const falha of [true, false]) {
+    const id = `card/foco ${MOTOR}: ${falha ? '' : 'CONTROLE — '}a foto ${falha ? 'FALHA' : 'chega'} depois de o foco pousar no ✕`;
+    let soltar = null;
+    const foto = async (r) => {
+      if (r.request().url().includes('thumb700_fF')) {
+        await new Promise((ok) => { soltar = ok; });
+        if (falha) return r.abort('internetdisconnected').catch(() => {});
+      }
+      return r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }).catch(() => {});
+    };
+    const g = await cardPagina([cardPedido('fA'), gestosPedidoDeFoto('fF'), cardPedido('fC')], { undo: false, foto });
+    await g.page.evaluate(() => Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false }));
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await g.page.keyboard.press('Enter');
+    await esperarNaPagina(g.page, () => AppState.currentPlace && AppState.currentPlace.updateRequestID === 'fF'
+      && !isSwipeAnimating() && AppState.inFlightActions === 0, 5000);
+    await doisQuadros(g.page);
+    const antes = await focoAgora(g.page);
+    checa(antes.frente === 'fF' && antes.onde === 'card-btn-reject' && antes.naFrente && !!soltar,
+      `${id}: PRÉ-CONDIÇÃO — o foco não pousou no ✕ do card de foto com a foto ainda carregando`, JSON.stringify(antes));
+    if (soltar) soltar();
+    await esperarNaPagina(g.page, () => {
+      const c = cardDaFrente();
+      return !!c && (!!c.querySelector('.card-sem-foto') || !!c.querySelector('.card-image:not(.hidden)'));
+    }, 5000);
+    await doisQuadros(g.page);
+    const depois = await focoAgora(g.page);
+    const semFoto = await g.page.evaluate(() => !!cardDaFrente().querySelector('.card-sem-foto'));
+    if (falha) {
+      checa(semFoto, `${id}: PRÉ-CONDIÇÃO — o card não ficou sem a foto`);
+      checa(depois.onde === 'card-btn-skip' && depois.naFrente,
+        `${id}: DEFEITO — o ✕ travou com o foco nele e o foco caiu no <body> (devia ir ao ↑)`, JSON.stringify(depois));
+    } else {
+      checa(!semFoto && depois.onde === 'card-btn-reject' && depois.naFrente,
+        `${id}: com a foto chegando o foco saiu do ✕`, JSON.stringify(depois));
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
   // ── C14: o card travado pelo lote diz por quê ─────────────────────────
   {
     const id = `card/trava ${MOTOR}: o card travado pelo "Marcar todos" responde`;
@@ -8842,7 +8887,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
+  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
