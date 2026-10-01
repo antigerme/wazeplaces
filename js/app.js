@@ -17166,6 +17166,9 @@ const presencaWme = {
     // Quando o desligar saiu por último, pro teto da repetição (ver
     // `presencaWmeRefazerDesligar`). Zero = a repetição sai na próxima prova.
     desligarEm: 0,
+    // A marca da SESSÃO desse último envio (`marcaDaSessao`): o teto é dela.
+    // Numa sessão nova (a renovação depois de um 401), o pendente sai já.
+    desligarSessao: null,
 };
 
 // Refazer o desligar que o WAZE recusou por estar fora (a resposta veio, com
@@ -17274,7 +17277,14 @@ function presencaWmeAoCarregarPerfil(visivel) {
 function presencaWmeDesligar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
-    if (!API.getSession()) return;
+    // Sem SESSÃO (a janela da renovação pela extensão, com os Filtros abertos),
+    // o gesto era descartado: a pessoa seguia visível no WME (auditoria de
+    // 2026-09-30, R5-5-8). Fica pendente, como o sem perfil logo abaixo, e o
+    // perfil que chegar com a sessão nova o manda (`definirPerfil`).
+    if (!API.getSession()) {
+        if (AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+        return;
+    }
     const id = AppState.profile && AppState.profile.id;
     // Sem o PERFIL (o app aberto sem rede com a fila guardada, ou o perfil que
     // falhou na abertura) o `visivel: false` não tem pra quem ir — e era
@@ -17286,17 +17296,28 @@ function presencaWmeDesligar() {
         return;
     }
     presencaWme.desligarEm = Date.now();
+    presencaWme.desligarSessao = marcaDaSessao(API.getSession());
     API.presencaWaze({ userId: String(id), visivel: false })
         .then((r) => {
-            // Só o TRANSIENTE fica pendente; recusa de verdade não se repete
-            // sozinha. E o que nem teve resposta (a rede; o `_post` põe
+            // Só o TRANSIENTE e o 401 ficam pendentes; recusa de verdade não se
+            // repete sozinha. E o que nem teve resposta (a rede; o `_post` põe
             // `_motivo`) sai na próxima prova de rede, sem o teto de um minuto:
             // é a resposta que chega que prova a rede (ver o teto, acima).
-            if (!(r && r.success) && (!r || r.errorCategory === 'transient')
+            //
+            // O 401 era descartado e não conferia a sessão: o `visivel: false`
+            // nunca chegava ao WME (auditoria de 2026-09-30, R5-5-8). Fica
+            // pendente, COM o teto (a sonda do alarme falso traz o perfil, e o
+            // perfil refaz o desligar: sem o teto, um 401 que se repete com a
+            // sessão viva viraria um laço de pedido e sonda), e a sessão é
+            // conferida — morta, a renovação traz uma sessão NOVA, que não herda
+            // o teto (`presencaWmeRefazerDesligar`).
+            const e401 = !!(r && r.errorCategory === 'unauthorized');
+            if (!(r && r.success) && (!r || r.errorCategory === 'transient' || e401)
                 && AppState.preferences.presenca === false) {
                 presencaWme.desligarPendente = true;
                 if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
             }
+            if (e401 && typeof handleUnauthorized === 'function') handleUnauthorized();
             dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
                 ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) });
         })
@@ -17307,7 +17328,9 @@ function presencaWmeDesligar() {
 // teto de um minuto pro Waze que responde fora (`PRESENCA_WME_DESLIGAR_REPETIR_MS`).
 function presencaWmeRefazerDesligar() {
     if (!presencaWme.desligarPendente || AppState.preferences.presenca !== false) return;
-    if (Date.now() - presencaWme.desligarEm < PRESENCA_WME_DESLIGAR_REPETIR_MS) return;
+    // O teto é da sessão que levou a recusa: numa sessão nova, sai já.
+    if (Date.now() - presencaWme.desligarEm < PRESENCA_WME_DESLIGAR_REPETIR_MS
+        && presencaWme.desligarSessao === marcaDaSessao(API.getSession())) return;
     presencaWmeDesligar();
 }
 
@@ -17324,6 +17347,7 @@ function presencaWmeZerar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
     presencaWme.desligarEm = 0;
+    presencaWme.desligarSessao = null;
     presencaWme.ultimaEm = 0;
     presencaWme.enviadas = 0;
     presencaWme.falhas = 0;
