@@ -8323,7 +8323,13 @@ let saiuNestaPagina = false;
 function desenharAvisoDoSair() {
     const el = document.getElementById('logoutSaidaAviso');
     if (!el) return;
-    const n = carregarFilaDeSaida().length;
+    // Só o que ESPERA: a decisão que está no ar — nesta aba
+    // (`pedidosEmAndamento`) ou na outra (a marca dela) — também mora na fila de
+    // saída desde o O2, e já saiu: ela chega ao Waze com o "Sair" no meio. A
+    // frase a contava e dizia que ela "não chega" (auditoria de 2026-10-01, R5-1
+    // F7).
+    const n = carregarFilaDeSaida().filter((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x))
+        && !reivindicadoPorOutraAba(x)).length;
     el.textContent = n ? t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }) : '';
     el.classList.toggle('hidden', !n);
 }
@@ -12788,6 +12794,10 @@ function sincronizarComOutraAba(chave) {
         && (aoSairEmOutraAba() || aoEntrarOutraContaEmOutraAba())) return;
     if (tudo || chave === STATS_KEY) relerPlacarDeOutraAba();
     if (tudo || chave === PREFERENCES_KEY) relerPreferenciasDeOutraAba();
+    // A fila de saída é do aparelho, e só UMA aba a esvazia (ver `travaDaSaida`):
+    // a outra seguia mostrando "1 esperando envio" depois de a decisão sair por
+    // esta (auditoria de 2026-10-01, R5-1 F6). Só desenha.
+    if (tudo || chave === SAIDA_KEY) updateInFlightIndicator();
 }
 
 // A conta desta aba (`id`) segue dona do aparelho? Os dados dele têm UM dono
@@ -14178,7 +14188,7 @@ async function enviarLote(places, opts = {}) {
         const lista = carregarFilaDeSaida();
         esperavamAntes = lista.length;
         for (const p of places) {
-            const r = enfileirarSaida('reject', p, opts.regiao, undefined, true, lista);
+            const r = enfileirarSaida('reject', p, opts.regiao, reivindicacaoDestaAba(), true, lista);
             if (r === true) anotados.add(p);
             else if (r === 'repetida') repetidos.add(p);
         }
@@ -14223,7 +14233,15 @@ async function enviarLote(places, opts = {}) {
                 if (naFilaDoLote()) for (const q of naoPousaram) voltarPraFila(q);
                 return;
             }
-            if (r && r.success) {
+            // A OUTRA aba já o pousou e contou (ver `pousouPorOutraAba`): é decisão
+            // desta pessoa que chegou ao Waze — sem contar de novo, nem como "outro
+            // editor".
+            const pousouNaOutra = () => anotados.delete(p) && tirarDaFilaDeSaida('reject', p) === false;
+            if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')
+                && pousouNaOutra()) {
+                conta.ok++;
+                pousouPorOutraAba(p, 'reject');
+            } else if (r && r.success) {
                 conta.ok++;
                 if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 registrarPouso(p);
@@ -14250,7 +14268,9 @@ async function enviarLote(places, opts = {}) {
                 // O resto do lote não pode evaporar (ver o 401 no
                 // `handleActionResult`): no placar otimista ele vai pra fila de
                 // saída — onde a anotação de antes do envio já o pôs, e fica;
-                // contando ao pousar, volta pra fila de pedidos.
+                // contando ao pousar, volta pra fila de pedidos. A marca desta aba
+                // sai dos anotados: ela não os está mais mandando.
+                soltarMarcaDosItens('reject', [...anotados]);
                 for (const q of places.slice(places.indexOf(p))) {
                     if (repetidos.has(q)) continue;
                     marcarEmAndamento(q, false);
@@ -14276,6 +14296,7 @@ async function enviarLote(places, opts = {}) {
                 // a ser um card. O contrato daquele modo ("o número na tela é
                 // sempre o que de fato foi enviado") continua valendo.
                 conta.fila++;
+                soltarMarcaDosItens('reject', [p]);
                 ficouNaSaida();
             } else {
                 conta.erro++;
@@ -14880,8 +14901,22 @@ const SAIDA_REIVINDICACAO_MS = 60 * 1000;
 // MESMO item no mesmo instante, e vale a última gravação. Por isso quem marca
 // espera um instante e relê — se a marca não é mais a dela, a outra ganhou.
 const SAIDA_REIVINDICACAO_ASSENTA_MS = 60;
-// A marca desta ABA (desta página): nasce com ela e morre com ela.
-const ABA_DESTA_PAGINA = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
+// A marca desta ABA: nasce com ela e SOBREVIVE a recarregar a mesma aba (o
+// `sessionStorage` é da aba). Desde que a decisão que sai leva a marca de quem
+// a manda (ver `reivindicacaoDestaAba`), a página recarregada — o F5, o Android
+// que encerrou o app em segundo plano — tem de reconhecer como DELA o que
+// anotou antes de morrer e mandá-lo na abertura, como sempre (O2, O5); com uma
+// marca por página, esperava a marca vencer. Outra aba tem outra. Sem o
+// `sessionStorage`, uma por página.
+const ABA_DESTA_PAGINA = (() => {
+    const nova = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
+    try {
+        const tinha = sessionStorage.getItem('__abaDaSaida');
+        if (tinha) return tinha;
+        sessionStorage.setItem('__abaDaSaida', nova);
+    } catch (e) { /* armazenamento bloqueado: a marca é desta página */ }
+    return nova;
+})();
 let saidaEsperandoOutraAba = false;
 
 // A trava ENTRE ABAS do esvaziamento: `null` quando outra aba está esvaziando;
@@ -14918,10 +14953,51 @@ function esperarOutraAbaEsvaziar() {
         () => { saidaEsperandoOutraAba = false; });
 }
 
-// A reserva (sem `navigator.locks`). Marca de OUTRA aba, recente: ela está
-// esvaziando.
+// Marca de OUTRA aba, recente: ela está esvaziando (a reserva, sem
+// `navigator.locks`) ou MANDANDO o item agora (a anotação antes do envio, ver
+// `reivindicacaoDestaAba`).
 function reivindicadoPorOutraAba(x) {
     return !!(x && x.rv && x.rv !== ABA_DESTA_PAGINA && Date.now() - (Number(x.rvEm) || 0) < SAIDA_REIVINDICACAO_MS);
+}
+
+// A marca DESTA aba na decisão que ela anota na fila de saída antes de mandar
+// (o ✕/✓ do card, o lote, a descarga). Desde o O2 toda decisão que sai fica na
+// fila enquanto voa, e a fila é do APARELHO: o que impedia o reenvio era o
+// `pedidosEmAndamento`, que é da MEMÓRIA desta aba. A outra aba, esvaziando a
+// fila em qualquer gatilho (abrir, a resposta de qualquer chamada, o `online`),
+// mandava de novo a decisão que esta ainda tinha no ar — MEDIDO: o ✕ saindo pelas
+// duas abas e o Histórico contando 3 pra 2 decisões; o "Rejeitar os 5" saindo
+// 2× inteiro, 10 no Histórico pra 6 (auditoria de 2026-10-01, R5-1 F1 e
+// R5-2-01). A marca vale o mesmo que a do esvaziamento: se esta aba morrer no
+// meio do envio, a outra manda depois (at-least-once).
+function reivindicacaoDestaAba() {
+    return { rv: ABA_DESTA_PAGINA, rvEm: Date.now() };
+}
+
+// A decisão que ESTA aba mandou e a OUTRA pousou (e contou) antes: quando a
+// resposta daqui chegou, o item já não estava na fila de saída. Contar de novo
+// punha o mesmo trabalho duas vezes no Histórico, e o "já tratado" que a cópia
+// causou virava "outro editor" — sobre a decisão da própria pessoa. Fica só o
+// pouso nesta página, pra busca não trazer o pedido de volta.
+function pousouPorOutraAba(place, tipo) {
+    registrarPouso(place);
+    dfato('saida.saiuPorOutro', { tipo });
+}
+
+// A resposta chegou e a decisão FICA na fila de saída (rede, 401): esta aba não
+// a está mais mandando, e a marca dela sai — senão a outra aba esperava a marca
+// vencer (até 1 min) pra mandar o que ninguém mais estava mandando. Só a marca
+// DESTA aba: a de outra é de quem está mandando agora.
+function soltarMarcaDosItens(tipo, places) {
+    const chaves = new Set(places.map(chaveDoPedido));
+    const f = carregarFilaDeSaida();
+    let mudou = false;
+    for (const x of f) {
+        if (x && x.tipo === tipo && x.rv === ABA_DESTA_PAGINA && chaves.has(chaveDoPedido(x))) {
+            delete x.rv; delete x.rvEm; mudou = true;
+        }
+    }
+    if (mudou) salvarFilaDeSaida(f);
 }
 
 // Marca o item com esta aba e confere, depois de um instante, que a marca ficou
@@ -14942,10 +15018,19 @@ async function reivindicarNaSaida(item) {
 
 // O fim do esvaziamento na reserva: o que esta aba marcou e não saiu (a rede
 // caiu, o 5xx mandou pro fim) fica livre pra qualquer aba na hora.
-function soltarReivindicacoes() {
+function soltarReivindicacoes({ comAsDoAr = false } = {}) {
     const f = carregarFilaDeSaida();
     let mudou = false;
-    for (const x of f) if (x && x.rv === ABA_DESTA_PAGINA) { delete x.rv; delete x.rvEm; mudou = true; }
+    // O que esta aba tem NO AR (anotado antes do envio) segue marcado: soltar a
+    // marca dele deixava a outra aba mandá-lo de novo. Menos quando a PÁGINA SAI
+    // (`comAsDoAr`, no `pagehide`): a resposta dela não chega mais pra contar, e
+    // a reabertura ou a outra aba o manda de novo NA HORA — o at-least-once de
+    // sempre —, em vez de esperar a marca vencer.
+    for (const x of f) {
+        if (x && x.rv === ABA_DESTA_PAGINA && (comAsDoAr || !pedidosEmAndamento.has(chaveDoPedido(x)))) {
+            delete x.rv; delete x.rvEm; mudou = true;
+        }
+    }
     if (mudou) salvarFilaDeSaida(f);
 }
 
@@ -15403,7 +15488,12 @@ async function esvaziarFilaDeSaida() {
             // Sem isto a prova de rede da PRÓPRIA resposta mandava o item de novo
             // e ele contava duas vezes. Pega o primeiro que não está no ar; só
             // com os que estão, para (a resposta deles chama de novo).
-            const item = f.find((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)));
+            //
+            // E o que está no ar NA OUTRA aba também (a marca dela, ver
+            // `reivindicacaoDestaAba`), com e sem a trava do navegador: a trava
+            // só serializa os esvaziamentos, e a decisão que a outra aba manda
+            // não passa por ela.
+            const item = f.find((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)) && !reivindicadoPorOutraAba(x));
             if (!item) break;
             // A conta do GESTO contra a de agora (ver `contaAgora`). Desconhecida
             // agora (sessão nova, perfil a caminho): espera — o perfil chegando
@@ -15659,7 +15749,7 @@ const anotadoAntesDoEnvio = new WeakSet();
 // antes, que avisa na falha). A descarga já anotou: nada a fazer.
 function anotarAntesDoEnvio(tipo, place, regiao) {
     if (descargaNaFila.has(place)) return true;
-    const r = enfileirarSaida(tipo, place, regiao, undefined, true);
+    const r = enfileirarSaida(tipo, place, regiao, reivindicacaoDestaAba(), true);
     if (r === true) anotadoAntesDoEnvio.add(place);
     return r;
 }
@@ -16992,7 +17082,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     const anotado = anotadoAntesDoEnvio.delete(place);
     const jaNaSaida = descargaNaFila.delete(place) || anotado;
     if (result.success) {
-        if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
+        if (jaNaSaida && tirarDaFilaDeSaida(actionType, place) === false) return pousouPorOutraAba(place, actionType);
         registrarPouso(place);
         recordHistory(actionType, 1);
         // Só REJEIÇÃO conta reincidência. Marcar como lido não é juízo
@@ -17007,7 +17097,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     const cat = result.errorCategory || 'unknown';
 
     if (cat === 'already_processed' || cat === 'not_found') {
-        if (jaNaSaida) tirarDaFilaDeSaida(actionType, place);
+        if (jaNaSaida && tirarDaFilaDeSaida(actionType, place) === false) return pousouPorOutraAba(place, actionType);
         registrarPouso(place);
         recordHistory(actionType, 1);
         // Conta como tratada pelos mesmos motivos que ela conta no placar: o
@@ -17028,6 +17118,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
         // Já está na fila: só anota QUANDO levou o 401 e confere a sessão.
         marcarNaSaida({ tipo: actionType, venueID: place.venueID, updateRequestID: place.updateRequestID },
                       { u401: Date.now() });
+        soltarMarcaDosItens(actionType, [place]);
         if (anotado) anotarSeAbriuASaida(actionType);
         handleUnauthorized();
         return;
@@ -17059,6 +17150,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     // Já está na fila (a descarga, ou a anotação de antes do envio): o placar
     // fica, e ela sai quando a rede vier.
     if (cat === 'transient' && jaNaSaida) {
+        soltarMarcaDosItens(actionType, [place]);
         if (anotado) anotarSeAbriuASaida(actionType);
         return;
     }
@@ -18182,7 +18274,7 @@ function scheduleAction(type, place, executor, opts = {}) {
         descarregar: () => {
             if (executed) return;
             if (n === 1 && (type === 'read' || type === 'reject')) {
-                const r = enfileirarSaida(type, places[0], regiaoDoGesto);
+                const r = enfileirarSaida(type, places[0], regiaoDoGesto, reivindicacaoDestaAba());
                 if (r === 'repetida') {
                     // A decisão deste pedido JÁ esperava na fila: vale a primeira
                     // (ver `enfileirarSemRede`), e este gesto não sai nem conta.
@@ -18920,7 +19012,13 @@ function descarregarAcaoPendente() {
 }
 
 function setupDescargaAoSair() {
-    window.addEventListener('pagehide', descarregarAcaoPendente);
+    window.addEventListener('pagehide', () => {
+        descarregarAcaoPendente();
+        // A página SAI (fechar a aba, navegar, recarregar): as marcas desta aba
+        // na fila de saída saem com ela, inclusive a do que está no ar (ver
+        // `soltarReivindicacoes`). A aba só ESCONDIDA segue viva e as mantém.
+        try { soltarReivindicacoes({ comAsDoAr: true }); } catch (e) { /* a saída segue */ }
+    });
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') descarregarAcaoPendente();
         // A página VOLTOU (a pessoa trocou de app e retornou): o modo "saindo"

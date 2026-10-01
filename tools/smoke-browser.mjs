@@ -8750,13 +8750,20 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // presença fica de fora — a sentinela deste arquivo reprova 401 de sessão
     // nela, e ela não é o que se mede aqui.
     const mortos = new Set();
+    // A seção 5 SEGURA a resposta de um pedido (a 1ª decisão dele) até soltar.
+    const segurar = new Map();
     let logins = 0;
     await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
     await ctx.route('**/api/**', async (r) => {
       const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
       let corpo = {};
       try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
-      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null });
+      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null, pedido: corpo.venueID || null });
+      if (rota === 'validar-place' && segurar.has(corpo.venueID)) {
+        const espera = segurar.get(corpo.venueID);
+        segurar.delete(corpo.venueID);
+        await espera;
+      }
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
       if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
         return r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false,
@@ -8798,7 +8805,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
     await esperarOuExplodir(A, pronta, 'a aba A abrir com a sessão e a fila');
     await esperarOuExplodir(B, pronta, 'a aba B abrir com a sessão e a fila');
-    return { ctx, A, B, rede, erros, mortos };
+    return { ctx, A, B, rede, erros, mortos, segurar };
   };
   // Um ✕ pelo botão do card da frente, esperando o card TROCAR e o envio voltar.
   const rejeitarNa = (page) => page.evaluate(async () => {
@@ -9079,6 +9086,49 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   }
   checa(o.erros.length === 0, 'duas abas: erro de JS na troca de conta', o.erros[0]);
   await o.ctx.close();
+
+  // ── 5. a decisão NO AR numa aba não sai de novo pela OUTRA ──────────────
+  // Desde o O2 a decisão entra na fila de saída ANTES do envio, e a fila é do
+  // aparelho: a outra aba, esvaziando (a resposta de qualquer chamada dela é
+  // prova de rede), mandava de novo o ✕ que esta ainda tinha no ar, e o
+  // Histórico o contava duas vezes (auditoria de 2026-10-01, R5-1 F1). Hoje a
+  // anotação leva a marca da aba que manda. Aqui a resposta do ✕ da B fica
+  // presa, e a A esvazia a fila nesse meio.
+  // CONTROLE: o mesmo com a marca tirada da anotação (o app de antes) — a A
+  // tem de mandá-lo de novo, senão a medida não enxerga o reenvio.
+  const vooNaOutra = async ({ semMarca }) => {
+    const v = await abrirAbas();
+    const alvo = await v.B.evaluate(() => AppState.currentPlace.venueID);
+    let soltar = () => {};
+    v.segurar.set(alvo, new Promise((ok) => { soltar = ok; }));
+    await v.B.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+    await esperarOuExplodir(v.A, () => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 1,
+      'o ✕ da aba B ser anotado na fila de saída antes do envio');
+    if (semMarca) {
+      await v.A.evaluate(() => {
+        const f = JSON.parse(localStorage.getItem('waze_places_saida'));
+        for (const x of f) { delete x.rv; delete x.rvEm; }
+        localStorage.setItem('waze_places_saida', JSON.stringify(f));
+      });
+    }
+    await v.A.evaluate(() => esvaziarFilaDeSaida());
+    soltar();
+    await esperarNaPagina(v.B, () => AppState.inFlightActions === 0
+      && (localStorage.getItem('waze_places_saida') || '[]') === '[]', 8000);
+    await dormir(300);
+    const envios = v.rede.filter((x) => x.rota === 'validar-place' && x.pedido === alvo).length;
+    const hist = await v.A.evaluate(() => (JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {}).rejected || 0);
+    const erros = v.erros.slice();
+    await v.ctx.close();
+    return { envios, hist, erros };
+  };
+  const r5 = await vooNaOutra({ semMarca: false });
+  checa(r5.envios === 1 && r5.hist === 1,
+    'duas abas: o ✕ NO AR na aba B saiu de novo pela A (ou o Histórico o contou duas vezes)', JSON.stringify(r5));
+  checa(r5.erros.length === 0, 'duas abas: erro de JS com a decisão no ar', r5.erros[0]);
+  const c5 = await vooNaOutra({ semMarca: true });
+  checa(c5.envios === 2,
+    'duas abas: CONTROLE — sem a marca da aba, a A devia mandar de novo o ✕ no ar da B; a medida não enxerga o reenvio', JSON.stringify(c5));
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────

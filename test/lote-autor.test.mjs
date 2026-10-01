@@ -60,6 +60,8 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
       return true;
     },
     salvarFilaDeSaida: (f) => { gravacoes++; naSaida.splice(0, naSaida.length, ...f); },
+    reivindicacaoDestaAba: () => ({}),   // a marca da aba (test/contas-abas, F1)
+    soltarMarcaDosItens: () => {},
     tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.findIndex((x) => chave(x) === chave(p)); if (i >= 0) naSaida.splice(i, 1); },
     carregarFilaDeSaida: () => naSaida.slice(), dfato: (k) => log.push('diario:' + k),
     pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),

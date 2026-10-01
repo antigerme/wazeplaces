@@ -1423,6 +1423,7 @@ function montarSaidaMorta() {
     t: (k) => k,
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
     API: {
       getSession: () => 'tok-A',
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
@@ -1437,8 +1438,8 @@ function montarSaidaMorta() {
     },
   };
   const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
-    'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida',
-    'handleUnauthorized'], deps);
+    'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'reivindicadoPorOutraAba',
+    'esvaziarFilaDeSaida', 'handleUnauthorized'], deps);
   return { h, deps, envios, responderSonda: (r) => sonda(r) };
 }
 

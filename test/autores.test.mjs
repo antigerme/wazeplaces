@@ -750,7 +750,7 @@ function lote({ respostas, camada = null }) {
     API: { rejectPlace: async () => fila.shift() },
     registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
-    enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
+    enfileirarSaida: () => 'ok', reivindicacaoDestaAba: () => ({}), soltarMarcaDosItens() {}, handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
     saveStats() {}, updatePendingCount() {}, openModal: (id) => modais.push(id),
     carregarFilaDeSaida: () => [], tirarDaFilaDeSaida() {}, dfato() {}, devolverPedidoRecusado() {},
     aoMudarAFilaPorBaixo() {}, pousouNoWaze: () => false, descontarGestoSemSessao() {},
