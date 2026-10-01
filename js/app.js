@@ -8518,6 +8518,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
         saveDevMode();
         API.setRegion('row');
         API.setCountry(30);
+    } else {
+        // O lugar é da aba (ver `API.lerLugar`), e o "Sair" de lá gravou o de
+        // fábrica no aparelho: esta o relê, em vez de seguir no lugar de quem saiu.
+        API.esquecerLugar();
     }
     removeUndoBanner();
     updateInFlightIndicator();

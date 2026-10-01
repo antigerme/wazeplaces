@@ -200,6 +200,7 @@ function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
     cancelarPareamento: (c) => { log.push('cancelou:' + c); return Promise.resolve(); },
     setRegion: (r) => { log.push('regiao:' + r); ap.safeLS.set('waze_region', r); },
     setCountry: (c) => { log.push('pais:' + c); ap.safeLS.set('waze_country', c); },
+    esquecerLugar: () => log.push('esqueceu o lugar'),
   };
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API,
@@ -1301,6 +1302,35 @@ test('F3: o desconto de uma decisão que não pousou, num placar ÓRFÃO (o "Sai
   deps.AppState.stats.rejected = 3;
   h.descontarGestoSemSessao('rejected', deps.AppState.stats, 1);
   assert.deepEqual([deps.AppState.stats.rejected, log], [2, ['desenha', 'grava']]);
+});
+
+test('F5: região e país são da ABA — o lugar que a OUTRA aba aplica não muda o desta (o ✕ e a busca seguem a fila daqui)', () => {
+  const dados = new Map([['waze_region', 'row'], ['waze_country', '30']]);
+  const aba = () => {
+    const ctx = { navigator: { language: 'pt', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+      localStorage: { getItem: (k) => (dados.has(k) ? dados.get(k) : null), setItem: (k, v) => dados.set(k, String(v)), removeItem: (k) => dados.delete(k) },
+      console, setTimeout, clearTimeout, window: {} };
+    vm.createContext(ctx);
+    vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API;', ctx);
+    return ctx.API;
+  };
+  const A = aba(), B = aba();
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['row', 30]);
+  A.setRegion('na'); A.setCountry(235);                            // a OUTRA aba aplica a América do Norte
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['row', 30],
+    'DEFEITO: a região e o país da outra aba entraram nesta — o ✕ daqui iria pro servidor de lá');
+  // CONTROLE: o aparelho guardou a escolha de lá — uma aba nova (ou esta, depois do "Sair" de lá) a lê.
+  assert.deepEqual([aba().getRegion(), aba().getCountry()], ['na', 235]);
+  B.esquecerLugar();
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['na', 235]);
+  // E o gesto DESTA aba troca o dela e grava, como sempre.
+  B.setCountry(181);
+  assert.deepEqual([B.getRegion(), B.getCountry(), dados.get('waze_country')], ['na', 181, '181']);
+  // A região antiga (`world`) segue virando `na` na leitura.
+  dados.set('waze_region', 'world');
+  assert.equal(aba().getRegion(), 'na');
+  // O "Sair" noutra aba faz esta reler o lugar de fábrica que ele gravou.
+  assert.match(fatiarDe(APP_SEM, 'handleLogout'), /\} else \{\s*API\.esquecerLugar\(\);\s*\}/);
 });
 
 test('F6: a fila de saída que muda noutra aba redesenha o "esperando envio" daqui', () => {

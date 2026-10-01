@@ -78,14 +78,35 @@ const API = {
     // quando a memória está vazia; aqui a pergunta é só sobre a memória.
     temSessaoNaMemoria() { return !!this.sessionToken; },
 
+    // Região e país são da ABA, como os outros filtros (`AppState.filters`, lidos
+    // na abertura): lidos do aparelho UMA vez, e daí em diante só o gesto DESTA
+    // aba os troca (`setRegion`/`setCountry`, que também gravam, pra próxima
+    // abertura). Relidos a cada chamada, eram do APARELHO: com o app em duas abas,
+    // a outra que trocava de lugar nos Filtros mandava o ✕ desta pro servidor da
+    // região de lá — "não encontrado", contado como "Já tratado por outro editor",
+    // e o pedido pendente no servidor certo —, e a busca seguinte desta trazia a
+    // fila do país de lá (auditoria de 2026-10-01, R5-1 F5). Assim a decisão leva
+    // a região da fila que a aba mostra. `esquecerLugar`: o "Sair" dado noutra aba
+    // gravou o lugar de fábrica no aparelho, e esta o relê da próxima vez.
+    lugarLido: false,
+    lerLugar() {
+        if (this.lugarLido) return;
+        this.lugarLido = true;
+        const regiao = safeLS.get('waze_region');
+        if (regiao) this.region = regiao;
+        const pais = safeLS.get('waze_country');
+        if (pais) this.countryId = parseInt(pais, 10) || 30;
+    },
+    esquecerLugar() { this.lugarLido = false; },
+
     setRegion(region) {
+        this.lerLugar();   // senão a 1ª leitura do país traria de volta a região do aparelho
         this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);
     },
 
     getRegion() {
-        const stored = safeLS.get('waze_region');
-        if (stored) this.region = stored;
+        this.lerLugar();
         // MIGRACAO: regiao-world — `world` era a América do Norte com outro
         // nome (ver `WAZE_REGIONS` no core); quem a escolheu vai pra `na`.
         if (this.region === 'world') { this.region = 'na'; safeLS.set('waze_region', 'na'); }
@@ -94,13 +115,13 @@ const API = {
     },
 
     setCountry(id) {
+        this.lerLugar();
         this.countryId = parseInt(id, 10) || 30;
         safeLS.set('waze_country', this.countryId);
     },
 
     getCountry() {
-        const stored = safeLS.get('waze_country');
-        if (stored) this.countryId = parseInt(stored, 10) || 30;
+        this.lerLugar();
         return this.countryId;
     },
 
