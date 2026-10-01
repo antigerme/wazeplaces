@@ -8,6 +8,141 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.01-01
+
+Sétima rodada da auditoria. Oito auditores revisaram o app de novo depois da v2026.09.29-01, e os consertos cobrem dez áreas: o servidor e a sessão, a conta e as várias abas, a fila e as decisões, os filtros, a foto e o mapa ampliados, o card, o "Disponível offline", a presença e a conversa, o modo dev e os textos.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**Sessão e conta**
+- **Quem usa o app um pouco por dia não perde mais a sessão do Waze antes da hora.** O Waze troca o cookie a cada resposta, e o app só guardava a troca se você ficasse mais de uma hora com ele aberto; quem abria por 20 minutos e voltava no dia seguinte seguia com o cookie do login, que é o que vence.
+- **Abrir o app gasta menos gravações no servidor**: uma por dia, em vez de três.
+- **Quando o Waze responde algo estranho no login, a tela diz "Resposta inesperada do Waze"**, e não que os seus cookies são inválidos. A extensão do Chrome também deixa de dizer que você não está logado no WME nesse caso.
+- **Quem entra num aparelho depois de a sessão de outra pessoa cair começa como num aparelho novo**: o Desfazer ligado até a sua própria cota, o "Como funciona" e os avisos de primeira vez — e o "Pular guarda o pedido" desligado: o ↑ não grava estrela no Waze em nome de quem não escolheu isso.
+- **A fila de quem entra não vem mais ordenada pela casa ou pela posição de quem estava antes.**
+- **O "Sair" avisa quantas decisões ainda esperam envio** — elas são descartadas e não chegam ao Waze.
+- **O código de pareamento não é enviado duas vezes** com Enter duplo ou Enter e "Entrar".
+
+**O app aberto em duas abas**
+- **"Sair" numa aba encerra as outras também.** Elas voltam à tela de entrada, fecham o que estava aberto e avisam por quê — e nada do que estava nelas vai pro Waze com a sessão de quem saiu.
+- **O placar não perde mais o que você fez na outra aba**, e as escolhas nas Preferências ("Pular guarda o pedido", "Ver quem está no app") não voltam atrás quando você age na outra.
+- **Cada decisão que esperava a rede sai uma vez só**, e o Histórico conta cada uma uma vez. Antes as duas abas mandavam a mesma decisão e o Histórico contava em dobro.
+- **A sessão que cai numa aba não tira mais a que você acabou de renovar na outra.** Antes, a aba renovada caía na tela de entrada ao recarregar.
+- **Outra conta entrando numa aba encerra a sessão das outras, com aviso.** Os dados do aparelho são de uma conta só: seguindo, as decisões feitas na aba da conta anterior iam pro placar e pro Histórico da conta nova — ou sumiam da fila de envio sem chegar ao Waze.
+
+**A sua decisão não some nem conta duas vezes**
+- **Fechar o app logo depois de rejeitar ou marcar como lido não perde mais a decisão.** Ela fica guardada no aparelho até o Waze confirmar e sai sozinha quando o app abre de novo: o pedido não volta como card nem conta duas vezes no placar. Vale também pro "Rejeitar os N" fechado no meio.
+- **Se a sessão cair e voltar sozinha com uma decisão ainda na janela do Desfazer ou a caminho do Waze, o pedido volta como o próximo card**, com o placar e o "Restam" de antes. Com outra conta, a fila começa do zero, como sempre.
+- **Pedido que o Waze recusa no "Rejeitar os N" volta como o próximo card**, na ordem, e o card de baixo passa a mostrá-lo.
+- **Atualizar com o "Rejeitar os N", o "Marcar todos" ou uma aprovação de foto ainda no ar não termina mais em "Tudo limpo!" com pedidos pendentes**: o que o Waze recusou volta pra fila.
+- **"Rejeitar os N" rejeita só os N que o botão mostrou**, mesmo que cheguem mais pedidos do autor com a folha aberta.
+- **O resultado do "Rejeitar os N" não abre mais por cima dos Filtros nem da foto ou do mapa ampliados**: com outra tela aberta, ele aparece como aviso e a tela fica como estava.
+- **A recusa automática pega também os pedidos do autor que chegam enquanto ela está rodando** (em "Mais antigos" e "Perto de…" o app lê várias páginas seguidas).
+- **"Marcar todos"**:
+  - fechar o app no meio não traz de volta o que o Waze já marcou;
+  - o pedido cuja foto você está aprovando fica de fora (e fora do número do botão);
+  - um "Marcar todos" da sessão que caiu não trava mais a sessão que volta, nem a de quem entra depois de "Sair".
+  - se a sessão cair no meio e a extensão a renovar, os pedidos que o Waze já tinha marcado saem da fila, em vez de seguirem como card pra serem decididos de novo.
+
+**O card**
+- **Se a foto de um pedido de foto não carregar (sem sinal) justo quando você toca ✕ ou ✓, o card volta pra tela** com o aviso "a foto precisa de sinal" e o ↑ ao alcance. Antes ele sumia da tela e o app ficava parado naquele pedido.
+- **Com "Pular guarda o pedido" ligado, uma falha passageira não diz mais "Sessão expirada" à toa**: o app confere a sessão e guarda o pedido de novo, como já fazia com o ✕.
+- **Pelo teclado, depois de Enter no ✕, ↑ ou ✓, o foco vai pro mesmo botão do próximo card** — e, no "Desfazer", pro botão do card que voltou. Com o dedo ou o mouse nada muda.
+- **Tocar na barra "Primeiro os de…" volta a fila à ordem normal**, como a barra promete. O card que está na tela continua nela.
+- **Pelo teclado, Enter em "Ver +N" leva o foco pra barra "Primeiro os de…", e Enter na barra o devolve ao "Ver +N"** (ou aos botões do card, quando a série do autor acabou). Antes o foco se perdia nos dois.
+- **Pelo teclado, se a foto de um pedido de foto não carregar (sem sinal) com o foco no ✕, o foco passa pro ↑**, o botão que continua valendo, em vez de se perder.
+- **Com o card travado esperando algo (o "Marcar todos" terminar, a conferência da sessão, a aprovação de uma foto), tocar no ✕ ↑ ✓, arrastar o card ou usar as setas diz o que se espera.** Um aviso de cada vez, e ele sai assim que a espera acaba. Na janela do Desfazer nada muda: o banner com a contagem já explica.
+- **Com a aprovação da foto de um pedido no ar, o card do mesmo pedido fica travado até o Waze responder**: antes, um ✕ ali mandava uma rejeição junto com a aprovação.
+- **Num reporte de duplicado, o nome do local duplicado ocupa no máximo duas linhas**, e arrastar o card pra cima volta a pular também em telas estreitas. Quando o nome é muito longo, o fim da frase fica cortado (a distância inclusive); no computador, o nome inteiro aparece ao passar o mouse, e o mapa continua mostrando onde ele está.
+
+**Filtros e "Perto de mim"**
+- **O "Aplicar" espera a localização do "📍 Perto de mim".** Tocado enquanto o aparelho ainda buscava a posição, ele gravava "Mais recentes" sem avisar, ou ordenava a fila pelo lugar onde você estava antes.
+- **Cancelar depois de um "Perto de mim" que não deu certo mantém a ordem que já valia.**
+- **Com a localização permitida mas sem posição** (a localização do aparelho desligada, sem sinal de GPS), o aviso agora diz isso e pede pra conferir e tentar de novo, em vez de mandar liberar uma permissão que já estava liberada.
+- **Os Filtros abertos pelo atalho do ícone, ou antes de o seu perfil carregar, não apagam mais a ordem "Perto de casa" (ou "do trabalho") nem a área gerenciada salvas.** A área aparece como "Carregando…" até o perfil chegar.
+- **Com a lista de países ainda carregando, o "Aplicar" não apaga mais o estado salvo.**
+- **Trocar o idioma nas Preferências traduz na hora a aba Filtros do mesmo modal.**
+- **Trocar de país ou de região nos Filtros não leva mais a área gerenciada nem o estado do país anterior** (a busca saía, por exemplo, com uma área de São Paulo na França).
+- **Trocar de região com a lista da região anterior ainda chegando não mistura mais os países das duas.**
+- **Aplicar outra região logo ao abrir o app não é mais desfeito quando o seu perfil termina de carregar.** Antes, o app podia levar você pra um país de outra região — o Brasil na América do Norte, com a fila vazia.
+- **Com os Filtros abertos, quando o app troca o país pro país onde você edita, o seletor mostra o país novo.** Se você já tinha escolhido outro país, vale a sua escolha.
+- **Trocar a região nos Filtros e voltar pra que estava valendo devolve o seu país, o estado e a área.**
+
+**Foto e mapa ampliados**
+- **No iPhone, o Street View do mapa ampliado abre e o toque duplo aproxima.** No Safari (e em todo navegador do iPhone) os dois não respondiam ao dedo.
+- **Se a sessão cair enquanto uma aprovação, exclusão ou correção de nome é enviada, a foto e o nome voltam ao que está no Waze, com o aviso.** Antes, quando a extensão renovava a sessão, ficavam na tela como feitos sem ter chegado ao Waze.
+- **Um "sessão expirada" falso em outra chamada não desfaz mais o que você aprovou, excluiu ou renomeou pela foto ampliada**: o app espera a conferência terminar e, com a sessão confirmada, manda de novo.
+- **Sem o Desfazer, "Aprovar" e a lixeira ficam travados até o Waze responder.**
+- **Aprovar a foto de um pedido depois de desfazer o card anterior tira esse pedido da fila**, e o "Restam" fica certo.
+- **Corrigir o nome de novo espera a correção anterior terminar**: o Waze e a tela ficam sempre com o último nome. Enquanto a sessão é conferida, o Enter no campo do nome não salva, e o nome digitado continua lá.
+- **Atualizar, aplicar os Filtros ou entrar no treino com o Desfazer de uma foto ou de um nome correndo manda a mudança na hora**, em vez de deixar o card travado sem o botão de desfazer.
+- **Aprovar, excluir e renomear vão sempre pro servidor da região em que você estava**, mesmo que você troque de região logo depois.
+- **Aprovar uma foto que outro editor já tratou avisa "Já tratado por outro editor 👍"**, como no card.
+- **Excluir uma foto com o Waze lento não diz mais "Outro editor já tinha excluído"** sobre a foto que você mesmo excluiu. Se o Waze demorar demais pra responder, o app avisa que não deu e você tenta de novo.
+- **No mapa ampliado, a tecla z e o Tab chegam ao "Desfazer".** Na foto ampliada, + e − dão zoom, como no mapa.
+- **O leitor de tela descreve a foto ampliada como a do card** (o endereço, quando o local não tem nome).
+
+**Disponível offline**
+- **Com o sinal que não anda (o celular diz que tem rede e nada carrega), os pedidos guardados aparecem.** Antes o app esperava a busca desistir e mostrava "Falha ao carregar". O "Tentar novamente" também os traz.
+- **Com o servidor do app fora do ar, o app instalado abre com os pedidos guardados**, em vez da página de erro do provedor.
+- **A preparação que ficou pela metade continua sozinha quando o sinal volta**, como a linha das Preferências promete. Antes ela só voltava 20 minutos depois.
+- **Ligar o "Disponível offline" já sem sinal guarda os pedidos na hora.**
+- **Trocar o filtro não traz mais os pedidos guardados do filtro anterior** quando o app reabre sem sinal. Trocar só a ordem mantém o que foi guardado.
+
+**Presença e conversa**
+- **Quando a sessão cai e a extensão a renova sozinha, a conversa aberta não fecha mais.** O pedido que você prendeu e o que estava digitado continuam lá, e as mensagens seguem chegando na hora.
+- **Com teclado ou leitor de tela, o foco não pula mais pro começo da página** quando chega mensagem com a lista ou a conversa aberta, nem ao pedir "Ver mensagens anteriores".
+- **A foto de um pedido que não carrega na conversa não é mais baixada de novo a cada mensagem.**
+- **Depois de fechar a conversa, e depois do "Sair", nada dela fica na página.**
+- **Mensagem que não sai porque o Waze está fora diz "Não enviada."** O "sem conexão" ficou só pra quando a sua rede falha.
+- **O número da pílula não conta mais uma mensagem como duas**, e uma lista atrasada não traz de volta a mensagem que você já leu.
+- **Fechar a conversa logo depois de uma mensagem chegar não a deixa mais como não lida.** Pelo ✕, pelo Esc, tocando fora ou pelo voltar do aparelho, o app avisa o Waze que você viu — e ela não volta como "1 mensagem nova".
+- **Trocar de país com o Waze fora não deixa mais na tela quem estava no país anterior.**
+- **Com o relógio do celular adiantado, a resposta da outra pessoa volta a aparecer na lista de conversas.**
+- **A conversa com quem acabou de sair do app segue com o nome da pessoa no topo**, em vez de "Editor".
+- **Com o Waze fora, o app não repete mais pedidos a cada ação**: no máximo uma vez por minuto.
+- **Fechar o app na janela do Desfazer não manda mais a sua posição pro mapa do WME.**
+
+**Modo Desenvolvedor**
+- **Fechar a aba ou recarregar a página com o modo dev ligado não perde mais o registro daquela abertura.**
+- **O resumo do diagnóstico não diz mais que o token do tempo real venceu quando ele ainda vale.**
+- **Os textos do modo dev chamam cada coisa por um nome só**, e saíram do dicionário dois avisos que o app nunca mostrava.
+- **Ferramentas de leitura do relatório**: a tela reconstruída mostra o placar do aparelho; com a porta ocupada, a sugestão de outra porta vem no formato que a ferramenta aceita; a triagem diz quando uma abertura veio do registro do fechar.
+
+**Treino e Desfazer**
+- **Fechar o fim do treino pelo Esc, tocando fora dele ou pelo voltar do celular leva à sua fila**, como o "Ir para a fila". Antes o treino ficava preso: o último card de treino na tela, "Restam 0" e os botões sem responder.
+- **Com o Desfazer desligado, o fim do treino não promete mais os segundos dele**: avisa que cada ação vai pro Waze na hora.
+- **A folha do autor diz o que "Rejeitar os N da fila" faz de verdade**: com o Desfazer ligado, que dá pra voltar atrás nos segundos dele; desligado, que o toque já envia.
+
+**Conectar outro aparelho**
+- **Quando o QR vence, a tela para de pedir pra apontar a câmera pra ele, e some o "Sem câmera? Mostrar um código"**, que criava um código novo embaixo do aviso de expirado. O código que você já tinha pedido vale até o fim do prazo dele.
+
+**Tema**
+- **Trocar do escuro pro claro pelo botão, com o celular no modo escuro, deixa a barra do sistema e o fundo claros na hora.** Antes eles só acertavam depois de reabrir o app.
+
+**Ajuda e conquistas**
+- **A Ajuda diz a verdade sobre a lista de fotos da lixeira**: ela sai do servidor até 1 minuto depois da última vez que você toca na lixeira ou exclui uma foto (dizia "1 minuto depois do toque").
+- **A legenda da ⭐ diz o que ela é**: o pedido que você favoritou no WME, a mesma estrela do "Pular guarda o pedido" (dizia que era o local).
+- **O ↗ desenhado no "Importante:" da Ajuda fica escuro no tema escuro**, igual ao botão do card.
+- **A conquista "Detetive" conta toda rejeição de um pedido de duplicado.** Antes só contava quando o app tinha achado o local original.
+- **Em espanhol, a Ajuda chama de "borrar" o apagar foto**, o mesmo verbo do botão da lixeira. **Em francês**, a frase da Privacidade sobre o que o app faz com os seus cookies deixou de ter dois "et" seguidos.
+
+**Manuais**
+- **README (instalação numa VM)**: o diretório das sessões é criado já com o dono certo. Com o comando antigo, todo login e todo pareamento davam "Erro interno".
+- **README**: a conferência da API com `curl` leva um User-Agent de navegador e explica o 403 do Cloudflare; a tabela dos erros diz o que o app faz hoje com um 401.
+- **Extensão**: o manual descreve o protocolo de hoje (a conta que vai junto com o token e a recusa do portão), e a extensão sobe pra 0.3.0 — ela precisa ser publicada de novo pra essas duas coisas valerem.
+
+**Servidor (pra quem hospeda)**
+- A chave `ENCRYPTION_KEY` precisa ter pelo menos 32 bytes. Com menos, ou malformada, o servidor da VM não sobe e diz por quê; no Cloudflare, a API responde "Backend não configurado" com o motivo.
+- O servidor da VM responde como o Cloudflare: `/index.html` redireciona pra `/`, pedidos grandes demais (mais de 5 MB) são recusados nos dois, e pedidos com dados que não são texto nem número recebem "pedido inválido" em vez de "erro interno".
+
+### Privacidade
+- **O LEIA-ME do diagnóstico avisa que, com o Modo Desenvolvedor ligado, o arquivo leva a posição de casa e a do trabalho do seu perfil no WME**, quando o perfil as tem. Ela já ia no arquivo; faltava dizer.
+
+---
+
 ## v2026.09.29-01
 
 Sexta rodada da auditoria. Cinco áreas foram revisadas de novo depois da v2026.09.26-01:
@@ -93,7 +228,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
   - que as fotos e o mapa passam pelo cache do próprio navegador;
   - que ninguém abre os cookies com o que fica guardado no servidor.
 
-  Os prazos citados (21 dias, 5 minutos) vêm do próprio servidor.
+  Os prazos citados (21 dias, 5 minutos) são os mesmos do servidor, e um teste confere.
 
 ### Mudado
 - **O login e o pareamento já dizem de quem é a conta**, e a extensão repassa isso. Vale depois de a extensão ser publicada de novo.
