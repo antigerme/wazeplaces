@@ -393,6 +393,7 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
     populateCountrySelect, showToast: () => {},
     // A espera do "Aplicar" e a área que volta a "Nenhuma" (test/filtros-modal).
     esperaDosFiltros: { regiao: false, gps: false }, aplicarEsperaDosFiltros: () => {}, aoMudarPaisNaTela: () => {},
+    cargaDePaises: 0,   // o número de cada carga da lista de países (R56-6, test/filtros-aplicar)
   }, ['aoTrocarRegiaoNoModal']);
   const ouvinte = aoTrocarRegiaoNoModal;
   AppState.profile = { editableCountryIDs: [30] };

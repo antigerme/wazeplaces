@@ -6101,9 +6101,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //       seletor seguia no de antes, e o "Aplicar" o devolvia.
 //   12. Trocar a região no modal e voltar pra aplicada escolhia o 1º país da
 //       lista (`na/40`, o Canadá) em vez do aplicado.
+//   R56-6. Trocar a região NA → ROW → NA: a lista da ida à NA que chegava
+//       DEPOIS punha o 1º da lista (o Canadá) por cima dos EUA que a pessoa
+//       tinha escolhido (auditoria da rodada 5).
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
-// no modal vale, e a região que não é a aplicada abre no 1º da lista.
+// no modal vale, a região que não é a aplicada abre no 1º da lista, e com uma
+// ida só à NA a escolha da pessoa fica.
 {
   const onde = 'filtros/lugar';
   const LISTAS = {
@@ -6121,6 +6125,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
     }, guardado);
     const seguros = [];
+    // R56-6: as listas de países das TROCAS de região, seguras na ordem em que saem.
+    const trocas = { segurar: false, seguras: [] };
     await ctx.route('**/api/**', async (route) => {
       const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
       let corpo = {};
@@ -6136,6 +6142,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
       if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
         await new Promise((solta) => seguros.push({ nome, solta }));
+      } else if (trocas.segurar && nome === 'lista-paises') {
+        await new Promise((solta) => trocas.seguras.push({ regiao, solta }));
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {});
     });
@@ -6145,7 +6153,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const soltar = (nome) => {
       for (const s of seguros.filter((x) => !nome || x.nome === nome)) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
     };
-    return { ctx, page, erros, soltar };
+    return { ctx, page, erros, soltar, trocas };
   };
   const pelosFiltros = async (m) => {
     await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
@@ -6239,6 +6247,64 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
     checa(gravado === 'na/235', `${onde}: foi à ROW e voltou, e o "Aplicar" gravou ${gravado} (achado 12)`, gravado);
     checa(m.erros.length === 0, `${onde} (12): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // R56-6. Aplicado ROW/Brasil, a região vai NA → ROW → NA no modal com as três
+  //        listas seguras, e elas chegam numa ordem; a pessoa escolhe os EUA
+  //        ASSIM QUE O SELETOR DEIXA (a lista na tela, sem "carregando",
+  //        destravado). O pouso de cada resposta se espera pelo registro dela
+  //        no anel de chamadas do app (`API.chamadas`), que é escrito ANTES de
+  //        a troca continuar — e a contagem é a que CRESCEU desde a base
+  //        fotografada depois da abertura (gotcha #62), nunca por prazo.
+  for (const [caso, regioes, ordem] of [
+    ['a 1ª ida à NA chega antes', ['na', 'row', 'na'], [0, 1, 2]],
+    ['a última ida à NA chega antes', ['na', 'row', 'na'], [2, 0, 1]],
+    ['CONTROLE: uma ida só à NA', ['na'], [0]],
+  ]) {
+    const m = await montar({ editaveis: [30] });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
+    await fimDaCarga(m);
+    await m.page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
+      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    const base = await m.page.evaluate(() => API.chamadas.filter((c) => c.rota === 'lista-paises').length);
+    m.trocas.segurar = true;
+    for (const r of regioes) {
+      await m.page.evaluate((r) => { const s = document.getElementById('filterRegion'); s.value = r; s.dispatchEvent(new Event('change')); }, r);
+    }
+    // As três saíram e estão seguras (a rota as recebe fora do `evaluate`).
+    for (let i = 0; i < 100 && m.trocas.seguras.length < regioes.length; i++) await m.page.waitForTimeout(20);
+    const seguradas = m.trocas.seguras.map((x) => x.regiao).join(',');
+    checa(seguradas === regioes.join(','), `${onde} (R56-6, ${caso}): CONTROLE — o instrumento não segurou as listas das trocas`, seguradas);
+    if (seguradas !== regioes.join(',')) { await m.ctx.close(); continue; }
+    let escolheuApos = null;
+    for (let k = 0; k < ordem.length; k++) {
+      m.trocas.seguras[ordem[k]].solta();
+      await m.page.evaluate((n) => { window.__r56Pousos = n; }, base + k + 1);
+      await esperarOuExplodir(m.page, () => API.chamadas.filter((c) => c.rota === 'lista-paises').length >= window.__r56Pousos,
+        `a resposta ${k + 1} pousar`);
+      if (escolheuApos !== null) continue;
+      const pode = await m.page.evaluate(() => {
+        const s = document.getElementById('filterCountry');
+        return !s.dataset.carregando && !s.disabled && !!s.querySelector('option[value="235"]');
+      });
+      if (pode) {
+        await m.page.evaluate(() => { const s = document.getElementById('filterCountry'); s.value = '235'; s.dispatchEvent(new Event('change')); });
+        escolheuApos = k + 1;
+      }
+    }
+    const fim = await m.page.evaluate(() => ({
+      pais: document.getElementById('filterCountry').value,
+      aplicarMorto: document.getElementById('applyFilters').disabled,
+    }));
+    checa(escolheuApos !== null, `${onde} (R56-6, ${caso}): o seletor de país nunca deixou a pessoa escolher`);
+    checa(fim.pais === '235', `${onde} (R56-6, ${caso}): a pessoa escolheu os EUA e a lista que chegou depois pôs o ${fim.pais}`, fim.pais);
+    checa(!fim.aplicarMorto, `${onde} (R56-6, ${caso}): o "Aplicar" ficou morto`);
+    const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
+    checa(gravado === 'na/235', `${onde} (R56-6, ${caso}): o "Aplicar" gravou ${gravado}`, gravado);
+    checa(m.erros.length === 0, `${onde} (R56-6): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
 }

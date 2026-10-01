@@ -3711,10 +3711,24 @@ async function loadStatesIntoSelect(countryId, regiao) {
 // MEDIDO no navegador: `na/30` (o Brasil no servidor da América do Norte) e
 // "Tudo limpo!" (auditoria da fila, 2026-09-26). Se a lista não vier, a troca
 // não se completa: a região aplicada volta, com os países dela, e o app diz.
+//
+// Cada carga da lista de PAÍSES no seletor tem um número, como a de estados
+// (`cargaDeEstados`). São duas que o escrevem — esta troca e a da abertura
+// (`popularPaisEstado`) — e só a ÚLTIMA a começar escreve: a lista, o país
+// escolhido, a área e a espera do "Aplicar". A conferência era pela REGIÃO, e
+// com a região trocada NA → ROW → NA as DUAS idas à NA passavam: a primeira a
+// chegar soltava a lista e o "Aplicar", a pessoa escolhia os EUA, e a outra
+// punha o 1º da lista de volta (o Canadá) e zerava a área — MEDIDO no
+// navegador: 235 escolhido, 40 no fim (auditoria da rodada 5, R56-6). A escolha
+// da pessoa vence a lista que chega depois, na régua do
+// `redesenharLugarNosFiltros`: ela só escolhe numa lista que já é a da última
+// carga, e nenhuma carga mais velha escreve depois dela.
+let cargaDePaises = 0;
 async function aoTrocarRegiaoNoModal(e) {
     const $ = (id) => document.getElementById(id);
     const regiao = e.target.value;
     const sel = $('filterCountry');
+    const minha = ++cargaDePaises;
     // A lista da região nova é a INTEIRA: a dica de "só os que você pode editar"
     // sai junto, porque deixou de ser verdade (T5).
     $('filterCountryHint').classList.add('hidden');
@@ -3724,16 +3738,20 @@ async function aoTrocarRegiaoNoModal(e) {
     sel.disabled = true;
     sel.dataset.carregando = '1';
     const r = await API.listCountries(regiao);
-    if ($('filterRegion').value !== regiao) return;   // trocou de novo no meio
+    // Outra carga tomou o seletor no meio (outra troca, a reabertura dos
+    // Filtros): esta não escreve nada, e quem solta o "Aplicar" é a de agora.
+    if (minha !== cargaDePaises) return;
     delete sel.dataset.carregando;
     sel.disabled = !!$('filterMyArea').checked;
     esperaDosFiltros.regiao = false;
     aplicarEsperaDosFiltros();
     if (!(r && r.success)) {
         $('filterRegion').value = API.getRegion();
-        populateCountrySelect();
         showToast(t('toast.regiaoNaoCarregou'), 'error');
-        await loadStatesIntoSelect(API.getCountry());
+        // A região aplicada volta com os países dela pelo caminho da abertura,
+        // que toma o seletor de novo: a carga da abertura que ainda vinha
+        // deixou de ser a dona dele quando a troca começou.
+        await popularPaisEstado();
         return;
     }
     sel.innerHTML = ordenarPorNome(r.countries || []).map((c) =>
@@ -3856,8 +3874,9 @@ async function openFiltersModal() {
     $('filterResidential').value = AppState.filters.residential;
     $('filterRegion').value = API.getRegion();
     // As esperas do "Aplicar" recomeçam aqui (ver `aplicarEsperaDosFiltros`):
-    // a troca de região que ficou no ar desiste ao ver o seletor de volta na
-    // região aplicada, e o pedido de posição que ficou no ar é abandonado —
+    // a troca de região que ficou no ar desiste, porque a carga da abertura
+    // (`popularPaisEstado`, no fim desta função) toma o seletor de país (ver
+    // `cargaDePaises`), e o pedido de posição que ficou no ar é abandonado —
     // nenhum dos dois devolveria o botão sozinho.
     esperaDosFiltros.regiao = false;
     esquecerPosicaoDoModal();
@@ -3900,6 +3919,9 @@ async function popularPaisEstado() {
     const estado = document.getElementById('filterState');
     // A lista pedida aqui é a da região APLICADA.
     const regiao = API.getRegion();
+    // Esta carga passa a ser a dona do seletor de país (ver `cargaDePaises`):
+    // a troca de região que ficou no ar não escreve mais nele.
+    const minha = ++cargaDePaises;
     // Enquanto não chega, o seletor diz o que está havendo em vez de ficar
     // vazio: seletor vazio parece defeito, e o editor toca de novo.
     const carregando = AppState.countries.length === 0;
@@ -3916,7 +3938,6 @@ async function popularPaisEstado() {
         estado.innerHTML = `<option value="" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>`;
         estado.dataset.carregando = '1';
     }
-    let doSeletor = true;
     try {
         if (AppState.countries.length === 0) {
             const r = await API.listCountries();
@@ -3924,21 +3945,27 @@ async function popularPaisEstado() {
             // ela não vale como a lista da região de agora...
             if (r.success && API.getRegion() === regiao) AppState.countries = r.countries;
         }
-        // ...e só vai pro seletor se ele ainda estiver na região pedida.
-        // Trocada a região NO MODAL, quem é dono do seletor é a lista da nova
-        // (`aoTrocarRegiaoNoModal`); a da aplicada, chegando DEPOIS, o
+        // ...e só vai pro seletor se esta ainda for a última carga dele.
+        // Trocada a região NO MODAL, quem é dono do seletor é a troca
+        // (`aoTrocarRegiaoNoModal`); a lista da aplicada, chegando DEPOIS, o
         // sobrescrevia — MEDIDO: o seletor em ROW com os países da NA, e o
-        // "Aplicar" gravando `row/235` (auditoria de 2026-09-29, V3).
-        const seletorDeRegiao = document.getElementById('filterRegion');
-        doSeletor = !seletorDeRegiao || seletorDeRegiao.value === regiao;
-        if (!doSeletor) return;
+        // "Aplicar" gravando `row/235` (auditoria de 2026-09-29, V3). A
+        // conferência era pela REGIÃO, e com a região trocada e VOLTADA pra
+        // aplicada ela passava: punha o país aplicado por cima do que a pessoa
+        // tinha escolhido na lista da troca (R56-6).
+        if (minha !== cargaDePaises) return;
         if (select) delete select.dataset.carregando;
         populateCountrySelect();
         await loadStatesIntoSelect(API.getCountry());
     } finally {
-        // O `myArea` marcado desabilita os três de propósito (regra de cima);
-        // fora isso, devolve o seletor ao editor mesmo se a rede falhou.
-        if (select && doSeletor) select.disabled = !!AppState.filters.myArea;
+        // O "Minha área" marcado desabilita os três de propósito (regra de
+        // cima) — o marcado NA TELA, como faz o ouvinte dele: a pessoa pode tê-lo
+        // marcado com a lista chegando, e a troca de região que não carregou
+        // devolve o seletor por aqui. Fora isso, devolve o seletor ao editor
+        // mesmo se a rede falhou — se ele ainda for desta carga: a troca de
+        // região que começou com os estados daqui chegando é dona dele, e o
+        // destravava no meio da carga dela.
+        if (select && minha === cargaDePaises) select.disabled = !!document.getElementById('filterMyArea').checked;
     }
 }
 
