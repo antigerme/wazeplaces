@@ -1069,7 +1069,10 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   });
   // O FOCO, como o navegador o trata (R56-5): `focus()` só pousa no que pode
   // recebê-lo, e o focado que some (escondido) ou vira `disabled` o perde pro
-  // <body> — a "focus fixup" do HTML, MEDIDA no Chromium com o QR vencendo.
+  // <body> — a "focus fixup" do HTML, MEDIDA no Chromium e no WebKit com o QR
+  // vencendo. E NA HORA, não na próxima leitura: com um pedido no ar (`await`),
+  // o navegador já a rodou quando a resposta chega. Preguiçosa, ela escondia o
+  // botão que volta da falha com o foco "ainda nele" (visto sabotando).
   const body = { id: 'BODY' };
   let foco = body;
   const sumiu = (el) => el.disabled === true || el.classList.contains('hidden');
@@ -1077,9 +1080,14 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
     el.isConnected = true;
     el.getClientRects = () => (el.classList.contains('hidden') ? [] : [{}]);
     el.focus = () => { if (!sumiu(el)) foco = el; };
+    let desligado = !!el.disabled;
+    Object.defineProperty(el, 'disabled', { enumerable: true,
+      get: () => desligado, set: (v) => { desligado = !!v; if (desligado && foco === el) foco = body; } });
+    const add = el.classList.add;
+    el.classList.add = (...cs) => { add(...cs); if (cs.includes('hidden') && foco === el) foco = body; };
   }
   document.body = body;
-  Object.defineProperty(document, 'activeElement', { get: () => { if (foco !== body && sumiu(foco)) foco = body; return foco; } });
+  Object.defineProperty(document, 'activeElement', { get: () => foco });
   const deps = {
     document,
     Date: { now: () => agora },
