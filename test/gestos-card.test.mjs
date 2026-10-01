@@ -517,8 +517,10 @@ function montarTecladoCom(trocas) {
     ...trocas,
   };
   const fonte = [constanteDoApp('TECLAS_DE_CURSOR'), fatiarApp('focoEmCampoDeTexto'),
-    constanteDoApp('AREAS_DO_CARD_QUE_ROLAM'), fatiarApp('focoEmAreaQueRola'), fatiarApp('handleKeyDown'),
-    'return handleKeyDown;'].join('\n');
+    constanteDoApp('AREAS_DO_CARD_QUE_ROLAM'), fatiarApp('focoEmAreaQueRola'),
+    // Ctrl, ⌘ ou Alt com seta é do navegador (test/atalhos-do-navegador.test.mjs).
+    fatiarApp('atalhoDoNavegador'), constanteDoApp('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),
+    fatiarApp('handleKeyDown'), 'return handleKeyDown;'].join('\n');
   const handle = new Function(...DEPS_DO_TECLADO, fonte)(...DEPS_DO_TECLADO.map((k) => deps[k]));
   // Um elemento com foco: `closest` responde como o do navegador pra lista de classes dele.
   const focar = (classes, tagName = 'DIV') => {

@@ -124,7 +124,7 @@ function teclado({ mapaAberto, fotoAberta, janelaDaFoto = false, campoFocado = f
     desfazerPeloTeclado: () => { if (!janelaDaFoto) return false; log.push('desfez'); return true; },
     document: { getElementById: (id) => ({ id }) } };
   const fonte = [constante('TECLAS_DE_CURSOR'), constante('SETAS_QUE_ANDAM'), fatiar('atalhoDoNavegador'),
-    fatiar('handleKeyDown')].join('\n');
+    constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'), fatiar('handleKeyDown')].join('\n');
   const h = new Function(...Object.keys(deps), fonte + '\nreturn handleKeyDown;')(...Object.values(deps));
   return { apertar: (key, mods = {}) => { let parou = false; h({ key, ...mods, preventDefault() { parou = true; } }); return parou; }, log };
 }
