@@ -577,10 +577,11 @@ function abrirComSessaoSalva() {
         // pedia a foto CRUA até a próxima varredura terminar — e se o sinal
         // caísse antes disso, "a foto precisa de sinal" com a cópia `?w=`
         // viva no cache. Só lê com o toggle ligado: quem não usa não paga.
-        if (offlineLigado() && offlineJanelaServida === null) {
-            const j = await offlineLerJanela();
-            if (offlineJanelaServida === null) offlineJanelaServida = j;
-        }
+        // Vem com ela QUAL fila a preparação cobriu: no lie-fi a busca falha e
+        // a guardada abre (`abrirGuardadaDepoisDaFalha`) com a janela já na
+        // memória, e sem a cobertura a linha diria "Ainda não preparado" de
+        // uma fila pronta.
+        if (offlineLigado() && offlineJanelaServida === null) await offlineRecuperarJanela();
         startFetching();
     });
     handleLaunchAction();
@@ -16146,6 +16147,21 @@ let offlineUltimoGesto = Date.now();
 // OFFLINE faria o card pedir uma URL que ninguém aqueceu e a foto sumiria com
 // a cópia boa parada no cache, a um sufixo de distância.
 let offlineJanelaServida = null;
+// QUAL fila a última preparação COMPLETA cobriu. A fila guardada é regravada na
+// busca e no começo de cada varredura, e a preparação "pronta" de uma fila velha
+// não diz nada da nova: o pedido que a busca trouxe depois — ou DURANTE a
+// varredura — não tem mapa nem foto no aparelho. As duas são o `t` da fila
+// guardada: `offlineFilaGravadaEm` é o da que está na base (gravada por esta
+// página, ou a que a reabertura sem rede abriu), e `offlineFilaPreparada` é o da
+// que a última varredura PRONTA gravou no começo dela. Esta vai gravada junto da
+// janela (`filaCoberta`), e é assim que ela sobrevive a fechar e reabrir. A
+// linha das Preferências só diz "Pronto" quando as duas são a MESMA: dizia sobre
+// qualquer fila guardada depois, por até uma hora (auditoria de 2026-09-30, a
+// sobra do R5-4-6). Pela HORA não dá: a fila que a busca grava DURANTE a
+// varredura fica com hora anterior ao fim dela (MEDIDO no navegador: a janela
+// 49 ms depois da fila, e o tile do pedido novo fora do aparelho).
+let offlineFilaGravadaEm = null;
+let offlineFilaPreparada = null;
 // Quando a varredura avisou o service worker pela última vez (`offlineAnunciarTiles`).
 // O aviso é assíncrono: tile guardado há menos de um instante pode ainda não
 // estar na lista do worker — `registrarFalhaDeTile` respeita essa janela.
@@ -16320,12 +16336,14 @@ async function offlineGravarFila(desde) {
     // ainda é desconhecida). Ver `filaGuardadaDestaConta`.
     const conta = contaAgora();
     const sessao = marcaDaSessao(API.getSession());
+    let gravadaEm = null;
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+            gravadaEm = Date.now();
             tx.objectStore(OFFLINE_STORE).put({
-                t: Date.now(),
+                t: gravadaEm,
                 desde: valeDesde,
                 filtros,
                 regiao: lugar.regiao,
@@ -16344,6 +16362,8 @@ async function offlineGravarFila(desde) {
             tx.onabort = () => erro(tx.error || new Error('abort'));
         });
         db.close();
+        // A fila que está na base AGORA (ver `offlineFilaPreparada`).
+        offlineFilaGravadaEm = gravadaEm;
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
         // valendo contra a fila velha, que é a que a reabertura vai ler.
         offlinePodarPousos(valeDesde);
@@ -16359,13 +16379,15 @@ async function offlineGravarFila(desde) {
 // card de foto abria com "a foto precisa de sinal". É o caso do Android, que
 // encerra o app em segundo plano e o faz renascer justamente na sombra.
 // Gravada só quando a varredura TERMINA, igual à janela em memória: sufixo de
-// varredura pela metade é foto que não está no cache.
-async function offlineGravarJanela(janela) {
+// varredura pela metade é foto que não está no cache. Vai junto QUAL fila ela
+// cobriu (`filaCoberta`, ver `offlineFilaPreparada`); o registro de versão
+// anterior não tem o campo, e a linha das Preferências o lê como não coberta.
+async function offlineGravarJanela(janela, filaCoberta = null) {
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-            tx.objectStore(OFFLINE_STORE).put({ janela, t: Date.now() }, 'janela');
+            tx.objectStore(OFFLINE_STORE).put({ janela, t: Date.now(), filaCoberta }, 'janela');
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
             // `onabort` também: a cota estourada ABORTA a transação sem sempre
             // passar pelo `onerror`, e a promessa pendurada prendia a varredura
@@ -16376,7 +16398,8 @@ async function offlineGravarJanela(janela) {
     } catch (e) {}
 }
 
-async function offlineLerJanela() {
+// O registro inteiro: `{ janela, t, filaCoberta }`.
+async function offlineLerRegistroDaJanela() {
     try {
         const db = await offlineDB();
         const v = await new Promise((ok, erro) => {
@@ -16385,8 +16408,23 @@ async function offlineLerJanela() {
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
         db.close();
-        return v && Number.isFinite(v.janela) ? v.janela : null;
+        return v && Number.isFinite(v.janela) ? v : null;
     } catch (e) { return null; }
+}
+
+async function offlineLerJanela() {
+    const v = await offlineLerRegistroDaJanela();
+    return v ? v.janela : null;
+}
+
+// A janela da última preparação COMPLETA volta da base, e com ela QUAL fila
+// essa preparação cobriu. Só quando a memória não tem uma: com o app vivo, a de
+// memória é a mais nova.
+async function offlineRecuperarJanela() {
+    const r = await offlineLerRegistroDaJanela();
+    if (!r || offlineJanelaServida !== null) return;
+    offlineJanelaServida = r.janela;
+    offlineFilaPreparada = Number.isFinite(r.filaCoberta) ? r.filaCoberta : null;
 }
 
 async function offlineLerFila() {
@@ -16409,6 +16447,8 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
+    offlineFilaGravadaEm = null;
+    offlineFilaPreparada = null;
     // O que estava pronto descreve o cache que sai logo abaixo (e são endereços
     // de pedidos de terceiros): vai junto.
     offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
@@ -16636,7 +16676,11 @@ async function offlineVarrer() {
     const epoca = offlineEpoca;
     let tilesNovos = 0;
     try {
-        await offlineGravarFila();
+        // A fila que ESTA varredura cobre é a que ela grava agora; a que uma
+        // busca gravar depois — ou durante — não é (ver `offlineFilaPreparada`).
+        // A gravação que falhou não diz qual fila está na base: aí nenhuma.
+        const filaGravada = await offlineGravarFila();
+        const filaCoberta = filaGravada ? offlineFilaGravadaEm : null;
         const todos = await offlineItensDaFila(janela);
         const total = todos.length;
         // Os tiles DESTA fila, da lista inteira: é o que a poda do fim mantém.
@@ -16744,11 +16788,12 @@ async function offlineVarrer() {
         // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
         if (epoca !== offlineEpoca) return;   // esqueceram: não grava resultado
         if (!pend.length && !desistidosPorRede.length) {
+            offlineFilaPreparada = filaCoberta;
             offlineJanelaServida = janela;
             // SEM `await` antes, e isso importa: o `open` sai neste mesmo tique,
             // logo depois da checagem de época acima — um "Sair" que venha em
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
-            offlineGravarJanela(janela);
+            offlineGravarJanela(janela, filaCoberta);
             offlineUltimoResultado = 'pronto';
             dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}),
                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
@@ -16791,14 +16836,19 @@ function atualizarLinhaDoOffline(feitos, total) {
     if (!el) return;
     if (!offlineLigado()) { el.textContent = t('prefs.offline.desc'); return; }
     const semRede = navigator.onLine === false;
+    // A última preparação completa cobriu a fila que está guardada AGORA? Uma
+    // fila gravada depois dela — pela busca, ou pela varredura que ficou pela
+    // metade ou nem começou — tem pedido sem mapa e sem foto no aparelho (ver
+    // `offlineFilaPreparada`). Registro de versão anterior: não coberta.
+    const cobreAFila = offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm;
     // Preparado AGORA: a última varredura completa é da janela atual.
-    const preparado = offlineJanelaServida !== null && !offlinePrecisaVarrer();
+    const preparado = offlineJanelaServida !== null && !offlinePrecisaVarrer() && cobreAFila;
     // SEM rede, quem decide é o que a última preparação COMPLETA guardou, e não
     // a janela de agora: o mapa não vence, e a foto vale 60 min do download —
     // baixada na janela J, até o fim da J+2. Pela janela de agora, 20 min depois
     // de tudo pronto a linha já dizia "o mapa e as fotos chegam quando houver
     // rede" com os dois no aparelho (auditoria de 2026-09-30, R5-4-6).
-    const completa = offlineJanelaServida !== null && offlineUltimoResultado !== 'parcial';
+    const completa = offlineJanelaServida !== null && offlineUltimoResultado !== 'parcial' && cobreAFila;
     const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
     if (semRede && fotosValem && AppState.queue.length) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
@@ -16953,9 +17003,8 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     }
     // A janela da última varredura COMPLETA, antes de qualquer card nascer: sem
     // ela o card pede a foto crua, que ninguém guardou. Só quando a memória não
-    // tem uma — com o app vivo, a de memória é a mais nova.
-    const janelaGuardada = await offlineLerJanela();
-    if (offlineJanelaServida === null) offlineJanelaServida = janelaGuardada;
+    // tem uma — com o app vivo, a de memória é a mais nova (ver a função).
+    await offlineRecuperarJanela();
     // A fila guardada é uma FOTO: não sabe do que foi decidido depois dela — na
     // sombra (está na fila de saída) nem com rede (pousou depois da foto). Sem
     // este filtro, tudo isso voltava como card (relato de 2026-09-22). Fila
@@ -16977,6 +17026,9 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     if (aposFalha && ((epoca !== null && epoca !== AppState.fetchEpoch) || AppState.queue.length)) return false;
     AppState.queue = filtrada.places;
     filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais), busca: guardada.busca };
+    // A fila aberta é a GUARDADA: é dela que a linha das Preferências fala (ver
+    // `offlineFilaPreparada`).
+    offlineFilaGravadaEm = Number.isFinite(guardada.t) ? guardada.t : null;
     // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
     // quando a rede voltar, relê do topo sem repetir nada disso.
     pedidosQueEntraramNaFila.clear();

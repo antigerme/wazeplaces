@@ -394,14 +394,15 @@ test('a trava de ação respeita o card sem foto — terminar a ação anterior 
 // em segundo plano) nascia com a janela nula, pedia a foto CRUA — que a
 // varredura nunca guarda — e todo card de foto abria com "precisa de sinal".
 test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () => {
-  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*offlineGravarJanela\(janela\);/,
+  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*offlineGravarJanela\(janela, filaCoberta\);/,
     'a janela tem de ser gravada no MESMO tique em que vira — sem await antes, um "Sair"'
     + ' logo depois entra na fila do IndexedDB atrás dela e apaga tudo');
   const abrir = fatiar('offlineTentarAbrirSemRede');
-  const iLer = abrir.indexOf('offlineLerJanela()');
+  const iLer = abrir.indexOf('offlineRecuperarJanela()');
   const iCard = abrir.indexOf('showCurrentPlace()');
   assert.ok(iLer > 0 && iCard > iLer, 'a janela tem de voltar ANTES do primeiro card nascer');
-  assert.match(abrir, /if \(offlineJanelaServida === null\) offlineJanelaServida = janelaGuardada;/,
+  // A volta da janela mora numa função só (a reabertura e a abertura com rede).
+  assert.match(fatiar('offlineRecuperarJanela'), /if \(!r \|\| offlineJanelaServida !== null\) return;\s*offlineJanelaServida = r\.janela;/,
     'com o app vivo a janela de memória é a mais nova — a guardada só entra quando não há outra');
   // Mesma base da fila, e é ela que o "Sair" e o desmarcar apagam.
   assert.match(fatiar('offlineGravarJanela'), /OFFLINE_STORE/, 'a janela saiu da base que o esquecer apaga');

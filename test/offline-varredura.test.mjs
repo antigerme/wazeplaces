@@ -59,7 +59,8 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada');
   const chaves = Object.keys(deps);
   const offlineVarrer = new Function(...chaves, '__st', corpo + '\nreturn offlineVarrer;')(...chaves.map((k) => deps[k]), st);
   await offlineVarrer();
@@ -198,6 +199,8 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     filaDeOnde: lugarDaFila, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // E o DONO (test/costura-sessao, K6).
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    // O carimbo da fila que está na base (a variável do módulo).
+    offlineFilaGravadaEm: null,
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -302,7 +305,7 @@ function reabrir({ guardada, agora }) {
   const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0 };
   const deps = {
     AppState, navigator: { onLine: false }, offlineLigado: () => true,
-    offlineLerFila: async () => guardada, offlineLerJanela: async () => null,
+    offlineLerFila: async () => guardada, offlineLerRegistroDaJanela: async () => null,
     lugarAgora: () => agora, dfato: (k) => log.push(k),
     semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
@@ -311,8 +314,8 @@ function reabrir({ guardada, agora }) {
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null;
-    ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineTentarAbrirSemRede')}
+  const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null;
+    ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineRecuperarJanela')}\n${fatiar('offlineTentarAbrirSemRede')}
     return { abrir: offlineTentarAbrirSemRede, onde: () => filaDeOnde };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, log };
 }
@@ -418,7 +421,8 @@ function gatilhosDaVarredura(janela) {
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada');
   const chaves = Object.keys(deps);
   const f = new Function(...chaves, '__st', corpo + '\nreturn { offlinePrecisaVarrer, offlineTalvezVarrer, offlineVarrer };')(
     ...chaves.map((k) => deps[k]), st);
@@ -487,7 +491,8 @@ function interruptor(onLine) {
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca');
+    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada');
   const chaves = Object.keys(deps);
   const f = new Function(...chaves, '__st', corpo + '\nreturn offlineAoMudarInterruptor;')(...chaves.map((k) => deps[k]), st);
   return { ligar: (v) => f(v), gravacoes, log, st, AppState };
@@ -551,7 +556,7 @@ function aparelhoO8() {
       localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
       FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
       API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok' },
-      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerJanela: async () => null,
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
       contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
       semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
       pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
@@ -561,9 +566,10 @@ function aparelhoO8() {
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
       'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'resetQueue',
-      'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
+      'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
+        offlineFilaGravadaEm = null, offlineFilaPreparada = null,
         filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
@@ -760,7 +766,7 @@ function aparelhoO1() {
       FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
       PREFETCH_THRESHOLD: PREFETCH_R, MAX_EMPTY_PAGES: MAX_VAZIAS_R, MAX_PAGINAS_POR_BUSCA: MAX_PAGINAS_R,
       API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok', fetchPlaces: async (p) => api(p) },
-      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerJanela: async () => null,
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
       contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
       dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
       handleUnauthorized: () => log.push(['sessao', {}]), showToast: () => {}, msgDoServidor: (r, d) => d, t: (k) => k,
@@ -777,10 +783,11 @@ function aparelhoO1() {
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
       'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'filaGuardadaDestaConta',
-      'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
+      'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
+        offlineFilaGravadaEm = null, offlineFilaPreparada = null,
         abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false, buscaSemResposta = false;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
@@ -938,7 +945,9 @@ test('R5-4-4: no lie-fi, a foto que não veio TRAVA ✕ e ✓ e diz que precisa 
 // no aparelho (o tile não vence) e as fotos valendo (60 min do download). Quem
 // decidia era a janela de AGORA (medido no navegador, t10). Aqui roda a
 // `atualizarLinhaDoOffline` de verdade, com a `offlinePrecisaVarrer` de verdade.
-function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila = 3 }) {
+// `preparada`/`gravada`: o `t` da fila que a preparação cobriu e o da que está
+// guardada — por padrão a MESMA (a cobertura tem os testes dela, mais abaixo).
+function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila = 3, preparada = 7, gravada = 7 }) {
   const el = { textContent: '', innerHTML: '' };
   const deps = {
     document: { getElementById: () => el }, navigator: { onLine },
@@ -948,7 +957,7 @@ function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila 
   };
   const nomes = Object.keys(deps);
   const f = new Function(...nomes, `let offlineJanelaServida = ${servida}, offlineUltimoResultado = ${JSON.stringify(resultado)},
-      offlineVarrendo = false;
+      offlineVarrendo = false, offlineFilaPreparada = ${preparada}, offlineFilaGravadaEm = ${gravada};
     ${fatiar('offlinePrecisaVarrer')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
   f(0, 0);
   return el.innerHTML || el.textContent;
@@ -978,4 +987,212 @@ test('R5-4-6: CONTROLE — sem preparação completa (nunca encheu, ou PARCIAL) 
   // E COM rede nada muda: a janela virada é "ainda não preparado" até a varredura passar.
   assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J + 1 }), /prefs\.offline\.pendenteA/);
   assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J }), /prefs\.offline\.prontoB/);
+});
+
+// ── A linha diz "Pronto" só sobre a fila que a preparação COBRIU (sobra do R5-4-6)
+// A fila guardada é regravada na busca e no começo de cada varredura. Com a fila
+// A pronta, uma busca que gravava a fila B (A + um pedido novo) deixava a linha
+// em "Pronto — 4 pedidos no aparelho" com o pedido novo sem mapa e sem foto: a
+// preparação de B nem começou (a pessoa estava parada), ficou parcial, ou a busca
+// chegou DURANTE a preparação de A. Fechado e reaberto sem rede, "Pronto … você
+// segue com o que está guardado" (medido no navegador, t11: o tile do pedido novo
+// fora do aparelho nos três casos). Aqui roda o código de VERDADE — gravar a
+// fila, varrer, gravar a janela, reabrir sem rede e a linha — sobre uma base de
+// mentira que sobrevive às "páginas", com um relógio que anda 1 ms por leitura.
+function aparelhoDaLinha() {
+  const base = new Map();
+  const relogio = { agora: 1492385 * 1200000 + 1000 };     // começo de uma janela
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+      });
+      return tx;
+    },
+  });
+  const A = [1, 2, 3].map((i) => ({ venueID: 'a' + i, updateRequestID: 'u' + i }));
+  const NOVO = { venueID: 'b4', updateRequestID: 'u4' };
+  function pagina({ onLine = true, fila = [] } = {}) {
+    const el = { textContent: '', innerHTML: '' };
+    // A rede da MÍDIA (tile e foto): `ok` diz se o download dá certo; com
+    // `segura`, os downloads ficam presos até `soltar()`.
+    const rede = { ok: true, segura: false, presos: [] };
+    const AppState = { authenticated: true, queue: fila.slice(), filters: {}, fetchEpoch: 0, serverTotal: 0, hasMore: true };
+    const navigator = { onLine };
+    const deps = {
+      AppState, navigator, Treino: { ativo: false }, offlineLigado: () => true,
+      Date: { now: () => relogio.agora++ },
+      document: { getElementById: () => el }, t: (k) => k, escapeHtml: (s) => s,
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, dfato: () => {},
+      lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
+      marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+      semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
+      pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
+      updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => {},
+      OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+      OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+      // Um tile e uma foto por pedido da fila.
+      offlineItensDaFila: async () => AppState.queue.flatMap((p) => [{ u: 'tile-' + p.venueID, tile: true }, { u: 'foto-' + p.venueID, tile: false }]),
+      offlineBaixar: (u) => new Promise((ok) => { const r = () => ok(rede.ok); if (rede.segura) rede.presos.push(r); else r(); }),
+      offlineSondarRede: async () => rede.ok,
+      offlineAnunciarTiles: () => {}, offlinePodarTiles: async () => 0,
+      setTimeout: (fn) => { fn(); return 0; },
+    };
+    const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
+      'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
+      'atualizarLinhaDoOffline'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null,
+        offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,
+        offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null, offlineFilaPreparada = null;
+      ${nomes.map(fatiar).join('\n')}
+      return { varrer: offlineVarrer, gravarFila: offlineGravarFila, abrirSemRede: offlineTentarAbrirSemRede,
+        recuperarJanela: offlineRecuperarJanela,
+        atualizarLinha: () => atualizarLinhaDoOffline(0, 0),
+        parar: () => { offlineUltimoGesto = -1e15; },          // mais de 3 min sem gesto
+        estado: () => ({ resultado: offlineUltimoResultado, varrendo: offlineVarrendo, janela: offlineJanelaServida,
+          preparada: offlineFilaPreparada, gravada: offlineFilaGravadaEm }) };`)(
+      ...chaves.map((k) => deps[k]));
+    // A busca que traz pedido novo, como o `fetchNextPage`: põe na fila, grava
+    // a fila (sem esperar) e chama a varredura.
+    const buscar = (novos) => {
+      AppState.queue.push(...novos);
+      app.gravarFila(relogio.agora);
+      return app.varrer();
+    };
+    const soltar = () => { rede.segura = false; for (const r of rede.presos.splice(0)) r(); };
+    const linha = () => { app.atualizarLinha(); return el.innerHTML || el.textContent; };
+    return { ...app, AppState, navigator, rede, buscar, soltar, linha };
+  }
+  return { pagina, base, relogio, A, NOVO };
+}
+// A base de mentira fecha a transação num `setTimeout`: assentar é esperar
+// TIMERS, não só a fila de microtarefas (40 `setImmediate` cabem em menos de 1 ms
+// e deixavam a gravação da fila sem fechar — a memória ainda na fila anterior).
+const assentarBase = async () => { for (let i = 0; i < 15; i++) await new Promise((r) => setTimeout(r, 2)); };
+// A fila A preparada por inteiro, numa página com rede.
+async function filaAPronta() {
+  const ap = aparelhoDaLinha();
+  const p1 = ap.pagina({ fila: ap.A });
+  await p1.varrer();
+  await assentarBase();
+  assert.equal(p1.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a preparação da fila A não ficou pronta');
+  return { ap, p1 };
+}
+// Fecha e reabre SEM rede: a reabertura de verdade, e a linha dela.
+async function reabrirSemRede(ap) {
+  const p2 = ap.pagina({ onLine: false });
+  assert.equal(await p2.abrirSemRede(), true, 'PRÉ-CONDIÇÃO: a fila guardada não abriu sem rede');
+  return p2;
+}
+const PRONTO = /prefs\.offline\.prontoA/;
+
+test('cobertura: a busca grava a fila B e a preparação dela NEM COMEÇA (a pessoa parada) — a linha não diz "Pronto"', async () => {
+  const { ap, p1 } = await filaAPronta();
+  assert.match(p1.linha(), /prefs\.offline\.prontoB/, 'PRÉ-CONDIÇÃO: com a fila A preparada, a linha não disse "Pronto"');
+  p1.parar();
+  await p1.buscar([ap.NOVO]);
+  await assentarBase();
+  assert.equal(p1.AppState.queue.length, 4);
+  assert.equal(ap.base.get('fila').places.length, 4, 'PRÉ-CONDIÇÃO: a fila B não foi gravada');
+  assert.equal(p1.estado().varrendo, false);
+  // Com rede, na mesma página: o pedido novo não foi preparado.
+  const comRede = p1.linha();
+  assert.doesNotMatch(comRede, PRONTO, `com rede, a linha diz "Pronto" sobre a fila B, que ninguém preparou: ${comRede}`);
+  assert.match(comRede, /prefs\.offline\.pendenteA/);
+  // O sinal cai, na mesma página.
+  p1.navigator.onLine = false;
+  const semRede = p1.linha();
+  assert.doesNotMatch(semRede, PRONTO, `sem rede, a linha diz "Pronto" sobre a fila B: ${semRede}`);
+  assert.match(semRede, /prefs\.offline\.esperaB/);
+  // Fecha e reabre sem rede.
+  const p2 = await reabrirSemRede(ap);
+  assert.equal(p2.AppState.queue.length, 4);
+  const reaberta = p2.linha();
+  assert.doesNotMatch(reaberta, PRONTO, `reaberta sem rede, a linha diz "Pronto" sobre a fila B: ${reaberta}`);
+  assert.match(reaberta, /prefs\.offline\.esperaB/);
+});
+
+test('cobertura: a preparação da fila B fica PARCIAL — reaberta sem rede, a linha não diz "Pronto"', async () => {
+  const { ap, p1 } = await filaAPronta();
+  p1.rede.ok = false;                 // o sinal da mídia cai; a busca ainda passou
+  await p1.buscar([ap.NOVO]);
+  await assentarBase();
+  assert.equal(p1.estado().resultado, 'parcial', 'PRÉ-CONDIÇÃO: a preparação da fila B não ficou parcial');
+  const p2 = await reabrirSemRede(ap);
+  const l = p2.linha();
+  assert.doesNotMatch(l, PRONTO, `reaberta sem rede, a linha diz "Pronto" sobre a fila que ficou pela metade: ${l}`);
+  assert.match(l, /prefs\.offline\.esperaB/);
+});
+
+test('cobertura: a busca grava a fila B DURANTE a preparação de A, e a de B não começa — pela HORA ela pareceria coberta', async () => {
+  const ap = aparelhoDaLinha();
+  const p1 = ap.pagina({ fila: ap.A });
+  p1.rede.segura = true;
+  const varreduraDeA = p1.varrer();
+  await assentarBase();
+  assert.equal(p1.estado().varrendo, true, 'PRÉ-CONDIÇÃO: a preparação de A não está no ar');
+  assert.ok(p1.rede.presos.length > 0, 'PRÉ-CONDIÇÃO: nenhum download preso');
+  p1.buscar([ap.NOVO]);               // a varredura está no ar: fica pedida de novo
+  await assentarBase();
+  assert.equal(ap.base.get('fila').places.length, 4, 'PRÉ-CONDIÇÃO: a fila B não foi gravada');
+  p1.parar();                         // e a pessoa fica parada até A terminar
+  p1.soltar();
+  await varreduraDeA;
+  await assentarBase();
+  assert.deepEqual([p1.estado().resultado, p1.estado().varrendo], ['pronto', false]);
+  // A janela foi gravada DEPOIS da fila B: a regra só pela hora diria "Pronto".
+  assert.ok(ap.base.get('janela').t > ap.base.get('fila').t, 'PRÉ-CONDIÇÃO: a janela não foi gravada depois da fila B');
+  const comRede = p1.linha();
+  assert.doesNotMatch(comRede, PRONTO, `com rede, a linha diz "Pronto" sobre a fila B (o pedido novo chegou durante a de A): ${comRede}`);
+  const p2 = await reabrirSemRede(ap);
+  const l = p2.linha();
+  assert.doesNotMatch(l, PRONTO, `reaberta sem rede, a linha diz "Pronto" sobre a fila B: ${l}`);
+  assert.match(l, /prefs\.offline\.esperaB/);
+});
+
+test('cobertura: CONTROLE — a fila que a preparação cobriu segue "Pronto" reaberta sem rede, e uma hora depois o mapa segue no aparelho', async () => {
+  const { ap } = await filaAPronta();
+  const p2 = await reabrirSemRede(ap);
+  assert.match(p2.linha(), /prefs\.offline\.prontoSemRedeB/, 'a fila A, preparada por inteiro, deixou de dizer "Pronto" reaberta sem rede');
+  ap.relogio.agora += 3 * 1200000;
+  assert.match(p2.linha(), /prefs\.offline\.mapaGuardadoB/, 'uma hora depois, a fila coberta deixou de dizer que o mapa está no aparelho');
+});
+
+test('cobertura: CONTROLE — a busca grava a fila B e a preparação DELA termina: "Pronto" de novo, com rede e reaberta sem rede', async () => {
+  const { ap, p1 } = await filaAPronta();
+  await p1.buscar([ap.NOVO]);
+  await assentarBase();
+  assert.equal(p1.estado().resultado, 'pronto');
+  assert.match(p1.linha(), /prefs\.offline\.prontoB/, 'a fila B, preparada, não voltou a dizer "Pronto"');
+  const p2 = await reabrirSemRede(ap);
+  assert.equal(p2.AppState.queue.length, 4);
+  assert.match(p2.linha(), /prefs\.offline\.prontoSemRedeB/, 'a fila B, preparada, não diz "Pronto" reaberta sem rede');
+});
+
+test('cobertura: registro da janela de versão anterior (sem `filaCoberta`) vale como NÃO coberto', async () => {
+  const { ap } = await filaAPronta();
+  const j = ap.base.get('janela');
+  assert.ok(Number.isFinite(j.filaCoberta), 'PRÉ-CONDIÇÃO: a janela não foi gravada com a fila que cobriu');
+  delete j.filaCoberta;
+  const p2 = await reabrirSemRede(ap);
+  const l = p2.linha();
+  assert.doesNotMatch(l, PRONTO, `o registro antigo, sem a fila que cobriu, diz "Pronto": ${l}`);
+  assert.match(l, /prefs\.offline\.esperaB/);
+});
+
+test('cobertura: a abertura COM rede traz a janela e a cobertura juntas — no lie-fi a guardada abre "Pronto"', async () => {
+  // O `abrirComSessaoSalva` (com rede) lê a janela antes da busca; a busca falha
+  // e a guardada abre pelo `abrirGuardadaDepoisDaFalha`, com a janela já na memória.
+  assert.match(fatiar('abrirComSessaoSalva'), /if \(offlineLigado\(\) && offlineJanelaServida === null\) await offlineRecuperarJanela\(\);/,
+    'a abertura com rede voltou a ler só a janela, sem a fila que ela cobriu');
+  const { ap } = await filaAPronta();
+  const p2 = ap.pagina({ onLine: true });
+  await p2.recuperarJanela();
+  assert.equal(await p2.abrirSemRede(true, 0), true, 'PRÉ-CONDIÇÃO: a guardada não abriu depois da busca que falhou');
+  assert.match(p2.linha(), /prefs\.offline\.prontoB/, 'no lie-fi, a fila coberta abriu dizendo que não está preparada');
 });
