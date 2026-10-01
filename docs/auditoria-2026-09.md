@@ -16,26 +16,34 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-09-29 ~17:30 UTC)
+## 0. Estado agora (2026-09-30 ~22:15 UTC)
 
-- **PR #252 mergeado** e produção **v2026.09.26-01 verificada: 71 ✓ · 0 ✗**.
-- **Rodada 3 da auditoria feita** (88 achados) e **lote 7 = os consertos dela, JUNTOS** no branch
-  `claude/peaceful-heisenberg-HaUuC` (worktree `/home/user/wp-lote7`): textos, fila, costura, lightbox e
-  diagnóstico, mais os conflitos resolvidos na junção (a trava das ações soma sessão, lote de lidos e
-  conferência do 401; o ouvinte da região; `enviarLote`) e um conserto meu de instrumento
-  (`tools/servidor-local.mjs`). Versão **2026092901**, CHANGELOG e CLAUDE.md escritos. `npm test` 1436/1436.
-  Falta: gerados, smokes (Chromium e WebKit), PR, CI, merge e `prod-auditoria.mjs`.
-- O limite SEMANAL da assinatura parou tudo de 2026-09-26 ~16:35 a 2026-09-29 15:00 UTC; os worktrees
-  sobreviveram e os agentes foram continuados por `SendMessage`.
-- **Cookies novos** das duas contas (2026-09-29): `a0ed4151-antigerme_cookies.txt` (L6+AM) e
-  `74c7e5b6-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe`; o `prod-auditoria.mjs` já aponta pra eles.
+- **Lote 8 praticamente todo juntado** no branch (`/home/user/wp-lote7`), com `npm test` 1694/1694: servidor,
+  dev, presença (com o "olhando é lida" ao fechar), filtros (com os achados 10–12), fila (com o A1: a
+  aprovação no ar trava o card), lightbox, offline, textos, card e contas (com o token novo da outra aba e o
+  `pularGuarda` zerado). **Faltam**: o item 3 das contas (outra conta entrando noutra aba tira a aba da conta
+  anterior — achado meu, na leitura do `sincronizarComOutraAba`) e os relatórios finais do card e da fila.
+- **O contêiner reiniciou duas vezes** (~21:44 e ~22:02 UTC), matando agentes e smokes; os arquivos ficaram.
+  Os agentes foram retomados por `SendMessage`. Daqui em diante: smokes num worktree FIXO
+  (`/home/user/wp-smoke`, num commit), um por vez, e só com os agentes quietos.
+- **Conflitos da junção**: todos de harness de teste (cada lote escreveu o seu sem as funções dos outros) e um
+  de código real na `aplicarTravaDeAcao` (lightbox L23/L24 × card C10/C14), resolvido pela união. Cada ajuste
+  de harness teve a sabotagem conferida.
+- **Smokes no branch juntado**: offline 192 ✓ (com a 9f do dev e as 9h/9i do offline convivendo), presença 51 ✓,
+  fluxo verde no `019bda6`. O de layout foi morto pelos reinícios; a bateria inteira (Chromium e WebKit) roda
+  no commit final.
+- **Pronto pro PR**: rascunho do CHANGELOG (`scratchpad/changelog-l8.md`, com a correção da frase dos prazos
+  da v2026.09.29-01), as notas do CLAUDE.md já no branch, a seção 11 do `prod-auditoria.mjs` (o lote 8 no ar)
+  e os escopos da rodada 5 (`scratchpad/r5-escopos.md`, `r5-base.txt`).
+- Vão pro owner com mockup: L28 (e o banner do Desfazer sobre o Street View), L31, D3, O1 (a trava de versão no
+  worker e os 45 s do lie-fi, com recomendação) e C8/C9/C12/C13/C15.
+- O branch `claude/peaceful-heisenberg-HaUuC` foi recriado a partir da main (o GitHub o apaga no merge);
+  o worktree de trabalho segue sendo `/home/user/wp-lote7`.
+- **Cookies** (2026-09-30, os válidos): `14319cf2-antigerme_cookies.txt` (L6+AM) e `6ae86b82-cafanha_cookies.txt` (L2+AM), conferidos pelo `waze-probe` e com sessões diferentes (comparadas sem imprimir valor); o `prod-auditoria.mjs` já aponta pra eles. Os arquivos anteriores não servem mais (um da "cafanha" trazia a sessão da antigerme, e o cafanha de 09-29 expirou).
 - **Decisões do owner**: página pronta (`scratchpad/mockups/decisoes-em-aberto.html`), a publicar no
-  relatório final. Entraram na rodada 3: o ✨ sobre a pílula (L7), o aviso do Desfazer sobre as
-  miniaturas (L10), a dica de zoom cortada (L18), o religar em 9 dias sem aviso (T3) e a lista de
-  credenciais (T24). Novos do lote 7 (sem mockup ainda): o aviso "fora do mapa" no meio do mapa ampliado
-  (L16) e a escala encavalando no aviso no card do SE com diff.
-- **Próxima volta**: rodada 4 (seis auditores, pedidos em `scratchpad/rodada4-prompts.md`) sobre a main
-  depois do merge do lote 7.
+  relatório final — inclui L7, L10, L18, T3, T24, L16 e a escala encavalando no aviso.
+- **Próxima volta**: juntar os achados da rodada 4, corrigir (lote 8), PR, CI, merge, produção — e
+  repetir até uma rodada limpa.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -56,8 +64,8 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 | o quê | onde |
 |---|---|
-| Código mergeado | `main` (PRs #248 a #252) |
-| Lote 7 (em andamento) | cinco worktrees locais `/home/user/wp-fix3-*` — ver §0 |
+| Código mergeado | `main` (PRs #248 a #253) |
+| Rodada 4 (em andamento) | auditores sobre `/home/user/wp-r4` (= main c6d9f91); o lote 8 sai dos achados — ver §0 |
 | Este arquivo | `docs/auditoria-2026-09.md` no mesmo branch |
 | Scripts de auditoria (produção, sabotagem, medições) | artefato privado https://claude.ai/artifact/5YRYw1MCA8zXAjbQEBd9Qf — ver §7 |
 | Cookies das duas contas de teste | mandados pelo owner NESTA sessão (`/root/.claude/uploads/<sessão>/`). Contêiner novo pode não tê-los: **peça de novo** (CLAUDE.md, seção 🔑) |
@@ -70,6 +78,8 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #249 | 2026092503 | rodada 1: região NA (`/Descartes/`), país do perfil, portão sem porta lateral, estado do cliente (época da sessão, treino, 401 → fila de saída, região no gesto), lightbox, offline, presença, textos | 56 ✓ · 2 ✗ (1 do instrumento, 1 REGRESSÃO real: a volta da rede com a fila vazia → rodada 2) |
 | #250 | 2026092504 | rodada 2: a regressão, KV com 1 leitura por ação, `nosniff`, `?diag-rede`, FAB, zoom da foto, botão direito, Tab nos lightboxes, horário de verão, textos | **58 ✓ · 0 ✗** — e um achado novo no diagnóstico (abaixo) |
 | #251 | 2026092505 | rodada 3: o diagnóstico sem o script do Cloudflare, fim da fila com pulados, retentativa de foto, irmãos na fila, pilha/foco no autor, Street View no zoom, presença (país no meio, relógio, leitor de tela, lista fechada, ids com teto), cookies colados limpos em todo fechamento, IndexedDB com teto, segredo do pareamento fora do relatório | mergeado em 2026-09-25 23:38 UTC (CI verde nos dois jobs); **60 ✓ · 0 ✗** em produção (2026-09-26 01:25), com o diagnóstico conferindo 13 arquivos com o servidor ("diferentes: 0") e o desvio do relógio medido (-8 ms) |
+| #252 | 2026092601 | rodada 2 (seis auditores): lote 5 + lote 6 — histórico, entrada e sessão, card, servidor, offline, presença | **71 ✓ · 0 ✗** em produção |
+| #253 | 2026092901 | rodada 3 (cinco auditores, 88 achados): sessão e conta, fila e filtros, foto e mapa ampliados, textos, modo dev; a trava das ações soma as três esperas; `tools/servidor-local.mjs` | mergeado em 2026-09-29 20:22 UTC (CI verde nos dois jobs); **71 ✓ · 0 ✗** em produção + 7 verificações novas do lote 7 |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere

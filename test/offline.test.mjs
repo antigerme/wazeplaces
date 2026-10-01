@@ -199,7 +199,14 @@ test('o card de FOTO sem foto trava ✕ e ✓ e deixa o ↑ vivo', () => {
   assert.match(corpo, /NEW_PHOTO|FLAGGED_PHOTO/, 'só vale pros dois tipos em que a foto decide');
   assert.match(corpo, /navigator\.onLine !== false/, 'com rede não há por que avisar nada');
   assert.match(corpo, /card-btn-reject/); assert.match(corpo, /card-btn-read/);
-  assert.ok(!/card-btn-skip/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
+  // O ↑ tem que continuar vivo: é a única ação verdadeira. Ele aparece no corpo
+  // só como o DESTINO do foco que o ✕/✓ travado perderia (a família do C10,
+  // test/card-foco-trava) — então a conferência é na lista do que TRAVA, e em
+  // nenhum `disabled` escrito no ↑.
+  const trava = corpo.match(/for \(const sel of \[([^\]]*)\]\) \{\s*const b = card\.querySelector\(sel\);\s*if \(b\) \{ b\.disabled = true;/);
+  assert.ok(trava, 'sumiu a trava de ✕ e ✓ no card sem foto');
+  assert.ok(!/card-btn-skip/.test(trava[1]), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
+  assert.ok(!/pular\.disabled|card-btn-skip'\)\.disabled/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
   assert.match(corpo, /disabled = true/); assert.match(corpo, /acoes-travadas/,
     'disabled sem esmaecer é botão morto com cara de vivo');
 });
@@ -666,6 +673,24 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('o 2º toque DESLIGA o modo dev e apaga o guardado/, 'desligado é desligado'],
     [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
   ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
+
+  // FECHAR SEM IR PRO FUNDO (auditoria de 2026-09-29, D2). A 9c vai pro fundo
+  // antes de fechar, e aí a gravação da base sempre chega: recarregar perdia a
+  // abertura em 5 de 5 e nada reprovava. A 9f recarrega e fecha DIRETO.
+  exigir(/secao\('9f\. FECHAR SEM IR PRO FUNDO/,
+    'sumiu a seção do fechar direto — é onde o retrato síncrono do `pagehide` é o que salva a abertura');
+  const i9f = CODIGO.indexOf("secao('9f.");
+  const bloco9f = CODIGO.slice(i9f, CODIGO.indexOf("secao('10.", i9f));
+  assert.doesNotMatch(bloco9f, /irProFundo9c\(/,
+    'a 9f foi pro fundo antes de fechar — aí a gravação da base chega sozinha e o retrato não é medido');
+  assert.match(bloco9f, /await a9f\.reload\(/, 'a 9f tem que RECARREGAR a página de verdade');
+  for (const [re, porque] of [
+    [/diz\('RECARREGAR \(sem ir pro fundo antes\) não perde a abertura/, 'o defeito medido (5 de 5)'],
+    [/diz\('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato/, 'sem ele, "não escreveu nada" passa por vácuo'],
+    [/diz\('FECHAR a aba \(sem ir pro fundo antes\) não perde a abertura/, 'o outro caminho medido (2 de 5)'],
+    [/diz\('o SAIR apaga o retrato do fechar/, 'sair é sair de tudo'],
+    [/diz\('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho/, 'quem não liga o modo dev não paga nada'],
+  ]) assert.match(bloco9f, re, `a 9f perdeu uma medida — ${porque}`);
 
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],

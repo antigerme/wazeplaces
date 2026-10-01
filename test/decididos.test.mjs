@@ -368,7 +368,12 @@ test('TODO pouso passa pela fonte única — um caminho de fora deixaria o pedid
   assert.equal(conta('concluirAprovacao'), 1, 'aprovar RESOLVE o pedido: o pouso tem que ser registrado');
   assert.equal((fatiar('enviarAprovacao').match(/concluirAprovacao\(alvo\);/g) || []).length, 2,
     'um dos desfechos da aprovação deixou de pousar');
-  assert.equal(conta('handleBatchMarkRead'), 1, 'o lote de lidos não registra o pouso');
+  // O lote de lidos pousa a CADA PEDAÇO e a cada pedido do um-a-um (O4,
+  // auditoria de 2026-09-29): um pouso só, no fim do laço, deixava sem pouso o
+  // que o Waze já tinha marcado quando o app fechava no meio (medido em
+  // test/lote-lidos.test.mjs). E o terceiro é o do que pousou DEPOIS de a
+  // sessão cair, na fila que atravessou a queda (V6b, test/costura-sessao).
+  assert.equal(conta('handleBatchMarkRead'), 3, 'o lote de lidos não registra o pouso por pedaço, por pedido e o de depois da queda');
   // E o pouso vem ANTES do que pode lançar (histórico, conquistas): se algo ali
   // quebrar, o pedido não pode voltar por causa disso.
   const h = fatiar('handleActionResult');

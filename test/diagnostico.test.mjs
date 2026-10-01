@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const fonte = readFileSync(new URL('../js/api.js', import.meta.url), 'utf8');
 
@@ -1160,6 +1161,48 @@ test('modo dev: a resposta do pareamento vai SEM o segredo, e o sessionToken de 
   const fila = montar({ corpo: '{"success":true,"places":[{"name":"LOCAL_X"}]}', devAtivo: true });
   await fila._post('buscar-places', { sessionToken: 'x' });
   assert.equal(fila.chamadas[0].corpoResposta, '{"success":true,"places":[{"name":"LOCAL_X"}]}');
+});
+
+// ── A casa e o trabalho no relatório, e o LEIA-ME (auditoria de 2026-09-29, D1) ──
+// A resposta do `perfil` traz `referencias.casa`/`trabalho` (a ordem "Perto de
+// casa"), e com o modo dev ela entra INTEIRA no registro de chamadas: a decisão
+// de 2026-09-24 é que privacidade não é critério no modo dev. O que não pode é
+// o arquivo levar a posição da casa de alguém SEM DIZER — o LEIA-ME aparece na
+// listagem de qualquer visualizador de ZIP. A frase anda JUNTO com o conteúdo,
+// nos dois sentidos: se a resposta um dia deixar de levar as coordenadas, a
+// frase tem que sair, senão é o app mentindo sobre si do outro lado.
+function dicionario() {
+  const ctx = { navigator: { language: 'pt' }, document: { documentElement: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8'), ctx);
+  return ctx.I18N_DICT;
+}
+test('modo dev: a resposta do perfil leva a casa e o trabalho, e o LEIA-ME diz isso nos 4 idiomas, com o termo da tela', async () => {
+  const CASA = [-23.5617123, -46.6559876], TRAB = [-22.9068467, -43.1728965];
+  const corpo = JSON.stringify({ success: true, profile: { id: 1, rank: 5 }, referencias: { casa: CASA, trabalho: TRAB } });
+  const ligado = montar({ corpo, devAtivo: true });
+  await ligado._post('perfil', { sessionToken: 'x' });
+  const r = String(ligado.chamadas[0].corpoResposta || '');
+  const leva = r.includes(String(CASA[0])) && r.includes(String(TRAB[0]));
+  // CONTROLE: sem o modo dev a resposta não entra — por isso a frase é condicionada a ele.
+  const desligado = montar({ corpo, devAtivo: false });
+  await desligado._post('perfil', { sessionToken: 'x' });
+  assert.equal(desligado.chamadas[0].corpoResposta, undefined, 'CONTROLE: a resposta do perfil entrou no registro SEM o modo dev');
+  const D = dicionario();
+  // O TERMO é o que a tela usa (a dica da ordem por distância), e o nome do modo o das Preferências.
+  const TERMOS = { pt: ['casa', 'trabalho'], en: ['home', 'work'], es: ['casa', 'trabajo'], fr: ['maison', 'travail'] };
+  assert.deepEqual(Object.keys(D).sort(), Object.keys(TERMOS).sort(), 'idioma novo: diga aqui como a tela dele chama casa e trabalho');
+  for (const [l, termos] of Object.entries(TERMOS)) {
+    const dica = D[l]['filters.sort.hint.perfil'].toLowerCase();
+    for (const w of termos) assert.ok(dica.includes(w), `PRÉ-CONDIÇÃO (${l}): a tela não chama de "${w}" — o teste precisa do termo DELA`);
+    const leiame = D[l]['diag.leiame'].replace(/\s+/g, ' ').toLowerCase();
+    const menciona = termos.every((w) => new RegExp(`\\b${w}\\b`).test(leiame));
+    assert.equal(menciona, leva, leva
+      ? `o LEIA-ME (${l}) não diz que o arquivo leva a posição de casa e a do trabalho`
+      : `o LEIA-ME (${l}) diz que o arquivo leva casa e trabalho — e ele não leva mais`);
+    const modo = D[l]['prefs.devMode.label'].replace(/\s*🛠️\s*$/u, '').toLowerCase();
+    assert.ok(leiame.includes(modo), `o LEIA-ME (${l}) não diz que é com o "${modo}" ligado — desligado, a posição não vai`);
+  }
 });
 
 test('a cópia da página e as capturas saem SEM o segredo do pareamento (o do QR e o digitável)', () => {

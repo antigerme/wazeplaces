@@ -266,7 +266,9 @@ test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e
   const mesma = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'row', pais: '30' } });
   assert.equal(await mesma.app.abrir(), true, 'CONTROLE: a fila do mesmo lugar não abriu');
   assert.deepEqual(mesma.AppState.queue.map((p) => p.venueID), ['v1']);
-  assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30' }, 'a fila reaberta não sabe de onde é');
+  // O lugar da fila reaberta leva também a assinatura da busca (R4-O8) — aqui
+  // ausente dos dois lados, que é o que o instrumento deste teste simula.
+  assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30', busca: undefined }, 'a fila reaberta não sabe de onde é');
 });
 
 test('O4: trocar de lugar ESQUECE a fila guardada de outro lugar — e só ela, e só com o offline ligado', async () => {
@@ -342,4 +344,433 @@ test('O9: uma RODADA de downloads pendurados para a varredura — "parcial", sem
   // cada item tentado até o teto de tentativas, sem parar na primeira rodada.
   const rede = await varrer(itens.slice(0, 4), () => false);
   assert.ok([...rede.tentativas.values()].every((n) => n >= 2), 'a falha imediata passou a parar a varredura como a pendurada');
+});
+
+// ── O3: a preparação PARCIAL na MESMA janela é retomada (auditoria de 2026-09-29)
+// A varredura da REPOSIÇÃO (os pedidos novos que a busca trouxe) roda na mesma
+// janela de 20 min da última preparação completa. O sinal caindo no meio dela
+// deixava "parcial" — e a linha dizendo "Continua sozinho quando houver rede" —,
+// mas todo gatilho passa pelo `offlineTalvezVarrer`, que só varria com a janela
+// VIRADA: a rede voltava e nada acontecia até ela virar (medido no navegador:
+// zero tiles pedidos depois da volta do sinal, contra 30 com a janela anterior).
+// Aqui as três funções rodam de VERDADE, sobre o mesmo estado.
+function gatilhosDaVarredura(janela) {
+  const AGORA = janela * 1200000 + 1000;
+  const tentativas = new Map();
+  const rede = { ok: false };
+  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0 };
+  const deps = {
+    AppState: { authenticated: true, queue: [{ venueID: 'v' }] }, Treino: { ativo: false },
+    navigator: { onLine: true }, offlineLigado: () => true, Date: { now: () => AGORA },
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+    offlineGravarFila: async () => {}, offlineItensDaFila: async () => ['tile-1', 'tile-2'].map((u) => ({ u, tile: true })),
+    offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return rede.ok; },
+    offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
+    offlinePodarTiles: async () => 0, dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
+  };
+  const corpo = ['offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
+    .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
+    .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+  const chaves = Object.keys(deps);
+  const f = new Function(...chaves, '__st', corpo + '\nreturn { offlinePrecisaVarrer, offlineTalvezVarrer, offlineVarrer };')(
+    ...chaves.map((k) => deps[k]), st);
+  const total = () => [...tentativas.values()].reduce((a, b) => a + b, 0);
+  return { f, st, rede, total };
+}
+const assentar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+
+test('R4-O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho — a promessa da linha', async () => {
+  const janela = 1492263;
+  const g = gatilhosDaVarredura(janela);
+  // A reposição na mesma janela, com o sinal caindo no meio: "parcial".
+  await g.f.offlineVarrer();
+  assert.equal(g.st.resultado, 'parcial', 'PRÉ-CONDIÇÃO: a varredura sem rede não ficou parcial');
+  assert.equal(g.st.janela, janela, 'PRÉ-CONDIÇÃO: a janela servida mudou (o cenário é o da MESMA janela)');
+  // O sinal volta; um gatilho qualquer (a prova de rede, o `online`, as Preferências).
+  g.rede.ok = true;
+  const antes = g.total();
+  g.f.offlineTalvezVarrer();
+  await assentar();
+  assert.ok(g.total() > antes, 'com a rede de volta, a preparação parcial NÃO foi retomada — só a janela virando a retomava');
+  assert.equal(g.st.resultado, 'pronto', 'a retomada não terminou a preparação');
+});
+
+test('R4-O3: CONTROLE — pronta na mesma janela não varre de novo; e com a varredura NO AR, o fim dela decide', async () => {
+  const janela = 1492263;
+  const pronta = gatilhosDaVarredura(janela);
+  pronta.f.offlineTalvezVarrer();
+  await assentar();
+  assert.equal(pronta.total(), 0, 'a preparação PRONTA foi varrida de novo na mesma janela (gasto à toa)');
+  const noAr = gatilhosDaVarredura(janela);
+  noAr.st.resultado = 'parcial';
+  noAr.st.varrendo = true;
+  assert.equal(noAr.f.offlinePrecisaVarrer(), false, 'com a varredura no ar, o parcial de ANTES pediu outra');
+  // E a janela virada segue valendo como sempre (o outro caminho da mesma função).
+  const virou = gatilhosDaVarredura(janela);
+  virou.st.janela = janela - 1;
+  assert.equal(virou.f.offlinePrecisaVarrer(), true, 'a janela virada deixou de pedir a varredura');
+});
+
+// ── O9: ligar o "Disponível offline" JÁ SEM REDE grava a fila (auditoria de 2026-09-29)
+// A linha dizia "3 pedidos guardados. O mapa e as fotos chegam quando houver
+// rede." e NADA tinha sido gravado: a varredura sai antes do `offlineGravarFila`
+// quando `onLine === false` — e guardar o texto não precisa de rede. Fechado e
+// reaberto sem rede, a tela era a de "sem conexão" (medido no navegador, f7).
+// O interruptor roda de VERDADE, com a varredura de verdade atrás dele.
+function interruptor(onLine) {
+  const gravacoes = [];
+  const log = [];
+  const AppState = { authenticated: true, queue: [{ venueID: 'v1' }, { venueID: 'v2' }, { venueID: 'v3' }], preferences: {} };
+  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0 };
+  const deps = {
+    AppState, Treino: { ativo: false }, navigator: { onLine },
+    offlineLigado: () => AppState.preferences.offlineDisponivel === true,
+    savePreferences: () => log.push('salvou'), offlineEsquecer: () => log.push('esqueceu'),
+    atualizarLinhaDoOffline: () => log.push('linha'),
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+    offlineGravarFila: async () => { gravacoes.push(AppState.queue.length); return true; },
+    offlineItensDaFila: async () => [], offlineBaixar: async () => true,
+    offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
+    dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
+  };
+  const corpo = ['offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
+    .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
+    .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineEpoca/g, '__st.epoca');
+  const chaves = Object.keys(deps);
+  const f = new Function(...chaves, '__st', corpo + '\nreturn offlineAoMudarInterruptor;')(...chaves.map((k) => deps[k]), st);
+  return { ligar: (v) => f(v), gravacoes, log, st, AppState };
+}
+
+test('R4-O9: ligar o "Disponível offline" JÁ SEM REDE grava a fila na hora — guardar o texto não precisa de rede', async () => {
+  const i = interruptor(false);
+  i.ligar(true);
+  await assentar();
+  assert.equal(i.AppState.preferences.offlineDisponivel, true);
+  assert.deepEqual(i.gravacoes, [3], 'ligado sem rede, a fila NÃO foi gravada — a linha diria "3 pedidos guardados" sem nada guardado');
+  assert.equal(i.st.resultado, null, 'o resultado da varredura anterior não foi zerado ao religar');
+});
+
+test('R4-O9: CONTROLE — com rede a fila é gravada (pela varredura também), e desligar esquece', async () => {
+  const i = interruptor(true);
+  i.ligar(true);
+  await assentar();
+  assert.ok(i.gravacoes.length >= 1 && i.gravacoes.every((n) => n === 3), `com rede a fila não foi gravada: ${JSON.stringify(i.gravacoes)}`);
+  i.ligar(false);
+  assert.ok(i.log.includes('esqueceu'), 'desligar não esqueceu o que foi guardado');
+  // E o interruptor da tela é ESTA função (não uma cópia dela).
+  assert.match(APP_SEM, /\$\('prefOfflineDisponivel'\)\?\.addEventListener\('change', \(e\) => offlineAoMudarInterruptor\(e\.target\.checked\)\);/,
+    'o interruptor da tela não passa mais pela função testada');
+});
+
+// ── R4-O8: a fila guardada é da BUSCA — o filtro também (auditoria de 2026-09-29)
+// O O4 fechou região e país; os FILTROS eram gravados junto da fila e nunca
+// lidos. Trocar de estado (ou de tipos, categoria, "Minha área", residencial,
+// "lidos também"), ver a busca nova vir vazia e reabrir sem rede mostrava a fila
+// do filtro VELHO sob o novo (medido no navegador, f1: estado 5 e só "Nova foto"
+// abriam os 3 pedidos do Brasil inteiro). Aqui o aparelho roda de VERDADE: os
+// filtros passam pelo armazenamento (`saveFilters`/`loadFilters`), a assinatura
+// é a real, e a base é uma de mentira que sobrevive às "páginas".
+const EXPR = (nome) => new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM)[1];
+const TYPES_ALL_R = new Function('return ' + EXPR('TYPES_ALL'))();
+const TYPES_PADRAO_R = new Function('TYPES_ALL', 'return ' + EXPR('TYPES_PADRAO'))(TYPES_ALL_R);
+function aparelhoO8() {
+  const ls = new Map();
+  const base = new Map();
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+        delete: (k) => { base.delete(k); },
+      });
+      return tx;
+    },
+  });
+  // Uma "página": memória nova, o armazenamento e a base de sempre.
+  return function pagina({ onLine = false } = {}) {
+    const log = [];
+    const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null };
+    const deps = {
+      AppState, navigator: { onLine }, Treino: { ativo: false }, offlineLigado: () => true,
+      localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
+      FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
+      API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok' },
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerJanela: async () => null,
+      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
+      semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
+      pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
+      updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push(['card', {}]),
+    };
+    const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
+      'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'offlineEsquecerFilaDeOutroLugar',
+      'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null;
+      ${nomes.map(fatiar).join('\n')}
+      AppState.filters = filtrosDeFabrica();
+      loadFilters();
+      return { saveFilters, lugarAgora, offlineGravarFila, offlineEsquecerFilaDeOutroLugar, offlineTentarAbrirSemRede,
+        buscou: (places) => { AppState.queue = places; filaDeOnde = lugarAgora(); } };`)(...chaves.map((k) => deps[k]));
+    return { app, AppState, log, base };
+  };
+}
+const PEDIDOS_O8 = () => [1, 2, 3].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+// A busca com rede traz a fila e a grava; a pessoa muda o filtro (e o grava);
+// o app é fechado e reaberto SEM rede.
+async function guardarMudarReabrir(mudar) {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  assert.equal(await a.app.offlineGravarFila(Date.now()), true, 'PRÉ-CONDIÇÃO: a fila não foi gravada');
+  mudar(a.AppState.filters);
+  a.app.saveFilters();
+  const b = pagina({ onLine: false });
+  const abriu = await b.app.offlineTentarAbrirSemRede();
+  return { abriu, b, pagina };
+}
+
+test('R4-O8: reaberta sem rede sob OUTRO FILTRO, a fila guardada do filtro anterior não entra — cada filtro da busca', async () => {
+  const mudancas = {
+    estado: (f) => { f.stateId = '5'; },
+    tipos: (f) => { f.types = ['NEW_PHOTO']; },
+    categoria: (f) => { f.categories = ['PARK']; },
+    'minha área': (f) => { f.myArea = true; },
+    residencial: (f) => { f.residential = 'true'; },
+    'lidos também': (f) => { f.unreadOnly = false; },
+    'área gerenciada': (f) => { f.managedAreaId = '77'; },
+  };
+  for (const [nome, mudar] of Object.entries(mudancas)) {
+    const r = await guardarMudarReabrir(mudar);
+    assert.equal(r.abriu, false, `trocado o filtro (${nome}), a fila guardada do filtro anterior ABRIU`);
+    assert.deepEqual(r.b.AppState.queue, [], `a fila do outro filtro (${nome}) entrou na tela`);
+    const ev = r.b.log.find(([k]) => k === 'offline.outroLugar');
+    assert.ok(ev && ev[1].filtro === true, `o diário não diz que foi o FILTRO (${nome}): ${JSON.stringify(r.b.log)}`);
+  }
+});
+
+test('R4-O8: CONTROLE — trocar só a ORDEM (ou nada) mantém a fila guardada: ela abre depois de fechar e reabrir', async () => {
+  for (const [nome, mudar] of Object.entries({
+    nada: () => {},
+    'mais antigos': (f) => { f.sortOrder = 'oldest'; },
+    'perto de casa': (f) => { f.sortOrder = 'casa'; },
+  })) {
+    const r = await guardarMudarReabrir(mudar);
+    assert.equal(r.abriu, true, `trocada só a ordem (${nome}), a fila guardada não abriu — a assinatura não sobrevive ao armazenamento`);
+    assert.deepEqual(r.b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3']);
+  }
+});
+
+test('R4-O8: a assinatura sobrevive a fechar e reabrir mesmo com os tipos gravados FORA da ordem canônica', async () => {
+  // O `loadFilters` normaliza os tipos pela ordem de `TYPES_ALL` (`sanearTiposSalvos`):
+  // a MESMA escolha, lida do armazenamento, volta noutra ordem.
+  const r = await guardarMudarReabrir((f) => { f.types = ['NEW_PHOTO', 'NEW_PLACE']; });
+  assert.equal(r.abriu, false, 'PRÉ-CONDIÇÃO: trocar os tipos não recusou');
+  // Agora a fila é gravada JÁ com os tipos fora de ordem — a escolha não muda.
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.AppState.filters.types = ['NEW_PHOTO', 'NEW_PLACE'];
+  a.app.saveFilters();
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const b = pagina({ onLine: false });
+  assert.deepEqual(b.AppState.filters.types, ['NEW_PLACE', 'NEW_PHOTO'], 'PRÉ-CONDIÇÃO: a leitura não normalizou a ordem');
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), true, 'a MESMA escolha de tipos, relida noutra ordem, recusou a fila');
+});
+
+test('R4-O8: fila guardada SEM a assinatura (versão anterior) não entra — não há como saber de que filtro é', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const velha = a.base.get('fila');
+  delete velha.busca;
+  a.base.set('fila', velha);
+  const b = pagina({ onLine: false });
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), false, 'a fila sem assinatura abriu — pode ser de outro filtro');
+});
+
+test('R4-O8: a fila nova (`resetQueue`) ESQUECE a guardada de outro filtro — e não a de outra ORDEM', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  a.AppState.filters.sortOrder = 'oldest';
+  await a.app.offlineEsquecerFilaDeOutroLugar();
+  assert.ok(a.base.has('fila'), 'trocar só a ordem esqueceu a fila guardada');
+  a.AppState.filters.stateId = '5';
+  await a.app.offlineEsquecerFilaDeOutroLugar();
+  assert.equal(a.base.has('fila'), false, 'trocar o estado não esqueceu a fila guardada do estado anterior');
+  // E o caminho da fila nova passa mesmo por aqui (o O4 já cobrava a região e o país).
+  assert.match(fatiar('resetQueue'), /filaDeOnde = null;\s*offlineEsquecerFilaDeOutroLugar\(\);/);
+});
+
+test('R4-O8: a fila REABERTA e regravada (a varredura grava de novo) segue sendo da mesma busca', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  await a.app.offlineGravarFila(Date.now());
+  const b = pagina({ onLine: false });
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), true, 'PRÉ-CONDIÇÃO: a fila guardada não abriu');
+  // A varredura grava a fila viva no começo dela (sem `desde`): o lugar é o da
+  // fila reaberta (`filaDeOnde`), que tem de levar a assinatura junto.
+  assert.equal(await b.app.offlineGravarFila(), true);
+  const c = pagina({ onLine: false });
+  assert.equal(await c.app.offlineTentarAbrirSemRede(), true,
+    'a fila reaberta, regravada, perdeu a assinatura da busca — a próxima reabertura a recusou');
+});
+
+// ── R4-O1: a busca que falha por REDE abre a fila guardada (auditoria de 2026-09-29)
+// "Lie-fi" (o `onLine` diz que há rede e nada passa: túnel, uma barra, portal
+// que não responde) e a origem fora do ar (5xx): a reabertura só usava a fila
+// guardada com `onLine === false`, então a busca esperava o teto de 45 s e a
+// tela virava "Falha ao carregar" — com a fila preparada no aparelho, sem uso
+// (medido no navegador, h2). Aqui o aparelho roda de VERDADE: o `startFetching`,
+// o `fetchNextPage`, a fila guardada e a assinatura reais, contra uma API de
+// mentira, com a base sobrevivendo às "páginas".
+const PREFETCH_R = Number(EXPR('PREFETCH_THRESHOLD'));
+const MAX_VAZIAS_R = Number(EXPR('MAX_EMPTY_PAGES'));
+const MAX_PAGINAS_R = Number(EXPR('MAX_PAGINAS_POR_BUSCA'));
+const FALHA_REDE = { success: false, error: 'rede', errorCategory: 'transient' };
+const FALHA_SESSAO = { success: false, error: 'sessão', errorCategory: 'unauthorized' };
+function aparelhoO1() {
+  const ls = new Map();
+  const base = new Map();
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+        delete: (k) => { base.delete(k); },
+      });
+      return tx;
+    },
+  });
+  return function pagina({ onLine = true, offline = true, api }) {
+    const log = [];
+    const AppState = {
+      authenticated: true, hasMore: true, fetching: false, fetchEpoch: 0, queue: [], currentPlace: null,
+      serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null, profile: null, filters: null,
+    };
+    const el = () => ({ classList: { add() {}, remove() {} } });
+    const deps = {
+      AppState, navigator: { onLine }, Treino: { ativo: false }, offlineLigado: () => offline, console: { error: () => {} },
+      localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
+      FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
+      PREFETCH_THRESHOLD: PREFETCH_R, MAX_EMPTY_PAGES: MAX_VAZIAS_R, MAX_PAGINAS_POR_BUSCA: MAX_PAGINAS_R,
+      API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok', fetchPlaces: async (p) => api(p) },
+      offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerJanela: async () => null,
+      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
+      dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
+      handleUnauthorized: () => log.push(['sessao', {}]), showToast: () => {}, msgDoServidor: (r, d) => d, t: (k) => k,
+      guardarPrazoDaSessao: () => {}, trackSeenCategories: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => {},
+      aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {}, offlineVarrer: () => {},
+      bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(),
+      pousosDaPagina: new Map(), offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
+      refazerPerfilSeFaltar: () => {}, showLoading: () => {}, removeCurrentCardEl: () => {},
+      document: { getElementById: el },
+      // A tela vazia diz se é a de FALHA (`loadError`) ou o "Tudo limpo!": o
+      // instrumento que não distingue as duas conta uma pela outra.
+      showCurrentPlace: () => log.push(['card', {}]), maybePrefetch: () => {},
+      showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
+    };
+    const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
+      'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'offlineEsquecerFilaDeOutroLugar', 'filaGuardadaDestaConta',
+      'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
+      'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
+        abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false;
+      ${nomes.map(fatiar).join('\n')}
+      AppState.filters = filtrosDeFabrica();
+      loadFilters();
+      return { startFetching, abrirGuardadaDepoisDaFalha, offlineTentarAbrirSemRede,
+        falhouPorRede: () => ultimaBuscaFalhouPorRede };`)(...chaves.map((k) => deps[k]));
+    return { app, AppState, log, deps, base };
+  };
+}
+const TRES = () => ({ success: true, places: PEDIDOS_O8(), hasMore: false, page: 1, total: 3, blocked: 0 });
+// Com rede: a busca traz a fila, e o "Disponível offline" a grava.
+async function prepararO1(opcoes = {}) {
+  const pagina = aparelhoO1();
+  const a = pagina({ api: () => TRES(), ...opcoes });
+  await a.app.startFetching();
+  await assentar();
+  assert.equal(a.base.has('fila'), opcoes.offline !== false, 'PRÉ-CONDIÇÃO: a fila da busca não foi (ou foi) gravada');
+  return pagina;
+}
+const eventos = (p, k) => p.log.filter(([e]) => e === k);
+
+test('R4-O1: abertura com o `onLine` verdadeiro e a busca FALHANDO por rede (lie-fi, 5xx): a fila guardada entra', async () => {
+  const pagina = await prepararO1();
+  const b = pagina({ onLine: true, api: () => FALHA_REDE });
+  await b.app.startFetching();
+  assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'],
+    'a busca falhou por rede com a fila guardada no aparelho, e ela NÃO entrou (a tela seria "Falha ao carregar")');
+  assert.equal(eventos(b, 'falha').length + eventos(b, 'tudoLimpo').length, 0,
+    'a tela vazia (de falha ou "Tudo limpo!") apareceu por cima, ou antes, da fila guardada');
+  assert.equal(eventos(b, 'card').length, 1, 'o card da fila guardada não foi mostrado UMA vez');
+  assert.equal(b.AppState.hasMore, true, 'a fila guardada diz que acabou: a busca não sai de novo quando a rede voltar');
+  const abriu = eventos(b, 'offline.abriu')[0];
+  assert.ok(abriu && abriu[1].aposFalha === true, 'o diário não diz que abriu com o aparelho dizendo que há rede');
+});
+
+test('R4-O1: CONTROLE — sem o offline, a mesma falha é a tela de falha; e 401 (sessão) nunca abre a fila guardada', async () => {
+  const semOffline = await prepararO1({ offline: false });
+  const b = semOffline({ onLine: true, offline: false, api: () => FALHA_REDE });
+  await b.app.startFetching();
+  assert.equal(eventos(b, 'falha').length, 1, 'CONTROLE: sem fila guardada, a falha não virou a tela de falha');
+  assert.deepEqual(b.AppState.queue, []);
+  const pagina = await prepararO1();
+  const c = pagina({ onLine: true, api: () => FALHA_SESSAO });
+  await c.app.startFetching();
+  assert.deepEqual(c.AppState.queue, [], 'um 401 (sessão) abriu a fila guardada: quem decide ali é a conferência da sessão');
+  assert.equal(c.app.falhouPorRede(), false);
+});
+
+test('R4-O1: na fila JÁ trabalhada a falha mostra a tela — e o "Tentar novamente" abre a guardada com o `onLine` verdadeiro', async () => {
+  const pagina = await prepararO1();
+  let falhar = false;
+  const b = pagina({ onLine: true, api: () => (falhar ? FALHA_REDE : { ...TRES(), hasMore: true }) });
+  await b.app.startFetching();
+  assert.equal(b.AppState.queue.length, 3, 'PRÉ-CONDIÇÃO: a busca com rede não trouxe a fila');
+  // A pessoa tratou tudo (a fila esvazia, o Waze ainda diz que há mais) e a rede some.
+  b.AppState.queue = [];
+  b.AppState.currentPlace = null;
+  b.AppState.hasMore = true;
+  falhar = true;
+  b.log.length = 0;
+  await b.app.startFetching();
+  assert.equal(eventos(b, 'falha').length, 1, 'numa fila já trabalhada, a guardada entrou SOZINHA — os pulados voltariam sem ninguém pedir');
+  assert.deepEqual(b.AppState.queue, []);
+  assert.equal(b.app.falhouPorRede(), true, 'a falha por rede não ficou anotada pro "Tentar novamente"');
+  // O "Tentar novamente": `offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)`.
+  assert.equal(await b.app.offlineTentarAbrirSemRede(b.app.falhouPorRede()), true,
+    'o "Tentar novamente" não abriu a fila guardada com o `onLine` verdadeiro');
+  // CONTROLE: sem a falha por rede anotada, e com o `onLine` verdadeiro, ele não abre (é a busca que sai).
+  const c = pagina({ onLine: true, api: () => TRES() });
+  assert.equal(await c.app.offlineTentarAbrirSemRede(false), false, 'CONTROLE: com rede e sem falha, a fila guardada abriu');
+});
+
+test('R4-O1: a fila que MUDA enquanto a base é lida (↻, filtro) não recebe a guardada por cima', async () => {
+  const pagina = await prepararO1();
+  const b = pagina({ onLine: true, api: () => FALHA_REDE });
+  const tentativa = b.app.abrirGuardadaDepoisDaFalha(b.AppState.fetchEpoch);
+  b.AppState.fetchEpoch++;               // o `resetQueue` no meio da leitura
+  assert.equal(await tentativa, false, 'a fila guardada entrou numa fila que já era outra');
+  assert.deepEqual(b.AppState.queue, []);
+  // Duas esperas pela MESMA busca: uma tentativa só, e o card uma vez.
+  const d = pagina({ onLine: true, api: () => FALHA_REDE });
+  const [x, y] = await Promise.all([d.app.abrirGuardadaDepoisDaFalha(0), d.app.abrirGuardadaDepoisDaFalha(0)]);
+  assert.ok(x === true && y === true);
+  assert.equal(eventos(d, 'card').length, 1, 'a fila guardada foi aberta duas vezes');
 });

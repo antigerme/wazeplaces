@@ -85,6 +85,10 @@ const Presenca = {
     conversas: [],          // [{ id, nome, naoLidas, atividade, ultima }] — as do app
     pais: null,             // o país da lista na tela
     atualizadaEm: 0,        // quando a última lista SAIU (o pedido), não quando chegou
+    // Quando o último pedido da lista SAIU, tenha dado certo ou não — é por ele
+    // que os gatilhos baratos (voltar do fundo, aplicar filtro) contam o teto de
+    // um por minuto (ver `presencaUltimaTentativa`).
+    tentadaEm: 0,
     contagem: null,         // o PORQUÊ da lista, do servidor (ver `contarOnlineDaApp` no core)
     diagUltimaLista: null,  // a última lista anotada no diário (só a MUDANÇA entra)
     diagMsgs: {},           // por tipo de linha: { em, juntas } (ver `presencaAnotarMsg`)
@@ -107,6 +111,10 @@ const Presenca = {
     vistas: new Set(),      // ids de mensagem já contados (o fluxo reentrega)
     historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
     aberta: null,           // id da pessoa da conversa aberta
+    // O nome dela, guardado ao abrir: a conversa NOVA (ainda sem mensagem) só
+    // tem o nome na lista de quem está no app, e a lista seguinte sem a pessoa
+    // trocava o título por "Editor" (auditoria de 2026-09-29).
+    nomeDaAberta: null,
     anexo: null,
     // O texto digitado e não mandado é DA CONVERSA, como o anexo: `rascunhoDe`
     // é a pessoa dona do que está no campo, e as outras conversas guardam o
@@ -114,7 +122,16 @@ const Presenca = {
     rascunhos: new Map(),
     rascunhoDe: null,
     ultimaPosicao: null,    // [lat, lon] do último card na tela — o "daqui"
+    // As fotos de cartão que NÃO carregaram nesta conversa (ver o `error` no
+    // `presencaMontar`). A conversa é redesenhada a cada mensagem, e cada
+    // redesenho recriava a <img> — pedindo de novo a foto que o CDN recusa:
+    // MEDIDO sem rota nenhuma, 1 → 6 pedidos em 5 redesenhos (a resposta do CDN
+    // pra foto que sumiu é 403 com `max-age=0`, e erro não fica no cache de
+    // imagem do navegador; a foto boa fica em 1). Como os tiles do mapa
+    // ampliado (`_falhos`): abrir a conversa de novo tenta de novo.
+    fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
+    lidaPendente: null,     // de quem é o "lida" que espera a rajada ou o perfil (ver `presencaPagarLida`)
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
@@ -303,13 +320,51 @@ function chatAoResponder(r, carona) {
 
 // ── a lista ─────────────────────────────────────────────────────────────────
 
+// Só falta o PERFIL, com a sessão de pé: é a renovação silenciosa pela extensão
+// (a queda apaga o perfil, e o `showMainScreen` chama a presença antes de ele
+// voltar) — ou a abertura, antes de o primeiro perfil chegar.
+function presencaEsperandoPerfil() {
+    return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry() && !presencaEu());
+}
+
 async function presencaSincronizar() {
+    // Esperando o perfil, ESPERA — com a tela como está. Desligar aqui fechava a
+    // conversa aberta, a lista e a folha do pedido, e o pedido preso se perdia,
+    // com a MESMA conta voltando segundos depois (auditoria de 2026-09-29). O
+    // perfil que chegar chama isto de novo (`completarPerfilChegado`); OUTRA
+    // conta limpa tudo pelo `esquecerOutraConta`, e o "Sair" pelo
+    // `presencaEsquecer`. Só o tempo real fecha: o que chegasse por ele sem
+    // saber de quem é a sessão não teria como entrar (ver `presencaQuadro`), e
+    // reaberto com o perfil ele reentrega o que ficou sem confirmar.
+    if (presencaEsperandoPerfil()) {
+        clearTimeout(Presenca.timers.fluxo);
+        presencaFluxoFechar();
+        return;
+    }
     if (!presencaPodeConectar()) return presencaDesligar();
+    // O "lida" que ficou DEVENDO na espera do perfil (ver `presencaPagarLida`).
+    // Com o relógio correndo ele é a rajada, e a rajada não se adianta.
+    if (Presenca.lidaPendente && !Presenca.timers.lida) presencaPagarLida({ fechando: Presenca.aberta !== Presenca.lidaPendente });
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
-    const fresca = Date.now() - Presenca.atualizadaEm < PRESENCA_VOLTA_MIN_MS;
+    const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
     if (Presenca.pais === API.getCountry() && fresca) { presencaFluxoGarantir(); return; }
     await presencaAtualizar();
+    // E o tempo real, também aqui: a lista só abre o fluxo quando traz token
+    // NOVO, e o fechado na espera do perfil (acima), com o token ainda valendo,
+    // ficava fechado até o app voltar do segundo plano. Sem pedir token: a
+    // lista acabou de pedir o que faltava.
+    presencaFluxoGarantir({ pedirToken: false });
+}
+
+// O teto de UM pedido por minuto dos gatilhos baratos (voltar do segundo plano,
+// aplicar filtro) conta da última TENTATIVA, não da última lista boa: com a
+// lista falhando COM resposta (o Waze fora), a lista boa não andava, e cada
+// volta do fundo pedia de novo (MEDIDO: 4 voltas em 40 s, 4 pedidos; auditoria
+// de 2026-09-29). O pedido que nem teve resposta não conta (ver o
+// `presencaAtualizar`): ele não chegou ao servidor, e a rede voltando o refaz.
+function presencaUltimaTentativa() {
+    return Math.max(Presenca.atualizadaEm, Presenca.tentadaEm);
 }
 
 // A falha que nem chegou a ter resposta (ver o `catch` do `_post` no api.js).
@@ -327,6 +382,8 @@ async function presencaAtualizar({ token = false } = {}) {
     const carona = chatCarona();
     const campos = { pais, userId: presencaEu(), conhecidos: chatConhecidos(), ...carona };
     if (querToken) { campos.instalacao = chatInstalacao(); campos.token = true; Presenca.tokenPedidoEm = inicio; }
+    const tentadaAntes = Presenca.tentadaEm;
+    Presenca.tentadaEm = inicio;
     let refazer = false;
     Presenca.pedindo = (async () => {
         try {
@@ -335,6 +392,9 @@ async function presencaAtualizar({ token = false } = {}) {
             chatAoResponder(r, carona);
             if (r && Number.isFinite(r.agora)) Presenca.desvio = r.agora - Date.now();
             if (!r || !r.success) {
+                // O que nem teve resposta não chegou ao servidor: não conta no
+                // teto dos gatilhos baratos (ver `presencaUltimaTentativa`).
+                if (presencaSemResposta(r)) Presenca.tentadaEm = tentadaAntes;
                 // Pedido de token que falhou por REDE não conta no teto de 5 min:
                 // aberto sem sinal, o app ficava 5 min sem o tempo real depois de
                 // a rede voltar (o `online` achava o pedido "recente" e desistia).
@@ -396,11 +456,43 @@ async function presencaAtualizar({ token = false } = {}) {
 // ações. `null` numa parte é "não veio", NUNCA "ninguém": manter a anterior é
 // melhor que a pílula sumir por uma falha passageira.
 function presencaAplicarLista(r, inicio, pais, via = 'carona') {
+    // A lista que SAIU antes da última que entrou é mais velha que ela: a
+    // carona de uma ação antiga, pousando depois do pedido novo, devolvia a não
+    // lida que a pessoa já tinha lido (auditoria de 2026-09-29).
+    if (inicio < Presenca.atualizadaEm) return;
+    // Trocou de país e a lista do WME não veio (`online: null`): a que está na
+    // tela é de OUTRO país, e ficava com o nome do novo no subtítulo — e
+    // contava como fresca, então nada a pedia de novo (auditoria de
+    // 2026-09-29). Com o país trocado, a parte que não veio é "ninguém que se
+    // saiba", e a lista não conta como atualizada. As conversas não têm país.
+    const trocouDePais = Presenca.pais !== null && String(Presenca.pais) !== String(pais);
+    let incompleta = false;
     if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
+    else if (trocouDePais) { Presenca.online = []; incompleta = true; }
     if (Array.isArray(r.conversas)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
-        // O que chegou ao vivo ANTES de o pedido sair o servidor já contou.
-        for (const [id, v] of Presenca.vivas) if (v.ultimaTs < inicio) Presenca.vivas.delete(id);
+        // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
+        // que chegou DEPOIS pode ter entrado na conta também: a lista é lida no
+        // Waze depois de o pedido sair, e a mensagem gravada nesse meio vem
+        // nela. Até onde a lista foi dizem a `atividade` da conversa e a hora
+        // da ÚLTIMA mensagem dela — as duas no relógio do Waze, que carimba a
+        // mensagem ao guardá-la (MEDIDO na gravação do WME: o pedido saiu com
+        // 1790182219825 e voltou guardado com 1790182220160), o mesmo relógio
+        // da hora que o fluxo traz. O que chegou com hora até ali, a lista já
+        // contou. Sem isto, UMA mensagem virava "2 mensagens novas" (auditoria
+        // de 2026-09-29).
+        for (const [id, v] of Presenca.vivas) {
+            if (v.ultimaTs < inicio) { Presenca.vivas.delete(id); continue; }
+            const c = Presenca.conversas.find((x) => x.id === id);
+            const ate = c ? Math.max(Number.isFinite(c.atividade) ? c.atividade : 0,
+                c.ultima && Number.isFinite(c.ultima.ts) ? c.ultima.ts : 0) : 0;
+            if (!ate || !Array.isArray(v.servs)) continue;
+            const depois = v.servs.filter((s) => !(s <= ate));
+            if (depois.length === v.servs.length) continue;
+            v.n = Math.max(0, v.n - (v.servs.length - depois.length));
+            v.servs = depois;
+            if (!v.n) Presenca.vivas.delete(id);
+        }
         // A conversa que a pessoa está OLHANDO está lida, diga a lista o que
         // disser. A lista pode ter sido lida no Waze ANTES do "lida" — pedida
         // junto com o toque que abriu a conversa, ou na volta do segundo plano
@@ -421,7 +513,7 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
     }
     if (r.contagem && typeof r.contagem === 'object') Presenca.contagem = r.contagem;
     Presenca.pais = pais;
-    Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
+    if (!incompleta) Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
     presencaRenderTudo();
     presencaAnotarLista({ via });
 }
@@ -468,7 +560,11 @@ function presencaDesligar() {
     Presenca.epoca += 1;
     presencaFluxoFechar();
     clearTimeout(Presenca.timers.fluxo);
+    // O "lida" pendente é DESCARTADO, não pago: desligar é o "Sair", a troca de
+    // conta ou a queda da sessão — e o fechamento da conversa logo abaixo não
+    // pode mandá-lo (ver `presencaPagarLida`).
     clearTimeout(Presenca.timers.lida);
+    Presenca.lidaPendente = null;
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -476,8 +572,10 @@ function presencaDesligar() {
     Presenca.vistas.clear();
     Presenca.historico.clear();
     Presenca.lidaEnviadaAte.clear();
+    Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
+    Presenca.tentadaEm = 0;
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
@@ -504,8 +602,10 @@ function presencaDesligar() {
     presencaEsquecerAberta();
 }
 
-// Logout: "se pedir para sair, é realmente para sair".
-function presencaEsquecer() {
+// Logout: "se pedir para sair, é realmente para sair". `soMemoria`: o "Sair"
+// foi numa OUTRA aba, que já apagou a chave do chat — esta fecha o tempo real e
+// solta a memória, sem mexer no aparelho (ver o `handleLogout`).
+function presencaEsquecer({ soMemoria = false } = {}) {
     presencaDesligar();
     Presenca.ultimaPosicao = null;
     // O que ficou digitado e não saiu também: o campo não é apagado quando o
@@ -515,7 +615,7 @@ function presencaEsquecer() {
     if (campo) campo.value = '';
     Presenca.rascunhos.clear();
     Presenca.rascunhoDe = null;
-    safeLS.remove(CHAT_KEY);
+    if (!soMemoria) safeLS.remove(CHAT_KEY);
 }
 
 // ── o tempo real (direto do navegador ao Google) ────────────────────────────
@@ -538,13 +638,15 @@ function presencaTokenAbre() {
     return !Number.isFinite(c.expiraEm) || c.expiraEm > Date.now();
 }
 
-function presencaFluxoGarantir() {
+// `pedirToken: false` é pra quem ACABOU de pedir a lista: ela já levou o pedido
+// do token que faltava (ver o `querToken` do `presencaAtualizar`).
+function presencaFluxoGarantir({ pedirToken = true } = {}) {
     if (!presencaPodeConectar()) return;
     if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
     // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
     // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
     // abre o fluxo quando o token vem.
-    if (!presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
+    if (pedirToken && !presencaTokenValido() && Date.now() - Presenca.tokenPedidoEm > PRESENCA_TOKEN_REPETIR_MS) {
         presencaAtualizar({ token: true });
     }
     if (!Presenca.fluxo && presencaTokenAbre()) presencaFluxoAbrir();
@@ -728,6 +830,10 @@ function presencaQuadro(fluxo, o) {
     }
     const im = o.inboxMessage;
     if (!im) return;
+    // Sem saber de quem é a sessão (o perfil que a renovação ainda não trouxe),
+    // a mensagem não tem como entrar — e CONFIRMADA ela não voltaria mais. Fica
+    // sem confirmar: o fluxo a reentrega quando reabrir, com o perfil.
+    if (!presencaEu()) return;
     // TUDO que chega é confirmado — inclusive a mensagem de quem só usa o WME,
     // que o app não mostra. Confirmar não marca nada como lido (isso é outro
     // método) e não mexe na fila do WME da pessoa: a fila é da INSTALAÇÃO.
@@ -864,7 +970,8 @@ function presencaMsgDoWaze(m, eu) {
     }
     return {
         id: String(m.id || ''),
-        ts: Number.isFinite(m.ts) ? m.ts : Date.now(),
+        // Sem a hora do Waze, a de agora — no relógio de LÁ, como as outras.
+        ts: Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio,
         meu,
         texto: String(m.texto || '').slice(0, 4000),
         card,
@@ -885,7 +992,7 @@ function presencaMensagemDoFluxo(m, doLote) {
         Presenca.fluxoDiag.recibos += 1;
         // Ler a conversa marca TUDO até ali: o recibo vale pra toda mensagem
         // minha mandada antes dele.
-        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now());
+        chatMarcarLidaAte(de, Number.isFinite(m.ts) ? m.ts : Date.now() + Presenca.desvio);
         if (Presenca.aberta === de) presencaRenderConversa();
         return;
     }
@@ -924,12 +1031,15 @@ function presencaMensagemDoFluxo(m, doLote) {
         // cada lista: a do lote vem com a hora do Google, convertida pelo
         // `desvio`; a ao vivo vale pela hora em que CHEGOU, que é exatamente o
         // que a lista seguinte precisa saber ("chegou antes de eu pedir?").
+        // E a hora do SERVIDOR de cada uma vai junto (`servs`): é ela que a
+        // `atividade` da lista seguinte mede (ver `presencaAplicarLista`).
         else {
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
-                const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0 };
+                const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
                 v.n += 1;
                 v.ultimaTs = Math.max(v.ultimaTs, chegou);
+                if (Array.isArray(v.servs)) v.servs.push(msg.ts);
                 Presenca.vivas.set(com, v);
             }
         }
@@ -1013,13 +1123,47 @@ function presencaAnunciar(msg) {
     el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
+// O "lida" que espera a rajada: `lidaPendente` diz de QUEM (a conversa que
+// estava na tela) e `timers.lida` é o relógio dele. Pendente SEM relógio é o
+// "lida" DEVENDO: ele venceu, ou a conversa fechou, sem saber de quem é a
+// sessão (ver `presencaPagarLida`).
 function presencaAgendarLida(id) {
     clearTimeout(Presenca.timers.lida);
-    Presenca.timers.lida = setTimeout(() => presencaMarcarLida(id), PRESENCA_LIDA_ATRASO_MS);
+    Presenca.lidaPendente = id;
+    Presenca.timers.lida = setTimeout(() => presencaPagarLida(), PRESENCA_LIDA_ATRASO_MS);
 }
 
-async function presencaMarcarLida(id) {
-    if (!presencaOlhando(id)) return;
+// Manda o "lida" pendente — o MESMO pedido, pela rajada que venceu, pelo
+// fechamento da conversa (`fechando`) ou pelo perfil que voltou.
+//
+// "Olhando é lida": fechar a conversa antes de a rajada vencer (1,2 s) deixava
+// no Waze como não lida uma mensagem que a pessoa viu, e a lista seguinte a
+// devolvia como "1 mensagem nova" (auditoria de 2026-09-29). Os quatro caminhos
+// de fechar (✕, Esc, fundo e voltar) e esconder a conversa sob outro modal
+// passam pela limpeza do modal, que PAGA o pendente na hora. Sem pendente, nada
+// sai — e o `presencaMarcarLida` ainda não pede quando não há o que marcar.
+//
+// Sem saber de quem é a sessão (a renovação silenciosa, antes do perfil), ele
+// ESPERA, como a fila de saída: o perfil que chegar o paga
+// (`presencaSincronizar`). E o "Sair", a troca de conta e a queda pra tela de
+// entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta o swipe que
+// esperava o Desfazer: sessão que sai não grava nada depois. Outra conta nunca
+// o paga: o `definirPerfil` roda o `esquecerOutraConta` (que desliga) no mesmo
+// passo em que o perfil novo entra — antes de qualquer um poder pagar.
+function presencaPagarLida({ fechando = false } = {}) {
+    const id = Presenca.lidaPendente;
+    if (!id) return;
+    clearTimeout(Presenca.timers.lida);
+    Presenca.timers.lida = null;
+    if (!presencaEu()) return;   // devendo: espera o perfil
+    Presenca.lidaPendente = null;
+    presencaMarcarLida(id, { fechando });
+}
+
+// `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
+// tela, e era nela que a pessoa estava olhando (ver `presencaPagarLida`).
+async function presencaMarcarLida(id, { fechando = false } = {}) {
+    if (!fechando && !presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
     // Conversa ainda carregando: o que chegou nela ainda não está na tela.
     if (!h || !h.carregada) return;
@@ -1073,8 +1217,13 @@ function presencaAbrirConversa(id) {
     // anexo ficava: abrir a conversa com OUTRA pessoa mostrava o pedido na
     // tirinha — e ele saía junto no envio, pra quem não era o destino
     // (auditoria de 2026-09-26).
-    if (Presenca.aberta !== id) Presenca.anexo = null;
+    if (Presenca.aberta !== id) { Presenca.anexo = null; Presenca.nomeDaAberta = null; }
     Presenca.aberta = id;
+    // O nome de quem se abriu, de onde ele estiver agora (ver `nomeDaAberta`).
+    const quem = Presenca.online.find((p) => p.id === id) || Presenca.conversas.find((x) => x.id === id);
+    if (quem && quem.nome) Presenca.nomeDaAberta = quem.nome;
+    // Abrir é a hora de tentar de novo a foto que não tinha carregado.
+    Presenca.fotosFalhas.clear();
     // E o TEXTO no campo também é da conversa (ver a função).
     presencaTrocarRascunho(id);
     chatConhecer(id);
@@ -1181,7 +1330,11 @@ function presencaTrocarRascunho(id) {
 // Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER
 // caminho de fechamento (✕, Esc, scrim, voltar do aparelho).
 function presencaEsquecerAberta() {
+    // O "lida" pendente é da conversa que sai da tela: sai agora (ver
+    // `presencaPagarLida`).
+    presencaPagarLida({ fechando: true });
     Presenca.aberta = null;
+    Presenca.nomeDaAberta = null;
     // O anexo é da conversa, não do aparelho: fechar sem mandar descarta. Vai
     // AQUI e não no ✕, pelos mesmos quatro caminhos de fechamento.
     Presenca.anexo = null;
@@ -1189,18 +1342,23 @@ function presencaEsquecerAberta() {
     // Fechada, a conversa não fica desenhada: o próximo abrir redesenha do
     // zero, e a captura do diagnóstico (que leva o DOM inteiro) mostra o que
     // estava NA TELA, não a última conversa aberta escondida num modal.
-    const corpo = document.getElementById('conversaMsgs');
-    if (corpo) corpo.innerHTML = '';
+    presencaDesenhar(document.getElementById('conversaMsgs'), '');
     const anuncio = document.getElementById('conversaAnuncio');
     if (anuncio) anuncio.textContent = '';
+    // O TOPO também: o nome de quem conversou e onde a pessoa está (nível e
+    // distância) ficavam no DOM depois de fechar — e depois do "Sair", que passa
+    // por aqui (auditoria de 2026-09-29).
+    const titulo = document.getElementById('conversaTitle');
+    if (titulo) titulo.textContent = '';
+    const estado = document.getElementById('conversaEstado');
+    if (estado) { presencaDesenhar(estado, ''); estado.classList.add('hidden'); }
     presencaRenderPilula();
     presencaRenderLista();
 }
 
 // Idem para a lista.
 function presencaEsquecerLista() {
-    const lista = document.getElementById('presencaLista');
-    if (lista) lista.innerHTML = '';
+    presencaDesenhar(document.getElementById('presencaLista'), '');
 }
 
 function presencaEnviar(legenda, card) {
@@ -1209,8 +1367,13 @@ function presencaEnviar(legenda, card) {
     if (!id || !eu) return;
     const h = Presenca.historico.get(id) || { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
     Presenca.historico.set(id, h);
+    // A hora é a do SERVIDOR (o relógio daqui mais o `desvio`), até a resposta
+    // trazer a de verdade: as das mensagens dela e a `atividade` da conversa são
+    // de lá. Com a hora crua de um aparelho 2 min adiantado, a minha mensagem
+    // ficava "mais nova" que a resposta dela, e a prévia da lista não mudava
+    // mais (auditoria de 2026-09-29).
     const msg = {
-        id: presencaUuid(), ts: Date.now(), meu: true,
+        id: presencaUuid(), ts: Date.now() + Presenca.desvio, meu: true,
         texto: presencaTextoParaWme(legenda, card), card: card || null, legenda: card ? legenda : null,
         estado: 'enviando', motivo: null,
     };
@@ -1254,7 +1417,11 @@ async function presencaMandar(com, msg) {
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
     } else {
         msg.estado = 'falhou';
-        msg.motivo = r && r.errorCategory === 'transient' ? 'conexao' : 'erro';
+        // "Sem conexão" só quando a resposta NEM CHEGOU (o `_post` põe
+        // `_motivo`). O Waze fora também volta `transient`, mas COM resposta: a
+        // rede está boa, e dizer "sem conexão" mandava a pessoa procurar sinal
+        // (auditoria de 2026-09-29). Aí é o "Não enviada." sem motivo.
+        msg.motivo = presencaSemResposta(r) ? 'conexao' : 'erro';
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
     }
     presencaRenderConversa();
@@ -1264,7 +1431,10 @@ async function presencaMandar(com, msg) {
 function presencaTentarDeNovo() {
     const id = Presenca.aberta;
     const h = id && Presenca.historico.get(id);
-    if (!h) return;
+    // Sem o id do perfil (a sessão renovando), não sai — como o "Enviar" com o
+    // campo cheio: sairia pela sessão NOVA, que pode ser de outra conta. A
+    // mensagem segue "Não enviada", com o botão, até o perfil chegar.
+    if (!h || !presencaEu()) return;
     for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
 }
 
@@ -1296,6 +1466,7 @@ function presencaRenderAnexo() {
     if (!tira || !botao) return;
     const a = Presenca.anexo;
     tira.classList.toggle('hidden', !a);
+    const img = document.getElementById('conversaAnexoFoto');
     if (a) {
         const nome = (a.name || '').trim() || (a.address || '').trim() || t('card.noName');
         document.getElementById('conversaAnexoNome').textContent = nome;
@@ -1303,10 +1474,17 @@ function presencaRenderAnexo() {
         // Quem some é a CAIXA, não o <img>: escondendo só a imagem sobravam
         // 40px de vão vazio com o `gap` do lado, que lê como foto que não
         // carregou.
-        const img = document.getElementById('conversaAnexoFoto');
         const caixa = img.parentElement;
         if (a.imageUrl) { img.src = a.imageUrl; caixa.classList.remove('hidden'); }
         else { img.removeAttribute('src'); caixa.classList.add('hidden'); }
+    } else {
+        // Solto — mandado, tirado, ou a conversa fechou: a tirinha escondida
+        // guardava o nome e a foto do pedido (dado de TERCEIRO), e a captura do
+        // diagnóstico os levava depois do "Sair" (auditoria de 2026-09-29).
+        document.getElementById('conversaAnexoNome').textContent = '';
+        document.getElementById('conversaAnexoMeta').textContent = '';
+        img.removeAttribute('src');
+        img.parentElement.classList.add('hidden');
     }
     // Ação impossível sai da frente em vez de virar botão morto.
     const temPedido = !!(window.cardParaConversa && window.cardParaConversa());
@@ -1367,6 +1545,64 @@ function presencaCardSeguro(c) {
 }
 
 // ── interface ───────────────────────────────────────────────────────────────
+
+// ── redesenhar só o que MUDOU, com o foco onde estava ──────────────────────
+//
+// A lista e a conversa são redesenhadas por `innerHTML` a cada mensagem que
+// chega e a cada resposta, e o `innerHTML` DESTRÓI o elemento focado: o foco
+// caía no <body>, e quem usa teclado ou leitor de tela voltava pro topo da
+// página no meio da conversa (auditoria de 2026-09-29, medido no Chromium e no
+// WebKit). E o topo da conversa (`#conversaEstado`, região viva) era reescrito
+// com a MESMA frase duas vezes por mensagem — e região viva reescrita pode ser
+// lida de novo. Duas regras, na mesma função:
+//   · o que não mudou não é redesenhado;
+//   · o que mudou devolve o foco ao MESMO controle (a mesma pessoa, a mesma
+//     mensagem), como o `devolverFocoAoPainel` do Histórico. Sem equivalente,
+//     o ✕ da folha — nunca o <body>, e nunca o campo de texto, que abriria o
+//     teclado do celular por cima da conversa.
+const PRESENCA_DESENHADO = new WeakMap();
+// Os controles que o `innerHTML` recria: a linha de uma pessoa, o cartão de um
+// pedido e os três botões de texto da conversa.
+const PRESENCA_FOCAVEIS = ['presenca-linha', 'conversa-pedido', 'conversa-reenviar', 'conversa-recarregar', 'conversa-anteriores'];
+
+// QUEM o controle representa: a pessoa da linha, a mensagem do cartão, ou a
+// página antiga do "Tentar de novo". Os outros botões são únicos na conversa.
+function presencaQuemE(el) {
+    return el.getAttribute('data-pessoa') || el.getAttribute('data-id') || el.getAttribute('data-antigas') || '';
+}
+
+function presencaChaveDoFoco(raiz) {
+    const a = document.activeElement;
+    if (!raiz || !a || a === raiz || !a.classList || !raiz.contains(a)) return null;
+    const classe = PRESENCA_FOCAVEIS.find((c) => a.classList.contains(c));
+    if (!classe) return null;
+    return { classe, quem: presencaQuemE(a), i: [...raiz.querySelectorAll('.' + classe)].indexOf(a) };
+}
+
+function presencaDevolverFoco(raiz, chave, reserva) {
+    const irmaos = [...raiz.querySelectorAll('.' + chave.classe)];
+    let alvo = irmaos.find((e) => presencaQuemE(e) === chave.quem) || null;
+    // Na lista, quem saiu cede o lugar à linha da mesma posição — como numa
+    // lista que se apaga item a item.
+    if (!alvo && chave.classe === 'presenca-linha') alvo = irmaos[Math.min(chave.i, irmaos.length - 1)] || null;
+    if (!alvo) alvo = document.getElementById(reserva);
+    if (alvo && typeof alvo.focus === 'function') alvo.focus({ preventScroll: true });
+}
+
+// Troca o conteúdo de `el` SÓ se ele mudou, e devolve se trocou. Com `reserva`
+// (o id do ✕ da folha), o foco que estava dentro volta ao mesmo controle.
+// Quem esvazia uma destas regiões passa por aqui também: escrever por fora
+// deixaria a memória do último desenho mentindo, e o redesenho seguinte, igual
+// ao último, seria pulado com a região vazia.
+function presencaDesenhar(el, html, reserva) {
+    if (!el) return false;
+    if (PRESENCA_DESENHADO.get(el) === html) return false;
+    const foco = reserva ? presencaChaveDoFoco(el) : null;
+    el.innerHTML = html;
+    PRESENCA_DESENHADO.set(el, html);
+    if (foco) presencaDevolverFoco(el, foco, reserva);
+    return true;
+}
 
 function presencaRenderTudo() {
     presencaRenderPilula();
@@ -1471,7 +1707,7 @@ function presencaRenderLista() {
     // fica vazia; abrir redesenha (o toque na pílula chama isto DEPOIS do
     // `openModal`).
     const folha = document.getElementById('presencaModal');
-    if (!folha || folha.classList.contains('hidden')) { lista.innerHTML = ''; return; }
+    if (!folha || folha.classList.contains('hidden')) { presencaDesenhar(lista, ''); return; }
     const sub = document.getElementById('presencaSub');
     if (sub) {
         const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
@@ -1525,9 +1761,11 @@ function presencaRenderLista() {
         </li>`;
     }).join('');
 
-    lista.innerHTML = `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.agora'))}</li>`
+    // A resposta da lista pedida ao abrir a folha costuma chegar IGUAL à que já
+    // está na tela: redesenhá-la tirava o foco da linha em que a pessoa estava.
+    presencaDesenhar(lista, `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.agora'))}</li>`
         + (linhasOnline || `<li class="presenca-vazio">${escapeHtml(t('presenca.sheet.vazio'))}</li>`)
-        + (linhasConversa ? `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.conversas'))}</li>` + linhasConversa : '');
+        + (linhasConversa ? `<li class="presenca-secao">${escapeHtml(t('presenca.sheet.conversas'))}</li>` + linhasConversa : ''), 'presencaClose');
 }
 
 // ── DESENHO DO RECIBO ───────────────────────────────────────────────────────
@@ -1606,7 +1844,9 @@ function presencaHtmlDoPedido(m, i, recibo) {
     const card = m.card;
     const nome = (card.name || '').trim() || (card.address || '').trim() || t('card.noName');
     const meta = presencaResumoDoCard(card);
-    const foto = card.imageUrl
+    // A foto que já não carregou nesta conversa não volta pro desenho (ver
+    // `Presenca.fotosFalhas`).
+    const foto = card.imageUrl && !Presenca.fotosFalhas.has(card.imageUrl)
         ? `<span class="cp-foto"><img src="${escapeHtml(card.imageUrl)}" alt="" width="62" height="62"></span>`
         : '';
     const topo = `<span class="cp-topo">${foto}<span class="cp-txt">`
@@ -1623,8 +1863,11 @@ function presencaHtmlDoPedido(m, i, recibo) {
         ? `<span id="${desc}" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
     const descrito = legenda || recibo.includes(`id="${desc}"`);
+    // `data-id` é QUAL mensagem: o `data-msg` é a posição, que anda quando a
+    // página antiga entra em cima — e é pelo id que o foco volta ao mesmo
+    // cartão depois do redesenho (ver `presencaDesenhar`).
     return `<button type="button" class="conversa-pedido ${m.meu ? 'minha' : 'dela'}`
-        + `${legenda ? ' com-legenda' : ''}" data-msg="${i}"`
+        + `${legenda ? ' com-legenda' : ''}" data-msg="${i}" data-id="${escapeHtml(m.id)}"`
         + ` aria-label="${escapeHtml(t('presenca.pedido.abrir', { nome }))}"`
         + `${descrito ? ` aria-describedby="${desc}"` : ''}>`
         + topo + legenda + (legenda ? '' : recibo) + '</button>';
@@ -1641,9 +1884,14 @@ function presencaIdDaDescricao(i) {
 // carregando, o MESMO botão, desabilitado e com o rótulo trocado; falhou, a
 // MESMA linha de erro da conversa, com o "Tentar de novo" (que refaz a página
 // antiga, não a conversa: `data-antigas`).
+//
+// "Desabilitado" é `aria-disabled`, e não `disabled`: botão `disabled` não
+// segura o foco, e quem apertou Enter nele caía no <body> (auditoria de
+// 2026-09-29). O toque no meio não manda nada: o `presencaCarregarConversa`
+// ignora com a página no ar.
 function presencaHtmlAnteriores(h) {
     if (h.antigas === 'carregando') {
-        return `<button type="button" class="conversa-anteriores" disabled>${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
+        return `<button type="button" class="conversa-anteriores" aria-disabled="true">${escapeHtml(t('presenca.conversa.anterioresCarregando'))}</button>`;
     }
     if (h.antigas === 'erro') {
         return `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.anterioresErro'))} <button type="button" class="conversa-recarregar" data-antigas="1">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
@@ -1656,12 +1904,17 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
     if (!id || !presencaConversaNaTela()) return;
     const pessoa = Presenca.online.find((p) => p.id === id);
     const conversa = Presenca.conversas.find((c) => c.id === id);
-    const nome = (pessoa && pessoa.nome) || (conversa && conversa.nome) || t('presenca.anon');
+    // O nome de agora, se a lista o traz; senão o que se sabia ao abrir (ou que
+    // uma lista trouxe depois): a pessoa que sai do app não vira "Editor".
+    const sabido = (pessoa && pessoa.nome) || (conversa && conversa.nome) || '';
+    if (sabido) Presenca.nomeDaAberta = sabido;
+    const nome = sabido || Presenca.nomeDaAberta || t('presenca.anon');
     const titulo = document.getElementById('conversaTitle');
-    if (titulo) titulo.textContent = nome;
+    if (titulo && titulo.textContent !== nome) titulo.textContent = nome;
 
     // Onde a pessoa está. "Fora do app" não é aviso de problema: a mensagem
     // fica guardada e ela lê quando voltar — por isso o campo nunca trava.
+    // É região viva: só é reescrita quando a frase MUDA (ver `presencaDesenhar`).
     const estado = document.getElementById('conversaEstado');
     if (estado) {
         let frase;
@@ -1669,7 +1922,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
             const d = presencaDistancia(pessoa);
             frase = [t('presenca.conversa.naApp'), 'L' + ((pessoa.rank || 0) + 1), d && d.texto].filter(Boolean).join(' · ');
         } else frase = t('presenca.conversa.fora');
-        estado.innerHTML = `<span class="presenca-estado"><span class="presenca-ponto${pessoa ? '' : ' fora'}" aria-hidden="true"></span>${escapeHtml(frase)}</span>`;
+        presencaDesenhar(estado, `<span class="presenca-estado"><span class="presenca-ponto${pessoa ? '' : ' fora'}" aria-hidden="true"></span>${escapeHtml(frase)}</span>`);
         estado.classList.remove('hidden');
     }
 
@@ -1693,7 +1946,7 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
         if (semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t('presenca.conversa.erro'))} <button type="button" class="conversa-recarregar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
         if (h.msgs.length) html += presencaHtmlDasMsgs(id, h);
         else if (!semHistorico) html += `<p class="conversa-vazio">${escapeHtml(t(h.carregada ? 'presenca.conversa.vazio' : 'presenca.conversa.carregando'))}</p>`;
-        corpo.innerHTML = html;
+        presencaDesenhar(corpo, html, 'conversaClose');
         // Página antiga entrando em cima: a mensagem que estava na tela fica
         // onde estava. Mensagem nova: segue o fim só se a pessoa já estava lá
         // — quem rolou pra ler o começo não é arrancado de volta.
@@ -1714,7 +1967,8 @@ function presencaAoVoltar() {
     // chegou nada no prazo do silêncio, descarta e religa já.
     const f = Presenca.fluxo;
     if (f && Date.now() - (f.vivoEm || f.desde) > PRESENCA_FLUXO_SILENCIO_MS) presencaFluxoFechar();
-    if (Date.now() - Presenca.atualizadaEm >= PRESENCA_VOLTA_MIN_MS) presencaAtualizar();
+    // Da última TENTATIVA: com a lista falhando, a lista boa não anda.
+    if (Date.now() - presencaUltimaTentativa() >= PRESENCA_VOLTA_MIN_MS) presencaAtualizar();
     clearTimeout(Presenca.timers.fluxo);
     presencaFluxoGarantir();
     // Voltar pra tela com a conversa aberta É ler o que chegou nesse meio-tempo.
@@ -1792,15 +2046,20 @@ function presencaMontar() {
             // A folha diz "de quem" porque o pedido aberto ali não é da fila de
             // ninguém: é o que alguém mostrou.
             const conv = Presenca.conversas.find((c) => c.id === id) || Presenca.online.find((p) => p.id === id);
-            const de = m.meu ? (AppState.profile && AppState.profile.userName) : (conv && conv.nome);
+            const de = m.meu ? (AppState.profile && AppState.profile.userName) : ((conv && conv.nome) || Presenca.nomeDaAberta);
             window.abrirPedidoRecebido?.(m.card, de);
         });
         // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
         // pode virar ícone quebrado no meio da conversa. `error` NÃO borbulha:
-        // só se pega na fase de CAPTURA.
+        // só se pega na fase de CAPTURA. E ela é lembrada: sem isso o próximo
+        // redesenho a pedia de novo (ver `Presenca.fotosFalhas`). O `src` do
+        // ATRIBUTO, que é o `imageUrl` do cartão — a propriedade vem resolvida.
         msgs.addEventListener('error', (ev) => {
             const img = ev.target;
-            if (img && img.tagName === 'IMG') img.closest('.cp-foto')?.remove();
+            if (!img || img.tagName !== 'IMG') return;
+            const url = img.getAttribute('src');
+            if (url) Presenca.fotosFalhas.add(url);
+            img.closest('.cp-foto')?.remove();
         }, true);
     }
     const anexoFoto = document.getElementById('conversaAnexoFoto');
@@ -1822,7 +2081,12 @@ function presencaDiag() {
         conversas: Presenca.conversas.length,
         naoLidas: presencaNaoLidasTotal(),
         atualizadaHaS: Presenca.atualizadaEm ? Math.round((agora - Presenca.atualizadaEm) / 1000) : null,
-        token: Presenca.chat ? { valido: presencaTokenValido(), expiraEmH: Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - agora) / 36e5) : null } : null,
+        // `valido` é "não precisa renovar" (conta a folga de 1 h); `abre` é
+        // "ainda abre o tempo real" (vence DE FATO). Só com o primeiro, o resumo
+        // dizia "o token venceu" com ele valendo mais meia hora (auditoria de
+        // 2026-09-29).
+        token: Presenca.chat ? { valido: presencaTokenValido(), abre: presencaTokenAbre(),
+            expiraEmH: Number.isFinite(Presenca.chat.expiraEm) ? Math.round((Presenca.chat.expiraEm - agora) / 36e5) : null } : null,
         fluxo: {
             aberto: !!Presenca.fluxo,
             haS: Presenca.fluxo ? Math.round((agora - Presenca.fluxo.desde) / 1000) : null,

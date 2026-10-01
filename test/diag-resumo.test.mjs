@@ -187,6 +187,29 @@ test('diag-resumo: relatório de antes das aberturas guardadas diz que elas não
   assert.match(rodar(relatorioV4()), /── ABERTURAS ANTERIORES \(guardadas no aparelho\) ─+\n\(ausente nesta versão\)/);
 });
 
+test('diag-resumo: a abertura que veio do RETRATO do fechar se identifica, e o corte pelo teto é dito (D2, 2026-09-29)', () => {
+  // Recarregar ou fechar a aba abortava a gravação da base; o retrato síncrono
+  // do `pagehide` a salva, com teto. Cortado, o começo do diário falta — e a
+  // triagem tem que dizer que falta, senão a ausência lê como "não aconteceu".
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  d.aberturasAnteriores = [{
+    id: 'ret-1', inicio: Date.parse('2026-09-29T21:00:00.000Z'), salvoEm: Date.parse('2026-09-29T21:30:00.000Z'),
+    salvoPor: 'saida', retrato: true, cortados: { diario: 340, chamadas: 2, lixo: 9 }, versao: '2026093001',
+    diario: [{ t: 1790715000000, k: 'busca.ok', n: 12 }], chamadas: [], erros: [], momentos: [] }, {
+    id: 'base-2', inicio: Date.parse('2026-09-29T22:00:00.000Z'), salvoEm: Date.parse('2026-09-29T22:10:00.000Z'),
+    salvoPor: 'oculta', versao: '2026093001', diario: [], chamadas: [], erros: [], momentos: [] }];
+  const s = rodar(d);
+  assert.match(s, /abertura ret-1 · .* \(guardada por: saida, retrato do fechar\) · v2026093001/,
+    'a abertura que veio do retrato do fechar não se identifica');
+  assert.match(s, /o retrato cortou pelo TETO os mais antigos: diário 340 · chamadas 2 — faltam no começo/,
+    'o corte pelo teto não é dito — o começo que falta leria como "não aconteceu"');
+  assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe no retrato');
+  // CONTROLE: a abertura da base não ganha a marca nem o aviso.
+  assert.match(s, /abertura base-2 · .* \(guardada por: oculta\) · v2026093001\n  diário 0 · chamadas 0 \(falhas 0\) · erros 0 · capturas 0\n/,
+    'CONTROLE: a abertura gravada na base ganhou a marca do retrato ou o aviso do corte');
+});
+
 test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
   const d = relatorioV4();
   d._versaoDoDiag = 7;
@@ -205,6 +228,36 @@ test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos �
   // Relatório de antes da fase 3: a seção diz que não havia.
   const antigo = rodar(relatorioV4());
   assert.match(antigo, /── PRESENÇA NO APP \(lista e conversa\) ─+\n\(ausente nesta versão\)/);
+});
+
+// O token na ÚLTIMA HORA não venceu: `valido` é "não precisa renovar" (conta a
+// folga de 1 h), e o aviso dizia "venceu" com o token abrindo o tempo real por
+// mais meia hora. Quem diz se venceu é o `abre` (auditoria de 2026-09-29, R4-1
+// P11); no relatório que não o traz, só as horas NEGATIVAS provam.
+test('diag-resumo: "o token venceu" só quando ele NÃO abre mais o tempo real — a última hora é nota, não alerta', () => {
+  const com = (token, versao = 11) => {
+    const d = relatorioV4();
+    d._versaoDoDiag = versao;
+    d.resumo.presencaApp = { ligada: true, online: 0, conversas: 0, naoLidas: 0, atualizadaHaS: 30, conversaAberta: false, token,
+      fluxo: { aberto: true, haS: 60, tentativa: 0, aberturas: 1, quadros: 2, mensagens: 0, recibos: 0 }, conhecidos: 0, aConfirmar: 0 };
+    return rodar(d);
+  };
+  const VENCEU = /ATENÇÃO: o token do tempo real venceu/;
+  const ultima = com({ valido: false, abre: true, expiraEmH: 1 });          // vence em 30 min
+  assert.doesNotMatch(ultima, VENCEU, 'o token que ainda abre o tempo real foi dado como vencido');
+  assert.match(ultima, /token válido false · abre o tempo real true \(vence em 1 h\)/);
+  assert.match(ultima, /nota: o token do tempo real está na última hora — ainda abre o tempo real/);
+  // CONTROLE: vencido de fato é alerta.
+  assert.match(com({ valido: false, abre: false, expiraEmH: 0 }), VENCEU, 'o token vencido deixou de ser alerta');
+  // Válido: nada.
+  const bom = com({ valido: true, abre: true, expiraEmH: 5 });
+  assert.doesNotMatch(bom, VENCEU);
+  assert.doesNotMatch(bom, /nota: o token/);
+  // Relatório de ANTES do `abre`: horas negativas provam; na última hora, não dá pra saber — nota, e o motivo.
+  assert.match(com({ valido: false, expiraEmH: -1 }, 7), VENCEU);
+  const antigo = com({ valido: false, expiraEmH: 1 }, 7);
+  assert.doesNotMatch(antigo, VENCEU, 'o relatório antigo na última hora foi dado como vencido');
+  assert.match(antigo, /este relatório não diz se ele ainda abre o tempo real/);
 });
 
 // ── v8 (v2026.09.24-02): o relatório pra entender os relatos da fase 3 ──────

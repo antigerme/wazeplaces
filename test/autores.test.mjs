@@ -242,8 +242,14 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
   // E "voltar pra fila" é pra fila do lote (F4): na fila refeita no meio do
   // laço, quem o traz é a busca — test/lote-autor.test.mjs roda os dois casos.
-  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*if \(naFilaDoLote\(\)\) \{[^}]*AppState\.queue\.push\(q\);/,
+  // Na recusa automática (contando ao landar) volta pro FIM da fila do lote; o
+  // lote da PESSOA volta como o ✕ de um card, pelo `devolverPedidoRecusado` —
+  // o PRÓXIMO card, ou a busca numa fila refeita (C5 e V9, auditoria de
+  // 2026-09-29; o comportamento é medido em test/lote-autor.test.mjs).
+  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*if \(aoLandar && naFilaDoLote\(\)\) \{ AppState\.queue\.push\(q\); return; \}\s*devolver\.push\(q\);\s*\};/,
     'o que falha deixou de voltar pra fila do lote');
+  assert.match(bloco, /devolverPedidoRecusado\(devolver, epocaFila\)/,
+    'o lote da pessoa deixou de devolver o que falhou como o ✕ de um card devolve');
 });
 
 test('lote: o lote respeita a trava e o treino', () => {
@@ -262,7 +268,7 @@ test('lote: o lote respeita a trava e o treino', () => {
   const iA = semComentarios.indexOf('function avisoDaTrava');
   const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
   const aviso = (auth, lote, conf) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
-    corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf);
+    'aprovacaoDaTelaNoAr', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false);
   assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
   assert.equal(aviso(true, true, 0), 'toast.esperaLote');
   assert.equal(aviso(true, false, 1), 'toast.esperaSessao', 'conferindo um 401, "espere o Desfazer" manda procurar um botão que não existe');
@@ -277,9 +283,10 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   // cards dos 6 países), então a condição extra matava o caso COMUM.
   //
   // O raciocínio que a produziu continua certo — com um só na fila, "Ver o 1" e
-  // "Rejeitar o 1" são o card que já está na tela, e a segunda é PIOR que o ✕
-  // (o lote não tem a janela de Desfazer). O erro foi cortar o botão em vez de
-  // cortar as duas linhas. Este teste trava as DUAS metades do conserto.
+  // "Rejeitar o 1" são o card que já está na tela, e a segunda repete o ✕ num
+  // segundo lugar (o lote tem a mesma janela de Desfazer do card; a frase antiga
+  // dizia que não tinha). O erro foi cortar o botão em vez de cortar as duas
+  // linhas. Este teste trava as DUAS metades do conserto.
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
 
   const iSelo = semComentarios.indexOf('function renderSelosDeProcedencia');
@@ -300,7 +307,7 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   // por distância: guard por distância erra nos dois sentidos (gotcha #67).
   assert.match(folha,
     /\(emLote\s*\?\s*linha\(ICONE_OLHO[\s\S]{0,400}?autor\.sheet\.rejeitar[\s\S]{0,140}?:\s*''\)/,
-    'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar é PIOR que o ✕ (sem Desfazer)');
+    'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar repete o ✕ que está logo abaixo');
   assert.match(folha,
     /\(emLote\s*\?\s*`<p class="mt-4[\s\S]{0,400}?autor\.sheet\.aviso[\s\S]{0,60}?:\s*''\)/,
     'o aviso descreve a rejeição em lote: sem ela na tela ele passa a descrever o interruptor errado');
@@ -430,7 +437,9 @@ test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo 
   const bloco = semComentarios.slice(i, i + 400);
   assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
   assert.match(bloco, /if \(Treino\.ativo\) return;/, 'no treino a fila é de exemplos');
-  assert.match(bloco, /if \(recusaAutomaticaRodando\) return;/,
+  // A segunda passagem SAI (anotando o pedido pra rodar de novo no fim — V4,
+  // medido em test/lote-autor.test.mjs), nunca corre junto da primeira.
+  assert.match(bloco, /if \(recusaAutomaticaRodando\) \{ recusaAutomaticaPedidaDeNovo = true; return; \}/,
     'a fila pode crescer durante o laço: duas passagens mandariam o mesmo pedido duas vezes');
 });
 
@@ -660,7 +669,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
   };
   const chaves = Object.keys(deps);
-  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
   await fn();
   assert.deepEqual(enviados, ['a2'], 'rejeitou o card que estava NA TELA');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['a1', 'b1']);
@@ -692,7 +701,7 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
     API: { getRegion: () => 'row' },
   };
   const chaves = Object.keys(deps);
-  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
   await fn();
   assert.deepEqual(enviados, ['a2'], 'a recusa rejeitou um pedido que o lote de lidos está marcando');
   assert.deepEqual(AppState.queue.map((x) => x.venueID), ['f1', 'a1'], 'o pedido do lote saiu da fila antes da resposta dele');
@@ -702,7 +711,10 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
 // Três defeitos de texto: o título dizia "{n} pedidos, {n} resolvidos" mesmo
 // com falha; com um só saía "1 rejeitados"; e o que foi pra fila de SAÍDA (sem
 // rede) contava como "Foram pro Waze no seu nome" — sem ter ido.
-function lote({ respostas }) {
+// `camada`: o que está aberto por cima quando o lote termina ('filtros', 'foto',
+// 'mapa' ou nada) — ver o L27 logo abaixo.
+const RECUSA_LOTE = { success: false, errorCategory: 'unknown', httpCode: 406 };
+function lote({ respostas, camada = null }) {
   const APP_SEM = fonte.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const fatiarFn = (nome) => {
     const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
@@ -722,6 +734,8 @@ function lote({ respostas }) {
   const els = { autorTitle: { textContent: '' }, autorCorpo: { innerHTML: '' } };
   const historico = [];
   const confirmadas = { n: 0 };
+  const toasts = [];
+  const modais = [];
   const fila = respostas.slice();
   const deps = {
     AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
@@ -730,7 +744,12 @@ function lote({ respostas }) {
     registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
     enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
-    saveStats() {}, updatePendingCount() {}, openModal() {},
+    saveStats() {}, updatePendingCount() {}, openModal: (id) => modais.push(id),
+    carregarFilaDeSaida: () => [], tirarDaFilaDeSaida() {}, dfato() {}, devolverPedidoRecusado() {},
+    aoMudarAFilaPorBaixo() {}, pousouNoWaze: () => false, descontarGestoSemSessao() {},
+    topOpenModal: () => (camada === 'filtros' ? { id: 'filtersModal' } : null),
+    Lightbox: { isOpen: () => camada === 'foto' }, MapaLightbox: { isOpen: () => camada === 'mapa' },
+    showToast: (msg, tipo) => toasts.push([msg, tipo]),
     document: { getElementById: (id) => els[id] || null },
     t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k), escapeHtml: (x) => x,
   };
@@ -738,7 +757,7 @@ function lote({ respostas }) {
   const enviar = new Function(...chaves, fatiarFn('enviarLote') + '\n' + fatiarFn('mostrarResultadoDoLote')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
   const pl = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 7 });
-  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els, historico, confirmadas };
+  return { rodar: () => enviar(respostas.map((_, i) => pl(i))), els, historico, confirmadas, toasts, modais };
 }
 
 test('lote: com UM pedido, singular no título e na linha ("1 rejeitado", não "1 rejeitados")', async () => {
@@ -770,4 +789,31 @@ test('lote: "já tratado" entra no Histórico como no card único, e o que saiu 
   await m.rodar();
   assert.deepEqual(m.historico, [['reject', 1], ['reject', 1]], 'o "já tratado" do lote não entrou no Histórico');
   assert.equal(m.confirmadas.n, 1, 'o rejeitado do lote não contou pras conquistas');
+});
+
+// ── L27: o resultado do lote NÃO abre por cima de outra camada ───────────────
+// A folha do resultado abria incondicional: com a foto ampliada aberta ela ia
+// pra TRÁS dela (o foco preso dentro da folha invisível), e com os Filtros
+// abertos ela os substituía, jogando fora a mudança não aplicada (auditoria de
+// 2026-09-29, e6/e23). Com outra camada, o resultado vira AVISO com as mesmas
+// frases da folha — e a folha (que pode ser a de outro autor) nem é tocada.
+test('L27: com Filtros, a foto ou o mapa ampliados abertos, o resultado do lote é um AVISO — a camada fica', async () => {
+  for (const camada of ['filtros', 'foto', 'mapa']) {
+    const m = lote({ respostas: [{ success: true }, { success: true }, RECUSA_LOTE], camada });
+    await m.rodar();
+    assert.deepEqual(m.modais, [], `${camada}: a folha do resultado abriu por cima da camada aberta`);
+    assert.equal(m.els.autorTitle.textContent, '', `${camada}: a folha (que pode ser a de outro autor) foi reescrita`);
+    assert.equal(m.toasts.length, 1, `${camada}: o resultado sumiu calado`);
+    assert.equal(m.toasts[0][0], 'autor.lote.rejeitados#2 · autor.lote.falharamUm#1',
+      `${camada}: o aviso não diz o mesmo que a folha diria`);
+    assert.equal(m.toasts[0][1], 'error', 'com falha, o aviso não é de sucesso');
+  }
+});
+
+test('L27: CONTROLE — sem camada aberta, a folha do resultado abre como sempre', async () => {
+  const m = lote({ respostas: [{ success: true }, { success: true }] });
+  await m.rodar();
+  assert.deepEqual(m.modais, ['autorModal']);
+  assert.equal(m.toasts.length, 0);
+  assert.equal(m.els.autorTitle.textContent, 'autor.lote.titulo#2');
 });

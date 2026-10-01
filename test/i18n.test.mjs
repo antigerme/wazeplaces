@@ -120,6 +120,40 @@ test('i18n: toda chave usada no index.html (data-i18n*) existe no dicionário', 
 // é justamente quem não tem outro caminho. Nada quebra: a chave existe, a
 // paridade passa, o texto só fica com as tags à mostra. Quem tem markup usa
 // `data-i18n-html` (innerHTML, valores do próprio dicionário — nunca da rede).
+// A MARCAÇÃO das chaves com HTML: a mesma na reserva do index.src.html (o que
+// se vê antes do JS) e nas 4 línguas. O teste da reserva (test/entrada.test.mjs)
+// compara só o TEXTO, e o chip do ↗ no "Importante:" da Ajuda nasceu com a
+// variante escura (`dark:bg-cyan-600/20`) no HTML e sem ela no dicionário: com
+// o JS, um chip claro no tema escuro (auditoria de 2026-09-29, A12 — a única
+// diferença entre as reservas). Tag ou classe a menos numa língua é o mesmo
+// defeito, só que pra quem usa o app nela.
+test('i18n: a marcação (tags e classes) de cada chave com HTML é a mesma na reserva do HTML e nas 4 línguas', () => {
+  const tags = (s) => (String(s).match(/<[^>]+>/g) || []).map((t) => t.replace(/\s+/g, ' ')).join('');
+  const html = read('index.src.html').replace(/<!--[\s\S]*?-->/g, '');
+  const achados = [...html.matchAll(/<([a-z0-9]+)\b[^>]*\bdata-i18n-html="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/g)];
+  const marcados = (html.match(/\bdata-i18n-html="/g) || []).length;
+  assert.ok(marcados >= 20, `CONTROLE: só ${marcados} reservas com data-i18n-html — o HTML mudou de forma`);
+  assert.equal(achados.length, marcados, 'CONTROLE: alguma reserva com data-i18n-html ficou de fora do recorte');
+  const divergentes = [];
+  for (const [, , chave, reserva] of achados) {
+    const pt = DICT.pt[chave];
+    if (typeof pt !== 'string') continue;   // chave sem dicionário: é o teste de cima
+    if (tags(reserva) !== tags(pt)) divergentes.push(`reserva × pt · ${chave}\n  html: ${tags(reserva)}\n  pt:   ${tags(pt)}`);
+  }
+  let comHtml = 0;
+  for (const chave of Object.keys(DICT[LANG_REF])) {
+    if (!/<[a-z][^>]*>/i.test(DICT[LANG_REF][chave])) continue;
+    comHtml++;
+    for (const lang of LANGS) {
+      if (tags(DICT[lang][chave]) !== tags(DICT[LANG_REF][chave])) {
+        divergentes.push(`${LANG_REF} × ${lang} · ${chave}\n  ${LANG_REF}: ${tags(DICT[LANG_REF][chave])}\n  ${lang}: ${tags(DICT[lang][chave])}`);
+      }
+    }
+  }
+  assert.ok(comHtml >= 20, `CONTROLE: só ${comHtml} chaves com HTML no dicionário — o recorte quebrou`);
+  assert.deepEqual(divergentes, [], 'a marcação muda entre a reserva do HTML e o dicionário, ou entre as línguas');
+});
+
 test('i18n: chave ligada por textContent (data-i18n) não pode ter markup no valor', () => {
   const html = read('index.src.html');
   const textuais = new Set();
@@ -291,6 +325,23 @@ test('i18n: dicionário não acumula srv.err.* órfã', () => {
   const orfas = noDict.filter((k) => !core.includes(k));
   assert.ok(orfas.length <= 2,
     `${orfas.length} chaves srv.err.* não são mais emitidas por ninguém:\n` + orfas.join('\n'));
+});
+
+// Aviso (toast) que ninguém mostra é frase que DESCREVE o app — e envelhece
+// junto com ele sem ninguém ver. `toast.devCapturado` dizia "segure o botão pra
+// baixar" desde que segurar o FAB passou a MOVÊ-LO (auditoria de 2026-09-29,
+// T5): lida por quem traduz ou mantém, ensinava o gesto errado. Os toasts são
+// pedidos pela chave LITERAL (`t('toast.x')`), então aqui a régua é exata.
+test('i18n: toda chave toast.* do dicionário é mostrada pelo app — aviso morto sai', () => {
+  const codigo = ['js/app.js', 'js/api.js', 'js/presenca.js', 'js/swipe.js', 'js/sw-register.js', 'index.src.html']
+    .map(read).join('\n');
+  const usada = (k) => codigo.includes(`'${k}'`) || codigo.includes(`"${k}"`) || codigo.includes('`' + k + '`');
+  const toasts = Object.keys(DICT[LANG_REF]).filter((k) => k.startsWith('toast.'));
+  // CONTROLE: o varredor enxerga um toast de verdade e não inventa um que não existe.
+  assert.ok(toasts.length >= 50 && usada('toast.logoutServerFailed'), 'CONTROLE: o varredor não achou os toasts do app');
+  assert.ok(!usada('toast.naoExisteNenhum'), 'CONTROLE: o varredor achou uma chave que não existe');
+  const mortas = toasts.filter((k) => !usada(k));
+  assert.deepEqual(mortas, [], 'aviso no dicionário que o app nunca mostra (tire dos 4 idiomas):\n' + mortas.join('\n'));
 });
 
 // O `||` que fazia o português do servidor GANHAR da tradução. Era o buraco de
@@ -539,6 +590,26 @@ test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', 
   for (const [k, v] of Object.entries(es)) assert.doesNotMatch(v, /\bpedidos?\b/i, `es: ${k} diz "pedido": "${v}"`);
   assert.deepEqual([es['stats.read'], es['stats.rejected'], es['stats.skipped']], ['Leídas', 'Rechazadas', 'Saltadas']);
   assert.match(es['resumo.img.lidos'], /leídas/);
+});
+
+// O termo de APAGAR FOTO no espanhol é o do botão da lixeira ("Borrar foto") e do
+// filtro do tipo de pedido — e o app todo segue ("Foto borrada", "No se pudo
+// borrar la foto", os erros do servidor). Duas frases da Ajuda diziam "eliminar"
+// (auditoria de 2026-09-29, achado do lote do lightbox): o mesmo conceito com
+// dois nomes, e o editor se pergunta se são duas ações. `Eliminar lugar` e
+// `Solicitud de eliminación` são OUTRO conceito (o pedido de apagar o LOCAL, com
+// a string do WME) e ficam.
+test('espanhol: apagar FOTO é "borrar" em todo o app — o mesmo verbo do botão da lixeira', () => {
+  const es = DICT.es;
+  assert.match(es['lightbox.delete.aria'], /^Borrar\b/, 'CONTROLE: o botão da lixeira mudou de verbo — atualize o teste junto');
+  assert.match(es['filters.types.DELETE_PHOTO'], /^Borrar\b/);
+  const ELIMINAR_FOTO = /\belimin\w*\s+(?:(?:una|la|las|los|el)\s+)?fotos?\b/i;
+  // CONTROLE: o padrão enxerga as frases de antes.
+  for (const antes of ['Solo se puede eliminar una foto que ya está en el mapa.', 'aprueba la foto nueva, elimina fotos del lugar']) {
+    assert.ok(ELIMINAR_FOTO.test(antes), `CONTROLE: o padrão não reconhece "${antes}"`);
+  }
+  const fora = Object.entries(es).filter(([, v]) => ELIMINAR_FOTO.test(String(v).replace(/<[^>]+>/g, ''))).map(([k]) => k);
+  assert.deepEqual(fora, [], 'frase em espanhol chamando de "eliminar" o apagar FOTO — a lixeira diz "Borrar"');
 });
 
 test('inglês e francês usam o apóstrofo tipográfico (’) — só as strings OFICIAIS do WME ficam como vieram', () => {

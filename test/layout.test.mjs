@@ -1631,6 +1631,10 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // o DOM, ou seja nome e endereço de terceiros. Sai pelo mesmo apagar do
     // desligar do modo dev, que o logout chama.
     DIAG_DB: 'dlogApagar()',
+    // O RETRATO que o fechar deixa no localStorage (diário, chamadas sem corpo
+    // e erros da abertura), pra a seguinte levar pra base: é o mesmo registro,
+    // e sai pelo mesmo apagar — conferido abaixo que o `dlogApagar` o apaga.
+    DIAG_RETRATO_KEY: 'dlogApagar()',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
@@ -1704,6 +1708,13 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   const esquecer = presenca.slice(j, presenca.indexOf('\n}', j));
   assert.match(esquecer, /safeLS\.remove\(CHAT_KEY\)/, 'o esquecer da presença parou de apagar a chave do chat');
   assert.match(presenca, /esquecer: presencaEsquecer,/, 'o esquecer da presença não está exportado');
+  // Idem o retrato do fechar: o logout chama o `dlogApagar`, e ele tem que
+  // apagar o retrato (o `diagEsquecerRetratos` sem lista apaga TODOS — medido
+  // em test/diag-guarda.test.mjs).
+  const d = app.indexOf('function dlogApagar(');
+  assert.notEqual(d, -1, 'sumiu o dlogApagar');
+  const apagar = app.slice(d, app.indexOf('\n}', d)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(apagar, /^\s+diagEsquecerRetratos\(\);/m, 'o Sair (e o desligar do modo dev) deixou o retrato do fechar no aparelho');
 });
 
 test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {

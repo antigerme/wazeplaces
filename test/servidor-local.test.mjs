@@ -42,10 +42,10 @@ test('toda ferramenta que sobe o app passa pela fonte única', () => {
 const portaLivre = () => new Promise((ok) => {
   const s = criarTcp().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); });
 });
-function rodar(porta) {
+function rodar(porta, variavel = 'TESTE_PORTA') {
   const codigo = `
     const { subirServidorLocal } = await import(${JSON.stringify(new URL('../tools/servidor-local.mjs', import.meta.url).href)});
-    const { base } = await subirServidorLocal({ porta: ${porta}, variavel: 'TESTE_PORTA', tetoMs: 8000,
+    const { base } = await subirServidorLocal({ porta: ${porta}, variavel: ${JSON.stringify(variavel)}, tetoMs: 8000,
       env: { ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64') } });
     const r = await fetch(base + '/');
     console.log('STATUS ' + r.status);
@@ -74,6 +74,31 @@ test('servidor local: porta ocupada por OUTRO servidor HTTP — recusa, com o ca
     assert.doesNotMatch(r.out, /STATUS/, 'chegou a medir: ' + r.out);
     assert.match(r.err, /já está ocupada/);
     assert.match(r.err, /TESTE_PORTA=/, 'o erro não diz como trocar de porta');
+  } finally { alheio.close(); }
+});
+
+// O diag-replay troca a porta por FLAG (`--porta N`), e a mensagem sugeria
+// `--porta=<outra porta>`, que o parser dele não lê: a porta nova era ignorada
+// e ele tentava a MESMA de novo (auditoria de 2026-09-29, V8). O que a tela
+// mostra e o que a ferramenta aceita são a mesma coisa: a sugestão, com a porta
+// preenchida, passa pelo `opt` DE VERDADE do diag-replay.
+test('servidor local: porta ocupada numa ferramenta de FLAG — a sugestão é a que o parser dela lê', async () => {
+  const alheio = criarHttp((req, res) => res.end('outro app')).listen(0, '127.0.0.1');
+  await new Promise((ok) => alheio.once('listening', ok));
+  try {
+    const r = await rodar(alheio.address().port, '--porta');
+    assert.equal(r.code, 1, 'mediu o servidor ALHEIO: ' + r.out);
+    const sugestao = (/rode noutra porta: (.+)$/m.exec(r.err) || [])[1];
+    assert.ok(sugestao, 'o erro não diz como trocar de porta: ' + r.err);
+    // O parser do diag-replay, fatiado do fonte (a função é a dele, não uma cópia).
+    const REPLAY = readFileSync(new URL('../tools/diag-replay.mjs', import.meta.url), 'utf8');
+    const m = /^const opt = \(nome, padrao\) => \{[\s\S]*?^\};/m.exec(REPLAY);
+    assert.ok(m, 'o `opt` sumiu do diag-replay — o teste precisa do parser dele');
+    const lerPorta = (linha) => new Function('args', m[0] + '\nreturn opt;')(linha.split(/\s+/))('porta', 'PADRAO');
+    assert.equal(lerPorta(sugestao.trim().replace('<outra porta>', '9123')), '9123',
+      `a sugestão "${sugestao}" não é lida pelo diag-replay — ele cairia na porta padrão`);
+    // CONTROLE: a forma de variável de ambiente, na mesma ferramenta, NÃO é lida.
+    assert.equal(lerPorta('--porta=9123'), 'PADRAO', 'CONTROLE: o parser leu "--porta=9123" — o teste não distingue as duas formas');
   } finally { alheio.close(); }
 });
 

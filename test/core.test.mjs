@@ -822,11 +822,21 @@ test('a sessão é janela DESLIZANTE: usar o app renova o prazo', async () => {
   // Cloudflare NÃO: `expirationTtl` conta do `put` e o `get` não estende nada.
   // Medido com este mesmo simulador antes da correção: editor usando o app
   // TODO DIA era deslogado no dia 21, com ZERO escritas no KV no período.
+  //
+  // "Usar o app" é uma REQUISIÇÃO, e desde a auditoria de 2026-09-29 o prazo
+  // anda no FIM dela (`renovarPrazo`, que o `dispatch` chama), não na leitura —
+  // então o teste passa pelo `dispatch`, que é o caminho de produção. O Waze
+  // daqui NÃO rotaciona o cookie: é o caso em que a renovação regrava o blob
+  // guardado. Com rotação, quem renova é a gravação do cookie novo, e isso é o
+  // `test/sessao-renovacao.test.mjs`.
   const DIA = 86400;
   const T0 = 1785000000;
   let agora = T0;
   const relogio = Date.now;
   Date.now = () => agora * 1000;
+  const fetchOriginal = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ countries: [] }),
+    { status: 200, headers: { 'content-type': 'application/json' } });
 
   try {
     const kv = new Map();
@@ -843,26 +853,29 @@ test('a sessão é janela DESLIZANTE: usar o app renova o prazo', async () => {
     };
     const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
     const token = await sessions.createSession('_web_session=a; _csrf_token=b');
+    const usar = () => dispatch('lista-paises', { sessionToken: token, region: 'row' }, { sessions });
 
     // Uso diário por muito mais que o TTL: tem que continuar viva.
     for (let dia = 1; dia <= 90; dia++) {
       agora = T0 + dia * DIA;
-      assert.ok(await sessions.loadSession(token), `sessão morreu no dia ${dia} com uso diário`);
+      const r = await usar();
+      assert.equal(r.status, 200, `sessão morreu no dia ${dia} com uso diário (${JSON.stringify(r.body).slice(0, 80)})`);
     }
 
     // Rajada no MESMO dia não pode virar uma escrita por leitura: o KV aceita
     // 1 escrita/s por chave, e o app faz 3 chamadas só ao abrir. Trocar o
     // logout por estouro de limite de escrita seria trocar de defeito.
     const antes = escritas;
-    for (let i = 0; i < 30; i++) { agora += 1; await sessions.loadSession(token); }
+    for (let i = 0; i < 30; i++) { agora += 1; await usar(); }
     assert.equal(escritas, antes, 'rajada no mesmo dia gerou escrita a cada leitura');
     assert.ok(SESSION_REFRESH_AFTER >= 3600, 'granularidade de renovação curta demais pro limite do KV');
 
     // Sumir por MAIS que o TTL ainda expira — a janela desliza, não é eterna.
     agora += SESSION_TTL + DIA;
-    assert.equal(await sessions.loadSession(token), null, 'sessão sobreviveu além do TTL sem uso');
+    assert.equal((await usar()).status, 401, 'sessão sobreviveu além do TTL sem uso');
   } finally {
     Date.now = relogio;
+    globalThis.fetch = fetchOriginal;
   }
 });
 

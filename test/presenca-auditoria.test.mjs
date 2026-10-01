@@ -605,7 +605,9 @@ test('P12 "Ver mensagens anteriores": carregando, o MESMO botão desabilitado e 
   toque(c, '.conversa-anteriores');
   await tick();
   const durante = c.$('conversaMsgs').innerHTML;
-  assert.match(durante, /<button type="button" class="conversa-anteriores" disabled>presenca\.conversa\.anterioresCarregando<\/button>/,
+  // `aria-disabled`, não `disabled`: o botão `disabled` solta o foco, e quem
+  // apertou Enter nele caía no <body> (auditoria de 2026-09-29).
+  assert.match(durante, /<button type="button" class="conversa-anteriores" aria-disabled="true">presenca\.conversa\.anterioresCarregando<\/button>/,
     'carregando, a tela ficou igual à de antes do toque');
   toque(c, '.conversa-anteriores');                        // outro toque no meio: nada sai
   assert.equal(c.chamadas.chat.filter((x) => x.acao === 'abrir' && x.antesDe).length, 1, 'o toque no meio mandou outro pedido');

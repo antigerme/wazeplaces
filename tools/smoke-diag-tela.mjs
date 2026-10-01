@@ -27,7 +27,8 @@ import { lerDiagnostico } from './diag-ler.mjs';
 import { esperarOuExplodir } from './esperar-saida.mjs';
 import { execFileSync } from 'node:child_process';
 import { subirServidorLocal } from './servidor-local.mjs';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -35,9 +36,15 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COOKIES = process.argv[2] || null;
 const PORT = Number(process.env.SMOKE_DIAG_PORT || 8241), BASE = `http://127.0.0.1:${PORT}`;
-const SAIDA = '/tmp/smoke-diag-tela';
-rmSync(SAIDA, { recursive: true, force: true });
-mkdirSync(SAIDA, { recursive: true });
+// Um diretório POR RODADA: com o caminho fixo de antes, duas rodadas ao mesmo
+// tempo (agentes em paralelo) apagavam os arquivos uma da outra no meio, e a
+// falha parecia do app. `SMOKE_DIAG_SAIDA` escolhe um caminho, se quiser.
+const SAIDA = process.env.SMOKE_DIAG_SAIDA || mkdtempSync(join(tmpdir(), 'smoke-diag-tela-'));
+if (process.env.SMOKE_DIAG_SAIDA) {
+  rmSync(SAIDA, { recursive: true, force: true });
+  mkdirSync(SAIDA, { recursive: true });
+}
+console.log(`arquivos desta rodada: ${SAIDA}`);
 
 let falhas = 0;
 const checa = (ok, oq, detalhe = '') => {
@@ -371,6 +378,34 @@ checa(/cabeçalho: perfil "[^"]+" · Filtros sim · Atualizar sim/.test(replay),
 checa(/alertas: nenhum/.test(replay) && !/tokenNaoPersiste/.test(replay),
   'o replay não inventa o alerta `tokenNaoPersiste`', (replay.match(/alertas: .*/) || [''])[0]);
 checa(existsSync(zip + '-replay.png'), 'o replay salvou a tela');
+
+// O PLACAR do aparelho (auditoria de 2026-09-29, T3): a remontagem mostrava
+// 0 · 0 · 0 e, no "Restam", o tamanho do recorte injetado. Aqui o MESMO
+// relatório com um placar CONHECIDO, e o CONTROLE sem os campos (a forma dos
+// relatórios antigos): se a linha não mudar entre os dois, ela não vem da tela.
+// Fila de 6 pedidos, acima do limiar da busca adiantada: com "há mais" e fila
+// curta o app pediria a página seguinte, e o replay corta a rede.
+const FILA_T3 = JSON.parse(readFileSync(join(ROOT, 'tools', 'fixtures-paises.json'), 'utf8')).slice(0, 6)
+  .map((p, i) => ({ ...p, venueID: 't3.' + i, updateRequestID: 't3u' + i }));
+const replayDoPlacar = async (placar, nome) => {
+  const { stats, serverTotal, hasMore, ...resto } = d.appState || {};
+  const arq = join(SAIDA, nome + '.json');
+  writeFileSync(arq, JSON.stringify({ ...d, momentos: [], aberturasAnteriores: [],
+    appState: { ...resto, queue: FILA_T3, currentPlaceIdx: 0, loadError: false, ...placar } }));
+  const porta = await new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
+  let saida = '';
+  try {
+    saida = execFileSync(process.execPath, ['tools/diag-replay.mjs', arq, '--tela', '--porta', String(porta)],
+      { cwd: ROOT, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) { saida = String(e.stdout || '') + '\nFALHOU: ' + String(e.message).slice(0, 200); }
+  return ((saida.match(/^placar: .*$/m) || [saida.slice(-200)])[0]).trim();
+};
+const placarCheio = await replayDoPlacar({ stats: { read: 801, rejected: 905, skipped: 18 }, serverTotal: 311, hasMore: true }, 'placar-cheio');
+checa(/lidos 801 · rejeitados 905 · pulados 18 · restam 311\+$/.test(placarCheio),
+  'o replay remonta o PLACAR do aparelho: Lidos, Rejeitados, Pulados e o "Restam" com o "+"', placarCheio);
+const placarAusente = await replayDoPlacar({}, 'placar-ausente');
+checa(/lidos 0 · rejeitados 0 · pulados 0 · restam 6$/.test(placarAusente),
+  'CONTROLE: relatório sem placar remonta como antes (zerado, o "Restam" do recorte) — a linha vem da tela', placarAusente);
 
 // ── o caminho de ABORTO ───────────────────────────────────────────────────
 console.log('\n── recusa de entregar imagem errada ──');

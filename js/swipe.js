@@ -98,6 +98,51 @@ function engolirCliqueDoArraste() {
     setTimeout(() => document.removeEventListener('click', engolir, true), 0);
 }
 
+// Tentativa de ARRASTAR o card com as ações travadas (C14; ver o
+// `handleDragStart`). O card não sai do lugar — o gesto nem começa —, mas se o
+// dedo ANDAR como num arraste (mais que o mínimo do flick) o app diz por quê,
+// pelo `avisarTravaAoTocar` do app.js, que cala na janela do Desfazer (o banner
+// já explica) e tem o próprio intervalo entre avisos. Toque parado não conta:
+// tocar na foto pra ampliá-la com o lote no ar é legítimo, e responder "espere"
+// a quem não tentou decidir nada seria ruído. UMA vigília por vez: um toque que
+// começa encerra a anterior, mesmo que o fim dela tenha se perdido (o card
+// trocado no meio do gesto, como o arraste órfão).
+let pararTentativa = null;
+function vigiarTentativaTravada(e) {
+    if (pararTentativa) pararTentativa();
+    const mouse = e.type === 'mousedown';
+    const inicio = mouse ? e : (e.changedTouches && e.changedTouches[0]);
+    if (!inicio) return;
+    const id = mouse ? null : inicio.identifier;
+    const x0 = inicio.clientX, y0 = inicio.clientY;
+    const mover = (ev) => {
+        let p = null;
+        if (ev.type === 'mousemove') {
+            if (ev.buttons === 0) { parar(); return; }   // soltou fora da janela
+            p = ev;
+        } else {
+            for (const t of ev.touches || []) if (t.identifier === id) p = t;
+        }
+        if (!p || Math.hypot(p.clientX - x0, p.clientY - y0) < FLICK_MIN_DISTANCE) return;
+        parar();
+        if (window.avisarTravaAoTocar) window.avisarTravaAoTocar();
+    };
+    const parar = () => {
+        document.removeEventListener('mousemove', mover);
+        document.removeEventListener('touchmove', mover);
+        document.removeEventListener('mouseup', parar);
+        document.removeEventListener('touchend', parar);
+        document.removeEventListener('touchcancel', parar);
+        if (pararTentativa === parar) pararTentativa = null;
+    };
+    pararTentativa = parar;
+    document.addEventListener('mousemove', mover);
+    document.addEventListener('touchmove', mover, { passive: true });
+    document.addEventListener('mouseup', parar);
+    document.addEventListener('touchend', parar);
+    document.addEventListener('touchcancel', parar);
+}
+
 function handleDragStart(e) {
     // DOIS DEDOS NO CARD NÃO SÃO ARRASTE: é a pinça de quem quer ver a foto de
     // perto (ou a mão apoiada). Até a auditoria de 2026-09-26 o segundo
@@ -124,11 +169,6 @@ function handleDragStart(e) {
         if (e.touches && e.touches.length > 1) return;
     }
     if (animating) return; // não inicia drag durante a animação de saída
-    // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
-    // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
-    // ficam visivelmente desabilitados no mesmo período, então o card parado é
-    // coerente com o resto da tela — não é travamento sem explicação.
-    if (window.acoesTravadas && window.acoesTravadas()) return;
     // Controles interativos e áreas de scroll interno não iniciam drag —
     // sem a exceção das listas, o touch-action:none do card mataria o
     // scroll de "Mudanças propostas" e do reporte no mobile.
@@ -142,6 +182,22 @@ function handleDragStart(e) {
     // soltar além do limiar — rejeitar com o botão direito, sem querer
     // (auditoria de 2026-09-25).
     if (e.type === 'mousedown' && e.button !== 0) return;
+    // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
+    // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
+    // ficam visivelmente desabilitados no mesmo período, então o card parado é
+    // coerente com o resto da tela — não é travamento sem explicação.
+    //
+    // Com as OUTRAS travas (o "Marcar todos" no ar, a conferência de um 401, a
+    // sessão renovando) não há banner nenhum explicando, e o card parado sob o
+    // dedo lia como app quebrado (auditoria do card, 2026-09-29, C14): quem
+    // TENTA arrastar recebe o porquê (ver `vigiarTentativaTravada`). Esta
+    // conferência vem DEPOIS das exceções de cima de propósito: tocar num
+    // botão ou rolar a lista com a trava ligada não é tentar decidir, e não
+    // merece "espere" — nem o toque parado (ampliar a foto): só o dedo que ANDA.
+    if (window.acoesTravadas && window.acoesTravadas()) {
+        vigiarTentativaTravada(e);
+        return;
+    }
 
     isDragging = true;
     capturouNesteGesto = false;
@@ -418,7 +474,12 @@ function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
 
 function triggerSwipe(direction, callback) {
     if (animating) return; // ignora enquanto uma animação de saída está em curso
-    if (window.acoesTravadas && window.acoesTravadas()) return;
+    // Travado: o botão e a tecla não decidem — e dizem por quê quando a trava
+    // não tem banner na tela (C14; ver `avisarTravaAoTocar` no app.js).
+    if (window.acoesTravadas && window.acoesTravadas()) {
+        if (window.avisarTravaAoTocar) window.avisarTravaAoTocar();
+        return;
+    }
     // A seta ← → num card de foto sem foto (ver `direcaoTravada` no app.js).
     if (window.direcaoTravada && window.direcaoTravada(direction)) return;
     // NUNCA `document.querySelector('.place-card')` aqui: desde a pilha existem

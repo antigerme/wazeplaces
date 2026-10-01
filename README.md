@@ -219,7 +219,7 @@ Variáveis de ambiente (todas opcionais):
 |---|---|---|
 | `PORT` | `8080` | Porta de escuta |
 | `HOST` | `0.0.0.0` | Host bind (`127.0.0.1` restringe ao localhost) |
-| `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
+| `ENCRYPTION_KEY` | auto-gera | Chave base64 com no mínimo 32 bytes (`openssl rand -base64 32`); com menos, ou malformada, a VM não sobe e diz por quê. Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
 
@@ -265,13 +265,18 @@ Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `
 **Conferir que a API subiu (uma linha):**
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' -X POST 'https://places.seudominio.com/api/perfil'
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' \
+  'https://places.seudominio.com/api/perfil'
 ```
+
+O `-A` (um User-Agent de navegador) não é enfeite: sem ele o Bot Fight Mode do Cloudflare barra o `curl` antes de a API ver o pedido.
 
 | Resposta | O que significa |
 |---|---|
 | **401** | Deu certo. A API respondeu "sessão inválida" (o pedido não levou sessão), o que só acontece com o KV `SESSIONS` e o `ENCRYPTION_KEY` no lugar |
-| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY` (a resposta diz "Backend não configurado"), ou a chave está malformada |
+| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY`, ou a chave está malformada ou tem menos de 32 bytes (a resposta diz "Backend não configurado" e o motivo) |
+| **403** | Quem respondeu foi o Bot Fight Mode do Cloudflare, não a API: o `curl` saiu sem o `-A` com um User-Agent de navegador |
 | outra coisa | O domínio ainda não aponta pra este Worker, ou o deploy não saiu |
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
@@ -293,7 +298,10 @@ proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) �
 sudo dnf module install -y nodejs:22/common
 sudo dnf install -y git
 sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
-sudo mkdir -p /var/lib/wazeplaces/sessions
+# O diretório das sessões é do USUÁRIO DO SERVIÇO (o `User=nobody` da unidade
+# abaixo). Criado só com `mkdir`, ele fica do root, o `nobody` não grava nele,
+# e todo login e todo pareamento respondem "Erro interno".
+sudo install -d -o nobody -g nobody -m 700 /var/lib/wazeplaces/sessions
 ```
 
 Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
@@ -412,8 +420,8 @@ Vários editores tratam o mesmo place ao mesmo tempo. `categorizeWazeError(httpC
 |---|---|---|
 | `already_processed` | code ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual | Toast "Já tratado por outro editor 👍", **mantém** stats |
 | `not_found` | HTTP 404 puro | Idem |
-| `unauthorized` | HTTP 401/403 | Invalida sessão local, volta pra tela de login |
-| `transient` | 5xx sem padrão de race, 408, 429, 0, erro de rede | `callWithRetry` 2x com backoff (1.5s, 3.5s) |
+| `unauthorized` | HTTP 401/403 | A ação vai pra fila de saída e o app confere a sessão com uma segunda chamada: um 401 muitas vezes é alarme falso (WAF, oscilação do KV), e aí nada cai. Morta de verdade, a extensão renova em silêncio, com a fila na tela; sem ela, aviso e tela de login. A fila de saída sai quando a sessão volta |
+| `transient` | 5xx sem padrão de race, 408, 429, 0, erro de rede | `callWithRetry` 2x com backoff (1.5s, 3.5s); sem rede, a ação espera na fila de saída e sai sozinha quando a rede voltar |
 | `unknown` | Resto | Reverte stat, toast de erro |
 
 A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra uma race no `Issues/Read` (HTTP 500) não virar "instabilidade real".
@@ -422,7 +430,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 
 - **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
-- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. Cookies do Waze duram ~28 dias. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
+- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. Cookies do Waze duram ~28 dias. Quando expiram de verdade, o backend devolve 401: o app confere (um 401 pode ser alarme falso), tenta renovar pela extensão e, sem ela, volta pra tela de login — a ação que levou o 401 espera na fila de saída.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
 - **CSP** em TRÊS cópias que precisam bater: o `<meta>` do `index.src.html`, o `_headers` (Cloudflare) e o `server/node.mjs` (VM). Sem `unsafe-eval` e sem `unsafe-inline` em `script-src` — o único script inline (o do tema) entra por hash, e `test/layout.test.mjs` o recalcula.
 

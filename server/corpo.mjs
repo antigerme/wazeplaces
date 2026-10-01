@@ -1,9 +1,12 @@
-// Corpo da requisição no adaptador da VM (`server/node.mjs`). O Worker não
-// precisa disto: lá o corpo chega inteiro pelo `request.json()`.
+// Corpo da requisição no adaptador da VM (`server/node.mjs`). O Worker tem o
+// dele (`lerCorpo`, em `worker/index.mjs`), com o MESMO teto e a MESMA resposta,
+// que moram no core — o Worker não importa este módulo, que fala a língua dos
+// streams do Node.
 //
 // Mora num módulo PRÓPRIO pra poder ser testado sem subir o servidor — o
 // `node.mjs` abre a porta ao ser importado.
-export const MAX_BODY_BYTES = 5_000_000;
+import { MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from './core.mjs';
+export { MAX_BODY_BYTES };
 // Depois do 413, o fechamento é em DUAS etapas (o "lingering close" do RFC 9112
 // §9.6): o FIN sai junto com a resposta, e o servidor segue LENDO — e jogando
 // fora — o resto do corpo antes de fechar de vez. Fechar com corpo ainda
@@ -23,7 +26,12 @@ const DRENO_MAX_MS = 5000;
 // pedaço sozinho, e um caractere de vários bytes (acento, emoji) cortado na
 // divisa entre dois pedaços virava `\uFFFD` — na VM, renomear "São João" ou
 // mandar mensagem com acento podia gravar o texto corrompido. O Worker não tem
-// o problema (lê o corpo inteiro com `request.json()`).
+// o problema (lê o corpo inteiro antes de decodificar).
+//
+// Pelo `TextDecoder`, como o Worker, e não pelo `Buffer#toString`: o decoder
+// tira o BOM do começo, o `toString` o deixava — e aí o `JSON.parse` falhava,
+// o corpo virava {} e o mesmo POST dava 200 no Worker e 400 aqui (o
+// comparador VM × Worker da auditoria de 2026-09-29).
 export function readBody(req, res) {
   return new Promise((resolve) => {
     const pedacos = [];
@@ -52,7 +60,7 @@ export function readBody(req, res) {
           // de vez é do `fecharDeVez`, quando o corpo termina ou um teto chega.
           if (req.socket) req.socket.destroySoon = function () { this.end(); };
           res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', Connection: 'close' });
-          res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
+          res.end(JSON.stringify(RESPOSTA_CORPO_GRANDE));
           prazo = setTimeout(fecharDeVez, DRENO_MAX_MS);
           prazo.unref();   // o prazo sozinho não segura o processo aberto
           req.once('end', fecharDeVez);   // corpo inteiro lido: fecha sem RST
@@ -62,7 +70,7 @@ export function readBody(req, res) {
         resolve(null); // sinaliza pro chamador que a resposta já foi enviada
       }
     });
-    req.on('end', () => { if (!tooLarge) resolve(Buffer.concat(pedacos).toString('utf8')); });
+    req.on('end', () => { if (!tooLarge) resolve(new TextDecoder().decode(Buffer.concat(pedacos))); });
     req.on('error', () => { if (!tooLarge) resolve(''); });
   });
 }

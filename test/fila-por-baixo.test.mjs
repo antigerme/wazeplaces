@@ -119,3 +119,58 @@ test('quem muda a fila por baixo chama o acerto, e o card de fundo diz qual pedi
   assert.match(aq, /aquecimentoDaFrenteFeito = false;/);
   assert.match(aq, /disparado = true;\s*aquecimentoDaFrenteFeito = true;/);
 });
+
+// ── a barra do foco cumpre o que diz (auditoria do card, 2026-09-29, C11) ────
+// A barra promete "Tocar para voltar à ordem normal" (é o nome dela pro leitor
+// de tela, nas quatro línguas), e o toque só escondia a barra: MEDIDO no
+// navegador, X1,X2,X3,Y1,Y2 depois do toque, com a ordem normal X1,Y1,X2,Y2,X3.
+// Aqui rodam o `voltarAOrdemNormal`, o `limparFocoAutor` e a ordenação de
+// verdade; a prova na tela (o toque, o card de fundo) mora no bloco "O CARD"
+// do `tools/smoke-browser.mjs`.
+function voltarPelaBarra(queue, { autorEmFoco }) {
+  const log = [];
+  const AppState = { queue, autorEmFoco, currentPlace: queue[0], filters: { sortOrder: 'newest' } };
+  // O foco do teclado depois da barra (`veioDoTeclado`/`focarDepoisDoFocoNoAutor`)
+  // tem teste próprio em test/card-foco-trava; aqui o toque é do dedo.
+  const fn = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm', 'renderFocoAutor',
+    'updatePendingCount', 'aoMudarAFilaPorBaixo', 'veioDoTeclado', 'focarDepoisDoFocoNoAutor',
+    [fatiar('sortQueue'), fatiar('manterFocoNaFrente'), fatiar('limparFocoAutor'), fatiar('voltarAOrdemNormal'),
+      'return voltarAOrdemNormal;'].join('\n'))(
+    AppState, () => null, () => null, () => 0, () => log.push('barra'), () => log.push('conta'), () => log.push('porBaixo'),
+    () => false, () => log.push('foco'));
+  fn();
+  return { ids: AppState.queue.map((p) => p.id), AppState, log };
+}
+
+test('r4 C11 tocar na barra do foco VOLTA à ordem normal — e o card da tela fica na frente', () => {
+  const X1 = P('X1', 7, 5000), Y1 = P('Y1', 8, 4000), X2 = P('X2', 7, 3000), Y2 = P('Y2', 8, 2000), X3 = P('X3', 7, 1000);
+  // Foco no autor 7, X1 na tela: o resto volta à ordem de data.
+  const r = voltarPelaBarra([X1, X2, X3, Y1, Y2], { autorEmFoco: 7 });
+  assert.deepEqual(r.ids, ['X1', 'Y1', 'X2', 'Y2', 'X3'], `o toque na barra não devolveu a ordem normal: ${r.ids}`);
+  assert.equal(r.AppState.autorEmFoco, null, 'o toque não saiu do foco');
+  assert.ok(r.log.includes('barra'), 'a barra não foi redesenhada (segue prometendo um foco que acabou)');
+  assert.ok(r.log.includes('porBaixo'), 'o card de fundo e o "Ver +N" não acompanham a fila nova');
+  // O card da tela NÃO troca, nem quando a ordem normal o poria atrás: foco
+  // no 8, Y1 na tela, e X1 é mais novo que ele.
+  const s = voltarPelaBarra([Y1, Y2, X1, X2, X3], { autorEmFoco: 8 });
+  assert.deepEqual(s.ids, ['Y1', 'X1', 'X2', 'Y2', 'X3'], `trocou o card da tela (ou não ordenou o resto): ${s.ids}`);
+  assert.equal(s.AppState.currentPlace, Y1);
+  // CONTROLE: a ordenação ingênua da fila INTEIRA tiraria o Y1 da frente — é
+  // essa diferença que o caso de cima distingue.
+  assert.deepEqual(ordenar([Y1, Y2, X1, X2, X3]), ['X1', 'Y1', 'X2', 'Y2', 'X3']);
+  // Sem foco, o toque não mexe em nada.
+  const n = voltarPelaBarra([Y1, X1], { autorEmFoco: null });
+  assert.deepEqual(n.ids, ['Y1', 'X1']);
+  assert.deepEqual(n.log, []);
+});
+
+test('r4 C11 o toque na barra chama quem VOLTA à ordem; a ordem nova do filtro segue encerrando o foco', () => {
+  assert.match(SEM, /\$\('focoAutorBar'\)\.addEventListener\('click', voltarAOrdemNormal\);/,
+    'a barra do foco voltou a só esconder a si mesma — o texto dela promete voltar à ordem normal');
+  // E a barra PROMETE isso nas quatro línguas: se a promessa mudar, este teste
+  // é o lugar de rever o que o toque faz.
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const promessas = [...I18N.matchAll(/'card\.focoAutor\.aria(?:Um)?':\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.equal(promessas.length, 8, `achei ${promessas.length} textos da barra, e são 2 chaves × 4 línguas`);
+  for (const p of promessas) assert.match(p, /ordem normal|normal order|orden normal|ordre normal/, `a barra deixou de prometer a ordem normal: "${p}"`);
+});

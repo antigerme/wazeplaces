@@ -65,7 +65,15 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // Estado dos vizinhos que a trava lê (o lote de lidos da fila, a conferência
   // de 401 do lightbox): o buraco negro devolveria uma função, que é VERDADEIRA,
   // e travaria tudo. Quem quer medir um deles o passa nos `deps`.
-  for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0 })) if (!(k in deps)) deps[k] = v;
+  // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
+  // por local, L23), pelo mesmo motivo.
+  for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set() })) if (!(k in deps)) deps[k] = v;
+  // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
+  // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
+  // negro devolveria uma função — verdadeira — e travaria tudo).
+  if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
+  if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
@@ -83,6 +91,17 @@ function montar(nomes, deps, fonte = APP_SEM) {
 }
 
 const tique = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+// Espera por CONDIÇÃO, com teto de tempo real. Um prazo fixo (`tique(30)`) mede a
+// velocidade da máquina, não o resultado: a rede de mentira destes testes também
+// anda por timer de verdade, e com a suíte inteira disputando a CPU o prazo do
+// teste pode vencer antes do timer dela (o K14 reprovou uma vez assim).
+async function ateQue(cond, rotulo, tetoMs = 5000) {
+  const fim = performance.now() + tetoMs;
+  while (!cond()) {
+    if (performance.now() > fim) assert.fail(`${rotulo}: não aconteceu em ${tetoMs / 1000} s`);
+    await tique(2);
+  }
+}
 
 // ═══ K1 · a decisão de A não sai com o token de B ═════════════════════════════
 
@@ -209,18 +228,25 @@ test('K9: a sessão cai DURANTE a saída do card (350 ms): o gesto não vale e o
 test('K1: sem sessão, as escritas do lightbox (excluir, aprovar, renomear pelo Enter) não abrem janela', () => {
   for (const autenticado of [false, true]) {
     const banners = [];
-    const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
-    const deps = {
-      AppState: { authenticated: autenticado, preferences: { undoEnabled: true }, currentPlace: null },
-      Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
-      Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
-        marcarComoAprovada() {}, removerFoto() {} },
-      document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
-      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
-      mostrarDesfazer: (msg) => banners.push(msg), setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
-    };
-    const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear'], deps);
-    h.pedirExclusaoDaFoto(); h.aprovarFotoAtual(); h.confirmarRenomear();
+    // Cada escrita num lightbox "limpo": com a janela de uma aberta, a trava
+    // (`acoesTravadas`) segura a seguinte — o `confirmarRenomear` a consulta
+    // desde o L23, como o botão travado da pílula já fazia na tela.
+    for (const abrir of ['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear']) {
+      const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho', lat: -23, lon: -46 };
+      const deps = {
+        AppState: { authenticated: autenticado, preferences: { undoEnabled: true }, currentPlace: null },
+        Treino: { ativo: false }, canDisableUndo: () => false, podeRenomearAqui: () => true,
+        Lightbox: { place, idx: 1, urls: ['a', 'b'], podeAprovarAtual: () => true, idFotoAtual: () => 'f1',
+          marcarComoAprovada() {}, removerFoto() {} },
+        document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
+        aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+        mostrarDesfazer: (msg) => banners.push(msg), setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
+      };
+      // A trava e a renomeação no ar são as de verdade (o `confirmarRenomear` as
+      // consulta, L23): o buraco negro devolveria "travado" pra tudo.
+      const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear', 'acoesTravadas', 'renomeacaoNoAr'], deps);
+      h[abrir]();
+    }
     if (!autenticado) assert.deepEqual(banners, [], 'DEFEITO: escrita do lightbox aberta sem sessão: ' + banners.join(', '));
     else assert.equal(banners.length, 3, 'CONTROLE: com sessão, as três abrem a janela do Desfazer');
   }
@@ -265,7 +291,7 @@ function montarLightboxComJanelas() {
     entrarPelaExtensao: () => new Promise(() => {}), console, pareamentosEmitidos: new Set(),
   };
   const h = montar(['acoesTravadas', 'pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear',
-    'cancelarPendenciasDoLightbox', 'derrubarSessao', 'handleLogout'], deps);
+    'cancelarPendenciasDoLightbox', 'derrubarSessao', 'handleLogout', 'renomeacaoNoAr'], deps);
   // As três janelas abertas, uma depois da outra (cada uma despacha a anterior,
   // então cada uma é aberta num lightbox "limpo").
   return { h, deps, timers, log, AppState };
@@ -306,14 +332,16 @@ function lsFalso() {
   return { guardado, safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) } };
 }
 
-function montarVoo() {
+// `janela`: com a janela do Desfazer (a ação fica pendente até vencer); sem
+// ela, o gesto sai na hora e fica EM VOO até o teste soltar a resposta.
+function montarVoo({ janela = false } = {}) {
   const { safeLS, guardado } = lsFalso();
   const pendentes = [];
   const gravados = [];
   const AppState = {
     authenticated: true, profile: { id: 'A' }, currentPlace: null, queue: [],
-    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10,
-    preferences: { undoEnabled: false }, pendingAction: null, inFlightActions: 0,
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10, fetchEpoch: 0,
+    preferences: { undoEnabled: janela }, pendingAction: null, inFlightActions: 0,
   };
   let token = 'tok-A';
   const deps = {
@@ -324,22 +352,25 @@ function montarVoo() {
       getRegion: () => 'row', getCountry: () => 30, getSession: () => token, setSession: (t) => { token = t; },
       rejectPlace: () => new Promise((ok) => pendentes.push(ok)), markAsRead: () => new Promise((ok) => pendentes.push(ok)),
     },
-    direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
+    direcaoTravada: () => false, canDisableUndo: () => !janela, presencaWmeDaAcao: () => null,
     advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
     saveStats: () => gravados.push({ ...AppState.stats }), msgDoServidor: (r, f) => f, t: (k) => k,
     historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', getLang: () => 'pt',
-    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(),
+    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    pedidosQueEntraramNaFila: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     entrarPelaExtensao: () => new Promise(() => {}), console,
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
     'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
+    'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
     'handleReject', 'handleMarkAsRead', 'derrubarSessao'], deps);
   const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
   AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
   AppState.currentPlace = P;
-  return { h, deps, AppState, pendentes, gravados, guardado };
+  return { h, deps, AppState, pendentes, gravados, guardado, P };
 }
 
 test('K7: o ✕/✓ em voo, a sessão cai e a resposta (401) chega depois — o +1 GRAVADO no placar volta', async () => {
@@ -408,6 +439,332 @@ test('K7: o LOTE manual com a sessão caindo no meio devolve só o placar otimis
   pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
   assert.equal(AppState.stats.rejected, 13 - 3, 'DEFEITO: o placar otimista dos 3 que não pousaram ficou');
+});
+
+// ═══ V1 · a decisão que não saiu VOLTA como card na renovação da queda ════════
+// A queda com a renovação pela extensão MANTÉM a fila na tela (`manterFila`). O
+// que estava na janela do Desfazer era cancelado sem voltar pra ela, e a
+// decisão EM VOO (✕/✓ e o "Rejeitar os N") que levava o 401 depois da queda só
+// descontava o placar: o pedido não ia pro Waze nem voltava como card — já
+// tinha passado pela fila, nenhuma busca o trazia, e a fila terminava em "Tudo
+// limpo!" com ele pendente (auditoria de 2026-09-29, V1/O5/C1; medido no
+// navegador com a renovação de verdade: s1, s3, s3b, s14, t3b, t3d).
+
+test('V1: ✕ na janela do Desfazer e a sessão cai — o pedido VOLTA pra fila, com o placar e o "Restam" de antes', async () => {
+  const m = montarVoo({ janela: true });
+  m.h.handleReject();
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: o ✕ está na janela do Desfazer');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2'], 'PRÉ-CONDIÇÃO: o gesto tirou o pedido da fila');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1', 'v2'],
+    'o pedido da janela sumiu: nem foi pro Waze, nem voltou pra fila que a renovação mantém');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.venueID, 'v1', 'o pedido voltou mas não está na tela');
+  assert.equal(m.AppState.serverTotal, 10, 'o "Restam" não voltou junto');
+  assert.equal(m.gravados.at(-1).rejected, 0, 'o placar revertido não foi gravado');
+  assert.equal(m.pendentes.length, 0, 'a decisão cancelada saiu pro Waze');
+});
+
+test('V1: ✕/✓ EM VOO, a sessão cai e a resposta (401) chega depois — o pedido volta como o PRÓXIMO card', async () => {
+  for (const gesto of ['handleReject', 'handleMarkAsRead']) {
+    const m = montarVoo();
+    m.h[gesto]();
+    await tique();
+    assert.equal(m.pendentes.length, 1, 'PRÉ-CONDIÇÃO: a decisão está no ar');
+    m.h.derrubarSessao('srv.err.cookiesExpired');
+    m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+    await tique();
+    assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2', 'v1'],
+      `${gesto}: o pedido que não pousou sumiu da fila que a renovação mantém`);
+    assert.equal(m.AppState.currentPlace.venueID, 'v2', `${gesto}: trocou o card da tela`);
+    assert.equal(m.AppState.serverTotal, 10, `${gesto}: o "Restam" não acompanha o pedido que voltou`);
+    assert.equal(m.h.carregarFilaDeSaida().length, 0, `${gesto}: a anotação da decisão ficou pra sair com a sessão de agora`);
+  }
+});
+
+test('V1: CONTROLE — com a fila REFEITA desde o gesto (o "Sair", outra conta), nada volta', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.fetchEpoch++;                                   // o `resetQueue` do "Sair" / da troca de conta
+  m.AppState.queue = [{ venueID: 'v7', updateRequestID: 'u7' }];
+  m.AppState.currentPlace = m.AppState.queue[0];
+  m.pendentes[0]({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+  await tique();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v7'], 'o pedido da sessão anterior entrou na fila de outra');
+  assert.equal(m.AppState.stats.rejected, 0, 'o placar do gesto que não pousou ficou');
+  assert.equal(m.h.carregarFilaDeSaida().length, 0);
+});
+
+test('V1: a decisão EM VOO que POUSOU depois da queda não volta (e a anotação dela sai da fila de saída)', async () => {
+  const m = montarVoo();
+  m.h.handleReject();
+  await tique();
+  assert.equal(m.h.carregarFilaDeSaida().length, 1, 'PRÉ-CONDIÇÃO: a decisão foi anotada antes de sair (O2)');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.pendentes[0]({ success: true });
+  await tique();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v2'], 'o pedido que pousou voltou como card');
+  assert.equal(m.AppState.stats.rejected, 1);
+  assert.equal(m.h.carregarFilaDeSaida().length, 0, 'a anotação da decisão que pousou ficou pra sair de novo');
+});
+
+function montarLoteDaQueda() {
+  const pendentes = [];
+  const naSaida = [];
+  const log = [];
+  const AppState = { authenticated: true, stats: { read: 0, rejected: 4, skipped: 0 }, serverTotal: 1, fetchEpoch: 0,
+    queue: [{ venueID: 'v9', updateRequestID: 'u9' }], hasMore: false, inFlightActions: 0 };
+  AppState.currentPlace = AppState.queue[0];
+  const ch = (p) => p.venueID + '|' + p.updateRequestID;
+  const deps = {
+    AppState, epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1],
+    API: { rejectPlace: () => new Promise((ok) => pendentes.push(ok)) },
+    saveStats: () => {}, recordHistory: () => {}, registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
+    registrarAcaoConfirmada: () => {}, pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(),
+    enfileirarSaida: (tipo, p) => { naSaida.push(ch(p)); return true; },
+    tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.indexOf(ch(p)); if (i >= 0) naSaida.splice(i, 1); },
+    carregarFilaDeSaida: () => naSaida.slice(),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    startFetching: () => log.push('busca'), mostrarResultadoDoLote: () => log.push('folha'),
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'pousouNoWaze', 'descontarGestoSemSessao', 'chaveDoPedido',
+    'marcarEmAndamento', 'devolverPedidoRecusado', 'enviarLote'], deps);
+  // O "Rejeitar os 4": o gesto já tirou os 4 da fila e os contou no placar.
+  const lote = [1, 2, 3, 4].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+  return { h, deps, AppState, pendentes, naSaida, log, lote };
+}
+
+test('V1: o "Rejeitar os N" EM VOO com a sessão caindo — os que não pousaram voltam pra fila da queda, em ordem', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: true });           // o 1º pousou
+  await tique(); m.deps.epocaDaSessao++;                      // a sessão cai com o 2º no ar
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v9', 'v2', 'v3', 'v4'],
+    'os três que não pousaram sumiram da fila que a renovação mantém');
+  assert.equal(m.AppState.serverTotal, 4, 'o "Restam" não acompanha os que voltaram');
+  assert.equal(m.AppState.stats.rejected, 1, 'o placar otimista dos que não pousaram ficou');
+  assert.deepEqual(m.naSaida, [], 'a anotação dos que não saíram ficou pra sair com a sessão de agora');
+  assert.ok(!m.log.includes('folha'), 'a folha do resultado abriu depois da queda');
+});
+
+test('V1: CONTROLE — o lote em voo com a fila REFEITA (o "Sair"): nada volta, e nenhuma busca sai', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: true });
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;
+  m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue, [], 'o lote da sessão anterior entrou na fila de outra');
+  assert.ok(!m.log.includes('busca'), 'o lote da sessão anterior mandou buscar na fila de outra');
+  assert.equal(m.AppState.stats.rejected, 1);
+});
+
+test('V1: CONTROLE — o que o Waze RECUSOU antes da queda também não entra (nem busca) na fila de outra sessão', async () => {
+  const m = montarLoteDaQueda();
+  const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
+  await tique(); m.pendentes[0]({ success: false, errorCategory: 'unknown' });   // o 1º: recusa de verdade
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;               // o "Sair" com o 2º no ar
+  m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
+  m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
+  await envio;
+  assert.deepEqual(m.AppState.queue, [], 'o recusado da sessão anterior entrou na fila de outra');
+  assert.ok(!m.log.includes('busca'), 'o recusado da sessão anterior mandou buscar na fila de outra');
+});
+
+// ═══ V6 · o "Marcar todos" de uma sessão que acabou não trava a próxima ═══════
+// A trava do lote no ar (`loteDeLidosEmVoo`) não tinha época: com o lote
+// pendurado (sinal ruim), sair e entrar de novo — ou a queda com a renovação —
+// fazia a sessão NOVA nascer travada ("espere o lote terminar") até a resposta
+// velha voltar, até 45 s (auditoria de 2026-09-29, medido no navegador: s7).
+function montarLoteNaTrocaDeSessao() {
+  const portoes = [];
+  const { safeLS } = lsFalso();
+  const P1 = { venueID: 'v1', updateRequestID: 'u1' };
+  const AppState = { authenticated: true, profile: { id: 'A' }, queue: [P1, { venueID: 'v2', updateRequestID: 'u2' }],
+    currentPlace: P1, stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 2, fetchEpoch: 0,
+    pendingAction: null, inFlightActions: 0, preferences: {} };
+  let token = 'tok-A';
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
+    LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    API: { getRegion: () => 'row', getSession: () => token, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
+      markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), destroySession: async () => ({ success: true }) },
+    callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+  };
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
+    'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
+  const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
+  return { h, deps, AppState, portoes, marcarTodos };
+}
+
+test('V6: "Marcar todos" pendurado e a sessão cai — a sessão que VOLTA não nasce travada pelo lote dela', async () => {
+  const m = montarLoteNaTrocaDeSessao();
+  const velho = m.marcarTodos();
+  await tique();
+  assert.equal(m.h.avisoDaTrava(), 'toast.esperaLote', 'PRÉ-CONDIÇÃO: o lote está no ar e trava o card');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.authenticated = true;                  // a renovação pela extensão
+  assert.equal(m.h.acoesTravadas(), false, 'a sessão nova nasceu travada pelo lote da que caiu (até 45 s)');
+  // Um lote NOVO, e o velho voltando no meio dele: o velho não solta a trava do
+  // novo. (O novo leva só o que NÃO está em andamento — os do lote velho seguem
+  // no ar; é a régua do V7 —, então um pedido que chegou depois.)
+  m.AppState.queue.push({ venueID: 'v3', updateRequestID: 'u3' });
+  const novo = m.marcarTodos();
+  await tique();
+  assert.equal(m.portoes.length, 2, 'PRÉ-CONDIÇÃO: o lote novo saiu');
+  m.portoes[0]({ success: true });
+  await velho;
+  assert.equal(m.h.acoesTravadas(), true, 'o lote da sessão que caiu soltou a trava do lote da sessão nova');
+  m.portoes[1]({ success: true });
+  await novo;
+  assert.equal(m.h.acoesTravadas(), false, 'o lote novo terminou e a trava ficou');
+});
+
+test('V6: o "Sair" com o lote no ar — quem entra não herda a trava', async () => {
+  const m = montarLoteNaTrocaDeSessao();
+  m.marcarTodos();
+  await tique();
+  assert.equal(m.h.avisoDaTrava(), 'toast.esperaLote', 'PRÉ-CONDIÇÃO: o lote está no ar');
+  await m.h.handleLogout();
+  m.AppState.authenticated = true;                  // entrou de novo, sem recarregar a página
+  assert.equal(m.h.acoesTravadas(), false, 'a sessão de quem entrou nasceu travada pelo lote de quem saiu');
+});
+
+// ═══ V6b · o "Marcar todos" que a queda corta no meio: o que JÁ pousou sai ═════
+// Com a sessão caindo e a extensão renovando com a MESMA conta, a fila atravessa
+// a queda — e o lote saía pela época trocada ANTES de tirar da fila o que o Waze
+// já tinha marcado. MEDIDO no navegador (s15, também na main c6d9f91): lote de
+// 60, o 1º pedaço (25) pousa, a sessão cai e renova, o 2º volta 401 → a fila
+// seguia com os 60 cards, 25 já marcados no Waze, "Restam" 60 e placar 0.
+// Pedaços de UM pedido aqui: a queda cai entre o 1º e o 2º.
+function montarLoteComQueda({ pedaco = 1 } = {}) {
+  const portoes = [];
+  const portoesUm = [];   // o caminho UM A UM (`markAsRead`)
+  const log = [];
+  const pousos = [];
+  const { safeLS } = lsFalso();
+  const P = [1, 2, 3].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+  const AppState = { authenticated: true, profile: { id: 'A' }, queue: P.slice(), currentPlace: P[0],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, fetchEpoch: 0, hasMore: false,
+    pendingAction: null, inFlightActions: 0, preferences: {} };
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
+    LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    API: { getRegion: () => 'row', getSession: () => 'tok-A', setSession() {}, setRegion() {}, setCountry() {},
+      markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoesUm.push(ok)) },
+    callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+    registrarPouso: (ps) => pousos.push(...(Array.isArray(ps) ? ps : [ps]).map((p) => p.updateRequestID)),
+    recordHistory: () => log.push('historico'), registrarLoteConfirmado: () => log.push('conquistas'),
+    showToast: (m, tipo) => log.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
+    updateStats() {}, saveStats() {}, updatePendingCount() {}, removeCurrentCardEl: () => log.push('tirou-card'),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace ? AppState.currentPlace.updateRequestID : '-')); },
+    startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), devolverPedidoRecusado: () => log.push('devolveu'),
+  };
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
+    'chaveDoPedido', 'derrubarSessao'], deps);
+  const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
+  // O 1º pedaço pousa; o 2º fica no ar, e a sessão cai e renova com a MESMA conta.
+  const ateAQueda = async () => {
+    const lote = marcarTodos();
+    await tique();
+    assert.equal(portoes.length, 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+    portoes[0]({ success: true });
+    await tique();
+    assert.equal(portoes.length, 2, 'PRÉ-CONDIÇÃO: o 2º pedaço está no ar');
+    h.derrubarSessao('srv.err.cookiesExpired');
+    AppState.authenticated = true;                  // a renovação pela extensão
+    // Embrulhada: devolver a promessa crua de uma função `async` a ADOTA, e o
+    // `await` de quem chama esperaria o lote — que só termina depois.
+    return { lote, desde: log.length };
+  };
+  const fila = () => AppState.queue.map((p) => p.updateRequestID);
+  return { h, deps, AppState, portoes, portoesUm, log, pousos, marcarTodos, ateAQueda, fila };
+}
+
+test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o que o Waze JÁ marcou sai da fila, sem contar', async () => {
+  const m = montarLoteComQueda();
+  const { lote, desde } = await m.ateAQueda();
+  m.portoes[1]({ success: false, errorCategory: 'unauthorized' });   // a resposta da sessão que caiu
+  await lote;
+  const depois = m.log.slice(desde);   // o "marcando…" do começo do lote é de antes da queda
+  assert.deepEqual(m.fila(), ['u2', 'u3'], 'o pedido que o Waze já marcou seguiu na fila como card — decidível de novo');
+  assert.equal(m.AppState.serverTotal, 2, 'o "Restam" seguiu contando o pedido já marcado');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'u2',
+    'o card da frente não foi refeito: ficou na tela o pedido já marcado');
+  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.ok(!depois.includes('historico') && !depois.includes('conquistas') && !depois.some((l) => l.startsWith('toast')),
+    `com a sessão trocada o lote gravou ou avisou: ${depois}`);
+  assert.ok(depois.includes('card:u2'), `a tela não foi refeita: ${depois}`);
+  assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
+});
+
+test('V6b: o pedaço cuja resposta POUSA depois da queda também sai da fila — e ganha o pouso', async () => {
+  const m = montarLoteComQueda();
+  const { lote } = await m.ateAQueda();
+  m.portoes[1]({ success: true });                   // chegou depois da queda, e o Waze marcou
+  await lote;
+  assert.deepEqual(m.fila(), ['u3'], 'o pedido que pousou depois da queda seguiu como card');
+  assert.equal(m.AppState.serverTotal, 1);
+  assert.deepEqual(m.pousos, ['u1', 'u2'], 'o que pousou depois da queda ficou sem pouso (a fila guardada o devolveria)');
+  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
+});
+
+test('V6b: a queda no meio do caminho UM A UM também para o lote — e o que já pousou sai da fila', async () => {
+  // Pedaços de DOIS: o 1º volta "já resolvido" (o lote do Waze para no primeiro
+  // resolvido) e o app vai um a um; a queda cai no 2º do um a um.
+  const m = montarLoteComQueda({ pedaco: 2 });
+  const lote = m.marcarTodos();
+  await tique();
+  m.portoes[0]({ success: false, errorCategory: 'already_processed' });
+  await tique();
+  assert.equal(m.portoesUm.length, 1, 'PRÉ-CONDIÇÃO: o um a um começou');
+  m.portoesUm[0]({ success: true });                 // u1 pousa antes da queda
+  await tique();
+  assert.equal(m.portoesUm.length, 2, 'PRÉ-CONDIÇÃO: o u2 está no ar');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.authenticated = true;
+  m.portoesUm[1]({ success: false, errorCategory: 'unauthorized' });
+  await lote;
+  assert.deepEqual(m.fila(), ['u2', 'u3'], 'o pedido que pousou no um a um seguiu na fila');
+  assert.equal(m.AppState.serverTotal, 2);
+  assert.equal(m.portoes.length, 1, 'o lote mandou o pedaço seguinte DEPOIS da queda (com a sessão que caiu)');
+  assert.equal(m.AppState.stats.read, 0);
+});
+
+test('V6b: CONTROLE — sem a queda, o lote inteiro sai da fila e conta (o instrumento distingue)', async () => {
+  const m = montarLoteComQueda();
+  const lote = m.marcarTodos();
+  for (let i = 0; i < 3; i++) { await tique(); m.portoes[i]({ success: true }); }
+  await lote;
+  assert.deepEqual(m.fila(), []);
+  assert.equal(m.AppState.stats.read, 3, 'sem queda o lote deixou de contar');
+  assert.ok(m.log.includes('historico') && m.log.includes('toast:success'), `sem queda, o lote não gravou nem avisou: ${m.log}`);
+});
+
+test('V6b: CONTROLE — com OUTRA conta a fila foi refeita: a resposta velha não mexe na fila nova', async () => {
+  const m = montarLoteComQueda();
+  const { lote } = await m.ateAQueda();
+  // Outra conta entrou: a fila é trocada (`esquecerOutraConta` → `resetQueue`).
+  const Q = { venueID: 'q1', updateRequestID: 'uq1' };
+  m.AppState.fetchEpoch++;
+  m.AppState.queue = [Q, { venueID: 'u2x', updateRequestID: 'u2' }];
+  m.AppState.currentPlace = Q;
+  m.AppState.serverTotal = 2;
+  const logAntes = m.log.length;
+  m.portoes[1]({ success: true });
+  await lote;
+  assert.deepEqual(m.fila(), ['uq1', 'u2'], 'a resposta da sessão de A mexeu na fila de B');
+  assert.equal(m.AppState.serverTotal, 2, 'a resposta da sessão de A descontou o "Restam" da fila de B');
+  assert.equal(m.AppState.currentPlace, Q);
+  assert.deepEqual(m.pousos, ['u1'], 'a resposta da sessão de A gravou pouso na fila de B');
+  assert.deepEqual(m.log.slice(logAntes), [], 'a resposta da sessão de A redesenhou a tela de B');
 });
 
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══
@@ -855,6 +1212,7 @@ test('K8: o resgate do pareamento e a ponte da extensão também dizem a conta �
   const r = montar(['resgatarPareamento'], {
     API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok-B', conta: '222' }) },
     document: { getElementById: () => null }, conhecerContaDoLogin: (c) => conhecidas.push('resgate:' + c),
+    resgateEmVoo: false,   // a trava do duplo envio (test/contas-abas, A7): nenhum resgate no ar
   });
   assert.equal(await r.resgatarPareamento('ABC234'), true);
   assert.ok(conhecidas.includes('resgate:222'), 'o resgate do pareamento ignora a conta devolvida');
@@ -874,7 +1232,10 @@ const PRES_SEM = semComentario(ler('js/presenca.js'));
 
 function montarConversas() {
   const campo = { value: '', focus() {} };
-  const Presenca = { aberta: null, anexo: null, conversas: [], vivas: new Map(), rascunhos: new Map(), rascunhoDe: null };
+  // O estado que o `presencaAbrirConversa` lê, com a forma do de verdade (as
+  // fotos que falharam nesta conversa e o nome guardado de quem se abriu).
+  const Presenca = { aberta: null, anexo: null, conversas: [], online: [], vivas: new Map(), rascunhos: new Map(), rascunhoDe: null,
+    fotosFalhas: new Set(), nomeDaAberta: null };
   const deps = { Presenca, PRESENCA_ID: /^\d{1,19}$/, document: { getElementById: (id) => (id === 'conversaInput' ? campo : null) } };
   const h = montar(['presencaAbrirConversa', 'presencaTrocarRascunho', 'presencaEsquecer'], deps, PRES_SEM);
   const fechar = () => { Presenca.aberta = null; Presenca.anexo = null; };   // o que o `presencaEsquecerAberta` faz
@@ -1057,6 +1418,8 @@ function montarSaidaMorta() {
     SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; },
     registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => { deps.AppState.authenticated = false; },
     t: (k) => k,
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     API: {
       getSession: () => 'tok-A',
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
@@ -1093,7 +1456,8 @@ test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na ho
   await tique(10);
   m.deps.proxima = () => ({ success: true });                 // a partir daqui o Waze aceita
   m.responderSonda({ success: true, profile: { id: 111 } });  // viva
-  await tique(30);
-  assert.equal(m.h.carregarFilaDeSaida().length, 0, 'o alarme falso não esvaziou a fila — ela ficaria esperando o próximo gatilho');
+  await ateQue(() => m.h.carregarFilaDeSaida().length === 0,
+    'a fila vazia depois do alarme falso (sem isso, ela ficaria esperando o próximo gatilho)');
+  await tique(20);   // o que saísse A MAIS teria tempo de sair
   assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
 });

@@ -67,6 +67,17 @@ const API = {
         return this.sessionToken;
     },
 
+    // O "Sair" foi numa OUTRA aba: o token já saiu do armazenamento, e o
+    // diário de sessões com ele. Esta aba só solta a cópia da MEMÓRIA — sem
+    // isso, o ✕ seguinte dela saía com o token de quem saiu (auditoria de
+    // 2026-09-29, R4-5 A1). Pelo `setSession`, o diário ganharia um "token-"
+    // por cima do "Sair" que acabou de apagá-lo.
+    soltarSessao() { this.sessionToken = null; },
+
+    // Há sessão na MEMÓRIA desta aba? O `getSession` vai ao armazenamento
+    // quando a memória está vazia; aqui a pergunta é só sobre a memória.
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+
     setRegion(region) {
         this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);
@@ -446,14 +457,21 @@ const API = {
     // no WME). Só é oferecido pra pedido de FOTO: ali não há campo pra ajustar,
     // então a decisão cabe inteira na tela, que é o que a regra de "nunca
     // aprova" existia pra proteger.
-    async aprovarPedido(venueID, updateRequestID) {
+    //
+    // `regiao`: a do GESTO, como no `rejectPlace`. As quatro escritas do
+    // lightbox (aprovar, excluir, aquecer a exclusão e renomear) saíam com a
+    // região do ENVIO — e o envio sai até 3 s depois (a janela do Desfazer) ou
+    // numa retentativa: trocada a região nesse meio, a escrita ia pro servidor
+    // errado e voltava "não encontrado", que na aprovação conta como feita
+    // (auditoria de 2026-09-29, L26).
+    async aprovarPedido(venueID, updateRequestID, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return semSessao();
         }
         return this._post('validar-place', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             approve: true,
@@ -469,11 +487,11 @@ const API = {
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
     // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
-    prepararExclusao(venueID, lat, lon) {
+    prepararExclusao(venueID, lat, lon, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) return;
         this._post('excluir-foto', {
-            sessionToken, region: this.getRegion(), action: 'preparar',
+            sessionToken, region: regiao || this.getRegion(), action: 'preparar',
             venueID, imageID: 'preparar', lat, lon,
         }).catch(() => {});
     },
@@ -481,24 +499,24 @@ const API = {
     // Renomear o local. Escrita de dado de LOCAL — a única do app — e por isso
     // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
     // verdade é o Waze, que valida permissão e lockRank na gravação.
-    async renomearLocal(venueID, nome) {
+    async renomearLocal(venueID, nome, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return semSessao();
         }
         return this._post('renomear-local', {
-            sessionToken, region: this.getRegion(), venueID, nome,
+            sessionToken, region: regiao || this.getRegion(), venueID, nome,
         });
     },
 
-    async excluirFoto(venueID, imageID, lat, lon) {
+    async excluirFoto(venueID, imageID, lat, lon, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) {
             return semSessao();
         }
         return this._post('excluir-foto', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             imageID,
             lat,

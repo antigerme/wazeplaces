@@ -525,7 +525,7 @@
                      VAZIA, porque a animação do swipe já tinha tirado o card da tela.
                      Tela em branco lê como app quebrado. -->
                 <p id="treinoFimEfeito" class="hidden text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl p-3 mb-4 leading-relaxed text-left dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"></p>
-                <p class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá 3s em cada ação.</p>
+                <p id="treinoFimCorpo" class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá 3s em cada ação.</p>
                 <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
             </div>
         </div>
@@ -534,6 +534,10 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-3 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>os dados do app neste aparelho</strong> (placar, histórico, conquistas, filtros e preferências) serão apagados — ficam só o idioma e o tema. Esta ação não pode ser desfeita.</p>
+                <!-- As decisões que ainda esperam envio (a fila de saída) saem com o
+                     "Sair" e NÃO chegam ao Waze: com a fila cheia, esta frase diz
+                     quantas (`desenharAvisoDoSair`). Sem fila, vazia e escondida. -->
+                <p id="logoutSaidaAviso" class="hidden text-sm text-slate-500 mb-3 dark:text-slate-400"></p>
                 <!-- Sair do app NÃO invalida os cookies no Waze. Quem sai preocupado
                      com privacidade pode concluir que cortou o acesso — não cortou.
                      Dizer isso aqui é o único momento em que a informação chega a
@@ -833,7 +837,7 @@
         <div id="pairShowModal" role="dialog" aria-modal="true" aria-labelledby="pairShowTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6">
                 <h3 id="pairShowTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.show.title">Conectar outro aparelho</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.show.body">Aponte a câmera do outro aparelho para o código abaixo.</p>
+                <p id="pairShowBody" class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.show.body">Aponte a câmera do outro aparelho para o código abaixo.</p>
 
                 <!-- O QR é a ação principal porque é a única que não precisa ser
                      explicada: aponta a câmera e entra. O código de 6 caracteres
@@ -860,7 +864,7 @@
                     <span data-i18n="pair.show.noCamera">Sem câmera? Mostrar um código</span>
                 </button>
                 <div id="pairCodeReveal" class="hidden">
-                    <p class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Digite este código no outro aparelho:</p>
+                    <p id="pairOrType" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Digite este código no outro aparelho:</p>
                     <div id="pairCodeBox" class="bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-cyan-300 dark:border-cyan-400/40 rounded-2xl py-3 text-center mb-2">
                         <p id="pairCode" class="text-2xl font-black tracking-[0.2em] text-cyan-700 dark:text-cyan-300 tnum select-all">······</p>
                     </div>
@@ -1351,10 +1355,15 @@
                                      própria — a caixa existe pra segurar o texto livre, e com o
                                      comentário vazio ela virava ~40px de moldura (borda + padding +
                                      cabeçalho) pra exibir uma linha. Segue em rosa: perdeu a caixa,
-                                     não o destaque. -->
+                                     não o destaque.
+                                     O valor tem teto de DUAS linhas (`line-clamp-2`, como categoria e
+                                     endereço), com a frase inteira no `title`: "Duplicado de «nome
+                                     longo»" crescia sem teto, a linha é `flex-shrink-0`, e no Fold ela
+                                     ligava a rede de segurança do card — o arraste pra cima rolava em
+                                     vez de pular (auditoria do card, 2026-09-29, C16). -->
                                 <p class="card-flag-reason hidden flex items-baseline gap-2 min-w-0 flex-shrink-0">
                                     <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.flagReason">Motivo:</span>
-                                    <span class="card-flag-reason-value text-sm font-semibold text-rose-700 break-words min-w-0 flex-1 dark:text-rose-300"></span>
+                                    <span class="card-flag-reason-value text-sm font-semibold text-rose-700 line-clamp-2 break-words min-w-0 flex-1 dark:text-rose-300"></span>
                                 </p>
 
                                 <!-- A caixa NÃO reivindica a sobra (`flex-1 min-h-0`, que era o que
@@ -1630,7 +1639,7 @@
                         <li data-i18n-html="help.legend.brandKnown"><span class="inline-block text-[0.6875rem] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-400/20 text-emerald-700 dark:text-emerald-300">✓ conhecida</span> — marca está na lista oficial do Waze</li>
                         <li data-i18n-html="help.legend.brandUnknown"><span class="inline-block text-[0.6875rem] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-400/20 text-amber-700 dark:text-amber-300">? não listada</span> — marca fora da lista oficial</li>
                         <li data-i18n-html="help.legend.pendingPlus"><strong>Restam</strong> com <code>+</code> (ex.: 30+) — ainda há mais páginas pra buscar no Waze</li>
-                        <li data-i18n-html="help.legend.starred"><span aria-hidden="true">⭐</span> — place favoritado no WME</li>
+                        <li data-i18n-html="help.legend.starred"><span aria-hidden="true">⭐</span> — <strong>pedido</strong> que você favoritou no WME (a mesma estrela do “Pular guarda o pedido”)</li>
                     </ul>
                 </div>
 
@@ -1690,9 +1699,9 @@
                 <div>
                     <h4 class="font-semibold text-slate-800 mb-2 dark:text-slate-100" data-i18n="help.privacy.title">Privacidade e dados:</h4>
                     <ul class="list-disc list-inside space-y-1.5 text-sm">
-                        <li data-i18n="help.privacy.server">No servidor ficam os seus cookies do Waze, criptografados (AES-256-GCM). A única outra coisa é passageira: ao tocar na lixeira de uma foto, a lista das fotos daquele local (com quem enviou cada uma) fica lá por até 1 minuto, sem criptografia, pra a exclusão sair na hora.</li>
+                        <li data-i18n="help.privacy.server">No servidor ficam os seus cookies do Waze, criptografados (AES-256-GCM). A única outra coisa é passageira: ao tocar na lixeira de uma foto, a lista das fotos daquele local (com quem enviou cada uma) fica lá, sem criptografia, pra a exclusão sair na hora, e sai até 1 minuto depois da última vez que você toca na lixeira ou exclui uma foto.</li>
                         <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app, com o que fica guardado. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
-                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados pelo app: nome, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As fotos e o mapa passam pelo cache do próprio navegador, como as imagens de qualquer site: vencem em até 1 hora e saem quando você limpa os dados de navegação. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, as capturas ficam até você baixar o diagnóstico, no máximo 24 h.</li>
+                        <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados pelo app: nome, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As fotos e o mapa passam pelo cache do próprio navegador, como as imagens de qualquer site: vencem em até 1 hora e saem quando você limpa os dados de navegação. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, os registros ficam até você baixar o diagnóstico, no máximo 24 h.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
                         <li data-i18n="help.privacy.device">Neste aparelho ficam o id da sua conta do Waze (pra saber de quem são estes dados), o seu nível no Waze e quando a sua sessão de lá vence, placar, histórico, conquistas, filtros, preferências, as ações esperando envio, os autores que você rejeitou (id e nome, pra contar a reincidência), um diário de quando a sessão começou e caiu e, das conversas, quais são do app e até onde cada pessoa leu. Tudo isso é apagado no “Sair”; ficam só o idioma e o tema.</li>
                         <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido e envia as mensagens que você escreve na conversa; e, só para L6+AM ou staff, aprova a foto nova do pedido, exclui fotos do local e corrige o nome do local.</li>

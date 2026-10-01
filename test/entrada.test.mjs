@@ -61,8 +61,11 @@ function elemento(id, { oculto = true, registro = null, ...resto } = {}) {
   const attrs = {};
   const el = {
     id, style: {}, textContent: '', dataset: {}, onerror: null, onload: null,
+    // `add`/`remove` com VÁRIAS classes, como no DOM: com uma só, o
+    // `add('opacity-40', 'line-through')` perdia a segunda calado.
     classList: {
-      add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c),
+      add: (...cs) => cs.forEach((c) => classes.add(c)), remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+      contains: (c) => classes.has(c),
       toggle: (c, f) => { const on = f === undefined ? !classes.has(c) : !!f; if (on) classes.add(c); else classes.delete(c); return on; },
     },
     setAttribute(k, v) { attrs[k] = String(v); },
@@ -228,6 +231,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     updateInFlightIndicator: nada, esquecerAutores: nada, safeLS: { remove: nada }, HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c',
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
+    esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
   };
   const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
     deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
@@ -582,6 +586,7 @@ function variaveisDaTela() {
     nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
     sessaoDias: String(num('SESSAO_DIAS_EXIBIDO')),
     parearMin: String(num('PAREAR_MIN_EXIBIDO')),
+    listaFotosMin: String(num('LISTA_FOTOS_MIN_EXIBIDO')),
   };
 }
 function decodificarHtml(s) {
@@ -677,24 +682,35 @@ test('sem sessão, a Ajuda não oferece "Ver de novo Como funciona" — o "Quero
 });
 
 // ── A13: o que fica no SERVIDOR ─────────────────────────────────────────────
-test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de fotos do local por até 1 minuto', () => {
+test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de fotos do local, até 1 minuto depois da última exclusão', () => {
   // A frase dizia "só uma coisa… nada além disso", e tocar na lixeira guarda,
   // SEM cifra, a lista de fotos do local (ids, quem enviou cada uma, data,
   // aprovada) pra a exclusão sair rápido — `relerLocal` no core. O prazo é o
-  // que o core manda pro armazenamento (o KV recusa menos de 60 s).
+  // que o core manda pro armazenamento (o KV recusa menos de 60 s), e ele
+  // conta de CADA gravação: a do toque e a de depois de cada exclusão (a lista
+  // regravada sem a foto, gotcha #57). A frase dizia "fica lá por até 1 minuto"
+  // depois do toque, e a lista ficava 74 s (auditoria de 2026-09-29). O número
+  // vem de `{listaFotosMin}`; a paridade com o core é do `test/consistencia`.
   const CORE = ler('server/core.mjs');
-  const ttl = Number((/const RELEITURA_TTL = (\d+);/.exec(CORE) || [])[1]);
-  const piso = Number((/const RELEITURA_TTL_STORE = Math\.max\((\d+), RELEITURA_TTL\);/.exec(CORE) || [])[1]);
-  assert.ok(ttl > 0 && piso > 0, 'CONTROLE: não achei o prazo da releitura no core — o teste perdeu a âncora');
-  const minutos = Math.ceil(Math.max(piso, ttl) / 60);
   assert.ok(/sessions\.store\.put\(chave, [^\n]*JSON\.stringify\(enxuto\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
+  assert.ok(/sessions\.store\.put\(await chaveDaReleitura\(data\),[\s\S]{0,160}?RELEITURA_TTL_STORE\)/.test(CORE),
+    'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
+  // O "depois da última vez que você toca na lixeira ou exclui uma foto", em
+  // cada língua: o prazo conta da ÚLTIMA gravação, e a última pode ser a da exclusão.
+  const DEPOIS_DA_ULTIMA = {
+    pt: /\{listaFotosMin\} minuto depois da última vez que você toca na lixeira ou exclui uma foto/,
+    en: /\{listaFotosMin\} minute after the last time you tap the trash can or delete a photo/,
+    es: /\{listaFotosMin\} minuto después de la última vez que tocas la papelera o borras una foto/,
+    fr: /\{listaFotosMin\} minute après la dernière fois que vous touchez la corbeille ou supprimez une photo/,
+  };
   const D = dicionario();
   for (const lang of Object.keys(D)) {
     const frase = D[lang]['help.privacy.server'];
     assert.doesNotMatch(frase, /nada além disso|nothing else|nada más|rien d’autre/i,
       `${lang}: a Ajuda ainda diz que no servidor não fica mais nada`);
-    assert.match(frase, new RegExp(`\\b${minutos} minut`, 'i'), `${lang}: a Ajuda não diz o prazo da lista de fotos (${minutos} min)`);
+    assert.ok(DEPOIS_DA_ULTIMA[lang], `CONTROLE: língua nova (${lang}) sem a frase esperada neste teste`);
+    assert.match(frase, DEPOIS_DA_ULTIMA[lang], `${lang}: a Ajuda não diz que o prazo conta da ÚLTIMA exclusão: ${frase}`);
   }
 });
 
@@ -1039,7 +1055,7 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira() {
+function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
@@ -1047,6 +1063,8 @@ function pareamentoDeMentira() {
   const { registro, document } = domDeMentira({
     pairShowClose: { focus() {} }, pairCode: {}, pairExpiry: {}, pairCodeReveal: {},
     pairShowCodeBtn: {}, pairCodeExpiry: {}, pairCopyLinkBtn: {},
+    // As instruções (a da câmera e a do código curto) nascem VISÍVEIS no HTML.
+    pairShowBody: { oculto: false }, pairOrType: { oculto: false },
   });
   const deps = {
     document,
@@ -1057,7 +1075,10 @@ function pareamentoDeMentira() {
     pairQrVenceEm: 0,
     pareamentosEmitidos: new Set(),
     openModal() {}, closeModal() {},
-    API: { criarPareamento: async () => ({ success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+    // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
+    API: { criarPareamento: async (op) => (op && op.comCodigo
+      ? { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg }
+      : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
     showToast: (m, tipo) => toasts.push([m, tipo]),
     msgDoServidor: (r, f) => f,
     t: (k) => k,
@@ -1067,10 +1088,16 @@ function pareamentoDeMentira() {
     navigator: { clipboard: { writeText: async (u) => { copiados.push(u); } } },
     TOAST_COPIAVEL_MS: 30000,
     contaAgora: () => null,   // o pareamento leva a conta de quem o cria (K8)
+    PAIR_CODE_LEN: 6, PAIR_CODE_GRUPO: 3,
   };
+  // A limpeza do modal (o fechar por qualquer caminho) roda no MESMO escopo.
+  const iLimpeza = APP_SEM.indexOf('const LIMPEZA_AO_FECHAR = {');
+  assert.ok(iLimpeza >= 0, 'CONTROLE: o LIMPEZA_AO_FECHAR sumiu do app.js');
   const api = montar(
-    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento'],
-    deps, ['abrirPareamento', 'copiarLinkPareamento']);
+    ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
+     'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
+    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
   return {
     ...api, registro, copiados, toasts,
     limpezasDoQr: () => limpezasDoQr,
@@ -1118,6 +1145,63 @@ test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba
     assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
       `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
   }
+});
+
+// ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────
+// Vencido o QR, a tela seguia com "Aponte a câmera… para o código abaixo" (sobre
+// um QR apagado) e com o "Sem câmera? Mostrar um código" — que criava um código
+// NOVO, válido por 5 min, embaixo de "Código expirado — feche e toque de novo"
+// (medido no navegador, t21 da auditoria). E o código curto já pedido vence no
+// prazo DELE: a instrução "Digite este código" sai quando ELE vence.
+test('A15: QR vencido esconde a instrução da câmera e o "Sem câmera?"; o código curto vence no prazo dele', async () => {
+  const oculto = (el) => el.classList.contains('hidden');
+  // Sem código curto: vence o QR, as duas saem, e o aviso de vencido fica.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const r = p.registro;
+  assert.equal(oculto(r.pairShowBody), false, 'CONTROLE: com o QR valendo, a instrução da câmera aparece');
+  assert.equal(oculto(r.pairShowCodeBtn), false, 'CONTROLE: com o QR valendo, o "Sem câmera?" aparece');
+  p.andar(300_000); p.tique();
+  assert.equal(r.pairExpiry.textContent, 'pair.expired');
+  assert.equal(oculto(r.pairShowBody), true, 'o QR venceu e a tela segue mandando apontar a câmera pra ele');
+  assert.equal(oculto(r.pairShowCodeBtn), true,
+    'o QR venceu e o "Sem câmera?" segue criando um código novo embaixo do "Código expirado"');
+
+  // Com o código curto pedido ANTES do fim do QR: ele nasceu depois, e vale mais.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  q.andar(200_000);
+  await q.revelarCodigoPareamento();
+  const s = q.registro;
+  assert.equal(oculto(s.pairCodeReveal), false, 'CONTROLE: o código curto não apareceu');
+  q.andar(100_000); q.tique();   // vence o QR; o curto tem mais 200 s
+  assert.equal(oculto(s.pairShowBody), true, 'a instrução da câmera sobreviveu ao QR');
+  assert.equal(s.pairExpiry.textContent, '', 'o "Código expirado" do QR ficou em cima de um código que ainda vale');
+  assert.equal(oculto(s.pairOrType), false, 'o código curto ainda vale e a instrução dele sumiu antes da hora');
+  assert.match(s.pairCodeExpiry.textContent, /^pair\.expiresIn/, 'o contador do código curto parou junto com o do QR');
+  q.andar(200_000); q.tique();   // vence o curto
+  assert.equal(s.pairCodeExpiry.textContent, 'pair.expired', 'o código curto venceu sem dizer');
+  assert.ok(s.pairCode.classList.contains('line-through'), 'o código curto vencido segue com cara de válido');
+  assert.equal(oculto(s.pairOrType), true, 'a tela segue mandando digitar um código morto');
+
+  // Reabrir devolve as instruções (o modal é reaproveitado)…
+  await q.abrirPareamento();
+  assert.equal(oculto(s.pairShowBody), false, 'reabrir não devolveu a instrução da câmera');
+  assert.equal(oculto(s.pairOrType), false, 'reabrir não devolveu a instrução do código curto');
+  // …e fechar por QUALQUER caminho também (a limpeza do modal).
+  q.andar(300_000); q.tique();
+  q.LIMPEZA_AO_FECHAR.pairShowModal();
+  assert.equal(oculto(s.pairShowBody), false, 'fechar não devolveu a instrução da câmera pra próxima abertura');
+
+  // O curto pedido no último instante do QR chega com o QR já vencido: o aviso
+  // de vencido do QR não fica em cima do código que acabou de nascer.
+  const u = pareamentoDeMentira();
+  await u.abrirPareamento();
+  u.andar(300_000); u.tique();
+  assert.equal(u.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o QR não venceu');
+  await u.revelarCodigoPareamento();
+  assert.equal(u.registro.pairExpiry.textContent, '', 'o "Código expirado" do QR ficou em cima do código que acabou de nascer');
+  assert.equal(oculto(u.registro.pairOrType), false);
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────

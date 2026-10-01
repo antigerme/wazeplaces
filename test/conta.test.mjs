@@ -59,6 +59,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     esvaziarFilaDeSaida: () => log.push('esvaziar'),
     esquecerFocoAutor: () => log.push('foco'),
     presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
+    esquecerEscolhasDaContaAnterior: () => log.push('escolhas'),   // (test/contas-abas, A3)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
@@ -147,6 +148,8 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     registrarPousoDeSaida: () => {}, handleUnauthorized: () => {}, updateInFlightIndicator: () => {},
     updateStats: () => {}, saveStats: () => log.push('saveStats'), dfato: (k) => log.push(k),
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
+    // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
@@ -320,6 +323,9 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     offlineEsquecer: () => {}, dlogApagar: () => {}, window: { Presenca: { esquecer: () => {} } },
     esquecerFocoAutor: () => log.push('foco'),
     presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
+    redesenharFiltrosComOPerfil: () => {},   // test/filtros-perfil (F2)
+    esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
+    contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];

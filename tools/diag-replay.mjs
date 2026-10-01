@@ -42,6 +42,22 @@ function temaDoRelatorio(d) {
   return { escuro: sistema === true, guardado: null, sistema, origem: sistema === null ? 'padrão' : 'o do sistema' };
 }
 
+// O PLACAR que a pessoa via: Lidos, Rejeitados, Pulados e o "Restam" (com o
+// "+" quando havia mais). A remontagem mostrava 0 · 0 · 0 e o tamanho do
+// recorte injetado, onde o aparelho tinha 801 · 905 · 18 · 20+ (auditoria de
+// 2026-09-29, T3) — e o "Restam" é justamente o número que um relato de "a fila
+// acabou" discute. Relatório sem os campos (antigo, ou montado à mão) fica como
+// era: placar zerado, e o "Restam" no tamanho da fila injetada.
+function placarDoRelatorio(st, naFila) {
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
+  const s = (st && st.stats) || {};
+  return {
+    stats: { read: n(s.read), rejected: n(s.rejected), skipped: n(s.skipped) },
+    serverTotal: st && Number.isFinite(st.serverTotal) && st.serverTotal >= 0 ? st.serverTotal : naFila,
+    hasMore: !!(st && st.hasMore === true),
+  };
+}
+
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -130,7 +146,7 @@ await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'load' });
 // intermitente que custou rodadas de CI (ver `tools/esperar-saida.mjs`).
 await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'o app carregar', 30000);
 
-await page.evaluate(([places, filtros, perfil, devMode]) => {
+await page.evaluate(([places, filtros, perfil, devMode, placar]) => {
   for (const id of ['authScreen', 'loadingCard', 'comoFuncionaModal']) {
     document.getElementById(id)?.classList.add('hidden');
   }
@@ -147,12 +163,14 @@ await page.evaluate(([places, filtros, perfil, devMode]) => {
   showMainScreen();
   renderProfileHeader();
   AppState.queue = places;
-  AppState.serverTotal = places.length;
-  AppState.hasMore = false;
+  // O placar do APARELHO (ver `placarDoRelatorio`), não o do recorte injetado.
+  AppState.stats = placar.stats;
+  AppState.serverTotal = placar.serverTotal;
+  AppState.hasMore = placar.hasMore;
   showCurrentPlace();
-  updatePendingCount();
+  updateStats(true);
   if (typeof atualizarFabDev === 'function') atualizarFabDev();
-}, [recorte, st.filters || null, st.profile || null, st.devMode || null]);
+}, [recorte, st.filters || null, st.profile || null, st.devMode || null, placarDoRelatorio(st, recorte.length)]);
 
 await page.waitForTimeout(500);
 
@@ -167,11 +185,15 @@ const visao = await page.evaluate(() => {
     // remontagem não entra "como o app entra".
     cabecalho: { perfil: naTela('userProfileBadge') ? (document.getElementById('userName')?.textContent || '').trim() : null,
                  filtros: naTela('filtersBtn'), atualizar: naTela('refreshBtn') },
+    // O PLACAR como a TELA o mostra (lido do DOM, não do AppState).
+    placar: ['readCount', 'rejectedCount', 'skippedCount', 'pendingCount']
+      .map((id) => (document.getElementById(id)?.textContent || '?').trim()),
     alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
   };
 });
 console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''} · tema na tela ${visao.tema}`);
 console.log(`cabeçalho: perfil ${visao.cabecalho.perfil ? `"${visao.cabecalho.perfil}"` : '—'} · Filtros ${visao.cabecalho.filtros ? 'sim' : 'NÃO'} · Atualizar ${visao.cabecalho.atualizar ? 'sim' : 'NÃO'}`);
+console.log(`placar:  lidos ${visao.placar[0]} · rejeitados ${visao.placar[1]} · pulados ${visao.placar[2]} · restam ${visao.placar[3]}`);
 if (visao.alertas) console.log(`alertas: ${visao.alertas.length ? JSON.stringify(visao.alertas) : 'nenhum'}`);
 if (erros.length) console.log(`ERROS DE JS: ${erros.join(' | ')}`);
 

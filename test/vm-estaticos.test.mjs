@@ -384,8 +384,20 @@ test('a VM roteia a API pelo caminho NORMALIZADO, como o Worker (`/api/./sessao`
 // MEDIDO, não deduzido da configuração: a dedução dizia 404 pra rota
 // desconhecida e acertou, mas também diria o mesmo do `README.md` da extensão
 // (e foi a medição que mostrou que o `.assetsignore` o tira em qualquer nível).
+//
+// Auditoria de 2026-09-29, `wrangler dev` 4.143.1: mais três divergências, e as
+// linhas com `{ metodo, location }` são delas:
+//   · o NOME do índice: `/index.html` e `/index` são 307 pra `/` lá (o
+//     `html_handling` padrão), e `/index/` é 307 pra `/index`, com a query junto
+//     — aqui, 200 e 404, 404;
+//   · URL mal codificada (`/%`) é 404 lá, e era 400 aqui;
+//   · fora do GET/HEAD, lá é 405 só onde há asset (os apelidos do índice
+//     incluídos) e 404 no resto — aqui era 405 pra tudo, e `POST /api` (sem a
+//     barra) e `POST /API/sessao` davam 405 aqui e 404 lá.
+// O pedido vai CRU (`node:http`): o `fetch` segue o 307 sozinho e normaliza o
+// caminho (`/./index.html` chegaria como `/index.html`).
 const NO_CLOUDFLARE = [
-  // [caminho, Accept, status, MIME (sem parâmetros) — null = não confere]
+  // [caminho, Accept, status, MIME (sem parâmetros) — null = não confere, { metodo, location }?]
   ['/extensao-chrome/manifest.json', '*/*', 200, 'application/json'],
   ['/extensao-chrome/icon16.png', 'image/*', 200, 'image/png'],
   // text/javascript lá, application/javascript aqui: pro navegador é o MESMO tipo.
@@ -400,16 +412,57 @@ const NO_CLOUDFLARE = [
   ['/qualquer-rota', '*/*', 404, null],
   ['/a/b/c', 'text/html,application/xhtml+xml', 404, null],
   ['/', 'text/html', 200, 'text/html'],
+  ['/index.html', '*/*', 307, null, { location: '/' }],
+  ['/index.html?x=1', '*/*', 307, null, { location: '/?x=1' }],
+  ['/index', '*/*', 307, null, { location: '/' }],
+  ['/index/', '*/*', 307, null, { location: '/index' }],
+  ['/index/?x=1', '*/*', 307, null, { location: '/index?x=1' }],
+  ['/./index.html', '*/*', 307, null, { location: '/' }],
+  ['/%69ndex.html', '*/*', 307, null, { location: '/' }],
+  ['/index.html', '*/*', 307, null, { metodo: 'HEAD', location: '/' }],
+  ['/index.html/', '*/*', 404, null],
+  ['/INDEX.HTML', '*/*', 404, null],
+  ['/%', '*/*', 404, null],
+  ['/%zz', '*/*', 404, null],
+  ['/', '*/*', 405, null, { metodo: 'POST' }],
+  ['/index.html', '*/*', 405, null, { metodo: 'POST' }],
+  ['/index', '*/*', 405, null, { metodo: 'POST' }],
+  ['/manifest.json', '*/*', 405, null, { metodo: 'DELETE' }],
+  ['/', '*/*', 405, null, { metodo: 'OPTIONS' }],
+  ['/api', '*/*', 404, null, { metodo: 'POST' }],
+  ['/API/sessao', '*/*', 404, null, { metodo: 'POST' }],
+  ['/qualquer-rota', '*/*', 404, null, { metodo: 'POST' }],
+  ['/js/app.js', '*/*', 404, null, { metodo: 'POST' }],
+  ['/%', '*/*', 404, null, { metodo: 'POST' }],
 ];
 
-test('estáticos: a VM responde como o Cloudflare MEDIDO — tipo, publicação e rota desconhecida', async () => {
+// O pedido CRU: caminho exato, sem seguir redirecionamento.
+async function pedidoCru(caminho, { metodo = 'GET', accept = '*/*' } = {}) {
+  const { request } = await import('node:http');
+  return new Promise((ok, erro) => {
+    const r = request({ host: '127.0.0.1', port: PORTA, method: metodo, path: caminho, headers: { Accept: accept } }, (res) => {
+      const pedacos = [];
+      res.on('data', (c) => pedacos.push(c));
+      res.on('end', () => ok({ status: res.statusCode, headers: res.headers, corpo: Buffer.concat(pedacos).toString() }));
+    });
+    r.on('error', erro);
+    r.end(metodo === 'POST' ? '{}' : undefined);
+  });
+}
+
+test('estáticos: a VM responde como o Cloudflare MEDIDO — tipo, publicação, índice, método e rota desconhecida', async () => {
   await comServidor(async () => {
-    for (const [caminho, accept, status, mime] of NO_CLOUDFLARE) {
-      const r = await fetch(URL_(caminho), { headers: { Accept: accept } });
-      const tipo = r.headers.get('content-type') || '';
-      assert.equal(r.status, status, `${caminho} (Accept ${accept}): a VM dá ${r.status}, o Cloudflare dá ${status}`);
-      if (mime) assert.equal(tipo.split(';')[0].trim(), mime, `${caminho}: Content-Type ${tipo}, o Cloudflare manda ${mime}`);
-      assert.notEqual(tipo, 'application/octet-stream', `${caminho} saiu octet-stream (com nosniff, o navegador não adivinha)`);
+    for (const [caminho, accept, status, mime, extra = {}] of NO_CLOUDFLARE) {
+      const metodo = extra.metodo || 'GET';
+      const r = await pedidoCru(caminho, { metodo, accept });
+      const tipo = r.headers['content-type'] || '';
+      const rotulo = `${metodo} ${caminho} (Accept ${accept})`;
+      assert.equal(r.status, status, `${rotulo}: a VM dá ${r.status}, o Cloudflare dá ${status}`);
+      if (mime) assert.equal(tipo.split(';')[0].trim(), mime, `${rotulo}: Content-Type ${tipo}, o Cloudflare manda ${mime}`);
+      if (extra.location !== undefined) {
+        assert.equal(r.headers.location, extra.location, `${rotulo}: redireciona pra ${r.headers.location}, o Cloudflare pra ${extra.location}`);
+      }
+      assert.notEqual(tipo, 'application/octet-stream', `${rotulo} saiu octet-stream (com nosniff, o navegador não adivinha)`);
     }
     // A licença aqui vai como texto (lá, sem tipo — que o navegador lê como texto).
     const lic = await fetch(URL_('/LICENSE'));

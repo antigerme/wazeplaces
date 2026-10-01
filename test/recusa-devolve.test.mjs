@@ -98,7 +98,7 @@ function montar({ fila = [], naTela = true, pendentesNoWaze = [], painel = false
   if (achar('devolverPedidoRecusado')) nomes.push('devolverPedidoRecusado');
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
-    const descargaNaFila = new WeakSet(); let filaDeOnde = null; let rebuscasAuto = 0;
+    const descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet(); let filaDeOnde = null; let rebuscasAuto = 0;
     let tratouNestaFila = true; let puladosNoInicioDaFila = 0;
     ${nomes.map(fatiar).join('\n')}
     return { handleActionResult, registrarPousoDeSaida, fetchNextPage, filaZeradaConfirmada, carregarFilaDeSaida, salvarFilaDeSaida };`)(

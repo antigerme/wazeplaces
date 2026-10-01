@@ -146,6 +146,30 @@ export function base64ToBytes(b64) {
   return a;
 }
 
+// O Secret (`ENCRYPTION_KEY`) é a entrada do HKDF que cifra as sessões (ver
+// `derivarChave`), e o HKDF aceita QUALQUER tamanho: uma chave de 3 bytes
+// ("YWJj") ou de 16 funcionava calada nos dois adaptadores (auditoria de
+// 2026-09-29). O mínimo é 32 — o que o README manda gerar (`openssl rand
+// -base64 32`) —, e NÃO "exatamente 32": uma chave maior só é mais forte, e a
+// de produção não pode derrubar o app por ser longa.
+export const CHAVE_MIN_BYTES = 32;
+
+// Decodifica o Secret e diz o que há de errado com ele, pros dois adaptadores
+// recusarem do mesmo jeito: a VM no boot (código 1), o Worker com o 500 de
+// "Backend não configurado". `problema` é `null` quando está tudo certo.
+export function chaveDoSecret(b64) {
+  let keyBytes;
+  try {
+    keyBytes = base64ToBytes(String(b64 ?? '').trim());
+  } catch {
+    return { keyBytes: null, problema: 'ENCRYPTION_KEY não é base64 válido' };
+  }
+  if (keyBytes.length < CHAVE_MIN_BYTES) {
+    return { keyBytes: null, problema: `ENCRYPTION_KEY com ${keyBytes.length} bytes; o mínimo é ${CHAVE_MIN_BYTES} (gere com: openssl rand -base64 32)` };
+  }
+  return { keyBytes, problema: null };
+}
+
 async function sha256hex(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -404,12 +428,20 @@ export function cookieHeaderFrom(cookiesContent, porHost = true) {
 // Chamada ao Waze via fetch (substitui makeCurlRequest/cURL)
 // ─────────────────────────────────────────────────────────────────────────
 
+// Quanto uma chamada ao Waze espera, no máximo, contando a leitura do corpo. O
+// cliente desiste do pedido INTEIRO aos 45 s (`_post`, no api.js), então rota
+// que faz duas chamadas em SÉRIE não cabe com as duas no teto cheio: a leitura
+// que vem antes de uma escrita ganha teto próprio (`RELEITURA_ESPERA_MS`), e a
+// soma é conferida em `test/portao-servidor.test.mjs`.
+export const WAZE_ESPERA_MS = 30000;
+
 // `ctx` (opcional) = { data, sessions, cookies } — o que permite regravar a
 // sessão com os cookies que o Waze rotacionou. Fica AQUI, e não em cada
 // handler, porque o modo de falha deste repo é "o próximo handler nasce sem":
 // são 7 pontos de chamada hoje e o esquecimento seria silencioso — a sessão
 // só azedaria semanas depois, longe de quem escreveu o código.
-async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null) {
+// `tetoMs`: a espera desta chamada, quando ela não pode usar o teto cheio.
+async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null, { tetoMs = WAZE_ESPERA_MS } = {}) {
   const env = wazeRefererEnv(region);
   const headers = {
     Accept: '*/*',
@@ -438,7 +470,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, response;
     try {
       res = await fetch(url, { ...init, signal: controller.signal });
@@ -485,7 +517,7 @@ async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat
   if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), WAZE_ESPERA_MS);
     let res, texto;
     try {
       res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
@@ -637,8 +669,25 @@ export function aplicarCookiesRotacionados(conteudoAtual, setCookie) {
 function objetoDoWaze(texto) {
   let v = null;
   try { v = JSON.parse(texto); } catch { /* cai no erro abaixo */ }
-  if (!v || typeof v !== 'object') apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (!v || typeof v !== 'object') respostaInesperadaDoWaze();
   return v;
+}
+
+// O Waze respondeu 200 com algo que não dá pra usar (página HTML, `null`, um
+// objeto sem o que a rota precisa). É erro inesperado DO WAZE, e sai igual em
+// toda rota: 500, `unknown`. O login dava 400 ("o pedido está errado") e sem
+// `errorCategory` (auditoria de 2026-09-29).
+//
+// A frase crua é a do dicionário pt: ela só aparece pra quem não tem a chave
+// — e pra extensão do Chrome, que decide "não está logado no WME" casando o
+// TEXTO com /expirad|inválid|invalid|csrf/. "Resposta inválida da API" casava,
+// e a extensão desistia dizendo que a pessoa não estava logada quando o Waze é
+// que tinha falhado. O certo é a extensão decidir pela `errorCategory` (ela
+// precisa ser republicada); até lá, a frase não a engana.
+function respostaInesperadaDoWaze() {
+  throw new ApiError({
+    success: false, error: 'Resposta inesperada do Waze', errorKey: 'srv.err.badWazeResponse', errorCategory: 'unknown',
+  }, 500);
 }
 
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
@@ -793,19 +842,57 @@ export function normalizePairCode(code) {
 }
 
 export function makeSessions({ store, keyBytes }) {
-  // O carimbo que o `loadSession` acabou de LER, por sessão. O Waze rotaciona o
-  // cookie em TODA resposta, então o `refreshCookies` roda a cada chamada — e
-  // cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no plano
-  // grátis) só pra descobrir que ainda não era hora de regravar, cujo teto é
-  // 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
+  // Os adaptadores recusam a chave curta antes de chegar aqui (a VM no boot, o
+  // Worker com o "Backend não configurado", ver `chaveDoSecret`); isto é a
+  // mesma régua pra quem montar um adaptador novo sem ela.
+  if (!keyBytes || !(keyBytes.length >= CHAVE_MIN_BYTES)) {
+    throw new Error(`makeSessions: a chave tem ${keyBytes ? keyBytes.length : 0} bytes, o mínimo é ${CHAVE_MIN_BYTES}`);
+  }
+  // O carimbo MAIS NOVO que esta instância conhece de cada sessão: o que o
+  // `loadSession` acabou de LER, ou o da gravação que ela mesma fez. O Waze
+  // rotaciona o cookie em TODA resposta, então o `refreshCookies` roda a cada
+  // chamada — e cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no
+  // plano grátis) só pra descobrir que ainda não era hora de regravar, cujo teto
+  // é 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
   // (auditoria de 2026-09-25). Carimbo só CRESCE, então um lembrado recente
   // prova que o de verdade também é: pular é seguro; um lembrado velho só faz
   // ler, como antes. No Worker isto vive uma requisição (o `makeSessions` é por
-  // requisição); na VM, o processo inteiro — daí o teto.
+  // requisição); na VM, o processo inteiro — daí o teto de entradas.
+  //
+  // Só CRESCE também no mapa, e na VM é isso que segura o teto de escrita sob
+  // concorrência: a gravação RESERVA o carimbo novo antes do primeiro `await`
+  // (`reservar`), e a requisição da mesma sessão que chega junto lê a reserva e
+  // não grava. Sem o "só cresce", o `loadSession` dessa outra requisição
+  // trocaria a reserva pelo carimbo VELHO que ainda está no arquivo, e as duas
+  // gravariam. No Worker cada requisição tem o seu mapa, e quem segura o teto é
+  // a RELEITURA antes de gravar: a 2ª requisição da abertura relê e acha o
+  // carimbo que a 1ª acabou de gravar. O KV não tem "compare e grave", então
+  // duas respostas do Waze chegando na MESMA janela de releitura (dezenas de
+  // ms) ainda gravam as duas — as 3 chamadas da abertura têm latências de
+  // centenas de ms entre si.
   const carimboLido = new Map();
+  const TETO_DE_SESSOES_LEMBRADAS = 5000;
   const lembrarCarimbo = (hash, carimbo) => {
-    if (carimboLido.size >= 5000) carimboLido.clear();
+    const atual = carimboLido.get(hash);
+    if (atual != null && atual >= carimbo) return;
+    if (atual == null && carimboLido.size >= TETO_DE_SESSOES_LEMBRADAS) carimboLido.clear();
     carimboLido.set(hash, carimbo);
+  };
+  // Marca a sessão como gravada AGORA, ANTES de gravar, e devolve o desfazer
+  // (pra quando a gravação não acontece). O desfazer só volta atrás se a marca
+  // ainda for a dele.
+  const reservar = (hash, agora) => {
+    const antes = carimboLido.get(hash);
+    lembrarCarimbo(hash, agora);
+    return () => {
+      if (carimboLido.get(hash) !== agora) return;
+      if (antes == null) carimboLido.delete(hash);
+      else carimboLido.set(hash, antes);
+    };
+  };
+  const carimboDoValor = (raw) => {
+    const sep = String(raw).indexOf('|');
+    return { sep, carimbo: sep > 0 ? parseInt(String(raw).slice(0, sep), 10) : NaN };
   };
   return {
     // Exposto pra quem precisa de cache curto próprio (a releitura do local
@@ -821,23 +908,21 @@ export function makeSessions({ store, keyBytes }) {
       await store.put(hash, Math.floor(Date.now() / 1000) + '|' + blob, SESSION_TTL);
       return token;
     },
-    // Renova o prazo A CADA USO — janela deslizante, não prazo fixo.
+    // Lê e abre a sessão, e NÃO grava nada. O prazo é renovado pela própria
+    // requisição: pela regravação do cookie rotacionado (`refreshCookies`), que
+    // renova de carona, ou, sem ela, no FIM da requisição (`renovarPrazo`, que o
+    // `dispatch` chama). Ver o `renovarPrazo` pra janela deslizante em si.
     //
-    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
-    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
-    // nada. Resultado medido com o core de verdade e um KV simulado: editor
-    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
-    // no período. A validade contava do login, não do último uso — e o
-    // CLAUDE.md descrevia os dois adaptadores como se fossem equivalentes.
-    //
-    // O carimbo vai no VALOR, no mesmo formato que `createPairing` já usa
-    // (`ts|blob`), porque o KV não sabe dizer quanto falta do TTL. `|` é seguro
-    // como separador: base64 não o produz.
-    //
-    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
-    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada
-    // chamada (são 3 só ao abrir o app) esbarraria nesse teto — trocaria um
-    // logout por outro.
+    // A renovação morava AQUI, e era o defeito (auditoria de 2026-09-29): ela
+    // regravava o blob VELHO com carimbo novo ANTES de a requisição chamar o
+    // Waze, e a trava de 1 h do `refreshCookies` lê esse carimbo — então o
+    // cookie rotacionado que chegava em seguida era jogado fora, na requisição
+    // da renovação e em toda a hora seguinte. MEDIDO com relógio simulado: quem
+    // usa o app menos de 1 h por abertura e volta 24 h depois NUNCA salvava a
+    // rotação (o `_web_session` do login em todas as chamadas, 6 dias seguidos;
+    // abrindo a cada 2 dias, 14 dias), e o cookie do login é o que azeda
+    // (gotcha #43). De quebra, cada uma das 3 chamadas da abertura renovava por
+    // conta própria: 3 escritas no KV, duas no mesmo segundo.
     async loadSession(token) {
       if (!token) return null;
       const hash = await sha256hex(token);
@@ -862,30 +947,68 @@ export function makeSessions({ store, keyBytes }) {
       // é ROTACIONAR o `ENCRYPTION_KEY`: aí todo blob antigo morre de uma vez.
       const descartar = async () => { try { await store.delete(hash); } catch (e) { /* nunca derruba a resposta */ } };
 
-      const sep = raw.indexOf('|');
-      const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+      const { sep, carimbo } = carimboDoValor(raw);
       if (!Number.isFinite(carimbo)) { await descartar(); return null; }
       const blob = raw.slice(sep + 1);
 
       const cookies = await decryptCookies(blob, await derivarChave(keyBytes, token));
       if (!cookies) { await descartar(); return null; }
 
-      const agora = Math.floor(Date.now() / 1000);
-      let carimboAtual = carimbo;
-      if (agora - carimbo >= SESSION_REFRESH_AFTER) {
-        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
-        // a sessão segue valendo com o prazo antigo. Deixar isto lançar
-        // transformaria uma falha de renovação em 401 — exatamente o defeito
-        // que esta função existe pra corrigir.
-        try {
-          await store.put(hash, agora + '|' + blob, SESSION_TTL);
-          carimboAtual = agora;
-        } catch (e) {
-          // silêncio proposital: nada aqui deve derrubar a sessão
-        }
-      }
-      lembrarCarimbo(hash, carimboAtual);
+      lembrarCarimbo(hash, carimbo);
       return cookies;
+    },
+    // Renova o prazo da sessão se ele venceu, no FIM da requisição — janela
+    // DESLIZANTE, não prazo fixo. Quem chama é o `dispatch`, depois do handler.
+    //
+    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
+    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
+    // nada. Resultado medido com o core de verdade e um KV simulado: editor
+    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
+    // no período (gotcha #41). O carimbo vai no VALOR (`ts|blob`, o formato do
+    // `createPairing`), porque o KV não sabe dizer quanto falta do TTL; `|` é
+    // seguro como separador, base64 não o produz.
+    //
+    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
+    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada chamada
+    // esbarraria nesse teto — trocaria um logout por outro.
+    //
+    // No FIM, e não no `loadSession`, porque a gravação do cookie rotacionado
+    // (`refreshCookies`) já renova o prazo: com o Waze mandando cookie novo, é
+    // ELA que grava, uma vez, e aqui não sobra nada a fazer (o carimbo lembrado
+    // já é o de agora). O blob velho só é regravado quando a requisição não
+    // trouxe cookie novo — e o que se regrava é o da RELEITURA, não o que o
+    // `loadSession` leu: outra requisição da mesma sessão pode ter acabado de
+    // gravar a rotação, e regravar o valor antigo por cima a desfaria.
+    //
+    // Só age se ESTA instância leu a sessão (o carimbo lembrado): token que não
+    // foi aberto aqui, ou sessão apagada (`destroySession` esquece o carimbo),
+    // não custa nem a leitura. E nunca lança, nem grava sessão que sumiu.
+    async renovarPrazo(token) {
+      if (typeof token !== 'string' || !token) return false;
+      let desfazer = null;
+      try {
+        const hash = await sha256hex(token);
+        const agora = Math.floor(Date.now() / 1000);
+        const lembrado = carimboLido.get(hash);
+        if (lembrado == null || agora - lembrado < SESSION_REFRESH_AFTER) return false;
+        desfazer = reservar(hash, agora);
+        const raw = await store.get(hash);
+        const { sep, carimbo } = raw ? carimboDoValor(raw) : { sep: -1, carimbo: NaN };
+        if (!raw || !Number.isFinite(carimbo)) { desfazer(); return false; }
+        if (agora - carimbo < SESSION_REFRESH_AFTER) {
+          desfazer();
+          lembrarCarimbo(hash, carimbo);
+          return false;
+        }
+        await store.put(hash, agora + '|' + raw.slice(sep + 1), SESSION_TTL);
+        return true;
+      } catch {
+        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
+        // a sessão segue valendo com o prazo antigo, e a próxima requisição
+        // tenta de novo.
+        if (desfazer) desfazer();
+        return false;
+      }
     },
     // Lê antes de apagar: a rota não exige nada além de um token qualquer, e no
     // plano grátis do KV o apagamento é a cota curta (1.000 por dia, contra
@@ -910,29 +1033,33 @@ export function makeSessions({ store, keyBytes }) {
     // KV aceita 1 escrita/s por chave. Sem o teto, um editor em ritmo trocaria
     // o logout por estouro de limite de escrita — outro logout, com outro nome.
     // Uma hora é folgado pra qualquer janela de tolerância plausível e mantém a
-    // escrita em no máximo 1/h por sessão ativa.
+    // escrita em no máximo 1/h por sessão ativa. A gravação leva o carimbo de
+    // agora e o TTL cheio, então ela RENOVA o prazo também — é o que deixa o
+    // `renovarPrazo` sem nada a fazer nesta requisição.
     //
     // Nunca lança: falha em renovar não pode derrubar a requisição do editor.
     async refreshCookies(token, conteudoNovo) {
       if (!token || !conteudoNovo) return false;
+      let desfazer = null;
       try {
         const hash = await sha256hex(token);
         const agora = Math.floor(Date.now() / 1000);
         const lembrado = carimboLido.get(hash);
         if (lembrado != null && agora - lembrado < SESSION_COOKIE_REFRESH) return false;
+        desfazer = reservar(hash, agora);
         const raw = await store.get(hash);
-        if (!raw) return false;
-        const sep = raw.indexOf('|');
-        const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+        if (!raw) { desfazer(); return false; }
+        const { carimbo } = carimboDoValor(raw);
         if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) {
+          desfazer();
           lembrarCarimbo(hash, carimbo);
           return false;
         }
         const blob = await encryptCookies(conteudoNovo, await derivarChave(keyBytes, token));
         await store.put(hash, agora + '|' + blob, SESSION_TTL);
-        lembrarCarimbo(hash, agora);
         return true;
       } catch {
+        if (desfazer) desfazer();
         return false;
       }
     },
@@ -1537,13 +1664,10 @@ async function handleTestarCookies(data, { sessions }) {
     };
   }
 
-  let profile;
-  try {
-    profile = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
-  }
-  if (!profile || typeof profile !== 'object' || !profile.userName) apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
+  // 200 com corpo que não é o perfil (HTML de um desafio, `null`, sem nome):
+  // falha do Waze, como qualquer outra — nunca "cookies inválidos".
+  const profile = objetoDoWaze(result.response);
+  if (!profile.userName) respostaInesperadaDoWaze();
 
   const check = isUserAllowed(profile);
   if (!check.allowed) {
@@ -2475,6 +2599,19 @@ const RELEITURA_TTL = 15;
 // toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
 // no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
 export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
+// Teto PRÓPRIO da releitura, o orçamento da rota. Sem a lista guardada (o
+// `preparar` falhou, ou a pessoa ficou mais de 15 s no diálogo), a exclusão faz
+// releitura e escrita EM SÉRIE, e cada uma herdava os 30 s do `callWaze`: 60 s,
+// contra os 45 s em que o cliente desiste do pedido. O `callWithRetry` refazia,
+// a escrita da 1ª tentativa já tinha saído, e a 2ª voltava `jaExcluida` — a
+// pessoa lia "outro editor já tinha excluído" sobre a exclusão DELA (MEDIDO
+// com um Waze de mentira de 29 s por chamada: 58,1 s; auditoria de 2026-09-29).
+// A escrita segue com o teto cheio: cortá-la cedo é abortar uma gravação que o
+// Waze pode estar fazendo. Quem encolhe é a leitura, e 10 s é ~14× os ~700 ms
+// medidos dela; releitura que não volta até lá é erro de rede, e o cliente
+// tenta de novo — sem escrita no meio, então sem o "já excluída" falso. A soma
+// com o teto da escrita é conferida contra os 45 s em `test/portao-servidor`.
+export const RELEITURA_ESPERA_MS = 10000;
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
@@ -2504,7 +2641,8 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
     bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
     v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
   });
-  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions },
+    { tetoMs: RELEITURA_ESPERA_MS });
   if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
   let atual;
   try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
@@ -2584,7 +2722,7 @@ async function handleExcluirFoto(data, { sessions }) {
       body: { success: false, error: rel.erro.message, errorKey: rel.erro.messageKey, errorVars: rel.erro.messageVars, errorCategory: rel.erro.category, httpCode: rel.httpCode },
     };
   }
-  if (rel.erroParse) apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (rel.erroParse) respostaInesperadaDoWaze();
   if (rel.semLocal) apiError('Local não encontrado', 404, 'srv.err.venueGone');
   const venue = rel.venue;
 
@@ -2871,8 +3009,16 @@ async function handleListaPaises(data, { sessions }) {
 async function handleListaEstados(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  const countryId = data.countryId ? parseInt(data.countryId, 10) : 0;
-  if (countryId <= 0) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
+  // O país é um inteiro: o número que o app manda (`parseInt` no `api.js`), ou
+  // um texto só de dígitos. O `parseInt` daqui lia '1e400' como 1 e '30abc'
+  // como 30, e o que não é número virava NaN — e `NaN <= 0` é FALSO: 'abc',
+  // `true`, `[]`, `{}` e 'NaN' passavam e iam ao Waze com countryId=0, voltando
+  // 200 com a lista vazia (auditoria de 2026-09-29). `!(> 0)` pega o NaN; o
+  // mesmo 400 do país ausente, antes do Waze.
+  const bruto = data.countryId;
+  const countryId = typeof bruto === 'number' ? bruto
+    : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+  if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
   const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region, { data, sessions, cookies });
@@ -3312,7 +3458,7 @@ async function handlePresencaWaze(data, { sessions }) {
     if (escrita) body.eu = escrita.dados ? lerEditorOnline(escrita.dados) : null;
     if (lista) body.editores = lerListaOnline(lista.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return { status: 200, body };
 }
@@ -3442,7 +3588,7 @@ async function handleChat(data, { sessions }) {
   try {
     resultado = ler(r.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return comConfirmados({ status: 200, body: { success: true, ...resultado } }, confirmacao);
 }
@@ -3481,7 +3627,7 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   try {
     resultado = lerMensagens(hist.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
   // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
@@ -3501,6 +3647,17 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   return { status: 200, body: { success: true, ...resultado, recibos, ...(lida ? { lida: lidaOk } : {}) } };
 }
 
+// O teto do corpo de uma requisição à API, e a resposta de quem passa dele — os
+// MESMOS nos dois adaptadores, e por isso aqui, no módulo que os dois importam:
+// a VM aplica no `readBody` (`server/corpo.mjs`), o Worker no `lerCorpo` dele.
+// O Worker lia tudo com `request.json()`, e o mesmo corpo de 5,5 MB dava 200
+// lá e 413 na VM (auditoria de 2026-09-29). O maior corpo legítimo do app é o
+// cookies.txt que o aparelho já filtrou, na casa dos KB.
+export const MAX_BODY_BYTES = 5_000_000;
+export const RESPOSTA_CORPO_GRANDE = Object.freeze({
+  success: false, error: 'Corpo da requisição muito grande', errorKey: 'srv.err.bodyTooLarge',
+});
+
 const ROUTES = {
   sessao: handleSessao,
   parear: handleParear,
@@ -3519,6 +3676,27 @@ const ROUTES = {
   'lista-estados': handleListaEstados,
 };
 
+// O corpo que a conversão pra texto ou número não consegue ler. `JSON.parse` dá
+// objeto com `toString`/`valueOf` PRÓPRIOS a quem mandar a chave no JSON
+// (`{"toString":1}`), e aí `String(v)`, `parseInt(v)` e `Number(v)` LANÇAM —
+// quase todo campo de quase toda rota passa por um deles, e o pedido virava o
+// 500 genérico de "erro interno" em vez de 400 (53 achados no fuzz da
+// auditoria de 2026-09-29). Conferido UMA vez aqui, no corpo inteiro, em vez
+// de campo a campo em cada handler: rota nova nasce coberta. `JSON.parse` não
+// produz outro jeito de a conversão lançar (nem `Symbol.toPrimitive`, nem
+// getter). O teto de profundidade é do próprio exame (sem ele, um corpo de
+// 10 mil níveis estouraria a pilha); nenhum corpo do app passa de 3 níveis.
+const PROFUNDIDADE_MAX_DO_CORPO = 8;
+function corpoLegivel(v, profundidade = 0) {
+  if (v === null || typeof v !== 'object') return true;
+  if (profundidade > PROFUNDIDADE_MAX_DO_CORPO) return false;
+  if (Object.hasOwn(v, 'toString') || Object.hasOwn(v, 'valueOf')) return false;
+  for (const k of Object.keys(v)) {
+    if (!corpoLegivel(v[k], profundidade + 1)) return false;
+  }
+  return true;
+}
+
 /**
  * Executa um endpoint, pelo nome exato da rota.
  * ctx = { sessions }. Sempre resolve — nunca lança (ApiError vira resposta;
@@ -3530,10 +3708,26 @@ export async function dispatch(name, data, ctx) {
   const nome = String(name || '');
   const handler = Object.hasOwn(ROUTES, nome) ? ROUTES[nome] : null;
   if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
+  if (!corpoLegivel(data)) return { status: 400, body: { success: false, error: 'Pedido inválido', errorKey: 'srv.err.badRequest' } };
   try {
     return await handler(data || {}, ctx);
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: e.body };
     return { status: 500, body: { success: false, error: 'Erro interno', errorKey: 'srv.err.internal' } };
+  } finally {
+    await renovarPrazoNoFim(data, ctx);
   }
+}
+
+// A janela deslizante da sessão anda no FIM da requisição, depois de o handler
+// ter tido a chance de gravar o cookie rotacionado — que renova o prazo junto
+// (ver `renovarPrazo` no `makeSessions`). Aqui, e não em cada handler, pelo
+// motivo do `callWaze`: rota nova nasceria sem, e a sessão de quem só usasse
+// ela venceria em 21 dias sem ninguém ver. Espera de verdade (sem promessa
+// solta): no Worker, o que fica pendurado depois da resposta é cortado.
+async function renovarPrazoNoFim(data, ctx) {
+  const token = data && data.sessionToken;
+  const sessions = ctx && ctx.sessions;
+  if (typeof token !== 'string' || !token || !sessions || typeof sessions.renovarPrazo !== 'function') return;
+  try { await sessions.renovarPrazo(token); } catch { /* renovar é melhor-esforço: a resposta sai igual */ }
 }

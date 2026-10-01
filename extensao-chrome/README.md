@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.2.0
+# Waze Places Rapid Access — proposta de v0.3.0
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -54,11 +54,22 @@ de três:
 
 ```js
 { source: 'wazeplaces-ext', action: 'aguarde' }                  // já: "estou aqui, trabalhando"
-{ source: 'wazeplaces-ext', action: 'sessao',     token: '…' }   // deu certo
+{ source: 'wazeplaces-ext', action: 'sessao',     token: '…', conta: '…' }  // deu certo
 { source: 'wazeplaces-ext', action: 'sem-sessao', motivo: '…' }  // sem login no WME, ou erro
 { source: 'wazeplaces-ext', action: 'sem-sessao', motivo: 'negado',
   negado: { errorKey, errorVars, error, profile } }               // o portão do app recusou a conta
 ```
+
+`conta` é o id da conta do Waze dona da sessão, que o `testar-cookies` devolve junto com o token
+(desde a v0.3.0). Com ele o app sabe de quem é a sessão NA HORA: se for OUTRA conta, a fila e os
+dados de quem estava saem antes de o perfil chegar. Sem ele (extensão ou servidor anteriores), o
+app espera o perfil, como sempre fez. O token que o botão do WME deixa pra aba nova (abaixo) vai
+sem a conta, e aí também é o perfil que diz.
+
+Os `motivo` do `sem-sessao`: `sem-login-wme` (não há login no WME), `erro` (a ida ao Waze ou ao
+app falhou depois das tentativas), `contexto-invalido` (a extensão se atualizou com a aba aberta
+e a ponte ficou órfã — ver a v0.2.0), `negado` (abaixo) e nenhum (o service worker da extensão
+não respondeu). O app trata todos como "sem sessão"; só o `negado` muda a tela.
 
 `negado` é quando o servidor respondeu `access_denied` (a conta não tem o nível ou a área que o
 app exige). É resposta definitiva: a extensão não tenta de novo, e o app mostra o diálogo "Acesso
@@ -165,5 +176,31 @@ carregamento.
 | atual | 0.2.0 | funciona, e instalar com a aba aberta passa a resolver sozinho |
 | anterior | 0.2.0 | funciona — o reload leva o app a perguntar no carregamento, como sempre |
 
-Nenhuma mudança de protocolo entre app e extensão: as mensagens (`precisa-de-sessao`, `aguarde`,
-`sessao`, `sem-sessao`) são as mesmas.
+Da 0.1.0 pra 0.2.0 o protocolo não mudou: as mensagens (`precisa-de-sessao`, `aguarde`,
+`sessao`, `sem-sessao`) são as mesmas. Na 0.3.0 ele ganhou dois campos (abaixo).
+
+---
+
+## v0.3.0 — a conta e o "Acesso restrito"
+
+Duas mudanças de protocolo, as duas só ACRESCENTAM campo — a mensagem continua a mesma, e quem não
+conhece o campo novo o ignora:
+
+1. **`sessao` leva a `conta`** (o `testar-cookies` já a devolvia). Numa queda de sessão renovada
+   pela extensão, era o perfil que dizia de quem era a sessão nova, e até ele chegar a fila e os
+   dados da conta anterior seguiam na tela. Com a conta junto, a troca acontece na hora.
+2. **`sem-sessao` com `motivo: 'negado'`** e o objeto `negado` quando o portão do app recusa a conta
+   (`access_denied`: sem o nível ou a área que o app exige). Antes a extensão tentava 4 vezes — uma
+   ida ao `/Session` do Waze em nome da pessoa a cada uma, 4,7 s medidos — e a ponte dizia só
+   `erro`: a pessoa caía na tela de entrada sem saber por quê. Agora é resposta definitiva, e o app
+   mostra o diálogo "Acesso restrito" com o perfil, o mesmo do login por arquivo.
+
+**Precisa ser publicada de novo** pra valer: até lá o app funciona com a 0.2.0 exatamente como antes.
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.2.0 | funciona como antes: a conta só é conhecida quando o perfil chega, e a conta recusada cai na tela de entrada (depois das 4 tentativas), sem o "Acesso restrito" |
+| atual | 0.3.0 | a conta chega com o token, e a conta recusada vê o "Acesso restrito" na hora |
+| anterior | 0.3.0 | funciona — o app de antes ignora a `conta`, e o `negado` segue sendo `sem-sessao` |
+
+Permissões: **as mesmas** da 0.2.0.

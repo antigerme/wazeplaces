@@ -186,12 +186,16 @@ test('corpo `null` do Waze: resposta inválida, não "Erro interno"', async () =
     const { r } = await comWaze(() => json('null'), () => dispatch(rota, { ...s.dados, region: 'row', countryId: 30 }, s.ctx));
     assert.equal(r.status, 500, rota);
     assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `${rota}: ${r.body.errorKey}`);
+    // O mesmo "erro inesperado do Waze" do login, com a categoria (o app lia a
+    // falta dela como `unknown`; agora vem dita).
+    assert.equal(r.body.errorCategory, 'unknown', `${rota}: ${r.body.errorCategory}`);
   }
   // A releitura do excluir-foto: `null` virava TypeError dentro do `relerLocal`.
   const s = await sessaoDeTeste(COOKIES);
   const { r, chamadas } = await comWaze(() => json('null'),
     () => dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 }, s.ctx));
   assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `excluir-foto: ${r.body.errorKey}`);
+  assert.equal(r.body.errorCategory, 'unknown', `excluir-foto: ${r.body.errorCategory}`);
   assert.ok(chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu no Waze sem ter lido o local');
 });
 
@@ -211,6 +215,83 @@ test('releitura do excluir-foto: o prazo gravado no store respeita o mínimo do 
   const doCache = prazos.filter((p) => p !== undefined && p < 3600);
   assert.ok(doCache.length > 0, 'a releitura não tentou gravar o cache — o teste não mediu nada');
   assert.ok(doCache.every((p) => p >= 60), `prazo abaixo do mínimo do KV: ${doCache}`);
+});
+
+// A Ajuda (`help.privacy.server`) promete que a lista de fotos da lixeira sai do
+// servidor até N minuto depois da ÚLTIMA vez que a pessoa toca na lixeira ou
+// exclui uma foto. Medido como o KV mede: o registro some `ttl` segundos depois
+// da ÚLTIMA gravação dele. A frase contava do toque, e a lista ficava 74 s
+// (auditoria de 2026-09-29): ela é regravada depois da exclusão — de propósito,
+// pra a exclusão seguinte não mandar de volta a foto que saiu (gotcha #57).
+test('a lista de fotos da lixeira some até o prazo da Ajuda depois da ÚLTIMA gravação — do toque, ou da exclusão', async () => {
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const prometido = 60 * Number((/^const LISTA_FOTOS_MIN_EXIBIDO = (\d+);/m.exec(APP) || [])[1]);
+  assert.ok(prometido > 0, 'CONTROLE: não achei o prazo que a Ajuda cita');
+  let agora = 1_790_000_000;
+  const relogio = Date.now;
+  Date.now = () => agora * 1000;
+  try {
+    const cenario = async ({ excluir }) => {
+      const s = await sessaoDeTeste(COOKIES);
+      const some = [];   // o instante em que o KV apagaria o registro, a cada gravação
+      const gravar = s.store.put;
+      s.store.put = async (k, v, ttl) => { if (String(k).startsWith('reler_')) some.push(agora + ttl); return gravar(k, v, ttl); };
+      const venue = { id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] };
+      const corpo = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+      const toque = agora;
+      let fimDaExclusao = null;
+      await comWaze((url, init) => {
+        if (init.method !== 'POST') return json({ venues: { objects: [venue] } });
+        agora += 5;   // o Waze leva 5 s pra gravar
+        return json({ venues: { v1: { images: [{ id: 'i2' }] } } });
+      }, async () => {
+        await dispatch('excluir-foto', { ...corpo, imageID: 'preparar', action: 'preparar' }, s.ctx);
+        if (!excluir) return;
+        agora += 14;   // leu o diálogo e confirmou (a lista guardada ainda vale)
+        const r = await dispatch('excluir-foto', { ...corpo, imageID: 'i1' }, s.ctx);
+        assert.equal(r.body.success, true, JSON.stringify(r.body));
+        fimDaExclusao = agora;
+      });
+      assert.ok(some.length > 0, 'CONTROLE: a lista não foi gravada — o teste não mediu nada');
+      return { toque, fimDaExclusao, sumiu: some.at(-1) };
+    };
+    const desistiu = await cenario({ excluir: false });
+    assert.ok(desistiu.sumiu - desistiu.toque <= prometido,
+      `tocou e desistiu: a lista ficou ${desistiu.sumiu - desistiu.toque} s depois do toque (a Ajuda diz ${prometido} s)`);
+    const excluiu = await cenario({ excluir: true });
+    assert.ok(excluiu.sumiu - excluiu.fimDaExclusao <= prometido,
+      `excluiu: a lista ficou ${excluiu.sumiu - excluiu.fimDaExclusao} s depois da exclusão (a Ajuda diz ${prometido} s)`);
+    // CONTROLE: contado do TOQUE, o prazo passa — é por isso que a frase conta
+    // da última exclusão. Se isto falhar, a regravação mudou, e a frase também deve.
+    assert.ok(excluiu.sumiu - excluiu.toque > prometido,
+      `CONTROLE: a lista sumiu ${excluiu.sumiu - excluiu.toque} s depois do toque — a regravação depois da exclusão sumiu?`);
+  } finally {
+    Date.now = relogio;
+  }
+});
+
+// Um corpo que começa com BOM: o Worker o lê (o `TextDecoder` tira o BOM, como
+// o `request.json()` tirava), e a VM, pelo `Buffer#toString`, o deixava — o
+// `JSON.parse` falhava e o mesmo POST dava 200 lá e 400 aqui (o comparador VM ×
+// Worker da auditoria de 2026-09-29).
+test('VM: corpo com BOM no começo é lido, como no Worker', async () => {
+  const texto = JSON.stringify({ action: 'destroy', sessionToken: 'x' });
+  const req = new EventEmitter();
+  req.destroy = () => {};
+  const res = { headersSent: false, writeHead() {}, end() {} };
+  const lido = readBody(req, res);
+  req.emit('data', Buffer.from([0xef, 0xbb, 0xbf]));
+  req.emit('data', Buffer.from(texto));
+  req.emit('end');
+  const corpo = await lido;
+  assert.deepEqual(JSON.parse(corpo), { action: 'destroy', sessionToken: 'x' }, `a VM não leu o corpo com BOM: ${JSON.stringify(corpo)}`);
+  // CONTROLE: o Worker de verdade lê o mesmo corpo.
+  const { default: worker } = await import('../worker/index.mjs');
+  const env = { ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+    SESSIONS: { get: async () => null, put: async () => {}, delete: async () => {} }, ASSETS: { fetch: () => new Response('') } };
+  const r = await worker.fetch(new Request('https://app.exemplo/api/sessao', { method: 'POST',
+    body: new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from(texto)]) }), env, {});
+  assert.equal(r.status, 200, 'CONTROLE: o Worker não leu o corpo com BOM');
 });
 
 test('VM: acento cortado na divisa entre dois pedaços do corpo chega inteiro', async () => {
@@ -525,7 +606,7 @@ test('cabeçalho que não dá pra converter sem perda segue aceito como veio (o 
   assert.equal(cabecalhoParaNetscape(COOKIES), COOKIES);
 });
 
-import { DUPLICADO_ESPERA_MS } from '../server/core.mjs';
+import { DUPLICADO_ESPERA_MS, WAZE_ESPERA_MS, RELEITURA_ESPERA_MS } from '../server/core.mjs';
 
 // Um pedido DUPLICATE: a busca faz uma releitura por bbox pra achar o NOME do
 // local apontado (ver `resolverDuplicados`).
@@ -573,16 +654,96 @@ test('buscar-places: a releitura do duplicado tem TETO próprio — presa, a bus
   assert.equal(rapida.r.body.places[0].duplicado?.nome, 'Natan Estacionamento', 'CONTROLE: o nome do duplicado não chegou');
 });
 
+// O cliente desiste do pedido INTEIRO aos 45 s (`_post`, no api.js), e rota que
+// faz duas chamadas ao Waze em SÉRIE só cabe nisso se a soma dos tetos couber.
+// Os tetos vêm do core IMPORTADOS; o do `callWaze` é conferido também na fonte,
+// porque um número à parte dentro dele faria a constante mentir.
+const tetoDoCliente = () => {
+  const m = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
+  assert.ok(m, 'não achei o teto do cliente no api.js — o instrumento quebrou, não a regra');
+  return Number(m[1]);
+};
+
 test('o teto do duplicado cabe no prazo do cliente: busca (teto do callWaze) + releitura < 45 s do `_post`', () => {
-  // A justificativa do número, conferida nas FONTES: se alguém subir o teto do
-  // duplicado (ou encurtar o do cliente), a busca volta a se perder pelo enfeite.
+  // A justificativa do número: se alguém subir o teto do duplicado (ou encurtar
+  // o do cliente), a busca volta a se perder pelo enfeite.
   const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
-  const tetoBusca = /async function callWaze\(url[\s\S]*?controller\.abort\(\), (\d+)\)/.exec(core);
-  const tetoCliente = /async _post\([\s\S]*?controller\.abort\(\), (\d+)\)/.exec(API_JS);
-  assert.ok(tetoBusca && tetoCliente, 'não achei os tetos nas fontes — o instrumento quebrou, não a regra');
-  const soma = Number(tetoBusca[1]) + DUPLICADO_ESPERA_MS;
-  assert.ok(soma < Number(tetoCliente[1]),
-    `busca (${tetoBusca[1]} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoCliente[1]} ms do cliente`);
+  assert.match(core, /async function callWaze\([^)]*\{ tetoMs = WAZE_ESPERA_MS \} = \{\}\)/,
+    'o callWaze não espera o WAZE_ESPERA_MS por padrão — a conta abaixo não vale');
+  assert.match(core, /controller\.abort\(\), tetoMs\)/, 'o timer do callWaze não usa o teto da chamada');
+  const soma = WAZE_ESPERA_MS + DUPLICADO_ESPERA_MS;
+  assert.ok(soma < tetoDoCliente(),
+    `busca (${WAZE_ESPERA_MS} ms) + releitura (${DUPLICADO_ESPERA_MS} ms) = ${soma} ms não cabe nos ${tetoDoCliente()} ms do cliente`);
+});
+
+test('o teto da releitura do excluir-foto cabe no prazo do cliente: releitura + escrita, EM SÉRIE, < 45 s do `_post`', () => {
+  // Sem a lista guardada, a exclusão relê e depois escreve. Com os dois no teto
+  // cheio eram 60 s, e o cliente desistia aos 45 com a escrita já no ar: a
+  // retentativa voltava "já excluída" e a pessoa lia "outro editor já tinha
+  // excluído" sobre a exclusão DELA (auditoria de 2026-09-29). 3 s de folga pro
+  // que não é o Waze (KV, cifra, a rede do celular até o servidor).
+  const soma = RELEITURA_ESPERA_MS + WAZE_ESPERA_MS;
+  assert.ok(soma + 3000 <= tetoDoCliente(),
+    `releitura (${RELEITURA_ESPERA_MS} ms) + escrita (${WAZE_ESPERA_MS} ms) = ${soma} ms, sem folga nos ${tetoDoCliente()} ms do cliente`);
+  assert.ok(RELEITURA_ESPERA_MS >= 3000, 'o teto da releitura ficou curto pra uma leitura de ~700 ms num dia ruim');
+});
+
+test('excluir-foto: releitura presa responde no teto DELA, sem escrever — e o erro é de rede, pro cliente tentar de novo', async () => {
+  // Os prazos do core andam 20× mais rápido aqui (só os de 1 s pra cima): 10 s
+  // viram 500 ms e 30 s viram 1,5 s, e a pergunta é QUAL dos dois segurou a rota.
+  const ESCALA = 20;
+  const setTimeoutReal = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...a) => setTimeoutReal(fn, ms >= 1000 ? ms / ESCALA : ms, ...a);
+  try {
+    const corpo = { region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6 };
+    // CONTROLE: com o Waze respondendo, a exclusão sai — o teto não corta o caminho normal.
+    const s0 = await sessaoDeTeste(COOKIES);
+    const normal = await comWaze((url, init) => (init.method === 'POST'
+      ? json({ venues: { v1: { images: [{ id: 'i2' }] } } })
+      : json({ venues: { objects: [{ id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] }] } })),
+    () => dispatch('excluir-foto', { ...s0.dados, ...corpo }, s0.ctx));
+    assert.equal(normal.r.body.success, true, `CONTROLE: ${JSON.stringify(normal.r.body)}`);
+
+    // A releitura fica PRESA até o `callWaze` abortar.
+    const s = await sessaoDeTeste(COOKIES);
+    const t0 = Date.now();
+    const { r, chamadas } = await comWaze((url, init) => new Promise((ok, erro) => {
+      init.signal?.addEventListener('abort', () => erro(new DOMException('This operation was aborted', 'AbortError')));
+    }), () => dispatch('excluir-foto', { ...s.dados, ...corpo }, s.ctx));
+    const levou = Date.now() - t0;
+    assert.equal(chamadas.length, 1, 'CONTROLE: a rota não fez a releitura (ou fez mais de uma chamada)');
+    assert.ok(chamadas.every((c) => (c.init.method || 'GET') === 'GET'), 'escreveu no Waze sem ter lido o local');
+    assert.equal(r.body.success, false);
+    assert.equal(r.body.errorCategory, 'transient', `a releitura que não voltou não é erro de rede: ${JSON.stringify(r.body)}`);
+    const dela = RELEITURA_ESPERA_MS / ESCALA, cheio = WAZE_ESPERA_MS / ESCALA;
+    assert.ok(levou < (dela + cheio) / 2,
+      `a releitura presa segurou a rota ${levou} ms — era o teto dela (${dela} ms escalados), não o cheio (${cheio})`);
+  } finally {
+    globalThis.setTimeout = setTimeoutReal;
+  }
+});
+
+// `NaN <= 0` é falso: o countryId que não é número passava pela guarda e ia ao
+// Waze como 0, voltando 200 com a lista vazia (auditoria de 2026-09-29).
+test('lista-estados: countryId que não é número positivo é o 400 de país ausente, antes do Waze', async () => {
+  // '1e400' e '30abc' o `parseInt` lia como 1 e 30; 1.5 não é país.
+  for (const v of ['abc', true, [], {}, 'NaN', 0, -5, '', null, undefined, '0x1e', '1e400', '30abc', 1.5, [30], Infinity]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(naoPodiaIrAoWaze,
+      () => dispatch('lista-estados', { ...s.dados, region: 'row', countryId: v }, s.ctx));
+    assert.equal(r.status, 400, `countryId ${JSON.stringify(v)}: HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 80)}`);
+    assert.equal(r.body.errorKey, 'srv.err.countryRequired', `countryId ${JSON.stringify(v)}`);
+    assert.equal(chamadas.length, 0, `countryId ${JSON.stringify(v)} foi ao Waze`);
+  }
+  // CONTROLE: o país de verdade (número ou texto de dígitos) vai, e com ele.
+  for (const v of [30, '30']) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(() => json({ states: [{ id: 1, name: 'SP', countryId: 30 }] }),
+      () => dispatch('lista-estados', { ...s.dados, region: 'row', countryId: v }, s.ctx));
+    assert.equal(r.status, 200, `CONTROLE (${JSON.stringify(v)}): ${JSON.stringify(r.body)}`);
+    assert.match(chamadas[0].url, /[?&]countryId=30$/, `CONTROLE (${JSON.stringify(v)}): ${chamadas[0].url}`);
+    assert.deepEqual(r.body.states.map((e) => e.name), ['SP']);
+  }
 });
 
 test('ids: objeto, lista ou texto enorme não vão ao Waze em NENHUMA rota de escrita — o mesmo 400 de id ausente', async () => {
@@ -680,6 +841,48 @@ test('login: Waze fora do ar é erro PASSAGEIRO e traduzido — não 400 com fra
   assert.equal(r.status, 400);
   assert.equal(r.body.errorKey, 'srv.err.cookiesExpiredRelogin');
   assert.match(r.body.error, /expirad/, 'a extensão decide "não está logado no WME" por este texto');
+});
+
+// O Waze respondendo 200 com algo que NÃO é o perfil — a página HTML de um
+// desafio, `null`, um objeto sem o nome. O login dava 400 ("o pedido está
+// errado") sem `errorCategory`, e as outras rotas, 500 (auditoria de
+// 2026-09-29). É falha do Waze, não dos cookies da pessoa, e a tela de entrar
+// e a extensão têm que ler assim.
+test('login: Waze 200 com corpo que não é o perfil é 500 `unknown` — a tela diz "resposta inesperada", nunca "cookies inválidos"', async () => {
+  // A extensão (`extensao-chrome/background.js`) decide "não está logado no WME"
+  // casando o TEXTO do erro. Até ela ser republicada decidindo pela categoria,
+  // a frase crua não pode casar — senão ela desiste dizendo que a pessoa não
+  // está logada, quando quem falhou foi o Waze.
+  const EXT = readFileSync(new URL('../extensao-chrome/background.js', import.meta.url), 'utf8');
+  const semLoginDaExtensao = /expirad|inválid|invalid|csrf/i;
+  assert.ok(EXT.includes('/expirad|inválid|invalid|csrf/i.test('),
+    'CONTROLE: a extensão mudou o jeito de decidir "sem login" — reveja a frase crua e este teste');
+  const telas = Object.fromEntries(['pt', 'en', 'es', 'fr'].map((l) => [l, msgDoServidorEm(l)]));
+  for (const [nome, corpo] of [['página HTML', '<!doctype html><html><body>Unusual traffic</body></html>'],
+    ['null', 'null'], ['objeto sem userName', '{}'], ['lista', '[]']]) {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r } = await comWaze(() => new Response(corpo, { status: 200, headers: { 'content-type': 'text/html' } }),
+      () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+    assert.equal(r.status, 500, `${nome}: HTTP ${r.status} — falha do Waze não é "pedido errado"`);
+    assert.equal(r.body.errorCategory, 'unknown', `${nome}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', nome);
+    assert.equal(r.body.sessionToken, undefined, `${nome}: criou sessão sem perfil`);
+    // A tela de entrar (`authenticateWithCookies` → `msgDoServidor`), nas 4 línguas.
+    for (const [lang, tela] of Object.entries(telas)) {
+      const vista = tela(r.body, 'FALLBACK');
+      assert.notEqual(vista, 'FALLBACK', `${nome}, ${lang}: a tela caiu no texto genérico ("cookies inválidos")`);
+      assert.doesNotMatch(vista, /cookie/i, `${nome}, ${lang}: a tela culpou os cookies: "${vista}"`);
+      assert.match(vista, /Waze/, `${nome}, ${lang}: a tela não diz que foi o Waze: "${vista}"`);
+    }
+    assert.doesNotMatch(r.body.error, semLoginDaExtensao, `${nome}: a extensão leria "${r.body.error}" como falta de login`);
+  }
+  // CONTROLE: o perfil de verdade passa, e cookie que não vale segue "sem login".
+  const s = await sessaoDeTeste(COOKIES);
+  const ok = await comWaze(() => json({ id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false }),
+    () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.equal(ok.r.body.success, true, `CONTROLE: o perfil de verdade não entrou: ${JSON.stringify(ok.r.body)}`);
+  const recusado = await comWaze(() => json({}, 403), () => dispatch('testar-cookies', { cookies: COOKIES, region: 'row' }, s.ctx));
+  assert.match(recusado.r.body.error, semLoginDaExtensao, 'CONTROLE: o cookie recusado deixou de ser "sem login" pra extensão');
 });
 
 test('core: toda apiError leva errorKey — frase crua do servidor chega em português em qualquer idioma', () => {
@@ -885,4 +1088,97 @@ test('VM: depois do 413 o servidor lê o resto do corpo até um TETO, e só ent�
   } finally {
     agente.destroy();
   }
+});
+
+// ── o 413 é o MESMO nos dois adaptadores ─────────────────────────────────────
+// O Worker lia o corpo inteiro com `request.json()`: o mesmo POST de 5,5 MB
+// (e o de 20) dava 200 lá e 413 na VM — o app deixando de ser o mesmo nos dois
+// destinos (gotcha #14; auditoria de 2026-09-29, MEDIDO no `wrangler dev`). O
+// teto e a resposta moram no core, e os dois adaptadores os importam.
+import { RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+
+function envDoWorker() {
+  const kv = new Map();
+  const ops = { n: 0 };
+  return {
+    ops,
+    env: {
+      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      SESSIONS: {
+        get: async (k) => { ops.n++; return kv.get(k) ?? null; },
+        put: async (k, v) => { ops.n++; kv.set(k, v); },
+        delete: async (k) => { ops.n++; kv.delete(k); },
+      },
+      ASSETS: { fetch: () => new Response('asset') },
+    },
+  };
+}
+
+test('Worker: corpo acima do teto é 413 com o MESMO JSON da VM — pelo content-length e pelo corpo em pedaços', async () => {
+  const { default: worker } = await import('../worker/index.mjs');
+  const url = 'https://app.exemplo/api/sessao';
+  const conferir = async (res, rotulo) => {
+    assert.equal(res.status, 413, `${rotulo}: HTTP ${res.status}`);
+    assert.deepEqual(await res.json(), { ...RESPOSTA_CORPO_GRANDE }, `${rotulo}: o corpo do 413 não é o da VM`);
+    assert.equal(res.headers.get('cache-control'), 'no-store', rotulo);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff', rotulo);
+  };
+
+  // (a) Corpo JSON VÁLIDO acima do teto, com o `content-length` que o navegador manda.
+  const grande = JSON.stringify({ action: 'destroy', sessionToken: 'x', lixo: 'a'.repeat(MAX_BODY_BYTES) });
+  const a = envDoWorker();
+  await conferir(await worker.fetch(new Request(url, {
+    method: 'POST', body: grande, headers: { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(grande)) },
+  }), a.env, {}), 'content-length');
+  assert.equal(a.ops.n, 0, 'o corpo grande chegou ao handler (o KV foi consultado)');
+  // E o declarado decide SEM ler: nem um pedaço do corpo é pedido.
+  let puxadosComTamanho = 0;
+  const naoLeia = new ReadableStream({ pull(c) { puxadosComTamanho++; c.enqueue(new Uint8Array(1000)); } }, { highWaterMark: 0 });
+  await conferir(await worker.fetch(new Request(url, {
+    method: 'POST', body: naoLeia, duplex: 'half', headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) },
+  }), envDoWorker().env, {}), 'content-length, sem ler');
+  assert.equal(puxadosComTamanho, 0, `com o tamanho declarado acima do teto, o Worker leu ${puxadosComTamanho} pedaços do corpo`);
+
+  // (b) Corpo em pedaços, SEM `content-length`: conta o que chega e para no teto,
+  // sem ler o resto (o que ainda não veio nem é pedido).
+  const PEDACO = 1_000_000;
+  const TOTAL = 20;
+  let puxados = 0;
+  const fluxo = new ReadableStream({
+    pull(c) {
+      if (puxados >= TOTAL) { c.close(); return; }
+      puxados++;
+      c.enqueue(new Uint8Array(PEDACO).fill(0x61));
+    },
+  }, { highWaterMark: 0 });
+  const b = envDoWorker();
+  await conferir(await worker.fetch(new Request(url, { method: 'POST', body: fluxo, duplex: 'half' }), b.env, {}), 'em pedaços');
+  assert.equal(b.ops.n, 0, 'o corpo em pedaços chegou ao handler');
+  assert.ok(puxados < TOTAL, `o Worker leu os ${TOTAL} MB inteiros antes de recusar (${puxados} pedaços)`);
+
+  // CONTROLE: logo abaixo do teto o pedido passa, e o handler roda.
+  const cabe = JSON.stringify({ action: 'destroy', sessionToken: 'x', lixo: 'a'.repeat(MAX_BODY_BYTES - 200) });
+  assert.ok(Buffer.byteLength(cabe) <= MAX_BODY_BYTES, 'CONTROLE: o corpo "que cabe" não cabe');
+  const c = envDoWorker();
+  const ok = await worker.fetch(new Request(url, { method: 'POST', body: cabe, headers: { 'Content-Type': 'application/json' } }), c.env, {});
+  assert.equal(ok.status, 200, `CONTROLE: o corpo abaixo do teto não passou (HTTP ${ok.status})`);
+  assert.ok(c.ops.n > 0, 'CONTROLE: o handler não rodou');
+  // E o BOM do começo segue sendo tirado, como o `request.json()` tirava.
+  const d = envDoWorker();
+  const comBom = await worker.fetch(new Request(url, { method: 'POST',
+    body: new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from(JSON.stringify({ action: 'destroy', sessionToken: 'x' }))]) }), d.env, {});
+  assert.equal((await comBom.json()).success, true, 'o corpo com BOM deixou de ser lido');
+});
+
+test('VM: o 413 do readBody é o MESMO JSON do Worker (o do core)', async () => {
+  const req = new EventEmitter();
+  req.destroy = () => {};
+  req.socket = { destroy() {}, end() {} };
+  const res = { headersSent: false, status: null, corpo: null,
+    writeHead(s) { this.status = s; this.headersSent = true; }, end(c) { this.corpo = c; } };
+  const lido = readBody(req, res);
+  req.emit('data', Buffer.alloc(MAX_BODY_BYTES + 1, 0x61));
+  assert.equal(await lido, null);
+  assert.equal(res.status, 413);
+  assert.deepEqual(JSON.parse(res.corpo), { ...RESPOSTA_CORPO_GRANDE });
 });
