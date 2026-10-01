@@ -4168,6 +4168,19 @@ function focoEmAreaQueRola() {
     return !!(el && el.closest && el.closest(AREAS_DO_CARD_QUE_ROLAM));
 }
 
+// Ctrl, ⌘ ou Alt junto: a tecla é ATALHO do navegador, não do app. Ctrl/⌘ com
+// + − = é o zoom da PÁGINA, e as duas ampliações o engoliam (`preventDefault` e
+// zoom da foto ou do mapa): com uma delas aberta, quem amplia a interface pelo
+// teclado não conseguia — e o zoom nunca é bloqueado (WCAG 1.4.4; auditoria de
+// 2026-09-30, R5-3-05).
+function atalhoDoNavegador(e) {
+    return !!(e && (e.ctrlKey || e.metaKey || e.altKey));
+}
+
+// O passo das setas na foto AMPLIADA (mais que 1×): os mesmos 80 px do mapa, e
+// no mesmo sentido — a seta mostra o lado pra onde ela aponta (R5-3-06).
+const SETAS_QUE_ANDAM = { ArrowLeft: [80, 0], ArrowRight: [-80, 0], ArrowUp: [0, 80], ArrowDown: [0, -80] };
+
 function handleKeyDown(e) {
     // Foco num campo de texto: as setas são do CURSOR, não do app.
     //
@@ -4192,8 +4205,8 @@ function handleKeyDown(e) {
     // 2026-09-26). Fechar é o Esc, e o ✕.
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) {
         if (e.key === 'Escape') { e.preventDefault(); MapaLightbox.close(); }
-        else if (e.key === '+' || e.key === '=') { e.preventDefault(); MapaLightbox.zoom(1); }
-        else if (e.key === '-' || e.key === '_') { e.preventDefault(); MapaLightbox.zoom(-1); }
+        else if ((e.key === '+' || e.key === '=') && !atalhoDoNavegador(e)) { e.preventDefault(); MapaLightbox.zoom(1); }
+        else if ((e.key === '-' || e.key === '_') && !atalhoDoNavegador(e)) { e.preventDefault(); MapaLightbox.zoom(-1); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); MapaLightbox.arrastar(80, 0); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); MapaLightbox.arrastar(-80, 0); }
         else if (e.key === 'ArrowUp') { e.preventDefault(); MapaLightbox.arrastar(0, 80); }
@@ -4216,6 +4229,14 @@ function handleKeyDown(e) {
         // Esc e ↓ são um passo pra trás: editando o nome (com o foco no ✓ ou no
         // ✕ da edição — no campo o Esc já é dele), saem só da edição.
         if (e.key === 'Escape') { e.preventDefault(); recuarNaFoto(); }
+        // AMPLIADA (mais que 1×), as quatro setas ANDAM pela foto, como no mapa:
+        // o + do teclado mostrava só o miolo, e a seta trocava de foto e desfazia
+        // o zoom — a placa da fachada no canto ficava inalcançável pra quem usa o
+        // teclado (auditoria de 2026-09-30, R5-3-06). Em 1×, a de sempre.
+        else if (Lightbox.scale > 1 && Object.prototype.hasOwnProperty.call(SETAS_QUE_ANDAM, e.key)) {
+            e.preventDefault();
+            Lightbox.panBy(...SETAS_QUE_ANDAM[e.key]);
+        }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); Lightbox.prev(); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); Lightbox.next(); }
         // ↓ fecha, espelhando o arraste pra baixo do toque. Relato do owner:
@@ -4231,8 +4252,8 @@ function handleKeyDown(e) {
         // + e − dão zoom, como no mapa ampliado: aqui eles não faziam nada
         // (auditoria de 2026-09-29, L33). Nunca com o campo do nome focado —
         // ali "+" e "-" são LETRAS do nome ("Posto 24-horas").
-        else if ((e.key === '+' || e.key === '=') && !focoEmCampoDeTexto()) { e.preventDefault(); Lightbox.zoomPeloTeclado(1); }
-        else if ((e.key === '-' || e.key === '_') && !focoEmCampoDeTexto()) { e.preventDefault(); Lightbox.zoomPeloTeclado(-1); }
+        else if ((e.key === '+' || e.key === '=') && !focoEmCampoDeTexto() && !atalhoDoNavegador(e)) { e.preventDefault(); Lightbox.zoomPeloTeclado(1); }
+        else if ((e.key === '-' || e.key === '_') && !focoEmCampoDeTexto() && !atalhoDoNavegador(e)) { e.preventDefault(); Lightbox.zoomPeloTeclado(-1); }
         // z desfaz a exclusão, a aprovação ou a renomeação que acabou de sair
         // daqui — o banner delas mora FORA do lightbox, e a tecla não chegava a
         // ele (auditoria de 2026-09-26). Nunca com o campo do nome focado: ali

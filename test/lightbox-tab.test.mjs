@@ -100,21 +100,33 @@ test('o Desfazer que aparece por cima do lightbox entra na volta do Tab — nas 
 // O ↓ fechava o mapa (copiado da foto, onde espelha o arraste pra baixo que
 // fecha); no mapa o arraste pra baixo ANDA, e pelo teclado não se chegava ao
 // sul do pedido. O `handleKeyDown` de verdade, com as camadas de mentira.
-function teclado({ mapaAberto, fotoAberta, janelaDaFoto = false, campoFocado = false }) {
+// Uma constante de UMA linha do app, de verdade (`const NOME = …;`).
+function constante(nome) {
+  const m = new RegExp('^const ' + nome + ' = [^\\n]*;$', 'm').exec(APP_SEM);
+  assert.ok(m, nome + ' sumiu');
+  return m[0];
+}
+
+// `escala`: o zoom da foto ampliada (R5-3-06). `apertar(tecla, modificadores)`
+// devolve se o app ficou com a tecla (`preventDefault`) — o que o navegador
+// não faz quando ela é dele (R5-3-05).
+function teclado({ mapaAberto, fotoAberta, janelaDaFoto = false, campoFocado = false, escala = 1 }) {
   const log = [];
   const MapaLightbox = { isOpen: () => mapaAberto, close: () => log.push('mapa:fechou'),
     zoom: (d) => log.push('mapa:zoom' + d), arrastar: (dx, dy) => log.push(`mapa:anda ${dx},${dy}`) };
   const Lightbox = { isOpen: () => fotoAberta, prev: () => log.push('foto:prev'), next: () => log.push('foto:next'),
-    zoomPeloTeclado: (s) => log.push('foto:zoom' + s) };
+    zoomPeloTeclado: (s) => log.push('foto:zoom' + s), scale: escala, panBy: (dx, dy) => log.push(`foto:anda ${dx},${dy}`) };
   // `janelaDaFoto`: a janela do Desfazer de uma escrita da foto correndo — o
   // `desfazerPeloTeclado` de verdade aperta o botão do banner e diz que desfez.
-  const deps = { MapaLightbox, Lightbox, focoEmCampoDeTexto: () => campoFocado, TECLAS_DE_CURSOR: [],
+  const deps = { MapaLightbox, Lightbox, focoEmCampoDeTexto: () => campoFocado,
     trapTabInModal: (e, ...zonas) => log.push('tab:' + zonas.map((z) => z && z.id).join('+')),
     recuarNaFoto: () => log.push('foto:recuou'),
     desfazerPeloTeclado: () => { if (!janelaDaFoto) return false; log.push('desfez'); return true; },
     document: { getElementById: (id) => ({ id }) } };
-  const h = new Function(...Object.keys(deps), fatiar('handleKeyDown') + '\nreturn handleKeyDown;')(...Object.values(deps));
-  return { apertar: (key) => { h({ key, preventDefault() {} }); }, log };
+  const fonte = [constante('TECLAS_DE_CURSOR'), constante('SETAS_QUE_ANDAM'), fatiar('atalhoDoNavegador'),
+    fatiar('handleKeyDown')].join('\n');
+  const h = new Function(...Object.keys(deps), fonte + '\nreturn handleKeyDown;')(...Object.values(deps));
+  return { apertar: (key, mods = {}) => { let parou = false; h({ key, ...mods, preventDefault() { parou = true; } }); return parou; }, log };
 }
 
 test('L13 mapa ampliado: ← → ↑ ↓ andam (o ↓ pro SUL) e só o Esc fecha', () => {
@@ -169,6 +181,52 @@ test('L33 foto ampliada: + e − dão zoom — e com o campo do nome focado são
   const c = teclado({ mapaAberto: false, fotoAberta: true, campoFocado: true });
   c.apertar('-'); c.apertar('+');
   assert.deepEqual(c.log, [], 'com o campo do nome focado, "+" e "-" viraram zoom em vez de letras');
+});
+
+// ── R5-3-05: Ctrl, ⌘ ou Alt com + = − é ATALHO do navegador ─────────────────
+// (auditoria de 2026-09-30). MEDIDO: com a foto ampliada aberta, Ctrl+= e
+// Ctrl+- saíam com `preventDefault` e ampliavam a FOTO — o L33 trouxe isso do
+// mapa, onde já era assim. Ctrl/⌘ com + − = é o zoom da PÁGINA: quem amplia a
+// interface pelo teclado não conseguia com uma ampliação aberta, e o zoom
+// nunca é bloqueado (WCAG 1.4.4). O `handleKeyDown` de verdade, nas duas.
+test('R5-3-05 Ctrl, ⌘ e Alt com + = − passam pro navegador — a foto e o mapa ampliados não os engolem', () => {
+  for (const [camada, aberta] of [['foto', { mapaAberto: false, fotoAberta: true }], ['mapa', { mapaAberto: true, fotoAberta: false }]]) {
+    for (const mod of ['ctrlKey', 'metaKey', 'altKey']) {
+      const f = teclado(aberta);
+      const presas = ['+', '=', '-', '_'].filter((k) => f.apertar(k, { [mod]: true }));
+      assert.deepEqual(presas, [], `${camada}: ${mod} com + − = ficou com o app (preventDefault) — o zoom da página não acontece`);
+      assert.deepEqual(f.log, [], `${camada}: ${mod} com + − = ampliou a ${camada} em vez da página`);
+    }
+    // CONTROLE: sem o modificador — e com o Shift, que é como se digita o "+"
+    // em vários teclados —, a tecla segue sendo do zoom da camada.
+    const c = teclado(aberta);
+    assert.equal(c.apertar('+', { shiftKey: true }), true, `CONTROLE: ${camada}: o + com Shift deixou de ser do app`);
+    assert.equal(c.apertar('-'), true);
+    assert.deepEqual(c.log, [`${camada}:zoom1`, `${camada}:zoom-1`], `CONTROLE: ${camada}: + e − deixaram de dar zoom`);
+  }
+});
+
+// ── R5-3-06: a foto AMPLIADA anda pelas setas, como o mapa ───────────────────
+// (auditoria de 2026-09-30). MEDIDO: + + levava a escala a 1,44, e a → trocava
+// de foto e desfazia o zoom; numa foto só, nada. Pelo teclado se via só o miolo
+// ampliado — a placa no canto da fachada ficava inalcançável. O toque já anda
+// quando a foto está ampliada (o arraste só troca e fecha em 1×).
+test('R5-3-06 foto ampliada (mais que 1×): as quatro setas ANDAM, no passo e no sentido do mapa — em 1×, as de sempre', () => {
+  const setas = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+  const f = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.44 });
+  for (const k of setas) assert.equal(f.apertar(k), true, `${k} na foto ampliada não ficou com o app`);
+  const m = teclado({ mapaAberto: true, fotoAberta: false });
+  for (const k of setas) m.apertar(k);
+  assert.deepEqual(f.log, m.log.map((l) => l.replace('mapa:', 'foto:')),
+    'na foto ampliada as setas não andam como no mapa (trocavam de foto e desfaziam o zoom; o ↓ fechava)');
+  // CONTROLE: em 1× — ← → trocam de foto, ↓ é o passo pra trás.
+  const u = teclado({ mapaAberto: false, fotoAberta: true, escala: 1 });
+  for (const k of setas) u.apertar(k);
+  assert.deepEqual(u.log, ['foto:prev', 'foto:next', 'foto:recuou'], 'CONTROLE: em 1× as setas da foto mudaram');
+  // E com o campo do nome focado as setas são do CURSOR, ampliada ou não.
+  const c = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.44, campoFocado: true });
+  for (const k of setas) assert.equal(c.apertar(k), false, `${k} no campo do nome não ficou com o cursor`);
+  assert.deepEqual(c.log, [], 'com o campo do nome focado, as setas andaram pela foto');
 });
 
 test('L29 o Desfazer some com o foco nele e o mapa aberto: o foco volta pro ✕ do mapa, não cai no <body>', () => {
