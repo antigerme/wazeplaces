@@ -635,6 +635,138 @@ test('V6: o "Sair" com o lote no ar — quem entra não herda a trava', async ()
   assert.equal(m.h.acoesTravadas(), false, 'a sessão de quem entrou nasceu travada pelo lote de quem saiu');
 });
 
+// ═══ V6b · o "Marcar todos" que a queda corta no meio: o que JÁ pousou sai ═════
+// Com a sessão caindo e a extensão renovando com a MESMA conta, a fila atravessa
+// a queda — e o lote saía pela época trocada ANTES de tirar da fila o que o Waze
+// já tinha marcado. MEDIDO no navegador (s15, também na main c6d9f91): lote de
+// 60, o 1º pedaço (25) pousa, a sessão cai e renova, o 2º volta 401 → a fila
+// seguia com os 60 cards, 25 já marcados no Waze, "Restam" 60 e placar 0.
+// Pedaços de UM pedido aqui: a queda cai entre o 1º e o 2º.
+function montarLoteComQueda({ pedaco = 1 } = {}) {
+  const portoes = [];
+  const portoesUm = [];   // o caminho UM A UM (`markAsRead`)
+  const log = [];
+  const pousos = [];
+  const { safeLS } = lsFalso();
+  const P = [1, 2, 3].map((i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
+  const AppState = { authenticated: true, profile: { id: 'A' }, queue: P.slice(), currentPlace: P[0],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, fetchEpoch: 0, hasMore: false,
+    pendingAction: null, inFlightActions: 0, preferences: {} };
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
+    LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    API: { getRegion: () => 'row', getSession: () => 'tok-A', setSession() {}, setRegion() {}, setCountry() {},
+      markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoesUm.push(ok)) },
+    callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+    registrarPouso: (ps) => pousos.push(...(Array.isArray(ps) ? ps : [ps]).map((p) => p.updateRequestID)),
+    recordHistory: () => log.push('historico'), registrarLoteConfirmado: () => log.push('conquistas'),
+    showToast: (m, tipo) => log.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
+    updateStats() {}, saveStats() {}, updatePendingCount() {}, removeCurrentCardEl: () => log.push('tirou-card'),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace ? AppState.currentPlace.updateRequestID : '-')); },
+    startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), devolverPedidoRecusado: () => log.push('devolveu'),
+  };
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
+    'chaveDoPedido', 'derrubarSessao'], deps);
+  const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
+  // O 1º pedaço pousa; o 2º fica no ar, e a sessão cai e renova com a MESMA conta.
+  const ateAQueda = async () => {
+    const lote = marcarTodos();
+    await tique();
+    assert.equal(portoes.length, 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+    portoes[0]({ success: true });
+    await tique();
+    assert.equal(portoes.length, 2, 'PRÉ-CONDIÇÃO: o 2º pedaço está no ar');
+    h.derrubarSessao('srv.err.cookiesExpired');
+    AppState.authenticated = true;                  // a renovação pela extensão
+    // Embrulhada: devolver a promessa crua de uma função `async` a ADOTA, e o
+    // `await` de quem chama esperaria o lote — que só termina depois.
+    return { lote, desde: log.length };
+  };
+  const fila = () => AppState.queue.map((p) => p.updateRequestID);
+  return { h, deps, AppState, portoes, portoesUm, log, pousos, marcarTodos, ateAQueda, fila };
+}
+
+test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o que o Waze JÁ marcou sai da fila, sem contar', async () => {
+  const m = montarLoteComQueda();
+  const { lote, desde } = await m.ateAQueda();
+  m.portoes[1]({ success: false, errorCategory: 'unauthorized' });   // a resposta da sessão que caiu
+  await lote;
+  const depois = m.log.slice(desde);   // o "marcando…" do começo do lote é de antes da queda
+  assert.deepEqual(m.fila(), ['u2', 'u3'], 'o pedido que o Waze já marcou seguiu na fila como card — decidível de novo');
+  assert.equal(m.AppState.serverTotal, 2, 'o "Restam" seguiu contando o pedido já marcado');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'u2',
+    'o card da frente não foi refeito: ficou na tela o pedido já marcado');
+  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.ok(!depois.includes('historico') && !depois.includes('conquistas') && !depois.some((l) => l.startsWith('toast')),
+    `com a sessão trocada o lote gravou ou avisou: ${depois}`);
+  assert.ok(depois.includes('card:u2'), `a tela não foi refeita: ${depois}`);
+  assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
+});
+
+test('V6b: o pedaço cuja resposta POUSA depois da queda também sai da fila — e ganha o pouso', async () => {
+  const m = montarLoteComQueda();
+  const { lote } = await m.ateAQueda();
+  m.portoes[1]({ success: true });                   // chegou depois da queda, e o Waze marcou
+  await lote;
+  assert.deepEqual(m.fila(), ['u3'], 'o pedido que pousou depois da queda seguiu como card');
+  assert.equal(m.AppState.serverTotal, 1);
+  assert.deepEqual(m.pousos, ['u1', 'u2'], 'o que pousou depois da queda ficou sem pouso (a fila guardada o devolveria)');
+  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
+});
+
+test('V6b: a queda no meio do caminho UM A UM também para o lote — e o que já pousou sai da fila', async () => {
+  // Pedaços de DOIS: o 1º volta "já resolvido" (o lote do Waze para no primeiro
+  // resolvido) e o app vai um a um; a queda cai no 2º do um a um.
+  const m = montarLoteComQueda({ pedaco: 2 });
+  const lote = m.marcarTodos();
+  await tique();
+  m.portoes[0]({ success: false, errorCategory: 'already_processed' });
+  await tique();
+  assert.equal(m.portoesUm.length, 1, 'PRÉ-CONDIÇÃO: o um a um começou');
+  m.portoesUm[0]({ success: true });                 // u1 pousa antes da queda
+  await tique();
+  assert.equal(m.portoesUm.length, 2, 'PRÉ-CONDIÇÃO: o u2 está no ar');
+  m.h.derrubarSessao('srv.err.cookiesExpired');
+  m.AppState.authenticated = true;
+  m.portoesUm[1]({ success: false, errorCategory: 'unauthorized' });
+  await lote;
+  assert.deepEqual(m.fila(), ['u2', 'u3'], 'o pedido que pousou no um a um seguiu na fila');
+  assert.equal(m.AppState.serverTotal, 2);
+  assert.equal(m.portoes.length, 1, 'o lote mandou o pedaço seguinte DEPOIS da queda (com a sessão que caiu)');
+  assert.equal(m.AppState.stats.read, 0);
+});
+
+test('V6b: CONTROLE — sem a queda, o lote inteiro sai da fila e conta (o instrumento distingue)', async () => {
+  const m = montarLoteComQueda();
+  const lote = m.marcarTodos();
+  for (let i = 0; i < 3; i++) { await tique(); m.portoes[i]({ success: true }); }
+  await lote;
+  assert.deepEqual(m.fila(), []);
+  assert.equal(m.AppState.stats.read, 3, 'sem queda o lote deixou de contar');
+  assert.ok(m.log.includes('historico') && m.log.includes('toast:success'), `sem queda, o lote não gravou nem avisou: ${m.log}`);
+});
+
+test('V6b: CONTROLE — com OUTRA conta a fila foi refeita: a resposta velha não mexe na fila nova', async () => {
+  const m = montarLoteComQueda();
+  const { lote } = await m.ateAQueda();
+  // Outra conta entrou: a fila é trocada (`esquecerOutraConta` → `resetQueue`).
+  const Q = { venueID: 'q1', updateRequestID: 'uq1' };
+  m.AppState.fetchEpoch++;
+  m.AppState.queue = [Q, { venueID: 'u2x', updateRequestID: 'u2' }];
+  m.AppState.currentPlace = Q;
+  m.AppState.serverTotal = 2;
+  const logAntes = m.log.length;
+  m.portoes[1]({ success: true });
+  await lote;
+  assert.deepEqual(m.fila(), ['uq1', 'u2'], 'a resposta da sessão de A mexeu na fila de B');
+  assert.equal(m.AppState.serverTotal, 2, 'a resposta da sessão de A descontou o "Restam" da fila de B');
+  assert.equal(m.AppState.currentPlace, Q);
+  assert.deepEqual(m.pousos, ['u1'], 'a resposta da sessão de A gravou pouso na fila de B');
+  assert.deepEqual(m.log.slice(logAntes), [], 'a resposta da sessão de A redesenhou a tela de B');
+});
+
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══
 
 function janelaFalsa() {

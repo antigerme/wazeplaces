@@ -17422,11 +17422,20 @@ async function handleBatchMarkRead() {
     showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }), 'info');
     const feitos = [];   // lidos agora, ou já resolvidos por outro editor: saem da fila
     let falhou = null;
+    // A sessão trocou no meio (ver `epocaDaSessao`): o laço PARA e nada mais
+    // sai. `posQueda`: o que a resposta que chegou DEPOIS da troca diz que o
+    // Waze marcou — vai sair da fila junto com os `feitos` (ver o fim).
+    let sessaoTrocou = false;
+    const posQueda = [];
     try {
-        for (let i = 0; i < alvos.length && !falhou; i += LOTE_LIDOS_PEDACO) {
+        for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
             const r = await callWithRetry(() => API.markAsReadBatch(itens(pedaco), regiao));
-            if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
+            if (epoca !== epocaDaSessao) {
+                sessaoTrocou = true;
+                if (r && r.success) posQueda.push(...pedaco);
+                break;
+            }
             // O pouso é registrado A CADA PEDAÇO, não no fim do laço: fechar o
             // app no meio de um lote de 60 deixava os 25 que o Waze já marcou sem
             // pouso, e a reabertura sem rede os devolvia como card — dava pra
@@ -17437,7 +17446,11 @@ async function handleBatchMarkRead() {
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
                 const r1 = await callWithRetry(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
-                if (epoca !== epocaDaSessao) return;
+                if (epoca !== epocaDaSessao) {
+                    sessaoTrocou = true;
+                    if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
+                    break;
+                }
                 if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) { feitos.push(p); registrarPouso(p); }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; handleUnauthorized(); break; }
                 else { falhou = r1 || {}; break; }
@@ -17454,6 +17467,30 @@ async function handleBatchMarkRead() {
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         aplicarTravaDeAcao();
+    }
+    // A sessão TROCOU no meio do lote: nada grava — placar, Histórico, avisos —,
+    // porque a resposta é da sessão que acabou (ver `epocaDaSessao`). Mas na
+    // renovação da queda com a MESMA conta a fila ATRAVESSOU a queda
+    // (`epocaFila === AppState.fetchEpoch`), e o que o Waze já marcou seguia nela
+    // como card: decidível de novo, com o "Restam" contando. MEDIDO (s15): lote
+    // de 60, o 1º pedaço pousa, a sessão cai e renova — a fila seguia com os 60
+    // cards, 25 já marcados no Waze. Agora o que pousou (os `feitos` e o pedaço
+    // cuja resposta pousou depois da queda) sai da fila pela chave, o "Restam"
+    // desce pelo que saiu, e o fim da função refaz o card da frente. Com OUTRA
+    // conta (ou o "Sair") a fila foi refeita, e não há o que tirar.
+    if (sessaoTrocou) {
+        if (epocaFila !== AppState.fetchEpoch) return;
+        // O pouso do que pousou depois da queda (o de antes já foi registrado a
+        // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
+        // devolvê-los como card.
+        if (posQueda.length) registrarPouso(posQueda);
+        const fora = new Set([...feitos, ...posQueda].map(chaveDoPedido));
+        const antes = AppState.queue.length;
+        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
+        // Daqui pra baixo, só a TELA: nada a contar nem a avisar.
+        feitos.length = 0;
+        falhou = null;
     }
     if (feitos.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
