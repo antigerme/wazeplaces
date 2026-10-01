@@ -10032,6 +10032,11 @@ function aoMudarAFilaPorBaixo() {
     const velho = linha && linha.querySelector('.selos-proc');
     if (velho) velho.remove();
     renderSelosDeProcedencia(card, place);
+    // E a barra "Primeiro os de X · N de M": com o foco no autor, a página que
+    // chega com mais pedidos dele passava o selo a "Ver +3" e a barra seguia
+    // dizendo "2 de 4" (e o `aria-label`, "os 2 pedidos") até o próximo card
+    // (R5-2-08). Os dois na tela contando a mesma fila de jeitos diferentes.
+    renderFocoAutor();
     if (!aquecimentoDaFrenteFeito) return;
     const fundo = document.querySelector('#cardStack .card-fundo');
     const quer = chaveDoPedido(AppState.queue[1]);
@@ -11341,7 +11346,13 @@ function aprovacaoDaTelaNoAr() {
 // botão que não existe. Sem sessão, a espera é a da sessão (a renovação pela
 // extensão, ou entrar de novo).
 function avisoDaTrava() {
-    if (!AppState.authenticated) return 'api.error.noSession';
+    // Sem sessão, com a extensão RENOVANDO em silêncio (`extPerguntando`): o app
+    // de propósito não avisa a queda nessa hora ("avisar antes seria assustar
+    // quem nem ia ser interrompido", ver `derrubarSessao`), e o toque no card
+    // travado dizia "Sessão expirada" — segundos antes do "Acesso renovado pelo
+    // WME — sua fila continua aqui", as duas se contradizendo (R5-2-07). A espera
+    // é a da sessão, com o texto que já existe.
+    if (!AppState.authenticated) return extPerguntando ? 'toast.esperaSessao' : 'api.error.noSession';
     if (loteDeLidosEmVoo) return 'toast.esperaLote';
     if (escritasConferindo > 0) return 'toast.esperaSessao';
     if (aprovacaoDaTelaNoAr()) return 'toast.esperaAprovacao';
@@ -13995,8 +14006,10 @@ function abrirFolhaDoAutor(place) {
 function rejeitarLoteDoAutor(place, contados) {
     // Sem sessão o lote não sai (a folha pode seguir aberta durante a renovação
     // pela extensão), e a folha já fechou com o toque: diz por quê. ANTES da
-    // trava, que também é verdadeira sem sessão e diria "espere o Desfazer".
-    if (!AppState.authenticated) { showToast(t('api.error.noSession'), 'info'); return; }
+    // trava, que também é verdadeira sem sessão e diria "espere o Desfazer". O
+    // aviso é o da trava sem sessão: na renovação silenciosa, o da espera
+    // (R5-2-07), não "Sessão expirada".
+    if (!AppState.authenticated) { showToast(t(avisoDaTrava()), 'info'); return; }
     // Na janela do Desfazer nada prossegue — mas a folha já FECHOU com o toque,
     // e sair calado deixava a pessoa achando que rejeitou (auditoria de
     // 2026-09-25). Diz o que fazer.
@@ -16874,6 +16887,13 @@ function devolverPedidoRecusado(place, epocaFila) {
     if (epocaFila === AppState.fetchEpoch) {
         AppState.queue.splice(AppState.currentPlace ? 1 : 0, 0, ...voltam);
         AppState.serverTotal += voltam.length;
+        // Com o foco num autor ("Primeiro os de X"), o recusado de OUTRO autor
+        // entrava no MEIO da série: depois do card da tela vinha ele, a barra
+        // sumia e o resto da série perdia a prioridade (R5-2-09). O foco é uma
+        // ordem que a pessoa pediu: a série segue na frente, e o devolvido vem
+        // logo depois dela — o próximo assim que a série acaba.
+        if (AppState.autorEmFoco !== null && AppState.autorEmFoco !== undefined
+            && AppState.currentPlace && AppState.currentPlace.creatorId === AppState.autorEmFoco) manterFocoNaFrente();
     } else {
         for (const p of voltam) pedidosQueEntraramNaFila.delete(chaveDoPedido(p));
         AppState.hasMore = true;

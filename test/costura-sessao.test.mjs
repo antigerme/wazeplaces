@@ -67,8 +67,10 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // e travaria tudo. Quem quer medir um deles o passa nos `deps`.
   // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
   // por local, L23), pelo mesmo motivo.
+  // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
+  // lê — R5-2-07), também parada por padrão.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set() })) if (!(k in deps)) deps[k] = v;
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
@@ -261,7 +263,8 @@ test('K1: sem sessão o lote do autor não sai, e diz por quê (não "espere o D
     Treino: { ativo: false }, t: (k) => k, showToast: (m) => toasts.push(m),
     scheduleAction: () => agendou.push('lote'), pedidosDoAutorNaFila: () => [{ venueID: 'v1', updateRequestID: 'u1' }],
   };
-  const h = montar(['acoesTravadas', 'rejeitarLoteDoAutor'], deps);
+  // O aviso sem sessão sai pela função da trava (R5-2-07): fatiada, a de verdade.
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'rejeitarLoteDoAutor'], deps);
   h.rejeitarLoteDoAutor({ creatorId: 9 });
   assert.deepEqual(agendou, [], 'o lote saiu sem sessão');
   assert.deepEqual(toasts, ['api.error.noSession']);

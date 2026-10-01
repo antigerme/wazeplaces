@@ -78,6 +78,8 @@ function montar({ aquecido = true, fundoPedido = 'v|u2' } = {}) {
     montarCardDeFundo: () => log.push('fundo'),
     chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
     document: { querySelector: () => fundo },
+    // A barra do foco no autor (R5-2-08): medida no teste dela, abaixo.
+    renderFocoAutor: () => {},
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let aquecimentoDaFrenteFeito = ${aquecido};\n${fatiar('aoMudarAFilaPorBaixo')}\nreturn aoMudarAFilaPorBaixo;`)(
@@ -173,4 +175,41 @@ test('r4 C11 o toque na barra chama quem VOLTA à ordem; a ordem nova do filtro 
   const promessas = [...I18N.matchAll(/'card\.focoAutor\.aria(?:Um)?':\s*'([^']*)'/g)].map((m) => m[1]);
   assert.equal(promessas.length, 8, `achei ${promessas.length} textos da barra, e são 2 chaves × 4 línguas`);
   for (const p of promessas) assert.match(p, /ordem normal|normal order|orden normal|ordre normal/, `a barra deixou de prometer a ordem normal: "${p}"`);
+});
+
+// ── R5-2-08: a barra "Primeiro os de X · N de M" acompanha a fila que muda por baixo ──
+// Com o foco no autor, a página que chega com mais pedidos dele passava o selo a
+// "Ver +3" e a barra (e o `aria-label`) seguiam dizendo "2 de 4" / "os 2 pedidos"
+// até o próximo card — MEDIDO no navegador (s22). As funções de verdade: o
+// `aoMudarAFilaPorBaixo` e o `renderFocoAutor`, com a barra de mentira.
+function montarBarra() {
+  const p = (i, autor) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: autor, createdBy: 'autor' + autor });
+  const AppState = { autorEmFoco: 777, queue: [p(1, 777), p(3, 777), p(2, 1), p(4, 1)] };
+  AppState.currentPlace = AppState.queue[0];
+  const els = {
+    focoAutorBar: { classList: { add() {}, remove() {} }, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } },
+    focoAutorTexto: { textContent: '' }, focoAutorContagem: { textContent: '' },
+  };
+  const deps = {
+    AppState, cardDaFrente: () => ({ querySelector: () => null }), renderSelosDeProcedencia: () => {},
+    montarCardDeFundo: () => {}, chaveDoPedido: (x) => (x ? x.venueID + '|' + x.updateRequestID : null),
+    document: { querySelector: () => null, getElementById: (id) => els[id] || null },
+    t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k + (v && v.n != null ? '#' + v.n : '')),
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'let aquecimentoDaFrenteFeito = false;\n' + fatiar('aoMudarAFilaPorBaixo') + '\n'
+    + fatiar('renderFocoAutor') + '\nreturn { aoMudarAFilaPorBaixo, renderFocoAutor };')(...chaves.map((k) => deps[k]));
+  return { app, AppState, els, p };
+}
+
+test('R5-2-08: a página que chega com mais pedidos do autor em foco atualiza a barra junto com o selo', () => {
+  const m = montarBarra();
+  m.app.renderFocoAutor();
+  assert.equal(m.els.focoAutorContagem.textContent, '2 de 4', 'PRÉ-CONDIÇÃO: a barra conta a fila de antes');
+  m.AppState.queue.splice(2, 0, m.p(5, 777), m.p(6, 777));          // a página chega: mais dois dele…
+  m.AppState.queue.push(m.p(7, 1));                                    // …e um de outro
+  m.app.aoMudarAFilaPorBaixo();
+  assert.equal(m.els.focoAutorContagem.textContent, '4 de 7',
+    'a barra seguiu dizendo "2 de 4" com o selo já dizendo "Ver +3" — a mesma fila contada de dois jeitos');
+  assert.equal(m.els.focoAutorBar.attrs['aria-label'], 'card.focoAutor.aria#4', 'o aria-label seguiu com a contagem velha');
 });

@@ -274,3 +274,48 @@ test('R5-2-10: o mesmo no ramo do movimento REDUZIDO — e o CONTROLE da contage
   for (let i = 0; i <= 10; i++) c.quadro(i * 100);
   assert.equal(c.el.textContent, '33', 'CONTROLE: a contagem deixou de chegar ao alvo');
 });
+
+// ── R5-2-09: com o foco no autor, o recusado devolvido não entra no MEIO da série ──
+// O C5 devolve o recusado "como o próximo card" (`splice(1, …)`); com o foco num
+// autor, o devolvido de OUTRO autor entrava entre o card da tela e o resto da
+// série: depois dele a barra sumia (`autorEmFoco = null`) e a série perdia a
+// prioridade — MEDIDO no navegador (s17). As funções de verdade.
+function montarDevolucaoComFoco({ foco = 'X' } = {}) {
+  const p = (id, autor) => ({ venueID: 'v' + id, updateRequestID: 'u' + id, creatorId: autor });
+  const AppState = { autorEmFoco: foco, queue: [p('x2', 'X'), p('x4', 'X'), p('x5', 'X'), p('y3', 'Y')], fetchEpoch: 0,
+    serverTotal: 4, hasMore: false };
+  AppState.currentPlace = AppState.queue[0];
+  const deps = {
+    AppState, chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, updatePendingCount: () => {},
+    aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, startFetching: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, fatiar('devolverPedidoRecusado') + '\n' + fatiar('manterFocoNaFrente')
+    + '\nreturn devolverPedidoRecusado;')(...chaves.map((k) => deps[k]));
+  return { devolver: app, AppState, p, fila: () => AppState.queue.map((x) => x.updateRequestID) };
+}
+
+test('R5-2-09: com o foco no autor, o recusado de OUTRO autor volta DEPOIS da série — e o do mesmo autor, dentro dela', () => {
+  const m = montarDevolucaoComFoco();
+  m.devolver(m.p('y1', 'Y'), 0);
+  assert.deepEqual(m.fila(), ['ux2', 'ux4', 'ux5', 'uy1', 'uy3'],
+    'o recusado de outro autor entrou no meio da série em foco (a barra sumiria depois do card da tela)');
+  assert.equal(m.AppState.serverTotal, 5);
+  const s = montarDevolucaoComFoco();
+  s.devolver(s.p('x9', 'X'), 0);
+  assert.deepEqual(s.fila(), ['ux2', 'ux9', 'ux4', 'ux5', 'uy3'], 'o recusado do autor em foco saiu da série');
+});
+
+test('R5-2-09: CONTROLE — sem foco, o recusado volta como o PRÓXIMO card (o que o C5 promete)', () => {
+  const m = montarDevolucaoComFoco({ foco: null });
+  m.devolver(m.p('y1', 'Y'), 0);
+  assert.deepEqual(m.fila(), ['ux2', 'uy1', 'ux4', 'ux5', 'uy3']);
+  // E o card da TELA nunca sai da frente: com o foco marcado mas outro autor na
+  // tela (a série acabou), a devolução não reordena nada por baixo dele.
+  const o = montarDevolucaoComFoco();
+  o.AppState.queue.unshift(o.p('y8', 'Y'));
+  o.AppState.currentPlace = o.AppState.queue[0];
+  o.devolver(o.p('y1', 'Y'), 0);
+  assert.equal(o.AppState.queue[0], o.AppState.currentPlace, 'a devolução tirou o card da tela da frente da fila');
+  assert.deepEqual(o.fila(), ['uy8', 'uy1', 'ux2', 'ux4', 'ux5', 'uy3']);
+});
