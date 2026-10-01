@@ -495,8 +495,8 @@ const API = {
     // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
     // não tem como buscar o venue de novo.
     // Aquece a releitura do local no servidor, pra ela não custar tempo depois
-    // do "Excluir". Disparada quando o editor TOCA na lixeira: os ~700ms dela
-    // correm enquanto ele lê a pergunta do diálogo.
+    // da exclusão. Disparada quando o editor TOCA na lixeira com o Desfazer
+    // ligado: os ~700ms dela correm dentro da janela do Desfazer.
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
     // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
