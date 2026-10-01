@@ -3143,6 +3143,7 @@ async function enviarAprovacao(alvo) {
         // aprovação que não pousou devolve o ✨ e o "Aprovar" (V2).
         if (epoca !== epocaDaSessao) {
             if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
+            else aprovacaoPousouDepoisDaQueda(alvo);
             return false;
         }
         const jaFeito = !!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'));
@@ -3239,6 +3240,28 @@ function tirarAprovadoDaFila(place) {
     updatePendingCount();
     // O card de FUNDO pode ser justamente o que saiu.
     if (AppState.currentPlace) aoMudarAFilaPorBaixo();
+}
+
+// A aprovação que POUSOU depois de a sessão cair (R5-2-03, o V6b da aprovação).
+// Nada grava — a regra da época: nem conquista nem Histórico (aprovar não conta
+// no placar) —, mas na fila que ATRAVESSOU a queda (a renovação com a MESMA
+// conta) o pedido aprovado seguia como card, contando no "Restam" e decidível de
+// novo: MEDIDO (s18, também na main 48d2aea), o ✓ seguinte mandava uma segunda
+// decisão ao Waze ("já tratado") e contava um lido a mais. Ele ganha o pouso, sai
+// da fila pela identidade e o "Restam" desce. Com OUTRA conta a fila foi refeita,
+// e não há o que tirar.
+function aprovacaoPousouDepoisDaQueda(alvo) {
+    if (alvo.epocaFila !== AppState.fetchEpoch) return;
+    registrarPouso(alvo.place);
+    // Um gesto da sessão nova já o decidiu (o card ficou destravado na
+    // renovação): ele já saiu da fila, e o "Restam" já desceu por ele.
+    if (!AppState.queue.includes(alvo.place)) return;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+    updatePendingCount();
+    // Com a foto dele aberta de novo (a pessoa a reabriu depois da renovação),
+    // ele sai quando ela fechar, como no `concluirAprovacao`.
+    if (Lightbox.isOpen() && Lightbox.place === alvo.place) { placeResolvidoPorAprovacao = alvo.place; return; }
+    tirarAprovadoDaFila(alvo.place);
 }
 
 // O pedido entrou ou saiu de "em andamento" com OUTRO card na tela: o "Ver +N"
@@ -17120,6 +17143,13 @@ const Treino = {
         if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
         enviarPendenciasDoLightbox();
         removeUndoBanner();
+        // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
+        // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
+        // procura na fila de treino) e voltava no `sair()` como card, destravado —
+        // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
+        // (R5-2-04). Depois de despachar as pendências: a da janela acabou de sair
+        // e também é esperada.
+        if (aprovacoesNoAr.size) { showToast(t('toast.esperaAprovacao'), 'info'); return; }
         // A busca que estiver em voo é DESCARTADA (a época muda): sem isto os
         // pedidos reais pousavam na fila de TREINO, crus e registrados como "já
         // passaram pela fila", e sumiam no `sair()`. Quem busca de novo é o

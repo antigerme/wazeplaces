@@ -429,7 +429,8 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
   };
   const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
     'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela', 'nomeDestaEscrita', 'devolverNome',
-    'escritaDoLightboxSemSessao', 'tirarAprovadoDaFila', 'pousouNoWaze', 'contarIdasSemResposta'];
+    'escritaDoLightboxSemSessao', 'tirarAprovadoDaFila', 'pousouNoWaze', 'contarIdasSemResposta',
+    'aprovacaoPousouDepoisDaQueda'];
   const chaves = Object.keys(deps);
   app = new Function(...chaves, 'epocaDaSessao', 'escritasConferindo', 'placeResolvidoPorAprovacao',
     'verificandoSessao', 'conferenciaDaSessao',
@@ -551,13 +552,19 @@ test('V2 a queda veio de OUTRA chamada com a escrita no ar: o que não pousou vo
   assert.equal(await ok.app.enviarExclusao({ id: 'a1', place: ok.P, idx: 0, url: FOTO('a1') }), false);
   assert.ok(!ok.log.includes('devolveu') && erros(ok.log).length === 0, 'a exclusão que POUSOU foi desfeita na tela');
   assert.deepEqual(ok.irmao.imageUrls, [FOTO('a1'), FOTO('ur-P')], 'depois da queda, a resposta gravou nos irmãos');
-  // A aprovação que pousou como "já tratada" também não volta.
+  // A aprovação que pousou como "já tratada" também não volta. E, na fila que
+  // ATRAVESSOU a queda (a renovação com a mesma conta: a fila é a do gesto), o
+  // pedido resolvido ganha o pouso e sai — o V6b da aprovação (R5-2-03, ver
+  // `aprovacaoPousouDepoisDaQueda`; a outra conta e o "não pousou" são medidos lá).
   const j = montarL1({ respostas: [{ success: false, errorCategory: 'already_processed' }], viva: true, quedaNaIda: true });
+  // (Sem `epocaFila` aqui, como os outros alvos deste harness: a fila do gesto é
+  // a de agora — `undefined` dos dois lados.)
   const alvoJ = { id: 'ur-P', place: j.P, idx: 0 };
   j.L.marcarComoAprovada(alvoJ);
   await j.app.enviarAprovacao(alvoJ);
   assert.equal(j.L.newIdx, -1, 'a aprovação que pousou (já tratada) voltou a ser proposta na tela');
-  assert.ok(!j.log.includes('pouso') && erros(j.log).length === 0, 'depois da queda, a resposta gravou o pouso');
+  assert.ok(j.log.includes('pouso') && erros(j.log).length === 0,
+    'depois da queda, o pedido resolvido na fila que atravessou ficou sem pouso (ou a tela avisou erro)');
 });
 
 test('V2 CONTROLE: o "Sair" na conferência — a fila foi embora, e nada volta nem é avisado', async () => {
@@ -1480,4 +1487,92 @@ test('R5-3-07 excluir sem o Desfazer: o card redesenhado quando a exclusão pous
   i.AppState.currentPlace = i.irmao;
   assert.equal(await i.app.enviarExclusao({ id: 'a1', place: i.P, idx: 0, url: FOTO('a1') }), true);
   assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'o irmão da frente é redesenhado por fora do foco do card');
+});
+
+// ── R5-2-03: a aprovação que POUSA depois de a sessão cair (o V6b da aprovação) ──
+// A queda solta o `aprovacoesNoAr` (V6) e a renovação com a MESMA conta mantém a
+// fila. Quando a resposta velha chegava dizendo que o Waze APROVOU, o ramo da
+// época só tratava o "não pousou": o pedido aprovado seguia como card, contando no
+// "Restam" e decidível de novo — MEDIDO no navegador (s18): o ✓ seguinte mandava
+// uma segunda decisão ao Waze ("já tratado") e contava um lido a mais.
+function montarAprovacaoNaQueda() {
+  const log = [];
+  const P = ['A', 'B', 'C'].map((x) => ({ venueID: 'v' + x, updateRequestID: 'u' + x }));
+  const AppState = { authenticated: true, queue: P.slice(), currentPlace: P[0], serverTotal: 3, fetchEpoch: 0,
+    stats: { read: 0, rejected: 0, skipped: 0 } };
+  const respostas = [];
+  const deps = {
+    AppState, aprovacoesNoAr: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    callWithRetry: (fn) => fn(), API: { aprovarPedido: () => new Promise((ok) => respostas.push(ok)) },
+    refazerDepoisDo401: async () => null, marcarEmAndamento: () => {}, refazerSelosSeOutroNaTela: () => {},
+    aplicarTravaDeAcao: () => {}, contarConquista: () => log.push('conquista'), showToast: (m) => log.push('toast:' + m),
+    msgDoServidor: () => '', t: (k) => k, voltarDaAprovacaoRecusada: () => log.push('devolveu'),
+    Lightbox: { isOpen: () => false, place: null, desmarcarAprovada: () => log.push('desmarcou'), esquecerProposta: () => {} },
+    escritaDoLightboxSemSessao: () => log.push('sem-sessao'),
+    registrarPouso: (p) => log.push('pouso:' + p.updateRequestID), updateStats: () => {}, updatePendingCount: () => {},
+    advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; log.push('avancou'); },
+    aoMudarAFilaPorBaixo: () => log.push('fundo'),
+    pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),
+    // O da foto ampliada (R5-3-07): o `tirarAprovadoDaFila` anda a fila por ele.
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
+  };
+  // `contarIdasSemResposta` é o da foto ampliada (R5-3-04): o `enviarAprovacao` o chama.
+  const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovacaoPousouDepoisDaQueda', 'tirarAprovadoDaFila',
+    'contarIdasSemResposta'];
+  const chaves = Object.keys(deps);
+  const corpo = nomes.map(fatiar).join('\n')
+    .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ').replace(/epocaDaSessao/g, '__ep.v');
+  const ep = { v: 0 };
+  const res = { v: null };
+  const app = new Function(...chaves, '__res', '__ep', 'let tratouNestaFila = false;\n' + corpo
+    + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]), res, ep);
+  // Aprova (a resposta presa), a sessão cai e renova; depois a resposta chega.
+  const aprovarECair = async (place, resposta, { outraConta = false, antesDaResposta = null } = {}) => {
+    const fim = app.enviarAprovacao({ place, idx: 0, epocaFila: 0 });
+    await umTique();
+    ep.v++;                                   // a queda (`derrubarSessao`)
+    deps.aprovacoesNoAr.clear();
+    if (outraConta) { AppState.fetchEpoch++; AppState.queue = [{ venueID: 'vQ', updateRequestID: 'uQ' }]; AppState.currentPlace = AppState.queue[0]; AppState.serverTotal = 1; }
+    if (antesDaResposta) antesDaResposta();
+    respostas.shift()(resposta);
+    await fim;
+  };
+  return { app, AppState, log, deps, res, P, aprovarECair, fila: () => AppState.queue.map((p) => p.updateRequestID) };
+}
+
+test('R5-2-03: a aprovação que POUSA depois da queda tira o pedido da fila que atravessou — sem placar nem conquista', async () => {
+  const m = montarAprovacaoNaQueda();
+  await m.aprovarECair(m.P[0], { success: true });                 // o card da FRENTE
+  assert.deepEqual(m.fila(), ['uB', 'uC'], 'o pedido que o Waze aprovou seguiu na fila como card');
+  assert.equal(m.AppState.serverTotal, 2, 'o "Restam" seguiu contando o pedido aprovado');
+  assert.ok(m.log.includes('pouso:uA'), 'o pedido aprovado ficou sem pouso (a fila guardada do offline o devolveria)');
+  assert.ok(!m.log.includes('conquista'), 'a resposta da sessão que caiu contou conquista');
+  // Um pedido que NÃO é o da frente sai pela identidade, sem mexer no card da tela.
+  const b = montarAprovacaoNaQueda();
+  await b.aprovarECair(b.P[1], { success: true });
+  assert.deepEqual(b.fila(), ['uA', 'uC']);
+  assert.equal(b.AppState.currentPlace, b.P[0], 'a saída do pedido aprovado trocou o card da tela');
+  assert.equal(b.AppState.serverTotal, 2);
+});
+
+test('R5-2-03: CONTROLES — não pousou, OUTRA conta, e o que um gesto da sessão nova já decidiu', async () => {
+  const n = montarAprovacaoNaQueda();
+  await n.aprovarECair(n.P[0], { success: false, errorCategory: 'unauthorized' });
+  assert.deepEqual(n.fila(), ['uA', 'uB', 'uC'], 'a aprovação que NÃO pousou tirou o pedido da fila');
+  assert.ok(n.log.includes('sem-sessao') && !n.log.some((l) => l.startsWith('pouso')));
+  const o = montarAprovacaoNaQueda();
+  await o.aprovarECair(o.P[0], { success: true }, { outraConta: true });
+  assert.deepEqual(o.fila(), ['uQ'], 'a resposta da sessão de A mexeu na fila de B');
+  assert.equal(o.AppState.serverTotal, 1);
+  assert.ok(!o.log.some((l) => l.startsWith('pouso')), 'a resposta da sessão de A gravou pouso com a fila de B');
+  // O card ficou destravado na renovação e um gesto da sessão nova já o tirou da
+  // fila (e descontou o "Restam") antes de a resposta velha chegar: nada a tirar
+  // de novo, e o "Restam" não desce duas vezes.
+  const g = montarAprovacaoNaQueda();
+  await g.aprovarECair(g.P[1], { success: true }, { antesDaResposta: () => {
+    g.AppState.queue.splice(1, 1); g.AppState.serverTotal = 2;
+  } });
+  assert.deepEqual(g.fila(), ['uA', 'uC']);
+  assert.equal(g.AppState.serverTotal, 2, 'o "Restam" desceu duas vezes pelo mesmo pedido');
+  assert.ok(g.log.includes('pouso:uB'), 'o pedido aprovado ficou sem pouso');
 });

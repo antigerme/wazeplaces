@@ -108,6 +108,7 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     // Entrar no treino despacha as escritas do lightbox que estavam na janela
     // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
     enviarPendenciasDoLightbox: () => {},
+    aprovacoesNoAr: new Set(),   // nenhuma aprovação de foto no ar (R5-2-04)
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',

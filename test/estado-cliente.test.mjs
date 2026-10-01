@@ -186,8 +186,11 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}, { loteNoAr = false } = {}) {
+function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false } = {}) {
   const log = [];
+  // A aprovação de foto no ar (R5-2-04): já saiu (`aprovacaoNoAr`), ou estava na
+  // janela do Desfazer e SAI no despacho das pendências do lightbox ao entrar.
+  const aprovacoes = new Set(aprovacaoNoAr ? ['vF|uF'] : []);
   const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true,
     queue: [], currentPlace: null, stats: { read: 7, rejected: 3, skipped: 1 }, serverTotal: 40,
     preferences: { comoFuncionaVisto: false }, ...estado };
@@ -201,7 +204,8 @@ function montarTreino(estado = {}, { loteNoAr = false } = {}) {
     t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
     loteDeLidosEmVoo: loteNoAr,
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
-    enviarPendenciasDoLightbox: () => log.push('lightbox:enviou'),
+    enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
+    aprovacoesNoAr: aprovacoes,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -240,6 +244,31 @@ test('treino (F1): com o lote de lidos NO AR ele não liga — e diz por quê', 
   assert.equal(AppState.queue, fila);
   assert.ok(log.includes('toast:toast.esperaLote'), 'recusou calado');
   // CONTROLE: sem o lote no ar, entra.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
+});
+
+// ── R5-2-04: a aprovação de foto NO AR pousa sobre a fila REAL ─────────────────
+// Trocada pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
+// procura na fila de treino) e voltava no `sair()` como card, destravado — MEDIDO
+// no navegador (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado.
+test('R5-2-04: com a aprovação de foto NO AR o treino não liga — e diz por quê', () => {
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNoAr: true });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo da aprovação no ar');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
+});
+
+test('R5-2-04: a aprovação que estava na JANELA sai ao entrar — e o treino espera por ela também', () => {
+  const { Treino, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNaJanela: true });
+  Treino.entrar();
+  assert.ok(log.includes('lightbox:enviou'), 'PRÉ-CONDIÇÃO: as pendências do lightbox foram despachadas');
+  assert.equal(Treino.ativo, false, 'a aprovação despachada ao entrar ficou no ar com o treino ligado');
+  assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  // CONTROLE: sem aprovação nenhuma, entra.
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
   c.Treino.entrar();
   assert.equal(c.Treino.ativo, true);
