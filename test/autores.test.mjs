@@ -267,9 +267,16 @@ test('lote: o lote respeita a trava e o treino', () => {
   // Rodando a função de verdade: cada trava com a sua espera.
   const iA = semComentarios.indexOf('function avisoDaTrava');
   const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
-  const aviso = (auth, lote, conf) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
-    'aprovacaoDaTelaNoAr', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false);
+  const aviso = (auth, lote, conf, ext = false) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
+    'aprovacaoDaTelaNoAr', 'extPerguntando', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false, ext);
   assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
+  // R5-2-07: com a extensão RENOVANDO em silêncio, a espera é a da sessão — não
+  // "Sessão expirada" segundos antes do "Acesso renovado… sua fila continua aqui".
+  assert.equal(aviso(false, false, 0, true), 'toast.esperaSessao',
+    'na renovação silenciosa o toque no card travado dizia "Sessão expirada"');
+  // E o "Rejeitar os N" sem sessão diz a MESMA coisa (pela mesma função).
+  assert.match(bloco, /if \(!AppState\.authenticated\) \{ showToast\(t\(avisoDaTrava\(\)\), 'info'\); return; \}/,
+    'o lote sem sessão voltou a dizer "Sessão expirada" por conta própria (na renovação, contradiz o aviso que vem)');
   assert.equal(aviso(true, true, 0), 'toast.esperaLote');
   assert.equal(aviso(true, false, 1), 'toast.esperaSessao', 'conferindo um 401, "espere o Desfazer" manda procurar um botão que não existe');
   assert.equal(aviso(true, false, 0), 'toast.esperaDesfazer');
@@ -743,7 +750,7 @@ function lote({ respostas, camada = null }) {
     API: { rejectPlace: async () => fila.shift() },
     registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
-    enfileirarSaida: () => 'ok', handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
+    enfileirarSaida: () => 'ok', reivindicacaoDestaAba: () => ({}), soltarMarcaDosItens() {}, handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
     saveStats() {}, updatePendingCount() {}, openModal: (id) => modais.push(id),
     carregarFilaDeSaida: () => [], tirarDaFilaDeSaida() {}, dfato() {}, devolverPedidoRecusado() {},
     aoMudarAFilaPorBaixo() {}, pousouNoWaze: () => false, descontarGestoSemSessao() {},

@@ -204,10 +204,34 @@ test('diag-resumo: a abertura que veio do RETRATO do fechar se identifica, e o c
     'a abertura que veio do retrato do fechar não se identifica');
   assert.match(s, /o retrato cortou pelo TETO os mais antigos: diário 340 · chamadas 2 — faltam no começo/,
     'o corte pelo teto não é dito — o começo que falta leria como "não aconteceu"');
+  // Este relatório (de antes das `lacunas`) não diz ONDE falta: juntado à base,
+  // o começo pode ter vindo dela e a falta ficar no meio (R5-4-5) — a triagem não
+  // pode afirmar "no começo".
+  assert.match(s, /faltam no começo, ou no meio se a abertura já tinha sido gravada antes \(este relatório não diz onde\)/,
+    'a triagem afirma "no começo" num relatório que não sabe onde falta');
   assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe no retrato');
   // CONTROLE: a abertura da base não ganha a marca nem o aviso.
   assert.match(s, /abertura base-2 · .* \(guardada por: oculta\) · v2026093001\n  diário 0 · chamadas 0 \(falhas 0\) · erros 0 · capturas 0\n/,
     'CONTROLE: a abertura gravada na base ganhou a marca do retrato ou o aviso do corte');
+});
+
+test('diag-resumo: as LACUNAS da junção dizem onde falta — no meio, entre o que a base tinha e o retrato; ou no começo (R5-4-5)', () => {
+  // Auditoria de 2026-10-01: juntado o retrato cortado à base, a triagem dizia
+  // "faltam 273 no começo", com o começo ali (veio da base) e 172 faltando no MEIO.
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  const T = Date.parse('2026-10-01T12:00:00.000Z');
+  d.aberturasAnteriores = [{
+    id: 'meio-1', inicio: T, salvoEm: T + 700000, salvoPor: 'saida', retrato: true, versao: '2026100101',
+    lacunas: { diario: { n: 172, de: T + 100000, ate: T + 273000 }, chamadas: { n: 1, de: null, ate: T + 5000 }, lixo: { n: 3 } },
+    diario: [{ t: T, k: 'a' }, { t: T + 100000, k: 'b' }, { t: T + 273000, k: 'c' }], chamadas: [], erros: [], momentos: [] }];
+  const s = rodar(d);
+  assert.match(s, /o retrato cortou pelo TETO: faltam 172 registros do diário no meio, entre 12:01:40\.000 e 12:04:33\.000 — o que veio antes estava gravado/,
+    'a falta no MEIO não é dita com o intervalo');
+  assert.match(s, /o retrato cortou pelo TETO: falta 1 chamada no começo, antes de 12:00:05\.000/,
+    'a falta no COMEÇO (sem base antes) não é dita, ou o singular saiu errado');
+  assert.ok(!/lixo/.test(s), 'o leitor imprimiu uma lista que não existe');
+  assert.doesNotMatch(s, /este relatório não diz onde/, 'com as lacunas, a triagem sabe onde falta e não pode hesitar');
 });
 
 test('diag-resumo: a presença do app (fase 3) sai em CONTAGENS, com os avisos — nunca nome, texto ou token', () => {
@@ -378,6 +402,44 @@ test('diag-resumo: o `/` que difere SÓ pelo script do Cloudflare não vira "ver
   c2._versaoDoDiag = 9;
   c2.cacheVsRede = { 'https://x.dev/': { aparelho: 'aaaa', servidor: 'abab', igual: false, bytesAparelho: 116709, bytesServidor: 116709, http: 200 } };
   assert.match(rodar(c2), /ATENÇÃO: o aparelho roda código diferente/, 'no v9 o `/` diferente passou a ser ignorado');
+});
+
+test('diag-resumo: com a ORIGEM FORA DO AR (a borda responde 502) nada é "diferente" — é "sem conferir", com o status (R5-4-3)', () => {
+  // Auditoria de 2026-10-01: com a origem fora, a releitura do "servidor" é a
+  // página de erro da BORDA (502, 50 bytes), e a triagem acusava "código
+  // diferente do servidor" nos 11 arquivos.
+  const ARQUIVOS = ['/', '/service-worker.js', '/css/app.css', '/manifest.json', '/js/min/version.js', '/js/min/i18n.js',
+    '/js/min/api.js', '/js/min/mapa.js', '/js/min/app.js', '/js/min/presenca.js', '/js/min/swipe.js'];
+  const com = (v) => Object.fromEntries(ARQUIVOS.map((u) => ['https://x.dev' + u, v]));
+  const confere = (s, rotulo) => {
+    assert.match(s, /11 arquivos conferidos com o servidor · diferentes: 0 · sem conferir: 11/, `${rotulo}: a página de erro da borda contou como diferença`);
+    assert.match(s, /sem conferir: o servidor respondeu 502 em 11 arquivos — a origem fora do ar/, `${rotulo}: a triagem não diz o status`);
+    assert.doesNotMatch(s, /DIFERENTE: /, `${rotulo}: arquivo listado como diferente`);
+    assert.doesNotMatch(s, /ATENÇÃO: o aparelho roda código diferente/, `${rotulo}: alarme falso de versão velha`);
+  };
+  // O formato do relatório da versão em produção: `igual: false`, com o `http` da borda.
+  const velho = relatorioV8();
+  velho._versaoDoDiag = 11;
+  velho.cacheVsRede = com({ aparelho: 'aaaa', servidor: 'bbbb', igual: false, bytesAparelho: 18157, bytesServidor: 50, http: 502 });
+  confere(rodar(velho), 'relatório de antes');
+  // O de hoje: o app já marca `erro` com o status.
+  const novo = relatorioV8();
+  novo._versaoDoDiag = 11;
+  novo.cacheVsRede = com({ erro: 'http 502', http: 502 });
+  confere(rodar(novo), 'relatório de hoje');
+  // Um 404 também é "sem conferir", sem a nota da origem fora.
+  const quatro = relatorioV8();
+  quatro.cacheVsRede = { 'https://x.dev/js/min/app.js': { erro: 'http 404', http: 404 } };
+  const q = rodar(quatro);
+  assert.match(q, /sem conferir: o servidor respondeu 404 em 1 arquivo: não há com o que comparar/);
+  assert.doesNotMatch(q, /404 .*origem fora/);
+  // CONTROLE: com o servidor de pé, o arquivo diferente segue acusado.
+  const c = relatorioV8();
+  c.cacheVsRede = { 'https://x.dev/js/min/app.js': { aparelho: 'eeee', servidor: 'ffff', igual: false, bytesAparelho: 70000, bytesServidor: 70100, http: 200 } };
+  const t = rodar(c);
+  assert.match(t, /1 arquivos conferidos com o servidor · diferentes: 1/);
+  assert.match(t, /ATENÇÃO: o aparelho roda código diferente/, 'CONTROLE: a diferença de verdade deixou de ser acusada');
+  assert.doesNotMatch(t, /sem conferir/);
 });
 
 test('diag-resumo v10: o "já tratado" não é FALHOU — nem na lista, nem na conta, nem nas aberturas anteriores', () => {

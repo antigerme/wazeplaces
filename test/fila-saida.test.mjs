@@ -107,7 +107,7 @@ test('o LOTE só enfileira no modo de placar OTIMISTA', () => {
   // mesmo: nem a anotação nem o enfileirar da rede existem na recusa automática.
   assert.match(l, /errorCategory === 'transient' && !aoLandar && \(anotados\.has\(p\) \|\| enfileirarSaida\('reject', p, opts\.regiao\)\)/,
     'o lote enfileira no modo `contarAoLandar`: a ação some do placar e do Histórico');
-  assert.match(l, /if \(!aoLandar\) \{\s*const lista = carregarFilaDeSaida\(\);\s*esperavamAntes = lista\.length;\s*for \(const p of places\) \{\s*const r = enfileirarSaida\('reject', p, opts\.regiao, undefined, true, lista\);/,
+  assert.match(l, /if \(!aoLandar\) \{\s*const lista = carregarFilaDeSaida\(\);\s*esperavamAntes = lista\.length;\s*for \(const p of places\) \{\s*const r = enfileirarSaida\('reject', p, opts\.regiao, reivindicacaoDestaAba\(\), true, lista\);/,
     'a anotação antes do envio saiu do portão `!aoLandar`: a recusa automática contaria a ação em lugar nenhum');
   // E o modo otimista PRECISA enfileirar, senão a promessa vale só pro swipe.
   assert.ok(l.indexOf("enfileirarSaida('reject', p, opts.regiao)") > 0,
@@ -283,7 +283,7 @@ test('o diário registra a TRANSIÇÃO, não cada swipe', () => {
   // (`anotarSeAbriuASaida`, e o `ficouNaSaida` do lote).
   assert.match(e, /if \(f\.length === 1 && !calado\) dfato\(/,
     'o diário voltou a registrar item a item — o anel de 120 vira só isto');
-  assert.match(fatiar('anotarAntesDoEnvio'), /enfileirarSaida\(tipo, place, regiao, undefined, true\)/,
+  assert.match(fatiar('anotarAntesDoEnvio'), /enfileirarSaida\(tipo, place, regiao, reivindicacaoDestaAba\(\), true\)/,
     'a anotação antes do envio deixou de ser calada: cada ✕ e cada ✓ virariam uma linha do diário');
   // Duas anotações e nenhuma é por item: a abertura da fila, e o ALARME do
   // pedido repetido — que só existe num ramo que não deveria acontecer nunca
@@ -599,10 +599,13 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     medidas, sonda, escrita, relogio, setImmediate,
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    // A marca desta aba nas decisões no ar (R5-1 F1): uma aba só.
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
-    'devolverPedidoRecusado', 'registrarPousoDeSaida', 'esvaziarFilaDeSaida', 'handleActionResult', 'handleUnauthorized'];
+    'devolverPedidoRecusado', 'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'pousouPorOutraAba', 'esvaziarFilaDeSaida',
+    'handleActionResult', 'handleUnauthorized'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
@@ -721,10 +724,14 @@ function aparelhoO5(guardado = new Map()) {
       medidas, resposta, setImmediate,
       // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
       travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+      // A marca da ABA nas decisões no ar (R5-1 F1). Cada `pagina()` é a MESMA aba
+      // reaberta (a marca mora no `sessionStorage`, que sobrevive a recarregar).
+      ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
     };
     const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
-      'saidaEmRecuo', 'registrarPousoDeSaida', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
+      'saidaEmRecuo', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'pousouPorOutraAba',
+      'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
       'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'descarregarAcaoPendente'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `
@@ -950,10 +957,11 @@ function drenarO8(itens, resposta) {
     dfato: (k) => medidas.diario.push(k),
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // R5-1 F1: uma aba só
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'devolverPedidoRecusado',
-    'registrarPousoDeSaida', 'esvaziarFilaDeSaida'];
+    'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'esvaziarFilaDeSaida'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0, verificandoSessao = false;

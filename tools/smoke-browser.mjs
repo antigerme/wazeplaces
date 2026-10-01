@@ -3399,13 +3399,14 @@ for (const sistema of ['dark', 'light']) {
 // código" — que criava um código NOVO, válido, embaixo de "Código expirado —
 // feche e toque de novo". Aqui o QR vence em 2 s e se mede o que está VISÍVEL
 // (não a classe); e o código curto pedido ANTES vence no prazo DELE, com a
-// instrução dele saindo só então. Esperas pelo ESTADO, lidas do Node.
+// instrução dele saindo só então. Esperas pelo ESTADO, lidas do Node. E o FOCO
+// do teclado nos dois botões que saem de cena (R56-5, seção 3).
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR' });
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
-  let prazoDoCurto = 300;
+  let prazoDoCurto = 300, prazoDoQr = 2;
   await page.route('**/api/**', async (r) => {
     const nome = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
     let c = {};
@@ -3413,7 +3414,7 @@ for (const sistema of ['dark', 'light']) {
     let body = { success: true };
     if (nome === 'parear' && c.action === 'create') {
       body = c.comCodigo ? { success: true, code: 'ABC234', curto: true, expiresIn: prazoDoCurto }
-        : { success: true, code: 'ABCDEFGHJKLMNPQRSTUV', curto: false, expiresIn: 2 };
+        : { success: true, code: 'ABCDEFGHJKLMNPQRSTUV', curto: false, expiresIn: prazoDoQr };
     } else if (nome === 'presenca-app') body = { success: true, online: [], conversas: [] };
     else if (nome === 'buscar-places') body = { success: true, places: [], hasMore: false, page: 1, total: 0 };
     else if (nome === 'perfil') body = { success: true, profile: { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false, areas: [] } };
@@ -3472,6 +3473,57 @@ for (const sistema of ['dark', 'light']) {
   checa(curtoVenceu.ok, 'pareamento: o código curto de 4 s não venceu na tela');
   const fim = await tela();
   checa(fim.riscado && !fim.digite, 'pareamento: código curto vencido, e a tela segue mandando digitá-lo', JSON.stringify(fim));
+  // 3) O FOCO do teclado (auditoria de 2026-10-01, R56-5). O QR vencendo com o
+  // foco no "Copiar link" (que apaga) ou no "Sem câmera?" (que some) largava o
+  // foco no <body>, e o Enter no "Sem câmera?" também (ele some quando o código
+  // chega): o leitor de tela perdia a posição. O foco vai ao "Fechar" no
+  // vencimento e ao "Copiar link" no código. A PRÉ-CONDIÇÃO é o foco no botão
+  // antes (sem ela, o "Fechar", foco da abertura, passaria por ele), e o
+  // CONTROLE prova que neste motor o botão focado que apaga perde o foco pro
+  // <body> — sem isso a medida não enxergaria o defeito.
+  const foco = () => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.tagName) : ''; });
+  await page.click('#pairShowClose');
+  prazoDoCurto = 300;
+  prazoDoQr = 60;
+  await abrir();
+  await page.keyboard.press('Shift+Tab');
+  checa(await foco() === 'pairCopyLinkBtn', 'pareamento · PRÉ-CONDIÇÃO do controle: o Shift+Tab não pôs o foco no "Copiar link"', await foco());
+  await page.evaluate(() => { document.getElementById('pairCopyLinkBtn').disabled = true; });
+  await doisQuadros(page);
+  const semConserto = await foco();
+  checa(semConserto === 'BODY', 'pareamento · CONTROLE: neste motor o botão focado que apaga não perde o foco — a medida não enxerga o defeito', semConserto);
+  await page.click('#pairShowClose');
+  prazoDoQr = 2;
+  for (const [id, voltas] of [['pairCopyLinkBtn', 1], ['pairShowCodeBtn', 2]]) {
+    await abrir();
+    for (let i = 0; i < voltas; i++) await page.keyboard.press('Shift+Tab');
+    const antes = await foco();
+    checa(antes === id, `pareamento · PRÉ-CONDIÇÃO: o Shift+Tab não pôs o foco no ${id}`, antes);
+    const apagou = await esperarNaPagina(page, () => document.getElementById('pairCopyLinkBtn').disabled === true, 8000);
+    checa(apagou.ok, 'pareamento · CONTROLE: o QR de 2 s não venceu (o "Copiar link" não apagou)');
+    await doisQuadros(page);
+    const depois = await foco();
+    checa(depois === 'pairShowClose', `pareamento: o QR venceu com o foco do teclado no ${id}, e o foco foi pro ${depois}`);
+    await page.click('#pairShowClose');
+  }
+  // O Enter no "Sem câmera?" (QR de 60 s: o código chega com ele valendo), e o
+  // CONTROLE do clique de mouse, que não move o foco (a regra do C10).
+  prazoDoQr = 60;
+  for (const pelo of ['teclado', 'mouse']) {
+    await abrir();
+    if (pelo === 'teclado') {
+      await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab');
+      checa(await foco() === 'pairShowCodeBtn', 'pareamento · PRÉ-CONDIÇÃO: o Shift+Tab não pôs o foco no "Sem câmera?"', await foco());
+      await page.keyboard.press('Enter');
+    } else await page.click('#pairShowCodeBtn');
+    const chegou = await esperarNaPagina(page, () => !document.getElementById('pairCodeReveal').classList.contains('hidden'), 8000);
+    checa(chegou.ok, `pareamento · CONTROLE: o código curto não apareceu (${pelo})`);
+    await doisQuadros(page);
+    const depois = await foco();
+    if (pelo === 'teclado') checa(depois === 'pairCopyLinkBtn', `pareamento: o Enter no "Sem câmera?" mostrou o código e o foco foi pro ${depois}`);
+    else checa(depois !== 'pairCopyLinkBtn', 'pareamento: o clique de MOUSE no "Sem câmera?" moveu o foco pro "Copiar link"', depois);
+    await page.click('#pairShowClose');
+  }
   checa(erros.length === 0, 'pareamento: erro de JS', erros[0]);
   await ctx.close();
 }
@@ -6101,16 +6153,25 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //       seletor seguia no de antes, e o "Aplicar" o devolvia.
 //   12. Trocar a região no modal e voltar pra aplicada escolhia o 1º país da
 //       lista (`na/40`, o Canadá) em vez do aplicado.
+//   R56-6. Trocar a região NA → ROW → NA: a lista da ida à NA que chegava
+//       DEPOIS punha o 1º da lista (o Canadá) por cima dos EUA que a pessoa
+//       tinha escolhido (auditoria da rodada 5).
+//   11, com a REGIÃO. Quem só edita na NA abre pelo atalho; o perfil a leva pra
+//       NA/EUA com a lista de países da ABERTURA ainda no ar, e a lista da ROW,
+//       chegando depois, ficava debaixo do seletor em `row` com os países da
+//       NA: o "Aplicar" gravava `row/235`, uma fila vazia (lote 9).
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
-// no modal vale, e a região que não é a aplicada abre no 1º da lista.
+// no modal vale, a região que não é a aplicada abre no 1º da lista, com uma
+// ida só à NA a escolha da pessoa fica, e com a lista da abertura chegando
+// ANTES do perfil a tela acompanha.
 {
   const onde = 'filtros/lugar';
   const LISTAS = {
     row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
     na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
   };
-  const montar = async ({ editaveis, segurar = false, guardado = {} }) => {
+  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {} }) => {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
     await ctx.addInitScript((guardado) => {
       try {
@@ -6121,6 +6182,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
     }, guardado);
     const seguros = [];
+    // R56-6: as listas de países das TROCAS de região, seguras na ordem em que saem.
+    const trocas = { segurar: false, seguras: [] };
     await ctx.route('**/api/**', async (route) => {
       const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
       let corpo = {};
@@ -6129,13 +6192,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       let b = { success: true };
       if (nome === 'perfil') {
         b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true,
-          isStaff: false, areas: [], managedAreas: [], editableCountryIDs: regiao === 'row' ? editaveis : [] } };
+          isStaff: false, areas: [], managedAreas: [], editableCountryIDs: regiao === 'row' ? editaveis : (editaveisLa[regiao] || []) } };
       } else if (nome === 'lista-paises') b = { success: true, countries: LISTAS[regiao] || [] };
       else if (nome === 'lista-estados') b = { success: true, states: [] };
       else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
       else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
       if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
         await new Promise((solta) => seguros.push({ nome, solta }));
+      } else if (trocas.segurar && nome === 'lista-paises') {
+        await new Promise((solta) => trocas.seguras.push({ regiao, solta }));
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {});
     });
@@ -6145,7 +6210,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const soltar = (nome) => {
       for (const s of seguros.filter((x) => !nome || x.nome === nome)) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
     };
-    return { ctx, page, erros, soltar };
+    // Só o PRIMEIRO seguro daquele nome (na ordem em que a rota os recebeu).
+    const soltarUm = (nome) => {
+      const s = seguros.find((x) => x.nome === nome);
+      if (s) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
+    };
+    const segurosDe = (nome) => seguros.filter((x) => x.nome === nome).length;
+    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas };
   };
   const pelosFiltros = async (m) => {
     await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
@@ -6239,6 +6310,110 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
     checa(gravado === 'na/235', `${onde}: foi à ROW e voltou, e o "Aplicar" gravou ${gravado} (achado 12)`, gravado);
     checa(m.erros.length === 0, `${onde} (12): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // R56-6. Aplicado ROW/Brasil, a região vai NA → ROW → NA no modal com as três
+  //        listas seguras, e elas chegam numa ordem; a pessoa escolhe os EUA
+  //        ASSIM QUE O SELETOR DEIXA (a lista na tela, sem "carregando",
+  //        destravado). O pouso de cada resposta se espera pelo registro dela
+  //        no anel de chamadas do app (`API.chamadas`), que é escrito ANTES de
+  //        a troca continuar — e a contagem é a que CRESCEU desde a base
+  //        fotografada depois da abertura (gotcha #62), nunca por prazo.
+  for (const [caso, regioes, ordem] of [
+    ['a 1ª ida à NA chega antes', ['na', 'row', 'na'], [0, 1, 2]],
+    ['a última ida à NA chega antes', ['na', 'row', 'na'], [2, 0, 1]],
+    ['CONTROLE: uma ida só à NA', ['na'], [0]],
+  ]) {
+    const m = await montar({ editaveis: [30] });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
+    await fimDaCarga(m);
+    await m.page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
+      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    const base = await m.page.evaluate(() => API.chamadas.filter((c) => c.rota === 'lista-paises').length);
+    m.trocas.segurar = true;
+    for (const r of regioes) {
+      await m.page.evaluate((r) => { const s = document.getElementById('filterRegion'); s.value = r; s.dispatchEvent(new Event('change')); }, r);
+    }
+    // As três saíram e estão seguras (a rota as recebe fora do `evaluate`).
+    for (let i = 0; i < 100 && m.trocas.seguras.length < regioes.length; i++) await m.page.waitForTimeout(20);
+    const seguradas = m.trocas.seguras.map((x) => x.regiao).join(',');
+    checa(seguradas === regioes.join(','), `${onde} (R56-6, ${caso}): CONTROLE — o instrumento não segurou as listas das trocas`, seguradas);
+    if (seguradas !== regioes.join(',')) { await m.ctx.close(); continue; }
+    let escolheuApos = null;
+    for (let k = 0; k < ordem.length; k++) {
+      m.trocas.seguras[ordem[k]].solta();
+      await m.page.evaluate((n) => { window.__r56Pousos = n; }, base + k + 1);
+      await esperarOuExplodir(m.page, () => API.chamadas.filter((c) => c.rota === 'lista-paises').length >= window.__r56Pousos,
+        `a resposta ${k + 1} pousar`);
+      if (escolheuApos !== null) continue;
+      const pode = await m.page.evaluate(() => {
+        const s = document.getElementById('filterCountry');
+        return !s.dataset.carregando && !s.disabled && !!s.querySelector('option[value="235"]');
+      });
+      if (pode) {
+        await m.page.evaluate(() => { const s = document.getElementById('filterCountry'); s.value = '235'; s.dispatchEvent(new Event('change')); });
+        escolheuApos = k + 1;
+      }
+    }
+    const fim = await m.page.evaluate(() => ({
+      pais: document.getElementById('filterCountry').value,
+      aplicarMorto: document.getElementById('applyFilters').disabled,
+    }));
+    checa(escolheuApos !== null, `${onde} (R56-6, ${caso}): o seletor de país nunca deixou a pessoa escolher`);
+    checa(fim.pais === '235', `${onde} (R56-6, ${caso}): a pessoa escolheu os EUA e a lista que chegou depois pôs o ${fim.pais}`, fim.pais);
+    checa(!fim.aplicarMorto, `${onde} (R56-6, ${caso}): o "Aplicar" ficou morto`);
+    const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
+    checa(gravado === 'na/235', `${onde} (R56-6, ${caso}): o "Aplicar" gravou ${gravado}`, gravado);
+    checa(m.erros.length === 0, `${onde} (R56-6): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // 11, com a REGIÃO. Quem só edita na NA (o perfil da ROW sem país, o da NA com
+  //     os EUA) abre pelo atalho, com o perfil e as DUAS listas de países da ROW
+  //     seguras: a da carga do início (que o perfil espera, `Promise.all`) e a da
+  //     abertura dos Filtros, nessa ordem — o `initApp` dispara a carga antes de
+  //     tratar o atalho. Solta-se a 1ª e o perfil; a da abertura fica no ar até
+  //     o perfil levar a pessoa pra NA/EUA. No CONTROLE ela chega antes.
+  for (const listaAntes of [false, true]) {
+    const caso = listaAntes ? 'CONTROLE: a lista da abertura chega ANTES do perfil' : 'a lista da abertura chega DEPOIS do perfil';
+    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true });
+    await pelosFiltros(m);
+    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 2; i++) await m.page.waitForTimeout(20);
+    checa(m.segurosDe('lista-paises') === 2, `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou as duas listas da ROW`,
+      String(m.segurosDe('lista-paises')));
+    const carregando = await m.page.evaluate(() => document.getElementById('filterCountry').dataset.carregando === '1');
+    checa(carregando, `${onde} (11, região, ${caso}): CONTROLE — a lista da abertura não estava no ar`);
+    if (listaAntes) m.soltar('lista-paises'); else m.soltarUm('lista-paises');
+    m.soltar('perfil');
+    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga do início, o
+    // perfil nem andaria e isto estoura — o instrumento não mede o caso fácil.
+    const lugar = await fimDaCarga(m);
+    checa(lugar === 'na/235', `${onde} (11, região, ${caso}): CONTROLE — o perfil não levou quem só edita na NA pra NA/EUA`, lugar);
+    if (!listaAntes) {
+      // A lista da abertura chega agora. O pouso se espera pelo registro dela no
+      // anel de chamadas do app, contado a partir de agora (gotcha #62).
+      const base = await m.page.evaluate(() => API.chamadas.filter((c) => c.rota === 'lista-paises').length);
+      m.soltar('lista-paises');
+      await m.page.evaluate((n) => { window.__listaDaAbertura = n; }, base + 1);
+      await esperarOuExplodir(m.page, () => API.chamadas.filter((c) => c.rota === 'lista-paises').length >= window.__listaDaAbertura,
+        'a lista da abertura pousar');
+    }
+    const tela = await m.page.evaluate(() => ({
+      regiao: document.getElementById('filterRegion').value,
+      pais: document.getElementById('filterCountry').value,
+      opcoes: [...document.getElementById('filterCountry').options].map((o) => o.value).join(','),
+      aplicarMorto: document.getElementById('applyFilters').disabled,
+    }));
+    const naTela = `${tela.regiao}/${tela.pais} com os países ${tela.opcoes}`;
+    checa(tela.regiao === 'na' && tela.pais === '235', `${onde} (11, região, ${caso}): o perfil levou pra NA/EUA e a tela ficou em ${naTela}`);
+    checa(!tela.opcoes.split(',').includes('30'), `${onde} (11, região, ${caso}): a lista da ROW ficou na tela da NA`, tela.opcoes);
+    checa(!tela.aplicarMorto, `${onde} (11, região, ${caso}): o "Aplicar" ficou morto`);
+    const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
+    checa(gravado === 'na/235', `${onde} (11, região, ${caso}): o "Aplicar" gravou ${gravado} (a fila de quem só edita na NA)`, gravado);
+    checa(m.erros.length === 0, `${onde} (11, região): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
 }
@@ -8575,13 +8750,20 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // presença fica de fora — a sentinela deste arquivo reprova 401 de sessão
     // nela, e ela não é o que se mede aqui.
     const mortos = new Set();
+    // A seção 5 SEGURA a resposta de um pedido (a 1ª decisão dele) até soltar.
+    const segurar = new Map();
     let logins = 0;
     await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
     await ctx.route('**/api/**', async (r) => {
       const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
       let corpo = {};
       try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
-      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null });
+      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null, pedido: corpo.venueID || null });
+      if (rota === 'validar-place' && segurar.has(corpo.venueID)) {
+        const espera = segurar.get(corpo.venueID);
+        segurar.delete(corpo.venueID);
+        await espera;
+      }
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
       if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
         return r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false,
@@ -8623,7 +8805,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
     await esperarOuExplodir(A, pronta, 'a aba A abrir com a sessão e a fila');
     await esperarOuExplodir(B, pronta, 'a aba B abrir com a sessão e a fila');
-    return { ctx, A, B, rede, erros, mortos };
+    return { ctx, A, B, rede, erros, mortos, segurar };
   };
   // Um ✕ pelo botão do card da frente, esperando o card TROCAR e o envio voltar.
   const rejeitarNa = (page) => page.evaluate(async () => {
@@ -8904,6 +9086,49 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   }
   checa(o.erros.length === 0, 'duas abas: erro de JS na troca de conta', o.erros[0]);
   await o.ctx.close();
+
+  // ── 5. a decisão NO AR numa aba não sai de novo pela OUTRA ──────────────
+  // Desde o O2 a decisão entra na fila de saída ANTES do envio, e a fila é do
+  // aparelho: a outra aba, esvaziando (a resposta de qualquer chamada dela é
+  // prova de rede), mandava de novo o ✕ que esta ainda tinha no ar, e o
+  // Histórico o contava duas vezes (auditoria de 2026-10-01, R5-1 F1). Hoje a
+  // anotação leva a marca da aba que manda. Aqui a resposta do ✕ da B fica
+  // presa, e a A esvazia a fila nesse meio.
+  // CONTROLE: o mesmo com a marca tirada da anotação (o app de antes) — a A
+  // tem de mandá-lo de novo, senão a medida não enxerga o reenvio.
+  const vooNaOutra = async ({ semMarca }) => {
+    const v = await abrirAbas();
+    const alvo = await v.B.evaluate(() => AppState.currentPlace.venueID);
+    let soltar = () => {};
+    v.segurar.set(alvo, new Promise((ok) => { soltar = ok; }));
+    await v.B.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+    await esperarOuExplodir(v.A, () => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length === 1,
+      'o ✕ da aba B ser anotado na fila de saída antes do envio');
+    if (semMarca) {
+      await v.A.evaluate(() => {
+        const f = JSON.parse(localStorage.getItem('waze_places_saida'));
+        for (const x of f) { delete x.rv; delete x.rvEm; }
+        localStorage.setItem('waze_places_saida', JSON.stringify(f));
+      });
+    }
+    await v.A.evaluate(() => esvaziarFilaDeSaida());
+    soltar();
+    await esperarNaPagina(v.B, () => AppState.inFlightActions === 0
+      && (localStorage.getItem('waze_places_saida') || '[]') === '[]', 8000);
+    await dormir(300);
+    const envios = v.rede.filter((x) => x.rota === 'validar-place' && x.pedido === alvo).length;
+    const hist = await v.A.evaluate(() => (JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {}).rejected || 0);
+    const erros = v.erros.slice();
+    await v.ctx.close();
+    return { envios, hist, erros };
+  };
+  const r5 = await vooNaOutra({ semMarca: false });
+  checa(r5.envios === 1 && r5.hist === 1,
+    'duas abas: o ✕ NO AR na aba B saiu de novo pela A (ou o Histórico o contou duas vezes)', JSON.stringify(r5));
+  checa(r5.erros.length === 0, 'duas abas: erro de JS com a decisão no ar', r5.erros[0]);
+  const c5 = await vooNaOutra({ semMarca: true });
+  checa(c5.envios === 2,
+    'duas abas: CONTROLE — sem a marca da aba, a A devia mandar de novo o ✕ no ar da B; a medida não enxerga o reenvio', JSON.stringify(c5));
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
@@ -8959,7 +9184,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
   + `, + tema trocado pelo BOTÃO pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida e volta; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
-  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence)`
+  + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence; e o foco do TECLADO nos botões que saem de cena — no "Fechar" quando o QR vence, no "Copiar link" quando o código chega —, com o CONTROLE do motor largando o foco no <body> e o do mouse, que não move o foco)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
   + `, + DUPLICATE em 2 aparelhos apertados × ${LINGUAS.length} idiomas (nomeia o alvo, marca no mapa, volta à forma isolada sem nome, e nome longo sem empurrar a barra nem ligar a rede de segurança — teto de duas linhas com o nome inteiro no title, e o CONTROLE sem teto ligando a rede no Fold)`
@@ -8990,6 +9215,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
-  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

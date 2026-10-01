@@ -483,8 +483,12 @@ test('fechar COM rede na janela do Desfazer: a decisão entra na FILA DE SAÍDA 
   const i = s.indexOf('descarregar: () => {');
   assert.ok(i > 0, 'sumiu o `descarregar`');
   const corpo = s.slice(i, s.indexOf('AppState.pendingAction.execute();', i));
-  const iEnfileira = corpo.indexOf('const r = enfileirarSaida(type, places[0], regiaoDoGesto);');
+  const iEnfileira = corpo.indexOf('const r = enfileirarSaida(type, places[0], regiaoDoGesto');
   assert.ok(iEnfileira > 0, 'a descarga não enfileira ANTES do envio');
+  // Com a marca DESTA aba: a outra aba (a que fica na tela quando esta vai pro
+  // fundo) mandaria de novo a decisão que esta está mandando (R5-1 F1).
+  assert.ok(corpo.includes('const r = enfileirarSaida(type, places[0], regiaoDoGesto, reivindicacaoDestaAba());'),
+    'a descarga anota sem a marca da aba — a outra aba a manda de novo enquanto o envio desta voa');
   assert.match(corpo, /if \(r\) descargaNaFila\.add\(places\[0\]\);/,
     'sem a marca, a resposta que chega com a página viva não sabe que o item já está na fila — contaria duas vezes');
   // E o pouso vem de onde sempre veio: a resposta.

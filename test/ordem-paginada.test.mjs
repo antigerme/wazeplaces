@@ -115,7 +115,10 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
     'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue', 'manterFocoNaFrente', 'assinaturaDeBusca', 'reordenarFilaNaTela'];
   // As funções do conserto: no código de antes elas não existem, e o teste tem
   // de reprovar pelo COMPORTAMENTO, não por não achá-las.
-  for (const opcional of ['ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'buscarORestoDaFila', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa']) {
+  // `ordemValida` (e a espera do perfil): a fila inteira se decide pela ordem que
+  // VALE, não pela salva (R56-3).
+  for (const opcional of ['ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'ordemValida', 'ordemSalvaEsperaOPerfil',
+    'buscarORestoDaFila', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa']) {
     if (achar(opcional)) nomes.push(opcional);
   }
   const chaves = Object.keys(deps);
@@ -240,4 +243,36 @@ test('F8: trocar pra "Perto de casa" com a fila PELA METADE — o resto vem na h
   assert.equal(m.AppState.ordemPendente, true, 'a ordem do resto não ficou pendente pro próximo card');
   m.AppState.queue.shift(); m.AppState.ordemPendente = false; m.app.sortQueue();   // o advanceQueue
   assert.equal(m.AppState.queue[0].venueID, 'V540', 'o próximo card depois da troca não é o mais perto de casa');
+});
+
+// ── R56-3: a fila inteira se decide pela ordem que VALE, não pela salva ─────────
+// "Perto de casa" salva com um perfil SEM casa (tirada no WME, ou outra conta no
+// aparelho), ou o GPS sem posição, ordenam por DATA — os Filtros mostram "Mais
+// recentes" —, e mesmo assim toda busca lia TODAS as páginas antes do primeiro
+// card: uma requisição a mais por página no free tier (MEDIDO, n1-casa: páginas
+// [1,2] na abertura e no ↻, contra [1] com "Mais recentes").
+function precisaDaFilaInteira({ ordem, perfil = { id: 1 }, referencias = null, gps = null }) {
+  const AppState = { filters: { sortOrder: ordem }, profile: perfil };
+  return new Function('AppState', 'ORDEM_PADRAO', 'ORDENS_POR_DISTANCIA',
+    `let referenciasDoPerfil = ${JSON.stringify(referencias)}; let posicaoGps = ${JSON.stringify(gps)};\n`
+    + ['referenciaDaOrdem', 'ordemSalvaEsperaOPerfil', 'ordemValida', 'ordemPrecisaDaFilaInteira'].map(fatiar).join('\n')
+    + '\nreturn ordemPrecisaDaFilaInteira();')(AppState, constante('ORDEM_PADRAO'), constante('ORDENS_POR_DISTANCIA'));
+}
+
+test('R56-3: a ordem por distância SEM referência (a fila sai por data) não lê a fila inteira', () => {
+  assert.equal(precisaDaFilaInteira({ ordem: 'casa' }), false,
+    '"Perto de casa" salva com um perfil sem casa: a fila sai por data e mesmo assim a busca leria todas as páginas');
+  assert.equal(precisaDaFilaInteira({ ordem: 'trabalho', referencias: { casa: [-23, -46], trabalho: null } }), false,
+    '"Perto do trabalho" sem trabalho no perfil leria todas as páginas');
+  assert.equal(precisaDaFilaInteira({ ordem: 'gps' }), false, 'o GPS sem posição leria todas as páginas');
+});
+
+test('R56-3: CONTROLES — com a referência, antes do perfil, e "Mais antigos" a fila inteira segue sendo lida', () => {
+  assert.equal(precisaDaFilaInteira({ ordem: 'casa', referencias: { casa: [-23, -46], trabalho: null } }), true,
+    'a ordem por distância COM a casa deixou de ler a fila inteira (o mais perto ficaria na página 2)');
+  assert.equal(precisaDaFilaInteira({ ordem: 'gps', gps: { ll: [-23, -46] } }), true);
+  // Antes do perfil, pode ser que a casa exista: a ordem salva segue valendo.
+  assert.equal(precisaDaFilaInteira({ ordem: 'casa', perfil: null }), true, 'a ordem salva deixou de esperar o perfil');
+  assert.equal(precisaDaFilaInteira({ ordem: 'oldest' }), true);
+  assert.equal(precisaDaFilaInteira({ ordem: 'newest' }), false);
 });

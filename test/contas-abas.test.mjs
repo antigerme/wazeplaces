@@ -200,6 +200,7 @@ function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
     cancelarPareamento: (c) => { log.push('cancelou:' + c); return Promise.resolve(); },
     setRegion: (r) => { log.push('regiao:' + r); ap.safeLS.set('waze_region', r); },
     setCountry: (c) => { log.push('pais:' + c); ap.safeLS.set('waze_country', c); },
+    esquecerLugar: () => log.push('esqueceu o lugar'),
   };
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API,
@@ -279,6 +280,55 @@ test('A1: CONTROLE — o "Sair" desta aba grava e apaga o aparelho (o espião en
   assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'presenca'), ['presenca', null]);
   assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'dlog'), ['dlog', null], 'o "Sair" daqui deixou o diagnóstico no aparelho');
   assert.ok(m.log.includes('toast:toast.loggedOut'));
+});
+
+// O fechamento das camadas DE VERDADE no que ele dispara: a foto ampliada fecha
+// pelo `avancarSeAprovado` (que MANDA a aprovação pendente) e a conversa pela
+// limpeza que paga o "lida" esperando a rajada (`presencaPagarLida`).
+function montarSairComCamadas() {
+  const m = montarSair();
+  const saiu = [];
+  Object.assign(m.deps, {
+    renomeacaoPendente: null, exclusaoPendente: null, placeResolvidoPorAprovacao: null,
+    aprovacaoPendente: { enviar: () => saiu.push('aprovação:' + m.API.sessionToken), cancelar: () => { m.deps.aprovacaoPendente = null; } },
+    Presenca: { lidaPendente: '777', timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
+    presencaMarcarLida: (id) => saiu.push('lida:' + id + ':' + m.API.sessionToken),
+  });
+  m.deps.window.Presenca.esquecer = (o) => { m.log.push(['presenca', o || null]); m.deps.Presenca.lidaPendente = null; };
+  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
+  const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada', 'cancelarPendenciasDoLightbox',
+    'avancarSeAprovado', 'presencaPagarLida', 'presencaEu'], m.deps, fonte);
+  m.deps.fecharCamadasAbertas = () => { m.log.push('camadas'); h.avancarSeAprovado(); h.presencaPagarLida({ fechando: true }); };
+  return { ...m, h, saiu };
+}
+
+test('F2: na OUTRA aba as camadas fecham DEPOIS do que estava pendente — a aprovação na janela e o "lida" não saem com a sessão de quem saiu', async () => {
+  for (const outraConta of [false, true]) {
+    const m = montarSairComCamadas();
+    await m.h.handleLogout({ porOutraAba: true, outraConta });
+    assert.ok(m.log.includes('camadas'), 'as camadas não fecharam');
+    assert.deepEqual(m.saiu, [],
+      `DEFEITO${outraConta ? ' (outra conta)' : ''}: o fechamento das camadas mandou o que estava pendente, com a sessão de quem saiu: ${m.saiu.join(' ')}`);
+    assert.equal(m.deps.aprovacaoPendente, null, 'a aprovação na janela não foi cancelada');
+    assert.equal(m.deps.Presenca.lidaPendente, null, 'o "lida" pendente ficou pra quem entrar');
+  }
+  // CONTROLE: o fechamento com a aprovação pendente e o perfil de pé (a ordem de antes) manda os dois.
+  const c = montarSairComCamadas();
+  c.deps.fecharCamadasAbertas();
+  assert.deepEqual(c.saiu, ['aprovação:tok-A', 'lida:777:tok-A'], 'CONTROLE: o harness não enxerga o que o fechamento manda');
+});
+
+test('R5-5-X: a tela de entrada não guarda o anúncio do último card (nome de local de terceiro) — nem no "Sair"', () => {
+  const els = {};
+  const el = (id) => (els[id] ||= { id, textContent: '', classList: { add() {}, remove() {}, toggle() {} } });
+  els.cardLiveRegion = { textContent: 'Novo pedido: Padaria Estrela, Local novo' };
+  const deps = { document: { documentElement: { classList: { remove() {} } }, getElementById: el, querySelectorAll: () => [] },
+    AppState: { authenticated: true, profile: { id: 1 } }, window: {} };
+  const h = montar(['showAuthScreen'], deps);
+  h.showAuthScreen();
+  assert.equal(els.cardLiveRegion.textContent, '', 'DEFEITO: o nome do local do último card seguiu na região viva da tela de entrada');
+  // O "Sair" passa por ela, nas duas abas.
+  assert.match(fatiarDe(APP_SEM, 'handleLogout'), /^\s+showAuthScreen\(\);/m);
 });
 
 test('A1: o api.js solta a sessão da MEMÓRIA sem tocar no aparelho — e o ✕ seguinte não sai com o token de quem saiu', async () => {
@@ -408,6 +458,7 @@ function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0
     window: { Presenca: { desligar: () => { aba.presencaDesligada = (aba.presencaDesligada || 0) + 1; }, renderPilula: () => {} } },
     offlineEsquecer: (o) => { aba.offlineSoltou = o; },
     handleLogout: (o) => { aba.saiu = o || true; },
+    SAIDA_KEY: 'waze_places_saida', updateInFlightIndicator: () => { aba.indicador = (aba.indicador || 0) + 1; },
   };
   const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'relerPlacarDeOutraAba', 'placarGuardado',
@@ -662,7 +713,7 @@ test('A3: CONTROLE — sem esquecer as escolhas de A, o ↑ de B grava a estrela
 
 // ═══ A4 · a casa da conta anterior não ordena a fila de quem entra ═══════════
 
-test('A4: a troca de conta e a QUEDA da sessão soltam casa, trabalho e a posição do GPS', () => {
+test('A4/R56-1: a troca de conta solta casa, trabalho e o GPS; a QUEDA solta casa e trabalho e MANTÉM o GPS (o aparelho segue "Perto de mim")', () => {
   const casa = () => ({ casa: [-10, -40], trabalho: [-11, -41] });
   const base = () => ({
     referenciasDoPerfil: casa(), posicaoGps: { ll: [-10, -40] }, safeLS: aparelho().safeLS,
@@ -676,8 +727,12 @@ test('A4: a troca de conta e a QUEDA da sessão soltam casa, trabalho e a posiç
   assert.equal(troca.referenciaDaOrdem('casa'), null);
   const queda = montar(['derrubarSessao', 'referenciaDaOrdem'], base());
   queda.derrubarSessao('srv.err.sessionExpired', { depois: () => {} });
-  assert.deepEqual([queda.deps.referenciasDoPerfil, queda.deps.posicaoGps], [null, null],
-    'DEFEITO: a casa de quem estava ficou pra quem entrar depois da queda');
+  assert.equal(queda.deps.referenciasDoPerfil, null, 'DEFEITO: a casa de quem estava ficou pra quem entrar depois da queda');
+  // A posição é do APARELHO, e o perfil que volta na renovação não a traz:
+  // tirada na queda, a fila "Perto de mim" passava pra ordem por data sem aviso.
+  assert.deepEqual(queda.referenciaDaOrdem('gps'), [-10, -40],
+    'DEFEITO (R56-1): a queda tirou a posição do GPS — a renovação da mesma conta perde o "Perto de mim"');
+  assert.equal(queda.referenciaDaOrdem('casa'), null);
   // CONTROLE: a referência existia (o teste mede alguma coisa).
   assert.deepEqual(montar(['referenciaDaOrdem'], base()).referenciaDaOrdem('casa'), [-10, -40]);
 });
@@ -955,7 +1010,7 @@ test('A7: o Enter que chega DEPOIS de entrar (o diálogo já fechado) não resga
 
 // ═══ A11 · o diálogo do "Sair" diz o que ele descarta ════════════════════════
 
-function montarAviso(itens, { dialogoAberto = true } = {}) {
+function montarAviso(itens, { dialogoAberto = true, noAr = [] } = {}) {
   const ap = aparelho({ waze_places_saida: itens });
   const el = { textContent: 'velho', escondido: true, classList: { toggle(c, v) { if (c === 'hidden') el.escondido = v; } } };
   const deps = {
@@ -964,8 +1019,11 @@ function montarAviso(itens, { dialogoAberto = true } = {}) {
     document: { getElementById: (id) => (id === 'logoutSaidaAviso' ? el
       : id === 'logoutModal' ? { classList: { contains: (c) => (c === 'hidden' ? !dialogoAberto : false) } } : null) },
     AppState: { authenticated: false, inFlightActions: 0 },
+    // O que está NO AR nesta aba (o gesto até o fim do envio) e a marca desta aba.
+    pedidosEmAndamento: new Set(noAr), ABA_DESTA_PAGINA: 'aba-esta', SAIDA_REIVINDICACAO_MS: 60000,
   };
-  const h = montar(['desenharAvisoDoSair', 'carregarFilaDeSaida', 'updateInFlightIndicator'], deps);
+  const h = montar(['desenharAvisoDoSair', 'carregarFilaDeSaida', 'updateInFlightIndicator', 'chaveDoPedido',
+    'reivindicadoPorOutraAba'], deps);
   return { h, el };
 }
 const ITEM = (v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v });
@@ -1020,4 +1078,334 @@ test('preferências de fábrica: o app recém-aberto, o "Sair" e a releitura usa
   // Nenhum outro literal de preferências no app: é assim que eles divergem.
   assert.doesNotMatch(APP_SEM.replace(fatiarDe(APP_SEM, 'preferenciasDeFabrica'), ''), /preferences\s*[:=]\s*\{/,
     'um literal de preferências apareceu fora da fonte única');
+});
+
+// ═══ lote 9 (auditoria de 2026-10-01): a decisão no ar entre abas, o placar
+// órfão, o lugar da aba, o indicador, o "Sair" que conta só o que espera, e a
+// área gerenciada que o perfil não tem ═══════════════════════════════════════
+
+// A fila de saída de DUAS abas no mesmo aparelho, com as funções de verdade: a
+// anotação antes do envio (com a marca da aba), o esvaziamento e o pouso.
+function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_000 } } = {}) {
+  const enviados = [], diario = [], historico = [];
+  const safeLS = { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) };
+  const deps = {
+    AppState: { authenticated: true, profile: { id: 1 }, stats: { read: 0, rejected: 5, skipped: 0 } },
+    navigator: { onLine: true }, epocaDaSessao: 0, safeLS, Date: { now: () => relogio.t },
+    API: { getSession: () => 'tok', getRegion: () => 'row',
+      rejectPlace: async (v) => { enviados.push(nome + ':' + v); return { success: true }; },
+      markAsRead: async (v) => { enviados.push(nome + ':' + v); return { success: true }; } },
+    SAIDA_KEY: 'waze_places_saida', CONTA_KEY, SAIDA_MAX: 1000, SAIDA_RITMO_MS: 0, SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000],
+    SAIDA_TENTATIVAS_POR_ITEM: 3, SAIDA_REIVINDICACAO_MS: 60000, SAIDA_REIVINDICACAO_ASSENTA_MS: 0, ABA_DESTA_PAGINA: 'aba-' + nome,
+    travaDaSaida: async () => (semTravas ? { reserva: true, soltar() {} } : { reserva: false, soltar() {} }),
+    pedidosEmAndamento: new Set(), anotadoAntesDoEnvio: new WeakSet(), descargaNaFila: new WeakSet(),
+    esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false, verificandoSessao: false,
+    sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
+    setTimeout: (f) => { f(); return 1; }, dfato: (k) => diario.push(k), t: (k) => k,
+    registrarPouso: () => {}, recordHistory: (tipo) => historico.push(tipo), registrarRejeicaoDeAutor: () => {},
+    registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {}, showToast: () => {},
+    updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, historyTodayKey: () => '2026-10-01',
+    ondeAgora: () => '30', getLang: () => 'pt',
+    registrarPousoDeSaida: (tipo, place, r) => { if (r && r.success) historico.push(tipo); },
+  };
+  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    'enfileirarSaida', 'tirarDaFilaDeSaida', 'anotarAntesDoEnvio', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
+    'reivindicarNaSaida', 'soltarReivindicacoes', 'pousouPorOutraAba', 'soltarMarcaDosItens', 'moverProFimDaSaida', 'sessaoVivaDepoisDe',
+    'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida', 'handleActionResult'], deps);
+  return { h, deps, enviados, diario, historico, relogio };
+}
+const PEDIDO = (v) => ({ venueID: v, updateRequestID: 'u' + v, creatorId: 9 });
+
+test('F1: a decisão que uma aba ANOTOU e está mandando não sai de novo pela outra — com e sem a trava do navegador', async () => {
+  for (const semTravas of [false, true]) {
+    const guardado = new Map();
+    const relogio = { t: 1_000_000 };
+    const A = abaDaSaida(guardado, 'A', { semTravas, relogio }), B = abaDaSaida(guardado, 'B', { semTravas, relogio });
+    const v0 = PEDIDO('v0');
+    // A anota o ✕ antes do envio (e o manda; a resposta ainda não voltou).
+    assert.equal(A.h.anotarAntesDoEnvio('reject', v0, 'row'), true);
+    A.deps.pedidosEmAndamento.add(A.h.chaveDoPedido(v0));
+    const anotado = JSON.parse(guardado.get('waze_places_saida'))[0];
+    assert.equal(anotado.rv, 'aba-A', 'a anotação antes do envio não leva a marca da aba que manda');
+    // B esvazia a fila (a resposta de qualquer chamada dela é prova de rede).
+    await B.h.esvaziarFilaDeSaida();
+    assert.deepEqual(B.enviados, [], `DEFEITO${semTravas ? ' (sem a trava do navegador)' : ''}: a outra aba mandou de novo a decisão que a primeira tinha no ar`);
+    // CONTROLE: a marca venceu (a aba A morreu no meio do envio) — a outra manda (at-least-once).
+    relogio.t += 61_000;
+    await B.h.esvaziarFilaDeSaida();
+    assert.deepEqual(B.enviados, ['B:v0'], 'CONTROLE: com a marca vencida a decisão ficaria presa pra sempre');
+  }
+});
+
+test('F1: a página RECARREGADA na mesma aba manda o que anotou antes de morrer (a marca é da aba, não da página)', async () => {
+  const guardado = new Map();
+  const antes = abaDaSaida(guardado, 'A');
+  antes.h.anotarAntesDoEnvio('reject', PEDIDO('v1'), 'row');      // a página morreu com o envio no ar
+  const depois = abaDaSaida(guardado, 'A');                        // a MESMA aba, recarregada (memória zerada)
+  await depois.h.esvaziarFilaDeSaida();
+  assert.deepEqual(depois.enviados, ['A:v1'], 'a mesma aba recarregada esperou a própria marca vencer');
+  // E a marca da aba mora no `sessionStorage`, que é da aba e sobrevive a
+  // recarregar: a MESMA aba recarregada tem a mesma marca; outra aba, outra.
+  const iife = /^const ABA_DESTA_PAGINA = (\(\(\) => \{[^]*?\n\}\)\(\));/m.exec(APP);
+  assert.ok(iife, 'a marca da aba mudou de forma — o teste não a acha');
+  const marcaDaAba = (sessionStorage) => new Function('sessionStorage', 'return ' + iife[1])(sessionStorage);
+  const sessao = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
+  const daAba = sessao();
+  const primeira = marcaDaAba(daAba);
+  assert.equal(marcaDaAba(daAba), primeira, 'a página recarregada na MESMA aba ganhou outra marca (e esperaria a própria vencer)');
+  assert.notEqual(marcaDaAba(sessao()), primeira, 'outra aba ganhou a MESMA marca');
+  const bloqueado = { getItem() { throw new Error('bloqueado'); }, setItem() { throw new Error('bloqueado'); } };
+  assert.match(marcaDaAba(bloqueado), /^[0-9a-z]+\.[0-9a-z]+$/, 'sem o armazenamento da aba, a página ficou sem marca');
+});
+
+test('F1: a página que SAI solta as marcas dela — a reabertura (ou a outra aba) manda NA HORA o que ela tinha no ar', async () => {
+  const guardado = new Map();
+  const A = abaDaSaida(guardado, 'A');
+  const v0 = PEDIDO('v0');
+  A.h.anotarAntesDoEnvio('reject', v0, 'row');
+  A.deps.pedidosEmAndamento.add(A.h.chaveDoPedido(v0));          // a página fecha com o envio no ar
+  A.h.soltarReivindicacoes({ comAsDoAr: true });                   // o `pagehide`
+  const B = abaDaSaida(guardado, 'B');                             // a reabertura, noutra aba
+  await B.h.esvaziarFilaDeSaida();
+  assert.deepEqual(B.enviados, ['B:v0'], 'a página que saiu deixou a decisão presa até a marca dela vencer');
+  // Quem chama é o `pagehide`; a aba só ESCONDIDA (o `visibilitychange`) segue viva e mantém as marcas.
+  const setup = fatiarDe(APP_SEM, 'setupDescargaAoSair');
+  assert.match(setup, /addEventListener\('pagehide', \(\) => \{\s*descarregarAcaoPendente\(\);[^]*?soltarReivindicacoes\(\{ comAsDoAr: true \}\)/,
+    'o `pagehide` parou de soltar as marcas da página que sai');
+  assert.doesNotMatch(setup.slice(setup.indexOf("'visibilitychange'")), /soltarReivindicacoes/,
+    'a aba só escondida soltou as marcas — a outra mandaria de novo o que ela tem no ar');
+});
+
+test('F1: a resposta de uma decisão que a OUTRA aba já pousou não conta de novo — nem vira "outro editor"', () => {
+  const guardado = new Map();
+  const A = abaDaSaida(guardado, 'A');
+  const v0 = PEDIDO('v0');
+  A.h.anotarAntesDoEnvio('reject', v0, 'row');
+  guardado.set('waze_places_saida', '[]');                       // a outra aba o mandou, pousou e tirou
+  for (const r of [{ success: true }, { success: false, errorCategory: 'already_processed' }]) {
+    A.h.anotarAntesDoEnvio('reject', v0, 'row');
+    guardado.set('waze_places_saida', '[]');
+    A.h.handleActionResult('reject', v0, r, 'row', 0);
+  }
+  assert.deepEqual(A.historico, [], 'DEFEITO: o Histórico contou de novo a decisão que a outra aba já tinha contado');
+  assert.deepEqual(A.diario.filter((k) => k === 'saida.saiuPorOutro').length, 2);
+  // CONTROLE: com o item ainda na fila, o pouso conta como sempre.
+  const c = abaDaSaida(new Map(), 'A');
+  c.h.anotarAntesDoEnvio('reject', v0, 'row');
+  c.h.handleActionResult('reject', v0, { success: true }, 'row', 0);
+  assert.deepEqual(c.historico, ['reject']);
+});
+
+// O "Rejeitar os 2" de uma aba, com as funções de verdade da fila de saída e
+// as respostas do Waze nas mãos do teste.
+async function loteDeDuas({ outraAbaPousaX1 = false, respostaX1, respostaX2 = { success: true } }) {
+  const tique = () => new Promise((ok) => setImmediate(ok));
+  const guardado = new Map();
+  const historico = [], diario = [], respostas = [], folha = [];
+  const deps = {
+    AppState: { authenticated: true, stats: { read: 0, rejected: 2, skipped: 0 }, fetchEpoch: 0, inFlightActions: 0, queue: [], serverTotal: 0 },
+    epocaDaSessao: 0, navigator: { onLine: true }, Date: { now: () => 1_000_000 },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    API: { getSession: () => 'tok', getRegion: () => 'row', rejectPlace: () => new Promise((ok) => respostas.push(ok)) },
+    SAIDA_KEY: 'waze_places_saida', CONTA_KEY, SAIDA_MAX: 1000, ABA_DESTA_PAGINA: 'aba-A', SAIDA_REIVINDICACAO_MS: 60000,
+    callWithRetry: (fn) => fn(), marcarEmAndamento: () => {}, dfato: (k) => diario.push(k),
+    recordHistory: (tipo) => historico.push(tipo), registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
+    registrarAcaoConfirmada: () => {}, mostrarResultadoDoLote: (c) => folha.push({ ...c }), updateStats: () => {},
+    saveStats: () => {}, updateInFlightIndicator: () => {}, updatePendingCount: () => {}, handleUnauthorized: () => {},
+    historyTodayKey: () => '2026-10-01', ondeAgora: () => '30', getLang: () => 'pt',
+  };
+  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+    'enfileirarSaida', 'tirarDaFilaDeSaida', 'reivindicacaoDestaAba', 'pousouPorOutraAba', 'soltarMarcaDosItens',
+    'pousouNoWaze', 'enviarLote'], deps);
+  const envio = h.enviarLote([PEDIDO('x1'), PEDIDO('x2')], { regiao: 'row' });
+  await tique();
+  const anotados = JSON.parse(guardado.get('waze_places_saida'));
+  assert.deepEqual(anotados.map((x) => x.rv), ['aba-A', 'aba-A'], 'o lote anotou sem a marca da aba que o manda');
+  if (outraAbaPousaX1) guardado.set('waze_places_saida', JSON.stringify(anotados.filter((x) => x.venueID !== 'x1')));
+  respostas[0](respostaX1);
+  await tique(); await tique();
+  if (respostas[1]) respostas[1](respostaX2);
+  await envio;
+  return { historico, diario, folha, saida: JSON.parse(guardado.get('waze_places_saida')) };
+}
+
+test('F1: o lote — a resposta de um pedido que a OUTRA aba já pousou não conta de novo no Histórico', async () => {
+  for (const respostaX1 of [{ success: true }, { success: false, errorCategory: 'already_processed' }]) {
+    const r = await loteDeDuas({ outraAbaPousaX1: true, respostaX1 });
+    assert.deepEqual(r.historico, ['reject'],
+      `DEFEITO (${respostaX1.success ? 'sucesso' : 'já tratado'}): o Histórico contou de novo o pedido do lote que a outra aba já tinha contado`);
+    assert.ok(r.diario.includes('saida.saiuPorOutro'));
+    assert.deepEqual([r.folha.at(-1).ok, r.folha.at(-1).ja], [2, 0], 'a folha disse "outro editor" sobre a decisão da própria pessoa');
+    assert.deepEqual(r.saida, []);
+  }
+  // CONTROLE: com os dois ainda na fila, os dois contam.
+  const c = await loteDeDuas({ respostaX1: { success: true } });
+  assert.deepEqual(c.historico, ['reject', 'reject'], 'CONTROLE: o harness não enxerga o pouso do lote');
+});
+
+test('F1: a decisão que FICA na fila de saída (rede, 401) perde a marca desta aba — a outra a manda na hora', async () => {
+  // O ✕ do card.
+  for (const resposta of [{ success: false, errorCategory: 'transient' }, { success: false, errorCategory: 'unauthorized' }]) {
+    const guardado = new Map();
+    const A = abaDaSaida(guardado, 'A');
+    const v0 = PEDIDO('v0');
+    A.h.anotarAntesDoEnvio('reject', v0, 'row');
+    A.h.handleActionResult('reject', v0, resposta, 'row', 0);
+    const f = JSON.parse(guardado.get('waze_places_saida'));
+    assert.equal(f.length, 1, 'PRÉ-CONDIÇÃO: a decisão ficou na fila de saída');
+    assert.equal(f[0].rv, undefined,
+      `DEFEITO (${resposta.errorCategory}): a marca ficou — a outra aba esperava até 1 min pra mandar o que ninguém mais mandava`);
+    const B = abaDaSaida(guardado, 'B');
+    await B.h.esvaziarFilaDeSaida();
+    assert.deepEqual(B.enviados, ['B:v0']);
+  }
+  // Só a marca DESTA aba sai: a da outra (que o pegou depois, a marca daqui já
+  // vencida) é de quem está mandando agora.
+  const guardado = new Map();
+  const A = abaDaSaida(guardado, 'A');
+  const v0 = PEDIDO('v0');
+  A.h.anotarAntesDoEnvio('reject', v0, 'row');
+  const f = JSON.parse(guardado.get('waze_places_saida'));
+  f[0].rv = 'aba-B';
+  guardado.set('waze_places_saida', JSON.stringify(f));
+  A.h.handleActionResult('reject', v0, { success: false, errorCategory: 'transient' }, 'row', 0);
+  assert.equal(JSON.parse(guardado.get('waze_places_saida'))[0].rv, 'aba-B', 'a resposta desta aba tirou a marca da OUTRA, que está mandando');
+  // O lote: a rede no 1º (ele fica, o 2º pousa) e o 401 no 1º (os dois ficam).
+  let r = await loteDeDuas({ respostaX1: { success: false, errorCategory: 'transient' } });
+  assert.deepEqual(r.saida.map((x) => [x.venueID, x.rv]), [['x1', undefined]], 'o pedido do lote que ficou na fila seguiu com a marca');
+  r = await loteDeDuas({ respostaX1: { success: false, errorCategory: 'unauthorized' } });
+  assert.deepEqual(r.saida.map((x) => [x.venueID, x.rv]), [['x1', undefined], ['x2', undefined]],
+    'os pedidos do lote que ficaram na fila (o 401) seguiram com a marca');
+});
+
+test('F1: o fim do esvaziamento sem a trava solta as marcas desta aba — menos a do que ela ainda tem NO AR', () => {
+  const guardado = new Map([['waze_places_saida', JSON.stringify([
+    { tipo: 'reject', venueID: 'v1', updateRequestID: 'uv1', rv: 'aba-A', rvEm: 1 },
+    { tipo: 'reject', venueID: 'v2', updateRequestID: 'uv2', rv: 'aba-A', rvEm: 1 }])]]);
+  const A = abaDaSaida(guardado, 'A');
+  A.deps.pedidosEmAndamento.add('v1|uv1');
+  A.h.soltarReivindicacoes();
+  const f = JSON.parse(guardado.get('waze_places_saida'));
+  assert.equal(f[0].rv, 'aba-A', 'a marca do que está no ar saiu — a outra aba o mandaria de novo');
+  assert.equal(f[1].rv, undefined, 'CONTROLE: a marca do que esperava ficou presa');
+});
+
+test('F3: o desconto de uma decisão que não pousou, num placar ÓRFÃO (o "Sair", outra conta), não desenha nem grava', () => {
+  const log = [];
+  const deps = { AppState: { stats: { read: 0, rejected: 0, skipped: 0 } }, updateStats: () => log.push('desenha'), saveStats: () => log.push('grava') };
+  const h = montar(['descontarGestoSemSessao'], deps);
+  const orfao = { read: 0, rejected: 3, skipped: 0 };
+  h.descontarGestoSemSessao('rejected', orfao, 1);
+  assert.equal(orfao.rejected, 2);
+  assert.deepEqual(log, [], 'DEFEITO: o desconto no placar órfão gravou o placar de agora (na outra aba, depois do "Sair")');
+  // CONTROLE: o placar do gesto é o de agora (a queda com renovação) — desconta, desenha e grava.
+  deps.AppState.stats.rejected = 3;
+  h.descontarGestoSemSessao('rejected', deps.AppState.stats, 1);
+  assert.deepEqual([deps.AppState.stats.rejected, log], [2, ['desenha', 'grava']]);
+});
+
+test('F5: região e país são da ABA — o lugar que a OUTRA aba aplica não muda o desta (o ✕ e a busca seguem a fila daqui)', () => {
+  const dados = new Map([['waze_region', 'row'], ['waze_country', '30']]);
+  const aba = () => {
+    const ctx = { navigator: { language: 'pt', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+      localStorage: { getItem: (k) => (dados.has(k) ? dados.get(k) : null), setItem: (k, v) => dados.set(k, String(v)), removeItem: (k) => dados.delete(k) },
+      console, setTimeout, clearTimeout, window: {} };
+    vm.createContext(ctx);
+    vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API;', ctx);
+    return ctx.API;
+  };
+  const A = aba(), B = aba();
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['row', 30]);
+  A.setRegion('na'); A.setCountry(235);                            // a OUTRA aba aplica a América do Norte
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['row', 30],
+    'DEFEITO: a região e o país da outra aba entraram nesta — o ✕ daqui iria pro servidor de lá');
+  // CONTROLE: o aparelho guardou a escolha de lá — uma aba nova (ou esta, depois do "Sair" de lá) a lê.
+  assert.deepEqual([aba().getRegion(), aba().getCountry()], ['na', 235]);
+  B.esquecerLugar();
+  assert.deepEqual([B.getRegion(), B.getCountry()], ['na', 235]);
+  // E o gesto DESTA aba troca o dela e grava, como sempre.
+  B.setCountry(181);
+  assert.deepEqual([B.getRegion(), B.getCountry(), dados.get('waze_country')], ['na', 181, '181']);
+  // A região antiga (`world`) segue virando `na` na leitura.
+  dados.set('waze_region', 'world');
+  assert.equal(aba().getRegion(), 'na');
+  // O "Sair" noutra aba faz esta reler o lugar de fábrica que ele gravou.
+  assert.match(fatiarDe(APP_SEM, 'handleLogout'), /\} else \{\s*API\.esquecerLugar\(\);\s*\}/);
+});
+
+test('F6: a fila de saída que muda noutra aba redesenha o "esperando envio" daqui', () => {
+  const comp = armazenamentoCompartilhado(sessaoNoAparelho);
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.deps.safeLS.set('waze_places_saida', '[]');                   // a A mandou a decisão que esperava
+  comp.entregar();
+  assert.equal(B.indicador, 1, 'DEFEITO: a aba B seguiu mostrando "1 esperando envio" depois de a A mandar');
+  // CONTROLE: o aviso de outra chave não redesenha o indicador.
+  A.deps.safeLS.set('waze_places_lang', '"pt"');
+  comp.entregar();
+  assert.equal(B.indicador, 1);
+});
+
+test('F7: o diálogo do "Sair" não conta como perdida a decisão que está NO AR (nesta aba ou na outra)', () => {
+  const agora = Date.now();
+  const itens = [ITEM('v1'), { ...ITEM('v2'), rv: 'outra-aba', rvEm: agora }, ITEM('v3')];
+  let m = montarAviso(itens, { noAr: ['v1|uv1'] });
+  m.h.desenharAvisoDoSair();
+  assert.equal(m.el.textContent, 'modal.logout.saida:{"n":1}',
+    'DEFEITO: o diálogo diz que não chega ao Waze a decisão que já está saindo');
+  // CONTROLE: a marca da outra aba vencida (ela morreu) e nada no ar — as três esperam.
+  m = montarAviso([ITEM('v1'), { ...ITEM('v2'), rv: 'outra-aba', rvEm: agora - 61_000 }, ITEM('v3')]);
+  m.h.desenharAvisoDoSair();
+  assert.equal(m.el.textContent, 'modal.logout.saidaPlural:{"n":3}');
+});
+
+test('F4: a área gerenciada salva que o perfil não tem sai do filtro — e a fila que saiu com ela é refeita', async () => {
+  const montarArea = ({ area = '9001', myArea = false } = {}) => {
+    const log = [];
+    const deps = {
+      AppState: { filters: { managedAreaId: area, myArea }, currentPlace: null, profile: null },
+      saveFilters: () => log.push('grava'), resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+      epocaDaSessao: 0, filaEsperaPerfil: false, paisDoPerfil: async () => null, caixaDaMinhaArea: () => [1, 2, 3, 4],
+      aplicarRecusaAutomatica: () => {}, sortQueue: () => {}, window: {},
+    };
+    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil'], deps);
+    return { h, deps, log };
+  };
+  let m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [] }, 0);
+  assert.equal(m.deps.AppState.filters.managedAreaId, '', 'DEFEITO: a área que o perfil não tem seguiu no filtro (os Filtros dizem "Nenhuma")');
+  assert.deepEqual(m.log, ['grava', 'fila nova', 'busca'], 'a fila que saiu filtrada pela área não foi refeita');
+  // CONTROLES: o perfil TEM a área — nada muda; perfil sem a lista — não decide; com "Minha área" — sai, sem refazer.
+  m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [{ id: '9001', name: 'Área SP' }] }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['9001', []]);
+  m = montarArea();
+  await m.h.completarPerfilChegado({ id: 2 }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['9001', []]);
+  m = montarArea({ myArea: true });
+  await m.h.completarPerfilChegado({ id: 2, managedAreas: [] }, 0);
+  assert.deepEqual([m.deps.AppState.filters.managedAreaId, m.log], ['', ['grava']]);
+});
+
+test('F4: a troca de conta tira do filtro a área gerenciada da conta anterior — e refaz a fila que saiu com ela', () => {
+  const trocar = ({ queue = [], fetching = false, myArea = false } = {}) => {
+    const log = [];
+    const deps = {
+      AppState: { stats: {}, preferences: {}, filters: { managedAreaId: '9001', stateId: '25', myArea }, pendingAction: null, queue, fetching },
+      safeLS: aparelho().safeLS, filaAtravessouSessao: false, saveFilters: () => log.push('grava'),
+      resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+    };
+    const h = montar(['esquecerOutraConta'], deps);
+    h.esquecerOutraConta('222');
+    return { deps, log };
+  };
+  // A abertura com a sessão salva: a busca saiu (ou está saindo) antes de o perfil dizer de quem é.
+  for (const fila of [{ queue: [{ venueID: 'v1' }] }, { fetching: true }]) {
+    const m = trocar(fila);
+    assert.equal(m.deps.AppState.filters.managedAreaId, '', 'DEFEITO: a busca de quem entrou sairia filtrada pela área da conta anterior');
+    assert.equal(m.deps.AppState.filters.stateId, '25', 'o estado é escolha do aparelho, e fica');
+    assert.deepEqual(m.log, ['grava', 'fila nova', 'busca'], 'a fila que saiu filtrada pela área da conta anterior ficou na tela');
+  }
+  // CONTROLES: no login a conta chega antes da 1ª busca (nada a refazer); com "Minha área" a busca não usou a área.
+  assert.deepEqual(trocar().log, ['grava']);
+  assert.deepEqual(trocar({ queue: [{ venueID: 'v1' }], myArea: true }).log, ['grava']);
 });

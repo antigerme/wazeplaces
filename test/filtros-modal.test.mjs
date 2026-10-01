@@ -107,10 +107,12 @@ function montarRegiao({ resposta }) {
   };
   const chaves = Object.keys(deps);
   // O botão tem UM escritor (`aplicarEsperaDosFiltros`, test/filtros-aplicar),
-  // e a área volta a "Nenhuma" com o país novo (`aoMudarPaisNaTela`).
+  // e a área volta a "Nenhuma" com o país novo (`aoMudarPaisNaTela`). A troca
+  // que não carrega devolve o seletor pela carga da abertura (`popularPaisEstado`),
+  // e as duas tiram número do mesmo contador (`cargaDePaises`, R56-6).
   const nomes = ['aoTrocarRegiaoNoModal', 'populateCountrySelect', 'loadStatesIntoSelect',
-    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela'];
-  const app = new Function(...chaves, 'let cargaDeEstados = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\n'
+    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela', 'popularPaisEstado'];
+  const app = new Function(...chaves, 'let cargaDeEstados = 0;\nlet cargaDePaises = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\n'
     + nomes.map(fatiar).join('\n') + '\nreturn { aoTrocarRegiaoNoModal };')(...chaves.map((k) => deps[k]));
   return { app, el, log, soltar: (r) => soltar(r) };
 }
@@ -143,10 +145,11 @@ test('F10a: a lista da região nova NÃO carrega — a troca não se completa: v
 });
 
 test('F10a: reabrir os Filtros com a troca de região no ar devolve o "Aplicar"', () => {
-  // Reabrir põe o seletor de região de volta na aplicada; a troca que estava no
-  // ar vê isso e desiste (sem reabilitar nada) — quem devolve o botão é a
-  // abertura, zerando as esperas e passando pelo escritor único do `disabled`
-  // (o GPS também espera: F1, em test/filtros-aplicar, que roda a abertura).
+  // Reabrir toma o seletor de país (a carga da abertura tira número novo de
+  // `cargaDePaises`); a troca que estava no ar vê isso e desiste (sem reabilitar
+  // nada) — quem devolve o botão é a abertura, zerando as esperas e passando
+  // pelo escritor único do `disabled` (o GPS também espera: F1, em
+  // test/filtros-aplicar, que roda a abertura; e R56-6, lá também).
   assert.match(fatiar('openFiltersModal'),
     /^\s+esperaDosFiltros\.regiao = false;\s*\n\s*esquecerPosicaoDoModal\(\);\s*\n\s*aplicarEsperaDosFiltros\(\);/m,
     'a troca de região abandonada deixava o "Aplicar" morto na abertura seguinte');

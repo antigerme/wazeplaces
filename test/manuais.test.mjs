@@ -6,7 +6,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
+import { dispatch, makeSessions } from '../server/core.mjs';
 
 const raiz = new URL('../', import.meta.url);
 const ler = (p) => readFileSync(new URL(p, raiz), 'utf8');
@@ -70,6 +72,61 @@ test('README: a linha do `unauthorized` diz o que o app faz hoje — e o código
   const ramo = APP.slice(ini, fim);
   assert.match(ramo, /enfileirarSaida\(/, 'o README diz que a ação vai pra fila de saída, e o ramo do 401 não a enfileira');
   assert.match(ramo, /handleUnauthorized\(\)/, 'o README diz que a sessão é conferida, e o ramo do 401 não confere');
+});
+
+// R56-8 (auditoria de 2026-10-01): a conta das escritas no KV do free tier
+// dizia "até 2" por exclusão de foto. São 2 no caminho comum — a lista de fotos
+// do local, gravada pelo `preparar` do toque na lixeira, e a regravação dela
+// depois de excluir —, e MAIS UMA a cada vez que a exclusão sai sem essa lista
+// valendo (ela vale `RELEITURA_TTL`) e a relê do Waze: a leitura do toque ainda
+// no ar quando a janela do Desfazer fecha, ou o reenvio do `callWithRetry`
+// depois de uma escrita lenta que falhou. MEDIDO até 4 numa exclusão só. Os
+// números saem do SERVIDOR DE VERDADE, com um Waze de mentira e o relógio
+// adiantado — mexeu no core, o README tem que acompanhar.
+async function escritasDaLixeira(segundosAteOEnvio) {
+  const VENUE = '1.2.3';
+  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }];
+  const original = globalThis.fetch, agora = Date.now;
+  let adiante = 0;
+  Date.now = () => agora.call(Date) + adiante;
+  globalThis.fetch = async (url, init = {}) => {
+    if (init.method === 'POST') imagens = JSON.parse(init.body).actions._subActions[0].attributes.images;
+    return new Response(JSON.stringify({ venues: { objects: [{ id: VENUE, images: imagens }] } }),
+      { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const mem = new Map();
+    let escritas = 0;
+    const store = { get: async (k) => (mem.has(k) ? mem.get(k) : null), put: async (k, v) => { escritas++; mem.set(k, v); }, delete: async (k) => { mem.delete(k); } };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const sessionToken = await sessions.createSession(['.waze.com\tTRUE\t/\tTRUE\t9999999999\t_csrf_token\tc',
+      '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\ts'].join('\n'));
+    escritas = 0;   // a sessão do login não é da lixeira
+    const base = { sessionToken, region: 'row', venueID: VENUE, lat: -23.5, lon: -46.6 };
+    await dispatch('excluir-foto', { ...base, action: 'preparar', imageID: 'preparar' }, { sessions });
+    adiante += segundosAteOEnvio * 1000;
+    const r = await dispatch('excluir-foto', { ...base, imageID: 'a' }, { sessions });
+    assert.ok(r.body && r.body.success && !r.body.jaExcluida, 'CONTROLE: a exclusão de mentira não saiu');
+    return escritas;
+  } finally {
+    globalThis.fetch = original;
+    Date.now = agora;
+  }
+}
+
+test('README: as escritas no KV da lixeira de foto são as que o servidor faz (R56-8)', async () => {
+  const frase = (/a lixeira de foto \(([^)]*)\)/.exec(README) || [])[1];
+  assert.ok(frase, 'CONTROLE: a lixeira sumiu da conta das escritas do README');
+  const ttl = Number((/^const RELEITURA_TTL = (\d+);/m.exec(ler('server/core.mjs')) || [])[1]);
+  assert.ok(ttl > 3, 'CONTROLE: o RELEITURA_TTL sumiu do core (ou ficou menor que a janela do Desfazer)');
+  const comum = await escritasDaLixeira(3);             // o toque e o envio no fim da janela do Desfazer
+  const vencida = await escritasDaLixeira(ttl + 1);     // a lista guardada venceu antes do envio
+  assert.ok(comum >= 1 && vencida > comum, `CONTROLE: o servidor gravou ${comum} e ${vencida} — a medida não separa os casos`);
+  assert.ok(frase.includes(`até ${comum} por exclusão`),
+    `o servidor grava ${comum} vezes numa exclusão comum, e o README diz: "${frase}"`);
+  assert.ok(frase.includes(`mais ${vencida - comum} cada vez`),
+    `com a lista vencida o servidor grava ${vencida} (mais ${vencida - comum}), e o README não conta a releitura: "${frase}"`);
+  assert.ok(frase.includes(`${ttl} s`), `a lista vale ${ttl} s no servidor, e o README diz outra coisa: "${frase}"`);
 });
 
 // ── A extensão ───────────────────────────────────────────────────────────────

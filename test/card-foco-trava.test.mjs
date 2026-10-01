@@ -63,6 +63,8 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
     // A aprovação da foto no ar do pedido da tela também trava (lote 8 da fila,
     // A1): aqui não há nenhuma.
     aprovacaoDaTelaNoAr: () => false,
+    // A extensão renovando em silêncio (R5-2-07): aqui, não.
+    extPerguntando: false,
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
@@ -407,4 +409,331 @@ test('família do C10: a foto que falha DEPOIS de o foco pousar no ✕ (ou no �
   const d = montarSemFoto();
   d.marcar(d.card, { purType: 'NEW_PHOTO' });
   assert.equal(doc.activeElement, doc.body, 'sem foco nenhum no card, a foto que falhou pôs o foco no ↑ (o foco pulando pela tela)');
+});
+
+// ── R5-2-05 e R5-2-06: o foco que a TRAVA e a FILA tiram debaixo do teclado ──
+// (auditoria de 2026-10-01). Os três casos MEDIDOS nos dois motores, com o
+// foco caindo no <body> e o CONTROLE mantendo-o no lugar:
+//   · a conferência de um 401 (o "Pular guarda") trava os botões com o foco no
+//     ↑ do card — botão focado que vira `disabled` perde o foco, e ninguém o
+//     devolvia quando a trava acabava;
+//   · uma página que chega (ou a recusa automática, ou o fim de um lote) refaz
+//     os selos do card, e o foco no "Ver +N" ou no "✕ N" saía com o velho;
+//   · "Rejeitar os N" pelo teclado: a folha devolve o foco ao "✕ N", que sai
+//     com o card que o lote tira; o resultado, ao fechar, o largava no <body>.
+// As funções de verdade, com o documento de mentira — que faz o que o navegador
+// faz: o focado que vira `disabled` ou sai do DOM PERDE o foco pro <body>. Na
+// tela, nos dois motores: os roteiros da auditoria (s09, s11, s19).
+function documentoDeMentira() {
+  return { body: { nome: 'body' }, activeElement: null, getElementById: () => null, querySelector: () => null };
+}
+function botaoQuePerde(d, nome, extra = {}) {
+  const b = { nome, _dis: false, isConnected: true, getClientRects: () => [1], ...extra };
+  Object.defineProperty(b, 'disabled', {
+    get() { return b._dis; },
+    set(v) { b._dis = !!v; if (v && d.activeElement === b) d.activeElement = d.body; },
+  });
+  b.focus = () => { if (!b._dis && b.isConnected) d.activeElement = b; };
+  return b;
+}
+
+function montarTrava() {
+  const d = documentoDeMentira();
+  const bs = { '.card-btn-reject': botaoQuePerde(d, '✕'), '.card-btn-skip': botaoQuePerde(d, '↑'),
+    '.card-btn-read': botaoQuePerde(d, '✓') };
+  const card = { bs, classList: { toggle() {} }, querySelector: (sel) => bs[sel] || null };
+  const estado = { travado: false };
+  // O lightbox e a pílula do nome (`getElementById` → null) e o aviso da trava
+  // não são o assunto aqui (test/lightbox-escritas e o C14, acima).
+  const deps = {
+    document: d, acoesTravadas: () => estado.travado, cardDaFrente: () => card, topOpenModal: () => null,
+    Lightbox: { isOpen: () => false, place: null }, MapaLightbox: { isOpen: () => false },
+    editandoNome: () => false, renomeacaoNoAr: () => false, atualizarBotaoSalvarNome: () => {},
+    dispensarAvisoDaTrava: () => {},
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let aprovandoAgora = false, excluindoAgora = false;',
+    fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'), 'let focoDoTeclado = null;',
+    fatiar('guardarFocoDaTrava'), fatiar('aplicarFocoDoTeclado'), fatiar('aplicarTravaDeAcao'),
+    'return { aplicarTravaDeAcao, pendente: () => focoDoTeclado, pointerdown: () => { focoDoTeclado = null; } };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, estado, card, d };
+}
+
+test('R5-2-05: a trava que LIGA com o foco num ✕ ↑ ✓ do card o devolve ao MESMO botão quando acaba', () => {
+  for (const sel of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+    const m = montarTrava();
+    m.app.aplicarTravaDeAcao();
+    m.card.bs[sel].focus();                  // o C10 pousou o foco aqui (ou a pessoa deu Tab)
+    assert.equal(m.d.activeElement, m.card.bs[sel], 'PRÉ-CONDIÇÃO: o foco não pousou no botão');
+    m.estado.travado = true;                 // a conferência do 401, a queda da sessão
+    m.app.aplicarTravaDeAcao();
+    assert.equal(m.card.bs[sel].disabled, true, 'PRÉ-CONDIÇÃO: a trava não desabilitou o botão');
+    assert.equal(m.d.activeElement, m.d.body, 'PRÉ-CONDIÇÃO: o focado que vira disabled perde o foco (o navegador)');
+    m.estado.travado = false;                // a conferência terminou: sessão viva
+    m.app.aplicarTravaDeAcao();
+    assert.equal(m.d.activeElement, m.card.bs[sel],
+      `DEFEITO: a trava acabou e o foco ficou no <body> em vez de voltar ao ${m.card.bs[sel].nome}`);
+    assert.equal(m.app.pendente(), null, 'o pedido de foco ficou pendurado depois de pousar');
+  }
+});
+
+test('R5-2-05: CONTROLES — a trava não traz pro card o foco que estava FORA dele, nem passa por cima do mouse ou do Tab', () => {
+  // O foco fora do card (Filtros): a trava não o mexe, nem o leva pro card depois.
+  const fora = montarTrava();
+  const filtros = botaoQuePerde(fora.d, 'Filtros');
+  filtros.focus();
+  fora.estado.travado = true; fora.app.aplicarTravaDeAcao();
+  fora.estado.travado = false; fora.app.aplicarTravaDeAcao();
+  assert.equal(fora.d.activeElement, filtros, 'a trava levou pro card o foco que estava fora dele');
+  assert.equal(fora.app.pendente(), null);
+  // Sem foco em lugar nenhum (o dedo, o mouse): nada se move.
+  const dedo = montarTrava();
+  dedo.d.activeElement = dedo.d.body;
+  dedo.estado.travado = true; dedo.app.aplicarTravaDeAcao();
+  dedo.estado.travado = false; dedo.app.aplicarTravaDeAcao();
+  assert.equal(dedo.d.activeElement, dedo.d.body, 'sem foco nos botões, a trava pôs o foco no card (o foco pulando pela tela)');
+  // Pegou o mouse ou o dedo durante a trava: o pedido cai.
+  const p = montarTrava();
+  p.card.bs['.card-btn-skip'].focus();
+  p.estado.travado = true; p.app.aplicarTravaDeAcao();
+  p.app.pointerdown();
+  p.estado.travado = false; p.app.aplicarTravaDeAcao();
+  assert.equal(p.d.activeElement, p.d.body, 'o foco voltou ao card depois de a pessoa pegar o mouse');
+  // Deu Tab pra outro lugar durante a trava: o lugar dela ganha.
+  const t = montarTrava();
+  t.card.bs['.card-btn-skip'].focus();
+  t.estado.travado = true; t.app.aplicarTravaDeAcao();
+  const outro = botaoQuePerde(t.d, 'Ajuda');
+  outro.focus();
+  t.estado.travado = false; t.app.aplicarTravaDeAcao();
+  assert.equal(t.d.activeElement, outro, 'o foco foi arrancado de onde a pessoa o pôs durante a trava');
+  assert.equal(t.app.pendente(), null);
+});
+
+function montarSelos({ depois = ['selo-lote', 'selo-reinc'], travado = false } = {}) {
+  const d = documentoDeMentira();
+  const caixa = (classes) => {
+    const selos = classes.map((c) => botaoQuePerde(d, c, { classList: { contains: (k) => k === c } }));
+    const box = {
+      selos, fora: false, contains: (el) => selos.includes(el),
+      // Sair do DOM leva junto o foco que estava num selo (o navegador).
+      remove() {
+        box.fora = true;
+        for (const s of selos) s.isConnected = false;
+        if (selos.includes(d.activeElement)) d.activeElement = d.body;
+      },
+    };
+    return box;
+  };
+  const linha = { box: caixa(['selo-lote', 'selo-reinc']) };
+  linha.querySelector = (s) => (s === '.selos-proc' && linha.box && !linha.box.fora ? linha.box : null);
+  const bs = { '.card-btn-reject': botaoQuePerde(d, '✕'), '.card-btn-skip': botaoQuePerde(d, '↑'),
+    '.card-btn-read': botaoQuePerde(d, '✓') };
+  for (const b of Object.values(bs)) b.disabled = travado;
+  const card = {
+    bs, querySelector(s) {
+      if (s === '.card-creator-row') return linha;
+      const m = /^\.selos-proc \.([\w-]+)$/.exec(s);
+      if (m) return (linha.box && !linha.box.fora && linha.box.selos.find((x) => x.nome === m[1])) || null;
+      return bs[s] || null;
+    },
+  };
+  const selo = (cls) => linha.box.selos.find((x) => x.nome === cls);
+  const estado = { travado };
+  const place = { venueID: 'v1', updateRequestID: 'u1' };
+  const deps = {
+    document: d, AppState: { currentPlace: place, queue: [place] }, cardDaFrente: () => card,
+    // Refeitos com o que a fila tem AGORA (os de `depois`).
+    renderSelosDeProcedencia: () => { linha.box = caixa(depois); },
+    renderFocoAutor: () => {}, montarCardDeFundo: () => {}, chaveDoPedido: () => null,
+    acoesTravadas: () => estado.travado, topOpenModal: () => null,
+    Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let aquecimentoDaFrenteFeito = false;', 'let focoDoTeclado = null;',
+    fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'), fatiar('aplicarFocoDoTeclado'),
+    fatiar('seloComFoco'), fatiar('devolverFocoAoSelo'), fatiar('aoMudarAFilaPorBaixo'),
+    'return { aoMudarAFilaPorBaixo, aplicarFocoDoTeclado, pendente: () => focoDoTeclado };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, card, selo, estado, d };
+}
+
+test('R5-2-06: a fila que muda por baixo devolve o foco ao selo REFEITO — o "Ver +N" e o "✕ N"', () => {
+  for (const cls of ['selo-lote', 'selo-reinc']) {
+    const m = montarSelos();
+    const velho = m.selo(cls);
+    velho.focus();
+    m.app.aoMudarAFilaPorBaixo();
+    assert.notEqual(m.selo(cls), velho, 'PRÉ-CONDIÇÃO: os selos não foram refeitos');
+    assert.equal(m.d.activeElement, m.selo(cls),
+      `DEFEITO: a fila mudou com o foco no ${cls} e o foco ficou em ${m.d.activeElement && m.d.activeElement.nome}`);
+  }
+  // CONTROLES: o foco fora dos selos (num botão do card, ou em lugar nenhum) não é mexido.
+  const noBotao = montarSelos();
+  noBotao.card.bs['.card-btn-skip'].focus();
+  noBotao.app.aoMudarAFilaPorBaixo();
+  assert.equal(noBotao.d.activeElement, noBotao.card.bs['.card-btn-skip'], 'a fila que muda tirou o foco do ↑');
+  const nada = montarSelos();
+  nada.d.activeElement = nada.d.body;
+  nada.app.aoMudarAFilaPorBaixo();
+  assert.equal(nada.d.activeElement, nada.d.body, 'sem foco nos selos, a fila que muda pôs o foco no card (o foco pulando pela tela)');
+  assert.equal(nada.app.pendente(), null);
+});
+
+test('R5-2-06: o selo focado que SOME com a fila leva o foco ao ✕ — prometido, se o card está travado', () => {
+  // Os outros pedidos do autor saíram (a recusa automática, um lote): sem "Ver +N".
+  const m = montarSelos({ depois: ['selo-reinc'] });
+  m.selo('selo-lote').focus();
+  m.app.aoMudarAFilaPorBaixo();
+  assert.equal(m.d.activeElement, m.card.bs['.card-btn-reject'],
+    `o "Ver +N" sumiu com o foco nele e o foco ficou em ${m.d.activeElement && m.d.activeElement.nome}`);
+  // Na janela do Desfazer o ✕ não recebe foco: fica PROMETIDO e pousa quando destravar.
+  const t = montarSelos({ depois: [], travado: true });
+  t.selo('selo-lote').focus();
+  t.app.aoMudarAFilaPorBaixo();
+  assert.equal(t.d.activeElement, t.d.body, 'o foco foi pra um botão travado');
+  assert.equal(t.app.pendente(), '.card-btn-reject', 'com o card travado, o ✕ não ficou prometido');
+  t.estado.travado = false;
+  for (const b of Object.values(t.card.bs)) b.disabled = false;
+  t.app.aplicarFocoDoTeclado();
+  assert.equal(t.d.activeElement, t.card.bs['.card-btn-reject'], 'destravado, o foco não pousou no ✕');
+});
+
+function montarFolha({ travado = false } = {}) {
+  const d = documentoDeMentira();
+  const card = (nome) => {
+    const bs = { '.card-btn-reject': botaoQuePerde(d, nome + ':✕'), '.card-btn-skip': botaoQuePerde(d, nome + ':↑'),
+      '.card-btn-read': botaoQuePerde(d, nome + ':✓') };
+    for (const b of Object.values(bs)) b.disabled = travado;
+    return { bs, querySelector: (s) => bs[s] || null };
+  };
+  const seloReinc = botaoQuePerde(d, '✕ N');            // no card do autor, que o lote tira da tela
+  const estado = { travado, card: card('x1'), lote: null };
+  let app;
+  const deps = {
+    document: d, acoesTravadas: () => estado.travado, cardDaFrente: () => estado.card,
+    topOpenModal: () => null, Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+    // `closeModal` devolve o foco a quem abriu a folha: o "✕ N".
+    closeModal: () => seloReinc.focus(),
+    // O lote tira o card (e o "✕ N") da tela, o próximo nasce, e o card que
+    // nasce aplica o foco prometido (`renderCurrentCard`).
+    rejeitarLoteDoAutor: (place, contados) => {
+      estado.lote = contados;
+      seloReinc.isConnected = false;
+      if (d.activeElement === seloReinc) d.activeElement = d.body;
+      estado.card = card('y1');
+      app.aplicarFocoDoTeclado();
+    },
+  };
+  const nomes = Object.keys(deps);
+  app = new Function(...nomes, [
+    'let focoDoTeclado = null;', fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'),
+    fatiar('veioDoTeclado'), fatiar('aplicarFocoDoTeclado'), fatiar('rejeitarPelaFolha'),
+    'return { rejeitarPelaFolha, aplicarFocoDoTeclado, pendente: () => focoDoTeclado };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  const rejeitar = botaoQuePerde(d, 'Rejeitar os 2');
+  return { app, estado, d, rejeitar };
+}
+
+test('R5-2-06: "Rejeitar os N" pelo TECLADO promete o ✕ do card que fica (e pousa quando destravar)', () => {
+  const m = montarFolha();
+  m.rejeitar.focus();
+  m.app.rejeitarPelaFolha({ detail: 0, currentTarget: m.rejeitar }, {}, ['v1|u1', 'v2|u2']);
+  assert.deepEqual(m.estado.lote, ['v1|u1', 'v2|u2'], 'o lote não recebeu as chaves que a folha contou');
+  assert.equal(m.d.activeElement, m.estado.card.bs['.card-btn-reject'],
+    `DEFEITO: "Rejeitar os 2" pelo teclado largou o foco em ${m.d.activeElement && m.d.activeElement.nome}`);
+  // Com a janela do Desfazer: o card novo nasce travado, e o ✕ pousa quando ela acaba.
+  const t = montarFolha({ travado: true });
+  t.rejeitar.focus();
+  t.app.rejeitarPelaFolha({ detail: 0, currentTarget: t.rejeitar }, {}, ['v1|u1']);
+  assert.equal(t.d.activeElement, t.d.body, 'o foco foi pra um botão travado');
+  assert.equal(t.app.pendente(), '.card-btn-reject', 'na janela do Desfazer o ✕ não ficou prometido');
+  t.estado.travado = false;
+  for (const b of Object.values(t.estado.card.bs)) b.disabled = false;
+  t.app.aplicarFocoDoTeclado();
+  assert.equal(t.d.activeElement, t.estado.card.bs['.card-btn-reject'], 'a janela acabou e o foco não pousou no ✕');
+  // CONTROLES: o mouse e o dedo (detail 1) e o .click() de script não movem o foco.
+  for (const [rotulo, ev, focado] of [['mouse', { detail: 1 }, true], ['script', { detail: 0 }, false]]) {
+    const c = montarFolha();
+    if (focado) c.rejeitar.focus(); else c.d.activeElement = c.d.body;
+    c.app.rejeitarPelaFolha({ ...ev, currentTarget: c.rejeitar }, {}, ['v1|u1']);
+    assert.equal(c.d.activeElement, c.d.body, `${rotulo}: o "Rejeitar os N" moveu o foco pro card`);
+    assert.equal(c.app.pendente(), null, `${rotulo}: o foco ficou prometido sem o teclado`);
+  }
+});
+
+test('R5-2-05/06: os pontos de entrada — a trava guarda ANTES de desabilitar, e a folha decide ANTES de fechar', () => {
+  const trava = fatiar('aplicarTravaDeAcao');
+  const iGuarda = trava.indexOf('if (travado) guardarFocoDaTrava(card);');
+  const iDisabled = trava.indexOf('b.disabled = travado');
+  assert.ok(iGuarda > 0 && iDisabled > iGuarda, 'a trava guarda o foco DEPOIS de desabilitar (o botão já o perdeu)');
+  const folha = fatiar('rejeitarPelaFolha');
+  const iTeclado = folha.indexOf('const peloTeclado = veioDoTeclado(ev);');
+  const iFecha = folha.indexOf("closeModal('autorModal');");
+  assert.ok(iTeclado >= 0 && iFecha > iTeclado, 'a folha decide se veio do teclado DEPOIS de fechar (o foco já não é do botão)');
+  assert.match(fatiar('aoMudarAFilaPorBaixo'), /const seloFocado = seloComFoco\(velho\);\s*if \(velho\) velho\.remove\(\);/,
+    'o selo focado é lido DEPOIS de os selos velhos saírem (o foco já caiu no <body>)');
+});
+
+// ── O "Ver os N" da FOLHA pelo teclado (follow-up do R5-2-06) ────────────────
+// Enter no "✕ N" abre a folha; Enter em "Ver os N" fecha a folha — que devolve
+// o foco ao "✕ N" — e o `focarAutor` remonta o card: o selo sai com ele e o foco
+// caía no <body> (MEDIDO no navegador, s19b). Vai à barra "Primeiro os de…", o
+// caminho de volta, como no Enter do selo "Ver +N". As funções de verdade.
+function montarFolhaVer({ comSerie = true } = {}) {
+  const d = documentoDeMentira();
+  const seloReinc = botaoQuePerde(d, '✕ N');
+  let barraNaTela = false;
+  const barra = botaoQuePerde(d, 'Primeiro os de…', { getClientRects: () => (barraNaTela ? [1] : []) });
+  d.getElementById = (id) => (id === 'focoAutorBar' ? barra : null);
+  const chamou = [];
+  const deps = {
+    document: d,
+    closeModal: () => seloReinc.focus(),           // a folha devolve o foco a quem a abriu
+    focarAutor: (id) => {
+      chamou.push(id);
+      if (!comSerie) return;                       // nenhum pedido do autor na fila: nada muda
+      seloReinc.isConnected = false;               // o card é remontado e o selo sai com ele
+      if (d.activeElement === seloReinc) d.activeElement = d.body;
+      barraNaTela = true;                          // a barra "Primeiro os de…" aparece
+    },
+    cardDaFrente: () => null,
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let focoDoTeclado = null;', fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'),
+    fatiar('veioDoTeclado'), fatiar('focarDepoisDoFocoNoAutor'), fatiar('verPelaFolha'),
+    'return { verPelaFolha };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, d, ver: botaoQuePerde(d, 'Ver os 2'), barra, seloReinc, chamou };
+}
+
+test('"Ver os N" da FOLHA pelo TECLADO leva o foco à barra "Primeiro os de…" — como o Enter no selo "Ver +N"', () => {
+  const m = montarFolhaVer();
+  m.ver.focus();
+  m.app.verPelaFolha({ detail: 0, currentTarget: m.ver }, { creatorId: 777 });
+  assert.deepEqual(m.chamou, [777], 'o "Ver os N" deixou de pôr a série do autor na frente');
+  assert.equal(m.d.activeElement, m.barra,
+    `DEFEITO: pelo teclado o foco ficou em ${m.d.activeElement && m.d.activeElement.nome} em vez da barra`);
+  // CONTROLES: o mouse e o dedo (detail 1) e o .click() de script não movem o foco.
+  for (const [rotulo, ev, focado] of [['mouse', { detail: 1 }, true], ['script', { detail: 0 }, false]]) {
+    const c = montarFolhaVer();
+    if (focado) c.ver.focus(); else c.d.activeElement = c.d.body;
+    c.app.verPelaFolha({ ...ev, currentTarget: c.ver }, { creatorId: 777 });
+    assert.deepEqual(c.chamou, [777], `${rotulo}: o "Ver os N" deixou de pôr a série na frente`);
+    assert.notEqual(c.d.activeElement, c.barra, `${rotulo}: o foco foi pra barra sem o teclado (o foco pulando pela tela)`);
+  }
+  // Sem pedidos do autor na fila (nada é remontado): o foco fica no "✕ N" que a folha devolveu.
+  const s = montarFolhaVer({ comSerie: false });
+  s.ver.focus();
+  s.app.verPelaFolha({ detail: 0, currentTarget: s.ver }, { creatorId: 777 });
+  assert.equal(s.d.activeElement, s.seloReinc, 'sem série a remontar, o foco saiu do "✕ N" que a folha devolveu');
+});
+
+test('"Ver os N" da FOLHA: o ouvinte passa o evento (sem ele o teclado não é reconhecido)', () => {
+  assert.match(fatiar('abrirFolhaDoAutor'), /getElementById\('autorVer'\)\.addEventListener\('click', \(ev\) => verPelaFolha\(ev, place\)\);/,
+    'o "Ver os N" da folha voltou a não saber se veio do teclado');
 });

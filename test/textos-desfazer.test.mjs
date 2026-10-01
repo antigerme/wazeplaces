@@ -108,6 +108,8 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     // Entrar no treino despacha as escritas do lightbox que estavam na janela
     // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
     enviarPendenciasDoLightbox: () => {},
+    aprovacoesNoAr: new Set(),   // nenhuma aprovação de foto no ar (R5-2-04)
+    aprovacoesDaQueda: new Map(),   // nem de uma sessão que caiu
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',
@@ -200,6 +202,8 @@ function montarFolha({ undoEnabled = true, cotaPassada = true } = {}) {
     contagemDoAutor: () => 6, podeRecusarAutomaticoAqui: () => false, autoLigado: () => false,
     openModal: () => {}, closeModal: () => {}, focarAutor: () => {}, rejeitarLoteDoAutor: () => {},
     alternarAutoDoAutor: () => {}, esquecerAutor: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => {},
+    // A série do autor deixa de fora o pedido EM ANDAMENTO (R5-2-02): aqui, nenhum.
+    pedidosEmAndamento: new Set(),
   };
   const chaves = Object.keys(deps);
   const { abrirFolhaDoAutor } = new Function(...chaves,

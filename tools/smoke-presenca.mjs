@@ -66,7 +66,9 @@ const naApp = new Set();          // quem está com o app aberto (e aparece na l
 const mensagens = [];             // { id, ts, de, para, texto, ctx, lida }
 const filas = new Map();          // id -> { itens: [{ inbox, bytes }], acordar }
 // O envio que falha: 'waze' é o Waze fora (gRPC 14) com a rede boa — o
-// servidor RESPONDE, com 500; 'rede' é a resposta que nem chega.
+// servidor RESPONDE, com 500; 'borda' é a borda respondendo HTML (a nossa
+// origem fora, a cota do plano grátis) — CHEGA, mas não é JSON; 'rede' é a
+// resposta que nem chega.
 const falharEnvio = new Map();
 // Quem tem uma página de mensagens ANTERIORES a pedir, que demora (a seção do
 // foco: o "Ver mensagens anteriores" carregando com o foco nele).
@@ -158,6 +160,7 @@ function responderApi(eu, rota, c) {
       // Como o core com o gRPC 14 do Waze: 500, transiente — e SEM `_motivo`,
       // que só o `_post` do app põe, quando a resposta nem chega.
       if (falha === 'waze') return { __status: 500, success: false, error: 'Erro de conexão com o Waze', errorKey: 'srv.err.connection', errorCategory: 'transient', httpCode: 200, grpcStatus: 14 };
+      if (falha === 'borda') return { __status: 502, __html: '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>error code: 502</body></html>' };
       // A marca do app quem põe é o SERVIDOR (como no core).
       const m = { id: c.id, ts: Date.now(), de: eu, para: c.para, texto: c.texto, ctx: { ...(c.contexto || {}), app: 'wazeplaces' } };
       if (!mensagens.some((x) => x.id === m.id)) mensagens.push(m);
@@ -260,7 +263,8 @@ async function editor(id, { lang = 'pt' } = {}) {
     try { c = JSON.parse(req.postData() || '{}'); } catch { /* vazio */ }
     const corpo = await responderApi(id, rota, c);
     if (corpo === ABORTAR) return route.abort('internetdisconnected').catch(() => {});
-    const { __status, ...resto } = corpo;
+    const { __status, __html, ...resto } = corpo;
+    if (__html) return route.fulfill({ status: __status || 200, contentType: 'text/html', body: __html }).catch(() => {});
     await route.fulfill({ status: __status || 200, contentType: 'application/json', body: JSON.stringify(resto) }).catch(() => {});
   });
   const page = await ctx.newPage();
@@ -508,6 +512,18 @@ try {
     const botao = await alcancavel(ana, '#conversaMsgs .conversa-reenviar');
     if (botao.noCentro && botao.altura >= 44) ok(`"Tentar de novo" recebe o dedo (${botao.altura}px de alvo)`);
     else anota(`"Tentar de novo" não é alcançável: ${JSON.stringify(botao)}`);
+    // A BORDA responde HTML (a nossa origem fora, a cota do plano grátis): a
+    // resposta CHEGA — a rede está boa — e a frase é a do Waze fora, não a de
+    // "sem conexão" (auditoria de 2026-09-30, R5-5-3). Quem lê o HTML é o
+    // `_post` de verdade.
+    falharEnvio.set(ana.id, 'borda');
+    await ana.page.tap('#conversaMsgs .conversa-reenviar');
+    for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length < enviosAntes + 2; i++) await dormir(100);
+    if (await esperar(ana, () => !!document.querySelector('#conversaMsgs .conversa-reenviar'), 'a falha da borda não mostrou "Tentar de novo"')) {
+      const daBorda = await frase();
+      if (/^Não enviada\. Tentar de novo$/.test(daBorda)) ok(`a borda respondendo HTML (502), com a rede boa: "${daBorda}" — sem mandar procurar sinal`);
+      else anota(`frase da falha da borda errada: ${daBorda}`);
+    }
     // A rede cai: a nova tentativa nem chega ao servidor.
     falharEnvio.set(ana.id, 'rede');
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
@@ -523,11 +539,43 @@ try {
       // pedido chegar à rota de mentira: espere o REGISTRO da 3ª tentativa e leia
       // só as desta mensagem. Com `slice(-3)` na hora, a corrida trazia o envio
       // de uma mensagem ANTERIOR e acusava "o id mudou" com o app certo.
-      for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length < enviosAntes + 3; i++) await dormir(100);
+      for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length < enviosAntes + 4; i++) await dormir(100);
       const ids = apiDe(ana, 'chat', 'enviar').slice(enviosAntes).map((x) => x.c.id);
-      if (ids.length === 3 && ids.every((i) => i === ids[0])) ok('as três tentativas vão com o MESMO id');
-      else anota(`as tentativas mudaram o id (ou não foram três): ${ids.join(' → ')}`);
+      if (ids.length === 4 && ids.every((i) => i === ids[0])) ok('as quatro tentativas vão com o MESMO id');
+      else anota(`as tentativas mudaram o id (ou não foram quatro): ${ids.join(' → ')}`);
     }
+  }
+
+  // ── 7a. O ✕ DA TIRINHA pelo teclado ─────────────────────────────────────
+  // A tirinha do pedido preso some com o foco dentro, e ele ia pro <body>
+  // (auditoria de 2026-09-30, R5-5-7). Vai pro botão de prender, que volta a
+  // aparecer. Aqui, e não mais adiante: depois da ação da seção 9 a fila da
+  // ana acaba, e sem pedido na tela não há o que prender.
+  console.log('\n7a. o ✕ da tirinha pelo teclado');
+  const focado = () => ana.page.evaluate(() => (document.activeElement ? document.activeElement.id || document.activeElement.tagName : null));
+  const prender = async () => {
+    await ana.page.evaluate(() => document.getElementById('conversaCardBtn').click());
+    return esperar(ana, () => !document.getElementById('conversaAnexo').classList.contains('hidden'), 'a tirinha do pedido preso não apareceu');
+  };
+  // CONTROLE: soltar cru, sem cuidar do foco, põe o foco no <body> — a medição
+  // enxerga a perda. Lido depois de um tempo: o navegador só tira o foco do
+  // elemento escondido no próximo desenho (lido na hora, ele ainda é o ✕).
+  if (await prender()) {
+    await ana.page.focus('#conversaAnexoTirar');
+    await ana.page.evaluate(() => presencaSoltarAnexo());
+    await dormir(150);
+    const cru = await focado();
+    if (cru === 'BODY') ok('controle: soltar a tirinha cru põe o foco no <body> — a medição enxerga a perda');
+    else anota(`controle: soltar a tirinha cru não tirou o foco (${cru}) — a medição não distinguiria nada`);
+  }
+  if (await prender()) {
+    await ana.page.focus('#conversaAnexoTirar');
+    await ana.page.keyboard.press('Enter');
+    await dormir(150);
+    const f = await focado();
+    const solta = await ana.page.evaluate(() => document.getElementById('conversaAnexo').classList.contains('hidden'));
+    if (solta && f === 'conversaCardBtn') ok('o ✕ da tirinha pelo teclado: o foco vai pro botão de prender — não pro <body>');
+    else anota(`o ✕ da tirinha pelo teclado levou o foco pra ${f} (tirinha solta: ${solta})`);
   }
 
   // ── 7b. A RENOVAÇÃO SILENCIOSA da sessão não fecha a conversa ────────────
@@ -839,6 +887,47 @@ try {
     if (novas.length === 1 && novas[0].em >= perfilEm && lida && lida.lida) ok(`${nome}: o "lida" esperou o perfil e saiu com ele — a mensagem vista fica LIDA (um pedido)`);
     else if (novas.some((x) => x.em < perfilEm)) anota(`${nome}: o "lida" saiu ANTES de se saber de quem é a sessão (${novas.map((x) => x.em - perfilEm).join(', ')} ms do perfil)`);
     else anota(`${nome}: a sessão caiu e voltou, e a mensagem vista ficou NÃO LIDA no Waze (lidas: ${novas.length})`);
+  }
+  atrasoPerfil.delete(ana.id);
+
+  // ── 9e. ABRIR A CONVERSA NA ESPERA DO PERFIL ──────────────────────────────
+  // Na renovação silenciosa (a extensão devolve a sessão; o perfil demora), o
+  // `abrir` saía sem saber de quem era a sessão, e as MINHAS mensagens vinham
+  // como "dela" (auditoria de 2026-09-30, R5-5-2). Ele espera o perfil e sai
+  // com ele. O caminho de verdade: `derrubarSessao` → extensão →
+  // `showMainScreen` → o perfil (atrasado 2,5 s aqui) → `completarPerfilChegado`
+  // → a presença.
+  console.log('\n9e. abrir a conversa na espera do perfil: o histórico espera, e as minhas seguem minhas');
+  atrasoPerfil.set(ana.id, 2500);
+  await ana.page.evaluate(() => { if (!document.getElementById('conversaModal').classList.contains('hidden')) closeModal('conversaModal'); });
+  await dormir(400);
+  await ana.page.evaluate(() => { Presenca.historico.delete('183164343'); derrubarSessao('srv.err.sessionExpired'); });
+  if (await esperar(ana, () => AppState.authenticated && !AppState.profile, 'a renovação não chegou à janela da espera do perfil')) {
+    const abrirsAntes = apiDe(ana, 'chat', 'abrir').length;
+    await ana.page.evaluate(() => presencaAbrirConversa('183164343'));
+    await dormir(400);
+    const naEspera = await ana.page.evaluate(() => ({ perfil: !!AppState.profile,
+      carregando: document.getElementById('conversaMsgs').textContent.includes(t('presenca.conversa.carregando')) }));
+    // CONTROLE: o toque tem que ter caído DENTRO da janela (sem o perfil).
+    if (naEspera.perfil) anota('controle: o perfil já tinha voltado no toque — a medição não pegou a espera');
+    else if (apiDe(ana, 'chat', 'abrir').length === abrirsAntes && naEspera.carregando) ok('na espera do perfil, abrir a conversa não manda o `abrir` — ela fica "Carregando"');
+    else anota(`na espera do perfil, o \`abrir\` saiu sem saber de quem é a sessão: ${JSON.stringify({ abrirs: apiDe(ana, 'chat', 'abrir').length - abrirsAntes, ...naEspera })}`);
+    if (await esperar(ana, () => !!AppState.profile, 'o perfil não voltou')) {
+      const perfilEm = perfilRespondido.get(ana.id);
+      if (await esperar(ana, () => (Presenca.historico.get('183164343') || {}).carregada === true, 'o histórico não chegou depois do perfil')) {
+        await dormir(200);
+        const abriu = apiDe(ana, 'chat', 'abrir').slice(abrirsAntes);
+        const lados = await ana.page.evaluate(() => {
+          const lado = (t) => {
+            const b = [...document.querySelectorAll('#conversaMsgs .conversa-bolha')].find((x) => x.textContent.includes(t));
+            return b ? (b.classList.contains('minha') ? 'minha' : 'dela') : null;
+          };
+          return { minha: lado('e o Instituto do Rim?'), dela: lado('chegou depois da renovação?') };
+        });
+        if (abriu.length === 1 && abriu[0].em >= perfilEm && lados.minha === 'minha' && lados.dela === 'dela') ok('com o perfil, o histórico sai (um pedido) e as minhas mensagens ficam do meu lado');
+        else anota(`o histórico da espera saiu errado: ${JSON.stringify({ abrirs: abriu.length, antesDoPerfil: abriu.filter((x) => x.em < perfilEm).length, lados })}`);
+      }
+    }
   }
   atrasoPerfil.delete(ana.id);
 

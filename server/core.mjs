@@ -983,6 +983,18 @@ export function makeSessions({ store, keyBytes }) {
     // Só age se ESTA instância leu a sessão (o carimbo lembrado): token que não
     // foi aberto aqui, ou sessão apagada (`destroySession` esquece o carimbo),
     // não custa nem a leitura. E nunca lança, nem grava sessão que sumiu.
+    //
+    // O carimbo que ela grava é `agora - SESSION_COOKIE_REFRESH`, e não `agora`:
+    // a renovação do blob velho estende o prazo (o TTL vem do `put`, e na VM do
+    // mtime) SEM fechar a janela da rotação. Com `agora`, a trava de 1 h do
+    // `refreshCookies` lia esse carimbo e jogava fora o cookie novo que chegasse
+    // logo depois — a 1ª resposta do dia sem cookie novo (um 503 do Waze, rápido,
+    // antes das outras chamadas da abertura; ou uma rota que nem chama o Waze,
+    // como o `parear`) custava a rotação do dia inteiro a quem usa menos de 1 h
+    // por dia (auditoria de 2026-09-30, S-1). A RESERVA em memória leva o mesmo
+    // carimbo: na VM o mapa é do processo, e a reserva com `agora` fecharia a
+    // janela do mesmo jeito. O preço: a próxima renovação vence 1 h mais cedo
+    // (23 h depois), e o dia da falha grava duas vezes — a renovação e a rotação.
     async renovarPrazo(token) {
       if (typeof token !== 'string' || !token) return false;
       let desfazer = null;
@@ -991,7 +1003,8 @@ export function makeSessions({ store, keyBytes }) {
         const agora = Math.floor(Date.now() / 1000);
         const lembrado = carimboLido.get(hash);
         if (lembrado == null || agora - lembrado < SESSION_REFRESH_AFTER) return false;
-        desfazer = reservar(hash, agora);
+        const carimboNovo = agora - SESSION_COOKIE_REFRESH;
+        desfazer = reservar(hash, carimboNovo);
         const raw = await store.get(hash);
         const { sep, carimbo } = raw ? carimboDoValor(raw) : { sep: -1, carimbo: NaN };
         if (!raw || !Number.isFinite(carimbo)) { desfazer(); return false; }
@@ -1000,7 +1013,7 @@ export function makeSessions({ store, keyBytes }) {
           lembrarCarimbo(hash, carimbo);
           return false;
         }
-        await store.put(hash, agora + '|' + raw.slice(sep + 1), SESSION_TTL);
+        await store.put(hash, carimboNovo + '|' + raw.slice(sep + 1), SESSION_TTL);
         return true;
       } catch {
         // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
@@ -2583,15 +2596,17 @@ const RELEITURA_BBOX_GRAUS = 0.0002;
 
 // Quanto tempo a releitura vale antes de o app ter que fazê-la de novo.
 //
-// A releitura é disparada quando o editor TOCA na lixeira, e usada quando ele
-// CONFIRMA — assim os ~700ms dela cabem dentro do tempo em que ele lê o
-// diálogo, e a espera depois do "Excluir" passa a ser só a escrita.
+// A releitura é disparada quando o editor TOCA na lixeira (a foto sai da tela e
+// abre a janela do Desfazer) e usada quando a exclusão sai, no fim da janela —
+// assim os ~700ms dela cabem dentro da janela, e a espera depois dela passa a
+// ser só a escrita. Com o Desfazer desligado não há `preparar`: a exclusão sai
+// na hora e faz releitura e escrita em série.
 //
 // Este número é o TAMANHO DA JANELA DA CORRIDA, e é por isso que ele é curto:
 // se outro editor subir uma foto dentro dela, a nossa escrita a apaga em
 // silêncio. Antes da releitura essa janela era a idade da fila — horas. Com 15s
-// ela cobre a hesitação normal e nada além; quem parar pra pensar mais que isso
-// paga a releitura de novo, que é o certo.
+// ela cobre a janela do Desfazer e a ida da rede, e nada além; o que passar
+// disso paga a releitura de novo, que é o certo.
 const RELEITURA_TTL = 15;
 // O prazo que vai pro STORE é outro número, e não pode ser o de cima: o KV do
 // Cloudflare recusa `expirationTtl` abaixo de 60 s (o `put` lança), e o
@@ -2600,7 +2615,7 @@ const RELEITURA_TTL = 15;
 // no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
 export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
 // Teto PRÓPRIO da releitura, o orçamento da rota. Sem a lista guardada (o
-// `preparar` falhou, ou a pessoa ficou mais de 15 s no diálogo), a exclusão faz
+// `preparar` falhou ou não houve, ou a lista passou dos 15 s), a exclusão faz
 // releitura e escrita EM SÉRIE, e cada uma herdava os 30 s do `callWaze`: 60 s,
 // contra os 45 s em que o cliente desiste do pedido. O `callWithRetry` refazia,
 // a escrita da 1ª tentativa já tinha saído, e a 2ª voltava `jaExcluida` — a
@@ -2702,9 +2717,10 @@ async function handleExcluirFoto(data, { sessions }) {
   // perguntar se ela precisa existir.
 
   // MODO PREPARAR: só aquece a releitura e volta. É o que o cliente dispara
-  // quando o editor TOCA na lixeira, pra os ~700ms dela correrem enquanto ele
-  // lê a pergunta do diálogo. Não escreve nada e não devolve a lista — quem
-  // decide o que gravar continua sendo o servidor.
+  // quando o editor TOCA na lixeira, pra os ~700ms dela correrem dentro da
+  // janela do Desfazer. Não escreve nada NO WAZE (a lista vai pro store: até uma
+  // escrita no KV) e não devolve a lista — quem decide o que gravar continua
+  // sendo o servidor.
   if (data.action === 'preparar') {
     const prep = await relerLocal(data, sessions, cookieHeader, csrf, region);
     // Falha aqui é silenciosa de propósito: preparar é otimização. Se der
@@ -2713,8 +2729,8 @@ async function handleExcluirFoto(data, { sessions }) {
   }
 
   // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
-  //    Vem do cache quando o cliente já pediu `preparar` ao abrir o diálogo —
-  //    aí os ~700ms dela couberam no tempo de leitura da pergunta.
+  //    Vem do cache quando o cliente já pediu `preparar` ao tocar na lixeira —
+  //    aí os ~700ms dela couberam na janela do Desfazer.
   const rel = await relerLocal(data, sessions, cookieHeader, csrf, region);
   if (rel.erro) {
     return {

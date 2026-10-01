@@ -407,6 +407,73 @@ const placarAusente = await replayDoPlacar({}, 'placar-ausente');
 checa(/lidos 0 · rejeitados 0 · pulados 0 · restam 6$/.test(placarAusente),
   'CONTROLE: relatório sem placar remonta como antes (zerado, o "Restam" do recorte) — a linha vem da tela', placarAusente);
 
+// ── a ORIGEM FORA DO AR (auditoria de 2026-10-01, R5-4-3) ─────────────────
+// O app instalado abre da cópia guardada com a origem fora, e o relatório
+// gerado ali relia cada arquivo do "servidor" — que era a página de erro da
+// BORDA (502, ~50 bytes). A triagem acusava "o aparelho roda código diferente
+// do servidor" em TODO arquivo. Uma borda de mentira na frente do servidor:
+// normal pra instalar o app (worker e cópia guardada), e em 502 pra gerar o
+// relatório. CONTROLE: com a borda normal, o mesmo relatório confere tudo.
+console.log('\n── origem fora do ar ──');
+const { createServer: criarHttp, request: pedirHttp } = await import('node:http');
+let modoDaBorda = 'normal';
+const borda = criarHttp((req, res) => {
+  if (modoDaBorda === '502') {
+    res.writeHead(502, { 'content-type': 'text/html' });
+    return res.end('<html><body><h1>502 Bad Gateway</h1></body></html>');
+  }
+  const up = pedirHttp({ host: '127.0.0.1', port: PORT, path: req.url, method: req.method, headers: req.headers }, (r) => {
+    res.writeHead(r.statusCode, r.headers); r.pipe(res);
+  });
+  up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+  req.pipe(up);
+});
+await new Promise((ok) => borda.listen(0, '127.0.0.1', ok));
+const BORDA = `http://127.0.0.1:${borda.address().port}`;
+const ctxBorda = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'allow', locale: 'pt-BR' });
+const relatorioPelaBorda = async (pg, nome) => {
+  const arq = join(SAIDA, nome + '.json');
+  writeFileSync(arq, await pg.evaluate(async () => JSON.stringify(await diagCorpo())));
+  const d = JSON.parse(readFileSync(arq, 'utf8'));
+  const triagem = execFileSync(process.execPath, ['tools/diag-resumo.mjs', arq], { cwd: ROOT, encoding: 'utf8', timeout: 30000 });
+  return { cvr: Object.values(d.cacheVsRede || {}), triagem };
+};
+try {
+  const pgB = await ctxBorda.newPage();
+  await pgB.goto(BORDA + '/', { waitUntil: 'load' });
+  await esperarOuExplodir(pgB, () => !!(navigator.serviceWorker && navigator.serviceWorker.controller), 'o worker assumir', 20000);
+  await pgB.reload({ waitUntil: 'load' });
+  await esperarOuExplodir(pgB, () => typeof diagCorpo === 'function', 'o app carregar', 20000);
+  const dePe = await relatorioPelaBorda(pgB, 'origem-de-pe');
+  checa(dePe.cvr.length > 0 && dePe.cvr.every((v) => v.igual === true)
+    && /arquivos conferidos com o servidor · diferentes: 0\n/.test(dePe.triagem),
+    'CONTROLE: com a origem de pé, o relatório confere cada arquivo com o servidor (todos iguais)',
+    (dePe.triagem.match(/.*arquivos conferidos.*/) || [''])[0]);
+  await pgB.close();
+  modoDaBorda = '502';
+  const status502 = await fetch(BORDA + '/?diag-rede=1').then((r) => r.status).catch(() => 0);
+  const pgF = await ctxBorda.newPage();
+  await pgF.goto(BORDA + '/', { waitUntil: 'load' });
+  const abriu = await esperarOuExplodir(pgF, () => typeof diagCorpo === 'function', 'o app abrir da cópia guardada', 20000)
+    .then(() => true, () => false);
+  checa(status502 === 502 && abriu, 'PRÉ-CONDIÇÃO: com a borda em 502, a origem está mesmo fora e o app abre da cópia guardada',
+    `status ${status502} · abriu ${abriu}`);
+  const fora = await relatorioPelaBorda(pgF, 'origem-fora');
+  checa(fora.cvr.length > 0 && fora.cvr.every((v) => v.erro === 'http 502' && v.http === 502 && !('igual' in v)),
+    'com a origem fora, o relatório marca cada arquivo "sem conferir", com o status — e não compara com a página de erro',
+    JSON.stringify(fora.cvr.slice(0, 2)));
+  checa(/diferentes: 0 · sem conferir: \d+/.test(fora.triagem)
+    && /sem conferir: o servidor respondeu 502 em \d+ arquivos? — a origem fora do ar/.test(fora.triagem)
+    && !/ATENÇÃO: o aparelho roda código diferente/.test(fora.triagem),
+    'e a triagem diz que o servidor respondeu 502 — sem acusar "código diferente do servidor"',
+    (fora.triagem.match(/.*(arquivos conferidos|sem conferir:|ATENÇÃO: o aparelho).*/g) || []).join(' / '));
+  await pgF.close();
+} finally {
+  await ctxBorda.close();
+  borda.closeAllConnections?.();
+  await new Promise((ok) => borda.close(ok));
+}
+
 // ── o caminho de ABORTO ───────────────────────────────────────────────────
 console.log('\n── recusa de entregar imagem errada ──');
 const quebrado = join(SAIDA, 'quebrado.json');

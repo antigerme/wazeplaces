@@ -849,6 +849,11 @@
                 </div>
 
                 <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-4"></p>
+                <!-- O vencimento é dito UMA vez ao leitor de tela, aqui: a contagem
+                     acima muda a cada segundo, e região viva nela falaria o tempo
+                     todo. Sem isto o "Código expirado" só era lido por quem fosse
+                     procurar (o foco inicial é o "Fechar"). -->
+                <p id="pairAnuncio" class="sr-only" role="status" aria-live="polite"></p>
 
                 <!-- O código digitável NÃO nasce junto com o QR: ele é criado
                      só quando alguém toca aqui, e o motivo é criptográfico, não

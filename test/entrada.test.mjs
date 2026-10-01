@@ -1055,17 +1055,39 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
+function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
   const copiados = [], toasts = [];
   const { registro, document } = domDeMentira({
-    pairShowClose: { focus() {} }, pairCode: {}, pairExpiry: {}, pairCodeReveal: {},
-    pairShowCodeBtn: {}, pairCodeExpiry: {}, pairCopyLinkBtn: {},
-    // As instruções (a da câmera e a do código curto) nascem VISÍVEIS no HTML.
+    pairCode: {}, pairExpiry: {}, pairCodeReveal: {}, pairShowCodeBtn: {}, pairCodeExpiry: {}, pairAnuncio: {},
+    // As instruções (a da câmera e a do código curto) e os dois botões de baixo
+    // nascem VISÍVEIS no HTML.
     pairShowBody: { oculto: false }, pairOrType: { oculto: false },
+    pairCopyLinkBtn: { oculto: false }, pairShowClose: { oculto: false },
   });
+  // O FOCO, como o navegador o trata (R56-5): `focus()` só pousa no que pode
+  // recebê-lo, e o focado que some (escondido) ou vira `disabled` o perde pro
+  // <body> — a "focus fixup" do HTML, MEDIDA no Chromium e no WebKit com o QR
+  // vencendo. E NA HORA, não na próxima leitura: com um pedido no ar (`await`),
+  // o navegador já a rodou quando a resposta chega. Preguiçosa, ela escondia o
+  // botão que volta da falha com o foco "ainda nele" (visto sabotando).
+  const body = { id: 'BODY' };
+  let foco = body;
+  const sumiu = (el) => el.disabled === true || el.classList.contains('hidden');
+  for (const el of Object.values(registro)) {
+    el.isConnected = true;
+    el.getClientRects = () => (el.classList.contains('hidden') ? [] : [{}]);
+    el.focus = () => { if (!sumiu(el)) foco = el; };
+    let desligado = !!el.disabled;
+    Object.defineProperty(el, 'disabled', { enumerable: true,
+      get: () => desligado, set: (v) => { desligado = !!v; if (desligado && foco === el) foco = body; } });
+    const add = el.classList.add;
+    el.classList.add = (...cs) => { add(...cs); if (cs.includes('hidden') && foco === el) foco = body; };
+  }
+  document.body = body;
+  Object.defineProperty(document, 'activeElement', { get: () => foco });
   const deps = {
     document,
     Date: { now: () => agora },
@@ -1076,8 +1098,9 @@ function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
     pareamentosEmitidos: new Set(),
     openModal() {}, closeModal() {},
     // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
+    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5).
     API: { criarPareamento: async (op) => (op && op.comCodigo
-      ? { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg }
+      ? (respostaCurto ? respostaCurto() : { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg })
       : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
     showToast: (m, tipo) => toasts.push([m, tipo]),
     msgDoServidor: (r, f) => f,
@@ -1095,11 +1118,12 @@ function pareamentoDeMentira({ curtoSeg = 300 } = {}) {
   assert.ok(iLimpeza >= 0, 'CONTROLE: o LIMPEZA_AO_FECHAR sumiu do app.js');
   const api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
-     'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento'],
+     'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento'],
     deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
     APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
   return {
-    ...api, registro, copiados, toasts,
+    ...api, registro, document, copiados, toasts,
     limpezasDoQr: () => limpezasDoQr,
     andar: (ms) => { agora += ms; },
     tique: () => { for (const fn of [...intervalos.values()]) fn(); },
@@ -1145,6 +1169,37 @@ test('QR vencido: o "Copiar link" apaga e não entrega link morto — nem na aba
     assert.ok(D[lang]['pair.expired'].includes(D[lang]['pair.createBtn']),
       `${lang}: o aviso de vencido não diz o caminho com o nome da tela "${D[lang]['pair.createBtn']}"`);
   }
+});
+
+// ── O vencimento é DITO ao leitor de tela, uma vez (lote 9) ─────────────────
+// O foco inicial é o "Fechar", e o "Código expirado" ia só pro texto da
+// contagem, que não é região viva (falaria a cada segundo): quem usa leitor de
+// tela não sabia que o QR tinha morrido. Ele vai pra uma região viva À PARTE.
+test('o "Código expirado" vai pra região viva à parte do modal — e a contagem segue sem região viva', async () => {
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const anuncio = p.registro.pairAnuncio;
+  p.andar(60_000); p.tique();
+  assert.equal(anuncio.textContent, '', 'CONTROLE: com o QR valendo, nada é anunciado (a contagem não fala)');
+  p.andar(240_000); p.tique();
+  assert.equal(p.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o QR não venceu no harness');
+  assert.equal(anuncio.textContent, 'pair.expired', 'o QR venceu e o leitor de tela não ouviu o "Código expirado"');
+  // Reaberto, o anúncio da vez passada não fica no modal reaproveitado.
+  await p.abrirPareamento();
+  assert.equal(anuncio.textContent, '', 'o modal reaberto ficou com o anúncio do QR que venceu da outra vez');
+
+  // A região existe no HTML, DENTRO do modal do QR (com aria-modal, o que fica
+  // fora pode não ser lido), e a contagem não é região viva.
+  const html = ler('index.src.html');
+  const iModal = html.indexOf('id="pairShowModal"');
+  const iFim = html.indexOf('id="pairEnterModal"');
+  assert.ok(iModal >= 0 && iFim > iModal, 'CONTROLE: os dois modais do pareamento sumiram do HTML');
+  const modal = html.slice(iModal, iFim);
+  assert.match(modal, /<p id="pairAnuncio" class="sr-only" role="status" aria-live="polite"><\/p>/,
+    'a região viva do vencimento não está dentro do modal do QR');
+  const contagem = modal.match(/<p id="pairExpiry"[^>]*>/);
+  assert.ok(contagem, 'CONTROLE: a contagem do QR sumiu do modal');
+  assert.doesNotMatch(contagem[0], /aria-live|role="status"/, 'a contagem virou região viva: o leitor falaria a cada segundo');
 });
 
 // ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────
@@ -1202,6 +1257,105 @@ test('A15: QR vencido esconde a instrução da câmera e o "Sem câmera?"; o có
   await u.revelarCodigoPareamento();
   assert.equal(u.registro.pairExpiry.textContent, '', 'o "Código expirado" do QR ficou em cima do código que acabou de nascer');
   assert.equal(oculto(u.registro.pairOrType), false);
+});
+
+// ── R56-5 (2026-10-01): o QR vence com o foco do TECLADO num botão que sai ────
+// O A15 passou a ESCONDER o "Sem câmera?" no vencimento, e o "Copiar link" já
+// apagava (`disabled`): com o foco num dos dois, ele caía no <body> e o leitor
+// de tela perdia a posição (MEDIDO no Chromium, com o relógio do Playwright: o
+// foco no "Fechar" ficava, nos outros dois ia pro BODY). A regra do C10: o foco
+// vai a um alvo que existe — o "Fechar", o passo que o aviso de vencido manda dar.
+test('R56-5: QR vencido com o foco no "Sem câmera?" ou no "Copiar link" — o foco vai ao "Fechar", não ao <body>', async () => {
+  // CONTROLE do instrumento: o foco num botão que apaga cai no <body>, como no
+  // navegador. Sem isto, "o foco não está no body" passaria com qualquer código.
+  const c = pareamentoDeMentira();
+  await c.abrirPareamento();
+  c.registro.pairCopyLinkBtn.focus();
+  c.registro.pairCopyLinkBtn.disabled = true;
+  assert.equal(c.document.activeElement.id, 'BODY', 'CONTROLE: o dublê não derruba o foco do botão que apaga');
+
+  for (const id of ['pairShowCodeBtn', 'pairCopyLinkBtn']) {
+    const p = pareamentoDeMentira();
+    await p.abrirPareamento();
+    p.registro[id].focus();
+    assert.equal(p.document.activeElement, p.registro[id], `PRÉ-CONDIÇÃO: o foco não pousou no ${id}`);
+    p.andar(300_000); p.tique();
+    assert.equal(p.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o QR não venceu');
+    assert.equal(p.document.activeElement.id, 'pairShowClose',
+      `o QR venceu com o foco no ${id}, e o foco foi pro ${p.document.activeElement.id}`);
+  }
+  // A aba que volta do segundo plano: o tique não veio, e é o toque no "Copiar
+  // link" (com o foco nele) que descobre o vencimento.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  q.registro.pairCopyLinkBtn.focus();
+  q.andar(301_000);
+  await q.copiarLinkPareamento();
+  assert.equal(q.registro.pairCopyLinkBtn.disabled, true, 'CONTROLE: o "Copiar link" não apagou');
+  assert.equal(q.document.activeElement.id, 'pairShowClose', 'o "Copiar link" apagou com o foco nele, e o foco caiu no <body>');
+  // CONTROLE: o foco que já estava no "Fechar" fica nele (ninguém o arrasta).
+  const f = pareamentoDeMentira();
+  await f.abrirPareamento();
+  assert.equal(f.document.activeElement.id, 'pairShowClose', 'CONTROLE: o modal não abriu com o foco no "Fechar"');
+  f.andar(300_000); f.tique();
+  assert.equal(f.document.activeElement.id, 'pairShowClose');
+});
+
+// E o mesmo botão no outro caminho: o Enter no "Sem câmera?" o trava no pedido
+// e o esconde quando o código chega — MEDIDO no Chromium, o foco ia pro BODY (o
+// Tab seguinte achava o "Copiar link" pela posição que o navegador guarda, mas o
+// leitor de tela já tinha perdido o lugar).
+test('R56-5: Enter no "Sem câmera?" — o código aparece e o foco vai ao "Copiar link"; falhou, volta ao botão', async () => {
+  // O clique do TECLADO (e do leitor de tela): `detail` 0, com o botão focado.
+  const teclado = (q) => ({ detail: 0, currentTarget: q.registro.pairShowCodeBtn });
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  p.registro.pairShowCodeBtn.focus();
+  assert.equal(p.document.activeElement.id, 'pairShowCodeBtn', 'PRÉ-CONDIÇÃO: o foco não pousou no "Sem câmera?"');
+  await p.revelarCodigoPareamento(teclado(p));
+  assert.ok(p.registro.pairShowCodeBtn.classList.contains('hidden'), 'CONTROLE: o "Sem câmera?" não sumiu');
+  assert.equal(p.document.activeElement.id, 'pairCopyLinkBtn',
+    `o código apareceu e o foco foi pro ${p.document.activeElement.id}, não pro "Copiar link"`);
+
+  // O QR vence com o pedido no ar: o link apagou, então o foco vai ao "Fechar".
+  let soltar;
+  const v = pareamentoDeMentira({ respostaCurto: () => new Promise((ok) => { soltar = ok; }) });
+  await v.abrirPareamento();
+  v.andar(299_000);
+  v.registro.pairShowCodeBtn.focus();
+  const pedido = v.revelarCodigoPareamento(teclado(v));
+  v.andar(1_000); v.tique();
+  assert.equal(v.registro.pairCopyLinkBtn.disabled, true, 'CONTROLE: o QR não venceu no meio do pedido');
+  soltar({ success: true, code: 'ABC234', curto: true, expiresIn: 300 });
+  await pedido;
+  assert.equal(v.document.activeElement.id, 'pairShowClose',
+    `o código chegou com o QR vencido e o foco foi pro ${v.document.activeElement.id}`);
+
+  // Falhou: o botão volta, e o foco com ele.
+  const f = pareamentoDeMentira({ respostaCurto: async () => ({ success: false }) });
+  await f.abrirPareamento();
+  f.registro.pairShowCodeBtn.focus();
+  await f.revelarCodigoPareamento(teclado(f));
+  assert.equal(f.registro.pairShowCodeBtn.disabled, false, 'CONTROLE: o botão não voltou depois da falha');
+  assert.equal(f.document.activeElement.id, 'pairShowCodeBtn', `o pedido falhou e o foco foi pro ${f.document.activeElement.id}`);
+
+  // CONTROLE: quem levou o foco a outro lugar durante o pedido fica onde está.
+  let soltar2;
+  const t = pareamentoDeMentira({ respostaCurto: () => new Promise((ok) => { soltar2 = ok; }) });
+  await t.abrirPareamento();
+  t.registro.pairShowCodeBtn.focus();
+  const pedido2 = t.revelarCodigoPareamento(teclado(t));
+  t.registro.pairShowClose.focus();
+  soltar2({ success: true, code: 'ABC234', curto: true, expiresIn: 300 });
+  await pedido2;
+  assert.equal(t.document.activeElement.id, 'pairShowClose', 'o foco que a pessoa levou ao "Fechar" durante o pedido foi arrastado');
+  // CONTROLE: o toque (`detail` 1) não move o foco, mesmo no Chrome, que foca o
+  // botão tocado — a regra do C10 (`veioDoTeclado`).
+  const d = pareamentoDeMentira();
+  await d.abrirPareamento();
+  d.registro.pairShowCodeBtn.focus();
+  await d.revelarCodigoPareamento({ detail: 1, currentTarget: d.registro.pairShowCodeBtn });
+  assert.equal(d.document.activeElement.id, 'BODY', `o toque no "Sem câmera?" moveu o foco pro ${d.document.activeElement.id}`);
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────

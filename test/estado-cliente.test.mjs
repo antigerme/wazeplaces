@@ -186,8 +186,14 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}, { loteNoAr = false } = {}) {
+function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false, aprovacaoDaQueda = null } = {}) {
   const log = [];
+  // A aprovação de foto no ar (R5-2-04): já saiu (`aprovacaoNoAr`), ou estava na
+  // janela do Desfazer e SAI no despacho das pendências do lightbox ao entrar.
+  const aprovacoes = new Set(aprovacaoNoAr ? ['vF|uF'] : []);
+  // A de uma sessão que CAIU, com a fila em que estava (`aprovacoesDaQueda`):
+  // 'nestaFila' (a fila que atravessou a queda) ou 'outraFila' (já refeita).
+  const daQueda = new Map(aprovacaoDaQueda ? [['vF|uF', aprovacaoDaQueda === 'nestaFila' ? 0 : -1]] : []);
   const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true,
     queue: [], currentPlace: null, stats: { read: 7, rejected: 3, skipped: 1 }, serverTotal: 40,
     preferences: { comoFuncionaVisto: false }, ...estado };
@@ -201,7 +207,8 @@ function montarTreino(estado = {}, { loteNoAr = false } = {}) {
     t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
     loteDeLidosEmVoo: loteNoAr,
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
-    enviarPendenciasDoLightbox: () => log.push('lightbox:enviou'),
+    enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
+    aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -243,6 +250,48 @@ test('treino (F1): com o lote de lidos NO AR ele não liga — e diz por quê', 
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
   c.Treino.entrar();
   assert.equal(c.Treino.ativo, true);
+});
+
+// ── R5-2-04: a aprovação de foto NO AR pousa sobre a fila REAL ─────────────────
+// Trocada pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
+// procura na fila de treino) e voltava no `sair()` como card, destravado — MEDIDO
+// no navegador (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado.
+test('R5-2-04: com a aprovação de foto NO AR o treino não liga — e diz por quê', () => {
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNoAr: true });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo da aprovação no ar');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
+});
+
+test('R5-2-04: a aprovação que estava na JANELA sai ao entrar — e o treino espera por ela também', () => {
+  const { Treino, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNaJanela: true });
+  Treino.entrar();
+  assert.ok(log.includes('lightbox:enviou'), 'PRÉ-CONDIÇÃO: as pendências do lightbox foram despachadas');
+  assert.equal(Treino.ativo, false, 'a aprovação despachada ao entrar ficou no ar com o treino ligado');
+  assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  // CONTROLE: sem aprovação nenhuma, entra.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
+});
+
+// A aprovação de uma sessão que CAIU, com a resposta ainda no ar, na fila que
+// atravessou a queda (a renovação com a MESMA conta): o pouso dela tira o pedido
+// DESTA fila (`aprovacaoPousouDepoisDaQueda`), e com a de treino no lugar ele
+// voltava no `sair()` como card — o R5-2-04 de novo, pela porta da queda.
+test('R5-2-04 × queda: a aprovação da sessão que caiu, ainda no ar NA FILA que ficou, segura o treino — a de uma fila refeita não', () => {
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoDaQueda: 'nestaFila' });
+  const fila = AppState.queue;
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'o treino trocou a fila debaixo da aprovação que atravessou a queda');
+  assert.equal(AppState.queue, fila);
+  assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
+  // CONTROLE: a de uma fila que já foi refeita (outra conta, ↻) não pousa nesta, e não segura.
+  const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { aprovacaoDaQueda: 'outraFila' });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true, 'a aprovação de uma fila que já foi refeita segurou o treino');
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {
@@ -393,6 +442,7 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
     populateCountrySelect, showToast: () => {},
     // A espera do "Aplicar" e a área que volta a "Nenhuma" (test/filtros-modal).
     esperaDosFiltros: { regiao: false, gps: false }, aplicarEsperaDosFiltros: () => {}, aoMudarPaisNaTela: () => {},
+    cargaDePaises: 0,   // o número de cada carga da lista de países (R56-6, test/filtros-aplicar)
   }, ['aoTrocarRegiaoNoModal']);
   const ouvinte = aoTrocarRegiaoNoModal;
   AppState.profile = { editableCountryIDs: [30] };

@@ -67,13 +67,16 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // e travaria tudo. Quem quer medir um deles o passa nos `deps`.
   // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
   // por local, L23), pelo mesmo motivo.
+  // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
+  // lê — R5-2-07), também parada por padrão.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set() })) if (!(k in deps)) deps[k] = v;
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
   if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
+  if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesDaQueda' in deps)) deps.aprovacoesDaQueda = new Map();
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
@@ -261,7 +264,8 @@ test('K1: sem sessão o lote do autor não sai, e diz por quê (não "espere o D
     Treino: { ativo: false }, t: (k) => k, showToast: (m) => toasts.push(m),
     scheduleAction: () => agendou.push('lote'), pedidosDoAutorNaFila: () => [{ venueID: 'v1', updateRequestID: 'u1' }],
   };
-  const h = montar(['acoesTravadas', 'rejeitarLoteDoAutor'], deps);
+  // O aviso sem sessão sai pela função da trava (R5-2-07): fatiada, a de verdade.
+  const h = montar(['acoesTravadas', 'avisoDaTrava', 'rejeitarLoteDoAutor'], deps);
   h.rejeitarLoteDoAutor({ creatorId: 9 });
   assert.deepEqual(agendou, [], 'o lote saiu sem sessão');
   assert.deepEqual(toasts, ['api.error.noSession']);
@@ -1420,6 +1424,7 @@ function montarSaidaMorta() {
     t: (k) => k,
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
     API: {
       getSession: () => 'tok-A',
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
@@ -1434,8 +1439,8 @@ function montarSaidaMorta() {
     },
   };
   const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
-    'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida',
-    'handleUnauthorized'], deps);
+    'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'reivindicadoPorOutraAba',
+    'esvaziarFilaDeSaida', 'handleUnauthorized'], deps);
   return { h, deps, envios, responderSonda: (r) => sonda(r) };
 }
 

@@ -78,14 +78,35 @@ const API = {
     // quando a memória está vazia; aqui a pergunta é só sobre a memória.
     temSessaoNaMemoria() { return !!this.sessionToken; },
 
+    // Região e país são da ABA, como os outros filtros (`AppState.filters`, lidos
+    // na abertura): lidos do aparelho UMA vez, e daí em diante só o gesto DESTA
+    // aba os troca (`setRegion`/`setCountry`, que também gravam, pra próxima
+    // abertura). Relidos a cada chamada, eram do APARELHO: com o app em duas abas,
+    // a outra que trocava de lugar nos Filtros mandava o ✕ desta pro servidor da
+    // região de lá — "não encontrado", contado como "Já tratado por outro editor",
+    // e o pedido pendente no servidor certo —, e a busca seguinte desta trazia a
+    // fila do país de lá (auditoria de 2026-10-01, R5-1 F5). Assim a decisão leva
+    // a região da fila que a aba mostra. `esquecerLugar`: o "Sair" dado noutra aba
+    // gravou o lugar de fábrica no aparelho, e esta o relê da próxima vez.
+    lugarLido: false,
+    lerLugar() {
+        if (this.lugarLido) return;
+        this.lugarLido = true;
+        const regiao = safeLS.get('waze_region');
+        if (regiao) this.region = regiao;
+        const pais = safeLS.get('waze_country');
+        if (pais) this.countryId = parseInt(pais, 10) || 30;
+    },
+    esquecerLugar() { this.lugarLido = false; },
+
     setRegion(region) {
+        this.lerLugar();   // senão a 1ª leitura do país traria de volta a região do aparelho
         this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);
     },
 
     getRegion() {
-        const stored = safeLS.get('waze_region');
-        if (stored) this.region = stored;
+        this.lerLugar();
         // MIGRACAO: regiao-world — `world` era a América do Norte com outro
         // nome (ver `WAZE_REGIONS` no core); quem a escolheu vai pra `na`.
         if (this.region === 'world') { this.region = 'na'; safeLS.set('waze_region', 'na'); }
@@ -94,13 +115,13 @@ const API = {
     },
 
     setCountry(id) {
+        this.lerLugar();
         this.countryId = parseInt(id, 10) || 30;
         safeLS.set('waze_country', this.countryId);
     },
 
     getCountry() {
-        const stored = safeLS.get('waze_country');
-        if (stored) this.countryId = parseInt(stored, 10) || 30;
+        this.lerLugar();
         return this.countryId;
     },
 
@@ -276,6 +297,9 @@ const API = {
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 45000);
+        // A resposta INTEIRA chegou (status, cabeçalhos e corpo)? É o que separa
+        // "a rede falhou" de "chegou e não era JSON" no `catch` (ver `_motivo`).
+        let chegou = false;
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
                 method: 'POST',
@@ -300,6 +324,7 @@ const API = {
                 if (v) cab[h] = v;
             }
             const bruto = await response.text();
+            chegou = true;
             let data, naoEraJson = null;
             try {
                 data = JSON.parse(bruto);
@@ -343,8 +368,17 @@ const API = {
             // `http: 0` é a marca de "nem chegou a responder" — aborto por
             // timeout, rede caída, DNS. Sem distinguir isso de um 500, todo
             // problema de rede vira "erro do servidor" na análise.
+            //
+            // `_motivo` é a marca de "a resposta NEM CHEGOU" (rede, DNS, tempo
+            // esgotado, corpo cortado no meio), e só ela. A que chega mas não é
+            // JSON (502 da borda com a origem fora, 429 da cota do plano grátis,
+            // desafio do WAF) PROVA a rede e segue `transient`, sem a marca: com
+            // ela, a conversa dizia "sem conexão" com a rede boa e os tetos de
+            // um pedido por minuto se soltavam (auditoria de 2026-09-30,
+            // R5-5-3). E sem `httpCode`, que é o status do WAZE pra fila de
+            // saída (um 502 da borda não é o Waze recusando AQUELE pedido).
             const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
-                            _motivo: String((error && error.name) || error).slice(0, 60) };
+                            ...(chegou ? {} : { _motivo: String((error && error.name) || error).slice(0, 60) }) };
             // Só registra aqui o que NÃO passou pelo `finally` do try — ou seja,
             // falha antes da resposta existir (rede, DNS, timeout). Corpo não
             // JSON já foi registrado lá com o status REAL; registrar de novo
@@ -482,8 +516,8 @@ const API = {
     // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
     // não tem como buscar o venue de novo.
     // Aquece a releitura do local no servidor, pra ela não custar tempo depois
-    // do "Excluir". Disparada quando o editor TOCA na lixeira: os ~700ms dela
-    // correm enquanto ele lê a pergunta do diálogo.
+    // da exclusão. Disparada quando o editor TOCA na lixeira com o Desfazer
+    // ligado: os ~700ms dela correm dentro da janela do Desfazer.
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
     // pessoa só espera mais. Por isso nem espera resposta nem trata erro.

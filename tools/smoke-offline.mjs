@@ -116,7 +116,10 @@ const page = await ctx.newPage();
 // lugar do percurso" é adivinhação — e foi o que me custou uma rodada de CI
 // atrás de um `EvalError` que o app não podia produzir (ele não tem `eval`).
 let secaoAtual = 'abertura';
-const secao = (nome) => { secaoAtual = nome; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
+// A contagem do resumo do fim sai daqui: escrita à mão, ela ficou em 20/21 com
+// 26 seções no arquivo, e ninguém percebe número de resumo que não confere.
+let secoesRodadas = 0;
+const secao = (nome) => { secaoAtual = nome; secoesRodadas++; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
 const errosJs = [];
 const violacoes = [];
 page.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
@@ -277,8 +280,12 @@ diz('o tile guardado volta do CACHE, sem tocar a rede', doCache === 'CARREGOU' &
 // revalidação de cada janela (o servidor de tile responde 304 quando nada
 // mudou). Respondida pelo worker a partir do próprio cache, ela nunca mais saía
 // e o guardado ficava o da primeira vez pra sempre (auditoria de 2026-09-26,
-// O7; na main de antes: ZERO pedidos na 2ª varredura).
-await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
+// O7; na main de antes: ZERO pedidos na 2ª varredura). A janela seguinte de
+// verdade também zera o que ficou pronto na janela (`offlineFeitosNaJanela`,
+// R5-4-1): sem isso, na MESMA janela a varredura só baixaria o que falta — nada
+// — e não mediria a revalidação.
+await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+  if (typeof offlineFeitosNaJanela !== 'undefined') offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
 await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
@@ -2781,6 +2788,155 @@ diz('CONTROLE: uma aba só — cada decisão sai e conta uma vez (o instrumento 
   Object.keys(uma9i.porPedido).length === 3 && Object.values(uma9i.porPedido).every((n) => n === 1)
   && uma9i.hist.rejeitados === 3, JSON.stringify(uma9i));
 
+secao('9j. A FOTO QUEBRADA NO FIM DA FILA, E O CARD DE FOTO NO LIE-FI');
+// Auditoria de 2026-09-30.
+// (R5-4-1) A foto que falha sempre e é a ÚLTIMA a falhar (a do último pedido,
+// um 404 mais lento que o resto) deixava a preparação "parcial" PRA SEMPRE: ela
+// só virava "defeito do item" se OUTRO item terminasse com sucesso entre a 1ª e
+// a 3ª tentativa dela, e atrás da última não há ninguém. A janela não virava e
+// cada prova de rede refazia a lista inteira. Hoje a varredura PERGUNTA à rede
+// (um tile desta fila, `no-cache`) antes de culpá-la — aqui com a CSP e o
+// service worker de verdade no caminho da pergunta. CONTROLE: a rede caindo
+// logo depois da 1ª falha da foto — a sonda diz que não, e fica "parcial" (a
+// sonda não inocenta tudo).
+// (R5-4-4) A fila guardada aberta pelo lie-fi (`onLine` verdadeiro, a busca sem
+// resposta) mostrava o card de foto sem a foto com "Sem Imagem" e ✕/✓ VIVOS —
+// no modo avião o mesmo card trava. CONTROLE: com a foto chegando, o mesmo card
+// abre sem trava (a trava vem da foto que falhou, não da reabertura).
+const PERFIL_9J = { success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } };
+const abrir9j = async (ctx, nome) => {
+  const pg = await ctx.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+const entrar9j = async (pg, tok) => {
+  await esperarNaPagina(pg, () => !!(navigator.serviceWorker && navigator.serviceWorker.controller), 20000, 100);
+  await pg.evaluate((t) => {
+    API.setSession(t);
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(t) }));
+    AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
+  }, tok);
+  await pg.reload({ waitUntil: 'domcontentloaded' });
+};
+// Uma fila de 12 pedidos com foto; a do ÚLTIMO responde 404, depois do resto.
+const PED_9J = Array.from({ length: 12 }, (_, i) => ({ ...PLACE(181 + i),
+  mapa: { centro: [-22.9 + i * 0.05, -43.2 + i * 0.05], entradas: [] } }));
+const FOTO_RUIM_9J = PED_9J.at(-1).imageUrls[0];
+const preparar9j = async (nome, { redeCaiNaFoto }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
+  const conta = { tiles: 0, fotoRuim: 0, rede: true };
+  await ctx.route('**/*-tiles/live/base/**', async (r) => {
+    if (!conta.rede) return r.abort('connectionreset');
+    await dormir(30);
+    conta.tiles++;
+    return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+      headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } });
+  });
+  await ctx.route('**/venue-image.waze.com/**', async (r) => {
+    if (r.request().url().startsWith(FOTO_RUIM_9J)) {
+      conta.fotoRuim++;
+      if (redeCaiNaFoto) conta.rede = false;
+      await dormir(300);
+      return r.fulfill({ status: 404, body: 'nao' });
+    }
+    if (!conta.rede) return r.abort('connectionreset');
+    return r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'cache-control': 'public, max-age=3600' } });
+  });
+  await ctx.route('**/api/*', (r) => {
+    const rota = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'buscar-places') return json({ success: true, places: PED_9J, hasMore: false, page: 1, total: PED_9J.length });
+    if (rota === 'perfil') return json(PERFIL_9J);
+    return r.abort('failed');
+  });
+  const pg = await abrir9j(ctx, nome);
+  await entrar9j(pg, 'tok-9j');
+  const fim = await esperarNaPagina(pg, () => typeof offlineUltimoResultado !== 'undefined'
+    && offlineUltimoResultado !== null && !offlineVarrendo, 60000, 200);
+  const r = await pg.evaluate(() => {
+    const ev = dfatoAnel.filter((e) => e.k === 'offline.pronto' || e.k === 'offline.parcial').at(-1) || null;
+    return { resultado: offlineUltimoResultado, janela: offlineJanelaServida,
+      ev: ev && { k: ev.k, sondas: ev.sondas || 0, definitivos: ev.definitivos || 0 } };
+  });
+  return { ctx, pg, conta, fim: fim.ok, ...r };
+};
+
+// 1. A foto quebrada é a ÚLTIMA, e a rede está de pé.
+const a9j = await preparar9j('foto quebrada no fim', { redeCaiNaFoto: false });
+diz('PRÉ-CONDIÇÃO: a varredura terminou, e a foto quebrada foi tentada até esgotar (3 vezes)',
+  a9j.fim && a9j.conta.fotoRuim === 3, JSON.stringify({ fim: a9j.fim, fotoRuim: a9j.conta.fotoRuim }));
+diz('a foto quebrada no FIM da fila: a sonda pergunta à rede (UMA vez) e a preparação fica PRONTA, com a janela virada',
+  a9j.resultado === 'pronto' && a9j.janela !== null && !!a9j.ev && a9j.ev.k === 'offline.pronto'
+  && a9j.ev.sondas === 1 && a9j.ev.definitivos >= 1, JSON.stringify({ resultado: a9j.resultado, janela: a9j.janela, ev: a9j.ev }));
+// E a prova de rede seguinte (a resposta de uma ação) não refaz a varredura.
+const tiles9j = a9j.conta.tiles;
+await a9j.pg.evaluate(() => { offlineMarcarGesto(); API.aoProvarRede && API.aoProvarRede('validar-place'); });
+await dormir(300);
+await esperarNaPagina(a9j.pg, () => !offlineVarrendo, 30000, 100);
+diz('e a prova de rede seguinte não pede tile nenhum (era a lista INTEIRA a cada uma)',
+  a9j.conta.tiles === tiles9j, `tiles: ${tiles9j} → ${a9j.conta.tiles}`);
+await a9j.ctx.close();
+
+// CONTROLE: a rede CAI logo depois da 1ª falha da foto — a sonda diz que não.
+const c9j = await preparar9j('controle, a rede cai', { redeCaiNaFoto: true });
+// (No máximo UMA sonda: a resposta negativa vale pros itens que esgotam depois.)
+diz('CONTROLE: com a rede caindo no meio, a preparação fica PARCIAL — a sonda não inocenta tudo',
+  c9j.fim && c9j.resultado === 'parcial' && !!c9j.ev && c9j.ev.k === 'offline.parcial' && c9j.ev.sondas <= 1,
+  JSON.stringify({ resultado: c9j.resultado, ev: c9j.ev }));
+await c9j.ctx.close();
+
+// 2. O card de FOTO na fila guardada aberta pelo LIE-FI.
+const liefi9j = async (nome, { fotoChega }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
+  const estado = { liefi: false };
+  const pedidos = [PLACE(201, 'NEW_PHOTO'), SO_MAPA(202)];
+  await ctx.route('**/*-tiles/live/base/**', (r) => (estado.liefi ? r.abort('connectionreset')
+    : r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } })));
+  await ctx.route('**/venue-image.waze.com/**', (r) => ((estado.liefi && !fotoChega) ? r.abort('connectionreset')
+    : r.fulfill({ status: 200, contentType: 'image/png', body: PX })));
+  await ctx.route('**/api/*', (r) => {
+    if (estado.liefi) return r.abort('connectionreset');
+    const rota = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'buscar-places') return json({ success: true, places: pedidos, hasMore: false, page: 1, total: 2 });
+    if (rota === 'perfil') return json(PERFIL_9J);
+    return r.abort('failed');
+  });
+  const prep = await abrir9j(ctx, nome + ', preparo');
+  await entrar9j(prep, 'tok-9j-foto');
+  const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
+    && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+  await prep.close({ runBeforeUnload: true });
+  // Reaberto no lie-fi: a API sem resposta, e o aparelho dizendo que há rede.
+  estado.liefi = true;
+  const pg = await abrir9j(ctx, nome);
+  await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && !!cardDaFrente()
+    && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v201', 30000, 200);
+  // A foto decide: ou carregou, ou falhou (e então o card já reagiu).
+  await esperarNaPagina(pg, () => { const i = cardDaFrente() && cardDaFrente().querySelector('.card-image');
+    return !!i && (i.classList.contains('hidden') || (i.complete && i.naturalWidth > 0)); }, 15000, 100);
+  await dormir(300);
+  const t = await pg.evaluate(() => {
+    const c = cardDaFrente();
+    const b = (s) => !!(c.querySelector(s) && c.querySelector(s).disabled);
+    return { onLine: navigator.onLine, abriu: (dfatoAnel.find((e) => e.k === 'offline.abriu') || {}).aposFalha === true,
+      aviso: !!c.querySelector('.card-sem-foto'), rejeitar: b('.card-btn-reject'), lido: b('.card-btn-read'), pular: b('.card-btn-skip') };
+  });
+  await ctx.close();
+  return { pronto: pronto.ok, ...t };
+};
+const l9j = await liefi9j('lie-fi, a foto não vem', { fotoChega: false });
+diz('PRÉ-CONDIÇÃO: preparado com rede, e reaberto no lie-fi (`onLine` verdadeiro) pela fila guardada',
+  l9j.pronto && l9j.onLine === true && l9j.abriu, JSON.stringify(l9j));
+diz('no lie-fi, o card de foto cuja foto não veio TRAVA ✕ e ✓ e diz que precisa de sinal (o ↑ fica vivo)',
+  l9j.aviso && l9j.rejeitar && l9j.lido && !l9j.pular, JSON.stringify(l9j));
+const lc9j = await liefi9j('controle, a foto chega', { fotoChega: true });
+diz('CONTROLE: no mesmo lie-fi, com a foto chegando, o card abre sem trava',
+  lc9j.pronto && lc9j.abriu && !lc9j.aviso && !lc9j.rejeitar && !lc9j.lido, JSON.stringify(lc9j));
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -2791,10 +2947,10 @@ if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log('\n✓ smoke do offline: 20 seções (17 com o service worker LIGADO) — o MAPINHA DO CARD e o'
+console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO CARD e o`
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), e DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando)');

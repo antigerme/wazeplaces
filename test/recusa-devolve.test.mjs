@@ -217,3 +217,105 @@ test('F3: o gesto entrega a FILA dele à resposta (`epocaFila`) — ✕ e ✓', 
       `${fn} não entrega a fila do gesto à resposta`);
   }
 });
+
+// ── R5-2-10: o "Restam" com o número VELHO no fim de uma contagem ───────────────
+// Uma contagem animada ainda correndo (a página que chega) terminava escrevendo
+// o alvo VELHO por cima do novo, quando a mudança seguinte era pequena (< 2): o
+// ramo direto escrevia o valor mas não parava a contagem. MEDIDO (s16): +30 com a
+// contagem de 400 ms, um ✕ confirmado 300 ms depois → "Restam" 33 na tela com 32.
+function contadorDeMentira() {
+  const estado = { reduzido: false };
+  let relogio = 0;
+  const quadros = new Map();
+  let proximo = 0;
+  const el = { textContent: '3', classList: { add() {}, remove() {} } };
+  const deps = {
+    performance: { now: () => relogio },
+    requestAnimationFrame: (cb) => { proximo++; quadros.set(proximo, cb); return proximo; },
+    cancelAnimationFrame: (id) => { quadros.delete(id); },
+    prefersReducedMotion: () => estado.reduzido, popCount: () => {},
+    COUNT_ANIM_MAX_MS: constante('COUNT_ANIM_MAX_MS'), COUNT_ANIM_MIN_MS: constante('COUNT_ANIM_MIN_MS'),
+  };
+  const nomes = Object.keys(deps);
+  const setCount = new Function(...nomes, fatiar('setCount') + '\nreturn setCount;')(...nomes.map((n) => deps[n]));
+  // Roda os quadros pendentes num instante (cada um agenda o seguinte).
+  const quadro = (t) => { relogio = t; const agora = [...quadros.entries()]; quadros.clear(); for (const [, cb] of agora) cb(t); };
+  return { el, setCount, quadro, estado, pendentes: () => quadros.size };
+}
+
+test('R5-2-10: uma mudança PEQUENA no meio de uma contagem para a contagem — a tela fica com o número novo', () => {
+  const m = contadorDeMentira();
+  m.setCount(m.el, 33);                 // a página chegou: 3 → 33, contando
+  m.quadro(0);
+  const dur = Math.min(constante('COUNT_ANIM_MAX_MS'), constante('COUNT_ANIM_MIN_MS') + 30 * 6);
+  m.quadro(dur * 0.6);                  // no meio: a tela mostra um intermediário
+  const meio = Number(m.el.textContent);
+  assert.ok(meio > 3 && meio < 33, `PRÉ-CONDIÇÃO: a contagem está no meio (${meio})`);
+  m.setCount(m.el, meio + 1);           // o ✕ confirmado: mudança de 1
+  assert.equal(m.el.textContent, String(meio + 1));
+  for (let i = 1; i <= 5; i++) m.quadro(dur * (1 + i));
+  assert.equal(m.el.textContent, String(meio + 1),
+    `a contagem velha terminou escrevendo ${m.el.textContent} por cima do número novo (${meio + 1})`);
+  assert.equal(m.pendentes(), 0, 'sobrou quadro da contagem velha agendado');
+});
+
+test('R5-2-10: o mesmo no ramo do movimento REDUZIDO — e o CONTROLE da contagem que chega ao fim', () => {
+  const m = contadorDeMentira();
+  m.setCount(m.el, 33);                 // contando
+  m.quadro(0);
+  m.quadro(100);
+  m.estado.reduzido = true;             // a pessoa liga o "reduzir movimento" no meio
+  m.setCount(m.el, 50);                 // a próxima escrita é direta
+  for (let i = 1; i <= 10; i++) m.quadro(100 + i * 200);
+  assert.equal(m.el.textContent, '50', `a contagem velha terminou escrevendo ${m.el.textContent} por cima do 50`);
+  // CONTROLE: sem mudança no meio, a contagem chega ao alvo.
+  const c = contadorDeMentira();
+  c.setCount(c.el, 33);
+  for (let i = 0; i <= 10; i++) c.quadro(i * 100);
+  assert.equal(c.el.textContent, '33', 'CONTROLE: a contagem deixou de chegar ao alvo');
+});
+
+// ── R5-2-09: com o foco no autor, o recusado devolvido não entra no MEIO da série ──
+// O C5 devolve o recusado "como o próximo card" (`splice(1, …)`); com o foco num
+// autor, o devolvido de OUTRO autor entrava entre o card da tela e o resto da
+// série: depois dele a barra sumia (`autorEmFoco = null`) e a série perdia a
+// prioridade — MEDIDO no navegador (s17). As funções de verdade.
+function montarDevolucaoComFoco({ foco = 'X' } = {}) {
+  const p = (id, autor) => ({ venueID: 'v' + id, updateRequestID: 'u' + id, creatorId: autor });
+  const AppState = { autorEmFoco: foco, queue: [p('x2', 'X'), p('x4', 'X'), p('x5', 'X'), p('y3', 'Y')], fetchEpoch: 0,
+    serverTotal: 4, hasMore: false };
+  AppState.currentPlace = AppState.queue[0];
+  const deps = {
+    AppState, chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, updatePendingCount: () => {},
+    aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, startFetching: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, fatiar('devolverPedidoRecusado') + '\n' + fatiar('manterFocoNaFrente')
+    + '\nreturn devolverPedidoRecusado;')(...chaves.map((k) => deps[k]));
+  return { devolver: app, AppState, p, fila: () => AppState.queue.map((x) => x.updateRequestID) };
+}
+
+test('R5-2-09: com o foco no autor, o recusado de OUTRO autor volta DEPOIS da série — e o do mesmo autor, dentro dela', () => {
+  const m = montarDevolucaoComFoco();
+  m.devolver(m.p('y1', 'Y'), 0);
+  assert.deepEqual(m.fila(), ['ux2', 'ux4', 'ux5', 'uy1', 'uy3'],
+    'o recusado de outro autor entrou no meio da série em foco (a barra sumiria depois do card da tela)');
+  assert.equal(m.AppState.serverTotal, 5);
+  const s = montarDevolucaoComFoco();
+  s.devolver(s.p('x9', 'X'), 0);
+  assert.deepEqual(s.fila(), ['ux2', 'ux9', 'ux4', 'ux5', 'uy3'], 'o recusado do autor em foco saiu da série');
+});
+
+test('R5-2-09: CONTROLE — sem foco, o recusado volta como o PRÓXIMO card (o que o C5 promete)', () => {
+  const m = montarDevolucaoComFoco({ foco: null });
+  m.devolver(m.p('y1', 'Y'), 0);
+  assert.deepEqual(m.fila(), ['ux2', 'uy1', 'ux4', 'ux5', 'uy3']);
+  // E o card da TELA nunca sai da frente: com o foco marcado mas outro autor na
+  // tela (a série acabou), a devolução não reordena nada por baixo dele.
+  const o = montarDevolucaoComFoco();
+  o.AppState.queue.unshift(o.p('y8', 'Y'));
+  o.AppState.currentPlace = o.AppState.queue[0];
+  o.devolver(o.p('y1', 'Y'), 0);
+  assert.equal(o.AppState.queue[0], o.AppState.currentPlace, 'a devolução tirou o card da tela da frente da fila');
+  assert.deepEqual(o.fila(), ['uy8', 'uy1', 'ux2', 'ux4', 'ux5', 'uy3']);
+});

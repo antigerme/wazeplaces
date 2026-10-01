@@ -206,7 +206,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     AppState, API, els, log, listas,
     esperaDosFiltros: { regiao: false, gps: false },
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
-    estadoDaDicaDeOrdem: null, cargaDeEstados: 0,
+    estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
@@ -999,4 +999,240 @@ test('achado 12: trocar a região no modal e VOLTAR pra aplicada devolve o país
   p.els.filterRegion.value = 'row';
   await p.app.aoTrocarRegiaoNoModal({ target: p.els.filterRegion });
   assert.deepEqual([p.els.filterCountry.value, p.els.filterManagedArea.value], ['30', '']);
+});
+
+// ═══ R56-6 · a lista que chega DEPOIS não desfaz a escolha da pessoa ════════
+// Trocada a região NA → ROW → NA, as duas idas à NA passavam pela conferência
+// da região: a primeira a chegar soltava a lista e o "Aplicar", a pessoa
+// escolhia os EUA, e a outra punha o 1º da lista de volta e zerava a área —
+// MEDIDO no navegador: 235 escolhido, 40 no fim (auditoria da rodada 5). Cada
+// carga da lista de países tem um número (`cargaDePaises`), e só a última a
+// começar escreve. A pessoa daqui escolhe ASSIM QUE O SELETOR DEIXA (a lista na
+// tela, sem "carregando", destravado), em qualquer ordem de chegada: é o que
+// ela faria, e é o que separa "a lista velha não escreve" de "escreveu antes".
+const LISTAS_R56 = {
+  // O 1º da lista é o Canadá, como no navegador (lá a lista sai ordenada pelo nome).
+  na: [{ id: 40, name: 'Canada' }, { id: 235, name: 'United States' }],
+  row: BR_FR,
+};
+const podeEscolher = (sel, valor) => !sel.dataset.carregando && !sel.disabled && sel.opcoes.some((o) => o.value === String(valor));
+// O ouvinte do seletor de país (setupModalListeners), com a escolha da pessoa.
+async function escolherPais(p, valor) {
+  p.els.filterCountry.value = String(valor);
+  p.app.aoMudarPaisNaTela();
+  await p.app.loadStatesIntoSelect(parseInt(valor, 10), p.els.filterRegion.value);
+}
+function segurarPaises(p) {
+  const segurados = [];
+  p.listas.paises = (r) => new Promise((ok) => segurados.push({ r, ok }));
+  return segurados;
+}
+function trocarRegioes(p, regioes) {
+  return regioes.map((r) => {
+    p.els.filterRegion.value = r;
+    return p.app.aoTrocarRegiaoNoModal({ target: p.els.filterRegion });
+  });
+}
+
+test('R56-6: NA → ROW → NA — a lista que chega depois não desfaz o país e a área que a pessoa escolheu', async () => {
+  const perfil = { id: 1, editableCountryIDs: [], managedAreas: [{ id: 9001, name: 'Área Chicago' }] };
+  const casos = [
+    ['a 1ª ida à NA chega antes', ['na', 'row', 'na'], [0, 1, 2]],
+    ['a última ida à NA chega antes', ['na', 'row', 'na'], [2, 0, 1]],
+    ['CONTROLE: uma ida só à NA', ['na'], [0]],
+  ];
+  for (const [nome, regioes, ordem] of casos) {
+    const p = pagina({ regiao: 'row', pais: 30, perfil });
+    await p.abrir();
+    const segurados = segurarPaises(p);
+    const trocas = trocarRegioes(p, regioes);
+    await tique();
+    assert.deepEqual(segurados.map((x) => x.r), regioes, `${nome}: o instrumento não segurou as listas`);
+    let escolheu = false;
+    for (const i of ordem) {
+      segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] });
+      await tique();
+      if (!escolheu && podeEscolher(p.els.filterCountry, 235)) {
+        await escolherPais(p, 235);           // os EUA, o 2º da lista
+        p.els.filterManagedArea.value = '9001';   // e uma área
+        escolheu = true;
+      }
+    }
+    await Promise.all(trocas);
+    assert.ok(escolheu, `${nome}: o seletor nunca deixou a pessoa escolher`);
+    assert.equal(p.els.filterCountry.value, '235',
+      `${nome}: a pessoa escolheu os EUA e o seletor mostra "${p.els.filterCountry.mostrado}"`);
+    assert.equal(p.els.filterManagedArea.value, '9001', `${nome}: a lista que chegou depois zerou a área escolhida`);
+    assert.equal(p.els.applyFilters.disabled, false, `${nome}: o "Aplicar" ficou morto`);
+    p.app.applyFiltersFromModal();
+    assert.deepEqual([p.estado.regiao, p.estado.pais, p.log.salvos.at(-1).managedAreaId], ['na', 235, '9001'],
+      `${nome}: o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais}`);
+  }
+});
+
+test('R56-6: a lista da ABERTURA chegando depois de a região ir e VOLTAR não desfaz o país escolhido na lista da troca', async () => {
+  // O 1º uso, sem a lista em cache: a abertura pede os países da região aplicada.
+  for (const [nome, ordem] of [['a da troca chega antes', [2, 0, 1]], ['a da abertura chega antes', [0, 2, 1]]]) {
+    const p = pagina({ regiao: 'row', pais: 30 });
+    const segurados = segurarPaises(p);
+    const abrindo = p.abrir();
+    await tique();
+    const trocas = trocarRegioes(p, ['na', 'row']);
+    await tique();
+    assert.deepEqual(segurados.map((x) => x.r), ['row', 'na', 'row'], `${nome}: o instrumento não segurou as listas`);
+    let escolheu = false;
+    for (const i of ordem) {
+      segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] });
+      await tique();
+      if (!escolheu && podeEscolher(p.els.filterCountry, 73)) { await escolherPais(p, 73); escolheu = true; }
+    }
+    await abrindo;
+    await Promise.all(trocas);
+    assert.ok(escolheu, `${nome}: o seletor nunca deixou a pessoa escolher`);
+    assert.equal(p.els.filterCountry.value, '73',
+      `${nome}: a pessoa escolheu a França e o seletor mostra "${p.els.filterCountry.mostrado}"`);
+    p.app.applyFiltersFromModal();
+    assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73], `${nome}: o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais}`);
+  }
+});
+
+test('R56-6: reabrir os Filtros com trocas no ar — a resposta delas não escreve no modal reaberto', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  await p.abrir();
+  const segurados = segurarPaises(p);
+  const trocas = trocarRegioes(p, ['na', 'row']);
+  await tique();
+  // Fechou sem aplicar e reabriu: a lista da ROW está no cache, e a abertura a escreve na hora.
+  p.els.filtersModal.classList.add('hidden');
+  await p.abrir();
+  assert.ok(podeEscolher(p.els.filterCountry, 73), 'CONTROLE: o modal reaberto mostra a lista da região aplicada');
+  await escolherPais(p, 73);
+  for (const s of segurados) { s.ok({ success: true, countries: LISTAS_R56[s.r] }); await tique(); }
+  await Promise.all(trocas);
+  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row'], 'CONTROLE: as duas trocas ficaram no ar');
+  assert.equal(p.els.filterCountry.value, '73',
+    `a troca de antes de fechar escreveu no modal reaberto: "${p.els.filterCountry.mostrado}" no lugar da França`);
+  assert.equal(p.els.applyFilters.disabled, false);
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73]);
+});
+
+test('R56-6: a troca que NÃO carrega devolve a lista da região aplicada pela abertura — com o "Minha área" marcado na tela travando o país', async () => {
+  for (const [nome, depoisDaFalha] of [['a da abertura chega antes', 'abertura'], ['a pedida de novo chega antes', 'nova']]) {
+    const p = pagina({ regiao: 'row', pais: 30 });
+    const segurados = segurarPaises(p);
+    const abrindo = p.abrir();   // o 1º uso: a lista da ROW vem
+    await tique();
+    // A pessoa marca "Minha área" com a lista chegando (o ouvinte trava os três).
+    p.els.filterMyArea.checked = true;
+    for (const id of ['filterCountry', 'filterState', 'filterManagedArea']) p.els[id].disabled = true;
+    const [troca] = trocarRegioes(p, ['na']);
+    await tique();
+    segurados[1].ok({ success: false, errorCategory: 'transient' });   // a NA não carrega
+    await tique();
+    assert.equal(p.els.filterRegion.value, 'row', `${nome}: a troca que não carregou não devolveu a região aplicada`);
+    // A lista da abertura e a pedida de novo (se o caminho da falha a pedir), na ordem do caso.
+    const abertura = segurados[0];
+    const outras = segurados.slice(2);
+    const ordem = depoisDaFalha === 'abertura' ? [abertura, ...outras] : [...outras, abertura];
+    for (const s of ordem) { s.ok({ success: true, countries: LISTAS_R56[s.r] }); await tique(); }
+    await abrindo;
+    await troca;
+    assert.deepEqual(p.els.filterCountry.opcoes.map((o) => o.value), ['30', '73'],
+      `${nome}: a troca desfeita deixou o seletor de país com "${p.els.filterCountry.mostrado}"`);
+    assert.equal(p.els.filterCountry.value, '30');
+    assert.equal(p.els.filterCountry.dataset.carregando, undefined, `${nome}: o seletor seguiu "carregando"`);
+    assert.equal(p.els.filterCountry.disabled, true,
+      `${nome}: o "Minha área" está marcado na tela e o seletor de país voltou destravado`);
+    assert.equal(p.els.applyFilters.disabled, false, `${nome}: o "Aplicar" ficou morto depois da falha`);
+    assert.ok(p.log.toasts.some((l) => l.startsWith('error:')), `${nome}: a troca de região desfeita calada`);
+  }
+});
+
+test('R56-6: a troca de região que começa com os estados da abertura chegando não é destravada por eles', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  let soltarEstados;
+  p.listas.estados = () => new Promise((ok) => { soltarEstados = ok; });
+  const abrindo = p.abrir();   // os países vêm; os estados do Brasil ficam no ar
+  await tique();
+  assert.equal(p.els.filterState.dataset.carregando, '1', 'CONTROLE: os estados da abertura estão no ar');
+  p.listas.paises = () => new Promise(() => {});   // a lista da NA não chega neste teste
+  trocarRegioes(p, ['na']);
+  await tique();
+  assert.equal(p.els.filterCountry.disabled, true, 'CONTROLE: a troca travou o seletor de país');
+  soltarEstados({ success: true, states: [{ id: 25, name: 'São Paulo' }] });
+  await abrindo;
+  assert.equal(p.els.filterCountry.disabled, true,
+    'os estados da abertura chegaram e destravaram o seletor de país com a lista da troca ainda carregando');
+  assert.equal(p.els.filterCountry.dataset.carregando, '1');
+  assert.equal(p.els.applyFilters.disabled, true, 'CONTROLE: o "Aplicar" segue esperando a lista da troca');
+});
+
+// ═══ Achado 11, com a REGIÃO trocada pelo perfil e a lista da abertura no ar ═
+// Quem só edita na NA abre os Filtros pelo atalho, antes do perfil. O perfil
+// chega e leva a pessoa pra NA/EUA com a lista de países da ABERTURA (a da ROW)
+// ainda vindo: o redesenho não mexia na tela "carregando", e a lista da ROW,
+// chegando depois, punha os países da NA debaixo do seletor de região em `row`
+// — MEDIDO no navegador: o "Aplicar" gravava `row/235`, os EUA no servidor da
+// ROW, uma fila vazia (achado do lote 9, ao consertar o R56-6).
+test('achado 11, região: com a lista da ABERTURA no ar, o perfil que leva pra OUTRA região leva a tela junto', async () => {
+  const NA = [{ id: 40, name: 'Canada' }, { id: 235, name: 'United States' }];
+  for (const [nome, listaAntes] of [['a lista da abertura chega DEPOIS do perfil', false], ['CONTROLE: a lista da abertura chega ANTES', true]]) {
+    const p = pagina({ regiao: 'row', pais: 30 });
+    let soltarRow;
+    p.listas.paises = (r) => (r === 'row' ? new Promise((ok) => { soltarRow = ok; }) : Promise.resolve({ success: true, countries: NA }));
+    const abrindo = p.abrir();   // pelo atalho, antes do perfil: a lista da ROW vem
+    await tique();
+    assert.equal(p.els.filterCountry.dataset.carregando, '1', `${nome}: CONTROLE — a lista da abertura está no ar`);
+    if (listaAntes) { soltarRow({ success: true, countries: BR_FR }); await tique(); }
+    await p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });   // quem só edita na NA
+    await tique();
+    if (!listaAntes) soltarRow({ success: true, countries: BR_FR });
+    await abrindo;
+    const tela = `${p.els.filterRegion.value}/${p.els.filterCountry.value} com os países ${p.els.filterCountry.opcoes.map((o) => o.value)}`;
+    assert.equal(p.els.filterRegion.value, 'na', `${nome}: o perfil levou pra NA/EUA e a tela ficou em ${tela}`);
+    assert.deepEqual(p.els.filterCountry.opcoes.map((o) => o.value), ['40', '235'], `${nome}: a tela ficou em ${tela}`);
+    assert.equal(p.els.filterCountry.value, '235', `${nome}: a tela ficou em ${tela}`);
+    assert.deepEqual(p.AppState.countries.map((c) => c.id), [40, 235], `${nome}: a lista da ROW virou a lista de países da NA`);
+    assert.equal(p.log.listCountries.length, 2, `${nome}: o redesenho pediu a lista de novo (${p.log.listCountries})`);
+    assert.equal(p.els.applyFilters.disabled, false);
+    p.app.applyFiltersFromModal();
+    assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], `${nome}: o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais}`);
+  }
+});
+
+test('achado 11, região: com uma troca da PESSOA no ar, o perfil não toma o seletor dela — e o "Aplicar" não morre', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  await p.abrir();
+  const segurados = segurarPaises(p);
+  const trocas = trocarRegioes(p, ['na', 'row']);   // a pessoa foi à NA e voltou: a troca da ROW está no ar
+  await tique();
+  const indo = p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row', 'na'], 'o instrumento não segurou as listas');
+  segurados[2].ok({ success: true, countries: LISTAS_R56.na });   // a lista que o perfil pediu
+  await indo;
+  for (const i of [0, 1]) { segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] }); await tique(); }
+  await Promise.all(trocas);
+  assert.equal(p.els.applyFilters.disabled, false,
+    'o "Aplicar" ficou morto: o redesenho tomou o seletor da troca que a pessoa deixou no ar, e ela nunca soltou a espera');
+  assert.equal(p.els.filterRegion.value, 'row', 'o redesenho passou por cima da troca de região que a pessoa fez');
+  // O que se vê é o que o "Aplicar" grava: a região do seletor e a lista dela.
+  assert.deepEqual(p.els.filterCountry.opcoes.map((o) => o.value), ['30', '73']);
+  const naTela = [p.els.filterRegion.value, Number(p.els.filterCountry.value)];
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], naTela, `o "Aplicar" gravou ${p.estado.regiao}/${p.estado.pais} e a tela dizia ${naTela.join('/')}`);
+});
+
+test('achado 11, região: se a pessoa escolheu OUTRO país no modal, a escolha dela vale também quando o perfil troca a região', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: LISTAS_R56[r] });
+  await p.abrir();
+  await escolherPais(p, 73);   // a pessoa escolheu a França
+  await p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  assert.deepEqual([p.els.filterRegion.value, p.els.filterCountry.value], ['row', '73'],
+    `o perfil levou pra NA e passou por cima da França que a pessoa escolheu: ${p.els.filterRegion.value}/${p.els.filterCountry.value}`);
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73]);
 });

@@ -150,13 +150,14 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     showToast: () => {}, t: (k) => k, setTimeout: (f) => f(),
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
     const pedidosEmAndamento = new Set();
     ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',
-       'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
+       'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
     return { esvaziarFilaDeSaida, carregarFilaDeSaida, esperando: () => saidaEsperandoConta };`)(...chaves.map((k) => deps[k]));
   return { app, enviados, log, AppState, guardado };
 }
