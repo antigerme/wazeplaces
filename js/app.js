@@ -8370,11 +8370,13 @@ function resetQueue() {
     AppState.serverBlocked = 0;
     AppState.blockedPartial = false;
     AppState.loadError = false;
-    // Fila nova, lugar novo (ver `filaDeOnde`): a busca que vem diz de onde é. E
-    // se o lugar mudou (região ou país), a fila guardada do offline é de outro
-    // lugar e sai — todo caminho que troca de lugar zera a fila por aqui.
+    // Fila nova, lugar novo (ver `filaDeOnde`): a busca que vem diz de onde é. A
+    // fila guardada do offline NÃO sai daqui: se o lugar mudou, a reabertura a
+    // RECUSA (`mesmoLugar`), e a busca com rede do lugar novo a regrava. Apagá-la
+    // na troca, como era, levava a preparação inteira no meio da estrada: trocar
+    // o filtro SEM REDE e voltar ao de antes não a trazia mais (auditoria de
+    // 2026-09-30, R5-4-2).
     filaDeOnde = null;
-    offlineEsquecerFilaDeOutroLugar();
     updatePendingCount();
 }
 
@@ -15818,8 +15820,10 @@ function offlineLigado() {
 // ver a busca nova vir vazia e reabrir sem rede mostrava a fila da região
 // VELHA sob o filtro novo — e o ✕ saía pro servidor da região nova, voltava
 // "não encontrado" e contava como feito (medido no navegador, p10). Hoje a
-// fila leva o lugar, a reabertura recusa a de outro lugar, e trocar de lugar a
-// esquece. `filaDeOnde` é o lugar da fila EM MEMÓRIA: o da busca que a trouxe
+// fila leva o lugar e a reabertura recusa a de outro lugar — sem apagá-la:
+// trocar de lugar SEM REDE e voltar ao de antes a encontra, e a busca com rede
+// do lugar novo a regrava (R5-4-2). `filaDeOnde` é o lugar da fila EM MEMÓRIA:
+// o da busca que a trouxe
 // (a região pode mudar antes de a fila ser zerada — o país do perfil troca a
 // região e ainda espera a lista de países), zerado a cada fila nova.
 //
@@ -15983,36 +15987,6 @@ async function offlineLerFila() {
         db.close();
         return v && Array.isArray(v.places) && v.places.length ? v : null;
     } catch (e) { return null; }
-}
-
-// Trocou de lugar (região, país ou filtro — ver `lugarAgora`): a fila guardada é
-// de OUTRO lugar e sai — a busca do lugar novo regrava, se trouxer pedido. Lê e
-// apaga na MESMA transação, e só se o guardado NÃO for daqui: a busca do lugar
-// novo pode ter gravado antes. Com o offline desligado nem abre a base (abrir
-// CRIA a base): quem não marca não paga nada.
-async function offlineEsquecerFilaDeOutroLugar() {
-    if (!offlineLigado()) return;
-    let db = null;
-    try {
-        db = await offlineDB();
-        await new Promise((ok, erro) => {
-            const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-            const st = tx.objectStore(OFFLINE_STORE);
-            const r = st.get('fila');
-            r.onsuccess = () => {
-                const agora = lugarAgora();
-                if (r.result && !mesmoLugar(r.result, agora)) {
-                    st.delete('fila');
-                    // `filtro`: o lugar é o mesmo e só o filtro mudou.
-                    const soOFiltro = r.result.regiao === agora.regiao && String(r.result.pais) === agora.pais;
-                    dfato('offline.outroLugar', { esqueceu: true, ...(soOFiltro ? { filtro: true } : {}) });
-                }
-            };
-            tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
-            tx.onabort = () => erro(tx.error || new Error('abort'));
-        });
-    } catch (e) { /* sem base: nada a esquecer */ }
-    finally { try { if (db) db.close(); } catch (e) {} }
 }
 
 // `soMemoria`: o "Sair" (ou o desligar do offline) foi em OUTRA aba, que já
@@ -16537,13 +16511,13 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // pro servidor errado (ver `filaDeOnde`) — ou a fila do Brasil inteiro sob
     // "só Nova foto" (O8). Fila guardada sem o lugar (versão anterior) também
     // não: não há como saber de onde ela é, e a próxima busca com rede a
-    // regrava. A tela é a de sempre sem rede, e a fila velha sai.
+    // regrava. A tela é a de sempre sem rede — e a fila guardada FICA: voltar
+    // ao filtro dela, ainda sem rede, a encontra (R5-4-2).
     const agora = lugarAgora();
     if (!mesmoLugar(guardada, agora)) {
         // `filtro`: o lugar é o mesmo e só o filtro mudou.
         const soOFiltro = guardada.regiao === agora.regiao && String(guardada.pais) === agora.pais;
         dfato('offline.outroLugar', { regiao: guardada.regiao || null, ...(soOFiltro ? { filtro: true } : {}) });
-        offlineEsquecerFilaDeOutroLugar();
         return false;
     }
     // E a fila de OUTRA conta também não: a sessão de A caiu, B entrou, o

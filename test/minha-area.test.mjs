@@ -70,7 +70,7 @@ function montar({ profile = null } = {}) {
     epocaDaSessao: 0, window: {}, paisDoPerfil: async () => null, irProPaisDoPerfil: async () => log.push('pais'),
     startFetching: () => log.push('busca'),
     // O `resetQueue` é o de VERDADE: é ele que diz que a fila nova não espera mais o perfil.
-    removeUndoBanner: () => {}, offlineEsquecerFilaDeOutroLugar: () => {},
+    removeUndoBanner: () => {},
     enviarPendenciasDoLightbox: () => {},   // as escritas do lightbox na janela saem (L25)
     ORDEM_PADRAO: 'newest',
   };

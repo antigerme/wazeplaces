@@ -304,7 +304,6 @@ function reabrir({ guardada, agora }) {
     AppState, navigator: { onLine: false }, offlineLigado: () => true,
     offlineLerFila: async () => guardada, offlineLerJanela: async () => null,
     lugarAgora: () => agora, dfato: (k) => log.push(k),
-    offlineEsquecerFilaDeOutroLugar: () => log.push('esqueceu'),
     semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
     updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push('card'),
@@ -319,11 +318,12 @@ function reabrir({ guardada, agora }) {
 }
 const GUARDADA = (lugar) => ({ t: Date.now(), desde: Date.now(), conta: '111', ...lugar, places: [{ venueID: 'v1', updateRequestID: 'u1' }] });
 
-test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e abre a do mesmo', async () => {
+test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar — e abre a do mesmo', async () => {
   const outra = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'na', pais: '235' } });
   assert.equal(await outra.app.abrir(), false, 'a fila da região velha abriu sob o filtro novo');
   assert.deepEqual(outra.AppState.queue, [], 'a fila de outro lugar entrou na tela');
-  assert.ok(outra.log.includes('esqueceu') && outra.log.includes('offline.outroLugar'));
+  // Recusa, e NÃO apaga (R5-4-2: ver o teste com a base de mentira, mais abaixo).
+  assert.ok(outra.log.includes('offline.outroLugar'));
   // O PAÍS também: mesma região, outro país.
   const pais = reabrir({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'row', pais: '73' } });
   assert.equal(await pais.app.abrir(), false, 'a fila de outro país abriu');
@@ -339,36 +339,11 @@ test('O4: a reabertura sem rede RECUSA a fila de OUTRO lugar (e a esquece) — e
   assert.deepEqual(mesma.app.onde(), { regiao: 'row', pais: '30', busca: undefined }, 'a fila reaberta não sabe de onde é');
 });
 
-test('O4: trocar de lugar ESQUECE a fila guardada de outro lugar — e só ela, e só com o offline ligado', async () => {
-  const rodar = ({ guardada, agora, ligado = true }) => {
-    const apagou = [];
-    let abriu = 0;
-    const deps = {
-      offlineLigado: () => ligado, lugarAgora: () => agora, dfato: () => {}, OFFLINE_STORE: 'fila',
-      offlineDB: async () => { abriu++; return { close() {}, transaction: () => {
-        const tx = { objectStore: () => ({
-          get: () => { const r = {}; setTimeout(() => { r.result = guardada; r.onsuccess(); setTimeout(() => tx.oncomplete()); }); return r; },
-          delete: (k) => apagou.push(k),
-        }) };
-        return tx;
-      } }; },
-    };
-    const chaves = Object.keys(deps);
-    const f = new Function(...chaves, `${fatiar('mesmoLugar')}\n${fatiar('offlineEsquecerFilaDeOutroLugar')}
-      return offlineEsquecerFilaDeOutroLugar;`)(...chaves.map((k) => deps[k]));
-    return f().then(() => ({ apagou, abriu }));
-  };
-  const trocou = await rodar({ guardada: GUARDADA({ regiao: 'row', pais: '30' }), agora: { regiao: 'na', pais: '235' } });
-  assert.deepEqual(trocou.apagou, ['fila'], 'a fila da região velha ficou guardada');
-  const mesmo = await rodar({ guardada: GUARDADA({ regiao: 'na', pais: '235' }), agora: { regiao: 'na', pais: '235' } });
-  assert.deepEqual(mesmo.apagou, [], 'apagou a fila que a busca do lugar NOVO acabou de gravar');
-  const desligado = await rodar({ guardada: null, agora: { regiao: 'na', pais: '235' }, ligado: false });
-  assert.equal(desligado.abriu, 0, 'abriu (e CRIOU) a base de quem não ligou o offline');
+test('O4: a busca anota de onde é o que trouxe, e a fila nova zera o lugar (sem apagar a fila guardada)', async () => {
   // Todo caminho que troca de lugar zera a fila por `resetQueue`, e a busca
   // anota de onde é o que trouxe.
   const reset = fatiar('resetQueue');
-  assert.match(reset, /filaDeOnde = null;\s*offlineEsquecerFilaDeOutroLugar\(\);/,
-    'a fila nova não zerou o lugar nem esqueceu a guardada de outro lugar');
+  assert.match(reset, /filaDeOnde = null;/, 'a fila nova não zerou o lugar');
   const busca = fatiar('fetchNextPage');
   const iLugar = busca.indexOf('const lugarDaBusca = lugarAgora();');
   assert.ok(iLugar > 0 && iLugar < busca.indexOf('await API.fetchPlaces('), 'o lugar da busca tem que ser o do PEDIDO');
@@ -569,7 +544,8 @@ function aparelhoO8() {
   // Uma "página": memória nova, o armazenamento e a base de sempre.
   return function pagina({ onLine = false } = {}) {
     const log = [];
-    const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null };
+    const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null,
+      stats: { skipped: 0 }, fetchEpoch: 0 };
     const deps = {
       AppState, navigator: { onLine }, Treino: { ativo: false }, offlineLigado: () => true,
       localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
@@ -580,16 +556,19 @@ function aparelhoO8() {
       semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
       pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
       updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push(['card', {}]),
+      // O `resetQueue` de verdade (a fila nova do Aplicar, R5-4-2).
+      enviarPendenciasDoLightbox: () => {}, removeUndoBanner: () => {}, bloqueadosPorPagina: new Map(),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'offlineEsquecerFilaDeOutroLugar',
+      'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'resetQueue',
       'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
     const chaves = Object.keys(deps);
-    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null;
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
+        filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
-      return { saveFilters, lugarAgora, offlineGravarFila, offlineEsquecerFilaDeOutroLugar, offlineTentarAbrirSemRede,
+      return { saveFilters, lugarAgora, offlineGravarFila, resetQueue, offlineTentarAbrirSemRede,
         buscou: (places) => { AppState.queue = places; filaDeOnde = lugarAgora(); } };`)(...chaves.map((k) => deps[k]));
     return { app, AppState, log, base };
   };
@@ -669,19 +648,59 @@ test('R4-O8: fila guardada SEM a assinatura (versão anterior) não entra — n�
   assert.equal(await b.app.offlineTentarAbrirSemRede(), false, 'a fila sem assinatura abriu — pode ser de outro filtro');
 });
 
-test('R4-O8: a fila nova (`resetQueue`) ESQUECE a guardada de outro filtro — e não a de outra ORDEM', async () => {
+// ── R5-4-2: trocar o filtro SEM REDE não apaga a fila guardada (auditoria de 2026-09-30)
+// O `resetQueue` do Aplicar esquecia a fila "de outro lugar" antes de existir
+// uma busca que a substituísse, e a reabertura sob o filtro novo também a
+// apagava: sem rede, a preparação inteira sumia no meio da estrada, e voltar ao
+// filtro de antes não a trazia mais (medido no navegador, t4 "filtroVolta":
+// "fila guardada no aparelho agora: 0"). Aqui roda o `resetQueue` de VERDADE,
+// como o Aplicar faz, com a base de mentira sobrevivendo às "páginas".
+test('R5-4-2: trocar o filtro SEM REDE e voltar ao de antes: a fila guardada continua no aparelho e abre', async () => {
+  const pagina = aparelhoO8();
+  const a = pagina({ onLine: true });
+  a.app.buscou(PEDIDOS_O8());
+  assert.equal(await a.app.offlineGravarFila(Date.now()), true, 'PRÉ-CONDIÇÃO: a fila não foi gravada');
+  // Sem rede: desmarca "Nova foto" e Aplica — a fila nova do Aplicar.
+  const b = pagina({ onLine: false });
+  b.AppState.filters.types = b.AppState.filters.types.filter((x) => x !== 'NEW_PHOTO');
+  b.app.saveFilters();
+  b.app.resetQueue();
+  await assentar();
+  assert.ok(b.base.has('fila'), 'trocar o filtro sem rede APAGOU a fila guardada — a preparação some no meio da estrada');
+  // Sob o filtro novo, a fila do outro filtro não entra (o O8) — e a recusa não a apaga.
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), false, 'a fila do filtro anterior abriu sob o filtro novo');
+  await assentar();
+  assert.ok(b.base.has('fila'), 'a reabertura sob o filtro novo APAGOU a fila guardada');
+  // De volta ao filtro de antes, ainda sem rede: remarca e Aplica.
+  b.AppState.filters.types = [...b.AppState.filters.types, 'NEW_PHOTO'];
+  b.app.saveFilters();
+  b.app.resetQueue();
+  await assentar();
+  const c = pagina({ onLine: false });
+  assert.equal(await c.app.offlineTentarAbrirSemRede(), true, 'de volta ao filtro de antes, sem rede, a fila guardada não abriu');
+  assert.deepEqual(c.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3']);
+});
+
+test('R5-4-2: CONTROLE — sem trocar nada, a fila nova não mexe na guardada; e a busca com rede do filtro novo a REGRAVA', async () => {
   const pagina = aparelhoO8();
   const a = pagina({ onLine: true });
   a.app.buscou(PEDIDOS_O8());
   await a.app.offlineGravarFila(Date.now());
-  a.AppState.filters.sortOrder = 'oldest';
-  await a.app.offlineEsquecerFilaDeOutroLugar();
-  assert.ok(a.base.has('fila'), 'trocar só a ordem esqueceu a fila guardada');
-  a.AppState.filters.stateId = '5';
-  await a.app.offlineEsquecerFilaDeOutroLugar();
-  assert.equal(a.base.has('fila'), false, 'trocar o estado não esqueceu a fila guardada do estado anterior');
-  // E o caminho da fila nova passa mesmo por aqui (o O4 já cobrava a região e o país).
-  assert.match(fatiar('resetQueue'), /filaDeOnde = null;\s*offlineEsquecerFilaDeOutroLugar\(\);/);
+  a.app.resetQueue();
+  await assentar();
+  const b = pagina({ onLine: false });
+  assert.equal(await b.app.offlineTentarAbrirSemRede(), true, 'CONTROLE: a fila nova do MESMO filtro estragou a guardada');
+  // Com rede, o filtro novo traz a fila dele e a grava por cima: não sobra a velha
+  // (é por isso que não é preciso apagar na troca).
+  const c = pagina({ onLine: true });
+  c.AppState.filters.stateId = '5';
+  c.app.saveFilters();
+  c.app.resetQueue();
+  c.app.buscou([{ venueID: 'v9', updateRequestID: 'u9' }]);
+  await c.app.offlineGravarFila(Date.now());
+  const d = pagina({ onLine: false });
+  assert.equal(await d.app.offlineTentarAbrirSemRede(), true);
+  assert.deepEqual(d.AppState.queue.map((p) => p.venueID), ['v9'], 'a busca do filtro novo não regravou a fila guardada');
 });
 
 test('R4-O8: a fila REABERTA e regravada (a varredura grava de novo) segue sendo da mesma busca', async () => {
@@ -757,7 +776,7 @@ function aparelhoO1() {
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'offlineEsquecerFilaDeOutroLugar', 'filaGuardadaDestaConta',
+      'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'filaGuardadaDestaConta',
       'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
     const chaves = Object.keys(deps);
