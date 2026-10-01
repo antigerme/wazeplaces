@@ -16199,6 +16199,10 @@ let offlineJanelaServida = null;
 // 49 ms depois da fila, e o tile do pedido novo fora do aparelho).
 let offlineFilaGravadaEm = null;
 let offlineFilaPreparada = null;
+// E a fila guardada sobre a qual a última varredura TRABALHOU — a que ela gravou
+// no começo, ou a que já estava lá quando a gravação dela falhou. A fila não
+// coberta volta pro gatilho uma vez só (ver `offlinePrecisaVarrer`).
+let offlineFilaVarrida = null;
 // Quando a varredura avisou o service worker pela última vez (`offlineAnunciarTiles`).
 // O aviso é assíncrono: tile guardado há menos de um instante pode ainda não
 // estar na lista do worker — `registrarFalhaDeTile` respeita essa janela.
@@ -16486,6 +16490,7 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineUltimoResultado = null;
     offlineFilaGravadaEm = null;
     offlineFilaPreparada = null;
+    offlineFilaVarrida = null;
     // O que estava pronto descreve o cache que sai logo abaixo (e são endereços
     // de pedidos de terceiros): vai junto.
     offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
@@ -16718,6 +16723,9 @@ async function offlineVarrer() {
         // A gravação que falhou não diz qual fila está na base: aí nenhuma.
         const filaGravada = await offlineGravarFila();
         const filaCoberta = filaGravada ? offlineFilaGravadaEm : null;
+        // Cobrindo ou não, esta é a fila guardada sobre a qual ela trabalha: o
+        // gatilho da fila não coberta não a traz de volta (ver `offlinePrecisaVarrer`).
+        offlineFilaVarrida = offlineFilaGravadaEm;
         const todos = await offlineItensDaFila(janela);
         const total = todos.length;
         // Os tiles DESTA fila, da lista inteira: é o que a poda do fim mantém.
@@ -16954,6 +16962,19 @@ function offlinePrecisaVarrer() {
     // próximo buraco de sinal (auditoria de 2026-09-29, O3). Com a varredura no
     // ar, quem decide é o fim dela — o próximo gatilho depois dele retoma.
     if (offlineUltimoResultado === 'parcial' && !offlineVarrendo) return true;
+    // A fila guardada que a última preparação completa NÃO cobriu também volta
+    // (ver `offlineFilaPreparada`): a busca a gravou com a pessoa parada, ou
+    // DURANTE a varredura anterior, e a preparação dela não começou. Ela esperava
+    // a janela virar — até 20 min de cards novos sem mapa nem foto pra quem saísse
+    // do sinal, com a linha dizendo "Ainda não preparado" e nada preparando
+    // (auditoria de 2026-09-30, a sobra do R5-4-6). A retomada baixa SÓ o que
+    // falta nesta página (`offlineFeitosNaJanela`); a página reaberta confere a
+    // fila inteira, como toda abertura com rede já faz. Uma vez por fila gravada:
+    // a varredura que já trabalhou sobre ela (`offlineFilaVarrida`) e não
+    // conseguiu gravar a cobertura — a gravação da fila falhou — não volta a cada
+    // gatilho.
+    if (!offlineVarrendo && offlineFilaGravadaEm !== null && offlineFilaGravadaEm !== offlineFilaPreparada
+        && offlineFilaGravadaEm !== offlineFilaVarrida) return true;
     return Math.floor(Date.now() / OFFLINE_CICLO_MS) !== offlineJanelaServida;
 }
 
