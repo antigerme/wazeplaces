@@ -135,6 +135,9 @@ const Presenca = {
     // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
     // do Waze delas chegar (ver `presencaLidaPorId`).
     lidasPorId: new Set(),
+    // Quando saiu (no relógio DAQUI) o último "lida" CONFIRMADO de cada
+    // conversa — o do `abrir` e o do `chat/lida` (ver `presencaAplicarLista`).
+    lidaSaiuEm: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
@@ -348,6 +351,10 @@ async function presencaSincronizar() {
     // O "lida" que ficou DEVENDO na espera do perfil (ver `presencaPagarLida`).
     // Com o relógio correndo ele é a rajada, e a rajada não se adianta.
     if (Presenca.lidaPendente && !Presenca.timers.lida) presencaPagarLida({ fechando: Presenca.aberta !== Presenca.lidaPendente });
+    // O histórico que a conversa aberta pediu na espera do perfil (ver
+    // `presencaCarregarConversa`): com o perfil, ele sai agora.
+    const espera = Presenca.aberta ? (Presenca.historico.get(Presenca.aberta) || {}).esperaPerfil : null;
+    if (espera) presencaCarregarConversa(Presenca.aberta, espera);
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
     const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
@@ -484,8 +491,19 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         // da hora que o fluxo traz. O que chegou com hora até ali, a lista já
         // contou. Sem isto, UMA mensagem virava "2 mensagens novas" (auditoria
         // de 2026-09-29).
+        //
+        // E a lista que SAIU antes do último "lida" CONFIRMADO de uma conversa
+        // foi lida no Waze antes dele: o "1" que ela traz é de mensagem que a
+        // pessoa já leu. Pedida com a pílula e chegando depois de a conversa
+        // ser aberta e fechada, ela acendia "1 mensagem nova" até a lista
+        // seguinte (auditoria de 2026-09-30, R5-5-4). Pra essa conversa a lista
+        // vale zero, e a conta dela não serve de régua pras vivas (o que chegou
+        // depois do "lida" segue contando por elas).
+        const lidaDepois = (cid) => inicio < (Presenca.lidaSaiuEm.get(cid) || 0);
+        for (const c of Presenca.conversas) if (lidaDepois(c.id)) c.naoLidas = 0;
         for (const [id, v] of Presenca.vivas) {
             if (v.ultimaTs < inicio) { Presenca.vivas.delete(id); continue; }
+            if (lidaDepois(id)) continue;
             const c = Presenca.conversas.find((x) => x.id === id);
             const ate = c ? Math.max(Number.isFinite(c.atividade) ? c.atividade : 0,
                 c.ultima && Number.isFinite(c.ultima.ts) ? c.ultima.ts : 0) : 0;
@@ -576,6 +594,7 @@ function presencaDesligar() {
     Presenca.historico.clear();
     Presenca.lidaEnviadaAte.clear();
     Presenca.lidasPorId.clear();
+    Presenca.lidaSaiuEm.clear();
     Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
@@ -1216,7 +1235,16 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     // pílula mostrava "1" com a conversa aberta e lida, e nada tentava de novo.
     if (r && r.success) {
         Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
+        Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
         presencaZerarNaoLidas(id, enviadoEm);
+    } else if (!Presenca.lidaPendente) {
+        // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
+        // lida no Waze e nada a refazia — o fechamento não pagava mais nada, e
+        // a lista seguinte a devolvia como "1 mensagem nova" (auditoria de
+        // 2026-09-30, R5-5-5). Volta a DEVER (sem relógio): o fechamento e o
+        // próximo `presencaSincronizar` o pagam. Um pedido a mais, só quando
+        // este falhou.
+        Presenca.lidaPendente = id;
     }
 }
 
@@ -1276,6 +1304,24 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     let h = Presenca.historico.get(id);
     if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
     if (h.carregando) return;
+    // De quem é a sessão decide o que é MEU no histórico (`presencaMsgDoWaze`).
+    // Na renovação silenciosa (a extensão devolveu a sessão e o perfil ainda não
+    // voltou), o `abrir` saía mesmo assim: as minhas mensagens vinham como
+    // "dela" e ficavam assim pelo resto da sessão — e o "lida" do `abrir` saía
+    // sem saber de quem era a sessão (auditoria de 2026-09-30, R5-5-2). Não
+    // sai: fica "Carregando", e o perfil que chegar o pede
+    // (`presencaSincronizar`). Como o "Enviar" e o "Tentar de novo" do envio.
+    const eu = presencaEu();
+    if (!eu) {
+        // Sem o histórico na tela, o que espera é a PRIMEIRA página: a antiga
+        // só existe depois dela.
+        h.esperaPerfil = { antes: h.carregada ? antes : null };
+        if (h.esperaPerfil.antes) h.antigas = 'carregando';
+        else h.erro = false;
+        presencaRenderConversa();
+        return;
+    }
+    h.esperaPerfil = null;
     h.carregando = true;
     // A página antiga tem estado PRÓPRIO (`antigas`): a falha dela não é a do
     // histórico, que já está na tela (ver `presencaHtmlAnteriores`). E a
@@ -1301,7 +1347,8 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         presencaRenderConversa();
         return;
     }
-    const eu = presencaEu();
+    // `eu` é o de QUANDO o pedido saiu: a sessão pode ter caído com ele no ar
+    // (o perfil some), e a resposta é da conta que perguntou.
     const msgs = (Array.isArray(r.mensagens) ? r.mensagens : [])
         .filter((m) => m && m.classe === 'texto' && m.id)
         .map((m) => presencaMsgDoWaze(m, eu));
@@ -1331,6 +1378,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         // 2026-09-26). Sem a marca aqui, o `presencaAgendarLida` logo abaixo
         // manda o "lida" que faltou — um pedido, só quando o do `abrir` falhou.
         if (ultimaDela && r.lida === true) Presenca.lidaEnviadaAte.set(id, ultimaDela);
+        if (r.lida === true) Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, saiuEm));
     }
     presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
@@ -1497,6 +1545,21 @@ function presencaAnexarCard() {
 function presencaSoltarAnexo() {
     Presenca.anexo = null;
     presencaRenderAnexo();
+}
+
+// O ✕ da tirinha ("Não mandar este pedido"): solta, e o foco que estava nela
+// não cai no <body> — a tirinha some com ele dentro, e quem usa teclado ou
+// leitor de tela perdia o lugar (auditoria de 2026-09-30, R5-5-7). Vai pro
+// botão de prender, que volta a aparecer no mesmo lugar; sem ele, pro ✕ da
+// conversa. Nunca pro campo: abriria o teclado do celular.
+function presencaTirarAnexo() {
+    const tira = document.getElementById('conversaAnexo');
+    const tinhaFoco = !!(tira && document.activeElement && tira.contains(document.activeElement));
+    presencaSoltarAnexo();
+    if (!tinhaFoco) return;
+    const botao = document.getElementById('conversaCardBtn');
+    const alvo = botao && !botao.classList.contains('hidden') ? botao : document.getElementById('conversaClose');
+    if (alvo) alvo.focus({ preventScroll: true });
 }
 
 // Desenha a tirinha e decide se o BOTÃO existe. As duas coisas na mesma função
@@ -2066,7 +2129,7 @@ function presencaMontar() {
     const btnCard = document.getElementById('conversaCardBtn');
     if (btnCard) btnCard.addEventListener('click', () => presencaAnexarCard());
     const tirar = document.getElementById('conversaAnexoTirar');
-    if (tirar) tirar.addEventListener('click', () => presencaSoltarAnexo());
+    if (tirar) tirar.addEventListener('click', () => presencaTirarAnexo());
 
     // Delegado: as bolhas são redesenhadas a cada mensagem, e ouvinte por
     // bolha vazaria a cada render.
