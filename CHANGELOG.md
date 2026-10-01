@@ -8,6 +8,93 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.01-02
+
+Oitava rodada da auditoria. Seis auditores revisaram o app de novo depois da v2026.10.01-01, conferindo os consertos da rodada anterior e as costuras entre eles (os lotes são feitos em paralelo e juntados depois). Os consertos cobrem o app aberto em duas abas e a sessão, a fila e as decisões, o card, a foto e o mapa ampliados, o "Disponível offline", a presença e a conversa, os filtros, o pareamento, o modo dev e os textos.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**O app aberto em duas abas**
+- **Uma decisão que uma aba está mandando não sai de novo pela outra.** Abrir a segunda aba (ou decidir algo nela) enquanto a primeira esperava a resposta do Waze mandava a mesma decisão duas vezes: o Histórico a contava em dobro, ou dizia "Já tratado por outro editor" sobre uma decisão sua. Vale pro ✕, pro ✓ e pro "Rejeitar os N".
+- **"Sair" numa aba não deixa mais a outra mandar o que estava pendente nela.** Uma foto aprovada ainda na janela do Desfazer e o aviso de que você leu a conversa aberta iam pro Waze com a sessão de quem saiu — e, se outra conta tinha entrado, a conquista da foto ficava com ela.
+- **Trocar a região ou o país numa aba não muda mais o da outra.** O ✕ dado na outra aba ia pro servidor da região nova, voltava como "Já tratado por outro editor" e o pedido seguia pendente; e a fila seguinte dela vinha do país da primeira.
+- **O "esperando envio" some das duas abas quando a decisão sai por uma delas.**
+- **O aviso do "Sair" não conta mais como perdida a decisão que já está a caminho do Waze** — ela chega.
+
+**Sessão e conta**
+- **Quando a sessão cai e volta sozinha, a fila em "📍 Perto de mim" continua na ordem da sua posição.** Antes ela passava pra ordem de data sem aviso, logo abaixo do "sua fila continua aqui".
+- **Quem entra num aparelho depois de outra conta não herda a área gerenciada dela no filtro.**
+- **Depois de "Sair", o leitor de tela não guarda mais o nome do último pedido.**
+- **Uma falha do Waze na hora de abrir o app não faz mais a sessão ficar com o cookie velho naquele dia.** Se a primeira resposta do Waze falhasse, o app deixava de guardar a troca de cookie das outras até a hora seguinte — e quem usa o app menos de uma hora por dia ficava o dia todo com o cookie antigo, o que vence primeiro.
+
+**A sua decisão não some nem conta duas vezes**
+- **"Rejeitar os N" deixa de fora o pedido cuja foto você está aprovando**, e ele também sai do número do botão e do "Ver +N". Antes, a foto que você aprovou podia sair rejeitada no Waze.
+- **Se a sessão cair e voltar sozinha com a aprovação de uma foto ainda a caminho, o card desse pedido fica travado até o Waze responder, e sai da fila quando a aprovação valeu** (o "Restam" desce junto). Antes ele voltava destravado: dava pra rejeitá-lo nesse meio, e o placar e a contagem do autor registravam a rejeição de uma foto que você tinha aprovado.
+- **O treino não começa enquanto a aprovação de uma foto ainda está a caminho**: o app pede pra esperar ela terminar e tocar de novo. Antes, ao sair do treino, o pedido aprovado voltava como card e dava pra rejeitá-lo.
+- **Com "Primeiro os de…" ligado, o pedido que o Waze recusou volta depois dos pedidos desse autor**, em vez de entrar no meio deles e desligar a barra.
+
+**O card**
+- **No computador, Alt, ⌘ ou Ctrl com as setas não decidem mais o pedido.** Alt+← e ⌘+← são o Voltar do navegador e rejeitavam o pedido da tela; Alt+→ e ⌘+→ (o Avançar) o marcavam como lido, e Alt+↑ e ⌘+↑ o pulavam. Na foto e no mapa ampliados, eles trocavam de foto ou moviam o mapa. Agora esses atalhos ficam com o navegador. As setas sozinhas seguem decidindo, e Ctrl+Z (⌘+Z) segue desfazendo.
+- **Enquanto a extensão renova o seu acesso, tocar no card travado pede pra esperar a conferência da sessão**, em vez de dizer "Sessão expirada" segundos antes do "Acesso renovado".
+- **A barra "Primeiro os de…" acompanha a fila**: quando chegam mais pedidos do autor, o "N de M" muda junto com o "Ver +N".
+- **O "Restam" não fica mais mostrando um número velho** quando muda logo depois de uma contagem (por exemplo, a fila acabando de carregar e você tratando um pedido).
+- **Pelo teclado, quando uma espera curta termina (a conferência da sessão, por exemplo), o foco volta ao botão do card em que estava**, em vez de se perder.
+- **Pelo teclado, o foco não se perde mais no "Ver +N" e no "✕ N" quando a fila muda por baixo do card**, nem depois do "Rejeitar os N": ele vai pro ✕ do card que fica.
+- **Pelo teclado, "Ver os N" na folha do autor leva o foco pra barra "Primeiro os de…"**, como o Enter no "Ver +N", em vez de se perder.
+
+**Foto e mapa ampliados**
+- **Aprovar ou excluir uma foto quando o sinal falha bem na hora da resposta não diz mais que foi outro editor.** O app manda de novo e o Waze responde que já está feito — por você: a foto aprovada fica aprovada (com a lixeira), conta pro "Curador", e não aparece "Já tratado por outro editor" nem "Outro editor já tinha excluído".
+- **Com a foto ou o mapa ampliados abertos, Ctrl (ou ⌘) com + e − volta a ampliar e reduzir a página**, como no resto do app. Antes quem ampliava era a foto ou o mapa.
+- **Na foto ampliada pelo teclado (+), as setas andam pela foto, como no mapa**, em vez de trocar de foto e desfazer o zoom. Sem zoom, ← e → continuam trocando de foto.
+- **Pelo teclado, o foco fica na foto do card quando uma aprovação ou exclusão termina depois de você fechar a foto, e quando você desfaz uma delas na tela do card** (com Enter no "Desfazer" ou com a tecla z). Antes ele se perdia, e o Tab recomeçava do topo da página.
+
+**Disponível offline**
+- **Uma foto que o Waze tirou do ar não deixa mais a preparação "pela metade" pra sempre.** Quando ela era a do último pedido, a linha das Preferências ficava em "Faltou parte", o app preparava tudo de novo a cada decisão e, sem sinal, os cards de foto abriam sem a foto. E quando a preparação fica mesmo pela metade (o sinal caiu no meio), a volta do sinal baixa só o que faltou.
+- **Trocar o filtro sem sinal não apaga mais os pedidos guardados.** De volta ao filtro de antes, o "Tentar novamente" (ou abrir o app de novo) traz os pedidos guardados.
+- **Com o sinal que não anda, o card de foto cuja foto não veio trava o ✕ e o ✓ e avisa que a foto precisa de sinal**, como no modo avião. Antes ele mostrava "Sem Imagem" e deixava decidir a foto sem vê-la.
+- **Sem sinal, a linha das Preferências não diz mais que o mapa e as fotos "chegam quando houver rede" quando eles já estão no aparelho.** Até uma hora depois da última preparação completa ela diz que você segue com o que está guardado; depois, que o mapa está no aparelho e só as fotos dependem de sinal.
+- **A linha das Preferências só diz "Pronto" quando a preparação cobriu os pedidos guardados de agora.** Com um pedido novo trazido depois (ou durante) a preparação, e ela pela metade ou sem começar, a linha dizia "Pronto" por até uma hora, inclusive sem sinal e com o app reaberto. Agora diz "N pedidos guardados. O mapa e as fotos chegam quando houver rede." (sem sinal) ou "Ainda não preparado." (com sinal).
+- **Com sinal, os pedidos novos que a preparação não cobriu são preparados no próximo gatilho**, baixando só o que falta: abrir os Filtros, a próxima resposta do servidor ou a rede voltando. Antes esperavam a janela de 20 minutos virar, e quem saísse do sinal nesse meio ficava com os cards novos sem mapa nem foto.
+
+**Presença e conversa**
+- **Quem manda uma mensagem bem na hora em que a outra pessoa abre a conversa agora vê o "Lida".** E quem leu não recebe mais aquela mensagem de volta como "1 mensagem nova".
+- **Se a sessão cair e for renovada sozinha bem quando você abre uma conversa, as suas mensagens não aparecem mais do lado da outra pessoa.** A conversa espera um instante e carrega certa.
+- **Abrir e fechar uma conversa enquanto a lista ainda carregava não acende mais "1 mensagem nova"** de uma mensagem que você já leu.
+- **Se o aviso de que você leu a mensagem falhar (sinal ruim, Waze fora), o app tenta de novo ao fechar a conversa**, em vez de deixá-la como não lida.
+- **Com a sua internet funcionando e o servidor fora do ar, a mensagem que não sai diz "Não enviada."**, não mais "sem conexão". Nesse caso, o app também deixa de repetir pedidos a cada vez que você volta pra ele.
+- **Pelo teclado, tirar o pedido preso da mensagem (o ✕) deixa o foco no botão de prender o pedido**, em vez de mandá-lo pro começo da página.
+- **Desligar "Ver quem está no app" bem na hora em que a sessão é renovada agora some do mapa do WME.** Antes, nesse caso, você continuava aparecendo lá.
+
+**Filtros e "Perto de mim"**
+- **Uma área gerenciada que não está mais no seu perfil sai do filtro.** Antes ela continuava filtrando a fila enquanto os Filtros mostravam "Nenhuma", até você tocar "Aplicar".
+- **Trocar a região nos Filtros várias vezes seguidas não troca mais o país que você escolheu.** Com a região indo e voltando (NA, ROW e NA de novo, por exemplo), a lista de países de uma das trocas podia chegar depois da sua escolha e pôr o primeiro país da lista no lugar — e o "Aplicar" gravava esse. Agora vale a lista da última troca, e nada muda o que você escolheu depois disso. Valia também pra lista que o app pede ao abrir os Filtros e pra uma troca que ficou no meio quando você fechou e abriu os Filtros de novo.
+- **Com "Minha área" marcado, o seletor de país fica travado** mesmo quando a lista de países chega depois de você marcar, ou quando a troca de região não carrega.
+- **Quem edita só na América do Norte (ou em Israel) e abre os Filtros pelo atalho do ícone não grava mais a região errada.** Quando o app levava você pro seu país com os Filtros abertos e a lista de países ainda chegando, a tela podia ficar com a região "ROW" e os países da América do Norte — e o "Aplicar" gravava os EUA no servidor errado, com uma fila vazia. Agora a tela muda junto: região, país e lista.
+- **"Perto de casa" ou "Perto do trabalho" guardado, num perfil que não tem mais esse endereço, não faz mais o app ler a fila inteira a cada busca**: a fila sai por data, como os Filtros mostram, e chega mais rápido.
+
+**Conectar outro aparelho**
+- **Quem usa o teclado ou leitor de tela não perde mais o lugar quando o QR vence** com o foco no "Copiar link" ou no "Sem câmera?": o foco vai pro "Fechar", o passo que o aviso de vencido manda dar.
+- **Pedindo o código pelo teclado ("Sem câmera? Mostrar um código"), o foco vai pro "Copiar link"** quando o código aparece (e volta pro botão se o pedido falhar). Antes ele se perdia.
+- **Com leitor de tela, o "Código expirado" é anunciado quando o QR (ou o código) vence.** Antes ele só aparecia escrito, e quem não enxerga a tela não sabia que precisava pedir outro.
+
+**Modo Desenvolvedor**
+- **Ferramentas de leitura do relatório**:
+  - com o servidor fora do ar, a triagem não acusa mais "o aparelho roda código diferente do servidor": ela diz que o servidor respondeu com erro e que não havia com o que comparar;
+  - quando o limite de tamanho corta o registro do fechar, a triagem diz onde faltam registros (no meio ou no começo) e quantos.
+
+**Textos e manuais**
+- **Saíram 11 frases que nenhuma tela do app mostrava**, nas quatro línguas.
+- **O manual de instalação diz o que o servidor faz na lixeira de foto**: até 2 gravações no banco do Cloudflare (plano grátis) por exclusão, e mais 1 quando a lista guardada já venceu.
+
+### Ficou pra decisão
+- **O "Aplicar" sem sinal**: trocar o filtro, ou só a ordem, sem sinal ainda esvazia a tela e mostra "Você está sem conexão". Há dois caminhos: guardar os filtros e manter a fila com um aviso, como o ↻ já faz, ou, com o "Disponível offline" ligado, abrir os pedidos guardados quando eles forem do filtro escolhido.
+- **Avisos com texto novo**: quando a área gerenciada salva some do seu perfil (hoje ela sai do filtro em silêncio), e um "Renovando o acesso…" próprio pro card travado durante a renovação da sessão (hoje ele pede pra esperar a conferência da sessão).
+- **A lista de autores vazia no Histórico** não mostra frase nenhuma, e o leitor de tela lê "Foto de X (1 de 1)" num local com uma foto só.
+
+---
+
 ## v2026.10.01-01
 
 Sétima rodada da auditoria. Oito auditores revisaram o app de novo depois da v2026.09.29-01, e os consertos cobrem dez áreas: o servidor e a sessão, a conta e as várias abas, a fila e as decisões, os filtros, a foto e o mapa ampliados, o card, o "Disponível offline", a presença e a conversa, o modo dev e os textos.
