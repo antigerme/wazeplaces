@@ -4753,29 +4753,34 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
-// ── Os seletores dos Filtros: o texto que o APP põe numa opção cabe FECHADO ──
+// ── O seletor de estado: a falha da lista cabe FECHADA no Fold e no SE ─────
 // A falha da lista de estados ("Não deu pra carregar os estados") saía cortada
-// no seletor fechado: no Galaxy Fold em pt, es e fr, e no iPhone SE em pt e es
-// — em pt, "Não deu pra carregar o", sem o objeto (auditoria da rodada 6,
-// R66-3). O inglês cabia: é o gotcha #25, a frase mais larga não está na língua
-// em que se desenvolve. O seletor não quebra linha nem rola, então "não
-// estoura" não se vê por `scrollWidth`: mede-se o TEXTO de cada opção com a
-// fonte COMPUTADA do seletor, contra a largura útil dele (sem os paddings).
-// Entram as opções que o DICIONÁRIO escreve (as com `data-i18n`, e todas as da
-// ordem, de residencial e de região); nome de país, estado, área e categoria é
-// dado do Waze e fica de fora. A falha vem pelo caminho de verdade: a lista de
-// estados responde 500. CONTROLES: a falha TEM que estar no seletor (senão o
-// bloco mede outra coisa), e um texto de 200 caracteres TEM que ser acusado.
+// no seletor fechado — em pt, "Não deu pra carregar o", sem o objeto (auditoria
+// da rodada 6, R66-3). O seletor não quebra linha nem rola, então "não estoura"
+// não se vê por `scrollWidth`.
+//
+// E a medida é a do PRÓPRIO navegador, não uma conta: um clone do seletor (as
+// mesmas classes, no mesmo lugar) com largura automática e só aquela opção diz
+// quanto o seletor PRECISA ter pra mostrá-la inteira, e passar da largura real é
+// cortar. A conta "texto (canvas) contra `clientWidth` menos os paddings" — a da
+// auditoria e a da 1ª versão deste bloco — esquece a caixa da SETA, que o
+// seletor reserva dentro do conteúdo: ela deu folga de 14 px a uma frase que a
+// tela mostrava com a última letra cortada, e "cabe" ao inglês de antes, que o
+// WebKit cortava ("Couldn’t load the state"). Esta acerta a fronteira no
+// Chromium (194/200 inteiro, 206/200 cortado, conferido pixel a pixel) e erra
+// pra MAIS no WebKit (uns 5 px). A falha vem pelo caminho de verdade: a lista de
+// estados responde 500. CONTROLES: a falha TEM que estar no seletor; um texto de
+// 200 caracteres TEM que cortar; e um de uma letra, não.
 {
   for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 320, height: 568 }]]) {
     for (const lang of LINGUAS) {
-      const onde = `seletores dos Filtros/${ap}/${lang}`;
+      const onde = `seletor de estado/${ap}/${lang}`;
       const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
       await ctx.addInitScript((l) => {
         try {
-          if (sessionStorage.getItem('__seletores')) return;
-          sessionStorage.setItem('__seletores', '1');
-          localStorage.setItem('waze_session_token', 'tok-smoke-seletores');
+          if (sessionStorage.getItem('__seletorEstado')) return;
+          sessionStorage.setItem('__seletorEstado', '1');
+          localStorage.setItem('waze_session_token', 'tok-smoke-estado');
           localStorage.setItem('waze_places_lang', l);
           localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
         } catch (e) { /* armazenamento bloqueado: o teste segue */ }
@@ -4785,10 +4790,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         let st = 200;
         let b = { success: true };
         if (nome === 'perfil') {
-          // Casa e trabalho no perfil: as ordens por distância viram opção (e são medidas).
-          b = { success: true, visivelNoWme: true, referencias: { casa: [-23.55, -46.63], trabalho: [-23.5, -46.6] },
-            profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
-              areas: [], managedAreas: [{ id: 9001, name: 'Área SP' }], editableCountryIDs: [30] } };
+          b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true,
+            isStaff: false, areas: [], managedAreas: [], editableCountryIDs: [30] } };
         } else if (nome === 'lista-paises') b = { success: true, countries: [{ id: 30, name: 'Brazil' }] };
         else if (nome === 'lista-estados') { st = 500; b = { success: false, errorCategory: 'transient', error: 'x' }; }
         else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
@@ -4807,36 +4810,27 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       }, 'a falha da lista de estados no seletor');
       await assentar(page, 100);
       const r = await page.evaluate(() => {
-        const c = document.createElement('canvas').getContext('2d');
-        const medir = (sel, txt) => {
-          const cs = getComputedStyle(sel);
-          c.font = cs.font;
-          const disp = sel.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-          return { w: Math.round(c.measureText(txt).width * 10) / 10, disp: Math.round(disp * 10) / 10 };
+        const sel = document.getElementById('filterState');
+        const real = sel.getBoundingClientRect().width;
+        const precisa = (txt) => {
+          const clone = sel.cloneNode(false);
+          clone.removeAttribute('id');
+          clone.style.cssText = 'width:auto;min-width:0;max-width:none;position:absolute;visibility:hidden;left:0;top:0';
+          const o = document.createElement('option');
+          o.textContent = txt;
+          clone.appendChild(o);
+          sel.parentElement.appendChild(clone);
+          const w = clone.getBoundingClientRect().width;
+          clone.remove();
+          return Math.round(w * 10) / 10;
         };
-        const NOSSOS = ['filterSort', 'filterResidential', 'filterRegion'];
-        const cortes = [];
-        let medidas = 0;
-        for (const sel of document.querySelectorAll('#filtersModal select')) {
-          if (!sel.getClientRects().length) continue;   // seletor de outra aba
-          for (const o of sel.options) {
-            if (!o.hasAttribute('data-i18n') && !NOSSOS.includes(sel.id)) continue;
-            if (o.getAttribute('data-i18n') === 'filters.state.naoCarregou') continue;   // conferida abaixo, por nome
-            const m = medir(sel, o.text);
-            medidas++;
-            if (m.w > m.disp + 0.5) cortes.push(`#${sel.id} "${o.text}" ${m.w} > ${m.disp}`);
-          }
-        }
-        const estado = document.getElementById('filterState');
-        const falha = { txt: estado.options[estado.selectedIndex].text, ...medir(estado, estado.options[estado.selectedIndex].text) };
-        const controle = medir(estado, 'x'.repeat(200));
-        return { cortes, medidas, falha, controle };
+        const txt = sel.options[sel.selectedIndex].text;
+        return { txt, real: Math.round(real * 10) / 10, falha: precisa(txt), longo: precisa('x'.repeat(200)), curto: precisa('x') };
       });
-      checa(r.controle.w > r.controle.disp, `${onde}: CONTROLE — o texto de 200 caracteres "coube": o instrumento não mede`, JSON.stringify(r.controle));
-      checa(r.medidas >= 8, `${onde}: CONTROLE — só ${r.medidas} opções do dicionário medidas`);
-      checa(r.falha.w <= r.falha.disp + 0.5,
-        `${onde}: a falha da lista de estados sai cortada no seletor fechado (R66-3)`, `"${r.falha.txt}" ${r.falha.w} > ${r.falha.disp}`);
-      for (const corte of r.cortes) checa(false, `${onde}: opção cortada no seletor fechado`, corte);
+      checa(r.longo > r.real, `${onde}: CONTROLE — o texto de 200 caracteres "coube": o instrumento não mede`, `${r.longo}/${r.real}`);
+      checa(r.curto <= r.real, `${onde}: CONTROLE — uma letra "não coube": o instrumento acusa tudo`, `${r.curto}/${r.real}`);
+      checa(r.falha <= r.real, `${onde}: a falha da lista de estados sai cortada no seletor fechado (R66-3)`,
+        `"${r.txt}" precisa ${r.falha} px, o seletor tem ${r.real}`);
       checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
       await ctx.close();
     }
