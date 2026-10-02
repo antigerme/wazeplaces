@@ -9394,6 +9394,138 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'duas abas: CONTROLE — sem a marca da aba, a A devia mandar de novo o ✕ no ar da B; a medida não enxerga o reenvio', JSON.stringify(c5));
 }
 
+// ── "SAIR" É LIMPAR DE TUDO — o DOM também (auditoria de 2026-10-02, R6-1-05) ──
+//
+// O armazenamento já saía inteiro no "Sair", mas o DOM da tela de entrada
+// seguia com dado de TERCEIRO: a lista de autores rejeitados do Histórico, a
+// folha do autor, a última foto ampliada (o nome do local, o de quem mandou a
+// foto e o `alt`) e o perfil de quem o portão recusou. Na mesma página, a
+// próxima conta que ligasse o modo dev levava isso no relatório (o DOM inteiro
+// vai nele). Os pedidos daqui têm uma MARCA no nome do local, no endereço e no
+// autor, e a página é VARRIDA por ela — texto e atributos. CONTROLE: com cada
+// camada ABERTA, a varredura acha a marca no nó dela (sem isto, "nada achado"
+// passaria com a varredura cega). Cada camada fecha por um caminho diferente
+// (Esc, o fundo, o ✕, o voltar), e o "Sair" é pela Ajuda, como a pessoa faz.
+{
+  const MARCA = 'PRIVSAIR';
+  const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const PERFIL_SAIR = { id: 4242, userName: 'editor_sair', rank: 5, isAreaManager: true, isStaff: false,
+    editableCountryIDs: [30], areas: [], managedAreas: [] };
+  // Pedidos de FOTO NOVA do MESMO autor: dois ✕ o promovem à lista de autores.
+  const FILA_SAIR = Array.from({ length: 5 }, (_, i) => ({
+    venueID: `vsair${i}`, updateRequestID: `usair${i}`, name: `Padaria${MARCA}${i}`, categories: ['BAKERY'],
+    address: `Rua${MARCA} ${i}, 10`, updateType: 'Nova foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO',
+    createdBy: `autor${MARCA}`, creatorId: 7777, imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_usair${i}.png`],
+    newImageIdx: 0, approvedImageIds: [], localAprovado: true, brand: null, changes: [],
+    mapa: { centro: [-23.5 + i / 1000, -46.6], proposto: null, movidoM: null, entradas: [] }, lat: -23.5 + i / 1000, lon: -46.6,
+  }));
+  const NEGADO = { success: false, error: 'Acesso restrito', errorKey: 'srv.err.accessDenied', errorVars: { minLevel: 2 },
+    errorCategory: 'access_denied', profile: { userName: `editor${MARCA}`, rank: 0, isAreaManager: false, isStaff: false } };
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
+  await ctx.route('**/api/**', async (r) => {
+    const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
+    const json = (o, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'perfil') return json({ success: true, profile: PERFIL_SAIR, visivelNoWme: true });
+    if (rota === 'buscar-places') return json({ success: true, places: FILA_SAIR, hasMore: false, page: 1,
+      total: FILA_SAIR.length, totalAll: FILA_SAIR.length, blocked: 0 });
+    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
+    if (rota === 'presenca-app') return json({ success: true, online: [], conversas: [] });
+    if (rota === 'testar-cookies') return json(NEGADO, 403);
+    return json({ success: true });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  // A cota do Desfazer cumprida (L6: 10) e o Desfazer desligado: o ✕ sai na hora.
+  await page.evaluate(() => {
+    localStorage.setItem('waze_session_token', 'tok-sair');
+    localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 20, skipped: 0 }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: false, presenca: true, undoGateSeen: true,
+      dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
+    && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject'), 'o app abrir com a fila do "Sair"');
+  // A VARREDURA: em que nó (o id do ancestral mais próximo) a marca aparece,
+  // no texto ou num atributo.
+  const varrer = () => page.evaluate((marca) => {
+    const achou = new Set();
+    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    for (let n = tw.currentNode; n; n = tw.nextNode()) {
+      let txt = '';
+      if (n.nodeType === 3) txt = n.nodeValue;
+      else for (const a of n.attributes || []) txt += ' ' + a.value;
+      if (!txt.includes(marca)) continue;
+      for (let e = n.nodeType === 3 ? n.parentElement : n; e; e = e.parentElement) if (e.id) { achou.add(e.id); break; }
+    }
+    return [...achou].sort();
+  }, MARCA);
+  const tocar = (seletor) => page.evaluate((s) => document.querySelector(s).click(), seletor);
+  const assentarCamada = () => doisQuadros(page);
+  // Dois ✕ do mesmo autor: ele entra na lista de autores rejeitados.
+  // (O pedido de antes fica NA PÁGINA: a espera não leva argumento, e variável
+  // do Node dentro dela chegaria `undefined` — gotcha #28.)
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(() => { window.__sairAntesDoX = AppState.currentPlace && AppState.currentPlace.updateRequestID; });
+    await tocar('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.currentPlace && AppState.currentPlace.updateRequestID !== window.__sairAntesDoX
+      && AppState.inFlightActions === 0, `o ✕ ${i + 1} pousar e o card trocar`);
+  }
+  // A folha do autor, aberta; fecha pelo Esc.
+  await page.evaluate(() => abrirFolhaDoAutor(AppState.currentPlace));
+  await esperarOuExplodir(page, () => !document.getElementById('autorModal').classList.contains('hidden'), 'a folha do autor abrir');
+  const comFolha = await varrer();
+  await page.keyboard.press('Escape');
+  await esperarOuExplodir(page, () => document.getElementById('autorModal').classList.contains('hidden'), 'o Esc fechar a folha');
+  // O Histórico, com a lista de autores; fecha pelo FUNDO (o clique no scrim).
+  await tocar('#filtersBtn');
+  await esperarOuExplodir(page, () => !document.getElementById('filtersModal').classList.contains('hidden'), 'os Filtros abrirem');
+  await tocar('#filtersTabHistory');
+  await assentarCamada();
+  const comHistorico = await varrer();
+  await page.evaluate(() => document.getElementById('filtersModal').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await esperarOuExplodir(page, () => document.getElementById('filtersModal').classList.contains('hidden'), 'o fundo fechar os Filtros');
+  // A foto ampliada do card; fecha pelo ✕.
+  await page.evaluate(() => { const p = AppState.currentPlace; openLightbox(p.imageUrls, 0, 0, p.name, false, p); });
+  await esperarOuExplodir(page, () => Lightbox.isOpen(), 'a foto ampliada abrir');
+  await assentarCamada();
+  const comFoto = await varrer();
+  await tocar('#lightboxClose');
+  await esperarOuExplodir(page, () => !Lightbox.isOpen(), 'o ✕ fechar a foto');
+  checa(comFolha.includes('autorTitle') && comHistorico.includes('autoresBody') && comFoto.includes('lightboxCount')
+      && comFoto.includes('lightboxNomeTxt'),
+    'sair/DOM: CONTROLE — com as camadas abertas, a varredura não viu a marca nos nós delas (ela está cega)',
+    JSON.stringify({ comFolha, comHistorico, comFoto }));
+  const fechadas = (await varrer()).filter((id) => ['autorTitle', 'autorCorpo', 'autoresBody', 'lightboxCount', 'lightboxNomeTxt',
+    'lightboxImage'].includes(id));
+  checa(fechadas.length === 0, 'sair/DOM: a camada FECHADA (Esc, fundo, ✕) seguiu com dado de terceiro no DOM', JSON.stringify(fechadas));
+  // O "Sair", pela Ajuda.
+  await tocar('#helpBtn');
+  await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
+  await tocar('#logoutBtn');
+  await esperarOuExplodir(page, () => !document.getElementById('logoutModal').classList.contains('hidden'), 'o diálogo do "Sair" abrir');
+  await tocar('#confirmLogout');
+  await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated,
+    'a tela de entrada depois do "Sair"');
+  const depoisDoSair = await varrer();
+  checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
+  // O "Acesso restrito" do login por cookies: o perfil recusado aparece no
+  // diálogo (CONTROLE) e sai dele quando ele fecha (pelo voltar do aparelho).
+  // (Uma linha do Waze basta: quem recusa é o servidor de mentira.)
+  await page.evaluate(() => authenticateWithCookies('.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\tZ'));
+  await esperarOuExplodir(page, () => !document.getElementById('accessDeniedModal').classList.contains('hidden'), 'o "Acesso restrito" abrir');
+  const comNegado = await varrer();
+  await page.evaluate(() => history.back());
+  await esperarOuExplodir(page, () => document.getElementById('accessDeniedModal').classList.contains('hidden'), 'o voltar fechar o diálogo');
+  const depoisDoNegado = await varrer();
+  checa(comNegado.includes('accessDeniedProfile'), 'sair/DOM: CONTROLE — o perfil recusado não apareceu no diálogo', JSON.stringify(comNegado));
+  checa(depoisDoNegado.length === 0, 'sair/DOM: o perfil de quem o portão recusou ficou no DOM do diálogo fechado', JSON.stringify(depoisDoNegado));
+  checa(erros.length === 0, 'sair/DOM: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -9479,5 +9611,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
+  + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
