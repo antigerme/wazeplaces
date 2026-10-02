@@ -16011,6 +16011,12 @@ function esquecerOutraConta(id) {
     // sessão salva busca antes de o perfil dizer de quem ela é. No login, a conta
     // chega antes da primeira busca, e não há fila pra refazer.
     if (filaAtravessouSessao || (areaNaBusca && (AppState.fetching || AppState.queue.length))) {
+        // A foto e o mapa AMPLIADOS são de um pedido dessa fila, que sai: com a
+        // renovação pela extensão trazendo OUTRA conta, a foto de um pedido da
+        // anterior ficava aberta por cima da fila nova — com o "Aprovar" de L6 à
+        // mostra e habilitado pra um L2, e o toque não fazendo nada (auditoria de
+        // 2026-10-02, R6-1-06). Fecham ANTES da fila trocar, como no treino.
+        fecharCamadasDeFoto();
         resetQueue();
         startFetching();
     }

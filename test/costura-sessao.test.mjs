@@ -833,6 +833,31 @@ test('K2: OUTRA conta revelada pelo perfil — a fila que atravessou a sessão s
   }
 });
 
+// ═══ R6-1-06 · a foto ampliada da conta anterior na renovação com OUTRA conta ═══
+// X (L6+AM) com a foto de um pedido de foto nova ampliada; a sessão cai e a
+// extensão renova com Y (L2+AM). A fila virava a de Y, mas a foto de X seguia
+// aberta por cima, com o "Aprovar" à mostra e HABILITADO — e o toque não fazia
+// nada (o portão recusa). Botão morto com cara de vivo, sobre um pedido que nem
+// está na fila de quem entrou (MEDIDO no Chromium, auditoria de 2026-10-02).
+test('R6-1-06: OUTRA conta na renovação — a foto e o mapa AMPLIADOS fecham ANTES de a fila trocar', () => {
+  for (const atravessou of [true, false]) {
+    const log = [];
+    const camada = (nome) => ({ aberto: true, isOpen() { return this.aberto; }, close() { this.aberto = false; log.push('fechou ' + nome); } });
+    const deps = { AppState: { stats: {}, queue: [{ venueID: 'xA' }] }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
+      carregarFilaDeSaida: () => [], window: {}, Lightbox: camada('a foto'), MapaLightbox: camada('o mapa'),
+      resetQueue: () => log.push('fila trocada'), startFetching: () => log.push('busca') };
+    const h = montar(['esquecerOutraConta', 'fecharCamadasDeFoto'], deps);
+    h.esquecerOutraConta('222');
+    if (atravessou) {
+      assert.deepEqual(log, ['fechou a foto', 'fechou o mapa', 'fila trocada', 'busca'],
+        `DEFEITO: a foto ampliada da conta anterior ficou aberta por cima da fila de quem entrou: ${log.join(' | ')}`);
+    } else {
+      // CONTROLE: a fila nasceu nesta sessão (o pedido na foto é de quem entrou): nada fecha.
+      assert.deepEqual(log, [], 'a foto de um pedido da própria fila fechou sem motivo');
+    }
+  }
+});
+
 test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redesenha)', () => {
   const deps = { AppState: { authenticated: true, pendingAction: null }, epocaDaSessao: 0,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
