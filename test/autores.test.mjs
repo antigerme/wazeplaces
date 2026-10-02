@@ -331,9 +331,13 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
 
 test('folha do autor: esquecer refaz o card, senão o selo apagado fica na tela', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
-  const i = semComentarios.indexOf("getElementById('autorEsquecer')");
-  assert.ok(i !== -1, 'a linha de esquecer sumiu da folha');
-  const bloco = semComentarios.slice(i, i + 320);
+  // O ouvinte entrega a CHAVE ao `esquecerPelaFolha` (que decide o foco do
+  // teclado, R6-2-12) — e é nele que o esquecer e o card refeito moram.
+  assert.match(semComentarios, /getElementById\('autorEsquecer'\)\.addEventListener\('click', \(ev\) => esquecerPelaFolha\(ev, chave\)\);/,
+    'a linha de esquecer sumiu da folha (ou deixou de passar a chave e o evento)');
+  const i = semComentarios.indexOf('function esquecerPelaFolha(');
+  assert.ok(i !== -1, 'o esquecer da folha sumiu');
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\n}', i));
   assert.match(bloco, /esquecerAutor\(chave\)/, 'esquece pela CHAVE (creatorId), nunca pelo nome');
   assert.match(bloco, /removeCurrentCardEl\(\);\s*\n?\s*showCurrentPlace\(\);/,
     'sem refazer o card, o `✕ N` segue na tela afirmando a contagem que acabou de ser apagada');

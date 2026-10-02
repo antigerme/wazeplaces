@@ -1130,7 +1130,11 @@ function setupAppListeners() {
     $('confirmLogout').addEventListener('click', () => handleLogout());
     $('cancelLogout').addEventListener('click', () => closeModal('logoutModal'));
 
-    $('reloadBtn').addEventListener('click', () => {
+    // "Verificar novamente" e "Tentar novamente" somem com o painel quando o
+    // card volta, com o foco neles: pelo teclado, o foco vai ao card que chega
+    // (`prometerFocoAoCardQueVem`, R6-2-13).
+    $('reloadBtn').addEventListener('click', (ev) => {
+        prometerFocoAoCardQueVem(ev);
         resetQueue();
         startFetching();
     });
@@ -1143,7 +1147,9 @@ function setupAppListeners() {
         startFetching();
         showToast(t('toast.refreshing'), 'info');
     });
-    $('retryLoadBtn')?.addEventListener('click', async () => {
+    $('retryLoadBtn')?.addEventListener('click', async (ev) => {
+        // Antes do `await`: depois dele o evento já não diz quem tinha o foco.
+        prometerFocoAoCardQueVem(ev);
         // Sem rede — ou com a última busca tendo falhado por rede ou pelo
         // servidor (o "lie-fi", a origem fora do ar), com o `onLine` dizendo que
         // há rede — e com o "Disponível offline": a fila guardada, que antes só
@@ -12253,7 +12259,12 @@ function aplicarFocoDoTeclado() {
     const camada = !!(topOpenModal()
         || (typeof Lightbox !== 'undefined' && Lightbox.isOpen())
         || (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()));
-    if ((ativo && ativo !== document.body) || camada) { focoDoTeclado = null; return; }
+    // Quem pôs o foco num controle VIVO (o Tab, o clique) ganha. O foco num
+    // controle que SUMIU (escondido com o painel, fora da página) é foco
+    // perdido, mesmo antes de o navegador o devolver ao <body> — ele só faz isso
+    // no próximo desenho, e o card que chega antes perdia o foco prometido
+    // (R6-2-13: o "Verificar novamente" some com o painel quando o card volta).
+    if ((ativo && ativo !== document.body && focavelNaTela(ativo)) || camada) { focoDoTeclado = null; return; }
     const card = cardDaFrente();
     if (!card) return;
     // Card de foto sem a foto: ✕ e ✓ seguem travados, e o ↑ é o vivo.
@@ -12261,6 +12272,18 @@ function aplicarFocoDoTeclado() {
     if (!alvo) return;
     focoDoTeclado = null;
     alvo.focus({ preventScroll: true });
+}
+
+// "Verificar novamente" (o "Fim da fila"/"Tudo limpo!") e "Tentar novamente" (a
+// falha ao carregar) somem com o painel quando o card volta — com o foco neles.
+// Pelo teclado ele caía no <body>, e quem usa teclado ou leitor de tela
+// recomeçava do topo da página (MEDIDO, s45; auditoria de 2026-10-02, R6-2-13).
+// A regra do C10 pra todo controle que some com o foco: pelo teclado
+// (`veioDoTeclado`), o foco é prometido ao ✕ do card que chegar — ou ao ↑, num
+// card de foto sem a foto — e pousa quando ele chegar (`renderCurrentCard`). O
+// mouse e o dedo não movem nada.
+function prometerFocoAoCardQueVem(ev) {
+    if (veioDoTeclado(ev)) focoDoTeclado = BOTAO_DA_ACAO.left;
 }
 
 // A rolagem do conteúdo é CONSEQUÊNCIA de estourar, não estado padrão — e a
@@ -14934,15 +14957,26 @@ function abrirFolhaDoAutor(place) {
         alternarAutoDoAutor(chave);
         auto.checked = autoLigado(chave);
     });
-    document.getElementById('autorEsquecer').addEventListener('click', () => {
-        closeModal('autorModal');
-        esquecerAutor(chave);
-        // O selo que abriu esta folha some agora: fechar deixando o `✕ N` na tela
-        // faria o app afirmar uma contagem que ela acabou de apagar.
-        removeCurrentCardEl();
-        showCurrentPlace();
-    });
+    document.getElementById('autorEsquecer').addEventListener('click', (ev) => esquecerPelaFolha(ev, chave));
     openModal('autorModal');
+}
+
+// O "Esquecer" da folha. O selo que abriu a folha some agora — fechar deixando o
+// `✕ N` na tela faria o app afirmar uma contagem que ela acabou de apagar —, e o
+// card é refeito. Pelo TECLADO, fechar a folha devolve o foco ao "✕ N", que sai
+// com o card refeito, e o foco caía no <body> (MEDIDO nos dois motores, s44; o
+// CONTROLE, a folha fechada com Esc, devolve ao "✕ N"; auditoria de 2026-10-02,
+// R6-2-12). Era o terceiro botão que fecha a folha, e os outros dois ("Ver os N",
+// "Rejeitar os N") já tinham destino. O foco vai ao "Ver +N" do card, se houver,
+// senão ao primeiro de ✕ ↑ ✓ vivo — e, travado, ao ✕ prometido: o destino da
+// barra que some (`focarDepoisDoFocoNoAutor`). Decidido ANTES de fechar.
+function esquecerPelaFolha(ev, chave) {
+    const peloTeclado = veioDoTeclado(ev);
+    closeModal('autorModal');
+    esquecerAutor(chave);
+    removeCurrentCardEl();
+    showCurrentPlace();
+    if (peloTeclado) focarDepoisDoFocoNoAutor(false);
 }
 
 // O lote, com a MESMA janela de Desfazer de um card só — a trava dos botões, o
