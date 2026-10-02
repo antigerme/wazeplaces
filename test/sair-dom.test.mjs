@@ -98,7 +98,7 @@ function elemento(id, { oculto = false } = {}) {
 
 // Os nós que o app ESCREVE com dado de terceiro, e os modais em volta deles.
 const NOS = ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'accessDeniedMessage',
-  'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'cardLiveRegion'];
+  'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'lightboxAnuncio', 'cardLiveRegion'];
 const MODAIS = ['filtersModal', 'autorModal', 'accessDeniedModal', 'helpModal', 'logoutModal'];
 
 function montar() {
@@ -137,6 +137,9 @@ function montar() {
     'Lightbox.close = function (o) { const r = this.fecharDeVerdade(o); this.aberto = false; return r; };',
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'), fatiar('devolverFoco'),
     fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('showAuthScreen'),
+    // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
+    // ela pode dizer o nome do local ("Renomeado para …").
+    fatiar('anunciarNoLightbox'),
     fatiarConst('LIMPEZA_AO_FECHAR'),
     'return { openModal, closeModal, showAuthScreen, Lightbox };',
   ].join('\n');
@@ -156,6 +159,7 @@ function montar() {
     els.lightboxCount.textContent = `autor${MARCA}foto · há 2 dias`;
     els.lightboxCount.title = '01/10/2026';
     els.lightboxNomeTxt.textContent = `Padaria${MARCA}`;
+    els.lightboxAnuncio.textContent = `Renomeado para “Padaria${MARCA}”`;
   };
   // A VARREDURA: texto, HTML e todo atributo de todo nó, pela marca.
   const varrer = () => Object.values(els).flatMap((el) => {
