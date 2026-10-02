@@ -1010,7 +1010,123 @@ test('outra conta: CONTROLES — a MESMA conta entrando de novo noutra aba, e a 
   assert.deepEqual(B.saiu, { porOutraAba: true, outraConta: true });
 });
 
-// O perfil que CHEGA numa aba cuja sessão não é a do aparelho (o caso de C acima).
+// ═══ R6-1-04 · a aba SEM perfil quando OUTRA sessão toma o aparelho ══════════
+// A aba A abre com a sessão de X e o perfil FALHA (5xx do Waze); na aba B entra
+// Y. A não saía ("sem perfil, quem decide é o perfil") e seguia triando: o ✕
+// dela ia pro Waze com a sessão de X, e o pouso gravava o Histórico, o placar,
+// os autores e as conquistas no aparelho — já de Y (MEDIDO no Chromium,
+// auditoria de 2026-10-02). E o perfil só era pedido de novo no teto de 1 min.
+// Agora: com o dono do aparelho CONFIRMADO por outra sessão e a conta desta aba
+// desconhecida, o perfil é pedido NA HORA e o card trava até ele chegar.
+const marcaDe = new Function(fatiarDe(APP_SEM, 'marcaDaSessao') + '\nreturn marcaDaSessao;')();
+
+function abaSemPerfil(comp, { token = 'tok-x' } = {}) {
+  const aba = { escreveuNoAviso: [], noAviso: false, pedidosDePerfil: 0, travas: [] };
+  const localStorage = comp.para(aba);
+  const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
+  const AppState = { authenticated: true, profile: null, pendingAction: null, currentPlace: null,
+    stats: { read: 0, rejected: 0, skipped: 0 }, preferences: { undoEnabled: true, presenca: true } };
+  let soltarPerfil = null;
+  const deps = {
+    AppState, localStorage, safeLS, STATS_KEY, PREFERENCES_KEY, CONTA_KEY, DEVMODE_KEY: 'waze_places_devmode',
+    HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
+    SAIDA_KEY: 'waze_places_saida', preferenciasCarregadas: true, puladosNoInicioDaFila: 0,
+    API: { temSessaoNaMemoria: () => true, sessionToken: token }, extPerguntando: false, extRenovando: false,
+    // A trava de verdade, com nada mais travando.
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), conferindoContaDestaAba: false,
+    perfilPedidoEm: 0, PERFIL_REFAZER_MS: 60 * 1000,
+    // O perfil pedido: preso até o teste soltar (ele chega ou falha).
+    loadProfileAndAuxData: () => { aba.pedidosDePerfil++; return new Promise((ok) => { soltarPerfil = ok; }); },
+    aplicarTravaDeAcao: () => aba.travas.push(aba.acoesTravadas()),
+    handleLogout: (o) => { aba.saiu = o || true; },
+    aoMudarModoDevEmOutraAba: () => {}, atualizarSeloDeConquista: () => {}, agendarRedesenhoDoHistorico: () => {},
+    desenharPlacar: () => {}, updateStats: () => {}, updateInFlightIndicator: () => {},
+  };
+  const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao',
+    'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
+  Object.assign(aba, montar(nomes, deps), { AppState, deps, soltarPerfil: (perfil) => {
+    if (perfil) AppState.profile = perfil;
+    soltarPerfil();
+  } });
+  comp.abas.push(aba);
+  return aba;
+}
+// A outra aba, que só escreve no aparelho (o aviso dela chega na A).
+function outraAba(comp) {
+  const b = { escreveuNoAviso: [], noAviso: false, aoGravarEmOutraAba() {} };
+  comp.abas.push(b);
+  return comp.para(b);
+}
+const tiqueAba = () => new Promise((ok) => setImmediate(ok));
+
+// O armazenamento com a sessão desta aba guardada CRUA (o compartilhado grava os
+// valores iniciais em JSON, e um token entre aspas não é a sessão de ninguém).
+function aparelhoComASessao(token = 'tok-x', conta = { id: '4242', s: 'velha' }) {
+  const comp = armazenamentoCompartilhado({ [CONTA_KEY]: conta });
+  comp.dados.set(TOKEN, token);
+  return comp;
+}
+
+test('R6-1-04: a aba SEM perfil não segue triando quando outra sessão toma o aparelho — o perfil é pedido NA HORA, e o card trava até ele', async () => {
+  const comp = aparelhoComASessao();
+  const A = abaSemPerfil(comp);
+  assert.equal(A.sessaoDestaAbaEhAGuardada(), true, 'CONTROLE: a sessão desta aba não é a do aparelho na largada');
+  const B = outraAba(comp);
+  // Na B, a sessão de X cai e Y entra: o token primeiro…
+  B.setItem(TOKEN, 'tok-y');
+  comp.entregar();
+  assert.equal(A.pedidosDePerfil, 0, 'no aviso do TOKEN a conta guardada ainda é a da sessão anterior: nada a conferir');
+  assert.equal(A.acoesTravadas(), false, 'CONTROLE: sem o dono do aparelho confirmado, a aba não trava');
+  // …e a conta de Y, vista com a sessão nova (`aoConhecerConta`).
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '5151', s: marcaDe('tok-y') }));
+  comp.entregar();
+  assert.equal(A.saiu, undefined, 'a aba sem perfil saiu sem saber de quem era');
+  assert.equal(A.pedidosDePerfil, 1, 'DEFEITO: a conta desta aba não foi conferida na hora (só no teto de 1 min, numa prova de rede)');
+  assert.equal(A.acoesTravadas(), true, 'DEFEITO: a aba sem perfil seguiu triando num aparelho que já é de outra conta');
+  assert.equal(A.avisoDaTrava(), 'toast.esperaSessao', 'o card travado não diz que espera a sessão');
+  assert.equal(A.travas.at(-1), true, 'o card não foi redesenhado travado');
+  // Um aviso a mais da conta, com o perfil ainda no ar, não o pede de novo.
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '5151', s: marcaDe('tok-y') }));
+  comp.entregar();
+  assert.equal(A.pedidosDePerfil, 1, 'o perfil foi pedido duas vezes com o primeiro ainda no ar');
+  // O perfil FALHA: a dúvida fica, e a trava também.
+  A.soltarPerfil(null);
+  await tiqueAba();
+  assert.equal(A.acoesTravadas(), true, 'o perfil falhou e a aba destravou sem saber de quem é');
+  // A próxima prova de rede (o teto de 1 min já passou) pede de novo PELA
+  // conferência — a que destrava o card quando o perfil chegar.
+  A.refazerPerfilSeFaltar();
+  assert.equal(A.pedidosDePerfil, 2, 'o perfil que faltou não foi pedido de novo');
+  A.soltarPerfil({ id: 5151 });
+  await tiqueAba();
+  assert.equal(A.travas.at(-1), false, 'o perfil chegou pelo pedido de novo e o card seguiu desenhado travado');
+});
+
+test('R6-1-04: a conta confirmada destrava — e sem dúvida nenhuma, nada é pedido nem travado', async () => {
+  // A MESMA conta entrou de novo na outra aba: o perfil desta chega, e a trava sai.
+  const comp = aparelhoComASessao();
+  const A = abaSemPerfil(comp);
+  const B = outraAba(comp);
+  B.setItem(TOKEN, 'tok-x2');
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '4242', s: marcaDe('tok-x2') }));
+  comp.entregar();
+  assert.equal(A.acoesTravadas(), true, 'CONTROLE: a dúvida não acendeu');
+  A.soltarPerfil({ id: 4242 });
+  await tiqueAba();
+  assert.equal(A.acoesTravadas(), false, 'o perfil chegou e o card seguiu travado');
+  assert.equal(A.travas.at(-1), false, 'o card não foi redesenhado destravado');
+  assert.equal(A.AppState.contaEmDuvida, false);
+  // CONTROLE: a sessão desta aba É a do aparelho — sem dúvida, nada é pedido.
+  const c = aparelhoComASessao();
+  const C = abaSemPerfil(c);
+  outraAba(c).setItem(CONTA_KEY, JSON.stringify({ id: '4242', s: marcaDe('tok-x') }));
+  c.entregar();
+  assert.equal(C.sessaoDestaAbaEhAGuardada(), true, 'CONTROLE: a sessão desta aba não é a do aparelho');
+  assert.equal(C.pedidosDePerfil, 0, 'a aba da sessão do aparelho pediu o perfil à toa');
+  assert.equal(C.acoesTravadas(), false);
+});
 function montarPerfilQueChega({ tokenDesta, tokenNoAparelho = 'tok-222', dono = '222' }) {
   const ap = aparelho({ [TOKEN]: tokenNoAparelho, [CONTA_KEY]: { id: dono, s: 'm' } });
   const log = [];

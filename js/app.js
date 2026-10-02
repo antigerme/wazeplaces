@@ -5259,6 +5259,9 @@ const PERFIL_REFAZER_MS = 60 * 1000;
 function refazerPerfilSeFaltar() {
     if (!AppState.authenticated || AppState.profile) return;
     if (Date.now() - perfilPedidoEm < PERFIL_REFAZER_MS) return;
+    // Com a conta desta aba em dúvida (R6-1-04), pela conferência: ela destrava
+    // o card quando o perfil chega.
+    if (AppState.contaEmDuvida === true) { conferirContaDestaAba(); return; }
     AppState._profilePromise = loadProfileAndAuxData();
 }
 
@@ -11993,8 +11996,12 @@ function acoesTravadas() {
     // E a conferência de um 401 numa escrita do lightbox (`refazerDepoisDo401`):
     // a escrita ainda pode sair de novo, e nada pode cruzar com ela (L1).
     // E a APROVAÇÃO no ar do pedido que está na tela (`aprovacaoDaTelaNoAr`).
+    // E a conta DESTA aba sendo conferida, com o aparelho tomado por outra
+    // sessão (`contaDestaAbaEmDuvida`, R6-1-04) — só depois de o aviso de outra
+    // aba a acender (`AppState.contaEmDuvida`); a dúvida mesma é lida na hora.
     return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
-        || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0 || aprovacaoDaTelaNoAr());
+        || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0 || aprovacaoDaTelaNoAr()
+        || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()));
 }
 
 // A aprovação da foto do pedido NA TELA saiu e espera a resposta. O card fica
@@ -12034,6 +12041,8 @@ function avisoDaTrava() {
     if (!AppState.authenticated) return extRenovando ? 'toast.esperaSessao' : 'api.error.noSession';
     if (loteDeLidosEmVoo) return 'toast.esperaLote';
     if (escritasConferindo > 0) return 'toast.esperaSessao';
+    // A conta desta aba sendo conferida (R6-1-04): também é esperar a sessão.
+    if (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()) return 'toast.esperaSessao';
     if (aprovacaoDaTelaNoAr()) return 'toast.esperaAprovacao';
     return 'toast.esperaDesfazer';
 }
@@ -13478,11 +13487,55 @@ function contaSegueNoAparelho(id) {
 // token ANTES da conta, e no aviso do token o `CONTA_KEY` ainda pode dizer a
 // conta anterior — esta aba segue até o aviso da conta. Sem perfil na memória
 // a conta desta aba não se sabe ainda; quando ele chega, o `definirPerfil`
-// confere o mesmo.
+// confere o mesmo — e ele é pedido NA HORA, com o card travado até chegar
+// (`conferirContaDestaAba`, R6-1-04).
 function aoEntrarOutraContaEmOutraAba() {
-    if (contaSegueNoAparelho(AppState.profile && AppState.profile.id)) return false;
+    if (contaSegueNoAparelho(AppState.profile && AppState.profile.id)) {
+        if (contaDestaAbaEmDuvida()) conferirContaDestaAba();
+        return false;
+    }
     handleLogout({ porOutraAba: true, outraConta: true });
     return true;
+}
+
+// A conta DESTA aba ainda não se sabe — o perfil não chegou (falhou na
+// abertura, ou está a caminho) — e o aparelho tem dono CONFIRMADO por OUTRA
+// sessão: a guardada não é a desta aba, e a conta guardada foi vista com ela
+// (a marca `s`). Outra conta pode ter entrado noutra aba, e "segue" (ver
+// `contaSegueNoAparelho`) não queria dizer "é a mesma": esta aba seguia
+// triando, o ✕ ia pro Waze com a sessão dela e o pouso gravava o Histórico, o
+// placar, os autores e as conquistas no aparelho — já de quem entrou lá
+// (MEDIDO no Chromium, auditoria de 2026-10-02, R6-1-04).
+function contaDestaAbaEmDuvida() {
+    const vivo = AppState.profile && AppState.profile.id;
+    if (vivo !== undefined && vivo !== null && vivo !== '') return false;
+    if (!AppState.authenticated || sessaoDestaAbaEhAGuardada()) return false;
+    const guardado = safeLS.get('waze_session_token');
+    if (!guardado) return false;
+    let dono = null;
+    try { dono = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { dono = null; }
+    return !!(dono && dono.id && dono.s === marcaDaSessao(guardado));
+}
+
+// A dúvida apareceu: o perfil desta aba é pedido NA HORA — sem o teto de um
+// minuto do `refazerPerfilSeFaltar`, porque é UM pedido por um evento raro (o
+// aviso de outra aba) —, e até ele chegar nada decide aqui (`acoesTravadas`,
+// com o aviso da espera da sessão). Ele decide: OUTRA conta, a aba sai
+// (`definirPerfil`); a mesma, a trava sai. Falhou de novo, a trava fica, e o
+// próximo pedido é o do `refazerPerfilSeFaltar`, que passa por aqui.
+let conferindoContaDestaAba = false;
+function conferirContaDestaAba() {
+    AppState.contaEmDuvida = true;
+    aplicarTravaDeAcao();
+    if (conferindoContaDestaAba) return;
+    conferindoContaDestaAba = true;
+    const p = loadProfileAndAuxData();
+    AppState._profilePromise = p;
+    Promise.resolve(p).catch(() => {}).then(() => {
+        conferindoContaDestaAba = false;
+        if (!contaDestaAbaEmDuvida()) AppState.contaEmDuvida = false;
+        aplicarTravaDeAcao();
+    });
 }
 
 // O "Sair" foi numa OUTRA aba? O que o separa da QUEDA da sessão lá é a CONTA:
