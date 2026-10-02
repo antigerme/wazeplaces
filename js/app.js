@@ -15693,8 +15693,9 @@ const SAIDA_REIVINDICACAO_ASSENTA_MS = 60;
 // que encerrou o app em segundo plano — tem de reconhecer como DELA o que
 // anotou antes de morrer e mandá-lo na abertura, como sempre (O2, O5); com uma
 // marca por página, esperava a marca vencer. Outra aba tem outra. Sem o
-// `sessionStorage`, uma por página.
-const ABA_DESTA_PAGINA = (() => {
+// `sessionStorage`, uma por página. É `let` porque a aba DUPLICADA troca de
+// marca logo ao abrir (ver `segurarMarcaDaAba`).
+let ABA_DESTA_PAGINA = (() => {
     const nova = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
     try {
         const tinha = sessionStorage.getItem('__abaDaSaida');
@@ -15705,6 +15706,39 @@ const ABA_DESTA_PAGINA = (() => {
 })();
 let saidaEsperandoOutraAba = false;
 
+// "Duplicar aba" (Chrome, Firefox, Safari) COPIA o `sessionStorage` — e a marca
+// com ele: a aba duplicada nascia com a MESMA marca da original, achava que a
+// decisão que a original tinha no ar era DELA e a mandava de novo ao abrir
+// (auditoria de 2026-10-02, R6-2-10: dois envios do mesmo pedido). A página
+// SEGURA uma trava do navegador com o nome da marca enquanto vive; ao abrir,
+// a trava ocupada quer dizer que OUTRA página viva tem a marca — esta é a
+// cópia, e ganha outra. Recarregar a mesma aba solta a trava da página que
+// morre a tempo de a recarregada pegá-la (MEDIDO no Chromium e no WebKit: 20
+// de 20 recargas ficaram com a marca, e a cópia achou a trava ocupada). Sem
+// `navigator.locks`, segue como antes. O nome é da trava, não do armazenamento:
+// trava do navegador não grava nada. O esvaziamento da fila de saída espera a
+// conferência (`travaDaSaida`), que leva milissegundos.
+const MARCA_DA_ABA_TRAVA = '__abaDaSaida:';
+const marcaDaAbaConferida = segurarMarcaDaAba();
+function segurarMarcaDaAba() {
+    let locks = null;
+    try { locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null; } catch (e) {}
+    if (!locks) return Promise.resolve();
+    const segurar = (marca) => new Promise((pronto) => {
+        locks.request(MARCA_DA_ABA_TRAVA + marca, { ifAvailable: true }, (lock) => {
+            pronto(!!lock);
+            // Presa pela vida da página: quem a solta é o navegador, quando ela morre.
+            return lock ? new Promise(() => {}) : undefined;
+        }).catch(() => pronto(true));   // trava recusada: fica a marca que tinha
+    });
+    return segurar(ABA_DESTA_PAGINA).then((minha) => {
+        if (minha) return undefined;
+        ABA_DESTA_PAGINA = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
+        try { sessionStorage.setItem('__abaDaSaida', ABA_DESTA_PAGINA); } catch (e) { /* a marca é desta página */ }
+        return segurar(ABA_DESTA_PAGINA);
+    });
+}
+
 // A trava ENTRE ABAS do esvaziamento: `null` quando outra aba está esvaziando;
 // senão `{ reserva, soltar }` — `reserva` quando o navegador não tem a trava, e
 // aí vale a reivindicação item a item.
@@ -15712,7 +15746,10 @@ function travaDaSaida() {
     let locks = null;
     try { locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null; } catch (e) {}
     if (!locks) return Promise.resolve({ reserva: true, soltar() {} });
-    return new Promise((pronto) => {
+    // A marca desta aba conferida ANTES (ver `segurarMarcaDaAba`): a aba
+    // duplicada que esvaziasse com a marca da original mandaria de novo o que a
+    // original tem no ar.
+    return Promise.resolve(marcaDaAbaConferida).then(() => new Promise((pronto) => {
         let decidiu = false;
         locks.request(SAIDA_TRAVA, { ifAvailable: true }, (lock) => {
             decidiu = true;
@@ -15722,7 +15759,7 @@ function travaDaSaida() {
             // sozinha — é do navegador.
             return new Promise((soltar) => pronto({ reserva: false, soltar }));
         }).catch(() => { if (!decidiu) pronto({ reserva: true, soltar() {} }); });
-    });
+    }));
 }
 
 // Outra aba está esvaziando: espera ela SOLTAR a trava e tenta uma vez. Uma

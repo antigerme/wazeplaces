@@ -1061,6 +1061,8 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
       SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], SAIDA_TENTATIVAS_POR_ITEM: 3,
       SAIDA_TRAVA: 'waze_places_saida', SAIDA_REIVINDICACAO_MS: 60000, SAIDA_REIVINDICACAO_ASSENTA_MS: 10,
       ABA_DESTA_PAGINA: 'aba-' + nome,
+      // A marca da aba já conferida (a aba DUPLICADA: test/contas-abas, R6-2-10).
+      marcaDaAbaConferida: Promise.resolve(),
       // O pouso: o que ele conta no Histórico é do APARELHO (as abas dividem).
       registrarPousoDeSaida: (tipo, place, r) => {
         if (r && (r.success || r.errorCategory === 'already_processed')) aparelho.historico.push(place.venueID);

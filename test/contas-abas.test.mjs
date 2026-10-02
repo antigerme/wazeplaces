@@ -1407,7 +1407,7 @@ test('F1: a página RECARREGADA na mesma aba manda o que anotou antes de morrer 
   assert.deepEqual(depois.enviados, ['A:v1'], 'a mesma aba recarregada esperou a própria marca vencer');
   // E a marca da aba mora no `sessionStorage`, que é da aba e sobrevive a
   // recarregar: a MESMA aba recarregada tem a mesma marca; outra aba, outra.
-  const iife = /^const ABA_DESTA_PAGINA = (\(\(\) => \{[^]*?\n\}\)\(\));/m.exec(APP);
+  const iife = /^let ABA_DESTA_PAGINA = (\(\(\) => \{[^]*?\n\}\)\(\));/m.exec(APP);
   assert.ok(iife, 'a marca da aba mudou de forma — o teste não a acha');
   const marcaDaAba = (sessionStorage) => new Function('sessionStorage', 'return ' + iife[1])(sessionStorage);
   const sessao = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
@@ -1417,6 +1417,95 @@ test('F1: a página RECARREGADA na mesma aba manda o que anotou antes de morrer 
   assert.notEqual(marcaDaAba(sessao()), primeira, 'outra aba ganhou a MESMA marca');
   const bloqueado = { getItem() { throw new Error('bloqueado'); }, setItem() { throw new Error('bloqueado'); } };
   assert.match(marcaDaAba(bloqueado), /^[0-9a-z]+\.[0-9a-z]+$/, 'sem o armazenamento da aba, a página ficou sem marca');
+});
+
+// ── R6-2-10 (2026-10-02): a aba DUPLICADA ────────────────────────────────────
+// "Duplicar aba" (Chrome, Firefox, Safari) COPIA o `sessionStorage`, e a marca
+// com ele: a cópia nascia com a MESMA marca da original, achava que a decisão
+// que a original tinha no ar era DELA e a mandava de novo ao abrir — MEDIDO,
+// dois envios do mesmo pedido (o Histórico ficava em 1 pelo pouso da outra
+// aba). A página segura uma trava do navegador com o nome da marca; a cópia a
+// acha ocupada e troca de marca. As travas daqui são as do navegador (por NOME,
+// e de uma página — a que morre solta as dela), como medido no Chromium e no
+// WebKit: a recarregada pega a trava, a cópia a acha ocupada.
+function navegadorComTravas() {
+  const donos = new Map();
+  return {
+    donos,
+    para(pagina) {
+      return {
+        request(nome, opcoes, cb) {
+          if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+          return Promise.resolve().then(() => {
+            if (donos.has(nome)) return (opcoes && opcoes.ifAvailable) ? cb(null) : new Promise(() => {});
+            donos.set(nome, pagina);
+            return Promise.resolve(cb({ name: nome })).finally(() => { if (donos.get(nome) === pagina) donos.delete(nome); });
+          });
+        },
+      };
+    },
+    morrer(pagina) { for (const [nome, dono] of [...donos]) if (dono === pagina) donos.delete(nome); },
+  };
+}
+// O `sessionStorage` de uma aba; `copia()` é o "Duplicar aba".
+function sessaoDaAba(inicial = []) {
+  const m = new Map(inicial);
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), copia: () => sessaoDaAba(m) };
+}
+// A marca de uma página que ABRE: o trecho de verdade do app.js, rodado com o
+// armazenamento e as travas dela.
+function abrirPaginaComMarca(sessionStorage, locks) {
+  const iife = /^let ABA_DESTA_PAGINA = \(\(\) => \{[^]*?\n\}\)\(\);/m.exec(APP_SEM);
+  const nome = /^const MARCA_DA_ABA_TRAVA = [^;]+;/m.exec(APP_SEM);
+  const chamada = /^const marcaDaAbaConferida = segurarMarcaDaAba\(\);/m.exec(APP_SEM);
+  assert.ok(iife && nome && chamada, 'a marca da aba (ou a trava dela) mudou de forma — o teste não a acha');
+  const fonte = [iife[0], nome[0], fatiarDe(APP_SEM, 'segurarMarcaDaAba'), chamada[0],
+    'return { marca: () => ABA_DESTA_PAGINA, conferida: marcaDaAbaConferida };'].join('\n');
+  return new Function('sessionStorage', 'navigator', fonte)(sessionStorage, { locks });
+}
+
+test('R6-2-10: a aba DUPLICADA troca de marca ao abrir — e a RECARREGADA fica com a dela', async () => {
+  const nav = navegadorComTravas();
+  const daA = sessaoDaAba();
+  const A = abrirPaginaComMarca(daA, nav.para('A'));
+  await A.conferida;
+  const marcaA = A.marca();
+  // Duplicar aba: a cópia do `sessionStorage`, com a original viva.
+  const daB = daA.copia();
+  const B = abrirPaginaComMarca(daB, nav.para('B'));
+  assert.equal(B.marca(), marcaA, 'PRÉ-CONDIÇÃO: a cópia não nasceu com a marca da original (o teste não mede o "Duplicar aba")');
+  await B.conferida;
+  assert.notEqual(B.marca(), marcaA,
+    'DEFEITO: a aba duplicada ficou com a marca da original — ela mandaria de novo a decisão que a original tem no ar');
+  assert.equal(daB.getItem('__abaDaSaida'), B.marca(), 'a marca nova da cópia não ficou na aba dela (recarregar a cópia voltaria à da original)');
+  assert.equal(A.marca(), marcaA, 'a original perdeu a marca');
+  // Recarregar a A: a página que morre solta a trava, e a recarregada fica com
+  // a marca — é o que manda, na abertura, o que ela anotou antes de morrer (O2, O5).
+  nav.morrer('A');
+  const A2 = abrirPaginaComMarca(daA, nav.para('A2'));
+  await A2.conferida;
+  assert.equal(A2.marca(), marcaA, 'a página RECARREGADA perdeu a marca da aba (e esperaria a própria marca vencer)');
+  // CONTROLE: sem `navigator.locks`, como antes — a cópia segue com a mesma marca.
+  const C = abrirPaginaComMarca(daA.copia(), undefined);
+  await C.conferida;
+  assert.equal(C.marca(), marcaA, 'CONTROLE: sem a trava do navegador, a cópia mudou de marca (o instrumento mede outra coisa)');
+});
+
+test('R6-2-10: o esvaziamento da fila de saída espera a marca da aba ser conferida', async () => {
+  let soltar;
+  const conferida = new Promise((ok) => { soltar = ok; });
+  const pedidas = [];
+  const navigator = { locks: { request: (nome, op, cb) => { pedidas.push(nome); return Promise.resolve(cb({ name: nome })); } } };
+  const travaDaSaida = new Function('navigator', 'marcaDaAbaConferida', 'SAIDA_TRAVA',
+    fatiarDe(APP_SEM, 'travaDaSaida') + '\nreturn travaDaSaida;')(navigator, conferida, 'waze_places_saida');
+  const pedido = travaDaSaida();
+  await tiqueAba();
+  assert.deepEqual(pedidas, [], 'DEFEITO: a aba foi esvaziar a fila de saída antes de saber se a marca é dela');
+  soltar();
+  const trava = await pedido;
+  assert.deepEqual(pedidas, ['waze_places_saida'], 'CONTROLE: conferida a marca, o esvaziamento não pegou a trava');
+  assert.equal(trava.reserva, false);
+  trava.soltar();
 });
 
 test('F1: a página que SAI solta as marcas dela — a reabertura (ou a outra aba) manda NA HORA o que ela tinha no ar', async () => {
