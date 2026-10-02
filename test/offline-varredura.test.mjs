@@ -243,8 +243,10 @@ test('offlinePodarTiles: apaga só o que não é da fila, e não cria o cache de
   const guardados = ['https://t/1', 'https://t/2', 'https://t/3'];
   const apagados = [];
   let criou = false;
+  // A lista do "já pronto" desta janela (R6-4-1): o que a poda apaga sai dela também.
+  const feitos = { janela: 7, epoca: 0, us: new Set(['https://t/1', 'https://t/2', 'foto-1']) };
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles',
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', offlineFeitosNaJanela: feitos,
     caches: {
       has: async () => guardados.length > 0,
       open: async () => { criou = true; return { keys: async () => guardados.map((url) => ({ url })), delete: async (r) => { apagados.push(r.url); } }; },
@@ -254,10 +256,109 @@ test('offlinePodarTiles: apaga só o que não é da fila, e não cria o cache de
   const podar = new Function(...chaves, fatiar('offlinePodarTiles') + '\nreturn offlinePodarTiles;')(...chaves.map((k) => deps[k]));
   assert.equal(await podar(new Set(['https://t/2']), 0), 2);
   assert.deepEqual(apagados.sort(), ['https://t/1', 'https://t/3']);
+  assert.deepEqual([...feitos.us].sort(), ['foto-1', 'https://t/2'],
+    'o tile que a poda apagou seguiu "pronto" na lista da janela (R6-4-1) — ou a poda tirou da lista o que ficou');
+  // De OUTRA época (esqueceram no meio), a lista não é a deste cache: não mexe.
+  const outra = { janela: 7, epoca: 3, us: new Set(['https://t/1']) };
+  const deps2 = { ...deps, offlineFeitosNaJanela: outra };
+  await new Function(...chaves, fatiar('offlinePodarTiles') + '\nreturn offlinePodarTiles;')(...chaves.map((k) => deps2[k]))(new Set(), 0);
+  assert.deepEqual([...outra.us], ['https://t/1'], 'a poda mexeu na lista de outra época');
   // Sem cache (quem nunca ligou o offline): não abre — `open` CRIARIA um vazio.
   guardados.length = 0; criou = false;
   assert.equal(await podar(new Set(), 0), 0);
   assert.equal(criou, false, 'a poda criou o cache do mapa pra quem nunca o teve');
+});
+
+// ── R6-4-1: a poda × a lista do "já pronto" (auditoria de 2026-10-01) ─────────
+// O "pronto" poda do cache os tiles dos pedidos que saíram da fila, e as URLs
+// deles seguiam na lista do "já pronto" desta janela. O pedido que VOLTAVA à
+// fila na mesma janela (o filtro de antes, o pulado que o ↻ traz) era pulado:
+// "Pronto — 2 pedidos no aparelho" e, sem rede, o mapa dele vazio (medido no
+// navegador, t1 e t1b). Os testes de cima não podiam ver: o harness troca a poda
+// por `async () => 0`. Aqui a poda e a varredura rodam DE VERDADE sobre um cache
+// de mentira — o mesmo em que o download grava e de onde a poda apaga.
+const flush = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+function aparelhoComCache() {
+  const cache = new Map();
+  const baixados = [];
+  const fila = { itens: [] };
+  let segurarPoda = null;              // com uma promessa aqui, cada apagar da poda espera por ela
+  const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: 0, epoca: 0,
+    feitos: { janela: null, epoca: -1, us: new Set() }, preparada: null, gravada: null, varrida: null };
+  const agora = 1492385 * 1200000 + 1000;   // uma janela só, do começo ao fim
+  st.gesto = agora;
+  const deps = {
+    AppState: { authenticated: true, queue: [{ venueID: 'v' }] }, Treino: { ativo: false }, navigator: { onLine: true },
+    Date: { now: () => agora }, offlineLigado: () => true,
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1, OFFLINE_ANUNCIAR_A_CADA: 50,
+    OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'), OFFLINE_TILES_CACHE: 'waze-places-tiles',
+    offlineGravarFila: async () => true,
+    offlineItensDaFila: async () => fila.itens.map((u) => ({ u, tile: true })),
+    offlineBaixar: async (u) => { baixados.push(u); cache.set(u, true); return true; },
+    offlineSondarRede: async () => true,
+    offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {}, dfato: () => {},
+    setTimeout: (fn) => { fn(); return 0; },
+    caches: {
+      has: async () => cache.size > 0,
+      open: async () => ({
+        keys: async () => [...cache.keys()].map((url) => ({ url })),
+        delete: async (r) => { if (segurarPoda) await segurarPoda; cache.delete(r.url); },
+      }),
+    },
+  };
+  const corpo = [fatiar('offlinePodarTiles'), fatiar('offlineVarrer')].join('\n')
+    .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
+    .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
+    .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
+    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada')
+    .replace(/offlineFilaVarrida/g, '__st.varrida');
+  const chaves = Object.keys(deps);
+  const varrer = new Function(...chaves, '__st', corpo + '\nreturn offlineVarrer;')(...chaves.map((k) => deps[k]), st);
+  return { varrer, st, cache, baixados, fila, segurar: (p) => { segurarPoda = p; } };
+}
+
+test('R6-4-1: o pedido que sai da fila e VOLTA na mesma janela tem o tile baixado de novo — a poda o tinha apagado', async () => {
+  const a = aparelhoComCache();
+  a.fila.itens = ['tile-p1', 'tile-p2'];                 // a fila A
+  await a.varrer();
+  assert.equal(a.st.resultado, 'pronto', 'PRÉ-CONDIÇÃO: a preparação de A não ficou pronta');
+  a.fila.itens = ['tile-p1'];                             // a fila B (o p2 saiu: outro filtro)
+  await a.varrer();
+  await flush();
+  assert.equal(a.cache.has('tile-p2'), false, 'PRÉ-CONDIÇÃO: a poda do "pronto" de B não apagou o tile do p2');
+  const antes = a.baixados.length;
+  a.fila.itens = ['tile-p1', 'tile-p2'];                 // de volta à A, na MESMA janela
+  await a.varrer();
+  await flush();
+  assert.equal(a.st.resultado, 'pronto');
+  assert.deepEqual(a.baixados.slice(antes), ['tile-p2'],
+    'o pedido que voltou foi pulado como pronto — a linha diria "Pronto" com o mapa dele fora do aparelho');
+  assert.equal(a.cache.has('tile-p2'), true, 'o tile do pedido que voltou não está no aparelho');
+});
+
+test('R6-4-1: a varredura seguinte não começa com a poda da anterior ainda apagando', async () => {
+  const a = aparelhoComCache();
+  a.fila.itens = ['tile-p1', 'tile-p2'];
+  await a.varrer();
+  // A fila B: a poda do "pronto" dela demora (o cache apaga devagar)…
+  a.fila.itens = ['tile-p1'];
+  let soltar = null;
+  a.segurar(new Promise((ok) => { soltar = ok; }));
+  const varreduraB = a.varrer();
+  await flush();
+  // …e nesse meio a busca traz o p2 de volta e chama a varredura (como o `fetchNextPage`).
+  a.fila.itens = ['tile-p1', 'tile-p2'];
+  const outra = a.varrer();
+  await flush();
+  a.segurar(null);
+  soltar();
+  await Promise.all([varreduraB, outra]);
+  await flush();
+  assert.equal(a.st.resultado, 'pronto');
+  assert.equal(a.cache.has('tile-p2'), true,
+    'a varredura da busca começou com a poda da anterior apagando: terminou "pronto" e a poda levou o tile do p2 depois');
+  assert.equal(a.st.varrendo, false);
 });
 
 // A cota estourada ABORTA a transação do IndexedDB sem sempre passar pelo

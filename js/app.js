@@ -16682,6 +16682,13 @@ async function offlineSondarRede(u) {
 // revalida o tile barato. `caches.has` antes de `open` pelo mesmo motivo da
 // hidratação do worker (`open` CRIA o cache), e a época pra não mexer num cache
 // que o "Sair" acabou de apagar.
+//
+// O que ela apaga sai TAMBÉM da lista do "já pronto" desta janela
+// (`offlineFeitosNaJanela`): a lista não sabia da poda, e o pedido que VOLTA à
+// fila na mesma janela — o filtro de antes aplicado de novo, o pulado que o ↻
+// traz, o recusado que a `devolverPedidoRecusado` devolve — era pulado como
+// pronto. A linha dizia "Pronto" e, sem rede, o mapa dele abria vazio, sem
+// sentinela nenhuma (o tile nem estava no cache). Auditoria de 2026-10-01, R6-4-1.
 async function offlinePodarTiles(manter, epoca) {
     try {
         if (!(await caches.has(OFFLINE_TILES_CACHE))) return 0;
@@ -16690,7 +16697,13 @@ async function offlinePodarTiles(manter, epoca) {
         let n = 0;
         for (const req of await c.keys()) {
             if (epoca !== offlineEpoca) return n;
-            if (!manter.has(req.url)) { await c.delete(req); n++; }
+            if (!manter.has(req.url)) {
+                // Sai da lista ANTES do cache: o contrário deixaria, nesse meio, um
+                // tile "pronto" que já não está no aparelho.
+                if (offlineFeitosNaJanela.epoca === epoca) offlineFeitosNaJanela.us.delete(req.url);
+                await c.delete(req);
+                n++;
+            }
         }
         return n;
     } catch (e) { return 0; }
@@ -16849,11 +16862,15 @@ async function offlineVarrer() {
             offlineUltimoResultado = 'pronto';
             dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}),
                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
-            // Só no "pronto": a lista inteira é a da fila guardada. Sem aguardar —
-            // a poda não muda o resultado, e o aviso ao worker sai quando ela acaba.
-            offlinePodarTiles(tilesDaFila, epoca).then((n) => {
-                if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
-            });
+            // Só no "pronto": a lista inteira é a da fila guardada. AGUARDADA, com
+            // a varredura ainda no ar (`offlineVarrendo`): o gatilho que chegar
+            // nesse meio fica pra depois dela (`offlinePedidaDeNovo`). Solta, a
+            // varredura seguinte — a da busca que chegou durante esta — começava
+            // com a poda ainda apagando: contava como pronto o tile de um pedido
+            // que voltou à fila e terminava "pronto" sem ele (R6-4-1). O resultado
+            // já está decidido acima; a poda só arruma o cache.
+            const n = await offlinePodarTiles(tilesDaFila, epoca);
+            if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
         } else {
             offlineUltimoResultado = 'parcial';
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
