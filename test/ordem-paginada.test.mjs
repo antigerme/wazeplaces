@@ -88,7 +88,7 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
   const log = [];
   const AppState = {
     authenticated: true, hasMore, fetching: false, fetchEpoch: 0, queue: queue.slice(), currentPlace: null,
-    serverTotal: queue.length, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null, ordemPendente: false,
+    serverTotal: queue.length, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
     autorEmFoco: null,
     filters: { unreadOnly: true, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '',
       categories: [], sortOrder },
@@ -150,8 +150,6 @@ async function triar(m, waze) {
     vistos.push(p);
     waze.tratar(chave(p));
     AppState.queue.shift();                        // advanceQueue
-    AppState.currentPlace = null;
-    if (AppState.ordemPendente) { AppState.ordemPendente = false; app.sortQueue(); }
     AppState.currentPlace = AppState.queue[0] || null;
     if (AppState.queue.length <= PREFETCH_THRESHOLD && AppState.hasMore) {
       await app.fetchNextPage();
@@ -239,10 +237,11 @@ test('F8: trocar pra "Perto de casa" com a fila PELA METADE — o resto vem na h
   for (let i = 0; i < 50 && m.AppState.fetching === false && m.AppState.queue.length === 500; i++) await new Promise((ok) => setTimeout(ok, 0));
   for (let i = 0; i < 50 && m.AppState.fetching; i++) await new Promise((ok) => setTimeout(ok, 0));
   assert.equal(m.AppState.queue.length, 554, 'o resto da fila não veio: a ordem por distância vale só pra página 1');
-  // O card da tela não troca debaixo do dedo; o próximo já é o mais perto.
-  assert.equal(m.AppState.ordemPendente, true, 'a ordem do resto não ficou pendente pro próximo card');
-  m.AppState.queue.shift(); m.AppState.ordemPendente = false; m.app.sortQueue();   // o advanceQueue
-  assert.equal(m.AppState.queue[0].venueID, 'V540', 'o próximo card depois da troca não é o mais perto de casa');
+  // O card da tela não troca debaixo do dedo; o próximo JÁ é o mais perto — é o
+  // que o card de fundo anuncia, e o que vem depois do gesto (R6-2-06: ele vinha
+  // pela ordem velha até o próximo card).
+  assert.equal(m.AppState.queue[0], m.AppState.currentPlace, 'o card da tela saiu da frente da fila');
+  assert.equal(m.AppState.queue[1].venueID, 'V540', 'o próximo card depois da troca não é o mais perto de casa');
 });
 
 // ── R56-3: a fila inteira se decide pela ordem que VALE, não pela salva ─────────

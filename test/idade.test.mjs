@@ -184,7 +184,8 @@ test('pedido SEM data vai pro FIM — nunca crava a posição 0', () => {
   // Não estava ativo na fila do owner (370 de 370 com data), mas o core manda
   // `ur.dateAdded ?? null`: basta o Waze omitir o campo uma vez.
   const APPJS = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  const i = APPJS.indexOf('function sortQueue()');
+  // (A assinatura ganhou a opção do card da tela, R6-2-06: casa só o nome.)
+  const i = APPJS.indexOf('function sortQueue(');
   const iFoco = APPJS.indexOf('function manterFocoNaFrente()');
   const corpo = APPJS.slice(i, APPJS.indexOf('\n}', i) + 2) + '\n' + APPJS.slice(iFoco, APPJS.indexOf('\n}', iFoco) + 2);
   const monta = (ordem) => {

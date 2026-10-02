@@ -309,9 +309,6 @@ const AppState = {
     _fetchPromise: null,
     _profilePromise: null,
     loadError: false,
-    // Uma página nova chegou enquanto havia card na tela: a ordem dela espera
-    // o `advanceQueue`. Ver o comentário no `fetchNextPage`.
-    ordemPendente: false,
     filters: filtrosDeFabrica(),
     preferences: preferenciasDeFabrica(),
     devMode: { unlocked: false, active: false },
@@ -4670,8 +4667,9 @@ function reordenarFilaNaTela() {
 }
 
 // Traz as páginas que faltam (ver `ordemPrecisaDaFilaInteira`). O que chega
-// entra na ordem a partir do PRÓXIMO card (`ordemPendente`): trocar o da tela
-// seria trocar o card debaixo do dedo. É o `maybePrefetch` sem o limiar.
+// entra na ordem JÁ, atrás do card da tela (`sortQueue` com
+// `semTrocarOCardDaTela`): trocar o da tela seria trocar o card debaixo do dedo.
+// É o `maybePrefetch` sem o limiar.
 function buscarORestoDaFila() {
     if (Treino.ativo || !AppState.hasMore || AppState.fetching) return;
     fetchNextPage().then(() => {
@@ -5224,8 +5222,10 @@ async function completarPerfilChegado(perfil, epoca) {
     // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
     // dois só valiam na próxima busca.
     aplicarRecusaAutomatica();
-    if (AppState.currentPlace) AppState.ordemPendente = true;
-    else sortQueue();
+    // Com um card na tela, só o RESTO entra na ordem, e o card de fundo passa a
+    // anunciar o próximo de verdade (ver o `sortQueue`, R6-2-06).
+    sortQueue({ semTrocarOCardDaTela: true });
+    if (AppState.currentPlace) aoMudarAFilaPorBaixo();
     // "Minha área": a busca que esperava por este perfil é refeita (ver
     // `fetchNextPage`) — pela caixa da área ou, num perfil sem caixa, com o
     // filtro desligado e dito. ANTES do país: desligado, o "Minha área" deixa
@@ -9137,7 +9137,6 @@ function resetQueue() {
     enviarPendenciasDoLightbox();
     removeUndoBanner();
     AppState.fetchEpoch++;              // invalida fetch em voo (descarta obsoleto)
-    AppState.ordemPendente = false;     // a fila vai embora; não há ordem a aplicar
     AppState.queue = [];
     AppState.hasMore = true;
     // Fila nova: o que passou pela anterior pode voltar — é o "atualizar".
@@ -9278,7 +9277,22 @@ function pontoDoPlace(p) {
 // trazer todas (ver `ordemPrecisaDaFilaInteira`). Este comentário dizia que "o
 // Waze devolve tudo de uma vez" — e com 554 pedidos o mais antigo aparecia no
 // card 499 (auditoria da fila, 2026-09-26).
-function sortQueue() {
+//
+// `semTrocarOCardDaTela`: a ordem vale JÁ pro RESTO da fila, e o card NA TELA
+// fica na frente — é a ordem que chega por baixo dele (uma página nova, o perfil
+// que trouxe a casa). A fila INTEIRA não pode ser reordenada com um card na
+// tela: ele é o `queue[0]` e a ação vai pra ele (ver o `fetchNextPage`). Isso
+// adiava a ordem pro próximo card (`ordemPendente`), e nesse meio o card de
+// FUNDO e o aquecimento anunciavam o `queue[1]` da ordem velha: o próximo card
+// era outro — MEDIDO, s48 (chega um pedido mais recente) e s49 ("Perto de casa"
+// com o perfil chegando depois do 1º card); auditoria de 2026-10-02, R6-2-06.
+function sortQueue({ semTrocarOCardDaTela = false } = {}) {
+    if (semTrocarOCardDaTela && AppState.currentPlace && AppState.queue[0] === AppState.currentPlace) {
+        const naTela = AppState.queue.shift();
+        sortQueue();
+        AppState.queue.unshift(naTela);
+        return;
+    }
     const ref = referenciaDaOrdem(AppState.filters.sortOrder);
     if (ref) {
         AppState.queue.sort((a, b) => {
@@ -9876,21 +9890,19 @@ function fetchNextPage() {
                     AppState.serverTotal += newPlaces.length;
                     busca.novos += newPlaces.length;
                     trackSeenCategories(newPlaces);
-                    // Reordenar AQUI, com um card já na tela, quebra a invariante de
-                    // que o card exibido é o `queue[0]` — e o resto do app inteiro
-                    // conta com ela. `advanceQueue` remove o TOPO (`shift`), mas a
-                    // ação é enviada pro `currentPlace`: divergindo os dois, o app
-                    // rejeita o que você vê e apaga OUTRO da fila, que some sem ser
-                    // tratado — e o seu volta na sua frente depois. MEDIDO no
-                    // navegador nas três ordens (recentes, antigos e perto de casa).
-                    // O aquecimento tem o mesmo prejuízo: ele mira no `queue[1]` do
-                    // instante em que dispara e não roda de novo, então baixa foto
-                    // que não vai aparecer e deixa de baixar a que vai.
-                    //
-                    // O outro ponto que reordena (`guardarReferencias`) já tinha
-                    // essa proteção, com o motivo escrito; este ficou sem.
-                    if (AppState.currentPlace) AppState.ordemPendente = true;
-                    else sortQueue();
+                    // Reordenar a fila INTEIRA aqui, com um card já na tela, quebra a
+                    // invariante de que o card exibido é o `queue[0]` — e o resto do
+                    // app inteiro conta com ela. `advanceQueue` remove o TOPO
+                    // (`shift`), mas a ação é enviada pro `currentPlace`: divergindo
+                    // os dois, o app rejeita o que você vê e apaga OUTRO da fila, que
+                    // some sem ser tratado — e o seu volta na sua frente depois.
+                    // MEDIDO no navegador nas três ordens (recentes, antigos e perto
+                    // de casa). Então o card da tela fica na frente e só o RESTO entra
+                    // na ordem — já, e não no próximo card: adiada, o card de fundo e
+                    // o aquecimento anunciavam o `queue[1]` da ordem velha, e o
+                    // próximo card era outro (R6-2-06). O `aoMudarAFilaPorBaixo` logo
+                    // abaixo refaz o card de fundo com o próximo de verdade.
+                    sortQueue({ semTrocarOCardDaTela: true });
                     aplicarRecusaAutomatica();
                     aoMudarAFilaPorBaixo();
                 }
@@ -19309,15 +19321,9 @@ async function handleBatchMarkRead() {
 function advanceQueue() {
     AppState.queue.shift();
     AppState.currentPlace = null;
-    // A ordem que a página nova pediu é aplicada AQUI, com o card já fora da
-    // tela: é o único instante em que reordenar não troca nada por baixo de
-    // ninguém. O `showCurrentPlace()` logo abaixo mostra o novo topo e agenda o
-    // aquecimento em cima dele, então a foto pré-carregada volta a ser a do
-    // card que vem — sem gatilho novo.
-    if (AppState.ordemPendente) {
-        AppState.ordemPendente = false;
-        sortQueue();
-    }
+    // A ordem que uma página nova (ou o perfil) pediu já foi aplicada ao RESTO
+    // quando chegou (`sortQueue` com `semTrocarOCardDaTela`, R6-2-06): o topo
+    // que fica é o próximo na ordem, o mesmo que o card de fundo anunciava.
     updatePendingCount();
 
     if (AppState.queue.length > 0) {
