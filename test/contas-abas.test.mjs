@@ -291,13 +291,20 @@ function montarSairComCamadas() {
   Object.assign(m.deps, {
     renomeacaoPendente: null, exclusaoPendente: null, placeResolvidoPorAprovacao: null,
     aprovacaoPendente: { enviar: () => saiu.push('aprovação:' + m.API.sessionToken), cancelar: () => { m.deps.aprovacaoPendente = null; } },
-    Presenca: { lidaPendente: '777', timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
+    // A dívida do "lida" mora num conjunto próprio desde o R6-5-1: o "lida" da
+    // rajada que não pode sair (sem o perfil) vira dívida, e o fechamento paga
+    // as dívidas (`presencaPagarDevidas`).
+    Presenca: { lidaPendente: '777', lidaDevendo: new Set(), timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
     presencaMarcarLida: (id) => saiu.push('lida:' + id + ':' + m.API.sessionToken),
   });
-  m.deps.window.Presenca.esquecer = (o) => { m.log.push(['presenca', o || null]); m.deps.Presenca.lidaPendente = null; };
-  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
+  m.deps.window.Presenca.esquecer = (o) => {
+    m.log.push(['presenca', o || null]);
+    m.deps.Presenca.lidaPendente = null;
+    m.deps.Presenca.lidaDevendo.clear();
+  };
+  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaPagarDevidas', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
   const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada', 'cancelarPendenciasDoLightbox',
-    'avancarSeAprovado', 'presencaPagarLida', 'presencaEu'], m.deps, fonte);
+    'avancarSeAprovado', 'presencaPagarLida', 'presencaPagarDevidas', 'presencaEu'], m.deps, fonte);
   m.deps.fecharCamadasAbertas = () => { m.log.push('camadas'); h.avancarSeAprovado(); h.presencaPagarLida({ fechando: true }); };
   return { ...m, h, saiu };
 }
@@ -311,6 +318,7 @@ test('F2: na OUTRA aba as camadas fecham DEPOIS do que estava pendente — a apr
       `DEFEITO${outraConta ? ' (outra conta)' : ''}: o fechamento das camadas mandou o que estava pendente, com a sessão de quem saiu: ${m.saiu.join(' ')}`);
     assert.equal(m.deps.aprovacaoPendente, null, 'a aprovação na janela não foi cancelada');
     assert.equal(m.deps.Presenca.lidaPendente, null, 'o "lida" pendente ficou pra quem entrar');
+    assert.equal(m.deps.Presenca.lidaDevendo.size, 0, 'o "lida" devido ficou pra quem entrar');
   }
   // CONTROLE: o fechamento com a aprovação pendente e o perfil de pé (a ordem de antes) manda os dois.
   const c = montarSairComCamadas();

@@ -131,7 +131,13 @@ const Presenca = {
     // ampliado (`_falhos`): abrir a conversa de novo tenta de novo.
     fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
-    lidaPendente: null,     // de quem é o "lida" que espera a rajada ou o perfil (ver `presencaPagarLida`)
+    lidaPendente: null,     // de quem é o "lida" que espera a RAJADA (`timers.lida`, ver `presencaPagarLida`)
+    // As conversas que DEVEM um "lida": o que falhou (a rede, o Waze fora) e o
+    // que venceu sem saber de quem é a sessão. Separado da rajada: morava no
+    // mesmo campo, e abrir OUTRA conversa — mesmo vazia — o sobrescrevia; a
+    // mensagem que a pessoa viu ficava não lida no Waze (auditoria de
+    // 2026-10-01, R6-5-1). Ver `presencaPagarDevidas`.
+    lidaDevendo: new Set(),
     // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
     // do Waze delas chegar (ver `presencaLidaPorId`).
     lidasPorId: new Set(),
@@ -348,9 +354,10 @@ async function presencaSincronizar() {
         return;
     }
     if (!presencaPodeConectar()) return presencaDesligar();
-    // O "lida" que ficou DEVENDO na espera do perfil (ver `presencaPagarLida`).
-    // Com o relógio correndo ele é a rajada, e a rajada não se adianta.
-    if (Presenca.lidaPendente && !Presenca.timers.lida) presencaPagarLida({ fechando: Presenca.aberta !== Presenca.lidaPendente });
+    // O "lida" que ficou DEVENDO — na espera do perfil, ou o que falhou (ver
+    // `presencaPagarDevidas`). A rajada em curso não se adianta: ela tem
+    // relógio próprio.
+    presencaPagarDevidas();
     // O histórico que a conversa aberta pediu na espera do perfil (ver
     // `presencaCarregarConversa`): com o perfil, ele sai agora.
     const espera = Presenca.aberta ? (Presenca.historico.get(Presenca.aberta) || {}).esperaPerfil : null;
@@ -583,9 +590,10 @@ function presencaDesligar() {
     clearTimeout(Presenca.timers.fluxo);
     // O "lida" pendente é DESCARTADO, não pago: desligar é o "Sair", a troca de
     // conta ou a queda da sessão — e o fechamento da conversa logo abaixo não
-    // pode mandá-lo (ver `presencaPagarLida`).
+    // pode mandá-lo (ver `presencaPagarLida`). O que estava DEVENDO também.
     clearTimeout(Presenca.timers.lida);
     Presenca.lidaPendente = null;
+    Presenca.lidaDevendo.clear();
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -1074,6 +1082,12 @@ function presencaMensagemDoFluxo(m, doLote) {
         // E a hora do SERVIDOR de cada uma vai junto (`servs`): é ela que a
         // `atividade` da lista seguinte mede (ver `presencaAplicarLista`).
         else {
+            // A mensagem que a pessoa NÃO viu tira a dívida do "lida" desta
+            // conversa (`lidaDevendo`): o Waze marca a conversa INTEIRA, e
+            // pagá-la agora marcaria esta também — "Lida" pra quem a mandou, e
+            // a não lida sumindo daqui sem ninguém ter visto. Ela segue não lida
+            // (com a que tinha sido vista), e abrir a conversa marca tudo.
+            Presenca.lidaDevendo.delete(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
@@ -1172,11 +1186,15 @@ function presencaAnunciar(msg) {
 }
 
 // O "lida" que espera a rajada: `lidaPendente` diz de QUEM (a conversa que
-// estava na tela) e `timers.lida` é o relógio dele. Pendente SEM relógio é o
-// "lida" DEVENDO: ele venceu, ou a conversa fechou, sem saber de quem é a
-// sessão (ver `presencaPagarLida`).
+// estava na tela) e `timers.lida` é o relógio dele. Só a rajada: o "lida"
+// DEVENDO (o que falhou, o que venceu sem saber de quem é a sessão) mora em
+// `lidaDevendo`, e a rajada de uma conversa não apaga a dívida de outra — até
+// a auditoria de 2026-10-01 (R6-5-1) era o mesmo campo, e abrir OUTRA conversa,
+// mesmo vazia, sobrescrevia a dívida. Se ainda houver a rajada de OUTRA
+// conversa esperando, ela também não se perde: vira dívida.
 function presencaAgendarLida(id) {
     clearTimeout(Presenca.timers.lida);
+    if (Presenca.lidaPendente && Presenca.lidaPendente !== id) Presenca.lidaDevendo.add(Presenca.lidaPendente);
     Presenca.lidaPendente = id;
     Presenca.timers.lida = setTimeout(() => presencaPagarLida(), PRESENCA_LIDA_ATRASO_MS);
 }
@@ -1192,20 +1210,47 @@ function presencaAgendarLida(id) {
 // sai — e o `presencaMarcarLida` ainda não pede quando não há o que marcar.
 //
 // Sem saber de quem é a sessão (a renovação silenciosa, antes do perfil), ele
-// ESPERA, como a fila de saída: o perfil que chegar o paga
-// (`presencaSincronizar`). E o "Sair", a troca de conta e a queda pra tela de
-// entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta o swipe que
-// esperava o Desfazer: sessão que sai não grava nada depois. Outra conta nunca
-// o paga: o `definirPerfil` roda o `esquecerOutraConta` (que desliga) no mesmo
-// passo em que o perfil novo entra — antes de qualquer um poder pagar.
+// ESPERA, como a fila de saída: vira DÍVIDA (`lidaDevendo`), e o perfil que
+// chegar a paga (`presencaSincronizar`). E o "Sair", a troca de conta e a queda
+// pra tela de entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta
+// o swipe que esperava o Desfazer: sessão que sai não grava nada depois. Outra
+// conta nunca o paga: o `definirPerfil` roda o `esquecerOutraConta` (que
+// desliga) no mesmo passo em que o perfil novo entra — antes de qualquer um
+// poder pagar.
+//
+// O FECHAMENTO paga também as dívidas (`presencaPagarDevidas`): é o momento em
+// que a pessoa deixa de olhar, e o "lida" que ficou devendo de OUTRA conversa
+// (falhou quando ela fechou aquela) sai junto.
 function presencaPagarLida({ fechando = false } = {}) {
     const id = Presenca.lidaPendente;
-    if (!id) return;
-    clearTimeout(Presenca.timers.lida);
-    Presenca.timers.lida = null;
-    if (!presencaEu()) return;   // devendo: espera o perfil
-    Presenca.lidaPendente = null;
-    presencaMarcarLida(id, { fechando });
+    if (id) {
+        clearTimeout(Presenca.timers.lida);
+        Presenca.timers.lida = null;
+        Presenca.lidaPendente = null;
+        if (presencaEu()) presencaMarcarLida(id, { fechando });
+        else Presenca.lidaDevendo.add(id);   // devendo: espera o perfil
+    }
+    if (fechando) presencaPagarDevidas();
+}
+
+// Paga o que está DEVENDO (`lidaDevendo`): o mesmo pedido de sempre, um por
+// conversa. Só no fechamento de uma conversa e no `presencaSincronizar` — o
+// freio que já existia: nunca por relógio, por mensagem ou por swipe, então
+// com o Waze fora é um pedido por conversa devendo a cada gesto desses, e nada
+// mais. Sem saber de quem é a sessão, segue devendo. A conversa com a rajada
+// correndo fica pra ela (a rajada não se adianta, e o "lida" dela cobre o da
+// dívida: o Waze marca a conversa inteira).
+//
+// É sempre de mensagem que a pessoa VIU: a que chega fora da vista tira a
+// dívida da conversa (ver `presencaMensagemDoFluxo`). Por isso sai como a do
+// fechamento (`fechando`), sem conferir se a conversa ainda está na tela.
+function presencaPagarDevidas() {
+    if (!Presenca.lidaDevendo.size || !presencaEu()) return;
+    for (const id of [...Presenca.lidaDevendo]) {
+        if (id === Presenca.lidaPendente && Presenca.timers.lida) continue;
+        Presenca.lidaDevendo.delete(id);
+        presencaMarcarLida(id, { fechando: true });
+    }
 }
 
 // `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
@@ -1236,15 +1281,23 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (r && r.success) {
         Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
+        // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga.
+        Presenca.lidaDevendo.delete(id);
         presencaZerarNaoLidas(id, enviadoEm);
-    } else if (!Presenca.lidaPendente) {
+    } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
         // lida no Waze e nada a refazia — o fechamento não pagava mais nada, e
         // a lista seguinte a devolvia como "1 mensagem nova" (auditoria de
-        // 2026-09-30, R5-5-5). Volta a DEVER (sem relógio): o fechamento e o
-        // próximo `presencaSincronizar` o pagam. Um pedido a mais, só quando
-        // este falhou.
-        Presenca.lidaPendente = id;
+        // 2026-09-30, R5-5-5). Volta a DEVER: o fechamento e o próximo
+        // `presencaSincronizar` o pagam. Um pedido a mais, só quando este
+        // falhou. SEMPRE, e não só com o campo da rajada vazio: era o mesmo
+        // campo, e a falha que chegava com a rajada de OUTRA conversa correndo
+        // nem era anotada (R6-5-1).
+        Presenca.lidaDevendo.add(id);
+        // No diário, que não mostrava falha nenhuma do "lida": uma linha por
+        // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
+        // por conversa devendo a cada fechamento (`presencaAnotarMsg`).
+        presencaAnotarMsg('chat.lida', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta' });
     }
 }
 
@@ -2202,6 +2255,9 @@ function presencaDiag() {
         conhecidos: chatConhecidos().length,
         aConfirmar: chatAConfirmar().length,
         conversaAberta: !!Presenca.aberta,
+        // Quantas conversas DEVEM um "lida" (ver `presencaPagarDevidas`): com
+        // ela acima de zero, a "mensagem nova" de uma conversa já vista é isto.
+        lidaDevendo: Presenca.lidaDevendo.size,
         // O porquê da lista, como o servidor contou na última (ver o core).
         contagem: Presenca.contagem,
     };

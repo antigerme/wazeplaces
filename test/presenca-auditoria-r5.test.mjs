@@ -261,7 +261,9 @@ test('R5-5-5 o "lida" que falhou volta a DEVER: o fechamento o refaz (um pedido 
     c.$('conversaModal').classList.add('hidden');
     c.P.presencaEsquecerAberta();                         // fecha
     await tick();
-    return { antes, depois: lidas(c).length, pendente: c.P.Presenca.lidaPendente };
+    // A dívida mora em `lidaDevendo` desde o R6-5-1 (o campo da rajada é só dela).
+    const devendo = [...c.P.Presenca.lidaDevendo];
+    return { antes, depois: lidas(c).length, pendente: c.P.Presenca.lidaPendente || devendo[0] || null };
   };
   const rede = await caso({ success: false, errorCategory: 'transient', _motivo: 'TypeError' });
   assert.equal(rede.antes, 1, 'CONTROLE: a rajada tem que ter mandado o "lida"');
