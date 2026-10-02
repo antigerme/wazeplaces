@@ -4753,6 +4753,96 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Os seletores dos Filtros: o texto que o APP põe numa opção cabe FECHADO ──
+// A falha da lista de estados ("Não deu pra carregar os estados") saía cortada
+// no seletor fechado: no Galaxy Fold em pt, es e fr, e no iPhone SE em pt e es
+// — em pt, "Não deu pra carregar o", sem o objeto (auditoria da rodada 6,
+// R66-3). O inglês cabia: é o gotcha #25, a frase mais larga não está na língua
+// em que se desenvolve. O seletor não quebra linha nem rola, então "não
+// estoura" não se vê por `scrollWidth`: mede-se o TEXTO de cada opção com a
+// fonte COMPUTADA do seletor, contra a largura útil dele (sem os paddings).
+// Entram as opções que o DICIONÁRIO escreve (as com `data-i18n`, e todas as da
+// ordem, de residencial e de região); nome de país, estado, área e categoria é
+// dado do Waze e fica de fora. A falha vem pelo caminho de verdade: a lista de
+// estados responde 500. CONTROLES: a falha TEM que estar no seletor (senão o
+// bloco mede outra coisa), e um texto de 200 caracteres TEM que ser acusado.
+{
+  for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 320, height: 568 }]]) {
+    for (const lang of LINGUAS) {
+      const onde = `seletores dos Filtros/${ap}/${lang}`;
+      const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+      await ctx.addInitScript((l) => {
+        try {
+          if (sessionStorage.getItem('__seletores')) return;
+          sessionStorage.setItem('__seletores', '1');
+          localStorage.setItem('waze_session_token', 'tok-smoke-seletores');
+          localStorage.setItem('waze_places_lang', l);
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+        } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+      }, lang);
+      await ctx.route('**/api/**', async (route) => {
+        const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
+        let st = 200;
+        let b = { success: true };
+        if (nome === 'perfil') {
+          // Casa e trabalho no perfil: as ordens por distância viram opção (e são medidas).
+          b = { success: true, visivelNoWme: true, referencias: { casa: [-23.55, -46.63], trabalho: [-23.5, -46.6] },
+            profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
+              areas: [], managedAreas: [{ id: 9001, name: 'Área SP' }], editableCountryIDs: [30] } };
+        } else if (nome === 'lista-paises') b = { success: true, countries: [{ id: 30, name: 'Brazil' }] };
+        else if (nome === 'lista-estados') { st = 500; b = { success: false, errorCategory: 'transient', error: 'x' }; }
+        else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
+        else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
+        await route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {});
+      });
+      const page = await ctx.newPage();
+      const erros = [];
+      page.on('pageerror', (e) => erros.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && !!AppState.profile, 'o perfil');
+      await page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
+      await esperarOuExplodir(page, () => {
+        const o = document.querySelector('#filterState option');
+        return !!o && o.getAttribute('data-i18n') === 'filters.state.naoCarregou';
+      }, 'a falha da lista de estados no seletor');
+      await assentar(page, 100);
+      const r = await page.evaluate(() => {
+        const c = document.createElement('canvas').getContext('2d');
+        const medir = (sel, txt) => {
+          const cs = getComputedStyle(sel);
+          c.font = cs.font;
+          const disp = sel.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+          return { w: Math.round(c.measureText(txt).width * 10) / 10, disp: Math.round(disp * 10) / 10 };
+        };
+        const NOSSOS = ['filterSort', 'filterResidential', 'filterRegion'];
+        const cortes = [];
+        let medidas = 0;
+        for (const sel of document.querySelectorAll('#filtersModal select')) {
+          if (!sel.getClientRects().length) continue;   // seletor de outra aba
+          for (const o of sel.options) {
+            if (!o.hasAttribute('data-i18n') && !NOSSOS.includes(sel.id)) continue;
+            if (o.getAttribute('data-i18n') === 'filters.state.naoCarregou') continue;   // conferida abaixo, por nome
+            const m = medir(sel, o.text);
+            medidas++;
+            if (m.w > m.disp + 0.5) cortes.push(`#${sel.id} "${o.text}" ${m.w} > ${m.disp}`);
+          }
+        }
+        const estado = document.getElementById('filterState');
+        const falha = { txt: estado.options[estado.selectedIndex].text, ...medir(estado, estado.options[estado.selectedIndex].text) };
+        const controle = medir(estado, 'x'.repeat(200));
+        return { cortes, medidas, falha, controle };
+      });
+      checa(r.controle.w > r.controle.disp, `${onde}: CONTROLE — o texto de 200 caracteres "coube": o instrumento não mede`, JSON.stringify(r.controle));
+      checa(r.medidas >= 8, `${onde}: CONTROLE — só ${r.medidas} opções do dicionário medidas`);
+      checa(r.falha.w <= r.falha.disp + 0.5,
+        `${onde}: a falha da lista de estados sai cortada no seletor fechado (R66-3)`, `"${r.falha.txt}" ${r.falha.w} > ${r.falha.disp}`);
+      for (const corte of r.cortes) checa(false, `${onde}: opção cortada no seletor fechado`, corte);
+      checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+  }
+}
+
 // ── A Ajuda: toda seção no MESMO molde, medido na TELA ─────────────────────
 // "Quem está no app" nasceu com a lista em 16px (as vizinhas são 14) e o título
 // sem dois-pontos, e ficou assim um mês — quem viu foi o owner, olhando. O
