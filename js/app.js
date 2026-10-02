@@ -10249,10 +10249,18 @@ function showCurrentPlace() {
 }
 
 let primeiroCardAnotado = false;   // `tela.primeiroCard`: uma vez por página
+// O pedido que a região viva do card anunciou por último. O card é REDESENHADO
+// por muita coisa que não troca o pedido da frente — a foto excluída sem o
+// Desfazer, a foto que volta, o idioma —, e cada redesenho dizia "Novo pedido:
+// <o mesmo local>" a quem usa leitor de tela (achado da auditoria de
+// 2026-10-01). O anúncio sai quando o pedido da frente MUDA: outro pedido, ou
+// um que volta depois de a frente ficar vazia (ela zera isto).
+let pedidoAnunciado = null;
 function renderCurrentCard() {
     const place = AppState.queue[0];
     if (!place) {
         AppState.currentPlace = null;
+        pedidoAnunciado = null;
         if (AppState.hasMore) {
             showLoading(true);
             startFetching();
@@ -10264,9 +10272,11 @@ function renderCurrentCard() {
 
     AppState.currentPlace = place;
 
-    // Anuncia o novo card a leitor de tela (a fila avança sem foco mudar).
+    // Anuncia o novo card a leitor de tela (a fila avança sem foco mudar) — só
+    // quando o pedido da frente é OUTRO (ver `pedidoAnunciado`).
     const liveRegion = document.getElementById('cardLiveRegion');
-    if (liveRegion) {
+    if (liveRegion && place !== pedidoAnunciado) {
+        pedidoAnunciado = place;
         liveRegion.textContent = t('card.live.newRequest', {
             name: identidadeDoPlace(place).titulo,
             // A MESMA função do rótulo visível. Aqui estava `place.updateType`
@@ -13053,6 +13063,9 @@ function showNoPlaces() {
     if (AppState.loadError) dlogCapturarAuto('falhaAoCarregar');
     marcarTelaPronta();   // fila vazia ou erro: não vem card, mas a tela está pronta
     AppState.currentPlace = null;
+    // A frente ficou vazia: o pedido que voltar a ela (o Desfazer do último) é
+    // anunciado de novo (ver `pedidoAnunciado`).
+    pedidoAnunciado = null;
     removeCurrentCardEl();
     showLoading(false);
     const noMore = document.getElementById('noMoreCards');

@@ -875,3 +875,76 @@ test('R6-2-13: os dois botões dos painéis prometem o foco ANTES de trocar a fi
   assert.match(ouvintes, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await /,
     'o "Tentar novamente" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
 });
+
+// ── O redesenho do MESMO card não é "Novo pedido" (follow-up do lote 10) ──────
+// A região viva do card (`#cardLiveRegion`) diz "Novo pedido: <local>, <tipo>"
+// a quem usa leitor de tela. O card é REDESENHADO por muita coisa que não troca
+// o pedido da frente — a foto excluída sem o Desfazer, a foto que volta pelo
+// Desfazer —, e cada redesenho repetia o anúncio do mesmo pedido (MEDIDO nos
+// dois motores: excluir e desfazer pela tecla z davam dois "Novo pedido" do
+// mesmo local). O `renderCurrentCard` e o `showNoPlaces` de VERDADE; o resto da
+// tela é um buraco negro que aceita qualquer chamada.
+function buracoNegro() {
+  return new Proxy(function () {}, {
+    get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' || typeof k !== 'string' ? undefined : buracoNegro()),
+    apply: () => buracoNegro(), set: () => true,
+  });
+}
+function cardQueAnuncia() {
+  const ditos = [];
+  const regiao = { set textContent(v) { ditos.push(v); }, get textContent() { return ditos.at(-1) || ''; } };
+  const AppState = { queue: [], hasMore: false, currentPlace: null, loadError: false };
+  const deps = {
+    AppState, pedidoAnunciado: null, primeiroCardAnotado: true,
+    t: (k, v) => `${k}:${v.name}`, identidadeDoPlace: (p) => ({ titulo: p.name }), rotuloDoTipo: () => '',
+    document: { getElementById: (id) => (id === 'cardLiveRegion' ? regiao : buracoNegro()) },
+  };
+  const escopo = new Proxy(deps, {
+    has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
+    get: (t, k) => (k === Symbol.unscopables ? undefined : k in t ? t[k] : typeof k === 'string' ? buracoNegro() : undefined),
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  const app = new Function('__escopo', `with (__escopo) {\n${fatiar('renderCurrentCard')}\n${fatiar('showNoPlaces')}
+    return { renderCurrentCard, showNoPlaces };\n}`)(escopo);
+  return { app, AppState, ditos };
+}
+
+test('o card REDESENHADO com o mesmo pedido na frente não anuncia "Novo pedido" — o pedido que MUDA, sim', () => {
+  const m = cardQueAnuncia();
+  const A = { name: 'Padaria A' }, B = { name: 'Padaria B' };
+  m.AppState.queue = [A, B];
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A'], 'CONTROLE: o primeiro card não foi anunciado');
+  m.app.renderCurrentCard();                       // o redesenho (a foto excluída, a que volta)
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A'],
+    'o redesenho do MESMO card repetiu "Novo pedido" ao leitor de tela');
+  m.AppState.queue.shift();                        // o ✕: o pedido da frente muda
+  m.app.renderCurrentCard();
+  assert.equal(m.ditos.at(-1), 'card.live.newRequest:Padaria B', 'CONTROLE: o pedido novo na frente não foi anunciado');
+  m.AppState.queue.unshift(A);                     // o Desfazer devolve A pra frente
+  m.app.renderCurrentCard();
+  assert.equal(m.ditos.at(-1), 'card.live.newRequest:Padaria A', 'o pedido que VOLTOU pra frente não foi anunciado');
+  assert.equal(m.ditos.length, 3);
+});
+
+test('a frente que fica VAZIA zera o anúncio: o mesmo pedido que volta a ela é dito de novo', () => {
+  const A = { name: 'Padaria A' };
+  // Pelo próprio `renderCurrentCard` (a fila acabou e ainda há o que buscar).
+  const m = cardQueAnuncia();
+  m.AppState.queue = [A];
+  m.app.renderCurrentCard();
+  m.AppState.queue = []; m.AppState.hasMore = true;
+  m.app.renderCurrentCard();
+  m.AppState.queue = [A];                          // o Desfazer do último devolve o MESMO pedido
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A', 'card.live.newRequest:Padaria A'],
+    'o pedido que voltou à frente vazia não foi anunciado');
+  // Pelo "Tudo limpo!" direto (`showNoPlaces`, o lote que leva a fila inteira).
+  const n = cardQueAnuncia();
+  n.AppState.queue = [A];
+  n.app.renderCurrentCard();
+  n.app.showNoPlaces();
+  n.app.renderCurrentCard();
+  assert.equal(n.ditos.length, 2, 'depois do "Tudo limpo!", o pedido que voltou à frente não foi anunciado');
+});
