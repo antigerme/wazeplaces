@@ -2122,3 +2122,57 @@ test('R6-3-10 Enter na edição do nome sem sessão (a renovação): avisa o que
   c.confirmar();
   assert.deepEqual(c.log, ['toast:toast.esperaSessao']);
 });
+
+// ── A foto FECHADA solta o pedido (follow-up do lote 10) ──────────────────────
+// O `Lightbox.place` sobrevivia ao fechamento, e a exclusão sem o Desfazer que
+// terminava com a foto já fechada achava "a foto deste pedido aberta":
+// REDESENHAVA a camada escondida, pedindo a foto de novo e refazendo a tira
+// (MEDIDO nos dois motores: a `src` do #lightboxImage voltando depois de
+// fechar). O `open`, o `close` e o `removerFoto` de VERDADE, com a tela de
+// mentira.
+function fotoQueFecha() {
+  const classes = new Set(['hidden']);
+  const els = {
+    imageLightbox: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } },
+    lightboxImage: { src: 'x', removeAttribute(k) { if (k === 'src') this.src = null; } },
+    lightboxStrip: { innerHTML: '<button>miniatura</button>', dataset: { chave: 'a|b' } },
+  };
+  const deps = {
+    document: { getElementById: (id) => els[id] || null, body: { style: {} }, activeElement: null },
+    CamadaVoltar: { empilhar() {}, consumir() {} }, mostrarNomeNoLightbox: () => {}, fecharEdicaoNome: () => {},
+    avancarSeAprovado: () => {}, topOpenModal: () => null, anunciarNoLightbox: () => {}, devolverFocoDaAmpliacao: () => {},
+  };
+  const L = new Function(...Object.keys(deps), `return {
+    place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, placeName: '', renders: 0,
+    isOpen() { return !document.getElementById('imageLightbox').classList.contains('hidden'); },
+    _render() { this.renders++; }, resetZoom() {},
+    ${['open', 'close', 'removerFoto'].map(metodo).join(',\n')}
+  };`)(...Object.values(deps));
+  return { L, els };
+}
+
+test('a foto FECHADA solta o pedido: a exclusão que termina depois muda o pedido, nunca a camada escondida', () => {
+  const m = fotoQueFecha();
+  const P = { venueID: 'v1', updateRequestID: 'ur-P', approvedImageIds: ['f1', 'f2'], imageUrls: [FOTO('f1'), FOTO('f2'), FOTO('ur-P')] };
+  m.L.open(P.imageUrls, 0, 2, 'Padaria', false, P);
+  // CONTROLE: com a foto ABERTA, a exclusão que termina redesenha a camada.
+  const r0 = m.L.renders;
+  m.L.removerFoto('f1', P);
+  assert.equal(m.L.renders, r0 + 1, 'CONTROLE: com a foto aberta, a exclusão não redesenhou a camada');
+  assert.deepEqual(m.L.urls, [FOTO('f2'), FOTO('ur-P')]);
+  m.L.close();
+  assert.equal(m.L.place, null, 'a foto fechou e a camada seguiu presa ao pedido');
+  assert.deepEqual([m.L.urls, m.L.newIdx], [[], -1], 'a camada fechada guardou as fotos do pedido');
+  assert.deepEqual([m.els.lightboxStrip.innerHTML, m.els.lightboxStrip.dataset.chave], ['', ''],
+    'as miniaturas do pedido ficaram na camada escondida');
+  // A exclusão da f2 termina AGORA, com a foto fechada.
+  const r1 = m.L.renders;
+  m.L.removerFoto('f2', P);
+  assert.equal(m.L.renders, r1, 'a exclusão que terminou com a foto fechada redesenhou a camada escondida (pede a foto de novo)');
+  assert.deepEqual(P.imageUrls, [FOTO('ur-P')], 'o PEDIDO (na fila, na tela) não recebeu a exclusão');
+  assert.ok(!P.approvedImageIds.includes('f2'));
+  // E reabrir a partir do card monta a camada de novo, do zero.
+  m.L.open(P.imageUrls, 0, 0, 'Padaria', false, P);
+  assert.equal(m.L.place, P);
+  assert.deepEqual(m.L.urls, [FOTO('ur-P')]);
+});

@@ -2290,6 +2290,24 @@ const Lightbox = {
         const nome = document.getElementById('lightboxNomeTxt');
         if (nome) nome.textContent = '';
         this.resetZoom();
+        // A camada SOLTA o pedido. Ele seguia aqui depois de fechar, e a escrita
+        // que terminava com a foto já fechada — a exclusão sem o Desfazer, com a
+        // foto fechada antes da resposta — achava "a foto deste pedido aberta" e
+        // REDESENHAVA a camada escondida: pedia a foto de novo e refazia a tira
+        // (MEDIDO, a `src` do #lightboxImage voltando depois de fechar). Agora
+        // só o que está na tela recebe o resultado, pela régua de sempre
+        // (`pedidoAindaNaTela`): o pedido e os irmãos na fila, sim; a camada
+        // fechada, não — ela nasce de novo do card no próximo `open`. As
+        // miniaturas da tira (as fotos do pedido) saem junto, como a foto
+        // grande já saía.
+        this.place = null;
+        this.urls = [];
+        this.idx = 0;
+        this.newIdx = -1;
+        this.eDenuncia = false;
+        this.placeName = '';
+        const tira = document.getElementById('lightboxStrip');
+        if (tira) { tira.innerHTML = ''; tira.dataset.chave = ''; }
         // O anúncio era DESTA foto (e o da renomeação leva o nome do local):
         // não fica no DOM depois de ela fechar.
         anunciarNoLightbox('');
