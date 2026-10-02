@@ -282,6 +282,63 @@ test('A1: CONTROLE — o "Sair" desta aba grava e apaga o aparelho (o espião en
   assert.ok(m.log.includes('toast:toast.loggedOut'));
 });
 
+// ═══ R6-1-11 · a recusa TERMINAL do portão na reconferência ══════════════════
+// O `perfil` reconfere o portão a cada abertura: quem caiu abaixo dele perde a
+// sessão (o servidor a apaga) e vê o "Acesso restrito". Ia pela regra da QUEDA,
+// que deixa o aparelho como está pra a mesma pessoa voltar — mas aqui não há
+// volta, e o "Sair" só existe com sessão: o Histórico, a lista de autores (nome
+// de terceiro) e a fila de saída (id e nome de quem mandou o pedido) ficavam no
+// aparelho sem caminho pra apagar (MEDIDO no Chromium, auditoria de
+// 2026-10-02). Agora sai o que é da conta, pela MESMA lista do "Sair".
+test('R6-1-11: o portão que fecha na reconferência apaga do aparelho o que é da conta — a MESMA lista do "Sair"', async () => {
+  const m = montarSair();
+  // A sessão já caiu (o `derrubarSessao` roda antes) e o servidor já a apagou.
+  m.API.sessionToken = null;
+  m.ap.dados.delete(TOKEN);
+  await m.h.handleLogout({ recusado: true });
+  for (const esperado of ['apaga:' + CONTA_KEY, 'apaga:waze_places_saida', 'apaga:waze_places_history',
+    'apaga:waze_places_conquistas', 'apaga:waze_places_autores', 'grava:' + STATS_KEY, 'grava:' + PREFERENCES_KEY]) {
+    assert.ok(m.ap.escritas.includes(esperado), `DEFEITO: a recusa do portão deixou no aparelho o que o "Sair" apaga (${esperado})`);
+  }
+  assert.deepEqual([m.AppState.history, m.AppState.conquistas, m.AppState.autores], [null, null, null]);
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'presenca'), ['presenca', null], 'o chat guardado ficou no aparelho');
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'offline'), ['offline', null], 'a fila guardada do offline ficou no aparelho');
+  // Não é o "Sair": não há diálogo do "Sair" a fechar (fechar o que não está
+  // aberto mente no diário), nem sessão a destruir — o servidor já a apagou.
+  assert.ok(!m.log.includes('fechou:logoutModal'), 'a recusa "fechou" o diálogo do "Sair", que nem estava aberto');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')), 'a recusa mandou destruir uma sessão que o servidor já apagou');
+  assert.ok(!m.log.includes('setSession:null'), 'a recusa mexeu no token do aparelho de novo (a queda já o tirou)');
+  assert.ok(m.log.includes('toast:toast.loggedOut'), 'o aviso de que os dados saíram não apareceu');
+});
+
+test('R6-1-11: a recusa passa pela limpeza só com a sessão DESTA aba sendo a do aparelho — e antes do diálogo', () => {
+  for (const [caso, guardado, esperado] of [
+    ['a sessão do aparelho', 'tok-A', ['derrubou', 'sair:recusado', 'negado', 'entrada']],
+    // CONTROLE: a sessão guardada é OUTRA (outra aba, talvez outra conta): o
+    // aparelho não é desta, e aqui cai só a memória, como na queda.
+    ['outra sessão no aparelho', 'tok-OUTRA', ['derrubou', 'negado', 'entrada']],
+  ]) {
+    const ap = aparelho({ [TOKEN]: guardado });
+    const log = [];
+    const deps = {
+      safeLS: ap.safeLS, API: { sessionToken: 'tok-A' },
+      // A queda de verdade tira o token do aparelho ANTES de chamar o `depois`:
+      // de quem é o aparelho tem de ser lido antes dela.
+      derrubarSessao: (k, { depois }) => {
+        log.push('derrubou');
+        if (ap.safeLS.get(TOKEN) === deps.API.sessionToken) ap.safeLS.remove(TOKEN);
+        deps.API.sessionToken = null;
+        depois();
+      },
+      handleLogout: (o) => log.push(o && o.recusado === true ? 'sair:recusado' : 'sair:' + JSON.stringify(o)),
+      showAccessDenied: () => log.push('negado'), showAuthScreen: () => log.push('entrada'),
+    };
+    const h = montar(['recusaDoPortao', 'sessaoDestaAbaEhAGuardada'], deps);
+    h.recusaDoPortao({ errorKey: 'srv.err.accessDenied', errorCategory: 'access_denied' });
+    assert.deepEqual(log, esperado, `${caso}: ${log.join(' → ')}`);
+  }
+});
+
 // O fechamento das camadas DE VERDADE no que ele dispara: a foto ampliada fecha
 // pelo `avancarSeAprovado` (que MANDA a aprovação pendente) e a conversa pela
 // limpeza que paga o "lida" esperando a rajada (`presencaPagarLida`).

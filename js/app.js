@@ -5089,13 +5089,7 @@ async function loadProfileAndAuxData() {
     // 401 ambíguo), nem pela extensão, que entraria pelo mesmo portão: a pessoa
     // vê o MESMO diálogo de quem é recusado no login, com o perfil dela.
     if (profileRes.errorCategory === 'access_denied') {
-        if (AppState.authenticated) {
-            // O diálogo ANTES da tela de entrada: o `showAuthScreen` fecha a
-            // conversa e a lista da presença (`Presenca.desligar`), e fechar um
-            // modal e abrir outro no mesmo quadro dessincroniza o voltar
-            // (gotcha #65). Aberto antes, o diálogo toma o lugar deles.
-            derrubarSessao(profileRes.errorKey, { depois: () => { showAccessDenied(profileRes); showAuthScreen(); } });
-        }
+        if (AppState.authenticated) recusaDoPortao(profileRes);
         return;
     }
     // Os países ANTES do resto: o país de quem entra e o subtítulo da lista da
@@ -5120,6 +5114,38 @@ async function loadProfileAndAuxData() {
         return;
     }
     if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
+}
+
+// ── O PORTÃO FECHOU na reconferência ──────────────────────────────────────
+// O `perfil` reconfere o nível e a área a cada abertura (e na sonda de um 401 —
+// ver `handlePerfil` e `handleUnauthorized`): quem caiu abaixo do portão perde a
+// sessão, que o servidor já apagou. Não passa pela extensão (ela entraria pelo
+// mesmo portão), e a pessoa vê o MESMO "Acesso restrito" de quem é recusado no
+// login, com o perfil dela.
+//
+// E a recusa é TERMINAL: a pessoa não entra de novo até mudar de nível ou de
+// área — e o "Sair" só existe com sessão. A queda comum deixa o aparelho como
+// está, pra a mesma pessoa voltar; aqui não há volta, e o Histórico, a lista de
+// autores e a fila de saída (nome e id de quem mandou o pedido, dado de
+// TERCEIRO) ficavam no aparelho sem caminho pra apagar, a não ser outra conta
+// entrando (auditoria de 2026-10-02, R6-1-11). Então o que é da conta sai como
+// o "Sair" tira — pela MESMA função, a mesma lista (`handleLogout`, com
+// `recusado`). Só se a sessão desta aba era a do aparelho: senão o aparelho é
+// de outra sessão (outra aba, talvez outra conta), e aqui cai só a memória,
+// como na queda.
+//
+// A ordem: a limpeza, o diálogo, a tela de entrada. O diálogo ANTES da tela de
+// entrada: o `showAuthScreen` fecha a conversa e a lista da presença
+// (`Presenca.desligar`), e fechar um modal e abrir outro no mesmo quadro
+// dessincroniza o voltar (gotcha #65). A limpeza antes dos dois: ela não abre
+// nem fecha camada nenhuma (as camadas já fecharam no `fecharCamadasAbertas`).
+function recusaDoPortao(res) {
+    const doAparelho = sessaoDestaAbaEhAGuardada();
+    derrubarSessao(res.errorKey, { depois: () => {
+        if (doAparelho) handleLogout({ recusado: true });
+        showAccessDenied(res);
+        showAuthScreen();
+    } });
 }
 
 // ── O PERFIL CHEGOU: fonte única ──────────────────────────────────────────
@@ -8398,10 +8424,9 @@ async function handleUnauthorized() {
         // A sonda achou o portão fechado (ver `handlePerfil`): não é alarme
         // falso nem sessão que expirou — é o mesmo desfecho do login negado.
         if (r && r.errorCategory === 'access_denied') {
-            // O diálogo ANTES da tela de entrada (ver o `loadProfileAndAuxData`:
-            // o `showAuthScreen` fecha a conversa, e fechar e abrir no mesmo
-            // quadro é o gotcha #65).
-            derrubarSessao(r.errorKey, { depois: () => { showAccessDenied(r); showAuthScreen(); } });
+            // A recusa TERMINAL, com o que é da conta saindo do aparelho e o
+            // diálogo antes da tela de entrada (ver a função).
+            recusaDoPortao(r);
             return;
         }
         // Teste POSITIVO de vida, não ausência de marcador.
@@ -8886,14 +8911,20 @@ function desenharAvisoDoSair() {
 // mesmo jeito — sem tocar nele —, com uma diferença: a sessão desta no
 // SERVIDOR é outra, que ninguém mais vai apagar. Ela sai daqui, pelo token da
 // memória, senão o registro fica órfão até vencer.
-async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
+//
+// `recusado`: não foi "Sair", foi o PORTÃO recusando a conta na reconferência
+// (ver `recusaDoPortao`). A recusa é terminal e o "Sair" só existe com sessão,
+// então o que é da conta sai do aparelho aqui, pela mesma lista. A sessão já
+// caiu (`derrubarSessao`) e o servidor já a apagou: não há diálogo do "Sair" a
+// fechar nem sessão a destruir, e o token da memória já saiu.
+async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
     saiuNestaPagina = true;
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
     // qualquer coisa (a foto ampliada, os Filtros, a conversa, o QR do
     // pareamento): tudo fecha, com a limpeza de cada um — mais abaixo, depois de
     // o que estava pendente ser cancelado (ver lá).
-    if (!porOutraAba) closeModal('logoutModal');
+    if (!porOutraAba && !recusado) closeModal('logoutModal');
     // Cancela ação pendente ANTES de destruir a sessão: logout = esquecer tudo,
     // então descartamos (não enviamos) o swipe em buffer e evitamos o executor
     // rodando com sessão nula (que mostrava "erro ao marcar" na tela de login).
@@ -8918,9 +8949,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
     // um "token-" por cima do "Sair" que acabou de apagá-lo. Na saída por outra
     // conta, a sessão desta aba é apagada no servidor — nunca a guardada, que é
     // a da outra.
-    const tokenParaApagar = !porOutraAba ? API.getSession()
+    const tokenParaApagar = recusado ? null : !porOutraAba ? API.getSession()
         : outraConta && !sessaoDestaAbaEhAGuardada() ? API.sessionToken : null;
-    if (porOutraAba) API.soltarSessao();
+    if (porOutraAba || recusado) API.soltarSessao();
     else API.setSession(null);
     // Na OUTRA aba as camadas abertas fecham SÓ AGORA, como na queda (o
     // `derrubarSessao`): com o que estava pendente cancelado e a sessão, o

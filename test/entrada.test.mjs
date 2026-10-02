@@ -549,8 +549,13 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
     'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
   // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
-  assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
-  assert.match(fatiar('handleUnauthorized'), /depois: \(\) => \{ showAccessDenied\(r\); showAuthScreen\(\); \}/);
+  // O portão que fecha na reconferência (a abertura e a sonda de um 401) passa
+  // por UMA função (R6-1-11): a limpeza do que é da conta, o diálogo e a tela
+  // de entrada, nessa ordem.
+  assert.match(fatiar('loadProfileAndAuxData'), /if \(AppState\.authenticated\) recusaDoPortao\(profileRes\);/);
+  assert.match(fatiar('handleUnauthorized'), /^\s+recusaDoPortao\(r\);/m);
+  assert.match(fatiar('recusaDoPortao'),
+    /depois: \(\) => \{\s*if \(doAparelho\) handleLogout\(\{ recusado: true \}\);\s*showAccessDenied\(res\);\s*showAuthScreen\(\);\s*\}/);
 });
 
 // ── A9 + A12: a tela de entrada ANTES do JS, e o divisor sem a extensão ──────

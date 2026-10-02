@@ -420,8 +420,15 @@ test('P6 o rascunho: a queda da sessão o mantém (é a mesma pessoa voltando); 
 test('P6 o diálogo do portão fechado abre ANTES da tela de entrada — fechar a conversa e abri-lo no mesmo quadro é o gotcha #65', async () => {
   const { readFileSync } = await import('node:fs');
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const depois = [...APP.matchAll(/depois: \(\) => \{([^}]*)\}/g)].map((m) => m[1]);
-  assert.ok(depois.length >= 2, 'sumiram os desfechos do portão fechado (o guard ficaria cego)');
+  // O corpo de cada `depois` com as chaves CASADAS: um `{ recusado: true }` lá
+  // dentro (R6-1-11) cortava o corpo no meio, e o guard deixava de vê-lo.
+  const depois = [...APP.matchAll(/depois: \(\) => \{/g)].map((m) => {
+    let prof = 0, j = m.index + m[0].length - 1;
+    for (; j < APP.length; j++) { if (APP[j] === '{') prof++; else if (APP[j] === '}' && --prof === 0) break; }
+    return APP.slice(m.index + m[0].length, j);
+  });
+  assert.ok(depois.some((c) => /showAuthScreen\(\)/.test(c) && /showAccessDenied\(/.test(c)),
+    'sumiram os desfechos do portão fechado (o guard ficaria cego)');
   for (const corpo of depois) {
     if (!/showAuthScreen\(\)/.test(corpo) || !/showAccessDenied\(/.test(corpo)) continue;
     assert.ok(corpo.indexOf('showAccessDenied(') < corpo.indexOf('showAuthScreen()'),
