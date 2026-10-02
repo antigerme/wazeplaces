@@ -9684,6 +9684,13 @@ function fetchNextPage() {
     }
 
     AppState.fetching = true;
+    // O "Restam" diz "…" (carregando) JÁ: quem o escreveu por último foi o
+    // `startFetching` (ou o `resetQueue` do ↻), ANTES de a busca ligar, e com a
+    // fila vazia isso dava "0+" — o zero que é o OPOSTO de "não sei" — sob o
+    // esqueleto, até a busca voltar (MEDIDO, s47: abertura e ↻ com a busca
+    // levando 3 s; auditoria de 2026-10-02, R6-2-04). Com card na fila, nada
+    // muda (o ramo do "…" é só com o total zerado).
+    updatePendingCount();
     // Época capturada aqui: se resetQueue() rodar durante o await (refresh, troca
     // de filtro, logout), a época muda e descartamos o resultado obsoleto pra não
     // injetar places de filtros/região antigos na fila nova.
@@ -9954,6 +9961,11 @@ function fetchNextPage() {
     return AppState._fetchPromise;
 }
 
+// O `startFetching` ESPERANDO o perfil pra buscar ("Minha área" sem as áreas
+// ainda): a fila está carregando, como com a busca no ar, e o "Restam" diz "…"
+// (ver `updatePendingCount`).
+let buscaEsperaOPerfil = false;
+
 async function startFetching() {
     // O `sair()` do treino busca; aqui, o laço abaixo esperaria uma busca que o
     // `fetchNextPage` recusa no treino — seria o laço do gotcha #19.
@@ -9974,7 +9986,14 @@ async function startFetching() {
     // "Minha área", que sem isto só repetia a mesma recusa.
     if (AppState.filters.myArea && !(AppState.profile && AppState.profile.areas)) {
         refazerPerfilSeFaltar();
-        if (AppState._profilePromise) { try { await AppState._profilePromise; } catch (e) {} }
+        if (AppState._profilePromise) {
+            // Esperando o perfil a fila está CARREGANDO, e o "Restam" diz "…" —
+            // não o "0+" escrito logo acima, que ficava até o perfil chegar
+            // (R6-2-04; ver o `updatePendingCount`).
+            buscaEsperaOPerfil = true;
+            updatePendingCount();
+            try { await AppState._profilePromise; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        }
     }
 
     while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
@@ -19907,6 +19926,16 @@ function atualizarAvisoDeSessao() {
     el.classList.remove('hidden');
 }
 
+// As escritas DIRETAS do "Restam" (o "—" e o "…") PARAM a contagem animada que
+// estiver correndo — a regra que o `setCount` já segue (R5-2-10), e estas não
+// seguiam: no ↻ com 40 pedidos a contagem 40 → 0 leva ~460 ms, a busca que
+// falha rápido (a borda com a origem fora dá 502 em ~50 ms) escrevia "—", e o
+// quadro seguinte da contagem escrevia por cima: "Restam 0+" sob o "Falha ao
+// carregar" (MEDIDO, s36, Chromium e WebKit; auditoria de 2026-10-02, R6-2-05).
+function pararContagemEmCurso(el) {
+    if (el._countRaf) { cancelAnimationFrame(el._countRaf); el._countRaf = null; }
+}
+
 function updatePendingCount(semAnimar = false) {
     const el = document.getElementById('pendingCount');
     atualizarPontoNoIcone();
@@ -19914,6 +19943,7 @@ function updatePendingCount(semAnimar = false) {
     if (!el) return;
     if (!AppState.authenticated) {
         el.textContent = '—';
+        pararContagemEmCurso(el);
         return;
     }
     if (Treino.ativo) {
@@ -19924,8 +19954,11 @@ function updatePendingCount(semAnimar = false) {
         updatePendingTotalHint();
         return;
     }
-    if (AppState.fetching && AppState.serverTotal === 0) {
+    // CARREGANDO: a busca no ar, ou o `startFetching` esperando o perfil pra
+    // buscar (`buscaEsperaOPerfil`), com a fila vazia (R6-2-04).
+    if ((AppState.fetching || buscaEsperaOPerfil) && AppState.serverTotal === 0) {
         el.textContent = '…';
+        pararContagemEmCurso(el);
         return;
     }
     // FALHOU: o app NÃO SABE quantos restam, e zero não é "não sei" — zero é
@@ -19934,6 +19967,7 @@ function updatePendingCount(semAnimar = false) {
     // símbolo que o deslogado já usa, então o editor não precisa aprender nada.
     if (AppState.loadError) {
         el.textContent = '—';
+        pararContagemEmCurso(el);
         return;
     }
     setCount(el, AppState.serverTotal, AppState.hasMore ? '+' : '', semAnimar);
