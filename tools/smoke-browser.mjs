@@ -4222,11 +4222,29 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await reabrirRen(JSON.parse(JSON.stringify(PLACE_REN)));   // o resto do bloco é com uma foto
 
     // ── ENVIO: medido pela REDE, não pelo DOM ───────────────────────────────
+    // E o que o leitor de tela recebe (R6-3-09, auditoria de 2026-10-01): o
+    // nome acessível da pílula leva o nome que ela MOSTRA, e o texto
+    // alternativo da foto passa ao nome novo junto com a pílula — seguia com o
+    // antigo até trocar de foto. CONTROLE: o ✕ achado pelo nome na árvore de
+    // acessibilidade (a medida enxerga a camada).
+    const pilulaPeloNome = (nome) => page.getByRole('button', { name: `Corrigir o nome do local: ${nome}`, exact: true }).count();
+    await page.evaluate(() => { try { fecharEdicaoNome(); } catch {} });
+    checa(await page.getByRole('button', { name: 'Fechar', exact: true }).count() >= 1,
+      `${onde}: CONTROLE — o ✕ não é achado pelo nome acessível (a medida estaria cega)`);
+    checa(await pilulaPeloNome('Odontodente Consultório') === 1,
+      `${onde}: a pílula não diz, no nome acessível, o nome do local que mostra`,
+      await page.locator('#lightboxNomeBtn').ariaSnapshot().catch(() => ''));
+    await page.locator('#lightboxNomeBtn').click();
+    await assentar(page);
     await page.locator('#lightboxNomeInput').fill('Odontodente Sorriso');
     posts.length = 0;
     await page.locator('#lightboxNomeOk').click();
     await page.waitForTimeout(400);
     checa(posts.length === 0, `${onde}: gravou ANTES de a janela do Desfazer vencer`);
+    const altRen = await page.evaluate(() => document.getElementById('lightboxImage').alt);
+    checa(altRen.includes('Odontodente Sorriso'), `${onde}: renomeado, o texto alternativo da foto seguiu com o nome antigo`, altRen);
+    checa(await pilulaPeloNome('Odontodente Sorriso') === 1, `${onde}: renomeado, a pílula segue anunciada com o nome antigo`,
+      await page.locator('#lightboxNomeBtn').ariaSnapshot().catch(() => ''));
     await page.waitForTimeout(UNDO_ESPERA_MS);
     const env = posts.find((p) => p && p.venueID);
     checa(!!env, `${onde}: o POST não saiu depois da janela`);
@@ -4519,6 +4537,37 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(nomes.minis.length === 2 && nomes.minis[nomes.newIdx].includes(nomes.nome)
     && nomes.minis.filter((m) => m.includes(nomes.nome)).length === 1,
     'foco: a miniatura da proposta não diz que é a proposta (ou todas dizem)', JSON.stringify(nomes.minis));
+  // A troca de foto pelo TECLADO com o foco NA AÇÃO (auditoria de 2026-10-01).
+  // R6-3-06: o foco no "Aprovar" e a → (a foto já no mapa): a ação é da OUTRA
+  // foto, some, e o foco caía no <body> com a camada `aria-modal` aberta.
+  // R6-3-08: a troca não era dita a ninguém — a região viva da camada diz a
+  // posição e o selo. R6-3-09: a pílula era anunciada só como "Corrigir o nome
+  // do local", sem o nome que mostra. CONTROLES: o ✕ achado pelo NOME na árvore
+  // de acessibilidade (a medida enxerga a camada) e o foco no ✕, que a troca
+  // não pode mexer.
+  {
+    await page.focus('#lightboxApprove');
+    const a0 = await foco();
+    checa(a0.id === 'lightboxApprove', 'foco/troca: PRÉ-CONDIÇÃO — o foco não está no "Aprovar" da proposta', JSON.stringify(a0));
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(250);
+    const a1 = await foco();
+    const anuncio = () => page.evaluate(() => document.getElementById('lightboxAnuncio')?.textContent ?? '(sem região)');
+    const an1 = await anuncio();
+    checa(!a1.body && a1.visivel && a1.naFoto, 'foco/troca: a → com o foco no "Aprovar" largou o foco fora da foto aberta', JSON.stringify(a1));
+    checa(an1 === 'Foto 2 de 2', 'foco/troca: a → trocou a foto e a região viva não disse qual', JSON.stringify(an1));
+    await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(250);
+    const an2 = await anuncio();
+    checa(an2 === `Foto 1 de 2 — ${nomes.nome}`, 'foco/troca: de volta à proposta, a região viva não disse que é ela', JSON.stringify(an2));
+    await page.focus('#lightboxClose');
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(250);
+    const a3 = await foco();
+    checa(a3.id === 'lightboxClose', 'foco/troca: CONTROLE — a troca de foto tirou o foco do ✕', JSON.stringify(a3));
+    const pelo = (nome) => page.getByRole('button', { name: nome, exact: true }).count();
+    checa(await pelo('Fechar') >= 1, 'foco/pílula: CONTROLE — o ✕ não é achado pelo nome acessível (a medida estaria cega)');
+    checa(await pelo('Corrigir o nome do local: Padaria Pão Quente') === 1,
+      'foco/pílula: o nome acessível da pílula não diz o nome do local que ela mostra',
+      await page.locator('#lightboxNomeBtn').ariaSnapshot().catch(() => ''));
+  }
   // Na DENÚNCIA o selo é 🚩 e o nome muda junto — o do HTML é o do ✨.
   await montar({ ...FOTO_PL, venueID: 'v-foco-flag', updateRequestID: 'u-flag', updateTypeKey: 'FLAG',
     reqType: 'REQUEST', reqSubType: 'FLAG', purType: 'FLAGGED_PHOTO', flagSubjectType: 'IMAGE',
@@ -4645,6 +4694,19 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const e2 = await escala();
   // proporcional: −80 é 0,8 dente → 1,2 × 1,2^0,8 ≈ 1,39 (por evento dava 4, o teto)
   checa(e2 > e1 && e2 < 1.5, `roda/foto: 20 eventos de trackpad (−80) foram de ${e1.toFixed(2)} a ${e2.toFixed(2)} — por evento, não pelo delta`);
+  // Ir e voltar na MESMA medida volta a 1× EXATO (R6-3-05, auditoria de
+  // 2026-10-01): o zoom é produto de fatores, e dois dentes de 53 px (o do
+  // Chrome no Linux) pra dentro e dois pra fora paravam em 1,0000000000000002 —
+  // a tela parecia 1×, mas as setas ANDAVAM a foto e o ↓ não fechava. CONTROLE:
+  // os dentes de 53 px aproximaram de verdade antes de voltar.
+  await page.evaluate(() => Lightbox.resetZoom());
+  await pausa();
+  await rodar(2, 0, -53);
+  const e3 = await escala();
+  checa(e3 > 1.1, `roda/foto: CONTROLE — dois dentes de 53 px não aproximaram (escala ${e3})`);
+  await rodar(2, 0, 53);
+  const e4 = await escala();
+  checa(e4 === 1, `roda/foto: dois dentes de 53 px pra dentro e dois pra fora pararam em ${e4}, não em 1× — as setas andariam a foto`);
   await page.evaluate(() => Lightbox.close());
   checa(erros.length === 0, 'roda: erro de JS', erros[0]);
   await ctx.close();
