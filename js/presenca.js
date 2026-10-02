@@ -1319,6 +1319,30 @@ function presencaZerarNaoLidas(id, ate) {
 
 // ── a conversa ──────────────────────────────────────────────────────────────
 
+// A folha da presença (a lista, a conversa e o pedido que chegou nela) mora no
+// RODAPÉ, embaixo do banner do Desfazer (`#notifyStack`, z-70, também no
+// rodapé). Aberta na janela do Desfazer, o banner ficava em cima da linha da
+// pessoa, do campo e do "Enviar" — e o toque no "Enviar" caía no "Desfazer": a
+// decisão do card era desfeita atrás da folha, e a mensagem não saía (auditoria
+// de 2026-10-01, R6-5-4, medido no 393 e no Fold). Abrir a folha DESPACHA a
+// janela, como fechar a foto ampliada despacha a aprovação e o "Marcar todos" e
+// o treino despacham a do card: a decisão sai agora, e o banner sai com ela.
+// Nada muda na tela além do banner sumir — como some quando a janela termina.
+function presencaDespacharJanela() {
+    if (typeof despacharJanelaDoDesfazer === 'function') despacharJanelaDoDesfazer();
+}
+
+// A folha está na tela. Com ela aberta, a decisão que CHEGA (o gesto saiu antes
+// e a animação do card dura 350 ms: tocar a pílula nesse meio era o mesmo
+// defeito por outro caminho) sai sem janela — quem pergunta é o `scheduleAction`
+// do app.js, que carrega antes deste arquivo e chama esta função pelo nome.
+function presencaFolhaAberta() {
+    return ['presencaModal', 'conversaModal', 'pedidoModal'].some((id) => {
+        const m = document.getElementById(id);
+        return !!m && !m.classList.contains('hidden');
+    });
+}
+
 function presencaAbrirConversa(id) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
@@ -1328,6 +1352,8 @@ function presencaAbrirConversa(id) {
     // tirinha — e ele saía junto no envio, pra quem não era o destino
     // (auditoria de 2026-09-26).
     if (Presenca.aberta !== id) { Presenca.anexo = null; Presenca.nomeDaAberta = null; }
+    // A janela do Desfazer não fica por cima da conversa (ver a função).
+    presencaDespacharJanela();
     Presenca.aberta = id;
     // O nome de quem se abriu, de onde ele estiver agora (ver `nomeDaAberta`).
     const quem = Presenca.online.find((p) => p.id === id) || Presenca.conversas.find((x) => x.id === id);
@@ -2148,6 +2174,8 @@ function presencaMontar() {
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => {
+        // A janela do Desfazer não fica por cima da lista (ver a função).
+        presencaDespacharJanela();
         openModal('presencaModal');
         presencaRenderLista();
         // Abrir a lista custa UM pedido: é o momento em que ela é OLHADA.

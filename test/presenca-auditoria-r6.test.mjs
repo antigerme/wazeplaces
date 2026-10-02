@@ -387,3 +387,73 @@ test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma f
   assert.equal(presencaWme.desligarPendente, false);
 });
 
+// ── R6-5-4: a folha da presença despacha a janela do Desfazer ────────────────
+
+test('R6-5-4 abrir a lista (a pílula) e abrir a conversa DESPACHAM a janela do Desfazer — o banner não fica por cima da folha', () => {
+  const c = novoCliente();
+  c.P.presencaMontar();
+  c.$('presencaPill').disparar('click');
+  assert.equal(c.chamadas.despacharJanela, 1, 'abrir a lista deixou a janela do Desfazer correndo por baixo dela');
+  assert.deepEqual(c.chamadas.openModal, ['presencaModal'], 'CONTROLE: a pílula tem que abrir a lista');
+  c.P.presencaAbrirConversa(CAF);
+  assert.equal(c.chamadas.despacharJanela, 2, 'abrir a conversa deixou a janela do Desfazer correndo por baixo dela');
+  // A folha na tela é a régua de quem decide a próxima janela (ver o `scheduleAction`).
+  assert.equal(c.P.presencaFolhaAberta(), true);
+  fechar(c);
+  c.$('presencaModal').classList.add('hidden');
+  assert.equal(c.P.presencaFolhaAberta(), false, 'CONTROLE: com a folha fechada, a janela volta a abrir');
+});
+
+test('R6-5-4 despachar: a janela do card e as do lightbox SAEM, e o banner sai com elas', () => {
+  const log = [];
+  const AppState = { pendingAction: { execute: () => log.push('card') } };
+  const { despacharJanelaDoDesfazer } = montar(['despacharJanelaDoDesfazer'], {
+    AppState, enviarPendenciasDoLightbox: () => log.push('lightbox'), removeUndoBanner: () => log.push('banner'),
+  });
+  despacharJanelaDoDesfazer();
+  assert.deepEqual(log, ['card', 'lightbox', 'banner']);
+  assert.equal(AppState.pendingAction, null);
+  // Sem janela nenhuma, nada a despachar (e nada lança).
+  log.length = 0;
+  despacharJanelaDoDesfazer();
+  assert.deepEqual(log, ['lightbox', 'banner']);
+});
+
+function montarAgenda({ folha }) {
+  const AppState = { pendingAction: null, preferences: { undoEnabled: true }, stats: { read: 0, rejected: 1, skipped: 0 },
+    serverTotal: 10, queue: [], inFlightActions: 0 };
+  const log = [];
+  const deps = {
+    AppState, dlog: () => {}, dlogPlace: () => null,
+    marcarEmAndamento: () => {}, removeUndoBanner: () => {}, aplicarTravaDeAcao: () => {}, updateInFlightIndicator: () => {},
+    canDisableUndo: () => false, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
+    updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => {},
+    showUndoBanner: () => log.push('banner'), t: (k) => k, enfileirarSaida: () => true, API: { getRegion: () => 'row' },
+    setTimeout: () => { log.push('janela'); return 1; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
+    console: { error: () => {} }, reivindicacaoDestaAba: () => null,
+    presencaFolhaAberta: () => folha,
+  };
+  const { scheduleAction } = montar(['scheduleAction'], deps);
+  return { scheduleAction, AppState, log };
+}
+
+test('R6-5-4 a decisão que CHEGA com a folha da presença aberta sai na hora — a janela não abre por baixo dela', async () => {
+  const m = montarAgenda({ folha: true });
+  let saiu = 0;
+  m.scheduleAction('reject', { venueID: 'v1', updateRequestID: 'u1' }, async () => { saiu++; });
+  await tick();
+  assert.equal(saiu, 1, 'DEFEITO: com a folha aberta, a decisão ficou esperando a janela');
+  assert.deepEqual(m.log, [], 'a janela (e o banner) abriu por baixo da folha');
+  assert.equal(m.AppState.pendingAction, null);
+  // CONTROLE: sem a folha, a janela abre como sempre — e um valor que só PARECE verdadeiro não conta.
+  for (const folha of [false, 'sim', {}]) {
+    const c = montarAgenda({ folha });
+    let saiuC = 0;
+    c.scheduleAction('reject', { venueID: 'v2', updateRequestID: 'u2' }, async () => { saiuC++; });
+    await tick();
+    assert.equal(saiuC, 0, `sem a folha (${JSON.stringify(folha)}), a decisão saiu sem a janela`);
+    assert.deepEqual(c.log, ['janela', 'banner']);
+    assert.ok(c.AppState.pendingAction);
+  }
+});
+

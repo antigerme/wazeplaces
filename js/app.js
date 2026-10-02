@@ -18891,6 +18891,18 @@ function scheduleAction(type, place, executor, opts = {}) {
         runExecutor();
         return;
     }
+    // Com a folha da presença aberta (a lista, a conversa), a janela não abre
+    // por baixo dela: o banner do Desfazer ficaria em cima da linha da pessoa e
+    // do "Enviar", e o toque caía nele (ver `despacharJanelaDoDesfazer`). É a
+    // decisão que CHEGA com a folha já aberta — o gesto saiu antes, e a animação
+    // do card dura 350 ms: tocar a pílula nesse meio abria a janela por baixo da
+    // lista (auditoria de 2026-10-01, R6-5-4). Ela sai na hora, como sairia ao
+    // abrir a folha com a janela correndo. `=== true`: só a folha de verdade.
+    if (typeof presencaFolhaAberta === 'function' && presencaFolhaAberta() === true) {
+        executed = true;
+        runExecutor();
+        return;
+    }
 
     const timerId = setTimeout(() => {
         if (!executed) {
@@ -19093,6 +19105,19 @@ function desfazerPeloTeclado() {
     if (!btn) return false;
     btn.click();
     return true;
+}
+
+// A janela do Desfazer SAI agora — a do card e as do lightbox (aprovar,
+// excluir, renomear) — e o banner sai com ela, na ordem do "Marcar todos" e do
+// treino (`handleBatchMarkRead`, `Treino.entrar`). Quem chama é a folha da
+// presença ao abrir (`presencaDespacharJanela`): ela mora no rodapé, embaixo do
+// banner, e o toque no "Enviar" da conversa caía no "Desfazer" — a decisão do
+// card era desfeita atrás da folha, e a mensagem não saía (auditoria de
+// 2026-10-01, R6-5-4).
+function despacharJanelaDoDesfazer() {
+    if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
+    enviarPendenciasDoLightbox();
+    removeUndoBanner();
 }
 
 function removeUndoBanner() {

@@ -71,7 +71,8 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   const armazenado = new Map();
-  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [], dfato: [] };
+  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [], dfato: [],
+    refazerPerfil: 0, despacharJanela: 0 };
   const timers = [];
   let proximoTimer = 1;
   const relogio = { agora: agora ?? Date.now() };
@@ -122,6 +123,10 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     openModal: (id) => { chamadas.openModal.push(id); $(id).classList.remove('hidden'); },
     closeModal: (id) => { chamadas.closeModal.push(id); $(id).classList.add('hidden'); },
     handleUnauthorized: () => { chamadas.unauthorized += 1; },
+    // Do app.js: pedir de novo o perfil que falta (com o teto de 1/min dele) e
+    // despachar a janela do Desfazer. Aqui só CONTAM — quem faz é o app.
+    refazerPerfilSeFaltar: () => { chamadas.refazerPerfil += 1; },
+    despacharJanelaDoDesfazer: () => { chamadas.despacharJanela += 1; },
     // O diário sempre ligado do app.js (`dfato`). Aqui ele só GUARDA, pra o
     // teste ver a linha do tempo que a presença deixa pro diagnóstico.
     dfato: (k, o) => { chamadas.dfato.push([k, o]); },
