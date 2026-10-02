@@ -944,7 +944,27 @@ const LIMPEZA_AO_FECHAR = {
     // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
     // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
     // expandido pra próxima abertura — o gotcha dos modais deste projeto.
-    filtersModal() { autoresExpandido = false; escadaAberta = false; conquistaTocada = null; novasDestaAbertura = null; },
+    filtersModal() {
+        autoresExpandido = false; escadaAberta = false; conquistaTocada = null; novasDestaAbertura = null;
+        // A lista de autores que você rejeitou — nome e id de TERCEIRO — não fica
+        // no DOM do painel fechado (a próxima abertura a desenha de novo): ela
+        // ficava depois do "Sair", e a próxima conta que ligasse o modo dev na
+        // mesma página a levava no relatório (auditoria de 2026-10-02, R6-1-05).
+        esvaziarListaDeAutores();
+    },
+    // A folha do autor: o nome dele e as linhas com a contagem (R6-1-05).
+    autorModal() {
+        const titulo = document.getElementById('autorTitle');
+        if (titulo) titulo.textContent = '';
+        const corpo = document.getElementById('autorCorpo');
+        if (corpo) corpo.innerHTML = '';
+    },
+    // O "Acesso restrito": o nome, o nível e a área de quem o portão recusou
+    // ficavam no diálogo fechado, na tela de entrada (R6-1-05).
+    accessDeniedModal() {
+        const perfil = document.getElementById('accessDeniedProfile');
+        if (perfil) { perfil.innerHTML = ''; perfil.classList.add('hidden'); }
+    },
     pairShowModal() {
         // A resposta de um pedido de código que ainda voava é de um diálogo que
         // fechou: não escreve nada, e o código que ela trouxer é cancelado
@@ -2255,7 +2275,17 @@ const Lightbox = {
         // card novo não aparecer por baixo de uma camada que ainda está aberta.
         avancarSeAprovado();
         if (!topOpenModal()) document.body.style.overflow = '';
-        document.getElementById('lightboxImage').removeAttribute('src');
+        const img = document.getElementById('lightboxImage');
+        img.removeAttribute('src');
+        // E o NOME do local e o de quem mandou a foto (a pílula, a contagem e o
+        // `alt`): ficavam no DOM do lightbox fechado, até na tela de entrada
+        // depois do "Sair" (auditoria de 2026-10-02, R6-1-05). O `alt` volta ao
+        // vazio do HTML; abrir escreve tudo de novo (`_render`, `mostrarNomeNoLightbox`).
+        img.alt = '';
+        const contagem = document.getElementById('lightboxCount');
+        if (contagem) { contagem.textContent = ''; contagem.removeAttribute('title'); contagem.classList.add('hidden'); }
+        const nome = document.getElementById('lightboxNomeTxt');
+        if (nome) nome.textContent = '';
         this.resetZoom();
         // O anúncio era DESTA foto (e o da renomeação leva o nome do local):
         // não fica no DOM depois de ela fechar.
@@ -4913,6 +4943,9 @@ function showAuthScreen() {
     // 2026-10-01, R5-5-X).
     const anuncio = document.getElementById('cardLiveRegion');
     if (anuncio) anuncio.textContent = '';
+    // E a lista de autores rejeitados (ver a função): a folha do autor pode tê-la
+    // redesenhado no painel fechado (R6-1-05).
+    esvaziarListaDeAutores();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -15356,6 +15389,16 @@ function renderAutores() {
         c.addEventListener('change', () => alternarAutoDoAutor(c.dataset.autor));
     }
     devolverFocoAoPainel(el, foco);
+}
+
+// A lista de autores SAI do DOM quando o painel fecha e na tela de entrada (o
+// "Sair", a queda): é nome e id de TERCEIRO, o mesmo dado que o
+// `waze_places_autores` apaga. Na tela de entrada também porque a folha do
+// autor redesenha o painel FECHADO (`esquecerAutor`, `alternarAutoDoAutor`),
+// depois de a limpeza do fechamento o ter esvaziado (R6-1-05).
+function esvaziarListaDeAutores() {
+    const el = document.getElementById('autoresBody');
+    if (el) el.innerHTML = '';
 }
 
 // Esquecer pela LISTA do Histórico. O card da frente (atrás do modal) e o de
