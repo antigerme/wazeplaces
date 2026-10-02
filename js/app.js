@@ -18399,6 +18399,23 @@ const Treino = {
         // O lote de lidos no ar termina sobre a fila REAL: trocada pela de
         // treino, os pedidos que ele marcou voltavam no `sair()` como card.
         if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
+        // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
+        // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
+        // procura na fila de treino) e voltava no `sair()` como card, destravado —
+        // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
+        // (R5-2-04). E a de uma sessão que CAIU, na fila que atravessou a queda: o
+        // pouso dela tira o pedido desta fila (ver `aprovacoesDaQueda`).
+        // A conferência vem ANTES de despachar qualquer coisa, como a do lote: o
+        // treino que ia ser recusado mandava antes o ✕ da janela do Desfazer (o
+        // banner sumia, e com ele a chance de desfazer) e então não abria — o
+        // efeito sem a ação pedida (MEDIDO, s35: o ✕ saiu em ~470 ms e o treino
+        // ficou fechado; auditoria de 2026-10-02, R6-2-07). A aprovação ainda na
+        // JANELA do Desfazer (`aprovacaoPendente`) conta junto: o despacho logo
+        // abaixo a poria no ar.
+        if (aprovacaoPendente || aprovacoesNoAr.size || [...aprovacoesDaQueda.values()].includes(AppState.fetchEpoch)) {
+            showToast(t('toast.esperaAprovacao'), 'info');
+            return;
+        }
         // Uma janela de Desfazer pendente é de um pedido REAL: despacha antes de
         // trocar a fila debaixo dela, senão ela executaria sobre outro estado.
         // A do card E as do lightbox (L25: só o banner saía, e a janela delas
@@ -18406,17 +18423,6 @@ const Treino = {
         if (AppState.pendingAction) { AppState.pendingAction.execute(); AppState.pendingAction = null; }
         enviarPendenciasDoLightbox();
         removeUndoBanner();
-        // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
-        // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
-        // procura na fila de treino) e voltava no `sair()` como card, destravado —
-        // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
-        // (R5-2-04). Depois de despachar as pendências: a da janela acabou de sair
-        // e também é esperada. E a de uma sessão que CAIU, na fila que atravessou
-        // a queda: o pouso dela tira o pedido desta fila (ver `aprovacoesDaQueda`).
-        if (aprovacoesNoAr.size || [...aprovacoesDaQueda.values()].includes(AppState.fetchEpoch)) {
-            showToast(t('toast.esperaAprovacao'), 'info');
-            return;
-        }
         // A busca que estiver em voo é DESCARTADA (a época muda): sem isto os
         // pedidos reais pousavam na fila de TREINO, crus e registrados como "já
         // passaram pela fila", e sumiam no `sair()`. Quem busca de novo é o

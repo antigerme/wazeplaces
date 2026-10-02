@@ -201,7 +201,7 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
   const el = () => ({ classList: { replace() {}, add() {}, remove() {} }, textContent: '', children: [] });
   const deps = {
     AppState, document: { getElementById: el },
-    removeUndoBanner: () => {}, savePreferences: () => log.push('prefs'), showLoading: () => {},
+    removeUndoBanner: () => log.push('banner-fora'), savePreferences: () => log.push('prefs'), showLoading: () => {},
     updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => log.push('card'),
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => log.push('prefetch'),
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
@@ -210,6 +210,8 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
     enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
     aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
+    // A aprovação ainda na JANELA do Desfazer (R6-2-07): o despacho a poria no ar.
+    aprovacaoPendente: aprovacaoNaJanela ? { enviar: () => {} } : null,
     ...extraDeps,
   };
   const i = APP_SEM.indexOf('const Treino = {');
@@ -267,12 +269,15 @@ test('R5-2-04: com a aprovação de foto NO AR o treino não liga — e diz por 
   assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
 });
 
-test('R5-2-04: a aprovação que estava na JANELA sai ao entrar — e o treino espera por ela também', () => {
+test('R5-2-04: a aprovação que está na JANELA do Desfazer segura o treino também — e segue na janela (R6-2-07)', () => {
   const { Treino, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNaJanela: true });
   Treino.entrar();
-  assert.ok(log.includes('lightbox:enviou'), 'PRÉ-CONDIÇÃO: as pendências do lightbox foram despachadas');
-  assert.equal(Treino.ativo, false, 'a aprovação despachada ao entrar ficou no ar com o treino ligado');
+  assert.equal(Treino.ativo, false, 'o treino ligou com a aprovação a caminho do ar');
   assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  // A recusa vem ANTES do despacho (R6-2-07): a aprovação segue na janela,
+  // desfazível, com o banner dela — o treino recusado não pode mandá-la.
+  assert.ok(!log.includes('lightbox:enviou'), 'o treino que ia ser recusado despachou a aprovação da janela');
+  assert.ok(!log.includes('banner-fora'), 'o treino recusado tirou o banner do Desfazer da aprovação');
   // CONTROLE: sem aprovação nenhuma, entra.
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
   c.Treino.entrar();
@@ -294,6 +299,30 @@ test('R5-2-04 × queda: a aprovação da sessão que caiu, ainda no ar NA FILA q
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { aprovacaoDaQueda: 'outraFila' });
   c.Treino.entrar();
   assert.equal(c.Treino.ativo, true, 'a aprovação de uma fila que já foi refeita segurou o treino');
+});
+
+// ── R6-2-07: a recusa do treino vem ANTES de despachar qualquer coisa ──────────
+// Com um ✕ na janela do Desfazer e a aprovação de OUTRO pedido no ar (o caminho
+// L22), "Praticar" mandava o ✕ na hora — o banner sumia, e com ele a chance de
+// desfazer — e DEPOIS recusava o treino: o efeito sem a ação pedida (MEDIDO no
+// navegador, s35: o ✕ saiu em ~470 ms e o treino ficou fechado).
+test('R6-2-07: com a aprovação no ar, o treino recusado NÃO manda o ✕ da janela do Desfazer', () => {
+  const executou = [];
+  const janela = { type: 'reject', execute: () => executou.push('reject') };
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vA', updateRequestID: 'uA' }], pendingAction: janela },
+    { aprovacaoNoAr: true });
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'PRÉ-CONDIÇÃO: o treino é recusado');
+  assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  assert.deepEqual(executou, [], 'o treino recusado mandou o ✕ da janela do Desfazer');
+  assert.equal(AppState.pendingAction, janela, 'a janela do Desfazer foi fechada pelo treino que não abriu');
+  assert.ok(!log.includes('banner-fora'), 'o banner do Desfazer sumiu com o treino recusado');
+  assert.ok(!log.includes('lightbox:enviou'), 'as escritas do lightbox saíram com o treino recusado');
+  // CONTROLE: a aprovação já pousou — o treino abre, e aí o ✕ sair é o desenho de entrar.
+  const c = montarTreino({ queue: [{ venueID: 'vA', updateRequestID: 'uA' }], pendingAction: { type: 'reject', execute: () => executou.push('c') } });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
+  assert.deepEqual(executou, ['c']);
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {
@@ -427,6 +456,9 @@ test('R6-7-8: no treino, o "de N na região" da fila real sai de baixo do "Resta
   const { updatePendingCount } = montar(['updatePendingCount', 'updatePendingTotalHint'], {
     AppState, Treino, document: { getElementById: (id) => el[id] || null }, t: (k, v) => k + JSON.stringify(v || {}),
     setCount: (e, n) => { e.textContent = String(n); }, atualizarPontoNoIcone() {}, atualizarAvisoDeSessao() {},
+    // O "…" e o "—" do R6-2-04/05 (lote 10 da fila): a busca esperando o perfil, e
+    // parar a contagem animada que estiver em curso.
+    buscaEsperaOPerfil: false, pararContagemEmCurso() {},
   }, ['updatePendingCount']);
   updatePendingCount();
   assert.equal(el.pendingCount.textContent, '30', 'PRÉ-CONDIÇÃO: o "Restam" é o do treino');
