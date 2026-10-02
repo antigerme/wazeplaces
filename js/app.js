@@ -340,6 +340,9 @@ let epocaDaSessao = 0;
 // Desligar o modo dev com captura não baixada pede um SEGUNDO toque (ver o
 // interruptor em `setupEventListeners`): até aqui, o segundo vale.
 let desligarDevConfirmadoAte = 0;
+// O número do último toque no interruptor do modo dev: a conta do aparelho é
+// assíncrona, e só o toque mais novo decide (ver o interruptor).
+let desligarDevVez = 0;
 
 // Os códigos de pareamento que ESTE aparelho emitiu nesta página: o "Sair" os
 // cancela no servidor, senão o QR mostrado antes seguia valendo 5 min e entrava
@@ -1846,7 +1849,7 @@ function setupModalListeners() {
         savePreferences();
         window.Presenca?.sincronizar?.();
     });
-    $('prefDevModeActive').addEventListener('change', (e) => {
+    $('prefDevModeActive').addEventListener('change', async (e) => {
         if (!AppState.devMode.unlocked) return;
         // Desligar APAGA o que o dev gravou — senão "desligado" é mentira: o
         // dado continua no aparelho. Mas nunca em silêncio: captura que ainda
@@ -1857,12 +1860,29 @@ function setupModalListeners() {
         // toast dizia "baixe antes de desligar" no mesmo instante em que as
         // capturas eram apagadas — conselho impossível de seguir. Agora o toque
         // volta o interruptor e avisa; um segundo toque (em até 15 s) desliga.
-        if (!e.target.checked && dlogNaoBaixados() > 0 && Date.now() > desligarDevConfirmadoAte) {
-            e.target.checked = true;
-            desligarDevConfirmadoAte = Date.now() + 15000;
+        //
+        // E a conta é a do APARELHO, não a desta aba (R6-4-4): desligar aqui apaga
+        // a base e, pelo aviso do navegador, a memória da OUTRA aba aberta — e as
+        // capturas que ela fez depois de esta abrir não estavam na conta: o 1º
+        // toque desligava calado. Elas estão na base, que se lê de forma
+        // assíncrona (`diagAtualizarAnteriores`, que também as põe no próximo
+        // relatório desta aba, como o aviso promete). Cada toque tira um número:
+        // um toque que chegar durante a leitura decide, e não a leitura antiga.
+        const vez = ++desligarDevVez;
+        if (!e.target.checked && Date.now() > desligarDevConfirmadoAte) {
+            // O que ESTA aba tem já se sabe: o interruptor volta na hora, sem piscar.
+            if (dlogNaoBaixados() > 0) e.target.checked = true;
+            await diagAtualizarAnteriores().catch(() => false);
+            if (vez !== desligarDevVez) return;
             const naoBaixados = dlogNaoBaixados();
-            showToast(t(naoBaixados === 1 ? 'toast.devPerdeCapturaUm' : 'toast.devPerdeCaptura', { n: naoBaixados }), 'error', 9000);
-            return;
+            if (naoBaixados > 0) {
+                e.target.checked = true;
+                desligarDevConfirmadoAte = Date.now() + 15000;
+                showToast(t(naoBaixados === 1 ? 'toast.devPerdeCapturaUm' : 'toast.devPerdeCaptura', { n: naoBaixados }), 'error', 9000);
+                return;
+            }
+            // Nada a perder no aparelho: desliga (o interruptor pode ter voltado acima).
+            e.target.checked = false;
         }
         desligarDevConfirmadoAte = 0;
         AppState.devMode.active = e.target.checked;
@@ -6166,16 +6186,18 @@ const DIAG_CAPTURAS_GUARDADAS_MAX = DLOG_MAX_MOMENTOS;
 // Esta abertura: o id nasce com a página e morre com ela.
 const DIAG_ABERTURA = { id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
                         inicio: Date.now() };
-// O que as aberturas ANTERIORES deixaram, lido do aparelho na abertura (só com
-// o modo dev ligado). Fica em memória até a página morrer: mesmo baixado, segue
-// indo nos relatórios desta abertura — é o que já acontece com as capturas dela.
+// O que as OUTRAS aberturas deixaram no aparelho — as anteriores, e a de outra
+// aba aberta —, lido na abertura (só com o modo dev ligado) e relido na hora de
+// baixar e de desligar (`diagAtualizarAnteriores`). Fica em memória até a página
+// morrer: mesmo baixado, segue indo nos relatórios desta abertura — é o que já
+// acontece com as capturas dela.
 let diagAberturasAnteriores = [];
 // O último download do diagnóstico NESTA abertura. O que veio antes já foi
 // entregue: não volta a ser guardado.
 let diagBaixadoEm = 0;
 
-function diagMomentosAnteriores() {
-    return diagAberturasAnteriores.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []));
+function diagMomentosAnteriores(lista = diagAberturasAnteriores) {
+    return lista.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []));
 }
 function diagCapturasAnterioresDoEditor() {
     return diagMomentosAnteriores().filter((m) => m && m.motivo === 'manual');
@@ -6359,6 +6381,55 @@ async function diagCarregarAberturas() {
     }
 }
 
+// O que o APARELHO tem agora das outras aberturas, juntado ao que esta aba leu ao
+// abrir. A OUTRA aba aberta grava as capturas dela na base na hora em que são
+// feitas (`diagGuardarAbertura`), e esta só as conhecia se fossem de antes de ela
+// abrir: o aviso do desligar contava só a memória desta aba — e desligar aqui
+// apaga as da outra (R6-4-4) —, e o relatório baixado aqui não as levava, com o
+// download apagando a base inteira (R6-4-5). Por abertura vale a versão mais NOVA
+// (`salvoEm`), e a que só esta aba ainda tem na memória fica. A versão nova de uma
+// abertura já baixada aqui traz de novo as capturas que foram: elas seguem
+// marcadas (pela hora e o motivo, que a base não guarda objeto), senão contariam
+// como "não baixadas" no botão e no aviso. Sem a base (o IndexedDB não
+// respondeu), fica o que havia.
+async function diagAtualizarAnteriores() {
+    if (!dlogLigado()) return false;
+    const epoca = diagEpoca;
+    let db = null, guardadas = null;
+    try {
+        db = await diagDB();
+        guardadas = await diagLerGuardado(db);
+    } catch (e) {
+        return false;
+    } finally {
+        try { if (db) db.close(); } catch (e) {}
+    }
+    // Apagado (o "Sair", o desligar) ou desligado enquanto a base era lida: nada
+    // do que foi lido volta pra memória.
+    if (epoca !== diagEpoca || !dlogLigado()) return false;
+    const marca = (m) => (m && m.t) + '|' + (m && m.motivo);
+    const porId = new Map(diagAberturasAnteriores.map((a) => [a.id, a]));
+    let mudou = false;
+    for (const a of guardadas) {
+        if (!a || typeof a.id !== 'string' || a.id === DIAG_ABERTURA.id) continue;
+        // O que passou do prazo (24 h) não volta: é da poda, não do relatório.
+        if (!(Date.now() - a.salvoEm <= DIAG_GUARDA_MS)) continue;
+        const ja = porId.get(a.id);
+        if (ja && !(a.salvoEm > ja.salvoEm)) continue;
+        if (ja) {
+            const baixadas = new Set((ja.momentos || []).filter((m) => dlogJaBaixados.has(m)).map(marca));
+            for (const m of (a.momentos || [])) if (baixadas.has(marca(m))) dlogJaBaixados.add(m);
+        }
+        porId.set(a.id, a);
+        mudou = true;
+    }
+    if (mudou) {
+        diagAberturasAnteriores = [...porId.values()];
+        atualizarFabDev();
+    }
+    return true;
+}
+
 // O que SOBROU no aparelho com o modo dev DESLIGADO. A poda de 24 h mora no
 // `diagCarregarAberturas`, que só roda com o modo dev ligado — então o que
 // ficasse pra trás (a base recriada por outra aba, antes do conserto do D2; um
@@ -6390,10 +6461,10 @@ function diagFaxinaSemModoDev() {
     } catch (e) { return Promise.resolve(false); }
 }
 
-// Apaga TUDO o que foi guardado: no download (já foi entregue), no desligar do
-// modo dev e no "Sair". Entra na MESMA fila das gravações: a que estava em voo
-// termina antes (senão recriaria a base logo depois de apagada), e a que for
-// pedida depois acontece depois.
+// Apaga TUDO o que foi guardado: no desligar do modo dev e no "Sair" (o download
+// apaga só o que entregou: `diagEsquecerEntregue`). Entra na MESMA fila das
+// gravações: a que estava em voo termina antes (senão recriaria a base logo
+// depois de apagada), e a que for pedida depois acontece depois.
 function diagEsquecerGuardado() {
     // A gravação em voo termina ANTES — mas com TETO: pendurada, ela prendia o
     // apagar pra sempre (O10). Se ela acordar depois, a época a impede de gravar.
@@ -6405,6 +6476,43 @@ function diagEsquecerGuardado() {
             r.onsuccess = r.onerror = r.onblocked = () => ok(true);
         } catch (e) { ok(false); }
     }));
+    diagGuardando = esta.catch(() => false);
+    return esta;
+}
+
+// Depois do DOWNLOAD, sai do aparelho só o que FOI no arquivo (R6-4-5). Apagava
+// a base inteira, e com ela o que a OUTRA aba gravou depois do relatório ler a
+// base — capturas que não foram no arquivo e sumiam (medido, t3b). Sai cada
+// abertura entregue, na versão em que foi (`{ id, salvoEm }`): a que a outra aba
+// regravou depois de lida fica, e vai no próximo relatório (repetir o entregue é
+// melhor que perder o que não foi). E a desta aba é REGRAVADA com o que veio
+// depois do retrato (`diagBaixadoEm`) e as capturas não entregues — sem o que já
+// foi. Na MESMA fila das gravações, e com a época do PEDIDO: um apagar inteiro
+// pedido depois (o "Sair", o desligar) decide.
+function diagEsquecerEntregue(entregues) {
+    const epoca = diagEpoca;
+    const foi = new Map((Array.isArray(entregues) ? entregues : []).map((a) => [a.id, a.salvoEm]));
+    const esta = diagGuardando.then(async () => {
+        if (epoca !== diagEpoca) return false;
+        let db = null;
+        try {
+            db = await diagDB();
+            const guardadas = await diagLerGuardado(db);
+            if (epoca !== diagEpoca) return false;
+            const sair = guardadas.filter((a) => a && (a.id === DIAG_ABERTURA.id
+                || (foi.has(a.id) && foi.get(a.id) === a.salvoEm))).map((a) => a.id);
+            // A desta aba volta com o que NÃO foi entregue — pelo modo dev da FONTE,
+            // como na gravação (desligado noutra aba, não regrava nada).
+            const atual = dlogLigado() && !modoDevDesligadoNoArmazenamento() ? diagRegistroDaAbertura('baixou') : null;
+            await diagAplicarPoda(db, { sair, manter: atual ? [atual] : [], cortadas: [] }, new Set(atual ? [atual.id] : []));
+            return true;
+        } catch (e) {
+            dfato('diag.guardarFalhou', { motivo: 'baixou', erro: String((e && e.name) || e).slice(0, 60) });
+            return false;
+        } finally {
+            try { if (db) db.close(); } catch (e) {}
+        }
+    });
     diagGuardando = esta.catch(() => false);
     return esta;
 }
@@ -7417,6 +7525,11 @@ async function diagCorpo() {
     // O ORÇAMENTO do relatório inteiro (ver `DIAG_ORCAMENTO_MS`).
     const inicioDaColeta = Date.now();
     const prazo = inicioDaColeta + DIAG_ORCAMENTO_MS;
+    // O que as OUTRAS abertas deixaram no aparelho até agora — a outra aba aberta
+    // inclusive (ver `diagAtualizarAnteriores`) —, relido em paralelo com as
+    // leituras de rede: o relatório leva o que o aparelho tem, e o download apaga
+    // só o que levou (R6-4-5). A base tem teto próprio (`DIAG_DB_TETO_MS`).
+    const anterioresDoAparelho = diagAtualizarAnteriores().catch(() => false);
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
     // ainda gastaria rede. `cache: 'force-cache'` pra pegar o que o aparelho
     // REALMENTE tem — que é a pergunta quando se suspeita de PWA com código
@@ -7557,6 +7670,7 @@ async function diagCorpo() {
     // Data errada no celular faz o aviso de sessão vencendo mentir e toda
     // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
     const relogio = await relogioPromessa;
+    await anterioresDoAparelho;
 
     const idb = {};
     try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
@@ -7577,6 +7691,9 @@ async function diagCorpo() {
     // arquivo e saía da cópia guardada (auditoria de 2026-09-26).
     const retratoEm = Date.now();
     const momentosNoArquivo = [...dlogMomentos];
+    // As outras aberturas, como vão no arquivo (a lista é trocada INTEIRA quando
+    // muda, nunca editada no lugar): é delas que o download diz o que entregou.
+    const aberturasNoArquivo = diagAberturasAnteriores;
     const chamadasNoArquivo = (typeof API !== 'undefined' && API.chamadas) ? [...API.chamadas] : [];
     const errosNoArquivo = [...diagErros];
     const corpo = {
@@ -7731,9 +7848,13 @@ async function diagCorpo() {
         },
     };
     // Fora do JSON (não enumerável): o que o `baixarDiagnostico` marca como
-    // entregue — o instante do retrato e as capturas que foram no arquivo.
+    // entregue — o instante do retrato, as capturas que foram no arquivo e as
+    // outras aberturas, cada uma na VERSÃO que foi (o que sai do aparelho, R6-4-5).
+    // Da lista do retrato, e não da de agora: a releitura pode trocá-la durante os
+    // `await` de cima, e marcaria como entregue o que não foi no arquivo.
     Object.defineProperty(corpo, 'entregue', {
-        value: { em: retratoEm, momentos: [...momentosNoArquivo, ...diagMomentosAnteriores()] },
+        value: { em: retratoEm, momentos: [...momentosNoArquivo, ...diagMomentosAnteriores(aberturasNoArquivo)],
+                 aberturas: aberturasNoArquivo.map((a) => ({ id: a.id, salvoEm: a.salvoEm })) },
     });
     return corpo;
 }
@@ -7859,11 +7980,12 @@ async function baixarDiagnostico() {
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 30000);
         dlogMarcarBaixados(corpo.entregue.momentos);
-        // Entregue: o que estava guardado no aparelho sai (ver
-        // `diagAberturasAnteriores`), e desta abertura só volta a ser guardado
-        // o que veio DEPOIS DO RETRATO — não do fim do download (ver `retratoEm`).
+        // Entregue: o que foi no arquivo sai do aparelho — e SÓ isso (R6-4-5: a
+        // base inteira saía, com o que a outra aba gravou depois da leitura; ver
+        // `diagEsquecerEntregue`) —, e desta abertura só volta a ser guardado o que
+        // veio DEPOIS DO RETRATO — não do fim do download (ver `retratoEm`).
         diagBaixadoEm = corpo.entregue.em;
-        diagEsquecerGuardado();
+        diagEsquecerEntregue(corpo.entregue.aberturas);
         atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
     } catch (e) {

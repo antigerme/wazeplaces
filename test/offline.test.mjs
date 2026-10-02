@@ -665,7 +665,8 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('CONTROLE: nenhuma captura NESTA abertura/, 'sem ele, o número podia vir de uma captura nova'],
     [/diz\('o RELATÓRIO leva a abertura anterior inteira/, 'o arquivo de verdade, lido pela ferramenta'],
     [/diz\('o resumo e o leitor mostram o defeito capturado ANTES de fechar/, 'o motivo de guardar'],
-    [/diz\('BAIXADO, o que estava guardado sai do aparelho/, 'o que foi entregue não fica'],
+    // Só o que FOI no arquivo (R6-4-5): a base inteira levava o que a outra aba gravou depois.
+    [/diz\('BAIXADO, sai do aparelho o que FOI no arquivo/, 'o que foi entregue não fica — e o que não foi, fica'],
     [/diz\('o que foi BAIXADO não volta/, 'o que foi entregue não volta'],
     [/diz\('a abertura guardada há MAIS de 24 h sai do aparelho/, 'o prazo que a Ajuda promete'],
     // Desde a auditoria de 2026-09-25 são DOIS toques com captura não baixada:
