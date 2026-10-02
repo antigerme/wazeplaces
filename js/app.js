@@ -1418,6 +1418,20 @@ function pareamentoTardio(r, epoca, abertura) {
     return true;
 }
 
+// O pedido de código NÃO DEU (`tardio`: a resposta é de outra sessão). Um 401
+// não é prova de sessão morta (gotcha #42): no resto do app ele é CONFERIDO
+// (`handleUnauthorized`) antes de virar "sessão expirada", e aqui o app
+// afirmava a queda sem conferir — pode ser o WAF —, e com a sessão morta de
+// verdade seguia na tela da fila, sem tentar a extensão nem levar à entrada
+// (auditoria de 2026-10-02, R6-1-08). O aviso é o do PEDIDO ("não deu pra
+// gerar o código"); o da sessão, se ela caiu, vem da conferência. O 401 de uma
+// resposta TARDIA é da sessão que já se foi: não confere a de agora.
+function avisarFalhaDoPareamento(r, tardio) {
+    const sessao = !tardio && !!r && r.errorCategory === 'unauthorized';
+    showToast(tardio || sessao ? t('toast.pairCreateError') : msgDoServidor(r, t('toast.pairCreateError')), 'error');
+    if (sessao) handleUnauthorized();
+}
+
 // Desenha o QR do link de pareamento. É a única forma de conectar que não
 // precisa de instrução nenhuma: aponta a câmera e entra — sem memorizar caminho
 // de menu no outro aparelho, sem trocar de aparelho com um código na cabeça,
@@ -1532,7 +1546,7 @@ async function abrirPareamento() {
     if (tardio && abertura !== aberturaDoPareamento) return;
     if (tardio || !r.success) {
         closeModal('pairShowModal');
-        showToast(tardio ? t('toast.pairCreateError') : msgDoServidor(r, t('toast.pairCreateError')), 'error');
+        avisarFalhaDoPareamento(r, tardio);
         return;
     }
     // O segredo do QR NÃO é exibido: ele tem 20 símbolos e ninguém vai digitar
@@ -1699,7 +1713,7 @@ async function revelarCodigoPareamento(ev) {
         btn.disabled = false;
         // O botão volta, e o foco com ele — ou o "Fechar", se o QR venceu nesse meio.
         if (tinhaFoco) devolverFocoNoPareamento(btn, ['pairShowCodeBtn', 'pairShowClose']);
-        showToast(tardio ? t('toast.pairCreateError') : msgDoServidor(r, t('toast.pairCreateError')), 'error');
+        avisarFalhaDoPareamento(r, tardio);
         return;
     }
     pareamentosEmitidos.add(r.code);

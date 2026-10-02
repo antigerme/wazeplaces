@@ -1116,7 +1116,8 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null, respostaQr 
       : (respostaQr ? respostaQr() : { success: true, code: 'SEGREDODOQR', expiresIn: 300 })),
       cancelarPareamento: async (c) => { cancelados.push(c); return { success: true }; } },
     showToast: (m, tipo) => toasts.push([m, tipo]),
-    msgDoServidor: (r, f) => f,
+    // Como o de verdade com o `t` de mentira: a frase do servidor, senão a reserva.
+    msgDoServidor: (r, f) => (r && r.error) || f,
     t: (k) => k,
     limparQrPareamento: () => { limpezasDoQr++; },
     desenharQrPareamento() {},
@@ -1132,7 +1133,8 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null, respostaQr 
   api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
      'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
-     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento', 'pareamentoTardio'],
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento', 'pareamentoTardio',
+     'avisarFalhaDoPareamento'],
     deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR', 'sair'],
     APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';\nfunction sair() { epocaDaSessao++; }');
   return {
@@ -1512,6 +1514,44 @@ test('R6-1-09: o código que chega depois do "Sair" (ou do diálogo fechado) é 
   assert.deepEqual([...ok.emitidos], ['SEGREDODOQR']);
   assert.deepEqual(ok.cancelados, []);
   assert.equal(ok.intervalosVivos(), 1);
+});
+
+// ── R6-1-08 (2026-10-02): o 401 do "Conectar outro aparelho" ─────────────────
+// Em todo o app um 401 é CONFERIDO antes de virar "sessão expirada" (gotcha
+// #42); aqui o toast "Sessão expirada ou inválida" saía direto, sem conferir
+// nada (pode ser o WAF) — e, com a sessão morta de verdade, o app seguia na
+// tela da fila, sem tentar a extensão nem levar à entrada (MEDIDO: só
+// `parear:create` na rede, nenhuma sonda).
+const NAO_AUTORIZADO = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired',
+  error: 'Sessão expirada ou inválida', httpCode: 401 };
+
+test('R6-1-08: "Conectar outro aparelho" com 401 CONFERE a sessão — e o aviso é o do pedido, não "sessão expirada"', async () => {
+  const p = pareamentoDeMentira({ respostaQr: async () => NAO_AUTORIZADO });
+  await p.abrirPareamento();
+  assert.deepEqual(p.conferencias, ['confere'], 'DEFEITO: o 401 do pareamento afirmou a queda sem conferir a sessão');
+  assert.deepEqual(p.toasts, [['toast.pairCreateError', 'error']],
+    `o 401 virou "${p.toasts.map((x) => x[0]).join(' | ')}" antes de a sessão ser conferida`);
+  assert.deepEqual(p.fechados, ['pairShowModal'], 'CONTROLE: o diálogo da falha não fechou');
+  // O código curto, pelo mesmo caminho.
+  const q = pareamentoDeMentira({ respostaCurto: async () => NAO_AUTORIZADO });
+  await q.abrirPareamento();
+  await q.revelarCodigoPareamento();
+  assert.deepEqual(q.conferencias, ['confere'], 'o 401 do código curto afirmou a queda sem conferir a sessão');
+  assert.deepEqual(q.toasts, [['toast.pairCreateError', 'error']]);
+  assert.equal(q.registro.pairShowCodeBtn.disabled, false, 'o botão do código curto não voltou');
+  // O 401 de uma resposta TARDIA é da sessão que já se foi: não confere a de agora.
+  const s = presa();
+  const w = pareamentoDeMentira({ respostaQr: s.resposta });
+  const pw = w.abrirPareamento();
+  w.sair();
+  s.soltar(NAO_AUTORIZADO);
+  await pw;
+  assert.deepEqual(w.conferencias, [], 'o 401 da sessão que caiu conferiu (e podia derrubar) a sessão de agora');
+  // CONTROLE: falha que não é de sessão segue com a frase do servidor e sem conferência.
+  const c = pareamentoDeMentira({ respostaQr: async () => ({ success: false, errorCategory: 'transient', error: 'Servidor Waze indisponível' }) });
+  await c.abrirPareamento();
+  assert.deepEqual(c.conferencias, []);
+  assert.deepEqual(c.toasts, [['Servidor Waze indisponível', 'error']], 'CONTROLE: a frase do servidor sumiu da falha comum');
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────
