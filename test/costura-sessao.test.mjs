@@ -70,7 +70,7 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
   // lê — R5-2-07), também parada por padrão.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false })) if (!(k in deps)) deps[k] = v;
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
@@ -1465,4 +1465,56 @@ test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na ho
     'a fila vazia depois do alarme falso (sem isso, ela ficaria esperando o próximo gatilho)');
   await tique(20);   // o que saísse A MAIS teria tempo de sair
   assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
+});
+
+// ═══ R6-1-03 · o card travado na queda SEM extensão (o celular) ═══════════════
+// A queda pergunta "tem extensão aí?" por 350 ms em TODO aparelho, e o aviso da
+// trava lia a pergunta como "a extensão está renovando": no celular (onde ela
+// nem instala), o toque no card travado logo depois da queda dizia "Espere a
+// conferência da sessão terminar e toque de novo" — e em seguida vinha "Sua
+// sessão no app não vale mais" (MEDIDO no Android emulado, o toque 100 ms
+// depois da queda, no Chromium e no WebKit, auditoria de 2026-10-02).
+test('R6-1-03: "espere a conferência" só DEPOIS do `aguarde` da extensão — a pergunta sozinha não é renovação', async () => {
+  const rodar = async (resposta) => {
+    const window = janelaFalsa();
+    const deps = { window, AppState: { authenticated: false, queue: [] }, epocaDaSessao: 1, saiuNestaPagina: false,
+      extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
+      EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
+      API: { setSession() {}, getSession: () => null } };
+    const h = montar(['entrarPelaExtensao', 'avisoDaTrava'], deps);
+    const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+    assert.equal(deps.extPerguntando, true, 'CONTROLE: a pergunta à extensão não saiu');
+    const naPergunta = h.avisoDaTrava();
+    window.responder({ source: 'wazeplaces-ext', action: 'aguarde' });
+    const renovando = h.avisoDaTrava();
+    window.responder({ source: 'wazeplaces-ext', ...resposta });
+    await p;
+    return { naPergunta, renovando, depois: h.avisoDaTrava() };
+  };
+  const semSessao = await rodar({ action: 'sem-sessao' });
+  assert.equal(semSessao.naPergunta, 'api.error.noSession',
+    'DEFEITO: com a extensão nem confirmada (o celular), o card travado mandou esperar a conferência');
+  assert.equal(semSessao.renovando, 'toast.esperaSessao', 'com a extensão RENOVANDO, o card travado disse "Sessão expirada" (R5-2-07)');
+  assert.equal(semSessao.depois, 'api.error.noSession', 'a renovação acabou (e não deu) e o card travado segue mandando esperar');
+  // CONTROLE: a renovação que DÁ CERTO também solta a marca.
+  const entrou = await rodar({ action: 'sessao', token: 'tokB' });
+  assert.equal(entrou.renovando, 'toast.esperaSessao');
+  assert.equal(entrou.depois, 'api.error.noSession', 'a marca da renovação ficou acesa depois de ela acabar');
+});
+
+test('R6-1-03: a renovação que NÃO deu tira o "espere a conferência" da tela ANTES do aviso de queda', async () => {
+  const log = [];
+  const deps = {
+    AppState: { authenticated: true, pendingAction: null, queue: [], fetchEpoch: 0 }, epocaDaSessao: 0,
+    API: { sessionToken: 'tok', setSession() {}, soltarSessao() {}, getSession: () => 'tok' },
+    MOTIVO_DA_QUEDA: constante('MOTIVO_DA_QUEDA'), UNAUTHORIZED_REDIRECT_MS: 0, setTimeout: () => 1,
+    // A extensão perguntada (e o toque no card travado mostrou o aviso da espera) — e não renovou.
+    entrarPelaExtensao: async () => false, tirarNegadoDaExtensao: () => null,
+    dispensarAvisoDaTrava: () => log.push('sai o "espere"'), showToast: (m) => log.push(m), t: (k) => k,
+  };
+  const h = montar(['derrubarSessao'], deps);
+  h.derrubarSessao('srv.err.sessionExpired');
+  await tique();
+  assert.deepEqual(log, ['sai o "espere"', 'toast.sessionExpired.local'],
+    `DEFEITO: o "espere a conferência" ficou na tela com o "a sessão não vale mais": ${log.join(' | ')}`);
 });

@@ -335,7 +335,7 @@ function montarExtensao(inicio = {}) {
   const deps = {
     window: win, document: { getElementById: () => null },
     API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
-    extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
+    extPerguntando: false, extRenovando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
     conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)

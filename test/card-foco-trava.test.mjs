@@ -64,7 +64,7 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
     // A1): aqui não há nenhuma.
     aprovacaoDaTelaNoAr: () => false,
     // A extensão renovando em silêncio (R5-2-07): aqui, não.
-    extPerguntando: false,
+    extPerguntando: false, extRenovando: false,
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [

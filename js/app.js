@@ -626,6 +626,14 @@ const EXT_ESPERA_MS = 8000;     // depois do `aguarde`, o prazo da ida ao Waze
 // depois ainda a troca, com o aviso dele.
 const AVISO_RENOVADA_ESPERA_PERFIL_MS = 4000;
 let extPerguntando = false;
+// A extensão RESPONDEU que está buscando a sessão (o `aguarde` da ponte): só daí
+// em diante há uma renovação de verdade a esperar. A pergunta sozinha
+// (`extPerguntando`) não diz que a extensão existe — a queda pergunta "tem
+// extensão aí?" por 350 ms em todo aparelho, inclusive no celular, onde ela não
+// instala —, e o toque no card travado nesse meio mandava "esperar a
+// conferência e tocar de novo", logo antes do "a sessão não vale mais"
+// (auditoria de 2026-10-02, R6-1-03). Ver `avisoDaTrava`.
+let extRenovando = false;
 // A extensão disse que o PORTÃO recusou esta conta (nível ou área — ver o
 // `autenticar` do background.js dela). Antes a recusa chegava como um
 // `sem-sessao` qualquer: quem não passa no portão e usa a extensão NUNCA via o
@@ -667,6 +675,7 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             window.removeEventListener('message', ouvir);
             clearTimeout(prazo);
             extPerguntando = false;
+            extRenovando = false;
             mostrarEntrandoPelaExtensao(false);
             resolve(ok);
         }
@@ -680,6 +689,9 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             if (d.action === 'aguarde') {
                 clearTimeout(prazo);
                 prazo = setTimeout(() => fim(false), EXT_ESPERA_MS);
+                // A renovação de verdade começou: o card travado pede pra
+                // esperar (ver `avisoDaTrava`).
+                extRenovando = true;
                 if (!silencioso) mostrarEntrandoPelaExtensao(true);
                 return;
             }
@@ -8568,6 +8580,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
         // ou a área mudou no Waze): aí o motivo é esse, não "a sessão venceu",
         // e a pessoa vê o "Acesso restrito" em vez do aviso de queda.
         const negado = tirarNegadoDaExtensao();
+        // O "espere a conferência" que o toque no card travado mostrou durante a
+        // renovação já não é verdade — ela acabou, e não deu: sai antes do aviso
+        // de queda, que diz o contrário (R6-1-03).
+        dispensarAvisoDaTrava();
         if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
         setTimeout(() => {
             if (epoca !== epocaDaSessao) return;
@@ -11933,13 +11949,16 @@ function aprovacaoDaTelaNoAr() {
 // botão que não existe. Sem sessão, a espera é a da sessão (a renovação pela
 // extensão, ou entrar de novo).
 function avisoDaTrava() {
-    // Sem sessão, com a extensão RENOVANDO em silêncio (`extPerguntando`): o app
+    // Sem sessão, com a extensão RENOVANDO em silêncio (`extRenovando`): o app
     // de propósito não avisa a queda nessa hora ("avisar antes seria assustar
     // quem nem ia ser interrompido", ver `derrubarSessao`), e o toque no card
     // travado dizia "Sessão expirada" — segundos antes do "Acesso renovado pelo
     // WME — sua fila continua aqui", as duas se contradizendo (R5-2-07). A espera
-    // é a da sessão, com o texto que já existe.
-    if (!AppState.authenticated) return extPerguntando ? 'toast.esperaSessao' : 'api.error.noSession';
+    // é a da sessão, com o texto que já existe. Só DEPOIS do `aguarde` da ponte:
+    // a pergunta sozinha ("tem extensão aí?", 350 ms em todo aparelho) mandava
+    // esperar também onde não há extensão nenhuma, logo antes do "a sessão não
+    // vale mais" (R6-1-03).
+    if (!AppState.authenticated) return extRenovando ? 'toast.esperaSessao' : 'api.error.noSession';
     if (loteDeLidosEmVoo) return 'toast.esperaLote';
     if (escritasConferindo > 0) return 'toast.esperaSessao';
     if (aprovacaoDaTelaNoAr()) return 'toast.esperaAprovacao';

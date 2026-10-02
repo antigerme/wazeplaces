@@ -269,7 +269,7 @@ test('lote: o lote respeita a trava e o treino', () => {
   const iA = semComentarios.indexOf('function avisoDaTrava');
   const corpoAviso = semComentarios.slice(iA, semComentarios.indexOf('\n}\n', iA) + 3);
   const aviso = (auth, lote, conf, ext = false) => new Function('AppState', 'loteDeLidosEmVoo', 'escritasConferindo',
-    'aprovacaoDaTelaNoAr', 'extPerguntando', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false, ext);
+    'aprovacaoDaTelaNoAr', 'extRenovando', corpoAviso + '\nreturn avisoDaTrava();')({ authenticated: auth }, lote, conf, () => false, ext);
   assert.equal(aviso(false, true, 1), 'api.error.noSession', 'sem sessão, a espera é a da sessão');
   // R5-2-07: com a extensão RENOVANDO em silêncio, a espera é a da sessão — não
   // "Sessão expirada" segundos antes do "Acesso renovado… sua fila continua aqui".
