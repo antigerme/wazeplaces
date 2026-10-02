@@ -162,6 +162,8 @@ test('R66-1: o painel diz o nível que o servidor exige, nas 4 línguas — e fa
     assert.equal(recusado.botao().disabled, true, `CONTROLE (${lingua}): o L1+AM deveria ver o botão travado`);
     const tela = recusado.textos();
     const botao = recusado.botao().title;
+    // Nenhum `{nivel}` cru na tela (o aviso, o title e a caixa passam TODOS pela constante).
+    assert.doesNotMatch(tela, /\{nivel\}/, `${lingua}: o painel mostrou o marcador cru`);
     for (const [onde, txt] of [['o aviso e a caixa de informação', tela], ['o title do botão', botao]]) {
       assert.ok(txt.includes(`${NIVEL_MINIMO}+`), `${lingua}: ${onde} não diz "${NIVEL_MINIMO}+", o nível que o servidor exige: ${JSON.stringify(txt.slice(0, 300))}`);
       assert.match(txt, /Staff/, `${lingua}: ${onde} não diz que Staff também entra`);
@@ -172,6 +174,23 @@ test('R66-1: o painel diz o nível que o servidor exige, nas 4 línguas — e fa
     admitido.receber(rodarInject(usuarioDoWme({ rank: NIVEL_MINIMO - 1, isAreaManager: true, isStaff: false }), { locale: lingua }));
     assert.equal(admitido.botao().disabled, false, `${lingua}: o L${NIVEL_MINIMO}+AM, que o servidor admite, vê o botão travado`);
     assert.ok(admitido.textos().includes(`${NIVEL_MINIMO}+`), `${lingua}: a caixa de informação não diz a régua do servidor`);
+    assert.doesNotMatch(admitido.textos(), /\{nivel\}/, `${lingua}: o painel mostrou o marcador cru`);
+  }
+});
+
+// O dicionário do painel: as MESMAS chaves nas 4 línguas, nenhuma vazia, e o
+// mesmo marcador `{nivel}` onde houver (a régua do app pra o dicionário dele).
+test('o dicionário do painel tem as mesmas chaves nas 4 línguas, e o mesmo `{nivel}` em cada uma', () => {
+  const [ref, ...outras] = LINGUAS_DO_PAINEL;
+  assert.ok(outras.length >= 3, `CONTROLE: só ${LINGUAS_DO_PAINEL.length} línguas no painel`);
+  const chaves = Object.keys(DICIONARIO[ref]).sort();
+  for (const l of outras) assert.deepEqual(Object.keys(DICIONARIO[l]).sort(), chaves, `${l}: chaves diferentes das do ${ref}`);
+  for (const l of LINGUAS_DO_PAINEL) {
+    for (const k of chaves) {
+      const v = DICIONARIO[l][k];
+      assert.ok(typeof v === 'string' && v.trim(), `${l}.${k} vazia`);
+      assert.equal(/\{nivel\}/.test(v), /\{nivel\}/.test(DICIONARIO[ref][k]), `${l}.${k}: o {nivel} não bate com o do ${ref}`);
+    }
   }
 });
 
