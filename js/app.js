@@ -2078,6 +2078,20 @@ function manterFocoNoLightbox() {
     }
 }
 
+// O que o leitor de tela OUVE da foto ampliada, pela região viva DELA
+// (`#lightboxAnuncio`, `sr-only`: nada muda na tela). A troca de foto e, no
+// caminho SEM o Desfazer, o desfecho de aprovar, excluir e renomear — com o
+// Desfazer quem anuncia é o banner dele. Eles mudavam a tela e nada era dito
+// (R6-3-08, auditoria de 2026-10-01). `place`: o desfecho que chega depois do
+// gesto só é dito com a foto DESTE pedido aberta — com a de outro na tela, "Foto
+// aprovada" falaria da foto errada. Sem texto, a região se esvazia (ao fechar).
+function anunciarNoLightbox(texto, place) {
+    const el = document.getElementById('lightboxAnuncio');
+    if (!el) return;
+    if (place !== undefined && !(Lightbox.isOpen() && Lightbox.place === place)) return;
+    el.textContent = texto || '';
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -2140,6 +2154,9 @@ const Lightbox = {
         if (!topOpenModal()) document.body.style.overflow = '';
         document.getElementById('lightboxImage').removeAttribute('src');
         this.resetZoom();
+        // O anúncio era DESTA foto (e o da renomeação leva o nome do local):
+        // não fica no DOM depois de ela fechar.
+        anunciarNoLightbox('');
         // DEPOIS do avanço: se o card andou, o foco vai pro card NOVO.
         const quem = this._quemAbriu;
         this._quemAbriu = null;
@@ -2149,11 +2166,27 @@ const Lightbox = {
         if (this.urls.length < 2) return;
         this.idx = (this.idx - 1 + this.urls.length) % this.urls.length;
         this._render();
+        this._anunciarFoto();
     },
     next() {
         if (this.urls.length < 2) return;
         this.idx = (this.idx + 1) % this.urls.length;
         this._render();
+        this._anunciarFoto();
+    },
+    // A foto TROCOU (‹ ›, as setas, o arraste, a tira): quem usa leitor de tela
+    // não ficava sabendo — o foco fica onde estava (o ✕) e nada era anunciado,
+    // nem qual foto estava na tela nem se era a proposta (R6-3-08, auditoria de
+    // 2026-10-01). Vai pela região viva da camada, com a posição e o selo — o
+    // MESMO termo do selo desenhado (✨/🚩) e da tira.
+    _anunciarFoto() {
+        const n = this.urls.length;
+        if (n < 2) return;
+        const vars = { i: this.idx + 1, n };
+        const comSelo = this.idx === this.newIdx && this.newIdx >= 0;
+        anunciarNoLightbox(comSelo
+            ? t('lightbox.anuncio.fotoSelo', { ...vars, selo: t(this.eDenuncia ? 'card.flaggedPhoto.title' : 'card.newPhoto.title') })
+            : t('lightbox.anuncio.foto', vars));
     },
     resetZoom() {
         this.scale = 1;
@@ -2167,6 +2200,14 @@ const Lightbox = {
         const rect = img.getBoundingClientRect();
         const prevScale = this.scale;
         this.scale = Math.max(1, Math.min(4, scale));
+        // A roda e o trackpad aproximam e afastam por PRODUTO de fatores
+        // (1,2^(Δ/100)), e ir e voltar na mesma medida não dá 1 exato: MEDIDO,
+        // dois dentes de 53 px pra dentro e dois pra fora param em
+        // 1,0000000000000002. A tela parece 1×, mas as setas passavam a ANDAR a
+        // foto em vez de trocá-la, o ↓ não fechava e o arraste não trocava nem
+        // fechava — tudo isso pergunta `=== 1` ou `> 1` (R6-3-05, auditoria de
+        // 2026-10-01). Abaixo de 0,1% a mais (1 px numa foto de 1000) é 1×.
+        if (this.scale < 1.001) this.scale = 1;
         if (this.scale === 1) {
             this.tx = 0;
             this.ty = 0;
@@ -2280,6 +2321,13 @@ const Lightbox = {
         // "por que não posso?", que num treino não tem resposta boa.
         atualizarAcoesDeFoto();
         this._renderTira();
+        // A ação com o foco é DESTA foto: trocar de foto pelo teclado (← → com o
+        // foco no "Aprovar" ou na lixeira) a escondia, e o foco caía no <body>
+        // com a camada `aria-modal` aberta — o Tab seguinte recomeçava atrás
+        // dela (R6-3-06, auditoria de 2026-10-01, MEDIDO nos dois motores). O
+        // foco vai à pílula do nome, senão ao ✕; não à ação que ocupou o lugar,
+        // que pode ser a lixeira — um Enter a mais apagaria uma foto.
+        manterFocoNoLightbox();
     },
     // Todas as fotos do local de uma vez, tocáveis pra pular direto.
     //
@@ -2315,7 +2363,7 @@ const Lightbox = {
                 im.decoding = 'async';
                 im.loading = 'lazy';
                 b.appendChild(im);
-                b.addEventListener('click', () => { this.idx = i; this._render(); });
+                b.addEventListener('click', () => { this.idx = i; this._render(); this._anunciarFoto(); });
                 tira.appendChild(b);
             });
             tira.dataset.chave = chave;
@@ -2358,9 +2406,17 @@ const Lightbox = {
     // num pedido de local NOVO aprovaria o LOCAL — a regra de ouro inteira. O
     // `newIdx` sozinho não prova nada: ele é estado da tela, e uma continuação
     // de OUTRO pedido chegou a escrevê-lo aqui (ver `desmarcarAprovada`).
+    //
+    // E o pedido cuja aprovação JÁ POUSOU (ele só espera esta foto fechar pra
+    // sair da fila, `placeResolvidoPorAprovacao`) não se aprova de novo: seria
+    // uma segunda escrita ao Waze ("já tratado") e o "Restam" descendo duas
+    // vezes pelo mesmo pedido — o que a aprovação pousada depois da queda deixava
+    // acontecer (R6-3-01). É aqui, e não só no toque, porque esta função decide
+    // também se o botão APARECE: o que a tela mostra e o que ela aceita juntos.
     podeAprovarAtual() {
         const p = this.place;
         if (!p || this.eDenuncia) return false;
+        if (p === placeResolvidoPorAprovacao) return false;
         if (p.purType !== 'NEW_PHOTO') return false;
         if (this.idx !== this.newIdx || this.newIdx < 0) return false;
         if (!p.venueID || !p.updateRequestID) return false;
@@ -2940,14 +2996,54 @@ async function refazerDepoisDo401(epoca, enviar) {
 // e não contando o "Curador". MEDIDO: 2 idas, a 1ª com a resposta perdida, nos
 // dois (auditoria de 2026-09-30, R5-3-04/R56-4). "Já feito" depois de uma ida
 // sem resposta é desta pessoa.
-function contarIdasSemResposta(ir) {
+//
+// `antes`: as idas sem resposta de um GESTO ANTERIOR sobre o mesmo alvo, nesta
+// sessão (`idasSemRespostaDeAntes`, R6-3-04 logo abaixo).
+function contarIdasSemResposta(ir, antes = 0) {
     const enviar = async () => {
+        // A ida que nem SAIU (o aparelho sem rede na hora: o `fetch` falha ali
+        // mesmo) não pode ter pousado, e contá-la daria a esta pessoa, no gesto
+        // seguinte, o "já feito" de outro editor.
+        const saiu = navigator.onLine !== false;
         const r = await ir();
-        if (r && !r.success && r.errorCategory === 'transient') enviar.semResposta++;
+        if (saiu && r && !r.success && r.errorCategory === 'transient') enviar.semResposta++;
         return r;
     };
-    enviar.semResposta = 0;
+    enviar.semResposta = Number(antes) || 0;
     return enviar;
+}
+
+// R6-3-04 (auditoria de 2026-10-01): a ida que POUSOU e cuja resposta se perdeu
+// com a REDE caindo (o `navigator.onLine` falso na volta) não é retentada — o
+// `callWithRetry` não insiste sem rede, de propósito. A pessoa via "Erro de
+// conexão" e a foto de volta a pendente, e tentava de novo com a rede de volta:
+// o Waze dizia "já feito", e o gesto NOVO, com o contador zerado, dizia "Já
+// tratado por outro editor 👍" (sem a lixeira e sem o "Curador"; na exclusão,
+// "Outro editor já tinha excluído 👍"). MEDIDO nos dois motores. O que o
+// aparelho sabe — houve uma ida dele, sem resposta — fica guardado por ALVO (o
+// pedido aprovado; a foto excluída, no local) e entra no gesto seguinte sobre
+// ele. Só na MESMA sessão (`epocaDaSessao`; o "Sair" esquece tudo): com outra
+// sessão, outra pessoa pode ter entrado. Sai quando o alvo tem desfecho (pousou:
+// um "já feito" depois disso é de outro), e o mapa tem teto.
+const idasSemRespostaGuardadas = new Map();   // alvo → { epoca, n }
+const IDAS_SEM_RESPOSTA_TETO = 50;
+
+function idasSemRespostaDeAntes(alvo) {
+    const g = idasSemRespostaGuardadas.get(alvo);
+    return g && g.epoca === epocaDaSessao ? g.n : 0;
+}
+
+// O fim de um gesto sobre o alvo. `pousou` é o desfecho do Waze (a escrita está
+// lá, desta pessoa ou de outra): o alvo é esquecido. Sem desfecho, e com alguma
+// ida sem resposta (deste gesto ou dos anteriores), o número fica pro gesto
+// seguinte. A resposta de OUTRA sessão não guarda nada.
+function lembrarIdasSemResposta(alvo, n, pousou, epoca) {
+    idasSemRespostaGuardadas.delete(alvo);
+    if (pousou || !(n > 0) || epoca !== epocaDaSessao) return;
+    idasSemRespostaGuardadas.set(alvo, { epoca, n });
+    if (idasSemRespostaGuardadas.size > IDAS_SEM_RESPOSTA_TETO) {
+        idasSemRespostaGuardadas.delete(idasSemRespostaGuardadas.keys().next().value);
+    }
 }
 
 // Manda pro Waze de verdade. Se falhar, a foto VOLTA — mesma gramática do
@@ -2957,24 +3053,36 @@ function contarIdasSemResposta(ir) {
 // mesmo na falha, e a tela afirmava uma exclusão que não houve.
 async function enviarExclusao(alvo) {
     const epoca = epocaDaSessao;
+    // A foto, no local: o mesmo alvo visto de qualquer pedido do local (R6-3-04).
+    const alvoDasIdas = 'excluir|' + alvo.place.venueID + '|' + alvo.id;
     try {
         // Com a MESMA política de retentativa do resto (o renomear já a tinha):
         // uma oscilação de rede virava "não deu pra excluir" na primeira falha
         // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
         // e a foto que já saiu volta como `jaExcluida` — de quem, diz a conta
-        // das idas (`contarIdasSemResposta`).
-        const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao));
+        // das idas (`contarIdasSemResposta`), deste gesto e dos anteriores.
+        const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
         let r = await callWithRetry(enviar);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
         }
+        lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, !!(r && r.success), epoca);
         // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a foto
         // que a exclusão não tirou do mapa volta pra tela (V2).
-        if (epoca !== epocaDaSessao) {
-            if (!(r && r.success)) escritaDoLightboxSemSessao(alvo.place, () => devolverFoto(alvo), 'toast.photoDeleteFailed');
+        const outraSessao = epoca !== epocaDaSessao;
+        if (outraSessao && !(r && r.success)) {
+            escritaDoLightboxSemSessao(alvo.place, () => devolverFoto(alvo), 'toast.photoDeleteFailed');
             return false;
         }
         if (r && r.success) {
+            // A exclusão que POUSOU depois da queda (a renovação com a MESMA
+            // conta mantém a fila e a foto aberta) vai pra tela como qualquer
+            // outra: a foto SAIU do mapa, e isso é fato do Waze, não gravação
+            // desta sessão — excluir não tem placar, Histórico nem conquista.
+            // Ela seguia na foto ampliada (com a lixeira oferecendo apagá-la de
+            // novo), no pedido e no irmão (auditoria de 2026-10-01, R6-3-01).
+            // Só pra quem ainda vê o pedido: depois do "Sair" não há tela.
+            if (outraSessao && !pedidoAindaNaTela(alvo.place)) return false;
             // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
             // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
             // fica só pro caso em que nada muda na tela por causa dela — e só
@@ -3076,6 +3184,8 @@ function pedirExclusaoDaFoto() {
             Lightbox.removerFoto(alvo.id, place);
             // Com a foto já fechada, o card é redesenhado debaixo do foco (R5-3-07).
             if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
+            // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu (R6-3-08).
+            anunciarNoLightbox(t('undo.photoDeleted'), place);
         });
         // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
         manterFocoNoLightbox();
@@ -3086,7 +3196,12 @@ function pedirExclusaoDaFoto() {
     // A releitura é aquecida agora — os ~557ms dela cabem dentro da janela.
     API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
     Lightbox.removerFoto(alvo.id, place);
-    if (AppState.currentPlace === place) showCurrentPlace();
+    // A ÚLTIMA foto do local saiu: o `removerFoto` FECHOU a foto ampliada e o
+    // foco voltou à foto do card — que este redesenho tira da página. O foco
+    // caía no <body>, com o banner do Desfazer na tela (R6-3-02, auditoria de
+    // 2026-10-01, MEDIDO nos dois motores); o caminho sem o Desfazer, acima, já
+    // passava pelo foco do card (R5-3-07).
+    if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
 
     let saiu = false;
     const enviar = () => {
@@ -3174,35 +3289,42 @@ function estadoAprovando(ligado) {
 // Devolve se ESTA aprovação valeu: quem espera a resposta (o caminho sem
 // Desfazer) só marca a foto como aprovada com `true`. O "outro editor tratou
 // antes" resolve o pedido e devolve `false` — a foto não é dada como aprovada
-// por quem não a aprovou (L30).
+// por quem não a aprovou (L30). Depois da queda, quem leva o desfecho à tela é
+// o `aprovacaoPousouDepoisDaQueda`, e aqui sai `false`: nada mais a fazer.
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
     // No ar: o card do pedido trava até a resposta (ver `aprovacaoDaTelaNoAr`).
     const chave = chaveDoPedido(alvo.place);
     aprovacoesNoAr.add(chave);
     aplicarTravaDeAcao();
+    // O pedido aprovado é o alvo das idas sem resposta (R6-3-04).
+    const alvoDasIdas = 'aprovar|' + chave;
     try {
         // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
         // de uma aprovação que passou volta `already_processed`, e é DESTA
-        // pessoa quando houve uma ida sem resposta antes (`contarIdasSemResposta`).
-        const enviar = contarIdasSemResposta(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao));
+        // pessoa quando houve uma ida sem resposta antes, neste gesto ou num
+        // anterior (`contarIdasSemResposta`).
+        const enviar = contarIdasSemResposta(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
         let r = await callWithRetry(enviar);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
         }
-        // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a
-        // aprovação que não pousou devolve o ✨ e o "Aprovar" (V2).
-        if (epoca !== epocaDaSessao) {
-            if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
-            else aprovacaoPousouDepoisDaQueda(alvo);
-            return false;
-        }
+        lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, pousouNoWaze(r), epoca);
         const jaFeito = !!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'));
         // "Já feito" depois de uma ida SEM resposta é a aprovação DESTA pessoa
         // que pousou e cuja resposta se perdeu (R5-3-04): vale como o sucesso —
         // a foto aprovada, com a lixeira, e o "Curador" — e sem o aviso de
         // "outro editor".
-        if ((r && r.success) || (jaFeito && enviar.semResposta)) {
+        const valeu = !!((r && r.success) || (jaFeito && enviar.semResposta));
+        // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a
+        // aprovação que não pousou devolve o ✨ e o "Aprovar" (V2); a que
+        // pousou vai pra tela como pousou (R6-3-01).
+        if (epoca !== epocaDaSessao) {
+            if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
+            else aprovacaoPousouDepoisDaQueda(alvo, valeu);
+            return false;
+        }
+        if (valeu) {
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
             // dizem que valeu — mesma razão do excluir.
             concluirAprovacao(alvo);
@@ -3304,7 +3426,24 @@ function tirarAprovadoDaFila(place) {
 // decisão ao Waze ("já tratado") e contava um lido a mais. Ele ganha o pouso, sai
 // da fila pela identidade e o "Restam" desce. Com OUTRA conta a fila foi refeita,
 // e não há o que tirar.
-function aprovacaoPousouDepoisDaQueda(alvo) {
+//
+// E a TELA mostra o desfecho, como a aprovação de agora mostraria (R6-3-01,
+// auditoria de 2026-10-01). Sem o Desfazer, quem marcava a foto como aprovada
+// era o `.then` do gesto — que recebe `false` depois da queda —, e a foto aberta
+// seguia com o ✨ e o "Aprovar" vivo: MEDIDO, o 2º toque mandava uma segunda
+// aprovação ao Waze, dizia "Já tratado por outro editor 👍" e o "Restam" descia
+// DUAS vezes pelo mesmo pedido (de 2 a 0, com 1 ainda na fila). O que pousou é
+// fato do Waze, não gravação desta sessão: `valeu` (desta pessoa) põe a foto
+// entre as aprovadas, com a lixeira; o "já tratado" por outro editor só tira a
+// proposta, sem ação nenhuma, e avisa quem ainda vê o pedido (o L30). Em
+// qualquer fila: a foto aberta é a mesma, e a marca vive no próprio pedido.
+// Placar, Histórico e "Curador" seguem de fora — são da sessão que caiu.
+function aprovacaoPousouDepoisDaQueda(alvo, valeu) {
+    if (valeu) Lightbox.marcarComoAprovada(alvo);
+    else {
+        Lightbox.esquecerProposta(alvo);
+        if (pedidoAindaNaTela(alvo.place)) showToast(t('toast.alreadyProcessed'), 'info');
+    }
     if (alvo.epocaFila !== AppState.fetchEpoch) return;
     registrarPouso(alvo.place);
     // Um gesto da sessão nova já o decidiu (o card ficou destravado na
@@ -3391,7 +3530,10 @@ function aprovarFotoAtual() {
         // lixeira no lugar, que então apagava a foto e deixava o pedido órfão.
         enviarAprovacao(alvo).then((valeu) => {
             estadoAprovando(false);
-            if (valeu) Lightbox.marcarComoAprovada(alvo);
+            if (!valeu) return;
+            Lightbox.marcarComoAprovada(alvo);
+            // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu (R6-3-08).
+            anunciarNoLightbox(t('undo.photoApproved'), place);
         });
         // O "Aprovar" com o foco virou spinner (`disabled`): o foco fica na camada.
         manterFocoNoLightbox();
@@ -3581,10 +3723,19 @@ function atualizarBotaoSalvarNome() {
 }
 
 function confirmarRenomear() {
-    if (Treino.ativo || !podeRenomearAqui()) return;
+    if (Treino.ativo) return;
     // O Enter do campo chega aqui direto, sem passar por botão travado: sem
-    // sessão (a queda no meio da edição), o nome não sai (K1).
-    if (!AppState.authenticated) return;
+    // sessão (a queda no meio da edição), o nome não sai (K1). E, com a edição
+    // aberta, o Enter DIZ o que esperar, como na conferência de um 401 (L23,
+    // logo abaixo): na renovação da sessão ele saía calado, com o nome digitado
+    // e o ✓ travado sem motivo à vista (R6-3-10, auditoria de 2026-10-01). Antes
+    // do portão de propósito: a queda leva o perfil junto, e o portão fechado
+    // era o primeiro a sair, calado.
+    if (!AppState.authenticated) {
+        if (editandoNome()) showToast(t(avisoDaTrava()), 'info');
+        return;
+    }
+    if (!podeRenomearAqui()) return;
     const inp = document.getElementById('lightboxNomeInput');
     const novo = inp ? inp.value.trim() : '';
     const place = Lightbox.place;
@@ -3609,8 +3760,15 @@ function confirmarRenomear() {
     const alvo = { place, antigo, novo, regiao: API.getRegion() };
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     // O ✓ que tinha o foco sumiu com a edição: o foco fica na camada (a pílula,
-    // ou o ✕ se ela travou na janela do Desfazer).
-    if (semJanela) { enviarRenomeacao(alvo); manterFocoNoLightbox(); return; }
+    // ou o ✕ se ela travou na janela do Desfazer). Sem o banner do Desfazer, o
+    // nome que pousou é dito ao leitor de tela (R6-3-08).
+    if (semJanela) {
+        enviarRenomeacao(alvo).then((gravou) => {
+            if (gravou) anunciarNoLightbox(t('lightbox.anuncio.renomeado', { nome: novo }), place);
+        });
+        manterFocoNoLightbox();
+        return;
+    }
 
     let saiu = false;
     const enviar = () => {
@@ -3641,16 +3799,31 @@ function confirmarRenomear() {
 }
 
 // O nome vive em três lugares e os três têm que andar juntos, senão o card diz
-// uma coisa e o lightbox outra.
+// uma coisa e o lightbox outra. E o texto ALTERNATIVO das duas fotos também é
+// dele (`altDaFoto`): a pílula e o card mostravam o nome novo e o leitor de tela
+// seguia ouvindo "Foto de <nome antigo> (2 de 3)" na foto ampliada e na do card,
+// até trocar de foto (R6-3-09, auditoria de 2026-10-01).
 function aplicarNomeNaTela(place, nome) {
     place.name = nome;
     if (Lightbox.place === place) Lightbox.placeName = nome;
     const txt = document.getElementById('lightboxNomeTxt');
     if (txt && Lightbox.place === place) txt.textContent = nome;
+    const imgLb = document.getElementById('lightboxImage');
+    if (imgLb && Lightbox.place === place && Lightbox.isOpen()) {
+        imgLb.alt = altDaFoto(place, Lightbox.idx + 1, Lightbox.urls.length);
+    }
     const card = cardDaFrente();
     if (card && AppState.currentPlace === place) {
         const el = card.querySelector('.card-name');
         if (el) el.textContent = nome;
+        // Qual das fotos o carrossel do card mostra: a da `src` (a mesma URL que
+        // ele pediu, `urlDaFoto`); as outras ganham o nome novo quando aparecerem.
+        const foto = card.querySelector('.card-image');
+        if (foto) {
+            const { urls } = fotosDoCard(place);
+            const i = urls.findIndex((u) => urlDaFoto(u) === foto.getAttribute('src'));
+            if (i >= 0) foto.alt = altDaFoto(place, i + 1, urls.length);
+        }
     }
 }
 
@@ -3671,6 +3844,8 @@ function devolverNome(alvo) {
     return true;
 }
 
+// Devolve se o nome foi GRAVADO e está na tela de quem ficou: é o que o caminho
+// sem o Desfazer anuncia ao leitor de tela (R6-3-08).
 async function enviarRenomeacao(alvo) {
     const epoca = epocaDaSessao;
     const local = alvo.place.venueID;
@@ -3691,25 +3866,35 @@ async function enviarRenomeacao(alvo) {
         // resposta que chegava depois do "Sair" contava o "Corretor" e recriava
         // `waze_places_conquistas` pra quem entrasse depois (auditoria de
         // 2026-09-25). Mas o nome que não chegou ao Waze não pode seguir na tela
-        // como gravado (V2, ver `escritaDoLightboxSemSessao`).
+        // como gravado (V2, ver `escritaDoLightboxSemSessao`) — e o que CHEGOU vai
+        // aos irmãos do local, como a foto excluída (R6-3-01): é fato do Waze, e o
+        // card seguinte do mesmo local mostrava o nome velho, com a pílula
+        // oferecendo corrigir o que já foi corrigido. O "Corretor" fica de fora.
         if (epoca !== epocaDaSessao) {
-            if (!(r && r.success)) escritaDoLightboxSemSessao(alvo.place, () => devolverNome(alvo), 'toast.renameFailed');
-            return;
+            if (!(r && r.success)) {
+                escritaDoLightboxSemSessao(alvo.place, () => devolverNome(alvo), 'toast.renameFailed');
+                return false;
+            }
+            if (!pedidoAindaNaTela(alvo.place)) return false;
+            aplicarNosIrmaos(alvo.place, (q) => aplicarNomeNaTela(q, alvo.novo));
+            return true;
         }
         if (r && r.success) {   // sem toast: o nome na tela já diz
             aplicarNosIrmaos(alvo.place, (q) => aplicarNomeNaTela(q, alvo.novo));
             contarConquista('nomes');
-            return;
+            return true;
         }
         // Falhou: o nome na tela precisa VOLTAR, senão o app afirma uma gravação
         // que não houve — e o editor segue triando achando que corrigiu.
         if (devolverNome(alvo)) showToast(msgDoServidor(r) || t('toast.renameFailed'), 'error');
+        return false;
     } catch (e) {
         if (epoca !== epocaDaSessao) {
             escritaDoLightboxSemSessao(alvo.place, () => devolverNome(alvo), 'toast.renameFailed');
-            return;
+            return false;
         }
         if (devolverNome(alvo)) showToast(t('toast.renameFailed'), 'error');
+        return false;
     } finally {
         renomeacoesNoAr.delete(local);
         aplicarTravaDeAcao();
@@ -3731,15 +3916,24 @@ async function enviarRenomeacao(alvo) {
 // saindo com o token de B). Com a tela de volta, a pessoa refaz com a sessão
 // nova — é o que o card faz com a decisão que não pousou (ela volta a ser card).
 //
-// Só com o pedido AINDA NA TELA de quem ficou (na fila, ou na foto aberta):
-// depois do "Sair" a fila já foi embora, e não há o que voltar nem a quem avisar
-// — e nada daqui grava (ver `epocaDaSessao`). `voltar()` devolve `false` quando
-// não havia o que voltar (o nome na tela já não era o desta escrita).
+// Só com o pedido AINDA NA TELA de quem ficou (`pedidoAindaNaTela`): depois do
+// "Sair" a fila já foi embora, e não há o que voltar nem a quem avisar — e nada
+// daqui grava (ver `epocaDaSessao`). `voltar()` devolve `false` quando não havia
+// o que voltar (o nome na tela já não era o desta escrita).
 function escritaDoLightboxSemSessao(place, voltar, chaveDoAviso) {
-    const naTela = (AppState.queue || []).includes(place) || (Lightbox.isOpen() && Lightbox.place === place);
-    if (!naTela) return;
+    if (!pedidoAindaNaTela(place)) return;
     if (voltar() === false) return;
     showToast(t(chaveDoAviso), 'error');
+}
+
+// O pedido de uma escrita do lightbox que a queda da sessão pegou no ar segue na
+// tela de quem ficou: na fila (a renovação com a MESMA conta a mantém) ou na
+// foto aberta. Depois do "Sair" a fila foi embora; com outra conta, ela é outra.
+// É a régua das duas pontas dessa escrita: a que NÃO chegou ao Waze volta
+// (`escritaDoLightboxSemSessao`) e a que POUSOU aparece (R6-3-01) — as duas, só
+// pra quem ainda vê o pedido.
+function pedidoAindaNaTela(place) {
+    return (AppState.queue || []).includes(place) || (Lightbox.isOpen() && Lightbox.place === place);
 }
 
 // A sessão ACABOU (queda ou "Sair") com uma escrita do lightbox na janela do
@@ -4832,7 +5026,23 @@ function definirPerfil(res) {
     // Os Filtros abertos ANTES dele (o atalho do PWA, a rede lenta) mostravam
     // a área e a ordem sem o que só o perfil sabe (F2).
     redesenharFiltrosComOPerfil();
+    // E a foto ampliada aberta antes dele: o "Aprovar", a lixeira e a pílula do
+    // nome dependem do portão, que lê o perfil (R6-3-07).
+    reavaliarFotoAbertaPeloPerfil();
     return true;
+}
+
+// O PERFIL chegou com a foto ampliada ABERTA — o `/Session` é a chamada mais
+// lenta da abertura, e a renovação da sessão o zera até o novo chegar. O portão
+// das três ações da foto (`podeAgirComoL6Aqui`) só era reavaliado ao abrir,
+// trocar de foto ou a imagem carregar: o "Aprovar", a lixeira e a pílula do nome
+// seguiam escondidos pra um L6+AM até fechar e abrir a foto de novo (R6-3-07,
+// auditoria de 2026-10-01, MEDIDO). Fecha também o caminho oposto: o perfil de
+// quem não pode tira a pílula e fecha a edição.
+function reavaliarFotoAbertaPeloPerfil() {
+    if (!Lightbox.isOpen()) return;
+    mostrarNomeNoLightbox();
+    atualizarAcoesDeFoto();
 }
 
 // O que DEPENDIA do perfil e pode ter rodado antes dele. Roda na carga da
@@ -8671,9 +8881,11 @@ async function handleLogout({ porOutraAba = false, outraConta = false } = {}) {
         safeLS.remove(SAIDA_KEY);
     }
     // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
-    // Quem entrar depois começa do zero: a fila dele vem da busca dele.
+    // Quem entrar depois começa do zero: a fila dele vem da busca dele. As idas
+    // sem resposta das escritas da foto também (R6-3-04): eram de quem saiu.
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
+    idasSemRespostaGuardadas.clear();
     // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
     // de tudo" nao abre excecao que ninguem decidiu. Leva junto os pousos
     // gravados (`OFFLINE_POUSOS_KEY`). Na outra aba, a varredura em voo PARA

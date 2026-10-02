@@ -175,6 +175,7 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
     // Do lightbox (L3, o foco, o "em andamento" da aprovação).
     fotoDoLightboxNaTela: () => true, marcarEmAndamento: () => {}, manterFocoNoLightbox: () => {},
     refazerSelosSeOutroNaTela: () => {},   // o "Ver +N" do card da frente (R5-2-02)
+    anunciarNoLightbox: () => {},   // o desfecho dito ao leitor de tela (R6-3-08)
   };
   const chaves = Object.keys(deps);
   const aprovar = new Function(...chaves, 'let aprovacaoPendente = null; let exclusaoPendente = null;\n'

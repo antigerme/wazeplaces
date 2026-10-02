@@ -329,7 +329,9 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
   };
   // `epocaDaSessao` é variável solta no app: passa por um getter no escopo.
   const chaves = Object.keys(deps);
-  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao'].map(fatiar).join('\n')
+  // `pedidoAindaNaTela`: a régua de "quem ainda vê o pedido", das duas pontas
+  // (o que não pousou volta, o que pousou vai aos irmãos — R6-3-01).
+  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'pedidoAindaNaTela'].map(fatiar).join('\n')
     .replace(/epocaDaSessao/g, '__estado.epoca');
   const enviar = new Function(...chaves, '__estado', corpo + '\nreturn enviarRenomeacao;')(...chaves.map((k) => deps[k]), estado);
   // O nome NA TELA é o desta escrita quando ela sai (o `confirmarRenomear` o

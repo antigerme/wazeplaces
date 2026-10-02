@@ -1541,8 +1541,15 @@
              Sobe com o teclado pelo `--kb-inset` que o app.js já publica.
              Só aparece pra L6+AM ou staff, o mesmo portão da lixeira. -->
         <div id="lightboxNome" class="lb-nome hidden absolute z-10">
-            <button id="lightboxNomeBtn" type="button" class="lb-nome-btn" aria-label="Corrigir o nome do local" data-i18n-aria="lightbox.rename.aria" title="Corrigir o nome do local" data-i18n-title="lightbox.rename.aria">
+            <!-- O NOME ACESSÍVEL da pílula sai do CONTEÚDO: o que ela faz (o
+                 `sr-only`) e o nome do local que ela mostra. Com um `aria-label`
+                 fixo o leitor de tela ouvia só "Corrigir o nome do local", sem o
+                 nome que está na tela — e o rótulo visível tem que estar no nome
+                 (WCAG 2.5.3; R6-3-09, auditoria de 2026-10-01). Sem JS a mais: a
+                 renomeação troca o `#lightboxNomeTxt`, e o nome acompanha. -->
+            <button id="lightboxNomeBtn" type="button" class="lb-nome-btn" title="Corrigir o nome do local" data-i18n-title="lightbox.rename.aria">
                 <svg class="lb-nome-lapis" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                <span class="sr-only" data-i18n="lightbox.rename.rotulo">Corrigir o nome do local:</span>
                 <span id="lightboxNomeTxt" class="lb-nome-txt"></span>
             </button>
             <div id="lightboxNomeEdit" class="hidden">
@@ -1574,6 +1581,11 @@
              data-i18n-aria="lightbox.strip.aria"
              class="hidden absolute inset-x-0 bottom-0 z-10 flex items-center gap-1.5 overflow-x-auto px-3 bg-black/70"></div>
         <img id="lightboxImage" class="max-w-full max-h-full object-contain will-change-transform" style="touch-action: none" alt="" draggable="false">
+        <!-- O que o leitor de tela ouve desta camada (`anunciarNoLightbox`): a
+             foto que trocou (posição e selo) e, sem o Desfazer, o desfecho de
+             aprovar, excluir e renomear. Antes nada mudava em região viva nenhuma
+             (R6-3-08). `sr-only`: nada muda na tela. -->
+        <p id="lightboxAnuncio" class="sr-only" role="status" aria-live="polite"></p>
     </div>
 
     <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
