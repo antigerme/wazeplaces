@@ -7,6 +7,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { dispatch } from '../server/core.mjs';
+import { sessaoDeTeste } from './_sessao.mjs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
@@ -738,8 +741,52 @@ test('R4-O8: a fila REABERTA e regravada (a varredura grava de novo) segue sendo
 const PREFETCH_R = Number(EXPR('PREFETCH_THRESHOLD'));
 const MAX_VAZIAS_R = Number(EXPR('MAX_EMPTY_PAGES'));
 const MAX_PAGINAS_R = Number(EXPR('MAX_PAGINAS_POR_BUSCA'));
-const FALHA_REDE = { success: false, error: 'rede', errorCategory: 'transient' };
-const FALHA_SESSAO = { success: false, error: 'sessão', errorCategory: 'unauthorized' };
+// As falhas que a busca recebe saem do `_post` DE VERDADE (o api.js numa vm, com
+// o `fetch` que o teste escolhe), e não de objetos escritos à mão: o `FALHA_REDE`
+// daqui era `{ errorCategory: 'transient' }` SEM o `_motivo` que o `_post` põe
+// quando a resposta não chega, e o `FALHA_502` levava um `httpCode` que o `_post`
+// nunca produz pra página de erro da borda — o teste do lie-fi (R5-4-4) codificava
+// a marca errada, e passava (auditoria de 2026-10-01, R6-4-3; gotcha #52). O
+// corpo do CORE também é o de verdade: o `dispatch`, com uma sessão de teste e o
+// `fetch` do servidor respondendo como o Waze.
+function apiDeVerdade(fetch) {
+  const fonte = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\n'
+    + readFileSync(new URL('../js/api.js', import.meta.url), 'utf8') + '\nthis.API = API;';
+  const ctx = { navigator: { language: 'pt-BR', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k === 'waze_session_token' ? 'tok' : null), setItem() {}, removeItem() {} },
+    fetch, performance, AbortController, Response, console: { error() {}, log() {}, warn() {} }, setTimeout, clearTimeout };
+  vm.createContext(ctx);
+  vm.runInContext(fonte, ctx);
+  return ctx.API;
+}
+const falhaDaBusca = (fetch) => apiDeVerdade(fetch).fetchPlaces(1, {});
+const respondeCom = (status, corpo, tipo) => async () => new Response(corpo, { status, headers: { 'content-type': tipo } });
+const COOKIES_TESTE = ['_csrf_token\tcsrf-abc', '_web_session\tsess-xyz']
+  .map((nv) => `.waze.com\tTRUE\t/\tTRUE\t9999999999\t${nv}`).join('\n');
+// O que o CORE devolve da busca quando o Waze responde (ou não) do jeito que o teste manda.
+async function respostaDoCore(doWaze) {
+  const s = await sessaoDeTeste(COOKIES_TESTE);
+  const original = globalThis.fetch;
+  globalThis.fetch = doWaze;
+  try { return await dispatch('buscar-places', { ...s.dados, region: 'row', countryId: 30, page: 1 }, s.ctx); }
+  finally { globalThis.fetch = original; }
+}
+const doCore = async (doWaze) => {
+  const r = await respostaDoCore(doWaze);
+  return falhaDaBusca(respondeCom(r.status, JSON.stringify(r.body), 'application/json'));
+};
+// A rede do APARELHO caiu: o `fetch` do `_post` falha, nada chega.
+const FALHA_REDE = await falhaDaBusca(async () => { throw new TypeError('Failed to fetch'); });
+// A origem fora do ar: quem responde é a BORDA, com a página de erro dela (não é JSON).
+const FALHA_BORDA_502 = await falhaDaBusca(respondeCom(502,
+  '<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>error code: 502</body></html>', 'text/html'));
+// O nosso servidor respondeu, mas o WAZE está fora do alcance dele: `httpCode: 0`.
+const FALHA_WAZE_FORA = await doCore(async () => { throw new TypeError('fetch failed'); });
+// O nosso servidor respondeu, e o Waze devolveu 502 a ele.
+const FALHA_502 = await doCore(async () => new Response('bad gateway', { status: 502 }));
+const FALHA_SESSAO = await falhaDaBusca(respondeCom(401,
+  JSON.stringify({ success: false, error: 'Sessão inválida', errorKey: 'srv.err.sessionInvalid', errorCategory: 'unauthorized' }),
+  'application/json'));
 function aparelhoO1() {
   const ls = new Map();
   const base = new Map();
@@ -881,9 +928,8 @@ test('R4-O1: a fila que MUDA enquanto a base é lida (↻, filtro) não recebe a
 // A fila guardada aberta pelo lie-fi (o O1: `onLine` VERDADEIRO e a busca sem
 // resposta) mostrava o card de foto cuja foto não veio com "Sem Imagem" e ✕/✓
 // VIVOS — decidir a foto sem vê-la —, enquanto no modo avião o mesmo card dizia
-// "a foto precisa de sinal" e travava (medido no navegador, t9).
-const FALHA_502 = { success: false, error: 'origem', errorCategory: 'transient', httpCode: 502 };
-
+// "a foto precisa de sinal" e travava (medido no navegador, t9). As falhas
+// (`FALHA_REDE`, `FALHA_502`…) são as do `_post` de verdade (ver acima).
 test('R5-4-4: a busca SEM resposta anota o lie-fi; a que teve resposta (502 da origem) não; e a busca que dá certo o apaga', async () => {
   const pagina = await prepararO1();
   const b = pagina({ onLine: true, api: () => FALHA_REDE });
@@ -904,6 +950,38 @@ test('R5-4-4: a busca SEM resposta anota o lie-fi; a que teve resposta (502 da o
   d.AppState.hasMore = true;
   await d.app.startFetching();
   assert.equal(d.app.semResposta(), false, 'a busca que deu certo não apagou a marca do lie-fi');
+});
+
+// ── R6-4-3: a marca do lie-fi decidia pelo `httpCode` (auditoria de 2026-10-01) ─
+// O `_post` não traz `httpCode` quando a resposta chega e não é JSON (o 502 da
+// borda com a origem fora, o 429 da cota, o desafio do WAF), e o core manda
+// `httpCode: 0` quando o WAZE é que está fora do alcance do servidor. Nos dois
+// casos alguém RESPONDEU, e a busca virava "sem resposta": com rede, o card da
+// foto que o Waze tirou do ar travava ✕/✓ dizendo "a foto precisa de sinal"
+// (medido no navegador, t2: `API=html` e `API=json0`). A marca certa é o `_motivo`.
+test('R6-4-3: a busca que teve RESPOSTA não é lie-fi — nem a página de erro da borda, nem o Waze fora do alcance do servidor', async () => {
+  // PRÉ-CONDIÇÕES: as falhas são as que o `_post` e o core produzem.
+  assert.equal(typeof FALHA_REDE._motivo, 'string', 'PRÉ-CONDIÇÃO: a falha sem resposta do `_post` perdeu o `_motivo`');
+  for (const [nome, f] of [['a borda 502', FALHA_BORDA_502], ['o Waze fora', FALHA_WAZE_FORA]]) {
+    assert.equal(f.errorCategory, 'transient', `PRÉ-CONDIÇÃO: ${nome} deixou de ser transiente`);
+    assert.equal('_motivo' in f, false, `PRÉ-CONDIÇÃO: ${nome} (a resposta CHEGOU) veio marcado como "sem resposta"`);
+  }
+  assert.equal('httpCode' in FALHA_BORDA_502, false, 'PRÉ-CONDIÇÃO: a página da borda passou a trazer `httpCode` — o teste precisa ser revisto');
+  assert.equal(FALHA_WAZE_FORA.httpCode, 0, 'PRÉ-CONDIÇÃO: o core deixou de mandar `httpCode: 0` com o Waze fora do alcance');
+  const pagina = await prepararO1();
+  for (const [nome, falha] of [['a borda respondeu 502 (a origem fora)', FALHA_BORDA_502],
+    ['o servidor respondeu com o Waze fora do alcance (httpCode 0)', FALHA_WAZE_FORA]]) {
+    const b = pagina({ onLine: true, api: () => falha });
+    await b.app.startFetching();
+    assert.equal(b.app.falhouPorRede(), true, `PRÉ-CONDIÇÃO (${nome}): não contou como falha da busca`);
+    assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], `PRÉ-CONDIÇÃO (${nome}): a fila guardada não entrou`);
+    assert.equal(b.app.semResposta(), false,
+      `${nome}: virou "sem rede" — o card da foto que o Waze tirou do ar travaria ✕/✓ dizendo que precisa de sinal`);
+  }
+  // CONTROLE: a falha SEM resposta (a rede do aparelho caiu) segue anotando o lie-fi.
+  const c = pagina({ onLine: true, api: () => FALHA_REDE });
+  await c.app.startFetching();
+  assert.equal(c.app.semResposta(), true, 'CONTROLE: a busca sem resposta deixou de anotar o lie-fi');
 });
 
 test('R5-4-4: a primeira resposta que CHEGA apaga o lie-fi — antes da saída do esvaziamento', () => {

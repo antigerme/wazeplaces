@@ -9047,7 +9047,8 @@ let filaEsperaPerfil = false;
 // `startFetching` e o "Tentar novamente"). Zera a cada busca que começa.
 let ultimaBuscaFalhouPorRede = false;
 // A última busca ficou SEM RESPOSTA nenhuma (a rede fora, o teto de 45 s — não o
-// erro do servidor, que respondeu) e nada respondeu DEPOIS: o "lie-fi", em que o
+// erro do servidor, que respondeu, nem a página de erro da borda: a marca é o
+// `_motivo` do `_post`) e nada respondeu DEPOIS: o "lie-fi", em que o
 // `onLine` diz que há rede e ela não anda. Pra foto que não abre, é o mesmo que
 // sem rede (`marcarCardSemFoto`). Zera com a primeira resposta que chegar
 // (`API.aoProvarRede`) ou com a busca que der certo — e NÃO a cada busca que
@@ -9214,9 +9215,15 @@ function fetchNextPage() {
                                             cat: result.errorCategory || null });
                     dlogCapturarAuto('buscaFalhou');
                     ultimaBuscaFalhouPorRede = result.errorCategory === 'transient';
-                    // Sem resposta NENHUMA: o código HTTP é a prova de que alguém
-                    // respondeu (ver `buscaSemResposta`).
-                    buscaSemResposta = result.errorCategory === 'transient' && !(Number(result.httpCode) > 0);
+                    // Sem resposta NENHUMA (ver `buscaSemResposta`): é o `_motivo`, que
+                    // o `_post` só põe quando a resposta NEM CHEGOU. Era o `httpCode`, e
+                    // ele não prova nada: a resposta que chega e não é JSON (o 502 da
+                    // borda com a origem fora, o 429 da cota, o desafio do WAF) vem SEM
+                    // ele, e o core manda `httpCode: 0` quando o WAZE é que está fora
+                    // do alcance do servidor — que respondeu. Com rede, o card da foto
+                    // que o Waze tirou do ar travava ✕/✓ dizendo "a foto precisa de
+                    // sinal" (auditoria de 2026-10-01, R6-4-3).
+                    buscaSemResposta = result.errorCategory === 'transient' && typeof result._motivo === 'string';
                     if (result.errorCategory === 'unauthorized') {
                         AppState.hasMore = false;
                         // `loadError` TAMBÉM aqui, e a falta dele foi o defeito que o
