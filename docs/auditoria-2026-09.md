@@ -16,20 +16,19 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-02 ~13:30 UTC)
+## 0. Estado agora (2026-10-02 ~20:00 UTC)
 
 - **Lote 9 em produção** (PR #255, `b270ffc`, v2026.10.01-02), verificado com as duas contas: 89 ✓ · 0 ✗ no
   roteiro inteiro e 20 ✓ · 0 ✗ na seção "12. Lote 9 no ar" (`prod-auditoria.mjs l9`).
-- **Rodada 6**: seis dos sete relatórios prontos (`scratchpad/r6-relatorios/r6-{1,3,4,5,6,7}.md`); o R6-2 (fila)
-  foi retomado depois do limite da sessão (que parou tudo às ~00:35 e voltou às 04:30). Plano em
-  `scratchpad/l10-plano.md`.
-- **Lote 10 em andamento**: seis agentes (offline, lightbox, histórico, filtros+extensão, contas, presença), worktrees
-  `/home/user/wp-fix6-<área>` (da main `b270ffc`), ids em `scratchpad/l10-agentes.txt`, regras
-  `scratchpad/l10-base.txt`, relatórios `scratchpad/relatorio-l10-<área>.md`.
-- **Junção**: no `/home/user/wp-lote7` (branch recriado da main), pelo `scratchpad/juntar.sh fix6-<área>`.
-- **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`.
-- **Cookies** (2026-10-02, os válidos; os de 10-01 expiraram): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs`, o `prod-lida.mjs` e o `wme-usuario.mjs` já apontam pra eles.
-- **Próxima volta**: juntar o lote 10, smokes, versão (`date -u`), PR, CI, merge, produção — e a rodada 7.
+- **Rodada 6** completa (`scratchpad/r6-relatorios/r6-{1..7}.md`).
+- **Lote 10 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.02-01): sete
+  agentes (offline, lightbox, histórico, filtros+extensão, contas, fila, presença) mais dois ajustes (foto ampliada
+  e presença), com cinco ajustes de harness na junção, cada um sabotado. `npm test` 1953/1953. Relatórios em
+  `scratchpad/relatorio-l10-<área>.md`.
+- **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`
+  (com as do lote 10: o aviso do treino, o aviso na conversa e o VOLTAR na edição do nome).
+- **Cookies** (2026-10-02, os válidos; os de 10-01 expiraram): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs`, o `prod-lida.mjs` e o `wme-usuario.mjs` já apontam pra eles. O `prod-auditoria.mjs` ganhou a seção "13. Lote 10 no ar".
+- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com `VERSAO=2026100201`) — e a rodada 7.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
