@@ -51,6 +51,7 @@ function depsDoIdioma(extra = {}) {
     renderProfileHeader: () => {}, showCurrentPlace: () => {}, updateStats: () => {}, updatePendingCount: () => {},
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},
     historicoNaTela: () => false, renderHistory: () => {},
+    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {},
     window: {}, showToast: () => {}, t: (k) => k, ...extra,
   };
   return { deps, idiomas };
@@ -81,7 +82,7 @@ test('H2: CONTROLE — o idioma continua entrando pelo GESTO confirmado', () => 
 // conquista era dada ali: desfazer devolvia o card e ela ficava gravada (C13).
 // E com pulados a tela diz "Fim da fila", mas soltava confete e dava a
 // conquista do mesmo jeito (H9).
-function montarFimDaFila({ skipped = 0, base = 0, tratou = true } = {}) {
+function montarFimDaFila({ skipped = 0, base = 0, tratou = true, treino = false } = {}) {
   const conquistas = [];
   const classes = new Set(['hidden']);
   const noMore = {
@@ -98,9 +99,10 @@ function montarFimDaFila({ skipped = 0, base = 0, tratou = true } = {}) {
     // Nada mais em jogo que possa voltar pra fila (F3): nem em andamento, nem na fila de saída.
     pedidosEmAndamento: new Set(), carregarFilaDeSaida: () => [],
     chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
+    Treino: { ativo: treino },
   };
   const preludio = `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};`;
-  const api = montar(['puladosNestaFila', 'filaZeradaConfirmada', 'showNoPlaces'], deps,
+  const api = montar(['puladosNestaFila', 'filaTerminouLimpa', 'filaZeradaConfirmada', 'showNoPlaces'], deps,
     ['showNoPlaces', 'filaZeradaConfirmada'], preludio);
   return { ...api, AppState, conquistas, festa: () => classes.has('celebrate'),
            tudoLimpo: () => conquistas.some((c) => c.filaZerada === true) };
@@ -167,7 +169,7 @@ test('C13: a confirmação de ação pergunta pela fila zerada (registrarAcaoCon
   const deps = {
     Treino: { ativo: false }, carregarConquistas: () => ({ seq: 0 }), salvarConquistas() {},
     registrarIdiomaUsado() {}, getLang: () => 'pt', contagemDoAutor: () => 0,
-    checarConquistas: (x) => ctxs.push(x || {}),
+    checarConquistas: (x) => ctxs.push(x || {}), checkUndoGateUnlock() {},
     filaZeradaConfirmada: (o) => !!(o && o.confirmando),
   };
   const { registrarAcaoConfirmada } = montar(['registrarAcaoConfirmada'], deps, ['registrarAcaoConfirmada']);
@@ -191,7 +193,7 @@ function montarConfirmacao({ agora, historico = {}, langAgora = 'en' }) {
   const deps = {
     Treino: { ativo: false }, carregarConquistas: () => ({ seq: 0 }), salvarConquistas() {},
     registrarIdiomaUsado: (l) => idiomas.push(l), getLang: () => langAgora, contagemDoAutor: () => 0,
-    checarConquistas: (x) => ctxs.push(x || {}), filaZeradaConfirmada: () => false,
+    checarConquistas: (x) => ctxs.push(x || {}), filaZeradaConfirmada: () => false, checkUndoGateUnlock() {},
     loadHistory: () => historico, Date: DataFalsa,
   };
   const { registrarAcaoConfirmada } = montar(['registrarAcaoConfirmada'], deps, ['registrarAcaoConfirmada']);
@@ -264,10 +266,10 @@ function fatiarConst(nome) {
   }
   throw new Error('não fechou ' + nome);
 }
-function montarChecagem({ g, tratados }) {
+function montarChecagem({ g, tratados, treino = false }) {
   const selo = { n: 0 };
   const deps = {
-    AppState: { authenticated: true }, Treino: { ativo: false },
+    AppState: { authenticated: true }, Treino: { ativo: treino },
     carregarConquistas: () => g, salvarConquistas() {}, atualizarSeloDeConquista: () => { selo.n++; },
     loadHistory: () => ({}),
     getHistoryStats: () => ({ total: { read: tratados, rejected: 0 }, today: { read: 0, rejected: 0 } }),
@@ -467,4 +469,121 @@ test('Detetive: rejeitar um duplicado conta pelo MOTIVO do reporte, com ou sem o
   assert.equal(conta('reject', remontado), true, 'o duplicado rejeitado sem rede não contou pro "Detetive" no pouso');
   const outro = new Function('item', 'return ' + lit[1])({ ...item, dup: false });
   assert.equal(conta('reject', outro), false, 'CONTROLE: o item que não é duplicado contou');
+});
+
+// ── R6-7-3: decisão REAL que pousa com o treino aberto conta nas conquistas ───
+// O `Treino.entrar` despacha a decisão da janela do Desfazer e entra sem esperar
+// a resposta (e a fila de saída esvazia, e o "Rejeitar os N" anda): a resposta
+// chega com o treino aberto. A guarda do treino nas conquistas a jogava fora —
+// o Histórico contava, e o "Detetive" do duplicado rejeitado sumia pra sempre, a
+// "Mão firme" não andava, e o "Primeiro resumo" baixado no treino não contava
+// (auditoria de 2026-10-01, MEDIDO no navegador). Ação DE treino nunca chega
+// lá: o guard dela está no topo dos handlers.
+test('R6-7-3: com o treino aberto, a confirmação de uma decisão REAL conta nas conquistas (Detetive, Mão firme, Poliglota)', () => {
+  const g = { seq: 0 };
+  const ctxs = [], idiomas = [];
+  const deps = {
+    Treino: { ativo: true }, carregarConquistas: () => g, salvarConquistas() {},
+    registrarIdiomaUsado: (l) => idiomas.push(l), getLang: () => 'fr', contagemDoAutor: () => 0,
+    checarConquistas: (x) => ctxs.push(x || {}), filaZeradaConfirmada: () => false, checkUndoGateUnlock() {},
+    loadHistory: () => ({}),
+  };
+  const { registrarAcaoConfirmada, registrarLoteConfirmado } = montar(['registrarAcaoConfirmada', 'registrarLoteConfirmado'], deps,
+    ['registrarAcaoConfirmada', 'registrarLoteConfirmado']);
+  registrarAcaoConfirmada('reject', { flagType: 'DUPLICATE' });
+  assert.equal(g.seq, 1, 'a "Mão firme" não andou: a decisão real confirmada no treino foi jogada fora');
+  assert.equal(ctxs.length, 1, 'as conquistas não foram avaliadas pela decisão real que pousou no treino');
+  assert.equal(ctxs[0].duplicado, true, 'o "Detetive" do duplicado rejeitado sumiu');
+  assert.deepEqual(idiomas, ['fr'], 'o idioma do trabalho não entrou na "Poliglota"');
+  registrarLoteConfirmado(12);
+  assert.equal(g.seq, 13, 'o "Marcar todos" confirmado com o treino aberto não contou na sequência');
+  assert.equal(ctxs.length, 2);
+});
+
+test('R6-7-3: o checarConquistas com o treino aberto avalia o que é REAL — e o "Tudo limpo" espera a fila real', () => {
+  const g = Object.assign(gNovo(), { base: true });
+  const m = montarChecagem({ g, tratados: 0, treino: true });
+  m.checarConquistas({ duplicado: true });
+  m.checarConquistas({ resumo: true });
+  assert.ok(g.c.detetive && g.novas.includes('detetive'), 'o "Detetive" da decisão real não destravou com o treino aberto');
+  assert.ok(g.c.primeiroResumo && g.novas.includes('primeiroResumo'), 'o resumo baixado com o treino aberto não contou');
+  // A fila NA TELA é a do treino: "zerada" ali seria a de exemplos. Quem julga
+  // a real é o painel que o `sair()` desenha (o `showNoPlaces`, que pergunta).
+  const f = montarFimDaFila({ treino: true });
+  f.showNoPlaces();
+  f.AppState.inFlightActions = 1;
+  assert.equal(f.filaZeradaConfirmada({ confirmando: true }), false, 'a fila de TREINO deu "Tudo limpo"');
+  // CONTROLE: fora do treino, a mesma fila zerada dá.
+  const c = montarFimDaFila();
+  c.showNoPlaces();
+  c.AppState.inFlightActions = 1;
+  assert.equal(c.filaZeradaConfirmada({ confirmando: true }), true);
+});
+
+// ── R6-7-13: a 1ª passada silenciosa não cala a AÇÃO que a provoca ───────────
+// A passada silenciosa existe pro RETROATIVO (quem já tem 3.000 pedidos nas
+// costas destravaria oito de uma vez). Feita na confirmação da 1ª ação do
+// aparelho, ela calava a própria ação: o histórico já a tinha somado, e um
+// "Marcar todos" de 12 destravava a "Primeira faxina" gravada, sem ponto nem
+// etiqueta "nova" (auditoria de 2026-10-01, MEDIDO no navegador). Roda o
+// `recordHistory` e o `checarConquistas` DE VERDADE, com o histórico de verdade.
+function montarAparelhoNovo(historico = null) {
+  const dados = new Map();
+  if (historico) dados.set('waze_places_history', JSON.stringify(historico));
+  const selo = { n: 0 };
+  const deps = {
+    AppState: { authenticated: true, history: null, conquistas: null },
+    localStorage: { getItem: (k) => (dados.has(k) ? dados.get(k) : null), setItem: (k, v) => dados.set(k, String(v)) },
+    HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas',
+    podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
+    agendarRedesenhoDoHistorico() {}, atualizarSeloDeConquista: () => { selo.n++; }, conquistasComPortaoAqui: () => false,
+  };
+  const chaves = Object.keys(deps);
+  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['patenteDe', 'avaliarConquistas', 'carregarConquistas',
+    'salvarConquistas', 'checarConquistas', 'garantirLinhaDeBaseDasConquistas', 'loadHistory', 'salvarHistorico', 'recordHistory',
+    'diasEntreChaves', 'chaveMaisDias', 'getHistoryStats', 'geografiaDoHistorico', 'maiorSequenciaDeDias'].map(fatiar)]
+    .join('\n') + '\nreturn { recordHistory, checarConquistas, AppState };';
+  const api = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
+  return { ...api, g: () => deps.AppState.conquistas, selo };
+}
+
+test('R6-7-13: aparelho novo cuja 1ª ação é um "Marcar todos" de 12 — a "Primeira faxina" sai NOVA, com ponto', () => {
+  const m = montarAparelhoNovo();
+  // O que o `handleBatchMarkRead` faz ao confirmar: histórico, depois conquistas.
+  m.recordHistory('read', 12);
+  m.checarConquistas({ madrugada: false });
+  const g = m.g();
+  assert.ok(g.c.primeiraFaxina, 'a "Primeira faxina" nem destravou');
+  assert.ok(g.novas.includes('primeiraFaxina'),
+    'a "Primeira faxina" destravou CALADA, sem etiqueta "nova": a passada silenciosa engoliu a ação que a provocou');
+  assert.ok(m.selo.n >= 1, 'o ponto do botão de Filtros não acendeu');
+});
+
+test('R6-7-13: CONTROLE — o volume que JÁ estava no histórico segue silencioso na 1ª passada', () => {
+  const m = montarAparelhoNovo({ _total: { read: 3000, rejected: 0 } });
+  m.recordHistory('read', 1);
+  m.checarConquistas({ madrugada: false });
+  const g = m.g();
+  assert.ok(g.c.primeiraFaxina, 'a retroativa não foi gravada');
+  assert.ok(!g.novas.includes('primeiraFaxina'), 'a passada deixou de ser silenciosa pro retroativo — volta a enxurrada');
+  assert.equal(g.base, true);
+});
+
+// ── R6-7-10: trocar o idioma redesenha o que o JS escreveu com `t()` ──────────
+// Dois textos ficavam no idioma de antes: a frase do indicador "esperando
+// envio"/"Enviando N…" (o `title` e o que o leitor de tela anuncia) e os exemplos
+// do treino de fila vazia (auditoria de 2026-10-01, MEDIDO no navegador).
+test('R6-7-10: o aplicarIdioma redesenha o indicador de envio e retraduz os exemplos do treino ANTES do card', () => {
+  const ordem = [];
+  const { deps } = depsDoIdioma({
+    AppState: { profile: null, currentPlace: { venueID: 'treino1' }, authenticated: true },
+    Treino: { retraduzirExemplos: () => ordem.push('exemplos') },
+    showCurrentPlace: () => ordem.push('card'), updateInFlightIndicator: () => ordem.push('indicador'),
+  });
+  const { aplicarIdioma } = montar(['aplicarIdioma'], deps, ['aplicarIdioma']);
+  aplicarIdioma('en');
+  assert.ok(ordem.includes('indicador'), 'o indicador "Enviando N…" ficou no idioma de antes');
+  assert.ok(ordem.includes('exemplos'), 'os exemplos do treino ficaram no idioma de antes');
+  assert.ok(ordem.indexOf('exemplos') < ordem.indexOf('card'),
+    `os exemplos foram retraduzidos DEPOIS de o card ser redesenhado (${ordem.join(' → ')}) — a tela segue no idioma velho`);
 });

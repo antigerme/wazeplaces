@@ -377,7 +377,7 @@ test('TODO pouso passa pela fonte única — um caminho de fora deixaria o pedid
   // E o pouso vem ANTES do que pode lançar (histórico, conquistas): se algo ali
   // quebrar, o pedido não pode voltar por causa disso.
   const h = fatiar('handleActionResult');
-  assert.ok(h.indexOf('registrarPouso(place);') < h.indexOf('recordHistory(actionType, 1);'));
+  assert.ok(h.indexOf('registrarPouso(place);') < h.indexOf('recordHistory(actionType, 1,'));
 });
 
 test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por todos os caminhos', () => {
@@ -417,7 +417,8 @@ test('fechar SEM REDE com ação na janela do Desfazer enfileira de forma SÍNCR
   const s = fatiar('scheduleAction');
   assert.match(s, /if \(executed \|\| n !== 1 \|\| \(type !== 'read' && type !== 'reject'\)\) return false;/,
     'só ✕ e ✓ de UM pedido vão pra fila ao fechar: o lote cancela e o Pular não escreve');
-  assert.match(s, /const r = enfileirarSaida\(type, places\[0\], regiaoDoGesto\);\s*if \(!r\) return false;/,
+  // O 4º argumento é o momento do gesto (`carimboDoGesto`, R6-7-4).
+  assert.match(s, /const r = enfileirarSaida\(type, places\[0\], regiaoDoGesto, gestoDoAgendamento\);\s*if \(!r\) return false;/,
     'fila cheia tem que cair no caminho de sempre, que avisa');
   assert.match(s, /if \(r === 'repetida'\) reverterPlacar\(true\);/,
     'o gesto repetido não pode contar duas vezes no placar');
@@ -487,7 +488,8 @@ test('fechar COM rede na janela do Desfazer: a decisão entra na FILA DE SAÍDA 
   assert.ok(iEnfileira > 0, 'a descarga não enfileira ANTES do envio');
   // Com a marca DESTA aba: a outra aba (a que fica na tela quando esta vai pro
   // fundo) mandaria de novo a decisão que esta está mandando (R5-1 F1).
-  assert.ok(corpo.includes('const r = enfileirarSaida(type, places[0], regiaoDoGesto, reivindicacaoDestaAba());'),
+  // (O `extra` leva também o momento do gesto, R6-7-4: a marca vem DEPOIS dele.)
+  assert.ok(corpo.includes('const r = enfileirarSaida(type, places[0], regiaoDoGesto, { ...gestoDoAgendamento, ...reivindicacaoDestaAba() });'),
     'a descarga anota sem a marca da aba — a outra aba a manda de novo enquanto o envio desta voa');
   assert.match(corpo, /if \(r\) descargaNaFila\.add\(places\[0\]\);/,
     'sem a marca, a resposta que chega com a página viva não sabe que o item já está na fila — contaria duas vezes');

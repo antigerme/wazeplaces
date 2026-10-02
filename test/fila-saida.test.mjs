@@ -54,7 +54,8 @@ test('só REDE entra na fila — recusa do Waze não', () => {
   const h = fatiar('handleActionResult');
   // O gancho é um bloco desde que a fila passou a recusar o pedido REPETIDO
   // (v2026.09.22-06): quem enfileira fica DENTRO do `if` da categoria.
-  assert.match(h, /if \(cat === 'transient'\) \{\s*const naFila = enfileirarSaida\(actionType, place, regiao\);/,
+  // (O 4º argumento é o momento do GESTO, que o item guarda — R6-7-4.)
+  assert.match(h, /if \(cat === 'transient'\) \{\s*const naFila = enfileirarSaida\(actionType, place, regiao, gesto\);/,
     'o gancho da fila de saída saiu, ou deixou de exigir `transient`');
   // As categorias e o destino de cada uma:
   //  · already_processed/not_found → já é sucesso (outro editor chegou antes)
@@ -73,7 +74,7 @@ test('só REDE entra na fila — recusa do Waze não', () => {
 
 test('o gancho vem ANTES da reversão — senão o placar já voltou', () => {
   const h = fatiar('handleActionResult');
-  const iFila = h.indexOf('enfileirarSaida(actionType, place, regiao)');
+  const iFila = h.indexOf('enfileirarSaida(actionType, place, regiao, gesto)');
   const iRevert = h.indexOf('AppState.stats[statKey] = Math.max(0');
   assert.ok(iFila > 0 && iRevert > 0, 'não achei as âncoras');
   assert.ok(iFila < iRevert,
@@ -105,12 +106,13 @@ test('o LOTE só enfileira no modo de placar OTIMISTA', () => {
   // Desde o O2 (auditoria de 2026-09-29) o lote da pessoa é ANOTADO na fila de
   // saída antes do primeiro envio (`anotados`); o que o `!aoLandar` protege é o
   // mesmo: nem a anotação nem o enfileirar da rede existem na recusa automática.
-  assert.match(l, /errorCategory === 'transient' && !aoLandar && \(anotados\.has\(p\) \|\| enfileirarSaida\('reject', p, opts\.regiao\)\)/,
+  // (O 4º argumento leva o momento do GESTO, que o item guarda — R6-7-4.)
+  assert.match(l, /errorCategory === 'transient' && !aoLandar && \(anotados\.has\(p\) \|\| enfileirarSaida\('reject', p, opts\.regiao, opts\.gesto\)\)/,
     'o lote enfileira no modo `contarAoLandar`: a ação some do placar e do Histórico');
-  assert.match(l, /if \(!aoLandar\) \{\s*const lista = carregarFilaDeSaida\(\);\s*esperavamAntes = lista\.length;\s*for \(const p of places\) \{\s*const r = enfileirarSaida\('reject', p, opts\.regiao, reivindicacaoDestaAba\(\), true, lista\);/,
+  assert.match(l, /if \(!aoLandar\) \{\s*const lista = carregarFilaDeSaida\(\);\s*esperavamAntes = lista\.length;\s*for \(const p of places\) \{\s*const r = enfileirarSaida\('reject', p, opts\.regiao, \{ \.\.\.opts\.gesto, \.\.\.reivindicacaoDestaAba\(\) \}, true, lista\);/,
     'a anotação antes do envio saiu do portão `!aoLandar`: a recusa automática contaria a ação em lugar nenhum');
   // E o modo otimista PRECISA enfileirar, senão a promessa vale só pro swipe.
-  assert.ok(l.indexOf("enfileirarSaida('reject', p, opts.regiao)") > 0,
+  assert.ok(l.indexOf("enfileirarSaida('reject', p, opts.regiao, opts.gesto)") > 0,
     'o lote parou de enfileirar de vez — o rejeitar em lote volta a perder por rede');
 });
 
@@ -267,10 +269,14 @@ test('o DIA e a REGIÃO são os do gesto, não os do pouso', () => {
     'o recordHistory voltou a cravar HOJE, ignorando o dia que recebeu');
   assert.match(rh, /const lugar = onde \|\| ondeAgora\(\)/,
     'o recordHistory voltou a cravar o filtro de agora, ignorando a região que recebeu');
-  // E o caminho ONLINE não pode mudar: lá os dois são omitidos e valem hoje.
+  // E o caminho ONLINE também passa os do GESTO. Esta asserção dizia o
+  // contrário ("ali o padrão É hoje") e estava errada: a resposta chega DEPOIS
+  // da janela do Desfazer, e um "Aplicar" de outro país dentro dela creditava o
+  // ✕ dado no Brasil à França — "Viajante" sem nenhum pedido francês (R6-7-4,
+  // auditoria de 2026-10-01; o comportamento, nos testes R6-7-4 do fim deste arquivo).
   const h = fatiar('handleActionResult');
-  assert.ok(/recordHistory\(actionType, 1\)/.test(h),
-    'o caminho online passou a passar dia/região — ali o padrão É hoje');
+  assert.match(h, /recordHistory\(actionType, 1, gesto && gesto\.dia, gesto && gesto\.onde\)/,
+    'o caminho online voltou a registrar no dia/região de quando a RESPOSTA chegou');
 });
 
 test('o diário registra a TRANSIÇÃO, não cada swipe', () => {
@@ -283,7 +289,7 @@ test('o diário registra a TRANSIÇÃO, não cada swipe', () => {
   // (`anotarSeAbriuASaida`, e o `ficouNaSaida` do lote).
   assert.match(e, /if \(f\.length === 1 && !calado\) dfato\(/,
     'o diário voltou a registrar item a item — o anel de 120 vira só isto');
-  assert.match(fatiar('anotarAntesDoEnvio'), /enfileirarSaida\(tipo, place, regiao, reivindicacaoDestaAba\(\), true\)/,
+  assert.match(fatiar('anotarAntesDoEnvio'), /enfileirarSaida\(tipo, place, regiao, \{ \.\.\.gesto, \.\.\.reivindicacaoDestaAba\(\) \}, true\)/,
     'a anotação antes do envio deixou de ser calada: cada ✕ e cada ✓ virariam uma linha do diário');
   // Duas anotações e nenhuma é por item: a abertura da fila, e o ALARME do
   // pedido repetido — que só existe num ramo que não deveria acontecer nunca
@@ -732,7 +738,7 @@ function aparelhoO5(guardado = new Map()) {
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
       'saidaEmRecuo', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'pousouPorOutraAba',
       'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
-      'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'descarregarAcaoPendente'];
+      'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'descarregarAcaoPendente', 'carimboDoGesto'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `
       let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false, verificandoSessao = false;
@@ -1199,4 +1205,100 @@ test('R4-O6: a RESERVA, passo a passo — marca de outra aba recente segura; vel
   const solta = aparelhoO6({ itens: [ITEM_O6('v1')], comTravas: false, rede: async () => ({ success: false, errorCategory: 'transient' }) });
   await solta.aba('A').app.esvaziarFilaDeSaida();
   assert.equal(solta.fila()[0].rv, undefined, 'a marca da aba ficou no item que a rede não levou: a outra aba esperaria 60 s à toa');
+});
+
+// ── R6-7-4: o dia e o LUGAR do Histórico são os do GESTO ─────────────────────
+// O "onde" do Histórico (a fonte de Andarilho e Viajante) e o dia eram lidos na
+// RESPOSTA (o `recordHistory` do caminho online) e no ENVIO (a anotação na fila
+// de saída, no fim da janela do Desfazer). "Aplicar" outro país dentro da janela
+// executa a decisão depois do `setCountry`: o ✕ dado no Brasil ia pra França e
+// destravava "Viajante" sem nenhum pedido francês (auditoria de 2026-10-01,
+// MEDIDO no navegador: `onde: {"30":5,"73":1}`). Aqui o aparelho roda de
+// verdade — `handleReject`, `scheduleAction`, o carimbo, a anotação, a resposta e
+// o `ondeAgora` —, e o país do FILTRO muda dentro da janela.
+function aparelhoDoGesto({ resposta }) {
+  const guardado = new Map();
+  const medidas = { envios: [], historico: [] };
+  const filtro = { pais: 30, dia: '2026-09-25' };
+  const AppState = { authenticated: true, profile: { id: 1 }, currentPlace: null, queue: [], pendingAction: null,
+    inFlightActions: 0, serverTotal: 5, stats: { read: 0, rejected: 0, skipped: 0 },
+    preferences: { undoEnabled: true }, filters: { stateId: '', myArea: false } };
+  const deps = {
+    AppState, epocaDaSessao: 0, navigator: { onLine: true },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000, CONTA_KEY: 'waze_places_conta', UNDO_WINDOW_MS: 3000,
+    // A janela do Desfazer não vence sozinha: quem a fecha é o teste (o `Aplicar`
+    // dos Filtros a despacha pelo `resetQueue`, com o país já trocado).
+    setTimeout: () => 0, clearTimeout: () => {},
+    dlog: () => {}, dlogPlace: () => null, dfato: () => {}, t: (k) => k, msgDoServidor: (r, d) => d,
+    showToast: () => {}, showUndoBanner: () => {}, removeUndoBanner: () => {}, aplicarTravaDeAcao: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => {},
+    saveStats: () => {}, canDisableUndo: () => false, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
+    acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
+    presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
+    registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
+    recordHistory: (tipo, n, dia, onde) => medidas.historico.push({ tipo, n, dia, onde }),
+    historyTodayKey: () => filtro.dia, getLang: () => 'pt', handleUnauthorized: () => {},
+    marcaDaSessao: () => 'marca', contaAgora: () => '1', reivindicacaoDestaAba: () => ({ rv: 'aba' }),
+    soltarMarcaDosItens: () => {}, anotarSeAbriuASaida: () => {}, devolverPedidoRecusado: () => {},
+    tirarDaFilaDeSaida: () => true, pousouPorOutraAba: () => {}, decisaoDepoisDaQueda: () => {},
+    API: { getSession: () => 'tok', getRegion: () => 'row', getCountry: () => filtro.pais,
+      rejectPlace: async (v) => { medidas.envios.push(v); await null; return resposta(); } },
+    console: { error: () => {} },
+  };
+  const nomes = ['carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarEmAndamento', 'enfileirarSaida',
+    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora', 'carimboDoGesto'];
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `
+    let tratouNestaFila = false;
+    const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+    ${nomes.map(fatiarComAsync).join('\n')}
+    return { handleReject, carregarFilaDeSaida, ondeAgora };`)(...chaves.map((k) => deps[k]));
+  return { app, AppState, medidas, filtro };
+}
+
+async function rejeitarETrocarOPais(m) {
+  m.AppState.currentPlace = { venueID: 'v1', updateRequestID: 'u1', creatorId: 7 };
+  m.app.handleReject();                                // o ✕ no card do Brasil
+  m.filtro.pais = 73;                                  // Filtros › França › Aplicar, DENTRO da janela…
+  m.filtro.dia = '2026-09-26';                         // (e a meia-noite passou no meio)
+  m.AppState.pendingAction.execute();                  // …que despacha a decisão (`resetQueue`)
+  for (let i = 0; i < 5; i++) await null;
+}
+
+test('R6-7-4: "Aplicar" outro país dentro da janela — o ✕ entra no Histórico no país (e no dia) do GESTO', async () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  await rejeitarETrocarOPais(m);
+  assert.deepEqual(m.medidas.envios, ['v1'], 'PRÉ-CONDIÇÃO: a decisão saiu');
+  assert.deepEqual(m.medidas.historico, [{ tipo: 'reject', n: 1, dia: '2026-09-25', onde: '30' }],
+    `o ✕ dado no Brasil entrou no Histórico como ${JSON.stringify(m.medidas.historico)} — "Viajante" sem pedido francês`);
+});
+
+test('R6-7-4: sem rede, o item da fila de saída guarda o país e o dia do GESTO, não os do envio', async () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: false, errorCategory: 'transient' }) });
+  await rejeitarETrocarOPais(m);
+  const fila = m.app.carregarFilaDeSaida();
+  assert.equal(fila.length, 1, 'PRÉ-CONDIÇÃO: a decisão ficou na fila de saída');
+  assert.equal(fila[0].onde, '30', `o item da fila de saída leva o país de DEPOIS do "Aplicar" (${fila[0].onde})`);
+  assert.equal(fila[0].dia, '2026-09-25', 'o item da fila de saída leva o dia do ENVIO');
+  assert.equal(fila[0].regiao, 'row');
+});
+
+test('R6-7-4: CONTROLE — sem trocar nada, o Histórico e a fila de saída levam o país de sempre', async () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  m.AppState.currentPlace = { venueID: 'v1', updateRequestID: 'u1', creatorId: 7 };
+  m.app.handleReject();
+  m.AppState.pendingAction.execute();
+  for (let i = 0; i < 5; i++) await null;
+  assert.deepEqual(m.medidas.historico, [{ tipo: 'reject', n: 1, dia: '2026-09-25', onde: '30' }]);
+});
+
+test('R6-7-4: com "Minha área" o "onde" é só o PAÍS — a busca vai pela caixa da área, sem o estado guardado', () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  m.AppState.filters.stateId = '1';
+  m.AppState.filters.myArea = true;
+  assert.equal(m.app.ondeAgora(), '30', 'com "Minha área" o Histórico gravou o estado que a busca nem usou (30:1)');
+  // CONTROLE: sem "Minha área", o estado do filtro é onde o trabalho foi feito.
+  m.AppState.filters.myArea = false;
+  assert.equal(m.app.ondeAgora(), '30:1');
 });

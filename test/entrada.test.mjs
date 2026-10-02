@@ -1393,7 +1393,7 @@ test('plural por chave: o "de N na região" e o aviso de desligar o modo dev esc
   const { registro, document } = domDeMentira({ pendingTotalHint: {} });
   const AppState = { authenticated: true, serverTotal: 10, serverBlocked: 1, blockedPartial: false };
   const { updatePendingTotalHint } = montar(['updatePendingTotalHint'],
-    { document, AppState, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
+    { document, AppState, Treino: { ativo: false }, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
   updatePendingTotalHint();
   assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.titleUm|{"blocked":1}', 'um pedido bloqueado usou a forma plural');
   AppState.serverBlocked = 3;

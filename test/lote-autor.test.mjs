@@ -45,11 +45,16 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
   let n = 0;
   const naSaida = saida.slice();
   let gravacoes = 0;
+  // O dia e o lugar com que cada pouso entra no Histórico, e o momento que a
+  // confirmação entrega às conquistas (R6-7-4).
+  const historicoCompleto = [], gestosConfirmados = [];
   const deps = {
     AppState, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { getRegion: () => 'row',
       rejectPlace: async (v, u, presenca, regiao) => { const p = { venueID: v, updateRequestID: u }; regioes.push(regiao); n++; antes(p, n); return resposta(p, n); } },
-    registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    registrarPouso: () => {}, recordHistory: (tipo, q, dia, onde) => historicoCompleto.push({ dia, onde }),
+    registrarRejeicaoDeAutor: () => {},
+    registrarAcaoConfirmada: (tipo, p, gesto) => gestosConfirmados.push(gesto ? gesto.dia + '|' + gesto.onde : null),
     marcarEmAndamento: () => {}, handleUnauthorized: () => {},
     // Com a `lista` de quem chama (o lote), só põe nela: quem grava é quem chama.
     enfileirarSaida: (tipo, p, regiao, extra, calado, lista) => {
@@ -77,7 +82,7 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
   const chaves = Object.keys(deps);
   const enviarLote = new Function(...chaves, fatiar('enviarLote') + '\n' + fatiar('devolverPedidoRecusado')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
-  return { enviarLote, AppState, log, regioes, deps, naSaida, gravacoes: () => gravacoes };
+  return { enviarLote, AppState, log, regioes, deps, naSaida, gravacoes: () => gravacoes, historicoCompleto, gestosConfirmados };
 }
 
 // ── F4: o ↻ no MEIO da recusa automática ────────────────────────────────────
@@ -246,6 +251,7 @@ function montarLoteDoAutor() {
     removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {}, startFetching: () => log.push('busca'),
     showNoPlaces: () => log.push('vazio:tratou=' + app.tratou()),
     API: { getRegion: () => 'row' }, scheduleAction: () => log.push('agendou'), enviarLote: () => {},
+    carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
   app = new Function(...chaves, 'let tratouNestaFila = false;\n' + fatiar('rejeitarLoteDoAutor')
@@ -316,7 +322,7 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
     marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
-    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {},
+    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
   const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + fatiar('enviarLote') + '\n'
@@ -324,6 +330,83 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
   await recusar();
   assert.deepEqual(regioes, ['row', 'row', 'row'],
     `a recusa mandou pedidos do servidor ROW pra ${regioes.join(', ')}: "não encontrado" lá conta como feito, e o pedido fica pendente`);
+});
+
+// ── R6-7-4: o "onde" e o dia do Histórico são os do GESTO, também no lote ────
+// O "Rejeitar os N" sai no fim da janela do Desfazer, e a recusa automática
+// anda um a um pela rede: lidos na hora de cada pouso, o país e o dia eram os
+// de DEPOIS de um "Aplicar" nos Filtros — o Histórico creditava o trabalho ao
+// país novo (auditoria de 2026-10-01). Com o `carimboDoGesto` e o `ondeAgora`
+// DE VERDADE, e o país do filtro trocando no meio.
+test('R6-7-4: trocar o PAÍS com a recusa automática no ar não muda o "onde" nem o dia do Histórico', async () => {
+  const estado = { pais: 30, dia: '2026-09-25' };
+  const frente = pedido(9, 1);
+  const alvos = [pedido(1), pedido(2), pedido(3)];
+  const AppState = { queue: [frente, ...alvos], currentPlace: frente, stats: { rejected: 0 }, serverTotal: 4,
+    fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true, filters: { stateId: '', myArea: false } };
+  const historico = [];
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado: (id) => id === 777, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    pedidosEmAndamento: new Set(), chaveDoPedido: chave, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: {
+      getRegion: () => 'row', getCountry: () => estado.pais,
+      rejectPlace: async () => {
+        estado.pais = 73; estado.dia = '2026-09-26';   // "Aplicar" a França (e a meia-noite) com o laço no ar
+        return { success: true };
+      },
+    },
+    registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    recordHistory: (tipo, n, dia, onde) => historico.push({ dia, onde }),
+    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
+    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, historyTodayKey: () => estado.dia, getLang: () => 'pt',
+  };
+  const chaves = Object.keys(deps);
+  const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n'
+    + ['enviarLote', 'aplicarRecusaAutomatica', 'ondeAgora', 'carimboDoGesto'].map(fatiar).join('\n')
+    + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
+  await recusar();
+  assert.equal(historico.length, 3, 'PRÉ-CONDIÇÃO: os três pousaram');
+  assert.deepEqual(historico, Array(3).fill({ dia: '2026-09-25', onde: '30' }),
+    `a recusa automática creditou ao país (ou ao dia) de DEPOIS do "Aplicar": ${JSON.stringify(historico)}`);
+});
+
+test('R6-7-4: o "Rejeitar os N" leva o carimbo do GESTO até o pouso — o enviado e o "já tratado"', async () => {
+  // O gesto: o lote é agendado com o carimbo do momento do toque (o executor
+  // roda no fim da janela, com o país do filtro já trocado).
+  const estado = { pais: 30, dia: '2026-09-25' };
+  const AppState = { authenticated: true, queue: [pedido(1, 555), pedido(2, 555)], currentPlace: null, stats: { rejected: 0 },
+    serverTotal: 2, hasMore: false, filters: { stateId: '', myArea: false } };
+  AppState.currentPlace = AppState.queue[0];
+  let executor = null;
+  const deps = {
+    AppState, acoesTravadas: () => false, avisoDaTrava: () => 'x', Treino: { ativo: false }, showToast: () => {}, t: (k) => k,
+    pedidosDoAutorNaFila: () => AppState.queue.slice(), updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
+    removeCurrentCardEl: () => {}, showCurrentPlace: () => {}, maybePrefetch: () => {}, startFetching: () => {}, showNoPlaces: () => {},
+    API: { getRegion: () => 'row', getCountry: () => estado.pais },
+    scheduleAction: (tipo, places, ex) => { executor = ex; }, enviarLote: (places, opts) => opts,
+    historyTodayKey: () => estado.dia, getLang: () => 'pt',
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'let tratouNestaFila = false;\n'
+    + ['rejeitarLoteDoAutor', 'ondeAgora', 'carimboDoGesto'].map(fatiar).join('\n')
+    + '\nreturn { rejeitarLoteDoAutor };')(...chaves.map((k) => deps[k]));
+  app.rejeitarLoteDoAutor(AppState.queue[0]);
+  estado.pais = 73; estado.dia = '2026-09-26';          // "Aplicar" dentro da janela
+  const opts = executor();
+  assert.equal(opts.gesto && opts.gesto.onde, '30', `o lote saiu com o país de DEPOIS do "Aplicar" (${opts.gesto && opts.gesto.onde})`);
+  assert.equal(opts.gesto.dia, '2026-09-25');
+  // O pouso: o enviado E o "já tratado" entram no Histórico (e nas conquistas)
+  // com o carimbo que o lote recebeu.
+  const m = montarLote({ fila: [pedido(1, 555), pedido(2, 555)],
+    resposta: (p, n) => (n === 1 ? { success: true } : { success: false, errorCategory: 'already_processed' }) });
+  await m.enviarLote(m.AppState.queue.slice(), { regiao: 'row', gesto: { t: 1, dia: '2026-09-25', onde: '30', lang: 'pt' } });
+  assert.deepEqual(m.historicoCompleto, [{ dia: '2026-09-25', onde: '30' }, { dia: '2026-09-25', onde: '30' }],
+    `o pouso do lote não usou o carimbo do gesto: ${JSON.stringify(m.historicoCompleto)}`);
+  assert.deepEqual(m.gestosConfirmados, ['2026-09-25|30', '2026-09-25|30'],
+    'a confirmação do lote (as conquistas) não recebeu o momento do gesto');
 });
 
 // ═══ Auditoria de 2026-09-29: a DECISÃO do lote não some nem é contada sem ir ══
@@ -492,6 +575,7 @@ function montarRecusa() {
     marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
+    carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
   const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n'
@@ -543,6 +627,7 @@ function montarFolhaDoAutor({ emAndamento = [] } = {}) {
     chaveDoPedido: chave, updateStats: () => {}, saveStats: () => {}, updatePendingCount: () => {},
     removeCurrentCardEl: () => {}, showCurrentPlace: () => {}, maybePrefetch: () => {}, startFetching: () => {}, showNoPlaces: () => {},
     API: { getRegion: () => 'row' }, scheduleAction: (tipo, places) => agendadas.push(places.map((p) => p.venueID)), enviarLote: () => {},
+    carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let tratouNestaFila = false;\n' + fatiar('pedidosDoAutorNaFila') + '\n'

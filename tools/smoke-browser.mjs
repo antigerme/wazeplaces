@@ -660,6 +660,10 @@ for (const [nome, vp, iOS] of [
           { prompt: () => {}, userChoice: Promise.resolve({ outcome: 'accepted' }) }));
       }
       AppState.queue = []; AppState.currentPlace = null;
+      // O convite mora no "Tudo limpo!" de quem TERMINOU a fila (R6-7-11): a
+      // pessoa tratou nesta fila e não sobrou pulado. Sem isto o painel é o de
+      // "Confira o país e a região", e ali o convite não aparece mais.
+      tratouNestaFila = true; puladosNoInicioDaFila = AppState.stats.skipped || 0;
       showNoPlaces();
       const box = document.getElementById('installInvite');
       if (!box || box.classList.contains('hidden')) return { ausente: true };
@@ -679,6 +683,41 @@ for (const [nome, vp, iOS] of [
     if (m.ausente) continue;
     checa(m.fora.length === 0, `${rot}: parte do convite fora da tela`, m.fora.join(', '));
     checa(m.alvoDispensar >= 44, `${rot}: "Agora não" abaixo de 44px`, `${m.alvoDispensar}px`);
+  }
+  // R6-7-11: no painel de quem NÃO terminou a fila — o "Confira o país e a
+  // região" (não tratou nada) e o "Fim da fila" (com pulados) — o convite não
+  // aparece, nem quando o prompt do navegador chega depois. O "Tudo limpo!" de
+  // cima é o CONTROLE: o mesmo painel, o mesmo convite podendo aparecer.
+  const semFesta = await page.evaluate(() => {
+    const visivel = () => !document.getElementById('installInvite').classList.contains('hidden');
+    const out = {};
+    tratouNestaFila = false; showNoPlaces(); atualizarConviteInstalar();
+    out.nada = visivel();
+    tratouNestaFila = true; AppState.stats.skipped = (AppState.stats.skipped || 0) + 2; showNoPlaces(); atualizarConviteInstalar();
+    out.pulados = visivel();
+    AppState.stats.skipped -= 2; showNoPlaces();
+    out.tudoLimpo = visivel();
+    return out;
+  });
+  checa(!semFesta.nada, `convite · ${nome}: apareceu no "Confira o país e a região" de quem não tratou nada`);
+  checa(!semFesta.pulados, `convite · ${nome}: apareceu no "Fim da fila" com pulados pendentes`);
+  checa(semFesta.tudoLimpo, `convite · ${nome}: CONTROLE — sumiu do "Tudo limpo!" de quem terminou`);
+  // R6-7-12: "Agora não" pelo TECLADO esconde o convite com o foco nele — o
+  // foco vai ao "Verificar novamente", que fica (caía no <body>). CONTROLE: o
+  // mesmo botão pelo mouse não move o foco pra lá (a regra do app: só teclado).
+  if (!iOS) {
+    const foco = {};
+    for (const via of ['teclado', 'mouse']) {
+      await page.evaluate(() => { try { localStorage.removeItem('waze_places_install_dispensado'); } catch (e) {} showNoPlaces(); });
+      const b = page.locator('#installDismissBtn');
+      if (via === 'teclado') { await b.focus(); await page.keyboard.press('Enter'); } else { await b.click(); }
+      await doisQuadros(page);
+      foco[via] = await page.evaluate(() => ({ id: (document.activeElement && document.activeElement.id) || document.activeElement.tagName,
+        convite: !document.getElementById('installInvite').classList.contains('hidden') }));
+    }
+    checa(!foco.teclado.convite && !foco.mouse.convite, `convite · ${nome}: PRÉ-CONDIÇÃO — o "Agora não" não escondeu o convite`, JSON.stringify(foco));
+    checa(foco.teclado.id === 'reloadBtn', `convite · ${nome}: "Agora não" pelo teclado largou o foco em ${foco.teclado.id}`, JSON.stringify(foco));
+    checa(foco.mouse.id !== 'reloadBtn', `convite · ${nome}: CONTROLE — o clique do mouse moveu o foco (o instrumento não distingue)`, JSON.stringify(foco));
   }
   await ctx.close();
 }
@@ -2477,6 +2516,46 @@ for (const status of [404, 403]) {
   checa(page.url() === antes, `como funciona: o Esc NAVEGOU pra fora do app (${page.url()})`);
   checa(!(await abertoComoFunciona()), 'como funciona: o Esc não fechou');
   await ctx.close();
+
+  // R6-7-2: com uma camada que a PESSOA abriu enquanto a fila carregava (aqui os
+  // Filtros, com uma escolha ainda não aplicada), o primeiro card NÃO abre o
+  // aviso por cima — o `openModal` a esconderia e jogaria a escolha fora. Ele
+  // espera o próximo card montado sem camada. O CONTROLE é o caso de cima: sem
+  // camada, o aviso abre no primeiro card.
+  const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true });
+  const page2 = await ctx2.newPage();
+  await page2.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page2.waitForTimeout(400);
+  const camada = await page2.evaluate((p) => {
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.serverTotal = 5; AppState.hasMore = false;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    openModal('filtersModal');
+    const unread = document.getElementById('filterUnreadOnly');
+    const antes = unread ? unread.checked : null;
+    if (unread) unread.checked = !antes;                 // a escolha ainda NÃO aplicada
+    AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
+    AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();                                  // o primeiro card chega
+    return { filtros: !document.getElementById('filtersModal').classList.contains('hidden'),
+             comoFunciona: !document.getElementById('comoFuncionaModal').classList.contains('hidden'),
+             escolhaFicou: unread ? unread.checked === !antes : null, visto: AppState.preferences.comoFuncionaVisto };
+  }, cru);
+  checa(!camada.comoFunciona, 'como funciona: abriu por cima dos Filtros abertos pela pessoa', JSON.stringify(camada));
+  checa(camada.filtros && camada.escolhaFicou !== false, 'como funciona: os Filtros (com a escolha não aplicada) sumiram', JSON.stringify(camada));
+  checa(!camada.visto, 'como funciona: deu-se por visto sem ter aparecido — nunca mais apareceria', JSON.stringify(camada));
+  await page2.evaluate(() => { closeModal('filtersModal'); });
+  await page2.waitForTimeout(300);
+  await page2.evaluate(() => { AppState.queue.shift(); AppState.currentPlace = null; showCurrentPlace(); });
+  await page2.waitForTimeout(400);
+  checa(await page2.evaluate(() => !document.getElementById('comoFuncionaModal').classList.contains('hidden')),
+    'como funciona: o próximo card SEM camada não mostrou o aviso que tinha ficado esperando');
+  await ctx2.close();
 }
 
 {
@@ -5353,6 +5432,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       ['fila vazia com o convite', 'convite', ['reloadBtn', 'installInviteBtn', 'installDismissBtn']]]) {
       const alvo = await page.evaluate((k) => {
         AppState.queue = []; AppState.currentPlace = null; AppState.loadError = k === 'falha';
+        // O convite mora no "Tudo limpo!" de quem TERMINOU a fila (R6-7-11).
+        tratouNestaFila = true; puladosNoInicioDaFila = AppState.stats.skipped || 0;
         showNoPlaces();
         const b = document.getElementById(k === 'falha' ? 'retryLoadBtn' : 'installDismissBtn');
         const r = b && b.getBoundingClientRect();

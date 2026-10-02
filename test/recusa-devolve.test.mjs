@@ -199,6 +199,7 @@ test('F3: CONTROLE — a confirmação do ÚLTIMO pedido (ele mesmo em andamento
     Treino: { ativo: false }, carregarConquistas: () => ({ seq: 0, n: {} }), salvarConquistas() {},
     registrarIdiomaUsado() {}, getLang: () => 'pt', contagemDoAutor: () => 0, loadHistory: () => ({}),
     checarConquistas: (x) => ctxs.push(x || {}), filaZeradaConfirmada: (o) => m.app.filaZeradaConfirmada(o),
+    checkUndoGateUnlock() {},
   };
   const chaves = Object.keys(deps);
   const registrar = new Function(...chaves, fatiar('registrarAcaoConfirmada') + '\nreturn registrarAcaoConfirmada;')(...chaves.map((k) => deps[k]));
@@ -213,7 +214,7 @@ test('F3: o gesto entrega a FILA dele à resposta (`epocaFila`) — ✕ e ✓', 
   for (const [fn, tipo] of [['handleReject', 'reject'], ['handleMarkAsRead', 'read']]) {
     const corpo = fatiar(fn);
     assert.match(corpo, /const epocaFila = AppState\.fetchEpoch;/, `${fn} não guarda a fila do gesto`);
-    assert.match(corpo, new RegExp(`handleActionResult\\('${tipo}', place, result, regiao, epocaFila\\);`),
+    assert.match(corpo, new RegExp(`handleActionResult\\('${tipo}', place, result, regiao, epocaFila, gesto\\);`),
       `${fn} não entrega a fila do gesto à resposta`);
   }
 });

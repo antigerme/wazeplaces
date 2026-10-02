@@ -517,7 +517,7 @@ test('A2: relido NO MESMO objeto — o desconto de uma decisão em voo (K7) aind
   assert.equal(A.AppState.stats.rejected, 2);
 });
 
-test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer é da aba que fez o gesto', () => {
+test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer é da aba em que a decisão se confirmou', () => {
   const ap = aparelho({ [STATS_KEY]: { read: 0, rejected: 30, skipped: 0 } });
   const log = [];
   const deps = {
@@ -526,15 +526,20 @@ test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer
     checkUndoGateUnlock: () => log.push('gate'), setCount: () => log.push('conta'), updatePendingCount: () => log.push('restam'),
     document: { getElementById: () => ({}) },
   };
-  const h = montar(['relerPlacarDeOutraAba', 'placarGuardado', 'desenharPlacar', 'updateStats'], deps);
+  const h = montar(['relerPlacarDeOutraAba', 'placarGuardado', 'desenharPlacar', 'updateStats', 'registrarAcaoConfirmada'], deps);
   h.relerPlacarDeOutraAba();
   assert.equal(deps.AppState.stats.rejected, 30);
   assert.deepEqual(log, ['conta', 'conta', 'conta', 'restam']);
-  assert.ok(!log.includes('gate'), 'a aba que só RELEU o placar comemorou a cota (a do gesto já comemorou)');
-  // CONTROLE: o gesto (o `updateStats`) avalia a cota, como sempre.
+  assert.ok(!log.includes('gate'), 'a aba que só RELEU o placar comemorou a cota (a da decisão já comemorou)');
+  // O gesto também só desenha: o placar é otimista, e a janela do Desfazer
+  // ainda pode devolver o pedido (R6-7-5) — a cota se avalia na confirmação.
   log.length = 0;
   h.updateStats();
-  assert.equal(log[0], 'gate');
+  assert.ok(!log.includes('gate'), 'o GESTO voltou a comemorar a cota, dentro da janela do Desfazer');
+  // CONTROLE: a confirmação avalia a cota (o instrumento enxerga a chamada).
+  log.length = 0;
+  h.registrarAcaoConfirmada('reject', { venueID: 'v1' });
+  assert.ok(log.includes('gate'), 'a confirmação de uma decisão não avalia a cota do Desfazer');
 });
 
 test('A2: os pulados DA OUTRA aba não contam como pulados DESTA fila (o "Tudo limpo!" daqui)', () => {
@@ -665,6 +670,81 @@ test('A3: CONTROLE — sem esquecer as escolhas de A, B cruza a cota calado e ag
   m.h.checkUndoGateUnlock();
   assert.deepEqual(m.toasts, []);
   assert.equal(m.deps.AppState.preferences.undoEnabled === false && m.h.canDisableUndo(), true);
+});
+
+// ═══ R6-7-5 · o aviso "o Desfazer virou opcional" sai na CONFIRMAÇÃO ═══════════
+// O placar é OTIMISTA: o gesto que cruzava a cota comemorava DENTRO da janela do
+// Desfazer, que ainda podia devolver o pedido. Desfeito, o aviso seguia na tela
+// levando a um interruptor travado ("falta 1"), e a marca de "visto" já estava
+// gravada — o desbloqueio de verdade, um pedido depois, nunca era anunciado
+// (auditoria de 2026-10-01, MEDIDO no navegador). Funções DE VERDADE: o gesto (o
+// `updateStats`), a confirmação (`registrarAcaoConfirmada`), a cota e a dica.
+function montarCota() {
+  // L2 (cota 30) com 29 tratados, a linha de base decidida ("ainda não") e 25
+  // janelas sem desfazer nas costas — a dica por comportamento já pediria pra sair.
+  const prefs = { undoEnabled: true, undoGateSeen: false, dicaDesfazerVista: false, semUndoSeguidas: 25 };
+  const ap = aparelho({ [constante('PERFIL_GATE_KEY')]: { rank: 1, isStaff: false }, [PREFERENCES_KEY]: prefs });
+  const toasts = [];
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, PREFERENCES_KEY, PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'),
+    AppState: { preferences: { ...prefs }, stats: { read: 0, rejected: 29, skipped: 0 }, profile: null,
+      devMode: { active: false }, pendingAction: null },
+    preferenciasCarregadas: true, UNDO_GATE_BASE: constante('UNDO_GATE_BASE'), DICA_SEM_UNDO: 20,
+    showToast: (m) => toasts.push(m), t: (k) => k, dispararConfeteNaFila: () => {}, abrirPreferenciaDoUndo: () => {},
+    Treino: { ativo: false },
+  };
+  const h = montar(['savePreferences', 'perfilDoPortao', 'getUndoUnlockThreshold', 'getUndoTreatedCount',
+    'undoGateAtingido', 'pedidosNaJanelaDoDesfazer', 'checkUndoGateUnlock', 'canDisableUndo', 'checkDicaDesfazer',
+    'updateStats', 'desenharPlacar', 'registrarAcaoConfirmada'], deps);
+  const P = { venueID: 'v1', updateRequestID: 'u1' };
+  return { h, deps, toasts, P, prefs: deps.AppState.preferences, stats: deps.AppState.stats };
+}
+
+test('R6-7-5: o gesto que cruza a cota NÃO comemora na janela; desfeito, nada fica — e o desbloqueio de verdade é anunciado', () => {
+  const m = montarCota();
+  // O 30º ✕ (L2: cota 30): o placar sobe no GESTO e a janela abre.
+  m.stats.rejected = 30;
+  m.h.updateStats();
+  m.deps.AppState.pendingAction = { type: 'reject', place: m.P };
+  assert.deepEqual(m.toasts, [], 'comemorou no GESTO — a janela do Desfazer ainda pode devolver o pedido');
+  // A confirmação de uma decisão ANTERIOR chega com este na janela: ele não conta.
+  m.h.registrarAcaoConfirmada('read', { venueID: 'v0', updateRequestID: 'u0' });
+  assert.deepEqual(m.toasts, [], 'comemorou contando o pedido que ainda está na janela do Desfazer');
+  assert.equal(m.prefs.undoGateSeen, false);
+  // Desfaz: o placar volta, a marca de "visto" segue livre.
+  m.stats.rejected = 29;
+  m.deps.AppState.pendingAction = null;
+  m.h.updateStats();
+  assert.deepEqual(m.toasts, []);
+  assert.equal(m.prefs.undoGateSeen, false, 'o desfeito deixou o "visto" gravado — o desbloqueio de verdade nunca seria anunciado');
+  assert.equal(m.prefs.dicaDesfazerVista, false, 'o desfeito deixou a dica por comportamento marcada como vista');
+  // O 30º de verdade: o gesto, a janela, e a CONFIRMAÇÃO — aí sim, uma vez.
+  m.stats.rejected = 30;
+  m.h.updateStats();
+  assert.deepEqual(m.toasts, []);
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'a confirmação que cruza a cota não anunciou o desbloqueio');
+  assert.equal(m.h.canDisableUndo(), true, 'o aviso leva a um interruptor travado');
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'anunciou duas vezes');
+});
+
+test('R6-7-5: a dica das janelas sem desfazer não sai junto da comemoração da cota (as duas dizem o mesmo)', () => {
+  // A janela que expira sem desfazer conta pra dica no FIM da janela, ANTES da
+  // confirmação: com a cota recém-cruzada, a comemoração vem logo depois.
+  const m = montarCota();
+  m.stats.rejected = 30;
+  m.h.checkDicaDesfazer();
+  assert.deepEqual(m.toasts, [], 'a dica saiu e, um instante depois, a comemoração dizendo a mesma coisa');
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  m.h.checkDicaDesfazer();
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'saiu a dica depois da comemoração (ou nenhuma das duas)');
+  // CONTROLE: quem já passou da cota antes (a linha de base marcou "visto") recebe a dica.
+  const c = montarCota();
+  c.prefs.undoGateSeen = true;
+  c.stats.rejected = 30;
+  c.h.checkDicaDesfazer();
+  assert.deepEqual(c.toasts, ['toast.undoHint'], 'a dica por comportamento sumiu pra quem já tinha passado da cota');
 });
 
 test('A3: a troca de conta passa pelo esquecer das escolhas (e a mesma conta voltando, não)', () => {

@@ -226,9 +226,10 @@ test('lote: quem agenda o lote pede o cancelamento ao sair', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function rejeitarLoteDoAutor');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('\nasync function', i));
-  // O executor leva a região do gesto (`{ regiao }`), então ele tem vírgula
-  // dentro: casa até o `{ aoSair` em vez de parar na primeira vírgula.
-  assert.match(bloco, /scheduleAction\('reject', places, \(\) => enviarLote\(places, \{ regiao \}\), \{ aoSair: 'cancel' \}\)/,
+  // O executor leva a região e o momento do gesto (`{ regiao, gesto }`, R6-7-4),
+  // então ele tem vírgula dentro: casa até o `{ aoSair` em vez de parar na
+  // primeira vírgula.
+  assert.match(bloco, /scheduleAction\('reject', places, \(\) => enviarLote\(places, \{ regiao, gesto \}\), \{ aoSair: 'cancel' \}\)/,
     'sem o aoSair o lote herda o despacho do card único');
 });
 
@@ -674,6 +675,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
+    carimboDoGesto: () => null,        // e o dia e o lugar (R6-7-4)
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -705,7 +707,7 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},
     pedidosEmAndamento: new Set(['a1|a1']), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
-    API: { getRegion: () => 'row' },
+    API: { getRegion: () => 'row' }, carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
   const fn = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + semComentarios.slice(i, fim) + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -795,7 +797,10 @@ test('lote: "já tratado" entra no Histórico como no card único, e o que saiu 
   const m = lote({ respostas: [{ success: true }, { success: false, errorCategory: 'already_processed' }] });
   await m.rodar();
   assert.deepEqual(m.historico, [['reject', 1], ['reject', 1]], 'o "já tratado" do lote não entrou no Histórico');
-  assert.equal(m.confirmadas.n, 1, 'o rejeitado do lote não contou pras conquistas');
+  // E o "já tratado" conta pras conquistas também, como no card único (que
+  // chama `registrarAcaoConfirmada` no ramo dele): o duplicado "já tratado"
+  // dava o "Detetive" pelo ✕ e não pelo lote (R6-7-9, auditoria de 2026-10-01).
+  assert.equal(m.confirmadas.n, 2, 'o rejeitado do lote, ou o "já tratado", não contou pras conquistas');
 });
 
 // ── L27: o resultado do lote NÃO abre por cima de outra camada ───────────────

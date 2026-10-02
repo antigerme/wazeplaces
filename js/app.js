@@ -1227,9 +1227,15 @@ function aplicarIdioma(valor) {
     // "Todos os estados", "Nenhuma", "Carregando…") levam `data-i18n` e já foram.
     atualizarDicaDeOrdem(estadoDaDicaDeOrdem);
     if (AppState.profile) renderProfileHeader(AppState.profile);
+    // Os exemplos do treino têm o texto no card (R6-7-10): retraduzidos ANTES de
+    // o card ser redesenhado.
+    Treino.retraduzirExemplos();
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
     updatePendingCount();
+    // A frase do indicador "esperando envio"/"Enviando N…" (o `title` e o que o
+    // leitor de tela anuncia) também é do JS: ficava no idioma de antes (R6-7-10).
+    updateInFlightIndicator();
     // O que o JS escreve com `t()` fora do `data-i18n`, e que o `applyI18n` não
     // alcança. MEDIDO trocando pra inglês com as Preferências abertas — a tela
     // onde a troca acontece: o aviso do Desfazer ficava em português, e o nome
@@ -9939,6 +9945,13 @@ function mostrarComoFuncionaSePrimeiraVez() {
     // sobre "Tudo limpo!" ou sobre o esqueleto de carregamento explicaria algo
     // que a pessoa não está vendo.
     if (!AppState.currentPlace || !cardDaFrente()) return;
+    // Nem por cima de uma camada que a PESSOA abriu enquanto a fila carregava
+    // (modal, foto ou mapa ampliados): o `openModal` a esconde e roda a limpeza
+    // dela — apagava o QR do "Conectar outro aparelho" no meio do pareamento e
+    // jogava fora a escolha ainda não aplicada dos Filtros (R6-7-2, auditoria de
+    // 2026-10-01). É interromper sem ser chamado, desfazendo o que ela fazia.
+    // Sem marcar como visto: ele espera o próximo card montado sem camada.
+    if (!semCamadaAberta()) return;
     AppState.preferences.comoFuncionaVisto = true;
     savePreferences();
     abrirComoFunciona();
@@ -12586,7 +12599,10 @@ function fotosDoCard(place) {
     const idxPorId = (id) => (id ? urls.findIndex((u) => u.indexOf(id) !== -1) : -1);
     const denunciadaIdx = idxPorId(place.flagEntityID);
     const eDenuncia = denunciadaIdx >= 0;
-    const emDecisao = eDenuncia ? denunciadaIdx : idxPorId(place.updateRequestID);
+    // `_urFoto`: o pedido de TREINO tem o `updateRequestID` trocado pelo inerte, e
+    // é por ele que a foto em decisão é achada — sem isto o card de foto nova do
+    // treino abria na foto ANTIGA, sem ✨ (ver `Treino.neutralizar`).
+    const emDecisao = eDenuncia ? denunciadaIdx : idxPorId(place._urFoto || place.updateRequestID);
     return { urls, eDenuncia, emDecisao, inicial: emDecisao >= 0 ? emDecisao : 0 };
 }
 
@@ -12702,6 +12718,17 @@ function puladosNestaFila() {
     return Math.max(0, (AppState.stats.skipped || 0) - puladosNoInicioDaFila);
 }
 
+// A fila desta tela terminou LIMPA pelo trabalho do editor: tratou algo nela e
+// não sobrou pulado. É a condição da FESTA do painel vazio — o confete e o
+// convite de instalar, que mora no "Tudo limpo!" e só ali (o único momento em
+// que a pessoa TERMINOU algo). O convite aparecia em todo painel vazio: no
+// "Confira o país e a região" de quem não tratou nada, disputando com a
+// instrução de conferir os filtros, e no "Fim da fila" com pulados (R6-7-11,
+// auditoria de 2026-10-01). Uma função pros dois, pra não voltarem a divergir.
+function filaTerminouLimpa() {
+    return tratouNestaFila && puladosNestaFila() === 0;
+}
+
 // A fila desta tela terminou LIMPA pelo trabalho do editor, e esse trabalho
 // está CONFIRMADO? É a condição da conquista "Tudo limpo", e ela é mais estreita
 // que a do confete por duas razões (auditoria de 2026-09-25):
@@ -12716,6 +12743,11 @@ function puladosNestaFila() {
 // `place` = o pedido cuja confirmação pergunta: ele está "em andamento" até o
 // fim do envio, e não conta contra si mesmo.
 function filaZeradaConfirmada({ confirmando = false, place = null } = {}) {
+    // A fila na tela é a do TREINO: "zerada" seria a de exemplos. A real, que a
+    // decisão confirmada com o treino aberto pode ter esvaziado, é julgada quando
+    // o treino sai — o `sair()` desenha o painel dela (`showNoPlaces`), que
+    // pergunta de novo (R6-7-3).
+    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return false;
     if (!tratouNestaFila || AppState.loadError || AppState.currentPlace) return false;
     if ((AppState.queue || []).length > 0) return false;
     if (AppState.pendingAction) return false;
@@ -12769,6 +12801,8 @@ function showNoPlaces() {
     } else {
         if (errEl) errEl.classList.add('hidden');
         noMore.classList.remove('hidden');
+        // O convite de instalar segue a MESMA condição do confete, logo abaixo
+        // (`filaTerminouLimpa`, R6-7-11).
         atualizarConviteInstalar();
         // Com o convite embaixo, o painel pode não caber (Fold, tela deitada,
         // fonte grande do sistema). Aí ele rola — e área que rola sem dizer que
@@ -12796,7 +12830,7 @@ function showNoPlaces() {
         noMore.classList.remove('celebrate');
         // Festa só com a fila LIMPA: com pulado a tela diz "Fim da fila" (eles
         // seguem pendentes), e confete ali contradizia o próprio título.
-        if (tratou && pulados === 0) {
+        if (filaTerminouLimpa()) {
             // Reflow forçado: sem isso o browser junta remove+add num só estilo
             // computado e a animação não reinicia na segunda vez que a fila zera.
             void noMore.offsetWidth;
@@ -13113,6 +13147,9 @@ function historyTodayKey() {
 // Omitidos (todo caminho online), valem hoje e o filtro atual, como sempre.
 function recordHistory(type, delta, dia, onde) {
     if (type !== 'read' && type !== 'reject') return;
+    // A linha de base das conquistas ANTES de a ação entrar no histórico (ver
+    // `garantirLinhaDeBaseDasConquistas`).
+    if ((delta || 0) > 0) garantirLinhaDeBaseDasConquistas();
     const h = loadHistory();
     const k = dia || historyTodayKey();
     if (!h[k]) h[k] = { read: 0, rejected: 0 };
@@ -13518,8 +13555,15 @@ function salvarConquistas() {
 // `gesto` é o MOMENTO da ação quando ela não pousa na hora — a fila de saída
 // guarda a hora, o dia e o idioma do gesto (`enfileirarSaida`). Sem ele, vale
 // agora, que é o caso de todo pouso com rede.
+//
+// SEM guarda do treino, e ela existia: uma decisão REAL que pousa com o treino
+// aberto (a da janela do Desfazer, que o `Treino.entrar` despacha sem esperar;
+// a fila de saída esvaziando; o "Rejeitar os N" no ar) é trabalho da pessoa, e o
+// Histórico a contava enquanto as conquistas a jogavam fora — o "Detetive" do
+// duplicado rejeitado sumia pra sempre, e a "Mão firme" não andava (R6-7-3,
+// auditoria de 2026-10-01). Ação DE treino nunca chega aqui: o guard está no
+// topo dos handlers (`handleReject` e os irmãos).
 function registrarAcaoConfirmada(actionType, place, gesto) {
-    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + 1;
     salvarConquistas();
@@ -13550,18 +13594,23 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
         // aparece com o gesto, que a fila fica limpa de verdade (C13).
         filaZerada: filaZeradaConfirmada({ confirmando: true, place }),
     });
+    // A cota do Desfazer, pela mesma régua: na confirmação (ver `updateStats`).
+    checkUndoGateUnlock();
 }
 
 // O lote de lidos confirma N de uma vez: UMA gravação e UMA avaliação, não N
 // (seriam N escritas síncronas no localStorage no meio da tela).
-function registrarLoteConfirmado(n) {
-    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
+// Sem guarda do treino, pela mesma razão da `registrarAcaoConfirmada`.
+// `gesto`: o momento do toque no "Marcar todos" (`carimboDoGesto`) — a hora e o
+// idioma em que a pessoa decidiu, como no ✕ e no ✓. Sem ele, vale agora.
+function registrarLoteConfirmado(n, gesto) {
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + n;
     salvarConquistas();
-    registrarIdiomaUsado(typeof getLang === 'function' ? getLang() : '');
-    const hora = new Date().getHours();
+    registrarIdiomaUsado(gesto ? gesto.lang : (typeof getLang === 'function' ? getLang() : ''));
+    const hora = new Date(gesto && Number.isFinite(gesto.t) ? gesto.t : Date.now()).getHours();
     checarConquistas({ madrugada: hora >= 0 && hora < 5 });
+    checkUndoGateUnlock();   // ver `updateStats`
 }
 
 // Desfazer zera a sequência de "Mão firme" e destrava "Segunda chance" — que é
@@ -13596,11 +13645,29 @@ function registrarIdiomaUsado(lang) {
 // O `place` NÃO carrega país/estado (o core não propaga), então a fonte é o
 // FILTRO — que é onde o editor escolheu trabalhar, e é a mesma fonte que já
 // nomeia a sala da presença.
+//
+// Com "Minha área" a busca vai pela CAIXA da área e sem o estado (ver
+// `fetchNextPage`): o estado guardado no filtro não é onde o trabalho foi feito,
+// e o "onde" é só o país (R6-7-4, auditoria de 2026-10-01).
 function ondeAgora() {
     const pais = (typeof API !== 'undefined' && API.getCountry) ? parseInt(API.getCountry(), 10) : NaN;
     if (!Number.isFinite(pais) || pais <= 0) return null;
+    if (AppState.filters && AppState.filters.myArea) return String(pais);
     const estado = parseInt(AppState.filters && AppState.filters.stateId, 10);
     return Number.isFinite(estado) && estado > 0 ? pais + ':' + estado : String(pais);
+}
+
+// O MOMENTO do gesto: a hora, o dia, o lugar e o idioma em que a pessoa decidiu.
+// É o que o Histórico e as conquistas registram, e eles chegavam ao pouso sendo
+// lidos de NOVO — na resposta (o `recordHistory` online) ou no envio (a anotação
+// na fila de saída, no fim da janela do Desfazer). "Aplicar" outro país dentro
+// da janela creditava o ✕ dado no Brasil à França e destravava "Viajante" sem
+// nenhum pedido francês tratado (R6-7-4). Carimbado junto da região do gesto
+// (`API.getRegion()` nos handlers), e com a MESMA forma que a fila de saída já
+// guardava (`t`, `dia`, `onde`, `lang`): o pouso de lá e o de cá contam igual.
+function carimboDoGesto() {
+    return { t: Date.now(), dia: historyTodayKey(), onde: ondeAgora(),
+             lang: typeof getLang === 'function' ? getLang() : '' };
 }
 // Estado é chaveado por `pais:estado`, nunca pelo id do estado sozinho: o
 // mesmo número existe em países diferentes e juntaria dois lugares num só.
@@ -13648,9 +13715,12 @@ function conquistasVisiveis() {
     return CONQUISTAS.filter((x) => !x.l6 || conquistasComPortaoAqui());
 }
 
+// Sem guarda do treino: quem chama aqui é trabalho REAL (a confirmação de uma
+// decisão, o "Primeiro resumo" baixado com o treino aberto) — ver a
+// `registrarAcaoConfirmada`. O que é do treino (a fila de exemplos) fica de fora
+// do "Tudo limpo" pela `filaZeradaConfirmada`.
 function checarConquistas(extra) {
     if (!AppState.authenticated) return;
-    if (typeof Treino !== 'undefined' && Treino && Treino.ativo) return;
     const g = carregarConquistas();
     const h = loadHistory();
     const s = getHistoryStats();
@@ -13731,6 +13801,22 @@ function checarConquistas(extra) {
     for (const id of novas) if (!g.novas.includes(id)) g.novas.push(id);
     salvarConquistas();
     if (subiu || novas.length) atualizarSeloDeConquista();
+}
+
+// A 1ª passada do aparelho é SILENCIOSA, e o silêncio é só pro RETROATIVO — o
+// volume que já estava no histórico antes de o aparelho avaliar conquistas. Feita
+// na confirmação da 1ª ação, ela calava a PRÓPRIA ação: o `recordHistory` já a
+// tinha somado, e um "Marcar todos" de 12 como 1ª ação do aparelho destravava a
+// "Primeira faxina" gravada, sem ponto nem etiqueta "nova" (R6-7-13, auditoria
+// de 2026-10-01). Daí a base ser feita AQUI, pelo `recordHistory`, antes de a
+// ação entrar: o histórico é a única fonte de volume que pode ser retroativa
+// (os contadores próprios — sequência, guardados, fotos, nomes, idiomas —
+// nascem zerados com as conquistas), e toda ação confirmada passa por ele
+// antes de chegar às conquistas.
+function garantirLinhaDeBaseDasConquistas() {
+    if (!AppState.authenticated) return;
+    const g = carregarConquistas();
+    if (g && !g.base) checarConquistas();
 }
 
 // Um PONTO, nunca um número (decisão do owner). Número convida a "zerar", e o
@@ -14302,8 +14388,10 @@ async function aplicarRecusaAutomatica() {
     // trouxe): trocar a região em Filtros com o laço no ar mandava o resto pro
     // servidor errado, que responde "não encontrado" — e isso conta como "já
     // tratado por outro editor", com o pedido pendente (auditoria da fila,
-    // 2026-09-26). É a mesma regra do gesto (ver `API.markAsRead`).
+    // 2026-09-26). É a mesma regra do gesto (ver `API.markAsRead`). E o dia e o
+    // lugar, pelo mesmo motivo, pro Histórico (`carimboDoGesto`, R6-7-4).
     const regiao = API.getRegion();
+    const gesto = carimboDoGesto();
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
     // o app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
     const fora = new Set(alvos);
@@ -14342,6 +14430,7 @@ async function aplicarRecusaAutomatica() {
             silencioso: true,
             contarAoLandar: true,
             regiao,
+            gesto,
             aoProgredir: (faltam) => {
                 if (faltam > 0) aviso.texto(andando(faltam));
             },
@@ -14578,7 +14667,8 @@ function rejeitarLoteDoAutor(place, contados) {
     else if (AppState.hasMore) { removeCurrentCardEl(); startFetching(); }
     else { removeCurrentCardEl(); showNoPlaces(); }
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
-    scheduleAction('reject', places, () => enviarLote(places, { regiao }), { aoSair: 'cancel' });
+    const gesto = carimboDoGesto();   // o dia e o lugar do GESTO (R6-7-4)
+    scheduleAction('reject', places, () => enviarLote(places, { regiao, gesto }), { aoSair: 'cancel' });
 }
 
 // Um a um, e o resultado NÃO é um número só: cada pedido tem destino próprio.
@@ -14647,7 +14737,7 @@ async function enviarLote(places, opts = {}) {
         const lista = carregarFilaDeSaida();
         esperavamAntes = lista.length;
         for (const p of places) {
-            const r = enfileirarSaida('reject', p, opts.regiao, reivindicacaoDestaAba(), true, lista);
+            const r = enfileirarSaida('reject', p, opts.regiao, { ...opts.gesto, ...reivindicacaoDestaAba() }, true, lista);
             if (r === true) anotados.add(p);
             else if (r === 'repetida') repetidos.add(p);
         }
@@ -14704,7 +14794,7 @@ async function enviarLote(places, opts = {}) {
                 conta.ok++;
                 if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 registrarPouso(p);
-                recordHistory('reject', 1);
+                recordHistory('reject', 1, opts.gesto && opts.gesto.dia, opts.gesto && opts.gesto.onde);
                 registrarRejeicaoDeAutor(p);
                 if (aoLandar) {
                     AppState.stats.rejected++;
@@ -14712,7 +14802,7 @@ async function enviarLote(places, opts = {}) {
                 } else {
                     // O lote da PESSOA conta pras conquistas como o ✕ do card; a
                     // recusa automática (`aoLandar`) é o app agindo, e não conta.
-                    registrarAcaoConfirmada('reject', p);
+                    registrarAcaoConfirmada('reject', p, opts.gesto);
                 }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
                 conta.ja++;
@@ -14721,8 +14811,14 @@ async function enviarLote(places, opts = {}) {
                 if (aoLandar) { if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1); }
                 // No placar otimista ele JÁ contou; o Histórico conta igual, como
                 // no card único (`handleActionResult`) — senão o placar e o
-                // Histórico divergiam por lote (auditoria de 2026-09-25).
-                else recordHistory('reject', 1);
+                // Histórico divergiam por lote (auditoria de 2026-09-25). E as
+                // conquistas também, como lá: o "já tratado" do duplicado dava o
+                // "Detetive" pelo ✕ e não pelo lote, e a "Mão firme" andava um a
+                // menos (R6-7-9, auditoria de 2026-10-01).
+                else {
+                    recordHistory('reject', 1, opts.gesto && opts.gesto.dia, opts.gesto && opts.gesto.onde);
+                    registrarAcaoConfirmada('reject', p, opts.gesto);
+                }
             } else if (r && r.errorCategory === 'unauthorized') {
                 // O resto do lote não pode evaporar (ver o 401 no
                 // `handleActionResult`): no placar otimista ele vai pra fila de
@@ -14733,14 +14829,14 @@ async function enviarLote(places, opts = {}) {
                 for (const q of places.slice(places.indexOf(p))) {
                     if (repetidos.has(q)) continue;
                     marcarEmAndamento(q, false);
-                    if (!aoLandar && (anotados.has(q) || enfileirarSaida('reject', q, opts.regiao))) continue;
+                    if (!aoLandar && (anotados.has(q) || enfileirarSaida('reject', q, opts.regiao, opts.gesto))) continue;
                     if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                     voltarPraFila(q);
                 }
                 ficouNaSaida();
                 handleUnauthorized();
                 return;
-            } else if (r && r.errorCategory === 'transient' && !aoLandar && (anotados.has(p) || enfileirarSaida('reject', p, opts.regiao))) {
+            } else if (r && r.errorCategory === 'transient' && !aoLandar && (anotados.has(p) || enfileirarSaida('reject', p, opts.regiao, opts.gesto))) {
                 // Rede, não recusa: o lote também entra na fila de saída, senão
                 // a promessa ("nada do que você fez se perde") valeria só pro
                 // swipe e não pro botão de rejeitar em lote. O placar otimista
@@ -15860,10 +15956,13 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
              // DIAGNÓSTICO (que despeja o localStorage inteiro), e é a HORA do
              // gesto pra "Coruja" no pouso (`registrarPousoDeSaida`).
              t: Date.now(),
-             // Carimbados AQUI, no gesto: é o dia e a região em que o trabalho
-             // foi feito. Lidos no pouso, seriam os do momento em que a rede
-             // voltou — que pode ser outro dia e outro filtro. O dia também é o
-             // balde do "Centurião", e o idioma o da "Poliglota".
+             // O dia e a região em que o trabalho foi feito. Lidos no pouso,
+             // seriam os do momento em que a rede voltou — que pode ser outro dia
+             // e outro filtro. O dia também é o balde do "Centurião", e o idioma
+             // o da "Poliglota". Quem enfileira DEPOIS do gesto (a anotação no
+             // fim da janela do Desfazer, a resposta que voltou por rede) passa o
+             // carimbo do gesto (`carimboDoGesto`) no `extra`, que vale por cima
+             // destes — senão um "Aplicar" dentro da janela trocava o país (R6-7-4).
              dia: historyTodayKey(), onde: ondeAgora(),
              lang: typeof getLang === 'function' ? getLang() : '',
              // E a CONTA do gesto (ver `contaAgora`): a fila não pode sair no
@@ -16216,9 +16315,11 @@ const anotadoAntesDoEnvio = new WeakSet();
 // UMA vez. Enquanto voa ele está em andamento (`pedidosEmAndamento`), e o
 // esvaziamento não o manda de novo. Fila cheia: segue sem anotar (o caminho de
 // antes, que avisa na falha). A descarga já anotou: nada a fazer.
-function anotarAntesDoEnvio(tipo, place, regiao) {
+// `gesto`: o dia e o lugar do GESTO (`carimboDoGesto`) — a anotação sai no fim
+// da janela do Desfazer, e lidos aqui eles seriam os de depois dela (R6-7-4).
+function anotarAntesDoEnvio(tipo, place, regiao, gesto) {
     if (descargaNaFila.has(place)) return true;
-    const r = enfileirarSaida(tipo, place, regiao, reivindicacaoDestaAba(), true);
+    const r = enfileirarSaida(tipo, place, regiao, { ...gesto, ...reivindicacaoDestaAba() }, true);
     if (r === true) anotadoAntesDoEnvio.add(place);
     return r;
 }
@@ -17656,7 +17757,12 @@ function devolverPedidoRecusado(place, epocaFila) {
     else if (AppState.hasMore) startFetching();
 }
 
-function handleActionResult(actionType, place, result, regiao, epocaFila) {
+// `gesto`: o MOMENTO da decisão (`carimboDoGesto`) — o dia e o lugar em que ela
+// entra no Histórico, e a hora, o dia e o idioma com que conta nas conquistas,
+// os mesmos do pouso da fila de saída. Lidos AQUI eles seriam os da resposta:
+// "Aplicar" outro país dentro da janela do Desfazer creditava a decisão ao país
+// novo (R6-7-4). Sem ele (quem chama sem carimbo), vale agora.
+function handleActionResult(actionType, place, result, regiao, epocaFila, gesto) {
     dlog('acao.fim', { tipo: actionType, ok: !!(result && result.success),
                        cat: (result && result.errorCategory) || null,
                        key: (result && result.errorKey) || null });
@@ -17671,13 +17777,13 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     if (result.success) {
         if (jaNaSaida && tirarDaFilaDeSaida(actionType, place) === false) return pousouPorOutraAba(place, actionType);
         registrarPouso(place);
-        recordHistory(actionType, 1);
+        recordHistory(actionType, 1, gesto && gesto.dia, gesto && gesto.onde);
         // Só REJEIÇÃO conta reincidência. Marcar como lido não é juízo
         // sobre o pedido — é "eu vi" —, e contá-lo transformaria quem
         // manda muita coisa BOA em reincidente.
         if (actionType === 'reject') registrarRejeicaoDeAutor(place);
         avisarConsequencia(actionType);
-        registrarAcaoConfirmada(actionType, place);
+        registrarAcaoConfirmada(actionType, place, gesto);
         return;
     }
 
@@ -17686,10 +17792,10 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
     if (cat === 'already_processed' || cat === 'not_found') {
         if (jaNaSaida && tirarDaFilaDeSaida(actionType, place) === false) return pousouPorOutraAba(place, actionType);
         registrarPouso(place);
-        recordHistory(actionType, 1);
+        recordHistory(actionType, 1, gesto && gesto.dia, gesto && gesto.onde);
         // Conta como tratada pelos mesmos motivos que ela conta no placar: o
         // objetivo de quem agiu foi cumprido, tenha sido por você ou não.
-        registrarAcaoConfirmada(actionType, place);
+        registrarAcaoConfirmada(actionType, place, gesto);
         showToast(t('toast.alreadyProcessed'), 'info');
         return;
     }
@@ -17714,7 +17820,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
         // `u401`: QUANDO este pedido levou o 401. Se a sonda confirmar a sessão
         // viva e ele levar outro, é a escrita dele que o Waze recusa, não a
         // sessão (ver `sessaoVivaDepoisDe` no esvaziamento).
-        const naFila = enfileirarSaida(actionType, place, regiao, { u401: Date.now() });
+        const naFila = enfileirarSaida(actionType, place, regiao, { ...gesto, u401: Date.now() });
         if (naFila === 'repetida' || !naFila) {
             const k = actionType === 'read' ? 'read' : 'rejected';
             AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
@@ -17742,7 +17848,7 @@ function handleActionResult(actionType, place, result, regiao, epocaFila) {
         return;
     }
     if (cat === 'transient') {
-        const naFila = enfileirarSaida(actionType, place, regiao);
+        const naFila = enfileirarSaida(actionType, place, regiao, gesto);
         // A decisão deste pedido JÁ estava esperando: a primeira vale, e este
         // gesto não pode contar de novo no placar. O `serverTotal` fica: o card
         // repetido também tinha sido contado nele, então o desconto do gesto
@@ -17825,6 +17931,13 @@ const Treino = {
         const c = JSON.parse(JSON.stringify(p));
         c.updateRequestID = this.UR_INERTE;
         c._treino = true;
+        // O id de verdade, SÓ pra achar a foto em decisão (`fotosDoCard`): o
+        // treino escolhe os cards por variedade justamente pra ensinar o card de
+        // foto, e sem ele ensinava na foto errada — a antiga, sem ✨ nem a borda
+        // âmbar (R6-7-6, auditoria de 2026-10-01; em 13 de 76 pedidos de foto da
+        // fila do owner a proposta não é a 1ª). Escrita nenhuma o lê: as de foto
+        // têm o guard do treino, e as do card a trava no topo dos handlers.
+        c._urFoto = p.updateRequestID;
         return c;
     },
 
@@ -17884,27 +17997,42 @@ const Treino = {
     sinteticos() {
         const base = {
             updateRequestID: 'treino', reqSubType: '', isDelete: false,
-            createdBy: t('treino.autor'), creatorRank: 0, source: null,
+            creatorRank: 0, source: null,
             flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '',
             brand: null, brandKnown: null, camposSemMudanca: 0, imageUrls: [],
             mapa: null, isStarred: false, lat: null, lon: null,
             dateAdded: Date.now() - 3600000,
         };
         return [
-            { ...base, venueID: 'treino1', name: t('treino.c1.nome'),
-              categories: ['RESTAURANT'], address: t('treino.c1.endereco'),
+            { ...base, venueID: 'treino1', _exemplo: 'c1',
+              categories: ['RESTAURANT'],
               updateType: 'Novo Local', updateTypeKey: 'VENUE', purType: 'NEW_PLACE',
               reqType: 'VENUE', changes: [] },
-            { ...base, venueID: 'treino2', name: t('treino.c2.nome'),
-              categories: ['PHARMACY'], address: t('treino.c2.endereco'),
+            { ...base, venueID: 'treino2', _exemplo: 'c2',
+              categories: ['PHARMACY'],
               updateType: 'Atualização', updateTypeKey: 'UPDATE_DETAILS', purType: 'DETAILS_UPDATE',
               reqType: 'REQUEST',
               changes: [{ field: 'phone', label: 'phone', from: '(11) 3333-0000', to: '(11) 4444-1111' }] },
-            { ...base, venueID: 'treino3', name: t('treino.c3.nome'),
-              categories: ['GAS_STATION'], address: t('treino.c3.endereco'),
+            { ...base, venueID: 'treino3', _exemplo: 'c3',
+              categories: ['GAS_STATION'],
               updateType: 'Novo Local', updateTypeKey: 'VENUE', purType: 'NEW_PLACE',
               reqType: 'VENUE', changes: [] },
-        ];
+        ].map((p) => this.traduzirExemplo(p));
+    },
+
+    // O texto dos exemplos sai do dicionário pela CHAVE (`_exemplo`), não fica
+    // escrito no card: trocar o idioma com o treino aberto deixava os exemplos no
+    // idioma de antes, com a faixa e os botões já no novo (R6-7-10, auditoria de
+    // 2026-10-01). O `aplicarIdioma` os retraduz (`retraduzirExemplos`).
+    traduzirExemplo(p) {
+        p.name = t('treino.' + p._exemplo + '.nome');
+        p.address = t('treino.' + p._exemplo + '.endereco');
+        p.createdBy = t('treino.autor');
+        return p;
+    },
+    retraduzirExemplos() {
+        if (!this.ativo) return;
+        for (const p of AppState.queue || []) if (p && p._exemplo) this.traduzirExemplo(p);
     },
 
     entrar() {
@@ -17943,7 +18071,14 @@ const Treino = {
         // `startFetching` do `sair()` girar em microtarefa pra sempre — a aba
         // congelava (gotcha #19).
         AppState.fetchEpoch++;
-        this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace };
+        // O FOCO num autor ("Primeiro os de…") é ordem da fila REAL: fica guardado
+        // com ela e sai da tela, senão a barra dizia "2 de 4" sobre a ordem de
+        // variedade do treino e se apagava no 1º card de outro autor — e a fila
+        // real voltava com a série na frente e sem a barra, sem como voltar à
+        // ordem normal. O foco escolhido NO treino também não atravessa: o
+        // `encerrar` devolve o de antes (R6-7-7, auditoria de 2026-10-01).
+        this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace, autorEmFoco: AppState.autorEmFoco };
+        AppState.autorEmFoco = null;
         this.ativo = true;
         this.passo = 0;
         // Quem entra no treino já foi aprender: o "Como funciona" por cima dos
@@ -17997,7 +18132,13 @@ const Treino = {
     encerrar() {
         if (!this.ativo) return;
         this.ativo = false;
+        // O foco da fila real volta (ver `entrar`), e a barra que estiver na tela
+        // é a do TREINO: sai. Quem a desenha de novo é o card seguinte
+        // (`renderFocoAutor`, no `sair()` com a fila real, ou na fila nova do
+        // `resetQueue`), pela regra de sempre.
+        AppState.autorEmFoco = this._salvo ? (this._salvo.autorEmFoco ?? null) : null;
         this._salvo = null;
+        document.getElementById('focoAutorBar')?.classList.add('hidden');
         document.getElementById('treinoBanner')?.classList.replace('flex', 'hidden');
     },
 
@@ -18474,11 +18615,12 @@ function handleMarkAsRead() {
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
+    const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
     scheduleAction('read', place, async () => {
         // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
         // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
         // não sai nem conta (a mesma regra da descarga).
-        if (anotarAntesDoEnvio('read', place, regiao) === 'repetida') {
+        if (anotarAntesDoEnvio('read', place, regiao, gesto) === 'repetida') {
             placar.read = Math.max(0, (placar.read || 0) - 1);
             updateStats();
             saveStats();
@@ -18494,8 +18636,8 @@ function handleMarkAsRead() {
             return;
         }
         presencaWmeAoResponder(presenca, result);
-        handleActionResult('read', place, result, regiao, epocaFila);
-    });
+        handleActionResult('read', place, result, regiao, epocaFila, gesto);
+    }, { gesto });
 }
 
 function handleReject() {
@@ -18516,11 +18658,12 @@ function handleReject() {
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
+    const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
     scheduleAction('reject', place, async () => {
         // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
         // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
         // não sai nem conta (a mesma regra da descarga).
-        if (anotarAntesDoEnvio('reject', place, regiao) === 'repetida') {
+        if (anotarAntesDoEnvio('reject', place, regiao, gesto) === 'repetida') {
             placar.rejected = Math.max(0, (placar.rejected || 0) - 1);
             updateStats();
             saveStats();
@@ -18536,8 +18679,8 @@ function handleReject() {
             return;
         }
         presencaWmeAoResponder(presenca, result);
-        handleActionResult('reject', place, result, regiao, epocaFila);
-    });
+        handleActionResult('reject', place, result, regiao, epocaFila, gesto);
+    }, { gesto });
 }
 
 function handleSkip() {
@@ -18654,6 +18797,9 @@ async function handleBatchMarkRead() {
     const epoca = epocaDaSessao;
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver o fim (V9)
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
+    // O dia e o lugar do GESTO (`carimboDoGesto`): o lote anda em pedaços, e os
+    // Filtros seguem alcançáveis com ele no ar (R6-7-4).
+    const gesto = carimboDoGesto();
     const itens = (ps) => ps.map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
     // No ar: trava as outras decisões e tira os pedidos das buscas que chegarem
     // no meio (`semOsJaDecididos`) — o ↻ trazia de volta, como card, o que o
@@ -18743,8 +18889,8 @@ async function handleBatchMarkRead() {
         // pedaço, lá no laço.)
         tratouNestaFila = true;
         AppState.stats.read += feitos.length;
-        recordHistory('read', feitos.length);
-        registrarLoteConfirmado(feitos.length);
+        recordHistory('read', feitos.length, gesto.dia, gesto.onde);
+        registrarLoteConfirmado(feitos.length, gesto);
         // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
         // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
         // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote
@@ -18846,6 +18992,10 @@ function scheduleAction(type, place, executor, opts = {}) {
     const n = places.length;
     const aoSair = opts.aoSair === 'cancel' ? 'cancel' : 'execute';
     const regiaoDoGesto = API.getRegion();   // ver `API.markAsRead`
+    // O dia e o lugar do gesto (`carimboDoGesto`), que o handler carimbou: a
+    // descarga põe a decisão na fila de saída no FIM da janela, e lidos ali eles
+    // seriam os de depois de um "Aplicar" dentro dela (R6-7-4).
+    const gestoDoAgendamento = opts.gesto || null;
     // Reverte o placar otimista. `salvar` existe porque o `cancel` do logout
     // não precisa gravar (tudo é apagado depois) mas o do `pagehide` precisa:
     // o número inflado JÁ foi pro armazenamento quando a ação foi agendada.
@@ -18975,7 +19125,7 @@ function scheduleAction(type, place, executor, opts = {}) {
         descarregar: () => {
             if (executed) return;
             if (n === 1 && (type === 'read' || type === 'reject')) {
-                const r = enfileirarSaida(type, places[0], regiaoDoGesto, reivindicacaoDestaAba());
+                const r = enfileirarSaida(type, places[0], regiaoDoGesto, { ...gestoDoAgendamento, ...reivindicacaoDestaAba() });
                 if (r === 'repetida') {
                     // A decisão deste pedido JÁ esperava na fila: vale a primeira
                     // (ver `enfileirarSemRede`), e este gesto não sai nem conta.
@@ -19002,7 +19152,7 @@ function scheduleAction(type, place, executor, opts = {}) {
         // Pular não escreve nada no Waze.
         enfileirarSemRede: () => {
             if (executed || n !== 1 || (type !== 'read' && type !== 'reject')) return false;
-            const r = enfileirarSaida(type, places[0], regiaoDoGesto);
+            const r = enfileirarSaida(type, places[0], regiaoDoGesto, gestoDoAgendamento);
             if (!r) return false;          // fila cheia: segue o caminho de sempre
             executed = true;
             clearTimeout(timerId);
@@ -19282,18 +19432,22 @@ function prefersReducedMotion() {
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
 }
 
+// O aviso de que o Desfazer ficou opcional (`checkUndoGateUnlock`) NÃO sai
+// mais daqui. Saía, e o placar é OTIMISTA: o gesto que cruzava a cota
+// comemorava dentro da janela do Desfazer, que ainda podia devolver o pedido —
+// desfeito, o aviso seguia na tela levando a um interruptor travado ("falta 1"),
+// e a marca de "visto" já estava gravada: o desbloqueio de verdade, um pedido
+// depois, nunca era anunciado (R6-7-5, auditoria de 2026-10-01). Ele é avaliado
+// na CONFIRMAÇÃO, como as conquistas (`registrarAcaoConfirmada`,
+// `registrarLoteConfirmado`).
 function updateStats(semAnimar = false) {
-    // Todo caminho que mexe em Lidos/Rejeitados passa por aqui (swipe, botão,
-    // lote, undo revertendo) — é o único ponto que pega todos sem espalhar
-    // chamadas por seis handlers.
-    checkUndoGateUnlock();
     desenharPlacar(semAnimar);
 }
 
-// Só DESENHA o placar e o "Restam". O aviso de que o Desfazer ficou opcional
-// (`checkUndoGateUnlock`, logo acima) é de quem FEZ o gesto: o placar que
-// chega de OUTRA aba só se desenha (`relerPlacarDeOutraAba`) — a aba do gesto
-// já comemorou, e a marca de "visto" chega pelas preferências.
+// Só DESENHA o placar e o "Restam". O placar que chega de OUTRA aba também só
+// se desenha (`relerPlacarDeOutraAba`): o aviso de que o Desfazer ficou
+// opcional é da aba em que a decisão se CONFIRMOU, e a marca de "visto" chega
+// pelas preferências.
 function desenharPlacar(semAnimar = false) {
     // No treino a TELA mostra o placar dele; o real segue intocado por baixo.
     const st = Treino.ativo ? Treino.stats : AppState.stats;
@@ -19407,6 +19561,10 @@ function updatePendingCount(semAnimar = false) {
     }
     if (Treino.ativo) {
         setCount(el, Treino.restam, '', semAnimar);
+        // O "de N na região" é da fila REAL: embaixo do "Restam" do treino ele
+        // dizia "30 de 135 na região" sobre 30 exemplos (R6-7-8). Esconde aqui e
+        // volta no `sair()`, que redesenha o contador.
+        updatePendingTotalHint();
         return;
     }
     if (AppState.fetching && AppState.serverTotal === 0) {
@@ -19433,7 +19591,7 @@ function updatePendingTotalHint() {
     const hint = document.getElementById('pendingTotalHint');
     if (!hint) return;
     const blocked = AppState.serverBlocked || 0;
-    if (!AppState.authenticated || blocked <= 0) {
+    if (!AppState.authenticated || blocked <= 0 || Treino.ativo) {
         hint.classList.add('hidden');
         hint.textContent = '';
         hint.removeAttribute('title');
@@ -19967,7 +20125,11 @@ function convitePodeAparecer() {
 function atualizarConviteInstalar() {
     const box = document.getElementById('installInvite');
     if (!box) return;
-    const mostra = convitePodeAparecer();
+    // Só no painel de quem terminou a fila (ver `filaTerminouLimpa`). O convite
+    // mora DENTRO do painel vazio, então fora dele não aparece de qualquer jeito;
+    // é aqui, e não só no `showNoPlaces`, porque o prompt do navegador chega a
+    // qualquer hora (`beforeinstallprompt`) e redesenha o convite por conta própria.
+    const mostra = convitePodeAparecer() && filaTerminouLimpa();
     box.classList.toggle('hidden', !mostra);
     if (!mostra) return;
     // Com prompt: botão. Sem prompt e iOS: passo a passo. Nunca os dois.
@@ -19991,21 +20153,36 @@ function setupInstalarApp() {
         promptInstalacao = null;
         atualizarBotaoInstalar();
     });
-    const instalar = async () => {
+    // Os três botões SOMEM depois do toque (o convite dispensado, o prompt que é
+    // de uso único), e com eles o foco de quem usa o TECLADO, que caía no <body>
+    // — com a Ajuda (`aria-modal`) ainda aberta, no caso do botão dela (R6-7-12,
+    // auditoria de 2026-10-01). Ele vai a um vizinho que FICA: no painel vazio, o
+    // "Verificar novamente"; na Ajuda, o ✕ dela. Só pelo teclado, como no resto
+    // do app (`veioDoTeclado`): quem usa o dedo não tem o foco movido. E o foco
+    // num botão que acabou de sumir ainda É ele até o navegador o soltar (no
+    // quadro seguinte): por isso a pergunta é "está nele ou perdido".
+    const devolverSeSumiu = (botao, vizinho) => {
+        if (document.activeElement === botao || focoPerdido()) devolverFoco(document.getElementById(vizinho));
+    };
+    const instalar = async (ev, vizinho) => {
         if (!promptInstalacao) return;
+        const botao = veioDoTeclado(ev) ? ev.currentTarget : null;
         promptInstalacao.prompt();
         // O evento é de uso único: depois de escolher, some de qualquer jeito.
         try { await promptInstalacao.userChoice; } catch (err) {}
         promptInstalacao = null;
         atualizarBotaoInstalar();
+        if (botao) devolverSeSumiu(botao, vizinho);
     };
-    document.getElementById('installAppBtn')?.addEventListener('click', instalar);
-    document.getElementById('installInviteBtn')?.addEventListener('click', instalar);
-    document.getElementById('installDismissBtn')?.addEventListener('click', () => {
+    document.getElementById('installAppBtn')?.addEventListener('click', (ev) => instalar(ev, 'closeHelp'));
+    document.getElementById('installInviteBtn')?.addEventListener('click', (ev) => instalar(ev, 'reloadBtn'));
+    document.getElementById('installDismissBtn')?.addEventListener('click', (ev) => {
+        const botao = veioDoTeclado(ev) ? ev.currentTarget : null;
         // "Agora não" é pra valer: sem persistir, a fila zerar de novo traria o
         // convite de volta, e convite que não aceita não é convite.
         safeLS.set(CHAVE_INSTALL_DISPENSADO, '1');
         atualizarConviteInstalar();
+        if (botao) devolverSeSumiu(botao, 'reloadBtn');
     });
     atualizarBotaoInstalar();
 }
@@ -20172,6 +20349,16 @@ function initUndoGateSeen() {
     savePreferences();
 }
 
+// Quantos pedidos o placar já contou e a janela do Desfazer ainda pode devolver.
+function pedidosNaJanelaDoDesfazer() {
+    const p = AppState.pendingAction;
+    if (!p || (p.type !== 'read' && p.type !== 'reject')) return 0;
+    return Array.isArray(p.place) ? p.place.length : 1;
+}
+
+// Chamado na CONFIRMAÇÃO de uma decisão (ver `updateStats`). Conta o placar sem
+// o que ainda está na janela do Desfazer: a confirmação do pedido anterior
+// chega com o próximo já na janela, e é ele que pode ser desfeito.
 function checkUndoGateUnlock() {
     // `undefined` = a LINHA DE BASE ainda não foi estabelecida: `initUndoGateSeen`
     // não pôde decidir se este acumulado é trabalho de ANTES. Celebrar aqui
@@ -20179,7 +20366,7 @@ function checkUndoGateUnlock() {
     // Só `false` — decisão tomada, ainda não atingiu — libera a comemoração.
     if (typeof AppState.preferences.undoGateSeen !== 'boolean') return;
     if (AppState.preferences.undoGateSeen) return;
-    if (!undoGateAtingido()) return;
+    if (getUndoTreatedCount() - pedidosNaJanelaDoDesfazer() < getUndoUnlockThreshold()) return;
     AppState.preferences.undoGateSeen = true;
     // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
     // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
@@ -20355,6 +20542,10 @@ function zerarJanelasSemUndo() {
 function checkDicaDesfazer() {
     if (AppState.preferences.dicaDesfazerVista) return;
     if (AppState.preferences.undoEnabled === false) return;   // já desligado: nada a oferecer
+    // A cota acabou de ser cruzada e a comemoração dela vem na CONFIRMAÇÃO,
+    // logo depois do fim desta janela (ver `updateStats`): ela já diz isto, e os
+    // dois banners sairiam quase juntos dizendo a mesma coisa.
+    if (AppState.preferences.undoGateSeen === false && undoGateAtingido()) return;
     if ((AppState.preferences.semUndoSeguidas || 0) < DICA_SEM_UNDO) return;
     // Nunca ofereça o que não dá pra fazer AQUI: sem passar a cota o toggle está
     // desabilitado, e a dica viraria beco sem saída. O contador continua correndo

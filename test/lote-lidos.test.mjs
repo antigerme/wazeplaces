@@ -28,7 +28,11 @@ const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
 // `seguraDepois`: com `segurar`, as N primeiras requisições respondem na hora e
 // só as seguintes esperam — o lote NO MEIO (um pedaço já pousou, o outro no ar).
 // `pendentes`: as ações de foto na janela do Desfazer ({ aprovacao, exclusao, renomeacao }).
-function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pendentes = {}, falhar = false } = {}) {
+// `carimboReal`: o `carimboDoGesto` e o `ondeAgora` DE VERDADE, com o país e o
+// dia do filtro mudáveis por `lugar` (R6-7-4); sem ele, um carimbo neutro.
+function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pendentes = {}, falhar = false, carimboReal = false } = {}) {
+  const lugar = { pais: 30, dia: '2026-09-25' };
+  const historicoCompleto = [];
   const lidos = new Set();
   const chamadas = [];
   const toasts = [];
@@ -38,7 +42,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
   const pousos = [];
   const mensagem = { textContent: '' };
   const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
-    pendingAction: null, inFlightActions: 0, fetchEpoch: 0 };
+    pendingAction: null, inFlightActions: 0, fetchEpoch: 0, filters: { stateId: '', myArea: false } };
   const processar = (itens) => {
     if (falhar) return { success: false, errorCategory: 'unknown', httpCode: 406 };
     for (const it of itens) {
@@ -64,11 +68,13 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     t: (k, v) => (v && v.n != null ? k + '#' + v.n : k),
     removeUndoBanner: () => {}, updateInFlightIndicator: () => {}, callWithRetry: (fn) => fn(),
     API: {
-      getRegion: () => 'row',
+      getRegion: () => 'row', getCountry: () => lugar.pais,
       markAsReadBatch: async (itens) => { chamadas.push(itens.length); log.push('lote'); await portao(); return processar(itens); },
       markAsRead: async (v, u) => { chamadas.push(1); await portao(); return processar([{ venueID: v, updateRequestID: u }]); },
     },
-    handleUnauthorized: () => {}, recordHistory: (tipo, n) => historico.push([tipo, n]),
+    handleUnauthorized: () => {},
+    recordHistory: (tipo, n, dia, onde) => { historico.push([tipo, n]); historicoCompleto.push({ dia, onde }); },
+    historyTodayKey: () => lugar.dia, getLang: () => 'pt',
     registrarPouso: (ps) => pousos.push(...(Array.isArray(ps) ? ps : [ps]).map((p) => p.updateRequestID)),
     registrarLoteConfirmado: () => {}, updateStats: () => {}, saveStats: () => {}, removeCurrentCardEl: () => {},
     // A TELA depois do lote vai num registro à parte: o `log` é o da ordem das
@@ -82,13 +88,16 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
     aprovacaoPendente: pendente('aprovacao'), exclusaoPendente: pendente('exclusao'), renomeacaoPendente: pendente('renomeacao'),
   };
+  // O momento do gesto (R6-7-4): o de verdade, ou um neutro.
+  if (!carimboReal) deps.carimboDoGesto = () => ({ dia: null, onde: null });
   const chaves = Object.keys(deps);
   const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'marcarEmAndamento',
-    'devolverPedidoRecusado']
+    'devolverPedidoRecusado', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
     .map(fatiar).join('\n');
   app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
     + '\nreturn { openBatchReadConfirm, handleBatchMarkRead, acoesTravadas };')(...chaves.map((k) => deps[k]));
-  return { app, AppState, lidos, chamadas, toasts, historico, log, tela, emAndamento, pousos, entraram, mensagem, soltar: () => soltar() };
+  return { app, AppState, lidos, chamadas, toasts, historico, log, tela, emAndamento, pousos, entraram, mensagem, soltar: () => soltar(),
+    lugar, historicoCompleto };
 }
 const umTique = () => new Promise((ok) => setTimeout(ok, 0));
 
@@ -287,4 +296,22 @@ test('V9: CONTROLE — o lote recusado SEM ↻: os pedidos seguem na mesma fila,
   assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3']);
   assert.equal(m.AppState.hasMore, false);
   assert.ok(!m.tela.includes('busca'));
+});
+
+// ── R6-7-4: o "Marcar todos" entra no Histórico no país e no dia do GESTO ──────
+// O lote anda em pedaços pela rede, e os Filtros seguem alcançáveis com ele no
+// ar: lidos no fim, o país e o dia eram os de DEPOIS de um "Aplicar" — o
+// Histórico creditava os lidos ao país novo (auditoria de 2026-10-01). Com o
+// `carimboDoGesto` e o `ondeAgora` de verdade, e o país trocando no meio.
+test('R6-7-4: trocar o país (e virar o dia) com o "Marcar todos" no ar não muda onde ele entra no Histórico', async () => {
+  const m = montar([pedido(1), pedido(2), pedido(3)], { segurar: true, carimboReal: true });
+  m.app.openBatchReadConfirm();
+  const lote = m.app.handleBatchMarkRead();
+  await umTique();
+  m.lugar.pais = 73; m.lugar.dia = '2026-09-26';          // "Aplicar" a França com o lote no ar
+  m.soltar();
+  await lote;
+  assert.deepEqual(m.historico, [['read', 3]], 'PRÉ-CONDIÇÃO: o lote pousou');
+  assert.deepEqual(m.historicoCompleto, [{ dia: '2026-09-25', onde: '30' }],
+    `o "Marcar todos" entrou no Histórico no país (ou no dia) de DEPOIS do "Aplicar": ${JSON.stringify(m.historicoCompleto)}`);
 });
