@@ -689,3 +689,36 @@ test('trocar de idioma redesenha o que o JS escreve fora do data-i18n (Preferên
   // E só com sessão: deslogado (o seletor da Ajuda) não há Preferências nem pílula.
   assert.match(corpo, /if \(AppState\.authenticated\) \{\s*renderUndoGateUI\(\);/);
 });
+
+// R66-5 (auditoria da rodada 6): em pt, a MESMA falta de conexão tinha dois
+// nomes nas linhas do "Disponível offline" — até na mesma linha ("Sem rede
+// agora. Vai preparar sozinho assim que o sinal voltar."), e "quando houver
+// rede" ao lado de "com sinal". O mesmo conceito tem UM nome; no pt, o "sinal",
+// como o en ("signal") e o es ("señal").
+test('i18n: as linhas do "Disponível offline" chamam a falta de conexão por UM nome só, em cada língua', () => {
+  const TERMOS = {
+    pt: { rede: /\brede\b/i, sinal: /\bsinal\b/i, 'conexão': /\bconex[aã]o\b/i, internet: /\binternet\b/i },
+    en: { network: /\bnetwork\b/i, signal: /\bsignal\b/i, connection: /\bconnection\b/i, internet: /\binternet\b/i },
+    es: { red: /\bred\b/i, 'señal': /\bseñal\b/i, 'conexión': /\bconexi[oó]n\b/i, internet: /\binternet\b/i },
+    fr: { 'réseau': /\bréseau\b/i, signal: /\bsignal\b/i, connexion: /\bconnexion\b/i, internet: /\binternet\b/i },
+  };
+  const termoDe = {};
+  for (const lang of LANGS) {
+    const termos = TERMOS[lang];
+    assert.ok(termos, `${lang}: língua sem o vocabulário deste teste — inclua-a`);
+    // O NOME do recurso (`label`, "Disponible sin conexión" no es) é a tradução
+    // de "offline", não uma das linhas que descrevem a falta de sinal.
+    const linhas = Object.entries(DICT[lang]).filter(([k]) => k.startsWith('prefs.offline.') && k !== 'prefs.offline.label');
+    assert.ok(linhas.length >= 15, `CONTROLE (${lang}): só ${linhas.length} linhas do offline — o recorte quebrou`);
+    const usados = {};
+    for (const [k, v] of linhas) {
+      for (const [nome, re] of Object.entries(termos)) if (re.test(v)) (usados[nome] = usados[nome] || []).push(k);
+    }
+    // CONTROLE: o vocabulário acha o conceito (senão "um termo só" passaria com zero).
+    assert.ok(Object.keys(usados).length >= 1, `CONTROLE (${lang}): nenhuma linha do offline fala da falta de conexão`);
+    assert.equal(Object.keys(usados).length, 1,
+      `${lang}: a falta de conexão tem ${Object.keys(usados).length} nomes nas linhas do "Disponível offline": ${JSON.stringify(usados)}`);
+    termoDe[lang] = Object.keys(usados)[0];
+  }
+  assert.equal(termoDe.pt, 'sinal', `pt: o termo é "${termoDe.pt}", e o en e o es dizem "${termoDe.en}"/"${termoDe.es}"`);
+});
