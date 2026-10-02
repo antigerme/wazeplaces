@@ -16,23 +16,20 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-01 ~23:50 UTC)
+## 0. Estado agora (2026-10-02 ~13:30 UTC)
 
-- **Lote 9 em produção** (PR #255, `b270ffc`, v2026.10.01-02, conferida no ar): os nove lotes da rodada 5
-  mais os follow-ups (Alt/⌘+← no card, a fila não coberta do offline, a aprovação que atravessa a queda, o
-  "Ver os N" pelo teclado). CI verde; smokes locais no HEAD final: layout e fluxo (saída 0), offline (199 ✓),
-  diagnóstico da tela (46 ✓), presença (63 ✓ no Chromium e no WebKit).
-- **Verificação em produção** com as duas contas (`scratchpad/prod-auditoria.mjs`): 89 ✓ · 0 ✗ no roteiro inteiro (`prod-l9.log`), e a seção nova "12. Lote 9 no ar" (`prod-auditoria.mjs l9`, `prod-l9b.log`) 20 ✓ · 0 ✗: Alt/⌘/Ctrl com as setas não decidem o pedido (com o controle da ← sozinha) e o "Lida" da corrida do `abrir` chegou 3 de 3.
-- **Rodada 6 em andamento**: sete auditores sobre a main `b270ffc` (worktree `/home/user/wp-r6`), ids em
-  `scratchpad/r6-agentes.txt`, prompts `scratchpad/r6-prompt-{1..7}.txt`, relatórios em
-  `scratchpad/r6-<n>/relatorio.md`. O 7º cobre Histórico, conquistas, Resumo, Ajuda, treino e Preferências.
-- **Decisões pro owner**: `scratchpad/r5-pendencias.md` (seção "Lote 9") e a página
-  `scratchpad/mockups/decisoes-em-aberto.html` (já com as seções do lote 9 e o mockup do "Aplicar" sem sinal).
-- **Cookies** (2026-10-01, os válidos): `0ca15e91-antigerme_cookies.txt` (L6+AM) e
-  `0ba08797-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: juntar os achados da rodada 6 (`l10-plano.md`), lote 10 nos worktrees `wp-fix6-<área>`
-  (da main `b270ffc`), junção no `/home/user/wp-lote7` (branch recriado da main), smokes, versão (rode
-  `date -u` — o serial segue a data do commit HEAD), PR, CI, merge, produção — e repetir até uma rodada limpa.
+- **Lote 9 em produção** (PR #255, `b270ffc`, v2026.10.01-02), verificado com as duas contas: 89 ✓ · 0 ✗ no
+  roteiro inteiro e 20 ✓ · 0 ✗ na seção "12. Lote 9 no ar" (`prod-auditoria.mjs l9`).
+- **Rodada 6**: seis dos sete relatórios prontos (`scratchpad/r6-relatorios/r6-{1,3,4,5,6,7}.md`); o R6-2 (fila)
+  foi retomado depois do limite da sessão (que parou tudo às ~00:35 e voltou às 04:30). Plano em
+  `scratchpad/l10-plano.md`.
+- **Lote 10 em andamento**: seis agentes (offline, lightbox, histórico, filtros+extensão, contas, presença), worktrees
+  `/home/user/wp-fix6-<área>` (da main `b270ffc`), ids em `scratchpad/l10-agentes.txt`, regras
+  `scratchpad/l10-base.txt`, relatórios `scratchpad/relatorio-l10-<área>.md`.
+- **Junção**: no `/home/user/wp-lote7` (branch recriado da main), pelo `scratchpad/juntar.sh fix6-<área>`.
+- **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`.
+- **Cookies** (2026-10-01): `0ca15e91-antigerme_cookies.txt` (L6+AM) e `0ba08797-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: juntar o lote 10, smokes, versão (`date -u`), PR, CI, merge, produção — e a rodada 7.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
