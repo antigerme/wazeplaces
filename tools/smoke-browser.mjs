@@ -4753,7 +4753,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
-// ── O seletor de estado: a falha da lista cabe FECHADA no Fold e no SE ─────
+// ── Os seletores dos Filtros: toda opção do dicionário cabe FECHADA ────────
 // A falha da lista de estados ("Não deu pra carregar os estados") saía cortada
 // no seletor fechado — em pt, "Não deu pra carregar o", sem o objeto (auditoria
 // da rodada 6, R66-3). O seletor não quebra linha nem rola, então "não estoura"
@@ -4768,19 +4768,27 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // tela mostrava com a última letra cortada, e "cabe" ao inglês de antes, que o
 // WebKit cortava ("Couldn’t load the state"). Esta acerta a fronteira no
 // Chromium (194/200 inteiro, 206/200 cortado, conferido pixel a pixel) e erra
-// pra MAIS no WebKit (uns 5 px). A falha vem pelo caminho de verdade: a lista de
-// estados responde 500. CONTROLES: a falha TEM que estar no seletor; um texto de
-// 200 caracteres TEM que cortar; e um de uma letra, não.
+// pra MAIS no WebKit (uns 5 px).
+//
+// Mede TODA opção que o dicionário escreve nos seletores do modal (as com
+// `data-i18n`, todas as da ordem — com as três de distância —, de residencial e
+// de região, e o seletor de idioma, na aba Preferências); nome de país, estado,
+// área e categoria é dado do Waze e fica de fora. Foi esta varredura que achou o
+// "📍 Perto de mim (GPS)" e o "Résidentiel uniquement" cortados no WebKit a
+// 280 px (204/200 e 207/200; a tela mostrava "(GPS" e "uniquemen"). A falha dos
+// estados vem pelo caminho de verdade: a lista responde 500. CONTROLES: a falha
+// TEM que estar no seletor; um texto de 200 caracteres TEM que cortar e um de
+// uma letra, não; e a varredura tem que ter medido as opções que já cortaram.
 {
   for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 320, height: 568 }]]) {
     for (const lang of LINGUAS) {
-      const onde = `seletor de estado/${ap}/${lang}`;
+      const onde = `seletores dos Filtros/${ap}/${lang}`;
       const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
       await ctx.addInitScript((l) => {
         try {
-          if (sessionStorage.getItem('__seletorEstado')) return;
-          sessionStorage.setItem('__seletorEstado', '1');
-          localStorage.setItem('waze_session_token', 'tok-smoke-estado');
+          if (sessionStorage.getItem('__seletores')) return;
+          sessionStorage.setItem('__seletores', '1');
+          localStorage.setItem('waze_session_token', 'tok-smoke-seletores');
           localStorage.setItem('waze_places_lang', l);
           localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
         } catch (e) { /* armazenamento bloqueado: o teste segue */ }
@@ -4790,8 +4798,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         let st = 200;
         let b = { success: true };
         if (nome === 'perfil') {
-          b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true,
-            isStaff: false, areas: [], managedAreas: [], editableCountryIDs: [30] } };
+          // Casa e trabalho no perfil: as três ordens por distância viram opção.
+          b = { success: true, visivelNoWme: true, referencias: { casa: [-23.55, -46.63], trabalho: [-23.5, -46.6] },
+            profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
+              areas: [], managedAreas: [{ id: 9001, name: 'Área SP' }], editableCountryIDs: [30] } };
         } else if (nome === 'lista-paises') b = { success: true, countries: [{ id: 30, name: 'Brazil' }] };
         else if (nome === 'lista-estados') { st = 500; b = { success: false, errorCategory: 'transient', error: 'x' }; }
         else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
@@ -4806,13 +4816,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
       await esperarOuExplodir(page, () => {
         const o = document.querySelector('#filterState option');
-        return !!o && o.getAttribute('data-i18n') === 'filters.state.naoCarregou';
-      }, 'a falha da lista de estados no seletor');
+        return !!o && o.getAttribute('data-i18n') === 'filters.state.naoCarregou'
+          && !!document.querySelector('#filterSort option[value="gps"]');
+      }, 'a falha da lista de estados e as ordens por distância no seletor');
       await assentar(page, 100);
-      const r = await page.evaluate(() => {
-        const sel = document.getElementById('filterState');
-        const real = sel.getBoundingClientRect().width;
-        const precisa = (txt) => {
+      // A função vai SERIALIZADA pra página: ela mede a aba que está na tela.
+      const varrer = () => page.evaluate(() => {
+        const NOSSOS = ['filterSort', 'filterResidential', 'filterRegion', 'langSelect'];
+        const precisa = (sel, txt) => {
           const clone = sel.cloneNode(false);
           clone.removeAttribute('id');
           clone.style.cssText = 'width:auto;min-width:0;max-width:none;position:absolute;visibility:hidden;left:0;top:0';
@@ -4824,13 +4835,38 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           clone.remove();
           return Math.round(w * 10) / 10;
         };
-        const txt = sel.options[sel.selectedIndex].text;
-        return { txt, real: Math.round(real * 10) / 10, falha: precisa(txt), longo: precisa('x'.repeat(200)), curto: precisa('x') };
+        const medidas = [];
+        for (const sel of document.querySelectorAll('#filtersModal select')) {
+          if (!sel.getClientRects().length) continue;   // o seletor da outra aba
+          const real = Math.round(sel.getBoundingClientRect().width * 10) / 10;
+          for (const o of sel.options) {
+            if (!o.hasAttribute('data-i18n') && !NOSSOS.includes(sel.id)) continue;
+            medidas.push({ id: sel.id, valor: o.value, i18n: o.getAttribute('data-i18n'), txt: o.text, precisa: precisa(sel, o.text), real });
+          }
+        }
+        const estado = document.getElementById('filterState');
+        const real = Math.round(estado.getBoundingClientRect().width * 10) / 10;
+        return { medidas, longo: estado.getClientRects().length ? precisa(estado, 'x'.repeat(200)) : null,
+          curto: estado.getClientRects().length ? precisa(estado, 'x') : null, real };
       });
-      checa(r.longo > r.real, `${onde}: CONTROLE — o texto de 200 caracteres "coube": o instrumento não mede`, `${r.longo}/${r.real}`);
-      checa(r.curto <= r.real, `${onde}: CONTROLE — uma letra "não coube": o instrumento acusa tudo`, `${r.curto}/${r.real}`);
-      checa(r.falha <= r.real, `${onde}: a falha da lista de estados sai cortada no seletor fechado (R66-3)`,
-        `"${r.txt}" precisa ${r.falha} px, o seletor tem ${r.real}`);
+      const filtros = await varrer();
+      await page.evaluate(() => switchFilterTab('filtersTabPrefs'));
+      await assentar(page, 60);
+      const prefs = await varrer();
+      const medidas = [...filtros.medidas, ...prefs.medidas];
+      checa(filtros.longo > filtros.real, `${onde}: CONTROLE — o texto de 200 caracteres "coube": o instrumento não mede`, `${filtros.longo}/${filtros.real}`);
+      checa(filtros.curto <= filtros.real, `${onde}: CONTROLE — uma letra "não coube": o instrumento acusa tudo`, `${filtros.curto}/${filtros.real}`);
+      // CONTROLE: a varredura mediu as opções que já cortaram (sem elas, "nada
+      // corta" não diz nada) e o seletor de idioma, da outra aba.
+      for (const [id, valor] of [['filterState', ''], ['filterSort', 'gps'], ['filterResidential', 'true'], ['langSelect', lang]]) {
+        checa(medidas.some((m) => m.id === id && m.valor === valor), `${onde}: CONTROLE — a varredura não mediu #${id} [${valor}]`);
+      }
+      checa(medidas.length >= 15, `${onde}: CONTROLE — só ${medidas.length} opções medidas`);
+      for (const m of medidas) {
+        checa(m.precisa <= m.real, m.i18n === 'filters.state.naoCarregou'
+          ? `${onde}: a falha da lista de estados sai cortada no seletor fechado (R66-3)`
+          : `${onde}: opção cortada no seletor fechado #${m.id}`, `"${m.txt}" precisa ${m.precisa} px, o seletor tem ${m.real}`);
+      }
       checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
       await ctx.close();
     }
