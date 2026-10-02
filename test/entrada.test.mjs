@@ -1206,6 +1206,66 @@ test('o "Código expirado" vai pra região viva à parte do modal — e a contag
   assert.doesNotMatch(contagem[0], /aria-live|role="status"/, 'a contagem virou região viva: o leitor falaria a cada segundo');
 });
 
+// ── R6-1-02 (2026-10-02): o anúncio do vencido com o código CURTO na tela ─────
+// O contador anunciava "Código expirado — feche e toque de novo" em TODO
+// vencimento. O código curto nasce depois do QR e vale até o prazo DELE: pedido
+// antes de o QR vencer, o leitor de tela ouvia "feche e toque de novo" com ele
+// valendo por mais 4 minutos — MEDIDO no Chromium e no WebKit —, e quem não
+// enxerga jogava fora um código que ainda entrava. E no vencimento do curto o
+// texto era o MESMO, reescrito: há leitor de tela que não lê de novo texto igual.
+// As escritas na região viva, uma a uma (o que o leitor de tela recebe).
+function anunciosDoPareamento(p) {
+  const el = p.registro.pairAnuncio;
+  const escritas = [];
+  let v = el.textContent;
+  Object.defineProperty(el, 'textContent', { get: () => v, set: (x) => { v = String(x); escritas.push(v); } });
+  return escritas;
+}
+
+test('R6-1-02: o "Código expirado" é dito no vencimento de CADA código — o do QR só sem o código curto valendo', async () => {
+  // O código curto pedido 60 s antes de o QR vencer.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const escritas = anunciosDoPareamento(p);
+  p.andar(240_000); p.tique();
+  await p.revelarCodigoPareamento();
+  p.andar(61_000); p.tique();                       // o QR vence; o curto vale mais ~4 min
+  assert.equal(p.registro.pairCopyLinkBtn.disabled, true, 'CONTROLE: o QR não venceu no harness');
+  assert.match(p.registro.pairCodeExpiry.textContent, /^pair\.expiresIn/, 'CONTROLE: o código curto não seguia valendo');
+  assert.ok(!escritas.includes('pair.expired'),
+    'DEFEITO: com o código curto valendo, o leitor de tela ouviu "Código expirado — feche e toque de novo"');
+  p.andar(240_000); p.tique();                      // o curto vence
+  assert.equal(p.registro.pairCodeExpiry.textContent, 'pair.expired', 'CONTROLE: o código curto não venceu');
+  assert.equal(p.registro.pairAnuncio.textContent, 'pair.expired', 'o código curto venceu e o leitor de tela não ouviu');
+  assert.equal(escritas.filter((x) => x === 'pair.expired').length, 1, `o vencimento foi dito ${escritas.length}× (${escritas.join(' | ')})`);
+
+  // O curto pedido no ÚLTIMO instante: a resposta chega com o QR já vencido (e
+  // dito). A região viva é esvaziada com o código novo na tela — e, quando ele
+  // vence, o texto MUDA de novo: o leitor de tela ouve o vencimento dele.
+  const u = pareamentoDeMentira();
+  await u.abrirPareamento();
+  const eu = anunciosDoPareamento(u);
+  u.andar(300_000); u.tique();
+  assert.equal(u.registro.pairAnuncio.textContent, 'pair.expired', 'CONTROLE: o QR venceu sem código curto e não foi dito');
+  await u.revelarCodigoPareamento();
+  assert.equal(u.registro.pairAnuncio.textContent, '', 'o "Código expirado" do QR ficou na região viva com um código novo valendo');
+  u.andar(300_000); u.tique();
+  assert.deepEqual(eu, ['pair.expired', '', 'pair.expired'],
+    'o vencimento do código curto foi o MESMO texto reescrito por cima do do QR — o leitor de tela pode não ler');
+
+  // CONTROLE: sem código curto, o vencimento do QR é dito UMA vez — e o "Copiar
+  // link" que descobre o vencimento pelo relógio (a aba que volta do segundo
+  // plano), com o tique chegando depois, não repete.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  const eq = anunciosDoPareamento(q);
+  q.andar(301_000);
+  await q.copiarLinkPareamento();
+  q.tique();
+  assert.equal(q.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o tique não chegou');
+  assert.deepEqual(eq, ['pair.expired'], `o vencimento do QR foi dito ${eq.length}× (${eq.join(' | ')})`);
+});
+
 // ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────
 // Vencido o QR, a tela seguia com "Aponte a câmera… para o código abaixo" (sobre
 // um QR apagado) e com o "Sem câmera? Mostrar um código" — que criava um código

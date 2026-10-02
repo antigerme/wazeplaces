@@ -1520,6 +1520,9 @@ async function abrirPareamento() {
 function aoVencerQrPareamento() {
     // Lido ANTES de mexer: o botão focado que vira `disabled` perde o foco.
     const focado = document.activeElement;
+    // Este QR JÁ tinha vencido (o "Copiar link" descobriu pelo relógio, e o tique
+    // chega depois): o anúncio dele já foi feito, e não se repete.
+    const jaVencido = !pairQrVenceEm;
     limparQrPareamento();
     pairQrVenceEm = 0;
     const code = document.getElementById('pairCode');
@@ -1539,6 +1542,15 @@ function aoVencerQrPareamento() {
     if (codigoCurtoValendo()) {
         const exp = document.getElementById('pairExpiry');
         if (exp) exp.textContent = '';
+    } else if (!jaVencido) {
+        // O vencimento DITO ao leitor de tela (ver `anunciarNoPareamento`), pela
+        // MESMA regra da frase visível: só quando nenhum código vale mais. Era
+        // dito em todo vencimento, pelo contador: com o código curto valendo, o
+        // leitor de tela ouvia "Código expirado — feche e toque de novo" 4
+        // minutos antes de ele vencer, e quem não enxerga jogava fora um código
+        // que ainda entrava (auditoria de 2026-10-02, R6-1-02). O do código
+        // curto é dito no vencimento DELE (`revelarCodigoPareamento`).
+        anunciarNoPareamento(t('pair.expired'));
     }
     // Com o foco no "Copiar link" (que apagou) ou no "Sem câmera?" (que sumiu),
     // o foco caía no <body> e o leitor de tela perdia a posição (auditoria de
@@ -1577,7 +1589,10 @@ function mostrarInstrucoesDoPareamento() {
 // O vencimento (do QR ou do código curto) é dito ao leitor de tela UMA vez, na
 // região viva à parte do modal (`#pairAnuncio`): a contagem muda a cada segundo,
 // e região viva nela falaria o tempo todo. O foco inicial é o "Fechar", então
-// sem isto o "Código expirado" só era lido por quem fosse procurar.
+// sem isto o "Código expirado" só era lido por quem fosse procurar. Quem anuncia
+// é o vencimento de CADA um (`aoVencerQrPareamento` e o do código curto em
+// `revelarCodigoPareamento`), não o contador: o contador não sabe se OUTRO
+// código ainda vale.
 function anunciarNoPareamento(texto) {
     const el = document.getElementById('pairAnuncio');
     if (el) el.textContent = texto;
@@ -1596,7 +1611,6 @@ function iniciarTickerPareamento(elemento, segundos, aoVencer) {
         const restante = Math.ceil((venceEm - Date.now()) / 1000);
         if (restante <= 0) {
             elemento.textContent = t('pair.expired');
-            anunciarNoPareamento(t('pair.expired'));
             if (aoVencer) aoVencer();
             pararTickerPareamento(elemento);
             return false;
@@ -1655,14 +1669,21 @@ async function revelarCodigoPareamento(ev) {
     codeEl.dataset.curto = r.code;
     codeEl.classList.remove('opacity-40', 'line-through');
     // Pedido no último instante do QR, a resposta chega com ele já vencido: o
-    // "Código expirado" dele não fica em cima deste, que acabou de nascer.
+    // "Código expirado" dele não fica em cima deste, que acabou de nascer — nem
+    // na tela, nem na região viva. Esvaziada aqui, ela MUDA quando este vencer, e
+    // o leitor de tela ouve o vencimento dele (texto igual reescrito pode não ser
+    // lido de novo).
     const expQr = document.getElementById('pairExpiry');
     if (expQr && expQr.textContent === t('pair.expired')) expQr.textContent = '';
+    anunciarNoPareamento('');
     iniciarTickerPareamento(expEl, r.expiresIn, () => {
         codeEl.classList.add('opacity-40', 'line-through');
         // "Digite este código" sobre um código morto é a mesma instrução falsa
         // da câmera sobre o QR vencido (A15): sai junto.
         document.getElementById('pairOrType')?.classList.add('hidden');
+        // E o leitor de tela ouve: ele nasceu depois do QR, então quando ele
+        // vence nenhum código vale mais (R6-1-02).
+        anunciarNoPareamento(t('pair.expired'));
     });
     // O código está na tela: o foco vai ao "Copiar link", o controle seguinte
     // (onde o próximo Tab iria) — ou ao "Fechar", com o QR já vencido.
