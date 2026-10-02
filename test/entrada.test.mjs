@@ -299,7 +299,7 @@ test('extensão: o portão RECUSOU — uma tentativa só, e o perfil e o motivo 
   assert.equal(passageira.chamadas, 4, 'a falha passageira deixou de ser retentada');
 });
 
-test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o app de antes segue caindo no login na hora', () => {
+test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o app de antes segue caindo no login na hora', async () => {
   const postados = [];
   let ouvinte = null;
   const win = {
@@ -313,10 +313,14 @@ test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o ap
     window: win, localStorage: { setItem() {} },
     chrome: { runtime: { sendMessage: (msg, cb) => cb(respostaDoBackground), lastError: null },
               storage: { local: { get: (k, cb) => cb({}), remove() {} } } },
+    // A pergunta espera a ponte ler o token que o botão do WME possa ter deixado
+    // (R6-1-10, test/extensao): a resposta sai depois de um tique.
+    setTimeout,
   };
   vm.createContext(ctx);
   vm.runInContext(ler('extensao-chrome/ponte.js'), ctx);
   ouvinte({ source: win, origin: win.location.origin, data: { source: 'wazeplaces', action: 'precisa-de-sessao' } });
+  for (let i = 0; i < 50 && postados.length < 2; i++) await new Promise((r) => setTimeout(r, 0));
   const final = postados[postados.length - 1];
   assert.equal(postados[0].action, 'aguarde');
   assert.equal(final.action, 'sem-sessao', 'mudou a ação: o app de ANTES ficaria esperando o prazo inteiro');

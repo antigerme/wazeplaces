@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.0
+# Waze Places Rapid Access — proposta de v0.3.1
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -50,7 +50,7 @@ window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, locati
 ```
 
 A ponte responde `aguarde` NA HORA (é mensagem local, sem rede) e, depois da ida ao Waze, uma
-de três:
+de três (com o token que o botão do WME deixou pra aba, sem ida nenhuma — abaixo):
 
 ```js
 { source: 'wazeplaces-ext', action: 'aguarde' }                  // já: "estou aqui, trabalhando"
@@ -63,8 +63,9 @@ de três:
 `conta` é o id da conta do Waze dona da sessão, que o `testar-cookies` devolve junto com o token
 (desde a v0.3.0). Com ele o app sabe de quem é a sessão NA HORA: se for OUTRA conta, a fila e os
 dados de quem estava saem antes de o perfil chegar. Sem ele (extensão ou servidor anteriores), o
-app espera o perfil, como sempre fez. O token que o botão do WME deixa pra aba nova (abaixo) vai
-sem a conta, e aí também é o perfil que diz.
+app espera o perfil, como sempre fez. Desde a v0.3.1, o token que o botão do WME deixa pra aba nova
+também vai por aqui, com a conta: o app da aba nova pergunta (o app sem sessão sempre pergunta na
+abertura), e a ponte responde `sessao` com ele, sem ir ao Waze de novo.
 
 Os `motivo` do `sem-sessao`: `sem-login-wme` (não há login no WME), `erro` (a ida ao Waze ou ao
 app falhou depois das tentativas), `contexto-invalido` (a extensão se atualizou com a aba aberta
@@ -202,5 +203,42 @@ conhece o campo novo o ignora:
 | atual | 0.2.0 | funciona como antes: a conta só é conhecida quando o perfil chega, e a conta recusada cai na tela de entrada (depois das 4 tentativas), sem o "Acesso restrito" |
 | atual | 0.3.0 | a conta chega com o token, e a conta recusada vê o "Acesso restrito" na hora |
 | anterior | 0.3.0 | funciona — o app de antes ignora a `conta`, e o `negado` segue sendo `sem-sessao` |
+
+Permissões: **as mesmas** da 0.2.0.
+
+---
+
+## v0.3.1 — o painel no WME com a régua do app, e o botão com a conta
+
+Leva tudo da 0.3.0, que não chegou a ser publicada. Três consertos, achados na auditoria da rodada 6
+do app (R66-1, R66-2 e R6-1-10), sem mudança de protocolo nem de permissão:
+
+1. **O botão ACESSAR segue o MESMO portão do servidor.** O painel exigia L3+AM ("Requer Nível 3+",
+   e no `title` do botão "maior que 3", que nem a regra antiga era), e o app admite L2+AM desde
+   2026-09-09, e o staff com ou sem AM. Um L2+AM via o botão travado e entrava pela ponte. O
+   `inject.js` passa a mandar o `rank` cru (o Waze conta do zero; a tela mostra `rank + 1`) e o
+   `isStaff`, e o `content.js` decide com a régua do `isUserAllowed` (`podeEntrarNoApp`). Os textos
+   nas 4 línguas dizem "Nível 2+ … ou Staff", com o número saindo da constante.
+2. **O alerta de falha sai inteiro na língua do WME.** Ele juntava o prefixo traduzido com a frase
+   CRUA do servidor (sempre em português) ou do próprio background — e no cookie vencido mandava
+   "exportar os cookies", que não é o caminho de quem entra pela extensão. O background repassa a
+   chave do servidor (`errorKey`) e dá chave às falhas dele (`ext.*`); o painel escolhe a frase no
+   dicionário dele, e a crua só sai pra resposta que não traz chave nem categoria.
+3. **O login pelo botão chega ao app com a conta.** O token do botão era escrito direto no
+   `localStorage` da aba nova, e o app o lia como sessão GUARDADA: a conta se perdia (o app só a
+   sabia quando o perfil chegava) e o diário de sessões do app marcava "já estava ativa" em vez de
+   "entrou pela extensão". Agora o `background.js` guarda o token com a conta e a hora, e a
+   `ponte.js` o entrega na resposta ao `precisa-de-sessao` que o app sem sessão sempre manda. O
+   botão continua vencendo a sessão que estava guardada (ela sai, e o app pergunta); token com mais
+   de 2 minutos não é entregue (a aba não abriu na hora — seria entrar com o login de outra hora,
+   talvez de outra conta do WME), e cada um é entregue uma vez.
+
+**Precisa ser publicada** pra valer.
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.2.0 | funciona como antes: o painel trava o L2+AM e o staff sem AM, e o botão entra com a sessão guardada, sem a conta |
+| atual | 0.3.1 | o painel deixa entrar quem o app deixa, e o botão entra pela ponte, com a conta |
+| anterior | 0.3.1 | funciona — o app de antes também pergunta à ponte quando abre sem sessão |
 
 Permissões: **as mesmas** da 0.2.0.
