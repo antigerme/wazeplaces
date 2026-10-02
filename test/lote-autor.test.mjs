@@ -800,3 +800,80 @@ test('R6-2-02: com a aprovação de OUTRO pedido do autor no ar, a frase conta o
   const c = montarFolhaComAndamento({ fila: [A, u3], naTela: A });
   assert.deepEqual([c.frase, c.ver, c.rejeitar], ['um', null, null]);
 });
+
+// ── R6-2-11: a recusa automática que esvazia a fila não manda "conferir o país" ──
+// Com a fila só de um autor marcado (o spammer que inundou a área), a recusa
+// rejeita todos sozinha na abertura, e a tela dizia "Tudo limpo! Nenhum pedido
+// pendente com estes filtros. Confira o país e a região em Filtros." — o conselho
+// de quem abriu o lugar errado, logo depois de o app rejeitar 4 pedidos ali
+// (MEDIDO no navegador, s39). A frase passa a ser a de quem tratou; a festa e a
+// conquista seguem só com o trabalho DA PESSOA (contar a recusa nelas é decisão
+// do owner, em aberto). A recusa e o painel vazio de verdade, no mesmo escopo.
+function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedido(1), pedido(2), pedido(3), pedido(4)] } = {}) {
+  const AppState = { queue: fila.slice(), currentPlace: null, stats: { rejected: 0, skipped: 0 }, serverTotal: fila.length,
+    fetchEpoch: 0, hasMore: false, inFlightActions: 0, authenticated: true, loadError: false };
+  const portoes = [];
+  const classes = new Set(['hidden']);
+  const textos = {};
+  const conquistas = [];
+  const el = (chave) => ({ attrs: { 'data-i18n': chave } });
+  const h3 = el('states.empty.title'), p = el('states.empty.body');
+  const noMore = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    querySelector: (sel) => (sel.startsWith('h3') ? h3 : p), dataset: { bordaRolagem: '1' }, offsetWidth: 0 };
+  const deps = {
+    AppState, podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, Treino: { ativo: false },
+    autoLigado, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k,
+    pedidosEmAndamento: new Set(), chaveDoPedido: chave, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { getRegion: () => 'row', rejectPlace: () => new Promise((ok) => portoes.push(() => ok({ success: true }))) },
+    registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
+    pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
+    // O painel vazio (`showNoPlaces`).
+    document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
+    dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
+    atualizarConviteInstalar() {}, marcarBordaRolagem() {},
+    trocarTextoI18n: (e, k) => { if (e) { e.attrs['data-i18n'] = k; textos[e === h3 ? 'titulo' : 'corpo'] = k; } },
+    filaZeradaConfirmada: () => true, checarConquistas: (x) => conquistas.push(x),
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;'
+    + ' let tratouNestaFila = false; let recusaAutomaticaNestaFila = false; let puladosNoInicioDaFila = 0;\n'
+    + ['enviarLote', 'aplicarRecusaAutomatica', 'puladosNestaFila', 'showNoPlaces'].map(fatiar).join('\n')
+    + '\nreturn { aplicarRecusaAutomatica, showNoPlaces };')(...chaves.map((k) => deps[k]));
+  const soltarTudo = async () => { for (let i = 0; i < 20 && portoes.length; i++) { portoes.shift()(); await new Promise((ok) => setTimeout(ok, 0)); } };
+  return { app, AppState, textos, festa: () => classes.has('celebrate'), conquistas, soltarTudo };
+}
+
+test('R6-2-11: a recusa automática esvazia a fila na abertura — a tela diz "Você processou…", não "Confira o país e a região"', async () => {
+  const m = montarRecusaNaAbertura();
+  const recusa = m.app.aplicarRecusaAutomatica();
+  assert.deepEqual(m.AppState.queue, [], 'PRÉ-CONDIÇÃO: a recusa tirou da fila os 4 do autor marcado');
+  m.app.showNoPlaces();                         // o `startFetching`: fila vazia, nada mais a buscar
+  assert.equal(m.textos.titulo, 'states.empty.title');
+  assert.equal(m.textos.corpo, 'states.empty.body',
+    `com a recusa automática tendo rejeitado os pedidos daqui, a tela mandou "${m.textos.corpo}" (conferir o país e a região)`);
+  // A festa e a conquista são do trabalho DA PESSOA: seguem de fora.
+  await new Promise((ok) => setTimeout(ok, 0));
+  assert.equal(m.festa(), false, 'a recusa automática soltou o confete (contar a recusa é decisão do owner)');
+  assert.deepEqual(m.conquistas, [], 'a recusa automática deu a conquista "Tudo limpo"');
+  await m.soltarTudo();
+  await recusa;
+  assert.equal(m.AppState.stats.rejected, 4, 'PRÉ-CONDIÇÃO: os 4 foram rejeitados');
+  // CONTROLE: a fila que veio vazia (nada com estes filtros) segue com o conselho de conferir o lugar.
+  const c = montarRecusaNaAbertura({ fila: [] });
+  await c.app.aplicarRecusaAutomatica();
+  c.app.showNoPlaces();
+  assert.equal(c.textos.corpo, 'states.empty.bodyNada');
+  // CONTROLE: sem autor marcado a recusa não age — e nada muda na frase de quem não tratou.
+  const n = montarRecusaNaAbertura({ autoLigado: () => false, fila: [] });
+  await n.app.aplicarRecusaAutomatica();
+  n.app.showNoPlaces();
+  assert.equal(n.textos.corpo, 'states.empty.bodyNada');
+});
+
+test('R6-2-11: a marca da recusa é DESTA fila — o `resetQueue` a zera junto com o trabalho da pessoa', () => {
+  assert.match(fatiar('resetQueue'), /tratouNestaFila = false;\s*recusaAutomaticaNestaFila = false;/,
+    'a fila nova herdou a marca da recusa da anterior: "Você processou…" numa fila que não trouxe nada');
+});

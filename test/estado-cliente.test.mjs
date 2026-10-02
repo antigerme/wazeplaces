@@ -514,7 +514,8 @@ function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
     queueMicrotask: () => {},
   };
   const chaves = Object.keys(deps);
-  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null;\n`
+  // `recusaAutomaticaNestaFila` (R6-2-11): só muda a FRASE; convite e confete são do trabalho da pessoa.
+  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false;\n`
     + ['puladosNestaFila', 'filaTerminouLimpa', 'atualizarConviteInstalar', 'showNoPlaces'].map(fatiar).join('\n')
     + '\nreturn { showNoPlaces, atualizarConviteInstalar };')(...chaves.map((k) => deps[k]));
   return { ...api, convite: () => !els.installInvite.classList.contains('hidden'), festa: () => noMore.classList.contains('celebrate') };
@@ -799,7 +800,8 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
       trocarTextoI18n: (e, k) => { if (e) e.attrs['data-i18n'] = k; },
     };
     const chaves = Object.keys(deps);
-    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};\n`
+    // `recusaAutomaticaNestaFila`: a recusa automática não agiu (R6-2-11 tem teste próprio, em lote-autor).
+    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false;\n`
       + fatiar('puladosNestaFila') + '\n' + fatiar('filaTerminouLimpa') + '\n' + fatiar('showNoPlaces')
       + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
     fn();

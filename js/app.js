@@ -9121,6 +9121,7 @@ function resetQueue() {
     // `Treino.encerrar`). Cobre sair, entrar, atualizar e trocar de filtro.
     if (Treino.ativo) Treino.encerrar();
     tratouNestaFila = false;
+    recusaAutomaticaNestaFila = false;
     filaAtravessouSessao = false;   // fila nova: é desta sessão
     puladosNoInicioDaFila = AppState.stats.skipped || 0;
     // Descarrega ação no buffer de undo ANTES de zerar a fila: sem isso, a ação
@@ -12935,6 +12936,14 @@ function trocarTextoI18n(el, chave) {
 // Houve trabalho de verdade NESTA fila (zera no `resetQueue`)? É o critério da
 // festa do "Tudo limpo!" e da frase dele.
 let tratouNestaFila = false;
+// A recusa automática AGIU nesta fila (zera no `resetQueue`): ela rejeitou, em
+// nome da pessoa, pedidos que estavam aqui. Conta como trabalho feito pra FRASE
+// do "Tudo limpo!" — com a fila só de um autor marcado, a abertura terminava em
+// "Nenhum pedido pendente com estes filtros. Confira o país e a região", logo
+// depois de o app rejeitar 4 pedidos ali (MEDIDO, s39; auditoria de 2026-10-02,
+// R6-2-11). A festa e a conquista seguem só com o `tratouNestaFila`: contar a
+// recusa nelas é decisão do owner, em aberto.
+let recusaAutomaticaNestaFila = false;
 // Quantos pedidos foram PULADOS nesta fila, pelo placar (o Desfazer do ↑ já o
 // desconta, e o treino tem placar próprio): a fila que termina com pulados não
 // está "limpa" — eles seguem pendentes, e só voltam ao "Verificar novamente".
@@ -13049,11 +13058,14 @@ function showNoPlaces() {
         // E a frase: "Você processou todos os pedidos" é mentira pra quem não
         // processou nada — é o que via quem abria o app num país onde não edita.
         // Com PULADOS, nem "tudo limpo" nem "confira o país": eles seguem
-        // pendentes e o botão logo abaixo os traz de volta.
+        // pendentes e o botão logo abaixo os traz de volta. A recusa automática
+        // que agiu aqui conta como trabalho feito NA FRASE (R6-2-11): o lugar está
+        // certo, e o app acabou de rejeitar os pedidos dele em nome da pessoa.
         trocarTextoI18n(noMore.querySelector('h3[data-i18n^="states.empty.title"]'),
             pulados > 0 ? 'states.empty.titlePulados' : 'states.empty.title');
         trocarTextoI18n(noMore.querySelector('p[data-i18n^="states.empty.body"]'),
-            pulados > 0 ? 'states.empty.bodyPulados' : tratou ? 'states.empty.body' : 'states.empty.bodyNada');
+            pulados > 0 ? 'states.empty.bodyPulados'
+                : tratou || recusaAutomaticaNestaFila ? 'states.empty.body' : 'states.empty.bodyNada');
         noMore.classList.remove('celebrate');
         // Festa só com a fila LIMPA: com pulado a tela diz "Fim da fila" (eles
         // seguem pendentes), e confete ali contradizia o próprio título.
@@ -14665,6 +14677,10 @@ async function aplicarRecusaAutomatica() {
     const gesto = carimboDoGesto();
     // Saem da fila ANTES de enviar: senão o editor veria como card o pedido que
     // o app já está rejeitando, e poderia agir nele — dois envios pro mesmo.
+    // E a fila que esvazia aqui é trabalho feito, não "nada com estes filtros"
+    // (ver `recusaAutomaticaNestaFila`, R6-2-11): marcado ANTES, porque o painel
+    // vazio sai logo (a abertura não espera o envio).
+    recusaAutomaticaNestaFila = true;
     const fora = new Set(alvos);
     AppState.queue = AppState.queue.filter((x) => !fora.has(x));
     updatePendingCount();
