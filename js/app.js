@@ -19085,29 +19085,47 @@ function handleSkip() {
     // passa a guardar o pedido na estrela do editor, e o Desfazer segue valendo
     // de graça: desfazer é não rodar o executor.
     const epoca = epocaDaSessao;
+    const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver a queda, abaixo
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     scheduleAction('skip', place, async () => {
         if (!guardar) return;
         if (!place || !place.venueID || !place.updateRequestID) return;
         const enviar = () => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao);
         let r = await callWithRetry(enviar, epoca);
-        if (epoca !== epocaDaSessao) return;   // saiu no meio: ver `epocaDaSessao`
         // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
         // "Sessão expirada" sem conferir nada — o ✕ com o mesmo 401 confere a
         // sessão e manda de novo (auditoria do card, 2026-09-29, C7). A estrela
         // não tem fila de saída, então passa pela conferência das escritas que
         // moram fora dela (`refazerDepoisDo401`): com a sessão confirmada viva,
-        // ela sai de novo UMA vez; se a sessão caiu, a época muda e quem avisa
-        // é a queda.
-        if (r && r.errorCategory === 'unauthorized') {
+        // ela sai de novo UMA vez.
+        if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
-            if (epoca !== epocaDaSessao) return;
+        }
+        // A sessão ACABOU com a estrela no ar (ver `epocaDaSessao`): nada grava.
+        // Mas a estrela que não chegou se perdia CALADA — "quem avisa é a queda",
+        // e com a extensão renovando a queda diz "Acesso renovado… sua fila
+        // continua aqui", com o pedido pulado fora da tela e sem a estrela, que
+        // não é mandada de novo (MEDIDO, s46; auditoria de 2026-10-02, R6-2-08).
+        // Avisa com a fila do gesto ainda na tela (a renovação, ou a queda antes
+        // da tela de entrada), como as escritas do lightbox
+        // (`escritaDoLightboxSemSessao`). Depois do "Sair" (ou com outra conta) a
+        // fila foi embora, e não há a quem avisar. Não manda de novo: sem a conta
+        // do gesto, seria a escrita de A com a sessão de B (K1).
+        if (epoca !== epocaDaSessao) {
+            if (!(r && r.success === true) && epocaFila === AppState.fetchEpoch) showToast(t('toast.guardarFalhou'), 'error');
+            return;
         }
         // Falhar aqui não corrompe contador nenhum — o Pular não mexe em
         // `serverTotal` e o `skipped` já subiu —, então não há o que reverter.
-        // O que não pode é falhar CALADO: o app prometeu guardar.
+        // O que não pode é falhar CALADO: o app prometeu guardar. E o aviso diz
+        // QUE a estrela falhou, com o motivo de COMPLEMENTO: era o motivo
+        // sozinho ("Erro de conexão", "Servidor Waze indisponível") que ganhava,
+        // ~3 s depois do ↑, com o pedido já fora da tela — nada o ligava à
+        // estrela (MEDIDO, s37; R6-2-09). O " · " é o separador do app (o
+        // resultado do lote junta as linhas assim).
         if (!r || r.success !== true) {
-            showToast(msgDoServidor(r, t('toast.guardarFalhou')), 'error');
+            const motivo = r ? msgDoServidor(r) : null;
+            showToast(t('toast.guardarFalhou') + (motivo ? ' · ' + motivo : ''), 'error');
             return;
         }
         contarConquista('guardados');

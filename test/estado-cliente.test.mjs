@@ -127,8 +127,10 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
     handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
     // As DUAS esperas do guardar: a ida e a conferência do 401 (C7 da
-    // auditoria do card, 2026-09-29) — as duas conferem a época depois.
-    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca !== epocaDaSessao\) return;[\s\S]*?r = await refazerDepoisDo401\(epoca, enviar\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // auditoria do card, 2026-09-29). A conferência só começa na MESMA época, e
+    // depois das duas a época mudada sai sem gravar nada — só o aviso da estrela
+    // que não foi guardada, com a fila do gesto na tela (R6-2-08).
+    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca === epocaDaSessao && r && r\.errorCategory === 'unauthorized'\) \{\s*r = await refazerDepoisDo401\(epoca, enviar\);\s*\}\s*if \(epoca !== epocaDaSessao\) \{\s*if \([^{}]*\) showToast\(t\('toast\.guardarFalhou'\), 'error'\);\s*return;\s*\}/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });

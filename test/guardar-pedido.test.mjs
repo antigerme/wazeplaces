@@ -170,7 +170,7 @@ async function pularCom401(respostas, { sonda = 'viva' } = {}) {
   const ctl = {};
   const deps = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 },
-      preferences: { pularGuarda: true } },
+      preferences: { pularGuarda: true }, fetchEpoch: 0 },
     acoesTravadas: () => false, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {}, aplicarTravaDeAcao: () => {},
     contarConquista: (k) => conquistas.push(k),
@@ -178,11 +178,14 @@ async function pularCom401(respostas, { sonda = 'viva' } = {}) {
     API: { getRegion: () => 'row', guardarPedido: async () => { chamadas++; return respostas.shift() || { success: true }; } },
     callWithRetry: (fn) => fn(),
     // A sonda do `handleUnauthorized`: viva (confirma), morta (a sessão cai e
-    // a época muda) ou sem resposta (não confirma nada).
+    // a época muda; a fila na tela fica — a renovação pela extensão), `sair` (a
+    // época muda e a fila vai embora, como no "Sair") ou sem resposta (não
+    // confirma nada).
     handleUnauthorized: async () => {
       conferiu++;
       if (sonda === 'viva') ctl.viva();
       else if (sonda === 'morta') ctl.caiu();
+      else if (sonda === 'sair') { ctl.caiu(); deps.AppState.fetchEpoch++; }
     },
     showToast: (msg, tipo) => avisos.push({ msg, tipo }), t: (k) => k,
   };
@@ -219,11 +222,11 @@ test('C7 401 que se repete com a sessão viva: "não deu pra guardar" — nunca 
   assert.equal(r.chamadas, 2);
   assert.deepEqual(r.avisos, [{ msg: 'toast.guardarFalhou', tipo: 'error' }],
     `o aviso do 401 repetido não é o do guardar: ${JSON.stringify(r.avisos)}`);
-  // Sessão que CAI na conferência: a época muda e quem avisa é a queda — a
-  // estrela não soma um segundo aviso nem sai de novo.
+  // Sessão que CAI na conferência: a estrela não sai de novo (sem a conta do
+  // gesto seria a escrita de A com a sessão de B) — e o aviso dela está no teste
+  // do R6-2-08, abaixo.
   const q = await pularCom401([U401], { sonda: 'morta' });
   assert.equal(q.chamadas, 1, 'a estrela saiu de novo depois de a sessão cair');
-  assert.deepEqual(q.avisos, [], 'a queda da sessão ganhou um aviso a mais do guardar');
   // Sonda sem resposta (rede): nada confirmado, então nada sai de novo — e a
   // falha não é calada.
   const s = await pularCom401([U401], { sonda: 'nada' });
@@ -234,6 +237,47 @@ test('C7 401 que se repete com a sessão viva: "não deu pra guardar" — nunca 
   assert.equal(c.conferiu, 0, 'CONTROLE: o guardar que deu certo conferiu a sessão');
   assert.equal(c.chamadas, 1);
   assert.deepEqual(c.conquistas, ['guardados']);
+});
+
+// ── R6-2-08: a estrela que se perde na QUEDA da sessão não é calada ──────────
+// "Quem avisa é a queda" — e com a extensão renovando, a queda diz "Acesso
+// renovado pelo WME — sua fila continua aqui", com o pedido pulado fora da tela
+// e sem a estrela, que não é mandada de novo (MEDIDO no navegador, s46:
+// `guardar-pedido` 1× com 401 e só o aviso da renovação). O CLAUDE.md promete
+// que a falha da estrela "NUNCA é calada"; as escritas do lightbox nessa mesma
+// situação avisam (`escritaDoLightboxSemSessao`).
+test('R6-2-08: a sessão cai com a estrela no ar e a fila FICA (a renovação) — o aviso diz que a estrela não foi guardada', async () => {
+  const q = await pularCom401([U401], { sonda: 'morta' });
+  assert.equal(q.chamadas, 1, 'PRÉ-CONDIÇÃO: a estrela não sai de novo depois da queda');
+  assert.deepEqual(q.avisos, [{ msg: 'toast.guardarFalhou', tipo: 'error' }],
+    `a estrela se perdeu calada na queda da sessão: ${JSON.stringify(q.avisos)}`);
+  assert.deepEqual(q.conquistas, []);
+  // CONTROLE: o "Sair" (a fila vai embora) — não há a quem avisar, e nada é dito.
+  const s = await pularCom401([U401], { sonda: 'sair' });
+  assert.equal(s.chamadas, 1);
+  assert.deepEqual(s.avisos, [], 'o aviso da estrela saiu depois do "Sair", na tela de entrada');
+});
+
+// ── R6-2-09: o aviso de falha diz QUE a estrela falhou ────────────────────────
+// A frase do recurso ("Não deu pra guardar o pedido") era só o último recurso: o
+// motivo do servidor ou da rede ganhava sozinho ("Erro de conexão", "Servidor
+// Waze indisponível") ~3 s depois do ↑, com o pedido já fora da tela — nada
+// ligava o aviso à estrela (MEDIDO, s37). Agora a frase da estrela vem SEMPRE, e
+// o motivo de complemento.
+test('R6-2-09: a falha da estrela diz que a estrela não foi guardada — e o motivo de complemento', async () => {
+  const rede = await pularCom401([{ success: false, error: 'Erro de conexão', errorCategory: 'transient' }]);
+  assert.deepEqual(rede.avisos, [{ msg: 'toast.guardarFalhou · Erro de conexão', tipo: 'error' }],
+    `o aviso não diz que foi a estrela que falhou: ${JSON.stringify(rede.avisos)}`);
+  const waze = await pularCom401([{ success: false, error: 'Servidor Waze indisponível', errorCategory: 'transient', httpCode: 503 }]);
+  assert.deepEqual(waze.avisos, [{ msg: 'toast.guardarFalhou · Servidor Waze indisponível', tipo: 'error' }]);
+  // CONTROLE: a falha sem texto nenhum — só a frase da estrela (era o único caso em que ela aparecia).
+  const mudo = await pularCom401([{ success: false }]);
+  assert.deepEqual(mudo.avisos, [{ msg: 'toast.guardarFalhou', tipo: 'error' }]);
+  // E nos 4 idiomas a frase da estrela existe e não termina em pontuação que
+  // brigue com o " · " do complemento.
+  const frases = [...I18N.matchAll(/'toast\.guardarFalhou':\s*'([^']*)'/g)].map((m) => m[1]);
+  assert.equal(frases.length, 4, `achei ${frases.length} frases da estrela, e são 4 idiomas`);
+  for (const frase of frases) assert.ok(frase && !/[.:;]$/.test(frase), `"${frase}" briga com o " · " do complemento`);
 });
 
 // ── 3. O QUE O APP FAZ É O QUE ELE DIZ ─────────────────────────────────────
