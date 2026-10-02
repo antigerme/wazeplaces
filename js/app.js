@@ -1061,6 +1061,15 @@ function devolverFoco(alvo) {
     const reserva = focavelNaTela(ultimoFocoForaDasCamadas) && !dentroDeCamada(ultimoFocoForaDasCamadas)
         ? ultimoFocoForaDasCamadas : null;
     for (const el of [alvo, reserva, document.getElementById('helpBtn')]) {
+        // O <body> (ou a raiz) não é alvo: é o foco PERDIDO. O modal que o app
+        // abre sozinho — o "Acesso restrito" do login (o botão que entrou fica
+        // `disabled` durante a validação), o da recusa na abertura, o "Como
+        // funciona" da primeira vez — nasce com o foco no <body>, e o
+        // `focavelNaTela` o aceita: fechar devolvia o foco pra lá, e quem usa
+        // teclado ou leitor de tela recomeçava do topo (auditoria de
+        // 2026-10-02, R6-1-07). Cai na reserva e no ⓘ da Ajuda, como o
+        // `fecharCamadasAbertas` já fazia.
+        if (el === document.body || el === document.documentElement) continue;
         if (focavelNaTela(el)) { el.focus(); return; }
     }
 }
