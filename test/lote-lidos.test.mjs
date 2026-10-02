@@ -30,18 +30,23 @@ const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
 // `pendentes`: as ações de foto na janela do Desfazer ({ aprovacao, exclusao, renomeacao }).
 // `carimboReal`: o `carimboDoGesto` e o `ondeAgora` DE VERDADE, com o país e o
 // dia do filtro mudáveis por `lugar` (R6-7-4); sem ele, um carimbo neutro.
-function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pendentes = {}, falhar = false, carimboReal = false } = {}) {
+// `semSessao`/`renovando`: a sessão caiu, e a extensão está (ou não) renovando
+// em silêncio (`extRenovando`) — o aviso de quem toca vem do `avisoDaTrava`.
+function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pendentes = {}, falhar = false, carimboReal = false,
+  semSessao = false, renovando = false } = {}) {
   const lugar = { pais: 30, dia: '2026-09-25' };
   const historicoCompleto = [];
   const lidos = new Set();
   const chamadas = [];
   const toasts = [];
+  const mensagens = [];   // o TEXTO de cada aviso (a chave, pelo `t` de mentira)
+  const modais = [];      // os diálogos abertos
   const historico = [];
   const log = [];
   const tela = [];
   const pousos = [];
   const mensagem = { textContent: '' };
-  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
+  const AppState = { authenticated: !semSessao, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
     pendingAction: null, inFlightActions: 0, fetchEpoch: 0, filters: { stateId: '', myArea: false } };
   const processar = (itens) => {
     if (falhar) return { success: false, errorCategory: 'unknown', httpCode: 406 };
@@ -64,7 +69,8 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     AppState, Treino: { ativo: false }, epocaDaSessao: 0,
     LOTE_LIDOS_PEDACO: Number(/^const LOTE_LIDOS_PEDACO = (\d+);/m.exec(APP_SEM)[1]),
     chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
-    closeModal: () => {}, openModal: () => {}, showToast: (m, tipo) => toasts.push(tipo), msgDoServidor: (r, d) => d,
+    closeModal: () => {}, openModal: (id) => modais.push(id),
+    showToast: (m, tipo) => { toasts.push(tipo); mensagens.push(m); }, msgDoServidor: (r, d) => d,
     t: (k, v) => (v && v.n != null ? k + '#' + v.n : k),
     removeUndoBanner: () => {}, updateInFlightIndicator: () => {}, callWithRetry: (fn) => fn(),
     API: {
@@ -87,17 +93,21 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
     aprovacaoPendente: pendente('aprovacao'), exclusaoPendente: pendente('exclusao'), renomeacaoPendente: pendente('renomeacao'),
+    // O aviso de quem toca sem sessão (R6-2-01): o do `avisoDaTrava` de verdade,
+    // que lê se a extensão está renovando (`extRenovando`, desde o R6-1-03: só
+    // depois do `aguarde` da ponte).
+    extRenovando: renovando,
   };
   // O momento do gesto (R6-7-4): o de verdade, ou um neutro.
   if (!carimboReal) deps.carimboDoGesto = () => ({ dia: null, onde: null });
   const chaves = Object.keys(deps);
   const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'marcarEmAndamento',
-    'devolverPedidoRecusado', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
+    'devolverPedidoRecusado', 'avisoDaTrava', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
     .map(fatiar).join('\n');
   app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
     + '\nreturn { openBatchReadConfirm, handleBatchMarkRead, acoesTravadas };')(...chaves.map((k) => deps[k]));
-  return { app, AppState, lidos, chamadas, toasts, historico, log, tela, emAndamento, pousos, entraram, mensagem, soltar: () => soltar(),
-    lugar, historicoCompleto };
+  return { app, AppState, lidos, chamadas, toasts, mensagens, modais, historico, log, tela, emAndamento, pousos, entraram, mensagem,
+    soltar: () => soltar(), lugar, historicoCompleto };
 }
 const umTique = () => new Promise((ok) => setTimeout(ok, 0));
 
@@ -314,4 +324,50 @@ test('R6-7-4: trocar o país (e virar o dia) com o "Marcar todos" no ar não mud
   assert.deepEqual(m.historico, [['read', 3]], 'PRÉ-CONDIÇÃO: o lote pousou');
   assert.deepEqual(m.historicoCompleto, [{ dia: '2026-09-25', onde: '30' }],
     `o "Marcar todos" entrou no Histórico no país (ou no dia) de DEPOIS do "Aplicar": ${JSON.stringify(m.historicoCompleto)}`);
+});
+
+// ── R6-2-01: o "Marcar todos" SEM SESSÃO não some calado ─────────────────────
+// Durante a renovação silenciosa pela extensão (até 8 s, com os Filtros
+// abertos), o diálogo contava e o toque dizia "Marcando 3 como lidos…" — e nada
+// saía: sem token o `api.js` devolve "sem sessão" sem ir à rede, e o
+// `handleUnauthorized` volta na hora. Depois vinha "Acesso renovado… sua fila
+// continua aqui" com os pedidos pendentes (MEDIDO no navegador, s38, Chromium e
+// WebKit: 0 `marcar-lido`, lidos 20). A guarda é a do "Rejeitar os N", com o
+// aviso do `avisoDaTrava` de verdade.
+test('R6-2-01: sem sessão, o "Marcar todos" não abre o diálogo — e diz por quê (a espera da sessão na renovação)', () => {
+  const m = montar([pedido(1), pedido(2), pedido(3)], { semSessao: true, renovando: true });
+  m.app.openBatchReadConfirm();
+  assert.deepEqual(m.modais, [], 'o diálogo abriu sem sessão: o confirmar não manda nada');
+  assert.deepEqual(m.mensagens, ['toast.esperaSessao'],
+    `o toque sem sessão ficou calado (ou com outro aviso): ${JSON.stringify(m.mensagens)}`);
+  // Fora da renovação (sem a extensão), o aviso é a sessão expirada — o mesmo da trava do card.
+  const fora = montar([pedido(1)], { semSessao: true });
+  fora.app.openBatchReadConfirm();
+  assert.deepEqual([fora.modais, fora.mensagens], [[], ['api.error.noSession']]);
+  // CONTROLE: com a sessão viva, o diálogo abre contando os três.
+  const c = montar([pedido(1), pedido(2), pedido(3)]);
+  c.app.openBatchReadConfirm();
+  assert.deepEqual(c.modais, ['batchReadModal']);
+  assert.equal(c.mensagem.textContent, 'modal.batchRead.bodyPlural#3');
+});
+
+test('R6-2-01: a sessão cai com o diálogo ABERTO — o confirmar não diz "Marcando", não manda nada e diz por quê', async () => {
+  const m = montar([pedido(1), pedido(2), pedido(3)], { renovando: true });
+  m.app.openBatchReadConfirm();
+  assert.deepEqual(m.modais, ['batchReadModal'], 'PRÉ-CONDIÇÃO: com a sessão viva o diálogo abriu');
+  m.AppState.authenticated = false;                 // a queda, e a extensão renovando
+  await m.app.handleBatchMarkRead();
+  assert.deepEqual(m.chamadas, [], 'o lote foi mandado sem sessão');
+  assert.ok(!m.mensagens.some((x) => /^toast\.batchMarking/.test(x)),
+    `disse "Marcando…" de um lote que não sai: ${JSON.stringify(m.mensagens)}`);
+  assert.deepEqual(m.mensagens, ['toast.esperaSessao'], 'o lote que não saiu ficou calado');
+  assert.equal(m.AppState.stats.read, 0);
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], 'os pedidos saíram da fila sem ser marcados');
+  assert.deepEqual(m.log, [], 'o lote sem sessão chegou a despachar pendências e ligar a trava dele');
+  // CONTROLE: a sessão viva no confirmar — o lote sai e conta.
+  const c = montar([pedido(1), pedido(2), pedido(3)], { renovando: true });
+  c.app.openBatchReadConfirm();
+  await c.app.handleBatchMarkRead();
+  assert.deepEqual(c.chamadas, [3]);
+  assert.deepEqual(c.mensagens, ['toast.batchMarkingPlural#3', 'toast.batchDonePlural#3']);
 });

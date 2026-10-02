@@ -19050,6 +19050,15 @@ let loteDeLidosEmVoo = false;
 const LOTE_LIDOS_PEDACO = 25;
 
 function openBatchReadConfirm() {
+    // Sem sessão o lote não sai — e saía CALADO: durante a renovação pela
+    // extensão (até 8 s, com os Filtros abertos), o diálogo contava, o toque
+    // dizia "Marcando 3 como lidos…", o `api.js` devolvia "sem sessão" sem ir à
+    // rede e o `handleUnauthorized` voltava na hora (já sem sessão). Depois vinha
+    // "Acesso renovado… sua fila continua aqui", com os pedidos pendentes, e a
+    // pessoa achando que tinha marcado (auditoria de 2026-10-02, R6-2-01). É a
+    // guarda do "Rejeitar os N" (`rejeitarLoteDoAutor`), com o mesmo aviso: na
+    // renovação, o da espera da sessão; fora dela, "Sessão expirada".
+    if (!AppState.authenticated) { showToast(t(avisoDaTrava()), 'info'); return; }
     // Marcar o LOTE também escreve. No treino a fila é de exemplos: deixar o
     // botão vivo mandaria um lote de ids inertes ao Waze — sem efeito, mas é
     // requisição que ninguém pediu, e o aviso mente sobre o que aconteceu.
@@ -19076,6 +19085,10 @@ async function handleBatchMarkRead() {
     // Só o que o diálogo CONTOU e segue na fila (ver `loteDeLidosContado`).
     const contados = new Set(loteDeLidosContado || []);
     loteDeLidosContado = null;
+    // A sessão caiu com o diálogo ABERTO (a renovação pela extensão): o lote não
+    // sai, e o diálogo já fechou com o toque — diz por quê (R6-2-01, ver o
+    // `openBatchReadConfirm`). Antes do "Marcando N…", que mentiria.
+    if (!AppState.authenticated) { showToast(t(avisoDaTrava()), 'info'); return; }
     // E o que entrou em andamento com o diálogo aberto também fica de fora (V7).
     const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p))
         && !pedidosEmAndamento.has(chaveDoPedido(p)));
