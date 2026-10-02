@@ -1059,11 +1059,12 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
+function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null, respostaQr = null } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
-  const copiados = [], toasts = [];
+  const copiados = [], toasts = [], cancelados = [], fechados = [], conferencias = [];
+  let api = null;
   const { registro, document } = domDeMentira({
     pairCode: {}, pairExpiry: {}, pairCodeReveal: {}, pairShowCodeBtn: {}, pairCodeExpiry: {}, pairAnuncio: {},
     // As instruções (a da câmera e a do código curto) e os dois botões de baixo
@@ -1100,12 +1101,20 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
     pairTickers: new Map(),
     pairQrVenceEm: 0,
     pareamentosEmitidos: new Set(),
-    openModal() {}, closeModal() {},
+    // A época da sessão (o "Sair" e a queda a sobem: `sair()`) e a abertura do
+    // diálogo (R6-1-09).
+    epocaDaSessao: 0, aberturaDoPareamento: 0,
+    // Fechar o diálogo roda a limpeza dele, como o `closeModal` de verdade.
+    openModal() {}, closeModal: (id) => { fechados.push(id); api && api.LIMPEZA_AO_FECHAR[id] && api.LIMPEZA_AO_FECHAR[id](); },
+    // A conferência da sessão (o 401 não afirma a queda sozinho — R6-1-08).
+    handleUnauthorized: () => conferencias.push('confere'),
     // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
-    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5).
+    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5);
+    // `respostaQr`, o do QR (R6-1-09).
     API: { criarPareamento: async (op) => (op && op.comCodigo
       ? (respostaCurto ? respostaCurto() : { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg })
-      : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+      : (respostaQr ? respostaQr() : { success: true, code: 'SEGREDODOQR', expiresIn: 300 })),
+      cancelarPareamento: async (c) => { cancelados.push(c); return { success: true }; } },
     showToast: (m, tipo) => toasts.push([m, tipo]),
     msgDoServidor: (r, f) => f,
     t: (k) => k,
@@ -1120,14 +1129,15 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   // A limpeza do modal (o fechar por qualquer caminho) roda no MESMO escopo.
   const iLimpeza = APP_SEM.indexOf('const LIMPEZA_AO_FECHAR = {');
   assert.ok(iLimpeza >= 0, 'CONTROLE: o LIMPEZA_AO_FECHAR sumiu do app.js');
-  const api = montar(
+  api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
      'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
-     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento'],
-    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
-    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento', 'pareamentoTardio'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR', 'sair'],
+    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';\nfunction sair() { epocaDaSessao++; }');
   return {
-    ...api, registro, document, copiados, toasts,
+    ...api, registro, document, copiados, toasts, cancelados, fechados, conferencias,
+    emitidos: deps.pareamentosEmitidos,
     limpezasDoQr: () => limpezasDoQr,
     andar: (ms) => { agora += ms; },
     tique: () => { for (const fn of [...intervalos.values()]) fn(); },
@@ -1420,6 +1430,88 @@ test('R56-5: Enter no "Sem câmera?" — o código aparece e o foco vai ao "Copi
   d.registro.pairShowCodeBtn.focus();
   await d.revelarCodigoPareamento({ detail: 1, currentTarget: d.registro.pairShowCodeBtn });
   assert.equal(d.document.activeElement.id, 'BODY', `o toque no "Sem câmera?" moveu o foco pro ${d.document.activeElement.id}`);
+});
+
+// ── R6-1-09 (2026-10-02): o código que chega DEPOIS do "Sair" ────────────────
+// Rede lenta: a pessoa fecha o diálogo e dá "Sair" antes de o QR chegar. O
+// "Sair" cancela os códigos que conhecia; o que chegava depois entrava no
+// `pareamentosEmitidos` já limpo — seguia valendo 5 min no servidor (abrindo
+// uma sessão NOVA da conta que acabou de sair) e ficava no DOM da tela de
+// entrada, com o segredo no `data-raw`, o "Copiar link" habilitado e a contagem
+// correndo (MEDIDO no Chromium com a resposta presa 2,5 s).
+function presa() {
+  let soltar;
+  const p = new Promise((ok) => { soltar = ok; });
+  return { resposta: () => p, soltar: (r) => soltar(r) };
+}
+const vazioDoPareamento = (p) => ({
+  raw: p.registro.pairCode.dataset.raw, curto: p.registro.pairCode.dataset.curto,
+  copiar: p.registro.pairCopyLinkBtn.disabled, contagem: p.intervalosVivos(),
+  revelado: !p.registro.pairCodeReveal.classList.contains('hidden'), emitidos: [...p.emitidos],
+});
+
+test('R6-1-09: o código que chega depois do "Sair" (ou do diálogo fechado) é CANCELADO e não escreve nada', async () => {
+  // O "Sair" de verdade: a Ajuda esconde o diálogo (com a limpeza dele) e a
+  // época da sessão sobe.
+  const s = presa();
+  const p = pareamentoDeMentira({ respostaQr: s.resposta });
+  const pedido = p.abrirPareamento();
+  p.LIMPEZA_AO_FECHAR.pairShowModal();
+  p.sair();
+  s.soltar({ success: true, code: 'TARDIOQR', expiresIn: 300 });
+  await pedido;
+  assert.deepEqual(p.cancelados, ['TARDIOQR'], 'DEFEITO: o QR que chegou depois do "Sair" seguiu valendo no servidor');
+  assert.deepEqual(vazioDoPareamento(p), { raw: undefined, curto: undefined, copiar: true, contagem: 0, revelado: false, emitidos: [] },
+    'o QR que chegou depois do "Sair" ficou no DOM (segredo, "Copiar link" ou contagem)');
+  assert.deepEqual(p.toasts, [], 'o "Sair" ganhou um aviso de falha de um pedido que ninguém espera mais');
+
+  // Só o diálogo FECHADO (sem "Sair"): o código que chega é de um diálogo que não existe.
+  const f = presa();
+  const q = pareamentoDeMentira({ respostaQr: f.resposta });
+  const pq = q.abrirPareamento();
+  q.LIMPEZA_AO_FECHAR.pairShowModal();
+  f.soltar({ success: true, code: 'FECHADOQR', expiresIn: 300 });
+  await pq;
+  assert.deepEqual(q.cancelados, ['FECHADOQR'], 'o QR que chegou com o diálogo já fechado seguiu valendo');
+  assert.deepEqual(vazioDoPareamento(q).emitidos, []);
+  assert.equal(q.intervalosVivos(), 0, 'a contagem de um diálogo fechado ficou correndo');
+
+  // Só a SESSÃO trocada, com o diálogo ainda na tela (a queda, com a extensão
+  // renovando): o código é cancelado, e o diálogo fecha dizendo que não deu —
+  // senão ficaria um QR vazio esperando nada.
+  const r = presa();
+  const w = pareamentoDeMentira({ respostaQr: r.resposta });
+  const pw = w.abrirPareamento();
+  w.sair();
+  r.soltar({ success: true, code: 'QUEDAQR', expiresIn: 300 });
+  await pw;
+  assert.deepEqual(w.cancelados, ['QUEDAQR'], 'o QR da sessão que caiu seguiu valendo');
+  assert.deepEqual(w.fechados, ['pairShowModal'], 'o diálogo ficou na tela sem QR nenhum');
+  assert.deepEqual(w.toasts, [['toast.pairCreateError', 'error']]);
+  assert.equal(w.registro.pairCode.dataset.raw, undefined);
+
+  // O código CURTO, pelo mesmo caminho: pedido, diálogo fechado e "Sair" com ele no ar.
+  const c = presa();
+  const k = pareamentoDeMentira({ respostaCurto: c.resposta });
+  await k.abrirPareamento();
+  const pk = k.revelarCodigoPareamento();
+  k.LIMPEZA_AO_FECHAR.pairShowModal();
+  k.sair();
+  c.soltar({ success: true, code: 'TARDE6', curto: true, expiresIn: 300 });
+  await pk;
+  assert.deepEqual(k.cancelados, ['TARDE6'], 'o código curto que chegou depois do "Sair" seguiu valendo');
+  assert.ok(!k.emitidos.has('TARDE6'));
+  assert.equal(k.registro.pairCode.dataset.curto, undefined, 'o código curto que chegou depois do "Sair" foi pra tela');
+  assert.equal(k.registro.pairCodeReveal.classList.contains('hidden'), true);
+
+  // CONTROLE: a resposta ANTES do "Sair" entra (o "Sair" a cancela pelos
+  // emitidos) — sem isto, "nada escreveu" passaria com o pareamento quebrado.
+  const ok = pareamentoDeMentira();
+  await ok.abrirPareamento();
+  assert.equal(ok.registro.pairCode.dataset.raw, 'SEGREDODOQR', 'CONTROLE: o QR não chegou ao DOM nem com a sessão de pé');
+  assert.deepEqual([...ok.emitidos], ['SEGREDODOQR']);
+  assert.deepEqual(ok.cancelados, []);
+  assert.equal(ok.intervalosVivos(), 1);
 });
 
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────

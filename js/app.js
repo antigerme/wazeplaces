@@ -934,6 +934,10 @@ const LIMPEZA_AO_FECHAR = {
     // expandido pra próxima abertura — o gotcha dos modais deste projeto.
     filtersModal() { autoresExpandido = false; escadaAberta = false; conquistaTocada = null; novasDestaAbertura = null; },
     pairShowModal() {
+        // A resposta de um pedido de código que ainda voava é de um diálogo que
+        // fechou: não escreve nada, e o código que ela trouxer é cancelado
+        // (`pareamentoTardio`, R6-1-09).
+        aberturaDoPareamento++;
         pararTickerPareamento();
         // O código é credencial e já não vale nada aqui: não fica desenhado
         // esperando alguém reabrir o modal e escanear um QR morto.
@@ -1393,6 +1397,27 @@ const pairTickers = new Map();
 // guardado). Quem consulta é o "Copiar link": ele não entrega link vencido.
 let pairQrVenceEm = 0;
 
+// A ABERTURA do diálogo do QR em curso: sobe a cada abertura e a cada fechamento
+// (a limpeza dele, por qualquer caminho). Com a época da sessão, é o que diz se
+// a resposta de um pedido de código ainda é DESTE diálogo (ver
+// `pareamentoTardio`).
+let aberturaDoPareamento = 0;
+
+// O código pedido pra um diálogo que JÁ NÃO É ESTE — fechado (o "Sair" passa
+// pela Ajuda, que o esconde com a limpeza), ou com a sessão trocada embaixo
+// dele (o "Sair" noutra aba, a queda). A resposta que chega depois não escreve
+// nada, e o código que ela traz é CANCELADO no servidor. Antes ele entrava no
+// `pareamentosEmitidos` que o "Sair" já tinha limpado: seguia valendo 5 min (e
+// abria uma sessão nova da conta que acabou de sair), e ficava no DOM da tela de
+// entrada, com o "Copiar link" habilitado e a contagem correndo — MEDIDO com a
+// resposta chegando 2,5 s depois do "Sair" (auditoria de 2026-10-02, R6-1-09).
+// Devolve se a resposta é de outro diálogo ou de outra sessão.
+function pareamentoTardio(r, epoca, abertura) {
+    if (epoca === epocaDaSessao && abertura === aberturaDoPareamento) return false;
+    if (r && r.success && r.code) API.cancelarPareamento(r.code).catch(() => {});
+    return true;
+}
+
 // Desenha o QR do link de pareamento. É a única forma de conectar que não
 // precisa de instrução nenhuma: aponta a câmera e entra — sem memorizar caminho
 // de menu no outro aparelho, sem trocar de aparelho com um código na cabeça,
@@ -1496,10 +1521,18 @@ async function abrirPareamento() {
 
     // A conta vai junto: o aparelho que resgatar sabe de quem é a sessão NA
     // HORA (ver `resgatarPareamento`, K8).
+    const epoca = epocaDaSessao;
+    const abertura = ++aberturaDoPareamento;
     const r = await API.criarPareamento({ conta: contaAgora() });
-    if (!r.success) {
+    // A resposta de outro diálogo, ou de outra sessão (ver `pareamentoTardio`).
+    // O MESMO diálogo ainda na tela, com a sessão trocada embaixo dele (a queda,
+    // com a extensão renovando), ficaria um QR vazio esperando nada: fecha, como
+    // a falha.
+    const tardio = pareamentoTardio(r, epoca, abertura);
+    if (tardio && abertura !== aberturaDoPareamento) return;
+    if (tardio || !r.success) {
         closeModal('pairShowModal');
-        showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
+        showToast(tardio ? t('toast.pairCreateError') : msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
     // O segredo do QR NÃO é exibido: ele tem 20 símbolos e ninguém vai digitar
@@ -1652,13 +1685,21 @@ async function revelarCodigoPareamento(ev) {
     // Só pelo teclado (`veioDoTeclado`, a regra do C10): quem toca não tem o
     // foco movido.
     const tinhaFoco = veioDoTeclado(ev);
+    const epoca = epocaDaSessao;
+    const abertura = aberturaDoPareamento;
     btn.disabled = true;
     const r = await API.criarPareamento({ comCodigo: true, conta: contaAgora() });
-    if (!r.success) {
+    // A resposta de outro diálogo, ou de outra sessão (ver `pareamentoTardio`):
+    // o código que veio é cancelado; com o diálogo fechado, nada se escreve. O
+    // MESMO diálogo ainda na tela (a sessão trocada embaixo dele) volta como a
+    // falha.
+    const tardio = pareamentoTardio(r, epoca, abertura);
+    if (tardio && abertura !== aberturaDoPareamento) return;
+    if (tardio || !r.success) {
         btn.disabled = false;
         // O botão volta, e o foco com ele — ou o "Fechar", se o QR venceu nesse meio.
         if (tinhaFoco) devolverFocoNoPareamento(btn, ['pairShowCodeBtn', 'pairShowClose']);
-        showToast(msgDoServidor(r, t('toast.pairCreateError')), 'error');
+        showToast(tardio ? t('toast.pairCreateError') : msgDoServidor(r, t('toast.pairCreateError')), 'error');
         return;
     }
     pareamentosEmitidos.add(r.code);
