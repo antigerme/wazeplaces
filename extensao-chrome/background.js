@@ -77,7 +77,7 @@ async function autenticar(urlDaAba) {
       const cookies = await coletarCookies(urlDaAba);
       if (!cookies.length) {
         if (tentativa < MAX_TENTATIVAS) { await dormir(ESPERAS_MS[tentativa - 1]); continue; }
-        return { success: false, semLogin: true, error: 'Nenhum cookie do Waze encontrado.' };
+        return { success: false, semLogin: true, errorKey: 'ext.semCookies', error: 'Nenhum cookie do Waze encontrado.' };
       }
 
       const r = await trocarPorToken(formatarNetscape(cookies));
@@ -95,14 +95,20 @@ async function autenticar(urlDaAba) {
 
       // 400 com cookie inválido/expirado é "não está logado no WME" — insistir
       // não muda nada e só atrasa a tela. Retry é pra falha de REDE.
+      //
+      // A CHAVE do servidor vai junto da frase, em toda falha: quem mostra é o
+      // painel no WME, na língua dele, e a frase crua é sempre a portuguesa do
+      // servidor — no cookie vencido, mandando "exportar os cookies" a quem usa
+      // a extensão (auditoria da rodada 6, R66-2). As falhas daqui mesmo levam
+      // chave própria (`ext.*`), pelo mesmo motivo.
       if (r && r.error && /expirad|inválid|invalid|csrf/i.test(String(r.error))) {
-        return { success: false, semLogin: true, error: r.error };
+        return { success: false, semLogin: true, error: r.error, errorKey: r.errorKey, errorVars: r.errorVars };
       }
       if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return r || { success: false, error: 'A API não devolveu token.' };
+      else return r || { success: false, errorKey: 'ext.semToken', error: 'A API não devolveu token.' };
     } catch (e) {
       if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return { success: false, error: 'Erro de conexão: ' + e.message };
+      else return { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: ' + e.message };
     }
   }
 }
@@ -118,16 +124,18 @@ chrome.runtime.onMessage.addListener((req, sender, responder) => {
 
   // Pedido vindo do botão no WME. Mesma autenticação; a diferença é que aqui
   // ainda não existe aba do app, então o token vai por `chrome.storage` e a
-  // ponte o entrega assim que a aba abre.
+  // ponte o entrega quando o app da aba nova pede — com a CONTA, como no login
+  // pela ponte, e com a HORA, porque pendente velho não se entrega (ver a ponte).
   if (req.action === 'abrirPlaces') {
     autenticar(sender.tab ? sender.tab.url : null).then((r) => {
       if (r && r.success && r.sessionToken) {
-        chrome.storage.local.set({ token_pendente: r.sessionToken }, () => {
+        const pendente = { token: r.sessionToken, conta: r.conta || null, em: Date.now() };
+        chrome.storage.local.set({ token_pendente: pendente }, () => {
           chrome.tabs.create({ url: API_BASE + '/' });
           responder({ success: true });
         });
       } else {
-        responder(r || { success: false, error: 'Falha desconhecida' });
+        responder(r || { success: false, errorKey: 'ext.desconhecida', error: 'Falha desconhecida' });
       }
     });
     return true;

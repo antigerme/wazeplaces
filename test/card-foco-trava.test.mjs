@@ -64,7 +64,7 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
     // A1): aqui não há nenhuma.
     aprovacaoDaTelaNoAr: () => false,
     // A extensão renovando em silêncio (R5-2-07): aqui, não.
-    extPerguntando: false,
+    extPerguntando: false, extRenovando: false,
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
@@ -736,4 +736,215 @@ test('"Ver os N" da FOLHA pelo TECLADO leva o foco à barra "Primeiro os de…" 
 test('"Ver os N" da FOLHA: o ouvinte passa o evento (sem ele o teclado não é reconhecido)', () => {
   assert.match(fatiar('abrirFolhaDoAutor'), /getElementById\('autorVer'\)\.addEventListener\('click', \(ev\) => verPelaFolha\(ev, place\)\);/,
     'o "Ver os N" da folha voltou a não saber se veio do teclado');
+});
+
+// ── R6-2-12: o "Esquecer" da FOLHA pelo teclado ─────────────────────────────────
+// Enter no "✕ N" abre a folha; Enter em "Esquecer" fecha a folha — que devolve o
+// foco ao "✕ N" — e o card é refeito sem o selo (a contagem foi apagada): o foco
+// caía no <body> (MEDIDO no navegador, s44, Chromium e WebKit; o CONTROLE, Esc na
+// folha, volta ao "✕ N"). O terceiro botão que fecha a folha, com o destino da
+// barra que some: o "Ver +N" do card, se houver; senão ✕ ↑ ✓ (e, travado, o ✕
+// prometido). As funções de verdade.
+function montarFolhaEsquecer({ comVerMais = false, travado = false } = {}) {
+  const d = documentoDeMentira();
+  const seloReinc = botaoQuePerde(d, '✕ N');
+  const novoCard = () => {
+    const bs = { '.card-btn-reject': botaoQuePerde(d, '✕'), '.card-btn-skip': botaoQuePerde(d, '↑'),
+      '.card-btn-read': botaoQuePerde(d, '✓') };
+    for (const b of Object.values(bs)) b.disabled = travado;
+    if (comVerMais) bs['.selo-lote'] = botaoQuePerde(d, 'Ver +1');
+    return { bs, querySelector: (s) => bs[s] || null };
+  };
+  const estado = { card: null, esqueceu: null };
+  const deps = {
+    document: d, cardDaFrente: () => estado.card,
+    closeModal: () => seloReinc.focus(),             // a folha devolve o foco a quem a abriu
+    esquecerAutor: (chave) => { estado.esqueceu = chave; },
+    // O card sai — e o "✕ N" com ele —, e o refeito nasce sem o selo.
+    removeCurrentCardEl: () => { seloReinc.isConnected = false; if (d.activeElement === seloReinc) d.activeElement = d.body; },
+    showCurrentPlace: () => { estado.card = novoCard(); },
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let focoDoTeclado = null;', fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'),
+    fatiar('veioDoTeclado'), fatiar('focarDepoisDoFocoNoAutor'), fatiar('esquecerPelaFolha'),
+    'return { esquecerPelaFolha, pendente: () => focoDoTeclado };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  return { app, d, estado, esquecer: botaoQuePerde(d, 'Esquecer') };
+}
+
+test('R6-2-12: "Esquecer" da FOLHA pelo TECLADO leva o foco ao card refeito — ao "Ver +N", senão ao ✕', () => {
+  const m = montarFolhaEsquecer();
+  m.esquecer.focus();
+  m.app.esquecerPelaFolha({ detail: 0, currentTarget: m.esquecer }, '777');
+  assert.equal(m.estado.esqueceu, '777', 'o "Esquecer" deixou de esquecer pela chave');
+  assert.equal(m.d.activeElement, m.estado.card.bs['.card-btn-reject'],
+    `DEFEITO: pelo teclado o foco ficou em ${m.d.activeElement && m.d.activeElement.nome}`);
+  // Com outro pedido do autor na fila, o card refeito tem o "Ver +N" — é ele o primeiro.
+  const v = montarFolhaEsquecer({ comVerMais: true });
+  v.esquecer.focus();
+  v.app.esquecerPelaFolha({ detail: 0, currentTarget: v.esquecer }, '777');
+  assert.equal(v.d.activeElement, v.estado.card.bs['.selo-lote'], 'com o "Ver +N" no card, o foco não foi a ele');
+  // Travado (a janela do Desfazer de antes ainda corre): o ✕ fica prometido.
+  const t = montarFolhaEsquecer({ travado: true });
+  t.esquecer.focus();
+  t.app.esquecerPelaFolha({ detail: 0, currentTarget: t.esquecer }, '777');
+  assert.equal(t.app.pendente(), '.card-btn-reject', 'com o card travado o ✕ não ficou prometido');
+  // CONTROLES: o mouse e o dedo (detail 1) e o .click() de script não movem o foco.
+  for (const [rotulo, ev, focado] of [['mouse', { detail: 1 }, true], ['script', { detail: 0 }, false]]) {
+    const c = montarFolhaEsquecer();
+    if (focado) c.esquecer.focus(); else c.d.activeElement = c.d.body;
+    c.app.esquecerPelaFolha({ ...ev, currentTarget: c.esquecer }, '777');
+    assert.equal(c.estado.esqueceu, '777');
+    assert.equal(c.d.activeElement, c.d.body, `${rotulo}: o "Esquecer" moveu o foco pro card`);
+    assert.equal(c.app.pendente(), null, `${rotulo}: o foco ficou prometido sem o teclado`);
+  }
+});
+
+// ── R6-2-13: "Verificar novamente" e "Tentar novamente" pelo teclado ────────────
+// Os dois somem com o painel quando o card volta, com o foco neles: pelo teclado
+// o foco caía no <body> (MEDIDO no navegador, s45; pelo mouse também fica no
+// <body>, o esperado). O foco é prometido ao ✕ do card que chega — e o painel
+// ESCONDIDO ainda segura o foco até o próximo desenho do navegador: o card que
+// chega antes disso não pode ler esse foco como "a pessoa foi pra outro lugar".
+function montarPainel() {
+  const d = documentoDeMentira();
+  const estado = { travado: false, card: null };
+  const deps = {
+    document: d, acoesTravadas: () => estado.travado, cardDaFrente: () => estado.card, topOpenModal: () => null,
+    Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    'let focoDoTeclado = null;', fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'),
+    fatiar('veioDoTeclado'), fatiar('aplicarFocoDoTeclado'), fatiar('prometerFocoAoCardQueVem'),
+    'return { prometerFocoAoCardQueVem, aplicarFocoDoTeclado, pendente: () => focoDoTeclado };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  let naTela = true;
+  const botao = botaoQuePerde(d, 'Verificar novamente', { getClientRects: () => (naTela ? [1] : []) });
+  const cardNovo = ({ semFoto = false } = {}) => {
+    const bs = { '.card-btn-reject': botaoQuePerde(d, '✕'), '.card-btn-skip': botaoQuePerde(d, '↑'),
+      '.card-btn-read': botaoQuePerde(d, '✓') };
+    if (semFoto) { bs['.card-btn-reject'].disabled = true; bs['.card-btn-read'].disabled = true; }
+    return { bs, querySelector: (s) => bs[s] || null };
+  };
+  // O toque/Enter no botão; o painel some (o navegador ainda não tirou o foco
+  // dele); o card chega e o `renderCurrentCard` aplica o foco prometido.
+  const usar = (ev, { foco = true, card = {} } = {}) => {
+    d.activeElement = foco ? botao : d.body;
+    app.prometerFocoAoCardQueVem({ ...ev, currentTarget: botao });
+    naTela = false;
+    estado.card = cardNovo(card);
+    app.aplicarFocoDoTeclado();
+  };
+  return { app, d, estado, botao, usar };
+}
+
+test('R6-2-13: pelo TECLADO, o card que volta recebe o foco — mesmo com o painel ainda segurando o foco escondido', () => {
+  const m = montarPainel();
+  m.usar({ detail: 0 });
+  assert.equal(m.d.activeElement, m.estado.card.bs['.card-btn-reject'],
+    `DEFEITO: o card voltou e o foco ficou em ${m.d.activeElement && m.d.activeElement.nome}`);
+  assert.equal(m.app.pendente(), null);
+  // Card de FOTO sem a foto: ✕ e ✓ travados, o ↑ é o vivo.
+  const f = montarPainel();
+  f.usar({ detail: 0 }, { card: { semFoto: true } });
+  assert.equal(f.d.activeElement, f.estado.card.bs['.card-btn-skip'], 'o card sem foto não recebeu o foco no ↑');
+  // CONTROLES: o mouse e o dedo (detail 1) e o .click() de script não movem o foco.
+  for (const [rotulo, ev, foco] of [['mouse', { detail: 1 }, true], ['script', { detail: 0 }, false]]) {
+    const c = montarPainel();
+    c.usar(ev, { foco });
+    assert.notEqual(c.d.activeElement, c.estado.card.bs['.card-btn-reject'], `${rotulo}: o foco pulou pro card`);
+    assert.equal(c.app.pendente(), null, `${rotulo}: o foco ficou prometido sem o teclado`);
+  }
+  // E quem pôs o foco num controle VIVO segue ganhando (o Tab durante a busca).
+  const t = montarPainel();
+  t.d.activeElement = t.botao;
+  t.app.prometerFocoAoCardQueVem({ detail: 0, currentTarget: t.botao });
+  const filtros = botaoQuePerde(t.d, 'Filtros');
+  filtros.focus();
+  t.estado.card = { bs: {}, querySelector: () => botaoQuePerde(t.d, '✕') };
+  t.app.aplicarFocoDoTeclado();
+  assert.equal(t.d.activeElement, filtros, 'o foco foi arrancado de onde a pessoa o pôs');
+});
+
+test('R6-2-13: os dois botões dos painéis prometem o foco ANTES de trocar a fila (e antes do `await`)', () => {
+  const ouvintes = fatiar('setupAppListeners');
+  assert.match(ouvintes, /\$\('reloadBtn'\)\.addEventListener\('click', \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*resetQueue\(\);\s*startFetching\(\);/,
+    'o "Verificar novamente" pelo teclado larga o foco no <body> quando o card volta');
+  assert.match(ouvintes, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await /,
+    'o "Tentar novamente" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
+});
+
+// ── O redesenho do MESMO card não é "Novo pedido" (follow-up do lote 10) ──────
+// A região viva do card (`#cardLiveRegion`) diz "Novo pedido: <local>, <tipo>"
+// a quem usa leitor de tela. O card é REDESENHADO por muita coisa que não troca
+// o pedido da frente — a foto excluída sem o Desfazer, a foto que volta pelo
+// Desfazer —, e cada redesenho repetia o anúncio do mesmo pedido (MEDIDO nos
+// dois motores: excluir e desfazer pela tecla z davam dois "Novo pedido" do
+// mesmo local). O `renderCurrentCard` e o `showNoPlaces` de VERDADE; o resto da
+// tela é um buraco negro que aceita qualquer chamada.
+function buracoNegro() {
+  return new Proxy(function () {}, {
+    get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' || typeof k !== 'string' ? undefined : buracoNegro()),
+    apply: () => buracoNegro(), set: () => true,
+  });
+}
+function cardQueAnuncia() {
+  const ditos = [];
+  const regiao = { set textContent(v) { ditos.push(v); }, get textContent() { return ditos.at(-1) || ''; } };
+  const AppState = { queue: [], hasMore: false, currentPlace: null, loadError: false };
+  const deps = {
+    AppState, pedidoAnunciado: null, primeiroCardAnotado: true,
+    t: (k, v) => `${k}:${v.name}`, identidadeDoPlace: (p) => ({ titulo: p.name }), rotuloDoTipo: () => '',
+    document: { getElementById: (id) => (id === 'cardLiveRegion' ? regiao : buracoNegro()) },
+  };
+  const escopo = new Proxy(deps, {
+    has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
+    get: (t, k) => (k === Symbol.unscopables ? undefined : k in t ? t[k] : typeof k === 'string' ? buracoNegro() : undefined),
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  const app = new Function('__escopo', `with (__escopo) {\n${fatiar('renderCurrentCard')}\n${fatiar('showNoPlaces')}
+    return { renderCurrentCard, showNoPlaces };\n}`)(escopo);
+  return { app, AppState, ditos };
+}
+
+test('o card REDESENHADO com o mesmo pedido na frente não anuncia "Novo pedido" — o pedido que MUDA, sim', () => {
+  const m = cardQueAnuncia();
+  const A = { name: 'Padaria A' }, B = { name: 'Padaria B' };
+  m.AppState.queue = [A, B];
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A'], 'CONTROLE: o primeiro card não foi anunciado');
+  m.app.renderCurrentCard();                       // o redesenho (a foto excluída, a que volta)
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A'],
+    'o redesenho do MESMO card repetiu "Novo pedido" ao leitor de tela');
+  m.AppState.queue.shift();                        // o ✕: o pedido da frente muda
+  m.app.renderCurrentCard();
+  assert.equal(m.ditos.at(-1), 'card.live.newRequest:Padaria B', 'CONTROLE: o pedido novo na frente não foi anunciado');
+  m.AppState.queue.unshift(A);                     // o Desfazer devolve A pra frente
+  m.app.renderCurrentCard();
+  assert.equal(m.ditos.at(-1), 'card.live.newRequest:Padaria A', 'o pedido que VOLTOU pra frente não foi anunciado');
+  assert.equal(m.ditos.length, 3);
+});
+
+test('a frente que fica VAZIA zera o anúncio: o mesmo pedido que volta a ela é dito de novo', () => {
+  const A = { name: 'Padaria A' };
+  // Pelo próprio `renderCurrentCard` (a fila acabou e ainda há o que buscar).
+  const m = cardQueAnuncia();
+  m.AppState.queue = [A];
+  m.app.renderCurrentCard();
+  m.AppState.queue = []; m.AppState.hasMore = true;
+  m.app.renderCurrentCard();
+  m.AppState.queue = [A];                          // o Desfazer do último devolve o MESMO pedido
+  m.app.renderCurrentCard();
+  assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A', 'card.live.newRequest:Padaria A'],
+    'o pedido que voltou à frente vazia não foi anunciado');
+  // Pelo "Tudo limpo!" direto (`showNoPlaces`, o lote que leva a fila inteira).
+  const n = cardQueAnuncia();
+  n.AppState.queue = [A];
+  n.app.renderCurrentCard();
+  n.app.showNoPlaces();
+  n.app.renderCurrentCard();
+  assert.equal(n.ditos.length, 2, 'depois do "Tudo limpo!", o pedido que voltou à frente não foi anunciado');
 });

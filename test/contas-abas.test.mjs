@@ -282,6 +282,63 @@ test('A1: CONTROLE — o "Sair" desta aba grava e apaga o aparelho (o espião en
   assert.ok(m.log.includes('toast:toast.loggedOut'));
 });
 
+// ═══ R6-1-11 · a recusa TERMINAL do portão na reconferência ══════════════════
+// O `perfil` reconfere o portão a cada abertura: quem caiu abaixo dele perde a
+// sessão (o servidor a apaga) e vê o "Acesso restrito". Ia pela regra da QUEDA,
+// que deixa o aparelho como está pra a mesma pessoa voltar — mas aqui não há
+// volta, e o "Sair" só existe com sessão: o Histórico, a lista de autores (nome
+// de terceiro) e a fila de saída (id e nome de quem mandou o pedido) ficavam no
+// aparelho sem caminho pra apagar (MEDIDO no Chromium, auditoria de
+// 2026-10-02). Agora sai o que é da conta, pela MESMA lista do "Sair".
+test('R6-1-11: o portão que fecha na reconferência apaga do aparelho o que é da conta — a MESMA lista do "Sair"', async () => {
+  const m = montarSair();
+  // A sessão já caiu (o `derrubarSessao` roda antes) e o servidor já a apagou.
+  m.API.sessionToken = null;
+  m.ap.dados.delete(TOKEN);
+  await m.h.handleLogout({ recusado: true });
+  for (const esperado of ['apaga:' + CONTA_KEY, 'apaga:waze_places_saida', 'apaga:waze_places_history',
+    'apaga:waze_places_conquistas', 'apaga:waze_places_autores', 'grava:' + STATS_KEY, 'grava:' + PREFERENCES_KEY]) {
+    assert.ok(m.ap.escritas.includes(esperado), `DEFEITO: a recusa do portão deixou no aparelho o que o "Sair" apaga (${esperado})`);
+  }
+  assert.deepEqual([m.AppState.history, m.AppState.conquistas, m.AppState.autores], [null, null, null]);
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'presenca'), ['presenca', null], 'o chat guardado ficou no aparelho');
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'offline'), ['offline', null], 'a fila guardada do offline ficou no aparelho');
+  // Não é o "Sair": não há diálogo do "Sair" a fechar (fechar o que não está
+  // aberto mente no diário), nem sessão a destruir — o servidor já a apagou.
+  assert.ok(!m.log.includes('fechou:logoutModal'), 'a recusa "fechou" o diálogo do "Sair", que nem estava aberto');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')), 'a recusa mandou destruir uma sessão que o servidor já apagou');
+  assert.ok(!m.log.includes('setSession:null'), 'a recusa mexeu no token do aparelho de novo (a queda já o tirou)');
+  assert.ok(m.log.includes('toast:toast.loggedOut'), 'o aviso de que os dados saíram não apareceu');
+});
+
+test('R6-1-11: a recusa passa pela limpeza só com a sessão DESTA aba sendo a do aparelho — e antes do diálogo', () => {
+  for (const [caso, guardado, esperado] of [
+    ['a sessão do aparelho', 'tok-A', ['derrubou', 'sair:recusado', 'negado', 'entrada']],
+    // CONTROLE: a sessão guardada é OUTRA (outra aba, talvez outra conta): o
+    // aparelho não é desta, e aqui cai só a memória, como na queda.
+    ['outra sessão no aparelho', 'tok-OUTRA', ['derrubou', 'negado', 'entrada']],
+  ]) {
+    const ap = aparelho({ [TOKEN]: guardado });
+    const log = [];
+    const deps = {
+      safeLS: ap.safeLS, API: { sessionToken: 'tok-A' },
+      // A queda de verdade tira o token do aparelho ANTES de chamar o `depois`:
+      // de quem é o aparelho tem de ser lido antes dela.
+      derrubarSessao: (k, { depois }) => {
+        log.push('derrubou');
+        if (ap.safeLS.get(TOKEN) === deps.API.sessionToken) ap.safeLS.remove(TOKEN);
+        deps.API.sessionToken = null;
+        depois();
+      },
+      handleLogout: (o) => log.push(o && o.recusado === true ? 'sair:recusado' : 'sair:' + JSON.stringify(o)),
+      showAccessDenied: () => log.push('negado'), showAuthScreen: () => log.push('entrada'),
+    };
+    const h = montar(['recusaDoPortao', 'sessaoDestaAbaEhAGuardada'], deps);
+    h.recusaDoPortao({ errorKey: 'srv.err.accessDenied', errorCategory: 'access_denied' });
+    assert.deepEqual(log, esperado, `${caso}: ${log.join(' → ')}`);
+  }
+});
+
 // O fechamento das camadas DE VERDADE no que ele dispara: a foto ampliada fecha
 // pelo `avancarSeAprovado` (que MANDA a aprovação pendente) e a conversa pela
 // limpeza que paga o "lida" esperando a rajada (`presencaPagarLida`).
@@ -291,13 +348,20 @@ function montarSairComCamadas() {
   Object.assign(m.deps, {
     renomeacaoPendente: null, exclusaoPendente: null, placeResolvidoPorAprovacao: null,
     aprovacaoPendente: { enviar: () => saiu.push('aprovação:' + m.API.sessionToken), cancelar: () => { m.deps.aprovacaoPendente = null; } },
-    Presenca: { lidaPendente: '777', timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
+    // A dívida do "lida" mora num conjunto próprio desde o R6-5-1: o "lida" da
+    // rajada que não pode sair (sem o perfil) vira dívida, e o fechamento paga
+    // as dívidas (`presencaPagarDevidas`).
+    Presenca: { lidaPendente: '777', lidaDevendo: new Set(), timers: {} }, PRESENCA_ID: /^\d{1,19}$/,
     presencaMarcarLida: (id) => saiu.push('lida:' + id + ':' + m.API.sessionToken),
   });
-  m.deps.window.Presenca.esquecer = (o) => { m.log.push(['presenca', o || null]); m.deps.Presenca.lidaPendente = null; };
-  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
+  m.deps.window.Presenca.esquecer = (o) => {
+    m.log.push(['presenca', o || null]);
+    m.deps.Presenca.lidaPendente = null;
+    m.deps.Presenca.lidaDevendo.clear();
+  };
+  const fonte = APP_SEM + '\n' + ['presencaPagarLida', 'presencaPagarDevidas', 'presencaEu'].map((n) => fatiarDe(PRESENCA_SEM, n)).join('\n');
   const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada', 'cancelarPendenciasDoLightbox',
-    'avancarSeAprovado', 'presencaPagarLida', 'presencaEu'], m.deps, fonte);
+    'avancarSeAprovado', 'presencaPagarLida', 'presencaPagarDevidas', 'presencaEu'], m.deps, fonte);
   m.deps.fecharCamadasAbertas = () => { m.log.push('camadas'); h.avancarSeAprovado(); h.presencaPagarLida({ fechando: true }); };
   return { ...m, h, saiu };
 }
@@ -311,6 +375,7 @@ test('F2: na OUTRA aba as camadas fecham DEPOIS do que estava pendente — a apr
       `DEFEITO${outraConta ? ' (outra conta)' : ''}: o fechamento das camadas mandou o que estava pendente, com a sessão de quem saiu: ${m.saiu.join(' ')}`);
     assert.equal(m.deps.aprovacaoPendente, null, 'a aprovação na janela não foi cancelada');
     assert.equal(m.deps.Presenca.lidaPendente, null, 'o "lida" pendente ficou pra quem entrar');
+    assert.equal(m.deps.Presenca.lidaDevendo.size, 0, 'o "lida" devido ficou pra quem entrar');
   }
   // CONTROLE: o fechamento com a aprovação pendente e o perfil de pé (a ordem de antes) manda os dois.
   const c = montarSairComCamadas();
@@ -509,7 +574,7 @@ test('A2: relido NO MESMO objeto — o desconto de uma decisão em voo (K7) aind
   assert.equal(A.AppState.stats.rejected, 2);
 });
 
-test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer é da aba que fez o gesto', () => {
+test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer é da aba em que a decisão se confirmou', () => {
   const ap = aparelho({ [STATS_KEY]: { read: 0, rejected: 30, skipped: 0 } });
   const log = [];
   const deps = {
@@ -518,15 +583,20 @@ test('A2: o placar que chega da outra aba só se DESENHA — o aviso do Desfazer
     checkUndoGateUnlock: () => log.push('gate'), setCount: () => log.push('conta'), updatePendingCount: () => log.push('restam'),
     document: { getElementById: () => ({}) },
   };
-  const h = montar(['relerPlacarDeOutraAba', 'placarGuardado', 'desenharPlacar', 'updateStats'], deps);
+  const h = montar(['relerPlacarDeOutraAba', 'placarGuardado', 'desenharPlacar', 'updateStats', 'registrarAcaoConfirmada'], deps);
   h.relerPlacarDeOutraAba();
   assert.equal(deps.AppState.stats.rejected, 30);
   assert.deepEqual(log, ['conta', 'conta', 'conta', 'restam']);
-  assert.ok(!log.includes('gate'), 'a aba que só RELEU o placar comemorou a cota (a do gesto já comemorou)');
-  // CONTROLE: o gesto (o `updateStats`) avalia a cota, como sempre.
+  assert.ok(!log.includes('gate'), 'a aba que só RELEU o placar comemorou a cota (a da decisão já comemorou)');
+  // O gesto também só desenha: o placar é otimista, e a janela do Desfazer
+  // ainda pode devolver o pedido (R6-7-5) — a cota se avalia na confirmação.
   log.length = 0;
   h.updateStats();
-  assert.equal(log[0], 'gate');
+  assert.ok(!log.includes('gate'), 'o GESTO voltou a comemorar a cota, dentro da janela do Desfazer');
+  // CONTROLE: a confirmação avalia a cota (o instrumento enxerga a chamada).
+  log.length = 0;
+  h.registrarAcaoConfirmada('reject', { venueID: 'v1' });
+  assert.ok(log.includes('gate'), 'a confirmação de uma decisão não avalia a cota do Desfazer');
 });
 
 test('A2: os pulados DA OUTRA aba não contam como pulados DESTA fila (o "Tudo limpo!" daqui)', () => {
@@ -657,6 +727,81 @@ test('A3: CONTROLE — sem esquecer as escolhas de A, B cruza a cota calado e ag
   m.h.checkUndoGateUnlock();
   assert.deepEqual(m.toasts, []);
   assert.equal(m.deps.AppState.preferences.undoEnabled === false && m.h.canDisableUndo(), true);
+});
+
+// ═══ R6-7-5 · o aviso "o Desfazer virou opcional" sai na CONFIRMAÇÃO ═══════════
+// O placar é OTIMISTA: o gesto que cruzava a cota comemorava DENTRO da janela do
+// Desfazer, que ainda podia devolver o pedido. Desfeito, o aviso seguia na tela
+// levando a um interruptor travado ("falta 1"), e a marca de "visto" já estava
+// gravada — o desbloqueio de verdade, um pedido depois, nunca era anunciado
+// (auditoria de 2026-10-01, MEDIDO no navegador). Funções DE VERDADE: o gesto (o
+// `updateStats`), a confirmação (`registrarAcaoConfirmada`), a cota e a dica.
+function montarCota() {
+  // L2 (cota 30) com 29 tratados, a linha de base decidida ("ainda não") e 25
+  // janelas sem desfazer nas costas — a dica por comportamento já pediria pra sair.
+  const prefs = { undoEnabled: true, undoGateSeen: false, dicaDesfazerVista: false, semUndoSeguidas: 25 };
+  const ap = aparelho({ [constante('PERFIL_GATE_KEY')]: { rank: 1, isStaff: false }, [PREFERENCES_KEY]: prefs });
+  const toasts = [];
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, PREFERENCES_KEY, PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'),
+    AppState: { preferences: { ...prefs }, stats: { read: 0, rejected: 29, skipped: 0 }, profile: null,
+      devMode: { active: false }, pendingAction: null },
+    preferenciasCarregadas: true, UNDO_GATE_BASE: constante('UNDO_GATE_BASE'), DICA_SEM_UNDO: 20,
+    showToast: (m) => toasts.push(m), t: (k) => k, dispararConfeteNaFila: () => {}, abrirPreferenciaDoUndo: () => {},
+    Treino: { ativo: false },
+  };
+  const h = montar(['savePreferences', 'perfilDoPortao', 'getUndoUnlockThreshold', 'getUndoTreatedCount',
+    'undoGateAtingido', 'pedidosNaJanelaDoDesfazer', 'checkUndoGateUnlock', 'canDisableUndo', 'checkDicaDesfazer',
+    'updateStats', 'desenharPlacar', 'registrarAcaoConfirmada'], deps);
+  const P = { venueID: 'v1', updateRequestID: 'u1' };
+  return { h, deps, toasts, P, prefs: deps.AppState.preferences, stats: deps.AppState.stats };
+}
+
+test('R6-7-5: o gesto que cruza a cota NÃO comemora na janela; desfeito, nada fica — e o desbloqueio de verdade é anunciado', () => {
+  const m = montarCota();
+  // O 30º ✕ (L2: cota 30): o placar sobe no GESTO e a janela abre.
+  m.stats.rejected = 30;
+  m.h.updateStats();
+  m.deps.AppState.pendingAction = { type: 'reject', place: m.P };
+  assert.deepEqual(m.toasts, [], 'comemorou no GESTO — a janela do Desfazer ainda pode devolver o pedido');
+  // A confirmação de uma decisão ANTERIOR chega com este na janela: ele não conta.
+  m.h.registrarAcaoConfirmada('read', { venueID: 'v0', updateRequestID: 'u0' });
+  assert.deepEqual(m.toasts, [], 'comemorou contando o pedido que ainda está na janela do Desfazer');
+  assert.equal(m.prefs.undoGateSeen, false);
+  // Desfaz: o placar volta, a marca de "visto" segue livre.
+  m.stats.rejected = 29;
+  m.deps.AppState.pendingAction = null;
+  m.h.updateStats();
+  assert.deepEqual(m.toasts, []);
+  assert.equal(m.prefs.undoGateSeen, false, 'o desfeito deixou o "visto" gravado — o desbloqueio de verdade nunca seria anunciado');
+  assert.equal(m.prefs.dicaDesfazerVista, false, 'o desfeito deixou a dica por comportamento marcada como vista');
+  // O 30º de verdade: o gesto, a janela, e a CONFIRMAÇÃO — aí sim, uma vez.
+  m.stats.rejected = 30;
+  m.h.updateStats();
+  assert.deepEqual(m.toasts, []);
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'a confirmação que cruza a cota não anunciou o desbloqueio');
+  assert.equal(m.h.canDisableUndo(), true, 'o aviso leva a um interruptor travado');
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'anunciou duas vezes');
+});
+
+test('R6-7-5: a dica das janelas sem desfazer não sai junto da comemoração da cota (as duas dizem o mesmo)', () => {
+  // A janela que expira sem desfazer conta pra dica no FIM da janela, ANTES da
+  // confirmação: com a cota recém-cruzada, a comemoração vem logo depois.
+  const m = montarCota();
+  m.stats.rejected = 30;
+  m.h.checkDicaDesfazer();
+  assert.deepEqual(m.toasts, [], 'a dica saiu e, um instante depois, a comemoração dizendo a mesma coisa');
+  m.h.registrarAcaoConfirmada('reject', m.P);
+  m.h.checkDicaDesfazer();
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'saiu a dica depois da comemoração (ou nenhuma das duas)');
+  // CONTROLE: quem já passou da cota antes (a linha de base marcou "visto") recebe a dica.
+  const c = montarCota();
+  c.prefs.undoGateSeen = true;
+  c.stats.rejected = 30;
+  c.h.checkDicaDesfazer();
+  assert.deepEqual(c.toasts, ['toast.undoHint'], 'a dica por comportamento sumiu pra quem já tinha passado da cota');
 });
 
 test('A3: a troca de conta passa pelo esquecer das escolhas (e a mesma conta voltando, não)', () => {
@@ -865,7 +1010,123 @@ test('outra conta: CONTROLES — a MESMA conta entrando de novo noutra aba, e a 
   assert.deepEqual(B.saiu, { porOutraAba: true, outraConta: true });
 });
 
-// O perfil que CHEGA numa aba cuja sessão não é a do aparelho (o caso de C acima).
+// ═══ R6-1-04 · a aba SEM perfil quando OUTRA sessão toma o aparelho ══════════
+// A aba A abre com a sessão de X e o perfil FALHA (5xx do Waze); na aba B entra
+// Y. A não saía ("sem perfil, quem decide é o perfil") e seguia triando: o ✕
+// dela ia pro Waze com a sessão de X, e o pouso gravava o Histórico, o placar,
+// os autores e as conquistas no aparelho — já de Y (MEDIDO no Chromium,
+// auditoria de 2026-10-02). E o perfil só era pedido de novo no teto de 1 min.
+// Agora: com o dono do aparelho CONFIRMADO por outra sessão e a conta desta aba
+// desconhecida, o perfil é pedido NA HORA e o card trava até ele chegar.
+const marcaDe = new Function(fatiarDe(APP_SEM, 'marcaDaSessao') + '\nreturn marcaDaSessao;')();
+
+function abaSemPerfil(comp, { token = 'tok-x' } = {}) {
+  const aba = { escreveuNoAviso: [], noAviso: false, pedidosDePerfil: 0, travas: [] };
+  const localStorage = comp.para(aba);
+  const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
+  const AppState = { authenticated: true, profile: null, pendingAction: null, currentPlace: null,
+    stats: { read: 0, rejected: 0, skipped: 0 }, preferences: { undoEnabled: true, presenca: true } };
+  let soltarPerfil = null;
+  const deps = {
+    AppState, localStorage, safeLS, STATS_KEY, PREFERENCES_KEY, CONTA_KEY, DEVMODE_KEY: 'waze_places_devmode',
+    HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
+    SAIDA_KEY: 'waze_places_saida', preferenciasCarregadas: true, puladosNoInicioDaFila: 0,
+    API: { temSessaoNaMemoria: () => true, sessionToken: token }, extPerguntando: false, extRenovando: false,
+    // A trava de verdade, com nada mais travando.
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), conferindoContaDestaAba: false,
+    perfilPedidoEm: 0, PERFIL_REFAZER_MS: 60 * 1000,
+    // O perfil pedido: preso até o teste soltar (ele chega ou falha).
+    loadProfileAndAuxData: () => { aba.pedidosDePerfil++; return new Promise((ok) => { soltarPerfil = ok; }); },
+    aplicarTravaDeAcao: () => aba.travas.push(aba.acoesTravadas()),
+    handleLogout: (o) => { aba.saiu = o || true; },
+    aoMudarModoDevEmOutraAba: () => {}, atualizarSeloDeConquista: () => {}, agendarRedesenhoDoHistorico: () => {},
+    desenharPlacar: () => {}, updateStats: () => {}, updateInFlightIndicator: () => {},
+  };
+  const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao',
+    'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
+  Object.assign(aba, montar(nomes, deps), { AppState, deps, soltarPerfil: (perfil) => {
+    if (perfil) AppState.profile = perfil;
+    soltarPerfil();
+  } });
+  comp.abas.push(aba);
+  return aba;
+}
+// A outra aba, que só escreve no aparelho (o aviso dela chega na A).
+function outraAba(comp) {
+  const b = { escreveuNoAviso: [], noAviso: false, aoGravarEmOutraAba() {} };
+  comp.abas.push(b);
+  return comp.para(b);
+}
+const tiqueAba = () => new Promise((ok) => setImmediate(ok));
+
+// O armazenamento com a sessão desta aba guardada CRUA (o compartilhado grava os
+// valores iniciais em JSON, e um token entre aspas não é a sessão de ninguém).
+function aparelhoComASessao(token = 'tok-x', conta = { id: '4242', s: 'velha' }) {
+  const comp = armazenamentoCompartilhado({ [CONTA_KEY]: conta });
+  comp.dados.set(TOKEN, token);
+  return comp;
+}
+
+test('R6-1-04: a aba SEM perfil não segue triando quando outra sessão toma o aparelho — o perfil é pedido NA HORA, e o card trava até ele', async () => {
+  const comp = aparelhoComASessao();
+  const A = abaSemPerfil(comp);
+  assert.equal(A.sessaoDestaAbaEhAGuardada(), true, 'CONTROLE: a sessão desta aba não é a do aparelho na largada');
+  const B = outraAba(comp);
+  // Na B, a sessão de X cai e Y entra: o token primeiro…
+  B.setItem(TOKEN, 'tok-y');
+  comp.entregar();
+  assert.equal(A.pedidosDePerfil, 0, 'no aviso do TOKEN a conta guardada ainda é a da sessão anterior: nada a conferir');
+  assert.equal(A.acoesTravadas(), false, 'CONTROLE: sem o dono do aparelho confirmado, a aba não trava');
+  // …e a conta de Y, vista com a sessão nova (`aoConhecerConta`).
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '5151', s: marcaDe('tok-y') }));
+  comp.entregar();
+  assert.equal(A.saiu, undefined, 'a aba sem perfil saiu sem saber de quem era');
+  assert.equal(A.pedidosDePerfil, 1, 'DEFEITO: a conta desta aba não foi conferida na hora (só no teto de 1 min, numa prova de rede)');
+  assert.equal(A.acoesTravadas(), true, 'DEFEITO: a aba sem perfil seguiu triando num aparelho que já é de outra conta');
+  assert.equal(A.avisoDaTrava(), 'toast.esperaSessao', 'o card travado não diz que espera a sessão');
+  assert.equal(A.travas.at(-1), true, 'o card não foi redesenhado travado');
+  // Um aviso a mais da conta, com o perfil ainda no ar, não o pede de novo.
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '5151', s: marcaDe('tok-y') }));
+  comp.entregar();
+  assert.equal(A.pedidosDePerfil, 1, 'o perfil foi pedido duas vezes com o primeiro ainda no ar');
+  // O perfil FALHA: a dúvida fica, e a trava também.
+  A.soltarPerfil(null);
+  await tiqueAba();
+  assert.equal(A.acoesTravadas(), true, 'o perfil falhou e a aba destravou sem saber de quem é');
+  // A próxima prova de rede (o teto de 1 min já passou) pede de novo PELA
+  // conferência — a que destrava o card quando o perfil chegar.
+  A.refazerPerfilSeFaltar();
+  assert.equal(A.pedidosDePerfil, 2, 'o perfil que faltou não foi pedido de novo');
+  A.soltarPerfil({ id: 5151 });
+  await tiqueAba();
+  assert.equal(A.travas.at(-1), false, 'o perfil chegou pelo pedido de novo e o card seguiu desenhado travado');
+});
+
+test('R6-1-04: a conta confirmada destrava — e sem dúvida nenhuma, nada é pedido nem travado', async () => {
+  // A MESMA conta entrou de novo na outra aba: o perfil desta chega, e a trava sai.
+  const comp = aparelhoComASessao();
+  const A = abaSemPerfil(comp);
+  const B = outraAba(comp);
+  B.setItem(TOKEN, 'tok-x2');
+  B.setItem(CONTA_KEY, JSON.stringify({ id: '4242', s: marcaDe('tok-x2') }));
+  comp.entregar();
+  assert.equal(A.acoesTravadas(), true, 'CONTROLE: a dúvida não acendeu');
+  A.soltarPerfil({ id: 4242 });
+  await tiqueAba();
+  assert.equal(A.acoesTravadas(), false, 'o perfil chegou e o card seguiu travado');
+  assert.equal(A.travas.at(-1), false, 'o card não foi redesenhado destravado');
+  assert.equal(A.AppState.contaEmDuvida, false);
+  // CONTROLE: a sessão desta aba É a do aparelho — sem dúvida, nada é pedido.
+  const c = aparelhoComASessao();
+  const C = abaSemPerfil(c);
+  outraAba(c).setItem(CONTA_KEY, JSON.stringify({ id: '4242', s: marcaDe('tok-x') }));
+  c.entregar();
+  assert.equal(C.sessaoDestaAbaEhAGuardada(), true, 'CONTROLE: a sessão desta aba não é a do aparelho');
+  assert.equal(C.pedidosDePerfil, 0, 'a aba da sessão do aparelho pediu o perfil à toa');
+  assert.equal(C.acoesTravadas(), false);
+});
 function montarPerfilQueChega({ tokenDesta, tokenNoAparelho = 'tok-222', dono = '222' }) {
   const ap = aparelho({ [TOKEN]: tokenNoAparelho, [CONTA_KEY]: { id: dono, s: 'm' } });
   const log = [];
@@ -1146,7 +1407,7 @@ test('F1: a página RECARREGADA na mesma aba manda o que anotou antes de morrer 
   assert.deepEqual(depois.enviados, ['A:v1'], 'a mesma aba recarregada esperou a própria marca vencer');
   // E a marca da aba mora no `sessionStorage`, que é da aba e sobrevive a
   // recarregar: a MESMA aba recarregada tem a mesma marca; outra aba, outra.
-  const iife = /^const ABA_DESTA_PAGINA = (\(\(\) => \{[^]*?\n\}\)\(\));/m.exec(APP);
+  const iife = /^let ABA_DESTA_PAGINA = (\(\(\) => \{[^]*?\n\}\)\(\));/m.exec(APP);
   assert.ok(iife, 'a marca da aba mudou de forma — o teste não a acha');
   const marcaDaAba = (sessionStorage) => new Function('sessionStorage', 'return ' + iife[1])(sessionStorage);
   const sessao = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
@@ -1156,6 +1417,95 @@ test('F1: a página RECARREGADA na mesma aba manda o que anotou antes de morrer 
   assert.notEqual(marcaDaAba(sessao()), primeira, 'outra aba ganhou a MESMA marca');
   const bloqueado = { getItem() { throw new Error('bloqueado'); }, setItem() { throw new Error('bloqueado'); } };
   assert.match(marcaDaAba(bloqueado), /^[0-9a-z]+\.[0-9a-z]+$/, 'sem o armazenamento da aba, a página ficou sem marca');
+});
+
+// ── R6-2-10 (2026-10-02): a aba DUPLICADA ────────────────────────────────────
+// "Duplicar aba" (Chrome, Firefox, Safari) COPIA o `sessionStorage`, e a marca
+// com ele: a cópia nascia com a MESMA marca da original, achava que a decisão
+// que a original tinha no ar era DELA e a mandava de novo ao abrir — MEDIDO,
+// dois envios do mesmo pedido (o Histórico ficava em 1 pelo pouso da outra
+// aba). A página segura uma trava do navegador com o nome da marca; a cópia a
+// acha ocupada e troca de marca. As travas daqui são as do navegador (por NOME,
+// e de uma página — a que morre solta as dela), como medido no Chromium e no
+// WebKit: a recarregada pega a trava, a cópia a acha ocupada.
+function navegadorComTravas() {
+  const donos = new Map();
+  return {
+    donos,
+    para(pagina) {
+      return {
+        request(nome, opcoes, cb) {
+          if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+          return Promise.resolve().then(() => {
+            if (donos.has(nome)) return (opcoes && opcoes.ifAvailable) ? cb(null) : new Promise(() => {});
+            donos.set(nome, pagina);
+            return Promise.resolve(cb({ name: nome })).finally(() => { if (donos.get(nome) === pagina) donos.delete(nome); });
+          });
+        },
+      };
+    },
+    morrer(pagina) { for (const [nome, dono] of [...donos]) if (dono === pagina) donos.delete(nome); },
+  };
+}
+// O `sessionStorage` de uma aba; `copia()` é o "Duplicar aba".
+function sessaoDaAba(inicial = []) {
+  const m = new Map(inicial);
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), copia: () => sessaoDaAba(m) };
+}
+// A marca de uma página que ABRE: o trecho de verdade do app.js, rodado com o
+// armazenamento e as travas dela.
+function abrirPaginaComMarca(sessionStorage, locks) {
+  const iife = /^let ABA_DESTA_PAGINA = \(\(\) => \{[^]*?\n\}\)\(\);/m.exec(APP_SEM);
+  const nome = /^const MARCA_DA_ABA_TRAVA = [^;]+;/m.exec(APP_SEM);
+  const chamada = /^const marcaDaAbaConferida = segurarMarcaDaAba\(\);/m.exec(APP_SEM);
+  assert.ok(iife && nome && chamada, 'a marca da aba (ou a trava dela) mudou de forma — o teste não a acha');
+  const fonte = [iife[0], nome[0], fatiarDe(APP_SEM, 'segurarMarcaDaAba'), chamada[0],
+    'return { marca: () => ABA_DESTA_PAGINA, conferida: marcaDaAbaConferida };'].join('\n');
+  return new Function('sessionStorage', 'navigator', fonte)(sessionStorage, { locks });
+}
+
+test('R6-2-10: a aba DUPLICADA troca de marca ao abrir — e a RECARREGADA fica com a dela', async () => {
+  const nav = navegadorComTravas();
+  const daA = sessaoDaAba();
+  const A = abrirPaginaComMarca(daA, nav.para('A'));
+  await A.conferida;
+  const marcaA = A.marca();
+  // Duplicar aba: a cópia do `sessionStorage`, com a original viva.
+  const daB = daA.copia();
+  const B = abrirPaginaComMarca(daB, nav.para('B'));
+  assert.equal(B.marca(), marcaA, 'PRÉ-CONDIÇÃO: a cópia não nasceu com a marca da original (o teste não mede o "Duplicar aba")');
+  await B.conferida;
+  assert.notEqual(B.marca(), marcaA,
+    'DEFEITO: a aba duplicada ficou com a marca da original — ela mandaria de novo a decisão que a original tem no ar');
+  assert.equal(daB.getItem('__abaDaSaida'), B.marca(), 'a marca nova da cópia não ficou na aba dela (recarregar a cópia voltaria à da original)');
+  assert.equal(A.marca(), marcaA, 'a original perdeu a marca');
+  // Recarregar a A: a página que morre solta a trava, e a recarregada fica com
+  // a marca — é o que manda, na abertura, o que ela anotou antes de morrer (O2, O5).
+  nav.morrer('A');
+  const A2 = abrirPaginaComMarca(daA, nav.para('A2'));
+  await A2.conferida;
+  assert.equal(A2.marca(), marcaA, 'a página RECARREGADA perdeu a marca da aba (e esperaria a própria marca vencer)');
+  // CONTROLE: sem `navigator.locks`, como antes — a cópia segue com a mesma marca.
+  const C = abrirPaginaComMarca(daA.copia(), undefined);
+  await C.conferida;
+  assert.equal(C.marca(), marcaA, 'CONTROLE: sem a trava do navegador, a cópia mudou de marca (o instrumento mede outra coisa)');
+});
+
+test('R6-2-10: o esvaziamento da fila de saída espera a marca da aba ser conferida', async () => {
+  let soltar;
+  const conferida = new Promise((ok) => { soltar = ok; });
+  const pedidas = [];
+  const navigator = { locks: { request: (nome, op, cb) => { pedidas.push(nome); return Promise.resolve(cb({ name: nome })); } } };
+  const travaDaSaida = new Function('navigator', 'marcaDaAbaConferida', 'SAIDA_TRAVA',
+    fatiarDe(APP_SEM, 'travaDaSaida') + '\nreturn travaDaSaida;')(navigator, conferida, 'waze_places_saida');
+  const pedido = travaDaSaida();
+  await tiqueAba();
+  assert.deepEqual(pedidas, [], 'DEFEITO: a aba foi esvaziar a fila de saída antes de saber se a marca é dela');
+  soltar();
+  const trava = await pedido;
+  assert.deepEqual(pedidas, ['waze_places_saida'], 'CONTROLE: conferida a marca, o esvaziamento não pegou a trava');
+  assert.equal(trava.reserva, false);
+  trava.soltar();
 });
 
 test('F1: a página que SAI solta as marcas dela — a reabertura (ou a outra aba) manda NA HORA o que ela tinha no ar', async () => {

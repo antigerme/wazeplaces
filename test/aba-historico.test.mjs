@@ -78,7 +78,7 @@ function montarPainel({ modalAberto = true, abaNaTela = true } = {}) {
     localStorage: { getItem: (k) => (guardado.has(k) ? guardado.get(k) : null) },
     podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
-    renderHistory: () => { desenhos.n++; },
+    renderHistory: () => { desenhos.n++; }, garantirLinhaDeBaseDasConquistas: () => {},
   };
   const api = montar(['historicoNaTela', 'agendarRedesenhoDoHistorico', 'loadHistory', 'recordHistory'], deps,
     ['recordHistory', 'historicoNaTela'], 'let redesenhoDoHistoricoAgendado = false;');
@@ -117,6 +117,7 @@ test('H1: trocar de idioma com o painel NA TELA o redesenha', () => {
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},
     registrarIdiomaUsado: () => {}, window: {}, showToast: () => {}, t: (k) => k,
     historicoNaTela: () => true, renderHistory: () => desenhos.push('en'),
+    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {},
   };
   const { aplicarIdioma } = montar(['aplicarIdioma'], deps, ['aplicarIdioma']);
   aplicarIdioma('en');
@@ -204,6 +205,7 @@ function abrirAba(comp) {
     // O "Sair", o placar e as preferências da outra aba também têm tratamento
     // PRÓPRIO (test/contas-abas); aqui só se anota a chave que chegou.
     sincronizarComOutraAba: (chave) => { (aba.sincronizou = aba.sincronizou || []).push(chave); },
+    garantirLinhaDeBaseDasConquistas: () => {},
   };
   const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
     'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
@@ -450,8 +452,8 @@ async function rodarRecusa(alvos) {
     autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
     // Pedido EM ANDAMENTO (o lote de lidos no ar) não é alvo — ver o F1.
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
-    // A região dos pedidos vai junto com o lote (F7).
-    API: { getRegion: () => 'row' },
+    // A região dos pedidos vai junto com o lote (F7), e o dia e o lugar (R6-7-4).
+    API: { getRegion: () => 'row' }, carimboDoGesto: () => null,
     t: (k, v) => k + ' ' + JSON.stringify(v),
     showToast: (msg) => { avisos.push(msg); return { texto: (m) => avisos.push(m), dispensar() {} }; },
     // O `enviarLote` anda EM ORDEM e conta o que ainda falta depois de cada um.

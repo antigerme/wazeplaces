@@ -131,7 +131,13 @@ const Presenca = {
     // ampliado (`_falhos`): abrir a conversa de novo tenta de novo.
     fotosFalhas: new Set(),
     lidaEnviadaAte: new Map(),
-    lidaPendente: null,     // de quem é o "lida" que espera a rajada ou o perfil (ver `presencaPagarLida`)
+    lidaPendente: null,     // de quem é o "lida" que espera a RAJADA (`timers.lida`, ver `presencaPagarLida`)
+    // As conversas que DEVEM um "lida": o que falhou (a rede, o Waze fora) e o
+    // que venceu sem saber de quem é a sessão. Separado da rajada: morava no
+    // mesmo campo, e abrir OUTRA conversa — mesmo vazia — o sobrescrevia; a
+    // mensagem que a pessoa viu ficava não lida no Waze (auditoria de
+    // 2026-10-01, R6-5-1). Ver `presencaPagarDevidas`.
+    lidaDevendo: new Set(),
     // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
     // do Waze delas chegar (ver `presencaLidaPorId`).
     lidasPorId: new Set(),
@@ -348,9 +354,10 @@ async function presencaSincronizar() {
         return;
     }
     if (!presencaPodeConectar()) return presencaDesligar();
-    // O "lida" que ficou DEVENDO na espera do perfil (ver `presencaPagarLida`).
-    // Com o relógio correndo ele é a rajada, e a rajada não se adianta.
-    if (Presenca.lidaPendente && !Presenca.timers.lida) presencaPagarLida({ fechando: Presenca.aberta !== Presenca.lidaPendente });
+    // O "lida" que ficou DEVENDO — na espera do perfil, ou o que falhou (ver
+    // `presencaPagarDevidas`). A rajada em curso não se adianta: ela tem
+    // relógio próprio.
+    presencaPagarDevidas();
     // O histórico que a conversa aberta pediu na espera do perfil (ver
     // `presencaCarregarConversa`): com o perfil, ele sai agora.
     const espera = Presenca.aberta ? (Presenca.historico.get(Presenca.aberta) || {}).esperaPerfil : null;
@@ -583,9 +590,10 @@ function presencaDesligar() {
     clearTimeout(Presenca.timers.fluxo);
     // O "lida" pendente é DESCARTADO, não pago: desligar é o "Sair", a troca de
     // conta ou a queda da sessão — e o fechamento da conversa logo abaixo não
-    // pode mandá-lo (ver `presencaPagarLida`).
+    // pode mandá-lo (ver `presencaPagarLida`). O que estava DEVENDO também.
     clearTimeout(Presenca.timers.lida);
     Presenca.lidaPendente = null;
+    Presenca.lidaDevendo.clear();
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -1074,6 +1082,12 @@ function presencaMensagemDoFluxo(m, doLote) {
         // E a hora do SERVIDOR de cada uma vai junto (`servs`): é ela que a
         // `atividade` da lista seguinte mede (ver `presencaAplicarLista`).
         else {
+            // A mensagem que a pessoa NÃO viu tira a dívida do "lida" desta
+            // conversa (`lidaDevendo`): o Waze marca a conversa INTEIRA, e
+            // pagá-la agora marcaria esta também — "Lida" pra quem a mandou, e
+            // a não lida sumindo daqui sem ninguém ter visto. Ela segue não lida
+            // (com a que tinha sido vista), e abrir a conversa marca tudo.
+            Presenca.lidaDevendo.delete(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
@@ -1172,11 +1186,15 @@ function presencaAnunciar(msg) {
 }
 
 // O "lida" que espera a rajada: `lidaPendente` diz de QUEM (a conversa que
-// estava na tela) e `timers.lida` é o relógio dele. Pendente SEM relógio é o
-// "lida" DEVENDO: ele venceu, ou a conversa fechou, sem saber de quem é a
-// sessão (ver `presencaPagarLida`).
+// estava na tela) e `timers.lida` é o relógio dele. Só a rajada: o "lida"
+// DEVENDO (o que falhou, o que venceu sem saber de quem é a sessão) mora em
+// `lidaDevendo`, e a rajada de uma conversa não apaga a dívida de outra — até
+// a auditoria de 2026-10-01 (R6-5-1) era o mesmo campo, e abrir OUTRA conversa,
+// mesmo vazia, sobrescrevia a dívida. Se ainda houver a rajada de OUTRA
+// conversa esperando, ela também não se perde: vira dívida.
 function presencaAgendarLida(id) {
     clearTimeout(Presenca.timers.lida);
+    if (Presenca.lidaPendente && Presenca.lidaPendente !== id) Presenca.lidaDevendo.add(Presenca.lidaPendente);
     Presenca.lidaPendente = id;
     Presenca.timers.lida = setTimeout(() => presencaPagarLida(), PRESENCA_LIDA_ATRASO_MS);
 }
@@ -1192,20 +1210,47 @@ function presencaAgendarLida(id) {
 // sai — e o `presencaMarcarLida` ainda não pede quando não há o que marcar.
 //
 // Sem saber de quem é a sessão (a renovação silenciosa, antes do perfil), ele
-// ESPERA, como a fila de saída: o perfil que chegar o paga
-// (`presencaSincronizar`). E o "Sair", a troca de conta e a queda pra tela de
-// entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta o swipe que
-// esperava o Desfazer: sessão que sai não grava nada depois. Outra conta nunca
-// o paga: o `definirPerfil` roda o `esquecerOutraConta` (que desliga) no mesmo
-// passo em que o perfil novo entra — antes de qualquer um poder pagar.
+// ESPERA, como a fila de saída: vira DÍVIDA (`lidaDevendo`), e o perfil que
+// chegar a paga (`presencaSincronizar`). E o "Sair", a troca de conta e a queda
+// pra tela de entrada o DESCARTAM (`presencaDesligar`), como o "Sair" descarta
+// o swipe que esperava o Desfazer: sessão que sai não grava nada depois. Outra
+// conta nunca o paga: o `definirPerfil` roda o `esquecerOutraConta` (que
+// desliga) no mesmo passo em que o perfil novo entra — antes de qualquer um
+// poder pagar.
+//
+// O FECHAMENTO paga também as dívidas (`presencaPagarDevidas`): é o momento em
+// que a pessoa deixa de olhar, e o "lida" que ficou devendo de OUTRA conversa
+// (falhou quando ela fechou aquela) sai junto.
 function presencaPagarLida({ fechando = false } = {}) {
     const id = Presenca.lidaPendente;
-    if (!id) return;
-    clearTimeout(Presenca.timers.lida);
-    Presenca.timers.lida = null;
-    if (!presencaEu()) return;   // devendo: espera o perfil
-    Presenca.lidaPendente = null;
-    presencaMarcarLida(id, { fechando });
+    if (id) {
+        clearTimeout(Presenca.timers.lida);
+        Presenca.timers.lida = null;
+        Presenca.lidaPendente = null;
+        if (presencaEu()) presencaMarcarLida(id, { fechando });
+        else Presenca.lidaDevendo.add(id);   // devendo: espera o perfil
+    }
+    if (fechando) presencaPagarDevidas();
+}
+
+// Paga o que está DEVENDO (`lidaDevendo`): o mesmo pedido de sempre, um por
+// conversa. Só no fechamento de uma conversa e no `presencaSincronizar` — o
+// freio que já existia: nunca por relógio, por mensagem ou por swipe, então
+// com o Waze fora é um pedido por conversa devendo a cada gesto desses, e nada
+// mais. Sem saber de quem é a sessão, segue devendo. A conversa com a rajada
+// correndo fica pra ela (a rajada não se adianta, e o "lida" dela cobre o da
+// dívida: o Waze marca a conversa inteira).
+//
+// É sempre de mensagem que a pessoa VIU: a que chega fora da vista tira a
+// dívida da conversa (ver `presencaMensagemDoFluxo`). Por isso sai como a do
+// fechamento (`fechando`), sem conferir se a conversa ainda está na tela.
+function presencaPagarDevidas() {
+    if (!Presenca.lidaDevendo.size || !presencaEu()) return;
+    for (const id of [...Presenca.lidaDevendo]) {
+        if (id === Presenca.lidaPendente && Presenca.timers.lida) continue;
+        Presenca.lidaDevendo.delete(id);
+        presencaMarcarLida(id, { fechando: true });
+    }
 }
 
 // `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
@@ -1236,15 +1281,23 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (r && r.success) {
         Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
+        // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga.
+        Presenca.lidaDevendo.delete(id);
         presencaZerarNaoLidas(id, enviadoEm);
-    } else if (!Presenca.lidaPendente) {
+    } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
         // lida no Waze e nada a refazia — o fechamento não pagava mais nada, e
         // a lista seguinte a devolvia como "1 mensagem nova" (auditoria de
-        // 2026-09-30, R5-5-5). Volta a DEVER (sem relógio): o fechamento e o
-        // próximo `presencaSincronizar` o pagam. Um pedido a mais, só quando
-        // este falhou.
-        Presenca.lidaPendente = id;
+        // 2026-09-30, R5-5-5). Volta a DEVER: o fechamento e o próximo
+        // `presencaSincronizar` o pagam. Um pedido a mais, só quando este
+        // falhou. SEMPRE, e não só com o campo da rajada vazio: era o mesmo
+        // campo, e a falha que chegava com a rajada de OUTRA conversa correndo
+        // nem era anotada (R6-5-1).
+        Presenca.lidaDevendo.add(id);
+        // No diário, que não mostrava falha nenhuma do "lida": uma linha por
+        // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
+        // por conversa devendo a cada fechamento (`presencaAnotarMsg`).
+        presencaAnotarMsg('chat.lida', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta' });
     }
 }
 
@@ -1266,6 +1319,41 @@ function presencaZerarNaoLidas(id, ate) {
 
 // ── a conversa ──────────────────────────────────────────────────────────────
 
+// A folha da presença (a lista, a conversa e o pedido que chegou nela) mora no
+// RODAPÉ, embaixo do banner do Desfazer (`#notifyStack`, z-70, também no
+// rodapé). Aberta na janela do Desfazer, o banner ficava em cima da linha da
+// pessoa, do campo e do "Enviar" — e o toque no "Enviar" caía no "Desfazer": a
+// decisão do card era desfeita atrás da folha, e a mensagem não saía (auditoria
+// de 2026-10-01, R6-5-4, medido no 393 e no Fold). Abrir a folha DESPACHA a
+// janela, como fechar a foto ampliada despacha a aprovação e o "Marcar todos" e
+// o treino despacham a do card: a decisão sai agora, e o banner sai com ela.
+// Nada muda na tela além do banner sumir — como some quando a janela termina.
+function presencaDespacharJanela() {
+    if (typeof despacharJanelaDoDesfazer === 'function') despacharJanelaDoDesfazer();
+}
+
+// A folha está na tela. Com ela aberta, a decisão que CHEGA (o gesto saiu antes
+// e a animação do card dura 350 ms: tocar a pílula nesse meio era o mesmo
+// defeito por outro caminho) sai sem janela — quem pergunta é o `scheduleAction`
+// do app.js, que carrega antes deste arquivo e chama esta função pelo nome.
+function presencaFolhaAberta() {
+    return ['presencaModal', 'conversaModal', 'pedidoModal'].some((id) => {
+        const m = document.getElementById(id);
+        return !!m && !m.classList.contains('hidden');
+    });
+}
+
+// Sem o perfil (a renovação silenciosa cujo perfil falhou, a abertura sem
+// rede), a presença não pede nada — e o perfil só era pedido de novo pela
+// prova de rede de OUTRA ação: a conversa ficava em "Carregando a conversa…" e
+// o "Enviar" mudo, sem prazo, com a pessoa olhando pra ela (auditoria de
+// 2026-10-01, R6-5-5, medido: 75 s depois, nenhum pedido novo). O gesto NA
+// conversa — abrir, "Enviar", "Tentar de novo" — o pede, com o teto de um por
+// minuto do app (`refazerPerfilSeFaltar`): é gesto da pessoa, nunca relógio.
+function presencaPedirPerfil() {
+    if (typeof refazerPerfilSeFaltar === 'function') refazerPerfilSeFaltar();
+}
+
 function presencaAbrirConversa(id) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
@@ -1275,6 +1363,8 @@ function presencaAbrirConversa(id) {
     // tirinha — e ele saía junto no envio, pra quem não era o destino
     // (auditoria de 2026-09-26).
     if (Presenca.aberta !== id) { Presenca.anexo = null; Presenca.nomeDaAberta = null; }
+    // A janela do Desfazer não fica por cima da conversa (ver a função).
+    presencaDespacharJanela();
     Presenca.aberta = id;
     // O nome de quem se abriu, de onde ele estiver agora (ver `nomeDaAberta`).
     const quem = Presenca.online.find((p) => p.id === id) || Presenca.conversas.find((x) => x.id === id);
@@ -1311,6 +1401,8 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // sem saber de quem era a sessão (auditoria de 2026-09-30, R5-5-2). Não
     // sai: fica "Carregando", e o perfil que chegar o pede
     // (`presencaSincronizar`). Como o "Enviar" e o "Tentar de novo" do envio.
+    // E quem chama aqui — abrir a conversa, o "Tentar de novo" do histórico, o
+    // "Ver mensagens anteriores" — é gesto: pede o perfil que falta (R6-5-5).
     const eu = presencaEu();
     if (!eu) {
         // Sem o histórico na tela, o que espera é a PRIMEIRA página: a antiga
@@ -1319,6 +1411,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (h.esperaPerfil.antes) h.antigas = 'carregando';
         else h.erro = false;
         presencaRenderConversa();
+        presencaPedirPerfil();
         return;
     }
     h.esperaPerfil = null;
@@ -1453,8 +1546,15 @@ function presencaEsquecerLista() {
 
 function presencaEnviar(legenda, card) {
     const id = Presenca.aberta;
+    if (!id) return;
+    // Sem o id do perfil (a renovação silenciosa da sessão, o perfil que falhou)
+    // a mensagem NÃO sai — sairia pela sessão nova, que pode ser de outra conta
+    // —, e o "Enviar" ficava calado: o texto no campo, o botão com cara de vivo
+    // e nada na tela (auditoria de 2026-10-01, R6-5-5). Ela entra na conversa
+    // como "Não enviada.", com o "Tentar de novo" — o MESMO estado do envio que
+    // falha, que é o que ela é —, e o "Tentar de novo" a manda quando o perfil
+    // tiver voltado (`presencaTentarDeNovo`). Quem pede o perfil é o `submit`.
     const eu = presencaEu();
-    if (!id || !eu) return;
     const h = Presenca.historico.get(id) || { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
     Presenca.historico.set(id, h);
     // A hora é a do SERVIDOR (o relógio daqui mais o `desvio`), até a resposta
@@ -1465,13 +1565,15 @@ function presencaEnviar(legenda, card) {
     const msg = {
         id: presencaUuid(), ts: Date.now() + Presenca.desvio, meu: true,
         texto: presencaTextoParaWme(legenda, card), card: card || null, legenda: card ? legenda : null,
-        estado: 'enviando', motivo: null,
+        estado: eu ? 'enviando' : 'falhou', motivo: eu ? null : 'erro',
     };
     h.msgs.push(msg);
     chatConhecer(id);
     presencaAtualizarPrevia(id, msg);
     presencaRenderConversa({ rolarAoFim: true });
-    presencaMandar(id, msg);
+    if (eu) presencaMandar(id, msg);
+    // No diário, como toda falha de envio (ver `presencaMandar`): esta nem saiu.
+    else presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
 }
 
 async function presencaMandar(com, msg) {
@@ -1524,8 +1626,11 @@ function presencaTentarDeNovo() {
     const h = id && Presenca.historico.get(id);
     // Sem o id do perfil (a sessão renovando), não sai — como o "Enviar" com o
     // campo cheio: sairia pela sessão NOVA, que pode ser de outra conta. A
-    // mensagem segue "Não enviada", com o botão, até o perfil chegar.
-    if (!h || !presencaEu()) return;
+    // mensagem segue "Não enviada", com o botão, até o perfil chegar — e o
+    // toque PEDE o perfil que falta (R6-5-5): era o único jeito de a conversa
+    // sair da espera sem a pessoa voltar pro card.
+    if (!h) return;
+    if (!presencaEu()) { presencaPedirPerfil(); return; }
     for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
 }
 
@@ -2095,6 +2200,8 @@ function presencaMontar() {
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => {
+        // A janela do Desfazer não fica por cima da lista (ver a função).
+        presencaDespacharJanela();
         openModal('presencaModal');
         presencaRenderLista();
         // Abrir a lista custa UM pedido: é o momento em que ela é OLHADA.
@@ -2115,9 +2222,12 @@ function presencaMontar() {
         // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
         if ((!texto && !Presenca.anexo) || !Presenca.aberta) return;
         // Sem o id do perfil o envio não sai (a sessão acabou de cair, ou o
-        // perfil ainda não chegou), e o campo era apagado assim mesmo: o que se
-        // digitou sumia calado (auditoria de 2026-09-26). Fica no campo.
-        if (!presencaEu()) return;
+        // perfil ainda não chegou). O campo era apagado assim mesmo e o que se
+        // digitou sumia calado (auditoria de 2026-09-26); depois ficava no
+        // campo, e o "Enviar" não fazia nada nem dizia nada (R6-5-5). Agora a
+        // mensagem entra na conversa como "Não enviada.", com o "Tentar de
+        // novo" (ver `presencaEnviar`), e o toque pede o perfil que falta.
+        if (!presencaEu()) presencaPedirPerfil();
         const card = Presenca.anexo;
         campo.value = '';
         // Solta o anexo ANTES de mandar: redesenhar com a tirinha ainda presa
@@ -2202,6 +2312,9 @@ function presencaDiag() {
         conhecidos: chatConhecidos().length,
         aConfirmar: chatAConfirmar().length,
         conversaAberta: !!Presenca.aberta,
+        // Quantas conversas DEVEM um "lida" (ver `presencaPagarDevidas`): com
+        // ela acima de zero, a "mensagem nova" de uma conversa já vista é isto.
+        lidaDevendo: Presenca.lidaDevendo.size,
         // O porquê da lista, como o servidor contou na última (ver o core).
         contagem: Presenca.contagem,
     };

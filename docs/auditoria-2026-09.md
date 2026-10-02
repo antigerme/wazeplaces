@@ -16,27 +16,19 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-01 ~23:00 UTC)
+## 0. Estado agora (2026-10-02 ~20:00 UTC)
 
-- **Lote 8 em produção** (PR #254, `48d2aea`, v2026.10.01-01): verificação com as duas contas 87 ✓ · 1 ✗; o ✗
-  era a corrida do "Lida", consertada no lote 9 (presença, R5-5-1).
-- **Rodada 5 feita** (seis auditores; relatórios em `scratchpad/r5-relatorios/r5-{1..6}.md`), desduplicada em
-  `scratchpad/l9-plano.md`.
-- **Lote 9 na junção** (`/home/user/wp-lote7`, branch `claude/peaceful-heisenberg-HaUuC`): juntados servidor,
-  dev, filtros, textos, offline, presença, lightbox e fila; `npm test` 1787/1787. Faltam: contas (o commit
-  01fa2a2 está no branch `fix5-contas`, o resto em andamento) e dois follow-ups (offline: o "Pronto" sem
-  sinal só pra fila preparada; lightbox: Alt/⌘+← no card rejeitava o pedido). O limite da sessão parou os
-  agentes às ~14:40 e eles foram retomados às 22:42 por `SendMessage`.
-- **Notas e CHANGELOG do lote 9**: rascunhos em `scratchpad/claude-l9-notas.md` (já aplicadas no CLAUDE.md
-  até o lightbox) e `scratchpad/changelog-l9.md`; corpo do PR em `scratchpad/pr9-body.md`.
-- **Decisões novas pro owner** (lote 9): `scratchpad/r5-pendencias.md`, seção "Lote 9".
-- **Rodada 6 pronta pra sair**: sete auditores (o 7º cobre Histórico, conquistas, Resumo, Ajuda, treino e
-  Preferências); base `scratchpad/r6-base.txt`, escopos `scratchpad/r6-escopos.md`, prompts por
-  `scratchpad/gerar-r6.py <hash-da-main> <versão>`.
-- **Cookies** (2026-10-01, os válidos): `0ca15e91-antigerme_cookies.txt` (L6+AM) e
-  `0ba08797-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs` e o `prod-lida.mjs` já apontam pra eles.
-- **Próxima volta**: juntar contas e os follow-ups, smokes, versão (rode `date -u` — o serial segue a data do
-  commit HEAD), PR, CI, merge, produção — e a rodada 6.
+- **Lote 9 em produção** (PR #255, `b270ffc`, v2026.10.01-02), verificado com as duas contas: 89 ✓ · 0 ✗ no
+  roteiro inteiro e 20 ✓ · 0 ✗ na seção "12. Lote 9 no ar" (`prod-auditoria.mjs l9`).
+- **Rodada 6** completa (`scratchpad/r6-relatorios/r6-{1..7}.md`).
+- **Lote 10 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.02-01): sete
+  agentes (offline, lightbox, histórico, filtros+extensão, contas, fila, presença) mais dois ajustes (foto ampliada
+  e presença), com cinco ajustes de harness na junção, cada um sabotado. `npm test` 1953/1953. Relatórios em
+  `scratchpad/relatorio-l10-<área>.md`.
+- **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`
+  (com as do lote 10: o aviso do treino, o aviso na conversa e o VOLTAR na edição do nome).
+- **Cookies** (2026-10-02, os válidos; os de 10-01 expiraram): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs`, o `prod-lida.mjs` e o `wme-usuario.mjs` já apontam pra eles. O `prod-auditoria.mjs` ganhou a seção "13. Lote 10 no ar".
+- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com `VERSAO=2026100201`) — e a rodada 7.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 

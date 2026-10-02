@@ -198,8 +198,11 @@ test('as gravações andam em FILA, e o retrato é tirado depois do await', () =
 test('o que foi guardado SAI ao baixar, ao desligar o modo dev e no Sair', () => {
   const baixar = fatiar('baixarDiagnostico');
   const iMarca = baixar.indexOf('dlogMarcarBaixados(corpo.entregue.momentos);');
-  const iApaga = baixar.indexOf('diagEsquecerGuardado();');
-  assert.ok(iMarca > 0 && iApaga > iMarca, 'baixar tem que apagar o guardado — já foi entregue');
+  // O que FOI no arquivo — e só isso: a base inteira levava o que a outra aba
+  // gravou depois da leitura (R6-4-5; o percurso roda mais abaixo).
+  const iApaga = baixar.indexOf('diagEsquecerEntregue(corpo.entregue.aberturas);');
+  assert.ok(iMarca > 0 && iApaga > iMarca, 'baixar tem que apagar o guardado que foi entregue');
+  assert.doesNotMatch(baixar, /diagEsquecerGuardado\(\)/, 'baixar voltou a apagar a base INTEIRA');
   assert.match(baixar, /diagBaixadoEm = corpo\.entregue\.em;/,
     'sem o carimbo do RETRATO, o que já foi entregue volta a ser guardado — ou o que não foi se perde');
   const apagar = fatiar('dlogApagar');
@@ -213,7 +216,7 @@ test('o número do botão e o aviso do desligar contam as guardadas; baixar as m
   const marca = fatiar('dlogMarcarBaixados');
   assert.match(marca, /: \[\.\.\.dlogMomentos, \.\.\.diagMomentosAnteriores\(\)\];/,
     'sem a lista do retrato, marcar tem que levar as guardadas também');
-  assert.match(fatiar('diagCorpo'), /momentos: \[\.\.\.momentosNoArquivo, \.\.\.diagMomentosAnteriores\(\)\]/,
+  assert.match(fatiar('diagCorpo'), /momentos: \[\.\.\.momentosNoArquivo, \.\.\.diagMomentosAnteriores\(aberturasNoArquivo\)\]/,
     'o relatório não entrega as guardadas — o aviso do desligar diria "não baixadas" do que já foi entregue');
 });
 
@@ -241,12 +244,12 @@ test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip 
     Blob: class { constructor(p) { this.p = p; } },
     setTimeout: () => 0, t: (k) => k, APP_VERSION: '2026092601', CompressionStream: function () {},
     showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
-    atualizarFabDev: () => {}, diagEsquecerGuardado: () => apagados.push(agora),
+    atualizarFabDev: () => {}, diagEsquecerEntregue: () => apagados.push(agora),
     Date: class extends Date { static now() { return agora; } },
     // O relatório: o retrato é tirado AGORA (R), com a captura que existe.
     diagCorpo: async () => {
       const corpo = { resumo: {} };
-      Object.defineProperty(corpo, 'entregue', { value: { em: agora, momentos: [...ctx.dlogMomentos] } });
+      Object.defineProperty(corpo, 'entregue', { value: { em: agora, momentos: [...ctx.dlogMomentos], aberturas: [] } });
       return corpo;
     },
     // O empacotamento leva tempo — e o app segue vivo: uma anotação e uma captura.
@@ -835,4 +838,187 @@ test('R5-4-5: a conta da lacuna — o anel girado, o retrato da versão anterior
   const jl = juntarRetrato(comLacuna, { ...r, chamadas: [{ t: new Date(T5 + 600000).toISOString(), rota: 'perfil' }] });
   assert.deepEqual(jl.lacunas.chamadas, undefined, 'a lacuna da base que o retrato cobre ficou');
   assert.equal(jl.lacunas.diario.n, r.cortados.diario - 101, 'a lacuna nova não veio por cima');
+});
+
+// ── R6-4-4 e R6-4-5 (auditoria de 2026-10-01): DUAS ABAS e o que é do APARELHO ─
+// A outra aba aberta grava as capturas dela na base na hora, e esta só as
+// conhecia se fossem de antes de ela abrir. Duas consequências, medidas no
+// navegador: desligar o modo dev AQUI (que apaga a base e, pelo aviso do
+// navegador, a memória da outra) contava só os registros desta aba e desligava
+// no 1º toque, calado (t3); e BAIXAR aqui apagava a base inteira, com as
+// capturas da outra que não tinham ido no arquivo (t3b). Aqui as funções rodam
+// DE VERDADE sobre uma base de mentira que, como o IndexedDB, devolve CÓPIAS.
+function baseClonada(registros = []) {
+  const loja = new Map(registros.map((r) => [r.id, structuredClone(r)]));
+  const indexedDB = {
+    open: () => {
+      const req = {};
+      setTimeout(() => {
+        req.result = {
+          objectStoreNames: { contains: () => true }, close() {},
+          transaction: () => {
+            const tx = {};
+            tx.objectStore = () => ({
+              getAll: () => { const r = {}; setTimeout(() => { r.result = [...loja.values()].map((x) => structuredClone(x)); r.onsuccess(); }, 0); return r; },
+              put: (a) => { loja.set(a.id, structuredClone(a)); },
+              delete: (id) => { loja.delete(id); },
+            });
+            setTimeout(() => tx.oncomplete && tx.oncomplete(), 1);
+            return tx;
+          },
+        };
+        req.onsuccess();
+      }, 0);
+      return req;
+    },
+    deleteDatabase: () => { const r = {}; setTimeout(() => { loja.clear(); r.onsuccess && r.onsuccess(); }, 0); return r; },
+  };
+  return { indexedDB, loja };
+}
+// O ouvinte do interruptor do modo dev, recortado do app.js (a arrow inteira).
+function ouvinteDoInterruptor() {
+  const ini = APP_SEM.indexOf("$('prefDevModeActive').addEventListener('change', async (e) =>");
+  assert.ok(ini > 0, 'sumiu o ouvinte do interruptor do modo dev');
+  const arrow = APP_SEM.indexOf('async (e) =>', ini);
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', arrow); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) return APP_SEM.slice(arrow, j + 1);
+  }
+  throw new Error('o ouvinte não fechou');
+}
+const ID_ESTA = 'esta-aba';
+const cap = (t, motivo = 'manual') => ({ t, motivo, dom: '<html></html>' });
+const reg = (id, salvoEm, momentos, extra = {}) => ({ id, inicio: salvoEm - 60e3, salvoEm, salvoPor: 'captura', versao: 'x',
+  diario: [], chamadas: [], erros: [], momentos, ...extra });
+// UMA aba: o módulo do diagnóstico (as funções de verdade) sobre a base dada.
+function abaDoDiag({ base, anteriores = [], minhas = [], ligadoLa = true }) {
+  const { indexedDB, loja } = baseClonada(base);
+  const toasts = [];
+  let apagou = 0;
+  const AppState = { devMode: { unlocked: true, active: true }, preferences: { undoEnabled: true } };
+  const deps = {
+    indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS,
+    DIAG_ABERTURA: { id: ID_ESTA, inicio: AGORA - HORA }, AppState, API: { chamadas: [] },
+    dlogLigado: () => AppState.devMode.active, modoDevDesligadoNoArmazenamento: () => !ligadoLa,
+    atualizarFabDev: () => {}, dfato: () => {},
+    Date: { now: () => AGORA }, showToast: (m) => toasts.push(m), t: (k, v) => `${k}|${v.n}`,
+    saveDevMode() {}, updateDevBadge() {}, diagAjustarRecursos() {}, enforceDevGatedFilters() {},
+    canDisableUndo: () => true, savePreferences() {}, renderUndoGateUI() {},
+    dlogApagar: () => { apagou++; },
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `
+    let diagAberturasAnteriores = __anteriores, diagEpoca = 0, diagGuardando = Promise.resolve(), diagBaixadoEm = 0;
+    let dlogMomentos = __minhas, dfatoAnel = [], dlogAnel = [], diagErros = [];
+    let desligarDevConfirmadoAte = 0, desligarDevVez = 0;
+    const dlogJaBaixados = new WeakSet();
+    ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagMomentosAnteriores', 'diagCapturasAnterioresDoEditor',
+       'dlogCapturasDoEditor', 'dlogNaoBaixados', 'dlogMarcarBaixados', 'diagChamadaSemCorpo', 'diagRegistroDaAbertura',
+       'diagAtualizarAnteriores', 'diagEsquecerEntregue'].map(fatiar).join('\n')}
+    const ouvinte = ${ouvinteDoInterruptor()};
+    return { ouvinte, diagAtualizarAnteriores, diagEsquecerEntregue, dlogNaoBaixados, dlogMarcarBaixados,
+      anteriores: () => diagAberturasAnteriores, baixouEm: (t) => { diagBaixadoEm = t; },
+      minhas: () => dlogMomentos, baixado: (m) => dlogJaBaixados.has(m) };`
+    .replace('__anteriores', 'arguments[arguments.length - 2]').replace('__minhas', 'arguments[arguments.length - 1]'));
+  const fns = app(...chaves.map((k) => deps[k]), structuredClone(anteriores), minhas);
+  return { ...fns, AppState, loja, toasts, apagou: () => apagou };
+}
+const tocar = async (aba, ligar = false) => { const e = { target: { checked: ligar } }; await aba.ouvinte(e); return e.target.checked; };
+
+test('R6-4-4: desligar o modo dev conta os registros não baixados do APARELHO — os da OUTRA aba, que estão na base', async () => {
+  // A outra aba registrou 2 telas DEPOIS de esta abrir: estão na base, não na memória daqui.
+  const outra = reg('outra', AGORA - 5000, [cap('o1'), cap('o2'), cap('oa', 'auto:arraste')]);
+  const aba = abaDoDiag({ base: [outra] });
+  assert.equal(aba.dlogNaoBaixados(), 0, 'PRÉ-CONDIÇÃO: esta aba já sabia das capturas da outra');
+  const marcado = await tocar(aba);
+  assert.equal(marcado, true, 'o 1º toque desligou o modo dev — e apagaria, calado, as 2 telas da outra aba');
+  assert.deepEqual(aba.toasts, ['toast.devPerdeCaptura|2'], 'o aviso não contou os registros do aparelho (só os da pessoa: o automático não entra)');
+  assert.equal(aba.apagou(), 0);
+  assert.equal(aba.AppState.devMode.active, true);
+  // O número do botão desta aba diz o mesmo que o aviso — e elas vão no relatório daqui, como o aviso manda.
+  assert.equal(aba.dlogNaoBaixados(), 2, 'o botão desta aba discorda do aviso');
+  // O 2º toque (em até 15 s) desliga e apaga.
+  await tocar(aba);
+  assert.equal(aba.AppState.devMode.active, false, 'o 2º toque não desligou');
+  assert.equal(aba.apagou(), 1);
+  // CONTROLE: nada não baixado no aparelho — o 1º toque desliga, sem aviso.
+  const vazia = abaDoDiag({ base: [reg('outra', AGORA - 5000, [cap('oa', 'auto:arraste')])] });
+  assert.equal(await tocar(vazia), false);
+  assert.equal(vazia.AppState.devMode.active, false, 'CONTROLE: sem registro da pessoa no aparelho o 1º toque não desligou');
+  assert.deepEqual(vazia.toasts, []);
+});
+
+test('R6-4-4: um toque que chega DURANTE a leitura da base decide — a leitura antiga não desliga o que foi religado', async () => {
+  const aba = abaDoDiag({ base: [] });
+  const desligando = tocar(aba);             // lê a base (assíncrono)…
+  const religou = await tocar(aba, true);    // …e a pessoa religa no meio
+  await desligando;
+  assert.equal(religou, true);
+  assert.equal(aba.AppState.devMode.active, true, 'a leitura do 1º toque desligou o modo dev que a pessoa religou');
+  assert.equal(aba.apagou(), 0, 'apagou o que o modo dev gravou com ele religado');
+});
+
+test('R6-4-4: a releitura traz a versão NOVA da outra aba e mantém marcado o que esta já baixou', async () => {
+  const v1 = reg('outra', AGORA - 9000, [cap('o1')]);
+  const aba = abaDoDiag({ base: [reg('outra', AGORA - 2000, [cap('o1'), cap('o2')])], anteriores: [v1] });
+  aba.dlogMarcarBaixados();                   // esta aba baixou: a o1 foi no arquivo
+  assert.equal(aba.dlogNaoBaixados(), 0, 'PRÉ-CONDIÇÃO');
+  await aba.diagAtualizarAnteriores();
+  const outra = aba.anteriores().find((a) => a.id === 'outra');
+  assert.deepEqual(outra.momentos.map((m) => m.t), ['o1', 'o2'], 'a versão nova da outra aba não entrou');
+  assert.equal(aba.dlogNaoBaixados(), 1, 'a o1, já baixada, voltou a contar como não baixada (ou a o2 não contou)');
+  // CONTROLE: a versão IGUAL (mesmo `salvoEm`) não troca nada.
+  const igual = abaDoDiag({ base: [v1], anteriores: [v1] });
+  const antes = igual.anteriores()[0];
+  await igual.diagAtualizarAnteriores();
+  assert.equal(igual.anteriores()[0], antes, 'a mesma versão foi trocada');
+  // E o que passou do prazo de 24 h (a poda ainda não rodou) não volta pra memória.
+  const vencida = abaDoDiag({ base: [reg('velha', AGORA - 25 * HORA, [cap('v1')])] });
+  await vencida.diagAtualizarAnteriores();
+  assert.deepEqual(vencida.anteriores(), [], 'a abertura vencida (mais de 24 h) voltou pro relatório e pro aviso');
+});
+
+test('R6-4-5: baixar numa aba apaga do aparelho SÓ o que foi no arquivo — o que a outra aba gravou depois fica', async () => {
+  const antiga = reg('antiga', AGORA - 3 * HORA, [cap('a1')]);              // uma abertura fechada
+  const outra = reg('outra', AGORA - 5000, [cap('o1'), cap('o2')]);        // a outra aba, aberta
+  const estaNaBase = reg(ID_ESTA, AGORA - 4000, [cap('m1')]);
+  const aba = abaDoDiag({ base: [antiga, outra, estaNaBase], anteriores: [antiga], minhas: [cap('m1')] });
+  // O relatório relê o aparelho: a outra aba entra nele (ver `diagCorpo`).
+  await aba.diagAtualizarAnteriores();
+  assert.deepEqual(aba.anteriores().map((a) => a.id).sort(), ['antiga', 'outra'],
+    'o relatório desta aba não leva o que a OUTRA gravou depois de esta abrir');
+  const noArquivo = aba.anteriores();
+  const entregues = noArquivo.map((a) => ({ id: a.id, salvoEm: a.salvoEm }));
+  // Enquanto o arquivo é montado, a outra aba registra mais uma tela (versão nova na base)…
+  aba.loja.set('outra', structuredClone(reg('outra', AGORA - 100, [cap('o1'), cap('o2'), cap('o3')])));
+  // …e esta registra uma depois do retrato.
+  aba.minhas().push(cap('m2'));
+  // O download: marca o que foi, carimba o retrato e apaga o entregue.
+  aba.dlogMarcarBaixados([aba.minhas()[0], ...noArquivo.flatMap((a) => a.momentos)]);
+  aba.baixouEm(AGORA - 3000);
+  await aba.diagEsquecerEntregue(entregues);
+  assert.equal(aba.loja.has('antiga'), false, 'a abertura que foi no arquivo ficou no aparelho');
+  assert.ok(aba.loja.has('outra'), 'a outra aba gravou DEPOIS da leitura, e o download apagou o que não foi no arquivo');
+  assert.deepEqual(aba.loja.get('outra').momentos.map((m) => m.t), ['o1', 'o2', 'o3']);
+  // A desta aba volta só com o que NÃO foi entregue.
+  assert.deepEqual(aba.loja.get(ID_ESTA).momentos.map((m) => m.t), ['m2'],
+    'a abertura desta aba ficou com o que já foi entregue (ou perdeu o que veio depois do retrato)');
+  // CONTROLE: a versão que FOI no arquivo, se ninguém a regravou, sai.
+  const b = abaDoDiag({ base: [outra], anteriores: [] });
+  await b.diagAtualizarAnteriores();
+  await b.diagEsquecerEntregue(b.anteriores().map((a) => ({ id: a.id, salvoEm: a.salvoEm })));
+  assert.equal(b.loja.has('outra'), false, 'CONTROLE: o que foi entregue, e não mudou, ficou no aparelho');
+});
+
+test('R6-4-5: o relatório relê o aparelho ANTES do retrato, e o download apaga pela lista DO RETRATO', () => {
+  const corpo = fatiar('diagCorpo');
+  const iInicio = corpo.indexOf('const anterioresDoAparelho = diagAtualizarAnteriores().catch(() => false);');
+  const iEspera = corpo.indexOf('await anterioresDoAparelho;');
+  const iRetrato = corpo.indexOf('const retratoEm = Date.now();');
+  assert.ok(iInicio > 0 && iEspera > iInicio && iRetrato > iEspera,
+    'o relatório não relê o aparelho antes do retrato — leva só o que esta aba viu ao abrir');
+  assert.match(corpo, /^\s+const aberturasNoArquivo = diagAberturasAnteriores;$/m);
+  assert.match(corpo, /aberturas: aberturasNoArquivo\.map\(\(a\) => \(\{ id: a\.id, salvoEm: a\.salvoEm \}\)\)/,
+    'o download não sabe QUAIS versões foram no arquivo');
 });

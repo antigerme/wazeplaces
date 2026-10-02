@@ -45,6 +45,7 @@ test('"Sair" e entrar de novo na MESMA página: a ação confirmada grava o hist
     podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
     agendarRedesenhoDoHistorico: () => {},   // o painel aberto se redesenha (test/aba-historico)
+    garantirLinhaDeBaseDasConquistas: () => {},   // a 1ª passada das conquistas (R6-7-13)
   };
   const { recordHistory } = montar(['loadHistory', 'recordHistory'], deps, ['recordHistory']);
   // O "Sair" deixa o histórico como o `handleLogout` deixa:
@@ -81,7 +82,7 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     get epocaDaSessao() { return estado.epoca; },
     API: { getRegion: () => 'row', getCountry: () => 30, rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
     scheduleAction: (tipo, place, ex) => agendadas.push(ex),
-    presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(),
+    presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(), carimboDoGesto: () => null,
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
     // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):
@@ -126,8 +127,10 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
     handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
     // As DUAS esperas do guardar: a ida e a conferência do 401 (C7 da
-    // auditoria do card, 2026-09-29) — as duas conferem a época depois.
-    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca !== epocaDaSessao\) return;[\s\S]*?r = await refazerDepoisDo401\(epoca, enviar\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // auditoria do card, 2026-09-29). A conferência só começa na MESMA época, e
+    // depois das duas a época mudada sai sem gravar nada — só o aviso da estrela
+    // que não foi guardada, com a fila do gesto na tela (R6-2-08).
+    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca === epocaDaSessao && r && r\.errorCategory === 'unauthorized'\) \{\s*r = await refazerDepoisDo401\(epoca, enviar\);\s*\}\s*if \(epoca !== epocaDaSessao\) \{\s*if \([^{}]*\) showToast\(t\('toast\.guardarFalhou'\), 'error'\);\s*return;\s*\}/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });
@@ -186,7 +189,7 @@ test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () =>
 });
 
 // ── o treino ──────────────────────────────────────────────────────────────────
-function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false, aprovacaoDaQueda = null } = {}) {
+function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, aprovacaoNaJanela = false, aprovacaoDaQueda = null, extraDeps = {} } = {}) {
   const log = [];
   // A aprovação de foto no ar (R5-2-04): já saiu (`aprovacaoNoAr`), ou estava na
   // janela do Desfazer e SAI no despacho das pendências do lightbox ao entrar.
@@ -200,7 +203,7 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
   const el = () => ({ classList: { replace() {}, add() {}, remove() {} }, textContent: '', children: [] });
   const deps = {
     AppState, document: { getElementById: el },
-    removeUndoBanner: () => {}, savePreferences: () => log.push('prefs'), showLoading: () => {},
+    removeUndoBanner: () => log.push('banner-fora'), savePreferences: () => log.push('prefs'), showLoading: () => {},
     updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => log.push('card'),
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => log.push('prefetch'),
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
@@ -209,6 +212,9 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
     enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
     aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
+    // A aprovação ainda na JANELA do Desfazer (R6-2-07): o despacho a poria no ar.
+    aprovacaoPendente: aprovacaoNaJanela ? { enviar: () => {} } : null,
+    ...extraDeps,
   };
   const i = APP_SEM.indexOf('const Treino = {');
   assert.ok(i >= 0, 'o objeto Treino sumiu');
@@ -265,12 +271,15 @@ test('R5-2-04: com a aprovação de foto NO AR o treino não liga — e diz por 
   assert.ok(log.includes('toast:toast.esperaAprovacao'), `recusou calado (ou com outro aviso): ${log}`);
 });
 
-test('R5-2-04: a aprovação que estava na JANELA sai ao entrar — e o treino espera por ela também', () => {
+test('R5-2-04: a aprovação que está na JANELA do Desfazer segura o treino também — e segue na janela (R6-2-07)', () => {
   const { Treino, log } = montarTreino({ queue: [{ venueID: 'vF', updateRequestID: 'uF' }] }, { aprovacaoNaJanela: true });
   Treino.entrar();
-  assert.ok(log.includes('lightbox:enviou'), 'PRÉ-CONDIÇÃO: as pendências do lightbox foram despachadas');
-  assert.equal(Treino.ativo, false, 'a aprovação despachada ao entrar ficou no ar com o treino ligado');
+  assert.equal(Treino.ativo, false, 'o treino ligou com a aprovação a caminho do ar');
   assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  // A recusa vem ANTES do despacho (R6-2-07): a aprovação segue na janela,
+  // desfazível, com o banner dela — o treino recusado não pode mandá-la.
+  assert.ok(!log.includes('lightbox:enviou'), 'o treino que ia ser recusado despachou a aprovação da janela');
+  assert.ok(!log.includes('banner-fora'), 'o treino recusado tirou o banner do Desfazer da aprovação');
   // CONTROLE: sem aprovação nenhuma, entra.
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] });
   c.Treino.entrar();
@@ -292,6 +301,30 @@ test('R5-2-04 × queda: a aprovação da sessão que caiu, ainda no ar NA FILA q
   const c = montarTreino({ queue: [{ venueID: 'r1', updateRequestID: 'r1' }] }, { aprovacaoDaQueda: 'outraFila' });
   c.Treino.entrar();
   assert.equal(c.Treino.ativo, true, 'a aprovação de uma fila que já foi refeita segurou o treino');
+});
+
+// ── R6-2-07: a recusa do treino vem ANTES de despachar qualquer coisa ──────────
+// Com um ✕ na janela do Desfazer e a aprovação de OUTRO pedido no ar (o caminho
+// L22), "Praticar" mandava o ✕ na hora — o banner sumia, e com ele a chance de
+// desfazer — e DEPOIS recusava o treino: o efeito sem a ação pedida (MEDIDO no
+// navegador, s35: o ✕ saiu em ~470 ms e o treino ficou fechado).
+test('R6-2-07: com a aprovação no ar, o treino recusado NÃO manda o ✕ da janela do Desfazer', () => {
+  const executou = [];
+  const janela = { type: 'reject', execute: () => executou.push('reject') };
+  const { Treino, AppState, log } = montarTreino({ queue: [{ venueID: 'vA', updateRequestID: 'uA' }], pendingAction: janela },
+    { aprovacaoNoAr: true });
+  Treino.entrar();
+  assert.equal(Treino.ativo, false, 'PRÉ-CONDIÇÃO: o treino é recusado');
+  assert.ok(log.includes('toast:toast.esperaAprovacao'));
+  assert.deepEqual(executou, [], 'o treino recusado mandou o ✕ da janela do Desfazer');
+  assert.equal(AppState.pendingAction, janela, 'a janela do Desfazer foi fechada pelo treino que não abriu');
+  assert.ok(!log.includes('banner-fora'), 'o banner do Desfazer sumiu com o treino recusado');
+  assert.ok(!log.includes('lightbox:enviou'), 'as escritas do lightbox saíram com o treino recusado');
+  // CONTROLE: a aprovação já pousou — o treino abre, e aí o ✕ sair é o desenho de entrar.
+  const c = montarTreino({ queue: [{ venueID: 'vA', updateRequestID: 'uA' }], pendingAction: { type: 'reject', execute: () => executou.push('c') } });
+  c.Treino.entrar();
+  assert.equal(c.Treino.ativo, true);
+  assert.deepEqual(executou, ['c']);
 });
 
 test('treino: deslogado ele NÃO liga (a tela de card nem existe)', () => {
@@ -317,6 +350,239 @@ test('treino: fila nova (sair, entrar, atualizar, filtro) ENCERRA o treino sem d
   // E nada busca durante o treino (o laço do `startFetching` giraria à toa).
   assert.match(fatiar('startFetching'), /^async function startFetching\(\) \{\s*if \(Treino\.ativo\) return;/);
   assert.match(fatiar('maybePrefetch'), /^function maybePrefetch\(\) \{\s*if \(Treino\.ativo\) return;/);
+});
+
+// ── R6-7-2: o "Como funciona" não abre por cima de camada aberta ─────────────
+// A primeira busca demorando, a pessoa abre o "Conectar outro aparelho" (ou os
+// Filtros) e o primeiro card chega: o aviso da primeira vez abria por cima — o
+// `openModal` esconde a camada e roda a limpeza dela, apagando o QR no meio do
+// pareamento e a escolha ainda não aplicada dos Filtros (auditoria de
+// 2026-10-01, MEDIDO no navegador: `pixelsQr: 0`).
+function montarComoFunciona() {
+  const camada = { modal: null, foto: false, mapa: false };
+  const abertos = [];
+  const AppState = { preferences: { comoFuncionaVisto: false }, currentPlace: { venueID: 'v1' } };
+  const deps = {
+    AppState, Treino: { ativo: false }, cardDaFrente: () => ({}),
+    topOpenModal: () => camada.modal, Lightbox: { isOpen: () => camada.foto }, MapaLightbox: { isOpen: () => camada.mapa },
+    savePreferences: () => {}, abrirComoFunciona: () => abertos.push('comoFunciona'),
+  };
+  const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'mostrarComoFuncionaSePrimeiraVez'], deps,
+    ['mostrarComoFuncionaSePrimeiraVez']);
+  return { mostrar: mostrarComoFuncionaSePrimeiraVez, AppState, abertos, camada };
+}
+
+test('R6-7-2: o "Como funciona" da 1ª vez NÃO abre por cima de uma camada aberta — e espera o próximo card sem ela', () => {
+  for (const [nome, abre] of [['do "Conectar outro aparelho"', (c) => { c.modal = { id: 'pairShowModal' }; }],
+    ['dos Filtros', (c) => { c.modal = { id: 'filtersModal' }; }], ['da foto ampliada', (c) => { c.foto = true; }],
+    ['do mapa ampliado', (c) => { c.mapa = true; }]]) {
+    const m = montarComoFunciona();
+    abre(m.camada);
+    m.mostrar();
+    assert.deepEqual(m.abertos, [], `abriu por cima ${nome}: o openModal a esconde e apaga o que a pessoa fazia`);
+    assert.equal(m.AppState.preferences.comoFuncionaVisto, false,
+      `por cima ${nome}, deu-se por visto sem ter aparecido — nunca mais apareceria`);
+    // A camada fechou e o PRÓXIMO card montou: aí sim.
+    Object.assign(m.camada, { modal: null, foto: false, mapa: false });
+    m.mostrar();
+    assert.deepEqual(m.abertos, ['comoFunciona'], `depois ${nome} fechar, o próximo card não mostrou o aviso`);
+  }
+  // CONTROLE: sem camada nenhuma ele abre na hora, e uma vez só.
+  const c = montarComoFunciona();
+  c.mostrar(); c.mostrar();
+  assert.deepEqual(c.abertos, ['comoFunciona']);
+  assert.equal(c.AppState.preferences.comoFuncionaVisto, true);
+});
+
+// ── R6-7-6: o card de foto nova do TREINO abre na foto em decisão, com ✨ ──────
+// O treino troca o `updateRequestID` pelo inerte, e é por ele que o card acha a
+// foto proposta: o card de foto nova abria na foto ANTIGA, sem ✨ nem a borda
+// âmbar — o treino escolhe os cards por variedade justamente pra ensinar o de
+// foto (auditoria de 2026-10-01; na fila do owner, em 13 de 76 pedidos de foto a
+// proposta não é a 1ª).
+test('R6-7-6: no treino, o pedido de foto nova abre na foto PROPOSTA — a mesma do modo real', () => {
+  const { Treino } = montarTreino();
+  const { fotosDoCard } = montar(['fotosDoCard'], {}, ['fotosDoCard']);
+  const real = { venueID: 'v1', updateRequestID: 'u1', purType: 'NEW_PHOTO',
+    imageUrls: ['https://venue-image.waze.com/thumbs/thumb347_antiga111.jpg', 'https://venue-image.waze.com/thumbs/thumb347_u1.jpg'] };
+  assert.equal(fotosDoCard(real).emDecisao, 1, 'CONTROLE: no modo real a proposta é a 2ª');
+  const treino = Treino.neutralizar(real);
+  assert.equal(treino.updateRequestID, Treino.UR_INERTE, 'PRÉ-CONDIÇÃO: o pedido de treino segue inerte pras escritas');
+  const f = fotosDoCard(treino);
+  assert.equal(f.emDecisao, 1, 'o card de treino não acha a foto em decisão — sem ✨, e o lightbox também não');
+  assert.equal(f.inicial, 1, 'o card de treino abre na foto ANTIGA');
+});
+
+// ── R6-7-7: o foco no autor não atravessa o treino ──────────────────────────
+// "Primeiro os de X" é ordem da fila REAL. Ele aparecia no treino (mentindo: a
+// ordem lá é de variedade) e se apagava no 1º card de outro autor — a fila real
+// voltava com a série na frente e sem a barra; e o foco escolhido NO treino
+// sobrava na fila real (auditoria de 2026-10-01, MEDIDO no navegador).
+function barraDeMentira() {
+  const classes = new Set(['hidden']);
+  const barra = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), replace() {}, contains: (c) => classes.has(c) } };
+  const el = () => ({ classList: { replace() {}, add() {}, remove() {} }, textContent: '', children: [] });
+  return { barra, visivel: () => !classes.has('hidden'),
+    document: { getElementById: (id) => (id === 'focoAutorBar' ? barra : el()) } };
+}
+test('R6-7-7: o foco da fila real sai da tela no treino e VOLTA no `sair()`; o escolhido no treino não sobra', () => {
+  const tela = barraDeMentira();
+  tela.barra.classList.remove('hidden');               // "Primeiro os de X" na fila real
+  const real = [{ venueID: 'v1', creatorId: 500 }, { venueID: 'v2', creatorId: 600 }];
+  const { Treino, AppState } = montarTreino({ queue: real, currentPlace: real[0], autorEmFoco: 500 },
+    { extraDeps: { document: tela.document } });
+  Treino.entrar();
+  assert.equal(AppState.autorEmFoco, null, 'o foco da fila REAL valeu no treino, cuja ordem é por variedade');
+  AppState.autorEmFoco = 600;                          // "Ver +N" num card de treino
+  tela.barra.classList.remove('hidden');
+  Treino.sair();
+  assert.equal(AppState.autorEmFoco, 500, 'o foco da fila real não voltou (ou o do treino sobrou nela)');
+  assert.equal(tela.visivel(), false, 'a barra do TREINO ficou na tela depois de sair');
+  // A fila nova (o `resetQueue` encerra o treino) também: o do treino não sobra.
+  const t2 = montarTreino({ queue: real, currentPlace: real[0], autorEmFoco: null }, { extraDeps: { document: barraDeMentira().document } });
+  t2.Treino.entrar();
+  t2.AppState.autorEmFoco = 600;
+  t2.Treino.encerrar();
+  assert.equal(t2.AppState.autorEmFoco, null, 'o foco escolhido no treino sobrou na fila nova');
+});
+
+// ── R6-7-8: o "de N na região" é da fila REAL ────────────────────────────────
+test('R6-7-8: no treino, o "de N na região" da fila real sai de baixo do "Restam" do treino — e volta fora dele', () => {
+  const classes = new Set();
+  const hint = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) }, textContent: '', title: '',
+    removeAttribute() {} };
+  const el = { pendingCount: { textContent: '' }, pendingTotalHint: hint };
+  const Treino = { ativo: true, restam: 30 };
+  const AppState = { authenticated: true, serverTotal: 35, serverBlocked: 100, blockedPartial: false, hasMore: false,
+    fetching: false, loadError: false };
+  const { updatePendingCount } = montar(['updatePendingCount', 'updatePendingTotalHint'], {
+    AppState, Treino, document: { getElementById: (id) => el[id] || null }, t: (k, v) => k + JSON.stringify(v || {}),
+    setCount: (e, n) => { e.textContent = String(n); }, atualizarPontoNoIcone() {}, atualizarAvisoDeSessao() {},
+    // O "…" e o "—" do R6-2-04/05 (lote 10 da fila): a busca esperando o perfil, e
+    // parar a contagem animada que estiver em curso.
+    buscaEsperaOPerfil: false, pararContagemEmCurso() {},
+  }, ['updatePendingCount']);
+  updatePendingCount();
+  assert.equal(el.pendingCount.textContent, '30', 'PRÉ-CONDIÇÃO: o "Restam" é o do treino');
+  assert.ok(classes.has('hidden'), `o "de N na região" da fila real ficou embaixo dos exemplos (${hint.textContent})`);
+  // CONTROLE: fora do treino, ele volta — "de 135 na região".
+  Treino.ativo = false;
+  updatePendingCount();
+  assert.ok(!classes.has('hidden'));
+  assert.match(hint.textContent, /"total":"135"/);
+});
+
+// ── R6-7-10: trocar o idioma no treino retraduz os EXEMPLOS ─────────────────
+test('R6-7-10: com a fila vazia o treino usa exemplos — trocar o idioma os retraduz (o nome, o endereço e o autor)', () => {
+  let lang = 'pt';
+  const { Treino, AppState } = montarTreino({ queue: [] }, { extraDeps: { t: (k) => lang + ':' + k } });
+  Treino.entrar();
+  assert.equal(AppState.queue.length, 3, 'PRÉ-CONDIÇÃO: o treino de fila vazia é de exemplos');
+  assert.equal(AppState.queue[0].name, 'pt:treino.c1.nome');
+  lang = 'en';
+  Treino.retraduzirExemplos();
+  assert.deepEqual(AppState.queue.map((p) => [p.name, p.address, p.createdBy]), [
+    ['en:treino.c1.nome', 'en:treino.c1.endereco', 'en:treino.autor'],
+    ['en:treino.c2.nome', 'en:treino.c2.endereco', 'en:treino.autor'],
+    ['en:treino.c3.nome', 'en:treino.c3.endereco', 'en:treino.autor']], 'os exemplos ficaram no idioma de antes');
+  // E o pedido REAL do treino não é tocado (o nome dele é do Waze).
+  const r = montarTreino({ queue: [{ venueID: 'r1', name: 'Padaria Real' }, { venueID: 'r2', name: 'B' }, { venueID: 'r3', name: 'C' }] });
+  r.Treino.entrar();
+  r.Treino.retraduzirExemplos();
+  assert.equal(r.AppState.queue.find((p) => p.venueID === 'r1').name, 'Padaria Real');
+});
+
+// ── R6-7-11: o convite de instalar mora no "Tudo limpo!", e só ali ──────────
+// A regra é a do confete: a tela de quem TERMINOU a fila. O convite aparecia em
+// todo painel vazio — no "Confira o país e a região" de quem não tratou nada,
+// disputando com a instrução de conferir os filtros, e no "Fim da fila" com
+// pulados (auditoria de 2026-10-01, MEDIDO no navegador com o passo a passo do iOS).
+function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
+  const cls = () => { const c = new Set(); return { set: c, add: (x) => c.add(x), remove: (x) => c.delete(x),
+    contains: (x) => c.has(x), toggle: (x, f) => { if (f) c.add(x); else c.delete(x); } }; };
+  const els = {};
+  for (const id of ['installInvite', 'installInviteBtn', 'installIosSteps']) els[id] = { classList: cls() };
+  els.installInvite.classList.add('hidden');
+  const noMore = { classList: cls(), querySelector: () => null, dataset: { bordaRolagem: '1' }, offsetWidth: 0 };
+  els.noMoreCards = noMore;
+  const deps = {
+    AppState: { loadError: false, hasMore: false, serverTotal: 0, stats: { skipped } },
+    document: { getElementById: (id) => els[id] || null },
+    dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
+    marcarBordaRolagem() {}, checarConquistas() {}, dlog() {}, filaZeradaConfirmada: () => false, trocarTextoI18n() {},
+    convitePodeAparecer: () => true,   // o navegador oferece (ou é iOS) e ninguém dispensou
+    queueMicrotask: () => {},
+  };
+  const chaves = Object.keys(deps);
+  // `recusaAutomaticaNestaFila` (R6-2-11): só muda a FRASE; convite e confete são do trabalho da pessoa.
+  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false;\n`
+    + ['puladosNestaFila', 'filaTerminouLimpa', 'atualizarConviteInstalar', 'showNoPlaces'].map(fatiar).join('\n')
+    + '\nreturn { showNoPlaces, atualizarConviteInstalar };')(...chaves.map((k) => deps[k]));
+  return { ...api, convite: () => !els.installInvite.classList.contains('hidden'), festa: () => noMore.classList.contains('celebrate') };
+}
+test('R6-7-11: o convite de instalar sai só no painel de quem TERMINOU a fila — a mesma condição do confete', () => {
+  for (const [nome, caso] of [['"Confira o país e a região" (não tratou nada)', { tratou: false }],
+    ['"Fim da fila" (com pulados)', { tratou: true, skipped: 3, base: 1 }]]) {
+    const m = montarPainelComConvite(caso);
+    m.showNoPlaces();
+    assert.equal(m.convite(), false, `o convite apareceu no ${nome}`);
+    assert.equal(m.festa(), false, 'PRÉ-CONDIÇÃO: este painel não tem festa');
+    // O prompt do navegador chega DEPOIS (beforeinstallprompt) e redesenha o convite.
+    m.atualizarConviteInstalar();
+    assert.equal(m.convite(), false, `o prompt que chegou depois pôs o convite no ${nome}`);
+  }
+  // CONTROLE: no "Tudo limpo!" de quem terminou, convite e confete juntos.
+  const c = montarPainelComConvite({ tratou: true });
+  c.showNoPlaces();
+  assert.equal(c.festa(), true);
+  assert.equal(c.convite(), true, 'o convite sumiu do "Tudo limpo!"');
+});
+
+// ── R6-7-12: os botões de instalar somem — o foco do teclado não cai no <body> ─
+// "Agora não" esconde o convite, e o "Instalar o aplicativo" da Ajuda se esconde
+// depois do diálogo do navegador (o prompt é de uso único), com a Ajuda ainda
+// aberta. Pelo teclado, o foco caía no <body> (auditoria de 2026-10-01, MEDIDO
+// nos dois). Ele vai a um vizinho que FICA; com o dedo, nada muda de lugar.
+function montarInstalar() {
+  const ouvintes = {};
+  const els = {};
+  const elemento = (id) => (els[id] = els[id] || { id, addEventListener: (tipo, fn) => { ouvintes[id] = fn; },
+    classList: { toggle() {}, add() {}, remove() {} } });
+  const doc = { activeElement: null, body: { id: 'body' }, getElementById: elemento };
+  const focos = [];
+  const deps = {
+    document: doc, window: { addEventListener() {} }, safeLS: { set() {} }, CHAVE_INSTALL_DISPENSADO: 'x',
+    atualizarConviteInstalar() {}, atualizarBotaoInstalar() {},
+    devolverFoco: (alvo) => { focos.push(alvo ? alvo.id : null); },
+  };
+  const chaves = Object.keys(deps);
+  const estado = new Function(...chaves, 'let promptInstalacao = null;\n'
+    + ['veioDoTeclado', 'focoPerdido', 'setupInstalarApp'].map(fatiar).join('\n')
+    + '\nreturn { setupInstalarApp, darPrompt: (p) => { promptInstalacao = p; } };')(...chaves.map((k) => deps[k]));
+  estado.setupInstalarApp();
+  const clicar = (id, { teclado }) => {
+    const alvo = elemento(id);
+    doc.activeElement = alvo;          // o foco está no botão (Tab até ele, ou o toque)
+    return ouvintes[id]({ detail: teclado ? 0 : 1, currentTarget: alvo });
+  };
+  return { clicar, focos, darPrompt: estado.darPrompt };
+}
+test('R6-7-12: "Agora não" e "Instalar" pelo teclado levam o foco a um vizinho que fica — com o dedo, não', async () => {
+  const m = montarInstalar();
+  m.clicar('installDismissBtn', { teclado: true });
+  assert.deepEqual(m.focos, ['reloadBtn'], 'o "Agora não" escondeu o convite com o foco nele, e o foco caiu no <body>');
+  m.darPrompt({ prompt() {}, userChoice: Promise.resolve({ outcome: 'dismissed' }) });
+  await m.clicar('installAppBtn', { teclado: true });
+  assert.deepEqual(m.focos, ['reloadBtn', 'closeHelp'], 'o "Instalar" da Ajuda sumiu com o foco nele, com a Ajuda aberta');
+  m.darPrompt({ prompt() {}, userChoice: Promise.resolve({ outcome: 'accepted' }) });
+  await m.clicar('installInviteBtn', { teclado: true });
+  assert.deepEqual(m.focos, ['reloadBtn', 'closeHelp', 'reloadBtn'], 'o "Instalar" do convite sumiu com o foco nele');
+  // CONTROLE: com o dedo (ou o mouse) o foco não é movido — a regra do app.
+  const d = montarInstalar();
+  d.clicar('installDismissBtn', { teclado: false });
+  d.darPrompt({ prompt() {}, userChoice: Promise.resolve() });
+  await d.clicar('installAppBtn', { teclado: false });
+  assert.deepEqual(d.focos, [], 'o toque moveu o foco');
 });
 
 test('Ajuda: Praticar, Conectar outro aparelho e Sair só aparecem com sessão', () => {
@@ -416,9 +682,11 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
   };
   const els = { filterCountry: el(), filterCountryHint: el(), filterRegion: el({ value: 'row' }), filterMyArea: el({ checked: false }) };
   const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
+  // A troca de região passa pela MESMA função (R66-4, test/filtros-aplicar): ela
+  // sabe a região aplicada e tira a área do país que deixou de ser mostrado.
   const { populateCountrySelect } = montar(['populateCountrySelect'], {
-    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30 },
-    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x),
+    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30, getRegion: () => 'row' },
+    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x), aoMudarPaisNaTela: () => {},
   }, ['populateCountrySelect']);
   const dica = () => !els.filterCountryHint.classList.contains('hidden');
 
@@ -532,8 +800,10 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
       trocarTextoI18n: (e, k) => { if (e) e.attrs['data-i18n'] = k; },
     };
     const chaves = Object.keys(deps);
-    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};\n`
-      + fatiar('puladosNestaFila') + '\n' + fatiar('showNoPlaces') + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
+    // `recusaAutomaticaNestaFila`: a recusa automática não agiu (R6-2-11 tem teste próprio, em lote-autor).
+    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false;\n`
+      + fatiar('puladosNestaFila') + '\n' + fatiar('filaTerminouLimpa') + '\n' + fatiar('showNoPlaces')
+      + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
     fn();
     return [h3.attrs['data-i18n'], p.attrs['data-i18n']];
   };

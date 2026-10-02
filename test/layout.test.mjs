@@ -1927,7 +1927,9 @@ test('foco num autor prioriza sem esconder ninguém', () => {
   assert.ok(f, 'sumiu o focarAutor');
   // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
   // um filter() que descarta o resto reprova aqui.
-  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.creatorId !== id\)/,
+  // (O resto é tudo o que não está na SÉRIE — `serieDoAutor`, que deixa o pedido
+  // em andamento de fora: ele vai pro resto, não some, R6-2-02.)
+  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => !naSerie\.has\(x\)\)/,
     'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e o app diria "Tudo limpo!" mentindo');
   // Chaveado por ID, nunca por nome: 69% dos autores têm nome GERADO, que muda
   // no dia em que a pessoa escolhe um. Medido: zero colisões nome→id numa fila,

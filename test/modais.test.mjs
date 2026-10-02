@@ -90,7 +90,13 @@ function montar() {
   for (const id of MODAIS) { elemento(id).classList.add('hidden'); elemento(id + '_fechar', id); }
   const filtersBtn = elemento('filtersBtn');
   const resumoBotao = elemento('resumoBotao', 'filtersModal');
-  const body = { id: 'body', style: {}, contains: (el) => !!el && els.get(el.id) === el };
+  // O ⓘ da Ajuda, a reserva final do foco (existe nas duas telas).
+  elemento('helpBtn');
+  // O <body> como o do navegador: conectado, com caixa e com `focus()` — o
+  // `focavelNaTela` o ACEITA, e é por isso que o `devolverFoco` tem de recusá-lo
+  // (R6-1-07). Sem isto, "o foco não voltou ao body" passaria com qualquer código.
+  const body = { id: 'body', style: {}, contains: (el) => !!el && els.get(el.id) === el,
+    isConnected: true, disabled: false, getClientRects: () => [{}], focus() { doc.activeElement = body; } };
   doc.activeElement = body;
   const document = Object.assign(doc, { body, getElementById: (id) => els.get(id) || null });
 
@@ -177,4 +183,31 @@ test('CONTROLE: só roda a limpeza do que ESTAVA na tela, e nunca a do próprio 
   const antes = m.presenca.esquecerAberta;
   m.openModal('conversaModal');
   assert.equal(m.presenca.esquecerAberta, antes, 'reabrir a conversa soltou a que acabou de abrir');
+});
+
+// ── R6-1-07 (2026-10-02): o modal aberto PELO APP, com o foco no <body> ──────
+// O "Acesso restrito" do login por arquivo (o botão que entrou fica `disabled`
+// durante a validação, e o foco cai no <body>), o da recusa na abertura e o
+// "Como funciona" da primeira vez abrem sem ninguém ter tocado num botão: quem
+// "abriu" é o <body>. Fechar (botão, Esc ou voltar) devolvia o foco pra lá — o
+// `focavelNaTela` aceita o <body> —, e quem usa teclado ou leitor de tela
+// recomeçava do topo (MEDIDO no Chromium, os três caminhos). A regra do projeto
+// é "nunca o <body>": a reserva e o ⓘ da Ajuda, como na queda.
+test('R6-1-07: o modal aberto com o foco no <body> devolve o foco a um ALVO ao fechar — nunca ao <body>', () => {
+  const m = montar();
+  assert.equal(m.document.activeElement, m.body, 'PRÉ-CONDIÇÃO: o foco não começou no <body>');
+  // CONTROLE do instrumento: o <body> daqui recebe foco, como o do navegador.
+  m.body.focus();
+  assert.equal(m.document.activeElement, m.body, 'CONTROLE: o <body> do harness não recebe foco — o teste perdeu o sentido');
+  m.openModal('helpModal');                      // aberto pelo app: quem "abriu" é o <body>
+  assert.equal(m.document.activeElement.id, 'helpModal_fechar', 'CONTROLE: o foco não entrou no modal');
+  m.closeModal('helpModal');
+  assert.equal(m.document.activeElement.id, 'helpBtn',
+    `DEFEITO: fechar o modal aberto pelo app devolveu o foco ao ${m.document.activeElement.id} — perdido pra quem usa teclado`);
+  // CONTROLE: aberto por um botão na tela, o foco volta a ELE (não ao ⓘ).
+  const c = montar();
+  c.document.activeElement = c.filtersBtn;
+  c.openModal('helpModal');
+  c.closeModal('helpModal');
+  assert.equal(c.document.activeElement, c.filtersBtn, 'o foco não voltou a quem abriu');
 });

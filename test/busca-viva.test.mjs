@@ -409,7 +409,8 @@ test('a volta da rede e o "Tentar novamente": com a fila VAZIA é atualizar; com
     'a volta da rede voltou a zerar a fila');
   // A fila guardada entra também depois de uma busca que falhou por rede com o
   // `onLine` verdadeiro (R4-O1, em test/offline-varredura.test.mjs).
-  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(\) => \{\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\);/,
+  // (O foco prometido ao card que vem, pelo teclado, sai antes do `await`: R6-2-13.)
+  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\);/,
     'o "Tentar novamente" voltou a zerar a fila (e a descartar a guardada do offline)');
   assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
     'o ↻ sem rede joga fora a fila (inclusive a guardada)');

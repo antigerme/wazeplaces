@@ -1236,3 +1236,76 @@ test('achado 11, região: se a pessoa escolheu OUTRO país no modal, a escolha d
   p.app.applyFiltersFromModal();
   assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73]);
 });
+
+// ═══ R66-4 · a lista de países é a MESMA na abertura e na volta à região ═════
+// A troca de região punha a lista INTEIRA, inclusive ao VOLTAR pra região
+// aplicada: pro mesmo servidor os Filtros mostravam duas listas — na abertura só
+// os países que a pessoa edita, com a dica; depois da ida e volta, todos, sem
+// ela —, e na volta dava pra aplicar um que ela não edita (o filtro de
+// permissão do servidor descarta tudo: fila vazia). E a reabertura dos Filtros
+// mostrava OUTRO país no lugar do aplicado, que um "Aplicar" tocado só pra
+// desmarcar um tipo gravava, calado (auditoria da rodada 6). MEDIDO no
+// navegador: na volta "30,73,181" sem a dica, escolhido 73, aplicado `row/73`,
+// reaberto mostrando o 30, e o "Aplicar" gravando `row/30`.
+const LISTAS_R66 = {
+  row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
+  na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
+};
+function paginaR66(extra = {}) {
+  const p = pagina({ perfil: { id: 1, editableCountryIDs: [30], managedAreas: [] }, ...extra });
+  // Uma lista NOVA a cada pedido, como a da rede: com o mesmo objeto, a abertura
+  // e a troca não se distinguiriam por identidade.
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: LISTAS_R66[r].map((c) => ({ ...c })) });
+  return p;
+}
+const telaDoPais = (p) => ({
+  opcoes: p.els.filterCountry.opcoes.map((o) => o.value).join(','),
+  pais: p.els.filterCountry.value,
+  dica: !p.els.filterCountryHint.classList.contains('hidden'),
+});
+async function trocarRegiao(p, r) {
+  p.els.filterRegion.value = r;
+  await p.app.aoTrocarRegiaoNoModal({ target: p.els.filterRegion });
+}
+// O "Aplicar" tocado só pra desmarcar um tipo.
+function aplicarSoDesmarcandoUmTipo(p) {
+  p.deps.document.querySelectorAll = (q) => (q === '.filter-type:checked' ? [{ value: 'NEW_PLACE' }] : []);
+  p.app.applyFiltersFromModal();
+}
+
+test('R66-4: ir e voltar de região mostra a MESMA lista da abertura — só os editáveis, com a dica — e o país que a pessoa não edita não entra', async () => {
+  const p = paginaR66();
+  await p.abrir();
+  const abertura = telaDoPais(p);
+  assert.deepEqual(abertura, { opcoes: '30', pais: '30', dica: true }, 'CONTROLE: a abertura não peneirou pelos países do perfil');
+  await trocarRegiao(p, 'na');
+  // CONTROLE: na região que não é a do perfil, a lista vai inteira e sem a dica.
+  assert.deepEqual(telaDoPais(p), { opcoes: '235,40', pais: '235', dica: false }, 'CONTROLE: a NA não veio inteira');
+  await trocarRegiao(p, 'row');
+  assert.deepEqual(telaDoPais(p), abertura, 'de volta à região aplicada, os Filtros mostram outra lista que a da abertura');
+  // A França não é opção: escolhê-la não acontece, e o "Aplicar" fica no Brasil.
+  p.els.filterCountry.value = '73';
+  assert.equal(p.els.filterCountry.value, '', 'a França (que a pessoa não edita) é opção na volta');
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 30]);
+});
+
+test('R66-4: o país APLICADO que a pessoa não edita entra como opção — o seletor não mostra outro no lugar dele, e o "Aplicar" não o troca calado', async () => {
+  // Aplicado `row/73` (escolhido antes de o perfil chegar, ou numa versão de antes).
+  const p = paginaR66({ pais: 73 });
+  await p.abrir();
+  const tela = telaDoPais(p);
+  assert.equal(tela.pais, '73', `os Filtros mostram o ${tela.pais} no lugar do país aplicado (73)`);
+  assert.deepEqual(tela.opcoes.split(',').sort(), ['30', '73'], 'a lista não é a dos editáveis mais o aplicado');
+  assert.equal(tela.dica, false, 'a dica diz "só os países que você pode editar" com um que a pessoa não edita na lista');
+  aplicarSoDesmarcandoUmTipo(p);
+  assert.equal(p.estado.pais, 73, `o "Aplicar" tocado só pra desmarcar um tipo gravou o ${p.estado.pais}, calado`);
+  // E a ida e volta mantém o aplicado.
+  await trocarRegiao(p, 'na');
+  await trocarRegiao(p, 'row');
+  assert.equal(p.els.filterCountry.value, '73', 'na volta à região aplicada, o seletor saiu do país aplicado');
+  // CONTROLE: com o aplicado editável, a lista é só a dos editáveis, com a dica.
+  const q = paginaR66({ pais: 30 });
+  await q.abrir();
+  assert.deepEqual(telaDoPais(q), { opcoes: '30', pais: '30', dica: true });
+});

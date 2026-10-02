@@ -232,9 +232,11 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };
-  const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
-    deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
+  const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente',
+    'serieDoAutor'], deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
   // CONTROLE: com o foco da anterior, a fila de quem entrou vem com o autor dela na frente.
   AppState.queue = [{ creatorId: 2002 }, { creatorId: 1001 }];
   manterFocoNaFrente();
@@ -299,7 +301,7 @@ test('extensão: o portão RECUSOU — uma tentativa só, e o perfil e o motivo 
   assert.equal(passageira.chamadas, 4, 'a falha passageira deixou de ser retentada');
 });
 
-test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o app de antes segue caindo no login na hora', () => {
+test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o app de antes segue caindo no login na hora', async () => {
   const postados = [];
   let ouvinte = null;
   const win = {
@@ -313,10 +315,14 @@ test('ponte: a recusa vai pro app como `sem-sessao` com motivo `negado` — o ap
     window: win, localStorage: { setItem() {} },
     chrome: { runtime: { sendMessage: (msg, cb) => cb(respostaDoBackground), lastError: null },
               storage: { local: { get: (k, cb) => cb({}), remove() {} } } },
+    // A pergunta espera a ponte ler o token que o botão do WME possa ter deixado
+    // (R6-1-10, test/extensao): a resposta sai depois de um tique.
+    setTimeout,
   };
   vm.createContext(ctx);
   vm.runInContext(ler('extensao-chrome/ponte.js'), ctx);
   ouvinte({ source: win, origin: win.location.origin, data: { source: 'wazeplaces', action: 'precisa-de-sessao' } });
+  for (let i = 0; i < 50 && postados.length < 2; i++) await new Promise((r) => setTimeout(r, 0));
   const final = postados[postados.length - 1];
   assert.equal(postados[0].action, 'aguarde');
   assert.equal(final.action, 'sem-sessao', 'mudou a ação: o app de ANTES ficaria esperando o prazo inteiro');
@@ -331,7 +337,7 @@ function montarExtensao(inicio = {}) {
   const deps = {
     window: win, document: { getElementById: () => null },
     API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
-    extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
+    extPerguntando: false, extRenovando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
     conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)
@@ -545,8 +551,13 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
     'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
   // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
-  assert.match(fatiar('loadProfileAndAuxData'), /depois: \(\) => \{ showAccessDenied\(profileRes\); showAuthScreen\(\); \}/);
-  assert.match(fatiar('handleUnauthorized'), /depois: \(\) => \{ showAccessDenied\(r\); showAuthScreen\(\); \}/);
+  // O portão que fecha na reconferência (a abertura e a sonda de um 401) passa
+  // por UMA função (R6-1-11): a limpeza do que é da conta, o diálogo e a tela
+  // de entrada, nessa ordem.
+  assert.match(fatiar('loadProfileAndAuxData'), /if \(AppState\.authenticated\) recusaDoPortao\(profileRes\);/);
+  assert.match(fatiar('handleUnauthorized'), /^\s+recusaDoPortao\(r\);/m);
+  assert.match(fatiar('recusaDoPortao'),
+    /depois: \(\) => \{\s*if \(doAparelho\) handleLogout\(\{ recusado: true \}\);\s*showAccessDenied\(res\);\s*showAuthScreen\(\);\s*\}/);
 });
 
 // ── A9 + A12: a tela de entrada ANTES do JS, e o divisor sem a extensão ──────
@@ -1055,11 +1066,12 @@ test('iPhone com o app INSTALADO: a instrução manda pro código digitado — a
 // onde. E o contador contava TIQUES: numa aba que volta do segundo plano (o
 // navegador estrangula o setInterval), ele mostrava "Vale por mais 3:40" pra um
 // código morto. Roda o código DE VERDADE, com relógio e intervalo de mentira.
-function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
+function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null, respostaQr = null } = {}) {
   let agora = 1_000_000;
   let proxId = 0, limpezasDoQr = 0;
   const intervalos = new Map();
-  const copiados = [], toasts = [];
+  const copiados = [], toasts = [], cancelados = [], fechados = [], conferencias = [];
+  let api = null;
   const { registro, document } = domDeMentira({
     pairCode: {}, pairExpiry: {}, pairCodeReveal: {}, pairShowCodeBtn: {}, pairCodeExpiry: {}, pairAnuncio: {},
     // As instruções (a da câmera e a do código curto) e os dois botões de baixo
@@ -1096,14 +1108,23 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
     pairTickers: new Map(),
     pairQrVenceEm: 0,
     pareamentosEmitidos: new Set(),
-    openModal() {}, closeModal() {},
+    // A época da sessão (o "Sair" e a queda a sobem: `sair()`) e a abertura do
+    // diálogo (R6-1-09).
+    epocaDaSessao: 0, aberturaDoPareamento: 0,
+    // Fechar o diálogo roda a limpeza dele, como o `closeModal` de verdade.
+    openModal() {}, closeModal: (id) => { fechados.push(id); api && api.LIMPEZA_AO_FECHAR[id] && api.LIMPEZA_AO_FECHAR[id](); },
+    // A conferência da sessão (o 401 não afirma a queda sozinho — R6-1-08).
+    handleUnauthorized: () => conferencias.push('confere'),
     // O QR (20 símbolos) e, pedido pelo "Sem câmera?", o código curto.
-    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5).
+    // `respostaCurto` segura (ou falha) o pedido do código curto (R56-5);
+    // `respostaQr`, o do QR (R6-1-09).
     API: { criarPareamento: async (op) => (op && op.comCodigo
       ? (respostaCurto ? respostaCurto() : { success: true, code: 'ABC234', curto: true, expiresIn: curtoSeg })
-      : { success: true, code: 'SEGREDODOQR', expiresIn: 300 }) },
+      : (respostaQr ? respostaQr() : { success: true, code: 'SEGREDODOQR', expiresIn: 300 })),
+      cancelarPareamento: async (c) => { cancelados.push(c); return { success: true }; } },
     showToast: (m, tipo) => toasts.push([m, tipo]),
-    msgDoServidor: (r, f) => f,
+    // Como o de verdade com o `t` de mentira: a frase do servidor, senão a reserva.
+    msgDoServidor: (r, f) => (r && r.error) || f,
     t: (k) => k,
     limparQrPareamento: () => { limpezasDoQr++; },
     desenharQrPareamento() {},
@@ -1116,14 +1137,16 @@ function pareamentoDeMentira({ curtoSeg = 300, respostaCurto = null } = {}) {
   // A limpeza do modal (o fechar por qualquer caminho) roda no MESMO escopo.
   const iLimpeza = APP_SEM.indexOf('const LIMPEZA_AO_FECHAR = {');
   assert.ok(iLimpeza >= 0, 'CONTROLE: o LIMPEZA_AO_FECHAR sumiu do app.js');
-  const api = montar(
+  api = montar(
     ['abrirPareamento', 'aoVencerQrPareamento', 'iniciarTickerPareamento', 'pararTickerPareamento', 'copiarLinkPareamento',
      'revelarCodigoPareamento', 'formatarCodigoPareamento', 'codigoCurtoValendo', 'mostrarInstrucoesDoPareamento',
-     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento'],
-    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR'],
-    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';');
+     'devolverFocoNoPareamento', 'focavelNaTela', 'veioDoTeclado', 'anunciarNoPareamento', 'pareamentoTardio',
+     'avisarFalhaDoPareamento'],
+    deps, ['abrirPareamento', 'copiarLinkPareamento', 'revelarCodigoPareamento', 'aoVencerQrPareamento', 'LIMPEZA_AO_FECHAR', 'sair'],
+    APP_SEM.slice(iLimpeza, fechar(APP_SEM, iLimpeza)) + ';\nfunction sair() { epocaDaSessao++; }');
   return {
-    ...api, registro, document, copiados, toasts,
+    ...api, registro, document, copiados, toasts, cancelados, fechados, conferencias,
+    emitidos: deps.pareamentosEmitidos,
     limpezasDoQr: () => limpezasDoQr,
     andar: (ms) => { agora += ms; },
     tique: () => { for (const fn of [...intervalos.values()]) fn(); },
@@ -1200,6 +1223,66 @@ test('o "Código expirado" vai pra região viva à parte do modal — e a contag
   const contagem = modal.match(/<p id="pairExpiry"[^>]*>/);
   assert.ok(contagem, 'CONTROLE: a contagem do QR sumiu do modal');
   assert.doesNotMatch(contagem[0], /aria-live|role="status"/, 'a contagem virou região viva: o leitor falaria a cada segundo');
+});
+
+// ── R6-1-02 (2026-10-02): o anúncio do vencido com o código CURTO na tela ─────
+// O contador anunciava "Código expirado — feche e toque de novo" em TODO
+// vencimento. O código curto nasce depois do QR e vale até o prazo DELE: pedido
+// antes de o QR vencer, o leitor de tela ouvia "feche e toque de novo" com ele
+// valendo por mais 4 minutos — MEDIDO no Chromium e no WebKit —, e quem não
+// enxerga jogava fora um código que ainda entrava. E no vencimento do curto o
+// texto era o MESMO, reescrito: há leitor de tela que não lê de novo texto igual.
+// As escritas na região viva, uma a uma (o que o leitor de tela recebe).
+function anunciosDoPareamento(p) {
+  const el = p.registro.pairAnuncio;
+  const escritas = [];
+  let v = el.textContent;
+  Object.defineProperty(el, 'textContent', { get: () => v, set: (x) => { v = String(x); escritas.push(v); } });
+  return escritas;
+}
+
+test('R6-1-02: o "Código expirado" é dito no vencimento de CADA código — o do QR só sem o código curto valendo', async () => {
+  // O código curto pedido 60 s antes de o QR vencer.
+  const p = pareamentoDeMentira();
+  await p.abrirPareamento();
+  const escritas = anunciosDoPareamento(p);
+  p.andar(240_000); p.tique();
+  await p.revelarCodigoPareamento();
+  p.andar(61_000); p.tique();                       // o QR vence; o curto vale mais ~4 min
+  assert.equal(p.registro.pairCopyLinkBtn.disabled, true, 'CONTROLE: o QR não venceu no harness');
+  assert.match(p.registro.pairCodeExpiry.textContent, /^pair\.expiresIn/, 'CONTROLE: o código curto não seguia valendo');
+  assert.ok(!escritas.includes('pair.expired'),
+    'DEFEITO: com o código curto valendo, o leitor de tela ouviu "Código expirado — feche e toque de novo"');
+  p.andar(240_000); p.tique();                      // o curto vence
+  assert.equal(p.registro.pairCodeExpiry.textContent, 'pair.expired', 'CONTROLE: o código curto não venceu');
+  assert.equal(p.registro.pairAnuncio.textContent, 'pair.expired', 'o código curto venceu e o leitor de tela não ouviu');
+  assert.equal(escritas.filter((x) => x === 'pair.expired').length, 1, `o vencimento foi dito ${escritas.length}× (${escritas.join(' | ')})`);
+
+  // O curto pedido no ÚLTIMO instante: a resposta chega com o QR já vencido (e
+  // dito). A região viva é esvaziada com o código novo na tela — e, quando ele
+  // vence, o texto MUDA de novo: o leitor de tela ouve o vencimento dele.
+  const u = pareamentoDeMentira();
+  await u.abrirPareamento();
+  const eu = anunciosDoPareamento(u);
+  u.andar(300_000); u.tique();
+  assert.equal(u.registro.pairAnuncio.textContent, 'pair.expired', 'CONTROLE: o QR venceu sem código curto e não foi dito');
+  await u.revelarCodigoPareamento();
+  assert.equal(u.registro.pairAnuncio.textContent, '', 'o "Código expirado" do QR ficou na região viva com um código novo valendo');
+  u.andar(300_000); u.tique();
+  assert.deepEqual(eu, ['pair.expired', '', 'pair.expired'],
+    'o vencimento do código curto foi o MESMO texto reescrito por cima do do QR — o leitor de tela pode não ler');
+
+  // CONTROLE: sem código curto, o vencimento do QR é dito UMA vez — e o "Copiar
+  // link" que descobre o vencimento pelo relógio (a aba que volta do segundo
+  // plano), com o tique chegando depois, não repete.
+  const q = pareamentoDeMentira();
+  await q.abrirPareamento();
+  const eq = anunciosDoPareamento(q);
+  q.andar(301_000);
+  await q.copiarLinkPareamento();
+  q.tique();
+  assert.equal(q.registro.pairExpiry.textContent, 'pair.expired', 'CONTROLE: o tique não chegou');
+  assert.deepEqual(eq, ['pair.expired'], `o vencimento do QR foi dito ${eq.length}× (${eq.join(' | ')})`);
 });
 
 // ── A15 (textos, 2026-09-29): o que a tela do QR VENCIDO ainda oferecia ──────
@@ -1358,14 +1441,136 @@ test('R56-5: Enter no "Sem câmera?" — o código aparece e o foco vai ao "Copi
   assert.equal(d.document.activeElement.id, 'BODY', `o toque no "Sem câmera?" moveu o foco pro ${d.document.activeElement.id}`);
 });
 
+// ── R6-1-09 (2026-10-02): o código que chega DEPOIS do "Sair" ────────────────
+// Rede lenta: a pessoa fecha o diálogo e dá "Sair" antes de o QR chegar. O
+// "Sair" cancela os códigos que conhecia; o que chegava depois entrava no
+// `pareamentosEmitidos` já limpo — seguia valendo 5 min no servidor (abrindo
+// uma sessão NOVA da conta que acabou de sair) e ficava no DOM da tela de
+// entrada, com o segredo no `data-raw`, o "Copiar link" habilitado e a contagem
+// correndo (MEDIDO no Chromium com a resposta presa 2,5 s).
+function presa() {
+  let soltar;
+  const p = new Promise((ok) => { soltar = ok; });
+  return { resposta: () => p, soltar: (r) => soltar(r) };
+}
+const vazioDoPareamento = (p) => ({
+  raw: p.registro.pairCode.dataset.raw, curto: p.registro.pairCode.dataset.curto,
+  copiar: p.registro.pairCopyLinkBtn.disabled, contagem: p.intervalosVivos(),
+  revelado: !p.registro.pairCodeReveal.classList.contains('hidden'), emitidos: [...p.emitidos],
+});
+
+test('R6-1-09: o código que chega depois do "Sair" (ou do diálogo fechado) é CANCELADO e não escreve nada', async () => {
+  // O "Sair" de verdade: a Ajuda esconde o diálogo (com a limpeza dele) e a
+  // época da sessão sobe.
+  const s = presa();
+  const p = pareamentoDeMentira({ respostaQr: s.resposta });
+  const pedido = p.abrirPareamento();
+  p.LIMPEZA_AO_FECHAR.pairShowModal();
+  p.sair();
+  s.soltar({ success: true, code: 'TARDIOQR', expiresIn: 300 });
+  await pedido;
+  assert.deepEqual(p.cancelados, ['TARDIOQR'], 'DEFEITO: o QR que chegou depois do "Sair" seguiu valendo no servidor');
+  assert.deepEqual(vazioDoPareamento(p), { raw: undefined, curto: undefined, copiar: true, contagem: 0, revelado: false, emitidos: [] },
+    'o QR que chegou depois do "Sair" ficou no DOM (segredo, "Copiar link" ou contagem)');
+  assert.deepEqual(p.toasts, [], 'o "Sair" ganhou um aviso de falha de um pedido que ninguém espera mais');
+
+  // Só o diálogo FECHADO (sem "Sair"): o código que chega é de um diálogo que não existe.
+  const f = presa();
+  const q = pareamentoDeMentira({ respostaQr: f.resposta });
+  const pq = q.abrirPareamento();
+  q.LIMPEZA_AO_FECHAR.pairShowModal();
+  f.soltar({ success: true, code: 'FECHADOQR', expiresIn: 300 });
+  await pq;
+  assert.deepEqual(q.cancelados, ['FECHADOQR'], 'o QR que chegou com o diálogo já fechado seguiu valendo');
+  assert.deepEqual(vazioDoPareamento(q).emitidos, []);
+  assert.equal(q.intervalosVivos(), 0, 'a contagem de um diálogo fechado ficou correndo');
+
+  // Só a SESSÃO trocada, com o diálogo ainda na tela (a queda, com a extensão
+  // renovando): o código é cancelado, e o diálogo fecha dizendo que não deu —
+  // senão ficaria um QR vazio esperando nada.
+  const r = presa();
+  const w = pareamentoDeMentira({ respostaQr: r.resposta });
+  const pw = w.abrirPareamento();
+  w.sair();
+  r.soltar({ success: true, code: 'QUEDAQR', expiresIn: 300 });
+  await pw;
+  assert.deepEqual(w.cancelados, ['QUEDAQR'], 'o QR da sessão que caiu seguiu valendo');
+  assert.deepEqual(w.fechados, ['pairShowModal'], 'o diálogo ficou na tela sem QR nenhum');
+  assert.deepEqual(w.toasts, [['toast.pairCreateError', 'error']]);
+  assert.equal(w.registro.pairCode.dataset.raw, undefined);
+
+  // O código CURTO, pelo mesmo caminho: pedido, diálogo fechado e "Sair" com ele no ar.
+  const c = presa();
+  const k = pareamentoDeMentira({ respostaCurto: c.resposta });
+  await k.abrirPareamento();
+  const pk = k.revelarCodigoPareamento();
+  k.LIMPEZA_AO_FECHAR.pairShowModal();
+  k.sair();
+  c.soltar({ success: true, code: 'TARDE6', curto: true, expiresIn: 300 });
+  await pk;
+  assert.deepEqual(k.cancelados, ['TARDE6'], 'o código curto que chegou depois do "Sair" seguiu valendo');
+  assert.ok(!k.emitidos.has('TARDE6'));
+  assert.equal(k.registro.pairCode.dataset.curto, undefined, 'o código curto que chegou depois do "Sair" foi pra tela');
+  assert.equal(k.registro.pairCodeReveal.classList.contains('hidden'), true);
+
+  // CONTROLE: a resposta ANTES do "Sair" entra (o "Sair" a cancela pelos
+  // emitidos) — sem isto, "nada escreveu" passaria com o pareamento quebrado.
+  const ok = pareamentoDeMentira();
+  await ok.abrirPareamento();
+  assert.equal(ok.registro.pairCode.dataset.raw, 'SEGREDODOQR', 'CONTROLE: o QR não chegou ao DOM nem com a sessão de pé');
+  assert.deepEqual([...ok.emitidos], ['SEGREDODOQR']);
+  assert.deepEqual(ok.cancelados, []);
+  assert.equal(ok.intervalosVivos(), 1);
+});
+
+// ── R6-1-08 (2026-10-02): o 401 do "Conectar outro aparelho" ─────────────────
+// Em todo o app um 401 é CONFERIDO antes de virar "sessão expirada" (gotcha
+// #42); aqui o toast "Sessão expirada ou inválida" saía direto, sem conferir
+// nada (pode ser o WAF) — e, com a sessão morta de verdade, o app seguia na
+// tela da fila, sem tentar a extensão nem levar à entrada (MEDIDO: só
+// `parear:create` na rede, nenhuma sonda).
+const NAO_AUTORIZADO = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired',
+  error: 'Sessão expirada ou inválida', httpCode: 401 };
+
+test('R6-1-08: "Conectar outro aparelho" com 401 CONFERE a sessão — e o aviso é o do pedido, não "sessão expirada"', async () => {
+  const p = pareamentoDeMentira({ respostaQr: async () => NAO_AUTORIZADO });
+  await p.abrirPareamento();
+  assert.deepEqual(p.conferencias, ['confere'], 'DEFEITO: o 401 do pareamento afirmou a queda sem conferir a sessão');
+  assert.deepEqual(p.toasts, [['toast.pairCreateError', 'error']],
+    `o 401 virou "${p.toasts.map((x) => x[0]).join(' | ')}" antes de a sessão ser conferida`);
+  assert.deepEqual(p.fechados, ['pairShowModal'], 'CONTROLE: o diálogo da falha não fechou');
+  // O código curto, pelo mesmo caminho.
+  const q = pareamentoDeMentira({ respostaCurto: async () => NAO_AUTORIZADO });
+  await q.abrirPareamento();
+  await q.revelarCodigoPareamento();
+  assert.deepEqual(q.conferencias, ['confere'], 'o 401 do código curto afirmou a queda sem conferir a sessão');
+  assert.deepEqual(q.toasts, [['toast.pairCreateError', 'error']]);
+  assert.equal(q.registro.pairShowCodeBtn.disabled, false, 'o botão do código curto não voltou');
+  // O 401 de uma resposta TARDIA é da sessão que já se foi: não confere a de agora.
+  const s = presa();
+  const w = pareamentoDeMentira({ respostaQr: s.resposta });
+  const pw = w.abrirPareamento();
+  w.sair();
+  s.soltar(NAO_AUTORIZADO);
+  await pw;
+  assert.deepEqual(w.conferencias, [], 'o 401 da sessão que caiu conferiu (e podia derrubar) a sessão de agora');
+  // CONTROLE: falha que não é de sessão segue com a frase do servidor e sem conferência.
+  const c = pareamentoDeMentira({ respostaQr: async () => ({ success: false, errorCategory: 'transient', error: 'Servidor Waze indisponível' }) });
+  await c.abrirPareamento();
+  assert.deepEqual(c.conferencias, []);
+  assert.deepEqual(c.toasts, [['Servidor Waze indisponível', 'error']], 'CONTROLE: a frase do servidor sumiu da falha comum');
+});
+
 // ── T14 (textos, 2026-09-26): o foco no autor com UM pedido dele ─────────────
 // O nome acessível da barra dizia "Mostrando primeiro os 1 pedidos de fulano" —
 // o plural com n = 1, que é justamente o caso do fim de toda série.
 test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singular, não "os 1 pedidos"', () => {
   const { registro, document } = domDeMentira({ focoAutorBar: {}, focoAutorTexto: {}, focoAutorContagem: {} });
   const AppState = { autorEmFoco: 7, queue: [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 9 }] };
-  const { renderFocoAutor } = montar(['renderFocoAutor'],
-    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}` }, ['renderFocoAutor']);
+  // A série que a barra conta é a da régua única (`serieDoAutor`, R6-2-02).
+  const { renderFocoAutor } = montar(['renderFocoAutor', 'serieDoAutor'],
+    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}`,
+      pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null) }, ['renderFocoAutor']);
   renderFocoAutor();
   assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.ariaUm|1|ana',
     'com um só pedido do autor, o nome acessível usou a forma plural');
@@ -1385,11 +1590,11 @@ test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singula
 // Duas frases escreviam o plural com parênteses ("1 pedido(s) da região não
 // aparecem", "Há 1 registro(s) não baixado(s)"). O projeto faz plural por CHAVE
 // (sem ICU), escolhida por `=== 1`. Roda o código DE VERDADE.
-test('plural por chave: o "de N na região" e o aviso de desligar o modo dev escolhem o singular com 1', () => {
+test('plural por chave: o "de N na região" e o aviso de desligar o modo dev escolhem o singular com 1', async () => {
   const { registro, document } = domDeMentira({ pendingTotalHint: {} });
   const AppState = { authenticated: true, serverTotal: 10, serverBlocked: 1, blockedPartial: false };
   const { updatePendingTotalHint } = montar(['updatePendingTotalHint'],
-    { document, AppState, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
+    { document, AppState, Treino: { ativo: false }, t: (k, v) => `${k}|${JSON.stringify(v)}` }, ['updatePendingTotalHint']);
   updatePendingTotalHint();
   assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.titleUm|{"blocked":1}', 'um pedido bloqueado usou a forma plural');
   AppState.serverBlocked = 3;
@@ -1397,21 +1602,24 @@ test('plural por chave: o "de N na região" e o aviso de desligar o modo dev esc
   assert.equal(registro.pendingTotalHint.title, 'stats.pending.ofRegion.title|{"blocked":3}', 'CONTROLE: três usam o plural');
 
   // O ouvinte do interruptor do modo dev, recortado do app.js: o 1º toque com
-  // captura não baixada AVISA (e para ali, sem apagar nada).
-  const ini = APP_SEM.indexOf("$('prefDevModeActive').addEventListener('change', (e) =>");
+  // captura não baixada AVISA (e para ali, sem apagar nada). Ele é assíncrono
+  // desde o R6-4-4 (a conta do aparelho lê a base): aqui a releitura não acha
+  // nada a mais, e a conta é a desta aba.
+  const ini = APP_SEM.indexOf("$('prefDevModeActive').addEventListener('change', async (e) =>");
   assert.ok(ini > 0, 'sumiu o ouvinte do interruptor do modo dev');
-  const arrow = APP_SEM.indexOf('(e) =>', ini);
+  const arrow = APP_SEM.indexOf('async (e) =>', ini);
   const src = APP_SEM.slice(arrow, fechar(APP_SEM, arrow));
-  const aviso = (naoBaixados) => {
+  const aviso = async (naoBaixados) => {
     const toasts = [];
-    const ouvinte = new Function('AppState', 'dlogNaoBaixados', 'desligarDevConfirmadoAte', 'Date', 'showToast', 't', `return ${src};`)(
-      { devMode: { unlocked: true, active: true } }, () => naoBaixados, 0, { now: () => 1000 },
+    const ouvinte = new Function('AppState', 'dlogNaoBaixados', 'desligarDevConfirmadoAte', 'desligarDevVez',
+      'diagAtualizarAnteriores', 'Date', 'showToast', 't', `return ${src};`)(
+      { devMode: { unlocked: true, active: true } }, () => naoBaixados, 0, 0, async () => true, { now: () => 1000 },
       (m) => toasts.push(m), (k, v) => `${k}|${v.n}`);
     const e = { target: { checked: false } };
-    ouvinte(e);
+    await ouvinte(e);
     assert.equal(e.target.checked, true, 'CONTROLE: o 1º toque com captura não baixada devolve o interruptor');
     return toasts;
   };
-  assert.deepEqual(aviso(1), ['toast.devPerdeCapturaUm|1'], 'uma captura não baixada usou a forma plural');
-  assert.deepEqual(aviso(4), ['toast.devPerdeCaptura|4'], 'CONTROLE: quatro usam o plural');
+  assert.deepEqual(await aviso(1), ['toast.devPerdeCapturaUm|1'], 'uma captura não baixada usou a forma plural');
+  assert.deepEqual(await aviso(4), ['toast.devPerdeCaptura|4'], 'CONTROLE: quatro usam o plural');
 });

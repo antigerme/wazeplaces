@@ -226,3 +226,32 @@ test('L33 + e − na foto: 1,2× por tecla, no CENTRO da camada, e o − não pa
   for (let i = 0; i < 10; i++) lb.zoomPeloTeclado(-1);
   assert.deepEqual([lb.scale, lb.tx, lb.ty], [1, 0, 0], 'o − passou de 1× ou não recentrou a foto');
 });
+
+// ── R6-3-05: a roda que vai e volta na MESMA medida para em 1× EXATO ─────────
+// (auditoria de 2026-10-01). A foto aproxima e afasta por PRODUTO de fatores
+// (1,2^(Δ/100), o `wheel` do `setupLightbox`), e ir e voltar não dá 1 exato:
+// MEDIDO, dois dentes de 53 px (o do Chrome no Linux) pra dentro e dois pra fora
+// paravam em 1,0000000000000002. A tela parecia 1×, mas as setas ANDAVAM a foto
+// em vez de trocá-la e o ↓ não fechava — as duas perguntam `> 1` —, e o arraste
+// de toque, que pergunta `=== 1`, nem trocava nem fechava. O `zoomTo` de verdade.
+test('R6-3-05 ir e voltar na mesma medida (roda, trackpad) volta a 1× EXATO, recentrada', () => {
+  for (const [dente, n] of [[53, 2], [53, 3], [7, 1], [4, 20], [125, 2], [33, 3]]) {
+    // CONTROLE do instrumento: a conta crua, sem o `zoomTo`, NÃO dá 1 exato
+    // nesses casos (senão o teste passaria com o defeito).
+    let cru = 1;
+    for (let i = 0; i < n; i++) cru *= Math.pow(1.2, dente / 100);
+    for (let i = 0; i < n; i++) cru *= Math.pow(1.2, -dente / 100);
+    if (dente !== 4) assert.notEqual(cru, 1, `CONTROLE: ${n}×${dente} px voltaria a 1 exato sozinho — o caso não mede nada`);
+    const lb = lightbox();
+    for (let i = 0; i < n; i++) lb.zoomTo(lb.scale * Math.pow(1.2, dente / 100), 250, 420);
+    for (let i = 0; i < n; i++) lb.zoomTo(lb.scale * Math.pow(1.2, -dente / 100), 250, 420);
+    assert.equal(lb.scale, 1, `${n} dentes de ${dente} px pra dentro e pra fora pararam em ${lb.scale}: as setas andam em vez de trocar de foto`);
+    assert.deepEqual([lb.tx, lb.ty], [0, 0], 'a foto voltou a 1× fora do centro');
+  }
+  // CONTROLE: um zoom DE VERDADE (um dente, 1,2×) fica — a folga não engole zoom.
+  const z = lightbox();
+  z.zoomTo(1.2, 250, 420);
+  assert.equal(z.scale, 1.2);
+  z.zoomTo(1.01, 250, 420);
+  assert.equal(z.scale, 1.01, 'a folga engoliu um zoom de 1% (10 px numa foto de 1000)');
+});

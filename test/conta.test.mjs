@@ -325,6 +325,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esquecerFocoAutor: () => log.push('foco'),
     presencaWmeZerar: () => {}, presencaWmeRefazerDesligar: () => {},   // test/costura-sessao, K5
     redesenharFiltrosComOPerfil: () => {},   // test/filtros-perfil (F2)
+    reavaliarFotoAbertaPeloPerfil: () => {},   // test/lightbox-escritas (R6-3-07)
     esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
   };

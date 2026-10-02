@@ -77,6 +77,10 @@ const anterioresDe = new Set();
 // e a hora em que cada perfil respondeu (a seção do "lida" que espera o perfil).
 const atrasoPerfil = new Map();   // id -> ms
 const perfilRespondido = new Map();   // id -> Date.now() da última resposta
+// O perfil SEGURADO até o teste soltar (a seção 9e): a espera do perfil por
+// SINAL, não por prazo — o que se mede tem que cair DENTRO dela, e com 2,5 s
+// de atraso o "Enviar" na espera chegou a cair depois de o perfil voltar.
+const perfilSegurado = new Map();   // id -> Promise
 const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
@@ -179,11 +183,19 @@ function responderApi(eu, rota, c) {
       profile: { id: Number(eu), userName: p.nome, rank: p.rank, isStaff: false, isAreaManager: true, isEditor: true,
         editableCountryIDs: [BRASIL], areas: [], managedAreas: [] } };
     const responder = () => { perfilRespondido.set(eu, Date.now()); return corpo; };
+    if (perfilSegurado.has(eu)) return perfilSegurado.get(eu).then(responder);
     return atrasoPerfil.get(eu) ? dormir(atrasoPerfil.get(eu)).then(responder) : responder();
   }
   if (rota === 'lista-paises') return { success: true, countries: [{ id: BRASIL, name: 'Brazil', abbr: 'BR' }] };
   if (rota === 'lista-estados') return { success: true, states: [] };
-  if (rota === 'buscar-places') return { success: true, places: [pedido(PESSOAS[eu].pos.lat, PESSOAS[eu].pos.lon)], hasMore: false, page: 1, total: 1 };
+  if (rota === 'buscar-places') {
+    // A bia tem DOIS pedidos: a seção 11 decide os dois (✕), e ninguém mais usa
+    // a fila dela. A da ana segue com um só (a seção 9 a esvazia, e é de
+    // propósito: a 7a explica).
+    const lista = [pedido(PESSOAS[eu].pos.lat, PESSOAS[eu].pos.lon)];
+    if (eu === '183164343') lista.push(pedido(PESSOAS[eu].pos.lat + 0.001, PESSOAS[eu].pos.lon, 'ur-smoke-2'));
+    return { success: true, places: lista, hasMore: false, page: 1, total: lista.length };
+  }
   if (rota === 'validar-place' || rota === 'marcar-lido') {
     return { success: true, presenca: { ok: true, marca: true }, presencaApp: { online: listaPara(eu), conversas: conversasPara(eu, (c.presenca && c.presenca.conhecidos) || []) } };
   }
@@ -208,13 +220,13 @@ const browser = await abrirNavegador(pw);
 // e é o que a conversa mandava antes do conserto.
 const REAL = JSON.parse(readFileSync(join(ROOT, 'tools', 'fixtures-paises.json'), 'utf8'))
   .find((p) => p.mapa && p.mapa.centro && p.mapa.centro[1] < -40 && p.mapa.centro[0] < 0);
-const pedido = (lat, lon) => ({
+const pedido = (lat, lon, ur = 'ur-smoke') => ({
   ...REAL,
-  venueID: '205522459.2055159053.3242788', updateRequestID: 'ur-smoke',
+  venueID: '205522459.2055159053.' + (ur === 'ur-smoke' ? '3242788' : '3242789'), updateRequestID: ur,
   name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — São Paulo',
   categories: ['BAKERY'], updateTypeKey: 'IMAGE', purType: 'NEW_PHOTO', reqType: 'IMAGE',
   imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
-              'https://venue-image.waze.com/thumbs/thumb700_ur-smoke'],
+              'https://venue-image.waze.com/thumbs/thumb700_' + ur],
   imageUrl: 'https://venue-image.waze.com/thumbs/thumb700_ja-no-local',
   lat, lon, mapa: { ...REAL.mapa, centro: [lat, lon], entradas: [] }, changes: [], flagComment: null,
 });
@@ -895,10 +907,12 @@ try {
   // `abrir` saía sem saber de quem era a sessão, e as MINHAS mensagens vinham
   // como "dela" (auditoria de 2026-09-30, R5-5-2). Ele espera o perfil e sai
   // com ele. O caminho de verdade: `derrubarSessao` → extensão →
-  // `showMainScreen` → o perfil (atrasado 2,5 s aqui) → `completarPerfilChegado`
-  // → a presença.
+  // `showMainScreen` → o perfil (SEGURADO aqui até as medições da espera
+  // terminarem) → `completarPerfilChegado` → a presença.
   console.log('\n9e. abrir a conversa na espera do perfil: o histórico espera, e as minhas seguem minhas');
-  atrasoPerfil.set(ana.id, 2500);
+  let soltarPerfil = () => {};
+  perfilSegurado.set(ana.id, new Promise((ok) => { soltarPerfil = ok; }));
+  const soltarOPerfil = () => { perfilSegurado.delete(ana.id); soltarPerfil(); };
   await ana.page.evaluate(() => { if (!document.getElementById('conversaModal').classList.contains('hidden')) closeModal('conversaModal'); });
   await dormir(400);
   await ana.page.evaluate(() => { Presenca.historico.delete('183164343'); derrubarSessao('srv.err.sessionExpired'); });
@@ -912,6 +926,23 @@ try {
     if (naEspera.perfil) anota('controle: o perfil já tinha voltado no toque — a medição não pegou a espera');
     else if (apiDe(ana, 'chat', 'abrir').length === abrirsAntes && naEspera.carregando) ok('na espera do perfil, abrir a conversa não manda o `abrir` — ela fica "Carregando"');
     else anota(`na espera do perfil, o \`abrir\` saiu sem saber de quem é a sessão: ${JSON.stringify({ abrirs: apiDe(ana, 'chat', 'abrir').length - abrirsAntes, ...naEspera })}`);
+    // O "Enviar" na espera não fica calado (auditoria de 2026-10-01, R6-5-5):
+    // a mensagem entra na conversa como "Não enviada.", com o "Tentar de novo",
+    // e nada sai — sairia pela sessão nova, que pode ser de outra conta. Antes
+    // o toque não fazia nada nem dizia nada, com o texto parado no campo.
+    const enviosNaEspera = apiDe(ana, 'chat', 'enviar').length;
+    await ana.page.fill('#conversaInput', 'pergunta feita na espera');
+    await ana.page.tap('#conversaEnviar');
+    const naEsperaEnvio = await ana.page.evaluate(() => ({ perfil: !!AppState.profile, campo: document.getElementById('conversaInput').value,
+      falhou: ((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent || '').trim(),
+      bolha: [...document.querySelectorAll('#conversaMsgs .conversa-bolha.minha')].some((b) => b.textContent.includes('pergunta feita na espera')) }));
+    // CONTROLE: o toque tem que ter caído DENTRO da janela (sem o perfil).
+    if (naEsperaEnvio.perfil) anota('controle: o perfil já tinha voltado no "Enviar" — a medição não pegou a espera');
+    else if (naEsperaEnvio.bolha && /^Não enviada\. Tentar de novo$/.test(naEsperaEnvio.falhou) && !naEsperaEnvio.campo
+      && apiDe(ana, 'chat', 'enviar').length === enviosNaEspera) {
+      ok('na espera do perfil, o "Enviar" não fica calado: a mensagem entra como "Não enviada.", com o "Tentar de novo" — e nada sai');
+    } else anota(`na espera do perfil, o "Enviar" ficou calado (ou saiu): ${JSON.stringify({ ...naEsperaEnvio, envios: apiDe(ana, 'chat', 'enviar').length - enviosNaEspera })}`);
+    soltarOPerfil();
     if (await esperar(ana, () => !!AppState.profile, 'o perfil não voltou')) {
       const perfilEm = perfilRespondido.get(ana.id);
       if (await esperar(ana, () => (Presenca.historico.get('183164343') || {}).carregada === true, 'o histórico não chegou depois do perfil')) {
@@ -926,10 +957,20 @@ try {
         });
         if (abriu.length === 1 && abriu[0].em >= perfilEm && lados.minha === 'minha' && lados.dela === 'dela') ok('com o perfil, o histórico sai (um pedido) e as minhas mensagens ficam do meu lado');
         else anota(`o histórico da espera saiu errado: ${JSON.stringify({ abrirs: abriu.length, antesDoPerfil: abriu.filter((x) => x.em < perfilEm).length, lados })}`);
+        // Com o perfil de volta, o "Tentar de novo" manda a mensagem da espera —
+        // com o MESMO id que ela ganhou ao entrar na conversa.
+        const idNaEspera = await ana.page.evaluate(() => ((Presenca.historico.get('183164343') || { msgs: [] }).msgs
+          .find((m) => m.meu && m.estado === 'falhou' && /pergunta feita na espera/.test(m.texto)) || {}).id || null);
+        if (idNaEspera) await ana.page.tap('#conversaMsgs .conversa-reenviar');
+        for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length === enviosNaEspera; i++) await dormir(100);
+        const saiuDaEspera = apiDe(ana, 'chat', 'enviar').slice(enviosNaEspera);
+        if (idNaEspera && saiuDaEspera.length === 1 && saiuDaEspera[0].c.id === idNaEspera && saiuDaEspera[0].c.texto === 'pergunta feita na espera') {
+          ok('com o perfil de volta, o "Tentar de novo" manda a mensagem da espera (o mesmo id)');
+        } else anota(`a mensagem da espera não saiu pelo "Tentar de novo": ${JSON.stringify({ idNaEspera, saiu: saiuDaEspera.map((x) => [x.c.id, x.c.texto]) })}`);
       }
     }
   }
-  atrasoPerfil.delete(ana.id);
+  soltarOPerfil();
 
   // ── 10. SAIR apaga o chat do aparelho e fecha o tempo real ──────────────────
   console.log('\n10. sair');
@@ -958,6 +999,137 @@ try {
   });
   if (folhaAberta && !Object.keys(sobras).length) ok('depois do "Sair", nada da conversa nem do pedido fica no DOM (quem, onde, a folha, a tirinha)');
   else anota(`o "Sair" deixou no DOM: ${JSON.stringify(sobras)}`);
+
+  // ── 11. A JANELA DO DESFAZER não fica por cima da folha da presença ────────
+  // A folha (a lista, a conversa) mora no RODAPÉ, embaixo do banner do
+  // Desfazer: aberta na janela, o banner ficava por cima da linha da pessoa e
+  // do "Enviar", e o toque no "Enviar" caía no "Desfazer" — a decisão do card
+  // era desfeita atrás da folha e a mensagem não saía (auditoria de
+  // 2026-10-01, R6-5-4, medido no 393 e no Fold). Abrir a folha DESPACHA a
+  // janela; e a decisão que chega com a folha JÁ aberta (o ✕ e a pílula antes
+  // de a animação do card terminar, 350 ms) sai sem janela. Na bia: a fila dela
+  // tem dois pedidos e nenhuma outra seção a usa — e aqui no fim, porque a
+  // mensagem que ela manda iria pra conversa da ana.
+  console.log('\n11. a janela do Desfazer não fica por cima da folha da presença');
+  const LINHA_ANA = '#presencaLista .presenca-linha[data-pessoa="12444348"]';
+  const X_DA_FRENTE = '#cardStack .place-card:not(.card-fundo) .card-btn-reject';
+  // Sem nada aberto, e com a entrada do voltar já consumida (fechar e abrir no
+  // mesmo quadro é o gotcha #65).
+  const semCamadas = async () => {
+    await bia.page.evaluate(() => { for (const id of ['conversaModal', 'pedidoModal', 'presencaModal']) closeModal(id); });
+    await esperar(bia, () => !CamadaVoltar.consumindo, 'o voltar da bia não assentou');
+  };
+  await semCamadas();
+  // A lista da bia com a ana (a seção 9 tirou a bia do app, não a ana).
+  await bia.page.evaluate(() => { Presenca.tentadaEm = 0; Presenca.atualizadaEm = 0; return presencaAtualizar(); });
+  await esperar(bia, () => !document.getElementById('presencaPill').classList.contains('hidden'), 'a pílula da bia não apareceu');
+  // CONTROLE do instrumento: o banner por cima da conversa ABERTA tira o dedo do
+  // "Enviar" — a medição enxerga a cobertura.
+  await bia.page.evaluate(() => presencaAbrirConversa('12444348'));
+  if (await esperar(bia, () => !document.getElementById('conversaModal').classList.contains('hidden'), 'a conversa da bia não abriu (controle)')) {
+    await bia.page.evaluate(() => showUndoBanner('controle do instrumento'));
+    const coberto = await alcancavel(bia, '#conversaEnviar');
+    await bia.page.evaluate(() => removeUndoBanner());
+    if (coberto.visivel && !coberto.noCentro) ok('controle: com o banner do Desfazer na tela, o "Enviar" da conversa não recebe o dedo — a medição enxerga a cobertura');
+    else anota(`controle: o banner por cima da conversa não tirou o dedo do "Enviar" (${JSON.stringify(coberto)}) — a medição não distinguiria nada`);
+  }
+  await semCamadas();
+  // O estado NA HORA (a janela, o banner e quem recebe o dedo no centro da linha
+  // da pessoa), medido logo depois do toque. Medir depois de esperar o pedido
+  // sair mediria a janela VENCENDO sozinha (3 s), que também tira o banner e
+  // manda a decisão: a primeira versão desta seção passou com o conserto
+  // desfeito, exatamente assim (gotcha #28).
+  const naHora = () => bia.page.evaluate((s) => {
+    const linha = document.querySelector(s);
+    const r = linha && linha.getBoundingClientRect();
+    const q = r && r.width && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { pendente: !!AppState.pendingAction, banner: !!document.querySelector('#undoContainer .undo-banner'),
+      linhaRecebe: !!q && (q === linha || linha.contains(q)), rejeitados: AppState.stats.rejected };
+  }, LINHA_ANA);
+  // O dedo cai no CENTRO do alvo, seja quem for que estiver por cima — como um
+  // dedo de verdade. O `tap` do Playwright espera o alvo ficar livre, e com a
+  // janela do Desfazer por cima ele só tocaria depois de ela vencer.
+  const tocarNoCentro = async (sel) => {
+    const q = await bia.page.evaluate((s) => {
+      const el = document.querySelector(s);
+      const r = el && el.getBoundingClientRect();
+      return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    }, sel);
+    if (q) await bia.page.touchscreen.tap(q.x, q.y);
+    return !!q;
+  };
+  // O pedido de decisão saiu DEPRESSA (o despacho), e não quando a janela venceu.
+  const saiuDepressa = async (antes, desde) => {
+    for (let i = 0; i < 30 && apiDe(bia, 'validar-place').length === antes; i++) await dormir(100);
+    const ida = apiDe(bia, 'validar-place')[antes];
+    return { saiu: apiDe(bia, 'validar-place').length - antes, emMs: ida ? ida.em - desde : null };
+  };
+  // a) A janela ABERTA, e depois a pílula. O ✕ tem que receber o dedo antes do
+  // toque: um aviso do rodapé por cima dele mediria o aviso (gotcha #26).
+  await esperar(bia, (s) => {
+    const el = document.querySelector(s);
+    const r = el && el.getBoundingClientRect();
+    const q = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!q && (q === el || el.contains(q));
+  }, 'o ✕ do card da bia não recebe o dedo', 6000, X_DA_FRENTE);
+  const validarAntes = apiDe(bia, 'validar-place').length;
+  await bia.page.tap(X_DA_FRENTE);
+  if (await esperar(bia, () => !!AppState.pendingAction && !!document.querySelector('#undoContainer .undo-banner'),
+    'controle: o ✕ da bia não abriu a janela do Desfazer', 2500)) {
+    const tToque = Date.now();
+    await bia.page.tap('#presencaPill');
+    if (await esperar(bia, (s) => !!document.querySelector(s), 'a lista da bia não abriu', 1500, LINHA_ANA)) {
+      const lista = await naHora();
+      // E segue DENTRO da janela, com o dedo de verdade (onde ele cair, sem a
+      // espera do Playwright por um alvo livre): o toque na linha da pessoa e o
+      // "Enviar" — com o defeito, os dois caíam no banner, e o do "Enviar" no
+      // "Desfazer".
+      if (await tocarNoCentro(LINHA_ANA)
+        && await esperar(bia, () => !document.getElementById('conversaModal').classList.contains('hidden'),
+          'o toque na linha da pessoa não abriu a conversa (caiu em outro lugar)', 1500)) {
+        const enviar = await alcancavel(bia, '#conversaEnviar');
+        const enviosAntes = apiDe(bia, 'chat', 'enviar').length;
+        await bia.page.evaluate(() => { document.getElementById('conversaInput').value = 'mandada logo depois de um ✕'; });
+        await tocarNoCentro('#conversaEnviar');
+        for (let i = 0; i < 30 && apiDe(bia, 'chat', 'enviar').length === enviosAntes; i++) await dormir(100);
+        const fim11 = await bia.page.evaluate(() => ({ rejeitados: AppState.stats.rejected, campo: document.getElementById('conversaInput').value }));
+        if (enviar.noCentro && apiDe(bia, 'chat', 'enviar').length === enviosAntes + 1 && fim11.rejeitados === lista.rejeitados && !fim11.campo) {
+          ok('na conversa, o toque no "Enviar" MANDA a mensagem — e a decisão do card segue decidida');
+        } else anota(`o toque no "Enviar" não mandou (ou desfez a decisão): ${JSON.stringify({ enviar, envios: apiDe(bia, 'chat', 'enviar').length - enviosAntes, ...fim11, antes: lista.rejeitados })}`);
+      }
+      const ida = await saiuDepressa(validarAntes, tToque);
+      if (!lista.pendente && !lista.banner && lista.linhaRecebe && ida.saiu === 1 && ida.emMs < 1500) {
+        ok(`abrir a lista na janela do Desfazer a DESPACHA: a decisão sai na hora (${ida.emMs} ms), o banner sai, e a linha da pessoa recebe o dedo`);
+      } else anota(`a lista abriu com a janela do Desfazer por cima: ${JSON.stringify({ ...lista, ...ida })}`);
+    }
+  }
+  // b) A corrida: o ✕ e, antes de a animação do card terminar, a pílula. A
+  // decisão chega com a lista JÁ aberta — e é medida no instante em que ela
+  // chega (o placar sobe no mesmo passo em que a janela abriria).
+  await semCamadas();
+  if (!await bia.page.evaluate(() => !!cardDaFrente())) anota('controle: a bia não tinha o segundo pedido na tela pra corrida');
+  else {
+    const validarB = apiDe(bia, 'validar-place').length;
+    const noToque = await bia.page.evaluate(() => new Promise((ok) => {
+      cardDaFrente().querySelector('.card-btn-reject').click();
+      setTimeout(() => {
+        const pendente = !!AppState.pendingAction;
+        const rejeitados = AppState.stats.rejected;
+        document.getElementById('presencaPill').click();
+        ok({ pendente, rejeitados, lista: !document.getElementById('presencaModal').classList.contains('hidden') });
+      }, 60);
+    }));
+    // CONTROLE: no toque da pílula a decisão ainda não tinha chegado, e a lista abriu.
+    if (noToque.pendente || !noToque.lista) anota(`controle: a corrida não aconteceu (${JSON.stringify(noToque)})`);
+    else if (await esperar(bia, (n) => AppState.stats.rejected > n, 'a decisão da corrida não chegou', 3000, noToque.rejeitados)) {
+      const tDecisao = Date.now();
+      const corrida = await naHora();
+      const ida = await saiuDepressa(validarB, tDecisao);
+      if (!corrida.pendente && !corrida.banner && corrida.linhaRecebe && ida.saiu === 1 && ida.emMs < 1500) {
+        ok('a decisão que chega com a lista JÁ aberta sai sem janela — nada por cima da linha da pessoa');
+      } else anota(`a decisão chegou com a lista aberta e abriu a janela por baixo dela: ${JSON.stringify({ ...corrida, ...ida })}`);
+    }
+  }
 } finally {
   await browser.close();
   srv.kill('SIGKILL');

@@ -379,7 +379,10 @@ test('P6 a sessão acaba com a conversa aberta: conversa, lista e folha do pedid
   assert.deepEqual(e.chamadas.closeModal, [], 'fechou modal que não estava aberto');
 });
 
-test('P6 sem o id do perfil o envio não sai — e o que se digitou FICA no campo', async () => {
+// O que se digitou sem o perfil ficava no campo, e o "Enviar" não dizia nada
+// (auditoria de 2026-10-01, R6-5-5): hoje ele entra na conversa como "Não
+// enviada.", com o "Tentar de novo" — e continua não SAINDO sem o perfil.
+test('P6 sem o id do perfil o envio não sai — e o que se digitou não some: vira "Não enviada.", com o "Tentar de novo"', async () => {
   const c = novoCliente({ api: { chat: () => ({ success: true }) } });
   c.P.presencaMontar();
   c.P.Presenca.aberta = CAF;
@@ -389,13 +392,19 @@ test('P6 sem o id do perfil o envio não sai — e o que se digitou FICA no camp
   c.$('conversaInput').value = 'minha resposta';
   c.$('conversaForm').disparar('submit');
   await tick();
-  assert.equal(c.$('conversaInput').value, 'minha resposta', 'o que se digitou sumiu calado');
-  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0);
-  // CONTROLE: com o perfil, sai e o campo limpa.
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0, 'saiu sem saber de quem é a sessão');
+  const msgs = c.P.Presenca.historico.get(CAF).msgs;
+  assert.deepEqual(msgs.map((m) => [m.texto, m.meu, m.estado]), [['minha resposta', true, 'falhou']], 'o que se digitou sumiu calado');
+  assert.match(c.$('conversaMsgs').innerHTML, /presenca\.recibo\.naoEnviadaErro[\s\S]*conversa-reenviar/, 'a tela não diz que ela não saiu');
+  // CONTROLE: com o perfil, o "Tentar de novo" a manda (o MESMO id) e o campo de um envio novo limpa.
   c.AppState.profile = { id: 12444348, userName: 'antigerme' };
+  c.P.presencaTentarDeNovo();
+  await tick();
+  assert.deepEqual(c.chamadas.chat.filter((x) => x.acao === 'enviar').map((x) => [x.texto, x.id]), [['minha resposta', msgs[0].id]]);
+  c.$('conversaInput').value = 'outra';
   c.$('conversaForm').disparar('submit');
   await tick();
-  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1);
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 2);
   assert.equal(c.$('conversaInput').value, '');
 });
 
@@ -411,8 +420,15 @@ test('P6 o rascunho: a queda da sessão o mantém (é a mesma pessoa voltando); 
 test('P6 o diálogo do portão fechado abre ANTES da tela de entrada — fechar a conversa e abri-lo no mesmo quadro é o gotcha #65', async () => {
   const { readFileSync } = await import('node:fs');
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const depois = [...APP.matchAll(/depois: \(\) => \{([^}]*)\}/g)].map((m) => m[1]);
-  assert.ok(depois.length >= 2, 'sumiram os desfechos do portão fechado (o guard ficaria cego)');
+  // O corpo de cada `depois` com as chaves CASADAS: um `{ recusado: true }` lá
+  // dentro (R6-1-11) cortava o corpo no meio, e o guard deixava de vê-lo.
+  const depois = [...APP.matchAll(/depois: \(\) => \{/g)].map((m) => {
+    let prof = 0, j = m.index + m[0].length - 1;
+    for (; j < APP.length; j++) { if (APP[j] === '{') prof++; else if (APP[j] === '}' && --prof === 0) break; }
+    return APP.slice(m.index + m[0].length, j);
+  });
+  assert.ok(depois.some((c) => /showAuthScreen\(\)/.test(c) && /showAccessDenied\(/.test(c)),
+    'sumiram os desfechos do portão fechado (o guard ficaria cego)');
   for (const corpo of depois) {
     if (!/showAuthScreen\(\)/.test(corpo) || !/showAccessDenied\(/.test(corpo)) continue;
     assert.ok(corpo.indexOf('showAccessDenied(') < corpo.indexOf('showAuthScreen()'),

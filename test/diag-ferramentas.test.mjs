@@ -262,6 +262,48 @@ test('diag-tela: remonta TAMBÉM as capturas das aberturas anteriores (o defeito
   assert.match(TELA, /const momentos = \[\.\.\.anteriores, \.\.\.atuais\];/);
 });
 
+// ── R6-4-6 (auditoria de 2026-10-01): as sentinelas DAS CAPTURAS ──────────────
+// O relatório costuma ser baixado com os Filtros abertos, quando as sentinelas
+// de toque calam: o defeito está nas CAPTURAS (`m.alertas`, relatório v4+), que
+// são justamente o que o diag-tela remonta — e ele lia só o `resumo.alertas`.
+// Medido no navegador (t5): o `diag-resumo` do mesmo arquivo acusava
+// "esqueletoSobreCard" na captura, e o diag-tela dizia `alertas: []`.
+test('diag-tela: as sentinelas de CADA CAPTURA saem no terminal, na linha do momento e no resumo.json (R6-4-6)', () => {
+  const sentinelasDaTela = fatiarDaTela('sentinelasDaTela');
+  const cap = { t: '2026-10-01T00:30:41.462Z', motivo: 'manual', painel: 'carregando', alertas: [
+    { chave: 'toqueInterceptado', msg: 'o toque no ✕ cai noutro elemento', alvo: 'button.card-btn-reject' },
+    { chave: 'esqueletoSobreCard', msg: 'o esqueleto de "carregando" está POR CIMA de um card já montado' }] };
+  const limpa = { t: '2026-10-01T00:31:00.000Z', motivo: 'manual', painel: 'card', alertas: [] };
+  const antiga = { t: '2026-10-01T00:29:00.000Z', motivo: '[abertura x] manual', painel: 'card' };   // relatório < v4
+  const semNada = { resumo: { alertas: [] } };   // o relatório baixado com os Filtros abertos
+  const s = sentinelasDaTela(semNada, [antiga, cap, limpa], ['momento-01.png', 'momento-02.png', 'momento-03.png']);
+  assert.deepEqual(s.porMomento, [[], ['toqueInterceptado', 'esqueletoSobreCard'], []],
+    'a linha de cada momento não leva as sentinelas DA captura');
+  assert.deepEqual(s.alertasNasCapturas, [{ arquivo: 'momento-02.png', quando: cap.t, motivo: 'manual', painel: 'carregando',
+    alertas: ['toqueInterceptado', 'esqueletoSobreCard'] }], 'o resumo.json não diz QUAL captura acusou o quê');
+  const texto = s.texto.join('\n');
+  assert.match(texto, /momento-02\.png/, 'o terminal não diz qual imagem remontada tem o defeito');
+  assert.match(texto, /\[esqueletoSobreCard\] o esqueleto/, 'o terminal não mostra o alerta da captura');
+  assert.match(texto, /alvo=button\.card-btn-reject/, 'o terminal perdeu o detalhe do alerta (o alvo do toque)');
+  // CONTROLE: sem alerta no relatório e em captura nenhuma, nada é dito.
+  assert.deepEqual(sentinelasDaTela(semNada, [antiga, limpa], ['a.png', 'b.png']).texto, []);
+  // E as do RELATÓRIO seguem saindo como antes.
+  const r = sentinelasDaTela({ resumo: { alertas: [{ chave: 'temaSemClasse', msg: 'o app claro sem tema-claro' }] } }, [limpa], ['a.png']);
+  assert.deepEqual(r.alertas.map((a) => a.chave), ['temaSemClasse']);
+  assert.match(r.texto.join('\n'), /\[temaSemClasse\] o app claro/);
+  assert.deepEqual(r.alertasNasCapturas, []);
+  // E a ferramenta USA o que a função devolve — ancorado em linha, fora de comentário (gotcha #67).
+  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(semCom, /^const sentinelas = sentinelasDaTela\(d, momentos, momentos\.map\(\(_, i\) => nomeDoMomento\(i\)\)\);$/m,
+    'a ferramenta deixou de calcular as sentinelas sobre os momentos que ela remonta');
+  assert.match(semCom, /^\s+alertas: sentinelas\.porMomento\[i\],$/m, 'a linha do momento não leva as sentinelas dele');
+  assert.match(semCom, /^const resumo = \{[\s\S]*?^\s+alertasNasCapturas,$[\s\S]*?^\};$/m, 'o resumo.json não leva as sentinelas das capturas');
+  assert.match(semCom, /^if \(sentinelas\.texto\.length\) console\.log\('\\n' \+ sentinelas\.texto\.join\('\\n'\) \+ '\\n'\);$/m,
+    'o terminal não imprime as sentinelas');
+  assert.match(semCom, /^\s+\+ \(l\.alertas\.length \? `  alertas=\$\{l\.alertas\.join\(','\)\}` : ''\)\);$/m,
+    'a linha impressa de cada momento não diz o alerta dele');
+});
+
 // O CORPO que a ferramenta mandaria, lido da própria saída dela: ela imprime o
 // corpo (com o token mascarado) ANTES do jitter e da rede. O processo é morto
 // assim que a linha aparece — nada sai pra rede, e o teste não espera o jitter.

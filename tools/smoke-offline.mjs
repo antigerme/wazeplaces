@@ -2181,12 +2181,24 @@ diz('o leitor mostra a duração da sessão do relatório de verdade — número
   JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
 diz('PRÉ-CONDIÇÃO: a captura e a anotação feitas DURANTE o zip não estão no arquivo (ele é o retrato de antes)',
   rel9c?.desta === 1 && rel9c?.duranteNoArquivo === false, JSON.stringify({ desta: rel9c?.desta, durante: rel9c?.duranteNoArquivo }));
-const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
+// BAIXADO, sai do aparelho o que FOI no arquivo — e só isso: a abertura anterior
+// (entregue inteira) sai, e a desta fica só com o que NÃO foi (a captura do meio
+// do zip). Apagava a base INTEIRA, e com ela o que outra aba gravou depois de o
+// relatório ler a base (auditoria de 2026-10-01, R6-4-5; as duas abas estão no
+// test/diag-guarda). A comparação é feita no Node: a função vai pra página
+// serializada, sem os ids daqui.
+let g3d = null;
+for (const t0 = Date.now(); Date.now() - t0 < 10000; await dormir(100)) {
+  g3d = await guardado9c(p2d);
+  const esta = (g3d.abertas || []).find((a) => a.id === r2d.id);
+  if (!(g3d.abertas || []).some((a) => a.id === id1d) && esta && esta.capturas === 1) break;
+}
+const esta3d = (g3d?.abertas || []).find((a) => a.id === r2d.id);
 const s4d = await selo9c(p2d);
 // 4 = as 2 guardadas + a desta abertura + a do meio do zip: o número conta o
 // que a pessoa registrou, baixado ou não.
-diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
-  apagou.ok && s4d.txt === '4', JSON.stringify({ apagou, s4d }));
+diz('BAIXADO, sai do aparelho o que FOI no arquivo — a abertura anterior, e desta só fica a captura do meio do zip (e nesta abertura o número segue contando, como sempre)',
+  !(g3d?.abertas || []).some((a) => a.id === id1d) && esta3d?.capturas === 1 && s4d.txt === '4', JSON.stringify({ g3d, s4d }));
 // Segue usando depois do download: uma captura NOVA, e o app vai pro fundo.
 // É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
 // o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
@@ -2396,14 +2408,30 @@ await prep9e.evaluate(() => {
 await devLigado9e(prep9e, true);
 await prep9e.close({ runBeforeUnload: true });
 
-// 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma captura.
+// 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma
+// captura NÃO BAIXADA. Ela é do APARELHO (está na base), e desligar em A a
+// apaga: o 1º toque em A AVISA e não desliga — ele desligava calado, contando só
+// os registros da memória de A (auditoria de 2026-10-01, R6-4-4). O 2º desliga,
+// e a aba B desliga junto.
 const a9e = await abrir9e('A'), b9e = await abrir9e('B');
 await pronta9c(a9e); await pronta9c(b9e);
 const cdpB9e = await ctx9e.newCDPSession(b9e);
 const tocouB = await tocar9c(b9e, cdpB9e);
 const guardouB = await guardouNesta9c(b9e, 1);
 diz('PRÉ-CONDIÇÃO: a captura da aba B foi pro aparelho', tocouB && guardouB.ok, JSON.stringify({ tocouB, guardouB }));
-await a9e.evaluate(() => { const cb = document.getElementById('prefDevModeActive'); cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const desligarA9e = () => a9e.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
+  cb.checked = false; cb.dispatchEvent(new Event('change')); });
+const naMemoriaDeA = await a9e.evaluate(() => dlogNaoBaixados());
+await desligarA9e();
+// A conta do aparelho lê a base (assíncrona): o desfecho do 1º toque é o aviso — a janela do 2º toque aberta.
+const avisouA = await esperarNaPagina(a9e, () => desligarDevConfirmadoAte > Date.now(), 5000, 100);
+const r1e = await a9e.evaluate(() => ({ dev: AppState.devMode.active, marcado: document.getElementById('prefDevModeActive').checked,
+  naoBaixados: dlogNaoBaixados(), avisos: document.querySelectorAll('#toastContainer > *').length }));
+const bSegue = await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }));
+diz('a captura NÃO baixada da aba B conta no aviso da aba A: o 1º toque avisa e nada é apagado (R6-4-4)',
+  naMemoriaDeA === 0 && avisouA.ok && r1e.dev === true && r1e.marcado === true && r1e.naoBaixados === 1 && r1e.avisos > 0
+  && bSegue.dev === true && bSegue.momentos === 1, JSON.stringify({ naMemoriaDeA, avisouA, r1e, bSegue }));
+await desligarA9e();                                   // o 2º toque, dentro dos 15 s
 const chegouB = await esperarNaPagina(b9e, () => AppState.devMode.active === false
   && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
 diz('desligado na aba A, a aba B desliga junto: o botão some e as capturas saem da memória', chegouB.ok,

@@ -24,44 +24,46 @@ function fatiar(nome) {
 
 // ── A invariante ───────────────────────────────────────────────────────────
 
-test('a página nova NÃO reordena por baixo de um card na tela', () => {
-  const corpo = fatiar('fetchNextPage');
-  assert.match(corpo, /if \(AppState\.currentPlace\) AppState\.ordemPendente = true;\s*\n\s*else sortQueue\(\);/,
-    'o fetchNextPage voltou a ordenar com card na tela — a ação passa a cair no pedido errado');
-  assert.ok(!/^\s*sortQueue\(\);\s*$/m.test(corpo),
-    'sobrou um sortQueue() incondicional no fetchNextPage');
-});
-
-// Posição de uma CHAMADA de verdade: ancorada no início da linha, nunca no
-// nome solto. Os comentários deste trecho explicam a ordem citando as funções
-// pelo nome, e um `indexOf` cru casa com a MENÇÃO e reprova código certo —
-// gotcha #14, que aconteceu na primeira escrita deste teste (e nos dois PRs
-// anteriores desta sessão, sempre do mesmo jeito).
-function posDaChamada(corpo, chamada) {
-  const i = corpo.search(new RegExp('^\\s+' + chamada.replace(/[.()[\]]/g, '\\$&'), 'm'));
-  assert.notEqual(i, -1, `sumiu a chamada ${chamada}`);
-  return i;
+// O card na tela fica no `queue[0]`, e a ordem nova vale JÁ pro RESTO — nunca
+// "no próximo card". Adiada (`ordemPendente`, até v2026.10.01-02), o card de
+// FUNDO e o aquecimento anunciavam o `queue[1]` da ordem velha, e o próximo
+// card era outro: MEDIDO, s48 (chega um pedido mais recente) e s49 ("Perto de
+// casa" com o perfil chegando depois do 1º card); auditoria de 2026-10-02,
+// R6-2-06. As funções de verdade: o `sortQueue` com a série do foco.
+function ordenarComCardNaTela(fila, opcoes, { autorEmFoco = null } = {}) {
+  const AppState = { queue: fila.slice(), currentPlace: fila[0], autorEmFoco, filters: { sortOrder: 'newest' } };
+  const sortQueue = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm', 'pedidosEmAndamento', 'chaveDoPedido',
+    fatiar('sortQueue') + '\n' + fatiar('manterFocoNaFrente') + '\n' + fatiar('serieDoAutor') + '\nreturn sortQueue;')(
+    AppState, () => null, () => null, () => 0, new Set(), (p) => (p ? p.id : null));
+  sortQueue(opcoes);
+  return { ids: AppState.queue.map((p) => p.id), AppState };
 }
+const P = (id, dateAdded, creatorId = 1) => ({ id, dateAdded, creatorId });
 
-test('a ordem adiada é aplicada no advanceQueue, com o card JÁ fora', () => {
-  const corpo = fatiar('advanceQueue');
-  const posShift = posDaChamada(corpo, 'AppState.queue.shift()');
-  const posSort = posDaChamada(corpo, 'sortQueue()');
-  const posMostra = posDaChamada(corpo, 'showCurrentPlace()');
-  assert.ok(posShift < posSort,
-    'reordenou ANTES de tirar o card — é exatamente o defeito que se está consertando');
-  // E antes de mostrar o próximo: é o `showCurrentPlace` que agenda o
-  // aquecimento, então reordenar depois dele faria a foto pré-carregada ser a
-  // do card errado — o mesmo prejuízo, no segundo lugar.
-  assert.ok(posSort < posMostra,
-    'reordenou depois de mostrar o próximo — o aquecimento passa a mirar no card errado');
-  assert.match(corpo, /AppState\.ordemPendente = false;/, 'a flag não é consumida — a fila reordenaria a cada swipe');
+test('a página nova reordena SÓ O RESTO — o card da tela fica no `queue[0]` e o próximo já é o da ordem', () => {
+  // u1 na tela (o mais antigo), e chega u0, o mais RECENTE ("Mais recentes").
+  const fila = [P('u1', 100), P('u2', 300), P('u3', 200), P('u0', 500)];
+  const r = ordenarComCardNaTela(fila, { semTrocarOCardDaTela: true });
+  assert.deepEqual(r.ids, ['u1', 'u0', 'u2', 'u3'],
+    `a ordem nova não valeu pro resto (o próximo seria outro que não o da pilha): ${r.ids}`);
+  assert.equal(r.AppState.queue[0], r.AppState.currentPlace, 'o card da tela saiu do `queue[0]` — a ação cairia no pedido errado');
+  // CONTROLE: a ordem da fila INTEIRA tiraria o u1 da frente — é essa diferença que o caso de cima distingue.
+  assert.deepEqual(ordenarComCardNaTela(fila).ids, ['u0', 'u2', 'u3', 'u1']);
+  // E com o foco num autor, a série dele segue na frente do resto (atrás do card da tela).
+  const foco = ordenarComCardNaTela([P('x1', 100, 7), P('y1', 400, 8), P('x2', 200, 7), P('y0', 500, 8)],
+    { semTrocarOCardDaTela: true }, { autorEmFoco: 7 });
+  assert.deepEqual(foco.ids, ['x1', 'x2', 'y0', 'y1']);
 });
 
-test('a flag nasce declarada e morre no resetQueue', () => {
-  assert.match(APP, /ordemPendente: false,/, 'o estado não é declarado no AppState');
-  assert.match(fatiar('resetQueue'), /AppState\.ordemPendente = false;/,
-    'a fila vai embora e a ordem pendente fica — o próximo advance ordenaria por nada');
+test('quem pede a ordem com um card na tela (a página que chega, o perfil que traz a casa) ordena SÓ O RESTO', () => {
+  const busca = fatiar('fetchNextPage');
+  assert.match(busca, /^\s+sortQueue\(\{ semTrocarOCardDaTela: true \}\);\s*\n\s*aplicarRecusaAutomatica\(\);\s*\n\s*aoMudarAFilaPorBaixo\(\);/m,
+    'a página que chega com o card na tela não ordena o resto já (ou não refaz o card de fundo depois)');
+  assert.ok(!/^\s*sortQueue\(\);\s*$/m.test(busca),
+    'sobrou um sortQueue() da fila INTEIRA no fetchNextPage — com o card na tela, a ação cai no pedido errado');
+  assert.match(fatiar('completarPerfilChegado'),
+    /^\s+sortQueue\(\{ semTrocarOCardDaTela: true \}\);\s*\n\s*if \(AppState\.currentPlace\) aoMudarAFilaPorBaixo\(\);/m,
+    'o perfil que chega com o card na tela não ordena o resto já (ou não refaz o card de fundo)');
 });
 
 // ── Trocar só a ordem não vai à rede ───────────────────────────────────────
