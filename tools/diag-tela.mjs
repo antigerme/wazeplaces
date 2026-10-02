@@ -73,6 +73,52 @@ const anteriores = (Array.isArray(d.aberturasAnteriores) ? d.aberturasAnteriores
     .filter((m) => m && m.dom)
     .map((m) => ({ ...m, motivo: `[abertura ${(a && a.id) || ia + 1}] ` + (m.motivo || '') })));
 const momentos = [...anteriores, ...atuais];
+
+// As SENTINELAS: as do RELATÓRIO (`resumo.alertas`) e as de CADA CAPTURA, no
+// instante dela (`m.alertas`, relatório v4+). As da captura são as que importam
+// AQUI: o relatório costuma ser baixado com os Filtros abertos, quando as
+// sentinelas de toque calam de propósito, e o defeito estava na tela quando a
+// pessoa tocou no botão — ou seja, na captura que esta ferramenta remonta. Ela
+// lia só as do relatório e dizia "nenhum" com o esqueleto por cima do card na
+// imagem que ela mesma gerava (auditoria de 2026-10-01, R6-4-6). PURA: devolve
+// as chaves de cada momento (a linha dele), as capturas que acusaram algo (o
+// `resumo.json`) e o texto do terminal — e é conferida sem navegador
+// (test/diag-ferramentas). `nomes[i]` é o arquivo da imagem do momento `i`.
+function sentinelasDaTela(d, momentos, nomes) {
+  const doRelatorio = (d && d.resumo && Array.isArray(d.resumo.alertas)) ? d.resumo.alertas : [];
+  const daCaptura = (m) => (Array.isArray(m && m.alertas) ? m.alertas : [])
+    .filter((a) => a && typeof a.chave === 'string');
+  const porMomento = momentos.map((m) => daCaptura(m).map((a) => a.chave));
+  const nasCapturas = momentos
+    .map((m, i) => ({ arquivo: nomes[i], quando: m.t, motivo: m.motivo, painel: m.painel, alertas: daCaptura(m) }))
+    .filter((c) => c.alertas.length);
+  const detalhe = (al) => {
+    const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
+    return `[${al.chave}] ${String(al.msg || '')}${extra ? '  (' + extra + ')' : ''}`;
+  };
+  const texto = [];
+  if (doRelatorio.length) {
+    texto.push(`⚠ ${doRelatorio.length} alerta(s) do app — invariante conhecida quebrada NO APARELHO:`);
+    for (const al of doRelatorio) texto.push('  · ' + detalhe(al));
+  }
+  if (nasCapturas.length) {
+    texto.push(`⚠ ${nasCapturas.length} captura(s) com alerta do app — quebrada NO INSTANTE em que a pessoa tocou no botão:`);
+    for (const c of nasCapturas) {
+      texto.push(`  ${c.arquivo}  ${c.motivo || ''}  painel=${c.painel ?? '?'}`);
+      for (const al of c.alertas) texto.push('    · ' + detalhe(al));
+    }
+  }
+  return {
+    alertas: doRelatorio,
+    alertasNasCapturas: nasCapturas.map((c) => ({ ...c, alertas: c.alertas.map((a) => a.chave) })),
+    porMomento,
+    texto,
+  };
+}
+const nomeDoMomento = (i) => `momento-${String(i + 1).padStart(2, '0')}.png`;
+const sentinelas = sentinelasDaTela(d, momentos, momentos.map((_, i) => nomeDoMomento(i)));
+
 if (!momentos.length) {
   console.error('o arquivo não tem nem `momentos` nem `dom` — nada pra remontar');
   process.exit(1);
@@ -237,7 +283,7 @@ for (let i = 0; i < momentos.length; i++) {
     } catch (e) { return { erro: String(e && e.message).slice(0, 80) }; }
   });
 
-  const nome = `momento-${String(i + 1).padStart(2, '0')}.png`;
+  const nome = nomeDoMomento(i);
   await page.screenshot({ path: join(saida, nome), fullPage: false });
   await ctx.close();
   linhas.push({
@@ -246,19 +292,22 @@ for (let i = 0; i < momentos.length; i++) {
     toasts: (m.toastsNaTela || []).length,
     imagensQuebradas: (m.imagens || []).filter((x) => x.quebrada).length,
     fonte: fonte && fonte.familia ? `${fonte.familia}${fonte.carregou ? '' : ' (NÃO carregou)'}` : '?',
+    // As sentinelas DESTA captura, no instante dela (ver `sentinelasDaTela`).
+    alertas: sentinelas.porMomento[i],
   });
 }
 await browser.close();
 
-// As SENTINELAS vêm antes de tudo. Quem roda esta ferramenta está procurando o
-// que está errado; se o app já sabe, ele diz aqui, e não numa linha perdida de
-// 1 MB de JSON.
-const alertas = (d.resumo && d.resumo.alertas) || [];
+// As SENTINELAS vêm antes de tudo — as do relatório e as de cada captura (ver
+// `sentinelasDaTela`). Quem roda esta ferramenta está procurando o que está
+// errado; se o app já sabe, ele diz aqui, e não numa linha perdida de 1 MB de JSON.
+const { alertas, alertasNasCapturas } = sentinelas;
 
 const resumo = {
   de: basename(arquivo),
   versaoDaApp: (d.app && d.app.rotulo) || null,
   alertas,
+  alertasNasCapturas,
   janela, dpr, tema: (d.ambiente && d.ambiente.escuro) ? 'escuro' : 'claro',
   cssBytes: cssDoAparelho.length,
   // Embutidas NA `@font-face` do app — e se a família CARREGOU em cada
@@ -278,17 +327,10 @@ const resumo = {
   ],
 };
 writeFileSync(join(saida, 'resumo.json'), JSON.stringify(resumo, null, 1));
-if (alertas.length) {
-  console.log(`\n⚠ ${alertas.length} alerta(s) do app — invariante conhecida quebrada NO APARELHO:`);
-  for (const al of alertas) {
-    const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
-      .map(([k, v]) => `${k}=${v}`).join(' ');
-    console.log(`  · [${al.chave}] ${al.msg}${extra ? '  (' + extra + ')' : ''}`);
-  }
-  console.log('');
-}
+if (sentinelas.texto.length) console.log('\n' + sentinelas.texto.join('\n') + '\n');
 console.log(`${linhas.length} momento(s) remontado(s) em ${saida}   (lido de ${_origemDoDiag})`);
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
-    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}  fonte=${l.fonte}`);
+    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}  fonte=${l.fonte}`
+    + (l.alertas.length ? `  alertas=${l.alertas.join(',')}` : ''));
 }
