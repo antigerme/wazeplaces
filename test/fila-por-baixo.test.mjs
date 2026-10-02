@@ -28,11 +28,14 @@ function fatiar(nome) {
 }
 
 // ── o foco no autor sobrevive à ordenação ────────────────────────────────────
-function ordenar(queue, { autorEmFoco = null, sortOrder = 'newest' } = {}) {
-  const AppState = { queue, autorEmFoco, filters: { sortOrder } };
-  const fn = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm',
-    fatiar('sortQueue') + '\n' + fatiar('manterFocoNaFrente') + '\nreturn sortQueue;')(
-    AppState, () => null, () => null, () => 0);
+// A série do foco é a da régua única (`serieDoAutor`, R6-2-02): sem o pedido em
+// andamento (`emAndamento`, pela chave), com o card da tela (`naTela`).
+const chaveP = (p) => (p ? p.id : null);
+function ordenar(queue, { autorEmFoco = null, sortOrder = 'newest', emAndamento = [], naTela = null } = {}) {
+  const AppState = { queue, autorEmFoco, filters: { sortOrder }, currentPlace: naTela };
+  const fn = new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm', 'pedidosEmAndamento', 'chaveDoPedido',
+    fatiar('sortQueue') + '\n' + fatiar('manterFocoNaFrente') + '\n' + fatiar('serieDoAutor') + '\nreturn sortQueue;')(
+    AppState, () => null, () => null, () => 0, new Set(emAndamento), chaveP);
   fn();
   return AppState.queue.map((p) => p.id);
 }
@@ -52,9 +55,9 @@ test('a ordenação pendente NÃO espalha a série do autor em foco', () => {
 test('a ordenação reordena NO LUGAR — quem segura a fila segue vendo a mesma', () => {
   const fila = [P('x', 1, 500), P('a7', 7, 100)];
   const AppState = { queue: fila, autorEmFoco: 7, filters: { sortOrder: 'newest' } };
-  new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm',
-    fatiar('sortQueue') + '\n' + fatiar('manterFocoNaFrente') + '\nreturn sortQueue;')(
-    AppState, () => null, () => null, () => 0)();
+  new Function('AppState', 'referenciaDaOrdem', 'pontoDoPlace', 'distanciaKm', 'pedidosEmAndamento', 'chaveDoPedido',
+    fatiar('sortQueue') + '\n' + fatiar('manterFocoNaFrente') + '\n' + fatiar('serieDoAutor') + '\nreturn sortQueue;')(
+    AppState, () => null, () => null, () => 0, new Set(), chaveP)();
   assert.equal(AppState.queue, fila, 'trocou o array da fila');
   assert.deepEqual(fila.map((p) => p.id), ['a7', 'x']);
 });
@@ -193,17 +196,20 @@ function montarBarra() {
     focoAutorBar: { classList: { add() {}, remove() {} }, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } },
     focoAutorTexto: { textContent: '' }, focoAutorContagem: { textContent: '' },
   };
+  const emAndamento = new Set();
   const deps = {
     AppState, cardDaFrente: () => ({ querySelector: () => null }), renderSelosDeProcedencia: () => {},
     montarCardDeFundo: () => {}, chaveDoPedido: (x) => (x ? x.venueID + '|' + x.updateRequestID : null),
     document: { querySelector: () => null, getElementById: (id) => els[id] || null },
     t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k + (v && v.n != null ? '#' + v.n : '')),
+    // A série que a barra conta é a da régua única (`serieDoAutor`, R6-2-02).
+    pedidosEmAndamento: emAndamento,
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let aquecimentoDaFrenteFeito = false;\n' + fatiar('seloComFoco') + '\n'
     + fatiar('devolverFocoAoSelo') + '\n' + fatiar('aoMudarAFilaPorBaixo') + '\n'
-    + fatiar('renderFocoAutor') + '\nreturn { aoMudarAFilaPorBaixo, renderFocoAutor };')(...chaves.map((k) => deps[k]));
-  return { app, AppState, els, p };
+    + fatiar('renderFocoAutor') + '\n' + fatiar('serieDoAutor') + '\nreturn { aoMudarAFilaPorBaixo, renderFocoAutor };')(...chaves.map((k) => deps[k]));
+  return { app, AppState, els, p, emAndamento };
 }
 
 test('R5-2-08: a página que chega com mais pedidos do autor em foco atualiza a barra junto com o selo', () => {
@@ -216,4 +222,98 @@ test('R5-2-08: a página que chega com mais pedidos do autor em foco atualiza a 
   assert.equal(m.els.focoAutorContagem.textContent, '4 de 7',
     'a barra seguiu dizendo "2 de 4" com o selo já dizendo "Ver +3" — a mesma fila contada de dois jeitos');
   assert.equal(m.els.focoAutorBar.attrs['aria-label'], 'card.focoAutor.aria#4', 'o aria-label seguiu com a contagem velha');
+});
+
+// ── R6-2-02: UMA régua pra série do autor — o selo, o toque e a barra ──────────
+// Com a aprovação de foto de B (do autor) no ar e A (do autor) na tela, o selo
+// dizia "Ver +1" e a folha "Ver os 2" (sem o pedido em andamento, R5-2-02) — e o
+// toque punha TRÊS na frente, B travado no meio, com a barra dizendo "3 de 4"
+// (MEDIDO no navegador, s33, Chromium e WebKit; regressão da costura do lote 9).
+// As funções de verdade: o `focarAutor`, a barra (`renderFocoAutor`), a
+// ordenação que segura a série (`manterFocoNaFrente`) e o pedido que entra e sai
+// de "em andamento" (`refazerSelosSeOutroNaTela`), pela régua `serieDoAutor`.
+function montarSerie(fila, { emAndamento = [] } = {}) {
+  const p = (i, autor) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: autor, createdBy: 'autor' + autor });
+  const pedidos = fila.map(([i, autor]) => p(i, autor));
+  const AppState = { autorEmFoco: null, queue: pedidos.slice(), currentPlace: pedidos[0] };
+  const andamento = new Set(emAndamento.map((i) => 'v' + i + '|u' + i));
+  const els = {
+    focoAutorBar: { classList: { add() {}, remove() {} }, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } },
+    focoAutorTexto: { textContent: '' }, focoAutorContagem: { textContent: '' },
+  };
+  let app = null;
+  const deps = {
+    AppState, pedidosEmAndamento: andamento, chaveDoPedido: (x) => (x ? x.venueID + '|' + x.updateRequestID : null),
+    document: { getElementById: (id) => els[id] || null },
+    t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k + (v && v.n != null ? '#' + v.n : '')),
+    removeCurrentCardEl: () => {}, updatePendingCount: () => {},
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; app.renderFocoAutor(); },
+    // O que o `aoMudarAFilaPorBaixo` faz com a barra (a pilha e o selo estão em outros testes).
+    aoMudarAFilaPorBaixo: () => app.renderFocoAutor(),
+  };
+  const chaves = Object.keys(deps);
+  app = new Function(...chaves, ['serieDoAutor', 'pedidosDoAutorNaFila', 'focarAutor', 'renderFocoAutor',
+    'manterFocoNaFrente', 'refazerSelosSeOutroNaTela'].map(fatiar).join('\n')
+    + '\nreturn { focarAutor, renderFocoAutor, pedidosDoAutorNaFila, refazerSelosSeOutroNaTela };')(...chaves.map((k) => deps[k]));
+  const id = (x) => x.updateRequestID;
+  return {
+    app, AppState, andamento, pedidos,
+    fila: () => AppState.queue.map(id),
+    barra: () => els.focoAutorContagem.textContent,
+    aria: () => els.focoAutorBar.attrs['aria-label'],
+    // O "Ver +N" do card da tela: a MESMA expressão do `renderSelosDeProcedencia`
+    // (travada no teste "R5-2-02: o 'Ver +N' conta pela MESMA régua", em lote-autor).
+    selo: () => app.pedidosDoAutorNaFila(AppState.currentPlace).filter((x) => x !== AppState.currentPlace).length,
+  };
+}
+
+test('R6-2-02: com a aprovação de B no ar, o "Ver +1" põe UM a mais na frente — B vai pro resto — e a barra diz "2 de 4"', () => {
+  // A(777) na tela, B(777) com a aprovação no ar, u3 de outro, D(777).
+  const m = montarSerie([[1, 777], [2, 777], [3, 5], [4, 777]], { emAndamento: [2] });
+  assert.equal(m.selo(), 1, 'PRÉ-CONDIÇÃO: o selo do A diz "Ver +1"');
+  m.app.focarAutor(777);
+  assert.deepEqual(m.fila(), ['u1', 'u4', 'u2', 'u3'],
+    'o toque no "Ver +1" pôs na frente o pedido cuja aprovação está no ar (travado, no meio da série)');
+  assert.equal(m.AppState.currentPlace, m.pedidos[0], 'o card da tela trocou');
+  assert.equal(m.barra(), '2 de 4', `a barra contou outra série que o selo: "${m.barra()}" com o selo em "Ver +1"`);
+  assert.equal(m.aria(), 'card.focoAutor.aria#2');
+  // CONTROLE: a aprovação já pousou noutra hora (nada em andamento) — B entra na série.
+  const c = montarSerie([[1, 777], [2, 777], [3, 5], [4, 777]]);
+  assert.equal(c.selo(), 2);
+  c.app.focarAutor(777);
+  assert.deepEqual([c.fila(), c.barra()], [['u1', 'u2', 'u4', 'u3'], '3 de 4']);
+});
+
+test('R6-2-02: o card da TELA em aprovação fica na frente e conta — o toque não troca o card debaixo do dedo', () => {
+  // uf1(777) na tela, com a aprovação DELE no ar; u2 de outro; u3(777). O selo dele diz "Ver +1".
+  const m = montarSerie([[1, 777], [2, 5], [3, 777]], { emAndamento: [1] });
+  assert.equal(m.selo(), 1);
+  m.app.focarAutor(777);
+  assert.deepEqual(m.fila(), ['u1', 'u3', 'u2'], 'o toque trocou o card da tela pelo outro pedido do autor');
+  assert.equal(m.barra(), '2 de 3', 'a barra não contou o card da tela (o "Ver +1" é ele mais um)');
+});
+
+test('R6-2-02: os dois sentidos — o pedido que ENTRA em andamento sai da série, e o que SAI (a aprovação recusada) volta pra ela', () => {
+  // Foco no 777 com A, B e D na frente; B entra em andamento (a aprovação dele sai, com A na tela — o L22).
+  const m = montarSerie([[1, 777], [2, 777], [3, 5], [4, 777]]);
+  m.app.focarAutor(777);
+  assert.deepEqual([m.fila(), m.barra()], [['u1', 'u2', 'u4', 'u3'], '3 de 4'], 'PRÉ-CONDIÇÃO');
+  m.andamento.add('v2|u2');
+  m.app.refazerSelosSeOutroNaTela(m.pedidos[1]);
+  assert.deepEqual(m.fila(), ['u1', 'u4', 'u2', 'u3'], 'o pedido em aprovação ficou no meio da série em foco');
+  assert.equal(m.barra(), '2 de 4');
+  // A aprovação de B FALHA (o Waze recusou): ele volta a ser decidível, e à série.
+  const v = montarSerie([[1, 777], [3, 5], [2, 777], [4, 777]], { emAndamento: [2] });
+  v.app.focarAutor(777);
+  assert.deepEqual([v.fila(), v.barra()], [['u1', 'u4', 'u3', 'u2'], '2 de 4'], 'PRÉ-CONDIÇÃO: B no resto, atrás do u3');
+  v.andamento.delete('v2|u2');
+  v.app.refazerSelosSeOutroNaTela(v.pedidos[2]);
+  assert.deepEqual(v.fila(), ['u1', 'u4', 'u2', 'u3'],
+    'a barra passou a contar B ("3 de 4") com ele atrás de um pedido de outro autor');
+  assert.equal(v.barra(), '3 de 4');
+  // CONTROLE: sem foco, entrar ou sair de "em andamento" não reordena nada.
+  const c = montarSerie([[1, 777], [3, 5], [2, 777]]);
+  c.andamento.add('v2|u2');
+  c.app.refazerSelosSeOutroNaTela(c.pedidos[2]);
+  assert.deepEqual(c.fila(), ['u1', 'u3', 'u2']);
 });

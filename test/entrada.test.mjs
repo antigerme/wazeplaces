@@ -232,9 +232,11 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };
-  const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente'],
-    deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
+  const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente',
+    'serieDoAutor'], deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
   // CONTROLE: com o foco da anterior, a fila de quem entrou vem com o autor dela na frente.
   AppState.queue = [{ creatorId: 2002 }, { creatorId: 1001 }];
   manterFocoNaFrente();
@@ -1565,8 +1567,10 @@ test('R6-1-08: "Conectar outro aparelho" com 401 CONFERE a sessão — e o aviso
 test('foco no autor: com UM pedido dele na fila, o leitor de tela ouve o singular, não "os 1 pedidos"', () => {
   const { registro, document } = domDeMentira({ focoAutorBar: {}, focoAutorTexto: {}, focoAutorContagem: {} });
   const AppState = { autorEmFoco: 7, queue: [{ creatorId: 7, createdBy: 'ana' }, { creatorId: 9 }] };
-  const { renderFocoAutor } = montar(['renderFocoAutor'],
-    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}` }, ['renderFocoAutor']);
+  // A série que a barra conta é a da régua única (`serieDoAutor`, R6-2-02).
+  const { renderFocoAutor } = montar(['renderFocoAutor', 'serieDoAutor'],
+    { document, AppState, t: (k, v) => `${k}|${v ? v.n : ''}|${v ? v.autor : ''}`,
+      pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null) }, ['renderFocoAutor']);
   renderFocoAutor();
   assert.equal(registro.focoAutorBar.getAttribute('aria-label'), 'card.focoAutor.ariaUm|1|ana',
     'com um só pedido do autor, o nome acessível usou a forma plural');

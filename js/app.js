@@ -3591,11 +3591,19 @@ function aprovacaoPousouDepoisDaQueda(alvo, valeu) {
 }
 
 // O pedido entrou ou saiu de "em andamento" com OUTRO card na tela: o "Ver +N"
-// dele conta pela mesma régua da folha (`pedidosDoAutorNaFila`, sem o em
-// andamento), e o selo foi desenhado antes. Com o próprio pedido na tela não há
-// selo de outro a refazer (e o card dele está travado pela aprovação, A1).
+// dele conta pela mesma régua da folha (`serieDoAutor`, sem o em andamento), e o
+// selo foi desenhado antes. Com o próprio pedido na tela não há selo de outro a
+// refazer (e o card dele está travado pela aprovação, A1).
+//
+// E com o FOCO no autor ("Primeiro os de X"), a série na frente muda junto: o
+// pedido que entra em andamento vai pro resto, e o que sai dele (a aprovação que
+// o Waze recusou) volta pra série — senão a barra contava uma série diferente da
+// que está na frente (R6-2-02).
 function refazerSelosSeOutroNaTela(place) {
-    if (AppState.currentPlace && AppState.currentPlace !== place) aoMudarAFilaPorBaixo();
+    if (!AppState.currentPlace || AppState.currentPlace === place) return;
+    if (AppState.autorEmFoco !== null && AppState.autorEmFoco !== undefined
+        && AppState.currentPlace.creatorId === AppState.autorEmFoco) manterFocoNaFrente();
+    aoMudarAFilaPorBaixo();
 }
 
 // A aprovação que o Waze RECUSOU deixa o pedido pendente lá. Na fila do gesto o
@@ -9320,9 +9328,12 @@ function manterFocoNaFrente() {
     const foco = AppState.autorEmFoco;
     if (foco === null || foco === undefined) return;
     const q = AppState.queue;
-    const dele = q.filter((x) => x && x.creatorId === foco);
+    // A série pela régua ÚNICA (`serieDoAutor`), a mesma do toque que a pôs na
+    // frente (`focarAutor`) e da barra que a conta (R6-2-02).
+    const dele = serieDoAutor(foco, { naTela: AppState.currentPlace });
     if (!dele.length) return;
-    const resto = q.filter((x) => !(x && x.creatorId === foco));
+    const naSerie = new Set(dele);
+    const resto = q.filter((x) => !naSerie.has(x));
     q.length = 0;
     q.push(...dele, ...resto);
 }
@@ -11629,9 +11640,14 @@ function objetoLegivel(v, prof = 0) {
 // explicitamente. `!id` mandaria o foco embora num id 0 sem ninguém ver.
 function focarAutor(id) {
     if (id === null || id === undefined || id === '') return;
-    const daPessoa = AppState.queue.filter((x) => x.creatorId === id);
+    // A série pela régua ÚNICA (`serieDoAutor`): o que o "Ver +N" e a folha
+    // contaram, com o card da tela na frente. O pedido em andamento (a aprovação
+    // de foto no ar) vai pro RESTO — na série ele chegava à frente travado, e a
+    // barra o contava sem o selo contar (R6-2-02).
+    const daPessoa = serieDoAutor(id, { naTela: AppState.currentPlace });
     if (daPessoa.length === 0) return;
-    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => x.creatorId !== id)];
+    const naSerie = new Set(daPessoa);
+    AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => !naSerie.has(x))];
     AppState.autorEmFoco = id;
     AppState.currentPlace = AppState.queue[0];
     renderFocoAutor();
@@ -11739,7 +11755,10 @@ function renderFocoAutor() {
     // O nome é só rótulo. Sem ele o id vira o texto — feio, nunca invisível,
     // como o resto do card faz com valor que o Waze não nomeia.
     const nome = atual.createdBy || String(id);
-    const restam = AppState.queue.filter((x) => x.creatorId === id).length;
+    // A série que o toque pôs na frente, pela régua ÚNICA (`serieDoAutor`): o
+    // pedido em andamento foi pro resto, e a barra contá-lo dizia "3 de 4" com
+    // o selo em "Ver +1" (R6-2-02).
+    const restam = serieDoAutor(id, { naTela: atual }).length;
     document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
     document.getElementById('focoAutorContagem').textContent =
         t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
@@ -14703,17 +14722,41 @@ const ICONE_LIXO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
 const ICONE_RAIO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">'
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>';
 
-// Os pedidos DESTE autor que estão na fila carregada agora.
-// Sem o pedido EM ANDAMENTO (`pedidosEmAndamento`): a aprovação de foto no ar
-// deixa o pedido na fila até a resposta, e a folha o contava e o "Rejeitar os N"
-// o levava — duas decisões opostas no mesmo pedido: MEDIDO, a foto que a pessoa
-// APROVOU saía rejeitada no Waze, com "Restam 0" e um card na tela (auditoria de
-// 2026-10-01, R5-2-02). É a régua do "Marcar todos" (V7) e da recusa automática,
-// e vale pra contagem da folha, pro lote e pro "Ver +N", que contam por aqui.
-function pedidosDoAutorNaFila(place) {
-    const id = place && place.creatorId;
+// A SÉRIE de um autor na fila — a régua ÚNICA do selo "Ver +N", da folha ("Ver
+// os N", "Rejeitar os N"), do lote, do toque que põe a série na frente
+// (`focarAutor`, `manterFocoNaFrente`) e da barra "Primeiro os de X · N de M".
+// Eram duas réguas: o selo, a folha e o lote já deixavam de fora o pedido EM
+// ANDAMENTO (R5-2-02), e a série do toque e a barra contavam a fila inteira — o
+// selo dizia "Ver +1", o toque punha 3 na frente (o da aprovação no meio,
+// travado) e a barra dizia "3 de 4" (MEDIDO, s33; auditoria de 2026-10-02,
+// R6-2-02).
+//
+// · O pedido EM ANDAMENTO (`pedidosEmAndamento`: a aprovação de foto no ar)
+//   fica FORA. Decidir sobre ele seria a SEGUNDA decisão — MEDIDO, a foto que a
+//   pessoa APROVOU saía rejeitada no Waze pelo "Rejeitar os N", com "Restam 0" e
+//   um card na tela (R5-2-02) —, e posto na frente ele chegava travado no meio
+//   da série. Vai pro resto da fila; se a aprovação não valer, ele volta à série
+//   (`refazerSelosSeOutroNaTela`).
+// · O card NA TELA (`naTela`) conta sempre, mesmo em andamento: ele já está na
+//   frente e é nele que a pessoa tocou — tirá-lo da série trocaria o card
+//   debaixo do dedo. Com a aprovação DELE no ar, a folha dizia "Este é o único
+//   dela na fila agora" e sumia com o "Ver/Rejeitar" com outro pedido do autor
+//   na fila (MEDIDO, s40, R6-2-03).
+// · `todos`: a FRASE da folha fala do AUTOR ("Há N na fila agora") e conta os
+//   pedidos dele que ESTÃO na fila, em andamento ou não: "o único" com outro ali
+//   é falso. Só a frase; o que decide não os leva.
+function serieDoAutor(id, { naTela = null, todos = false } = {}) {
     if (id === null || id === undefined || id === '') return [];
-    return (AppState.queue || []).filter((x) => x && x.creatorId === id && !pedidosEmAndamento.has(chaveDoPedido(x)));
+    return (AppState.queue || []).filter((x) => x && x.creatorId === id
+        && (todos || x === naTela || !pedidosEmAndamento.has(chaveDoPedido(x))));
+}
+
+// O que o LOTE decide ("Rejeitar os N") e o que o "Ver +N" conta além do card:
+// a série SEM nada em andamento — nem o card da tela, se a aprovação dele está
+// no ar (a trava recusa o lote nessa hora; esta é a segunda camada). É a régua
+// do "Marcar todos" (V7) e da recusa automática.
+function pedidosDoAutorNaFila(place) {
+    return serieDoAutor(place && place.creatorId);
 }
 
 // O "Rejeitar os N" da folha. Pelo TECLADO (R5-2-06), fechar a folha devolve o
@@ -14764,7 +14807,13 @@ function abrirFolhaDoAutor(place) {
     const corpo = document.getElementById('autorCorpo');
     const titulo = document.getElementById('autorTitle');
     if (!corpo || !titulo) return;
-    const naFila = pedidosDoAutorNaFila(place);
+    // A série deste autor pela régua ÚNICA (`serieDoAutor`), com o card da tela:
+    // é o que o "Ver os N" põe na frente e o que o "Rejeitar os N" mostra — o
+    // mesmo número do "Ver +N" (mais o card) e da barra depois do toque. A FRASE
+    // ("Há N na fila agora") fala do autor e conta os pedidos dele que estão na
+    // fila, inclusive o em andamento (R6-2-03).
+    const naFila = serieDoAutor(place.creatorId, { naTela: place });
+    const doAutorNaFila = serieDoAutor(place.creatorId, { todos: true }).length;
     const emLote = naFila.length > 1;
     // O lote passa pela janela do Desfazer como o card (`scheduleAction`): com
     // ela, "começa ao tocar" e "tocar já escreve no Waze" eram falsos — o
@@ -14799,8 +14848,8 @@ function abrirFolhaDoAutor(place) {
     // 2026-09-25).
     corpo.innerHTML =
         `<p class="text-[0.8125rem] text-slate-500 dark:text-slate-400 mb-4 leading-snug">`
-        + `${escapeHtml(t(emLote ? 'autor.sheet.sub' : 'autor.sheet.subUm',
-                          { n: contagemDoAutor(place), fila: naFila.length }))}</p>`
+        + `${escapeHtml(t(doAutorNaFila > 1 ? 'autor.sheet.sub' : 'autor.sheet.subUm',
+                          { n: contagemDoAutor(place), fila: doAutorNaFila }))}</p>`
         + (emLote
             ? linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                     t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')

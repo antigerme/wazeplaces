@@ -289,10 +289,12 @@ function montarDevolucaoComFoco({ foco = 'X' } = {}) {
   const deps = {
     AppState, chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, updatePendingCount: () => {},
     aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, startFetching: () => {},
+    // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
+    pedidosEmAndamento: new Set(),
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, fatiar('devolverPedidoRecusado') + '\n' + fatiar('manterFocoNaFrente')
-    + '\nreturn devolverPedidoRecusado;')(...chaves.map((k) => deps[k]));
+    + '\n' + fatiar('serieDoAutor') + '\nreturn devolverPedidoRecusado;')(...chaves.map((k) => deps[k]));
   return { devolver: app, AppState, p, fila: () => AppState.queue.map((x) => x.updateRequestID) };
 }
 

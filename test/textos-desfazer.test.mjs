@@ -208,8 +208,9 @@ function montarFolha({ undoEnabled = true, cotaPassada = true } = {}) {
   const chaves = Object.keys(deps);
   const { abrirFolhaDoAutor } = new Function(...chaves,
     // `chaveDoPedido`: a folha guarda as chaves que CONTOU (lote 8 da fila, L21).
-    [fatiar('pedidosDoAutorNaFila'), fatiar('chaveDoPedido'), fatiar('semJanelaDeDesfazer'), fatiar('abrirFolhaDoAutor'),
-     'return { abrirFolhaDoAutor };'].join('\n'))(...chaves.map((k) => deps[k]));
+    // `serieDoAutor`: a régua única da série (R6-2-02/03).
+    [fatiar('pedidosDoAutorNaFila'), fatiar('serieDoAutor'), fatiar('chaveDoPedido'), fatiar('semJanelaDeDesfazer'),
+     fatiar('abrirFolhaDoAutor'), 'return { abrirFolhaDoAutor };'].join('\n'))(...chaves.map((k) => deps[k]));
   abrirFolhaDoAutor(fila[0]);
   return els.get('autorCorpo').innerHTML;
 }

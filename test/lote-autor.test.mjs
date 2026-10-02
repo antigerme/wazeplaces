@@ -630,8 +630,11 @@ function montarFolhaDoAutor({ emAndamento = [] } = {}) {
     carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
+  // A régua única da série (`serieDoAutor`, R6-2-02/03): a folha conta por ela,
+  // com o card da tela; o lote, pelo `pedidosDoAutorNaFila` (sem nada em andamento).
   const app = new Function(...chaves, 'let tratouNestaFila = false;\n' + fatiar('pedidosDoAutorNaFila') + '\n'
-    + fatiar('rejeitarLoteDoAutor') + '\nreturn { rejeitarLoteDoAutor, pedidosDoAutorNaFila };')(...chaves.map((k) => deps[k]));
+    + fatiar('serieDoAutor') + '\n' + fatiar('rejeitarLoteDoAutor')
+    + '\nreturn { rejeitarLoteDoAutor, pedidosDoAutorNaFila, serieDoAutor };')(...chaves.map((k) => deps[k]));
   return { app, AppState, agendadas, X1 };
 }
 
@@ -660,7 +663,7 @@ test('L21: o contado que saiu da fila no meio não volta a sair; CONTROLE: sem a
 
 test('L21: a folha entrega ao toque as chaves que ela contou ao ABRIR', () => {
   const f = fatiar('abrirFolhaDoAutor');
-  assert.match(f, /const naFila = pedidosDoAutorNaFila\(place\);/);
+  assert.match(f, /const naFila = serieDoAutor\(place\.creatorId, \{ naTela: place \}\);/);
   assert.match(f, /const contados = naFila\.map\(chaveDoPedido\);\s*document\.getElementById\('autorRejeitar'\)\.addEventListener\('click', \(ev\) => rejeitarPelaFolha\(ev, place, contados\)\);/,
     'o toque voltou a recontar a fila: o que chegou com a folha aberta sai junto');
   assert.match(fatiar('rejeitarPelaFolha'), /rejeitarLoteDoAutor\(place, contados\);\s*\}$/,
@@ -717,4 +720,83 @@ test('R5-2-02: o selo do card da frente é refeito quando OUTRO pedido entra ou 
     'o Desfazer da aprovação deixou de refazer o selo do card da frente');
   assert.match(fatiar('enviarAprovacao'), /marcarEmAndamento\(alvo\.place, false\);\s*refazerSelosSeOutroNaTela\(alvo\.place\);/,
     'o fim do envio da aprovação deixou de refazer o selo do card da frente');
+});
+
+// ── R6-2-02/03: UMA régua pra série do autor (`serieDoAutor`) ──────────────────
+// O R5-2-02 tirou o pedido com a aprovação de foto NO AR do selo, da folha e do
+// lote; e a folha aberta NO PRÓPRIO card em aprovação passou a dizer "Este é o
+// único dela na fila agora", sem o "Ver/Rejeitar", com outro pedido do autor ali
+// (MEDIDO, s40; na 48d2aea dizia "Há 2"). A FRASE fala do AUTOR e conta os
+// pedidos dele que ESTÃO na fila; o "Ver os N"/"Rejeitar os N" contam a série
+// (com o card da tela), e o lote decide sem o que está em andamento.
+// A folha de verdade (`abrirFolhaDoAutor`), com o DOM de mentira.
+function montarFolhaComAndamento({ fila, naTela, emAndamento = [] }) {
+  const els = new Map();
+  const ouvintes = {};
+  for (const id of ['autorCorpo', 'autorTitle', 'autorVer', 'autorRejeitar', 'autorEsquecer', 'autorAuto']) {
+    els.set(id, { id, innerHTML: '', textContent: '', addEventListener: (ev, fn) => { ouvintes[id] = fn; } });
+  }
+  const recebidos = [];
+  const deps = {
+    AppState: { queue: fila, currentPlace: naTela, preferences: { undoEnabled: true }, devMode: { active: false } },
+    document: { getElementById: (id) => els.get(id) || null },
+    canDisableUndo: () => false, escapeHtml: (x) => x,
+    // O texto com os números, pra conferir o que a folha MOSTRA.
+    t: (k, v) => (v ? `${k}${JSON.stringify(v)}` : k),
+    ICONE_OLHO: '', ICONE_X: '', ICONE_LIXO: '', ICONE_RAIO: '',
+    contagemDoAutor: () => 6, podeRecusarAutomaticoAqui: () => false, autoLigado: () => false,
+    openModal: () => {}, closeModal: () => {}, focarAutor: () => {}, verPelaFolha: () => {},
+    rejeitarPelaFolha: (ev, place, contados) => recebidos.push(contados),
+    alternarAutoDoAutor: () => {}, esquecerAutor: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => {},
+    pedidosEmAndamento: new Set(emAndamento), chaveDoPedido: chave,
+  };
+  const chaves = Object.keys(deps);
+  const { abrirFolhaDoAutor } = new Function(...chaves,
+    [fatiar('serieDoAutor'), fatiar('semJanelaDeDesfazer'), fatiar('abrirFolhaDoAutor'),
+     'return { abrirFolhaDoAutor };'].join('\n'))(...chaves.map((k) => deps[k]));
+  abrirFolhaDoAutor(naTela);
+  const html = els.get('autorCorpo').innerHTML;
+  const linha = (k) => { const m = new RegExp(`${k.replace(/\./g, '\\.')}\\{"n":(\\d+)\\}`).exec(html); return m ? Number(m[1]) : null; };
+  return {
+    html, frase: /autor\.sheet\.subUm/.test(html) ? 'um' : (/autor\.sheet\.sub\{[^}]*"fila":(\d+)/.exec(html) || [])[1] || null,
+    ver: linha('autor.sheet.ver'), rejeitar: linha('autor.sheet.rejeitar'),
+    tocarRejeitar: () => { ouvintes.autorRejeitar && ouvintes.autorRejeitar({}); return recebidos.at(-1); },
+  };
+}
+
+test('R6-2-03: a folha aberta NO card em aprovação conta o próprio card — "Há 2", com o "Ver/Rejeitar os 2"', () => {
+  const uf1 = pedido(1), u2 = pedido(2, 5), u3 = pedido(3);
+  const f = montarFolhaComAndamento({ fila: [uf1, u2, u3], naTela: uf1, emAndamento: ['v1|u1'] });
+  assert.equal(f.frase, '2', `a folha disse "${f.frase === 'um' ? 'Este é o único dela na fila agora' : f.frase}" com o u3 do autor na fila`);
+  assert.equal(f.ver, 2, 'o "Ver os N" sumiu (ou contou outro número) com a aprovação do card no ar');
+  assert.equal(f.rejeitar, 2);
+  assert.deepEqual(f.tocarRejeitar(), ['v1|u1', 'v3|u3'], 'a folha não entrega ao toque o que ela contou');
+  // CONTROLE: sem nada em andamento, a mesma folha (o instrumento não inventa diferença).
+  const c = montarFolhaComAndamento({ fila: [uf1, u2, u3], naTela: uf1 });
+  assert.deepEqual([c.frase, c.ver, c.rejeitar], ['2', 2, 2]);
+});
+
+test('R6-2-03: e o LOTE segue sem o que está em andamento — o card da aprovação no ar não sai rejeitado', () => {
+  const m = montarFolhaDoAutor({ emAndamento: ['v1|u1'] });     // X1 (o card da tela) com a aprovação no ar
+  const contados = m.app.serieDoAutor(777, { naTela: m.X1 }).map(chave);
+  assert.deepEqual(contados, ['v1|u1', 'v2|u2'], 'PRÉ-CONDIÇÃO: a folha conta o card da tela');
+  m.app.rejeitarLoteDoAutor(m.X1, contados);
+  assert.deepEqual(m.agendadas, [['v2']], 'o lote levou o pedido cuja aprovação está no ar — duas decisões opostas');
+});
+
+test('R6-2-02: com a aprovação de OUTRO pedido do autor no ar, a frase conta os dele na fila e o "Ver/Rejeitar" conta a série', () => {
+  // A na tela; B (do autor) com a aprovação no ar; D (do autor); u3 de outro. O selo do A diz "Ver +1" (D).
+  const A = pedido(1), B = pedido(2), u3 = pedido(3, 5), D = pedido(4);
+  const f = montarFolhaComAndamento({ fila: [A, B, u3, D], naTela: A, emAndamento: ['v2|u2'] });
+  assert.equal(f.frase, '3', 'a frase deixou de contar os pedidos do autor que estão na fila');
+  assert.deepEqual([f.ver, f.rejeitar], [2, 2], 'o "Ver/Rejeitar os N" contou o pedido cuja aprovação está no ar');
+  assert.deepEqual(f.tocarRejeitar(), ['v1|u1', 'v4|u4']);
+  // Os dois sentidos: com UM só do autor decidível (o da tela) e outro em aprovação,
+  // a frase não diz "o único" (há outro ali), e não há lote a oferecer.
+  const so = montarFolhaComAndamento({ fila: [A, B, u3], naTela: A, emAndamento: ['v2|u2'] });
+  assert.equal(so.frase, '2', `a folha disse "o único dela" com outro pedido do autor na fila`);
+  assert.deepEqual([so.ver, so.rejeitar], [null, null], 'ofereceu o lote de UM pedido (o que o card já faz)');
+  // CONTROLE: a aprovação pousou (B saiu da fila) — "o único", sem lote.
+  const c = montarFolhaComAndamento({ fila: [A, u3], naTela: A });
+  assert.deepEqual([c.frase, c.ver, c.rejeitar], ['um', null, null]);
 });
