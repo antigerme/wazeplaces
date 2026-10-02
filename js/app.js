@@ -3798,11 +3798,25 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
     });
 }
 
-function populateCountrySelect() {
+// A lista de países que o seletor MOSTRA, pela MESMA régua na abertura dos
+// Filtros (a lista da região aplicada, `AppState.countries`) e na troca de
+// região (`aoTrocarRegiaoNoModal`, com a lista da região escolhida). A troca
+// punha a lista INTEIRA, inclusive ao voltar pra região aplicada: os Filtros
+// mostravam duas listas pro mesmo servidor, e na volta dava pra aplicar um país
+// que a pessoa não edita — fila vazia, e a reabertura mostrava OUTRO país no
+// lugar do aplicado, que o "Aplicar" seguinte gravava calado (auditoria da
+// rodada 6, R66-4). Os editáveis do perfil são de UM servidor (ver
+// `paisDoPerfil`) e só cruzam a lista dele: nas outras regiões a peneira não
+// acha nenhum, e a lista vai inteira, sem a dica.
+//
+// Devolve se o seletor ficou no país APLICADO (a troca que volta pra região
+// aplicada repõe a área com ele).
+function populateCountrySelect(lista = AppState.countries, regiao = API.getRegion()) {
     const select = document.getElementById('filterCountry');
     const hint = document.getElementById('filterCountryHint');
     const editable = (AppState.profile && AppState.profile.editableCountryIDs) || [];
-    let countries = AppState.countries;
+    const todos = lista || [];
+    let countries = todos;
 
     // A dica ("só os países que você pode editar") diz o que ESTA lista é, e
     // por isso é decidida a cada lista: só se ACENDIA, e seguia na tela com a
@@ -3810,10 +3824,25 @@ function populateCountrySelect() {
     // editáveis aqui (auditoria de 2026-09-26).
     let filtrou = false;
     if (editable.length > 0) {
-        const filtered = countries.filter(c => editable.includes(c.id));
+        const filtered = todos.filter(c => editable.includes(c.id));
         if (filtered.length > 0) {
             countries = filtered;
             filtrou = true;
+        }
+    }
+    // O país APLICADO que a peneira tirou (escolhido antes de o perfil chegar,
+    // ou um perfil que perdeu o país) entra como opção: o seletor nunca mostra
+    // outro país como se fosse o aplicado, e o "Aplicar" não o troca calado
+    // (R66-4). Com ele a lista deixa de ser "só os que você pode editar", e a
+    // dica não diz isso.
+    const current = API.getCountry();
+    const ehOAplicado = (c) => String(c.id) === String(current);
+    const naRegiaoAplicada = regiao === API.getRegion();
+    if (naRegiaoAplicada && filtrou && !countries.some(ehOAplicado)) {
+        const aplicado = todos.find(ehOAplicado);
+        if (aplicado) {
+            countries = [...countries, aplicado];
+            filtrou = false;
         }
     }
     hint.classList.toggle('hidden', !filtrou);
@@ -3822,16 +3851,18 @@ function populateCountrySelect() {
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
-    const current = API.getCountry();
-    if (countries.some(c => c.id === current)) {
+    if (naRegiaoAplicada && countries.some(ehOAplicado)) {
         select.value = current;
-    } else if (countries.length > 0) {
+        return true;
+    }
+    if (countries.length > 0) {
         // Só ajusta o select visualmente; a persistência do país acontece no
         // Aplicar (antes, abrir o modal já trocava o país mesmo cancelando).
         select.value = countries[0].id;
         // O país mostrado não é o aplicado: a área dele também não vale (F7).
         aoMudarPaisNaTela();
     }
+    return false;
 }
 
 // Ordena nomes na colação do idioma ATUAL. Fica no cliente porque é o único
@@ -3910,8 +3941,10 @@ async function loadStatesIntoSelect(countryId, regiao) {
 
 // Trocar a REGIÃO traz os países DELA. Antes o seletor seguia com os da região
 // anterior, e o "Aplicar" gravava, por exemplo, NA com o Brasil — uma fila vazia
-// sem explicação. Os países editáveis do perfil são POR SERVIDOR (ver
-// `paisDoPerfil`), então aqui vai a lista inteira da região nova.
+// sem explicação. A lista passa pela MESMA peneira da abertura
+// (`populateCountrySelect`): os editáveis do perfil são POR SERVIDOR (ver
+// `paisDoPerfil`), então numa região que não é a do perfil a lista vai inteira,
+// e a volta pra ela mostra o que a abertura mostra (R66-4).
 //
 // E o "Aplicar" ESPERA a lista chegar: com ela carregando, o seletor de país
 // dizia "Carregando…" e o "Aplicar" gravava a região nova com o país da ANTIGA —
@@ -3961,25 +3994,19 @@ async function aoTrocarRegiaoNoModal(e) {
         await popularPaisEstado();
         return;
     }
-    sel.innerHTML = ordenarPorNome(r.countries || []).map((c) =>
-        `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
     // De volta à região APLICADA (trocou e voltou), o lugar aplicado volta
     // inteiro: o país — o estado vem com ele, que o `loadStatesIntoSelect` repõe
     // no país aplicado — e a área. Voltava o 1º da lista: aplicado `na/235`, ida
     // à ROW e volta, e o "Aplicar" gravava `na/40`, o Canadá (auditoria de
-    // 2026-09-29, achado 12).
-    const aplicado = String(API.getCountry());
-    if (regiao === API.getRegion() && (r.countries || []).some((c) => String(c.id) === aplicado)) {
-        sel.value = aplicado;
+    // 2026-09-29, achado 12). Outra região é outro país: a área gerenciada que o
+    // seletor mostrava era do país de antes, e o `populateCountrySelect` a tira
+    // (ver `aoMudarPaisNaTela`).
+    if (populateCountrySelect(r.countries || [], regiao)) {
         const area = $('filterManagedArea');
         if (area) {
             area.value = AppState.filters.managedAreaId || '';
             if (area.selectedIndex < 0) area.value = '';
         }
-    } else {
-        // Outra região é outro país: a área gerenciada que o seletor mostrava
-        // era do país de antes (ver `aoMudarPaisNaTela`).
-        aoMudarPaisNaTela();
     }
     await loadStatesIntoSelect(parseInt(sel.value, 10), regiao);
 }

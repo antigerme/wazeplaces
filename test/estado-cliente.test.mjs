@@ -416,9 +416,11 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
   };
   const els = { filterCountry: el(), filterCountryHint: el(), filterRegion: el({ value: 'row' }), filterMyArea: el({ checked: false }) };
   const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
+  // A troca de região passa pela MESMA função (R66-4, test/filtros-aplicar): ela
+  // sabe a região aplicada e tira a área do país que deixou de ser mostrado.
   const { populateCountrySelect } = montar(['populateCountrySelect'], {
-    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30 },
-    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x),
+    document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30, getRegion: () => 'row' },
+    ordenarPorNome: (l) => l, escapeHtml: (x) => String(x), aoMudarPaisNaTela: () => {},
   }, ['populateCountrySelect']);
   const dica = () => !els.filterCountryHint.classList.contains('hidden');
 
