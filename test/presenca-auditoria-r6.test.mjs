@@ -387,6 +387,99 @@ test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma f
   assert.equal(presencaWme.desligarPendente, false);
 });
 
+// O 401 do desligar com a sessão VIVA (o caso do R5-5-8): cada repetição — uma
+// por minuto, o teto — conferia a sessão de novo, e cada conferência era uma
+// sonda do perfil e um "Sua sessão continua válida" na cara de quem tria. Com a
+// sessão confirmada viva DEPOIS do 401 que a conferiu, a repetição não confere
+// mais (o critério do `u401` da fila de saída). Aqui o `handleUnauthorized` é o
+// DE VERDADE, fatiado, com a sonda de mentira (`API.getProfile`).
+function montarDesligar401({ sonda }) {
+  const relogio = { agora: T };
+  const pedidos = [], toasts = [], quedas = [], fatos = [];
+  const sondas = { n: 0 };
+  const sessao = { token: 'tok-A' };
+  const AppState = { authenticated: true, preferences: { presenca: false }, profile: { id: Number(EU) } };
+  const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligar401Em: null };
+  const deps = {
+    AppState, presencaWme, Date: { now: () => relogio.agora },
+    PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+    preferenciasCarregadas: false, localStorage: { setItem() {} }, PREFERENCES_KEY: 'p',
+    safeLS: { get: () => null }, CONTA_KEY: 'c',
+    dfato: (k, o) => fatos.push([k, o]), dlog: () => {}, dlogCapturarAuto: () => {},
+    VERIFICA_SESSAO_MS: 0, setTimeout,
+    API: {
+      getSession: () => sessao.token,
+      // O Waze da presença recusa o "invisível" com 401, com a sessão viva.
+      presencaWaze: async (c) => { pedidos.push(c); return { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 }; },
+      // A sonda leva o seu tempo: a confirmação é DEPOIS do 401.
+      getProfile: async () => { sondas.n++; relogio.agora += 1500; return sonda; },
+    },
+    // As variáveis de módulo que a conferência e a prova de vida usam.
+    verificandoSessao: false, conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 }, epocaDaSessao: 0,
+    derrubarSessao: (k) => quedas.push(k), showAccessDenied: () => {}, showAuthScreen: () => {},
+    definirPerfil: () => true, completarPerfilChegado: () => {},
+    showToast: (k) => toasts.push(k), t: (k) => k,
+    rebuscarDepoisDeFalha: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['marcaDaSessao', 'savePreferences', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'handleUnauthorized',
+    'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
+    'presencaWmeRefazerDesligar'], deps);
+  const assentar = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0)); };
+  return {
+    h, pedidos, toasts, quedas, presencaWme, sessao, assentar,
+    sondas: () => sondas.n,
+    passar: (ms) => { relogio.agora += ms; },
+    linhas: () => fatos.filter(([k]) => k === 'presencaWme.visivel'),
+  };
+}
+
+test('R6-5-3 (sobra) com a sessão CONFIRMADA viva depois do 401, a repetição do desligar não confere de novo — nada de sonda e "Sua sessão continua válida" a cada minuto', async () => {
+  const m = montarDesligar401({ sonda: { success: true, profile: { id: Number(EU) } } });
+  m.h.presencaWmeDesligar();                                // o gesto: 401
+  await m.assentar();
+  assert.equal(m.sondas(), 1, 'CONTROLE: o PRIMEIRO 401 tem que conferir a sessão');
+  assert.deepEqual(m.toasts, ['toast.sessionKeptAlive']);
+  // Cinco minutos de triagem: uma resposta da nossa API a cada 10 s (a prova de rede).
+  for (let s = 10; s <= 300; s += 10) { m.passar(10_000); m.h.presencaWmeRefazerDesligar(); await m.assentar(); }
+  assert.ok(m.pedidos.length >= 5 && m.pedidos.length <= 6, `CONTROLE: o teto de um por minuto mudou (${m.pedidos.length} pedidos)`);
+  assert.equal(m.sondas(), 1, `DEFEITO: a repetição do desligar conferiu a sessão de novo (${m.sondas()} sondas em 5 min)`);
+  assert.deepEqual(m.toasts, ['toast.sessionKeptAlive'], 'um "Sua sessão continua válida" a cada minuto, na cara de quem tria');
+  assert.equal(m.presencaWme.desligarPendente, true, 'o "invisível" deixou de ficar pendente');
+  assert.equal(m.linhas().length, 1, 'o diário não anotou pelo limitador (o gesto e mais nada em 5 min)');
+  // Um gesto NOVO é uma série nova: o 401 dele confere de novo.
+  m.passar(1000);
+  m.h.presencaWmeDesligar();
+  await m.assentar();
+  assert.equal(m.sondas(), 2, 'o 401 do gesto novo não conferiu a sessão');
+});
+
+test('R6-5-3 (sobra) CONTROLE: sem prova de vida a repetição confere de novo, a sessão morta de verdade cai, e numa sessão NOVA o 401 confere', async () => {
+  // (a) A sonda não deu pra saber (5xx): não é prova de vida — a repetição confere.
+  const a = montarDesligar401({ sonda: { success: false, errorCategory: 'transient', httpCode: 502 } });
+  a.h.presencaWmeDesligar();
+  await a.assentar();
+  a.passar(61_000);
+  a.h.presencaWmeRefazerDesligar();
+  await a.assentar();
+  assert.equal(a.pedidos.length, 2, 'CONTROLE: a repetição tem que ter saído');
+  assert.equal(a.sondas(), 2, 'sem a sessão confirmada viva, a repetição deixou de conferir');
+  // (b) A sessão morta de verdade: a sonda diz "não autoriza", e ela cai.
+  const b = montarDesligar401({ sonda: { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' } });
+  b.h.presencaWmeDesligar();
+  await b.assentar();
+  assert.deepEqual(b.quedas, ['srv.err.sessionExpired'], 'a sessão morta de verdade não caiu');
+  // (c) Confirmada viva na sessão A; a renovação traz OUTRA sessão: o 401 dela confere.
+  const c = montarDesligar401({ sonda: { success: true, profile: { id: Number(EU) } } });
+  c.h.presencaWmeDesligar();
+  await c.assentar();
+  c.sessao.token = 'tok-novo';
+  c.passar(1000);
+  c.h.presencaWmeRefazerDesligar();
+  await c.assentar();
+  assert.equal(c.pedidos.length, 2, 'CONTROLE: numa sessão nova o pendente sai já');
+  assert.equal(c.sondas(), 2, 'a prova de vida da sessão ANTERIOR dispensou a conferência do 401 da nova');
+});
+
 // ── R6-5-4: a folha da presença despacha a janela do Desfazer ────────────────
 
 test('R6-5-4 abrir a lista (a pílula) e abrir a conversa DESPACHAM a janela do Desfazer — o banner não fica por cima da folha', () => {

@@ -18258,6 +18258,11 @@ const presencaWme = {
     desligarFalhas: 0,
     desligarFalhaAnotada: null,
     desligarFalhaAnotadaEm: 0,
+    // QUANDO o desligar levou o 401 que mandou conferir a sessão: o critério do
+    // `u401` da fila de saída (ver `presencaWmeDesligar`). `null` = nenhum ainda
+    // nesta série — e tem de ser `null`, não 0: com 0, uma sessão confirmada
+    // viva por OUTRO motivo, antes, dispensaria a conferência do primeiro 401.
+    desligar401Em: null,
 };
 
 // Refazer o desligar que o WAZE recusou por estar fora (a resposta veio, com
@@ -18368,8 +18373,9 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
     // O resultado do GESTO entra no diário sempre; a repetição que falha, pelo
-    // limitador (ver `presencaWmeAnotarDesligar`).
-    if (!repeticao) presencaWme.desligarFalhaAnotada = null;
+    // limitador (ver `presencaWmeAnotarDesligar`). E o gesto é uma série NOVA:
+    // o 401 dele confere a sessão (ver o `desligar401Em`, abaixo).
+    if (!repeticao) { presencaWme.desligarFalhaAnotada = null; presencaWme.desligar401Em = null; }
     // Sem SESSÃO (a janela da renovação pela extensão, com os Filtros abertos),
     // o gesto era descartado: a pessoa seguia visível no WME (auditoria de
     // 2026-09-30, R5-5-8). Fica pendente, como o sem perfil logo abaixo, e o
@@ -18416,7 +18422,21 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
                 // novo, feito com este no ar, já gravou o dele.
                 presencaWmeEsquecerGravado();
             }
-            if (e401 && typeof handleUnauthorized === 'function') handleUnauthorized();
+            // O 401 confere a sessão — menos quando ela foi CONFIRMADA viva
+            // depois do 401 que já a conferiu (`sessaoVivaDepoisDe`, o critério
+            // do `u401` da fila de saída): aí não é a sessão, é o "invisível"
+            // que o Waze recusa, e conferir de novo era uma sonda do perfil e um
+            // "Sua sessão continua válida" a cada minuto (o teto da repetição),
+            // na cara de quem tria. Ele segue pendente, com o teto, e o diário
+            // anota pelo limitador. A sonda que não confirmou nada (5xx, rede)
+            // não é prova, e numa sessão nova a marca é outra: o 401 dela
+            // confere de novo — a sessão morta de verdade segue caindo.
+            const vivaDepois = typeof sessaoVivaDepoisDe === 'function'
+                && sessaoVivaDepoisDe(presencaWme.desligar401Em) === true;
+            if (e401 && !vivaDepois) {
+                presencaWme.desligar401Em = Date.now();
+                if (typeof handleUnauthorized === 'function') handleUnauthorized();
+            }
             presencaWmeAnotarDesligar(r);
         })
         .catch(() => {});
@@ -18513,6 +18533,7 @@ function presencaWmeReligar() {
 function presencaWmeZerar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
+    presencaWme.desligar401Em = null;
     if (AppState.preferences) delete AppState.preferences.presencaWmeDesligar;
     presencaWme.desligarFalhas = 0;
     presencaWme.desligarFalhaAnotada = null;
