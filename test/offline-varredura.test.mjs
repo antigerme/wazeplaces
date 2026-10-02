@@ -25,6 +25,8 @@ function fatiar(nome) {
   throw new Error('não fechou');
 }
 const constante = (nome) => Number(new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM)[1]);
+// A chave de um pedido, a do app (a gravação da fila confere com ela se é a mesma fila).
+const chaveDoPedido = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
 
 // Roda a varredura de VERDADE contra downloads de mentira. `baixar(u)` diz o que
 // cada URL devolve (true | false | 'definitivo'); conta as tentativas por URL.
@@ -203,8 +205,9 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     filaDeOnde: lugarDaFila, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // E o DONO (test/costura-sessao, K6).
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
-    // O carimbo da fila que está na base (a variável do módulo).
-    offlineFilaGravadaEm: null,
+    // O carimbo da fila que está na base, e os pedidos dela (as variáveis do
+    // módulo), e a cobertura (R6-4-2: a mesma fila regravada mantém o carimbo).
+    offlineFilaGravadaEm: null, offlineFilaGravadaChaves: null, offlineFilaPreparada: null, chaveDoPedido,
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -416,10 +419,11 @@ function reabrir({ guardada, agora }) {
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
     updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push('card'),
     // O DONO da fila guardada (test/costura-sessao, K6): a mesma conta.
-    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' }, chaveDoPedido,
   };
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null;
+  const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
+      offlineFilaGravadaChaves = null;
     ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineRecuperarJanela')}\n${fatiar('offlineTentarAbrirSemRede')}
     return { abrir: offlineTentarAbrirSemRede, onde: () => filaDeOnde };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, log };
@@ -673,10 +677,10 @@ function aparelhoO8() {
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
       'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'resetQueue',
-      'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede'];
+      'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
-        offlineFilaGravadaEm = null, offlineFilaPreparada = null,
+        offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,
         filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
@@ -938,7 +942,7 @@ function aparelhoO1() {
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
-        offlineFilaGravadaEm = null, offlineFilaPreparada = null,
+        offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,
         abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false, buscaSemResposta = false;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
@@ -1164,8 +1168,12 @@ test('R5-4-6: sem sinal, a preparação COMPLETA vale enquanto a foto vale — e
 test('R5-4-6: CONTROLE — sem preparação completa (nunca encheu, ou PARCIAL) a linha segue dizendo que o mapa e as fotos chegam', () => {
   const J = 1492385;
   assert.match(linhaSemSinal({ servida: null, agora: J }), /prefs\.offline\.esperaB/, 'sem preparação nenhuma a linha mudou');
-  assert.match(linhaSemSinal({ servida: J, resultado: 'parcial', agora: J }), /prefs\.offline\.esperaB/,
-    'a preparação PARCIAL passou a dizer que tudo está no aparelho');
+  // A preparação PARCIAL de uma fila que a completa de antes NÃO cobriu (ela
+  // gravou a fila com um pedido novo: outro carimbo). Este controle tinha a fila
+  // COBERTA (`preparada === gravada`) com o resultado "parcial" — que é o caso da
+  // renovação da MESMA fila cortada no meio, o defeito do R6-4-2 (mais abaixo).
+  assert.match(linhaSemSinal({ servida: J, resultado: 'parcial', agora: J, preparada: 7, gravada: 8 }), /prefs\.offline\.esperaB/,
+    'a preparação PARCIAL de uma fila não coberta passou a dizer que tudo está no aparelho');
   // E COM rede nada muda: a janela virada é "ainda não preparado" até a varredura passar.
   assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J + 1 }), /prefs\.offline\.pendenteA/);
   assert.match(linhaSemSinal({ onLine: true, servida: J, agora: J }), /prefs\.offline\.prontoB/);
@@ -1242,11 +1250,12 @@ function aparelhoDaLinha() {
     };
     const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
-      'atualizarLinhaDoOffline', 'offlineTalvezVarrer', 'offlineMarcarGesto'];
+      'atualizarLinhaDoOffline', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,
         offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
+        offlineFilaGravadaChaves = null,
         offlineFilaVarrida = null;
       ${nomes.map(fatiar).join('\n')}
       return { varrer: offlineVarrer, gravarFila: offlineGravarFila, abrirSemRede: offlineTentarAbrirSemRede,
@@ -1400,6 +1409,62 @@ test('cobertura: a abertura COM rede traz a janela e a cobertura juntas — no l
   assert.match(p2.linha(), /prefs\.offline\.prontoB/, 'no lie-fi, a fila coberta abriu dizendo que não está preparada');
 });
 
+// ── R6-4-2: a RENOVAÇÃO da mesma fila (auditoria de 2026-10-01) ───────────────
+// 20 min depois de tudo pronto, a varredura renova a MESMA fila (as fotos com o
+// sufixo novo), e grava a fila de novo no começo — com carimbo novo, o que
+// quebrava a cobertura. O sinal caindo no meio (o "sai de casa" que o próprio
+// código cita) deixava "parcial", e o app fechado no meio deixava a base com a
+// cobertura velha: nos dois, sem sinal, a linha voltava a dizer "O mapa e as
+// fotos chegam quando houver rede" — com o mapa da fila inteira no aparelho e
+// as fotos da janela de antes valendo (medido no navegador, t4: `corte` e `fecha`).
+async function renovacaoNaJanelaSeguinte({ cortar }) {
+  const { ap, p1 } = await filaAPronta();
+  const t0 = ap.base.get('fila').t;
+  ap.relogio.agora += 1200000;                     // J+1
+  p1.voltar();
+  if (cortar) p1.rede.ok = false; else p1.rede.segura = true;
+  p1.gatilho();                                    // a prova de rede, o `online`, as Preferências…
+  await assentarBase();
+  assert.equal(p1.rede.varreduras, 2, 'PRÉ-CONDIÇÃO: a renovação não começou');
+  return { ap, p1, t0 };
+}
+
+test('R6-4-2: a renovação da MESMA fila cortada no meio — sem sinal, a linha segue com o que a preparação completa guardou', async () => {
+  const { ap, p1 } = await renovacaoNaJanelaSeguinte({ cortar: true });
+  assert.equal(p1.estado().resultado, 'parcial', 'PRÉ-CONDIÇÃO: a renovação cortada não ficou parcial');
+  assert.equal(p1.estado().janela, 1492385, 'PRÉ-CONDIÇÃO: a janela servida mudou (o cenário é a renovação que NÃO terminou)');
+  p1.navigator.onLine = false;
+  const l = p1.linha();
+  assert.match(l, /prefs\.offline\.prontoSemRedeB/,
+    `sem sinal, a linha diz que o mapa e as fotos ainda vão chegar — com o mapa e as fotos da janela de antes no aparelho: ${l}`);
+  const p2 = await reabrirSemRede(ap);
+  const r = p2.linha();
+  assert.match(r, /prefs\.offline\.prontoSemRedeB/, `reaberta sem rede depois da renovação cortada: ${r}`);
+});
+
+test('R6-4-2: o app FECHADO no meio da renovação — reaberto sem rede, a linha segue com o que a preparação completa guardou', async () => {
+  const { ap, p1, t0 } = await renovacaoNaJanelaSeguinte({ cortar: false });
+  assert.equal(p1.estado().varrendo, true, 'PRÉ-CONDIÇÃO: a renovação não está no ar (o app fecha no meio dela)');
+  assert.equal(ap.base.get('fila').t, t0, 'a renovação regravou a MESMA fila com outro carimbo — a cobertura da base ficou velha');
+  const p2 = await reabrirSemRede(ap);
+  const r = p2.linha();
+  assert.match(r, /prefs\.offline\.prontoSemRedeB/, `reaberta sem rede depois de fechar no meio da renovação: ${r}`);
+});
+
+test('R6-4-2: CONTROLE — a renovação com um pedido NOVO, cortada no meio: sem sinal, a linha segue dizendo que o mapa e as fotos chegam', async () => {
+  const { ap, p1 } = await filaAPronta();
+  ap.relogio.agora += 1200000;
+  p1.voltar();
+  p1.rede.ok = false;
+  await p1.buscar([ap.NOVO]);                      // a busca trouxe um pedido, e a preparação dele cai
+  await assentarBase();
+  assert.equal(p1.estado().resultado, 'parcial', 'PRÉ-CONDIÇÃO');
+  p1.navigator.onLine = false;
+  assert.match(p1.linha(), /prefs\.offline\.esperaB/, 'o pedido novo, sem nada no aparelho, entrou no "Pronto"');
+  const p2 = await reabrirSemRede(ap);
+  assert.match(p2.linha(), /prefs\.offline\.esperaB/);
+});
+
 // ── A fila NÃO coberta volta pro GATILHO (auditoria de 2026-09-30) ───────────
 // Com rede, a fila guardada que a preparação não cobriu esperava a janela virar:
 // a busca a gravava com a pessoa parada (ou durante a varredura anterior), a
@@ -1487,18 +1552,35 @@ test('gatilho: CONTROLE — a fila já coberta não varre de novo, nem na mesma 
   assert.deepEqual(p2.rede.baixados, []);
 });
 
-test('gatilho: CONTROLE — a MESMA fila regravada (outro carimbo) é varrida sem baixar nada, e a cobertura é gravada', async () => {
+// Este controle afirmava o contrário — a MESMA fila regravada ganhava outro
+// carimbo e deixava de estar coberta até uma varredura passar. É o mecanismo do
+// R6-4-2: a renovação de cada janela regrava a mesma fila no começo, e cortada no
+// meio (ou com o app fechado no meio) a linha sem sinal negava o que estava no
+// aparelho. Hoje a mesma fila (ou parte dela) mantém o carimbo; pedido NOVO não.
+test('gatilho: CONTROLE — a MESMA fila regravada mantém o carimbo e segue coberta (R6-4-2); com um pedido a menos também; com um NOVO, não', async () => {
   const { ap, p1 } = await filaAPronta();
+  const t0 = ap.base.get('fila').t;
   assert.equal(await p1.gravarFila(), true);       // a mesma fila, gravada de novo
   await assentarBase();
-  assert.match(p1.linha(), /prefs\.offline\.pendenteA/, 'PRÉ-CONDIÇÃO: a fila regravada seguiu como coberta');
-  const antes = p1.rede.baixados.length, v = p1.rede.varreduras;
+  assert.equal(ap.base.get('fila').t, t0, 'a MESMA fila regravada ganhou outro carimbo — a cobertura da preparação completa se perde');
+  assert.match(p1.linha(), /prefs\.offline\.prontoB/, 'a mesma fila regravada deixou de estar coberta');
+  const v = p1.rede.varreduras;
   p1.gatilho();
   await assentarBase();
-  assert.equal(p1.rede.varreduras, v + 1, 'a fila regravada não foi varrida pelo gatilho');
-  assert.equal(p1.rede.baixados.length, antes, 'a fila regravada, sem nada faltando, baixou de novo');
-  assert.match(p1.linha(), /prefs\.offline\.prontoB/, 'a varredura sem nada a baixar não gravou a cobertura');
-  assert.equal(ap.base.get('janela').filaCoberta, ap.base.get('fila').t, 'a cobertura gravada não é a da fila guardada');
+  assert.equal(p1.rede.varreduras, v, 'a fila coberta, regravada igual, foi varrida de novo na mesma janela');
+  // Um pedido decidido sai: o que sobra é PARTE da fila coberta, e segue coberto.
+  p1.AppState.queue.shift();
+  assert.equal(await p1.gravarFila(), true);
+  await assentarBase();
+  assert.equal(ap.base.get('fila').places.length, 2, 'PRÉ-CONDIÇÃO: a fila gravada não é a que sobrou');
+  assert.equal(ap.base.get('fila').t, t0, 'a fila com um pedido A MENOS ganhou outro carimbo');
+  assert.match(p1.linha(), /prefs\.offline\.prontoB/);
+  // CONTROLE: com um pedido NOVO é carimbo novo — e não coberta, como sempre.
+  p1.AppState.queue.push(ap.NOVO);
+  assert.equal(await p1.gravarFila(), true);
+  await assentarBase();
+  assert.notEqual(ap.base.get('fila').t, t0, 'a fila com um pedido NOVO manteve o carimbo da coberta — diria "Pronto" sem o mapa dele');
+  assert.match(p1.linha(), /prefs\.offline\.pendenteA/);
 });
 
 test('gatilho: sem laço — a foto do pedido novo QUEBRADA (o resto andando) deixa a fila coberta (R5-4-1), e o gatilho não volta', async () => {

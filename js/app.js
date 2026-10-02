@@ -16206,6 +16206,10 @@ let offlineJanelaServida = null;
 // 49 ms depois da fila, e o tile do pedido novo fora do aparelho).
 let offlineFilaGravadaEm = null;
 let offlineFilaPreparada = null;
+// OS PEDIDOS da fila guardada agora (as chaves de `chaveDoPedido`), junto do `t`
+// dela. É com eles que a regravação da MESMA fila — a renovação de cada janela,
+// que grava a fila de novo no começo — mantém o carimbo (ver `offlineGravarFila`).
+let offlineFilaGravadaChaves = null;
 // E a fila guardada sobre a qual a última varredura TRABALHOU — a que ela gravou
 // no começo, ou a que já estava lá quando a gravação dela falhou. A fila não
 // coberta volta pro gatilho uma vez só (ver `offlinePrecisaVarrer`).
@@ -16385,11 +16389,27 @@ async function offlineGravarFila(desde) {
     const conta = contaAgora();
     const sessao = marcaDaSessao(API.getSession());
     let gravadaEm = null;
+    let chaves = null;
+    let mesmaFila = false;
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-            gravadaEm = Date.now();
+            // Os pedidos do que vai pra base, lidos junto do `put` (a fila pode ter
+            // mudado durante o `await`).
+            chaves = fila.map(chaveDoPedido);
+            // A MESMA fila — ou parte dela: o que foi decidido saiu — por cima da
+            // fila guardada que a última preparação COMPLETA cobriu MANTÉM o
+            // carimbo. A renovação de cada janela grava a fila de novo no começo,
+            // e o carimbo novo quebrava a cobertura: com o sinal caindo no meio
+            // dela (o "sai de casa"), ou o app fechado no meio, a linha sem sinal
+            // voltava a "O mapa e as fotos chegam quando houver rede" com os dois
+            // no aparelho (auditoria de 2026-10-01, R6-4-2). Pedido NOVO na fila
+            // é carimbo novo — e "não coberta", como sempre.
+            mesmaFila = offlineFilaGravadaEm !== null && offlineFilaGravadaEm === offlineFilaPreparada
+                && offlineFilaGravadaChaves !== null
+                && chaves.every((k) => k !== null && offlineFilaGravadaChaves.has(k));
+            gravadaEm = mesmaFila ? offlineFilaGravadaEm : Date.now();
             tx.objectStore(OFFLINE_STORE).put({
                 t: gravadaEm,
                 desde: valeDesde,
@@ -16412,10 +16432,11 @@ async function offlineGravarFila(desde) {
         db.close();
         // A fila que está na base AGORA (ver `offlineFilaPreparada`).
         offlineFilaGravadaEm = gravadaEm;
+        offlineFilaGravadaChaves = new Set(chaves);
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
         // valendo contra a fila velha, que é a que a reabertura vai ler.
         offlinePodarPousos(valeDesde);
-        dfato('offline.gravou', { n: fila.length });
+        dfato('offline.gravou', { n: fila.length, ...(mesmaFila ? { mesma: true } : {}) });
         return true;
     } catch (e) { return false; }
 }
@@ -16496,6 +16517,7 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
     offlineFilaGravadaEm = null;
+    offlineFilaGravadaChaves = null;
     offlineFilaPreparada = null;
     offlineFilaVarrida = null;
     // O que estava pronto descreve o cache que sai logo abaixo (e são endereços
@@ -16906,9 +16928,10 @@ function atualizarLinhaDoOffline(feitos, total) {
     if (!offlineLigado()) { el.textContent = t('prefs.offline.desc'); return; }
     const semRede = navigator.onLine === false;
     // A última preparação completa cobriu a fila que está guardada AGORA? Uma
-    // fila gravada depois dela — pela busca, ou pela varredura que ficou pela
-    // metade ou nem começou — tem pedido sem mapa e sem foto no aparelho (ver
-    // `offlineFilaPreparada`). Registro de versão anterior: não coberta.
+    // fila gravada depois dela com pedido NOVO — pela busca, ou pela varredura
+    // que ficou pela metade ou nem começou — tem pedido sem mapa e sem foto no
+    // aparelho (ver `offlineFilaPreparada`); a MESMA fila regravada mantém o
+    // carimbo (ver `offlineGravarFila`). Registro de versão anterior: não coberta.
     const cobreAFila = offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm;
     // Preparado AGORA: a última varredura completa é da janela atual.
     const preparado = offlineJanelaServida !== null && !offlinePrecisaVarrer() && cobreAFila;
@@ -16916,8 +16939,12 @@ function atualizarLinhaDoOffline(feitos, total) {
     // a janela de agora: o mapa não vence, e a foto vale 60 min do download —
     // baixada na janela J, até o fim da J+2. Pela janela de agora, 20 min depois
     // de tudo pronto a linha já dizia "o mapa e as fotos chegam quando houver
-    // rede" com os dois no aparelho (auditoria de 2026-09-30, R5-4-6).
-    const completa = offlineJanelaServida !== null && offlineUltimoResultado !== 'parcial' && cobreAFila;
+    // rede" com os dois no aparelho (auditoria de 2026-09-30, R5-4-6). E o
+    // resultado da ÚLTIMA TENTATIVA não entra: a renovação da mesma fila cortada
+    // no meio fica "parcial", e o que a preparação completa de antes guardou
+    // segue no aparelho — quem diz se ela vale pra esta fila é a cobertura
+    // (auditoria de 2026-10-01, R6-4-2).
+    const completa = offlineJanelaServida !== null && cobreAFila;
     const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
     if (semRede && fotosValem && AppState.queue.length) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
@@ -17109,8 +17136,10 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     AppState.queue = filtrada.places;
     filaDeOnde = { regiao: guardada.regiao, pais: String(guardada.pais), busca: guardada.busca };
     // A fila aberta é a GUARDADA: é dela que a linha das Preferências fala (ver
-    // `offlineFilaPreparada`).
+    // `offlineFilaPreparada`), e é contra os pedidos DELA — os gravados, não só os
+    // que entraram — que a próxima gravação confere se é a mesma fila.
     offlineFilaGravadaEm = Number.isFinite(guardada.t) ? guardada.t : null;
+    offlineFilaGravadaChaves = new Set(guardada.places.map(chaveDoPedido));
     // A fila guardada começa uma fila: o que ela traz já ENTROU, e a busca,
     // quando a rede voltar, relê do topo sem repetir nada disso.
     pedidosQueEntraramNaFila.clear();
