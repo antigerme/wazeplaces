@@ -77,6 +77,10 @@ const anterioresDe = new Set();
 // e a hora em que cada perfil respondeu (a seção do "lida" que espera o perfil).
 const atrasoPerfil = new Map();   // id -> ms
 const perfilRespondido = new Map();   // id -> Date.now() da última resposta
+// O perfil SEGURADO até o teste soltar (a seção 9e): a espera do perfil por
+// SINAL, não por prazo — o que se mede tem que cair DENTRO dela, e com 2,5 s
+// de atraso o "Enviar" na espera chegou a cair depois de o perfil voltar.
+const perfilSegurado = new Map();   // id -> Promise
 const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
@@ -179,6 +183,7 @@ function responderApi(eu, rota, c) {
       profile: { id: Number(eu), userName: p.nome, rank: p.rank, isStaff: false, isAreaManager: true, isEditor: true,
         editableCountryIDs: [BRASIL], areas: [], managedAreas: [] } };
     const responder = () => { perfilRespondido.set(eu, Date.now()); return corpo; };
+    if (perfilSegurado.has(eu)) return perfilSegurado.get(eu).then(responder);
     return atrasoPerfil.get(eu) ? dormir(atrasoPerfil.get(eu)).then(responder) : responder();
   }
   if (rota === 'lista-paises') return { success: true, countries: [{ id: BRASIL, name: 'Brazil', abbr: 'BR' }] };
@@ -902,10 +907,12 @@ try {
   // `abrir` saía sem saber de quem era a sessão, e as MINHAS mensagens vinham
   // como "dela" (auditoria de 2026-09-30, R5-5-2). Ele espera o perfil e sai
   // com ele. O caminho de verdade: `derrubarSessao` → extensão →
-  // `showMainScreen` → o perfil (atrasado 2,5 s aqui) → `completarPerfilChegado`
-  // → a presença.
+  // `showMainScreen` → o perfil (SEGURADO aqui até as medições da espera
+  // terminarem) → `completarPerfilChegado` → a presença.
   console.log('\n9e. abrir a conversa na espera do perfil: o histórico espera, e as minhas seguem minhas');
-  atrasoPerfil.set(ana.id, 2500);
+  let soltarPerfil = () => {};
+  perfilSegurado.set(ana.id, new Promise((ok) => { soltarPerfil = ok; }));
+  const soltarOPerfil = () => { perfilSegurado.delete(ana.id); soltarPerfil(); };
   await ana.page.evaluate(() => { if (!document.getElementById('conversaModal').classList.contains('hidden')) closeModal('conversaModal'); });
   await dormir(400);
   await ana.page.evaluate(() => { Presenca.historico.delete('183164343'); derrubarSessao('srv.err.sessionExpired'); });
@@ -919,6 +926,23 @@ try {
     if (naEspera.perfil) anota('controle: o perfil já tinha voltado no toque — a medição não pegou a espera');
     else if (apiDe(ana, 'chat', 'abrir').length === abrirsAntes && naEspera.carregando) ok('na espera do perfil, abrir a conversa não manda o `abrir` — ela fica "Carregando"');
     else anota(`na espera do perfil, o \`abrir\` saiu sem saber de quem é a sessão: ${JSON.stringify({ abrirs: apiDe(ana, 'chat', 'abrir').length - abrirsAntes, ...naEspera })}`);
+    // O "Enviar" na espera não fica calado (auditoria de 2026-10-01, R6-5-5):
+    // a mensagem entra na conversa como "Não enviada.", com o "Tentar de novo",
+    // e nada sai — sairia pela sessão nova, que pode ser de outra conta. Antes
+    // o toque não fazia nada nem dizia nada, com o texto parado no campo.
+    const enviosNaEspera = apiDe(ana, 'chat', 'enviar').length;
+    await ana.page.fill('#conversaInput', 'pergunta feita na espera');
+    await ana.page.tap('#conversaEnviar');
+    const naEsperaEnvio = await ana.page.evaluate(() => ({ perfil: !!AppState.profile, campo: document.getElementById('conversaInput').value,
+      falhou: ((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent || '').trim(),
+      bolha: [...document.querySelectorAll('#conversaMsgs .conversa-bolha.minha')].some((b) => b.textContent.includes('pergunta feita na espera')) }));
+    // CONTROLE: o toque tem que ter caído DENTRO da janela (sem o perfil).
+    if (naEsperaEnvio.perfil) anota('controle: o perfil já tinha voltado no "Enviar" — a medição não pegou a espera');
+    else if (naEsperaEnvio.bolha && /^Não enviada\. Tentar de novo$/.test(naEsperaEnvio.falhou) && !naEsperaEnvio.campo
+      && apiDe(ana, 'chat', 'enviar').length === enviosNaEspera) {
+      ok('na espera do perfil, o "Enviar" não fica calado: a mensagem entra como "Não enviada.", com o "Tentar de novo" — e nada sai');
+    } else anota(`na espera do perfil, o "Enviar" ficou calado (ou saiu): ${JSON.stringify({ ...naEsperaEnvio, envios: apiDe(ana, 'chat', 'enviar').length - enviosNaEspera })}`);
+    soltarOPerfil();
     if (await esperar(ana, () => !!AppState.profile, 'o perfil não voltou')) {
       const perfilEm = perfilRespondido.get(ana.id);
       if (await esperar(ana, () => (Presenca.historico.get('183164343') || {}).carregada === true, 'o histórico não chegou depois do perfil')) {
@@ -933,10 +957,20 @@ try {
         });
         if (abriu.length === 1 && abriu[0].em >= perfilEm && lados.minha === 'minha' && lados.dela === 'dela') ok('com o perfil, o histórico sai (um pedido) e as minhas mensagens ficam do meu lado');
         else anota(`o histórico da espera saiu errado: ${JSON.stringify({ abrirs: abriu.length, antesDoPerfil: abriu.filter((x) => x.em < perfilEm).length, lados })}`);
+        // Com o perfil de volta, o "Tentar de novo" manda a mensagem da espera —
+        // com o MESMO id que ela ganhou ao entrar na conversa.
+        const idNaEspera = await ana.page.evaluate(() => ((Presenca.historico.get('183164343') || { msgs: [] }).msgs
+          .find((m) => m.meu && m.estado === 'falhou' && /pergunta feita na espera/.test(m.texto)) || {}).id || null);
+        if (idNaEspera) await ana.page.tap('#conversaMsgs .conversa-reenviar');
+        for (let i = 0; i < 50 && apiDe(ana, 'chat', 'enviar').length === enviosNaEspera; i++) await dormir(100);
+        const saiuDaEspera = apiDe(ana, 'chat', 'enviar').slice(enviosNaEspera);
+        if (idNaEspera && saiuDaEspera.length === 1 && saiuDaEspera[0].c.id === idNaEspera && saiuDaEspera[0].c.texto === 'pergunta feita na espera') {
+          ok('com o perfil de volta, o "Tentar de novo" manda a mensagem da espera (o mesmo id)');
+        } else anota(`a mensagem da espera não saiu pelo "Tentar de novo": ${JSON.stringify({ idNaEspera, saiu: saiuDaEspera.map((x) => [x.c.id, x.c.texto]) })}`);
       }
     }
   }
-  atrasoPerfil.delete(ana.id);
+  soltarOPerfil();
 
   // ── 10. SAIR apaga o chat do aparelho e fecha o tempo real ──────────────────
   console.log('\n10. sair');

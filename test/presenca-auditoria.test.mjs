@@ -379,7 +379,10 @@ test('P6 a sessão acaba com a conversa aberta: conversa, lista e folha do pedid
   assert.deepEqual(e.chamadas.closeModal, [], 'fechou modal que não estava aberto');
 });
 
-test('P6 sem o id do perfil o envio não sai — e o que se digitou FICA no campo', async () => {
+// O que se digitou sem o perfil ficava no campo, e o "Enviar" não dizia nada
+// (auditoria de 2026-10-01, R6-5-5): hoje ele entra na conversa como "Não
+// enviada.", com o "Tentar de novo" — e continua não SAINDO sem o perfil.
+test('P6 sem o id do perfil o envio não sai — e o que se digitou não some: vira "Não enviada.", com o "Tentar de novo"', async () => {
   const c = novoCliente({ api: { chat: () => ({ success: true }) } });
   c.P.presencaMontar();
   c.P.Presenca.aberta = CAF;
@@ -389,13 +392,19 @@ test('P6 sem o id do perfil o envio não sai — e o que se digitou FICA no camp
   c.$('conversaInput').value = 'minha resposta';
   c.$('conversaForm').disparar('submit');
   await tick();
-  assert.equal(c.$('conversaInput').value, 'minha resposta', 'o que se digitou sumiu calado');
-  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0);
-  // CONTROLE: com o perfil, sai e o campo limpa.
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0, 'saiu sem saber de quem é a sessão');
+  const msgs = c.P.Presenca.historico.get(CAF).msgs;
+  assert.deepEqual(msgs.map((m) => [m.texto, m.meu, m.estado]), [['minha resposta', true, 'falhou']], 'o que se digitou sumiu calado');
+  assert.match(c.$('conversaMsgs').innerHTML, /presenca\.recibo\.naoEnviadaErro[\s\S]*conversa-reenviar/, 'a tela não diz que ela não saiu');
+  // CONTROLE: com o perfil, o "Tentar de novo" a manda (o MESMO id) e o campo de um envio novo limpa.
   c.AppState.profile = { id: 12444348, userName: 'antigerme' };
+  c.P.presencaTentarDeNovo();
+  await tick();
+  assert.deepEqual(c.chamadas.chat.filter((x) => x.acao === 'enviar').map((x) => [x.texto, x.id]), [['minha resposta', msgs[0].id]]);
+  c.$('conversaInput').value = 'outra';
   c.$('conversaForm').disparar('submit');
   await tick();
-  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1);
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 2);
   assert.equal(c.$('conversaInput').value, '');
 });
 

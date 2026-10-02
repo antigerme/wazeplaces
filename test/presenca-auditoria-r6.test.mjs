@@ -457,3 +457,39 @@ test('R6-5-4 a decisão que CHEGA com a folha da presença aberta sai na hora �
   }
 });
 
+// ── R6-5-5: a conversa na espera do perfil tem saída ─────────────────────────
+
+test('R6-5-5 na espera do perfil, abrir a conversa, os dois "Tentar de novo" e o "Enviar" PEDEM o perfil — e o "Enviar" não fica calado', async () => {
+  const c = novoCliente({ agora: T });
+  c.P.presencaMontar();
+  c.AppState.profile = null;                                // a renovação: a sessão voltou, o perfil não
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.equal(c.chamadas.refazerPerfil, 1, 'abrir a conversa na espera não pediu o perfil');
+  assert.equal(c.chamadas.chat.length, 0, 'CONTROLE: na espera nada sai');
+  c.P.presencaCarregarConversa(CAF);                        // o "Tentar de novo" do histórico
+  assert.equal(c.chamadas.refazerPerfil, 2, 'o "Tentar de novo" do histórico não pediu o perfil');
+  c.$('conversaInput').value = 'oi na espera';
+  c.$('conversaForm').disparar('submit');
+  await tick();
+  assert.equal(c.chamadas.refazerPerfil, 3, 'o "Enviar" na espera não pediu o perfil');
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0, 'saiu sem saber de quem é a sessão');
+  assert.match(c.$('conversaMsgs').innerHTML, /oi na espera[\s\S]*presenca\.recibo\.naoEnviadaErro/,
+    'DEFEITO: o "Enviar" na espera não disse nada — a mensagem não está na conversa como "Não enviada."');
+  assert.deepEqual(c.chamadas.dfato.filter(([k]) => k === 'chat.envio').map(([, o]) => o.categoria), ['semPerfil'],
+    'a mensagem que nem saiu não foi pro diário');
+  c.P.presencaTentarDeNovo();                               // o "Tentar de novo" da mensagem
+  assert.equal(c.chamadas.refazerPerfil, 4, 'o "Tentar de novo" da mensagem não pediu o perfil');
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0);
+  // CONTROLE: com o perfil, nenhum desses gestos pede o perfil — e o "Tentar de novo" manda.
+  const d = novoCliente({ agora: T });
+  d.P.presencaMontar();
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  d.$('conversaInput').value = 'oi';
+  d.$('conversaForm').disparar('submit');
+  await tick();
+  d.P.presencaTentarDeNovo();
+  assert.equal(d.chamadas.refazerPerfil, 0, 'com o perfil na mão, um gesto pediu o perfil de novo');
+  assert.equal(d.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1);
+});

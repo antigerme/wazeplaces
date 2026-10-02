@@ -1343,6 +1343,17 @@ function presencaFolhaAberta() {
     });
 }
 
+// Sem o perfil (a renovação silenciosa cujo perfil falhou, a abertura sem
+// rede), a presença não pede nada — e o perfil só era pedido de novo pela
+// prova de rede de OUTRA ação: a conversa ficava em "Carregando a conversa…" e
+// o "Enviar" mudo, sem prazo, com a pessoa olhando pra ela (auditoria de
+// 2026-10-01, R6-5-5, medido: 75 s depois, nenhum pedido novo). O gesto NA
+// conversa — abrir, "Enviar", "Tentar de novo" — o pede, com o teto de um por
+// minuto do app (`refazerPerfilSeFaltar`): é gesto da pessoa, nunca relógio.
+function presencaPedirPerfil() {
+    if (typeof refazerPerfilSeFaltar === 'function') refazerPerfilSeFaltar();
+}
+
 function presencaAbrirConversa(id) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
@@ -1390,6 +1401,8 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // sem saber de quem era a sessão (auditoria de 2026-09-30, R5-5-2). Não
     // sai: fica "Carregando", e o perfil que chegar o pede
     // (`presencaSincronizar`). Como o "Enviar" e o "Tentar de novo" do envio.
+    // E quem chama aqui — abrir a conversa, o "Tentar de novo" do histórico, o
+    // "Ver mensagens anteriores" — é gesto: pede o perfil que falta (R6-5-5).
     const eu = presencaEu();
     if (!eu) {
         // Sem o histórico na tela, o que espera é a PRIMEIRA página: a antiga
@@ -1398,6 +1411,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (h.esperaPerfil.antes) h.antigas = 'carregando';
         else h.erro = false;
         presencaRenderConversa();
+        presencaPedirPerfil();
         return;
     }
     h.esperaPerfil = null;
@@ -1532,8 +1546,15 @@ function presencaEsquecerLista() {
 
 function presencaEnviar(legenda, card) {
     const id = Presenca.aberta;
+    if (!id) return;
+    // Sem o id do perfil (a renovação silenciosa da sessão, o perfil que falhou)
+    // a mensagem NÃO sai — sairia pela sessão nova, que pode ser de outra conta
+    // —, e o "Enviar" ficava calado: o texto no campo, o botão com cara de vivo
+    // e nada na tela (auditoria de 2026-10-01, R6-5-5). Ela entra na conversa
+    // como "Não enviada.", com o "Tentar de novo" — o MESMO estado do envio que
+    // falha, que é o que ela é —, e o "Tentar de novo" a manda quando o perfil
+    // tiver voltado (`presencaTentarDeNovo`). Quem pede o perfil é o `submit`.
     const eu = presencaEu();
-    if (!id || !eu) return;
     const h = Presenca.historico.get(id) || { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
     Presenca.historico.set(id, h);
     // A hora é a do SERVIDOR (o relógio daqui mais o `desvio`), até a resposta
@@ -1544,13 +1565,15 @@ function presencaEnviar(legenda, card) {
     const msg = {
         id: presencaUuid(), ts: Date.now() + Presenca.desvio, meu: true,
         texto: presencaTextoParaWme(legenda, card), card: card || null, legenda: card ? legenda : null,
-        estado: 'enviando', motivo: null,
+        estado: eu ? 'enviando' : 'falhou', motivo: eu ? null : 'erro',
     };
     h.msgs.push(msg);
     chatConhecer(id);
     presencaAtualizarPrevia(id, msg);
     presencaRenderConversa({ rolarAoFim: true });
-    presencaMandar(id, msg);
+    if (eu) presencaMandar(id, msg);
+    // No diário, como toda falha de envio (ver `presencaMandar`): esta nem saiu.
+    else presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
 }
 
 async function presencaMandar(com, msg) {
@@ -1603,8 +1626,11 @@ function presencaTentarDeNovo() {
     const h = id && Presenca.historico.get(id);
     // Sem o id do perfil (a sessão renovando), não sai — como o "Enviar" com o
     // campo cheio: sairia pela sessão NOVA, que pode ser de outra conta. A
-    // mensagem segue "Não enviada", com o botão, até o perfil chegar.
-    if (!h || !presencaEu()) return;
+    // mensagem segue "Não enviada", com o botão, até o perfil chegar — e o
+    // toque PEDE o perfil que falta (R6-5-5): era o único jeito de a conversa
+    // sair da espera sem a pessoa voltar pro card.
+    if (!h) return;
+    if (!presencaEu()) { presencaPedirPerfil(); return; }
     for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
 }
 
@@ -2196,9 +2222,12 @@ function presencaMontar() {
         // Com pedido preso, mandar SÓ o card é legítimo — perguntar é opcional.
         if ((!texto && !Presenca.anexo) || !Presenca.aberta) return;
         // Sem o id do perfil o envio não sai (a sessão acabou de cair, ou o
-        // perfil ainda não chegou), e o campo era apagado assim mesmo: o que se
-        // digitou sumia calado (auditoria de 2026-09-26). Fica no campo.
-        if (!presencaEu()) return;
+        // perfil ainda não chegou). O campo era apagado assim mesmo e o que se
+        // digitou sumia calado (auditoria de 2026-09-26); depois ficava no
+        // campo, e o "Enviar" não fazia nada nem dizia nada (R6-5-5). Agora a
+        // mensagem entra na conversa como "Não enviada.", com o "Tentar de
+        // novo" (ver `presencaEnviar`), e o toque pede o perfil que falta.
+        if (!presencaEu()) presencaPedirPerfil();
         const card = Presenca.anexo;
         campo.value = '';
         // Solta o anexo ANTES de mandar: redesenhar com a tirinha ainda presa
