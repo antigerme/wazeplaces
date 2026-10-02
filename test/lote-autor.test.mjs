@@ -830,6 +830,8 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
     marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
+    // O momento do gesto pro Histórico (R6-7-4, lote 10 do Histórico): um carimbo neutro.
+    carimboDoGesto: () => ({ dia: null, onde: null }),
     // O painel vazio (`showNoPlaces`).
     document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
@@ -840,7 +842,7 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;'
     + ' let tratouNestaFila = false; let recusaAutomaticaNestaFila = false; let puladosNoInicioDaFila = 0;\n'
-    + ['enviarLote', 'aplicarRecusaAutomatica', 'puladosNestaFila', 'showNoPlaces'].map(fatiar).join('\n')
+    + ['enviarLote', 'aplicarRecusaAutomatica', 'puladosNestaFila', 'filaTerminouLimpa', 'showNoPlaces'].map(fatiar).join('\n')
     + '\nreturn { aplicarRecusaAutomatica, showNoPlaces };')(...chaves.map((k) => deps[k]));
   const soltarTudo = async () => { for (let i = 0; i < 20 && portoes.length; i++) { portoes.shift()(); await new Promise((ok) => setTimeout(ok, 0)); } };
   return { app, AppState, textos, festa: () => classes.has('celebrate'), conquistas, soltarTudo };
