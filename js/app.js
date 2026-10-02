@@ -18103,7 +18103,8 @@ const presencaWme = {
     // O `visivel: false` do GESTO de desligar que não saiu por falta de rede: é
     // a MESMA chave do perfil do WME, e sem refazê-lo a pessoa que desligou o
     // interruptor seguia visível lá (auditoria de 2026-09-25). A próxima prova
-    // de rede o manda de novo.
+    // de rede o manda de novo. E ele fica GRAVADO no aparelho também, com a
+    // conta (ver `presencaWmeGravarPendente`).
     desligarPendente: false,
     // Quando o desligar saiu por último, pro teto da repetição (ver
     // `presencaWmeRefazerDesligar`). Zero = a repetição sai na próxima prova.
@@ -18111,6 +18112,11 @@ const presencaWme = {
     // A marca da SESSÃO desse último envio (`marcaDaSessao`): o teto é dela.
     // Numa sessão nova (a renovação depois de um 401), o pendente sai já.
     desligarSessao: null,
+    // O desligar que FALHA, no diário (ver `presencaWmeAnotarDesligar`): o
+    // total, e a última falha que foi pro diário e quando.
+    desligarFalhas: 0,
+    desligarFalhaAnotada: null,
+    desligarFalhaAnotadaEm: 0,
 };
 
 // Refazer o desligar que o WAZE recusou por estar fora (a resposta veio, com
@@ -18215,16 +18221,20 @@ function presencaWmeAoCarregarPerfil(visivel) {
 }
 
 // A pessoa desligou o "Ver quem está na fila": some do WME na hora. É a única
-// requisição própria da fase 2, e só acontece no GESTO.
-function presencaWmeDesligar() {
+// requisição própria da fase 2, e só acontece no GESTO. `repeticao`: quem chama
+// é o `presencaWmeRefazerDesligar`, refazendo o gesto que não chegou.
+function presencaWmeDesligar({ repeticao = false } = {}) {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
+    // O resultado do GESTO entra no diário sempre; a repetição que falha, pelo
+    // limitador (ver `presencaWmeAnotarDesligar`).
+    if (!repeticao) presencaWme.desligarFalhaAnotada = null;
     // Sem SESSÃO (a janela da renovação pela extensão, com os Filtros abertos),
     // o gesto era descartado: a pessoa seguia visível no WME (auditoria de
     // 2026-09-30, R5-5-8). Fica pendente, como o sem perfil logo abaixo, e o
     // perfil que chegar com a sessão nova o manda (`definirPerfil`).
     if (!API.getSession()) {
-        if (AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+        if (AppState.preferences.presenca === false) { presencaWme.desligarPendente = true; presencaWmeGravarPendente(); }
         return;
     }
     const id = AppState.profile && AppState.profile.id;
@@ -18234,7 +18244,7 @@ function presencaWmeDesligar() {
     // a pessoa seguia visível no WME (auditoria da costura, 2026-09-26, K5).
     // Fica pendente, e o perfil chegando o manda (`definirPerfil`).
     if (id === null || id === undefined) {
-        if (AppState.preferences.presenca === false) presencaWme.desligarPendente = true;
+        if (AppState.preferences.presenca === false) { presencaWme.desligarPendente = true; presencaWmeGravarPendente(); }
         return;
     }
     presencaWme.desligarEm = Date.now();
@@ -18257,37 +18267,115 @@ function presencaWmeDesligar() {
             if (!(r && r.success) && (!r || r.errorCategory === 'transient' || e401)
                 && AppState.preferences.presenca === false) {
                 presencaWme.desligarPendente = true;
+                presencaWmeGravarPendente();
                 if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
+            } else if (!presencaWme.desligarPendente) {
+                // Chegou (ou foi recusado de vez, ou religaram no meio): o
+                // gravado não vale mais. Só sem pendente NA MEMÓRIA: um desligar
+                // novo, feito com este no ar, já gravou o dele.
+                presencaWmeEsquecerGravado();
             }
             if (e401 && typeof handleUnauthorized === 'function') handleUnauthorized();
-            dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: !!(r && r.success),
-                ...(r && r.success ? {} : { categoria: (r && r.errorCategory) || 'sem resposta' }) });
+            presencaWmeAnotarDesligar(r);
         })
         .catch(() => {});
 }
 
+// O "invisível" pendente fica GRAVADO no aparelho, com a CONTA, nas
+// preferências (`presencaWmeDesligar: { conta, em }`). Só na memória, fechar o
+// app antes de ele sair — sem rede, na janela da renovação — o perdia: o
+// interruptor seguia desligado, o perfil dizia "visível" e nada saía, e a
+// pessoa seguia visível no WME contra o gesto dela (auditoria de 2026-10-01,
+// R6-5-2, MEDIDO: fechar e abrir → 0 `visivel: false`). Quem decide a
+// visibilidade é SÓ o interruptor do app, e o gesto dele tem de chegar ao WME.
+// Só a MESMA conta o manda (`presencaWmeRefazerDesligar`, com o perfil na mão);
+// sai no sucesso, no religar, na troca de conta e no "Sair"
+// (`presencaWmeZerar`, e o "Sair" repõe as preferências de fábrica).
+//
+// A conta é a do perfil vivo; sem ele (a renovação, o app aberto sem rede), a
+// última que o aparelho conheceu — o perfil que chegar confere, e outra conta
+// apaga o gravado na troca. Sem nenhuma, fica só na memória: não há a quem
+// conferir.
+function presencaWmeGravarPendente() {
+    let conta = AppState.profile && AppState.profile.id;
+    if (conta === null || conta === undefined || conta === '') {
+        try { const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); conta = c && c.id; } catch (e) { conta = null; }
+    }
+    if (conta === null || conta === undefined || conta === '') return;
+    conta = String(conta);
+    const g = AppState.preferences.presencaWmeDesligar;
+    if (g && g.conta === conta) return;   // já gravado: o `setItem` é síncrono, e cada repetição passaria aqui
+    AppState.preferences.presencaWmeDesligar = { conta, em: Date.now() };
+    savePreferences();
+}
+
+function presencaWmeEsquecerGravado() {
+    if (!AppState.preferences.presencaWmeDesligar) return;
+    delete AppState.preferences.presencaWmeDesligar;
+    savePreferences();
+}
+
+// O desligar no diário (R6-5-3). O GESTO entra sempre — com o resultado. A
+// repetição (`presencaWmeRefazerDesligar`, até uma por minuto com o Waze fora)
+// entra quando a falha MUDA de categoria e, a mesma, uma a cada 10 min: o
+// limitador da falha da carona (`presencaWmeAoResponder`). Sem ele, cada
+// repetição era uma linha, e 2 h de triagem com o Waze fora enchiam o anel
+// (120) só com elas, empurrando a queda da sessão e a da rede pra fora (MEDIDO:
+// 121 linhas em 2 h, contra 12 da carona). O total vai em `desligarFalhas`.
+function presencaWmeAnotarDesligar(r) {
+    if (r && r.success) {
+        dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: true });
+        return;
+    }
+    presencaWme.desligarFalhas = (presencaWme.desligarFalhas || 0) + 1;
+    const categoria = (r && r.errorCategory) || 'sem resposta';
+    const agora = Date.now();
+    if (presencaWme.desligarFalhaAnotada === categoria && agora - presencaWme.desligarFalhaAnotadaEm < 10 * 60000) return;
+    presencaWme.desligarFalhaAnotada = categoria;
+    presencaWme.desligarFalhaAnotadaEm = agora;
+    dfato('presencaWme.visivel', { desligou: true, via: 'interruptor', ok: false, categoria, total: presencaWme.desligarFalhas });
+}
+
 // A prova de rede refaz o desligar que não saiu (ver `desligarPendente`), com o
 // teto de um minuto pro Waze que responde fora (`PRESENCA_WME_DESLIGAR_REPETIR_MS`).
+// E retoma o que ficou GRAVADO (o app fechou antes de ele sair): com o perfil
+// da MESMA conta na mão — é o `definirPerfil` que chama isto quando ele chega.
 function presencaWmeRefazerDesligar() {
-    if (!presencaWme.desligarPendente || AppState.preferences.presenca !== false) return;
+    if (AppState.preferences.presenca !== false) return;
+    if (!presencaWme.desligarPendente) {
+        const g = AppState.preferences.presencaWmeDesligar;
+        const id = AppState.profile && AppState.profile.id;
+        if (!g || id === null || id === undefined || String(g.conta) !== String(id)) return;
+        presencaWme.desligarPendente = true;
+    }
     // O teto é da sessão que levou a recusa: numa sessão nova, sai já.
     if (Date.now() - presencaWme.desligarEm < PRESENCA_WME_DESLIGAR_REPETIR_MS
         && presencaWme.desligarSessao === marcaDaSessao(API.getSession())) return;
-    presencaWmeDesligar();
+    presencaWmeDesligar({ repeticao: true });
 }
 
 // Religou à mão: a próxima ação liga a visibilidade de carona, sem esperar o
-// freio (quem acabou de pedir pra aparecer não espera 30 s pra aparecer).
+// freio (quem acabou de pedir pra aparecer não espera 30 s pra aparecer). O
+// "invisível" gravado sai junto (quem chama grava as preferências logo depois).
 function presencaWmeReligar() {
     presencaWme.desligarPendente = false;
+    delete AppState.preferences.presencaWmeDesligar;
     presencaWme.ligarNaProxima = true;
     presencaWme.ultimaEm = 0;
     dfato('presencaWme.visivel', { religou: true, via: 'interruptor' });
 }
 
+// A troca de conta e o "Sair". O "invisível" gravado sai da MEMÓRIA aqui, e
+// quem chama grava: a troca (`esquecerEscolhasDaContaAnterior`, logo depois) e
+// o "Sair" (que já repôs as de fábrica) — o "Sair" de OUTRA aba não grava nada
+// no aparelho, e esta função não pode gravar por ele.
 function presencaWmeZerar() {
     presencaWme.ligarNaProxima = false;
     presencaWme.desligarPendente = false;
+    if (AppState.preferences) delete AppState.preferences.presencaWmeDesligar;
+    presencaWme.desligarFalhas = 0;
+    presencaWme.desligarFalhaAnotada = null;
+    presencaWme.desligarFalhaAnotadaEm = 0;
     presencaWme.desligarEm = 0;
     presencaWme.desligarSessao = null;
     presencaWme.ultimaEm = 0;
@@ -18315,6 +18403,10 @@ function presencaWmeDiag() {
         // interruptor ligado, `false` aqui vira "ligar na próxima ação".
         perfilVisivel: presencaWme.perfilVisivel,
         perfilHaS: presencaWme.perfilEm ? Math.round((Date.now() - presencaWme.perfilEm) / 1000) : null,
+        // O "invisível" do gesto de desligar que ainda não chegou ao WME, e
+        // quantas vezes ele falhou (o diário anota só a mudança).
+        desligarPendente: presencaWme.desligarPendente || !!AppState.preferences.presencaWmeDesligar,
+        desligarFalhas: presencaWme.desligarFalhas || 0,
     };
 }
 
@@ -19465,6 +19557,14 @@ function lerPreferenciasGuardadas() {
             if (Number.isFinite(parsed.presencaOffEm) && parsed.presencaOffEm > 0) {
                 AppState.preferences.presencaOffEm = parsed.presencaOffEm;
             }
+            // O "invisível" do gesto de desligar que ainda não chegou ao WME, e
+            // de QUAL conta (ver `presencaWmeGravarPendente`). Só com o
+            // interruptor desligado: ligado, ele não vale mais.
+            const pend = parsed.presencaWmeDesligar;
+            if (parsed.presenca === false && pend && typeof pend === 'object'
+                && /^\d{1,19}$/.test(String(pend.conta)) && Number.isFinite(pend.em)) {
+                AppState.preferences.presencaWmeDesligar = { conta: String(pend.conta), em: pend.em };
+            }
             // O `presencaWmeVisto` da fase 2 não é mais lido: sem carregar, o
             // próximo `savePreferences` já grava sem ele.
         }
@@ -19505,6 +19605,9 @@ function aplicarAnistiaDaPresenca() {
     if (decorrido < PRESENCA_ANISTIA_MS) return false;
     p.presenca = true;
     delete p.presencaOffEm;
+    // O "invisível" que ainda esperava ir pro WME era do desligar que a
+    // anistia acabou de desfazer (ver `presencaWmeGravarPendente`).
+    delete p.presencaWmeDesligar;
     return true;
 }
 

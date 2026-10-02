@@ -31,6 +31,25 @@ function montar(nome, escopo) {
 // A marca da sessão de verdade (o teto do desligar é da sessão: ver o R5-5-8).
 const marcaDaSessao = montar('marcaDaSessao', {});
 
+// O que o desligar chama desde a auditoria de 2026-10-01 — gravar e esquecer o
+// "invisível" pendente no aparelho (R6-5-2) e anotar o resultado no diário
+// (R6-5-3) —, as funções DE VERDADE, no mesmo escopo do teste. O armazenamento
+// é de mentira (`guardado`), e `gravacoes` conta os `savePreferences`.
+function comAjudantesDoDesligar(escopo) {
+  const guardado = escopo.guardado || new Map();
+  const e = {
+    savePreferences: () => { e.gravacoes = (e.gravacoes || 0) + 1; guardado.set('prefs', JSON.stringify(e.AppState.preferences)); },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null) },
+    CONTA_KEY: 'waze_places_conta',
+    ...escopo,
+    guardado,
+  };
+  e.presencaWmeGravarPendente = montar('presencaWmeGravarPendente', e);
+  e.presencaWmeEsquecerGravado = montar('presencaWmeEsquecerGravado', e);
+  e.presencaWmeAnotarDesligar = montar('presencaWmeAnotarDesligar', e);
+  return e;
+}
+
 const CARD = { venueID: 'v1', updateRequestID: 'ur1', mapa: { centro: [-12.597498, -39.511208] } };
 const PROXIMO = { venueID: 'v2', updateRequestID: 'ur2', mapa: { centro: [-22.9, -43.2] } };
 
@@ -329,11 +348,11 @@ test('toggle: desligar some do WME NA HORA (visivel:false); religar pede ligar s
   const fatos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 99 };
   const prefs = {};
-  const escopo = {
+  const escopo = comAjudantesDoDesligar({
     presencaWme, AppState: { preferences: prefs, profile: { id: 12444348 } },
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
     dfato: (k, o) => fatos.push([k, o]), marcaDaSessao,
-  };
+  });
   montar('presencaWmeDesligar', escopo)();
   assert.deepEqual(pedidos, [{ userId: '12444348', visivel: false }]);
   assert.equal(presencaWme.ligarNaProxima, false);
@@ -422,11 +441,11 @@ test('desligar sem rede fica pendente, e a próxima prova de rede refaz o "invis
   // do teto, abaixo).
   let resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
   const presencaWme = { ligarNaProxima: true, desligarPendente: false, desligarEm: 0 };
-  const escopo = {
+  const escopo = comAjudantesDoDesligar({
     AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
     presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
-  };
+  });
   const desligar = montar('presencaWmeDesligar', escopo);
   const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
   desligar();
@@ -460,11 +479,11 @@ test('desligar com o Waze fora (COM resposta): pendente, mas refeito no máximo 
   let agora = 1790200000000;
   let resposta = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
   const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
-  const escopo = {
+  const escopo = comAjudantesDoDesligar({
     AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
     presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, Date: { now: () => agora }, marcaDaSessao,
     API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
-  };
+  });
   const desligar = montar('presencaWmeDesligar', escopo);
   const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
   const vez = async () => { refazer(); await new Promise((r) => setTimeout(r, 0)); };
@@ -502,11 +521,11 @@ test('desligar SEM sessão (a renovação) fica pendente, e o perfil que chega c
   const pedidos = [];
   let sessao = null;
   const presencaWme = { ligarNaProxima: true, desligarPendente: false, desligarEm: 0 };
-  const escopo = {
+  const escopo = comAjudantesDoDesligar({
     AppState: { preferences: { presenca: false }, profile: null },
     presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
     API: { getSession: () => sessao, presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
-  };
+  });
   const desligar = montar('presencaWmeDesligar', escopo);
   const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
   desligar();                                   // o gesto, na janela
@@ -534,12 +553,12 @@ test('desligar com 401: pendente e a sessão conferida — o teto segura o laço
   let resposta = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' };
   let conferidas = 0;
   const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
-  const escopo = {
+  const escopo = comAjudantesDoDesligar({
     AppState: { preferences: { presenca: false }, profile: { id: 12444348 } },
     presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, Date: { now: () => agora }, marcaDaSessao,
     handleUnauthorized: () => { conferidas += 1; },
     API: { getSession: () => sessao, presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
-  };
+  });
   const desligar = montar('presencaWmeDesligar', escopo);
   const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
   const vez = async () => { refazer(); await new Promise((r) => setTimeout(r, 0)); };

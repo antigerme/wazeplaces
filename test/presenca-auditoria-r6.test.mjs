@@ -216,3 +216,174 @@ test('R6-5-1 o "Sair", a troca de conta e a queda DESCARTAM a dívida — nada s
   assert.equal(lidas(m.c, CAF).length, 2, 'a dívida da conta que saiu foi paga pela sessão de outra');
 });
 
+// ── R6-5-2: o "invisível" pendente fica GRAVADO, com a conta ─────────────────
+
+// Um aparelho: o armazenamento sobrevive à "página", a memória (presencaWme,
+// AppState) não. Cada `pagina()` é uma abertura nova.
+function aparelho() {
+  const guardado = new Map();
+  const localStorage = {
+    getItem: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    setItem: (k, v) => guardado.set(k, String(v)),
+    removeItem: (k) => guardado.delete(k),
+  };
+  const pedidos = [];
+  return {
+    guardado, pedidos,
+    gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
+    pagina({ perfil = null, resposta = { success: true }, sessao = 'tok' } = {}) {
+      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: perfil };
+      const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null };
+      const fatos = [];
+      const deps = {
+        AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'),
+        preferenciasCarregadas: true, CONTA_KEY: constante('CONTA_KEY'),
+        PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+        safeLS: { get: (k) => localStorage.getItem(k) },
+        dfato: (k, o) => fatos.push([k, o]),
+        API: { getSession: () => sessao, presencaWaze: async (c) => { pedidos.push(c); return typeof resposta === 'function' ? resposta() : resposta; } },
+      };
+      const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'presencaWmeDesligar',
+        'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
+        'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar'], deps);
+      h.lerPreferenciasGuardadas();
+      return { ...h, AppState, presencaWme, fatos };
+    },
+  };
+}
+const SEM_REDE = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+const espera = () => new Promise((r) => setTimeout(r, 0));
+
+test('R6-5-2 o "invisível" que não saiu (sem rede) sobrevive a fechar o app: o perfil da MESMA conta, ao chegar, o manda', async () => {
+  const a = aparelho();
+  const p1 = a.pagina({ perfil: { id: Number(EU) }, resposta: SEM_REDE });
+  p1.AppState.preferences.presenca = false;                // o interruptor
+  p1.savePreferences();
+  p1.presencaWmeDesligar();                                 // o gesto
+  await espera();
+  assert.equal(p1.presencaWme.desligarPendente, true, 'CONTROLE: sem rede, o desligar fica pendente');
+  assert.deepEqual(Object.keys(a.gravado() || {}), ['conta', 'em'], 'DEFEITO: o pendente não foi gravado no aparelho');
+  assert.equal(a.gravado().conta, EU);
+  // Fecha o app e abre de novo: a memória é outra, o armazenamento o mesmo. O
+  // perfil ainda não chegou (a carga da abertura), e a prova de rede não manda.
+  const p2 = a.pagina({ perfil: null });
+  assert.equal(p2.AppState.preferences.presenca, false);
+  p2.presencaWmeRefazerDesligar();
+  await espera();
+  assert.equal(a.pedidos.length, 1, 'sem o perfil (de quem é a sessão?), o pendente saiu');
+  // O perfil chega (o `definirPerfil` chama o refazer): sai, e o gravado sai junto.
+  p2.AppState.profile = { id: Number(EU) };
+  p2.presencaWmeRefazerDesligar();
+  await espera();
+  assert.deepEqual(a.pedidos.slice(1), [{ userId: EU, visivel: false }], 'DEFEITO: fechar o app perdeu o "invisível" — a pessoa segue visível no WME');
+  assert.equal(a.gravado(), null, 'o "invisível" chegou e ficou gravado (sairia de novo na próxima abertura)');
+  // E não sai de novo.
+  const p3 = a.pagina({ perfil: { id: Number(EU) } });
+  p3.presencaWmeRefazerDesligar();
+  await espera();
+  assert.equal(a.pedidos.length, 2, 'o "invisível" que já chegou saiu de novo');
+});
+
+test('R6-5-2 só a MESMA conta o manda — o perfil de OUTRA conta não, e o religar (ou a troca de conta) o apaga', async () => {
+  const gravarPendente = async () => {
+    const a = aparelho();
+    const p1 = a.pagina({ perfil: { id: Number(EU) }, resposta: SEM_REDE });
+    p1.AppState.preferences.presenca = false;
+    p1.savePreferences();
+    p1.presencaWmeDesligar();
+    await espera();
+    assert.ok(a.gravado(), 'CONTROLE: o pendente tem que estar gravado');
+    return a;
+  };
+  // Outra conta.
+  const outra = await gravarPendente();
+  const q = outra.pagina({ perfil: { id: Number(CAF) } });
+  q.presencaWmeRefazerDesligar();
+  await espera();
+  assert.equal(outra.pedidos.length, 1, 'DEFEITO: o "invisível" de uma conta foi pro WME no nome de OUTRA');
+  // Religou à mão (o ouvinte do interruptor grava as preferências logo depois).
+  const religou = await gravarPendente();
+  const r = religou.pagina({ perfil: { id: Number(EU) } });
+  r.AppState.preferences.presenca = true;
+  r.presencaWmeReligar();
+  r.savePreferences();
+  assert.equal(religou.gravado(), null, 'religou e o "invisível" seguiu gravado');
+  // A troca de conta: sai da memória (quem chama grava).
+  const troca = await gravarPendente();
+  const t1 = troca.pagina({ perfil: { id: Number(EU) } });
+  assert.ok(t1.AppState.preferences.presencaWmeDesligar, 'CONTROLE: a abertura tem que ler o gravado');
+  t1.presencaWmeZerar();
+  assert.equal(t1.AppState.preferences.presencaWmeDesligar, undefined, 'a troca de conta deixou o "invisível" da anterior');
+  // Gravado com o interruptor LIGADO (armazenamento editado, versão velha): a leitura o ignora.
+  const ligado = aparelho();
+  ligado.guardado.set('waze_places_preferences', JSON.stringify({ presenca: true, presencaWmeDesligar: { conta: EU, em: 1 } }));
+  const l = ligado.pagina({ perfil: { id: Number(EU) } });
+  assert.equal(l.AppState.preferences.presencaWmeDesligar, undefined, 'com o interruptor ligado, o "invisível" gravado foi lido');
+});
+
+test('R6-5-2 a ordem que protege a conta: o perfil confere a conta ANTES de refazer, e a troca grava o que apagou', () => {
+  const def = fatiar('definirPerfil');
+  const iConta = def.indexOf('aoConhecerConta(perfil);');
+  const iRefazer = def.indexOf('presencaWmeRefazerDesligar();');
+  assert.ok(iConta > 0 && iRefazer > iConta, 'o "invisível" gravado sairia antes de a troca de conta o apagar');
+  const troca = fatiar('esquecerOutraConta');
+  const iZerar = troca.indexOf('presencaWmeZerar();');
+  const iGravar = troca.indexOf('esquecerEscolhasDaContaAnterior();');
+  assert.ok(iZerar > 0 && iGravar > iZerar, 'a troca de conta apaga o "invisível" da memória e ninguém grava depois');
+  assert.match(fatiar('esquecerEscolhasDaContaAnterior'), /savePreferences\(\);/);
+  // O "Sair" repõe as preferências de fábrica (sem o gravado) e grava.
+  const sair = fatiar('handleLogout');
+  assert.ok(sair.indexOf('AppState.preferences = preferenciasDeFabrica();') > 0 && /savePreferences\(\);/.test(sair));
+  assert.equal('presencaWmeDesligar' in new Function(fatiar('preferenciasDeFabrica') + '\nreturn preferenciasDeFabrica();')(), false);
+});
+
+// ── R6-5-3: o desligar repetido no diário, com limitador ─────────────────────
+
+test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma falha entra uma vez a cada 10 min, com o total', async () => {
+  let agora = T;
+  const pedidos = [];
+  let resposta = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+  const AppState = { preferences: { presenca: false }, profile: { id: Number(EU) } };
+  const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null };
+  const fatos = [];
+  const deps = {
+    AppState, presencaWme, PREFERENCES_KEY: 'p', preferenciasCarregadas: false, localStorage: { setItem() {} },
+    CONTA_KEY: 'c', safeLS: { get: () => null }, Date: { now: () => agora },
+    PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+    dfato: (k, o) => fatos.push([k, o]),
+    API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  };
+  const h = montar(['marcaDaSessao', 'savePreferences', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
+    'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar'], deps);
+  const linhas = () => fatos.filter(([k]) => k === 'presencaWme.visivel');
+  h.presencaWmeDesligar();                                  // o gesto
+  await espera();
+  // Duas horas de triagem: uma resposta da nossa API a cada 10 s (a prova de rede).
+  for (let s = 10; s <= 120 * 60; s += 10) { agora += 10_000; h.presencaWmeRefazerDesligar(); await espera(); }
+  assert.ok(pedidos.length >= 120 && pedidos.length <= 121, `CONTROLE: o teto de um por minuto mudou (${pedidos.length} pedidos)`);
+  assert.ok(linhas().length <= 13, `DEFEITO: ${linhas().length} linhas do desligar em 2 h — o anel (120) ficaria só com elas`);
+  assert.equal(linhas()[0][1].ok, false, 'CONTROLE: o resultado do GESTO tem que ir pro diário');
+  assert.equal(linhas().at(-1)[1].total >= 110, true, 'a linha não diz quantas vezes ele falhou');
+  // Categoria NOVA entra na hora.
+  const antes = linhas().length;
+  resposta = { success: false, errorCategory: 'unauthorized' };
+  agora += 61_000;
+  h.presencaWmeRefazerDesligar();
+  await espera();
+  assert.equal(linhas().length, antes + 1, 'a falha de outro tipo tem que entrar na hora');
+  assert.equal(linhas().at(-1)[1].categoria, 'unauthorized');
+  // Um GESTO novo entra sempre, mesmo com a mesma falha de há pouco.
+  agora += 1000;
+  h.presencaWmeDesligar();
+  await espera();
+  assert.equal(linhas().length, antes + 2, 'o gesto de desligar sumiu do diário');
+  // E o sucesso, que encerra o pendente, também.
+  resposta = { success: true };
+  agora += 61_000;
+  presencaWme.desligarSessao = 'outra';                     // (sem esperar o teto)
+  h.presencaWmeRefazerDesligar();
+  await espera();
+  assert.deepEqual(linhas().at(-1)[1], { desligou: true, via: 'interruptor', ok: true });
+  assert.equal(presencaWme.desligarPendente, false);
+});
+
