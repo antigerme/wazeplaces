@@ -28,7 +28,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   `scratchpad/l10-base.txt`, relatórios `scratchpad/relatorio-l10-<área>.md`.
 - **Junção**: no `/home/user/wp-lote7` (branch recriado da main), pelo `scratchpad/juntar.sh fix6-<área>`.
 - **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`.
-- **Cookies** (2026-10-01): `0ca15e91-antigerme_cookies.txt` (L6+AM) e `0ba08797-cafanha_cookies.txt` (L2+AM).
+- **Cookies** (2026-10-02, os válidos; os de 10-01 expiraram): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs`, o `prod-lida.mjs` e o `wme-usuario.mjs` já apontam pra eles.
 - **Próxima volta**: juntar o lote 10, smokes, versão (`date -u`), PR, CI, merge, produção — e a rodada 7.
 
 ## 1. O pedido (o que "pronto" quer dizer)
