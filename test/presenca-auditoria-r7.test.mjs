@@ -512,3 +512,45 @@ test('R7-5-03 a troca de conta com o envio no ar: a resposta dele não deixa pen
     'DEFEITO: o envio da conta anterior segurou o "invisível" da conta nova');
 });
 
+// ── R7-5-04: a lista de carona entra com o instante DA CARONA ────────────────
+
+test('R7-5-04 a resposta atrasada de uma ação velha entra com o instante da carona DELA — e a conversa lida no meio não volta como nova', async () => {
+  let agora = T;
+  const capturado = [];
+  const presencaWme = { ligarNaProxima: false, ultimaEm: 0, enviadas: 0, falhas: 0, ultimaFalha: null, falhaAnotada: null, falhaAnotadaEm: 0, marcaPerdida: false };
+  const h = montar(['presencaWmeDaAcao', 'presencaWmeAoResponder'], {
+    AppState: { authenticated: true, preferences: {}, profile: { id: Number(EU) }, currentPlace: { mapa: { centro: [-23.5, -46.6] } } },
+    presencaWme, Treino: { ativo: false }, API: { saindo: false, getCountry: () => 30 }, navigator: { onLine: true },
+    PRESENCA_WME_FREIO_MS: constante('PRESENCA_WME_FREIO_MS'), Date: { now: () => agora },
+    window: { Presenca: { conhecidos: () => [], aoCarona: (p, inicio, pais) => capturado.push({ lista: p, inicio, pais }) } },
+    presencaLigada: () => true, dfato: () => {},
+  });
+  const listaVelha = { online: [], conversas: [{ id: CAF, nome: 'cafanha', naoLidas: 1, atividade: T - 5000, ultima: { deMim: false, ts: T - 5000, texto: 'oi' } }] };
+  const listaNovaDoWaze = { online: [], conversas: [{ id: CAF, nome: 'cafanha', naoLidas: 0, atividade: T - 5000, ultima: { deMim: false, ts: T - 5000, texto: 'oi' } }] };
+  const p1 = h.presencaWmeDaAcao(null, 30);                 // a ação 1, em T (a resposta vai atrasar)
+  agora += 31_000;
+  const p2 = h.presencaWmeDaAcao(null, 30);                 // a ação 2, em T+31 s (o freio passou)
+  assert.ok(p1 && p2, 'CONTROLE: as duas ações levam carona');
+  // O instante vai COM a carona, mas não no pedido.
+  assert.equal(JSON.stringify(p1).includes(String(T)), false, 'o instante da carona foi junto no corpo do pedido');
+  h.presencaWmeAoResponder(p2, { presencaApp: listaNovaDoWaze, presenca: { ok: true } });
+  agora += 9_000;
+  h.presencaWmeAoResponder(p1, { presencaApp: listaVelha, presenca: { ok: true } });
+  assert.deepEqual(capturado.map((x) => x.inicio), [T + 31_000, T],
+    'DEFEITO: a lista da ação velha entrou com o instante da carona nova (lido na hora da resposta)');
+  // A consequência, no presenca.js de verdade: a conversa lida em T+10 s (o
+  // "lida" confirmado) não volta como "1 mensagem nova" com a lista velha.
+  const c = novoCliente({ agora: T });
+  c.P.Presenca.lidaSaiuEm.set(CAF, T + 10_000);
+  c.relogio.agora = T + 32_000;
+  c.P.presencaAoCarona(capturado[0].lista, capturado[0].inicio, 30);
+  c.relogio.agora = T + 40_000;
+  c.P.presencaAoCarona(capturado[1].lista, capturado[1].inicio, 30);
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 0, 'DEFEITO: a conversa lida voltou como "1 mensagem nova" com a lista da ação velha');
+  // CONTROLE: a carona sem o instante dela (uma lista que não saiu do `presencaWmeDaAcao`) usa o da última carona.
+  const outro = [];
+  const g = montar(['presencaWmeAoResponder'], { presencaWme: { ...presencaWme, ultimaEm: 12345 }, dfato: () => {},
+    window: { Presenca: { aoCarona: (p, inicio) => outro.push(inicio) } } });
+  g.presencaWmeAoResponder({ userId: EU, pais: 30 }, { presencaApp: listaVelha });
+  assert.deepEqual(outro, [12345]);
+});

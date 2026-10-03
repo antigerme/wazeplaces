@@ -18876,6 +18876,10 @@ function presencaWmeDaAcao(placeDaAcao, paisDoGesto) {
         // respondidas pelo WME (sem a marca do app).
         const conhecidos = window.Presenca?.conhecidos?.();
         if (Array.isArray(conhecidos) && conhecidos.length) presenca.conhecidos = conhecidos;
+        // O instante desta carona vai COM ela, fora do que é mandado (não
+        // enumerável: o JSON do pedido não o leva) — é ele que diz de quando é a
+        // lista que volta (ver `presencaWmeAoResponder`).
+        Object.defineProperty(presenca, 'saiuEm', { value: agora });
         return presenca;
     } catch (e) {
         return null;
@@ -18886,10 +18890,16 @@ function presencaWmeAoResponder(presenca, result) {
     try {
         // A lista de quem usa o app e as conversas (fase 3), de carona. O
         // instante é o de quando a carona SAIU: mensagem que chegou ao vivo
-        // depois disso a lista ainda não contou. E o país é o DELA: a lista é
-        // do país que a carona levou, e a presença a descarta se ele não for
-        // mais o do filtro.
-        if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, presencaWme.ultimaEm, presenca.pais);
+        // depois disso a lista ainda não contou. E é o DESTA carona (`saiuEm`),
+        // não o `ultimaEm` lido agora: com o Waze lento (além do freio de 30 s),
+        // a resposta de uma ação velha chegava depois de a carona da seguinte
+        // sair, entrava com o instante da nova e passava pela régua da lista
+        // mais velha que não pousa — a conversa lida nesse meio voltava como
+        // "1 mensagem nova" (auditoria de 2026-10-02, R7-5-04). E o país é o
+        // DELA: a lista é do país que a carona levou, e a presença a descarta se
+        // ele não for mais o do filtro.
+        const saiuEm = presenca && Number.isFinite(presenca.saiuEm) ? presenca.saiuEm : presencaWme.ultimaEm;
+        if (presenca && result && result.presencaApp) window.Presenca?.aoCarona?.(result.presencaApp, saiuEm, presenca.pais);
         const r = presenca && result && result.presenca;
         if (!r) return;
         if (r.ok) {
