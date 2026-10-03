@@ -509,7 +509,7 @@ try {
 
   // ── 7. A FALHA que sobra: a do envio, com "Tentar de novo" no MESMO id ──────
   // Duas falhas, duas frases (auditoria de 2026-09-29, P10): o Waze fora com a
-  // rede boa — a resposta CHEGA, e "sem conexão" mandaria procurar sinal — e a
+  // rede boa — a resposta CHEGA, e "sem sinal" mandaria procurar sinal — e a
   // rede fora, em que a resposta nem chega.
   console.log('\n7. falha de envio');
   const frase = () => ana.page.evaluate(() => (document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent?.trim() || '');
@@ -526,7 +526,7 @@ try {
     else anota(`"Tentar de novo" não é alcançável: ${JSON.stringify(botao)}`);
     // A BORDA responde HTML (a nossa origem fora, a cota do plano grátis): a
     // resposta CHEGA — a rede está boa — e a frase é a do Waze fora, não a de
-    // "sem conexão" (auditoria de 2026-09-30, R5-5-3). Quem lê o HTML é o
+    // "sem sinal" (auditoria de 2026-09-30, R5-5-3). Quem lê o HTML é o
     // `_post` de verdade.
     falharEnvio.set(ana.id, 'borda');
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
@@ -539,9 +539,9 @@ try {
     // A rede cai: a nova tentativa nem chega ao servidor.
     falharEnvio.set(ana.id, 'rede');
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
-    if (await esperar(ana, () => /sem conexão/.test((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent || ''), 'sem rede, a falha não disse "sem conexão"')) {
+    if (await esperar(ana, () => /sem sinal/.test((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent || ''), 'sem rede, a falha não disse "sem sinal"')) {
       const daRede = await frase();
-      if (/^Não enviada, sem conexão\. Tentar de novo$/.test(daRede)) ok(`sem rede: "${daRede}"`);
+      if (/^Não enviada, sem sinal\. Tentar de novo$/.test(daRede)) ok(`sem rede: "${daRede}"`);
       else anota(`frase da falha de rede errada: ${daRede}`);
     }
     falharEnvio.delete(ana.id);

@@ -741,9 +741,11 @@ test('i18n: o "Disponível offline", o card de foto sem sinal e a tela sem conex
     es: { red: /\bred\b/i, 'señal': /\bseñal\b/i, 'conexión': /\bconexi[oó]n\b/i, internet: /\binternet\b/i, offline: /\boffline\b/i },
     fr: { 'réseau': /\bréseau\b/i, signal: /\bsignal\b/i, connexion: /\bconnexion\b/i, internet: /\binternet\b/i, 'hors ligne': /\bhors ligne\b/i, offline: /\boffline\b/i },
   };
-  // O card de foto que precisa de sinal (`marcarCardSemFoto`) e a tela da fila
-  // sem conexão (`showNoPlaces`, e o aviso do ↻ sem rede): a MESMA falta.
-  const DO_MESMO_QUADRO = ['card.semFoto.titulo', 'card.semFoto.desc', 'states.error.titleOffline', 'states.error.bodyOffline'];
+  // O card de foto que precisa de sinal (`marcarCardSemFoto`), a tela da fila
+  // sem sinal (`showNoPlaces`, e o aviso do ↻ sem rede) e a mensagem da conversa
+  // que não saiu por falta de rede (`presenca.recibo.naoEnviada`, lote 11): a MESMA falta.
+  const DO_MESMO_QUADRO = ['card.semFoto.titulo', 'card.semFoto.desc', 'states.error.titleOffline', 'states.error.bodyOffline',
+    'presenca.recibo.naoEnviada'];
   // O termo de cada língua é o que as linhas do offline já usavam (R66-5).
   const TERMO_DA_LINGUA = { pt: 'sinal', en: 'signal', es: 'señal', fr: 'réseau' };
   const termoDe = {};
