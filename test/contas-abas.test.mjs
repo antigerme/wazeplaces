@@ -1519,6 +1519,7 @@ function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_00
     sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
     setTimeout: (f) => { f(); return 1; }, dfato: (k) => diario.push(k), t: (k) => k,
     registrarPouso: () => {}, recordHistory: (tipo) => historico.push(tipo), registrarRejeicaoDeAutor: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {}, showToast: () => {},
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, historyTodayKey: () => '2026-10-01',
     ondeAgora: () => '30', getLang: () => 'pt',

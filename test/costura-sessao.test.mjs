@@ -365,6 +365,7 @@ function montarVoo({ janela = false, extras = [] } = {}) {
     pedidosQueEntraramNaFila: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     entrarPelaExtensao: () => new Promise(() => {}), console,
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
     'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',

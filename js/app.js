@@ -2234,6 +2234,18 @@ function anunciarNoLightbox(texto, place) {
     el.textContent = texto || '';
 }
 
+// O desfecho de uma escrita da foto que FECHOU a camada é dito pela região viva
+// do CARD (`#cardLiveRegion`), pra onde o foco foi. Sem o Desfazer, excluir a
+// ÚLTIMA foto do local fecha a foto ampliada (`removerFoto`) antes do anúncio,
+// e a região dela já não fala: o foco ia pro mapa do card e nada dizia que a
+// foto saiu — o card é redesenhado com o MESMO pedido, então nem o "Novo
+// pedido" sai (`pedidoAnunciado`; auditoria de 2026-10-02, R7-3-04, MEDIDO nos
+// dois motores).
+function anunciarNoCard(texto) {
+    const el = document.getElementById('cardLiveRegion');
+    if (el) el.textContent = texto || '';
+}
+
 const Lightbox = {
     urls: [],
     idx: 0,
@@ -2380,8 +2392,15 @@ const Lightbox = {
         // 1,0000000000000002. A tela parece 1×, mas as setas passavam a ANDAR a
         // foto em vez de trocá-la, o ↓ não fechava e o arraste não trocava nem
         // fechava — tudo isso pergunta `=== 1` ou `> 1` (R6-3-05, auditoria de
-        // 2026-10-01). Abaixo de 0,1% a mais (1 px numa foto de 1000) é 1×.
-        if (this.scale < 1.001) this.scale = 1;
+        // 2026-10-01). Abaixo de 0,1% a mais (1 px numa foto de 1000) é 1× —
+        // AFASTANDO. Aproximando, não: partindo de 1×, cada evento da roda e da
+        // pinça do trackpad é aplicado sobre a escala de agora, e todo evento
+        // abaixo de ~0,55 px (1,2^0,0055 = 1,001) caía de volta em 1. A roda fina
+        // e a pinça LENTA do trackpad (centenas de eventos de 0,2 a 0,4 px) nunca
+        // começavam a ampliar (auditoria de 2026-10-02, R7-3-03, MEDIDO no
+        // Chromium: 301 eventos e a escala parada em 1). Quem aproxima quer zoom,
+        // por menor que seja o passo; quem afasta até perto de 1 quer o 1× exato.
+        if (this.scale < prevScale && this.scale < 1.001) this.scale = 1;
         if (this.scale === 1) {
             this.tx = 0;
             this.ty = 0;
@@ -2970,6 +2989,26 @@ function setupLightbox() {
     lb.addEventListener('click', (e) => {
         if (e.target === lb) recuarNaFoto();
     });
+    // O toque nas ações TRAVADAS da foto (o "Aprovar", a lixeira, a pílula do
+    // nome) responde com o porquê, como o ✕ ↑ ✓ do card (C14, ver
+    // `avisarTravaAoTocar`): elas travam pela MESMA função
+    // (`aplicarTravaDeAcao`) e ficavam caladas — com o "Marcar todos" no ar, o
+    // toque no "Aprovar" não dizia nada (auditoria de 2026-10-02, R7-3-07,
+    // MEDIDO nos dois motores). Botão `disabled` não recebe `click`, mas o
+    // `pointerdown`/`pointerup` chegam e sobem até a camada; o par no MESMO
+    // botão é o "clique". A pílula que é RÓTULO na edição não trava as ações
+    // (`acoesTravadas`), e aí o aviso sai calado.
+    let tocouTravada = null;
+    const acaoTravada = (ev) => {
+        const b = ev.target && ev.target.closest && ev.target.closest('#lightboxApprove, #lightboxDelete, #lightboxNomeBtn');
+        return b && b.disabled ? b : null;
+    };
+    lb.addEventListener('pointerdown', (ev) => { tocouTravada = acaoTravada(ev); });
+    lb.addEventListener('pointerup', (ev) => {
+        const b = acaoTravada(ev);
+        if (b && b === tocouTravada) avisarTravaAoTocar();
+        tocouTravada = null;
+    });
 
     // ── Gestos (Pointer Events): pinch zoom, double-tap, pan, swipe ──
     const pointers = new Map();
@@ -3220,6 +3259,32 @@ function lembrarIdasSemResposta(alvo, n, pousou, epoca) {
     }
 }
 
+// A decisão do CARD (✕ ou ✓) que volta "já tratado" depois de uma APROVAÇÃO
+// desta foto sem resposta (auditoria de 2026-10-02, R7-3-08). A aprovação pousou
+// e a resposta se perdeu com a rede caindo: o app disse "Erro de conexão" e
+// devolveu o ✨ e o "Aprovar", e a memória das idas guardou a ida (R6-3-04) — só
+// pro gesto seguinte NA FOTO. Com a rede de volta, a pessoa decide pelo card, o
+// Waze responde "já tratado" (quem resolveu o pedido foi a aprovação DELA), e o
+// card dizia "Já tratado por outro editor 👍" e contava um Rejeitado (ou um
+// Lido) no placar e no Histórico, de um pedido APROVADO — MEDIDO nos dois
+// motores. O desfecho é o da aprovação: sem "outro editor" e sem contar a
+// decisão do card (o placar do gesto desce), com o "Curador", como a aprovação
+// que pousa (`enviarAprovacao`). A memória do alvo sai: um "já feito" depois
+// disto é de outro editor. Dizer na tela que a foto já estava aprovada pediria
+// uma frase que o app não tem — fica calado, como o pouso por outra aba.
+function aprovacaoDelaJaPousou(place) {
+    return !!place && idasSemRespostaDeAntes('aprovar|' + chaveDoPedido(place)) > 0;
+}
+
+function desfechoDaAprovacaoDela(actionType, place) {
+    lembrarIdasSemResposta('aprovar|' + chaveDoPedido(place), 0, true, epocaDaSessao);
+    const k = actionType === 'read' ? 'read' : 'rejected';
+    AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
+    updateStats();
+    saveStats();
+    contarConquista('fotos');
+}
+
 // Manda pro Waze de verdade. Se falhar, a foto VOLTA — mesma gramática do
 // swipe, que reverte o placar quando o Waze recusa.
 // Devolve se a foto SAIU do mapa: quem espera a resposta (o caminho sem
@@ -3289,9 +3354,22 @@ async function enviarExclusao(alvo) {
 // pílula oferecendo corrigir o que já foi corrigido). Só depois de o Waze
 // CONFIRMAR — na janela do Desfazer ou na falha, o mapa ainda é o de antes
 // (auditoria de 2026-09-25).
+//
+// Com o TREINO aberto, a `AppState.queue` é a fila de EXEMPLOS (clones), e a fila
+// REAL mora em `Treino._salvo.queue` até ele fechar. A escrita que pousava ali —
+// a exclusão sem o Desfazer, ou a da janela despachada ao entrar no treino —
+// mudava só os clones: ao sair, o irmão real seguia com a foto que saiu (e a
+// lixeira dele dizia "Outro editor já tinha excluído 👍" sobre a exclusão da
+// própria pessoa) e com o nome velho (auditoria de 2026-10-02, R7-3-05, MEDIDO
+// nos dois motores). As duas filas são percorridas.
 function aplicarNosIrmaos(place, aplicar) {
     if (!place || place.venueID == null) return;
-    const irmaos = (AppState.queue || []).filter((q) => q && q !== place && q.venueID === place.venueID);
+    const filas = [AppState.queue || []];
+    if (Treino.ativo && Treino._salvo && Array.isArray(Treino._salvo.queue)) filas.push(Treino._salvo.queue);
+    const irmaos = [];
+    for (const fila of filas) {
+        for (const q of fila) if (q && q !== place && q.venueID === place.venueID && !irmaos.includes(q)) irmaos.push(q);
+    }
     for (const q of irmaos) aplicar(q);
     // O card de FUNDO da pilha foi desenhado com o local de antes.
     if (irmaos.includes(AppState.queue[1])) montarCardDeFundo();
@@ -3355,11 +3433,17 @@ function pedirExclusaoDaFoto() {
         enviarExclusao(alvo).then((saiuDoMapa) => {
             lixeiraOcupada(false);
             if (!saiuDoMapa) return;
+            // A foto DESTE pedido estava aberta? Lido antes do `removerFoto`: a
+            // última foto do local fecha a camada (R7-3-04).
+            const naCamada = Lightbox.isOpen() && Lightbox.place === place;
             Lightbox.removerFoto(alvo.id, place);
             // Com a foto já fechada, o card é redesenhado debaixo do foco (R5-3-07).
             if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
-            // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu (R6-3-08).
-            anunciarNoLightbox(t('undo.photoDeleted'), place);
+            // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu
+            // (R6-3-08): pela região da camada — ou pela do card, quando a
+            // exclusão FECHOU a camada (R7-3-04).
+            if (naCamada && !Lightbox.isOpen()) anunciarNoCard(t('undo.photoDeleted'));
+            else anunciarNoLightbox(t('undo.photoDeleted'), place);
         });
         // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
         manterFocoNoLightbox();
@@ -3813,9 +3897,16 @@ function mostrarNomeNoLightbox() {
     const pode = podeRenomearAqui() && !Treino.ativo;
     cx.classList.toggle('hidden', !pode);
     // A dica de zoom mora no mesmo canto. Some pra quem tem a pílula — é editor
-    // L6+AM, que já sabe dar zoom; pro resto ela continua lá.
+    // L6+AM, que já sabe dar zoom; pro resto ela fica o tempo que o `open` dá.
+    // Daqui ela só SAI: quem a mostra é o `open`, que tem o relógio que a tira
+    // em 4 s. Esta função passou a rodar também com o perfil chegando com a foto
+    // aberta (`reavaliarFotoAbertaPeloPerfil`, R6-3-07) — o perfil atrasado, a
+    // renovação da sessão e a sonda de todo 401 —, e o `toggle` que estava aqui
+    // trazia a dica de volta pra quem não tem a pílula, sem relógio nenhum: ela
+    // FICAVA sobre a foto até fechar (auditoria de 2026-10-02, R7-3-02, MEDIDO
+    // nos dois motores com um L4+AM).
     const dica = document.getElementById('lightboxZoomHint');
-    if (dica) dica.classList.toggle('hidden', pode);
+    if (dica && pode) dica.classList.add('hidden');
     if (!pode) { fecharEdicaoNome(); return; }
     const txt = document.getElementById('lightboxNomeTxt');
     if (txt) txt.textContent = Lightbox.place.name;
@@ -11657,6 +11748,28 @@ const MapaLightbox = {
         // sem isso sobra entrada morta e o próximo voltar não faz nada, a
         // pessoa aperta de novo e sai do app (a mesma regra do lightbox).
         if (!viaHistorico) CamadaVoltar.consumir();
+        // E o que era DO PEDIDO sai do DOM e da memória: o nome do local
+        // duplicado e o das entradas (o `title` dos marcadores), o link do
+        // Street View com a coordenada do pedido, os tiles da área e os pontos.
+        // Ficavam no mapa fechado — até na tela de entrada depois do "Sair", e o
+        // relatório do modo dev da próxima conta os levava com o DOM inteiro
+        // (auditoria de 2026-10-02, R7-1-02, MEDIDO nos dois motores; a foto
+        // ampliada já limpava, R6-1-05). O `open` refaz tudo. Sem o `centro`, o
+        // que chegar depois de fechar (o quadro de um arraste ainda no ar, o
+        // toque que solta o dedo) não desenha a camada escondida.
+        for (const id of ['mapaLbTiles', 'mapaLbMarks', 'mapaLbLegenda']) {
+            const n = document.getElementById(id);
+            if (n) n.textContent = '';
+        }
+        const sv = document.getElementById('mapaLbStreetView');
+        if (sv) sv.removeAttribute('href');
+        this._tiles.clear();
+        this._falhos.clear();
+        this.pontos = [];
+        this._fora = [];
+        this._local = null;
+        this._inicial = null;
+        this.centro = null;
         // O foco não cai no <body>: volta pro mapa do card (ver
         // `devolverFocoDaAmpliacao`).
         const quem = this._quemAbriu;
@@ -11710,12 +11823,31 @@ const MapaLightbox = {
         else { a.removeAttribute('href'); a.classList.add('hidden'); }
     },
 
+    // O "+" no zoom MÁXIMO e o "−" no MÍNIMO não fazem nada (o `zoom` sai calado
+    // no limite) e seguiam com cara de vivos — botão morto com cara de vivo lê
+    // como app quebrado (auditoria de 2026-10-02, R7-3-09, MEDIDO nos dois
+    // motores). `aria-disabled`, e não `disabled`: este tiraria o foco de quem
+    // chegou ao botão pelo teclado (R5-2-05), e o Tab seguinte recomeçaria fora
+    // da camada; o esmaecido vem do CSS, o mesmo dos outros botões travados.
+    // Chamada do `desenhar()`, por onde passa todo caminho que muda o zoom.
+    atualizarLimitesDoZoom() {
+        for (const [id, noLimite] of [['mapaLbMais', this.z >= MAPA_Z_NAV_MAX], ['mapaLbMenos', this.z <= MAPA_Z_NAV_MIN]]) {
+            const b = document.getElementById(id);
+            if (!b) continue;
+            if (noLimite) b.setAttribute('aria-disabled', 'true');
+            else b.removeAttribute('aria-disabled');
+        }
+    },
+
     desenhar() {
+        // Fechado, não há o que desenhar (ver o `close`).
+        if (!this.centro) return;
         const el = document.getElementById('mapaLightbox');
         const w = el.clientWidth || innerWidth;
         const h = el.clientHeight || innerHeight;
         const g = mapaGrade(this.centro, this.z, w, h, API.getRegion());
         this.z = g.z;
+        this.atualizarLimitesDoZoom();
         const caixa = document.getElementById('mapaLbTiles');
         const vivos = new Set();
         for (const t of g.tiles) {
@@ -11816,6 +11948,7 @@ const MapaLightbox = {
     // `desprojetar`. Ir pelo pixel e não por "graus por pixel" mantém a conta
     // correta em qualquer latitude e qualquer zoom.
     arrastar(dxPx, dyPx) {
+        if (!this.centro) return;   // fechado (ver o `close`)
         const el = document.getElementById('mapaLightbox');
         const w = el.clientWidth || innerWidth, h = el.clientHeight || innerHeight;
         const g = mapaGrade(this.centro, this.z, w, h, API.getRegion());
@@ -11826,6 +11959,7 @@ const MapaLightbox = {
     // Zoom mantendo FIXO o ponto sob o dedo (ou o centro, se não houver foco).
     // Sem isso, dar zoom no que interessa manda o alvo pra fora da tela.
     zoom(delta, focoX, focoY) {
+        if (!this.centro) return;   // fechado (ver o `close`)
         const el = document.getElementById('mapaLightbox');
         const w = el.clientWidth || innerWidth, h = el.clientHeight || innerHeight;
         const fx = focoX === undefined ? w / 2 : focoX;
@@ -12732,6 +12866,14 @@ function aplicarTravaDeAcao() {
     // O ✓ da edição também (o Enter vai pelo `confirmarRenomear`, que confere a
     // trava): quem escreve o `disabled` dele é o `atualizarBotaoSalvarNome`.
     if (editandoNome()) atualizarBotaoSalvarNome();
+    // O controle da foto ampliada que TINHA o foco e acabou de travar (o
+    // "Aprovar", a lixeira, a pílula do nome) o perdeu, e o foco caía no <body>
+    // com a camada `aria-modal` aberta — a queda da sessão com a extensão
+    // renovando, a conferência de um 401, o lote no ar; e a trava, ao acabar,
+    // não o devolvia (auditoria de 2026-10-02, R7-3-06, MEDIDO nos dois
+    // motores). É o par do `guardarFocoDaTrava` do card: o foco fica na camada,
+    // na pílula ou, travada ela também, no ✕ (ver `manterFocoNoLightbox`).
+    if (travado) manterFocoNoLightbox();
     // A trava mudou: acabou, o aviso dela sai de cima dos botões (C14); o
     // "Como funciona" que esperava o card destravar (o fim da janela do
     // Desfazer, sobretudo) pode abrir — decidido na microtarefa, DEPOIS do foco
@@ -17348,6 +17490,10 @@ function registrarPousoDeSaida(actionType, place, result, item) {
     const cat = result.errorCategory || (result.success ? null : 'unknown');
     if (result.success || cat === 'already_processed' || cat === 'not_found') {
         registrarPouso(place);
+        // O mesmo do `handleActionResult`: o ✕ ou o ✓ dado sem rede, depois de a
+        // aprovação desta foto ter pousado sem resposta, sai da fila de saída
+        // "já tratado" — o desfecho é a aprovação dela (R7-3-08).
+        if (!result.success && aprovacaoDelaJaPousou(place)) { desfechoDaAprovacaoDela(actionType, place); return; }
         recordHistory(actionType, 1, item.dia, item.onde);
         if (actionType === 'reject' && result.success) registrarRejeicaoDeAutor(place);
         // As conquistas também são do GESTO, pelo mesmo motivo do `dia`: o
@@ -18971,6 +19117,9 @@ function handleActionResult(actionType, place, result, regiao, epocaFila, gesto)
     if (cat === 'already_processed' || cat === 'not_found') {
         if (jaNaSaida && tirarDaFilaDeSaida(actionType, place) === false) return pousouPorOutraAba(place, actionType);
         registrarPouso(place);
+        // Quem resolveu foi a aprovação DESTA pessoa, cuja resposta se perdeu
+        // (ver a função): nem "outro editor", nem a decisão do card contada.
+        if (aprovacaoDelaJaPousou(place)) { desfechoDaAprovacaoDela(actionType, place); return; }
         recordHistory(actionType, 1, gesto && gesto.dia, gesto && gesto.onde);
         // Conta como tratada pelos mesmos motivos que ela conta no placar: o
         // objetivo de quem agiu foi cumprido, tenha sido por você ou não.

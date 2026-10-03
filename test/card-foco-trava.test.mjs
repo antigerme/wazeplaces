@@ -476,6 +476,8 @@ function montarTrava() {
   const app = new Function(...nomes, [
     'let aprovandoAgora = false, excluindoAgora = false;',
     fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'), 'let focoDoTeclado = null;',
+    // O foco da foto ampliada na trava (R7-3-06): com ela fechada, sai sem mexer.
+    fatiar('manterFocoNoLightbox'),
     fatiar('guardarFocoDaTrava'), fatiar('aplicarFocoDoTeclado'), fatiar('aplicarTravaDeAcao'),
     'return { aplicarTravaDeAcao, pendente: () => focoDoTeclado, pointerdown: () => { focoDoTeclado = null; } };',
   ].join('\n'))(...nomes.map((n) => deps[n]));

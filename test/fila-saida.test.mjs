@@ -510,6 +510,7 @@ function montarResultado() {
     API: { getRegion: () => 'row', getSession: () => 'tok' },
     dlog: () => {}, dfato: () => {},
     registrarPouso: () => chamadas.push('pouso'), recordHistory: () => chamadas.push('historico'),
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     registrarRejeicaoDeAutor: () => {}, avisarConsequencia: () => {}, registrarAcaoConfirmada: () => {},
     showToast: (m, tipo) => chamadas.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     handleUnauthorized: () => chamadas.push('confere'),
@@ -599,6 +600,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     showToast: (m, tipo) => medidas.toasts.push(tipo + ':' + m),
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {},
     registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-26', ondeAgora: () => '30',
     rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => medidas.toasts.push('derrubou'),
@@ -726,6 +728,7 @@ function aparelhoO5(guardado = new Map()) {
       acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
       presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
       registrarPouso: () => { medidas.pousos++; }, recordHistory: () => { medidas.historico++; },
+      aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
       registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
       historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', handleUnauthorized: () => {},
       paisDaFila: () => 30,   // o país do gesto, pra marca da presença (R7-6-05)
@@ -961,6 +964,7 @@ function drenarO8(itens, resposta) {
     SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], POUSO_NA_MEMORIA_MS: 600000,
     SAIDA_TENTATIVAS_POR_ITEM: Number(/^const SAIDA_TENTATIVAS_POR_ITEM = (\d+);/m.exec(APP_SEM)[1]),
     offlineLigado: () => false, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {}, handleUnauthorized: () => {},
     showToast: (m, tipo) => { if (tipo === 'error') medidas.erros++; }, t: (k) => k, msgDoServidor: (r, d) => d,
     dfato: (k) => medidas.diario.push(k),
@@ -1244,6 +1248,7 @@ function aparelhoDoGesto({ resposta }) {
     presencaWmeDaAcao: (place, pais) => { medidas.presenca.push(pais); return null; },
     presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
     registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     recordHistory: (tipo, n, dia, onde) => medidas.historico.push({ tipo, n, dia, onde }),
     historyTodayKey: () => filtro.dia, getLang: () => 'pt', handleUnauthorized: () => {},
     marcaDaSessao: () => 'marca', contaAgora: () => '1', reivindicacaoDestaAba: () => ({ rv: 'aba' }),
