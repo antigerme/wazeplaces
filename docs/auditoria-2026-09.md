@@ -16,19 +16,23 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-02 ~20:00 UTC)
+## 0. Estado agora (2026-10-03 ~15:30 UTC)
 
-- **Lote 9 em produção** (PR #255, `b270ffc`, v2026.10.01-02), verificado com as duas contas: 89 ✓ · 0 ✗ no
-  roteiro inteiro e 20 ✓ · 0 ✗ na seção "12. Lote 9 no ar" (`prod-auditoria.mjs l9`).
-- **Rodada 6** completa (`scratchpad/r6-relatorios/r6-{1..7}.md`).
-- **Lote 10 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.02-01): sete
-  agentes (offline, lightbox, histórico, filtros+extensão, contas, fila, presença) mais dois ajustes (foto ampliada
-  e presença), com cinco ajustes de harness na junção, cada um sabotado. `npm test` 1953/1953. Relatórios em
-  `scratchpad/relatorio-l10-<área>.md`.
+- **Lote 10 em produção** (PR #256, `babe2bf`, v2026.10.02-01), verificado com as duas contas: 97 ✓ · 0 ✗ no
+  roteiro inteiro, com a seção "13. Lote 10 no ar".
+- **Rodada 7** completa (`scratchpad/r7-relatorios/r7-{1..7}.md`, 56 achados, 5 médios).
+- **Lote 11 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.03-01): nove
+  agentes (textos, treino, presença, fila, filtros, histórico, offline/diagnóstico, contas, foto ampliada) mais o
+  que a junção achou: a ordem trocada nos Filtros com o treino aberto, o "sem sinal" da conversa, o `rodar-longo`
+  que anunciava "rodando" antes do trap e três ajustes de harness, cada um sabotado. `npm test` 2078/2078.
+  Relatórios em `scratchpad/relatorio-l11-<área>.md`; pendências e hipóteses pra rodada 8 em
+  `scratchpad/l11-juncao-pendencias.md`.
 - **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`
-  (com as do lote 10: o aviso do treino, o aviso na conversa e o VOLTAR na edição do nome).
-- **Cookies** (2026-10-02, os válidos; os de 10-01 expiraram): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM); o `prod-auditoria.mjs`, o `prod-lida.mjs` e o `wme-usuario.mjs` já apontam pra eles. O `prod-auditoria.mjs` ganhou a seção "13. Lote 10 no ar".
-- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com `VERSAO=2026100201`) — e a rodada 7.
+  (com as do lote 11: a frase da aprovação que pousou sem resposta, o país não editável escolhido antes do perfil,
+  o "Como funciona" na carga com o voltar do celular, e a extensão 0.3.2 pra publicar).
+- **Cookies** (2026-10-02): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com `VERSAO=2026100301` e a
+  seção "14. Lote 11 no ar") — e a rodada 8.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -65,6 +69,9 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #251 | 2026092505 | rodada 3: o diagnóstico sem o script do Cloudflare, fim da fila com pulados, retentativa de foto, irmãos na fila, pilha/foco no autor, Street View no zoom, presença (país no meio, relógio, leitor de tela, lista fechada, ids com teto), cookies colados limpos em todo fechamento, IndexedDB com teto, segredo do pareamento fora do relatório | mergeado em 2026-09-25 23:38 UTC (CI verde nos dois jobs); **60 ✓ · 0 ✗** em produção (2026-09-26 01:25), com o diagnóstico conferindo 13 arquivos com o servidor ("diferentes: 0") e o desvio do relógio medido (-8 ms) |
 | #252 | 2026092601 | rodada 2 (seis auditores): lote 5 + lote 6 — histórico, entrada e sessão, card, servidor, offline, presença | **71 ✓ · 0 ✗** em produção |
 | #253 | 2026092901 | rodada 3 (cinco auditores, 88 achados): sessão e conta, fila e filtros, foto e mapa ampliados, textos, modo dev; a trava das ações soma as três esperas; `tools/servidor-local.mjs` | mergeado em 2026-09-29 20:22 UTC (CI verde nos dois jobs); **71 ✓ · 0 ✗** em produção + 7 verificações novas do lote 7 |
+| #254 | 2026100101 | rodada 7 (sete auditores): sessão e abas, decisões e trava do card, foto e mapa ampliados, offline, presença, filtros, textos e modo dev | 87 ✓ · 1 ✗ (o "Lida" numa corrida da conversa → lote 9) |
+| #255 | 2026100102 | rodada 8: duas abas e sessão, fila e trava do card, foto ampliada, offline, presença, filtros e textos | **89 ✓ · 0 ✗** em produção |
+| #256 | 2026100201 | rodada 9: conta e duas abas, pareamento, fila e card, foto ampliada, offline, presença, filtros e extensão, treino e Histórico | **97 ✓ · 0 ✗** em produção |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
