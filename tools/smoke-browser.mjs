@@ -2927,6 +2927,74 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
   }
 }
 
+// ── Treino: o "Sair" pelo TECLADO leva o foco ao ✕ do card real ──────────
+// O "Sair" some com a faixa do treino e o card real volta: pelo teclado, o foco
+// caía no <body> (R7-2-06, MEDIDO no Chromium e no WebKit; auditoria de
+// 2026-10-02), e quem usa teclado ou leitor de tela recomeçava do topo da
+// página. A regra do C10 pra todo controle que some com o foco: ele vai ao ✕ do
+// card que volta (`prometerFocoAoCardQueVem`). O CONTROLE é o mouse — o foco não
+// é movido —, e a PRÉ-CONDIÇÃO é o Enter cair no "Sair" focado: sem ela, "o foco
+// não foi pro ✕" mediria uma tecla que nem chegou ao botão.
+for (const como of ['teclado', 'mouse']) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    API.setSession('token-de-teste');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.serverTotal = 2; AppState.hasMore = false;
+    const real = (i) => ({ venueID: 'real' + i, updateRequestID: 'r' + i, name: 'Local Real ' + i,
+      categories: ['OTHER'], address: 'Rua Real, ' + i, updateType: 'Novo Local', updateTypeKey: 'VENUE',
+      purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'x', changes: [], imageUrls: [], mapa: null, dateAdded: Date.now() });
+    AppState.queue = [real(1), real(2)];
+    AppState.currentPlace = AppState.queue[0];
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(); updateStats(); showLoading(false);
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showCurrentPlace();
+    Treino.entrar();
+  });
+  await esperarNaPagina(page, () => Treino.ativo && !document.getElementById('treinoBanner').classList.contains('hidden'), 5000);
+  let focado = null;
+  if (como === 'teclado') {
+    await page.focus('#treinoSairBtn');
+    focado = await page.evaluate(() => document.activeElement && document.activeElement.id);
+    await page.keyboard.press('Enter');
+  } else {
+    await page.click('#treinoSairBtn');
+  }
+  // Espera o FIM (o card real de volta na tela), nunca um prazo; o foco
+  // prometido pousa logo depois de o card ser desenhado.
+  const voltou = await esperarNaPagina(page, () => !Treino.ativo && !!cardDaFrente()
+    && AppState.currentPlace && AppState.currentPlace.updateRequestID === 'r1', 5000);
+  if (como === 'teclado') {
+    await esperarNaPagina(page, () => !!document.activeElement && document.activeElement.classList.contains('card-btn-reject'), 3000);
+  } else {
+    await doisQuadros(page);
+  }
+  const r = await page.evaluate(() => {
+    const a = document.activeElement;
+    return { treino: Treino.ativo, frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      foco: !a || a === document.body ? 'body' : (a.id || String(a.className).split(' ')[0]),
+      noCardDaFrente: !!(a && cardDaFrente() && cardDaFrente().contains(a)) };
+  });
+  const onde = `treino, "Sair" pelo ${como}`;
+  checa(voltou.ok && !r.treino && r.frente === 'r1', `${onde}: PRÉ-CONDIÇÃO — o card real não voltou`, JSON.stringify(r));
+  if (como === 'teclado') {
+    checa(focado === 'treinoSairBtn', `${onde}: PRÉ-CONDIÇÃO — o "Sair" não estava com o foco antes do Enter (${focado})`);
+    checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+      `${onde}: a faixa sumiu e o foco ficou em ${r.foco} — quem usa teclado recomeça do topo`, JSON.stringify(r));
+  } else {
+    checa(!r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+  }
+  await ctx.close();
+}
+
 
 // ── Os controles do cabeçalho, CLICADOS ─────────────────────────────────
 // `semAnimar is not defined` foi pra produção e quebrou o botão de ATUALIZAR.
@@ -9573,6 +9641,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + aquecimento dos próximos cards medido pela REDE (profundidade, largura e prioridade)`
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
+  + `, + o "Sair" do treino pelo TECLADO levando o foco ao ✕ do card real que volta (com o CONTROLE do mouse, que não move o foco)`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
