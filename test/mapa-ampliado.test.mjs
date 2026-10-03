@@ -194,6 +194,8 @@ function mapaQueFecha() {
     MAPA_Z_NAV_MAX: M.MAPA_Z_NAV_MAX, MAPA_Z_NAV_MIN: M.MAPA_Z_NAV_MIN, STREET_VIEW_URL: 'https://www.google.com/maps/@',
     CamadaVoltar: { empilhar() {}, consumir() { log.push('consumiu'); } },
     devolverFocoDaAmpliacao: () => log.push('foco'),
+    // A camada que fecha pede o "Como funciona" adiado (R7-7-01, do lote do Histórico): aqui não é o assunto.
+    aoFecharCamada: () => {},
     // Os pontos do pedido (os nomes são de TERCEIRO: o duplicado e a entrada).
     pontosDoMapa: (p) => [{ ll: p.mapa.centro, cls: 'mapa-atual', rot: 'card.map.aqui' },
       { ll: [p.mapa.centro[0] + 0.0002, p.mapa.centro[1]], cls: 'mapa-entrada mapa-e-nova', rot: 'card.map.entradaNova', nome: 'EntradaPRIV' },

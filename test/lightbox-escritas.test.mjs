@@ -2356,6 +2356,8 @@ function trancaComFoco({ aberta = true } = {}) {
     document: doc, acoesTravadas: () => estado.travado, cardDaFrente: () => null, editandoNome: () => false,
     renomeacaoNoAr: () => false, Lightbox: { isOpen: () => aberta, place: null }, atualizarBotaoSalvarNome: () => {},
     aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {},
+    // o "Como funciona" adiado que a trava solta pede (R7-7-01, do lote do Histórico): aqui não é o assunto
+    pedirComoFuncionaAdiado: () => {},
   };
   const app = new Function(...Object.keys(deps), 'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['focavelNaTela', 'manterFocoNoLightbox', 'aplicarTravaDeAcao'].map(fatiar).join('\n')

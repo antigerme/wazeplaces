@@ -180,6 +180,8 @@ test('R7-7-01: a aplicarTravaDeAcao de verdade pede o "Como funciona" quando a t
     document: { getElementById: () => null }, acoesTravadas: () => estado.travado, cardDaFrente: () => card,
     guardarFocoDaTrava: () => {}, editandoNome: () => false, renomeacaoNoAr: () => false, Lightbox: { place: null },
     atualizarBotaoSalvarNome: () => {}, dispensarAvisoDaTrava: () => {}, aplicarFocoDoTeclado: () => {},
+    // o foco da foto ampliada na trava (R7-3-06, do lote da foto): aqui não é o assunto
+    manterFocoNoLightbox: () => {},
     pedirComoFuncionaAdiado: () => pedidos.push(estado.travado ? 'travado' : 'livre'),
   };
   const chaves = Object.keys(deps);
