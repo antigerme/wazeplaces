@@ -17559,7 +17559,9 @@ API.aoProvarRede = () => {
     // nela: o que estava preso pra SAIR e o que falta ENTRAR.
     offlineTalvezVarrer();
     refazerPerfilSeFaltar();
-    recuperarCardSemFoto();
+    // A resposta que chegou JÁ prova a rede: a foto que ainda falhar é falha
+    // dela, e o card sai do "precisa de sinal" (ver `recuperarCardSemFoto`).
+    recuperarCardSemFoto({ redeProvada: true });
     presencaWmeRefazerDesligar();
     // O token do tempo real que faltou ou falhou: sem isto, nada mais o pedia
     // de novo e o chat ficava sem tempo real até reabrir o app. Com o teto de
@@ -18666,30 +18668,73 @@ function marcarCardSemFoto(card, place) {
 // VIVOS — `marcarCardSemFoto` só trava sem rede (ou no lie-fi, até a primeira
 // resposta chegar) —, ou seja decidir foto não vista. Com a prova, o redesenho
 // já acha a foto no cache HTTP.
-let provandoFotoDe = null;
-function recuperarCardSemFoto() {
+//
+// A foto que o Waze TIROU DO AR (404) nunca passa na prova: o card aberto sem
+// sinal seguia com "A foto precisa de sinal" e ✕/✓ travados com a rede DE
+// VOLTA, até a pessoa pular — o mesmo pedido aberto com sinal mostra "Sem
+// Imagem" com ✕/✓ vivos (R7-4-06, MEDIDO: o `online` chega, a prova sai e dá
+// 404, e o card fica como estava). A falha da prova sozinha não solta o card (o
+// `online` chega antes de a rede passar tráfego); a rede PROVADA solta: uma
+// resposta NOSSA chegou (`redeProvada`, do `API.aoProvarRede`), ou o servidor
+// da FOTO respondeu (`fotoServidorResponde`). Aí a falha é da foto, e o
+// redesenho é o card aberto com sinal — o `marcarCardSemFoto` não trava com
+// rede. Depois do `online`, nenhuma resposta nossa chega sozinha (o free tier
+// não deixa pedir uma), e é o servidor da foto que prova a rede.
+let provandoFotoDe = null;   // { place, redeProvada }: a prova em voo
+function recuperarCardSemFoto({ redeProvada = false } = {}) {
     if (navigator.onLine === false) return;
     const place = AppState.currentPlace;
     const card = cardDaFrente();
     if (!place || !card || !card.querySelector('.card-sem-foto')) return;
-    if (provandoFotoDe === place) return;
+    if (provandoFotoDe && provandoFotoDe.place === place) {
+        // A prova em voo vale pela rede provada que chegar durante ela.
+        if (redeProvada) provandoFotoDe.redeProvada = true;
+        return;
+    }
     const f = fotosDoCard(place);
     const u = f.urls[f.inicial];
     if (!u) return;
-    provandoFotoDe = place;
-    const prova = new Image();
-    prova.onload = () => {
-        provandoFotoDe = null;
+    const prova = { place, redeProvada };
+    provandoFotoDe = prova;
+    const src = urlDaFoto(u);
+    const soltar = () => { if (provandoFotoDe === prova) provandoFotoDe = null; };
+    const redesenhar = (porque) => {
+        soltar();
         // O card pode ter mudado, ou estar no meio de um arraste (o `transform`
         // é do gesto): aí não se mexe nele; a próxima prova de rede tenta de novo.
         if (AppState.currentPlace !== place) return;
         const agora = cardDaFrente();
         if (!agora || !agora.querySelector('.card-sem-foto') || agora.style.transform) return;
-        dfato('foto.voltou');
+        dfato(porque);
         showCurrentPlace();
     };
-    prova.onerror = () => { provandoFotoDe = null; };
-    prova.src = urlDaFoto(u);
+    const img = new Image();
+    img.onload = () => redesenhar('foto.voltou');
+    img.onerror = () => {
+        if (prova.redeProvada) return redesenhar('foto.falhouComRede');
+        fotoServidorResponde(src).then((respondeu) => {
+            if (respondeu || prova.redeProvada) redesenhar('foto.falhouComRede');
+            else soltar();
+        });
+    };
+    img.src = src;
+}
+
+// O servidor da foto RESPONDE? O CDN de foto não manda CORS, então o pedido vai
+// sem (`no-cors`): a resposta é opaca, mas o `fetch` só REJEITA quando a rede
+// falha — qualquer resposta HTTP, o 404 da foto tirada do ar inclusive,
+// resolve. `no-store`: pergunta à rede e não guarda nada (a foto do card é a do
+// cache da `<img>`, que é outra entrada). Com teto: rede pendurada não anda. O
+// host da foto já está no `connect-src` das três cópias da CSP.
+const FOTO_SONDA_TETO_MS = 10 * 1000;
+async function fotoServidorResponde(src) {
+    const ctrl = new AbortController();
+    const teto = setTimeout(() => ctrl.abort(), FOTO_SONDA_TETO_MS);
+    try {
+        await fetch(src, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', signal: ctrl.signal });
+        return true;
+    } catch (e) { return false; }
+    finally { clearTimeout(teto); }
 }
 
 // Um pedido cuja decisão o Waze RECUSOU de vez (`unknown`, ou a fila de saída

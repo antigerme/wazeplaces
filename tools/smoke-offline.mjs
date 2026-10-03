@@ -619,6 +619,41 @@ diz('e o ✕ e o ✓ destravam — agora há foto pra decidir', !voltou.rejTrava
 page.off('request', contarFoto11);
 aviao = false;
 await ctx.setOffline(false);
+// 6f) A FOTO QUE O WAZE TIROU DO AR, e a rede de volta (R7-4-06). Sem sinal o
+// card de foto trava e avisa (certo: não dá pra saber). Com o sinal de volta, a
+// prova da foto dá 404 — e nada redesenhava: o card seguia dizendo que a foto
+// precisava de sinal, com ✕/✓ travados, até a pessoa pular, enquanto o mesmo
+// pedido aberto com sinal mostra "Sem Imagem" com ✕/✓ vivos. O servidor DA FOTO
+// responde (o 404 é resposta), e isso prova a rede. O 1º tempo do 6e (o
+// `online` com a rede sem passar: a sonda também não responde) é o CONTROLE de
+// que a trava não sai à toa.
+const FOTO_REMOVIDA = 'https://venue-image.waze.com/thumbs/thumb700_removida404';
+const fotoRemovida = (r) => (aviao ? r.abort('internetdisconnected')
+  : r.fulfill({ status: 404, contentType: 'text/plain', body: 'nao', headers: { 'cache-control': 'no-store' } }));
+await ctx.route('**/thumb700_removida404*', fotoRemovida);
+const pedidosRemovida = [];
+const contarRemovida = (r) => { if (r.url().indexOf('removida404') !== -1) pedidosRemovida.push(r.url()); };
+page.on('request', contarRemovida);
+aviao = true; await ctx.setOffline(true);
+await montar([{ ...PLACE(12, 'NEW_PHOTO'), imageUrls: [FOTO_REMOVIDA] }]);
+await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
+const removidaSemRede = await lerFotoDoCard();
+diz('PRÉ-CONDIÇÃO: sem rede, o card da foto que o Waze tirou do ar avisa, com ✕ e ✓ travados',
+  removidaSemRede.temAviso && removidaSemRede.rejTravado && removidaSemRede.lidoTravado, JSON.stringify(removidaSemRede));
+const antesDaRemovida = pedidosRemovida.length;
+aviao = false;
+await ctx.setOffline(false);
+const saiuDoAviso = await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  return !!(c && !c.querySelector('.card-sem-foto')); }, 10000);
+const removidaComRede = await lerFotoDoCard();
+diz('a foto tirada do AR, com a rede de volta: o card sai do "precisa de sinal" e destrava ✕ e ✓ — como o aberto com sinal (R7-4-06)',
+  saiuDoAviso.ok && !removidaComRede.temAviso && !removidaComRede.rejTravado && !removidaComRede.lidoTravado,
+  JSON.stringify({ saiuDoAviso, removidaComRede }));
+diz('CONTROLE: a foto foi pedida de novo com a rede de volta e NÃO veio — o 404 é dela, não da rede',
+  pedidosRemovida.length > antesDaRemovida && !removidaComRede.fotoVisivel,
+  JSON.stringify({ pedidos: pedidosRemovida.length - antesDaRemovida, removidaComRede }));
+page.off('request', contarRemovida);
+await ctx.unroute('**/thumb700_removida404*', fotoRemovida);
 
 secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
