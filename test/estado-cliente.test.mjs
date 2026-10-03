@@ -366,9 +366,13 @@ function montarComoFunciona() {
   const deps = {
     AppState, Treino: { ativo: false }, cardDaFrente: () => ({}),
     topOpenModal: () => camada.modal, Lightbox: { isOpen: () => camada.foto }, MapaLightbox: { isOpen: () => camada.mapa },
-    savePreferences: () => {}, abrirComoFunciona: () => abertos.push('comoFunciona'),
+    savePreferences: () => {}, openModal: (id) => abertos.push(id === 'comoFuncionaModal' ? 'comoFunciona' : id),
+    // As outras esperas do adiado (a janela do Desfazer, o voltar no ar, o voltar
+    // do aparelho) moram em test/como-funciona; aqui, nenhuma.
+    acoesTravadas: () => false, CamadaVoltar: { consumindo: false },
+    comoFuncionaEsperaVoltar: false, comoFuncionaEsperaGesto: false,
   };
-  const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'mostrarComoFuncionaSePrimeiraVez'], deps,
+  const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'abrirComoFunciona', 'mostrarComoFuncionaSePrimeiraVez'], deps,
     ['mostrarComoFuncionaSePrimeiraVez']);
   return { mostrar: mostrarComoFuncionaSePrimeiraVez, AppState, abertos, camada };
 }

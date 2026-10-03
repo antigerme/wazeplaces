@@ -487,6 +487,9 @@ function montarCamadas({ abertos = [], lightbox = false, mapa = false, profundid
   const deps = {
     document, history, Lightbox, MapaLightbox, dfato() {}, lastFocusedBeforeModal: null, devolverFoco() {},
     LIMPEZA_AO_FECHAR: new Proxy({}, { get: (t, id) => () => limpezas.push(id) }),
+    // O "Como funciona" adiado que espera a camada fechar (R7-7-01): não é o
+    // assunto aqui (test/como-funciona).
+    aoFecharCamada() {},
   };
   const app = montar(['fecharCamadasAbertas', 'closeModal', 'topOpenModal'], deps,
     ['fecharCamadasAbertas', 'closeModal', 'CamadaVoltar'], constante('MODAL_IDS') + '\n' + objeto('CamadaVoltar'));
@@ -949,7 +952,7 @@ function montarFoco({ alvo, reserva = null }) {
   const deps = {
     document: { getElementById: (id) => (id === 'helpBtn' ? helpBtn : id === 'pairShowModal' ? modal : outros[id] || null), body: { style: {} } },
     dfato() {}, CamadaVoltar: { consumir() {} }, LIMPEZA_AO_FECHAR: {}, Lightbox: { isOpen: () => false },
-    lastFocusedBeforeModal: alvo, ultimoFocoForaDasCamadas: reserva,
+    lastFocusedBeforeModal: alvo, ultimoFocoForaDasCamadas: reserva, aoFecharCamada() {},
   };
   const { closeModal } = montar(['closeModal', 'devolverFoco', 'dentroDeCamada', 'focavelNaTela', 'topOpenModal'], deps,
     ['closeModal'], constante('MODAL_IDS'));

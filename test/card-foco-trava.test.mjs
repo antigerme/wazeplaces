@@ -450,6 +450,9 @@ function montarTrava() {
     Lightbox: { isOpen: () => false, place: null }, MapaLightbox: { isOpen: () => false },
     editandoNome: () => false, renomeacaoNoAr: () => false, atualizarBotaoSalvarNome: () => {},
     dispensarAvisoDaTrava: () => {},
+    // O "Como funciona" adiado que espera o card destravar (R7-7-01): não é o
+    // assunto aqui (test/como-funciona).
+    pedirComoFuncionaAdiado: () => {},
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [

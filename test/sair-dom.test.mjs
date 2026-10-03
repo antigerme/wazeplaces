@@ -124,6 +124,7 @@ function montar() {
     pararTickerPareamento() {}, limparQrPareamento() {}, mostrarInstrucoesDoPareamento() {},
     fecharEdicaoNome() {}, avancarSeAprovado() {}, devolverFocoDaAmpliacao() {},
     Treino: { sair() {} },
+    aoFecharCamada() {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
   };
   const MODAL_IDS = MODAIS;
   const corpo = [

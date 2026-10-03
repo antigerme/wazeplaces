@@ -717,9 +717,10 @@ test('L9 a pílula do nome: travada na janela, rótulo na edição, viva fora do
   // (test/card-foco-trava); aqui eles não são o assunto.
   const rodar = (travado, editando) => new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome',
     'aprovandoAgora', 'excluindoAgora', 'renomeacaoNoAr', 'Lightbox', 'atualizarBotaoSalvarNome',
-    'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'guardarFocoDaTrava', fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
+    'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'guardarFocoDaTrava', 'pedirComoFuncionaAdiado',
+    fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
     { getElementById: (id) => el[id] || null }, () => travado, () => null, () => editando,
-    false, false, () => false, { place: null }, () => {}, () => {}, () => {}, () => {});
+    false, false, () => false, { place: null }, () => {}, () => {}, () => {}, () => {}, () => {});
   rodar(false, false);
   assert.equal(el.lightboxNomeBtn.disabled, false, 'CONTROLE: sem janela e sem edição a pílula ficou morta');
   rodar(true, false);
@@ -935,12 +936,12 @@ test('L24 a escrita de foto SEM janela no ar segura o botão, mesmo quando a tra
   // `aplicarFocoDoTeclado`/`dispensarAvisoDaTrava`: o que a trava faz ao mudar
   // no card (lote 8 do card, C10 e C14); aqui não são o assunto.
   const app = new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome', 'renomeacaoNoAr', 'Lightbox',
-    'atualizarBotaoSalvarNome', 'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava',
+    'atualizarBotaoSalvarNome', 'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'pedirComoFuncionaAdiado',
     'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['estadoAprovando', 'lixeiraOcupada', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
     + '\nreturn { estadoAprovando, lixeiraOcupada, aplicarTravaDeAcao };')(
     { getElementById: (id) => el[id] || null }, () => false, () => null, () => false, () => false, { place: null }, () => {},
-    () => {}, () => {});
+    () => {}, () => {}, () => {});
   app.estadoAprovando(true);
   assert.equal(el.lightboxApprove.disabled, true, 'CONTROLE: com a aprovação no ar o "Aprovar" não travou');
   app.aplicarTravaDeAcao();                         // abrir/fechar a edição do nome, fechar o lightbox
@@ -2142,6 +2143,7 @@ function fotoQueFecha() {
     document: { getElementById: (id) => els[id] || null, body: { style: {} }, activeElement: null },
     CamadaVoltar: { empilhar() {}, consumir() {} }, mostrarNomeNoLightbox: () => {}, fecharEdicaoNome: () => {},
     avancarSeAprovado: () => {}, topOpenModal: () => null, anunciarNoLightbox: () => {}, devolverFocoDaAmpliacao: () => {},
+    aoFecharCamada: () => {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
   };
   const L = new Function(...Object.keys(deps), `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, placeName: '', renders: 0,

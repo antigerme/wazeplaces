@@ -1053,6 +1053,8 @@ function closeModal(id, { viaHistorico = false } = {}) {
     const alvo = lastFocusedBeforeModal;
     lastFocusedBeforeModal = null;
     devolverFoco(alvo);
+    // O "Como funciona" que esperava a camada fechar (R6-7-2, R7-7-01).
+    aoFecharCamada(viaHistorico);
 }
 
 // Pra onde o foco volta quando um modal fecha. Primeiro, quem o abriu — mas ele
@@ -2323,6 +2325,10 @@ const Lightbox = {
         const quem = this._quemAbriu;
         this._quemAbriu = null;
         devolverFocoDaAmpliacao(quem, ['.card-image', '.card-map']);
+        // O "Como funciona" que esperava a camada fechar — e o card que o
+        // `avancarSeAprovado` montou aqui em cima pediu o dele no mesmo tique
+        // do voltar pendente (R7-3-01): os dois decidem depois, na microtarefa.
+        aoFecharCamada(viaHistorico);
     },
     prev() {
         if (this.urls.length < 2) return;
@@ -10315,6 +10321,47 @@ function agirNoPedidoDoGesto(alvo, handler) {
 // Mora no `preferences` (que já é persistido e já é apagado no logout) de
 // propósito: chave nova no localStorage exigiria decisão de logout própria e
 // entraria na varredura do test/layout — e não há nada aqui que justifique uma.
+//
+// Ele só abre com a TELA DO CARD LIVRE, e quem pede passa por
+// `pedirComoFuncionaAdiado`, que decide DEPOIS da tarefa que pediu (numa
+// microtarefa, o mesmo padrão do foco prometido no `renderCurrentCard`). O
+// pedido mais comum é o card que monta (`showCurrentPlace`), e no GESTO ele
+// vem antes de o `scheduleAction` abrir a janela do Desfazer: decidido na
+// hora, o diálogo adiado (R6-7-2) abria no 1º ✕ e o banner do Desfazer (z-70)
+// ficava por cima do "Entendi" e do "Quero treinar antes" — no iPhone SE e
+// com o celular deitado, o toque caía no "Desfazer" e desfazia o ✕, com o
+// diálogo ainda aberto; e pelo teclado o foco ia pro ⓘ, perdendo o ✕ do card
+// seguinte (R7-7-01, auditoria de 2026-10-02). Os outros pedidos são os
+// momentos em que a tela fica livre: o card que destrava (`aplicarTravaDeAcao`,
+// o fim da janela) e a camada que fecha (`aoFecharCamada`) — antes de
+// qualquer gesto, como no 1º card.
+let comoFuncionaPedido = false;
+function pedirComoFuncionaAdiado() {
+    if (comoFuncionaPedido || AppState.preferences.comoFuncionaVisto) return;
+    comoFuncionaPedido = true;
+    queueMicrotask(() => {
+        comoFuncionaPedido = false;
+        // Acessório: uma falha aqui nunca derruba quem pediu (o card, a trava).
+        try { mostrarComoFuncionaSePrimeiraVez(); } catch (e) { console.error(e); }
+    });
+}
+
+// Um voltar NOSSO no ar (`CamadaVoltar.consumindo`): a camada fechou por um
+// caminho do app e o `history.back()` dela ainda não chegou. A tentativa espera
+// o `popstate` que o consome (o ouvinte logo abaixo).
+let comoFuncionaEsperaVoltar = false;
+// O VOLTAR DO APARELHO fechou uma camada: até um gesto novo da pessoa, o
+// diálogo não abre. Empilhar uma entrada depois de um voltar do navegador SEM
+// gesto novo faz o Chrome marcar as entradas do app como "puláveis" (History
+// Manipulation Intervention: o voltar iniciado pelo navegador tira o valor da
+// ativação de antes, e só um gesto novo devolve), e o voltar seguinte SAI do
+// app em vez de fechar o diálogo. MEDIDO pelo aviso que o próprio Chromium dá
+// (`NavigationEntryMarkedSkippable`, no Audits do DevTools): a foto ampliada
+// fechada pelo voltar depois de uma aprovação abria o adiado e dava o aviso.
+// O voltar NOSSO (`history.back()` do app) não tira o valor da ativação: depois
+// dele, empilhar é seguro.
+let comoFuncionaEsperaGesto = false;
+
 function mostrarComoFuncionaSePrimeiraVez() {
     if (AppState.preferences.comoFuncionaVisto) return;
     if (Treino.ativo) return;   // o treino É o "como funciona"; ver `Treino.entrar`
@@ -10327,11 +10374,60 @@ function mostrarComoFuncionaSePrimeiraVez() {
     // dela — apagava o QR do "Conectar outro aparelho" no meio do pareamento e
     // jogava fora a escolha ainda não aplicada dos Filtros (R6-7-2, auditoria de
     // 2026-10-01). É interromper sem ser chamado, desfazendo o que ela fazia.
-    // Sem marcar como visto: ele espera o próximo card montado sem camada.
+    // Sem marcar como visto: ele espera a camada fechar (`aoFecharCamada`).
     if (!semCamadaAberta()) return;
-    AppState.preferences.comoFuncionaVisto = true;
-    savePreferences();
+    // Nem com o card TRAVADO, e a trava que mais aparece é a janela do
+    // Desfazer: o banner dela fica por cima dos modais e cobre os botões do
+    // diálogo (R7-7-01). Ele espera o card destravar (`aplicarTravaDeAcao`).
+    // Explicar os botões de um card travado também não faria sentido.
+    if (acoesTravadas()) return;
+    // Nem com um voltar NOSSO no ar: o `openModal` empilharia a entrada do
+    // diálogo no mesmo tique do `history.back()` pendente, que a come (gotcha
+    // #65) — e o "Entendi", o Esc ou o voltar do aparelho tiravam a pessoa do
+    // app. Era o fechar da foto ampliada que ANDA a fila depois de uma
+    // aprovação (R7-3-01, auditoria de 2026-10-02).
+    if (CamadaVoltar.consumindo) { comoFuncionaEsperaVoltar = true; return; }
+    if (comoFuncionaEsperaGesto) return;
     abrirComoFunciona();
+}
+
+// O `popstate` do voltar NOSSO chegou: a tentativa que esperava por ele vai de
+// novo. Registrado DEPOIS do ouvinte do `CamadaVoltar` (a ordem do arquivo é a
+// ordem dos ouvintes), então o `consumindo` aqui já é o depois.
+window.addEventListener('popstate', () => {
+    if (!comoFuncionaEsperaVoltar || CamadaVoltar.consumindo) return;
+    comoFuncionaEsperaVoltar = false;
+    pedirComoFuncionaAdiado();
+});
+
+// Um gesto novo da pessoa: as mesmas regras da ativação do navegador (HTML,
+// "activation triggering input event") — a tecla que não é o Esc, o botão do
+// mouse que desce e o dedo ou a caneta que SOBEM. Em captura, pra valer mesmo
+// quando alguém para a propagação.
+function gestoDaPessoaParaOComoFunciona(ev) {
+    if (!comoFuncionaEsperaGesto) return;
+    if (ev.type === 'keydown' && ev.key === 'Escape') return;
+    if (ev.type === 'pointerdown' && ev.pointerType !== 'mouse') return;
+    if (ev.type === 'pointerup' && ev.pointerType === 'mouse') return;
+    comoFuncionaEsperaGesto = false;
+}
+for (const tipo of ['keydown', 'pointerdown', 'pointerup']) {
+    window.addEventListener(tipo, gestoDaPessoaParaOComoFunciona, true);
+}
+
+// Uma camada FECHOU (modal, foto ou mapa ampliados). Por um caminho do app (✕,
+// Esc, fundo, "Entendi"): o diálogo que esperava tenta de novo — antes de
+// qualquer gesto, como no 1º card —, e a tentativa espera o voltar nosso ser
+// consumido. Pelo VOLTAR do aparelho (`viaHistorico`): espera um gesto novo
+// (ver `comoFuncionaEsperaGesto`). A queda da sessão fecha tudo pelo mesmo
+// caminho (`fecharCamadasAbertas`) e também espera: é só o adiado esperando o
+// próximo toque. Chamado no FIM de cada fechamento; o que o próprio fechamento
+// pediu no meio (a foto que anda a fila ao fechar) é decidido depois, na
+// microtarefa, já com a marca.
+function aoFecharCamada(viaHistorico) {
+    if (AppState.preferences.comoFuncionaVisto) return;
+    if (viaHistorico) { comoFuncionaEsperaGesto = true; return; }
+    pedirComoFuncionaAdiado();
 }
 
 // Direto no `openModal`, mesmo vindo da Ajuda: ele JÁ esconde o modal anterior
@@ -10340,7 +10436,16 @@ function mostrarComoFuncionaSePrimeiraVez() {
 // era exatamente isso que quebrava: `closeModal` CONSOME a entrada do histórico
 // e o `openModal` seguinte, vendo nenhum modal aberto, empilhava outra. Medido,
 // o Esc depois disso levava a `about:blank` — a pessoa saía do app inteiro.
+//
+// Quem abre, à mão ou sozinho, dá o diálogo por VISTO. O "Ver de novo" da Ajuda
+// aberto enquanto a fila carregava não marcava: o card montava com ele aberto,
+// o adiado ficava esperando, e o diálogo reabria no 1º gesto — com o banner do
+// Desfazer por cima (R7-7-02, auditoria de 2026-10-02).
 function abrirComoFunciona() {
+    if (!AppState.preferences.comoFuncionaVisto) {
+        AppState.preferences.comoFuncionaVisto = true;
+        savePreferences();
+    }
     openModal('comoFuncionaModal');
 }
 
@@ -10386,8 +10491,10 @@ function showCurrentPlace() {
     }
     // FORA do try de propósito: uma falha aqui não pode fazer o card ser tratado
     // como quebrado e o pedido ser DESCARTADO (o catch acima faz `queue.shift()`
-    // e decrementa o total). O aviso é acessório; o pedido é o produto.
-    try { mostrarComoFuncionaSePrimeiraVez(); } catch (e) { console.error(e); }
+    // e decrementa o total). O aviso é acessório; o pedido é o produto. E é
+    // PEDIDO, não aberto: no gesto, a janela do Desfazer abre logo depois desta
+    // linha (ver `pedirComoFuncionaAdiado`, R7-7-01).
+    try { pedirComoFuncionaAdiado(); } catch (e) { console.error(e); }
 }
 
 let primeiroCardAnotado = false;   // `tela.primeiroCard`: uma vez por página
@@ -11329,6 +11436,8 @@ const MapaLightbox = {
         const quem = this._quemAbriu;
         this._quemAbriu = null;
         devolverFocoDaAmpliacao(quem, ['.card-map', '.card-image']);
+        // O "Como funciona" que esperava a camada fechar (R7-7-01).
+        aoFecharCamada(!!viaHistorico);
     },
 
     // Redesenha a grade. Tiles já baixados são REAPROVEITADOS (mapa por chave
@@ -12378,9 +12487,13 @@ function aplicarTravaDeAcao() {
     // O ✓ da edição também (o Enter vai pelo `confirmarRenomear`, que confere a
     // trava): quem escreve o `disabled` dele é o `atualizarBotaoSalvarNome`.
     if (editandoNome()) atualizarBotaoSalvarNome();
-    // A trava mudou: acabou, o aviso dela sai de cima dos botões (C14); e o
-    // foco prometido ao teclado pode pousar agora (C10).
+    // A trava mudou: acabou, o aviso dela sai de cima dos botões (C14); o
+    // "Como funciona" que esperava o card destravar (o fim da janela do
+    // Desfazer, sobretudo) pode abrir — decidido na microtarefa, DEPOIS do foco
+    // da última linha: fechado, ele o devolve ao ✕ que o teclado acabou de
+    // ganhar (R7-7-01); e o foco prometido ao teclado pode pousar agora (C10).
     if (!travado) dispensarAvisoDaTrava();
+    if (!travado) pedirComoFuncionaAdiado();
     aplicarFocoDoTeclado();
 }
 
