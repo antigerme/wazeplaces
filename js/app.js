@@ -21377,9 +21377,24 @@ function pedidosNaJanelaDoDesfazer() {
     return Array.isArray(p.place) ? p.place.length : 1;
 }
 
-// Chamado na CONFIRMAÇÃO de uma decisão (ver `updateStats`). Conta o placar sem
-// o que ainda está na janela do Desfazer: a confirmação do pedido anterior
-// chega com o próximo já na janela, e é ele que pode ser desfeito.
+// Quantos pedidos o Waze JÁ CONFIRMOU: o acumulador do Histórico só anda no
+// pouso (`recordHistory`, sempre ANTES do `registrarAcaoConfirmada`), nunca no
+// gesto — o placar anda no gesto e conta também o que ainda está no ar e na
+// fila de saída.
+function pedidosConfirmados() {
+    const total = (loadHistory() || {})._total || {};
+    return (total.read || 0) + (total.rejected || 0);
+}
+
+// Chamado na CONFIRMAÇÃO de uma decisão (ver `updateStats`), e conta só o que
+// foi CONFIRMADO. Descontar só a janela do Desfazer não bastava: com duas
+// decisões no ar (rede lenta), a confirmação da 9ª já avisava "10 pedidos
+// tratados", com a 10ª ainda no Waze — recusada, o placar voltava a 9, o
+// interruptor ficava travado ("falta 1") e a marca de "visto" já estava gravada,
+// então o desbloqueio de verdade nunca era anunciado (R7-7-05, auditoria de
+// 2026-10-02; o mesmo com um "Rejeitar os N" no ar). O placar sem a janela
+// entra junto, pelo MENOR dos dois: o aviso leva ao interruptor, e ele obedece
+// ao placar (`canDisableUndo`) — avisar com o interruptor travado é o defeito.
 function checkUndoGateUnlock() {
     // `undefined` = a LINHA DE BASE ainda não foi estabelecida: `initUndoGateSeen`
     // não pôde decidir se este acumulado é trabalho de ANTES. Celebrar aqui
@@ -21387,7 +21402,8 @@ function checkUndoGateUnlock() {
     // Só `false` — decisão tomada, ainda não atingiu — libera a comemoração.
     if (typeof AppState.preferences.undoGateSeen !== 'boolean') return;
     if (AppState.preferences.undoGateSeen) return;
-    if (getUndoTreatedCount() - pedidosNaJanelaDoDesfazer() < getUndoUnlockThreshold()) return;
+    const tratados = Math.min(getUndoTreatedCount() - pedidosNaJanelaDoDesfazer(), pedidosConfirmados());
+    if (tratados < getUndoUnlockThreshold()) return;
     AppState.preferences.undoGateSeen = true;
     // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
     // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
@@ -21563,9 +21579,11 @@ function zerarJanelasSemUndo() {
 function checkDicaDesfazer() {
     if (AppState.preferences.dicaDesfazerVista) return;
     if (AppState.preferences.undoEnabled === false) return;   // já desligado: nada a oferecer
-    // A cota acabou de ser cruzada e a comemoração dela vem na CONFIRMAÇÃO,
-    // logo depois do fim desta janela (ver `updateStats`): ela já diz isto, e os
-    // dois banners sairiam quase juntos dizendo a mesma coisa.
+    // A cota acabou de ser cruzada e a comemoração dela vem na CONFIRMAÇÃO
+    // que a completar (ver `checkUndoGateUnlock`: conta só o confirmado): ela
+    // já diz isto, e os dois banners sairiam quase juntos dizendo a mesma coisa.
+    // Recusada a decisão que faltava, o placar desce e o `canDisableUndo` abaixo
+    // segura a dica do mesmo jeito.
     if (AppState.preferences.undoGateSeen === false && undoGateAtingido()) return;
     if ((AppState.preferences.semUndoSeguidas || 0) < DICA_SEM_UNDO) return;
     // Nunca ofereça o que não dá pra fazer AQUI: sem passar a cota o toggle está

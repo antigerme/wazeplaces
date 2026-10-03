@@ -685,9 +685,13 @@ function montarGate({ prefs, perfilGate = { rank: 5, isStaff: false }, stats = {
     AppState: { preferences: { ...prefs }, stats: { ...stats }, profile: null, devMode: { active: false } },
     preferenciasCarregadas: true, UNDO_GATE_BASE: constante('UNDO_GATE_BASE'),
     showToast: (m) => toasts.push(m), t: (k) => k, dispararConfeteNaFila: () => {}, abrirPreferenciaDoUndo: () => {},
+    // O Histórico conta o CONFIRMADO (R7-7-05): aqui nada fica no ar, então ele
+    // acompanha o placar.
+    loadHistory: () => ({ _total: { read: deps.AppState.stats.read, rejected: deps.AppState.stats.rejected } }),
   };
   const h = montar(['esquecerEscolhasDaContaAnterior', 'savePreferences', 'guardarPerfilDoPortao', 'perfilDoPortao',
-    'getUndoUnlockThreshold', 'getUndoTreatedCount', 'undoGateAtingido', 'initUndoGateSeen', 'checkUndoGateUnlock', 'canDisableUndo'], deps);
+    'getUndoUnlockThreshold', 'getUndoTreatedCount', 'undoGateAtingido', 'initUndoGateSeen', 'pedidosConfirmados',
+    'checkUndoGateUnlock', 'canDisableUndo'], deps);
   return { h, ap, toasts, deps };
 }
 // O aparelho da conta A (L6 que desligou o Desfazer e já viu tudo), cuja sessão CAIU.
@@ -736,10 +740,14 @@ test('A3: CONTROLE — sem esquecer as escolhas de A, B cruza a cota calado e ag
 // gravada — o desbloqueio de verdade, um pedido depois, nunca era anunciado
 // (auditoria de 2026-10-01, MEDIDO no navegador). Funções DE VERDADE: o gesto (o
 // `updateStats`), a confirmação (`registrarAcaoConfirmada`), a cota e a dica.
-function montarCota() {
+function montarCota({ confirmados = 29 } = {}) {
   // L2 (cota 30) com 29 tratados, a linha de base decidida ("ainda não") e 25
   // janelas sem desfazer nas costas — a dica por comportamento já pediria pra sair.
+  // `confirmados`: quantos deles o Waze JÁ confirmou (o acumulador do Histórico,
+  // R7-7-05); o resto está no ar. Cada confirmação do teste soma 1 ANTES do
+  // `registrarAcaoConfirmada`, como o `recordHistory` do app.
   const prefs = { undoEnabled: true, undoGateSeen: false, dicaDesfazerVista: false, semUndoSeguidas: 25 };
+  const hist = { _total: { read: 0, rejected: confirmados } };
   const ap = aparelho({ [constante('PERFIL_GATE_KEY')]: { rank: 1, isStaff: false }, [PREFERENCES_KEY]: prefs });
   const toasts = [];
   const deps = {
@@ -748,24 +756,27 @@ function montarCota() {
       devMode: { active: false }, pendingAction: null },
     preferenciasCarregadas: true, UNDO_GATE_BASE: constante('UNDO_GATE_BASE'), DICA_SEM_UNDO: 20,
     showToast: (m) => toasts.push(m), t: (k) => k, dispararConfeteNaFila: () => {}, abrirPreferenciaDoUndo: () => {},
-    Treino: { ativo: false },
+    Treino: { ativo: false }, loadHistory: () => hist,
   };
   const h = montar(['savePreferences', 'perfilDoPortao', 'getUndoUnlockThreshold', 'getUndoTreatedCount',
-    'undoGateAtingido', 'pedidosNaJanelaDoDesfazer', 'checkUndoGateUnlock', 'canDisableUndo', 'checkDicaDesfazer',
-    'updateStats', 'desenharPlacar', 'registrarAcaoConfirmada'], deps);
+    'undoGateAtingido', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'checkUndoGateUnlock', 'canDisableUndo',
+    'checkDicaDesfazer', 'updateStats', 'desenharPlacar', 'registrarAcaoConfirmada'], deps);
   const P = { venueID: 'v1', updateRequestID: 'u1' };
-  return { h, deps, toasts, P, prefs: deps.AppState.preferences, stats: deps.AppState.stats };
+  // O pouso de uma decisão: o Histórico conta, e ENTÃO a confirmação avalia.
+  const confirmar = (tipo, place) => { hist._total[tipo === 'read' ? 'read' : 'rejected']++; h.registrarAcaoConfirmada(tipo, place); };
+  return { h, deps, toasts, P, prefs: deps.AppState.preferences, stats: deps.AppState.stats, hist, confirmar };
 }
 
 test('R6-7-5: o gesto que cruza a cota NÃO comemora na janela; desfeito, nada fica — e o desbloqueio de verdade é anunciado', () => {
-  const m = montarCota();
+  // Dos 29 do placar, 28 confirmados: a decisão anterior (v0) ainda está no ar.
+  const m = montarCota({ confirmados: 28 });
   // O 30º ✕ (L2: cota 30): o placar sobe no GESTO e a janela abre.
   m.stats.rejected = 30;
   m.h.updateStats();
   m.deps.AppState.pendingAction = { type: 'reject', place: m.P };
   assert.deepEqual(m.toasts, [], 'comemorou no GESTO — a janela do Desfazer ainda pode devolver o pedido');
   // A confirmação de uma decisão ANTERIOR chega com este na janela: ele não conta.
-  m.h.registrarAcaoConfirmada('read', { venueID: 'v0', updateRequestID: 'u0' });
+  m.confirmar('read', { venueID: 'v0', updateRequestID: 'u0' });
   assert.deepEqual(m.toasts, [], 'comemorou contando o pedido que ainda está na janela do Desfazer');
   assert.equal(m.prefs.undoGateSeen, false);
   // Desfaz: o placar volta, a marca de "visto" segue livre.
@@ -779,10 +790,10 @@ test('R6-7-5: o gesto que cruza a cota NÃO comemora na janela; desfeito, nada f
   m.stats.rejected = 30;
   m.h.updateStats();
   assert.deepEqual(m.toasts, []);
-  m.h.registrarAcaoConfirmada('reject', m.P);
+  m.confirmar('reject', m.P);
   assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'a confirmação que cruza a cota não anunciou o desbloqueio');
   assert.equal(m.h.canDisableUndo(), true, 'o aviso leva a um interruptor travado');
-  m.h.registrarAcaoConfirmada('reject', m.P);
+  m.confirmar('reject', m.P);
   assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'anunciou duas vezes');
 });
 
@@ -793,7 +804,7 @@ test('R6-7-5: a dica das janelas sem desfazer não sai junto da comemoração da
   m.stats.rejected = 30;
   m.h.checkDicaDesfazer();
   assert.deepEqual(m.toasts, [], 'a dica saiu e, um instante depois, a comemoração dizendo a mesma coisa');
-  m.h.registrarAcaoConfirmada('reject', m.P);
+  m.confirmar('reject', m.P);
   m.h.checkDicaDesfazer();
   assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'saiu a dica depois da comemoração (ou nenhuma das duas)');
   // CONTROLE: quem já passou da cota antes (a linha de base marcou "visto") recebe a dica.
@@ -802,6 +813,72 @@ test('R6-7-5: a dica das janelas sem desfazer não sai junto da comemoração da
   c.stats.rejected = 30;
   c.h.checkDicaDesfazer();
   assert.deepEqual(c.toasts, ['toast.undoHint'], 'a dica por comportamento sumiu pra quem já tinha passado da cota');
+});
+
+// ═══ R7-7-05 · o aviso "o Desfazer virou opcional" conta só o CONFIRMADO ══════
+// Descontar só a janela do Desfazer não bastava: com DUAS decisões no ar (rede
+// lenta), a confirmação da 1ª já avisava "N pedidos tratados", com a 2ª ainda no
+// Waze. Recusada, o placar voltava pra baixo da cota, o interruptor ficava
+// travado ("falta 1") e a marca de "visto" já estava gravada — o desbloqueio de
+// verdade nunca era anunciado (auditoria de 2026-10-02, MEDIDO no navegador; o
+// mesmo com um "Rejeitar os N" no ar). O que conta é o acumulador do Histórico,
+// que só anda no pouso.
+test('R7-7-05: com DUAS decisões no ar, a confirmação da 1ª não avisa; recusada a 2ª, nada fica — e o desbloqueio de verdade é anunciado', () => {
+  // 28 confirmados; A e B saem (o placar vai a 30, a cota do L2) e ficam no ar.
+  const m = montarCota({ confirmados: 28 });
+  m.stats.rejected = 30;
+  m.h.updateStats();
+  // A confirma: 29 confirmados, B ainda no Waze.
+  m.confirmar('reject', { venueID: 'vA', updateRequestID: 'uA' });
+  assert.deepEqual(m.toasts, [], 'DEFEITO: avisou contando a decisão que ainda está no ar');
+  assert.equal(m.prefs.undoGateSeen, false);
+  // B é recusada de vez: o placar desce (o `handleActionResult`).
+  m.stats.rejected = 29;
+  m.h.updateStats();
+  assert.equal(m.h.canDisableUndo(), false, 'PRÉ-CONDIÇÃO: com a recusa, o interruptor voltou a travar');
+  assert.deepEqual(m.toasts, [], 'o aviso saiu e leva a um interruptor travado');
+  assert.equal(m.prefs.undoGateSeen, false, 'a marca de "visto" foi gravada — o desbloqueio de verdade nunca seria anunciado');
+  // C sai e confirma: 30 confirmados — aí sim, com o interruptor livre.
+  m.stats.rejected = 30;
+  m.confirmar('reject', { venueID: 'vC', updateRequestID: 'uC' });
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'o desbloqueio de verdade não foi anunciado');
+  assert.equal(m.h.canDisableUndo(), true);
+});
+
+test('R7-7-05: CONTROLE — a 2ª decisão confirma, e o aviso sai na confirmação DELA, uma vez', () => {
+  const m = montarCota({ confirmados: 28 });
+  m.stats.rejected = 30;
+  m.confirmar('reject', { venueID: 'vA', updateRequestID: 'uA' });
+  assert.deepEqual(m.toasts, []);
+  m.confirmar('reject', { venueID: 'vB', updateRequestID: 'uB' });
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'a confirmação que completa a cota não avisou');
+  assert.equal(m.h.canDisableUndo(), true);
+  m.confirmar('reject', { venueID: 'vD', updateRequestID: 'uD' });
+  assert.deepEqual(m.toasts, ['toast.undoUnlocked'], 'avisou duas vezes');
+});
+
+test('R7-7-05: o "Rejeitar os N" no ar conta só o que POUSOU — o lote de 3 com o último recusado não avisa', () => {
+  // 27 confirmados; o lote de 3 sobe o placar a 30 no gesto.
+  const m = montarCota({ confirmados: 27 });
+  m.stats.rejected = 30;
+  m.confirmar('reject', { venueID: 'v1', updateRequestID: 'u1' });
+  m.confirmar('reject', { venueID: 'v2', updateRequestID: 'u2' });
+  assert.deepEqual(m.toasts, [], 'DEFEITO: o lote avisou com um pedido dele ainda no Waze');
+  m.stats.rejected = 29;   // o 3º recusado de vez
+  assert.equal(m.prefs.undoGateSeen, false);
+  assert.equal(m.h.canDisableUndo(), false);
+});
+
+test('R7-7-05: o aviso nunca sai com o interruptor TRAVADO — mesmo com o Histórico contando mais que o placar', () => {
+  // O interruptor obedece ao placar (`canDisableUndo`): se os dois divergirem,
+  // vale o menor. Placar 29 com o Histórico em 30 (o placar desceu por um gesto
+  // descontado depois de a confirmação já ter contado).
+  const m = montarCota({ confirmados: 29 });
+  m.stats.rejected = 29;
+  m.confirmar('reject', m.P);
+  assert.equal(m.h.canDisableUndo(), false, 'PRÉ-CONDIÇÃO: o interruptor está travado');
+  assert.deepEqual(m.toasts, [], 'avisou que o Desfazer virou opcional com o interruptor travado');
+  assert.equal(m.prefs.undoGateSeen, false);
 });
 
 test('A3: a troca de conta passa pelo esquecer das escolhas (e a mesma conta voltando, não)', () => {
