@@ -108,7 +108,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   m.app.aoConhecerConta({ id: 'B' });
   const fila = m.app.carregarFilaDeSaida();
   assert.deepEqual(fila.map((x) => x.venueID), ['v2'], 'a decisão de A ficou pra sair no nome de B');
-  for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'toast:toast.outraConta']) {
+  for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'camadas', 'toast:toast.outraConta']) {
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
@@ -122,6 +122,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   c.app.aoConhecerConta({ id: 'A' });
   assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a mesma conta perdeu a fila de saída');
   assert.ok(!c.log.includes('autores') && !c.log.includes('foco') && !c.log.includes('dfato:conta.trocou'));
+  assert.ok(!c.log.includes('camadas'), 'a MESMA conta voltando fechou o que ela tinha aberto (é dela)');
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {

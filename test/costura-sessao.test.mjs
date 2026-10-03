@@ -839,23 +839,101 @@ test('K2: OUTRA conta revelada pelo perfil — a fila que atravessou a sessão s
 // aberta por cima, com o "Aprovar" à mostra e HABILITADO — e o toque não fazia
 // nada (o portão recusa). Botão morto com cara de vivo, sobre um pedido que nem
 // está na fila de quem entrou (MEDIDO no Chromium, auditoria de 2026-10-02).
-test('R6-1-06: OUTRA conta na renovação — a foto e o mapa AMPLIADOS fecham ANTES de a fila trocar', () => {
-  for (const atravessou of [true, false]) {
-    const log = [];
-    const camada = (nome) => ({ aberto: true, isOpen() { return this.aberto; }, close() { this.aberto = false; log.push('fechou ' + nome); } });
-    const deps = { AppState: { stats: {}, queue: [{ venueID: 'xA' }] }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
-      carregarFilaDeSaida: () => [], window: {}, Lightbox: camada('a foto'), MapaLightbox: camada('o mapa'),
-      resetQueue: () => log.push('fila trocada'), startFetching: () => log.push('busca') };
-    const h = montar(['esquecerOutraConta', 'fecharCamadasDeFoto'], deps);
-    h.esquecerOutraConta('222');
-    if (atravessou) {
-      assert.deepEqual(log, ['fechou a foto', 'fechou o mapa', 'fila trocada', 'busca'],
-        `DEFEITO: a foto ampliada da conta anterior ficou aberta por cima da fila de quem entrou: ${log.join(' | ')}`);
-    } else {
-      // CONTROLE: a fila nasceu nesta sessão (o pedido na foto é de quem entrou): nada fecha.
-      assert.deepEqual(log, [], 'a foto de um pedido da própria fila fechou sem motivo');
-    }
+// A troca de conta com o que a anterior tinha ABERTO. O fechamento é o de
+// verdade (`fecharCamadasAbertas`, o da queda): cada camada aberta fecha pela
+// limpeza dela, sem mexer no voltar, e as entradas saem de uma vez no fim. A foto
+// ampliada de mentira faz o que o `Lightbox.close` faz ao fechar: anda a fila se
+// uma aprovação pousou esperando ela fechar (`avancarSeAprovado`).
+function trocaComCamadas({ atravessou = true, foto = false, mapa = false, modal = null, aprovacaoPousada = null,
+  emitidos = [], soFechar = false } = {}) {
+  const log = [];
+  const camada = (nome, aberto) => ({ aberto, isOpen() { return this.aberto; },
+    close() {
+      this.aberto = false;
+      log.push('fechou ' + nome);
+      if (nome === 'a foto' && deps.placeResolvidoPorAprovacao) log.push('andou a fila: ' + deps.placeResolvidoPorAprovacao.venueID);
+    } });
+  const modais = {};
+  for (const id of ['pairShowModal', 'autorModal', 'filtersModal', 'helpModal']) {
+    const aberto = { v: id === modal };
+    modais[id] = { id, classList: { contains: (c) => (c === 'hidden' ? !aberto.v : false) }, fechar() { aberto.v = false; } };
   }
+  const deps = {
+    AppState: { stats: {}, queue: [{ venueID: 'xA' }] }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
+    carregarFilaDeSaida: () => [], window: { Presenca: { esquecer: () => log.push('conversa esquecida') } },
+    Lightbox: camada('a foto', foto), MapaLightbox: camada('o mapa', mapa),
+    placeResolvidoPorAprovacao: aprovacaoPousada, pareamentosEmitidos: new Set(emitidos),
+    API: { cancelarPareamento: (c) => { log.push('cancelou ' + c); return Promise.resolve({ success: true }); } },
+    MODAL_IDS: Object.keys(modais), document: { getElementById: (id) => modais[id] || null, activeElement: null, body: {} },
+    closeModal: (id, o) => { modais[id].fechar(); log.push('fechou ' + id + (o && o.viaHistorico ? '' : ' (com voltar)')); },
+    CamadaVoltar: { profundidade: (foto || mapa || modal) ? 1 : 0, consumindo: false },
+    history: { go: (n) => log.push('voltar ' + n) }, devolverFoco: () => {}, focavelNaTela: () => true,
+    resetQueue: () => log.push('fila trocada'), startFetching: () => log.push('busca'),
+  };
+  const h = montar(['esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'fecharCamadasAbertas', 'semCamadaAberta',
+    'topOpenModal'], deps);
+  // `soFechar`: só o fechamento da QUEDA, sem a troca de conta (o controle do instrumento).
+  if (soFechar) h.fecharCamadasAbertas();
+  else h.esquecerOutraConta('222');
+  return { log, deps };
+}
+
+test('R6-1-06: OUTRA conta na renovação — a foto e o mapa AMPLIADOS fecham ANTES de a fila trocar', () => {
+  const t = trocaComCamadas({ foto: true, mapa: true });
+  assert.deepEqual(t.log, ['conversa esquecida', 'fechou o mapa', 'fechou a foto', 'voltar -1', 'fila trocada', 'busca'],
+    `DEFEITO: a foto ampliada da conta anterior ficou aberta por cima da fila de quem entrou: ${t.log.join(' | ')}`);
+  // CONTROLE: a fila nasceu nesta sessão (o pedido na foto é de quem entrou): nada fecha.
+  const c = trocaComCamadas({ atravessou: false, foto: true, mapa: true });
+  assert.deepEqual(c.log, ['conversa esquecida'], 'a foto de um pedido da própria fila fechou sem motivo');
+});
+
+// ═══ R7-1-01 · o QR, a folha do autor e o Histórico da conta anterior ═══════════
+// A troca de conta pela renovação fechava só a foto e o mapa: o QR do "Conectar
+// outro aparelho" de X seguia na tela, desenhado e VÁLIDO (quem o escaneasse
+// entrava como X por até 5 min), e a folha do autor e o Histórico mostravam o
+// que tinha acabado de sair do aparelho (MEDIDO no Chromium e no WebKit,
+// auditoria de 2026-10-02).
+test('R7-1-01: OUTRA conta — os códigos de X são CANCELADOS e o que estava aberto (QR, folha, Histórico) FECHA', () => {
+  for (const modal of ['pairShowModal', 'autorModal', 'filtersModal']) {
+    const t = trocaComCamadas({ modal, emitidos: ['PRIVQRSTUVWXYZ234567', 'PRV234'] });
+    assert.ok(t.log.includes('cancelou PRIVQRSTUVWXYZ234567') && t.log.includes('cancelou PRV234'),
+      `DEFEITO: o código de X segue valendo depois de Y entrar: ${t.log.join(' | ')}`);
+    assert.equal(t.deps.pareamentosEmitidos.size, 0, 'os códigos cancelados seguem na lista desta página');
+    // Pela função da queda: a limpeza de cada camada, SEM o voltar de cada uma,
+    // e as entradas de uma vez — e antes da fila trocar.
+    const i = t.log.indexOf('fechou ' + modal);
+    assert.ok(i >= 0, `DEFEITO: ${modal} da conta anterior ficou aberto por cima da fila de quem entrou: ${t.log.join(' | ')}`);
+    assert.ok(t.log.indexOf('voltar -1') > i && t.log.indexOf('fila trocada') > t.log.indexOf('voltar -1'),
+      `${modal}: fora da ordem do fechamento da queda (gotcha #65): ${t.log.join(' | ')}`);
+    // DEPOIS do esquecimento da conversa: o fechamento dela pagaria o "lida" com a sessão de quem entrou.
+    assert.ok(t.log.indexOf('conversa esquecida') < i);
+  }
+  // Com a fila DESTA sessão (o login pela tela de entrada, a abertura): os
+  // códigos de X também saem, e os diálogos fecham; a foto, de um pedido de
+  // quem entrou, fica (o controle do R6-1-06).
+  const n = trocaComCamadas({ atravessou: false, modal: 'pairShowModal', emitidos: ['PRIVQRSTUVWXYZ234567'] });
+  assert.ok(n.log.includes('cancelou PRIVQRSTUVWXYZ234567'), 'sem a fila trocando, o código de X seguiu valendo');
+  assert.ok(n.log.includes('fechou pairShowModal'), 'sem a fila trocando, o QR de X ficou na tela');
+  // CONTROLE: nada aberto e nenhum código — nada se fecha nem se cancela (e o foco não é mexido).
+  const v = trocaComCamadas();
+  assert.deepEqual(v.log, ['conversa esquecida', 'fila trocada', 'busca']);
+});
+
+// ═══ R7-3-01 (b) · fechar a foto na troca não anda a fila da conta ANTERIOR ═══
+// Com uma aprovação POUSADA esperando a foto fechar, o fechamento da troca de
+// conta andava a fila de X: o card seguinte de X era anunciado e o "Como
+// funciona" de quem entrou abria no mesmo tique do voltar pendente — e o
+// "Entendi" tirava a pessoa do app (gotcha #65; MEDIDO nos dois motores).
+test('R7-3-01 (b): a troca de conta esquece a aprovação pousada ANTES de fechar a foto — a fila de X não anda', () => {
+  const t = trocaComCamadas({ foto: true, aprovacaoPousada: { venueID: 'xA' } });
+  assert.ok(t.log.includes('fechou a foto'), 'PRÉ-CONDIÇÃO: a foto da conta anterior fecha');
+  assert.ok(!t.log.some((l) => l.startsWith('andou a fila')),
+    `DEFEITO: fechar a foto andou a fila da conta ANTERIOR: ${t.log.join(' | ')}`);
+  assert.equal(t.deps.placeResolvidoPorAprovacao, null);
+  // CONTROLE: o mesmo fechamento SEM a troca de conta (o da queda comum, em que a
+  // fila é da mesma pessoa) anda a fila — o instrumento enxerga o defeito.
+  const c = trocaComCamadas({ foto: true, aprovacaoPousada: { venueID: 'xA' }, soFechar: true });
+  assert.ok(c.log.includes('andou a fila: xA'), `CONTROLE: o fechamento não andou a fila — o teste perdeu o sentido: ${c.log.join(' | ')}`);
 });
 
 test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redesenha)', () => {

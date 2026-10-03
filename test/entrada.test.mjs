@@ -232,6 +232,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };

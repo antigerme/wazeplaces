@@ -16846,17 +16846,44 @@ function esquecerOutraConta(id) {
     // saiu (ou está saindo) filtrada pela área da anterior: a abertura com a
     // sessão salva busca antes de o perfil dizer de quem ela é. No login, a conta
     // chega antes da primeira busca, e não há fila pra refazer.
-    if (filaAtravessouSessao || (areaNaBusca && (AppState.fetching || AppState.queue.length))) {
-        // A foto e o mapa AMPLIADOS são de um pedido dessa fila, que sai: com a
-        // renovação pela extensão trazendo OUTRA conta, a foto de um pedido da
-        // anterior ficava aberta por cima da fila nova — com o "Aprovar" de L6 à
-        // mostra e habilitado pra um L2, e o toque não fazendo nada (auditoria de
-        // 2026-10-02, R6-1-06). Fecham ANTES da fila trocar, como no treino.
-        fecharCamadasDeFoto();
+    const refazerFila = filaAtravessouSessao || (areaNaBusca && (AppState.fetching || AppState.queue.length));
+    // O que a conta anterior tinha ABERTO na tela sai antes da fila trocar (ver
+    // a função). DEPOIS do `Presenca.esquecer` lá em cima: o fechamento da
+    // conversa pagaria o "lida" dela com a sessão de quem entrou.
+    fecharOQueEraDaContaAnterior(refazerFila);
+    if (refazerFila) {
         resetQueue();
         startFetching();
     }
     showToast(t('toast.outraConta'), 'info');
+}
+
+// A troca de conta (`esquecerOutraConta`) tirava do aparelho o que era da conta
+// anterior e deixava na TELA o que ela tinha aberto (auditoria de 2026-10-02,
+// R7-1-01): o QR do "Conectar outro aparelho" — uma CÓPIA da sessão dela, que
+// seguia desenhada e válida: quem o escaneasse entrava como ela por até 5 min —,
+// a folha do autor com a reincidência dela e o Histórico com o trabalho dela, os
+// dois já apagados do aparelho. É o que o "Sair" e a entrada de outra conta
+// noutra aba já fazem:
+//   · os códigos emitidos nesta página são cancelados no servidor, sem esperar
+//     rede (sem ela, vencem sozinhos);
+//   · as camadas fecham pela função da queda (`fecharCamadasAbertas`), que roda
+//     a limpeza de cada uma e devolve o voltar de uma vez (gotcha #65). Com a
+//     fila trocando (`comAFila`), TODAS: a foto e o mapa ampliados são de um
+//     pedido dela — a foto da anterior ficava aberta por cima da fila nova, com
+//     o "Aprovar" de L6 à mostra pra um L2 (R6-1-06). Com a fila desta sessão,
+//     só os diálogos: a foto e o mapa são de um pedido de quem entrou, e ficam;
+//   · e, ANTES de fechar a foto, a aprovação que POUSOU esperando ela fechar
+//     (`placeResolvidoPorAprovacao`) é esquecida: o pedido é da fila que sai, e
+//     fechar a foto andava a fila DA CONTA ANTERIOR — o card seguinte dela era
+//     anunciado ("Novo pedido: …") e abria o "Como funciona" de quem entrou no
+//     mesmo tique do voltar pendente, e o "Entendi" tirava a pessoa do app
+//     (gotcha #65; R7-3-01).
+function fecharOQueEraDaContaAnterior(comAFila) {
+    for (const code of pareamentosEmitidos) API.cancelarPareamento(code).catch(() => {});
+    pareamentosEmitidos.clear();
+    if (comAFila) placeResolvidoPorAprovacao = null;
+    if (comAFila ? !semCamadaAberta() : !!topOpenModal()) fecharCamadasAbertas();
 }
 
 // O que a conta ANTERIOR escolheu sob as regras DELA, e o que só ela viu
