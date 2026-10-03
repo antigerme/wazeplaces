@@ -16501,6 +16501,22 @@ async function esvaziarFilaDeSaida() {
     // esvaziando, esta espera ela soltar e tenta uma vez.
     const trava = await travaDaSaida();
     if (!trava) { esvaziandoSaida = false; esperarOutraAbaEsvaziar(); return; }
+    // As guardas do topo valem DE NOVO depois da espera da trava: ela é uma
+    // volta do laço de eventos (o navegador entrega a trava numa tarefa), e
+    // nela o mundo anda. O caso que mordeu: o ✕ que leva 401. A resposta é prova
+    // de rede, e a prova chama este esvaziamento ANTES de a resposta chegar a
+    // quem a pediu (ver `API.aoProvarRede`) — com o `verificandoSessao` ainda
+    // falso. Durante a espera o executor recebe o 401, solta o pedido
+    // (`pedidosEmAndamento`) e começa a conferência; esta passada, que já tinha
+    // passado pelas guardas, mandava a MESMA decisão de novo (MEDIDO: duas idas
+    // ao Waze em 7 a 11 ms; auditoria de 2026-10-02, R7-1-05). A trava volta pro
+    // navegador: quem chama de novo é quem sempre chama (o fim da conferência,
+    // a rede voltando, a próxima resposta).
+    if (!AppState.authenticated || navigator.onLine === false || verificandoSessao || saidaEmRecuo()) {
+        esvaziandoSaida = false;
+        trava.soltar();
+        return;
+    }
     const epoca = epocaDaSessao;
     // Zera ao ENTRAR, não ao sair: o que interessa é o gatilho que chegar DAQUI
     // pra frente. Zerar no fim apagaria justamente o pedido que esta passada

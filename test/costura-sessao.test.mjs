@@ -1492,6 +1492,119 @@ test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na ho
   assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
 });
 
+// ═══ R7-1-05 · o ✕ que leva 401 não sai de novo pela ESPERA da trava ══════════
+// O K14 fez o esvaziamento esperar a conferência da sessão — mas só na ENTRADA.
+// A resposta 401 do ✕ é prova de rede, e a prova chama o esvaziamento ANTES de a
+// resposta chegar a quem a pediu (o `_post`): ele entra com o `verificandoSessao`
+// ainda falso e espera a trava ENTRE ABAS, que o navegador entrega numa TAREFA.
+// Nessa espera o executor recebe o 401, solta o pedido e começa a conferência; a
+// passada, que já tinha passado pelas guardas, mandava a MESMA decisão de novo
+// (MEDIDO no navegador: duas idas ao Waze em 7 a 11 ms; auditoria de 2026-10-02,
+// R7-1-05). Aqui roda o caminho de verdade — o `handleReject`, o
+// `scheduleAction`, o `handleActionResult`, o `handleUnauthorized`, o
+// esvaziamento e a `travaDaSaida` —, com a trava do navegador de mentira
+// entregando numa tarefa (`setImmediate`), como a de verdade.
+function montarXQueLeva401() {
+  const { safeLS } = lsFalso();
+  const envios = [];
+  const travas = { pedidas: 0, presas: new Set() };
+  let sonda;
+  const AppState = {
+    authenticated: true, profile: { id: 111 }, currentPlace: null, queue: [],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10, fetchEpoch: 0,
+    preferences: { undoEnabled: false }, pendingAction: null, inFlightActions: 0,
+  };
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, Treino: { ativo: false },
+    navigator: {
+      onLine: true,
+      locks: {
+        // A trava do navegador: entregue numa TAREFA, nunca na hora.
+        request(nome, opcoes, cb) {
+          if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+          travas.pedidas++;
+          return new Promise((fim) => setImmediate(() => {
+            if (travas.presas.has(nome)) { fim(opcoes.ifAvailable ? cb(null) : undefined); return; }
+            travas.presas.add(nome);
+            Promise.resolve(cb({ name: nome })).then((v) => { travas.presas.delete(nome); fim(v); });
+          }));
+        },
+      },
+    },
+    marcaDaAbaConferida: Promise.resolve(), SAIDA_TRAVA: constante('SAIDA_KEY'),   // `SAIDA_TRAVA = SAIDA_KEY`
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'), CONTA_KEY: constante('CONTA_KEY'),
+    SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'), SAIDA_TENTATIVAS_POR_ITEM: constante('SAIDA_TENTATIVAS_POR_ITEM'),
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0,
+    esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false, verificandoSessao: false,
+    conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
+    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
+    advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, definirPerfil: (r) => !!(r && r.success && r.profile),
+    derrubarSessao: () => { AppState.authenticated = false; },
+    historyTodayKey: () => '2026-10-02', ondeAgora: () => '30', getLang: () => 'pt', t: (k) => k,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+    API: {
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A',
+      // Como o `_post`: a resposta CHEGA (uma volta de rede), a prova de rede
+      // roda (o `API.aoProvarRede`, que só chama sem esvaziamento no ar) e SÓ
+      // DEPOIS a resposta volta a quem pediu.
+      rejectPlace: async (v) => {
+        envios.push(v);
+        await new Promise((ok) => setImmediate(ok));
+        if (!deps.esvaziandoSaida) h.esvaziarFilaDeSaida();
+        return deps.proxima ? deps.proxima(v) : { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 };
+      },
+      getProfile: () => new Promise((ok) => { sonda = ok; }),
+    },
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'chaveDoPedido', 'marcaDaSessao', 'contaAgora',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
+    'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
+    'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'travaDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',
+    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'carimboDoGesto', 'handleReject'], deps);
+  const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
+  AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
+  AppState.currentPlace = P;
+  return { h, deps, AppState, envios, travas, responderSonda: (r) => sonda(r), temSonda: () => !!sonda };
+}
+
+test('R7-1-05: o ✕ que leva 401 vai ao Waze UMA vez — a passada que esperou a trava não manda a mesma decisão de novo', async () => {
+  const m = montarXQueLeva401();
+  m.h.handleReject();                                   // o ✕, sem a janela do Desfazer
+  // A conferência começou (o 401 chegou ao executor) e a trava pedida pela
+  // prova de rede já foi entregue (e devolvida).
+  await ateQue(() => m.temSonda() && m.travas.pedidas >= 1 && !m.deps.esvaziandoSaida,
+    'a resposta 401, a conferência e a passada que esperou a trava');
+  await tique(10);                                      // o que saísse A MAIS teria tempo de sair
+  assert.equal(m.travas.pedidas, 1, 'PRÉ-CONDIÇÃO: a prova de rede da resposta não chamou o esvaziamento (o instrumento não mede a corrida)');
+  assert.deepEqual(m.envios, ['v1'],
+    `DEFEITO: com a sessão sendo conferida, a mesma decisão saiu de novo: ${m.envios.join(',')}`);
+  assert.equal(m.travas.presas.size, 0, 'a passada que desistiu ficou com a trava entre abas (a próxima nunca esvaziaria)');
+  assert.equal(m.h.carregarFilaDeSaida().length, 1, 'a decisão que levou 401 tem de ficar na fila de saída');
+  // O veredito: MORTA — nada mais sai; a decisão espera o próximo login.
+  m.responderSonda({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired' });
+  await tique(10);
+  assert.deepEqual(m.envios, ['v1'], 'depois do veredito de sessão morta, a decisão saiu de novo');
+  assert.equal(m.h.carregarFilaDeSaida().length, 1);
+});
+
+test('R7-1-05: CONTROLE — a conferência diz VIVA: a decisão sai de novo, UMA vez, DEPOIS do veredito (a trava foi devolvida)', async () => {
+  const m = montarXQueLeva401();
+  m.h.handleReject();
+  await ateQue(() => m.temSonda() && m.travas.pedidas >= 1 && !m.deps.esvaziandoSaida, 'a conferência começou');
+  await tique(10);
+  const antesDoVeredito = [...m.envios];
+  m.deps.proxima = () => ({ success: true });           // a partir daqui o Waze aceita
+  m.responderSonda({ success: true, profile: { id: 111 } });
+  await ateQue(() => m.h.carregarFilaDeSaida().length === 0, 'a fila de saída vazia depois do alarme falso');
+  await tique(10);
+  assert.deepEqual(antesDoVeredito, ['v1'], 'antes do veredito a decisão já tinha saído de novo');
+  assert.deepEqual(m.envios, ['v1', 'v1'], 'confirmada a sessão, a decisão não saiu (ou saiu mais de uma vez)');
+  assert.equal(m.travas.pedidas, 2, 'o esvaziamento do alarme falso não pegou a trava (a passada anterior a prendeu?)');
+});
+
 // ═══ R6-1-03 · o card travado na queda SEM extensão (o celular) ═══════════════
 // A queda pergunta "tem extensão aí?" por 350 ms em TODO aparelho, e o aviso da
 // trava lia a pergunta como "a extensão está renovando": no celular (onde ela
