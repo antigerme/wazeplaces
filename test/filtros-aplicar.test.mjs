@@ -1540,27 +1540,33 @@ test('R7-6-01: o perfil que chega com os Filtros abertos peneira a lista que já
   assert.deepEqual(telaDoPais(q), { opcoes: '30', pais: '30', dica: true });
 });
 
-test('R7-6-01: o país que a pessoa escolheu antes do perfil fica, se ela o edita — e o que ela não edita volta pro aplicado, com o estado e a área dele', async () => {
+test('R7-6-01: o país que a pessoa escolheu ANTES do perfil fica na tela — editável ou não (achado 11) —, e os outros que ela não edita saem', async () => {
   const perfil = { id: 1, editableCountryIDs: [30, 181], managedAreas: [{ id: 9001, name: 'Área SP' }] };
   const estados = { 30: [{ id: 25, name: 'São Paulo' }], 73: [{ id: 3, name: 'Normandie' }], 181: [{ id: 9, name: 'Lisboa' }] };
-  // (a) Escolheu Portugal (que ela edita): fica, com os estados dele.
+  // (a) Escolheu Portugal (que ela edita): fica, com os estados dele, e a lista
+  //     é só a dos editáveis, com a dica.
   const a = await filtrosAbertosAntesDoPerfil({ perfil, estados, filtros: { stateId: '25', managedAreaId: '9001' } });
   await escolherPais(a.p, 181);
   await a.chegar();
   assert.deepEqual(telaDoPais(a.p), { opcoes: '30,181', pais: '181', dica: true },
     `o perfil desfez o Portugal que a pessoa escolheu: ${JSON.stringify(telaDoPais(a.p))}`);
   assert.equal(a.p.els.filterState.mostrado, 'filters.state.all', 'o estado de Portugal não ficou');
-  // (b) Escolheu a França (que ela NÃO edita): volta pro aplicado, com o estado e a área.
+  // (b) Escolheu a França (que ela NÃO edita) antes de o app saber disso: a
+  //     escolha é dela e fica (o perfil não a troca calado), e com ela a lista
+  //     deixa de ser "só os editáveis" — sem a dica. O Portugal (editável)
+  //     segue opção, e o que mais ela não edita, não.
   const b = await filtrosAbertosAntesDoPerfil({ perfil, estados, filtros: { stateId: '25', managedAreaId: '9001' } });
   await escolherPais(b.p, 73);
-  assert.equal(b.p.els.filterManagedArea.value, '', 'PRÉ-CONDIÇÃO: trocar o país levou a área pra "Nenhuma"');
+  const estadosAntes = b.p.els.filterState.opcoes.map((o) => o.value).join(',');
   await b.chegar();
-  assert.equal(b.p.els.filterCountry.value, '30', `a França (não editável) ficou na tela: "${b.p.els.filterCountry.mostrado}"`);
-  assert.equal(b.p.els.filterState.value, '25', 'voltou pro Brasil sem o estado aplicado (ou com os estados da França)');
-  assert.equal(b.p.els.filterManagedArea.value, '9001', 'voltou pro Brasil sem a área aplicada');
-  aplicarSoDesmarcandoUmTipo(b.p);
-  assert.deepEqual([b.p.estado.pais, b.p.log.salvos.at(-1).stateId, b.p.log.salvos.at(-1).managedAreaId], [30, '25', '9001'],
-    'o "Aplicar" depois do perfil gravou outro lugar');
+  assert.equal(b.p.els.filterCountry.value, '73', `o perfil trocou a França que a pessoa escolheu por "${b.p.els.filterCountry.mostrado}"`);
+  assert.deepEqual(b.p.els.filterCountry.opcoes.map((o) => o.value).sort(), ['181', '30', '73'],
+    `a lista não é a dos editáveis mais a escolhida: ${b.p.els.filterCountry.opcoes.map((o) => o.value)}`);
+  assert.ok(b.p.els.filterCountryHint.classList.contains('hidden'),
+    'a dica diz "só os países que você pode editar" com a França (que ela não edita) na lista');
+  assert.equal(b.p.els.filterState.opcoes.map((o) => o.value).join(','), estadosAntes,
+    'o perfil mexeu nos estados do país que ficou na tela');
+  assert.ok(estadosAntes.split(',').includes('3'), 'PRÉ-CONDIÇÃO: os estados da França não estavam na tela');
 });
 
 test('R7-6-01: o país APLICADO que a pessoa não edita (escolhido antes do perfil) fica — e a lista leva ele, sem a dica (R66-4)', async () => {
@@ -1618,4 +1624,17 @@ test('R7-6-01: com OUTRA região na tela (a troca da pessoa), ou com a lista ain
   segurados[0].ok({ success: true, countries: LISTAS_R66.row.map((c) => ({ ...c })) });
   await volta;
   assert.deepEqual(telaDoPais(r), { opcoes: '30', pais: '30', dica: true }, 'a lista da volta não passou pela peneira do perfil');
+  // A lista da abertura NÃO carregou (R7-6-04) e a pessoa foi à NA e voltou: o
+  // seletor mostra a lista da volta, que o app não guardou (`AppState.countries`
+  // segue vazio). O perfil não a troca por nada — antes, um seletor vazio.
+  const v = pagina({ perfil: null });
+  v.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
+  await v.abrir();
+  v.listas.paises = (rg) => Promise.resolve({ success: true, countries: LISTAS_R66[rg].map((c) => ({ ...c })) });
+  await trocarRegiao(v, 'na');
+  await trocarRegiao(v, 'row');
+  const naVolta = telaDoPais(v);
+  assert.deepEqual([naVolta.opcoes, v.AppState.countries.length], ['30,73,181', 0], 'PRÉ-CONDIÇÃO: a volta não mostra a lista sem guardá-la');
+  v.app.definirPerfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  assert.deepEqual(telaDoPais(v), naVolta, `o perfil trocou a lista da tela por ${JSON.stringify(telaDoPais(v))}`);
 });

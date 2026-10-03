@@ -4207,8 +4207,8 @@ function editaveisLidos(regiao) {
 // Devolve se o seletor ficou no país APLICADO (a troca que volta pra região
 // aplicada repõe a área com ele).
 //
-// `manter`: o país que o seletor mostrava continua escolhido, se segue sendo
-// opção (o perfil que chega com a lista já na tela, `peneirarPaisesComOPerfil`).
+// `manter`: o país que o seletor MOSTRAVA continua na lista e escolhido (o
+// perfil que chega com a lista já na tela, `peneirarPaisesComOPerfil`).
 function populateCountrySelect(lista = AppState.countries, regiao = API.getRegion(), manter = null) {
     const select = document.getElementById('filterCountry');
     const hint = document.getElementById('filterCountryHint');
@@ -4231,15 +4231,20 @@ function populateCountrySelect(lista = AppState.countries, regiao = API.getRegio
     // O país APLICADO que a peneira tirou (escolhido antes de o perfil chegar,
     // ou um perfil que perdeu o país) entra como opção: o seletor nunca mostra
     // outro país como se fosse o aplicado, e o "Aplicar" não o troca calado
-    // (R66-4). Com ele a lista deixa de ser "só os que você pode editar", e a
-    // dica não diz isso.
+    // (R66-4). E o que o seletor MOSTRAVA quando o perfil chegou (`manter`): a
+    // pessoa o escolheu antes de haver peneira, e o perfil não troca a escolha
+    // dela calado (a régua do achado 11, R7-6-01). Com eles a lista deixa de ser
+    // "só os que você pode editar", e a dica não diz isso.
     const current = API.getCountry();
     const ehOAplicado = (c) => String(c.id) === String(current);
+    const ehOMantido = (c) => manter !== null && String(c.id) === String(manter);
     const naRegiaoAplicada = regiao === API.getRegion();
-    if (naRegiaoAplicada && filtrou && !countries.some(ehOAplicado)) {
-        const aplicado = todos.find(ehOAplicado);
-        if (aplicado) {
-            countries = [...countries, aplicado];
+    const peneirou = filtrou;
+    for (const fica of [naRegiaoAplicada ? ehOAplicado : null, ehOMantido]) {
+        if (!fica || !peneirou || countries.some(fica)) continue;
+        const pais = todos.find(fica);
+        if (pais) {
+            countries = [...countries, pais];
             filtrou = false;
         }
     }
@@ -4249,7 +4254,7 @@ function populateCountrySelect(lista = AppState.countries, regiao = API.getRegio
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
-    if (manter !== null && countries.some((c) => String(c.id) === String(manter))) {
+    if (countries.some(ehOMantido)) {
         select.value = String(manter);
         return naRegiaoAplicada && String(manter) === String(current);
     }
@@ -9695,29 +9700,24 @@ function redesenharFiltrosComOPerfil() {
 // vinha vazia ("Confira o país e a região"), e a reabertura seguinte a devolvia
 // ao país do perfil, com aviso (auditoria da rodada 7, R7-6-01; é o R66-4 por um
 // terceiro caminho). A lista passa pela MESMA peneira da abertura
-// (`populateCountrySelect`), e a régua é a do redesenho: o que o seletor mostra
-// FICA, se ainda é opção; o que deixou de existir (o país que a pessoa não edita)
-// volta pro aplicado, com o estado e a área dele, como a volta à região aplicada
-// (`aoTrocarRegiaoNoModal`). Só a lista da região APLICADA: com outra região na
-// tela, os editáveis deste perfil (de outro servidor) não a peneiram. Com a lista
-// ainda chegando (ou a que não carregou), quem a puser no seletor já peneira com
-// o perfil de agora — e aqui não se pede nada.
+// (`populateCountrySelect`), com a régua do redesenho: o país que o seletor
+// mostra FICA — escolhido antes de haver peneira, ele é da pessoa (achado 11) —,
+// e os outros que ela não edita saem. Como o país na tela não muda, o estado e a
+// área também não. E aqui não se pede nada.
+//
+// Só quando a tela mostra a lista da região APLICADA (`AppState.countries`), que
+// é a que o app tem pra peneirar — e a prova é o país da tela estar NELA (os ids
+// de país são de um servidor só). Com outra região na tela (a troca da pessoa,
+// com os editáveis de outro servidor), com o "Carregando…" de uma lista no ar ou
+// o "Lista não carregou" (R7-6-04), ou com a lista da volta à região que o app
+// não guardou, o país da tela não está nela, e nada muda: quem puser a próxima
+// lista no seletor já peneira com o perfil de agora.
 function peneirarPaisesComOPerfil() {
     const pais = document.getElementById('filterCountry');
-    const regiao = document.getElementById('filterRegion');
-    if (!pais || !regiao || pais.dataset.carregando) return;
-    if (regiao.value !== API.getRegion() || !(AppState.countries && AppState.countries.length)) return;
+    if (!pais || !Array.isArray(AppState.countries)) return;
     const mostrado = pais.value;
-    const noAplicado = populateCountrySelect(AppState.countries, API.getRegion(), mostrado);
-    if (String(pais.value) === String(mostrado)) return;
-    if (noAplicado) {
-        const area = document.getElementById('filterManagedArea');
-        if (area) {
-            area.value = AppState.filters.managedAreaId || '';
-            if (area.selectedIndex < 0) area.value = '';
-        }
-    }
-    loadStatesIntoSelect(parseInt(pais.value, 10), API.getRegion());
+    if (!AppState.countries.some((c) => String(c.id) === String(mostrado))) return;
+    populateCountrySelect(AppState.countries, API.getRegion(), mostrado);
 }
 
 // Acumula as categorias vistas nos places carregados — fonte do filtro de categoria (B5).
