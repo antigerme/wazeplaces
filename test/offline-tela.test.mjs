@@ -203,22 +203,39 @@ test('área que ROLA no card não vira arraste: a rede de segurança (.card-cont
 // voltar". Nada a buscava de novo, e o card ficava travado até a pessoa pular
 // (auditoria de 2026-09-25). A recuperação PROVA a foto antes de redesenhar:
 // redesenhar com a rede ainda firmando daria "Sem Imagem" com ✕ e ✓ vivos.
-function montarRecuperacao({ online = true, semFoto = true, transform = '' } = {}) {
+// `servidorDaFoto`: o que o servidor da FOTO faz com o pedido sem CORS da sonda
+// (R7-4-06) — 'responde' (qualquer resposta HTTP, o 404 da foto tirada do ar
+// inclusive), 'falha' (a rede não passa) ou 'pendura'.
+function montarRecuperacao({ online = true, semFoto = true, transform = '', servidorDaFoto = 'falha' } = {}) {
   const place = { venueID: 'v1', updateRequestID: 'ur1', purType: 'NEW_PHOTO', imageUrls: ['https://venue-image.waze.com/a', 'https://venue-image.waze.com/ur1'] };
   const redesenhos = [];
   const provas = [];
+  const sondas = [];
+  const diario = [];
   const card = { style: { transform }, querySelector: (sel) => (sel === '.card-sem-foto' && semFoto ? {} : null) };
   class Image { set src(u) { this._src = u; provas.push(this); } get src() { return this._src; } }
+  const fetch = (u, opcoes) => {
+    sondas.push({ u, opcoes });
+    if (servidorDaFoto === 'responde') return Promise.resolve({ type: 'opaque', status: 0 });
+    if (servidorDaFoto === 'pendura') {
+      return new Promise((_, falhar) => opcoes.signal.addEventListener('abort', () => falhar(new Error('AbortError'))));
+    }
+    return Promise.reject(new TypeError('Failed to fetch'));
+  };
   const deps = {
     navigator: { onLine: online }, AppState: { currentPlace: place },
     cardDaFrente: () => card, fotosDoCard: new Function('return ' + fatiar('fotosDoCard'))(),
-    urlDaFoto: (u) => u + '?w=7', Image, dfato: () => {}, showCurrentPlace: () => redesenhos.push(1),
+    urlDaFoto: (u) => u + '?w=7', Image, dfato: (k) => diario.push(k), showCurrentPlace: () => redesenhos.push(1),
+    fetch, FOTO_SONDA_TETO_MS: 30,
   };
   const chaves = Object.keys(deps);
   const recuperar = new Function(...chaves, 'let provandoFotoDe = null;\n' + fatiar('recuperarCardSemFoto')
+    + '\nasync ' + fatiar('fotoServidorResponde')
     + '\nreturn recuperarCardSemFoto;')(...chaves.map((k) => deps[k]));
-  return { recuperar, redesenhos, provas, deps, card };
+  return { recuperar, redesenhos, provas, sondas, diario, deps, card };
 }
+// A sonda é assíncrona: deixa as promessas (e o teto, quando pendura) assentarem.
+const assentar = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
 test('card "sem foto": a rede voltando e a foto carregando REDESENHAM o card', () => {
   const m = montarRecuperacao();
@@ -231,13 +248,89 @@ test('card "sem foto": a rede voltando e a foto carregando REDESENHAM o card', (
   assert.equal(m.redesenhos.length, 1, 'a foto chegou e o card seguiu travado');
 });
 
-test('card "sem foto": a foto que ainda FALHA não redesenha (senão "Sem Imagem" com ✕ e ✓ vivos)', () => {
-  const m = montarRecuperacao();
+test('card "sem foto": a foto que ainda FALHA, com a rede SEM passar, não redesenha (senão "Sem Imagem" com ✕ e ✓ vivos)', async () => {
+  const m = montarRecuperacao();   // o servidor da foto também não responde: a rede não passa
   m.recuperar();
   m.provas[0].onerror();
+  await assentar();
+  assert.equal(m.sondas.length, 1, 'PRÉ-CONDIÇÃO: a falha da foto não perguntou ao servidor dela');
   assert.equal(m.redesenhos.length, 0);
   m.recuperar();
   assert.equal(m.provas.length, 2, 'depois da falha, a próxima prova de rede não tentou de novo');
+});
+
+// ── R7-4-06: a foto que o Waze TIROU DO AR, com o sinal de volta ────────────
+// Aberto sem sinal pela fila guardada, o card de foto trava ✕/✓ e diz "A foto
+// precisa de sinal" (certo). Com o sinal de volta, a prova da foto dá 404 e
+// nada redesenhava: o card seguia travado, dizendo que precisava de sinal, até a
+// pessoa pular — o mesmo pedido aberto com sinal mostra "Sem Imagem" com ✕/✓
+// vivos (MEDIDO no navegador, x6 da auditoria).
+test('R7-4-06: a foto tirada do ar com a rede de volta — o servidor da foto RESPONDE e o card sai do "precisa de sinal"', async () => {
+  const m = montarRecuperacao({ servidorDaFoto: 'responde' });
+  m.recuperar();
+  m.provas[0].onerror();                     // o 404 da foto: a <img> não distingue de falta de rede
+  await assentar();
+  assert.equal(m.sondas.length, 1, 'a falha da foto não perguntou ao servidor dela se a rede passa');
+  assert.equal(m.sondas[0].u, 'https://venue-image.waze.com/ur1?w=7', 'a sonda perguntou por outra foto que não a EM DECISÃO');
+  assert.equal(m.sondas[0].opcoes.mode, 'no-cors', 'o CDN da foto não manda CORS: a sonda tem que ir sem');
+  assert.equal(m.sondas[0].opcoes.cache, 'no-store', 'a sonda tem que perguntar à REDE, e não guardar nada');
+  assert.equal(m.redesenhos.length, 1, 'o servidor da foto respondeu e o card seguiu travado dizendo que precisa de sinal');
+  assert.deepEqual(m.diario, ['foto.falhouComRede']);
+  // E a prova se solta: a próxima tenta de novo (o card redesenhado pode travar de novo, se a rede cair).
+  m.recuperar();
+  assert.equal(m.provas.length, 2);
+});
+
+test('R7-4-06: com a rede PROVADA por uma resposta nossa, a foto que falha redesenha sem sondar ninguém', async () => {
+  const m = montarRecuperacao();
+  m.recuperar({ redeProvada: true });
+  m.provas[0].onerror();
+  await assentar();
+  assert.equal(m.redesenhos.length, 1, 'a resposta nossa provou a rede, e o card seguiu travado');
+  assert.equal(m.sondas.length, 0, 'com a rede já provada, a sonda gastou um pedido à toa');
+  // A rede provada que chega DURANTE uma prova vale pra ela.
+  const d = montarRecuperacao();
+  d.recuperar();
+  d.recuperar({ redeProvada: true });
+  assert.equal(d.provas.length, 1, 'a rede provada abriu uma segunda prova em vez de valer pra que estava no ar');
+  d.provas[0].onerror();
+  await assentar();
+  assert.equal(d.redesenhos.length, 1, 'a rede provada durante a prova se perdeu');
+  // CONTROLE: a foto que CHEGA segue redesenhando pelo caminho de sempre.
+  const ok = montarRecuperacao();
+  ok.recuperar({ redeProvada: true });
+  ok.provas[0].onload();
+  assert.deepEqual([ok.redesenhos.length, ok.diario], [1, ['foto.voltou']]);
+});
+
+test('R7-4-06: o servidor da foto PENDURADO — o teto solta a prova, e o card segue travado', async () => {
+  const m = montarRecuperacao({ servidorDaFoto: 'pendura' });
+  m.recuperar();
+  m.provas[0].onerror();
+  await assentar(80);                        // passa do teto de mentira (30 ms)
+  assert.equal(m.redesenhos.length, 0, 'rede pendurada contou como rede que anda');
+  m.recuperar();
+  assert.equal(m.provas.length, 2, 'a sonda pendurada prendeu a recuperação pra sempre');
+});
+
+test('R7-4-06: o host da foto está no `connect-src` das TRÊS cópias da CSP (sem isso a sonda nunca responde)', () => {
+  // A sonda é um `fetch` (destino '' → `connect-src`, não `img-src`): barrada
+  // pela CSP, ela falha ANTES da rede, e o card voltaria a ficar travado calado.
+  const CORE = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const base = /^const WAZE_IMAGE_BASE = '([^']+)';/m.exec(CORE);
+  assert.ok(base, 'a base das fotos sumiu do core');
+  const host = new URL(base[1]).origin;
+  const copias = {
+    _headers: readFileSync(new URL('../_headers', import.meta.url), 'utf8'),
+    'index.src.html': readFileSync(new URL('../index.src.html', import.meta.url), 'utf8'),
+    'server/node.mjs': readFileSync(new URL('../server/node.mjs', import.meta.url), 'utf8'),
+  };
+  for (const [onde, txt] of Object.entries(copias)) {
+    // Pela FORMA da diretiva de verdade (só ela começa com 'self'), não pela menção num comentário (gotcha #67.1).
+    const m = /connect-src 'self'([^;"]*);/.exec(txt);
+    assert.ok(m, `não achei o connect-src em ${onde}`);
+    assert.ok(m[1].split(/\s+/).includes(host), `${host} saiu do connect-src em ${onde}`);
+  }
 });
 
 test('card "sem foto": sem rede, sem o aviso, com o card trocado ou no meio do arraste, não mexe', () => {
@@ -259,8 +352,11 @@ test('card "sem foto": sem rede, sem o aviso, com o card trocado ou no meio do a
 });
 
 test('a recuperação do card "sem foto" é chamada nos DOIS sinais de rede: `online` e a resposta que chega', () => {
+  // O `online` não prova a rede (chega antes de ela passar tráfego): ali quem
+  // prova é a foto, ou o servidor dela. A resposta NOSSA prova (R7-4-06).
   const online = APP_SEM.slice(APP_SEM.indexOf("window.addEventListener('online', async"));
   assert.match(online.slice(0, online.indexOf('\n});')), /^\s+recuperarCardSemFoto\(\);/m);
   const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
-  assert.match(prova.slice(0, prova.indexOf('\n};')), /^\s+recuperarCardSemFoto\(\);/m);
+  assert.match(prova.slice(0, prova.indexOf('\n};')), /^\s+recuperarCardSemFoto\(\{ redeProvada: true \}\);/m,
+    'a resposta nossa chegou e não conta como rede provada pro card "sem foto"');
 });

@@ -454,7 +454,11 @@ test('o leitor de tela ouve o tipo do pedido no MESMO idioma da tela', () => {
   assert.match(APP, /function rotuloDoTipo\(place\)/,
     'sumiu o rotuloDoTipo — o rotulo do tipo voltou a ter duas implementacoes');
 
-  const live = APP.match(/cardLiveRegion[\s\S]{0,900}?\n    \}/);
+  // Ancorado na ESTRUTURA (a regiao viva do card que nasce), nao na primeira
+  // mencao de `cardLiveRegion` no arquivo: o desfecho de uma escrita da foto
+  // que fecha a camada tambem fala por ela (`anunciarNoCard`, R7-3-04), e o
+  // guard passava a ler aquela funcao (gotcha #67, pela posicao).
+  const live = APP.match(/const liveRegion = document\.getElementById\('cardLiveRegion'\);[\s\S]{0,900}?\n    \}/);
   assert.ok(live, 'sumiu o bloco da regiao viva');
   assert.match(live[0], /rotuloDoTipo\(place\)/,
     'a regiao viva nao passa mais pelo rotuloDoTipo — volta a anunciar portugues em qualquer idioma');

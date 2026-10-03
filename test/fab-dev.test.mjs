@@ -128,3 +128,104 @@ test('FAB: o "pego" que sobrar SEM dedo não trava o botão — a reavaliação 
     'o posicionarFabDev voltou a respeitar o "pego" sem olhar se há dedo');
   assert.match(fatiar('dlogApagar'), /classList\.remove\('fab-pego'\)/, 'desligar o modo dev não solta o botão pego');
 });
+
+// ── R7-4-01: o banner do topo (e o rodapé de avisos) não decide o canto ──────
+// O FAB mede o canto pelo que recebe o dedo ali. Com um banner do topo na tela
+// (o aviso da consequência, a recusa automática), o `cima-dir` lia o banner —
+// sem nada acionável nem `.nao-cobrir` — e passava por LIVRE: tocado nesse
+// meio, o FAB ia pra cima do "Restam" e FICAVA lá depois de o banner sair, com
+// "310" lido como "31" (MEDIDO no navegador: 21% da tinta a 390×844, 30% no SE).
+// Aqui o `posicionarFabDev` RODA sobre uma tela de mentira em camadas, com o
+// hit-test de verdade dela (`elementsFromPoint`, de cima pra baixo).
+const constanteDoApp = (nome, ctx = {}) => {
+  const m = new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM);
+  assert.ok(m, `a constante ${nome} sumiu`);
+  return new Function(...Object.keys(ctx), 'return (' + m[1] + ');')(...Object.values(ctx));
+};
+function telaDoFab({ banner = false, desfazer = false, modal = false } = {}) {
+  const LARGURA = 390, ALTURA = 844;
+  // Um nó: id, tag, classes, pai e a caixa. O `closest` casa seletor simples
+  // (tag, #id, .classe) — o que os nós desta tela precisam; atributo não casa.
+  const no = (o) => ({ classes: [], pai: null, ...o, closest(sel) {
+    const simples = sel.split(',').map((s) => s.trim());
+    for (let n = this; n; n = n.pai) {
+      if (simples.some((s) => (s[0] === '#' ? n.id === s.slice(1) : s[0] === '.' ? n.classes.includes(s.slice(1)) : /^[a-z]+$/.test(s) && n.tag === s))) return n;
+    }
+    return null;
+  } });
+  // A GEOMETRIA DE VERDADE a 390 px (medida no navegador): o placar, o card e os
+  // avisos têm a mesma calha de 16 px dos dois lados — e o FAB (334–378 no
+  // `cima-dir`) passa 4 px da borda direita deles. É por essa coluna que o
+  // `cima-dir` lia "livre" com o banner na tela: nos três pontos da grade, o
+  // banner nos dois de dentro e o fundo da página no de fora. Placar de largura
+  // CHEIA aqui achava o "Restam" na coluna de fora e escondia o defeito.
+  const corpo = no({ tag: 'body', caixa: [0, 0, LARGURA, ALTURA] });
+  const placar = no({ tag: 'div', id: 'placar', classes: ['nao-cobrir'], pai: corpo, caixa: [16, 62, 374, 128] });
+  const restam = no({ tag: 'span', id: 'pendingCount', pai: placar, caixa: [300, 70, 374, 120] });
+  const lidos = no({ tag: 'span', id: 'readCount', pai: placar, caixa: [16, 70, 100, 120] });
+  const foto = no({ tag: 'img', pai: corpo, caixa: [16, 132, 374, 750] });
+  const barra = no({ tag: 'div', pai: corpo, caixa: [16, 760, 374, ALTURA] });
+  const botao = no({ tag: 'button', pai: barra, caixa: [16, 760, 374, ALTURA] });
+  const camadas = [];   // de CIMA pra baixo
+  if (banner) {
+    const stack = no({ tag: 'div', id: 'bannerStack', pai: corpo, caixa: [0, 0, 0, 0] });
+    const cont = no({ tag: 'div', id: 'bannerContainer', pai: stack, caixa: [16, 68, 374, 140] });
+    camadas.push(no({ tag: 'div', classes: ['toast'], pai: cont, caixa: [16, 68, 374, 140] }));
+  }
+  if (desfazer) {
+    // O Desfazer do rodapé, com o botão dele, alto o bastante pra alcançar o `baixo-*`.
+    const stack = no({ tag: 'div', id: 'notifyStack', pai: corpo, caixa: [0, 0, 0, 0] });
+    const cont = no({ tag: 'div', id: 'undoContainer', pai: stack, caixa: [16, 690, 374, 830] });
+    camadas.push(no({ tag: 'button', id: 'undoBtn', pai: cont, caixa: [16, 690, 374, 830] }));
+  }
+  if (modal) camadas.push(no({ tag: 'div', id: 'helpModal', pai: corpo, caixa: [0, 0, LARGURA, ALTURA] }));
+  camadas.push(restam, lidos, placar, foto, botao, barra, corpo);
+  const dentro = (n, x, y) => x >= n.caixa[0] && x < n.caixa[2] && y >= n.caixa[1] && y < n.caixa[3];
+  const pilha = (x, y) => camadas.filter((n) => dentro(n, x, y));
+  const classes = new Set();
+  const fab = { style: {}, dataset: {}, classList: { contains: (c) => classes.has(c), remove: (c) => classes.delete(c) },
+    getBoundingClientRect: () => ({ width: 44, height: 44 }), contains: (n) => n === fab || n === btn };
+  const btn = { style: {} };
+  const document = {
+    getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : null),
+    querySelector: (s) => (s === 'header' ? { getBoundingClientRect: () => ({ bottom: 60 }) } : null),
+    elementsFromPoint: pilha,
+    elementFromPoint: (x, y) => pilha(x, y)[0] || null,
+  };
+  const DEV_FAB_ACIONAVEL = constanteDoApp('DEV_FAB_ACIONAVEL');
+  const DEV_FAB_LEITURA = constanteDoApp('DEV_FAB_LEITURA');
+  const deps = { document, innerWidth: LARGURA, innerHeight: ALTURA,
+    DEV_FAB_CANTOS: constanteDoApp('DEV_FAB_CANTOS'), DEV_FAB_AMOSTRAS: constanteDoApp('DEV_FAB_AMOSTRAS'),
+    DEV_FAB_MARGEM: constanteDoApp('DEV_FAB_MARGEM'), DEV_FAB_RESERVA_TOAST: constanteDoApp('DEV_FAB_RESERVA_TOAST'),
+    DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }),
+    DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS') };
+  const chaves = Object.keys(deps);
+  const posicionar = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n'
+    + ['devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev'].map(fatiar).join('\n')
+    + '\nreturn posicionarFabDev;')(...chaves.map((k) => deps[k]));
+  posicionar();
+  return { canto: fab.dataset.canto, fab, btn };
+}
+
+test('R7-4-01: com o banner do topo na tela, o FAB NÃO vai pra cima do placar (mede o que fica por baixo do banner)', () => {
+  // A RÉGUA: sem banner, os dois cantos de cima caem no placar, e o FAB vai pro `baixo-dir`.
+  assert.equal(telaDoFab().canto, 'baixo-dir', 'PRÉ-CONDIÇÃO: sem banner, o canto livre desta tela é o baixo-dir');
+  const t = telaDoFab({ banner: true });
+  assert.equal(t.canto, 'baixo-dir', `com o banner na tela, o FAB foi pro ${t.canto} — em cima do "Restam", onde fica depois de o banner sair`);
+  // O FAB volta a valer no hit-test depois da medição.
+  assert.equal(t.fab.style.pointerEvents, undefined);
+  assert.equal(t.btn.style.pointerEvents, undefined);
+});
+
+test('R7-4-01: o Desfazer do rodapé também não espanta o FAB pro meio da foto', () => {
+  assert.equal(telaDoFab({ desfazer: true }).canto, 'baixo-dir',
+    'o botão do Desfazer (passageiro, e por CIMA do FAB) contou como vítima do canto de baixo');
+});
+
+test('R7-4-01: CONTROLE — camada que NÃO é aviso passageiro (um modal) segue decidindo o canto', () => {
+  // Com a Ajuda aberta, o placar está ESCONDIDO: o FAB mede o modal e fica no
+  // canto preferido (quando a camada fecha, o observador o reavalia). Se a
+  // medida ignorasse qualquer camada, ele fugiria do placar que ninguém vê — e
+  // este caso é também a prova de que a tela de mentira empilha de verdade.
+  assert.equal(telaDoFab({ modal: true }).canto, 'cima-dir');
+});

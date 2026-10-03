@@ -246,8 +246,10 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   // Na recusa automática (contando ao landar) volta pro FIM da fila do lote; o
   // lote da PESSOA volta como o ✕ de um card, pelo `devolverPedidoRecusado` —
   // o PRÓXIMO card, ou a busca numa fila refeita (C5 e V9, auditoria de
-  // 2026-09-29; o comportamento é medido em test/lote-autor.test.mjs).
-  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*if \(aoLandar && naFilaDoLote\(\)\) \{ AppState\.queue\.push\(q\); return; \}\s*devolver\.push\(q\);\s*\};/,
+  // 2026-09-29; o comportamento é medido em test/lote-autor.test.mjs). A fila do
+  // lote é a da tela ou, com o treino aberto, a que ele guardou (R7-2-03, medido
+  // em test/treino-fila-real.test.mjs).
+  assert.match(bloco, /const voltarPraFila = \(q\) => \{\s*const fila = aoLandar \? filaDoLote\(\) : null;\s*if \(fila\) \{ fila\.push\(q\); return; \}\s*devolver\.push\(q\);\s*\};/,
     'o que falha deixou de voltar pra fila do lote');
   assert.match(bloco, /devolverPedidoRecusado\(devolver, epocaFila\)/,
     'o lote da pessoa deixou de devolver o que falhou como o ✕ de um card devolve');

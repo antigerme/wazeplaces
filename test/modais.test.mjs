@@ -110,6 +110,7 @@ function montar() {
     window: { Presenca: { esquecerAberta: () => { presenca.esquecerAberta++; }, esquecerLista: () => { presenca.esquecerLista++; } } },
     URL: { revokeObjectURL: () => {} },
     pararTickerPareamento: () => {}, limparQrPareamento: () => {},
+    aoFecharCamada: () => {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
   };
   const corpo = [
     // O estado de VISUALIZAÇÃO que a limpeza de Filtros zera (módulo, no app).

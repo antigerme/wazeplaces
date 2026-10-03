@@ -111,6 +111,7 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     aprovacoesNoAr: new Set(),   // nenhuma aprovação de foto no ar (R5-2-04)
     aprovacoesDaQueda: new Map(),   // nem de uma sessão que caiu
     aprovacaoPendente: null,        // nem na janela do Desfazer (R6-2-07)
+    aoFecharCamada: () => {},       // o "Como funciona" adiado (R7-7-01), em test/como-funciona
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',

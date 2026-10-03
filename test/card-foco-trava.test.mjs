@@ -48,7 +48,7 @@ function constante(nome) {
 }
 
 // ── C14: o aviso da trava ────────────────────────────────────────────────────
-function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela = false } = {}) {
+function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela = false, quedaAnunciada = false } = {}) {
   const avisos = [];
   const dispensados = [];
   const duracoes = [];
@@ -68,7 +68,7 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
-    `let loteDeLidosEmVoo = ${lote}, escritasConferindo = ${conferindo};`,
+    `let loteDeLidosEmVoo = ${lote}, escritasConferindo = ${conferindo}, quedaAnunciada = ${quedaAnunciada};`,
     fatiar('acoesTravadas'), fatiar('avisoDaTrava'),
     constante('AVISO_DA_TRAVA_INTERVALO_MS'), 'let avisoDaTravaEm = 0;', 'let avisoDaTravaNaTela = null;',
     fatiar('avisarTravaAoTocar'), fatiar('dispensarAvisoDaTrava'),
@@ -87,6 +87,24 @@ test('C14 o card travado SEM banner responde com o porquê — o aviso que já e
     assert.equal(m.app.avisarTravaAoTocar(), true, `${caso}: DEFEITO — o toque no card travado não respondeu`);
     assert.deepEqual(m.avisos, [{ msg: chave, tipo: 'info' }], `${caso}: o aviso não é o da trava que está valendo`);
   }
+});
+
+// R7-1-09: a renovação da queda ACABOU sem dar e o aviso de queda está na tela;
+// nos instantes até a tela de entrada o card segue ali, travado, e o toque nele
+// empilhava "Sessão expirada" sob "Sua sessão no app não vale mais" — dois avisos
+// do mesmo fato (MEDIDO, auditoria de 2026-10-02). Quem acende e apaga a marca é
+// a queda (test/costura-sessao, R7-1-09).
+test('R7-1-09: com a queda já dita, o toque no card travado não empilha "Sessão expirada" sob o aviso de queda', () => {
+  const m = montarAviso({ autenticado: false, quedaAnunciada: true });
+  assert.equal(m.app.avisarTravaAoTocar(), false);
+  assert.deepEqual(m.avisos, [], `DEFEITO: o toque somou um aviso ao aviso de queda: ${JSON.stringify(m.avisos)}`);
+  // CONTROLE: a mesma queda ANTES de ser dita (a pergunta à extensão) avisa, como sempre.
+  const c = montarAviso({ autenticado: false });
+  assert.equal(c.app.avisarTravaAoTocar(), true);
+  assert.deepEqual(c.avisos, [{ msg: 'api.error.noSession', tipo: 'info' }]);
+  // E a marca de uma queda antiga não cala a trava de quem tem sessão (o lote no ar).
+  const s = montarAviso({ lote: true, quedaAnunciada: true });
+  assert.equal(s.app.avisarTravaAoTocar(), true, 'a marca da queda calou a trava de uma sessão viva');
 });
 
 test('C14 na janela do Desfazer NÃO: o banner com a contagem já explica — e destravado, nada', () => {
@@ -450,11 +468,16 @@ function montarTrava() {
     Lightbox: { isOpen: () => false, place: null }, MapaLightbox: { isOpen: () => false },
     editandoNome: () => false, renomeacaoNoAr: () => false, atualizarBotaoSalvarNome: () => {},
     dispensarAvisoDaTrava: () => {},
+    // O "Como funciona" adiado que espera o card destravar (R7-7-01): não é o
+    // assunto aqui (test/como-funciona).
+    pedirComoFuncionaAdiado: () => {},
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
     'let aprovandoAgora = false, excluindoAgora = false;',
     fatiar('focavelNaTela'), constante('BOTAO_DA_ACAO'), 'let focoDoTeclado = null;',
+    // O foco da foto ampliada na trava (R7-3-06): com ela fechada, sai sem mexer.
+    fatiar('manterFocoNoLightbox'),
     fatiar('guardarFocoDaTrava'), fatiar('aplicarFocoDoTeclado'), fatiar('aplicarTravaDeAcao'),
     'return { aplicarTravaDeAcao, pendente: () => focoDoTeclado, pointerdown: () => { focoDoTeclado = null; } };',
   ].join('\n'))(...nomes.map((n) => deps[n]));
@@ -801,7 +824,7 @@ test('R6-2-12: "Esquecer" da FOLHA pelo TECLADO leva o foco ao card refeito — 
   }
 });
 
-// ── R6-2-13: "Verificar novamente" e "Tentar novamente" pelo teclado ────────────
+// ── R6-2-13: "Verificar novamente" e "Tentar de novo" pelo teclado ────────────
 // Os dois somem com o painel quando o card volta, com o foco neles: pelo teclado
 // o foco caía no <body> (MEDIDO no navegador, s45; pelo mouse também fica no
 // <body>, o esperado). O foco é prometido ao ✕ do card que chega — e o painel
@@ -873,7 +896,7 @@ test('R6-2-13: os dois botões dos painéis prometem o foco ANTES de trocar a fi
   assert.match(ouvintes, /\$\('reloadBtn'\)\.addEventListener\('click', \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*resetQueue\(\);\s*startFetching\(\);/,
     'o "Verificar novamente" pelo teclado larga o foco no <body> quando o card volta');
   assert.match(ouvintes, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await /,
-    'o "Tentar novamente" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
+    'o "Tentar de novo" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
 });
 
 // ── O redesenho do MESMO card não é "Novo pedido" (follow-up do lote 10) ──────
@@ -890,23 +913,66 @@ function buracoNegro() {
     apply: () => buracoNegro(), set: () => true,
   });
 }
+// Um painel da fila vazia (`#noMoreCards`, `#loadErrorState`): o que o
+// `showNoPlaces`, o `renderCurrentCard` e o `aplicarFocoDoTeclado` leem dele.
+function painelDeMentira() {
+  const classes = new Set(['hidden']);   // nascem escondidos, como no HTML
+  return {
+    dataset: {}, offsetWidth: 0, querySelector: () => buracoNegro(),
+    classList: {
+      contains: (c) => classes.has(c),
+      add: (...cs) => { for (const c of cs) classes.add(c); },
+      remove: (...cs) => { for (const c of cs) classes.delete(c); },
+    },
+  };
+}
 function cardQueAnuncia() {
   const ditos = [];
   const regiao = { set textContent(v) { ditos.push(v); }, get textContent() { return ditos.at(-1) || ''; } };
   const AppState = { queue: [], hasMore: false, currentPlace: null, loadError: false };
+  // Os painéis e os botões deles, de verdade o bastante: o botão só está NA
+  // TELA com o painel dele à mostra (o `focavelNaTela` lê `getClientRects`).
+  const d = documentoDeMentira();
+  const paineis = { noMoreCards: painelDeMentira(), loadErrorState: painelDeMentira() };
+  const naTela = (painel) => () => (paineis[painel].classList.contains('hidden') ? [] : [1]);
+  const botoes = {
+    reloadBtn: botaoQuePerde(d, 'Verificar novamente', { getClientRects: naTela('noMoreCards') }),
+    retryLoadBtn: botaoQuePerde(d, 'Tentar de novo', { getClientRects: naTela('loadErrorState') }),
+  };
+  d.getElementById = (id) => (id === 'cardLiveRegion' ? regiao : paineis[id] || botoes[id] || buracoNegro());
+  // O card da frente, quando há um (o `cardDaFrente`): sair da tela leva o
+  // foco que estava num botão dele (o navegador).
+  const estado = { card: null, travado: false, pulados: 0 };
+  const cardNaTela = () => {
+    const bs = { '.card-btn-reject': botaoQuePerde(d, '✕'), '.card-btn-skip': botaoQuePerde(d, '↑'),
+      '.card-btn-read': botaoQuePerde(d, '✓') };
+    estado.card = { bs, querySelector: (s) => bs[s] || null };
+    return estado.card;
+  };
+  const tirarCard = () => {
+    if (!estado.card) return;
+    const bs = Object.values(estado.card.bs);
+    for (const b of bs) b.isConnected = false;
+    if (bs.includes(d.activeElement)) d.activeElement = d.body;
+    estado.card = null;
+  };
   const deps = {
-    AppState, pedidoAnunciado: null, primeiroCardAnotado: true,
-    t: (k, v) => `${k}:${v.name}`, identidadeDoPlace: (p) => ({ titulo: p.name }), rotuloDoTipo: () => '',
-    document: { getElementById: (id) => (id === 'cardLiveRegion' ? regiao : buracoNegro()) },
+    AppState, pedidoAnunciado: null, primeiroCardAnotado: true, focoDoTeclado: null,
+    t: (k, v) => (v ? `${k}:${v.name}` : k), identidadeDoPlace: (p) => ({ titulo: p.name }), rotuloDoTipo: () => '',
+    document: d, navigator: { onLine: true },
+    cardDaFrente: () => estado.card, removeCurrentCardEl: tirarCard, puladosNestaFila: () => estado.pulados,
+    acoesTravadas: () => estado.travado, topOpenModal: () => null,
+    Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
   };
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
     get: (t, k) => (k === Symbol.unscopables ? undefined : k in t ? t[k] : typeof k === 'string' ? buracoNegro() : undefined),
     set: (t, k, v) => { t[k] = v; return true; },
   });
-  const app = new Function('__escopo', `with (__escopo) {\n${fatiar('renderCurrentCard')}\n${fatiar('showNoPlaces')}
-    return { renderCurrentCard, showNoPlaces };\n}`)(escopo);
-  return { app, AppState, ditos };
+  const app = new Function('__escopo', `with (__escopo) {\n${constante('BOTAO_DA_ACAO')}\n${fatiar('focavelNaTela')}
+    ${fatiar('pedirFocoDoTeclado')}\n${fatiar('aplicarFocoDoTeclado')}\n${fatiar('renderCurrentCard')}\n${fatiar('showNoPlaces')}
+    return { renderCurrentCard, showNoPlaces, pedirFocoDoTeclado, aplicarFocoDoTeclado };\n}`)(escopo);
+  return { app, AppState, ditos, d, deps, estado, paineis, botoes, cardNaTela, tirarCard };
 }
 
 test('o card REDESENHADO com o mesmo pedido na frente não anuncia "Novo pedido" — o pedido que MUDA, sim', () => {
@@ -941,10 +1007,150 @@ test('a frente que fica VAZIA zera o anúncio: o mesmo pedido que volta a ela é
   assert.deepEqual(m.ditos, ['card.live.newRequest:Padaria A', 'card.live.newRequest:Padaria A'],
     'o pedido que voltou à frente vazia não foi anunciado');
   // Pelo "Tudo limpo!" direto (`showNoPlaces`, o lote que leva a fila inteira).
+  // O fim da fila é dito no meio (R7-2-06, abaixo).
   const n = cardQueAnuncia();
   n.AppState.queue = [A];
   n.app.renderCurrentCard();
   n.app.showNoPlaces();
   n.app.renderCurrentCard();
-  assert.equal(n.ditos.length, 2, 'depois do "Tudo limpo!", o pedido que voltou à frente não foi anunciado');
+  assert.deepEqual(n.ditos, ['card.live.newRequest:Padaria A', 'states.empty.title', 'card.live.newRequest:Padaria A'],
+    'depois do "Tudo limpo!", o pedido que voltou à frente não foi anunciado');
+});
+
+// ── R7-2-06: o botão que some com o ÚLTIMO card, e o fim da fila ────────────────
+// O C10 leva o foco do ✕ ↑ ✓ ao botão equivalente do card que chega — e, quando
+// a decisão esvaziava a fila, não chegava card nenhum: o foco caía no <body> (o
+// Tab seguinte recomeçava do topo da página), e nenhuma região viva mudava — quem
+// usa leitor de tela não ouvia nem o fim da fila. MEDIDO nos dois motores
+// (auditoria de 2026-10-02, R7-2-06: t06 e t08). O mesmo no "Verificar novamente"
+// que volta sem nada e no "Rejeitar os N" que leva o resto da fila. As funções de
+// VERDADE (`showNoPlaces`, `aplicarFocoDoTeclado`, `renderCurrentCard`); a tela é
+// o painel de mentira e o resto, buraco negro.
+// O Enter no botão do card, com ele focado (o `fireAction`), e o card saindo.
+function enterNoUltimo(m, sel = '.card-btn-reject', acao = 'left') {
+  const b = m.estado.card.bs[sel];
+  b.focus();
+  m.app.pedirFocoDoTeclado(b, true, acao);
+  assert.equal(m.deps.focoDoTeclado, sel, 'PRÉ-CONDIÇÃO: o Enter no botão focado não prometeu o foco');
+}
+const microtarefas = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+
+test('R7-2-06: Enter no ✕ (ou ↑) do ÚLTIMO card pelo TECLADO — o foco vai ao "Verificar novamente", e o fim é dito', async () => {
+  for (const [sel, acao, pulados, titulo] of [['.card-btn-reject', 'left', 0, 'states.empty.title'],
+    ['.card-btn-skip', 'up', 1, 'states.empty.titlePulados']]) {
+    const m = cardQueAnuncia();
+    m.cardNaTela();
+    enterNoUltimo(m, sel, acao);
+    m.estado.pulados = pulados;
+    m.app.showNoPlaces();                          // o `advanceQueue`: a fila acabou
+    assert.equal(m.d.activeElement, m.d.body, 'PRÉ-CONDIÇÃO: o card não saiu com o foco');
+    await microtarefas();
+    assert.equal(m.d.activeElement, m.botoes.reloadBtn,
+      `${acao}: DEFEITO — a fila acabou pelo teclado e o foco ficou em ${m.d.activeElement && m.d.activeElement.nome}`);
+    assert.equal(m.deps.focoDoTeclado, null, `${acao}: o pedido de foco ficou pendurado depois de pousar`);
+    assert.deepEqual(m.ditos, [titulo], `${acao}: o fim da fila não foi dito ao leitor de tela (ou foi outra coisa)`);
+  }
+});
+
+test('R7-2-06: na FALHA ao carregar o foco vai ao "Tentar de novo" — e o anúncio é do painel dela (`role="alert"`), não repetido', async () => {
+  const m = cardQueAnuncia();
+  m.cardNaTela();
+  enterNoUltimo(m);
+  m.AppState.loadError = true;
+  m.app.showNoPlaces();
+  await microtarefas();
+  assert.equal(m.d.activeElement, m.botoes.retryLoadBtn, `a falha ao carregar largou o foco em ${m.d.activeElement && m.d.activeElement.nome}`);
+  assert.deepEqual(m.ditos, [], 'a falha foi dita também pela região do card: o painel dela já é `role="alert"` (dita duas vezes)');
+  // O motivo de não repetir mora no HTML: o painel da falha se anuncia, o do fim da fila não.
+  const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  const abre = (id) => (new RegExp(`<div id="${id}"[^>]*>`).exec(html) || [''])[0];
+  assert.match(abre('loadErrorState'), /role="alert"/, 'o painel da falha deixou de ser região viva: o anúncio dele sumiu');
+  assert.doesNotMatch(abre('noMoreCards'), /aria-live|role="(status|alert|log)"/,
+    'o painel do fim da fila virou região viva: o título seria dito duas vezes');
+  // Os ids que o foco consulta existem, e cada botão mora no SEU painel (gotcha
+  // #68: id errado devolve `null` e o foco cai no <body> sem dizer nada).
+  const pos = (s) => html.indexOf(s);
+  for (const [botao, de, ate] of [['reloadBtn', 'id="noMoreCards"', 'id="loadErrorState"'],
+    ['retryLoadBtn', 'id="loadErrorState"', '<template id="cardTemplate"']]) {
+    const j = pos(`id="${botao}"`);
+    assert.ok(pos(de) > 0 && j > pos(de) && j < pos(ate), `o ${botao} não mora no painel dele (${de})`);
+  }
+});
+
+test('R7-2-06: com o Desfazer o foco ESPERA a janela — e a tecla z, que devolve o card, leva o foco ao botão dele', async () => {
+  // A janela acaba: o foco pousa no "Verificar novamente" (a trava que muda o aplica).
+  const m = cardQueAnuncia();
+  m.cardNaTela();
+  enterNoUltimo(m);
+  m.app.showNoPlaces();
+  m.estado.travado = true;                         // o `scheduleAction` do MESMO gesto abre a janela logo depois
+  await microtarefas();
+  assert.equal(m.d.activeElement, m.d.body, 'o foco foi pro painel com a janela do Desfazer correndo');
+  assert.equal(m.deps.focoDoTeclado, '.card-btn-reject', 'a janela apagou o pedido de foco');
+  m.estado.travado = false;
+  m.app.aplicarFocoDoTeclado();                    // o `aplicarTravaDeAcao` do fim da janela
+  assert.equal(m.d.activeElement, m.botoes.reloadBtn, 'a janela acabou e o foco não pousou no "Verificar novamente"');
+  // A tecla z na janela: o card VOLTA, e o foco vai ao ✕ dele (o que o C10 já fazia).
+  const z = cardQueAnuncia();
+  const A = { name: 'Padaria A' };
+  z.AppState.queue = [A];
+  z.app.renderCurrentCard();
+  z.cardNaTela();
+  enterNoUltimo(z);
+  z.AppState.queue = [];
+  z.app.showNoPlaces();
+  z.estado.travado = true;
+  await microtarefas();
+  z.AppState.queue = [A];                          // o `undo()`: o pedido volta pra frente
+  z.app.renderCurrentCard();
+  z.cardNaTela();
+  z.estado.travado = false;
+  await microtarefas();
+  z.app.aplicarFocoDoTeclado();                    // e o `desfazerAcaoPendente` destrava
+  assert.equal(z.d.activeElement, z.estado.card.bs['.card-btn-reject'],
+    `o Desfazer devolveu o card e o foco ficou em ${z.d.activeElement && z.d.activeElement.nome} — o painel o tomou antes da janela acabar`);
+  assert.deepEqual(z.ditos, ['card.live.newRequest:Padaria A', 'states.empty.title', 'card.live.newRequest:Padaria A']);
+});
+
+test('R7-2-06: CONTROLES — sem o teclado nada se move, o lugar que a pessoa escolheu ganha, e sem painel a promessa espera', async () => {
+  // O mouse e o dedo (sem promessa): o fim é dito, o foco não pula pela tela.
+  const mouse = cardQueAnuncia();
+  mouse.cardNaTela().bs['.card-btn-reject'].focus();   // o clique foca o botão (no Chromium), sem prometer nada
+  mouse.app.showNoPlaces();
+  await microtarefas();
+  assert.equal(mouse.d.activeElement, mouse.d.body, 'sem o teclado, o fim da fila pôs o foco no painel (o foco pulando pela tela)');
+  assert.deepEqual(mouse.ditos, ['states.empty.title'], 'o fim da fila não foi dito a quem usa leitor de tela pelo toque');
+  // A pessoa deu Tab pra outro lugar antes de o foco pousar: o lugar dela ganha.
+  const tab = cardQueAnuncia();
+  tab.cardNaTela();
+  enterNoUltimo(tab);
+  tab.app.showNoPlaces();
+  const filtros = botaoQuePerde(tab.d, 'Filtros');
+  filtros.focus();
+  await microtarefas();
+  assert.equal(tab.d.activeElement, filtros, 'o foco foi arrancado de onde a pessoa o pôs');
+  assert.equal(tab.deps.focoDoTeclado, null);
+  // Sem painel na tela (a busca ainda corre): a promessa espera, e o card que chega a leva.
+  const busca = cardQueAnuncia();
+  busca.cardNaTela();
+  enterNoUltimo(busca);
+  busca.tirarCard();
+  busca.app.aplicarFocoDoTeclado();
+  assert.equal(busca.d.activeElement, busca.d.body, 'sem card nem painel, o foco foi parar em algum lugar');
+  assert.equal(busca.deps.focoDoTeclado, '.card-btn-reject', 'sem card nem painel, a promessa caiu');
+  busca.cardNaTela();
+  busca.app.aplicarFocoDoTeclado();
+  assert.equal(busca.d.activeElement, busca.estado.card.bs['.card-btn-reject'], 'o card que chegou depois da busca não recebeu o foco');
+});
+
+test('R7-2-06: o fim é dito quando o painel APARECE — redesenhado na tela, não repete; depois de um card, diz de novo', () => {
+  const m = cardQueAnuncia();
+  m.app.showNoPlaces();
+  m.app.showNoPlaces();                            // desenhado de novo, já na tela
+  assert.deepEqual(m.ditos, ['states.empty.title'], 'o painel redesenhado repetiu o fim da fila');
+  m.AppState.queue = [{ name: 'Padaria A' }];      // o "Verificar novamente" trouxe um pedido
+  m.app.renderCurrentCard();
+  m.AppState.queue = [];
+  m.app.showNoPlaces();                            // e a decisão esvaziou a fila de novo
+  assert.deepEqual(m.ditos, ['states.empty.title', 'card.live.newRequest:Padaria A', 'states.empty.title']);
 });

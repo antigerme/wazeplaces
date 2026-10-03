@@ -83,6 +83,7 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     API: { getRegion: () => 'row', getCountry: () => 30, rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
     scheduleAction: (tipo, place, ex) => agendadas.push(ex),
     presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(), carimboDoGesto: () => null,
+    paisDaFila: () => 30,   // o país do gesto, pra marca da presença (R7-6-05)
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
     // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):
@@ -365,9 +366,13 @@ function montarComoFunciona() {
   const deps = {
     AppState, Treino: { ativo: false }, cardDaFrente: () => ({}),
     topOpenModal: () => camada.modal, Lightbox: { isOpen: () => camada.foto }, MapaLightbox: { isOpen: () => camada.mapa },
-    savePreferences: () => {}, abrirComoFunciona: () => abertos.push('comoFunciona'),
+    savePreferences: () => {}, openModal: (id) => abertos.push(id === 'comoFuncionaModal' ? 'comoFunciona' : id),
+    // As outras esperas do adiado (a janela do Desfazer, o voltar no ar, o voltar
+    // do aparelho) moram em test/como-funciona; aqui, nenhuma.
+    acoesTravadas: () => false, CamadaVoltar: { consumindo: false },
+    comoFuncionaEsperaVoltar: false, comoFuncionaEsperaGesto: false,
   };
-  const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'mostrarComoFuncionaSePrimeiraVez'], deps,
+  const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'abrirComoFunciona', 'mostrarComoFuncionaSePrimeiraVez'], deps,
     ['mostrarComoFuncionaSePrimeiraVez']);
   return { mostrar: mostrarComoFuncionaSePrimeiraVez, AppState, abertos, camada };
 }
@@ -515,7 +520,8 @@ function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
   };
   const chaves = Object.keys(deps);
   // `recusaAutomaticaNestaFila` (R6-2-11): só muda a FRASE; convite e confete são do trabalho da pessoa.
-  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false;\n`
+  // `focoDoTeclado` (R7-2-06): o painel leva o foco prometido ao teclado; aqui ninguém usa teclado.
+  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false; let focoDoTeclado = null;\n`
     + ['puladosNestaFila', 'filaTerminouLimpa', 'atualizarConviteInstalar', 'showNoPlaces'].map(fatiar).join('\n')
     + '\nreturn { showNoPlaces, atualizarConviteInstalar };')(...chaves.map((k) => deps[k]));
   return { ...api, convite: () => !els.installInvite.classList.contains('hidden'), festa: () => noMore.classList.contains('celebrate') };
@@ -603,6 +609,9 @@ function montarPais({ pais = 30, regiao = 'row', perfis = {}, myArea = false } =
     // Sem pedido registrado, nada mudou desde ele (o achado 10 tem o seu
     // teste em test/filtros-aplicar.test.mjs).
     lugarDoPedidoDoPerfil: null,
+    // A lista que cada pergunta trouxe fica pra peneira dos Filtros (R7-6-02,
+    // test/filtros-aplicar); aqui se mede o país escolhido.
+    anotarEditaveis: () => {},
     API: {
       getCountry: () => pais, getRegion: () => regiao,
       getProfile: async (r) => { pedidos.push(r); return perfis[r] || { success: true, profile: { editableCountryIDs: [] } }; },
@@ -684,7 +693,10 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
   const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
   // A troca de região passa pela MESMA função (R66-4, test/filtros-aplicar): ela
   // sabe a região aplicada e tira a área do país que deixou de ser mostrado.
+  // Sem editáveis LIDOS por servidor (`editaveisLidos`, R7-6-02), a peneira usa
+  // os do perfil — que é o que este teste varia.
   const { populateCountrySelect } = montar(['populateCountrySelect'], {
+    editaveisLidos: () => null,
     document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30, getRegion: () => 'row' },
     ordenarPorNome: (l) => l, escapeHtml: (x) => String(x), aoMudarPaisNaTela: () => {},
   }, ['populateCountrySelect']);
@@ -801,7 +813,8 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
     };
     const chaves = Object.keys(deps);
     // `recusaAutomaticaNestaFila`: a recusa automática não agiu (R6-2-11 tem teste próprio, em lote-autor).
-    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false;\n`
+    // E o `focoDoTeclado` (R7-2-06): ninguém usa teclado aqui.
+    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false; let focoDoTeclado = null;\n`
       + fatiar('puladosNestaFila') + '\n' + fatiar('filaTerminouLimpa') + '\n' + fatiar('showNoPlaces')
       + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
     fn();

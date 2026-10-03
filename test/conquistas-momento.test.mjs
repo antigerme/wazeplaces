@@ -101,7 +101,8 @@ function montarFimDaFila({ skipped = 0, base = 0, tratou = true, treino = false 
     chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
     Treino: { ativo: treino },
   };
-  const preludio = `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base};`;
+  // `focoDoTeclado` (R7-2-06): o painel leva o foco prometido ao teclado; aqui ninguém usa teclado.
+  const preludio = `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let focoDoTeclado = null;`;
   const api = montar(['puladosNestaFila', 'filaTerminouLimpa', 'filaZeradaConfirmada', 'showNoPlaces'], deps,
     ['showNoPlaces', 'filaZeradaConfirmada'], preludio);
   return { ...api, AppState, conquistas, festa: () => classes.has('celebrate'),

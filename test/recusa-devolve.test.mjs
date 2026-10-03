@@ -74,6 +74,7 @@ function montar({ fila = [], naTela = true, pendentesNoWaze = [], painel = false
     API: { getRegion: () => 'row', getSession: () => 'tok', fetchPlaces: (page, f) => waze.buscar(page, f) },
     dlog: () => {}, dfato: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
     registrarPouso: () => log.push('pouso'), recordHistory: () => {}, registrarRejeicaoDeAutor: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     avisarConsequencia: () => {}, registrarAcaoConfirmada: () => log.push('confirmada'),
     showToast: (m, tipo) => log.push('toast:' + tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     handleUnauthorized: () => log.push('confere'),

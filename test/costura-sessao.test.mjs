@@ -338,7 +338,7 @@ function lsFalso() {
 
 // `janela`: com a janela do Desfazer (a ação fica pendente até vencer); sem
 // ela, o gesto sai na hora e fica EM VOO até o teste soltar a resposta.
-function montarVoo({ janela = false } = {}) {
+function montarVoo({ janela = false, extras = [] } = {}) {
   const { safeLS, guardado } = lsFalso();
   const pendentes = [];
   const gravados = [];
@@ -365,12 +365,13 @@ function montarVoo({ janela = false } = {}) {
     pedidosQueEntraramNaFila: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     entrarPelaExtensao: () => new Promise(() => {}), console,
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
     'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
     'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
-    'handleReject', 'handleMarkAsRead', 'derrubarSessao'], deps);
+    'handleReject', 'handleMarkAsRead', 'derrubarSessao', ...extras], deps);
   const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
   AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
   AppState.currentPlace = P;
@@ -390,6 +391,70 @@ test('K7: o ✕/✓ em voo, a sessão cai e a resposta (401) chega depois — o 
     assert.equal(m.AppState.stats[chave], 0);
     assert.equal(m.h.carregarFilaDeSaida().length, 0, 'a resposta de outra época entrou na fila de saída');
   }
+});
+
+// ═══ R7-2-01 · a decisão no ar quando a conta DESTA aba fica em dúvida ═══════
+// A aba sem perfil, com o aparelho tomado por OUTRA sessão (R6-1-04), travava
+// as decisões NOVAS — e o ✕ que já estava na janela do Desfazer saía no fim
+// dela com a sessão desta aba; o pouso gravava o Histórico, os autores, as
+// conquistas e a marca do primeiro ✕ no aparelho, já de OUTRA conta (MEDIDO,
+// auditoria de 2026-10-02). Quando a dúvida acende vale o que a queda faz: a
+// janela é cancelada (a decisão volta como card) e a época troca — a resposta
+// do que estava no ar não grava nada no aparelho.
+const DUVIDA = ['conferirContaDestaAba'];
+
+test('R7-2-01: a dúvida ACENDE com o ✕ na janela do Desfazer — a decisão não sai, volta como card e o placar desconta', async () => {
+  const m = montarVoo({ janela: true, extras: DUVIDA });
+  m.h.handleReject();
+  await tique();
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: o ✕ está na janela do Desfazer');
+  assert.equal(m.gravados.at(-1).rejected, 1, 'PRÉ-CONDIÇÃO: o gesto gravou o +1');
+  m.h.conferirContaDestaAba();
+  assert.equal(m.AppState.pendingAction, null, 'DEFEITO: a janela seguiu correndo com a conta desta aba em dúvida');
+  assert.equal(m.AppState.contaEmDuvida, true);
+  assert.equal(m.AppState.queue[0], m.P, 'a decisão cancelada não voltou como o card da frente');
+  assert.equal(m.gravados.at(-1).rejected, 0, 'o +1 de uma decisão que não saiu ficou gravado');
+  await tique(10);
+  assert.deepEqual(m.pendentes, [], 'a decisão saiu pro Waze mesmo com a janela cancelada');
+  // Um aviso a mais da outra aba (a dúvida já acesa) não cancela nem troca a época de novo.
+  const epoca = m.deps.epocaDaSessao;
+  m.h.conferirContaDestaAba();
+  assert.equal(m.deps.epocaDaSessao, epoca, 'a época trocou de novo com a dúvida já acesa');
+});
+
+test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida — não grava nada no aparelho', async () => {
+  for (const [caso, resposta] of [['pousou', { success: true }], ['caiu a rede', { success: false, errorCategory: 'transient' }]]) {
+    const m = montarVoo({ extras: DUVIDA });
+    m.h.handleReject();
+    await tique();
+    assert.equal(m.pendentes.length, 1, `${caso}: PRÉ-CONDIÇÃO: o ✕ saiu e está no ar`);
+    m.h.conferirContaDestaAba();
+    m.pendentes[0](resposta);
+    await tique(20);
+    for (const gravaria of ['recordHistory', 'registrarRejeicaoDeAutor', 'registrarAcaoConfirmada', 'avisarConsequencia']) {
+      assert.ok(!m.h.chamou.includes(gravaria), `DEFEITO (${caso}): a resposta com a conta em dúvida chegou a ${gravaria}`);
+    }
+    assert.equal(m.h.carregarFilaDeSaida().length, 0, `${caso}: a decisão ficou na fila de saída do aparelho de outra conta`);
+    if (caso === 'caiu a rede') {
+      assert.equal(m.AppState.stats.rejected, 0, 'a decisão que não pousou ficou contada');
+      assert.ok(m.AppState.queue.includes(m.P), 'a decisão que não pousou não voltou como card');
+    }
+  }
+  // CONTROLE: a mesma resposta SEM a dúvida grava como sempre (o instrumento enxerga).
+  const c = montarVoo();
+  c.h.handleReject();
+  await tique();
+  c.pendentes[0]({ success: true });
+  await tique(20);
+  assert.ok(c.h.chamou.includes('recordHistory'), 'CONTROLE: sem dúvida a resposta não gravou — o teste perdeu o sentido');
+});
+
+test('R7-2-01: a dúvida para o "Marcar todos" no ar e solta a trava dele — como a queda', () => {
+  const m = montarVoo({ extras: DUVIDA });
+  m.deps.loteDeLidosEmVoo = true;
+  m.h.conferirContaDestaAba();
+  assert.equal(m.deps.loteDeLidosEmVoo, false, 'o lote da época que acabou travaria o card depois de a dúvida se resolver');
+  assert.ok(m.h.chamou.includes('cancelarPendenciasDoLightbox'), 'as escritas do lightbox na janela seguiram correndo');
 });
 
 test('K7: CONTROLE — a mesma resposta ANTES da queda vai pra fila de saída e o placar fica', async () => {
@@ -600,8 +665,8 @@ function montarLoteNaTrocaDeSessao() {
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
   };
-  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
-    'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
+  const h = montar(['acoesTravadas', 'acoesTravadasForaDaJanela', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
+    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
   const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   return { h, deps, AppState, portoes, marcarTodos };
 }
@@ -670,8 +735,8 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace ? AppState.currentPlace.updateRequestID : '-')); },
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), devolverPedidoRecusado: () => log.push('devolveu'),
   };
-  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
-    'chaveDoPedido', 'derrubarSessao'], deps);
+  const h = montar(['acoesTravadas', 'acoesTravadasForaDaJanela', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
+    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao'], deps);
   const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   // O 1º pedaço pousa; o 2º fica no ar, e a sessão cai e renova com a MESMA conta.
   const ateAQueda = async () => {
@@ -839,23 +904,101 @@ test('K2: OUTRA conta revelada pelo perfil — a fila que atravessou a sessão s
 // aberta por cima, com o "Aprovar" à mostra e HABILITADO — e o toque não fazia
 // nada (o portão recusa). Botão morto com cara de vivo, sobre um pedido que nem
 // está na fila de quem entrou (MEDIDO no Chromium, auditoria de 2026-10-02).
-test('R6-1-06: OUTRA conta na renovação — a foto e o mapa AMPLIADOS fecham ANTES de a fila trocar', () => {
-  for (const atravessou of [true, false]) {
-    const log = [];
-    const camada = (nome) => ({ aberto: true, isOpen() { return this.aberto; }, close() { this.aberto = false; log.push('fechou ' + nome); } });
-    const deps = { AppState: { stats: {}, queue: [{ venueID: 'xA' }] }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
-      carregarFilaDeSaida: () => [], window: {}, Lightbox: camada('a foto'), MapaLightbox: camada('o mapa'),
-      resetQueue: () => log.push('fila trocada'), startFetching: () => log.push('busca') };
-    const h = montar(['esquecerOutraConta', 'fecharCamadasDeFoto'], deps);
-    h.esquecerOutraConta('222');
-    if (atravessou) {
-      assert.deepEqual(log, ['fechou a foto', 'fechou o mapa', 'fila trocada', 'busca'],
-        `DEFEITO: a foto ampliada da conta anterior ficou aberta por cima da fila de quem entrou: ${log.join(' | ')}`);
-    } else {
-      // CONTROLE: a fila nasceu nesta sessão (o pedido na foto é de quem entrou): nada fecha.
-      assert.deepEqual(log, [], 'a foto de um pedido da própria fila fechou sem motivo');
-    }
+// A troca de conta com o que a anterior tinha ABERTO. O fechamento é o de
+// verdade (`fecharCamadasAbertas`, o da queda): cada camada aberta fecha pela
+// limpeza dela, sem mexer no voltar, e as entradas saem de uma vez no fim. A foto
+// ampliada de mentira faz o que o `Lightbox.close` faz ao fechar: anda a fila se
+// uma aprovação pousou esperando ela fechar (`avancarSeAprovado`).
+function trocaComCamadas({ atravessou = true, foto = false, mapa = false, modal = null, aprovacaoPousada = null,
+  emitidos = [], soFechar = false } = {}) {
+  const log = [];
+  const camada = (nome, aberto) => ({ aberto, isOpen() { return this.aberto; },
+    close() {
+      this.aberto = false;
+      log.push('fechou ' + nome);
+      if (nome === 'a foto' && deps.placeResolvidoPorAprovacao) log.push('andou a fila: ' + deps.placeResolvidoPorAprovacao.venueID);
+    } });
+  const modais = {};
+  for (const id of ['pairShowModal', 'autorModal', 'filtersModal', 'helpModal']) {
+    const aberto = { v: id === modal };
+    modais[id] = { id, classList: { contains: (c) => (c === 'hidden' ? !aberto.v : false) }, fechar() { aberto.v = false; } };
   }
+  const deps = {
+    AppState: { stats: {}, queue: [{ venueID: 'xA' }] }, filaAtravessouSessao: atravessou, safeLS: { remove() {} },
+    carregarFilaDeSaida: () => [], window: { Presenca: { esquecer: () => log.push('conversa esquecida') } },
+    Lightbox: camada('a foto', foto), MapaLightbox: camada('o mapa', mapa),
+    placeResolvidoPorAprovacao: aprovacaoPousada, pareamentosEmitidos: new Set(emitidos),
+    API: { cancelarPareamento: (c) => { log.push('cancelou ' + c); return Promise.resolve({ success: true }); } },
+    MODAL_IDS: Object.keys(modais), document: { getElementById: (id) => modais[id] || null, activeElement: null, body: {} },
+    closeModal: (id, o) => { modais[id].fechar(); log.push('fechou ' + id + (o && o.viaHistorico ? '' : ' (com voltar)')); },
+    CamadaVoltar: { profundidade: (foto || mapa || modal) ? 1 : 0, consumindo: false },
+    history: { go: (n) => log.push('voltar ' + n) }, devolverFoco: () => {}, focavelNaTela: () => true,
+    resetQueue: () => log.push('fila trocada'), startFetching: () => log.push('busca'),
+  };
+  const h = montar(['esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'fecharCamadasAbertas', 'semCamadaAberta',
+    'topOpenModal'], deps);
+  // `soFechar`: só o fechamento da QUEDA, sem a troca de conta (o controle do instrumento).
+  if (soFechar) h.fecharCamadasAbertas();
+  else h.esquecerOutraConta('222');
+  return { log, deps };
+}
+
+test('R6-1-06: OUTRA conta na renovação — a foto e o mapa AMPLIADOS fecham ANTES de a fila trocar', () => {
+  const t = trocaComCamadas({ foto: true, mapa: true });
+  assert.deepEqual(t.log, ['conversa esquecida', 'fechou o mapa', 'fechou a foto', 'voltar -1', 'fila trocada', 'busca'],
+    `DEFEITO: a foto ampliada da conta anterior ficou aberta por cima da fila de quem entrou: ${t.log.join(' | ')}`);
+  // CONTROLE: a fila nasceu nesta sessão (o pedido na foto é de quem entrou): nada fecha.
+  const c = trocaComCamadas({ atravessou: false, foto: true, mapa: true });
+  assert.deepEqual(c.log, ['conversa esquecida'], 'a foto de um pedido da própria fila fechou sem motivo');
+});
+
+// ═══ R7-1-01 · o QR, a folha do autor e o Histórico da conta anterior ═══════════
+// A troca de conta pela renovação fechava só a foto e o mapa: o QR do "Conectar
+// outro aparelho" de X seguia na tela, desenhado e VÁLIDO (quem o escaneasse
+// entrava como X por até 5 min), e a folha do autor e o Histórico mostravam o
+// que tinha acabado de sair do aparelho (MEDIDO no Chromium e no WebKit,
+// auditoria de 2026-10-02).
+test('R7-1-01: OUTRA conta — os códigos de X são CANCELADOS e o que estava aberto (QR, folha, Histórico) FECHA', () => {
+  for (const modal of ['pairShowModal', 'autorModal', 'filtersModal']) {
+    const t = trocaComCamadas({ modal, emitidos: ['PRIVQRSTUVWXYZ234567', 'PRV234'] });
+    assert.ok(t.log.includes('cancelou PRIVQRSTUVWXYZ234567') && t.log.includes('cancelou PRV234'),
+      `DEFEITO: o código de X segue valendo depois de Y entrar: ${t.log.join(' | ')}`);
+    assert.equal(t.deps.pareamentosEmitidos.size, 0, 'os códigos cancelados seguem na lista desta página');
+    // Pela função da queda: a limpeza de cada camada, SEM o voltar de cada uma,
+    // e as entradas de uma vez — e antes da fila trocar.
+    const i = t.log.indexOf('fechou ' + modal);
+    assert.ok(i >= 0, `DEFEITO: ${modal} da conta anterior ficou aberto por cima da fila de quem entrou: ${t.log.join(' | ')}`);
+    assert.ok(t.log.indexOf('voltar -1') > i && t.log.indexOf('fila trocada') > t.log.indexOf('voltar -1'),
+      `${modal}: fora da ordem do fechamento da queda (gotcha #65): ${t.log.join(' | ')}`);
+    // DEPOIS do esquecimento da conversa: o fechamento dela pagaria o "lida" com a sessão de quem entrou.
+    assert.ok(t.log.indexOf('conversa esquecida') < i);
+  }
+  // Com a fila DESTA sessão (o login pela tela de entrada, a abertura): os
+  // códigos de X também saem, e os diálogos fecham; a foto, de um pedido de
+  // quem entrou, fica (o controle do R6-1-06).
+  const n = trocaComCamadas({ atravessou: false, modal: 'pairShowModal', emitidos: ['PRIVQRSTUVWXYZ234567'] });
+  assert.ok(n.log.includes('cancelou PRIVQRSTUVWXYZ234567'), 'sem a fila trocando, o código de X seguiu valendo');
+  assert.ok(n.log.includes('fechou pairShowModal'), 'sem a fila trocando, o QR de X ficou na tela');
+  // CONTROLE: nada aberto e nenhum código — nada se fecha nem se cancela (e o foco não é mexido).
+  const v = trocaComCamadas();
+  assert.deepEqual(v.log, ['conversa esquecida', 'fila trocada', 'busca']);
+});
+
+// ═══ R7-3-01 (b) · fechar a foto na troca não anda a fila da conta ANTERIOR ═══
+// Com uma aprovação POUSADA esperando a foto fechar, o fechamento da troca de
+// conta andava a fila de X: o card seguinte de X era anunciado e o "Como
+// funciona" de quem entrou abria no mesmo tique do voltar pendente — e o
+// "Entendi" tirava a pessoa do app (gotcha #65; MEDIDO nos dois motores).
+test('R7-3-01 (b): a troca de conta esquece a aprovação pousada ANTES de fechar a foto — a fila de X não anda', () => {
+  const t = trocaComCamadas({ foto: true, aprovacaoPousada: { venueID: 'xA' } });
+  assert.ok(t.log.includes('fechou a foto'), 'PRÉ-CONDIÇÃO: a foto da conta anterior fecha');
+  assert.ok(!t.log.some((l) => l.startsWith('andou a fila')),
+    `DEFEITO: fechar a foto andou a fila da conta ANTERIOR: ${t.log.join(' | ')}`);
+  assert.equal(t.deps.placeResolvidoPorAprovacao, null);
+  // CONTROLE: o mesmo fechamento SEM a troca de conta (o da queda comum, em que a
+  // fila é da mesma pessoa) anda a fila — o instrumento enxerga o defeito.
+  const c = trocaComCamadas({ foto: true, aprovacaoPousada: { venueID: 'xA' }, soFechar: true });
+  assert.ok(c.log.includes('andou a fila: xA'), `CONTROLE: o fechamento não andou a fila — o teste perdeu o sentido: ${c.log.join(' | ')}`);
 });
 
 test('K2: a queda limpa o cabeçalho de quem estava (o perfil que chegar o redesenha)', () => {
@@ -1492,6 +1635,119 @@ test('K14: CONTROLE — a conferência diz VIVA (alarme falso): a fila sai na ho
   assert.deepEqual(m.envios, ['v1', 'v1', 'v2']);
 });
 
+// ═══ R7-1-05 · o ✕ que leva 401 não sai de novo pela ESPERA da trava ══════════
+// O K14 fez o esvaziamento esperar a conferência da sessão — mas só na ENTRADA.
+// A resposta 401 do ✕ é prova de rede, e a prova chama o esvaziamento ANTES de a
+// resposta chegar a quem a pediu (o `_post`): ele entra com o `verificandoSessao`
+// ainda falso e espera a trava ENTRE ABAS, que o navegador entrega numa TAREFA.
+// Nessa espera o executor recebe o 401, solta o pedido e começa a conferência; a
+// passada, que já tinha passado pelas guardas, mandava a MESMA decisão de novo
+// (MEDIDO no navegador: duas idas ao Waze em 7 a 11 ms; auditoria de 2026-10-02,
+// R7-1-05). Aqui roda o caminho de verdade — o `handleReject`, o
+// `scheduleAction`, o `handleActionResult`, o `handleUnauthorized`, o
+// esvaziamento e a `travaDaSaida` —, com a trava do navegador de mentira
+// entregando numa tarefa (`setImmediate`), como a de verdade.
+function montarXQueLeva401() {
+  const { safeLS } = lsFalso();
+  const envios = [];
+  const travas = { pedidas: 0, presas: new Set() };
+  let sonda;
+  const AppState = {
+    authenticated: true, profile: { id: 111 }, currentPlace: null, queue: [],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10, fetchEpoch: 0,
+    preferences: { undoEnabled: false }, pendingAction: null, inFlightActions: 0,
+  };
+  const deps = {
+    AppState, safeLS, epocaDaSessao: 0, Treino: { ativo: false },
+    navigator: {
+      onLine: true,
+      locks: {
+        // A trava do navegador: entregue numa TAREFA, nunca na hora.
+        request(nome, opcoes, cb) {
+          if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+          travas.pedidas++;
+          return new Promise((fim) => setImmediate(() => {
+            if (travas.presas.has(nome)) { fim(opcoes.ifAvailable ? cb(null) : undefined); return; }
+            travas.presas.add(nome);
+            Promise.resolve(cb({ name: nome })).then((v) => { travas.presas.delete(nome); fim(v); });
+          }));
+        },
+      },
+    },
+    marcaDaAbaConferida: Promise.resolve(), SAIDA_TRAVA: constante('SAIDA_KEY'),   // `SAIDA_TRAVA = SAIDA_KEY`
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'), CONTA_KEY: constante('CONTA_KEY'),
+    SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'), SAIDA_TENTATIVAS_POR_ITEM: constante('SAIDA_TENTATIVAS_POR_ITEM'),
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0,
+    esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false, verificandoSessao: false,
+    conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
+    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
+    advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, definirPerfil: (r) => !!(r && r.success && r.profile),
+    derrubarSessao: () => { AppState.authenticated = false; },
+    historyTodayKey: () => '2026-10-02', ondeAgora: () => '30', getLang: () => 'pt', t: (k) => k,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
+    API: {
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A',
+      // Como o `_post`: a resposta CHEGA (uma volta de rede), a prova de rede
+      // roda (o `API.aoProvarRede`, que só chama sem esvaziamento no ar) e SÓ
+      // DEPOIS a resposta volta a quem pediu.
+      rejectPlace: async (v) => {
+        envios.push(v);
+        await new Promise((ok) => setImmediate(ok));
+        if (!deps.esvaziandoSaida) h.esvaziarFilaDeSaida();
+        return deps.proxima ? deps.proxima(v) : { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 };
+      },
+      getProfile: () => new Promise((ok) => { sonda = ok; }),
+    },
+  };
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'chaveDoPedido', 'marcaDaSessao', 'contaAgora',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
+    'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
+    'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'travaDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',
+    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'carimboDoGesto', 'handleReject'], deps);
+  const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
+  AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
+  AppState.currentPlace = P;
+  return { h, deps, AppState, envios, travas, responderSonda: (r) => sonda(r), temSonda: () => !!sonda };
+}
+
+test('R7-1-05: o ✕ que leva 401 vai ao Waze UMA vez — a passada que esperou a trava não manda a mesma decisão de novo', async () => {
+  const m = montarXQueLeva401();
+  m.h.handleReject();                                   // o ✕, sem a janela do Desfazer
+  // A conferência começou (o 401 chegou ao executor) e a trava pedida pela
+  // prova de rede já foi entregue (e devolvida).
+  await ateQue(() => m.temSonda() && m.travas.pedidas >= 1 && !m.deps.esvaziandoSaida,
+    'a resposta 401, a conferência e a passada que esperou a trava');
+  await tique(10);                                      // o que saísse A MAIS teria tempo de sair
+  assert.equal(m.travas.pedidas, 1, 'PRÉ-CONDIÇÃO: a prova de rede da resposta não chamou o esvaziamento (o instrumento não mede a corrida)');
+  assert.deepEqual(m.envios, ['v1'],
+    `DEFEITO: com a sessão sendo conferida, a mesma decisão saiu de novo: ${m.envios.join(',')}`);
+  assert.equal(m.travas.presas.size, 0, 'a passada que desistiu ficou com a trava entre abas (a próxima nunca esvaziaria)');
+  assert.equal(m.h.carregarFilaDeSaida().length, 1, 'a decisão que levou 401 tem de ficar na fila de saída');
+  // O veredito: MORTA — nada mais sai; a decisão espera o próximo login.
+  m.responderSonda({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired' });
+  await tique(10);
+  assert.deepEqual(m.envios, ['v1'], 'depois do veredito de sessão morta, a decisão saiu de novo');
+  assert.equal(m.h.carregarFilaDeSaida().length, 1);
+});
+
+test('R7-1-05: CONTROLE — a conferência diz VIVA: a decisão sai de novo, UMA vez, DEPOIS do veredito (a trava foi devolvida)', async () => {
+  const m = montarXQueLeva401();
+  m.h.handleReject();
+  await ateQue(() => m.temSonda() && m.travas.pedidas >= 1 && !m.deps.esvaziandoSaida, 'a conferência começou');
+  await tique(10);
+  const antesDoVeredito = [...m.envios];
+  m.deps.proxima = () => ({ success: true });           // a partir daqui o Waze aceita
+  m.responderSonda({ success: true, profile: { id: 111 } });
+  await ateQue(() => m.h.carregarFilaDeSaida().length === 0, 'a fila de saída vazia depois do alarme falso');
+  await tique(10);
+  assert.deepEqual(antesDoVeredito, ['v1'], 'antes do veredito a decisão já tinha saído de novo');
+  assert.deepEqual(m.envios, ['v1', 'v1'], 'confirmada a sessão, a decisão não saiu (ou saiu mais de uma vez)');
+  assert.equal(m.travas.pedidas, 2, 'o esvaziamento do alarme falso não pegou a trava (a passada anterior a prendeu?)');
+});
+
 // ═══ R6-1-03 · o card travado na queda SEM extensão (o celular) ═══════════════
 // A queda pergunta "tem extensão aí?" por 350 ms em TODO aparelho, e o aviso da
 // trava lia a pergunta como "a extensão está renovando": no celular (onde ela
@@ -1525,6 +1781,37 @@ test('R6-1-03: "espere a conferência" só DEPOIS do `aguarde` da extensão — 
   const entrou = await rodar({ action: 'sessao', token: 'tokB' });
   assert.equal(entrou.renovando, 'toast.esperaSessao');
   assert.equal(entrou.depois, 'api.error.noSession', 'a marca da renovação ficou acesa depois de ela acabar');
+});
+
+// R7-1-09: o fim da renovação que não deu ACENDE a marca da queda dita (o toque
+// no card travado cala até a tela de entrada, test/card-foco-trava); uma queda
+// nova a apaga, e a sessão que volta (`showMainScreen`) também.
+test('R7-1-09: a queda é dada por DITA só quando a renovação acaba sem dar — e a sessão que volta a apaga', async () => {
+  const montarQueda = (renovou) => {
+    const deps = {
+      AppState: { authenticated: true, pendingAction: null, queue: [], fetchEpoch: 0 }, epocaDaSessao: 0, quedaAnunciada: true,
+      API: { sessionToken: 'tok', setSession() {}, soltarSessao() {}, getSession: () => 'tok' },
+      MOTIVO_DA_QUEDA: constante('MOTIVO_DA_QUEDA'), UNAUTHORIZED_REDIRECT_MS: 0, setTimeout: () => 1,
+      AVISO_RENOVADA_ESPERA_PERFIL_MS: 0,
+      entrarPelaExtensao: async () => renovou, tirarNegadoDaExtensao: () => null, t: (k) => k,
+    };
+    return { h: montar(['derrubarSessao'], deps), deps };
+  };
+  const q = montarQueda(false);
+  q.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(q.deps.quedaAnunciada, false, 'a queda NOVA herdou a marca da anterior (calaria o "espere a conferência")');
+  await tique();
+  assert.equal(q.deps.quedaAnunciada, true, 'DEFEITO: a renovação acabou sem dar e a queda não ficou dita');
+  // CONTROLE: a renovação que DEU não deixa a queda dita.
+  const r = montarQueda(true);
+  r.h.derrubarSessao('srv.err.sessionExpired');
+  await tique(); await tique();
+  assert.equal(r.deps.quedaAnunciada, false, 'a renovação que deu deixou a queda dita');
+  // A sessão que volta (`showMainScreen`) apaga a marca.
+  const deps = { AppState: { authenticated: false }, quedaAnunciada: true,
+    document: { getElementById: () => ({ classList: { add() {}, remove() {} } }) } };
+  montar(['showMainScreen'], deps).showMainScreen();
+  assert.equal(deps.quedaAnunciada, false, 'a sessão voltou e a marca da queda ficou — o card travado seguinte ficaria calado');
 });
 
 test('R6-1-03: a renovação que NÃO deu tira o "espere a conferência" da tela ANTES do aviso de queda', async () => {

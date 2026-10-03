@@ -150,8 +150,8 @@ test('F5: a espera é da FILA — a pessoa desliga "Minha área" e aplica (fila 
   assert.ok(!m.log.includes('busca'));
 });
 
-test('F5: o "Tentar novamente" de quem usa "Minha área" pede o perfil de novo (com o teto de 1×/min)', () => {
+test('F5: o "Tentar de novo" de quem usa "Minha área" pede o perfil de novo (com o teto de 1×/min)', () => {
   const s = fatiar('startFetching');
   assert.match(s, /if \(AppState\.filters\.myArea && !\(AppState\.profile && AppState\.profile\.areas\)\) \{\s*refazerPerfilSeFaltar\(\);/,
-    'sem o perfil, o "Tentar novamente" repetia a mesma recusa: nada pedia o perfil de novo');
+    'sem o perfil, o "Tentar de novo" repetia a mesma recusa: nada pedia o perfil de novo');
 });

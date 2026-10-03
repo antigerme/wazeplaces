@@ -689,6 +689,18 @@ body > main {
   cursor: not-allowed;
 }
 
+/* E o "+" no zoom máximo e o "−" no mínimo do mapa ampliado: o toque não faz
+   nada (o zoom está no limite), e o botão PARECE travado — o mesmo visual. É
+   `aria-disabled`, e não `disabled`, que tiraria o foco de quem chegou ali pelo
+   teclado (R7-3-09). `#id[atributo]` (1,1,0) vence a utility de cor do
+   Tailwind (gotcha #27). */
+#mapaLbMais[aria-disabled="true"],
+#mapaLbMenos[aria-disabled="true"] {
+  opacity: 0.4;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 /* O "Copiar link" do pareamento apagado: o QR venceu (ou ainda está chegando).
    Sem isto ele seguia com cara de vivo e não respondia — o "botão morto" que o
    M3 pede pra mostrar. `#id:disabled` vence a utility de cor (gotcha #27). */

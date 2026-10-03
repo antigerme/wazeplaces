@@ -619,6 +619,41 @@ diz('e o ✕ e o ✓ destravam — agora há foto pra decidir', !voltou.rejTrava
 page.off('request', contarFoto11);
 aviao = false;
 await ctx.setOffline(false);
+// 6f) A FOTO QUE O WAZE TIROU DO AR, e a rede de volta (R7-4-06). Sem sinal o
+// card de foto trava e avisa (certo: não dá pra saber). Com o sinal de volta, a
+// prova da foto dá 404 — e nada redesenhava: o card seguia dizendo que a foto
+// precisava de sinal, com ✕/✓ travados, até a pessoa pular, enquanto o mesmo
+// pedido aberto com sinal mostra "Sem Imagem" com ✕/✓ vivos. O servidor DA FOTO
+// responde (o 404 é resposta), e isso prova a rede. O 1º tempo do 6e (o
+// `online` com a rede sem passar: a sonda também não responde) é o CONTROLE de
+// que a trava não sai à toa.
+const FOTO_REMOVIDA = 'https://venue-image.waze.com/thumbs/thumb700_removida404';
+const fotoRemovida = (r) => (aviao ? r.abort('internetdisconnected')
+  : r.fulfill({ status: 404, contentType: 'text/plain', body: 'nao', headers: { 'cache-control': 'no-store' } }));
+await ctx.route('**/thumb700_removida404*', fotoRemovida);
+const pedidosRemovida = [];
+const contarRemovida = (r) => { if (r.url().indexOf('removida404') !== -1) pedidosRemovida.push(r.url()); };
+page.on('request', contarRemovida);
+aviao = true; await ctx.setOffline(true);
+await montar([{ ...PLACE(12, 'NEW_PHOTO'), imageUrls: [FOTO_REMOVIDA] }]);
+await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
+const removidaSemRede = await lerFotoDoCard();
+diz('PRÉ-CONDIÇÃO: sem rede, o card da foto que o Waze tirou do ar avisa, com ✕ e ✓ travados',
+  removidaSemRede.temAviso && removidaSemRede.rejTravado && removidaSemRede.lidoTravado, JSON.stringify(removidaSemRede));
+const antesDaRemovida = pedidosRemovida.length;
+aviao = false;
+await ctx.setOffline(false);
+const saiuDoAviso = await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  return !!(c && !c.querySelector('.card-sem-foto')); }, 10000);
+const removidaComRede = await lerFotoDoCard();
+diz('a foto tirada do AR, com a rede de volta: o card sai do "precisa de sinal" e destrava ✕ e ✓ — como o aberto com sinal (R7-4-06)',
+  saiuDoAviso.ok && !removidaComRede.temAviso && !removidaComRede.rejTravado && !removidaComRede.lidoTravado,
+  JSON.stringify({ saiuDoAviso, removidaComRede }));
+diz('CONTROLE: a foto foi pedida de novo com a rede de volta e NÃO veio — o 404 é dela, não da rede',
+  pedidosRemovida.length > antesDaRemovida && !removidaComRede.fotoVisivel,
+  JSON.stringify({ pedidos: pedidosRemovida.length - antesDaRemovida, removidaComRede }));
+page.off('request', contarRemovida);
+await ctx.unroute('**/thumb700_removida404*', fotoRemovida);
 
 secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
@@ -2155,8 +2190,12 @@ try {
     diario: (ant.diario || []).length, semCorpo: (ant.chamadas || []).every((c) => !('corpoReq' in c) && !('corpoResposta' in c)),
     atual: d.aberturaAtual && d.aberturaAtual.id, resumo: d.resumo && d.resumo.aberturasAnteriores,
     alertaAnterior: (d.resumo?.alertasNasCapturas || []).some((c) => c.abertura === id1d && c.alertas.includes('pedidoDecididoNaFila')),
-    triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
+    triagemSecao: triagem.includes('OUTRAS ABERTURAS (guardadas no aparelho') && triagem.includes('abertura ' + id1d),
     triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
+    // A abertura que FECHOU antes desta não é "outra aba aberta junto" (R7-4-04):
+    // nem no arquivo (a trava dela foi solta ao fechar, e ela não gravou depois)
+    // nem na triagem.
+    simultanea: (d.aberturasAnteriores || []).some((a) => a.simultanea), triagemOutraAba: triagem.includes('OUTRA ABA'),
     vazouToken: triagem.includes('tok-9c'),
     duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
     objetoCru: triagem.includes('[object Object]'),
@@ -2176,6 +2215,8 @@ diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o
 diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
   rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
   JSON.stringify(rel9c));
+diz('a abertura que FECHOU antes desta segue ANTERIOR — não vira "outra aba aberta junto" (R7-4-04, controle)',
+  rel9c?.simultanea === false && rel9c?.triagemOutraAba === false, JSON.stringify(rel9c));
 diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
   rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
   JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
@@ -2965,6 +3006,217 @@ const lc9j = await liefi9j('controle, a foto chega', { fotoChega: true });
 diz('CONTROLE: no mesmo lie-fi, com a foto chegando, o card abre sem trava',
   lc9j.pronto && lc9j.abriu && !lc9j.aviso && !lc9j.rejeitar && !lc9j.lido, JSON.stringify(lc9j));
 
+secao('9k. DUAS ABAS E O DIAGNÓSTICO: a poda, a outra aba no relatório e a sentinela');
+// Auditoria da rodada 7 (R7-4-03, R7-4-04, R7-4-05). Duas páginas do MESMO
+// contexto (o mesmo aparelho: a base, a fila de saída e o aviso `storage` são
+// os de verdade), a B aberta DEPOIS da A, com o modo dev ligado.
+//  · A PODA da base ia pela hora de ABERTURA: a B registrava 12 telas, a A 2 (as
+//    mais novas de todas), e na base ficavam A 0 · B 12.
+//  · O RELATÓRIO da A trazia a B, VIVA, como "abertura anterior".
+//  · A SENTINELA `pedidoDecididoNaFila`: a A decide sem sinal um pedido que a B
+//    já tinha na fila, e a captura da B acusava "voltou como card".
+const ctx9k = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  serviceWorkers: 'block', acceptDownloads: true });
+let aviao9k = false;
+await ctx9k.route('**/*-tiles/live/base/**', (r) => (aviao9k ? r.abort('internetdisconnected') : servirTile(r)));
+const rotaApi9k = (r) => {
+  if (aviao9k) return r.abort('internetdisconnected');
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(201), SO_MAPA(202), SO_MAPA(203)], hasMore: false, page: 1, total: 3 });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
+  if (rota === 'lista-estados') return json({ success: true, states: [] });
+  return json({ success: true });
+};
+await ctx9k.route('**/api/*', rotaApi9k);
+const abrirEm = async (contexto, nome) => {
+  const pg = await contexto.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  return pg;
+};
+// O modo dev é ligado no ARMAZENAMENTO por uma página que abriu com ele
+// desligado: ela fecha sem gravar nada do diagnóstico.
+const prepararDev = async (contexto, token) => {
+  const prep = await abrirEm(contexto, 'preparo');
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate((tk) => {
+    API.setSession(tk);
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(tk) }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
+    localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+  }, token);
+  await prep.close({ runBeforeUnload: true });
+};
+const prontaComFab = (pg) => esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated
+  && !!cardDaFrente() && AppState.queue.length === 3 && !document.getElementById('devFab').classList.contains('hidden'), 20000, 100);
+// O toque no botão pelos ouvintes do PRÓPRIO botão (ponteiro que desce e sobe
+// nele), como o dedo — e a gravação na base ESPERADA pelo fim, não por prazo.
+const tocarFab = (pg, n) => pg.evaluate(async (n) => {
+  const b = document.getElementById('devFabBtn');
+  for (let i = 0; i < n; i++) {
+    b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 50 + i, bubbles: true }));
+    b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 50 + i, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  await diagGuardando;
+  return dlogCapturasDoEditor().length;
+}, n);
+await prepararDev(ctx9k, 'tok-9k');
+const A9k = await abrirEm(ctx9k, 'A');
+const prontaA9k = await prontaComFab(A9k);
+await dormir(50);   // as duas aberturas em milissegundos diferentes
+const B9k = await abrirEm(ctx9k, 'B');
+const prontaB9k = await prontaComFab(B9k);
+const ab9k = { A: await A9k.evaluate(() => DIAG_ABERTURA), B: await B9k.evaluate(() => DIAG_ABERTURA) };
+diz('PRÉ-CONDIÇÃO: as duas abas com a fila e o modo dev, a B aberta DEPOIS da A',
+  prontaA9k.ok && prontaB9k.ok && ab9k.B.inicio > ab9k.A.inicio, JSON.stringify(ab9k));
+const manuaisNaBase = (g, id) => ((g.abertas || []).find((a) => a.id === id) || {}).manuais;
+// 1. A PODA (R7-4-03). A pré-condição prova que o instrumento lê a base: as 12 da B estão lá.
+const nB9k = await tocarFab(B9k, 12);
+const base1 = await guardado9c(A9k);
+diz('PRÉ-CONDIÇÃO: a B registrou 12 telas, e as 12 estão na base', nB9k === 12 && manuaisNaBase(base1, ab9k.B.id) === 12,
+  JSON.stringify({ nB9k, base1 }));
+const nA9k = await tocarFab(A9k, 2);
+const base2 = await guardado9c(A9k);
+diz('a PODA vai pela hora da CAPTURA: as 2 telas da A (as mais novas) ficam na base, e da B saem as 2 mais velhas (R7-4-03)',
+  nA9k === 2 && manuaisNaBase(base2, ab9k.A.id) === 2 && manuaisNaBase(base2, ab9k.B.id) === 10, JSON.stringify({ nA9k, base2 }));
+// 2. O RELATÓRIO da A, de verdade, lido pela triagem (R7-4-04).
+const dir9k = mkdtempSync(join(tmpdir(), 'smoke-9k-'));
+let rel9k = null;
+try {
+  const [dl] = await Promise.all([A9k.waitForEvent('download', { timeout: 30000 }), A9k.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dir9k, 'diag.zip');
+  await dl.saveAs(arq);
+  const { dados: d } = lerDiagnostico(arq);
+  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
+  const b = (d.aberturasAnteriores || []).find((a) => a.id === ab9k.B.id) || {};
+  rel9k = { atual: d.aberturaAtual && d.aberturaAtual.id, temB: !!b.id, simultanea: b.simultanea, abertaAgora: b.abertaAgora,
+    simultaneas: d.resumo?.aberturasAnteriores?.simultaneas,
+    triagem: /abertura [^\n]*\n  OUTRA ABA, aberta junto com a do relatório — seguia aberta na hora do relatório/.test(triagem),
+    vazouToken: triagem.includes('tok-9k') };
+} catch (e) {
+  rel9k = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dir9k, { recursive: true, force: true });
+}
+diz('o RELATÓRIO da A traz a B como OUTRA ABA aberta junto — e aberta agora —, e a triagem diz isso, não "abertura anterior" (R7-4-04)',
+  rel9k?.atual === ab9k.A.id && rel9k?.temB === true && rel9k?.simultanea === true && rel9k?.abertaAgora === true
+  && rel9k?.simultaneas >= 1 && rel9k?.triagem === true && rel9k?.vazouToken === false, JSON.stringify(rel9k));
+// 3. A SENTINELA (R7-4-05): sem sinal (modo avião de verdade: abort + offline),
+// a A rejeita o pedido da frente, que fica na fila de saída — e a B tem o MESMO
+// card na frente.
+aviao9k = true; await ctx9k.setOffline(true);
+const frente9k = await A9k.evaluate(() => { window.__frente9k = AppState.currentPlace.venueID; return window.__frente9k; });
+await A9k.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+const ficou9k = await esperarNaPagina(A9k, () => carregarFilaDeSaida().some((x) => x.venueID === window.__frente9k)
+  && AppState.inFlightActions === 0 && !AppState.pendingAction, 15000, 100);
+diz('PRÉ-CONDIÇÃO: a decisão da A ficou na fila de saída (sem sinal)', ficou9k.ok, frente9k);
+const capturaDaB = (pg, encenarEntrada) => pg.evaluate((encenar) => {
+  // A falha da ENTRADA, encenada: o mesmo pedido entrando DE NOVO na fila (outro objeto).
+  if (encenar) AppState.queue.push(JSON.parse(JSON.stringify(AppState.currentPlace)));
+  const b = document.getElementById('devFabBtn');
+  b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 81, bubbles: true }));
+  b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 81, bubbles: true }));
+  const m = dlogMomentos[dlogMomentos.length - 1];
+  if (encenar) AppState.queue.pop();
+  return { frente: AppState.currentPlace && AppState.currentPlace.venueID,
+    alertas: (m.alertas || []).map((a) => a.chave), decididos: m.computado && m.computado.decididos };
+}, encenarEntrada);
+const cap9k = await capturaDaB(B9k, false);
+diz('a captura da B NÃO acusa "pedido decidido voltou como card" — foi a OUTRA aba que decidiu, com o card já aqui (R7-4-05)',
+  cap9k.frente === frente9k && !cap9k.alertas.includes('pedidoDecididoNaFila') && cap9k.decididos?.naFila === 0
+  && cap9k.decididos?.porOutraAba === 1, JSON.stringify(cap9k));
+const ctl9k = await capturaDaB(B9k, true);
+diz('CONTROLE: o mesmo pedido ENTRANDO de novo na fila da B (a falha da entrada, encenada) segue acusado — a sentinela não ficou cega',
+  ctl9k.alertas.includes('pedidoDecididoNaFila') && ctl9k.decididos?.naFila >= 1, JSON.stringify(ctl9k));
+diz('e só o que ENTROU conta: o card que a outra aba decidiu segue de fora da conta (naFila 1, porOutraAba 1)',
+  ctl9k.decididos?.naFila === 1 && ctl9k.decididos?.porOutraAba === 1, JSON.stringify(ctl9k));
+// E o ✕ da B no mesmo pedido: o diário diz que foi a outra aba, não um caminho furado.
+await B9k.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+await esperarNaPagina(B9k, () => !AppState.pendingAction && AppState.inFlightActions === 0
+  && dfatoAnel.some((e) => e.k === 'saida.repetida'), 15000, 100);
+const rep9k = await B9k.evaluate(() => dfatoAnel.filter((e) => e.k === 'saida.repetida').pop() || null);
+diz('o ✕ da B no pedido que a A já decidiu: o "repetida" do diário diz que foi a OUTRA aba',
+  !!rep9k && rep9k.outraAba === true, JSON.stringify(rep9k));
+// Fecha ainda sem sinal: a volta da rede esvaziaria a fila de saída, e nada
+// disso é desta seção. (A rota da API é reusada no 9l, com sinal.)
+await ctx9k.close();
+aviao9k = false;
+
+secao('9l. O FAB DO MODO DEV E O BANNER DO TOPO: o FAB não fica em cima do "Restam"');
+// R7-4-01. O FAB escolhe o canto pelo que recebe o dedo ali. Com um banner do
+// topo na tela (o aviso da consequência do 1º ✕, a recusa automática), o
+// `cima-dir` lia o banner — sem nada acionável nem `.nao-cobrir` — como LIVRE: o
+// toque no FAB nesse meio o mandava pra cima do "Restam", e ele FICAVA lá depois
+// de o banner sair (MEDIDO: 21% da tinta de "310" a 390×844, e o dedo ali caindo
+// no FAB). Agora ele mede o que fica POR BAIXO dos avisos passageiros.
+const ctx9l = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+await ctx9l.route('**/*-tiles/live/base/**', servirTile);
+await ctx9l.route('**/api/*', rotaApi9k);
+await prepararDev(ctx9l, 'tok-9l');
+const F9l = await abrirEm(ctx9l, 'FAB');
+const pronta9l = await prontaComFab(F9l);
+// Quanto da TINTA do número do "Restam" o FAB cobre (`Range`, não a caixa), e
+// quem recebe o dedo no meio da sobreposição. Lida com o botão PARADO: ele tem
+// transição, e a reposição sai por quadro.
+const tinta9l = async () => {
+  let antes = null;
+  for (let i = 0; i < 40; i++) {
+    const agora = await F9l.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const r = document.getElementById('devFab').getBoundingClientRect(); ok(`${r.left},${r.top}`); }))));
+    if (agora === antes) break;
+    antes = agora;
+  }
+  return F9l.evaluate(() => {
+    const fabEl = document.getElementById('devFab');
+    const fab = fabEl.getBoundingClientRect();
+    const el = document.getElementById('pendingCount');
+    const rg = document.createRange(); rg.selectNodeContents(el);
+    const r = rg.getBoundingClientRect();
+    const x0 = Math.max(r.left, fab.left), x1 = Math.min(r.right, fab.right);
+    const y0 = Math.max(r.top, fab.top), y1 = Math.min(r.bottom, fab.bottom);
+    const area = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+    const quem = area ? document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2) : null;
+    return { canto: fabEl.dataset.canto, texto: el.textContent, cobre: Math.round(100 * area / (r.width * r.height)),
+      noPonto: quem ? (quem.closest('#devFab') ? 'FAB' : (quem.id || quem.tagName)) : null,
+      banners: document.querySelectorAll('#bannerContainer > *').length };
+  });
+};
+// Sem animar a contagem: o número tem que estar INTEIRO na hora da medida.
+await F9l.evaluate(() => { AppState.serverTotal = 310; AppState.hasMore = false; updatePendingCount(true); });
+const inicio9l = await tinta9l();
+diz('PRÉ-CONDIÇÃO: o "Restam" diz 310, e o FAB começa fora dele', pronta9l.ok && inicio9l.texto === '310' && inicio9l.cobre === 0,
+  JSON.stringify(inicio9l));
+// O banner do topo (o mesmo `showToast` do aviso da consequência), e o toque no FAB com ele na tela.
+await F9l.evaluate(() => { window.__banner9l = showToast(t('consequencia.reject'), 'hint', 600000); });
+const comBanner9l = await F9l.evaluate(() => document.querySelectorAll('#bannerContainer > *').length);
+await tocarFab(F9l, 1);
+const noBanner9l = await tinta9l();
+await F9l.evaluate(() => window.__banner9l.dispensar());
+await esperarNaPagina(F9l, () => document.querySelectorAll('#bannerContainer > *').length === 0, 5000, 50);
+const depois9l = await tinta9l();
+diz('PRÉ-CONDIÇÃO: o banner do topo estava na tela quando o FAB foi tocado', comBanner9l === 1 && noBanner9l.banners === 1,
+  JSON.stringify({ comBanner9l, noBanner9l }));
+diz('o toque no FAB com o banner na tela NÃO o manda pra cima do "Restam" — nem com o banner, nem depois de ele sair (R7-4-01)',
+  noBanner9l.cobre === 0 && depois9l.cobre === 0 && depois9l.noPonto !== 'FAB' && depois9l.banners === 0, JSON.stringify({ noBanner9l, depois9l }));
+// CONTROLE: o instrumento ENXERGA a sobreposição — com o FAB posto no `cima-dir`,
+// ele come a tinta do "Restam" nesta tela, e o dedo ali cai no FAB.
+const forcado9l = await F9l.evaluate(() => {
+  const fab = document.getElementById('devFab');
+  const r = fab.getBoundingClientRect();
+  const { x, y } = devFabCoords('cima-dir', r.width || 44, r.height || 44);
+  fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.dataset.canto = 'cima-dir(forçado)';
+  return true;
+});
+const cima9l = await tinta9l();
+diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa a tinta coberta e o dedo no FAB — ela enxerga o defeito',
+  forcado9l && cima9l.cobre > 0 && cima9l.noPonto === 'FAB', JSON.stringify(cima9l));
+await ctx9l.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -2981,4 +3233,4 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) e o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima)');

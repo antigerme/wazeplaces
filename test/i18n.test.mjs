@@ -690,26 +690,78 @@ test('trocar de idioma redesenha o que o JS escreve fora do data-i18n (Preferên
   assert.match(corpo, /if \(AppState\.authenticated\) \{\s*renderUndoGateUI\(\);/);
 });
 
+// R7-5-07 (auditoria da rodada 7): o MESMO botão — tentar de novo o que falhou —
+// tinha dois nomes em pt e em es: "Tentar novamente" na tela de falha ao carregar
+// (`states.error.retry`) e "Tentar de novo" na conversa (`presenca.conversa.tentar`),
+// "Reintentar" × "Intentar de nuevo". O en e o fr já diziam um só ("Try again",
+// "Réessayer"), a prova de que é um conceito só. Fica o nome que o app mais usa:
+// as frases do pt dizem "tente/tentar de novo" (6 delas, uma na PRÓPRIA tela de
+// falha, logo acima do botão: "Verifique sua conexão e tente de novo") e nenhuma
+// diz "tentar novamente"; as do es dizem "inténtalo/intentar de nuevo" (5) contra
+// um "reintentar". E os três botões da conversa já usavam esse nome.
+test('i18n: o botão de tentar de novo tem UM nome em cada língua — o mesmo na tela de falha e na conversa', () => {
+  const CHAVES = ['presenca.conversa.tentar', 'states.error.retry'];
+  // CONTROLE: as duas são mesmo o rótulo do botão de repetir — a da tela de falha no
+  // `retryLoadBtn` do HTML, a da conversa nos três botões que o presenca.js desenha.
+  assert.match(read('index.src.html'), /<button id="retryLoadBtn"[^>]*data-i18n="states\.error\.retry"/,
+    'CONTROLE: o botão da tela de falha deixou de ser o `states.error.retry`');
+  const botoesDaConversa = read('js/presenca.js').match(/<button [^>]*>\$\{escapeHtml\(t\('presenca\.conversa\.tentar'\)\)\}<\/button>/g) || [];
+  assert.ok(botoesDaConversa.length >= 3, `CONTROLE: só ${botoesDaConversa.length} botões da conversa usam o \`presenca.conversa.tentar\``);
+  // O verbo do botão em cada língua: rótulo CURTO que começa com ele é este botão.
+  const VERBO = { pt: /^tentar\b/i, en: /^(?:re)?try\b/i, es: /^(?:re)?intentar\b|^volver a intentar/i, fr: /^(?:ré)?essayer\b/i };
+  for (const lang of LANGS) {
+    assert.ok(VERBO[lang], `${lang}: língua sem o verbo deste teste — inclua-a`);
+    const nomes = [...new Set(CHAVES.map((k) => DICT[lang][k]))];
+    assert.equal(nomes.length, 1, `${lang}: o botão de tentar de novo tem ${nomes.length} nomes: ${JSON.stringify(nomes)}`);
+    // E nenhuma outra chave é este botão com outro nome. A varredura acha as duas
+    // de cima (é o CONTROLE de que ela enxerga) e só elas.
+    const achadas = Object.entries(DICT[lang]).filter(([, v]) => v.length <= 25 && VERBO[lang].test(v)).map(([k]) => k).sort();
+    assert.deepEqual(achadas, CHAVES, `${lang}: outro rótulo de "tentar de novo" fora das chaves do botão: ${JSON.stringify(achadas)}`);
+  }
+  assert.equal(DICT.pt['states.error.retry'], 'Tentar de novo', 'pt: o nome que o app mais usa é "Tentar de novo"');
+  assert.equal(DICT.es['states.error.retry'], 'Intentar de nuevo', 'es: o nome que o app mais usa é "Intentar de nuevo"');
+});
+
 // R66-5 (auditoria da rodada 6): em pt, a MESMA falta de conexão tinha dois
 // nomes nas linhas do "Disponível offline" — até na mesma linha ("Sem rede
 // agora. Vai preparar sozinho assim que o sinal voltar."), e "quando houver
 // rede" ao lado de "com sinal". O mesmo conceito tem UM nome; no pt, o "sinal",
 // como o en ("signal") e o es ("señal").
-test('i18n: as linhas do "Disponível offline" chamam a falta de conexão por UM nome só, em cada língua', () => {
+// R7-6-06/R7-4-08 (rodada 7): o card de foto sem sinal e a tela da fila sem
+// conexão diziam a mesma falta com outros nomes, em pt, en e es — "A foto
+// precisa de sinal / Ela chega sozinha quando a REDE voltar", e "Você está sem
+// CONEXÃO / Os pedidos voltam sozinhos quando a REDE voltar". Entram no recorte,
+// e cada uma tem que NOMEAR a falta: sem isso, uma frase que a chamasse de
+// "offline" sem que o vocabulário a conhecesse ficaria fora da conta, e o teste
+// passaria com ela.
+test('i18n: o "Disponível offline", o card de foto sem sinal e a tela sem conexão chamam a falta de conexão por UM nome só, em cada língua', () => {
   const TERMOS = {
-    pt: { rede: /\brede\b/i, sinal: /\bsinal\b/i, 'conexão': /\bconex[aã]o\b/i, internet: /\binternet\b/i },
-    en: { network: /\bnetwork\b/i, signal: /\bsignal\b/i, connection: /\bconnection\b/i, internet: /\binternet\b/i },
-    es: { red: /\bred\b/i, 'señal': /\bseñal\b/i, 'conexión': /\bconexi[oó]n\b/i, internet: /\binternet\b/i },
-    fr: { 'réseau': /\bréseau\b/i, signal: /\bsignal\b/i, connexion: /\bconnexion\b/i, internet: /\binternet\b/i },
+    pt: { rede: /\brede\b/i, sinal: /\bsinal\b/i, 'conexão': /\bconex[aã]o\b/i, internet: /\binternet\b/i, offline: /\boffline\b/i },
+    en: { network: /\bnetwork\b/i, signal: /\bsignal\b/i, connection: /\bconnection\b/i, internet: /\binternet\b/i, offline: /\boffline\b/i },
+    es: { red: /\bred\b/i, 'señal': /\bseñal\b/i, 'conexión': /\bconexi[oó]n\b/i, internet: /\binternet\b/i, offline: /\boffline\b/i },
+    fr: { 'réseau': /\bréseau\b/i, signal: /\bsignal\b/i, connexion: /\bconnexion\b/i, internet: /\binternet\b/i, 'hors ligne': /\bhors ligne\b/i, offline: /\boffline\b/i },
   };
+  // O card de foto que precisa de sinal (`marcarCardSemFoto`), a tela da fila
+  // sem sinal (`showNoPlaces`, e o aviso do ↻ sem rede) e a mensagem da conversa
+  // que não saiu por falta de rede (`presenca.recibo.naoEnviada`, lote 11): a MESMA falta.
+  const DO_MESMO_QUADRO = ['card.semFoto.titulo', 'card.semFoto.desc', 'states.error.titleOffline', 'states.error.bodyOffline',
+    'presenca.recibo.naoEnviada'];
+  // O termo de cada língua é o que as linhas do offline já usavam (R66-5).
+  const TERMO_DA_LINGUA = { pt: 'sinal', en: 'signal', es: 'señal', fr: 'réseau' };
   const termoDe = {};
   for (const lang of LANGS) {
     const termos = TERMOS[lang];
     assert.ok(termos, `${lang}: língua sem o vocabulário deste teste — inclua-a`);
     // O NOME do recurso (`label`, "Disponible sin conexión" no es) é a tradução
     // de "offline", não uma das linhas que descrevem a falta de sinal.
-    const linhas = Object.entries(DICT[lang]).filter(([k]) => k.startsWith('prefs.offline.') && k !== 'prefs.offline.label');
-    assert.ok(linhas.length >= 15, `CONTROLE (${lang}): só ${linhas.length} linhas do offline — o recorte quebrou`);
+    const linhas = Object.entries(DICT[lang])
+      .filter(([k]) => (k.startsWith('prefs.offline.') && k !== 'prefs.offline.label') || DO_MESMO_QUADRO.includes(k));
+    assert.ok(linhas.length >= 15 + DO_MESMO_QUADRO.length, `CONTROLE (${lang}): só ${linhas.length} linhas no recorte — ele quebrou`);
+    // Cada frase do card e da tela diz o que falta, com um dos nomes da língua.
+    for (const k of DO_MESMO_QUADRO) {
+      assert.ok(Object.values(termos).some((re) => re.test(DICT[lang][k] || '')),
+        `${lang}: ${k} não nomeia a falta com nenhum dos termos conhecidos: "${DICT[lang][k]}"`);
+    }
     const usados = {};
     for (const [k, v] of linhas) {
       for (const [nome, re] of Object.entries(termos)) if (re.test(v)) (usados[nome] = usados[nome] || []).push(k);
@@ -717,7 +769,9 @@ test('i18n: as linhas do "Disponível offline" chamam a falta de conexão por UM
     // CONTROLE: o vocabulário acha o conceito (senão "um termo só" passaria com zero).
     assert.ok(Object.keys(usados).length >= 1, `CONTROLE (${lang}): nenhuma linha do offline fala da falta de conexão`);
     assert.equal(Object.keys(usados).length, 1,
-      `${lang}: a falta de conexão tem ${Object.keys(usados).length} nomes nas linhas do "Disponível offline": ${JSON.stringify(usados)}`);
+      `${lang}: a falta de conexão tem ${Object.keys(usados).length} nomes no "Disponível offline", no card de foto e na tela sem conexão: ${JSON.stringify(usados)}`);
+    assert.equal(Object.keys(usados)[0], TERMO_DA_LINGUA[lang],
+      `${lang}: o termo é "${Object.keys(usados)[0]}", e cada língua usa o seu equivalente de "sinal": ${JSON.stringify(TERMO_DA_LINGUA)}`);
     termoDe[lang] = Object.keys(usados)[0];
   }
   assert.equal(termoDe.pt, 'sinal', `pt: o termo é "${termoDe.pt}", e o en e o es dizem "${termoDe.en}"/"${termoDe.es}"`);

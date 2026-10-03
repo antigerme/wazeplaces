@@ -71,8 +71,10 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   const armazenado = new Map();
-  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [], dfato: [],
-    refazerPerfil: 0, despacharJanela: 0 };
+  // `saindoNoChat[i]` é o modo "saindo" do api.js (o `keepalive`) na hora da
+  // chamada `chat[i]`: é ele que diz se o pedido sobrevive à página que morre.
+  const chamadas = { presencaApp: [], chat: [], saindoNoChat: [], setSaindo: [], openModal: [], closeModal: [], unauthorized: 0,
+    fetch: [], dfato: [], refazerPerfil: 0, despacharJanela: 0 };
   const timers = [];
   let proximoTimer = 1;
   const relogio = { agora: agora ?? Date.now() };
@@ -105,7 +107,10 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     getCountry: () => pais,
     getRegion: () => 'row',
     async presencaApp(c) { chamadas.presencaApp.push(c); return api.presencaApp ? api.presencaApp(c) : { success: true, online: [], conversas: [] }; },
-    async chat(c) { chamadas.chat.push(c); return api.chat ? api.chat(c) : { success: true }; },
+    async chat(c) { chamadas.chat.push(c); chamadas.saindoNoChat.push(API.saindo === true); return api.chat ? api.chat(c) : { success: true }; },
+    // O modo "saindo" do api.js: com ele, o pedido vai com `keepalive`.
+    saindo: false,
+    setSaindo(v) { chamadas.setSaindo.push(!!v); API.saindo = !!v; },
   };
   const escopo = {
     document: doc,

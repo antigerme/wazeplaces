@@ -255,3 +255,37 @@ test('R6-3-05 ir e voltar na mesma medida (roda, trackpad) volta a 1× EXATO, re
   z.zoomTo(1.01, 250, 420);
   assert.equal(z.scale, 1.01, 'a folga engoliu um zoom de 1% (10 px numa foto de 1000)');
 });
+
+// ── R7-3-03: a partir de 1×, a roda FINA e a pinça LENTA do trackpad ampliam ──
+// (auditoria de 2026-10-02). O R6-3-05 punha a escala em 1 sempre que ela ficava
+// abaixo de 1,001 — inclusive APROXIMANDO a partir de 1×. Cada evento da roda e
+// da pinça de trackpad é aplicado sobre a escala de agora (1,2^(−Δ/100)), então
+// todo evento abaixo de ~0,55 px caía de volta em 1 e o gesto nunca começava a
+// ampliar. MEDIDO no Chromium: 40 eventos de −0,4 px deixavam a escala em 1, e
+// a pinça de trackpad que ele mesmo sintetiza (CDP, ×1,5) a 20, 35 e 50 px/s
+// manda 301, 172 e 121 eventos que somam −40,55 px — escala parada em 1 (a
+// 70 px/s, com eventos maiores, ela ampliava). Voltar a 1 é só AFASTANDO.
+test('R7-3-03 a partir de 1×, a roda fina e a pinça lenta do trackpad ampliam; afastando na mesma medida, volta a 1× EXATO', () => {
+  for (const [n, soma] of [[40, -16], [301, -40.55], [172, -40.55], [121, -40.55]]) {
+    const dy = soma / n;
+    const fator = Math.pow(1.2, -dy / 100);
+    // CONTROLE do instrumento: cada evento SOZINHO fica abaixo do limiar de
+    // 0,1% (senão o caso mediria o evento grande, que sempre ampliou).
+    assert.ok(fator < 1.001, `CONTROLE: o evento de ${dy.toFixed(3)} px já passava do limiar sozinho`);
+    const lb = lightbox();
+    for (let i = 0; i < n; i++) lb.zoomTo(lb.scale * fator, 250, 420);
+    const esperado = Math.pow(1.2, -soma / 100);
+    assert.ok(Math.abs(lb.scale - esperado) < 1e-9,
+      `DEFEITO: ${n} eventos de ${dy.toFixed(3)} px deixaram a escala em ${lb.scale} (a soma pede ${esperado.toFixed(4)})`);
+    // O R6-3-05 segue: afastando na mesma medida, a escala volta a 1× EXATO, recentrada.
+    for (let i = 0; i < n; i++) lb.zoomTo(lb.scale / fator, 250, 420);
+    assert.equal(lb.scale, 1, `${n} eventos pra dentro e ${n} pra fora pararam em ${lb.scale}: as setas andariam a foto`);
+    assert.deepEqual([lb.tx, lb.ty], [0, 0], 'a foto voltou a 1× fora do centro');
+  }
+  // CONTROLE: afastando a partir de um zoom pequeno (1,0005), abaixo de 0,1% é 1×.
+  const p = lightbox();
+  p.zoomTo(1.0005, 250, 420);
+  assert.ok(p.scale > 1, 'CONTROLE: aproximar 0,05% a partir de 1× não ampliou');
+  p.zoomTo(1.0003, 250, 420);
+  assert.equal(p.scale, 1, 'CONTROLE: afastando pra baixo de 0,1% a escala não voltou a 1× (o R6-3-05)');
+});

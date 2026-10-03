@@ -200,10 +200,14 @@ function hashDoCodigoDaExtensao() {
 // o manifesto parado em 0.2.0, que é o defeito T4. 0.3.1 = o painel com a régua
 // do servidor, o alerta na língua do WME e o botão com a conta (rodada 6: R66-1,
 // R66-2 e R6-1-10); a 0.3.0 não chegou a ser publicada, e a 0.3.1 a leva junto.
+// 0.3.2 = o ACESSAR que trava enquanto loga e volta em qualquer desfecho, e o
+// painel que diz o que acontece quando o login falha (rodada 7: R7-1-06 e
+// R7-6-07); ainda não publicada, então as duas mudanças são a MESMA versão.
 const CODIGO_POR_VERSAO = {
   '0.2.0': '70aa3ce409d9449234e3183bfc7f7f8f21b6e769e11431865915657c565144a2',
   '0.3.0': '7183aaef5597ed54d3c68ed709dab8659ba69cda22d6c306e789f3b25fa7f36e',
   '0.3.1': '9845a36bdabe98e5baf540f6cdac90c4d5d5332f7420848334dd2c00bf677596',
+  '0.3.2': '5a8fd648c151b022ca3c11b2c30fc980bda1023406b78c785716245e6e78483b',
 };
 const semver = (v) => v.split('.').map(Number);
 const antes = (a, b) => { const x = semver(a), y = semver(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };

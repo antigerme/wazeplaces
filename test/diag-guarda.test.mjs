@@ -95,6 +95,68 @@ test('as capturas SOMADAS não passam do teto — a abertura mais nova e as capt
   assert.equal(total, teto);
 });
 
+// ── R7-4-03: com DUAS ABAS, a poda vai pela hora da CAPTURA ────────────────
+// A ordem era a da ABERTURA (`inicio`): a aba aberta por último guardava as dela
+// e cortava as da outra, mesmo sendo as da outra as mais novas — e a aba mais
+// velha gravava a própria abertura já sem as capturas dela. MEDIDO no navegador
+// (x4 da auditoria): A abre, B abre depois, B registra 12 telas e A registra 2,
+// as MAIS NOVAS de todas — na base, A 0 · B 12, com o botão de A mostrando "2".
+const iso = (horasAtras) => new Date(AGORA - horasAtras * HORA).toISOString();
+const telas = (id, horas, motivo = 'manual') => horas.map((h, i) => ({ t: iso(h), motivo, n: id + i }));
+test('R7-4-03: duas abas — as capturas mais NOVAS ficam, seja qual for a aba aberta por último', () => {
+  const teto = DIAG.DIAG_CAPTURAS_GUARDADAS_MAX;
+  // A abriu ANTES (inicio 3 h atrás) e fez as 2 telas mais novas; B abriu depois e fez 12, mais velhas.
+  const horasB = Array.from({ length: teto }, (_, i) => 2 - i * 0.05);
+  const A = { id: 'A', inicio: AGORA - 3 * HORA, salvoEm: AGORA - 0.01 * HORA, momentos: telas('A', [0.3, 0.2]) };
+  const B = { id: 'B', inicio: AGORA - 2.5 * HORA, salvoEm: AGORA - 0.5 * HORA, momentos: telas('B', horasB) };
+  for (const ordem of [[A, B], [B, A]]) {
+    const r = podar(ordem, AGORA);
+    const de = (id) => r.manter.find((a) => a.id === id).momentos;
+    assert.equal(de('A').length, 2, 'as 2 telas mais NOVAS (as da aba aberta antes) foram cortadas');
+    assert.equal(de('B').length, teto - 2, 'a aba aberta depois ficou com mais que o teto deixa');
+    assert.deepEqual(de('B').map((m) => m.n), B.momentos.slice(-(teto - 2)).map((m) => m.n),
+      'da aba B saíram as capturas erradas (têm que sair as mais VELHAS dela)');
+    assert.deepEqual(de('B').map((m) => m.t), [...de('B').map((m) => m.t)].sort(),
+      'as capturas que ficam têm que seguir na ORDEM do anel');
+    assert.deepEqual(r.cortadas, ['B']);
+  }
+  // CONTROLE: com as de A mais VELHAS que as 12 de B, ficam as 12 de B — é a regra.
+  const Avelha = { ...A, momentos: telas('A', [2.9, 2.8]) };
+  const c = podar([Avelha, B], AGORA);
+  assert.equal(c.manter.find((a) => a.id === 'A').momentos.length, 0);
+  assert.equal(c.manter.find((a) => a.id === 'B').momentos.length, teto);
+});
+
+test('R7-4-03: a abertura que está GRAVANDO agora nunca é a que sai — vale a última gravação, não a hora de abrir', () => {
+  const max = DIAG.DIAG_ABERTURAS_MAX;
+  // A mais velha de abrir é a que grava AGORA (a aba aberta há horas); as outras abriram depois e fecharam.
+  const atual = { id: 'atual', inicio: AGORA - 10 * HORA, salvoEm: AGORA, momentos: telas('atual', [0.01]) };
+  const outras = Array.from({ length: max }, (_, i) => ({ id: 'o' + i, inicio: AGORA - (9 - i) * HORA, salvoEm: AGORA - (8.5 - i) * HORA, momentos: [] }));
+  const r = podar([atual, ...outras], AGORA);
+  assert.ok(r.manter.some((a) => a.id === 'atual'), 'a gravação da abertura de agora apagou a ela mesma (era a mais velha de abrir)');
+  assert.ok(!r.sair.includes('atual'));
+  assert.equal(r.manter.length, max);
+  assert.deepEqual(r.sair, ['o0'], 'saiu a de atividade mais VELHA');
+});
+
+// R7-4-02 na cópia guardada: o teto vale com as telas da PESSOA na frente das
+// automáticas (a mesma regra do anel), senão as automáticas de uma busca que
+// falha empurravam pra fora do aparelho as telas que a pessoa registrou.
+test('R7-4-02: na poda, as telas da PESSOA ficam na frente das automáticas, mesmo as mais velhas', () => {
+  const teto = DIAG.DIAG_CAPTURAS_GUARDADAS_MAX;
+  const atual = { id: 'atual', inicio: AGORA - HORA, salvoEm: AGORA,
+    momentos: telas('auto', Array.from({ length: teto }, (_, i) => 0.5 - i * 0.01), 'auto:buscaFalhou') };
+  const antes = { id: 'antes', inicio: AGORA - 3 * HORA, salvoEm: AGORA - 2 * HORA, momentos: telas('man', [2.5, 2.4]) };
+  const r = podar([atual, antes], AGORA);
+  assert.equal(r.manter.find((a) => a.id === 'antes').momentos.length, 2, 'as telas da pessoa saíram do aparelho pelas automáticas');
+  assert.equal(r.manter.find((a) => a.id === 'atual').momentos.length, teto - 2);
+  assert.deepEqual(r.manter.find((a) => a.id === 'atual').momentos.map((m) => m.n),
+    atual.momentos.slice(2).map((m) => m.n), 'das automáticas, saíram as que não eram as mais VELHAS');
+  // CONTROLE: só automáticas — as mais novas ficam, como sempre.
+  const so = podar([atual, { ...antes, momentos: telas('a2', [2.5, 2.4], 'auto:erroDeJs') }], AGORA);
+  assert.equal(so.manter.find((a) => a.id === 'antes').momentos.length, 0);
+});
+
 test('a poda não inventa: registro sem id é ignorado, e sem nada a cortar nada muda', () => {
   const a = ab('ok', 1, 1, 2);
   const r = podar([a, { semId: true }, null], AGORA);
@@ -284,11 +346,76 @@ test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip 
 
 test('o relatório leva as aberturas anteriores, e o resumo acusa o que elas capturaram', () => {
   const corpo = fatiar('diagCorpo');
-  assert.match(corpo, /aberturasAnteriores: diagAberturasAnteriores,/, 'o relatório parou de levar as aberturas anteriores');
+  // As do RETRATO, com a outra aba marcada (R7-4-04: ver o teste abaixo).
+  assert.match(corpo, /const aberturasMarcadas = diagMarcarSimultaneas\(aberturasNoArquivo, DIAG_ABERTURA\.inicio, vivas\);/,
+    'o relatório parou de marcar a outra aba aberta junto');
+  assert.match(corpo, /aberturasAnteriores: aberturasMarcadas,/, 'o relatório parou de levar as aberturas anteriores');
   assert.match(corpo, /aberturaAtual: \{ id: DIAG_ABERTURA\.id,/, 'sem a abertura atual, não se sabe de qual as outras vieram');
-  assert.match(corpo, /\.concat\(diagAberturasAnteriores\.flatMap\(/,
+  assert.match(corpo, /\.concat\(aberturasMarcadas\.flatMap\(/,
     'os alertas das capturas anteriores saíram do resumo — é o defeito que atravessa fechar e reabrir');
   assert.match(corpo, /abertura: a\.id,/, 'o alerta de uma captura anterior tem que dizer de QUAL abertura veio');
+  assert.match(corpo, /\.\.\.\(a\.simultanea \? \{ outraAba: true \} : \{\}\),/,
+    'o alerta de uma captura da OUTRA ABA não diz que ela não é de uma abertura anterior');
+  // As vivas são perguntadas JUNTO com a releitura da base, e esperadas antes do retrato.
+  assert.match(corpo, /const vivasPromessa = diagAberturasVivas\(prazo\);/, 'o relatório deixou de perguntar quais aberturas seguem vivas');
+  const iVivas = corpo.indexOf('const vivas = await vivasPromessa;');
+  const iRetrato = corpo.indexOf('const retratoEm = Date.now();');
+  assert.ok(iVivas > 0 && iRetrato > iVivas, 'as aberturas vivas têm que chegar ANTES do retrato');
+});
+
+// ── R7-4-04: a OUTRA ABA aberta não é uma abertura ANTERIOR ─────────────────
+// Desde o R6-4-5 o relatório leva o que a outra aba aberta gravou, e ela chegava
+// em `aberturasAnteriores` igual a uma abertura que FECHOU: no relatório do
+// auditor, a "anterior" tinha começado 343 ms DEPOIS da do relatório.
+test('R7-4-04: a abertura que gravou DEPOIS de esta abrir, ou que segue viva, é marcada como OUTRA ABA', () => {
+  const marcar = new Function(fatiar('diagMarcarSimultaneas') + '\nreturn diagMarcarSimultaneas;')();
+  const INICIO = AGORA;
+  const antes = { id: 'antes', inicio: INICIO - 2 * HORA, salvoEm: INICIO - HORA, momentos: [] };   // fechou antes
+  const junto = { id: 'junto', inicio: INICIO + 343, salvoEm: INICIO + 1525, momentos: [{ t: 'x' }] }; // o caso do auditor
+  const velhaViva = { id: 'velhaViva', inicio: INICIO - HORA, salvoEm: INICIO - 1000, momentos: [] }; // aberta antes, viva
+  const r = marcar([antes, junto, velhaViva], INICIO, new Set(['junto', 'velhaViva']));
+  assert.equal(r[0], antes, 'a abertura que FECHOU antes desta tem que voltar a MESMA, sem marca');
+  assert.deepEqual([r[1].simultanea, r[1].abertaAgora], [true, true], 'a que gravou depois de esta abrir não foi marcada');
+  assert.equal(r[1].momentos, junto.momentos, 'a marca copiou as capturas (tem que ser a mesma lista)');
+  assert.deepEqual([r[2].simultanea, r[2].abertaAgora], [true, true], 'a aberta antes, viva agora, não foi marcada');
+  // Sem saber quais vivem (o navegador sem `navigator.locks`): vale a hora.
+  const semTravas = marcar([antes, junto, velhaViva], INICIO, null);
+  assert.equal(semTravas[0], antes);
+  assert.deepEqual([semTravas[1].simultanea, semTravas[1].abertaAgora], [true, null], 'sem as travas, a hora tem que bastar');
+  assert.equal(semTravas[2], velhaViva, 'sem as travas e sem gravar depois, não há como dizer — fica como estava');
+  // A que gravou depois e já FECHOU: junto com esta, e fechada.
+  const fechou = marcar([junto], INICIO, new Set());
+  assert.deepEqual([fechou[0].simultanea, fechou[0].abertaAgora], [true, false]);
+  assert.deepEqual(marcar(undefined, INICIO, null), []);
+});
+
+test('R7-4-04: a abertura que GRAVA segura a trava com o id dela, e o relatório lê as vivas pelo nome', async () => {
+  const g = fatiar('diagGuardarAbertura');
+  assert.match(g, /^function diagGuardarAbertura\(motivo\) \{\s*if \(!dlogLigado\(\)\) return Promise\.resolve\(false\);\s*diagSegurarAbertura\(\);/,
+    'a abertura que grava não segura a trava dela (o relatório da outra aba não a veria viva)');
+  // A trava RODADA, contra um `navigator.locks` de mentira.
+  const DIAG_ABERTURA_TRAVA = /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1];
+  const montar = (navigator) => new Function('navigator', 'DIAG_ABERTURA', 'DIAG_ABERTURA_TRAVA',
+    `let diagAberturaSegura = false;\n${fatiar('diagSegurarAbertura')}\n${fatiar('diagAberturasVivas')}
+    return { diagSegurarAbertura, diagAberturasVivas };`)(navigator, { id: 'esta' }, DIAG_ABERTURA_TRAVA);
+  const pedidos = [];
+  const app = montar({ locks: {
+    request: (nome, opcoes, fn) => { pedidos.push([nome, opcoes]); fn({}); return Promise.resolve(); },
+    query: async () => ({ held: [{ name: DIAG_ABERTURA_TRAVA + 'outra' }, { name: '__abaDaSaida:x' }, { name: DIAG_ABERTURA_TRAVA + 'esta' }] }),
+  } });
+  app.diagSegurarAbertura();
+  app.diagSegurarAbertura();
+  assert.deepEqual(pedidos, [[DIAG_ABERTURA_TRAVA + 'esta', { ifAvailable: true }]],
+    'a trava tem que ser pedida UMA vez, com o id desta abertura');
+  const vivas = await app.diagAberturasVivas(Date.now() + 1000);
+  assert.deepEqual([...vivas].sort(), ['esta', 'outra'], 'as vivas saem dos nomes das travas — e só das do diagnóstico');
+  // Sem `navigator.locks`: não dá pra saber, e nada quebra.
+  const sem = montar({});
+  sem.diagSegurarAbertura();
+  assert.equal(await sem.diagAberturasVivas(Date.now() + 1000), null);
+  // E a pergunta tem TETO: o relatório tem orçamento.
+  const pendurada = montar({ locks: { request: () => Promise.resolve(), query: () => new Promise(() => {}) } });
+  assert.equal(await pendurada.diagAberturasVivas(Date.now() + 30), null, 'a pergunta pendurada segurou o relatório');
 });
 
 test('a Ajuda diz a verdade sobre o que fica no aparelho, nos 4 idiomas', () => {
@@ -359,6 +486,7 @@ function baseDoDiag({ abrir }) {
   };
   const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30,
     DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => false,
+    diagSegurarAbertura: () => {},
     diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
     diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
   const chaves = Object.keys(deps);
@@ -508,6 +636,7 @@ test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, n�
     const deps = { indexedDB: { open: () => { conta.aberturas++; return {}; }, deleteDatabase: () => ({}) },
       DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30, DIAG_ABERTURA: { id: 'esta' },
       dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => desligadoLa,
+      diagSegurarAbertura: () => {},
       diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: 1, inicio: 1, momentos: [] }),
       diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
     const chaves = Object.keys(deps);

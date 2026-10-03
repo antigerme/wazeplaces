@@ -386,7 +386,7 @@ test('`fetching` preso SEM promessa não vira laço: a busca sai de novo', async
   assert.equal(m.AppState.fetching, false);
 });
 
-test('a volta da rede e o "Tentar novamente": com a fila VAZIA é atualizar; com card na tela, só retoma', () => {
+test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com card na tela, só retoma', () => {
   // Era `resetQueue()` + `startFetching()` SEMPRE: com card na tela o card era
   // arrancado e a ação da janela do Desfazer saía antes da hora. A primeira
   // correção (só retomar, sempre) errou do outro lado, e a auditoria EM PRODUÇÃO
@@ -411,7 +411,7 @@ test('a volta da rede e o "Tentar novamente": com a fila VAZIA é atualizar; com
   // `onLine` verdadeiro (R4-O1, em test/offline-varredura.test.mjs).
   // (O foco prometido ao card que vem, pelo teclado, sai antes do `await`: R6-2-13.)
   assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\);/,
-    'o "Tentar novamente" voltou a zerar a fila (e a descartar a guardada do offline)');
+    'o "Tentar de novo" voltou a zerar a fila (e a descartar a guardada do offline)');
   assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
     'o ↻ sem rede joga fora a fila (inclusive a guardada)');
 });

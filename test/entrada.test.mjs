@@ -232,6 +232,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };
@@ -487,6 +488,9 @@ function montarCamadas({ abertos = [], lightbox = false, mapa = false, profundid
   const deps = {
     document, history, Lightbox, MapaLightbox, dfato() {}, lastFocusedBeforeModal: null, devolverFoco() {},
     LIMPEZA_AO_FECHAR: new Proxy({}, { get: (t, id) => () => limpezas.push(id) }),
+    // O "Como funciona" adiado que espera a camada fechar (R7-7-01): não é o
+    // assunto aqui (test/como-funciona).
+    aoFecharCamada() {},
   };
   const app = montar(['fecharCamadasAbertas', 'closeModal', 'topOpenModal'], deps,
     ['fecharCamadasAbertas', 'closeModal', 'CamadaVoltar'], constante('MODAL_IDS') + '\n' + objeto('CamadaVoltar'));
@@ -949,7 +953,7 @@ function montarFoco({ alvo, reserva = null }) {
   const deps = {
     document: { getElementById: (id) => (id === 'helpBtn' ? helpBtn : id === 'pairShowModal' ? modal : outros[id] || null), body: { style: {} } },
     dfato() {}, CamadaVoltar: { consumir() {} }, LIMPEZA_AO_FECHAR: {}, Lightbox: { isOpen: () => false },
-    lastFocusedBeforeModal: alvo, ultimoFocoForaDasCamadas: reserva,
+    lastFocusedBeforeModal: alvo, ultimoFocoForaDasCamadas: reserva, aoFecharCamada() {},
   };
   const { closeModal } = montar(['closeModal', 'devolverFoco', 'dentroDeCamada', 'focavelNaTela', 'topOpenModal'], deps,
     ['closeModal'], constante('MODAL_IDS'));
@@ -1622,4 +1626,136 @@ test('plural por chave: o "de N na região" e o aviso de desligar o modo dev esc
   };
   assert.deepEqual(await aviso(1), ['toast.devPerdeCapturaUm|1'], 'uma captura não baixada usou a forma plural');
   assert.deepEqual(await aviso(4), ['toast.devPerdeCaptura|4'], 'CONTROLE: quatro usam o plural');
+});
+
+// ═══ R7-1-08 · "Validando cookies…" sai com o resultado ════════════════════════
+// Com o servidor respondendo rápido, o aviso de progresso seguia na tela por até
+// ~3,7 s depois do resultado: ao lado do "Autenticado com sucesso!", do erro e por
+// cima do "Acesso restrito" (MEDIDO, auditoria de 2026-10-02).
+//
+// E o login pelo TECLADO (R7-1-04): a tela de entrada some com o foco nela, e o
+// foco caía no <body>. O que der certo pelo teclado promete o foco ao ✕ do
+// primeiro card (`focoDoTeclado`, que o `aplicarFocoDoTeclado` pousa quando o card
+// chega); o mouse e o dedo não movem nada.
+function montarLogin(resposta, { peloTeclado = false } = {}) {
+  const toasts = [];
+  const dispensados = [];
+  const log = [];
+  const deps = {
+    API: { testCookies: async () => { log.push('validou'); if (resposta === 'lanca') throw new Error('rede'); return resposta; } },
+    showToast: (msg, tipo) => { const i = toasts.push(msg) - 1; return { dispensar: () => dispensados.push(toasts[i]) }; },
+    t: (k) => k, msgDoServidor: (r, d) => d, setAuthLoading: (v) => log.push('carregando:' + v),
+    guardarPrazoDaSessao() {}, aoEntrarNestaPagina() {}, showMainScreen() {}, resetQueue() {}, conhecerContaDoLogin() {},
+    loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {},
+    showAccessDenied: () => toasts.push('[Acesso restrito]'), AppState: {},
+    authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+  };
+  const { authenticateWithCookies, estado } = montar(['authenticateWithCookies'], deps,
+    ['authenticateWithCookies', 'estado'], 'const estado = () => ({ focoDoTeclado });');
+  return { entrar: () => authenticateWithCookies('cookies', { peloTeclado }), toasts, dispensados, log, estado };
+}
+
+test('R7-1-08: "Validando cookies…" SAI com o resultado — sucesso, erro, "Acesso restrito" e falha de rede', async () => {
+  for (const [caso, resposta, resultado] of [
+    ['sucesso', { success: true, sessionToken: 'tok' }, 'toast.authSuccess'],
+    ['cookies recusados', { success: false, error: 'x' }, 'toast.invalidCookies'],
+    ['portão', { success: false, errorCategory: 'access_denied' }, '[Acesso restrito]'],
+    ['rede', 'lanca', 'toast.authError'],
+  ]) {
+    const m = montarLogin(resposta);
+    await m.entrar();
+    assert.ok(m.toasts.includes(resultado), `${caso}: CONTROLE — o resultado não apareceu (o instrumento não enxerga)`);
+    assert.deepEqual(m.dispensados, ['toast.validatingCookies'],
+      `DEFEITO (${caso}): "Validando cookies…" ficou na tela depois do resultado: ${m.toasts.join(' | ')}`);
+  }
+});
+
+test('R7-1-04: o login que DEU CERTO pelo teclado promete o foco ao ✕ do primeiro card — e só pelo teclado', async () => {
+  const t = montarLogin({ success: true, sessionToken: 'tok' }, { peloTeclado: true });
+  await t.entrar();
+  assert.equal(t.estado().focoDoTeclado, '.card-btn-reject',
+    'DEFEITO: entrou pelo teclado e o foco não ficou prometido — cai no <body> quando a tela de entrada some');
+  // CONTROLES: pelo mouse nada é prometido; e o login que FALHA (a tela de entrada fica) também não.
+  const m = montarLogin({ success: true, sessionToken: 'tok' });
+  await m.entrar();
+  assert.equal(m.estado().focoDoTeclado, null, 'o login pelo mouse prometeu foco ao card (foco pulando pela tela)');
+  const f = montarLogin({ success: false, error: 'x' }, { peloTeclado: true });
+  await f.entrar();
+  assert.equal(f.estado().focoDoTeclado, null, 'o login que falhou prometeu o foco a um card que não vem');
+});
+
+test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do TECLADO — lido antes de o diálogo fechar', async () => {
+  // O colar: o `veioDoTeclado` de verdade, lido ANTES do `closeModal` (que leva o
+  // foco ao "Colar cookies" — depois dele, o Enter no "Confirmar" leria como mouse).
+  const confirmar = { id: 'confirmPaste' };
+  const colar = (detail) => {
+    const doc = { activeElement: confirmar,
+      getElementById: (id) => (id === 'cookiesTextarea' ? { value: 'cookies' } : null) };
+    const chamadas = [];
+    const { handlePasteConfirm } = montar(['handlePasteConfirm', 'veioDoTeclado'], {
+      document: doc, showToast() {}, t: (k) => k,
+      closeModal: () => { doc.activeElement = { id: 'pasteBtn' }; },
+      authenticateWithCookies: async (c, o) => chamadas.push(o),
+    }, ['handlePasteConfirm']);
+    return handlePasteConfirm({ detail, currentTarget: confirmar }).then(() => chamadas[0]);
+  };
+  assert.deepEqual(await colar(0), { peloTeclado: true }, 'DEFEITO: o Enter no "Confirmar" do colar não chegou como teclado');
+  assert.deepEqual(await colar(1), { peloTeclado: false }, 'CONTROLE: o clique do mouse chegou como teclado');
+  // O código: o Enter no campo e o "Entrar" passam o teclado adiante (a estrutura
+  // do ouvinte, que mora no `setupModalListeners`).
+  const ouvintes = fatiar('setupModalListeners');
+  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
+    'o Enter no campo do código não diz que veio do teclado');
+  assert.match(ouvintes, /\$\('pairEnterConfirm'\)\?\.addEventListener\('click', \(ev\) => resgatarPareamento\(\$\('pairCodeInput'\)\.value,\s*\{ peloTeclado: veioDoTeclado\(ev\) \}\)\);/,
+    'o "Entrar" do código não diz se veio do teclado');
+  assert.match(fatiar('setupAuthListeners'), /\$\('confirmPaste'\)\.addEventListener\('click', handlePasteConfirm\);/,
+    'o "Confirmar" do colar não recebe o evento (o `veioDoTeclado` precisa dele)');
+  // E o resgate que DEU CERTO pelo teclado promete o foco, como o colar.
+  const resgate = async (peloTeclado) => {
+    const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
+      document: { getElementById: () => null }, resgateEmVoo: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+      closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
+      conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {} };
+    const { resgatarPareamento, estado } = montar(['resgatarPareamento'], deps, ['resgatarPareamento', 'estado'],
+      'const estado = () => ({ focoDoTeclado });');
+    await resgatarPareamento('ABC234', { silencioso: true, peloTeclado });
+    return estado().focoDoTeclado;
+  };
+  assert.equal(await resgate(true), '.card-btn-reject', 'DEFEITO: entrou pelo código no teclado e o foco não ficou prometido');
+  assert.equal(await resgate(false), null, 'CONTROLE: o resgate pelo mouse prometeu foco ao card');
+});
+
+test('R7-1-04: o colar que FALHA devolve o foco ao "Colar cookies" — o botão desabilitado durante a validação o perdia', () => {
+  const botao = (id) => {
+    const b = { id, disabled: false, isConnected: true, classList: { toggle() {} }, focus() { doc.activeElement = b; }, visivel: true };
+    return b;
+  };
+  const doc = { body: { id: 'BODY' }, activeElement: null };
+  const pasteBtn = botao('pasteBtn');
+  const uploadBtn = botao('uploadBtn');
+  doc.getElementById = (id) => ({ pasteBtn, uploadBtn }[id] || null);
+  doc.activeElement = pasteBtn;      // o fechamento do "Colar" põe o foco nele
+  const { setAuthLoading } = montar(['setAuthLoading', 'focoPerdido'], {
+    document: doc, focoNoBotaoDeEntrada: null, focavelNaTela: (el) => !!(el && el.visivel && !el.disabled),
+  }, ['setAuthLoading']);
+  setAuthLoading(true);
+  assert.equal(pasteBtn.disabled, true, 'PRÉ-CONDIÇÃO: o botão trava durante a validação');
+  doc.activeElement = doc.body;      // o navegador tira o foco do botão desabilitado
+  setAuthLoading(false);
+  assert.equal(doc.activeElement, pasteBtn, 'DEFEITO: os cookies recusados deixaram o foco no <body>');
+  // CONTROLES: o login que deu certo (a tela de entrada sumiu) não põe o foco num
+  // botão escondido; e o foco que a pessoa (ou um diálogo) pôs em OUTRO lugar fica.
+  doc.activeElement = pasteBtn;
+  setAuthLoading(true);
+  doc.activeElement = doc.body;
+  pasteBtn.visivel = false;
+  setAuthLoading(false);
+  assert.equal(doc.activeElement, doc.body, 'o foco foi pra um botão da tela de entrada escondida');
+  pasteBtn.visivel = true;
+  doc.activeElement = pasteBtn;
+  setAuthLoading(true);
+  const dialogo = { id: 'accessDeniedOk', isConnected: true };
+  doc.activeElement = dialogo;       // o "Acesso restrito" abriu com o foco nele
+  setAuthLoading(false);
+  assert.equal(doc.activeElement, dialogo, 'o foco foi tirado do diálogo que abriu');
 });

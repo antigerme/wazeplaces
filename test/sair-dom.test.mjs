@@ -50,13 +50,13 @@ function fatiarConst(nome) {
   assert.ok(m, `const ${nome} sumiu do app.js`);
   return APP_SEM.slice(m.index, fechar(APP_SEM, m.index)) + ';';
 }
-// Um MÉTODO do objeto `Lightbox`, como texto de método.
-function metodoDoLightbox(nome) {
-  const ini = APP_SEM.indexOf('const Lightbox = {');
-  assert.ok(ini >= 0, 'o objeto Lightbox sumiu do app.js');
+// Um MÉTODO do objeto `Lightbox` (ou do `MapaLightbox`), como texto de método.
+function metodoDoLightbox(nome, objeto = 'Lightbox') {
+  const ini = APP_SEM.indexOf(`const ${objeto} = {`);
+  assert.ok(ini >= 0, `o objeto ${objeto} sumiu do app.js`);
   const fim = fechar(APP_SEM, ini);
   const m = new RegExp('^    ' + nome + '\\(', 'm').exec(APP_SEM.slice(ini, fim));
-  assert.ok(m, `Lightbox.${nome} sumiu`);
+  assert.ok(m, `${objeto}.${nome} sumiu`);
   const i = ini + m.index;
   let par = 0, k = APP_SEM.indexOf('(', i);
   for (let j = k; j < fim; j++) {
@@ -73,8 +73,12 @@ const MARCA = 'PRIV';
 function elemento(id, { oculto = false } = {}) {
   const classes = new Set(oculto ? ['hidden'] : []);
   const attrs = {};
+  // `textContent` e `innerHTML` andam JUNTOS, como no DOM: esvaziar um esvazia o
+  // outro (o `close` do mapa ampliado esvazia pelo `textContent` o que foi
+  // escrito em nós).
+  let texto = '', html = '';
   const el = {
-    id, textContent: '', innerHTML: '', style: {}, isConnected: true, disabled: false,
+    id, style: {}, isConnected: true, disabled: false,
     classList: {
       add: (...cs) => cs.forEach((c) => classes.add(c)), remove: (...cs) => cs.forEach((c) => classes.delete(c)),
       contains: (c) => classes.has(c),
@@ -93,12 +97,19 @@ function elemento(id, { oculto = false } = {}) {
   for (const a of ['alt', 'title']) {
     Object.defineProperty(el, a, { get: () => (a in attrs ? attrs[a] : ''), set: (v) => { attrs[a] = String(v); }, enumerable: true });
   }
+  Object.defineProperty(el, 'textContent', { get: () => texto, enumerable: true,
+    set: (v) => { texto = String(v); html = texto.replace(/&/g, '&amp;').replace(/</g, '&lt;'); } });
+  Object.defineProperty(el, 'innerHTML', { get: () => html, enumerable: true,
+    set: (v) => { html = String(v); texto = html.replace(/<[^>]*>/g, ''); } });
   return el;
 }
 
 // Os nós que o app ESCREVE com dado de terceiro, e os modais em volta deles.
 const NOS = ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'accessDeniedMessage',
-  'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'lightboxAnuncio', 'cardLiveRegion'];
+  'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'lightboxAnuncio', 'cardLiveRegion',
+  // O mapa ampliado (R7-1-02): os marcadores com o nome do duplicado e das
+  // entradas, a legenda, os tiles da área e o link do Street View.
+  'mapaLbTiles', 'mapaLbMarks', 'mapaLbLegenda', 'mapaLbStreetView'];
 const MODAIS = ['filtersModal', 'autorModal', 'accessDeniedModal', 'helpModal', 'logoutModal'];
 
 function montar() {
@@ -108,6 +119,7 @@ function montar() {
   for (const id of ['imageLightbox', 'authScreen', 'appScreen', 'filtersBtn', 'refreshBtn', 'userProfileBadge', 'brandTitle', 'helpBtn']) {
     els[id] = elemento(id);
   }
+  els.mapaLightbox = elemento('mapaLightbox', { oculto: true });
   const body = { id: 'BODY', style: {} };
   const document = {
     body, activeElement: body,
@@ -124,6 +136,7 @@ function montar() {
     pararTickerPareamento() {}, limparQrPareamento() {}, mostrarInstrucoesDoPareamento() {},
     fecharEdicaoNome() {}, avancarSeAprovado() {}, devolverFocoDaAmpliacao() {},
     Treino: { sair() {} },
+    aoFecharCamada() {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
   };
   const MODAL_IDS = MODAIS;
   const corpo = [
@@ -135,13 +148,19 @@ function montar() {
     'const Lightbox = { aberto: true, _quemAbriu: null, isOpen() { return this.aberto; }, resetZoom() {},',
     '  ' + metodoDoLightbox('close').replace(/^close\(/, 'fecharDeVerdade(') + ' };',
     'Lightbox.close = function (o) { const r = this.fecharDeVerdade(o); this.aberto = false; return r; };',
+    // O mapa ampliado: o `close` DE VERDADE, com o que um pedido de DUPLICADO
+    // deixa na memória (os pontos com o nome do local e da entrada).
+    'const MapaLightbox = { centro: [-23.5, -46.6], z: 17, _fora: [2], _inicial: { centro: [-23.5, -46.6], z: 17 },',
+    '  _local: [-23.5, -46.6], _tiles: new Map([["17/1/2", {}]]), _falhos: new Set(["17/1/3"]),',
+    `  pontos: [{ ll: [-23.5, -46.6] }, { nome: 'Entrada${MARCA}' }, { nome: 'Duplicado${MARCA}' }],`,
+    '  ' + metodoDoLightbox('close', 'MapaLightbox') + ' };',
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'), fatiar('devolverFoco'),
     fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('showAuthScreen'),
     // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
     // ela pode dizer o nome do local ("Renomeado para …").
     fatiar('anunciarNoLightbox'),
     fatiarConst('LIMPEZA_AO_FECHAR'),
-    'return { openModal, closeModal, showAuthScreen, Lightbox };',
+    'return { openModal, closeModal, showAuthScreen, Lightbox, MapaLightbox };',
   ].join('\n');
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
@@ -160,6 +179,15 @@ function montar() {
     els.lightboxCount.title = '01/10/2026';
     els.lightboxNomeTxt.textContent = `Padaria${MARCA}`;
     els.lightboxAnuncio.textContent = `Renomeado para “Padaria${MARCA}”`;
+    // O mapa ampliado de um reporte de DUPLICADO, aberto: os marcadores dizem o
+    // nome do local duplicado e o da entrada; os tiles e o Street View são do
+    // lugar do pedido (aqui marcados pra varredura enxergá-los).
+    els.mapaLightbox.classList.remove('hidden');
+    els.mapaLbMarks.innerHTML = `<span class="mapa-marca mapa-duplicado" title="duplicado — Duplicado${MARCA}"></span>`
+      + `<span class="mapa-marca mapa-entrada" title="entrada nova — Entrada${MARCA}"></span>`;
+    els.mapaLbLegenda.innerHTML = `<span class="mapa-leg">duplicado ${MARCA}</span>`;
+    els.mapaLbTiles.innerHTML = `<img class="absolute mapa-tile" src="https://www.waze.com/row-tiles/live/base/17/${MARCA}/2/tile.png">`;
+    els.mapaLbStreetView.setAttribute('href', `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${MARCA}`);
   };
   // A VARREDURA: texto, HTML e todo atributo de todo nó, pela marca.
   const varrer = () => Object.values(els).flatMap((el) => {
@@ -178,16 +206,19 @@ test('R6-1-05: depois de fechar (por qualquer caminho) e do "Sair", o DOM não g
   // CONTROLE: a varredura ENXERGA o dado de terceiro antes — sem isto, "nada
   // achado" passaria com o instrumento cego.
   const antes = m.varrer();
-  for (const no of ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'lightboxImage', 'lightboxCount', 'lightboxNomeTxt']) {
+  for (const no of ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'lightboxImage', 'lightboxCount', 'lightboxNomeTxt',
+    'mapaLbMarks', 'mapaLbTiles', 'mapaLbStreetView']) {
     assert.ok(antes.some((x) => x.startsWith(no + ':')), `CONTROLE: a varredura não viu o dado de terceiro no #${no} — ela está cega`);
   }
   // A pessoa usou tudo e fechou cada camada (o botão, o Esc, o fundo e o voltar
-  // passam pelo `closeModal`; a foto, pelo `close` dela) — e deu "Sair".
+  // passam pelo `closeModal`; a foto e o mapa ampliados, pelo `close` de cada
+  // um) — e deu "Sair".
   for (const id of ['filtersModal', 'autorModal', 'accessDeniedModal']) {
     m.els[id].classList.remove('hidden');
     m.app.closeModal(id);
   }
   m.app.Lightbox.close();
+  m.app.MapaLightbox.close();
   // Fechar já limpa (é o caminho que vale pros quatro jeitos de fechar), antes
   // de a tela de entrada aparecer.
   assert.deepEqual(m.varrer(), [], 'DEFEITO: a camada FECHADA seguiu com dado de terceiro no DOM');
@@ -195,6 +226,29 @@ test('R6-1-05: depois de fechar (por qualquer caminho) e do "Sair", o DOM não g
   assert.deepEqual(m.varrer(), [], 'DEFEITO: depois do "Sair", o DOM ainda guarda dado de terceiro');
   assert.ok(m.els.accessDeniedProfile.classList.contains('hidden'), 'o perfil recusado vazio ficou visível no diálogo');
   assert.ok(m.els.lightboxCount.classList.contains('hidden'), 'a contagem vazia da foto ficou visível');
+});
+
+// ── R7-1-02: o mapa ampliado FECHADO não guarda o pedido (auditoria de 2026-10-02)
+// O lote 10 limpou a foto ampliada; o mapa ampliado seguia com o nome do local
+// duplicado e o das entradas (o `title` dos marcadores), o link do Street View
+// com a coordenada do pedido, os tiles da área e, na memória, os pontos — até
+// na tela de entrada depois do "Sair" (MEDIDO nos dois motores).
+test('R7-1-02: fechar o mapa ampliado (o voltar, o ✕, o Esc, a queda) tira o pedido do DOM e da memória', () => {
+  for (const viaHistorico of [false, true]) {
+    const m = montar();
+    m.preencher();
+    const antes = m.varrer();
+    assert.ok(['mapaLbMarks', 'mapaLbTiles', 'mapaLbStreetView'].every((no) => antes.some((x) => x.startsWith(no + ':'))),
+      'CONTROLE: a varredura não viu o pedido no mapa ampliado aberto (ela está cega)');
+    m.app.MapaLightbox.close(viaHistorico);
+    assert.ok(m.els.mapaLightbox.classList.contains('hidden'), 'PRÉ-CONDIÇÃO: o mapa não fechou');
+    const sobrou = m.varrer().filter((x) => x.startsWith('mapaLb'));
+    assert.deepEqual(sobrou, [], `DEFEITO: o mapa ampliado FECHADO${viaHistorico ? ' pelo voltar' : ''} seguiu com o pedido no DOM`);
+    assert.equal(m.els.mapaLbStreetView.getAttribute('href'), null, 'o link do Street View guardou a coordenada do pedido');
+    const mapa = m.app.MapaLightbox;
+    assert.deepEqual([mapa.pontos, mapa._fora, mapa._local, mapa._inicial, mapa.centro, mapa._tiles.size, mapa._falhos.size],
+      [[], [], null, null, null, 0, 0], 'DEFEITO: a memória guardou os pontos do pedido (com os nomes) depois de fechar');
+  }
 });
 
 test('R6-1-05: o modal escondido por OUTRO que abre por cima (a Ajuda, de onde sai o "Sair") também é limpo', () => {
