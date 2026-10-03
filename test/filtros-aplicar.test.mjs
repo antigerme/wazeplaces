@@ -152,6 +152,8 @@ const FUNCOES = [
   // O caminho do perfil (achados 10 e 11).
   'loadProfileAndAuxData', 'definirPerfil', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil',
   'redesenharLugarNosFiltros',
+  // Os editáveis por servidor (R7-6-02).
+  'anotarEditaveis', 'editaveisLidos',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -208,6 +210,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
+    editaveisPorServidor: new WeakMap(),
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
     GPS_TIMEOUT_MS: 10, TYPES_PADRAO: ['NEW_PLACE'],
@@ -1435,4 +1438,67 @@ test('R7-6-04: a carga de estados que ainda vinha não escreve por cima do "List
   assert.equal(p.els.filterState.mostrado, 'filters.state.naoCarregou',
     `a carga de estados de antes escreveu "${p.els.filterState.mostrado}" debaixo do país que não carregou`);
   assert.equal(p.els.filterState.dataset.carregando, '1');
+});
+
+// ═══ R7-6-02 · quem edita só noutro servidor tem a peneira na 1ª sessão ═════
+// O app abre na ROW (de fábrica, e depois de todo "Sair"). O perfil de lá vem
+// com `editableCountryIDs []`, e o `paisDoPerfil` pergunta o NA e leva a pessoa
+// pros EUA — mas o perfil que ficava era o da ROW, vazio, e a lista que a
+// pergunta trouxe ia embora. Nos Filtros dessa sessão a lista do NA ia inteira,
+// sem a dica, e dava pra aplicar o Canadá, onde a pessoa não edita (fila
+// vazia); reaberto o app, o perfil é lido no NA e a peneira valia (MEDIDO no
+// navegador, auditoria da rodada 7). Aqui a carga do perfil roda DE VERDADE
+// (`loadProfileAndAuxData` → `paisDoPerfil` → `irProPaisDoPerfil`).
+function paginaQueEditaNaNA({ regiao = 'row', pais = 30 } = {}) {
+  const p = pagina({ regiao, pais });
+  p.listas.perfil = (r) => Promise.resolve({ success: true,
+    profile: { id: 1, editableCountryIDs: r === 'na' ? [235] : [], managedAreas: [] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  return p;
+}
+
+test('R7-6-02: quem edita só na NA, levado pra lá pelo perfil da ROW, tem a MESMA peneira da reabertura — sem pedido a mais', async () => {
+  const p = paginaQueEditaNaNA();
+  await p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a pessoa pros EUA');
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], 'PRÉ-CONDIÇÃO: o perfil não foi perguntado no NA');
+  await p.abrir();
+  const primeira = telaDoPais(p);
+  assert.deepEqual(primeira, { opcoes: '235', pais: '235', dica: true },
+    `a 1ª sessão mostra a lista do NA sem a peneira: ${JSON.stringify(primeira)}`);
+  // O Canadá (onde a pessoa não edita) não é opção, e o "Aplicar" fica nos EUA.
+  p.els.filterCountry.value = '40';
+  assert.equal(p.els.filterCountry.value, '', 'o Canadá, onde a pessoa não edita, é opção');
+  aplicarSoDesmarcandoUmTipo(p);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235]);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], 'a peneira custou um pedido de perfil a mais');
+  // CONTROLE: reaberto, o perfil é lido no NA — a mesma lista, com a dica.
+  const q = paginaQueEditaNaNA({ regiao: 'na', pais: 235 });
+  await q.app.loadProfileAndAuxData();
+  await q.abrir();
+  assert.deepEqual(q.log.getProfile, ['na'], 'CONTROLE: a reabertura perguntou a outro servidor');
+  assert.deepEqual(telaDoPais(q), primeira, 'a mesma pessoa vê duas listas, conforme a sessão começou');
+});
+
+test('R7-6-02: o que o app leu nos outros servidores é DESTE perfil — o perfil de outra conta começa sem nada', async () => {
+  const p = paginaQueEditaNaNA();
+  await p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual(p.app.editaveisLidos('na'), [235], 'PRÉ-CONDIÇÃO: a lista do NA não ficou');
+  assert.deepEqual(p.app.editaveisLidos('row'), [], 'a lista do servidor em que o perfil foi pedido não ficou');
+  assert.equal(p.app.editaveisLidos('il'), null, 'um servidor que ninguém perguntou virou "não edita lá"');
+  // Outra conta entra (o perfil é outro objeto): nada da anterior vale.
+  p.app.definirPerfil({ success: true, profile: { id: 2, editableCountryIDs: [], managedAreas: [] } });
+  assert.equal(p.AppState.profile.id, 2, 'PRÉ-CONDIÇÃO: o perfil de outra conta não entrou');
+  assert.equal(p.app.editaveisLidos('na'), null, 'a lista do NA da conta anterior vale pra quem entrou');
+  // E a pergunta que FALHOU não diz que a pessoa não edita lá.
+  const f = pagina();
+  f.listas.perfil = (r) => Promise.resolve(r === 'row'
+    ? { success: true, profile: { id: 1, editableCountryIDs: [], managedAreas: [] } }
+    : { success: false, errorCategory: 'transient' });
+  await f.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual(f.log.getProfile, ['row', 'na', 'il'], 'PRÉ-CONDIÇÃO: os outros servidores não foram perguntados');
+  assert.equal(f.app.editaveisLidos('na'), null, 'a pergunta que falhou virou "não edita no NA"');
 });

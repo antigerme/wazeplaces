@@ -4162,6 +4162,37 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
     });
 }
 
+// ── Os países editáveis, POR SERVIDOR ──────────────────────────────────────
+// O `/Session` traz `editableCountryIDs` de UM servidor só (MEDIDO nas contas do
+// owner: [30] no ROW, [] no NA e no IL), e o perfil que fica no `AppState` é o
+// do servidor em que ele foi pedido. Quem edita só na NA (ou em Israel) abre na
+// ROW (o de fábrica, e depois de todo "Sair"): o perfil de lá vem vazio, o
+// `paisDoPerfil` pergunta o NA e leva a pessoa pros EUA — e a lista que ele leu
+// lá ia embora. Os Filtros dessa sessão mostravam a lista do NA inteira, sem a
+// dica, e dava pra aplicar o Canadá, onde ela não edita (fila vazia); reaberto o
+// app, o perfil é lido no NA e a peneira valia: a mesma pessoa via duas listas,
+// conforme a sessão começou (auditoria da rodada 7, R7-6-02). Os editáveis que o
+// app LEU ficam aqui, por servidor — sem pedido a mais: são os da carga do
+// perfil (`loadProfileAndAuxData`) e os que o `paisDoPerfil` já perguntou.
+//
+// Presos ao OBJETO do perfil: o perfil novo (a outra conta, o "Sair", a sonda
+// do alarme falso) começa sem nada, e nada de uma conta vale pra outra.
+const editaveisPorServidor = new WeakMap();
+function anotarEditaveis(perfil, regiao, lista) {
+    if (!perfil || typeof perfil !== 'object' || !regiao) return;
+    const ids = (Array.isArray(lista) ? lista : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const lidos = editaveisPorServidor.get(perfil) || {};
+    lidos[regiao] = ids;
+    editaveisPorServidor.set(perfil, lidos);
+}
+// Os editáveis do servidor `regiao` que o app leu pro perfil de agora, ou
+// `null` quando não leu (`[]` é "leu, e a pessoa não edita lá").
+function editaveisLidos(regiao) {
+    const perfil = AppState.profile;
+    const lidos = perfil && typeof perfil === 'object' ? editaveisPorServidor.get(perfil) : null;
+    return lidos && Object.prototype.hasOwnProperty.call(lidos, regiao) ? lidos[regiao] : null;
+}
+
 // A lista de países que o seletor MOSTRA, pela MESMA régua na abertura dos
 // Filtros (a lista da região aplicada, `AppState.countries`) e na troca de
 // região (`aoTrocarRegiaoNoModal`, com a lista da região escolhida). A troca
@@ -4169,16 +4200,16 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
 // mostravam duas listas pro mesmo servidor, e na volta dava pra aplicar um país
 // que a pessoa não edita — fila vazia, e a reabertura mostrava OUTRO país no
 // lugar do aplicado, que o "Aplicar" seguinte gravava calado (auditoria da
-// rodada 6, R66-4). Os editáveis do perfil são de UM servidor (ver
-// `paisDoPerfil`) e só cruzam a lista dele: nas outras regiões a peneira não
-// acha nenhum, e a lista vai inteira, sem a dica.
+// rodada 6, R66-4). A peneira usa os editáveis do servidor DESTA lista
+// (`editaveisLidos`, R7-6-02); sem leitura de lá, os do perfil, que são de outro
+// servidor e não cruzam com ela: a lista vai inteira, sem a dica.
 //
 // Devolve se o seletor ficou no país APLICADO (a troca que volta pra região
 // aplicada repõe a área com ele).
 function populateCountrySelect(lista = AppState.countries, regiao = API.getRegion()) {
     const select = document.getElementById('filterCountry');
     const hint = document.getElementById('filterCountryHint');
-    const editable = (AppState.profile && AppState.profile.editableCountryIDs) || [];
+    const editable = editaveisLidos(regiao) || (AppState.profile && AppState.profile.editableCountryIDs) || [];
     const todos = lista || [];
     let countries = todos;
 
@@ -5168,6 +5199,9 @@ async function loadProfileAndAuxData() {
         handleUnauthorized();
         return;
     }
+    // Os editáveis do perfil são do servidor em que ele foi PEDIDO (ver
+    // `editaveisLidos`, R7-6-02).
+    if (profileRes.success && profileRes.profile) anotarEditaveis(profileRes.profile, regiaoPedida, profileRes.profile.editableCountryIDs);
     if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
 }
 
@@ -5368,6 +5402,10 @@ async function paisDoPerfil(perfil, epoca) {
         const r = await API.getProfile(regiao);
         if (epoca !== epocaDaSessao || lugarMudou()) return null;
         const la = r && r.success && r.profile ? editaveis(r.profile.editableCountryIDs) : [];
+        // A lista que esta pergunta trouxe fica, pra peneira dos Filtros naquela
+        // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
+        // falhou não diz que a pessoa não edita lá.
+        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la);
         if (la.length) return { regiao, pais: la[0] };
     }
     return null;

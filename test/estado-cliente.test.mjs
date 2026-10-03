@@ -604,6 +604,9 @@ function montarPais({ pais = 30, regiao = 'row', perfis = {}, myArea = false } =
     // Sem pedido registrado, nada mudou desde ele (o achado 10 tem o seu
     // teste em test/filtros-aplicar.test.mjs).
     lugarDoPedidoDoPerfil: null,
+    // A lista que cada pergunta trouxe fica pra peneira dos Filtros (R7-6-02,
+    // test/filtros-aplicar); aqui se mede o país escolhido.
+    anotarEditaveis: () => {},
     API: {
       getCountry: () => pais, getRegion: () => regiao,
       getProfile: async (r) => { pedidos.push(r); return perfis[r] || { success: true, profile: { editableCountryIDs: [] } }; },
@@ -685,7 +688,10 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
   const AppState = { profile: { editableCountryIDs: [30] }, countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }] };
   // A troca de região passa pela MESMA função (R66-4, test/filtros-aplicar): ela
   // sabe a região aplicada e tira a área do país que deixou de ser mostrado.
+  // Sem editáveis LIDOS por servidor (`editaveisLidos`, R7-6-02), a peneira usa
+  // os do perfil — que é o que este teste varia.
   const { populateCountrySelect } = montar(['populateCountrySelect'], {
+    editaveisLidos: () => null,
     document: { getElementById: (id) => els[id] || null }, AppState, API: { getCountry: () => 30, getRegion: () => 'row' },
     ordenarPorNome: (l) => l, escapeHtml: (x) => String(x), aoMudarPaisNaTela: () => {},
   }, ['populateCountrySelect']);

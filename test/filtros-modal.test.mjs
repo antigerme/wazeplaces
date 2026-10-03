@@ -110,9 +110,10 @@ function montarRegiao({ resposta }) {
   // e a área volta a "Nenhuma" com o país novo (`aoMudarPaisNaTela`). A troca
   // que não carrega devolve o seletor pela carga da abertura (`popularPaisEstado`),
   // e as duas tiram número do mesmo contador (`cargaDePaises`, R56-6).
+  // A peneira lê os editáveis por servidor (`editaveisLidos`, R7-6-02).
   const nomes = ['aoTrocarRegiaoNoModal', 'populateCountrySelect', 'loadStatesIntoSelect',
-    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela', 'popularPaisEstado'];
-  const app = new Function(...chaves, 'let cargaDeEstados = 0;\nlet cargaDePaises = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\n'
+    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela', 'popularPaisEstado', 'editaveisLidos'];
+  const app = new Function(...chaves, 'let cargaDeEstados = 0;\nlet cargaDePaises = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\nconst editaveisPorServidor = new WeakMap();\n'
     + nomes.map(fatiar).join('\n') + '\nreturn { aoTrocarRegiaoNoModal };')(...chaves.map((k) => deps[k]));
   return { app, el, log, soltar: (r) => soltar(r) };
 }
