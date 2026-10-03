@@ -6585,7 +6585,24 @@ function dlogCapturar(motivo) {
                 else i++;
             }
         }
-        if (dlogMomentos.length > DLOG_MAX_MOMENTOS) dlogMomentos.shift();
+        // O ANEL CHEIO tira primeiro a captura AUTOMÁTICA mais velha, NUNCA uma
+        // que a PESSOA fez (o toque no FAB, motivo 'manual') enquanto houver
+        // automática pra tirar. Tirava a mais velha, fosse qual fosse: com o
+        // servidor fora — justamente quando se registra a tela pra relatar —,
+        // cada busca que falha deixa duas automáticas (`buscaFalhou` e
+        // `falhaAoCarregar`), e o sexto "Tentar novamente" levava as telas da
+        // pessoa do anel, da cópia guardada e do relatório, sem download e sem
+        // aviso, com o número do botão ainda contando-as (R7-4-02, MEDIDO: 2 →
+        // 0 em ~2,5 min). Com o anel só de telas da pessoa, a automática que
+        // chega é a que sai; e a tela nova da pessoa tira a mais velha dela.
+        if (dlogMomentos.length > DLOG_MAX_MOMENTOS) {
+            const automatica = dlogMomentos.findIndex((x) => x.motivo !== 'manual');
+            dlogMomentos.splice(automatica >= 0 ? automatica : 0, 1);
+        }
+        // O número do botão segue o anel a CADA captura, não só a do toque: é
+        // o que o anel tem agora que vai no próximo relatório. Sem reposicionar
+        // o botão — a captura do arraste acontece com o card no meio do gesto.
+        atualizarFabDev({ reposicionar: false });
         dlog('momento', { motivo, painel: m.painel, cardMontado: m.cardMontado,
                           alertas: (m.alertas || []).map((a) => a.chave) });
         // A captura vai pro aparelho NA HORA: é ela que prova o defeito, e o
@@ -6720,8 +6737,9 @@ const DIAG_STORE = 'aberturas';
 const DIAG_GUARDA_MS = 24 * 60 * 60 * 1000;
 const DIAG_ABERTURAS_MAX = 5;
 // O mesmo teto do anel desta abertura (`DLOG_MAX_MOMENTOS`), somado entre TODAS
-// as aberturas guardadas — é ele que segura o armazenamento em ~1,8 MB, e as
-// capturas mais recentes ganham das mais velhas.
+// as aberturas guardadas — é ele que segura o armazenamento em ~1,8 MB. As da
+// pessoa ganham das automáticas, e entre iguais as mais NOVAS ganham (pela hora
+// da captura, ver `diagPodarAberturas`).
 const DIAG_CAPTURAS_GUARDADAS_MAX = DLOG_MAX_MOMENTOS;
 // Esta abertura: o id nasce com a página e morre com ela.
 const DIAG_ABERTURA = { id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
@@ -6811,28 +6829,45 @@ function diagRegistroDaAbertura(motivo) {
 }
 
 // A PODA, pura. O que passou de 24 h sai inteiro; das que ficam, só as
-// DIAG_ABERTURAS_MAX mais recentes; e as capturas, somadas, não passam do teto —
-// a abertura mais nova primeiro, e dentro de cada uma as capturas mais novas.
+// DIAG_ABERTURAS_MAX de atividade mais RECENTE (a última gravação, `salvoEm`);
+// e as capturas, somadas, não passam do teto — as da PESSOA antes das
+// automáticas (a mesma regra do anel, ver `dlogCapturar`), e entre iguais as
+// mais NOVAS pela hora da CAPTURA (`m.t`). A ordem era a da ABERTURA
+// (`inicio`), que com duas abas não diz nada da hora das capturas: a aba aberta
+// por último ficava com as dela e cortava as da outra, mesmo sendo as da outra
+// as mais novas, e a aba mais velha gravava a própria abertura já sem as
+// capturas dela (R7-4-03, MEDIDO: na base A 0 · B 12, com o botão de A
+// mostrando "2"; A recarregada, as 2 tinham sumido sem ir em arquivo nenhum).
+// Pela última gravação, a abertura que está gravando agora nunca é a que sai.
 // Devolve o que manter (com as capturas já cortadas), os ids que saem e os ids
 // cortados (que precisam ser regravados).
 function diagPodarAberturas(lista, agora) {
     const todas = (Array.isArray(lista) ? lista : []).filter((a) => a && typeof a.id === 'string');
     const vivas = todas
         .filter((a) => Number.isFinite(a.salvoEm) && agora - a.salvoEm <= DIAG_GUARDA_MS)
-        .sort((a, b) => (b.inicio || 0) - (a.inicio || 0))
+        .sort((a, b) => b.salvoEm - a.salvoEm)
         .slice(0, DIAG_ABERTURAS_MAX);
-    let cabem = DIAG_CAPTURAS_GUARDADAS_MAX;
+    // Cada captura com a hora dela (o `toISOString` da captura); sem hora
+    // legível, a da gravação da abertura (a captura é de antes dela), e o empate
+    // fica com a de depois no anel. Só a forma ISO: o `Date.parse` do V8 aceita
+    // quase qualquer texto ("x:11" vira uma data de 2001).
+    const capturas = vivas.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []).map((m, i) => {
+        const t = !m ? NaN : typeof m.t === 'number' ? m.t
+            : (typeof m.t === 'string' && /^\d{4}-\d\d-\d\dT/.test(m.t) ? Date.parse(m.t) : NaN);
+        return { m, i, daPessoa: !!(m && m.motivo === 'manual'), t: Number.isFinite(t) ? t : a.salvoEm };
+    }));
+    capturas.sort((x, y) => (y.daPessoa - x.daPessoa) || (y.t - x.t) || (y.i - x.i));
+    const ficam = new Set(capturas.slice(0, DIAG_CAPTURAS_GUARDADAS_MAX).map((c) => c.m));
     const cortadas = [];
     const manter = vivas.map((a) => {
         const ms = Array.isArray(a.momentos) ? a.momentos : [];
-        const ficam = cabem > 0 ? ms.slice(-cabem) : [];
-        cabem -= ficam.length;
-        if (ficam.length === ms.length) return a;
+        const daqui = ms.filter((m) => ficam.has(m));
+        if (daqui.length === ms.length) return a;
         cortadas.push(a.id);
-        return { ...a, momentos: ficam };
+        return { ...a, momentos: daqui };
     });
-    const ficam = new Set(manter.map((a) => a.id));
-    return { manter, sair: todas.filter((a) => !ficam.has(a.id)).map((a) => a.id), cortadas };
+    const mantidas = new Set(manter.map((a) => a.id));
+    return { manter, sair: todas.filter((a) => !mantidas.has(a.id)).map((a) => a.id), cortadas };
 }
 
 async function diagAplicarPoda(db, poda, novos) {
@@ -7433,7 +7468,9 @@ function posicionarFabDev() {
     fab.dataset.canto = melhor;
 }
 
-function atualizarFabDev() {
+// `reposicionar: false` só acerta o número (a captura no meio de um arraste não
+// pode mudar o botão de canto debaixo do gesto).
+function atualizarFabDev({ reposicionar = true } = {}) {
     const fab = document.getElementById('devFab');
     if (!fab) return;
     const ligado = typeof AppState !== 'undefined' && !!(AppState.devMode && AppState.devMode.active);
@@ -7447,7 +7484,7 @@ function atualizarFabDev() {
         selo.textContent = String(n);
         selo.classList.toggle('hidden', n === 0);
     }
-    if (ligado) posicionarFabDev();
+    if (ligado && reposicionar) posicionarFabDev();
 }
 
 function ligarFabDev() {

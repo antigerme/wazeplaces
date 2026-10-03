@@ -729,15 +729,15 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
     'a cota do arraste sumiu: ele é o gesto CENTRAL do app e, a uma captura por 30s, '
     + 'toma as 12 vagas do anel em ~6 minutos — empurrando pra fora o momento do erro '
     + 'de JS e o da queda de sessão, que são os que se quer ler');
-  const cap = semLinhaComentada(APP.slice(APP.indexOf('function dlogCapturar(')));
-  // A poda tem que acontecer ANTES do corte do anel: se rodar depois, o
-  // `shift()` já tirou o mais antigo de OUTRO motivo, que é o dano que a cota
-  // existe pra evitar.
+  const cap = fatiarFn(semLinhaComentada(APP), 'dlogCapturar');
+  // A poda tem que acontecer ANTES do corte do anel: se rodar depois, o corte
+  // já tirou o mais antigo de OUTRO motivo, que é o dano que a cota existe pra
+  // evitar.
   const iCota = cap.indexOf('DLOG_COTA_POR_MOTIVO[motivo]');
-  const iShift = cap.indexOf('dlogMomentos.shift()');
-  assert.ok(iCota > 0 && iShift > 0, 'não achei as âncoras da poda');
-  assert.ok(iCota < iShift,
-    'a cota passou pra depois do corte do anel — aí o `shift()` já removeu o momento '
+  const iCorte = cap.indexOf('if (dlogMomentos.length > DLOG_MAX_MOMENTOS)');
+  assert.ok(iCota > 0 && iCorte > 0, 'não achei as âncoras da poda');
+  assert.ok(iCota < iCorte,
+    'a cota passou pra depois do corte do anel — aí o corte já removeu o momento '
     + 'de outro motivo e a cota não protege mais nada');
   // E ela poda o PRÓPRIO motivo, nunca varre o anel inteiro.
   assert.match(cap, /dlogMomentos\[i\]\.motivo === motivo/,
@@ -748,6 +748,72 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
   // +47 KB no ZIP que o editor manda.
   assert.ok(/DLOG_MAX_MOMENTOS = 12/.test(app),
     'o teto do anel mudou — os números da cota foram medidos contra 12 vagas');
+});
+
+// ── R7-4-02: as capturas AUTOMÁTICAS não empurram as da PESSOA pra fora ─────
+// O anel cheio descartava o mais velho, fosse qual fosse: com o servidor fora
+// (quando se registra a tela pra relatar), cada busca que falha deixa duas
+// automáticas, e o 6º "Tentar novamente" levava as telas do toque do anel, da
+// cópia guardada e do relatório — com o número do botão ainda contando-as
+// (MEDIDO no navegador: 2 → 0 na 6ª tentativa, ~2,5 min). Aqui o `dlogCapturar`
+// RODA, com o resto do app de mentira.
+function anelDeCapturas() {
+  const selos = [];
+  const deps = {
+    diagRedeAgora: () => ({}), diagOfflineAgora: () => ({}), dlogTelaAtual: () => ({ painel: 'card' }),
+    diagNoInstante: () => ({ alertas: [] }), document: { querySelectorAll: () => [], images: [] },
+    diagSemSegredoDePareamento: (s) => s, AppState: { queue: [] }, diagSeguro: (x) => x, dlogPlace: () => null,
+    domParaDiagnostico: () => '', DLOG_COTA_POR_MOTIVO: { 'auto:arraste': 2 },
+    DLOG_MAX_MOMENTOS: Number(/^const DLOG_MAX_MOMENTOS = (\d+);/m.exec(APP)[1]),
+    dlog: () => {}, diagGuardarAbertura: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'selos', `let dlogMomentos = [];
+    function atualizarFabDev(o) { selos.push([o, dlogMomentos.filter((m) => m.motivo === 'manual').length]); }
+    ${fatiarFn(semLinhaComentada(APP), 'dlogCapturar')}
+    return { capturar: dlogCapturar, anel: () => dlogMomentos };`)(...chaves.map((k) => deps[k]), selos);
+  return { ...app, selos, max: deps.DLOG_MAX_MOMENTOS };
+}
+
+test('R7-4-02: o anel cheio tira a captura AUTOMÁTICA mais velha — nunca a que a pessoa fez', () => {
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  a.capturar('manual');
+  // Cada automática com o seu nome, pra se saber QUAL saiu.
+  for (let i = 0; i < a.max; i++) a.capturar('auto:falha' + i);
+  const motivos = a.anel().map((m) => m.motivo);
+  assert.equal(motivos.length, a.max, 'o anel passou do teto');
+  assert.equal(motivos.filter((m) => m === 'manual').length, 2, 'as telas que a PESSOA registrou saíram do anel pelas automáticas');
+  assert.deepEqual(motivos.slice(0, 2), ['manual', 'manual'], 'as telas da pessoa mudaram de lugar no anel');
+  // Das automáticas saíram as mais VELHAS (a 0 e a 1): ficam as 10 últimas, na ordem.
+  assert.deepEqual(motivos.slice(2), Array.from({ length: a.max - 2 }, (_, i) => 'auto:falha' + (i + 2)),
+    'das automáticas não saíram as mais VELHAS');
+});
+
+test('R7-4-02: o anel só de telas da pessoa — a automática que chega é a que sai; a tela nova tira a mais velha da pessoa', () => {
+  const a = anelDeCapturas();
+  for (let i = 0; i < a.max; i++) a.capturar('manual');
+  const antes = [...a.anel()];
+  a.capturar('auto:erroDeJs');
+  assert.deepEqual(a.anel(), antes, 'uma automática tomou o lugar de uma tela da pessoa');
+  a.capturar('manual');
+  assert.equal(a.anel().length, a.max);
+  assert.equal(a.anel()[0], antes[1], 'a tela nova da pessoa não tirou a mais VELHA dela');
+  assert.ok(a.anel().every((m) => m.motivo === 'manual'));
+});
+
+test('R7-4-02: o número do botão é refeito a CADA captura — sem reposicionar o botão no meio do gesto', () => {
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  a.capturar('auto:arraste');
+  assert.equal(a.selos.length, 2, 'uma captura não refez o número do botão');
+  assert.deepEqual(a.selos.map(([o]) => o), [{ reposicionar: false }, { reposicionar: false }],
+    'a captura reposicionou o botão (a do arraste acontece com o card no meio do gesto)');
+  assert.deepEqual(a.selos.map(([, n]) => n), [1, 1], 'o número foi refeito ANTES de a captura entrar (e sair) do anel');
+  // E o `atualizarFabDev` sabe não reposicionar.
+  const f = fatiarFn(semLinhaComentada(APP), 'atualizarFabDev');
+  assert.match(f, /^function atualizarFabDev\(\{ reposicionar = true \} = \{\}\)/);
+  assert.match(f, /if \(ligado && reposicionar\) posicionarFabDev\(\);/, 'o `reposicionar: false` não é respeitado');
 });
 
 // ── O que o relato de 2026-09-22 mostrou que faltava ──────────────────────

@@ -95,6 +95,68 @@ test('as capturas SOMADAS não passam do teto — a abertura mais nova e as capt
   assert.equal(total, teto);
 });
 
+// ── R7-4-03: com DUAS ABAS, a poda vai pela hora da CAPTURA ────────────────
+// A ordem era a da ABERTURA (`inicio`): a aba aberta por último guardava as dela
+// e cortava as da outra, mesmo sendo as da outra as mais novas — e a aba mais
+// velha gravava a própria abertura já sem as capturas dela. MEDIDO no navegador
+// (x4 da auditoria): A abre, B abre depois, B registra 12 telas e A registra 2,
+// as MAIS NOVAS de todas — na base, A 0 · B 12, com o botão de A mostrando "2".
+const iso = (horasAtras) => new Date(AGORA - horasAtras * HORA).toISOString();
+const telas = (id, horas, motivo = 'manual') => horas.map((h, i) => ({ t: iso(h), motivo, n: id + i }));
+test('R7-4-03: duas abas — as capturas mais NOVAS ficam, seja qual for a aba aberta por último', () => {
+  const teto = DIAG.DIAG_CAPTURAS_GUARDADAS_MAX;
+  // A abriu ANTES (inicio 3 h atrás) e fez as 2 telas mais novas; B abriu depois e fez 12, mais velhas.
+  const horasB = Array.from({ length: teto }, (_, i) => 2 - i * 0.05);
+  const A = { id: 'A', inicio: AGORA - 3 * HORA, salvoEm: AGORA - 0.01 * HORA, momentos: telas('A', [0.3, 0.2]) };
+  const B = { id: 'B', inicio: AGORA - 2.5 * HORA, salvoEm: AGORA - 0.5 * HORA, momentos: telas('B', horasB) };
+  for (const ordem of [[A, B], [B, A]]) {
+    const r = podar(ordem, AGORA);
+    const de = (id) => r.manter.find((a) => a.id === id).momentos;
+    assert.equal(de('A').length, 2, 'as 2 telas mais NOVAS (as da aba aberta antes) foram cortadas');
+    assert.equal(de('B').length, teto - 2, 'a aba aberta depois ficou com mais que o teto deixa');
+    assert.deepEqual(de('B').map((m) => m.n), B.momentos.slice(-(teto - 2)).map((m) => m.n),
+      'da aba B saíram as capturas erradas (têm que sair as mais VELHAS dela)');
+    assert.deepEqual(de('B').map((m) => m.t), [...de('B').map((m) => m.t)].sort(),
+      'as capturas que ficam têm que seguir na ORDEM do anel');
+    assert.deepEqual(r.cortadas, ['B']);
+  }
+  // CONTROLE: com as de A mais VELHAS que as 12 de B, ficam as 12 de B — é a regra.
+  const Avelha = { ...A, momentos: telas('A', [2.9, 2.8]) };
+  const c = podar([Avelha, B], AGORA);
+  assert.equal(c.manter.find((a) => a.id === 'A').momentos.length, 0);
+  assert.equal(c.manter.find((a) => a.id === 'B').momentos.length, teto);
+});
+
+test('R7-4-03: a abertura que está GRAVANDO agora nunca é a que sai — vale a última gravação, não a hora de abrir', () => {
+  const max = DIAG.DIAG_ABERTURAS_MAX;
+  // A mais velha de abrir é a que grava AGORA (a aba aberta há horas); as outras abriram depois e fecharam.
+  const atual = { id: 'atual', inicio: AGORA - 10 * HORA, salvoEm: AGORA, momentos: telas('atual', [0.01]) };
+  const outras = Array.from({ length: max }, (_, i) => ({ id: 'o' + i, inicio: AGORA - (9 - i) * HORA, salvoEm: AGORA - (8.5 - i) * HORA, momentos: [] }));
+  const r = podar([atual, ...outras], AGORA);
+  assert.ok(r.manter.some((a) => a.id === 'atual'), 'a gravação da abertura de agora apagou a ela mesma (era a mais velha de abrir)');
+  assert.ok(!r.sair.includes('atual'));
+  assert.equal(r.manter.length, max);
+  assert.deepEqual(r.sair, ['o0'], 'saiu a de atividade mais VELHA');
+});
+
+// R7-4-02 na cópia guardada: o teto vale com as telas da PESSOA na frente das
+// automáticas (a mesma regra do anel), senão as automáticas de uma busca que
+// falha empurravam pra fora do aparelho as telas que a pessoa registrou.
+test('R7-4-02: na poda, as telas da PESSOA ficam na frente das automáticas, mesmo as mais velhas', () => {
+  const teto = DIAG.DIAG_CAPTURAS_GUARDADAS_MAX;
+  const atual = { id: 'atual', inicio: AGORA - HORA, salvoEm: AGORA,
+    momentos: telas('auto', Array.from({ length: teto }, (_, i) => 0.5 - i * 0.01), 'auto:buscaFalhou') };
+  const antes = { id: 'antes', inicio: AGORA - 3 * HORA, salvoEm: AGORA - 2 * HORA, momentos: telas('man', [2.5, 2.4]) };
+  const r = podar([atual, antes], AGORA);
+  assert.equal(r.manter.find((a) => a.id === 'antes').momentos.length, 2, 'as telas da pessoa saíram do aparelho pelas automáticas');
+  assert.equal(r.manter.find((a) => a.id === 'atual').momentos.length, teto - 2);
+  assert.deepEqual(r.manter.find((a) => a.id === 'atual').momentos.map((m) => m.n),
+    atual.momentos.slice(2).map((m) => m.n), 'das automáticas, saíram as que não eram as mais VELHAS');
+  // CONTROLE: só automáticas — as mais novas ficam, como sempre.
+  const so = podar([atual, { ...antes, momentos: telas('a2', [2.5, 2.4], 'auto:erroDeJs') }], AGORA);
+  assert.equal(so.manter.find((a) => a.id === 'antes').momentos.length, 0);
+});
+
 test('a poda não inventa: registro sem id é ignorado, e sem nada a cortar nada muda', () => {
   const a = ab('ok', 1, 1, 2);
   const r = podar([a, { semId: true }, null], AGORA);
