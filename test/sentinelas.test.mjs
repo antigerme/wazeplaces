@@ -392,20 +392,102 @@ test('sentinelas: fila de saída cheia com a fila de pedidos limpa é o normal �
 });
 
 test('diagnóstico: a sentinela do pedido decidido lê o que o COLETOR mede (fila de saída × fila de pedidos)', () => {
+  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const i = APP.indexOf('function diagComputado(');
-  const corpo = APP.slice(i, APP.indexOf('\n}', i)).split('\n')
-    .filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const corpo = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
+  // O coletor cruza a fila de saída do APARELHO com a fila de pedidos DESTA aba,
+  // e conhece o que a outra aba decidiu com o card já aqui (R7-4-05).
+  assert.match(corpo, /fora\.decididos = diagDecididos\(carregarFilaDeSaida\(\), AppState\.queue, decididosPorOutraAbaComCardAqui\);/,
+    'o coletor tem que cruzar a fila de saída com a fila de PEDIDOS, sabendo o que a outra aba decidiu');
   // A MESMA chave dos dois lados, pela fonte única — é ela que o filtro usa.
-  assert.match(corpo, /const naSaida = new Set\(carregarFilaDeSaida\(\)\.map\(chaveDoPedido\)\.filter\(Boolean\)\);/,
+  const j = APP.indexOf('function diagDecididos(');
+  const dd = semComentario(APP.slice(j, APP.indexOf('\n}', j)));
+  assert.match(dd, /const naSaida = new Set\(\(Array\.isArray\(saida\) \? saida : \[\]\)\.map\(chaveDoPedido\)\.filter\(Boolean\)\);/,
     'o coletor tem que ler a fila de saída pela `chaveDoPedido`, a mesma do filtro');
-  assert.match(corpo, /naFila: \(AppState\.queue \|\| \[\]\)\.filter\(\(p\) => naSaida\.has\(chaveDoPedido\(p\)\)\)\.length,/,
-    'o coletor tem que cruzar com a fila de PEDIDOS');
+  assert.match(dd, /\.filter\(\(p\) => naSaida\.has\(chaveDoPedido\(p\)\)\)/, 'o coletor tem que cruzar com a fila de PEDIDOS pela mesma chave');
   // Só números: a chave é id de pedido de terceiro.
-  assert.ok(!/decididos = \{[^}]*chaves/.test(corpo), 'o coletor passou a levar as CHAVES — só a contagem vai');
+  assert.ok(!/chaves/.test(dd), 'o coletor passou a levar as CHAVES — só a contagem vai');
   // O NOME que o coletor grava é o que a sentinela lê. Sem esta amarra, renomear
   // um dos lados deixava os dois testes verdes e a sentinela muda pra sempre —
   // foi a sabotagem que sobreviveu na primeira rodada.
-  assert.match(corpo, /fora\.decididos = \{/, 'o coletor parou de gravar `decididos`');
   const s = APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas(')));
   assert.match(s, /const dc = comp\.decididos;/, 'a sentinela parou de ler `comp.decididos`');
+});
+
+// ── R7-4-05: com DUAS ABAS, o pedido que a OUTRA decidiu não é "voltou como card" ──
+// A fila de saída é do APARELHO e a fila de pedidos é de cada ABA: o pedido que
+// a aba A decide (sem sinal, esperando envio) segue como card na B, que o
+// carregou ANTES — nenhum caminho de entrada falhou, e a captura da B acusava
+// "pedido que já está esperando envio voltou como card" (MEDIDO no navegador,
+// x5 da auditoria). O aviso `storage` da outra aba diz o que APARECEU na fila de
+// saída; o que já estava lá quando o pedido ENTROU na fila desta segue contando.
+function decididos() {
+  const pega = (nome) => {
+    const i = APP.indexOf('function ' + nome + '(');
+    assert.ok(i > 0, `${nome} sumiu do app.js`);
+    return APP.slice(i, APP.indexOf('\n}', i) + 2);
+  };
+  const decl = /^const decididosPorOutraAbaComCardAqui = new WeakSet\(\);$/m.exec(APP);
+  assert.ok(decl, 'o conjunto do que a outra aba decidiu sumiu (ou deixou de ser por OBJETO)');
+  const AppState = { queue: [] };
+  const app = new Function('AppState', `${decl[0]}
+    ${['chaveDoPedido', 'diagDecididos', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
+    return { anotar: anotarDecididosPorOutraAba, contar: (saida) => diagDecididos(saida, AppState.queue, decididosPorOutraAbaComCardAqui) };`)(AppState);
+  return { ...app, AppState };
+}
+const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i });
+const item = (i) => ({ tipo: 'reject', venueID: 'v' + i, updateRequestID: 'u' + i });
+const aviso = (antes, depois) => ({ key: 'waze_places_saida', oldValue: antes ? JSON.stringify(antes) : null, newValue: depois ? JSON.stringify(depois) : null });
+
+test('R7-4-05: a OUTRA aba decide o pedido que esta já tinha na fila — não conta como "voltou como card"', () => {
+  const b = decididos();
+  b.AppState.queue = [pedido(1), pedido(2), pedido(3)];      // a aba B já tem a fila
+  b.anotar(aviso([], [item(1)]));                              // a aba A decide o 1º, sem sinal
+  assert.deepEqual(b.contar([item(1)]), { naSaida: 1, naFila: 0, porOutraAba: 1 },
+    'a decisão da outra aba, com o card já aqui, virou "pedido decidido de volta na fila"');
+  // CONTROLE: sem o aviso da outra aba, é o defeito que a sentinela existe pra pegar.
+  const c = decididos();
+  c.AppState.queue = [pedido(1), pedido(2)];
+  assert.deepEqual(c.contar([item(1)]), { naSaida: 1, naFila: 1 }, 'CONTROLE: o pedido decidido na fila deixou de contar');
+});
+
+test('R7-4-05: o pedido que ENTRA na fila desta com a decisão JÁ na fila de saída segue contando — é a falha da entrada', () => {
+  // A decisão chegou ANTES (a outra aba, ou uma abertura de antes): o aviso veio
+  // com o pedido fora desta fila — e a busca (ou a fila guardada) o trouxe depois.
+  const b = decididos();
+  b.AppState.queue = [pedido(2)];
+  b.anotar(aviso([], [item(1)]));
+  b.AppState.queue = [pedido(2), pedido(1)];                   // o caminho de entrada falhou
+  assert.equal(b.contar([item(1)]).naFila, 1, 'o pedido decidido que ENTROU depois deixou de ser acusado');
+  // E o que já estava na fila de saída ANTES do aviso não vira "da outra aba".
+  const r = decididos();
+  r.AppState.queue = [pedido(1), pedido(5)];
+  r.anotar(aviso([item(1)], [item(1), item(9)]));              // a outra aba mexeu na fila (o 9), o 1 já estava
+  assert.equal(r.contar([item(1), item(9)]).naFila, 1, 'o que já estava na fila de saída foi tirado da conta por um aviso de outra decisão');
+});
+
+test('R7-4-05: o pedido que SAI e ENTRA de novo nesta fila volta a contar (é outro objeto)', () => {
+  const b = decididos();
+  const p1 = pedido(1);
+  b.AppState.queue = [p1];
+  b.anotar(aviso([], [item(1)]));
+  assert.equal(b.contar([item(1)]).naFila, 0);
+  b.AppState.queue = [pedido(1)];                              // a fila refeita trouxe o 1 de novo
+  assert.equal(b.contar([item(1)]).naFila, 1, 'o pedido que entrou DE NOVO ficou marcado como da outra aba');
+  // Aviso ilegível e o "Sair" (valor nulo) não quebram nem marcam nada.
+  b.anotar({ key: 'waze_places_saida', oldValue: '{', newValue: '[' });
+  b.anotar(aviso([item(1)], null));
+  assert.equal(b.contar([item(1)]).naFila, 1);
+});
+
+test('R7-4-05: o aviso da outra aba é ouvido, e o diário do repetido diz que foi ela', () => {
+  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = APP.indexOf('function setupGuardaDoDiagnostico(');
+  const setup = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
+  assert.match(setup, /window\.addEventListener\('storage', \(ev\) => \{ if \(ev\.key === SAIDA_KEY\) anotarDecididosPorOutraAba\(ev\); \}\);/,
+    'ninguém ouve a outra aba gravando a fila de saída');
+  const j = APP.indexOf('function enfileirarSaida(');
+  const enf = semComentario(APP.slice(j, APP.indexOf('\n}', j)));
+  assert.match(enf, /dfato\('saida\.repetida', \{ tipo, \.\.\.\(daOutraAba \? \{ outraAba: true \} : \{\}\) \}\);/,
+    'o "repetida" do diário voltou a soar como caminho furado quando foi a outra aba que decidiu');
 });

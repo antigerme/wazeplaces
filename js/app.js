@@ -5984,15 +5984,52 @@ function diagComputado() {
         // defeito do relato de 2026-09-22 (ver `semOsJaDecididos` e a sentinela
         // `pedidoDecididoNaFila`). Vai só a CONTAGEM — a chave é id de pedido
         // de terceiro, e o conteúdo da fila de saída já está no localStorage.
-        const naSaida = new Set(carregarFilaDeSaida().map(chaveDoPedido).filter(Boolean));
-        fora.decididos = {
-            naSaida: naSaida.size,
-            naFila: (AppState.queue || []).filter((p) => naSaida.has(chaveDoPedido(p))).length,
-        };
+        fora.decididos = diagDecididos(carregarFilaDeSaida(), AppState.queue, decididosPorOutraAbaComCardAqui);
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
     }
     return fora;
+}
+
+// PURA. A fila de saída × a fila de pedidos DESTA aba, pela MESMA chave do
+// filtro de entrada (`chaveDoPedido`), e só em números. O pedido que a OUTRA
+// aba decidiu com o card já aqui (`daOutraAba`, ver `anotarDecididosPorOutraAba`)
+// não é o que a sentinela procura — nenhum caminho de entrada falhou — e vai à
+// parte (`porOutraAba`), sem contar em `naFila` (R7-4-05).
+function diagDecididos(saida, fila, daOutraAba) {
+    const naSaida = new Set((Array.isArray(saida) ? saida : []).map(chaveDoPedido).filter(Boolean));
+    const voltaram = (Array.isArray(fila) ? fila : []).filter((p) => naSaida.has(chaveDoPedido(p)));
+    const porOutraAba = daOutraAba ? voltaram.filter((p) => p && typeof p === 'object' && daOutraAba.has(p)).length : 0;
+    return { naSaida: naSaida.size, naFila: voltaram.length - porOutraAba, ...(porOutraAba ? { porOutraAba } : {}) };
+}
+
+// O pedido que a OUTRA ABA decidiu com o card JÁ na fila desta. A fila de saída
+// é do APARELHO e a de pedidos é de cada aba: a decisão de lá (sem sinal,
+// esperando envio) não tira o card daqui, que entrou ANTES — e nenhum caminho de
+// entrada falhou. A sentinela `pedidoDecididoNaFila` e o `saida.repetida` do
+// diário diziam "voltou como card" nesse caso, mandando quem lê atrás de um
+// filtro furado que não existe (R7-4-05, MEDIDO: as duas abas com a mesma fila,
+// a A decide sem sinal e a captura da B acusa). O navegador avisa esta aba
+// quando a outra grava a fila de saída (evento `storage`, com o valor de antes e
+// o de depois): o pedido que APARECEU nela com o card ainda aqui é da outra aba.
+// Pelo OBJETO do pedido na fila (`WeakSet`), não pela chave: o pedido que sai e
+// ENTRA de novo — pela busca, pela fila guardada — é outro objeto e volta a
+// contar, porque é nessa entrada que mora a falha que a sentinela procura. E o
+// que já estava na fila de saída quando o pedido entrou aqui não é marcado
+// nunca. Só em memória, e o que sai da fila some daqui junto.
+const decididosPorOutraAbaComCardAqui = new WeakSet();
+function anotarDecididosPorOutraAba(ev) {
+    let antes, depois;
+    try {
+        antes = JSON.parse((ev && ev.oldValue) || '[]');
+        depois = JSON.parse((ev && ev.newValue) || '[]');
+    } catch (e) { return; }
+    const tinha = new Set((Array.isArray(antes) ? antes : []).map(chaveDoPedido).filter(Boolean));
+    const novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
+    if (!novas.size) return;
+    for (const p of (AppState.queue || [])) {
+        if (p && typeof p === 'object' && novas.has(chaveDoPedido(p))) decididosPorOutraAbaComCardAqui.add(p);
+    }
 }
 
 // `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
@@ -7321,6 +7358,11 @@ function setupGuardaDoDiagnostico() {
     });
     // O retrato SÍNCRONO primeiro: é o que chega ao fim quando a página morre.
     window.addEventListener('pagehide', () => { diagRetratoAoSair(); diagGuardarAbertura('saida'); });
+    // A decisão que a OUTRA aba põe na fila de saída com o card ainda nesta: só
+    // ANOTA, pra sentinela `pedidoDecididoNaFila` não chamá-la de falha de
+    // entrada (ver `anotarDecididosPorOutraAba`). Roda com ou sem o modo dev: o
+    // relatório pode ser baixado depois de ligá-lo, e anotar não grava nada.
+    window.addEventListener('storage', (ev) => { if (ev.key === SAIDA_KEY) anotarDecididosPorOutraAba(ev); });
 }
 
 // ── O FAB ─────────────────────────────────────────────────────────────────
@@ -16864,10 +16906,13 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
     // entrada (`semOsJaDecididos`) um pedido que está aqui não volta a ser card,
     // então isto não deveria acontecer: se acontecer, é um caminho novo que
     // escapou do filtro, e o diário diz. Vale a PRIMEIRA decisão, e quem chama
-    // desfaz a contagem do gesto repetido.
+    // desfaz a contagem do gesto repetido. Com DUAS ABAS acontece sem caminho
+    // nenhum escapar — a outra decidiu o pedido com o card já aqui —, e o diário
+    // diz isso também (`outraAba`, ver `anotarDecididosPorOutraAba`).
     const chave = chaveDoPedido(place);
     if (chave && f.some((it) => chaveDoPedido(it) === chave)) {
-        dfato('saida.repetida', { tipo });
+        const daOutraAba = typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(place);
+        dfato('saida.repetida', { tipo, ...(daOutraAba ? { outraAba: true } : {}) });
         return 'repetida';
     }
     if (f.length >= SAIDA_MAX) return false;
