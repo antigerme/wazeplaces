@@ -6739,15 +6739,49 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       regiao: document.getElementById('filterRegion').value,
       pais: document.getElementById('filterCountry').value,
       opcoes: [...document.getElementById('filterCountry').options].map((o) => o.value).join(','),
+      dica: !document.getElementById('filterCountryHint').classList.contains('hidden'),
       aplicarMorto: document.getElementById('applyFilters').disabled,
     }));
     const naTela = `${tela.regiao}/${tela.pais} com os países ${tela.opcoes}`;
     checa(tela.regiao === 'na' && tela.pais === '235', `${onde} (11, região, ${caso}): o perfil levou pra NA/EUA e a tela ficou em ${naTela}`);
     checa(!tela.opcoes.split(',').includes('30'), `${onde} (11, região, ${caso}): a lista da ROW ficou na tela da NA`, tela.opcoes);
+    // R7-6-02: a lista do NA que o perfil leu fica pra peneira — a mesma da
+    // reabertura (só os EUA, com a dica); sem isso, o Canadá era opção.
+    checa(tela.opcoes === '235' && tela.dica, `${onde} (11, região, ${caso}): a 1ª sessão de quem só edita na NA mostra a lista do NA sem a peneira (R7-6-02)`,
+      `${tela.opcoes} · dica ${tela.dica}`);
     checa(!tela.aplicarMorto, `${onde} (11, região, ${caso}): o "Aplicar" ficou morto`);
     const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
     checa(gravado === 'na/235', `${onde} (11, região, ${caso}): o "Aplicar" gravou ${gravado} (a fila de quem só edita na NA)`, gravado);
     checa(m.erros.length === 0, `${onde} (11, região): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // R7-6-01. O perfil chega com os Filtros abertos pelo atalho SEM mudar o
+  //     lugar (a pessoa já está onde edita): a lista que estava na tela — todos
+  //     os países, sem a dica — passa pela peneira dele. Sem isso, dava pra
+  //     escolher e aplicar um país que ela não edita DEPOIS de o perfil chegar
+  //     (fila vazia). PRÉ-CONDIÇÃO: antes do perfil a lista é a inteira (o
+  //     instrumento enxerga a diferença).
+  {
+    const m = await montar({ editaveis: [30], segurar: true });
+    await pelosFiltros(m);
+    m.soltar('lista-paises');
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
+      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    const ler = () => m.page.evaluate(() => ({
+      opcoes: [...document.getElementById('filterCountry').options].map((o) => o.value).join(','),
+      pais: document.getElementById('filterCountry').value,
+      dica: !document.getElementById('filterCountryHint').classList.contains('hidden'),
+    }));
+    const antes = await ler();
+    checa(antes.opcoes === '30,73,181' && !antes.dica, `${onde} (R7-6-01): PRÉ-CONDIÇÃO — antes do perfil a lista não era a inteira`, JSON.stringify(antes));
+    m.soltar('perfil');
+    const lugar = await fimDaCarga(m);
+    checa(lugar === 'row/30', `${onde} (R7-6-01): PRÉ-CONDIÇÃO — o perfil mudou o lugar`, lugar);
+    const depois = await ler();
+    checa(depois.opcoes === '30' && depois.pais === '30' && depois.dica,
+      `${onde} (R7-6-01): o perfil chegou com os Filtros abertos e a lista seguiu sem a peneira`, JSON.stringify(depois));
+    checa(m.erros.length === 0, `${onde} (R7-6-01): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
 }
