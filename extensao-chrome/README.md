@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.1
+# Waze Places Rapid Access — proposta de v0.3.2
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -240,5 +240,39 @@ do app (R66-1, R66-2 e R6-1-10), sem mudança de protocolo nem de permissão:
 | atual | 0.2.0 | funciona como antes: o painel trava o L2+AM e o staff sem AM, e o botão entra com a sessão guardada, sem a conta |
 | atual | 0.3.1 | o painel deixa entrar quem o app deixa, e o botão entra pela ponte, com a conta |
 | anterior | 0.3.1 | funciona — o app de antes também pergunta à ponte quando abre sem sessão |
+
+Permissões: **as mesmas** da 0.2.0.
+
+---
+
+## v0.3.2 — o ACESSAR trava enquanto loga
+
+Achado na auditoria da rodada 7 do app (R7-1-06), sem mudança de protocolo nem de permissão:
+
+1. **O ACESSAR fica travado enquanto o login acontece, e volta em qualquer desfecho.** Cada toque é
+   um `abrirPlaces` — uma ida ao `/Session` do Waze no nome da pessoa, uma sessão nova no servidor e
+   uma aba nova do app —, e o botão só trocava o texto pra "LOGANDO...": o toque duplo abria duas
+   abas, com duas sessões da mesma conta. Ele volta quando a resposta chega (deu certo ou não),
+   quando a extensão não responde (`lastError`), quando o `sendMessage` lança (a extensão se
+   atualizou com o WME aberto) e num teto de 45 s (`ESPERA_DO_BOTAO_MS`) pra resposta que nunca
+   chega: com o servidor pendurado, o Chrome não derruba o service worker, e o botão ficava em
+   "LOGANDO..." pra sempre, sem aviso. Nesses três últimos casos sai o aviso de que a extensão não
+   respondeu, que manda recarregar a página. Medido com esta extensão carregada num Chromium e um
+   servidor de mentira:
+
+   ```
+   0.3.1, 2 toques (servidor responde em 0,8 s):  2 sessões criadas, 2 abas abertas  (1 toque: 1 e 1)
+   0.3.2, 2 ou 3 toques:                           1 sessão criada,  1 aba aberta
+   0.3.1, servidor pendurado, 70 s depois:          "LOGANDO...", nenhum aviso
+   0.3.2, servidor pendurado, 47 s depois:          "Acessar o Waze Places" e o aviso
+   ```
+
+**Precisa ser publicada** pra valer. Se a 0.3.1 ainda não tiver sido publicada, a 0.3.2 a leva junto.
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.3.1 | funciona como antes: o toque duplo no ACESSAR abre duas abas |
+| atual | 0.3.2 | o toque duplo abre uma aba só, e o botão não fica parado em "LOGANDO..." |
+| anterior | 0.3.2 | funciona — nada mudou no que a extensão manda ao app |
 
 Permissões: **as mesmas** da 0.2.0.

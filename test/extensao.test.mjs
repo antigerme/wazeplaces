@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
-import { dispatch, makeSessions, isUserAllowed } from '../server/core.mjs';
+import { dispatch, makeSessions, isUserAllowed, WAZE_ESPERA_MS } from '../server/core.mjs';
 import { storeEmMemoria } from './_sessao.mjs';
 
 const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
@@ -68,6 +68,11 @@ function rodarPainel({ sendMessage = () => {} } = {}) {
   const abas = elemento('ul');
   const conteudo = elemento('div');
   let ouvinte = null;
+  // O RELÓGIO do painel é de mentira: nada dispara sozinho, e o teste dispara o
+  // que quiser (o teto do ACESSAR, R7-1-06). O `clearTimeout` existe, como no
+  // navegador — o painel desarma o teto quando a resposta chega.
+  const agendados = new Map();
+  let proximoTimer = 1;
   const chrome = {
     runtime: {
       lastError: null,
@@ -85,7 +90,8 @@ function rodarPainel({ sendMessage = () => {} } = {}) {
     },
     chrome, alert: (m) => alertas.push(m), console,
     MutationObserver: class { observe() {} disconnect() {} },
-    setTimeout: () => 0,
+    setTimeout: (fn, ms) => { const id = proximoTimer++; agendados.set(id, { fn, ms }); return id; },
+    clearTimeout: (id) => { agendados.delete(id); },
   };
   ctx.window = ctx;
   ctx.addEventListener = (tipo, fn) => { if (tipo === 'message') ouvinte = fn; };
@@ -101,6 +107,9 @@ function rodarPainel({ sendMessage = () => {} } = {}) {
     botao: () => todos.find((e) => e.tagName === 'BUTTON'),
     // Tudo o que o painel escreve na tela (texto, HTML e o `title` do botão).
     textos: () => todos.map((e) => [e.innerText, e.innerHTML, e.title].filter(Boolean).join(' ')).join('\n'),
+    // Os prazos armados (em ms), e disparar os de um prazo — como se ele vencesse.
+    agendados: () => [...agendados.values()].map((a) => a.ms),
+    disparar(ms) { for (const [id, a] of [...agendados]) if (a.ms === ms) { agendados.delete(id); a.fn(); } },
   };
 }
 
@@ -310,6 +319,106 @@ test('R66-2: o background repassa a CHAVE do servidor junto da frase, no "sem lo
   const r = await bg.pedir({ action: 'abrirPlaces' });
   assert.equal(r.semLogin, true, 'CONTROLE: o cookie vencido deixou de ser "sem login" pra extensão');
   assert.equal(r.errorKey, 'srv.err.cookiesExpiredRelogin', 'o background jogou fora a chave que o servidor mandou');
+});
+
+// ═══ R7-1-06 · o ACESSAR trava enquanto loga, e volta em QUALQUER desfecho ══
+// Cada toque no ACESSAR é um `abrirPlaces`: uma ida ao /Session do Waze no nome
+// da pessoa, uma sessão nova no servidor e uma aba nova do app. O botão só
+// trocava o texto pra "LOGANDO...", e o toque duplo (comum em botão de página)
+// abria DUAS abas, com duas sessões da mesma conta — MEDIDO com a extensão de
+// verdade, 2 cliques: 2 sessões criadas e 2 abas (1 e 1 com um clique). E,
+// com o servidor pendurado, ele ficava em "LOGANDO..." pra sempre, sem aviso.
+const ESPERA_DO_BOTAO_MS = Number((/^const ESPERA_DO_BOTAO_MS = (\d+);/m.exec(CONTENT) || [])[1]);
+
+// O painel de um L6+AM com o `abrirPlaces` SEGURADO: a resposta sai quando o teste mandar.
+function painelSegurado(lingua, { lanca = false } = {}) {
+  const pedidos = [];
+  const painel = rodarPainel({
+    sendMessage: (msg, cb, chrome) => {
+      if (lanca) throw new Error('Extension context invalidated.');
+      pedidos.push({
+        msg,
+        responder: (resposta) => cb(resposta),
+        // Como o Chrome: o `lastError` vale só DENTRO do callback.
+        falharComLastError: (texto) => { chrome.runtime.lastError = { message: texto }; cb(undefined); chrome.runtime.lastError = null; },
+      });
+    },
+  });
+  painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
+  assert.equal(painel.botao().disabled, false, `CONTROLE (${lingua}): o L6+AM vê o ACESSAR liberado`);
+  return { painel, pedidos, b: painel.botao(), t: DICIONARIO[lingua] };
+}
+
+test('R7-1-06: o ACESSAR trava enquanto loga — o toque duplo manda UM `abrirPlaces`, e ele volta quando a resposta chega', () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const { painel, pedidos, b, t } = painelSegurado(lingua);
+    b.click();
+    b.click();   // o toque duplo
+    assert.equal(pedidos.length, 1, `${lingua}: o toque duplo mandou ${pedidos.length} \`abrirPlaces\` — cada um é uma sessão e uma aba novas`);
+    assert.equal(pedidos[0].msg.action, 'abrirPlaces');
+    assert.equal(b.disabled, true, `${lingua}: o ACESSAR não trava enquanto loga`);
+    assert.equal(b.innerText, t.loggingBtn);
+    assert.deepEqual(painel.agendados(), [ESPERA_DO_BOTAO_MS], `${lingua}: o toque não armou o teto do botão`);
+    pedidos[0].responder({ success: true });
+    assert.equal(b.disabled, false, `${lingua}: o login terminou e o botão seguiu travado`);
+    assert.equal(b.innerText, t.accessWazePlacesBtn);
+    assert.deepEqual(painel.alertas, [], `${lingua}: o login que deu certo avisou alguma coisa`);
+    assert.deepEqual(painel.agendados(), [], `${lingua}: a resposta chegou e o teto seguiu armado`);
+    // CONTROLE: a trava é do login em curso, não um botão morto — destravado, ele manda de novo.
+    b.click();
+    assert.equal(pedidos.length, 2, `${lingua}: depois da resposta o ACESSAR não mandou de novo`);
+  }
+});
+
+test('R7-1-06: o ACESSAR destrava em QUALQUER desfecho — a falha, a extensão que não responde ou lança, e o teto', () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const desfechos = {
+      'login do WME não achado': ({ pedidos }) => pedidos[0].responder({ success: false, semLogin: true, errorKey: 'srv.err.cookiesExpiredRelogin' }),
+      'extensão sem resposta (lastError)': ({ pedidos }) => pedidos[0].falharComLastError('The message port closed before a response was received.'),
+      'nada responde (o teto vence)': ({ painel }) => painel.disparar(ESPERA_DO_BOTAO_MS),
+    };
+    const fraseEsperada = (t, nome) => t.errorLogin + (nome.startsWith('login') ? t.erroSemLogin : t.erroExtensao);
+    for (const [nome, desfecho] of Object.entries(desfechos)) {
+      const p = painelSegurado(lingua);
+      p.b.click();
+      assert.equal(p.b.disabled, true, `CONTROLE (${lingua}, ${nome}): o botão não travou no toque`);
+      desfecho(p);
+      assert.equal(p.b.disabled, false, `${lingua}, ${nome}: o ACESSAR seguiu travado`);
+      assert.equal(p.b.innerText, p.t.accessWazePlacesBtn, `${lingua}, ${nome}: o botão seguiu em "${p.b.innerText}"`);
+      assert.deepEqual(p.painel.alertas, [fraseEsperada(p.t, nome)], `${lingua}, ${nome}: o aviso não diz o que fazer`);
+      assert.deepEqual(p.painel.agendados(), [], `${lingua}, ${nome}: o teto seguiu armado`);
+    }
+    // A extensão que LANÇA no `sendMessage` (atualizada com a página do WME aberta).
+    const lanca = painelSegurado(lingua, { lanca: true });
+    lanca.b.click();
+    assert.equal(lanca.b.disabled, false, `${lingua}: o \`sendMessage\` lançou e o ACESSAR ficou travado`);
+    assert.deepEqual(lanca.painel.alertas, [lanca.t.errorLogin + lanca.t.erroExtensao], `${lingua}: o \`sendMessage\` que lança não avisou`);
+    assert.deepEqual(lanca.painel.agendados(), [], `${lingua}: o \`sendMessage\` lançou e o teto ficou armado`);
+  }
+});
+
+test('R7-1-06: a resposta que chega DEPOIS do teto não avisa de novo nem destrava o toque seguinte', () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const { painel, pedidos, b, t } = painelSegurado(lingua);
+    b.click();
+    painel.disparar(ESPERA_DO_BOTAO_MS);
+    assert.deepEqual(painel.alertas, [t.errorLogin + t.erroExtensao], `CONTROLE (${lingua}): o teto não avisou`);
+    b.click();                          // tenta de novo: outro login no ar
+    assert.equal(pedidos.length, 2, `CONTROLE (${lingua}): o toque depois do teto não mandou`);
+    assert.equal(b.disabled, true);
+    pedidos[0].responder({ success: false, semLogin: true });   // a resposta ATRASADA do primeiro
+    assert.equal(b.disabled, true, `${lingua}: a resposta atrasada do 1º toque destravou o 2º login no ar`);
+    assert.equal(painel.alertas.length, 1, `${lingua}: a resposta atrasada do 1º toque avisou de novo: ${JSON.stringify(painel.alertas)}`);
+    pedidos[1].responder({ success: true });
+    assert.equal(b.disabled, false, `${lingua}: o 2º login terminou e o botão seguiu travado`);
+    assert.equal(painel.alertas.length, 1);
+  }
+});
+
+test('R7-1-06: o teto do ACESSAR é maior que o do servidor pra ir ao Waze — o login lento ainda chega antes de o botão desistir', () => {
+  assert.ok(Number.isInteger(ESPERA_DO_BOTAO_MS) && ESPERA_DO_BOTAO_MS > 0, 'CONTROLE: sumiu o `ESPERA_DO_BOTAO_MS` do content.js');
+  assert.ok(ESPERA_DO_BOTAO_MS > WAZE_ESPERA_MS,
+    `o botão desiste em ${ESPERA_DO_BOTAO_MS} ms, antes do servidor (${WAZE_ESPERA_MS} ms pro Waze): o login que o Waze atrasa avisaria "a extensão não respondeu" e abriria a aba depois`);
 });
 
 // ═══ R6-1-10 · o login pelo BOTÃO do WME diz a conta e passa pelo diário ═════

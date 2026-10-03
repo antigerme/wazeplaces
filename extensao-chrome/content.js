@@ -23,6 +23,20 @@ function podeEntrarNoApp(rank, isAM, isStaff) {
     return r >= RANK_MINIMO && !!isAM;
 }
 
+// O ACESSAR fica TRAVADO enquanto loga (auditoria da rodada 7, R7-1-06). Cada
+// toque é um `abrirPlaces`: uma ida ao /Session do Waze no nome da pessoa, uma
+// sessão nova no servidor e uma aba nova do app — e o toque duplo abria duas
+// abas, com duas sessões da mesma conta (MEDIDO com a extensão de verdade). Ele
+// volta em QUALQUER desfecho: a resposta do background (deu certo ou não), o
+// `lastError` (o service worker não respondeu), o `sendMessage` que lança (a
+// extensão se atualizou com o WME aberto) e este TETO, pra resposta que nunca
+// chega — MEDIDO com o servidor pendurado: o Chrome não derruba o service
+// worker, e o botão ficava em "LOGANDO..." pra sempre, sem aviso. O teto é o
+// mesmo que o app espera por uma resposta do servidor, e é maior que o prazo
+// do servidor pra ir ao Waze (30 s, `WAZE_ESPERA_MS`): o login que o Waze
+// atrasa ainda chega antes de o botão desistir.
+const ESPERA_DO_BOTAO_MS = 45000;
+
 const s = document.createElement('script');
 s.src = chrome.runtime.getURL('inject.js');
 s.onload = function() { this.remove(); };
@@ -251,22 +265,50 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
         `;
         
         btn.addEventListener('click', () => {
+            if (btn.disabled) return;   // um login por vez (ver `ESPERA_DO_BOTAO_MS`)
+            btn.disabled = true;
             btn.innerText = t.loggingBtn;
             btn.style.background = '#ffcc00';
+
+            // Devolve o botão UMA vez por toque: a resposta que chega depois do
+            // teto não avisa de novo, nem destrava o toque seguinte, que pode
+            // estar com outro login no ar.
+            let terminou = false;
+            let teto = null;
+            const terminar = () => {
+                if (terminou) return false;
+                terminou = true;
+                clearTimeout(teto);
+                btn.disabled = false;
+                btn.innerText = t.accessWazePlacesBtn;
+                btn.style.background = '#33ccff';
+                return true;
+            };
+            teto = setTimeout(() => {
+                if (terminar()) alert(t.errorLogin + t.erroExtensao);
+            }, ESPERA_DO_BOTAO_MS);
 
             // "abrirPlaces" (era "getCookies"): o nome agora diz o que o botão
             // FAZ, e o background tem uma segunda ação ("autenticar") que a
             // ponte usa sem abrir aba. Dois nomes porque são dois fluxos.
-            chrome.runtime.sendMessage({ action: "abrirPlaces" }, (response) => {
-                btn.innerText = t.accessWazePlacesBtn;
-                btn.style.background = '#33ccff';
-
-                if (chrome.runtime.lastError) {
-                    alert(t.errorLogin + t.erroExtensao);
-                } else if (response && response.success !== true) {
-                    alert(t.errorLogin + fraseDoErro(response));
-                }
-            });
+            try {
+                chrome.runtime.sendMessage({ action: "abrirPlaces" }, (response) => {
+                    // Lido SEMPRE, antes de tudo: o `lastError` só vale aqui
+                    // dentro, e o Chrome acusa o que ninguém leu.
+                    const semResposta = chrome.runtime.lastError;
+                    if (!terminar()) return;
+                    if (semResposta) {
+                        alert(t.errorLogin + t.erroExtensao);
+                    } else if (response && response.success !== true) {
+                        alert(t.errorLogin + fraseDoErro(response));
+                    }
+                });
+            } catch (e) {
+                // A extensão se atualizou com o WME aberto: o `sendMessage` deste
+                // painel LANÇA ("Extension context invalidated"), e só recarregar
+                // a página traz o painel novo — que é o que o aviso diz.
+                if (terminar()) alert(t.errorLogin + t.erroExtensao);
+            }
         });
     } else {
 // -------------- botao NO
