@@ -415,6 +415,49 @@ test('R7-1-06: a resposta que chega DEPOIS do teto não avisa de novo nem destra
   }
 });
 
+// ═══ R7-6-07 · o painel diz o que o código faz, e o português tem acento ════
+// O `info1`, em vermelho em todo painel, dizia que com o cookie vencido "o
+// botão ficará travado com o texto 'logando...'" e mandava recarregar. Desde a
+// 0.3.1 o cookie vencido volta como "sem login": o botão volta na hora e o
+// aviso diz o que fazer (MEDIDO com a extensão de verdade). O painel prometia
+// um sintoma que não acontece — e, com o teto da 0.3.2, nem o servidor
+// pendurado deixa mais o botão parado. E o `info2` em português não tinha
+// acento ("Apos", "icone", "Area").
+const O_AVISO = { 'pt-BR': /\baviso\b/i, en: /\bmessage\b/i, es: /\baviso\b/i, fr: /\bmessage\b/i };
+
+test('R7-6-07: o painel diz o que acontece quando o login falha — o aviso, e nunca o botão parado em "LOGANDO..."', async () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const t = DICIONARIO[lingua];
+    assert.ok(O_AVISO[lingua], `${lingua}: língua do painel sem a palavra do aviso neste teste — inclua-a`);
+    // O que o CÓDIGO faz com o login do WME vencido (o background e o servidor de verdade).
+    const bg = rodarBackground({ waze: () => json({ errorList: [{ code: 101 }] }, 403) });
+    let respondeu = false;
+    const painel = rodarPainel({ sendMessage: (msg, cb) => { bg.pedir(msg).then((r) => { respondeu = true; cb(r); }); } });
+    painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
+    const oQueOPainelDiz = painel.textos();   // antes do toque: o botão ainda diz o seu nome
+    painel.botao().click();
+    for (let i = 0; i < 200 && !respondeu; i++) await tique();
+    assert.ok(respondeu, `CONTROLE (${lingua}): o background não respondeu`);
+    assert.equal(painel.botao().innerText, t.accessWazePlacesBtn, `CONTROLE (${lingua}): com o login vencido o botão não voltou`);
+    assert.deepEqual(painel.alertas, [t.errorLogin + t.erroSemLogin], `CONTROLE (${lingua}): o aviso do login vencido mudou`);
+    // O painel não promete o contrário.
+    assert.ok(!oQueOPainelDiz.toLowerCase().includes(t.loggingBtn.toLowerCase()),
+      `${lingua}: o painel diz que o botão fica parado em "${t.loggingBtn}", e ele volta com um aviso: ${JSON.stringify(t.info1)}`);
+    // O que ele diz: se o login falhar, um aviso explica o que fazer.
+    assert.match(t.info1, O_AVISO[lingua], `${lingua}: o info1 não fala do aviso: ${JSON.stringify(t.info1)}`);
+  }
+});
+
+test('R7-6-07: o painel em português tem os acentos — "Após", "ícone", "Área"', () => {
+  const pt = DICIONARIO['pt-BR'];
+  const SEM_ACENTO = /\b(?:Apos|icone|Area(?! Manager))\b/;
+  // CONTROLE: o padrão enxerga a frase de antes, e o "Area Manager" (o nome do papel no Waze) não conta.
+  assert.match('Apos acessar o Waze Places clique no filtro ( icone de funil ) para configurar o seu Estado e Area', SEM_ACENTO);
+  assert.doesNotMatch('Requer Nível 2+ e ser Area Manager (AM), ou ser Staff.', SEM_ACENTO);
+  for (const [k, v] of Object.entries(pt)) assert.doesNotMatch(v, SEM_ACENTO, `pt-BR.${k} sem acento: "${v}"`);
+  assert.match(pt.info2, /^Após acessar o Waze Places, clique no filtro \(ícone de funil\) /, `pt-BR.info2: "${pt.info2}"`);
+});
+
 test('R7-1-06: o teto do ACESSAR é maior que o do servidor pra ir ao Waze — o login lento ainda chega antes de o botão desistir', () => {
   assert.ok(Number.isInteger(ESPERA_DO_BOTAO_MS) && ESPERA_DO_BOTAO_MS > 0, 'CONTROLE: sumiu o `ESPERA_DO_BOTAO_MS` do content.js');
   assert.ok(ESPERA_DO_BOTAO_MS > WAZE_ESPERA_MS,

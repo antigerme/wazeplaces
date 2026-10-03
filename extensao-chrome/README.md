@@ -245,9 +245,9 @@ Permissões: **as mesmas** da 0.2.0.
 
 ---
 
-## v0.3.2 — o ACESSAR trava enquanto loga
+## v0.3.2 — o ACESSAR trava enquanto loga, e o painel diz o que acontece
 
-Achado na auditoria da rodada 7 do app (R7-1-06), sem mudança de protocolo nem de permissão:
+Achados na auditoria da rodada 7 do app (R7-1-06 e R7-6-07), sem mudança de protocolo nem de permissão:
 
 1. **O ACESSAR fica travado enquanto o login acontece, e volta em qualquer desfecho.** Cada toque é
    um `abrirPlaces` — uma ida ao `/Session` do Waze no nome da pessoa, uma sessão nova no servidor e
@@ -267,12 +267,19 @@ Achado na auditoria da rodada 7 do app (R7-1-06), sem mudança de protocolo nem 
    0.3.2, servidor pendurado, 47 s depois:          "Acessar o Waze Places" e o aviso
    ```
 
+2. **O texto do painel diz o que o botão faz.** O primeiro aviso em vermelho dizia que, com o cookie
+   vencido, "o botão ficará travado com o texto 'logando...'" e mandava recarregar. Desde a 0.3.1 o
+   login vencido volta na hora como "sem login": o botão volta e o alerta diz o que fazer — e, com o
+   teto acima, nem o servidor pendurado deixa mais o botão parado. Agora ele diz isso, nas 4 línguas:
+   "Se o login automático falhar (por exemplo, com o seu login no WME expirado), um aviso diz o que
+   fazer." E o do filtro, em português, ganhou os acentos ("Após", "ícone", "Área").
+
 **Precisa ser publicada** pra valer. Se a 0.3.1 ainda não tiver sido publicada, a 0.3.2 a leva junto.
 
 | app | extensão | resultado |
 |---|---|---|
 | atual | 0.3.1 | funciona como antes: o toque duplo no ACESSAR abre duas abas |
-| atual | 0.3.2 | o toque duplo abre uma aba só, e o botão não fica parado em "LOGANDO..." |
+| atual | 0.3.2 | o toque duplo abre uma aba só, o botão não fica parado em "LOGANDO...", e o painel diz o que acontece quando o login falha |
 | anterior | 0.3.2 | funciona — nada mudou no que a extensão manda ao app |
 
 Permissões: **as mesmas** da 0.2.0.
