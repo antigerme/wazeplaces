@@ -210,7 +210,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
-    editaveisPorServidor: new WeakMap(),
+    editaveisPorServidor: { conta: null, lidos: {} },
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
     GPS_TIMEOUT_MS: 10, TYPES_PADRAO: ['NEW_PLACE'],
@@ -1481,17 +1481,26 @@ test('R7-6-02: quem edita só na NA, levado pra lá pelo perfil da ROW, tem a ME
   assert.deepEqual(telaDoPais(q), primeira, 'a mesma pessoa vê duas listas, conforme a sessão começou');
 });
 
-test('R7-6-02: o que o app leu nos outros servidores é DESTE perfil — o perfil de outra conta começa sem nada', async () => {
+test('R7-6-02: o que o app leu nos outros servidores é DESTA conta — a sonda do alarme falso não apaga, e outra conta começa sem nada', async () => {
   const p = paginaQueEditaNaNA();
   await p.app.loadProfileAndAuxData();
   await tique(5);
   assert.deepEqual(p.app.editaveisLidos('na'), [235], 'PRÉ-CONDIÇÃO: a lista do NA não ficou');
   assert.deepEqual(p.app.editaveisLidos('row'), [], 'a lista do servidor em que o perfil foi pedido não ficou');
   assert.equal(p.app.editaveisLidos('il'), null, 'um servidor que ninguém perguntou virou "não edita lá"');
-  // Outra conta entra (o perfil é outro objeto): nada da anterior vale.
+  // A sonda de um 401 que se revela alarme falso traz um perfil NOVO (outro
+  // objeto) da MESMA conta, pela porta única (`definirPerfil`): o que foi lido
+  // segue valendo — sem isto, a "Minha área" perdia o país pelo resto da sessão.
+  p.app.definirPerfil({ success: true, profile: { id: 1, editableCountryIDs: [235], managedAreas: [] } });
+  assert.deepEqual([p.app.editaveisLidos('na'), p.app.editaveisLidos('row')], [[235], []],
+    'o perfil novo da MESMA conta (a sonda do alarme falso) apagou o que o app tinha lido');
+  // Outra conta entra: nada da anterior vale.
   p.app.definirPerfil({ success: true, profile: { id: 2, editableCountryIDs: [], managedAreas: [] } });
   assert.equal(p.AppState.profile.id, 2, 'PRÉ-CONDIÇÃO: o perfil de outra conta não entrou');
   assert.equal(p.app.editaveisLidos('na'), null, 'a lista do NA da conta anterior vale pra quem entrou');
+  // E sem perfil (o "Sair"), nada vale.
+  p.AppState.profile = null;
+  assert.equal(p.app.editaveisLidos('na'), null, 'sem perfil, a lista lida de alguém vale');
   // E a pergunta que FALHOU não diz que a pessoa não edita lá.
   const f = pagina();
   f.listas.perfil = (r) => Promise.resolve(r === 'row'

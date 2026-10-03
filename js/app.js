@@ -4175,22 +4175,25 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
 // app LEU ficam aqui, por servidor — sem pedido a mais: são os da carga do
 // perfil (`loadProfileAndAuxData`) e os que o `paisDoPerfil` já perguntou.
 //
-// Presos ao OBJETO do perfil: o perfil novo (a outra conta, o "Sair", a sonda
-// do alarme falso) começa sem nada, e nada de uma conta vale pra outra.
-const editaveisPorServidor = new WeakMap();
+// Presos à CONTA (o id do perfil), e só valem com ela no app: o perfil novo da
+// MESMA conta (a sonda do alarme falso de um 401, que troca o objeto do perfil)
+// segue com o que foi lido, e outra conta não herda nada — a primeira leitura
+// dela recomeça a lista, e até lá nada vale. Sem perfil (o "Sair"), nada vale.
+let editaveisPorServidor = { conta: null, lidos: {} };
 function anotarEditaveis(perfil, regiao, lista) {
-    if (!perfil || typeof perfil !== 'object' || !regiao) return;
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined || !regiao) return;
     const ids = (Array.isArray(lista) ? lista : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    const lidos = editaveisPorServidor.get(perfil) || {};
-    lidos[regiao] = ids;
-    editaveisPorServidor.set(perfil, lidos);
+    if (editaveisPorServidor.conta !== String(perfil.id)) editaveisPorServidor = { conta: String(perfil.id), lidos: {} };
+    editaveisPorServidor.lidos[regiao] = ids;
 }
-// Os editáveis do servidor `regiao` que o app leu pro perfil de agora, ou
+// Os editáveis do servidor `regiao` que o app leu pra conta de agora, ou
 // `null` quando não leu (`[]` é "leu, e a pessoa não edita lá").
 function editaveisLidos(regiao) {
     const perfil = AppState.profile;
-    const lidos = perfil && typeof perfil === 'object' ? editaveisPorServidor.get(perfil) : null;
-    return lidos && Object.prototype.hasOwnProperty.call(lidos, regiao) ? lidos[regiao] : null;
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return null;
+    if (editaveisPorServidor.conta !== String(perfil.id)) return null;
+    const lidos = editaveisPorServidor.lidos;
+    return Object.prototype.hasOwnProperty.call(lidos, regiao) ? lidos[regiao] : null;
 }
 
 // A lista de países que o seletor MOSTRA, pela MESMA régua na abertura dos

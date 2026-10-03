@@ -1261,7 +1261,7 @@ function aparelhoDoGesto({ resposta }) {
   const app = new Function(...chaves, `
     let tratouNestaFila = false;
     const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
-    const editaveisPorServidor = new WeakMap();
+    let editaveisPorServidor = { conta: null, lidos: {} };
     ${nomes.map(fatiarComAsync).join('\n')}
     return { handleReject, carregarFilaDeSaida, ondeAgora, anotarEditaveis, paisDaFila };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, medidas, filtro };
