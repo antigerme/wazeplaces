@@ -2523,8 +2523,10 @@ for (const status of [404, 403]) {
   // R6-7-2: com uma camada que a PESSOA abriu enquanto a fila carregava (aqui os
   // Filtros, com uma escolha ainda não aplicada), o primeiro card NÃO abre o
   // aviso por cima — o `openModal` a esconderia e jogaria a escolha fora. Ele
-  // espera o próximo card montado sem camada. O CONTROLE é o caso de cima: sem
-  // camada, o aviso abre no primeiro card.
+  // espera a camada FECHAR, e abre logo depois, antes de qualquer gesto, como no
+  // 1º card (R7-7-01: esperando o "próximo card", ele abria no 1º ✕, debaixo do
+  // banner do Desfazer). O CONTROLE é o caso de cima: sem camada, o aviso abre
+  // no primeiro card.
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true });
   const page2 = await ctx2.newPage();
   await page2.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -2553,12 +2555,235 @@ for (const status of [404, 403]) {
   checa(camada.filtros && camada.escolhaFicou !== false, 'como funciona: os Filtros (com a escolha não aplicada) sumiram', JSON.stringify(camada));
   checa(!camada.visto, 'como funciona: deu-se por visto sem ter aparecido — nunca mais apareceria', JSON.stringify(camada));
   await page2.evaluate(() => { closeModal('filtersModal'); });
-  await page2.waitForTimeout(300);
-  await page2.evaluate(() => { AppState.queue.shift(); AppState.currentPlace = null; showCurrentPlace(); });
-  await page2.waitForTimeout(400);
-  checa(await page2.evaluate(() => !document.getElementById('comoFuncionaModal').classList.contains('hidden')),
-    'como funciona: o próximo card SEM camada não mostrou o aviso que tinha ficado esperando');
+  // Sem card novo nenhum: é o FECHAR da camada que o traz, depois do voltar dela.
+  const aposFechar = await esperarNaPagina(page2, () => !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 3000, 50);
+  checa(aposFechar.ok, 'como funciona: os Filtros fecharam e o aviso que tinha ficado esperando não apareceu');
+  const hist = await page2.evaluate(() => ({ estado: history.state, prof: CamadaVoltar.profundidade, card: AppState.currentPlace && AppState.currentPlace.venueID }));
+  checa(hist.estado && hist.estado.wpCamada === 1 && hist.prof === 1,
+    'como funciona: a entrada do aviso não ficou no histórico — o voltar do fechamento a comeu (gotcha #65)', JSON.stringify(hist));
+  checa(hist.card === cru.venueID, 'como funciona: o aviso só apareceu com outro card (o próximo), e não ao fechar a camada', JSON.stringify(hist));
   await ctx2.close();
+}
+
+// ── O "Como funciona" ADIADO: nunca debaixo do banner do Desfazer, nunca no
+// tique do voltar (auditoria de 2026-10-02: R7-7-01, R7-7-02 e R7-3-01) ──────
+// O adiado (a Ajuda aberta quando o 1º card montou) abria no 1º GESTO: o card
+// seguinte monta antes de o `scheduleAction` abrir a janela do Desfazer, e o
+// banner (z-70) ficava por cima do "Entendi" — no iPhone SE o toque caía no
+// "Desfazer". E fechar a foto ampliada que ANDA a fila (a aprovação pousou com
+// ela aberta) o abria no mesmo tique do `history.back()` do fechamento: o voltar
+// comia a entrada dele, e o "Entendi" tirava a pessoa do app. Tudo pelo
+// `initApp` de verdade, com a fila segurada até a Ajuda estar aberta. A Ajuda é
+// fechada pelo VOLTAR do navegador: aí o adiado segue esperando (fechada pelo
+// app, ele abre logo depois, e o bloco de cima mede isso).
+{
+  const SVG_FOTO = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%" height="100%" fill="#4b8"/></svg>';
+  const FOTO_NOVA = 'data:image/svg+xml;base64,' + Buffer.from(SVG_FOTO).toString('base64');
+  const PERFIL_L6 = { id: 12444348, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] };
+  const pedido = (n, foto) => ({
+    venueID: 'cf' + n, updateRequestID: foto ? 'pendente-0' + n : 'u' + n, name: 'Local ' + n, categories: ['PARK'],
+    address: 'Rua ' + n + ', 1', updateTypeKey: foto ? 'IMAGE' : 'VENUE', purType: foto ? 'NEW_PHOTO' : 'NEW_PLACE',
+    createdBy: 'fulano' + n, creatorId: 900 + n, creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null,
+    localAprovado: true, dateAdded: Date.now() - 3600000 * n,
+    ...(foto ? { imageUrls: [`${FOTO_NOVA}#pendente-0${n}`, `${FOTO_NOVA}#aprovada-0${n}`], approvedImageIds: ['aprovada-0' + n] } : { imageUrls: [] }),
+  });
+  const abrirApp = async ({ viewport, toque = false, fotos = false, visto = false, rever = false }) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', hasTouch: toque, primeiraVez: true });
+    await ctx.addInitScript((visto) => {
+      try {
+        if (sessionStorage.getItem('__cfAdiado')) return;
+        sessionStorage.setItem('__cfAdiado', '1');
+        localStorage.setItem('waze_session_token', 'token-smoke');
+        localStorage.setItem('waze_places_lang', 'pt');
+        localStorage.setItem('waze_places_preferences', JSON.stringify(visto ? { undoEnabled: true, comoFuncionaVisto: true } : { undoEnabled: true }));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, visto);
+    const places = [1, 2, 3].map((n) => pedido(n, fotos));
+    let soltar; const busca = new Promise((ok) => { soltar = ok; });
+    const envios = [];
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
+      let corpo = { success: true };
+      if (nome === 'perfil' || nome === 'testar-cookies') corpo = { success: true, visivelNoWme: true, referencias: null, profile: PERFIL_L6 };
+      else if (nome === 'lista-paises') corpo = { success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR', env: 'row' }] };
+      else if (nome === 'lista-estados') corpo = { success: true, states: [] };
+      else if (nome === 'presenca-app') corpo = { success: true, online: [], conversas: [] };
+      else if (nome === 'buscar-places') {
+        await busca;
+        corpo = { success: true, places, hasMore: false, page: 1, total: places.length, totalAll: places.length, blocked: 0 };
+      } else if (nome === 'validar-place') envios.push(JSON.parse(r.request().postData() || '{}'));
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    // A página ANTERIOR do histórico: sair do app aparece na URL.
+    await page.goto(BASE + 'manifest.json');
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !!(window.AppState && AppState.authenticated && AppState.profile), 'como funciona adiado: o app não entrou');
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'como funciona adiado: a Ajuda não abriu');
+    if (rever) {
+      await page.click('#reverComoFunciona');
+      await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'comoFuncionaModal', 'como funciona adiado: o "Ver de novo" não abriu');
+    }
+    soltar();
+    await esperarOuExplodir(page, () => !!AppState.currentPlace && !!document.querySelector('#cardStack .place-card:not(.card-fundo)'), 'como funciona adiado: o 1º card não montou');
+    await doisQuadros(page);
+    return { ctx, page, erros, envios };
+  };
+  const aberto = (page) => page.evaluate(() => !document.getElementById('comoFuncionaModal').classList.contains('hidden'));
+  // Quantos dos 9 pontos (grade 3×3, quase na borda) do botão NÃO o recebem.
+  const cobertos = (page, id) => page.evaluate((id) => {
+    const el = document.getElementById(id);
+    const r = el.getBoundingClientRect();
+    const por = [];
+    for (const fx of [0.05, 0.5, 0.95]) for (const fy of [0.05, 0.5, 0.95]) {
+      const h = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+      if (!h || !(h === el || el.contains(h))) por.push(!h ? null : h.closest('#undoContainer') ? 'desfazer' : (h.id || String(h.className).split(' ')[0]));
+    }
+    return por;
+  }, id);
+  const FRENTE = '#cardStack .place-card:not(.card-fundo)';
+  const SE = { width: 320, height: 568 };
+
+  // (1) R7-7-01 pelo TOQUE no iPhone SE: o 1º ✕ não abre o aviso debaixo da
+  // janela; ele vem quando ela acaba, com o "Entendi" inteiro alcançável.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: SE, toque: true });
+    checa(!(await aberto(page)), 'como funciona adiado: abriu por cima da Ajuda aberta (R6-7-2)');
+    await page.goBack();            // o VOLTAR do aparelho fecha a Ajuda
+    await doisQuadros(page);
+    checa(!(await aberto(page)), 'como funciona adiado: abriu logo depois do voltar do aparelho, sem gesto novo (as entradas ficam puláveis no Chrome)');
+    const x = await page.locator(FRENTE + ' .card-btn-reject').boundingBox();
+    await page.touchscreen.tap(x.x + x.width / 2, x.y + x.height / 2);
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'como funciona adiado: o ✕ não abriu a janela do Desfazer');
+    await doisQuadros(page);
+    checa(!(await aberto(page)), 'como funciona adiado: abriu no 1º ✕, com a janela do Desfazer por cima (o toque no "Entendi" cai no "Desfazer")');
+    const fim = await esperarNaPagina(page, () => !AppState.pendingAction && !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 8000, 50);
+    checa(fim.ok, 'como funciona adiado: a janela acabou e o aviso que esperava não apareceu');
+    const tela = await page.evaluate(() => ({ banner: document.getElementById('undoContainer').children.length }));
+    checa(tela.banner === 0, 'como funciona adiado: abriu com o banner do Desfazer na tela', JSON.stringify(tela));
+    const pontos = await cobertos(page, 'comoFuncionaOk');
+    checa(pontos.length === 0, `como funciona adiado: ${pontos.length}/9 pontos do "Entendi" cobertos`, JSON.stringify(pontos));
+    const ok = await page.locator('#comoFuncionaOk').boundingBox();
+    await page.touchscreen.tap(ok.x + ok.width / 2, ok.y + ok.height - 4);   // a parte de BAIXO, a que o banner cobria
+    await doisQuadros(page);
+    const depois = await page.evaluate(() => ({ cf: !document.getElementById('comoFuncionaModal').classList.contains('hidden'),
+      rejeitados: AppState.stats.rejected, atual: AppState.currentPlace && AppState.currentPlace.venueID, url: location.pathname }));
+    checa(!depois.cf && depois.rejeitados === 1 && depois.atual === 'cf2' && depois.url === '/',
+      'como funciona adiado: o "Entendi" não fechou o aviso, ou desfez o ✕', JSON.stringify(depois));
+    checa(envios.length === 1, `como funciona adiado: esperava 1 rejeição enviada, veio ${envios.length}`);
+    checa(erros.length === 0, 'como funciona adiado: erro de JS', erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE do instrumento: o aviso aberto à força DENTRO da janela, no SE —
+  // a grade enxerga o banner por cima do "Entendi" (sem isto, "0 cobertos"
+  // passaria com a grade cega).
+  {
+    const { ctx, page } = await abrirApp({ viewport: SE, toque: true, visto: true });
+    await page.goBack(); await doisQuadros(page);
+    const x = await page.locator(FRENTE + ' .card-btn-reject').boundingBox();
+    await page.touchscreen.tap(x.x + x.width / 2, x.y + x.height / 2);
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'como funciona adiado (controle): o ✕ não abriu a janela');
+    await page.evaluate(() => openModal('comoFuncionaModal'));
+    await doisQuadros(page);
+    const pontos = await cobertos(page, 'comoFuncionaOk');
+    checa(pontos.includes('desfazer'),
+      'como funciona adiado (CONTROLE): o aviso aberto na janela não teve o "Entendi" coberto pelo Desfazer — a grade está cega', JSON.stringify(pontos));
+    await ctx.close();
+  }
+
+  // (2) R7-7-01 pelo TECLADO: Enter no ✕, o aviso vem no fim da janela, e o
+  // Enter no "Entendi" devolve o foco ao ✕ do card da frente (o C10) — antes ia
+  // pro ⓘ.
+  {
+    const { ctx, page, erros } = await abrirApp({ viewport: { width: 390, height: 844 } });
+    await page.goBack(); await doisQuadros(page);
+    await page.focus(FRENTE + ' .card-btn-reject');
+    // CONTROLE do instrumento: a leitura do foco enxerga o ✕ da frente.
+    checa(await page.evaluate(() => document.activeElement === document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject')),
+      'como funciona adiado (CONTROLE): a leitura do foco não enxerga o ✕ da frente');
+    await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'como funciona adiado: o Enter no ✕ não abriu a janela');
+    const fim = await esperarNaPagina(page, () => !AppState.pendingAction && !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 8000, 50);
+    checa(fim.ok, 'como funciona adiado (teclado): a janela acabou e o aviso não apareceu');
+    await page.focus('#comoFuncionaOk');
+    await page.keyboard.press('Enter');
+    await doisQuadros(page);
+    const foco = await page.evaluate(() => ({ noX: document.activeElement === document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject'),
+      id: document.activeElement && (document.activeElement.id || String(document.activeElement.className).split(' ')[0]) }));
+    checa(foco.noX, 'como funciona adiado (teclado): fechar o aviso não devolveu o foco ao ✕ do card da frente', JSON.stringify(foco));
+    checa(erros.length === 0, 'como funciona adiado (teclado): erro de JS', erros[0]);
+    await ctx.close();
+  }
+
+  // (3) R7-7-02: o "Ver de novo" aberto com a fila carregando dá o aviso por
+  // VISTO — o 1º ✕ e o fim da janela não o reabrem.
+  {
+    const { ctx, page, erros } = await abrirApp({ viewport: { width: 390, height: 844 }, rever: true });
+    checa(await page.evaluate(() => AppState.preferences.comoFuncionaVisto === true), 'como funciona: o "Ver de novo" não se deu por visto (R7-7-02)');
+    await page.click('#comoFuncionaOk');
+    await doisQuadros(page);
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'como funciona (rever): o ✕ não abriu a janela');
+    await esperarOuExplodir(page, () => !AppState.pendingAction, 'como funciona (rever): a janela não acabou', 8000);
+    await doisQuadros(page);
+    checa(!(await aberto(page)), 'como funciona: o aviso que a pessoa já leu pelo "Ver de novo" reabriu (R7-7-02)');
+    checa(erros.length === 0, 'como funciona (rever): erro de JS', erros[0]);
+    await ctx.close();
+  }
+
+  // (4) R7-3-01: aprovar a foto, esperar a aprovação pousar e FECHAR a foto pelo
+  // Esc anda a fila — o aviso vem DEPOIS do voltar do fechamento, a entrada dele
+  // fica, e o "Entendi" e o voltar do aparelho ficam no app. CONTROLE: com o
+  // aviso já visto, o mesmo caminho fica no app (o caminho em si não sai dele).
+  // E a foto fechada pelo VOLTAR do aparelho: o card anda, mas o aviso espera um
+  // gesto novo (empilhar ali, sem gesto, deixa as entradas do app "puláveis" no
+  // Chrome, e o voltar seguinte sairia dele — o aviso que o próprio navegador dá,
+  // medido à parte); ele vem depois do ✕ seguinte, no fim da janela.
+  for (const [rotulo, visto, fecha] of [['Entendi', false, 'ok'], ['voltar', false, 'voltar'], ['CONTROLE já visto', true, 'nada'],
+    ['foto fechada pelo voltar', false, 'aparelho']]) {
+    const { ctx, page, erros } = await abrirApp({ viewport: { width: 412, height: 915 }, fotos: true, visto });
+    await page.goBack(); await doisQuadros(page);
+    await page.click(FRENTE + ' .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && document.getElementById('lightboxImage').naturalWidth > 0, `como funciona/foto (${rotulo}): a foto não abriu`);
+    await doisQuadros(page);
+    await page.click('#lightboxApprove');
+    const pousou = await esperarNaPagina(page, () => placeResolvidoPorAprovacao !== null, 10000, 50);
+    checa(pousou.ok, `como funciona/foto (${rotulo}): a aprovação não pousou com a foto aberta (a espera estourou)`);
+    if (fecha === 'aparelho') {
+      await page.goBack();          // o VOLTAR do aparelho fecha a foto: o card anda
+      await doisQuadros(page);
+      await page.waitForTimeout(300);
+      const cedo = await aberto(page);
+      checa(!cedo, `como funciona/foto (${rotulo}): o aviso abriu logo depois do voltar do aparelho, sem gesto novo`);
+      // Aberto (o defeito), ele cobre o card: o resto não teria o que medir.
+      if (cedo) { await ctx.close(); continue; }
+      await page.click(FRENTE + ' .card-btn-reject');
+      const veio = await esperarNaPagina(page, () => !AppState.pendingAction && !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 8000, 50);
+      checa(veio.ok, `como funciona/foto (${rotulo}): depois do gesto e da janela, o aviso adiado não apareceu`);
+      await page.click('#comoFuncionaOk');
+    } else await page.keyboard.press('Escape');
+    if (fecha !== 'nada' && fecha !== 'aparelho') {
+      const veio = await esperarNaPagina(page, () => !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 3000, 50);
+      checa(veio.ok, `como funciona/foto (${rotulo}): o aviso adiado não apareceu ao fechar a foto`);
+      const h = await page.evaluate(() => ({ estado: history.state, prof: CamadaVoltar.profundidade }));
+      checa(h.estado && h.estado.wpCamada === 1 && h.prof === 1,
+        `como funciona/foto (${rotulo}): a entrada do aviso foi comida pelo voltar do fechamento (gotcha #65)`, JSON.stringify(h));
+      if (fecha === 'ok') await page.click('#comoFuncionaOk'); else await page.goBack().catch(() => {});
+    }
+    await page.waitForTimeout(800);
+    // Com `?.`: fora do app (o defeito), a página é a ANTERIOR e não tem o app —
+    // a falha sai com o nome e a URL, em vez de derrubar o smoke.
+    const fim = await page.evaluate(() => ({ url: location.pathname,
+      cf: !!document.getElementById('comoFuncionaModal') && !document.getElementById('comoFuncionaModal').classList.contains('hidden'),
+      atual: window.AppState?.currentPlace?.venueID }));
+    checa(fim.url === '/' && !fim.cf && fim.atual === (fecha === 'aparelho' ? 'cf3' : 'cf2'),
+      `como funciona/foto (${rotulo}): saiu do app (ou o aviso ficou, ou a fila não andou)`, JSON.stringify(fim));
+    checa(erros.length === 0, `como funciona/foto (${rotulo}): erro de JS`, erros[0]);
+    await ctx.close();
+  }
 }
 
 {
