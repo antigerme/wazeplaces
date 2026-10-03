@@ -1176,7 +1176,15 @@ function setupAppListeners() {
     $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
     $('comoFuncionaTreinar')?.addEventListener('click', () => { closeModal('comoFuncionaModal'); Treino.entrar(); });
     $('abrirTreino')?.addEventListener('click', () => { closeModal('helpModal'); Treino.entrar(); });
-    $('treinoSairBtn')?.addEventListener('click', () => Treino.sair());
+    // O "Sair" some com a faixa do treino, e o card real volta: pelo teclado, o
+    // foco caía no <body> (R7-2-06, MEDIDO nos dois motores; auditoria de
+    // 2026-10-02). Ele vai ao ✕ do card que volta, a regra do C10 pra todo
+    // controle que some com o foco (`prometerFocoAoCardQueVem`); com o mouse e
+    // o dedo, nada se move.
+    $('treinoSairBtn')?.addEventListener('click', (ev) => {
+        prometerFocoAoCardQueVem(ev);
+        Treino.sair();
+    });
     // Só fecha: quem sai do treino é a limpeza do modal (`LIMPEZA_AO_FECHAR`),
     // que vale também pro Esc, o fundo e o voltar.
     $('treinoFimOk')?.addEventListener('click', () => closeModal('treinoFimModal'));
@@ -5246,10 +5254,19 @@ async function completarPerfilChegado(perfil, epoca) {
     // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
     // dois só valiam na próxima busca.
     aplicarRecusaAutomatica();
-    // Com um card na tela, só o RESTO entra na ordem, e o card de fundo passa a
-    // anunciar o próximo de verdade (ver o `sortQueue`, R6-2-06).
-    sortQueue({ semTrocarOCardDaTela: true });
-    if (AppState.currentPlace) aoMudarAFilaPorBaixo();
+    // Com o TREINO aberto a fila na tela é a de EXEMPLOS, e a real está guardada
+    // nele: a ordem e a recusa (que no treino sai na primeira linha) ficam
+    // ANOTADAS, e o `Treino.sair()` as aplica na fila real quando ela voltar.
+    // Ordenar aqui desfazia a ordem por variedade do treino, e a real voltava na
+    // ordem de data, com os pedidos do autor marcado na tela (R7-2-04, MEDIDO no
+    // navegador; auditoria de 2026-10-02).
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) Treino.anotarPerfil();
+    else {
+        // Com um card na tela, só o RESTO entra na ordem, e o card de fundo passa a
+        // anunciar o próximo de verdade (ver o `sortQueue`, R6-2-06).
+        sortQueue({ semTrocarOCardDaTela: true });
+        if (AppState.currentPlace) aoMudarAFilaPorBaixo();
+    }
     // "Minha área": a busca que esperava por este perfil é refeita (ver
     // `fetchNextPage`) — pela caixa da área ou, num perfil sem caixa, com o
     // filtro desligado e dito. ANTES do país: desligado, o "Minha área" deixa
@@ -9734,6 +9751,11 @@ function fetchNextPage() {
     // de filtro, logout), a época muda e descartamos o resultado obsoleto pra não
     // injetar places de filtros/região antigos na fila nova.
     const epoch = AppState.fetchEpoch;
+    // E o TREINO: o `entrar()` descarta a busca no ar (sobe a época), mas o
+    // `sair()` DEVOLVE a época da fila real (R7-7-04) — e a busca de antes do
+    // treino, ainda no ar, voltaria a valer. Ela segue descartada pelo número de
+    // vezes que o treino abriu: quem busca de novo é o `sair()`.
+    const treinoAntes = Treino.entradas;
     const filters = {
         unreadOnly: AppState.filters.unreadOnly !== false
     };
@@ -9800,7 +9822,8 @@ function fetchNextPage() {
                 // O LUGAR desta busca (ver `filaDeOnde`): o que ela trouxer é de lá.
                 const lugarDaBusca = lugarAgora();
                 const result = await API.fetchPlaces(pagina, filters);
-                if (epoch !== AppState.fetchEpoch) return; // reset durante o fetch → descarta
+                // reset (ou o treino) durante o fetch → descarta
+                if (epoch !== AppState.fetchEpoch || treinoAntes !== Treino.entradas) return;
                 if (!result.success) {
                     dlogVoltou('buscar');
                     dfato('busca.falhou', { key: result.errorKey || null,
@@ -9975,7 +9998,7 @@ function fetchNextPage() {
             dlogVoltou('buscar');
             dlog('busca.erro', { erro: String((error && error.message) || error).slice(0, 120) });
             console.error('fetchNextPage error', error);
-            if (epoch === AppState.fetchEpoch) {
+            if (epoch === AppState.fetchEpoch && treinoAntes === Treino.entradas) {
                 // O toast só fala quando o PAINEL não vai falar. Com a fila
                 // vazia o `showNoPlaces` desenha o estado de erro inteiro, e
                 // somar um toast vermelho é anunciar o mesmo fato duas vezes —
@@ -11791,8 +11814,16 @@ function focarDepoisDoFocoNoAutor(entrou) {
 // tela sem nunca ter tocado em "Ver +N" (auditoria de 2026-09-26). Sai no
 // "Sair" e quando o perfil revela OUTRA conta (`esquecerOutraConta`); a queda
 // da sessão sozinha não mexe, porque ali a mesma pessoa volta e segue a série.
+//
+// E o foco que o TREINO aberto guardou com a fila real (ver `Treino.entrar`)
+// também sai: o `encerrar` o devolve, e a troca de conta com o treino aberto
+// esquecia o de agora (nulo no treino) e o `resetQueue` logo depois o trazia de
+// volta — a fila da conta B nascia com a série do autor que a conta A tinha
+// escolhido na frente, e a barra "Primeiro os de X" (R7-7-03, MEDIDO no
+// navegador; auditoria de 2026-10-02).
 function esquecerFocoAutor() {
     AppState.autorEmFoco = null;
+    if (typeof Treino !== 'undefined' && Treino._salvo) Treino._salvo.autorEmFoco = null;
     const bar = document.getElementById('focoAutorBar');
     if (!bar) return;
     bar.classList.add('hidden');
@@ -15074,8 +15105,19 @@ async function enviarLote(places, opts = {}) {
     // andamento), então nem o "Restam" dela desce pelos pousos daqui, nem o que
     // falhar entra nela — era "Restam 0" com 5 cards na tela (auditoria da fila,
     // 2026-09-26). O que falhou volta pela busca, se for da fila nova.
+    //
+    // E com o TREINO aberto a fila do lote não foi refeita: está GUARDADA nele, e
+    // volta no `sair()` com a época dela (`Treino.filaGuardada`). A recusa
+    // automática no meio do laço, com a pessoa entrando no treino, pousava "fora
+    // da fila do lote": o "Restam" não descia pelos pousos do treino, e a fila
+    // real voltava com "Restam 6" sobre 3 cards — "Tudo limpo!" com "Restam 3"
+    // no fim (R7-2-03, MEDIDO no navegador; auditoria de 2026-10-02).
     const epocaFila = AppState.fetchEpoch;
-    const naFilaDoLote = () => AppState.fetchEpoch === epocaFila;
+    const filaDoLote = () => {
+        if (typeof Treino !== 'undefined' && Treino.ativo === true) return Treino.filaGuardada(epocaFila);
+        return AppState.fetchEpoch === epocaFila ? AppState.queue : null;
+    };
+    const naFilaDoLote = () => filaDoLote() !== null;
     // Os que voltam pra fila de pedidos. Na recusa automática (contando ao
     // landar) o "Restam" nunca desceu por eles: voltam pro fim da fila do lote,
     // sem somar. O lote da PESSOA volta como o ✕ de um card volta
@@ -15086,7 +15128,8 @@ async function enviarLote(places, opts = {}) {
     // pedidos pendentes, V9). Juntos, no fim, na ordem do lote.
     const devolver = [];
     const voltarPraFila = (q) => {
-        if (aoLandar && naFilaDoLote()) { AppState.queue.push(q); return; }
+        const fila = aoLandar ? filaDoLote() : null;
+        if (fila) { fila.push(q); return; }
         devolver.push(q);
     };
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
@@ -18150,17 +18193,25 @@ function recuperarCardSemFoto() {
 //
 // Na fila do GESTO (`epocaFila` igual à de agora) ele volta como o PRÓXIMO
 // card — nunca no lugar do que está na tela, que seria trocar o card debaixo do
-// dedo —, e o "Restam" sobe junto. Numa fila refeita desde o gesto (↻, filtro,
-// treino) ele nem entrou (estava em andamento), e sem o pedido inteiro na mão
+// dedo —, e o "Restam" sobe junto. Numa fila refeita desde o gesto (↻, filtro)
+// ele nem entrou (estava em andamento), e sem o pedido inteiro na mão
 // (a fila de saída guarda só os ids) não há card pra montar: nos dois casos
 // quem o traz é a BUSCA, que diz o que o Waze tem agora e sob os filtros de
 // agora. Ele sai do "já passou pela fila", a fila volta a dizer "pode haver
 // mais", e o "Restam" sobe quando ele chegar — somar agora o contaria duas vezes.
 //
+// Com o TREINO aberto a fila do gesto não foi refeita: está GUARDADA nele, e
+// volta no `sair()` com a época dela. O recusado espera lá e volta como o
+// próximo card quando ela voltar (`Treino.guardarDevolucao`) — tratado como
+// fila refeita, ele sumia até uma busca o trazer, com o "Restam" um abaixo
+// (R7-7-04, auditoria de 2026-10-02: o ✕ que o "Praticar" despacha da janela do
+// Desfazer, recusado com o treino aberto).
+//
 // Aceita um pedido ou uma LISTA (o "Rejeitar os N" que volta junto): um por um,
 // cada `splice` na posição 1 inverteria a ordem dos que voltam — sem erro
 // visível, só a fila discordando do WME na hora de conferir.
 function devolverPedidoRecusado(place, epocaFila) {
+    if (typeof Treino !== 'undefined' && Treino.ativo === true && Treino.guardarDevolucao(place, epocaFila)) return;
     const naFila = new Set(AppState.queue.map(chaveDoPedido));
     const voltam = [];
     for (const p of (Array.isArray(place) ? place : [place])) {
@@ -18340,6 +18391,11 @@ const Treino = {
     ativo: false,
     _salvo: null,
     passo: 0,
+    // Quantas vezes o treino ABRIU nesta página. A busca guarda o número de
+    // quando saiu, e a que estava no ar quando ele abriu segue DESCARTADA mesmo
+    // pousando depois do `sair()` (ver `fetchNextPage`): o `sair()` devolve a
+    // época da fila real, e só pela época ela valeria de novo.
+    entradas: 0,
     // O placar do treino é DELE. Trocar o `AppState.stats` pelo do treino (como
     // era) fazia a resposta de uma ação REAL que pousasse durante o treino
     // reverter e GRAVAR o número do treino no lugar do real (`saveStats`), e o
@@ -18511,14 +18567,31 @@ const Treino = {
         // `fetching = true` sem a promessa (que já tinha terminado) fazia o
         // `startFetching` do `sair()` girar em microtarefa pra sempre — a aba
         // congelava (gotcha #19).
+        //
+        // A época da fila REAL fica GUARDADA com ela e volta no `sair()`. O que
+        // estava no ar sobre essa fila — o ✕ que o "Praticar" acabou de despachar
+        // logo acima, a recusa automática no meio do laço — pousa na fila do
+        // GESTO, e com a época do treino no lugar o pouso a dava por refeita
+        // (MEDIDO no navegador, auditoria de 2026-10-02): o ✕ recusado de vez com
+        // o treino aberto não voltava como o próximo card (R7-7-04), e a recusa
+        // automática terminando no treino não descontava o "Restam" — "Tudo
+        // limpo!" com "Restam 3" (R7-2-03). Com o treino aberto, quem pousa acha
+        // a fila guardada (`filaGuardada`, `guardarDevolucao`). E a busca no ar
+        // segue descartada depois do `sair()`, pelo `entradas` (ver o topo).
+        const epocaDaFilaReal = AppState.fetchEpoch;
         AppState.fetchEpoch++;
+        this.entradas++;
         // O FOCO num autor ("Primeiro os de…") é ordem da fila REAL: fica guardado
         // com ela e sai da tela, senão a barra dizia "2 de 4" sobre a ordem de
         // variedade do treino e se apagava no 1º card de outro autor — e a fila
         // real voltava com a série na frente e sem a barra, sem como voltar à
         // ordem normal. O foco escolhido NO treino também não atravessa: o
         // `encerrar` devolve o de antes (R6-7-7, auditoria de 2026-10-01).
-        this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace, autorEmFoco: AppState.autorEmFoco };
+        // `devolver`: o que o Waze recusou de vez com o treino aberto, e
+        // `perfilChegou`: o perfil que chegou nele — os dois esperam a fila real
+        // voltar (ver o `sair()`).
+        this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace, autorEmFoco: AppState.autorEmFoco,
+            epoca: epocaDaFilaReal, epocaDoTreino: AppState.fetchEpoch, devolver: [], perfilChegou: false };
         AppState.autorEmFoco = null;
         this.ativo = true;
         this.passo = 0;
@@ -18556,7 +18629,27 @@ const Treino = {
         this.encerrar();
         AppState.queue = s.queue || [];
         AppState.currentPlace = s.currentPlace || null;
+        // A ÉPOCA volta com a fila (ver `entrar`): o que ainda estiver no ar sobre
+        // ela pousa nela, como se o treino não tivesse existido. Só se a época é
+        // a que o treino pôs: outra (nada a muda sem encerrar o treino hoje) seria
+        // uma fila refeita, e voltar a época apagaria isso.
+        if (Number.isInteger(s.epoca) && AppState.fetchEpoch === s.epocaDoTreino) AppState.fetchEpoch = s.epoca;
         removeCurrentCardEl();
+        // O PERFIL que chegou com o treino aberto (R7-2-04, auditoria de
+        // 2026-10-02): a ordem por casa/trabalho e a recusa automática esperavam
+        // por ele — o `completarPerfilChegado` só anotou (`anotarPerfil`), porque
+        // ordenar ali era ordenar os EXEMPLOS, e a fila real voltava na ordem de
+        // data e com os pedidos do autor marcado na tela. Aplicados agora, ANTES
+        // de o card ser desenhado: o da frente fica (`semTrocarOCardDaTela`), e o
+        // de fundo nasce do próximo de verdade.
+        if (s.perfilChegou) {
+            aplicarRecusaAutomatica();
+            sortQueue({ semTrocarOCardDaTela: true });
+        }
+        // O que o Waze RECUSOU de vez com o treino aberto (R7-7-04): volta como o
+        // PRÓXIMO card, com o "Restam" junto — o que teria acontecido sem o treino
+        // (`devolverPedidoRecusado`, que o guardou em `guardarDevolucao`).
+        if (s.devolver && s.devolver.length) devolverPedidoRecusado(s.devolver, s.epoca);
         updateStats(true);
         updatePendingCount(true);
         // A busca que o `entrar()` descartou volta aqui: pela fila vazia, ou pelo
@@ -18566,10 +18659,35 @@ const Treino = {
         else showNoPlaces();
     },
 
+    // A fila REAL da época `epoca` enquanto o treino está aberto: a que ele
+    // GUARDOU (e o `sair()` devolve), ou null — fila de outra época é fila
+    // refeita. É por aqui que quem pousa no meio do treino acha a fila do gesto
+    // (o `enviarLote`, o `devolverPedidoRecusado`, a queda da sessão).
+    filaGuardada(epoca) {
+        return this.ativo && this._salvo && this._salvo.epoca === epoca ? this._salvo.queue : null;
+    },
+
+    // O recusado de vez com o treino aberto, cuja fila é a guardada: espera o
+    // `sair()` pra voltar como o próximo card dela — o `devolverPedidoRecusado`
+    // de agora o poria na fila de EXEMPLOS. Num `encerrar` (fila nova) ele sai
+    // com o resto: quem o traz é a busca da fila nova, como numa fila refeita.
+    guardarDevolucao(place, epoca) {
+        if (!this.filaGuardada(epoca)) return false;
+        this._salvo.devolver.push(...(Array.isArray(place) ? place : [place]));
+        return true;
+    },
+
+    // O perfil chegou com o treino aberto: ver o `sair()`.
+    anotarPerfil() {
+        if (this.ativo && this._salvo) this._salvo.perfilChegou = true;
+    },
+
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de
     // filtro, atualizar, sair, entrar), já que ele vai montar uma fila nova de
     // qualquer jeito. Sem isto, sair da conta com o treino aberto deixava o
     // treino ativo, e o `sair()` seguinte devolvia a fila da conta ANTERIOR.
+    // A época da fila guardada NÃO volta aqui: o `resetQueue` sobe a de agora,
+    // e o que estava no ar sobre a fila guardada pousa como numa fila refeita.
     encerrar() {
         if (!this.ativo) return;
         this.ativo = false;
@@ -19050,13 +19168,16 @@ function descontarGestoSemSessao(chave, placar, n) {
 // pedido VOLTA como o próximo card (V1, auditoria de 2026-09-29): ele segue
 // pendente no Waze e já passou pela fila, então nenhuma busca o trazia, e a
 // fila terminava em "Tudo limpo!" com ele pendente. Numa fila refeita (o
-// "Sair", outra conta) nada volta — a fila é de outra sessão.
+// "Sair", outra conta) nada volta — a fila é de outra sessão. A fila que o
+// TREINO guardou é a do gesto (a sessão caiu com ele aberto): o pedido volta
+// quando ela voltar (ver `Treino.guardarDevolucao`, R7-7-04).
 function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila) {
     const anotado = anotadoAntesDoEnvio.delete(place);
     if (descargaNaFila.delete(place) || anotado) tirarDaFilaDeSaida(tipo, place);
     if (pousouNoWaze(result)) return;
     descontarGestoSemSessao(tipo === 'read' ? 'read' : 'rejected', placar, 1);
-    if (epocaFila === AppState.fetchEpoch) devolverPedidoRecusado(place, epocaFila);
+    if (epocaFila === AppState.fetchEpoch
+        || (typeof Treino !== 'undefined' && Treino.ativo === true && Treino.filaGuardada(epocaFila))) devolverPedidoRecusado(place, epocaFila);
 }
 
 function handleMarkAsRead() {
