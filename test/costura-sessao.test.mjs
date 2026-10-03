@@ -664,8 +664,8 @@ function montarLoteNaTrocaDeSessao() {
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
   };
-  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
-    'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
+  const h = montar(['acoesTravadas', 'acoesTravadasForaDaJanela', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
+    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao', 'handleLogout'], deps);
   const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   return { h, deps, AppState, portoes, marcarTodos };
 }
@@ -734,8 +734,8 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace ? AppState.currentPlace.updateRequestID : '-')); },
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), devolverPedidoRecusado: () => log.push('devolveu'),
   };
-  const h = montar(['acoesTravadas', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead', 'marcarEmAndamento',
-    'chaveDoPedido', 'derrubarSessao'], deps);
+  const h = montar(['acoesTravadas', 'acoesTravadasForaDaJanela', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
+    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao'], deps);
   const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   // O 1º pedaço pousa; o 2º fica no ar, e a sessão cai e renova com a MESMA conta.
   const ateAQueda = async () => {

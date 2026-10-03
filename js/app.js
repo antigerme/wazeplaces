@@ -12525,6 +12525,18 @@ function acoesTravadas() {
         || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()));
 }
 
+// A trava do card MENOS as janelas do Desfazer (a do card e as do lightbox),
+// que o "Marcar todos" despacha antes de sair, e menos a aprovação no ar, cujo
+// pedido o lote já deixa de fora (V7). É o que segura o "Marcar todos": ele
+// conferia só a sessão, e com a conta desta aba em DÚVIDA (R6-1-04) o card
+// travava mas o lote abria, marcava a fila inteira com a sessão desta aba e
+// gravava o placar e o Histórico no aparelho — já de OUTRA conta (MEDIDO,
+// auditoria de 2026-10-02, R7-2-02). O aviso é o da trava (`avisoDaTrava`).
+function acoesTravadasForaDaJanela() {
+    return !!(!AppState.authenticated || loteDeLidosEmVoo || escritasConferindo > 0
+        || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()));
+}
+
 // A aprovação da foto do pedido NA TELA saiu e espera a resposta. O card fica
 // na fila até ela voltar (ele só sai quando ela vale), e com ela no ar o ✕ e o
 // ✓ do card seguiam vivos: sem o Desfazer, uma rejeição saía JUNTO com a
@@ -20060,14 +20072,17 @@ function openBatchReadConfirm() {
     // pessoa achando que tinha marcado (auditoria de 2026-10-02, R6-2-01). É a
     // guarda do "Rejeitar os N" (`rejeitarLoteDoAutor`), com o mesmo aviso: na
     // renovação, o da espera da sessão; fora dela, "Sessão expirada".
-    if (!AppState.authenticated) { showToast(t(avisoDaTrava()), 'info'); return; }
+    //
+    // E o lote segue a trava do CARD, menos a janela do Desfazer (que ele
+    // despacha): um lote por vez (os pedidos do primeiro ainda estão na fila e o
+    // diálogo contaria os MESMOS de novo), a conferência de um 401 e a conta
+    // desta aba em DÚVIDA — com ela, o card travava e o lote marcava a fila
+    // inteira no aparelho de outra conta (R7-2-02). Ver a função.
+    if (acoesTravadasForaDaJanela()) { showToast(t(avisoDaTrava()), 'info'); return; }
     // Marcar o LOTE também escreve. No treino a fila é de exemplos: deixar o
     // botão vivo mandaria um lote de ids inertes ao Waze — sem efeito, mas é
     // requisição que ninguém pediu, e o aviso mente sobre o que aconteceu.
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
-    // Um lote por vez: os pedidos do primeiro ainda estão na fila e o diálogo
-    // contaria os MESMOS de novo.
-    if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
     // O pedido EM ANDAMENTO fica de fora (`pedidosEmAndamento`): a aprovação de
     // foto no ar deixa o card na fila até a resposta, e o lote o levava junto —
     // uma SEGUNDA decisão sobre o mesmo pedido, contada no placar (MEDIDO: o
@@ -20089,8 +20104,10 @@ async function handleBatchMarkRead() {
     loteDeLidosContado = null;
     // A sessão caiu com o diálogo ABERTO (a renovação pela extensão): o lote não
     // sai, e o diálogo já fechou com o toque — diz por quê (R6-2-01, ver o
-    // `openBatchReadConfirm`). Antes do "Marcando N…", que mentiria.
-    if (!AppState.authenticated) { showToast(t(avisoDaTrava()), 'info'); return; }
+    // `openBatchReadConfirm`). Antes do "Marcando N…", que mentiria. O mesmo
+    // com o resto da trava do card que pode acender com o diálogo aberto (a conta
+    // desta aba em dúvida, R7-2-02; a conferência de um 401).
+    if (acoesTravadasForaDaJanela()) { showToast(t(avisoDaTrava()), 'info'); return; }
     // E o que entrou em andamento com o diálogo aberto também fica de fora (V7).
     const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p))
         && !pedidosEmAndamento.has(chaveDoPedido(p)));

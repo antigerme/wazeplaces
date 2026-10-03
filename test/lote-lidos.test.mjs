@@ -32,8 +32,10 @@ const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
 // dia do filtro mudáveis por `lugar` (R6-7-4); sem ele, um carimbo neutro.
 // `semSessao`/`renovando`: a sessão caiu, e a extensão está (ou não) renovando
 // em silêncio (`extRenovando`) — o aviso de quem toca vem do `avisoDaTrava`.
+// `duvida`: a conta desta aba em DÚVIDA (R6-1-04: outra sessão tomou o aparelho,
+// e o perfil desta aba ainda não disse de quem ela é — R7-2-02).
 function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pendentes = {}, falhar = false, carimboReal = false,
-  semSessao = false, renovando = false } = {}) {
+  semSessao = false, renovando = false, duvida = false } = {}) {
   const lugar = { pais: 30, dia: '2026-09-25' };
   const historicoCompleto = [];
   const lidos = new Set();
@@ -47,7 +49,8 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
   const pousos = [];
   const mensagem = { textContent: '' };
   const AppState = { authenticated: !semSessao, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0 }, serverTotal: fila.length, hasMore: false,
-    pendingAction: null, inFlightActions: 0, fetchEpoch: 0, filters: { stateId: '', myArea: false } };
+    pendingAction: null, inFlightActions: 0, fetchEpoch: 0, filters: { stateId: '', myArea: false },
+    ...(duvida ? { contaEmDuvida: true } : {}) };
   const processar = (itens) => {
     if (falhar) return { success: false, errorCategory: 'unknown', httpCode: 406 };
     for (const it of itens) {
@@ -97,12 +100,14 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     // que lê se a extensão está renovando (`extRenovando`, desde o R6-1-03: só
     // depois do `aguarde` da ponte).
     extRenovando: renovando,
+    // A dúvida mesma, lida na hora (`contaDestaAbaEmDuvida`): segue de pé enquanto o perfil não chega.
+    contaDestaAbaEmDuvida: () => duvida,
   };
   // O momento do gesto (R6-7-4): o de verdade, ou um neutro.
   if (!carimboReal) deps.carimboDoGesto = () => ({ dia: null, onde: null });
   const chaves = Object.keys(deps);
-  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'marcarEmAndamento',
-    'devolverPedidoRecusado', 'avisoDaTrava', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
+  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr',
+    'marcarEmAndamento', 'devolverPedidoRecusado', 'avisoDaTrava', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
     .map(fatiar).join('\n');
   app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
     + '\nreturn { openBatchReadConfirm, handleBatchMarkRead, acoesTravadas };')(...chaves.map((k) => deps[k]));
@@ -370,4 +375,72 @@ test('R6-2-01: a sessão cai com o diálogo ABERTO — o confirmar não diz "Mar
   await c.app.handleBatchMarkRead();
   assert.deepEqual(c.chamadas, [3]);
   assert.deepEqual(c.mensagens, ['toast.batchMarkingPlural#3', 'toast.batchDonePlural#3']);
+});
+
+// ── R7-2-02: o "Marcar todos" segue a trava do CARD com a conta em DÚVIDA ─────
+// A aba sem perfil, com o aparelho tomado por OUTRA sessão (R6-1-04), trava o
+// card ("espere a conferência da sessão") — e o "Marcar todos" abria, marcava a
+// fila inteira com a sessão desta aba e gravava o placar e o Histórico no
+// aparelho, já de OUTRA conta (MEDIDO no Chromium e no WebKit, auditoria de
+// 2026-10-02). O diálogo e o envio seguem a trava do card, menos a janela do
+// Desfazer (que o lote despacha), com o aviso dela.
+test('R7-2-02: com a conta em DÚVIDA o "Marcar todos" não abre — e diz por quê (a espera da sessão)', () => {
+  const m = montar([pedido(1), pedido(2), pedido(3)], { duvida: true });
+  assert.equal(m.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: a dúvida trava o card');
+  m.app.openBatchReadConfirm();
+  assert.deepEqual(m.modais, [], 'DEFEITO: o diálogo abriu com a conta em dúvida — o confirmar marcaria a fila no aparelho de outra conta');
+  assert.deepEqual(m.mensagens, ['toast.esperaSessao'], `o toque ficou calado (ou com outro aviso): ${JSON.stringify(m.mensagens)}`);
+  // CONTROLE: a mesma fila sem a dúvida abre o diálogo.
+  const c = montar([pedido(1), pedido(2), pedido(3)]);
+  c.app.openBatchReadConfirm();
+  assert.deepEqual(c.modais, ['batchReadModal']);
+});
+
+test('R7-2-02: a dúvida acende com o diálogo ABERTO — o confirmar não manda nada, não conta e diz por quê', async () => {
+  const d = montar([pedido(1), pedido(2), pedido(3)], { duvida: true });
+  d.AppState.contaEmDuvida = false;                 // o diálogo abre ANTES de a dúvida acender
+  d.app.openBatchReadConfirm();
+  assert.deepEqual(d.modais, ['batchReadModal'], 'PRÉ-CONDIÇÃO: o diálogo abriu antes de a dúvida acender');
+  d.AppState.contaEmDuvida = true;                  // outra sessão toma o aparelho com ele aberto
+  await d.app.handleBatchMarkRead();
+  assert.deepEqual(d.chamadas, [], 'DEFEITO: o lote saiu com a conta desta aba em dúvida');
+  assert.equal(d.AppState.stats.read, 0, 'o placar (do aparelho de outra conta) contou o lote');
+  assert.deepEqual(d.historico, [], 'o Histórico (do aparelho de outra conta) ganhou o lote');
+  assert.deepEqual(d.mensagens, ['toast.esperaSessao'], `o lote que não saiu ficou calado: ${JSON.stringify(d.mensagens)}`);
+  // CONTROLE: a dúvida que se desfez antes do confirmar (o perfil chegou: a MESMA conta) — o lote sai.
+  const c = montar([pedido(1), pedido(2), pedido(3)], { duvida: true });
+  c.AppState.contaEmDuvida = false;
+  c.app.openBatchReadConfirm();
+  await c.app.handleBatchMarkRead();
+  assert.deepEqual(c.chamadas, [3], 'CONTROLE: sem a dúvida o lote não saiu — o teste perdeu o sentido');
+});
+
+// A trava do lote é a do card MENOS as janelas do Desfazer (que ele despacha) e
+// a aprovação no ar (cujo pedido ele deixa de fora, V7): nada mais, nada menos.
+// Uma função só pra cada uma, e esta confere que elas não se descolam — o que
+// trava o lote trava o card.
+test('R7-2-02: a trava do lote é a do card sem a janela do Desfazer — o que trava um trava o outro', () => {
+  const corpo = ['acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr'].map(fatiar).join('\n');
+  const avaliar = (estado) => new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente',
+    'loteDeLidosEmVoo', 'escritasConferindo', 'contaDestaAbaEmDuvida', 'aprovacoesNoAr', 'aprovacoesDaQueda', 'chaveDoPedido',
+    corpo + '\nreturn [acoesTravadas(), acoesTravadasForaDaJanela()];')(
+    { authenticated: estado.sessao !== false, pendingAction: estado.janela ? {} : null, currentPlace: pedido(1),
+      contaEmDuvida: !!estado.duvida, fetchEpoch: 0 },
+    estado.aprovacao ? {} : null, null, null, !!estado.lote, estado.conferindo ? 1 : 0, () => !!estado.duvida,
+    new Set(estado.noAr ? ['v1|u1'] : []), new Map(), (p) => p.venueID + '|' + p.updateRequestID);
+  for (const [caso, estado, lote] of [
+    ['sem sessão', { sessao: false }, true],
+    ['o lote no ar', { lote: true }, true],
+    ['a conferência de um 401', { conferindo: true }, true],
+    ['a conta em dúvida', { duvida: true }, true],
+    ['a janela do Desfazer (o lote a despacha)', { janela: true }, false],
+    ['a janela de uma aprovação (o lote a despacha)', { aprovacao: true }, false],
+    ['a aprovação no ar (o lote deixa o pedido de fora)', { noAr: true }, false],
+    ['nada', {}, false],
+  ]) {
+    const [card, doLote] = avaliar(estado);
+    assert.equal(doLote, lote, `${caso}: a trava do lote ${lote ? 'não segurou' : 'segurou'} o "Marcar todos"`);
+    if (doLote) assert.equal(card, true, `${caso}: o lote travou e o card não — as duas réguas se descolaram`);
+    if (caso !== 'nada') assert.equal(card, true, `CONTROLE (${caso}): o card não travou — o caso não exercita a trava`);
+  }
 });
