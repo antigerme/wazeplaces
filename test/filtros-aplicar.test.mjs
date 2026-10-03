@@ -1309,3 +1309,76 @@ test('R66-4: o país APLICADO que a pessoa não edita entra como opção — o s
   await q.abrir();
   assert.deepEqual(telaDoPais(q), { opcoes: '30', pais: '30', dica: true });
 });
+
+// ═══ R7-6-03 · o "Sair" esquece a lista de países da região de antes ═══════
+// O "Sair" repunha região e país (`row/30`), mas deixava em memória a lista de
+// países (e os estados) da região de ANTES — e a lista só é pedida com o cache
+// VAZIO. Entrando de novo na MESMA aba, com a lista da ROW falhando (sinal ruim)
+// ou ainda chegando, os Filtros mostravam os países da NA debaixo da ROW, e o
+// "Aplicar" tocado sem mexer em nada gravava `row/235`, os EUA no servidor da
+// ROW — uma fila vazia (MEDIDO no navegador, auditoria da rodada 7). Aqui o
+// `handleLogout` roda DE VERDADE, nos três caminhos (este "Sair", o da outra aba
+// e a recusa do portão), com o lugar e a lista da página de verdade.
+const LISTA_NA = [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }];
+function sairNaPagina(p, modo) {
+  Object.assign(p.API, {
+    sessionToken: 'tok', chamadas: [],
+    getSession() { return this.sessionToken; }, setSession(t) { this.sessionToken = t; },
+    soltarSessao() { this.sessionToken = null; },
+    destroySession: async () => ({ success: true }), cancelarPareamento: async () => {},
+    // A outra aba relê o lugar do aparelho, que o "Sair" de lá deixou de fábrica.
+    esquecerLugar: () => { p.estado.regiao = 'row'; p.estado.pais = 30; },
+  });
+  Object.assign(p.deps, {
+    pareamentosEmitidos: new Set(), epocaDaSessao: 0,
+    filtrosDeFabrica: () => ({ types: ['NEW_PLACE', 'NEW_PHOTO'], residential: '', stateId: '', managedAreaId: '',
+      myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' }),
+  });
+  const { handleLogout } = montar(['handleLogout'], p.deps);
+  return handleLogout(modo);
+}
+// Uma sessão na NA (os EUA), com a lista da NA (e estados) em memória.
+async function sessaoNaNA() {
+  const p = pagina({ regiao: 'na', pais: 235, perfil: { id: 1, editableCountryIDs: [235], managedAreas: [] },
+    estados: { 235: [{ id: 7, name: 'Illinois' }] } });
+  p.listas.paises = (r) => Promise.resolve(r === 'na'
+    ? { success: true, countries: LISTA_NA.map((c) => ({ ...c })) }
+    : { success: false, errorCategory: 'transient' });
+  await p.abrir();
+  p.els.filtersModal.classList.add('hidden');
+  assert.deepEqual(p.AppState.countries.map((c) => c.id), [235, 40], 'PRÉ-CONDIÇÃO: a lista da NA está em memória');
+  assert.ok(p.AppState.statesByCountry[235], 'PRÉ-CONDIÇÃO: os estados dos EUA estão em memória');
+  return p;
+}
+
+test('R7-6-03: o "Sair" esquece a lista de países e os estados da região de antes — nos três caminhos', async () => {
+  for (const modo of [undefined, { porOutraAba: true }, { recusado: true }]) {
+    const nome = JSON.stringify(modo || {});
+    const p = await sessaoNaNA();
+    await sairNaPagina(p, modo);
+    assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 30], `${nome}: PRÉ-CONDIÇÃO: o lugar voltou ao de fábrica`);
+    assert.deepEqual(p.AppState.countries, [], `${nome}: a lista da NA seguiu em memória debaixo da ROW`);
+    assert.deepEqual(p.AppState.statesByCountry, {}, `${nome}: os estados da região de antes seguiram em memória`);
+  }
+});
+
+test('R7-6-03: entrando de novo na mesma aba, com a lista da ROW falhando, os Filtros não mostram os países da NA — e o "Aplicar" fica na ROW', async () => {
+  const p = await sessaoNaNA();
+  await sairNaPagina(p);
+  // Quem entra de novo (na mesma aba) edita no Brasil; a lista da ROW não vem.
+  p.AppState.profile = { id: 1, editableCountryIDs: [30], managedAreas: [] };
+  await p.abrir();
+  const tela = telaDoPais(p);
+  assert.ok(!tela.opcoes.split(',').includes('235'),
+    `os Filtros em ${p.els.filterRegion.value} mostram os países da NA: ${tela.opcoes}`);
+  aplicarSoDesmarcandoUmTipo(p);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 30],
+    `o "Aplicar" tocado sem mexer no lugar gravou ${p.estado.regiao}/${p.estado.pais}`);
+  // CONTROLE: com a lista da ROW chegando, os Filtros a mostram, peneirada.
+  const q = await sessaoNaNA();
+  await sairNaPagina(q);
+  q.AppState.profile = { id: 1, editableCountryIDs: [30], managedAreas: [] };
+  q.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  await q.abrir();
+  assert.deepEqual(telaDoPais(q), { opcoes: '30', pais: '30', dica: true });
+});

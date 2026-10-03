@@ -9134,6 +9134,14 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
         // fábrica no aparelho: esta o relê, em vez de seguir no lugar de quem saiu.
         API.esquecerLugar();
     }
+    // A lista de países (e os estados) em memória é da região de ANTES, e o lugar
+    // acabou de voltar ao de fábrica: entrando de novo nesta aba, os Filtros
+    // mostravam os países da NA debaixo da ROW (a lista só é pedida com o cache
+    // vazio), e o "Aplicar" tocado sem mexer em nada gravava `row/235`, uma fila
+    // vazia (auditoria da rodada 7, R7-6-03). Vale nos três caminhos — este
+    // "Sair", o da outra aba e a recusa do portão —, como o lugar.
+    AppState.countries = [];
+    AppState.statesByCountry = {};
     removeUndoBanner();
     updateInFlightIndicator();
     updateStats();
