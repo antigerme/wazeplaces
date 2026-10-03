@@ -13732,8 +13732,11 @@ function relerPreferenciasDeOutraAba() {
     atualizarSeloDePular();
     atualizarLinhaDoOffline(0, 0);
     // "Ver quem está no app" desligado lá: aqui a conexão fecha e a pílula some,
-    // sem pedido nenhum (o `visivel: false` a outra já mandou). Religado lá: a
-    // próxima ação daqui liga a visibilidade de carona, como a próxima de lá —
+    // sem pedido nenhum (o `visivel: false` a outra mandou no gesto). Ela o
+    // GRAVA antes de mandar (R7-5-03), e a leitura acima o traz pra cá: se ela
+    // fechar com o pedido no ar, a prova de rede daqui o manda
+    // (`presencaWmeRefazerDesligar`); a resposta boa de lá o apaga. Religado lá:
+    // a próxima ação daqui liga a visibilidade de carona, como a próxima de lá —
     // a pessoa pode seguir triando nesta.
     if ((antes.presenca !== false) !== (agora.presenca !== false)) {
         if (agora.presenca === false) {
@@ -18822,6 +18825,12 @@ const presencaWme = {
     // nesta série — e tem de ser `null`, não 0: com 0, uma sessão confirmada
     // viva por OUTRO motivo, antes, dispensaria a conferência do primeiro 401.
     desligar401Em: null,
+    // O número do ÚLTIMO envio do desligar, e o do que está no ar (0 = nenhum):
+    // com o "invisível" gravado ANTES de sair (R7-5-03), quem decide o gravado
+    // é a resposta do último envio, e nenhuma repetição sai por cima dele (ver
+    // `presencaWmeDesligar`).
+    desligarVez: 0,
+    desligarNoAr: 0,
 };
 
 // Refazer o desligar que o WAZE recusou por estar fora (a resposta veio, com
@@ -18955,8 +18964,27 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     }
     presencaWme.desligarEm = Date.now();
     presencaWme.desligarSessao = marcaDaSessao(API.getSession());
+    // GRAVADO antes de sair, e não só quando a falha volta: com o pedido
+    // pendurado (o sinal fraco: o `_post` espera até 45 s) e o app fechado — ou
+    // encerrado pelo Android — antes da resposta, nada ficava no aparelho, e a
+    // reabertura com rede não mandava o "invisível": a pessoa seguia visível no
+    // WME contra o gesto (auditoria de 2026-10-02, R7-5-03). A resposta decide o
+    // gravado: o sucesso e a recusa de verdade o apagam (abaixo). E a OUTRA aba,
+    // que relê as preferências, o herda: se esta fechar com o pedido no ar, a
+    // prova de rede de lá o manda.
+    if (AppState.preferences.presenca === false) presencaWmeGravarPendente();
+    // Quem decide o gravado é a resposta do ÚLTIMO envio: a de um envio anterior
+    // que chega depois (o gesto de novo, a troca de conta no meio) não apaga o
+    // gravado do envio no ar nem cria pendente por cima dele. E, com um envio no
+    // ar, a repetição espera a resposta dele (ver `presencaWmeRefazerDesligar`):
+    // adotar o gravado mandaria o mesmo "invisível" duas vezes.
+    const vez = (presencaWme.desligarVez || 0) + 1;
+    presencaWme.desligarVez = vez;
+    presencaWme.desligarNoAr = vez;
     API.presencaWaze({ userId: String(id), visivel: false })
         .then((r) => {
+            const ultimo = vez === presencaWme.desligarVez;
+            if (presencaWme.desligarNoAr === vez) presencaWme.desligarNoAr = 0;
             // Só o TRANSIENTE e o 401 ficam pendentes; recusa de verdade não se
             // repete sozinha. E o que nem teve resposta (a rede; o `_post` põe
             // `_motivo`) sai na próxima prova de rede, sem o teto de um minuto:
@@ -18972,13 +19000,16 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
             const e401 = !!(r && r.errorCategory === 'unauthorized');
             if (!(r && r.success) && (!r || r.errorCategory === 'transient' || e401)
                 && AppState.preferences.presenca === false) {
-                presencaWme.desligarPendente = true;
-                presencaWmeGravarPendente();
-                if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
-            } else if (!presencaWme.desligarPendente) {
+                if (ultimo) {
+                    presencaWme.desligarPendente = true;
+                    presencaWmeGravarPendente();
+                    if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
+                }
+            } else if (ultimo && !presencaWme.desligarPendente) {
                 // Chegou (ou foi recusado de vez, ou religaram no meio): o
                 // gravado não vale mais. Só sem pendente NA MEMÓRIA: um desligar
-                // novo, feito com este no ar, já gravou o dele.
+                // novo sem sessão ou sem perfil, feito com este no ar, já gravou
+                // o dele.
                 presencaWmeEsquecerGravado();
             }
             // O 401 confere a sessão — menos quando ela foi CONFIRMADA viva
@@ -18998,7 +19029,8 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
             }
             presencaWmeAnotarDesligar(r);
         })
-        .catch(() => {});
+        // O envio que nem voltou não segura a repetição pra sempre.
+        .catch(() => { if (presencaWme.desligarNoAr === vez) presencaWme.desligarNoAr = 0; });
 }
 
 // O "invisível" pendente fica GRAVADO no aparelho, com a CONTA, nas
@@ -19008,6 +19040,9 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
 // pessoa seguia visível no WME contra o gesto dela (auditoria de 2026-10-01,
 // R6-5-2, MEDIDO: fechar e abrir → 0 `visivel: false`). Quem decide a
 // visibilidade é SÓ o interruptor do app, e o gesto dele tem de chegar ao WME.
+// Por isso ele é gravado no GESTO, antes de o pedido sair, e não só quando a
+// falha volta: o pedido pendurado no sinal fraco não volta nunca se o app
+// fechar (R7-5-03, ver `presencaWmeDesligar`).
 // Só a MESMA conta o manda (`presencaWmeRefazerDesligar`, com o perfil na mão);
 // sai no sucesso, no religar, na troca de conta e no "Sair"
 // (`presencaWmeZerar`, e o "Sair" repõe as preferências de fábrica).
@@ -19062,6 +19097,11 @@ function presencaWmeAnotarDesligar(r) {
 // da MESMA conta na mão — é o `definirPerfil` que chama isto quando ele chega.
 function presencaWmeRefazerDesligar() {
     if (AppState.preferences.presenca !== false) return;
+    // Com um envio no AR, quem decide é a resposta dele: o gravado é dele
+    // (gravado no gesto, R7-5-03), e adotá-lo aqui marcava o pendente na memória
+    // — a resposta boa já não o apagava, e o mesmo "invisível" saía de novo um
+    // minuto depois, a cada desligar com uma prova de rede no meio.
+    if (presencaWme.desligarNoAr) return;
     if (!presencaWme.desligarPendente) {
         const g = AppState.preferences.presencaWmeDesligar;
         const id = AppState.profile && AppState.profile.id;
@@ -19099,6 +19139,10 @@ function presencaWmeZerar() {
     presencaWme.desligarFalhaAnotadaEm = 0;
     presencaWme.desligarEm = 0;
     presencaWme.desligarSessao = null;
+    // O envio no ar é da conta que saiu: a resposta dele não decide o gravado de
+    // quem entrar, e ele não segura a repetição dela (ver `presencaWmeDesligar`).
+    presencaWme.desligarVez = (presencaWme.desligarVez || 0) + 1;
+    presencaWme.desligarNoAr = 0;
     presencaWme.ultimaEm = 0;
     presencaWme.enviadas = 0;
     presencaWme.falhas = 0;
