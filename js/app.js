@@ -7350,13 +7350,42 @@ function devFabCoords(canto, w, h) {
 // ambíguo entre as duas caixas.
 const DEV_FAB_AMOSTRAS = [0.02, 0.5, 0.98];
 
+// Os AVISOS PASSAGEIROS — o banner do topo (o aviso da consequência, o da recusa
+// automática, a dica do Desfazer) e o rodapé do toast e do Desfazer — não
+// decidem o canto: o FAB mede o que fica POR BAIXO deles. O banner é uma caixa
+// sem nada acionável e sem `.nao-cobrir`, e lido como o que está no ponto ele
+// fazia o `cima-dir` passar por LIVRE com o placar ali embaixo: tocado com o
+// banner na tela, o FAB ia pra cima do "Restam" e FICAVA lá depois de o banner
+// sair, porque nada reavalia o canto quando um aviso some (R7-4-01, MEDIDO: 21%
+// da tinta de "310" coberta a 390×844, 30% no iPhone SE, o mesmo no WebKit). O
+// rodapé é o espelho: o "Desfazer" é um botão, e espantava o FAB pra um canto
+// pior, onde ele ficava depois de a janela fechar. O aviso some sozinho; o que
+// está por baixo dele é o que o FAB vai cobrir depois.
+const DEV_FAB_PASSAGEIROS = '#bannerStack, #notifyStack';
+
+// O que recebe o dedo no ponto sem o próprio FAB e sem os avisos passageiros.
+// Pela PILHA do ponto (`elementsFromPoint`, de cima pra baixo), e não tirando
+// os avisos do hit-test pelo `pointer-events`: o filho de um aviso que traga o
+// próprio `pointer-events-auto` escaparia do ajuste no contêiner (é o que o
+// botão do FAB faz com o dele, ver abaixo).
+function devFabSob(px, py, fab) {
+    const pilha = typeof document.elementsFromPoint === 'function'
+        ? document.elementsFromPoint(px, py) : [document.elementFromPoint(px, py)];
+    for (const el of pilha) {
+        if (!el || fab.contains(el)) continue;
+        if (el.closest && el.closest(DEV_FAB_PASSAGEIROS)) continue;
+        return el;
+    }
+    return null;
+}
+
 function devFabVitimas(canto, w, h, fab) {
     const { x, y } = devFabCoords(canto, w, h);
     const vitimas = new Set();
     const pontos = [];
     for (const fx of DEV_FAB_AMOSTRAS) for (const fy of DEV_FAB_AMOSTRAS) pontos.push([fx, fy]);
     for (const [fx, fy] of pontos) {
-        const sob = document.elementFromPoint(x + w * fx, y + h * fy);
+        const sob = devFabSob(x + w * fx, y + h * fy, fab);
         const alvo = sob && sob.closest(DEV_FAB_EVITAR);
         // O próprio FAB nunca conta como vítima. A segunda condição não é
         // paranoia: `pointer-events: none` no contêiner NÃO tira o botão do
