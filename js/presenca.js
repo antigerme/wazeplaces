@@ -1220,7 +1220,8 @@ function presencaAgendarLida(id) {
 }
 
 // Manda o "lida" pendente — o MESMO pedido, pela rajada que venceu, pelo
-// fechamento da conversa (`fechando`) ou pelo perfil que voltou.
+// fechamento da conversa (`fechando`), pela página indo pro fundo ou saindo
+// (`presencaPagarAoSair`, como o fechamento) ou pelo perfil que voltou.
 //
 // "Olhando é lida": fechar a conversa antes de a rajada vencer (1,2 s) deixava
 // no Waze como não lida uma mensagem que a pessoa viu, e a lista seguinte a
@@ -1254,12 +1255,13 @@ function presencaPagarLida({ fechando = false } = {}) {
 }
 
 // Paga o que está DEVENDO (`lidaDevendo`): o mesmo pedido de sempre, um por
-// conversa. Só no fechamento de uma conversa e no `presencaSincronizar` — o
-// freio que já existia: nunca por relógio, por mensagem ou por swipe, então
-// com o Waze fora é um pedido por conversa devendo a cada gesto desses, e nada
-// mais. Sem saber de quem é a sessão, segue devendo. A conversa com a rajada
-// correndo fica pra ela (a rajada não se adianta, e o "lida" dela cobre o da
-// dívida: o Waze marca a conversa inteira).
+// conversa. Só no fechamento de uma conversa, no `presencaSincronizar` e com a
+// página indo pro fundo ou saindo (`presencaPagarAoSair`) — o freio que já
+// existia: nunca por relógio, por mensagem ou por swipe, então com o Waze fora
+// é um pedido por conversa devendo a cada gesto desses, e nada mais. Sem saber
+// de quem é a sessão, segue devendo. A conversa com a rajada correndo fica pra
+// ela (a rajada não se adianta, e o "lida" dela cobre o da dívida: o Waze marca
+// a conversa inteira).
 //
 // É sempre de mensagem que a pessoa VIU: a que chega fora da vista tira a
 // dívida da conversa (ver `presencaMensagemDoFluxo`). Por isso sai como a do
@@ -2253,17 +2255,39 @@ function presencaAoVoltar() {
     if (Presenca.aberta) presencaAgendarLida(Presenca.aberta);
 }
 
+// A página vai pro fundo (`visibilitychange` oculto) ou SAI (`pagehide`) com o
+// "lida" da rajada esperando (`lidaPendente`): a mensagem chegou com a pessoa
+// olhando, e ele é pago AGORA, como o fechamento da conversa paga — e o que
+// estava devendo, junto (`presencaPagarLida` com `fechando`). Antes, a rajada
+// que vencia com a tela apagada saía sem marcar (a pessoa não está "olhando") e
+// sem virar dívida, e o app encerrado no fundo não mandava mais nada: a
+// mensagem VISTA ficava não lida no Waze e voltava como "1 mensagem nova" na
+// próxima abertura (auditoria de 2026-10-02, R7-5-05). Vai com `keepalive` (o
+// modo "saindo" do api.js), que sobrevive à página que morre, como a descarga
+// da janela do Desfazer. O modo vale só pra ESTE envio: a página escondida
+// segue viva, e as outras requisições dela não são desta conta. Sem nada
+// esperando, nada sai.
+function presencaPagarAoSair() {
+    if (!Presenca.lidaPendente && !Presenca.lidaDevendo.size) return;
+    const antes = API.saindo;
+    const trocar = typeof API.setSaindo === 'function';
+    if (trocar) API.setSaindo(true);
+    try { presencaPagarLida({ fechando: true }); } finally { if (trocar) API.setSaindo(antes); }
+}
+
 function presencaMontar() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') presencaAoVoltar();
+        else presencaPagarAoSair();
     });
     // bfcache (o jeito comum de um PWA voltar no iOS): a página volta congelada,
     // nem sempre com `visibilitychange`.
     window.addEventListener('pageshow', (ev) => { if (ev.persisted) presencaAoVoltar(); });
     window.addEventListener('online', () => { clearTimeout(Presenca.timers.fluxo); presencaFluxoGarantir(); });
-    // Sair da página fecha a conexão com o Google na hora. Voltar pelo bfcache
-    // religa pelo `pageshow`.
-    window.addEventListener('pagehide', () => presencaFluxoFechar());
+    // Sair da página paga o "lida" que esperava (ver `presencaPagarAoSair`) e
+    // fecha a conexão com o Google na hora. Voltar pelo bfcache religa pelo
+    // `pageshow`.
+    window.addEventListener('pagehide', () => { presencaPagarAoSair(); presencaFluxoFechar(); });
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => {

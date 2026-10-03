@@ -292,6 +292,84 @@ test('R7-5-02 com a dívida, a lista de CARONA não devolve a mensagem VISTA com
   assert.equal(w.c.P.presencaNaoLidasDe(CAF), 2, 'a mensagem nova (não vista) sumiu da conta');
 });
 
+// ── R7-5-05: o "lida" da rajada ao ir pro fundo e ao sair ────────────────────
+
+function comConversaNaTela() {
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir'
+    ? { success: true, mensagens: [], maisAntigas: false, lida: true } : { success: true }) } });
+  c.P.presencaMontar();
+  c.P.Presenca.conversas = [{ id: CAF, nome: 'cafanha', naoLidas: 0, atividade: 0, ultima: null }];
+  return c;
+}
+const ouvintes = (alvo, tipo) => alvo._ouv[tipo] || [];
+const irProFundo = (c) => { c.doc.visibilityState = 'hidden'; for (const fn of ouvintes(c.doc, 'visibilitychange')) fn(); };
+const sairDaPagina = (c) => { for (const fn of ouvintes(c.win, 'pagehide')) fn({ persisted: false }); };
+const comKeepalive = (c, x) => c.chamadas.saindoNoChat[c.chamadas.chat.indexOf(x)];
+
+test('R7-5-05 o app que vai pro fundo dentro da rajada PAGA o "lida" da mensagem que chegou na tela — com keepalive, e uma vez só', async () => {
+  const c = comConversaNaTela();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  await chega(c, 1);                                        // a 1, na tela: a rajada corre (1,2 s)
+  assert.equal(c.P.Presenca.lidaPendente, CAF, 'CONTROLE: a rajada tem que estar correndo');
+  irProFundo(c);
+  assert.equal(lidas(c, CAF).length, 1, 'DEFEITO: ir pro fundo dentro da rajada não pagou o "lida" — a mensagem VISTA fica não lida');
+  assert.equal(comKeepalive(c, lidas(c, CAF)[0]), true, 'o "lida" saiu sem keepalive: morre com a página');
+  assert.equal(c.API.saindo, false, 'o modo "saindo" ficou ligado pras outras requisições da página escondida');
+  sairDaPagina(c);                                          // e o app fecha
+  await c.rodarTimers();
+  await tick();
+  assert.equal(lidas(c, CAF).length, 1, 'o "lida" saiu duas vezes');
+  assert.equal(c.P.Presenca.lidaPendente, null);
+  assert.equal(c.P.Presenca.lidaDevendo.size, 0);
+});
+
+test('R7-5-05 CONTROLE: na tela, a rajada sai no prazo, sem keepalive', async () => {
+  const c = comConversaNaTela();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  await chega(c, 1);
+  await c.rodarTimers();
+  await tick();
+  assert.equal(lidas(c, CAF).length, 1);
+  assert.equal(comKeepalive(c, lidas(c, CAF)[0]), false, 'o "lida" da rajada na tela saiu com keepalive');
+});
+
+test('R7-5-05 sair da página (o `pagehide`, sem passar pelo fundo) também paga — e sem nada esperando, nada sai', async () => {
+  const c = comConversaNaTela();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  await chega(c, 1);
+  sairDaPagina(c);
+  assert.equal(lidas(c, CAF).length, 1, 'DEFEITO: fechar a página dentro da rajada não pagou o "lida"');
+  assert.equal(comKeepalive(c, lidas(c, CAF)[0]), true, 'o "lida" do `pagehide` saiu sem keepalive');
+  // Sem rajada nem dívida, ir pro fundo e sair não pedem nada — nem mexem no modo
+  // "saindo". (Abrir a conversa agenda uma rajada pro que chegou durante o
+  // `abrir`: ela vence antes, sem nada a marcar.)
+  const d = comConversaNaTela();
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  await d.rodarTimers();
+  await tick();
+  assert.equal(d.P.Presenca.lidaPendente, null, 'CONTROLE: não pode haver rajada esperando');
+  const antes = d.chamadas.chat.length;
+  irProFundo(d);
+  sairDaPagina(d);
+  assert.equal(d.chamadas.chat.length, antes, 'sem nada esperando, ir pro fundo pediu alguma coisa');
+  assert.deepEqual(d.chamadas.setSaindo, [], 'sem nada esperando, o modo "saindo" foi mexido');
+});
+
+test('R7-5-05 sem o perfil (a renovação silenciosa), ir pro fundo não manda nada: o "lida" vira dívida, como no fechamento', async () => {
+  const c = comConversaNaTela();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  await chega(c, 1);
+  c.AppState.profile = null;
+  irProFundo(c);
+  assert.equal(lidas(c, CAF).length, 0, 'saiu sem saber de quem é a sessão');
+  assert.deepEqual([...c.P.Presenca.lidaDevendo], [CAF], 'o "lida" da rajada se perdeu (devia esperar o perfil)');
+});
+
 // ── O app.js, fatiado ────────────────────────────────────────────────────────
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
