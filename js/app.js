@@ -16697,12 +16697,24 @@ function contaAgora() {
 // da fonte única (o defeito do alarme falso, auditoria de 2026-09-26) ela agia
 // com a lista da conta ANTERIOR. Hoje só o `definirPerfil` grava o perfil; isto
 // é o cinto: se um caminho novo escapar dele, a recusa não roda.
+//
+// "Confirmado nesta sessão" vale por DUAS provas: a marca do aparelho é a
+// sessão de agora, ou ESTA aba passou pelo `aoConhecerConta` com a sessão dela
+// (`contaConfirmadaNestaAba`). Com duas abas da MESMA conta, cada uma com a sua
+// sessão, a marca do aparelho é a da sessão guardada — a da outra aba, que
+// entrou de novo —, e só a marca do aparelho deixava esta sem a recusa
+// automática, calada, até recarregar (auditoria de 2026-10-02, R7-2-05). O dono
+// do aparelho continua tendo que ser o perfil vivo: a lista de autores é dele.
+let contaConfirmadaNestaAba = null;   // { id, s }: a conta e a marca da sessão desta aba
 function contaConfirmada() {
     const vivo = AppState.profile && AppState.profile.id;
     if (vivo === undefined || vivo === null || vivo === '') return false;
     try {
         const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
-        return !!(c && String(c.id) === String(vivo) && c.s === marcaDaSessao(API.getSession()));
+        if (!c || String(c.id) !== String(vivo)) return false;
+        const s = marcaDaSessao(API.getSession());
+        const aqui = contaConfirmadaNestaAba;
+        return c.s === s || !!(aqui && aqui.id === String(vivo) && aqui.s === s);
     } catch (e) { return false; }
 }
 
@@ -16727,7 +16739,18 @@ function aoConhecerConta(perfil) {
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
-    safeLS.set(CONTA_KEY, JSON.stringify({ id, s: marcaDaSessao(API.getSession()) }));
+    const s = marcaDaSessao(API.getSession());
+    contaConfirmadaNestaAba = { id, s };
+    // A marca do APARELHO é a da sessão GUARDADA nele: só esta aba a regrava
+    // quando a sessão dela é a guardada, ou quando a conta muda (nenhuma, ou
+    // outra). A aba de OUTRA sessão da MESMA conta — a da dúvida que se resolveu
+    // como a mesma conta (R6-1-04), ou a que a outra aba deixou pra trás ao entrar
+    // de novo — gravava a marca dela por cima: na aba dona do aparelho a
+    // `contaConfirmada` virava falsa, e a recusa automática parava calada
+    // (auditoria de 2026-10-02, R7-1-03). A desta aba fica na memória.
+    if (!antes || String(antes.id) !== id || sessaoDestaAbaEhAGuardada()) {
+        safeLS.set(CONTA_KEY, JSON.stringify({ id, s }));
+    }
     if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
 }
 

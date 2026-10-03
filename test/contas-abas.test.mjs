@@ -1204,6 +1204,84 @@ test('R6-1-04: a conta confirmada destrava — e sem dúvida nenhuma, nada é pe
   assert.equal(C.pedidosDePerfil, 0, 'a aba da sessão do aparelho pediu o perfil à toa');
   assert.equal(C.acoesTravadas(), false);
 });
+// ═══ R7-1-03 / R7-2-05 · duas abas da MESMA conta, cada uma com a sua sessão ═══
+// A marca da conta no aparelho (`CONTA_KEY.s`) é a da sessão GUARDADA. Duas
+// abas da mesma conta com sessões diferentes (o botão do WME abrindo outra aba,
+// o login de novo numa delas, a renovação de cada uma) brigavam por ela, e a
+// `contaConfirmada` — o portão da recusa automática — virava falsa na aba que
+// perdia, calada, até recarregar (MEDIDO, auditoria de 2026-10-02):
+//   · R7-1-03: a dúvida da aba sem perfil (R6-1-04) que se resolve como a MESMA
+//     conta regravava a marca com a sessão DELA, e a dona do aparelho perdia;
+//   · R7-2-05: a sessão nova da outra aba (o login de novo) tirava a desta.
+// Uma regra pros dois: a marca do aparelho só a sessão guardada (ou a troca de
+// conta) regrava, e cada aba confirma a conta com a SUA sessão, na memória.
+function abaDaConta(comp, { token, perfilId = null }) {
+  const aba = { escreveuNoAviso: [], noAviso: false, aoGravarEmOutraAba() {} };
+  const localStorage = comp.para(aba);
+  const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
+  const AppState = { authenticated: true, profile: perfilId ? { id: perfilId } : null };
+  const deps = { AppState, safeLS, localStorage, CONTA_KEY, API: { sessionToken: token, getSession: () => token },
+    contaConfirmadaNestaAba: null, saidaEsperandoConta: false, filaAtravessouSessao: false,
+    carimbarContaNaSaida: () => {}, esquecerOutraConta: (id) => { aba.trocou = id; }, esvaziarFilaDeSaida: () => {} };
+  Object.assign(aba, montar(['aoConhecerConta', 'contaConfirmada', 'sessaoDestaAbaEhAGuardada', 'marcaDaSessao'], deps),
+    { AppState, deps });
+  // O perfil chegou (o `definirPerfil`: o perfil na memória e a conta conferida).
+  aba.perfilChegou = (id) => { AppState.profile = { id }; aba.aoConhecerConta({ id }); };
+  comp.abas.push(aba);
+  return aba;
+}
+
+test('R7-1-03: a dúvida que se resolve como a MESMA conta não regrava a marca do aparelho — a aba dona dele segue confirmada', () => {
+  // B entrou de novo com X: a sessão guardada e a marca do aparelho são as DELA.
+  const comp = aparelhoComASessao('tok-x2', { id: '4242', s: marcaDe('tok-x2') });
+  const B = abaDaConta(comp, { token: 'tok-x2', perfilId: 4242 });
+  const A = abaDaConta(comp, { token: 'tok-x1' });   // sem perfil: a dúvida (R6-1-04) o pediu na hora
+  assert.equal(B.contaConfirmada(), true, 'PRÉ-CONDIÇÃO: a aba dona do aparelho está confirmada');
+  A.perfilChegou(4242);                             // a conferência: a MESMA conta
+  assert.equal(A.trocou, undefined, 'a mesma conta foi tratada como troca');
+  assert.equal(comp.ler(CONTA_KEY).s, marcaDe('tok-x2'),
+    'DEFEITO: a aba de OUTRA sessão regravou a marca do aparelho com a sessão dela');
+  assert.equal(B.contaConfirmada(), true, 'DEFEITO: a aba dona do aparelho perdeu a recusa automática, calada');
+  assert.equal(A.contaConfirmada(), true, 'a aba que confirmou a conta com a sessão dela ficou sem a recusa automática');
+  // CONTROLES: a aba cuja sessão É a guardada regrava a marca (a renovação com a
+  // mesma conta), e a troca de conta grava o dono novo.
+  const c = aparelhoComASessao('tok-x3', { id: '4242', s: marcaDe('tok-x2') });
+  abaDaConta(c, { token: 'tok-x3' }).perfilChegou(4242);
+  assert.equal(c.ler(CONTA_KEY).s, marcaDe('tok-x3'), 'a sessão guardada não regravou a marca do aparelho');
+  const o = aparelhoComASessao('tok-y', { id: '4242', s: marcaDe('tok-x2') });
+  const Y = abaDaConta(o, { token: 'tok-y' });
+  Y.perfilChegou(5151);
+  assert.equal(Y.trocou, '5151', 'PRÉ-CONDIÇÃO: a troca de conta foi vista');
+  assert.deepEqual(o.ler(CONTA_KEY), { id: '5151', s: marcaDe('tok-y') }, 'a troca de conta não gravou o dono novo');
+  // E a troca grava o dono novo MESMO sem a sessão desta aba guardada (a queda
+  // da outra aba tirou o token do aparelho): o `esquecerOutraConta` acabou de
+  // apagar o que era da anterior, e um dono velho no aparelho faria o próximo
+  // perfil "trocar" de novo — apagando o que é de quem entrou.
+  const semToken = aparelhoComASessao('tok-x2', { id: '4242', s: marcaDe('tok-x2') });
+  semToken.dados.delete(TOKEN);
+  abaDaConta(semToken, { token: 'tok-y' }).perfilChegou(5151);
+  assert.equal(semToken.ler(CONTA_KEY).id, '5151', 'a troca de conta sem a sessão guardada deixou o dono velho no aparelho');
+});
+
+test('R7-2-05: a OUTRA aba da mesma conta entra de novo (sessão nova) — a recusa automática desta segue', () => {
+  const comp = aparelhoComASessao('tok-x1', null);   // A: a sessão dela é a guardada
+  const A = abaDaConta(comp, { token: 'tok-x1' });
+  A.perfilChegou(4242);
+  assert.equal(A.contaConfirmada(), true, 'PRÉ-CONDIÇÃO: a aba confirmou a conta');
+  // B entra de novo com a MESMA conta: o token e a marca do aparelho passam a ser os dela.
+  comp.dados.set(TOKEN, 'tok-x2');
+  const B = abaDaConta(comp, { token: 'tok-x2' });
+  B.perfilChegou(4242);
+  assert.equal(comp.ler(CONTA_KEY).s, marcaDe('tok-x2'), 'PRÉ-CONDIÇÃO: a marca do aparelho é a da sessão nova de B');
+  assert.equal(B.contaConfirmada(), true);
+  assert.equal(A.contaConfirmada(), true, 'DEFEITO: a sessão nova da outra aba desligou a recusa automática desta, calada');
+  // CONTROLE: OUTRA conta toma o aparelho noutra aba — esta deixa de estar
+  // confirmada (a lista de autores do aparelho não é mais dela).
+  comp.dados.set(TOKEN, 'tok-y');
+  abaDaConta(comp, { token: 'tok-y' }).perfilChegou(5151);
+  assert.equal(A.contaConfirmada(), false, 'a aba de X seguiu confirmada num aparelho que é de Y');
+});
+
 function montarPerfilQueChega({ tokenDesta, tokenNoAparelho = 'tok-222', dono = '222' }) {
   const ap = aparelho({ [TOKEN]: tokenNoAparelho, [CONTA_KEY]: { id: dono, s: 'm' } });
   const log = [];

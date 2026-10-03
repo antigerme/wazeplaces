@@ -36,16 +36,18 @@ const constante = (nome) => {
 function montar({ perfil = null, token = 'tok-B' } = {}) {
   const guardado = new Map();
   const log = [];
+  const sessao = { token };
+  // UMA aba: a sessão dela é a guardada no aparelho (a de duas abas mora em
+  // test/contas-abas, R7-1-03).
   const safeLS = {
-    get: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    get: (k) => (guardado.has(k) ? guardado.get(k) : k === 'waze_session_token' ? sessao.token : null),
     set: (k, v) => guardado.set(k, String(v)),
     remove: (k) => { log.push('-' + k); guardado.delete(k); },
   };
   const AppState = { profile: perfil, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {}, authenticated: true };
-  const sessao = { token };
   const deps = {
     safeLS, AppState,
-    API: { getSession: () => sessao.token, getRegion: () => 'row' },
+    API: { getSession: () => sessao.token, get sessionToken() { return sessao.token; }, getRegion: () => 'row' },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     dfato: (k) => log.push('dfato:' + k),
@@ -60,11 +62,13 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     esquecerFocoAutor: () => log.push('foco'),
     presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
     esquecerEscolhasDaContaAnterior: () => log.push('escolhas'),   // (test/contas-abas, A3)
+    fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
-    'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida'];
+    'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
+    'sessaoDestaAbaEhAGuardada'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false;\n${nomes.map(fatiar).join('\n')}
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, contaConfirmadaNestaAba = null;\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
     ...chaves.map((k) => deps[k]));
   return { app, guardado, log, AppState, sessao, deps };
@@ -298,8 +302,9 @@ test('só a fonte única (`definirPerfil`) grava um perfil no AppState — nenhu
 function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes = null }) {
   const guardado = new Map();
   const log = [];
+  // UMA aba: a sessão de agora é a guardada no aparelho.
   const safeLS = {
-    get: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    get: (k) => (guardado.has(k) ? guardado.get(k) : k === 'waze_session_token' ? tokenAgora : null),
     set: (k, v) => guardado.set(k, String(v)),
     remove: (k) => { log.push('-' + k); guardado.delete(k); },
   };
@@ -308,7 +313,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
   const AppState = { authenticated: true, profile: perfilAntes, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {} };
   const deps = {
     safeLS, AppState, epocaDaSessao: 0,
-    API: { getSession: () => tokenAgora, getProfile: async () => sonda },
+    API: { getSession: () => tokenAgora, sessionToken: tokenAgora, getProfile: async () => sonda },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     VERIFICA_SESSAO_MS: 0, setTimeout: (f) => f(),
@@ -328,11 +333,12 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     reavaliarFotoAbertaPeloPerfil: () => {},   // test/lightbox-escritas (R6-3-07)
     esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
+    fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
-    'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized'];
+    'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 };
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 }, contaConfirmadaNestaAba = null;
     ${nomes.map(fatiar).join('\n')}
     return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState, guardado };
@@ -369,12 +375,14 @@ test('a recusa automática só age com a conta CONFIRMADA nesta sessão (`contaC
   const iAlvos = r.indexOf('const alvos');
   assert.ok(iPortao > 0 && iConta > iPortao && iConta < iAlvos, 'a recusa automática não confere de quem é a lista de autores');
   const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
-  const confirma = (perfil, guardada, token) => {
+  // `nestaAba`: o que o `aoConhecerConta` DESTA aba anotou na memória (R7-2-05).
+  const confirma = (perfil, guardada, token, nestaAba = null) => {
     const g = new Map();
     if (guardada) g.set('waze_places_conta', JSON.stringify(guardada));
-    return new Function('AppState', 'safeLS', 'CONTA_KEY', 'API', fatiar('marcaDaSessao') + '\n' + fatiar('contaConfirmada')
+    return new Function('AppState', 'safeLS', 'CONTA_KEY', 'API', 'contaConfirmadaNestaAba',
+      fatiar('marcaDaSessao') + '\n' + fatiar('contaConfirmada')
       + '\nreturn contaConfirmada();')({ profile: perfil }, { get: (k) => (g.has(k) ? g.get(k) : null) },
-      'waze_places_conta', { getSession: () => token });
+      'waze_places_conta', { getSession: () => token }, nestaAba);
   };
   assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-B') }, 'tok-B'), true);
   assert.equal(confirma({ id: 222 }, { id: '111', s: marca('tok-A') }, 'tok-B'), false,
@@ -382,4 +390,15 @@ test('a recusa automática só age com a conta CONFIRMADA nesta sessão (`contaC
   assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-A') }, 'tok-B'), false,
     'a conta vista em OUTRA sessão passou como confirmada nesta');
   assert.equal(confirma(null, { id: '222', s: marca('tok-B') }, 'tok-B'), false, 'sem perfil vivo não há quem confirmar');
+  // R7-2-05: duas abas da MESMA conta, cada uma com a sua sessão. A outra entrou
+  // de novo e a marca do aparelho é a sessão DELA (tok-B2); esta aba confirmou a
+  // conta com a sua (tok-B) — e segue confirmada.
+  assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-B2') }, 'tok-B', { id: '222', s: marca('tok-B') }), true,
+    'DEFEITO (R7-2-05): a sessão nova da OUTRA aba da mesma conta desligou a recusa automática desta, calada');
+  // CONTROLES da mesma regra: a confirmação desta aba é de OUTRA sessão (a dela
+  // caiu e voltou sem perfil), ou o dono do aparelho é OUTRA conta — não vale.
+  assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-B2') }, 'tok-B3', { id: '222', s: marca('tok-B') }), false,
+    'a confirmação de uma sessão que já não é a desta aba valeu');
+  assert.equal(confirma({ id: 222 }, { id: '111', s: marca('tok-A') }, 'tok-B', { id: '222', s: marca('tok-B') }), false,
+    'a confirmação desta aba valeu com o aparelho de OUTRA conta (a lista de autores é dela)');
 });
