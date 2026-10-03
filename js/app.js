@@ -14123,6 +14123,29 @@ function contaDestaAbaEmDuvida() {
 // próximo pedido é o do `refazerPerfilSeFaltar`, que passa por aqui.
 let conferindoContaDestaAba = false;
 function conferirContaDestaAba() {
+    // A dúvida ACENDEU agora: o que já tinha saído do gesto e ainda não gravou
+    // nada é de uma conta que esta aba não sabe mais se é a dona do aparelho. A
+    // trava segurava só as decisões NOVAS: o ✕ que estava na janela do Desfazer
+    // saía no fim dela com a sessão desta aba, e o pouso gravava o Histórico, os
+    // autores, as conquistas e a marca do primeiro ✕ no aparelho — já de OUTRA
+    // conta (MEDIDO, auditoria de 2026-10-02, R7-2-01). Vale o que a QUEDA faz
+    // (`derrubarSessao`): a janela é cancelada e a decisão volta como card (o
+    // "Rejeitar os N" também: é a mesma janela), as do lightbox também, e a
+    // época troca — a resposta do que estava no ar não grava nada no aparelho
+    // (ela volta pela regra da queda, `decisaoDepoisDaQueda`), e o lote no ar
+    // para e não trava a sessão que segue. Quando o perfil chegar: a MESMA
+    // conta, o card destrava e a pessoa decide de novo; OUTRA, a aba sai.
+    if (AppState.contaEmDuvida !== true) {
+        AppState.contaEmDuvida = true;
+        epocaDaSessao++;
+        if (AppState.pendingAction) {
+            AppState.pendingAction.cancel(true);
+            AppState.pendingAction = null;
+        }
+        cancelarPendenciasDoLightbox();
+        loteDeLidosEmVoo = false;
+        aprovacoesAtravessamAQueda();
+    }
     AppState.contaEmDuvida = true;
     aplicarTravaDeAcao();
     if (conferindoContaDestaAba) return;

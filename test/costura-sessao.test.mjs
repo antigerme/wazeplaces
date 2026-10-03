@@ -338,7 +338,7 @@ function lsFalso() {
 
 // `janela`: com a janela do Desfazer (a ação fica pendente até vencer); sem
 // ela, o gesto sai na hora e fica EM VOO até o teste soltar a resposta.
-function montarVoo({ janela = false } = {}) {
+function montarVoo({ janela = false, extras = [] } = {}) {
   const { safeLS, guardado } = lsFalso();
   const pendentes = [];
   const gravados = [];
@@ -370,7 +370,7 @@ function montarVoo({ janela = false } = {}) {
     'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
     'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
-    'handleReject', 'handleMarkAsRead', 'derrubarSessao'], deps);
+    'handleReject', 'handleMarkAsRead', 'derrubarSessao', ...extras], deps);
   const P = { venueID: 'v1', updateRequestID: 'u1', creatorId: 9 };
   AppState.queue = [P, { venueID: 'v2', updateRequestID: 'u2', creatorId: 9 }];
   AppState.currentPlace = P;
@@ -390,6 +390,70 @@ test('K7: o ✕/✓ em voo, a sessão cai e a resposta (401) chega depois — o 
     assert.equal(m.AppState.stats[chave], 0);
     assert.equal(m.h.carregarFilaDeSaida().length, 0, 'a resposta de outra época entrou na fila de saída');
   }
+});
+
+// ═══ R7-2-01 · a decisão no ar quando a conta DESTA aba fica em dúvida ═══════
+// A aba sem perfil, com o aparelho tomado por OUTRA sessão (R6-1-04), travava
+// as decisões NOVAS — e o ✕ que já estava na janela do Desfazer saía no fim
+// dela com a sessão desta aba; o pouso gravava o Histórico, os autores, as
+// conquistas e a marca do primeiro ✕ no aparelho, já de OUTRA conta (MEDIDO,
+// auditoria de 2026-10-02). Quando a dúvida acende vale o que a queda faz: a
+// janela é cancelada (a decisão volta como card) e a época troca — a resposta
+// do que estava no ar não grava nada no aparelho.
+const DUVIDA = ['conferirContaDestaAba'];
+
+test('R7-2-01: a dúvida ACENDE com o ✕ na janela do Desfazer — a decisão não sai, volta como card e o placar desconta', async () => {
+  const m = montarVoo({ janela: true, extras: DUVIDA });
+  m.h.handleReject();
+  await tique();
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: o ✕ está na janela do Desfazer');
+  assert.equal(m.gravados.at(-1).rejected, 1, 'PRÉ-CONDIÇÃO: o gesto gravou o +1');
+  m.h.conferirContaDestaAba();
+  assert.equal(m.AppState.pendingAction, null, 'DEFEITO: a janela seguiu correndo com a conta desta aba em dúvida');
+  assert.equal(m.AppState.contaEmDuvida, true);
+  assert.equal(m.AppState.queue[0], m.P, 'a decisão cancelada não voltou como o card da frente');
+  assert.equal(m.gravados.at(-1).rejected, 0, 'o +1 de uma decisão que não saiu ficou gravado');
+  await tique(10);
+  assert.deepEqual(m.pendentes, [], 'a decisão saiu pro Waze mesmo com a janela cancelada');
+  // Um aviso a mais da outra aba (a dúvida já acesa) não cancela nem troca a época de novo.
+  const epoca = m.deps.epocaDaSessao;
+  m.h.conferirContaDestaAba();
+  assert.equal(m.deps.epocaDaSessao, epoca, 'a época trocou de novo com a dúvida já acesa');
+});
+
+test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida — não grava nada no aparelho', async () => {
+  for (const [caso, resposta] of [['pousou', { success: true }], ['caiu a rede', { success: false, errorCategory: 'transient' }]]) {
+    const m = montarVoo({ extras: DUVIDA });
+    m.h.handleReject();
+    await tique();
+    assert.equal(m.pendentes.length, 1, `${caso}: PRÉ-CONDIÇÃO: o ✕ saiu e está no ar`);
+    m.h.conferirContaDestaAba();
+    m.pendentes[0](resposta);
+    await tique(20);
+    for (const gravaria of ['recordHistory', 'registrarRejeicaoDeAutor', 'registrarAcaoConfirmada', 'avisarConsequencia']) {
+      assert.ok(!m.h.chamou.includes(gravaria), `DEFEITO (${caso}): a resposta com a conta em dúvida chegou a ${gravaria}`);
+    }
+    assert.equal(m.h.carregarFilaDeSaida().length, 0, `${caso}: a decisão ficou na fila de saída do aparelho de outra conta`);
+    if (caso === 'caiu a rede') {
+      assert.equal(m.AppState.stats.rejected, 0, 'a decisão que não pousou ficou contada');
+      assert.ok(m.AppState.queue.includes(m.P), 'a decisão que não pousou não voltou como card');
+    }
+  }
+  // CONTROLE: a mesma resposta SEM a dúvida grava como sempre (o instrumento enxerga).
+  const c = montarVoo();
+  c.h.handleReject();
+  await tique();
+  c.pendentes[0]({ success: true });
+  await tique(20);
+  assert.ok(c.h.chamou.includes('recordHistory'), 'CONTROLE: sem dúvida a resposta não gravou — o teste perdeu o sentido');
+});
+
+test('R7-2-01: a dúvida para o "Marcar todos" no ar e solta a trava dele — como a queda', () => {
+  const m = montarVoo({ extras: DUVIDA });
+  m.deps.loteDeLidosEmVoo = true;
+  m.h.conferirContaDestaAba();
+  assert.equal(m.deps.loteDeLidosEmVoo, false, 'o lote da época que acabou travaria o card depois de a dúvida se resolver');
+  assert.ok(m.h.chamou.includes('cancelarPendenciasDoLightbox'), 'as escritas do lightbox na janela seguiram correndo');
 });
 
 test('K7: CONTROLE — a mesma resposta ANTES da queda vai pra fila de saída e o placar fica', async () => {
