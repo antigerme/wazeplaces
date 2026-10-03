@@ -64,15 +64,34 @@ function momentosDoRelatorio(d) {
             painel: ta.painel || '?' }];
 }
 const atuais = momentosDoRelatorio(d);
-// E as capturas das ABERTURAS ANTERIORES (o app fechado e reaberto com o modo
-// dev ligado): são justamente as do defeito que atravessa um fechar e reabrir,
-// e ficavam de fora da remontagem (auditoria de 2026-09-25). Vão primeiro, na
-// ordem em que aconteceram, com a abertura no rótulo.
-const anteriores = (Array.isArray(d.aberturasAnteriores) ? d.aberturasAnteriores : [])
-  .flatMap((a, ia) => (Array.isArray(a && a.momentos) ? a.momentos : [])
-    .filter((m) => m && m.dom)
-    .map((m) => ({ ...m, motivo: `[abertura ${(a && a.id) || ia + 1}] ` + (m.motivo || '') })));
-const momentos = [...anteriores, ...atuais];
+// E as capturas das OUTRAS ABERTURAS guardadas no aparelho (o app fechado e
+// reaberto com o modo dev ligado): são justamente as do defeito que atravessa
+// um fechar e reabrir, e ficavam de fora da remontagem (auditoria de
+// 2026-09-25). Desde que o relatório leva também o que a OUTRA ABA aberta gravou
+// (R6-4-5), "primeiro as anteriores" deixou de ser a ordem do tempo: a da outra
+// aba pode ter começado DEPOIS desta (R7-4-04). Vão todas pela hora da captura
+// (`m.t`), com a abertura no rótulo — "[outra aba …]" pra a que viveu junto com
+// a do relatório (`simultanea`, ou, em relatório anterior à marca, a que gravou
+// depois de esta abrir). PURA, conferida sem navegador (test/diag-ferramentas).
+function momentosEmOrdem(d, atuais) {
+  const inicioDesta = Date.parse(d && d.aberturaAtual && d.aberturaAtual.inicio);
+  const juntoComEsta = (a) => a.simultanea === true
+    || (Number.isFinite(inicioDesta) && Number.isFinite(a.salvoEm) && a.salvoEm > inicioDesta);
+  const outras = (Array.isArray(d && d.aberturasAnteriores) ? d.aberturasAnteriores : [])
+    .flatMap((a, ia) => (Array.isArray(a && a.momentos) ? a.momentos : [])
+      .filter((m) => m && m.dom)
+      .map((m) => ({ ...m, motivo: `[${juntoComEsta(a) ? 'outra aba' : 'abertura'} ${a.id || ia + 1}] ` + (m.motivo || '') })));
+  // Só a forma ISO (a do app): o `Date.parse` do V8 aceita quase qualquer texto.
+  const hora = (m) => {
+    const t = m && typeof m.t === 'string' && /^\d{4}-\d\d-\d\dT/.test(m.t) ? Date.parse(m.t) : NaN;
+    return Number.isFinite(t) ? t : Infinity;
+  };
+  return [...outras, ...(Array.isArray(atuais) ? atuais : [])]
+    .map((m, i) => ({ m, i, t: hora(m) }))
+    .sort((x, y) => (x.t - y.t) || (x.i - y.i))
+    .map((x) => x.m);
+}
+const momentos = momentosEmOrdem(d, atuais);
 
 // As SENTINELAS: as do RELATÓRIO (`resumo.alertas`) e as de CADA CAPTURA, no
 // instante dela (`m.alertas`, relatório v4+). As da captura são as que importam

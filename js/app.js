@@ -6888,6 +6888,7 @@ async function diagAplicarPoda(db, poda, novos) {
 let diagGuardando = Promise.resolve();
 function diagGuardarAbertura(motivo) {
     if (!dlogLigado()) return Promise.resolve(false);
+    diagSegurarAbertura();
     // A época do PEDIDO, e não a do começo da gravação: um apagar pedido DEPOIS
     // desta gravação a vence, mesmo que ela ainda nem tenha começado (a fila) ou
     // esteja pendurada no meio (ver `diagEpoca`).
@@ -6916,6 +6917,60 @@ function diagGuardarAbertura(motivo) {
     });
     diagGuardando = esta.catch(() => false);
     return esta;
+}
+
+// ── A OUTRA ABA não é uma abertura ANTERIOR ───────────────────────────────
+//
+// Desde que o relatório leva o que a outra aba aberta gravou (R6-4-5), ela
+// chegava em `aberturasAnteriores` sem nada que a distinguisse de uma abertura
+// que FECHOU — e essa seção existe pro defeito que atravessa fechar e reabrir:
+// quem lê ia atrás de um fechar que não houve. No relatório do auditor, a
+// "abertura anterior" tinha COMEÇADO depois da do relatório (R7-4-04).
+//
+// A abertura que gravou na base segura, enquanto a página viver, uma trava do
+// navegador com o id dela (só com o modo dev, a partir da primeira gravação);
+// quem a solta é o navegador, quando a página morre. Trava não grava nada.
+const DIAG_ABERTURA_TRAVA = '__diagAbertura:';
+let diagAberturaSegura = false;
+function diagSegurarAbertura() {
+    if (diagAberturaSegura) return;
+    diagAberturaSegura = true;
+    try {
+        const locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null;
+        if (!locks) return;
+        locks.request(DIAG_ABERTURA_TRAVA + DIAG_ABERTURA.id, { ifAvailable: true },
+            (lock) => (lock ? new Promise(() => {}) : undefined)).catch(() => {});
+    } catch (e) { /* sem a trava, fica a prova pela hora (ver abaixo) */ }
+}
+
+// As aberturas VIVAS agora, pelas travas que o navegador diz estarem seguras.
+// `null` = não deu pra saber (navegador sem `navigator.locks`, ou sem resposta
+// a tempo — o relatório tem orçamento).
+async function diagAberturasVivas(prazo) {
+    try {
+        const locks = navigator.locks && typeof navigator.locks.query === 'function' ? navigator.locks : null;
+        if (!locks) return null;
+        const espera = Math.max(0, Math.min(1500, prazo - Date.now()));
+        const r = await Promise.race([locks.query(), new Promise((ok) => setTimeout(() => ok(null), espera))]);
+        if (!r || !Array.isArray(r.held)) return null;
+        return new Set(r.held.map((l) => String((l && l.name) || ''))
+            .filter((n) => n.startsWith(DIAG_ABERTURA_TRAVA)).map((n) => n.slice(DIAG_ABERTURA_TRAVA.length)));
+    } catch (e) { return null; }
+}
+
+// PURA. A abertura guardada que viveu JUNTO com esta ganha `simultanea: true`:
+// ela gravou DEPOIS de esta abrir (a vida das duas se cruzou — uma página de
+// antes, na mesma aba, morreu antes de esta nascer), ou a trava dela segue
+// segura agora. `abertaAgora` diz se ela segue aberta (`null`: não deu pra
+// saber). As que não viveram junto voltam as MESMAS.
+function diagMarcarSimultaneas(lista, inicioDesta, vivas) {
+    return (Array.isArray(lista) ? lista : []).map((a) => {
+        if (!a || typeof a !== 'object') return a;
+        const viva = vivas ? vivas.has(a.id) : null;
+        const gravouDepois = Number.isFinite(a.salvoEm) && a.salvoEm > inicioDesta;
+        if (!gravouDepois && viva !== true) return a;
+        return { ...a, simultanea: true, abertaAgora: viva };
+    });
 }
 
 // Na abertura, com o modo dev ligado: traz o que as aberturas anteriores
@@ -8136,6 +8191,9 @@ async function diagCorpo() {
     // leituras de rede: o relatório leva o que o aparelho tem, e o download apaga
     // só o que levou (R6-4-5). A base tem teto próprio (`DIAG_DB_TETO_MS`).
     const anterioresDoAparelho = diagAtualizarAnteriores().catch(() => false);
+    // Quais delas seguem ABERTAS agora (outra aba), pelas travas (ver
+    // `diagMarcarSimultaneas`).
+    const vivasPromessa = diagAberturasVivas(prazo);
     // Só recurso da NOSSA origem: de terceiro a resposta é opaca e a leitura
     // ainda gastaria rede. `cache: 'force-cache'` pra pegar o que o aparelho
     // REALMENTE tem — que é a pergunta quando se suspeita de PWA com código
@@ -8277,6 +8335,7 @@ async function diagCorpo() {
     // comparação de prazo sair torta — e o sintoma nunca aponta pro relógio.
     const relogio = await relogioPromessa;
     await anterioresDoAparelho;
+    const vivas = await vivasPromessa;
 
     const idb = {};
     try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
@@ -8300,6 +8359,9 @@ async function diagCorpo() {
     // As outras aberturas, como vão no arquivo (a lista é trocada INTEIRA quando
     // muda, nunca editada no lugar): é delas que o download diz o que entregou.
     const aberturasNoArquivo = diagAberturasAnteriores;
+    // As mesmas, com a OUTRA ABA marcada (`simultanea`): é assim que elas vão no
+    // arquivo e no resumo. Cópias só das marcadas — as capturas são as mesmas.
+    const aberturasMarcadas = diagMarcarSimultaneas(aberturasNoArquivo, DIAG_ABERTURA.inicio, vivas);
     const chamadasNoArquivo = (typeof API !== 'undefined' && API.chamadas) ? [...API.chamadas] : [];
     const errosNoArquivo = [...diagErros];
     const corpo = {
@@ -8359,17 +8421,22 @@ async function diagCorpo() {
                                alertas: m.alertas.map((a) => a.chave) }))
                 // E as das aberturas ANTERIORES que ficaram guardadas, com a
                 // abertura de cada uma: o defeito que só aparece depois de
-                // fechar e reabrir foi capturado ANTES, noutra abertura.
-                .concat(diagAberturasAnteriores.flatMap((a) => (a.momentos || [])
+                // fechar e reabrir foi capturado ANTES, noutra abertura. A da
+                // OUTRA ABA aberta junto vem marcada (`outraAba`): ali não houve
+                // fechar e reabrir (R7-4-04).
+                .concat(aberturasMarcadas.flatMap((a) => (a.momentos || [])
                     .filter((m) => Array.isArray(m.alertas) && m.alertas.length)
                     .map((m) => ({ t: m.t, motivo: m.motivo, painel: m.painel, abertura: a.id,
+                                   ...(a.simultanea ? { outraAba: true } : {}),
                                    alertas: m.alertas.map((x) => x.chave) }))))
                 .sort((x, y) => Date.parse(x.t) - Date.parse(y.t)),
             // Quantas aberturas anteriores ficaram guardadas, e com quantas
             // capturas — a primeira pergunta de um relato que atravessa fechar
-            // e reabrir o app.
+            // e reabrir o app. E quantas delas são, na verdade, OUTRA ABA que
+            // viveu junto com esta (`simultaneas`).
             aberturasAnteriores: { n: diagAberturasAnteriores.length,
-                                   capturas: diagMomentosAnteriores().length },
+                                   capturas: diagMomentosAnteriores().length,
+                                   simultaneas: aberturasMarcadas.filter((a) => a && a.simultanea).length },
         },
         computado,
         // Os DOIS anéis numa linha do tempo só: o sempre-ligado (`dfato`) e o do
@@ -8382,8 +8449,10 @@ async function diagCorpo() {
         // modo dev ligado nelas): diário, chamadas sem corpo, erros e as
         // capturas não baixadas, cada abertura com o seu id, início e versão.
         // Ver `diagAberturasAnteriores`.
+        // A da OUTRA ABA aberta junto com esta vem com `simultanea: true` (e
+        // `abertaAgora`), ver `diagMarcarSimultaneas`.
         aberturaAtual: { id: DIAG_ABERTURA.id, inicio: new Date(DIAG_ABERTURA.inicio).toISOString() },
-        aberturasAnteriores: diagAberturasAnteriores,
+        aberturasAnteriores: aberturasMarcadas,
         _gerado: new Date().toISOString(),
         // A seção que responde o relato "a sessão não dura": ciclos medidos em
         // horas, e o ambiente que decide se o armazenamento sobrevive.

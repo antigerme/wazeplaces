@@ -346,11 +346,76 @@ test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip 
 
 test('o relatório leva as aberturas anteriores, e o resumo acusa o que elas capturaram', () => {
   const corpo = fatiar('diagCorpo');
-  assert.match(corpo, /aberturasAnteriores: diagAberturasAnteriores,/, 'o relatório parou de levar as aberturas anteriores');
+  // As do RETRATO, com a outra aba marcada (R7-4-04: ver o teste abaixo).
+  assert.match(corpo, /const aberturasMarcadas = diagMarcarSimultaneas\(aberturasNoArquivo, DIAG_ABERTURA\.inicio, vivas\);/,
+    'o relatório parou de marcar a outra aba aberta junto');
+  assert.match(corpo, /aberturasAnteriores: aberturasMarcadas,/, 'o relatório parou de levar as aberturas anteriores');
   assert.match(corpo, /aberturaAtual: \{ id: DIAG_ABERTURA\.id,/, 'sem a abertura atual, não se sabe de qual as outras vieram');
-  assert.match(corpo, /\.concat\(diagAberturasAnteriores\.flatMap\(/,
+  assert.match(corpo, /\.concat\(aberturasMarcadas\.flatMap\(/,
     'os alertas das capturas anteriores saíram do resumo — é o defeito que atravessa fechar e reabrir');
   assert.match(corpo, /abertura: a\.id,/, 'o alerta de uma captura anterior tem que dizer de QUAL abertura veio');
+  assert.match(corpo, /\.\.\.\(a\.simultanea \? \{ outraAba: true \} : \{\}\),/,
+    'o alerta de uma captura da OUTRA ABA não diz que ela não é de uma abertura anterior');
+  // As vivas são perguntadas JUNTO com a releitura da base, e esperadas antes do retrato.
+  assert.match(corpo, /const vivasPromessa = diagAberturasVivas\(prazo\);/, 'o relatório deixou de perguntar quais aberturas seguem vivas');
+  const iVivas = corpo.indexOf('const vivas = await vivasPromessa;');
+  const iRetrato = corpo.indexOf('const retratoEm = Date.now();');
+  assert.ok(iVivas > 0 && iRetrato > iVivas, 'as aberturas vivas têm que chegar ANTES do retrato');
+});
+
+// ── R7-4-04: a OUTRA ABA aberta não é uma abertura ANTERIOR ─────────────────
+// Desde o R6-4-5 o relatório leva o que a outra aba aberta gravou, e ela chegava
+// em `aberturasAnteriores` igual a uma abertura que FECHOU: no relatório do
+// auditor, a "anterior" tinha começado 343 ms DEPOIS da do relatório.
+test('R7-4-04: a abertura que gravou DEPOIS de esta abrir, ou que segue viva, é marcada como OUTRA ABA', () => {
+  const marcar = new Function(fatiar('diagMarcarSimultaneas') + '\nreturn diagMarcarSimultaneas;')();
+  const INICIO = AGORA;
+  const antes = { id: 'antes', inicio: INICIO - 2 * HORA, salvoEm: INICIO - HORA, momentos: [] };   // fechou antes
+  const junto = { id: 'junto', inicio: INICIO + 343, salvoEm: INICIO + 1525, momentos: [{ t: 'x' }] }; // o caso do auditor
+  const velhaViva = { id: 'velhaViva', inicio: INICIO - HORA, salvoEm: INICIO - 1000, momentos: [] }; // aberta antes, viva
+  const r = marcar([antes, junto, velhaViva], INICIO, new Set(['junto', 'velhaViva']));
+  assert.equal(r[0], antes, 'a abertura que FECHOU antes desta tem que voltar a MESMA, sem marca');
+  assert.deepEqual([r[1].simultanea, r[1].abertaAgora], [true, true], 'a que gravou depois de esta abrir não foi marcada');
+  assert.equal(r[1].momentos, junto.momentos, 'a marca copiou as capturas (tem que ser a mesma lista)');
+  assert.deepEqual([r[2].simultanea, r[2].abertaAgora], [true, true], 'a aberta antes, viva agora, não foi marcada');
+  // Sem saber quais vivem (o navegador sem `navigator.locks`): vale a hora.
+  const semTravas = marcar([antes, junto, velhaViva], INICIO, null);
+  assert.equal(semTravas[0], antes);
+  assert.deepEqual([semTravas[1].simultanea, semTravas[1].abertaAgora], [true, null], 'sem as travas, a hora tem que bastar');
+  assert.equal(semTravas[2], velhaViva, 'sem as travas e sem gravar depois, não há como dizer — fica como estava');
+  // A que gravou depois e já FECHOU: junto com esta, e fechada.
+  const fechou = marcar([junto], INICIO, new Set());
+  assert.deepEqual([fechou[0].simultanea, fechou[0].abertaAgora], [true, false]);
+  assert.deepEqual(marcar(undefined, INICIO, null), []);
+});
+
+test('R7-4-04: a abertura que GRAVA segura a trava com o id dela, e o relatório lê as vivas pelo nome', async () => {
+  const g = fatiar('diagGuardarAbertura');
+  assert.match(g, /^function diagGuardarAbertura\(motivo\) \{\s*if \(!dlogLigado\(\)\) return Promise\.resolve\(false\);\s*diagSegurarAbertura\(\);/,
+    'a abertura que grava não segura a trava dela (o relatório da outra aba não a veria viva)');
+  // A trava RODADA, contra um `navigator.locks` de mentira.
+  const DIAG_ABERTURA_TRAVA = /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1];
+  const montar = (navigator) => new Function('navigator', 'DIAG_ABERTURA', 'DIAG_ABERTURA_TRAVA',
+    `let diagAberturaSegura = false;\n${fatiar('diagSegurarAbertura')}\n${fatiar('diagAberturasVivas')}
+    return { diagSegurarAbertura, diagAberturasVivas };`)(navigator, { id: 'esta' }, DIAG_ABERTURA_TRAVA);
+  const pedidos = [];
+  const app = montar({ locks: {
+    request: (nome, opcoes, fn) => { pedidos.push([nome, opcoes]); fn({}); return Promise.resolve(); },
+    query: async () => ({ held: [{ name: DIAG_ABERTURA_TRAVA + 'outra' }, { name: '__abaDaSaida:x' }, { name: DIAG_ABERTURA_TRAVA + 'esta' }] }),
+  } });
+  app.diagSegurarAbertura();
+  app.diagSegurarAbertura();
+  assert.deepEqual(pedidos, [[DIAG_ABERTURA_TRAVA + 'esta', { ifAvailable: true }]],
+    'a trava tem que ser pedida UMA vez, com o id desta abertura');
+  const vivas = await app.diagAberturasVivas(Date.now() + 1000);
+  assert.deepEqual([...vivas].sort(), ['esta', 'outra'], 'as vivas saem dos nomes das travas — e só das do diagnóstico');
+  // Sem `navigator.locks`: não dá pra saber, e nada quebra.
+  const sem = montar({});
+  sem.diagSegurarAbertura();
+  assert.equal(await sem.diagAberturasVivas(Date.now() + 1000), null);
+  // E a pergunta tem TETO: o relatório tem orçamento.
+  const pendurada = montar({ locks: { request: () => Promise.resolve(), query: () => new Promise(() => {}) } });
+  assert.equal(await pendurada.diagAberturasVivas(Date.now() + 30), null, 'a pergunta pendurada segurou o relatório');
 });
 
 test('a Ajuda diz a verdade sobre o que fica no aparelho, nos 4 idiomas', () => {
@@ -421,6 +486,7 @@ function baseDoDiag({ abrir }) {
   };
   const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30,
     DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => false,
+    diagSegurarAbertura: () => {},
     diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
     diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
   const chaves = Object.keys(deps);
@@ -570,6 +636,7 @@ test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, n�
     const deps = { indexedDB: { open: () => { conta.aberturas++; return {}; }, deleteDatabase: () => ({}) },
       DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30, DIAG_ABERTURA: { id: 'esta' },
       dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => desligadoLa,
+      diagSegurarAbertura: () => {},
       diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: 1, inicio: 1, momentos: [] }),
       diagPodarAberturas: (l) => ({ manter: l, sair: [], cortadas: [] }) };
     const chaves = Object.keys(deps);

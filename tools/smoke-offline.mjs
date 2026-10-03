@@ -2155,8 +2155,12 @@ try {
     diario: (ant.diario || []).length, semCorpo: (ant.chamadas || []).every((c) => !('corpoReq' in c) && !('corpoResposta' in c)),
     atual: d.aberturaAtual && d.aberturaAtual.id, resumo: d.resumo && d.resumo.aberturasAnteriores,
     alertaAnterior: (d.resumo?.alertasNasCapturas || []).some((c) => c.abertura === id1d && c.alertas.includes('pedidoDecididoNaFila')),
-    triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
+    triagemSecao: triagem.includes('OUTRAS ABERTURAS (guardadas no aparelho') && triagem.includes('abertura ' + id1d),
     triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
+    // A abertura que FECHOU antes desta não é "outra aba aberta junto" (R7-4-04):
+    // nem no arquivo (a trava dela foi solta ao fechar, e ela não gravou depois)
+    // nem na triagem.
+    simultanea: (d.aberturasAnteriores || []).some((a) => a.simultanea), triagemOutraAba: triagem.includes('OUTRA ABA'),
     vazouToken: triagem.includes('tok-9c'),
     duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
     objetoCru: triagem.includes('[object Object]'),
@@ -2176,6 +2180,8 @@ diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o
 diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
   rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
   JSON.stringify(rel9c));
+diz('a abertura que FECHOU antes desta segue ANTERIOR — não vira "outra aba aberta junto" (R7-4-04, controle)',
+  rel9c?.simultanea === false && rel9c?.triagemOutraAba === false, JSON.stringify(rel9c));
 diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
   rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
   JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));

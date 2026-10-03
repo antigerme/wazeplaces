@@ -57,6 +57,17 @@ const VARIANTES = { limpo: 'tudo limpo de verdade', fimDaFila: 'fim da fila: há
 const painelComVariante = (x) => `${x.painel}${x.variante ? ` (${VARIANTES[x.variante] || x.variante})` : ''}`;
 
 const r = d.resumo || {};
+// A OUTRA ABA aberta junto com a do relatório vem em `aberturasAnteriores` desde
+// que o relatório leva o que ela gravou (R6-4-5) — e não é uma abertura que
+// FECHOU: tratada como "anterior", mandava quem lê atrás de um fechar e reabrir
+// que não houve (R7-4-04). O app a marca (`simultanea`); no relatório anterior à
+// marca, é a que gravou DEPOIS de a do relatório abrir — uma página de antes, na
+// mesma aba, morre antes de a seguinte nascer.
+const inicioDesta = Date.parse(d.aberturaAtual && d.aberturaAtual.inicio);
+const juntoComEsta = (a) => !!a && (a.simultanea === true
+  || (Number.isFinite(inicioDesta) && Number.isFinite(a.salvoEm) && a.salvoEm > inicioDesta));
+const outraAbaPorId = new Set((Array.isArray(d.aberturasAnteriores) ? d.aberturasAnteriores : [])
+  .filter(juntoComEsta).map((a) => a.id));
 out(`arquivo: ${origem}, ${Math.round(bytes / 1024)} KB · relatório v${d._versaoDoDiag ?? '?'} · app ${d.app?.rotulo ?? d.app?.versao ?? '?'} · gerado ${d._gerado ?? '?'}`);
 const amb = d.ambiente || {};
 out(`aparelho: ${(amb.ua || '?').replace(/^Mozilla\/5\.0 /, '').slice(0, 90)} · tela ${amb.tela?.w}×${amb.tela?.h}@${amb.tela?.dpr} · janela ${amb.tela?.janela} · instalada: ${amb.standalone} · online: ${amb.online}`);
@@ -69,7 +80,14 @@ else for (const a of alertas) out(`no relatório: ${a.chave} — ${String(a.msg 
 const nasCapturas = r.alertasNasCapturas;
 if (nasCapturas === undefined) out('nas capturas: ' + AUSENTE);
 else if (!nasCapturas.length) out('nas capturas: nenhum');
-else for (const c of nasCapturas) out(`nas capturas: ${hora(c.t)} ${c.motivo} (painel ${c.painel}) → ${c.alertas.join(', ')}${c.abertura ? ` [abertura anterior ${c.abertura}]` : ''}`);
+else {
+  for (const c of nasCapturas) {
+    const deOnde = !c.abertura ? ''
+      : (c.outraAba || outraAbaPorId.has(c.abertura)) ? ` [outra aba ${c.abertura}, aberta junto com esta]`
+      : ` [abertura anterior ${c.abertura}]`;
+    out(`nas capturas: ${hora(c.t)} ${c.motivo} (painel ${c.painel}) → ${c.alertas.join(', ')}${deOnde}`);
+  }
+}
 
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
@@ -306,7 +324,9 @@ const quando = (t) => {
   const dt = typeof t === 'number' ? new Date(t) : new Date(String(t));
   return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().replace('T', ' ').slice(0, 19);
 };
-secao('ABERTURAS ANTERIORES (guardadas no aparelho)');
+// E a OUTRA ABA que viveu junto com a do relatório vem aqui também — marcada,
+// porque entre as duas não houve fechar e reabrir (ver `juntoComEsta`).
+secao('OUTRAS ABERTURAS (guardadas no aparelho: anteriores, ou outra aba aberta junto)');
 const anteriores = d.aberturasAnteriores;
 if (anteriores === undefined) out(AUSENTE);
 else if (!anteriores.length) out('(nenhuma)');
@@ -320,6 +340,11 @@ else {
     // a gravação da base não chegou ao fim. Se o teto do retrato cortou, o que
     // falta NÃO quer dizer "não aconteceu": as linhas abaixo dizem onde e quanto.
     out(`abertura ${a.id} · ${quando(a.inicio)} → ${quando(a.salvoEm)} (guardada por: ${a.salvoPor}${a.retrato ? ', retrato do fechar' : ''}) · v${a.versao ?? '?'}`);
+    if (juntoComEsta(a)) {
+      const agora = a.abertaAgora === true ? ' — seguia aberta na hora do relatório'
+        : a.abertaAgora === false ? ' — já tinha fechado na hora do relatório' : '';
+      out(`  OUTRA ABA, aberta junto com a do relatório${agora}: entre as duas não houve fechar e reabrir.`);
+    }
     out(`  diário ${di.length} · chamadas ${ch.length} (falhas ${ch.filter((c) => estadoDaChamada(c) === 'FALHOU').length}) · erros ${er.length} · capturas ${ms.length}`);
     const NOMES_DO_CORTE = { diario: 'diário', chamadas: 'chamadas', erros: 'erros' };
     // ONDE o teto do retrato deixou falta (auditoria de 2026-10-01, R5-4-5). O

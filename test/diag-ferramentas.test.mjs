@@ -259,7 +259,39 @@ test('diag-tela: remonta TAMBÉM as capturas das aberturas anteriores (o defeito
   // só as capturas da abertura atual.
   const TELA = readFileSync(join(ROOT, 'tools/diag-tela.mjs'), 'utf8');
   assert.match(TELA, /d\.aberturasAnteriores/, 'o diag-tela voltou a ignorar as aberturas anteriores');
-  assert.match(TELA, /const momentos = \[\.\.\.anteriores, \.\.\.atuais\];/);
+  // Ancorado em linha, fora de comentário (gotcha #67): é o que a ferramenta USA.
+  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(semCom, /^const momentos = momentosEmOrdem\(d, atuais\);$/m);
+});
+
+// ── R7-4-04: a outra aba aberta, e a ORDEM do tempo, na remontagem ──────────
+// "Primeiro as anteriores, na ordem em que aconteceram" deixou de ser a ordem do
+// tempo quando o relatório passou a levar o que a OUTRA ABA aberta gravou
+// (R6-4-5): no do auditor, a "anterior" tinha começado depois da do relatório.
+test('diag-tela: as capturas vão pela HORA delas, e a da outra aba aberta junto sai rotulada como tal (R7-4-04)', () => {
+  const momentosEmOrdem = fatiarDaTela('momentosEmOrdem');
+  const d = {
+    aberturaAtual: { id: 'esta', inicio: '2026-10-02T19:54:48.006Z' },
+    aberturasAnteriores: [
+      { id: 'B', inicio: Date.parse('2026-10-02T19:54:48.349Z'), salvoEm: Date.parse('2026-10-02T19:54:49.531Z'),
+        momentos: [{ t: '2026-10-02T19:54:48.650Z', motivo: 'manual', dom: 'b1' }, { t: '2026-10-02T19:54:49.099Z', motivo: 'manual', dom: 'b2' }] },
+      { id: 'velha', inicio: Date.parse('2026-10-02T18:00:00.000Z'), salvoEm: Date.parse('2026-10-02T18:30:00.000Z'),
+        momentos: [{ t: '2026-10-02T18:10:00.000Z', motivo: 'manual', dom: 'v1' }, { t: '2026-10-02T18:11:00.000Z', motivo: 'auto:x' }] },
+    ],
+  };
+  const atuais = [{ t: '2026-10-02T19:54:48.800Z', motivo: 'manual', dom: 'a1' }, { t: '2026-10-02T19:55:00.000Z', motivo: 'manual', dom: 'a2' }];
+  const m = momentosEmOrdem(d, atuais);
+  assert.deepEqual(m.map((x) => x.dom), ['v1', 'b1', 'a1', 'b2', 'a2'],
+    'as capturas não saíram na ordem do TEMPO (as da outra aba aberta junto iam todas antes)');
+  assert.deepEqual(m.map((x) => x.motivo), ['[abertura velha] manual', '[outra aba B] manual', 'manual', '[outra aba B] manual', 'manual'],
+    'a outra aba aberta junto saiu rotulada como abertura anterior (ou a anterior como outra aba)');
+  // Marcada pelo app (`simultanea`) vale mesmo sem a hora de gravação depois.
+  const marcada = momentosEmOrdem({ aberturaAtual: d.aberturaAtual, aberturasAnteriores: [{ ...d.aberturasAnteriores[1], simultanea: true }] }, []);
+  assert.match(marcada[0].motivo, /^\[outra aba velha\]/);
+  // CONTROLE: hora ilegível não embaralha nada (fica no fim, na ordem em que veio) e não derruba.
+  const torta = momentosEmOrdem({}, [{ t: 'x:11', motivo: 'm1', dom: 1 }, { t: '2026-10-02T19:00:00.000Z', motivo: 'm2', dom: 2 }, { motivo: 'm3', dom: 3 }]);
+  assert.deepEqual(torta.map((x) => x.motivo), ['m2', 'm1', 'm3']);
+  assert.deepEqual(momentosEmOrdem({}, []), []);
 });
 
 // ── R6-4-6 (auditoria de 2026-10-01): as sentinelas DAS CAPTURAS ──────────────
