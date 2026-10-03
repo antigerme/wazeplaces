@@ -1836,7 +1836,11 @@ const TOAST_COPIAVEL_RECHECA_MS = 1500;
 // `authInFlight` do login por cookies, pro código.
 let resgateEmVoo = false;
 
-async function resgatarPareamento(code, { silencioso = false } = {}) {
+// `peloTeclado`: o Enter no campo, ou no "Entrar" focado. A tela de entrada some
+// com o foco nela (o "Entrar com um código", a quem o fechamento do diálogo o
+// devolve), e o foco caía no <body> — o mesmo do login pelo colar (R7-1-04, ver
+// `authenticateWithCookies`): fica prometido ao ✕ do primeiro card.
+async function resgatarPareamento(code, { silencioso = false, peloTeclado = false } = {}) {
     if (resgateEmVoo) return false;
     // Pelo diálogo, só com o diálogo NA TELA. Contra a VM de verdade o resgate
     // volta em milissegundos, e o 2º Enter chegava DEPOIS dele, com o diálogo já
@@ -1863,6 +1867,7 @@ async function resgatarPareamento(code, { silencioso = false } = {}) {
         resetQueue();   // fila NOVA, como no login por cookies
         conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
         AppState._profilePromise = loadProfileAndAuxData();
+        if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
         startFetching();
         esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
         return true;
@@ -1910,9 +1915,10 @@ function setupModalListeners() {
         openModal('pairEnterModal');
     });
     $('pairEnterCancel')?.addEventListener('click', () => closeModal('pairEnterModal'));
-    $('pairEnterConfirm')?.addEventListener('click', () => resgatarPareamento($('pairCodeInput').value));
+    $('pairEnterConfirm')?.addEventListener('click', (ev) => resgatarPareamento($('pairCodeInput').value,
+        { peloTeclado: veioDoTeclado(ev) }));
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value); }
+        if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value, { peloTeclado: true }); }
     });
     // Colado de dentro de uma mensagem, com espaço ou quebra de linha: o código
     // é achado no texto (ver `extrairCodigoPareamento`).
@@ -5112,22 +5118,37 @@ async function handleFileUpload(e) {
     }
 }
 
-async function handlePasteConfirm() {
+async function handlePasteConfirm(ev) {
     const content = document.getElementById('cookiesTextarea').value.trim();
     if (!content) {
         showToast(t('toast.pasteEmpty'), 'error');
         return;
     }
+    // Pelo TECLADO (o Enter no "Confirmar"): o login que der certo leva o foco
+    // ao ✕ do primeiro card (ver `authenticateWithCookies`). Lido ANTES de
+    // fechar: o fechamento leva o foco pro "Colar cookies".
+    const peloTeclado = veioDoTeclado(ev);
     closeModal('pasteModal');   // limpa o campo (ver `LIMPEZA_AO_FECHAR`); o conteúdo já foi lido
-    await authenticateWithCookies(content);
+    await authenticateWithCookies(content, { peloTeclado });
 }
 
 let authInFlight = false;
-async function authenticateWithCookies(cookies) {
+// `peloTeclado`: quem entrou pelo teclado (o "Confirmar" do colar). A tela de
+// entrada some com o foco nela, e o foco caía no <body>: o Tab seguinte ia à
+// seta do carrossel do card (MEDIDO nos dois motores, auditoria de 2026-10-02,
+// R7-1-04). É a regra do C10 pra todo controle que some com o foco: ele fica
+// PROMETIDO ao ✕ do primeiro card e pousa quando o card chegar
+// (`aplicarFocoDoTeclado`, com as regras dele). O mouse e o dedo não movem nada.
+async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
     if (authInFlight) return;            // evita duplo-envio (criaria 2 sessões)
     authInFlight = true;
     setAuthLoading(true);
-    showToast(t('toast.validatingCookies'), 'info');
+    // O aviso de PROGRESSO sai com o resultado: com o servidor respondendo
+    // rápido, "Validando cookies…" seguia na tela por até ~3,7 s depois dele —
+    // ao lado do "Autenticado com sucesso!", do erro e por cima do "Acesso
+    // restrito" (auditoria de 2026-10-02, R7-1-08). É a regra do aviso da trava:
+    // aviso de espera que já acabou é o app mentindo.
+    const validando = showToast(t('toast.validatingCookies'), 'info');
     try {
         const result = await API.testCookies(cookies);
         if (result.success) {
@@ -5143,6 +5164,8 @@ async function authenticateWithCookies(cookies) {
             // `resetQueue`: a fila já é desta sessão, e a troca não a refaz.
             conhecerContaDoLogin(result.conta);
             AppState._profilePromise = loadProfileAndAuxData();
+            // O foco de quem entrou pelo teclado (ver acima, R7-1-04).
+            if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
             showToast(t('toast.authSuccess'), 'success');
@@ -5156,19 +5179,36 @@ async function authenticateWithCookies(cookies) {
     } finally {
         authInFlight = false;
         setAuthLoading(false);
+        try { validando.dispensar(); } catch (e) { /* o aviso já saiu */ }
     }
 }
 
 // Desabilita os botões de login enquanto valida (feedback + trava duplo-envio).
+//
+// O botão com o FOCO que vira `disabled` o perde (MEDIDO nos dois motores), e o
+// fechamento do "Colar" põe o foco justamente no "Colar cookies": com os
+// cookies recusados a tela de entrada fica, e o foco ficava no <body> — quem usa
+// teclado ou leitor de tela recomeçava do topo (auditoria de 2026-10-02,
+// R7-1-04). O foco é GUARDADO ao desabilitar e volta ao mesmo botão quando ele
+// volta a valer, se ainda estiver perdido: não é foco pulando pela tela, ele
+// volta pra onde estava (como o `guardarFocoDaTrava` do card). Com o login que
+// deu certo a tela de entrada some, e o botão escondido não recebe nada.
+let focoNoBotaoDeEntrada = null;
 function setAuthLoading(loading) {
+    const ativo = document.activeElement;
     ['uploadBtn', 'pasteBtn'].forEach(id => {
         const b = document.getElementById(id);
         if (b) {
+            if (loading && b === ativo) focoNoBotaoDeEntrada = b;
             b.disabled = loading;
             b.classList.toggle('opacity-60', loading);
             b.classList.toggle('cursor-wait', loading);
         }
     });
+    if (loading) return;
+    const b = focoNoBotaoDeEntrada;
+    focoNoBotaoDeEntrada = null;
+    if (b && focoPerdido() && focavelNaTela(b)) b.focus();
 }
 
 function showAccessDenied(result) {
