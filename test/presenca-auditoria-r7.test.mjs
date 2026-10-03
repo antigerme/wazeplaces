@@ -12,6 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { novoCliente, bytesDeMensagem, b64 } from './_presenca-cliente.mjs';
 
 const EU = '12444348';
@@ -357,6 +358,52 @@ test('R7-5-05 sair da página (o `pagehide`, sem passar pelo fundo) também paga
   sairDaPagina(d);
   assert.equal(d.chamadas.chat.length, antes, 'sem nada esperando, ir pro fundo pediu alguma coisa');
   assert.deepEqual(d.chamadas.setSaindo, [], 'sem nada esperando, o modo "saindo" foi mexido');
+});
+
+// O api.js DE VERDADE numa vm (o padrão do `presenca-auditoria-r5`), com um
+// `fetch` que anota o `init` de cada pedido. É ele que transforma o modo
+// "saindo" em `keepalive`: o modo de mentira do `_presenca-cliente.mjs` não
+// enxergaria o api.js trocando o nome ou o jeito de ligar o modo (gotcha #52).
+function apiDeVerdade() {
+  const pedidos = [];
+  const fetch = async (url, init) => {
+    pedidos.push({ rota: String(url).split('/').pop(), corpo: JSON.parse(init.body), keepalive: init.keepalive === true });
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const fonte = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\n'
+    + readFileSync(new URL('../js/api.js', import.meta.url), 'utf8') + '\nthis.API = API;';
+  const ctx = { navigator: { language: 'pt-BR', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k === 'waze_session_token' ? 'tok' : null), setItem() {}, removeItem() {} },
+    fetch, performance, AbortController, Response, ReadableStream, console: { error() {}, log() {}, warn() {} }, setTimeout, clearTimeout };
+  vm.createContext(ctx);
+  vm.runInContext(fonte, ctx);
+  return { API: ctx.API, pedidos };
+}
+
+test('R7-5-05 com o api.js DE VERDADE: o "lida" pago no fundo sai com keepalive, o da rajada na tela não, e o modo "saindo" volta ao que era', async () => {
+  const caso = async (fundo) => {
+    const real = apiDeVerdade();
+    const c = comConversaNaTela();
+    // A presença fala com o api.js de verdade (o objeto `API` que ela enxerga é o do harness).
+    c.API.chat = (x) => real.API.chat(x);
+    c.API.setSaindo = (v) => real.API.setSaindo(v);
+    Object.defineProperty(c.API, 'saindo', { get: () => real.API.saindo, configurable: true });
+    c.P.presencaAbrirConversa(CAF);
+    await tick();
+    await tick();
+    await chega(c, 1);                                      // a 1, na tela: a rajada corre
+    if (fundo) irProFundo(c); else await c.rodarTimers();
+    await tick();
+    const lida = real.pedidos.filter((p) => p.rota === 'chat' && p.corpo.acao === 'lida');
+    return { lida, saindo: real.API.saindo };
+  };
+  const f = await caso(true);
+  assert.equal(f.lida.length, 1, 'CONTROLE: o "lida" do fundo tinha que sair pelo `_post` de verdade');
+  assert.equal(f.lida[0].keepalive, true, 'DEFEITO: o "lida" do fundo saiu do api.js sem keepalive — morre com a página');
+  assert.equal(f.saindo, false, 'o modo "saindo" do api.js ficou ligado pras outras requisições');
+  const t = await caso(false);
+  assert.equal(t.lida.length, 1);
+  assert.equal(t.lida[0].keepalive, false, 'o "lida" da rajada na tela saiu com keepalive (sem o teto de 45 s)');
 });
 
 test('R7-5-05 sem o perfil (a renovação silenciosa), ir pro fundo não manda nada: o "lida" vira dívida, como no fechamento', async () => {
