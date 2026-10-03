@@ -2173,6 +2173,9 @@ for (const status of [404, 403]) {
     return { card: f ? (f.querySelector('.card-name') || {}).textContent : null,
              limpo: aberto('noMoreCards'), falha: aberto('loadErrorState'),
              titulo: (document.querySelector('#loadErrorState h3') || {}).textContent || '',
+             // A VARIANTE do painel é a chave que o `showNoPlaces` pôs no título,
+             // não as palavras (que já trocaram: "sem conexão" virou "sem sinal").
+             variante: (document.querySelector('#loadErrorState h3') || { getAttribute: () => '' }).getAttribute('data-i18n') || '',
              fila: AppState.queue.length, hasMore: AppState.hasMore, emVoo: AppState.inFlightActions };
   });
   // Trata o card da frente pelo ✕ e espera a tela mudar (outro card, ou um
@@ -2247,8 +2250,8 @@ for (const status of [404, 403]) {
     semRede.join(' '));
   checa(buscas.length === buscasAntes, 'sem sinal: a busca foi ao servidor sem rede',
     JSON.stringify(buscas.slice(buscasAntes)));
-  checa(vazioSemRede.falha && !vazioSemRede.limpo && /conex|offline/i.test(vazioSemRede.titulo),
-    'sem sinal: com a fila vazia a tela tinha que ser a de "sem conexão", nunca o "Tudo limpo!"', JSON.stringify(vazioSemRede));
+  checa(vazioSemRede.falha && !vazioSemRede.limpo && vazioSemRede.variante === 'states.error.titleOffline',
+    'sem sinal: com a fila vazia a tela tinha que ser a de "sem sinal", nunca o "Tudo limpo!"', JSON.stringify(vazioSemRede));
   checa(toastsVermelhos === 0, 'sem sinal: toast de erro pra quem está sem rede tratando o que tem', String(toastsVermelhos));
 
   await ctx.setOffline(false);
