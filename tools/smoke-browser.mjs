@@ -8649,6 +8649,77 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
 
+  // ── R7-2-06: o botão que some com o ÚLTIMO card, e o fim da fila ─────────
+  // O C10 leva o foco ao botão equivalente do card que CHEGA — e, quando a
+  // decisão esvaziava a fila, não chegava card nenhum: o foco caía no <body>, e
+  // nenhuma região viva mudava (auditoria de 2026-10-02, R7-2-06). O foco vai ao
+  // "Verificar novamente" do painel, e o título dele é dito pela região do card.
+  // Com a janela do Desfazer o foco ESPERA: a tecla z devolve o card, e o foco
+  // vai ao ✕ dele. CONTROLE: pelo mouse o foco não pula, e o fim é dito igual.
+  const ouvirRegiaoDoCard = (page) => page.evaluate(() => {
+    window.__ditosDoCard = [];
+    const r = document.getElementById('cardLiveRegion');
+    new MutationObserver(() => window.__ditosDoCard.push(r.textContent))
+      .observe(r, { childList: true, characterData: true, subtree: true });
+  });
+  const fimDaFila = (page) => page.evaluate(() => ({
+    painel: !document.getElementById('noMoreCards').classList.contains('hidden'),
+    titulo: document.querySelector('#noMoreCards h3').textContent.trim(), ditos: window.__ditosDoCard }));
+  for (const [nome, sel, undo, titulo] of [
+    ['✕ do ÚLTIMO, com a janela do Desfazer', '.card-btn-reject', true, 'Tudo limpo!'],
+    ['↑ do ÚLTIMO, sem a janela', '.card-btn-skip', false, 'Fim da fila'],
+  ]) {
+    const id = `card/teclado ${MOTOR}: Enter no ${nome}`;
+    const g = await cardPagina([cardPedido('kA')], { undo });
+    await ouvirRegiaoDoCard(g.page);
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) ' + sel);
+    await g.page.keyboard.press('Enter');
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    const d = await fimDaFila(g.page);
+    checa(d.painel && !f.frente && d.titulo === titulo, `${id}: PRÉ-CONDIÇÃO — a fila não acabou no painel "${titulo}"`, JSON.stringify({ f, d }));
+    checa(f.onde === '#reloadBtn', `${id}: DEFEITO — a fila acabou pelo teclado e o foco ficou em ${f.onde}, não no "Verificar novamente"`, JSON.stringify(f));
+    checa(d.ditos.at(-1) === titulo, `${id}: o fim da fila não foi dito pela região do card`, JSON.stringify(d.ditos));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // A tecla z DENTRO da janela: o card volta, e o foco vai ao ✕ dele. Se o
+    // painel tomasse o foco na hora (antes de a janela acabar), o z o largava
+    // escondido junto com o painel.
+    const id = `card/teclado ${MOTOR}: Enter no ✕ do ÚLTIMO e a tecla z na janela`;
+    const g = await cardPagina([cardPedido('kA')]);
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await g.page.keyboard.press('Enter');
+    await esperarOuExplodir(g.page, () => !!document.getElementById('undoBtn'), 'o banner do Desfazer');
+    const naJanela = await focoAgora(g.page);
+    await g.page.keyboard.press('z');
+    await esperarNaPagina(g.page, acaoTerminou, 5000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(naJanela.onde !== '#reloadBtn', `${id}: o foco foi pro painel com a janela do Desfazer correndo`, JSON.stringify(naJanela));
+    checa(f.frente === 'kA', `${id}: PRÉ-CONDIÇÃO — a tecla z não devolveu o pedido`, JSON.stringify(f));
+    checa(f.onde === 'card-btn-reject' && f.naFrente, `${id}: o foco não voltou ao ✕ do card devolvido`, JSON.stringify(f));
+    await g.fechar();
+  }
+  {
+    // CONTROLE: pelo MOUSE o foco não pula pro painel — e o fim é dito do mesmo
+    // jeito (o anúncio é de quem usa leitor de tela, com o dedo também).
+    const id = `card/teclado ${MOTOR}: CONTROLE — o ✕ do ÚLTIMO pelo mouse`;
+    const g = await cardPagina([cardPedido('kA')], { undo: false });
+    await ouvirRegiaoDoCard(g.page);
+    await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    const d = await fimDaFila(g.page);
+    checa(d.painel && !f.frente, `${id}: PRÉ-CONDIÇÃO — o ✕ pelo mouse não esvaziou a fila`, JSON.stringify({ f, d }));
+    checa(f.onde !== '#reloadBtn', `${id}: o clique do mouse pôs o foco no painel (o foco pulando pela tela)`, JSON.stringify(f));
+    checa(d.ditos.at(-1) === 'Tudo limpo!', `${id}: o fim da fila não foi dito a quem usa o mouse ou o dedo`, JSON.stringify(d.ditos));
+    await g.fechar();
+  }
+
   // ── C4: a foto em decisão falha no meio da saída pelo ✕ ─────────────────
   for (const falha of [true, false]) {
     const id = `card/foto ${MOTOR}: ${falha ? '' : 'CONTROLE — '}a foto em decisão ${falha ? 'FALHA' : 'chega'} durante a saída pelo ✕`;

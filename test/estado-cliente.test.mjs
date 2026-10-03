@@ -515,7 +515,8 @@ function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
   };
   const chaves = Object.keys(deps);
   // `recusaAutomaticaNestaFila` (R6-2-11): só muda a FRASE; convite e confete são do trabalho da pessoa.
-  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false;\n`
+  // `focoDoTeclado` (R7-2-06): o painel leva o foco prometido ao teclado; aqui ninguém usa teclado.
+  const api = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let promptInstalacao = null; let recusaAutomaticaNestaFila = false; let focoDoTeclado = null;\n`
     + ['puladosNestaFila', 'filaTerminouLimpa', 'atualizarConviteInstalar', 'showNoPlaces'].map(fatiar).join('\n')
     + '\nreturn { showNoPlaces, atualizarConviteInstalar };')(...chaves.map((k) => deps[k]));
   return { ...api, convite: () => !els.installInvite.classList.contains('hidden'), festa: () => noMore.classList.contains('celebrate') };
@@ -801,7 +802,8 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
     };
     const chaves = Object.keys(deps);
     // `recusaAutomaticaNestaFila`: a recusa automática não agiu (R6-2-11 tem teste próprio, em lote-autor).
-    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false;\n`
+    // E o `focoDoTeclado` (R7-2-06): ninguém usa teclado aqui.
+    const fn = new Function(...chaves, `let tratouNestaFila = ${tratou}; let puladosNoInicioDaFila = ${base}; let recusaAutomaticaNestaFila = false; let focoDoTeclado = null;\n`
       + fatiar('puladosNestaFila') + '\n' + fatiar('filaTerminouLimpa') + '\n' + fatiar('showNoPlaces')
       + '\nreturn showNoPlaces;')(...chaves.map((k) => deps[k]));
     fn();

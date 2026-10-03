@@ -841,7 +841,9 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;'
-    + ' let tratouNestaFila = false; let recusaAutomaticaNestaFila = false; let puladosNoInicioDaFila = 0;\n'
+    + ' let tratouNestaFila = false; let recusaAutomaticaNestaFila = false; let puladosNoInicioDaFila = 0;'
+    // O foco prometido ao teclado, que o painel leva (R7-2-06): ninguém usa teclado aqui.
+    + ' let focoDoTeclado = null;\n'
     + ['enviarLote', 'aplicarRecusaAutomatica', 'puladosNestaFila', 'filaTerminouLimpa', 'showNoPlaces'].map(fatiar).join('\n')
     + '\nreturn { aplicarRecusaAutomatica, showNoPlaces };')(...chaves.map((k) => deps[k]));
   const soltarTudo = async () => { for (let i = 0; i < 20 && portoes.length; i++) { portoes.shift()(); await new Promise((ok) => setTimeout(ok, 0)); } };

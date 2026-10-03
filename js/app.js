@@ -12325,7 +12325,27 @@ function aplicarFocoDoTeclado() {
     // (R6-2-13: o "Verificar novamente" some com o painel quando o card volta).
     if ((ativo && ativo !== document.body && focavelNaTela(ativo)) || camada) { focoDoTeclado = null; return; }
     const card = cardDaFrente();
-    if (!card) return;
+    if (!card) {
+        // A fila ACABOU com o foco prometido: o ✕ ↑ ✓ do ÚLTIMO card saiu com
+        // ele, o "Verificar novamente" voltou sem nada, o "Rejeitar os N" levou o
+        // resto da fila — e não vem card nenhum. O foco caía no <body>, e quem
+        // usa teclado ou leitor de tela recomeçava do topo da página (MEDIDO nos
+        // dois motores; auditoria de 2026-10-02, R7-2-06). Vai ao botão do painel
+        // que tomou o lugar do card, o caminho de volta: "Tentar novamente" na
+        // falha, "Verificar novamente" no "Tudo limpo!"/"Fim da fila". Sem painel
+        // na tela (a busca ainda corre), a promessa espera quem chegar: o card
+        // (`renderCurrentCard`) ou o painel (`showNoPlaces`).
+        const painelNaTela = (id) => {
+            const p = document.getElementById(id);
+            return !!p && !p.classList.contains('hidden');
+        };
+        const botao = painelNaTela('loadErrorState') ? document.getElementById('retryLoadBtn')
+            : painelNaTela('noMoreCards') ? document.getElementById('reloadBtn') : null;
+        if (!focavelNaTela(botao)) return;
+        focoDoTeclado = null;
+        botao.focus();
+        return;
+    }
     // Card de foto sem a foto: ✕ e ✓ seguem travados, e o ↑ é o vivo.
     const alvo = [card.querySelector(focoDoTeclado), card.querySelector('.card-btn-skip')].find(focavelNaTela);
     if (!alvo) return;
@@ -13121,6 +13141,9 @@ function showNoPlaces() {
         trocarTextoI18n(errEl.querySelector('p'), semRede ? 'states.error.bodyOffline' : 'states.error.body');
     } else {
         if (errEl) errEl.classList.add('hidden');
+        // O painel APARECE agora (ou já estava na tela e só é desenhado de
+        // novo)? Lido antes de mostrá-lo: é o que decide o anúncio, abaixo.
+        const jaNaTela = !noMore.classList.contains('hidden');
         noMore.classList.remove('hidden');
         // O convite de instalar segue a MESMA condição do confete, logo abaixo
         // (`filaTerminouLimpa`, R6-7-11).
@@ -13146,11 +13169,20 @@ function showNoPlaces() {
         // pendentes e o botão logo abaixo os traz de volta. A recusa automática
         // que agiu aqui conta como trabalho feito NA FRASE (R6-2-11): o lugar está
         // certo, e o app acabou de rejeitar os pedidos dele em nome da pessoa.
-        trocarTextoI18n(noMore.querySelector('h3[data-i18n^="states.empty.title"]'),
-            pulados > 0 ? 'states.empty.titlePulados' : 'states.empty.title');
+        const titulo = pulados > 0 ? 'states.empty.titlePulados' : 'states.empty.title';
+        trocarTextoI18n(noMore.querySelector('h3[data-i18n^="states.empty.title"]'), titulo);
         trocarTextoI18n(noMore.querySelector('p[data-i18n^="states.empty.body"]'),
             pulados > 0 ? 'states.empty.bodyPulados'
                 : tratou || recusaAutomaticaNestaFila ? 'states.empty.body' : 'states.empty.bodyNada');
+        // O FIM da fila é dito a quem usa leitor de tela, como o card novo: a
+        // região viva do card dizia "Novo pedido" a cada card e NADA quando a
+        // decisão esvaziava a fila — o painel não é região viva (MEDIDO nos dois
+        // motores; auditoria de 2026-10-02, R7-2-06). O título do painel, quando
+        // ele APARECE: desenhado de novo com ele já na tela, não repete. A falha
+        // ao carregar não passa por aqui: o painel dela é `role="alert"` e se
+        // anuncia sozinho — dito também aqui, seria dito duas vezes.
+        const anuncio = document.getElementById('cardLiveRegion');
+        if (anuncio && !jaNaTela) anuncio.textContent = t(titulo);
         noMore.classList.remove('celebrate');
         // Festa só com a fila LIMPA: com pulado a tela diz "Fim da fila" (eles
         // seguem pendentes), e confete ali contradizia o próprio título.
@@ -13168,6 +13200,13 @@ function showNoPlaces() {
             });
         }
     }
+    // O foco prometido ao teclado (o Enter no ✕ ↑ ✓ do último card, no
+    // "Verificar novamente", no "Rejeitar os N"): o botão sumiu e não vem card —
+    // ele vai ao botão do painel (`aplicarFocoDoTeclado`, R7-2-06). Depois da
+    // tarefa, como no card que nasce: o gesto que esvaziou a fila chega aqui pelo
+    // `advanceQueue` e só DEPOIS abre a janela do Desfazer — e, com ela correndo,
+    // o foco ESPERA (a tecla z devolve o card, e o foco vai ao botão dele).
+    if (focoDoTeclado) queueMicrotask(aplicarFocoDoTeclado);
 }
 
 // A abreviação OFICIAL do idioma — quando ela for inequívoca.
