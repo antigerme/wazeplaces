@@ -5097,6 +5097,7 @@ function showMainScreen() {
     AppState.authenticated = true;   // o selo lê isto; o resto da função repete abaixo
     atualizarSeloDeConquista();
     AppState.authenticated = true;
+    quedaAnunciada = false;   // a sessão voltou: a queda dita já passou (ver `avisarTravaAoTocar`)
     // Com a sessão de volta (a renovação pela extensão, com o card na tela), o
     // card destrava: sem sessão ele fica travado (ver `acoesTravadas`).
     aplicarTravaDeAcao();
@@ -8883,6 +8884,7 @@ function sessaoDestaAbaEhAGuardada() {
 
 function derrubarSessao(errorKey, { depois } = {}) {
     epocaDaSessao++;   // o que estava em voo pertencia à sessão que morreu
+    quedaAnunciada = false;   // esta queda ainda não foi dita (ver o fim da renovação)
     // O que é do APARELHO — o token guardado, o diário de sessões e o prazo —
     // só sai se a sessão que caiu é a guardada nele. Senão ele é o da sessão
     // da outra aba, viva, e aqui cai só a cópia da memória (ver a função).
@@ -9009,6 +9011,13 @@ function derrubarSessao(errorKey, { depois } = {}) {
         // renovação já não é verdade — ela acabou, e não deu: sai antes do aviso
         // de queda, que diz o contrário (R6-1-03).
         dispensarAvisoDaTrava();
+        // E daqui até a tela de entrada o card segue na tela, travado: o toque
+        // nele empilhava "Sessão expirada" sob o aviso de queda — dois avisos do
+        // mesmo fato, um com o termo que o app deixou de usar pra queda de causa
+        // desconhecida (auditoria de 2026-10-02, R7-1-09). O desfecho já está
+        // dito (ou o "Acesso restrito" vem já): o toque não avisa mais nada (ver
+        // `avisarTravaAoTocar`).
+        quedaAnunciada = true;
         if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
         setTimeout(() => {
             if (epoca !== epocaDaSessao) return;
@@ -12641,8 +12650,15 @@ function avisoDaTrava() {
 const AVISO_DA_TRAVA_INTERVALO_MS = 3000;
 let avisoDaTravaEm = 0;
 let avisoDaTravaNaTela = null;   // o toast do aviso, pra sair quando a trava acabar
+// A renovação da queda ACABOU sem dar, e o aviso de queda já está na tela (ou o
+// "Acesso restrito" vem já): até a tela de entrada, o toque no card travado não
+// diz mais nada — antes ele empilhava "Sessão expirada" sob "Sua sessão no app
+// não vale mais" (R7-1-09). Aceso no fim da renovação (`derrubarSessao`), apagado
+// a cada queda nova e quando a sessão volta (`showMainScreen`).
+let quedaAnunciada = false;
 function avisarTravaAoTocar() {
     if (!acoesTravadas()) return false;
+    if (!AppState.authenticated && quedaAnunciada) return false;
     const chave = avisoDaTrava();
     if (chave === 'toast.esperaDesfazer') return false;
     const agora = Date.now();

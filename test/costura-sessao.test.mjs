@@ -1782,6 +1782,37 @@ test('R6-1-03: "espere a conferência" só DEPOIS do `aguarde` da extensão — 
   assert.equal(entrou.depois, 'api.error.noSession', 'a marca da renovação ficou acesa depois de ela acabar');
 });
 
+// R7-1-09: o fim da renovação que não deu ACENDE a marca da queda dita (o toque
+// no card travado cala até a tela de entrada, test/card-foco-trava); uma queda
+// nova a apaga, e a sessão que volta (`showMainScreen`) também.
+test('R7-1-09: a queda é dada por DITA só quando a renovação acaba sem dar — e a sessão que volta a apaga', async () => {
+  const montarQueda = (renovou) => {
+    const deps = {
+      AppState: { authenticated: true, pendingAction: null, queue: [], fetchEpoch: 0 }, epocaDaSessao: 0, quedaAnunciada: true,
+      API: { sessionToken: 'tok', setSession() {}, soltarSessao() {}, getSession: () => 'tok' },
+      MOTIVO_DA_QUEDA: constante('MOTIVO_DA_QUEDA'), UNAUTHORIZED_REDIRECT_MS: 0, setTimeout: () => 1,
+      AVISO_RENOVADA_ESPERA_PERFIL_MS: 0,
+      entrarPelaExtensao: async () => renovou, tirarNegadoDaExtensao: () => null, t: (k) => k,
+    };
+    return { h: montar(['derrubarSessao'], deps), deps };
+  };
+  const q = montarQueda(false);
+  q.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(q.deps.quedaAnunciada, false, 'a queda NOVA herdou a marca da anterior (calaria o "espere a conferência")');
+  await tique();
+  assert.equal(q.deps.quedaAnunciada, true, 'DEFEITO: a renovação acabou sem dar e a queda não ficou dita');
+  // CONTROLE: a renovação que DEU não deixa a queda dita.
+  const r = montarQueda(true);
+  r.h.derrubarSessao('srv.err.sessionExpired');
+  await tique(); await tique();
+  assert.equal(r.deps.quedaAnunciada, false, 'a renovação que deu deixou a queda dita');
+  // A sessão que volta (`showMainScreen`) apaga a marca.
+  const deps = { AppState: { authenticated: false }, quedaAnunciada: true,
+    document: { getElementById: () => ({ classList: { add() {}, remove() {} } }) } };
+  montar(['showMainScreen'], deps).showMainScreen();
+  assert.equal(deps.quedaAnunciada, false, 'a sessão voltou e a marca da queda ficou — o card travado seguinte ficaria calado');
+});
+
 test('R6-1-03: a renovação que NÃO deu tira o "espere a conferência" da tela ANTES do aviso de queda', async () => {
   const log = [];
   const deps = {

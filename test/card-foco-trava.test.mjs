@@ -48,7 +48,7 @@ function constante(nome) {
 }
 
 // ── C14: o aviso da trava ────────────────────────────────────────────────────
-function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela = false } = {}) {
+function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela = false, quedaAnunciada = false } = {}) {
   const avisos = [];
   const dispensados = [];
   const duracoes = [];
@@ -68,7 +68,7 @@ function montarAviso({ autenticado = true, lote = false, conferindo = 0, janela 
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [
-    `let loteDeLidosEmVoo = ${lote}, escritasConferindo = ${conferindo};`,
+    `let loteDeLidosEmVoo = ${lote}, escritasConferindo = ${conferindo}, quedaAnunciada = ${quedaAnunciada};`,
     fatiar('acoesTravadas'), fatiar('avisoDaTrava'),
     constante('AVISO_DA_TRAVA_INTERVALO_MS'), 'let avisoDaTravaEm = 0;', 'let avisoDaTravaNaTela = null;',
     fatiar('avisarTravaAoTocar'), fatiar('dispensarAvisoDaTrava'),
@@ -87,6 +87,24 @@ test('C14 o card travado SEM banner responde com o porquê — o aviso que já e
     assert.equal(m.app.avisarTravaAoTocar(), true, `${caso}: DEFEITO — o toque no card travado não respondeu`);
     assert.deepEqual(m.avisos, [{ msg: chave, tipo: 'info' }], `${caso}: o aviso não é o da trava que está valendo`);
   }
+});
+
+// R7-1-09: a renovação da queda ACABOU sem dar e o aviso de queda está na tela;
+// nos instantes até a tela de entrada o card segue ali, travado, e o toque nele
+// empilhava "Sessão expirada" sob "Sua sessão no app não vale mais" — dois avisos
+// do mesmo fato (MEDIDO, auditoria de 2026-10-02). Quem acende e apaga a marca é
+// a queda (test/costura-sessao, R7-1-09).
+test('R7-1-09: com a queda já dita, o toque no card travado não empilha "Sessão expirada" sob o aviso de queda', () => {
+  const m = montarAviso({ autenticado: false, quedaAnunciada: true });
+  assert.equal(m.app.avisarTravaAoTocar(), false);
+  assert.deepEqual(m.avisos, [], `DEFEITO: o toque somou um aviso ao aviso de queda: ${JSON.stringify(m.avisos)}`);
+  // CONTROLE: a mesma queda ANTES de ser dita (a pergunta à extensão) avisa, como sempre.
+  const c = montarAviso({ autenticado: false });
+  assert.equal(c.app.avisarTravaAoTocar(), true);
+  assert.deepEqual(c.avisos, [{ msg: 'api.error.noSession', tipo: 'info' }]);
+  // E a marca de uma queda antiga não cala a trava de quem tem sessão (o lote no ar).
+  const s = montarAviso({ lote: true, quedaAnunciada: true });
+  assert.equal(s.app.avisarTravaAoTocar(), true, 'a marca da queda calou a trava de uma sessão viva');
 });
 
 test('C14 na janela do Desfazer NÃO: o banner com a contagem já explica — e destravado, nada', () => {
