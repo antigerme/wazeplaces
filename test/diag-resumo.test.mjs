@@ -634,3 +634,48 @@ test('diag-resumo: relatório de ANTES da marca — a outra aba é reconhecida p
   assert.doesNotMatch(v, /OUTRA ABA/, 'sem a abertura atual, a triagem inventou uma outra aba');
   assert.match(v, /\[abertura anterior murdtpr1-67np5r\]/);
 });
+
+// ── R7-4-07 = R7-5-06: os campos que o lote 10 pôs no relatório, na triagem ───
+// `desligarPendente`/`desligarFalhas` respondem "desliguei e sigo aparecendo no
+// WME"; `lidaDevendo`, a "mensagem nova" de uma conversa já vista. A triagem não
+// os mostrava, e o "falhas 0" da linha de cima (das escritas de CARONA) lia como
+// "nada falhou" (MEDIDO: o arquivo levava `desligarPendente: true, desligarFalhas: 1`).
+const comPresenca = (wme, app) => {
+  const d = relatorioV8();
+  d._versaoDoDiag = 11;
+  Object.assign(d.resumo.presencaWme, wme);
+  Object.assign(d.resumo.presencaApp, app);
+  return d;
+};
+
+test('diag-resumo: o "invisível" pendente do desligar e as falhas dele aparecem — com ATENÇÃO quando pendente', () => {
+  const s = rodar(comPresenca({ ligada: false, perfilVisivel: true, desligarPendente: true, desligarFalhas: 7 }, {}));
+  assert.match(s, /o desligar \("invisível" no WME\): pendente true · falhas 7/, 'o pendente e as falhas do desligar sumiram da triagem');
+  assert.match(s, /ATENÇÃO: o "invisível" do desligar ainda não chegou ao WME \(falhou 7 vezes\), e o perfil do WME dizia visível — pros outros, a pessoa pode seguir aparecendo no mapa até ele sair\./,
+    'o desligar pendente e falhando não ganhou o aviso');
+  const um = rodar(comPresenca({ desligarPendente: true, desligarFalhas: 1, perfilVisivel: false }, {}));
+  assert.match(um, /ATENÇÃO: o "invisível" do desligar ainda não chegou ao WME \(falhou 1 vez\) — pros outros/, 'o singular saiu errado');
+  // CONTROLE: sem pendente, a linha fica e o aviso não.
+  const ok = rodar(comPresenca({ desligarPendente: false, desligarFalhas: 0 }, {}));
+  assert.match(ok, /o desligar \("invisível" no WME\): pendente false · falhas 0/);
+  assert.doesNotMatch(ok, /ATENÇÃO: o "invisível"/, 'aviso sem pendente é o aviso que se aprende a ignorar');
+});
+
+test('diag-resumo: as conversas devendo o "lida" aparecem, com a nota que explica a "mensagem nova"', () => {
+  const s = rodar(comPresenca({}, { lidaDevendo: 2 }));
+  assert.match(s, /conversas devendo o "lida": 2/, 'a dívida do "lida" sumiu da triagem');
+  assert.match(s, /nota: 2 conversas devem o "lida" ao Waze — a "mensagem nova" de uma conversa já vista é isto, não mensagem que chegou\./);
+  assert.match(rodar(comPresenca({}, { lidaDevendo: 1 })), /nota: 1 conversa deve o "lida"/, 'o singular saiu errado');
+  // CONTROLE: zero não ganha nota.
+  const zero = rodar(comPresenca({}, { lidaDevendo: 0 }));
+  assert.match(zero, /conversas devendo o "lida": 0/);
+  assert.doesNotMatch(zero, /nota: \d+ conversas? dev/);
+});
+
+test('diag-resumo: relatório de ANTES desses campos diz que eles não vinham — e não acusa nada', () => {
+  const s = rodar(relatorioV8());   // v8: sem `desligarPendente`, `desligarFalhas` nem `lidaDevendo`
+  assert.match(s, /o desligar \("invisível" no WME\): pendente \(ausente nesta versão\) · falhas \(ausente nesta versão\)/);
+  assert.match(s, /conversas devendo o "lida": \(ausente nesta versão\)/);
+  assert.doesNotMatch(s, /ATENÇÃO: o "invisível"/);
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
+});

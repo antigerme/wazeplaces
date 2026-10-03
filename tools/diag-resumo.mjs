@@ -138,6 +138,17 @@ else {
   out(`ligada ${pw.ligada}${pw.visto !== undefined ? ` · já vista ligada ${pw.visto}` : ''} · ligar na próxima ação ${pw.ligarNaProxima} · escritas ${pw.enviadas} · falhas ${pw.falhas}${pw.ultimaFalha ? ` (última: ${pw.ultimaFalha})` : ''} · última escrita há ${pw.ultimaHaS ?? '—'} s`);
   // `perfilVisivel` entrou no relatório v8.
   if (pw.perfilVisivel !== undefined) out(`o perfil do WME disse visível: ${pw.perfilVisivel ?? '—'}${pw.perfilHaS != null ? ` (há ${pw.perfilHaS} s)` : ''}`);
+  // O "invisível" do GESTO de desligar que ainda não chegou ao WME, e quantas
+  // vezes ele falhou (o lote 10 os pôs no relatório pro relato "desliguei e sigo
+  // aparecendo no WME"). A triagem não os mostrava, e o "falhas 0" de cima — das
+  // escritas de CARONA, não do desligar — lia como "nada falhou" (R7-4-07 =
+  // R7-5-06).
+  const semCampo = (v) => (v === undefined ? AUSENTE : v);
+  out(`o desligar ("invisível" no WME): pendente ${semCampo(pw.desligarPendente)} · falhas ${semCampo(pw.desligarFalhas)}`);
+  if (pw.desligarPendente === true) {
+    const vezes = Number(pw.desligarFalhas) > 0 ? ` (falhou ${pw.desligarFalhas} ${Number(pw.desligarFalhas) === 1 ? 'vez' : 'vezes'})` : '';
+    out(`ATENÇÃO: o "invisível" do desligar ainda não chegou ao WME${vezes}${pw.perfilVisivel === true ? ', e o perfil do WME dizia visível' : ''} — pros outros, a pessoa pode seguir aparecendo no mapa até ele sair.`);
+  }
   if (pw.marcaPerdida) out('ATENÇÃO: o Waze devolveu a posição SEM a marca do app — a lista de quem está no app vai vir vazia.');
   // A presença do WME expira ~15 min depois da última escrita (medido): quem
   // parou de agir já sumiu da lista dos outros, e isso NÃO é defeito.
@@ -158,6 +169,12 @@ else {
   out(`ligada ${pa.ligada} · no app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
   out(`token ${tk ? `válido ${tk.valido}${tk.abre !== undefined ? ` · abre o tempo real ${tk.abre}` : ''} (vence em ${tk.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
   out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}${f.ignoradas !== undefined ? ` · mensagens só do WME (ignoradas de propósito) ${f.ignoradas}` : ''}${f.quedasSeguidas ? ` · quedas seguidas do tempo real ${f.quedasSeguidas}` : ''}`);
+  // As conversas que DEVEM um "lida" (lote 10): com ela acima de zero, a
+  // "mensagem nova" de uma conversa já vista é isto (R7-4-07 = R7-5-06).
+  out(`conversas devendo o "lida": ${pa.lidaDevendo === undefined ? AUSENTE : pa.lidaDevendo}`);
+  if (Number(pa.lidaDevendo) > 0) {
+    out(`nota: ${pa.lidaDevendo} ${Number(pa.lidaDevendo) === 1 ? 'conversa deve' : 'conversas devem'} o "lida" ao Waze — a "mensagem nova" de uma conversa já vista é isto, não mensagem que chegou.`);
+  }
   // O PORQUÊ da lista, contado no servidor (relatório v8): separa "ninguém usa
   // o app agora" de "está no app, mas noutro país" e de "a marca se perdeu".
   const ct = pa.contagem;
