@@ -4897,6 +4897,34 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.evaluate(() => { const u = document.getElementById('undoBtn'); if (u) u.click(); });
     await page.waitForTimeout(150);
   }
+  // A TRAVA que desabilita a ação FOCADA (R7-3-06, auditoria de 2026-10-02): a
+  // conferência de um 401 (a mesma trava da queda da sessão e do lote) escreve
+  // `disabled` no "Aprovar" e na pílula, o botão focado perde o foco — o
+  // NAVEGADOR o tira — e ele caía no <body> com a camada `aria-modal` aberta. Ele
+  // fica na camada (no ✕: a pílula trava junto), também quando a trava acaba.
+  // CONTROLE: o foco no ✕ (que não trava) não é mexido.
+  for (const alvo of ['#lightboxApprove', '#lightboxNomeBtn', '#lightboxClose']) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await page.focus(alvo);
+    const t0 = await foco();
+    checa('#' + t0.id === alvo, `foco/trava ${alvo}: PRÉ-CONDIÇÃO — o foco não pousou`, JSON.stringify(t0));
+    await page.evaluate(() => { escritasConferindo++; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    const t1 = await foco();
+    const travou = await page.evaluate((a) => document.querySelector(a).disabled, alvo);
+    if (alvo === '#lightboxClose') {
+      checa(t1.id === 'lightboxClose', 'foco/trava: CONTROLE — a trava tirou o foco do ✕', JSON.stringify(t1));
+    } else {
+      checa(travou, `foco/trava ${alvo}: PRÉ-CONDIÇÃO — a trava não desabilitou a ação`);
+      checa(!t1.body && t1.visivel && t1.naFoto, `foco/trava: a trava desabilitou ${alvo} com o foco nele e o foco caiu fora da foto aberta`, JSON.stringify(t1));
+    }
+    await page.evaluate(() => { escritasConferindo--; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    const t2 = await foco();
+    checa(!t2.body && t2.naFoto, `foco/trava ${alvo}: a trava acabou e o foco saiu da foto aberta`, JSON.stringify(t2));
+  }
   // O ✨ e a miniatura da proposta com NOME pro leitor de tela.
   await montar(FOTO_PL);
   await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
@@ -5050,6 +5078,32 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await page.waitForTimeout(250);
   const zt2 = await z();
   checa(zt2 === zt1, `duplo toque/mapa: CONTROLE — um ARRASTE seguido de um toque aproximou (z ${zt1} → ${zt2})`);
+  // O "+" no zoom MÁXIMO e o "−" no MÍNIMO (R7-3-09, auditoria de 2026-10-02):
+  // o toque não faz nada e eles seguiam com cara de vivos. Agora `aria-disabled`
+  // e esmaecidos (o PIXEL: a opacidade computada) — e o foco de quem chegou pelo
+  // TECLADO fica no botão (com `disabled` ele cairia no <body>). CONTROLE: o
+  // outro botão, no mesmo instante, vivo e opaco.
+  const limite = () => page.evaluate(() => {
+    const m = document.getElementById('mapaLbMais'), n = document.getElementById('mapaLbMenos');
+    return { z: MapaLightbox.z, mais: m.getAttribute('aria-disabled'), opMais: Number(getComputedStyle(m).opacity),
+      menos: n.getAttribute('aria-disabled'), opMenos: Number(getComputedStyle(n).opacity),
+      foco: document.activeElement && document.activeElement.id, maisDis: m.disabled };
+  });
+  await page.evaluate(() => { while (MapaLightbox.z < MAPA_Z_NAV_MAX - 1) MapaLightbox.zoom(1); });
+  await page.focus('#mapaLbMais');
+  await page.keyboard.press('Enter'); await page.keyboard.press('Enter');   // o 2º já no limite
+  await page.waitForTimeout(150);
+  const noMax = await limite();
+  checa(noMax.z === await page.evaluate(() => MAPA_Z_NAV_MAX), `zoom/mapa: PRÉ-CONDIÇÃO — o Enter no "+" não levou ao máximo (z ${noMax.z})`);
+  checa(noMax.mais === 'true' && noMax.opMais < 0.6 && !noMax.maisDis,
+    'zoom/mapa: no zoom máximo o "+" segue com cara de vivo (sem aria-disabled ou sem esmaecer) — ou virou `disabled`', JSON.stringify(noMax));
+  checa(noMax.menos === null && noMax.opMenos === 1, 'zoom/mapa: CONTROLE — no máximo o "−" (vivo) travou ou esmaeceu', JSON.stringify(noMax));
+  checa(noMax.foco === 'mapaLbMais', 'zoom/mapa: o "+" travado no máximo perdeu o foco do teclado', JSON.stringify(noMax));
+  await page.evaluate(() => { while (MapaLightbox.z > MAPA_Z_NAV_MIN) MapaLightbox.zoom(-1); });
+  await page.waitForTimeout(150);
+  const noMin = await limite();
+  checa(noMin.menos === 'true' && noMin.opMenos < 0.6 && noMin.mais === null && noMin.opMais === 1,
+    'zoom/mapa: no zoom mínimo o "−" segue com cara de vivo (ou o "+" não voltou a valer)', JSON.stringify(noMin));
   await page.evaluate(() => MapaLightbox.close());
   await page.waitForTimeout(250);
   // A FOTO.
@@ -5082,6 +5136,21 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await rodar(2, 0, 53);
   const e4 = await escala();
   checa(e4 === 1, `roda/foto: dois dentes de 53 px pra dentro e dois pra fora pararam em ${e4}, não em 1× — as setas andariam a foto`);
+  // E a roda FINA a partir de 1× (R7-3-03, auditoria de 2026-10-02): o "abaixo de
+  // 0,1% é 1×" de cima engolia todo evento menor que ~0,55 px, e a roda fina e a
+  // pinça lenta do trackpad nunca começavam a ampliar (40 eventos de −0,4 px e a
+  // escala parada em 1). Agora ela volta a 1 só AFASTANDO: 40 de −0,4 ampliam
+  // (1,2^0,16 ≈ 1,03) e 40 de +0,4 voltam a 1× EXATO.
+  if (!pularForaDoChromium(MOTOR, 'roda/foto: a roda FINA (eventos de −0,4 px) a partir de 1×',
+    'o WebKit do Playwright descarta a roda com |delta| abaixo de 1 px (MEDIDO: 10 eventos de −0,4 px, nenhum chegou à página; os de −1 e −4 chegam), e o defeito mora abaixo de ~0,55 px')) {
+    await pausa();
+    await rodar(40, 0, -0.4);
+    const e5 = await escala();
+    checa(e5 > 1.02, `roda/foto: 40 eventos de roda de −0,4 px a partir de 1× não ampliaram (escala ${e5}) — a roda fina e a pinça lenta morrem`);
+    await rodar(40, 0, 0.4);
+    const e6 = await escala();
+    checa(e6 === 1, `roda/foto: afastando os mesmos 40 eventos a escala parou em ${e6}, não em 1×`);
+  }
   await page.evaluate(() => Lightbox.close());
   checa(erros.length === 0, 'roda: erro de JS', erros[0]);
   await ctx.close();
@@ -9252,6 +9321,83 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(esperas.length === 0, `${id}: a janela do Desfazer ganhou um aviso por cima do banner`, JSON.stringify(esperas));
     await g.fechar();
   }
+  {
+    // R7-3-07 (auditoria de 2026-10-02): as ações da FOTO ampliada (o "Aprovar",
+    // a pílula do nome) travam pela MESMA função do ✕ ↑ ✓ do card, e o toque
+    // nelas — botão `disabled`, que não recebe `click` — não dizia nada. O mesmo
+    // par pointerdown/up do C14, agora na camada, com o DEDO de verdade
+    // (`touchscreen.tap` no centro medido, conferido por hit-test: gotcha #26).
+    // CONTROLES: o ✕ travado do card responde na mesma trava (a medida enxerga o
+    // aviso), e o toque na FOTO, que não é ação, não pede aviso.
+    const id = `card/trava ${MOTOR}: as ações TRAVADAS da foto ampliada respondem (R7-3-07)`;
+    let soltarLote = null, primeira = true;
+    const resposta = async (nome) => {
+      if (nome !== 'marcar-lido') return null;
+      if (primeira) { primeira = false; await new Promise((ok) => { soltarLote = ok; }); }
+      return { success: false, error: 'x', errorCategory: 'unknown' };
+    };
+    // Pedidos de FOTO NOVA (o "Aprovar" é da foto do pedido), com o local aprovado e nome (a pílula).
+    const fotoNova = (i) => cardPedido('fl' + i, { purType: 'NEW_PHOTO', reqType: 'IMAGE', updateTypeKey: 'IMAGE',
+      flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '', localAprovado: true, name: 'Padaria ' + i,
+      imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_fl${i}.jpg`], approvedImageIds: [] });
+    const g = await cardPagina([fotoNova(0), fotoNova(1), fotoNova(2)], { hasTouch: true, resposta });
+    await g.page.evaluate(() => {
+      window.__toastsDoSmoke = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.classList && n.classList.contains('toast')) window.__toastsDoSmoke.push(n.textContent.trim());
+        }
+      }).observe(document.getElementById('toastContainer'), { childList: true });
+    });
+    const texto = await g.page.evaluate(() => t('toast.esperaLote'));
+    const avisos = () => g.page.evaluate((x) => window.__toastsDoSmoke.filter((s) => s === x).length, texto);
+    const centroDe = (sel) => g.page.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, sel);
+    const dedoChega = (p, sel) => g.page.evaluate(({ p, sel }) => {
+      const e = document.elementFromPoint(p.x, p.y);
+      return !!(e && e.closest(sel));
+    }, { p, sel });
+    const semToast = (o) => esperarOuExplodir(g.page, () => !document.querySelector('#toastContainer .toast'), o, 8000);
+    await g.page.evaluate(() => { openBatchReadConfirm(); handleBatchMarkRead(); });
+    await esperarOuExplodir(g.page, () => acoesTravadas() && !!cardDaFrente()
+      && cardDaFrente().querySelector('.card-btn-reject').disabled, 'o lote travar o card');
+    await semToast('o toast do lote sair');
+    // CONTROLE: o ✕ travado do card responde na mesma trava.
+    const x = await centroDe('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await g.page.touchscreen.tap(x.x, x.y);
+    await g.page.waitForTimeout(300);
+    checa(await avisos() === 1, `${id}: CONTROLE — o toque no ✕ travado do card não respondeu (a medida não enxerga o aviso)`,
+      `${await avisos()} avisos`);
+    await g.page.waitForTimeout(3200);           // o intervalo do aviso (3 s)
+    await semToast('o aviso do card sair');
+    // A foto ampliada, aberta DURANTE o lote (o toque na foto do card).
+    const fc = await centroDe('#cardStack .place-card:not(.card-fundo) .card-image');
+    await g.page.touchscreen.tap(fc.x, fc.y);
+    await esperarOuExplodir(g.page, () => Lightbox.isOpen() && document.getElementById('lightboxImage').naturalWidth > 0
+      && !document.getElementById('lightboxApprove').classList.contains('hidden')
+      && !document.getElementById('lightboxNome').classList.contains('hidden'), 'a foto ampliada abrir com o "Aprovar" e a pílula');
+    // CONTROLE: o toque na FOTO, que não é ação, não pede aviso.
+    const fl = await centroDe('#lightboxImage');
+    await g.page.touchscreen.tap(fl.x, fl.y);
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === 1, `${id}: CONTROLE — o toque na foto (não é ação) pediu o aviso da trava`, `${await avisos()} avisos`);
+    for (const [n, sel] of [[2, '#lightboxApprove'], [3, '#lightboxNomeBtn']]) {
+      const a = await centroDe(sel);
+      const travado = await g.page.evaluate((s) => document.querySelector(s).disabled, sel);
+      checa(travado && await dedoChega(a, sel), `${id}: PRÉ-CONDIÇÃO — ${sel} não está travado, ou o dedo não chega nele`);
+      await g.page.touchscreen.tap(a.x, a.y);
+      await g.page.waitForTimeout(400);
+      checa(await avisos() === n, `${id}: DEFEITO — o toque em ${sel} travado da foto ampliada não respondeu`, `${await avisos()} avisos`);
+      await g.page.waitForTimeout(3200);
+      await semToast('o aviso da foto sair');
+    }
+    if (soltarLote) soltarLote();
+    await esperarNaPagina(g.page, () => !acoesTravadas(), 8000);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
 }
 
 // ── MAPA E PÍLULA: nada sai da caixa (auditoria de 2026-09-26) ─────────────
@@ -9818,7 +9964,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     address: `Rua${MARCA} ${i}, 10`, updateType: 'Nova foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO',
     createdBy: `autor${MARCA}`, creatorId: 7777, imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_usair${i}.png`],
     newImageIdx: 0, approvedImageIds: [], localAprovado: true, brand: null, changes: [],
-    mapa: { centro: [-23.5 + i / 1000, -46.6], proposto: null, movidoM: null, entradas: [] }, lat: -23.5 + i / 1000, lon: -46.6,
+    // Uma entrada com NOME (de terceiro): o mapa ampliado o põe no `title` do marcador (R7-1-02).
+    mapa: { centro: [-23.5 + i / 1000, -46.6], proposto: null, movidoM: null,
+      entradas: [{ ll: [-23.5 + i / 1000 + 0.0002, -46.6002], estado: 'nova', nome: `Entrada${MARCA}${i}`, distM: 25 }] },
+    lat: -23.5 + i / 1000, lon: -46.6,
   }));
   const NEGADO = { success: false, error: 'Acesso restrito', errorKey: 'srv.err.accessDenied', errorVars: { minLevel: 2 },
     errorCategory: 'access_denied', profile: { userName: `editor${MARCA}`, rank: 0, isAreaManager: false, isStaff: false } };
@@ -9895,13 +10044,34 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const comFoto = await varrer();
   await tocar('#lightboxClose');
   await esperarOuExplodir(page, () => !Lightbox.isOpen(), 'o ✕ fechar a foto');
+  // O MAPA ampliado do card (R7-1-02, auditoria de 2026-10-02): o nome da
+  // entrada no `title` do marcador, o link do Street View com a coordenada do
+  // pedido e os tiles da área ficavam no mapa FECHADO — até depois do "Sair".
+  // Fecha pelo VOLTAR do aparelho (o caminho do `close(viaHistorico)`).
+  await page.evaluate(() => MapaLightbox.open(AppState.currentPlace));
+  await esperarOuExplodir(page, () => MapaLightbox.isOpen() && document.querySelectorAll('#mapaLbTiles img').length > 0,
+    'o mapa ampliado abrir com tiles');
+  await assentarCamada();
+  const comMapa = await varrer();
+  const mapaAberto = await page.evaluate(() => ({ sv: document.getElementById('mapaLbStreetView').getAttribute('href'),
+    tiles: document.querySelectorAll('#mapaLbTiles img').length, pontos: MapaLightbox.pontos.length }));
+  await page.evaluate(() => history.back());
+  await esperarOuExplodir(page, () => !MapaLightbox.isOpen() && !CamadaVoltar.consumindo, 'o voltar fechar o mapa ampliado');
+  const mapaFechado = await page.evaluate(() => ({ sv: document.getElementById('mapaLbStreetView').getAttribute('href'),
+    tiles: document.querySelectorAll('#mapaLbTiles img').length, marcas: document.querySelectorAll('#mapaLbMarks *').length,
+    pontos: MapaLightbox.pontos.length, centro: MapaLightbox.centro, local: MapaLightbox._local }));
   checa(comFolha.includes('autorTitle') && comHistorico.includes('autoresBody') && comFoto.includes('lightboxCount')
-      && comFoto.includes('lightboxNomeTxt'),
+      && comFoto.includes('lightboxNomeTxt') && comMapa.includes('mapaLbMarks') && !!mapaAberto.sv && mapaAberto.tiles > 0
+      && mapaAberto.pontos > 0,
     'sair/DOM: CONTROLE — com as camadas abertas, a varredura não viu a marca nos nós delas (ela está cega)',
-    JSON.stringify({ comFolha, comHistorico, comFoto }));
+    JSON.stringify({ comFolha, comHistorico, comFoto, comMapa, mapaAberto }));
   const fechadas = (await varrer()).filter((id) => ['autorTitle', 'autorCorpo', 'autoresBody', 'lightboxCount', 'lightboxNomeTxt',
-    'lightboxImage'].includes(id));
-  checa(fechadas.length === 0, 'sair/DOM: a camada FECHADA (Esc, fundo, ✕) seguiu com dado de terceiro no DOM', JSON.stringify(fechadas));
+    'lightboxImage', 'mapaLbMarks', 'mapaLbLegenda', 'mapaLbTiles', 'mapaLbStreetView'].includes(id));
+  checa(fechadas.length === 0, 'sair/DOM: a camada FECHADA (Esc, fundo, ✕, voltar) seguiu com dado de terceiro no DOM', JSON.stringify(fechadas));
+  checa(mapaFechado.sv === null && mapaFechado.tiles === 0 && mapaFechado.marcas === 0 && mapaFechado.pontos === 0
+      && mapaFechado.centro === null && mapaFechado.local === null,
+    'sair/DOM: o mapa ampliado FECHADO guardou o pedido (o link do Street View, os tiles, os marcadores ou os pontos na memória)',
+    JSON.stringify(mapaFechado));
   // O "Sair", pela Ajuda.
   await tocar('#helpBtn');
   await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');

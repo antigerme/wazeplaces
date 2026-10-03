@@ -172,7 +172,10 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // arraste (e, a pinça, com DOIS dedos), que só o CDP do Chromium sintetiza.
   // E a permissão de localização concedida SEM posição (auditoria de
   // 2026-09-29, F4): o WebKit do Playwright entrega uma posição de mentira aí.
-  const ESPERADOS = { 'smoke-browser.mjs': 4 };
+  // E a roda FINA da foto ampliada (auditoria de 2026-10-02, R7-3-03): o WebKit
+  // do Playwright descarta o evento de roda com |delta| abaixo de 1 px (MEDIDO),
+  // e o defeito mora abaixo de ~0,55 px; a conta é medida em test/lightbox-zoom.
+  const ESPERADOS = { 'smoke-browser.mjs': 5 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));
