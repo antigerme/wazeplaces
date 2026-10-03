@@ -4206,7 +4206,10 @@ function editaveisLidos(regiao) {
 //
 // Devolve se o seletor ficou no país APLICADO (a troca que volta pra região
 // aplicada repõe a área com ele).
-function populateCountrySelect(lista = AppState.countries, regiao = API.getRegion()) {
+//
+// `manter`: o país que o seletor mostrava continua escolhido, se segue sendo
+// opção (o perfil que chega com a lista já na tela, `peneirarPaisesComOPerfil`).
+function populateCountrySelect(lista = AppState.countries, regiao = API.getRegion(), manter = null) {
     const select = document.getElementById('filterCountry');
     const hint = document.getElementById('filterCountryHint');
     const editable = editaveisLidos(regiao) || (AppState.profile && AppState.profile.editableCountryIDs) || [];
@@ -4246,6 +4249,10 @@ function populateCountrySelect(lista = AppState.countries, regiao = API.getRegio
         `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
     ).join('');
 
+    if (manter !== null && countries.some((c) => String(c.id) === String(manter))) {
+        select.value = String(manter);
+        return naRegiaoAplicada && String(manter) === String(current);
+    }
     if (naRegiaoAplicada && countries.some(ehOAplicado)) {
         select.value = current;
         return true;
@@ -9678,6 +9685,39 @@ function redesenharFiltrosComOPerfil() {
     const antes = sel && sel.value;
     popularOrdenacoes();
     if (sel && sel.value !== antes) atualizarDicaDeOrdem(null);
+    peneirarPaisesComOPerfil();
+}
+
+// A lista de países que já estava no seletor quando o perfil chegou entrou SEM a
+// peneira dos editáveis: todos os países, sem a dica. Pelo atalho do PWA (os
+// Filtros abrem antes do perfil) ou com a rede lenta, dava pra escolher e
+// aplicar um país que a pessoa não edita DEPOIS de o perfil chegar — a fila
+// vinha vazia ("Confira o país e a região"), e a reabertura seguinte a devolvia
+// ao país do perfil, com aviso (auditoria da rodada 7, R7-6-01; é o R66-4 por um
+// terceiro caminho). A lista passa pela MESMA peneira da abertura
+// (`populateCountrySelect`), e a régua é a do redesenho: o que o seletor mostra
+// FICA, se ainda é opção; o que deixou de existir (o país que a pessoa não edita)
+// volta pro aplicado, com o estado e a área dele, como a volta à região aplicada
+// (`aoTrocarRegiaoNoModal`). Só a lista da região APLICADA: com outra região na
+// tela, os editáveis deste perfil (de outro servidor) não a peneiram. Com a lista
+// ainda chegando (ou a que não carregou), quem a puser no seletor já peneira com
+// o perfil de agora — e aqui não se pede nada.
+function peneirarPaisesComOPerfil() {
+    const pais = document.getElementById('filterCountry');
+    const regiao = document.getElementById('filterRegion');
+    if (!pais || !regiao || pais.dataset.carregando) return;
+    if (regiao.value !== API.getRegion() || !(AppState.countries && AppState.countries.length)) return;
+    const mostrado = pais.value;
+    const noAplicado = populateCountrySelect(AppState.countries, API.getRegion(), mostrado);
+    if (String(pais.value) === String(mostrado)) return;
+    if (noAplicado) {
+        const area = document.getElementById('filterManagedArea');
+        if (area) {
+            area.value = AppState.filters.managedAreaId || '';
+            if (area.selectedIndex < 0) area.value = '';
+        }
+    }
+    loadStatesIntoSelect(parseInt(pais.value, 10), API.getRegion());
 }
 
 // Acumula as categorias vistas nos places carregados — fonte do filtro de categoria (B5).
