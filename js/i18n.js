@@ -182,7 +182,7 @@ const I18N_DICT = {
     'states.error.title': 'Falha ao carregar',
     'states.error.titleOffline': 'Você está sem sinal',
     'states.error.bodyOffline': 'Os pedidos voltam sozinhos quando o sinal voltar.', 'states.error.body': 'Não deu pra buscar os pedidos agora. Verifique sua conexão e tente de novo.',
-    'states.error.retry': 'Tentar novamente',
+    'states.error.retry': 'Tentar de novo',
     // card
     'card.noImage': 'Sem Imagem', 'card.deleteBanner': '⚠ Pedido de remoção',
     'card.categories': 'Categorias:', 'card.address': 'Endereço:', 'card.type': 'Tipo:', 'card.creator': 'Criador:',
@@ -1511,7 +1511,7 @@ const I18N_DICT = {
     'states.error.title': 'Error al cargar',
     'states.error.titleOffline': 'Estás sin señal',
     'states.error.bodyOffline': 'Las solicitudes vuelven solas cuando vuelva la señal.', 'states.error.body': 'No se pudieron buscar las solicitudes ahora. Revisa tu conexión e inténtalo de nuevo.',
-    'states.error.retry': 'Reintentar',
+    'states.error.retry': 'Intentar de nuevo',
     'card.noImage': 'Sin Imagen', 'card.deleteBanner': '⚠ Solicitud de eliminación',
     'card.categories': 'Categorías:', 'card.address': 'Dirección:', 'card.type': 'Tipo:', 'card.creator': 'Creador:',
     'card.read.banner': 'Ya marcada como leída — el filtro incluye las leídas',
