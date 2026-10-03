@@ -5757,7 +5757,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     //
     // O observador do canto vigiava modal, lightbox e as duas telas — e os
     // painéis da fila vazia aparecem sem mexer em nenhum deles. O FAB ficava
-    // onde estava: na borda do "Tentar novamente" (Fold) e do "Agora não" do
+    // onde estava: na borda do "Tentar de novo" (Fold) e do "Agora não" do
     // convite (iPhone SE), auditoria de 2026-09-26 (D8). O canto em que ele
     // estava antes depende do card, então o caso é MONTADO em todo aparelho:
     // com o painel escondido, o FAB (automático, não fixado) é posto em cima de

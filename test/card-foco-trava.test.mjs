@@ -824,7 +824,7 @@ test('R6-2-12: "Esquecer" da FOLHA pelo TECLADO leva o foco ao card refeito — 
   }
 });
 
-// ── R6-2-13: "Verificar novamente" e "Tentar novamente" pelo teclado ────────────
+// ── R6-2-13: "Verificar novamente" e "Tentar de novo" pelo teclado ────────────
 // Os dois somem com o painel quando o card volta, com o foco neles: pelo teclado
 // o foco caía no <body> (MEDIDO no navegador, s45; pelo mouse também fica no
 // <body>, o esperado). O foco é prometido ao ✕ do card que chega — e o painel
@@ -896,7 +896,7 @@ test('R6-2-13: os dois botões dos painéis prometem o foco ANTES de trocar a fi
   assert.match(ouvintes, /\$\('reloadBtn'\)\.addEventListener\('click', \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*resetQueue\(\);\s*startFetching\(\);/,
     'o "Verificar novamente" pelo teclado larga o foco no <body> quando o card volta');
   assert.match(ouvintes, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await /,
-    'o "Tentar novamente" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
+    'o "Tentar de novo" pelo teclado larga o foco no <body> (ou decide depois do `await`, quando o evento já não diz nada)');
 });
 
 // ── O redesenho do MESMO card não é "Novo pedido" (follow-up do lote 10) ──────
@@ -937,7 +937,7 @@ function cardQueAnuncia() {
   const naTela = (painel) => () => (paineis[painel].classList.contains('hidden') ? [] : [1]);
   const botoes = {
     reloadBtn: botaoQuePerde(d, 'Verificar novamente', { getClientRects: naTela('noMoreCards') }),
-    retryLoadBtn: botaoQuePerde(d, 'Tentar novamente', { getClientRects: naTela('loadErrorState') }),
+    retryLoadBtn: botaoQuePerde(d, 'Tentar de novo', { getClientRects: naTela('loadErrorState') }),
   };
   d.getElementById = (id) => (id === 'cardLiveRegion' ? regiao : paineis[id] || botoes[id] || buracoNegro());
   // O card da frente, quando há um (o `cardDaFrente`): sair da tela leva o
@@ -1052,7 +1052,7 @@ test('R7-2-06: Enter no ✕ (ou ↑) do ÚLTIMO card pelo TECLADO — o foco vai
   }
 });
 
-test('R7-2-06: na FALHA ao carregar o foco vai ao "Tentar novamente" — e o anúncio é do painel dela (`role="alert"`), não repetido', async () => {
+test('R7-2-06: na FALHA ao carregar o foco vai ao "Tentar de novo" — e o anúncio é do painel dela (`role="alert"`), não repetido', async () => {
   const m = cardQueAnuncia();
   m.cardNaTela();
   enterNoUltimo(m);

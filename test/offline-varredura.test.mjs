@@ -991,7 +991,7 @@ test('R4-O1: CONTROLE — sem o offline, a mesma falha é a tela de falha; e 401
   assert.equal(c.app.falhouPorRede(), false);
 });
 
-test('R4-O1: na fila JÁ trabalhada a falha mostra a tela — e o "Tentar novamente" abre a guardada com o `onLine` verdadeiro', async () => {
+test('R4-O1: na fila JÁ trabalhada a falha mostra a tela — e o "Tentar de novo" abre a guardada com o `onLine` verdadeiro', async () => {
   const pagina = await prepararO1();
   let falhar = false;
   const b = pagina({ onLine: true, api: () => (falhar ? FALHA_REDE : { ...TRES(), hasMore: true }) });
@@ -1006,10 +1006,10 @@ test('R4-O1: na fila JÁ trabalhada a falha mostra a tela — e o "Tentar novame
   await b.app.startFetching();
   assert.equal(eventos(b, 'falha').length, 1, 'numa fila já trabalhada, a guardada entrou SOZINHA — os pulados voltariam sem ninguém pedir');
   assert.deepEqual(b.AppState.queue, []);
-  assert.equal(b.app.falhouPorRede(), true, 'a falha por rede não ficou anotada pro "Tentar novamente"');
-  // O "Tentar novamente": `offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)`.
+  assert.equal(b.app.falhouPorRede(), true, 'a falha por rede não ficou anotada pro "Tentar de novo"');
+  // O "Tentar de novo": `offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)`.
   assert.equal(await b.app.offlineTentarAbrirSemRede(b.app.falhouPorRede()), true,
-    'o "Tentar novamente" não abriu a fila guardada com o `onLine` verdadeiro');
+    'o "Tentar de novo" não abriu a fila guardada com o `onLine` verdadeiro');
   // CONTROLE: sem a falha por rede anotada, e com o `onLine` verdadeiro, ele não abre (é a busca que sai).
   const c = pagina({ onLine: true, api: () => TRES() });
   assert.equal(await c.app.offlineTentarAbrirSemRede(false), false, 'CONTROLE: com rede e sem falha, a fila guardada abriu');

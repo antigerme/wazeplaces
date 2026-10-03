@@ -1132,7 +1132,7 @@ function setupAppListeners() {
     $('confirmLogout').addEventListener('click', () => handleLogout());
     $('cancelLogout').addEventListener('click', () => closeModal('logoutModal'));
 
-    // "Verificar novamente" e "Tentar novamente" somem com o painel quando o
+    // "Verificar novamente" e "Tentar de novo" somem com o painel quando o
     // card volta, com o foco neles: pelo teclado, o foco vai ao card que chega
     // (`prometerFocoAoCardQueVem`, R6-2-13).
     $('reloadBtn').addEventListener('click', (ev) => {
@@ -5677,7 +5677,7 @@ let conferenciaDaSessao = null;
 // `hasMore` — ou seja a "retentativa" não busca coisa nenhuma, só zera o
 // `loadError` e desenha o painel de fila vazia. Os dois caminhos de
 // recomposição (alarme falso do 401, e renovação pela extensão) chamavam
-// `startFetching()` cru. O botão "Tentar novamente" nunca caiu nisto porque ele
+// `startFetching()` cru. O botão "Tentar de novo" nunca caiu nisto porque ele
 // passa antes pelo `resetQueue`, que repõe `hasMore` — foi o que escondeu o
 // defeito: testar pelo botão dava certo.
 //
@@ -6759,7 +6759,7 @@ function dlogCapturar(motivo) {
         // automática pra tirar. Tirava a mais velha, fosse qual fosse: com o
         // servidor fora — justamente quando se registra a tela pra relatar —,
         // cada busca que falha deixa duas automáticas (`buscaFalhou` e
-        // `falhaAoCarregar`), e o sexto "Tentar novamente" levava as telas da
+        // `falhaAoCarregar`), e o sexto "Tentar de novo" levava as telas da
         // pessoa do anel, da cópia guardada e do relatório, sem download e sem
         // aviso, com o número do botão ainda contando-as (R7-4-02, MEDIDO: 2 →
         // 0 em ~2,5 min). Com o anel só de telas da pessoa, a automática que
@@ -7882,7 +7882,7 @@ function ligarFabDev() {
     // cobra que todo id desta lista exista no index.html.
     // E os PAINÉIS da fila vazia: a falha de carga e o "Tudo limpo!" (com o
     // convite de instalar dentro) aparecem SEM mexer em modal, lightbox ou tela
-    // — o FAB ficava onde estava, na borda do "Tentar novamente", do "Instalar"
+    // — o FAB ficava onde estava, na borda do "Tentar de novo", do "Instalar"
     // e do "Agora não" (auditoria de 2026-09-26, D8).
     const DEV_FAB_CAMADAS = [...MODAL_IDS, 'imageLightbox', 'mapaLightbox', 'appScreen', 'authScreen',
                              'loadErrorState', 'noMoreCards', 'installInvite'];
@@ -10088,7 +10088,7 @@ let filaEsperaPerfil = false;
 // A última busca FALHOU POR REDE ou pelo SERVIDOR (`transient`: nada respondeu,
 // o teto de 45 s estourou, ou a origem devolveu 5xx). É o que deixa a fila
 // guardada do offline entrar com `onLine` dizendo que há rede (ver
-// `startFetching` e o "Tentar novamente"). Zera a cada busca que começa.
+// `startFetching` e o "Tentar de novo"). Zera a cada busca que começa.
 let ultimaBuscaFalhouPorRede = false;
 // A última busca ficou SEM RESPOSTA nenhuma (a rede fora, o teto de 45 s — não o
 // erro do servidor, que respondeu, nem a página de erro da borda: a marca é o
@@ -10164,7 +10164,7 @@ function fetchNextPage() {
     // filtro marcado na tela — MEDIDO, `bbox: null, countryId: 30` com o perfil
     // falhando na abertura, e o perfil que chegava depois não refazia nada
     // (auditoria da fila, 2026-09-26). Sem o perfil a busca ESPERA por ele: a
-    // tela é a de falha (com "Tentar novamente"), o perfil que faltou é pedido
+    // tela é a de falha (com "Tentar de novo"), o perfil que faltou é pedido
     // de novo (no máximo 1×/min), e o que chegar refaz a fila. O `hasMore =
     // false` encerra o laço do `startFetching` (gotcha #19). Com o perfil na mão
     // e SEM caixa, o filtro desliga e diz por quê.
@@ -10484,7 +10484,7 @@ async function startFetching() {
 
     // "Minha área" precisa do perfil (áreas/bbox). Se ainda não chegou, espera —
     // a busca sem ele não sai (ver `fetchNextPage`). E o perfil que FALHOU é
-    // pedido de novo aqui, no máximo 1×/min: é o "Tentar novamente" de quem usa
+    // pedido de novo aqui, no máximo 1×/min: é o "Tentar de novo" de quem usa
     // "Minha área", que sem isto só repetia a mesma recusa.
     if (AppState.filters.myArea && !(AppState.profile && AppState.profile.areas)) {
         refazerPerfilSeFaltar();
@@ -10510,7 +10510,7 @@ async function startFetching() {
     // entrava com `onLine === false`, e a espera terminava em "Falha ao
     // carregar" com a fila preparada no aparelho (auditoria de 2026-09-29, O1).
     // Só na fila NOVA: numa fila que a pessoa já trabalhou, os que ela pulou
-    // voltariam sozinhos — ali é o "Tentar novamente" que a traz, como sem rede.
+    // voltariam sozinhos — ali é o "Tentar de novo" que a traz, como sem rede.
     if (!AppState.queue.length && ultimaBuscaFalhouPorRede && pedidosQueEntraramNaFila.size === 0
         && epoca === AppState.fetchEpoch) {
         await abrirGuardadaDepoisDaFalha(epoca);
@@ -12950,7 +12950,7 @@ function aplicarFocoDoTeclado() {
         // resto da fila — e não vem card nenhum. O foco caía no <body>, e quem
         // usa teclado ou leitor de tela recomeçava do topo da página (MEDIDO nos
         // dois motores; auditoria de 2026-10-02, R7-2-06). Vai ao botão do painel
-        // que tomou o lugar do card, o caminho de volta: "Tentar novamente" na
+        // que tomou o lugar do card, o caminho de volta: "Tentar de novo" na
         // falha, "Verificar novamente" no "Tudo limpo!"/"Fim da fila". Sem painel
         // na tela (a busca ainda corre), a promessa espera quem chegar: o card
         // (`renderCurrentCard`) ou o painel (`showNoPlaces`).
@@ -12972,7 +12972,7 @@ function aplicarFocoDoTeclado() {
     alvo.focus({ preventScroll: true });
 }
 
-// "Verificar novamente" (o "Fim da fila"/"Tudo limpo!") e "Tentar novamente" (a
+// "Verificar novamente" (o "Fim da fila"/"Tudo limpo!") e "Tentar de novo" (a
 // falha ao carregar) somem com o painel quando o card volta — com o foco neles.
 // Pelo teclado ele caía no <body>, e quem usa teclado ou leitor de tela
 // recomeçava do topo da página (MEDIDO, s45; auditoria de 2026-10-02, R6-2-13).
@@ -13742,7 +13742,7 @@ function showNoPlaces() {
     const errEl = document.getElementById('loadErrorState');
     if (AppState.loadError && errEl) {
         // Falha de rede/servidor: NÃO mostra "Tudo limpo!" (o editor acharia que
-        // zerou o backlog). Mostra estado de erro com "Tentar novamente".
+        // zerou o backlog). Mostra estado de erro com "Tentar de novo".
         noMore.classList.add('hidden');
         errEl.classList.remove('hidden');
         // SEM CONEXÃO é coisa que o app SABE — `onLine === false` é confiável
@@ -17773,7 +17773,7 @@ window.addEventListener('online', async () => {
     // isso. MEDIDO — sem isso o app trocava "Falha ao carregar" por **"Tudo
     // limpo!"** com a fila vazia, que é pior que o erro original. Era um
     // `resetQueue()`, que resolvia isso e trazia de volta o que a pessoa pulou.
-    // É o mesmo caminho do botão "Tentar novamente": o automático e o manual
+    // É o mesmo caminho do botão "Tentar de novo": o automático e o manual
     // têm que fazer a mesma coisa.
     if (AppState.authenticated && AppState.loadError && !AppState.fetching) {
         retomarBusca();

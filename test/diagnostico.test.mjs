@@ -753,7 +753,7 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
 // ── R7-4-02: as capturas AUTOMÁTICAS não empurram as da PESSOA pra fora ─────
 // O anel cheio descartava o mais velho, fosse qual fosse: com o servidor fora
 // (quando se registra a tela pra relatar), cada busca que falha deixa duas
-// automáticas, e o 6º "Tentar novamente" levava as telas do toque do anel, da
+// automáticas, e o 6º "Tentar de novo" levava as telas do toque do anel, da
 // cópia guardada e do relatório — com o número do botão ainda contando-as
 // (MEDIDO no navegador: 2 → 0 na 6ª tentativa, ~2,5 min). Aqui o `dlogCapturar`
 // RODA, com o resto do app de mentira.
