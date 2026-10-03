@@ -134,15 +134,18 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
     paisDoPerfil: async () => null, irProPaisDoPerfil: async () => {}, resetQueue: () => log.push('resetQueue'), window: {},
     // a decisão depois da queda
     anotadoAntesDoEnvio: new Set(), descargaNaFila: new Set(),
+    // a ordem trocada nos Filtros (o `aplicarSoAOrdem`): a barra do foco e as páginas que faltam
+    renderFocoAutor: () => {}, ordemPrecisaDaFilaInteira: () => false, buscarORestoDaFila: () => log.push('resto'),
   };
   const fontes = [
     'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false;',
     'let filaEsperaPerfil = false; let referenciasDoPerfil = null; let posicaoGps = null;',
     ...['chaveDoPedido', 'serieDoAutor', 'manterFocoNaFrente', 'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue',
       'devolverPedidoRecusado', 'pousouNoWaze', 'descontarGestoSemSessao', 'decisaoDepoisDaQueda', 'enviarLote',
-      'aplicarRecusaAutomatica', 'completarPerfilChegado', 'esquecerFocoAutor'].map(fatiar),
+      'aplicarRecusaAutomatica', 'completarPerfilChegado', 'esquecerFocoAutor',
+      'limparFocoAutor', 'reordenarFilaNaTela', 'aplicarSoAOrdem'].map(fatiar),
     'const Treino = ' + objetoDoTreino() + ';',
-    'return { Treino, devolverPedidoRecusado, decisaoDepoisDaQueda, aplicarRecusaAutomatica, completarPerfilChegado,',
+    'return { Treino, devolverPedidoRecusado, decisaoDepoisDaQueda, aplicarRecusaAutomatica, completarPerfilChegado, aplicarSoAOrdem,',
     '  esquecerFocoAutor, casa: (ll) => { referenciasDoPerfil = { casa: ll, trabalho: null }; } };',
   ].join('\n');
   const chaves = Object.keys(deps);
@@ -495,4 +498,35 @@ test('R7-2-06: o "Sair" do treino pelo TECLADO leva o foco ao ✕ do card real q
     assert.notEqual(c.d.activeElement, c.card.bs['.card-btn-reject'], `${rotulo}: o foco pulou pro card`);
     assert.equal(c.app.pendente(), null, `${rotulo}: o foco ficou prometido sem o teclado`);
   }
+});
+
+// ═══ Junção do lote 11 · a ORDEM trocada nos Filtros com o treino aberto ═════
+// O "Aplicar" que muda SÓ a ordem (sem pedido novo ao Waze) reordena a fila da
+// tela (`reordenarFilaNaTela`). Com o treino aberto, a fila da tela é a de
+// EXEMPLOS: a ordem de variedade se perdia, e a fila REAL voltava no "Sair" na
+// ordem velha, com o filtro dizendo "Perto de casa". MEDIDO no navegador
+// (roteiro da rodada 7, no código do lote 11): exemplos v1,v2,v3,v4 →
+// v3,v4,v2,v1, e a real voltando u1,u2,u3,u4; sem o treino, u3,u4,u2,u1.
+function ordemNoTreino(comTreino) {
+  const fila = [P(1, 1, [-10, -40]), P(2, 2, [-11, -41]), P(3, 3, [-23.001, -46.001]), P(4, 4, [-23.01, -46.01])];
+  const m = montarApp({ queue: fila.slice(), currentPlace: fila[0], serverTotal: 4, autorEmFoco: 2 }, { wazeNaHora: true });
+  m.app.casa([-23.0, -46.0]);
+  let exemplosAntes = null, exemplosDepois = null;
+  if (comTreino) { m.app.Treino.entrar(); exemplosAntes = ids(m.AppState.queue); }
+  m.AppState.filters.sortOrder = 'casa';   // o "Aplicar" grava a ordem antes do ramo "só a ordem"
+  m.app.aplicarSoAOrdem();
+  if (comTreino) { exemplosDepois = ids(m.AppState.queue); m.app.Treino.sair(); }
+  return { fila: ids(m.AppState.queue), frente: m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID,
+    foco: m.AppState.autorEmFoco, exemplosAntes, exemplosDepois };
+}
+
+test('junção do lote 11: a ORDEM trocada nos Filtros com o treino aberto não mexe nos EXEMPLOS — e a fila real volta nela', () => {
+  const controle = ordemNoTreino(false);
+  assert.deepEqual({ fila: controle.fila, frente: controle.frente, foco: controle.foco }, { fila: ['u3', 'u4', 'u2', 'u1'], frente: 'u3', foco: null },
+    'CONTROLE: sem o treino a ordem por casa não reordenou a fila (ou não trocou o card, ou manteve o foco) — o teste perdeu o sentido');
+  const r = ordemNoTreino(true);
+  assert.deepEqual(r.exemplosDepois, r.exemplosAntes,
+    `DEFEITO: a ordem nova reordenou os EXEMPLOS do treino (${r.exemplosAntes} → ${r.exemplosDepois}) — a ordem de variedade se perdeu`);
+  assert.deepEqual({ fila: r.fila, frente: r.frente, foco: r.foco }, { fila: controle.fila, frente: controle.frente, foco: controle.foco },
+    `DEFEITO: no "Sair", a fila real não voltou na ordem pedida (${JSON.stringify({ fila: r.fila, frente: r.frente, foco: r.foco })})`);
 });

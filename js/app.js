@@ -4711,11 +4711,24 @@ function applyFiltersFromModal() {
     // a fila refeita os traz de novo. Quem só queria outra ordem via o app
     // travar, recarregar e devolver o que ele tinha empurrado pra frente.
     if (assinaturaDeBusca() === buscaAntes && AppState.queue.length) {
-        reordenarFilaNaTela();
+        aplicarSoAOrdem();
         return;
     }
     resetQueue();
     startFetching();
+}
+
+// A ordem nova, sem pedido novo ao Waze. Com o treino aberto, a fila da tela é
+// a de EXEMPLOS (na ordem de variedade dele) e a real está guardada: reordenar
+// aqui embaralhava os exemplos e deixava a fila real voltar, no "Sair", na
+// ordem velha com o filtro dizendo a nova (junção do lote 11, medido com
+// "Perto de casa": exemplos v1,v2,v3,v4 → v3,v4,v2,v1, e a real voltando
+// u1,u2,u3,u4 em vez de u3,u4,u2,u1). O treino anota, e o `sair()` aplica a
+// ordem na fila real, como o `reordenarFilaNaTela` faria — o mesmo caminho do
+// perfil que chega no treino (`anotarPerfil`).
+function aplicarSoAOrdem() {
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) { Treino.anotarOrdem(); return; }
+    reordenarFilaNaTela();
 }
 
 // O que decide se é preciso RE-BUSCAR. Tudo de `filters` MENOS a ordem, mais
@@ -18792,7 +18805,7 @@ const Treino = {
         // `perfilChegou`: o perfil que chegou nele — os dois esperam a fila real
         // voltar (ver o `sair()`).
         this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace, autorEmFoco: AppState.autorEmFoco,
-            epoca: epocaDaFilaReal, epocaDoTreino: AppState.fetchEpoch, devolver: [], perfilChegou: false };
+            epoca: epocaDaFilaReal, epocaDoTreino: AppState.fetchEpoch, devolver: [], perfilChegou: false, ordemMudou: false };
         AppState.autorEmFoco = null;
         this.ativo = true;
         this.passo = 0;
@@ -18843,7 +18856,15 @@ const Treino = {
         // data e com os pedidos do autor marcado na tela. Aplicados agora, ANTES
         // de o card ser desenhado: o da frente fica (`semTrocarOCardDaTela`), e o
         // de fundo nasce do próximo de verdade.
-        if (s.perfilChegou) {
+        // A ORDEM trocada nos Filtros com o treino aberto (`anotarOrdem`) é gesto
+        // da pessoa e vale como no `reordenarFilaNaTela`: encerra o foco no autor
+        // e o primeiro da fila é outro (o card da frente TROCA). Ela vence o
+        // `semTrocarOCardDaTela` do perfil, que é o app ordenando sozinho.
+        if (s.ordemMudou) {
+            limparFocoAutor();
+            if (s.perfilChegou) aplicarRecusaAutomatica();
+            sortQueue();
+        } else if (s.perfilChegou) {
             aplicarRecusaAutomatica();
             sortQueue({ semTrocarOCardDaTela: true });
         }
@@ -18855,7 +18876,14 @@ const Treino = {
         updatePendingCount(true);
         // A busca que o `entrar()` descartou volta aqui: pela fila vazia, ou pelo
         // prefetch de sempre quando sobram poucos.
-        if (AppState.queue.length) { AppState.currentPlace = AppState.queue[0]; showCurrentPlace(); maybePrefetch(); }
+        if (AppState.queue.length) {
+            AppState.currentPlace = AppState.queue[0];
+            showCurrentPlace();
+            // A ordem escolhida só vale sobre a fila inteira: as páginas que
+            // faltam vêm agora, como no `reordenarFilaNaTela`.
+            if (s.ordemMudou && ordemPrecisaDaFilaInteira()) buscarORestoDaFila();
+            maybePrefetch();
+        }
         else if (AppState.hasMore) startFetching();
         else showNoPlaces();
     },
@@ -18881,6 +18909,11 @@ const Treino = {
     // O perfil chegou com o treino aberto: ver o `sair()`.
     anotarPerfil() {
         if (this.ativo && this._salvo) this._salvo.perfilChegou = true;
+    },
+
+    // A ordem trocada nos Filtros com o treino aberto (`aplicarSoAOrdem`): ver o `sair()`.
+    anotarOrdem() {
+        if (this.ativo && this._salvo) this._salvo.ordemMudou = true;
     },
 
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de

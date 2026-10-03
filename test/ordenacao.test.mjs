@@ -84,8 +84,13 @@ test('a assinatura de busca é por EXCLUSÃO, não por lista de inclusão', () =
 test('só a ordem evita a rede; qualquer filtro de busca continua rebuscando', () => {
   const corpo = fatiar('applyFiltersFromModal');
   assert.match(corpo, /const buscaAntes = assinaturaDeBusca\(\);/, 'sumiu a foto dos filtros antes da mutação');
-  assert.match(corpo, /if \(assinaturaDeBusca\(\) === buscaAntes && AppState\.queue\.length\) \{[\s\S]{0,120}reordenarFilaNaTela\(\);[\s\S]{0,40}return;/,
+  assert.match(corpo, /if \(assinaturaDeBusca\(\) === buscaAntes && AppState\.queue\.length\) \{[\s\S]{0,120}aplicarSoAOrdem\(\);[\s\S]{0,40}return;/,
     'o atalho local deixou de exigir que a busca seja IDÊNTICA — filtro de verdade pararia de rebuscar');
+  // Fora do treino, "só a ordem" é reordenar a fila da tela (com o treino
+  // aberto, a fila da tela é a de exemplos, e a ordem vai pro `sair()`: ver
+  // `test/treino-fila-real.test.mjs`).
+  assert.match(fatiar('aplicarSoAOrdem'), /\{ Treino\.anotarOrdem\(\); return; \}\s*\n\s*reordenarFilaNaTela\(\);/,
+    'o "só a ordem" deixou de reordenar a fila da tela fora do treino');
   // A foto tem que ser tirada ANTES de qualquer mutação, senão ela já nasce
   // igual ao estado novo e a comparação sempre dá "não mudou nada".
   assert.ok(corpo.indexOf('const buscaAntes') < corpo.indexOf('AppState.filters.unreadOnly ='),
