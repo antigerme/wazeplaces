@@ -1382,3 +1382,57 @@ test('R7-6-03: entrando de novo na mesma aba, com a lista da ROW falhando, os Fi
   await q.abrir();
   assert.deepEqual(telaDoPais(q), { opcoes: '30', pais: '30', dica: true });
 });
+
+// ═══ R7-6-04 · a lista de PAÍSES que não carrega ═══════════════════════════
+// Com a lista de países falhando (o servidor, a rede), o seletor de país ficava
+// VAZIO e destravado, com os estados do país aplicado logo abaixo — o caso
+// irmão, a lista de ESTADOS que falha, já dizia "Lista não carregou" (MEDIDO no
+// navegador, auditoria da rodada 7: `paises-500` e `paises-rede` com o seletor
+// em branco). Agora diz o mesmo, e segue "carregando" pro "Aplicar" não mexer.
+test('R7-6-04: a lista de países que NÃO carrega diz isso, como a de estados — e o "Aplicar" não mexe no país nem no estado', async () => {
+  const falhas = [['o servidor (500)', { success: false, errorCategory: 'transient', httpCode: 500 }],
+    ['a rede', { success: false, errorCategory: 'transient', _motivo: 'rede' }]];
+  for (const [nome, resposta] of falhas) {
+    const p = pagina({ filtros: { stateId: '25' }, estados: { 30: [{ id: 25, name: 'São Paulo' }] } });
+    p.listas.paises = () => Promise.resolve(resposta);
+    await p.abrir();
+    const pais = p.els.filterCountry;
+    assert.equal(pais.mostrado, 'filters.state.naoCarregou', `${nome}: o seletor de país ficou "${pais.mostrado}"`);
+    assert.equal((pais.querySelector('option[value=""]') || {}).i18n, 'filters.state.naoCarregou',
+      `${nome}: a opção sem data-i18n não acompanha a troca de idioma`);
+    assert.equal(pais.dataset.carregando, '1', `${nome}: o seletor de país não segue "carregando" — o "Aplicar" mexeria no país`);
+    assert.equal(pais.disabled, false, `${nome}: o seletor ficou travado (o de estados, na mesma falha, não fica)`);
+    assert.equal(p.els.filterState.mostrado, 'filters.state.naoCarregou',
+      `${nome}: o estado mostra "${p.els.filterState.mostrado}" debaixo de um país que a tela não mostra`);
+    assert.equal(p.els.filterState.dataset.carregando, '1');
+    assert.deepEqual(p.log.listStates, [], `${nome}: pediu os estados de um país que a tela não mostra`);
+    aplicarSoDesmarcandoUmTipo(p);
+    assert.deepEqual([p.estado.regiao, p.estado.pais, p.log.salvos.at(-1).stateId], ['row', 30, '25'],
+      `${nome}: o "Aplicar" mexeu no lugar ou no estado`);
+    // Reabrir os Filtros tenta de novo — e com a lista chegando, ela aparece
+    // (CONTROLE: o instrumento distingue a lista da falha).
+    p.listas.paises = () => Promise.resolve({ success: true, countries: BR_FR.map((c) => ({ ...c })) });
+    await p.abrir();
+    assert.deepEqual(telaDoPais(p), { opcoes: '30,73', pais: '30', dica: false }, `${nome}: reabrir não pediu a lista de novo`);
+    assert.equal(p.els.filterState.value, '25', `${nome}: o estado aplicado não voltou com a lista`);
+  }
+});
+
+test('R7-6-04: a carga de estados que ainda vinha não escreve por cima do "Lista não carregou" do país', async () => {
+  // A pessoa trocou de país (os estados dele no ar), fechou e reabriu os
+  // Filtros com a lista de países indo e falhando.
+  const p = pagina({ estados: {} });
+  await p.abrir();
+  let soltarEstados;
+  p.listas.estados = () => new Promise((ok) => { soltarEstados = ok; });
+  const velha = p.app.loadStatesIntoSelect(73, 'row');
+  p.els.filtersModal.classList.add('hidden');
+  p.AppState.countries = [];
+  p.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
+  await p.abrir();
+  soltarEstados({ success: true, states: [{ id: 3, name: 'Normandie' }] });
+  await velha;
+  assert.equal(p.els.filterState.mostrado, 'filters.state.naoCarregou',
+    `a carga de estados de antes escreveu "${p.els.filterState.mostrado}" debaixo do país que não carregou`);
+  assert.equal(p.els.filterState.dataset.carregando, '1');
+});

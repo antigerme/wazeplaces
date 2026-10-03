@@ -4552,6 +4552,23 @@ async function popularPaisEstado() {
         // aplicada ela passava: punha o país aplicado por cima do que a pessoa
         // tinha escolhido na lista da troca (R56-6).
         if (minha !== cargaDePaises) return;
+        // A lista NÃO veio (a rede, o servidor): o seletor de país ficava VAZIO e
+        // destravado, com os estados do país aplicado logo abaixo — o defeito que
+        // o de estados já não tem (auditoria da rodada 7, R7-6-04). Ele diz o que
+        // houve com a MESMA opção do de estados ("Lista não carregou", em
+        // `loadStatesIntoSelect`) e segue "carregando": o "Aplicar" não mexe no
+        // país aplicado. O estado diz o mesmo e também fica como está — a lista
+        // dele seria de um país que a tela não mostra, e pedi-la é um pedido a
+        // mais. Reabrir os Filtros tenta de novo (a lista vazia é pedida de novo).
+        if (AppState.countries.length === 0) {
+            const naoCarregou = `<option value="" data-i18n="filters.state.naoCarregou">${escapeHtml(t('filters.state.naoCarregou'))}</option>`;
+            if (select) { select.innerHTML = naoCarregou; select.dataset.carregando = '1'; }
+            // Esta escrita é a ÚLTIMA no seletor de estados (`cargaDeEstados`): a
+            // carga de estados que ainda vinha não a sobrescreve.
+            cargaDeEstados++;
+            if (estado) { estado.innerHTML = naoCarregou; estado.dataset.carregando = '1'; }
+            return;
+        }
         if (select) delete select.dataset.carregando;
         populateCountrySelect();
         await loadStatesIntoSelect(API.getCountry());
