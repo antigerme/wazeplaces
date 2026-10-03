@@ -83,6 +83,7 @@ test('época da sessão: resposta de ação em voo que chega depois do "Sair" n�
     API: { getRegion: () => 'row', getCountry: () => 30, rejectPlace: () => new Promise((ok) => { soltar = ok; }) },
     scheduleAction: (tipo, place, ex) => agendadas.push(ex),
     presencaWmeDaAcao: () => null, callWithRetry: (fn) => fn(), carimboDoGesto: () => null,
+    paisDaFila: () => 30,   // o país do gesto, pra marca da presença (R7-6-05)
     presencaWmeAoResponder: () => efeitos.push('presenca'),
     handleActionResult: () => efeitos.push('resultado'),
     // O placar do gesto volta só pro que NÃO pousou (test/costura-sessao, K7):

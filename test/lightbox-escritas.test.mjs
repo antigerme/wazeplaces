@@ -1316,6 +1316,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     aprovacaoPousouDepoisDaQueda: () => log.push('pousou-depois-da-queda'),
     ...r6Deps(),
     carimboDoGesto: () => null,   // o momento do gesto (R6-7-4); aqui se mede a trava
+    paisDaFila: () => 30,         // o país do gesto, pra marca da presença (R7-6-05)
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',

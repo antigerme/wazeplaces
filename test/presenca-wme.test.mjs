@@ -175,7 +175,8 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     // do card de 3 s atrás, e iria pra fila de saída junto se a rede caísse.
     const gesto = corpo.slice(0, corpo.indexOf('scheduleAction('));
     assert.doesNotMatch(gesto, /presencaWme/, `${handler}: montou a posição no gesto`);
-    assert.match(gesto, /const pais = API\.getCountry\(\);/, `${handler}: o país não é o do GESTO`);
+    // O da FILA (`paisDaFila`): o do filtro, ou o da área com "Minha área" (R7-6-05).
+    assert.match(gesto, /const pais = paisDaFila\(\);/, `${handler}: o país não é o do GESTO`);
   }
 });
 

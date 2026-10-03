@@ -267,7 +267,9 @@ test('o DIA e a REGIÃO são os do gesto, não os do pouso', () => {
     'o recordHistory deixou de aceitar dia/região');
   assert.match(rh, /const k = dia \|\| historyTodayKey\(\)/,
     'o recordHistory voltou a cravar HOJE, ignorando o dia que recebeu');
-  assert.match(rh, /const lugar = onde \|\| ondeAgora\(\)/,
+  // Só o `onde` AUSENTE lê o de agora: o `null` do gesto é "o app não sabe
+  // onde" (a "Minha área" sem o país, R7-6-05), e não o filtro do pouso.
+  assert.match(rh, /const lugar = onde !== undefined \? onde : ondeAgora\(\)/,
     'o recordHistory voltou a cravar o filtro de agora, ignorando a região que recebeu');
   // E o caminho ONLINE também passa os do GESTO. Esta asserção dizia o
   // contrário ("ali o padrão É hoje") e estava errada: a resposta chega DEPOIS
@@ -726,6 +728,7 @@ function aparelhoO5(guardado = new Map()) {
       registrarPouso: () => { medidas.pousos++; }, recordHistory: () => { medidas.historico++; },
       registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
       historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', handleUnauthorized: () => {},
+      paisDaFila: () => 30,   // o país do gesto, pra marca da presença (R7-6-05)
       renomeacaoPendente: null, aprovacaoPendente: null, exclusaoPendente: null, console: { error: () => {} },
       medidas, resposta, setImmediate,
       // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
@@ -1220,7 +1223,7 @@ test('R4-O6: a RESERVA, passo a passo — marca de outra aba recente segura; vel
 // o `ondeAgora` —, e o país do FILTRO muda dentro da janela.
 function aparelhoDoGesto({ resposta }) {
   const guardado = new Map();
-  const medidas = { envios: [], historico: [] };
+  const medidas = { envios: [], historico: [], presenca: [] };
   const filtro = { pais: 30, dia: '2026-09-25' };
   const AppState = { authenticated: true, profile: { id: 1 }, currentPlace: null, queue: [], pendingAction: null,
     inFlightActions: 0, serverTotal: 5, stats: { read: 0, rejected: 0, skipped: 0 },
@@ -1237,7 +1240,9 @@ function aparelhoDoGesto({ resposta }) {
     updateInFlightIndicator: () => {}, updateStats: () => {}, updatePendingCount: () => {}, showCurrentPlace: () => {},
     saveStats: () => {}, canDisableUndo: () => false, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
     acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
-    presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
+    // O país que a carona da presença leva (a marca, R7-6-05): anotado.
+    presencaWmeDaAcao: (place, pais) => { medidas.presenca.push(pais); return null; },
+    presencaWmeAoResponder: () => {}, callWithRetry: (fn) => fn(),
     registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {}, avisarConsequencia: () => {},
     recordHistory: (tipo, n, dia, onde) => medidas.historico.push({ tipo, n, dia, onde }),
     historyTodayKey: () => filtro.dia, getLang: () => 'pt', handleUnauthorized: () => {},
@@ -1248,14 +1253,17 @@ function aparelhoDoGesto({ resposta }) {
       rejectPlace: async (v) => { medidas.envios.push(v); await null; return resposta(); } },
     console: { error: () => {} },
   };
+  // O país da fila com "Minha área" sai dos editáveis por servidor (R7-6-05).
   const nomes = ['carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarEmAndamento', 'enfileirarSaida',
-    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora', 'carimboDoGesto'];
+    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora', 'carimboDoGesto',
+    'anotarEditaveis', 'editaveisLidos', 'paisDaMinhaArea', 'paisDaFila'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let tratouNestaFila = false;
     const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+    const editaveisPorServidor = new WeakMap();
     ${nomes.map(fatiarComAsync).join('\n')}
-    return { handleReject, carregarFilaDeSaida, ondeAgora };`)(...chaves.map((k) => deps[k]));
+    return { handleReject, carregarFilaDeSaida, ondeAgora, anotarEditaveis, paisDaFila };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, medidas, filtro };
 }
 
@@ -1295,12 +1303,93 @@ test('R6-7-4: CONTROLE — sem trocar nada, o Histórico e a fila de saída leva
   assert.deepEqual(m.medidas.historico, [{ tipo: 'reject', n: 1, dia: '2026-09-25', onde: '30' }]);
 });
 
-test('R6-7-4: com "Minha área" o "onde" é só o PAÍS — a busca vai pela caixa da área, sem o estado guardado', () => {
+test('R6-7-4: com "Minha área" o "onde" não leva o estado — a busca vai pela caixa da área, sem o estado guardado', () => {
   const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  // Quem edita UM país só neste servidor (ver R7-6-05, abaixo): o país é o dela.
+  m.app.anotarEditaveis(m.AppState.profile, 'row', [30]);
   m.AppState.filters.stateId = '1';
   m.AppState.filters.myArea = true;
   assert.equal(m.app.ondeAgora(), '30', 'com "Minha área" o Histórico gravou o estado que a busca nem usou (30:1)');
   // CONTROLE: sem "Minha área", o estado do filtro é onde o trabalho foi feito.
   m.AppState.filters.myArea = false;
   assert.equal(m.app.ondeAgora(), '30:1');
+});
+
+// ── R7-6-05: com "Minha área", nem o PAÍS do filtro é onde o trabalho foi feito ──
+// A busca vai pela caixa da área com `countryId: null` (o core), mas o Histórico
+// gravava o país do FILTRO e a carona da presença marcava a pessoa com ele: com
+// a área num país e o filtro noutro, o ✕ num pedido da área entrava no Histórico
+// (e no "Viajante") como o outro país, e a pessoa aparecia no "Triando agora" de
+// lá (MEDIDO no navegador, auditoria da rodada 7: área em São Paulo, filtro na
+// França → `onde {"73":1}` e `pais: 73`). Sem pedido novo: a fila só tem o que a
+// pessoa EDITA, e quem edita UM país só neste servidor tem a fila nele. Com mais
+// de um, o Histórico não grava lugar (contar no lugar errado é pior que não
+// contar), e a marca segue o país do filtro (sem país não há marca).
+async function rejeitarNaMinhaArea(m) {
+  m.AppState.filters.myArea = true;
+  m.AppState.currentPlace = { venueID: 'v1', updateRequestID: 'u1', creatorId: 7 };
+  m.app.handleReject();
+  m.AppState.pendingAction.execute();
+  for (let i = 0; i < 5; i++) await null;
+}
+
+test('R7-6-05: com "Minha área" num país e o filtro noutro, o ✕ entra no Histórico e na presença como o país da ÁREA', async () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  m.filtro.pais = 73;                                       // o filtro na França…
+  m.app.anotarEditaveis(m.AppState.profile, 'row', [30]);   // …e a pessoa só edita (e tem a área) no Brasil
+  await rejeitarNaMinhaArea(m);
+  assert.deepEqual(m.medidas.envios, ['v1'], 'PRÉ-CONDIÇÃO: a decisão saiu');
+  assert.deepEqual(m.medidas.historico.map((h) => h.onde), ['30'],
+    `o ✕ num pedido da área entrou no Histórico como ${JSON.stringify(m.medidas.historico.map((h) => h.onde))} — o país do filtro`);
+  assert.deepEqual(m.medidas.presenca, [30], `a carona marcou a pessoa no país ${m.medidas.presenca} (o do filtro)`);
+  // CONTROLE: sem "Minha área", o país do filtro é o da fila.
+  const c = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  c.filtro.pais = 73;
+  c.app.anotarEditaveis(c.AppState.profile, 'row', [30]);
+  c.AppState.currentPlace = { venueID: 'v1', updateRequestID: 'u1', creatorId: 7 };
+  c.app.handleReject();
+  c.AppState.pendingAction.execute();
+  for (let i = 0; i < 5; i++) await null;
+  assert.deepEqual([c.medidas.historico.map((h) => h.onde), c.medidas.presenca], [['73'], [73]]);
+});
+
+test('R7-6-05: quem edita MAIS de um país não tem o país da área — o Histórico não grava lugar, e a marca segue o filtro', async () => {
+  const m = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  m.filtro.pais = 73;
+  m.app.anotarEditaveis(m.AppState.profile, 'row', [30, 73]);
+  await rejeitarNaMinhaArea(m);
+  assert.deepEqual(m.medidas.envios, ['v1'], 'PRÉ-CONDIÇÃO: a decisão saiu');
+  assert.deepEqual(m.medidas.historico.map((h) => h.onde), [null],
+    `sem saber o país da área, o ✕ foi creditado a ${JSON.stringify(m.medidas.historico.map((h) => h.onde))}`);
+  assert.deepEqual(m.medidas.presenca, [73], 'sem o país da área, a carona perdeu a marca (a pessoa sumiria da lista)');
+  // E sem a lista DESTE servidor (o perfil foi lido noutro), também não se sabe.
+  const o = aparelhoDoGesto({ resposta: () => ({ success: true }) });
+  o.filtro.pais = 73;
+  o.app.anotarEditaveis(o.AppState.profile, 'na', [235]);
+  await rejeitarNaMinhaArea(o);
+  assert.deepEqual([o.medidas.historico.map((h) => h.onde), o.medidas.presenca], [[null], [73]],
+    'os editáveis de OUTRO servidor viraram o país da fila');
+});
+
+test('R7-6-05: o "não sei onde" do GESTO vale no pouso — o Histórico não lê o filtro de depois', () => {
+  // O `recordHistory` DE VERDADE: `onde` nulo (o gesto com "Minha área" sem o
+  // país) não vira o filtro de agora; `onde` AUSENTE (o caminho sem gesto) segue
+  // lendo o de agora.
+  const guardado = new Map();
+  const deps = {
+    AppState: { history: null }, HISTORY_KEY: 'waze_places_history',
+    localStorage: { getItem: (k) => (guardado.has(k) ? guardado.get(k) : null) },
+    podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
+    historyTodayKey: () => '2026-10-03', ondeAgora: () => '73', contaAgora: () => null,
+    agendarRedesenhoDoHistorico: () => {}, garantirLinhaDeBaseDasConquistas: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const { recordHistory } = new Function(...chaves, ['loadHistory', 'recordHistory'].map(fatiarComAsync).join('\n')
+    + '\nreturn { recordHistory };')(...chaves.map((k) => deps[k]));
+  recordHistory('reject', 1, '2026-10-03', null);
+  assert.equal(JSON.parse(guardado.get('waze_places_history'))['2026-10-03'].onde, undefined,
+    'o gesto sem lugar entrou no Histórico com o filtro do pouso');
+  // CONTROLE: sem `onde` (o caminho sem gesto), vale o de agora.
+  recordHistory('reject', 1, '2026-10-03');
+  assert.deepEqual(JSON.parse(guardado.get('waze_places_history'))['2026-10-03'].onde, { 73: 1 });
 });

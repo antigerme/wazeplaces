@@ -13626,7 +13626,10 @@ function recordHistory(type, delta, dia, onde) {
     // — e o MESMO que tirou o "onde" do Resumo do mês, que agora pode voltar.
     // É dado SEU (onde você trabalhou), não de terceiro: pode persistir, e sai
     // no logout junto com o resto do histórico.
-    const lugar = onde || ondeAgora();
+    // Só o `onde` AUSENTE (o caminho sem gesto) lê o de agora: o `null` do gesto
+    // é "o app não sabe onde" (a "Minha área" sem o país, R7-6-05), e lido de
+    // novo no pouso valeria o filtro de DEPOIS do gesto (R6-7-4).
+    const lugar = onde !== undefined ? onde : ondeAgora();
     if (lugar && (delta || 0) > 0) {
         if (!h[k].onde) h[k].onde = {};
         h[k].onde[lugar] = Math.max(0, (h[k].onde[lugar] || 0) + delta);
@@ -14159,15 +14162,49 @@ function registrarIdiomaUsado(lang) {
 // FILTRO — que é onde o editor escolheu trabalhar, e é a mesma fonte que já
 // nomeia a sala da presença.
 //
-// Com "Minha área" a busca vai pela CAIXA da área e sem o estado (ver
-// `fetchNextPage`): o estado guardado no filtro não é onde o trabalho foi feito,
-// e o "onde" é só o país (R6-7-4, auditoria de 2026-10-01).
+// Com "Minha área" a busca vai pela CAIXA da área, sem o estado E sem o país do
+// filtro (o core manda `countryId: null` junto da caixa): nenhum dos dois é onde
+// o trabalho foi feito. O estado saiu primeiro (R6-7-4, auditoria de
+// 2026-10-01); o país ficava, e com a área num país e o filtro noutro o ✕ entrava
+// no Histórico — e no "Viajante" — como o país do filtro (auditoria da rodada 7,
+// R7-6-05). O "onde" é o país da área quando o app o SABE (`paisDaMinhaArea`), e
+// nada quando não sabe: deixar de contar é melhor que contar no lugar errado.
 function ondeAgora() {
+    if (AppState.filters && AppState.filters.myArea) {
+        const area = paisDaMinhaArea();
+        return area ? String(area) : null;
+    }
     const pais = (typeof API !== 'undefined' && API.getCountry) ? parseInt(API.getCountry(), 10) : NaN;
     if (!Number.isFinite(pais) || pais <= 0) return null;
-    if (AppState.filters && AppState.filters.myArea) return String(pais);
     const estado = parseInt(AppState.filters && AppState.filters.stateId, 10);
     return Number.isFinite(estado) && estado > 0 ? pais + ':' + estado : String(pais);
+}
+
+// O país da FILA de quem busca por "Minha área" — sem pedido novo (R7-6-05). O
+// pedido não traz o país (o core não o repassa), mas a fila só tem o que a
+// pessoa pode EDITAR (o filtro de permissão do servidor descarta o resto), e os
+// editáveis são POR SERVIDOR (`editaveisLidos`): quem edita UM país só neste
+// servidor tem a fila inteira nele. Com mais de um, ou sem a lista deste
+// servidor (o perfil foi lido noutro), não dá pra saber qual: `null`.
+function paisDaMinhaArea() {
+    const lidos = typeof API !== 'undefined' && API.getRegion ? editaveisLidos(API.getRegion()) : null;
+    if (!lidos) return null;
+    const paises = [...new Set(lidos)];
+    return paises.length === 1 ? paises[0] : null;
+}
+
+// O país em que a FILA está, pra MARCA da presença (a carona leva o país do
+// gesto): o do filtro — e, com "Minha área", o da área quando o app o sabe
+// (`paisDaMinhaArea`): com a área num país e o filtro noutro, a pessoa aparecia
+// no "Triando agora" do país do filtro (R7-6-05). Sem saber, segue o do filtro:
+// a marca não existe sem país, e sem marca a pessoa sumiria do "Triando agora" de
+// todo mundo enquanto usa "Minha área".
+function paisDaFila() {
+    if (AppState.filters && AppState.filters.myArea) {
+        const area = paisDaMinhaArea();
+        if (area) return area;
+    }
+    return API.getCountry();
 }
 
 // O MOMENTO do gesto: a hora, o dia, o lugar e o idioma em que a pessoa decidiu.
@@ -19408,7 +19445,7 @@ function handleMarkAsRead() {
     const epoca = epocaDaSessao;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
-    const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
+    const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
     scheduleAction('read', place, async () => {
@@ -19451,7 +19488,7 @@ function handleReject() {
     const epoca = epocaDaSessao;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
-    const pais = API.getCountry();    // o do GESTO: a carona leva o país em que o card estava
+    const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
     scheduleAction('reject', place, async () => {
