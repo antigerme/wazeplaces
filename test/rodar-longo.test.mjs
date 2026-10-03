@@ -189,3 +189,22 @@ test('o ESTADO mora num arquivo irmão — o log fica só com a saída', () => {
   const codigo = fonte.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
   assert.ok(!/grep/.test(codigo), 'a ferramenta voltou a depender de grep no log');
 });
+
+test('"rodando" só é escrito DEPOIS do trap de sinais (pronto é sinal positivo, gotcha #62)', () => {
+  // Escrito antes do `process.on('SIGTERM')`, o estado já dizia "rodando" numa
+  // janela em que o SIGTERM caía no tratamento padrão do Node: o processo
+  // morria sem carimbar "morto", e o vigia via um ÓRFÃO numa morte comum. Com a
+  // máquina carregada (carga 10 em 4 CPUs) o teste do SIGTERM acima reprovou
+  // uma vez por isso. A janela é de microssegundos e não se reproduz sob
+  // encomenda, então o guard é pela ORDEM no código (sem os comentários, que
+  // citam os dois nomes).
+  const fonte = readFileSync(FERRAMENTA, 'utf8');
+  const ini = fonte.indexOf('async function rodar(');
+  assert.ok(ini > 0, 'a função rodar() não foi achada');
+  const corpo = fonte.slice(ini).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const trap = corpo.search(/^\s+process\.on\(s, /m);
+  const pronto = corpo.search(/^\s+gravarEstado\(log, \{ \.\.\.base, estado: 'rodando' \}\);/m);
+  assert.ok(trap > 0, 'o registro do trap (process.on(s, …)) não foi achado');
+  assert.ok(pronto > 0, 'a gravação do estado "rodando" não foi achada');
+  assert.ok(trap < pronto, 'o estado "rodando" é escrito ANTES do trap: um SIGTERM nessa janela mata sem carimbar');
+});
