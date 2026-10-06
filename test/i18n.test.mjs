@@ -776,3 +776,44 @@ test('i18n: o "Disponível offline", o card de foto sem sinal e a tela sem conex
   }
   assert.equal(termoDe.pt, 'sinal', `pt: o termo é "${termoDe.pt}", e o en e o es dizem "${termoDe.en}"/"${termoDe.es}"`);
 });
+
+// R8-6-05 (auditoria da rodada 8): o aviso do "Sair" que não completou a
+// limpeza no servidor dizia a CAUSA — "(sem conexão)", "(no connection)", "(sin
+// conexión)", "(pas de connexion)" —, e ele sai pra QUALQUER falha da exclusão:
+// o 500 do servidor (no plano grátis o apagamento do KV tem a cota curta de
+// 1.000 por dia) e o 403 do WAF também, com a rede de pé. MEDIDO no navegador
+// com o `handleLogout` de verdade: `sessao` → 500 com `onLine` verdadeiro, um
+// pedido e o aviso "(sem conexão)". O resto da frase é verdade nos dois casos
+// (os dados saíram do aparelho; a limpeza não completou e acontece sozinha), e
+// a frase deixou de afirmar a causa, nas quatro línguas, sem chave nova.
+test('i18n: o aviso do "Sair" que não limpou o servidor não afirma a causa — ele sai em QUALQUER falha da exclusão', () => {
+  // A estrutura que obriga a isso: o aviso sai pra toda falha, sem distinguir a
+  // falta de rede (o `_motivo` do `_post`) da resposta de erro. Lido sem
+  // comentário (gotcha #67), no corpo do `handleLogout`.
+  const app = read('js/app.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = app.indexOf('async function handleLogout(');
+  assert.ok(i > 0, 'sumiu o handleLogout');
+  const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
+  assert.match(corpo, /if \(!saida \|\| !saida\.success\) \{\s*showToast\(t\('toast\.logoutServerFailed'\)/,
+    'o aviso deixou de sair em toda falha da exclusão — se agora ele distingue a causa, reveja este teste');
+  assert.doesNotMatch(corpo, /_motivo/,
+    'o "Sair" passou a distinguir a falta de rede da resposta de erro — a frase de cada caso pode dizer a causa: reveja este teste');
+  // A falta de rede em cada língua (os nomes do teste do termo único, acima).
+  const CAUSA = {
+    pt: /\b(conex[aã]o|sinal|rede|internet|offline)\b/i,
+    en: /\b(connection|signal|network|internet|offline)\b/i,
+    es: /\b(conexi[oó]n|señal|red|internet|offline)\b/i,
+    fr: /\b(connexion|signal|réseau|internet|hors ligne|offline)\b/i,
+  };
+  // CONTROLE: o vocabulário enxerga a causa que a frase dizia.
+  const DIZIA = { pt: '(sem conexão)', en: '(no connection)', es: '(sin conexión)', fr: '(pas de connexion)' };
+  for (const [lang, velho] of Object.entries(DIZIA)) assert.match(velho, CAUSA[lang], `CONTROLE (${lang}): o vocabulário não vê "${velho}"`);
+  for (const lang of LANGS) {
+    assert.ok(CAUSA[lang], `${lang}: língua sem o vocabulário deste teste — inclua-a`);
+    const v = DICT[lang]['toast.logoutServerFailed'];
+    assert.ok(v, `${lang}: sumiu o toast.logoutServerFailed`);
+    assert.doesNotMatch(v, CAUSA[lang],
+      `${lang}: o aviso afirma a falta de rede e sai também com a rede de pé (o 500, o 403 do WAF): "${v}"`);
+    assert.doesNotMatch(v, /\([^)]*\)/, `${lang}: o aviso explica a causa entre parênteses: "${v}"`);
+  }
+});
