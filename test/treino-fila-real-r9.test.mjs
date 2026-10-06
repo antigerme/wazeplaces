@@ -149,6 +149,9 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
     API, REGIOES_DO_WAZE: ['row', 'na', 'il'], anotarEditaveis: () => {}, saveFilters: () => log.push('grava'),
     dfato: () => {}, showToast: (m) => toasts.push(m), redesenharLugarNosFiltros: () => {}, window: {},
     aoMudarAFilaPorBaixo: () => {}, caixaDaMinhaArea: () => [-38.5, -13, -38.2, -12.8], desligarMinhaAreaSemCaixa: () => {},
+    // A caixa da área POR SERVIDOR e a lista de países pela fonte única (R9-6-04, R9-6-01, do lote dos Filtros).
+    caixaDaMinhaAreaEm: () => [-38.5, -13, -38.2, -12.8],
+    listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
     // A busca de VERDADE não roda aqui: o que importa é ONDE ela sairia.
     startFetching: () => log.push('busca:' + lugar.regiao + '/' + lugar.pais),
@@ -158,7 +161,7 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
   // O `devolverPedidoRecusado` de VERDADE, quando o teste mede o que ele mostra.
   const nomesDoDevolver = devolverDeVerdade ? ['chaveDoPedido', 'devolverPedidoRecusado'] : [];
   if (devolverDeVerdade) delete deps.devolverPedidoRecusado;
-  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaReal', 'irProPaisDoPerfil', 'paisDoPerfil',
+  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaReal', 'pedirListaDePaises', 'irProPaisDoPerfil', 'paisDoPerfil',
     'esquecerAreaForaDoPerfil', 'completarPerfilChegado'],
   `let epocaDaSessao = 0, lugarDoPedidoDoPerfil = null, filaEsperaPerfil = false, tratouNestaFila = false,
      recusaAutomaticaNestaFila = false, filaAtravessouSessao = false, puladosNoInicioDaFila = 0, rebuscasAuto = 0,
