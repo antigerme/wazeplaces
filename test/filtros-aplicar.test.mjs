@@ -1785,3 +1785,61 @@ test('R8-6-04: a ida de uma sessão não serve à seguinte — com o "Sair" no m
   await tique(5);
   assert.deepEqual(p.AppState.countries, [], 'a lista da sessão que saiu entrou na memória da sessão de agora');
 });
+
+// ═══ R8-6-06 · "Minha área" de quem só edita noutro servidor ═══════════════
+// O `paisDoPerfil` saía na 1ª linha com "Minha área", e a busca pela caixa da
+// área vai ao servidor da REGIÃO: OUTRA conta entrando no mesmo aparelho (a
+// renovação pela extensão, outra pessoa no navegador) herdava o "Minha área"
+// ligado e a região da anterior, e quem só edita na NA seguia buscando a área
+// dele no servidor da ROW — MEDIDO no navegador, a busca saía `row bbox` e o
+// perfil só era perguntado na ROW; sem "Minha área", a mesma pessoa ia pra
+// `na/235` (auditoria da rodada 8). Decisão do owner: com "Minha área", o
+// perfil corrige a REGIÃO quando a lista daqui é vazia, e "Minha área" fica
+// ligado; com a lista daqui cheia, nada muda. Aqui a carga do perfil roda DE
+// VERDADE (`loadProfileAndAuxData` → `paisDoPerfil` → `irProPaisDoPerfil`).
+function paginaMinhaArea({ myArea, editaveis }) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea } });
+  p.listas.perfil = (r) => Promise.resolve({ success: true,
+    profile: { id: 1, editableCountryIDs: editaveis[r] || [], managedAreas: [] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  // A caixa da área existe (sem ela, "Minha área" desliga e diz por quê), e a
+  // área gerenciada salva não entra: a fila só é refeita pelo lugar.
+  Object.assign(p.deps, { caixaDaMinhaArea: () => [-74.1, 40.6, -73.8, 40.9], esquecerAreaForaDoPerfil: () => false });
+  return p;
+}
+
+test('R8-6-06: com "Minha área", quem só edita noutro servidor vai pra REGIÃO da área — "Minha área" fica, e sem aviso de país', async () => {
+  const p = paginaMinhaArea({ myArea: true, editaveis: { na: [235] } });
+  await p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], `o perfil não foi perguntado nos outros servidores: ${p.log.getProfile}`);
+  assert.equal(p.estado.regiao, 'na',
+    `"Minha área" seguiu buscando a caixa da área no servidor da ROW (${p.estado.regiao}/${p.estado.pais})`);
+  assert.equal(p.estado.pais, 235, `o país ficou de outro servidor: ${p.estado.regiao}/${p.estado.pais}`);
+  assert.equal(p.AppState.filters.myArea, true, '"Minha área" foi desligado');
+  assert.equal(p.log.buscas, 1, 'a fila não foi refeita no servidor da área');
+  assert.ok(!p.log.toasts.some((x) => x.includes('toast.paisDoPerfil')),
+    `o aviso "Mostrando a fila de {país}" saiu com "Minha área", que segue mostrando a fila da área: ${p.log.toasts}`);
+  assert.ok(p.log.dfato.some((d) => d.startsWith('pais.doPerfil:') && d.includes('"minhaArea":true')),
+    `o diário não marca a ida pela região da área: ${p.log.dfato}`);
+  // CONTROLE: sem "Minha área", a mesma pessoa vai pro mesmo lugar — com o aviso.
+  const c = paginaMinhaArea({ myArea: false, editaveis: { na: [235] } });
+  await c.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual([c.estado.regiao, c.estado.pais, c.log.buscas], ['na', 235, 1]);
+  assert.ok(c.log.toasts.some((x) => x.includes('toast.paisDoPerfil')), 'CONTROLE: sem "Minha área", o aviso do país não saiu');
+});
+
+test('R8-6-06: com "Minha área" e a área NESTE servidor, nada muda — o país do filtro fica, e nenhum outro servidor é perguntado', async () => {
+  const p = paginaMinhaArea({ myArea: true, editaveis: { row: [73] } });
+  await p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 30], `"Minha área" teve o lugar trocado: ${p.estado.regiao}/${p.estado.pais}`);
+  assert.deepEqual(p.log.getProfile, ['row'], 'perguntou a outro servidor com a lista daqui cheia');
+  assert.deepEqual([p.log.buscas, p.log.toasts], [0, []]);
+  // CONTROLE: sem "Minha área", o país vai pra França.
+  const c = paginaMinhaArea({ myArea: false, editaveis: { row: [73] } });
+  await c.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual([c.estado.regiao, c.estado.pais], ['row', 73]);
+});

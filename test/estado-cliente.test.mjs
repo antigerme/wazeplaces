@@ -642,9 +642,24 @@ test('país: lista VAZIA aqui = edita em outro servidor — pergunta lá (EUA no
   assert.deepEqual(pedidos, ['na'], 'perguntou a mais servidores que o necessário');
 });
 
-test('país: staff e "Minha área" escolhem sozinhos', async () => {
+test('país: staff escolhe sozinho; "Minha área" com a área NESTE servidor também (o país do filtro fica)', async () => {
   assert.equal(await montarPais().paisDoPerfil({ isStaff: true, editableCountryIDs: [73] }, 0), null);
-  assert.equal(await montarPais({ myArea: true }).paisDoPerfil({ editableCountryIDs: [73] }, 0), null);
+  const m = montarPais({ myArea: true });
+  assert.equal(await m.paisDoPerfil({ editableCountryIDs: [73] }, 0), null);
+  assert.deepEqual(m.pedidos, [], '"Minha área" com a lista daqui cheia perguntou a outro servidor');
+});
+
+// R8-6-06 (auditoria da rodada 8; a decisão é do owner): com "Minha área" e a
+// lista daqui VAZIA, a área está noutro servidor — a REGIÃO é corrigida (o
+// país vai junto só porque o de antes não existe lá), e "Minha área" fica.
+test('país: "Minha área" com a lista daqui VAZIA — pergunta os outros servidores e leva pra REGIÃO da área', async () => {
+  const m = montarPais({ myArea: true, perfis: { na: { success: true, profile: { editableCountryIDs: [235] } } } });
+  assert.deepEqual(await m.paisDoPerfil({ editableCountryIDs: [] }, 0), { regiao: 'na', pais: 235, minhaArea: true });
+  assert.deepEqual(m.pedidos, ['na'], 'perguntou a mais servidores que o necessário');
+  // Em nenhum servidor: nada muda (como sem "Minha área").
+  const n = montarPais({ myArea: true });
+  assert.equal(await n.paisDoPerfil({ editableCountryIDs: [] }, 0), null);
+  assert.deepEqual(n.pedidos, ['na', 'il']);
 });
 
 test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila nova)', () => {

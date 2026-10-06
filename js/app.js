@@ -5577,8 +5577,23 @@ function refazerPerfilSeFaltar() {
 // fora dessa lista vem sempre vazia, então trocar é sempre melhor que ficar.
 // Lista vazia quer dizer que a pessoa edita em OUTRO servidor: pergunta o
 // perfil lá (uma chamada por servidor, só neste caso — nunca pra quem já está
-// no lugar certo). Staff edita em toda parte e escolhe sozinho; "Minha área"
-// busca pela caixa das áreas, não pelo país.
+// no lugar certo). Staff edita em toda parte e escolhe sozinho.
+//
+// "Minha área" busca pela CAIXA das áreas, não pelo país: o país dela fica como
+// está. Mas a caixa é buscada no servidor da REGIÃO, e com a lista daqui VAZIA
+// a área está noutro servidor — a busca dela ia ao servidor errado, numa fila
+// que não tem os locais da área. Era o que acontecia com OUTRA conta entrando
+// no mesmo aparelho (a renovação pela extensão, outra pessoa no navegador): o
+// "Minha área" da anterior fica (é um filtro, e os filtros são do aparelho), e
+// quem só edita na NA seguia na ROW — MEDIDO no navegador, a busca dela saía
+// `row bbox` e o perfil só era perguntado na ROW; sem "Minha área", a mesma
+// pessoa ia pra `na/235` (auditoria da rodada 8, R8-6-06). Decisão do owner:
+// com "Minha área", o perfil corrige a REGIÃO quando a lista daqui é vazia
+// (pergunta os outros servidores, como sem ela), e "Minha área" fica ligado. O
+// país vai junto só porque o de antes não existe no servidor novo: o par
+// região/país fica coerente (o achado 10), e nenhum aviso de país sai — a fila
+// continua a da área (ver `irProPaisDoPerfil`). Com a lista daqui CHEIA, nada
+// muda: a área é deste servidor, e o país do filtro é o da pessoa.
 //
 // E só decide sobre o lugar do PEDIDO (`lugarDoPedidoDoPerfil`): mudou a região
 // ou o país desde que o perfil foi pedido — a pessoa aplicou outro lugar nos
@@ -5591,10 +5606,13 @@ async function paisDoPerfil(perfil, epoca) {
         const pedido = lugarDoPedidoDoPerfil;
         return !!pedido && (API.getRegion() !== pedido.regiao || String(API.getCountry()) !== String(pedido.pais));
     };
-    if (!perfil || perfil.isStaff || AppState.filters.myArea || lugarMudou()) return null;
+    if (!perfil || perfil.isStaff || lugarMudou()) return null;
+    const minhaArea = !!AppState.filters.myArea;
     const editaveis = (l) => (Array.isArray(l) ? l : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
     const aqui = editaveis(perfil.editableCountryIDs);
     if (aqui.length) {
+        // A área é deste servidor: com "Minha área", o país do filtro fica.
+        if (minhaArea) return null;
         return aqui.includes(Number(API.getCountry())) ? null : { regiao: API.getRegion(), pais: aqui[0] };
     }
     for (const regiao of REGIOES_DO_WAZE.filter((r) => r !== API.getRegion())) {
@@ -5605,12 +5623,13 @@ async function paisDoPerfil(perfil, epoca) {
         // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
         // falhou não diz que a pessoa não edita lá.
         if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la);
-        if (la.length) return { regiao, pais: la[0] };
+        if (la.length) return minhaArea ? { regiao, pais: la[0], minhaArea: true } : { regiao, pais: la[0] };
     }
     return null;
 }
 
-async function irProPaisDoPerfil({ regiao, pais }) {
+// `minhaArea`: a ida é pela REGIÃO da área (ver `paisDoPerfil`, R8-6-06).
+async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
     const epoca = epocaDaSessao;
     // O lugar de ANTES: pra saber se a pessoa aplicou outro durante a espera
     // abaixo, e se os Filtros abertos mostram este (ver `redesenharLugarNosFiltros`).
@@ -5637,9 +5656,13 @@ async function irProPaisDoPerfil({ regiao, pais }) {
     AppState.filters.stateId = '';
     AppState.filters.managedAreaId = '';
     saveFilters();
-    dfato('pais.doPerfil', { pais, regiao });
-    const nome = ((AppState.countries || []).find((c) => Number(c.id) === Number(pais)) || {}).name;
-    showToast(t(nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', { pais: nome || '' }), 'info', 7000);
+    dfato('pais.doPerfil', minhaArea ? { pais, regiao, minhaArea: true } : { pais, regiao });
+    // Com "Minha área" a fila segue sendo a da ÁREA: "Mostrando a fila de
+    // {país}" diria o que ela não é. A região é a da área, e não há o que avisar.
+    if (!minhaArea) {
+        const nome = ((AppState.countries || []).find((c) => Number(c.id) === Number(pais)) || {}).name;
+        showToast(t(nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', { pais: nome || '' }), 'info', 7000);
+    }
     // Os Filtros ABERTOS mostravam o país de antes, e o "Aplicar" o devolvia.
     redesenharLugarNosFiltros(antes);
     window.Presenca?.sincronizar?.();
