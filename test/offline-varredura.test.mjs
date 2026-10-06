@@ -1144,7 +1144,7 @@ function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila 
   const nomes = Object.keys(deps);
   const f = new Function(...nomes, `let offlineJanelaServida = ${servida}, offlineUltimoResultado = ${JSON.stringify(resultado)},
       offlineVarrendo = false, offlineFilaPreparada = ${preparada}, offlineFilaGravadaEm = ${gravada}, offlineFilaVarrida = null;
-    ${fatiar('offlinePrecisaVarrer')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
+    ${fatiar('offlinePrecisaVarrer')}\n${fatiar('filaReal')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
   f(0, 0);
   return el.innerHTML || el.textContent;
 }
@@ -1250,7 +1250,7 @@ function aparelhoDaLinha() {
     };
     const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
-      'atualizarLinhaDoOffline', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
+      'atualizarLinhaDoOffline', 'filaReal', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,

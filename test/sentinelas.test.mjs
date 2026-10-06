@@ -431,7 +431,7 @@ function decididos() {
   assert.ok(decl, 'o conjunto do que a outra aba decidiu sumiu (ou deixou de ser por OBJETO)');
   const AppState = { queue: [] };
   const app = new Function('AppState', `${decl[0]}
-    ${['chaveDoPedido', 'diagDecididos', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
+    ${['chaveDoPedido', 'diagDecididos', 'filaReal', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
     return { anotar: anotarDecididosPorOutraAba, contar: (saida) => diagDecididos(saida, AppState.queue, decididosPorOutraAbaComCardAqui) };`)(AppState);
   return { ...app, AppState };
 }

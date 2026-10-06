@@ -450,7 +450,9 @@ test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo 
   const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
   const bloco = semComentarios.slice(i, i + 400);
   assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
-  assert.match(bloco, /if \(Treino\.ativo\) return;/, 'no treino a fila é de exemplos');
+  // No treino ela não age sobre os exemplos: ANOTA, e o `Treino.sair()` a roda
+  // na fila real (R8-7-03, test/treino-fila-real-r8.test.mjs).
+  assert.match(bloco, /if \(Treino\.ativo\) \{ Treino\.anotarRecusa\(\); return; \}/, 'no treino a fila é de exemplos');
   // A segunda passagem SAI (anotando o pedido pra rodar de novo no fim — V4,
   // medido em test/lote-autor.test.mjs), nunca corre junto da primeira.
   assert.match(bloco, /if \(recusaAutomaticaRodando\) \{ recusaAutomaticaPedidaDeNovo = true; return; \}/,
