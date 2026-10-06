@@ -1843,3 +1843,90 @@ test('R8-6-06: com "Minha área" e a área NESTE servidor, nada muda — o país
   await tique(5);
   assert.deepEqual([c.estado.regiao, c.estado.pais], ['row', 73]);
 });
+
+// ═══ R9-6-03 · a busca que espera o perfil é refeita UMA vez, no lugar certo ═
+// Com "Minha área", a busca da abertura é RECUSADA sem o perfil
+// (`filaEsperaPerfil`). Quando o 1º perfil chega pela SONDA de um 401
+// passageiro, o `handleUnauthorized` começa o `completarPerfilChegado` — que
+// refaz a fila — e chama o `rebuscarDepoisDeFalha` logo atrás: saíam DUAS
+// buscas, e a primeira era jogada fora. Pra quem só edita noutro servidor, ela
+// ia ao servidor errado, e a tela dizia "Tudo limpo! … Confira o país e a
+// região" até o perfil de lá responder (MEDIDO no navegador, auditoria da rodada
+// 9: buscas `row bbox, na bbox`, e as telas FALHA → "Tudo limpo!" aos 1,4 s →
+// card aos 2,9 s). Aqui a sonda, o perfil e a recomposição rodam DE VERDADE
+// (`handleUnauthorized` → `completarPerfilChegado` → `rebuscarDepoisDeFalha`),
+// com a fila no estado da busca recusada e cada busca anotada com a REGIÃO em
+// que sai.
+const CAIXA_SP = [-46.8, -23.7, -46.4, -23.4];
+const CAIXA_NY = [-74.1, 40.6, -73.8, 40.9];
+function paginaDaSondaComAFilaEsperando({ myArea = true, perfis, segurar = [] }) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea } });
+  const soltar = {};
+  p.listas.perfil = (r) => (segurar.includes(r)
+    ? new Promise((ok) => { soltar[r] = () => ok({ success: true, profile: perfis[r] }); })
+    : Promise.resolve({ success: true, profile: perfis[r] || { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] } }));
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  // A fila como a busca recusada a deixa (ver `fetchNextPage`): vazia, com a
+  // tela de falha, sem `hasMore` — e "Minha área" esperando o perfil.
+  Object.assign(p.AppState, { authenticated: true, queue: [], loadError: myArea, hasMore: false, fetching: false });
+  const buscas = [];
+  Object.assign(p.deps, { VERIFICA_SESSAO_MS: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    filaEsperaPerfil: myArea, rebuscasAuto: 0, MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'),
+    esquecerAreaForaDoPerfil: () => false,
+    startFetching: () => buscas.push(p.estado.regiao) });
+  let sonda = null;
+  p.deps.setTimeout = (f) => { sonda = f; return 1; };   // a sonda espera o teste
+  const app = montar([...FUNCOES, 'handleUnauthorized', 'rebuscarDepoisDeFalha', 'caixaDaMinhaArea'], p.deps);
+  return { p, app, buscas, soltar, sonda: () => sonda };
+}
+
+test('R9-6-03: "Minha área" com o 1º perfil pela sonda do 401 — a fila que esperava o perfil é refeita UMA vez', async () => {
+  // A área é deste servidor (os editáveis daqui): o perfil não muda o lugar, e
+  // quem refaz a fila é o `completarPerfilChegado`.
+  const m = paginaDaSondaComAFilaEsperando({ perfis: {
+    row: { id: 1, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_SP }], managedAreas: [] } } });
+  const conferindo = m.app.handleUnauthorized();
+  assert.ok(m.sonda(), 'PRÉ-CONDIÇÃO: o 401 não armou a sonda do alarme falso');
+  m.sonda()();
+  await conferindo;
+  await tique(10);
+  assert.equal(m.p.AppState.profile && m.p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: a sonda não trouxe o perfil');
+  assert.equal(m.p.AppState.filters.myArea, true, 'PRÉ-CONDIÇÃO: "Minha área" foi desligado');
+  assert.deepEqual(m.buscas, ['row'], `a fila que esperava o perfil saiu ${m.buscas.length} vezes (${m.buscas}) — uma delas jogada fora`);
+  assert.equal(m.p.log.buscas, 1, 'a fila não foi refeita pelo perfil que chegou');
+  // CONTROLE: sem "Minha área" (a fila não esperava o perfil), a recomposição
+  // do alarme falso busca de novo a fila que FALHOU — o instrumento enxerga a
+  // busca dela.
+  const c = paginaDaSondaComAFilaEsperando({ myArea: false, perfis: {
+    row: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [] } } });
+  c.p.AppState.loadError = true;
+  const conferindoC = c.app.handleUnauthorized();
+  c.sonda()();
+  await conferindoC;
+  await tique(10);
+  assert.deepEqual(c.buscas, ['row'], `CONTROLE: a recomposição do alarme falso não buscou a fila que falhou (${c.buscas})`);
+  // E com a fila esperando o perfil SEM ele ter chegado (a renovação pela
+  // extensão, que zera o perfil), a recomposição segue: é o `startFetching`
+  // que pede o perfil e o espera — sair cedo ali deixava a falha na tela.
+  const s = paginaDaSondaComAFilaEsperando({ perfis: {} });
+  s.p.AppState.profile = null;
+  s.app.rebuscarDepoisDeFalha();
+  assert.deepEqual(s.buscas, ['row'], 'sem o perfil, a recomposição da fila que o espera não saiu (ninguém o pede)');
+});
+
+test('R9-6-03: quem só edita noutro servidor — nenhuma busca sai no servidor errado enquanto o perfil de lá não responde', async () => {
+  const m = paginaDaSondaComAFilaEsperando({ segurar: ['na'], perfis: {
+    row: { id: 1, editableCountryIDs: [], areas: [{ type: 'drive', bbox: CAIXA_NY }], managedAreas: [] },
+    na: { id: 1, editableCountryIDs: [235], areas: [{ type: 'drive', bbox: CAIXA_NY }], managedAreas: [] } } });
+  const conferindo = m.app.handleUnauthorized();
+  m.sonda()();
+  await conferindo;
+  await tique(10);
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: o perfil da NA não foi perguntado (ou não ficou seguro)');
+  assert.deepEqual(m.buscas, [], `com o perfil da NA ainda vindo, a fila saiu em ${m.buscas} — o "Tudo limpo!" do servidor errado`);
+  m.soltar.na();
+  await tique(10);
+  if (m.soltar.il) { m.soltar.il(); await tique(10); }
+  assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pro servidor da área');
+  assert.deepEqual(m.buscas, ['na'], `a fila saiu em ${m.buscas} — a busca no servidor errado, antes da certa`);
+});

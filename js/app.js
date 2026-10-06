@@ -5981,6 +5981,16 @@ let rebuscasAuto = 0;
 
 function rebuscarDepoisDeFalha() {
     if (AppState.fetching) return;
+    // "Minha área" com a busca RECUSADA porque o perfil não tinha chegado
+    // (`filaEsperaPerfil`), e o perfil CHEGOU — pelo alarme falso de um 401, que
+    // chama esta função logo depois de começar o `completarPerfilChegado`. Quem
+    // refaz essa fila é ele, depois de decidir a caixa e o lugar (no servidor da
+    // área, R8-6-06): buscar aqui também saía em DOBRO, e a primeira era jogada
+    // fora — pra quem só edita noutro servidor, ela ia ao servidor errado, e a
+    // tela dizia "Tudo limpo! … Confira o país e a região" até o perfil de lá
+    // responder (MEDIDO no navegador, auditoria da rodada 9, R9-6-03). Sem o
+    // perfil ainda, segue abaixo: o `startFetching` o pede e espera.
+    if (filaEsperaPerfil && AppState.profile) return;
     if (AppState.queue.length > 0) {
         // COM card na fila: foi a REPOSIÇÃO que levou o 401. A busca que falhou
         // deixou `hasMore = false` e `loadError = true`, e com a sessão viva a
