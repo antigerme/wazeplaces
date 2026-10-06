@@ -3071,6 +3071,67 @@ const lc9j = await liefi9j('controle, a foto chega', { fotoChega: true });
 diz('CONTROLE: no mesmo lie-fi, com a foto chegando, o card abre sem trava',
   lc9j.pronto && lc9j.abriu && !lc9j.aviso && !lc9j.rejeitar && !lc9j.lido, JSON.stringify(lc9j));
 
+// 3. (R9-4-06) A REDE PROVADA ANTES de a prova da foto começar. O mesmo lie-fi:
+// a abertura com o `onLine` verdadeiro, a busca sem resposta, a fila guardada e
+// o card de foto travado. A PRIMEIRA resposta nossa (o perfil, segurado aqui) é
+// quem chama a recuperação — já com a rede provada —, e o 1º pedido à foto fica
+// PRESO. Ela começava uma prova da <img> mesmo assim, e o card ficava travado
+// até o teto (MEDIDO, n4 da auditoria da rodada 9: 10,1 s; com a prova já no ar,
+// 11 ms). A PRÉ-CONDIÇÃO é o CONTROLE: com o perfil segurado (nada provando a
+// rede), o card segue travado.
+const ctxP9j = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
+const p9j = { fase: 'prepara', perfis: [], fotos: [] };
+const pedidosP9j = [PLACE(211, 'NEW_PHOTO'), SO_MAPA(212)];
+await ctxP9j.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+  headers: { 'access-control-allow-origin': '*' } }));
+await ctxP9j.route('**/venue-image.waze.com/**', (r) => {
+  if (p9j.fase === 'prepara') return r.fulfill({ status: 200, contentType: 'image/png', body: PX });
+  if (p9j.fase === 'liefi') return r.abort('connectionreset');
+  p9j.fotos.push(r); return undefined;                     // 'prova': o pedido à foto fica PRESO
+});
+await ctxP9j.route('**/api/*', (r) => {
+  const rota = r.request().url().split('/api/')[1];
+  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+  if (p9j.fase !== 'prepara') {
+    if (rota === 'perfil') { p9j.perfis.push(r); return undefined; }   // a resposta nossa, segurada
+    return r.abort('connectionreset');                                 // o lie-fi: nada mais responde
+  }
+  if (rota === 'buscar-places') return json({ success: true, places: pedidosP9j, hasMore: false, page: 1, total: 2 });
+  if (rota === 'perfil') return json(PERFIL_9J);
+  return r.abort('failed');
+});
+const prepP9j = await abrir9j(ctxP9j, 'rede provada antes, preparo');
+await entrar9j(prepP9j, 'tok-9j-prova');
+const prontoP9j = await esperarNaPagina(prepP9j, () => typeof offlineUltimoResultado !== 'undefined'
+  && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+await prepP9j.close({ runBeforeUnload: true });
+p9j.fase = 'liefi';
+const pgP9j = await abrir9j(ctxP9j, 'rede provada antes');
+const travadoP9j = await esperarNaPagina(pgP9j, () => typeof AppState !== 'undefined' && !!cardDaFrente()
+  && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v211' && !!cardDaFrente().querySelector('.card-sem-foto'), 30000, 200);
+p9j.fase = 'prova';
+await dormir(1000);   // o tempo de um destravamento indevido aparecer, se houvesse
+const antesP9j = await pgP9j.evaluate(() => { const c = cardDaFrente();
+  return { aviso: !!(c && c.querySelector('.card-sem-foto')), rejeitar: !!(c && c.querySelector('.card-btn-reject').disabled),
+    onLine: navigator.onLine }; });
+diz('PRÉ-CONDIÇÃO: lie-fi pela fila guardada, o card de foto travado e o perfil SEGURADO — sem nada provando a rede, o card segue travado',
+  prontoP9j.ok && travadoP9j.ok && p9j.perfis.length >= 1 && antesP9j.aviso && antesP9j.rejeitar && antesP9j.onLine === true,
+  JSON.stringify({ pronto: prontoP9j.ok, travado: travadoP9j.ok, perfis: p9j.perfis.length, antesP9j }));
+const tP9j = Date.now();
+if (p9j.perfis.length) {
+  await p9j.perfis.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PERFIL_9J) });
+}
+const soltoP9j = await esperarNaPagina(pgP9j, () => { const c = cardDaFrente();
+  return !!(c && !c.querySelector('.card-sem-foto') && !c.querySelector('.card-btn-reject').disabled); }, 15000, 50);
+const msP9j = Date.now() - tP9j;
+const diarioP9j = await pgP9j.evaluate(() => dfatoAnel.filter((e) => /^foto\./.test(e.k)).map((e) => e.k));
+diz('a rede provada ANTES de a prova da foto começar solta o card NA HORA — com o pedido à foto preso (R9-4-06)',
+  soltoP9j.ok && msP9j < 2000 && diarioP9j.includes('foto.redeProvada') && !diarioP9j.includes('foto.provaSemResposta'),
+  JSON.stringify({ ms: msP9j, solto: soltoP9j.ok, diario: diarioP9j, fotosPresas: p9j.fotos.length }));
+for (const r of p9j.fotos.splice(0)) await r.fulfill({ status: 404, body: 'nao' }).catch(() => {});
+for (const r of p9j.perfis.splice(0)) await r.abort('failed').catch(() => {});
+await ctxP9j.close();
+
 secao('9k. DUAS ABAS E O DIAGNÓSTICO: a poda, a outra aba no relatório e a sentinela');
 // Auditoria da rodada 7 (R7-4-03, R7-4-04, R7-4-05). Duas páginas do MESMO
 // contexto (o mesmo aparelho: a base, a fila de saída e o aviso `storage` são

@@ -19973,6 +19973,15 @@ function marcarCardSemFoto(card, place) {
 // estourar, conta como falha — com a rede provada, redesenha; senão, pergunta ao
 // servidor da foto, como no `onerror`.
 //
+// E a rede que JÁ CHEGA provada, sem prova no ar, também redesenha na hora
+// (R9-4-06): é o caminho do lie-fi — o `onLine` segue verdadeiro, e a primeira
+// resposta nossa (o `aoProvarRede`) é quem chama aqui. Ela começava uma prova da
+// <img> mesmo assim, e com o 1º pedido à foto pendurado o card ficava travado
+// até o teto (MEDIDO, n4 da auditoria da rodada 9: 10,1 s; com a mesma rede
+// provada chegando com a prova JÁ no ar, 11 ms). Provar a foto serve pra saber se
+// a REDE anda — e isso a resposta nossa já disse: o redesenho é o card aberto com
+// sinal, que pede a foto ele mesmo.
+//
 // O redesenho é do MESMO pedido e passa pelo `mantendoFocoNoCard`: o teclado no
 // ↑ (o único botão vivo do card sem a foto) ia pro <body> (R8-4-03).
 let provandoFotoDe = null;   // { place, redeProvada, comRede }: a prova em voo
@@ -19989,6 +19998,14 @@ function recuperarCardSemFoto({ redeProvada = false } = {}) {
     const f = fotosDoCard(place);
     const u = f.urls[f.inicial];
     if (!u) return;
+    if (redeProvada) {
+        // No meio de um arraste o `transform` é do gesto: não se mexe no card; a
+        // próxima prova de rede tenta de novo (a mesma regra do `redesenhar`).
+        if (card.style.transform) return;
+        dfato('foto.redeProvada');
+        mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
+        return;
+    }
     const prova = { place, redeProvada };
     provandoFotoDe = prova;
     const src = urlDaFoto(u);
