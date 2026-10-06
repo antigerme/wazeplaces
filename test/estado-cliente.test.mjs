@@ -673,11 +673,11 @@ test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila
   const c = fatiar('completarPerfilChegado');
   assert.match(c, /const destino = await paisDoPerfil\(perfil, epoca\);\s*if \(destino && epoca === epocaDaSessao\) await irProPaisDoPerfil\(destino\);/);
   const ir = fatiar('irProPaisDoPerfil');
-  for (const re of [/API\.setCountry\(pais\);/, /AppState\.filters\.stateId = '';/, /saveFilters\(\);/, /refazerFilaPeloPerfil\(aviso\);/]) {
+  for (const re of [/API\.setCountry\(pais\);/, /AppState\.filters\.stateId = '';/, /saveFilters\(\);/, /refazerFilaReal\(aviso\);/]) {
     assert.match(ir, re);
   }
   // A fila nova sai pela função que respeita o treino aberto (R9-7-04).
-  const refazer = fatiar('refazerFilaPeloPerfil');
+  const refazer = fatiar('refazerFilaReal');
   for (const re of [/resetQueue\(\);/, /startFetching\(\);/]) assert.match(refazer, re);
 });
 

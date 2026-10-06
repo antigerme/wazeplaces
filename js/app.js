@@ -5833,7 +5833,7 @@ async function completarPerfilChegado(perfil, epoca) {
     // a pessoa NÃO edita (ver `paisDoPerfil`).
     const destino = await paisDoPerfil(perfil, epoca);
     if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaPeloPerfil();
+    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaReal();
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
@@ -5981,22 +5981,23 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
     redesenharLugarNosFiltros(antes);
     window.Presenca?.sincronizar?.();
     // A fila, e o aviso que fala dela: com o treino aberto, no `sair()` dele.
-    refazerFilaPeloPerfil(aviso);
+    refazerFilaReal(aviso);
 }
 
-// A fila REAL refeita porque o PERFIL chegou: o país de quem entra
-// (`irProPaisDoPerfil`), a busca que esperava por ele ("Minha área") ou a área
-// salva que ele não tem (`completarPerfilChegado`). Com o TREINO aberto, a fila
-// real está guardada nele e a da tela são os EXEMPLOS: o `resetQueue` daqui o
+// A fila REAL refeita SEM gesto da pessoa: porque o PERFIL chegou — o país de
+// quem entra (`irProPaisDoPerfil`), a busca que esperava por ele ("Minha área")
+// ou a área salva que ele não tem (`completarPerfilChegado`) — ou porque a rede
+// voltou com a fila vazia (`retomarBusca`). Com o TREINO aberto, a fila real
+// está guardada nele e a da tela são os EXEMPLOS: o `resetQueue` daqui o
 // encerrava CALADO — a faixa "nada é enviado ao Waze" sumia, o card da frente
 // virava um pedido real e o ✕ seguinte ia pro Waze no nome da pessoa (R9-7-04,
-// MEDIDO no navegador nos três caminhos; auditoria de 2026-10-06). O treino
-// ANOTA, como já anota o perfil e a ordem, e o `sair()` refaz a fila, com o
-// aviso do país. O LUGAR (região, país, a área do filtro) muda já, como sem o
-// treino: é por ele que o ↻ e os Filtros buscam, se a pessoa sair do treino por
-// eles. Nada que refaça a fila sem gesto da pessoa encerra o treino por baixo
-// dela.
-function refazerFilaPeloPerfil(aviso = null) {
+// MEDIDO no navegador nos três caminhos do perfil; auditoria de 2026-10-06). O
+// treino ANOTA, como já anota o perfil e a ordem, e o `sair()` refaz a fila,
+// com o aviso do país. O LUGAR (região, país, a área do filtro) muda já, como
+// sem o treino: é por ele que o ↻ e os Filtros buscam, se a pessoa sair do
+// treino por eles. Nada que refaça a fila sem gesto da pessoa encerra o treino
+// por baixo dela.
+function refazerFilaReal(aviso = null) {
     if (typeof Treino !== 'undefined' && Treino.ativo === true) { Treino.anotarFilaRefeita(aviso); return; }
     if (aviso) showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
     resetQueue();
@@ -18616,9 +18617,14 @@ function retomarBusca() {
     // produção de 2026-09-25, reaberto sem rede, tudo pulado, rede de volta: 0
     // cards). Com card na tela só retoma: o reset arrancaria o card da mão e
     // despacharia a ação da janela do Desfazer antes da hora.
-    if (AppState.queue.length === 0) {
-        resetQueue();
-        startFetching();
+    // A fila VAZIA é a REAL (`filaReal`), e o atualizar passa pela função que
+    // respeita o treino aberto (`refazerFilaReal`): pela da tela, no treino, a
+    // fila real vazia não era vista (os exemplos estão nela) e o "Sair" buscava
+    // sem refazer — os pulados sem sinal não voltavam —, e no ÚLTIMO card do
+    // treino o `resetQueue` daqui o encerrava por baixo do "Treino concluído"
+    // (auditoria de 2026-10-06, junto do R9-7-04).
+    if (filaReal().length === 0) {
+        refazerFilaReal();
         return;
     }
     AppState.loadError = false;
@@ -20436,7 +20442,7 @@ const Treino = {
         // A fila que o PERFIL mandou refazer com o treino aberto (`anotarFilaRefeita`,
         // R9-7-04): é ela que vem, e não a guardada, com o aviso do país — e o
         // recusado de vez volta pela busca dela, como numa fila refeita.
-        if (s.refazerFila) { updateStats(true); refazerFilaPeloPerfil(s.avisoDoPais); return; }
+        if (s.refazerFila) { updateStats(true); refazerFilaReal(s.avisoDoPais); return; }
         // O que o Waze RECUSOU de vez com o treino aberto (R7-7-04): volta como o
         // PRÓXIMO card, com o "Restam" junto — o que teria acontecido sem o treino
         // (`devolverPedidoRecusado`, que o guardou em `guardarDevolucao`).
@@ -20502,7 +20508,7 @@ const Treino = {
         this._salvo.filaGuardadaLida = { n: Number.isFinite(n) ? n : 0, t: Number.isFinite(t) ? t : null };
     },
 
-    // O perfil mandou REFAZER a fila real com o treino aberto (`refazerFilaPeloPerfil`,
+    // O perfil mandou REFAZER a fila real com o treino aberto (`refazerFilaReal`,
     // R9-7-04): ver o `sair()`. O aviso do país que chegar depois vale; o de um
     // refazer sem país (a área, a busca que esperava o perfil) não apaga o anterior.
     anotarFilaRefeita(aviso) {

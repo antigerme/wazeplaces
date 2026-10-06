@@ -158,7 +158,7 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
   // O `devolverPedidoRecusado` de VERDADE, quando o teste mede o que ele mostra.
   const nomesDoDevolver = devolverDeVerdade ? ['chaveDoPedido', 'devolverPedidoRecusado'] : [];
   if (devolverDeVerdade) delete deps.devolverPedidoRecusado;
-  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaPeloPerfil', 'irProPaisDoPerfil', 'paisDoPerfil',
+  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaReal', 'irProPaisDoPerfil', 'paisDoPerfil',
     'esquecerAreaForaDoPerfil', 'completarPerfilChegado'],
   `let epocaDaSessao = 0, lugarDoPedidoDoPerfil = null, filaEsperaPerfil = false, tratouNestaFila = false,
      recusaAutomaticaNestaFila = false, filaAtravessouSessao = false, puladosNoInicioDaFila = 0, rebuscasAuto = 0,
@@ -285,6 +285,58 @@ test('R9-7-04: os dois avisos — o do país que chegou primeiro não se perde n
   m.app.Treino.anotarFilaRefeita(null);
   m.app.Treino.sair();
   assert.deepEqual(m.toasts, ['toast.paisDoPerfil(France)'], 'o aviso do país se perdeu');
+});
+
+// ═══ A volta da REDE com a fila real vazia, com o treino aberto ══════════════
+// O `online` (e o "Tentar de novo") com a fila VAZIA é um ATUALIZAR: os pedidos
+// que passaram pela fila sem decisão — pulados sem sinal, como o card de foto sem
+// a foto — voltam (`retomarBusca`, a auditoria em produção de 2026-09-25). Ele
+// olhava a fila da TELA: no treino são os exemplos, e a fila real vazia não era
+// vista — o "Sair" buscava SEM refazer a fila, e os pulados não voltavam ("Tudo
+// limpo!" com pedidos pendentes). E no ÚLTIMO card do treino (os exemplos
+// acabaram, o "Treino concluído" aberto) o `resetQueue` daqui o encerrava por
+// baixo da pessoa. Mesmo caminho do R9-7-04: com o treino aberto, anota.
+function montarRetomada() {
+  const log = [];
+  const els = {};
+  const passaram = new Set(['v1|u1', 'v2|u2']);         // os pulados sem sinal
+  const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false, loadError: true,
+    queue: [], currentPlace: null, stats: { read: 0, rejected: 0, skipped: 2 }, serverTotal: 0, autorEmFoco: null,
+    preferences: { comoFuncionaVisto: true } };
+  const deps = depsDoTreino(AppState, log, els, { pedidosQueEntraramNaFila: passaram, bloqueadosPorPagina: new Map(),
+    showToast: () => {} });
+  const app = montar(deps, ['filaReal', 'resetQueue', 'refazerFilaReal', 'retomarBusca'],
+    `let tratouNestaFila = false, recusaAutomaticaNestaFila = false, filaAtravessouSessao = false, puladosNoInicioDaFila = 0,
+       filaEsperaPerfil = false, rebuscasAuto = 0, filaDeOnde = null;`);
+  return { app, AppState, log, passaram };
+}
+
+test('a volta da REDE com a fila real vazia e o treino aberto: o treino segue, e o "Sair" faz o atualizar (os pulados voltam)', () => {
+  const c = montarRetomada();
+  c.app.retomarBusca();
+  assert.deepEqual([c.passaram.size, c.log], [0, ['busca']],
+    'CONTROLE: sem o treino a volta da rede com a fila vazia não atualizou — o teste perdeu o sentido');
+  // No meio do treino: os exemplos na tela, a fila real vazia.
+  const m = montarRetomada();
+  m.app.Treino.entrar();
+  assert.ok(soExemplos(m.AppState.queue), 'PRÉ-CONDIÇÃO: o treino não pôs os exemplos na tela');
+  m.app.retomarBusca();
+  assert.equal(m.app.Treino.ativo, true, 'a volta da rede encerrou o treino');
+  assert.equal(m.passaram.size, 2, 'a fila real foi refeita com o treino aberto');
+  m.app.Treino.sair();
+  assert.equal(m.passaram.size, 0,
+    'DEFEITO: o "Sair" buscou SEM refazer a fila — os pulados sem sinal não voltam ("Tudo limpo!" com pedidos pendentes)');
+  assert.deepEqual(m.log.filter((l) => l === 'busca'), ['busca'], 'o "Sair" não buscou a fila');
+});
+
+test('a volta da REDE no ÚLTIMO card do treino ("Treino concluído" aberto) não o encerra por baixo da pessoa', () => {
+  const m = montarRetomada();
+  m.app.Treino.entrar();
+  m.AppState.queue = [];                                 // os exemplos acabaram (`Treino.agir` no último)
+  m.app.retomarBusca();
+  assert.equal(m.app.Treino.ativo, true, 'DEFEITO: a volta da rede encerrou o treino por baixo do "Treino concluído"');
+  m.app.Treino.sair();                                   // o "Ir para a fila"
+  assert.equal(m.passaram.size, 0, 'o "Ir para a fila" não fez o atualizar');
 });
 
 // ═══ R9-7-01 = R9-3-03 · o recusado que espera o "Sair" do treino ═══════════
@@ -614,18 +666,20 @@ test('R9-4-03: CONTROLE — a fila guardada de OUTRO lugar não fica esperando n
 });
 
 // ═══ A fonte única ═══════════════════════════════════════════════════════════
-// Quem refaz a fila por causa do PERFIL passa pela função que respeita o treino
-// aberto; o `resetQueue` direto no caminho do perfil é como o treino volta a
-// sair calado (R9-7-04).
-test('R9-7-04: o caminho do perfil refaz a fila só pela `refazerFilaPeloPerfil` — nunca pelo `resetQueue` direto', () => {
-  for (const nome of ['completarPerfilChegado', 'irProPaisDoPerfil']) {
+// Quem refaz a fila SEM gesto da pessoa (o perfil que chega, a rede que volta)
+// passa pela função que respeita o treino aberto; o `resetQueue` direto nesses
+// caminhos é como o treino volta a sair calado (R9-7-04).
+test('R9-7-04: o perfil e a volta da rede refazem a fila só pela `refazerFilaReal` — nunca pelo `resetQueue` direto', () => {
+  assert.match(fatiar('retomarBusca'), /if \(filaReal\(\)\.length === 0\) \{\s*refazerFilaReal\(\);/,
+    'a volta da rede decide pela fila da TELA (no treino, os exemplos), ou refaz sem respeitar o treino');
+  for (const nome of ['completarPerfilChegado', 'irProPaisDoPerfil', 'retomarBusca']) {
     const corpo = fatiar(nome);
     assert.doesNotMatch(corpo, /\bresetQueue\(\)/, `${nome} refaz a fila pelo \`resetQueue\` direto: com o treino aberto, ele o encerra calado`);
-    assert.match(corpo, /\brefazerFilaPeloPerfil\(/, `${nome} não refaz a fila pela \`refazerFilaPeloPerfil\``);
+    assert.match(corpo, /\brefazerFilaReal\(/, `${nome} não refaz a fila pela \`refazerFilaReal\``);
   }
-  const refazer = fatiar('refazerFilaPeloPerfil');
+  const refazer = fatiar('refazerFilaReal');
   assert.match(refazer, /Treino\.ativo === true\) \{ Treino\.anotarFilaRefeita\(aviso\); return; \}/,
-    'a `refazerFilaPeloPerfil` não anota no treino aberto antes de refazer');
-  assert.match(objetoDoTreino(), /if \(s\.refazerFila\) \{[^}]*\brefazerFilaPeloPerfil\(s\.avisoDoPais\); return; \}/,
+    'a `refazerFilaReal` não anota no treino aberto antes de refazer');
+  assert.match(objetoDoTreino(), /if \(s\.refazerFila\) \{[^}]*\brefazerFilaReal\(s\.avisoDoPais\); return; \}/,
     'o `sair()` do treino não refaz a fila que o perfil mandou refazer');
 });

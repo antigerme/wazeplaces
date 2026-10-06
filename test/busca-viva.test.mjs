@@ -398,7 +398,10 @@ test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com c
   const r = fatiar('retomarBusca');
   const chamadas = [];
   const AppState = { queue: [], loadError: true, hasMore: false };
-  const rodar = new Function('AppState', 'resetQueue', 'startFetching', r + '\nreturn retomarBusca;')(
+  // A fila vazia é a REAL (`filaReal`), e o atualizar passa pela função que
+  // respeita o treino aberto (`refazerFilaReal`; o treino em test/treino-fila-real-r9).
+  const rodar = new Function('AppState', 'resetQueue', 'startFetching',
+    [fatiar('filaReal'), fatiar('refazerFilaReal'), r].join('\n') + '\nreturn retomarBusca;')(
     AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'));
   rodar();
   assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');

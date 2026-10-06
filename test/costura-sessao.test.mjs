@@ -1482,7 +1482,7 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
   deps.listasDePaisesGuardadas = new Map();
   deps.geracaoDasListasDePaises = 0;
   const h = montar(['loadProfileAndAuxData', 'handleUnauthorized', 'definirPerfil', 'completarPerfilChegado',
-    'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaPeloPerfil', 'pedirListaDePaises'], deps);
+    'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'pedirListaDePaises'], deps);
   await h.loadProfileAndAuxData();
   await tique(20);
   assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');
@@ -1510,7 +1510,7 @@ function montarIrProPais() {
   };
   // A lista da região nova pela fonte única (`pedirListaDePaises`, R9-6-01).
   Object.assign(deps, { listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0 });
-  const h = montar(['irProPaisDoPerfil', 'pedirListaDePaises', 'refazerFilaPeloPerfil'], deps);
+  const h = montar(['irProPaisDoPerfil', 'pedirListaDePaises', 'refazerFilaReal'], deps);
   return { h, deps, guardado, toasts, soltar: () => soltar() };
 }
 

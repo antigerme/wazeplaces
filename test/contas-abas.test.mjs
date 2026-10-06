@@ -1881,7 +1881,7 @@ test('F4: a área gerenciada salva que o perfil não tem sai do filtro — e a f
       epocaDaSessao: 0, filaEsperaPerfil: false, paisDoPerfil: async () => null, caixaDaMinhaArea: () => [1, 2, 3, 4],
       aplicarRecusaAutomatica: () => {}, sortQueue: () => {}, window: {},
     };
-    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaPeloPerfil'], deps);
+    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaReal'], deps);
     return { h, deps, log };
   };
   let m = montarArea();
