@@ -77,7 +77,7 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   AppState.stats = { read: 0, rejected: 0, skipped: 0 };
   AppState.pendingAction = null;
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
-    'completarPerfilChegado', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
+    'completarPerfilChegado', 'refazerFilaPeloPerfil', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
   // A caixa da área POR SERVIDOR (R9-6-04): a busca usa a do servidor dela, lida com os editáveis.
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
     'anotarEditaveis']) if (achar(opcional)) nomes.push(opcional);

@@ -414,8 +414,10 @@ test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () 
 test('a varredura guarda os tiles da FAIXA de alturas, com piso amarrado ao CSS', () => {
   const itens = fatiar('offlineItensDaFila');
   assert.match(itens, /tilesDaFaixa\(/, 'a varredura voltou a usar UMA caixa só');
-  assert.match(itens, /AppState\.queue\.slice\(\)/,
-    'o laço cede a thread: tem de iterar uma CÓPIA, senão o avanço da fila pula um pedido calado');
+  // A fila REAL (`filaReal`), e uma CÓPIA dela: o treino que abre durante a
+  // gravação (o `await` antes) trocava a da tela pelos EXEMPLOS (R9-4-01).
+  assert.match(itens, /filaReal\(\)\.slice\(\)/,
+    'o laço cede a thread: tem de iterar uma CÓPIA (da fila REAL), senão o avanço da fila pula um pedido calado');
   assert.match(fatiar('offlineFaixaDeCaixas'), /MAPA_TILE - 8/,
     'o teto tem de ficar abaixo de um tile: acima de 504px o custo dobra (medido: 313 → 470 tiles)');
   // O piso NÃO pode ficar acima do menor `min-height` do `.card-photo`: se o

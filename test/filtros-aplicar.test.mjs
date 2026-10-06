@@ -151,7 +151,7 @@ const FUNCOES = [
   'aoTrocarOrdenacao', 'redesenharFiltrosComOPerfil', 'referenciaDaOrdem',
   // O caminho do perfil (achados 10 e 11).
   'loadProfileAndAuxData', 'definirPerfil', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil',
-  'redesenharLugarNosFiltros',
+  'refazerFilaPeloPerfil', 'redesenharLugarNosFiltros',
   // Os editáveis por servidor (R7-6-02), e a peneira com o perfil que chega (R7-6-01).
   'anotarEditaveis', 'editaveisLidos', 'peneirarPaisesComOPerfil',
   // A lista de países que a carga e os Filtros dividem (R8-6-04), guardada por região (R9-6-01).

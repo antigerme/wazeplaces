@@ -1286,7 +1286,7 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
       return tx;
     } }),
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'offlineGravarFila'], deps);
+  const h = montar(['marcaDaSessao', 'contaAgora', 'filaReal', 'offlineGravarFila'], deps);
   assert.equal(await h.offlineGravarFila(), true);
   assert.equal(puts[0].conta, '111', 'a fila guardada não diz de que conta é');
   assert.equal(puts[0].s, marcaDe('tok-A'), 'a fila guardada não diz de que sessão é');
@@ -1482,7 +1482,7 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
   deps.listasDePaisesGuardadas = new Map();
   deps.geracaoDasListasDePaises = 0;
   const h = montar(['loadProfileAndAuxData', 'handleUnauthorized', 'definirPerfil', 'completarPerfilChegado',
-    'paisDoPerfil', 'irProPaisDoPerfil', 'pedirListaDePaises'], deps);
+    'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaPeloPerfil', 'pedirListaDePaises'], deps);
   await h.loadProfileAndAuxData();
   await tique(20);
   assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');
@@ -1510,7 +1510,7 @@ function montarIrProPais() {
   };
   // A lista da região nova pela fonte única (`pedirListaDePaises`, R9-6-01).
   Object.assign(deps, { listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0 });
-  const h = montar(['irProPaisDoPerfil', 'pedirListaDePaises'], deps);
+  const h = montar(['irProPaisDoPerfil', 'pedirListaDePaises', 'refazerFilaPeloPerfil'], deps);
   return { h, deps, guardado, toasts, soltar: () => soltar() };
 }
 

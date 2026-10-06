@@ -60,7 +60,7 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     dfato: (k, o) => diario.push([k, o]),
     setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = fatiar('offlineVarrer')
+  const corpo = [fatiar('filaReal'), fatiar('offlineVarrer')].join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -181,17 +181,19 @@ test('treino: a varredura NÃO grava nem baixa a fila de exemplos', async () => 
   assert.equal(st.varrendo, false);
 });
 
-function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFila = null } = {}) {
+function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFila = null, real = null } = {}) {
   const puts = [];
-  const real = [{ venueID: 'real-1' }, { venueID: 'real-2' }];
+  real = real || [{ venueID: 'real-1' }, { venueID: 'real-2' }];
   const exemplos = [{ venueID: 'exemplo', _treino: true }];
-  const AppState = { queue: real, filters: { countryId: 30 } };
-  const Treino = { ativo: treinoAgora };
+  // Com o treino aberto, a fila da TELA é a de exemplos e a real fica guardada
+  // nele (`Treino._salvo.queue`), como o `Treino.entrar` faz.
+  const AppState = { queue: treinoAgora ? exemplos : real, filters: { countryId: 30 } };
+  const Treino = { ativo: treinoAgora, _salvo: treinoAgora ? { queue: real } : null };
   const deps = {
     AppState, Treino, offlineLigado: () => true, OFFLINE_STORE: 'fila',
     offlineDB: async () => {
       // O treino começa ENQUANTO a base abre: troca a fila, como o `Treino.entrar`.
-      if (treinoDuranteOAbrir) { Treino.ativo = true; AppState.queue = exemplos; }
+      if (treinoDuranteOAbrir) { Treino.ativo = true; Treino._salvo = { queue: AppState.queue }; AppState.queue = exemplos; }
       return {
         close() {},
         transaction: () => {
@@ -210,14 +212,23 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     offlineFilaGravadaEm: null, offlineFilaGravadaChaves: null, offlineFilaPreparada: null, chaveDoPedido,
   };
   const chaves = Object.keys(deps);
-  const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   return { gravar, puts };
 }
 
-test('offlineGravarFila: no treino não grava; e o treino que começa com a base ABRINDO não troca a fila gravada', async () => {
+// No treino a fila da TELA é a de exemplos: gravada, ela voltaria como fila de
+// verdade na próxima abertura sem rede (auditoria de 2026-09-25). E não gravar
+// NADA, como era, fazia o interruptor ligado sem sinal no treino dizer "4 pedidos
+// guardados" com a base vazia (R9-4-02, auditoria de 2026-10-06): grava a REAL.
+test('offlineGravarFila: no treino grava a fila REAL, nunca os exemplos; e o treino que começa com a base ABRINDO não troca a fila gravada', async () => {
   const a = gravarCom({ treinoAgora: true });
-  assert.equal(await a.gravar(), false);
-  assert.equal(a.puts.length, 0, 'gravou a fila de exemplos');
+  assert.equal(await a.gravar(), true, 'DEFEITO: no treino a fila real não foi gravada — o interruptor diria "pedidos guardados" sobre a base vazia (R9-4-02)');
+  assert.deepEqual(a.puts[0].places.map((p) => p.venueID), ['real-1', 'real-2'], 'gravou a fila de EXEMPLOS');
+  // A fila real VAZIA no treino (a reabertura sem rede que deixou a guardada
+  // esperando o "Sair", R8-4-04) não apaga a guardada do aparelho.
+  const vazia = gravarCom({ treinoAgora: true, real: [] });
+  assert.equal(await vazia.gravar(), false);
+  assert.equal(vazia.puts.length, 0, 'a fila real vazia do treino foi gravada por cima da guardada');
 
   const b = gravarCom({ treinoDuranteOAbrir: true });
   assert.equal(await b.gravar(), true);
@@ -309,7 +320,7 @@ function aparelhoComCache() {
       }),
     },
   };
-  const corpo = [fatiar('offlinePodarTiles'), fatiar('offlineVarrer')].join('\n')
+  const corpo = [fatiar('filaReal'), fatiar('offlinePodarTiles'), fatiar('offlineVarrer')].join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -380,7 +391,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
-  const gravar = new Function(...chaves, fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   const r = await Promise.race([gravar(), new Promise((ok) => setTimeout(() => ok('PENDUROU'), 500))]);
   assert.equal(r, false, 'a gravação abortada pendurou (a varredura ficaria presa)');
 });
@@ -526,7 +537,7 @@ function gatilhosDaVarredura(janela) {
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     offlinePodarTiles: async () => 0, dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = ['offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
+  const corpo = ['filaReal', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -597,7 +608,7 @@ function interruptor(onLine) {
     offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
     dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = ['offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
+  const corpo = ['filaReal', 'offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -676,7 +687,7 @@ function aparelhoO8() {
       enviarPendenciasDoLightbox: () => {}, removeUndoBanner: () => {}, bloqueadosPorPagina: new Map(),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'saveFilters', 'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'resetQueue',
+      'saveFilters', 'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'resetQueue',
       'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
@@ -937,7 +948,7 @@ function aparelhoO1() {
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'loadFilters', 'offlineLerFila', 'offlineGravarFila', 'filaGuardadaDestaConta',
+      'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'filaGuardadaDestaConta',
       'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
     const chaves = Object.keys(deps);
@@ -1144,7 +1155,7 @@ function linhaSemSinal({ onLine = false, servida, resultado = null, agora, fila 
   const nomes = Object.keys(deps);
   const f = new Function(...nomes, `let offlineJanelaServida = ${servida}, offlineUltimoResultado = ${JSON.stringify(resultado)},
       offlineVarrendo = false, offlineFilaPreparada = ${preparada}, offlineFilaGravadaEm = ${gravada}, offlineFilaVarrida = null;
-    ${fatiar('offlinePrecisaVarrer')}\n${fatiar('filaReal')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
+    ${fatiar('offlinePrecisaVarrer')}\n${fatiar('filaReal')}\n${fatiar('filaGuardadaEsperandoOTreino')}\n${fatiar('atualizarLinhaDoOffline')}\nreturn atualizarLinhaDoOffline;`)(...nomes.map((n) => deps[n]));
   f(0, 0);
   return el.innerHTML || el.textContent;
 }
@@ -1250,7 +1261,7 @@ function aparelhoDaLinha() {
     };
     const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
-      'atualizarLinhaDoOffline', 'filaReal', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
+      'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,

@@ -3578,12 +3578,13 @@ async function enviarExclusao(alvo) {
 // mudava só os clones: ao sair, o irmão real seguia com a foto que saiu (e a
 // lixeira dele dizia "Outro editor já tinha excluído 👍" sobre a exclusão da
 // própria pessoa) e com o nome velho (auditoria de 2026-10-02, R7-3-05, MEDIDO
-// nos dois motores). As duas filas são percorridas: a da tela e a real
-// (`filaReal`), que fora do treino são a mesma.
+// nos dois motores). As duas filas são percorridas: a da tela e a real, com o
+// recusado que espera o "Sair" do treino (`filaRealComDevolvidos`, R9-7-01), que
+// fora do treino são a mesma.
 function aplicarNosIrmaos(place, aplicar) {
     if (!place || place.venueID == null) return;
     const filas = [AppState.queue || []];
-    const real = filaReal();
+    const real = filaRealComDevolvidos();
     if (real !== filas[0]) filas.push(real);
     const irmaos = [];
     for (const fila of filas) {
@@ -4435,9 +4436,11 @@ function escritaDoLightboxSemSessao(place, voltar, chaveDoAviso) {
 // exclusão da própria pessoa —, e a que NÃO chegou ao Waze não voltava nem
 // avisava: a foto fora e o nome novo seguiam na tela sem estar no mapa (auditoria
 // de 2026-10-03, R8-3-02 = R8-7-02, MEDIDO no navegador). O aviso sai com o
-// treino aberto: é sobre uma escrita de verdade.
+// treino aberto: é sobre uma escrita de verdade. E o pedido que o Waze RECUSOU
+// de vez com o treino aberto, que espera o "Sair" pra voltar como card, também é
+// da tela (`filaRealComDevolvidos`, R9-7-01).
 function pedidoAindaNaTela(place) {
-    return filaReal().includes(place) || (Lightbox.isOpen() && Lightbox.place === place);
+    return filaRealComDevolvidos().includes(place) || (Lightbox.isOpen() && Lightbox.place === place);
 }
 
 // A sessão ACABOU (queda ou "Sair") com uma escrita do lightbox na janela do
@@ -5830,7 +5833,7 @@ async function completarPerfilChegado(perfil, epoca) {
     // a pessoa NÃO edita (ver `paisDoPerfil`).
     const destino = await paisDoPerfil(perfil, epoca);
     if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) { resetQueue(); startFetching(); }
+    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaPeloPerfil();
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
@@ -5969,13 +5972,33 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
     dfato('pais.doPerfil', minhaArea ? { pais, regiao, minhaArea: true } : { pais, regiao });
     // Com "Minha área" a fila segue sendo a da ÁREA: "Mostrando a fila de
     // {país}" diria o que ela não é. A região é a da área, e não há o que avisar.
+    let aviso = null;
     if (!minhaArea) {
         const nome = ((AppState.countries || []).find((c) => Number(c.id) === Number(pais)) || {}).name;
-        showToast(t(nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', { pais: nome || '' }), 'info', 7000);
+        aviso = { chave: nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', pais: nome || '' };
     }
     // Os Filtros ABERTOS mostravam o país de antes, e o "Aplicar" o devolvia.
     redesenharLugarNosFiltros(antes);
     window.Presenca?.sincronizar?.();
+    // A fila, e o aviso que fala dela: com o treino aberto, no `sair()` dele.
+    refazerFilaPeloPerfil(aviso);
+}
+
+// A fila REAL refeita porque o PERFIL chegou: o país de quem entra
+// (`irProPaisDoPerfil`), a busca que esperava por ele ("Minha área") ou a área
+// salva que ele não tem (`completarPerfilChegado`). Com o TREINO aberto, a fila
+// real está guardada nele e a da tela são os EXEMPLOS: o `resetQueue` daqui o
+// encerrava CALADO — a faixa "nada é enviado ao Waze" sumia, o card da frente
+// virava um pedido real e o ✕ seguinte ia pro Waze no nome da pessoa (R9-7-04,
+// MEDIDO no navegador nos três caminhos; auditoria de 2026-10-06). O treino
+// ANOTA, como já anota o perfil e a ordem, e o `sair()` refaz a fila, com o
+// aviso do país. O LUGAR (região, país, a área do filtro) muda já, como sem o
+// treino: é por ele que o ↻ e os Filtros buscam, se a pessoa sair do treino por
+// eles. Nada que refaça a fila sem gesto da pessoa encerra o treino por baixo
+// dela.
+function refazerFilaPeloPerfil(aviso = null) {
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) { Treino.anotarFilaRefeita(aviso); return; }
+    if (aviso) showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
     resetQueue();
     startFetching();
 }
@@ -6589,10 +6612,9 @@ function anotarDecididosPorOutraAba(ev) {
     // guardada nele — junto do que o Waze recusou de vez nesse meio, que volta
     // como card no `sair()` (`devolver`). A decisão da outra aba não era anotada,
     // e de volta à fila a sentinela acusava "voltou como card" e o ✕ aqui anotava
-    // um `saida.repetida` sem `outraAba` (auditoria de 2026-10-03, R8-4-02).
-    const devolver = (typeof Treino !== 'undefined' && Treino.ativo === true && Treino._salvo
-        && Array.isArray(Treino._salvo.devolver)) ? Treino._salvo.devolver : [];
-    for (const p of [...filaReal(), ...devolver]) {
+    // um `saida.repetida` sem `outraAba` (auditoria de 2026-10-03, R8-4-02). A
+    // régua é a das outras perguntas de identidade (`filaRealComDevolvidos`).
+    for (const p of filaRealComDevolvidos()) {
         if (p && typeof p === 'object' && novas.has(chaveDoPedido(p))) decididosPorOutraAbaComCardAqui.add(p);
     }
 }
@@ -18907,16 +18929,18 @@ function offlineDB() {
 // viva, que já não tem nada do que foi decidido nesta página). Vai gravado junto
 // porque é contra ele que a reabertura sem rede filtra os pousos.
 async function offlineGravarFila(desde) {
-    if (!offlineLigado() || !AppState.queue.length) return false;
-    // No treino a fila é de EXEMPLOS (`_treino`, e parte sintética, com id que
-    // não existe): gravada, ela voltaria como fila de verdade na próxima
-    // abertura sem rede, e as ações iriam pro Waze (auditoria de 2026-09-25).
-    if (Treino.ativo) return false;
+    // A fila REAL (`filaReal`), lida AGORA, antes do `await`. No treino a da tela
+    // é a de EXEMPLOS (`_treino`, e parte sintética, com id que não existe):
+    // gravada, ela voltaria como fila de verdade na próxima abertura sem rede, e
+    // as ações iriam pro Waze (auditoria de 2026-09-25). E não gravar nada no
+    // treino, como era, fazia o interruptor ligado SEM SINAL dizer "4 pedidos
+    // guardados" com a base vazia: fechado e reaberto sem sinal, a tela era a de
+    // "sem sinal" (R9-4-02, MEDIDO no navegador; auditoria de 2026-10-06). A real,
+    // que o treino guarda, é a que a estrada vai precisar.
+    const fila = filaReal();
+    if (!offlineLigado() || !fila.length) return false;
     const valeDesde = Number.isFinite(desde) ? desde : Date.now();
-    // A fila e os filtros são lidos AGORA, antes do `await`: o treino que
-    // começar enquanto a base abre troca `AppState.queue`, e ler depois
-    // gravaria a fila de exemplos no lugar da real.
-    const fila = AppState.queue;
+    // Os filtros também são lidos antes do `await`.
     const filtros = JSON.parse(JSON.stringify(AppState.filters || {}));
     // O LUGAR da fila (ver `filaDeOnde`), lido AGORA pelo mesmo motivo.
     const lugar = filaDeOnde || lugarAgora();
@@ -19133,7 +19157,12 @@ async function offlineItensDaFila(janela) {
     const faixa = offlineFaixaDeCaixas();
     // CÓPIA da fila: o laço cede a thread, e quem tria desliza no meio — o
     // `shift()` do avanço deslocaria o iterador e pularia um pedido calado.
-    const fila = AppState.queue.slice();
+    // E a fila REAL (`filaReal`): a varredura a lê DEPOIS de gravá-la (um
+    // `await`), e o treino que abria nesse meio a fazia preparar os EXEMPLOS,
+    // dar a fila real por "Pronto" e a poda apagar do cache o mapa dos pedidos
+    // reais que não viraram exemplo (R9-4-01, MEDIDO no navegador: 10 de 40
+    // pedidos sem nenhum tile; auditoria de 2026-10-06).
+    const fila = filaReal().slice();
     let i = 0;
     for (const p of fila) {
         for (const u of tilesDaFaixa(p, faixa)) {
@@ -19282,7 +19311,9 @@ async function offlineVarrer() {
     if (!offlineLigado()) return;
     if (offlineVarrendo) { offlinePedidaDeNovo = true; return; }
     if (!AppState.authenticated || !AppState.queue.length) return;
-    // A fila do treino não é a que a estrada vai precisar (ver `offlineGravarFila`).
+    // No treino nenhuma varredura COMEÇA: a próxima prova de rede depois do "Sair"
+    // a dispara. A que já estava no ar quando ele abriu segue sobre a fila REAL
+    // (`offlineGravarFila` e `offlineItensDaFila` leem a `filaReal`, R9-4-01).
     if (Treino.ativo) return;
     // `onLine === false` é confiável pra "não tem rede"; `true` não prova nada
     // (portal cativo diz true e mente). Só o false muda comportamento — a mesma
@@ -19418,7 +19449,7 @@ async function offlineVarrer() {
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
             offlineGravarJanela(janela, filaCoberta);
             offlineUltimoResultado = 'pronto';
-            dfato('offline.pronto', { n: AppState.queue.length, itens: total, ...(definitivos ? { definitivos } : {}),
+            dfato('offline.pronto', { n: filaReal().length, itens: total, ...(definitivos ? { definitivos } : {}),
                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
             // Só no "pronto": a lista inteira é a da fila guardada. AGUARDADA, com
             // a varredura ainda no ar (`offlineVarrendo`): o gatilho que chegar
@@ -19466,14 +19497,20 @@ function atualizarLinhaDoOffline(feitos, total) {
     // Os pedidos no aparelho são os da fila REAL (`filaReal`): com o treino
     // aberto, a da tela são os EXEMPLOS, e a linha dizia "Pronto — 30 pedidos no
     // aparelho" (os clones do treino) com 40 guardados — e, com a fila curta, os
-    // exemplos inventados contavam junto (auditoria de 2026-10-03, R8-4-05).
-    const n = filaReal().length;
+    // exemplos inventados contavam junto (auditoria de 2026-10-03, R8-4-05). Com a
+    // fila real do treino VAZIA e a fila guardada esperando o "Sair" dele
+    // (`filaGuardadaEsperandoOTreino`, R8-4-04), os pedidos no aparelho são os
+    // DELA, e a fila guardada agora é ela (o carimbo `t`): a linha dizia "Sem
+    // sinal agora. Vai preparar sozinho…" sobre uma fila preparada (R9-4-03).
+    const esperando = filaReal().length ? null : filaGuardadaEsperandoOTreino();
+    const n = esperando ? esperando.n : filaReal().length;
+    const gravadaEm = esperando ? esperando.t : offlineFilaGravadaEm;
     // A última preparação completa cobriu a fila que está guardada AGORA? Uma
     // fila gravada depois dela com pedido NOVO — pela busca, ou pela varredura
     // que ficou pela metade ou nem começou — tem pedido sem mapa e sem foto no
     // aparelho (ver `offlineFilaPreparada`); a MESMA fila regravada mantém o
     // carimbo (ver `offlineGravarFila`). Registro de versão anterior: não coberta.
-    const cobreAFila = offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm;
+    const cobreAFila = offlineFilaPreparada !== null && offlineFilaPreparada === gravadaEm;
     // Preparado AGORA: a última varredura completa é da janela atual.
     const preparado = offlineJanelaServida !== null && !offlinePrecisaVarrer() && cobreAFila;
     // SEM rede, quem decide é o que a última preparação COMPLETA guardou, e não
@@ -19679,9 +19716,10 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // no treino, e o `sair()` tenta de novo pelo MESMO caminho
     // (`abrirGuardadaDepoisDoTreino`) — a abertura (a ordem, a cobertura da linha
     // do offline, o que já entrou na fila) segue sendo uma só. Só a fila DESTA
-    // leitura: o treino guardou a época dela (`filaGuardada`).
+    // leitura: o treino guardou a época dela (`filaGuardada`). Quantos entram e o
+    // carimbo dela vão junto: é dela que a linha do offline fala até lá (R9-4-03).
     if (typeof Treino !== 'undefined' && Treino.ativo === true) {
-        if (Treino.filaGuardada(epocaDaLeitura)) Treino.anotarFilaGuardada();
+        if (Treino.filaGuardada(epocaDaLeitura)) Treino.anotarFilaGuardada(filtrada.places.length, guardada.t);
         return false;
     }
     // Depois de uma busca que falhou: a fila mudou enquanto a base era lida
@@ -20324,11 +20362,13 @@ const Treino = {
         // `devolver`: o que o Waze recusou de vez com o treino aberto, e
         // `perfilChegou`: o perfil que chegou nele — os dois esperam a fila real
         // voltar (ver o `sair()`). Como a recusa automática pedida nele
-        // (`recusaPedida`) e a fila guardada do offline que a abertura sem rede
-        // leu nele (`abrirGuardada`).
+        // (`recusaPedida`), a fila guardada do offline que a abertura sem rede
+        // leu nele (`abrirGuardada`, e quantos e de quando: `filaGuardadaLida`) e
+        // a fila que o perfil mandou refazer nele (`refazerFila`, com o aviso do
+        // país: `avisoDoPais`).
         this._salvo = { queue: AppState.queue, currentPlace: AppState.currentPlace, autorEmFoco: AppState.autorEmFoco,
             epoca: epocaDaFilaReal, epocaDoTreino: AppState.fetchEpoch, devolver: [], perfilChegou: false, ordemMudou: false,
-            recusaPedida: false, abrirGuardada: false };
+            recusaPedida: false, abrirGuardada: false, filaGuardadaLida: null, refazerFila: false, avisoDoPais: null };
         AppState.autorEmFoco = null;
         this.ativo = true;
         this.passo = 0;
@@ -20393,6 +20433,10 @@ const Treino = {
             aplicarRecusaAutomatica();
             sortQueue({ semTrocarOCardDaTela: true });
         } else if (s.recusaPedida) aplicarRecusaAutomatica();
+        // A fila que o PERFIL mandou refazer com o treino aberto (`anotarFilaRefeita`,
+        // R9-7-04): é ela que vem, e não a guardada, com o aviso do país — e o
+        // recusado de vez volta pela busca dela, como numa fila refeita.
+        if (s.refazerFila) { updateStats(true); refazerFilaPeloPerfil(s.avisoDoPais); return; }
         // O que o Waze RECUSOU de vez com o treino aberto (R7-7-04): volta como o
         // PRÓXIMO card, com o "Restam" junto — o que teria acontecido sem o treino
         // (`devolverPedidoRecusado`, que o guardou em `guardarDevolucao`).
@@ -20450,8 +20494,21 @@ const Treino = {
     },
 
     // A fila guardada do offline lida com o treino aberto (`offlineTentarAbrirSemRede`): ver o `sair()`.
-    anotarFilaGuardada() {
-        if (this.ativo && this._salvo) this._salvo.abrirGuardada = true;
+    // `n` e `t`: quantos pedidos dela entram e o carimbo dela, pra linha do
+    // "Disponível offline" (`filaGuardadaEsperandoOTreino`).
+    anotarFilaGuardada(n, t) {
+        if (!this.ativo || !this._salvo) return;
+        this._salvo.abrirGuardada = true;
+        this._salvo.filaGuardadaLida = { n: Number.isFinite(n) ? n : 0, t: Number.isFinite(t) ? t : null };
+    },
+
+    // O perfil mandou REFAZER a fila real com o treino aberto (`refazerFilaPeloPerfil`,
+    // R9-7-04): ver o `sair()`. O aviso do país que chegar depois vale; o de um
+    // refazer sem país (a área, a busca que esperava o perfil) não apaga o anterior.
+    anotarFilaRefeita(aviso) {
+        if (!this.ativo || !this._salvo) return;
+        this._salvo.refazerFila = true;
+        if (aviso) this._salvo.avisoDoPais = aviso;
     },
 
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de
@@ -20556,6 +20613,36 @@ function filaReal() {
         return Treino._salvo.queue;
     }
     return AppState.queue || [];
+}
+
+// A fila real E o que o Waze recusou de vez com o treino aberto e volta como o
+// próximo card no `sair()` (`Treino._salvo.devolver`, ver `guardarDevolucao`). É
+// a régua das perguntas de IDENTIDADE — "este pedido ainda é desta tela?"
+// (`pedidoAindaNaTela`), "quem são os irmãos dele?" (`aplicarNosIrmaos`), "a
+// decisão da outra aba caiu num card daqui?" (`anotarDecididosPorOutraAba`): o
+// devolvido é pedido da tela de quem volta do treino. Pela `filaReal()`, a
+// exclusão (ou o nome) que pousou não chegava a ele — de volta à fila, a lixeira
+// oferecia a foto que já tinha saído e dizia "Outro editor já tinha excluído 👍"
+// sobre a exclusão da própria pessoa —, e a que não chegou ao Waze não voltava
+// nem avisava (R9-7-01 = R9-3-03, MEDIDO no navegador; auditoria de
+// 2026-10-06). Quem CONTA a fila (a linha do offline, o "Restam") segue na
+// `filaReal()`: o devolvido volta a contar quando volta à fila.
+function filaRealComDevolvidos() {
+    const real = filaReal();
+    const devolver = (typeof Treino !== 'undefined' && Treino.ativo === true && Treino._salvo
+        && Array.isArray(Treino._salvo.devolver)) ? Treino._salvo.devolver : [];
+    return devolver.length ? [...real, ...devolver] : real;
+}
+
+// A fila guardada do offline que a reabertura sem rede leu com o treino aberto e
+// espera o "Sair" dele (`Treino.anotarFilaGuardada`, R8-4-04): `{ n, t }` —
+// quantos pedidos dela entram e o carimbo dela —, ou null. A linha do
+// "Disponível offline" fala dela enquanto a fila real do treino está vazia
+// (R9-4-03).
+function filaGuardadaEsperandoOTreino() {
+    if (typeof Treino === 'undefined' || Treino.ativo !== true || !Treino._salvo) return null;
+    const g = Treino._salvo.filaGuardadaLida;
+    return g && g.n > 0 ? g : null;
 }
 
 // ── Presença no WME, de carona nas ações (fase 2) ─────────────────────────

@@ -65,7 +65,7 @@ function lightbox(podeL6 = true) {
 // As peças do R6-3-01/R6-3-04 que toda escrita da foto usa, DE VERDADE: a régua
 // do "pedido ainda na tela" e a memória das idas sem resposta entre gestos. O
 // anúncio ao leitor de tela (R6-3-08) é anotado no `log` de quem passar um.
-const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta'];
+const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
   anunciarNoLightbox: (texto, place) => { if (log) log.push('anuncio:' + texto); },
   // A região do CARD, pro desfecho que fecha a camada (R7-3-04).
@@ -1064,7 +1064,7 @@ function montarRenomeio({ API }) {
     document: { getElementById: () => null }, Treino: { ativo: false, _salvo: null },   // o treino fechado (R7-3-05)
   };
   const nomes = ['enviarRenomeacao', 'renomeacaoNoAr', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela',
-    'aplicarNosIrmaos', 'escritaDoLightboxSemSessao', 'refazerDepoisDo401', 'pedidoAindaNaTela', 'filaReal'];
+    'aplicarNosIrmaos', 'escritaDoLightboxSemSessao', 'refazerDepoisDo401', 'pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;\n'
     + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
