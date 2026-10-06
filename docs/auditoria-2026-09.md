@@ -16,23 +16,24 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-03 ~15:30 UTC)
+## 0. Estado agora (2026-10-06 ~21:30 UTC)
 
-- **Lote 10 em produção** (PR #256, `babe2bf`, v2026.10.02-01), verificado com as duas contas: 97 ✓ · 0 ✗ no
-  roteiro inteiro, com a seção "13. Lote 10 no ar".
-- **Rodada 7** completa (`scratchpad/r7-relatorios/r7-{1..7}.md`, 56 achados, 5 médios).
-- **Lote 11 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.03-01): nove
-  agentes (textos, treino, presença, fila, filtros, histórico, offline/diagnóstico, contas, foto ampliada) mais o
-  que a junção achou: a ordem trocada nos Filtros com o treino aberto, o "sem sinal" da conversa, o `rodar-longo`
-  que anunciava "rodando" antes do trap e três ajustes de harness, cada um sabotado. `npm test` 2078/2078.
-  Relatórios em `scratchpad/relatorio-l11-<área>.md`; pendências e hipóteses pra rodada 8 em
-  `scratchpad/l11-juncao-pendencias.md`.
+- **Lote 11 em produção** (PR #257, `79d6ab7`, v2026.10.03-01), verificado com as duas contas em duas rodadas
+  (2026-10-03 e 2026-10-06): nenhum defeito do app; os ✗ das duas foram do ROTEIRO (a volta do "lido" com um 500
+  passageiro do Waze, a espera do 14(c) antes de o ✕ existir, a 9b contra o cache do KV na borda), consertados nele.
+- **Rodada 8** completa (`scratchpad/r8-relatorios/r8-{1..7}.md`, 48 achados, 3 médios).
+- **Lote 12 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (treino,
+  avisos do treino, foto ampliada, fila e lotes, diagnóstico e offline, presença, filtros, contas e Histórico,
+  extensão 0.3.3) mais o que a junção achou: o guard do aviso do "Sair" com as duas sessões, e a sentinela do
+  pedido decidido olhando a fila REAL com o treino aberto. `npm test` 2190/2190. Relatórios em
+  `scratchpad/relatorio-l12-<área>.md`.
 - **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`
-  (com as do lote 11: a frase da aprovação que pousou sem resposta, o país não editável escolhido antes do perfil,
-  o "Como funciona" na carga com o voltar do celular, e a extensão 0.3.2 pra publicar).
-- **Cookies** (2026-10-02): `7548e7e7-antigerme_cookies.txt` (L6+AM) e `9bb18a23-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com `VERSAO=2026100301` e a
-  seção "14. Lote 11 no ar") — e a rodada 8.
+  (com as do lote 12: dois toques travados calados na foto ampliada, a frase da aprovação também nos lotes, e as
+  duas decididas e reversíveis — o país da presença com "Minha área" e "Minha área" na troca de conta — e a
+  extensão 0.3.3 pra publicar).
+- **Cookies** (2026-10-06): `a3bf0b4b-antigerme_cookies.txt` (L6+AM) e `83b3b403-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "15. Lote 12 no
+  ar") — e a rodada 9.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -72,6 +73,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #254 | 2026100101 | rodada 7 (sete auditores): sessão e abas, decisões e trava do card, foto e mapa ampliados, offline, presença, filtros, textos e modo dev | 87 ✓ · 1 ✗ (o "Lida" numa corrida da conversa → lote 9) |
 | #255 | 2026100102 | rodada 8: duas abas e sessão, fila e trava do card, foto ampliada, offline, presença, filtros e textos | **89 ✓ · 0 ✗** em produção |
 | #256 | 2026100201 | rodada 9: conta e duas abas, pareamento, fila e card, foto ampliada, offline, presença, filtros e extensão, treino e Histórico | **97 ✓ · 0 ✗** em produção |
+| #257 | 2026100301 | rodada 10: conta e duas abas, fila e fim da fila, foto ampliada, offline e modo dev, presença, filtros, treino, "Como funciona" e textos; a extensão 0.3.2 | **101 ✓** em produção, nas duas rodadas (os ✗ foram do roteiro, consertados nele) |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
