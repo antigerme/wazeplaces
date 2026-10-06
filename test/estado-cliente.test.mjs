@@ -123,7 +123,8 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // na fila que atravessou a queda, ele volta como card (V1). O bloco não
     // tem chave NENHUMA dentro: nada de ramo que grave.
     enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
-    loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // A lista de países é a ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
+    loadProfileAndAuxData: /pedirListaDePaises\(regiaoPedida\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
     handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,

@@ -6784,10 +6784,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   R56-6. Trocar a região NA → ROW → NA: a lista da ida à NA que chegava
 //       DEPOIS punha o 1º da lista (o Canadá) por cima dos EUA que a pessoa
 //       tinha escolhido (auditoria da rodada 5).
-//   11, com a REGIÃO. Quem só edita na NA abre pelo atalho; o perfil a leva pra
-//       NA/EUA com a lista de países da ABERTURA ainda no ar, e a lista da ROW,
+//   11, com a REGIÃO. Quem só edita na NA abre os Filtros com a lista de
+//       países da ROW no ar; o perfil a leva pra NA/EUA, e a lista da ROW,
 //       chegando depois, ficava debaixo do seletor em `row` com os países da
 //       NA: o "Aplicar" gravava `row/235`, uma fila vazia (lote 9).
+//   R8-6-04. Pelo atalho, a carga da abertura e os Filtros pediam a MESMA
+//       lista de países duas vezes; hoje é uma ida só, dividida.
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
 // no modal vale, a região que não é a aplicada abre no 1º da lista, com uma
@@ -6799,7 +6801,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
     na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
   };
-  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {} }) => {
+  // `falharListaDaCarga`: a 1ª lista de países da ROW (a da carga da abertura)
+  // responde falha na hora, e só as seguintes ficam seguras (ver o "11, com a
+  // REGIÃO"). `listasDaRow` conta as que a ROTA recebeu (R8-6-04).
+  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {}, falharListaDaCarga = false }) => {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
     await ctx.addInitScript((guardado) => {
       try {
@@ -6812,6 +6817,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const seguros = [];
     // R56-6: as listas de países das TROCAS de região, seguras na ordem em que saem.
     const trocas = { segurar: false, seguras: [] };
+    const contagem = { listasDaRow: 0 };
     await ctx.route('**/api/**', async (route) => {
       const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
       let corpo = {};
@@ -6825,7 +6831,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       else if (nome === 'lista-estados') b = { success: true, states: [] };
       else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
       else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
-      if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
+      const daRow = nome === 'lista-paises' && regiao === 'row';
+      if (daRow) contagem.listasDaRow++;
+      if (daRow && falharListaDaCarga && contagem.listasDaRow === 1) {
+        b = { success: false, errorCategory: 'transient' };
+      } else if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
         await new Promise((solta) => seguros.push({ nome, solta }));
       } else if (trocas.segurar && nome === 'lista-paises') {
         await new Promise((solta) => trocas.seguras.push({ regiao, solta }));
@@ -6844,7 +6854,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       if (s) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
     };
     const segurosDe = (nome) => seguros.filter((x) => x.nome === nome).length;
-    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas };
+    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas, contagem };
   };
   const pelosFiltros = async (m) => {
     await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
@@ -7000,24 +7010,33 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 
   // 11, com a REGIÃO. Quem só edita na NA (o perfil da ROW sem país, o da NA com
-  //     os EUA) abre pelo atalho, com o perfil e as DUAS listas de países da ROW
-  //     seguras: a da carga do início (que o perfil espera, `Promise.all`) e a da
-  //     abertura dos Filtros, nessa ordem — o `initApp` dispara a carga antes de
-  //     tratar o atalho. Solta-se a 1ª e o perfil; a da abertura fica no ar até
-  //     o perfil levar a pessoa pra NA/EUA. No CONTROLE ela chega antes.
+  //     os EUA) abre os Filtros com o perfil seguro e a lista de países da ROW
+  //     dos Filtros no ar. A carga da abertura e os Filtros abertos com ela no
+  //     ar DIVIDEM a lista (R8-6-04): a dos Filtros só é uma ida própria quando
+  //     a da carga não serviu — aqui, ela FALHA, e os Filtros abrem depois
+  //     (pelo botão, não pelo atalho, que os abriria dividindo a ida da carga).
+  //     A dos Filtros fica no ar até o perfil levar a pessoa pra NA/EUA. No
+  //     CONTROLE ela chega antes.
   for (const listaAntes of [false, true]) {
     const caso = listaAntes ? 'CONTROLE: a lista da abertura chega ANTES do perfil' : 'a lista da abertura chega DEPOIS do perfil';
-    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true });
-    await pelosFiltros(m);
-    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 2; i++) await m.page.waitForTimeout(20);
-    checa(m.segurosDe('lista-paises') === 2, `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou as duas listas da ROW`,
-      String(m.segurosDe('lista-paises')));
+    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true, falharListaDaCarga: true });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // A lista da carga POUSOU (falhando): o registro dela no anel de chamadas.
+    await esperarOuExplodir(m.page, () => typeof API !== 'undefined' && API.chamadas.some((c) => c.rota === 'lista-paises'),
+      'a lista da carga falhar');
+    // Os Filtros abertos pelo botão, com o perfil ainda seguro. Sem esperar a
+    // promessa do `openFiltersModal` (ela espera a lista que o teste segura).
+    await m.page.evaluate(() => { void openFiltersModal(); });
+    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 1; i++) await m.page.waitForTimeout(20);
+    checa(m.segurosDe('lista-paises') === 1 && m.contagem.listasDaRow === 2,
+      `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou a lista dos Filtros (a da carga falhou antes)`,
+      `seguras ${m.segurosDe('lista-paises')} · da ROW ${m.contagem.listasDaRow}`);
     const carregando = await m.page.evaluate(() => document.getElementById('filterCountry').dataset.carregando === '1');
     checa(carregando, `${onde} (11, região, ${caso}): CONTROLE — a lista da abertura não estava no ar`);
-    if (listaAntes) m.soltar('lista-paises'); else m.soltarUm('lista-paises');
+    if (listaAntes) m.soltar('lista-paises');
     m.soltar('perfil');
-    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga do início, o
-    // perfil nem andaria e isto estoura — o instrumento não mede o caso fácil.
+    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga, o perfil nem
+    // andaria e isto estoura — o instrumento não mede o caso fácil.
     const lugar = await fimDaCarga(m);
     checa(lugar === 'na/235', `${onde} (11, região, ${caso}): CONTROLE — o perfil não levou quem só edita na NA pra NA/EUA`, lugar);
     if (!listaAntes) {
@@ -7075,6 +7094,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const depois = await ler();
     checa(depois.opcoes === '30' && depois.pais === '30' && depois.dica,
       `${onde} (R7-6-01): o perfil chegou com os Filtros abertos e a lista seguiu sem a peneira`, JSON.stringify(depois));
+    // R8-6-04: pelo atalho, a carga da abertura e os Filtros DIVIDEM a ida da
+    // lista da ROW — eram duas, cada uma um pedido ao `/api` e uma ida ao Waze.
+    // CONTROLE de que a contagem enxerga a 2ª: no "11, com a REGIÃO", acima, a
+    // rota conta 2 (a da carga, que falhou, e a dos Filtros abertos depois).
+    checa(m.contagem.listasDaRow === 1,
+      `${onde} (R8-6-04): pelo atalho, a lista de países da ROW saiu ${m.contagem.listasDaRow} vezes — a carga e os Filtros pediam a mesma`);
     checa(m.erros.length === 0, `${onde} (R7-6-01): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }

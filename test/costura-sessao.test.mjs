@@ -1471,8 +1471,10 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
     t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''), showToast: (m) => toasts.push(m),
     aoConhecerConta: () => {}, marcarSessaoViva: () => {},
   };
+  // A lista de países pela ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
+  deps.listasDePaisesNoAr = new Map();
   const h = montar(['loadProfileAndAuxData', 'handleUnauthorized', 'definirPerfil', 'completarPerfilChegado',
-    'paisDoPerfil', 'irProPaisDoPerfil'], deps);
+    'paisDoPerfil', 'irProPaisDoPerfil', 'pedirListaDePaises'], deps);
   await h.loadProfileAndAuxData();
   await tique(20);
   assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');

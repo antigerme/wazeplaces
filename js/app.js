@@ -4659,6 +4659,35 @@ async function openFiltersModal() {
     await popularPaisEstado();
 }
 
+// A lista de países de UMA região, uma ida por vez (R8-6-04). A carga da
+// abertura (`loadProfileAndAuxData`) e os Filtros (`popularPaisEstado`) pediam
+// a MESMA lista quando os Filtros abriam antes de ela chegar — pelo atalho do
+// ícone (`/?action=filters`) é sempre assim: dois `lista-paises` iguais, cada
+// um um pedido ao nosso `/api` (o free tier) e uma ida ao Waze (MEDIDO no
+// navegador, auditoria da rodada 8: 2 pelo atalho, 1 com os Filtros abertos
+// depois da carga). A ida no ar é COMPARTILHADA, como a do perfil
+// (`_profilePromise`): por região e por SESSÃO (`epocaDaSessao`) — a resposta
+// da sessão que saiu não serve a quem entrou (o 401 dela, na carga, mandaria a
+// sessão nova à conferência). E a lista que CHEGA bem fica na memória
+// (`AppState.countries`) na hora, com a região ainda a pedida e a mesma sessão:
+// a carga só a guardava junto do perfil, e os Filtros abertos nesse meio
+// pediam outra. A que falha não fica: reabrir os Filtros pede de novo.
+const listasDePaisesNoAr = new Map();
+function pedirListaDePaises(regiao = API.getRegion()) {
+    const epoca = epocaDaSessao;
+    const chave = epoca + '|' + regiao;
+    const noAr = listasDePaisesNoAr.get(chave);
+    if (noAr) return noAr;
+    const ida = Promise.resolve(API.listCountries(regiao)).then((r) => {
+        if (r && r.success && epoca === epocaDaSessao && API.getRegion() === regiao) AppState.countries = r.countries;
+        return r;
+    }).finally(() => {
+        if (listasDePaisesNoAr.get(chave) === ida) listasDePaisesNoAr.delete(chave);
+    });
+    listasDePaisesNoAr.set(chave, ida);
+    return ida;
+}
+
 // As duas listas que vêm do Waze. Fora do `openFiltersModal` porque ele agora
 // só as AGENDA — e porque um erro aqui não pode impedir o modal de abrir.
 async function popularPaisEstado() {
@@ -4687,7 +4716,9 @@ async function popularPaisEstado() {
     }
     try {
         if (AppState.countries.length === 0) {
-            const r = await API.listCountries();
+            // A MESMA ida da carga da abertura, se ela ainda estiver no ar (ver
+            // `pedirListaDePaises`, R8-6-04).
+            const r = await pedirListaDePaises(regiao);
             // A lista é da região PEDIDA: aplicada outra enquanto ela vinha,
             // ela não vale como a lista da região de agora...
             if (r.success && API.getRegion() === regiao) AppState.countries = r.countries;
@@ -5328,9 +5359,11 @@ async function loadProfileAndAuxData() {
     // O lugar em que o perfil e os países são PEDIDOS (ver `lugarDoPedidoDoPerfil`).
     const regiaoPedida = API.getRegion();
     lugarDoPedidoDoPerfil = { regiao: regiaoPedida, pais: API.getCountry() };
+    // A lista de países é a MESMA ida que os Filtros abertos nesse meio
+    // aproveitam (o atalho do ícone os abre já): ver `pedirListaDePaises`.
     const [profileRes, countriesRes] = await Promise.all([
         API.getProfile(),
-        API.listCountries()
+        pedirListaDePaises(regiaoPedida)
     ]);
     // Saiu enquanto o perfil vinha: sem isto ele voltava ao AppState, ao
     // cabeçalho e ao portão gravado — de quem já tinha saído.

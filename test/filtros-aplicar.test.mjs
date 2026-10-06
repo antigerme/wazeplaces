@@ -154,6 +154,8 @@ const FUNCOES = [
   'redesenharLugarNosFiltros',
   // Os editáveis por servidor (R7-6-02), e a peneira com o perfil que chega (R7-6-01).
   'anotarEditaveis', 'editaveisLidos', 'peneirarPaisesComOPerfil',
+  // A lista de países que a carga e os Filtros dividem (R8-6-04).
+  'pedirListaDePaises',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -211,6 +213,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
     editaveisPorServidor: { conta: null, lidos: {} },
+    listasDePaisesNoAr: new Map(),
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
     GPS_TIMEOUT_MS: 10, TYPES_PADRAO: ['NEW_PLACE'],
@@ -1715,4 +1718,70 @@ test('R8-6-03: os editáveis da sonda são do servidor em que ela PERGUNTOU — 
   assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil da sonda desfez o lugar aplicado no meio');
   assert.equal(m.app.editaveisLidos('na'), null, 'os editáveis da ROW (a da sonda) foram anotados como os da NA');
   assert.deepEqual(m.app.editaveisLidos('row'), [73], 'os editáveis que a sonda leu na ROW não ficaram na ROW');
+});
+
+// ═══ R8-6-04 · a lista de países é UMA ida, dividida pela carga e pelos Filtros ═
+// Pelo atalho do ícone (`/?action=filters`) os Filtros abrem com a carga da
+// abertura no ar, e o `popularPaisEstado` só olhava se a lista já tinha
+// CHEGADO: saíam dois `lista-paises` iguais — dois pedidos ao nosso `/api` (o
+// free tier) e duas idas ao Waze (MEDIDO no navegador, auditoria da rodada 8:
+// 2 pelo atalho; 1 com os Filtros abertos depois da carga). E com a ida dos
+// Filtros falhando e a da carga dando certo, o seletor ficava em "Lista não
+// carregou" com a lista na memória. Aqui a carga e a abertura dos Filtros rodam
+// DE VERDADE, na ordem do atalho (a carga primeiro), com a lista segura.
+test('R8-6-04: os Filtros abertos com a carga da abertura no ar não pedem a lista de países de novo — e mostram a que chega', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const { carga, soltar } = await cargaSegura(p);
+  const abrindo = p.abrir();
+  await tique();
+  assert.equal(p.els.filterCountry.dataset.carregando, '1', 'PRÉ-CONDIÇÃO: os Filtros não abriram com a lista no ar');
+  assert.deepEqual(p.log.listCountries, ['row'], `os Filtros abertos com a carga no ar pediram a lista de novo: ${p.log.listCountries}`);
+  soltar.paises({ success: true, countries: BR_FR });
+  await abrindo;
+  assert.deepEqual(telaDoPais(p), { opcoes: '30,73', pais: '30', dica: false }, 'a lista que a carga trouxe não chegou ao seletor');
+  soltar.perfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  await carga;
+  await tique(5);
+  assert.deepEqual(p.log.listCountries, ['row'], `a abertura pelo atalho custou ${p.log.listCountries.length} idas da lista`);
+  // CONTROLE: com a ida da carga FALHANDO, os Filtros abertos depois pedem de
+  // novo (o R7-6-04) — o instrumento conta a 2ª ida quando ela existe.
+  const q = pagina({ regiao: 'row', pais: 30 });
+  q.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
+  q.listas.perfil = () => Promise.resolve({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  await q.app.loadProfileAndAuxData();
+  await q.abrir();
+  assert.deepEqual(q.log.listCountries, ['row', 'row'], 'CONTROLE: a lista que falhou na carga não foi pedida de novo pelos Filtros');
+});
+
+test('R8-6-04: a lista que a carga trouxe serve aos Filtros abertos ANTES de o perfil chegar — sem outra ida', async () => {
+  // A carga guardava a lista só junto do perfil (`Promise.all`): os Filtros
+  // abertos nesse meio a viam vazia e pediam outra.
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const { carga, soltar } = await cargaSegura(p);
+  soltar.paises({ success: true, countries: BR_FR });
+  await tique(5);
+  await p.abrir();                                   // o perfil ainda vem
+  assert.equal(p.AppState.profile, null, 'PRÉ-CONDIÇÃO: o perfil já tinha chegado');
+  assert.deepEqual(p.log.listCountries, ['row'], 'a lista que a carga trouxe não serviu aos Filtros abertos antes do perfil: outra ida');
+  assert.deepEqual(telaDoPais(p), { opcoes: '30,73', pais: '30', dica: false });
+  soltar.perfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  await carga;
+});
+
+test('R8-6-04: a ida de uma sessão não serve à seguinte — com o "Sair" no meio, a lista de quem entrou é pedida de novo, e a velha não entra', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  const { carga, soltar } = await cargaSegura(p);   // a lista da sessão de antes fica no ar
+  p.deps.epocaDaSessao++;                            // o "Sair" (ou a queda) e a sessão seguinte
+  p.listas.paises = () => Promise.resolve({ success: true, countries: BR_FR.map((c) => ({ ...c })) });
+  await p.abrir();
+  assert.deepEqual(p.log.listCountries, ['row', 'row'],
+    'os Filtros da sessão nova esperaram a ida da sessão que saiu (o 401 dela mandaria a sessão nova à conferência)');
+  assert.deepEqual(telaDoPais(p), { opcoes: '30,73', pais: '30', dica: false });
+  // A resposta da sessão de antes chega depois: não entra na memória da de agora.
+  p.AppState.countries = [];
+  soltar.paises({ success: true, countries: [{ id: 999, name: 'De quem saiu' }] });
+  soltar.perfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  await carga;
+  await tique(5);
+  assert.deepEqual(p.AppState.countries, [], 'a lista da sessão que saiu entrou na memória da sessão de agora');
 });
