@@ -3332,16 +3332,29 @@ function lembrarIdasSemResposta(alvo, n, pousou, epoca) {
 // que pousa (`enviarAprovacao`). A memória do alvo sai: um "já feito" depois
 // disto é de outro editor. Dizer na tela que a foto já estava aprovada pediria
 // uma frase que o app não tem — fica calado, como o pouso por outra aba.
+//
+// Os LOTES perguntam a mesma coisa (auditoria de 2026-10-06, R8-2-01): o
+// "Rejeitar os N" e a recusa automática (`enviarLote`) e o "Marcar todos"
+// (`handleBatchMarkRead`) levavam junto o pedido aprovado, e o "já tratado" dele
+// contava um rejeitado (ou um lido) no placar e no Histórico, sem o "Curador" —
+// e a folha do lote dizia "1 já tratado por outro editor" sobre a aprovação da
+// própria pessoa (MEDIDO nos dois motores).
 function aprovacaoDelaJaPousou(place) {
     return !!place && idasSemRespostaDeAntes('aprovar|' + chaveDoPedido(place)) > 0;
 }
 
-function desfechoDaAprovacaoDela(actionType, place) {
+// `contado`: a decisão JÁ entrou no placar no GESTO (o ✕ e o ✓ do card, a fila
+// de saída e o "Rejeitar os N", que contam antes de mandar) e desce aqui. O
+// "Marcar todos" e a recusa automática contam quando o pedido POUSA: neles o
+// pedido aprovado nunca subiu o placar, e não há o que descer (R8-2-01).
+function desfechoDaAprovacaoDela(actionType, place, contado = true) {
     lembrarIdasSemResposta('aprovar|' + chaveDoPedido(place), 0, true, epocaDaSessao);
-    const k = actionType === 'read' ? 'read' : 'rejected';
-    AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
-    updateStats();
-    saveStats();
+    if (contado) {
+        const k = actionType === 'read' ? 'read' : 'rejected';
+        AppState.stats[k] = Math.max(0, AppState.stats[k] - 1);
+        updateStats();
+        saveStats();
+    }
     contarConquista('fotos');
 }
 
@@ -16176,7 +16189,10 @@ function rejeitarLoteDoAutor(place, contados) {
 // `aoProgredir` recebe quantos AINDA FALTAM, pra quem quiser mostrar.
 async function enviarLote(places, opts = {}) {
     // `fila` = foi pra fila de SAÍDA (sem rede): nem "foi pro Waze" nem "falhou".
-    const conta = { ok: 0, fila: 0, ja: 0, erro: 0 };
+    // `aprovada` = quem o resolveu foi a APROVAÇÃO desta pessoa, cuja resposta se
+    // perdeu (R8-2-01, ver `aprovacaoDelaJaPousou`): nem rejeitado, nem "outro
+    // editor" — e a folha não o conta.
+    const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0 };
     const epoca = epocaDaSessao;
     // A FILA em que o lote começou. O ↻ e a troca de filtro no meio do laço a
     // refazem (`resetQueue`): a nova já vem sem os pedidos que faltam (estão em
@@ -16214,7 +16230,7 @@ async function enviarLote(places, opts = {}) {
     const aoLandar = !!opts.contarAoLandar;
     const progresso = () => {
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
-        if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.fila - conta.ja - conta.erro, conta);
+        if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada, conta);
     };
     // Em andamento até cada um resolver: uma busca que chegue no meio não os
     // traz de volta como card (ver `semOsJaDecididos`). A marca mora AQUI e não
@@ -16308,19 +16324,29 @@ async function enviarLote(places, opts = {}) {
                     registrarAcaoConfirmada('reject', p, opts.gesto);
                 }
             } else if (r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')) {
-                conta.ja++;
                 if (anotados.delete(p)) tirarDaFilaDeSaida('reject', p);
                 registrarPouso(p);
                 if (aoLandar) { if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1); }
-                // No placar otimista ele JÁ contou; o Histórico conta igual, como
-                // no card único (`handleActionResult`) — senão o placar e o
-                // Histórico divergiam por lote (auditoria de 2026-09-25). E as
-                // conquistas também, como lá: o "já tratado" do duplicado dava o
-                // "Detetive" pelo ✕ e não pelo lote, e a "Mão firme" andava um a
-                // menos (R6-7-9, auditoria de 2026-10-01).
-                else {
-                    recordHistory('reject', 1, opts.gesto && opts.gesto.dia, opts.gesto && opts.gesto.onde);
-                    registrarAcaoConfirmada('reject', p, opts.gesto);
+                if (aprovacaoDelaJaPousou(p)) {
+                    // Quem resolveu foi a APROVAÇÃO desta pessoa, cuja resposta se
+                    // perdeu (R8-2-01): o desfecho é o dela, como no ✕ do card
+                    // (`handleActionResult`) — nem "outro editor", nem a rejeição
+                    // no Histórico e nas conquistas, e o "Curador" conta. O placar
+                    // otimista do lote desce; contando ao pousar, ele nem subiu.
+                    conta.aprovada++;
+                    desfechoDaAprovacaoDela('reject', p, !aoLandar);
+                } else {
+                    conta.ja++;
+                    // No placar otimista ele JÁ contou; o Histórico conta igual,
+                    // como no card único (`handleActionResult`) — senão o placar e
+                    // o Histórico divergiam por lote (auditoria de 2026-09-25). E
+                    // as conquistas também, como lá: o "já tratado" do duplicado
+                    // dava o "Detetive" pelo ✕ e não pelo lote, e a "Mão firme"
+                    // andava um a menos (R6-7-9, auditoria de 2026-10-01).
+                    if (!aoLandar) {
+                        recordHistory('reject', 1, opts.gesto && opts.gesto.dia, opts.gesto && opts.gesto.onde);
+                        registrarAcaoConfirmada('reject', p, opts.gesto);
+                    }
                 }
             } else if (r && r.errorCategory === 'unauthorized') {
                 // O resto do lote não pode evaporar (ver o 401 no
@@ -20936,6 +20962,10 @@ async function handleBatchMarkRead() {
     updateInFlightIndicator();
     showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }), 'info');
     const feitos = [];   // lidos agora, ou já resolvidos por outro editor: saem da fila
+    // Os que a APROVAÇÃO desta pessoa já tinha resolvido, com a resposta perdida
+    // (R8-2-01, ver `aprovacaoDelaJaPousou`): saem da fila e do "Restam" como os
+    // `feitos`, mas não são lidos — nem no placar, nem no Histórico, nem no aviso.
+    const aprovadas = [];
     let falhou = null;
     // A sessão trocou no meio (ver `epocaDaSessao`): o laço PARA e nada mais
     // sai. `posQueda`: o que a resposta que chegou DEPOIS da troca diz que o
@@ -20966,7 +20996,13 @@ async function handleBatchMarkRead() {
                     if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
                     break;
                 }
-                if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) { feitos.push(p); registrarPouso(p); }
+                if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) {
+                    registrarPouso(p);
+                    // O "já tratado" de um pedido cuja aprovação desta pessoa
+                    // pousou sem resposta é a aprovação DELA (R8-2-01).
+                    if (!r1.success && aprovacaoDelaJaPousou(p)) aprovadas.push(p);
+                    else feitos.push(p);
+                }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; handleUnauthorized(); break; }
                 else { falhou = r1 || {}; break; }
             }
@@ -20999,23 +21035,30 @@ async function handleBatchMarkRead() {
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
         // devolvê-los como card.
         if (posQueda.length) registrarPouso(posQueda);
-        const fora = new Set([...feitos, ...posQueda].map(chaveDoPedido));
+        const fora = new Set([...feitos, ...aprovadas, ...posQueda].map(chaveDoPedido));
         const antes = AppState.queue.length;
         AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
         AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
         // Daqui pra baixo, só a TELA: nada a contar nem a avisar.
         feitos.length = 0;
+        aprovadas.length = 0;
         falhou = null;
     }
-    if (feitos.length) {
+    if (feitos.length || aprovadas.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
         // conquistas. Antes o lote subia só o placar, e o Histórico, o Resumo do
         // mês e a patente discordavam dele. (O pouso já foi registrado a cada
         // pedaço, lá no laço.)
         tratouNestaFila = true;
-        AppState.stats.read += feitos.length;
-        recordHistory('read', feitos.length, gesto.dia, gesto.onde);
-        registrarLoteConfirmado(feitos.length, gesto);
+        if (feitos.length) {
+            AppState.stats.read += feitos.length;
+            recordHistory('read', feitos.length, gesto.dia, gesto.onde);
+            registrarLoteConfirmado(feitos.length, gesto);
+        }
+        // O pedido que a aprovação desta pessoa resolveu (R8-2-01): o "Curador",
+        // e nenhum lido — este lote conta ao pousar, então o placar dele nem
+        // subiu (`desfechoDaAprovacaoDela` sem `contado`).
+        for (const p of aprovadas) desfechoDaAprovacaoDela('read', p, false);
         // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
         // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
         // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote
@@ -21023,13 +21066,13 @@ async function handleBatchMarkRead() {
         // estavam em andamento), então nada sai dela e nada é descontado — antes
         // o "Restam" da fila nova descia pelos pedidos da velha. E uma aprovação
         // de foto que pousou no meio já tirou o pedido dela e descontou sozinha.
-        const fora = new Set(feitos.map(chaveDoPedido));
+        const fora = new Set([...feitos, ...aprovadas].map(chaveDoPedido));
         const antes = AppState.queue.length;
         AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
         AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
         updateStats();
         saveStats();
-        showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
+        if (feitos.length) showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
     }
     if (falhou && falhou.errorCategory !== 'unauthorized') showToast(msgDoServidor(falhou, t('toast.batchError')), 'error');
     // O que o lote NÃO marcou segue pendente no Waze. Na mesma fila ele nunca
@@ -21037,8 +21080,8 @@ async function handleBatchMarkRead() {
     // filtro) ele não entrou — estava em andamento —, e ninguém o trazia: a fila
     // terminava em "Tudo limpo! … Confira o país" com os pedidos pendentes
     // (auditoria de 2026-09-29, V9). Volta pela busca (`devolverPedidoRecusado`),
-    // que sai na hora se a tela ficou sem card.
-    const marcados = new Set(feitos);
+    // que sai na hora se a tela ficou sem card. O que a aprovação resolveu não volta.
+    const marcados = new Set([...feitos, ...aprovadas]);
     const naoMarcados = epocaFila !== AppState.fetchEpoch ? alvos.filter((p) => !marcados.has(p)) : [];
     // A fila na tela: o card da frente pode ter saído no lote.
     if (AppState.currentPlace && !AppState.queue.includes(AppState.currentPlace)) {

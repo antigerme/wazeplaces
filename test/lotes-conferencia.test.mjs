@@ -1,6 +1,11 @@
 // O LOTE e a PASSADA da fila de saída diante do que o card já sabia tratar
 // (auditoria de 2026-10-06, rodada 8 — o lote 12 da fila):
 //
+//  · a APROVAÇÃO de foto que pousou com a resposta perdida (R8-2-01 = R8-3-05 =
+//    R8-7-05). O ✕ e o ✓ do card já a reconheciam (R7-3-08); o "Rejeitar os N",
+//    a recusa automática e o "Marcar todos" contavam um rejeitado (ou um lido)
+//    no placar e no Histórico, sem o "Curador", e a folha do lote dizia "1 já
+//    tratado por outro editor" sobre a aprovação da própria pessoa;
 //  · a CONFERÊNCIA de sessão que começa NO MEIO de uma passada da fila de saída
 //    (R8-2-02 = R8-1-06). As guardas só valiam na entrada: o ✕ que levava 401
 //    com a passada dormindo o ritmo saía de novo, e os itens seguintes saíam
@@ -98,9 +103,214 @@ const lsFalso = () => {
   return { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) };
 };
 const chave = (p) => p.venueID + '|' + p.updateRequestID;
+const GESTO = { dia: '2026-10-06', onde: '30', t: 1, lang: 'pt' };
+const JA_TRATADO = { success: false, errorCategory: 'already_processed', errorKey: 'srv.err.alreadyProcessed', httpCode: 404 };
 const R401 = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired', httpCode: 401 };
 const VIVA = { success: true, profile: { id: 111 } };
 const MORTA = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired' };
+
+// A MEMÓRIA de verdade das idas sem resposta (R6-3-04) e o desfecho da aprovação
+// (R7-3-08): as mesmas funções que o card usa.
+const MEMORIA = ['chaveDoPedido', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'aprovacaoDelaJaPousou',
+  'desfechoDaAprovacaoDela'];
+// A aprovação da foto de `p` pousou e a resposta se perdeu (a rede caiu na
+// volta): o app disse "Erro de conexão" e guardou a ida — é o estado que o
+// `enviarAprovacao` deixa (test/lightbox-escritas, R7-3-08).
+const aprovacaoSemResposta = (h, p) => h.lembrarIdasSemResposta('aprovar|' + chave(p), 1, false, h.deps.epocaDaSessao);
+
+const foto = (i, autor = 777) => ({ venueID: 'v' + i, updateRequestID: 'uf' + i, creatorId: autor, createdBy: 'spam', purType: 'NEW_PHOTO' });
+const pedido = (i, autor = 777) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: autor, createdBy: 'spam' });
+
+// ═══ R8-2-01 · os LOTES e a aprovação que pousou sem resposta ════════════════
+
+// O lote do autor (`enviarLote`, com a folha do resultado de verdade).
+// `respostas[venueID]`: o que o Waze responde à rejeição de cada pedido.
+function montarLote({ respostas, placar = 0, fila = [] }) {
+  const log = [];
+  const naSaida = [];
+  const faltam = [];
+  const els = { autorTitle: { textContent: '' }, autorCorpo: { innerHTML: '' } };
+  const AppState = { authenticated: true, stats: { read: 0, rejected: placar, skipped: 0 }, serverTotal: 3, fetchEpoch: 0,
+    queue: fila.slice(), currentPlace: fila[0] || null, hasMore: false, inFlightActions: 0 };
+  const deps = {
+    AppState, epocaDaSessao: 0, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: constante('IDAS_SEM_RESPOSTA_TETO'),
+    Treino: { ativo: false }, callWithRetry: (fn) => fn(),
+    API: { getRegion: () => 'row', rejectPlace: async (v) => respostas[v] },
+    registrarPouso: (p) => log.push('pouso:' + p.venueID),
+    recordHistory: (tipo, n) => log.push(`historico:${tipo}:${n}`),
+    registrarRejeicaoDeAutor: (p) => log.push('reincidencia:' + p.venueID),
+    registrarAcaoConfirmada: (tipo, p) => log.push('confirmada:' + p.venueID),
+    contarConquista: (k) => log.push('conquista:' + k),
+    // A fila de SAÍDA de mentira: o lote da pessoa anota cada pedido antes de mandar.
+    carregarFilaDeSaida: () => naSaida.slice(), salvarFilaDeSaida: () => {},
+    enfileirarSaida: (tipo, p) => { naSaida.push(p.venueID); return true; },
+    tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.indexOf(p.venueID); if (i < 0) return false; naSaida.splice(i, 1); return true; },
+    reivindicacaoDestaAba: () => ({}),
+    document: { getElementById: (id) => els[id] || null },
+    topOpenModal: () => null, Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+    openModal: (id) => log.push('abriu:' + id), showToast: (m) => log.push('toast:' + m),
+    t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k), escapeHtml: (x) => x,
+  };
+  const h = montar([...MEMORIA, 'enviarLote', 'mostrarResultadoDoLote'], deps);
+  const enviar = (places, opts) => h.enviarLote(places, { regiao: 'row', gesto: GESTO, ...opts,
+    aoProgredir: (n) => faltam.push(n) });
+  return { h, AppState, log, naSaida, faltam, els, enviar };
+}
+
+test('R8-2-01: "Rejeitar os N" com o pedido cuja APROVAÇÃO pousou sem resposta — o desfecho é o da aprovação, não "outro editor"', async () => {
+  const f1 = foto(1), x2 = pedido(2);
+  const m = montarLote({ respostas: { v1: JA_TRATADO, v2: { success: true } }, placar: 2 });   // o gesto contou os 2 (otimista)
+  aprovacaoSemResposta(m.h, f1);
+  assert.equal(m.h.aprovacaoDelaJaPousou(f1), true, 'PRÉ-CONDIÇÃO: a memória da aprovação sem resposta não pegou');
+  await m.enviar([f1, x2]);
+  assert.equal(m.AppState.stats.rejected, 1,
+    `DEFEITO: o pedido que a pessoa APROVOU contou como rejeitado no placar (${m.AppState.stats.rejected} de 1)`);
+  assert.deepEqual(m.log.filter((l) => /^(historico|confirmada):/.test(l)), ['historico:reject:1', 'confirmada:v2'],
+    'DEFEITO: a aprovação entrou no Histórico (ou nas conquistas) como rejeição');
+  assert.equal(m.log.filter((l) => l === 'conquista:fotos').length, 1, 'DEFEITO: o "Curador" não contou a aprovação dela');
+  assert.doesNotMatch(m.els.autorCorpo.innerHTML, /jaTratados/,
+    'DEFEITO: a folha disse "já tratado por outro editor" sobre a aprovação da própria pessoa');
+  // A folha conta o que ela sabe dizer: o rejeitado. A aprovação fica calada,
+  // como no ✕ do card — dizer "você já tinha aprovado" pediria frase nova.
+  assert.equal(m.els.autorTitle.textContent, 'autor.lote.tituloUm#1');
+  assert.match(m.els.autorCorpo.innerHTML, /autor\.lote\.rejeitadosUm#1/);
+  assert.ok(m.log.includes('pouso:v1'), 'o pedido resolvido pela aprovação não pousou (a busca o traria de volta)');
+  assert.deepEqual(m.naSaida, [], 'a anotação do pedido aprovado ficou na fila de saída (sairia de novo)');
+  assert.equal(m.h.idasSemRespostaDeAntes('aprovar|' + chave(f1)), 0, 'a memória do alvo sobreviveu ao desfecho');
+  assert.equal(m.faltam.at(-1), 0, `o lote terminou dizendo que ainda falta ${m.faltam.at(-1)}`);
+  // CONTROLE: sem a aprovação dela, o "já tratado" é de OUTRO editor — conta,
+  // vai pro Histórico e a folha diz.
+  const c = montarLote({ respostas: { v1: JA_TRATADO, v2: { success: true } }, placar: 2 });
+  await c.enviar([f1, x2]);
+  assert.equal(c.AppState.stats.rejected, 2, 'CONTROLE: o "já tratado" de outro editor deixou de contar');
+  assert.deepEqual(c.log.filter((l) => /^historico:/.test(l)), ['historico:reject:1', 'historico:reject:1']);
+  assert.ok(!c.log.includes('conquista:fotos'), 'CONTROLE: o "Curador" contou sem aprovação nenhuma');
+  assert.match(c.els.autorCorpo.innerHTML, /autor\.lote\.jaTratadosUm#1/, 'CONTROLE: a folha deixou de dizer "outro editor"');
+  assert.equal(c.els.autorTitle.textContent, 'autor.lote.titulo#2');
+});
+
+test('R8-2-01: a RECUSA AUTOMÁTICA (conta ao pousar) — o "Curador" conta, e o placar, que nem subiu, não desce', async () => {
+  // O enviado ANTES do aprovado: o placar já tem um, e descontar o aprovado o
+  // levaria a zero (com o aprovado primeiro, o `Math.max(0, …)` esconderia).
+  const x2 = pedido(2), f1 = foto(1);
+  const m = montarLote({ respostas: { v1: JA_TRATADO, v2: { success: true } }, fila: [pedido(9, 1)] });
+  aprovacaoSemResposta(m.h, f1);
+  await m.enviar([x2, f1], { silencioso: true, contarAoLandar: true });
+  assert.equal(m.AppState.stats.rejected, 1,
+    `DEFEITO: a recusa automática descontou do placar o que ele nunca contou (${m.AppState.stats.rejected} de 1)`);
+  assert.equal(m.log.filter((l) => l === 'conquista:fotos').length, 1, 'DEFEITO: o "Curador" não contou a aprovação dela');
+  assert.equal(m.AppState.serverTotal, 1, 'o pedido resolvido pela aprovação não desceu o "Restam"');
+  assert.deepEqual(m.faltam, [1, 0], `o aviso da recusa terminou contando um que faltava: ${m.faltam}`);
+  assert.deepEqual(m.log.filter((l) => l.startsWith('abriu:')), [], 'a recusa automática abriu a folha');
+  // CONTROLE: sem a aprovação dela, nada de "Curador".
+  const c = montarLote({ respostas: { v1: JA_TRATADO, v2: { success: true } }, fila: [pedido(9, 1)] });
+  await c.enviar([x2, f1], { silencioso: true, contarAoLandar: true });
+  assert.equal(c.AppState.stats.rejected, 1);
+  assert.ok(!c.log.includes('conquista:fotos'), 'CONTROLE: o "Curador" contou sem aprovação nenhuma');
+});
+
+// O "Marcar todos" (`handleBatchMarkRead`) com o Waze de mentira na regra MEDIDA:
+// o lote para no primeiro pedido já resolvido (test/lote-lidos), e o pedido que a
+// aprovação resolveu está resolvido.
+function montarMarcarTodos({ fila, resolvidos = [], pedaco = constante('LOTE_LIDOS_PEDACO'), loteResponde = null,
+  umResponde = null, perfil = () => VIVA, quedaRefazAFila = false }) {
+  const log = [];
+  const chamadas = [];
+  const lidos = new Set();
+  const AppState = { authenticated: true, profile: { id: 111 }, queue: fila.slice(), currentPlace: fila[0],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, fetchEpoch: 0, hasMore: false,
+    pendingAction: null, inFlightActions: 0, preferences: {} };
+  const processar = (itens) => {
+    for (const it of itens) {
+      if (resolvidos.includes(it.updateRequestID)) return JA_TRATADO;
+      lidos.add(it.updateRequestID);
+    }
+    return { success: true };
+  };
+  const mensagem = { textContent: '' };
+  const deps = {
+    AppState, epocaDaSessao: 0, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: constante('IDAS_SEM_RESPOSTA_TETO'),
+    LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), Treino: { ativo: false },
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], VERIFICA_SESSAO_MS: 0, navigator: { onLine: true },
+    verificandoSessao: false, conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 },
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    API: {
+      getRegion: () => 'row', getSession: () => 'tok-A',
+      markAsReadBatch: async (itens) => {
+        chamadas.push('lote:' + itens.map((i) => i.venueID).join('+'));
+        const n = chamadas.filter((c) => c.startsWith('lote:')).length;
+        return (loteResponde && loteResponde(n)) || processar(itens);
+      },
+      markAsRead: async (v, u) => {
+        chamadas.push('um:' + v);
+        const n = chamadas.filter((c) => c.startsWith('um:')).length;
+        return (umResponde && umResponde(n, v)) || processar([{ venueID: v, updateRequestID: u }]);
+      },
+      getProfile: async () => { chamadas.push('perfil'); return perfil(chamadas.filter((c) => c === 'perfil').length); },
+    },
+    // A queda (a sonda diz MORTA): a época muda, o lote no ar sai da trava. Com
+    // `quedaRefazAFila`, a fila foi refeita (outra conta entrou, o "Sair").
+    derrubarSessao: () => {
+      deps.epocaDaSessao++; deps.loteDeLidosEmVoo = false; AppState.authenticated = false;
+      if (quedaRefazAFila) AppState.fetchEpoch++;
+    },
+    definirPerfil: (r) => !!(r && r.success && r.profile),
+    registrarPouso: (ps) => log.push(...(Array.isArray(ps) ? ps : [ps]).map((p) => 'pouso:' + p.venueID)),
+    recordHistory: (tipo, n) => log.push(`historico:${tipo}:${n}`),
+    registrarLoteConfirmado: (n) => log.push('conquistas:' + n),
+    contarConquista: (k) => log.push('conquista:' + k),
+    carimboDoGesto: () => GESTO,
+    showToast: (m, tipo) => log.push(`toast:${tipo}:${m}`), msgDoServidor: (r, d) => d,
+    t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k),
+    document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
+  };
+  const h = montar([...MEMORIA, 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'avisoDaTrava',
+    'marcarEmAndamento', 'marcaDaSessao', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
+    'handleUnauthorized', 'refazerDepoisDo401', 'openBatchReadConfirm', 'handleBatchMarkRead'], deps);
+  // O lote, e a conferência que ele (ou o código de antes, sem esperá-la) abriu.
+  const marcarTodos = async () => {
+    h.openBatchReadConfirm();
+    await h.handleBatchMarkRead();
+    await ateQue(() => !deps.verificandoSessao, 'a conferência da sessão terminou');
+    await tique(5);
+  };
+  const toasts = () => log.filter((l) => l.startsWith('toast:'));
+  const fila_ = () => AppState.queue.map((p) => p.venueID);
+  return { h, deps, AppState, log, chamadas, lidos, marcarTodos, toasts, fila: fila_ };
+}
+
+test('R8-2-01: "Marcar todos" com o pedido cuja APROVAÇÃO pousou sem resposta — sai da fila e do "Restam" sem virar lido', async () => {
+  const f1 = foto(1);
+  const m = montarMarcarTodos({ fila: [f1, pedido(2), pedido(3)], resolvidos: ['uf1'] });
+  aprovacaoSemResposta(m.h, f1);
+  assert.equal(m.h.aprovacaoDelaJaPousou(f1), true, 'PRÉ-CONDIÇÃO: a memória da aprovação sem resposta não pegou');
+  await m.marcarTodos();
+  assert.deepEqual(m.chamadas, ['lote:v1+v2+v3', 'um:v1', 'um:v2', 'um:v3'],
+    'PRÉ-CONDIÇÃO: o lote parou no pedido resolvido e foi um a um');
+  assert.equal(m.AppState.stats.read, 2, `DEFEITO: o pedido que a pessoa APROVOU contou como lido (${m.AppState.stats.read} de 2)`);
+  assert.deepEqual(m.log.filter((l) => /^(historico|conquistas):/.test(l)), ['historico:read:2', 'conquistas:2'],
+    'DEFEITO: a aprovação entrou no Histórico (ou nas conquistas) como lido');
+  assert.deepEqual(m.toasts(), ['toast:info:toast.batchMarkingPlural#3', 'toast:success:toast.batchDonePlural#2'],
+    'DEFEITO: o aviso contou a aprovação entre os marcados como lidos');
+  assert.equal(m.log.filter((l) => l === 'conquista:fotos').length, 1, 'DEFEITO: o "Curador" não contou a aprovação dela');
+  assert.deepEqual(m.fila(), [], 'o pedido resolvido pela aprovação ficou na fila como card (decidível de novo)');
+  assert.equal(m.AppState.serverTotal, 0, 'o "Restam" seguiu contando o pedido resolvido pela aprovação');
+  assert.ok(m.log.includes('pouso:v1'), 'o pedido resolvido pela aprovação não pousou');
+  assert.equal(m.h.idasSemRespostaDeAntes('aprovar|' + chave(f1)), 0, 'a memória do alvo sobreviveu ao desfecho');
+  // A fila SÓ com o aprovado: nada de "0 marcados", e a fila anda.
+  const so = montarMarcarTodos({ fila: [f1], resolvidos: ['uf1'] });
+  aprovacaoSemResposta(so.h, f1);
+  await so.marcarTodos();
+  assert.deepEqual([so.fila(), so.AppState.stats.read, so.toasts()], [[], 0, ['toast:info:toast.batchMarking#1']],
+    'só com o pedido aprovado na fila, o lote disse que marcou (ou não o tirou da fila)');
+  // CONTROLE: sem a aprovação dela, o resolvido é de OUTRO editor — conta como lido.
+  const c = montarMarcarTodos({ fila: [f1, pedido(2), pedido(3)], resolvidos: ['uf1'] });
+  await c.marcarTodos();
+  assert.equal(c.AppState.stats.read, 3, 'CONTROLE: o "já tratado" de outro editor deixou de contar');
+  assert.deepEqual(c.toasts().at(-1), 'toast:success:toast.batchDonePlural#3');
+  assert.ok(!c.log.includes('conquista:fotos'), 'CONTROLE: o "Curador" contou sem aprovação nenhuma');
+});
 
 // ═══ R8-2-02 · a conferência que começa NO MEIO de uma passada da fila de saída ═══
 

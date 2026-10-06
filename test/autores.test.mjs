@@ -237,8 +237,17 @@ test('lote: "já tratado por outro editor" NÃO conta como falha', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('async function enviarLote');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('function mostrarResultadoDoLote'));
-  assert.match(bloco, /already_processed[\s\S]{0,80}conta\.ja\+\+/,
+  // O ramo do "já tratado" INTEIRO, do `else if` dele ao do 401 — por distância
+  // ("80 caracteres depois de already_processed") a asserção reprovou código
+  // certo quando o ramo ganhou a aprovação que pousou sem resposta (R8-2-01,
+  // gotcha #67).
+  const iJa = bloco.indexOf("} else if (r && (r.errorCategory === 'already_processed'");
+  const iAuth = bloco.indexOf("} else if (r && r.errorCategory === 'unauthorized')", iJa);
+  assert.ok(iJa > 0 && iAuth > iJa, 'não achei o ramo do "já tratado" do lote');
+  assert.match(bloco.slice(iJa, iAuth), /conta\.ja\+\+/,
     'o app já trata isso como objetivo cumprido no card único — chamar de falha aqui daria dois nomes à mesma coisa');
+  assert.doesNotMatch(bloco.slice(iJa, iAuth), /conta\.erro\+\+/,
+    'o "já tratado" do lote virou falha — o card único o trata como objetivo cumprido');
   assert.match(bloco, /conta\.erro\+\+[\s\S]{0,420}voltarPraFila\(p\);/,
     'o que NÃO saiu tem que voltar pra fila, senão o pedido some sem ter sido tratado');
   // E "voltar pra fila" é pra fila do lote (F4): na fila refeita no meio do
@@ -760,6 +769,7 @@ function lote({ respostas, camada = null }) {
     API: { rejectPlace: async () => fila.shift() },
     registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     enfileirarSaida: () => 'ok', reivindicacaoDestaAba: () => ({}), soltarMarcaDosItens() {}, handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
     saveStats() {}, updatePendingCount() {}, openModal: (id) => modais.push(id),
     carregarFilaDeSaida: () => [], tirarDaFilaDeSaida() {}, dfato() {}, devolverPedidoRecusado() {},

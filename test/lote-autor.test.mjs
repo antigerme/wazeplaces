@@ -56,6 +56,7 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
     registrarRejeicaoDeAutor: () => {},
     registrarAcaoConfirmada: (tipo, p, gesto) => gestosConfirmados.push(gesto ? gesto.dia + '|' + gesto.onde : null),
     marcarEmAndamento: () => {}, handleUnauthorized: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     // Com a `lista` de quem chama (o lote), só põe nela: quem grava é quem chama.
     enfileirarSaida: (tipo, p, regiao, extra, calado, lista) => {
       const f = lista || naSaida;
