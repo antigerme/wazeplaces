@@ -12,6 +12,7 @@
 // FATIADAS e rodadas num escopo de mentira.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { novoCliente, bytesDeMensagem, b64 } from './_presenca-cliente.mjs';
 
 const T = 1790400000000;
@@ -474,3 +475,215 @@ test('R9-5-06 a triagem mostra o tempo real PARADO (com ATENÇÃO) e o "lida" no
   assert.match(velho, /com o "lida" no ar: \(ausente nesta versão\)/);
 });
 
+// ── O app.js, fatiado (o padrão do `presenca-auditoria-r8`) ──────────────────
+
+const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+function fatiar(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let par = 0, i = APP_SEM.indexOf('(', m.index);
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '(') par++;
+    else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+  }
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', i); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) {
+      const corpo = APP_SEM.slice(m.index, j + 1);
+      assert.ok(corpo.length > 60, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
+      return corpo;
+    }
+  }
+  throw new Error('não fechou: ' + nome);
+}
+function montar(nomes, deps) {
+  const chaves = Object.keys(deps);
+  return new Function(...chaves, nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
+}
+const constante = (nome) => {
+  const m = new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP);
+  assert.ok(m, `sumiu a constante ${nome}`);
+  return new Function(`return ${m[1]};`)();
+};
+
+// Um aparelho com ABAS: o armazenamento é um só, a memória (presencaWme,
+// AppState) é de cada uma — e as TRAVAS do navegador também são do aparelho:
+// cada página viva segura a da marca dela (`segurarMarcaDaAba`), e o
+// `navigator.locks.query()` diz quais estão seguras. `token` é a sessão da aba,
+// `aba` a marca dela (`ABA_DESTA_PAGINA`); `semLocks`: o navegador sem a trava.
+// `resposta` responde o `presenca-waze` — uma promessa que não volta é o envio NO AR.
+const MARCA = constante('MARCA_DA_ABA_TRAVA');
+function aparelho() {
+  const guardado = new Map();
+  const localStorage = {
+    getItem: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    setItem: (k, v) => guardado.set(k, String(v)),
+    removeItem: (k) => guardado.delete(k),
+  };
+  const travas = new Set();
+  const pedidos = [];
+  const relogio = { agora: T };
+  return {
+    guardado, pedidos, relogio, travas,
+    gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
+    pagina({ nome = 'aba', token = 'tok', aba = 'aba-' + nome, semLocks = false, resposta = () => ({ success: true }) } = {}) {
+      travas.add(MARCA + aba);
+      const sessao = { token };
+      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
+      const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
+      const navigator = semLocks ? { onLine: true } : { onLine: true, locks: { query: async () => ({ held: [...travas].map((name) => ({ name })), pending: [] }) } };
+      const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica',
+        'relerPreferenciasDeOutraAba', 'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado',
+        'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeConferirAbaDoCarimbo', 'presencaWmeReligar',
+        'presencaWmeZerar', 'presencaWmeSoltarAoSair'], {
+        AppState, presencaWme, localStorage, navigator, ABA_DESTA_PAGINA: aba, MARCA_DA_ABA_TRAVA: MARCA,
+        PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true,
+        CONTA_KEY: constante('CONTA_KEY'), PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+        safeLS: { get: (k) => localStorage.getItem(k) }, dfato: () => {}, Date: { now: () => relogio.agora },
+        API: { getSession: () => sessao.token, presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, token: sessao.token, ...c }); return resposta(c); } },
+        desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
+        offlineEsquecer: () => {}, window: { Presenca: { desligar: () => {}, renderPilula: () => {} } },
+      });
+      h.lerPreferenciasGuardadas();
+      // O gesto, na ordem do ouvinte do interruptor (`prefPresenca`).
+      const desligar = () => { AppState.preferences.presenca = false; AppState.preferences.presencaOffEm = relogio.agora; h.presencaWmeDesligar(); h.savePreferences(); };
+      return { ...h, AppState, presencaWme, sessao, desligar,
+        // O sistema DESCARTA a página no fundo: sem `pagehide`, a trava dela some com ela.
+        morrer: () => travas.delete(MARCA + aba),
+        fechar: () => { h.presencaWmeSoltarAoSair(); travas.delete(MARCA + aba); } };
+    },
+  };
+}
+const assentar = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
+const WAZE_FORA = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+
+// ── R9-5-02: o teto do "invisível" é da CONTA, não da sessão ─────────────────
+
+test('R9-5-02 duas abas da MESMA conta em sessões DIFERENTES e o Waze fora: o teto de um "invisível" por minuto vale pras duas', async () => {
+  const contar = async ({ abas, tokens }) => {
+    const a = aparelho();
+    const A = a.pagina({ nome: 'A', token: tokens[0], resposta: () => WAZE_FORA });
+    const B = abas === 2 ? a.pagina({ nome: 'B', token: tokens[1], resposta: () => WAZE_FORA }) : null;
+    A.desligar();
+    await assentar();
+    if (B) B.relerPreferenciasDeOutraAba();
+    // 5 min, uma resposta da API a cada 10 s em cada aba (a ordem entre elas alterna).
+    for (let s = 0; s < 300; s += 10) {
+      a.relogio.agora += 10_000;
+      const vez = B && (s / 10) % 2 ? [B, A] : [A, B];
+      for (const x of vez) if (x) { x.presencaWmeRefazerDesligar(); await assentar(); }
+    }
+    return a.pedidos;
+  };
+  const uma = await contar({ abas: 1, tokens: ['tok-A'] });
+  const outra = await contar({ abas: 2, tokens: ['tok-A', 'tok-B'] });
+  assert.equal(uma.length, 6, 'CONTROLE: com uma aba, um envio por minuto');
+  assert.equal(outra.length, uma.length, `DEFEITO: com duas abas da mesma conta em sessões diferentes, ${outra.length} envios em 5 min contra ${uma.length} com uma`);
+  for (let i = 1; i < outra.length; i++) assert.ok(outra[i].em - outra[i - 1].em >= 60_000, 'dois envios a menos de um minuto um do outro');
+  // CONTROLE: a mesma sessão nas duas (o que já funcionava).
+  assert.equal((await contar({ abas: 2, tokens: ['tok-A', 'tok-A'] })).length, 6);
+});
+
+test('R9-5-02 o envio de uma aba NO AR: a outra, noutra sessão, não manda o mesmo "invisível"', async () => {
+  const a = aparelho();
+  const A = a.pagina({ nome: 'A', token: 'tok-A', resposta: () => new Promise(() => {}) });
+  const B = a.pagina({ nome: 'B', token: 'tok-B' });
+  A.desligar();                                             // o envio de A fica no ar (sinal fraco)
+  await assentar();
+  B.relerPreferenciasDeOutraAba();
+  for (let i = 0; i < 3; i++) { a.relogio.agora += 5_000; B.presencaWmeRefazerDesligar(); await assentar(); }
+  assert.deepEqual(a.pedidos.map((x) => x.aba), ['A'], 'DEFEITO: a outra aba, noutra sessão, mandou o mesmo "invisível" com o de A no ar');
+});
+
+test('R9-5-02 a exceção da sessão nova é SÓ a que esta aba trocou depois de um 401: ela manda já; o alarme falso e a outra aba seguem com o teto', async () => {
+  const a = aparelho();
+  let primeiro = true;
+  const A = a.pagina({ nome: 'A', token: 'tok-A', resposta: () => {
+    if (primeiro) { primeiro = false; return { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' }; }
+    return WAZE_FORA;
+  } });
+  const B = a.pagina({ nome: 'B', token: 'tok-B', resposta: () => WAZE_FORA });
+  A.desligar();                                             // o gesto: 401
+  await assentar();
+  assert.equal(A.presencaWme.desligarPendente, true, 'CONTROLE: o 401 tinha que deixar o "invisível" pendente');
+  a.relogio.agora += 5_000;
+  A.presencaWmeRefazerDesligar();                           // o alarme falso: a MESMA sessão
+  await assentar();
+  assert.equal(a.pedidos.length, 1, 'com a MESMA sessão, o 401 virou laço (o teto sumiu)');
+  A.sessao.token = 'tok-A-renovado';                        // a renovação traz uma sessão NOVA
+  a.relogio.agora += 1_000;
+  A.presencaWmeRefazerDesligar();
+  await assentar();
+  assert.deepEqual(a.pedidos.map((x) => x.token), ['tok-A', 'tok-A-renovado'], 'a sessão renovada depois do 401 esperou o teto da que levou o 401');
+  // A outra aba, que não levou 401 nenhum, respeita o carimbo do envio novo de A.
+  B.relerPreferenciasDeOutraAba();
+  a.relogio.agora += 5_000;
+  B.presencaWmeRefazerDesligar();
+  await assentar();
+  assert.equal(a.pedidos.length, 2, 'DEFEITO: a outra aba, noutra sessão, não respeitou o carimbo de A');
+});
+
+// ── R9-5-04: o carimbo da aba que morreu sem `pagehide` ──────────────────────
+
+test('R9-5-04 a página descartada SEM `pagehide` com o "invisível" no ar: a reabertura (outra marca) manda já — a trava dela sumiu', async () => {
+  const caso = async ({ morre = true, semLocks = false } = {}) => {
+    const a = aparelho();
+    const A = a.pagina({ nome: 'A', aba: 'aba-A', resposta: () => new Promise(() => {}) });
+    A.desligar();                                           // o envio fica no ar (sinal fraco)
+    await assentar();
+    assert.ok(a.gravado() && a.gravado().aba === 'aba-A', 'CONTROLE: o carimbo tinha que levar a marca da aba');
+    if (morre) A.morrer();                                  // descartada no fundo: nada de `pagehide`
+    a.relogio.agora += 15_000;                              // a pessoa volta 15 s depois: a página reabre
+    const C = a.pagina({ nome: 'reaberta', aba: 'aba-nova', semLocks });
+    C.presencaWmeRefazerDesligar();                         // o `definirPerfil` da reabertura
+    await assentar();
+    const naAbertura = a.pedidos.filter((x) => x.aba === 'reaberta').length;
+    a.relogio.agora += 46_000;                              // passado o teto do envio morto
+    C.presencaWmeRefazerDesligar();
+    await assentar();
+    return { naAbertura, depoisDoTeto: a.pedidos.filter((x) => x.aba === 'reaberta').length };
+  };
+  const morta = await caso();
+  assert.equal(morta.naAbertura, 1, 'DEFEITO: com a aba do envio MORTA, a reabertura esperou o teto do carimbo dela');
+  // CONTROLE: a aba do envio VIVA (ele pode estar no ar ainda) — o teto vale.
+  const viva = await caso({ morre: false });
+  assert.equal(viva.naAbertura, 0, 'CONTROLE: com a aba do envio viva, o mesmo "invisível" saiu de novo');
+  assert.equal(viva.depoisDoTeto, 1);
+  // CONTROLE: sem a trava no navegador não há como saber — o teto vale, como antes.
+  const sem = await caso({ semLocks: true });
+  assert.equal(sem.naAbertura, 0, 'sem `navigator.locks`, um carimbo que pode ser de uma aba viva foi ignorado');
+});
+
+test('R9-5-04 a MESMA aba recarregada (a mesma marca): o carimbo dela vale pela memória, e a página nova manda já', async () => {
+  const a = aparelho();
+  const A = a.pagina({ nome: 'A', aba: 'aba-A', resposta: () => new Promise(() => {}) });
+  A.desligar();
+  await assentar();
+  A.morrer();                                               // a página morre sem `pagehide`…
+  a.relogio.agora += 15_000;
+  const A2 = a.pagina({ nome: 'recarregada', aba: 'aba-A' });   // …e a mesma aba recarrega: a trava da marca agora é DELA
+  A2.presencaWmeRefazerDesligar();
+  await assentar();
+  assert.equal(a.pedidos.filter((x) => x.aba === 'recarregada').length, 1, 'DEFEITO: a aba recarregada achou o próprio carimbo "vivo" e esperou o teto');
+});
+
+test('R9-5-04 a marca do carimbo sobrevive à gravação de preferências da OUTRA aba — e a reabertura confere a aba dele', async () => {
+  const a = aparelho();
+  const A = a.pagina({ nome: 'A', aba: 'aba-A', resposta: () => new Promise(() => {}) });
+  const B = a.pagina({ nome: 'B', aba: 'aba-B' });
+  A.desligar();                                             // o envio de A fica no ar
+  await assentar();
+  B.relerPreferenciasDeOutraAba();                          // o aviso `storage` chega à B…
+  B.AppState.preferences.undoEnabled = false;               // …e um toque nas Preferências da B grava as dela
+  B.savePreferences();
+  assert.equal(a.gravado() && a.gravado().aba, 'aba-A', 'DEFEITO: a gravação da outra aba apagou a marca do carimbo — a aba dele não tem mais como ser conferida');
+  A.morrer();                                               // A é descartada no fundo, sem `pagehide`
+  B.morrer();                                               // (e a B fecha também: a reabertura é a única aba)
+  a.relogio.agora += 15_000;
+  const C = a.pagina({ nome: 'reaberta', aba: 'aba-C' });
+  C.presencaWmeRefazerDesligar();
+  await assentar();
+  assert.equal(a.pedidos.filter((x) => x.aba === 'reaberta').length, 1, 'a reabertura esperou o teto do envio que morreu com A');
+});
