@@ -4927,10 +4927,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const MAPA_PL = { ...FOTO_PL, venueID: 'v-foco-mapa', updateRequestID: 'u-mapa', updateTypeKey: 'UPDATE',
     reqType: 'REQUEST', purType: 'DETAILS_UPDATE', imageUrls: [], approvedImageIds: [],
     mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
-  const montar = async (pl, { semDesfazer = false } = {}) => {
+  // `depois`: os pedidos que vêm DEPOIS deste na fila, e ela termina neles (sem
+  // mais o que buscar: o fim da fila é o painel "Tudo limpo!", na hora).
+  const montar = async (pl, { semDesfazer = false, depois = null } = {}) => {
     await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); if (MapaLightbox.isOpen()) MapaLightbox.close(); });
     await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
-    await page.evaluate(({ p0, semDesfazer: sem }) => {
+    await page.evaluate(({ p0, semDesfazer: sem, depois: resto }) => {
       setLang('pt'); applyI18n();
       API.setSession('tok-smoke');
       AppState.authenticated = true;
@@ -4947,9 +4949,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       showLoading(false);
       const p = JSON.parse(JSON.stringify(p0));
       AppState.queue = [p]; AppState.currentPlace = p;
+      if (resto) {
+        AppState.queue.push(...JSON.parse(JSON.stringify(resto)));
+        AppState.hasMore = false; AppState.serverTotal = AppState.queue.length;
+      }
       document.querySelectorAll('.place-card').forEach((e) => e.remove());
       showCurrentPlace();
-    }, { p0: pl, semDesfazer });
+    }, { p0: pl, semDesfazer, depois });
     await assentar(page);
   };
   // Onde está o foco, e se ele está NO LUGAR CERTO: o id, a classe do card, e
@@ -5120,6 +5126,123 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   });
   checa(flag.txt === '🚩' && flag.nome === flag.titulo && flag.nome !== nomes.nome && flag.mini.includes(flag.nome),
     'foco: na denúncia o 🚩 segue com o NOME do ✨ (ou a miniatura não diz qual é a denunciada)', JSON.stringify(flag));
+
+  // ── R8-3-04 (auditoria de 2026-10-03): corrigindo o nome, a trava que acende
+  // com o foco no ✓ "Salvar nome" (o Tab a partir do campo) o desabilita, e o
+  // foco ia pro ✕ que FECHA A FOTO (a pílula é rótulo na edição): o Enter
+  // seguinte fechava a foto e jogava fora o nome digitado. O foco vai ao CAMPO,
+  // e o Enter ali diz o que esperar com a edição aberta e o nome intacto.
+  // CONTROLE: o foco que JÁ estava no campo fica nele (o R7-3-06, acima, mede
+  // as ações fora da edição, que vão pro ✕).
+  for (const [onde, alvo] of [['✓', 'lightboxNomeOk'], ['campo', 'lightboxNomeInput']]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    await page.keyboard.type(' do Zé');
+    if (onde === '✓') await page.keyboard.press('Tab');
+    const e0 = await foco();
+    checa(e0.id === alvo, `foco/edição+trava ${onde}: PRÉ-CONDIÇÃO — o foco não pousou no ${alvo}`, JSON.stringify(e0));
+    await page.evaluate(() => { escritasConferindo++; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    const okTravado = await page.evaluate(() => document.getElementById('lightboxNomeOk').disabled);
+    const e1 = await foco();
+    checa(okTravado, `foco/edição+trava ${onde}: PRÉ-CONDIÇÃO — a trava não desabilitou o ✓`);
+    checa(e1.id === 'lightboxNomeInput',
+      `foco/edição+trava: com o foco no ${onde}, a trava o levou a ${e1.body ? '<body>' : e1.id} — não ao CAMPO do nome`, JSON.stringify(e1));
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(250);
+    const e2 = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), editando: editandoNome(),
+      campo: document.getElementById('lightboxNomeInput').value }));
+    checa(e2.aberta && e2.editando && /do Zé$/.test(e2.campo),
+      `foco/edição+trava ${onde}: o Enter na trava fechou a foto ou jogou fora o nome digitado`, JSON.stringify(e2));
+    await page.evaluate(() => { escritasConferindo--; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    await page.keyboard.press('Escape');               // sai da edição (o Esc do campo)
+    await page.waitForTimeout(150);
+  }
+
+  // Um pedido de FOTO NOVA com UMA foto só (a proposta), pra aprovar e excluir.
+  const soAProposta = (n, nomeDele) => ({ ...FOTO_PL, venueID: 'v-r8-' + n, updateRequestID: 'pend-r8-' + n,
+    name: nomeDele, imageUrls: [`${foto}#pend-r8-${n}`], approvedImageIds: [] });
+  const aprovarPeloTeclado = async () => {
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxApprove').classList.contains('hidden'), 'o "Aprovar" da foto proposta');
+    await page.focus('#lightboxApprove'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => placeResolvidoPorAprovacao !== null && !aprovandoAgora, 'a aprovação pousar');
+  };
+
+  // ── R8-3-06 (auditoria de 2026-10-03): aprovar a foto do ÚLTIMO pedido e
+  // fechar a foto pelo teclado — a aprovação pousada anda a fila ao fechar, a
+  // fila acaba no "Tudo limpo!" e o foco ia pro ⓘ da Ajuda, no topo da página.
+  // Ele vai ao "Verificar novamente", como no Enter no ✓ do último card
+  // (R7-2-06). CONTROLE: com um pedido depois, o foco vai à foto do card novo.
+  for (const ultimo of [true, false]) {
+    await montar(soAProposta(1, 'Padaria Um'), { semDesfazer: true, depois: ultimo ? [] : [soAProposta(2, 'Padaria Dois')] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await aprovarPeloTeclado();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const f = await foco();
+    const fim = await page.evaluate(() => ({ painel: !document.getElementById('noMoreCards').classList.contains('hidden'),
+      frente: AppState.currentPlace && AppState.currentPlace.updateRequestID }));
+    if (ultimo) {
+      checa(fim.painel, 'foco/último aprovado: PRÉ-CONDIÇÃO — a fila não acabou no "Tudo limpo!" ao fechar a foto', JSON.stringify(fim));
+      checa(f.id === 'reloadBtn',
+        `foco/último aprovado: fechar a foto com a fila no fim levou o foco a ${f.body ? '<body>' : f.id}, não ao "Verificar novamente"`, JSON.stringify(f));
+    } else {
+      checa(fim.frente === 'pend-r8-2' && f.fotoDoCard,
+        'foco/último aprovado: CONTROLE — com outro pedido depois, o foco não foi à foto do card novo', JSON.stringify({ f, fim }));
+    }
+  }
+
+  // ── R8-3-07 (auditoria de 2026-10-03): aprovar a foto proposta e excluí-la
+  // sem o Desfazer (a lixeira é o caminho de volta da aprovação), num local em
+  // que ela é a ÚNICA foto: a exclusão fecha a camada, o fechamento anda a fila,
+  // e "Foto excluída" sobrescrevia, na MESMA tarefa, o anúncio do card novo (ou
+  // o "Tudo limpo!") — o leitor de tela só ouvia "Foto excluída". Mede-se o
+  // texto FINAL da região do card, que é o que ele ouve. CONTROLES: aprovar e só
+  // fechar diz o card novo, sem "Foto excluída"; e excluir a última foto de um
+  // local que NÃO anda a fila (a foto já no mapa) diz só "Foto excluída" (R7-3-04).
+  const regiaoDoCard = () => page.evaluate(() => document.getElementById('cardLiveRegion').textContent);
+  for (const [nome, depois, excluir, espera] of [
+    ['com outro pedido depois', [soAProposta(4, 'Padaria Quatro')], true,
+      (s) => s.startsWith('Foto excluída. ') && s.includes('Padaria Quatro')],
+    ['no último pedido', [], true, (s) => s.startsWith('Foto excluída. ') && s.includes('Tudo limpo')],
+    ['CONTROLE — aprovar e só fechar', [soAProposta(4, 'Padaria Quatro')], false,
+      (s) => !s.includes('Foto excluída') && s.includes('Padaria Quatro')],
+  ]) {
+    await montar(soAProposta(3, 'Padaria Três'), { semDesfazer: true, depois });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await aprovarPeloTeclado();
+    if (excluir) {
+      await esperarOuExplodir(page, () => !document.getElementById('lightboxDelete').classList.contains('hidden')
+        && !document.getElementById('lightboxDelete').disabled, 'a lixeira na foto recém-aprovada');
+      await page.click('#lightboxDelete');
+      await esperarOuExplodir(page, () => !excluindoAgora && !Lightbox.isOpen(), 'a exclusão fechar a foto ampliada');
+    } else {
+      await page.click('#lightboxClose');
+    }
+    await page.waitForTimeout(300);
+    const s = await regiaoDoCard();
+    checa(espera(s), `anúncio/${nome}: a região do card terminou dizendo ${JSON.stringify(s)}`);
+  }
+  {
+    // CONTROLE (R7-3-04): a foto já no mapa, a única do local, excluída sem o
+    // Desfazer — a camada fecha e o MESMO card é redesenhado: só "Foto excluída".
+    const noMapa = { ...soAProposta(5, 'Padaria Cinco'), imageUrls: [`${foto}#aprovada-r8-5`], approvedImageIds: ['aprovada-r8-5'] };
+    await montar(noMapa, { semDesfazer: true, depois: [soAProposta(6, 'Padaria Seis')] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    await page.click('#lightboxDelete');
+    await esperarOuExplodir(page, () => !excluindoAgora && !Lightbox.isOpen(), 'a exclusão fechar a foto ampliada');
+    await page.waitForTimeout(300);
+    const s = await regiaoDoCard();
+    const frente = await page.evaluate(() => AppState.currentPlace && AppState.currentPlace.updateRequestID);
+    checa(frente === 'pend-r8-5' && s === 'Foto excluída',
+      `anúncio/CONTROLE (R7-3-04): sem trocar o card, a região do card terminou dizendo ${JSON.stringify(s)}`, frente);
+  }
   checa(erros.length === 0, 'foco: erro de JS', erros[0]);
   await ctx.close();
 }
@@ -5285,6 +5408,41 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await rodar(40, 0, 0.4);
     const e6 = await escala();
     checa(e6 === 1, `roda/foto: afastando os mesmos 40 eventos a escala parou em ${e6}, não em 1×`);
+    // E UM evento só (R8-3-01, auditoria de 2026-10-03): o passo fino fica
+    // guardado (1,00073, a foto de 800 px com 801) e a tela segue em 1× — mas as
+    // setas a tratavam como AMPLIADA: a → ANDAVA a foto 80 px em vez de trocá-la,
+    // e o ↓ a andava em vez de fechar. Com duas fotos, pra a → ter o que trocar.
+    // CONTROLE: com um zoom de verdade (um dente), a → anda a foto.
+    const estadoDaFoto = () => page.evaluate(() => ({ escala: Lightbox.scale, idx: Lightbox.idx, aberta: Lightbox.isOpen(),
+      transform: document.getElementById('lightboxImage').style.transform || '' }));
+    const abrirComDuas = async () => {
+      await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+      await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
+      await page.evaluate((outra) => { const p = AppState.currentPlace; Lightbox.open([p.imageUrls[0], outra], 0, -1, p.name, false, p); },
+        `${foto}#outra-r8`);
+      await page.waitForTimeout(400);
+      await page.mouse.move(640, 400);
+    };
+    await abrirComDuas();
+    await rodar(1, 0, -0.4);
+    const f0 = await estadoDaFoto();
+    checa(f0.escala > 1 && f0.escala < 1.001, `roda/foto: PRÉ-CONDIÇÃO — um evento de −0,4 px deu a escala ${f0.escala}, não o fio invisível`);
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const f1 = await estadoDaFoto();
+    checa(f1.idx === 1 && !/translate/.test(f1.transform),
+      'roda/foto: depois de um fio de zoom invisível, a → andou a foto em vez de trocá-la', JSON.stringify(f1));
+    await rodar(1, 0, -0.4);
+    await page.keyboard.press('ArrowDown'); await page.waitForTimeout(250);
+    const f2 = await estadoDaFoto();
+    checa(!f2.aberta, 'roda/foto: depois de um fio de zoom invisível, o ↓ andou a foto em vez de fechá-la', JSON.stringify(f2));
+    await abrirComDuas();
+    await rodar(1, 0, -100);
+    const txDe = (tr) => { const m = /translate\((-?[\d.e-]+)px/.exec(tr); return m ? Number(m[1]) : 0; };
+    const f3 = await estadoDaFoto();
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const f4 = await estadoDaFoto();
+    checa(f3.escala > 1.1 && f4.idx === 0 && Math.abs(txDe(f4.transform) - txDe(f3.transform) + 80) < 0.5,
+      'roda/foto: CONTROLE — ampliada de verdade (um dente), a → deixou de andar a foto 80 px', JSON.stringify({ f3, f4 }));
   }
   await page.evaluate(() => Lightbox.close());
   checa(erros.length === 0, 'roda: erro de JS', erros[0]);
@@ -9555,6 +9713,84 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     }
     if (soltarLote) soltarLote();
     await esperarNaPagina(g.page, () => !acoesTravadas(), 8000);
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // R8-3-03 (auditoria de 2026-10-03): o ✓ "Salvar nome" da edição trava pela
+    // MESMA trava (a conferência de um 401, a sessão renovando), e o toque nele
+    // ficava calado — enquanto o Enter no campo, na mesma trava, dizia "Espere a
+    // conferência…". O DEDO de verdade no centro medido, conferido por hit-test
+    // (gotcha #26). CONTROLES: sem trava, o ✓ desabilitado pelo nome VAZIO segue
+    // calado; e o Enter no campo, na mesma trava, avisa (a medida enxerga o aviso).
+    const id = `card/trava ${MOTOR}: o ✓ "Salvar nome" TRAVADO responde (R8-3-03)`;
+    const fotoNova = (i) => cardPedido('fo' + i, { purType: 'NEW_PHOTO', reqType: 'IMAGE', updateTypeKey: 'IMAGE',
+      flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '', localAprovado: true, name: 'Padaria ' + i,
+      imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_fo${i}.jpg`], approvedImageIds: [] });
+    const g = await cardPagina([fotoNova(0), fotoNova(1)], { hasTouch: true });
+    await g.page.evaluate(() => {
+      window.__toastsDoSmoke = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.classList && n.classList.contains('toast')) window.__toastsDoSmoke.push(n.textContent.trim());
+        }
+      }).observe(document.getElementById('toastContainer'), { childList: true });
+    });
+    const texto = await g.page.evaluate(() => t('toast.esperaSessao'));
+    const avisos = () => g.page.evaluate((x) => window.__toastsDoSmoke.filter((s) => s === x).length, texto);
+    const centroDe = (sel) => g.page.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, sel);
+    const dedoChega = (p, sel) => g.page.evaluate(({ p, sel }) => {
+      const e = document.elementFromPoint(p.x, p.y);
+      return !!(e && e.closest(sel));
+    }, { p, sel });
+    const escrever = (v) => g.page.evaluate((valor) => {
+      const i = document.getElementById('lightboxNomeInput');
+      i.value = valor; i.dispatchEvent(new Event('input'));
+    }, v);
+    const semToast = (o) => esperarOuExplodir(g.page, () => !document.querySelector('#toastContainer .toast'), o, 8000);
+    // A foto ampliada e a edição do nome, pelo toque.
+    const fc = await centroDe('#cardStack .place-card:not(.card-fundo) .card-image');
+    await g.page.touchscreen.tap(fc.x, fc.y);
+    await esperarOuExplodir(g.page, () => Lightbox.isOpen() && document.getElementById('lightboxImage').naturalWidth > 0
+      && !document.getElementById('lightboxNome').classList.contains('hidden'), 'a foto ampliada abrir com a pílula do nome');
+    const pc = await centroDe('#lightboxNomeBtn');
+    await g.page.touchscreen.tap(pc.x, pc.y);
+    await esperarOuExplodir(g.page, () => editandoNome(), 'a edição do nome abrir');
+    // CONTROLE: sem trava, o ✓ desabilitado pelo nome VAZIO não pede aviso nenhum.
+    await escrever('');
+    const ok0 = await centroDe('#lightboxNomeOk');
+    const vazio = await g.page.evaluate(() => document.getElementById('lightboxNomeOk').disabled && !acoesTravadas());
+    checa(vazio && await dedoChega(ok0, '#lightboxNomeOk'), `${id}: PRÉ-CONDIÇÃO — o ✓ do nome vazio não está desabilitado sem trava, ou o dedo não chega nele`);
+    await g.page.touchscreen.tap(ok0.x, ok0.y);
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === 0, `${id}: CONTROLE — sem trava, o toque no ✓ do nome vazio pediu o aviso da trava`, `${await avisos()} avisos`);
+    // A trava (a conferência de um 401) com um nome novo no campo.
+    await escrever('Padaria Certa');
+    await g.page.evaluate(() => { escritasConferindo++; aplicarTravaDeAcao(); });
+    await doisQuadros(g.page);
+    const ok1 = await centroDe('#lightboxNomeOk');
+    const travado = await g.page.evaluate(() => document.getElementById('lightboxNomeOk').disabled && acoesTravadas());
+    checa(travado && await dedoChega(ok1, '#lightboxNomeOk'), `${id}: PRÉ-CONDIÇÃO — a trava não desabilitou o ✓, ou o dedo não chega nele`);
+    await g.page.touchscreen.tap(ok1.x, ok1.y);
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === 1, `${id}: DEFEITO — o toque no ✓ "Salvar nome" travado não disse nada`, `${await avisos()} avisos`);
+    await g.page.waitForTimeout(3200);             // o intervalo do aviso (3 s)
+    await semToast('o aviso do ✓ sair');
+    // CONTROLE: o Enter no campo, na MESMA trava, avisa (o par que o toque passa
+    // a seguir). Contado a partir de agora: independe de o toque ter avisado.
+    const antesDoEnter = await avisos();
+    await g.page.focus('#lightboxNomeInput');
+    await g.page.keyboard.press('Enter');
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === antesDoEnter + 1, `${id}: CONTROLE — o Enter no campo, na mesma trava, não avisou (a medida estaria cega)`,
+      `${await avisos() - antesDoEnter} aviso(s) do Enter`);
+    const segue = await g.page.evaluate(() => ({ aberta: Lightbox.isOpen(), editando: editandoNome(),
+      campo: document.getElementById('lightboxNomeInput').value }));
+    checa(segue.aberta && segue.editando && segue.campo === 'Padaria Certa', `${id}: o toque ou o Enter na trava perdeu a edição`, JSON.stringify(segue));
+    await g.page.evaluate(() => { escritasConferindo--; aplicarTravaDeAcao(); });
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
