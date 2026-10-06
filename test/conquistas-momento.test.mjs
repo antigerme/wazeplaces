@@ -538,9 +538,10 @@ function montarAparelhoNovo(historico = null) {
     HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas',
     podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     agendarRedesenhoDoHistorico() {}, atualizarSeloDeConquista: () => { selo.n++; }, conquistasComPortaoAqui: () => false,
+    textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
   const chaves = Object.keys(deps);
-  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['patenteDe', 'avaliarConquistas', 'carregarConquistas',
+  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['copiaEmDia', 'lembrarTextoDaCopia', 'patenteDe', 'avaliarConquistas', 'carregarConquistas',
     'salvarConquistas', 'checarConquistas', 'garantirLinhaDeBaseDasConquistas', 'loadHistory', 'salvarHistorico', 'recordHistory',
     'diasEntreChaves', 'chaveMaisDias', 'getHistoryStats', 'geografiaDoHistorico', 'maiorSequenciaDeDias'].map(fatiar)]
     .join('\n') + '\nreturn { recordHistory, checarConquistas, AppState };';

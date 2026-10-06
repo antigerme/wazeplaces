@@ -14563,14 +14563,66 @@ async function callWithRetry(fn, epoca = epocaDaSessao) {
 // num acumulador à parte, que sobrevive à poda.
 const HISTORY_MAX_DIAS = 400;
 
+// ── A CÓPIA EM MEMÓRIA × O APARELHO (o app aberto em duas abas) ──────────────
+// O histórico, as conquistas e os autores moram em MEMÓRIA depois da primeira
+// leitura, e cada gravação escreve a estrutura INTEIRA. A outra aba solta a
+// cópia dela quando o navegador avisa (o evento `storage`, ver
+// `aoGravarEmOutraAba`) — mas o aviso é uma TAREFA, e duas decisões pousando
+// juntas, uma em cada aba (a recusa automática, o "Rejeitar os N" ou a fila de
+// saída numa, a pessoa decidindo na outra), gravavam uma por cima da outra: o
+// Histórico, a reincidência do autor e a "Mão firme" ficavam com UMA
+// (auditoria de 2026-10-06, R9-2-03).
+//
+// Cada cópia lembra o TEXTO do aparelho de onde saiu (ou que acabou de gravar),
+// e quem a usa confere antes: mudou, outra aba gravou — relê. Com as abas no
+// MESMO processo do navegador (o armazenamento é um só, e o aviso vem depois)
+// isto fecha a corrida: MEDIDO no Chromium com um processo só, a reincidência e
+// a "Mão firme" perdiam uma decisão em 4 de 4 e passaram a 0 de 4. Com as abas
+// em processos SEPARADOS (o padrão do computador) a gravação da outra só chega
+// junto com o aviso, 0,3 a 7 ms depois, e o que pousa nesse meio ainda grava
+// por cima — nenhuma conferência síncrona vê o que não chegou (MEDIDO: 4 de 5
+// no Chromium, 3 de 3 no WebKit). Fechar essa janela exige coordenar a
+// gravação entre as abas, e nem a trava do navegador basta: no WebKit a aba
+// que pega a trava ainda lê o valor velho (20 de 40).
+//
+// É uma leitura do texto e uma comparação, sem JSON: o texto que o navegador
+// devolve é o mesmo enquanto ninguém grava. MEDIDO no teto das estruturas (88 KB
+// de autores, 29 KB de Histórico): 1 a 3 µs pelas duas conferências com a CPU
+// 6× mais lenta no Chromium, 11 a 14 µs no WebKit, contra 20 ms e 3 ms do pouso.
+// A regra do custo por swipe (a tabela da gravação síncrona) segue: só relê o
+// JSON quem achou o aparelho mudado.
+//
+// Cópia sem texto lembrado (montada fora daqui) vale como está.
+const textoDaCopia = new WeakMap();
+function copiaEmDia(copia, chave) {
+    if (!copia) return false;
+    if (!textoDaCopia.has(copia)) return true;
+    let agora;
+    try { agora = localStorage.getItem(chave); } catch (e) { return true; }
+    return agora === textoDaCopia.get(copia);
+}
+// `texto`: o que o aparelho tinha quando a cópia foi lida. Sem ele, relido do
+// aparelho — é o caso de quem ACABOU de gravar: o texto relido, e não o
+// escrito, é o que a próxima leitura devolve.
+function lembrarTextoDaCopia(copia, chave, texto) {
+    if (!copia || typeof copia !== 'object') return;
+    if (texto === undefined) {
+        try { texto = localStorage.getItem(chave); } catch (e) { return; }
+    }
+    textoDaCopia.set(copia, texto);
+}
+
 function loadHistory() {
-    if (AppState.history) return AppState.history;
+    if (copiaEmDia(AppState.history, HISTORY_KEY)) return AppState.history;
+    let texto = null;
+    try { texto = localStorage.getItem(HISTORY_KEY); } catch (e) { texto = null; }
     let h = {};
-    try { h = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}') || {}; } catch (e) { h = {}; }
+    try { h = JSON.parse(texto || '{}') || {}; } catch (e) { h = {}; }
     // Acumulador que sobrevive à poda dos baldes diários. Só inicializa — a
     // soma retroativa do formato antigo saiu junto com os outros resíduos.
     if (!h._total) h._total = { read: 0, rejected: 0 };
     AppState.history = h;
+    lembrarTextoDaCopia(h, HISTORY_KEY, texto);
     if (podarHistorico(h)) salvarHistorico(h);
     return h;
 }
@@ -14590,7 +14642,10 @@ function podarHistorico(h) {
 }
 
 function salvarHistorico(h) {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch (e) {}
+    try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+        lembrarTextoDaCopia(h, HISTORY_KEY);
+    } catch (e) {}
 }
 function historyTodayKey() {
     const d = new Date();
@@ -14673,9 +14728,10 @@ function getHistoryStats() {
 //
 // O navegador avisa a OUTRA aba quando esta grava (evento `storage`, que não
 // dispara na aba que gravou): ela solta a cópia em memória, e a próxima
-// leitura pega o que está no aparelho. Não põe leitura nenhuma a mais no swipe
-// — que é o que a tabela de custo da gravação por swipe protege —: só relê
-// quem foi avisado, e só quando precisar.
+// leitura pega o que está no aparelho. Não põe JSON nenhum a mais no swipe —
+// que é o que a tabela de custo da gravação por swipe protege —: só relê quem
+// foi avisado, e só quando precisar. O aviso é uma TAREFA, e a gravação que
+// chega antes dele é pega pela conferência do texto (`copiaEmDia`, R9-2-03).
 //
 // A SESSÃO que a outra aba tirou do aparelho por último (o `oldValue` do aviso
 // do token), ou `null` quando não se sabe. O "Sair" de lá apaga no servidor a
@@ -15055,9 +15111,12 @@ function avaliarConquistas(ctx, jaTem) {
 }
 
 function carregarConquistas() {
-    if (AppState.conquistas) return AppState.conquistas;
+    // A cópia em memória só vale se a outra aba não gravou (ver `copiaEmDia`).
+    if (copiaEmDia(AppState.conquistas, CONQUISTAS_KEY)) return AppState.conquistas;
+    let texto = null;
+    try { texto = localStorage.getItem(CONQUISTAS_KEY); } catch (e) { texto = null; }
     let g = null;
-    try { g = JSON.parse(localStorage.getItem(CONQUISTAS_KEY) || 'null'); } catch (e) { g = null; }
+    try { g = JSON.parse(texto || 'null'); } catch (e) { g = null; }
     if (!g || typeof g !== 'object') g = {};
     AppState.conquistas = {
         c: (g.c && typeof g.c === 'object') ? g.c : {},   // id → 'YYYY-MM-DD'
@@ -15077,10 +15136,14 @@ function carregarConquistas() {
         novas: Array.isArray(g.novas) ? g.novas.slice(0, 32) : [],
         patenteNova: g.patenteNova === true,
     };
+    lembrarTextoDaCopia(AppState.conquistas, CONQUISTAS_KEY, texto);
     return AppState.conquistas;
 }
 function salvarConquistas() {
-    try { localStorage.setItem(CONQUISTAS_KEY, JSON.stringify(AppState.conquistas)); } catch (e) {}
+    try {
+        localStorage.setItem(CONQUISTAS_KEY, JSON.stringify(AppState.conquistas));
+        lembrarTextoDaCopia(AppState.conquistas, CONQUISTAS_KEY);
+    } catch (e) {}
 }
 // Uma ação CONFIRMADA pelo Waze. Daqui saem a sequência sem desfazer, os
 // gatilhos de evento e a reavaliação.
@@ -16729,19 +16792,26 @@ function diaLocalDe(ms) {
 }
 
 function loadAutores() {
-    if (AppState.autores) return AppState.autores;
+    // A cópia em memória só vale se a outra aba não gravou (ver `copiaEmDia`).
+    if (copiaEmDia(AppState.autores, AUTORES_KEY)) return AppState.autores;
+    let texto = null;
+    try { texto = localStorage.getItem(AUTORES_KEY); } catch (e) { texto = null; }
     let a = null;
-    try { a = JSON.parse(localStorage.getItem(AUTORES_KEY) || 'null'); } catch (e) { a = null; }
+    try { a = JSON.parse(texto || 'null'); } catch (e) { a = null; }
     if (!a || typeof a !== 'object') a = {};
     if (!Array.isArray(a.v)) a.v = [];
     if (!a.r || typeof a.r !== 'object') a.r = {};
     AppState.autores = a;
+    lembrarTextoDaCopia(a, AUTORES_KEY, texto);
     if (podarAutores(a)) salvarAutores(a);
     return a;
 }
 
 function salvarAutores(a) {
-    try { localStorage.setItem(AUTORES_KEY, JSON.stringify(a)); } catch (e) {}
+    try {
+        localStorage.setItem(AUTORES_KEY, JSON.stringify(a));
+        lembrarTextoDaCopia(a, AUTORES_KEY);
+    } catch (e) {}
 }
 
 // Poda por TEMPO e por TETO, nessa ordem: o tempo tira o que não informa mais,

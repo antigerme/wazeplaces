@@ -16,6 +16,13 @@ const FIM = 'function renderAutores() {';
 assert.ok(fonte.includes(INICIO), 'o módulo de autores sumiu do app.js');
 assert.ok(fonte.includes(FIM), 'renderAutores sumiu — o corte do teste precisa ser revisto');
 const trecho = fonte.slice(fonte.indexOf(INICIO), fonte.indexOf(FIM));
+// A cópia em memória × o aparelho (R9-2-03): o `loadAutores` confere o texto do
+// aparelho antes de usar a cópia. As duas funções e o mapa moram junto do
+// histórico, num corte próprio.
+const COPIA_INI = 'const textoDaCopia = new WeakMap();';
+const COPIA_FIM = 'function loadHistory() {';
+assert.ok(fonte.includes(COPIA_INI) && fonte.includes(COPIA_FIM), 'a conferência da cópia em memória sumiu do app.js');
+const trechoDaCopia = fonte.slice(fonte.indexOf(COPIA_INI), fonte.indexOf(COPIA_FIM));
 
 function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
   const guardado = new Map();
@@ -36,7 +43,7 @@ function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
     },
   };
   const nomes = Object.keys(escopo);
-  const corpo = trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
+  const corpo = trechoDaCopia + trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
     + ' esquecerAutor, esquecerAutores, loadAutores, podarAutores, AUTORES_KEY, AUTORES_VISIVEIS,'
     + ' AUTORES_MAX_REINCIDENTES, AUTORES_MAX_VISTOS, AUTORES_MAX_DIAS, AUTOR_LIMIAR_DESTAQUE };';
   const api = new Function(...nomes, corpo)(...nomes.map((n) => escopo[n]));

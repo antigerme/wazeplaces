@@ -1388,9 +1388,10 @@ test('R7-6-05: o "não sei onde" do GESTO vale no pouso — o Histórico não l�
     podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
     historyTodayKey: () => '2026-10-03', ondeAgora: () => '73', contaAgora: () => null,
     agendarRedesenhoDoHistorico: () => {}, garantirLinhaDeBaseDasConquistas: () => {},
+    textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
   const chaves = Object.keys(deps);
-  const { recordHistory } = new Function(...chaves, ['loadHistory', 'recordHistory'].map(fatiarComAsync).join('\n')
+  const { recordHistory } = new Function(...chaves, ['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'recordHistory'].map(fatiarComAsync).join('\n')
     + '\nreturn { recordHistory };')(...chaves.map((k) => deps[k]));
   recordHistory('reject', 1, '2026-10-03', null);
   assert.equal(JSON.parse(guardado.get('waze_places_history'))['2026-10-03'].onde, undefined,
