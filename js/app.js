@@ -4720,7 +4720,9 @@ async function aoTrocarRegiaoNoModal(e) {
     sel.innerHTML = `<option value="" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>`;
     sel.disabled = true;
     sel.dataset.carregando = '1';
-    const r = await API.listCountries(regiao);
+    // A lista da região que CHEGOU fica guardada (R9-6-01): a ida e a volta, e o
+    // "Aplicar" desta região, não pedem de novo (ver `pedirListaDePaises`).
+    const r = await pedirListaDePaises(regiao);
     // Outra carga tomou o seletor no meio (outra troca, a reabertura dos
     // Filtros): esta não escreve nada, e quem solta o "Aplicar" é a de agora.
     if (minha !== cargaDePaises) return;
@@ -4902,14 +4904,41 @@ async function openFiltersModal() {
 // (`AppState.countries`) na hora, com a região ainda a pedida e a mesma sessão:
 // a carga só a guardava junto do perfil, e os Filtros abertos nesse meio
 // pediam outra. A que falha não fica: reabrir os Filtros pede de novo.
+//
+// E a que CHEGOU fica guardada POR REGIÃO (`listasDePaisesGuardadas`) e não é
+// pedida de novo enquanto vale: só dividir a ida no ar não bastava. O perfil
+// refeito depois de falhar na abertura, a troca de região no modal (a ida e a
+// volta, e a lista que ela trouxe, que o "Aplicar" jogava fora), a ida pro país
+// do perfil e a renovação pela extensão pediam de novo a lista que estava na
+// memória — cada um um pedido ao `/api` e uma ida ao Waze pela MESMA lista
+// (MEDIDO no navegador, auditoria da rodada 9, R9-6-01). Países não mudam no
+// meio da sessão: a lista vale até o "Sair" ou outra conta entrar
+// (`esquecerListasDePaises`). A queda da sessão não a apaga: a renovação é da
+// mesma pessoa, e a lista que veio bem não traz o 401 de ninguém.
 const listasDePaisesNoAr = new Map();
+const listasDePaisesGuardadas = new Map();
+// Sobe a cada esquecimento: a ida que estava no ar quando a lista foi esquecida
+// não guarda nada nem serve a quem pede depois.
+let geracaoDasListasDePaises = 0;
+function esquecerListasDePaises() {
+    listasDePaisesGuardadas.clear();
+    geracaoDasListasDePaises++;
+}
 function pedirListaDePaises(regiao = API.getRegion()) {
+    const guardada = listasDePaisesGuardadas.get(regiao);
+    if (guardada) return Promise.resolve({ success: true, countries: guardada });
     const epoca = epocaDaSessao;
-    const chave = epoca + '|' + regiao;
+    const geracao = geracaoDasListasDePaises;
+    const chave = epoca + '|' + geracao + '|' + regiao;
     const noAr = listasDePaisesNoAr.get(chave);
     if (noAr) return noAr;
     const ida = Promise.resolve(API.listCountries(regiao)).then((r) => {
-        if (r && r.success && epoca === epocaDaSessao && API.getRegion() === regiao) AppState.countries = r.countries;
+        if (r && r.success && epoca === epocaDaSessao && geracao === geracaoDasListasDePaises) {
+            // Lista VAZIA não fica: com ela, o seletor diria "nenhum país" pelo
+            // resto da sessão, e quem a pede de novo é o próximo "Filtros".
+            if (Array.isArray(r.countries) && r.countries.length) listasDePaisesGuardadas.set(regiao, r.countries);
+            if (API.getRegion() === regiao) AppState.countries = r.countries;
+        }
         return r;
     }).finally(() => {
         if (listasDePaisesNoAr.get(chave) === ida) listasDePaisesNoAr.delete(chave);
@@ -5047,10 +5076,12 @@ function applyFiltersFromModal() {
     if (lugarMudou && AppState.filters.managedAreaId === areaAplicada) AppState.filters.managedAreaId = '';
     AppState.filters.myArea = $('filterMyArea').checked;
     if (!$('filterCountry').dataset.carregando && $('filterCountry').value) API.setCountry($('filterCountry').value);
-    // Troca de região invalida o cache de países/estados (eram da região anterior).
+    // Troca de região: os países e estados em memória eram da região anterior. A
+    // lista da região nova é a que a troca no modal acabou de trazer (guardada
+    // por região, R9-6-01) — zerada, a reabertura dos Filtros a pedia de novo.
     const newRegion = $('filterRegion').value;
     if (newRegion !== API.getRegion()) {
-        AppState.countries = [];
+        AppState.countries = listasDePaisesGuardadas.get(newRegion) || [];
         AppState.statesByCountry = {};
     }
     API.setRegion(newRegion);
@@ -5901,8 +5932,9 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
         // gravada antes do `await` deixava o par trocado (a região de quem
         // entrou com o país que o "Sair" repôs) — e o país de quem saiu voltava
         // ao aparelho, com o aviso na tela de entrada (auditoria da costura,
-        // 2026-09-26, K12).
-        const r = await API.listCountries(regiao);
+        // 2026-09-26, K12). Pela fonte única da lista: a que já chegou daquela
+        // região não sai de novo (R9-6-01).
+        const r = await pedirListaDePaises(regiao);
         if (epoca !== epocaDaSessao) return;
         // Nem se a pessoa aplicou outro lugar nos Filtros enquanto a lista vinha:
         // a escolha dela vale (achado 10).
@@ -10064,9 +10096,11 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // mostravam os países da NA debaixo da ROW (a lista só é pedida com o cache
     // vazio), e o "Aplicar" tocado sem mexer em nada gravava `row/235`, uma fila
     // vazia (auditoria da rodada 7, R7-6-03). Vale nos três caminhos — este
-    // "Sair", o da outra aba e a recusa do portão —, como o lugar.
+    // "Sair", o da outra aba e a recusa do portão —, como o lugar. E as listas
+    // guardadas por região, que são desta sessão (R9-6-01).
     AppState.countries = [];
     AppState.statesByCountry = {};
+    esquecerListasDePaises();
     removeUndoBanner();
     updateInFlightIndicator();
     updateStats();
@@ -17780,6 +17814,9 @@ function esquecerOutraConta(id) {
     // que ainda estava no ar também fica de fora — da lista e do anel de chamadas,
     // cujos corpos o `dlogApagar` acabou de tirar (ver a função; L12-1).
     esquecerRegistrosDaPagina();
+    // As listas de países guardadas por região valem pra uma sessão de UMA
+    // conta, como no "Sair" (R9-6-01): quem entrou pede as dele.
+    esquecerListasDePaises();
     // A fila na tela, se atravessou a sessão (a renovação silenciosa a manteve),
     // é da conta anterior — dos filtros e das permissões dela: sai, e a de quem
     // entrou é buscada. Nos outros caminhos de entrada a fila já nasceu desta

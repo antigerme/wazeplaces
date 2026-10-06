@@ -110,10 +110,12 @@ function montarRegiao({ resposta }) {
   // e a área volta a "Nenhuma" com o país novo (`aoMudarPaisNaTela`). A troca
   // que não carrega devolve o seletor pela carga da abertura (`popularPaisEstado`),
   // e as duas tiram número do mesmo contador (`cargaDePaises`, R56-6).
-  // A peneira lê os editáveis por servidor (`editaveisLidos`, R7-6-02).
+  // A peneira lê os editáveis por servidor (`editaveisLidos`, R7-6-02). A lista
+  // vem pela fonte única (`pedirListaDePaises`), guardada por região (R9-6-01).
   const nomes = ['aoTrocarRegiaoNoModal', 'populateCountrySelect', 'loadStatesIntoSelect',
-    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela', 'popularPaisEstado', 'editaveisLidos'];
+    'aplicarEsperaDosFiltros', 'aoMudarPaisNaTela', 'popularPaisEstado', 'editaveisLidos', 'pedirListaDePaises'];
   const app = new Function(...chaves, 'let cargaDeEstados = 0;\nlet cargaDePaises = 0;\nconst esperaDosFiltros = { regiao: false, gps: false };\nlet editaveisPorServidor = { conta: null, lidos: {} };\n'
+    + 'let epocaDaSessao = 0;\nconst listasDePaisesNoAr = new Map();\nconst listasDePaisesGuardadas = new Map();\nlet geracaoDasListasDePaises = 0;\n'
     + nomes.map(fatiar).join('\n') + '\nreturn { aoTrocarRegiaoNoModal };')(...chaves.map((k) => deps[k]));
   return { app, el, log, soltar: (r) => soltar(r) };
 }

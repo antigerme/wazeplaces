@@ -684,7 +684,8 @@ test('filtros: trocar a REGIÃO traz os países dela, e o "Aplicar" com lista ca
   // que test/filtros-modal.test.mjs RODA — com a lista chegando e falhando.
   assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/,
     'a troca de região no modal deixou de trazer os países dela');
-  assert.match(fatiar('aoTrocarRegiaoNoModal'), /const r = await API\.listCountries\(regiao\);/,
+  // Pela fonte única da lista (`pedirListaDePaises`): a que já chegou não sai de novo (R9-6-01).
+  assert.match(fatiar('aoTrocarRegiaoNoModal'), /const r = await pedirListaDePaises\(regiao\);/,
     'a troca de região no modal seguia com os países da região anterior');
   const aplicar = fatiar('applyFiltersFromModal');
   assert.match(aplicar, /if \(!\$\('filterState'\)\.dataset\.carregando\) AppState\.filters\.stateId = \$\('filterState'\)\.value;/);
@@ -733,7 +734,7 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
   // O ouvinte da troca de região: a função com nome do F10a, recortada do app.js
   // e rodada com a lista da região nova chegando.
   assert.match(APP_SEM, /\$\('filterRegion'\)\.addEventListener\('change', aoTrocarRegiaoNoModal\);/, 'sumiu o ouvinte da troca de região');
-  const { aoTrocarRegiaoNoModal } = montar(['aoTrocarRegiaoNoModal'], {
+  const { aoTrocarRegiaoNoModal } = montar(['aoTrocarRegiaoNoModal', 'pedirListaDePaises'], {
     document: { getElementById: (id) => els[id] || null }, AppState,
     API: { getRegion: () => 'row', getCountry: () => 30,
       listCountries: async () => ({ success: true, countries: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }] }) },
@@ -742,6 +743,8 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
     // A espera do "Aplicar" e a área que volta a "Nenhuma" (test/filtros-modal).
     esperaDosFiltros: { regiao: false, gps: false }, aplicarEsperaDosFiltros: () => {}, aoMudarPaisNaTela: () => {},
     cargaDePaises: 0,   // o número de cada carga da lista de países (R56-6, test/filtros-aplicar)
+    // A lista pela fonte única, guardada por região (R9-6-01, test/filtros-aplicar).
+    epocaDaSessao: 0, listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
   }, ['aoTrocarRegiaoNoModal']);
   const ouvinte = aoTrocarRegiaoNoModal;
   AppState.profile = { editableCountryIDs: [30] };

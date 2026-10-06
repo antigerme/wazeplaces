@@ -65,6 +65,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     esquecerRegistrosDaPagina: () => log.push('recursos'),   // a lista de recursos e a marca do anel (R8-1-05, L12-1)
     esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
+    esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
@@ -111,7 +112,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   const fila = m.app.carregarFilaDeSaida();
   assert.deepEqual(fila.map((x) => x.venueID), ['v2'], 'a decisão de A ficou pra sair no nome de B');
   for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'camadas', 'toast:toast.outraConta',
-    'recursos', 'painel']) {
+    'recursos', 'painel', 'paises']) {
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
@@ -128,6 +129,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   assert.ok(!c.log.includes('camadas'), 'a MESMA conta voltando fechou o que ela tinha aberto (é dela)');
   assert.ok(!c.log.includes('recursos') && !c.log.includes('painel'),
     'a MESMA conta voltando perdeu a lista de recursos (o relatório dela) ou o painel do Histórico (é dela)');
+  assert.ok(!c.log.includes('paises'), 'a MESMA conta voltando pede de novo as listas de países que já tinha (R9-6-01)');
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {
@@ -343,6 +345,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
     fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     esquecerRegistrosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
+    esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];
