@@ -1099,7 +1099,7 @@ const LIMPEZA_AO_FECHAR = {
     },
 };
 
-function closeModal(id, { viaHistorico = false, peloTeclado = false } = {}) {
+function closeModal(id, { viaHistorico = false, peloTeclado = false, focoComDestino = false } = {}) {
     dfato('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
@@ -1107,9 +1107,10 @@ function closeModal(id, { viaHistorico = false, peloTeclado = false } = {}) {
     if (!viaHistorico) CamadaVoltar.consumir();
     // A limpeza sabe se o fechamento veio do TECLADO (o Esc, o Enter no botão
     // que fecha) e devolve `true` quando ela mesma deu destino ao foco (o fim do
-    // treino, R8-7-07): aí ele não volta a quem abriu.
-    let focoComDestino = false;
-    try { focoComDestino = LIMPEZA_AO_FECHAR[id]?.({ peloTeclado }) === true; } catch (e) { /* limpeza nunca derruba o fechamento */ }
+    // treino, R8-7-07): aí ele não volta a quem abriu. Quem FECHA também pode
+    // dizer isso (`focoComDestino`): o "Quero treinar antes" pelo teclado, que
+    // prometeu o foco ao ✕ do card de treino (R9-7-03).
+    try { if (LIMPEZA_AO_FECHAR[id]?.({ peloTeclado }) === true) focoComDestino = true; } catch (e) { /* limpeza nunca derruba o fechamento */ }
     if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
     const alvo = lastFocusedBeforeModal;
     lastFocusedBeforeModal = null;
@@ -1247,16 +1248,23 @@ function setupAppListeners() {
     // sessão (a renovação silenciosa pela extensão), com o "Marcar todos" ou a
     // aprovação de uma foto no ar: diz o que esperar e o diálogo fica
     // (`recusarTreino`, R8-7-09, R9-7-07). E o "Quero treinar antes" pelo
-    // TECLADO: o fechamento devolve o foco ao ✕ do card REAL, que o
-    // `Treino.entrar` troca logo em seguida pelo de treino — o foco caía no
-    // <body> (R8-7-08, MEDIDO nos dois motores; auditoria de 2026-10-03). Vai ao
-    // ✕ do card de treino, como no "Sair" da faixa (`prometerFocoAoCardQueVem`),
-    // prometido ANTES de fechar: depois do fechamento, o evento já não diz quem
-    // tinha o foco.
+    // TECLADO: o foco vai ao ✕ do card de treino, como no "Sair" da faixa
+    // (`prometerFocoAoCardQueVem`), prometido ANTES de fechar: depois do
+    // fechamento, o evento já não diz quem tinha o foco (R8-7-08). E o
+    // fechamento NÃO o devolve a quem abriu (`focoComDestino`): no "Como
+    // funciona" que abre SOZINHO no 1º card, quem abriu é o <body>, a reserva é
+    // o ⓘ do topo — um controle VIVO, e o foco prometido desistia dele. O
+    // teclado caía no ⓘ, e o Enter seguinte reabria a Ajuda (R9-7-03, MEDIDO
+    // nos dois motores; auditoria de 2026-10-06). No adiado, o fechamento o
+    // devolvia ao ✕ do card real, que saía com o `Treino.entrar`: só ali dava
+    // certo. Já DENTRO do treino (o "Ver de novo" da Ajuda), o `entrar` não troca
+    // o card: o fechamento devolve o foco a quem abriu, como sempre — sem isso
+    // ele ficava no botão escondido.
     $('comoFuncionaTreinar')?.addEventListener('click', (ev) => {
         if (recusarTreino()) return;
+        const focoNoCardDeTreino = veioDoTeclado(ev) && !Treino.ativo;
         prometerFocoAoCardQueVem(ev);
-        closeModal('comoFuncionaModal');
+        closeModal('comoFuncionaModal', { focoComDestino: focoNoCardDeTreino });
         Treino.entrar();
     });
     $('abrirTreino')?.addEventListener('click', () => {
