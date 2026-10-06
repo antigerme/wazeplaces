@@ -224,14 +224,17 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     // A tela: só as regiões vivas, quando o teste as quer (`exclusaoQueAnuncia`).
     document: { getElementById: () => null },
+    // Nenhuma camada por cima do card além da foto ampliada (o desfecho com a
+    // foto fechada, R9-3-05: `anunciarDesfechoDaFoto`, de verdade).
+    semCamadaAberta: () => !L.isOpen(),
     ...r6Deps(log),
     // `extra`: troca qualquer dependência acima (R5-3-07).
     ...extra,
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto',
-    'anuncioDoCardAoFechar', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta',
-    ...R6_NOMES];
+    'anuncioDoCardAoFechar', 'anunciarDesfechoDaFoto', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao',
+    'contarIdasSemResposta', ...R6_NOMES];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -652,13 +655,18 @@ test('L1 a conferência do 401 TRAVA as ações, como a janela do Desfazer', () 
 function lightboxQueAbre() {
   const el = () => ({ classList: { add() {}, remove() {} }, focus() {} });
   const doc = { getElementById: () => el(), body: { style: {} } };
-  const corpo = ['open', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual'].map(metodo).join(',\n')
+  const corpo = ['open', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual', '_anunciarFoto'].map(metodo).join(',\n')
     .replace(/placeResolvidoPorAprovacao/g, '__res.v');
-  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', '__res', `return {
+  // A região viva da camada (o `_anunciarFoto` de verdade escreve nela, R9-3-05).
+  const anuncios = [];
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', '__res',
+    't', 'anunciarNoLightbox', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
     ${corpo}
-  };`)(doc, { empilhar() {} }, () => {}, () => true, { v: null });
+  };`)(doc, { empilhar() {} }, () => {}, () => true, { v: null },
+    (k, v) => (v ? `${k}${JSON.stringify(v)}` : k), (txt) => anuncios.push(txt));
+  L.anuncios = anuncios;
   const devolverFoto = new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard',
     fatiar('devolverFoto') + '\nreturn devolverFoto;')(L, { currentPlace: null }, () => {}, (redesenhar) => redesenhar());
   return { L, devolverFoto };
@@ -686,6 +694,49 @@ test('C10 excluir, fechar, REABRIR e desfazer: a foto volta com o ✨ no lugar c
     assert.deepEqual(P.imageUrls, [a, b, c], `${nome}: o pedido não recebeu a foto de volta`);
     assert.notEqual(L.urls, P.imageUrls, `${nome}: o lightbox voltou a dividir a lista com o pedido`);
   }
+});
+
+// ── R9-3-05 (b): a foto que VOLTA pelo Desfazer é dita, como toda troca de foto ──
+// (auditoria de 2026-10-06). O Desfazer de uma exclusão com a foto aberta a
+// recoloca (`recolocarFoto`) e ela passa a ser a da TELA, e nada era dito: quem
+// usa leitor de tela ouvia só o banner saindo, enquanto o Desfazer do ✕ do card
+// diz o pedido que voltou (MEDIDO nos dois motores, r41). A troca é dita com o texto
+// que JÁ existe (`_anunciarFoto`: a posição e o selo); "desfeito" seria frase
+// nova e fica de fora. O `open`, o `removerFoto`, o `recolocarFoto`, o
+// `_anunciarFoto` e o `devolverFoto` de verdade.
+test('R9-3-05 o Desfazer de uma exclusão com a foto aberta DIZ a foto que voltou — sem troca na tela, nada', () => {
+  const a = FOTO('foto-a'), b = FOTO('foto-b'), c = FOTO('uNP-c');
+  const novo = () => ({ venueID: 'vNP', updateRequestID: 'uNP', purType: 'NEW_PHOTO', approvedImageIds: ['foto-a', 'foto-b'], imageUrls: [a, b, c] });
+  const m = lightboxQueAbre();
+  const P = novo();
+  m.L.open(P.imageUrls, 0, 2, 'x', false, P);
+  m.L.aberto = true;
+  m.L.removerFoto('foto-a', P);                     // excluída com a janela aberta: a tela mostra b
+  m.L.anuncios.length = 0;
+  m.devolverFoto({ id: 'foto-a', place: P, idx: 0, url: a });   // o Desfazer
+  assert.deepEqual([m.L.idx, m.L.urls[m.L.idx]], [0, a], 'PRÉ-CONDIÇÃO: a foto que voltou não passou a ser a da tela');
+  assert.deepEqual(m.L.anuncios, ['lightbox.anuncio.foto{"i":1,"n":3}'],
+    'DEFEITO: a foto excluída voltou à tela pelo Desfazer e nada foi dito ao leitor de tela');
+  // CONTROLE: com a foto JÁ fechada (o Desfazer pela tecla z, na tela do card), a
+  // camada não fala — quem diz é o card, redesenhado.
+  const f = lightboxQueAbre();
+  const Q = novo();
+  f.L.open(Q.imageUrls, 0, 2, 'x', false, Q);
+  f.L.aberto = true;
+  f.L.removerFoto('foto-a', Q);
+  f.L.aberto = false;
+  f.L.anuncios.length = 0;
+  f.devolverFoto({ id: 'foto-a', place: Q, idx: 0, url: a });
+  assert.deepEqual(f.L.anuncios, [], 'CONTROLE: a camada FECHADA anunciou a foto que voltou');
+  // CONTROLE: a foto que nunca saiu da tela (a falha SEM o Desfazer: ela só sai
+  // quando o Waze confirma) não é troca nenhuma, e nada é dito.
+  const n = lightboxQueAbre();
+  const R = novo();
+  n.L.open(R.imageUrls, 1, 2, 'x', false, R);
+  n.L.aberto = true;
+  n.L.anuncios.length = 0;
+  n.devolverFoto({ id: 'foto-b', place: R, idx: 1, url: b });
+  assert.deepEqual(n.L.anuncios, [], 'CONTROLE: a foto que não saiu da tela foi anunciada como uma troca');
 });
 
 // ── L4: editando o nome, o passo pra trás só sai da EDIÇÃO ───────────────────
@@ -1547,10 +1598,12 @@ test('R5-3-04 excluir: "já excluída" depois de uma ida SEM resposta é a exclu
 // MEDIDO (auditoria de 2026-09-30): excluir sem o Desfazer e fechar com a
 // escrita no ar — o `.then` redesenhava o card e o foco, na foto do card desde o
 // fechar (L12), caía no <body>. E o irmão do mesmo local que virou o card da
-// frente (o pedido decidido no meio) é redesenhado igual.
+// frente (o pedido decidido no meio) é redesenhado igual. Os dois redesenhos são
+// do MESMO pedido: o foco num ✕ ↑ ✓ fica no mesmo botão (`mesmoBotao`, R9-3-04,
+// medido em test/lightbox-foco-card), e a guarda anota se ele veio.
 test('R5-3-07 excluir sem o Desfazer: o card redesenhado quando a exclusão pousa passa pelo foco do card — o dele e o do irmão', async () => {
   const ordem = [];
-  const extra = { mantendoFocoNoCard: (redesenhar) => { ordem.push('guarda'); redesenhar(); },
+  const extra = { mantendoFocoNoCard: (redesenhar, opcoes = {}) => { ordem.push(opcoes.mesmoBotao ? 'guarda:mesmoBotao' : 'guarda'); redesenhar(); },
     showCurrentPlace: () => ordem.push('redesenhou'), aplicarNosIrmaos: () => {} };
   const m = montarEscritas({ resposta: { success: true }, extra });
   m.L.place.approvedImageIds = ['velha'];
@@ -1562,14 +1615,16 @@ test('R5-3-07 excluir sem o Desfazer: o card redesenhado quando a exclusão pous
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
   assert.ok(m.log.includes('api:excluir:row'), 'PRÉ-CONDIÇÃO: a exclusão não saiu');
-  assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'a exclusão pousada redesenha o card por fora do foco do card (caminho 2)');
+  assert.deepEqual(ordem, ['guarda:mesmoBotao', 'redesenhou'],
+    'a exclusão pousada redesenha o card por fora do foco do card (caminho 2), ou sem o `mesmoBotao` (o ✕ focado vai pra foto, R9-3-04)');
   // O irmão do mesmo local na frente: redesenhado pelo mesmo caminho.
   ordem.length = 0;
   const i = montarL1({ respostas: [{ success: true }], viva: true,
     extra: { mantendoFocoNoCard: extra.mantendoFocoNoCard, showCurrentPlace: extra.showCurrentPlace } });
   i.AppState.currentPlace = i.irmao;
   assert.equal(await i.app.enviarExclusao({ id: 'a1', place: i.P, idx: 0, url: FOTO('a1') }), true);
-  assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'o irmão da frente é redesenhado por fora do foco do card');
+  assert.deepEqual(ordem, ['guarda:mesmoBotao', 'redesenhou'],
+    'o irmão da frente é redesenhado por fora do foco do card, ou sem o `mesmoBotao` (R9-3-04)');
 });
 
 // ── R5-2-03: a aprovação que POUSA depois de a sessão cair (o V6b da aprovação) ──
@@ -2045,13 +2100,20 @@ test('R6-3-08 sem o Desfazer, aprovar e excluir que valeram são DITOS; o que fa
 });
 
 // O `confirmarRenomear` de verdade, com a edição aberta e o resto de mentira.
-function confirmarComCampo({ autenticado = true, editando = true, travado = false, semJanela = false, gravou = true } = {}) {
+// O desfecho sem o Desfazer passa pelo `anunciarDesfechoDaFoto` de verdade, e as
+// duas regiões vivas ficam no `log` (R9-3-05): `fotoAberta` é a foto DESTE
+// pedido na tela quando a resposta chega (a pessoa pode tê-la fechado antes),
+// `frente` o pedido do card da frente e `camada` outra camada por cima do card.
+function confirmarComCampo({ autenticado = true, editando = true, travado = false, semJanela = false, gravou = true,
+  fotoAberta = true, frente = null, camada = false } = {}) {
   const log = [];
   const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Nome Velho' };
+  const Lightbox = { place, aberta: fotoAberta, isOpen() { return this.aberta; } };
   const deps = {
-    Treino: { ativo: false }, podeRenomearAqui: () => autenticado, AppState: { authenticated: autenticado, preferences: { undoEnabled: !semJanela } },
+    Treino: { ativo: false }, podeRenomearAqui: () => autenticado,
+    AppState: { authenticated: autenticado, preferences: { undoEnabled: !semJanela }, currentPlace: frente || place },
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
-    Lightbox: { place }, acoesTravadas: () => travado || !autenticado, avisoDaTrava: () => 'toast.esperaSessao',
+    Lightbox, acoesTravadas: () => travado || !autenticado, avisoDaTrava: () => 'toast.esperaSessao',
     renomeacaoNoAr: () => false, editandoNome: () => editando,
     showToast: (m) => log.push('toast:' + m), t: (k, v) => (v ? `${k}${JSON.stringify(v)}` : k), sairDaEdicaoNome: () => log.push('saiu'),
     fecharEdicaoNome: () => log.push('fechou'), aplicarNomeNaTela: (p, n) => log.push('nome:' + n),
@@ -2060,10 +2122,12 @@ function confirmarComCampo({ autenticado = true, editando = true, travado = fals
     renomeacaoPendente: null, aprovacaoPendente: null, exclusaoPendente: null,
     setTimeout: () => 1, clearTimeout() {}, UNDO_WINDOW_MS: 3000, aplicarTravaDeAcao() {}, removeUndoBanner() {},
     registrarDesfazer() {}, mostrarDesfazer: () => log.push('banner'), manterFocoNoLightbox() {},
-    anunciarNoLightbox: (txt, p) => log.push('anuncio:' + txt),
+    anunciarNoLightbox: (txt, p) => log.push('anuncio:' + txt), anunciarNoCard: (txt) => log.push('anuncioCard:' + txt),
+    semCamadaAberta: () => !Lightbox.isOpen() && !camada,
   };
-  const confirmar = new Function(...Object.keys(deps), fatiar('confirmarRenomear') + '\nreturn confirmarRenomear;')(...Object.values(deps));
-  return { confirmar, log };
+  const confirmar = new Function(...Object.keys(deps),
+    fatiar('confirmarRenomear') + '\n' + fatiar('anunciarDesfechoDaFoto') + '\nreturn confirmarRenomear;')(...Object.values(deps));
+  return { confirmar, log, Lightbox };
 }
 
 test('R6-3-08 renomear sem o Desfazer: o nome que pousou é DITO; o que não pousou, não', async () => {
@@ -2078,6 +2142,42 @@ test('R6-3-08 renomear sem o Desfazer: o nome que pousou é DITO; o que não pou
   // O enviar devolve se gravou (o anúncio depende disso).
   const env = fatiar('enviarRenomeacao');
   assert.match(env, /contarConquista\('nomes'\);\s*return true;/, 'o envio que gravou não diz que gravou');
+});
+
+// ── R9-3-05 (a): o nome que pousa com a foto JÁ fechada é dito pela região do card ──
+// (auditoria de 2026-10-06). Sem o Desfazer, quem corrige o nome e fecha a foto
+// antes da resposta seguia no card do MESMO pedido: a região da camada não fala
+// (`anunciarNoLightbox` só com a foto deste pedido aberta) e o card não diz
+// "Novo pedido" de novo — o leitor de tela não ouvia que o nome valeu (MEDIDO
+// nos dois motores, r40 B). É dito pela região do CARD, como o R7-3-04.
+test('R9-3-05 renomear sem o Desfazer e fechar a foto antes da resposta: o nome que pousou é DITO pela região do card', async () => {
+  const m = confirmarComCampo({ semJanela: true });
+  m.confirmar();
+  m.Lightbox.aberta = false;                        // fechou a foto com o nome no ar
+  await umTique();
+  assert.ok(m.log.includes('ENVIOU'), 'PRÉ-CONDIÇÃO: o nome não saiu');
+  assert.ok(m.log.includes('anuncioCard:lightbox.anuncio.renomeado{"nome":"Nome Novo"}'),
+    `DEFEITO: o nome pousou com a foto fechada e nada foi dito ao leitor de tela (${m.log.filter((l) => l.startsWith('anuncio')).join(', ') || 'nada'})`);
+  assert.ok(!m.log.some((l) => l.startsWith('anuncio:')), 'a região da camada FECHADA falou');
+  // CONTROLES: o que NÃO pousou não é dito; com OUTRO local na frente (a pessoa
+  // decidiu o card e seguiu), o desfecho não é do que se vê; com outra camada por
+  // cima do card (um modal, o mapa ampliado), também não.
+  const outro = { venueID: 'v9', updateRequestID: 'u9', name: 'Outro Local' };
+  for (const [nome, opcoes] of [['não pousou', { gravou: false }], ['outro local na frente', { frente: outro }],
+    ['outra camada por cima', { camada: true }]]) {
+    const c = confirmarComCampo({ semJanela: true, ...opcoes });
+    c.confirmar();
+    c.Lightbox.aberta = false;
+    await umTique();
+    assert.ok(!c.log.some((l) => l.startsWith('anuncio')), `CONTROLE (${nome}): o desfecho foi dito — ${c.log.join(', ')}`);
+  }
+  // CONTROLE: o IRMÃO do mesmo local na frente recebe o mesmo nome (`aplicarNosIrmaos`): é dito.
+  const irmao = confirmarComCampo({ semJanela: true, frente: { venueID: 'v1', updateRequestID: 'u2', name: 'Nome Velho' } });
+  irmao.confirmar();
+  irmao.Lightbox.aberta = false;
+  await umTique();
+  assert.ok(irmao.log.includes('anuncioCard:lightbox.anuncio.renomeado{"nome":"Nome Novo"}'),
+    'com o irmão do mesmo local na frente (o nome dele também mudou), o desfecho não foi dito');
 });
 
 // ── R6-3-09: o texto alternativo das fotos e a pílula dizem o nome NOVO ────────
@@ -2262,14 +2362,18 @@ test('R7-3-02 o perfil que chega com a foto aberta não traz a dica de zoom de v
 // `aoFechar(m)`: o que o FECHAMENTO da camada faz com o card — a aprovação que
 // pousou anda a fila (`avancarSeAprovado`) e o card seguinte ou o fim da fila
 // escrevem na região do card, como o `renderCurrentCard` e o `showNoPlaces`.
+// `outraCamada.aberta`: um modal (ou o mapa ampliado) por cima do card (R9-3-05).
 function exclusaoQueAnuncia(fotos, { fechadaAntes = false, dito = '', aoFechar = null } = {}) {
   const regioes = { lightboxAnuncio: { textContent: '' }, cardLiveRegion: { textContent: dito } };
   const doc = { getElementById: (id) => regioes[id] || null };
   const porTras = {};
+  const outraCamada = { aberta: false };
   const m = montarEscritas({ resposta: { success: true }, extra: {
     aplicarNosIrmaos: () => {}, document: doc,
     anunciarNoLightbox: (...a) => porTras.lb(...a), anunciarNoCard: (...a) => porTras.card(...a),
+    semCamadaAberta: () => !porTras.L.isOpen() && !outraCamada.aberta,
   } });
+  porTras.L = m.L;
   porTras.lb = new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
   porTras.card = new Function('document', fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc);
   Object.assign(m.A, { approvedImageIds: fotos.slice(), lat: -23, lon: -46, imageUrls: fotos.map(FOTO) });
@@ -2277,7 +2381,7 @@ function exclusaoQueAnuncia(fotos, { fechadaAntes = false, dito = '', aoFechar =
   if (aoFechar) {
     m.L.close = function () { this.aberto = false; aoFechar(m, regioes); };
   }
-  return { ...m, regioes, fecharAntes: fechadaAntes };
+  return { ...m, regioes, outraCamada, fecharAntes: fechadaAntes };
 }
 
 test('R7-3-04 sem o Desfazer, a exclusão da ÚLTIMA foto (que fecha a camada) é dita pela região do CARD', async () => {
@@ -2295,14 +2399,56 @@ test('R7-3-04 sem o Desfazer, a exclusão da ÚLTIMA foto (que fecha a camada) �
   assert.equal(c.L.aberto, true, 'PRÉ-CONDIÇÃO: com duas fotos a camada fechou');
   assert.equal(c.regioes.lightboxAnuncio.textContent, 'undo.photoDeleted', 'CONTROLE: a camada aberta não disse');
   assert.equal(c.regioes.cardLiveRegion.textContent, '', 'com a camada aberta, o card também falou (dito duas vezes)');
-  // CONTROLE: a pessoa FECHOU a foto antes de a resposta chegar — o desfecho que
-  // chega depois do gesto não é dito (o R6-3-08: só com a foto deste pedido aberta).
+  // A pessoa FECHOU a foto antes de a resposta chegar: a camada fechada não fala,
+  // e o desfecho é dito pela região do card também (R9-3-05, logo abaixo).
   const f = exclusaoQueAnuncia(['so-ela']);
   f.app.pedirExclusaoDaFoto();
   f.L.aberto = false;
   await umTique(); await umTique();
-  assert.deepEqual([f.regioes.cardLiveRegion.textContent, f.regioes.lightboxAnuncio.textContent], ['', ''],
-    'CONTROLE: com a foto fechada pela pessoa antes da resposta, o desfecho foi dito');
+  assert.deepEqual([f.regioes.cardLiveRegion.textContent, f.regioes.lightboxAnuncio.textContent], ['undo.photoDeleted', ''],
+    'com a foto fechada pela pessoa antes da resposta, o desfecho não foi dito pela região do card (R9-3-05)');
+});
+
+// ── R9-3-05 (a): a exclusão que pousa com a foto JÁ fechada é dita pela região do card ──
+// (auditoria de 2026-10-06). Sem o Desfazer, excluir uma foto e fechar a foto
+// ampliada antes da resposta: o card do MESMO pedido é redesenhado sem a foto e
+// não diz "Novo pedido" de novo (`pedidoAnunciado`), e a região da camada só fala
+// com a foto deste pedido aberta — o leitor de tela não ouvia nada (MEDIDO nos
+// dois motores, r40 A: `vivas: []`, com a foto fora do card). É dito pela região
+// do CARD (`anunciarDesfechoDaFoto`), como o R7-3-04, com o card deste local na
+// frente e nenhuma camada por cima.
+test('R9-3-05 excluir sem o Desfazer e fechar a foto antes da resposta: "Foto excluída" é DITO pela região do card', async () => {
+  const m = exclusaoQueAnuncia(['primeira', 'segunda']);
+  m.app.pedirExclusaoDaFoto();
+  m.L.aberto = false;                               // fechou com a exclusão no ar
+  await umTique(); await umTique();
+  assert.deepEqual(m.A.imageUrls, [FOTO('segunda')], 'PRÉ-CONDIÇÃO: a exclusão não pousou no pedido');
+  assert.equal(m.regioes.cardLiveRegion.textContent, 'undo.photoDeleted',
+    'DEFEITO: a foto saiu do card com a foto ampliada fechada e nada foi dito ao leitor de tela');
+  assert.equal(m.regioes.lightboxAnuncio.textContent, '', 'a camada FECHADA falou');
+  // O IRMÃO do mesmo local na frente (o pedido foi decidido no meio): ele também
+  // perde a foto (`aplicarNosIrmaos`), e o desfecho é do que se vê.
+  const i = exclusaoQueAnuncia(['primeira', 'segunda']);
+  i.app.pedirExclusaoDaFoto();
+  i.L.aberto = false;
+  i.AppState.currentPlace = { venueID: i.A.venueID, updateRequestID: 'ur-irmao' };
+  await umTique(); await umTique();
+  assert.equal(i.regioes.cardLiveRegion.textContent, 'undo.photoDeleted', 'com o irmão do mesmo local na frente, o desfecho não foi dito');
+  // CONTROLES: OUTRO local na frente; outra camada por cima do card; e a foto de
+  // OUTRO pedido aberta — o desfecho não é do que se vê, e nada é dito.
+  const casos = [
+    ['outro local na frente', (c) => { c.L.aberto = false; c.AppState.currentPlace = { venueID: 'v-outro', updateRequestID: 'u-outro' }; }],
+    ['um modal por cima do card', (c) => { c.L.aberto = false; c.outraCamada.aberta = true; }],
+    ['a foto de OUTRO pedido aberta', (c) => { c.L.place = pedidoDeFoto('ur-outro'); }],
+  ];
+  for (const [nome, depois] of casos) {
+    const c = exclusaoQueAnuncia(['primeira', 'segunda']);
+    c.app.pedirExclusaoDaFoto();
+    depois(c);
+    await umTique(); await umTique();
+    assert.deepEqual([c.regioes.cardLiveRegion.textContent, c.regioes.lightboxAnuncio.textContent], ['', ''],
+      `CONTROLE (${nome}): o desfecho foi dito`);
+  }
 });
 
 // ── R8-3-07: "Foto excluída" não APAGA o card que o fechamento trouxe ─────────

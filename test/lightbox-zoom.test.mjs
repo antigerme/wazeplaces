@@ -24,7 +24,17 @@ function metodoDoLightbox(nome) {
   return APP.slice(ini, fim).trim();
 }
 
-function lightbox() {
+// Uma constante NUMÉRICA de topo do app.js, como ele a declara.
+function constante(nome) {
+  const m = new RegExp('^const ' + nome + ' = (\\d+);', 'm').exec(APP);
+  assert.ok(m, `${nome} sumiu`);
+  return Number(m[1]);
+}
+
+// `W`×`H`: a caixa da <img> SEM a transformação (o `offsetWidth`/`offsetHeight`
+// que a régua de "ampliada" lê, R9-3-01). Por padrão a foto de 1000 px de que
+// os testes de cá falam ("10 px numa foto de 1000").
+function lightbox({ W = 1000, H = 600 } = {}) {
   const ini = APP.indexOf('    zoomTo(scale, cx, cy) {');
   assert.ok(ini > 0, 'zoomTo sumiu');
   let prof = 0, fim = -1;
@@ -33,19 +43,22 @@ function lightbox() {
     else if (APP[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
   }
   const zoomTo = APP.slice(ini, fim).trim();
-  // Layout da foto: centro (200, 400), 300×200. O retângulo VISUAL inclui o
+  // Layout da foto: centro (200, 400), W×H. O retângulo VISUAL inclui o
   // translate e o scale (origem no centro), como o getBoundingClientRect.
-  const C = { x: 200, y: 400 }, W = 300, H = 200;
+  const C = { x: 200, y: 400 };
   const lb = { scale: 1, tx: 0, ty: 0, _applyTransform() {} };
-  const img = { getBoundingClientRect: () => ({ left: C.x + lb.tx - (W * lb.scale) / 2, top: C.y + lb.ty - (H * lb.scale) / 2,
-    width: W * lb.scale, height: H * lb.scale }) };
+  const img = { offsetWidth: W, offsetHeight: H,
+    getBoundingClientRect: () => ({ left: C.x + lb.tx - (W * lb.scale) / 2, top: C.y + lb.ty - (H * lb.scale) / 2,
+      width: W * lb.scale, height: H * lb.scale }) };
   const document = { getElementById: () => img };
   lb.zoomTo = new Function('document', 'return function ' + zoomTo.replace(/^zoomTo/, 'zoomTo'))(document);
   // A régua de "ampliada de verdade" (R8-3-01), que o `zoomTo` também usa pra
   // decidir quando o afastar volta a 1×, e o `panBy`, que só anda ampliada.
   for (const nome of ['ampliada', 'panBy', 'resetZoom']) {
-    lb[nome] = new Function('return function ' + metodoDoLightbox(nome))();
+    lb[nome] = new Function('document', 'ZOOM_VISIVEL_PX', 'return function ' + metodoDoLightbox(nome))(
+      document, constante('ZOOM_VISIVEL_PX'));
   }
+  lb.img = img;
   // Onde um ponto da foto (em coordenadas da foto, centradas) aparece na tela.
   lb.naTela = (u) => ({ x: C.x + lb.tx + lb.scale * u.x, y: C.y + lb.ty + lb.scale * u.y });
   lb.naFoto = (p) => ({ x: (p.x - C.x - lb.tx) / lb.scale, y: (p.y - C.y - lb.ty) / lb.scale });
@@ -349,8 +362,9 @@ test('R8-3-01 o afastar usa a MESMA régua: nenhum zoom que ENCOLHE para entre o
 
 // Os GESTOS da foto: o `setupLightbox` de VERDADE, com a camada e a <img> de
 // mentira que guardam os ouvintes, o relógio parado e o zoom de verdade.
-function gestosDaFoto(escala) {
-  const L = lightbox();
+// `tamanho`: a caixa da foto na tela (ver `lightbox`).
+function gestosDaFoto(escala, tamanho) {
+  const L = lightbox(tamanho);
   L.zoomTo(escala, 250, 420);
   const log = [];
   L.next = () => log.push('next');
@@ -406,6 +420,97 @@ test('R8-3-01 os GESTOS num fio de zoom invisível: o arraste troca de foto e fe
   assert.ok(Math.abs(c.L.tx - (cx0 - 100)) < 1e-9, 'CONTROLE: ampliada, o arraste não andou a foto');
   c.toqueDuplo(260, 380);
   assert.equal(c.L.scale, 1, 'CONTROLE: ampliada, o duplo toque não voltou a 1×');
+});
+
+// ── R9-3-01: a régua é em PIXELS NA TELA, não em fração da escala ─────────────
+// (auditoria de 2026-10-06). Os 0,1% do R8-3-01 cobriam só o PRIMEIRO evento da
+// roda fina: UM evento de roda de −1 px (o menor que o WebKit entrega) dava
+// 1,00182 — a foto de 800 px com 801,5 na tela —, 12 eventos de −0,4 px davam
+// 1,00879 (+7 px) e a pinça de toque com 0,5 px de tremor (dedos a 200 px),
+// 1,0025 (412 → 413 px). Invisível, e a → ANDAVA a foto, o ↓ não fechava, o
+// arraste não trocava e o duplo toque não ampliava (MEDIDO nos dois motores,
+// r32 e r32b da auditoria). Menos de `ZOOM_VISIVEL_PX` a mais no MAIOR lado da
+// foto é 1×; o tamanho é o da caixa da <img> sem a transformação.
+const RODA = (px) => Math.pow(1.2, px / 100);   // o fator de UM evento de roda de −px, a partir de 1×
+const FAIXA = [
+  ['um evento de roda de −1 px (o menor do WebKit)', { W: 800, H: 600 }, [RODA(1)]],
+  ['12 eventos de roda de −0,4 px', { W: 800, H: 600 }, Array(12).fill(RODA(0.4))],
+  ['a pinça com 0,5 px de tremor (dedos a 200 px)', { W: 412, H: 309 }, [200.5 / 200]],
+  ['a pinça com 2 px (dedos a 200 px)', { W: 412, H: 309 }, [202 / 200]],
+];
+
+test('R9-3-01 o zoom que não se VÊ é 1×: um evento de roda de −1 px, 12 de −0,4 px e a pinça com tremor — a régua é em pixels da foto', () => {
+  for (const [nome, tam, fatores] of FAIXA) {
+    const lb = lightbox(tam);
+    for (const f of fatores) lb.zoomTo(lb.scale * f, 250, 420);
+    const aMais = (lb.scale - 1) * Math.max(tam.W, tam.H);
+    // O caso passa da régua de ANTES (0,1%): sem isso ele não distingue nada.
+    assert.ok(lb.scale > 1.001, `PRÉ-CONDIÇÃO (${nome}): a escala ${lb.scale} não passa dos 0,1% — o caso não mede nada`);
+    assert.equal(lb.ampliada(), false,
+      `DEFEITO (${nome}): a escala ${lb.scale.toFixed(5)}, ${aMais.toFixed(1)} px a mais numa foto de ${tam.W}, conta como ampliada — as setas andam a foto e o ↓ não fecha`);
+    const t0 = [lb.tx, lb.ty];
+    lb.panBy(-80, 0);
+    assert.deepEqual([lb.tx, lb.ty], t0, `DEFEITO (${nome}): o panBy andou a foto num zoom que não se vê`);
+  }
+});
+
+test('R9-3-01 CONTROLES: o zoom que se vê é ampliada, a régua é da FOTO (o maior lado), afastar abaixo dela volta a 1× exato, e sem foto vale a fração de antes', () => {
+  const limiar = constante('ZOOM_VISIVEL_PX');
+  // A roda fina SEGUE ampliando a partir de 1× (o R7-3-03) e, passada a régua, conta como ampliada.
+  const fina = lightbox({ W: 800, H: 600 });
+  for (let i = 0; i < 40; i++) fina.zoomTo(fina.scale * RODA(0.4), 250, 420);
+  assert.ok(fina.ampliada(), `40 eventos de −0,4 px (+${((fina.scale - 1) * 800).toFixed(1)} px numa foto de 800) não contam como ampliada`);
+  // O MESMO 1,01 é 1× numa foto de 412 (4 px a mais) e ampliada numa de 1000 (10 px).
+  const pequena = lightbox({ W: 412, H: 309 });
+  pequena.zoomTo(1.01, 250, 420);
+  const grande = lightbox({ W: 1000, H: 600 });
+  grande.zoomTo(1.01, 250, 420);
+  assert.deepEqual([pequena.ampliada(), grande.ampliada()], [false, true], 'a régua não olha o tamanho da foto na tela');
+  // O MAIOR lado: a foto em pé (9:16) se vê pela altura.
+  const emPe = lightbox({ W: 300, H: 533 });
+  emPe.zoomTo(1.02, 250, 420);
+  assert.equal(emPe.ampliada(), true, 'a foto em pé com 10,7 px a mais na ALTURA não conta como ampliada (a régua olhou só a largura)');
+  // Afastar até abaixo da régua volta a 1× EXATO, recentrada (o R6-3-05 com a régua nova); acima dela, fica.
+  for (const alvo of [1 + (limiar - 0.1) / 800, 1.005, 1.0002]) {
+    const lb = lightbox({ W: 800, H: 600 });
+    lb.zoomTo(1.5, 250, 420);
+    lb.zoomTo(alvo, 250, 420);
+    assert.deepEqual([lb.scale, lb.tx, lb.ty], [1, 0, 0], `afastar até ${alvo} (abaixo da régua) parou em ${lb.scale}, não em 1× exato`);
+  }
+  const fica = lightbox({ W: 800, H: 600 });
+  fica.zoomTo(1.5, 250, 420);
+  fica.zoomTo(1 + (limiar + 0.5) / 800, 250, 420);
+  assert.ok(fica.scale > 1 && fica.ampliada(), `afastar até ${(limiar + 0.5)} px a mais (acima da régua) foi parar em ${fica.scale}`);
+  // Sem foto na tela (carregando, quebrada: a caixa é 0): a fração de antes, 0,1%.
+  const semFoto = lightbox({ W: 0, H: 0 });
+  semFoto.zoomTo(1.0005, 250, 420);
+  assert.equal(semFoto.ampliada(), false, 'sem foto na tela, 0,05% contou como ampliada');
+  semFoto.zoomTo(1.2, 250, 420);
+  assert.equal(semFoto.ampliada(), true, 'sem foto na tela, o + do teclado (1,2×) não contou como ampliada');
+});
+
+test('R9-3-01 os GESTOS na faixa logo acima dos 0,1%: o arraste troca e fecha, e o duplo toque AMPLIA — a 3%, ampliada de verdade, o arraste anda', () => {
+  for (const [nome, tam, fatores] of FAIXA) {
+    const escala = fatores.reduce((s, f) => s * f, 1);
+    const g = gestosDaFoto(escala, tam);
+    assert.ok(g.L.scale > 1.001, `PRÉ-CONDIÇÃO (${nome}): a escala ${g.L.scale} não passa dos 0,1%`);
+    const tx0 = g.L.tx;
+    g.arrastar([300, 400], [200, 400]);             // pro lado: −100 px
+    assert.deepEqual(g.log, ['next'], `DEFEITO (${nome}): o arraste pro lado não trocou de foto`);
+    assert.ok(Math.abs(g.L.tx - tx0) < 1e-9, `DEFEITO (${nome}): o arraste ANDOU a foto ${(g.L.tx - tx0).toFixed(1)} px`);
+    g.arrastar([300, 300], [300, 420]);             // pra baixo: +120 px
+    assert.deepEqual(g.log, ['next', 'recuou'], `DEFEITO (${nome}): o arraste pra baixo não fechou`);
+    g.toqueDuplo(260, 380);
+    assert.equal(g.L.scale, 2.5, `DEFEITO (${nome}): o duplo toque deixou a escala em ${g.L.scale} (só "voltou" a 1×)`);
+  }
+  // CONTROLE: 1,03 numa foto de 800 (24 px a mais) é ampliada: o arraste anda, não troca, e o duplo toque volta a 1×.
+  const c = gestosDaFoto(1.03, { W: 800, H: 600 });
+  const cx0 = c.L.tx;
+  c.arrastar([300, 400], [200, 400]);
+  assert.deepEqual(c.log, [], 'CONTROLE: ampliada de verdade, o arraste trocou de foto');
+  assert.ok(Math.abs(c.L.tx - (cx0 - 100)) < 1e-9, 'CONTROLE: ampliada de verdade, o arraste não andou a foto');
+  c.toqueDuplo(260, 380);
+  assert.equal(c.L.scale, 1, 'CONTROLE: ampliada de verdade, o duplo toque não voltou a 1×');
 });
 
 // E ninguém volta a perguntar à escala por conta própria: a régua é UMA. O

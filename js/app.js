@@ -2269,15 +2269,27 @@ function fotoDoLightboxNaTela() {
 // lugar dele é o botão do painel que tomou o lugar do card (`botaoDoPainelDoFim`).
 // Ia pro ⓘ da Ajuda, no topo da página: o que o R7-2-06 tirou do ✕ ↑ ✓, de volta
 // pela foto ampliada (auditoria de 2026-10-03, R8-3-06, MEDIDO nos dois motores).
+//
+// E sem card E sem painel — a fila acabou com a próxima página ainda no ar (o
+// esqueleto na tela) —, o foco ia pro ⓘ e FICAVA lá quando o painel ou o card
+// novo chegavam (auditoria de 2026-10-06, R9-3-02, MEDIDO nos dois motores). Ele é
+// PROMETIDO a quem chegar, pela régua do `aplicarFocoDoTeclado`
+// (`focoDoTeclado`, aqui a lista `noCard`): o card, ao mesmo lugar dele (a foto
+// ou o mapa); o painel, ao botão dele. Até lá ele fica onde a camada o largou,
+// como o do ✕ ↑ ✓ do último card decidido pelo teclado. Só com a sessão de pé:
+// sem ela (a queda fecha as camadas, `fecharCamadasAbertas`) não vem card, e
+// vale a reserva.
 function devolverFocoDaAmpliacao(quem, noCard) {
     if (topOpenModal()) return;
     const card = cardDaFrente();
-    const candidatos = [quem, ...(card ? noCard.map((s) => card.querySelector(s)) : [botaoDoPainelDoFim()])];
+    const painel = card ? null : botaoDoPainelDoFim();
+    const candidatos = [quem, ...(card ? noCard.map((s) => card.querySelector(s)) : [painel])];
     for (const el of candidatos) {
         if (!el || el === document.body || dentroDeCamada(el) || !focavelNaTela(el)) continue;
         try { el.focus({ preventScroll: true }); } catch (e) { continue; }
         if (document.activeElement === el) return;
     }
+    if (!card && !painel && AppState.authenticated) { focoDoTeclado = noCard.slice(); return; }
     devolverFoco(null);
 }
 
@@ -2393,6 +2405,24 @@ function anunciarNoCard(texto) {
     if (el) el.textContent = texto || '';
 }
 
+// O desfecho de uma escrita da foto SEM o Desfazer (a exclusão, o nome), dito
+// onde a pessoa está. Com a foto DESTE pedido aberta, pela região da camada
+// (R6-3-08). Com ela FECHADA antes da resposta — a pessoa fechou a foto e seguiu
+// no card —, a região da camada não fala, e o card do local é redesenhado sem a
+// foto (ou com o nome novo) com o MESMO pedido na frente, então nem o "Novo
+// pedido" sai (`pedidoAnunciado`): o leitor de tela não ouvia que valeu
+// (auditoria de 2026-10-06, R9-3-05, MEDIDO nos dois motores). Aí vale a região
+// do CARD, como no desfecho que fecha a camada (R7-3-04) — só com um card DESTE
+// local na frente (o pedido, ou um irmão, que recebe a mesma escrita:
+// `aplicarNosIrmaos`) e nenhuma camada por cima. Com outro local na tela, ou
+// outra camada aberta, o desfecho não é do que se vê, e nada é dito.
+function anunciarDesfechoDaFoto(texto, place) {
+    if (Lightbox.isOpen() && Lightbox.place === place) { anunciarNoLightbox(texto, place); return; }
+    const frente = AppState.currentPlace;
+    if (!place || place.venueID == null || !frente || frente.venueID !== place.venueID) return;
+    if (semCamadaAberta()) anunciarNoCard(texto);
+}
+
 // O desfecho que FECHA a camada pode chegar com o card TROCADO pelo próprio
 // fechamento: a aprovação que pousou esperando a foto fechar anda a fila
 // (`avancarSeAprovado`) — aprovar a foto proposta e excluí-la (a lixeira é o
@@ -2421,6 +2451,13 @@ function anuncioDoCardAoFechar() {
         anunciarNoCard(disseOQueVeio ? texto + '. ' + agora : texto);
     };
 }
+
+// Quantos pixels a MAIS no maior lado da foto ampliada fazem o zoom se ver (ver
+// `Lightbox.ampliada`): abaixo disto a foto é 1× pra quem lê a escala. O zoom
+// invisível MEDIDO foi de 1,5 px (um evento de roda de 1 px) a 7 px (12 eventos
+// de 0,4 px) numa foto de 800; o primeiro zoom de verdade (um dente de roda, ou o
+// + do teclado, 1,2×) passa de 160 px.
+const ZOOM_VISIVEL_PX = 8;
 
 const Lightbox = {
     urls: [],
@@ -2558,17 +2595,33 @@ const Lightbox = {
     },
     // A foto está AMPLIADA DE VERDADE? A régua ÚNICA de quem lê a escala: as
     // setas (andam, ou trocam de foto e o ↓ fecha), o arraste (anda, ou troca e
-    // fecha), o duplo toque (volta a 1× ou amplia) e o `panBy`. Até 0,1% a mais
-    // (1 px numa foto de 1000) a tela é 1×, e o `zoomTo` usa a MESMA conta pra
-    // decidir quando o afastar volta a 1× exato. Cada um perguntava `=== 1` ou
-    // `> 1`: um fio de zoom pra DENTRO — a roda fina e a pinça lenta do trackpad,
-    // que o R7-3-03 deixou começar a ampliar a partir de 1× — parava a escala
-    // em 1,00073, invisível (a foto de 800 px com 801), e a → ANDAVA a foto
-    // 80 px em vez de trocá-la, o ↓ a andava em vez de fechar e o arraste nem
-    // trocava nem fechava: o R6-3-05 de volta por outra porta (auditoria de
-    // 2026-10-03, R8-3-01, MEDIDO no Chromium com um evento de roda de −0,4 px).
+    // fecha), o duplo toque (volta a 1× ou amplia) e o `panBy`. O zoom que não
+    // se VÊ é 1×, e o `zoomTo` usa a MESMA conta pra decidir quando o afastar
+    // volta a 1× exato. Cada um perguntava `=== 1` ou `> 1`: um fio de zoom pra
+    // DENTRO — a roda fina e a pinça lenta do trackpad, que o R7-3-03 deixou
+    // começar a ampliar a partir de 1× — parava a escala em 1,00073, invisível
+    // (a foto de 800 px com 801), e a → ANDAVA a foto 80 px em vez de trocá-la, o
+    // ↓ a andava em vez de fechar e o arraste nem trocava nem fechava: o R6-3-05
+    // de volta por outra porta (auditoria de 2026-10-03, R8-3-01, MEDIDO no
+    // Chromium com um evento de roda de −0,4 px).
+    //
+    // E a régua é em PIXELS NA TELA, não em fração da escala: os 0,1% de antes
+    // cobriam só o PRIMEIRO evento da roda fina. Um evento de roda de −1 px (o
+    // menor que o WebKit entrega) dava 1,00182 — a foto de 800 px com 801,5 —, 12
+    // eventos de −0,4 px davam 1,00879 (+7 px) e a pinça com 0,5 px de tremor,
+    // 1,0025: tudo invisível, e de novo as setas andavam a foto, o ↓ não fechava,
+    // o arraste não trocava e o duplo toque não ampliava (auditoria de
+    // 2026-10-06, R9-3-01, MEDIDO nos dois motores). Menos de `ZOOM_VISIVEL_PX` a
+    // mais no MAIOR lado da foto é 1×. O tamanho é o da caixa da <img> SEM a
+    // transformação (`offsetWidth`): com `object-contain` e `max-w/h-full`, a
+    // caixa É a foto. Sem foto na tela (carregando, quebrada) não há pixel pra
+    // medir, e vale a fração de antes (0,1%).
     ampliada() {
-        return this.scale > 1.001;
+        if (!(this.scale > 1)) return false;
+        const img = document.getElementById('lightboxImage');
+        const lado = img ? Math.max(img.offsetWidth || 0, img.offsetHeight || 0) : 0;
+        if (!lado) return this.scale > 1.001;
+        return (this.scale - 1) * lado >= ZOOM_VISIVEL_PX;
     },
     zoomTo(scale, cx, cy) {
         // cx/cy em coordenadas de viewport; mantém o ponto tocado sob o dedo
@@ -2582,8 +2635,8 @@ const Lightbox = {
         // 1,0000000000000002. A tela parece 1×, mas as setas passavam a ANDAR a
         // foto em vez de trocá-la, o ↓ não fechava e o arraste não trocava nem
         // fechava — tudo isso pergunta `=== 1` ou `> 1` (R6-3-05, auditoria de
-        // 2026-10-01). Abaixo de 0,1% a mais (1 px numa foto de 1000) é 1× —
-        // AFASTANDO. Aproximando, não: partindo de 1×, cada evento da roda e da
+        // 2026-10-01). O zoom que não se vê (a régua do `ampliada`, em pixels) é
+        // 1× — AFASTANDO. Aproximando, não: partindo de 1×, cada evento da roda e da
         // pinça do trackpad é aplicado sobre a escala de agora, e todo evento
         // abaixo de ~0,55 px (1,2^0,0055 = 1,001) caía de volta em 1. A roda fina
         // e a pinça LENTA do trackpad (centenas de eventos de 0,2 a 0,4 px) nunca
@@ -2912,6 +2965,13 @@ const Lightbox = {
     // Recoloca a foto na posição em que estava — usado pelo Desfazer e quando o
     // envio falha. Sem isto, desfazer devolveria a foto pro fim da lista e a
     // pessoa veria a ordem mudar sozinha.
+    //
+    // A foto que volta passa a ser a da TELA: é uma troca de foto, e a troca é
+    // dita como as outras (`_anunciarFoto`: a posição e o selo). O Desfazer de
+    // uma exclusão com a foto aberta a trazia de volta calado — o ✨ mudava de
+    // lugar e quem usa leitor de tela ouvia só o banner saindo, enquanto o
+    // Desfazer do ✕ do card diz o pedido que voltou (auditoria de 2026-10-06,
+    // R9-3-05, MEDIDO nos dois motores).
     recolocarFoto(url, idx) {
         if (!url || this.urls.some((u) => u === url)) return;
         const pos = Math.max(0, Math.min(idx, this.urls.length));
@@ -2920,6 +2980,7 @@ const Lightbox = {
         this.idx = pos;
         if (!this.isOpen()) return;
         this._render();
+        this._anunciarFoto();
     },
     // Tira a foto da lista aberta depois que o Waze confirmou. Sem fila e sem
     // recarregar: quem está olhando quer ver a foto sumir.
@@ -3545,9 +3606,11 @@ async function enviarExclusao(alvo) {
             // se a foto saiu por OUTRO: "já excluída" depois de uma ida sem
             // resposta é a exclusão desta pessoa (R5-3-04).
             if (r.jaExcluida && !enviar.semResposta) showToast(t('toast.photoAlreadyGone'), 'info');
+            // O irmão na frente é redesenhado com o MESMO pedido: o foco num ✕
+            // ↑ ✓ dele fica no mesmo botão (`mesmoBotao`, R9-3-04).
             aplicarNosIrmaos(alvo.place, (q) => {
                 Lightbox.removerFoto(alvo.id, q);
-                if (AppState.currentPlace === q) mantendoFocoNoCard(showCurrentPlace);
+                if (AppState.currentPlace === q) mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
             });
             return true;
         }
@@ -3605,8 +3668,9 @@ function devolverFoto(alvo) {
     }
     if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx);
     // O card é redesenhado debaixo do foco — o Desfazer pela tecla z, com a foto
-    // já fechada, e a falha que chega depois (R5-3-07).
-    if (AppState.currentPlace === p) mantendoFocoNoCard(showCurrentPlace);
+    // já fechada, e a falha que chega depois (R5-3-07). É o MESMO pedido: o foco
+    // num ✕ ↑ ✓ fica no mesmo botão (`mesmoBotao`, R9-3-04).
+    if (AppState.currentPlace === p) mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
 }
 
 function pedirExclusaoDaFoto() {
@@ -3660,14 +3724,17 @@ function pedirExclusaoDaFoto() {
             const naCamada = Lightbox.isOpen() && Lightbox.place === place;
             const anunciarAoFechar = anuncioDoCardAoFechar();
             Lightbox.removerFoto(alvo.id, place);
-            // Com a foto já fechada, o card é redesenhado debaixo do foco (R5-3-07).
-            if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
+            // Com a foto já fechada, o card é redesenhado debaixo do foco
+            // (R5-3-07) — o MESMO pedido: o foco num ✕ ↑ ✓ fica no mesmo botão
+            // (`mesmoBotao`, R9-3-04).
+            if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
             // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu
             // (R6-3-08): pela região da camada — ou pela do card, quando a
             // exclusão FECHOU a camada (R7-3-04), junto do card que o
-            // fechamento trouxe, se trouxe (R8-3-07).
+            // fechamento trouxe, se trouxe (R8-3-07), e quando a pessoa a
+            // fechou antes da resposta (R9-3-05, `anunciarDesfechoDaFoto`).
             if (naCamada && !Lightbox.isOpen()) anunciarAoFechar(t('undo.photoDeleted'));
-            else anunciarNoLightbox(t('undo.photoDeleted'), place);
+            else anunciarDesfechoDaFoto(t('undo.photoDeleted'), place);
         });
         // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
         manterFocoNoLightbox();
@@ -3682,8 +3749,8 @@ function pedirExclusaoDaFoto() {
     // foco voltou à foto do card — que este redesenho tira da página. O foco
     // caía no <body>, com o banner do Desfazer na tela (R6-3-02, auditoria de
     // 2026-10-01, MEDIDO nos dois motores); o caminho sem o Desfazer, acima, já
-    // passava pelo foco do card (R5-3-07).
-    if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
+    // passava pelo foco do card (R5-3-07). O MESMO pedido (`mesmoBotao`, R9-3-04).
+    if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
 
     let saiu = false;
     const enviar = () => {
@@ -4258,10 +4325,11 @@ function confirmarRenomear() {
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     // O ✓ que tinha o foco sumiu com a edição: o foco fica na camada (a pílula,
     // ou o ✕ se ela travou na janela do Desfazer). Sem o banner do Desfazer, o
-    // nome que pousou é dito ao leitor de tela (R6-3-08).
+    // nome que pousou é dito ao leitor de tela (R6-3-08) — também com a foto já
+    // fechada, pela região do card (R9-3-05, `anunciarDesfechoDaFoto`).
     if (semJanela) {
         enviarRenomeacao(alvo).then((gravou) => {
-            if (gravou) anunciarNoLightbox(t('lightbox.anuncio.renomeado', { nome: novo }), place);
+            if (gravou) anunciarDesfechoDaFoto(t('lightbox.anuncio.renomeado', { nome: novo }), place);
         });
         manterFocoNoLightbox();
         return;
@@ -13522,7 +13590,7 @@ function aplicarTravaDeAcao() {
 // clique, uma camada aberta —, o pedido cai: o lugar que ela escolheu ganha.
 const BOTAO_DA_ACAO = { left: '.card-btn-reject', up: '.card-btn-skip', right: '.card-btn-read',
     reject: '.card-btn-reject', skip: '.card-btn-skip', read: '.card-btn-read' };
-let focoDoTeclado = null;   // o seletor do botão que recebe o foco, ou null
+let focoDoTeclado = null;   // o seletor do botão que recebe o foco (ou a lista, R9-3-02), ou null
 
 function pedirFocoDoTeclado(botao, peloTeclado, acao) {
     if (!peloTeclado || !botao || document.activeElement !== botao) return;
@@ -13580,8 +13648,12 @@ function aplicarFocoDoTeclado() {
         botao.focus();
         return;
     }
-    // Card de foto sem a foto: ✕ e ✓ seguem travados, e o ↑ é o vivo.
-    const alvo = [card.querySelector(focoDoTeclado), card.querySelector('.card-btn-skip')].find(focavelNaTela);
+    // Card de foto sem a foto: ✕ e ✓ seguem travados, e o ↑ é o vivo. A
+    // promessa é UM seletor (o botão equivalente, C10) ou uma LISTA em ordem: o
+    // fechar de uma ampliação sem card na tela promete o mesmo lugar no card que
+    // chegar, a foto ou o mapa dele (`devolverFocoDaAmpliacao`, R9-3-02).
+    const sels = Array.isArray(focoDoTeclado) ? focoDoTeclado : [focoDoTeclado];
+    const alvo = [...sels, '.card-btn-skip'].map((s) => card.querySelector(s)).find(focavelNaTela);
     if (!alvo) return;
     focoDoTeclado = null;
     alvo.focus({ preventScroll: true });

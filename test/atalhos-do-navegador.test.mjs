@@ -50,15 +50,22 @@ function constante(nome) {
 }
 
 // A régua de "ampliada de verdade" da foto (`Lightbox.ampliada`, R8-3-01), de
-// verdade: um método do objeto `Lightbox`, com o `this` de quem o chama.
+// verdade: um método do objeto `Lightbox`, com o `this` de quem o chama. Ela
+// mede a foto NA TELA (a caixa da <img>, R9-3-01): uma de 800 × 600.
 function metodoDoLightbox(nome) {
   const obj = SEM.indexOf('const Lightbox = {');
   const ini = SEM.indexOf('\n    ' + nome + '(', obj) + 1;
   assert.ok(obj > 0 && ini > obj, `Lightbox.${nome} sumiu do app.js`);
+  const zoomVisivel = /^const ZOOM_VISIVEL_PX = (\d+);$/m.exec(SEM);
+  assert.ok(zoomVisivel, 'a constante ZOOM_VISIVEL_PX sumiu do app.js');
+  const fotoNaTela = { offsetWidth: 800, offsetHeight: 600 };
   let prof = 0;
   for (let j = SEM.indexOf('{', SEM.indexOf(')', ini)); j < SEM.length; j++) {
     if (SEM[j] === '{') prof++;
-    else if (SEM[j] === '}' && --prof === 0) return new Function('return function ' + SEM.slice(ini, j + 1).trim())();
+    else if (SEM[j] === '}' && --prof === 0) {
+      return new Function('document', 'ZOOM_VISIVEL_PX', 'return function ' + SEM.slice(ini, j + 1).trim())(
+        { getElementById: (id) => (id === 'lightboxImage' ? fotoNaTela : null) }, Number(zoomVisivel[1]));
+    }
   }
   throw new Error('não fechou: Lightbox.' + nome);
 }
