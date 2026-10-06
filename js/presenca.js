@@ -215,6 +215,17 @@ function presencaPodeConectar() {
     return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry() && presencaEu());
 }
 
+// O país da PRESENÇA, um só: o da FILA (`paisDaFila`, no app.js) — o do filtro
+// e, com "Minha área", o da área quando o app o sabe. É o país em que a carona
+// MARCA a pessoa (R7-6-05), e a lista que ela pede, a que ela aceita de carona e
+// o subtítulo da folha são desse mesmo país. Com a marca no da área e a lista
+// no do filtro, ela aparecia no "Triando agora" da França e via o do Brasil — e
+// a lista que voltava de carona (a da França) era jogada fora em toda ação
+// (auditoria da rodada 8, R8-5-03 e R8-6-02; decisão: o país da área).
+function presencaPais() {
+    return typeof paisDaFila === 'function' ? paisDaFila() : API.getCountry();
+}
+
 // ── o que fica no aparelho ──────────────────────────────────────────────────
 
 function chatGuardado() {
@@ -373,7 +384,7 @@ async function presencaSincronizar() {
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
     const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
-    if (Presenca.pais === API.getCountry() && fresca) { presencaPagarDevidas(); presencaFluxoGarantir(); return; }
+    if (String(Presenca.pais) === String(presencaPais()) && fresca) { presencaPagarDevidas(); presencaFluxoGarantir(); return; }
     await presencaAtualizar();
     presencaPagarDevidas();
     // E o tempo real, também aqui: a lista só abre o fluxo quando traz token
@@ -402,7 +413,7 @@ async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
     const epoca = Presenca.epoca;
-    const pais = API.getCountry();
+    const pais = presencaPais();
     const inicio = Date.now();
     const querToken = token || !presencaTokenValido();
     const carona = chatCarona();
@@ -444,7 +455,7 @@ async function presencaAtualizar({ token = false } = {}) {
             // pediu no meio recebeu ESTA promessa e ficava sem lista até a
             // próxima ação. O caso comum é a abertura: o app troca pro país do
             // perfil com o primeiro pedido no ar (auditoria de 2026-09-25).
-            if (pais !== API.getCountry()) refazer = true;
+            if (String(pais) !== String(presencaPais())) refazer = true;
             else presencaAplicarLista(r, inicio, pais, 'pedido');
             if (r.chat && r.chat.token) {
                 // O prazo vem no relógio do servidor; vai pro daqui (ver `desvio`).
@@ -481,7 +492,10 @@ async function presencaAtualizar({ token = false } = {}) {
 // A mesma resposta chega por dois caminhos: a rota própria e a carona das
 // ações. `null` numa parte é "não veio", NUNCA "ninguém": manter a anterior é
 // melhor que a pílula sumir por uma falha passageira.
-function presencaAplicarLista(r, inicio, pais, via = 'carona') {
+// `soConversas`: a lista de quem está no app é de OUTRO país (a carona de uma
+// ação dada antes de a pessoa trocar de país) e fica de fora, com o país e a
+// hora da lista que está na tela; as CONVERSAS não têm país e entram (R8-5-03).
+function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = false } = {}) {
     // A lista que SAIU antes da última que entrou é mais velha que ela: a
     // carona de uma ação antiga, pousando depois do pedido novo, devolvia a não
     // lida que a pessoa já tinha lido (auditoria de 2026-09-29).
@@ -493,8 +507,10 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
     // saiba", e a lista não conta como atualizada. As conversas não têm país.
     const trocouDePais = Presenca.pais !== null && String(Presenca.pais) !== String(pais);
     let incompleta = false;
-    if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
-    else if (trocouDePais) { Presenca.online = []; incompleta = true; }
+    if (!soConversas) {
+        if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
+        else if (trocouDePais) { Presenca.online = []; incompleta = true; }
+    }
     if (Array.isArray(r.conversas)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
@@ -564,6 +580,7 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         // marca. As mais recentes primeiro, pelo teto.
         chatConhecer([...Presenca.conversas].sort((a, b) => (b.atividade || 0) - (a.atividade || 0)).map((c) => c.id));
     }
+    if (soConversas) { presencaRenderTudo(); presencaAnotarLista({ via }); return; }
     if (r.contagem && typeof r.contagem === 'object') Presenca.contagem = r.contagem;
     Presenca.pais = pais;
     if (!incompleta) Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
@@ -576,13 +593,18 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
 // filtro trocado com a ação no ar, a lista do Brasil entrava como a da França
 // — e, com ela "fresca", o pedido do país novo nem saía (auditoria de
 // 2026-09-26). Lista de outro país fica de fora; a do país novo vem pelo
-// pedido que a troca de filtro já faz.
+// pedido que a troca de filtro já faz. As CONVERSAS da carona entram mesmo
+// assim: elas não têm país, e iam fora junto com a lista (R8-5-03).
+//
+// O país de agora é o da PRESENÇA (`presencaPais`), o mesmo que a carona leva
+// (`paisDaFila`, no gesto): com "Minha área", os dois eram de países diferentes
+// e toda carona era jogada fora (R8-5-03).
 function presencaAoCarona(p, inicio, pais) {
     try {
         if (!p || !presencaPodeConectar()) return;
-        const atual = API.getCountry();
-        if (pais !== undefined && pais !== null && String(pais) !== String(atual)) return;
-        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona');
+        const atual = presencaPais();
+        const outroPais = pais !== undefined && pais !== null && String(pais) !== String(atual);
+        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona', { soConversas: outroPais });
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
@@ -2012,7 +2034,7 @@ function presencaRenderLista() {
     if (!folha || folha.classList.contains('hidden')) { presencaDesenhar(lista, ''); return; }
     const sub = document.getElementById('presencaSub');
     if (sub) {
-        const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
+        const pais = presencaNomeDoPais(Presenca.pais || presencaPais());
         sub.textContent = pais ? t('presenca.sheet.sub', { pais }) : t('presenca.sheet.subSemPais');
     }
     // Quem está no app, do mais perto pro mais longe: "a quem perguntar sobre

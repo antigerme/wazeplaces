@@ -67,7 +67,7 @@ function elemento(id) {
 
 // Cria um cliente novo. `api` responde por rota: `presencaApp(campos)` e
 // `chat(campos)` devolvem a resposta (ou uma promessa dela).
-export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null } = {}) {
+export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined } = {}) {
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   const armazenado = new Map();
@@ -143,6 +143,10 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     Date: DateFalso,
     // Do api.js (carregado antes do presenca.js no app de verdade).
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
+    // Do app.js: o país da FILA (com "Minha área", o da área), que é o país da
+    // presença. Sem ele, a presença usa o do filtro (`API.getCountry`). O teste
+    // que o quer passa o de verdade, fatiado do app.js.
+    paisDaFila,
   };
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);

@@ -223,3 +223,77 @@ test('R8-5-02 a volta pelo bfcache (o `pageshow`): a lista sai sem keepalive tam
   const v = await caso(['setupAppListeners', 'setupDescargaAoSair', 'setupFimDoModoSaindo']);
   assert.equal(v[0].keepalive, true, 'CONTROLE: na ordem de antes, a lista sairia com keepalive');
 });
+
+// ── R8-5-03 (= R8-6-02): "Minha área" com UM país na presença ────────────────
+
+const EU = '12444348';
+const CAF = '183164343';
+// Quem está no app, por país: na França o "francois" (perto da área), no
+// Brasil o "paulista". O servidor de mentira devolve a lista do país PEDIDO.
+const NO_APP = { 73: [{ id: '700000001', nome: 'francois', rank: 4, lat: 48.86, lon: 2.34 }],
+  30: [{ id: '300000001', nome: 'paulista', rank: 2, lat: -23.55, lon: -46.63 }] };
+const CONVERSA = { id: CAF, nome: 'cafanha', naoLidas: 1, atividade: T - 1000,
+  ultima: { deMim: false, ts: T - 1000, recibo: false, texto: 'oi', card: null } };
+
+// O `paisDaFila` DE VERDADE (o app.js fatiado): a área na França (a pessoa
+// edita SÓ a França neste servidor) e o filtro no Brasil.
+function paisDaFilaDe({ myArea = true, editaveis = [73], filtro = 30 } = {}) {
+  const AppState = { profile: { id: Number(EU) }, filters: { myArea } };
+  const app = montar(['anotarEditaveis', 'editaveisLidos', 'paisDaMinhaArea', 'paisDaFila'], {
+    AppState, editaveisPorServidor: { conta: null, lidos: {} }, API: { getCountry: () => filtro, getRegion: () => 'row' } });
+  app.anotarEditaveis(AppState.profile, 'row', editaveis);
+  return app.paisDaFila;
+}
+function comMinhaArea(opcoes) {
+  const paisDaFila = paisDaFilaDe(opcoes);
+  let pedidos = 0;
+  const c = novoCliente({ agora: T, pais: (opcoes && opcoes.filtro) || 30, paisDaFila, api: {
+    // Com TETO: um laço de pedidos (o país que nunca bate com o da lista) reprova
+    // pela contagem, em vez de pendurar o teste (gotcha #19).
+    presencaApp: (x) => (++pedidos > 10 ? new Promise(() => {})
+      : { success: true, online: NO_APP[x.pais] || [], conversas: [], agora: c.relogio.agora }) } });
+  c.AppState.currentPlace = { mapa: { centro: [48.8566, 2.3522] } };   // o card na tela: em Paris
+  return { c, paisDaFila };
+}
+const subtitulo = (c) => { c.$('presencaModal').classList.remove('hidden'); c.P.presencaRenderLista(); return c.$('presencaSub').textContent; };
+
+test('R8-5-03 com "Minha área" (a área na França, o filtro no Brasil): a lista é PEDIDA, mostrada e nomeada com o país da área — o da marca', async () => {
+  const { c, paisDaFila } = comMinhaArea();
+  assert.equal(paisDaFila(), 73, 'PRÉ-CONDIÇÃO: o país da fila (o da marca) tem que ser o da área');
+  assert.match(subtitulo(c), /France/, 'DEFEITO: antes da primeira lista, o subtítulo nomeia o país do filtro');
+  await c.P.presencaAtualizar();
+  assert.deepEqual(c.chamadas.presencaApp.map((x) => x.pais), [73],
+    'DEFEITO: a lista foi pedida com o país do FILTRO — a pessoa aparece na França e vê o Brasil');
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['francois']);
+  assert.match(subtitulo(c), /France/, 'DEFEITO: o subtítulo da folha nomeia o país do filtro');
+  // A lista fresca do MESMO país não se pede de novo a cada "Aplicar".
+  await c.P.presencaSincronizar();
+  assert.equal(c.chamadas.presencaApp.length, 1, 'a lista fresca do país da área foi pedida de novo (a conferência comparava com o filtro)');
+  // CONTROLE: sem "Minha área", vale o país do filtro.
+  const s = comMinhaArea({ myArea: false });
+  await s.c.P.presencaAtualizar();
+  assert.deepEqual(s.c.chamadas.presencaApp.map((x) => x.pais), [30]);
+  assert.match(subtitulo(s.c), /Brazil/);
+});
+
+test('R8-5-03 a lista que volta de CARONA (a do país da área, que a carona levou) entra — com "Minha área" ela era jogada fora em toda ação', async () => {
+  const { c, paisDaFila } = comMinhaArea();
+  c.relogio.agora += 1000;
+  c.P.presencaAoCarona({ online: NO_APP[73], conversas: [CONVERSA] }, c.relogio.agora - 100, paisDaFila());
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['francois'], 'DEFEITO: a lista da carona (a do país da marca) foi jogada fora');
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1, 'DEFEITO: a conversa da carona foi jogada fora junto');
+  assert.equal(String(c.P.Presenca.pais), '73');
+});
+
+test('R8-5-03 a carona de OUTRO país (a pessoa trocou de país com a ação no ar): a lista fica de fora, mas as CONVERSAS entram', async () => {
+  const c = novoCliente({ agora: T, pais: 30 });
+  Object.assign(c.P.Presenca, { pais: 30, atualizadaEm: T - 5000, online: NO_APP[30].slice() });
+  c.P.presencaAoCarona({ online: NO_APP[73], conversas: [CONVERSA] }, T, 73);
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['paulista'], 'a lista de outro país entrou como a do país de agora');
+  assert.equal(String(c.P.Presenca.pais), '30', 'o país da lista na tela mudou com a carona de outro país');
+  assert.equal(c.P.Presenca.atualizadaEm, T - 5000, 'a lista na tela contou como atualizada pela carona de outro país');
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 1, 'DEFEITO: as conversas da carona (que não têm país) foram jogadas fora junto com a lista');
+  // CONTROLE: a carona do MESMO país entra inteira.
+  c.P.presencaAoCarona({ online: NO_APP[30].concat([{ id: '300000002', nome: 'carioca', rank: 1 }]), conversas: [] }, T + 10, 30);
+  assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['paulista', 'carioca']);
+});
