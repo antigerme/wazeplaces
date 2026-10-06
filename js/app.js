@@ -17953,11 +17953,17 @@ function esquecerOutraConta(id) {
     updateStats();
     offlineEsquecer();
     dlogApagar();
+    // O anel de chamadas, como no "Sair": o `dlogApagar` tira os corpos, mas as
+    // entradas ficavam — a rota, o status, a hora e o `n` da fila de cada pedido
+    // da conta anterior, em sequência, iam no relatório e na cópia guardada de
+    // quem entrou (auditoria da rodada 9, R9-1-04 = R9-4-09, MEDIDO). Quem entra
+    // começa do zero, como depois do "Sair".
+    try { API.chamadas.length = 0; } catch (e) {}
     // A lista de recursos do navegador, como no "Sair": a URL da foto de perfil
     // (com o id da conta anterior) e as das fotos da fila dela iam no relatório
     // do modo dev de quem entrou (MEDIDO; auditoria de 2026-10-03, R8-1-05). O
-    // que ainda estava no ar também fica de fora — da lista e do anel de chamadas,
-    // cujos corpos o `dlogApagar` acabou de tirar (ver a função; L12-1).
+    // que ainda estava no ar também fica de fora — da lista e do anel de chamadas
+    // (ver a função; L12-1).
     esquecerRegistrosDaPagina();
     // As listas de países guardadas por região valem pra uma sessão de UMA
     // conta, como no "Sair" (R9-6-01): quem entrou pede as dele.

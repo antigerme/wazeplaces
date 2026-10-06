@@ -47,7 +47,9 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
   const AppState = { profile: perfil, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {}, authenticated: true };
   const deps = {
     safeLS, AppState,
-    API: { getSession: () => sessao.token, get sessionToken() { return sessao.token; }, getRegion: () => 'row' },
+    API: { getSession: () => sessao.token, get sessionToken() { return sessao.token; }, getRegion: () => 'row',
+      // O anel de chamadas da página, só os metadados (os corpos o `dlogApagar` tira).
+      chamadas: [{ rota: 'perfil', http: 200 }, { rota: 'buscar-places', http: 200, n: 3 }, { rota: 'validar-place', http: 200 }] },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     dfato: (k) => log.push('dfato:' + k),
@@ -118,6 +120,9 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
   assert.deepEqual(m.AppState.stats, { read: 0, rejected: 0, skipped: 0 }, 'o placar de A ficou pra B');
   assert.equal(JSON.parse(m.guardado.get('waze_places_conta')).id, 'B');
+  // O anel de chamadas de A — a rota, o status e o `n` da fila de cada pedido dela
+  // — ia no relatório e na cópia guardada de B; o "Sair" o zera (R9-1-04 = R9-4-09).
+  assert.equal(m.deps.API.chamadas.length, 0, 'as chamadas da conta anterior ficaram no anel de quem entrou');
   // Controle: a MESMA conta voltando (a sessão caiu e ela entrou de novo) não perde nada.
   const c = montar({ perfil: { id: 'A' }, token: 'tok-A' });
   c.app.aoConhecerConta({ id: 'A' });
@@ -125,6 +130,7 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   c.sessao.token = 'tok-A2';
   c.app.aoConhecerConta({ id: 'A' });
   assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a mesma conta perdeu a fila de saída');
+  assert.equal(c.deps.API.chamadas.length, 3, 'a MESMA conta voltando perdeu o anel de chamadas (é dela)');
   assert.ok(!c.log.includes('autores') && !c.log.includes('foco') && !c.log.includes('dfato:conta.trocou'));
   assert.ok(!c.log.includes('camadas'), 'a MESMA conta voltando fechou o que ela tinha aberto (é dela)');
   assert.ok(!c.log.includes('recursos') && !c.log.includes('painel'),
