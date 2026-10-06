@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.2
+# Waze Places Rapid Access — proposta de v0.3.3
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -281,5 +281,64 @@ Achados na auditoria da rodada 7 do app (R7-1-06 e R7-6-07), sem mudança de pro
 | atual | 0.3.1 | funciona como antes: o toque duplo no ACESSAR abre duas abas |
 | atual | 0.3.2 | o toque duplo abre uma aba só, o botão não fica parado em "LOGANDO...", e o painel diz o que acontece quando o login falha |
 | anterior | 0.3.2 | funciona — nada mudou no que a extensão manda ao app |
+
+Permissões: **as mesmas** da 0.2.0.
+
+---
+
+## v0.3.3 — o login do ACESSAR tem prazo, e a aba não abre depois do aviso
+
+Achado na auditoria da rodada 8 do app (R8-6-01 e R8-1-02). O protocolo com o app não muda, nem as
+permissões; a mensagem interna do botão pro `background.js` só ganha a hora do toque (`desde`).
+
+O teto de 45 s do ACESSAR (`ESPERA_DO_BOTAO_MS`, da 0.3.2) foi conferido contra UMA ida ao servidor, que
+espera o Waze até 30 s. Mas o `background.js` repete o login em toda falha passageira: até 4 idas, com
+4,6 s de espera entre elas — 4 × 30 + 4,6 = 124,6 s no pior caso. Com o Waze lento, o botão voltava aos
+45 s dizendo que a extensão não tinha respondido ("Recarregue esta página e tente de novo"), e o login
+que seguia no background abria a aba do app DEPOIS do aviso. Quem obedecia ao "tente de novo" abria uma
+segunda sessão e uma segunda aba, que era o que a 0.3.2 tinha vindo fechar.
+
+Agora o `abrirPlaces` tem um prazo TOTAL de 40 s (`PRAZO_DO_BOTAO_MS`, no `background.js`), contado do
+toque, e não da chegada da mensagem (o service worker adormecido leva um tempo pra acordar):
+
+- nenhuma ida começa depois do prazo, nem a espera entre idas passa dele;
+- a ida que está no ar é cancelada (`AbortController` no `fetch`);
+- a resposta que chegar depois não abre aba nem deixa token pra aba nenhuma.
+
+O botão volta antes do teto, com o aviso do que aconteceu: "O Waze não respondeu como esperado" quando o
+Waze estourou o prazo do servidor, ou "Não foi possível falar com o Waze Places" quando o servidor nem
+respondeu. O "A extensão não respondeu" fica pra extensão que não responde nada, e aí não há login no ar
+pra abrir aba depois do "tente de novo". Medido com o `content.js` e o `background.js` de verdade num
+relógio virtual, como em `test/extensao.test.mjs`:
+
+```
+a 1ª ida estoura os 30 s, e a 2ª responderia em 20 s
+  0.3.2: 45 s "a extensão não respondeu" · 50,6 s a aba abre
+  0.3.3: 40 s "o Waze não respondeu" · nenhuma aba
+idem, tocando de novo 1 s depois do aviso
+  0.3.2: 2 sessões, 2 abas
+  0.3.3: 1 aba (a do 2º toque)
+toda ida estoura os 30 s
+  0.3.2: 4 idas ao Waze, a última termina aos 124,6 s
+  0.3.3: 2 idas, o botão volta aos 40 s
+servidor pendurado
+  0.3.2: 45 s "a extensão não respondeu"
+  0.3.3: 40 s "não foi possível falar com o Waze Places"
+```
+
+E num Chromium de verdade com esta extensão carregada (os dois prazos divididos por 10, e um servidor
+local que responde em 5 s): o servidor vê a ida cancelada 4,07 s depois do toque, o aviso sai antes do
+teto, e o 2º toque abre a única aba; a 0.3.2, no mesmo roteiro, abre duas.
+
+A sessão que o servidor ainda criar depois de a ida ser cancelada fica sem dono, e vence sozinha (em até
+21 dias sem uso), como qualquer sessão abandonada.
+
+**Precisa ser publicada** pra valer. Se a 0.3.2 ainda não tiver sido publicada, a 0.3.3 a leva junto.
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.3.2 | funciona como antes: com o Waze lento, a aba do app pode abrir depois do aviso |
+| atual | 0.3.3 | o botão volta em até 40 s com o aviso do que aconteceu, e a aba nunca abre depois dele |
+| anterior | 0.3.3 | funciona — nada mudou no que a extensão manda ao app |
 
 Permissões: **as mesmas** da 0.2.0.

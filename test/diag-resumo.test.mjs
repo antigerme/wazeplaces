@@ -679,3 +679,67 @@ test('diag-resumo: relatório de ANTES desses campos diz que eles não vinham �
   assert.doesNotMatch(s, /ATENÇÃO: o "invisível"/);
   assert.ok(!s.includes(TOKEN), 'o token vazou');
 });
+
+// ── R8-4-06: o relatório gerado DENTRO do treino ────────────────────────────
+// A fila na tela (e no `appState`, e no `estado.fila` das capturas) é a de
+// EXEMPLOS; a real é a que o treino guarda (`treino`, no corpo). A triagem não
+// dizia "treino" em lugar nenhum (MEDIDO, r7 da auditoria). Agora diz, e CONTA a
+// fila real — sem os pedidos, que são dado de terceiro.
+const noTreino = () => {
+  const d = relatorioV4();
+  d._versaoDoDiag = 11;
+  const tr = { ativo: true, passo: 2, exemplos: 3 };
+  d.resumo.telaAgora = { ...d.resumo.telaAgora, modais: [], treino: tr };
+  d.momentos[0].treino = tr;
+  d.treino = { ...tr, fila: Array.from({ length: 5 }, (_, i) => ({ name: LOCAL + i })), currentPlaceIdx: 0,
+    autorEmFoco: null, epoca: 4, epocaDoTreino: 5, epocaAgora: 5, devolver: [{ name: LOCAL }], perfilChegou: true, ordemMudou: false };
+  return d;
+};
+
+test('diag-resumo: relatório gerado DENTRO do treino — a triagem diz, e conta a fila real sem mostrar os pedidos (R8-4-06)', () => {
+  const s = rodar(noTreino());
+  assert.match(s, /· lightbox false · treino ABERTO \(passo 2 · 3 exemplos na fila\)/, 'a tela do relatório não diz que o treino estava aberto');
+  assert.match(s, /ATENÇÃO: relatório gerado DENTRO do treino — a fila na tela e no `appState` é de EXEMPLOS; a fila real é a que o treino guarda\./,
+    'a triagem não avisa que o relatório é de dentro do treino');
+  assert.match(s, /fila real guardada pelo treino: 5 pedidos · recusados que voltam como card ao sair dele: 1 · perfil chegou nele: true · ordem trocada nele: false · época da fila real 4 \(a do treino 5, a de agora 5\)/,
+    'a fila real que o treino guarda não foi contada');
+  assert.match(s, /manual · tela app · painel carregando · card montado true · modais \[\] · DENTRO DO TREINO \(3 exemplos na fila\)/,
+    'a captura feita dentro do treino não diz isso');
+  assert.ok(!s.includes(LOCAL), 'a fila real que o treino guarda (dado de terceiro) vazou na triagem');
+  assert.ok(!s.includes(TOKEN), 'o token vazou');
+});
+
+test('diag-resumo: CONTROLES do treino — fechado não ganha aviso, e o relatório de antes diz que não o trazia', () => {
+  const f = noTreino();
+  f.resumo.telaAgora.treino = { ativo: false };
+  delete f.momentos[0].treino;
+  delete f.treino;
+  const sf = rodar(f);
+  assert.match(sf, /· lightbox false · treino fechado/);
+  assert.doesNotMatch(sf, /DENTRO do treino|DENTRO DO TREINO|fila real guardada/, 'o treino fechado ganhou o aviso de dentro do treino');
+  const antigo = rodar(relatorioV4());
+  assert.match(antigo, /· lightbox false · treino \(ausente nesta versão\)/, 'o relatório de antes não diz que não trazia o treino');
+  assert.doesNotMatch(antigo, /DENTRO do treino|DENTRO DO TREINO/);
+});
+
+// ── R8-4-07: a aba mais velha, fechada antes do relatório ───────────────────
+// O app passou a marcar a aba que estava VIVA quando a do relatório abriu, mesmo
+// que ela tenha gravado pela última vez ANTES disso (o fechar aborta a gravação
+// da base). A triagem segue a marca do app, sem exigir a hora.
+test('diag-resumo: a aba marcada OUTRA ABA pelo app sai como tal mesmo tendo gravado ANTES de a do relatório abrir (R8-4-07)', () => {
+  const antesDesta = (marca) => {
+    const d = comOutraAba(marca);
+    const B = d.aberturasAnteriores.find((a) => a.id === 'murdtpr1-67np5r');
+    B.inicio = Date.parse(d.aberturaAtual.inicio) - 60e3;
+    B.salvoEm = Date.parse(d.aberturaAtual.inicio) - 400;
+    return d;
+  };
+  const s = rodar(antesDesta({ simultanea: true, abertaAgora: false }));
+  assert.match(s, /abertura murdtpr1-67np5r · [^\n]*\n  OUTRA ABA, aberta junto com a do relatório — já tinha fechado na hora do relatório: entre as duas não houve fechar e reabrir\./,
+    'a aba marcada pelo app (viva quando a do relatório abriu) saiu como abertura anterior');
+  assert.match(s, /\[outra aba murdtpr1-67np5r, aberta junto com esta\]/);
+  // CONTROLE: sem a marca, a mesma abertura (gravou antes de esta abrir) é anterior — a triagem não inventa.
+  const sem = rodar(antesDesta({}));
+  assert.doesNotMatch(sem, /abertura murdtpr1-67np5r · [^\n]*\n  OUTRA ABA/, 'sem a marca do app, a triagem inventou uma outra aba');
+  assert.match(sem, /\[abertura anterior murdtpr1-67np5r\]/);
+});

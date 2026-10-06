@@ -409,6 +409,7 @@ function montarDesligar401({ sonda }) {
     VERIFICA_SESSAO_MS: 0, setTimeout,
     API: {
       getSession: () => sessao.token,
+      getRegion: () => 'row',   // a região em que a sonda pergunta (R8-6-03)
       // O Waze da presença recusa o "invisível" com 401, com a sessão viva.
       presencaWaze: async (c) => { pedidos.push(c); return { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 }; },
       // A sonda leva o seu tempo: a confirmação é DEPOIS do 401.
@@ -418,6 +419,7 @@ function montarDesligar401({ sonda }) {
     verificandoSessao: false, conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 }, epocaDaSessao: 0,
     derrubarSessao: (k) => quedas.push(k), showAccessDenied: () => {}, showAuthScreen: () => {},
     definirPerfil: () => true, completarPerfilChegado: () => {},
+    anotarEditaveis: () => {},   // os editáveis do perfil da sonda (R8-6-03): aqui, nada a anotar
     showToast: (k) => toasts.push(k), t: (k) => k,
     rebuscarDepoisDeFalha: () => {}, esvaziarFilaDeSaida: () => {},
   };

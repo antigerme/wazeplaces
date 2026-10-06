@@ -30,9 +30,11 @@
 //
 // ── O QUE FICA NO APARELHO ──────────────────────────────────────────────────
 // Uma chave só (`CHAT_KEY`): a instalação do chat (o "aparelho" pro Waze), as
-// conversas conhecidas, até onde cada pessoa leu, e os ids a confirmar. Sem
-// texto de mensagem nenhum. O TOKEN do tempo real NUNCA vai pro armazenamento:
-// é credencial, e o diagnóstico leva o localStorage inteiro.
+// conversas conhecidas, até onde cada pessoa leu, os ids a confirmar e o "lida"
+// DEVIDO (até que mensagem a pessoa viu, na conversa cujo "lida" não chegou ao
+// Waze — ver `chatGuardarDivida`). Sem texto de mensagem nenhum. O TOKEN do
+// tempo real NUNCA vai pro armazenamento: é credencial, e o diagnóstico leva o
+// localStorage inteiro.
 
 const CHAT_KEY = 'waze_places_chat';
 
@@ -73,6 +75,11 @@ const PRESENCA_FLUXO_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
 
 // Mensagens que chegam juntas viram UM "lida" só.
 const PRESENCA_LIDA_ATRASO_MS = 1200;
+// Quanto um "lida" NO AR (`Presenca.lidaNoAr`) segura os seguintes da mesma
+// conversa: o teto do `_post` (45 s). O pago ao ir pro fundo sai com
+// `keepalive`, que não tem teto, e pendurado ele não pode segurar o "lida" da
+// conversa pra sempre.
+const PRESENCA_LIDA_NO_AR_MS = 45_000;
 // No diário, mensagem (chegando ou saindo) entra no máximo uma vez por minuto
 // de cada tipo, com quantas vieram juntas — ver `presencaAnotarMsg`.
 const PRESENCA_DIAG_MSG_MS = 60_000;
@@ -103,6 +110,11 @@ const Presenca = {
     tokenPedidoEm: 0,
     fluxo: null,            // a conexão de tempo real aberta agora
     fluxoTentativa: 0,
+    // O tempo real PARADO pela falta de rede: o `presencaFluxoGarantir` desistiu
+    // com `navigator.onLine === false` (o recuo venceu no modo avião), e nenhum
+    // timer ficou de pé. Quem o religa é o `online` — ou, quando ele não vem, a
+    // prova de rede (ver `presencaAoProvarRede`).
+    fluxoParado: false,
     fluxoDiag: { aberturas: 0, quadros: 0, mensagens: 0, recibos: 0, ignoradas: 0, loteMensagens: 0,
                  ultimoFim: null, ultimoErro: null, quedasSeguidas: 0, erroAnotado: null, conectou: false },
     // Mensagens que chegaram AO VIVO com a conversa fechada, por pessoa. Somam
@@ -138,6 +150,19 @@ const Presenca = {
     // mensagem que a pessoa viu ficava não lida no Waze (auditoria de
     // 2026-10-01, R6-5-1). Ver `presencaPagarDevidas`.
     lidaDevendo: new Set(),
+    // O "lida" que está NO AR, por conversa: `{ ate, em }` — a hora da última
+    // mensagem dela que ele marca e quando saiu. Enquanto ele voa, a conversa
+    // vale como DEVENDO pra lista que chega (ela foi lida no Waze antes dele), e
+    // outro "lida" cobrindo o mesmo não sai (auditoria da rodada 8, R8-5-05 e
+    // R8-5-06; ver `presencaMarcarLida`).
+    lidaNoAr: new Map(),
+    // A dívida que veio GUARDADA no aparelho (`chatGuardarDivida`) e que esta
+    // página adotou na primeira lista (`presencaAdotarDividas`): por conversa,
+    // até que mensagem dela a pessoa viu (`ate`) e quantas vistas o Waze ainda
+    // contava como não lidas (`n`). É o que diz o que foi VISTO numa conversa
+    // cujo histórico esta página não carregou (`presencaVistaDe`).
+    dividaGuardada: new Map(),
+    dividasAdotadas: false,
     // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
     // do Waze delas chegar (ver `presencaLidaPorId`).
     lidasPorId: new Set(),
@@ -208,6 +233,17 @@ function presencaEu() {
 
 function presencaPodeConectar() {
     return !!(AppState.authenticated && presencaLigada() && API.getSession() && API.getCountry() && presencaEu());
+}
+
+// O país da PRESENÇA, um só: o da FILA (`paisDaFila`, no app.js) — o do filtro
+// e, com "Minha área", o da área quando o app o sabe. É o país em que a carona
+// MARCA a pessoa (R7-6-05), e a lista que ela pede, a que ela aceita de carona e
+// o subtítulo da folha são desse mesmo país. Com a marca no da área e a lista
+// no do filtro, ela aparecia no "Triando agora" da França e via o do Brasil — e
+// a lista que voltava de carona (a da França) era jogada fora em toda ação
+// (auditoria da rodada 8, R8-5-03 e R8-6-02; decisão: o país da área).
+function presencaPais() {
+    return typeof paisDaFila === 'function' ? paisDaFila() : API.getCountry();
 }
 
 // ── o que fica no aparelho ──────────────────────────────────────────────────
@@ -330,6 +366,48 @@ function chatAoResponder(r, carona) {
     if (r && r.confirmados && carona && carona.confirmar) chatSoltarConfirmados(carona.confirmar);
 }
 
+// O "lida" DEVIDO, guardado no aparelho: por conversa, até que mensagem DELA a
+// pessoa viu (`ate`, a hora do Waze) e quantas dessas o Waze ainda contava como
+// não lidas (`n`). Só na memória (`lidaDevendo`), a dívida morria com a página:
+// vista sem sinal e o app fechado sem sinal, reaberto ele devolvia a mensagem
+// VISTA como "1 mensagem nova" — o "invisível" da mesma situação já era
+// guardado (auditoria da rodada 8, R8-5-04). Entra quando a dívida nasce e sai
+// quando ela é PAGA (ou deixa de valer: chegou mensagem que a pessoa não viu) —
+// não quando o pagamento sai, que a página pode morrer com ele no ar. Sai no
+// "Sair" e na troca de conta com o resto do chat (`presencaEsquecer`).
+function chatDividas() {
+    const d = chatGuardado().devendo;
+    const out = {};
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return out;
+    for (const [id, v] of Object.entries(d)) {
+        if (!PRESENCA_ID.test(id) || !v || !Number.isFinite(v.ate) || v.ate <= 0) continue;
+        out[id] = { ate: v.ate, n: Number.isFinite(v.n) && v.n > 0 ? Math.floor(v.n) : 0 };
+    }
+    return out;
+}
+
+// `vista` nula tira a conversa. Sem escrita quando nada muda (o `setItem` é
+// síncrono, e quem tira chama isto a cada mensagem que chega fora da vista).
+function chatGuardarDivida(id, vista) {
+    const k = String(id);
+    if (!PRESENCA_ID.test(k)) return;
+    const g = chatGuardado();
+    const d = g.devendo && typeof g.devendo === 'object' && !Array.isArray(g.devendo) ? g.devendo : {};
+    if (vista) {
+        const atual = d[k];
+        if (atual && atual.ate === vista.ate && atual.n === vista.n) return;
+        d[k] = { ate: vista.ate, n: vista.n };
+        // Teto: ficam as vistas mais novas.
+        g.devendo = Object.fromEntries(Object.entries(d).sort((a, b) => (b[1].ate || 0) - (a[1].ate || 0)).slice(0, PRESENCA_LIDAS_MAX));
+    } else {
+        if (!Object.prototype.hasOwnProperty.call(d, k)) return;
+        delete d[k];
+        if (Object.keys(d).length) g.devendo = d;
+        else delete g.devendo;
+    }
+    chatGuardar(g);
+}
+
 // ── a lista ─────────────────────────────────────────────────────────────────
 
 // Só falta o PERFIL, com a sessão de pé: é a renovação silenciosa pela extensão
@@ -368,7 +446,7 @@ async function presencaSincronizar() {
     // Mesmo país e lista fresca: nada a pedir. Sem esta guarda, cada filtro
     // aplicado (tipo, ordem, categoria) custaria um pedido sem mudar a lista.
     const fresca = Date.now() - presencaUltimaTentativa() < PRESENCA_VOLTA_MIN_MS;
-    if (Presenca.pais === API.getCountry() && fresca) { presencaPagarDevidas(); presencaFluxoGarantir(); return; }
+    if (String(Presenca.pais) === String(presencaPais()) && fresca) { presencaPagarDevidas(); presencaFluxoGarantir(); return; }
     await presencaAtualizar();
     presencaPagarDevidas();
     // E o tempo real, também aqui: a lista só abre o fluxo quando traz token
@@ -397,7 +475,7 @@ async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
     const epoca = Presenca.epoca;
-    const pais = API.getCountry();
+    const pais = presencaPais();
     const inicio = Date.now();
     const querToken = token || !presencaTokenValido();
     const carona = chatCarona();
@@ -439,7 +517,7 @@ async function presencaAtualizar({ token = false } = {}) {
             // pediu no meio recebeu ESTA promessa e ficava sem lista até a
             // próxima ação. O caso comum é a abertura: o app troca pro país do
             // perfil com o primeiro pedido no ar (auditoria de 2026-09-25).
-            if (pais !== API.getCountry()) refazer = true;
+            if (String(pais) !== String(presencaPais())) refazer = true;
             else presencaAplicarLista(r, inicio, pais, 'pedido');
             if (r.chat && r.chat.token) {
                 // O prazo vem no relógio do servidor; vai pro daqui (ver `desvio`).
@@ -476,7 +554,10 @@ async function presencaAtualizar({ token = false } = {}) {
 // A mesma resposta chega por dois caminhos: a rota própria e a carona das
 // ações. `null` numa parte é "não veio", NUNCA "ninguém": manter a anterior é
 // melhor que a pílula sumir por uma falha passageira.
-function presencaAplicarLista(r, inicio, pais, via = 'carona') {
+// `soConversas`: a lista de quem está no app é de OUTRO país (a carona de uma
+// ação dada antes de a pessoa trocar de país) e fica de fora, com o país e a
+// hora da lista que está na tela; as CONVERSAS não têm país e entram (R8-5-03).
+function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = false } = {}) {
     // A lista que SAIU antes da última que entrou é mais velha que ela: a
     // carona de uma ação antiga, pousando depois do pedido novo, devolvia a não
     // lida que a pessoa já tinha lido (auditoria de 2026-09-29).
@@ -488,8 +569,10 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
     // saiba", e a lista não conta como atualizada. As conversas não têm país.
     const trocouDePais = Presenca.pais !== null && String(Presenca.pais) !== String(pais);
     let incompleta = false;
-    if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
-    else if (trocouDePais) { Presenca.online = []; incompleta = true; }
+    if (!soConversas) {
+        if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
+        else if (trocouDePais) { Presenca.online = []; incompleta = true; }
+    }
     if (Array.isArray(r.conversas)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
@@ -538,6 +621,9 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
             if (c) c.naoLidas = 0;
             Presenca.vivas.delete(olhando);
         }
+        // A dívida que a página anterior deixou GUARDADA entra com a primeira
+        // lista desta (R8-5-04): daqui em diante, as regras de sempre.
+        if (!Presenca.dividasAdotadas) presencaAdotarDividas();
         // A conversa que DEVE um "lida" (`lidaDevendo`: o que falhou). O Waze
         // segue contando como não lida a mensagem que a pessoa VIU, e cada lista
         // que chegava — a carona de cada ✕/✓, a da pílula, a da volta do fundo —
@@ -547,11 +633,16 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         // conversa olhando — sem pedido nenhum: quem marca no Waze é a dívida, no
         // fechamento. Com a mensagem nova que só a lista conhece, a dívida SAI e
         // a conta fica: pagá-la marcaria essa também (R7-5-01).
-        for (const id of [...Presenca.lidaDevendo]) {
+        //
+        // E a que tem o "lida" NO AR (`lidaNoAr`, o pagamento da dívida ou o da
+        // rajada) vale o mesmo: a lista que chega com ele voando foi lida no Waze
+        // antes dele, e devolvia a vista como "1 mensagem nova" — que ficava, se
+        // ele falhasse (auditoria da rodada 8, R8-5-05).
+        for (const id of new Set([...Presenca.lidaDevendo, ...presencaComLidaNoAr()])) {
             if (id === olhando) continue;
             const c = Presenca.conversas.find((x) => x.id === id);
             if (!c) continue;
-            if (presencaDividaTemNaoVista(id)) Presenca.lidaDevendo.delete(id);
+            if (presencaDividaTemNaoVista(id)) { if (Presenca.lidaDevendo.has(id)) presencaQuitarDivida(id); }
             else c.naoLidas = 0;
         }
         // Conversa que o servidor diz ser do app o aparelho passa a conhecer:
@@ -559,6 +650,7 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
         // marca. As mais recentes primeiro, pelo teto.
         chatConhecer([...Presenca.conversas].sort((a, b) => (b.atividade || 0) - (a.atividade || 0)).map((c) => c.id));
     }
+    if (soConversas) { presencaRenderTudo(); presencaAnotarLista({ via }); return; }
     if (r.contagem && typeof r.contagem === 'object') Presenca.contagem = r.contagem;
     Presenca.pais = pais;
     if (!incompleta) Presenca.atualizadaEm = Math.max(Presenca.atualizadaEm, inicio);
@@ -571,13 +663,18 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona') {
 // filtro trocado com a ação no ar, a lista do Brasil entrava como a da França
 // — e, com ela "fresca", o pedido do país novo nem saía (auditoria de
 // 2026-09-26). Lista de outro país fica de fora; a do país novo vem pelo
-// pedido que a troca de filtro já faz.
+// pedido que a troca de filtro já faz. As CONVERSAS da carona entram mesmo
+// assim: elas não têm país, e iam fora junto com a lista (R8-5-03).
+//
+// O país de agora é o da PRESENÇA (`presencaPais`), o mesmo que a carona leva
+// (`paisDaFila`, no gesto): com "Minha área", os dois eram de países diferentes
+// e toda carona era jogada fora (R8-5-03).
 function presencaAoCarona(p, inicio, pais) {
     try {
         if (!p || !presencaPodeConectar()) return;
-        const atual = API.getCountry();
-        if (pais !== undefined && pais !== null && String(pais) !== String(atual)) return;
-        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona');
+        const atual = presencaPais();
+        const outroPais = pais !== undefined && pais !== null && String(pais) !== String(atual);
+        presencaAplicarLista(p, Number.isFinite(inicio) ? inicio : Date.now() - 2000, atual, 'carona', { soConversas: outroPais });
     } catch (e) { /* diagnóstico nunca derruba a ação */ }
 }
 
@@ -614,6 +711,12 @@ function presencaDesligar() {
     clearTimeout(Presenca.timers.lida);
     Presenca.lidaPendente = null;
     Presenca.lidaDevendo.clear();
+    // Da MEMÓRIA: a dívida GUARDADA no aparelho fica (a mesma conta, de volta
+    // depois da queda, a adota na primeira lista); o "Sair" e a troca de conta
+    // a apagam com a chave do chat (`presencaEsquecer`).
+    Presenca.lidaNoAr.clear();
+    Presenca.dividaGuardada.clear();
+    Presenca.dividasAdotadas = false;
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -630,6 +733,7 @@ function presencaDesligar() {
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
+    Presenca.fluxoParado = false;
     // A conversa, a lista e a folha do pedido FECHAM junto. Desligar é o que o
     // `showAuthScreen` chama quando a sessão acaba, e elas ficavam por cima da
     // tela de entrada — com a conversa (texto de terceiro) à mostra e um campo
@@ -693,7 +797,15 @@ function presencaTokenAbre() {
 // do token que faltava (ver o `querToken` do `presencaAtualizar`).
 function presencaFluxoGarantir({ pedirToken = true } = {}) {
     if (!presencaPodeConectar()) return;
-    if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
+    if (document.visibilityState === 'hidden') return;
+    // Sem rede não se tenta nada, e o fluxo fica PARADO: o recuo que vence aqui
+    // não reagenda, e quem religa é o `online` do navegador. O que não vem no
+    // iPhone (a nota da prova de rede, no api.js): sair do modo avião deixava o
+    // tempo real parado com o token valendo, e a resposta da outra pessoa não
+    // aparecia com a conversa aberta (auditoria da rodada 8, R8-5-01). Daí a
+    // marca, que a prova de rede lê (`presencaAoProvarRede`).
+    if (navigator.onLine === false) { Presenca.fluxoParado = true; return; }
+    Presenca.fluxoParado = false;
     // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
     // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
     // abre o fluxo quando o token vem.
@@ -710,9 +822,17 @@ function presencaFluxoGarantir({ pedirToken = true } = {}) {
 // só voltava reabrindo o app (auditoria de 2026-09-26). Aqui ele é pedido de
 // novo, com o MESMO teto de 5 min — e nada além disso: com token, quem cuida
 // do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google.
+//
+// A exceção é o fluxo PARADO (`fluxoParado`): o recuo venceu sem rede e não
+// deixou timer, e o `online` que o religaria pode não vir (R8-5-01). A
+// resposta que chegou prova a rede: religa UMA vez, sem pedir token (nenhum
+// pedido à API), e o fluxo aberto (ou o recuo dele, se falhar) volta a cuidar
+// de si — a próxima prova não religa de novo.
 function presencaAoProvarRede() {
-    if (presencaTokenAbre()) return;
-    presencaFluxoGarantir();
+    if (!presencaTokenAbre()) { presencaFluxoGarantir(); return; }
+    if (!Presenca.fluxoParado || Presenca.fluxo) return;
+    clearTimeout(Presenca.timers.fluxo);
+    presencaFluxoGarantir({ pedirToken: false });
 }
 
 function presencaFluxoFechar() {
@@ -1107,7 +1227,7 @@ function presencaMensagemDoFluxo(m, doLote) {
             // pagá-la agora marcaria esta também — "Lida" pra quem a mandou, e
             // a não lida sumindo daqui sem ninguém ter visto. Ela segue não lida
             // (com a que tinha sido vista), e abrir a conversa marca tudo.
-            Presenca.lidaDevendo.delete(com);
+            presencaQuitarDivida(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
@@ -1205,6 +1325,55 @@ function presencaAnunciar(msg) {
     el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
+// A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
+// pessoa viu nela (`presencaVistaDe`). Sem mensagem dela vista, nada a guardar.
+function presencaDever(id) {
+    Presenca.lidaDevendo.add(id);
+    const vista = presencaVistaDe(id);
+    if (vista.ate > 0) chatGuardarDivida(id, vista);
+}
+
+// A dívida da conversa acabou: paga (o Waze marcou a conversa inteira), ou sem
+// valer mais (chegou mensagem dela que a pessoa não viu). Sai da memória e do
+// aparelho.
+function presencaQuitarDivida(id) {
+    Presenca.lidaDevendo.delete(id);
+    Presenca.dividaGuardada.delete(id);
+    chatGuardarDivida(id, null);
+}
+
+// O "lida" no ar da conversa, enquanto ele SEGURA (o teto, ver
+// `PRESENCA_LIDA_NO_AR_MS`); vencido, sai.
+function presencaLidaNoAr(id) {
+    const voo = Presenca.lidaNoAr.get(id);
+    if (!voo) return null;
+    if (Date.now() - voo.em < PRESENCA_LIDA_NO_AR_MS) return voo;
+    Presenca.lidaNoAr.delete(id);
+    return null;
+}
+
+function presencaComLidaNoAr() {
+    return [...Presenca.lidaNoAr.keys()].filter((id) => presencaLidaNoAr(id));
+}
+
+// A dívida que veio GUARDADA no aparelho (a página anterior fechou devendo),
+// adotada UMA vez, na primeira lista com conversas: a lista desta página é a
+// régua (R8-5-04). O Waze que já não conta nenhuma dela como não lida (o
+// "lida" chegou e a resposta se perdeu com a página, ou a pessoa leu pelo WME)
+// não deve nada: sai sem pedido. O resto vira dívida como qualquer outra — a
+// lista vale zero pra ela (sem mensagem que a pessoa não viu) e o
+// `presencaSincronizar`, ou o próximo fechamento, paga.
+function presencaAdotarDividas() {
+    Presenca.dividasAdotadas = true;
+    for (const [id, vista] of Object.entries(chatDividas())) {
+        if (Presenca.lidaDevendo.has(id) || presencaLidaNoAr(id)) continue;
+        const c = Presenca.conversas.find((x) => x.id === id);
+        if (c && !c.naoLidas && !Presenca.vivas.has(id)) { chatGuardarDivida(id, null); continue; }
+        Presenca.dividaGuardada.set(id, vista);
+        Presenca.lidaDevendo.add(id);
+    }
+}
+
 // O "lida" que espera a rajada: `lidaPendente` diz de QUEM (a conversa que
 // estava na tela) e `timers.lida` é o relógio dele. Só a rajada: o "lida"
 // DEVENDO (o que falhou, o que venceu sem saber de quem é a sessão) mora em
@@ -1214,7 +1383,7 @@ function presencaAnunciar(msg) {
 // conversa esperando, ela também não se perde: vira dívida.
 function presencaAgendarLida(id) {
     clearTimeout(Presenca.timers.lida);
-    if (Presenca.lidaPendente && Presenca.lidaPendente !== id) Presenca.lidaDevendo.add(Presenca.lidaPendente);
+    if (Presenca.lidaPendente && Presenca.lidaPendente !== id) presencaDever(Presenca.lidaPendente);
     Presenca.lidaPendente = id;
     Presenca.timers.lida = setTimeout(() => presencaPagarLida(), PRESENCA_LIDA_ATRASO_MS);
 }
@@ -1237,7 +1406,9 @@ function presencaAgendarLida(id) {
 // o swipe que esperava o Desfazer: sessão que sai não grava nada depois. Outra
 // conta nunca o paga: o `definirPerfil` roda o `esquecerOutraConta` (que
 // desliga) no mesmo passo em que o perfil novo entra — antes de qualquer um
-// poder pagar.
+// poder pagar. A dívida GUARDADA no aparelho (`chatGuardarDivida`) é o que a
+// queda não descarta: a MESMA conta, de volta, a adota e paga (R8-5-04); o
+// "Sair" e a troca de conta a apagam com a chave do chat.
 //
 // O FECHAMENTO paga também as dívidas (`presencaPagarDevidas`): é o momento em
 // que a pessoa deixa de olhar, e o "lida" que ficou devendo de OUTRA conversa
@@ -1249,7 +1420,7 @@ function presencaPagarLida({ fechando = false } = {}) {
         Presenca.timers.lida = null;
         Presenca.lidaPendente = null;
         if (presencaEu()) presencaMarcarLida(id, { fechando });
-        else Presenca.lidaDevendo.add(id);   // devendo: espera o perfil
+        else presencaDever(id);   // devendo: espera o perfil
     }
     if (fechando) presencaPagarDevidas();
 }
@@ -1273,8 +1444,11 @@ function presencaPagarDevidas() {
     if (!Presenca.lidaDevendo.size || !presencaEu()) return;
     for (const id of [...Presenca.lidaDevendo]) {
         if (id === Presenca.lidaPendente && Presenca.timers.lida) continue;
+        if (presencaDividaTemNaoVista(id)) { presencaQuitarDivida(id); continue; }
+        // Sai da MEMÓRIA com o pedido (no ar, quem a carrega é o `lidaNoAr`); a
+        // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
+        // com ele no ar (R8-5-04).
         Presenca.lidaDevendo.delete(id);
-        if (presencaDividaTemNaoVista(id)) continue;
         presencaMarcarLida(id, { fechando: true });
     }
 }
@@ -1305,13 +1479,25 @@ function presencaUltimaDela(h) {
 function presencaDividaTemNaoVista(id) {
     const c = Presenca.conversas.find((x) => x.id === id);
     if (!c) return false;
-    const h = Presenca.historico.get(id);
+    const vista = presencaVistaDe(id);
     const u = c.ultima;
-    if (u && !u.deMim && !u.recibo && Number.isFinite(u.ts) && u.ts > presencaUltimaDela(h)) return true;
+    if (u && !u.deMim && !u.recibo && Number.isFinite(u.ts) && u.ts > vista.ate) return true;
+    return (c.naoLidas || 0) > vista.n;
+}
+
+// O que a pessoa VIU numa conversa: até que mensagem dela (`ate`, no relógio do
+// Waze) e quantas dela vistas o Waze ainda não confirmou como lidas (`n`). Do
+// histórico daqui; a conversa cuja dívida veio GUARDADA (`dividaGuardada`) soma
+// o que o aparelho guardou — reaberto o app, o histórico ainda não está aqui.
+function presencaVistaDe(id) {
+    const h = Presenca.historico.get(id);
     const confirmadaAte = Presenca.lidaEnviadaAte.get(id) || 0;
-    let vistasSemConfirmar = 0;
-    if (h) for (const m of h.msgs) if (!m.meu && m.ts > confirmadaAte) vistasSemConfirmar += 1;
-    return (c.naoLidas || 0) > vistasSemConfirmar;
+    let n = 0;
+    if (h) for (const m of h.msgs) if (!m.meu && m.ts > confirmadaAte) n += 1;
+    const vista = { ate: presencaUltimaDela(h), n };
+    const g = Presenca.dividaGuardada.get(id);
+    if (g) { vista.ate = Math.max(vista.ate, g.ate); vista.n = Math.max(vista.n, g.n); }
+    return vista;
 }
 
 // `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
@@ -1319,21 +1505,42 @@ function presencaDividaTemNaoVista(id) {
 async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (!fechando && !presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
+    let ultimaDela;
     // Conversa ainda carregando: o que chegou nela ainda não está na tela.
-    if (!h || !h.carregada) return;
-    const ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
+    if (h && h.carregada) ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
+    // A dívida que veio GUARDADA no aparelho (a página anterior fechou devendo,
+    // R8-5-04): o histórico não está aqui, e o que a pessoa viu é o que o
+    // aparelho guardou.
+    else if (fechando && Presenca.dividaGuardada.has(id)) ultimaDela = Presenca.dividaGuardada.get(id).ate;
+    else return;
     // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
-    // pedido seria à toa (voltar pra tela chama isto sempre). Mas a contagem
-    // DAQUI pode estar velha — uma lista lida no Waze antes do último "lida",
-    // chegada com o app no segundo plano —, e com a conversa na tela ela é zero.
+    // pedido seria à toa (voltar pra tela chama isto sempre) — nem dívida a
+    // pagar. Mas a contagem DAQUI pode estar velha — uma lista lida no Waze
+    // antes do último "lida", chegada com o app no segundo plano —, e com a
+    // conversa na tela ela é zero.
     if (!ultimaDela || (Presenca.lidaEnviadaAte.get(id) || 0) >= ultimaDela) {
+        presencaQuitarDivida(id);
         presencaZerarNaoLidas(id, Date.now());
         return;
     }
+    // Um "lida" NO AR já cobre esta mensagem: outro seria o mesmo pedido. O
+    // pago ao ir pro fundo (com `keepalive`) segue voando quando a pessoa volta
+    // logo, e a rajada da volta mandava o mesmo "lida" de novo — um pedido a
+    // mais por volta rápida com o Waze lento (auditoria da rodada 8, R8-5-06).
+    // Se ele falhar, a conversa volta a DEVER (abaixo).
+    const noAr = presencaLidaNoAr(id);
+    if (noAr && noAr.ate >= ultimaDela) return;
+    const voo = { ate: ultimaDela, em: Date.now() };
+    Presenca.lidaNoAr.set(id, voo);
     const carona = chatCarona();
     const epoca = Presenca.epoca;
     const enviadoEm = Date.now();
-    const r = await API.chat({ acao: 'lida', com: id, ...carona });
+    let r;
+    try {
+        r = await API.chat({ acao: 'lida', com: id, ...carona });
+    } finally {
+        if (Presenca.lidaNoAr.get(id) === voo) Presenca.lidaNoAr.delete(id);
+    }
     chatAoResponder(r, carona);
     if (epoca !== Presenca.epoca) return;   // desligou ou saiu no meio
     // Só DEPOIS da resposta: marcado antes, um "lida" que falhou (rede) ficava
@@ -1342,8 +1549,9 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (r && r.success) {
         Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
-        // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga.
-        Presenca.lidaDevendo.delete(id);
+        // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga
+        // — inclusive a guardada no aparelho.
+        presencaQuitarDivida(id);
         presencaZerarNaoLidas(id, enviadoEm);
     } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
@@ -1361,8 +1569,13 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
         // ela segue não lida, com a que tinha sido vista, como a que chega fora
         // da vista (auditoria de 2026-10-02, R7-5-01). Na tela, ela tem a rajada
         // dela, que marca a conversa inteira — e vira dívida se falhar.
-        if (presencaUltimaDela(h) > ultimaDela) Presenca.lidaDevendo.delete(id);
-        else Presenca.lidaDevendo.add(id);
+        //
+        // A lista que chegou com ele no ar já valeu zero pra conversa (ver o
+        // `lidaNoAr` no `presencaAplicarLista`, R8-5-05), e segue valendo com a
+        // dívida de volta; a conta de ANTES dele fica até a próxima lista, como
+        // sempre ficou (o Waze segue contando).
+        if (presencaUltimaDela(h) > ultimaDela) presencaQuitarDivida(id);
+        else presencaDever(id);
         // No diário, que não mostrava falha nenhuma do "lida": uma linha por
         // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
         // por conversa devendo a cada fechamento (`presencaAnotarMsg`).
@@ -1990,7 +2203,7 @@ function presencaRenderLista() {
     if (!folha || folha.classList.contains('hidden')) { presencaDesenhar(lista, ''); return; }
     const sub = document.getElementById('presencaSub');
     if (sub) {
-        const pais = presencaNomeDoPais(Presenca.pais || API.getCountry());
+        const pais = presencaNomeDoPais(Presenca.pais || presencaPais());
         sub.textContent = pais ? t('presenca.sheet.sub', { pais }) : t('presenca.sheet.subSemPais');
     }
     // Quem está no app, do mais perto pro mais longe: "a quem perguntar sobre
@@ -2398,6 +2611,8 @@ function presencaDiag() {
             aberto: !!Presenca.fluxo,
             haS: Presenca.fluxo ? Math.round((agora - Presenca.fluxo.desde) / 1000) : null,
             tentativa: Presenca.fluxoTentativa,
+            // Parado pela falta de rede, esperando o `online` ou a prova de rede.
+            parado: Presenca.fluxoParado,
             ...Presenca.fluxoDiag,
         },
         conhecidos: chatConhecidos().length,
@@ -2406,6 +2621,8 @@ function presencaDiag() {
         // Quantas conversas DEVEM um "lida" (ver `presencaPagarDevidas`): com
         // ela acima de zero, a "mensagem nova" de uma conversa já vista é isto.
         lidaDevendo: Presenca.lidaDevendo.size,
+        // E quantas têm o "lida" no ar agora (ver `presencaMarcarLida`).
+        lidaNoAr: presencaComLidaNoAr().length,
         // O porquê da lista, como o servidor contou na última (ver o core).
         contagem: Presenca.contagem,
     };

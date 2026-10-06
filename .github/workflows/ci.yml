@@ -58,9 +58,14 @@ jobs:
       - name: Sintaxe (node --check)
         run: for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
       - name: Testes (node --test)
+        # O reporter `spec` REPETE as reprovações no fim do log ("failing
+        # tests"), com o erro de cada uma. Com o TAP padrão fora de terminal, a
+        # reprovação ficava no meio de ~13 mil linhas, por ordem de chegada, e
+        # quem lê o log pelo fim (a interface do agente traz só a cauda) via
+        # "# fail 1" sem saber qual (PR #258, 2026-10-06).
         run: |
           if [ -d test ]; then
-            node --test
+            node --test --test-reporter=spec
           else
             echo "Sem diretório test/ ainda — pulando testes."
           fi

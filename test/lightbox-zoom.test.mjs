@@ -9,6 +9,21 @@ import { readFileSync } from 'node:fs';
 
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 
+// Um MÉTODO do `Lightbox` de verdade (`nome(...) { … }` dentro do objeto), como
+// texto — o `this` é quem o chamar.
+function metodoDoLightbox(nome) {
+  const obj = APP.indexOf('const Lightbox = {');
+  assert.ok(obj > 0, 'o objeto Lightbox sumiu');
+  const ini = APP.indexOf('\n    ' + nome + '(', obj) + 1;
+  assert.ok(ini > obj, `Lightbox.${nome} sumiu`);
+  let prof = 0, fim = -1;
+  for (let j = APP.indexOf('{', APP.indexOf(')', ini)); j < APP.length; j++) {
+    if (APP[j] === '{') prof++;
+    else if (APP[j] === '}') { prof--; if (prof === 0) { fim = j + 1; break; } }
+  }
+  return APP.slice(ini, fim).trim();
+}
+
 function lightbox() {
   const ini = APP.indexOf('    zoomTo(scale, cx, cy) {');
   assert.ok(ini > 0, 'zoomTo sumiu');
@@ -26,6 +41,11 @@ function lightbox() {
     width: W * lb.scale, height: H * lb.scale }) };
   const document = { getElementById: () => img };
   lb.zoomTo = new Function('document', 'return function ' + zoomTo.replace(/^zoomTo/, 'zoomTo'))(document);
+  // A régua de "ampliada de verdade" (R8-3-01), que o `zoomTo` também usa pra
+  // decidir quando o afastar volta a 1×, e o `panBy`, que só anda ampliada.
+  for (const nome of ['ampliada', 'panBy', 'resetZoom']) {
+    lb[nome] = new Function('return function ' + metodoDoLightbox(nome))();
+  }
   // Onde um ponto da foto (em coordenadas da foto, centradas) aparece na tela.
   lb.naTela = (u) => ({ x: C.x + lb.tx + lb.scale * u.x, y: C.y + lb.ty + lb.scale * u.y });
   lb.naFoto = (p) => ({ x: (p.x - C.x - lb.tx) / lb.scale, y: (p.y - C.y - lb.ty) / lb.scale });
@@ -288,4 +308,119 @@ test('R7-3-03 a partir de 1×, a roda fina e a pinça lenta do trackpad ampliam;
   assert.ok(p.scale > 1, 'CONTROLE: aproximar 0,05% a partir de 1× não ampliou');
   p.zoomTo(1.0003, 250, 420);
   assert.equal(p.scale, 1, 'CONTROLE: afastando pra baixo de 0,1% a escala não voltou a 1× (o R6-3-05)');
+});
+
+// ── R8-3-01: um fio de zoom pra DENTRO é 1× pra quem LÊ a escala ─────────────
+// (auditoria de 2026-10-03). O R7-3-03 deixou a roda fina e a pinça lenta do
+// trackpad ampliarem a partir de 1× — certo —, e um evento de −0,4 px para a
+// escala em 1,00073: invisível (a foto de 800 px fica com 801). Quem LIA a
+// escala perguntava `=== 1` ou `> 1`, e a tratava como ampliada: MEDIDO no
+// Chromium, a → ANDAVA a foto 80 px em vez de trocá-la, e o ↓ a andava em vez
+// de fechar (o R6-3-05 de volta, por outra porta). Os consumidores perguntam a
+// régua ÚNICA, `Lightbox.ampliada()`, que o `zoomTo` também usa.
+const UM_FIO = Math.pow(1.2, 0.4 / 100);   // um evento de roda de −0,4 px a partir de 1×
+
+test('R8-3-01 um fio de zoom pra DENTRO amplia (o R7-3-03), mas é 1× pra quem lê: `ampliada` diz não e o `panBy` não anda', () => {
+  const lb = lightbox();
+  lb.zoomTo(lb.scale * UM_FIO, 250, 420);
+  assert.ok(lb.scale > 1 && lb.scale < 1.001, `PRÉ-CONDIÇÃO: um evento de −0,4 px deu ${lb.scale} (o R7-3-03 guarda o passo, invisível)`);
+  assert.equal(lb.ampliada(), false,
+    `DEFEITO: a escala ${lb.scale.toFixed(5)} (invisível) conta como ampliada — as setas andam a foto e o ↓ não fecha`);
+  const t0 = [lb.tx, lb.ty];
+  lb.panBy(-80, 0);
+  assert.deepEqual([lb.tx, lb.ty], t0, 'DEFEITO: o panBy andou a foto num zoom invisível');
+  // CONTROLE: a roda fina SEGUE ampliando (o R7-3-03) e, passada a régua, conta como ampliada.
+  for (let i = 0; i < 39; i++) lb.zoomTo(lb.scale * UM_FIO, 250, 420);
+  assert.ok(lb.ampliada(), `CONTROLE: 40 eventos de −0,4 px (escala ${lb.scale.toFixed(4)}) não contam como ampliada`);
+  const t1 = lb.tx;
+  lb.panBy(-80, 0);
+  assert.equal(lb.tx, t1 - 80, 'CONTROLE: ampliada de verdade, o panBy deixou de andar');
+});
+
+test('R8-3-01 o afastar usa a MESMA régua: nenhum zoom que ENCOLHE para entre o 1× exato e o "ampliada"', () => {
+  for (const alvo of [1.0002, 1.0009, 1.001, 1.0010001, 1.0011, 1.002]) {
+    const lb = lightbox();
+    lb.zoomTo(1.5, 250, 420);
+    lb.zoomTo(alvo, 250, 420);
+    assert.ok(lb.scale === 1 || lb.ampliada(),
+      `afastar até ${alvo} deixou a escala em ${lb.scale}: nem 1× exato nem ampliada — as setas e o arraste não sabem o que ela é`);
+  }
+});
+
+// Os GESTOS da foto: o `setupLightbox` de VERDADE, com a camada e a <img> de
+// mentira que guardam os ouvintes, o relógio parado e o zoom de verdade.
+function gestosDaFoto(escala) {
+  const L = lightbox();
+  L.zoomTo(escala, 250, 420);
+  const log = [];
+  L.next = () => log.push('next');
+  L.prev = () => log.push('prev');
+  const no = () => ({ h: {}, addEventListener(tipo, fn) { this.h[tipo] = fn; }, setPointerCapture() {} });
+  const els = { imageLightbox: no(), lightboxImage: no(), lightboxClose: no(), lightboxPrev: no(), lightboxNext: no() };
+  let T = 1000;
+  const constantes = ['DUPLO_TOQUE_MS', 'DUPLO_TOQUE_RAIO_PX'].map((c) => {
+    const m = new RegExp('^const ' + c + ' = (\\d+);', 'm').exec(APP);
+    assert.ok(m, `${c} sumiu`);
+    return `const ${c} = ${m[1]};`;
+  }).join('\n');
+  const deps = {
+    document: { getElementById: (id) => els[id] || null }, Lightbox: L, performance: { now: () => T },
+    recuarNaFoto: () => log.push('recuou'), atualizarAcoesDeFoto: () => {}, avisarTravaAoTocar: () => {},
+    deltaDaRoda: () => 0, RODA_DENTE_PX: 100,
+  };
+  new Function(...Object.keys(deps), constantes + '\n' + fatiarFuncao('setupLightbox') + '\nsetupLightbox();')(...Object.values(deps));
+  const img = els.lightboxImage;
+  const ev = (x, y) => ({ pointerId: 1, clientX: x, clientY: y, preventDefault() {} });
+  const arrastar = ([x0, y0], [x1, y1]) => {
+    img.h.pointerdown(ev(x0, y0));
+    img.h.pointermove(ev((x0 + x1) / 2, (y0 + y1) / 2));
+    img.h.pointermove(ev(x1, y1));
+    img.h.pointerup(ev(x1, y1));
+    T += 400;
+  };
+  const toqueDuplo = (x, y) => {
+    img.h.pointerdown(ev(x, y)); img.h.pointerup(ev(x, y));
+    T += 120;
+    img.h.pointerdown(ev(x, y)); img.h.pointerup(ev(x, y));
+    T += 400;
+  };
+  return { L, log, arrastar, toqueDuplo };
+}
+
+test('R8-3-01 os GESTOS num fio de zoom invisível: o arraste troca de foto e fecha, e o duplo toque AMPLIA — ampliada de verdade, o arraste anda', () => {
+  const g = gestosDaFoto(UM_FIO);
+  assert.ok(g.L.scale > 1 && !g.L.ampliada(), `PRÉ-CONDIÇÃO: a escala ${g.L.scale} não é o fio invisível`);
+  const tx0 = g.L.tx;
+  g.arrastar([300, 400], [200, 400]);               // pro lado: −100 px
+  assert.deepEqual(g.log, ['next'], 'DEFEITO: num fio de zoom invisível o arraste pro lado não trocou de foto');
+  assert.ok(Math.abs(g.L.tx - tx0) < 1e-9, `DEFEITO: o arraste ANDOU a foto ${(g.L.tx - tx0).toFixed(1)} px num zoom invisível`);
+  g.arrastar([300, 300], [300, 420]);               // pra baixo: +120 px
+  assert.deepEqual(g.log, ['next', 'recuou'], 'DEFEITO: num fio de zoom invisível o arraste pra baixo não fechou');
+  g.toqueDuplo(260, 380);
+  assert.equal(g.L.scale, 2.5, `DEFEITO: o duplo toque num fio de zoom invisível deixou a escala em ${g.L.scale} (só "voltou" a 1×)`);
+  // CONTROLE: ampliada de verdade, o arraste ANDA (não troca nem fecha) e o duplo toque volta a 1×.
+  const c = gestosDaFoto(1.44);
+  const cx0 = c.L.tx;
+  c.arrastar([300, 400], [200, 400]);
+  assert.deepEqual(c.log, [], 'CONTROLE: ampliada, o arraste trocou de foto');
+  assert.ok(Math.abs(c.L.tx - (cx0 - 100)) < 1e-9, 'CONTROLE: ampliada, o arraste não andou a foto');
+  c.toqueDuplo(260, 380);
+  assert.equal(c.L.scale, 1, 'CONTROLE: ampliada, o duplo toque não voltou a 1×');
+});
+
+// E ninguém volta a perguntar à escala por conta própria: a régua é UMA. O
+// guard lê só CÓDIGO (gotcha #67) e se amarra a quem consome a escala — as
+// setas (`handleKeyDown`), os gestos (`setupLightbox`) e o `panBy`.
+test('R8-3-01 quem lê a escala pergunta `ampliada()`, nunca `=== 1`/`> 1` por conta própria', () => {
+  const semComentario = (txt) => txt.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const consumidores = { handleKeyDown: fatiarFuncao('handleKeyDown'), setupLightbox: fatiarFuncao('setupLightbox'),
+    panBy: metodoDoLightbox('panBy') };
+  for (const [nome, corpo] of Object.entries(consumidores)) {
+    const codigo = semComentario(corpo);
+    assert.doesNotMatch(codigo, /\b(?:Lightbox|this)\.scale\s*(?:===|!==|==|>=|<=|>|<)\s*1(?![.\d])/,
+      `${nome} voltou a comparar a escala com 1 por conta própria: um fio de zoom invisível vira "ampliada"`);
+    assert.match(codigo, /\.ampliada\(\)/, `${nome} deixou de perguntar a régua única (\`ampliada\`)`);
+  }
+  assert.match(semComentario(fatiarFuncao('handleKeyDown')), /Lightbox\.ampliada\(\) && Object\.prototype\.hasOwnProperty\.call\(SETAS_QUE_ANDAM, e\.key\)/,
+    'as setas da foto deixaram de perguntar a régua única');
 });

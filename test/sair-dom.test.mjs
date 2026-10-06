@@ -105,7 +105,7 @@ function elemento(id, { oculto = false } = {}) {
 }
 
 // Os nós que o app ESCREVE com dado de terceiro, e os modais em volta deles.
-const NOS = ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'accessDeniedMessage',
+const NOS = ['autoresBody', 'historyBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'accessDeniedMessage',
   'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'lightboxAnuncio', 'cardLiveRegion',
   // O mapa ampliado (R7-1-02): os marcadores com o nome do duplicado e das
   // entradas, a legenda, os tiles da área e o link do Street View.
@@ -155,7 +155,8 @@ function montar() {
     `  pontos: [{ ll: [-23.5, -46.6] }, { nome: 'Entrada${MARCA}' }, { nome: 'Duplicado${MARCA}' }],`,
     '  ' + metodoDoLightbox('close', 'MapaLightbox') + ' };',
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'), fatiar('devolverFoco'),
-    fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('showAuthScreen'),
+    fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('esvaziarPainelDoHistorico'),
+    fatiar('showAuthScreen'),
     // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
     // ela pode dizer o nome do local ("Renomeado para …").
     fatiar('anunciarNoLightbox'),
@@ -169,6 +170,10 @@ function montar() {
   // ampliada (contagem com o autor, nome do local na pílula, o `alt`).
   const preencher = () => {
     els.autoresBody.innerHTML = `<span>autor${MARCA}repetido</span><button data-autor="7777" aria-label="Esquecer autor${MARCA}repetido"></button>`;
+    // O resto do painel do Histórico (R8-7-06): a patente, os totais e o botão do
+    // Resumo do mês são o trabalho de quem estava (a marca no lugar dos números).
+    els.historyBody.innerHTML = `<div class="conq-card">Zelador do Mapa ${MARCA} 1801 tratados</div>`
+      + `<div>Hoje 34 · 7</div><button id="resumoBotao">Compartilhar meu resumo de ${MARCA}</button>`;
     els.autorTitle.textContent = `autor${MARCA}repetido`;
     els.autorCorpo.innerHTML = `<p>Você rejeitou 2 pedidos de autor${MARCA}repetido</p>`;
     els.accessDeniedProfile.innerHTML = `<strong>editor${MARCA}negado</strong> · L1 · não-AM`;
@@ -206,7 +211,7 @@ test('R6-1-05: depois de fechar (por qualquer caminho) e do "Sair", o DOM não g
   // CONTROLE: a varredura ENXERGA o dado de terceiro antes — sem isto, "nada
   // achado" passaria com o instrumento cego.
   const antes = m.varrer();
-  for (const no of ['autoresBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'lightboxImage', 'lightboxCount', 'lightboxNomeTxt',
+  for (const no of ['autoresBody', 'historyBody', 'autorTitle', 'autorCorpo', 'accessDeniedProfile', 'lightboxImage', 'lightboxCount', 'lightboxNomeTxt',
     'mapaLbMarks', 'mapaLbTiles', 'mapaLbStreetView']) {
     assert.ok(antes.some((x) => x.startsWith(no + ':')), `CONTROLE: a varredura não viu o dado de terceiro no #${no} — ela está cega`);
   }
@@ -274,4 +279,28 @@ test('R6-1-05: a lista de autores redesenhada com o painel FECHADO sai na tela d
   m.els.cardLiveRegion.textContent = `Novo pedido: Padaria${MARCA}`;
   m.app.showAuthScreen();
   assert.equal(m.els.cardLiveRegion.textContent, '');
+});
+
+// ── R8-7-06: o painel do Histórico INTEIRO sai do DOM (auditoria de 2026-10-03)
+// O lote 10 tirou do painel fechado a lista de autores; o resto dele — a
+// patente, os totais de hoje à semana, o botão do Resumo com o mês e a vitrine de
+// conquistas — seguia no `#historyBody` escondido depois do "Sair" e na sessão da
+// conta que entrava pela renovação, e ia no relatório do modo dev dela (MEDIDO no
+// Chromium). Sai pelos mesmos caminhos: o painel que fecha, a tela de entrada (a
+// folha do autor redesenha o painel FECHADO) e a troca de conta.
+test('R8-7-06: o painel do Histórico sai do DOM ao fechar os Filtros (qualquer caminho) e na tela de entrada', () => {
+  const m = montar();
+  m.preencher();
+  assert.ok(m.varrer().includes('historyBody:texto'), 'CONTROLE: a varredura não viu o painel do Histórico preenchido');
+  m.els.filtersModal.classList.remove('hidden');
+  m.app.closeModal('filtersModal');
+  assert.equal(m.els.historyBody.innerHTML, '', 'DEFEITO: o painel do Histórico FECHADO seguiu com o trabalho de quem estava no DOM');
+  // A folha do autor redesenha o painel com os Filtros FECHADOS (`esquecerAutor`,
+  // `alternarAutoDoAutor`): a tela de entrada o tira de novo.
+  m.preencher();
+  m.app.showAuthScreen();
+  assert.equal(m.els.historyBody.innerHTML, '', 'DEFEITO: depois do "Sair", o painel do Histórico redesenhado fechado ficou no DOM');
+  // E a troca de conta (que não passa pela tela de entrada) chama a mesma limpeza.
+  assert.match(fatiar('esquecerOutraConta'), /^\s+esvaziarPainelDoHistorico\(\);$/m,
+    'a troca de conta deixou o painel do Histórico da conta anterior no DOM');
 });

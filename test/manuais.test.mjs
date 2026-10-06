@@ -203,11 +203,15 @@ function hashDoCodigoDaExtensao() {
 // 0.3.2 = o ACESSAR que trava enquanto loga e volta em qualquer desfecho, e o
 // painel que diz o que acontece quando o login falha (rodada 7: R7-1-06 e
 // R7-6-07); ainda não publicada, então as duas mudanças são a MESMA versão.
+// 0.3.3 = o login do ACESSAR com prazo TOTAL abaixo do teto do botão: nenhuma
+// ida depois dele, a que está no ar é cancelada, e a aba não abre depois do
+// aviso (rodada 8: R8-6-01 = R8-1-02).
 const CODIGO_POR_VERSAO = {
   '0.2.0': '70aa3ce409d9449234e3183bfc7f7f8f21b6e769e11431865915657c565144a2',
   '0.3.0': '7183aaef5597ed54d3c68ed709dab8659ba69cda22d6c306e789f3b25fa7f36e',
   '0.3.1': '9845a36bdabe98e5baf540f6cdac90c4d5d5332f7420848334dd2c00bf677596',
   '0.3.2': '5a8fd648c151b022ca3c11b2c30fc980bda1023406b78c785716245e6e78483b',
+  '0.3.3': 'fae3ead541b97453a0b66f8ecc6eebf7b333fff4cc6abfbfebdad52bd648d430',
 };
 const semver = (v) => v.split('.').map(Number);
 const antes = (a, b) => { const x = semver(a), y = semver(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };

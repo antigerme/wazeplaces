@@ -509,7 +509,9 @@ function montarTecladoCom(trocas) {
     document: doc,
     window: { triggerSwipe: (dir) => saiu.push(dir) },
     AppState: { currentPlace: { updateRequestID: 'uA' }, pendingAction: null },
-    MapaLightbox: { isOpen: () => false }, Lightbox: { isOpen: () => false },
+    // A foto em 1× (`ampliada`, a régua das setas da foto, R8-3-01): o zoom não
+    // é o assunto daqui (test/lightbox-tab e test/lightbox-zoom).
+    MapaLightbox: { isOpen: () => false }, Lightbox: { isOpen: () => false, ampliada: () => false },
     topOpenModal: () => null, trapTabInModal() {}, closeModal() {}, desfazerAcaoPendente() {},
     acoesTravadas: () => false, agirNoPedidoDoGesto() {}, pedidoDoCard: () => null,
     handleReject() {}, handleMarkAsRead() {}, handleSkip() {}, desfazerPeloTeclado: () => false,

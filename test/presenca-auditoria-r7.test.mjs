@@ -485,12 +485,15 @@ function aparelho() {
       };
       const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica',
         'relerPreferenciasDeOutraAba', 'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado',
-        'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar'], deps);
+        'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar',
+        'presencaWmeSoltarAoSair'], deps);
       h.lerPreferenciasGuardadas();
       // O gesto, na ordem do ouvinte do interruptor (`prefPresenca`).
       const desligar = () => { AppState.preferences.presenca = false; AppState.preferences.presencaOffEm = relogio.agora; h.presencaWmeDesligar(); h.savePreferences(); };
       const religar = () => { AppState.preferences.presenca = true; delete AppState.preferences.presencaOffEm; h.presencaWmeReligar(); h.savePreferences(); };
-      return { ...h, AppState, presencaWme, sessao, desligar, religar };
+      // A página SAI (o `pagehide`): o envio no ar morre com ela (R8-5-07).
+      const fechar = () => h.presencaWmeSoltarAoSair();
+      return { ...h, AppState, presencaWme, sessao, desligar, religar, fechar };
     },
   };
 }
@@ -501,9 +504,11 @@ test('R7-5-03 o "invisível" com o pedido PENDURADO (sinal fraco) e o app fechad
   const p1 = a.pagina({ resposta: pendurado });
   p1.desligar();
   await espera();
-  assert.deepEqual(Object.keys(a.gravado() || {}), ['conta', 'em'], 'DEFEITO: com o pedido no ar, nada ficou gravado — fechar o app perde o gesto');
+  // (Desde o R8-5-07 o gravado leva também a hora do envio e a sessão dele.)
+  assert.deepEqual(Object.keys(a.gravado() || {}).sort(), ['conta', 'em', 'sessao', 'tentadoEm'], 'DEFEITO: com o pedido no ar, nada ficou gravado — fechar o app perde o gesto');
   assert.equal(a.gravado().conta, EU);
   // O app fecha (o pedido morre com a página) e abre de novo com rede, a mesma conta.
+  p1.fechar();
   const p2 = a.pagina({ resposta: () => ({ success: true }) });
   assert.equal(p2.AppState.preferences.presenca, false, 'CONTROLE: a reabertura tem que ler o interruptor desligado');
   p2.presencaWmeRefazerDesligar();                          // o `definirPerfil` chama isto quando o perfil chega
@@ -556,6 +561,7 @@ test('R7-5-03 a OUTRA aba herda o gravado: com a do gesto fechada e o pedido no 
   const outra = a.pagina({ nome: 'outra' });
   gesto.desligar();                                         // e esta aba fecha com o pedido no ar
   await espera();
+  gesto.fechar();                                           // (o `pagehide`: o envio morre com ela)
   outra.relerPreferenciasDeOutraAba();                      // o aviso `storage` chega à outra aba
   assert.equal(outra.AppState.preferences.presenca, false, 'CONTROLE: a outra aba tem que ler o interruptor desligado');
   outra.presencaWmeRefazerDesligar();                       // a próxima resposta da API, lá
@@ -579,6 +585,7 @@ test('R7-5-03 a resposta de um envio ANTERIOR não decide o gravado do envio que
   soltar[0]({ success: true });
   await espera();
   assert.ok(a.gravado(), 'DEFEITO: a resposta do envio anterior apagou o gravado do envio no ar');
+  p.fechar();                                               // o app fecha com o envio no ar
   const p2 = a.pagina();
   p2.presencaWmeRefazerDesligar();
   await espera();

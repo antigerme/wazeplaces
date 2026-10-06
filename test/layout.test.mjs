@@ -2787,7 +2787,8 @@ test('filtros: o modal abre antes de qualquer await de rede', () => {
   // Fatia SÓ o corpo da função: sem isto o `finally` de qualquer função
   // lá adiante no arquivo satisfazia o guard (pego na sabotagem).
   const pop = src.slice(jp, src.indexOf('\n}\n', jp));
-  assert.match(pop, /API\.listCountries\(\)/, 'a busca de países sumiu');
+  // Pela ida que a carga da abertura divide com os Filtros (`pedirListaDePaises`, R8-6-04).
+  assert.match(pop, /pedirListaDePaises\(regiao\)/, 'a busca de países sumiu');
   assert.match(pop, /loadStatesIntoSelect\(/, 'a busca de estados sumiu');
   // Falha de rede não pode deixar o seletor travado pra sempre.
   assert.match(pop, /finally\s*\{/, 'sem finally, uma falha deixa o seletor desabilitado');

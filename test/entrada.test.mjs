@@ -214,9 +214,124 @@ test('a foto agendada da conta que SAIU não pousa no <img> da que entrou (époc
   assert.equal(el.src, '', 'a foto da conta que saiu pousou no cabeçalho da que entrou');
 });
 
-test('o "Sair" limpa a lista de recursos que o diagnóstico leva (foto de perfil e fotos de terceiros)', () => {
-  assert.match(fatiar('handleLogout'), /try \{ performance\.clearResourceTimings\(\); \} catch \(e\) \{\}/,
-    'a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos');
+test('o "Sair" e a troca de conta limpam a lista de recursos que o diagnóstico leva (foto de perfil e fotos de terceiros)', () => {
+  // Os dois passam pela MESMA limpeza — a troca de conta não passava por
+  // nenhuma (auditoria de 2026-10-03, R8-1-05). Ancorado no começo da linha:
+  // o comentário em volta cita o nome (gotcha #67).
+  for (const quem of ['handleLogout', 'esquecerOutraConta']) {
+    assert.match(fatiar(quem), /^\s+esquecerRegistrosDaPagina\(\);$/m,
+      `${quem}: a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos`);
+  }
+});
+
+// ═══ R8-1-04 · a foto que ainda CHEGAVA no "Sair" ═════════════════════════════
+// Limpar a lista de recursos não bastava: o download no ar terminava DEPOIS da
+// limpeza, e a entrada voltava — a foto do pedido de terceiro ia no relatório
+// do modo dev da próxima conta que entrasse na mesma página (MEDIDO no Chromium
+// e no WebKit, auditoria de 2026-10-03). Cortar o download não resolve (tirar o
+// `src` não cancela a ida do navegador — medido nos dois motores); o que separa
+// a foto de quem saiu é QUANDO ela começou. Roda as duas funções DE VERDADE num
+// `performance` de mentira que se comporta como o do navegador: a limpeza
+// esvazia o que TERMINOU, e o que termina depois entra com o `startTime` do
+// começo. A marca mora no `API` (`registrosDesde`): é a mesma do anel de
+// chamadas (L12-1, abaixo).
+test('R8-1-04: a foto que chega DEPOIS da limpeza não volta pro relatório — o que conta é quando ela COMEÇOU', () => {
+  const montarRecursos = () => {
+    const relogio = { agora: 0 };
+    const lista = [];
+    const performance = {
+      now: () => relogio.agora,
+      clearResourceTimings: () => { lista.length = 0; },
+      getEntriesByType: (tipo) => (tipo === 'resource' ? lista.slice() : []),
+    };
+    const fns = montar(['esquecerRegistrosDaPagina', 'diagRecursosDaSessao'], { performance, API: { registrosDesde: 0 } },
+      ['esquecerRegistrosDaPagina', 'diagRecursosDaSessao']);
+    const terminou = (name, startTime) => lista.push({ name, startTime });
+    return { ...fns, relogio, terminou, nomes: () => fns.diagRecursosDaSessao().map((r) => r.name) };
+  };
+  const m = montarRecursos();
+  m.terminou('/js/min/app.js', 5);
+  m.terminou('https://sms-profile-image.waze.com/AVATAR_DE_QUEM_SAIU', 40);
+  assert.deepEqual(m.nomes(), ['/js/min/app.js', 'https://sms-profile-image.waze.com/AVATAR_DE_QUEM_SAIU'],
+    'CONTROLE: antes de qualquer "Sair" o relatório leva a lista inteira');
+  // A foto do card começou aos 100 ms; o "Sair" limpa aos 400; ela termina aos 4.100.
+  m.relogio.agora = 400;
+  m.esquecerRegistrosDaPagina();
+  assert.deepEqual(m.nomes(), [], 'a limpeza deixou o que já tinha terminado');
+  m.terminou('https://venue-image.waze.com/thumbs/thumb700_FOTO_DE_TERCEIRO.jpg', 100);
+  // O que a próxima conta pede começa DEPOIS da limpeza, e é dela.
+  m.terminou('/api/buscar-places', 900);
+  assert.deepEqual(m.nomes(), ['/api/buscar-places'],
+    'DEFEITO: a foto que ainda chegava no "Sair" voltou pro relatório da próxima conta');
+});
+
+test('R8-1-04: o relatório lê a lista de recursos SÓ pela régua da sessão — nenhum leitor cru dela', () => {
+  // Guard pela ESTRUTURA: o único leitor da lista crua é o `diagRecursosDaSessao`,
+  // e o `diagCorpo` monta os `recursos` dele. Um leitor novo da lista crua levaria
+  // a foto de quem saiu de volta pro relatório.
+  const leitores = [...APP_SEM.matchAll(/getEntriesByType\('resource'\)/g)].length;
+  assert.equal(leitores, 1, `a lista crua de recursos tem ${leitores} leitores no app.js — passe pelo diagRecursosDaSessao`);
+  assert.match(fatiar('diagRecursosDaSessao'), /getEntriesByType\('resource'\)/);
+  assert.match(fatiar('diagCorpo'), /const recursos = diagRecursosDaSessao\(\)\n/,
+    'o relatório deixou de montar os recursos pela régua da sessão');
+});
+
+// ═══ L12-1 · a CHAMADA que estava no ar no "Sair" (pista do lote 12) ═══════════
+// O anel de chamadas (`API.chamadas`, que o relatório do modo dev leva) tinha o
+// mesmo buraco da lista de recursos: o "Sair" o zerava, mas o ✕ que esperava a
+// resposta registrava DEPOIS, com o corpo do pedido — o id do pedido de
+// terceiro, e a posição e o id de quem saiu na carona da presença (MEDIDO no
+// Chromium e no WebKit, roteiro do lote 12). Roda o `api.js` DE VERDADE (o
+// `_post`, com o `fetch` preso) e a limpeza do app.js no MESMO contexto: a marca
+// que a limpeza põe é UMA só, e vale pras duas listas.
+test('L12-1: a chamada que estava no AR no "Sair" não entra no anel de quem vem depois — a MESMA marca da lista de recursos', async () => {
+  const relogio = { agora: 0 };
+  const lista = [];
+  const presos = [];
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console, setTimeout, clearTimeout, AbortController,
+    performance: { now: () => relogio.agora, clearResourceTimings: () => { lista.length = 0; },
+      getEntriesByType: (tipo) => (tipo === 'resource' ? lista.slice() : []) },
+    // O servidor responde quando o teste solta.
+    fetch: () => new Promise((ok) => presos.push(() => ok({ status: 200, headers: { get: () => null },
+      text: async () => JSON.stringify({ success: true }) }))),
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(ler('js/i18n.js') + '\n' + ler('js/api.js') + '\n' + fatiar('esquecerRegistrosDaPagina') + '\n'
+    + fatiar('diagRecursosDaSessao') + '\nthis.API = API; this.limpar = esquecerRegistrosDaPagina; this.recursos = diagRecursosDaSessao;', ctx);
+  const { API } = ctx;
+  const soltar = async () => { for (const f of presos.splice(0)) f(); for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok)); };
+  // (`Array.from` traz as listas pro reino do teste: arrays do contexto do vm têm outro protótipo.)
+  const rotas = () => Array.from(API.chamadas, (c) => c.rota);
+  // CONTROLE: sem limpeza nenhuma no meio, a chamada registra quando a resposta chega.
+  relogio.agora = 50;
+  const antes = API._post('buscar-places', { sessionToken: 'tok-A', page: 1 });
+  relogio.agora = 80;
+  await soltar(); await antes;
+  assert.deepEqual(rotas(), ['buscar-places'], 'CONTROLE: a chamada que terminou não entrou no anel (a medida não enxerga o registro)');
+  // O ✕ sai aos 100 ms e a resposta fica presa; o "Sair" zera o anel e põe a marca aos 400.
+  relogio.agora = 100;
+  const voo = API._post('validar-place', { sessionToken: 'tok-A', venueID: 'v-de-terceiro', updateRequestID: 'u-de-terceiro',
+    presenca: { userId: '4242', lat: -23.5, lon: -46.6, pais: 30 } });
+  relogio.agora = 400;
+  API.chamadas.length = 0;
+  ctx.limpar();
+  assert.equal(API.registrosDesde, 400, 'PRÉ-CONDIÇÃO: a limpeza não pôs a marca no API');
+  // O que a página pede DEPOIS do "Sair" (a exclusão da sessão, a próxima conta) é de quem vem.
+  relogio.agora = 500;
+  const depois = API._post('sessao', { action: 'destroy', sessionToken: 'tok-A' });
+  relogio.agora = 4100;
+  await soltar(); await voo; await depois;
+  assert.deepEqual(rotas(), ['sessao'],
+    'DEFEITO: a chamada que estava no ar no "Sair" entrou no anel depois da limpeza — com o corpo do pedido: '
+    + JSON.stringify(API.chamadas.map((c) => c.corpoReq)));
+  // E a MESMA marca vale pra lista de recursos: o recurso que começou antes dela não volta.
+  lista.push({ name: 'https://venue-image.waze.com/thumbs/foto_de_terceiro.jpg', startTime: 100 }, { name: '/api/sessao', startTime: 500 });
+  assert.deepEqual(Array.from(ctx.recursos(), (r) => r.name), ['/api/sessao'], 'a lista de recursos e o anel não usam a mesma marca');
 });
 
 // ── A4: o autor em foco é da fila de QUEM ESTAVA aqui ──────────────────────
@@ -232,6 +347,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
@@ -280,6 +396,9 @@ async function rodarBackground(corpoDoServidor) {
     },
     fetch: async () => { chamadas++; return { json: async () => corpoDoServidor }; },
     setTimeout: (fn) => { fn(); return 0; },   // as esperas entre tentativas, sem esperar
+    // O service worker de verdade tem os dois, e o login os usa desde a 0.3.3 (o
+    // prazo do ACESSAR, R8-6-01; a ponte, que este teste roda, não tem prazo).
+    AbortController, clearTimeout: () => {},
     console,
   };
   vm.createContext(ctx);
@@ -903,7 +1022,9 @@ async function sondar(resposta) {
   const toasts = [], quedas = [];
   const deps = {
     dlog() {}, verificandoSessao: false, AppState: { authenticated: true }, VERIFICA_SESSAO_MS: 0,
-    API: { getProfile: async () => resposta }, derrubarSessao: (k) => quedas.push(k || null),
+    // A região em que a sonda pergunta: os editáveis do perfil dela são dela (R8-6-03).
+    API: { getProfile: async () => resposta, getRegion: () => 'row' }, derrubarSessao: (k) => quedas.push(k || null),
+    anotarEditaveis() {},
     guardarReferencias() {}, guardarPerfilDoPortao() {}, renderProfileHeader() {}, dfato() {}, dlogCapturarAuto() {},
     showToast: (m) => toasts.push(m), t: (k) => k, rebuscarDepoisDeFalha() {}, esvaziarFilaDeSaida() {},
     showAccessDenied() {}, showAuthScreen() {},
@@ -1758,4 +1879,53 @@ test('R7-1-04: o colar que FALHA devolve o foco ao "Colar cookies" — o botão 
   doc.activeElement = dialogo;       // o "Acesso restrito" abriu com o foco nele
   setAuthLoading(false);
   assert.equal(doc.activeElement, dialogo, 'o foco foi tirado do diálogo que abriu');
+});
+
+// ═══ R8-1-01 · o login pelo ARQUIVO, pelo teclado ═════════════════════════════
+// O lote 11 levou o foco ao ✕ do primeiro card pra quem entra pelo teclado
+// colando ou com o código (R7-1-04). O terceiro caminho, o arquivo, ficou de
+// fora: Tab até "Fazer upload do cookies.txt", Enter, e o card chegava com o
+// foco no <body> — o Tab seguinte ia à seta do carrossel (MEDIDO nos dois
+// motores, auditoria de 2026-10-03). O `change` do seletor vem do SISTEMA e não
+// diz como ele foi aberto: o teclado se lê no toque que o abre, e o login o
+// recebe. Roda o `setupAuthListeners` e o `handleFileUpload` DE VERDADE.
+test('R8-1-01: o "Fazer upload do cookies.txt" pelo TECLADO chega ao login como teclado — e só ele', async () => {
+  const ouvintes = {};
+  const el = (id) => ({ id, addEventListener: (tipo, fn) => { ouvintes[id + ':' + tipo] = fn; }, click() { abertos.push(id); } });
+  const abertos = [];
+  const els = Object.fromEntries(['uploadBtn', 'fileInput', 'pasteBtn', 'confirmPaste', 'cancelPaste', 'byAuthor', 'closeAccessDenied']
+    .map((id) => [id, el(id)]));
+  const doc = { activeElement: els.uploadBtn, getElementById: (id) => els[id] || null };
+  const logins = [];
+  const { setupAuthListeners } = montar(['setupAuthListeners', 'handleFileUpload', 'veioDoTeclado'], {
+    document: doc, window: {}, openModal() {}, closeModal() {}, handlePasteConfirm() {},
+    authenticateWithCookies: async (c, o) => { logins.push(o); }, showToast() {}, t: (k) => k,
+  }, ['setupAuthListeners'], 'let arquivoPeloTeclado = false;');
+  setupAuthListeners();
+  // O toque que abre o seletor (Enter: `detail` 0, com o foco no botão; o mouse
+  // e o dedo: `detail` 1), e o arquivo que o sistema entrega.
+  const tocar = (detail) => ouvintes['uploadBtn:click']({ detail, currentTarget: els.uploadBtn });
+  const entregar = () => ouvintes['fileInput:change']({ target: { files: [{ text: async () => 'cookies' }], value: 'x' } });
+  tocar(0);
+  assert.deepEqual(abertos, ['fileInput'], 'PRÉ-CONDIÇÃO: o toque não abriu o seletor de arquivo');
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: true },
+    'DEFEITO: o arquivo escolhido pelo teclado chegou ao login como mouse — o foco cai no <body> quando a tela de entrada some');
+  // CONTROLE: pelo mouse, nada é prometido.
+  tocar(1);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'CONTROLE: o arquivo escolhido pelo mouse chegou como teclado');
+  // E a marca é GASTA: o seletor aberto pelo teclado e CANCELADO (sem `change`)
+  // não faz o arquivo seguinte, escolhido pelo mouse, chegar como teclado.
+  tocar(0);
+  tocar(1);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'o seletor cancelado deixou a marca do teclado pro arquivo seguinte');
+  // Nem o `change` que chega sem toque nenhum antes: a marca é do arquivo que o
+  // teclado abriu, e sai com ele.
+  tocar(0);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: true }, 'CONTROLE: o teclado deixou de valer no segundo arquivo');
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'a marca do teclado valeu pra dois arquivos');
 });

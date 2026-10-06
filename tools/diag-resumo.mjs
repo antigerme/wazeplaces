@@ -17,9 +17,10 @@
 //    saída; e, como defesa a mais, TODA a saída passa por uma troca do token
 //    por `<TOKEN>` antes de ser impressa — se ele vazar pra dentro de alguma
 //    mensagem de erro, não sai daqui. O link de pareamento (`#pair=…`), idem.
-//  · DADO DE TERCEIRO EM MASSA: `appState` (a fila inteira), `dom`, `codigo` e
-//    o corpo das chamadas (`corpoReq`) ficam de fora. O diário do modo dev pode
-//    citar um nome de local, como sempre citou — ele é assim por desenho.
+//  · DADO DE TERCEIRO EM MASSA: `appState` (a fila inteira), a fila real que o
+//    treino guarda (`treino`: só a contagem), `dom`, `codigo` e o corpo das
+//    chamadas (`corpoReq`) ficam de fora. O diário do modo dev pode citar um
+//    nome de local, como sempre citou — ele é assim por desenho.
 // `test/diag-resumo.test.mjs` prova as duas coisas com CANÁRIOS.
 //
 // Relatório ANTIGO também abre: o que a versão dele não trazia sai como
@@ -89,9 +90,22 @@ else {
   }
 }
 
+// O TREINO (R8-4-06): com ele aberto, a fila na tela — e no `appState` e no
+// `estado.fila` das capturas — é a de EXEMPLOS, não a real. O app passou a dizer
+// isso (`treino` na tela) e a levar a fila real que o treino guarda (`treino`,
+// no corpo); a triagem diz o primeiro e CONTA o segundo, sem os pedidos.
+const textoDoTreino = (tr) => (tr === undefined ? AUSENTE : !tr || tr.ativo === false ? 'fechado'
+  : tr.ativo === true ? `ABERTO (passo ${tr.passo ?? '?'} · ${tr.exemplos ?? '?'} exemplos na fila)` : 'não se sabe');
+
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
-out(`tela ${ta.tela} · painel ${painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox}`);
+out(`tela ${ta.tela} · painel ${painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox} · treino ${textoDoTreino(ta.treino)}`);
+if (ta.treino && ta.treino.ativo === true) {
+  const g = d.treino && typeof d.treino === 'object' ? d.treino : {};
+  const n = (x) => (Array.isArray(x) ? x.length : '?');
+  out('ATENÇÃO: relatório gerado DENTRO do treino — a fila na tela e no `appState` é de EXEMPLOS; a fila real é a que o treino guarda.');
+  out(`fila real guardada pelo treino: ${n(g.fila)} pedidos · recusados que voltam como card ao sair dele: ${n(g.devolver)} · perfil chegou nele: ${g.perfilChegou ?? '?'} · ordem trocada nele: ${g.ordemMudou ?? '?'} · época da fila real ${g.epoca ?? '?'} (a do treino ${g.epocaDoTreino ?? '?'}, a de agora ${g.epocaAgora ?? '?'})`);
+}
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.
 const jaTratadas = typeof r.jaTratadas === 'number' ? ` · já tratadas ${r.jaTratadas}` : '';
@@ -323,7 +337,9 @@ if (chamadas.length > 30) out(`(… e mais ${chamadas.length - 30} antes destas)
 function linhasDaCaptura(m, recuo = '') {
   const quebradas = Array.isArray(m.imagens) ? m.imagens.filter((i) => i.quebrada).length : '—';
   const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
-  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}`);
+  // A captura feita DENTRO do treino (R8-4-06): a `fila` da 3ª linha conta os exemplos.
+  const noTreino = m.treino && m.treino.ativo === true ? ` · DENTRO DO TREINO (${m.treino.exemplos ?? '?'} exemplos na fila)` : '';
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}${noTreino}`);
   out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
   out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
 }

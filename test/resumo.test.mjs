@@ -325,3 +325,56 @@ test('Resumo: o `alt` da imagem diz o que ela diz, COM os números (H19)', () =>
   // E a folha usa esse alt, não o "Resumo do mês" genérico.
   assert.match(fatiarFuncao('abrirResumoDoMes'), /img\.alt = r\.alt \|\|/, 'a imagem da folha voltou ao alt sem números');
 });
+
+// ── 6. DE QUEM é o resumo (auditoria de 2026-10-03, R8-7-04) ─────────────────
+// A geração é ASSÍNCRONA (a fonte, o `qr.js` pela rede na 1ª vez, o logo), e a
+// folha abria no fim dela sem conferir nada: com o "Sair" noutra aba no meio, ela
+// abria por cima da tela de entrada com o nome e os números de quem saiu, e o
+// "Baixar" e o "Compartilhar" vivos (MEDIDO no Chromium com o `qr.js` segurado).
+// Roda o `abrirResumoDoMes` DE VERDADE, com a geração presa até o teste soltar.
+test('R8-7-04: o Resumo do mês só abre pra MESMA sessão e conta, com o Histórico na tela — senão a imagem é jogada fora', async () => {
+  const montarResumo = () => {
+    let soltar = null;
+    const gerado = new Promise((ok) => { soltar = ok; });
+    const log = [];
+    const els = { resumoImg: { src: '', alt: '' }, resumoTitle: { textContent: '' },
+      resumoCompartilhar: { classList: { toggle() {} } } };
+    const estado = { conta: '111', naTela: true };
+    // (o `fatiarFuncao` corta a partir de `function`: o `async` volta aqui)
+    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null;\nasync ' + fatiarFuncao('abrirResumoDoMes')
+      + '\nreturn { abrirResumoDoMes, mudarSessao: () => { epocaDaSessao++; }, resumo: () => resumoAtual };';
+    const fns = new Function('gerarResumoDoMes', 'contaAgora', 'historicoNaTela', 'document', 'URL', 'File', 'navigator',
+      'openModal', 'showToast', 't', corpo)(
+      () => gerado, () => estado.conta, () => estado.naTela, { getElementById: (id) => els[id] },
+      { createObjectURL: () => { log.push('imagem'); return 'blob:resumo'; }, revokeObjectURL() {} },
+      class { constructor() {} }, { canShare: () => false },
+      (id) => log.push('abriu:' + id), (m) => log.push('toast:' + m), (k) => k);
+    const pronto = { canvas: { toBlob: (cb) => cb({ size: 1 }) }, mesNome: 'outubro',
+      alt: 'antigerme limpou 52 pedidos do mapa', nomeArquivo: 'wazeplaces-2026-10.png' };
+    return { ...fns, soltar: () => soltar(pronto), estado, log, els };
+  };
+  const abrir = async (noMeio) => {
+    const m = montarResumo();
+    const pedido = m.abrirResumoDoMes();
+    noMeio(m);
+    m.soltar();
+    await pedido;
+    return m;
+  };
+  // CONTROLE: ninguém saiu — a folha abre com a imagem.
+  const c = await abrir(() => {});
+  assert.deepEqual(c.log, ['imagem', 'abriu:resumoModal'], 'CONTROLE: sem ninguém sair, a folha não abriu');
+  for (const [caso, noMeio] of [
+    // O que o auditor mediu: o "Sair" noutra aba (a sessão, a conta e a tela, juntas).
+    ['o "Sair" noutra aba', (m) => { m.mudarSessao(); m.estado.conta = null; m.estado.naTela = false; }],
+    // E cada régua sozinha, pra nenhuma ser decoração (gotcha #67).
+    ['a sessão caiu e voltou', (m) => m.mudarSessao()],
+    ['outra conta entrou', (m) => { m.estado.conta = '222'; }],
+    ['a pessoa fechou o Histórico', (m) => { m.estado.naTela = false; }],
+  ]) {
+    const m = await abrir(noMeio);
+    assert.deepEqual(m.log, [], `DEFEITO (${caso}): a folha do Resumo abriu (ou avisou) depois — ${m.log.join(' ')}`);
+    assert.equal(m.resumo(), null, `${caso}: a imagem de quem saiu ficou guardada pro "Baixar"`);
+    assert.equal(m.els.resumoImg.alt, '', `${caso}: os números de quem saiu foram pro alt da imagem`);
+  }
+});

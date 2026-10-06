@@ -3220,6 +3220,141 @@ for (const como of ['teclado', 'mouse']) {
   await ctx.close();
 }
 
+// ── Treino: o FIM e o "Quero treinar antes" pelo TECLADO, o foco no ✕ ────
+// Os irmãos do "Sair" de cima: controles do treino que somem com o foco
+// (auditoria de 2026-10-03, MEDIDO no Chromium e no WebKit).
+//   R8-7-07 — o fim do treino fechado pelo teclado (Enter no "Ir para a fila",
+//             Esc) devolvia o foco a quem abriu o diálogo, o ✓ do último card
+//             de TREINO, que saiu com ele: caía no ⓘ do topo. Vai ao ✕ do card
+//             real que volta;
+//   R8-7-08 — o "Quero treinar antes" pelo teclado devolvia o foco ao ✕ do card
+//             REAL, que o treino troca logo em seguida: caía no <body>. Vai ao ✕
+//             do card de treino.
+// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" (o foco volta a
+// quem abriu o diálogo — prova que a medida enxerga o fechamento devolvendo o
+// foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão focado.
+{
+  const montar = async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 2; AppState.hasMore = false;
+      const real = (i) => ({ venueID: 'real' + i, updateRequestID: 'r' + i, name: 'Local Real ' + i,
+        categories: ['OTHER'], address: 'Rua Real, ' + i, updateType: 'Novo Local', updateTypeKey: 'VENUE',
+        purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'x', changes: [], imageUrls: [], mapa: null, dateAdded: Date.now() });
+      AppState.queue = [real(1), real(2)];
+      AppState.currentPlace = AppState.queue[0];
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+    });
+    return { ctx, page };
+  };
+  const foco = (page) => page.evaluate(() => {
+    const a = document.activeElement;
+    return { treino: Treino.ativo, frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      deTreino: !!(AppState.currentPlace && AppState.currentPlace._treino),
+      foco: !a || a === document.body ? 'body' : (a.id || String(a.className).split(' ')[0]),
+      noCardDaFrente: !!(a && cardDaFrente() && cardDaFrente().contains(a)) };
+  });
+  const focadoAgora = (page) => page.evaluate(() => document.activeElement && document.activeElement.id);
+  const focoNoX = (page) => esperarNaPagina(page,
+    () => !!document.activeElement && document.activeElement.classList.contains('card-btn-reject'), 3000);
+
+  // R8-7-07: o treino inteiro pelo teclado (Enter no ✓ de cada card) até o fim.
+  for (const como of ['Enter', 'Esc', 'mouse']) {
+    const { ctx, page } = await montar();
+    const onde = `treino, o fim fechado pelo ${como}`;
+    await page.evaluate(() => Treino.entrar());
+    let passos = 0;
+    for (let i = 0; i < 10; i++) {
+      const fim = await page.evaluate(() => !document.getElementById('treinoFimModal').classList.contains('hidden'));
+      if (fim) break;
+      // O FIM de cada passo, nunca um prazo: o `agir` conta o passo e monta o
+      // card seguinte (ou abre o diálogo do fim) na mesma tarefa. A marca vai
+      // NA PÁGINA — a função da espera é serializada, sem as variáveis daqui.
+      await page.evaluate(() => { window.__passoAntes = Treino.passo; });
+      await page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-read');
+      await page.keyboard.press('Enter');
+      passos++;
+      await esperarNaPagina(page, () => Treino.passo > window.__passoAntes, 3000);
+    }
+    const abriu = await esperarNaPagina(page, () => !document.getElementById('treinoFimModal').classList.contains('hidden'), 3000);
+    checa(abriu.ok, `${onde}: PRÉ-CONDIÇÃO — o "Treino concluído" não abriu (${passos} passos)`);
+    let focado = null;
+    if (como === 'Enter') {
+      await page.focus('#treinoFimOk');
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+    } else if (como === 'Esc') {
+      await page.keyboard.press('Escape');
+    } else {
+      await page.click('#treinoFimOk');
+    }
+    const voltou = await esperarNaPagina(page, () => !Treino.ativo && !!cardDaFrente()
+      && AppState.currentPlace && AppState.currentPlace.updateRequestID === 'r1', 5000);
+    if (como !== 'mouse') await focoNoX(page);
+    else await doisQuadros(page);
+    const r = await foco(page);
+    checa(voltou.ok && !r.treino && r.frente === 'r1', `${onde}: PRÉ-CONDIÇÃO — o card real não voltou`, JSON.stringify(r));
+    if (como === 'Enter') checa(focado === 'treinoFimOk', `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no "Ir para a fila" focado (${focado})`);
+    if (como === 'mouse') {
+      checa(!r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    } else {
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o diálogo fechou e o foco ficou em ${r.foco} — quem usa teclado recomeça da Ajuda`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+
+  // R8-7-08: o "Como funciona" aberto com o foco guardado no ✕ do card real (o
+  // adiado, R7-7-01), e o Enter no "Quero treinar antes" / no "Entendi".
+  for (const como of ['Treinar', 'Entendi', 'mouse']) {
+    const { ctx, page } = await montar();
+    const onde = `"Como funciona", ${como === 'Treinar' ? 'Enter no "Quero treinar antes"' : como === 'Entendi' ? 'Enter no "Entendi"' : 'o mouse no "Quero treinar antes"'}`;
+    await page.evaluate(() => {
+      cardDaFrente().querySelector('.card-btn-reject').focus();
+      abrirComoFunciona();
+    });
+    const botao = como === 'Entendi' ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
+    let focado = null;
+    if (como === 'mouse') {
+      await page.click('#' + botao);
+    } else {
+      await page.focus('#' + botao);
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+    }
+    const fechou = await esperarNaPagina(page, () => document.getElementById('comoFuncionaModal').classList.contains('hidden')
+      && !!cardDaFrente(), 3000);
+    if (como !== 'mouse') await focoNoX(page);
+    else { await esperarNaPagina(page, () => Treino.ativo, 3000); await doisQuadros(page); }
+    const r = await foco(page);
+    checa(fechou.ok, `${onde}: PRÉ-CONDIÇÃO — o diálogo não fechou`, JSON.stringify(r));
+    if (como !== 'mouse') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
+    if (como === 'Entendi') {
+      checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: CONTROLE — o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
+    } else if (como === 'Treinar') {
+      checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o card real saiu com o foco e ele ficou em ${r.foco}`, JSON.stringify(r));
+    } else {
+      checa(r.treino && !r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+}
+
 
 // ── Os controles do cabeçalho, CLICADOS ─────────────────────────────────
 // `semAnimar is not defined` foi pra produção e quebrou o botão de ATUALIZAR.
@@ -4792,10 +4927,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const MAPA_PL = { ...FOTO_PL, venueID: 'v-foco-mapa', updateRequestID: 'u-mapa', updateTypeKey: 'UPDATE',
     reqType: 'REQUEST', purType: 'DETAILS_UPDATE', imageUrls: [], approvedImageIds: [],
     mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
-  const montar = async (pl, { semDesfazer = false } = {}) => {
+  // `depois`: os pedidos que vêm DEPOIS deste na fila, e ela termina neles (sem
+  // mais o que buscar: o fim da fila é o painel "Tudo limpo!", na hora).
+  const montar = async (pl, { semDesfazer = false, depois = null } = {}) => {
     await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); if (MapaLightbox.isOpen()) MapaLightbox.close(); });
     await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
-    await page.evaluate(({ p0, semDesfazer: sem }) => {
+    await page.evaluate(({ p0, semDesfazer: sem, depois: resto }) => {
       setLang('pt'); applyI18n();
       API.setSession('tok-smoke');
       AppState.authenticated = true;
@@ -4812,9 +4949,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       showLoading(false);
       const p = JSON.parse(JSON.stringify(p0));
       AppState.queue = [p]; AppState.currentPlace = p;
+      if (resto) {
+        AppState.queue.push(...JSON.parse(JSON.stringify(resto)));
+        AppState.hasMore = false; AppState.serverTotal = AppState.queue.length;
+      }
       document.querySelectorAll('.place-card').forEach((e) => e.remove());
       showCurrentPlace();
-    }, { p0: pl, semDesfazer });
+    }, { p0: pl, semDesfazer, depois });
     await assentar(page);
   };
   // Onde está o foco, e se ele está NO LUGAR CERTO: o id, a classe do card, e
@@ -4985,6 +5126,123 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   });
   checa(flag.txt === '🚩' && flag.nome === flag.titulo && flag.nome !== nomes.nome && flag.mini.includes(flag.nome),
     'foco: na denúncia o 🚩 segue com o NOME do ✨ (ou a miniatura não diz qual é a denunciada)', JSON.stringify(flag));
+
+  // ── R8-3-04 (auditoria de 2026-10-03): corrigindo o nome, a trava que acende
+  // com o foco no ✓ "Salvar nome" (o Tab a partir do campo) o desabilita, e o
+  // foco ia pro ✕ que FECHA A FOTO (a pílula é rótulo na edição): o Enter
+  // seguinte fechava a foto e jogava fora o nome digitado. O foco vai ao CAMPO,
+  // e o Enter ali diz o que esperar com a edição aberta e o nome intacto.
+  // CONTROLE: o foco que JÁ estava no campo fica nele (o R7-3-06, acima, mede
+  // as ações fora da edição, que vão pro ✕).
+  for (const [onde, alvo] of [['✓', 'lightboxNomeOk'], ['campo', 'lightboxNomeInput']]) {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await page.waitForTimeout(350);
+    await page.focus('#lightboxNomeBtn'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    await page.keyboard.type(' do Zé');
+    if (onde === '✓') await page.keyboard.press('Tab');
+    const e0 = await foco();
+    checa(e0.id === alvo, `foco/edição+trava ${onde}: PRÉ-CONDIÇÃO — o foco não pousou no ${alvo}`, JSON.stringify(e0));
+    await page.evaluate(() => { escritasConferindo++; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    const okTravado = await page.evaluate(() => document.getElementById('lightboxNomeOk').disabled);
+    const e1 = await foco();
+    checa(okTravado, `foco/edição+trava ${onde}: PRÉ-CONDIÇÃO — a trava não desabilitou o ✓`);
+    checa(e1.id === 'lightboxNomeInput',
+      `foco/edição+trava: com o foco no ${onde}, a trava o levou a ${e1.body ? '<body>' : e1.id} — não ao CAMPO do nome`, JSON.stringify(e1));
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(250);
+    const e2 = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), editando: editandoNome(),
+      campo: document.getElementById('lightboxNomeInput').value }));
+    checa(e2.aberta && e2.editando && /do Zé$/.test(e2.campo),
+      `foco/edição+trava ${onde}: o Enter na trava fechou a foto ou jogou fora o nome digitado`, JSON.stringify(e2));
+    await page.evaluate(() => { escritasConferindo--; aplicarTravaDeAcao(); });
+    await doisQuadros(page);
+    await page.keyboard.press('Escape');               // sai da edição (o Esc do campo)
+    await page.waitForTimeout(150);
+  }
+
+  // Um pedido de FOTO NOVA com UMA foto só (a proposta), pra aprovar e excluir.
+  const soAProposta = (n, nomeDele) => ({ ...FOTO_PL, venueID: 'v-r8-' + n, updateRequestID: 'pend-r8-' + n,
+    name: nomeDele, imageUrls: [`${foto}#pend-r8-${n}`], approvedImageIds: [] });
+  const aprovarPeloTeclado = async () => {
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxApprove').classList.contains('hidden'), 'o "Aprovar" da foto proposta');
+    await page.focus('#lightboxApprove'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => placeResolvidoPorAprovacao !== null && !aprovandoAgora, 'a aprovação pousar');
+  };
+
+  // ── R8-3-06 (auditoria de 2026-10-03): aprovar a foto do ÚLTIMO pedido e
+  // fechar a foto pelo teclado — a aprovação pousada anda a fila ao fechar, a
+  // fila acaba no "Tudo limpo!" e o foco ia pro ⓘ da Ajuda, no topo da página.
+  // Ele vai ao "Verificar novamente", como no Enter no ✓ do último card
+  // (R7-2-06). CONTROLE: com um pedido depois, o foco vai à foto do card novo.
+  for (const ultimo of [true, false]) {
+    await montar(soAProposta(1, 'Padaria Um'), { semDesfazer: true, depois: ultimo ? [] : [soAProposta(2, 'Padaria Dois')] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await aprovarPeloTeclado();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const f = await foco();
+    const fim = await page.evaluate(() => ({ painel: !document.getElementById('noMoreCards').classList.contains('hidden'),
+      frente: AppState.currentPlace && AppState.currentPlace.updateRequestID }));
+    if (ultimo) {
+      checa(fim.painel, 'foco/último aprovado: PRÉ-CONDIÇÃO — a fila não acabou no "Tudo limpo!" ao fechar a foto', JSON.stringify(fim));
+      checa(f.id === 'reloadBtn',
+        `foco/último aprovado: fechar a foto com a fila no fim levou o foco a ${f.body ? '<body>' : f.id}, não ao "Verificar novamente"`, JSON.stringify(f));
+    } else {
+      checa(fim.frente === 'pend-r8-2' && f.fotoDoCard,
+        'foco/último aprovado: CONTROLE — com outro pedido depois, o foco não foi à foto do card novo', JSON.stringify({ f, fim }));
+    }
+  }
+
+  // ── R8-3-07 (auditoria de 2026-10-03): aprovar a foto proposta e excluí-la
+  // sem o Desfazer (a lixeira é o caminho de volta da aprovação), num local em
+  // que ela é a ÚNICA foto: a exclusão fecha a camada, o fechamento anda a fila,
+  // e "Foto excluída" sobrescrevia, na MESMA tarefa, o anúncio do card novo (ou
+  // o "Tudo limpo!") — o leitor de tela só ouvia "Foto excluída". Mede-se o
+  // texto FINAL da região do card, que é o que ele ouve. CONTROLES: aprovar e só
+  // fechar diz o card novo, sem "Foto excluída"; e excluir a última foto de um
+  // local que NÃO anda a fila (a foto já no mapa) diz só "Foto excluída" (R7-3-04).
+  const regiaoDoCard = () => page.evaluate(() => document.getElementById('cardLiveRegion').textContent);
+  for (const [nome, depois, excluir, espera] of [
+    ['com outro pedido depois', [soAProposta(4, 'Padaria Quatro')], true,
+      (s) => s.startsWith('Foto excluída. ') && s.includes('Padaria Quatro')],
+    ['no último pedido', [], true, (s) => s.startsWith('Foto excluída. ') && s.includes('Tudo limpo')],
+    ['CONTROLE — aprovar e só fechar', [soAProposta(4, 'Padaria Quatro')], false,
+      (s) => !s.includes('Foto excluída') && s.includes('Padaria Quatro')],
+  ]) {
+    await montar(soAProposta(3, 'Padaria Três'), { semDesfazer: true, depois });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await aprovarPeloTeclado();
+    if (excluir) {
+      await esperarOuExplodir(page, () => !document.getElementById('lightboxDelete').classList.contains('hidden')
+        && !document.getElementById('lightboxDelete').disabled, 'a lixeira na foto recém-aprovada');
+      await page.click('#lightboxDelete');
+      await esperarOuExplodir(page, () => !excluindoAgora && !Lightbox.isOpen(), 'a exclusão fechar a foto ampliada');
+    } else {
+      await page.click('#lightboxClose');
+    }
+    await page.waitForTimeout(300);
+    const s = await regiaoDoCard();
+    checa(espera(s), `anúncio/${nome}: a região do card terminou dizendo ${JSON.stringify(s)}`);
+  }
+  {
+    // CONTROLE (R7-3-04): a foto já no mapa, a única do local, excluída sem o
+    // Desfazer — a camada fecha e o MESMO card é redesenhado: só "Foto excluída".
+    const noMapa = { ...soAProposta(5, 'Padaria Cinco'), imageUrls: [`${foto}#aprovada-r8-5`], approvedImageIds: ['aprovada-r8-5'] };
+    await montar(noMapa, { semDesfazer: true, depois: [soAProposta(6, 'Padaria Seis')] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    await page.click('#lightboxDelete');
+    await esperarOuExplodir(page, () => !excluindoAgora && !Lightbox.isOpen(), 'a exclusão fechar a foto ampliada');
+    await page.waitForTimeout(300);
+    const s = await regiaoDoCard();
+    const frente = await page.evaluate(() => AppState.currentPlace && AppState.currentPlace.updateRequestID);
+    checa(frente === 'pend-r8-5' && s === 'Foto excluída',
+      `anúncio/CONTROLE (R7-3-04): sem trocar o card, a região do card terminou dizendo ${JSON.stringify(s)}`, frente);
+  }
   checa(erros.length === 0, 'foco: erro de JS', erros[0]);
   await ctx.close();
 }
@@ -5150,6 +5408,41 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await rodar(40, 0, 0.4);
     const e6 = await escala();
     checa(e6 === 1, `roda/foto: afastando os mesmos 40 eventos a escala parou em ${e6}, não em 1×`);
+    // E UM evento só (R8-3-01, auditoria de 2026-10-03): o passo fino fica
+    // guardado (1,00073, a foto de 800 px com 801) e a tela segue em 1× — mas as
+    // setas a tratavam como AMPLIADA: a → ANDAVA a foto 80 px em vez de trocá-la,
+    // e o ↓ a andava em vez de fechar. Com duas fotos, pra a → ter o que trocar.
+    // CONTROLE: com um zoom de verdade (um dente), a → anda a foto.
+    const estadoDaFoto = () => page.evaluate(() => ({ escala: Lightbox.scale, idx: Lightbox.idx, aberta: Lightbox.isOpen(),
+      transform: document.getElementById('lightboxImage').style.transform || '' }));
+    const abrirComDuas = async () => {
+      await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+      await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
+      await page.evaluate((outra) => { const p = AppState.currentPlace; Lightbox.open([p.imageUrls[0], outra], 0, -1, p.name, false, p); },
+        `${foto}#outra-r8`);
+      await page.waitForTimeout(400);
+      await page.mouse.move(640, 400);
+    };
+    await abrirComDuas();
+    await rodar(1, 0, -0.4);
+    const f0 = await estadoDaFoto();
+    checa(f0.escala > 1 && f0.escala < 1.001, `roda/foto: PRÉ-CONDIÇÃO — um evento de −0,4 px deu a escala ${f0.escala}, não o fio invisível`);
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const f1 = await estadoDaFoto();
+    checa(f1.idx === 1 && !/translate/.test(f1.transform),
+      'roda/foto: depois de um fio de zoom invisível, a → andou a foto em vez de trocá-la', JSON.stringify(f1));
+    await rodar(1, 0, -0.4);
+    await page.keyboard.press('ArrowDown'); await page.waitForTimeout(250);
+    const f2 = await estadoDaFoto();
+    checa(!f2.aberta, 'roda/foto: depois de um fio de zoom invisível, o ↓ andou a foto em vez de fechá-la', JSON.stringify(f2));
+    await abrirComDuas();
+    await rodar(1, 0, -100);
+    const txDe = (tr) => { const m = /translate\((-?[\d.e-]+)px/.exec(tr); return m ? Number(m[1]) : 0; };
+    const f3 = await estadoDaFoto();
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const f4 = await estadoDaFoto();
+    checa(f3.escala > 1.1 && f4.idx === 0 && Math.abs(txDe(f4.transform) - txDe(f3.transform) + 80) < 0.5,
+      'roda/foto: CONTROLE — ampliada de verdade (um dente), a → deixou de andar a foto 80 px', JSON.stringify({ f3, f4 }));
   }
   await page.evaluate(() => Lightbox.close());
   checa(erros.length === 0, 'roda: erro de JS', erros[0]);
@@ -6784,10 +7077,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //   R56-6. Trocar a região NA → ROW → NA: a lista da ida à NA que chegava
 //       DEPOIS punha o 1º da lista (o Canadá) por cima dos EUA que a pessoa
 //       tinha escolhido (auditoria da rodada 5).
-//   11, com a REGIÃO. Quem só edita na NA abre pelo atalho; o perfil a leva pra
-//       NA/EUA com a lista de países da ABERTURA ainda no ar, e a lista da ROW,
+//   11, com a REGIÃO. Quem só edita na NA abre os Filtros com a lista de
+//       países da ROW no ar; o perfil a leva pra NA/EUA, e a lista da ROW,
 //       chegando depois, ficava debaixo do seletor em `row` com os países da
 //       NA: o "Aplicar" gravava `row/235`, uma fila vazia (lote 9).
+//   R8-6-04. Pelo atalho, a carga da abertura e os Filtros pediam a MESMA
+//       lista de países duas vezes; hoje é uma ida só, dividida.
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
 // no modal vale, a região que não é a aplicada abre no 1º da lista, com uma
@@ -6799,7 +7094,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
     na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
   };
-  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {} }) => {
+  // `falharListaDaCarga`: a 1ª lista de países da ROW (a da carga da abertura)
+  // responde falha na hora, e só as seguintes ficam seguras (ver o "11, com a
+  // REGIÃO"). `listasDaRow` conta as que a ROTA recebeu (R8-6-04).
+  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {}, falharListaDaCarga = false }) => {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
     await ctx.addInitScript((guardado) => {
       try {
@@ -6812,6 +7110,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const seguros = [];
     // R56-6: as listas de países das TROCAS de região, seguras na ordem em que saem.
     const trocas = { segurar: false, seguras: [] };
+    const contagem = { listasDaRow: 0 };
     await ctx.route('**/api/**', async (route) => {
       const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
       let corpo = {};
@@ -6825,7 +7124,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       else if (nome === 'lista-estados') b = { success: true, states: [] };
       else if (nome === 'buscar-places') b = { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 };
       else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
-      if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
+      const daRow = nome === 'lista-paises' && regiao === 'row';
+      if (daRow) contagem.listasDaRow++;
+      if (daRow && falharListaDaCarga && contagem.listasDaRow === 1) {
+        b = { success: false, errorCategory: 'transient' };
+      } else if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
         await new Promise((solta) => seguros.push({ nome, solta }));
       } else if (trocas.segurar && nome === 'lista-paises') {
         await new Promise((solta) => trocas.seguras.push({ regiao, solta }));
@@ -6844,7 +7147,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       if (s) { seguros.splice(seguros.indexOf(s), 1); s.solta(); }
     };
     const segurosDe = (nome) => seguros.filter((x) => x.nome === nome).length;
-    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas };
+    return { ctx, page, erros, soltar, soltarUm, segurosDe, trocas, contagem };
   };
   const pelosFiltros = async (m) => {
     await m.page.goto(BASE + '?action=filters', { waitUntil: 'domcontentloaded' });
@@ -7000,24 +7303,33 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 
   // 11, com a REGIÃO. Quem só edita na NA (o perfil da ROW sem país, o da NA com
-  //     os EUA) abre pelo atalho, com o perfil e as DUAS listas de países da ROW
-  //     seguras: a da carga do início (que o perfil espera, `Promise.all`) e a da
-  //     abertura dos Filtros, nessa ordem — o `initApp` dispara a carga antes de
-  //     tratar o atalho. Solta-se a 1ª e o perfil; a da abertura fica no ar até
-  //     o perfil levar a pessoa pra NA/EUA. No CONTROLE ela chega antes.
+  //     os EUA) abre os Filtros com o perfil seguro e a lista de países da ROW
+  //     dos Filtros no ar. A carga da abertura e os Filtros abertos com ela no
+  //     ar DIVIDEM a lista (R8-6-04): a dos Filtros só é uma ida própria quando
+  //     a da carga não serviu — aqui, ela FALHA, e os Filtros abrem depois
+  //     (pelo botão, não pelo atalho, que os abriria dividindo a ida da carga).
+  //     A dos Filtros fica no ar até o perfil levar a pessoa pra NA/EUA. No
+  //     CONTROLE ela chega antes.
   for (const listaAntes of [false, true]) {
     const caso = listaAntes ? 'CONTROLE: a lista da abertura chega ANTES do perfil' : 'a lista da abertura chega DEPOIS do perfil';
-    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true });
-    await pelosFiltros(m);
-    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 2; i++) await m.page.waitForTimeout(20);
-    checa(m.segurosDe('lista-paises') === 2, `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou as duas listas da ROW`,
-      String(m.segurosDe('lista-paises')));
+    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true, falharListaDaCarga: true });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // A lista da carga POUSOU (falhando): o registro dela no anel de chamadas.
+    await esperarOuExplodir(m.page, () => typeof API !== 'undefined' && API.chamadas.some((c) => c.rota === 'lista-paises'),
+      'a lista da carga falhar');
+    // Os Filtros abertos pelo botão, com o perfil ainda seguro. Sem esperar a
+    // promessa do `openFiltersModal` (ela espera a lista que o teste segura).
+    await m.page.evaluate(() => { void openFiltersModal(); });
+    for (let i = 0; i < 100 && m.segurosDe('lista-paises') < 1; i++) await m.page.waitForTimeout(20);
+    checa(m.segurosDe('lista-paises') === 1 && m.contagem.listasDaRow === 2,
+      `${onde} (11, região, ${caso}): CONTROLE — o instrumento não segurou a lista dos Filtros (a da carga falhou antes)`,
+      `seguras ${m.segurosDe('lista-paises')} · da ROW ${m.contagem.listasDaRow}`);
     const carregando = await m.page.evaluate(() => document.getElementById('filterCountry').dataset.carregando === '1');
     checa(carregando, `${onde} (11, região, ${caso}): CONTROLE — a lista da abertura não estava no ar`);
-    if (listaAntes) m.soltar('lista-paises'); else m.soltarUm('lista-paises');
+    if (listaAntes) m.soltar('lista-paises');
     m.soltar('perfil');
-    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga do início, o
-    // perfil nem andaria e isto estoura — o instrumento não mede o caso fácil.
+    // O perfil leva pra NA/EUA. Se a lista segura fosse a da carga, o perfil nem
+    // andaria e isto estoura — o instrumento não mede o caso fácil.
     const lugar = await fimDaCarga(m);
     checa(lugar === 'na/235', `${onde} (11, região, ${caso}): CONTROLE — o perfil não levou quem só edita na NA pra NA/EUA`, lugar);
     if (!listaAntes) {
@@ -7075,6 +7387,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const depois = await ler();
     checa(depois.opcoes === '30' && depois.pais === '30' && depois.dica,
       `${onde} (R7-6-01): o perfil chegou com os Filtros abertos e a lista seguiu sem a peneira`, JSON.stringify(depois));
+    // R8-6-04: pelo atalho, a carga da abertura e os Filtros DIVIDEM a ida da
+    // lista da ROW — eram duas, cada uma um pedido ao `/api` e uma ida ao Waze.
+    // CONTROLE de que a contagem enxerga a 2ª: no "11, com a REGIÃO", acima, a
+    // rota conta 2 (a da carga, que falhou, e a dos Filtros abertos depois).
+    checa(m.contagem.listasDaRow === 1,
+      `${onde} (R8-6-04): pelo atalho, a lista de países da ROW saiu ${m.contagem.listasDaRow} vezes — a carga e os Filtros pediam a mesma`);
     checa(m.erros.length === 0, `${onde} (R7-6-01): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
@@ -9398,6 +9716,84 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
+  {
+    // R8-3-03 (auditoria de 2026-10-03): o ✓ "Salvar nome" da edição trava pela
+    // MESMA trava (a conferência de um 401, a sessão renovando), e o toque nele
+    // ficava calado — enquanto o Enter no campo, na mesma trava, dizia "Espere a
+    // conferência…". O DEDO de verdade no centro medido, conferido por hit-test
+    // (gotcha #26). CONTROLES: sem trava, o ✓ desabilitado pelo nome VAZIO segue
+    // calado; e o Enter no campo, na mesma trava, avisa (a medida enxerga o aviso).
+    const id = `card/trava ${MOTOR}: o ✓ "Salvar nome" TRAVADO responde (R8-3-03)`;
+    const fotoNova = (i) => cardPedido('fo' + i, { purType: 'NEW_PHOTO', reqType: 'IMAGE', updateTypeKey: 'IMAGE',
+      flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '', localAprovado: true, name: 'Padaria ' + i,
+      imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_fo${i}.jpg`], approvedImageIds: [] });
+    const g = await cardPagina([fotoNova(0), fotoNova(1)], { hasTouch: true });
+    await g.page.evaluate(() => {
+      window.__toastsDoSmoke = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.classList && n.classList.contains('toast')) window.__toastsDoSmoke.push(n.textContent.trim());
+        }
+      }).observe(document.getElementById('toastContainer'), { childList: true });
+    });
+    const texto = await g.page.evaluate(() => t('toast.esperaSessao'));
+    const avisos = () => g.page.evaluate((x) => window.__toastsDoSmoke.filter((s) => s === x).length, texto);
+    const centroDe = (sel) => g.page.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, sel);
+    const dedoChega = (p, sel) => g.page.evaluate(({ p, sel }) => {
+      const e = document.elementFromPoint(p.x, p.y);
+      return !!(e && e.closest(sel));
+    }, { p, sel });
+    const escrever = (v) => g.page.evaluate((valor) => {
+      const i = document.getElementById('lightboxNomeInput');
+      i.value = valor; i.dispatchEvent(new Event('input'));
+    }, v);
+    const semToast = (o) => esperarOuExplodir(g.page, () => !document.querySelector('#toastContainer .toast'), o, 8000);
+    // A foto ampliada e a edição do nome, pelo toque.
+    const fc = await centroDe('#cardStack .place-card:not(.card-fundo) .card-image');
+    await g.page.touchscreen.tap(fc.x, fc.y);
+    await esperarOuExplodir(g.page, () => Lightbox.isOpen() && document.getElementById('lightboxImage').naturalWidth > 0
+      && !document.getElementById('lightboxNome').classList.contains('hidden'), 'a foto ampliada abrir com a pílula do nome');
+    const pc = await centroDe('#lightboxNomeBtn');
+    await g.page.touchscreen.tap(pc.x, pc.y);
+    await esperarOuExplodir(g.page, () => editandoNome(), 'a edição do nome abrir');
+    // CONTROLE: sem trava, o ✓ desabilitado pelo nome VAZIO não pede aviso nenhum.
+    await escrever('');
+    const ok0 = await centroDe('#lightboxNomeOk');
+    const vazio = await g.page.evaluate(() => document.getElementById('lightboxNomeOk').disabled && !acoesTravadas());
+    checa(vazio && await dedoChega(ok0, '#lightboxNomeOk'), `${id}: PRÉ-CONDIÇÃO — o ✓ do nome vazio não está desabilitado sem trava, ou o dedo não chega nele`);
+    await g.page.touchscreen.tap(ok0.x, ok0.y);
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === 0, `${id}: CONTROLE — sem trava, o toque no ✓ do nome vazio pediu o aviso da trava`, `${await avisos()} avisos`);
+    // A trava (a conferência de um 401) com um nome novo no campo.
+    await escrever('Padaria Certa');
+    await g.page.evaluate(() => { escritasConferindo++; aplicarTravaDeAcao(); });
+    await doisQuadros(g.page);
+    const ok1 = await centroDe('#lightboxNomeOk');
+    const travado = await g.page.evaluate(() => document.getElementById('lightboxNomeOk').disabled && acoesTravadas());
+    checa(travado && await dedoChega(ok1, '#lightboxNomeOk'), `${id}: PRÉ-CONDIÇÃO — a trava não desabilitou o ✓, ou o dedo não chega nele`);
+    await g.page.touchscreen.tap(ok1.x, ok1.y);
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === 1, `${id}: DEFEITO — o toque no ✓ "Salvar nome" travado não disse nada`, `${await avisos()} avisos`);
+    await g.page.waitForTimeout(3200);             // o intervalo do aviso (3 s)
+    await semToast('o aviso do ✓ sair');
+    // CONTROLE: o Enter no campo, na MESMA trava, avisa (o par que o toque passa
+    // a seguir). Contado a partir de agora: independe de o toque ter avisado.
+    const antesDoEnter = await avisos();
+    await g.page.focus('#lightboxNomeInput');
+    await g.page.keyboard.press('Enter');
+    await g.page.waitForTimeout(400);
+    checa(await avisos() === antesDoEnter + 1, `${id}: CONTROLE — o Enter no campo, na mesma trava, não avisou (a medida estaria cega)`,
+      `${await avisos() - antesDoEnter} aviso(s) do Enter`);
+    const segue = await g.page.evaluate(() => ({ aberta: Lightbox.isOpen(), editando: editandoNome(),
+      campo: document.getElementById('lightboxNomeInput').value }));
+    checa(segue.aberta && segue.editando && segue.campo === 'Padaria Certa', `${id}: o toque ou o Enter na trava perdeu a edição`, JSON.stringify(segue));
+    await g.page.evaluate(() => { escritasConferindo--; aplicarTravaDeAcao(); });
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
 }
 
 // ── MAPA E PÍLULA: nada sai da caixa (auditoria de 2026-09-26) ─────────────
@@ -10035,8 +10431,16 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#filtersTabHistory');
   await assentarCamada();
   const comHistorico = await varrer();
+  // O RESTO do painel do Histórico (R8-7-06, auditoria de 2026-10-03): a patente,
+  // os totais e o botão do Resumo são o trabalho de quem estava — números, sem a
+  // marca, então medidos pelo tamanho do texto. Ficavam no DOM do painel fechado.
+  const historicoAberto = await page.evaluate(() => document.getElementById('historyBody').textContent.trim().length);
   await page.evaluate(() => document.getElementById('filtersModal').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await esperarOuExplodir(page, () => document.getElementById('filtersModal').classList.contains('hidden'), 'o fundo fechar os Filtros');
+  const historicoFechado = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(historicoAberto > 0, 'sair/DOM: CONTROLE — o painel do Histórico aberto não tinha texto (a medida não enxerga o painel)',
+    String(historicoAberto));
+  checa(historicoFechado === 0, 'sair/DOM: o painel do Histórico FECHADO seguiu com a patente e os totais no DOM', String(historicoFechado));
   // A foto ampliada do card; fecha pelo ✕.
   await page.evaluate(() => { const p = AppState.currentPlace; openLightbox(p.imageUrls, 0, 0, p.name, false, p); });
   await esperarOuExplodir(page, () => Lightbox.isOpen(), 'a foto ampliada abrir');
@@ -10072,6 +10476,34 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       && mapaFechado.centro === null && mapaFechado.local === null,
     'sair/DOM: o mapa ampliado FECHADO guardou o pedido (o link do Street View, os tiles, os marcadores ou os pontos na memória)',
     JSON.stringify(mapaFechado));
+  // A folha do autor redesenha o painel do Histórico com os Filtros FECHADOS (o
+  // "Esquecer" dela): o painel volta ao DOM escondido, e o "Sair" tem que tirá-lo
+  // (R8-7-06). CONTROLE: o redesenho escondido aconteceu.
+  await page.evaluate(() => abrirFolhaDoAutor(AppState.currentPlace));
+  await esperarOuExplodir(page, () => !document.getElementById('autorModal').classList.contains('hidden'), 'a folha do autor abrir de novo');
+  await tocar('#autorEsquecer');
+  await esperarOuExplodir(page, () => document.getElementById('autorModal').classList.contains('hidden'), 'o "Esquecer" fechar a folha');
+  const historicoRedesenhado = await page.evaluate(() => (document.getElementById('filtersModal').classList.contains('hidden')
+    ? document.getElementById('historyBody').textContent.trim().length : -1));
+  checa(historicoRedesenhado > 0,
+    'sair/DOM: CONTROLE — o "Esquecer" da folha não redesenhou o painel do Histórico escondido (o caso que o "Sair" tem de limpar não aconteceu)',
+    String(historicoRedesenhado));
+  // A FOTO QUE AINDA CHEGAVA no "Sair" (R8-1-04, auditoria de 2026-10-03). A
+  // limpeza da lista de recursos do navegador deixava de fora o download no ar:
+  // ele terminava depois, a entrada voltava, e a foto do pedido de terceiro ia no
+  // relatório do modo dev de quem usasse a página depois. Uma foto de pedido sai
+  // pelo aquecimento do app (o mesmo caminho do próximo card) e a resposta dela é
+  // SEGURADA até depois do "Sair".
+  let fotoLentaChegou = null;
+  const fotoLentaPedida = new Promise((ok) => { fotoLentaChegou = ok; });
+  await ctx.route('**/thumb700_LENTA_PRIVSAIR.png', async (r) => {
+    fotoLentaChegou();
+    await dormir(2500);
+    await r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }).catch(() => {});
+  });
+  await page.evaluate((u) => aquecer(u), 'https://venue-image.waze.com/thumbs/thumb700_LENTA_PRIVSAIR.png');
+  const fotoNoAr = await Promise.race([fotoLentaPedida.then(() => true), dormir(5000).then(() => false)]);
+  checa(fotoNoAr, 'sair/recursos: PRÉ-CONDIÇÃO — a foto lenta nem foi pedida antes do "Sair"');
   // O "Sair", pela Ajuda.
   await tocar('#helpBtn');
   await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
@@ -10082,6 +10514,23 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'a tela de entrada depois do "Sair"');
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
+  const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(historicoDepoisDoSair === 0,
+    'sair/DOM: depois do "Sair", o painel do Histórico (redesenhado com os Filtros fechados) seguiu no DOM', String(historicoDepoisDoSair));
+  // A foto termina DEPOIS do "Sair" e volta à lista CRUA do navegador — o CONTROLE
+  // de que o caso aconteceu; o relatório do modo dev não pode levá-la.
+  const fotoVoltou = await esperarNaPagina(page,
+    () => performance.getEntriesByType('resource').some((e) => e.name.includes('thumb700_LENTA_PRIVSAIR')), 10000);
+  checa(fotoVoltou.ok, 'sair/recursos: CONTROLE — a foto que terminou depois do "Sair" não voltou à lista crua (a medida não enxerga o caso)');
+  const noRelatorio = await page.evaluate(async () => {
+    AppState.devMode = { unlocked: true, active: true };
+    try {
+      const d = await diagCorpo();
+      return (d.recursos || []).map((r) => r.url).filter((u) => u.includes('PRIVSAIR'));
+    } finally { AppState.devMode = { unlocked: false, active: false }; }
+  });
+  checa(noRelatorio.length === 0, 'sair/recursos: a foto de terceiro que ainda chegava no "Sair" foi no relatório do modo dev',
+    JSON.stringify(noRelatorio));
   // O "Acesso restrito" do login por cookies: o perfil recusado aparece no
   // diálogo (CONTROLE) e sai dele quando ele fecha (pelo voltar do aparelho).
   // (Uma linha do Waze basta: quem recusa é o servidor de mentira.)
@@ -10142,6 +10591,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
   + `, + o "Sair" do treino pelo TECLADO levando o foco ao ✕ do card real que volta (com o CONTROLE do mouse, que não move o foco)`
+  + `, + o fim do treino (Enter no "Ir para a fila" e Esc) e o "Quero treinar antes" pelo TECLADO levando o foco ao ✕ do card que entra (com os CONTROLES do mouse e do "Entendi")`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
@@ -10183,6 +10633,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
-  + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto)`
+  + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

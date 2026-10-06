@@ -767,8 +767,13 @@ test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o 
   assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'u2',
     'o card da frente não foi refeito: ficou na tela o pedido já marcado');
   assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
-  assert.ok(!depois.includes('historico') && !depois.includes('conquistas') && !depois.some((l) => l.startsWith('toast')),
-    `com a sessão trocada o lote gravou ou avisou: ${depois}`);
+  assert.ok(!depois.includes('historico') && !depois.includes('conquistas'),
+    `com a sessão trocada o lote gravou: ${depois}`);
+  // O ÚNICO aviso é o de que o lote não saiu inteiro (R8-2-04): o u2 e o u3
+  // seguem pendentes, e a renovação diria "sua fila continua aqui" com a pessoa
+  // achando que tinha marcado. Nada de "N marcados".
+  assert.deepEqual(depois.filter((l) => l.startsWith('toast')), ['toast:error'],
+    `com a sessão trocada o lote disse outra coisa (ou nada) sobre o que não saiu: ${depois}`);
   assert.ok(depois.includes('card:u2'), `a tela não foi refeita: ${depois}`);
   assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
 });
@@ -1471,8 +1476,10 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
     t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''), showToast: (m) => toasts.push(m),
     aoConhecerConta: () => {}, marcarSessaoViva: () => {},
   };
+  // A lista de países pela ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
+  deps.listasDePaisesNoAr = new Map();
   const h = montar(['loadProfileAndAuxData', 'handleUnauthorized', 'definirPerfil', 'completarPerfilChegado',
-    'paisDoPerfil', 'irProPaisDoPerfil'], deps);
+    'paisDoPerfil', 'irProPaisDoPerfil', 'pedirListaDePaises'], deps);
   await h.loadProfileAndAuxData();
   await tique(20);
   assert.equal(AppState.countries.length, 2, 'DEFEITO: os países que chegaram na abertura foram jogados fora');
@@ -1595,6 +1602,7 @@ function montarSaidaMorta() {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
     API: {
       getSession: () => 'tok-A',
+      getRegion: () => 'row',   // a região em que a sonda pergunta (R8-6-03)
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
       // esvaziamento ANTES de a resposta voltar pra quem pediu.
       rejectPlace: async (v) => {

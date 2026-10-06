@@ -759,20 +759,24 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
 // RODA, com o resto do app de mentira.
 function anelDeCapturas() {
   const selos = [];
+  const diario = [];
   const deps = {
     diagRedeAgora: () => ({}), diagOfflineAgora: () => ({}), dlogTelaAtual: () => ({ painel: 'card' }),
     diagNoInstante: () => ({ alertas: [] }), document: { querySelectorAll: () => [], images: [] },
     diagSemSegredoDePareamento: (s) => s, AppState: { queue: [] }, diagSeguro: (x) => x, dlogPlace: () => null,
     domParaDiagnostico: () => '', DLOG_COTA_POR_MOTIVO: { 'auto:arraste': 2 },
     DLOG_MAX_MOMENTOS: Number(/^const DLOG_MAX_MOMENTOS = (\d+);/m.exec(APP)[1]),
-    dlog: () => {}, diagGuardarAbertura: () => {},
+    // As capturas JÁ BAIXADAS, marcadas como o `dlogMarcarBaixados` marca (R8-4-01).
+    dlogJaBaixados: new WeakSet(),
+    dlog: (k, o) => diario.push([k, o]), diagGuardarAbertura: () => {},
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'selos', `let dlogMomentos = [];
     function atualizarFabDev(o) { selos.push([o, dlogMomentos.filter((m) => m.motivo === 'manual').length]); }
     ${fatiarFn(semLinhaComentada(APP), 'dlogCapturar')}
     return { capturar: dlogCapturar, anel: () => dlogMomentos };`)(...chaves.map((k) => deps[k]), selos);
-  return { ...app, selos, max: deps.DLOG_MAX_MOMENTOS };
+  const baixar = () => { for (const m of app.anel()) deps.dlogJaBaixados.add(m); };
+  return { ...app, selos, diario, baixar, max: deps.DLOG_MAX_MOMENTOS };
 }
 
 test('R7-4-02: o anel cheio tira a captura AUTOMÁTICA mais velha — nunca a que a pessoa fez', () => {
@@ -800,6 +804,68 @@ test('R7-4-02: o anel só de telas da pessoa — a automática que chega é a qu
   assert.equal(a.anel().length, a.max);
   assert.equal(a.anel()[0], antes[1], 'a tela nova da pessoa não tirou a mais VELHA dela');
   assert.ok(a.anel().every((m) => m.motivo === 'manual'));
+  // E o diário diz que a automática nem coube (sem a marca, ele anotava uma
+  // captura que o relatório não traz).
+  const naoCoube = a.diario.find(([k, o]) => k === 'momento' && o.motivo === 'auto:erroDeJs');
+  assert.equal(naoCoube && naoCoube[1].foraDoAnel, true, 'o diário anotou como capturada a automática que não coube no anel');
+  assert.ok(a.diario.filter(([k, o]) => k === 'momento' && o.motivo === 'manual').every(([, o]) => !o.foraDoAnel),
+    'a captura que ENTROU no anel saiu marcada como fora dele');
+});
+
+// ── R8-4-01: o que JÁ FOI BAIXADO sai primeiro ──────────────────────────────
+// As telas baixadas seguem no anel (o número desta abertura as conta), mas já
+// foram entregues: a regra do R7-4-02 protege o que NÃO foi. Com o anel cheio de
+// telas da pessoa JÁ BAIXADAS, a automática que chegava — o erro de JS, a busca
+// que falhou — era a que saía, e não ia nem pra cópia guardada nem pro próximo
+// relatório (MEDIDO no navegador, r1 da auditoria: 12 toques, o download, um
+// erro de JS de verdade: a captura dele sumiu; com 11 toques, entrou).
+test('R8-4-01: com o anel cheio de capturas JÁ BAIXADAS, a nova entra — sai a baixada mais velha, de qualquer motivo', () => {
+  const a = anelDeCapturas();
+  for (let i = 0; i < a.max; i++) a.capturar('manual');
+  const baixadas = [...a.anel()];
+  a.baixar();
+  a.capturar('auto:erroDeJs');
+  assert.ok(a.anel().some((m) => m.motivo === 'auto:erroDeJs'),
+    'a captura automática (não entregue) não entrou no anel cheio de telas JÁ BAIXADAS — some sem ir em relatório nenhum');
+  assert.equal(a.anel().length, a.max, 'o anel passou do teto');
+  assert.ok(!a.anel().includes(baixadas[0]), 'não saiu a baixada mais VELHA');
+  assert.deepEqual(a.anel().slice(0, -1), baixadas.slice(1), 'saiu outra que não a baixada mais velha, ou a ordem mudou');
+  // A baixada sai de QUALQUER motivo, antes da automática não entregue: a
+  // automática baixada mais velha sai, e a automática nova (não entregue) fica.
+  const b = anelDeCapturas();
+  b.capturar('auto:buscaFalhou');
+  for (let i = 1; i < b.max; i++) b.capturar('manual');
+  b.baixar();
+  const autoBaixada = b.anel()[0];
+  b.capturar('auto:falhaAoCarregar');
+  assert.ok(!b.anel().includes(autoBaixada) && b.anel().some((m) => m.motivo === 'auto:falhaAoCarregar'));
+  // Uma tela NOVA da pessoa também tira a baixada, e nunca outra não entregue.
+  const c = anelDeCapturas();
+  for (let i = 0; i < 6; i++) c.capturar('manual');
+  c.baixar();
+  const ja = [...c.anel()];
+  for (let i = 0; i < 6; i++) c.capturar('auto:x' + i);   // 6 automáticas NÃO entregues: o anel enche (12)
+  c.capturar('manual');                                     // a 13ª: sai a baixada mais velha
+  assert.ok(!c.anel().includes(ja[0]), 'a tela nova da pessoa não tirou a baixada mais velha');
+  assert.equal(c.anel().filter((m) => /^auto:x/.test(m.motivo)).length, 6, 'a tela nova tirou uma automática NÃO entregue com baixada no anel');
+});
+
+test('R8-4-01 CONTROLES: sem baixada, segue o R7-4-02 — sai a automática mais velha; só telas da pessoa, a mais velha delas', () => {
+  // Telas da pessoa NÃO baixadas com automáticas: sai a automática mais velha (o R7-4-02).
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  for (let i = 0; i < a.max - 1; i++) a.capturar('auto:a' + i);
+  a.capturar('auto:nova');
+  assert.deepEqual(a.anel().map((m) => m.motivo), ['manual', ...Array.from({ length: a.max - 2 }, (_, i) => 'auto:a' + (i + 1)), 'auto:nova']);
+  // O baixado de ANTES de capturas novas não protege as novas: com 11 baixadas e 1
+  // não baixada, a automática que chega tira a baixada mais velha (não a não baixada).
+  const b = anelDeCapturas();
+  for (let i = 0; i < b.max - 1; i++) b.capturar('manual');
+  b.baixar();
+  b.capturar('manual');
+  const naoEntregue = b.anel()[b.max - 1];
+  b.capturar('auto:erroDeJs');
+  assert.ok(b.anel().includes(naoEntregue), 'saiu a tela da pessoa NÃO entregue com baixada no anel');
 });
 
 test('R7-4-02: o número do botão é refeito a CADA captura — sem reposicionar o botão no meio do gesto', () => {
@@ -1574,4 +1640,48 @@ test('D15: as leituras do relatório andam em PARALELO, com o prazo do relatóri
   // IDADE, não defeito.
   const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
   assert.ok(v >= 11, `a versão do diagnóstico não subiu com a coleta (${v})`);
+});
+
+// ── R8-4-06: o relatório e a captura feitos DENTRO do treino ────────────────
+// Com o treino aberto, a fila na tela — e no `appState` e no `estado.fila` das
+// capturas — é a de EXEMPLOS, e nada no arquivo dizia isso: a palavra "treino"
+// só aparecia no id inerte do pedido da frente. E a fila REAL, que o treino
+// guarda desde o lote 11 (com a época, o `devolver`, o perfil e a ordem que
+// chegaram nele), não ia no arquivo — o relato "ao sair do treino a fila voltou
+// errada" chegava sem a fila que voltou (MEDIDO, r7 da auditoria).
+test('R8-4-06: a captura e o resumo dizem que o TREINO estava aberto — em números', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'dlogTelaAtual'), /^\s+treino: diagTreinoAgora\(\),$/m,
+    'a tela da captura (e o `resumo.telaAgora`) não diz se o treino estava aberto');
+  // RODADA, contra um treino de mentira.
+  const agora = (Treino, AppState) => new Function('Treino', 'AppState',
+    fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(Treino, AppState);
+  assert.deepEqual(agora({ ativo: true, passo: 2, _salvo: {} }, { queue: [{}, {}, {}] }), { ativo: true, passo: 2, exemplos: 3 },
+    'com o treino aberto, a tela não diz o passo e quantos exemplos estão na fila');
+  assert.deepEqual(agora({ ativo: false, passo: 0 }, { queue: [{}, {}] }), { ativo: false });
+  // Nunca derruba a captura: sem o `Treino` (a TDZ, num erro na carga), "não se sabe".
+  assert.deepEqual(new Function(fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(), { ativo: null });
+});
+
+test('R8-4-06: o relatório leva a fila REAL que o treino guarda — a fila, a frente, as épocas, o que volta e o que chegou nele', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'diagCorpo'), /^\s+treino: diagTreinoGuardado\(\),$/m,
+    'o relatório não leva a fila real que o treino guarda (o `appState` tem só os exemplos)');
+  const guardado = (Treino, AppState) => new Function('Treino', 'AppState', 'diagSeguro',
+    fatiarFn(app, 'diagTreinoAgora') + '\n' + fatiarFn(app, 'diagTreinoGuardado') + '\nreturn diagTreinoGuardado();')(
+    Treino, AppState, (x) => JSON.parse(JSON.stringify(x)));
+  const A = { venueID: 'vA', updateRequestID: 'uA' }, B = { venueID: 'vB', updateRequestID: 'uB' };
+  const R = { venueID: 'vR', updateRequestID: 'uR' };
+  const T = { ativo: true, passo: 1, _salvo: { queue: [A, B], currentPlace: B, autorEmFoco: 77, epoca: 4, epocaDoTreino: 5,
+    devolver: [R], perfilChegou: true, ordemMudou: false } };
+  const g = guardado(T, { queue: [{ venueID: 'vA', updateRequestID: 'treino-inerte', _treino: true }], fetchEpoch: 5 });
+  assert.deepEqual(g.fila.map((p) => p.updateRequestID), ['uA', 'uB'], 'a fila REAL não foi no relatório');
+  assert.equal(g.currentPlaceIdx, 1, 'o pedido que estava na frente da fila real não vai (como índice)');
+  assert.deepEqual(g.devolver.map((p) => p.updateRequestID), ['uR'], 'o que o Waze recusou com o treino aberto (e volta como card) não vai');
+  assert.deepEqual([g.ativo, g.passo, g.exemplos, g.autorEmFoco, g.epoca, g.epocaDoTreino, g.epocaAgora, g.perfilChegou, g.ordemMudou],
+    [true, 1, 1, 77, 4, 5, 5, true, false], 'o que o treino guarda não foi inteiro');
+  // Fechado: só diz que está fechado (nada de fila).
+  assert.deepEqual(guardado({ ativo: false, _salvo: null }, { queue: [A] }), { ativo: false });
+  // Nunca derruba o relatório.
+  assert.ok(guardado({ get ativo() { throw new Error('quebrou'); } }, { queue: [] }).erro, 'o erro ao ler o treino derrubou o relatório');
 });

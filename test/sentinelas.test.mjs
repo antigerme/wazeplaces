@@ -396,8 +396,15 @@ test('diagnóstico: a sentinela do pedido decidido lê o que o COLETOR mede (fil
   const i = APP.indexOf('function diagComputado(');
   const corpo = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
   // O coletor cruza a fila de saída do APARELHO com a fila de pedidos DESTA aba,
-  // e conhece o que a outra aba decidiu com o card já aqui (R7-4-05).
-  assert.match(corpo, /fora\.decididos = diagDecididos\(carregarFilaDeSaida\(\), AppState\.queue, decididosPorOutraAbaComCardAqui\);/,
+  // e conhece o que a outra aba decidiu com o card já aqui (R7-4-05). A fila é a
+  // REAL (`filaReal()`): com o treino aberto, a da tela são os exemplos (junção
+  // do lote 12, o comportamento em test/treino-fila-real-r8.test.mjs).
+  assert.match(corpo, /fora\.decididos = diagDecididosAgora\(\);/,
+    'o coletor tem que cruzar a fila de saída com a fila de PEDIDOS, sabendo o que a outra aba decidiu');
+  const k = APP.indexOf('function diagDecididosAgora(');
+  assert.ok(k > 0, 'sumiu o `diagDecididosAgora`');
+  assert.match(semComentario(APP.slice(k, APP.indexOf('\n}', k))),
+    /return diagDecididos\(carregarFilaDeSaida\(\), filaReal\(\), decididosPorOutraAbaComCardAqui\);/,
     'o coletor tem que cruzar a fila de saída com a fila de PEDIDOS, sabendo o que a outra aba decidiu');
   // A MESMA chave dos dois lados, pela fonte única — é ela que o filtro usa.
   const j = APP.indexOf('function diagDecididos(');
@@ -431,7 +438,7 @@ function decididos() {
   assert.ok(decl, 'o conjunto do que a outra aba decidiu sumiu (ou deixou de ser por OBJETO)');
   const AppState = { queue: [] };
   const app = new Function('AppState', `${decl[0]}
-    ${['chaveDoPedido', 'diagDecididos', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
+    ${['chaveDoPedido', 'diagDecididos', 'filaReal', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
     return { anotar: anotarDecididosPorOutraAba, contar: (saida) => diagDecididos(saida, AppState.queue, decididosPorOutraAbaComCardAqui) };`)(AppState);
   return { ...app, AppState };
 }

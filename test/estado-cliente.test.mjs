@@ -123,7 +123,8 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // na fila que atravessou a queda, ele volta como card (V1). O bloco não
     // tem chave NENHUMA dentro: nada de ramo que grave.
     enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
-    loadProfileAndAuxData: /API\.listCountries\(\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
+    // A lista de países é a ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
+    loadProfileAndAuxData: /pedirListaDePaises\(regiaoPedida\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
     handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
@@ -183,8 +184,10 @@ test('Desfazer: o LOTE cancelado ao ir pro fundo FECHA a janela e devolve os ped
 });
 
 test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () => {
-  const d = fatiar('setupDescargaAoSair');
-  assert.match(d, /else if \(document\.visibilityState === 'visible' && typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\);/,
+  // Mora no `setupFimDoModoSaindo` desde a rodada 8 (R8-5-02): registrado antes
+  // de todo ouvinte da volta — a ordem é cobrada em test/presenca-auditoria-r8.
+  const d = fatiar('setupFimDoModoSaindo');
+  assert.match(d, /if \(document\.visibilityState === 'visible' && typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\);/,
     'depois da primeira ida ao fundo, toda requisição ficava com keepalive e sem o teto de 45 s');
   assert.match(d, /addEventListener\('pageshow', \(\) => \{ if \(typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\); \}\)/);
 });
@@ -641,9 +644,24 @@ test('país: lista VAZIA aqui = edita em outro servidor — pergunta lá (EUA no
   assert.deepEqual(pedidos, ['na'], 'perguntou a mais servidores que o necessário');
 });
 
-test('país: staff e "Minha área" escolhem sozinhos', async () => {
+test('país: staff escolhe sozinho; "Minha área" com a área NESTE servidor também (o país do filtro fica)', async () => {
   assert.equal(await montarPais().paisDoPerfil({ isStaff: true, editableCountryIDs: [73] }, 0), null);
-  assert.equal(await montarPais({ myArea: true }).paisDoPerfil({ editableCountryIDs: [73] }, 0), null);
+  const m = montarPais({ myArea: true });
+  assert.equal(await m.paisDoPerfil({ editableCountryIDs: [73] }, 0), null);
+  assert.deepEqual(m.pedidos, [], '"Minha área" com a lista daqui cheia perguntou a outro servidor');
+});
+
+// R8-6-06 (auditoria da rodada 8; a decisão é do owner): com "Minha área" e a
+// lista daqui VAZIA, a área está noutro servidor — a REGIÃO é corrigida (o
+// país vai junto só porque o de antes não existe lá), e "Minha área" fica.
+test('país: "Minha área" com a lista daqui VAZIA — pergunta os outros servidores e leva pra REGIÃO da área', async () => {
+  const m = montarPais({ myArea: true, perfis: { na: { success: true, profile: { editableCountryIDs: [235] } } } });
+  assert.deepEqual(await m.paisDoPerfil({ editableCountryIDs: [] }, 0), { regiao: 'na', pais: 235, minhaArea: true });
+  assert.deepEqual(m.pedidos, ['na'], 'perguntou a mais servidores que o necessário');
+  // Em nenhum servidor: nada muda (como sem "Minha área").
+  const n = montarPais({ myArea: true });
+  assert.equal(await n.paisDoPerfil({ editableCountryIDs: [] }, 0), null);
+  assert.deepEqual(n.pedidos, ['na', 'il']);
 });
 
 test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila nova)', () => {

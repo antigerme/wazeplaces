@@ -134,11 +134,12 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
 }
 
 // O ouvinte do "Ir para a fila", rodado de verdade: o corpo da arrow do
-// `addEventListener` no setupModalListeners.
+// `addEventListener` no setupModalListeners. Ele pergunta se o gesto veio do
+// teclado (R8-7-07, em test/treino-avisos): aqui é o clique do MOUSE.
 function botaoIrParaAFila(closeModal, Treino) {
-  const m = /\$\('treinoFimOk'\)\?\.addEventListener\('click', \(\) => ([^\n]+)\);\n/.exec(APP_SEM);
+  const m = /\$\('treinoFimOk'\)\?\.addEventListener\('click', \((\w*)\) => ([^\n]+)\);\n/.exec(APP_SEM);
   assert.ok(m, 'CONTROLE: o ouvinte do "Ir para a fila" sumiu do setupModalListeners');
-  return new Function('closeModal', 'Treino', `return () => ${m[1]};`)(closeModal, Treino);
+  return new Function('closeModal', 'Treino', 'veioDoTeclado', `return (${m[1]}) => ${m[2]};`)(closeModal, Treino, () => false);
 }
 
 test('A5: o fim do treino fechado por Esc/fundo ou pelo VOLTAR sai do treino e devolve a fila real', () => {

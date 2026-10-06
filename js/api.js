@@ -148,6 +148,16 @@ const API = {
     // o pedido). O que interessa pra depurar é a FORMA da falha.
     chamadas: [],
 
+    // A MARCA da última limpeza do que a página registrou de QUEM ESTAVA aqui —
+    // o `performance.now()` do "Sair" e da troca de conta (quem a põe é o
+    // `esquecerRegistrosDaPagina`, no app.js). É UMA marca pras duas listas que o
+    // relatório do modo dev leva: a de recursos do navegador e este anel. A
+    // chamada que COMEÇOU antes dela é de quem estava aqui, termine quando
+    // terminar: a resposta que chegava depois da limpeza entrava no anel de quem
+    // entrou, com o corpo do pedido — o id do pedido de terceiro, e a posição e o
+    // id de quem saiu, na carona da presença (MEDIDO; pista do lote 12, L12-1).
+    registrosDesde: 0,
+
     // Cabeçalhos que interessam pra depurar, e SÓ eles. `cf-ray` diz qual
     // datacenter e qual execução respondeu; `cf-cache-status` diz se a BORDA
     // serviu cache (o modo de falha que atinge um aparelho e não o outro, e que
@@ -238,6 +248,9 @@ const API = {
     },
 
     _registrar(endpoint, inicio, http, data, extra) {
+        // A chamada que COMEÇOU antes da última limpeza é de quem estava aqui
+        // (ver `registrosDesde`): o que chega depois dela não entra.
+        if (inicio < this.registrosDesde) return;
         try {
             const reg = {
                 t: new Date().toISOString(),

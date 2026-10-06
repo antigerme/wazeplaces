@@ -82,6 +82,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
       markAsRead: async (v, u) => { chamadas.push(1); await portao(); return processar([{ venueID: v, updateRequestID: u }]); },
     },
     handleUnauthorized: () => {},
+    aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     recordHistory: (tipo, n, dia, onde) => { historico.push([tipo, n]); historicoCompleto.push({ dia, onde }); },
     historyTodayKey: () => lugar.dia, getLang: () => 'pt',
     registrarPouso: (ps) => pousos.push(...(Array.isArray(ps) ? ps : [ps]).map((p) => p.updateRequestID)),

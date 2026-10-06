@@ -32,9 +32,19 @@ function podeEntrarNoApp(rank, isAM, isStaff) {
 // extensão se atualizou com o WME aberto) e este TETO, pra resposta que nunca
 // chega — MEDIDO com o servidor pendurado: o Chrome não derruba o service
 // worker, e o botão ficava em "LOGANDO..." pra sempre, sem aviso. O teto é o
-// mesmo que o app espera por uma resposta do servidor, e é maior que o prazo
-// do servidor pra ir ao Waze (30 s, `WAZE_ESPERA_MS`): o login que o Waze
-// atrasa ainda chega antes de o botão desistir.
+// mesmo que o app espera por uma resposta do servidor.
+//
+// O teto se compara com o PIOR caso do login INTEIRO, e não com uma ida só
+// (auditoria da rodada 8, R8-6-01 = R8-1-02). Esta conta dizia "maior que os
+// 30 s do servidor pro Waze", mas o background repete o login em toda falha
+// passageira: até 4 idas e 4,6 s de espera entre elas, 124,6 s sem prazo. O
+// login lento abria a aba DEPOIS do aviso de que a extensão não respondeu, e o
+// "tente de novo" abria a segunda. Hoje o login do botão tem um prazo TOTAL,
+// contado deste toque (`PRAZO_DO_BOTAO_MS`, 40 s, no background.js): nenhuma ida
+// começa depois dele, a que está no ar é cancelada e a resposta atrasada não
+// abre aba. O background responde até lá, e o botão volta com o aviso do que
+// aconteceu; este teto, acima do prazo, só pega a extensão que não responde
+// nada — e aí não há login no ar pra abrir aba depois do "tente de novo".
 const ESPERA_DO_BOTAO_MS = 45000;
 
 const s = document.createElement('script');
@@ -290,9 +300,10 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
 
             // "abrirPlaces" (era "getCookies"): o nome agora diz o que o botão
             // FAZ, e o background tem uma segunda ação ("autenticar") que a
-            // ponte usa sem abrir aba. Dois nomes porque são dois fluxos.
+            // ponte usa sem abrir aba. Dois nomes porque são dois fluxos. O
+            // `desde` é a hora do toque: é dela que o prazo do login conta lá.
             try {
-                chrome.runtime.sendMessage({ action: "abrirPlaces" }, (response) => {
+                chrome.runtime.sendMessage({ action: "abrirPlaces", desde: Date.now() }, (response) => {
                     // Lido SEMPRE, antes de tudo: o `lastError` só vale aqui
                     // dentro, e o Chrome acusa o que ninguém leu.
                     const semResposta = chrome.runtime.lastError;
