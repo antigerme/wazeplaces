@@ -129,6 +129,95 @@ test('README: as escritas no KV da lixeira de foto são as que o servidor faz (R
   assert.ok(frase.includes(`${ttl} s`), `a lista vale ${ttl} s no servidor, e o README diz outra coisa: "${frase}"`);
 });
 
+// R9-6-07 (auditoria da rodada 9): a conta dos APAGAMENTOS no KV — a cota curta
+// do plano grátis, 1.000 por dia — dizia "o 'Sair', o resgate e o cancelamento
+// do código". O servidor apaga em mais três casos, e um deles vira RAJADA no dia
+// em que se troca o `ENCRYPTION_KEY`: cada sessão que volta não abre mais e é
+// apagada uma vez. Os números saem do SERVIDOR DE VERDADE (o `dispatch`, com um
+// store que conta os `delete`) e de um Waze de mentira: cada caso apaga 1, e os
+// CONTROLES (aprovar sem a lixeira, o perfil que passa no portão) apagam 0 —
+// mexeu num apagamento do core, o README acompanha.
+const COOKIES_DO_TESTE = ['.waze.com\tTRUE\t/\tTRUE\t9999999999\t_csrf_token\tc',
+  '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\ts'].join('\n');
+const PERFIL_QUE_PASSA = { id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false };
+async function apagamentosNoKv(cenario, { sessao = PERFIL_QUE_PASSA } = {}) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response(JSON.stringify(/\/Session\b/.test(String(url)) ? sessao
+    : { venues: { objects: [{ id: '1.2.3', images: [{ id: 'a', approved: true }] }] } }),
+  { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const mem = new Map();
+    let apagados = 0;
+    const store = { get: async (k) => (mem.has(k) ? mem.get(k) : null), put: async (k, v) => { mem.set(k, v); },
+      delete: async (k) => { apagados++; mem.delete(k); } };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const sessionToken = await sessions.createSession(COOKIES_DO_TESTE);
+    // O que o cenário faz ANTES do gesto medido (gerar o código, tocar na
+    // lixeira) não conta: a contagem recomeça no `medir`.
+    await cenario({ sessions, sessionToken, mem, medir: () => { apagados = 0; } });
+    return apagados;
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+const FOTO = { region: 'row', venueID: '1.2.3', lat: -23.5, lon: -46.6 };
+const aprovar = ({ sessions, sessionToken }) => dispatch('validar-place',
+  { ...FOTO, sessionToken, updateRequestID: '99', approve: true }, { sessions });
+const CASOS_DE_APAGAMENTO = [
+  ['o "Sair"', /"Sair"/, async ({ sessions, sessionToken, medir }) => {
+    medir();
+    await dispatch('sessao', { action: 'destroy', sessionToken }, { sessions });
+  }],
+  ['o resgate do código', /resgate/, async ({ sessions, sessionToken, medir }) => {
+    const { body } = await dispatch('parear', { action: 'create', sessionToken }, { sessions });
+    medir();
+    const r = await dispatch('parear', { action: 'claim', code: body.code }, { sessions });
+    assert.ok(r.body.success, 'CONTROLE: o resgate não deu certo');
+  }],
+  ['o cancelamento do código', /cancelamento/, async ({ sessions, sessionToken, medir }) => {
+    const { body } = await dispatch('parear', { action: 'create', sessionToken }, { sessions });
+    medir();
+    await dispatch('parear', { action: 'cancel', code: body.code }, { sessions });
+  }],
+  ['a aprovação de foto com a lista da lixeira guardada', /aprovação de foto/, async (amb) => {
+    await dispatch('excluir-foto', { ...FOTO, sessionToken: amb.sessionToken, action: 'preparar', imageID: 'preparar' }, { sessions: amb.sessions });
+    amb.medir();
+    const r = await aprovar(amb);
+    assert.ok(r.body.success, 'CONTROLE: a aprovação de mentira não saiu');
+  }],
+  ['a sessão que a conferência do perfil recusa (o portão)', /conferência do perfil/, async ({ sessions, sessionToken, medir }) => {
+    medir();
+    const r = await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+    assert.equal(r.status, 403, 'CONTROLE: o portão não recusou o perfil de rank 0');
+  }, { sessao: { ...PERFIL_QUE_PASSA, rank: 0 } }],
+  ['a sessão que não abre mais (outra ENCRYPTION_KEY, formato de antes)', /ENCRYPTION_KEY/, async ({ sessions, sessionToken, mem, medir }) => {
+    for (const k of mem.keys()) mem.set(k, Math.floor(Date.now() / 1000) + '|lixo::lixo');
+    medir();
+    const r = await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+    assert.equal(r.status, 401, 'CONTROLE: a sessão que não abre não deu 401');
+  }],
+];
+
+test('README: os apagamentos no KV são os que o servidor faz — o "Sair" e o código, a aprovação de foto, o portão e a sessão que não abre (R9-6-07)', async () => {
+  const frase = (/Apagam: (.*?)Passou disso/.exec(README) || [])[1];
+  assert.ok(frase, 'CONTROLE: a conta dos apagamentos sumiu do README');
+  for (const [caso, noReadme, cenario, opcoes] of CASOS_DE_APAGAMENTO) {
+    const n = await apagamentosNoKv(cenario, opcoes);
+    assert.equal(n, 1, `${caso}: o servidor apagou ${n} vezes no KV (o README conta 1)`);
+    assert.match(frase, noReadme, `${caso}: o servidor apaga no KV, e o README não conta: "${frase}"`);
+  }
+  // A aprovação apaga 1 por vez — e o README diz quanto.
+  assert.ok(frase.includes('1 por aprovação'), `o README não diz quanto a aprovação de foto apaga: "${frase}"`);
+  // CONTROLES: sem a lista da lixeira guardada, aprovar não apaga; o perfil que
+  // passa no portão também não (o instrumento não conta apagamento à toa).
+  assert.equal(await apagamentosNoKv(async (amb) => { amb.medir(); await aprovar(amb); }), 0,
+    'CONTROLE: aprovar sem a lixeira apagou no KV');
+  assert.equal(await apagamentosNoKv(async ({ sessions, sessionToken, medir }) => {
+    medir();
+    await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+  }), 0, 'CONTROLE: o perfil que passa no portão apagou no KV');
+});
+
 // ── A extensão ───────────────────────────────────────────────────────────────
 // T4/A14: o protocolo do README não tinha o `conta` do `sessao`, e dizia que
 // "nenhuma mudança de protocolo" tinha havido depois de duas. As respostas da
