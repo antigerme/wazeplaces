@@ -48,10 +48,52 @@ function rodarInject(user, { locale = 'pt-BR' } = {}) {
   return postados[0];
 }
 
+// ── Um RELÓGIO de mentira, pra quem precisa que o tempo ANDE ────────────────
+// `setTimeout` agenda na hora virtual, `Date.now()` lê a hora virtual, e
+// `andar` roda os timers na ordem, pulando o relógio de um pro outro. Entre um
+// timer e outro ele deixa terminar o que NÃO é timer: as microtarefas e o
+// trabalho de verdade em voo (`acompanhar`: o servidor de verdade cifrando a
+// sessão). Sem isso o relógio pularia pro próximo timer — o prazo do login,
+// 40 s adiante — com a resposta do servidor ainda a caminho (R8-6-01).
+function relogioVirtual(inicio = Date.now()) {
+  let agora = inicio;
+  let proximo = 1;
+  const fila = new Map();
+  const emVoo = new Set();
+  const folga = () => new Promise((r) => setImmediate(r));
+  return {
+    agora: () => agora,
+    Date: { now: () => agora },
+    setTimeout: (fn, ms) => { const id = proximo++; fila.set(id, { fn, quando: agora + Math.max(0, Number(ms) || 0) }); return id; },
+    clearTimeout: (id) => { fila.delete(id); },
+    acompanhar(p) { emVoo.add(p); const sai = () => emVoo.delete(p); p.then(sai, sai); return p; },
+    // Anda até `pronto()` dar verdade, ou até a hora `ate` — o que vier antes.
+    async andar({ ate = Infinity, pronto = () => false } = {}) {
+      for (;;) {
+        await folga();
+        while (emVoo.size) { await Promise.allSettled([...emVoo]); await folga(); }
+        if (pronto()) return true;
+        let prox = null;
+        for (const [id, t] of fila) if (!prox || t.quando < prox[1].quando) prox = [id, t];
+        if (!prox || prox[1].quando > ate) {
+          if (Number.isFinite(ate) && ate > agora) agora = ate;
+          return pronto();
+        }
+        fila.delete(prox[0]);
+        agora = prox[1].quando;
+        prox[1].fn();
+      }
+    },
+  };
+}
+
 // ── O painel (content.js) num DOM de mentira com o #sidebar do WME ──────────
-function rodarPainel({ sendMessage = () => {} } = {}) {
+// Com `relogio`, os timers e o `Date.now()` do painel são os dele (o mesmo do
+// background, no teste do prazo do login); sem, nada dispara sozinho (abaixo).
+function rodarPainel({ sendMessage = () => {}, relogio = null } = {}) {
   const todos = [];
   const alertas = [];
+  const alertasEm = [];
   const elemento = (tag) => {
     const el = {
       tagName: String(tag).toUpperCase(), id: '', className: '', children: [], style: {},
@@ -88,10 +130,11 @@ function rodarPainel({ sendMessage = () => {} } = {}) {
       getElementById: (id) => todos.find((e) => e.id === id) || null,
       querySelector: (q) => (q === '#sidebar ul.nav-tabs' ? abas : q === '#sidebar .tab-content' ? conteudo : null),
     },
-    chrome, alert: (m) => alertas.push(m), console,
+    chrome, alert: (m) => { alertas.push(m); alertasEm.push(relogio ? relogio.agora() : null); }, console,
     MutationObserver: class { observe() {} disconnect() {} },
-    setTimeout: (fn, ms) => { const id = proximoTimer++; agendados.set(id, { fn, ms }); return id; },
-    clearTimeout: (id) => { agendados.delete(id); },
+    setTimeout: relogio ? relogio.setTimeout : (fn, ms) => { const id = proximoTimer++; agendados.set(id, { fn, ms }); return id; },
+    clearTimeout: relogio ? relogio.clearTimeout : (id) => { agendados.delete(id); },
+    ...(relogio ? { Date: relogio.Date } : {}),
   };
   ctx.window = ctx;
   ctx.addEventListener = (tipo, fn) => { if (tipo === 'message') ouvinte = fn; };
@@ -102,7 +145,7 @@ function rodarPainel({ sendMessage = () => {} } = {}) {
   // ele), e é com ele que o content.js confere quem mandou a mensagem.
   const global = vm.runInContext('globalThis', ctx);
   return {
-    alertas, chrome,
+    alertas, alertasEm, chrome,
     receber(msg) { ouvinte({ source: global, data: msg }); },
     botao: () => todos.find((e) => e.tagName === 'BUTTON'),
     // Tudo o que o painel escreve na tela (texto, HTML e o `title` do botão).
@@ -213,21 +256,26 @@ const COOKIE = (n, v) => ({ name: n, value: v, domain: '.waze.com', hostOnly: fa
 const COOKIES_OK = [COOKIE('_web_session', 'S'), COOKIE('_csrf_token', 'C')];
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 
-function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = null } = {}) {
+// O relógio é o de mentira (acima): as esperas entre tentativas andam com ele,
+// sem esperar de verdade, e o prazo do login do botão (R8-6-01) só vence se o
+// tempo virtual chegar lá. `servidor` troca o servidor de verdade por um de
+// mentira (o teste do prazo, que precisa de idas LENTAS).
+function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = null, servidor = null, relogio = relogioVirtual() } = {}) {
   const sessions = makeSessions({ store: storeEmMemoria(), keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
   const guardado = {};
   const abas = [];
+  const abasEm = [];
   let ouvinte = null;
   const ctx = {
     chrome: {
       cookies: { getAll: (q, cb) => cb(cookies) },
       runtime: { onMessage: { addListener: (f) => { ouvinte = f; } }, onInstalled: { addListener() {} } },
       storage: { local: { set: (o, cb) => { Object.assign(guardado, o); if (cb) cb(); } } },
-      tabs: { create: (o) => abas.push(o.url), query() {}, reload() {} },
+      tabs: { create: (o) => { abas.push(o.url); abasEm.push(relogio.agora()); }, query() {}, reload() {} },
     },
     // O servidor DE VERDADE, com o Waze de mentira (o `fetch` do core) só
     // durante a chamada.
-    fetch: async (url, init) => {
+    fetch: servidor || ((url, init) => relogio.acompanhar((async () => {
       if (rede) throw rede;
       const salvo = globalThis.fetch;
       globalThis.fetch = async (u, i) => waze(String(u), i);
@@ -235,16 +283,30 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
         const r = await dispatch('testar-cookies', JSON.parse(init.body), { sessions });
         return { json: async () => r.body };
       } finally { globalThis.fetch = salvo; }
-    },
-    setTimeout: (fn) => { fn(); return 0; },   // as esperas entre tentativas, sem esperar
-    console, Date,
+    })())),
+    AbortController,
+    setTimeout: relogio.setTimeout, clearTimeout: relogio.clearTimeout,
+    console, Date: relogio.Date,
   };
   vm.createContext(ctx);
   vm.runInContext(BACKGROUND, ctx);
   assert.ok(ouvinte, 'CONTROLE: o background não ouve mensagens');
+  const ABA_DO_WME = { tab: { url: 'https://www.waze.com/editor' } };
   return {
-    guardado, abas,
-    pedir: (msg) => new Promise((res) => ouvinte(msg, { tab: { url: 'https://www.waze.com/editor' } }, res)),
+    guardado, abas, abasEm, relogio,
+    // Uma constante do background.js, lida do script que rodou.
+    constante: (nome) => {
+      try { return vm.runInContext(nome, ctx); } catch { assert.fail(`sumiu a constante ${nome} do background.js`); }
+    },
+    // A mensagem entra, e quem chamou anda com o relógio.
+    ouvir: (msg, responder) => ouvinte(msg, ABA_DO_WME, responder),
+    // A mensagem entra, e o relógio anda até a resposta.
+    pedir: async (msg) => {
+      let resposta, chegou = false;
+      ouvinte(msg, ABA_DO_WME, (r) => { resposta = r; chegou = true; });
+      assert.ok(await relogio.andar({ pronto: () => chegou }), `o background não respondeu a ${JSON.stringify(msg)}`);
+      return resposta;
+    },
   };
 }
 
@@ -458,10 +520,235 @@ test('R7-6-07: o painel em português tem os acentos — "Após", "ícone", "Ár
   assert.match(pt.info2, /^Após acessar o Waze Places, clique no filtro \(ícone de funil\) /, `pt-BR.info2: "${pt.info2}"`);
 });
 
-test('R7-1-06: o teto do ACESSAR é maior que o do servidor pra ir ao Waze — o login lento ainda chega antes de o botão desistir', () => {
+// ═══ R8-6-01 = R8-1-02 · o login do ACESSAR tem prazo TOTAL, abaixo do teto ═══
+// O teto de 45 s do botão era comparado com UMA ida ao servidor (que espera o
+// Waze até 30 s), e o background repete o login em toda falha passageira: até 4
+// idas, com 4,6 s de espera entre elas. O Waze que estourava os 30 s na 1ª ida e
+// respondia na 2ª fazia o botão voltar aos 45 s com "A extensão não respondeu.
+// Recarregue esta página e tente de novo." — e a aba do app abria DEPOIS, aos
+// 50,6 s; quem obedecia ao aviso abria a segunda sessão e a segunda aba (MEDIDO
+// num relógio virtual com o content.js e o background.js de verdade). Agora o
+// `abrirPlaces` tem prazo TOTAL (`PRAZO_DO_BOTAO_MS`), contado do toque: nenhuma
+// ida começa depois dele, a que está no ar é cancelada, e a resposta que chega
+// depois não abre aba.
+//
+// O servidor aqui é de mentira, porque as idas precisam ser LENTAS. Cada ida
+// segue o plano da vez (`ms` até a resposta; `ok` dá a sessão) e, como o `fetch`
+// do Chrome, para quando o sinal cancela — menos com `ignoraCancelamento`. As
+// respostas são as do servidor DE VERDADE: a sessão, e a falha que ele dá quando
+// o `callWaze` aborta a ida ao Waze nos 30 s (`WAZE_ESPERA_MS`).
+const COOKIES_TXT = ['.waze.com\tTRUE\t/\tTRUE\t9999999999\t_csrf_token\tc', '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\ts'].join('\n');
+async function respostaDoServidor(waze) {
+  const sessions = makeSessions({ store: storeEmMemoria(), keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+  const salvo = globalThis.fetch;
+  globalThis.fetch = waze;
+  try { return (await dispatch('testar-cookies', { cookies: COOKIES_TXT, region: 'row' }, { sessions })).body; }
+  finally { globalThis.fetch = salvo; }
+}
+const WAZE_ESTOUROU = await respostaDoServidor(async () => { const e = new Error('This operation was aborted'); e.name = 'AbortError'; throw e; });
+const SESSAO_OK = await respostaDoServidor(async () => json(PERFIL_L6));
+
+function servidorLento(relogio, idas, { ignoraCancelamento = false } = {}) {
+  const registro = [];   // cada ida: quando saiu, quando terminou, e como ('sessão', 'falha' ou 'cancelada')
+  const servidor = (url, init = {}) => new Promise((ok, falha) => {
+    const plano = idas[Math.min(registro.length, idas.length - 1)];
+    const ida = { saiu: relogio.agora(), fim: null, como: null };
+    registro.push(ida);
+    const corpo = plano.ok ? { ...SESSAO_OK, sessionToken: `tok-${registro.length}` } : WAZE_ESTOUROU;
+    const id = relogio.setTimeout(() => {
+      if (ida.como) return;
+      ida.fim = relogio.agora();
+      ida.como = plano.ok ? 'sessão' : 'falha';
+      ok({ json: async () => structuredClone(corpo) });
+    }, plano.ms);
+    if (ignoraCancelamento || !init.signal) return;
+    const cancelar = () => {
+      if (ida.como) return;   // já respondeu: cancelar não desfaz a resposta
+      ida.fim = relogio.agora();
+      ida.como = 'cancelada';
+      relogio.clearTimeout(id);
+      falha(new DOMException('The operation was aborted.', 'AbortError'));
+    };
+    if (init.signal.aborted) cancelar(); else init.signal.addEventListener('abort', cancelar, { once: true });
+  });
+  return { servidor, registro };
+}
+
+// O toque no ACESSAR de um L6+AM: o painel e o background de verdade num relógio
+// só, com o servidor lento. `entregaMs`: a mensagem do toque demora pra chegar ao
+// background (o service worker acordando). `tocarDeNovo`: quantos ms depois do
+// aviso a pessoa toca de novo, como ele pede. `responde: false`: a extensão muda.
+// Depois disso o tempo passa (10 minutos), pra ver o que abre DEPOIS.
+async function acessarComServidorLento({ idas, lingua = 'pt-BR', entregaMs = 0, tocarDeNovo = null, ignoraCancelamento = false, responde = true }) {
+  const relogio = relogioVirtual();
+  const t0 = relogio.agora();
+  const { servidor, registro } = servidorLento(relogio, idas, { ignoraCancelamento });
+  const bg = rodarBackground({ servidor, relogio });
+  const mensagens = [];
+  const painel = rodarPainel({
+    relogio,
+    sendMessage: (msg, cb) => {
+      mensagens.push(msg);
+      if (responde) relogio.setTimeout(() => bg.ouvir(msg, cb), entregaMs);
+    },
+  });
+  painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
+  const b = painel.botao();
+  assert.equal(b.disabled, false, `CONTROLE (${lingua}): o L6+AM vê o ACESSAR liberado`);
+  b.click();
+  let segundoToque = null;
+  if (tocarDeNovo !== null) {
+    assert.ok(await relogio.andar({ pronto: () => painel.alertas.length > 0 }), 'CONTROLE: o aviso não saiu, e o 2º toque não tem quando');
+    await relogio.andar({ ate: relogio.agora() + tocarDeNovo });
+    segundoToque = relogio.agora() - t0;
+    assert.equal(b.disabled, false, 'CONTROLE: o botão não voltou pro 2º toque');
+    b.click();
+  }
+  await relogio.andar({ ate: t0 + 10 * 60 * 1000 });
+  const rel = (t) => t - t0;
+  return {
+    t: DICIONARIO[lingua], b, mensagens, segundoToque, PRAZO: bg.constante('PRAZO_DO_BOTAO_MS'),
+    idas: registro.map((i) => ({ saiu: rel(i.saiu), fim: i.fim === null ? null : rel(i.fim), como: i.como })),
+    alertas: painel.alertas, alertasEm: painel.alertasEm.map(rel),
+    abasEm: bg.abasEm.map(rel), pendente: bg.guardado.token_pendente || null,
+  };
+}
+const segundos = (lista) => lista.map((ms) => `${ms / 1000} s`).join(', ') || 'nenhum';
+
+test('R8-6-01: o Waze que estoura os 30 s na 1ª ida e responderia na 2ª não abre mais a aba depois do aviso — o botão volta antes do teto, dizendo o que aconteceu', async () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const r = await acessarComServidorLento({ idas: [{ ms: WAZE_ESPERA_MS, ok: false }, { ms: 20000, ok: true }], lingua });
+    // CONTROLE: o caso é o do achado — a 2ª ida saiu, e a sessão dela chegaria depois do teto do botão.
+    assert.equal(r.idas.length, 2, `CONTROLE (${lingua}): ${JSON.stringify(r.idas)}`);
+    assert.ok(r.idas[1].saiu + 20000 > ESPERA_DO_BOTAO_MS, `CONTROLE (${lingua}): a 2ª ida responderia antes do teto: ${JSON.stringify(r.idas)}`);
+    assert.deepEqual(r.abasEm, [], `${lingua}: a aba do app abriu aos ${segundos(r.abasEm)}, e o aviso saiu aos ${segundos(r.alertasEm)}`);
+    assert.equal(r.pendente, null, `${lingua}: o login que desistiu deixou o token guardado pra aba do app`);
+    assert.equal(r.idas[1].como, 'cancelada', `${lingua}: a ida no ar seguiu depois do prazo do login: ${JSON.stringify(r.idas[1])}`);
+    assert.ok(r.idas[1].fim <= r.PRAZO, `${lingua}: a ida foi cancelada aos ${r.idas[1].fim} ms, depois do prazo (${r.PRAZO} ms)`);
+    assert.equal(r.alertas.length, 1, `${lingua}: ${JSON.stringify(r.alertas)}`);
+    assert.ok(r.alertasEm[0] < ESPERA_DO_BOTAO_MS, `${lingua}: o botão só voltou no teto (${r.alertasEm[0]} ms), com o login ainda no ar`);
+    assert.equal(r.alertas[0], r.t.errorLogin + r.t.erroWaze, `${lingua}: o aviso não diz que foi o Waze que não respondeu: ${JSON.stringify(r.alertas[0])}`);
+    assert.equal(r.b.disabled, false, `${lingua}: o botão seguiu travado`);
+    assert.equal(r.b.innerText, r.t.accessWazePlacesBtn);
+  }
+});
+
+test('R8-6-01: tocar de novo depois do aviso, como ele pede, abre UMA aba — a do 2º toque, nunca a do login que desistiu', async () => {
+  const r = await acessarComServidorLento({ idas: [{ ms: WAZE_ESPERA_MS, ok: false }, { ms: 20000, ok: true }, { ms: 5000, ok: true }], tocarDeNovo: 1000 });
+  assert.equal(r.idas.length, 3, `CONTROLE: ${JSON.stringify(r.idas)}`);
+  assert.ok(r.idas[2].saiu >= r.segundoToque, `CONTROLE: a 3ª ida não é a do 2º toque: ${JSON.stringify(r.idas)}`);
+  assert.equal(r.abasEm.length, 1, `abriram ${r.abasEm.length} abas (aos ${segundos(r.abasEm)}): duas sessões e duas abas da mesma conta`);
+  assert.ok(r.abasEm[0] >= r.segundoToque, `a aba que abriu (aos ${segundos(r.abasEm)}) é a do login que desistiu`);
+  assert.equal(r.pendente && r.pendente.token, 'tok-3', 'o token guardado pra aba não é o do 2º toque');
+});
+
+test('R8-6-01: com o servidor pendurado, o botão volta no prazo do login dizendo que não falou com o Waze Places — "a extensão não respondeu" fica pra extensão muda', async () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const r = await acessarComServidorLento({ idas: [{ ms: Infinity, ok: false }], lingua });
+    assert.equal(r.idas.length, 1, `CONTROLE (${lingua}): ${JSON.stringify(r.idas)}`);
+    assert.equal(r.idas[0].como, 'cancelada', `${lingua}: a ida pendurada não foi cancelada: ${JSON.stringify(r.idas[0])}`);
+    assert.ok(r.idas[0].fim <= r.PRAZO, `${lingua}: cancelada aos ${r.idas[0].fim} ms, depois do prazo`);
+    assert.deepEqual(r.abasEm, []);
+    assert.equal(r.alertas.length, 1, `${lingua}: ${JSON.stringify(r.alertas)}`);
+    assert.ok(r.alertasEm[0] <= r.PRAZO, `${lingua}: o botão voltou aos ${r.alertasEm[0]} ms, depois do prazo do login`);
+    assert.equal(r.alertas[0], r.t.errorLogin + r.t.erroConexao, `${lingua}: ${JSON.stringify(r.alertas[0])}`);
+    // CONTROLE: a extensão que não responde nada segue caindo no teto do botão, com o aviso dela.
+    const muda = await acessarComServidorLento({ idas: [{ ms: 1, ok: true }], lingua, responde: false });
+    assert.deepEqual(muda.alertasEm, [ESPERA_DO_BOTAO_MS], `CONTROLE (${lingua}): o teto do botão não venceu na hora dele`);
+    assert.deepEqual(muda.alertas, [muda.t.errorLogin + muda.t.erroExtensao], `CONTROLE (${lingua}): o aviso do teto mudou`);
+  }
+});
+
+test('R8-6-01: o prazo conta do TOQUE — o service worker que demora a acordar não empurra o login pra depois do aviso, e a mensagem que chega depois do prazo nem vai ao servidor', async () => {
+  const PRAZO = rodarBackground().constante('PRAZO_DO_BOTAO_MS');
+  const ESPERA_1 = rodarBackground().constante('ESPERAS_MS')[0];
+  // A mensagem chega 1 s depois da folga entre o prazo e o teto; a 2ª ida daria
+  // certo ENTRE o teto do botão e o prazo contado da CHEGADA — contado dela, a aba
+  // abriria depois do aviso.
+  const entregaMs = ESPERA_DO_BOTAO_MS - PRAZO + 1000;
+  const sessaoEm = Math.round((ESPERA_DO_BOTAO_MS + entregaMs + PRAZO) / 2);
+  const idas = [{ ms: WAZE_ESPERA_MS, ok: false }, { ms: sessaoEm - (entregaMs + WAZE_ESPERA_MS + ESPERA_1), ok: true }];
+  const r = await acessarComServidorLento({ entregaMs, idas });
+  assert.equal(typeof r.mensagens[0].desde, 'number', 'o painel não manda a hora do toque');
+  assert.ok(r.idas[0].saiu >= entregaMs, `CONTROLE: a mensagem não chegou atrasada: ${JSON.stringify(r.idas)}`);
+  assert.equal(r.idas.length, 2, `CONTROLE: ${JSON.stringify(r.idas)}`);
+  assert.ok(sessaoEm > ESPERA_DO_BOTAO_MS && sessaoEm < entregaMs + PRAZO, 'CONTROLE: a sessão não cai entre o teto e o prazo contado da chegada');
+  assert.deepEqual(r.abasEm, [], `a aba abriu aos ${segundos(r.abasEm)}, e o aviso saiu aos ${segundos(r.alertasEm)}`);
+  assert.equal(r.alertas.length, 1);
+  assert.ok(r.alertasEm[0] <= PRAZO, `o botão voltou aos ${r.alertasEm[0]} ms: o prazo contou da chegada, e não do toque`);
+  // A mensagem que chega DEPOIS do prazo (o service worker que levou mais que ele pra acordar).
+  const tarde = await acessarComServidorLento({ entregaMs: PRAZO + 1000, idas: [{ ms: 1000, ok: true }] });
+  assert.deepEqual(tarde.idas, [], 'a mensagem que chegou depois do prazo foi ao servidor (uma ida ao Waze no nome da pessoa, e a aba depois do aviso)');
+  assert.deepEqual(tarde.abasEm, []);
+});
+
+test('R8-6-01: a sessão que chega depois do prazo não abre aba nem fica guardada pra aba nenhuma — mesmo com uma ida que não se deixa cancelar', async () => {
+  const tardia = await acessarComServidorLento({ ignoraCancelamento: true, idas: [{ ms: WAZE_ESPERA_MS, ok: false }, { ms: 20000, ok: true }] });
+  assert.equal(tardia.idas[1].como, 'sessão', `CONTROLE: a ida não terminou com a sessão: ${JSON.stringify(tardia.idas)}`);
+  assert.ok(tardia.idas[1].fim > tardia.PRAZO, 'CONTROLE: a sessão chegou dentro do prazo');
+  assert.deepEqual(tardia.abasEm, [], `a sessão que chegou aos ${tardia.idas[1].fim} ms abriu a aba`);
+  assert.equal(tardia.pendente, null, 'a sessão que chegou depois do prazo ficou guardada pra aba do app');
+  // CONTROLE: a mesma ida, dentro do prazo, abre a aba.
+  const aTempo = await acessarComServidorLento({ ignoraCancelamento: true, idas: [{ ms: WAZE_ESPERA_MS, ok: false }, { ms: 4000, ok: true }] });
+  assert.equal(aTempo.abasEm.length, 1, `CONTROLE: ${JSON.stringify(aTempo.idas)}`);
+  assert.ok(aTempo.abasEm[0] < aTempo.PRAZO);
+  assert.deepEqual(aTempo.alertas, []);
+});
+
+test('R8-6-01: o teto do ACESSAR se compara com o PIOR caso do login inteiro — todas as idas, e não uma só', async () => {
   assert.ok(Number.isInteger(ESPERA_DO_BOTAO_MS) && ESPERA_DO_BOTAO_MS > 0, 'CONTROLE: sumiu o `ESPERA_DO_BOTAO_MS` do content.js');
-  assert.ok(ESPERA_DO_BOTAO_MS > WAZE_ESPERA_MS,
-    `o botão desiste em ${ESPERA_DO_BOTAO_MS} ms, antes do servidor (${WAZE_ESPERA_MS} ms pro Waze): o login que o Waze atrasa avisaria "a extensão não respondeu" e abriria a aba depois`);
+  const bg0 = rodarBackground();
+  const MAX = bg0.constante('MAX_TENTATIVAS');
+  const ESPERAS = bg0.constante('ESPERAS_MS');
+  const PRAZO = bg0.constante('PRAZO_DO_BOTAO_MS');
+  // Sem prazo, o pior caso é a SOMA: toda ida esperando o Waze até os 30 s do
+  // servidor, e as esperas entre elas. Comparar o teto com uma ida só escondia isso.
+  const semPrazo = MAX * WAZE_ESPERA_MS + ESPERAS.slice(0, MAX - 1).reduce((a, b) => a + b, 0);
+  assert.ok(WAZE_ESPERA_MS < ESPERA_DO_BOTAO_MS && semPrazo > ESPERA_DO_BOTAO_MS,
+    `CONTROLE: uma ida (${WAZE_ESPERA_MS} ms) cabe no teto (${ESPERA_DO_BOTAO_MS} ms), e o login inteiro sem prazo (${semPrazo} ms) não`);
+  // CONTROLE MEDIDO: a ponte, que não tem prazo, leva exatamente essa soma com toda
+  // ida estourando — o instrumento mede a cadeia inteira de tentativas.
+  {
+    const relogio = relogioVirtual();
+    const { servidor, registro } = servidorLento(relogio, [{ ms: WAZE_ESPERA_MS, ok: false }]);
+    const bg = rodarBackground({ servidor, relogio });
+    const t0 = relogio.agora();
+    const r = await bg.pedir({ action: 'autenticar' });
+    assert.equal(r.errorCategory, 'transient', `CONTROLE: ${JSON.stringify(r)}`);
+    assert.equal(registro.length, MAX, 'CONTROLE: a ponte não fez todas as idas');
+    assert.equal(relogio.agora() - t0, semPrazo, 'CONTROLE: o login inteiro, sem prazo, não levou a soma das idas e das esperas');
+  }
+  // O prazo do botão: uma ida lenta que dá certo ainda cabe, e o background responde antes do teto.
+  assert.ok(PRAZO > WAZE_ESPERA_MS, `o prazo do login (${PRAZO} ms) não cabe uma ida que o Waze atrasa até o fim (${WAZE_ESPERA_MS} ms)`);
+  assert.ok(PRAZO < ESPERA_DO_BOTAO_MS, `o prazo do login (${PRAZO} ms) não fica abaixo do teto do botão (${ESPERA_DO_BOTAO_MS} ms)`);
+  // MEDIDO: a demora de cada ida varrida de 0 a além do teto (e o servidor
+  // pendurado), com a sessão chegando na k-ésima ida, ou em nenhuma. O pior caso é
+  // a resposta MAIS TARDIA do background, de todas.
+  const demoras = [];
+  for (let ms = 0; ms <= ESPERA_DO_BOTAO_MS + 2000; ms += 500) demoras.push(ms);
+  demoras.push(WAZE_ESPERA_MS - 1, WAZE_ESPERA_MS + 1, Infinity);
+  let pior = 0;
+  for (const ms of demoras) {
+    for (let k = 0; k <= MAX; k++) {
+      const relogio = relogioVirtual();
+      const { servidor, registro } = servidorLento(relogio, Array.from({ length: MAX }, (_, i) => ({ ms, ok: i === k - 1 })));
+      const bg = rodarBackground({ servidor, relogio });
+      const t0 = relogio.agora();
+      let quando = null;
+      let resposta = null;
+      bg.ouvir({ action: 'abrirPlaces', desde: t0 }, (r) => { quando = relogio.agora() - t0; resposta = r; });
+      await relogio.andar({ ate: t0 + 10 * 60 * 1000 });
+      const caso = `ida de ${ms} ms, ${k ? `a sessão na ${k}ª` : 'nenhuma sessão'}`;
+      assert.ok(quando !== null, `${caso}: o background não respondeu`);
+      pior = Math.max(pior, quando);
+      assert.ok(quando <= PRAZO, `${caso}: o background respondeu aos ${quando} ms, depois do prazo (${PRAZO} ms)`);
+      for (const i of registro) assert.ok(i.saiu - t0 < PRAZO, `${caso}: uma ida começou aos ${i.saiu - t0} ms, no prazo ou depois dele`);
+      assert.equal(bg.abasEm.length, resposta && resposta.success ? 1 : 0, `${caso}: ${bg.abasEm.length} abas, e a resposta foi ${JSON.stringify(resposta)}`);
+      for (const a of bg.abasEm) assert.ok(a - t0 <= PRAZO, `${caso}: a aba abriu aos ${a - t0} ms, depois do prazo`);
+    }
+  }
+  assert.ok(pior < ESPERA_DO_BOTAO_MS, `o pior caso medido do login (${pior} ms) passa do teto do botão (${ESPERA_DO_BOTAO_MS} ms)`);
+  assert.equal(pior, PRAZO, 'CONTROLE: nenhuma ida da varredura esbarrou no prazo');
 });
 
 // ═══ R6-1-10 · o login pelo BOTÃO do WME diz a conta e passa pelo diário ═════

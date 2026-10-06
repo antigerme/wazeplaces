@@ -8,6 +8,20 @@ const MAX_TENTATIVAS = 4;
 const ESPERAS_MS = [600, 1500, 2500, 3000];
 const API_BASE = 'https://places.wazebrasil.com';
 
+// O prazo TOTAL do login do botão ACESSAR (`abrirPlaces`), contado do TOQUE e
+// valendo pra TODAS as tentativas (auditoria da rodada 8, R8-6-01 = R8-1-02).
+// O painel desiste em 45 s (`ESPERA_DO_BOTAO_MS`, no content.js), e a conta de
+// lá comparava UMA ida com o prazo do servidor pro Waze (30 s) — só que o login
+// daqui se repete em toda falha passageira: até 4 idas, com 4,6 s de espera
+// entre elas, 4 × 30 + 4,6 = 124,6 s no pior caso. O Waze que estourava os 30 s
+// na 1ª ida e respondia na 2ª abria a aba DEPOIS do aviso de "a extensão não
+// respondeu", e quem obedecia ao "tente de novo" abria a segunda sessão e a
+// segunda aba (MEDIDO com os dois scripts de verdade num relógio virtual).
+// Passado o prazo, nenhuma ida começa, a que está no ar é cancelada e a
+// resposta é a falha, antes do teto do painel e com o aviso do que aconteceu.
+// Maior que os 30 s do servidor: uma ida lenta que dá certo ainda cabe.
+const PRAZO_DO_BOTAO_MS = 40000;
+
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cookiesPorUrl = (url) =>
@@ -60,27 +74,67 @@ function formatarNetscape(cookies) {
 // — a v0.0.3 mandava 30 (Brasil) e o servidor ignorava. Sai daqui: mandar um
 // país fixo num endpoint que não o lê só sugeria que a extensão é brasileira,
 // e o app atende qualquer país onde o editor tenha permissão.
-async function trocarPorToken(cookiesTxt) {
+//
+// `sinal` cancela a ida, e a leitura do corpo junto (ela também fica no ar).
+async function trocarPorToken(cookiesTxt, sinal) {
   const resp = await fetch(`${API_BASE}/api/testar-cookies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookies: cookiesTxt, region: 'row' }),
+    signal: sinal,
   });
   return resp.json();
 }
 
-async function autenticar(urlDaAba) {
+// `ate`: a hora (`Date.now()`) em que o login DESISTE — o prazo do botão (ver
+// `PRAZO_DO_BOTAO_MS`). A ponte não passa prazo, e lá tudo segue como era.
+async function autenticar(urlDaAba, ate = Infinity) {
+  const controle = new AbortController();
+  const teto = ate === Infinity ? null : setTimeout(() => controle.abort(), Math.max(0, ate - Date.now()));
+  try {
+    return await tentarAte(urlDaAba, ate, controle.signal);
+  } finally {
+    clearTimeout(teto);
+  }
+}
+
+// As idas do login, até o prazo `ate`; o `sinal` cancela a que estiver no ar.
+async function tentarAte(urlDaAba, ate, sinal) {
+  // O relógio também conta, e não só o cancelamento: com o prazo já vencido na
+  // chegada, o `setTimeout(…, 0)` só cancelaria depois de a 1ª ida ter saído.
+  const venceu = () => sinal.aborted || Date.now() >= ate;
+  // A falha da ida ANTERIOR é a que sai quando o prazo acaba no meio da
+  // seguinte (o Waze que estourou os 30 s no servidor, por exemplo). Sem
+  // nenhuma, quem não respondeu a tempo foi o próprio Waze Places.
+  let ultima = null;
+  const desistir = () => ultima
+    || { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: o login passou do prazo.' };
+  // Anota a falha desta ida (é ela que sai se não houver outra) e espera a
+  // próxima — se ainda houver tentativa e a espera acabar DENTRO do prazo: a ida
+  // que começaria depois dele não começa, e esperar pra então desistir só
+  // seguraria o botão à toa.
+  const outraIda = async (tentativa, falha) => {
+    ultima = falha;
+    const espera = ESPERAS_MS[tentativa - 1];
+    if (tentativa >= MAX_TENTATIVAS || venceu() || Date.now() + espera >= ate) return false;
+    await dormir(espera);
+    return !venceu();
+  };
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    if (venceu()) return desistir();
     try {
       // Re-coleta a cada tentativa: o Waze rotaciona o cookie de sessão, então
       // um valor de 3 segundos atrás pode já não valer.
       const cookies = await coletarCookies(urlDaAba);
       if (!cookies.length) {
-        if (tentativa < MAX_TENTATIVAS) { await dormir(ESPERAS_MS[tentativa - 1]); continue; }
-        return { success: false, semLogin: true, errorKey: 'ext.semCookies', error: 'Nenhum cookie do Waze encontrado.' };
+        if (await outraIda(tentativa, { success: false, semLogin: true, errorKey: 'ext.semCookies', error: 'Nenhum cookie do Waze encontrado.' })) continue;
+        return desistir();
       }
 
-      const r = await trocarPorToken(formatarNetscape(cookies));
+      const r = await trocarPorToken(formatarNetscape(cookies), sinal);
+      // A resposta que chega DEPOIS do prazo não vale, nem a que deu certo: o
+      // botão já voltou com o aviso da falha, e a aba aberta agora o desmentiria.
+      if (venceu()) return desistir();
       if (r && r.success && r.sessionToken) return r;
 
       // O PORTÃO do app recusou esta conta (nível ou área — `isUserAllowed` no
@@ -104,13 +158,16 @@ async function autenticar(urlDaAba) {
       if (r && r.error && /expirad|inválid|invalid|csrf/i.test(String(r.error))) {
         return { success: false, semLogin: true, error: r.error, errorKey: r.errorKey, errorVars: r.errorVars };
       }
-      if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return r || { success: false, errorKey: 'ext.semToken', error: 'A API não devolveu token.' };
+      if (await outraIda(tentativa, r || { success: false, errorKey: 'ext.semToken', error: 'A API não devolveu token.' })) continue;
+      return desistir();
     } catch (e) {
-      if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: ' + e.message };
+      // A ida que o PRAZO cancelou não é falha de rede: sai a da ida anterior.
+      if (venceu()) return desistir();
+      if (await outraIda(tentativa, { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: ' + e.message })) continue;
+      return desistir();
     }
   }
+  return desistir();
 }
 
 chrome.runtime.onMessage.addListener((req, sender, responder) => {
@@ -126,8 +183,14 @@ chrome.runtime.onMessage.addListener((req, sender, responder) => {
   // ainda não existe aba do app, então o token vai por `chrome.storage` e a
   // ponte o entrega quando o app da aba nova pede — com a CONTA, como no login
   // pela ponte, e com a HORA, porque pendente velho não se entrega (ver a ponte).
+  //
+  // O prazo do login (`PRAZO_DO_BOTAO_MS`) conta do TOQUE, que o painel manda
+  // (`desde`), e não de quando a mensagem chegou: o service worker adormecido
+  // leva um tempo pra acordar, e o teto do painel conta do toque. A mensagem que
+  // chega depois do prazo nem vai ao Waze.
   if (req.action === 'abrirPlaces') {
-    autenticar(sender.tab ? sender.tab.url : null).then((r) => {
+    const desde = Number.isFinite(req.desde) ? Math.min(req.desde, Date.now()) : Date.now();
+    autenticar(sender.tab ? sender.tab.url : null, desde + PRAZO_DO_BOTAO_MS).then((r) => {
       if (r && r.success && r.sessionToken) {
         const pendente = { token: r.sessionToken, conta: r.conta || null, em: Date.now() };
         chrome.storage.local.set({ token_pendente: pendente }, () => {

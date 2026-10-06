@@ -280,6 +280,9 @@ async function rodarBackground(corpoDoServidor) {
     },
     fetch: async () => { chamadas++; return { json: async () => corpoDoServidor }; },
     setTimeout: (fn) => { fn(); return 0; },   // as esperas entre tentativas, sem esperar
+    // O service worker de verdade tem os dois, e o login os usa desde a 0.3.3 (o
+    // prazo do ACESSAR, R8-6-01; a ponte, que este teste roda, não tem prazo).
+    AbortController, clearTimeout: () => {},
     console,
   };
   vm.createContext(ctx);
