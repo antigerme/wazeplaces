@@ -14,7 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { novoCliente } from './_presenca-cliente.mjs';
+import { novoCliente, bytesDeMensagem, b64 } from './_presenca-cliente.mjs';
 
 const T = 1790400000000;
 const tick = () => new Promise((r) => setImmediate(r));
@@ -296,4 +296,294 @@ test('R8-5-03 a carona de OUTRO país (a pessoa trocou de país com a ação no 
   // CONTROLE: a carona do MESMO país entra inteira.
   c.P.presencaAoCarona({ online: NO_APP[30].concat([{ id: '300000002', nome: 'carioca', rank: 1 }]), conversas: [] }, T + 10, 30);
   assert.deepEqual(c.P.Presenca.online.map((p) => p.nome), ['paulista', 'carioca']);
+});
+
+// ── R8-5-04, 05 e 06: a dívida do "lida" ─────────────────────────────────────
+
+const OUTRA = '555000111';
+const uuid = (n) => `b0000000-0000-1000-8000-${String(n).padStart(12, '0')}`;
+const fluxoDe = (c) => ({ ctl: new AbortController(), emLote: false, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 });
+// A mensagem `n` da CAF, com a hora `T + n` (a do Waze), chegando pelo tempo real.
+const chega = async (c, n) => c.P.presencaQuadro(fluxoDe(c), { inboxMessage: { messageId: uuid(900 + n), messageType: 'X',
+  message: b64(await bytesDeMensagem({ id: uuid(n), de: CAF, para: EU, texto: 'msg ' + n, ctx: { app: 'wazeplaces' }, ts: T + n })) } });
+const lidas = (c, com = CAF) => c.chamadas.chat.filter((x) => x.acao === 'lida' && x.com === com);
+const fechar = (c) => { c.$('conversaModal').classList.add('hidden'); c.P.presencaEsquecerAberta(); };
+const pilula = (c) => ({ escondida: c.$('presencaPill').classList.contains('hidden'),
+  balao: !c.$('presencaIconMsg').classList.contains('hidden'), selo: c.$('presencaCount').textContent });
+const SEM_REDE = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+
+// O Waze de mentira, que sobrevive à PÁGINA (o mesmo servidor pra cada
+// abertura do app): as mensagens da CAF (a `n` tem a hora `T + n`) e quais
+// seguem NÃO LIDAS. O "lida" (e o `abrir`) marca a conversa INTEIRA. `fora`
+// derruba o "lida"; `segurar` prende os "lida" no ar até o teste soltar.
+function wazeDeMentira() {
+  const w = { fora: false, segurar: false, presos: [], dela: [] };
+  const marcar = (com) => { if (com === CAF) for (const m of w.dela) m.lida = true; };
+  const conversaDaCaf = () => {
+    const u = w.dela.reduce((a, m) => (!a || m.ts > a.ts ? m : a), null);
+    return { id: CAF, nome: 'cafanha', naoLidas: w.dela.filter((m) => !m.lida).length, atividade: u ? u.ts : 0,
+      ultima: u ? { deMim: false, ts: u.ts, recibo: false, texto: 'x', card: null } : null };
+  };
+  w.guardar = (n) => w.dela.push({ n, ts: T + n, lida: false });
+  w.naoLida = (n) => w.dela.some((m) => m.n === n && !m.lida);
+  w.lista = () => ({ online: [], conversas: [conversaDaCaf()] });
+  // Uma página (uma abertura do app). `de`: o aparelho da página anterior.
+  w.pagina = ({ de = null, agora = T } = {}) => {
+    const c = novoCliente({ agora, api: {
+      chat: (x) => {
+        if (x.acao === 'abrir') { marcar(x.com); return { success: true, mensagens: [], maisAntigas: false, lida: true }; }
+        if (x.acao !== 'lida') return { success: true };
+        const responder = () => { if (w.fora) return SEM_REDE; marcar(x.com); return { success: true }; };
+        if (w.segurar) return new Promise((ok) => w.presos.push((r) => { if (r && r.success) marcar(x.com); ok(r || responder()); }));
+        return responder();
+      },
+      presencaApp: () => ({ success: true, ...w.lista(), agora: c.relogio.agora }),
+    } });
+    if (de) for (const [k, v] of de.armazenado) c.armazenado.set(k, v);
+    c.P.presencaMontar();
+    return c;
+  };
+  return w;
+}
+
+// A conversa com a CAF aberta e a mensagem 1 dela VISTA, com o "lida" falhando
+// (sem sinal): a dívida fica.
+async function vistaSemSinal(w, c) {
+  c.P.Presenca.conversas = [w.lista().conversas[0]];
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await c.rodarTimers(); await tick();       // a rajada do `abrir` (nada a marcar)
+  w.fora = true;
+  w.guardar(1);
+  await chega(c, 1);                                        // a 1, NA TELA
+  await c.rodarTimers(); await tick();                      // a rajada: falha
+  assert.deepEqual([...c.P.Presenca.lidaDevendo], [CAF], 'CONTROLE: a dívida tem que ter nascido');
+}
+const irProFundoESair = (c) => {
+  c.doc.visibilityState = 'hidden';
+  for (const fn of c.doc._ouv.visibilitychange || []) fn();
+  for (const fn of c.win._ouv.pagehide || []) fn({ persisted: false });
+};
+
+test('R8-5-04 vista sem sinal e o app fechado sem sinal: a dívida fica GUARDADA, e reaberto o app a vista não volta como nova — e o "lida" sai', async () => {
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  await vistaSemSinal(w, c);
+  irProFundoESair(c);                                       // fecha o app, ainda sem sinal
+  await tick(); await tick();
+  assert.deepEqual(c.guardado().devendo, { [CAF]: { ate: T + 1, n: 1 } },
+    'DEFEITO: a dívida do "lida" não ficou no aparelho — morre com a página');
+  // Reabre, com rede: outra página, o MESMO aparelho.
+  w.fora = false;
+  const c2 = w.pagina({ de: c, agora: T + 600_000 });
+  await c2.P.presencaSincronizar();                         // a abertura
+  await tick(); await tick();
+  assert.equal(c2.P.presencaNaoLidasDe(CAF), 0, 'DEFEITO: reaberto o app, a mensagem VISTA voltou como "1 mensagem nova"');
+  assert.deepEqual(pilula(c2), { escondida: true, balao: false, selo: '' }, 'a pílula virou balão com a mensagem vista');
+  assert.equal(lidas(c2).length, 1, 'DEFEITO: a reabertura não pagou a dívida guardada');
+  assert.equal(w.naoLida(1), false, 'a mensagem vista seguiu não lida no Waze');
+  assert.equal(c2.guardado().devendo, undefined, 'a dívida paga ficou no aparelho');
+  // E a página seguinte não paga de novo.
+  const c3 = w.pagina({ de: c2, agora: T + 900_000 });
+  await c3.P.presencaSincronizar();
+  await tick();
+  assert.equal(lidas(c3).length, 0, 'a dívida paga saiu de novo na abertura seguinte');
+});
+
+test('R8-5-04 CONTROLES: a rede volta antes de fechar (nada guardado); com mensagem NOVA dela, a dívida guardada sai sem pagar e a conta fica', async () => {
+  // (a) O "lida" do `pagehide` chega: nada fica devendo no aparelho.
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  await vistaSemSinal(w, c);
+  w.fora = false;
+  irProFundoESair(c);
+  await tick(); await tick();
+  assert.equal(w.naoLida(1), false, 'CONTROLE: o "lida" do fechamento tinha que chegar');
+  assert.equal(c.guardado().devendo, undefined, 'a dívida paga ficou no aparelho');
+  // (b) Fechado devendo; a CAF manda a 2, que a pessoa não viu: a dívida
+  // guardada não paga (marcaria a 2) e a conta (as duas) fica.
+  const v = wazeDeMentira();
+  const d = v.pagina();
+  await vistaSemSinal(v, d);
+  irProFundoESair(d);
+  await tick(); await tick();
+  v.fora = false;
+  v.guardar(2);
+  const d2 = v.pagina({ de: d, agora: T + 600_000 });
+  await d2.P.presencaSincronizar();
+  await tick(); await tick();
+  assert.equal(d2.P.presencaNaoLidasDe(CAF), 2, 'a mensagem 2 (não vista) sumiu da conta');
+  assert.equal(lidas(d2).length, 0, 'a dívida guardada foi paga com a mensagem 2, que ninguém viu');
+  assert.equal(v.naoLida(2), true);
+  assert.equal(d2.guardado().devendo, undefined, 'a dívida que deixou de valer ficou no aparelho');
+  // (c) Fechado devendo, e a vista LIDA no Waze depois (o "lida" do fechamento
+  // chegou e a resposta se perdeu com a página, ou a pessoa leu pelo WME): a
+  // reabertura não tem o que pagar — e não pede nada.
+  const x = wazeDeMentira();
+  const e = x.pagina();
+  await vistaSemSinal(x, e);
+  irProFundoESair(e);
+  await tick(); await tick();
+  x.fora = false;
+  x.dela.forEach((m) => { m.lida = true; });
+  const e2 = x.pagina({ de: e, agora: T + 600_000 });
+  await e2.P.presencaSincronizar();
+  await tick(); await tick();
+  assert.equal(lidas(e2).length, 0, 'a reabertura pagou uma dívida que o Waze já não conta');
+  assert.equal(e2.guardado().devendo, undefined, 'a dívida sem nada a pagar ficou no aparelho');
+});
+
+test('R8-5-04 o app fecha com o pagamento da dívida NO AR (a página morre antes da resposta): a dívida segue guardada', async () => {
+  // A dívida só sai do aparelho quando o pagamento CHEGA: tirada quando ele
+  // sai, a página que morre com ele no ar a levava junto.
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  await vistaSemSinal(w, c);
+  w.segurar = true;                                         // o pagamento do fechamento fica no ar…
+  irProFundoESair(c);                                       // …e a página morre
+  await tick(); await tick();
+  assert.equal(w.presos.length, 1, 'CONTROLE: o pagamento tinha que estar no ar');
+  assert.deepEqual(c.guardado().devendo, { [CAF]: { ate: T + 1, n: 1 } },
+    'DEFEITO: a dívida saiu do aparelho com o pagamento ainda no ar — a página morreu e a perdeu');
+});
+
+test('R8-5-04 a dívida GUARDADA sai no "Sair" (com a chave do chat), e a queda da sessão a mantém pra mesma conta', async () => {
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  await vistaSemSinal(w, c);
+  assert.ok(c.guardado().devendo, 'CONTROLE: a dívida tem que estar no aparelho');
+  // A queda (o `presencaDesligar`): a memória sai, o aparelho fica — e a mesma
+  // conta, de volta, adota e paga na primeira lista.
+  c.P.presencaDesligar();
+  assert.equal(c.P.Presenca.lidaDevendo.size, 0);
+  assert.ok(c.guardado().devendo, 'a queda apagou a dívida guardada da mesma conta');
+  w.fora = false;
+  c.relogio.agora += 61_000;
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  assert.equal(w.naoLida(1), false, 'a dívida guardada não foi paga depois da queda');
+  // O "Sair": sai tudo do chat, a dívida junto.
+  const s = wazeDeMentira();
+  const d = s.pagina();
+  await vistaSemSinal(s, d);
+  d.P.presencaEsquecer();
+  assert.equal(d.armazenado.has('waze_places_chat'), false, 'o "Sair" deixou a dívida no aparelho');
+});
+
+test('R8-5-05 a lista que chega com o pagamento da dívida NO AR não devolve a vista como nova — e o "1" não fica quando ele falha', async () => {
+  const caso = async ({ noAr = true, resposta = SEM_REDE } = {}) => {
+    const w = wazeDeMentira();
+    const c = w.pagina();
+    await vistaSemSinal(w, c);
+    fechar(c);                                              // o fechamento paga… e falha de novo
+    await tick();
+    w.fora = false;
+    if (noAr) {
+      w.segurar = true;
+      c.P.presencaAbrirConversa(OUTRA); await tick();       // fechar OUTRA conversa paga a dívida: o pedido fica no ar
+      fechar(c); await tick();
+      assert.equal(w.presos.length, 1, 'CONTROLE: o pagamento tinha que estar no ar');
+    }
+    c.relogio.agora += 40_000;
+    c.P.presencaAoCarona(w.lista(), c.relogio.agora - 100, 30);   // a carona de um ✕
+    await tick();
+    const comNoAr = c.P.presencaNaoLidasDe(CAF);
+    if (noAr) { w.presos.shift()(resposta); await tick(); await tick(); }
+    return { comNoAr, depois: c.P.presencaNaoLidasDe(CAF), pilula: pilula(c), devendo: [...c.P.Presenca.lidaDevendo] };
+  };
+  const r = await caso();
+  assert.equal(r.comNoAr, 0, 'DEFEITO: com o pagamento no ar, a lista devolveu a mensagem VISTA como "1 mensagem nova"');
+  assert.equal(r.depois, 0, 'DEFEITO: o pagamento falhou e o "1" ficou');
+  assert.deepEqual(r.pilula, { escondida: true, balao: false, selo: '' });
+  assert.deepEqual(r.devendo, [CAF], 'o pagamento que falhou não voltou a dever');
+  // CONTROLES: o pagamento dá certo → 0; sem pagamento no ar → 0 (a dívida, R7-5-02).
+  const a = await caso({ resposta: { success: true } });
+  assert.equal(a.depois, 0);
+  assert.deepEqual(a.devendo, []);
+  const b = await caso({ noAr: false });
+  assert.equal(b.comNoAr, 0);
+});
+
+test('R8-5-05 o "lida" da RAJADA no ar vale igual: a conversa fechada com ele voando não volta como nova com a carona', async () => {
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  c.P.Presenca.conversas = [w.lista().conversas[0]];
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await c.rodarTimers(); await tick();
+  w.segurar = true;
+  w.guardar(1);
+  await chega(c, 1);                                        // a 1, na tela
+  await c.rodarTimers(); await tick();                      // o "lida" da rajada sai e fica no ar
+  assert.equal(w.presos.length, 1, 'CONTROLE: o "lida" da rajada tinha que estar no ar');
+  fechar(c);
+  await tick();
+  c.relogio.agora += 40_000;
+  c.P.presencaAoCarona(w.lista(), c.relogio.agora - 100, 30);
+  await tick();
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 0, 'DEFEITO: com o "lida" no ar, a carona devolveu a vista como "1 mensagem nova"');
+  // CONTROLE: com mensagem NOVA dela (que a pessoa não viu), a carona conta.
+  w.guardar(2);
+  c.relogio.agora += 40_000;
+  c.P.presencaAoCarona(w.lista(), c.relogio.agora - 100, 30);
+  await tick();
+  assert.equal(c.P.presencaNaoLidasDe(CAF), 2, 'a mensagem 2 (não vista) sumiu da conta com o "lida" no ar');
+});
+
+test('R8-5-06 o "lida" pago ao ir pro fundo ainda NO AR e a volta rápida: o mesmo "lida" não sai duas vezes', async () => {
+  const caso = async ({ primeiroVoltaAntes = false, primeiroFalha = false } = {}) => {
+    const w = wazeDeMentira();
+    const c = w.pagina();
+    c.P.Presenca.conversas = [w.lista().conversas[0]];
+    c.P.presencaAbrirConversa(CAF);
+    await tick(); await c.rodarTimers(); await tick();
+    w.segurar = true;
+    w.guardar(1);
+    await chega(c, 1);                                      // a 1 chega NA TELA: a rajada corre
+    c.doc.visibilityState = 'hidden';                       // a pessoa troca de app: paga com keepalive
+    for (const fn of c.doc._ouv.visibilitychange || []) fn();
+    assert.equal(lidas(c).length, 1, 'CONTROLE: o "lida" tinha que sair ao ir pro fundo');
+    if (primeiroVoltaAntes) { w.presos.shift()({ success: true }); await tick(); await tick(); }
+    c.relogio.agora += 500;
+    c.doc.visibilityState = 'visible';                      // e volta meio segundo depois
+    for (const fn of c.doc._ouv.visibilitychange || []) fn();
+    await c.rodarTimers(); await tick(); await tick();      // a rajada da volta vence
+    const total = lidas(c).length;
+    if (w.presos.length) { w.presos.shift()(primeiroFalha ? SEM_REDE : { success: true }); await tick(); await tick(); }
+    const devendo = [...c.P.Presenca.lidaDevendo];
+    w.segurar = false;
+    fechar(c);                                              // o fechamento paga o que ficou devendo
+    await tick(); await tick();
+    return { total, devendo, naoLida: w.naoLida(1), pagoNoFechamento: lidas(c).length };
+  };
+  const r = await caso();
+  assert.equal(r.total, 1, 'DEFEITO: com o primeiro "lida" no ar, a rajada da volta mandou o mesmo "lida" de novo');
+  assert.equal(r.naoLida, false);
+  // Se o do fundo FALHA, a conversa volta a dever, e o fechamento a paga — o
+  // registro do "lida" no ar sai com a resposta, e não segura o pagamento.
+  const f = await caso({ primeiroFalha: true });
+  assert.equal(f.total, 1);
+  assert.deepEqual(f.devendo, [CAF], 'o "lida" no ar que falhou não voltou a dever');
+  assert.equal(f.pagoNoFechamento, 2, 'o fechamento não pagou a dívida do "lida" que falhou (o registro do no ar ficou)');
+  // CONTROLE: a resposta do primeiro chega antes da volta — a rajada não tem o que marcar.
+  const k = await caso({ primeiroVoltaAntes: true });
+  assert.equal(k.total, 1);
+});
+
+test('R8-5-06 o "lida" no ar segura os seguintes só até o teto do `_post`: pendurado, ele não trava o "lida" da conversa', async () => {
+  const w = wazeDeMentira();
+  const c = w.pagina();
+  c.P.Presenca.conversas = [w.lista().conversas[0]];
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await c.rodarTimers(); await tick();
+  w.segurar = true;
+  w.guardar(1);
+  await chega(c, 1);
+  await c.rodarTimers(); await tick();                      // o "lida" da rajada, pendurado
+  assert.equal(lidas(c).length, 1);
+  c.P.presencaAgendarLida(CAF);                             // a volta pra tela, dentro do teto
+  await c.rodarTimers(); await tick();
+  assert.equal(lidas(c).length, 1, 'dentro do teto, o mesmo "lida" saiu de novo');
+  c.relogio.agora += 46_000;                                // passou o teto: o pendurado não segura mais
+  c.P.presencaAgendarLida(CAF);
+  await c.rodarTimers(); await tick();
+  assert.equal(lidas(c).length, 2, 'o "lida" pendurado travou o da conversa pra sempre');
 });
