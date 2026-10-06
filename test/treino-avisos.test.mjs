@@ -15,7 +15,9 @@
 //   R9-7-05 — a folha do autor aberta de um card de treino oferecia o que
 //             ESCREVE: o interruptor armava a recusa automática de verdade;
 //   R9-7-02 — o próximo gesto de treino apagava os avisos de VERDADE que tinham
-//             chegado com ele aberto (o resultado do "Rejeitar os N"…).
+//             chegado com ele aberto (o resultado do "Rejeitar os N"…);
+//   R9-7-07 — o "Praticar" recusado pelo lote ou pela aprovação no ar fechava o
+//             diálogo, e o aviso mandava tocar de novo num botão fora da tela.
 //
 // Os testes RODAM as funções de verdade, fatiadas do app.js, num escopo só: o
 // que o teste não fornece é um "buraco negro" que aceita qualquer chamada. Por
@@ -222,21 +224,31 @@ test('R8-7-01: o resultado do "Rejeitar os N" que pousa com o treino aberto vira
 
 // ═══ R8-7-09 · o treino pedido por um diálogo, SEM sessão ═══════════════════
 // Os ouvintes DE VERDADE do "Praticar" (Ajuda) e do "Quero treinar antes"
-// ("Como funciona"), fatiados do `setupAppListeners`, com a guarda e o
-// `avisoDaTrava` de verdade.
-function montarDialogos({ autenticado, renovando = true }) {
+// ("Como funciona"), fatiados do `setupAppListeners`, com a guarda
+// (`recusarTreino`), o `Treino` de verdade (a conferência dele,
+// `motivoDeRecusa`) e o `avisoDaTrava` de verdade. O `Treino.entrar` é ESPIADO
+// (`espiar`): o que se mede aqui é o diálogo. Sem espiar, é o `entrar` de
+// verdade, que recusa pela MESMA conferência.
+// O que pode estar no ar (R9-7-07): o "Marcar todos" (`lote`) e a aprovação de
+// uma foto (`aprovacao`): no ar, na janela do Desfazer ou da sessão que caiu.
+function montarDialogos({ autenticado, renovando = true, lote = false, aprovacao = null, epocaDaQueda = 4, espiar = true }) {
   const toasts = [], fechados = [], entradas = [], ouvintes = {};
   const deps = {
-    AppState: { authenticated: autenticado, contaEmDuvida: false },
-    extRenovando: renovando, loteDeLidosEmVoo: false, escritasConferindo: 0,
+    AppState: { authenticated: autenticado, contaEmDuvida: false, fetchEpoch: 4 },
+    extRenovando: renovando, loteDeLidosEmVoo: lote, escritasConferindo: 0,
+    aprovacaoPendente: aprovacao === 'janela' ? { place: { venueID: 'v1', updateRequestID: 'u1' } } : null,
+    aprovacoesNoAr: new Set(aprovacao === 'noAr' ? ['v1|u1'] : []),
+    // A da sessão que CAIU segura o treino só na fila que atravessou a queda (a época de agora).
+    aprovacoesDaQueda: new Map(aprovacao === 'queda' ? [['v1|u1', epocaDaQueda]] : []),
     showToast: (m, tipo) => { toasts.push([m, tipo]); return {}; }, t: (k) => k,
     closeModal: (id) => fechados.push(id),
-    Treino: { entrar: () => entradas.push('entrar') },
-    prometerFocoAoCardQueVem: () => {},
+    prometerFocoAoCardQueVem: () => {}, veioDoTeclado: () => false,
     $: (id) => ({ addEventListener: (tipo, fn) => { ouvintes[id] = fn; } }),
   };
-  rodar(deps, [fatiar('avisoDaTrava'), fatiar('recusarTreinoSemSessao'), ouvinte('abrirTreino'), ouvinte('comoFuncionaTreinar')], []);
-  return { ouvintes, toasts, fechados, entradas };
+  const { Treino } = rodar(deps, [fatiar('avisoDaTrava'), fatiar('recusarTreino'), declaracao('Treino'),
+    ouvinte('abrirTreino'), ouvinte('comoFuncionaTreinar')], ['Treino']);
+  if (espiar) Treino.entrar = () => entradas.push('entrar');
+  return { ouvintes, toasts, fechados, entradas, Treino };
 }
 
 test('R8-7-09: o "Praticar" (e o "Quero treinar antes") SEM sessão diz o que esperar e o diálogo FICA — com a sessão, abre o treino', () => {
@@ -341,7 +353,7 @@ function montarTela({ filaReal = 2, hasMore = false } = {}) {
 
   // O card da frente: montar troca o da tela (o `renderCurrentCard`), e o foco
   // prometido ao teclado pousa DEPOIS da tarefa, como lá.
-  const estado = { card: null, buscas: 0 };
+  const estado = { card: null, buscas: 0, toasts: [] };
   let app = null;
   const tirarCard = () => {
     if (!estado.card) return;
@@ -362,7 +374,8 @@ function montarTela({ filaReal = 2, hasMore = false } = {}) {
     Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
     acoesTravadas: () => false, extRenovando: false, escritasConferindo: 0,
     loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
-    semJanelaDeDesfazer: () => false, t: (k) => k, showToast: () => ({ dispensar() {}, texto() {} }),
+    semJanelaDeDesfazer: () => false, t: (k) => k,
+    showToast: (m, tipo) => { estado.toasts.push([m, tipo]); return { dispensar() {}, texto() {} }; },
     cardDaFrente: () => estado.card,
     removeCurrentCardEl: tirarCard,
     showCurrentPlace: () => {
@@ -391,7 +404,7 @@ function montarTela({ filaReal = 2, hasMore = false } = {}) {
     declaracao('MODAL_IDS'), declaracao('LIMPEZA_AO_FECHAR'), declaracao('BOTAO_DA_ACAO'),
     declaracao('TECLAS_DE_CURSOR'), declaracao('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'), declaracao('Treino'),
     ...['openModal', 'closeModal', 'topOpenModal', 'devolverFoco', 'focavelNaTela', 'dentroDeCamada', 'veioDoTeclado',
-      'prometerFocoAoCardQueVem', 'aplicarFocoDoTeclado', 'avisoDaTrava', 'recusarTreinoSemSessao', 'handleKeyDown',
+      'prometerFocoAoCardQueVem', 'aplicarFocoDoTeclado', 'avisoDaTrava', 'recusarTreino', 'handleKeyDown',
       'atalhoDoNavegador', 'focoEmCampoDeTexto'].map(fatiar),
     ...['abrirTreino', 'comoFuncionaTreinar', 'comoFuncionaOk', 'treinoFimOk'].map(ouvinte),
   ], ['Treino', 'openModal', 'closeModal', 'handleKeyDown', 'aplicarFocoDoTeclado']);
@@ -521,6 +534,7 @@ test('R8-7-08: "Quero treinar antes" pelo TECLADO leva o foco ao ✕ do card de 
   assert.notEqual(s.d.activeElement, s.botaoDoCard('.card-btn-reject'), 'o mouse moveu o foco pro card de treino');
   assert.equal(s.deps.focoDoTeclado, null, 'o mouse deixou o foco prometido ao teclado');
 });
+
 // ═══ R9-7-05 · a folha do autor aberta de um card de TREINO ═════════════════
 // O selo "✕ N" do card de treino (o clone de um pedido real, com o autor de
 // verdade) abria a folha com as linhas que ESCREVEM: o "Rejeitar os N" (recusado
@@ -665,4 +679,80 @@ test('R9-7-02: o próximo gesto de treino tira só o aviso que o TREINO pôs —
   assert.deepEqual(m.naPilha(), ['2 rejeitados', 'Acesso renovado pelo WME', 'treino.efeito.skip'],
     `o aviso do treino não saiu na hora (ou empurrou um de verdade pra fora): ${JSON.stringify(m.naPilha())}`);
   assert.equal(m.naPilha().filter((x) => x.startsWith('treino.efeito.')).length, 1, 'os avisos do treino se empilharam');
+});
+
+// ═══ R9-7-07 · o treino recusado pelo lote ou pela aprovação NO AR ══════════
+// O R8-7-09 fez o diálogo FICAR na recusa pela sessão. As outras recusas do
+// `Treino.entrar` — o "Marcar todos" no ar, a aprovação de uma foto no ar —
+// vinham DEPOIS de fechar: a Ajuda fechava, e o aviso mandava "toque de novo"
+// num botão que tinha saído da tela (MEDIDO no navegador, s21; auditoria de
+// 2026-10-06). A conferência é UMA (`Treino.motivoDeRecusa`), feita antes de
+// fechar, e o diálogo fica nas três.
+const RECUSAS_NO_AR = [
+  ['o "Marcar todos" no ar', { lote: true }, 'toast.esperaLote'],
+  ['a aprovação de uma foto no ar', { aprovacao: 'noAr' }, 'toast.esperaAprovacao'],
+  ['a aprovação na janela do Desfazer', { aprovacao: 'janela' }, 'toast.esperaAprovacao'],
+  ['a aprovação da sessão que caiu, na fila que atravessou a queda', { aprovacao: 'queda' }, 'toast.esperaAprovacao'],
+];
+
+test('R9-7-07: "Praticar" (e "Quero treinar antes") com o "Marcar todos" ou a aprovação de uma foto NO AR diz o que esperar e o diálogo FICA', () => {
+  for (const [id, dialogo] of [['abrirTreino', 'helpModal'], ['comoFuncionaTreinar', 'comoFuncionaModal']]) {
+    for (const [caso, op, aviso] of RECUSAS_NO_AR) {
+      const m = montarDialogos({ autenticado: true, ...op });
+      m.ouvintes[id]({ detail: 1 });
+      assert.deepEqual(m.fechados, [],
+        `DEFEITO: #${id} com ${caso} fechou o diálogo — o aviso manda "toque de novo" num botão que saiu da tela`);
+      assert.deepEqual(m.toasts, [[aviso, 'info']], `#${id} com ${caso} não disse o que esperar`);
+      assert.deepEqual(m.entradas, [], `#${id} com ${caso} tentou entrar no treino`);
+    }
+    // CONTROLE: a aprovação da queda de OUTRA fila (refeita depois) não segura o
+    // treino — fecha e entra, como com nada no ar.
+    for (const op of [{}, { aprovacao: 'queda', epocaDaQueda: 3 }]) {
+      const c = montarDialogos({ autenticado: true, ...op });
+      c.ouvintes[id]({ detail: 1 });
+      assert.deepEqual([c.fechados, c.entradas, c.toasts], [[dialogo], ['entrar'], []],
+        `CONTROLE (${JSON.stringify(op)}): #${id} não abriu o treino — o teste perdeu o sentido`);
+    }
+  }
+});
+
+test('R9-7-07: o `Treino.entrar` recusa pela MESMA conferência dos diálogos (`motivoDeRecusa`) — duas listas divergiriam caladas', () => {
+  for (const [caso, op, aviso] of RECUSAS_NO_AR) {
+    const m = montarDialogos({ autenticado: true, espiar: false, ...op });
+    assert.equal(m.Treino.motivoDeRecusa(), aviso, `a conferência não viu ${caso}`);
+    m.Treino.entrar();
+    assert.equal(m.Treino.ativo, false, `o treino abriu com ${caso}`);
+    assert.deepEqual(m.toasts, [[aviso, 'info']], `o \`entrar\` com ${caso} não disse o que esperar`);
+  }
+  // CONTROLE: com nada no ar (e com sessão), a conferência deixa abrir; sem sessão, é a da trava.
+  assert.equal(montarDialogos({ autenticado: true, espiar: false }).Treino.motivoDeRecusa(), null);
+  assert.equal(montarDialogos({ autenticado: false, espiar: false }).Treino.motivoDeRecusa(), 'toast.esperaSessao');
+  // A ESTRUTURA: o `entrar` não tem lista própria, e o diálogo pergunta à mesma conferência.
+  const T = declaracao('Treino');
+  const i = T.indexOf('\n    entrar() {');
+  assert.ok(i >= 0, 'o `Treino.entrar` sumiu');
+  const entrar = T.slice(i, fechar(T, i));
+  assert.match(entrar, /const motivo = this\.motivoDeRecusa\(\);/, 'o `entrar` deixou de perguntar à conferência única');
+  assert.doesNotMatch(entrar, /loteDeLidosEmVoo|aprovacoesNoAr|aprovacaoPendente|aprovacoesDaQueda/,
+    'o `entrar` voltou a ter uma lista própria de recusas — o diálogo e ele divergem calados');
+  assert.match(fatiar('recusarTreino'), /const motivo = Treino\.motivoDeRecusa\(\);/,
+    'o diálogo deixou de perguntar à conferência do `entrar`');
+});
+
+test('R9-7-07: na tela, o "Praticar" recusado pelo "Marcar todos" no ar deixa a Ajuda ABERTA — e o mesmo toque, depois, abre o treino', async () => {
+  const m = montarTela();
+  m.deps.showCurrentPlace();
+  m.els.helpBtn.focus();
+  m.app.openModal('helpModal');
+  m.deps.loteDeLidosEmVoo = true;   // o "Marcar todos" no ar
+  await m.clicar('abrirTreino', { teclado: false });
+  assert.equal(m.els.helpModal.classes.has('hidden'), false,
+    'DEFEITO: a Ajuda fechou, e o aviso manda "toque de novo" num "Praticar" que saiu da tela');
+  assert.equal(m.app.Treino.ativo, false, 'o treino abriu com o lote no ar');
+  assert.deepEqual(m.estado.toasts, [['toast.esperaLote', 'info']]);
+  // O lote terminou: o mesmo botão, que segue na tela, abre o treino.
+  m.deps.loteDeLidosEmVoo = false;
+  await m.clicar('abrirTreino', { teclado: false });
+  assert.equal(m.els.helpModal.classes.has('hidden'), true, 'CONTROLE: com nada no ar, a Ajuda não fechou');
+  assert.equal(m.app.Treino.ativo, true, 'CONTROLE: com nada no ar, o "Praticar" não abriu o treino');
 });

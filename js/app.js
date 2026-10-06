@@ -1243,22 +1243,24 @@ function setupAppListeners() {
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
     $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
-    // O treino pedido por um diálogo, SEM sessão (a renovação silenciosa pela
-    // extensão): diz o que esperar e o diálogo fica (`recusarTreinoSemSessao`,
-    // R8-7-09). E o "Quero treinar antes" pelo TECLADO: o fechamento devolve o
-    // foco ao ✕ do card REAL, que o `Treino.entrar` troca logo em seguida pelo
-    // de treino — o foco caía no <body> (R8-7-08, MEDIDO nos dois motores;
-    // auditoria de 2026-10-03). Vai ao ✕ do card de treino, como no "Sair" da
-    // faixa (`prometerFocoAoCardQueVem`), prometido ANTES de fechar: depois do
-    // fechamento, o evento já não diz quem tinha o foco.
+    // O treino pedido por um diálogo que o `Treino.entrar` vai RECUSAR — sem
+    // sessão (a renovação silenciosa pela extensão), com o "Marcar todos" ou a
+    // aprovação de uma foto no ar: diz o que esperar e o diálogo fica
+    // (`recusarTreino`, R8-7-09, R9-7-07). E o "Quero treinar antes" pelo
+    // TECLADO: o fechamento devolve o foco ao ✕ do card REAL, que o
+    // `Treino.entrar` troca logo em seguida pelo de treino — o foco caía no
+    // <body> (R8-7-08, MEDIDO nos dois motores; auditoria de 2026-10-03). Vai ao
+    // ✕ do card de treino, como no "Sair" da faixa (`prometerFocoAoCardQueVem`),
+    // prometido ANTES de fechar: depois do fechamento, o evento já não diz quem
+    // tinha o foco.
     $('comoFuncionaTreinar')?.addEventListener('click', (ev) => {
-        if (recusarTreinoSemSessao()) return;
+        if (recusarTreino()) return;
         prometerFocoAoCardQueVem(ev);
         closeModal('comoFuncionaModal');
         Treino.entrar();
     });
     $('abrirTreino')?.addEventListener('click', () => {
-        if (recusarTreinoSemSessao()) return;
+        if (recusarTreino()) return;
         closeModal('helpModal');
         Treino.entrar();
     });
@@ -20083,16 +20085,18 @@ function fecharCamadasDeFoto() {
 }
 
 // O treino pedido por um DIÁLOGO — o "Praticar" da Ajuda, o "Quero treinar
-// antes" do "Como funciona" — SEM sessão: a renovação silenciosa pela
-// extensão, com o card travado por baixo e os dois botões na tela. O diálogo
-// fechava e nada acontecia, calado: o `Treino.entrar` sai sem sessão (R8-7-09,
-// auditoria de 2026-10-03; o "Marcar todos", no mesmo instante, dizia o que
-// esperar). Diz o que esperar com a guarda do "Rejeitar os N"
-// (`avisoDaTrava`), e o diálogo FICA: tocar de novo depois vale. Devolve se
-// recusou.
-function recusarTreinoSemSessao() {
-    if (AppState.authenticated) return false;
-    showToast(t(avisoDaTrava()), 'info');
+// antes" do "Como funciona" — que o `Treino.entrar` vai recusar. Sem sessão (a
+// renovação silenciosa pela extensão), o diálogo fechava e nada acontecia,
+// calado (R8-7-09, auditoria de 2026-10-03). Com o "Marcar todos" ou a
+// aprovação de uma foto no ar, ele fechava ANTES de o `entrar` recusar, e o
+// aviso mandava "toque de novo" num botão que tinha saído da tela (R9-7-07,
+// MEDIDO no navegador; auditoria de 2026-10-06). A conferência vem ANTES de
+// fechar e é a do `entrar` (`Treino.motivoDeRecusa`): diz o que esperar, e o
+// diálogo FICA — tocar de novo depois vale. Devolve se recusou.
+function recusarTreino() {
+    const motivo = Treino.motivoDeRecusa();
+    if (!motivo) return false;
+    showToast(t(motivo), 'info');
     return true;
 }
 
@@ -20235,6 +20239,30 @@ const Treino = {
         for (const p of AppState.queue || []) if (p && p._exemplo) this.traduzirExemplo(p);
     },
 
+    // Por que o treino NÃO pode abrir agora — a chave do aviso que diz o que
+    // esperar —, ou null. A conferência ÚNICA do `entrar` e dos diálogos que o
+    // pedem (`recusarTreino`, antes de fechar): duas listas divergiriam caladas.
+    motivoDeRecusa() {
+        // Sem sessão: a renovação silenciosa pela extensão, com o card travado
+        // por baixo. O aviso é o da guarda do "Rejeitar os N" (`avisoDaTrava`).
+        if (!AppState.authenticated) return avisoDaTrava();
+        // O lote de lidos no ar termina sobre a fila REAL: trocada pela de
+        // treino, os pedidos que ele marcou voltavam no `sair()` como card.
+        if (loteDeLidosEmVoo) return 'toast.esperaLote';
+        // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
+        // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
+        // procura na fila de treino) e voltava no `sair()` como card, destravado —
+        // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
+        // (R5-2-04). E a de uma sessão que CAIU, na fila que atravessou a queda: o
+        // pouso dela tira o pedido desta fila (ver `aprovacoesDaQueda`). A
+        // aprovação ainda na JANELA do Desfazer (`aprovacaoPendente`) conta
+        // junto: o despacho do `entrar` a poria no ar.
+        if (aprovacaoPendente || aprovacoesNoAr.size || [...aprovacoesDaQueda.values()].includes(AppState.fetchEpoch)) {
+            return 'toast.esperaAprovacao';
+        }
+        return null;
+    },
+
     entrar() {
         if (this.ativo) return;
         // Deslogado não há tela de card: o treino aberto pela Ajuda na tela de
@@ -20242,26 +20270,15 @@ const Treino = {
         // real em modo treino — sem enviar nada — até a pessoa sair dele e
         // cair num "Tudo limpo!" falso.
         if (!AppState.authenticated) return;
-        // O lote de lidos no ar termina sobre a fila REAL: trocada pela de
-        // treino, os pedidos que ele marcou voltavam no `sair()` como card.
-        if (loteDeLidosEmVoo) { showToast(t('toast.esperaLote'), 'info'); return; }
-        // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
-        // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
-        // procura na fila de treino) e voltava no `sair()` como card, destravado —
-        // MEDIDO (s15): o ✕ seguinte mandava uma rejeição do pedido aprovado
-        // (R5-2-04). E a de uma sessão que CAIU, na fila que atravessou a queda: o
-        // pouso dela tira o pedido desta fila (ver `aprovacoesDaQueda`).
-        // A conferência vem ANTES de despachar qualquer coisa, como a do lote: o
-        // treino que ia ser recusado mandava antes o ✕ da janela do Desfazer (o
-        // banner sumia, e com ele a chance de desfazer) e então não abria — o
-        // efeito sem a ação pedida (MEDIDO, s35: o ✕ saiu em ~470 ms e o treino
-        // ficou fechado; auditoria de 2026-10-02, R6-2-07). A aprovação ainda na
-        // JANELA do Desfazer (`aprovacaoPendente`) conta junto: o despacho logo
-        // abaixo a poria no ar.
-        if (aprovacaoPendente || aprovacoesNoAr.size || [...aprovacoesDaQueda.values()].includes(AppState.fetchEpoch)) {
-            showToast(t('toast.esperaAprovacao'), 'info');
-            return;
-        }
+        // O lote de lidos e a aprovação de foto no ar (`motivoDeRecusa`, a MESMA
+        // conferência que os diálogos fazem antes de fechar). Ela vem ANTES de
+        // despachar qualquer coisa: o treino que ia ser recusado mandava antes o
+        // ✕ da janela do Desfazer (o banner sumia, e com ele a chance de
+        // desfazer) e então não abria — o efeito sem a ação pedida (MEDIDO, s35:
+        // o ✕ saiu em ~470 ms e o treino ficou fechado; auditoria de 2026-10-02,
+        // R6-2-07).
+        const motivo = this.motivoDeRecusa();
+        if (motivo) { showToast(t(motivo), 'info'); return; }
         // Uma janela de Desfazer pendente é de um pedido REAL: despacha antes de
         // trocar a fila debaixo dela, senão ela executaria sobre outro estado.
         // A do card E as do lightbox (L25: só o banner saía, e a janela delas
