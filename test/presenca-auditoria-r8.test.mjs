@@ -23,10 +23,10 @@ const GOOGLE = 'https://instantmessaging-pa.googleapis.com/';
 // ── R8-5-01: o tempo real parado pela falta de rede ──────────────────────────
 
 // O fluxo aberto com um token que vale, e o Google inalcançável: ele cai, a
-// pessoa está no modo avião (`onLine` falso) e o recuo vence SEM rede — o
-// `presencaFluxoGarantir` desiste sem reagendar. Depois a rede volta, SEM o
-// evento `online` (o iPhone). `token`: 'vale' (vale mais de uma hora),
-// 'ultimaHora' (abre o fluxo, mas já é hora de renovar) ou null (sem token).
+// pessoa está no modo avião (`onLine` falso) e o recuo vence SEM rede — o fluxo
+// fica PARADO. Depois a rede volta, SEM o evento `online` (o iPhone). `token`:
+// 'vale' (vale mais de uma hora), 'ultimaHora' (abre o fluxo, mas já é hora de
+// renovar) ou null (sem token).
 async function fluxoParado({ token = 'vale' } = {}) {
   const c = novoCliente({ agora: T, api: {
     fetch: async () => { throw new TypeError('Failed to fetch'); },   // o Google inalcançável
@@ -44,7 +44,13 @@ async function fluxoParado({ token = 'vale' } = {}) {
   c.escopo.navigator.onLine = false;                        // o modo avião
   c.relogio.agora += 3000;
   await c.rodarTimers();                                    // o recuo vence SEM rede
-  assert.equal(c.timers.length, 0, 'CONTROLE: o recuo sem rede não pode deixar timer de pé (é o defeito)');
+  // Até o lote 12, sem rede ele não deixava timer nenhum; desde o lote 13
+  // (R9-5-03) o recuo do próprio fluxo segue de pé, e religa a conversa que a
+  // pessoa só olha. Aqui se mede a prova de rede, que chega ANTES dele.
+  if (token) {
+    assert.equal(c.P.Presenca.fluxoParado, true, 'CONTROLE: sem rede, o tempo real tinha que PARAR');
+    assert.equal(c.timers.length, 1, 'CONTROLE: sem rede, o que fica de pé tem que ser só o recuo do fluxo parado');
+  } else assert.equal(c.timers.length, 0, 'CONTROLE: sem token não há fluxo, nem recuo');
   c.escopo.navigator.onLine = true;                         // a rede volta, sem o `online`
   c.relogio.agora += 6 * 60_000;                            // (o teto de 5 min do token já passou)
   return c;

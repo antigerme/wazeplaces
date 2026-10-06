@@ -196,13 +196,25 @@ else {
   const f = pa.fluxo || {};
   const tk = pa.token;
   out(`ligada ${pa.ligada} · no app ${pa.online} · conversas ${pa.conversas} · não lidas ${pa.naoLidas} · lista de há ${pa.atualizadaHaS ?? '—'} s · conversa aberta ${pa.conversaAberta}`);
-  out(`token ${tk ? `válido ${tk.valido}${tk.abre !== undefined ? ` · abre o tempo real ${tk.abre}` : ''} (vence em ${tk.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''}`);
+  out(`token ${tk ? `válido ${tk.valido}${tk.abre !== undefined ? ` · abre o tempo real ${tk.abre}` : ''} (vence em ${tk.expiraEmH ?? '?'} h)` : 'nenhum'} · tempo real aberto ${f.aberto}${f.aberto ? ` há ${f.haS} s` : ''} · aberturas ${f.aberturas} · quadros ${f.quadros} · mensagens ${f.mensagens} · recibos ${f.recibos} · recuo ${f.tentativa}${f.ultimoErro ? ` · último erro: ${f.ultimoErro}` : ''} · parado sem rede ${f.parado === undefined ? AUSENTE : f.parado}`);
+  // O tempo real PARADO pela falta de rede (o lote 12 pôs `fluxo.parado` no
+  // relatório, R8-5-01). Sem esta linha, o relato "as mensagens não chegaram
+  // depois do modo avião" saía como "aberto false · recuo 2 · último erro:
+  // TypeError", que lê como recuo em andamento (auditoria da rodada 9, R9-5-06).
+  if (f.parado === true && !f.aberto) {
+    out('ATENÇÃO: o tempo real está PARADO pela falta de rede — mensagem nova só aparece quando ele religar: com o `online` do navegador, com a próxima resposta da API, no foco do app, num toque na conversa ou no recuo do próprio tempo real, de 2 s até 1 min (os três últimos só nas versões depois da v2026.10.06-01).');
+  }
   out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}${f.ignoradas !== undefined ? ` · mensagens só do WME (ignoradas de propósito) ${f.ignoradas}` : ''}${f.quedasSeguidas ? ` · quedas seguidas do tempo real ${f.quedasSeguidas}` : ''}`);
   // As conversas que DEVEM um "lida" (lote 10): com ela acima de zero, a
-  // "mensagem nova" de uma conversa já vista é isto (R7-4-07 = R7-5-06).
-  out(`conversas devendo o "lida": ${pa.lidaDevendo === undefined ? AUSENTE : pa.lidaDevendo}`);
+  // "mensagem nova" de uma conversa já vista é isto (R7-4-07 = R7-5-06). E as
+  // que têm o "lida" NO AR (o lote 12 o pôs no relatório, R8-5-05): pra lista
+  // que chega com ele voando, a conversa vale como lida (R9-5-06).
+  out(`conversas devendo o "lida": ${pa.lidaDevendo === undefined ? AUSENTE : pa.lidaDevendo} · com o "lida" no ar: ${pa.lidaNoAr === undefined ? AUSENTE : pa.lidaNoAr}`);
   if (Number(pa.lidaDevendo) > 0) {
     out(`nota: ${pa.lidaDevendo} ${Number(pa.lidaDevendo) === 1 ? 'conversa deve' : 'conversas devem'} o "lida" ao Waze — a "mensagem nova" de uma conversa já vista é isto, não mensagem que chegou.`);
+  }
+  if (Number(pa.lidaNoAr) > 0) {
+    out(`nota: ${pa.lidaNoAr} ${Number(pa.lidaNoAr) === 1 ? 'conversa tem' : 'conversas têm'} o "lida" no ar — pra lista que chega agora, a conversa vale como lida (o que ele cobre); se ele falhar, ela volta a dever.`);
   }
   // O PORQUÊ da lista, contado no servidor (relatório v8): separa "ninguém usa
   // o app agora" de "está no app, mas noutro país" e de "a marca se perdeu".
