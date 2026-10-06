@@ -328,15 +328,31 @@ test('selo vermelho é SEMPRE tocável, e a folha é que se adapta ao tamanho da
   const folha = semComentarios.slice(iFolha, semComentarios.indexOf('\nfunction ', iFolha + 10));
   assert.match(folha, /const emLote = naFila\.length > 1;/,
     'é aqui que o tamanho da fila decide, e não no selo');
-  // As duas linhas de lote e o aviso vermelho ficam DENTRO do ternário do
-  // `emLote` — exigido COLADO nos dois extremos (`(emLote ?` … `: '')`), e não
-  // por distância: guard por distância erra nos dois sentidos (gotcha #67).
-  assert.match(folha,
-    /\(emLote\s*\?\s*linha\(ICONE_OLHO[\s\S]{0,400}?autor\.sheet\.rejeitar[\s\S]{0,140}?:\s*''\)/,
+  // As duas linhas de lote ficam DENTRO do ternário do `emLote`, e o aviso
+  // vermelho anda com a linha do "Rejeitar os N" — a MESMA condição
+  // (`rejeitarEmLote`: o `emLote` fora do treino, R9-7-05). Cada ternário é
+  // lido INTEIRO, pelos parênteses (`(cond ?` … `: '')`), e não por distância:
+  // guard por distância erra nos dois sentidos (gotcha #67).
+  const ternario = (re) => {
+    const m = re.exec(folha);
+    assert.ok(m, `o ternário ${re} sumiu da folha`);
+    let p = 0;
+    for (let j = m.index; j < folha.length; j++) {
+      if (folha[j] === '(') p++;
+      else if (folha[j] === ')' && --p === 0) return folha.slice(m.index, j + 1);
+    }
+    return '';
+  };
+  const lote = ternario(/\(emLote\s*\?\s*linha\(ICONE_OLHO/);
+  assert.ok(lote.includes("'autorVer'") && lote.includes("'autorRejeitar'") && /:\s*''\)$/.test(lote),
     'ver/rejeitar precisam morrer juntos quando há um só na fila — a de rejeitar repete o ✕ que está logo abaixo');
-  assert.match(folha,
-    /\(emLote\s*\?\s*`<p class="mt-4[\s\S]{0,400}?autor\.sheet\.aviso[\s\S]{0,60}?:\s*''\)/,
+  assert.ok(ternario(/\(rejeitarEmLote\s*\?\s*linha\(ICONE_X/).includes("'autorRejeitar'"),
+    'a linha do "Rejeitar os N" deixou de seguir a condição do aviso dela');
+  const aviso = ternario(/\(rejeitarEmLote\s*\?\s*`<p class="mt-4/);
+  assert.ok(/autor\.sheet\.aviso/.test(aviso) && /:\s*''\)$/.test(aviso),
     'o aviso descreve a rejeição em lote: sem ela na tela ele passa a descrever o interruptor errado');
+  assert.match(folha, /const rejeitarEmLote = emLote && !noTreino;/,
+    'o "Rejeitar os N" e o aviso dele deixaram de seguir o tamanho da fila (ou passaram a valer no treino)');
 
   // O que substitui as linhas removidas, e por isso não pode ser condicional ao
   // lote: sem isso a folha do caso comum abre vazia.

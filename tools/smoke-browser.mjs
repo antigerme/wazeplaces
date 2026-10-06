@@ -3048,10 +3048,12 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
 //      no mesmo card, a lixeira precisa APARECER.
 {
   const PIXEL = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+  // O MESMO autor nos três: a folha dele (R9-7-05, abaixo) tem lote a oferecer.
   const reais = FIXTURES_PAISES.filter((p) => (p.imageUrls || []).length).slice(0, 3).map((p, i) => ({
     ...p, lat: -23.55 + i * 0.01, lon: -46.63 + i * 0.01,
     imageUrls: ['https://venue-image.waze.com/thumbs/thumb700_foto' + i],
     approvedImageIds: ['foto' + i],
+    creatorId: 777, createdBy: 'spam',
   }));
   for (const lg of LINGUAS) {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 },
@@ -3096,6 +3098,31 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
       `${onde}: pedido real entrou no treino com o updateRequestID VIVO`);
     checa(est.cards.every((c) => c.v && c.v !== 'treino-inerte'),
       `${onde}: o venueID foi neutralizado — o ↗ do card deixa de abrir o lugar certo`);
+
+    // A FOLHA DO AUTOR (o selo "✕ N") num card de TREINO (R9-7-05, auditoria de
+    // 2026-10-06): ela oferecia o "Rejeitar os N", o "Esquecer" e o interruptor
+    // da recusa automática — que ARMAVA rejeições de verdade pra depois do
+    // treino. No treino ela não oferece o que escreve, como a lixeira (abaixo). A
+    // CONTRAPROVA é a mesma folha fora do treino, redesenhada SEM fechar (fechar
+    // e abrir no mesmo tique é o gotcha #65).
+    const folha = await page.evaluate(() => {
+      const ids = () => [...document.querySelectorAll('#autorCorpo [id]')].map((e) => e.id).sort().join(',');
+      abrirFolhaDoAutor(AppState.currentPlace);
+      const noTreino = { aberta: !document.getElementById('autorModal').classList.contains('hidden'), ids: ids() };
+      const era = Treino.ativo; Treino.ativo = false;
+      abrirFolhaDoAutor(AppState.currentPlace);
+      const fora = ids();
+      Treino.ativo = era;
+      closeModal('autorModal');
+      return { noTreino, fora };
+    });
+    checa(folha.fora === 'autorAuto,autorEsquecer,autorRejeitar,autorVer',
+      `${onde}: CONTRAPROVA falhou — fora do treino a folha não tem as quatro linhas, então "sumiu" não prova nada`, folha.fora);
+    checa(folha.noTreino.aberta && folha.noTreino.ids === 'autorVer',
+      `${onde}: a folha do autor no treino oferece o que ESCREVE (o interruptor arma a recusa automática de verdade)`,
+      JSON.stringify(folha.noTreino));
+    // O `history.back()` do fechamento termina antes da próxima camada abrir.
+    await esperarNaPagina(page, () => !CamadaVoltar.consumindo, 3000);
 
     // primeiro card já é real (todos são); só garante o render assentado
     await page.evaluate(() => {

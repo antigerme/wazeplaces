@@ -16332,7 +16332,8 @@ function verPelaFolha(ev, place) {
 //   · a recusa automática deste autor, que hoje só se alcança por Filtros →
 //     Histórico, rolando até achar a pessoa;
 //   · o esquecer, pra quando você discorda da contagem.
-// Esses três valem nos DOIS tamanhos, então ficam sempre.
+// Esses três valem nos DOIS tamanhos, então ficam sempre — fora do TREINO, onde
+// a folha não oferece o que escreve (ver `noTreino`, R9-7-05).
 function abrirFolhaDoAutor(place) {
     if (!place) return;
     const corpo = document.getElementById('autorCorpo');
@@ -16346,6 +16347,18 @@ function abrirFolhaDoAutor(place) {
     const naFila = serieDoAutor(place.creatorId, { naTela: place });
     const doAutorNaFila = serieDoAutor(place.creatorId, { todos: true }).length;
     const emLote = naFila.length > 1;
+    // No TREINO a folha abre de um card de EXEMPLO — o clone de um pedido real,
+    // com o autor de verdade —, e as linhas que ESCREVEM escreviam de verdade: o
+    // interruptor ARMAVA a recusa automática deste autor (depois do "Sair" do
+    // treino e do ↻, as rejeições foram ao Waze no nome da pessoa), e o
+    // "Rejeitar os N" era oferecido pra ser recusado com a frase do "Marcar
+    // todos" (R9-7-05 = R9-2-04, MEDIDO no navegador; auditoria de 2026-10-06).
+    // Como os botões da foto, que somem no treino, a folha não oferece o que
+    // escreve: o "Rejeitar os N" (e o aviso vermelho dele), o interruptor e o
+    // "Esquecer". Ficam a frase que explica o "✕ N" e o "Ver os N", que só põe
+    // os exemplos do autor na frente.
+    const noTreino = typeof Treino !== 'undefined' && Treino.ativo === true;
+    const rejeitarEmLote = emLote && !noTreino;
     // O lote passa pela janela do Desfazer como o card (`scheduleAction`): com
     // ela, "começa ao tocar" e "tocar já escreve no Waze" eram falsos — o
     // banner abria e nada saía (auditoria de 2026-09-29, A10). As frases seguem
@@ -16384,25 +16397,30 @@ function abrirFolhaDoAutor(place) {
         + (emLote
             ? linha(ICONE_OLHO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
                     t('autor.sheet.ver', { n: naFila.length }), t('autor.sheet.ver.desc'), 'autorVer')
-              + linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
-                      t('autor.sheet.rejeitar', { n: naFila.length }),
-                      t(semJanela ? 'autor.sheet.rejeitar.descSemDesfazer' : 'autor.sheet.rejeitar.desc'), 'autorRejeitar')
+              + (rejeitarEmLote
+                  ? linha(ICONE_X, 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
+                          t('autor.sheet.rejeitar', { n: naFila.length }),
+                          t(semJanela ? 'autor.sheet.rejeitar.descSemDesfazer' : 'autor.sheet.rejeitar.desc'), 'autorRejeitar')
+                  : '')
             : '')
         // Mesmo portão da lista do Histórico: mostrar o interruptor desabilitado
         // anunciaria um recurso que a pessoa não pode usar, e o app não faz isso.
-        + (podeRecusarAutomaticoAqui() ? linhaAuto() : '')
-        + linha(ICONE_LIXO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
-                t('stats.autores.esquecer'), t('autor.sheet.esquecer.desc'), 'autorEsquecer')
-        // O aviso é da rejeição em LOTE, então acompanha a linha que ele descreve.
-        // Sem ela na tela, um aviso vermelho sobre "não há segunda pergunta"
-        // descreveria o interruptor errado — e o interruptor tem a própria frase.
-        + (emLote
+        + (!noTreino && podeRecusarAutomaticoAqui() ? linhaAuto() : '')
+        + (noTreino ? '' : linha(ICONE_LIXO, 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300',
+                                 t('stats.autores.esquecer'), t('autor.sheet.esquecer.desc'), 'autorEsquecer'))
+        // O aviso é da rejeição em LOTE, então acompanha a linha que ele descreve
+        // (a MESMA condição). Sem ela na tela, um aviso vermelho sobre "não há
+        // segunda pergunta" descreveria o interruptor errado — e o interruptor
+        // tem a própria frase.
+        + (rejeitarEmLote
             ? `<p class="mt-4 text-xs leading-relaxed text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10`
               + ` border border-rose-100 dark:border-rose-500/30 rounded-xl px-3 py-2.5">`
               + `${t(semJanela ? 'autor.sheet.avisoSemDesfazer' : 'autor.sheet.aviso')}</p>`
             : '');
     if (emLote) {
         document.getElementById('autorVer').addEventListener('click', (ev) => verPelaFolha(ev, place));
+    }
+    if (rejeitarEmLote) {
         // Só os que a folha CONTOU e mostrou no botão (L21): a busca que pousa
         // com ela aberta traz mais pedidos do autor, e o toque rejeitava esses
         // também — "Rejeitar os 2", e saíam 4. É a régua do "Marcar todos"
@@ -16418,7 +16436,7 @@ function abrirFolhaDoAutor(place) {
         alternarAutoDoAutor(chave);
         auto.checked = autoLigado(chave);
     });
-    document.getElementById('autorEsquecer').addEventListener('click', (ev) => esquecerPelaFolha(ev, chave));
+    if (!noTreino) document.getElementById('autorEsquecer').addEventListener('click', (ev) => esquecerPelaFolha(ev, chave));
     openModal('autorModal');
 }
 
@@ -16457,6 +16475,8 @@ function rejeitarLoteDoAutor(place, contados) {
     // e sair calado deixava a pessoa achando que rejeitou (auditoria de
     // 2026-09-25). Diz o que fazer.
     if (acoesTravadas()) { showToast(t(avisoDaTrava()), 'info'); return; }
+    // Segunda camada: no treino a folha nem oferece o "Rejeitar os N" (R9-7-05),
+    // e a fila da tela é de exemplos — um lote aqui decidiria sobre clones.
     if (Treino.ativo) { showToast(t('treino.semLote'), 'info'); return; }
     const naFolha = Array.isArray(contados) ? new Set(contados) : null;
     const places = pedidosDoAutorNaFila(place).filter((p) => !naFolha || naFolha.has(chaveDoPedido(p)));

@@ -11,6 +11,9 @@
 //   R8-7-08 — o "Quero treinar antes" pelo teclado largava o foco no <body>;
 //   R8-7-09 — o "Praticar" (e o "Quero treinar antes") SEM sessão — a renovação
 //             silenciosa pela extensão — fechava o diálogo e não fazia nada.
+// E na rodada 9 (2026-10-06):
+//   R9-7-05 — a folha do autor aberta de um card de treino oferecia o que
+//             ESCREVE: o interruptor armava a recusa automática de verdade.
 //
 // Os testes RODAM as funções de verdade, fatiadas do app.js, num escopo só: o
 // que o teste não fornece é um "buraco negro" que aceita qualquer chamada. Por
@@ -515,4 +518,70 @@ test('R8-7-08: "Quero treinar antes" pelo TECLADO leva o foco ao ✕ do card de 
   assert.equal(s.app.Treino.ativo, true);
   assert.notEqual(s.d.activeElement, s.botaoDoCard('.card-btn-reject'), 'o mouse moveu o foco pro card de treino');
   assert.equal(s.deps.focoDoTeclado, null, 'o mouse deixou o foco prometido ao teclado');
+});
+// ═══ R9-7-05 · a folha do autor aberta de um card de TREINO ═════════════════
+// O selo "✕ N" do card de treino (o clone de um pedido real, com o autor de
+// verdade) abria a folha com as linhas que ESCREVEM: o "Rejeitar os N" (recusado
+// com a frase do "Marcar todos"), o interruptor "Rejeitar sozinho os próximos
+// deste autor" — que ARMAVA a recusa automática de verdade: depois do "Sair" do
+// treino e do ↻, o Waze recebeu as rejeições — e o "Esquecer", que apaga a
+// contagem do aparelho (MEDIDO no navegador; auditoria de 2026-10-06). DECISÃO:
+// no treino a folha não oferece o que escreve, como os botões da foto, que
+// somem. A folha de verdade (`abrirFolhaDoAutor`), num DOM de mentira em que só
+// existe o que a folha DESENHOU: ouvinte pendurado num elemento que ela não
+// desenhou lança, como no navegador.
+function montarFolha({ treino, doAutor = 3 }) {
+  const ouvidos = [], abertos = [];
+  const corpo = { innerHTML: '' }, titulo = { textContent: '' };
+  const fila = [];
+  for (let i = 1; i <= doAutor; i++) fila.push({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 901, createdBy: 'spammer' });
+  fila.push({ venueID: 'v9', updateRequestID: 'u9', creatorId: 902, createdBy: 'outro' });
+  const deps = {
+    Treino: { ativo: treino },
+    AppState: { queue: fila, currentPlace: fila[0], preferences: { undoEnabled: true }, devMode: { active: false } },
+    pedidosEmAndamento: new Set(),
+    document: {
+      getElementById: (id) => {
+        if (id === 'autorCorpo') return corpo;
+        if (id === 'autorTitle') return titulo;
+        if (!corpo.innerHTML.includes(`id="${id}"`)) return null;
+        return { id, checked: false, addEventListener: (tipo) => ouvidos.push(id + ':' + tipo) };
+      },
+    },
+    t: (k) => k, escapeHtml: (x) => String(x), canDisableUndo: () => false,
+    ICONE_OLHO: '', ICONE_X: '', ICONE_LIXO: '', ICONE_RAIO: '',
+    contagemDoAutor: () => 6, podeRecusarAutomaticoAqui: () => true, autoLigado: () => false,
+    openModal: (id) => abertos.push(id),
+  };
+  const { abrirFolhaDoAutor } = rodar(deps, ['chaveDoPedido', 'serieDoAutor', 'semJanelaDeDesfazer', 'abrirFolhaDoAutor'].map(fatiar),
+    ['abrirFolhaDoAutor']);
+  abrirFolhaDoAutor(fila[0]);
+  const ids = [...corpo.innerHTML.matchAll(/id="(\w+)"/g)].map((x) => x[1]);
+  return { ids, html: corpo.innerHTML, ouvidos, abertos };
+}
+
+test('R9-7-05: a folha do autor aberta de um card de TREINO não oferece o que escreve — nem o "Rejeitar os N", nem o interruptor, nem o "Esquecer"', () => {
+  // CONTROLE: fora do treino (L6+AM, 3 do autor na fila), as quatro linhas e o aviso do lote.
+  const c = montarFolha({ treino: false });
+  assert.deepEqual(c.ids, ['autorVer', 'autorRejeitar', 'autorAuto', 'autorEsquecer'],
+    'CONTROLE: fora do treino, a folha não tinha as quatro linhas — o teste perdeu o sentido');
+  assert.match(c.html, /autor\.sheet\.aviso/, 'CONTROLE: o aviso do lote sumiu fora do treino');
+  assert.deepEqual(c.ouvidos, ['autorVer:click', 'autorRejeitar:click', 'autorAuto:change', 'autorEsquecer:click']);
+  // No treino.
+  const m = montarFolha({ treino: true });
+  assert.deepEqual(m.abertos, ['autorModal'], 'a folha deixou de abrir no treino — ela ainda explica o "✕ N"');
+  assert.match(m.html, /autor\.sheet\.sub/, 'a frase que explica o "✕ N" sumiu no treino');
+  assert.ok(!m.ids.includes('autorAuto'),
+    'DEFEITO: o interruptor "Rejeitar sozinho os próximos deste autor" no treino — ele ARMA a recusa automática de verdade');
+  assert.ok(!m.ids.includes('autorRejeitar'),
+    'DEFEITO: o "Rejeitar os N" oferecido no treino, pra ser recusado com a frase do "Marcar todos"');
+  assert.ok(!m.ids.includes('autorEsquecer'), 'DEFEITO: o "Esquecer" no treino apaga a contagem de verdade do aparelho');
+  assert.doesNotMatch(m.html, /autor\.sheet\.aviso/, 'o aviso vermelho do lote ficou no treino, sem a linha que ele descreve');
+  // O que não escreve fica: o "Ver os N" só põe os exemplos do autor na frente.
+  assert.deepEqual(m.ids, ['autorVer']);
+  assert.deepEqual(m.ouvidos, ['autorVer:click']);
+  // Com um só do autor no treino, a folha é só a frase (e o ✕ do topo).
+  const um = montarFolha({ treino: true, doAutor: 1 });
+  assert.deepEqual([um.ids, um.abertos], [[], ['autorModal']]);
+  assert.match(um.html, /autor\.sheet\.subUm/);
 });
