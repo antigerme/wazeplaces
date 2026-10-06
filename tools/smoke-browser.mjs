@@ -3220,6 +3220,141 @@ for (const como of ['teclado', 'mouse']) {
   await ctx.close();
 }
 
+// ── Treino: o FIM e o "Quero treinar antes" pelo TECLADO, o foco no ✕ ────
+// Os irmãos do "Sair" de cima: controles do treino que somem com o foco
+// (auditoria de 2026-10-03, MEDIDO no Chromium e no WebKit).
+//   R8-7-07 — o fim do treino fechado pelo teclado (Enter no "Ir para a fila",
+//             Esc) devolvia o foco a quem abriu o diálogo, o ✓ do último card
+//             de TREINO, que saiu com ele: caía no ⓘ do topo. Vai ao ✕ do card
+//             real que volta;
+//   R8-7-08 — o "Quero treinar antes" pelo teclado devolvia o foco ao ✕ do card
+//             REAL, que o treino troca logo em seguida: caía no <body>. Vai ao ✕
+//             do card de treino.
+// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" (o foco volta a
+// quem abriu o diálogo — prova que a medida enxerga o fechamento devolvendo o
+// foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão focado.
+{
+  const montar = async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 2; AppState.hasMore = false;
+      const real = (i) => ({ venueID: 'real' + i, updateRequestID: 'r' + i, name: 'Local Real ' + i,
+        categories: ['OTHER'], address: 'Rua Real, ' + i, updateType: 'Novo Local', updateTypeKey: 'VENUE',
+        purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'x', changes: [], imageUrls: [], mapa: null, dateAdded: Date.now() });
+      AppState.queue = [real(1), real(2)];
+      AppState.currentPlace = AppState.queue[0];
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+    });
+    return { ctx, page };
+  };
+  const foco = (page) => page.evaluate(() => {
+    const a = document.activeElement;
+    return { treino: Treino.ativo, frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      deTreino: !!(AppState.currentPlace && AppState.currentPlace._treino),
+      foco: !a || a === document.body ? 'body' : (a.id || String(a.className).split(' ')[0]),
+      noCardDaFrente: !!(a && cardDaFrente() && cardDaFrente().contains(a)) };
+  });
+  const focadoAgora = (page) => page.evaluate(() => document.activeElement && document.activeElement.id);
+  const focoNoX = (page) => esperarNaPagina(page,
+    () => !!document.activeElement && document.activeElement.classList.contains('card-btn-reject'), 3000);
+
+  // R8-7-07: o treino inteiro pelo teclado (Enter no ✓ de cada card) até o fim.
+  for (const como of ['Enter', 'Esc', 'mouse']) {
+    const { ctx, page } = await montar();
+    const onde = `treino, o fim fechado pelo ${como}`;
+    await page.evaluate(() => Treino.entrar());
+    let passos = 0;
+    for (let i = 0; i < 10; i++) {
+      const fim = await page.evaluate(() => !document.getElementById('treinoFimModal').classList.contains('hidden'));
+      if (fim) break;
+      // O FIM de cada passo, nunca um prazo: o `agir` conta o passo e monta o
+      // card seguinte (ou abre o diálogo do fim) na mesma tarefa. A marca vai
+      // NA PÁGINA — a função da espera é serializada, sem as variáveis daqui.
+      await page.evaluate(() => { window.__passoAntes = Treino.passo; });
+      await page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-read');
+      await page.keyboard.press('Enter');
+      passos++;
+      await esperarNaPagina(page, () => Treino.passo > window.__passoAntes, 3000);
+    }
+    const abriu = await esperarNaPagina(page, () => !document.getElementById('treinoFimModal').classList.contains('hidden'), 3000);
+    checa(abriu.ok, `${onde}: PRÉ-CONDIÇÃO — o "Treino concluído" não abriu (${passos} passos)`);
+    let focado = null;
+    if (como === 'Enter') {
+      await page.focus('#treinoFimOk');
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+    } else if (como === 'Esc') {
+      await page.keyboard.press('Escape');
+    } else {
+      await page.click('#treinoFimOk');
+    }
+    const voltou = await esperarNaPagina(page, () => !Treino.ativo && !!cardDaFrente()
+      && AppState.currentPlace && AppState.currentPlace.updateRequestID === 'r1', 5000);
+    if (como !== 'mouse') await focoNoX(page);
+    else await doisQuadros(page);
+    const r = await foco(page);
+    checa(voltou.ok && !r.treino && r.frente === 'r1', `${onde}: PRÉ-CONDIÇÃO — o card real não voltou`, JSON.stringify(r));
+    if (como === 'Enter') checa(focado === 'treinoFimOk', `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no "Ir para a fila" focado (${focado})`);
+    if (como === 'mouse') {
+      checa(!r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    } else {
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o diálogo fechou e o foco ficou em ${r.foco} — quem usa teclado recomeça da Ajuda`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+
+  // R8-7-08: o "Como funciona" aberto com o foco guardado no ✕ do card real (o
+  // adiado, R7-7-01), e o Enter no "Quero treinar antes" / no "Entendi".
+  for (const como of ['Treinar', 'Entendi', 'mouse']) {
+    const { ctx, page } = await montar();
+    const onde = `"Como funciona", ${como === 'Treinar' ? 'Enter no "Quero treinar antes"' : como === 'Entendi' ? 'Enter no "Entendi"' : 'o mouse no "Quero treinar antes"'}`;
+    await page.evaluate(() => {
+      cardDaFrente().querySelector('.card-btn-reject').focus();
+      abrirComoFunciona();
+    });
+    const botao = como === 'Entendi' ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
+    let focado = null;
+    if (como === 'mouse') {
+      await page.click('#' + botao);
+    } else {
+      await page.focus('#' + botao);
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+    }
+    const fechou = await esperarNaPagina(page, () => document.getElementById('comoFuncionaModal').classList.contains('hidden')
+      && !!cardDaFrente(), 3000);
+    if (como !== 'mouse') await focoNoX(page);
+    else { await esperarNaPagina(page, () => Treino.ativo, 3000); await doisQuadros(page); }
+    const r = await foco(page);
+    checa(fechou.ok, `${onde}: PRÉ-CONDIÇÃO — o diálogo não fechou`, JSON.stringify(r));
+    if (como !== 'mouse') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
+    if (como === 'Entendi') {
+      checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: CONTROLE — o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
+    } else if (como === 'Treinar') {
+      checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o card real saiu com o foco e ele ficou em ${r.foco}`, JSON.stringify(r));
+    } else {
+      checa(r.treino && !r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+}
+
 
 // ── Os controles do cabeçalho, CLICADOS ─────────────────────────────────
 // `semAnimar is not defined` foi pra produção e quebrou o botão de ATUALIZAR.
@@ -10220,6 +10355,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
   + `, + o "Sair" do treino pelo TECLADO levando o foco ao ✕ do card real que volta (com o CONTROLE do mouse, que não move o foco)`
+  + `, + o fim do treino (Enter no "Ir para a fila" e Esc) e o "Quero treinar antes" pelo TECLADO levando o foco ao ✕ do card que entra (com os CONTROLES do mouse e do "Entendi")`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote e card mortos, com contraprova de que a lixeira EXISTE fora do treino`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
