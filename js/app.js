@@ -15464,9 +15464,22 @@ async function gerarResumoDoMes() {
 let resumoAtual = null;
 
 async function abrirResumoDoMes() {
+    // DE QUEM é o resumo. A geração espera a fonte, o QR (o `qr.js` vem pela
+    // rede, sob demanda, na 1ª vez) e o logo, e nesse meio a pessoa pode ter
+    // saído — o "Sair" noutra aba chega a qualquer hora —, a sessão pode ter
+    // caído ou outra conta ter entrado. A folha abria DEPOIS, por cima da tela de
+    // entrada, com o nome e os números de quem saiu, e o "Baixar" e o
+    // "Compartilhar" vivos pra quem pegasse o aparelho (MEDIDO com o `qr.js`
+    // segurado e o "Sair" na outra aba; auditoria de 2026-10-03, R8-7-04). Só
+    // abre com a MESMA sessão e a MESMA conta, e com o Histórico — de onde ela
+    // foi pedida — ainda na tela; senão a imagem é jogada fora, calada: quem saiu
+    // não espera aviso dela, e quem fechou o Histórico desistiu.
+    const epoca = epocaDaSessao;
+    const conta = contaAgora();
     let r = null;
     try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
     const blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    if (epoca !== epocaDaSessao || conta !== contaAgora() || !historicoNaTela()) return;
     if (!blob) { showToast(t('toast.resumoFalhou'), 'error'); return; }
     resumoAtual = { blob, nome: r.nomeArquivo, mesNome: r.mesNome };
     const img = document.getElementById('resumoImg');
