@@ -96,8 +96,9 @@ export async function esperarNaPagina(page, fn, tetoMs = 20000, passoMs = 200) {
       // A página que CAIU (o processo do navegador morreu) ou FECHOU não volta:
       // esperar o teto inteiro só trocava a causa por "a espera estourou". Foi o
       // que o CI do #259 disse do bloco do pareamento no WebKit, e a reprodução
-      // aqui (1 em 12 rodadas com carga) mostrou "Target crashed" no lugar. A
-      // espera para na hora e diz que caiu; erro de navegação segue tentando.
+      // aqui, com a máquina carregada, mostrou "Target crashed" no lugar — com o
+      // código do lote 11 na mesma proporção: é o motor, não o app. A espera
+      // para na hora e diz que caiu; erro de navegação segue tentando.
       if (PAGINA_MORTA.test(String(e && e.message || e))) return { ok: false, ms: Date.now() - t0, caiu: String(e && e.message || e).slice(0, 160) };
       v = null;   // navegando: tenta de novo
     }

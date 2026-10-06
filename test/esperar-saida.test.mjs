@@ -1,8 +1,9 @@
 // A espera dos smokes (`tools/esperar-saida.mjs`) separa a página que CAIU da
 // página que ainda não chegou no estado. O CI do #259 (2026-10-06) reprovou o bloco
 // do pareamento do smoke de layout no WebKit com "a espera por o QR com a contagem
-// estourou (15000ms)", e a reprodução aqui (1 em 12 rodadas, com carga) mostrou
-// "page.evaluate: Target crashed": o processo da página do WebKit morreu, e a
+// estourou (15000ms)", e a reprodução aqui (com a máquina carregada, e com o
+// código do lote 11 na mesma proporção) mostrou "page.evaluate: Target crashed":
+// o processo da página do WebKit morreu, e a
 // espera, que trata todo erro do `evaluate` como "ainda não", esperou o teto
 // inteiro e culpou o estado da página. Erro de NAVEGAÇÃO segue sendo "ainda não"
 // (a página volta); o de página morta encerra na hora, dizendo que caiu.
