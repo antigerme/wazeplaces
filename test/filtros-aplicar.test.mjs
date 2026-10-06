@@ -1930,3 +1930,67 @@ test('R9-6-03: quem só edita noutro servidor — nenhuma busca sai no servidor 
   assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pro servidor da área');
   assert.deepEqual(m.buscas, ['na'], `a fila saiu em ${m.buscas} — a busca no servidor errado, antes da certa`);
 });
+
+// ═══ R9-6-04 · as ÁREAS do perfil são POR SERVIDOR, como os editáveis ═══════
+// MEDIDO no Waze real (o `/Session` das duas contas do owner nos três
+// servidores): 8 e 1 áreas na ROW, 0 na NA e na IL — como o
+// `editableCountryIDs`. O R8-6-06 decidia "sem área" com o perfil da ROW ANTES
+// de perguntar os outros servidores: quem só edita na NA chegava na ROW com 0
+// áreas, e "Minha área" era desligado com a frase falsa "Seu perfil do Waze não
+// tem área de edição", seguida de "Mostrando a fila de United States" (MEDIDO no
+// navegador, auditoria da rodada 9). Aqui a carga do perfil roda DE VERDADE
+// (`loadProfileAndAuxData` → `completarPerfilChegado` → `paisDoPerfil` →
+// `irProPaisDoPerfil`), com o perfil de cada servidor trazendo SÓ as áreas
+// dele, e a caixa da busca lida como a busca a lê (`caixaDaMinhaAreaEm`).
+function paginaComAreasPorServidor({ myArea = true, areasNa = [{ type: 'drive', bbox: CAIXA_NY }], areasRow = [] } = {}) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea } });
+  const perfis = {
+    row: { id: 1, editableCountryIDs: [], areas: areasRow, managedAreas: [] },
+    na: { id: 1, editableCountryIDs: [235], areas: areasNa, managedAreas: [] },
+    il: { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] },
+  };
+  p.listas.perfil = (r) => Promise.resolve({ success: true, profile: { ...perfis[r] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  // A área gerenciada salva não entra: a fila só é refeita pelo lugar.
+  p.deps.esquecerAreaForaDoPerfil = () => false;
+  const app = montar([...FUNCOES, 'caixaDaMinhaArea', 'caixaDaMinhaAreaEm', 'desligarMinhaAreaSemCaixa'], p.deps);
+  return { p, app };
+}
+
+test('R9-6-04: quem só edita na NA, com "Minha área" e a ROW sem áreas — vai pra NA com a caixa da área de LÁ, sem a frase falsa', async () => {
+  const { p, app } = paginaComAreasPorServidor();
+  await app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], `PRÉ-CONDIÇÃO: o perfil não foi perguntado na NA (${p.log.getProfile})`);
+  assert.equal(p.AppState.filters.myArea, true, `"Minha área" foi desligado com a área na NA: ${p.log.toasts}`);
+  assert.ok(!p.log.toasts.some((x) => x.includes('toast.minhaAreaSemCaixa')),
+    `o app disse "Seu perfil do Waze não tem área de edição" a quem tem área na NA: ${p.log.toasts}`);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], `"Minha área" ficou em ${p.estado.regiao}/${p.estado.pais}`);
+  assert.ok(!p.log.toasts.some((x) => x.includes('toast.paisDoPerfil')),
+    `o aviso "Mostrando a fila de {país}" saiu com "Minha área", que segue mostrando a fila da área: ${p.log.toasts}`);
+  assert.deepEqual(app.caixaDaMinhaAreaEm(), CAIXA_NY, 'a busca da NA não vai pela caixa da área de lá');
+  assert.equal(p.log.buscas, 1, 'a fila não foi refeita no servidor da área');
+  // CONTROLE: o perfil que o app guardou é o da ROW, sem caixa nenhuma — é
+  // dele que a decisão saía.
+  assert.equal(app.caixaDaMinhaArea(p.AppState.profile), null, 'CONTROLE: o perfil da ROW tem caixa (o caso não é o do relato)');
+  assert.deepEqual(app.caixaDaMinhaAreaEm('row'), null, 'CONTROLE: a caixa lida na ROW não é "nenhuma"');
+});
+
+test('R9-6-04: sem área TAMBÉM no servidor de destino, aí sim "Minha área" desliga e diz — e a fila é a do país, com o aviso dele', async () => {
+  const { p, app } = paginaComAreasPorServidor({ areasNa: [] });
+  await app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], 'PRÉ-CONDIÇÃO: o perfil não foi perguntado na NA');
+  assert.equal(p.AppState.filters.myArea, false, '"Minha área" ficou ligado sem área em servidor nenhum: o filtro mente');
+  assert.equal(p.log.toasts.filter((x) => x.includes('toast.minhaAreaSemCaixa')).length, 1, `o desligar não foi dito (uma vez): ${p.log.toasts}`);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'a pessoa não foi pro país onde edita');
+  assert.ok(p.log.toasts.some((x) => x.includes('toast.paisDoPerfil')), `a fila do país saiu sem o aviso dele: ${p.log.toasts}`);
+  assert.equal(p.log.buscas, 1);
+  // CONTROLE: com a área NESTE servidor (editáveis daqui), a decisão é a de
+  // sempre — e sem caixa aqui, desliga já, sem perguntar ninguém.
+  const c = paginaComAreasPorServidor();
+  c.p.listas.perfil = () => Promise.resolve({ success: true, profile: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [] } });
+  await c.app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual([c.p.log.getProfile, c.p.AppState.filters.myArea], [['row'], false], 'CONTROLE: o perfil com a área aqui e sem caixa não desligou "Minha área"');
+});

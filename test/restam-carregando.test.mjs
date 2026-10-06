@@ -87,6 +87,7 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), refazerPerfilSeFaltar: () => {},
     caixaDaMinhaArea: () => [1, 2, 3, 4], desligarMinhaAreaSemCaixa: () => {},
+    caixaDaMinhaAreaEm: () => [1, 2, 3, 4],   // a caixa no servidor da busca (R9-6-04)
     showLoading: (v) => tela.push(v ? 'esqueleto' : 'sem-esqueleto'), removeCurrentCardEl: () => {},
     showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
     abrirGuardadaDepoisDaFalha: async () => false,

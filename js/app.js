@@ -4503,12 +4503,21 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
 // MESMA conta (a sonda do alarme falso de um 401, que troca o objeto do perfil)
 // segue com o que foi lido, e outra conta não herda nada — a primeira leitura
 // dela recomeça a lista, e até lá nada vale. Sem perfil (o "Sair"), nada vale.
-let editaveisPorServidor = { conta: null, lidos: {} };
-function anotarEditaveis(perfil, regiao, lista) {
+//
+// `areas`: as áreas de edição do MESMO `/Session`, que também são POR SERVIDOR
+// (MEDIDO no Waze real, nas duas contas do owner: 8 e 1 áreas na ROW, 0 na NA e
+// na IL). Fica a CAIXA de "Minha área" daquele servidor (`caixas`, lida por
+// `caixaDaMinhaAreaEm`); sem a lista (não veio), a daquele servidor não muda.
+let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };
+function anotarEditaveis(perfil, regiao, lista, areas) {
     if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined || !regiao) return;
     const ids = (Array.isArray(lista) ? lista : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    if (editaveisPorServidor.conta !== String(perfil.id)) editaveisPorServidor = { conta: String(perfil.id), lidos: {} };
+    if (editaveisPorServidor.conta !== String(perfil.id)) editaveisPorServidor = { conta: String(perfil.id), lidos: {}, caixas: {} };
     editaveisPorServidor.lidos[regiao] = ids;
+    if (Array.isArray(areas)) {
+        if (!editaveisPorServidor.caixas) editaveisPorServidor.caixas = {};
+        editaveisPorServidor.caixas[regiao] = caixaDaMinhaArea({ areas });
+    }
 }
 // Os editáveis do servidor `regiao` que o app leu pra conta de agora, ou
 // `null` quando não leu (`[]` é "leu, e a pessoa não edita lá").
@@ -5635,7 +5644,10 @@ async function loadProfileAndAuxData() {
     }
     // Os editáveis do perfil são do servidor em que ele foi PEDIDO (ver
     // `editaveisLidos`, R7-6-02).
-    if (profileRes.success && profileRes.profile) anotarEditaveis(profileRes.profile, regiaoPedida, profileRes.profile.editableCountryIDs);
+    // E a caixa das áreas do mesmo `/Session`, que também é dele (R9-6-04).
+    if (profileRes.success && profileRes.profile) {
+        anotarEditaveis(profileRes.profile, regiaoPedida, profileRes.profile.editableCountryIDs, profileRes.profile.areas);
+    }
     if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
 }
 
@@ -5756,8 +5768,20 @@ async function completarPerfilChegado(perfil, epoca) {
     // `fetchNextPage`) — pela caixa da área ou, num perfil sem caixa, com o
     // filtro desligado e dito. ANTES do país: desligado, o "Minha área" deixa
     // de segurar a escolha do país de quem entra.
+    //
+    // Menos com a lista de editáveis DAQUI vazia (e quem não é staff): aí a área
+    // está noutro servidor, e as `areas` do `/Session` são POR SERVIDOR (MEDIDO no
+    // Waze real: 8 e 1 áreas na ROW, 0 na NA e na IL) — o perfil daqui não tem
+    // caixa nenhuma, e desligar aqui dizia "Seu perfil do Waze não tem área de
+    // edição" a quem tem, com "Mostrando a fila de United States" logo depois
+    // (auditoria da rodada 9, R9-6-04). A decisão espera o perfil do servidor de
+    // destino: a ida pra lá confere a caixa de lá (`irProPaisDoPerfil`), e sem
+    // destino quem decide é a busca, pela caixa do servidor dela.
     const refazerFila = filaEsperaPerfil;
-    if (AppState.filters.myArea && !caixaDaMinhaArea(perfil)) desligarMinhaAreaSemCaixa();
+    const editaveisAqui = (Array.isArray(perfil.editableCountryIDs) ? perfil.editableCountryIDs : [])
+        .map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const areaNoutroServidor = !perfil.isStaff && editaveisAqui.length === 0;
+    if (AppState.filters.myArea && !areaNoutroServidor && !caixaDaMinhaArea(perfil)) desligarMinhaAreaSemCaixa();
     // A área gerenciada salva que este perfil não tem sai do filtro, e a fila que
     // saiu com ela é refeita (ver a função).
     const refazerPelaArea = esquecerAreaForaDoPerfil(perfil);
@@ -5857,7 +5881,8 @@ async function paisDoPerfil(perfil, epoca) {
         // A lista que esta pergunta trouxe fica, pra peneira dos Filtros naquela
         // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
         // falhou não diz que a pessoa não edita lá.
-        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la);
+        // E a caixa das áreas de lá: com "Minha área", é ela que decide (R9-6-04).
+        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la, r.profile.areas);
         if (la.length) return minhaArea ? { regiao, pais: la[0], minhaArea: true } : { regiao, pais: la[0] };
     }
     return null;
@@ -5885,6 +5910,14 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
         API.setRegion(regiao);
         AppState.statesByCountry = {};
         AppState.countries = r && r.success ? r.countries : [];
+    }
+    // "Minha área" vai pela região DA ÁREA se o perfil de LÁ tiver a caixa: as
+    // `areas` do `/Session` são por servidor (R9-6-04), e o perfil de lá sem
+    // área nenhuma é o "sem caixa" de verdade. Aí o filtro desliga e diz por
+    // quê, e a ida é a do país, com o aviso dele.
+    if (minhaArea && !caixaDaMinhaAreaEm(regiao)) {
+        desligarMinhaAreaSemCaixa();
+        minhaArea = false;
     }
     API.setCountry(pais);
     // Estado e área eram do país de antes.
@@ -9366,7 +9399,8 @@ async function handleUnauthorized() {
             // da rodada 8, R8-6-03, MEDIDO no navegador). Antes do
             // `definirPerfil`, na ordem da carga: a anotação é da conta do
             // perfil, e outra conta recomeça a lista.
-            if (r.success && r.profile) anotarEditaveis(r.profile, regiaoDaSonda, r.profile.editableCountryIDs);
+            // A caixa das áreas também (R9-6-04).
+            if (r.success && r.profile) anotarEditaveis(r.profile, regiaoDaSonda, r.profile.editableCountryIDs, r.profile.areas);
             const primeiroPerfil = !AppState.profile;
             if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
             // O perfil revelou que OUTRA conta tomou o aparelho noutra aba, e
@@ -10570,6 +10604,21 @@ function caixaDaMinhaArea(perfil) {
     return area ? area.bbox : null;
 }
 
+// A caixa de "Minha área" NO SERVIDOR da região (por padrão, a de agora). As
+// `areas` do `/Session` são POR SERVIDOR, como os editáveis (MEDIDO no Waze
+// real: 8 e 1 áreas na ROW, 0 na NA e na IL), e o perfil do `AppState` é o do
+// servidor em que ele foi pedido: quem só edita na NA chega na ROW com zero
+// áreas, e o `paisDoPerfil` o leva pra NA com a caixa do perfil de LÁ — a que
+// ele leu (`anotarEditaveis`). Sem leitura do servidor, a do perfil que o app
+// tem (auditoria da rodada 9, R9-6-04).
+function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
+    const perfil = AppState.profile;
+    const lidas = editaveisPorServidor.caixas;
+    if (perfil && perfil.id !== null && perfil.id !== undefined && editaveisPorServidor.conta === String(perfil.id)
+        && lidas && Object.prototype.hasOwnProperty.call(lidas, regiao)) return lidas[regiao];
+    return caixaDaMinhaArea(perfil);
+}
+
 // A busca recusou "Minha área" porque o perfil não tinha chegado (sinal ruim na
 // abertura): o perfil que chegar refaz a fila (`completarPerfilChegado`). Zera
 // no `resetQueue` — fila nova é outra busca.
@@ -10657,7 +10706,8 @@ function fetchNextPage() {
     // tela é a de falha (com "Tentar de novo"), o perfil que faltou é pedido
     // de novo (no máximo 1×/min), e o que chegar refaz a fila. O `hasMore =
     // false` encerra o laço do `startFetching` (gotcha #19). Com o perfil na mão
-    // e SEM caixa, o filtro desliga e diz por quê.
+    // e SEM caixa NO SERVIDOR desta busca (`caixaDaMinhaAreaEm`, R9-6-04), o
+    // filtro desliga e diz por quê.
     if (AppState.filters.myArea) {
         if (!AppState.profile) {
             filaEsperaPerfil = true;
@@ -10668,7 +10718,7 @@ function fetchNextPage() {
             updatePendingCount();
             return Promise.resolve();
         }
-        if (!caixaDaMinhaArea(AppState.profile)) desligarMinhaAreaSemCaixa();
+        if (!caixaDaMinhaAreaEm()) desligarMinhaAreaSemCaixa();
     }
 
     AppState.fetching = true;
@@ -10700,8 +10750,8 @@ function fetchNextPage() {
         // Prefere a área de gerência (drive); cai pra qualquer área com bbox
         // (managed areas não-drive) se não houver drive — amplia o "minha área".
         // Aqui ela EXISTE: sem perfil a busca nem sai, e sem caixa o filtro
-        // desligou logo acima.
-        filters.bbox = caixaDaMinhaArea(AppState.profile);
+        // desligou logo acima. É a do servidor da busca (R9-6-04).
+        filters.bbox = caixaDaMinhaAreaEm();
     } else {
         if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
         if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
