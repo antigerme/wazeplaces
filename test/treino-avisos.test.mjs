@@ -13,7 +13,9 @@
 //             silenciosa pela extensão — fechava o diálogo e não fazia nada.
 // E na rodada 9 (2026-10-06):
 //   R9-7-05 — a folha do autor aberta de um card de treino oferecia o que
-//             ESCREVE: o interruptor armava a recusa automática de verdade.
+//             ESCREVE: o interruptor armava a recusa automática de verdade;
+//   R9-7-02 — o próximo gesto de treino apagava os avisos de VERDADE que tinham
+//             chegado com ele aberto (o resultado do "Rejeitar os N"…).
 //
 // Os testes RODAM as funções de verdade, fatiadas do app.js, num escopo só: o
 // que o teste não fornece é um "buraco negro" que aceita qualquer chamada. Por
@@ -584,4 +586,83 @@ test('R9-7-05: a folha do autor aberta de um card de TREINO não oferece o que e
   const um = montarFolha({ treino: true, doAutor: 1 });
   assert.deepEqual([um.ids, um.abertos], [[], ['autorModal']]);
   assert.match(um.html, /autor\.sheet\.subUm/);
+});
+
+// ═══ R9-7-02 · o próximo gesto de treino apagava os avisos de VERDADE ═══════
+// `Treino.limparAvisos` (no topo de cada `agir`) tirava TODO aviso da pilha: o
+// resultado do "Rejeitar os N" que pousou com o treino aberto (R8-7-01), o "Não
+// deu pra excluir a foto", o "Acesso renovado pelo WME", o "Erro ao rejeitar"
+// sumiam no primeiro ✕/✓/↑ de treino (MEDIDO no navegador; auditoria de
+// 2026-10-06). O `showToast` de VERDADE, numa pilha de mentira com o teto de 3
+// e o relógio parado (o aviso que "sai devagar" fica na pilha, como nos 250 ms
+// da animação), e o `Treino` de verdade.
+function montarAvisos() {
+  const no = () => {
+    const n = {
+      pai: null, className: '', title: '', style: {}, dataset: {}, _html: '',
+      set innerHTML(v) { n._html = String(v); },
+      get innerHTML() { return n._html; },
+      get textContent() { return n._html.replace(/<[^>]+>/g, ''); },
+      addEventListener() {}, querySelector: () => null,
+      remove() {
+        if (!n.pai) return;
+        const i = n.pai.filhos.indexOf(n);
+        if (i >= 0) n.pai.filhos.splice(i, 1);
+        n.pai = null;
+      },
+    };
+    return n;
+  };
+  const pilha = () => {
+    const p = no();
+    p.filhos = [];
+    Object.defineProperty(p, 'children', { get: () => p.filhos });
+    Object.defineProperty(p, 'firstElementChild', { get: () => p.filhos[0] || null });
+    p.appendChild = (n) => { n.remove(); n.pai = p; p.filhos.push(n); return n; };
+    p.removeChild = (n) => { n.remove(); return n; };
+    return p;
+  };
+  const els = { toastContainer: pilha(), bannerContainer: pilha() };
+  const P = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i, updateTypeKey: 'VENUE', imageUrls: [] });
+  const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false,
+    queue: [1, 2, 3, 4].map(P), currentPlace: null, stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 4,
+    autorEmFoco: null, preferences: { comoFuncionaVisto: true, undoEnabled: true } };
+  AppState.currentPlace = AppState.queue[0];
+  const deps = {
+    AppState, document: { getElementById: (id) => els[id] || null, createElement: () => no() },
+    t: (k) => k, escapeHtml: (x) => String(x), dlog: () => {},
+    // O relógio PARADO: nada sai sozinho durante o teste.
+    setTimeout: () => 0, clearTimeout: () => {},
+    loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+    updateStats: () => {}, updatePendingCount: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => {},
+    showLoading: () => {}, removeUndoBanner: () => {}, enviarPendenciasDoLightbox: () => {}, savePreferences: () => {},
+  };
+  const app = rodar(deps, [declaracao('Treino'), fatiar('showToast'), fatiar('fecharCamadasDeFoto')], ['Treino', 'showToast']);
+  const naPilha = () => els.toastContainer.filhos.map((n) => n.textContent);
+  return { ...app, naPilha };
+}
+
+test('R9-7-02: o próximo gesto de treino tira só o aviso que o TREINO pôs — os avisos de verdade que chegaram com ele aberto ficam', () => {
+  const m = montarAvisos();
+  m.Treino.entrar();
+  assert.equal(m.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+  // O resultado do "Rejeitar os N" que a janela do Desfazer despachou pousa com o treino aberto.
+  m.showToast('2 rejeitados', 'success');
+  m.Treino.agir('read');
+  assert.deepEqual(m.naPilha(), ['2 rejeitados', 'treino.efeito.read'],
+    `DEFEITO: o 1º gesto de treino apagou o resultado do lote (${JSON.stringify(m.naPilha())})`);
+  // A sessão renovada pela extensão, com o treino aberto.
+  m.showToast('Acesso renovado pelo WME', 'info');
+  m.Treino.agir('reject');
+  assert.deepEqual(m.naPilha(), ['2 rejeitados', 'Acesso renovado pelo WME', 'treino.efeito.reject'],
+    `DEFEITO: o gesto de treino apagou um aviso de verdade (${JSON.stringify(m.naPilha())})`);
+  // CONTROLE (o "um aviso por vez" do treino, que tapava o "Ir para a fila"): o
+  // aviso ANTERIOR do treino saiu — e saiu NA HORA. Saindo devagar, ele ainda
+  // contava no teto de 3 da pilha, e o aviso novo empurrava pra fora o primeiro
+  // aviso de verdade.
+  m.Treino.agir('skip');
+  assert.deepEqual(m.naPilha(), ['2 rejeitados', 'Acesso renovado pelo WME', 'treino.efeito.skip'],
+    `o aviso do treino não saiu na hora (ou empurrou um de verdade pra fora): ${JSON.stringify(m.naPilha())}`);
+  assert.equal(m.naPilha().filter((x) => x.startsWith('treino.efeito.')).length, 1, 'os avisos do treino se empilharam');
 });

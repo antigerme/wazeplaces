@@ -20448,6 +20448,10 @@ const Treino = {
         document.getElementById('treinoBanner')?.classList.replace('flex', 'hidden');
     },
 
+    // O aviso que o PRÓPRIO treino pôs na tela — o efeito do último gesto, o
+    // punho que o `showToast` devolve —, pra sair no próximo (`limparAvisos`).
+    aviso: null,
+
     // Chamado do TOPO dos handlers reais. Explica o que TERIA acontecido e
     // avança — sem stat, sem fila real, sem rede.
     // Um aviso por vez, e o modal final só entra depois que o último foi lido.
@@ -20456,11 +20460,20 @@ const Treino = {
     // 3 de 4 aparelhos. É o gotcha #26 de novo (feedback transitório cobrindo o
     // alvo que ainda precisa ser tocado), agora numa tela de aprender a usar.
     limparAvisos() {
-        // , não : o segundo é o POSICIONADOR fixo, e
-        // limpá-lo apagaria o container. Errei nisso e o throw abortava a ação
-        // inteira — o card nem avançava.
-        const pilha = document.getElementById('toastContainer');
-        if (pilha) [...pilha.children].forEach((n) => n.remove());
+        // Só o aviso que o PRÓPRIO treino pôs (`this.aviso`). Varrer a pilha
+        // inteira apagava também os avisos de VERDADE que chegaram com o treino
+        // aberto — o resultado do "Rejeitar os N", o "Não deu pra excluir a
+        // foto", o "Acesso renovado pelo WME", o "Erro ao rejeitar" — no primeiro
+        // ✕/✓/↑ de treino, ~1 s depois de aparecerem: o único lugar que dizia o
+        // desfecho da decisão real sumia (R9-7-02 = R9-2-02, MEDIDO no
+        // navegador; auditoria de 2026-10-06). Eles têm o prazo deles. Sai NA
+        // HORA, sem a animação (`remover`): o que ainda estivesse saindo contava
+        // no teto de 3 da pilha, e o aviso seguinte do treino empurrava pra fora
+        // um de verdade.
+        if (this.aviso) {
+            try { this.aviso.remover?.(); } catch (e) { /* o aviso já saiu */ }
+            this.aviso = null;
+        }
         // Simétrico ao entrar(): sair com uma foto de TREINO aberta deixaria o
         // lightbox do modo real em cima de um pedido inerte.
         fecharCamadasDeFoto();
@@ -20476,7 +20489,7 @@ const Treino = {
         // O ↑ com o "Pular guarda o pedido" ligado ENVIA a estrela no modo real:
         // "pular não envia nada" seria falso justamente pra quem o ligou.
         const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && AppState.preferences.pularGuarda === true ? 'skipGuarda' : tipo);
-        if (!ultimo) showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000);
+        if (!ultimo) this.aviso = showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000);
         this.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
         this.restam = Math.max(0, this.restam - (tipo === 'skip' ? 0 : 1));
         updateStats();
@@ -23410,6 +23423,10 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null, { 
             if (alvo) alvo.textContent = novo;
         },
         dispensar() { clearTimeout(relogio); dismiss(); },
+        // Sai NA HORA, sem a animação de saída: quem chama põe outro aviso no
+        // lugar dele (o treino, um por vez), e o que ainda estivesse saindo
+        // contava no teto de 3 acima — o novo empurraria outro pra fora.
+        remover() { clearTimeout(relogio); removed = true; toast.remove(); },
     };
 }
 
