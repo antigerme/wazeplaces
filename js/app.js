@@ -1045,20 +1045,38 @@ const LIMPEZA_AO_FECHAR = {
     // ficavam o card de TREINO já tratado na tela, "Restam 0" e os botões
     // mortos, com a fila real guardada por baixo (auditoria de 2026-09-29, A5).
     // Sair mora aqui pra valer nos quatro; o botão só fecha o modal.
-    treinoFimModal() { Treino.sair(); },
+    //
+    // Pelo TECLADO (o Enter no "Ir para a fila", o Esc), o foco vai ao ✕ do card
+    // que volta — ou ao botão do painel do fim, quando não volta card —, a régua
+    // do "Sair" da faixa (`prometerFocoAoCardQueVem`). O fechamento o devolvia a
+    // quem abriu o modal, o ✓ do último card de TREINO, que saiu junto: caía no
+    // ⓘ do topo, e quem usa teclado ou leitor de tela recomeçava da Ajuda
+    // (R8-7-07, MEDIDO nos dois motores; auditoria de 2026-10-03). Prometido
+    // ANTES do `sair()`, que monta o card e agenda o foco prometido; o `true`
+    // diz ao `closeModal` que o foco já tem destino. Pelo mouse, pelo dedo, pelo
+    // fundo e pelo voltar, nada muda.
+    treinoFimModal({ peloTeclado = false } = {}) {
+        if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+        Treino.sair();
+        return peloTeclado;
+    },
 };
 
-function closeModal(id, { viaHistorico = false } = {}) {
+function closeModal(id, { viaHistorico = false, peloTeclado = false } = {}) {
     dfato('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
     m.classList.add('hidden');
     if (!viaHistorico) CamadaVoltar.consumir();
-    try { LIMPEZA_AO_FECHAR[id]?.(); } catch (e) { /* limpeza nunca derruba o fechamento */ }
+    // A limpeza sabe se o fechamento veio do TECLADO (o Esc, o Enter no botão
+    // que fecha) e devolve `true` quando ela mesma deu destino ao foco (o fim do
+    // treino, R8-7-07): aí ele não volta a quem abriu.
+    let focoComDestino = false;
+    try { focoComDestino = LIMPEZA_AO_FECHAR[id]?.({ peloTeclado }) === true; } catch (e) { /* limpeza nunca derruba o fechamento */ }
     if (!topOpenModal() && !Lightbox.isOpen()) document.body.style.overflow = '';
     const alvo = lastFocusedBeforeModal;
     lastFocusedBeforeModal = null;
-    devolverFoco(alvo);
+    if (!focoComDestino) devolverFoco(alvo);
     // O "Como funciona" que esperava a camada fechar (R6-7-2, R7-7-01).
     aoFecharCamada(viaHistorico);
 }
@@ -1188,8 +1206,25 @@ function setupAppListeners() {
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
     $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
-    $('comoFuncionaTreinar')?.addEventListener('click', () => { closeModal('comoFuncionaModal'); Treino.entrar(); });
-    $('abrirTreino')?.addEventListener('click', () => { closeModal('helpModal'); Treino.entrar(); });
+    // O treino pedido por um diálogo, SEM sessão (a renovação silenciosa pela
+    // extensão): diz o que esperar e o diálogo fica (`recusarTreinoSemSessao`,
+    // R8-7-09). E o "Quero treinar antes" pelo TECLADO: o fechamento devolve o
+    // foco ao ✕ do card REAL, que o `Treino.entrar` troca logo em seguida pelo
+    // de treino — o foco caía no <body> (R8-7-08, MEDIDO nos dois motores;
+    // auditoria de 2026-10-03). Vai ao ✕ do card de treino, como no "Sair" da
+    // faixa (`prometerFocoAoCardQueVem`), prometido ANTES de fechar: depois do
+    // fechamento, o evento já não diz quem tinha o foco.
+    $('comoFuncionaTreinar')?.addEventListener('click', (ev) => {
+        if (recusarTreinoSemSessao()) return;
+        prometerFocoAoCardQueVem(ev);
+        closeModal('comoFuncionaModal');
+        Treino.entrar();
+    });
+    $('abrirTreino')?.addEventListener('click', () => {
+        if (recusarTreinoSemSessao()) return;
+        closeModal('helpModal');
+        Treino.entrar();
+    });
     // O "Sair" some com a faixa do treino, e o card real volta: pelo teclado, o
     // foco caía no <body> (R7-2-06, MEDIDO nos dois motores; auditoria de
     // 2026-10-02). Ele vai ao ✕ do card que volta, a regra do C10 pra todo
@@ -1200,8 +1235,9 @@ function setupAppListeners() {
         Treino.sair();
     });
     // Só fecha: quem sai do treino é a limpeza do modal (`LIMPEZA_AO_FECHAR`),
-    // que vale também pro Esc, o fundo e o voltar.
-    $('treinoFimOk')?.addEventListener('click', () => closeModal('treinoFimModal'));
+    // que vale também pro Esc, o fundo e o voltar. O fechamento leva junto se o
+    // gesto veio do TECLADO: aí a limpeza leva o foco ao card que volta (R8-7-07).
+    $('treinoFimOk')?.addEventListener('click', (ev) => closeModal('treinoFimModal', { peloTeclado: veioDoTeclado(ev) }));
 
     // "Instalei… e agora?" — o beco sem saída medido: o app pergunta à extensão
     // UMA vez, no carregamento, com 350ms de janela, e o `ponte.js` não é
@@ -5098,12 +5134,14 @@ function handleKeyDown(e) {
     }
 
     // Com modal aberto: Esc fecha, e as setas NÃO disparam swipe no card
-    // atrás do diálogo (antes disparavam — ação destrutiva invisível).
+    // atrás do diálogo (antes disparavam — ação destrutiva invisível). O Esc é
+    // TECLADO, e a limpeza do modal sabe disso (o fim do treino leva o foco ao
+    // card que volta, R8-7-07).
     const openedModal = topOpenModal();
     if (openedModal) {
         if (e.key === 'Escape') {
             e.preventDefault();
-            closeModal(openedModal.id);
+            closeModal(openedModal.id, { peloTeclado: true });
         } else if (e.key === 'Tab') {
             trapTabInModal(e, openedModal);
         }
@@ -16376,9 +16414,21 @@ function mostrarResultadoDoLote(conta) {
     // ampliada, com o foco preso nela invisível, ou no lugar dos Filtros,
     // jogando fora a mudança ainda não aplicada (auditoria de 2026-09-29, L27).
     // Nada da folha é escrito antes: a aberta pode ser a de outro autor.
+    //
+    // O TREINO aberto entra na mesma regra: ele também está POR CIMA da fila em
+    // que o lote foi decidido (o "Rejeitar os N" da janela do Desfazer que o
+    // "Praticar" despacha). A folha abria sobre o card de treino, com a faixa
+    // "nada é enviado ao Waze" e o "Foram pro Waze no seu nome" na mesma tela —
+    // quem está aprendendo lia que o treino tinha mandado (R8-7-01, auditoria de
+    // 2026-10-03). AVISO, e não a folha guardada pro `sair()`: abrir a folha
+    // logo que o treino fecha cairia no MESMO tique do fechamento do fim do
+    // treino (o `history.back()` pendente come a entrada nova, gotcha #65) ou
+    // depois do voltar do aparelho, sem gesto novo — e é a regra que já vale
+    // pra toda camada, sem mais um caminho de abrir diálogo pra manter.
     const outraCamada = !!topOpenModal()
         || (typeof Lightbox !== 'undefined' && Lightbox.isOpen())
-        || (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen());
+        || (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen())
+        || (typeof Treino !== 'undefined' && Treino.ativo === true);
     if (outraCamada) {
         showToast(linhas.map((l) => l[2]).join(' · '), conta.erro ? 'error' : fila ? 'info' : 'success');
         return;
@@ -16849,6 +16899,14 @@ function renderHistory() {
 // tela com o banner do Desfazer.
 function avisarConsequencia(actionType) {
     if (!CONSEQUENCIA_AVISADA[actionType]) return;
+    // Com o TREINO aberto, nem aparece nem fica visto. A decisão é REAL — o ✕
+    // da janela do Desfazer que o "Praticar" despacha, pousando com o treino
+    // já na tela —, e o aviso de primeira vez saía por cima da faixa "nada é
+    // enviado ao Waze": quem está aprendendo lia que o TREINO tinha mandado, e
+    // a marca de visto o gastava ali, longe da fila em que ele explica alguma
+    // coisa (R8-7-01, auditoria de 2026-10-03). Fica pra próxima confirmação
+    // fora do treino — uma decisão de verdade, que é do que ele fala.
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) return;
     const vistas = AppState.preferences.consequenciaVista || {};
     if (vistas[actionType]) return;
     vistas[actionType] = true;
@@ -19627,6 +19685,20 @@ function handleActionResult(actionType, place, result, regiao, epocaFila, gesto)
 function fecharCamadasDeFoto() {
     if (typeof Lightbox !== 'undefined' && Lightbox.isOpen()) Lightbox.close();
     if (typeof MapaLightbox !== 'undefined' && MapaLightbox.isOpen()) MapaLightbox.close();
+}
+
+// O treino pedido por um DIÁLOGO — o "Praticar" da Ajuda, o "Quero treinar
+// antes" do "Como funciona" — SEM sessão: a renovação silenciosa pela
+// extensão, com o card travado por baixo e os dois botões na tela. O diálogo
+// fechava e nada acontecia, calado: o `Treino.entrar` sai sem sessão (R8-7-09,
+// auditoria de 2026-10-03; o "Marcar todos", no mesmo instante, dizia o que
+// esperar). Diz o que esperar com a guarda do "Rejeitar os N"
+// (`avisoDaTrava`), e o diálogo FICA: tocar de novo depois vale. Devolve se
+// recusou.
+function recusarTreinoSemSessao() {
+    if (AppState.authenticated) return false;
+    showToast(t(avisoDaTrava()), 'info');
+    return true;
 }
 
 const Treino = {
@@ -22448,6 +22520,14 @@ function checkUndoGateUnlock() {
     // Só `false` — decisão tomada, ainda não atingiu — libera a comemoração.
     if (typeof AppState.preferences.undoGateSeen !== 'boolean') return;
     if (AppState.preferences.undoGateSeen) return;
+    // Com o TREINO aberto, espera — sem marcar como visto. A decisão que cruza a
+    // cota é REAL (a da janela do Desfazer que o "Praticar" despacha), mas o
+    // banner dourado e o confete saíam sobre o card de TREINO, debaixo da faixa
+    // "nada é enviado ao Waze", e o aviso é de uma vez na vida: gasto ali, nunca
+    // mais aparecia onde o interruptor vale (R8-7-01, auditoria de 2026-10-03).
+    // Quem avisa é a próxima confirmação fora do treino: ela refaz esta mesma
+    // conta, e o que o Waze confirmou aqui segue contado nela.
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) return;
     const tratados = Math.min(getUndoTreatedCount() - pedidosNaJanelaDoDesfazer(), pedidosConfirmados());
     if (tratados < getUndoUnlockThreshold()) return;
     AppState.preferences.undoGateSeen = true;
