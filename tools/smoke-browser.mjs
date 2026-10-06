@@ -4949,12 +4949,22 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
   // Cada rota com a FORMA que o app espera: abrir o Filtros (o controle) pede
   // países, e uma resposta genérica ali vira erro de JS na página.
-  await page.route('**/api/**', (route) => {
+  // `segurar(nome)`: a PRÓXIMA resposta dessa rota espera o roteiro soltá-la
+  // (`solta(corpo)`, com o corpo que ela devolve) — a busca da página seguinte
+  // no ar e a exclusão no ar com a foto já fechada (R9-3-02, R9-3-04/05).
+  const seguras = {};
+  const segurar = (nome) => {
+    let solta;
+    seguras[nome] = new Promise((ok) => { solta = ok; });
+    return (corpo) => { delete seguras[nome]; solta(corpo); };
+  };
+  await page.route('**/api/**', async (route) => {
     const nome = route.request().url().split('/api/')[1].split('?')[0];
-    const corpo = nome === 'lista-paises' ? { success: true, countries: [] }
+    const segura = seguras[nome];
+    const corpo = (segura && await segura) || (nome === 'lista-paises' ? { success: true, countries: [] }
       : nome === 'lista-estados' ? { success: true, states: [] }
         : nome === 'perfil' ? { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false } }
-          : { success: true, places: [], hasMore: false, total: 0 };
+          : { success: true, places: [], hasMore: false, total: 0 });
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) });
   });
   await presencaViva(page);   // registrada DEPOIS: a última rota que casa é a que responde
@@ -4970,11 +4980,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     reqType: 'REQUEST', purType: 'DETAILS_UPDATE', imageUrls: [], approvedImageIds: [],
     mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
   // `depois`: os pedidos que vêm DEPOIS deste na fila, e ela termina neles (sem
-  // mais o que buscar: o fim da fila é o painel "Tudo limpo!", na hora).
-  const montar = async (pl, { semDesfazer = false, depois = null } = {}) => {
+  // mais o que buscar: o fim da fila é o painel "Tudo limpo!", na hora). `mais`:
+  // o Waze diz que há mais (a fila acaba e a página seguinte SAI, R9-3-02).
+  const montar = async (pl, { semDesfazer = false, depois = null, mais = false } = {}) => {
     await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); if (MapaLightbox.isOpen()) MapaLightbox.close(); });
     await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
-    await page.evaluate(({ p0, semDesfazer: sem, depois: resto }) => {
+    await page.evaluate(({ p0, semDesfazer: sem, depois: resto, mais: haMais }) => {
       setLang('pt'); applyI18n();
       API.setSession('tok-smoke');
       AppState.authenticated = true;
@@ -4995,9 +5006,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         AppState.queue.push(...JSON.parse(JSON.stringify(resto)));
         AppState.hasMore = false; AppState.serverTotal = AppState.queue.length;
       }
+      if (haMais) AppState.hasMore = true;
       document.querySelectorAll('.place-card').forEach((e) => e.remove());
       showCurrentPlace();
-    }, { p0: pl, semDesfazer, depois });
+    }, { p0: pl, semDesfazer, depois, mais });
     await assentar(page);
   };
   // Onde está o foco, e se ele está NO LUGAR CERTO: o id, a classe do card, e
@@ -5285,6 +5297,106 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(frente === 'pend-r8-5' && s === 'Foto excluída',
       `anúncio/CONTROLE (R7-3-04): sem trocar o card, a região do card terminou dizendo ${JSON.stringify(s)}`, frente);
   }
+
+  // ── R9-3-02 (auditoria de 2026-10-06): a fila acaba com a página seguinte NO
+  // AR. Aprovar a foto do ÚLTIMO pedido e fechar pelo Esc com a busca ainda
+  // correndo: sem card e sem painel (o esqueleto), o fechar levava o foco ao ⓘ do
+  // topo e ele FICAVA lá quando o "Tudo limpo!" (D1) ou o card novo (D2)
+  // chegavam. Ele fica prometido e pousa no "Verificar novamente" ou na foto do
+  // card que chegou. PRÉ-CONDIÇÃO medida: a busca no ar, sem card e sem painel,
+  // no instante do Esc (sem ela, o caso é o R8-3-06, acima).
+  for (const [nome, traz] of [['D1, a busca volta vazia', null], ['D2, a busca traz um pedido', soAProposta(19, 'Padaria Dezenove')]]) {
+    await montar(soAProposta(18, 'Padaria Dezoito'), { semDesfazer: true, depois: [], mais: true });
+    const solta = segurar('buscar-places');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await aprovarPeloTeclado();
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !Lightbox.isOpen() && AppState.fetching, 'a foto fechar com a busca da página seguinte no ar');
+    await doisQuadros(page);
+    const meio = await page.evaluate(() => ({ fetching: AppState.fetching, card: !!cardDaFrente(),
+      painel: !document.getElementById('noMoreCards').classList.contains('hidden'),
+      foco: document.activeElement && (document.activeElement.id || document.activeElement.tagName) }));
+    checa(meio.fetching && !meio.card && !meio.painel,
+      `foco/busca no ar ${nome}: PRÉ-CONDIÇÃO — no fechamento a busca não estava no ar sem card e sem painel`, JSON.stringify(meio));
+    checa(meio.foco !== 'helpBtn', `foco/busca no ar ${nome}: o fechar da foto levou o foco ao ⓘ do topo`, JSON.stringify(meio));
+    solta({ success: true, places: traz ? [traz] : [], hasMore: false, page: 1, total: traz ? 1 : 0, totalAll: traz ? 1 : 0, blocked: 0 });
+    await esperarOuExplodir(page, () => !AppState.fetching
+      && (!!cardDaFrente() || !document.getElementById('noMoreCards').classList.contains('hidden')), 'o painel ou o card depois da busca');
+    await doisQuadros(page);
+    const f = await foco();
+    if (traz) {
+      checa(f.fotoDoCard, `foco/busca no ar ${nome}: o card novo chegou e o foco ficou em ${f.body ? '<body>' : f.id} — não na foto dele`, JSON.stringify(f));
+    } else {
+      checa(f.id === 'reloadBtn', `foco/busca no ar ${nome}: o "Tudo limpo!" chegou e o foco ficou em ${f.body ? '<body>' : f.id}`, JSON.stringify(f));
+    }
+  }
+
+  // ── R9-3-04 e R9-3-05 (a) (auditoria de 2026-10-06): sem o Desfazer, a
+  // exclusão que pousa com a foto JÁ fechada redesenha o MESMO pedido. O foco que
+  // o Tab levou ao ✕ do card ia pra foto do card (`tabindex=-1`, fora do Tab: o
+  // Enter seguinte não decidia nada), e nada era dito ao leitor de tela. O foco
+  // fica no ✕, e a região do card diz "Foto excluída". CONTROLES: o foco que o
+  // Esc deixou na foto do card segue nela (a regra de antes); e a região do card
+  // é ESVAZIADA antes da resposta, pra o "Foto excluída" ser desta resposta.
+  const noCard = () => page.evaluate(() => {
+    const c = cardDaFrente();
+    const a = document.activeElement;
+    return { noX: !!(c && a === c.querySelector('.card-btn-reject')), naFoto: !!(c && a === c.querySelector('.card-image')),
+      frente: AppState.currentPlace && AppState.currentPlace.updateRequestID, fotos: AppState.currentPlace && AppState.currentPlace.imageUrls.length };
+  });
+  for (const noX of [true, false]) {
+    const rot = noX ? 'o foco no ✕' : 'CONTROLE, o foco na foto do card';
+    await montar(FOTO_PL, { semDesfazer: true });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');            // a foto já no mapa: a lixeira
+    await esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    const solta = segurar('excluir-foto');
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => excluindoAgora === true, 'a exclusão no ar');
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !Lightbox.isOpen(), 'a foto fechar');
+    if (noX) {
+      for (let i = 0; i < 25 && !(await noCard()).noX; i++) await page.keyboard.press('Tab');
+    }
+    const antes = await noCard();
+    checa(noX ? antes.noX : antes.naFoto, `foco/exclusão com a foto fechada (${rot}): PRÉ-CONDIÇÃO — o foco não está onde o caso pede`, JSON.stringify(antes));
+    await page.evaluate(() => { document.getElementById('cardLiveRegion').textContent = ''; });
+    solta({ success: true });
+    await esperarOuExplodir(page, () => !excluindoAgora, 'a exclusão pousar');
+    await doisQuadros(page);
+    const depois = await noCard();
+    const s = await regiaoDoCard();
+    checa(depois.frente === 'pend-01' && depois.fotos === 1,
+      `foco/exclusão com a foto fechada (${rot}): PRÉ-CONDIÇÃO — o card não foi redesenhado sem a foto`, JSON.stringify(depois));
+    checa(noX ? depois.noX : depois.naFoto,
+      `foco/exclusão com a foto fechada (${rot}): o redesenho do MESMO pedido tirou o foco de onde ele estava`, JSON.stringify(depois));
+    checa(s === 'Foto excluída', `anúncio/exclusão com a foto fechada (${rot}): a região do card terminou dizendo ${JSON.stringify(s)}`);
+  }
+
+  // ── R9-3-05 (b) (auditoria de 2026-10-06): o Desfazer de uma exclusão com a
+  // foto ABERTA traz a foto de volta e ela passa a ser a da tela — e nada era
+  // dito. A região da camada diz a foto que voltou (a posição: "Foto 2 de 2").
+  // CONTROLE: a região é esvaziada antes do Desfazer (a → que levou à foto já
+  // escreveu "Foto 2 de 2"), e a foto que voltou é a da tela.
+  {
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');
+    await esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn') && Lightbox.urls.length === 1, 'o Desfazer da exclusão');
+    await page.evaluate(() => { document.getElementById('lightboxAnuncio').textContent = ''; });
+    await page.focus('#undoBtn'); await page.keyboard.press('Enter');
+    await page.waitForTimeout(250);
+    const d = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), n: Lightbox.urls.length, idx: Lightbox.idx,
+      anuncio: document.getElementById('lightboxAnuncio').textContent }));
+    checa(d.aberta && d.n === 2 && d.idx === 1, 'anúncio/Desfazer da foto: PRÉ-CONDIÇÃO — a foto não voltou pra tela', JSON.stringify(d));
+    checa(d.anuncio === 'Foto 2 de 2', `anúncio/Desfazer da foto: a foto voltou à tela e a região da camada disse ${JSON.stringify(d.anuncio)}`);
+  }
   checa(erros.length === 0, 'foco: erro de JS', erros[0]);
   await ctx.close();
 }
@@ -5441,6 +5553,19 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   // pinça lenta do trackpad nunca começavam a ampliar (40 eventos de −0,4 px e a
   // escala parada em 1). Agora ela volta a 1 só AFASTANDO: 40 de −0,4 ampliam
   // (1,2^0,16 ≈ 1,03) e 40 de +0,4 voltam a 1× EXATO.
+  // O estado da foto e a foto com DUAS imagens (pra a → ter o que trocar): os
+  // trechos abaixo, o do Chromium e o dos dois motores, medem por eles.
+  const estadoDaFoto = () => page.evaluate(() => ({ escala: Lightbox.scale, idx: Lightbox.idx, aberta: Lightbox.isOpen(),
+    transform: document.getElementById('lightboxImage').style.transform || '' }));
+  const abrirComDuas = async () => {
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
+    await page.evaluate((outra) => { const p = AppState.currentPlace; Lightbox.open([p.imageUrls[0], outra], 0, -1, p.name, false, p); },
+      `${foto}#outra-r8`);
+    await page.waitForTimeout(400);
+    await page.mouse.move(640, 400);
+  };
+  const txDe = (tr) => { const m = /translate\((-?[\d.e-]+)px/.exec(tr); return m ? Number(m[1]) : 0; };
   if (!pularForaDoChromium(MOTOR, 'roda/foto: a roda FINA (eventos de −0,4 px) a partir de 1×',
     'o WebKit do Playwright descarta a roda com |delta| abaixo de 1 px (MEDIDO: 10 eventos de −0,4 px, nenhum chegou à página; os de −1 e −4 chegam), e o defeito mora abaixo de ~0,55 px')) {
     await pausa();
@@ -5455,16 +5580,6 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // setas a tratavam como AMPLIADA: a → ANDAVA a foto 80 px em vez de trocá-la,
     // e o ↓ a andava em vez de fechar. Com duas fotos, pra a → ter o que trocar.
     // CONTROLE: com um zoom de verdade (um dente), a → anda a foto.
-    const estadoDaFoto = () => page.evaluate(() => ({ escala: Lightbox.scale, idx: Lightbox.idx, aberta: Lightbox.isOpen(),
-      transform: document.getElementById('lightboxImage').style.transform || '' }));
-    const abrirComDuas = async () => {
-      await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
-      await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
-      await page.evaluate((outra) => { const p = AppState.currentPlace; Lightbox.open([p.imageUrls[0], outra], 0, -1, p.name, false, p); },
-        `${foto}#outra-r8`);
-      await page.waitForTimeout(400);
-      await page.mouse.move(640, 400);
-    };
     await abrirComDuas();
     await rodar(1, 0, -0.4);
     const f0 = await estadoDaFoto();
@@ -5479,12 +5594,49 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!f2.aberta, 'roda/foto: depois de um fio de zoom invisível, o ↓ andou a foto em vez de fechá-la', JSON.stringify(f2));
     await abrirComDuas();
     await rodar(1, 0, -100);
-    const txDe = (tr) => { const m = /translate\((-?[\d.e-]+)px/.exec(tr); return m ? Number(m[1]) : 0; };
     const f3 = await estadoDaFoto();
     await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
     const f4 = await estadoDaFoto();
     checa(f3.escala > 1.1 && f4.idx === 0 && Math.abs(txDe(f4.transform) - txDe(f3.transform) + 80) < 0.5,
       'roda/foto: CONTROLE — ampliada de verdade (um dente), a → deixou de andar a foto 80 px', JSON.stringify({ f3, f4 }));
+  }
+  // A régua é em PIXELS da foto na tela (R9-3-01, auditoria de 2026-10-06). UM
+  // evento de roda de −1 px — o menor que o WebKit entrega, então isto roda nos
+  // DOIS motores — dá 1,00182 (a foto de 800 px com 801,5): os 0,1% de antes a
+  // contavam como ampliada, e a → ANDAVA a foto e o ↓ a andava em vez de fechar
+  // (MEDIDO nos dois motores). CONTROLES: a caixa da <img> que a régua mede É a
+  // foto na tela (sem isso a régua mediria outra coisa, calada); o evento passou
+  // dos 0,1% (senão o caso não distingue nada); e um zoom que se VÊ (um dente)
+  // anda a foto.
+  {
+    await abrirComDuas();
+    const caixa = await page.evaluate(() => {
+      const img = document.getElementById('lightboxImage');
+      const r = img.getBoundingClientRect();
+      return { w: img.offsetWidth, h: img.offsetHeight, naTelaW: r.width, naTelaH: r.height, escala: Lightbox.scale, carregou: fotoDoLightboxNaTela() };
+    });
+    checa(caixa.carregou && caixa.escala === 1 && Math.abs(caixa.w - caixa.naTelaW) < 1 && Math.abs(caixa.h - caixa.naTelaH) < 1
+      && Math.max(caixa.w, caixa.h) > 200,
+    'roda/foto R9-3-01: CONTROLE — a caixa da <img> (o `offsetWidth` que a régua lê) não é a foto que a tela mostra', JSON.stringify(caixa));
+    await rodar(1, 0, -1);
+    const g0 = await estadoDaFoto();
+    const aMais = (g0.escala - 1) * Math.max(caixa.w, caixa.h);
+    checa(g0.escala > 1.001 && g0.escala < 1.005, `roda/foto R9-3-01: PRÉ-CONDIÇÃO — um evento de −1 px deu a escala ${g0.escala} (+${aMais.toFixed(1)} px), fora da faixa logo acima dos 0,1%`);
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const g1 = await estadoDaFoto();
+    checa(g1.idx === 1 && !/translate/.test(g1.transform),
+      `roda/foto R9-3-01: depois de UM evento de −1 px (+${aMais.toFixed(1)} px, invisível), a → andou a foto em vez de trocá-la`, JSON.stringify(g1));
+    await rodar(1, 0, -1);
+    await page.keyboard.press('ArrowDown'); await page.waitForTimeout(250);
+    const g2 = await estadoDaFoto();
+    checa(!g2.aberta, 'roda/foto R9-3-01: depois de UM evento de −1 px, o ↓ andou a foto em vez de fechá-la', JSON.stringify(g2));
+    await abrirComDuas();
+    await rodar(1, 0, -100);
+    const g3 = await estadoDaFoto();
+    await page.keyboard.press('ArrowRight'); await page.waitForTimeout(150);
+    const g4 = await estadoDaFoto();
+    checa(g3.escala > 1.1 && g4.idx === 0 && Math.abs(txDe(g4.transform) - txDe(g3.transform) + 80) < 0.5,
+      'roda/foto R9-3-01: CONTROLE — ampliada de verdade (um dente), a → deixou de andar a foto 80 px', JSON.stringify({ g3, g4 }));
   }
   await page.evaluate(() => Lightbox.close());
   checa(erros.length === 0, 'roda: erro de JS', erros[0]);
