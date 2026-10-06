@@ -516,20 +516,51 @@ function initApp() {
         // Quem tem a extensão instalada e está logado no WME entra sem tocar em
         // nada; quem não tem cai na tela de sempre depois de EXT_PRESENTE_MS (sem o
         // `aguarde` da ponte; com ele, a espera vai até EXT_ESPERA_MS).
-        entrarPelaExtensao().then((entrou) => {
-            if (entrou) return;
-            // Escrita ATRASADA não pode atropelar estado novo. Entre o pedido e
-            // esta linha passam centenas de ms, e nesse meio alguém pode ter
-            // entrado por outro caminho (colar cookies, código de pareamento,
-            // token injetado). Sem esta guarda o `showAuthScreen` derrubava a
-            // sessão recém-criada e escondia o app JÁ montado — apareceu como
-            // "card sem endereço / botões 0px" no smoke, mudando de aparelho a
-            // cada rodada porque atinge sempre o PRIMEIRO card medido.
-            if (API.getSession() || AppState.authenticated) return;
-            showAuthScreen();
-            mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
-        });
+        entrarPelaExtensao().then(aoFimDaPerguntaDaAbertura);
     }
+}
+
+// O fim da pergunta à extensão na ABERTURA sem sessão (o `initApp`).
+//
+// Escrita ATRASADA não pode atropelar estado novo. Entre o pedido e o fim da
+// pergunta passam centenas de ms (até `EXT_ESPERA_MS`), e nesse meio alguém
+// pode ter entrado por outro caminho (colar cookies, código de pareamento,
+// token injetado). Sem a primeira guarda o `showAuthScreen` derrubava a sessão
+// recém-criada e escondia o app JÁ montado — apareceu como "card sem endereço /
+// botões 0px" no smoke, mudando de aparelho a cada rodada porque atinge sempre
+// o PRIMEIRO card medido.
+//
+// O login DESTA aba passa pelo `setSession`, que o põe na MEMÓRIA, e é ela que
+// se pergunta (`temSessaoNaMemoria`). A guarda perguntava pelo `getSession`,
+// que com a memória vazia lê o APARELHO e GRAVA na memória o que leu: a sessão
+// que OUTRA aba guardou nesse meio (a pessoa entrou lá enquanto esta
+// perguntava) passava por ela como se fosse desta. A aba saía sem mostrar a
+// tela de entrada — e o "Entrando pelo WME…" já tinha se escondido —, e ficava
+// EM BRANCO, só com o cabeçalho e sem caminho nenhum pra entrar, até recarregar
+// (auditoria de 2026-10-06, R9-1-03).
+//
+// Essa sessão é ADOTADA, como numa abertura com sessão salva — a decisão de
+// produto que a auditoria deixou em aberto (a outra saída era a tela de
+// entrada; em branco, nunca): é a abertura que esta aba teria feito um
+// instante depois, e a que recarregar faz. A recusa que a extensão tenha
+// repassado (o portão negou a conta do WME) não aparece: quem fica é a sessão
+// do aparelho, de quem entrou na outra aba. E o que a tela de entrada tinha
+// aberto sai com a limpeza, como na entrada pela extensão (ver
+// `MODAIS_DA_ENTRADA`).
+function aoFimDaPerguntaDaAbertura(entrou) {
+    if (entrou) return;
+    if (API.temSessaoNaMemoria() || AppState.authenticated) return;
+    // A adoção é o `getSession` da abertura (o do `initApp`): ele põe na memória
+    // desta aba a sessão guardada no aparelho. Sem nenhuma, a tela de entrada —
+    // um caminho ou o outro, nunca nenhum dos dois.
+    if (API.getSession()) {
+        tirarNegadoDaExtensao();
+        fecharModaisDaEntrada();
+        abrirComSessaoSalva();
+        return;
+    }
+    showAuthScreen();
+    mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
 }
 
 // O link de pareamento aberto neste aparelho. Num aparelho JÁ logado, o link
@@ -1258,22 +1289,7 @@ function setupAppListeners() {
     // este mesmo caminho resolve a instalação sem toque nenhum e o botão acima
     // deixa de ser necessário. Só onde extensão existe: no celular seria uma
     // espera de 350ms por nada, repetida a cada troca de aba.
-    if (podeInstalarExtensao()) {
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState !== 'visible') return;
-            // Quem deu "Sair" NESTA página não é relogado por trocar de aba:
-            // era o que acontecia — sair, ir ao WME e voltar entrava de novo
-            // sozinho. Recarregar a página (ou tocar em entrar) começa do zero.
-            if (saiuNestaPagina) return;
-            // E quem o portão recusou pela extensão já viu o motivo: perguntar
-            // de novo a cada volta à aba era uma ida ao Waze e um diálogo a mais
-            // por troca de aba, com a mesma resposta.
-            if (extNegadoNestaPagina) return;
-            if (AppState.authenticated || API.getSession()) return;
-            if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
-            entrarPelaExtensao({ silencioso: true }).then((entrou) => { if (!entrou) mostrarNegadoDaExtensao(); });
-        });
-    }
+    if (podeInstalarExtensao()) document.addEventListener('visibilitychange', perguntarAExtensaoAoVoltar);
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', () => {
         // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
@@ -1301,6 +1317,31 @@ function setupAppListeners() {
     // Quem pegou o mouse ou o dedo deixou de operar pelo teclado: o foco
     // prometido ao teclado (`focoDoTeclado`, C10) não vale mais.
     window.addEventListener('pointerdown', () => { focoDoTeclado = null; }, true);
+}
+
+// A volta a esta aba na TELA DE ENTRADA pergunta à extensão, em silêncio (o
+// ouvinte mora no `setupAppListeners`, e só onde a extensão instala).
+function perguntarAExtensaoAoVoltar() {
+    if (document.visibilityState !== 'visible') return;
+    // Quem deu "Sair" NESTA página não é relogado por trocar de aba:
+    // era o que acontecia — sair, ir ao WME e voltar entrava de novo
+    // sozinho. Recarregar a página (ou tocar em entrar) começa do zero.
+    if (saiuNestaPagina) return;
+    // E quem o portão recusou pela extensão já viu o motivo: perguntar
+    // de novo a cada volta à aba era uma ida ao Waze e um diálogo a mais
+    // por troca de aba, com a mesma resposta.
+    if (extNegadoNestaPagina) return;
+    // Com sessão não pergunta: a DESTA aba (a memória) ou a que OUTRA aba
+    // guardou no aparelho — a pergunta traria uma sessão nova por cima dela,
+    // com mais uma ida ao Waze no nome da pessoa. O aparelho se lê SEM o
+    // `getSession`, que com a memória vazia GRAVAVA nela a sessão da outra
+    // aba: esta, que nunca entrou, passava a contar como logada, e o "Sair"
+    // dado lá a encerrava junto — o "Colar cookies" aberto fechava, apagando o
+    // que estava sendo colado, e o aviso dizia "Você saiu em outra aba" a quem
+    // nem tinha entrado (auditoria de 2026-10-06, R9-1-03).
+    if (AppState.authenticated || API.temSessaoNaMemoria() || safeLS.get('waze_session_token')) return;
+    if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
+    entrarPelaExtensao({ silencioso: true }).then((entrou) => { if (!entrou) mostrarNegadoDaExtensao(); });
 }
 
 // Seletor de idioma. São DOIS controles: um em Filtros → Preferências (onde se

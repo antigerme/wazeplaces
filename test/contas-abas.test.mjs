@@ -2005,3 +2005,140 @@ test('R8-1-03: pelos avisos de verdade — o do token diz QUAL sessão saiu, e o
   assert.ok(uma.saiu, 'PRÉ-CONDIÇÃO: a aba não saiu com o "Sair" da outra');
   assert.deepEqual(uma.apagadas, [], 'CONTROLE: a aba apagou de novo a sessão que a outra já apagou');
 });
+
+// ═══ R9-1-03 · a aba SEM sessão não puxa a sessão que OUTRA aba guardou ════════
+// O `getSession` do api.js, com a memória vazia, LÊ o aparelho e GRAVA na memória
+// o que leu. As guardas da abertura e da volta à aba o usavam pra perguntar "esta
+// aba já entrou?", e a sessão que OUTRA aba guardou passava por elas como se fosse
+// desta (auditoria de 2026-10-06, R9-1-03): (a) a abertura que perguntava à
+// extensão ficava EM BRANCO, só com o cabeçalho; (b) a aba da tela de entrada
+// passava a contar como logada, e o "Sair" da outra a encerrava. O `api.js` aqui
+// é o DE VERDADE (num contexto do `vm`, com um armazenamento de mentira): é nele
+// que mora o efeito, e um dublê o esconderia.
+function apiDeVerdade(guardado = {}) {
+  const dados = new Map(Object.entries(guardado));
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: {
+      getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+      setItem: (k, v) => { dados.set(k, String(v)); },
+      removeItem: (k) => { dados.delete(k); },
+    },
+    console, setTimeout, clearTimeout,
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API; this.safeLS = safeLS;', ctx);
+  return { API: ctx.API, safeLS: ctx.safeLS, dados };
+}
+
+// A ABERTURA sem sessão, no fim da pergunta à extensão (`aoFimDaPerguntaDaAbertura`).
+function aberturaSemSessao(guardado = {}) {
+  const real = apiDeVerdade(guardado);
+  const log = [];
+  const AppState = { authenticated: false, profile: null };
+  const deps = {
+    API: real.API, safeLS: real.safeLS, AppState,
+    showAuthScreen: () => log.push('tela de entrada'),
+    mostrarNegadoDaExtensao: () => log.push('recusa mostrada'),
+    tirarNegadoDaExtensao: () => log.push('recusa descartada'),
+    fecharModaisDaEntrada: () => log.push('modais da entrada fechados'),
+    // A abertura com sessão salva, com a sessão que a memória tem NA HORA.
+    abrirComSessaoSalva: () => log.push('abriu com ' + real.API.sessionToken),
+  };
+  const h = montar(['aoFimDaPerguntaDaAbertura'], deps);
+  return { ...real, h, log, AppState };
+}
+// A tela que a abertura decidiu — ou nenhuma: a tela EM BRANCO.
+const decidiuATela = (log) => log.some((x) => x === 'tela de entrada' || x.startsWith('abriu com '));
+
+test('R9-1-03 (a): a abertura que pergunta à extensão ADOTA a sessão que OUTRA aba guardou nesse meio — nunca a tela em branco', () => {
+  // A aba abriu SEM sessão e perguntou à extensão ("Entrando pelo WME…"); nesse
+  // meio a pessoa entrou pela OUTRA aba, e o token foi pro aparelho. A extensão
+  // responde sem sessão.
+  const m = aberturaSemSessao();
+  m.dados.set(TOKEN, 'tok-da-outra');
+  m.h.aoFimDaPerguntaDaAbertura(false);
+  assert.ok(decidiuATela(m.log),
+    'DEFEITO: a aba ficou EM BRANCO — nem a tela de entrada, nem o app (a guarda tomou a sessão da outra aba pela desta)');
+  assert.deepEqual(m.log, ['recusa descartada', 'modais da entrada fechados', 'abriu com tok-da-outra'],
+    'a sessão que a outra aba guardou não foi ADOTADA como numa abertura com sessão salva: ' + JSON.stringify(m.log));
+  // CONTROLE: ninguém entrou — a tela de entrada (com a recusa, se houver), e a memória segue vazia.
+  const c = aberturaSemSessao();
+  c.h.aoFimDaPerguntaDaAbertura(false);
+  assert.deepEqual(c.log, ['tela de entrada', 'recusa mostrada']);
+  assert.equal(c.API.temSessaoNaMemoria(), false);
+  // O login feito NESTA aba nesse meio (o `setSession` de verdade) já decidiu a tela: nada aqui.
+  const l = aberturaSemSessao();
+  l.API.setSession('tok-desta', 'cookies');
+  l.h.aoFimDaPerguntaDaAbertura(false);
+  assert.deepEqual(l.log, [], 'o fim da pergunta atropelou o login feito nesta aba');
+  // O app já montado nesta aba, e a extensão que entrou: nada também.
+  const a = aberturaSemSessao({ [TOKEN]: 'tok-injetado' });
+  a.AppState.authenticated = true;
+  a.h.aoFimDaPerguntaDaAbertura(false);
+  assert.deepEqual(a.log, [], 'o fim da pergunta mexeu no app já montado');
+  const e = aberturaSemSessao({ [TOKEN]: 'tok-da-extensao' });
+  e.h.aoFimDaPerguntaDaAbertura(true);
+  assert.deepEqual(e.log, []);
+  // Quem chama: o ramo SEM sessão do `initApp`.
+  assert.match(fatiarDe(APP_SEM, 'initApp'), /^\s+entrarPelaExtensao\(\)\.then\(aoFimDaPerguntaDaAbertura\);/m,
+    'a abertura sem sessão deixou de passar por esta guarda');
+});
+
+// A aba da TELA DE ENTRADA: a volta a ela (o ouvinte da extensão, só onde ela
+// instala) e os avisos do "Sair" dado na outra.
+function abaDaEntrada(guardado = {}) {
+  const real = apiDeVerdade(guardado);
+  const log = [];
+  const deps = {
+    API: real.API, safeLS: real.safeLS, AppState: { authenticated: false, profile: null },
+    CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
+    // A tela de entrada NA TELA; o app, fora dela.
+    document: { visibilityState: 'visible',
+      getElementById: (id) => ({ classList: { contains: (c) => c === 'hidden' && id === 'appScreen' } }) },
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extPerguntando: false,
+    entrarPelaExtensao: (o) => { log.push('perguntou à extensão' + (o && o.silencioso ? ' (em silêncio)' : '')); return new Promise(() => {}); },
+    handleLogout: (o) => log.push(['sair', o]),
+  };
+  const h = montar(['perguntarAExtensaoAoVoltar', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao'], deps);
+  return { ...real, h, log };
+}
+// O "Sair" na outra aba: o token e a conta saem do aparelho, e os avisos chegam aqui na ordem em que ela gravou.
+function sairNaOutra(m) {
+  m.dados.delete(TOKEN);
+  m.h.sincronizarComOutraAba(TOKEN);
+  m.dados.delete(CONTA_KEY);
+  m.h.sincronizarComOutraAba(CONTA_KEY);
+}
+
+test('R9-1-03 (b): a volta à aba da TELA DE ENTRADA não puxa pra memória a sessão da outra — e o "Sair" de lá não encerra esta', () => {
+  const DA_OUTRA = { [TOKEN]: 'tok-da-outra', [CONTA_KEY]: '{"id":"4242","s":"x"}' };
+  const m = abaDaEntrada(DA_OUTRA);
+  m.h.perguntarAExtensaoAoVoltar();
+  assert.equal(m.API.temSessaoNaMemoria(), false,
+    'DEFEITO: a volta à aba gravou na memória desta (que nunca entrou) a sessão que a outra guardou');
+  assert.deepEqual(m.log, [],
+    'com a sessão da outra aba no aparelho, a volta à aba perguntou à extensão (traria uma sessão nova por cima da guardada)');
+  sairNaOutra(m);
+  assert.deepEqual(m.log, [],
+    'DEFEITO: a aba que nunca entrou foi encerrada pelo "Sair" da outra — o "Colar cookies" fechava, apagando o colado, e o aviso dizia "Você saiu em outra aba"');
+  // CONTROLE: sem sessão nenhuma no aparelho, a volta à aba pergunta à extensão (o ouvinte enxerga a tela de entrada).
+  const c = abaDaEntrada();
+  c.h.perguntarAExtensaoAoVoltar();
+  assert.deepEqual(c.log, ['perguntou à extensão (em silêncio)']);
+  // CONTROLE do instrumento: com a sessão da outra na memória desta (o que o
+  // `getSession` de verdade faz com a memória vazia), o "Sair" de lá a encerra.
+  const d = abaDaEntrada(DA_OUTRA);
+  assert.equal(d.API.getSession(), 'tok-da-outra');
+  assert.equal(d.API.temSessaoNaMemoria(), true, 'CONTROLE: o `getSession` de verdade não grava mais na memória — o mecanismo mudou, reveja o teste');
+  sairNaOutra(d);
+  assert.deepEqual(d.log, [['sair', { porOutraAba: true }]],
+    'CONTROLE: com a sessão na memória, o "Sair" da outra aba devia encerrar esta — a medida não enxerga o defeito');
+  // Quem chama: o ouvinte da volta à aba, onde a extensão instala.
+  assert.match(fatiarDe(APP_SEM, 'setupAppListeners'),
+    /^\s+if \(podeInstalarExtensao\(\)\) document\.addEventListener\('visibilitychange', perguntarAExtensaoAoVoltar\);/m,
+    'a volta à aba deixou de passar por esta guarda');
+});

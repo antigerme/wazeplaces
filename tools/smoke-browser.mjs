@@ -9949,7 +9949,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const FILA_ABAS = Array.from({ length: 3 }, (_, i) => Object.values(CARDS).map((p, k) => ({ ...p,
     venueID: `va${i}-${k}`, updateRequestID: `ua${i}-${k}` }))).flat();
   const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  const abrirAbas = async () => {
+  const abrirAbas = async ({ semSessao = false } = {}) => {
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const rede = [];
     // Sessões que MORRERAM no servidor: respondem o 401 carimbado do core. A
@@ -9990,12 +9990,17 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       return json({ success: true });
     });
     const erros = [];
-    const abrir = async () => {
+    // `antesDeAbrir`: um script que roda na aba antes do app (a extensão de
+    // mentira da seção 6).
+    const abrir = async (antesDeAbrir) => {
       const p = await ctx.newPage();
       p.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 120)));
+      if (antesDeAbrir) await p.addInitScript(antesDeAbrir);
       await p.goto(BASE, { waitUntil: 'domcontentloaded' });
       return p;
     };
+    // A seção 6 abre as abas ela mesma, SEM sessão nenhuma no aparelho.
+    if (semSessao) return { ctx, rede, erros, abrir };
     // A sessão salva e um placar com a cota do Desfazer cumprida (L6: 10): as
     // ações saem sem a janela, e o percurso não espera 3 s por ✕.
     const A = await abrir();
@@ -10335,6 +10340,153 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const c5 = await vooNaOutra({ semMarca: true });
   checa(c5.envios === 2,
     'duas abas: CONTROLE — sem a marca da aba, a A devia mandar de novo o ✕ no ar da B; a medida não enxerga o reenvio', JSON.stringify(c5));
+
+  // ── 6. a aba SEM sessão não toma pra si a sessão que a OUTRA guardou ─────
+  // O `getSession` do api.js, com a memória vazia, lê o aparelho e GRAVA na
+  // memória o que leu, e as guardas da abertura e da volta à aba perguntavam
+  // por ele "esta aba já entrou?" (auditoria de 2026-10-06, R9-1-03):
+  //  (a) a aba que abre SEM sessão e pergunta à extensão, com a outra entrando
+  //      nesse meio, ficava EM BRANCO (só o cabeçalho) até recarregar — agora
+  //      ela adota a sessão, como numa abertura com sessão salva;
+  //  (b) a aba da tela de entrada, depois de a pessoa voltar a ela, contava
+  //      como logada, e o "Sair" da outra fechava o "Colar cookies" (apagando o
+  //      que estava sendo colado) e dizia "Você saiu em outra aba".
+  // A extensão de mentira (só na aba A da parte a) responde `aguarde` na hora —
+  // o "Entrando pelo WME…" — e `sem-sessao` quando o TESTE manda: a outra aba
+  // entra no meio, sem prazo fixo nenhum.
+  // CONTROLES: ninguém entrando, a A cai na tela de entrada; e com a sessão da
+  // outra puxada pra memória da A à mão (o que a guarda antiga fazia), a medida
+  // tem de ver a tela em branco e o "Sair" encerrando a A.
+  const telaDaAba = (page) => page.evaluate(() => {
+    const vis = (id) => {
+      const e = document.getElementById(id);
+      if (!e || e.classList.contains('hidden')) return false;
+      const b = e.getBoundingClientRect();
+      return b.width > 0 && b.height > 0;
+    };
+    return { entrada: vis('authScreen'), app: vis('appScreen'), entrandoWme: vis('extLoginState'),
+      auth: AppState.authenticated, memoria: API.temSessaoNaMemoria() };
+  });
+  const naFilaComCard = () => AppState.authenticated && !!AppState.currentPlace
+    && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+  const aberturaComAOutraEntrando = async ({ outraEntra, puxar = false }) => {
+    const s = await abrirAbas({ semSessao: true });
+    const B = await s.abrir();
+    await esperarOuExplodir(B, () => !extPerguntando && !document.getElementById('authScreen').classList.contains('hidden'),
+      'a aba B (sem sessão) chegar à tela de entrada');
+    const A = await s.abrir(() => {
+      window.addEventListener('message', (ev) => {
+        const d = ev.data;
+        if (d && d.source === 'wazeplaces' && d.action === 'precisa-de-sessao') {
+          window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+        }
+      });
+      window.__extSemSessao = () => window.postMessage({ source: 'wazeplaces-ext', action: 'sem-sessao', motivo: 'sem-login-wme' },
+        location.origin);
+    });
+    await esperarOuExplodir(A, () => extPerguntando && !document.getElementById('extLoginState').classList.contains('hidden'),
+      'a aba A perguntar à extensão ("Entrando pelo WME…")');
+    if (outraEntra) {
+      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await esperarOuExplodir(A, () => !!localStorage.getItem('waze_session_token'), 'a sessão da aba B chegar ao aparelho');
+    }
+    if (puxar) await A.evaluate(() => { API.getSession(); });   // o que a guarda antiga fazia
+    await A.evaluate(() => window.__extSemSessao());
+    await esperarOuExplodir(A, () => !extPerguntando, 'a pergunta da aba A acabar');
+    const tela = await telaDaAba(A);
+    const comCard = outraEntra && !puxar ? await esperarNaPagina(A, naFilaComCard, 8000) : null;
+    const adotou = await A.evaluate(() => !!API.sessionToken && API.sessionToken === localStorage.getItem('waze_session_token'));
+    const erros = s.erros.slice();
+    await s.ctx.close();
+    return { tela, branca: !tela.entrada && !tela.app && !tela.entrandoWme, comCard, adotou, erros };
+  };
+  const r6a = await aberturaComAOutraEntrando({ outraEntra: true });
+  checa(!r6a.branca, 'aba sem sessão: a abertura que perguntava à extensão ficou EM BRANCO com a sessão que a outra aba guardou',
+    JSON.stringify(r6a.tela));
+  checa(r6a.tela.app && r6a.adotou && r6a.comCard && r6a.comCard.ok,
+    'aba sem sessão: a sessão que a outra aba guardou durante a pergunta não foi ADOTADA (o app, com a fila, como numa abertura com sessão salva)',
+    JSON.stringify({ tela: r6a.tela, adotou: r6a.adotou, card: r6a.comCard && r6a.comCard.ok }));
+  checa(r6a.erros.length === 0, 'aba sem sessão: erro de JS na abertura que adotou a sessão da outra', r6a.erros[0]);
+  const c6a = await aberturaComAOutraEntrando({ outraEntra: false });
+  checa(c6a.tela.entrada && !c6a.tela.app && !c6a.tela.memoria,
+    'aba sem sessão: CONTROLE — ninguém entrou, e a aba A não caiu na tela de entrada no fim da pergunta (a medida não vê o fim dela)',
+    JSON.stringify(c6a.tela));
+  const d6a = await aberturaComAOutraEntrando({ outraEntra: true, puxar: true });
+  checa(d6a.branca,
+    'aba sem sessão: CONTROLE — com a sessão da outra puxada pra memória da A (a guarda antiga), a medida devia ver a tela EM BRANCO',
+    JSON.stringify(d6a.tela));
+
+  const entradaComOSairDaOutra = async ({ puxar = false }) => {
+    const s = await abrirAbas({ semSessao: true });
+    const A = await s.abrir(() => {
+      window.__perguntas = 0;
+      window.addEventListener('message', (ev) => {
+        const d = ev.data;
+        if (d && d.source === 'wazeplaces' && d.action === 'precisa-de-sessao') window.__perguntas++;
+      });
+    });
+    const parada = () => !extPerguntando && !document.getElementById('authScreen').classList.contains('hidden');
+    await esperarOuExplodir(A, parada, 'a aba A (sem sessão) chegar à tela de entrada');
+    // CONTROLE do ouvinte: sem sessão nenhuma no aparelho, a volta à aba pergunta
+    // à extensão — onde ela instala (o Chromium de computador; fora dele não há
+    // o ouvinte, e a volta não faz nada).
+    const temOuvinte = await A.evaluate(() => podeInstalarExtensao());
+    const p0 = await A.evaluate(() => window.__perguntas);
+    await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await esperarOuExplodir(A, parada, 'a pergunta da volta à aba A acabar');
+    const semSessaoPerguntou = (await A.evaluate(() => window.__perguntas)) - p0;
+    // A aba B entra pelos cookies; a pessoa volta à A e abre o "Colar cookies".
+    const B = await s.abrir();
+    await esperarOuExplodir(B, parada, 'a aba B (sem sessão) chegar à tela de entrada');
+    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
+    const p1 = await A.evaluate(() => window.__perguntas);
+    await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    if (puxar) await A.evaluate(() => { API.getSession(); });   // o que a guarda antiga fazia
+    const naVolta = await A.evaluate(() => ({ memoria: API.temSessaoNaMemoria(), perguntando: extPerguntando }));
+    const comSessaoPerguntou = (await A.evaluate(() => window.__perguntas)) - p1;
+    await A.evaluate(() => document.getElementById('pasteBtn').click());
+    await esperarOuExplodir(A, () => !document.getElementById('pasteModal').classList.contains('hidden'), 'o "Colar cookies" abrir na aba A');
+    await A.evaluate(() => {
+      document.getElementById('cookiesTextarea').value = 'TEXTO_QUE_ESTOU_COLANDO';
+      window.__sairChegou = false;
+      window.addEventListener('storage', () => {
+        if (!localStorage.getItem('waze_session_token') && !localStorage.getItem('waze_places_conta')) window.__sairChegou = true;
+      });
+    });
+    await sairPelaAjuda(B);
+    await esperarOuExplodir(B, naEntrada, 'a aba B voltar à entrada depois do "Sair"');
+    await esperarOuExplodir(A, () => window.__sairChegou, 'o aviso do "Sair" da B chegar à aba A');
+    const encerrou = await esperarNaPagina(A, () => document.getElementById('pasteModal').classList.contains('hidden')
+      || [...document.querySelectorAll('#toastContainer > *')].some((e) => /outra aba/.test(e.textContent)), 1500);
+    const fim = await A.evaluate(() => ({
+      colar: !document.getElementById('pasteModal').classList.contains('hidden'),
+      campo: document.getElementById('cookiesTextarea').value,
+      avisos: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent.trim()),
+    }));
+    const erros = s.erros.slice();
+    await s.ctx.close();
+    return { temOuvinte, semSessaoPerguntou, comSessaoPerguntou, naVolta, encerrou: encerrou.ok, fim, erros };
+  };
+  const r6b = await entradaComOSairDaOutra({});
+  checa(MOTOR !== 'chromium' || r6b.temOuvinte,
+    'aba sem sessão: CONTROLE — no Chromium de computador a volta à aba devia ter o ouvinte da extensão; sem ele a parte (b) não mede nada');
+  checa(r6b.semSessaoPerguntou === (r6b.temOuvinte ? 1 : 0),
+    'aba sem sessão: CONTROLE — sem sessão no aparelho, a volta à aba devia perguntar à extensão onde ela instala (e só lá)',
+    JSON.stringify({ temOuvinte: r6b.temOuvinte, perguntas: r6b.semSessaoPerguntou }));
+  checa(!r6b.naVolta.memoria, 'aba sem sessão: a volta à aba da TELA DE ENTRADA gravou na memória dela a sessão que a outra aba guardou');
+  checa(r6b.comSessaoPerguntou === 0 && !r6b.naVolta.perguntando,
+    'aba sem sessão: com a sessão da outra aba no aparelho, a volta à aba perguntou à extensão (uma sessão nova por cima da guardada)');
+  checa(!r6b.encerrou && r6b.fim.colar && r6b.fim.campo === 'TEXTO_QUE_ESTOU_COLANDO',
+    'aba sem sessão: o "Sair" da outra aba encerrou a aba da tela de entrada — o "Colar cookies" fechou e o que era colado sumiu',
+    JSON.stringify(r6b.fim));
+  checa(!r6b.fim.avisos.some((x) => /outra aba/.test(x)), 'aba sem sessão: "Você saiu em outra aba" numa aba que nunca entrou',
+    r6b.fim.avisos.join(' | '));
+  checa(r6b.erros.length === 0, 'aba sem sessão: erro de JS na volta à aba e no "Sair" da outra', r6b.erros[0]);
+  const d6b = await entradaComOSairDaOutra({ puxar: true });
+  checa(d6b.naVolta.memoria && d6b.encerrou && !d6b.fim.colar,
+    'aba sem sessão: CONTROLE — com a sessão da outra na memória da A (a guarda antiga), o "Sair" de lá devia encerrar a A; a medida não enxerga',
+    JSON.stringify({ memoria: d6b.naVolta.memoria, encerrou: d6b.encerrou, fim: d6b.fim }));
 }
 
 // ── "SAIR" É LIMPAR DE TUDO — o DOM também (auditoria de 2026-10-02, R6-1-05) ──

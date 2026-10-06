@@ -2339,9 +2339,14 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   // cresce, e empurrava o fim dele pra fora da janela — reprovando código certo
   // quando o bloco ganhou uma linha (a recusa da extensão, 2026-09-26).
   const soCodigo = app.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const bloco = soCodigo.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
-  assert.ok(bloco, 'sumiu o handshake do boot');
-  assert.match(bloco[0], /API\.getSession\(\)\s*\|\|\s*AppState\.authenticated/,
+  assert.match(soCodigo, /^\s+entrarPelaExtensao\(\)\.then\(aoFimDaPerguntaDaAbertura\);/m, 'sumiu o handshake do boot');
+  const bloco = soCodigo.match(/^function aoFimDaPerguntaDaAbertura\(entrou\) \{[\s\S]*?\n\}/m);
+  assert.ok(bloco, 'sumiu o fim da pergunta à extensão na abertura');
+  // A guarda pergunta pela MEMÓRIA desta aba, onde o login dela entra (o
+  // `setSession`). Pelo `getSession` ela lia o aparelho e tomava a sessão de
+  // OUTRA aba pela desta: a abertura ficava em branco (R9-1-03; o
+  // comportamento é medido em test/contas-abas.test.mjs).
+  assert.match(bloco[0], /if \(API\.temSessaoNaMemoria\(\) \|\| AppState\.authenticated\) return;[\s\S]*showAuthScreen\(\);/,
     'a guarda contra login-no-meio sumiu — showAuthScreen volta a atropelar sessão nova');
 
   // E o prazo curto existe pra não punir quem NÃO tem a extensão: sem resposta
