@@ -10362,12 +10362,16 @@ function atualizarDicaDeOrdem(estado) {
         alerta: 'text-amber-700 dark:text-amber-300',
     };
     // A precisão é a da posição que a ordem vai USAR: a pedida neste modal,
-    // senão a da ordem já aplicada.
+    // senão a da ordem já aplicada. E ela é uma DISTÂNCIA como as outras da
+    // tela, no formato delas (`formatarMetros`, com a unidade): o metro cru da
+    // frase dava "±12346 m" nas 4 línguas onde o card diz "12,3 km" — e a posição
+    // aproximada que se pede (`enableHighAccuracy: false`) costuma vir em
+    // quilômetros no computador (auditoria da rodada 9, R9-6-05).
     const posicao = posicaoDoModal || posicaoGps;
     const mapa = {
         perfil: ['filters.sort.hint.perfil', 'neutro', {}],
         pedindo: ['filters.sort.hint.pedindo', 'neutro', {}],
-        ok: ['filters.sort.hint.ok', 'ok', { m: (posicao && posicao.precisaoM) || 0 }],
+        ok: ['filters.sort.hint.ok', 'ok', { d: formatarMetros((posicao && posicao.precisaoM) || 0) }],
         negado: ['filters.sort.hint.negado', 'alerta', { padrao: t('filters.sort.' + ORDEM_PADRAO) }],
         semPosicao: ['filters.sort.hint.semPosicao', 'alerta', { padrao: t('filters.sort.' + ORDEM_PADRAO) }],
     };
@@ -12603,25 +12607,33 @@ function renderCardImages(card, place) {
 // Distância que o ponto andou, no formato de quem está lendo. Abaixo de 1m o
 // número inteiro esconde a informação ("0 m" não diz nada), então vai com uma
 // casa; acima de 1km metro não importa mais.
+//
+// A unidade se escolhe pelo número ARREDONDADO, que é o que a tela mostra:
+// decidindo por `m < 1000` antes de arredondar, de 999,5 a 999,9 m saía "1.000 m"
+// (en "1,000 m", fr "1 000 m") onde todo o resto diz "1 km" — MEDIDO nos 4
+// idiomas (auditoria da rodada 9, R9-6-06). A mesma régua em `formatarMetros`.
 function formatarDistancia(m) {
     if (!Number.isFinite(m)) return '';
     const loc = i18nLocale();
     if (m < 1) return t('card.change.movedM', { d: m.toLocaleString(loc, { maximumFractionDigits: 1 }) });
-    if (m < 1000) return t('card.change.movedM', { d: Math.round(m).toLocaleString(loc) });
+    const metros = Math.round(m);
+    if (metros < 1000) return t('card.change.movedM', { d: metros.toLocaleString(loc) });
     return t('card.change.movedKm', { d: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
 }
 
 // A mesma distância SEM o verbo. `formatarDistancia` diz "moveu 36 m", que é a
 // frase certa pra geometria e errada pra qualquer outra coisa — reusá-la no
 // ponto de entrada produziu "a MOVEU 16,3 km do local". Número e frase são
-// coisas separadas; quem monta a frase escolhe o verbo.
+// coisas separadas; quem monta a frase escolhe o verbo. É a FONTE ÚNICA de uma
+// distância sem verbo na tela: o mapa, a entrada, o duplicado e a precisão do
+// "📍 Perto de mim" (R9-6-05) passam por aqui.
 function formatarMetros(m) {
     if (!Number.isFinite(m)) return '';
     const loc = i18nLocale();
-    if (m < 1000) {
-        return t('card.map.m', { n: (m < 1 ? m.toLocaleString(loc, { maximumFractionDigits: 1 })
-                                          : Math.round(m).toLocaleString(loc)) });
-    }
+    if (m < 1) return t('card.map.m', { n: m.toLocaleString(loc, { maximumFractionDigits: 1 }) });
+    // A unidade pelo número ARREDONDADO (R9-6-06, ver `formatarDistancia`).
+    const metros = Math.round(m);
+    if (metros < 1000) return t('card.map.m', { n: metros.toLocaleString(loc) });
     return t('card.map.km', { n: (m / 1000).toLocaleString(loc, { maximumFractionDigits: 1 }) });
 }
 
