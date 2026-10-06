@@ -6861,16 +6861,30 @@ function dlogCapturar(motivo) {
         // aviso, com o número do botão ainda contando-as (R7-4-02, MEDIDO: 2 →
         // 0 em ~2,5 min). Com o anel só de telas da pessoa, a automática que
         // chega é a que sai; e a tela nova da pessoa tira a mais velha dela.
+        //
+        // E ANTES de tudo sai a mais velha JÁ BAIXADA, de qualquer motivo: ela
+        // já foi entregue, e segue no anel só pro número desta abertura
+        // (`dlogJaBaixados`). A regra existe pra proteger o que NÃO foi
+        // entregue: com o anel cheio de telas da pessoa já baixadas, a
+        // automática que chegava (o erro de JS, a busca que falhou) era a que
+        // saía, e não ia nem pra cópia guardada nem pro próximo relatório
+        // (R8-4-01, MEDIDO: 12 toques, o download e um erro de JS de verdade —
+        // a captura do erro sumiu; com 11 toques, entrou).
         if (dlogMomentos.length > DLOG_MAX_MOMENTOS) {
+            const baixada = dlogMomentos.findIndex((x) => dlogJaBaixados.has(x));
             const automatica = dlogMomentos.findIndex((x) => x.motivo !== 'manual');
-            dlogMomentos.splice(automatica >= 0 ? automatica : 0, 1);
+            dlogMomentos.splice(baixada >= 0 ? baixada : automatica >= 0 ? automatica : 0, 1);
         }
         // O número do botão segue o anel a CADA captura, não só a do toque: é
         // o que o anel tem agora que vai no próximo relatório. Sem reposicionar
         // o botão — a captura do arraste acontece com o card no meio do gesto.
         atualizarFabDev({ reposicionar: false });
+        // `foraDoAnel`: a captura que nem coube (a automática, com o anel cheio
+        // de telas da pessoa ainda não entregues) — sem a marca, o diário
+        // anotava uma captura que o relatório não traz.
         dlog('momento', { motivo, painel: m.painel, cardMontado: m.cardMontado,
-                          alertas: (m.alertas || []).map((a) => a.chave) });
+                          alertas: (m.alertas || []).map((a) => a.chave),
+                          ...(dlogMomentos.includes(m) ? {} : { foraDoAnel: true }) });
         // A captura vai pro aparelho NA HORA: é ela que prova o defeito, e o
         // app pode morrer antes de ir pro fundo (ver `diagGuardarAbertura`).
         diagGuardarAbertura('captura');
@@ -7094,35 +7108,53 @@ function diagRegistroDaAbertura(motivo) {
     };
 }
 
-// A PODA, pura. O que passou de 24 h sai inteiro; das que ficam, só as
-// DIAG_ABERTURAS_MAX de atividade mais RECENTE (a última gravação, `salvoEm`);
-// e as capturas, somadas, não passam do teto — as da PESSOA antes das
-// automáticas (a mesma regra do anel, ver `dlogCapturar`), e entre iguais as
-// mais NOVAS pela hora da CAPTURA (`m.t`). A ordem era a da ABERTURA
-// (`inicio`), que com duas abas não diz nada da hora das capturas: a aba aberta
+// A PODA, pura. O que passou de 24 h sai inteiro; das que ficam SEM tela da
+// pessoa (ver abaixo), só as DIAG_ABERTURAS_MAX de atividade mais RECENTE (a
+// última gravação, `salvoEm`); e as capturas, somadas, não passam do teto — as
+// da PESSOA antes das automáticas (a mesma regra do anel, ver `dlogCapturar`),
+// e entre iguais as mais NOVAS pela hora da CAPTURA (`m.t`). A ordem era a da
+// ABERTURA (`inicio`), que com duas abas não diz nada da hora das capturas: a aba aberta
 // por último ficava com as dela e cortava as da outra, mesmo sendo as da outra
 // as mais novas, e a aba mais velha gravava a própria abertura já sem as
 // capturas dela (R7-4-03, MEDIDO: na base A 0 · B 12, com o botão de A
 // mostrando "2"; A recarregada, as 2 tinham sumido sem ir em arquivo nenhum).
 // Pela última gravação, a abertura que está gravando agora nunca é a que sai.
+//
+// O teto de ABERTURAS não leva tela da PESSOA (R8-4-09): ele cortava antes da
+// prioridade delas, e a 6ª abertura que gravava tirava a mais velha INTEIRA, com
+// as telas que a pessoa registrou, mesmo com as outras 5 sem captura nenhuma —
+// no Android, que encerra o app no fundo, cada volta a ele é uma abertura nova
+// (MEDIDO, r9 da auditoria: 2 telas registradas, 5 reaberturas, e a base ficou
+// com [0,0,0,0,0], o botão ainda dizendo "2"). A abertura com tela da pessoa
+// que cabe no teto de CAPTURAS fica; o teto de aberturas vale entre as outras.
+// O custo segue limitado: as capturas, somadas, não passam do teto de sempre, e
+// abertura com tela é no máximo uma por captura (5 + 12 no pior caso, 24 h).
 // Devolve o que manter (com as capturas já cortadas), os ids que saem e os ids
 // cortados (que precisam ser regravados).
 function diagPodarAberturas(lista, agora) {
     const todas = (Array.isArray(lista) ? lista : []).filter((a) => a && typeof a.id === 'string');
-    const vivas = todas
+    const noPrazo = todas
         .filter((a) => Number.isFinite(a.salvoEm) && agora - a.salvoEm <= DIAG_GUARDA_MS)
-        .sort((a, b) => b.salvoEm - a.salvoEm)
-        .slice(0, DIAG_ABERTURAS_MAX);
+        .sort((a, b) => b.salvoEm - a.salvoEm);
     // Cada captura com a hora dela (o `toISOString` da captura); sem hora
     // legível, a da gravação da abertura (a captura é de antes dela), e o empate
     // fica com a de depois no anel. Só a forma ISO: o `Date.parse` do V8 aceita
     // quase qualquer texto ("x:11" vira uma data de 2001).
-    const capturas = vivas.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []).map((m, i) => {
+    const capturasDe = (aberturas) => aberturas.flatMap((a) => (Array.isArray(a.momentos) ? a.momentos : []).map((m, i) => {
         const t = !m ? NaN : typeof m.t === 'number' ? m.t
             : (typeof m.t === 'string' && /^\d{4}-\d\d-\d\dT/.test(m.t) ? Date.parse(m.t) : NaN);
         return { m, i, daPessoa: !!(m && m.motivo === 'manual'), t: Number.isFinite(t) ? t : a.salvoEm };
     }));
-    capturas.sort((x, y) => (y.daPessoa - x.daPessoa) || (y.t - x.t) || (y.i - x.i));
+    const ordem = (x, y) => (y.daPessoa - x.daPessoa) || (y.t - x.t) || (y.i - x.i);
+    // As telas da pessoa que cabem no teto de capturas, entre TODAS as aberturas
+    // no prazo: são elas que tiram a abertura do teto de aberturas.
+    const telas = new Set(capturasDe(noPrazo).filter((c) => c.daPessoa).sort(ordem)
+        .slice(0, DIAG_CAPTURAS_GUARDADAS_MAX).map((c) => c.m));
+    const temTela = (a) => (Array.isArray(a.momentos) ? a.momentos : []).some((m) => telas.has(m));
+    const semTela = new Set(noPrazo.filter((a) => !temTela(a)).slice(0, DIAG_ABERTURAS_MAX));
+    const vivas = noPrazo.filter((a) => semTela.has(a) || temTela(a));
+    const capturas = capturasDe(vivas);
+    capturas.sort(ordem);
     const ficam = new Set(capturas.slice(0, DIAG_CAPTURAS_GUARDADAS_MAX).map((c) => c.m));
     const cortadas = [];
     const manter = vivas.map((a) => {
