@@ -794,7 +794,9 @@ test('i18n: o aviso do "Sair" que não limpou o servidor não afirma a causa —
   const i = app.indexOf('async function handleLogout(');
   assert.ok(i > 0, 'sumiu o handleLogout');
   const corpo = app.slice(i, app.indexOf('\nfunction resetQueue', i));
-  assert.match(corpo, /if \(!saida \|\| !saida\.success\) \{\s*showToast\(t\('toast\.logoutServerFailed'\)/,
+  // Uma sessão (`saida`) ou as duas do R8-1-03 (`saidas.some(...)`, a desta aba e
+  // a guardada de outra aba): em qualquer das formas, toda falha avisa.
+  assert.match(corpo, /if \((?:!saida \|\| !saida\.success|saidas\.some\(\(saida\) => !saida \|\| !saida\.success\))\) \{\s*showToast\(t\('toast\.logoutServerFailed'\)/,
     'o aviso deixou de sair em toda falha da exclusão — se agora ele distingue a causa, reveja este teste');
   assert.doesNotMatch(corpo, /_motivo/,
     'o "Sair" passou a distinguir a falta de rede da resposta de erro — a frase de cada caso pode dizer a causa: reveja este teste');
