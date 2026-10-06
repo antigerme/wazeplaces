@@ -1108,7 +1108,13 @@ function topOpenModal() {
 function setupAuthListeners() {
     const $ = id => document.getElementById(id);
 
-    $('uploadBtn').addEventListener('click', () => $('fileInput').click());
+    // O seletor de arquivo é do SISTEMA, e o `change` que ele dispara não diz
+    // como ele foi aberto: o TECLADO se lê aqui, no toque que o abre (ver
+    // `arquivoPeloTeclado`).
+    $('uploadBtn').addEventListener('click', (ev) => {
+        arquivoPeloTeclado = veioDoTeclado(ev);
+        $('fileInput').click();
+    });
     $('fileInput').addEventListener('change', handleFileUpload);
     $('pasteBtn').addEventListener('click', () => openModal('pasteModal'));
     $('confirmPaste').addEventListener('click', handlePasteConfirm);
@@ -5232,12 +5238,22 @@ function showMainScreen() {
     window.Presenca?.sincronizar?.();
 }
 
+// O "Fazer upload do cookies.txt" foi tocado pelo TECLADO? O login que der certo
+// leva o foco ao ✕ do primeiro card, como o colar e o código (R7-1-04): pelo
+// arquivo, o foco ficava no botão que o `setAuthLoading` desabilita e a tela de
+// entrada esconde, e caía no <body> — o Tab seguinte ia à seta do carrossel
+// (MEDIDO nos dois motores; auditoria de 2026-10-03, R8-1-01). Lido no toque que
+// abre o seletor (o `change` vem do sistema, sem o gesto) e gasto no `change`.
+let arquivoPeloTeclado = false;
+
 async function handleFileUpload(e) {
+    const peloTeclado = arquivoPeloTeclado;
+    arquivoPeloTeclado = false;
     const file = e.target.files[0];
     if (!file) { e.target.value = ''; return; }
     try {
         const content = await file.text();
-        await authenticateWithCookies(content);
+        await authenticateWithCookies(content, { peloTeclado });
     } catch (error) {
         showToast(t('toast.fileReadError'), 'error');
     } finally {

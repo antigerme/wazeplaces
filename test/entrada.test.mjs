@@ -1764,3 +1764,52 @@ test('R7-1-04: o colar que FALHA devolve o foco ao "Colar cookies" — o botão 
   setAuthLoading(false);
   assert.equal(doc.activeElement, dialogo, 'o foco foi tirado do diálogo que abriu');
 });
+
+// ═══ R8-1-01 · o login pelo ARQUIVO, pelo teclado ═════════════════════════════
+// O lote 11 levou o foco ao ✕ do primeiro card pra quem entra pelo teclado
+// colando ou com o código (R7-1-04). O terceiro caminho, o arquivo, ficou de
+// fora: Tab até "Fazer upload do cookies.txt", Enter, e o card chegava com o
+// foco no <body> — o Tab seguinte ia à seta do carrossel (MEDIDO nos dois
+// motores, auditoria de 2026-10-03). O `change` do seletor vem do SISTEMA e não
+// diz como ele foi aberto: o teclado se lê no toque que o abre, e o login o
+// recebe. Roda o `setupAuthListeners` e o `handleFileUpload` DE VERDADE.
+test('R8-1-01: o "Fazer upload do cookies.txt" pelo TECLADO chega ao login como teclado — e só ele', async () => {
+  const ouvintes = {};
+  const el = (id) => ({ id, addEventListener: (tipo, fn) => { ouvintes[id + ':' + tipo] = fn; }, click() { abertos.push(id); } });
+  const abertos = [];
+  const els = Object.fromEntries(['uploadBtn', 'fileInput', 'pasteBtn', 'confirmPaste', 'cancelPaste', 'byAuthor', 'closeAccessDenied']
+    .map((id) => [id, el(id)]));
+  const doc = { activeElement: els.uploadBtn, getElementById: (id) => els[id] || null };
+  const logins = [];
+  const { setupAuthListeners } = montar(['setupAuthListeners', 'handleFileUpload', 'veioDoTeclado'], {
+    document: doc, window: {}, openModal() {}, closeModal() {}, handlePasteConfirm() {},
+    authenticateWithCookies: async (c, o) => { logins.push(o); }, showToast() {}, t: (k) => k,
+  }, ['setupAuthListeners'], 'let arquivoPeloTeclado = false;');
+  setupAuthListeners();
+  // O toque que abre o seletor (Enter: `detail` 0, com o foco no botão; o mouse
+  // e o dedo: `detail` 1), e o arquivo que o sistema entrega.
+  const tocar = (detail) => ouvintes['uploadBtn:click']({ detail, currentTarget: els.uploadBtn });
+  const entregar = () => ouvintes['fileInput:change']({ target: { files: [{ text: async () => 'cookies' }], value: 'x' } });
+  tocar(0);
+  assert.deepEqual(abertos, ['fileInput'], 'PRÉ-CONDIÇÃO: o toque não abriu o seletor de arquivo');
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: true },
+    'DEFEITO: o arquivo escolhido pelo teclado chegou ao login como mouse — o foco cai no <body> quando a tela de entrada some');
+  // CONTROLE: pelo mouse, nada é prometido.
+  tocar(1);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'CONTROLE: o arquivo escolhido pelo mouse chegou como teclado');
+  // E a marca é GASTA: o seletor aberto pelo teclado e CANCELADO (sem `change`)
+  // não faz o arquivo seguinte, escolhido pelo mouse, chegar como teclado.
+  tocar(0);
+  tocar(1);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'o seletor cancelado deixou a marca do teclado pro arquivo seguinte');
+  // Nem o `change` que chega sem toque nenhum antes: a marca é do arquivo que o
+  // teclado abriu, e sai com ele.
+  tocar(0);
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: true }, 'CONTROLE: o teclado deixou de valer no segundo arquivo');
+  await entregar();
+  assert.deepEqual(logins.at(-1), { peloTeclado: false }, 'a marca do teclado valeu pra dois arquivos');
+});
