@@ -1595,6 +1595,7 @@ function montarSaidaMorta() {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
     API: {
       getSession: () => 'tok-A',
+      getRegion: () => 'row',   // a região em que a sonda pergunta (R8-6-03)
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
       // esvaziamento ANTES de a resposta voltar pra quem pediu.
       rejectPlace: async (v) => {

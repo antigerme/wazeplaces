@@ -606,6 +606,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => medidas.toasts.push('derrubou'),
     showAuthScreen: () => {}, showAccessDenied: () => {}, completarPerfilChegado: () => {},
     definirPerfil: (r) => !!(r && r.success && r.profile),
+    anotarEditaveis: () => {},   // os editáveis do perfil da sonda (R8-6-03): aqui, nada a anotar
     medidas, sonda, escrita, relogio, setImmediate,
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),

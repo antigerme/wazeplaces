@@ -8869,6 +8869,10 @@ async function handleUnauthorized() {
         // espera. Seguir daria uma sonda SEM token, um "morta" e uma tentativa
         // de login silencioso pela extensão — depois de um "Sair".
         if (!AppState.authenticated) return;
+        // O servidor em que a sonda PERGUNTA: os editáveis do perfil que ela
+        // trouxer são dele (ver abaixo, R8-6-03), e a pessoa pode aplicar outra
+        // região enquanto a resposta vem.
+        const regiaoDaSonda = API.getRegion();
         const r = await API.getProfile();
         if (!AppState.authenticated) return;
         // A sonda achou o portão fechado (ver `handlePerfil`): não é alarme
@@ -8903,6 +8907,17 @@ async function handleUnauthorized() {
             // confere a conta antes de tudo: era aqui que ele entrava sem o
             // `aoConhecerConta`. Se era o PRIMEIRO da sessão (o 401 barrou o da
             // abertura), completa o que a abertura não chegou a fazer.
+            //
+            // E os editáveis dele ficam anotados, como a carga faz (ver
+            // `editaveisLidos`, R7-6-02): o perfil da abertura que leva o 401
+            // passageiro nunca chega a anotá-los, e o desta sonda também não
+            // anotava — com "Minha área", o país da área (`paisDaMinhaArea`)
+            // ficava desconhecido até recarregar: o Histórico gravava as
+            // decisões sem lugar e a carona marcava o país do filtro (auditoria
+            // da rodada 8, R8-6-03, MEDIDO no navegador). Antes do
+            // `definirPerfil`, na ordem da carga: a anotação é da conta do
+            // perfil, e outra conta recomeça a lista.
+            if (r.success && r.profile) anotarEditaveis(r.profile, regiaoDaSonda, r.profile.editableCountryIDs);
             const primeiroPerfil = !AppState.profile;
             if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
             // O perfil revelou que OUTRA conta tomou o aparelho noutra aba, e

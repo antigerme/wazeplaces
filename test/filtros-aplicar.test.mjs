@@ -1647,3 +1647,72 @@ test('R7-6-01: com OUTRA região na tela (a troca da pessoa), ou com a lista ain
   v.app.definirPerfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
   assert.deepEqual(telaDoPais(v), naVolta, `o perfil trocou a lista da tela por ${JSON.stringify(telaDoPais(v))}`);
 });
+
+// ═══ R8-6-03 · o 1º perfil que chega pela SONDA do 401 anota os editáveis ═══
+// O perfil da abertura que leva um 401 passageiro (o blip do KV, o WAF) nunca
+// anotava os editáveis, e o que a sonda do alarme falso trazia também não: com
+// "Minha área", o país da área (`paisDaMinhaArea`) ficava desconhecido até
+// recarregar — o Histórico gravava as decisões sem lugar e a carona marcava o
+// país do filtro (MEDIDO no navegador, auditoria da rodada 8: pela sonda,
+// `editaveisLidos('row') = null` e o ✕ no Histórico com `onde {}`; pela carga
+// normal, `[73]` e `onde {"73":1}`). Aqui a carga e a sonda rodam DE VERDADE
+// (`loadProfileAndAuxData` → `handleUnauthorized`), com a sonda segura até o
+// teste soltar: os editáveis são do servidor em que ela PERGUNTOU, mesmo com
+// outra região aplicada enquanto a resposta vinha.
+function paginaDaSonda({ primeiroLeva401 = true } = {}) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea: true } });
+  const perfil = { id: 1, editableCountryIDs: [73], managedAreas: [] };
+  let n = 0;
+  let soltarSonda = null;
+  p.listas.perfil = () => {
+    n++;
+    if (primeiroLeva401 && n === 1) return Promise.resolve({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' });
+    if (primeiroLeva401 && n === 2) return new Promise((ok) => { soltarSonda = () => ok({ success: true, profile: perfil }); });
+    return Promise.resolve({ success: true, profile: perfil });
+  };
+  Object.assign(p.deps, { VERIFICA_SESSAO_MS: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    caixaDaMinhaArea: () => [2.2, 48.8, 2.5, 48.9] });
+  p.AppState.authenticated = true;
+  let sonda = null;
+  p.deps.setTimeout = (f) => { sonda = f; return 1; };   // a sonda espera o teste
+  const app = montar([...FUNCOES, 'handleUnauthorized', 'paisDaMinhaArea', 'ondeAgora'], p.deps);
+  return { p, app, sonda: () => sonda, soltarSonda: () => soltarSonda() };
+}
+
+test('R8-6-03: o 1º perfil que chega pela sonda do alarme falso anota os editáveis — "Minha área" sabe o país da área sem recarregar', async () => {
+  // CONTROLE: pela carga normal, o instrumento enxerga a anotação.
+  const c = paginaDaSonda({ primeiroLeva401: false });
+  await c.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.deepEqual([c.app.editaveisLidos('row'), c.app.paisDaMinhaArea(), c.app.ondeAgora()], [[73], 73, '73'],
+    'CONTROLE: a carga normal não anotou os editáveis (o instrumento não mede a anotação)');
+  // O 1º perfil leva o 401; a sonda traz o perfil.
+  const m = paginaDaSonda();
+  await m.app.loadProfileAndAuxData();
+  assert.ok(m.sonda(), 'PRÉ-CONDIÇÃO: o 401 do perfil não armou a sonda do alarme falso');
+  assert.equal(m.p.AppState.profile, null, 'PRÉ-CONDIÇÃO: o perfil da abertura entrou apesar do 401');
+  m.sonda()();
+  await tique(5);
+  m.soltarSonda();
+  await tique(10);
+  assert.equal(m.p.AppState.profile && m.p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: a sonda não trouxe o perfil');
+  assert.deepEqual(m.app.editaveisLidos('row'), [73],
+    'o perfil da sonda não anotou os editáveis: com "Minha área", o país da área fica desconhecido até recarregar');
+  assert.equal(m.app.paisDaMinhaArea(), 73, 'com "Minha área", o país da área (a marca da carona) ficou desconhecido');
+  assert.equal(m.app.ondeAgora(), '73', 'com "Minha área", o Histórico grava as decisões sem lugar');
+  assert.deepEqual(m.p.log.getProfile, ['row', 'row'], 'a anotação custou um pedido de perfil a mais');
+});
+
+test('R8-6-03: os editáveis da sonda são do servidor em que ela PERGUNTOU — a região aplicada no meio não os leva', async () => {
+  const m = paginaDaSonda();
+  await m.app.loadProfileAndAuxData();
+  m.sonda()();                                  // a sonda pergunta à ROW...
+  await tique(5);
+  aplicarLugar(m.p, 'na', 235);                  // ...e a pessoa aplica NA/EUA enquanto a resposta vem
+  m.soltarSonda();
+  await tique(10);
+  assert.equal(m.p.AppState.profile && m.p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: a sonda não trouxe o perfil');
+  assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil da sonda desfez o lugar aplicado no meio');
+  assert.equal(m.app.editaveisLidos('na'), null, 'os editáveis da ROW (a da sonda) foram anotados como os da NA');
+  assert.deepEqual(m.app.editaveisLidos('row'), [73], 'os editáveis que a sonda leu na ROW não ficaram na ROW');
+});

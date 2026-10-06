@@ -314,7 +314,9 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
   const AppState = { authenticated: true, profile: perfilAntes, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {} };
   const deps = {
     safeLS, AppState, epocaDaSessao: 0,
-    API: { getSession: () => tokenAgora, sessionToken: tokenAgora, getProfile: async () => sonda },
+    // A região em que a sonda pergunta: os editáveis do perfil dela são dela (R8-6-03).
+    API: { getSession: () => tokenAgora, sessionToken: tokenAgora, getProfile: async () => sonda, getRegion: () => 'row' },
+    anotarEditaveis: () => {},
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     VERIFICA_SESSAO_MS: 0, setTimeout: (f) => f(),

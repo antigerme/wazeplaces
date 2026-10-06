@@ -1317,7 +1317,8 @@ test('outra conta: a sonda do 401 que traz o perfil de quem saiu não diz "sua s
     const AppState = { authenticated: true, profile: { id: 111 } };
     const deps = {
       safeLS: ap.safeLS, CONTA_KEY, AppState, verificandoSessao: false, VERIFICA_SESSAO_MS: 0,
-      API: { sessionToken: 'tok-111', getProfile: async () => ({ success: true, profile: { id: 111 } }) },
+      // A região em que a sonda pergunta: os editáveis do perfil dela são dela (R8-6-03).
+      API: { sessionToken: 'tok-111', getProfile: async () => ({ success: true, profile: { id: 111 } }), getRegion: () => 'row' },
       handleLogout: () => { log.push('saiu'); AppState.authenticated = false; },
       aoConhecerConta: () => {}, showToast: (msg) => log.push(msg), t: (k) => k,
       rebuscarDepoisDeFalha: () => log.push('buscou'), esvaziarFilaDeSaida: () => log.push('esvaziou'),

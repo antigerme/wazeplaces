@@ -906,7 +906,9 @@ async function sondar(resposta) {
   const toasts = [], quedas = [];
   const deps = {
     dlog() {}, verificandoSessao: false, AppState: { authenticated: true }, VERIFICA_SESSAO_MS: 0,
-    API: { getProfile: async () => resposta }, derrubarSessao: (k) => quedas.push(k || null),
+    // A região em que a sonda pergunta: os editáveis do perfil dela são dela (R8-6-03).
+    API: { getProfile: async () => resposta, getRegion: () => 'row' }, derrubarSessao: (k) => quedas.push(k || null),
+    anotarEditaveis() {},
     guardarReferencias() {}, guardarPerfilDoPortao() {}, renderProfileHeader() {}, dfato() {}, dlogCapturarAuto() {},
     showToast: (m) => toasts.push(m), t: (k) => k, rebuscarDepoisDeFalha() {}, esvaziarFilaDeSaida() {},
     showAccessDenied() {}, showAuthScreen() {},
