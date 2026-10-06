@@ -457,6 +457,10 @@ function initApp() {
     API.getRegion();
     API.getCountry();
 
+    // ANTES de todo ouvinte da volta à página: quem pede alguma coisa ao voltar
+    // do fundo (a presença, no `setupAppListeners`) já pede com o modo "saindo"
+    // desligado (ver a função, R8-5-02).
+    setupFimDoModoSaindo();
     setupAuthListeners();
     setupAppListeners();
     setupModalListeners();
@@ -21516,14 +21520,31 @@ function setupDescargaAoSair() {
     });
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') descarregarAcaoPendente();
-        // A página VOLTOU (a pessoa trocou de app e retornou): o modo "saindo"
-        // acaba. Sem isto ele ficava ligado pra sempre depois da primeira ida ao
-        // fundo com ação pendente, e TODA requisição seguinte ia com `keepalive`
-        // e sem o teto de 45 s — uma busca pendurada prendia a fila, e o login
-        // por cookies.txt grande estourava o limite de 64 KB do keepalive.
-        else if (document.visibilityState === 'visible' && typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
     });
-    // Voltou do bfcache (o `pagehide` já tinha ligado o modo "saindo").
+    // O FIM do modo "saindo" (a página voltou) não mora aqui: é o
+    // `setupFimDoModoSaindo`, registrado antes de todo ouvinte da volta.
+}
+
+// A página VOLTOU (a pessoa trocou de app e retornou, ou ela voltou do bfcache,
+// com o `pagehide` tendo ligado o modo): o modo "saindo" acaba. Sem isto ele
+// ficava ligado pra sempre depois da primeira ida ao fundo com ação pendente, e
+// TODA requisição seguinte ia com `keepalive` e sem o teto de 45 s — uma busca
+// pendurada prendia a fila, e o login por cookies.txt grande estourava o limite
+// de 64 KB do keepalive.
+//
+// E ele é registrado ANTES de todo outro ouvinte da volta (no `initApp`, antes
+// do `setupAppListeners`), porque os ouvintes de um mesmo evento rodam na
+// ordem em que foram registrados. Morava no `setupDescargaAoSair`, registrado
+// DEPOIS: a presença (o `Presenca.montar()`, dentro do `setupAppListeners`)
+// pede a lista na volta do fundo, e o pedido saía com o modo ainda ligado —
+// com `keepalive` e sem o teto. Pendurado, ele segurava o `Presenca.pedindo`, e
+// a lista, o token do tempo real e as confirmações de carona paravam até
+// recarregar (auditoria da rodada 8, R8-5-02, medido no Chromium: aos 46,5 s o
+// pedido seguia no ar, e tocar na pílula mandava 0 pedidos).
+function setupFimDoModoSaindo() {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
+    });
     window.addEventListener('pageshow', () => { if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false); });
 }
 

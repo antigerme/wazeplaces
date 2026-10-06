@@ -12,6 +12,8 @@
 // FATIADAS e rodadas num escopo de mentira.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { novoCliente } from './_presenca-cliente.mjs';
 
 const T = 1790400000000;
@@ -94,4 +96,130 @@ test('R8-5-01 CONTROLES: o `online` religa; sem o fluxo parado a prova não reco
   const c = await fluxoParado({ token: null });
   await provasDeRede(c, 1);
   assert.equal(c.chamadas.presencaApp.filter((x) => x.token === true).length, 1, 'sem token, a prova de rede deixou de pedi-lo');
+});
+
+// ── O app.js, fatiado ────────────────────────────────────────────────────────
+
+const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+function fatiar(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let par = 0, i = APP_SEM.indexOf('(', m.index);
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '(') par++;
+    else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+  }
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', i); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) {
+      const corpo = APP_SEM.slice(m.index, j + 1);
+      assert.ok(corpo.length > 60, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
+      return corpo;
+    }
+  }
+  throw new Error('não fechou: ' + nome);
+}
+function montar(nomes, deps) {
+  const chaves = Object.keys(deps);
+  return new Function(...chaves, nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
+}
+const constante = (nome) => {
+  const m = new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP);
+  assert.ok(m, `sumiu a constante ${nome}`);
+  return new Function(`return ${m[1]};`)();
+};
+
+// O api.js DE VERDADE numa vm (o padrão do `presenca-auditoria-r7`): é o `_post`
+// dele que transforma o modo "saindo" em `keepalive` e tira o sinal do teto de
+// 45 s. O `fetch` anota o `init` de cada pedido.
+function apiDeVerdade() {
+  const pedidos = [];
+  const fetch = async (url, init) => {
+    pedidos.push({ rota: String(url).split('/').pop(), corpo: JSON.parse(init.body), keepalive: init.keepalive === true, sinal: !!init.signal });
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const fonte = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\n'
+    + readFileSync(new URL('../js/api.js', import.meta.url), 'utf8') + '\nthis.API = API;';
+  const ctx = { navigator: { language: 'pt-BR', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k === 'waze_session_token' ? 'tok' : null), setItem() {}, removeItem() {} },
+    fetch, performance, AbortController, Response, ReadableStream, console: { error() {}, log() {}, warn() {} }, setTimeout, clearTimeout };
+  vm.createContext(ctx);
+  vm.runInContext(fonte, ctx);
+  return { API: ctx.API, pedidos };
+}
+
+// ── R8-5-02: a volta do fundo pede a lista com o modo "saindo" já desligado ──
+
+// A página com os três ouvintes que importam, registrados na ORDEM dada: o fim
+// do modo "saindo", a presença (o `Presenca.montar()` do `setupAppListeners`) e
+// a descarga da janela do Desfazer (que liga o modo ao ir pro fundo).
+function paginaComOuvintes(ordem) {
+  const real = apiDeVerdade();
+  const c = novoCliente({ agora: T });
+  c.API.presencaApp = (x) => real.API.presencaApp(x);
+  c.API.setSaindo = (v) => real.API.setSaindo(v);
+  Object.defineProperty(c.API, 'saindo', { get: () => real.API.saindo, configurable: true });
+  Object.assign(c.P.Presenca, { atualizadaEm: T, tentadaEm: T, pais: 30, tokenPedidoEm: T,
+    chat: { token: 'tk', base: GOOGLE, chave: 'k', expiraEm: T + 20 * 3600e3 } });
+  const registrar = {
+    setupFimDoModoSaindo: () => montar(['setupFimDoModoSaindo'], { document: c.doc, window: c.win, API: real.API }).setupFimDoModoSaindo(),
+    setupAppListeners: () => c.P.presencaMontar(),
+    // A ação da janela do Desfazer sai com keepalive: a descarga LIGA o modo.
+    setupDescargaAoSair: () => montar(['setupDescargaAoSair'], { document: c.doc, window: c.win, API: real.API,
+      descarregarAcaoPendente: () => real.API.setSaindo(true), soltarReivindicacoes: () => {} }).setupDescargaAoSair(),
+  };
+  for (const n of ordem) registrar[n]();
+  const listas = () => real.pedidos.filter((p) => p.rota === 'presenca-app');
+  return { c, real, listas };
+}
+const visibilidade = (c, v) => { c.doc.visibilityState = v; for (const fn of c.doc._ouv.visibilitychange || []) fn(); };
+
+// A ordem DE VERDADE dos três, lida do `initApp` (sem comentário: gotcha #67).
+function ordemDoInitApp() {
+  const init = fatiar('initApp');
+  const posicao = (n) => init.search(new RegExp('^\\s*' + n + '\\(\\);', 'm'));
+  const nomes = ['setupFimDoModoSaindo', 'setupAppListeners', 'setupDescargaAoSair'];
+  assert.ok(posicao('setupAppListeners') > 0 && posicao('setupDescargaAoSair') > 0, 'PRÉ-CONDIÇÃO: o initApp não registra mais a presença ou a descarga');
+  return nomes.filter((n) => posicao(n) >= 0).sort((a, b) => posicao(a) - posicao(b));
+}
+
+test('R8-5-02 voltar do fundo depois da descarga do Desfazer: a lista da presença sai SEM keepalive e COM o teto de 45 s (a ordem do initApp)', async () => {
+  const caso = async (ordem) => {
+    const p = paginaComOuvintes(ordem);
+    visibilidade(p.c, 'hidden');                            // ✕ e o app vai pro fundo: a descarga
+    assert.equal(p.real.API.saindo, true, 'CONTROLE: a descarga tinha que ligar o modo "saindo"');
+    p.c.relogio.agora += 61_000;                            // passa o teto de um pedido por minuto
+    visibilidade(p.c, 'visible');                           // e volta
+    await tick(); await tick();
+    return { listas: p.listas(), saindo: p.real.API.saindo };
+  };
+  const r = await caso(ordemDoInitApp());
+  assert.equal(r.listas.length, 1, 'CONTROLE: a volta do fundo tinha que pedir a lista');
+  assert.equal(r.listas[0].keepalive, false, 'DEFEITO: a lista da volta saiu com keepalive (o modo "saindo" ainda ligado)');
+  assert.equal(r.listas[0].sinal, true, 'DEFEITO: a lista da volta saiu sem o teto de 45 s — pendurada, ela segura o `Presenca.pedindo`');
+  assert.equal(r.saindo, false);
+  // CONTROLE do instrumento: com o fim do modo registrado DEPOIS da presença (a
+  // ordem de antes), o defeito aparece — o teste enxerga a ordem.
+  const v = await caso(['setupAppListeners', 'setupDescargaAoSair', 'setupFimDoModoSaindo']);
+  assert.equal(v.listas[0].keepalive, true, 'CONTROLE: na ordem de antes, a lista sairia com keepalive');
+});
+
+test('R8-5-02 a volta pelo bfcache (o `pageshow`): a lista sai sem keepalive também', async () => {
+  const caso = async (ordem) => {
+    const p = paginaComOuvintes(ordem);
+    for (const fn of p.c.win._ouv.pagehide || []) fn({ persisted: true });   // a página vai pro bfcache
+    p.real.API.setSaindo(true);                             // (o `pagehide` da descarga liga o modo)
+    p.c.relogio.agora += 61_000;
+    for (const fn of p.c.win._ouv.pageshow || []) fn({ persisted: true });   // e volta dele
+    await tick(); await tick();
+    return p.listas();
+  };
+  const r = await caso(ordemDoInitApp());
+  assert.equal(r.length, 1, 'CONTROLE: a volta do bfcache tinha que pedir a lista');
+  assert.equal(r[0].keepalive, false, 'DEFEITO: a lista da volta do bfcache saiu com keepalive');
+  assert.equal(r[0].sinal, true);
+  const v = await caso(['setupAppListeners', 'setupDescargaAoSair', 'setupFimDoModoSaindo']);
+  assert.equal(v[0].keepalive, true, 'CONTROLE: na ordem de antes, a lista sairia com keepalive');
 });

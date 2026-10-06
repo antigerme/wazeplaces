@@ -184,8 +184,10 @@ test('Desfazer: o LOTE cancelado ao ir pro fundo FECHA a janela e devolve os ped
 });
 
 test('o modo "saindo" acaba quando a página VOLTA (visível ou bfcache)', () => {
-  const d = fatiar('setupDescargaAoSair');
-  assert.match(d, /else if \(document\.visibilityState === 'visible' && typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\);/,
+  // Mora no `setupFimDoModoSaindo` desde a rodada 8 (R8-5-02): registrado antes
+  // de todo ouvinte da volta — a ordem é cobrada em test/presenca-auditoria-r8.
+  const d = fatiar('setupFimDoModoSaindo');
+  assert.match(d, /if \(document\.visibilityState === 'visible' && typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\);/,
     'depois da primeira ida ao fundo, toda requisição ficava com keepalive e sem o teto de 45 s');
   assert.match(d, /addEventListener\('pageshow', \(\) => \{ if \(typeof API !== 'undefined' && API\.setSaindo\) API\.setSaindo\(false\); \}\)/);
 });
