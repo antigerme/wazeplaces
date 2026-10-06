@@ -1470,9 +1470,84 @@ test('código: o `codigo` é só o código nosso — sem a leitura do relatório
   // CONTROLE: sem nada do relatório anterior, a lista é a mesma de antes.
   assert.deepEqual(diagUrlsDoCodigo(daPagina.filter((u) => !u.includes('diag-rede')), meu, meu + '/'),
     diagUrlsDoCodigo(daPagina, meu, meu + '/'));
-  // E o relatório usa esta lista (e não outra montada à parte).
-  assert.match(fatiarFn(APP, 'diagCorpo'), /const urlsDoCodigo = diagUrlsDoCodigo\(recursos\.map\(\(r\) => r\.url\), meu, location\.href\);/,
-    'o `codigo` deixou de sair do `diagUrlsDoCodigo`');
+  // E o relatório usa esta lista (e não outra montada à parte) — com o código do
+  // DOCUMENTO na frente da lista de recursos da sessão (R9-1-01, abaixo).
+  assert.match(fatiarFn(APP, 'diagCorpo'),
+    /const urlsDoCodigo = diagUrlsDoCodigo\(\[\.\.\.diagUrlsDoDocumento\(\), \.\.\.recursos\.map\(\(r\) => r\.url\)\], meu, location\.href\);/,
+    'o `codigo` deixou de sair do `diagUrlsDoCodigo` (ou deixou de ler o código do documento)');
+});
+
+// ── R9-1-01 = R9-4-04 (auditoria da rodada 9): o código depois do "Sair" ──────
+// A lista do `codigo` saía SÓ da lista de recursos da sessão, e a troca de conta
+// (e o "Sair" seguido de outro login na mesma página) a limpa: o `app.css` e os
+// `js/min/*`, carregados na abertura, ANTES da marca, saíam junto — o relatório
+// de quem entrou conferia 2 dos 11 arquivos, e o `diag-tela` remontava a tela
+// sem estilo (MEDIDO no navegador). Aqui a limpeza, a régua da sessão, o
+// documento e a lista do código rodam DE VERDADE, num documento de mentira que
+// casa seletor como o navegador (o subconjunto que o app usa; o resto LANÇA).
+function documentoDeMentira(elementos) {
+  const casa = (el, parte) => {
+    const m = /^([a-z]+)((?:\[[^\]]+\])*)$/.exec(parte);
+    if (!m) throw new Error('seletor que o documento de mentira não entende: ' + parte);
+    if (el.tagName !== m[1].toUpperCase()) return false;
+    for (const [, cond] of m[2].matchAll(/\[([^\]]+)\]/g)) {
+      const c = /^([\w-]+)(?:(~?=)"([^"]*)")?$/.exec(cond);
+      if (!c) throw new Error('condição que o documento de mentira não entende: ' + cond);
+      const v = el.attrs[c[1]];
+      if (v === undefined) return false;
+      if (c[2] === '=' && v !== c[3]) return false;
+      if (c[2] === '~=' && !v.split(/\s+/).includes(c[3])) return false;
+    }
+    return true;
+  };
+  return { querySelectorAll: (sel) => elementos.filter((el) => sel.split(',').some((p) => casa(el, p.trim()))) };
+}
+
+test('R9-1-01: depois do "Sair" ou da troca de conta, o relatório ainda leva o CÓDIGO da página — do documento, não só da lista de recursos', () => {
+  const meu = 'https://x.dev';
+  const script = (src) => ({ tagName: 'SCRIPT', attrs: { src, defer: '' }, src: new URL(src, meu + '/').href });
+  const link = (rel, href) => ({ tagName: 'LINK', attrs: { rel, href }, href: new URL(href, meu + '/').href });
+  const elementos = [
+    { tagName: 'SCRIPT', attrs: {} },                                     // o inline do tema: sem arquivo
+    link('preload', 'fonts/inter-latin-wght-normal.woff2'), link('manifest', 'manifest.json'),
+    link('icon', 'icons/icon-192.svg'), link('stylesheet', 'css/app.css'),
+    script('js/min/qr.js'),                                               // o pareamento o pôs no <head>
+    script('js/min/version.js'), script('js/min/api.js'), script('js/min/app.js'),
+    { tagName: 'SCRIPT', attrs: { src: 'x' }, src: 'https://static.cloudflareinsights.com/beacon.min.js' },
+  ];
+  const relogio = { agora: 0 };
+  const recursos = [];
+  const performance = { now: () => relogio.agora, clearResourceTimings: () => { recursos.length = 0; },
+    getEntriesByType: (tipo) => (tipo === 'resource' ? recursos.slice() : []) };
+  const fns = new Function('performance', 'API', 'document',
+    ['esquecerRegistrosDaPagina', 'diagRecursosDaSessao', 'diagUrlsDoDocumento', 'diagUrlsDoCodigo'].map((n) => fatiarFn(APP, n)).join('\n')
+    + '\nreturn { esquecerRegistrosDaPagina, diagRecursosDaSessao, diagUrlsDoDocumento, diagUrlsDoCodigo };')(
+    performance, { registrosDesde: 0 }, documentoDeMentira(elementos));
+  // A composição do `diagCorpo` (a asserção estrutural do teste de cima a amarra).
+  const codigo = () => fns.diagUrlsDoCodigo([...fns.diagUrlsDoDocumento(), ...fns.diagRecursosDaSessao().map((r) => r.name)], meu, meu + '/')
+    .map((u) => u.slice(meu.length));
+  // A abertura carrega o código; a foto de perfil de quem estava e a foto do pedido chegam depois.
+  for (const [u, t] of [['/css/app.css', 5], ['/js/min/version.js', 8], ['/js/min/api.js', 9], ['/js/min/app.js', 12],
+    ['/js/min/qr.js', 300]]) recursos.push({ name: meu + u, startTime: t });
+  recursos.push({ name: 'https://sms-profile-image.waze.com/QUEM_SAIU', startTime: 50 },
+    { name: 'https://venue-image.waze.com/thumbs/thumb700_FOTO', startTime: 60 });
+  const tudo = ['/', '/service-worker.js', '/css/app.css', '/js/min/qr.js', '/js/min/version.js', '/js/min/api.js', '/js/min/app.js'];
+  assert.deepEqual(codigo(), tudo, 'CONTROLE: antes de qualquer limpeza, o relatório não leva o código da página');
+  // O "Sair" (ou a troca de conta) aos 400 ms.
+  relogio.agora = 400;
+  fns.esquecerRegistrosDaPagina();
+  assert.equal(fns.diagRecursosDaSessao().filter((r) => /\/js\/min\/|\/css\//.test(r.name)).length, 0,
+    'PRÉ-CONDIÇÃO: a limpeza deixou o código na lista de recursos — o caso não foi encenado');
+  assert.deepEqual(codigo(), tudo,
+    'depois da limpeza o relatório perdeu o código da página (o `diag-tela` remonta sem estilo, e "versão velha?" confere 2 arquivos)');
+  // E o documento NÃO traz o que não é código: a fonte do preload, o manifest, o
+  // ícone (são `<link>`, mas não folha de estilo), o inline sem arquivo e o script de terceiro.
+  assert.deepEqual(fns.diagUrlsDoDocumento().map((u) => u.replace(meu, '')),
+    ['/css/app.css', '/js/min/qr.js', '/js/min/version.js', '/js/min/api.js', '/js/min/app.js',
+     'https://static.cloudflareinsights.com/beacon.min.js'],
+    'o documento devolveu o que não é `<script src>` nem folha de estilo');
+  // Nunca lança: sem documento, a lista é a dos recursos.
+  assert.deepEqual(new Function(fatiarFn(APP, 'diagUrlsDoDocumento') + '\nreturn diagUrlsDoDocumento();')(), []);
 });
 
 // ── D9 (auditoria de 2026-09-26): o tile guardado que falhou, UMA vez ───────

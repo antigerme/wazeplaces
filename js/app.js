@@ -8965,6 +8965,24 @@ function diagUrlsDoCodigo(urlsDosRecursos, meu, aqui) {
         .filter((u) => !/[?&]diag-rede=/.test(u));
 }
 
+// O código que a PÁGINA carregou, lido do PRÓPRIO DOCUMENTO: os `<script src>` (o
+// `js/min/qr.js` também, que o `carregarQr` põe no `<head>` quando o pareamento
+// o pede) e as folhas de estilo. A lista do `codigo` saía SÓ da lista de recursos
+// da sessão (`diagRecursosDaSessao`), e o "Sair" e a troca de conta a limpam
+// (`esquecerRegistrosDaPagina`): o código, carregado na abertura, ANTES da marca,
+// saía junto. O relatório de quem entrava na mesma página levava `/` e o
+// `/service-worker.js` e mais nada — a conferência de "versão velha?" cobria 2
+// dos 11 arquivos, e o `diag-tela` remontava a tela SEM ESTILO (auditoria da
+// rodada 9, R9-1-01 = R9-4-04, MEDIDO). O DOM não muda com a limpeza e não
+// carrega dado de ninguém: é o código NOSSO, o mesmo pra toda conta. Nunca lança.
+function diagUrlsDoDocumento() {
+    try {
+        return [...document.querySelectorAll('script[src], link[rel~="stylesheet"][href]')]
+            .map((el) => (el.tagName === 'LINK' ? el.href : el.src))
+            .filter((u) => typeof u === 'string' && u);
+    } catch (e) { return []; }
+}
+
 async function diagCorpo() {
     const meu = location.origin;
     // O ORÇAMENTO do relatório inteiro (ver `DIAG_ORCAMENTO_MS`).
@@ -9020,15 +9038,17 @@ async function diagCorpo() {
     // O CÓDIGO que está rodando: tamanho, hash e versão de cada arquivo (o corpo,
     // só do CSS — ver abaixo). É isto que responde "o PWA está com a versão
     // velha?" — pergunta que o serial sozinho não responde, porque ele só diz o
-    // que o `version.js` carregado afirma, não o que o resto é. Só o que começou
-    // DEPOIS do último "Sair" ou troca de conta (ver `diagRecursosDaSessao`).
+    // que o `version.js` carregado afirma, não o que o resto é. Os `recursos` são
+    // só os que começaram DEPOIS do último "Sair" ou troca de conta (ver
+    // `diagRecursosDaSessao`); o CÓDIGO da página vem também do documento, que a
+    // limpeza não toca (ver `diagUrlsDoDocumento`, R9-1-01).
     const recursos = diagRecursosDaSessao()
         .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
                        bytes: r.transferSize,
                        doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
     // EM PARALELO (ver `DIAG_ORCAMENTO_MS`), e na ordem da lista.
     const codigo = {};
-    const urlsDoCodigo = diagUrlsDoCodigo(recursos.map((r) => r.url), meu, location.href);
+    const urlsDoCodigo = diagUrlsDoCodigo([...diagUrlsDoDocumento(), ...recursos.map((r) => r.url)], meu, location.href);
     const lidos = await Promise.all(urlsDoCodigo.map((u) => texto(u)));
     urlsDoCodigo.forEach((u, i) => { codigo[u] = lidos[i]; });
 
