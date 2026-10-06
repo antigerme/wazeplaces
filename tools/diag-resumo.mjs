@@ -105,6 +105,15 @@ if (ta.treino && ta.treino.ativo === true) {
   const n = (x) => (Array.isArray(x) ? x.length : '?');
   out('ATENÇÃO: relatório gerado DENTRO do treino — a fila na tela e no `appState` é de EXEMPLOS; a fila real é a que o treino guarda.');
   out(`fila real guardada pelo treino: ${n(g.fila)} pedidos · recusados que voltam como card ao sair dele: ${n(g.devolver)} · perfil chegou nele: ${g.perfilChegou ?? '?'} · ordem trocada nele: ${g.ordemMudou ?? '?'} · época da fila real ${g.epoca ?? '?'} (a do treino ${g.epocaDoTreino ?? '?'}, a de agora ${g.epocaAgora ?? '?'})`);
+  // O que ESPERA o "Sair" do treino (R9-4-07): a fila guardada do offline que a
+  // abertura sem rede leu com ele aberto, e a recusa automática pedida nele. Sem
+  // isto, "fila real: 0 pedidos" lia como a fila tendo sumido.
+  const espera = (x) => (x === undefined ? AUSENTE : x === true ? 'SIM' : 'não');
+  out(`esperando o "Sair" do treino — a fila guardada do offline: ${espera(g.abrirGuardada)} · a recusa automática: ${espera(g.recusaPedida)}`);
+  if (g.abrirGuardada === true) {
+    out('ATENÇÃO: a fila guardada do offline (seção OFFLINE) espera o "Sair" do treino — com a fila real vazia, é ela que abre ali; vazia aqui não quer dizer que sumiu.');
+  }
+  if (g.recusaPedida === true) out('a recusa automática pedida com o treino aberto roda no "Sair" dele.');
 }
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.

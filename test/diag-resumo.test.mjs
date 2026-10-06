@@ -722,6 +722,32 @@ test('diag-resumo: CONTROLES do treino — fechado não ganha aviso, e o relató
   assert.doesNotMatch(antigo, /DENTRO do treino|DENTRO DO TREINO/);
 });
 
+// ── R9-4-07: o que ESPERA o "Sair" do treino ────────────────────────────────
+// A fila guardada do offline lida com o treino aberto e a recusa automática
+// pedida nele esperam o "Sair". A triagem dizia "fila real guardada pelo treino:
+// 0 pedidos", e quem lia concluía que a fila tinha sumido — com a seção OFFLINE
+// do mesmo arquivo mostrando a guardada (MEDIDO, n2 da auditoria da rodada 9).
+test('diag-resumo: no treino, a fila guardada do offline e a recusa automática que esperam o "Sair" são ditas (R9-4-07)', () => {
+  const d = noTreino();
+  d.treino = { ...d.treino, fila: [], devolver: [], abrirGuardada: true, recusaPedida: true };
+  const s = rodar(d);
+  assert.match(s, /fila real guardada pelo treino: 0 pedidos/, 'PRÉ-CONDIÇÃO: a fila real que o treino guarda está vazia');
+  assert.match(s, /esperando o "Sair" do treino — a fila guardada do offline: SIM · a recusa automática: SIM/,
+    'a triagem não diz o que espera o "Sair" do treino');
+  assert.match(s, /ATENÇÃO: a fila guardada do offline \(seção OFFLINE\) espera o "Sair" do treino/,
+    'a fila real vazia segue lendo como a fila que sumiu');
+  assert.match(s, /a recusa automática pedida com o treino aberto roda no "Sair" dele\./);
+  assert.ok(!s.includes(LOCAL) && !s.includes(TOKEN));
+  // CONTROLE: nada esperando — "não", e sem o aviso.
+  const n = noTreino();
+  n.treino = { ...n.treino, abrirGuardada: false, recusaPedida: false };
+  const sn = rodar(n);
+  assert.match(sn, /esperando o "Sair" do treino — a fila guardada do offline: não · a recusa automática: não/);
+  assert.doesNotMatch(sn, /espera o "Sair" do treino —|roda no "Sair" dele/, 'o aviso saiu sem nada esperando o "Sair"');
+  // E o relatório de antes (sem os dois campos) diz que não os trazia, em vez de "não".
+  assert.match(rodar(noTreino()), /esperando o "Sair" do treino — a fila guardada do offline: \(ausente nesta versão\) · a recusa automática: \(ausente nesta versão\)/);
+});
+
 // ── R8-4-07: a aba mais velha, fechada antes do relatório ───────────────────
 // O app passou a marcar a aba que estava VIVA quando a do relatório abriu, mesmo
 // que ela tenha gravado pela última vez ANTES disso (o fechar aborta a gravação

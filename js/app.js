@@ -6470,6 +6470,13 @@ function diagTreinoAgora() {
 // (`perfilChegou`, `ordemMudou`). Sem isto, o relato "ao sair do treino a fila
 // voltou errada" chegava sem a fila que voltou: o `appState` tem os exemplos. O
 // pedido da frente sai como ÍNDICE, como no `appState`. Fechado, só `ativo`.
+//
+// E o que ESPERA o "Sair" dele: a fila guardada do offline que a abertura sem
+// rede leu com ele aberto (`abrirGuardada`) e a recusa automática pedida nele
+// (`recusaPedida`). As duas entraram no `_salvo` em paralelo com esta função, e
+// ficaram de fora: o relatório feito no treino dizia "fila real: 0 pedidos" com a
+// fila guardada esperando o "Sair" — quem lia concluía que a fila tinha sumido
+// (auditoria da rodada 9, R9-4-07).
 function diagTreinoGuardado() {
     try {
         const s = Treino.ativo ? Treino._salvo : null;
@@ -6483,6 +6490,7 @@ function diagTreinoGuardado() {
             epoca: s.epoca, epocaDoTreino: s.epocaDoTreino, epocaAgora: AppState.fetchEpoch,
             devolver: diagSeguro(Array.isArray(s.devolver) ? s.devolver : []),
             perfilChegou: !!s.perfilChegou, ordemMudou: !!s.ordemMudou,
+            abrirGuardada: !!s.abrirGuardada, recusaPedida: !!s.recusaPedida,
         };
     } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }

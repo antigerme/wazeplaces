@@ -1760,3 +1760,29 @@ test('R8-4-06: o relatório leva a fila REAL que o treino guarda — a fila, a f
   // Nunca derruba o relatório.
   assert.ok(guardado({ get ativo() { throw new Error('quebrou'); } }, { queue: [] }).erro, 'o erro ao ler o treino derrubou o relatório');
 });
+
+// ── R9-4-07 (auditoria da rodada 9): o que ESPERA o "Sair" do treino ─────────
+// A fila guardada do offline que a abertura sem rede leu com o treino aberto
+// (`abrirGuardada`) e a recusa automática pedida nele (`recusaPedida`) entraram
+// no `_salvo` em paralelo com o relatório do treino, e ficaram de fora dele: o
+// arquivo feito no treino dizia "fila real: 0 pedidos" com a fila guardada
+// esperando o "Sair", e quem lia concluía que ela tinha sumido (MEDIDO, n2).
+test('R9-4-07: o relatório feito no treino leva o que espera o "Sair" dele — a fila guardada do offline e a recusa automática', () => {
+  const app = semLinhaComentada(APP);
+  const guardado = (salvo) => new Function('Treino', 'AppState', 'diagSeguro',
+    fatiarFn(app, 'diagTreinoAgora') + '\n' + fatiarFn(app, 'diagTreinoGuardado') + '\nreturn diagTreinoGuardado();')(
+    { ativo: true, passo: 0, _salvo: { queue: [], currentPlace: null, autorEmFoco: null, epoca: 4, epocaDoTreino: 5,
+      devolver: [], perfilChegou: false, ordemMudou: false, recusaPedida: false, abrirGuardada: false, ...salvo } },
+    { queue: [{ _treino: true }, { _treino: true }], fetchEpoch: 5 }, (x) => JSON.parse(JSON.stringify(x)));
+  const g = guardado({ abrirGuardada: true, recusaPedida: true });
+  assert.deepEqual(g.fila, [], 'PRÉ-CONDIÇÃO: a fila real que o treino guarda está vazia (a guardada do offline espera o "Sair")');
+  assert.equal(g.abrirGuardada, true, 'o relatório não diz que a fila guardada do offline espera o "Sair" do treino');
+  assert.equal(g.recusaPedida, true, 'o relatório não diz que a recusa automática pedida no treino roda no "Sair" dele');
+  // CONTROLE: nada esperando — as duas saem falsas (e não ausentes).
+  const n = guardado({});
+  assert.deepEqual([n.abrirGuardada, n.recusaPedida], [false, false]);
+  // E os nomes são os que o `Treino` anota (e o `sair()` lê): renomeado lá, o
+  // relatório leria sempre falso, calado.
+  assert.match(app, /this\._salvo\.abrirGuardada = /, 'o treino deixou de anotar `abrirGuardada` — o relatório lê um campo que ninguém escreve');
+  assert.match(app, /this\._salvo\.recusaPedida = /, 'o treino deixou de anotar `recusaPedida` — o relatório lê um campo que ninguém escreve');
+});
