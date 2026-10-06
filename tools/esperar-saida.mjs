@@ -69,6 +69,11 @@ export async function esperarFimDaSaida(page, tetoMs = 180000) {
   }
 }
 
+// O erro do Playwright quando a página não existe mais: o processo caiu, ou a
+// página/contexto/navegador fechou. Navegação no meio ("Execution context was
+// destroyed") NÃO entra: depois dela a página volta.
+export const PAGINA_MORTA = /Target crashed|Target closed|has been closed/i;
+
 /**
  * Espera uma condição NA PÁGINA pollando pelo lado do Node.
  *
@@ -78,16 +83,24 @@ export async function esperarFimDaSaida(page, tetoMs = 180000) {
  * chama a função por referência, sem avaliar string.
  *
  * @param {import('playwright').Page} page
- * @param {() => boolean} fn   avaliada na página; erro ou contexto morto conta como "ainda não"
+ * @param {() => boolean} fn   avaliada na página; erro de NAVEGAÇÃO conta como "ainda não"
  * @param {number} tetoMs      rede contra travar, nunca expectativa
  * @param {number} passoMs
- * @returns {Promise<{ok: boolean, ms: number}>}
+ * @returns {Promise<{ok: boolean, ms: number, caiu?: string}>}
  */
 export async function esperarNaPagina(page, fn, tetoMs = 20000, passoMs = 200) {
   const t0 = Date.now();
   for (;;) {
     let v = null;
-    try { v = await page.evaluate(fn); } catch (e) { v = null; }   // navegando: tenta de novo
+    try { v = await page.evaluate(fn); } catch (e) {
+      // A página que CAIU (o processo do navegador morreu) ou FECHOU não volta:
+      // esperar o teto inteiro só trocava a causa por "a espera estourou". Foi o
+      // que o CI do #259 disse do bloco do pareamento no WebKit, e a reprodução
+      // aqui (1 em 12 rodadas com carga) mostrou "Target crashed" no lugar. A
+      // espera para na hora e diz que caiu; erro de navegação segue tentando.
+      if (PAGINA_MORTA.test(String(e && e.message || e))) return { ok: false, ms: Date.now() - t0, caiu: String(e && e.message || e).slice(0, 160) };
+      v = null;   // navegando: tenta de novo
+    }
     if (v) return { ok: true, ms: Date.now() - t0 };
     if (Date.now() - t0 > tetoMs) return { ok: false, ms: Date.now() - t0 };
     await new Promise((r) => setTimeout(r, passoMs));
@@ -109,6 +122,7 @@ export async function esperarNaPagina(page, fn, tetoMs = 20000, passoMs = 200) {
  */
 export async function esperarOuExplodir(page, fn, oQue, tetoMs = 15000) {
   const r = await esperarNaPagina(page, fn, tetoMs);
+  if (r.caiu) throw new Error(`a página CAIU durante a espera por ${oQue} (${r.caiu}) — não é o app que não chegou no estado`);
   if (!r.ok) throw new Error(`a espera por ${oQue} estourou (${tetoMs}ms) — a página não chegou no estado esperado`);
   return r;
 }
