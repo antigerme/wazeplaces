@@ -19916,7 +19916,15 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     // gravado: o sucesso e a recusa de verdade o apagam (abaixo). E a OUTRA aba,
     // que relê as preferências, o herda: se esta fechar com o pedido no ar, a
     // prova de rede de lá o manda.
-    if (AppState.preferences.presenca === false) presencaWmeGravarPendente();
+    //
+    // E o gravado leva a hora DESTE envio e a sessão dele (`tentadoEm`): o teto
+    // de um por minuto é do APARELHO, não da aba. A outra aba adotava o gravado
+    // com este envio no ar, e mandava o mesmo "invisível" de novo; com o Waze
+    // fora, cada aba repetia no teto dela — 2 por minuto com duas abas
+    // (auditoria da rodada 8, R8-5-07; ver `presencaWmeRefazerDesligar`).
+    if (AppState.preferences.presenca === false) {
+        presencaWmeGravarPendente({ tentadoEm: presencaWme.desligarEm, sessao: presencaWme.desligarSessao });
+    }
     // Quem decide o gravado é a resposta do ÚLTIMO envio: a de um envio anterior
     // que chega depois (o gesto de novo, a troca de conta no meio) não apaga o
     // gravado do envio no ar nem cria pendente por cima dele. E, com um envio no
@@ -19946,8 +19954,11 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
                 && AppState.preferences.presenca === false) {
                 if (ultimo) {
                     presencaWme.desligarPendente = true;
-                    presencaWmeGravarPendente();
-                    if (!r || typeof r._motivo === 'string') presencaWme.desligarEm = 0;
+                    // Sem resposta (a rede), o teto não vale — em NENHUMA aba: o
+                    // carimbo deste envio sai do gravado (R8-5-07).
+                    const semResposta = !r || typeof r._motivo === 'string';
+                    presencaWmeGravarPendente(semResposta ? { tentadoEm: 0 } : {});
+                    if (semResposta) presencaWme.desligarEm = 0;
                 }
             } else if (ultimo && !presencaWme.desligarPendente) {
                 // Chegou (ou foi recusado de vez, ou religaram no meio): o
@@ -19995,7 +20006,12 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
 // última que o aparelho conheceu — o perfil que chegar confere, e outra conta
 // apaga o gravado na troca. Sem nenhuma, fica só na memória: não há a quem
 // conferir.
-function presencaWmeGravarPendente() {
+//
+// `tentadoEm` (com a `sessao`): a hora do último ENVIO, que o gravado carrega
+// pras outras abas respeitarem o teto da repetição (R8-5-07); 0 tira o
+// carimbo (o envio que não teve resposta, ou que morreu com a página). Sem ele,
+// só grava o que ainda não está gravado.
+function presencaWmeGravarPendente({ tentadoEm, sessao } = {}) {
     let conta = AppState.profile && AppState.profile.id;
     if (conta === null || conta === undefined || conta === '') {
         try { const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); conta = c && c.id; } catch (e) { conta = null; }
@@ -20003,9 +20019,27 @@ function presencaWmeGravarPendente() {
     if (conta === null || conta === undefined || conta === '') return;
     conta = String(conta);
     const g = AppState.preferences.presencaWmeDesligar;
-    if (g && g.conta === conta) return;   // já gravado: o `setItem` é síncrono, e cada repetição passaria aqui
-    AppState.preferences.presencaWmeDesligar = { conta, em: Date.now() };
+    const mesma = !!(g && g.conta === conta);
+    if (tentadoEm === undefined) {
+        if (mesma) return;   // já gravado: o `setItem` é síncrono, e cada repetição passaria aqui
+        AppState.preferences.presencaWmeDesligar = { conta, em: Date.now() };
+    } else {
+        const novo = { conta, em: mesma ? g.em : Date.now() };
+        if (tentadoEm > 0) { novo.tentadoEm = tentadoEm; novo.sessao = sessao; }
+        if (mesma && g.tentadoEm === novo.tentadoEm && g.sessao === novo.sessao) return;
+        AppState.preferences.presencaWmeDesligar = novo;
+    }
     savePreferences();
+}
+
+// A página SAI com o "invisível" no AR: o envio morre com ela (o `fetch` sem
+// keepalive é cancelado no unload), e o carimbo dele faria a outra aba — ou a
+// reabertura — esperar o teto à toa. O gravado fica, sem o carimbo: quem o
+// manda é a próxima prova de rede de lá (R7-5-03, R8-5-07). Chamado no
+// `pagehide` (`setupDescargaAoSair`); a página só ESCONDIDA segue viva e
+// mantém o carimbo.
+function presencaWmeSoltarAoSair() {
+    if (presencaWme.desligarNoAr && AppState.preferences.presenca === false) presencaWmeGravarPendente({ tentadoEm: 0 });
 }
 
 function presencaWmeEsquecerGravado() {
@@ -20046,15 +20080,42 @@ function presencaWmeRefazerDesligar() {
     // — a resposta boa já não o apagava, e o mesmo "invisível" saía de novo um
     // minuto depois, a cada desligar com uma prova de rede no meio.
     if (presencaWme.desligarNoAr) return;
-    if (!presencaWme.desligarPendente) {
-        const g = AppState.preferences.presencaWmeDesligar;
+    // O gravado como está no APARELHO agora: a OUTRA aba o manda, carimba e
+    // apaga, e o aviso `storage` chega quando chega (R8-5-07). Ilegível
+    // (`undefined`), vale a cópia desta aba.
+    let noAparelho;
+    try {
+        const p = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || 'null');
+        const x = p && p.presenca === false ? p.presencaWmeDesligar : null;
+        noAparelho = x && typeof x === 'object' ? x : null;
+    } catch (e) { noAparelho = undefined; }
+    const g = noAparelho === undefined ? AppState.preferences.presencaWmeDesligar : noAparelho;
+    if (presencaWme.desligarPendente) {
+        // O gravado que esta aba conhecia SUMIU do aparelho: a outra aba o
+        // entregou (a resposta boa de lá o apaga) — o pendente daqui era o
+        // mesmo "invisível", e mandá-lo de novo seria o envio repetido.
+        if (noAparelho === null && AppState.preferences.presencaWmeDesligar) {
+            presencaWme.desligarPendente = false;
+            delete AppState.preferences.presencaWmeDesligar;
+            return;
+        }
+    } else {
         const id = AppState.profile && AppState.profile.id;
         if (!g || id === null || id === undefined || String(g.conta) !== String(id)) return;
-        presencaWme.desligarPendente = true;
     }
-    // O teto é da sessão que levou a recusa: numa sessão nova, sai já.
-    if (Date.now() - presencaWme.desligarEm < PRESENCA_WME_DESLIGAR_REPETIR_MS
-        && presencaWme.desligarSessao === marcaDaSessao(API.getSession())) return;
+    // O teto é da sessão que levou a recusa: numa sessão nova, sai já. E é do
+    // APARELHO: conta o último envio desta aba e o de QUALQUER aba, que o gravado
+    // carrega (`tentadoEm`). A outra aba adotava o gravado com o envio desta no
+    // ar — o mesmo "invisível" duas vezes — e, com o Waze fora, cada aba
+    // repetia no teto dela (MEDIDO: 11 envios em 5 min com duas abas, contra 6
+    // com uma; auditoria da rodada 8, R8-5-07). Só depois do teto o gravado é
+    // adotado: adotado antes, o pendente ficava na memória mesmo com a outra
+    // aba entregando.
+    const sessao = marcaDaSessao(API.getSession());
+    const daqui = presencaWme.desligarSessao === sessao ? presencaWme.desligarEm : 0;
+    const deQualquerAba = g && g.sessao === sessao && Number.isFinite(g.tentadoEm) ? g.tentadoEm : 0;
+    if (Date.now() - Math.max(daqui, deQualquerAba) < PRESENCA_WME_DESLIGAR_REPETIR_MS) return;
+    presencaWme.desligarPendente = true;
     presencaWmeDesligar({ repeticao: true });
 }
 
@@ -21362,7 +21423,14 @@ function lerPreferenciasGuardadas() {
             const pend = parsed.presencaWmeDesligar;
             if (parsed.presenca === false && pend && typeof pend === 'object'
                 && /^\d{1,19}$/.test(String(pend.conta)) && Number.isFinite(pend.em)) {
-                AppState.preferences.presencaWmeDesligar = { conta: String(pend.conta), em: pend.em };
+                const g = { conta: String(pend.conta), em: pend.em };
+                // O último envio (de qualquer aba) e a sessão dele: o teto da
+                // repetição é do aparelho (R8-5-07).
+                if (Number.isFinite(pend.tentadoEm) && pend.tentadoEm > 0 && typeof pend.sessao === 'string') {
+                    g.tentadoEm = pend.tentadoEm;
+                    g.sessao = pend.sessao.slice(0, 16);
+                }
+                AppState.preferences.presencaWmeDesligar = g;
             }
             // O `presencaWmeVisto` da fase 2 não é mais lido: sem carregar, o
             // próximo `savePreferences` já grava sem ele.
@@ -21517,6 +21585,8 @@ function setupDescargaAoSair() {
         // na fila de saída saem com ela, inclusive a do que está no ar (ver
         // `soltarReivindicacoes`). A aba só ESCONDIDA segue viva e as mantém.
         try { soltarReivindicacoes({ comAsDoAr: true }); } catch (e) { /* a saída segue */ }
+        // E o "invisível" no ar: o carimbo dele sai do gravado (ver a função).
+        try { presencaWmeSoltarAoSair(); } catch (e) { /* a saída segue */ }
     });
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') descarregarAcaoPendente();

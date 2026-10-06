@@ -587,3 +587,175 @@ test('R8-5-06 o "lida" no ar segura os seguintes só até o teto do `_post`: pen
   await c.rodarTimers(); await tick();
   assert.equal(lidas(c).length, 2, 'o "lida" pendurado travou o da conversa pra sempre');
 });
+
+// ── R8-5-07: o "invisível" repetido pela outra aba ───────────────────────────
+
+// Um aparelho com ABAS (o padrão do `presenca-auditoria-r7`): o armazenamento é
+// um só, e a memória (presencaWme, AppState) é de cada uma. `resposta` responde
+// o `presenca-waze` — uma promessa que não volta é o envio NO AR.
+function aparelho() {
+  const guardado = new Map();
+  const localStorage = {
+    getItem: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    setItem: (k, v) => guardado.set(k, String(v)),
+    removeItem: (k) => guardado.delete(k),
+  };
+  const pedidos = [];
+  const relogio = { agora: T };
+  return {
+    guardado, pedidos, relogio,
+    gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
+    pagina({ nome = 'aba', resposta = () => ({ success: true }) } = {}) {
+      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
+      const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
+      const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica',
+        'relerPreferenciasDeOutraAba', 'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado',
+        'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar',
+        'presencaWmeSoltarAoSair'], {
+        AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true,
+        CONTA_KEY: constante('CONTA_KEY'), PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+        safeLS: { get: (k) => localStorage.getItem(k) }, dfato: () => {}, Date: { now: () => relogio.agora },
+        API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, ...c }); return resposta(c); } },
+        desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
+        offlineEsquecer: () => {}, window: { Presenca: { desligar: () => {}, renderPilula: () => {} } },
+      });
+      h.lerPreferenciasGuardadas();
+      // O gesto, na ordem do ouvinte do interruptor (`prefPresenca`).
+      const desligar = () => { AppState.preferences.presenca = false; AppState.preferences.presencaOffEm = relogio.agora; h.presencaWmeDesligar(); h.savePreferences(); };
+      return { ...h, AppState, presencaWme, desligar, fechar: () => h.presencaWmeSoltarAoSair() };
+    },
+  };
+}
+const esperaTick = () => new Promise((r) => setTimeout(r, 0));
+const WAZE_FORA = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+
+test('R8-5-07 duas abas vivas e o envio da aba do gesto NO AR: a outra não manda o mesmo "invisível" (nem antes, nem depois da resposta)', async () => {
+  const a = aparelho();
+  const soltar = [];
+  const A = a.pagina({ nome: 'A', resposta: () => new Promise((ok) => soltar.push(ok)) });
+  const B = a.pagina({ nome: 'B' });
+  A.desligar();                                             // o envio de A fica no ar (sinal fraco)
+  await esperaTick();
+  B.relerPreferenciasDeOutraAba();                          // o aviso `storage` chega à B
+  for (let i = 0; i < 3; i++) {                             // as respostas da API na B (os ✕ dela)
+    a.relogio.agora += 5_000;
+    B.presencaWmeRefazerDesligar();
+    await esperaTick();
+  }
+  assert.deepEqual(a.pedidos.map((x) => x.aba), ['A'], 'DEFEITO: a outra aba mandou o mesmo "invisível" com o de A no ar');
+  soltar[0]({ success: true });                             // e o envio de A chega, bem
+  await esperaTick();
+  a.relogio.agora += 61_000;
+  B.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(a.pedidos.map((x) => x.aba), ['A'], 'o "invisível" que A entregou saiu de novo pela B');
+  assert.equal(a.gravado(), null);
+});
+
+test('R8-5-07 CONTROLES: a aba do gesto FECHA com o envio no ar → a outra manda na hora; morta sem `pagehide` → só depois do teto', async () => {
+  // (a) Fechou (o `pagehide`): o envio morreu com ela, e o carimbo sai.
+  const a = aparelho();
+  const A = a.pagina({ nome: 'A', resposta: () => new Promise(() => {}) });
+  const B = a.pagina({ nome: 'B' });
+  A.desligar();
+  await esperaTick();
+  A.fechar();
+  B.relerPreferenciasDeOutraAba();
+  a.relogio.agora += 5_000;
+  B.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(a.pedidos.map((x) => x.aba), ['A', 'B'], 'a aba que fechou com o envio no ar segurou o "invisível" na outra');
+  assert.equal(a.gravado(), null);
+  // (b) Morta SEM `pagehide` (o sistema encerrou o app): a outra espera o teto do último envio, e manda.
+  const m = aparelho();
+  const M = m.pagina({ nome: 'A', resposta: () => new Promise(() => {}) });
+  const N = m.pagina({ nome: 'B' });
+  M.desligar();
+  await esperaTick();
+  N.relerPreferenciasDeOutraAba();
+  m.relogio.agora += 10_000;
+  N.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(m.pedidos.map((x) => x.aba), ['A'], 'CONTROLE: dentro do teto, a outra aba não manda');
+  m.relogio.agora += 51_000;
+  N.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(m.pedidos.map((x) => x.aba), ['A', 'B'], 'passado o teto, o "invisível" de quem morreu no ar nunca saiu');
+});
+
+test('R8-5-07 o Waze fora com DUAS abas: o teto de um por minuto é do aparelho — os mesmos envios de uma aba só', async () => {
+  const contar = async (abas) => {
+    const a = aparelho();
+    const A = a.pagina({ nome: 'A', resposta: () => WAZE_FORA });
+    const B = abas === 2 ? a.pagina({ nome: 'B', resposta: () => WAZE_FORA }) : null;
+    A.desligar();
+    await esperaTick();
+    if (B) B.relerPreferenciasDeOutraAba();
+    // 5 min, uma resposta da API a cada 10 s em cada aba (a ordem entre elas alterna).
+    for (let s = 0; s < 300; s += 10) {
+      a.relogio.agora += 10_000;
+      const vez = B && (s / 10) % 2 ? [B, A] : [A, B];
+      for (const x of vez) if (x) { x.presencaWmeRefazerDesligar(); await esperaTick(); }
+    }
+    return a.pedidos;
+  };
+  const uma = await contar(1);
+  const duas = await contar(2);
+  assert.equal(uma.length, 6, 'CONTROLE: com uma aba, um envio por minuto');
+  assert.equal(duas.length, uma.length, `DEFEITO: com duas abas, ${duas.length} envios em 5 min contra ${uma.length} com uma`);
+  for (let i = 1; i < duas.length; i++) assert.ok(duas[i].em - duas[i - 1].em >= 60_000, 'dois envios a menos de um minuto um do outro');
+});
+
+test('R8-5-07 o "invisível" que a outra aba ENTREGOU tira o pendente desta — e o carimbo sobrevive à gravação de preferências da outra', async () => {
+  // (a) As duas abas com o pendente (o Waze fora); a B entrega: a A não manda de novo.
+  const a = aparelho();
+  let fora = true;
+  const resp = () => (fora ? WAZE_FORA : { success: true });
+  const A = a.pagina({ nome: 'A', resposta: resp });
+  const B = a.pagina({ nome: 'B', resposta: resp });
+  A.desligar();
+  await esperaTick();
+  B.relerPreferenciasDeOutraAba();
+  a.relogio.agora += 61_000;
+  B.presencaWmeRefazerDesligar();                           // a B adota e manda (falha: o Waze fora)
+  await esperaTick();
+  assert.equal(A.presencaWme.desligarPendente && B.presencaWme.desligarPendente, true, 'CONTROLE: as duas abas tinham que ficar com o pendente');
+  fora = false;
+  a.relogio.agora += 61_000;
+  B.presencaWmeRefazerDesligar();                           // a B entrega
+  await esperaTick();
+  assert.equal(a.gravado(), null, 'CONTROLE: a entrega tinha que apagar o gravado');
+  a.relogio.agora += 61_000;
+  A.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(a.pedidos.map((x) => x.aba), ['A', 'B', 'B'], 'DEFEITO: a aba A mandou de novo o "invisível" que a B já tinha entregado');
+  // (b) A B grava as preferências dela (outra chave) com o envio de A no ar: o
+  // carimbo de A não pode sumir do aparelho — sem ele, a B manda de novo.
+  const c = aparelho();
+  const C = c.pagina({ nome: 'A', resposta: () => new Promise(() => {}) });
+  const D = c.pagina({ nome: 'B' });
+  C.desligar();
+  await esperaTick();
+  D.relerPreferenciasDeOutraAba();
+  assert.ok(Number.isFinite(D.AppState.preferences.presencaWmeDesligar.tentadoEm), 'a releitura da outra aba perdeu o carimbo do envio');
+  D.AppState.preferences.undoEnabled = false;               // um toque nas Preferências da B
+  D.savePreferences();
+  c.relogio.agora += 5_000;
+  D.presencaWmeRefazerDesligar();
+  await esperaTick();
+  assert.deepEqual(c.pedidos.map((x) => x.aba), ['A'], 'a gravação de preferências da outra aba apagou o carimbo — e ela mandou de novo');
+});
+
+test('R8-5-07 quem tira o carimbo ao sair é o `pagehide` da página (a página só escondida o mantém)', () => {
+  const chamou = [];
+  const doc = { _ouv: {}, addEventListener(t, fn) { (this._ouv[t] ||= []).push(fn); } };
+  const win = { _ouv: {}, addEventListener(t, fn) { (this._ouv[t] ||= []).push(fn); } };
+  montar(['setupDescargaAoSair'], { document: doc, window: win, API: {},
+    descarregarAcaoPendente: () => chamou.push('descarga'), soltarReivindicacoes: () => chamou.push('marcas'),
+    presencaWmeSoltarAoSair: () => chamou.push('invisivel') }).setupDescargaAoSair();
+  doc.visibilityState = 'hidden';
+  for (const fn of doc._ouv.visibilitychange || []) fn();
+  assert.deepEqual(chamou, ['descarga'], 'a página só ESCONDIDA tirou o carimbo do "invisível" no ar (ela segue viva)');
+  for (const fn of win._ouv.pagehide || []) fn({ persisted: false });
+  assert.deepEqual(chamou, ['descarga', 'descarga', 'marcas', 'invisivel'], 'o `pagehide` não tira o carimbo do "invisível" no ar');
+});
