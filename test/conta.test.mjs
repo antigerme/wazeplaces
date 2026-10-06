@@ -63,6 +63,8 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
     esquecerEscolhasDaContaAnterior: () => log.push('escolhas'),   // (test/contas-abas, A3)
     fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
+    esquecerRecursosDaPagina: () => log.push('recursos'),   // a lista de recursos do relatório (R8-1-05)
+    esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
@@ -108,7 +110,8 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   m.app.aoConhecerConta({ id: 'B' });
   const fila = m.app.carregarFilaDeSaida();
   assert.deepEqual(fila.map((x) => x.venueID), ['v2'], 'a decisão de A ficou pra sair no nome de B');
-  for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'camadas', 'toast:toast.outraConta']) {
+  for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'camadas', 'toast:toast.outraConta',
+    'recursos', 'painel']) {
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
@@ -123,6 +126,8 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a mesma conta perdeu a fila de saída');
   assert.ok(!c.log.includes('autores') && !c.log.includes('foco') && !c.log.includes('dfato:conta.trocou'));
   assert.ok(!c.log.includes('camadas'), 'a MESMA conta voltando fechou o que ela tinha aberto (é dela)');
+  assert.ok(!c.log.includes('recursos') && !c.log.includes('painel'),
+    'a MESMA conta voltando perdeu a lista de recursos (o relatório dela) ou o painel do Histórico (é dela)');
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {
@@ -337,6 +342,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
     fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
+    esquecerRecursosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];

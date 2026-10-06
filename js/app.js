@@ -951,7 +951,9 @@ const LIMPEZA_AO_FECHAR = {
         // no DOM do painel fechado (a próxima abertura a desenha de novo): ela
         // ficava depois do "Sair", e a próxima conta que ligasse o modo dev na
         // mesma página a levava no relatório (auditoria de 2026-10-02, R6-1-05).
-        esvaziarListaDeAutores();
+        // Nem o resto do painel do Histórico: a patente, os totais e o Resumo do
+        // mês de quem estava (R8-7-06).
+        esvaziarPainelDoHistorico();
     },
     // A folha do autor: o nome dele e as linhas com a contagem (R6-1-05).
     autorModal() {
@@ -5202,8 +5204,9 @@ function showAuthScreen() {
     const anuncio = document.getElementById('cardLiveRegion');
     if (anuncio) anuncio.textContent = '';
     // E a lista de autores rejeitados (ver a função): a folha do autor pode tê-la
-    // redesenhado no painel fechado (R6-1-05).
-    esvaziarListaDeAutores();
+    // redesenhado no painel fechado (R6-1-05) — e, com ela, o painel inteiro do
+    // Histórico, com a patente e os totais de quem estava (R8-7-06).
+    esvaziarPainelDoHistorico();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -8198,6 +8201,34 @@ function diagAjustarRecursos() {
     } catch (e) { /* navegador sem a API: fica o padrão */ }
 }
 
+// ── De QUEM é a lista de RECURSOS ─────────────────────────────────────────
+// O relatório a leva inteira, e ela guarda a URL da foto de perfil (com o id de
+// quem estava aqui) e as fotos dos pedidos de terceiros (o id do pedido vai no
+// nome). O "Sair" e a troca de conta a LIMPAM — e só limpar não bastava: o
+// download que ainda estava no ar termina DEPOIS da limpeza, e a entrada dele
+// volta pra lista. MEDIDO com a foto do card chegando em 4 s e o "Sair" no
+// meio: a lista sai vazia e, 6 s depois, tem a foto de novo — que ia no
+// relatório da próxima conta que entrasse na mesma página (auditoria de
+// 2026-10-03, R8-1-04). E a troca de conta nem limpava (R8-1-05).
+//
+// CORTAR o download não resolve: tirar o `src` do <img> (ou trocá-lo por '') não
+// cancela a ida do navegador, e a entrada volta igual — MEDIDO no Chromium 153 e
+// no WebKit 26, com a <img> no DOM, fora dele e solta (`new Image()`). O que
+// separa a foto de quem saiu é QUANDO o download COMEÇOU: o `startTime` dela é
+// anterior à limpeza (medido nos dois motores; a que começa depois tem o
+// `startTime` depois). Daí a marca: o relatório só leva o que começou depois
+// dela (`diagRecursosDaSessao`), termine quando terminar.
+let diagRecursosDesde = 0;   // o `performance.now()` da última limpeza
+function esquecerRecursosDaPagina() {
+    try { diagRecursosDesde = performance.now(); } catch (e) { /* sem a API: só a limpeza */ }
+    try { performance.clearResourceTimings(); } catch (e) {}
+}
+function diagRecursosDaSessao() {
+    let lista = [];
+    try { lista = performance.getEntriesByType('resource'); } catch (e) { return []; }
+    return lista.filter((r) => r.startTime >= diagRecursosDesde);
+}
+
 function diagCapturarErros() {
     // A lista bateu no teto: o relatório tem que DIZER isso, senão a ausência
     // do que veio depois lê como "não aconteceu".
@@ -8486,8 +8517,9 @@ async function diagCorpo() {
     // O CÓDIGO que está rodando: tamanho, hash e versão de cada arquivo (o corpo,
     // só do CSS — ver abaixo). É isto que responde "o PWA está com a versão
     // velha?" — pergunta que o serial sozinho não responde, porque ele só diz o
-    // que o `version.js` carregado afirma, não o que o resto é.
-    const recursos = performance.getEntriesByType('resource')
+    // que o `version.js` carregado afirma, não o que o resto é. Só o que começou
+    // DEPOIS do último "Sair" ou troca de conta (ver `diagRecursosDaSessao`).
+    const recursos = diagRecursosDaSessao()
         .map((r) => ({ url: r.name, tipo: r.initiatorType, ms: Math.round(r.duration),
                        bytes: r.transferSize,
                        doCache: r.transferSize === 0 && r.decodedBodySize > 0 }));
@@ -9567,8 +9599,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // A lista de recursos do navegador também, pelo mesmo motivo: o diagnóstico
     // a leva inteira, e ela guardava a URL da foto de perfil (com o id de quem
     // saiu) e as fotos dos pedidos de terceiros — MEDIDO depois do "Sair", as
-    // duas seguiam lá (auditoria de 2026-09-26).
-    try { performance.clearResourceTimings(); } catch (e) {}
+    // duas seguiam lá (auditoria de 2026-09-26). E o que ainda estava chegando
+    // não volta pro relatório depois da limpeza (ver a função; R8-1-04).
+    esquecerRecursosDaPagina();
     AppState.profile = null;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
@@ -16548,6 +16581,21 @@ function esvaziarListaDeAutores() {
     if (el) el.innerHTML = '';
 }
 
+// E o painel INTEIRO, pelos mesmos caminhos (o painel que fecha, a tela de
+// entrada, a troca de conta): a patente, os totais de hoje à semana, o botão do
+// Resumo com o mês e a vitrine de conquistas são o trabalho de QUEM ESTAVA aqui.
+// Só a lista de autores saía, e o resto ficava no DOM escondido — depois do
+// "Sair" e na sessão da conta que entrou, que o levava no relatório do modo dev
+// (MEDIDO; auditoria de 2026-10-03, R8-7-06). Esvaziar é seguro: o painel é
+// desenhado ao ENTRAR na aba (`switchFilterTab`) e ao abrir os Filtros
+// (`openFiltersModal`), e o ouvinte das conquistas mora no `#historyBody`, que
+// fica.
+function esvaziarPainelDoHistorico() {
+    const el = document.getElementById('historyBody');
+    if (el) el.innerHTML = '';
+    esvaziarListaDeAutores();
+}
+
 // Esquecer pela LISTA do Histórico. O card da frente (atrás do modal) e o de
 // fundo podem estar mostrando o `✕ N` desse autor, e sem refazer os dois o app
 // seguia afirmando a contagem que a pessoa acabou de apagar — e o selo abria a
@@ -17180,6 +17228,9 @@ function esquecerOutraConta(id) {
     safeLS.remove(CONQUISTAS_KEY);
     AppState.conquistas = null;
     atualizarSeloDeConquista();
+    // E o painel do Histórico dela, que fica no DOM com os Filtros fechados (a
+    // folha do autor o redesenha assim; ver a função; R8-7-06).
+    esvaziarPainelDoHistorico();
     AppState.stats = { read: 0, rejected: 0, skipped: 0 };
     // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
     // placar, e o placar acabou de zerar: com a base da conta anterior (5
@@ -17210,6 +17261,11 @@ function esquecerOutraConta(id) {
     updateStats();
     offlineEsquecer();
     dlogApagar();
+    // A lista de recursos do navegador, como no "Sair": a URL da foto de perfil
+    // (com o id da conta anterior) e as das fotos da fila dela iam no relatório
+    // do modo dev de quem entrou (MEDIDO; auditoria de 2026-10-03, R8-1-05). O
+    // que ainda estava chegando também fica de fora (ver a função).
+    esquecerRecursosDaPagina();
     // A fila na tela, se atravessou a sessão (a renovação silenciosa a manteve),
     // é da conta anterior — dos filtros e das permissões dela: sai, e a de quem
     // entrou é buscada. Nos outros caminhos de entrada a fila já nasceu desta

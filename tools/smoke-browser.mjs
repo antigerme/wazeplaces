@@ -10060,8 +10060,16 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#filtersTabHistory');
   await assentarCamada();
   const comHistorico = await varrer();
+  // O RESTO do painel do Histórico (R8-7-06, auditoria de 2026-10-03): a patente,
+  // os totais e o botão do Resumo são o trabalho de quem estava — números, sem a
+  // marca, então medidos pelo tamanho do texto. Ficavam no DOM do painel fechado.
+  const historicoAberto = await page.evaluate(() => document.getElementById('historyBody').textContent.trim().length);
   await page.evaluate(() => document.getElementById('filtersModal').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await esperarOuExplodir(page, () => document.getElementById('filtersModal').classList.contains('hidden'), 'o fundo fechar os Filtros');
+  const historicoFechado = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(historicoAberto > 0, 'sair/DOM: CONTROLE — o painel do Histórico aberto não tinha texto (a medida não enxerga o painel)',
+    String(historicoAberto));
+  checa(historicoFechado === 0, 'sair/DOM: o painel do Histórico FECHADO seguiu com a patente e os totais no DOM', String(historicoFechado));
   // A foto ampliada do card; fecha pelo ✕.
   await page.evaluate(() => { const p = AppState.currentPlace; openLightbox(p.imageUrls, 0, 0, p.name, false, p); });
   await esperarOuExplodir(page, () => Lightbox.isOpen(), 'a foto ampliada abrir');
@@ -10097,6 +10105,34 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       && mapaFechado.centro === null && mapaFechado.local === null,
     'sair/DOM: o mapa ampliado FECHADO guardou o pedido (o link do Street View, os tiles, os marcadores ou os pontos na memória)',
     JSON.stringify(mapaFechado));
+  // A folha do autor redesenha o painel do Histórico com os Filtros FECHADOS (o
+  // "Esquecer" dela): o painel volta ao DOM escondido, e o "Sair" tem que tirá-lo
+  // (R8-7-06). CONTROLE: o redesenho escondido aconteceu.
+  await page.evaluate(() => abrirFolhaDoAutor(AppState.currentPlace));
+  await esperarOuExplodir(page, () => !document.getElementById('autorModal').classList.contains('hidden'), 'a folha do autor abrir de novo');
+  await tocar('#autorEsquecer');
+  await esperarOuExplodir(page, () => document.getElementById('autorModal').classList.contains('hidden'), 'o "Esquecer" fechar a folha');
+  const historicoRedesenhado = await page.evaluate(() => (document.getElementById('filtersModal').classList.contains('hidden')
+    ? document.getElementById('historyBody').textContent.trim().length : -1));
+  checa(historicoRedesenhado > 0,
+    'sair/DOM: CONTROLE — o "Esquecer" da folha não redesenhou o painel do Histórico escondido (o caso que o "Sair" tem de limpar não aconteceu)',
+    String(historicoRedesenhado));
+  // A FOTO QUE AINDA CHEGAVA no "Sair" (R8-1-04, auditoria de 2026-10-03). A
+  // limpeza da lista de recursos do navegador deixava de fora o download no ar:
+  // ele terminava depois, a entrada voltava, e a foto do pedido de terceiro ia no
+  // relatório do modo dev de quem usasse a página depois. Uma foto de pedido sai
+  // pelo aquecimento do app (o mesmo caminho do próximo card) e a resposta dela é
+  // SEGURADA até depois do "Sair".
+  let fotoLentaChegou = null;
+  const fotoLentaPedida = new Promise((ok) => { fotoLentaChegou = ok; });
+  await ctx.route('**/thumb700_LENTA_PRIVSAIR.png', async (r) => {
+    fotoLentaChegou();
+    await dormir(2500);
+    await r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }).catch(() => {});
+  });
+  await page.evaluate((u) => aquecer(u), 'https://venue-image.waze.com/thumbs/thumb700_LENTA_PRIVSAIR.png');
+  const fotoNoAr = await Promise.race([fotoLentaPedida.then(() => true), dormir(5000).then(() => false)]);
+  checa(fotoNoAr, 'sair/recursos: PRÉ-CONDIÇÃO — a foto lenta nem foi pedida antes do "Sair"');
   // O "Sair", pela Ajuda.
   await tocar('#helpBtn');
   await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
@@ -10107,6 +10143,23 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'a tela de entrada depois do "Sair"');
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
+  const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(historicoDepoisDoSair === 0,
+    'sair/DOM: depois do "Sair", o painel do Histórico (redesenhado com os Filtros fechados) seguiu no DOM', String(historicoDepoisDoSair));
+  // A foto termina DEPOIS do "Sair" e volta à lista CRUA do navegador — o CONTROLE
+  // de que o caso aconteceu; o relatório do modo dev não pode levá-la.
+  const fotoVoltou = await esperarNaPagina(page,
+    () => performance.getEntriesByType('resource').some((e) => e.name.includes('thumb700_LENTA_PRIVSAIR')), 10000);
+  checa(fotoVoltou.ok, 'sair/recursos: CONTROLE — a foto que terminou depois do "Sair" não voltou à lista crua (a medida não enxerga o caso)');
+  const noRelatorio = await page.evaluate(async () => {
+    AppState.devMode = { unlocked: true, active: true };
+    try {
+      const d = await diagCorpo();
+      return (d.recursos || []).map((r) => r.url).filter((u) => u.includes('PRIVSAIR'));
+    } finally { AppState.devMode = { unlocked: false, active: false }; }
+  });
+  checa(noRelatorio.length === 0, 'sair/recursos: a foto de terceiro que ainda chegava no "Sair" foi no relatório do modo dev',
+    JSON.stringify(noRelatorio));
   // O "Acesso restrito" do login por cookies: o perfil recusado aparece no
   // diálogo (CONTROLE) e sai dele quando ele fecha (pelo voltar do aparelho).
   // (Uma linha do Waze basta: quem recusa é o servidor de mentira.)
@@ -10208,6 +10261,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
-  + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto)`
+  + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

@@ -214,9 +214,65 @@ test('a foto agendada da conta que SAIU não pousa no <img> da que entrou (époc
   assert.equal(el.src, '', 'a foto da conta que saiu pousou no cabeçalho da que entrou');
 });
 
-test('o "Sair" limpa a lista de recursos que o diagnóstico leva (foto de perfil e fotos de terceiros)', () => {
-  assert.match(fatiar('handleLogout'), /try \{ performance\.clearResourceTimings\(\); \} catch \(e\) \{\}/,
-    'a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos');
+test('o "Sair" e a troca de conta limpam a lista de recursos que o diagnóstico leva (foto de perfil e fotos de terceiros)', () => {
+  // Os dois passam pela MESMA limpeza — a troca de conta não passava por
+  // nenhuma (auditoria de 2026-10-03, R8-1-05). Ancorado no começo da linha:
+  // o comentário em volta cita o nome (gotcha #67).
+  for (const quem of ['handleLogout', 'esquecerOutraConta']) {
+    assert.match(fatiar(quem), /^\s+esquecerRecursosDaPagina\(\);$/m,
+      `${quem}: a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos`);
+  }
+});
+
+// ═══ R8-1-04 · a foto que ainda CHEGAVA no "Sair" ═════════════════════════════
+// Limpar a lista de recursos não bastava: o download no ar terminava DEPOIS da
+// limpeza, e a entrada voltava — a foto do pedido de terceiro ia no relatório
+// do modo dev da próxima conta que entrasse na mesma página (MEDIDO no Chromium
+// e no WebKit, auditoria de 2026-10-03). Cortar o download não resolve (tirar o
+// `src` não cancela a ida do navegador — medido nos dois motores); o que separa
+// a foto de quem saiu é QUANDO ela começou. Roda as duas funções DE VERDADE num
+// `performance` de mentira que se comporta como o do navegador: a limpeza
+// esvazia o que TERMINOU, e o que termina depois entra com o `startTime` do
+// começo.
+test('R8-1-04: a foto que chega DEPOIS da limpeza não volta pro relatório — o que conta é quando ela COMEÇOU', () => {
+  const montarRecursos = () => {
+    const relogio = { agora: 0 };
+    const lista = [];
+    const performance = {
+      now: () => relogio.agora,
+      clearResourceTimings: () => { lista.length = 0; },
+      getEntriesByType: (tipo) => (tipo === 'resource' ? lista.slice() : []),
+    };
+    const fns = montar(['esquecerRecursosDaPagina', 'diagRecursosDaSessao'], { performance },
+      ['esquecerRecursosDaPagina', 'diagRecursosDaSessao'], 'let diagRecursosDesde = 0;');
+    const terminou = (name, startTime) => lista.push({ name, startTime });
+    return { ...fns, relogio, terminou, nomes: () => fns.diagRecursosDaSessao().map((r) => r.name) };
+  };
+  const m = montarRecursos();
+  m.terminou('/js/min/app.js', 5);
+  m.terminou('https://sms-profile-image.waze.com/AVATAR_DE_QUEM_SAIU', 40);
+  assert.deepEqual(m.nomes(), ['/js/min/app.js', 'https://sms-profile-image.waze.com/AVATAR_DE_QUEM_SAIU'],
+    'CONTROLE: antes de qualquer "Sair" o relatório leva a lista inteira');
+  // A foto do card começou aos 100 ms; o "Sair" limpa aos 400; ela termina aos 4.100.
+  m.relogio.agora = 400;
+  m.esquecerRecursosDaPagina();
+  assert.deepEqual(m.nomes(), [], 'a limpeza deixou o que já tinha terminado');
+  m.terminou('https://venue-image.waze.com/thumbs/thumb700_FOTO_DE_TERCEIRO.jpg', 100);
+  // O que a próxima conta pede começa DEPOIS da limpeza, e é dela.
+  m.terminou('/api/buscar-places', 900);
+  assert.deepEqual(m.nomes(), ['/api/buscar-places'],
+    'DEFEITO: a foto que ainda chegava no "Sair" voltou pro relatório da próxima conta');
+});
+
+test('R8-1-04: o relatório lê a lista de recursos SÓ pela régua da sessão — nenhum leitor cru dela', () => {
+  // Guard pela ESTRUTURA: o único leitor da lista crua é o `diagRecursosDaSessao`,
+  // e o `diagCorpo` monta os `recursos` dele. Um leitor novo da lista crua levaria
+  // a foto de quem saiu de volta pro relatório.
+  const leitores = [...APP_SEM.matchAll(/getEntriesByType\('resource'\)/g)].length;
+  assert.equal(leitores, 1, `a lista crua de recursos tem ${leitores} leitores no app.js — passe pelo diagRecursosDaSessao`);
+  assert.match(fatiar('diagRecursosDaSessao'), /getEntriesByType\('resource'\)/);
+  assert.match(fatiar('diagCorpo'), /const recursos = diagRecursosDaSessao\(\)\n/,
+    'o relatório deixou de montar os recursos pela régua da sessão');
 });
 
 // ── A4: o autor em foco é da fila de QUEM ESTAVA aqui ──────────────────────
@@ -232,6 +288,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
+    esquecerRecursosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
