@@ -8153,10 +8153,12 @@ const DEV_FAB_ACIONAVEL = 'button, a[href], input, select, textarea, label[for],
 // alguém lembrar de somá-lo a uma lista deste arquivo. E é marcador PURO — sem
 // regra em CSS nenhuma —, senão reusar a classe arrastaria aparência junto
 // (gotcha #56) e mexer nela deixaria de ser barato.
-// Escopo de propósito ESTREITO: só o placar. As leituras curtas sobre a FOTO
-// (escala do mapa, "3/5") ficam de fora porque a foto é justamente o que o FAB
-// pode cobrir, e alargar o marcador até elas desqualificaria os cantos do meio
-// — com a chance de não sobrar canto nenhum, que é pior que o defeito.
+// Escopo de propósito ESTREITO: o placar e o "N esperando envio" (o
+// `#inFlightIndicator`, que mora fora do placar — R9-4-05). As leituras curtas
+// sobre a FOTO (escala do mapa, "3/5") ficam de fora porque a foto é justamente
+// o que o FAB pode cobrir, e alargar o marcador até elas desqualificaria os
+// cantos do meio — com a chance de não sobrar canto nenhum, que é pior que o
+// defeito.
 const DEV_FAB_LEITURA = '.nao-cobrir';
 const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL + ', ' + DEV_FAB_LEITURA;
 
@@ -8235,6 +8237,25 @@ function devFabVitimas(canto, w, h, fab) {
         // FAB media a si mesmo, achava o canto onde já estava sempre ocupado e
         // fugia dele a cada troca de camada.
         if (alvo && !fab.contains(alvo)) vitimas.add(alvo);
+    }
+    // O NÚMERO menor que a grade (R9-4-05). A grade amostra 3 linhas a 0,02, 0,5 e
+    // 0,98 da altura — num FAB de 44 px, a 1, 22 e 43 px —, e o "N esperando
+    // envio" tem 17 px de altura: no computador e no tablet ele cabia INTEIRO
+    // entre a 1ª e a 2ª linha, nenhum ponto o tocava, e o FAB o cobria 100% com
+    // o canto lido como livre (MEDIDO a 1280×800 e 768×1024, já com o
+    // `.nao-cobrir` nele). Pra o que se LÊ (`DEV_FAB_LEITURA`), o que vale é a
+    // INTERSEÇÃO com o canto — cobrir parte de um número já mente —, e quem
+    // decide se ele está mesmo À VISTA ali é o hit-test no meio da sobreposição,
+    // pelo mesmo `devFabSob` da grade: atrás de um modal ele não é vítima, como
+    // o placar não é (o teste da camada que segue decidindo o canto).
+    for (const el of document.querySelectorAll(DEV_FAB_LEITURA)) {
+        if (vitimas.has(el)) continue;
+        const r = el.getBoundingClientRect();
+        const x0 = Math.max(x, r.left), x1 = Math.min(x + w, r.right);
+        const y0 = Math.max(y, r.top), y1 = Math.min(y + h, r.bottom);
+        if (x1 <= x0 || y1 <= y0) continue;
+        const sob = devFabSob((x0 + x1) / 2, (y0 + y1) / 2, fab);
+        if (sob && el.contains(sob)) vitimas.add(el);
     }
     return vitimas.size;
 }
@@ -22075,9 +22096,11 @@ function updateInFlightIndicator() {
     let el = document.getElementById('inFlightIndicator');
     const esperando = AppState.authenticated ? carregarFilaDeSaida().length : 0;
     if (AppState.inFlightActions <= 0 && esperando <= 0) {
-        if (el) el.remove();
+        // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo).
+        if (el) { el.remove(); atualizarFabDev(); }
         return;
     }
+    const nasceu = !el;
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
@@ -22121,7 +22144,14 @@ function updateInFlightIndicator() {
     // cartão do placar, e -700 media 4,8:1 contra um mínimo de 4,5 — passa, mas
     // com 0,3 de folga. O `.valor-ausente` já nasceu numa margem dessas e teve
     // que ser corrigido depois (gotcha #40: constante de contraste tem ESCOPO).
-    el.className = 'fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
+    //
+    // `nao-cobrir`: é um NÚMERO, e o FAB do modo dev não pousa em cima de número
+    // (ver `DEV_FAB_LEITURA`) — cobrir "3" é sumir com a única coisa que diz que há
+    // decisão esperando sinal, justo o que se olha ao depurar o offline. Deitado,
+    // no tablet e no computador o placar não passa por baixo do `cima-dir`, o canto
+    // lia como livre, e o FAB tapava 100% do indicador (auditoria da rodada 9,
+    // R9-4-05, MEDIDO a 1280×800, 844×390 e 768×1024, nos dois motores).
+    el.className = 'nao-cobrir fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
         + (enviando ? 'text-cyan-800 dark:text-cyan-300'
                     : 'text-amber-800 dark:text-amber-300');
     el.title = texto;
@@ -22130,6 +22160,11 @@ function updateInFlightIndicator() {
     // mais nada — e "3" sozinho não diz nem o que são, nem em que estado estão.
     el.innerHTML = icone + `<span class="tnum" aria-hidden="true">${escapeHtml(String(n))}</span>`
         + `<span class="sr-only">${escapeHtml(texto)}</span>`;
+    // O indicador aparece SEM camada mudando — e o FAB só reavalia o canto quando
+    // uma camada muda (ver `ligarFabDev`): sem isto, ele ficava onde estava, em
+    // cima do número que acabou de nascer. Só no nascer e no sumir (acima), não a
+    // cada número: é a geometria que muda ali. Sem o modo dev, não faz nada.
+    if (nasceu) atualizarFabDev();
 }
 
 // Feedback quando um número muda. São DOIS mecanismos, porque contar não serve
