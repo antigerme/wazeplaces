@@ -248,7 +248,20 @@ function montarMarcarTodos({ fila, resolvidos = [], pedaco = constante('LOTE_LID
         const n = chamadas.filter((c) => c.startsWith('um:')).length;
         return (umResponde && umResponde(n, v)) || processar([{ venueID: v, updateRequestID: u }]);
       },
-      getProfile: async () => { chamadas.push('perfil'); return perfil(chamadas.filter((c) => c === 'perfil').length); },
+      // A sonda de verdade é uma ida ao servidor, e a resposta chega DEPOIS do 401
+      // que a pediu. Respondida no MESMO milissegundo (máquina rápida), ela empatava
+      // a hora da confirmação (`sessaoVivaEm.em`) com a do 401 (`levou`), e o
+      // `sessaoVivaDepoisDe` — estrito, e certo — não reenviava: reprovou o CI do
+      // #258 uma vez, e reprova sempre com o relógio de parede congelado ou grosso
+      // (`node --import tools/relogio-grosso.mjs --test`). Responde quando o relógio
+      // ANDA, com teto (relógio parado não pendura o teste: ele reprova).
+      getProfile: async () => {
+        chamadas.push('perfil');
+        const t0 = Date.now();
+        const teto = performance.now() + 2000;
+        while (Date.now() <= t0 && performance.now() < teto) await tique(1);
+        return perfil(chamadas.filter((c) => c === 'perfil').length);
+      },
     },
     // A queda (a sonda diz MORTA): a época muda, o lote no ar sai da trava. Com
     // `quedaRefazAFila`, a fila foi refeita (outra conta entrou, o "Sair").
