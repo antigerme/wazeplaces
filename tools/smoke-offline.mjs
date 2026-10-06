@@ -3419,6 +3419,170 @@ diz('o relatório feito DENTRO do treino diz isso (na tela e na captura) e leva 
   && rel9m?.triagemTreino === true && rel9m?.vazouToken === false, JSON.stringify(rel9m));
 await ctx9m.close();
 
+secao('9n. O RELATÓRIO DEPOIS DA TROCA DE CONTA, AS TELAS QUE A OUTRA ABA ENTREGOU, E O FAB × O "N ESPERANDO ENVIO"');
+// Auditoria da rodada 9, três achados do diagnóstico que só o navegador mede.
+//  · (R9-1-01 = R9-4-04) A troca de conta limpa a lista de recursos, e o código
+//    da página (carregado ANTES da limpeza) saía junto: o relatório de quem entrou
+//    conferia 2 de 11 arquivos, e o `diag-tela` remontava sem o CSS. A lista do
+//    código passou a vir também do DOCUMENTO.
+//  · (R9-4-10) As telas da aba B que foram no relatório baixado na A voltavam pra
+//    base quando B ia pro fundo de novo, e saíam de novo no próximo relatório; B
+//    seguia contando "2 não baixados". O download avisa as outras abas.
+//  · (R9-4-05) No computador, o FAB pousava no `cima-dir` e cobria 100% do
+//    "N esperando envio": o número não era `.nao-cobrir`, a grade do FAB não o
+//    tocava, e nada reavaliava o canto quando ele aparecia.
+const ctx9n = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  serviceWorkers: 'block', acceptDownloads: true });
+await ctx9n.route('**/*-tiles/live/base/**', servirTile);
+await ctx9n.route('**/api/*', rotaApi9k);
+// O aparelho guarda os dados de OUTRA conta ('9'), com a marca da sessão desta:
+// o perfil (o id 1 da rota) chega e é a troca de conta na abertura.
+const prep9n = await abrirEm(ctx9n, 'preparo');
+await esperarNaPagina(prep9n, () => typeof API !== 'undefined', 20000, 100);
+await prep9n.evaluate(() => {
+  API.setSession('tok-9n');
+  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '9', s: marcaDaSessao('tok-9n') }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+});
+await prep9n.close({ runBeforeUnload: true });
+const A9n = await abrirEm(ctx9n, 'A');
+const prontaA9n = await prontaComFab(A9n);
+const trocou9n = await esperarNaPagina(A9n, () => dfatoAnel.some((e) => e.k === 'conta.trocou'), 10000, 100);
+const pre9n = await A9n.evaluate(() => ({ dev: !!(AppState.devMode && AppState.devMode.active),
+  codigoNaLista: diagRecursosDaSessao().filter((r) => /\/js\/min\/|\/css\//.test(r.name)).length }));
+diz('PRÉ-CONDIÇÃO: a troca de conta aconteceu, o modo dev segue ligado, e a lista de recursos da sessão ficou SEM o código da página',
+  prontaA9n.ok && trocou9n.ok && pre9n.dev && pre9n.codigoNaLista === 0, JSON.stringify({ pronta: prontaA9n.ok, trocou: trocou9n.ok, pre9n }));
+const dir9n = mkdtempSync(join(tmpdir(), 'smoke-9n-'));
+const baixar9n = async (pg, nome) => {
+  const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 30000 }), pg.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dir9n, nome + '.zip');
+  await dl.saveAs(arq);
+  await pg.evaluate(() => diagGuardando);
+  return lerDiagnostico(arq).dados;
+};
+let cod9n = null;
+try {
+  const d = await baixar9n(A9n, 'troca');
+  const caminhos = Object.keys(d.codigo || {}).map((u) => u.replace(/^https?:\/\/[^/]+/, ''));
+  const css = Object.entries(d.codigo || {}).find(([u]) => /\/css\/app\.css$/.test(u));
+  cod9n = { caminhos, cssComCorpo: !!(css && typeof css[1].corpo === 'string' && css[1].corpo.length > 1000),
+    comparados: Object.keys(d.cacheVsRede || {}).filter((u) => /\/js\/min\/app\.js$|\/css\/app\.css$/.test(u)).length };
+} catch (e) { cod9n = { erro: String((e && e.message) || e).slice(0, 200) }; }
+diz('depois da TROCA DE CONTA, o relatório ainda leva o código da página — o app.js e o CSS (com o corpo, de que o diag-tela remonta), conferidos com o servidor (R9-1-01)',
+  !!cod9n?.caminhos && cod9n.caminhos.includes('/js/min/app.js') && cod9n.caminhos.includes('/css/app.css')
+  && cod9n.cssComCorpo === true && cod9n.comparados === 2, JSON.stringify(cod9n));
+// (R9-4-10) A aba B, aberta junto, registra 2 telas e vai pro fundo (a gravação de
+// ir pro fundo, chamada direto: a amplificação declarada das outras seções).
+const B9n = await abrirEm(ctx9n, 'B');
+const prontaB9n = await prontaComFab(B9n);
+const idB9n = await B9n.evaluate(() => DIAG_ABERTURA.id);
+const nB9n = await tocarFab(B9n, 2);
+await B9n.evaluate(() => diagGuardarAbertura('oculta'));
+const telasDeB = (d) => (d.aberturasAnteriores || []).filter((a) => a.id === idB9n)
+  .flatMap((a) => a.momentos || []).filter((m) => m.motivo === 'manual').length;
+let ab9n = null;
+try {
+  const d1 = await baixar9n(A9n, 'abas-1');
+  // O aviso do navegador chega a B — pelo FIM (a conta zerar), não por prazo.
+  const avisada = await esperarNaPagina(B9n, () => dlogNaoBaixados() === 0, 5000, 50);
+  const naoBaixadosB = await B9n.evaluate(() => dlogNaoBaixados());
+  // B registra MAIS UMA tela depois do download, e vai pro fundo de novo.
+  await tocarFab(B9n, 1);
+  const novaNaoBaixada = await B9n.evaluate(() => !dlogJaBaixados.has(dlogMomentos[dlogMomentos.length - 1]));
+  await B9n.evaluate(() => diagGuardarAbertura('oculta'));
+  const base9n = await guardado9c(A9n);
+  const d2 = await baixar9n(A9n, 'abas-2');
+  ab9n = { noPrimeiro: telasDeB(d1), avisada: avisada.ok, naoBaixadosB, novaNaoBaixada,
+    naBase: ((base9n.abertas || []).find((a) => a.id === idB9n) || {}).manuais, noSegundo: telasDeB(d2) };
+} catch (e) { ab9n = { erro: String((e && e.message) || e).slice(0, 200) }; }
+diz('PRÉ-CONDIÇÃO: B registrou 2 telas, e o relatório da A as levou',
+  prontaB9n.ok && nB9n === 2 && ab9n?.noPrimeiro === 2, JSON.stringify({ pronta: prontaB9n.ok, nB9n, ab9n }));
+diz('as telas de B que foram no relatório da A contam como entregues em B — o aviso do desligar não as conta (R9-4-10)',
+  ab9n?.avisada === true && ab9n?.naoBaixadosB === 0, JSON.stringify(ab9n));
+// (Lida no PRÓPRIO momento, e não pela contagem: o controle vale com e sem o
+// conserto — o que ele pega é a marcação larga demais, que daria a tela nova por
+// entregue.)
+diz('CONTROLE: a tela que B registrou DEPOIS do download segue não baixada', ab9n?.novaNaoBaixada === true, JSON.stringify(ab9n));
+diz('B, indo pro fundo de novo, guarda SÓ a tela nova — e o 2º relatório da A não leva de novo as que já foram (R9-4-10)',
+  ab9n?.naBase === 1 && ab9n?.noSegundo === 1, JSON.stringify(ab9n));
+rmSync(dir9n, { recursive: true, force: true });
+await ctx9n.close();
+// (R9-4-05) O computador: 1280×800, e o modo avião de verdade (abort + offline)
+// com um ✕ — a decisão fica esperando envio, e o indicador aparece no canto do FAB.
+const ctx9nL = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR', serviceWorkers: 'block' });
+let aviao9n = false;
+await ctx9nL.route('**/*-tiles/live/base/**', (r) => (aviao9n ? r.abort('internetdisconnected') : servirTile(r)));
+await ctx9nL.route('**/api/*', (r) => (aviao9n ? r.abort('internetdisconnected') : rotaApi9k(r)));
+// O aviso da consequência do 1º ✕ (um banner do topo) já visto: ele é passageiro
+// pro FAB, mas por cima do indicador a medida do dedo mediria o banner.
+const prepL9n = await abrirEm(ctx9nL, 'preparo');
+await esperarNaPagina(prepL9n, () => typeof API !== 'undefined', 20000, 100);
+await prepL9n.evaluate(() => {
+  API.setSession('tok-9n-largo');
+  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-largo') }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false,
+    consequenciaVista: { reject: true, read: true } }));
+  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+});
+await prepL9n.close({ runBeforeUnload: true });
+const L9n = await abrirEm(ctx9nL, 'computador');
+const prontaL9n = await prontaComFab(L9n);
+// O FAB PARADO (ele tem transição, e a reposição sai por quadro), e quanto da
+// caixa do indicador ele cobre, e quem recebe o dedo no meio dela.
+const fab9n = async () => {
+  let antes = null;
+  for (let i = 0; i < 40; i++) {
+    const agora = await L9n.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const r = document.getElementById('devFab').getBoundingClientRect(); ok(`${r.left},${r.top}`); }))));
+    if (agora === antes) break;
+    antes = agora;
+  }
+  return L9n.evaluate(() => {
+    const fabEl = document.getElementById('devFab');
+    const fab = fabEl.getBoundingClientRect();
+    const el = document.getElementById('inFlightIndicator');
+    if (!el) return { canto: fabEl.dataset.canto, indicador: false };
+    const r = el.getBoundingClientRect();
+    const x0 = Math.max(r.left, fab.left), x1 = Math.min(r.right, fab.right);
+    const y0 = Math.max(r.top, fab.top), y1 = Math.min(r.bottom, fab.bottom);
+    const area = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { canto: fabEl.dataset.canto, indicador: true, titulo: el.title, cobre: Math.round(100 * area / (r.width * r.height)),
+      noCentro: quem ? (quem.closest('#devFab') ? 'FAB' : quem.closest('#inFlightIndicator') ? 'indicador' : (quem.id || quem.tagName)) : null };
+  });
+};
+const antes9n = await fab9n();
+diz('PRÉ-CONDIÇÃO: no computador, sem o indicador, o FAB fica no canto preferido (cima-dir)',
+  prontaL9n.ok && antes9n.canto === 'cima-dir' && antes9n.indicador === false, JSON.stringify(antes9n));
+aviao9n = true; await ctx9nL.setOffline(true);
+await L9n.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+const esperando9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length === 1 && AppState.inFlightActions === 0
+  && !AppState.pendingAction && !!document.getElementById('inFlightIndicator'), 15000, 100);
+const com9n = await fab9n();
+diz('PRÉ-CONDIÇÃO: sem sinal, o ✕ ficou esperando envio, e o indicador está na tela', esperando9n.ok && com9n.indicador === true,
+  JSON.stringify(com9n));
+diz('no computador, o FAB NÃO cobre o "N esperando envio" — reavaliado quando o número apareceu (R9-4-05)',
+  com9n.cobre === 0 && com9n.noCentro === 'indicador' && com9n.canto !== 'cima-dir', JSON.stringify(com9n));
+// CONTROLE: o instrumento ENXERGA a sobreposição — com o FAB posto à força no
+// `cima-dir`, ele cobre o número, e o dedo no meio dele cai no FAB.
+await L9n.evaluate(() => {
+  const fab = document.getElementById('devFab');
+  const r = fab.getBoundingClientRect();
+  const { x, y } = devFabCoords('cima-dir', r.width || 44, r.height || 44);
+  fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.dataset.canto = 'cima-dir(forçado)';
+});
+const forcado9n = await fab9n();
+diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa o número coberto e o dedo no FAB',
+  forcado9n.cobre > 0 && forcado9n.noCentro === 'FAB', JSON.stringify(forcado9n));
+// A rede volta: a fila de saída esvazia, o indicador SOME — e o FAB volta ao canto preferido.
+aviao9n = false; await ctx9nL.setOffline(false);
+const saiu9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length === 0 && !document.getElementById('inFlightIndicator'), 20000, 100);
+const depois9n = await fab9n();
+diz('com a rede de volta, o indicador some e o FAB volta ao cima-dir — reavaliado quando o número sumiu',
+  saiu9n.ok && depois9n.indicador === false && depois9n.canto === 'cima-dir', JSON.stringify(depois9n));
+await ctx9nL.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -3435,4 +3599,4 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele)');
