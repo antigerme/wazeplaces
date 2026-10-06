@@ -1639,6 +1639,10 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // e erros da abertura), pra a seguinte levar pra base: é o mesmo registro,
     // e sai pelo mesmo apagar — conferido abaixo que o `dlogApagar` o apaga.
     DIAG_RETRATO_KEY: 'dlogApagar()',
+    // O aviso do que um download do diagnóstico entregou (as aberturas e a
+    // marca das capturas, pra outra aba não as guardar de novo, R9-4-10): é do
+    // modo dev, e sai pelo mesmo apagar — conferido abaixo.
+    DIAG_ENTREGUE_KEY: 'dlogApagar()',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
@@ -1719,6 +1723,13 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   assert.notEqual(d, -1, 'sumiu o dlogApagar');
   const apagar = app.slice(d, app.indexOf('\n}', d)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   assert.match(apagar, /^\s+diagEsquecerRetratos\(\);/m, 'o Sair (e o desligar do modo dev) deixou o retrato do fechar no aparelho');
+  // E o aviso das entregas do download (R9-4-10): o `dlogApagar` chama o
+  // esquecer, e o esquecer APAGA a chave.
+  assert.match(apagar, /^\s+diagEsquecerEntregas\(\);/m, 'o Sair (e o desligar do modo dev) deixou o aviso das entregas no aparelho');
+  const e = app.indexOf('function diagEsquecerEntregas(');
+  assert.notEqual(e, -1, 'sumiu o diagEsquecerEntregas');
+  assert.match(app.slice(e, app.indexOf('\n}', e)), /localStorage\.removeItem\(DIAG_ENTREGUE_KEY\)/,
+    'o esquecer das entregas não apaga a chave — a chamada no Sair seria decoração');
 });
 
 test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {

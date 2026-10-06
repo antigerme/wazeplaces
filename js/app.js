@@ -7359,12 +7359,14 @@ function dlogApagar({ soMemoria = false } = {}) {
     diagAberturasAnteriores = [];
     diagBaixadoEm = 0;
     // Na saída por OUTRA aba (`soMemoria`) o aparelho não é desta aba: só a
-    // memória sai. Senão saem a base e o retrato que o fechar deixou no
-    // localStorage (`diagRetratoAoSair`), que também são do aparelho.
+    // memória sai. Senão saem a base, o retrato que o fechar deixou no
+    // localStorage (`diagRetratoAoSair`) e o aviso do que um download entregou
+    // (`diagAvisarEntregues`), que também são do aparelho.
     if (soMemoria) diagEpoca++;
     else {
         diagEsquecerGuardado();
         diagEsquecerRetratos();
+        diagEsquecerEntregas();
     }
     for (const h of dlogPendencias.values()) clearTimeout(h);
     dlogPendencias.clear();
@@ -7523,8 +7525,11 @@ function diagChamadaSemCorpo(c) {
 
 // O que ESTA abertura guarda: só o que ainda não foi entregue — as capturas não
 // baixadas e, do diário, das chamadas e dos erros, o que veio depois do último
-// download (sem download, tudo).
+// download (sem download, tudo). O download de OUTRA aba também conta (R9-4-10):
+// o que ela entregou desta é conferido aqui, antes de cada registro, e não volta
+// à base (ver `diagAplicarEntregues`).
 function diagRegistroDaAbertura(motivo) {
+    diagAplicarEntregues();
     const depois = (x) => {
         if (!diagBaixadoEm) return true;
         const t = typeof x.t === 'number' ? x.t : Date.parse(x.t);
@@ -7725,6 +7730,8 @@ let diagOutrasVivasAoAbrir = null;
 // poda, juntos ao que a base tinha da mesma abertura, e saem do localStorage.
 async function diagCarregarAberturas() {
     if (!dlogLigado()) return;
+    // O aviso do que os downloads entregaram vive o prazo do resto (24 h).
+    diagPodarEntregas();
     // Quem está VIVO agora, na abertura (ver `diagOutrasVivasAoAbrir`): a
     // pergunta sai antes da base, que pode levar até o teto dela pra abrir.
     // Trava não grava nada, e a pergunta não lança (`null` = não se sabe).
@@ -7792,7 +7799,6 @@ async function diagAtualizarAnteriores() {
     // Apagado (o "Sair", o desligar) ou desligado enquanto a base era lida: nada
     // do que foi lido volta pra memória.
     if (epoca !== diagEpoca || !dlogLigado()) return false;
-    const marca = (m) => (m && m.t) + '|' + (m && m.motivo);
     const porId = new Map(diagAberturasAnteriores.map((a) => [a.id, a]));
     let mudou = false;
     for (const a of guardadas) {
@@ -7802,8 +7808,8 @@ async function diagAtualizarAnteriores() {
         const ja = porId.get(a.id);
         if (ja && !(a.salvoEm > ja.salvoEm)) continue;
         if (ja) {
-            const baixadas = new Set((ja.momentos || []).filter((m) => dlogJaBaixados.has(m)).map(marca));
-            for (const m of (a.momentos || [])) if (baixadas.has(marca(m))) dlogJaBaixados.add(m);
+            const baixadas = new Set((ja.momentos || []).filter((m) => dlogJaBaixados.has(m)).map(diagMarcaDoMomento));
+            for (const m of (a.momentos || [])) if (baixadas.has(diagMarcaDoMomento(m))) dlogJaBaixados.add(m);
         }
         porId.set(a.id, a);
         mudou = true;
@@ -7812,6 +7818,10 @@ async function diagAtualizarAnteriores() {
         diagAberturasAnteriores = [...porId.values()];
         atualizarFabDev();
     }
+    // E o que OUTRA aba já entregou (R9-4-10): o aviso dela pode não ter chegado
+    // — esta releitura é a do relatório e a do aviso do desligar, que contam as
+    // não baixadas (ver `diagAplicarEntregues`).
+    diagAplicarEntregues();
     return true;
 }
 
@@ -7829,8 +7839,10 @@ async function diagAtualizarAnteriores() {
 // — por isso ele é o caminho onde não há `databases()` (Firefox antigo).
 function diagFaxinaSemModoDev() {
     if (dlogLigado()) return Promise.resolve(false);
-    // O retrato do fechar também (síncrono, e sem custo quando não há chave).
+    // O retrato do fechar também (síncrono, e sem custo quando não há chave), e
+    // o aviso do que um download entregou (R9-4-10).
     diagEsquecerRetratos();
+    diagEsquecerEntregas();
     try {
         if (typeof indexedDB === 'undefined') return Promise.resolve(false);
         const sabe = typeof indexedDB.databases === 'function';
@@ -7900,6 +7912,95 @@ function diagEsquecerEntregue(entregues) {
     });
     diagGuardando = esta.catch(() => false);
     return esta;
+}
+
+// ── O que OUTRA ABA entregou ──────────────────────────────────────────────
+//
+// O download numa aba leva o que a OUTRA aba aberta gravou na base (R6-4-5) e
+// apaga do aparelho a versão que foi. A outra aba não ficava sabendo: as telas
+// dela seguiam "não baixadas" na memória, VOLTAVAM pra base quando ela ia pro
+// fundo de novo e saíam de novo no próximo relatório — e o aviso do desligar
+// pedia o 2º toque por "2 não baixados" que já tinham ido no arquivo (auditoria
+// da rodada 9, R9-4-10, MEDIDO no navegador). Agora o download DIZ o que entregou:
+// uma chave no localStorage com as aberturas (o id e a versão, `salvoEm`) e a
+// marca de cada captura (`diagMarcaDoMomento`). O aviso `storage` a leva às
+// outras abas na hora, e cada registro desta abertura a confere de novo antes de
+// gravar (`diagRegistroDaAbertura`): o aviso que se perder, com a aba congelada
+// no fundo, não devolve nada à base. Só ids, horas e o motivo — nenhum DOM,
+// nenhum dado de terceiro —, e sai com o resto do modo dev: no "Sair", ao
+// desligar, e em 24 h.
+const DIAG_ENTREGUE_KEY = 'waze_places_diag_entregue';
+// As últimas entregas, e não só a última: dois downloads com a outra aba
+// congelada nos dois, e a conferência na hora de gravar ainda acha o primeiro.
+const DIAG_ENTREGAS_MAX = 5;
+
+// A marca de uma captura ENTRE abas: a base guarda CÓPIAS, não o objeto, então o
+// que a identifica é a hora e o motivo.
+function diagMarcaDoMomento(m) { return (m && m.t) + '|' + (m && m.motivo); }
+
+// As entregas no aparelho, as de até 24 h e com a forma certa. Nunca lança.
+function diagLerEntregas() {
+    let lista = [];
+    try { lista = JSON.parse(localStorage.getItem(DIAG_ENTREGUE_KEY) || '[]'); } catch (e) { return []; }
+    const agora = Date.now();
+    return (Array.isArray(lista) ? lista : []).filter((it) => it && Number.isFinite(it.em)
+        && agora - it.em <= DIAG_GUARDA_MS && Array.isArray(it.aberturas) && Array.isArray(it.marcas));
+}
+
+// O DOWNLOAD avisa o que entregou (o `corpo.entregue` do relatório): as outras
+// aberturas, cada uma na versão que foi, e as marcas de TODAS as capturas que
+// foram no arquivo — as desta aba também, que a outra pode ter lido da base.
+function diagAvisarEntregues(entregue) {
+    if (!entregue) return false;
+    try {
+        const item = {
+            em: Date.now(),
+            aberturas: (Array.isArray(entregue.aberturas) ? entregue.aberturas : [])
+                .filter((a) => a && typeof a.id === 'string').map((a) => ({ id: a.id, salvoEm: a.salvoEm })),
+            marcas: [...new Set((Array.isArray(entregue.momentos) ? entregue.momentos : []).filter(Boolean).map(diagMarcaDoMomento))],
+        };
+        localStorage.setItem(DIAG_ENTREGUE_KEY, JSON.stringify([...diagLerEntregas(), item].slice(-DIAG_ENTREGAS_MAX)));
+        return true;
+    } catch (e) { return false; }   // cota cheia, armazenamento bloqueado: a outra aba repete, não perde
+}
+
+// O que OUTRA aba entregou DESTA conta como entregue aqui: as capturas com a marca
+// de uma entregue (as desta abertura e as das outras que esta tem na memória)
+// ficam "baixadas" — o aviso do desligar não as conta, e o registro não as grava
+// de novo —, e a versão desta abertura que foi no arquivo dela adianta o
+// `diagBaixadoEm`: o diário, as chamadas e os erros até ela já foram entregues.
+// Devolve se mudou algo.
+function diagAplicarEntregues() {
+    const entregas = diagLerEntregas();
+    if (!entregas.length) return false;
+    const marcas = new Set(entregas.flatMap((it) => it.marcas));
+    let ate = 0;
+    for (const it of entregas) {
+        for (const a of it.aberturas) {
+            if (a && a.id === DIAG_ABERTURA.id && Number.isFinite(a.salvoEm) && a.salvoEm > ate) ate = a.salvoEm;
+        }
+    }
+    let mudou = false;
+    for (const m of [...dlogMomentos, ...diagMomentosAnteriores()]) {
+        if (m && !dlogJaBaixados.has(m) && marcas.has(diagMarcaDoMomento(m))) { dlogJaBaixados.add(m); mudou = true; }
+    }
+    if (ate > diagBaixadoEm) { diagBaixadoEm = ate; mudou = true; }
+    return mudou;
+}
+
+// As entregas de mais de 24 h saem do aparelho (na abertura com o modo dev, como
+// a poda da base): a chave vive o mesmo prazo do resto.
+function diagPodarEntregas() {
+    try {
+        const cru = localStorage.getItem(DIAG_ENTREGUE_KEY);
+        if (cru === null) return;
+        const vivas = diagLerEntregas();
+        if (!vivas.length) localStorage.removeItem(DIAG_ENTREGUE_KEY);
+        else if (JSON.stringify(vivas) !== cru) localStorage.setItem(DIAG_ENTREGUE_KEY, JSON.stringify(vivas));
+    } catch (e) {}
+}
+function diagEsquecerEntregas() {
+    try { localStorage.removeItem(DIAG_ENTREGUE_KEY); } catch (e) {}
 }
 
 // ── A abertura que FECHA sem ir pro fundo ─────────────────────────────────
@@ -8081,6 +8182,10 @@ function setupGuardaDoDiagnostico() {
     // entrada (ver `anotarDecididosPorOutraAba`). Roda com ou sem o modo dev: o
     // relatório pode ser baixado depois de ligá-lo, e anotar não grava nada.
     window.addEventListener('storage', (ev) => { if (ev.key === SAIDA_KEY) anotarDecididosPorOutraAba(ev); });
+    // O DOWNLOAD feito na outra aba levou telas e diário DESTA: contam como
+    // entregues aqui, na hora (R9-4-10, ver `diagAplicarEntregues`). Só marca a
+    // memória — não grava nada.
+    window.addEventListener('storage', (ev) => { if (ev.key === DIAG_ENTREGUE_KEY) diagAplicarEntregues(); });
 }
 
 // ── O FAB ─────────────────────────────────────────────────────────────────
@@ -9498,6 +9603,9 @@ async function baixarDiagnostico() {
         // `diagEsquecerEntregue`) —, e desta abertura só volta a ser guardado o que
         // veio DEPOIS DO RETRATO — não do fim do download (ver `retratoEm`).
         diagBaixadoEm = corpo.entregue.em;
+        // E as OUTRAS abas ficam sabendo do que foi delas (R9-4-10): sem isto a
+        // que gravou as telas as devolvia à base, e elas saíam de novo.
+        diagAvisarEntregues(corpo.entregue);
         diagEsquecerEntregue(corpo.entregue.aberturas);
         atualizarFabDev();
         showToast(t('toast.diagPronto'), 'success');
