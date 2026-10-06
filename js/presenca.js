@@ -103,6 +103,11 @@ const Presenca = {
     tokenPedidoEm: 0,
     fluxo: null,            // a conexão de tempo real aberta agora
     fluxoTentativa: 0,
+    // O tempo real PARADO pela falta de rede: o `presencaFluxoGarantir` desistiu
+    // com `navigator.onLine === false` (o recuo venceu no modo avião), e nenhum
+    // timer ficou de pé. Quem o religa é o `online` — ou, quando ele não vem, a
+    // prova de rede (ver `presencaAoProvarRede`).
+    fluxoParado: false,
     fluxoDiag: { aberturas: 0, quadros: 0, mensagens: 0, recibos: 0, ignoradas: 0, loteMensagens: 0,
                  ultimoFim: null, ultimoErro: null, quedasSeguidas: 0, erroAnotado: null, conectou: false },
     // Mensagens que chegaram AO VIVO com a conversa fechada, por pessoa. Somam
@@ -630,6 +635,7 @@ function presencaDesligar() {
     Presenca.pedindo = null;
     Presenca.chat = null;
     Presenca.fluxoTentativa = 0;
+    Presenca.fluxoParado = false;
     // A conversa, a lista e a folha do pedido FECHAM junto. Desligar é o que o
     // `showAuthScreen` chama quando a sessão acaba, e elas ficavam por cima da
     // tela de entrada — com a conversa (texto de terceiro) à mostra e um campo
@@ -693,7 +699,15 @@ function presencaTokenAbre() {
 // do token que faltava (ver o `querToken` do `presencaAtualizar`).
 function presencaFluxoGarantir({ pedirToken = true } = {}) {
     if (!presencaPodeConectar()) return;
-    if (document.visibilityState === 'hidden' || navigator.onLine === false) return;
+    if (document.visibilityState === 'hidden') return;
+    // Sem rede não se tenta nada, e o fluxo fica PARADO: o recuo que vence aqui
+    // não reagenda, e quem religa é o `online` do navegador. O que não vem no
+    // iPhone (a nota da prova de rede, no api.js): sair do modo avião deixava o
+    // tempo real parado com o token valendo, e a resposta da outra pessoa não
+    // aparecia com a conversa aberta (auditoria da rodada 8, R8-5-01). Daí a
+    // marca, que a prova de rede lê (`presencaAoProvarRede`).
+    if (navigator.onLine === false) { Presenca.fluxoParado = true; return; }
+    Presenca.fluxoParado = false;
     // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
     // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
     // abre o fluxo quando o token vem.
@@ -710,9 +724,17 @@ function presencaFluxoGarantir({ pedirToken = true } = {}) {
 // só voltava reabrindo o app (auditoria de 2026-09-26). Aqui ele é pedido de
 // novo, com o MESMO teto de 5 min — e nada além disso: com token, quem cuida
 // do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google.
+//
+// A exceção é o fluxo PARADO (`fluxoParado`): o recuo venceu sem rede e não
+// deixou timer, e o `online` que o religaria pode não vir (R8-5-01). A
+// resposta que chegou prova a rede: religa UMA vez, sem pedir token (nenhum
+// pedido à API), e o fluxo aberto (ou o recuo dele, se falhar) volta a cuidar
+// de si — a próxima prova não religa de novo.
 function presencaAoProvarRede() {
-    if (presencaTokenAbre()) return;
-    presencaFluxoGarantir();
+    if (!presencaTokenAbre()) { presencaFluxoGarantir(); return; }
+    if (!Presenca.fluxoParado || Presenca.fluxo) return;
+    clearTimeout(Presenca.timers.fluxo);
+    presencaFluxoGarantir({ pedirToken: false });
 }
 
 function presencaFluxoFechar() {
@@ -2398,6 +2420,8 @@ function presencaDiag() {
             aberto: !!Presenca.fluxo,
             haS: Presenca.fluxo ? Math.round((agora - Presenca.fluxo.desde) / 1000) : null,
             tentativa: Presenca.fluxoTentativa,
+            // Parado pela falta de rede, esperando o `online` ou a prova de rede.
+            parado: Presenca.fluxoParado,
             ...Presenca.fluxoDiag,
         },
         conhecidos: chatConhecidos().length,
