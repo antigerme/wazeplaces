@@ -1,4 +1,4 @@
-// Relógio de parede GROSSO pra rodar a suíte: `node --import tools/relogio-grosso.mjs --test`
+// Relógio de parede GROSSO pra rodar a suíte: `node --import ./tools/relogio-grosso.mjs --test`
 // (o test runner repassa o `--import` aos processos de cada arquivo).
 //
 // O `Date.now` passa a andar em degraus de 20 ms. O tempo segue correndo, mas duas horas
