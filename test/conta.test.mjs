@@ -63,7 +63,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
     esquecerEscolhasDaContaAnterior: () => log.push('escolhas'),   // (test/contas-abas, A3)
     fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
-    esquecerRecursosDaPagina: () => log.push('recursos'),   // a lista de recursos do relatório (R8-1-05)
+    esquecerRegistrosDaPagina: () => log.push('recursos'),   // a lista de recursos e a marca do anel (R8-1-05, L12-1)
     esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
@@ -342,7 +342,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esquecerEscolhasDaContaAnterior: () => {},   // (test/contas-abas, A3)
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
     fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
-    esquecerRecursosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
+    esquecerRegistrosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];

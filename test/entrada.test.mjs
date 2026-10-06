@@ -219,7 +219,7 @@ test('o "Sair" e a troca de conta limpam a lista de recursos que o diagnóstico 
   // nenhuma (auditoria de 2026-10-03, R8-1-05). Ancorado no começo da linha:
   // o comentário em volta cita o nome (gotcha #67).
   for (const quem of ['handleLogout', 'esquecerOutraConta']) {
-    assert.match(fatiar(quem), /^\s+esquecerRecursosDaPagina\(\);$/m,
+    assert.match(fatiar(quem), /^\s+esquecerRegistrosDaPagina\(\);$/m,
       `${quem}: a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos`);
   }
 });
@@ -233,7 +233,8 @@ test('o "Sair" e a troca de conta limpam a lista de recursos que o diagnóstico 
 // a foto de quem saiu é QUANDO ela começou. Roda as duas funções DE VERDADE num
 // `performance` de mentira que se comporta como o do navegador: a limpeza
 // esvazia o que TERMINOU, e o que termina depois entra com o `startTime` do
-// começo.
+// começo. A marca mora no `API` (`registrosDesde`): é a mesma do anel de
+// chamadas (L12-1, abaixo).
 test('R8-1-04: a foto que chega DEPOIS da limpeza não volta pro relatório — o que conta é quando ela COMEÇOU', () => {
   const montarRecursos = () => {
     const relogio = { agora: 0 };
@@ -243,8 +244,8 @@ test('R8-1-04: a foto que chega DEPOIS da limpeza não volta pro relatório — 
       clearResourceTimings: () => { lista.length = 0; },
       getEntriesByType: (tipo) => (tipo === 'resource' ? lista.slice() : []),
     };
-    const fns = montar(['esquecerRecursosDaPagina', 'diagRecursosDaSessao'], { performance },
-      ['esquecerRecursosDaPagina', 'diagRecursosDaSessao'], 'let diagRecursosDesde = 0;');
+    const fns = montar(['esquecerRegistrosDaPagina', 'diagRecursosDaSessao'], { performance, API: { registrosDesde: 0 } },
+      ['esquecerRegistrosDaPagina', 'diagRecursosDaSessao']);
     const terminou = (name, startTime) => lista.push({ name, startTime });
     return { ...fns, relogio, terminou, nomes: () => fns.diagRecursosDaSessao().map((r) => r.name) };
   };
@@ -255,7 +256,7 @@ test('R8-1-04: a foto que chega DEPOIS da limpeza não volta pro relatório — 
     'CONTROLE: antes de qualquer "Sair" o relatório leva a lista inteira');
   // A foto do card começou aos 100 ms; o "Sair" limpa aos 400; ela termina aos 4.100.
   m.relogio.agora = 400;
-  m.esquecerRecursosDaPagina();
+  m.esquecerRegistrosDaPagina();
   assert.deepEqual(m.nomes(), [], 'a limpeza deixou o que já tinha terminado');
   m.terminou('https://venue-image.waze.com/thumbs/thumb700_FOTO_DE_TERCEIRO.jpg', 100);
   // O que a próxima conta pede começa DEPOIS da limpeza, e é dela.
@@ -275,6 +276,64 @@ test('R8-1-04: o relatório lê a lista de recursos SÓ pela régua da sessão �
     'o relatório deixou de montar os recursos pela régua da sessão');
 });
 
+// ═══ L12-1 · a CHAMADA que estava no ar no "Sair" (pista do lote 12) ═══════════
+// O anel de chamadas (`API.chamadas`, que o relatório do modo dev leva) tinha o
+// mesmo buraco da lista de recursos: o "Sair" o zerava, mas o ✕ que esperava a
+// resposta registrava DEPOIS, com o corpo do pedido — o id do pedido de
+// terceiro, e a posição e o id de quem saiu na carona da presença (MEDIDO no
+// Chromium e no WebKit, roteiro do lote 12). Roda o `api.js` DE VERDADE (o
+// `_post`, com o `fetch` preso) e a limpeza do app.js no MESMO contexto: a marca
+// que a limpeza põe é UMA só, e vale pras duas listas.
+test('L12-1: a chamada que estava no AR no "Sair" não entra no anel de quem vem depois — a MESMA marca da lista de recursos', async () => {
+  const relogio = { agora: 0 };
+  const lista = [];
+  const presos = [];
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console, setTimeout, clearTimeout, AbortController,
+    performance: { now: () => relogio.agora, clearResourceTimings: () => { lista.length = 0; },
+      getEntriesByType: (tipo) => (tipo === 'resource' ? lista.slice() : []) },
+    // O servidor responde quando o teste solta.
+    fetch: () => new Promise((ok) => presos.push(() => ok({ status: 200, headers: { get: () => null },
+      text: async () => JSON.stringify({ success: true }) }))),
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(ler('js/i18n.js') + '\n' + ler('js/api.js') + '\n' + fatiar('esquecerRegistrosDaPagina') + '\n'
+    + fatiar('diagRecursosDaSessao') + '\nthis.API = API; this.limpar = esquecerRegistrosDaPagina; this.recursos = diagRecursosDaSessao;', ctx);
+  const { API } = ctx;
+  const soltar = async () => { for (const f of presos.splice(0)) f(); for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok)); };
+  // (`Array.from` traz as listas pro reino do teste: arrays do contexto do vm têm outro protótipo.)
+  const rotas = () => Array.from(API.chamadas, (c) => c.rota);
+  // CONTROLE: sem limpeza nenhuma no meio, a chamada registra quando a resposta chega.
+  relogio.agora = 50;
+  const antes = API._post('buscar-places', { sessionToken: 'tok-A', page: 1 });
+  relogio.agora = 80;
+  await soltar(); await antes;
+  assert.deepEqual(rotas(), ['buscar-places'], 'CONTROLE: a chamada que terminou não entrou no anel (a medida não enxerga o registro)');
+  // O ✕ sai aos 100 ms e a resposta fica presa; o "Sair" zera o anel e põe a marca aos 400.
+  relogio.agora = 100;
+  const voo = API._post('validar-place', { sessionToken: 'tok-A', venueID: 'v-de-terceiro', updateRequestID: 'u-de-terceiro',
+    presenca: { userId: '4242', lat: -23.5, lon: -46.6, pais: 30 } });
+  relogio.agora = 400;
+  API.chamadas.length = 0;
+  ctx.limpar();
+  assert.equal(API.registrosDesde, 400, 'PRÉ-CONDIÇÃO: a limpeza não pôs a marca no API');
+  // O que a página pede DEPOIS do "Sair" (a exclusão da sessão, a próxima conta) é de quem vem.
+  relogio.agora = 500;
+  const depois = API._post('sessao', { action: 'destroy', sessionToken: 'tok-A' });
+  relogio.agora = 4100;
+  await soltar(); await voo; await depois;
+  assert.deepEqual(rotas(), ['sessao'],
+    'DEFEITO: a chamada que estava no ar no "Sair" entrou no anel depois da limpeza — com o corpo do pedido: '
+    + JSON.stringify(API.chamadas.map((c) => c.corpoReq)));
+  // E a MESMA marca vale pra lista de recursos: o recurso que começou antes dela não volta.
+  lista.push({ name: 'https://venue-image.waze.com/thumbs/foto_de_terceiro.jpg', startTime: 100 }, { name: '/api/sessao', startTime: 500 });
+  assert.deepEqual(Array.from(ctx.recursos(), (r) => r.name), ['/api/sessao'], 'a lista de recursos e o anel não usam a mesma marca');
+});
+
 // ── A4: o autor em foco é da fila de QUEM ESTAVA aqui ──────────────────────
 test('outra conta entrando: o autor que a anterior focou sai — a fila dela não vem reordenada por ele', () => {
   const { registro, document } = domDeMentira({ focoAutorBar: { oculto: false }, focoAutorTexto: {}, focoAutorContagem: {} });
@@ -288,7 +347,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     atualizarSeloDeConquista: nada, saveStats: nada, updateStats: nada, offlineEsquecer: nada, dlogApagar: nada,
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
-    esquecerRecursosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),

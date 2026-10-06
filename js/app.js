@@ -8372,32 +8372,36 @@ function diagAjustarRecursos() {
     } catch (e) { /* navegador sem a API: fica o padrão */ }
 }
 
-// ── De QUEM é a lista de RECURSOS ─────────────────────────────────────────
-// O relatório a leva inteira, e ela guarda a URL da foto de perfil (com o id de
-// quem estava aqui) e as fotos dos pedidos de terceiros (o id do pedido vai no
-// nome). O "Sair" e a troca de conta a LIMPAM — e só limpar não bastava: o
-// download que ainda estava no ar termina DEPOIS da limpeza, e a entrada dele
-// volta pra lista. MEDIDO com a foto do card chegando em 4 s e o "Sair" no
-// meio: a lista sai vazia e, 6 s depois, tem a foto de novo — que ia no
+// ── De QUEM é o que a página REGISTROU: a lista de recursos e o anel de chamadas
+// O relatório leva as duas. A lista de recursos do navegador guarda a URL da
+// foto de perfil (com o id de quem estava aqui) e as fotos dos pedidos de
+// terceiros (o id do pedido vai no nome); o anel de chamadas (`API.chamadas`)
+// guarda o corpo de cada pedido ao servidor. O "Sair" e a troca de conta as
+// LIMPAM — e só limpar não bastava: o que ainda estava no ar termina DEPOIS da
+// limpeza e entra de novo. MEDIDO com a foto do card chegando em 4 s e o "Sair"
+// no meio: a lista sai vazia e, 6 s depois, tem a foto de novo — que ia no
 // relatório da próxima conta que entrasse na mesma página (auditoria de
-// 2026-10-03, R8-1-04). E a troca de conta nem limpava (R8-1-05).
+// 2026-10-03, R8-1-04; a troca de conta nem limpava, R8-1-05). E o ✕ no ar no
+// "Sair" registrava DEPOIS, com o id do pedido de terceiro e a posição e o id de
+// quem saiu na carona da presença (pista do lote 12, L12-1).
 //
 // CORTAR o download não resolve: tirar o `src` do <img> (ou trocá-lo por '') não
 // cancela a ida do navegador, e a entrada volta igual — MEDIDO no Chromium 153 e
 // no WebKit 26, com a <img> no DOM, fora dele e solta (`new Image()`). O que
-// separa a foto de quem saiu é QUANDO o download COMEÇOU: o `startTime` dela é
-// anterior à limpeza (medido nos dois motores; a que começa depois tem o
-// `startTime` depois). Daí a marca: o relatório só leva o que começou depois
-// dela (`diagRecursosDaSessao`), termine quando terminar.
-let diagRecursosDesde = 0;   // o `performance.now()` da última limpeza
-function esquecerRecursosDaPagina() {
-    try { diagRecursosDesde = performance.now(); } catch (e) { /* sem a API: só a limpeza */ }
+// separa o que era de quem saiu é QUANDO a ida COMEÇOU: o `startTime` da entrada
+// tardia é anterior à limpeza (medido nos dois motores; a que começa depois tem o
+// `startTime` depois), e o início de cada chamada o `_post` já mede. Daí UMA
+// marca (`API.registrosDesde`) pras duas listas: o relatório só leva o recurso
+// que começou depois dela (`diagRecursosDaSessao`), e o anel não registra a
+// chamada que começou antes (`API._registrar`), termine quando terminar.
+function esquecerRegistrosDaPagina() {
+    try { API.registrosDesde = performance.now(); } catch (e) { /* sem a API: só a limpeza */ }
     try { performance.clearResourceTimings(); } catch (e) {}
 }
 function diagRecursosDaSessao() {
     let lista = [];
     try { lista = performance.getEntriesByType('resource'); } catch (e) { return []; }
-    return lista.filter((r) => r.startTime >= diagRecursosDesde);
+    return lista.filter((r) => r.startTime >= API.registrosDesde);
 }
 
 function diagCapturarErros() {
@@ -9774,9 +9778,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // A lista de recursos do navegador também, pelo mesmo motivo: o diagnóstico
     // a leva inteira, e ela guardava a URL da foto de perfil (com o id de quem
     // saiu) e as fotos dos pedidos de terceiros — MEDIDO depois do "Sair", as
-    // duas seguiam lá (auditoria de 2026-09-26). E o que ainda estava chegando
-    // não volta pro relatório depois da limpeza (ver a função; R8-1-04).
-    esquecerRecursosDaPagina();
+    // duas seguiam lá (auditoria de 2026-09-26). E o que ainda estava no ar — a
+    // foto chegando, o ✕ esperando a resposta — não volta pra nenhuma das duas
+    // depois da limpeza (ver a função; R8-1-04, L12-1).
+    esquecerRegistrosDaPagina();
     AppState.profile = null;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
@@ -17465,8 +17470,9 @@ function esquecerOutraConta(id) {
     // A lista de recursos do navegador, como no "Sair": a URL da foto de perfil
     // (com o id da conta anterior) e as das fotos da fila dela iam no relatório
     // do modo dev de quem entrou (MEDIDO; auditoria de 2026-10-03, R8-1-05). O
-    // que ainda estava chegando também fica de fora (ver a função).
-    esquecerRecursosDaPagina();
+    // que ainda estava no ar também fica de fora — da lista e do anel de chamadas,
+    // cujos corpos o `dlogApagar` acabou de tirar (ver a função; L12-1).
+    esquecerRegistrosDaPagina();
     // A fila na tela, se atravessou a sessão (a renovação silenciosa a manteve),
     // é da conta anterior — dos filtros e das permissões dela: sai, e a de quem
     // entrou é buscada. Nos outros caminhos de entrada a fila já nasceu desta
