@@ -696,6 +696,42 @@ test('C10 excluir, fechar, REABRIR e desfazer: a foto volta com o ✨ no lugar c
   }
 });
 
+// ── Achado de passagem do lote 13: o Desfazer da exclusão da foto DENUNCIADA ──
+// O `removerFoto` tira o selo (o 🚩) junto com a foto que sai, e o `recolocarFoto`
+// não o devolvia: com a camada aberta, a foto denunciada voltava SEM o 🚩 até
+// reabrir, e o anúncio dizia a posição sem o selo. O card, redesenhado, estava
+// certo. Medido com os métodos de verdade (`newIdx -1` depois do Desfazer).
+test('o Desfazer da exclusão da foto DENUNCIADA devolve o 🚩 a ela na camada aberta', () => {
+  const d = FOTO('denunciada'), o = FOTO('outra');
+  const novo = () => ({ venueID: 'vFL', updateRequestID: 'uFL', purType: 'FLAGGED_PHOTO', approvedImageIds: ['denunciada', 'outra'], imageUrls: [d, o] });
+  const m = lightboxQueAbre();
+  const P = novo();
+  m.L.open(P.imageUrls, 0, 0, 'x', true, P);       // o selo (🚩) na denunciada, que está na tela
+  m.L.aberto = true;
+  assert.equal(m.L.newIdx, 0, 'PRÉ-CONDIÇÃO: o selo não está na foto denunciada');
+  const alvo = { id: 'denunciada', place: P, idx: 0, url: d, selo: m.L.newIdx === m.L.idx };
+  m.L.removerFoto('denunciada', P);                 // excluída com a janela aberta
+  assert.equal(m.L.newIdx, -1, 'PRÉ-CONDIÇÃO: a exclusão não tirou o selo com a foto');
+  m.devolverFoto(alvo);                             // o Desfazer
+  assert.deepEqual(m.L.urls, [d, o], 'a foto denunciada não voltou pro carrossel');
+  assert.equal(m.L.newIdx, 0, `DEFEITO: a foto denunciada voltou SEM o 🚩 na camada aberta (newIdx ${m.L.newIdx})`);
+  // CONTROLE: excluir OUTRA foto (não a do selo) e desfazer — o selo segue na
+  // denunciada, deslocado pela foto que volta antes dela.
+  const c = lightboxQueAbre();
+  const Q = { ...novo(), imageUrls: [o, d] };
+  c.L.open(Q.imageUrls, 0, 1, 'x', true, Q);       // a outra na tela, o 🚩 na 2ª
+  c.L.aberto = true;
+  const alvoOutra = { id: 'outra', place: Q, idx: 0, url: o, selo: c.L.newIdx === c.L.idx };
+  assert.equal(alvoOutra.selo, false, 'PRÉ-CONDIÇÃO: a foto excluída do controle era a do selo');
+  c.L.removerFoto('outra', Q);
+  assert.equal(c.L.newIdx, 0, 'PRÉ-CONDIÇÃO: o selo não acompanhou a denunciada quando a outra saiu');
+  c.devolverFoto(alvoOutra);
+  assert.equal(c.L.newIdx, 1, `CONTROLE: o selo saiu da denunciada quando a OUTRA voltou (newIdx ${c.L.newIdx})`);
+  // E o alvo da exclusão de verdade diz se a foto era a do selo.
+  assert.match(fatiar('pedirExclusaoDaFoto'), /selo: Lightbox\.newIdx >= 0 && Lightbox\.newIdx === Lightbox\.idx/,
+    'a exclusão deixou de anotar se a foto excluída era a do selo — o Desfazer não tem como devolvê-lo');
+});
+
 // ── R9-3-05 (b): a foto que VOLTA pelo Desfazer é dita, como toda troca de foto ──
 // (auditoria de 2026-10-06). O Desfazer de uma exclusão com a foto aberta a
 // recoloca (`recolocarFoto`) e ela passa a ser a da TELA, e nada era dito: quem

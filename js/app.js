@@ -2972,11 +2972,18 @@ const Lightbox = {
     // lugar e quem usa leitor de tela ouvia só o banner saindo, enquanto o
     // Desfazer do ✕ do card diz o pedido que voltou (auditoria de 2026-10-06,
     // R9-3-05, MEDIDO nos dois motores).
-    recolocarFoto(url, idx) {
+    //
+    // `eraSelo`: a foto que volta era a do selo (a 🚩 de um pedido de foto
+    // denunciada). O `removerFoto` tira o selo junto com ela, e sem isto o
+    // Desfazer a devolvia SEM o 🚩 na camada aberta — o card, redesenhado,
+    // mostrava o selo, e o anúncio dizia "Foto 1 de 2" sem ele (achado de
+    // passagem do lote 13, medido com os métodos de verdade).
+    recolocarFoto(url, idx, eraSelo = false) {
         if (!url || this.urls.some((u) => u === url)) return;
         const pos = Math.max(0, Math.min(idx, this.urls.length));
         this.urls.splice(pos, 0, url);
-        if (this.newIdx >= pos) this.newIdx += 1;
+        if (eraSelo === true) this.newIdx = pos;
+        else if (this.newIdx >= pos) this.newIdx += 1;
         this.idx = pos;
         if (!this.isOpen()) return;
         this._render();
@@ -3666,7 +3673,7 @@ function devolverFoto(alvo) {
         if (Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(alvo.id)) p.approvedImageIds.push(alvo.id);
         p.imageUrl = p.imageUrls[0] || null;
     }
-    if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx);
+    if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx, alvo.selo === true);
     // O card é redesenhado debaixo do foco — o Desfazer pela tecla z, com a foto
     // já fechada, e a falha que chega depois (R5-3-07). É o MESMO pedido: o foco
     // num ✕ ↑ ✓ fica no mesmo botão (`mesmoBotao`, R9-3-04).
@@ -3692,7 +3699,10 @@ function pedirExclusaoDaFoto() {
     if (!id) return;
     const place = Lightbox.place;
     // A região é a do GESTO (L26): o envio sai até 3 s depois.
-    const alvo = { id, place, idx: Lightbox.idx, url: Lightbox.urls[Lightbox.idx], regiao: API.getRegion() };
+    // `selo`: a foto excluída é a do selo da camada (a 🚩 denunciada, num pedido de
+    // foto denunciada) — o Desfazer o devolve junto com ela (ver `recolocarFoto`).
+    const alvo = { id, place, idx: Lightbox.idx, url: Lightbox.urls[Lightbox.idx], regiao: API.getRegion(),
+        selo: Lightbox.newIdx >= 0 && Lightbox.newIdx === Lightbox.idx };
 
     // Uma exclusão por vez: tocar na lixeira de novo despacha a anterior, como
     // o swipe faz. Sem isto, duas janelas correndo escreveriam listas que se
