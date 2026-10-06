@@ -640,6 +640,17 @@ await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-ca
 const removidaSemRede = await lerFotoDoCard();
 diz('PRÉ-CONDIÇÃO: sem rede, o card da foto que o Waze tirou do ar avisa, com ✕ e ✓ travados',
   removidaSemRede.temAviso && removidaSemRede.rejTravado && removidaSemRede.lidoTravado, JSON.stringify(removidaSemRede));
+// O TECLADO no ↑ — o único botão vivo do card sem a foto —, e o card de agora
+// MARCADO: o sinal de volta o REDESENHA, e o foco caía no <body> (R8-4-03,
+// MEDIDO com Tab de verdade no r4 da auditoria). A marca é o CONTROLE de que o
+// card foi mesmo trocado: sem redesenho, o foco ficaria no ↑ por não ter saído.
+const focoAntes6f = await page.evaluate(() => {
+  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  c.dataset.smoke6f = 'antes';
+  const pular = c.querySelector('.card-btn-skip');
+  pular.focus();
+  return document.activeElement === pular;
+});
 const antesDaRemovida = pedidosRemovida.length;
 aviao = false;
 await ctx.setOffline(false);
@@ -652,8 +663,62 @@ diz('a foto tirada do AR, com a rede de volta: o card sai do "precisa de sinal" 
 diz('CONTROLE: a foto foi pedida de novo com a rede de volta e NÃO veio — o 404 é dela, não da rede',
   pedidosRemovida.length > antesDaRemovida && !removidaComRede.fotoVisivel,
   JSON.stringify({ pedidos: pedidosRemovida.length - antesDaRemovida, removidaComRede }));
+const focoDepois6f = await page.evaluate(() => {
+  const a = document.activeElement;
+  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  return { redesenhado: !!(c && c.dataset.smoke6f !== 'antes'), body: a === document.body,
+    noPular: !!(a && c && c.contains(a) && a.matches('.card-btn-skip')),
+    foco: a ? String(a.className || a.tagName).slice(0, 40) : null };
+});
+diz('PRÉ-CONDIÇÃO: o teclado estava no ↑ do card sem a foto, e o card foi REDESENHADO pela rede de volta',
+  focoAntes6f && focoDepois6f.redesenhado, JSON.stringify({ focoAntes6f, focoDepois6f }));
+diz('o card redesenhado mantém o teclado no ↑ do card novo — não o larga no <body> (R8-4-03)',
+  focoDepois6f.noPular && !focoDepois6f.body, JSON.stringify(focoDepois6f));
 page.off('request', contarRemovida);
 await ctx.unroute('**/thumb700_removida404*', fotoRemovida);
+// 6g) A PROVA DA FOTO PENDURADA e a rede PROVADA (R8-4-08). O sinal volta e o 1º
+// pedido à foto fica PRESO (a conexão que não responde logo depois de o sinal
+// voltar): a prova da <img> fica no ar. A rede provada por uma resposta nossa
+// era só ANOTADA na prova, e o card seguia com "A foto precisa de sinal" e ✕/✓
+// travados até ela terminar — e ela não tinha teto (MEDIDO, r8 da auditoria:
+// 12 s depois da volta, travado). A resposta nossa é o que o `API.aoProvarRede`
+// faz com o card — `recuperarCardSemFoto({ redeProvada: true })`, chamado aqui
+// direto: a resposta de verdade, nesta página sem sessão nem rota da API, poria
+// a varredura e a fila de saída no meio (a ligação está no test/offline-tela).
+// A PRÉ-CONDIÇÃO é o CONTROLE: com a prova presa e nada provando a rede, o card
+// segue travado — e segue preso o pedido quando ele destrava.
+const FOTO_PRESA = 'https://venue-image.waze.com/thumbs/thumb700_presa';
+const presos6g = [];
+let prender6g = false;
+const fotoPresa = (r) => {
+  if (aviao) return r.abort('internetdisconnected');
+  if (prender6g) { prender6g = false; presos6g.push(r); return undefined; }
+  return r.fulfill({ status: 404, contentType: 'text/plain', body: 'nao', headers: { 'cache-control': 'no-store' } });
+};
+await ctx.route('**/thumb700_presa*', fotoPresa);
+aviao = true; await ctx.setOffline(true);
+await montar([{ ...PLACE(13, 'NEW_PHOTO'), imageUrls: [FOTO_PRESA] }]);
+await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
+prender6g = true;
+aviao = false;
+await ctx.setOffline(false);
+for (let i = 0; i < 50 && !presos6g.length; i++) await dormir(100);
+await dormir(300);   // o tempo de um destravamento indevido aparecer, se houvesse
+const presa6g = await lerFotoDoCard();
+diz('PRÉ-CONDIÇÃO: com o sinal de volta, a prova da foto ficou PRESA — e, sem nada provando a rede, o card segue travado',
+  presos6g.length === 1 && presa6g.temAviso && presa6g.rejTravado && presa6g.lidoTravado,
+  JSON.stringify({ presos: presos6g.length, presa6g }));
+const t6g = Date.now();
+await page.evaluate(() => recuperarCardSemFoto({ redeProvada: true }));
+const solto6g = await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  return !!(c && !c.querySelector('.card-sem-foto')); }, 3000);
+const ms6g = Date.now() - t6g;
+const depois6g = await lerFotoDoCard();
+diz('com a rede PROVADA, o card sai do "precisa de sinal" NA HORA e destrava ✕ e ✓ — com a prova da foto ainda presa (R8-4-08)',
+  solto6g.ok && !depois6g.temAviso && !depois6g.rejTravado && !depois6g.lidoTravado && presos6g.length === 1 && ms6g < 2000,
+  JSON.stringify({ ms6g, solto6g, depois6g, presos: presos6g.length }));
+for (const r of presos6g.splice(0)) await r.fulfill({ status: 404, body: 'nao', headers: { 'cache-control': 'no-store' } }).catch(() => {});
+await ctx.unroute('**/thumb700_presa*', fotoPresa);
 
 secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:

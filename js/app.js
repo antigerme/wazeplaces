@@ -2203,12 +2203,24 @@ function semCamadaAberta() {
 // a família do C10). O foco vai ao equivalente no card que ficou: a foto ou o
 // mapa dele. Só quando o foco ESTAVA no card — quem o pôs ali foi o app, ao
 // fechar a ampliação; o foco que a pessoa levou a outro lugar fica onde está.
-function mantendoFocoNoCard(redesenhar) {
+//
+// `mesmoBotao`: o redesenho é do MESMO pedido, e o foco num ✕ ↑ ✓ vai ao MESMO
+// botão do card novo — travado ou ausente, ao ✕ (que agora pode estar vivo) ou
+// ao ↑; senão, a foto ou o mapa. É o card "sem foto" que o sinal de volta
+// redesenha (`recuperarCardSemFoto`): o ↑ era o único botão vivo, o teclado
+// estava nele, e o foco caía no <body> (R8-4-03, MEDIDO no Chromium: "foco
+// antes: card-btn-skip · foco depois: BODY", com a foto que volta e com a que o
+// Waze tirou do ar).
+function mantendoFocoNoCard(redesenhar, { mesmoBotao = false } = {}) {
     const card = cardDaFrente();
     const a = document.activeElement;
     const estavaNoCard = !!(card && a && a !== document.body && card.contains(a));
+    const botao = mesmoBotao && estavaNoCard && typeof a.matches === 'function'
+        ? ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].find((s) => a.matches(s)) : null;
     redesenhar();
-    if (estavaNoCard && focoPerdido() && semCamadaAberta()) devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+    if (estavaNoCard && focoPerdido() && semCamadaAberta()) {
+        devolverFocoDaAmpliacao(null, [...(botao ? [botao, '.card-btn-reject', '.card-btn-skip'] : []), '.card-image', '.card-map']);
+    }
 }
 
 // O foco não pode CAIR no <body> com a foto ampliada aberta: ela é
@@ -19250,15 +19262,27 @@ function marcarCardSemFoto(card, place) {
 // redesenho é o card aberto com sinal — o `marcarCardSemFoto` não trava com
 // rede. Depois do `online`, nenhuma resposta nossa chega sozinha (o free tier
 // não deixa pedir uma), e é o servidor da foto que prova a rede.
-let provandoFotoDe = null;   // { place, redeProvada }: a prova em voo
+//
+// A rede provada que chega com a prova NO AR redesenha NA HORA (R8-4-08): ela
+// só era anotada, e a prova da <img> não tinha teto — com o 1º pedido à foto
+// pendurado (a conexão que não responde logo depois de o sinal voltar), o card
+// seguia com "A foto precisa de sinal" e ✕/✓ travados com a rede já provada
+// (MEDIDO, r8 da auditoria: 12 s depois da volta, travado; soltando o pedido
+// preso, destravou em 86 ms). E a prova ganhou TETO (`FOTO_PROVA_TETO_MS`): ao
+// estourar, conta como falha — com a rede provada, redesenha; senão, pergunta ao
+// servidor da foto, como no `onerror`.
+//
+// O redesenho é do MESMO pedido e passa pelo `mantendoFocoNoCard`: o teclado no
+// ↑ (o único botão vivo do card sem a foto) ia pro <body> (R8-4-03).
+let provandoFotoDe = null;   // { place, redeProvada, comRede }: a prova em voo
 function recuperarCardSemFoto({ redeProvada = false } = {}) {
     if (navigator.onLine === false) return;
     const place = AppState.currentPlace;
     const card = cardDaFrente();
     if (!place || !card || !card.querySelector('.card-sem-foto')) return;
     if (provandoFotoDe && provandoFotoDe.place === place) {
-        // A prova em voo vale pela rede provada que chegar durante ela.
-        if (redeProvada) provandoFotoDe.redeProvada = true;
+        // A prova em voo NÃO segura a rede provada que chega durante ela.
+        if (redeProvada) provandoFotoDe.comRede();
         return;
     }
     const f = fotosDoCard(place);
@@ -19267,28 +19291,46 @@ function recuperarCardSemFoto({ redeProvada = false } = {}) {
     const prova = { place, redeProvada };
     provandoFotoDe = prova;
     const src = urlDaFoto(u);
-    const soltar = () => { if (provandoFotoDe === prova) provandoFotoDe = null; };
+    let teto = null;
+    // Uma falha só (o `onerror` e o teto não perguntam ao servidor duas vezes), e
+    // um redesenho só: o desfecho que chega DEPOIS dele não mexe no card de novo.
+    let falhou = false, redesenhou = false;
+    const soltar = () => { clearTimeout(teto); if (provandoFotoDe === prova) provandoFotoDe = null; };
     const redesenhar = (porque) => {
+        if (redesenhou) return;
         soltar();
         // O card pode ter mudado, ou estar no meio de um arraste (o `transform`
         // é do gesto): aí não se mexe nele; a próxima prova de rede tenta de novo.
         if (AppState.currentPlace !== place) return;
         const agora = cardDaFrente();
         if (!agora || !agora.querySelector('.card-sem-foto') || agora.style.transform) return;
+        redesenhou = true;
         dfato(porque);
-        showCurrentPlace();
+        mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
     };
-    const img = new Image();
-    img.onload = () => redesenhar('foto.voltou');
-    img.onerror = () => {
+    const aoFalhar = () => {
+        if (falhou) return;
+        falhou = true;
+        clearTimeout(teto);
         if (prova.redeProvada) return redesenhar('foto.falhouComRede');
         fotoServidorResponde(src).then((respondeu) => {
             if (respondeu || prova.redeProvada) redesenhar('foto.falhouComRede');
             else soltar();
         });
     };
+    prova.comRede = () => { prova.redeProvada = true; redesenhar('foto.redeProvada'); };
+    const img = new Image();
+    img.onload = () => redesenhar('foto.voltou');
+    img.onerror = aoFalhar;
+    teto = setTimeout(() => { dfato('foto.provaSemResposta'); aoFalhar(); }, FOTO_PROVA_TETO_MS);
     img.src = src;
 }
+// O teto da prova da <img> (R8-4-08), o mesmo da sonda do servidor da foto:
+// passou dele sem desfecho, a prova conta como FALHA, e quem decide se a rede
+// anda é a sonda (ou a rede já provada) — o card não fica preso à prova
+// pendurada. Numa rede só LENTA, o servidor da foto responde à sonda e o card é
+// redesenhado como o aberto com sinal: a foto aparece quando terminar de chegar.
+const FOTO_PROVA_TETO_MS = 10 * 1000;
 
 // O servidor da foto RESPONDE? O CDN de foto não manda CORS, então o pedido vai
 // sem (`no-cors`): a resposta é opaca, mas o `fetch` só REJEITA quando a rede

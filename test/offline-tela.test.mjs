@@ -206,12 +206,15 @@ test('área que ROLA no card não vira arraste: a rede de segurança (.card-cont
 // `servidorDaFoto`: o que o servidor da FOTO faz com o pedido sem CORS da sonda
 // (R7-4-06) — 'responde' (qualquer resposta HTTP, o 404 da foto tirada do ar
 // inclusive), 'falha' (a rede não passa) ou 'pendura'.
-function montarRecuperacao({ online = true, semFoto = true, transform = '', servidorDaFoto = 'falha' } = {}) {
+// `tetoProva`: o teto da prova da <img> (R8-4-08), curto aqui pra o teste não esperar.
+function montarRecuperacao({ online = true, semFoto = true, transform = '', servidorDaFoto = 'falha', tetoProva = 60 } = {}) {
   const place = { venueID: 'v1', updateRequestID: 'ur1', purType: 'NEW_PHOTO', imageUrls: ['https://venue-image.waze.com/a', 'https://venue-image.waze.com/ur1'] };
   const redesenhos = [];
   const provas = [];
   const sondas = [];
   const diario = [];
+  // Quem guarda o foco no redesenho (R8-4-03): a opção com que foi chamado.
+  const focos = [];
   const card = { style: { transform }, querySelector: (sel) => (sel === '.card-sem-foto' && semFoto ? {} : null) };
   class Image { set src(u) { this._src = u; provas.push(this); } get src() { return this._src; } }
   const fetch = (u, opcoes) => {
@@ -226,13 +229,17 @@ function montarRecuperacao({ online = true, semFoto = true, transform = '', serv
     navigator: { onLine: online }, AppState: { currentPlace: place },
     cardDaFrente: () => card, fotosDoCard: new Function('return ' + fatiar('fotosDoCard'))(),
     urlDaFoto: (u) => u + '?w=7', Image, dfato: (k) => diario.push(k), showCurrentPlace: () => redesenhos.push(1),
-    fetch, FOTO_SONDA_TETO_MS: 30,
+    mantendoFocoNoCard: (redesenhar, opcoes) => { focos.push(opcoes); redesenhar(); },
+    fetch, FOTO_SONDA_TETO_MS: 30, FOTO_PROVA_TETO_MS: tetoProva,
+    // Os tetos não seguram o processo do teste depois do fim (a prova que o
+    // teste deixa no ar estoura sozinha, sem ninguém olhando).
+    setTimeout: (fn, ms) => { const h = setTimeout(fn, ms); if (h && h.unref) h.unref(); return h; },
   };
   const chaves = Object.keys(deps);
   const recuperar = new Function(...chaves, 'let provandoFotoDe = null;\n' + fatiar('recuperarCardSemFoto')
     + '\nasync ' + fatiar('fotoServidorResponde')
     + '\nreturn recuperarCardSemFoto;')(...chaves.map((k) => deps[k]));
-  return { recuperar, redesenhos, provas, sondas, diario, deps, card };
+  return { recuperar, redesenhos, provas, sondas, diario, focos, deps, card };
 }
 // A sonda é assíncrona: deixa as promessas (e o teto, quando pendura) assentarem.
 const assentar = (ms = 0) => new Promise((r) => setTimeout(r, ms));
@@ -311,6 +318,85 @@ test('R7-4-06: o servidor da foto PENDURADO — o teto solta a prova, e o card s
   assert.equal(m.redesenhos.length, 0, 'rede pendurada contou como rede que anda');
   m.recuperar();
   assert.equal(m.provas.length, 2, 'a sonda pendurada prendeu a recuperação pra sempre');
+});
+
+// ── R8-4-08: a prova da foto PENDURADA com a rede já provada ────────────────
+// O `online` abre a prova da <img>; o 1º pedido à foto fica pendurado (a conexão
+// que não responde logo depois de o sinal voltar). Uma resposta NOSSA chega e
+// prova a rede — e era só ANOTADA na prova: o card seguia com "A foto precisa de
+// sinal" e ✕/✓ travados até a prova terminar, e ela não tinha teto (MEDIDO, r8 da
+// auditoria: travado 12 s depois da volta; soltando o pedido preso, 86 ms).
+test('R8-4-08: a rede PROVADA com a prova da <img> no ar redesenha NA HORA — sem esperar o desfecho dela', async () => {
+  const d = montarRecuperacao();
+  d.recuperar();                          // o `online`: a prova sai, e a <img> fica no ar
+  d.recuperar({ redeProvada: true });     // a resposta nossa chega
+  assert.equal(d.provas.length, 1, 'a rede provada abriu uma segunda prova em vez de valer pra que estava no ar');
+  assert.equal(d.redesenhos.length, 1, 'a rede provada esperou a prova pendurada — o card segue travado com a rede de volta');
+  assert.deepEqual(d.diario, ['foto.redeProvada']);
+  assert.equal(d.sondas.length, 0, 'com a rede já provada, a sonda gastou um pedido à toa');
+  // O desfecho TARDIO da prova não mexe no card de novo (nem pergunta ao servidor).
+  d.provas[0].onerror();
+  await assentar(80);
+  assert.deepEqual([d.redesenhos.length, d.sondas.length], [1, 0], 'o desfecho tardio da prova redesenhou de novo');
+  // A rede provada no meio da SONDA (a <img> falhou e o servidor da foto pendura) também não espera.
+  const s = montarRecuperacao({ servidorDaFoto: 'pendura' });
+  s.recuperar();
+  s.provas[0].onerror();
+  s.recuperar({ redeProvada: true });
+  assert.equal(s.redesenhos.length, 1, 'a rede provada esperou a sonda pendurada');
+  await assentar(80);
+  assert.equal(s.redesenhos.length, 1, 'a sonda que voltou depois redesenhou de novo');
+});
+
+test('R8-4-08: a prova da <img> tem TETO — estourado, conta como falha (e o card não fica preso a ela)', async () => {
+  // A <img> nunca responde; o servidor da foto RESPONDE à sonda: a rede anda.
+  const m = montarRecuperacao({ servidorDaFoto: 'responde', tetoProva: 30 });
+  m.recuperar();
+  await assentar(90);
+  assert.equal(m.sondas.length, 1, 'a prova pendurada não contou como falha no teto — ninguém perguntou ao servidor da foto');
+  assert.equal(m.redesenhos.length, 1, 'com o servidor da foto respondendo, o card seguiu preso à prova pendurada');
+  assert.deepEqual(m.diario, ['foto.provaSemResposta', 'foto.falhouComRede']);
+  // CONTROLE: a rede não passa (a sonda falha) — nada redesenha, mas a prova SOLTA: a próxima tenta de novo.
+  const c = montarRecuperacao({ servidorDaFoto: 'falha', tetoProva: 30 });
+  c.recuperar();
+  await assentar(90);
+  assert.equal(c.redesenhos.length, 0, 'a prova pendurada, com a rede sem passar, contou como rede que anda');
+  // A falha que a <img> der DEPOIS do teto já foi contada: não pergunta ao servidor de novo.
+  c.provas[0].onerror();
+  await assentar();
+  assert.equal(c.sondas.length, 1, 'a falha tardia da prova, depois do teto, perguntou ao servidor da foto outra vez');
+  c.recuperar();
+  assert.equal(c.provas.length, 2, 'a prova pendurada prendeu a recuperação pra sempre');
+  // A prova que SAIU com a rede já provada: no teto, redesenha sem sondar.
+  const p = montarRecuperacao({ tetoProva: 30 });
+  p.recuperar({ redeProvada: true });
+  await assentar(90);
+  assert.deepEqual([p.redesenhos.length, p.sondas.length], [1, 0]);
+  // CONTROLE: a prova que RESPONDE antes do teto não ganha falha no teto.
+  const r = montarRecuperacao({ tetoProva: 30 });
+  r.recuperar();
+  r.provas[0].onload();
+  await assentar(90);
+  assert.deepEqual([r.redesenhos.length, r.sondas.length, r.diario], [1, 0, ['foto.voltou']]);
+});
+
+// ── R8-4-03: o teclado no ↑ do card "sem foto" quando o sinal volta ─────────
+// O ↑ é o único botão vivo do card sem a foto, e o teclado está nele. O sinal
+// volta, o card é REDESENHADO, e o foco caía no <body> (MEDIDO, r4 da auditoria,
+// com a foto que volta e com a que o Waze tirou do ar). O redesenho passa pelo
+// `mantendoFocoNoCard`, com o foco indo ao MESMO botão do card novo (ver
+// `test/lightbox-foco-card.test.mjs`).
+test('R8-4-03: o redesenho do card "sem foto" passa pelo foco do card — o mesmo botão no card novo', async () => {
+  for (const [nome, fazer] of [['a foto que volta', (m) => m.provas[0].onload()],
+    ['a foto tirada do ar, com a rede provada', (m) => m.provas[0].onerror()]]) {
+    const m = montarRecuperacao();
+    m.recuperar({ redeProvada: nome !== 'a foto que volta' });
+    fazer(m);
+    await assentar();
+    assert.equal(m.redesenhos.length, 1, `${nome}: PRÉ-CONDIÇÃO, o card não foi redesenhado`);
+    assert.deepEqual(m.focos, [{ mesmoBotao: true }],
+      `${nome}: o redesenho do card "sem foto" não passou pelo foco do card (o ↑ do teclado cai no <body>)`);
+  }
 });
 
 test('R7-4-06: o host da foto está no `connect-src` das TRÊS cópias da CSP (sem isso a sonda nunca responde)', () => {

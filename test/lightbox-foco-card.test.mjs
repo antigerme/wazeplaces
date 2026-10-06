@@ -49,15 +49,21 @@ function tela({ comFoto = true } = {}) {
   const doc = { body: { nome: 'body' } };
   doc.activeElement = doc.body;
   const camadas = { modal: false, foto: false, mapa: false };
-  const el = (nome, { visivel = true } = {}) => {
+  // `sel`: o seletor que o elemento CASA (`matches`), como os botões do card.
+  const el = (nome, { visivel = true, sel = null } = {}) => {
     const e = { nome, isConnected: true, disabled: false, closest: () => null };
     e.getClientRects = () => (visivel && e.isConnected ? [1] : []);
-    e.focus = () => { if (e.isConnected && visivel) doc.activeElement = e; };
+    e.focus = () => { if (e.isConnected && visivel && !e.disabled) doc.activeElement = e; };
+    e.matches = (s) => !!sel && s.split(',').map((x) => x.trim()).includes(sel);
     return e;
   };
+  // `travados`: os botões que o card novo traz `disabled` (o ✕ e o ✓ do card
+  // "sem foto", ou os três na janela do Desfazer).
   const novoCard = (opcoes = {}) => {
+    const botao = (nome, sel) => { const b = el(nome, { sel }); b.disabled = (opcoes.travados || []).includes(sel); return b; };
     const filhos = { '.card-image': el('foto do card', { visivel: opcoes.comFoto !== false }), '.card-map': el('mapa do card'),
-      '.card-btn-reject': el('✕ do card') };
+      '.card-btn-reject': botao('✕ do card', '.card-btn-reject'), '.card-btn-skip': botao('↑ do card', '.card-btn-skip'),
+      '.card-btn-read': botao('✓ do card', '.card-btn-read') };
     return { filhos, contains: (x) => Object.values(filhos).includes(x), querySelector: (s) => filhos[s] || null };
   };
   let card = novoCard({ comFoto });
@@ -209,4 +215,65 @@ test('R5-3-07 a aprovação que anda a fila e a foto que volta passam pelo foco 
     { place: null }, { currentPlace: P }, () => ordem.push('redesenhou'), guarda);
   devolver({ id: 'f1', place: P, idx: 0, url: 'https://venue-image.waze.com/f1.jpg' });
   assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'a foto que volta redesenha o card por fora do foco (caminho 3, a tecla z)');
+});
+
+// ── R8-4-03: o redesenho do MESMO pedido devolve o foco ao MESMO botão ──────
+// O card "sem foto" que o sinal de volta redesenha (`recuperarCardSemFoto`): o ↑
+// era o único botão vivo, o teclado estava nele, e o foco caía no <body> (MEDIDO,
+// r4 da auditoria: "foco antes: card-btn-skip · foco depois: BODY"). Com
+// `mesmoBotao`, ele vai ao ↑ do card novo — travado, ao ✕ (que agora pode estar
+// vivo) —, e só então à foto ou ao mapa.
+test('R8-4-03 o card "sem foto" redesenhado com o sinal de volta: o foco do ↑ vai ao ↑ do card novo, não ao <body>', () => {
+  const montar = () => {
+    const m = tela({ comFoto: false });
+    // O card sem a foto: ✕ e ✓ travados, o teclado no ↑.
+    m.trocarCard(m.novoCard({ comFoto: false, travados: ['.card-btn-reject', '.card-btn-read'] }));
+    m.card().filhos['.card-btn-skip'].focus();
+    return m;
+  };
+  const m = montar();
+  assert.equal(nome(m.doc), '↑ do card', 'PRÉ-CONDIÇÃO: o teclado está no ↑ do card sem a foto');
+  const novo = m.novoCard({ comFoto: false });
+  m.app.mantendoFocoNoCard(() => m.trocarCard(novo), { mesmoBotao: true });
+  assert.equal(m.doc.activeElement, novo.filhos['.card-btn-skip'],
+    `o redesenho do card largou o foco do ↑ em ${nome(m.doc)} — quem usa o teclado recomeça do topo da página`);
+  // O ↑ do card novo travado: o ✕, que agora está vivo.
+  const t = montar();
+  const semPular = t.novoCard({ comFoto: false, travados: ['.card-btn-skip'] });
+  t.app.mantendoFocoNoCard(() => t.trocarCard(semPular), { mesmoBotao: true });
+  assert.equal(t.doc.activeElement, semPular.filhos['.card-btn-reject'], `com o ↑ travado, o foco caiu em ${nome(t.doc)}`);
+  // Os três travados (a janela do Desfazer): a foto ou o mapa, como antes.
+  const j = montar();
+  const tudoTravado = j.novoCard({ comFoto: false, travados: ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'] });
+  j.app.mantendoFocoNoCard(() => j.trocarCard(tudoTravado), { mesmoBotao: true });
+  assert.equal(j.doc.activeElement, tudoTravado.filhos['.card-map'], `com os três travados, o foco caiu em ${nome(j.doc)}`);
+  // O ✓ focado vai ao ✓ (o equivalente é o MESMO botão, não sempre o ↑).
+  const v = tela();
+  v.card().filhos['.card-btn-read'].focus();
+  const comLido = v.novoCard();
+  v.app.mantendoFocoNoCard(() => v.trocarCard(comLido), { mesmoBotao: true });
+  assert.equal(v.doc.activeElement, comLido.filhos['.card-btn-read'], `o foco do ✓ caiu em ${nome(v.doc)}`);
+});
+
+test('R8-4-03 CONTROLES: sem `mesmoBotao` (outro pedido na frente) a regra é a de antes; o foco fora dos botões segue a foto', () => {
+  // As escritas do lightbox podem TROCAR o pedido da frente: lá o foco vai à foto ou ao mapa (R5-3-07).
+  const c = tela();
+  c.card().filhos['.card-btn-skip'].focus();
+  const outro = c.novoCard();
+  c.app.mantendoFocoNoCard(() => c.trocarCard(outro));
+  assert.equal(c.doc.activeElement, outro.filhos['.card-image'], 'sem `mesmoBotao`, o foco mudou de regra');
+  // Com `mesmoBotao`, o foco que estava na foto vai à foto (não é botão de ação).
+  const f = tela();
+  f.card().filhos['.card-image'].focus();
+  const comFoto = f.novoCard();
+  f.app.mantendoFocoNoCard(() => f.trocarCard(comFoto), { mesmoBotao: true });
+  assert.equal(f.doc.activeElement, comFoto.filhos['.card-image']);
+  // E o foco de FORA do card (ou o do dedo, no <body>) segue onde está.
+  const fora = tela();
+  fora.cabecalho.focus();
+  fora.app.mantendoFocoNoCard(() => fora.trocarCard(fora.novoCard()), { mesmoBotao: true });
+  assert.equal(fora.doc.activeElement, fora.cabecalho);
+  const dedo = tela();
+  dedo.app.mantendoFocoNoCard(() => dedo.trocarCard(dedo.novoCard()), { mesmoBotao: true });
+  assert.equal(dedo.doc.activeElement, dedo.doc.body);
 });
