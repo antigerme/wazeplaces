@@ -20961,7 +20961,13 @@ function handleSkip() {
     // UNDO_WINDOW_MS depois, e nesse intervalo dá pra abrir Filtros e mexer no
     // interruptor. Quem pulou com a preferência ligada quis guardar aquele
     // pedido; mudar de ideia sobre o recurso não reescreve o que já foi feito.
-    const guardar = AppState.preferences.pularGuarda === true;
+    //
+    // E o pedido que JÁ tem a estrela (o `isStarred` que a busca traz, a ⭐ do
+    // card) não ganha outra: ela não muda nada no Waze, gasta uma requisição e
+    // contava de novo no "Colecionador" — o mesmo pedido pulado dez vezes dava
+    // a conquista (MEDIDO: 2 estrelas e `guardados: 2` com um pedido só;
+    // auditoria de 2026-10-06, R9-7-06). O ↑ segue sendo pular.
+    const guardar = AppState.preferences.pularGuarda === true && place.isStarred !== true;
     // Sem a preferência, o Pular continua sendo o que sempre foi: REDE ZERO.
     // O place segue pendente no Waze e o executor é no-op — o scheduleAction
     // está aqui só pela janela do Desfazer. Com a preferência, o mesmo executor
