@@ -20972,10 +20972,30 @@ async function handleBatchMarkRead() {
     // Waze marcou — vai sair da fila junto com os `feitos` (ver o fim).
     let sessaoTrocou = false;
     const posQueda = [];
+    // O 401 NÃO prova sessão morta (gotcha #42), e o lote que o levava não
+    // marcava, não mandava de novo e não dizia — "Marcando 3 como lidos…" e só
+    // "Conexão instável — sua sessão continua válida", com os 3 pendentes
+    // (auditoria de 2026-10-06, R8-2-04, MEDIDO nos dois motores). O lote não
+    // tem fila de saída: o 401 passa pela conferência das escritas que moram
+    // fora dela (`refazerDepoisDo401`, a do "Pular guarda" e a do lightbox) e,
+    // com a sessão confirmada VIVA, o que o levou sai de novo — UMA vez por
+    // lote; o resto segue o laço. O 401 que fica é o que não se refaz (a sessão
+    // não se confirmou, ou a 2ª ida levou outro) e o de um pedaço SEGUINTE, que
+    // chega depois de a sessão ter sido confirmada viva neste lote: aí é a
+    // escrita que o Waze recusa, não a sessão (o critério do `u401` da fila de
+    // saída), e conferir de novo seria outra sonda e outro "conexão instável".
+    // O lote para e avisa (lá embaixo).
+    let refez = false;
+    const mandar = async (enviar) => {
+        const r = await callWithRetry(enviar);
+        if (refez || epoca !== epocaDaSessao || !(r && r.errorCategory === 'unauthorized')) return r;
+        refez = true;
+        return (await refazerDepoisDo401(epoca, enviar)) || r;
+    };
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
-            const r = await callWithRetry(() => API.markAsReadBatch(itens(pedaco), regiao));
+            const r = await mandar(() => API.markAsReadBatch(itens(pedaco), regiao));
             if (epoca !== epocaDaSessao) {
                 sessaoTrocou = true;
                 if (r && r.success) posQueda.push(...pedaco);
@@ -20986,11 +21006,11 @@ async function handleBatchMarkRead() {
             // pouso, e a reabertura sem rede os devolvia como card — dava pra
             // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
             if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); continue; }
-            if (r && r.errorCategory === 'unauthorized') { falhou = r; handleUnauthorized(); break; }
+            if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
-                const r1 = await callWithRetry(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
+                const r1 = await mandar(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
                 if (epoca !== epocaDaSessao) {
                     sessaoTrocou = true;
                     if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
@@ -21003,7 +21023,7 @@ async function handleBatchMarkRead() {
                     if (!r1.success && aprovacaoDelaJaPousou(p)) aprovadas.push(p);
                     else feitos.push(p);
                 }
-                else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; handleUnauthorized(); break; }
+                else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; break; }
                 else { falhou = r1 || {}; break; }
             }
         }
@@ -21029,6 +21049,13 @@ async function handleBatchMarkRead() {
     // cuja resposta pousou depois da queda) sai da fila pela chave, o "Restam"
     // desce pelo que saiu, e o fim da função refaz o card da frente. Com OUTRA
     // conta (ou o "Sair") a fila foi refeita, e não há o que tirar.
+    //
+    // E o que NÃO saiu diz que não saiu (R8-2-04): a queda cortava o lote calada,
+    // e a renovação dizia "sua fila continua aqui" com os pedidos pendentes — a
+    // pessoa achando que tinha marcado. Só com a fila do gesto na tela (a
+    // renovação, ou a queda antes da tela de entrada), como a estrela do "Pular
+    // guarda" que a queda pega no ar (R6-2-08). Nada mais é dito nem contado.
+    let naoSaiuNaQueda = false;
     if (sessaoTrocou) {
         if (epocaFila !== AppState.fetchEpoch) return;
         // O pouso do que pousou depois da queda (o de antes já foi registrado a
@@ -21039,7 +21066,8 @@ async function handleBatchMarkRead() {
         const antes = AppState.queue.length;
         AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
         AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
-        // Daqui pra baixo, só a TELA: nada a contar nem a avisar.
+        naoSaiuNaQueda = alvos.some((p) => !fora.has(chaveDoPedido(p)));
+        // Daqui pra baixo, só a TELA: nada a contar.
         feitos.length = 0;
         aprovadas.length = 0;
         falhou = null;
@@ -21074,7 +21102,15 @@ async function handleBatchMarkRead() {
         saveStats();
         if (feitos.length) showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
     }
-    if (falhou && falhou.errorCategory !== 'unauthorized') showToast(msgDoServidor(falhou, t('toast.batchError')), 'error');
+    // O lote que NÃO saiu avisa — também pelo 401 que não se refez (a sessão não
+    // se confirmou viva, ou a 2ª ida levou outro 401) e pela queda (acima), os
+    // dois desfechos que eram calados (R8-2-04). A frase é a do lote
+    // (`toast.batchError`): a do servidor diria "sessão expirada" de uma sessão
+    // que pode estar viva, e o "espere a conferência e toque de novo" só é
+    // verdade enquanto ela corre — depois da queda sem a extensão, o que vem é a
+    // tela de entrada.
+    if (falhou) showToast(falhou.errorCategory === 'unauthorized' ? t('toast.batchError') : msgDoServidor(falhou, t('toast.batchError')), 'error');
+    else if (naoSaiuNaQueda) showToast(t('toast.batchError'), 'error');
     // O que o lote NÃO marcou segue pendente no Waze. Na mesma fila ele nunca
     // saiu dela (o lote trava as outras decisões). Numa fila REFEITA no meio (↻,
     // filtro) ele não entrou — estava em andamento —, e ninguém o trazia: a fila

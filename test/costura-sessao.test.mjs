@@ -767,8 +767,13 @@ test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o 
   assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'u2',
     'o card da frente não foi refeito: ficou na tela o pedido já marcado');
   assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
-  assert.ok(!depois.includes('historico') && !depois.includes('conquistas') && !depois.some((l) => l.startsWith('toast')),
-    `com a sessão trocada o lote gravou ou avisou: ${depois}`);
+  assert.ok(!depois.includes('historico') && !depois.includes('conquistas'),
+    `com a sessão trocada o lote gravou: ${depois}`);
+  // O ÚNICO aviso é o de que o lote não saiu inteiro (R8-2-04): o u2 e o u3
+  // seguem pendentes, e a renovação diria "sua fila continua aqui" com a pessoa
+  // achando que tinha marcado. Nada de "N marcados".
+  assert.deepEqual(depois.filter((l) => l.startsWith('toast')), ['toast:error'],
+    `com a sessão trocada o lote disse outra coisa (ou nada) sobre o que não saiu: ${depois}`);
   assert.ok(depois.includes('card:u2'), `a tela não foi refeita: ${depois}`);
   assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
 });

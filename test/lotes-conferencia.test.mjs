@@ -9,7 +9,9 @@
 //  · a CONFERÊNCIA de sessão que começa NO MEIO de uma passada da fila de saída
 //    (R8-2-02 = R8-1-06). As guardas só valiam na entrada: o ✕ que levava 401
 //    com a passada dormindo o ritmo saía de novo, e os itens seguintes saíam
-//    durante a conferência.
+//    durante a conferência;
+//  · o 401 no "Marcar todos" (R8-2-04): não marcava, não mandava de novo e não
+//    dizia que não tinha marcado.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js: o que o teste não
 // fornece vira um "buraco negro" que aceita qualquer chamada (o `montar` de
@@ -310,6 +312,78 @@ test('R8-2-01: "Marcar todos" com o pedido cuja APROVAÇÃO pousou sem resposta 
   assert.equal(c.AppState.stats.read, 3, 'CONTROLE: o "já tratado" de outro editor deixou de contar');
   assert.deepEqual(c.toasts().at(-1), 'toast:success:toast.batchDonePlural#3');
   assert.ok(!c.log.includes('conquista:fotos'), 'CONTROLE: o "Curador" contou sem aprovação nenhuma');
+});
+
+// ═══ R8-2-04 · o "Marcar todos" que leva 401 ═════════════════════════════════
+
+test('R8-2-04: o "Marcar todos" leva 401 e a sessão está VIVA (alarme falso) — o lote sai de novo, UMA vez, e conta', async () => {
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2), pedido(3)], loteResponde: (n) => (n === 1 ? R401 : null) });
+  await m.marcarTodos();
+  assert.deepEqual(m.chamadas, ['lote:v1+v2+v3', 'perfil', 'lote:v1+v2+v3'],
+    'DEFEITO: com a sessão confirmada viva, o lote que levou o 401 não saiu de novo (ou saiu antes do veredito)');
+  assert.equal(m.AppState.stats.read, 3, 'o lote que saiu de novo não contou');
+  assert.deepEqual(m.fila(), [], 'os pedidos marcados seguiram na fila');
+  assert.deepEqual(m.toasts(), ['toast:info:toast.batchMarkingPlural#3', 'toast:info:toast.sessionKeptAlive',
+    'toast:success:toast.batchDonePlural#3']);
+});
+
+test('R8-2-04: a 2ª ida leva OUTRO 401 (a escrita, não a sessão) — o lote para, não confere de novo e DIZ que não marcou', async () => {
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2), pedido(3)], loteResponde: () => R401 });
+  await m.marcarTodos();
+  assert.deepEqual(m.chamadas, ['lote:v1+v2+v3', 'perfil', 'lote:v1+v2+v3'],
+    `uma conferência e UMA 2ª ida, nada mais: ${m.chamadas.join(', ')}`);
+  assert.equal(m.AppState.stats.read, 0);
+  assert.deepEqual(m.fila(), ['v1', 'v2', 'v3'], 'os pedidos que não foram marcados saíram da fila');
+  assert.equal(m.toasts().at(-1), 'toast:error:toast.batchError',
+    `DEFEITO: o lote que não saiu ficou calado (avisos: ${m.toasts().join(' | ')})`);
+});
+
+test('R8-2-04: a sonda não CONFIRMA a sessão (rede) — o lote não sai de novo, e diz que não marcou', async () => {
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2)], loteResponde: () => R401,
+    perfil: () => ({ success: false, errorCategory: 'transient' }) });
+  await m.marcarTodos();
+  assert.deepEqual(m.chamadas, ['lote:v1+v2', 'perfil'], 'o lote saiu de novo sem a sessão confirmada');
+  assert.deepEqual(m.fila(), ['v1', 'v2']);
+  assert.equal(m.toasts().at(-1), 'toast:error:toast.batchError', `DEFEITO: calado (avisos: ${m.toasts().join(' | ')})`);
+});
+
+test('R8-2-04: o 401 é a QUEDA (a sonda diz morta) — o lote não sai de novo, e diz que não marcou com a fila do gesto na tela', async () => {
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2), pedido(3)], loteResponde: () => R401, perfil: () => MORTA });
+  await m.marcarTodos();
+  assert.equal(m.deps.epocaDaSessao, 1, 'PRÉ-CONDIÇÃO: a sessão não caiu');
+  assert.deepEqual(m.chamadas, ['lote:v1+v2+v3', 'perfil'], 'o lote saiu de novo com a sessão que caiu');
+  assert.equal(m.AppState.stats.read, 0);
+  assert.deepEqual(m.fila(), ['v1', 'v2', 'v3']);
+  assert.deepEqual(m.toasts(), ['toast:info:toast.batchMarkingPlural#3', 'toast:error:toast.batchError'],
+    'DEFEITO: a queda cortou o lote calada — a renovação diria "sua fila continua aqui" com a pessoa achando que marcou');
+  // CONTROLE: a fila do gesto foi embora (o "Sair", outra conta) — não há a quem avisar.
+  const c = montarMarcarTodos({ fila: [pedido(1), pedido(2)], loteResponde: () => R401, perfil: () => MORTA, quedaRefazAFila: true });
+  await c.marcarTodos();
+  assert.deepEqual(c.toasts(), ['toast:info:toast.batchMarkingPlural#2'], 'com a fila refeita, o lote avisou de uma fila que não está mais na tela');
+});
+
+test('R8-2-04: UMA conferência com 2ª ida por lote — o 401 de um pedaço SEGUINTE não sai de novo nem confere de novo', async () => {
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2), pedido(3), pedido(4)], pedaco: 2,
+    loteResponde: (n) => (n === 1 || n === 3 ? R401 : null) });
+  await m.marcarTodos();
+  // O 1º pedaço: 401, conferência, 2ª ida que pousa. O 2º: 401 depois de a
+  // sessão ter sido confirmada viva NESTE lote — é a escrita, não a sessão.
+  assert.deepEqual(m.chamadas, ['lote:v1+v2', 'perfil', 'lote:v1+v2', 'lote:v3+v4'],
+    `o 2º 401 do lote saiu de novo (ou conferiu a sessão de novo): ${m.chamadas.join(', ')}`);
+  assert.equal(m.AppState.stats.read, 2);
+  assert.deepEqual(m.fila(), ['v3', 'v4']);
+  assert.deepEqual(m.toasts().slice(-2), ['toast:success:toast.batchDonePlural#2', 'toast:error:toast.batchError'],
+    `o pedaço que saiu e o que não saiu: ${m.toasts().join(' | ')}`);
+});
+
+test('R8-2-04: o 401 no caminho UM A UM também se refaz com a sessão viva', async () => {
+  // O lote para no v2 (resolvido por outro editor) e vai um a um; o v1 leva 401.
+  const m = montarMarcarTodos({ fila: [pedido(1), pedido(2)], resolvidos: ['u2'], umResponde: (n) => (n === 1 ? R401 : null) });
+  await m.marcarTodos();
+  assert.deepEqual(m.chamadas, ['lote:v1+v2', 'um:v1', 'perfil', 'um:v1', 'um:v2'],
+    'DEFEITO: o pedido do um a um que levou 401 não saiu de novo com a sessão viva');
+  assert.equal(m.AppState.stats.read, 2);
+  assert.deepEqual(m.fila(), []);
 });
 
 // ═══ R8-2-02 · a conferência que começa NO MEIO de uma passada da fila de saída ═══
