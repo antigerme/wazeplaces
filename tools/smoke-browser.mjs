@@ -7083,21 +7083,26 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 //       NA: o "Aplicar" gravava `row/235`, uma fila vazia (lote 9).
 //   R8-6-04. Pelo atalho, a carga da abertura e os Filtros pediam a MESMA
 //       lista de países duas vezes; hoje é uma ida só, dividida.
+//   R9-6-01. A lista que já CHEGOU saía de novo: a ida e a volta de região no
+//       modal e o "Aplicar" + reabrir os Filtros pediam a da memória; hoje ela
+//       fica guardada por região.
 // CONTROLES: sem ninguém mexer, o perfil AINDA leva quem edita na França pra
 // França (o instrumento enxerga a decisão automática), a escolha de OUTRO país
 // no modal vale, a região que não é a aplicada abre no 1º da lista, com uma
-// ida só à NA a escolha da pessoa fica, e com a lista da abertura chegando
-// ANTES do perfil a tela acompanha.
+// ida só à NA a escolha da pessoa fica, com a lista da abertura chegando
+// ANTES do perfil a tela acompanha, e a lista da NA que FALHA na 1ª ida é
+// pedida de novo na volta (a contagem enxerga a 2ª ida quando ela existe).
 {
   const onde = 'filtros/lugar';
   const LISTAS = {
     row: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }, { id: 181, name: 'Portugal' }],
     na: [{ id: 235, name: 'United States' }, { id: 40, name: 'Canada' }],
   };
-  // `falharListaDaCarga`: a 1ª lista de países da ROW (a da carga da abertura)
-  // responde falha na hora, e só as seguintes ficam seguras (ver o "11, com a
-  // REGIÃO"). `listasDaRow` conta as que a ROTA recebeu (R8-6-04).
-  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {}, falharListaDaCarga = false }) => {
+  // `falhar`: as N primeiras listas de países de cada região respondem falha
+  // na hora (`{ row: 1 }` é a da carga da abertura, ver o "11, com a REGIÃO"),
+  // e só as seguintes ficam seguras. `listasDaRow` conta as da ROW que a ROTA
+  // recebeu (R8-6-04), e `listas` as de cada região (R9-6-01).
+  const montar = async ({ editaveis, editaveisLa = {}, segurar = false, guardado = {}, falhar = {} }) => {
     const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, locale: 'pt-BR', serviceWorkers: 'block' });
     await ctx.addInitScript((guardado) => {
       try {
@@ -7110,7 +7115,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const seguros = [];
     // R56-6: as listas de países das TROCAS de região, seguras na ordem em que saem.
     const trocas = { segurar: false, seguras: [] };
-    const contagem = { listasDaRow: 0 };
+    const contagem = { listasDaRow: 0, listas: {} };
     await ctx.route('**/api/**', async (route) => {
       const nome = route.request().url().split('/api/')[1].split(/[?#]/)[0];
       let corpo = {};
@@ -7126,7 +7131,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       else if (nome === 'presenca-app') b = { success: true, online: [], conversas: [] };
       const daRow = nome === 'lista-paises' && regiao === 'row';
       if (daRow) contagem.listasDaRow++;
-      if (daRow && falharListaDaCarga && contagem.listasDaRow === 1) {
+      if (nome === 'lista-paises') contagem.listas[regiao] = (contagem.listas[regiao] || 0) + 1;
+      if (nome === 'lista-paises' && contagem.listas[regiao] <= (falhar[regiao] || 0)) {
         b = { success: false, errorCategory: 'transient' };
       } else if (segurar && regiao === 'row' && (nome === 'perfil' || nome === 'lista-paises')) {
         await new Promise((solta) => seguros.push({ nome, solta }));
@@ -7244,35 +7250,43 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await m.ctx.close();
   }
 
-  // R56-6. Aplicado ROW/Brasil, a região vai NA → ROW → NA no modal com as três
+  // R56-6. Aplicado ROW/Brasil, a região vai NA → ROW → NA no modal com as
   //        listas seguras, e elas chegam numa ordem; a pessoa escolhe os EUA
   //        ASSIM QUE O SELETOR DEIXA (a lista na tela, sem "carregando",
   //        destravado). O pouso de cada resposta se espera pelo registro dela
   //        no anel de chamadas do app (`API.chamadas`), que é escrito ANTES de
   //        a troca continuar — e a contagem é a que CRESCEU desde a base
   //        fotografada depois da abertura (gotcha #62), nunca por prazo.
+  //        Desde o R9-6-01 a volta à NA DIVIDE a ida que está no ar e a lista
+  //        que chegou vem da memória: é UMA ida por região, e o que sobra do
+  //        R56-6 é a lista de OUTRA região chegando depois. A ida à ROW só é de
+  //        verdade com a lista da ROW fora da memória: aqui ela falha na carga e
+  //        na abertura dos Filtros (`falhar: { row: 2 }`).
   for (const [caso, regioes, ordem] of [
-    ['a 1ª ida à NA chega antes', ['na', 'row', 'na'], [0, 1, 2]],
-    ['a última ida à NA chega antes', ['na', 'row', 'na'], [2, 0, 1]],
+    ['a da NA chega antes (a da ROW, depois)', ['na', 'row', 'na'], [0, 1]],
+    ['a da ROW chega antes', ['na', 'row', 'na'], [1, 0]],
     ['CONTROLE: uma ida só à NA', ['na'], [0]],
   ]) {
-    const m = await montar({ editaveis: [30] });
+    const m = await montar({ editaveis: [30], falhar: { row: 2 } });
     await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
     await fimDaCarga(m);
     await m.page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
-    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
-      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    // A da carga e a dos Filtros FALHARAM (as duas pousaram no anel), e o
+    // seletor diz "Lista não carregou".
+    await esperarOuExplodir(m.page, () => API.chamadas.filter((c) => c.rota === 'lista-paises').length >= 2
+      && document.getElementById('filterCountry').dataset.carregando === '1', 'a lista da ROW dos Filtros falhar');
     const base = await m.page.evaluate(() => API.chamadas.filter((c) => c.rota === 'lista-paises').length);
     m.trocas.segurar = true;
     for (const r of regioes) {
       await m.page.evaluate((r) => { const s = document.getElementById('filterRegion'); s.value = r; s.dispatchEvent(new Event('change')); }, r);
     }
-    // As três saíram e estão seguras (a rota as recebe fora do `evaluate`).
-    for (let i = 0; i < 100 && m.trocas.seguras.length < regioes.length; i++) await m.page.waitForTimeout(20);
+    // Uma ida por REGIÃO saiu e está segura (a rota as recebe fora do `evaluate`).
+    const esperadas = [...new Set(regioes)].join(',');
+    for (let i = 0; i < 100 && m.trocas.seguras.length < esperadas.split(',').length; i++) await m.page.waitForTimeout(20);
     const seguradas = m.trocas.seguras.map((x) => x.regiao).join(',');
-    checa(seguradas === regioes.join(','), `${onde} (R56-6, ${caso}): CONTROLE — o instrumento não segurou as listas das trocas`, seguradas);
-    if (seguradas !== regioes.join(',')) { await m.ctx.close(); continue; }
+    checa(seguradas === esperadas, `${onde} (R56-6, ${caso}): CONTROLE — o instrumento não segurou as listas das trocas (uma ida por região, R9-6-01)`, seguradas);
+    if (seguradas !== esperadas) { await m.ctx.close(); continue; }
     let escolheuApos = null;
     for (let k = 0; k < ordem.length; k++) {
       m.trocas.seguras[ordem[k]].solta();
@@ -7298,7 +7312,55 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(!fim.aplicarMorto, `${onde} (R56-6, ${caso}): o "Aplicar" ficou morto`);
     const gravado = await m.page.evaluate(() => { document.getElementById('applyFilters').click(); return API.getRegion() + '/' + API.getCountry(); });
     checa(gravado === 'na/235', `${onde} (R56-6, ${caso}): o "Aplicar" gravou ${gravado}`, gravado);
+    // R9-6-01: no fim de tudo, a lista da NA saiu UMA vez (a volta à NA dividiu a ida).
+    checa(m.contagem.listas.na === 1, `${onde} (R56-6, ${caso}): a lista da NA saiu ${m.contagem.listas.na} vezes (R9-6-01)`);
     checa(m.erros.length === 0, `${onde} (R56-6): erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // R9-6-01. A lista que CHEGOU não sai de novo: aplicado ROW/Brasil, a pessoa
+  //     vai à NA, volta à ROW e vai à NA de novo no modal, escolhe os EUA,
+  //     aplica e reabre os Filtros. Eram 2 da ROW e 2 da NA (MEDIDO, auditoria
+  //     da rodada 9); hoje 1 e 1, e a lista da região aplicada fica na memória
+  //     depois do "Aplicar" (o "Aplicar" a jogava fora). CONTROLE: com a 1ª
+  //     lista da NA FALHANDO, a volta à NA a pede de novo — a contagem enxerga
+  //     a 2ª ida quando ela existe, e a que falhou não fica guardada.
+  for (const controle of [false, true]) {
+    const caso = controle ? 'CONTROLE: a 1ª da NA falha' : 'ida e volta, "Aplicar" e reabrir';
+    const m = await montar({ editaveis: [30], falhar: controle ? { na: 1 } : {} });
+    await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(m.page, () => typeof AppState !== 'undefined' && !!AppState._profilePromise, 'a carga do perfil');
+    await fimDaCarga(m);
+    await m.page.evaluate(() => { openFiltersModal(); switchFilterTab('filtersTabFilters'); });
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '30'
+      && !document.getElementById('filterCountry').dataset.carregando, 'o Brasil no seletor');
+    // A troca acabou quando o "Aplicar" não espera mais por ela.
+    const naRegiao = async (r) => {
+      await m.page.evaluate((r) => { const s = document.getElementById('filterRegion'); s.value = r; s.dispatchEvent(new Event('change')); }, r);
+      await esperarOuExplodir(m.page, () => !esperaDosFiltros.regiao && !document.getElementById('applyFilters').disabled,
+        `a troca de região acabar`);
+    };
+    for (const r of ['na', 'row', 'na']) await naRegiao(r);
+    const naTela = await m.page.evaluate(() => document.getElementById('filterRegion').value);
+    checa(naTela === 'na', `${onde} (R9-6-01, ${caso}): PRÉ-CONDIÇÃO — a última troca não ficou na NA`, naTela);
+    await m.page.evaluate(() => {
+      const s = document.getElementById('filterCountry'); s.value = '235'; s.dispatchEvent(new Event('change'));
+      document.getElementById('applyFilters').click();
+    });
+    const memoria = await m.page.evaluate(() => ({ lugar: API.getRegion() + '/' + API.getCountry(), paises: AppState.countries.map((c) => c.id) }));
+    checa(memoria.lugar === 'na/235', `${onde} (R9-6-01, ${caso}): PRÉ-CONDIÇÃO — o "Aplicar" gravou ${memoria.lugar}`);
+    checa(memoria.paises.includes(235), `${onde} (R9-6-01, ${caso}): o "Aplicar" jogou fora a lista da região que a troca trouxe`, memoria.paises.join(','));
+    // Reabre os Filtros (depois de o voltar do fechamento assentar, gotcha #65).
+    await esperarOuExplodir(m.page, () => !CamadaVoltar.consumindo, 'o voltar do fechamento assentar');
+    await m.page.evaluate(() => { void openFiltersModal(); });
+    await esperarOuExplodir(m.page, () => document.getElementById('filterCountry').value === '235'
+      && !document.getElementById('filterCountry').dataset.carregando, 'os EUA no seletor reaberto');
+    const esperado = controle ? { row: 1, na: 2 } : { row: 1, na: 1 };
+    const contou = { row: m.contagem.listas.row || 0, na: m.contagem.listas.na || 0 };
+    checa(contou.row === esperado.row && contou.na === esperado.na,
+      controle ? `${onde} (R9-6-01, ${caso}): CONTROLE — a lista da NA que falhou não foi pedida de novo (ou a contagem não a viu)`
+        : `${onde} (R9-6-01, ${caso}): a lista de países saiu de novo com ela na memória`, JSON.stringify(contou));
+    checa(m.erros.length === 0, `${onde} (R9-6-01): erro de JS`, m.erros[0]);
     await m.ctx.close();
   }
 
@@ -7312,7 +7374,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   //     CONTROLE ela chega antes.
   for (const listaAntes of [false, true]) {
     const caso = listaAntes ? 'CONTROLE: a lista da abertura chega ANTES do perfil' : 'a lista da abertura chega DEPOIS do perfil';
-    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true, falharListaDaCarga: true });
+    const m = await montar({ editaveis: [], editaveisLa: { na: [235] }, segurar: true, falhar: { row: 1 } });
     await m.page.goto(BASE, { waitUntil: 'domcontentloaded' });
     // A lista da carga POUSOU (falhando): o registro dela no anel de chamadas.
     await esperarOuExplodir(m.page, () => typeof API !== 'undefined' && API.chamadas.some((c) => c.rota === 'lista-paises'),
