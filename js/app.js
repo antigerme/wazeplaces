@@ -17755,6 +17755,21 @@ async function esvaziarFilaDeSaida() {
             // do envio. Não deu — outra aba tem item marcado há pouco (ela está
             // esvaziando), ou marcou este no mesmo instante e ganhou —: esta sai.
             if (trava.reserva && !(await reivindicarNaSaida(item))) break;
+            // As guardas da ENTRADA valem a CADA item — depois do ritmo (e da
+            // reivindicação, na reserva) e antes do envio. A conferência de sessão
+            // que começa no MEIO da passada não a parava: o ✕ que leva 401 com
+            // ela dormindo o ritmo é solto do "em andamento" pelo executor, e a
+            // passada acordava e mandava a MESMA decisão de novo, com a
+            // conferência no ar; o 401 de qualquer outra chamada deixava os itens
+            // seguintes saírem durante ela (MEDIDO nos dois motores; auditoria de
+            // 2026-10-06, R8-2-02 e R8-1-06 — o R7-1-05 só valia na entrada). A
+            // rede que cai no meio, idem: o envio já nascia condenado. E a sessão
+            // é a da ENTRADA (`epoca`): trocada no meio (a queda que renova
+            // durante o ritmo), a resposta seria jogada fora e o item, mandado de
+            // novo. Quem chama de novo é quem sempre chama: o fim da conferência,
+            // a rede voltando, a próxima resposta, a renovação.
+            if (!AppState.authenticated || navigator.onLine === false || verificandoSessao || saidaEmRecuo()
+                || epoca !== epocaDaSessao) break;
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
                             flagType: item.dup ? 'DUPLICATE' : undefined };
