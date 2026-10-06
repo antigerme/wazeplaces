@@ -17895,6 +17895,16 @@ async function esvaziarFilaDeSaida() {
             // `reivindicacaoDestaAba`), com e sem a trava do navegador: a trava
             // só serializa os esvaziamentos, e a decisão que a outra aba manda
             // não passa por ela.
+            //
+            // A fila é RELIDA a cada volta, e não só depois do pouso: entre uma
+            // volta e a seguinte há o ritmo (400 ms), e nele a decisão do card
+            // (ou do "Rejeitar os N") que estava no ar quando a lista foi lida
+            // POUSA — sai da fila e do "em andamento". Escolhida na lista de
+            // antes do ritmo, ela parecia livre e ia ao Waze DE NOVO (MEDIDO
+            // nos dois motores: o ✕ de u2 aos 370 e aos 1017 ms; auditoria de
+            // 2026-10-06, R9-2-01). Uma leitura do aparelho por item, só
+            // durante a passada.
+            f = carregarFilaDeSaida();
             const item = f.find((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)) && !reivindicadoPorOutraAba(x));
             if (!item) break;
             // A conta do GESTO contra a de agora (ver `contaAgora`). Desconhecida
