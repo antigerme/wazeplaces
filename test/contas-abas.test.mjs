@@ -225,6 +225,9 @@ function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
     savePreferences: () => ap.safeLS.set(PREFERENCES_KEY, JSON.stringify(AppState.preferences)),
     saveDevMode: () => ap.safeLS.set('waze_places_devmode', '{}'),
     callWithRetry: (fn) => fn(), t: (k) => k, showToast: (m) => log.push('toast:' + m),
+    // Qual sessão a OUTRA aba tirou do aparelho (o aviso do token, R8-1-03):
+    // `null` é "não se sabe". Quem testa o "Sair" de lá diz qual foi.
+    tokenTiradoPorOutraAba: null,
   };
   const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada'], deps);
   return { h, ap, log, AppState, API, deps, statsAntes };
@@ -232,6 +235,9 @@ function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
 
 test('A1: na OUTRA aba o "Sair" solta a memória e a tela, e não grava nem apaga NADA no aparelho', async () => {
   const m = montarSair();
+  // A outra aba tirou do aparelho a MESMA sessão desta (o aviso do token disse
+  // qual): ela já a apagou no servidor, e daqui nada sai (R8-1-03).
+  m.deps.tokenTiradoPorOutraAba = 'tok-A';
   await m.h.handleLogout({ porOutraAba: true });
   assert.deepEqual(m.ap.escritas, [],
     'DEFEITO: a aba que só soube do "Sair" mexeu no aparelho: ' + m.ap.escritas.join(' '));
@@ -1347,6 +1353,7 @@ test('outra conta: a aba sai SEM tocar no aparelho, apaga a PRÓPRIA sessão no 
   assert.equal(m.deps.saiuNestaPagina, true, 'voltar à aba relogaria pela extensão, tomando o aparelho de volta');
   // CONTROLE: o "Sair" noutra aba não apaga nada no servidor — a que saiu já apagou a sessão (a mesma).
   const s = montarSair({ tokenNoAparelho: 'tok-da-outra' });
+  s.deps.tokenTiradoPorOutraAba = 'tok-A';
   await s.h.handleLogout({ porOutraAba: true });
   assert.ok(!s.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')));
   // E a sessão GUARDADA nunca é apagada daqui, nem num estado sem sentido (o mesmo token nos dois).
@@ -1915,4 +1922,86 @@ test('F4: a troca de conta tira do filtro a área gerenciada da conta anterior �
   // CONTROLES: no login a conta chega antes da 1ª busca (nada a refazer); com "Minha área" a busca não usou a área.
   assert.deepEqual(trocar().log, ['grava']);
   assert.deepEqual(trocar({ queue: [{ venueID: 'v1' }], myArea: true }).log, ['grava']);
+});
+
+// ═══ R8-1-03 · o "Sair" com DUAS sessões da mesma conta, uma em cada aba ═══════
+// A aba B entrou de novo (o ACESSAR do WME é uma sessão nova a cada toque; ou os
+// cookies colados), e a aba A seguiu com a dela: a mesma conta, duas sessões. O
+// "Sair" apagava no servidor só UMA — a da aba que saiu —, e a outra ficava viva,
+// órfã, por até 21 dias, nos dois sentidos (MEDIDO no Chromium: "Sair" na B
+// apagava `tok-x2` e deixava `tok-x`; na A, o espelho; auditoria de 2026-10-03).
+// O contrato do "Sair" é apagar dos DOIS lados. Agora: a aba do "Sair" apaga a
+// dela e a GUARDADA no aparelho (que ela tira do aparelho), e a outra aba apaga a
+// dela se não for a que a do "Sair" tirou — o aviso do token diz qual.
+
+test('R8-1-03: na OUTRA aba, com uma sessão DIFERENTE da que saiu, a aba apaga a SUA no servidor — sem tocar no aparelho', async () => {
+  const m = montarSair({ tokenNoAparelho: null });
+  m.ap.dados.delete(TOKEN);                       // o "Sair" de lá já tirou o token do aparelho
+  m.deps.tokenTiradoPorOutraAba = 'tok-B';        // e era o da OUTRA sessão
+  await m.h.handleLogout({ porOutraAba: true });
+  assert.deepEqual(m.log.filter((x) => typeof x === 'string' && x.startsWith('destroy:')), ['destroy:tok-A'],
+    'DEFEITO: a sessão desta aba (outra que não a do "Sair") ficou viva no servidor — órfã por até 21 dias');
+  assert.deepEqual(m.ap.escritas, [], 'a aba que só soube do "Sair" mexeu no aparelho: ' + m.ap.escritas.join(' '));
+  assert.ok(m.log.includes('soltou') && !m.log.includes('setSession:null'), 'o token saiu pelo `setSession` (o diário ganharia um "token-")');
+  assert.equal(m.deps.tokenTiradoPorOutraAba, null, 'a marca da sessão tirada ficou pra um "Sair" seguinte');
+  // CONTROLE: a outra aba tirou a MESMA sessão desta — já apagada lá, e daqui nada sai.
+  const c = montarSair({ tokenNoAparelho: null });
+  c.ap.dados.delete(TOKEN);
+  c.deps.tokenTiradoPorOutraAba = 'tok-A';
+  await c.h.handleLogout({ porOutraAba: true });
+  assert.ok(!c.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')), 'CONTROLE: a aba apagou de novo a sessão que a outra já apagou');
+  // Sem saber qual saiu (o armazenamento limpo inteiro): apaga a dela — o servidor lê antes de apagar.
+  const n = montarSair({ tokenNoAparelho: null });
+  n.ap.dados.delete(TOKEN);
+  await n.h.handleLogout({ porOutraAba: true });
+  assert.ok(n.log.includes('destroy:tok-A'), 'sem saber qual sessão saiu, a desta ficou no servidor');
+});
+
+test('R8-1-03: o "Sair" desta aba apaga no servidor a SUA e a GUARDADA no aparelho, quando são outras', async () => {
+  const m = montarSair({ tokenNoAparelho: 'tok-B' });   // a guardada é a da outra aba (que entrou de novo)
+  await m.h.handleLogout();
+  const apagadas = m.log.filter((x) => typeof x === 'string' && x.startsWith('destroy:')).sort();
+  assert.deepEqual(apagadas, ['destroy:tok-A', 'destroy:tok-B'],
+    'DEFEITO: o "Sair" tirou do aparelho a sessão da outra aba e a deixou viva no servidor: ' + apagadas.join(' '));
+  // CONTROLE: a mesma sessão (o caso comum) sai UMA vez — nenhum pedido a mais no free tier.
+  const c = montarSair();
+  await c.h.handleLogout();
+  assert.deepEqual(c.log.filter((x) => typeof x === 'string' && x.startsWith('destroy:')), ['destroy:tok-A']);
+  // A recusa do portão não apaga nada: o servidor já apagou a recusada.
+  const r = montarSair({ tokenNoAparelho: 'tok-B' });
+  r.API.sessionToken = null;
+  await r.h.handleLogout({ recusado: true });
+  assert.ok(!r.log.some((x) => typeof x === 'string' && x.startsWith('destroy:')), 'a recusa do portão apagou uma sessão no servidor');
+});
+
+// O caminho INTEIRO, pelos avisos do navegador na ordem em que a outra aba grava:
+// o do token (com o `oldValue`) e depois o da conta, que é onde o "Sair" costuma
+// ser decidido (ver `aoSairEmOutraAba`).
+test('R8-1-03: pelos avisos de verdade — o do token diz QUAL sessão saiu, e o da conta decide o "Sair"', async () => {
+  const caso = async ({ desta, guardada }) => {
+    const m = montarSair({ tokenNoAparelho: guardada });
+    m.API.sessionToken = desta;
+    m.API.temSessaoNaMemoria = function () { return !!this.sessionToken; };
+    const h = montar(['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+      'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'handleLogout', 'preferenciasDeFabrica'], m.deps);
+    // A outra aba dá "Sair": tira o token e, depois, a conta.
+    m.ap.dados.delete(TOKEN);
+    h.aoGravarEmOutraAba({ key: TOKEN, oldValue: guardada, newValue: null });
+    const antesDaConta = m.log.filter((x) => typeof x === 'string' && x.startsWith('destroy:'));
+    m.ap.dados.delete(CONTA_KEY);
+    h.aoGravarEmOutraAba({ key: CONTA_KEY, oldValue: '{"id":"111"}', newValue: null });
+    await new Promise((ok) => setImmediate(ok));
+    m.ap.escritas.length = 0;   // (o harness apagou o aparelho à mão acima)
+    return { antesDaConta, apagadas: m.log.filter((x) => typeof x === 'string' && x.startsWith('destroy:')),
+      saiu: m.AppState.authenticated === false, log: m.log };
+  };
+  const duas = await caso({ desta: 'tok-A', guardada: 'tok-B' });
+  assert.ok(duas.saiu, 'PRÉ-CONDIÇÃO: a aba não saiu com o "Sair" da outra');
+  assert.deepEqual(duas.antesDaConta, [], 'PRÉ-CONDIÇÃO: com a conta ainda no aparelho, o aviso do token não é o "Sair"');
+  assert.deepEqual(duas.apagadas, ['destroy:tok-A'],
+    'DEFEITO: o "Sair" noutra aba deixou a sessão DESTA viva no servidor (era outra que não a que saiu)');
+  // CONTROLE: a mesma sessão nas duas abas — a outra já a apagou.
+  const uma = await caso({ desta: 'tok-A', guardada: 'tok-A' });
+  assert.ok(uma.saiu, 'PRÉ-CONDIÇÃO: a aba não saiu com o "Sair" da outra');
+  assert.deepEqual(uma.apagadas, [], 'CONTROLE: a aba apagou de novo a sessão que a outra já apagou');
 });

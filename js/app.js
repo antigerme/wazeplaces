@@ -9491,15 +9491,34 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     aprovacoesNoAr.clear();
     aprovacoesDaQueda.clear();
     // O token sai do armazenamento AGORA e a limpeza local acontece inteira sem
-    // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. A cópia
-    // serve pra exclusão no servidor, que vai depois, com retentativa. Na outra
-    // aba o token já saiu do armazenamento (e o servidor é da que saiu): só a
-    // cópia da memória solta — pelo `setSession`, o diário de sessões ganharia
-    // um "token-" por cima do "Sair" que acabou de apagá-lo. Na saída por outra
-    // conta, a sessão desta aba é apagada no servidor — nunca a guardada, que é
-    // a da outra.
+    // esperar rede nenhuma — pedir pra sair tem que ser instantâneo. As cópias
+    // servem pra exclusão no servidor, que vai depois, com retentativa. Na outra
+    // aba o token já saiu do armazenamento: só a cópia da memória solta — pelo
+    // `setSession`, o diário de sessões ganharia um "token-" por cima do "Sair"
+    // que acabou de apagá-lo.
+    //
+    // QUAIS sessões saem do servidor. Com o app aberto em mais de uma aba, a
+    // MESMA conta pode ter sessões DIFERENTES nelas (uma entrou de novo, pelo
+    // ACESSAR do WME ou pelos cookies), e o "Sair" apagava só uma — a outra
+    // ficava viva no servidor, órfã, por até 21 dias, nos dois sentidos (MEDIDO;
+    // auditoria de 2026-10-03, R8-1-03):
+    //  · aqui, a desta aba E a GUARDADA no aparelho, quando são outras: este
+    //    "Sair" a tira do aparelho e a aba dela sai junto, sem saber que é a dela
+    //    que saiu;
+    //  · na outra aba, a dela, se não for a que a aba do "Sair" tirou do aparelho
+    //    (`tokenTiradoPorOutraAba`), que já saiu do servidor por lá. Sem saber
+    //    qual saiu, apaga a dela: o servidor lê antes de apagar, e o pedido a
+    //    mais é barato;
+    //  · na saída por outra conta, a desta aba — nunca a guardada, que é da
+    //    outra;
+    //  · na recusa do portão, nenhuma: o servidor já apagou a recusada.
+    const tirada = tokenTiradoPorOutraAba;
+    tokenTiradoPorOutraAba = null;
     const tokenParaApagar = recusado ? null : !porOutraAba ? API.getSession()
-        : outraConta && !sessaoDestaAbaEhAGuardada() ? API.sessionToken : null;
+        : outraConta ? (!sessaoDestaAbaEhAGuardada() ? API.sessionToken : null)
+        : (API.sessionToken && API.sessionToken !== tirada ? API.sessionToken : null);
+    const guardada = porOutraAba || recusado ? null : safeLS.get('waze_session_token');
+    const guardadaParaApagar = guardada && guardada !== tokenParaApagar ? guardada : null;
     if (porOutraAba || recusado) API.soltarSessao();
     else API.setSession(null);
     // Na OUTRA aba as camadas abertas fecham SÓ AGORA, como na queda (o
@@ -9652,11 +9671,12 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // ficava sabendo. Agora tenta de novo (mesma política de transiente do resto
     // do app) e, se ainda assim não for, diz o que aconteceu e o que acontece
     // depois — o blob fica órfão (a chave é o hash do token, que já foi embora)
-    // e expira sozinho em até 21 dias.
-    if (tokenParaApagar) {
+    // e expira sozinho em até 21 dias. As duas sessões (ver acima) saem juntas.
+    const apagar = [tokenParaApagar, guardadaParaApagar].filter(Boolean);
+    if (apagar.length) {
         // `null`: o token vai EXPLÍCITO, e a época já mudou (ver `callWithRetry`).
-        const saida = await callWithRetry(() => API.destroySession(tokenParaApagar), null);
-        if (!saida || !saida.success) {
+        const saidas = await Promise.all(apagar.map((tok) => callWithRetry(() => API.destroySession(tok), null)));
+        if (saidas.some((saida) => !saida || !saida.success)) {
             showToast(t('toast.logoutServerFailed'), 'error', 9000);
         }
     }
@@ -14291,11 +14311,25 @@ function getHistoryStats() {
 // leitura pega o que está no aparelho. Não põe leitura nenhuma a mais no swipe
 // — que é o que a tabela de custo da gravação por swipe protege —: só relê
 // quem foi avisado, e só quando precisar.
+//
+// A SESSÃO que a outra aba tirou do aparelho por último (o `oldValue` do aviso
+// do token), ou `null` quando não se sabe. O "Sair" de lá apaga no servidor a
+// sessão dela e a guardada (ver `handleLogout`), e esta aba sai junto
+// (`aoSairEmOutraAba`) — mas com o app aberto em duas abas da MESMA conta, as
+// duas podem ter sessões DIFERENTES: a outra entrou de novo (o ACESSAR do WME,
+// os cookies colados) e esta seguiu com a dela. A desta ficava viva no
+// servidor, órfã, por até 21 dias (MEDIDO; auditoria de 2026-10-03, R8-1-03).
+// É lida no aviso do TOKEN porque o "Sair" pode ser decidido no aviso seguinte,
+// o da conta, que não a traz.
+let tokenTiradoPorOutraAba = null;
 function aoGravarEmOutraAba(ev) {
     // O mapa é montado AQUI, no evento: as chaves das conquistas e dos autores
     // são declaradas mais abaixo neste arquivo.
     const caches = { [HISTORY_KEY]: 'history', [CONQUISTAS_KEY]: 'conquistas', [AUTORES_KEY]: 'autores' };
     const chave = ev ? ev.key : undefined;
+    // Um token NOVO no aparelho (outra entrada) não é uma sessão tirada; o
+    // armazenamento limpo inteiro (`key` nulo) não diz qual saiu.
+    if (chave === null || chave === 'waze_session_token') tokenTiradoPorOutraAba = ev.newValue ? null : (ev.oldValue || null);
     // O MODO DEV mudou noutra aba — desligado ali, ou o "Sair" de lá (que o
     // desliga) —, ou o token saiu, ou o armazenamento foi limpo inteiro.
     if (chave === null || chave === DEVMODE_KEY || chave === 'waze_session_token') aoMudarModoDevEmOutraAba();
