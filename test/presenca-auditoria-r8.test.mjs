@@ -759,3 +759,21 @@ test('R8-5-07 quem tira o carimbo ao sair é o `pagehide` da página (a página 
   for (const fn of win._ouv.pagehide || []) fn({ persisted: false });
   assert.deepEqual(chamou, ['descarga', 'descarga', 'marcas', 'invisivel'], 'o `pagehide` não tira o carimbo do "invisível" no ar');
 });
+
+test('R8-5-07 a prova de rede de quem só deixou o interruptor desligado (nada pendente, nada gravado) não lê o aparelho', async () => {
+  // A repetição lê o gravado do aparelho — mas ela roda a CADA resposta da API
+  // (uma por swipe), e no estado comum (o "invisível" já entregue) não há o que
+  // ler: a cópia desta aba (que a releitura das preferências mantém) basta.
+  const a = aparelho();
+  const A = a.pagina({ nome: 'A' });
+  A.desligar();
+  await esperaTick();
+  assert.equal(a.gravado(), null, 'CONTROLE: o "invisível" tinha que ter sido entregue');
+  let leituras = 0;
+  const getItem = a.guardado.get.bind(a.guardado);
+  a.guardado.get = (k) => { leituras += 1; return getItem(k); };
+  for (let i = 0; i < 5; i++) { a.relogio.agora += 61_000; A.presencaWmeRefazerDesligar(); }
+  await esperaTick();
+  assert.equal(leituras, 0, 'cada resposta da API leu as preferências do aparelho sem nada pendente');
+  assert.equal(a.pedidos.length, 1);
+});

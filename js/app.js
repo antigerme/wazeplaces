@@ -20080,6 +20080,10 @@ function presencaWmeRefazerDesligar() {
     // — a resposta boa já não o apagava, e o mesmo "invisível" saía de novo um
     // minuto depois, a cada desligar com uma prova de rede no meio.
     if (presencaWme.desligarNoAr) return;
+    // Nada pendente nem gravado na cópia desta aba (que a releitura das
+    // preferências mantém em dia): nada a fazer, e sem ler o aparelho a cada
+    // resposta da API de quem só deixou o interruptor desligado.
+    if (!presencaWme.desligarPendente && !AppState.preferences.presencaWmeDesligar) return;
     // O gravado como está no APARELHO agora: a OUTRA aba o manda, carimba e
     // apaga, e o aviso `storage` chega quando chega (R8-5-07). Ilegível
     // (`undefined`), vale a cópia desta aba.
