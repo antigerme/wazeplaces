@@ -3282,6 +3282,82 @@ diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa a tinta cob
   forcado9l && cima9l.cobre > 0 && cima9l.noPonto === 'FAB', JSON.stringify(cima9l));
 await ctx9l.close();
 
+secao('9m. O RELATÓRIO: a aba mais VELHA que fechou antes dele, e o relatório feito DENTRO do treino');
+// Auditoria da rodada 8 (R8-4-07, R8-4-06), as duas no MESMO relatório.
+//  · A aba B abre ANTES da A, registra telas, vai pro fundo (grava na base) e é
+//    FECHADA depois de a A abrir. O fechar aborta a gravação da base (MEDIDO no
+//    r2 `bAntes` da auditoria: em 3 de 4 rodadas a última gravação de B ficou a
+//    de ANTES de a A abrir); aqui a gravação do fechar é DESLIGADA na B, pra a
+//    seção não depender da sorte (a amplificação declarada). A trava de B já
+//    estava solta na hora do relatório: a A a dava como "abertura anterior". A
+//    prova que faltava é a trava SEGURA quando a A abriu.
+//  · O relatório da A é baixado com o TREINO aberto: o `appState` tem os
+//    EXEMPLOS (o CONTROLE do instrumento), e o arquivo não dizia que o treino
+//    estava aberto nem levava a fila real que ele guarda.
+const ctx9m = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
+  serviceWorkers: 'block', acceptDownloads: true });
+await ctx9m.route('**/*-tiles/live/base/**', servirTile);
+await ctx9m.route('**/api/*', rotaApi9k);
+await prepararDev(ctx9m, 'tok-9m');
+const B9m = await abrirEm(ctx9m, 'B (a mais velha)');
+const prontaB9m = await prontaComFab(B9m);
+const nB9m = await tocarFab(B9m, 2);
+// B vai pro fundo (a pessoa abre outra aba): grava, e segura a trava dela.
+const idB9m = await B9m.evaluate(async () => { await diagGuardarAbertura('oculta'); return DIAG_ABERTURA.id; });
+await dormir(50);
+const A9m = await abrirEm(ctx9m, 'A');
+const prontaA9m = await prontaComFab(A9m);
+await esperarNaPagina(A9m, () => dfatoAnel.some((e) => e.k === 'diag.aberturas' || e.k === 'diag.carregarFalhou'), 20000, 100);
+const travaDeB = (pg, id) => pg.evaluate(async (i) => (await navigator.locks.query()).held.some((l) => l.name === '__diagAbertura:' + i), id);
+const vivaComA9m = await travaDeB(A9m, idB9m);
+await B9m.evaluate(() => { window.diagGuardarAbertura = () => Promise.resolve(false); });
+await B9m.close({ runBeforeUnload: true });
+let soltou9m = false;
+for (let i = 0; i < 50 && !soltou9m; i++) { soltou9m = !(await travaDeB(A9m, idB9m)); if (!soltou9m) await dormir(100); }
+const inicioA9m = await A9m.evaluate(() => DIAG_ABERTURA.inicio);
+// O TREINO, aberto como a Ajuda o abre, e uma captura nele.
+await A9m.evaluate(() => Treino.entrar());
+const treino9m = await esperarNaPagina(A9m, () => Treino.ativo === true
+  && !document.getElementById('treinoBanner').classList.contains('hidden'), 5000, 50);
+await tocarFab(A9m, 1);
+const dir9m = mkdtempSync(join(tmpdir(), 'smoke-9m-'));
+let rel9m = null;
+try {
+  const [dl] = await Promise.all([A9m.waitForEvent('download', { timeout: 30000 }), A9m.evaluate(() => baixarDiagnostico())]);
+  const arq = join(dir9m, 'diag.zip');
+  await dl.saveAs(arq);
+  const { dados: d } = lerDiagnostico(arq);
+  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
+  const b = (d.aberturasAnteriores || []).find((a) => a.id === idB9m) || {};
+  const ultima = (d.momentos || [])[(d.momentos || []).length - 1] || {};
+  rel9m = { temB: !!b.id, capturasB: (b.momentos || []).length, simultanea: b.simultanea, abertaAgora: b.abertaAgora,
+    gravouAntesDeA: Number.isFinite(b.salvoEm) && b.salvoEm < inicioA9m,
+    triagemB: new RegExp('abertura ' + idB9m + ' · [^\\n]*\\n  OUTRA ABA, aberta junto com a do relatório — já tinha fechado na hora do relatório').test(triagem),
+    treinoTela: d.resumo?.telaAgora?.treino, treinoCaptura: ultima.treino,
+    filaReal: (d.treino?.fila || []).map((p) => p && p.updateRequestID).sort(),
+    soExemplosNoAppState: (d.appState?.queue || []).length > 0 && (d.appState.queue || []).every((p) => p && p._treino === true),
+    triagemTreino: triagem.includes('ATENÇÃO: relatório gerado DENTRO do treino')
+      && /fila real guardada pelo treino: 3 pedidos/.test(triagem) && /DENTRO DO TREINO \(\d+ exemplos na fila\)/.test(triagem),
+    vazouToken: triagem.includes('tok-9m') };
+} catch (e) {
+  rel9m = { erro: String((e && e.message) || e).slice(0, 200) };
+} finally {
+  rmSync(dir9m, { recursive: true, force: true });
+}
+diz('PRÉ-CONDIÇÃO: a B (a mais velha) registrou 2 telas e gravou ANTES de a A abrir; a trava dela estava segura com a A aberta, e soltou ao fechar',
+  prontaB9m.ok && prontaA9m.ok && nB9m === 2 && vivaComA9m === true && soltou9m && rel9m?.gravouAntesDeA === true && rel9m?.capturasB === 2,
+  JSON.stringify({ prontaB: prontaB9m.ok, prontaA: prontaA9m.ok, nB9m, vivaComA9m, soltou9m, rel9m }));
+diz('a aba mais velha, fechada ANTES do relatório e sem gravar depois de a A abrir, vem como OUTRA ABA (já fechada), e a triagem diz isso (R8-4-07)',
+  rel9m?.temB === true && rel9m?.simultanea === true && rel9m?.abertaAgora === false && rel9m?.triagemB === true,
+  JSON.stringify(rel9m));
+diz('PRÉ-CONDIÇÃO: o treino estava aberto, e o `appState` do arquivo tem só os EXEMPLOS (a fila real não está nele)',
+  treino9m.ok && rel9m?.soExemplosNoAppState === true, JSON.stringify({ treino: treino9m.ok, rel9m }));
+diz('o relatório feito DENTRO do treino diz isso (na tela e na captura) e leva a fila REAL que o treino guarda; a triagem avisa e conta, sem o token (R8-4-06)',
+  rel9m?.treinoTela?.ativo === true && rel9m?.treinoCaptura?.ativo === true
+  && JSON.stringify(rel9m?.filaReal) === JSON.stringify(['u201', 'u202', 'u203'])
+  && rel9m?.triagemTreino === true && rel9m?.vazouToken === false, JSON.stringify(rel9m));
+await ctx9m.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -3298,4 +3374,4 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) e o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos)');

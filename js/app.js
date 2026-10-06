@@ -6077,7 +6077,47 @@ function dlogTelaAtual() {
         // o dado SEM DIZER NADA. `test/diagnostico.test.mjs` cobra que todo id
         // consultado aqui exista no HTML.
         lightbox: visivel('imageLightbox') ? 'foto' : (visivel('mapaLightbox') ? 'mapa' : false),
+        // O TREINO aberto (R8-4-06): a fila na tela é a de EXEMPLOS, e a captura e
+        // o relatório não diziam isso — a palavra "treino" só aparecia no id inerte
+        // do pedido da frente. Ver `diagTreinoAgora`.
+        treino: diagTreinoAgora(),
     };
+}
+
+// O treino, em NÚMEROS: aberto ou não, quantas ações já houve nele (`passo`) e
+// quantos EXEMPLOS (os clones inertes e os sintéticos) estão na fila agora — com
+// ele aberto, é ela que o `appState` e o `estado.fila` das capturas contam. A
+// fila REAL que ele guarda vai inteira só no relatório (`diagTreinoGuardado`).
+// Nunca lança: a captura não pode cair por causa dele.
+function diagTreinoAgora() {
+    try {
+        if (!Treino.ativo) return { ativo: false };
+        return { ativo: true, passo: Treino.passo, exemplos: (AppState.queue || []).length };
+    } catch (e) { return { ativo: null }; }
+}
+
+// A fila REAL que o treino GUARDA enquanto está aberto (`Treino._salvo`), lida
+// direto (R8-4-06): a fila, o pedido que estava na frente, o foco no autor, as
+// épocas (a da fila real e a que o treino pôs), o que o Waze recusou com ele
+// aberto e volta como card (`devolver`), e se o perfil e a ordem chegaram nele
+// (`perfilChegou`, `ordemMudou`). Sem isto, o relato "ao sair do treino a fila
+// voltou errada" chegava sem a fila que voltou: o `appState` tem os exemplos. O
+// pedido da frente sai como ÍNDICE, como no `appState`. Fechado, só `ativo`.
+function diagTreinoGuardado() {
+    try {
+        const s = Treino.ativo ? Treino._salvo : null;
+        if (!s) return { ativo: false };
+        const fila = Array.isArray(s.queue) ? s.queue : [];
+        return {
+            ...diagTreinoAgora(),
+            fila: diagSeguro(fila),
+            currentPlaceIdx: s.currentPlace ? fila.indexOf(s.currentPlace) : -1,
+            autorEmFoco: s.autorEmFoco ?? null,
+            epoca: s.epoca, epocaDoTreino: s.epocaDoTreino, epocaAgora: AppState.fetchEpoch,
+            devolver: diagSeguro(Array.isArray(s.devolver) ? s.devolver : []),
+            perfilChegou: !!s.perfilChegou, ordemMudou: !!s.ordemMudou,
+        };
+    } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }
 
 // Qual das frases o painel de fila vazia (ou de falha) está mostrando, pela
@@ -7271,17 +7311,30 @@ async function diagAberturasVivas(prazo) {
 // PURA. A abertura guardada que viveu JUNTO com esta ganha `simultanea: true`:
 // ela gravou DEPOIS de esta abrir (a vida das duas se cruzou — uma página de
 // antes, na mesma aba, morreu antes de esta nascer), ou a trava dela segue
-// segura agora. `abertaAgora` diz se ela segue aberta (`null`: não deu pra
-// saber). As que não viveram junto voltam as MESMAS.
-function diagMarcarSimultaneas(lista, inicioDesta, vivas) {
+// segura agora, ou estava segura quando ESTA abriu (`vivasAoAbrir`, ver
+// `diagCarregarAberturas`). `abertaAgora` diz se ela segue aberta (`null`: não
+// deu pra saber). As que não viveram junto voltam as MESMAS.
+function diagMarcarSimultaneas(lista, inicioDesta, vivas, vivasAoAbrir) {
     return (Array.isArray(lista) ? lista : []).map((a) => {
         if (!a || typeof a !== 'object') return a;
         const viva = vivas ? vivas.has(a.id) : null;
         const gravouDepois = Number.isFinite(a.salvoEm) && a.salvoEm > inicioDesta;
-        if (!gravouDepois && viva !== true) return a;
+        const vivaAoAbrir = !!(vivasAoAbrir && vivasAoAbrir.has(a.id));
+        if (!gravouDepois && viva !== true && !vivaAoAbrir) return a;
         return { ...a, simultanea: true, abertaAgora: viva };
     });
 }
+
+// As OUTRAS aberturas VIVAS quando esta abriu, pelas travas (só com o modo dev
+// ligado na abertura; `null` = não se sabe). A aba MAIS VELHA, aberta junto com
+// esta e fechada antes do relatório, saía como "abertura anterior": a última
+// gravação dela na base é de antes de esta abrir (ir pro fundo grava; o fechar
+// aborta a gravação), e a trava já tinha sido solta na hora do relatório — as
+// duas provas acima falhavam, embora a trava dela estivesse SEGURA quando esta
+// abriu (R8-4-07, MEDIDO: 3 de 4 rodadas do r2 `bAntes` da auditoria). A página
+// de antes, na MESMA aba (recarregar), não entra: ela solta a trava a tempo de
+// a seguinte nascer (a mesma medição do `segurarMarcaDaAba`).
+let diagOutrasVivasAoAbrir = null;
 
 // Na abertura, com o modo dev ligado: traz o que as aberturas anteriores
 // deixaram, já podado (o que venceu sai do aparelho aqui mesmo). Os RETRATOS
@@ -7289,6 +7342,14 @@ function diagMarcarSimultaneas(lista, inicioDesta, vivas) {
 // poda, juntos ao que a base tinha da mesma abertura, e saem do localStorage.
 async function diagCarregarAberturas() {
     if (!dlogLigado()) return;
+    // Quem está VIVO agora, na abertura (ver `diagOutrasVivasAoAbrir`): a
+    // pergunta sai antes da base, que pode levar até o teto dela pra abrir.
+    // Trava não grava nada, e a pergunta não lança (`null` = não se sabe).
+    const vivasAoAbrir = diagAberturasVivas(Date.now() + 1500).then((vivas) => {
+        if (!vivas) return;
+        vivas.delete(DIAG_ABERTURA.id);
+        diagOutrasVivasAoAbrir = vivas;
+    });
     // A época de AGORA: desligado o modo dev (ou o "Sair") enquanto a base
     // abre, nada do que foi lido volta pro aparelho.
     const epoca = diagEpoca;
@@ -7318,6 +7379,7 @@ async function diagCarregarAberturas() {
         dfato('diag.carregarFalhou', { erro: String((e && e.name) || e).slice(0, 60) });
     } finally {
         try { if (db) db.close(); } catch (e) {}
+        await vivasAoAbrir;
     }
 }
 
@@ -8705,7 +8767,8 @@ async function diagCorpo() {
     const aberturasNoArquivo = diagAberturasAnteriores;
     // As mesmas, com a OUTRA ABA marcada (`simultanea`): é assim que elas vão no
     // arquivo e no resumo. Cópias só das marcadas — as capturas são as mesmas.
-    const aberturasMarcadas = diagMarcarSimultaneas(aberturasNoArquivo, DIAG_ABERTURA.inicio, vivas);
+    // As vivas AGORA e as vivas quando esta abriu (a que fechou antes, R8-4-07).
+    const aberturasMarcadas = diagMarcarSimultaneas(aberturasNoArquivo, DIAG_ABERTURA.inicio, vivas, diagOutrasVivasAoAbrir);
     const chamadasNoArquivo = (typeof API !== 'undefined' && API.chamadas) ? [...API.chamadas] : [];
     const errosNoArquivo = [...diagErros];
     const corpo = {
@@ -8850,6 +8913,9 @@ async function diagCorpo() {
             if (fora) fora.currentPlaceIdx = idx;
             return fora;
         })(),
+        // Com o TREINO aberto, o `appState` acima tem os EXEMPLOS; a fila REAL é
+        // a que o treino guarda, e vai aqui (R8-4-06, ver `diagTreinoGuardado`).
+        treino: diagTreinoGuardado(),
         // O HTML como está AGORA, com as classes que decidem o que aparece na
         // tela. É o que mostra qual painel estava visível no momento da queixa.
         dom: domParaDiagnostico(),

@@ -1641,3 +1641,47 @@ test('D15: as leituras do relatório andam em PARALELO, com o prazo do relatóri
   const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
   assert.ok(v >= 11, `a versão do diagnóstico não subiu com a coleta (${v})`);
 });
+
+// ── R8-4-06: o relatório e a captura feitos DENTRO do treino ────────────────
+// Com o treino aberto, a fila na tela — e no `appState` e no `estado.fila` das
+// capturas — é a de EXEMPLOS, e nada no arquivo dizia isso: a palavra "treino"
+// só aparecia no id inerte do pedido da frente. E a fila REAL, que o treino
+// guarda desde o lote 11 (com a época, o `devolver`, o perfil e a ordem que
+// chegaram nele), não ia no arquivo — o relato "ao sair do treino a fila voltou
+// errada" chegava sem a fila que voltou (MEDIDO, r7 da auditoria).
+test('R8-4-06: a captura e o resumo dizem que o TREINO estava aberto — em números', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'dlogTelaAtual'), /^\s+treino: diagTreinoAgora\(\),$/m,
+    'a tela da captura (e o `resumo.telaAgora`) não diz se o treino estava aberto');
+  // RODADA, contra um treino de mentira.
+  const agora = (Treino, AppState) => new Function('Treino', 'AppState',
+    fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(Treino, AppState);
+  assert.deepEqual(agora({ ativo: true, passo: 2, _salvo: {} }, { queue: [{}, {}, {}] }), { ativo: true, passo: 2, exemplos: 3 },
+    'com o treino aberto, a tela não diz o passo e quantos exemplos estão na fila');
+  assert.deepEqual(agora({ ativo: false, passo: 0 }, { queue: [{}, {}] }), { ativo: false });
+  // Nunca derruba a captura: sem o `Treino` (a TDZ, num erro na carga), "não se sabe".
+  assert.deepEqual(new Function(fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(), { ativo: null });
+});
+
+test('R8-4-06: o relatório leva a fila REAL que o treino guarda — a fila, a frente, as épocas, o que volta e o que chegou nele', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'diagCorpo'), /^\s+treino: diagTreinoGuardado\(\),$/m,
+    'o relatório não leva a fila real que o treino guarda (o `appState` tem só os exemplos)');
+  const guardado = (Treino, AppState) => new Function('Treino', 'AppState', 'diagSeguro',
+    fatiarFn(app, 'diagTreinoAgora') + '\n' + fatiarFn(app, 'diagTreinoGuardado') + '\nreturn diagTreinoGuardado();')(
+    Treino, AppState, (x) => JSON.parse(JSON.stringify(x)));
+  const A = { venueID: 'vA', updateRequestID: 'uA' }, B = { venueID: 'vB', updateRequestID: 'uB' };
+  const R = { venueID: 'vR', updateRequestID: 'uR' };
+  const T = { ativo: true, passo: 1, _salvo: { queue: [A, B], currentPlace: B, autorEmFoco: 77, epoca: 4, epocaDoTreino: 5,
+    devolver: [R], perfilChegou: true, ordemMudou: false } };
+  const g = guardado(T, { queue: [{ venueID: 'vA', updateRequestID: 'treino-inerte', _treino: true }], fetchEpoch: 5 });
+  assert.deepEqual(g.fila.map((p) => p.updateRequestID), ['uA', 'uB'], 'a fila REAL não foi no relatório');
+  assert.equal(g.currentPlaceIdx, 1, 'o pedido que estava na frente da fila real não vai (como índice)');
+  assert.deepEqual(g.devolver.map((p) => p.updateRequestID), ['uR'], 'o que o Waze recusou com o treino aberto (e volta como card) não vai');
+  assert.deepEqual([g.ativo, g.passo, g.exemplos, g.autorEmFoco, g.epoca, g.epocaDoTreino, g.epocaAgora, g.perfilChegou, g.ordemMudou],
+    [true, 1, 1, 77, 4, 5, 5, true, false], 'o que o treino guarda não foi inteiro');
+  // Fechado: só diz que está fechado (nada de fila).
+  assert.deepEqual(guardado({ ativo: false, _salvo: null }, { queue: [A] }), { ativo: false });
+  // Nunca derruba o relatório.
+  assert.ok(guardado({ get ativo() { throw new Error('quebrou'); } }, { queue: [] }).erro, 'o erro ao ler o treino derrubou o relatório');
+});
