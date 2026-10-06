@@ -2206,16 +2206,36 @@ function fotoDoLightboxNaTela() {
 // quem ABRIU, se ainda está na tela; senão o mesmo lugar no card da FRENTE (a
 // fila pode ter andado: aprovar e fechar avança o card); senão a reserva dos
 // modais. Com um modal aberto por cima, o foco é dele e fica onde está.
+//
+// Sem card na frente porque a fila ACABOU com a ampliação aberta — aprovar a
+// foto do ÚLTIMO pedido e fechar, a aprovação que pousa com a foto fechada —, o
+// lugar dele é o botão do painel que tomou o lugar do card (`botaoDoPainelDoFim`).
+// Ia pro ⓘ da Ajuda, no topo da página: o que o R7-2-06 tirou do ✕ ↑ ✓, de volta
+// pela foto ampliada (auditoria de 2026-10-03, R8-3-06, MEDIDO nos dois motores).
 function devolverFocoDaAmpliacao(quem, noCard) {
     if (topOpenModal()) return;
     const card = cardDaFrente();
-    const candidatos = [quem, ...(card ? noCard.map((s) => card.querySelector(s)) : [])];
+    const candidatos = [quem, ...(card ? noCard.map((s) => card.querySelector(s)) : [botaoDoPainelDoFim()])];
     for (const el of candidatos) {
         if (!el || el === document.body || dentroDeCamada(el) || !focavelNaTela(el)) continue;
         try { el.focus({ preventScroll: true }); } catch (e) { continue; }
         if (document.activeElement === el) return;
     }
     devolverFoco(null);
+}
+
+// O botão do painel que toma o lugar do card quando a fila ACABA, o caminho de
+// volta: "Tentar de novo" na falha ao carregar, "Verificar novamente" no "Tudo
+// limpo!"/"Fim da fila". É a régua do `aplicarFocoDoTeclado` sem card (R7-2-06;
+// test/lightbox-foco-card confere que os dois escolhem o MESMO botão). Sem
+// painel na tela — a busca ainda corre —, nenhum.
+function botaoDoPainelDoFim() {
+    const naTela = (id) => {
+        const p = document.getElementById(id);
+        return !!p && !p.classList.contains('hidden');
+    };
+    return naTela('loadErrorState') ? document.getElementById('retryLoadBtn')
+        : naTela('noMoreCards') ? document.getElementById('reloadBtn') : null;
 }
 
 // O foco PERDIDO: no <body>, ou num elemento que saiu da página.
@@ -2266,13 +2286,23 @@ function mantendoFocoNoCard(redesenhar, { mesmoBotao = false } = {}) {
 // e, travada ou ausente, pro ✕ do lightbox, que é onde ele nasce ao abrir.
 // Quem já está num controle vivo da camada (ou no Desfazer, que entra na volta
 // do Tab dela) não é mexido.
+//
+// Com a EDIÇÃO do nome aberta, o foco vai primeiro ao CAMPO do nome. A trava que
+// acende com o foco no ✓ "Salvar nome" (a sessão caindo com a extensão
+// renovando, a conferência de um 401) o desabilita; a pílula é rótulo na
+// edição, e o foco ia pro ✕ que FECHA A FOTO: o Enter seguinte — de quem estava
+// no ✓ justamente pra salvar — fechava a foto e jogava fora o nome digitado
+// (auditoria de 2026-10-03, R8-3-04, MEDIDO nos dois motores). No campo, o
+// Enter diz o que esperar e a edição fica aberta (`confirmarRenomear`). Quem
+// estava no ✓ chegou pelo Tab, a partir do campo: está no teclado físico.
 function manterFocoNoLightbox() {
     if (!Lightbox.isOpen()) return;
     const lb = document.getElementById('imageLightbox');
     const atual = document.activeElement;
     if (atual && atual !== document.body && focavelNaTela(atual)
         && (lb.contains(atual) || (atual.closest && atual.closest('#undoContainer')))) return;
-    for (const id of ['lightboxNomeBtn', 'lightboxClose']) {
+    const alvos = editandoNome() ? ['lightboxNomeInput', 'lightboxNomeBtn', 'lightboxClose'] : ['lightboxNomeBtn', 'lightboxClose'];
+    for (const id of alvos) {
         const el = document.getElementById(id);
         if (!focavelNaTela(el)) continue;
         try { el.focus({ preventScroll: true }); } catch (e) { continue; }
@@ -2304,6 +2334,35 @@ function anunciarNoLightbox(texto, place) {
 function anunciarNoCard(texto) {
     const el = document.getElementById('cardLiveRegion');
     if (el) el.textContent = texto || '';
+}
+
+// O desfecho que FECHA a camada pode chegar com o card TROCADO pelo próprio
+// fechamento: a aprovação que pousou esperando a foto fechar anda a fila
+// (`avancarSeAprovado`) — aprovar a foto proposta e excluí-la (a lixeira é o
+// caminho de volta da aprovação) num local em que ela é a única foto. O card
+// seguinte ("Novo pedido: …") ou o fim da fila ("Tudo limpo!") é dito na MESMA
+// tarefa, e "Foto excluída" por cima o apagava: o leitor de tela ouvia só "Foto
+// excluída", e o card novo nem seria dito depois (`pedidoAnunciado` já é ele)
+// (auditoria de 2026-10-03, R8-3-07, MEDIDO nos dois motores). Lido ANTES de
+// fechar, devolve quem diz o desfecho DEPOIS: com o card trocado, as duas frases
+// vão juntas, na ordem em que aconteceram; sem troca, só o desfecho (R7-3-04).
+// "Trocado" é o card da FRENTE que mudou, não o pedido da foto: com a foto de
+// outro pedido aberta (o Desfazer de um ✕ devolveu outro à frente, L22), o
+// fechamento só tira o aprovado pela identidade, e nada novo foi dito.
+function anuncioDoCardAoFechar() {
+    const regiao = document.getElementById('cardLiveRegion');
+    const frenteAntes = AppState.currentPlace;
+    const ditoAntes = regiao ? regiao.textContent : '';
+    return (texto) => {
+        const agora = regiao ? regiao.textContent : '';
+        const frente = AppState.currentPlace;
+        // O card que entrou foi dito (o `renderCurrentCard` diz o pedido que
+        // MUDA). Sem card, só o painel do fim que APARECEU escreve: a busca que
+        // ainda corre e a falha (que o painel dela diz sozinho, `role="alert"`)
+        // não escrevem nada, e o que a região tem é do card que SAIU.
+        const disseOQueVeio = frente !== frenteAntes && !!agora && (!!frente || agora !== ditoAntes);
+        anunciarNoCard(disseOQueVeio ? texto + '. ' + agora : texto);
+    };
 }
 
 const Lightbox = {
@@ -2440,6 +2499,20 @@ const Lightbox = {
         this.ty = 0;
         this._applyTransform();
     },
+    // A foto está AMPLIADA DE VERDADE? A régua ÚNICA de quem lê a escala: as
+    // setas (andam, ou trocam de foto e o ↓ fecha), o arraste (anda, ou troca e
+    // fecha), o duplo toque (volta a 1× ou amplia) e o `panBy`. Até 0,1% a mais
+    // (1 px numa foto de 1000) a tela é 1×, e o `zoomTo` usa a MESMA conta pra
+    // decidir quando o afastar volta a 1× exato. Cada um perguntava `=== 1` ou
+    // `> 1`: um fio de zoom pra DENTRO — a roda fina e a pinça lenta do trackpad,
+    // que o R7-3-03 deixou começar a ampliar a partir de 1× — parava a escala
+    // em 1,00073, invisível (a foto de 800 px com 801), e a → ANDAVA a foto
+    // 80 px em vez de trocá-la, o ↓ a andava em vez de fechar e o arraste nem
+    // trocava nem fechava: o R6-3-05 de volta por outra porta (auditoria de
+    // 2026-10-03, R8-3-01, MEDIDO no Chromium com um evento de roda de −0,4 px).
+    ampliada() {
+        return this.scale > 1.001;
+    },
     zoomTo(scale, cx, cy) {
         // cx/cy em coordenadas de viewport; mantém o ponto tocado sob o dedo
         const img = document.getElementById('lightboxImage');
@@ -2460,7 +2533,10 @@ const Lightbox = {
         // começavam a ampliar (auditoria de 2026-10-02, R7-3-03, MEDIDO no
         // Chromium: 301 eventos e a escala parada em 1). Quem aproxima quer zoom,
         // por menor que seja o passo; quem afasta até perto de 1 quer o 1× exato.
-        if (this.scale < prevScale && this.scale < 1.001) this.scale = 1;
+        // O "perto de 1" é a régua de quem LÊ a escala (`ampliada`, R8-3-01): o
+        // passo pequeno pra dentro fica guardado, e até passar dela a foto segue
+        // sendo 1× pras setas, o arraste e o duplo toque.
+        if (this.scale < prevScale && !this.ampliada()) this.scale = 1;
         if (this.scale === 1) {
             this.tx = 0;
             this.ty = 0;
@@ -2491,7 +2567,7 @@ const Lightbox = {
         this.zoomTo(this.scale * Math.pow(1.2, sentido > 0 ? 1 : -1), cx, cy);
     },
     panBy(dx, dy) {
-        if (this.scale <= 1) return;
+        if (!this.ampliada()) return;
         this.tx += dx;
         this.ty += dy;
         this._applyTransform();
@@ -3058,9 +3134,16 @@ function setupLightbox() {
     // `pointerdown`/`pointerup` chegam e sobem até a camada; o par no MESMO
     // botão é o "clique". A pílula que é RÓTULO na edição não trava as ações
     // (`acoesTravadas`), e aí o aviso sai calado.
+    // E o ✓ "Salvar nome" da edição (R8-3-03): travado pela MESMA trava (a
+    // sessão renovando, a conferência de um 401), o toque nele ficava calado,
+    // enquanto o Enter no campo, na mesma trava, dizia "Espere a conferência…"
+    // (`confirmarRenomear`) — o mesmo gesto com duas respostas (MEDIDO nos dois
+    // motores). Desabilitado só por estar vazio ou igual ao nome de agora, ele
+    // segue calado: aí não há trava (`avisarTravaAoTocar` sai sem ela).
     let tocouTravada = null;
     const acaoTravada = (ev) => {
-        const b = ev.target && ev.target.closest && ev.target.closest('#lightboxApprove, #lightboxDelete, #lightboxNomeBtn');
+        const b = ev.target && ev.target.closest
+            && ev.target.closest('#lightboxApprove, #lightboxDelete, #lightboxNomeBtn, #lightboxNomeOk');
         return b && b.disabled ? b : null;
     };
     lb.addEventListener('pointerdown', (ev) => { tocouTravada = acaoTravada(ev); });
@@ -3094,11 +3177,14 @@ function setupLightbox() {
             return;
         }
 
-        // Double-tap → alterna zoom no ponto tocado (a régua é a do mapa também)
+        // Double-tap → alterna zoom no ponto tocado (a régua é a do mapa também).
+        // "Ampliada" é a régua única (`ampliada`, R8-3-01): num fio de zoom
+        // invisível o toque duplo amplia, em vez de "voltar" ao 1× que a tela já
+        // mostra.
         const now = performance.now();
         if (now - lastTapTime < DUPLO_TOQUE_MS && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < DUPLO_TOQUE_RAIO_PX) {
             lastTapTime = 0;
-            if (Lightbox.scale > 1) Lightbox.resetZoom();
+            if (Lightbox.ampliada()) Lightbox.resetZoom();
             else Lightbox.zoomTo(2.5, e.clientX, e.clientY);
             return;
         }
@@ -3127,7 +3213,7 @@ function setupLightbox() {
             return;
         }
 
-        if (Lightbox.scale > 1) {
+        if (Lightbox.ampliada()) {
             Lightbox.panBy(e.clientX - prev.x, e.clientY - prev.y);
         }
     });
@@ -3138,8 +3224,9 @@ function setupLightbox() {
         if (pointers.size < 2) pinchStartDist = 0;
 
         // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
-        // (editando o nome, sai só da edição — ver `recuarNaFoto`).
-        if (dragging && pointers.size === 0 && Lightbox.scale === 1) {
+        // (editando o nome, sai só da edição — ver `recuarNaFoto`). "Sem zoom"
+        // é a régua única (`ampliada`, R8-3-01), não o 1 exato.
+        if (dragging && pointers.size === 0 && !Lightbox.ampliada()) {
             const dx = e.clientX - dragStartX;
             const dy = e.clientY - dragStartY;
             if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
@@ -3509,15 +3596,19 @@ function pedirExclusaoDaFoto() {
             lixeiraOcupada(false);
             if (!saiuDoMapa) return;
             // A foto DESTE pedido estava aberta? Lido antes do `removerFoto`: a
-            // última foto do local fecha a camada (R7-3-04).
+            // última foto do local fecha a camada (R7-3-04). E o que a região do
+            // card diz agora, e de qual card: o fechamento pode TROCAR o card,
+            // e o que ele disser não pode ser apagado (R8-3-07).
             const naCamada = Lightbox.isOpen() && Lightbox.place === place;
+            const anunciarAoFechar = anuncioDoCardAoFechar();
             Lightbox.removerFoto(alvo.id, place);
             // Com a foto já fechada, o card é redesenhado debaixo do foco (R5-3-07).
             if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace);
             // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu
             // (R6-3-08): pela região da camada — ou pela do card, quando a
-            // exclusão FECHOU a camada (R7-3-04).
-            if (naCamada && !Lightbox.isOpen()) anunciarNoCard(t('undo.photoDeleted'));
+            // exclusão FECHOU a camada (R7-3-04), junto do card que o
+            // fechamento trouxe, se trouxe (R8-3-07).
+            if (naCamada && !Lightbox.isOpen()) anunciarAoFechar(t('undo.photoDeleted'));
             else anunciarNoLightbox(t('undo.photoDeleted'), place);
         });
         // A lixeira com o foco virou spinner (`disabled`): o foco fica na camada.
@@ -5110,8 +5201,9 @@ function handleKeyDown(e) {
         // AMPLIADA (mais que 1×), as quatro setas ANDAM pela foto, como no mapa:
         // o + do teclado mostrava só o miolo, e a seta trocava de foto e desfazia
         // o zoom — a placa da fachada no canto ficava inalcançável pra quem usa o
-        // teclado (auditoria de 2026-09-30, R5-3-06). Em 1×, a de sempre.
-        else if (Lightbox.scale > 1 && Object.prototype.hasOwnProperty.call(SETAS_QUE_ANDAM, e.key)) {
+        // teclado (auditoria de 2026-09-30, R5-3-06). Em 1×, a de sempre — e um
+        // fio de zoom invisível é 1× (`ampliada`, R8-3-01).
+        else if (Lightbox.ampliada() && Object.prototype.hasOwnProperty.call(SETAS_QUE_ANDAM, e.key)) {
             e.preventDefault();
             Lightbox.panBy(...SETAS_QUE_ANDAM[e.key]);
         }

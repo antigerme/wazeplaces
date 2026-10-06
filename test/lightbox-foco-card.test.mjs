@@ -44,7 +44,9 @@ function fatiar(nome) {
 
 // A tela de mentira: o card da frente (foto, mapa, ✕), o cabeçalho, a Ajuda, o
 // banner do Desfazer e as camadas. Trocar o card é como o DOM troca: o de antes
-// sai da página, e o foco que estava nele cai no <body>.
+// sai da página, e o foco que estava nele cai no <body>. Os painéis do fim da
+// fila (`noMoreCards`, `loadErrorState`) nascem escondidos, como no HTML, e o
+// botão de cada um só está na tela com o painel à mostra (`m.mostrarPainel`).
 function tela({ comFoto = true } = {}) {
   const doc = { body: { nome: 'body' } };
   doc.activeElement = doc.body;
@@ -77,10 +79,21 @@ function tela({ comFoto = true } = {}) {
   const undoBtn = el('Desfazer');
   let aoClicar = null;
   undoBtn.addEventListener = (tipo, fn) => { if (tipo === 'click') aoClicar = fn; };
+  const paineis = { noMoreCards: false, loadErrorState: false };   // à mostra?
+  const painel = (id) => ({ classList: { contains: (c) => c === 'hidden' && !paineis[id] } });
+  const botaoDoPainel = (nomeDele, id) => {
+    const b = el(nomeDele);
+    b.getClientRects = () => (paineis[id] && b.isConnected ? [1] : []);
+    b.focus = () => { if (paineis[id]) doc.activeElement = b; };
+    return b;
+  };
+  const reloadBtn = botaoDoPainel('Verificar novamente', 'noMoreCards');
+  const retryLoadBtn = botaoDoPainel('Tentar de novo', 'loadErrorState');
   doc.querySelector = (s) => (s === '#cardStack .place-card:not(.card-fundo)' ? card : null);
   doc.getElementById = (id) => ({
     helpBtn: ajuda, undoBtn, undoContainer: { appendChild() {} },
     filtersModal: { classList: { contains: (c) => (c === 'hidden' ? !camadas.modal : false) } },
+    noMoreCards: painel('noMoreCards'), loadErrorState: painel('loadErrorState'), reloadBtn, retryLoadBtn,
   })[id] || null;
   doc.createElement = () => ({});
   const deps = {
@@ -89,7 +102,8 @@ function tela({ comFoto = true } = {}) {
     removeUndoBanner: () => {}, escapeHtml: (s) => s, t: (k) => k, UNDO_WINDOW_MS: 3000,
   };
   const nomes = ['dentroDeCamada', 'focavelNaTela', 'devolverFoco', 'topOpenModal', 'cardDaFrente',
-    'devolverFocoDaAmpliacao', 'focoPerdido', 'semCamadaAberta', 'mantendoFocoNoCard', 'veioDoTeclado', 'mostrarDesfazer'];
+    'devolverFocoDaAmpliacao', 'botaoDoPainelDoFim', 'focoPerdido', 'semCamadaAberta', 'mantendoFocoNoCard',
+    'veioDoTeclado', 'mostrarDesfazer'];
   const app = new Function(...Object.keys(deps), 'let ultimoFocoForaDasCamadas = null;\n'
     + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...Object.values(deps));
   // O clique no "Desfazer" como o navegador o entrega: o Enter no botão focado
@@ -103,7 +117,9 @@ function tela({ comFoto = true } = {}) {
     undoBtn.isConnected = true;
     aoClicar({ detail, currentTarget: undoBtn });
   };
-  return { app, doc, camadas, card: () => card, novoCard, trocarCard, ajuda, cabecalho, undoBtn, clicarDesfazer };
+  const mostrarPainel = (id) => { paineis[id] = true; };
+  return { app, doc, camadas, card: () => card, novoCard, trocarCard, ajuda, cabecalho, undoBtn, clicarDesfazer,
+    mostrarPainel, reloadBtn, retryLoadBtn };
 }
 
 const nome = (doc) => doc.activeElement && doc.activeElement.nome;
@@ -127,11 +143,50 @@ test('R5-3-07 o card trocado (ou redesenhado) debaixo do foco: o foco vai à fot
   const semFoto = s.novoCard({ comFoto: false });
   s.app.mantendoFocoNoCard(() => s.trocarCard(semFoto));
   assert.equal(s.doc.activeElement, semFoto.filhos['.card-map'], `sem a foto, o foco caiu em ${nome(s.doc)}`);
-  // A fila acabou (o "Tudo limpo!"): sem card, o lugar de sempre (`devolverFoco`).
+  // A fila acabou e o painel do fim ainda não veio (a busca corre): sem card nem
+  // painel, o lugar de sempre (`devolverFoco`). Com o painel, o botão dele (R8-3-06,
+  // logo abaixo).
   const f = tela();
   f.card().filhos['.card-image'].focus();
   f.app.mantendoFocoNoCard(() => f.trocarCard(null));
-  assert.equal(f.doc.activeElement, f.ajuda, `com a fila no fim, o foco caiu em ${nome(f.doc)}`);
+  assert.equal(f.doc.activeElement, f.ajuda, `com a fila no fim e sem painel, o foco caiu em ${nome(f.doc)}`);
+});
+
+// ── R8-3-06: a fila que ACABA com a foto ampliada aberta ──────────────────────
+// (auditoria de 2026-10-03). Aprovar a foto do ÚLTIMO pedido e fechar a foto: a
+// aprovação pousada anda a fila ao fechar (`avancarSeAprovado`), a fila acaba no
+// "Tudo limpo!" e o foco ia pro ⓘ da Ajuda, no topo da página — MEDIDO nos dois
+// motores, enquanto o MESMO último pedido decidido pelo Enter no ✓ do card leva
+// o foco ao "Verificar novamente" (R7-2-06). O fechar (`devolverFocoDaAmpliacao`,
+// de verdade) vai ao botão do painel que tomou o lugar do card.
+test('R8-3-06 a fila que acaba ao fechar a foto: o foco vai ao "Verificar novamente" (ou ao "Tentar de novo" na falha), não ao ⓘ do topo', () => {
+  for (const [painel, botao] of [['noMoreCards', 'reloadBtn'], ['loadErrorState', 'retryLoadBtn']]) {
+    const m = tela();
+    const fotoDoCard = m.card().filhos['.card-image'];   // quem abriu a foto
+    m.trocarCard(null);                                   // o fechar anda a fila: ela acaba…
+    m.mostrarPainel(painel);                              // …e o painel toma o lugar do card
+    m.app.devolverFocoDaAmpliacao(fotoDoCard, ['.card-image', '.card-map']);
+    assert.equal(m.doc.activeElement, m[botao],
+      `${painel}: DEFEITO — a fila acabou ao fechar a foto e o foco foi parar em ${nome(m.doc)}, não no botão do painel`);
+  }
+  // A escrita que pousa com a foto JÁ fechada e o foco no card (R5-3-07): o mesmo.
+  const p = tela();
+  p.card().filhos['.card-image'].focus();
+  p.app.mantendoFocoNoCard(() => { p.trocarCard(null); p.mostrarPainel('noMoreCards'); });
+  assert.equal(p.doc.activeElement, p.reloadBtn, `a aprovação que pousou com a foto fechada largou o foco em ${nome(p.doc)}`);
+  // CONTROLE: com um card na frente, o foco vai a ele (o painel escondido não conta).
+  const c = tela();
+  const novo = c.novoCard();
+  c.trocarCard(novo);
+  c.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  assert.equal(c.doc.activeElement, novo.filhos['.card-image'], `CONTROLE: com card na frente, o foco foi a ${nome(c.doc)}`);
+  // CONTROLE: com um modal por cima, o foco é dele — nada se mexe.
+  const md = tela();
+  md.trocarCard(null);
+  md.mostrarPainel('noMoreCards');
+  md.camadas.modal = true;
+  md.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  assert.equal(md.doc.activeElement, md.doc.body, `CONTROLE: com um modal aberto, o foco foi a ${nome(md.doc)}`);
 });
 
 test('R5-3-07 CONTROLES: o foco que a pessoa levou pra FORA do card, o que sobreviveu e o de camada aberta ficam onde estão', () => {
@@ -276,4 +331,28 @@ test('R8-4-03 CONTROLES: sem `mesmoBotao` (outro pedido na frente) a regra é a 
   const dedo = tela();
   dedo.app.mantendoFocoNoCard(() => dedo.trocarCard(dedo.novoCard()), { mesmoBotao: true });
   assert.equal(dedo.doc.activeElement, dedo.doc.body);
+});
+
+// A régua do "botão do painel do fim" é UMA: a do `aplicarFocoDoTeclado` sem
+// card (R7-2-06), que leva ao painel o foco prometido ao teclado, e a do fechar
+// da foto (R8-3-06, `botaoDoPainelDoFim`). As duas funções de VERDADE, no mesmo
+// estado de tela: se uma ganhar um painel (ou trocar a ordem) e a outra não, o
+// mesmo fim de fila leva o foco a lugares diferentes conforme o caminho.
+test('R8-3-06 o fechar da foto e o foco prometido ao teclado escolhem o MESMO botão do painel do fim', () => {
+  const estados = [[], ['noMoreCards'], ['loadErrorState'], ['noMoreCards', 'loadErrorState']];
+  for (const visiveis of estados) {
+    const m = tela();
+    m.trocarCard(null);
+    for (const id of visiveis) m.mostrarPainel(id);
+    const doFechar = m.app.botaoDoPainelDoFim();
+    const deps = { document: m.doc, acoesTravadas: () => false, topOpenModal: () => null, cardDaFrente: () => null,
+      Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false } };
+    const aplicar = new Function(...Object.keys(deps), "let focoDoTeclado = '.card-btn-reject';\n"
+      + [fatiar('focavelNaTela'), fatiar('aplicarFocoDoTeclado')].join('\n') + '\nreturn aplicarFocoDoTeclado;')(...Object.values(deps));
+    m.doc.activeElement = m.doc.body;
+    aplicar();
+    const doTeclado = m.doc.activeElement === m.doc.body ? null : m.doc.activeElement;
+    assert.equal(doFechar, doTeclado,
+      `painéis ${JSON.stringify(visiveis)}: o fechar da foto escolhe ${doFechar && doFechar.nome} e o teclado ${doTeclado && doTeclado.nome}`);
+  }
 });

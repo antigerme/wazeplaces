@@ -222,13 +222,16 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     // O foco que fica no card trocado debaixo dele (R5-3-07) é medido à parte,
     // em test/lightbox-foco-card.test.mjs: aqui só redesenha.
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    // A tela: só as regiões vivas, quando o teste as quer (`exclusaoQueAnuncia`).
+    document: { getElementById: () => null },
     ...r6Deps(log),
     // `extra`: troca qualquer dependência acima (R5-3-07).
     ...extra,
   };
   let placeResolvido = null;
   const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto',
-    'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta', ...R6_NOMES];
+    'anuncioDoCardAoFechar', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta',
+    ...R6_NOMES];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -762,14 +765,16 @@ function elFoco(nome, { conectado = true, visivel = true, disabled = false, dent
     closest: (sel) => (sel === '[role="dialog"]' ? dentro : null), conectado };
 }
 const doc = { activeElement: null, body: { nome: 'BODY' } };
-function helpers({ modal = null, card = null, lbAberto = true, lb = null } = {}) {
+// `editando`: a edição do nome aberta (R8-3-04). `lb` também leva os painéis do
+// fim da fila e os botões deles (R8-3-06), quando o teste os quer na tela.
+function helpers({ modal = null, card = null, lbAberto = true, lb = null, editando = false } = {}) {
   const log = [];
   const deps = {
     document: Object.assign(doc, { getElementById: (id) => (lb && lb[id]) || null }),
     topOpenModal: () => modal, cardDaFrente: () => card, devolverFoco: () => log.push('reserva'),
-    Lightbox: { isOpen: () => lbAberto },
+    Lightbox: { isOpen: () => lbAberto }, editandoNome: () => editando,
   };
-  const nomes = ['focavelNaTela', 'dentroDeCamada', 'devolverFocoDaAmpliacao', 'manterFocoNoLightbox'];
+  const nomes = ['focavelNaTela', 'dentroDeCamada', 'devolverFocoDaAmpliacao', 'botaoDoPainelDoFim', 'manterFocoNoLightbox'];
   const f = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(
     ...Object.values(deps));
   return { ...f, log };
@@ -1878,8 +1883,9 @@ function fotoAmpliadaComFoco({ pilulaVisivel = true } = {}) {
   els.imageLightbox = { contains: (x) => Object.values(els).includes(x) };
   doc.getElementById = (id) => els[id] || null;
   doc.createElement = () => el('span');
-  const manter = new Function('document', 'Lightbox', ['focavelNaTela', 'manterFocoNoLightbox'].map(fatiar).join('\n')
-    + '\nreturn manterFocoNoLightbox;')(doc, { isOpen: () => true });
+  // Sem a edição do nome aberta (a troca de foto não é assunto do R8-3-04).
+  const manter = new Function('document', 'Lightbox', 'editandoNome', ['focavelNaTela', 'manterFocoNoLightbox'].map(fatiar).join('\n')
+    + '\nreturn manterFocoNoLightbox;')(doc, { isOpen: () => true }, () => false);
   const L = new Function('document', 'urlDaFoto', 'altDaFoto', 'idadeDaFoto', 't', 'i18nLocale', 'atualizarAcoesDeFoto',
     'manterFocoNoLightbox', `return {
       place: { name: 'Padaria' }, placeName: 'Padaria', urls: ['u0', 'u1', 'u2'], idx: 1, newIdx: 1, eDenuncia: false,
@@ -2252,18 +2258,25 @@ test('R7-3-02 o perfil que chega com a foto aberta não traz a dica de zoom de v
 // O `pedirExclusaoDaFoto` e o `enviarExclusao` de verdade, as DUAS regiões
 // de verdade (`anunciarNoLightbox`, `anunciarNoCard`), e a camada que fecha
 // quando a lista esvazia (o `removerFoto` de verdade).
-function exclusaoQueAnuncia(fotos, { fechadaAntes = false } = {}) {
-  const regioes = { lightboxAnuncio: { textContent: '' }, cardLiveRegion: { textContent: '' } };
+// `dito`: o que a região do card já dizia (o anúncio do card da frente, R8-3-07).
+// `aoFechar(m)`: o que o FECHAMENTO da camada faz com o card — a aprovação que
+// pousou anda a fila (`avancarSeAprovado`) e o card seguinte ou o fim da fila
+// escrevem na região do card, como o `renderCurrentCard` e o `showNoPlaces`.
+function exclusaoQueAnuncia(fotos, { fechadaAntes = false, dito = '', aoFechar = null } = {}) {
+  const regioes = { lightboxAnuncio: { textContent: '' }, cardLiveRegion: { textContent: dito } };
   const doc = { getElementById: (id) => regioes[id] || null };
   const porTras = {};
   const m = montarEscritas({ resposta: { success: true }, extra: {
-    aplicarNosIrmaos: () => {},
+    aplicarNosIrmaos: () => {}, document: doc,
     anunciarNoLightbox: (...a) => porTras.lb(...a), anunciarNoCard: (...a) => porTras.card(...a),
   } });
   porTras.lb = new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
   porTras.card = new Function('document', fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc);
   Object.assign(m.A, { approvedImageIds: fotos.slice(), lat: -23, lon: -46, imageUrls: fotos.map(FOTO) });
   Object.assign(m.L, { urls: fotos.map(FOTO), idx: 0, newIdx: -1, idFotoAtual: () => fotos[0] });
+  if (aoFechar) {
+    m.L.close = function () { this.aberto = false; aoFechar(m, regioes); };
+  }
   return { ...m, regioes, fecharAntes: fechadaAntes };
 }
 
@@ -2290,6 +2303,58 @@ test('R7-3-04 sem o Desfazer, a exclusão da ÚLTIMA foto (que fecha a camada) �
   await umTique(); await umTique();
   assert.deepEqual([f.regioes.cardLiveRegion.textContent, f.regioes.lightboxAnuncio.textContent], ['', ''],
     'CONTROLE: com a foto fechada pela pessoa antes da resposta, o desfecho foi dito');
+});
+
+// ── R8-3-07: "Foto excluída" não APAGA o card que o fechamento trouxe ─────────
+// (auditoria de 2026-10-03, costura do R7-3-04). Aprovar a foto proposta e
+// excluí-la sem o Desfazer (a lixeira é o caminho de volta da aprovação), num
+// local em que ela é a ÚNICA foto: o `removerFoto` fecha a camada, o fechamento
+// anda a fila (a aprovação pousada) e o card seguinte diz "Novo pedido: …" — ou
+// o fim diz "Tudo limpo!" — e, na MESMA tarefa, "Foto excluída" o sobrescrevia:
+// o leitor de tela só ouvia "Foto excluída" (MEDIDO nos dois motores). As duas
+// frases vão juntas quando o fechamento TROCOU o card.
+test('R8-3-07 a exclusão que fecha a camada e TROCA o card diz as duas coisas: "Foto excluída" e o card novo (ou o fim da fila)', async () => {
+  const ANTES = 'card.live.newRequest:Padaria A';
+  const B = pedidoDeFoto('ur-B');
+  // O card seguinte: o fechamento traz B e o `renderCurrentCard` o diz.
+  const a = exclusaoQueAnuncia(['so-ela'], { dito: ANTES, aoFechar: (m, r) => {
+    m.AppState.queue = [B]; m.AppState.currentPlace = B; r.cardLiveRegion.textContent = 'card.live.newRequest:Padaria B';
+  } });
+  a.app.pedirExclusaoDaFoto();
+  await umTique(); await umTique();
+  assert.equal(a.L.aberto, false, 'PRÉ-CONDIÇÃO: a última foto saiu e a camada não fechou');
+  assert.equal(a.regioes.cardLiveRegion.textContent, 'undo.photoDeleted. card.live.newRequest:Padaria B',
+    'DEFEITO: "Foto excluída" apagou o anúncio do card que o fechamento trouxe — o leitor de tela nunca ouve o card novo');
+  // O ÚLTIMO pedido: o fechamento acaba a fila e o painel do fim se diz.
+  const b = exclusaoQueAnuncia(['so-ela'], { dito: ANTES, aoFechar: (m, r) => {
+    m.AppState.queue = []; m.AppState.currentPlace = null; r.cardLiveRegion.textContent = 'states.empty.title';
+  } });
+  b.app.pedirExclusaoDaFoto();
+  await umTique(); await umTique();
+  assert.equal(b.regioes.cardLiveRegion.textContent, 'undo.photoDeleted. states.empty.title',
+    'DEFEITO: "Foto excluída" apagou o "Tudo limpo!" do fim da fila');
+  // O irmão de MESMO nome e tipo: o texto é igual (o Chromium nem reescreve), mas
+  // é OUTRO card na frente — a frase dele segue junto.
+  const A2 = pedidoDeFoto('ur-A2');
+  const s = exclusaoQueAnuncia(['so-ela'], { dito: ANTES, aoFechar: (m) => { m.AppState.queue = [A2]; m.AppState.currentPlace = A2; } });
+  s.app.pedirExclusaoDaFoto();
+  await umTique(); await umTique();
+  assert.equal(s.regioes.cardLiveRegion.textContent, 'undo.photoDeleted. ' + ANTES,
+    'o card trocado por um irmão de mesmo nome não foi dito junto da exclusão');
+  // CONTROLE: a fila acabou SEM o painel (a busca ainda corre): o que a região
+  // tem é do card que SAIU — não vai junto, a exclusão o sobrescreve.
+  const c = exclusaoQueAnuncia(['so-ela'], { dito: ANTES, aoFechar: (m) => { m.AppState.queue = []; m.AppState.currentPlace = null; } });
+  c.app.pedirExclusaoDaFoto();
+  await umTique(); await umTique();
+  assert.equal(c.regioes.cardLiveRegion.textContent, 'undo.photoDeleted',
+    'CONTROLE: com a busca correndo, o anúncio VELHO (do card que saiu) foi dito de novo junto da exclusão');
+  // CONTROLE (o R7-3-04): o fechamento NÃO trocou o card (o mesmo pedido,
+  // redesenhado): só "Foto excluída" — o anúncio velho não é repetido.
+  const r = exclusaoQueAnuncia(['so-ela'], { dito: ANTES });
+  r.app.pedirExclusaoDaFoto();
+  await umTique(); await umTique();
+  assert.equal(r.regioes.cardLiveRegion.textContent, 'undo.photoDeleted',
+    'CONTROLE: sem trocar o card, o anúncio velho foi repetido junto da exclusão');
 });
 
 // ── R7-3-05: com o TREINO aberto, a escrita que pousa chega aos irmãos da fila REAL ──
@@ -2451,6 +2516,137 @@ test('R7-3-07 o toque no "Aprovar", na lixeira e na pílula TRAVADOS da foto amp
   m.els.lightboxApprove.disabled = false;
   m.tocar(m.icone);
   assert.equal(m.avisos.length, 3, 'CONTROLE: o "Aprovar" vivo pediu o aviso da trava');
+});
+
+// ── R8-3-03: o ✓ "Salvar nome" TRAVADO responde ao toque, como o Enter do campo ──
+// (auditoria de 2026-10-03, o caso 1). Corrigindo o nome com a trava acesa (a
+// sessão renovando, a conferência de um 401), o ✓ fica `disabled` e o toque nele
+// não dizia nada — enquanto o Enter no campo, na MESMA trava, diz "Espere a
+// conferência da sessão terminar e toque de novo." (MEDIDO nos dois motores). O
+// `setupLightbox` de VERDADE, com o `avisarTravaAoTocar` e o `avisoDaTrava` de
+// verdade e o toast contado; a camada de mentira guarda os ouvintes.
+function edicaoQueOuve({ travado }) {
+  const no = (id, pai = null) => ({ id, pai, disabled: false, ouv: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener(tipo, fn) { (this.ouv[tipo] = this.ouv[tipo] || []).push(fn); },
+    closest(sel) {
+      const ids = sel.split(',').map((x) => x.trim().replace(/^#/, ''));
+      for (let n = this; n; n = n.pai) if (ids.includes(n.id)) return n;
+      return null;
+    } });
+  const lb = no('imageLightbox');
+  const els = { imageLightbox: lb, lightboxImage: no('lightboxImage', lb), lightboxClose: no('lightboxClose', lb),
+    lightboxPrev: no('lightboxPrev', lb), lightboxNext: no('lightboxNext', lb),
+    lightboxApprove: no('lightboxApprove', lb), lightboxDelete: no('lightboxDelete', lb) };
+  els.lightboxNome = no('lightboxNome', lb);
+  els.lightboxNomeBtn = no('lightboxNomeBtn', els.lightboxNome);
+  els.lightboxNomeEdit = no('lightboxNomeEdit', els.lightboxNome);
+  els.lightboxNomeInput = no('lightboxNomeInput', els.lightboxNomeEdit);
+  els.lightboxNomeOk = no('lightboxNomeOk', els.lightboxNomeEdit);
+  const iconeOk = no(null, els.lightboxNomeOk);               // o <svg> de dentro do ✓
+  const toasts = [];
+  const deps = {
+    document: { getElementById: (id) => els[id] || null }, atualizarAcoesDeFoto: () => {},
+    acoesTravadas: () => travado, AppState: { authenticated: true, contaEmDuvida: false }, extRenovando: false,
+    loteDeLidosEmVoo: null, escritasConferindo: travado ? 1 : 0, contaDestaAbaEmDuvida: () => false,
+    aprovacaoDaTelaNoAr: () => false, t: (k) => k,
+    showToast: (msg) => { toasts.push(msg); return { dispensar() {} }; },
+  };
+  const intervalo = /^const AVISO_DA_TRAVA_INTERVALO_MS = \d+;$/m.exec(APP_SEM);
+  assert.ok(intervalo, 'AVISO_DA_TRAVA_INTERVALO_MS sumiu');
+  new Function(...Object.keys(deps), intervalo[0] + '\nlet avisoDaTravaEm = 0, avisoDaTravaNaTela = null, quedaAnunciada = false;\n'
+    + ['avisoDaTrava', 'avisarTravaAoTocar', 'setupLightbox'].map(fatiar).join('\n') + '\nsetupLightbox();')(...Object.values(deps));
+  const tocar = (inicio, fim = inicio) => {
+    for (const fn of lb.ouv.pointerdown || []) fn({ target: inicio, type: 'pointerdown' });
+    for (const fn of lb.ouv.pointerup || []) fn({ target: fim, type: 'pointerup' });
+  };
+  return { els, iconeOk, toasts, tocar };
+}
+
+test('R8-3-03 o toque no ✓ "Salvar nome" TRAVADO diz o que esperar (o Enter do campo já dizia) — sem a trava, o ✓ desabilitado segue calado', () => {
+  const m = edicaoQueOuve({ travado: true });
+  m.els.lightboxNomeOk.disabled = true;               // a trava o desabilita (`atualizarBotaoSalvarNome`)
+  m.tocar(m.iconeOk);                                 // o dedo no ícone do ✓
+  assert.deepEqual(m.toasts, ['toast.esperaSessao'],
+    'DEFEITO: o toque no ✓ "Salvar nome" travado não disse nada — o Enter do campo, na mesma trava, diz o que esperar');
+  // CONTROLE: o fim de um arraste que começa no CAMPO e só termina no ✓ não é toque.
+  const a = edicaoQueOuve({ travado: true });
+  a.els.lightboxNomeOk.disabled = true;
+  a.tocar(a.els.lightboxNomeInput, a.iconeOk);
+  assert.deepEqual(a.toasts, [], 'CONTROLE: o fim de um arraste que só terminou no ✓ pediu o aviso');
+  // CONTROLE: sem a trava, o ✓ desabilitado por nome VAZIO (ou igual ao de agora) segue calado.
+  const v = edicaoQueOuve({ travado: false });
+  v.els.lightboxNomeOk.disabled = true;
+  v.tocar(v.iconeOk);
+  assert.deepEqual(v.toasts, [], 'o ✓ desabilitado pelo nome vazio, SEM trava, pediu o aviso da trava');
+  // CONTROLE: o ✓ VIVO recebe o clique (o `confirmarRenomear`), não o aviso.
+  const w = edicaoQueOuve({ travado: true });
+  w.tocar(w.iconeOk);
+  assert.deepEqual(w.toasts, [], 'CONTROLE: o ✓ vivo pediu o aviso da trava');
+});
+
+// ── R8-3-04: corrigindo o nome, a trava com o foco no ✓ leva o foco ao CAMPO ───
+// (auditoria de 2026-10-03, costura do R7-3-06). Com a edição aberta e o foco no
+// ✓ "Salvar nome" (o Tab a partir do campo), a trava acende — a sessão caindo
+// com a extensão renovando, a conferência de um 401 —, o ✓ vira `disabled` e
+// perde o foco, e o `manterFocoNoLightbox` o levava ao ✕ que FECHA A FOTO (a
+// pílula é rótulo na edição): o Enter seguinte fechava a foto e jogava fora o
+// nome digitado (MEDIDO nos dois motores). A trava, o `atualizarBotaoSalvarNome`
+// e o `manterFocoNoLightbox` de verdade, num documento que tira o foco do botão
+// que vira `disabled`, como o navegador.
+function edicaoComFoco() {
+  const doc = { body: { nome: 'BODY' }, activeElement: null };
+  const el = (nome) => {
+    const e = { nome, isConnected: true, oculto: false, _dis: false, value: '', closest: () => null, classList: { toggle() {} },
+      querySelector: () => null, getClientRects: () => (e.oculto ? [] : [1]),
+      focus() { if (!e.oculto && !e._dis) doc.activeElement = e; } };
+    Object.defineProperty(e, 'disabled', { get: () => e._dis,
+      set: (v) => { e._dis = !!v; if (e._dis && doc.activeElement === e) doc.activeElement = doc.body; } });
+    return e;
+  };
+  const els = { lightboxApprove: el('Aprovar'), lightboxDelete: el('lixeira'), lightboxNomeBtn: el('pílula'),
+    lightboxNomeInput: el('campo'), lightboxNomeOk: el('✓'), lightboxNomeCancel: el('✕ da edição'), lightboxClose: el('✕') };
+  els.lightboxApprove.oculto = true;                  // editando, as ações de foto somem
+  els.lightboxDelete.oculto = true;
+  els.lightboxNomeInput.value = 'Padaria Certa';      // o nome digitado, diferente do de agora
+  els.imageLightbox = { contains: (x) => Object.values(els).includes(x) };
+  doc.getElementById = (id) => els[id] || null;
+  const estado = { travado: false };
+  const deps = {
+    document: doc, acoesTravadas: () => estado.travado, cardDaFrente: () => null, editandoNome: () => true,
+    renomeacaoNoAr: () => false, Lightbox: { isOpen: () => true, place: { name: 'Padaria 1' } },
+    aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {},
+  };
+  const app = new Function(...Object.keys(deps), 'let aprovandoAgora = false, excluindoAgora = false;\n'
+    + ['focavelNaTela', 'manterFocoNoLightbox', 'atualizarBotaoSalvarNome', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
+    + '\nreturn { aplicarTravaDeAcao };')(...Object.values(deps));
+  const onde = () => doc.activeElement && doc.activeElement.nome;
+  return { app, doc, els, estado, onde };
+}
+
+test('R8-3-04 corrigindo o nome, a trava que acende com o foco no ✓ leva o foco ao CAMPO — não ao ✕ que fecha a foto', () => {
+  const m = edicaoComFoco();
+  m.app.aplicarTravaDeAcao();
+  assert.equal(m.els.lightboxNomeOk.disabled, false, 'PRÉ-CONDIÇÃO: com um nome novo no campo e sem trava, o ✓ não está vivo');
+  m.els.lightboxNomeOk.focus();                       // o Tab a partir do campo
+  assert.equal(m.onde(), '✓', 'PRÉ-CONDIÇÃO: o foco não pousou no ✓');
+  m.estado.travado = true;                            // a queda com a extensão renovando, a conferência de um 401
+  m.app.aplicarTravaDeAcao();
+  assert.equal(m.els.lightboxNomeOk.disabled, true, 'PRÉ-CONDIÇÃO: a trava não desabilitou o ✓');
+  assert.equal(m.onde(), 'campo',
+    `DEFEITO: a trava tirou o foco do ✓ e o levou ao ${m.onde()} — o Enter seguinte fecha a foto e joga fora o nome digitado`);
+  m.estado.travado = false;                           // a renovação: destrava
+  m.app.aplicarTravaDeAcao();
+  assert.equal(m.els.lightboxNomeOk.disabled, false, 'a trava acabou e o ✓ não voltou a valer');
+  assert.equal(m.onde(), 'campo', 'destravar tirou o foco do campo');
+  // CONTROLES: o foco no CAMPO e no ✕ da EDIÇÃO (que não travam) fica onde está.
+  for (const [alvo, nomeDele] of [['lightboxNomeInput', 'campo'], ['lightboxNomeCancel', '✕ da edição']]) {
+    const c = edicaoComFoco();
+    c.app.aplicarTravaDeAcao();
+    c.els[alvo].focus();
+    c.estado.travado = true;
+    c.app.aplicarTravaDeAcao();
+    assert.equal(c.onde(), nomeDele, `CONTROLE: a trava mexeu no foco que estava no ${nomeDele}`);
+  }
 });
 
 // ── R7-3-08: a aprovação POUSOU sem resposta e a pessoa decide pelo CARD ───────

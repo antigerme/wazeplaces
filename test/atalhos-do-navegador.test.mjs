@@ -49,6 +49,20 @@ function constante(nome) {
   return m[0];
 }
 
+// A régua de "ampliada de verdade" da foto (`Lightbox.ampliada`, R8-3-01), de
+// verdade: um método do objeto `Lightbox`, com o `this` de quem o chama.
+function metodoDoLightbox(nome) {
+  const obj = SEM.indexOf('const Lightbox = {');
+  const ini = SEM.indexOf('\n    ' + nome + '(', obj) + 1;
+  assert.ok(obj > 0 && ini > obj, `Lightbox.${nome} sumiu do app.js`);
+  let prof = 0;
+  for (let j = SEM.indexOf('{', SEM.indexOf(')', ini)); j < SEM.length; j++) {
+    if (SEM[j] === '{') prof++;
+    else if (SEM[j] === '}' && --prof === 0) return new Function('return function ' + SEM.slice(ini, j + 1).trim())();
+  }
+  throw new Error('não fechou: Lightbox.' + nome);
+}
+
 const MODIFICADORES = [['Alt', 'altKey'], ['⌘', 'metaKey'], ['Ctrl', 'ctrlKey']];
 const SETAS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
 
@@ -63,7 +77,7 @@ function montar({ camada = null, escala = 1, travado = false } = {}) {
     AppState: { currentPlace: { updateRequestID: 'uA' }, pendingAction: null },
     MapaLightbox: { isOpen: () => camada === 'mapa', close: () => log.push('mapa:fechou'),
       zoom: (d) => log.push('mapa:zoom' + d), arrastar: (dx, dy) => log.push(`mapa:anda ${dx},${dy}`) },
-    Lightbox: { isOpen: () => camada === 'foto', scale: escala, prev: () => log.push('foto:anterior'),
+    Lightbox: { isOpen: () => camada === 'foto', scale: escala, ampliada: metodoDoLightbox('ampliada'), prev: () => log.push('foto:anterior'),
       next: () => log.push('foto:proxima'), panBy: (dx, dy) => log.push(`foto:anda ${dx},${dy}`),
       zoomPeloTeclado: (s) => log.push('foto:zoom' + s) },
     topOpenModal: () => (camada === 'modal' ? { id: 'filtersModal' } : null),

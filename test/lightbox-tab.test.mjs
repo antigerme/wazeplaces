@@ -107,6 +107,20 @@ function constante(nome) {
   return m[0];
 }
 
+// Um MÉTODO do `Lightbox` de verdade, como função (o `this` é quem a chama):
+// a régua de "ampliada de verdade" (R8-3-01) é dele, não uma cópia daqui.
+function metodoDoLightbox(nome) {
+  const obj = APP_SEM.indexOf('const Lightbox = {');
+  const ini = APP_SEM.indexOf('\n    ' + nome + '(', obj) + 1;
+  assert.ok(obj > 0 && ini > obj, `Lightbox.${nome} sumiu`);
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', APP_SEM.indexOf(')', ini)); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) return new Function('return function ' + APP_SEM.slice(ini, j + 1).trim())();
+  }
+  throw new Error('não fechou');
+}
+
 // `escala`: o zoom da foto ampliada (R5-3-06). `apertar(tecla, modificadores)`
 // devolve se o app ficou com a tecla (`preventDefault`) — o que o navegador
 // não faz quando ela é dele (R5-3-05).
@@ -115,7 +129,8 @@ function teclado({ mapaAberto, fotoAberta, janelaDaFoto = false, campoFocado = f
   const MapaLightbox = { isOpen: () => mapaAberto, close: () => log.push('mapa:fechou'),
     zoom: (d) => log.push('mapa:zoom' + d), arrastar: (dx, dy) => log.push(`mapa:anda ${dx},${dy}`) };
   const Lightbox = { isOpen: () => fotoAberta, prev: () => log.push('foto:prev'), next: () => log.push('foto:next'),
-    zoomPeloTeclado: (s) => log.push('foto:zoom' + s), scale: escala, panBy: (dx, dy) => log.push(`foto:anda ${dx},${dy}`) };
+    zoomPeloTeclado: (s) => log.push('foto:zoom' + s), scale: escala, ampliada: metodoDoLightbox('ampliada'),
+    panBy: (dx, dy) => log.push(`foto:anda ${dx},${dy}`) };
   // `janelaDaFoto`: a janela do Desfazer de uma escrita da foto correndo — o
   // `desfazerPeloTeclado` de verdade aperta o botão do banner e diz que desfez.
   const deps = { MapaLightbox, Lightbox, focoEmCampoDeTexto: () => campoFocado,
@@ -227,6 +242,24 @@ test('R5-3-06 foto ampliada (mais que 1×): as quatro setas ANDAM, no passo e no
   const c = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.44, campoFocado: true });
   for (const k of setas) assert.equal(c.apertar(k), false, `${k} no campo do nome não ficou com o cursor`);
   assert.deepEqual(c.log, [], 'com o campo do nome focado, as setas andaram pela foto');
+});
+
+// ── R8-3-01: um fio de zoom invisível é 1× pras setas ────────────────────────
+// (auditoria de 2026-10-03). A roda fina e a pinça lenta do trackpad ampliam a
+// partir de 1× (R7-3-03), e um evento de −0,4 px para a escala em 1,00073 — a
+// foto de 800 px com 801. As setas perguntavam `scale > 1`: MEDIDO no Chromium,
+// a → ANDAVA a foto 80 px em vez de trocá-la, e o ↓ a andava em vez de fechar.
+// Elas perguntam a régua única (`Lightbox.ampliada`, de verdade aqui).
+test('R8-3-01 um fio de zoom invisível (1,00073) é 1× pras setas: ← → trocam de foto e o ↓ recua — ampliada de verdade, andam', () => {
+  const fio = Math.pow(1.2, 0.4 / 100);
+  const f = teclado({ mapaAberto: false, fotoAberta: true, escala: fio });
+  for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowDown']) assert.equal(f.apertar(k), true, `${k} não ficou com o app`);
+  assert.deepEqual(f.log, ['foto:prev', 'foto:next', 'foto:recuou'],
+    `DEFEITO: com a escala em ${fio.toFixed(5)} (invisível) as setas andaram a foto em vez de trocá-la e de fechar`);
+  // CONTROLE: logo depois da régua (1,0015, já ampliada), as quatro andam.
+  const a = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.0015 });
+  a.apertar('ArrowRight'); a.apertar('ArrowDown');
+  assert.deepEqual(a.log, ['foto:anda -80,0', 'foto:anda 0,-80'], 'CONTROLE: ampliada de verdade, as setas deixaram de andar');
 });
 
 test('L29 o Desfazer some com o foco nele e o mapa aberto: o foco volta pro ✕ do mapa, não cai no <body>', () => {
