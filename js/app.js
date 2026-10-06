@@ -6257,7 +6257,7 @@ function diagComputado() {
         // defeito do relato de 2026-09-22 (ver `semOsJaDecididos` e a sentinela
         // `pedidoDecididoNaFila`). Vai só a CONTAGEM — a chave é id de pedido
         // de terceiro, e o conteúdo da fila de saída já está no localStorage.
-        fora.decididos = diagDecididos(carregarFilaDeSaida(), AppState.queue, decididosPorOutraAbaComCardAqui);
+        fora.decididos = diagDecididosAgora();
     } catch (e) {
         fora._erro = String((e && e.message) || e).slice(0, 160);
     }
@@ -6274,6 +6274,15 @@ function diagDecididos(saida, fila, daOutraAba) {
     const voltaram = (Array.isArray(fila) ? fila : []).filter((p) => naSaida.has(chaveDoPedido(p)));
     const porOutraAba = daOutraAba ? voltaram.filter((p) => p && typeof p === 'object' && daOutraAba.has(p)).length : 0;
     return { naSaida: naSaida.size, naFila: voltaram.length - porOutraAba, ...(porOutraAba ? { porOutraAba } : {}) };
+}
+
+// O que a sentinela compara AGORA: a fila de saída × a fila REAL (`filaReal()`).
+// Com o treino aberto, a da tela são os EXEMPLOS, e o pedido decidido que voltou
+// à fila guardada pelo treino passava calado — justamente no relatório que o
+// R8-4-06 passou a gerar "dentro do treino" (junção do lote 12; o R8-4-02 já
+// anota a decisão da outra aba na fila real).
+function diagDecididosAgora() {
+    return diagDecididos(carregarFilaDeSaida(), filaReal(), decididosPorOutraAbaComCardAqui);
 }
 
 // O pedido que a OUTRA ABA decidiu com o card JÁ na fila desta. A fila de saída

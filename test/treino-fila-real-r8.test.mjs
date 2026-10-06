@@ -592,3 +592,34 @@ test('filaReal: os consumidores da fila REAL perguntam a ela (e só a ela)', () 
   assert.doesNotMatch(fatiar('atualizarLinhaDoOffline'), /AppState\.queue/, 'a linha do offline voltou a contar a fila da TELA');
   assert.doesNotMatch(fatiar('pedidoAindaNaTela'), /AppState\.queue/, 'o "pedido ainda na tela" voltou a olhar a fila da TELA');
 });
+
+// ═══ Junção do lote 12 · a SENTINELA olha a fila real com o treino aberto ═════
+// O R8-4-06 passou a gerar o relatório "dentro do treino", e a sentinela
+// `pedidoDecididoNaFila` comparava a fila de saída com a `AppState.queue` — os
+// exemplos. O pedido decidido que voltou à fila guardada pelo treino (o defeito
+// que ela procura) passava calado ali.
+test('junção do lote 12: a sentinela `pedidoDecididoNaFila` compara a fila REAL, também com o treino aberto', () => {
+  const contar = (comTreino) => {
+    const fila = [P(1), P(2), P(3)];
+    const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false,
+      queue: fila.slice(), currentPlace: fila[0], stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, autorEmFoco: null,
+      preferences: { comoFuncionaVisto: true } };
+    let saida = [];
+    const deps = depsDoTreino(AppState, [], {}, { carregarFilaDeSaida: () => saida });
+    const app = montar(deps, ['chaveDoPedido', 'filaReal', 'diagDecididos', 'diagDecididosAgora'],
+      'const decididosPorOutraAbaComCardAqui = new WeakSet();');
+    if (comTreino) {
+      app.Treino.entrar();
+      assert.ok(soExemplos(AppState.queue), 'PRÉ-CONDIÇÃO: o treino não pôs os exemplos na tela');
+    }
+    // O 2º pedido está esperando envio E de volta na fila real: o que a sentinela procura.
+    saida = [item(fila[1])];
+    return app.diagDecididosAgora();
+  };
+  const controle = contar(false);
+  assert.deepEqual(controle, { naSaida: 1, naFila: 1 }, 'CONTROLE: sem o treino a sentinela não viu o pedido de volta — o teste perdeu o sentido');
+  assert.deepEqual(contar(true), controle, 'DEFEITO: com o treino aberto a sentinela olhava os exemplos, e o pedido de volta passava calado');
+  // E é ela que o relatório usa (a captura de cada momento passa pelo `diagComputado`).
+  assert.match(fatiar('diagComputado'), /fora\.decididos = diagDecididosAgora\(\);/,
+    'o `diagComputado` deixou de contar os decididos pela fila REAL (`diagDecididosAgora`)');
+});
