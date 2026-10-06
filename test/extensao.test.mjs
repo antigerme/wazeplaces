@@ -292,6 +292,7 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
   vm.runInContext(BACKGROUND, ctx);
   assert.ok(ouvinte, 'CONTROLE: o background não ouve mensagens');
   const ABA_DO_WME = { tab: { url: 'https://www.waze.com/editor' } };
+  const ABA_DO_APP = { tab: { url: 'https://places.wazebrasil.com/' } };
   return {
     guardado, abas, abasEm, relogio,
     // Uma constante do background.js, lida do script que rodou.
@@ -300,6 +301,8 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
     },
     // A mensagem entra, e quem chamou anda com o relógio.
     ouvir: (msg, responder) => ouvinte(msg, ABA_DO_WME, responder),
+    // A mensagem da PONTE, que vem da aba do app.
+    ouvirDaPonte: (msg, responder) => ouvinte(msg, ABA_DO_APP, responder),
     // A mensagem entra, e o relógio anda até a resposta.
     pedir: async (msg) => {
       let resposta, chegou = false;
@@ -706,16 +709,19 @@ test('R8-6-01: o teto do ACESSAR se compara com o PIOR caso do login inteiro —
   const semPrazo = MAX * WAZE_ESPERA_MS + ESPERAS.slice(0, MAX - 1).reduce((a, b) => a + b, 0);
   assert.ok(WAZE_ESPERA_MS < ESPERA_DO_BOTAO_MS && semPrazo > ESPERA_DO_BOTAO_MS,
     `CONTROLE: uma ida (${WAZE_ESPERA_MS} ms) cabe no teto (${ESPERA_DO_BOTAO_MS} ms), e o login inteiro sem prazo (${semPrazo} ms) não`);
-  // CONTROLE MEDIDO: a ponte, que não tem prazo, leva exatamente essa soma com toda
-  // ida estourando — o instrumento mede a cadeia inteira de tentativas.
+  // CONTROLE MEDIDO: o login sem prazo (o `autenticar` chamado sem `ate`, que era
+  // o da ponte até a 0.3.3) leva exatamente essa soma com toda ida estourando — o
+  // instrumento mede a cadeia inteira de tentativas.
   {
     const relogio = relogioVirtual();
     const { servidor, registro } = servidorLento(relogio, [{ ms: WAZE_ESPERA_MS, ok: false }]);
     const bg = rodarBackground({ servidor, relogio });
     const t0 = relogio.agora();
-    const r = await bg.pedir({ action: 'autenticar' });
+    let r = null;
+    bg.constante('autenticar')('https://www.waze.com/editor').then((x) => { r = x; });
+    assert.ok(await relogio.andar({ pronto: () => r !== null }), 'CONTROLE: o login sem prazo não terminou');
     assert.equal(r.errorCategory, 'transient', `CONTROLE: ${JSON.stringify(r)}`);
-    assert.equal(registro.length, MAX, 'CONTROLE: a ponte não fez todas as idas');
+    assert.equal(registro.length, MAX, 'CONTROLE: o login sem prazo não fez todas as idas');
     assert.equal(relogio.agora() - t0, semPrazo, 'CONTROLE: o login inteiro, sem prazo, não levou a soma das idas e das esperas');
   }
   // O prazo do botão: uma ida lenta que dá certo ainda cabe, e o background responde antes do teto.
@@ -789,7 +795,13 @@ const constante = (nome) => {
 const ORIGEM = 'https://places.wazebrasil.com';
 // A aba do app: UM localStorage (o da origem, que a ponte e o app dividem) e a
 // janela por onde o `postMessage` passa — entregue depois, como no navegador.
-function abaDoApp(guardadoAntes = {}) {
+// Com `relogio`, a entrega anda no relógio de mentira (o de `relogioVirtual`).
+// Cada resposta da ponte fica anotada em `entregas`, com a hora e se o APP ainda
+// a ouvia (algum ouvinte que não é o da própria ponte); e cada pergunta do app,
+// inteira, em `perguntas`.
+function abaDoApp(guardadoAntes = {}, { relogio = null } = {}) {
+  const agendar = relogio ? relogio.setTimeout : setTimeout;
+  const agora = relogio ? relogio.agora : Date.now;
   const guardado = new Map(Object.entries(guardadoAntes));
   const escritas = [];
   const armazenamento = (quem) => ({
@@ -798,35 +810,53 @@ function abaDoApp(guardadoAntes = {}) {
     removeItem: (k) => { escritas.push(`${quem}:remove:${k}`); guardado.delete(k); },
   });
   const ouvintes = [];
+  const daPonte = new Set();
   const win = {
     location: { origin: ORIGEM },
     addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.push(fn); },
     removeEventListener: (tipo, fn) => { const i = ouvintes.indexOf(fn); if (i >= 0) ouvintes.splice(i, 1); },
     postMessage: (data, alvo) => {
       if (alvo !== ORIGEM && alvo !== '*') return;
-      setTimeout(() => {
+      agendar(() => {
         // Pro CONTROLE do teste da ordem: a pergunta chegou antes da leitura?
         if (data && data.action === 'precisa-de-sessao' && aba.perguntouAntesDaLeitura === null) aba.perguntouAntesDaLeitura = !aba.leituraFeita;
+        if (data && data.source === 'wazeplaces') aba.perguntas.push({ ...data });
+        if (data && data.source === 'wazeplaces-ext') {
+          aba.entregas.push({ quando: agora(), action: data.action, token: data.token || null, appOuvia: ouvintes.some((f) => !daPonte.has(f)) });
+        }
         for (const fn of [...ouvintes]) fn({ source: win, origin: ORIGEM, data });
       }, 0);
     },
   };
-  const aba = { guardado, escritas, armazenamento, win, leituraFeita: false, perguntouAntesDaLeitura: null };
+  const aba = { guardado, escritas, armazenamento, win, leituraFeita: false, perguntouAntesDaLeitura: null,
+    ouvintes, daPonte, entregas: [], perguntas: [] };
   return aba;
 }
 
 const NUNCA = Symbol('o chrome.storage não responde');
 // A ponte (o content script do app) no `document_start` da aba, com o que o
-// background deixou no `chrome.storage`.
-function rodarPonte(aba, { pendente, autenticar = () => ({ success: false, semLogin: true }), atrasoDaLeitura = 0 }) {
+// background deixou no `chrome.storage`. Com `background` (o de `rodarBackground`),
+// o `sendMessage` vai ao background DE VERDADE, serializado como no Chrome:
+// `entregaMs` é a demora da ida (o service worker acordando), `voltaMs` a da volta.
+function rodarPonte(aba, { pendente, autenticar = () => ({ success: false, semLogin: true }), atrasoDaLeitura = 0,
+  relogio = null, background = null, entregaMs = 0, voltaMs = 0 }) {
+  const agendar = relogio ? relogio.setTimeout : setTimeout;
   const pedidos = [];
   const removidos = [];
+  const comoNoChrome = (o) => (o === undefined ? undefined : JSON.parse(JSON.stringify(o)));
   const ctx = {
     window: aba.win, localStorage: aba.armazenamento('ponte'),
     chrome: {
       runtime: {
         lastError: null,
-        sendMessage: (msg, cb) => { pedidos.push(msg.action); setTimeout(() => cb(autenticar(msg)), 0); },
+        sendMessage: (msg, cb) => {
+          pedidos.push(msg.action);
+          if (background) {
+            agendar(() => background.ouvirDaPonte(comoNoChrome(msg), (r) => agendar(() => cb(comoNoChrome(r)), voltaMs)), entregaMs);
+            return;
+          }
+          agendar(() => cb(autenticar(msg)), 0);
+        },
       },
       storage: {
         local: {
@@ -834,22 +864,27 @@ function rodarPonte(aba, { pendente, autenticar = () => ({ success: false, semLo
           // `NUNCA`: o storage de uma ponte órfã, que não responde.
           get: (chaves, cb) => {
             if (pendente === NUNCA) return;
-            setTimeout(() => { aba.leituraFeita = true; cb(pendente === undefined ? {} : { token_pendente: pendente }); }, atrasoDaLeitura);
+            agendar(() => { aba.leituraFeita = true; cb(pendente === undefined ? {} : { token_pendente: pendente }); }, atrasoDaLeitura);
           },
           remove: (k) => { removidos.push(k); },
         },
       },
     },
-    setTimeout, Date, console,
+    setTimeout: agendar, Date: relogio ? relogio.Date : Date, console,
   };
   vm.createContext(ctx);
   vm.runInContext(PONTE, ctx);
+  // Quem ouve a janela até aqui é a ponte: o app começa a ouvir quando pergunta.
+  for (const f of aba.ouvintes) aba.daPonte.add(f);
   return { pedidos, removidos };
 }
 
 // O app nessa aba: o `API` do api.js de verdade e, do app.js, o diário de
 // sessões, o `marcarSessaoJaAtiva` e o `entrarPelaExtensao`, com o mínimo em volta.
-function rodarApp(aba) {
+// Com `relogio`, os timers do app são os do relógio de mentira. `esperaMs` troca a
+// espera do app (um app que espera menos); `comoOAppDeAntes` tira a `espera` da
+// pergunta, como ela saía até a v2026.10.06-01.
+function rodarApp(aba, { relogio = null, esperaMs = null, comoOAppDeAntes = false } = {}) {
   const contas = [];
   const ctxApi = { localStorage: aba.armazenamento('app'), window: aba.win, t: (k) => k, console };
   vm.createContext(ctxApi);
@@ -866,11 +901,18 @@ function rodarApp(aba) {
     mostrarEntrandoPelaExtensao() {}, negadoDaExtensao: (n) => n, aoEntrarNestaPagina() {}, fecharModaisDaEntrada() {},
     showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {}, esvaziarFilaDeSaida() {},
     conhecerContaDoLogin: (c) => contas.push(c),
-    setTimeout, clearTimeout,
+    setTimeout: relogio ? relogio.setTimeout : setTimeout, clearTimeout: relogio ? relogio.clearTimeout : clearTimeout,
   };
   const chaves = Object.keys(deps);
-  const corpo = [constante('EXT_PRESENTE_MS'), constante('EXT_ESPERA_MS'), constante('SESSOES_KEY'), constante('SESSOES_TETO'),
-    ...['lerDiarioDeSessoes', 'registrarEventoDeSessao', 'marcarSessaoJaAtiva', 'entrarPelaExtensao'].map(fatiar),
+  let pergunta = fatiar('entrarPelaExtensao');
+  if (comoOAppDeAntes) {
+    const hoje = pergunta;
+    pergunta = pergunta.replace(/(action: 'precisa-de-sessao'),\s*espera:\s*EXT_ESPERA_MS\s*\}/, '$1 }');
+    assert.notEqual(pergunta, hoje, 'CONTROLE: a pergunta do app não leva mais a `espera` — reveja como este teste encena o app de antes');
+  }
+  const corpo = [constante('EXT_PRESENTE_MS'), esperaMs ? `const EXT_ESPERA_MS = ${Number(esperaMs)};` : constante('EXT_ESPERA_MS'),
+    constante('SESSOES_KEY'), constante('SESSOES_TETO'),
+    ...['lerDiarioDeSessoes', 'registrarEventoDeSessao', 'marcarSessaoJaAtiva'].map(fatiar), pergunta,
     'return { lerDiarioDeSessoes, registrarEventoDeSessao, marcarSessaoJaAtiva, entrarPelaExtensao };'].join('\n');
   const app = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
   // O gancho do diário mora no `API.setSession` (ver o api.js): é por ele que o
@@ -970,4 +1012,247 @@ test('R6-1-10: o chrome.storage que não responde (a ponte órfã) não segura a
   const levou = Date.now() - t0;
   assert.ok(levou < 3000, `a resposta levou ${levou} ms — a espera pelo storage não tem teto`);
   assert.deepEqual(ponte.pedidos, ['autenticar']);
+});
+
+// ═══ R9-1-02 = R9-6-02 · a PONTE tem o prazo de quem pergunta, e um login por vez ═══
+// O app pede sessão à ponte (na abertura, na volta à aba e na queda) e espera a
+// resposta por `EXT_ESPERA_MS` (8 s) depois do `aguarde`; aí desiste e para de
+// ouvir. O login da ponte não tinha prazo nenhum: até 4 idas, 124,6 s com o Waze
+// lento, indo ao /Session no nome da pessoa depois de o app ter desistido — e a
+// ida que dava certo entregava o token a uma página que já não ouvia: a sessão
+// ficava sem dono no servidor, e a pessoa na tela de entrada. E cada volta à aba
+// começava outra cadeia ao lado da que corria (MEDIDO com a extensão e o app de
+// verdade num Chromium: 12 idas, até 3 ao mesmo tempo, 10 depois de o app
+// desistir). Agora o app manda a espera dele na pergunta (`espera`), o login da
+// ponte acaba antes dela (`FOLGA_DA_PONTE_MS`), e é um por vez.
+//
+// Aqui, o app (`entrarPelaExtensao` e o `API`), a ponte e o background de
+// verdade, num relógio só, com o servidor de mentira das idas lentas (o do
+// R8-6-01: ele cancela a ida quando o sinal cancela, como o `fetch`). O token da
+// ida N é `tok-N`.
+const numeroDoApp = (nome) => Number(/=\s*(\d+)\s*;/.exec(constante(nome))[1]);
+const ESPERA_DO_APP = numeroDoApp('EXT_ESPERA_MS');
+
+// `abas`: uma aba do app por item, cada uma com a ponte dela, todas com o MESMO
+// background. `em`: quando o app pergunta; `deNovo`: quando ele pergunta outra vez
+// (a volta à aba, depois da resposta da primeira). `entregaMs`/`voltaMs`: a demora
+// da mensagem da ponte até o background e de volta; `atrasoDaLeitura`: a do
+// `chrome.storage` da ponte; `esperaMs`: um app que espera outra coisa;
+// `comoOAppDeAntes`: a pergunta sem a `espera`.
+async function perguntarComServidorLento({ idas, abas = [{}], ignoraCancelamento = false }) {
+  const relogio = relogioVirtual();
+  const t0 = relogio.agora();
+  const rel = (t) => t - t0;
+  const { servidor, registro } = servidorLento(relogio, idas, { ignoraCancelamento });
+  const bg = rodarBackground({ servidor, relogio });
+  const estado = abas.map((cfg) => {
+    const aba = abaDoApp({}, { relogio });
+    rodarPonte(aba, { relogio, background: bg, entregaMs: cfg.entregaMs || 0, voltaMs: cfg.voltaMs || 0, atrasoDaLeitura: cfg.atrasoDaLeitura || 0 });
+    const app = rodarApp(aba, { relogio, esperaMs: cfg.esperaMs, comoOAppDeAntes: cfg.comoOAppDeAntes });
+    const e = { aba, app, esperaDoApp: cfg.esperaMs || ESPERA_DO_APP, perguntas: [] };
+    for (const em of [cfg.em || 0, ...(cfg.deNovo || [])]) {
+      relogio.setTimeout(() => {
+        const p = { em: rel(relogio.agora()), entrou: null, respondeuEm: null };
+        e.perguntas.push(p);
+        app.app.entrarPelaExtensao({ silencioso: true }).then((ok) => { p.entrou = ok; p.respondeuEm = rel(relogio.agora()); });
+      }, em);
+    }
+    return e;
+  });
+  await relogio.andar({ ate: t0 + 10 * 60 * 1000 });
+  const idasRel = registro.map((i) => ({ saiu: rel(i.saiu), fim: i.fim === null ? null : rel(i.fim), como: i.como }));
+  // Quantas idas no ar ao mesmo tempo, no máximo (a que termina num instante não
+  // se soma à que começa nele).
+  let noAr = 0, maxNoAr = 0;
+  const marcos = idasRel.flatMap((i) => [[i.saiu, 1], [i.fim === null ? Infinity : i.fim, -1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  for (const [, d] of marcos) { noAr += d; maxNoAr = Math.max(maxNoAr, noAr); }
+  return {
+    idas: idasRel, maxNoAr,
+    abas: estado.map((e) => ({
+      esperaDoApp: e.esperaDoApp,
+      perguntas: e.perguntas,
+      token: e.app.API.getSession(),
+      entregas: e.aba.entregas.map((x) => ({ ...x, quando: rel(x.quando) })),
+      mensagensDoApp: e.aba.perguntas,
+    })),
+  };
+}
+
+// O que vale em TODA pergunta à ponte:
+//  1. o app recebe a resposta da ponte ANTES de desistir — nunca pelo prazo dele;
+//  2. nenhuma sessão chega a uma página que já não ouve;
+//  3. toda ida ao servidor acontece enquanto algum app espera a resposta dela;
+//  4. toda sessão que o servidor criou ficou com um app (sem dono, nenhuma).
+function conferirAPonte(r, caso) {
+  for (const [n, a] of r.abas.entries()) {
+    const aba = r.abas.length > 1 ? ` (aba ${n + 1})` : '';
+    assert.ok(a.perguntas.length > 0, `CONTROLE (${caso}${aba}): o app nem perguntou`);
+    for (const p of a.perguntas) {
+      assert.ok(p.respondeuEm !== null, `${caso}${aba}: a pergunta de ${p.em} ms ficou sem resposta`);
+      assert.ok(p.respondeuEm - p.em < a.esperaDoApp,
+        `${caso}${aba}: a ponte não respondeu antes de o app desistir — ele perguntou aos ${p.em} ms e desistiu sozinho aos ${p.respondeuEm} ms`
+        + ` (idas: ${JSON.stringify(r.idas)})`);
+    }
+    const tardias = a.entregas.filter((e) => e.action === 'sessao' && !e.appOuvia);
+    assert.deepEqual(tardias, [], `${caso}${aba}: a ponte entregou a sessão a uma página que já não ouvia — sem dono no servidor`
+      + ` (perguntas: ${JSON.stringify(a.perguntas)}, idas: ${JSON.stringify(r.idas)})`);
+  }
+  const todas = r.abas.flatMap((a) => a.perguntas);
+  for (const i of r.idas) {
+    const coberta = i.fim !== null && todas.some((p) => p.em <= i.saiu && i.fim <= p.respondeuEm);
+    assert.ok(coberta, `${caso}: uma ida ao servidor (${JSON.stringify(i)}) correu depois de o app ter a resposta — ida ao Waze no nome da pessoa sem ninguém esperando`
+      + ` (perguntas: ${JSON.stringify(todas)})`);
+  }
+  const comApp = new Set(r.abas.map((a) => a.token).filter(Boolean));
+  r.idas.forEach((i, n) => {
+    if (i.como === 'sessão') assert.ok(comApp.has(`tok-${n + 1}`), `${caso}: a sessão da ${n + 1}ª ida ficou sem dono no servidor (idas: ${JSON.stringify(r.idas)})`);
+  });
+}
+
+test('R9-1-02: o app manda a espera dele na pergunta, e a ponte acaba antes dela — nenhuma ida depois de o app desistir, a que está no ar é cancelada, e nenhuma sessão fica sem dono', async () => {
+  const bg0 = rodarBackground();
+  const MAX = bg0.constante('MAX_TENTATIVAS');
+  const ESPERAS = bg0.constante('ESPERAS_MS');
+  // A demora de cada ida varrida de 0 a além da espera do app (e o servidor
+  // pendurado), com a sessão chegando na k-ésima ida, ou em nenhuma.
+  const demoras = [];
+  for (let ms = 0; ms <= ESPERA_DO_APP + 2000; ms += 250) demoras.push(ms);
+  demoras.push(WAZE_ESPERA_MS, Infinity);
+  let semPrazoChegariaTarde = 0, entrou = 0, desistiu = 0;
+  for (const ms of demoras) {
+    for (let k = 0; k <= MAX; k++) {
+      const r = await perguntarComServidorLento({ idas: Array.from({ length: MAX }, (_, i) => ({ ms, ok: i === k - 1 })) });
+      const caso = `ida de ${ms} ms, ${k ? `a sessão na ${k}ª` : 'nenhuma sessão'}`;
+      // A pergunta leva a espera do app (é ela que a ponte usa).
+      assert.deepEqual(r.abas[0].mensagensDoApp.map((m) => m.espera), [ESPERA_DO_APP], `${caso}: a pergunta do app não diz a espera dele`);
+      conferirAPonte(r, caso);
+      const p = r.abas[0].perguntas[0];
+      if (p.entrou) entrou++; else desistiu++;
+      // Sem prazo na ponte, a sessão deste caso chegaria depois de o app desistir?
+      if (k && k * ms + ESPERAS.slice(0, k - 1).reduce((a, b) => a + b, 0) >= ESPERA_DO_APP) semPrazoChegariaTarde++;
+    }
+  }
+  // CONTROLE: a varredura tem os três desfechos — o app que entra, o que desiste,
+  // e o caso do achado (a sessão que, sem o prazo, chegaria depois de o app desistir).
+  assert.ok(entrou > 20 && desistiu > 20 && semPrazoChegariaTarde > 20,
+    `CONTROLE: a varredura não cobre os casos (entrou ${entrou}, desistiu ${desistiu}, sessão que chegaria tarde ${semPrazoChegariaTarde})`);
+});
+
+test('R9-1-02: a ida que daria certo depois de o app desistir é cancelada; e a sessão que o servidor cria mesmo assim não chega à página que não ouve', async () => {
+  // O caso do achado (x11 "tardio", em escala): a 1ª ida falha em 6 s, e a 2ª
+  // daria a sessão 6 s depois — já com o app na tela de entrada.
+  const idas = [{ ms: 6000, ok: false }, { ms: 6000, ok: true }];
+  const r = await perguntarComServidorLento({ idas });
+  conferirAPonte(r, 'tardio');
+  assert.equal(r.idas.length, 2, `CONTROLE: ${JSON.stringify(r.idas)}`);
+  assert.equal(r.idas[1].como, 'cancelada', `a 2ª ida seguiu depois do prazo de quem perguntou: ${JSON.stringify(r.idas[1])}`);
+  const p = r.abas[0].perguntas[0];
+  assert.equal(p.entrou, false);
+  assert.ok(r.idas[1].fim <= p.respondeuEm, `a 2ª ida foi cancelada aos ${r.idas[1].fim} ms, depois de o app ter a resposta (${p.respondeuEm} ms)`);
+  assert.deepEqual(r.abas[0].entregas.map((e) => e.action), ['aguarde', 'sem-sessao'], 'a ponte não disse "sem sessão" ao app');
+  // A ida que não se deixa cancelar (a resposta já a caminho): a sessão que o
+  // servidor criou chega ao background depois do prazo, e ele a joga fora — a
+  // ponte não a entrega a quem não ouve mais. (Ela fica sem dono no servidor, e
+  // vence sozinha: isso só o servidor evitaria.)
+  const teimosa = await perguntarComServidorLento({ idas, ignoraCancelamento: true });
+  assert.equal(teimosa.idas[1].como, 'sessão', `CONTROLE: a ida não terminou com a sessão: ${JSON.stringify(teimosa.idas)}`);
+  assert.ok(teimosa.idas[1].fim > teimosa.abas[0].perguntas[0].respondeuEm, 'CONTROLE: a sessão chegou antes da resposta ao app');
+  assert.deepEqual(teimosa.abas[0].entregas.filter((e) => e.action === 'sessao'), [], 'a sessão que chegou depois do prazo foi entregue à página');
+  assert.equal(teimosa.abas[0].token, null);
+  // CONTROLE: a mesma ida, dentro do prazo, entra.
+  const aTempo = await perguntarComServidorLento({ idas: [{ ms: 3000, ok: false }, { ms: 2000, ok: true }] });
+  conferirAPonte(aTempo, 'a tempo');
+  assert.equal(aTempo.abas[0].perguntas[0].entrou, true, `CONTROLE: ${JSON.stringify(aTempo.idas)}`);
+  assert.equal(aTempo.abas[0].token, 'tok-2');
+});
+
+test('R9-1-02: o prazo conta da PERGUNTA — o service worker que demora a acordar e o chrome.storage lento não empurram a resposta pra depois de o app desistir', async () => {
+  const pendurado = [{ ms: Infinity, ok: false }];
+  for (const cfg of [{ entregaMs: 3000 }, { atrasoDaLeitura: 1000 }, { entregaMs: 2000, atrasoDaLeitura: 900 }]) {
+    const r = await perguntarComServidorLento({ idas: pendurado, abas: [cfg] });
+    const caso = `servidor pendurado, ${JSON.stringify(cfg)}`;
+    conferirAPonte(r, caso);
+    assert.equal(r.idas.length, 1, `CONTROLE (${caso}): ${JSON.stringify(r.idas)}`);
+    assert.equal(r.idas[0].como, 'cancelada', `${caso}: a ida pendurada não foi cancelada`);
+  }
+  // A mensagem que chega ao background DEPOIS do prazo nem vai ao servidor.
+  const tarde = await perguntarComServidorLento({ idas: [{ ms: 100, ok: true }], abas: [{ entregaMs: ESPERA_DO_APP - 500 }] });
+  conferirAPonte(tarde, 'a mensagem chegou depois do prazo');
+  assert.deepEqual(tarde.idas, [], 'a mensagem que chegou depois do prazo foi ao servidor (uma ida ao Waze no nome de quem já desistiu)');
+  // A volta (background → ponte → app) cabe na folga: a sessão que chega ao
+  // background no fim do prazo ainda chega ao app enquanto ele ouve. MEDIDA com a
+  // extensão carregada num Chromium, do servidor responder até o app receber o
+  // `sessao`: de 6 a 75 ms, em 8 rodadas. A folga tem de cobrir meio segundo.
+  const VOLTA_LENTA_MS = 500;
+  const FOLGA = rodarBackground().constante('FOLGA_DA_PONTE_MS');
+  assert.ok(FOLGA < ESPERA_DO_APP, `a folga da ponte (${FOLGA} ms) não cabe na espera do app (${ESPERA_DO_APP} ms)`);
+  const noLimite = [{ ms: ESPERA_DO_APP - FOLGA - 1, ok: true }];
+  for (const voltaMs of [VOLTA_LENTA_MS, FOLGA - 1]) {
+    const naFolga = await perguntarComServidorLento({ idas: noLimite, abas: [{ voltaMs }] });
+    conferirAPonte(naFolga, `a volta de ${voltaMs} ms`);
+    assert.equal(naFolga.abas[0].token, 'tok-1', `a volta de ${voltaMs} ms: a sessão do fim do prazo não ficou com o app`);
+  }
+  // CONTROLE: a volta mais lenta que a folga leva a mesma sessão a uma página que
+  // já não ouve — o instrumento enxerga a entrega tardia, e é a folga que a evita.
+  const foraDaFolga = await perguntarComServidorLento({ idas: noLimite, abas: [{ voltaMs: FOLGA + 2 }] });
+  assert.equal(foraDaFolga.abas[0].entregas.filter((e) => e.action === 'sessao' && !e.appOuvia).length, 1,
+    `CONTROLE: com a volta mais lenta que a folga, a entrega tardia não apareceu: ${JSON.stringify(foraDaFolga.abas[0].entregas)}`);
+});
+
+test('R9-1-02: o login da ponte é UM por vez — a volta à aba e a outra aba do app não abrem outra cadeia de idas ao Waze', async () => {
+  // Duas abas do app perguntando com 2 s de diferença: uma cadeia só, e as duas
+  // ficam com a MESMA sessão (é o mesmo navegador e a mesma conta do WME).
+  const duas = await perguntarComServidorLento({ idas: [{ ms: 3000, ok: false }, { ms: 2000, ok: true }], abas: [{ em: 0 }, { em: 2000 }] });
+  conferirAPonte(duas, 'duas abas');
+  assert.equal(duas.maxNoAr, 1, `as duas abas abriram cadeias em paralelo: ${JSON.stringify(duas.idas)}`);
+  assert.equal(duas.idas.length, 2, `idas demais: ${JSON.stringify(duas.idas)}`);
+  assert.deepEqual(duas.abas.map((a) => a.token), ['tok-2', 'tok-2'], 'as duas abas não ficaram com a sessão do login no ar');
+  // A mesma página perguntando de novo (a volta à aba) depois da resposta da
+  // primeira: a cadeia de antes já acabou, e a nova é a única no ar.
+  const voltas = await perguntarComServidorLento({
+    idas: [{ ms: 6000, ok: false }, { ms: 6000, ok: false }, { ms: 500, ok: true }],
+    abas: [{ em: 0, deNovo: [ESPERA_DO_APP + 1000] }],
+  });
+  conferirAPonte(voltas, 'a volta à aba');
+  assert.equal(voltas.maxNoAr, 1, `a volta à aba abriu outra cadeia ao lado da que corria: ${JSON.stringify(voltas.idas)}`);
+  const [primeira, segunda] = voltas.abas[0].perguntas;
+  assert.equal(primeira.entrou, false, 'CONTROLE: a primeira pergunta não desistiu');
+  assert.equal(segunda.entrou, true, `a volta à aba não fez um login novo: ${JSON.stringify(voltas.idas)}`);
+  assert.equal(voltas.abas[0].token, 'tok-3');
+  // A aba que espera MENOS que o login no ar recebe a resposta no prazo dela, e
+  // o login segue pra quem ainda espera.
+  const apressada = await perguntarComServidorLento({ idas: [{ ms: 5000, ok: true }], abas: [{ em: 0 }, { em: 1000, esperaMs: 3000 }] });
+  conferirAPonte(apressada, 'a aba que espera menos');
+  assert.equal(apressada.idas.length, 1, `CONTROLE: ${JSON.stringify(apressada.idas)}`);
+  assert.deepEqual(apressada.abas.map((a) => a.perguntas[0].entrou), [true, false]);
+  assert.deepEqual(apressada.abas.map((a) => a.token), ['tok-1', null]);
+});
+
+// O app de antes é o que está no ar até a v2026.10.06-01: a pergunta sem a
+// `espera`, e 8 s de espera (o `EXT_ESPERA_MS` dele — um fato da história, e não
+// o valor de hoje, que pode mudar).
+const ESPERA_DO_APP_DE_ANTES = 8000;
+test('R9-1-02: o app de antes (sem a `espera` na pergunta) também recebe a resposta da ponte antes de desistir', async () => {
+  let viu = 0;
+  const E = ESPERA_DO_APP_DE_ANTES;
+  for (const ms of [0, 3000, 6000, E - 1500, E - 500, E + 1000, WAZE_ESPERA_MS, Infinity]) {
+    for (let k = 0; k <= 2; k++) {
+      const r = await perguntarComServidorLento({ idas: [0, 1, 2, 3].map((i) => ({ ms, ok: i === k - 1 })),
+        abas: [{ comoOAppDeAntes: true, esperaMs: E }] });
+      assert.deepEqual(r.abas[0].mensagensDoApp.map((m) => 'espera' in m), [false], 'CONTROLE: a pergunta encenada ainda leva a `espera`');
+      conferirAPonte(r, `app de antes, ida de ${ms} ms, ${k ? `a sessão na ${k}ª` : 'nenhuma sessão'}`);
+      viu++;
+    }
+  }
+  assert.equal(viu, 24);
+});
+
+test('R9-1-02: nenhum login da ponte espera mais que o do botão — a espera que passa dele vale o prazo do botão', async () => {
+  const bg0 = rodarBackground();
+  const PRAZO = bg0.constante('PRAZO_DO_BOTAO_MS');
+  const r = await perguntarComServidorLento({ idas: [{ ms: WAZE_ESPERA_MS, ok: false }], abas: [{ esperaMs: 10 * 60 * 1000 }] });
+  conferirAPonte(r, 'a espera de 10 minutos');
+  const ultima = r.idas.at(-1);
+  assert.ok(ultima.fim <= PRAZO, `o login da ponte foi até ${ultima.fim} ms, além do prazo do botão (${PRAZO} ms): ${JSON.stringify(r.idas)}`);
+  assert.ok(r.idas.length < bg0.constante('MAX_TENTATIVAS'), `CONTROLE: o prazo nem cortou as idas: ${JSON.stringify(r.idas)}`);
 });

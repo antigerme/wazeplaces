@@ -763,8 +763,14 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             fim(true);
         }
         window.addEventListener('message', ouvir);
+        // A `espera` vai junto: é o prazo de quem pergunta, e o login da extensão
+        // (desde a 0.3.4) acaba antes dele, com folga pra resposta voltar. Sem
+        // prazo, a extensão seguia indo ao Waze no nome da pessoa depois de o app
+        // desistir, e a sessão que dava certo chegava a esta página já sem
+        // ouvinte — sem dono no servidor (auditoria da rodada 9, R9-1-02 =
+        // R9-6-02). A extensão de antes ignora o campo.
         try {
-            window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, window.location.origin);
+            window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao', espera: EXT_ESPERA_MS }, window.location.origin);
         } catch (e) { fim(false); }
     });
 }

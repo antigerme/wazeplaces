@@ -164,6 +164,21 @@ test('extensão: o protocolo do README é o que a ponte manda — cada ação, c
   assert.ok(!/Nenhuma mudança de protocolo/.test(EXT), 'o README segue dizendo que o protocolo não mudou');
 });
 
+// E o outro lado: a PERGUNTA do app à ponte, cada campo (a `espera`, desde a
+// rodada 9, R9-1-02, é o prazo do login da ponte — e quem publica a extensão
+// precisa saber que ele existe).
+test('extensão: o README documenta a pergunta do app à ponte — cada campo que o app manda', () => {
+  const app = ler('js/app.js').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const m = /postMessage\(\{\s*(source: 'wazeplaces',\s*action: 'precisa-de-sessao'[^}]*)\}/.exec(app);
+  assert.ok(m, 'CONTROLE: a pergunta do app à ponte sumiu do app.js');
+  const campos = [...m[1].matchAll(/([a-zA-Z]+)\s*:/g)].map((x) => x[1]);
+  assert.ok(campos.includes('source') && campos.includes('action'), `CONTROLE: o recorte da pergunta quebrou: ${campos}`);
+  const bloco = blocos(EXT, 'js').find((b) => b.includes("action: 'precisa-de-sessao'"));
+  assert.ok(bloco, 'CONTROLE: o bloco da pergunta do app sumiu do README da extensão');
+  const falta = campos.filter((c) => !new RegExp(`\\b${c}\\s*:`).test(bloco));
+  assert.deepEqual(falta, [], 'o README da extensão não documenta o que o app manda na pergunta');
+});
+
 // O código que vai pra Web Store (tudo menos o README), sem comentário e sem a
 // própria versão do manifesto: mudar comentário não pede publicação; mudar
 // código pede. Linha a linha e sem arrancar bloco multilinha, porque o
@@ -205,13 +220,15 @@ function hashDoCodigoDaExtensao() {
 // R7-6-07); ainda não publicada, então as duas mudanças são a MESMA versão.
 // 0.3.3 = o login do ACESSAR com prazo TOTAL abaixo do teto do botão: nenhuma
 // ida depois dele, a que está no ar é cancelada, e a aba não abre depois do
-// aviso (rodada 8: R8-6-01 = R8-1-02).
+// aviso (rodada 8: R8-6-01 = R8-1-02). 0.3.4 = o login da PONTE com o prazo de
+// quem pergunta (a `espera` do app), e um por vez (rodada 9: R9-1-02 = R9-6-02).
 const CODIGO_POR_VERSAO = {
   '0.2.0': '70aa3ce409d9449234e3183bfc7f7f8f21b6e769e11431865915657c565144a2',
   '0.3.0': '7183aaef5597ed54d3c68ed709dab8659ba69cda22d6c306e789f3b25fa7f36e',
   '0.3.1': '9845a36bdabe98e5baf540f6cdac90c4d5d5332f7420848334dd2c00bf677596',
   '0.3.2': '5a8fd648c151b022ca3c11b2c30fc980bda1023406b78c785716245e6e78483b',
   '0.3.3': 'fae3ead541b97453a0b66f8ecc6eebf7b333fff4cc6abfbfebdad52bd648d430',
+  '0.3.4': '98cbedc9239c03bfef84a9a94056e8b60cab8ad26ee521cd02b09102b2419ff7',
 };
 const semver = (v) => v.split('.').map(Number);
 const antes = (a, b) => { const x = semver(a), y = semver(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };

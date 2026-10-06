@@ -30,6 +30,12 @@ window.addEventListener('message', (ev) => {
   // Responde AGORA que está trabalhando. É o que permite o app não punir quem
   // NÃO tem a extensão: sem este aviso ele mostra a tela de login em 350ms; com
   // ele, espera a ida ao Waze (~1,8s medidos) mostrando "Entrando pelo WME…".
+  //
+  // A espera do app começa quando este aviso chega a ele, e dura `espera` ms (o
+  // app a manda na pergunta; o de antes não manda, e esperava 8 s): o login no
+  // background tem esse prazo, contado DAQUI — antes de o aviso chegar (R9-1-02).
+  const desde = Date.now();
+  const espera = typeof d.espera === 'number' ? d.espera : null;
   responder({ action: 'aguarde' });
 
   // O token que o botão do WME deixou pra esta aba vai PRIMEIRO, sem ida ao
@@ -39,11 +45,11 @@ window.addEventListener('message', (ev) => {
     const p = pendente;
     pendente = null;
     if (pendenteValido(p)) return responder({ action: 'sessao', token: p.token, conta: p.conta });
-    autenticarPeloBackground();
+    autenticarPeloBackground(desde, espera);
   });
 });
 
-function autenticarPeloBackground() {
+function autenticarPeloBackground(desde, espera) {
   // Contexto ÓRFÃO: quando a extensão se atualiza sozinha, o content script
   // antigo continua vivo na página mas o `chrome.runtime` dele morre, e
   // `sendMessage` LANÇA. Sem este try, o `aguarde` já tinha sido enviado e o app
@@ -51,7 +57,7 @@ function autenticarPeloBackground() {
   // entrada ficar utilizável. Dizer "não consegui" na hora custa 0s, e a aba
   // volta a funcionar sozinha no próximo carregamento.
   try {
-    chrome.runtime.sendMessage({ action: 'autenticar' }, (r) => {
+    chrome.runtime.sendMessage({ action: 'autenticar', desde, espera }, (r) => {
       // `lastError` acontece quando o service worker foi descarregado e não
       // respondeu. Silenciar sem responder deixaria o app esperando até o prazo
       // dele — melhor dizer "não consegui" e ele cai no login na hora.

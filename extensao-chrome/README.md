@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.3
+# Waze Places Rapid Access — proposta de v0.3.4
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -46,7 +46,7 @@ Permissões: **as mesmas**. Nenhum acesso novo é pedido.
 O app manda, na própria janela:
 
 ```js
-window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao' }, location.origin);
+window.postMessage({ source: 'wazeplaces', action: 'precisa-de-sessao', espera: 8000 }, location.origin);
 ```
 
 A ponte responde `aguarde` NA HORA (é mensagem local, sem rede) e, depois da ida ao Waze, uma
@@ -80,7 +80,9 @@ app de antes não conhece o motivo e cai no login na hora, como sempre.
 Sem resposta nenhuma em 350 ms (`EXT_PRESENTE_MS`, no `js/app.js`), o app mostra a tela de login
 normal — é o `aguarde` que separa quem tem a extensão de quem não tem, e quem não tem não paga
 espera. Depois do `aguarde`, o app espera a ida ao Waze por até 8 s (`EXT_ESPERA_MS`), mostrando
-"Entrando pelo WME…".
+"Entrando pelo WME…", e então desiste e para de ouvir. Essa espera vai na pergunta (`espera`, em
+ms): é o prazo do login da ponte, que acaba antes dela (ver a v0.3.4). O app de antes não a
+manda, e a ponte usa os 8 s que ele esperava.
 
 **Sobre segurança:** aceitar um token por `postMessage` **não abre superfície nova** — qualquer
 script na página já pode escrever `localStorage.waze_session_token` direto. Mesmo assim os dois
@@ -340,5 +342,75 @@ A sessão que o servidor ainda criar depois de a ida ser cancelada fica sem dono
 | atual | 0.3.2 | funciona como antes: com o Waze lento, a aba do app pode abrir depois do aviso |
 | atual | 0.3.3 | o botão volta em até 40 s com o aviso do que aconteceu, e a aba nunca abre depois dele |
 | anterior | 0.3.3 | funciona — nada mudou no que a extensão manda ao app |
+
+Permissões: **as mesmas** da 0.2.0.
+
+---
+
+## v0.3.4 — a ponte tem o prazo de quem pergunta, e um login por vez
+
+Achado na auditoria da rodada 9 do app (R9-1-02 = R9-6-02). As respostas da ponte não mudam, nem as
+permissões; a pergunta do app ganha um campo (`espera`), e a mensagem interna da ponte pro
+`background.js` ganha a hora da pergunta (`desde`) e essa espera.
+
+A 0.3.3 deu prazo ao login do botão ACESSAR. O da PONTE — o app pedindo sessão na abertura, na volta à
+aba e na queda — seguia sem prazo nenhum: até 4 idas, 124,6 s com o Waze lento. Só que o app espera a
+resposta por 8 s depois do `aguarde` (`EXT_ESPERA_MS`) e então desiste e para de ouvir. Com o Waze lento,
+três coisas aconteciam:
+
+- **O background seguia depois de o app desistir**, indo ao `/Session` do Waze no nome da pessoa.
+- **As cadeias se somavam**: cada volta à aba fazia outra pergunta, e cada pergunta começava a sua cadeia
+  de idas ao lado das que já corriam.
+- **O login que dava certo se perdia**: a ida que dava certo depois dos 8 s entregava o token a uma página
+  que já não ouvia. A pessoa ficava na tela de entrada, e a sessão sem dono no servidor.
+
+Agora:
+
+- **O app manda a espera dele na pergunta** (`espera`, em ms), e o login da ponte acaba ANTES dela, com
+  1 s de folga pra resposta voltar ao app (`FOLGA_DA_PONTE_MS`, no `background.js`). A volta medida no
+  Chromium, do servidor responder até o app receber o `sessao`, foi de 6 a 75 ms em 8 medidas. O prazo
+  conta da PERGUNTA — a hora em que a ponte responde o `aguarde`, que é quando a espera do app começa —,
+  e não de quando a mensagem chega ao background (o service worker adormecido leva um tempo pra
+  acordar). Passado o prazo, como no botão: nenhuma ida começa, a que está no ar é cancelada, e a
+  resposta que chega depois não é entregue. O app recebe o "sem sessão" da ponte antes de desistir
+  sozinho.
+- **Um login da ponte por vez**, pra todas as abas do app. A pergunta que chega com um no ar recebe o
+  desfecho dele — a mesma sessão, que é do mesmo navegador e da mesma conta do WME —, ou a desistência
+  no prazo dela, se ele vier antes.
+- O app que não manda a `espera` (todos até a v2026.10.06-01) esperava 8 s, e a ponte usa esses 8 s. E
+  nenhum login da ponte espera mais que o do botão (40 s).
+
+Medido com esta extensão carregada num Chromium e o app de verdade, contra um servidor de mentira que
+demora 6 s em cada ida (a escala de ~÷5 dos 30 s do servidor de verdade):
+
+```
+toda ida falha, e a pessoa volta à aba 2 vezes
+  0.3.3: 12 idas, 10 depois de o app desistir, até 3 ao mesmo tempo
+         a resposta de cada pergunta chega aos 29, 39 e 50 s — com o app já na tela de entrada
+  0.3.4: 6 idas, uma por vez (3 canceladas no prazo)
+         cada pergunta recebe "sem sessão" 7 s depois do `aguarde`, antes dos 8 s do app
+a 1ª ida falha, e a 2ª daria a sessão 6 s depois
+  0.3.3: o app desiste aos 8 s, e a sessão chega à página aos 12,9 s, sem ninguém ouvindo
+  0.3.4: a 2ª ida é cancelada no prazo, e o app recebe "sem sessão" antes dos 8 s
+a 1ª ida dá certo em 0,5 s
+  0.3.3 e 0.3.4: o app entra, com uma ida só
+```
+
+E em `test/extensao.test.mjs`, o app (`entrarPelaExtensao`), a ponte e o background de verdade num
+relógio virtual: a demora de cada ida varrida de 0 a 10 s (e o servidor pendurado), com a sessão
+chegando na 1ª…4ª ida ou em nenhuma; em todos os casos o app recebe a resposta antes de desistir,
+nenhuma ida acontece sem alguém esperando, e nenhuma sessão chega a uma página que não ouve mais.
+
+A sessão que o servidor ainda criar depois de a ida ser cancelada (ele não sabe que a extensão foi
+embora, e pode seguir a ida até o fim) fica sem dono, e vence sozinha (em até 21 dias sem uso), como na
+0.3.3.
+
+**Precisa ser publicada** pra valer. Se a 0.3.3 ainda não tiver sido publicada, a 0.3.4 a leva junto.
+
+| app | extensão | resultado |
+|---|---|---|
+| atual | 0.3.3 | funciona como antes: a ponte ignora a `espera` e segue sem prazo |
+| atual | 0.3.4 | o login da ponte acaba antes de o app desistir, e é um por vez |
+| anterior | 0.3.4 | funciona — sem a `espera`, a ponte usa os 8 s que o app de antes esperava |
 
 Permissões: **as mesmas** da 0.2.0.
