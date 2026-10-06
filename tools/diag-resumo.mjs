@@ -109,11 +109,17 @@ if (ta.treino && ta.treino.ativo === true) {
   // abertura sem rede leu com ele aberto, e a recusa automática pedida nele. Sem
   // isto, "fila real: 0 pedidos" lia como a fila tendo sumido.
   const espera = (x) => (x === undefined ? AUSENTE : x === true ? 'SIM' : 'não');
-  out(`esperando o "Sair" do treino — a fila guardada do offline: ${espera(g.abrirGuardada)} · a recusa automática: ${espera(g.recusaPedida)}`);
+  out(`esperando o "Sair" do treino — a fila guardada do offline: ${espera(g.abrirGuardada)} · a recusa automática: ${espera(g.recusaPedida)} · a fila refeita pelo perfil: ${espera(g.refazerFila)}`);
   if (g.abrirGuardada === true) {
     out('ATENÇÃO: a fila guardada do offline (seção OFFLINE) espera o "Sair" do treino — com a fila real vazia, é ela que abre ali; vazia aqui não quer dizer que sumiu.');
   }
   if (g.recusaPedida === true) out('a recusa automática pedida com o treino aberto roda no "Sair" dele.');
+  // O perfil que chegou no treino e mudou o lugar (o país de quem entra, a área
+  // salva que ele não tem, "Minha área"): a fila real é BUSCADA de novo no "Sair"
+  // (R9-7-04) — a guardada, que aparece acima, não é a que volta.
+  if (g.refazerFila === true) {
+    out(`ATENÇÃO: o perfil que chegou no treino mandou refazer a fila real${g.avisoDoPais ? ' (com o aviso do país)' : ''} — no "Sair" ela é buscada de novo; a guardada acima não é a que volta.`);
+  }
 }
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.

@@ -1785,4 +1785,13 @@ test('R9-4-07: o relatório feito no treino leva o que espera o "Sair" dele — 
   // relatório leria sempre falso, calado.
   assert.match(app, /this\._salvo\.abrirGuardada = /, 'o treino deixou de anotar `abrirGuardada` — o relatório lê um campo que ninguém escreve');
   assert.match(app, /this\._salvo\.recusaPedida = /, 'o treino deixou de anotar `recusaPedida` — o relatório lê um campo que ninguém escreve');
+  // A fila que o PERFIL mandou refazer no treino (R9-7-04) e a fila guardada lida
+  // nele (quantos e de quando) também esperam o "Sair".
+  const r = guardado({ refazerFila: true, avisoDoPais: { chave: 'toast.paisDoPerfil', pais: 'France' }, filaGuardadaLida: { n: 7, t: 1785203731191 } });
+  assert.equal(r.refazerFila, true, 'o relatório não diz que o perfil mandou refazer a fila real no treino');
+  assert.equal(r.avisoDoPais, 'toast.paisDoPerfil', 'o relatório não diz que o aviso do país espera o "Sair"');
+  assert.deepEqual(r.filaGuardadaLida, { n: 7, t: 1785203731191 }, 'o relatório não diz quantos pedidos a fila guardada lida no treino tem');
+  assert.deepEqual([n.refazerFila, n.avisoDoPais, n.filaGuardadaLida], [false, null, null]);
+  assert.match(app, /this\._salvo\.refazerFila = /, 'o treino deixou de anotar `refazerFila` — o relatório lê um campo que ninguém escreve');
+  assert.match(app, /this\._salvo\.filaGuardadaLida = /, 'o treino deixou de anotar `filaGuardadaLida` — o relatório lê um campo que ninguém escreve');
 });

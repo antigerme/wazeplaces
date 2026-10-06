@@ -6491,6 +6491,13 @@ function diagTreinoGuardado() {
             devolver: diagSeguro(Array.isArray(s.devolver) ? s.devolver : []),
             perfilChegou: !!s.perfilChegou, ordemMudou: !!s.ordemMudou,
             abrirGuardada: !!s.abrirGuardada, recusaPedida: !!s.recusaPedida,
+            // A fila guardada do offline que a abertura leu nele (quantos e de
+            // quando) e a fila que o PERFIL mandou refazer nele (R9-7-04): os
+            // dois também esperam o "Sair".
+            filaGuardadaLida: s.filaGuardadaLida && typeof s.filaGuardadaLida === 'object'
+                ? { n: s.filaGuardadaLida.n ?? null, t: s.filaGuardadaLida.t ?? null } : null,
+            refazerFila: !!s.refazerFila,
+            avisoDoPais: s.avisoDoPais && typeof s.avisoDoPais === 'object' ? (s.avisoDoPais.chave || null) : null,
         };
     } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }

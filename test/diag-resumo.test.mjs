@@ -740,10 +740,18 @@ test('diag-resumo: no treino, a fila guardada do offline e a recusa automática 
   assert.ok(!s.includes(LOCAL) && !s.includes(TOKEN));
   // CONTROLE: nada esperando — "não", e sem o aviso.
   const n = noTreino();
-  n.treino = { ...n.treino, abrirGuardada: false, recusaPedida: false };
+  n.treino = { ...n.treino, abrirGuardada: false, recusaPedida: false, refazerFila: false };
   const sn = rodar(n);
   assert.match(sn, /esperando o "Sair" do treino — a fila guardada do offline: não · a recusa automática: não/);
   assert.doesNotMatch(sn, /espera o "Sair" do treino —|roda no "Sair" dele/, 'o aviso saiu sem nada esperando o "Sair"');
+  // A fila que o PERFIL mandou refazer no treino (R9-7-04): dita, com o aviso.
+  const p = noTreino();
+  p.treino = { ...p.treino, fila: [], devolver: [], abrirGuardada: false, recusaPedida: false, refazerFila: true, avisoDoPais: 'toast.paisDoPerfil' };
+  const sp = rodar(p);
+  assert.match(sp, /a fila refeita pelo perfil: SIM/, 'a triagem não diz que o perfil mandou refazer a fila real no treino');
+  assert.match(sp, /ATENÇÃO: o perfil que chegou no treino mandou refazer a fila real \(com o aviso do país\)/);
+  assert.match(sn, /a fila refeita pelo perfil: não/);
+  assert.doesNotMatch(sn, /mandou refazer a fila real/, 'o aviso da fila refeita saiu sem o perfil ter mandado');
   // E o relatório de antes (sem os dois campos) diz que não os trazia, em vez de "não".
   assert.match(rodar(noTreino()), /esperando o "Sair" do treino — a fila guardada do offline: \(ausente nesta versão\) · a recusa automática: \(ausente nesta versão\)/);
 });
