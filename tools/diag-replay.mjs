@@ -84,6 +84,31 @@ function filaDoRelatorio(d) {
   return { fila, idx, doTreino: false, exemplos: 0 };
 }
 
+// O que ESPERA o "Sair" do treino e muda a fila que volta (auditoria da rodada
+// 10, R10-4-08). A remontagem injeta a fila REAL que o treino guardava — e, com a
+// fila guardada do offline lida no treino (`abrirGuardada`), ela costuma estar
+// VAZIA: a remontagem mostrava "fila: 0" e o painel vazio, sem dizer que N
+// pedidos abrem no "Sair" (o `diag-resumo` do mesmo arquivo diz). E com a fila
+// que o perfil mandou refazer (`refazerFila`), a remontada não é a que volta. A
+// ordem é a do `Treino.sair()`: a refeita vence; a guardada só abre com a fila
+// real vazia. O relatório leva só a CONTAGEM da guardada (`filaGuardadaLida.n`),
+// e não os pedidos: a remontagem não tem como mostrá-los. PURA, conferida sem
+// navegador (test/diag-ferramentas).
+function filaQueVoltaDoTreino(d) {
+  const tr = d && d.treino && typeof d.treino === 'object' ? d.treino : null;
+  if (!tr || tr.ativo !== true || !Array.isArray(tr.fila)) return [];
+  const naFila = tr.fila.filter((x) => x && typeof x === 'object').length;
+  if (tr.refazerFila === true) {
+    return ['o perfil que chegou no treino mandou REFAZER a fila real: no "Sair" ela é buscada de novo — a fila remontada aqui não é a que volta.'];
+  }
+  if (tr.abrirGuardada !== true) return [];
+  const lida = tr.filaGuardadaLida && typeof tr.filaGuardadaLida === 'object' ? tr.filaGuardadaLida.n : null;
+  const quantos = Number.isInteger(lida) && lida >= 0 ? `${lida} pedido(s) da fila guardada do offline` : 'a fila guardada do offline';
+  return [naFila > 0
+    ? `${quantos} espera(m) o "Sair" do treino, mas só abre(m) com a fila real vazia — e ela tem ${naFila} pedido(s).`
+    : `${quantos} abre(m) no "Sair" do treino — a fila real estava vazia, e o relatório leva só a contagem da guardada: a remontagem não tem esses pedidos.`];
+}
+
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -120,6 +145,7 @@ if (doTreino) {
   console.log(`AVISO:   relatório gerado DENTRO do treino — a tela tinha ${exemplos} EXEMPLO(S) na fila; a remontagem usa a fila REAL que o treino guardava, sem a faixa do treino.`);
 }
 console.log(`fila:    ${fila.length} pedido(s)${doTreino ? ' (a fila real que o treino guardava)' : ''}, injetando ${recorte.length} a partir do índice ${idx}`);
+for (const linha of filaQueVoltaDoTreino(d)) console.log(`AVISO:   ${linha}`);
 console.log(`filtros: ${JSON.stringify(st.filters || {})}`);
 
 const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');

@@ -541,3 +541,50 @@ test('diag-replay: relatório feito DENTRO do treino — remonta a fila REAL que
   assert.match(codigo, /if \(doTreino\) \{\s*console\.log\(`AVISO:/, 'a remontagem do treino não avisa que trocou os exemplos pela fila real');
   assert.doesNotMatch(codigo, /^const fila = \(st\.queue/m, 'a fila voltou a sair só do `appState`');
 });
+
+// ── diag-replay: o que ESPERA o "Sair" do treino (auditoria da rodada 10, R10-4-08) ──
+// Relatório feito no treino com a fila guardada do offline lida nele: a fila real
+// que o treino guardava está VAZIA, e a remontagem mostrava "fila: 0" e o painel
+// vazio sem dizer que 4 pedidos abrem no "Sair" (o `diag-resumo` do mesmo arquivo
+// diz; MEDIDO no relatório do n2 da auditoria). O mesmo com a fila que o perfil
+// mandou refazer: a remontada não é a que volta.
+const filaQueVoltaDoTreino = (() => {
+  const ini = REPLAY.indexOf('\nfunction filaQueVoltaDoTreino(d) {');
+  assert.ok(ini > 0, 'filaQueVoltaDoTreino sumiu do diag-replay');
+  let prof = 0, fim = -1;
+  for (let k = REPLAY.indexOf('{', ini); k < REPLAY.length; k++) {
+    if (REPLAY[k] === '{') prof++;
+    else if (REPLAY[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(REPLAY.slice(ini, fim) + '\nreturn filaQueVoltaDoTreino;')();
+})();
+
+test('diag-replay: no treino, a fila guardada do offline que abre no "Sair" e a fila que o perfil manda refazer são DITAS (R10-4-08)', () => {
+  const reais = Array.from({ length: 3 }, (_, i) => ({ venueID: 'r' + i, updateRequestID: 'u' + i }));
+  const treino = (extra) => ({ appState: { queue: [] }, treino: { ativo: true, passo: 1, exemplos: 30, fila: [], ...extra } });
+  // O caso do relatório: a fila real vazia, e 4 pedidos da guardada esperando o "Sair".
+  const guardada = filaQueVoltaDoTreino(treino({ abrirGuardada: true, filaGuardadaLida: { n: 4, t: 1 } }));
+  assert.equal(guardada.length, 1, 'a remontagem não diz nada sobre a fila guardada que abre no "Sair"');
+  assert.match(guardada[0], /^4 pedido\(s\) da fila guardada do offline abre\(m\) no "Sair" do treino/,
+    'a remontagem não diz QUANTOS pedidos da fila guardada abrem no "Sair"');
+  // Sem a contagem (o `n` ilegível), diz a fila sem o número — nunca "NaN pedidos".
+  assert.match(filaQueVoltaDoTreino(treino({ abrirGuardada: true, filaGuardadaLida: { n: 'x' } }))[0],
+    /^a fila guardada do offline abre\(m\)/);
+  // A fila real com pedidos: a guardada não abre no "Sair" (a do `Treino.sair()` vence).
+  assert.match(filaQueVoltaDoTreino(treino({ fila: reais, abrirGuardada: true, filaGuardadaLida: { n: 4 } }))[0],
+    /só abre\(m\) com a fila real vazia — e ela tem 3 pedido\(s\)/);
+  // A fila que o perfil mandou refazer VENCE (o `sair()` a busca de novo, e a guardada não abre).
+  const refeita = filaQueVoltaDoTreino(treino({ fila: reais, refazerFila: true, abrirGuardada: true, filaGuardadaLida: { n: 4 } }));
+  assert.equal(refeita.length, 1);
+  assert.match(refeita[0], /REFAZER a fila real: no "Sair" ela é buscada de novo/, 'a remontagem não diz que a fila refeita não é a remontada');
+  // CONTROLE: o treino sem nada esperando, o treino fechado e o relatório sem o
+  // treino não ganham aviso nenhum.
+  assert.deepEqual(filaQueVoltaDoTreino(treino({ fila: reais })), []);
+  assert.deepEqual(filaQueVoltaDoTreino({ treino: { ativo: false, abrirGuardada: true } }), []);
+  assert.deepEqual(filaQueVoltaDoTreino({ appState: { queue: reais } }), []);
+  assert.deepEqual(filaQueVoltaDoTreino({ treino: { ativo: true, abrirGuardada: true } }), [], 'o relatório sem a fila real no arquivo (antes do v11) inventou aviso');
+  // E a ferramenta imprime cada linha como AVISO.
+  const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(codigo, /^for \(const linha of filaQueVoltaDoTreino\(d\)\) console\.log\(`AVISO: {3}\$\{linha\}`\);$/m,
+    'a ferramenta não imprime o que espera o "Sair" do treino');
+});
