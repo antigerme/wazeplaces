@@ -273,6 +273,26 @@ test('sem Desfazer: exclusão que FALHA não tira a foto da tela', async () => {
   assert.ok(log.includes('devolveu'));
 });
 
+// ── Junção do lote 14 (R10-2-02): o pedido que a OUTRA aba decidiu ───────────
+// Vale a primeira decisão. O gesto no card dele já é descontado; aprovar a foto
+// pela foto ampliada era o caminho que sobrava (relatório do agente das duas
+// abas): a aprovação saía, e o Waze recebia a decisão de lá e a daqui.
+test('junção R10-2-02: aprovar a foto de um pedido que a OUTRA aba já decidiu não vai ao Waze — e diz por quê', async () => {
+  const decididos = new WeakSet();
+  const m = montarEscritas({ resposta: { success: true }, extra: { decididosPorOutraAbaComCardAqui: decididos } });
+  decididos.add(m.A);
+  m.app.aprovarFotoAtual();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.ok(!m.log.some((l) => l.startsWith('api:')), `DEFEITO: a aprovação foi ao Waze sobre a decisão da outra aba: ${m.log}`);
+  assert.ok(m.log.includes('toast:info:toast.decididoNaOutraAba'), `o toque não disse por quê: ${m.log}`);
+  assert.ok(!m.A.approvedImageIds.includes('ur-A'), 'a foto virou "aprovada" na tela sem a aprovação sair');
+  // CONTROLE: o mesmo pedido, sem a anotação, aprova.
+  const c = montarEscritas({ resposta: { success: true }, extra: { decididosPorOutraAbaComCardAqui: new WeakSet() } });
+  c.app.aprovarFotoAtual();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.ok(c.log.some((l) => l.startsWith('api:aprovar')), `CONTROLE: sem a anotação a aprovação não saiu: ${c.log}`);
+});
+
 // ── L3: a foto que NÃO CARREGOU não se aprova nem se exclui ──────────────────
 // (auditoria de 2026-09-26). MEDIDO: pelo carrossel, a proposta com 404 abria
 // no lightbox com o ícone de imagem quebrada, o ✨ e o "Aprovar" ativo, e

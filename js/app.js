@@ -4355,6 +4355,15 @@ function aprovarFotoAtual() {
     // teclado ou um script não furam a trava (L24).
     if (aprovandoAgora || excluindoAgora) return;
     if (!Lightbox.podeAprovarAtual()) return;
+    // O pedido que a OUTRA aba já decidiu (R10-2-02): vale a decisão de lá, e
+    // aprovar a foto seria a segunda — o Waze receberia as duas. Como o gesto no
+    // card (`gestoNoDecididoPorOutraAba`), ela não sai, e a pessoa fica sabendo
+    // por quê; o botão fica, porque é o toque que explica. Excluir e renomear não
+    // decidem o pedido, e seguem.
+    if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(Lightbox.place) === true) {
+        showToast(t('toast.decididoNaOutraAba'), 'info');
+        return;
+    }
     const place = Lightbox.place;
     // `epocaFila`: a fila do gesto (ver `concluirAprovacao`). `regiao`: a do
     // gesto, que viaja com a escrita (L26).
