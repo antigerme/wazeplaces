@@ -828,6 +828,27 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             }
             if (d.action !== 'sessao' || !d.token) return;
             if (epoca !== epocaDaSessao) return fim(false);   // saiu no meio: ver acima
+            // A pergunta da VOLTA à aba (silenciosa, sem manter fila) com um login
+            // DESTA aba no meio: a pessoa colou os cookies, digitou o código ou
+            // abriu o link enquanto a extensão respondia. O login que ela pediu
+            // vence, como na adoção (`adotarSessaoDoAparelho`) — e a resposta da
+            // extensão o TROCAVA: duas sessões no servidor (o "Sair" apaga uma, a
+            // outra fica órfã por até 21 dias) e, com outra conta no WME, a conta
+            // que a pessoa acabou de escolher ia embora com "Outra conta entrou
+            // neste aparelho…" (auditoria da rodada 11, R11-1-03, MEDIDO). Vale o
+            // login que já entrou (a memória com OUTRA sessão) e o que ainda está
+            // no ar. A sessão da extensão sai do servidor, menos se ela já é a do
+            // aparelho: a ponte dá o desfecho de UM login a todas as abas que
+            // perguntam juntas, e a outra pode estar com ela.
+            const tokenDaExtensao = String(d.token);
+            const voltaComLoginDestaAba = silencioso && !manterFila
+                && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo);
+            if (voltaComLoginDestaAba) {
+                if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
+                    callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
+                }
+                return fim(false);
+            }
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
             // O foco que estava NA tela de entrada (no "Colar cookies", no campo
@@ -1504,6 +1525,12 @@ function perguntarAExtensaoAoVoltar() {
     // que estava sendo colado, e o aviso dizia "Você saiu em outra aba" a quem
     // nem tinha entrado (auditoria de 2026-10-06, R9-1-03).
     if (AppState.authenticated || API.temSessaoNaMemoria() || safeLS.get('waze_session_token')) return;
+    // Nem com um login DESTA aba no ar (os cookies sendo conferidos, o código ou
+    // o link sendo resgatado): o fim dele decide, como na adoção
+    // (`adotarSessaoDoAparelho`). A pergunta trazia uma sessão NOVA por cima do
+    // login que a pessoa pediu — duas sessões no servidor, e o "Sair" apagava só
+    // a última (auditoria da rodada 11, R11-1-03, MEDIDO).
+    if (authInFlight || resgateEmVoo) return;
     if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
     entrarPelaExtensao({ silencioso: true }).then((entrou) => {
         // A outra aba entrou enquanto a extensão respondia: a sessão dela entra,

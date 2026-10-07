@@ -542,7 +542,9 @@ function montarExtensao(inicio = {}) {
   const negados = [];
   const deps = {
     window: win, document: { getElementById: () => null },
-    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
+    // A tela de entrada: nenhuma sessão na memória e nenhum login desta aba no ar (R11-1-03).
+    API: { setSession() {}, temSessaoNaMemoria: () => false, sessionToken: null }, authInFlight: false, resgateEmVoo: false,
+    AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
     extPerguntando: false, extRenovando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},

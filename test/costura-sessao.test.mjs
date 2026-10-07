@@ -68,9 +68,11 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
   // por local, L23), pelo mesmo motivo.
   // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
-  // lê — R5-2-07), também parada por padrão.
+  // lê — R5-2-07), também parada por padrão. E nenhum login desta aba no ar (o
+  // colar, o código), que a resposta da extensão à volta à aba confere (R11-1-03).
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false })) if (!(k in deps)) deps[k] = v;
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
+    authInFlight: false, resgateEmVoo: false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
@@ -869,7 +871,8 @@ function montarExtensao(extra = {}) {
     window, AppState: { authenticated: false, queue: [{ venueID: 'vA' }] }, epocaDaSessao: 1, saiuNestaPagina: false,
     extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
-    API: { setSession: (t) => { deps.token = t; }, getSession: () => deps.token || null }, token: null,
+    API: { setSession: (t) => { deps.token = t; }, getSession: () => deps.token || null,
+      temSessaoNaMemoria: () => !!deps.token, get sessionToken() { return deps.token || null; } }, token: null,
     ...extra,
   };
   const h = montar(['entrarPelaExtensao'], deps);

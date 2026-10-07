@@ -2399,7 +2399,9 @@ function extensaoNaEntrada(tela) {
   const log = [];
   const deps = {
     window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {},
-    API: { setSession: (tok) => log.push('sessão ' + tok) },
+    // A aba da tela de entrada: nenhuma sessão na memória, nenhum login no ar (R11-1-03).
+    API: { setSession: (tok) => log.push('sessão ' + tok), temSessaoNaMemoria: () => false, sessionToken: null },
+    authInFlight: false, resgateEmVoo: false,
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
     extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
     setTimeout: () => 1, clearTimeout: () => {},
@@ -2656,4 +2658,98 @@ test('R11-1-02: o desligar sem sessão NESTA aba fica pendente sem ler o aparelh
   c.h.presencaWmeDesligar();
   await tiqueAba();
   assert.deepEqual(c.enviados, [{ userId: '4242', visivel: false }]);
+});
+
+// ── R11-1-03 · a pergunta à extensão da VOLTA e o login DESTA aba ──────────────
+// A adoção da volta espera o login desta aba (`authInFlight`, `resgateEmVoo`), e a
+// pergunta à extensão logo abaixo não: duas sessões criadas (o "Sair" apaga uma, a
+// outra fica órfã por até 21 dias), e a resposta que chegava DEPOIS do login o
+// TROCAVA — com outra conta no WME, a que a pessoa escolheu ia embora (auditoria
+// da rodada 11, R11-1-03, MEDIDO).
+test('R11-1-03: a volta à aba com um login DESTA aba no ar não pergunta à extensão — o fim dele decide', () => {
+  for (const noAr of ['authInFlight', 'resgateEmVoo']) {
+    const m = abaDaEntrada();
+    m.deps[noAr] = true;
+    m.h.aoVoltarAAba();
+    assert.deepEqual(m.log, [], `DEFEITO (${noAr}): a volta perguntou à extensão com o login desta aba no ar — duas sessões no servidor`);
+  }
+  // CONTROLE: sem login no ar, a volta pergunta (o ouvinte enxerga a tela de entrada).
+  const c = abaDaEntrada();
+  c.h.aoVoltarAAba();
+  assert.deepEqual(c.log, ['perguntou à extensão (em silêncio)']);
+});
+
+// A extensão que responde à pergunta da VOLTA, com o login desta aba no meio.
+function extensaoNaVolta({ memoria = null, noAr = null, tokenGuardado = null } = {}) {
+  const t = telaDeEntrada({});
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  const log = [];
+  const API = {
+    sessionToken: memoria,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(tok) { log.push('sessão ' + tok); this.sessionToken = tok; },
+    destroySession: (tok) => { log.push('apagou ' + tok); return Promise.resolve({ success: true }); },
+  };
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, API,
+    safeLS: { get: (k) => (k === TOKEN ? tokenGuardado : null) },
+    authInFlight: noAr === 'cookies', resgateEmVoo: noAr === 'codigo', callWithRetry: (fn) => fn(),
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id) => t.fechar(id),
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); },
+    resetQueue: () => {}, loadProfileAndAuxData: () => Promise.resolve(), conhecerContaDoLogin: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, responder, log, API };
+}
+
+test('R11-1-03: a resposta da extensão à VOLTA não troca o login que esta aba fez (ou faz) nesse meio — e a sessão dela sai do servidor', async () => {
+  for (const [caso, o] of [['os cookies colados entraram', { memoria: 'tok-c' }],
+    ['os cookies sendo conferidos', { noAr: 'cookies' }], ['o código sendo resgatado', { noAr: 'codigo' }]]) {
+    const m = extensaoNaVolta(o);
+    const p = m.h.entrarPelaExtensao({ silencioso: true });
+    m.responder({ action: 'sessao', token: 'tok-e', conta: '5151' });
+    assert.equal(await p, false, `DEFEITO (${caso}): a resposta da extensão entrou por cima do login desta aba`);
+    assert.ok(!m.log.includes('sessão tok-e') && !m.log.includes('app'),
+      `DEFEITO (${caso}): a sessão da extensão trocou a do login que a pessoa pediu: ` + JSON.stringify(m.log));
+    assert.ok(m.log.includes('apagou tok-e'), `(${caso}) a sessão da extensão ficou órfã no servidor, por até 21 dias`);
+    assert.equal(m.API.sessionToken, o.memoria || null, `(${caso}) a memória desta aba mudou`);
+  }
+  // A sessão da extensão já é a do aparelho (a ponte dá o desfecho de UM login a
+  // todas as abas que perguntam juntas, e outra a pôs lá): ela fica no servidor.
+  const outra = extensaoNaVolta({ memoria: 'tok-c', tokenGuardado: 'tok-e' });
+  const po = outra.h.entrarPelaExtensao({ silencioso: true });
+  outra.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await po, false);
+  assert.ok(!outra.log.includes('apagou tok-e'), 'a sessão que OUTRA aba está usando foi apagada do servidor');
+});
+
+test('R11-1-03: CONTROLES — sem login desta aba a extensão entra; a mesma sessão e a renovação da queda seguem como antes', async () => {
+  const m = extensaoNaVolta();
+  const p = m.h.entrarPelaExtensao({ silencioso: true });
+  m.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await p, true);
+  assert.deepEqual(m.log, ['sessão tok-e', 'app'], 'CONTROLE: a extensão deixou de entrar pela volta à aba');
+  // A memória já com a MESMA sessão que a extensão traz: não é outro login.
+  const mesma = extensaoNaVolta({ memoria: 'tok-e' });
+  const pm = mesma.h.entrarPelaExtensao({ silencioso: true });
+  mesma.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await pm, true);
+  // A renovação da QUEDA (`manterFila`) não é a volta: a regra não vale lá.
+  const queda = extensaoNaVolta({ noAr: 'cookies' });
+  const pq = queda.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  queda.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await pq, true, 'a renovação da queda passou a recusar a sessão da extensão');
 });
