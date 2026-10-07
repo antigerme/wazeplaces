@@ -4397,6 +4397,14 @@ async function enviarAprovacao(alvo) {
             // antes: a camada REABERTA pelo card com a aprovação no ar voltava
             // com o ✨, e a resposta não o tirava (R10-3-04).
             Lightbox.marcarComoAprovada(alvo);
+            // E nos IRMÃOS do local, como a exclusão e o nome (auditoria da rodada
+            // 12, R12-3-03): aprovada, a foto está no mapa e é da lixeira em
+            // qualquer pedido do local. Na camada do irmão ela seguia sem a
+            // lixeira até recarregar, com as outras aprovadas tendo a dela (MEDIDO
+            // no s13). O mesmo gesto, no pedido do irmão: a camada aberta dele é
+            // redesenhada. O "já tratado" por outro editor (logo abaixo) não mexe
+            // nos irmãos: não se sabe o que houve.
+            aplicarNosIrmaos(alvo.place, (q) => Lightbox.marcarComoAprovada({ ...alvo, place: q }));
             concluirAprovacao(alvo);
             // "Curador" conta CURADORIA SUA. O `already_processed` logo abaixo
             // (sem ida perdida antes) é outro editor que tratou antes — conta
@@ -4510,11 +4518,18 @@ function tirarAprovadoDaFila(place) {
 // proposta, sem ação nenhuma, e avisa quem ainda vê o pedido (o L30). Em
 // qualquer fila: a foto aberta é a mesma, e a marca vive no próprio pedido.
 // Placar, Histórico e "Curador" seguem de fora — são da sessão que caiu.
+//
+// Os IRMÃOS do local também ganham a foto entre as aprovadas (R12-3-03, como no
+// `enviarAprovacao`), mas só pra quem ainda vê o pedido — a régua da exclusão
+// que pousa depois da queda: depois do "Sair", ou com a fila de OUTRA conta,
+// não há tela daquele pedido.
 // `quem`: a marca de quem aprovou, tirada no envio — é com ela que as outras
 // abas ficam sabendo do pouso, que pode chegar sem sessão na memória (R12-2-04).
 function aprovacaoPousouDepoisDaQueda(alvo, valeu, quem) {
-    if (valeu) Lightbox.marcarComoAprovada(alvo);
-    else {
+    if (valeu) {
+        Lightbox.marcarComoAprovada(alvo);
+        if (pedidoAindaNaTela(alvo.place)) aplicarNosIrmaos(alvo.place, (q) => Lightbox.marcarComoAprovada({ ...alvo, place: q }));
+    } else {
         Lightbox.esquecerProposta(alvo);
         if (pedidoAindaNaTela(alvo.place)) showToast(t('toast.alreadyProcessed'), 'info');
     }

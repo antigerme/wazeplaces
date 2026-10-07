@@ -232,6 +232,9 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     // Nenhuma camada por cima do card além da foto ampliada (o desfecho com a
     // foto fechada, R9-3-05: `anunciarDesfechoDaFoto`, de verdade).
     semCamadaAberta: () => !L.isOpen(),
+    // Os IRMÃOS do local (a exclusão e, desde o R12-3-03, a aprovação que vale
+    // chegam a eles) são medidos à parte, com o `aplicarNosIrmaos` de verdade.
+    aplicarNosIrmaos: () => {},
     ...r6Deps(log),
     // `extra`: troca qualquer dependência acima (R5-3-07).
     ...extra,
@@ -999,6 +1002,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
     aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    aplicarNosIrmaos: () => {},   // os irmãos (R12-3-03) são medidos à parte
     ...r6Deps(),
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
@@ -1725,6 +1729,7 @@ function montarAprovacaoNaQueda() {
     pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),
     // O da foto ampliada (R5-3-07): o `tirarAprovadoDaFila` anda a fila por ele.
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    aplicarNosIrmaos: () => {},   // os irmãos (R12-3-03) são medidos à parte
     ...r6Deps(),
   };
   // `contarIdasSemResposta` é o da foto ampliada (R5-3-04): o `enviarAprovacao` o chama.
@@ -3373,8 +3378,9 @@ test('R10-3-04 a aprovação que VALE marca a foto como aprovada e redesenha a c
 // `aquecimentoNoAr`: o aquecimento da lixeira (`API.prepararExclusao`) devolve a
 // promessa do pedido, que fica no ar até o teste responder (`responderAquecimento`)
 // — como o de verdade (R12-3-01). Sem a opção, ele não devolve nada (o pedido sem
-// sessão, ou o dublê antigo), e nada espera por ele.
-function fotosNoMesmoLocal({ aquecimentoNoAr = false } = {}) {
+// sessão, ou o dublê antigo), e nada espera por ele. `quedaDeVerdade`: o
+// `aprovacaoPousouDepoisDaQueda` de verdade (R12-3-03).
+function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } = {}) {
   const log = [];
   const aquecimentos = [];
   const L = lightbox();
@@ -3423,6 +3429,7 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false } = {}) {
   const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'aprovarFotoAtual', 'enviarAprovacao', 'concluirAprovacao',
     'tirarAprovadoDaFila', 'pousouNoWaze', 'chaveDoPedido', 'aplicarNosIrmaos', 'escritaDoLightboxSemSessao',
     'contarIdasSemResposta', 'callWithRetry', ...R6_NOMES];
+  if (quedaDeVerdade) { delete deps.aprovacaoPousouDepoisDaQueda; nomes.push('aprovacaoPousouDepoisDaQueda'); }
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n').replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
     .replace(/aprovacaoPendente/g, '__pend.a').replace(/exclusaoPendente/g, '__pend.e');
@@ -3995,4 +4002,62 @@ test('R12-3-02 a memória das fotos que saíram do mapa: por local e sessão, co
   assert.equal(g.size, 3, 'a memória das fotos que saíram cresce sem teto');
   assert.equal(h.fotoSaiuDoMapa(V1, 'f1'), false, 'a mais velha não saiu pelo teto');
   assert.match(fatiar('handleLogout'), /fotosQueSairamDoMapa\.clear\(\);/, 'o "Sair" não esquece as fotos que as exclusões de quem saiu tiraram do mapa');
+});
+
+// ── R12-3-03: a APROVAÇÃO chega aos IRMÃOS do local ───────────────────────────
+// (auditoria da rodada 12). A exclusão e o nome chegam aos outros pedidos do
+// mesmo local (`aplicarNosIrmaos`); a aprovação não chegava. Aprovada em A, a
+// foto P está no mapa e é da lixeira em qualquer pedido do local — mas na camada
+// do irmão B ela seguia sem a lixeira (e sem nada) até recarregar, com as outras
+// fotos aprovadas tendo a delas (MEDIDO no s13, com o controle). O irmão B tem,
+// na lista do LOCAL, a proposta de A (pendente).
+function aprovacaoComIrmao(opcoes) {
+  const m = fotosNoMesmoLocal(opcoes);
+  m.B.imageUrls = [FOTO('f1'), FOTO('ur-B'), FOTO('ur-A'), FOTO('f2')];
+  m.abrirEm(m.A, 'ur-A');
+  m.app.aprovarFotoAtual(); m.vencerJanela();      // a aprovação de P (a proposta de A) sai e fica no ar
+  m.abrirEm(m.B, 'ur-A');                         // a camada do irmão, na foto P
+  assert.equal(m.L.idFotoAtual(), null, 'PRÉ-CONDIÇÃO: na camada do irmão, P (ainda pendente) já tinha a lixeira');
+  return m;
+}
+
+test('R12-3-03 a aprovação que VALE chega aos IRMÃOS do local: P entra nas aprovadas do irmão, e a camada aberta dele ganha a lixeira nela', async () => {
+  const m = aprovacaoComIrmao();
+  const antes = m.L.renders;
+  m.responder('aprovar', 'ur-A', { success: true });
+  await umTique(); await umTique();
+  assert.ok(m.B.approvedImageIds.includes('ur-A'), `DEFEITO: a foto aprovada não entrou nas aprovadas do IRMÃO: ${m.B.approvedImageIds}`);
+  assert.equal(m.L.idFotoAtual(), 'ur-A', 'DEFEITO: na camada do irmão, a foto recém-aprovada segue sem a lixeira');
+  assert.ok(m.L.renders > antes, 'a camada aberta do irmão não foi redesenhada');
+  assert.ok(!m.C.approvedImageIds.includes('ur-A'), 'CONTROLE: a aprovação chegou a um pedido de OUTRO local');
+  // CONTROLES: o "já tratado" por outro editor (não se sabe o que houve: ele pode
+  // ter recusado a foto) e a falha não mexem nos irmãos.
+  for (const [nome, r] of [['o "já tratado" por outro editor', { success: false, errorCategory: 'already_processed' }],
+    ['a falha', { success: false, errorCategory: 'unknown' }]]) {
+    const c = aprovacaoComIrmao();
+    c.responder('aprovar', 'ur-A', r);
+    await umTique(); await umTique();
+    assert.ok(!c.B.approvedImageIds.includes('ur-A'), `CONTROLE (${nome}): a foto entrou nas aprovadas do irmão`);
+    assert.equal(c.L.idFotoAtual(), null, `CONTROLE (${nome}): a camada do irmão ofereceu a lixeira numa foto que não se sabe se está no mapa`);
+  }
+});
+
+test('R12-3-03 a aprovação que POUSA depois da queda chega aos irmãos — e não à fila de OUTRA conta', async () => {
+  const m = aprovacaoComIrmao({ quedaDeVerdade: true });
+  m.app.setEpoca(1);                               // a queda, renovada com a MESMA conta (a fila fica)
+  m.responder('aprovar', 'ur-A', { success: true });
+  await umTique(); await umTique();
+  assert.ok(m.B.approvedImageIds.includes('ur-A'), 'DEFEITO: a aprovação que pousou depois da queda não chegou ao irmão');
+  assert.equal(m.L.idFotoAtual(), 'ur-A', 'DEFEITO: na camada do irmão, a foto aprovada depois da queda segue sem a lixeira');
+  // CONTROLE: com OUTRA conta a fila foi refeita (pedidos novos, o mesmo local):
+  // o desfecho da sessão que caiu não entra nela — a régua da exclusão
+  // (`pedidoAindaNaTela`).
+  const c = aprovacaoComIrmao({ quedaDeVerdade: true });
+  c.app.setEpoca(1);
+  const B2 = { ...c.B, updateRequestID: 'ur-B2', approvedImageIds: ['f1', 'f2'], imageUrls: c.B.imageUrls.slice() };
+  c.AppState.fetchEpoch++; c.AppState.queue = [B2, c.C]; c.AppState.currentPlace = B2;
+  c.abrirEm(B2, 'ur-A');
+  c.responder('aprovar', 'ur-A', { success: true });
+  await umTique(); await umTique();
+  assert.ok(!B2.approvedImageIds.includes('ur-A'), 'CONTROLE: o desfecho da sessão que caiu entrou na fila de OUTRA conta');
 });
