@@ -41,7 +41,7 @@ const CAIXA = [-43.3, -23.0, -43.1, -22.8];
 const PERFIL_COM_AREA = { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA }] };
 const PERFIL_SEM_CAIXA = { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive' }] };
 
-function montar({ profile = null } = {}) {
+function montar({ profile = null, regiao = 'row' } = {}) {
   const log = [];
   const buscas = [];
   const AppState = {
@@ -55,7 +55,7 @@ function montar({ profile = null } = {}) {
     AppState, TYPES_ALL: constante('TYPES_ALL'), PREFETCH_THRESHOLD: constante('PREFETCH_THRESHOLD'),
     MAX_EMPTY_PAGES: constante('MAX_EMPTY_PAGES'), MAX_PAGINAS_POR_BUSCA: constante('MAX_PAGINAS_POR_BUSCA'),
     navigator: { onLine: true }, Treino: { ativo: false },
-    API: { getRegion: () => 'row', getCountry: () => '30',
+    API: { getRegion: () => regiao, getCountry: () => '30',
       fetchPlaces: async (page, f) => { buscas.push({ bbox: f.bbox || null, stateId: f.stateId || null });
         return { success: true, places: [{ venueID: 'v1', updateRequestID: 'u1' }], hasMore: false, total: 1, blocked: 0 }; } },
     dfato: () => {}, dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
@@ -77,12 +77,16 @@ function montar({ profile = null } = {}) {
   AppState.stats = { read: 0, rejected: 0, skipped: 0 };
   AppState.pendingAction = null;
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
-    'completarPerfilChegado', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
-  for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil']) if (achar(opcional)) nomes.push(opcional);
+    'completarPerfilChegado', 'refazerFilaReal', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
+  // A caixa da área POR SERVIDOR (R9-6-04): a busca usa a do servidor dela, lida com os editáveis.
+  for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
+    'anotarEditaveis']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0;\n'
-    + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, completarPerfilChegado, resetQueue };')(...chaves.map((k) => deps[k]));
+    + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };\n'
+    + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, completarPerfilChegado, resetQueue,'
+    + ` anotarEditaveis: ${nomes.includes('anotarEditaveis') ? 'anotarEditaveis' : 'null'} };`)(...chaves.map((k) => deps[k]));
   // A fila refeita = época nova e uma busca.
   const refez = () => AppState.fetchEpoch > 0 && log.includes('busca');
   return { app, AppState, log, buscas, refez };
@@ -154,4 +158,37 @@ test('F5: o "Tentar de novo" de quem usa "Minha área" pede o perfil de novo (co
   const s = fatiar('startFetching');
   assert.match(s, /if \(AppState\.filters\.myArea && !\(AppState\.profile && AppState\.profile\.areas\)\) \{\s*refazerPerfilSeFaltar\(\);/,
     'sem o perfil, o "Tentar de novo" repetia a mesma recusa: nada pedia o perfil de novo');
+});
+
+// R9-6-04 (auditoria da rodada 9): as `areas` do `/Session` são POR SERVIDOR
+// (MEDIDO no Waze real: 8 e 1 áreas na ROW, 0 na NA e na IL), e o perfil que o
+// app guarda é o do servidor em que ele foi pedido. Quem só edita na NA tem o
+// perfil da ROW — sem caixa — e a área no perfil da NA, que o `paisDoPerfil`
+// leu (`anotarEditaveis`). A busca na NA vai pela caixa de LÁ; pelo perfil da
+// ROW, "Minha área" desligava com a frase "Seu perfil do Waze não tem área de
+// edição" e a fila virava a do país.
+const CAIXA_NY = [-74.1, 40.6, -73.8, 40.9];
+const PERFIL_ROW_SEM_AREA = { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [], areas: [] };
+test('R9-6-04: a busca vai pela caixa do servidor DELA — a área lida na NA, não o perfil da ROW sem área', async () => {
+  const m = montar({ profile: PERFIL_ROW_SEM_AREA, regiao: 'na' });
+  assert.ok(m.app.anotarEditaveis, 'o `anotarEditaveis` sumiu do app.js');
+  m.app.anotarEditaveis(PERFIL_ROW_SEM_AREA, 'row', [], []);
+  m.app.anotarEditaveis(PERFIL_ROW_SEM_AREA, 'na', [235], [{ type: 'drive', bbox: CAIXA_NY }]);
+  await m.app.fetchNextPage();
+  assert.equal(m.AppState.filters.myArea, true, `"Minha área" desligou na NA com a área de lá lida: ${m.log}`);
+  assert.ok(!m.log.includes('toast:toast.minhaAreaSemCaixa'), 'disse "não tem área de edição" a quem tem área na NA');
+  assert.deepEqual(m.buscas, [{ bbox: CAIXA_NY, stateId: null }], `a busca da NA não foi pela caixa de lá: ${JSON.stringify(m.buscas)}`);
+  // CONTROLE: a MESMA pessoa buscando na ROW — o servidor sem área — desliga e diz.
+  const c = montar({ profile: PERFIL_ROW_SEM_AREA, regiao: 'row' });
+  c.app.anotarEditaveis(PERFIL_ROW_SEM_AREA, 'row', [], []);
+  c.app.anotarEditaveis(PERFIL_ROW_SEM_AREA, 'na', [235], [{ type: 'drive', bbox: CAIXA_NY }]);
+  await c.app.fetchNextPage();
+  assert.equal(c.AppState.filters.myArea, false, 'CONTROLE: na ROW, sem área, "Minha área" seguiu ligado');
+  assert.ok(c.log.includes('toast:toast.minhaAreaSemCaixa'));
+  // E a área lida é DA CONTA: outra conta não a herda (cai no perfil dela).
+  const o = montar({ profile: { ...PERFIL_ROW_SEM_AREA, id: 2 }, regiao: 'na' });
+  o.app.anotarEditaveis(PERFIL_ROW_SEM_AREA, 'na', [235], [{ type: 'drive', bbox: CAIXA_NY }]);
+  await o.app.fetchNextPage();
+  assert.deepEqual([o.AppState.filters.myArea, o.buscas], [false, [{ bbox: null, stateId: '4' }]],
+    'a caixa lida pra uma conta valeu pra outra');
 });

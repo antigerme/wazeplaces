@@ -151,11 +151,11 @@ const FUNCOES = [
   'aoTrocarOrdenacao', 'redesenharFiltrosComOPerfil', 'referenciaDaOrdem',
   // O caminho do perfil (achados 10 e 11).
   'loadProfileAndAuxData', 'definirPerfil', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil',
-  'redesenharLugarNosFiltros',
+  'refazerFilaReal', 'redesenharLugarNosFiltros',
   // Os editáveis por servidor (R7-6-02), e a peneira com o perfil que chega (R7-6-01).
   'anotarEditaveis', 'editaveisLidos', 'peneirarPaisesComOPerfil',
-  // A lista de países que a carga e os Filtros dividem (R8-6-04).
-  'pedirListaDePaises',
+  // A lista de países que a carga e os Filtros dividem (R8-6-04), guardada por região (R9-6-01).
+  'pedirListaDePaises', 'esquecerListasDePaises',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -214,6 +214,8 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
     editaveisPorServidor: { conta: null, lidos: {} },
     listasDePaisesNoAr: new Map(),
+    // As listas que CHEGARAM, por região (R9-6-01).
+    listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     REGIOES_DO_WAZE: ['row', 'na', 'il'],
     ORDEM_PADRAO: constante('ORDEM_PADRAO'), ORDENS_POR_DISTANCIA: constante('ORDENS_POR_DISTANCIA'),
     GPS_TIMEOUT_MS: 10, TYPES_PADRAO: ['NEW_PLACE'],
@@ -1040,20 +1042,31 @@ function trocarRegioes(p, regioes) {
   });
 }
 
+// Desde o R9-6-01 a lista de cada região é UMA ida por sessão: a volta à NA
+// divide a ida que está no ar, e a lista que já chegou vem da memória. As duas
+// idas à MESMA região que chegavam fora de ordem não existem mais — o que sobra
+// é a lista de OUTRA região chegando depois. Pra a ida à ROW ser uma ida de
+// verdade (no ar), a lista dela não veio na abertura (`semAListaDaAbertura`).
+function semAListaDaAbertura(p) {
+  p.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
+}
+
 test('R56-6: NA → ROW → NA — a lista que chega depois não desfaz o país e a área que a pessoa escolheu', async () => {
   const perfil = { id: 1, editableCountryIDs: [], managedAreas: [{ id: 9001, name: 'Área Chicago' }] };
   const casos = [
-    ['a 1ª ida à NA chega antes', ['na', 'row', 'na'], [0, 1, 2]],
-    ['a última ida à NA chega antes', ['na', 'row', 'na'], [2, 0, 1]],
+    ['a da NA chega antes (a da ROW, depois)', ['na', 'row', 'na'], [0, 1]],
+    ['a da ROW chega antes', ['na', 'row', 'na'], [1, 0]],
     ['CONTROLE: uma ida só à NA', ['na'], [0]],
   ];
   for (const [nome, regioes, ordem] of casos) {
     const p = pagina({ regiao: 'row', pais: 30, perfil });
+    semAListaDaAbertura(p);
     await p.abrir();
     const segurados = segurarPaises(p);
     const trocas = trocarRegioes(p, regioes);
     await tique();
-    assert.deepEqual(segurados.map((x) => x.r), regioes, `${nome}: o instrumento não segurou as listas`);
+    // A volta à NA divide a ida que está no ar (R9-6-01): uma ida por região.
+    assert.deepEqual(segurados.map((x) => x.r), [...new Set(regioes)], `${nome}: o instrumento não segurou as listas (ou a NA saiu duas vezes)`);
     let escolheu = false;
     for (const i of ordem) {
       segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] });
@@ -1078,14 +1091,16 @@ test('R56-6: NA → ROW → NA — a lista que chega depois não desfaz o país 
 
 test('R56-6: a lista da ABERTURA chegando depois de a região ir e VOLTAR não desfaz o país escolhido na lista da troca', async () => {
   // O 1º uso, sem a lista em cache: a abertura pede os países da região aplicada.
-  for (const [nome, ordem] of [['a da troca chega antes', [2, 0, 1]], ['a da abertura chega antes', [0, 2, 1]]]) {
+  // A volta à ROW divide essa ida (R9-6-01): a lista da abertura E a da volta são
+  // a MESMA resposta, e a dona do seletor é a volta.
+  for (const [nome, ordem] of [['a da ROW chega antes', [0, 1]], ['a da NA chega antes', [1, 0]]]) {
     const p = pagina({ regiao: 'row', pais: 30 });
     const segurados = segurarPaises(p);
     const abrindo = p.abrir();
     await tique();
     const trocas = trocarRegioes(p, ['na', 'row']);
     await tique();
-    assert.deepEqual(segurados.map((x) => x.r), ['row', 'na', 'row'], `${nome}: o instrumento não segurou as listas`);
+    assert.deepEqual(segurados.map((x) => x.r), ['row', 'na'], `${nome}: o instrumento não segurou as listas (ou a ROW saiu duas vezes)`);
     let escolheu = false;
     for (const i of ordem) {
       segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] });
@@ -1115,7 +1130,8 @@ test('R56-6: reabrir os Filtros com trocas no ar — a resposta delas não escre
   await escolherPais(p, 73);
   for (const s of segurados) { s.ok({ success: true, countries: LISTAS_R56[s.r] }); await tique(); }
   await Promise.all(trocas);
-  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row'], 'CONTROLE: as duas trocas ficaram no ar');
+  // A da NA ficou no ar; a da ROW veio da memória (R9-6-01).
+  assert.deepEqual(segurados.map((x) => x.r), ['na'], 'CONTROLE: a troca da NA não ficou no ar');
   assert.equal(p.els.filterCountry.value, '73',
     `a troca de antes de fechar escreveu no modal reaberto: "${p.els.filterCountry.mostrado}" no lugar da França`);
   assert.equal(p.els.applyFilters.disabled, false);
@@ -1209,16 +1225,21 @@ test('achado 11, região: com a lista da ABERTURA no ar, o perfil que leva pra O
 
 test('achado 11, região: com uma troca da PESSOA no ar, o perfil não toma o seletor dela — e o "Aplicar" não morre', async () => {
   const p = pagina({ regiao: 'row', pais: 30 });
+  // A lista da abertura não veio: a volta à ROW é uma ida de verdade, no ar
+  // (com ela na memória, a volta não espera nada — R9-6-01).
+  semAListaDaAbertura(p);
   await p.abrir();
   const segurados = segurarPaises(p);
   const trocas = trocarRegioes(p, ['na', 'row']);   // a pessoa foi à NA e voltou: a troca da ROW está no ar
   await tique();
   const indo = p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
   await tique();
-  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row', 'na'], 'o instrumento não segurou as listas');
-  segurados[2].ok({ success: true, countries: LISTAS_R56.na });   // a lista que o perfil pediu
+  // A lista que o perfil pede é a da NA que a troca já pediu: a mesma ida (R9-6-01).
+  assert.deepEqual(segurados.map((x) => x.r), ['na', 'row'], 'o instrumento não segurou as listas (ou a NA saiu duas vezes)');
+  segurados[0].ok({ success: true, countries: LISTAS_R56.na });   // a lista que o perfil pediu
   await indo;
-  for (const i of [0, 1]) { segurados[i].ok({ success: true, countries: LISTAS_R56[segurados[i].r] }); await tique(); }
+  segurados[1].ok({ success: true, countries: LISTAS_R56.row });
+  await tique();
   await Promise.all(trocas);
   assert.equal(p.els.applyFilters.disabled, false,
     'o "Aplicar" ficou morto: o redesenho tomou o seletor da troca que a pessoa deixou no ar, e ela nunca soltou a espera');
@@ -1340,7 +1361,7 @@ function sairNaPagina(p, modo) {
     filtrosDeFabrica: () => ({ types: ['NEW_PLACE', 'NEW_PHOTO'], residential: '', stateId: '', managedAreaId: '',
       myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' }),
   });
-  const { handleLogout } = montar(['handleLogout'], p.deps);
+  const { handleLogout } = montar(['handleLogout', 'esquecerListasDePaises'], p.deps);
   return handleLogout(modo);
 }
 // Uma sessão na NA (os EUA), com a lista da NA (e estados) em memória.
@@ -1433,7 +1454,10 @@ test('R7-6-04: a carga de estados que ainda vinha não escreve por cima do "List
   p.listas.estados = () => new Promise((ok) => { soltarEstados = ok; });
   const velha = p.app.loadStatesIntoSelect(73, 'row');
   p.els.filtersModal.classList.add('hidden');
+  // A lista de países tem de ser pedida de novo na reabertura (a da ROW não
+  // está na memória nem guardada, R9-6-01) — e ela falha.
   p.AppState.countries = [];
+  p.deps.listasDePaisesGuardadas.clear();
   p.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
   await p.abrir();
   soltarEstados({ success: true, states: [{ id: 3, name: 'Normandie' }] });
@@ -1622,9 +1646,12 @@ test('R7-6-01: com OUTRA região na tela (a troca da pessoa), ou com a lista ain
   assert.equal(q.log.listCountries.length, 1, 'o perfil pediu a lista de países de novo');
   // A troca de região DA PESSOA no ar, voltando pra aplicada (NA → ROW): o
   // seletor é dela até a lista chegar (`cargaDePaises`), e o perfil não escreve nele.
+  // A lista da abertura não veio: a volta à ROW é uma ida de verdade, no ar (com
+  // ela na memória, a volta não espera nada — R9-6-01).
   const r = pagina({ perfil: null });
-  r.listas.paises = (rg) => Promise.resolve({ success: true, countries: LISTAS_R66[rg].map((c) => ({ ...c })) });
+  semAListaDaAbertura(r);
   await r.abrir();
+  r.listas.paises = (rg) => Promise.resolve({ success: true, countries: LISTAS_R66[rg].map((c) => ({ ...c })) });
   await trocarRegiao(r, 'na');
   const segurados = segurarPaises(r);
   const volta = trocarRegioes(r, ['row'])[0];
@@ -1636,19 +1663,22 @@ test('R7-6-01: com OUTRA região na tela (a troca da pessoa), ou com a lista ain
   segurados[0].ok({ success: true, countries: LISTAS_R66.row.map((c) => ({ ...c })) });
   await volta;
   assert.deepEqual(telaDoPais(r), { opcoes: '30', pais: '30', dica: true }, 'a lista da volta não passou pela peneira do perfil');
-  // A lista da abertura NÃO carregou (R7-6-04) e a pessoa foi à NA e voltou: o
-  // seletor mostra a lista da volta, que o app não guardou (`AppState.countries`
-  // segue vazio). O perfil não a troca por nada — antes, um seletor vazio.
+  // A lista da abertura NÃO carregou (R7-6-04) e a pessoa foi à NA e voltou: a
+  // lista da volta à região aplicada FICA na memória (R9-6-01) — antes o app não
+  // a guardava, e o perfil que chegava a trocava por nada (um seletor vazio). O
+  // perfil a peneira, como a de qualquer abertura.
   const v = pagina({ perfil: null });
-  v.listas.paises = () => Promise.resolve({ success: false, errorCategory: 'transient' });
+  semAListaDaAbertura(v);
   await v.abrir();
   v.listas.paises = (rg) => Promise.resolve({ success: true, countries: LISTAS_R66[rg].map((c) => ({ ...c })) });
   await trocarRegiao(v, 'na');
   await trocarRegiao(v, 'row');
   const naVolta = telaDoPais(v);
-  assert.deepEqual([naVolta.opcoes, v.AppState.countries.length], ['30,73,181', 0], 'PRÉ-CONDIÇÃO: a volta não mostra a lista sem guardá-la');
+  assert.deepEqual([naVolta.opcoes, v.AppState.countries.length], ['30,73,181', 3],
+    'a lista da volta à região aplicada não ficou na memória (R9-6-01)');
   v.app.definirPerfil({ success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
-  assert.deepEqual(telaDoPais(v), naVolta, `o perfil trocou a lista da tela por ${JSON.stringify(telaDoPais(v))}`);
+  assert.deepEqual(telaDoPais(v), { opcoes: '30', pais: '30', dica: true },
+    `o perfil não peneirou a lista da volta: ${JSON.stringify(telaDoPais(v))}`);
 });
 
 // ═══ R8-6-03 · o 1º perfil que chega pela SONDA do 401 anota os editáveis ═══
@@ -1842,4 +1872,260 @@ test('R8-6-06: com "Minha área" e a área NESTE servidor, nada muda — o país
   await c.app.loadProfileAndAuxData();
   await tique(5);
   assert.deepEqual([c.estado.regiao, c.estado.pais], ['row', 73]);
+});
+
+// ═══ R9-6-03 · a busca que espera o perfil é refeita UMA vez, no lugar certo ═
+// Com "Minha área", a busca da abertura é RECUSADA sem o perfil
+// (`filaEsperaPerfil`). Quando o 1º perfil chega pela SONDA de um 401
+// passageiro, o `handleUnauthorized` começa o `completarPerfilChegado` — que
+// refaz a fila — e chama o `rebuscarDepoisDeFalha` logo atrás: saíam DUAS
+// buscas, e a primeira era jogada fora. Pra quem só edita noutro servidor, ela
+// ia ao servidor errado, e a tela dizia "Tudo limpo! … Confira o país e a
+// região" até o perfil de lá responder (MEDIDO no navegador, auditoria da rodada
+// 9: buscas `row bbox, na bbox`, e as telas FALHA → "Tudo limpo!" aos 1,4 s →
+// card aos 2,9 s). Aqui a sonda, o perfil e a recomposição rodam DE VERDADE
+// (`handleUnauthorized` → `completarPerfilChegado` → `rebuscarDepoisDeFalha`),
+// com a fila no estado da busca recusada e cada busca anotada com a REGIÃO em
+// que sai.
+const CAIXA_SP = [-46.8, -23.7, -46.4, -23.4];
+const CAIXA_NY = [-74.1, 40.6, -73.8, 40.9];
+function paginaDaSondaComAFilaEsperando({ myArea = true, perfis, segurar = [] }) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea } });
+  const soltar = {};
+  p.listas.perfil = (r) => (segurar.includes(r)
+    ? new Promise((ok) => { soltar[r] = () => ok({ success: true, profile: perfis[r] }); })
+    : Promise.resolve({ success: true, profile: perfis[r] || { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] } }));
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  // A fila como a busca recusada a deixa (ver `fetchNextPage`): vazia, com a
+  // tela de falha, sem `hasMore` — e "Minha área" esperando o perfil.
+  Object.assign(p.AppState, { authenticated: true, queue: [], loadError: myArea, hasMore: false, fetching: false });
+  const buscas = [];
+  Object.assign(p.deps, { VERIFICA_SESSAO_MS: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    filaEsperaPerfil: myArea, rebuscasAuto: 0, MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'),
+    esquecerAreaForaDoPerfil: () => false,
+    startFetching: () => buscas.push(p.estado.regiao) });
+  let sonda = null;
+  p.deps.setTimeout = (f) => { sonda = f; return 1; };   // a sonda espera o teste
+  const app = montar([...FUNCOES, 'handleUnauthorized', 'rebuscarDepoisDeFalha', 'caixaDaMinhaArea'], p.deps);
+  return { p, app, buscas, soltar, sonda: () => sonda };
+}
+
+test('R9-6-03: "Minha área" com o 1º perfil pela sonda do 401 — a fila que esperava o perfil é refeita UMA vez', async () => {
+  // A área é deste servidor (os editáveis daqui): o perfil não muda o lugar, e
+  // quem refaz a fila é o `completarPerfilChegado`.
+  const m = paginaDaSondaComAFilaEsperando({ perfis: {
+    row: { id: 1, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_SP }], managedAreas: [] } } });
+  const conferindo = m.app.handleUnauthorized();
+  assert.ok(m.sonda(), 'PRÉ-CONDIÇÃO: o 401 não armou a sonda do alarme falso');
+  m.sonda()();
+  await conferindo;
+  await tique(10);
+  assert.equal(m.p.AppState.profile && m.p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: a sonda não trouxe o perfil');
+  assert.equal(m.p.AppState.filters.myArea, true, 'PRÉ-CONDIÇÃO: "Minha área" foi desligado');
+  assert.deepEqual(m.buscas, ['row'], `a fila que esperava o perfil saiu ${m.buscas.length} vezes (${m.buscas}) — uma delas jogada fora`);
+  assert.equal(m.p.log.buscas, 1, 'a fila não foi refeita pelo perfil que chegou');
+  // CONTROLE: sem "Minha área" (a fila não esperava o perfil), a recomposição
+  // do alarme falso busca de novo a fila que FALHOU — o instrumento enxerga a
+  // busca dela.
+  const c = paginaDaSondaComAFilaEsperando({ myArea: false, perfis: {
+    row: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [] } } });
+  c.p.AppState.loadError = true;
+  const conferindoC = c.app.handleUnauthorized();
+  c.sonda()();
+  await conferindoC;
+  await tique(10);
+  assert.deepEqual(c.buscas, ['row'], `CONTROLE: a recomposição do alarme falso não buscou a fila que falhou (${c.buscas})`);
+  // E com a fila esperando o perfil SEM ele ter chegado (a renovação pela
+  // extensão, que zera o perfil), a recomposição segue: é o `startFetching`
+  // que pede o perfil e o espera — sair cedo ali deixava a falha na tela.
+  const s = paginaDaSondaComAFilaEsperando({ perfis: {} });
+  s.p.AppState.profile = null;
+  s.app.rebuscarDepoisDeFalha();
+  assert.deepEqual(s.buscas, ['row'], 'sem o perfil, a recomposição da fila que o espera não saiu (ninguém o pede)');
+});
+
+test('R9-6-03: quem só edita noutro servidor — nenhuma busca sai no servidor errado enquanto o perfil de lá não responde', async () => {
+  const m = paginaDaSondaComAFilaEsperando({ segurar: ['na'], perfis: {
+    row: { id: 1, editableCountryIDs: [], areas: [{ type: 'drive', bbox: CAIXA_NY }], managedAreas: [] },
+    na: { id: 1, editableCountryIDs: [235], areas: [{ type: 'drive', bbox: CAIXA_NY }], managedAreas: [] } } });
+  const conferindo = m.app.handleUnauthorized();
+  m.sonda()();
+  await conferindo;
+  await tique(10);
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: o perfil da NA não foi perguntado (ou não ficou seguro)');
+  assert.deepEqual(m.buscas, [], `com o perfil da NA ainda vindo, a fila saiu em ${m.buscas} — o "Tudo limpo!" do servidor errado`);
+  m.soltar.na();
+  await tique(10);
+  if (m.soltar.il) { m.soltar.il(); await tique(10); }
+  assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pro servidor da área');
+  assert.deepEqual(m.buscas, ['na'], `a fila saiu em ${m.buscas} — a busca no servidor errado, antes da certa`);
+});
+
+// ═══ R9-6-04 · as ÁREAS do perfil são POR SERVIDOR, como os editáveis ═══════
+// MEDIDO no Waze real (o `/Session` das duas contas do owner nos três
+// servidores): 8 e 1 áreas na ROW, 0 na NA e na IL — como o
+// `editableCountryIDs`. O R8-6-06 decidia "sem área" com o perfil da ROW ANTES
+// de perguntar os outros servidores: quem só edita na NA chegava na ROW com 0
+// áreas, e "Minha área" era desligado com a frase falsa "Seu perfil do Waze não
+// tem área de edição", seguida de "Mostrando a fila de United States" (MEDIDO no
+// navegador, auditoria da rodada 9). Aqui a carga do perfil roda DE VERDADE
+// (`loadProfileAndAuxData` → `completarPerfilChegado` → `paisDoPerfil` →
+// `irProPaisDoPerfil`), com o perfil de cada servidor trazendo SÓ as áreas
+// dele, e a caixa da busca lida como a busca a lê (`caixaDaMinhaAreaEm`).
+function paginaComAreasPorServidor({ myArea = true, areasNa = [{ type: 'drive', bbox: CAIXA_NY }], areasRow = [] } = {}) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { myArea } });
+  const perfis = {
+    row: { id: 1, editableCountryIDs: [], areas: areasRow, managedAreas: [] },
+    na: { id: 1, editableCountryIDs: [235], areas: areasNa, managedAreas: [] },
+    il: { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] },
+  };
+  p.listas.perfil = (r) => Promise.resolve({ success: true, profile: { ...perfis[r] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  // A área gerenciada salva não entra: a fila só é refeita pelo lugar.
+  p.deps.esquecerAreaForaDoPerfil = () => false;
+  const app = montar([...FUNCOES, 'caixaDaMinhaArea', 'caixaDaMinhaAreaEm', 'desligarMinhaAreaSemCaixa'], p.deps);
+  return { p, app };
+}
+
+test('R9-6-04: quem só edita na NA, com "Minha área" e a ROW sem áreas — vai pra NA com a caixa da área de LÁ, sem a frase falsa', async () => {
+  const { p, app } = paginaComAreasPorServidor();
+  await app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], `PRÉ-CONDIÇÃO: o perfil não foi perguntado na NA (${p.log.getProfile})`);
+  assert.equal(p.AppState.filters.myArea, true, `"Minha área" foi desligado com a área na NA: ${p.log.toasts}`);
+  assert.ok(!p.log.toasts.some((x) => x.includes('toast.minhaAreaSemCaixa')),
+    `o app disse "Seu perfil do Waze não tem área de edição" a quem tem área na NA: ${p.log.toasts}`);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], `"Minha área" ficou em ${p.estado.regiao}/${p.estado.pais}`);
+  assert.ok(!p.log.toasts.some((x) => x.includes('toast.paisDoPerfil')),
+    `o aviso "Mostrando a fila de {país}" saiu com "Minha área", que segue mostrando a fila da área: ${p.log.toasts}`);
+  assert.deepEqual(app.caixaDaMinhaAreaEm(), CAIXA_NY, 'a busca da NA não vai pela caixa da área de lá');
+  assert.equal(p.log.buscas, 1, 'a fila não foi refeita no servidor da área');
+  // CONTROLE: o perfil que o app guardou é o da ROW, sem caixa nenhuma — é
+  // dele que a decisão saía.
+  assert.equal(app.caixaDaMinhaArea(p.AppState.profile), null, 'CONTROLE: o perfil da ROW tem caixa (o caso não é o do relato)');
+  assert.deepEqual(app.caixaDaMinhaAreaEm('row'), null, 'CONTROLE: a caixa lida na ROW não é "nenhuma"');
+});
+
+test('R9-6-04: sem área TAMBÉM no servidor de destino, aí sim "Minha área" desliga e diz — e a fila é a do país, com o aviso dele', async () => {
+  const { p, app } = paginaComAreasPorServidor({ areasNa: [] });
+  await app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual(p.log.getProfile, ['row', 'na'], 'PRÉ-CONDIÇÃO: o perfil não foi perguntado na NA');
+  assert.equal(p.AppState.filters.myArea, false, '"Minha área" ficou ligado sem área em servidor nenhum: o filtro mente');
+  assert.equal(p.log.toasts.filter((x) => x.includes('toast.minhaAreaSemCaixa')).length, 1, `o desligar não foi dito (uma vez): ${p.log.toasts}`);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'a pessoa não foi pro país onde edita');
+  assert.ok(p.log.toasts.some((x) => x.includes('toast.paisDoPerfil')), `a fila do país saiu sem o aviso dele: ${p.log.toasts}`);
+  assert.equal(p.log.buscas, 1);
+  // CONTROLE: com a área NESTE servidor (editáveis daqui), a decisão é a de
+  // sempre — e sem caixa aqui, desliga já, sem perguntar ninguém.
+  const c = paginaComAreasPorServidor();
+  c.p.listas.perfil = () => Promise.resolve({ success: true, profile: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [] } });
+  await c.app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual([c.p.log.getProfile, c.p.AppState.filters.myArea], [['row'], false], 'CONTROLE: o perfil com a área aqui e sem caixa não desligou "Minha área"');
+});
+
+// ═══ R9-6-01 · a lista de países que CHEGOU não sai de novo ════════════════
+// O R8-6-04 dividia só a ida NO AR. A lista que já tinha chegado saía de novo
+// em quatro caminhos — o perfil refeito depois de falhar na abertura, a troca de
+// região no modal (a ida e a volta, e a lista dela que o "Aplicar" jogava fora),
+// a ida pro país do perfil e a renovação pela extensão —, cada um um pedido ao
+// `/api` (o free tier) e uma ida ao Waze pela MESMA lista (MEDIDO no navegador,
+// auditoria da rodada 9: a ROW 1 → 2 no perfil refeito e na ida e volta, a NA
+// 1 → 2 no "Aplicar" + reabrir, e 1 → 2 na renovação). Agora a lista que chega
+// fica guardada por região (`pedirListaDePaises`) até o "Sair" ou outra conta
+// entrar (`esquecerListasDePaises`). Aqui a carga, a troca, o "Aplicar", a ida
+// pro país do perfil e o "Sair" rodam DE VERDADE, contando os `lista-paises`.
+const contarListas = (p, r) => p.log.listCountries.filter((x) => x === r).length;
+
+test('R9-6-01: o perfil refeito depois de falhar na abertura não pede de novo a lista que já está na memória', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  let n = 0;
+  p.listas.perfil = () => Promise.resolve(n++ === 0 ? { success: false, errorCategory: 'transient' }
+    : { success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  p.listas.paises = () => Promise.resolve({ success: true, countries: BR_FR.map((c) => ({ ...c })) });
+  await p.app.loadProfileAndAuxData();               // o perfil falha; a lista chega
+  assert.equal(p.AppState.profile, null, 'PRÉ-CONDIÇÃO: o perfil não falhou');
+  assert.deepEqual(p.AppState.countries.map((c) => c.id), [30, 73], 'PRÉ-CONDIÇÃO: a lista não ficou na memória');
+  await p.app.loadProfileAndAuxData();               // o `refazerPerfilSeFaltar`
+  await tique(5);
+  assert.equal(p.AppState.profile && p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: o perfil refeito não chegou');
+  assert.equal(contarListas(p, 'row'), 1, `o perfil refeito pediu a lista da ROW de novo (${p.log.listCountries})`);
+  // CONTROLE: com a lista da abertura FALHANDO, o perfil refeito a pede de novo.
+  const c = pagina({ regiao: 'row', pais: 30 });
+  let k = 0;
+  c.listas.perfil = () => Promise.resolve(k++ === 0 ? { success: false, errorCategory: 'transient' }
+    : { success: true, profile: { id: 1, editableCountryIDs: [30], managedAreas: [] } });
+  let m = 0;
+  c.listas.paises = () => Promise.resolve(m++ === 0 ? { success: false, errorCategory: 'transient' } : { success: true, countries: BR_FR.map((x) => ({ ...x })) });
+  await c.app.loadProfileAndAuxData();
+  await c.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.equal(contarListas(c, 'row'), 2, 'CONTROLE: a lista que falhou não foi pedida de novo');
+});
+
+test('R9-6-01: a ida e a volta de região no modal não pedem de novo a lista que já chegou', async () => {
+  const p = paginaR66();
+  await p.abrir();
+  await trocarRegiao(p, 'na');
+  await trocarRegiao(p, 'row');
+  await trocarRegiao(p, 'na');
+  assert.deepEqual([contarListas(p, 'row'), contarListas(p, 'na')], [1, 1],
+    `a ida e a volta pediram de novo a lista que estava na memória: ${p.log.listCountries}`);
+  // E a tela é a de cada região, como antes (CONTROLE de que a lista guardada é a certa).
+  assert.deepEqual(telaDoPais(p), { opcoes: '235,40', pais: '235', dica: false });
+  await trocarRegiao(p, 'row');
+  assert.deepEqual(telaDoPais(p), { opcoes: '30', pais: '30', dica: true });
+});
+
+test('R9-6-01: o "Aplicar" de outra região fica com a lista que a troca trouxe — e os Filtros reabertos não a pedem de novo', async () => {
+  const p = paginaR66();
+  await p.abrir();
+  await trocarRegiao(p, 'na');
+  await escolherPais(p, 235);
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o "Aplicar" não gravou a NA/EUA');
+  assert.deepEqual(p.AppState.countries.map((c) => c.id), [235, 40],
+    'o "Aplicar" jogou fora a lista que a troca trouxe (a memória da região aplicada ficou vazia)');
+  await p.abrir();
+  assert.equal(contarListas(p, 'na'), 1, `os Filtros reabertos pediram a lista da NA de novo: ${p.log.listCountries}`);
+  assert.equal(p.els.filterCountry.value, '235');
+});
+
+test('R9-6-01: a ida pro país do perfil usa a lista da região que já chegou', async () => {
+  const p = paginaR66();
+  await p.abrir();
+  await trocarRegiao(p, 'na');                       // a pessoa olhou a NA no modal…
+  p.els.filtersModal.classList.add('hidden');        // …e fechou sem aplicar
+  await p.app.irProPaisDoPerfil({ regiao: 'na', pais: 235 });
+  await tique();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou pra NA/EUA');
+  assert.equal(contarListas(p, 'na'), 1, `a ida pro país do perfil pediu de novo a lista da NA: ${p.log.listCountries}`);
+  assert.deepEqual(p.AppState.countries.map((c) => c.id), [235, 40], 'a lista da NA não virou a da região aplicada');
+});
+
+test('R9-6-01: a lista vale até o "Sair" ou outra conta — a queda da sessão não a apaga, e a ida esquecida no ar não volta', async () => {
+  const p = pagina({ regiao: 'row', pais: 30 });
+  await p.abrir();
+  assert.equal(contarListas(p, 'row'), 1, 'PRÉ-CONDIÇÃO: a abertura não pediu a lista');
+  // A queda (a época sobe; a renovação pela extensão é da mesma pessoa).
+  p.deps.epocaDaSessao++;
+  p.AppState.countries = [];
+  await p.app.pedirListaDePaises('row');
+  assert.equal(contarListas(p, 'row'), 1, `a renovação da sessão pediu de novo a lista que já tinha chegado: ${p.log.listCountries}`);
+  // O "Sair" esquece: quem entra pede a lista de novo.
+  await sairNaPagina(p);
+  await p.abrir();
+  assert.equal(contarListas(p, 'row'), 2, 'depois do "Sair", a lista de quem saiu serviu a quem entrou');
+  // A troca de conta esquece no meio de uma ida: a resposta dela não guarda nada.
+  let soltar;
+  p.listas.paises = () => new Promise((ok) => { soltar = ok; });
+  const ida = p.app.pedirListaDePaises('na');
+  await tique();
+  p.app.esquecerListasDePaises();                    // outra conta entrou (`esquecerOutraConta`)
+  soltar({ success: true, countries: LISTA_NA.map((c) => ({ ...c })) });
+  await ida;
+  p.listas.paises = null;
+  await p.app.pedirListaDePaises('na');
+  assert.equal(contarListas(p, 'na'), 2, 'a lista que estava no ar quando a troca de conta a esqueceu ficou guardada');
 });

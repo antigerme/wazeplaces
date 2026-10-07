@@ -47,7 +47,9 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
   const AppState = { profile: perfil, stats: { read: 3, rejected: 5, skipped: 0 }, history: {}, conquistas: {}, authenticated: true };
   const deps = {
     safeLS, AppState,
-    API: { getSession: () => sessao.token, get sessionToken() { return sessao.token; }, getRegion: () => 'row' },
+    API: { getSession: () => sessao.token, get sessionToken() { return sessao.token; }, getRegion: () => 'row',
+      // O anel de chamadas da página, só os metadados (os corpos o `dlogApagar` tira).
+      chamadas: [{ rota: 'perfil', http: 200 }, { rota: 'buscar-places', http: 200, n: 3 }, { rota: 'validar-place', http: 200 }] },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     dfato: (k) => log.push('dfato:' + k),
@@ -65,6 +67,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     esquecerRegistrosDaPagina: () => log.push('recursos'),   // a lista de recursos e a marca do anel (R8-1-05, L12-1)
     esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
+    esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
@@ -111,12 +114,15 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   const fila = m.app.carregarFilaDeSaida();
   assert.deepEqual(fila.map((x) => x.venueID), ['v2'], 'a decisão de A ficou pra sair no nome de B');
   for (const o of ['autores', 'foco', 'chat', 'offline', 'dlog', 'dfato:conta.trocou', 'camadas', 'toast:toast.outraConta',
-    'recursos', 'painel']) {
+    'recursos', 'painel', 'paises']) {
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
   assert.deepEqual(m.AppState.stats, { read: 0, rejected: 0, skipped: 0 }, 'o placar de A ficou pra B');
   assert.equal(JSON.parse(m.guardado.get('waze_places_conta')).id, 'B');
+  // O anel de chamadas de A — a rota, o status e o `n` da fila de cada pedido dela
+  // — ia no relatório e na cópia guardada de B; o "Sair" o zera (R9-1-04 = R9-4-09).
+  assert.equal(m.deps.API.chamadas.length, 0, 'as chamadas da conta anterior ficaram no anel de quem entrou');
   // Controle: a MESMA conta voltando (a sessão caiu e ela entrou de novo) não perde nada.
   const c = montar({ perfil: { id: 'A' }, token: 'tok-A' });
   c.app.aoConhecerConta({ id: 'A' });
@@ -124,10 +130,12 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   c.sessao.token = 'tok-A2';
   c.app.aoConhecerConta({ id: 'A' });
   assert.equal(c.app.carregarFilaDeSaida().length, 1, 'a mesma conta perdeu a fila de saída');
+  assert.equal(c.deps.API.chamadas.length, 3, 'a MESMA conta voltando perdeu o anel de chamadas (é dela)');
   assert.ok(!c.log.includes('autores') && !c.log.includes('foco') && !c.log.includes('dfato:conta.trocou'));
   assert.ok(!c.log.includes('camadas'), 'a MESMA conta voltando fechou o que ela tinha aberto (é dela)');
   assert.ok(!c.log.includes('recursos') && !c.log.includes('painel'),
     'a MESMA conta voltando perdeu a lista de recursos (o relatório dela) ou o painel do Histórico (é dela)');
+  assert.ok(!c.log.includes('paises'), 'a MESMA conta voltando pede de novo as listas de países que já tinha (R9-6-01)');
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {
@@ -343,6 +351,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
     fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     esquecerRegistrosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
+    esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];

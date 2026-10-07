@@ -247,6 +247,8 @@ test('a abertura guarda só o que NÃO foi entregue: capturas não baixadas, e o
     dlogJaBaixados: baixados,
     diagChamadaSemCorpo: new Function(fatiar('diagChamadaSemCorpo') + '\nreturn diagChamadaSemCorpo;')(),
     diagBaixadoEm: 0,
+    // O que OUTRA aba entregou (R9-4-10) tem teste próprio, mais abaixo: aqui, nada.
+    diagAplicarEntregues: () => false,
   };
   const montar = (baixadoEm) => new Function(...Object.keys(ctx),
     fatiar('diagRegistroDaAbertura') + '\nreturn diagRegistroDaAbertura;')(...Object.values({ ...ctx, diagBaixadoEm: baixadoEm }));
@@ -363,6 +365,8 @@ test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip 
     setTimeout: () => 0, t: (k) => k, APP_VERSION: '2026092601', CompressionStream: function () {},
     showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
     atualizarFabDev: () => {}, diagEsquecerEntregue: () => apagados.push(agora),
+    // O aviso às outras abas (R9-4-10) tem teste próprio, mais abaixo.
+    diagAvisarEntregues: () => true, diagAplicarEntregues: () => false,
     Date: class extends Date { static now() { return agora; } },
     // O relatório: o retrato é tirado AGORA (R), com a captura que existe.
     diagCorpo: async () => {
@@ -763,14 +767,14 @@ test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, n�
 
 test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem criar a base', async () => {
   const montar = ({ ligado = false, bases = [], semDatabases = false }) => {
-    const esquecido = [], fatos = [], retratos = [];
+    const esquecido = [], fatos = [], retratos = [], entregas = [];
     const indexedDB = semDatabases ? {} : { databases: async () => bases.map((name) => ({ name })) };
     const deps = { indexedDB, DIAG_DB: 'waze_places_diag', dlogLigado: () => ligado,
       dfato: (k) => fatos.push(k), diagEsquecerGuardado: async () => { esquecido.push(1); return true; },
-      diagEsquecerRetratos: (lidos) => retratos.push(lidos) };
+      diagEsquecerRetratos: (lidos) => retratos.push(lidos), diagEsquecerEntregas: () => entregas.push(1) };
     const chaves = Object.keys(deps);
     const f = new Function(...chaves, fatiar('diagFaxinaSemModoDev') + '\nreturn diagFaxinaSemModoDev;')(...chaves.map((k) => deps[k]));
-    return { f, esquecido, fatos, retratos };
+    return { f, esquecido, fatos, retratos, entregas };
   };
   const sobra = montar({ bases: ['waze_places_diag', 'waze_places_offline'] });
   assert.equal(await sobra.f(), true);
@@ -778,6 +782,8 @@ test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem 
   assert.deepEqual(sobra.fatos, ['diag.sobraApagada']);
   // O retrato do fechar (no localStorage) sai também — TODOS, sem lista.
   assert.deepEqual(sobra.retratos, [undefined], 'o retrato do fechar ficou no aparelho com o modo dev desligado');
+  // E o aviso do que um download entregou (R9-4-10), também do localStorage.
+  assert.equal(sobra.entregas.length, 1, 'o aviso das entregas do download ficou no aparelho com o modo dev desligado');
   const nada = montar({ bases: ['waze_places_offline'] });
   await nada.f();
   assert.equal(nada.esquecido.length, 0, 'sem a base, a faxina não tem o que fazer (e não pode criar nada)');
@@ -785,6 +791,7 @@ test('D2: com o modo dev DESLIGADO, a sobra no aparelho sai na abertura — sem 
   await ligado.f();
   assert.equal(ligado.esquecido.length, 0, 'com o modo dev LIGADO a faxina apagou o guardado — quem cuida ali é a poda de 24 h');
   assert.deepEqual(ligado.retratos, [], 'com o modo dev LIGADO a faxina apagou o retrato do fechar — ele é da abertura seguinte');
+  assert.deepEqual(ligado.entregas, [], 'com o modo dev LIGADO a faxina apagou o aviso das entregas — a outra aba ainda o confere');
   const cego = montar({ semDatabases: true });
   await cego.f();
   assert.equal(cego.esquecido.length, 1, 'sem `databases()` o apagar (que não cria nada) tem que acontecer às cegas');
@@ -817,6 +824,7 @@ function armazenamento(inicial = {}) {
   };
 }
 const DIAG_RETRATO_KEY = constante('DIAG_RETRATO_KEY');
+const DIAG_ENTREGUE_KEY = constante('DIAG_ENTREGUE_KEY');
 const DIAG_RETRATO_TETO = constante('DIAG_RETRATO_TETO');
 const compacto = new Function(fatiar('diagRetratoCompacto') + '\nreturn diagRetratoCompacto;')();
 const juntarRetrato = new Function(fatiar('diagJuntarRetrato') + '\nreturn diagJuntarRetrato;')();
@@ -942,11 +950,12 @@ function baseNaMemoria(registros = [], { segurarAbertura = null } = {}) {
 function carregador({ ls, base, ligado = () => true, navigator = {} }) {
   const deps = { localStorage: ls, indexedDB: base.indexedDB, dlogLigado: ligado, dfato: () => {}, atualizarFabDev: () => {},
     DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200,
-    DIAG_RETRATO_KEY, DIAG_ABERTURA_TRAVA: /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1], navigator, ...DIAG };
+    DIAG_RETRATO_KEY, DIAG_ENTREGUE_KEY, DIAG_ABERTURA_TRAVA: /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1], navigator, ...DIAG };
   const chaves = Object.keys(deps);
   return new Function(...chaves, `let diagAberturasAnteriores = [], diagEpoca = 0, diagOutrasVivasAoAbrir = null;
     ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagPodarAberturas', 'diagMomentosAnteriores',
-       'diagLerRetratos', 'diagEsquecerRetratos', 'diagJuntarRetrato', 'diagAberturasVivas', 'diagCarregarAberturas'].map(fatiar).join('\n')}
+       'diagLerRetratos', 'diagEsquecerRetratos', 'diagJuntarRetrato', 'diagAberturasVivas', 'diagLerEntregas', 'diagPodarEntregas',
+       'diagCarregarAberturas'].map(fatiar).join('\n')}
     return { carregar: diagCarregarAberturas, anteriores: () => diagAberturasAnteriores, apagar: () => { diagEpoca++; },
              vivasAoAbrir: () => diagOutrasVivasAoAbrir };`)(
     ...chaves.map((k) => deps[k]));
@@ -1135,6 +1144,8 @@ function abaDoDiag({ base, anteriores = [], minhas = [], ligadoLa = true }) {
   const AppState = { devMode: { unlocked: true, active: true }, preferences: { undoEnabled: true } };
   const deps = {
     indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS,
+    // O aviso do que outra aba entregou (R9-4-10) mora no localStorage: aqui, vazio.
+    localStorage: armazenamento(), DIAG_ENTREGUE_KEY,
     DIAG_ABERTURA: { id: ID_ESTA, inicio: AGORA - HORA }, AppState, API: { chamadas: [] },
     dlogLigado: () => AppState.devMode.active, modoDevDesligadoNoArmazenamento: () => !ligadoLa,
     atualizarFabDev: () => {}, dfato: () => {},
@@ -1151,6 +1162,7 @@ function abaDoDiag({ base, anteriores = [], minhas = [], ligadoLa = true }) {
     const dlogJaBaixados = new WeakSet();
     ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagMomentosAnteriores', 'diagCapturasAnterioresDoEditor',
        'dlogCapturasDoEditor', 'dlogNaoBaixados', 'dlogMarcarBaixados', 'diagChamadaSemCorpo', 'diagRegistroDaAbertura',
+       'diagMarcaDoMomento', 'diagLerEntregas', 'diagAplicarEntregues',
        'diagAtualizarAnteriores', 'diagEsquecerEntregue'].map(fatiar).join('\n')}
     const ouvinte = ${ouvinteDoInterruptor()};
     return { ouvinte, diagAtualizarAnteriores, diagEsquecerEntregue, dlogNaoBaixados, dlogMarcarBaixados,
@@ -1257,4 +1269,206 @@ test('R6-4-5: o relatório relê o aparelho ANTES do retrato, e o download apaga
   assert.match(corpo, /^\s+const aberturasNoArquivo = diagAberturasAnteriores;$/m);
   assert.match(corpo, /aberturas: aberturasNoArquivo\.map\(\(a\) => \(\{ id: a\.id, salvoEm: a\.salvoEm \}\)\)/,
     'o download não sabe QUAIS versões foram no arquivo');
+});
+
+// ── R9-4-10 (auditoria da rodada 9): o que a OUTRA aba baixou ──────────────────
+// A aba B registra 2 telas e vai pro fundo (grava na base); a A baixa o relatório,
+// que leva as 2 de B, e apaga da base a versão que foi. B não ficava sabendo: as
+// telas seguiam "não baixadas" na memória dela, VOLTAVAM pra base quando ela ia
+// pro fundo de novo e saíam de novo no próximo relatório de A — e o aviso do
+// desligar, em B, pedia o 2º toque por "2 não baixados" que já tinham ido (MEDIDO
+// no navegador, n13). Aqui duas abas de verdade (as funções do app.js) dividem UMA
+// base e UM localStorage, e o aviso `storage` é entregue como o navegador o
+// entrega: às OUTRAS abas, quando o teste manda (`entregar`). O download é o
+// `baixarDiagnostico` de verdade; só o relatório (`diagCorpo`) é de mentira, com a
+// MESMA composição do `entregue` que o teste de cima amarra no de verdade.
+function aparelhoDeDuasAbas() {
+  const { indexedDB, loja } = baseClonada([]);
+  const ls = armazenamento();
+  const avisos = [];
+  const abas = [];
+  const relogio = { agora: AGORA };
+  return { indexedDB, loja, ls, avisos, abas, relogio,
+    // O navegador entrega o `storage` às OUTRAS abas — nunca à que escreveu.
+    entregar() { for (const av of avisos.splice(0)) for (const a of abas) if (a.id !== av.de) for (const fn of a.ouvintes.storage) fn(av); } };
+}
+function abaDoAparelho(ap, id, { minhas = [], diario = [] } = {}) {
+  const ouvintes = { storage: [], pagehide: [], visibilitychange: [] };
+  const localStorage = {
+    get length() { return ap.ls.length; }, key: (i) => ap.ls.key(i), getItem: (k) => ap.ls.getItem(k),
+    setItem: (k, v) => { ap.ls.setItem(k, v); ap.avisos.push({ de: id, key: k, newValue: String(v) }); },
+    removeItem: (k) => { ap.ls.removeItem(k); ap.avisos.push({ de: id, key: k, newValue: null }); },
+  };
+  const document = {
+    visibilityState: 'visible',
+    addEventListener: (tipo, fn) => { (ouvintes[tipo] ||= []).push(fn); },
+    getElementById: () => null, createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} },
+  };
+  const deps = {
+    indexedDB: ap.indexedDB, localStorage, document,
+    window: { addEventListener: (tipo, fn) => { (ouvintes[tipo] ||= []).push(fn); } },
+    DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, ...DIAG,
+    DIAG_ABERTURA: { id, inicio: AGORA - HORA }, DIAG_ENTREGUE_KEY, DIAG_ENTREGAS_MAX: constante('DIAG_ENTREGAS_MAX'),
+    AppState: { devMode: { unlocked: true, active: true } }, API: { chamadas: [] },
+    dlogLigado: () => true, modoDevDesligadoNoArmazenamento: () => false, diagSegurarAbertura: () => {},
+    dfato: () => {}, atualizarFabDev: () => {}, SAIDA_KEY: 'waze_places_saida', anotarDecididosPorOutraAba: () => {},
+    diagRetratoAoSair: () => {},
+    Date: class extends Date { static now() { return ap.relogio.agora; } },
+    setTimeout: (fn, ms) => { const h = setTimeout(fn, ms); if (h && h.unref) h.unref(); return h; }, clearTimeout,
+    URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} }, Blob: class { constructor(p) { this.p = p; } },
+    CompressionStream: function () {}, zipar: async () => new Uint8Array(4), t: (k) => k, APP_VERSION: '2026100601',
+    showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, `
+    let diagAberturasAnteriores = [], diagEpoca = 0, diagGuardando = Promise.resolve(), diagBaixadoEm = 0;
+    let dlogMomentos = arguments[arguments.length - 2], dfatoAnel = arguments[arguments.length - 1], dlogAnel = [], diagErros = [];
+    const dlogJaBaixados = new WeakSet();
+    let ultimoCorpo = null;
+    ${['diagDB', 'diagLerGuardado', 'diagAplicarPoda', 'diagPodarAberturas', 'diagMomentosAnteriores',
+       'diagCapturasAnterioresDoEditor', 'dlogCapturasDoEditor', 'dlogNaoBaixados', 'dlogMarcarBaixados', 'diagChamadaSemCorpo',
+       'diagRegistroDaAbertura', 'diagMarcaDoMomento', 'diagLerEntregas', 'diagAvisarEntregues', 'diagAplicarEntregues',
+       'diagAtualizarAnteriores', 'diagEsquecerEntregue', 'diagGuardarAbertura', 'baixarDiagnostico',
+       'setupGuardaDoDiagnostico'].map(fatiar).join('\n')}
+    async function diagCorpo() {
+      await diagAtualizarAnteriores().catch(() => false);
+      const retratoEm = Date.now();
+      const momentosNoArquivo = [...dlogMomentos];
+      const aberturasNoArquivo = diagAberturasAnteriores;
+      const corpo = { momentos: momentosNoArquivo, aberturasAnteriores: aberturasNoArquivo };
+      Object.defineProperty(corpo, 'entregue', { value: { em: retratoEm,
+        momentos: [...momentosNoArquivo, ...diagMomentosAnteriores(aberturasNoArquivo)],
+        aberturas: aberturasNoArquivo.map((a) => ({ id: a.id, salvoEm: a.salvoEm })) } });
+      ultimoCorpo = corpo;
+      return corpo;
+    }
+    setupGuardaDoDiagnostico();
+    return { baixar: baixarDiagnostico, naoBaixados: dlogNaoBaixados, minhas: () => dlogMomentos, atualizar: diagAtualizarAnteriores,
+      anotar: (e) => dfatoAnel.push(e), corpo: () => ultimoCorpo, guardando: () => diagGuardando };`);
+  const fns = app(...chaves.map((k) => deps[k]), minhas, diario);
+  // Ir pro fundo: o `visibilitychange` de verdade, com a página escondida — e a gravação esperada pelo FIM.
+  const fundo = async () => { document.visibilityState = 'hidden'; for (const fn of ouvintes.visibilitychange) fn();
+    await fns.guardando(); document.visibilityState = 'visible'; };
+  const baixar = async () => { await fns.baixar(); await fns.guardando(); };
+  const aba = { id, ouvintes, ...fns, fundo, baixar };
+  ap.abas.push(aba);
+  return aba;
+}
+const capEm = (ms, motivo = 'manual') => ({ t: new Date(AGORA + ms).toISOString(), motivo, dom: '<html></html>' });
+const daAbaNaBase = (ap, id) => {
+  const r = ap.loja.get(id);
+  return r ? { telas: (r.momentos || []).filter((m) => m.motivo === 'manual').map((m) => m.t), diario: (r.diario || []).map((e) => e.k) } : null;
+};
+
+test('R9-4-10: as telas da OUTRA aba que foram no relatório baixado aqui contam como entregues lá — não voltam pra base nem pro próximo relatório', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = abaDoAparelho(ap, 'aba-A');
+  const b1 = capEm(-3000), b2 = capEm(-2000);
+  const B = abaDoAparelho(ap, 'aba-B', { minhas: [b1, b2], diario: [{ t: AGORA - 4000, k: 'b.antes' }] });
+  // B registrou 2 telas e vai pro fundo: a base fica com elas.
+  ap.relogio.agora = AGORA + 100;
+  await B.fundo();
+  assert.deepEqual(daAbaNaBase(ap, 'aba-B'), { telas: [b1.t, b2.t], diario: ['b.antes'] }, 'PRÉ-CONDIÇÃO: as 2 telas de B não estão na base');
+  assert.equal(B.naoBaixados(), 2, 'PRÉ-CONDIÇÃO');
+  // A baixa o relatório: ele leva as 2 de B.
+  ap.relogio.agora = AGORA + 200;
+  await A.baixar();
+  const deB = (corpo) => (corpo.aberturasAnteriores.find((a) => a.id === 'aba-B') || { momentos: [] }).momentos.map((m) => m.t);
+  assert.deepEqual(deB(A.corpo()), [b1.t, b2.t], 'PRÉ-CONDIÇÃO: o relatório de A não levou as telas de B');
+  // O navegador entrega o aviso a B.
+  ap.entregar();
+  assert.equal(B.naoBaixados(), 0, 'B segue contando como NÃO baixadas as telas que foram no relatório de A (o desligar pede o 2º toque à toa)');
+  // B registra outra tela DEPOIS do download e vai pro fundo de novo.
+  ap.relogio.agora = AGORA + 300;
+  const b3 = capEm(300);
+  B.minhas().push(b3);
+  B.anotar({ t: AGORA + 300, k: 'b.depois' });
+  assert.equal(B.naoBaixados(), 1, 'CONTROLE: a tela feita DEPOIS do download não foi entregue — e contou como se fosse');
+  ap.relogio.agora = AGORA + 400;
+  await B.fundo();
+  assert.deepEqual(daAbaNaBase(ap, 'aba-B'), { telas: [b3.t], diario: ['b.depois'] },
+    'B devolveu à base o que já foi no relatório de A (as telas, ou o diário até a versão entregue)');
+  // E o próximo relatório de A leva só o que é novo.
+  ap.relogio.agora = AGORA + 500;
+  await A.baixar();
+  assert.deepEqual(deB(A.corpo()), [b3.t], 'o SEGUNDO relatório de A levou de novo as telas de B que já tinham ido no primeiro');
+});
+
+test('R9-4-10: o aviso que NÃO chega (a aba congelada no fundo) não devolve nada à base — a gravação confere o que foi entregue', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = abaDoAparelho(ap, 'aba-A');
+  const b1 = capEm(-3000), b2 = capEm(-2000);
+  const B = abaDoAparelho(ap, 'aba-B', { minhas: [b1, b2], diario: [{ t: AGORA - 4000, k: 'b.antes' }] });
+  ap.relogio.agora = AGORA + 100;
+  await B.fundo();
+  ap.relogio.agora = AGORA + 200;
+  await A.baixar();
+  ap.avisos.length = 0;                     // o aviso se perdeu: B nunca o recebe
+  assert.equal(B.naoBaixados(), 2, 'PRÉ-CONDIÇÃO: sem o aviso, B ainda não sabe do download');
+  ap.relogio.agora = AGORA + 300;
+  const b3 = capEm(300);
+  B.minhas().push(b3);
+  ap.relogio.agora = AGORA + 400;
+  await B.fundo();
+  assert.deepEqual(daAbaNaBase(ap, 'aba-B'), { telas: [b3.t], diario: [] },
+    'sem o aviso, B devolveu à base o que já foi no relatório de A — a gravação não conferiu o que foi entregue');
+  assert.equal(B.naoBaixados(), 1);
+});
+
+test('R9-4-10: com o aviso perdido, a RELEITURA do aparelho (a do desligar e a do relatório) também sabe do que foi entregue', async () => {
+  // O desligar do modo dev relê o aparelho e conta as não baixadas: em B, com o
+  // aviso perdido, ele pedia o 2º toque por telas que já tinham ido no relatório de A.
+  const ap = aparelhoDeDuasAbas();
+  const A = abaDoAparelho(ap, 'aba-A');
+  const B = abaDoAparelho(ap, 'aba-B', { minhas: [capEm(-3000), capEm(-2000)] });
+  ap.relogio.agora = AGORA + 100;
+  await B.fundo();
+  ap.relogio.agora = AGORA + 200;
+  await A.baixar();
+  ap.avisos.length = 0;
+  assert.equal(B.naoBaixados(), 2, 'PRÉ-CONDIÇÃO: sem o aviso, B ainda não sabe do download');
+  await B.atualizar();
+  assert.equal(B.naoBaixados(), 0, 'a releitura do aparelho seguiu contando como não baixadas as telas que A já entregou');
+});
+
+test('R9-4-10: CONTROLE — sem download em A, nada de B é dado como entregue', async () => {
+  const ap = aparelhoDeDuasAbas();
+  abaDoAparelho(ap, 'aba-A');
+  const b1 = capEm(-3000), b2 = capEm(-2000);
+  const B = abaDoAparelho(ap, 'aba-B', { minhas: [b1, b2], diario: [{ t: AGORA - 4000, k: 'b.antes' }] });
+  ap.relogio.agora = AGORA + 100;
+  await B.fundo();
+  ap.entregar();
+  const b3 = capEm(300);
+  B.minhas().push(b3);
+  ap.relogio.agora = AGORA + 400;
+  await B.fundo();
+  assert.deepEqual(daAbaNaBase(ap, 'aba-B'), { telas: [b1.t, b2.t, b3.t], diario: ['b.antes'] },
+    'sem download nenhum, B perdeu da base o que nunca foi entregue');
+  assert.equal(B.naoBaixados(), 3);
+  assert.equal(ap.ls.getItem(DIAG_ENTREGUE_KEY), null, 'sem download, o aparelho ganhou um aviso de entrega');
+});
+
+test('R9-4-10: o aviso das entregas vive 24 h e tem teto — o vencido sai na abertura, e nunca passa de DIAG_ENTREGAS_MAX', () => {
+  const ls = armazenamento();
+  let agora = AGORA;
+  const deps = { localStorage: ls, DIAG_ENTREGUE_KEY, DIAG_ENTREGAS_MAX: constante('DIAG_ENTREGAS_MAX'),
+    DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS, Date: { now: () => agora } };
+  const chaves = Object.keys(deps);
+  const f = new Function(...chaves, ['diagMarcaDoMomento', 'diagLerEntregas', 'diagAvisarEntregues', 'diagPodarEntregas']
+    .map(fatiar).join('\n') + '\nreturn { ler: diagLerEntregas, avisar: diagAvisarEntregues, podar: diagPodarEntregas };')(...chaves.map((k) => deps[k]));
+  const max = constante('DIAG_ENTREGAS_MAX');
+  for (let i = 0; i < max + 2; i++) f.avisar({ aberturas: [{ id: 'x' + i, salvoEm: i }], momentos: [{ t: 't' + i, motivo: 'manual' }] });
+  assert.equal(f.ler().length, max, 'o aviso das entregas cresceu sem teto');
+  assert.deepEqual(f.ler()[f.ler().length - 1].marcas, ['t' + (max + 1) + '|manual'], 'a entrega mais nova não ficou');
+  // Passadas 24 h, a abertura (com o modo dev) apaga a chave.
+  agora = AGORA + DIAG.DIAG_GUARDA_MS + 1;
+  assert.deepEqual(f.ler(), [], 'a entrega vencida ainda vale');
+  f.podar();
+  assert.equal(ls.getItem(DIAG_ENTREGUE_KEY), null, 'a entrega vencida ficou no aparelho');
+  // Lixo na chave não derruba nada.
+  ls.setItem(DIAG_ENTREGUE_KEY, '{nao-e-json');
+  assert.deepEqual(f.ler(), []);
+  // E a abertura com o modo dev chama a poda.
+  assert.match(fatiar('diagCarregarAberturas'), /^\s+diagPodarEntregas\(\);/m, 'a abertura deixou de podar o aviso das entregas');
 });

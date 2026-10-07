@@ -58,6 +58,32 @@ function placarDoRelatorio(st, naFila) {
   };
 }
 
+// A FILA que a remontagem injeta, e o pedido da frente. Com o TREINO aberto na
+// hora do relatório, o `appState.queue` são os EXEMPLOS (os clones inertes e os
+// sintéticos): a remontagem os punha como a fila, sem a faixa do treino e sem
+// dizer nada — com 40 pedidos reais, injetava 30 exemplos e mostrava "restam 40"
+// (auditoria da rodada 9, R9-4-08, MEDIDO). A fila REAL é a que o treino guarda,
+// e o relatório a leva desde o v11 (`treino.fila`, com o `currentPlaceIdx` dela,
+// R8-4-06): é ela que entra, e `doTreino` diz que foi assim. O placar e o
+// "Restam" do `appState` já são os da fila real (o treino tem placar próprio).
+function filaDoRelatorio(d) {
+  const st = (d && d.appState) || {};
+  const tr = d && d.treino && typeof d.treino === 'object' ? d.treino : null;
+  const doTreino = !!(tr && tr.ativo === true && Array.isArray(tr.fila));
+  if (doTreino) {
+    const fila = tr.fila.filter((x) => x && typeof x === 'object');
+    const i = tr.currentPlaceIdx;
+    return { fila, idx: Number.isInteger(i) && i >= 0 && i < fila.length ? i : 0, doTreino, exemplos: (st.queue || []).length };
+  }
+  // `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
+  // objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
+  // objeto serializado duas vezes. Os dois casos são remendados aqui.
+  // MIGRACAO: diag-formato-2 — ver tools/migracoes.mjs
+  const fila = (st.queue || []).map((x) => (x === '[circular]' ? st.currentPlace : x)).filter(Boolean);
+  const idx = Number.isInteger(st.currentPlaceIdx) && st.currentPlaceIdx >= 0 ? st.currentPlaceIdx : 0;
+  return { fila, idx, doTreino: false, exemplos: 0 };
+}
+
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -75,12 +101,7 @@ if (!ARQ) {
 // navegador sem CompressionStream). Farejado pelos bytes, não pela extensão.
 const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const st = d.appState || {};
-// `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
-// objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
-// objeto serializado duas vezes. Os dois casos são remendados aqui.
-// MIGRACAO: diag-formato-2 — ver tools/migracoes.mjs
-const fila = (st.queue || []).map((x, i) => (x === '[circular]' ? st.currentPlace : x)).filter(Boolean);
-const idx = Number.isInteger(st.currentPlaceIdx) && st.currentPlaceIdx >= 0 ? st.currentPlaceIdx : 0;
+const { fila, idx, doTreino, exemplos } = filaDoRelatorio(d);
 const LIMITE = args.includes('--tudo') ? fila.length : 30;
 const recorte = fila.slice(idx, idx + LIMITE);
 
@@ -95,7 +116,10 @@ const PORTA = parseInt(opt('porta', '8123'), 10);
 console.log(`de:      ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`app:     ${(d.app && d.app.rotulo) || '?'}   formato ${d._formato || '?'}`);
 console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} (${tema.origem}) · idioma ${lang}`);
-console.log(`fila:    ${fila.length} pedido(s), injetando ${recorte.length} a partir do índice ${idx}`);
+if (doTreino) {
+  console.log(`AVISO:   relatório gerado DENTRO do treino — a tela tinha ${exemplos} EXEMPLO(S) na fila; a remontagem usa a fila REAL que o treino guardava, sem a faixa do treino.`);
+}
+console.log(`fila:    ${fila.length} pedido(s)${doTreino ? ' (a fila real que o treino guardava)' : ''}, injetando ${recorte.length} a partir do índice ${idx}`);
 console.log(`filtros: ${JSON.stringify(st.filters || {})}`);
 
 const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');

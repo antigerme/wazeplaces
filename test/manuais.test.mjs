@@ -129,6 +129,95 @@ test('README: as escritas no KV da lixeira de foto são as que o servidor faz (R
   assert.ok(frase.includes(`${ttl} s`), `a lista vale ${ttl} s no servidor, e o README diz outra coisa: "${frase}"`);
 });
 
+// R9-6-07 (auditoria da rodada 9): a conta dos APAGAMENTOS no KV — a cota curta
+// do plano grátis, 1.000 por dia — dizia "o 'Sair', o resgate e o cancelamento
+// do código". O servidor apaga em mais três casos, e um deles vira RAJADA no dia
+// em que se troca o `ENCRYPTION_KEY`: cada sessão que volta não abre mais e é
+// apagada uma vez. Os números saem do SERVIDOR DE VERDADE (o `dispatch`, com um
+// store que conta os `delete`) e de um Waze de mentira: cada caso apaga 1, e os
+// CONTROLES (aprovar sem a lixeira, o perfil que passa no portão) apagam 0 —
+// mexeu num apagamento do core, o README acompanha.
+const COOKIES_DO_TESTE = ['.waze.com\tTRUE\t/\tTRUE\t9999999999\t_csrf_token\tc',
+  '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\ts'].join('\n');
+const PERFIL_QUE_PASSA = { id: 1, userName: 'x', rank: 5, isAreaManager: true, isStaff: false };
+async function apagamentosNoKv(cenario, { sessao = PERFIL_QUE_PASSA } = {}) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response(JSON.stringify(/\/Session\b/.test(String(url)) ? sessao
+    : { venues: { objects: [{ id: '1.2.3', images: [{ id: 'a', approved: true }] }] } }),
+  { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const mem = new Map();
+    let apagados = 0;
+    const store = { get: async (k) => (mem.has(k) ? mem.get(k) : null), put: async (k, v) => { mem.set(k, v); },
+      delete: async (k) => { apagados++; mem.delete(k); } };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const sessionToken = await sessions.createSession(COOKIES_DO_TESTE);
+    // O que o cenário faz ANTES do gesto medido (gerar o código, tocar na
+    // lixeira) não conta: a contagem recomeça no `medir`.
+    await cenario({ sessions, sessionToken, mem, medir: () => { apagados = 0; } });
+    return apagados;
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+const FOTO = { region: 'row', venueID: '1.2.3', lat: -23.5, lon: -46.6 };
+const aprovar = ({ sessions, sessionToken }) => dispatch('validar-place',
+  { ...FOTO, sessionToken, updateRequestID: '99', approve: true }, { sessions });
+const CASOS_DE_APAGAMENTO = [
+  ['o "Sair"', /"Sair"/, async ({ sessions, sessionToken, medir }) => {
+    medir();
+    await dispatch('sessao', { action: 'destroy', sessionToken }, { sessions });
+  }],
+  ['o resgate do código', /resgate/, async ({ sessions, sessionToken, medir }) => {
+    const { body } = await dispatch('parear', { action: 'create', sessionToken }, { sessions });
+    medir();
+    const r = await dispatch('parear', { action: 'claim', code: body.code }, { sessions });
+    assert.ok(r.body.success, 'CONTROLE: o resgate não deu certo');
+  }],
+  ['o cancelamento do código', /cancelamento/, async ({ sessions, sessionToken, medir }) => {
+    const { body } = await dispatch('parear', { action: 'create', sessionToken }, { sessions });
+    medir();
+    await dispatch('parear', { action: 'cancel', code: body.code }, { sessions });
+  }],
+  ['a aprovação de foto com a lista da lixeira guardada', /aprovação de foto/, async (amb) => {
+    await dispatch('excluir-foto', { ...FOTO, sessionToken: amb.sessionToken, action: 'preparar', imageID: 'preparar' }, { sessions: amb.sessions });
+    amb.medir();
+    const r = await aprovar(amb);
+    assert.ok(r.body.success, 'CONTROLE: a aprovação de mentira não saiu');
+  }],
+  ['a sessão que a conferência do perfil recusa (o portão)', /conferência do perfil/, async ({ sessions, sessionToken, medir }) => {
+    medir();
+    const r = await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+    assert.equal(r.status, 403, 'CONTROLE: o portão não recusou o perfil de rank 0');
+  }, { sessao: { ...PERFIL_QUE_PASSA, rank: 0 } }],
+  ['a sessão que não abre mais (outra ENCRYPTION_KEY, formato de antes)', /ENCRYPTION_KEY/, async ({ sessions, sessionToken, mem, medir }) => {
+    for (const k of mem.keys()) mem.set(k, Math.floor(Date.now() / 1000) + '|lixo::lixo');
+    medir();
+    const r = await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+    assert.equal(r.status, 401, 'CONTROLE: a sessão que não abre não deu 401');
+  }],
+];
+
+test('README: os apagamentos no KV são os que o servidor faz — o "Sair" e o código, a aprovação de foto, o portão e a sessão que não abre (R9-6-07)', async () => {
+  const frase = (/Apagam: (.*?)Passou disso/.exec(README) || [])[1];
+  assert.ok(frase, 'CONTROLE: a conta dos apagamentos sumiu do README');
+  for (const [caso, noReadme, cenario, opcoes] of CASOS_DE_APAGAMENTO) {
+    const n = await apagamentosNoKv(cenario, opcoes);
+    assert.equal(n, 1, `${caso}: o servidor apagou ${n} vezes no KV (o README conta 1)`);
+    assert.match(frase, noReadme, `${caso}: o servidor apaga no KV, e o README não conta: "${frase}"`);
+  }
+  // A aprovação apaga 1 por vez — e o README diz quanto.
+  assert.ok(frase.includes('1 por aprovação'), `o README não diz quanto a aprovação de foto apaga: "${frase}"`);
+  // CONTROLES: sem a lista da lixeira guardada, aprovar não apaga; o perfil que
+  // passa no portão também não (o instrumento não conta apagamento à toa).
+  assert.equal(await apagamentosNoKv(async (amb) => { amb.medir(); await aprovar(amb); }), 0,
+    'CONTROLE: aprovar sem a lixeira apagou no KV');
+  assert.equal(await apagamentosNoKv(async ({ sessions, sessionToken, medir }) => {
+    medir();
+    await dispatch('perfil', { sessionToken, region: 'row' }, { sessions });
+  }), 0, 'CONTROLE: o perfil que passa no portão apagou no KV');
+});
+
 // ── A extensão ───────────────────────────────────────────────────────────────
 // T4/A14: o protocolo do README não tinha o `conta` do `sessao`, e dizia que
 // "nenhuma mudança de protocolo" tinha havido depois de duas. As respostas da
@@ -162,6 +251,21 @@ test('extensão: o protocolo do README é o que a ponte manda — cada ação, c
   }
   assert.deepEqual(falta, [], 'o README da extensão não documenta o que a ponte manda');
   assert.ok(!/Nenhuma mudança de protocolo/.test(EXT), 'o README segue dizendo que o protocolo não mudou');
+});
+
+// E o outro lado: a PERGUNTA do app à ponte, cada campo (a `espera`, desde a
+// rodada 9, R9-1-02, é o prazo do login da ponte — e quem publica a extensão
+// precisa saber que ele existe).
+test('extensão: o README documenta a pergunta do app à ponte — cada campo que o app manda', () => {
+  const app = ler('js/app.js').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const m = /postMessage\(\{\s*(source: 'wazeplaces',\s*action: 'precisa-de-sessao'[^}]*)\}/.exec(app);
+  assert.ok(m, 'CONTROLE: a pergunta do app à ponte sumiu do app.js');
+  const campos = [...m[1].matchAll(/([a-zA-Z]+)\s*:/g)].map((x) => x[1]);
+  assert.ok(campos.includes('source') && campos.includes('action'), `CONTROLE: o recorte da pergunta quebrou: ${campos}`);
+  const bloco = blocos(EXT, 'js').find((b) => b.includes("action: 'precisa-de-sessao'"));
+  assert.ok(bloco, 'CONTROLE: o bloco da pergunta do app sumiu do README da extensão');
+  const falta = campos.filter((c) => !new RegExp(`\\b${c}\\s*:`).test(bloco));
+  assert.deepEqual(falta, [], 'o README da extensão não documenta o que o app manda na pergunta');
 });
 
 // O código que vai pra Web Store (tudo menos o README), sem comentário e sem a
@@ -205,13 +309,15 @@ function hashDoCodigoDaExtensao() {
 // R7-6-07); ainda não publicada, então as duas mudanças são a MESMA versão.
 // 0.3.3 = o login do ACESSAR com prazo TOTAL abaixo do teto do botão: nenhuma
 // ida depois dele, a que está no ar é cancelada, e a aba não abre depois do
-// aviso (rodada 8: R8-6-01 = R8-1-02).
+// aviso (rodada 8: R8-6-01 = R8-1-02). 0.3.4 = o login da PONTE com o prazo de
+// quem pergunta (a `espera` do app), e um por vez (rodada 9: R9-1-02 = R9-6-02).
 const CODIGO_POR_VERSAO = {
   '0.2.0': '70aa3ce409d9449234e3183bfc7f7f8f21b6e769e11431865915657c565144a2',
   '0.3.0': '7183aaef5597ed54d3c68ed709dab8659ba69cda22d6c306e789f3b25fa7f36e',
   '0.3.1': '9845a36bdabe98e5baf540f6cdac90c4d5d5332f7420848334dd2c00bf677596',
   '0.3.2': '5a8fd648c151b022ca3c11b2c30fc980bda1023406b78c785716245e6e78483b',
   '0.3.3': 'fae3ead541b97453a0b66f8ecc6eebf7b333fff4cc6abfbfebdad52bd648d430',
+  '0.3.4': '98cbedc9239c03bfef84a9a94056e8b60cab8ad26ee521cd02b09102b2419ff7',
 };
 const semver = (v) => v.split('.').map(Number);
 const antes = (a, b) => { const x = semver(a), y = semver(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };

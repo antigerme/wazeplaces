@@ -334,7 +334,7 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
   const chaves = Object.keys(deps);
   // `pedidoAindaNaTela`: a régua de "quem ainda vê o pedido", das duas pontas
   // (o que não pousou volta, o que pousou vai aos irmãos — R6-3-01).
-  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'pedidoAindaNaTela', 'filaReal'].map(fatiar).join('\n')
+  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos'].map(fatiar).join('\n')
     .replace(/epocaDaSessao/g, '__estado.epoca');
   const enviar = new Function(...chaves, '__estado', corpo + '\nreturn enviarRenomeacao;')(...chaves.map((k) => deps[k]), estado);
   // O nome NA TELA é o desta escrita quando ela sai (o `confirmarRenomear` o
@@ -538,9 +538,10 @@ function montarAparelhoNovo(historico = null) {
     HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas',
     podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     agendarRedesenhoDoHistorico() {}, atualizarSeloDeConquista: () => { selo.n++; }, conquistasComPortaoAqui: () => false,
+    textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
   const chaves = Object.keys(deps);
-  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['patenteDe', 'avaliarConquistas', 'carregarConquistas',
+  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['copiaEmDia', 'lembrarTextoDaCopia', 'patenteDe', 'avaliarConquistas', 'carregarConquistas',
     'salvarConquistas', 'checarConquistas', 'garantirLinhaDeBaseDasConquistas', 'loadHistory', 'salvarHistorico', 'recordHistory',
     'diasEntreChaves', 'chaveMaisDias', 'getHistoryStats', 'geografiaDoHistorico', 'maiorSequenciaDeDias'].map(fatiar)]
     .join('\n') + '\nreturn { recordHistory, checarConquistas, AppState };';

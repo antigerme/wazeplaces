@@ -196,8 +196,10 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
 
 test('o que o motor diz no console e não é erro da página: lista FECHADA e exata', () => {
   const { RUIDO_DO_MOTOR } = _paraTeste;
-  // Uma frase só, MEDIDA: o Safari avisando que ignora o `interactive-widget`.
-  assert.equal(RUIDO_DO_MOTOR.length, 1, 'a lista de ruído do motor cresceu — frase nova entra com o motivo e a medição');
+  // Duas frases, MEDIDAS: o Safari avisando que ignora o `interactive-widget`, e o
+  // WebKit logando como "controle de acesso" o pedido à nossa API que o smoke
+  // aborta (lote 13; o Playwright o entrega como `pageerror`, cortado no "http:").
+  assert.equal(RUIDO_DO_MOTOR.length, 2, 'a lista de ruído do motor cresceu — frase nova entra com o motivo e a medição');
   for (const r of RUIDO_DO_MOTOR) {
     assert.ok(r.source.startsWith('^') && r.source.endsWith('$'),
       `ruído sem âncora (${r.source}) engole erro de verdade que CONTENHA a frase`);
@@ -207,6 +209,13 @@ test('o que o motor diz no console e não é erro da página: lista FECHADA e ex
   // O que tem que continuar sendo ERRO: a mesma frase com mais coisa, e erro de verdade.
   assert.equal(ruidoDoMotor('TypeError: x is undefined'), false);
   assert.equal(ruidoDoMotor('Viewport argument key "interactive-widget" not recognized and ignored. TypeError: boom'), false);
+  // O pedido abortado à nossa API: as duas formas (o texto do console e o do `pageerror`).
+  assert.equal(ruidoDoMotor('Fetch API cannot load http://127.0.0.1:18612/api/validar-place due to access control checks.'), true);
+  assert.equal(ruidoDoMotor('/127.0.0.1:18612/api/validar-place due to access control checks.'), true);
+  // E segue ERRO: outro host (o Google do tempo real, o Waze), outro caminho, ou a frase com mais coisa.
+  assert.equal(ruidoDoMotor('Fetch API cannot load https://instantmessaging-pa.googleapis.com/v1/messages:receive due to access control checks.'), false);
+  assert.equal(ruidoDoMotor('/127.0.0.1:18612/js/app.js due to access control checks.'), false);
+  assert.equal(ruidoDoMotor('/127.0.0.1:18612/api/validar-place due to access control checks. TypeError: boom'), false);
 });
 
 test('a presença não usa WebRTC desde a fase 3 — e o smoke dela exercita o tempo real de verdade', () => {

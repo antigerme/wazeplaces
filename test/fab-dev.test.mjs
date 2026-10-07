@@ -142,30 +142,41 @@ const constanteDoApp = (nome, ctx = {}) => {
   assert.ok(m, `a constante ${nome} sumiu`);
   return new Function(...Object.keys(ctx), 'return (' + m[1] + ');')(...Object.values(ctx));
 };
-function telaDoFab({ banner = false, desfazer = false, modal = false } = {}) {
-  const LARGURA = 390, ALTURA = 844;
+function telaDoFab({ banner = false, desfazer = false, modal = false, larga = false, indicador = null } = {}) {
+  // `larga`: a tela do computador (1280×800), medida no navegador — ver abaixo.
+  const LARGURA = larga ? 1280 : 390, ALTURA = larga ? 800 : 844;
   // Um nó: id, tag, classes, pai e a caixa. O `closest` casa seletor simples
   // (tag, #id, .classe) — o que os nós desta tela precisam; atributo não casa.
-  const no = (o) => ({ classes: [], pai: null, ...o, closest(sel) {
-    const simples = sel.split(',').map((s) => s.trim());
-    for (let n = this; n; n = n.pai) {
-      if (simples.some((s) => (s[0] === '#' ? n.id === s.slice(1) : s[0] === '.' ? n.classes.includes(s.slice(1)) : /^[a-z]+$/.test(s) && n.tag === s))) return n;
-    }
-    return null;
-  } });
+  // Todo nó fica em `todos`, pro `querySelectorAll` (que casa pelo mesmo `closest`).
+  const todos = [];
+  const no = (o) => {
+    const n = { classes: [], pai: null, ...o, closest(sel) {
+      const simples = sel.split(',').map((s) => s.trim());
+      for (let n = this; n; n = n.pai) {
+        if (simples.some((s) => (s[0] === '#' ? n.id === s.slice(1) : s[0] === '.' ? n.classes.includes(s.slice(1)) : /^[a-z]+$/.test(s) && n.tag === s))) return n;
+      }
+      return null;
+    },
+    contains(outro) { for (let n = outro; n; n = n.pai) if (n === this) return true; return false; },
+    getBoundingClientRect() { const [left, top, right, bottom] = this.caixa; return { left, top, right, bottom, width: right - left, height: bottom - top }; } };
+    todos.push(n);
+    return n;
+  };
   // A GEOMETRIA DE VERDADE a 390 px (medida no navegador): o placar, o card e os
   // avisos têm a mesma calha de 16 px dos dois lados — e o FAB (334–378 no
   // `cima-dir`) passa 4 px da borda direita deles. É por essa coluna que o
   // `cima-dir` lia "livre" com o banner na tela: nos três pontos da grade, o
   // banner nos dois de dentro e o fundo da página no de fora. Placar de largura
   // CHEIA aqui achava o "Restam" na coluna de fora e escondia o defeito.
+  // A 1280×800 (também medida, R9-4-05): o cabeçalho acaba em 69, e o placar e o
+  // card ficam no MEIO (432–848) — os dois cantos de cima caem no fundo da página.
   const corpo = no({ tag: 'body', caixa: [0, 0, LARGURA, ALTURA] });
-  const placar = no({ tag: 'div', id: 'placar', classes: ['nao-cobrir'], pai: corpo, caixa: [16, 62, 374, 128] });
-  const restam = no({ tag: 'span', id: 'pendingCount', pai: placar, caixa: [300, 70, 374, 120] });
-  const lidos = no({ tag: 'span', id: 'readCount', pai: placar, caixa: [16, 70, 100, 120] });
-  const foto = no({ tag: 'img', pai: corpo, caixa: [16, 132, 374, 750] });
-  const barra = no({ tag: 'div', pai: corpo, caixa: [16, 760, 374, ALTURA] });
-  const botao = no({ tag: 'button', pai: barra, caixa: [16, 760, 374, ALTURA] });
+  const placar = no({ tag: 'div', id: 'placar', classes: ['nao-cobrir'], pai: corpo, caixa: larga ? [432, 77, 848, 144] : [16, 62, 374, 128] });
+  const restam = no({ tag: 'span', id: 'pendingCount', pai: placar, caixa: larga ? [741, 86, 839, 114] : [300, 70, 374, 120] });
+  const lidos = no({ tag: 'span', id: 'readCount', pai: placar, caixa: larga ? [440, 86, 540, 114] : [16, 70, 100, 120] });
+  const foto = no({ tag: 'img', pai: corpo, caixa: larga ? [440, 152, 840, 700] : [16, 132, 374, 750] });
+  const barra = no({ tag: 'div', pai: corpo, caixa: larga ? [440, 730, 840, 784] : [16, 760, 374, ALTURA] });
+  const botao = no({ tag: 'button', pai: barra, caixa: larga ? [440, 730, 840, 784] : [16, 760, 374, ALTURA] });
   const camadas = [];   // de CIMA pra baixo
   if (banner) {
     const stack = no({ tag: 'div', id: 'bannerStack', pai: corpo, caixa: [0, 0, 0, 0] });
@@ -179,6 +190,13 @@ function telaDoFab({ banner = false, desfazer = false, modal = false } = {}) {
     camadas.push(no({ tag: 'button', id: 'undoBtn', pai: cont, caixa: [16, 690, 374, 830] }));
   }
   if (modal) camadas.push(no({ tag: 'div', id: 'helpModal', pai: corpo, caixa: [0, 0, LARGURA, ALTURA] }));
+  // O "N esperando envio" (`#inFlightIndicator`, `fixed top-20 right-4 z-40`):
+  // a caixa MEDIDA a 1280×800 (23×17 px), e as classes que o app de verdade põe
+  // nele (`classesDoIndicador`, abaixo). Abaixo de um modal, acima do placar.
+  if (indicador) {
+    camadas.push(no({ tag: 'div', id: 'inFlightIndicator', classes: indicador, pai: corpo,
+      caixa: larga ? [1241, 80, 1264, 97] : [351, 80, 374, 97] }));
+  }
   camadas.push(restam, lidos, placar, foto, botao, barra, corpo);
   const dentro = (n, x, y) => x >= n.caixa[0] && x < n.caixa[2] && y >= n.caixa[1] && y < n.caixa[3];
   const pilha = (x, y) => camadas.filter((n) => dentro(n, x, y));
@@ -188,7 +206,8 @@ function telaDoFab({ banner = false, desfazer = false, modal = false } = {}) {
   const btn = { style: {} };
   const document = {
     getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : null),
-    querySelector: (s) => (s === 'header' ? { getBoundingClientRect: () => ({ bottom: 60 }) } : null),
+    querySelector: (s) => (s === 'header' ? { getBoundingClientRect: () => ({ bottom: larga ? 69 : 60 }) } : null),
+    querySelectorAll: (sel) => todos.filter((n) => n.closest(sel) === n),
     elementsFromPoint: pilha,
     elementFromPoint: (x, y) => pilha(x, y)[0] || null,
   };
@@ -197,7 +216,7 @@ function telaDoFab({ banner = false, desfazer = false, modal = false } = {}) {
   const deps = { document, innerWidth: LARGURA, innerHeight: ALTURA,
     DEV_FAB_CANTOS: constanteDoApp('DEV_FAB_CANTOS'), DEV_FAB_AMOSTRAS: constanteDoApp('DEV_FAB_AMOSTRAS'),
     DEV_FAB_MARGEM: constanteDoApp('DEV_FAB_MARGEM'), DEV_FAB_RESERVA_TOAST: constanteDoApp('DEV_FAB_RESERVA_TOAST'),
-    DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }),
+    DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }), DEV_FAB_LEITURA,
     DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS') };
   const chaves = Object.keys(deps);
   const posicionar = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n'
@@ -228,4 +247,65 @@ test('R7-4-01: CONTROLE — camada que NÃO é aviso passageiro (um modal) segue
   // medida ignorasse qualquer camada, ele fugiria do placar que ninguém vê — e
   // este caso é também a prova de que a tela de mentira empilha de verdade.
   assert.equal(telaDoFab({ modal: true }).canto, 'cima-dir');
+});
+
+// ── R9-4-05: o FAB × o "N esperando envio" (deitado, tablet, computador) ─────
+// Onde o placar não passa por baixo do `cima-dir` (a tela mais larga que ele), o
+// canto lia como livre — e é o canto do indicador. MEDIDO no navegador: 100% do
+// número coberto a 1280×800, 844×390 e 768×1024, nos dois motores. Duas coisas
+// faltavam: o indicador não era `.nao-cobrir` (o FAB só evita controle e número
+// MARCADO), e a grade de 3×3 do FAB não o tocava — 17 px de altura cabiam
+// inteiros entre a 1ª e a 2ª linha. Aqui as classes vêm do `updateInFlightIndicator`
+// DE VERDADE, e o `posicionarFabDev` roda sobre a tela medida.
+function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
+  const ids = new Map();
+  const reavaliou = [];
+  let saida = Array.from({ length: fila }, () => ({}));
+  const document = {
+    getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : ids.get(id) || null),
+    createElement: () => {
+      const el = { className: '', title: '', innerHTML: '', remove() { ids.delete(this.id); } };
+      return el;
+    },
+    body: { appendChild: (el) => { ids.set(el.id, el); } },
+  };
+  const AppState = { authenticated: true, inFlightActions: noAr };
+  const deps = { document, AppState, carregarFilaDeSaida: () => saida, t: (k, v) => `${k}:${v.n}`,
+    escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => reavaliou.push(ids.has('inFlightIndicator')) };
+  const chaves = Object.keys(deps);
+  const atualizar = new Function(...chaves, fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
+  return { atualizar, reavaliou, el: () => ids.get('inFlightIndicator') || null,
+    fila: (n) => { saida = Array.from({ length: n }, () => ({})); }, AppState };
+}
+const classesDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().className.split(/\s+/).filter(Boolean); };
+
+test('R9-4-05: no computador, o FAB NÃO pousa em cima do "N esperando envio" — o número é `.nao-cobrir` e a medida o enxerga', () => {
+  // A RÉGUA: sem o indicador, o canto livre do computador é o preferido (`cima-dir`).
+  assert.equal(telaDoFab({ larga: true }).canto, 'cima-dir', 'PRÉ-CONDIÇÃO: sem o indicador, o canto livre a 1280×800 é o cima-dir');
+  const classes = classesDoIndicador();
+  assert.ok(classes.includes('fixed') && classes.includes('top-20') && classes.includes('right-4'),
+    'PRÉ-CONDIÇÃO: o indicador mudou de lugar — a caixa medida desta tela não vale mais');
+  const t = telaDoFab({ larga: true, indicador: classes });
+  assert.notEqual(t.canto, 'cima-dir', 'o FAB foi pro cima-dir, em cima do "N esperando envio" (o número de decisões sem sinal)');
+  assert.equal(t.canto, 'cima-esq');
+  // CONTROLE: com um modal por cima, o indicador está ESCONDIDO — ele não decide o
+  // canto (a medida respeita as camadas, como faz com o placar).
+  assert.equal(telaDoFab({ larga: true, indicador: classes, modal: true }).canto, 'cima-dir',
+    'o indicador ATRÁS de um modal tirou o FAB do canto preferido — a medida não olha quem está à vista');
+  // CONTROLE do celular em pé (390): o placar já tirava o FAB dos cantos de cima.
+  assert.equal(telaDoFab({ indicador: classes }).canto, 'baixo-dir');
+});
+
+test('R9-4-05: o indicador que NASCE ou SOME reavalia o FAB — e o número que só muda, não', () => {
+  const i = indicadorDeVerdade({ fila: 1 });
+  i.atualizar();
+  assert.ok(i.el(), 'PRÉ-CONDIÇÃO: o indicador não nasceu');
+  assert.deepEqual(i.reavaliou, [true], 'o indicador nasceu SEM o FAB reavaliar o canto — ele fica em cima do número que acabou de aparecer');
+  i.fila(3);
+  i.atualizar();
+  assert.deepEqual(i.reavaliou, [true], 'o FAB foi reavaliado a cada número (é a geometria que muda, não o número)');
+  i.fila(0);
+  i.atualizar();
+  assert.equal(i.el(), null, 'PRÉ-CONDIÇÃO: o indicador não sumiu');
+  assert.deepEqual(i.reavaliou, [true, false], 'o indicador sumiu sem o FAB reavaliar — o canto que ele ocupava não volta a ser o do FAB');
 });

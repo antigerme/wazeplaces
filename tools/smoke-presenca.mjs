@@ -81,6 +81,9 @@ const perfilRespondido = new Map();   // id -> Date.now() da última resposta
 // SINAL, não por prazo — o que se mede tem que cair DENTRO dela, e com 2,5 s
 // de atraso o "Enviar" na espera chegou a cair depois de o perfil voltar.
 const perfilSegurado = new Map();   // id -> Promise
+// Quem está "sem rede" pro tempo real (a seção 12): o Google dela cai, como no
+// modo avião — mas sem o `setOffline`, que dispara o `online` ao voltar.
+const semRede = new Set();
 const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
@@ -250,6 +253,7 @@ async function editor(id, { lang = 'pt' } = {}) {
     const req = route.request();
     const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST' };
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors }).catch(() => {});
+    if (semRede.has(id)) return route.abort('internetdisconnected').catch(() => {});
     let corpo = null;
     try { corpo = JSON.parse(req.postData() || 'null'); } catch { /* registrado como null */ }
     reg(id).fluxo.push({ url: req.url(), chave: req.headers()['x-goog-api-key'], corpo, cookie: req.headers().cookie || null });
@@ -321,7 +325,8 @@ const esperar = async (e, fn, oq, ms = 15000, arg) => {
       // Espera que estoura sem dizer o que ESTAVA no lugar é a pior falha de CI.
       const estado = await e.page.evaluate(() => ({
         online: Presenca.online.map((p) => p.nome), conversas: Presenca.conversas.map((c) => `${c.nome}:${c.naoLidas}`),
-        vivas: [...Presenca.vivas].map(([k, v]) => `${k}:${v.n}`), fluxo: !!Presenca.fluxo, diag: Presenca.fluxoDiag,
+        vivas: [...Presenca.vivas].map(([k, v]) => `${k}:${v.n}`), fluxo: !!Presenca.fluxo, parado: Presenca.fluxoParado,
+        visivel: document.visibilityState, podeConectar: presencaPodeConectar(), diag: Presenca.fluxoDiag,
       })).catch((err) => `(não deu pra ler: ${String(err.message).split('\n')[0]})`);
       anota(`${oq} — estado: ${JSON.stringify(estado)}`);
       return false;
@@ -1129,6 +1134,114 @@ try {
         ok('a decisão que chega com a lista JÁ aberta sai sem janela — nada por cima da linha da pessoa');
       } else anota(`a decisão chegou com a lista aberta e abriu a janela por baixo dela: ${JSON.stringify({ ...corrida, ...ida })}`);
     }
+  }
+
+  // ── 12. O TEMPO REAL PARADO religa sem o `online` e sem pedido à API ──────
+  // Quem fica OLHANDO a conversa esperando a resposta não faz pedido nenhum à
+  // nossa API (não há polling, de propósito), e o `online` pode não vir (o
+  // iPhone): o tempo real parado pela falta de rede ficava parado, e a resposta
+  // não aparecia (auditoria da rodada 9, R9-5-03; MEDIDO no Chromium e no
+  // WebKit: 20 s olhando, 0 conexões ao Google). DECISÃO: religar SEM pedido à
+  // API — no recuo do próprio fluxo (que segue de pé, tentando o Google mesmo
+  // sem rede), no foco do app e num gesto na conversa. A rede some e volta DE
+  // MENTIRA (o `onLine` e o Google), sem o `setOffline`: ele dispararia o `online`.
+  console.log('\n12. o tempo real parado religa sem o `online` e sem pedido à API');
+  // A rede cai com a conversa aberta, e volta (sem o `online`) com a resposta da
+  // ana esperando no Google. `degrau: 'ultimo'`: o recuo já no degrau de 1 min.
+  const pararEVoltar = async (texto, { degrau = null } = {}) => {
+    // O que a bia recebeu e ainda não confirmou (a confirmação vai DE CARONA no
+    // próximo pedido à API) é entregue de novo a cada conexão. O Google de
+    // verdade segura a conexão aberta depois de entregar; o daqui a ENCERRA (o
+    // `route.fulfill` não faz fluxo), e com um item pendente o tempo real abria e
+    // fechava a cada segundo — a espera abaixo nunca o pegava aberto (MEDIDO na
+    // junção do lote 13, no WebKit: 59 aberturas e 60 entregas em ~1 min, com a
+    // pré-condição reprovando). Uma carona confirma a fila antes, como o próximo
+    // gesto dela faria; e a espera abaixo pega o tempo real PRESO, como o do Google.
+    // A carona sai quando o app JÁ guardou o que está pendente: o eco da mensagem
+    // que a bia mandou na seção 11 chega pelo tempo real DEPOIS da última carona
+    // (MEDIDO com uma sonda: o app o guardava pra confirmar, certo, e nenhum
+    // pedido seguinte o levava).
+    const ate = Date.now() + 10_000;
+    while (fila(bia.id).itens.length && Date.now() < ate) {
+      const pendentes = fila(bia.id).itens.map((x) => x.inbox);
+      const guardou = await bia.page.evaluate((pp) => { const l = chatAConfirmar(); return pp.every((x) => l.includes(x)); }, pendentes);
+      if (guardou) await bia.page.evaluate(() => { Presenca.tentadaEm = 0; Presenca.atualizadaEm = 0; return presencaAtualizar(); });
+      await dormir(200);
+    }
+    if (fila(bia.id).itens.length) { anota(`a carona da bia não confirmou a fila do tempo real (${fila(bia.id).itens.length} pendentes)`); return null; }
+    // E a RESPOSTA da carona tem que ter chegado: o servidor de mentira tira o
+    // item da fila ao receber o pedido, e a resposta que chegasse com a rede já
+    // caída seria prova de rede pro app — que religa o tempo real (certo), e o
+    // controle de baixo leria "religou sem o toque".
+    //
+    // E nenhum "lida" pendente ou no ar: o da mensagem da parte (a) sai pela
+    // rajada (1,2 s), e no WebKit caía DENTRO da janela do controle da (b) — a
+    // resposta dele é prova de rede, e o app religa o tempo real parado (certo,
+    // é o desenho). MEDIDO com uma sonda: `chat/lida` 166 ms depois da volta da
+    // rede e o fluxo de pé 10 ms depois. O controle mede "sem gesto, sem
+    // `online` e sem resposta nossa, nada religa": a premissa tem que valer.
+    for (const fim = Date.now() + 10_000; Date.now() < fim;) {
+      if (await bia.page.evaluate(() => !Presenca.pedindo && !Presenca.lidaPendente && Presenca.lidaNoAr.size === 0)) break;
+      await dormir(100);
+    }
+    if (!await esperar(bia, () => !!Presenca.fluxo && !Presenca.fluxoParado, 'o tempo real da bia não estava aberto antes de a rede cair')) return null;
+    semRede.add(bia.id);
+    const onLine = await bia.page.evaluate((d) => {
+      window.__semRede = true;
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => !window.__semRede });
+      if (d === 'ultimo') Presenca.fluxoTentativa = PRESENCA_FLUXO_ESPERAS_MS.length - 1;
+      if (Presenca.fluxo) Presenca.fluxo.ctl.abort();    // a conexão cai com a rede
+      return navigator.onLine;
+    }, degrau);
+    if (onLine !== false) { anota('controle: o `onLine` de mentira não pegou — a seção mediria outra coisa'); return null; }
+    if (!await esperar(bia, () => Presenca.fluxoParado === true && !Presenca.fluxo, 'o tempo real da bia não PAROU sem rede')) return null;
+    semRede.delete(bia.id);
+    await bia.page.evaluate(() => { window.__semRede = false; });
+    const m = { id: randomUUID(), ts: Date.now(), de: '12444348', para: '183164343', texto, ctx: { app: 'wazeplaces' } };
+    mensagens.push(m);
+    entregar(bia.id, bytesMsg(m));
+    return { apiAntes: reg(bia.id).api.length, googleAntes: reg(bia.id).fluxo.length, desde: Date.now() };
+  };
+  const naTela = (texto) => bia.page.evaluate((t) => document.getElementById('conversaMsgs').textContent.includes(t), texto);
+  // O "lida" da mensagem que chega na tela é o de sempre (a rajada); o que não
+  // pode haver é pedido pra RELIGAR (o token, a lista).
+  const pedidosDoReligar = (r) => reg(bia.id).api.slice(r.apiAntes).filter((x) => !(x.rota === 'chat' && x.c.acao === 'lida'))
+    .map((x) => x.rota + (x.c.acao ? '/' + x.c.acao : ''));
+  await semCamadas();
+  await bia.page.evaluate(() => presencaAbrirConversa('12444348'));
+  if (await esperar(bia, () => !document.getElementById('conversaModal').classList.contains('hidden')
+      && (Presenca.historico.get('12444348') || {}).carregada, 'a conversa da bia não abriu')) {
+    // a) Ninguém toca em nada: o recuo do próprio fluxo (no 1º degrau, 2 s) religa.
+    const a = await pararEVoltar('resposta com a bia só olhando');
+    if (a) {
+      const chegou = await esperar(bia, () => document.getElementById('conversaMsgs').textContent.includes('resposta com a bia só olhando'),
+        'com a pessoa só olhando, o recuo não religou o tempo real parado — a resposta não apareceu', 10_000);
+      const pedidos = pedidosDoReligar(a);
+      if (chegou && !pedidos.length) ok(`com a pessoa só olhando, o recuo religa o tempo real parado: a resposta aparece em ${((Date.now() - a.desde) / 1000).toFixed(1)} s, sem pedido nenhum à API`);
+      else if (chegou) anota(`religar pelo recuo pediu à API: ${JSON.stringify(pedidos)}`);
+    }
+    // b) O recuo já no degrau de 1 min (como depois de um minuto sem rede): um
+    // toque na conversa religa na hora.
+    const b = await pararEVoltar('resposta depois de um minuto sem rede', { degrau: 'ultimo' });
+    if (b) {
+      // CONTROLE: sem o toque (e sem o `online`), nada religa em 3 s.
+      await dormir(3000);
+      const parada = { parado: await bia.page.evaluate(() => Presenca.fluxoParado), naTela: await naTela('resposta depois de um minuto sem rede'), google: reg(bia.id).fluxo.length - b.googleAntes };
+      if (parada.parado && !parada.naTela && parada.google === 0) ok('controle: com o recuo no degrau de 1 min, sem toque nem `online`, a conversa segue parada');
+      else anota(`controle: a conversa parada religou sem o toque: ${JSON.stringify(parada)}`);
+      // O dedo no campo da conversa (a pessoa vai responder).
+      const campo = await bia.page.evaluate(() => {
+        const r = document.getElementById('conversaInput').getBoundingClientRect();
+        return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      if (campo) await bia.page.touchscreen.tap(campo.x, campo.y);
+      const chegou = campo && await esperar(bia, () => document.getElementById('conversaMsgs').textContent.includes('resposta depois de um minuto sem rede'),
+        'o toque na conversa não religou o tempo real parado — a resposta não apareceu', 8000);
+      const pedidos = pedidosDoReligar(b);
+      if (chegou && !pedidos.length) ok('um toque na conversa religa o tempo real parado na hora: a resposta aparece, sem pedido nenhum à API');
+      else if (chegou) anota(`religar pelo toque pediu à API: ${JSON.stringify(pedidos)}`);
+    }
+    await bia.page.evaluate(() => { delete navigator.onLine; }).catch(() => {});
   }
 } finally {
   await browser.close();

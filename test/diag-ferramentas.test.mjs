@@ -471,3 +471,48 @@ test('diag-replay: o placar vem do relatório — Lidos, Rejeitados, Pulados e o
   assert.doesNotMatch(codigo, /AppState\.serverTotal = places\.length;/, 'o "Restam" voltou a ser o tamanho do recorte');
   assert.match(codigo, /updateStats\(true\);/, 'o placar não é redesenhado depois de restaurado');
 });
+
+// ── diag-replay: o relatório feito DENTRO do treino (auditoria da rodada 9, R9-4-08) ──
+// Com o treino aberto, o `appState.queue` são os EXEMPLOS (os clones inertes e os
+// sintéticos). A remontagem os injetava como a fila, sem a faixa do treino e sem
+// dizer nada: com 40 pedidos reais, 30 exemplos na tela e "restam 40" (MEDIDO no
+// navegador, n3). A fila real está no arquivo desde o v11 (`treino.fila`, com o
+// `currentPlaceIdx` dela).
+const filaDoRelatorio = (() => {
+  const ini = REPLAY.indexOf('\nfunction filaDoRelatorio(d) {');
+  assert.ok(ini > 0, 'filaDoRelatorio sumiu do diag-replay');
+  let prof = 0, fim = -1;
+  for (let k = REPLAY.indexOf('{', ini); k < REPLAY.length; k++) {
+    if (REPLAY[k] === '{') prof++;
+    else if (REPLAY[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  return new Function(REPLAY.slice(ini, fim) + '\nreturn filaDoRelatorio;')();
+})();
+
+test('diag-replay: relatório feito DENTRO do treino — remonta a fila REAL que o treino guardava, e diz isso (R9-4-08)', () => {
+  const exemplos = Array.from({ length: 30 }, (_, i) => ({ venueID: 'v' + i, updateRequestID: 'treino-inerte', _treino: true }));
+  const reais = Array.from({ length: 40 }, (_, i) => ({ venueID: 'r' + i, updateRequestID: 'u' + i }));
+  const d = { appState: { queue: exemplos, currentPlaceIdx: 0, serverTotal: 40 },
+    treino: { ativo: true, passo: 1, exemplos: 30, fila: reais, currentPlaceIdx: 2 } };
+  const f = filaDoRelatorio(d);
+  assert.equal(f.doTreino, true, 'o relatório feito no treino não foi reconhecido');
+  assert.deepEqual(f.fila.map((p) => p.updateRequestID), reais.map((p) => p.updateRequestID),
+    'a remontagem injetou os EXEMPLOS do treino como se fossem a fila');
+  assert.equal(f.idx, 2, 'o pedido da frente da fila real (o `currentPlaceIdx` dela) se perdeu');
+  assert.equal(f.exemplos, 30);
+  // CONTROLE: fora do treino, a fila do `appState`, e o remendo do formato antigo
+  // ("[circular]" no lugar do card da frente) segue valendo.
+  const fora = filaDoRelatorio({ appState: { queue: ['[circular]', reais[1]], currentPlace: reais[0], currentPlaceIdx: 1 },
+    treino: { ativo: false } });
+  assert.deepEqual([fora.doTreino, fora.idx, fora.fila.map((p) => p.updateRequestID)], [false, 1, ['u0', 'u1']]);
+  // Relatório anterior ao v11 (sem `treino`) e o treino aberto SEM a fila no arquivo: a do `appState`.
+  assert.equal(filaDoRelatorio({ appState: { queue: exemplos } }).doTreino, false);
+  assert.equal(filaDoRelatorio({ appState: { queue: exemplos }, treino: { ativo: true } }).fila.length, 30);
+  // Índice fora da fila real: a frente é a primeira.
+  assert.equal(filaDoRelatorio({ appState: {}, treino: { ativo: true, fila: reais, currentPlaceIdx: 99 } }).idx, 0);
+  // E é ela que a ferramenta usa — avisando que o relatório é de dentro do treino.
+  const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(codigo, /const \{ fila, idx, doTreino, exemplos \} = filaDoRelatorio\(d\);/, 'a remontagem não usa a fila do relatório pela régua do treino');
+  assert.match(codigo, /if \(doTreino\) \{\s*console\.log\(`AVISO:/, 'a remontagem do treino não avisa que trocou os exemplos pela fila real');
+  assert.doesNotMatch(codigo, /^const fila = \(st\.queue/m, 'a fila voltou a sair só do `appState`');
+});

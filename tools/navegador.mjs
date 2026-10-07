@@ -193,6 +193,18 @@ const RUIDO_DO_MOTOR = [
   // do smoke de fluxo no WebKit 26.6. Inofensivo: no iPhone quem cede espaço
   // pro teclado é o `--kb-inset`, medido da visualViewport.
   /^Viewport argument key "interactive-widget" not recognized and ignored\.$/,
+  // WebKit: o pedido à NOSSA API que o próprio smoke aborta (o modo avião de
+  // mentira, `route.abort`) às vezes sai no console do motor como falha de
+  // controle de acesso ("Fetch API cannot load … due to access control checks."),
+  // com nível de erro e origem "javascript" — e o Playwright transforma TODA
+  // mensagem assim em `pageerror`, cortando o "nome" no primeiro ":" (o da URL):
+  // a mensagem do `pageerror` começa em "/127.0.0.1". O app trata a rejeição (o
+  // `_post` captura tudo), e não existe CORS num pedido de MESMA origem. MEDIDO
+  // (lote 13): 1 vez em 9 rodadas do bloco da fila de saída no WebKit, só com o
+  // smoke de layout inteiro (nunca com o bloco sozinho, nem com a CPU ocupada), e
+  // o `_onConsoleMessage`/`splitErrorMessage` do Playwright 1.63 lidos. Só o
+  // servidor local dos smokes e a rota da API: outro host segue sendo erro.
+  /^(?:Fetch API cannot load http:\/)?\/127\.0\.0\.1:\d+\/api\/[a-z-]+ due to access control checks\.$/,
 ];
 
 /** `true` pra mensagem de console que é aviso conhecido do MOTOR, não da página. */

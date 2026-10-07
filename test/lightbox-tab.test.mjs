@@ -108,15 +108,22 @@ function constante(nome) {
 }
 
 // Um MÉTODO do `Lightbox` de verdade, como função (o `this` é quem a chama):
-// a régua de "ampliada de verdade" (R8-3-01) é dele, não uma cópia daqui.
+// a régua de "ampliada de verdade" (R8-3-01) é dele, não uma cópia daqui. Ela
+// mede a foto NA TELA (a caixa da <img>, R9-3-01): a de 800 × 600 da auditoria.
+const FOTO_NA_TELA = { offsetWidth: 800, offsetHeight: 600 };
 function metodoDoLightbox(nome) {
   const obj = APP_SEM.indexOf('const Lightbox = {');
   const ini = APP_SEM.indexOf('\n    ' + nome + '(', obj) + 1;
   assert.ok(obj > 0 && ini > obj, `Lightbox.${nome} sumiu`);
+  const zoomVisivel = /^const ZOOM_VISIVEL_PX = (\d+);$/m.exec(APP_SEM);
+  assert.ok(zoomVisivel, 'ZOOM_VISIVEL_PX sumiu');
   let prof = 0;
   for (let j = APP_SEM.indexOf('{', APP_SEM.indexOf(')', ini)); j < APP_SEM.length; j++) {
     if (APP_SEM[j] === '{') prof++;
-    else if (APP_SEM[j] === '}' && --prof === 0) return new Function('return function ' + APP_SEM.slice(ini, j + 1).trim())();
+    else if (APP_SEM[j] === '}' && --prof === 0) {
+      return new Function('document', 'ZOOM_VISIVEL_PX', 'return function ' + APP_SEM.slice(ini, j + 1).trim())(
+        { getElementById: (id) => (id === 'lightboxImage' ? FOTO_NA_TELA : null) }, Number(zoomVisivel[1]));
+    }
   }
   throw new Error('não fechou');
 }
@@ -256,10 +263,27 @@ test('R8-3-01 um fio de zoom invisível (1,00073) é 1× pras setas: ← → tro
   for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowDown']) assert.equal(f.apertar(k), true, `${k} não ficou com o app`);
   assert.deepEqual(f.log, ['foto:prev', 'foto:next', 'foto:recuou'],
     `DEFEITO: com a escala em ${fio.toFixed(5)} (invisível) as setas andaram a foto em vez de trocá-la e de fechar`);
-  // CONTROLE: logo depois da régua (1,0015, já ampliada), as quatro andam.
-  const a = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.0015 });
+  // CONTROLE: logo depois da régua (1,0101: 8,1 px a mais na foto de 800, já
+  // ampliada — a régua em pixels do R9-3-01), as quatro andam.
+  const a = teclado({ mapaAberto: false, fotoAberta: true, escala: 1.0101 });
   a.apertar('ArrowRight'); a.apertar('ArrowDown');
   assert.deepEqual(a.log, ['foto:anda -80,0', 'foto:anda 0,-80'], 'CONTROLE: ampliada de verdade, as setas deixaram de andar');
+});
+
+// ── R9-3-01: a faixa logo acima dos 0,1% também é 1× pras setas ─────────────
+// (auditoria de 2026-10-06). UM evento de roda de −1 px (o menor que o WebKit
+// entrega) dá 1,00182 — a foto de 800 px com 801,5 —, e 12 eventos de −0,4 px
+// dão 1,00879 (+7 px): a régua de 0,1% os contava como ampliada, e a → ANDAVA a
+// foto 80 px e o ↓ a andava em vez de fechar (MEDIDO nos dois motores, r32 e
+// r32b). A régua é em pixels da foto na tela (`ZOOM_VISIVEL_PX`).
+test('R9-3-01 um evento de roda de −1 px (a foto de 800 com 801,5) é 1× pras setas: → troca de foto e ↓ recua', () => {
+  for (const [nome, escala] of [['um evento de −1 px', Math.pow(1.2, 1 / 100)], ['12 eventos de −0,4 px', Math.pow(1.2, 4.8 / 100)]]) {
+    assert.ok(escala > 1.001, `PRÉ-CONDIÇÃO (${nome}): a escala ${escala} não passa dos 0,1% — o caso não mede nada`);
+    const f = teclado({ mapaAberto: false, fotoAberta: true, escala });
+    f.apertar('ArrowRight'); f.apertar('ArrowDown');
+    assert.deepEqual(f.log, ['foto:next', 'foto:recuou'],
+      `DEFEITO (${nome}): com a escala em ${escala.toFixed(5)} (${((escala - 1) * 800).toFixed(1)} px a mais na foto de 800) as setas andaram a foto em vez de trocá-la e de fechar`);
+  }
 });
 
 test('L29 o Desfazer some com o foco nele e o mapa aberto: o foco volta pro ✕ do mapa, não cai no <body>', () => {

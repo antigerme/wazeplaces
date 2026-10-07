@@ -22,7 +22,27 @@ const API_BASE = 'https://places.wazebrasil.com';
 // Maior que os 30 s do servidor: uma ida lenta que dá certo ainda cabe.
 const PRAZO_DO_BOTAO_MS = 40000;
 
+// O prazo do login da PONTE (o app pedindo sessão: na abertura, na volta à aba
+// e na queda) é o de QUEM PERGUNTA (auditoria da rodada 9, R9-1-02 = R9-6-02).
+// O app espera a resposta por `espera` ms depois do `aguarde` da ponte (o
+// `EXT_ESPERA_MS` dele) e então desiste e para de ouvir. O login daqui não tinha
+// prazo nenhum: seguia indo ao /Session do Waze no nome da pessoa depois de o
+// app ter desistido (até 4 idas, 124,6 s com o Waze lento), e a ida que dava
+// certo entregava o token a uma página que já não ouvia — a sessão ficava sem
+// dono no servidor, e a pessoa na tela de entrada (MEDIDO com a extensão e o app
+// de verdade). Agora ele acaba ANTES de o app desistir, com folga pra resposta
+// voltar (background → ponte → app), e é tratado como o do botão: nenhuma ida
+// depois do prazo, e a que está no ar é cancelada. O app que não diz a espera
+// (todos até a v2026.10.06-01) esperava 8 s; e nenhum login da ponte espera mais
+// que o do botão.
+const ESPERA_DO_APP_MS = 8000;
+const FOLGA_DA_PONTE_MS = 1000;
+
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A desistência de quando o prazo acaba sem nenhuma falha pra contar: quem não
+// respondeu a tempo foi o próprio Waze Places.
+const passouDoPrazo = () => ({ success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: o login passou do prazo.' });
 
 const cookiesPorUrl = (url) =>
   new Promise((r) => chrome.cookies.getAll({ url }, (c) => r(c || [])));
@@ -87,7 +107,8 @@ async function trocarPorToken(cookiesTxt, sinal) {
 }
 
 // `ate`: a hora (`Date.now()`) em que o login DESISTE — o prazo do botão (ver
-// `PRAZO_DO_BOTAO_MS`). A ponte não passa prazo, e lá tudo segue como era.
+// `PRAZO_DO_BOTAO_MS`) ou o de quem pergunta pela ponte (`ESPERA_DO_APP_MS`).
+// Sem ele, o login vai até a última tentativa; nenhum dos dois o chama assim.
 async function autenticar(urlDaAba, ate = Infinity) {
   const controle = new AbortController();
   const teto = ate === Infinity ? null : setTimeout(() => controle.abort(), Math.max(0, ate - Date.now()));
@@ -107,8 +128,7 @@ async function tentarAte(urlDaAba, ate, sinal) {
   // seguinte (o Waze que estourou os 30 s no servidor, por exemplo). Sem
   // nenhuma, quem não respondeu a tempo foi o próprio Waze Places.
   let ultima = null;
-  const desistir = () => ultima
-    || { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: o login passou do prazo.' };
+  const desistir = () => ultima || passouDoPrazo();
   // Anota a falha desta ida (é ela que sai se não houver outra) e espera a
   // próxima — se ainda houver tentativa e a espera acabar DENTRO do prazo: a ida
   // que começaria depois dele não começa, e esperar pra então desistir só
@@ -170,12 +190,45 @@ async function tentarAte(urlDaAba, ate, sinal) {
   return desistir();
 }
 
+// O login da PONTE é UM por vez, pra todas as abas do app (R9-1-02). Cada volta
+// à aba, e cada aba do app, pergunta de novo, e cada pergunta começava a sua
+// cadeia de idas ao lado das que já corriam (MEDIDO com a extensão e o app de
+// verdade: 12 idas ao Waze, até 3 ao mesmo tempo, 10 delas depois de o app ter
+// desistido). A pergunta que chega com um login no ar recebe o desfecho DELE — a
+// mesma sessão, que é do mesmo navegador e da mesma conta do WME —, ou a
+// desistência no prazo dela, se ele vier antes do prazo do login no ar: quem
+// perguntou recebe a resposta enquanto ainda ouve, e o login segue pra quem
+// ainda espera.
+let loginDaPonteNoAr = null;
+function loginDaPonte(urlDaAba, ate) {
+  if (!loginDaPonteNoAr) {
+    const login = { ate, desfecho: null };
+    login.desfecho = autenticar(urlDaAba, ate).finally(() => {
+      if (loginDaPonteNoAr === login) loginDaPonteNoAr = null;
+    });
+    loginDaPonteNoAr = login;
+  }
+  const login = loginDaPonteNoAr;
+  if (ate >= login.ate) return login.desfecho;
+  return new Promise((pronto) => {
+    const prazo = setTimeout(() => pronto(passouDoPrazo()), Math.max(0, ate - Date.now()));
+    login.desfecho.then((r) => { clearTimeout(prazo); pronto(r); });
+  });
+}
+
 chrome.runtime.onMessage.addListener((req, sender, responder) => {
   // Pedido vindo da PONTE (o app pediu sessão). Devolve o token pra ela, sem
   // abrir aba nem gravar nada: quem guarda é o próprio app, no localStorage
   // dele. Guardar aqui também era o que obrigava o `location.reload()`.
+  //
+  // O prazo é o de quem pergunta (ver `ESPERA_DO_APP_MS`), contado da PERGUNTA
+  // (`desde`, a hora em que a ponte respondeu o `aguarde`, que é quando a espera
+  // do app começa) e não de quando a mensagem chegou: o service worker adormecido
+  // leva um tempo pra acordar, como no `desde` do botão.
   if (req.action === 'autenticar') {
-    autenticar(sender.tab ? sender.tab.url : null).then(responder);
+    const desde = Number.isFinite(req.desde) ? Math.min(req.desde, Date.now()) : Date.now();
+    const espera = Number.isFinite(req.espera) ? Math.min(req.espera, PRAZO_DO_BOTAO_MS) : ESPERA_DO_APP_MS;
+    loginDaPonte(sender.tab ? sender.tab.url : null, desde + espera - FOLGA_DA_PONTE_MS).then(responder);
     return true;
   }
 

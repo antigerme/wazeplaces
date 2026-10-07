@@ -153,7 +153,7 @@ function montarEscritaNaQueda() {
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
     renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
   });
-  app = montar(deps, ['filaReal', 'pedidoAindaNaTela', 'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto',
+  app = montar(deps, ['filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela', 'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto',
     'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401', 'contarIdasSemResposta', 'idasSemRespostaDeAntes',
     'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
@@ -254,7 +254,7 @@ function montarOutraAba() {
     queue: fila.slice(), currentPlace: fila[0], stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, autorEmFoco: null,
     preferences: { comoFuncionaVisto: true } };
   const deps = depsDoTreino(AppState, log, els);
-  const app = montar(deps, ['chaveDoPedido', 'filaReal', 'diagDecididos', 'anotarDecididosPorOutraAba'],
+  const app = montar(deps, ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'diagDecididos', 'anotarDecididosPorOutraAba'],
     'const decididosPorOutraAbaComCardAqui = new WeakSet();',
     'conta: (saida) => diagDecididos(saida, AppState.queue, decididosPorOutraAbaComCardAqui), daOutraAba: (p) => decididosPorOutraAbaComCardAqui.has(p)');
   return { app, AppState, fila };
@@ -439,7 +439,7 @@ function linhaDoOffline({ comTreino, onLine }) {
     navigator: { onLine }, offlineLigado: () => true, escapeHtml: (s) => s,
     OFFLINE_CICLO_MS: 1200000, Date: { now: () => J * 1200000 + 1000 },
   });
-  const app = montar(deps, ['filaReal', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline'],
+  const app = montar(deps, ['filaReal', 'filaGuardadaEsperandoOTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline'],
     `let offlineJanelaServida = ${J}, offlineUltimoResultado = 'pronto', offlineVarrendo = false,
       offlineFilaPreparada = 7, offlineFilaGravadaEm = 7, offlineFilaVarrida = null;`);
   let exemplos = null;
@@ -583,7 +583,19 @@ test('filaReal: a guardada pelo treino com ele aberto; senão a da tela', () => 
 });
 
 test('filaReal: os consumidores da fila REAL perguntam a ela (e só a ela)', () => {
-  for (const nome of ['pedidoAindaNaTela', 'aplicarNosIrmaos', 'anotarDecididosPorOutraAba', 'atualizarLinhaDoOffline']) {
+  // As perguntas de IDENTIDADE ("o pedido ainda é desta tela?", "os irmãos dele",
+  // "a decisão da outra aba caiu num card daqui?") incluem o recusado que espera
+  // o "Sair" do treino: a irmã `filaRealComDevolvidos`, que pergunta à `filaReal`
+  // (R9-7-01). Quem CONTA (a linha do offline) pergunta à `filaReal` direto.
+  const irma = fatiar('filaRealComDevolvidos');
+  assert.match(irma, /\bfilaReal\(\)/, 'a `filaRealComDevolvidos` não parte da `filaReal`');
+  assert.match(irma, /Treino\._salvo\.devolver/, 'a `filaRealComDevolvidos` não soma o recusado que espera o "Sair"');
+  for (const nome of ['pedidoAindaNaTela', 'aplicarNosIrmaos', 'anotarDecididosPorOutraAba']) {
+    const corpo = fatiar(nome);
+    assert.match(corpo, /\bfilaRealComDevolvidos\(\)/, `${nome} não pergunta pela fila real (com o recusado do treino) à \`filaRealComDevolvidos\``);
+    assert.doesNotMatch(corpo, /Treino\._salvo\.(queue|devolver)/, `${nome} copiou a régua da fila guardada em vez de usar a irmã da \`filaReal\``);
+  }
+  for (const nome of ['atualizarLinhaDoOffline', 'offlineGravarFila', 'offlineItensDaFila']) {
     const corpo = fatiar(nome);
     assert.match(corpo, /\bfilaReal\(\)/, `${nome} não pergunta pela fila real à \`filaReal\``);
     assert.doesNotMatch(corpo, /Treino\._salvo\.queue/, `${nome} copiou a régua da fila guardada em vez de usar a \`filaReal\``);

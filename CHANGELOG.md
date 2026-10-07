@@ -8,6 +8,75 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.07-01
+
+Décima segunda rodada da auditoria. Depois da v2026.10.06-01, conferida em produção com duas contas, sete auditores revisaram o app de novo, com atenção às costuras entre os consertos da rodada anterior, que são feitos em paralelo e juntados depois. Os consertos cobrem o treino, a fila de saída, a foto ampliada, o "Disponível offline" e o modo dev, a presença e a conversa, os Filtros e "Minha área", a conta em duas abas, e a extensão.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**Treino**
+- **Se o app descobre, com o treino aberto, que a sua fila precisa mudar, o treino continua.** Isso vale quando você edita em outro país, quando a área salva no filtro não é mais sua, ou quando "Minha área" esperava o seu perfil chegar. Antes o treino terminava sem aviso: a faixa "nada é enviado ao Waze" sumia, o card da frente virava um pedido de verdade e o próximo ✕ ia pro Waze no seu nome. Agora a fila certa aparece quando você sai do treino, com o aviso "Mostrando a fila de…" quando o país muda.
+- **No treino, a folha do autor (o "✕ N" vermelho no card) não oferece mais o que mudaria algo de verdade.** Ligar "Rejeitar sozinho os próximos deste autor" durante o treino ligava a recusa de verdade: ao sair do treino, os pedidos daquele autor iam ao Waze como rejeitados, no seu nome. Agora, no treino, a folha mostra só o que o "✕ N" quer dizer e o "Ver os N primeiro"; o "Rejeitar os N", a recusa automática e o "Esquecer" ficam pra fora dele.
+- **Os avisos que chegam enquanto você está no treino não somem mais no seu próximo gesto.** O resultado do "Rejeitar os N" ("2 rejeitados", "1 não deu certo"), o "Não deu pra excluir a foto" e o "Acesso renovado pelo WME" sumiam no primeiro ✕, ✓ ou ↑ do treino, um segundo depois de aparecer. Agora eles ficam o tempo de sempre; só a explicação do treino é trocada a cada gesto.
+- **"Praticar" e "Quero treinar antes" enquanto o "Marcar todos" ou a aprovação de uma foto ainda está a caminho do Waze dizem o que esperar, e a janela fica aberta**, como já acontecia com a renovação do acesso. Antes ela fechava, e o aviso mandava tocar de novo num botão que já não estava na tela.
+- **Um pedido que o Waze recusou enquanto você treinava volta, ao sair do treino, com a foto que você excluiu (ou o nome que corrigiu) logo antes de entrar.** Antes ele voltava com a foto que já tinha saído, e a lixeira dizia "Outro editor já tinha excluído". E quando a exclusão não chegava ao Waze, a foto não voltava pra tela e o app não avisava.
+- **Se o sinal volta enquanto você treina, os pedidos que você pulou sem sinal voltam quando você sai do treino** (quando a sua fila tinha ficado vazia antes dele). Antes a tela dizia "Tudo limpo!" com eles ainda pendentes. E o sinal voltando no fim do treino não o encerra mais por baixo do "Treino concluído".
+- **Pelo teclado, "Quero treinar antes" no "Como funciona" que aparece sozinho na primeira vez leva o foco ao ✕ do primeiro card do treino.** Antes o foco ia pro botão da Ajuda no topo, e o Enter seguinte abria a Ajuda de novo.
+
+**A sua decisão não some nem conta duas vezes**
+- **Uma decisão sua que chega ao Waze enquanto as decisões que esperavam envio estão saindo não vai mais de novo ao Waze.** Quando o sinal voltava, o app mandava as decisões guardadas uma por uma, com uma pausa entre elas; um ✕ (ou o "Rejeitar os N") dado nesse meio, que chegava ao Waze durante a pausa, era mandado uma segunda vez logo depois. O placar e o Histórico já contavam certo.
+- **Com "Pular guarda o pedido" ligado, pular um pedido que já tem a ⭐ não manda a estrela de novo nem conta outra vez no "Colecionador".** Antes, o mesmo pedido pulado várias vezes (ele volta no "Verificar novamente" e no dia seguinte) contava a cada vez, e dez pulos davam a conquista.
+
+**Foto ampliada**
+- **Na foto ampliada, um zoom pequeno demais pra se ver não deixa mais as setas "presas".** Bastava um giro leve na roda do mouse, no trackpad ou um tremor dos dedos na pinça: a seta → arrastava a foto em vez de trocar, o ↓ não fechava, o arraste não trocava e o toque duplo não ampliava. Agora, enquanto a foto não cresce o bastante pra você ver, tudo funciona como no tamanho normal.
+- **Desfazer a exclusão da foto denunciada (🚩) com a foto ampliada aberta devolve o 🚩 a ela.** Antes ela voltava sem o selo até você reabrir a foto.
+- **Pelo teclado, aprovar a foto do último pedido e fechar a foto enquanto o app ainda busca mais pedidos leva o foco pro "Verificar novamente"**, ou pro pedido novo, se ele chegar. Antes o foco ficava no botão da Ajuda, no topo da página.
+- **Pelo teclado e sem o Desfazer: quando você exclui uma foto e vai até o ✕ do card antes de o Waze responder, o foco continua no ✕ quando a resposta chega.** Antes ele pulava pra foto do card, e o Enter seguinte não fazia nada.
+- **Com leitor de tela e sem o Desfazer, a exclusão de uma foto e a correção do nome são anunciadas ("Foto excluída", "Renomeado para …") também quando você fecha a foto antes de o Waze responder.** Antes o card mudava sem nada ser dito.
+- **Com leitor de tela, desfazer a exclusão de uma foto com a foto aberta diz qual foto voltou pra tela** ("Foto 2 de 3"), como quando você troca de foto.
+
+**"Minha área" e Filtros**
+- **Com "Minha área" ligada, quem edita só na América do Norte (ou em Israel) e entra no app num aparelho que estava na região do resto do mundo não ouve mais "Seu perfil do Waze não tem área de edição".** O Waze guarda as áreas de edição separadas por servidor, e o app olhava o servidor errado: desligava "Minha área" e mostrava a fila do país inteiro. Agora ele confere as áreas no servidor onde você edita, leva a fila pra lá e "Minha área" continua ligada. Se você não tem área de edição em servidor nenhum, o aviso continua.
+- **Com "Minha área" ligada, quando o app abre com o aviso "Conexão instável — sua sessão continua válida", a sua fila é buscada uma vez só.** Antes saíam duas buscas, e pra quem só edita noutro servidor a primeira ia ao servidor errado: a tela dizia "Tudo limpo! … Confira o país e a região" por um instante antes do primeiro card.
+- **A lista de países não é mais buscada de novo quando o app já a tem.** Ir a outra região e voltar nos Filtros, aplicar outra região e reabrir os Filtros, ou o app reconectar a sua sessão não pedem mais a mesma lista ao Waze. Ela vale até você sair do app (ou outra conta entrar).
+- **A dica do "📍 Perto de mim" dá a precisão da sua posição como o resto do app dá distâncias**: "±12,3 km" em vez de "±12346 m".
+- **Uma distância entre 999,5 m e 1 km aparece como "1 km"** (no card e no mapa), e não mais como "1.000 m".
+
+**Disponível offline**
+- **Ligar o "Disponível offline" sem sinal, com o treino aberto, guarda a sua fila no aparelho.** Antes a linha dizia "4 pedidos guardados" e nada era guardado: reabrindo o app sem sinal, a tela dizia que você estava sem sinal.
+- **Entrar no treino enquanto o app prepara a fila pra usar sem sinal não faz mais ele preparar os exemplos do treino.** Antes ele dava a sua fila por "Pronto" e apagava do aparelho o mapa dos pedidos que não viraram exemplo.
+- **Abrindo o app sem sinal e entrando no treino antes de a sua fila guardada aparecer, as Preferências dizem "Pronto — N pedidos no aparelho"**, como depois de sair do treino. Antes diziam "Sem sinal agora. Vai preparar sozinho…".
+- **Com a internet ruim (o celular diz que tem rede, mas nada responde), o card de foto sai do "A foto precisa de sinal" assim que o app confirma que a rede está funcionando, também quando isso acontece antes de o app tentar a foto de novo.** Antes, nesse caso, ✕ e ✓ ficavam travados uns 10 segundos.
+
+**Sair e conta**
+- **Abrindo o app numa aba nova enquanto você entra por outra aba, a tela não fica mais em branco.** Se o app estava perguntando à extensão ("Entrando pelo WME…") e você entrou pela outra aba nesse meio, a aba nova ficava só com o cabeçalho, sem nenhum caminho pra entrar, até recarregar. Agora ela abre já com a sua entrada, como se tivesse aberto um instante depois.
+- **Numa aba parada na tela de entrada, o "Sair" dado em outra aba não fecha mais o "Colar cookies" nem apaga o que você estava colando.** Depois de voltar a essa aba (no Chrome do computador), ela passava a contar como se tivesse entrado, e o "Sair" da outra a fechava junto, com o aviso "Você saiu em outra aba" — numa aba em que você nem tinha entrado.
+
+**Presença e conversa**
+- **Com a conversa aberta, ao sair do modo avião, a resposta da outra pessoa aparece sozinha — mesmo se você só estiver olhando a conversa e o celular não avisar que a rede voltou.** O app tenta de novo em poucos segundos (sem sinal por muito tempo, uma vez por minuto), e um toque na conversa tenta na hora. Antes, ela só aparecia depois da sua próxima ação no app, como um ✕ ou mandar uma mensagem.
+- **Uma resposta que chega com a conversa fechada não some mais da "mensagem nova" enquanto o aviso de que você leu a mensagem anterior ainda está a caminho** (com o Waze lento), nem quando esse aviso chega.
+- **Quando o aviso de leitura falha ao abrir uma conversa, a mensagem nova que chega depois, e que você ainda não viu, não é mais dada como lida**: ela continua como "mensagem nova", e quem mandou não vê "Lida".
+- **Com o app aberto em duas abas, o aviso de que você leu uma mensagem vista sem sinal sai uma vez só.** Antes podiam sair dois.
+- **Desligar "Ver quem está no app" com o app aberto em duas abas não manda mais o mesmo pedido ao Waze pelas duas também quando uma delas entrou de novo** (pelo botão do WME ou colando os cookies). Ele sai por uma de cada vez, no máximo uma vez por minuto.
+- **Se o celular fecha o app no fundo com o pedido de ficar invisível a caminho, ao abrir o app de novo ele sai na hora**, em vez de esperar um minuto.
+
+**Modo Desenvolvedor**
+- **O diagnóstico baixado depois de outra conta entrar no aparelho (ou de "Sair" e entrar de novo sem fechar o app) volta a levar o código do app.** É ele que diz se o seu aparelho está com a versão atual, e a tela remontada a partir do diagnóstico volta a sair com o visual do app. Antes ele levava só 2 dos 11 arquivos.
+- **Quando outra conta entra no aparelho, o diagnóstico de quem entrou não leva mais a lista do que a conta anterior pediu ao servidor** (o que era pedido e quando, sem o conteúdo), como já acontecia depois do "Sair".
+- **No computador, no tablet e com o celular deitado, o botão do modo dev não fica mais em cima do número de decisões esperando envio.** Ele muda de canto quando o número aparece, e volta quando o número some.
+- **Com o app aberto em duas abas, as telas que uma aba registrou e que foram no diagnóstico baixado na outra contam como entregues.** Elas não entram de novo no próximo diagnóstico, e desligar o modo dev na aba que as registrou não avisa mais de registros "não baixados" que já foram.
+- **A triagem do relatório diz quando o tempo real da conversa está parado pela falta de rede, e quantas conversas têm o aviso de leitura a caminho**; o diário registra quando ele parou e quando voltou, e por quê.
+- **O diagnóstico feito com o treino aberto diz o que está esperando você sair do treino**: a sua fila guardada (do "Disponível offline"), a recusa automática e a fila que o seu perfil mandou refazer. Antes ele dizia "fila real: 0 pedidos", como se a fila tivesse sumido.
+
+**Extensão Waze Places Rapid Access (valem quando a 0.3.4 for publicada)**
+- **Com o Waze lento, a extensão não fica mais tentando entrar depois que o app desiste.** Quando você abre o app, volta à aba dele ou a sua sessão cai, o app pede o seu acesso à extensão e espera até 8 segundos. Antes, depois desse tempo o app mostrava a tela de entrada, mas a extensão seguia indo ao Waze no seu nome por até dois minutos, e cada volta à aba abria mais uma tentativa ao lado das outras. Quando uma delas dava certo, o acesso chegava tarde e se perdia, e você continuava na tela de entrada. Agora a extensão desiste antes do app e o avisa, e faz uma tentativa por vez, mesmo com o app aberto em mais de uma aba.
+
+### Documentação
+- **O manual de instalação conta todos os apagamentos no banco do Cloudflare (plano grátis)**: além do "Sair" e do código de "Conectar outro aparelho", a aprovação de foto logo depois de tocar na lixeira, a sessão recusada quando o nível ou a área mudam no Waze e a sessão que não abre mais — esta vira uma rajada no dia em que se troca a `ENCRYPTION_KEY`.
+- **A extensão 0.3.4** documenta no README o campo `espera` da pergunta do app.
+
 ## v2026.10.06-01
 
 Décima primeira rodada da auditoria. Depois da v2026.10.03-01, conferida em produção com duas contas, sete auditores revisaram o app de novo. Eles conferiram os consertos da rodada anterior e as costuras entre eles, porque os lotes são feitos em paralelo e juntados depois. Os consertos cobrem o treino, a foto ampliada, a fila e os lotes, o "Disponível offline" e o modo dev, a presença e a conversa, os Filtros, a conta e o "Sair", e a extensão.

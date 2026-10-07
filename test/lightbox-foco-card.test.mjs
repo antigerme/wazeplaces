@@ -69,9 +69,12 @@ function tela({ comFoto = true } = {}) {
     return { filhos, contains: (x) => Object.values(filhos).includes(x), querySelector: (s) => filhos[s] || null };
   };
   let card = novoCard({ comFoto });
+  // Sem card na frente (a fila acabou, a busca corre), o próximo só CHEGA.
   const trocarCard = (novo) => {
-    for (const f of Object.values(card.filhos)) f.isConnected = false;
-    if (card.contains(doc.activeElement)) doc.activeElement = doc.body;
+    if (card) {
+      for (const f of Object.values(card.filhos)) f.isConnected = false;
+      if (card.contains(doc.activeElement)) doc.activeElement = doc.body;
+    }
     card = novo;
   };
   const ajuda = el('ⓘ Ajuda');
@@ -96,16 +99,20 @@ function tela({ comFoto = true } = {}) {
     noMoreCards: painel('noMoreCards'), loadErrorState: painel('loadErrorState'), reloadBtn, retryLoadBtn,
   })[id] || null;
   doc.createElement = () => ({});
+  // A sessão de pé (o foco prometido ao card que chegar só vale com ela, R9-3-02).
+  const AppState = { authenticated: true };
   const deps = {
-    document: doc, MODAL_IDS: ['filtersModal'],
+    document: doc, MODAL_IDS: ['filtersModal'], AppState, acoesTravadas: () => false,
     Lightbox: { isOpen: () => camadas.foto }, MapaLightbox: { isOpen: () => camadas.mapa },
     removeUndoBanner: () => {}, escapeHtml: (s) => s, t: (k) => k, UNDO_WINDOW_MS: 3000,
   };
+  // O `aplicarFocoDoTeclado` (R7-2-06) de verdade: é ele que pousa o foco que o
+  // fechar de uma ampliação PROMETE quando não há card nem painel (R9-3-02).
   const nomes = ['dentroDeCamada', 'focavelNaTela', 'devolverFoco', 'topOpenModal', 'cardDaFrente',
     'devolverFocoDaAmpliacao', 'botaoDoPainelDoFim', 'focoPerdido', 'semCamadaAberta', 'mantendoFocoNoCard',
-    'veioDoTeclado', 'mostrarDesfazer'];
-  const app = new Function(...Object.keys(deps), 'let ultimoFocoForaDasCamadas = null;\n'
-    + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...Object.values(deps));
+    'veioDoTeclado', 'mostrarDesfazer', 'aplicarFocoDoTeclado'];
+  const app = new Function(...Object.keys(deps), 'let ultimoFocoForaDasCamadas = null;\nlet focoDoTeclado = null;\n'
+    + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')}, promessa: () => focoDoTeclado };`)(...Object.values(deps));
   // O clique no "Desfazer" como o navegador o entrega: o Enter no botão focado
   // chega com `detail` 0; o mouse e o dedo, com 1. O banner some com o foco nele.
   const clicarDesfazer = ({ detail, aoDesfazer }) => {
@@ -119,7 +126,7 @@ function tela({ comFoto = true } = {}) {
   };
   const mostrarPainel = (id) => { paineis[id] = true; };
   return { app, doc, camadas, card: () => card, novoCard, trocarCard, ajuda, cabecalho, undoBtn, clicarDesfazer,
-    mostrarPainel, reloadBtn, retryLoadBtn };
+    mostrarPainel, reloadBtn, retryLoadBtn, AppState };
 }
 
 const nome = (doc) => doc.activeElement && doc.activeElement.nome;
@@ -144,12 +151,13 @@ test('R5-3-07 o card trocado (ou redesenhado) debaixo do foco: o foco vai à fot
   s.app.mantendoFocoNoCard(() => s.trocarCard(semFoto));
   assert.equal(s.doc.activeElement, semFoto.filhos['.card-map'], `sem a foto, o foco caiu em ${nome(s.doc)}`);
   // A fila acabou e o painel do fim ainda não veio (a busca corre): sem card nem
-  // painel, o lugar de sempre (`devolverFoco`). Com o painel, o botão dele (R8-3-06,
-  // logo abaixo).
+  // painel, o foco fica PROMETIDO a quem chegar, nunca no ⓘ do topo (R9-3-02,
+  // abaixo). Com o painel, o botão dele (R8-3-06, logo abaixo).
   const f = tela();
   f.card().filhos['.card-image'].focus();
   f.app.mantendoFocoNoCard(() => f.trocarCard(null));
-  assert.equal(f.doc.activeElement, f.ajuda, `com a fila no fim e sem painel, o foco caiu em ${nome(f.doc)}`);
+  assert.notEqual(f.doc.activeElement, f.ajuda, 'com a fila no fim e sem painel, o foco foi pro ⓘ do topo (R9-3-02)');
+  assert.deepEqual(f.app.promessa(), ['.card-image', '.card-map'], 'com a fila no fim e sem painel, o foco não ficou prometido');
 });
 
 // ── R8-3-06: a fila que ACABA com a foto ampliada aberta ──────────────────────
@@ -355,4 +363,138 @@ test('R8-3-06 o fechar da foto e o foco prometido ao teclado escolhem o MESMO bo
     assert.equal(doFechar, doTeclado,
       `painéis ${JSON.stringify(visiveis)}: o fechar da foto escolhe ${doFechar && doFechar.nome} e o teclado ${doTeclado && doTeclado.nome}`);
   }
+});
+
+// ── R9-3-02: a fila acaba com a próxima página NO AR: o foco é PROMETIDO ──────
+// (auditoria de 2026-10-06, o incompleto do R8-3-06). Aprovar a foto do ÚLTIMO
+// pedido e fechar a foto com a busca da página seguinte ainda correndo: sem card
+// e sem painel na tela (o esqueleto), o fechar levava o foco ao ⓘ da Ajuda, no
+// topo da página, e ele FICAVA lá quando o "Tudo limpo!" ou o card novo chegavam
+// — MEDIDO nos dois motores (r34 D1 e D2), enquanto o mesmo último pedido decidido
+// pelo Enter no ✓ do card leva o foco ao painel ou ao card novo (o
+// `aplicarFocoDoTeclado` espera, R7-2-06). O fechar promete o foco pela MESMA
+// régua: o card que chegar recebe o foco no mesmo lugar (a foto ou o mapa dele),
+// o painel, no botão dele. `devolverFocoDaAmpliacao` e `aplicarFocoDoTeclado`
+// de verdade; quem os chama na chegada é o `renderCurrentCard`/`showNoPlaces`.
+test('R9-3-02 fechar a foto sem card e sem painel (a busca no ar): o foco não vai ao ⓘ — o painel ou o card que chegar o recebe', () => {
+  const fechar = (m, quem = m.card().filhos['.card-image'], noCard = ['.card-image', '.card-map']) => {
+    m.trocarCard(null);                                   // o fechar anda a fila: ela acaba, sem painel (a busca corre)
+    m.app.devolverFocoDaAmpliacao(quem, noCard);
+  };
+  // D1: a busca volta vazia — o painel "Tudo limpo!" chega e leva o foco.
+  const d1 = tela();
+  fechar(d1);
+  assert.notEqual(d1.doc.activeElement, d1.ajuda,
+    'DEFEITO: a fila acabou com a busca no ar e o fechar da foto levou o foco ao ⓘ do topo (e ele ficaria lá)');
+  assert.deepEqual(d1.app.promessa(), ['.card-image', '.card-map'], 'DEFEITO: o foco não ficou prometido a quem chegar');
+  d1.app.aplicarFocoDoTeclado();                          // antes de o painel chegar: espera
+  assert.deepEqual(d1.app.promessa(), ['.card-image', '.card-map'], 'sem card nem painel, a promessa caiu antes da chegada');
+  d1.mostrarPainel('noMoreCards');
+  d1.app.aplicarFocoDoTeclado();                          // o `showNoPlaces`
+  assert.equal(d1.doc.activeElement, d1.reloadBtn, `o "Tudo limpo!" chegou e o foco ficou em ${nome(d1.doc)}`);
+  assert.equal(d1.app.promessa(), null, 'a promessa ficou pendurada depois de pousar');
+  // A falha ao carregar: o "Tentar de novo".
+  const fa = tela();
+  fechar(fa);
+  fa.mostrarPainel('loadErrorState');
+  fa.app.aplicarFocoDoTeclado();
+  assert.equal(fa.doc.activeElement, fa.retryLoadBtn, `a falha chegou e o foco ficou em ${nome(fa.doc)}`);
+  // D2: a busca traz um pedido novo — o foco vai à foto do card que chegou.
+  const d2 = tela();
+  fechar(d2);
+  const novo = d2.novoCard();
+  d2.trocarCard(novo);
+  d2.app.aplicarFocoDoTeclado();                          // o `renderCurrentCard`
+  assert.equal(d2.doc.activeElement, novo.filhos['.card-image'], `o card novo chegou e o foco ficou em ${nome(d2.doc)}`);
+  // O card que chega sem a foto (o que abre no mapa): o mapa.
+  const sm = tela();
+  fechar(sm);
+  const semFoto = sm.novoCard({ comFoto: false });
+  sm.trocarCard(semFoto);
+  sm.app.aplicarFocoDoTeclado();
+  assert.equal(sm.doc.activeElement, semFoto.filhos['.card-map'], `o card sem foto chegou e o foco ficou em ${nome(sm.doc)}`);
+  // O fechar do MAPA promete o mapa primeiro (a régua dele).
+  const mp = tela();
+  fechar(mp, mp.card().filhos['.card-map'], ['.card-map', '.card-image']);
+  const outro = mp.novoCard();
+  mp.trocarCard(outro);
+  mp.app.aplicarFocoDoTeclado();
+  assert.equal(mp.doc.activeElement, outro.filhos['.card-map'], `o fechar do mapa: o card novo chegou e o foco ficou em ${nome(mp.doc)}`);
+});
+
+test('R9-3-02 CONTROLES: sem sessão vale a reserva; o lugar que a pessoa escolheu ganha; um modal por cima não é mexido', () => {
+  // Sem sessão (a queda fecha as camadas): não vem card — a reserva, como antes.
+  const s = tela();
+  s.AppState.authenticated = false;
+  s.trocarCard(null);
+  s.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  assert.equal(s.doc.activeElement, s.ajuda, `CONTROLE: sem sessão, o foco foi a ${nome(s.doc)} (a reserva é o ⓘ)`);
+  assert.equal(s.app.promessa(), null, 'CONTROLE: sem sessão, o foco ficou prometido a um card que não vem');
+  // A pessoa levou o foco a outro lugar (o Tab) antes de o card chegar: o lugar dela ganha.
+  const t = tela();
+  t.trocarCard(null);
+  t.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  t.cabecalho.focus();
+  const novo = t.novoCard();
+  t.trocarCard(novo);
+  t.app.aplicarFocoDoTeclado();
+  assert.equal(t.doc.activeElement, t.cabecalho, 'CONTROLE: o card que chegou arrancou o foco de onde a pessoa o pôs');
+  assert.equal(t.app.promessa(), null, 'CONTROLE: a promessa sobreviveu à escolha da pessoa');
+  // Um modal por cima: o foco é dele, e nada é prometido.
+  const md = tela();
+  md.trocarCard(null);
+  md.camadas.modal = true;
+  md.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  assert.deepEqual([md.doc.activeElement, md.app.promessa()], [md.doc.body, null], 'CONTROLE: com um modal aberto, o fechar mexeu no foco');
+  // CONTROLE: com o painel JÁ na tela (o R8-3-06), o foco vai a ele na hora, sem promessa.
+  const p = tela();
+  p.trocarCard(null);
+  p.mostrarPainel('noMoreCards');
+  p.app.devolverFocoDaAmpliacao(null, ['.card-image', '.card-map']);
+  assert.deepEqual([p.doc.activeElement, p.app.promessa()], [p.reloadBtn, null], 'CONTROLE: com o painel na tela, o foco não foi ao botão dele na hora');
+});
+
+// ── R9-3-04: o redesenho do MESMO pedido pela escrita da foto mantém o ✕ ───────
+// (auditoria de 2026-10-06). Sem o Desfazer, a exclusão no ar não trava o card:
+// quem fecha a foto (Esc) e vai pelo Tab até o ✕ perdia o lugar quando a
+// resposta chegava, pousando ou falhando — o card era redesenhado e o foco ia
+// pra foto do card (`tabindex="-1"`, fora da ordem do Tab), e o Enter seguinte
+// não fazia nada (MEDIDO nos dois motores, r39 A e B). O redesenho é do MESMO
+// pedido: o foco num ✕ ↑ ✓ vai ao MESMO botão do card novo (o `mesmoBotao` do
+// R8-4-03). O `devolverFoto` (a falha, e o Desfazer pela tecla z) e o
+// `mantendoFocoNoCard` de verdade; o `.then` e o irmão em
+// test/lightbox-escritas ("R5-3-07 excluir sem o Desfazer…").
+test('R9-3-04 a foto que volta (a falha, o Desfazer) redesenha o MESMO pedido: o foco no ✕ ↑ ✓ fica no mesmo botão — na foto, fica na foto', () => {
+  const devolverCom = (m, P, novo) => new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard',
+    fatiar('devolverFoto') + '\nreturn devolverFoto;')({ place: null }, { currentPlace: P }, () => m.trocarCard(novo), m.app.mantendoFocoNoCard);
+  for (const sel of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+    const m = tela();
+    m.card().filhos[sel].focus();                       // o Tab levou o foco ao botão
+    const P = { imageUrls: [], approvedImageIds: [] };
+    const novo = m.novoCard();
+    devolverCom(m, P, novo)({ id: 'f1', place: P, idx: 0, url: 'https://venue-image.waze.com/f1.jpg' });
+    assert.equal(m.doc.activeElement, novo.filhos[sel],
+      `DEFEITO: o redesenho do MESMO pedido levou o foco do ${sel} a ${nome(m.doc)} — o Enter seguinte não decide nada`);
+  }
+  // CONTROLE: o foco na foto do card (onde o Esc o pôs) fica na foto do card novo.
+  const f = tela();
+  f.card().filhos['.card-image'].focus();
+  const P = { imageUrls: [], approvedImageIds: [] };
+  const novo = f.novoCard();
+  devolverCom(f, P, novo)({ id: 'f1', place: P, idx: 0, url: 'https://venue-image.waze.com/f1.jpg' });
+  assert.equal(f.doc.activeElement, novo.filhos['.card-image'], `CONTROLE: o foco na foto do card foi a ${nome(f.doc)}`);
+});
+
+// E a regra é ESTRUTURAL: todo redesenho pelo `showCurrentPlace` debaixo do foco
+// é do MESMO pedido (quem chama confere `AppState.currentPlace === place` antes)
+// e passa o `mesmoBotao`; o que TROCA o pedido é o `advanceQueue`, que não passa.
+// Lê só código (gotcha #67): o comentário cita os nomes.
+test('R9-3-04 todo `mantendoFocoNoCard(showCurrentPlace…)` passa `{ mesmoBotao: true }` — o `advanceQueue`, que troca o pedido, não', () => {
+  const codigo = SEM;
+  const redesenhos = [...codigo.matchAll(/mantendoFocoNoCard\(showCurrentPlace\b([^)]*)\)/g)];
+  assert.ok(redesenhos.length >= 5, `CONTROLE: só ${redesenhos.length} redesenhos pelo \`showCurrentPlace\` achados — o guard estaria cego`);
+  const sem = redesenhos.filter((m) => !/^,\s*\{\s*mesmoBotao:\s*true\s*\}$/.test(m[1]));
+  assert.deepEqual(sem.map((m) => m[0]), [], 'um redesenho do MESMO pedido deixou de levar o foco do ✕ ↑ ✓ ao mesmo botão');
+  const trocas = [...codigo.matchAll(/mantendoFocoNoCard\(advanceQueue\b([^)]*)\)/g)];
+  assert.ok(trocas.length >= 1 && trocas.every((m) => m[1] === ''), 'o `advanceQueue` (OUTRO pedido na frente) passou a levar o foco ao mesmo botão');
 });

@@ -111,6 +111,9 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     // A ordem da fila (F8): com a padrão, a busca é a de sempre — e a
     // ordem-paginada.test.mjs mede as outras.
     ORDEM_PADRAO: 'newest',
+    // A fila que espera o perfil ("Minha área"): aqui, nenhuma (R9-6-03 em
+    // test/filtros-aplicar.test.mjs).
+    filaEsperaPerfil: false,
   };
   const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage']
@@ -395,7 +398,10 @@ test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com c
   const r = fatiar('retomarBusca');
   const chamadas = [];
   const AppState = { queue: [], loadError: true, hasMore: false };
-  const rodar = new Function('AppState', 'resetQueue', 'startFetching', r + '\nreturn retomarBusca;')(
+  // A fila vazia é a REAL (`filaReal`), e o atualizar passa pela função que
+  // respeita o treino aberto (`refazerFilaReal`; o treino em test/treino-fila-real-r9).
+  const rodar = new Function('AppState', 'resetQueue', 'startFetching',
+    [fatiar('filaReal'), fatiar('refazerFilaReal'), r].join('\n') + '\nreturn retomarBusca;')(
     AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'));
   rodar();
   assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');
@@ -466,7 +472,8 @@ test('O6: o teto da recomposição vale também com card na fila — e 401 de A�
   const rodar = (estado, rebuscasAuto) => {
     const AppState = { queue: [{}], fetching: false, hasMore: false, loadError: true, ...estado };
     const chamadas = [];
-    const f = new Function('AppState', 'MAX_REBUSCAS_AUTO', 'maybePrefetch', 'startFetching', `let rebuscasAuto = ${rebuscasAuto};\n${src}
+    const f = new Function('AppState', 'MAX_REBUSCAS_AUTO', 'maybePrefetch', 'startFetching', `let rebuscasAuto = ${rebuscasAuto};
+      let filaEsperaPerfil = false;\n${src}
       rebuscarDepoisDeFalha(); return rebuscasAuto;`);
     const depois = f(AppState, constante('MAX_REBUSCAS_AUTO'), () => chamadas.push('prefetch'), () => chamadas.push('start'));
     return { AppState, chamadas, depois };

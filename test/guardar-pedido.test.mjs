@@ -49,13 +49,13 @@ test('a preferência nasce DESLIGADA, e só liga quem disse que quer', () => {
 });
 
 // ── 2. A PROMESSA DO PULAR ─────────────────────────────────────────────────
-function rodarSkip({ pularGuarda }) {
+function rodarSkip({ pularGuarda, isStarred }) {
   const chamadas = [];
   const conquistas = [];
   const agendadas = [];
   const escopo = {
     AppState: {
-      currentPlace: { venueID: 'v1', updateRequestID: 'ur1', name: 'Bar do Zé' },
+      currentPlace: { venueID: 'v1', updateRequestID: 'ur1', name: 'Bar do Zé', ...(isStarred !== undefined ? { isStarred } : {}) },
       queue: [], stats: { skipped: 0 }, preferences: { pularGuarda },
     },
     acoesTravadas: () => false, epocaDaSessao: 0,
@@ -94,6 +94,28 @@ test('LIGADA, o Pular guarda o pedido — e guarda o pedido CERTO', async () => 
   // gesto (antes da resposta) e premiar guardar que falhou.
   assert.deepEqual(r.conquistas, ['guardados'],
     'guardar com sucesso deixou de contar pra conquista do Colecionador');
+});
+
+// R9-7-06 (auditoria de 2026-10-06): o pulado volta no "Verificar novamente" — e
+// no dia seguinte — com a ⭐ no card (o `isStarred` que a busca traz). O ↑ com a
+// preferência mandava a estrela DE NOVO: nada mudava no Waze, gastava uma
+// requisição e contava outra vez no "Colecionador — guardar 10 pedidos" (MEDIDO:
+// 2 estrelas e `guardados: 2` com um pedido só). O ↑ segue sendo pular.
+test('R9-7-06: o pedido que JÁ tem a estrela não ganha outra — e o ↑ não conta de novo no "Colecionador"', async () => {
+  const r = rodarSkip({ pularGuarda: true, isStarred: true });
+  assert.equal(r.stats.skipped, 1, 'o ↑ deixou de contar como pular');
+  assert.equal(r.agendadas.length, 1, 'o ↑ deixou de passar pelo scheduleAction (perde o Desfazer)');
+  await r.agendadas[0].executor();
+  assert.deepEqual(r.chamadas, [], 'DEFEITO: o ↑ mandou de novo a estrela de um pedido que já a tem');
+  assert.deepEqual(r.conquistas, [], 'DEFEITO: o pedido que já estava guardado contou de novo no "Colecionador"');
+  // CONTROLE: o mesmo pedido SEM a estrela é guardado e conta (o teste vê a ida).
+  const c = rodarSkip({ pularGuarda: true, isStarred: false });
+  await c.agendadas[0].executor();
+  assert.equal(c.chamadas.length, 1, 'o pedido sem a estrela deixou de ser guardado');
+  assert.deepEqual(c.conquistas, ['guardados']);
+  // O js/min/ é o que o navegador carrega (gotcha #22).
+  const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
+  assert.match(MIN, /pularGuarda===!0&&\w+\.isStarred!==!0/, 'js/min/app.js não tem o conserto — faltou `npm run js`');
 });
 
 test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {

@@ -79,8 +79,10 @@ function montarPainel({ modalAberto = true, abaNaTela = true } = {}) {
     podarHistorico: () => false, salvarHistorico: (h) => guardado.set('waze_places_history', JSON.stringify(h)),
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     renderHistory: () => { desenhos.n++; }, garantirLinhaDeBaseDasConquistas: () => {},
+    textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
-  const api = montar(['historicoNaTela', 'agendarRedesenhoDoHistorico', 'loadHistory', 'recordHistory'], deps,
+  const api = montar(['historicoNaTela', 'agendarRedesenhoDoHistorico', 'copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory',
+    'recordHistory'], deps,
     ['recordHistory', 'historicoNaTela'], 'let redesenhoDoHistoricoAgendado = false;');
   return { ...api, desenhos, modal, painel };
 }
@@ -191,10 +193,12 @@ function armazenamentoCompartilhado(inicial = {}) {
   };
 }
 function abrirAba(comp) {
-  const aba = { selo: 0, redesenhos: 0 };
+  const aba = { selo: 0, redesenhos: 0, lidas: 0 };
   const AppState = { history: null, conquistas: null, autores: null, authenticated: true };
   const deps = {
     AppState, localStorage: comp.para(aba),
+    // O JSON CONTADO: quantas vezes esta aba releu uma estrutura do aparelho.
+    JSON: { parse: (t) => { aba.lidas++; return JSON.parse(t); }, stringify: (v) => JSON.stringify(v) },
     HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
     AUTORES_MAX_DIAS: 30, AUTORES_MAX_REINCIDENTES: 500, AUTORES_MAX_VISTOS: 6000, diaDeHoje: () => 20000,
     podarHistorico: () => false, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
@@ -206,10 +210,12 @@ function abrirAba(comp) {
     // PRÓPRIO (test/contas-abas); aqui só se anota a chave que chegou.
     sincronizarComOutraAba: (chave) => { (aba.sincronizou = aba.sincronizou || []).push(chave); },
     garantirLinhaDeBaseDasConquistas: () => {},
+    // A cópia em memória × o aparelho (R9-2-03): o que cada cópia DESTA aba leu.
+    textoDaCopia: new WeakMap(),
   };
-  const nomes = ['salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas', 'salvarConquistas',
-    'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
-  Object.assign(aba, montar(nomes, deps, nomes), { AppState });
+  const nomes = ['copiaEmDia', 'lembrarTextoDaCopia', 'salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas',
+    'salvarConquistas', 'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
+  Object.assign(aba, montar(nomes, deps, nomes), { AppState, textoDaCopia: deps.textoDaCopia });
   comp.abas.push(aba);
   return aba;
 }
@@ -226,14 +232,100 @@ test('H3: o trabalho de uma aba NÃO some quando a outra grava — histórico', 
   assert.ok(B.redesenhos >= 1, 'o painel aberto da aba avisada não é redesenhado');
 });
 
-test('H3: CONTROLE — sem o aviso do navegador a perda acontece (o teste mede o que diz medir)', () => {
+// ── R9-2-03: as gravações que chegam ANTES do aviso ───────────────────────────
+// O aviso do navegador é uma TAREFA: duas decisões pousando juntas, uma em cada
+// aba (a recusa automática, o "Rejeitar os N" ou a fila de saída numa, a pessoa
+// decidindo na outra), gravavam dentro da latência dele, e a segunda aba
+// gravava a cópia VELHA por cima — o Histórico, a reincidência do autor e a
+// "Mão firme" ficavam com UMA das duas (auditoria de 2026-10-06). Aqui o aviso
+// NÃO é entregue: é a conferência do texto do aparelho (`copiaEmDia`) que tem
+// de pegar a gravação. O armazenamento de mentira é UM só pras duas abas — é o
+// caso das abas no MESMO processo do navegador, em que o conserto fecha a
+// corrida (MEDIDO no Chromium com um processo só: 4 de 4 → 0 de 4). Com
+// processos separados a gravação da outra só chega junto com o aviso, e a
+// janela de 0,3 a 7 ms segue aberta (ver o comentário da `copiaEmDia`).
+test('R9-2-03: a outra aba gravou e o aviso AINDA NÃO chegou — a cópia é relida antes de aplicar (histórico)', () => {
+  const comp = armazenamentoCompartilhado({ waze_places_history: { _total: { read: 100, rejected: 0 } } });
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.loadHistory(); B.loadHistory();
+  for (let i = 0; i < 5; i++) A.recordHistory('read', 1);
+  comp.descartarAvisos();                              // o aviso não chegou a tempo
+  B.recordHistory('reject', 1);
+  assert.deepEqual(comp.ler('waze_places_history')._total, { read: 105, rejected: 1 },
+    'DEFEITO: a aba B gravou a cópia VELHA por cima — os 5 pedidos da aba A sumiram do Histórico (o aviso chegou tarde)');
+});
+
+test('R9-2-03: CONTROLE — sem a conferência (a cópia sem o texto lembrado, como era), a perda acontece', () => {
+  // O teste de cima mede o que diz medir: com a MESMA ordem e sem o texto
+  // lembrado da cópia da B, a gravação dela apaga a da A.
   const comp = armazenamentoCompartilhado({ waze_places_history: { _total: { read: 100, rejected: 0 } } });
   const A = abrirAba(comp), B = abrirAba(comp);
   A.loadHistory(); B.loadHistory();
   for (let i = 0; i < 5; i++) A.recordHistory('read', 1);
   comp.descartarAvisos();
+  B.textoDaCopia.delete(B.AppState.history);
   B.recordHistory('reject', 1);
   assert.deepEqual(comp.ler('waze_places_history')._total, { read: 100, rejected: 1 });
+});
+
+test('R9-2-03: a "Mão firme" (a sequência) e a reincidência dos autores também — com o aviso atrasado', () => {
+  const comp = armazenamentoCompartilhado();
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.carregarConquistas(); B.carregarConquistas();
+  A.carregarConquistas().seq += 1; A.salvarConquistas();   // a confirmação na A (`registrarAcaoConfirmada`)
+  B.carregarConquistas().seq += 1; B.salvarConquistas();   // e na B, antes do aviso
+  assert.equal(comp.ler('waze_places_conquistas').seq, 2,
+    'DEFEITO: a "Mão firme" perdeu a decisão da aba A — a B gravou a sequência a partir da cópia velha');
+
+  A.loadAutores(); B.loadAutores();
+  A.registrarRejeicaoDeAutor({ creatorId: 501, createdBy: 'aut1' });
+  B.registrarRejeicaoDeAutor({ creatorId: 502, createdBy: 'aut2' });
+  assert.deepEqual(comp.ler('waze_places_autores').v, ['501', '502'],
+    'DEFEITO: a reincidência perdeu o autor rejeitado na aba A — a B gravou o anel a partir da cópia velha');
+  // A reincidência que PROMOVE (a 2ª rejeição do mesmo autor, uma em cada aba).
+  A.registrarRejeicaoDeAutor({ creatorId: 501, createdBy: 'aut1' });
+  assert.equal(comp.ler('waze_places_autores').r['501']?.[0], 2,
+    'DEFEITO: a 2ª rejeição do autor (na aba A, depois da B gravar) não o promoveu — a A usou a cópia velha');
+});
+
+test('R9-2-03: a cópia EM DIA não relê o JSON — o custo por swipe fica no texto', () => {
+  // A regra do custo da gravação por swipe (o `setItem` síncrono): conferir a
+  // cópia não pode virar um `JSON.parse` a cada decisão. Sem outra aba gravando,
+  // dez pousos seguidos releem NADA; uma gravação da outra aba custa UMA releitura.
+  const comp = armazenamentoCompartilhado({ waze_places_history: { _total: { read: 0, rejected: 0 } } });
+  const A = abrirAba(comp), B = abrirAba(comp);
+  A.loadHistory(); A.carregarConquistas(); A.loadAutores();
+  const base = A.lidas;
+  assert.ok(base >= 1, 'CONTROLE: a 1ª leitura não passou pelo JSON contado — o instrumento não vê nada');
+  for (let i = 0; i < 10; i++) {
+    A.recordHistory('reject', 1);
+    A.registrarRejeicaoDeAutor({ creatorId: 600 + i, createdBy: 'x' });
+    A.carregarConquistas().seq += 1; A.salvarConquistas();
+  }
+  assert.equal(A.lidas - base, 0, `a cópia em dia releu o JSON ${A.lidas - base} vezes em 10 pousos — custo por swipe`);
+  B.recordHistory('read', 1);                          // a outra aba grava
+  comp.descartarAvisos();
+  A.recordHistory('reject', 1);
+  assert.equal(A.lidas - base, 1, 'a gravação da outra aba não custou exatamente UMA releitura');
+  assert.deepEqual(comp.ler('waze_places_history')._total, { read: 1, rejected: 11 });
+});
+
+test('R9-2-03: as três cópias passam pela conferência — e o bundle gerado tem o conserto', () => {
+  // As três leituras conferem o aparelho antes de usar a cópia, e as três
+  // gravações lembram o texto que deixaram (é isso que mantém o custo no texto).
+  for (const [ler, salvar, chave] of [['loadHistory', 'salvarHistorico', 'HISTORY_KEY'],
+    ['carregarConquistas', 'salvarConquistas', 'CONQUISTAS_KEY'], ['loadAutores', 'salvarAutores', 'AUTORES_KEY']]) {
+    assert.match(fatiar(ler), new RegExp('^\\s+if \\(copiaEmDia\\(AppState\\.\\w+, ' + chave + '\\)\\) return AppState\\.\\w+;', 'm'),
+      `${ler} usa a cópia em memória sem conferir o aparelho`);
+    assert.match(fatiar(salvar), new RegExp('lembrarTextoDaCopia\\([^)]*' + chave + '\\)'),
+      `${salvar} não lembra o texto que gravou — a próxima leitura relê o JSON à toa`);
+  }
+  // O js/min/ é o que o navegador carrega (gotcha #22).
+  const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
+  const contar = (txt, re) => (txt.match(re) || []).length;
+  for (const re of [/copiaEmDia\(/g, /lembrarTextoDaCopia\(/g]) {
+    assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
+  }
 });
 
 test('H3: conquistas e autores também — e o ponto da aba avisada segue o aparelho', () => {

@@ -348,6 +348,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
     esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
@@ -387,6 +388,12 @@ async function respostaDoPortao() {
 
 async function rodarBackground(corpoDoServidor) {
   let ouvinte = null, chamadas = 0;
+  // O relógio é de mentira: as esperas entre tentativas e o prazo do login (o da
+  // ponte, que este teste roda, desde a 0.3.4 — R9-1-02) andam na ordem, sem
+  // esperar de verdade. Disparar todo timer na hora, como antes, venceria o prazo
+  // assim que ele é armado.
+  let agora = Date.now();
+  const timers = new Set();
   const ctx = {
     chrome: {
       cookies: { getAll: (q, cb) => cb([{ name: '_web_session', value: 'S', domain: '.waze.com', hostOnly: false, path: '/', secure: true },
@@ -395,15 +402,28 @@ async function rodarBackground(corpoDoServidor) {
       storage: { local: { set() {} } }, tabs: { create() {}, query() {}, reload() {} },
     },
     fetch: async () => { chamadas++; return { json: async () => corpoDoServidor }; },
-    setTimeout: (fn) => { fn(); return 0; },   // as esperas entre tentativas, sem esperar
-    // O service worker de verdade tem os dois, e o login os usa desde a 0.3.3 (o
-    // prazo do ACESSAR, R8-6-01; a ponte, que este teste roda, não tem prazo).
-    AbortController, clearTimeout: () => {},
+    setTimeout: (fn, ms) => { const t = { fn, quando: agora + Math.max(0, Number(ms) || 0) }; timers.add(t); return t; },
+    clearTimeout: (t) => { timers.delete(t); },
+    Date: { now: () => agora },
+    // O service worker de verdade tem o `AbortController`, e o login o usa desde
+    // a 0.3.3 (o prazo do ACESSAR, R8-6-01).
+    AbortController,
     console,
   };
   vm.createContext(ctx);
   vm.runInContext(ler('extensao-chrome/background.js'), ctx);
-  const r = await new Promise((res) => ouvinte({ action: 'autenticar' }, { tab: { url: 'https://places.wazebrasil.com/' } }, res));
+  let r, chegou = false;
+  ouvinte({ action: 'autenticar' }, { tab: { url: 'https://places.wazebrasil.com/' } }, (x) => { r = x; chegou = true; });
+  for (let i = 0; i < 100 && !chegou; i++) {
+    await new Promise((ok) => setImmediate(ok));
+    if (chegou) break;
+    const proximo = [...timers].sort((a, b) => a.quando - b.quando)[0];
+    if (!proximo) continue;
+    timers.delete(proximo);
+    agora = proximo.quando;
+    proximo.fn();
+  }
+  assert.ok(chegou, 'o background não respondeu à ponte');
   return { r, chamadas };
 }
 
