@@ -15606,10 +15606,12 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + 1;
     salvarConquistas();
-    // O idioma entra no gesto, não na carga: "usou o app em 2 idiomas" é sobre
-    // TRABALHAR em dois, não sobre abrir o seletor e voltar. Item da fila de
-    // saída sem o idioma (gravado antes dele existir) não registra nenhum: o de
-    // AGORA não é prova de que o trabalho foi feito nele.
+    // O idioma entra no gesto, não na carga: o "Poliglota" é sobre TRABALHAR
+    // em dois, não sobre abrir o seletor e voltar — e a condição na vitrine diz
+    // isso, no verbo das vizinhas ("tratar pedidos em 2 idiomas"; dizia "usar o
+    // app", R10-7-05). Item da fila de saída sem o idioma (gravado antes dele
+    // existir) não registra nenhum: o de AGORA não é prova de que o trabalho
+    // foi feito nele.
     registrarIdiomaUsado(gesto ? gesto.lang : (typeof getLang === 'function' ? getLang() : ''));
     const hora = new Date(gesto && Number.isFinite(gesto.t) ? gesto.t : Date.now()).getHours();
     // "Centurião" é o balde do DIA do gesto — o `recordHistory` do pouso já
