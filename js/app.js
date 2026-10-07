@@ -14382,13 +14382,35 @@ function renderFocoAutor() {
         bar.classList.add('hidden');
         return;
     }
-    // O nome é só rótulo. Sem ele o id vira o texto — feio, nunca invisível,
-    // como o resto do card faz com valor que o Waze não nomeia.
-    const nome = atual.createdBy || String(id);
     // A série que o toque pôs na frente, pela régua ÚNICA (`serieDoAutor`): o
     // pedido em andamento foi pro resto, e a barra contá-lo dizia "3 de 4" com
     // o selo em "Ver +1" (R6-2-02).
     const restam = serieDoAutor(id, { naTela: atual }).length;
+    // A série ACABOU com o card do autor ainda na tela: é o card que a OUTRA aba
+    // já decidiu, que fica fora da série (R11-2-06) e segue na frente. A barra
+    // dizia "Primeiro os de X · 0 de 3", e o leitor de tela "Mostrando primeiro
+    // os 0 pedidos de X" (MEDIDO no navegador: o "Marcar todos" da outra aba
+    // decide a série do autor em foco; auditoria de 2026-10-07, R12-2-06). É a
+    // regra de cima: a série acabou, a barra sai e o foco no autor também. O
+    // foco do TECLADO que estava nela vai ao caminho de volta no card (o "Ver
+    // +N", que aqui não existe, ou o ✕; travado, o ✕ fica prometido), e não ao
+    // <body> — numa microtarefa, porque o `renderCurrentCard` desenha a barra
+    // ANTES de pôr o card novo na tela. Quem pôs o foco em outro lugar ganha.
+    if (restam === 0) {
+        AppState.autorEmFoco = null;
+        const comOFoco = bar.contains(document.activeElement);
+        bar.classList.add('hidden');
+        if (comOFoco) {
+            queueMicrotask(() => {
+                const ativo = document.activeElement;
+                if (!ativo || ativo === document.body || bar.contains(ativo)) focarDepoisDoFocoNoAutor(false);
+            });
+        }
+        return;
+    }
+    // O nome é só rótulo. Sem ele o id vira o texto — feio, nunca invisível,
+    // como o resto do card faz com valor que o Waze não nomeia.
+    const nome = atual.createdBy || String(id);
     document.getElementById('focoAutorTexto').textContent = t('card.focoAutor', { autor: nome });
     document.getElementById('focoAutorContagem').textContent =
         t('card.focoAutor.contagem', { n: restam, total: AppState.queue.length });
