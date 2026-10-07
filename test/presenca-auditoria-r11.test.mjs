@@ -177,3 +177,125 @@ test('R11-5-01 depois do "lida" que deu certo, a recontagem pelo histórico não
   await tick(); await tick();
   assert.equal(conta(c), 1, 'DEFEITO: depois do "lida", a resposta contou pela lista refeita E pela viva — "2 mensagens novas" com uma só');
 });
+
+// ── R11-5-03: o que DEU ERRADO na conversa, pro leitor de tela ──────────────
+
+// A frase que a TELA mostra (o texto antes do "Tentar de novo") e o que a região
+// viva da conversa diz.
+const fraseNaTela = (c, classe) => {
+  const m = new RegExp(`<p class="${classe}">([^<]*) <button`).exec(c.$('conversaMsgs').innerHTML);
+  return m ? m[1] : null;
+};
+const anuncio = (c) => c.$('conversaAnuncio').textContent;
+
+// A conversa com a CAF aberta (o histórico chegou). `enviar` responde o envio;
+// `naHora` guarda o que a região viva dizia quando cada envio SAIU.
+async function conversaAberta({ enviar = () => ({ success: true }), abrir = () => ({ success: true, mensagens: [], maisAntigas: false, lida: true }) } = {}) {
+  const naHora = [];
+  const c = novoCliente({ agora: T, api: { chat: (x) => {
+    if (x.acao === 'abrir') { naHora.push(['abrir', anuncio(c)]); return abrir(x); }
+    if (x.acao === 'enviar') { naHora.push(['enviar', anuncio(c)]); return enviar(x); }
+    return { success: true };
+  } } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  return { c, naHora };
+}
+
+test('R11-5-03 o envio que FALHA diz ao leitor de tela a MESMA frase da tela — com e sem sinal', async () => {
+  for (const [resposta, chave] of [[SEM_REDE, 'presenca.recibo.naoEnviada'], [WAZE_FORA, 'presenca.recibo.naoEnviadaErro']]) {
+    const { c } = await conversaAberta({ enviar: () => resposta });
+    assert.equal(anuncio(c), '', 'CONTROLE: a região viva começa calada');
+    c.P.presencaEnviar('é a fachada?', null);
+    await tick(); await tick();
+    assert.equal(fraseNaTela(c, 'conversa-falhou'), chave, `CONTROLE: a tela tinha que mostrar "${chave}"`);
+    assert.equal(anuncio(c), chave, `DEFEITO: a tela diz "${chave}" e o leitor de tela não ouve nada — o mesmo silêncio do envio que deu certo`);
+  }
+});
+
+test('R11-5-03 o "Tentar de novo" começa calado: a mesma falha outra vez é dita outra vez — e o envio que dá certo não deixa a falha pra trás', async () => {
+  const respostas = [SEM_REDE, SEM_REDE, { success: true, ts: T + 50 }];
+  const { c, naHora } = await conversaAberta({ enviar: () => respostas.shift() });
+  c.P.presencaEnviar('é a fachada?', null);
+  await tick(); await tick();
+  assert.equal(anuncio(c), 'presenca.recibo.naoEnviada');
+  c.P.presencaTentarDeNovo();
+  await tick(); await tick();
+  const [, quandoSaiu] = naHora.filter(([acao]) => acao === 'enviar')[1];
+  assert.equal(quandoSaiu, '', 'DEFEITO: a nova tentativa saiu com a falha anterior ainda na região viva — a mesma frase reescrita pode não ser lida de novo');
+  assert.equal(anuncio(c), 'presenca.recibo.naoEnviada', 'a segunda falha não foi dita');
+  c.P.presencaTentarDeNovo();
+  await tick(); await tick();
+  assert.equal(fraseNaTela(c, 'conversa-falhou'), null, 'CONTROLE: a terceira tentativa tinha que dar certo');
+  assert.equal(anuncio(c), '', 'o envio que deu certo deixou "Não enviada" na região viva');
+});
+
+test('R11-5-03 a falha que volta com a conversa FECHADA (ou outra aberta) não fala na região da conversa', async () => {
+  let soltar = null;
+  const { c } = await conversaAberta({ enviar: () => new Promise((ok) => { soltar = ok; }) });
+  c.P.presencaEnviar('é a fachada?', null);
+  await tick();
+  fechar(c);
+  soltar(SEM_REDE);
+  await tick(); await tick();
+  assert.equal(anuncio(c), '', 'a falha de uma conversa fechada foi escrita na região viva');
+  // Reaberta com OUTRA pessoa: a falha da conversa com a CAF não é dela.
+  let soltar2 = null;
+  const d = (await conversaAberta({ enviar: () => new Promise((ok) => { soltar2 = ok; }) })).c;
+  d.P.presencaEnviar('é a fachada?', null);
+  await tick();
+  d.P.presencaAbrirConversa('999');
+  await tick(); await tick();
+  soltar2(SEM_REDE);
+  await tick(); await tick();
+  assert.equal(anuncio(d), '', 'a falha da conversa com a CAF foi dita na conversa com outra pessoa');
+  // A conversa ESCONDIDA por outra camada (sem a limpeza dela): a região é
+  // dela, e escondida não fala.
+  let soltar3 = null;
+  const e = (await conversaAberta({ enviar: () => new Promise((ok) => { soltar3 = ok; }) })).c;
+  e.P.presencaEnviar('é a fachada?', null);
+  await tick();
+  e.$('conversaModal').classList.add('hidden');
+  soltar3(SEM_REDE);
+  await tick(); await tick();
+  assert.equal(e.P.Presenca.aberta, CAF, 'CONTROLE: a conversa segue a aberta, só escondida');
+  assert.equal(anuncio(e), '', 'a falha foi escrita na região de uma conversa escondida');
+});
+
+test('R11-5-03 sem o perfil, o "Enviar" que entra como "Não enviada." diz isso ao leitor de tela', async () => {
+  const { c, naHora } = await conversaAberta();
+  c.AppState.profile = null;
+  c.P.presencaEnviar('é a fachada?', null);
+  await tick();
+  assert.equal(naHora.filter(([acao]) => acao === 'enviar').length, 0, 'CONTROLE: sem o perfil, nada sai');
+  assert.equal(fraseNaTela(c, 'conversa-falhou'), 'presenca.recibo.naoEnviadaErro', 'CONTROLE: a tela mostra "Não enviada."');
+  assert.equal(anuncio(c), 'presenca.recibo.naoEnviadaErro', 'DEFEITO: sem o perfil, a mensagem entrou como "Não enviada." em silêncio');
+});
+
+test('R11-5-03 o histórico que não carrega diz ao leitor de tela a MESMA frase da tela — e o "Tentar de novo" que falha outra vez, outra vez', async () => {
+  const { c, naHora } = await conversaAberta({ abrir: () => WAZE_FORA });
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), 'presenca.conversa.erro', 'CONTROLE: a tela mostra que o histórico não veio');
+  assert.equal(anuncio(c), 'presenca.conversa.erro', 'DEFEITO: o histórico não veio e o leitor de tela não ouviu nada');
+  c.P.presencaCarregarConversa(CAF);                         // o "Tentar de novo"
+  await tick(); await tick();
+  assert.equal(naHora.filter(([acao]) => acao === 'abrir')[1][1], '', 'DEFEITO: o "Tentar de novo" saiu com a falha anterior ainda na região viva');
+  assert.equal(anuncio(c), 'presenca.conversa.erro', 'a segunda falha do histórico não foi dita');
+});
+
+test('R11-5-03 a página ANTERIOR que não carrega é dita; a primeira página que falha com o histórico já na tela, não (a tela também não diz)', async () => {
+  const respostas = [{ success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }, WAZE_FORA];
+  const { c } = await conversaAberta({ abrir: () => respostas.shift() });
+  assert.equal(anuncio(c), '', 'CONTROLE: o histórico chegou, nada a dizer');
+  c.P.presencaCarregarAntigas(CAF);
+  await tick(); await tick();
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), 'presenca.conversa.anterioresErro', 'CONTROLE: a tela mostra que as anteriores não vieram');
+  assert.equal(anuncio(c), 'presenca.conversa.anterioresErro', 'DEFEITO: as mensagens anteriores não vieram e o leitor de tela não ouviu nada');
+  // Reaberta, a primeira página falha — mas o histórico já está na tela, e a
+  // tela não mostra erro nenhum: o leitor de tela também não ouve.
+  respostas.push(WAZE_FORA);
+  fechar(c);
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), null, 'CONTROLE: com o histórico na tela, a falha da primeira página não aparece');
+  assert.equal(anuncio(c), '', 'o leitor de tela ouviu uma falha que a tela não mostra');
+});

@@ -1546,6 +1546,36 @@ function presencaAnunciar(msg) {
     el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
 }
 
+// O que DEU ERRADO na conversa — o envio que não saiu, o histórico que não
+// carregou — vai também pro leitor de tela, pela mesma região do que chega. A
+// tela mostrava "Não enviada, sem sinal." com o "Tentar de novo" numa área que
+// não é região viva, e o campo já tinha sido limpo: quem usa leitor de tela
+// ouvia o mesmo silêncio do envio que deu certo e achava que a mensagem tinha
+// ido (auditoria da rodada 11, R11-5-03). A frase é a MESMA da tela, sem texto
+// novo, e só com a conversa dela na tela (a região é da conversa aberta).
+// Vazia, a frase LIMPA a região: cada tentativa começa sem a falha anterior, e
+// a mesma falha outra vez é uma mudança — região viva reescrita com o mesmo
+// texto pode não ser lida de novo.
+function presencaDizerNaConversa(com, frase) {
+    const el = document.getElementById('conversaAnuncio');
+    if (!el || Presenca.aberta !== com || !presencaConversaNaTela()) return;
+    el.textContent = frase;
+}
+
+// A frase do envio que falhou, a MESMA na tela e no leitor de tela: "sem sinal"
+// só quando a resposta nem chegou (`motivo: 'conexao'`, ver `presencaMandar`).
+function presencaFraseDaFalha(m) {
+    return t(m && m.motivo === 'conexao' ? 'presenca.recibo.naoEnviada' : 'presenca.recibo.naoEnviadaErro');
+}
+
+// A tela diz a frase da ÚLTIMA mensagem minha que falhou (ver
+// `presencaHtmlDasMsgs`), e o anúncio diz a mesma.
+function presencaAnunciarFalhaDoEnvio(com) {
+    const h = Presenca.historico.get(com);
+    const ultima = h ? h.msgs.filter((m) => m.meu && m.estado === 'falhou').pop() : null;
+    if (ultima) presencaDizerNaConversa(com, presencaFraseDaFalha(ultima));
+}
+
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
 // pessoa viu nela (`presencaVistaDe`). Sem mensagem dela vista, nada a guardar.
 function presencaDever(id) {
@@ -2090,6 +2120,9 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (antes) h.antigas = 'carregando';
     else { h.erro = false; h.antigas = null; }
     presencaRenderConversa();
+    // A tentativa começa sem a falha anterior no leitor de tela (o "Tentar de
+    // novo" que falha outra vez é dito outra vez; ver `presencaDizerNaConversa`).
+    presencaDizerNaConversa(id, '');
     const epoca = Presenca.epoca;
     const carona = chatCarona();
     // A hora em que o `abrir` SAI: o "lida" dele só cobre o que já estava
@@ -2105,6 +2138,11 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
         presencaRenderConversa();
+        // A tela diz que o histórico não veio; o leitor de tela também, com a
+        // MESMA frase — e só quando a tela a mostra: a primeira página que
+        // falha com o histórico já na tela não diz nada lá (R11-5-03).
+        if (antes) presencaDizerNaConversa(id, t('presenca.conversa.anterioresErro'));
+        else if (!h.carregada) presencaDizerNaConversa(id, t('presenca.conversa.erro'));
         return;
     }
     // `eu` é o de QUANDO o pedido saiu: a sessão pode ter caído com ele no ar
@@ -2238,15 +2276,20 @@ function presencaEnviar(legenda, card) {
     chatConhecer(id);
     presencaAtualizarPrevia(id, msg);
     presencaRenderConversa({ rolarAoFim: true });
-    if (eu) presencaMandar(id, msg);
+    if (eu) { presencaMandar(id, msg); return; }
+    // A tela diz "Não enviada." — o leitor de tela também (R11-5-03).
+    presencaAnunciarFalhaDoEnvio(id);
     // No diário, como toda falha de envio (ver `presencaMandar`): esta nem saiu.
-    else presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
+    presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
 }
 
 async function presencaMandar(com, msg) {
     msg.estado = 'enviando';
     msg.motivo = null;
     presencaRenderConversa();
+    // A tentativa começa sem a falha anterior no leitor de tela (ver
+    // `presencaDizerNaConversa`): a mesma falha de novo volta a ser dita.
+    presencaDizerNaConversa(com, '');
     // O cartão vai num campo que o WME não mostra, com a pergunta curta pra
     // prévia da lista. A MARCA do app quem põe é o servidor.
     const contexto = msg.card ? { legenda: String(msg.legenda || '').slice(0, 280), card: JSON.stringify(msg.card) } : undefined;
@@ -2286,6 +2329,9 @@ async function presencaMandar(com, msg) {
     }
     presencaRenderConversa();
     presencaRenderLista();
+    // O campo já foi limpo no "Enviar": sem isto, o leitor de tela não dizia
+    // nada — o mesmo silêncio do envio que deu certo (R11-5-03).
+    if (msg.estado === 'falhou') presencaAnunciarFalhaDoEnvio(com);
 }
 
 function presencaTentarDeNovo() {
@@ -2706,7 +2752,9 @@ function presencaHtmlDasMsgs(id, h) {
             ? presencaHtmlDoPedido(m, i, recibo)
             : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
         if (i === ultimaFalha) {
-            const frase = m.motivo === 'conexao' ? t('presenca.recibo.naoEnviada') : t('presenca.recibo.naoEnviadaErro');
+            // A frase vem da mesma função que a diz ao leitor de tela
+            // (`presencaAnunciarFalhaDoEnvio`, R11-5-03).
+            const frase = presencaFraseDaFalha(m);
             html += `<p class="conversa-falhou">${escapeHtml(frase)} <button type="button" class="conversa-reenviar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
         } else if (i === ultimaLida) {
             html += `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;

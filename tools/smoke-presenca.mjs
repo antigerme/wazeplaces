@@ -518,6 +518,26 @@ try {
   // rede fora, em que a resposta nem chega.
   console.log('\n7. falha de envio');
   const frase = () => ana.page.evaluate(() => (document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent?.trim() || '');
+  // O leitor de tela ouve a falha (auditoria da rodada 11, R11-5-03): a região
+  // viva da conversa (`#conversaAnuncio`) diz a MESMA frase da tela — o texto
+  // antes do "Tentar de novo". O campo é limpo no "Enviar", e sem o anúncio o
+  // envio que falha soava igual ao que deu certo. Tudo o que a região diz nesta
+  // seção fica registrado (`__anuncios`), na ordem.
+  const fraseDaFalha = () => ana.page.evaluate(() => {
+    const p = document.querySelector('#conversaMsgs .conversa-falhou');
+    return p && p.firstChild ? p.firstChild.textContent.trim() : '';
+  });
+  const anuncioDaConversa = () => ana.page.evaluate(() => document.getElementById('conversaAnuncio').textContent);
+  await ana.page.evaluate(() => {
+    window.__anuncios = [];
+    const el = document.getElementById('conversaAnuncio');
+    new MutationObserver(() => window.__anuncios.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  // CONTROLE: antes da falha a região não diz "Não enviada" — senão a medição
+  // de depois não distinguiria nada.
+  const antesDaFalha = await anuncioDaConversa();
+  if (!/Não enviada/.test(antesDaFalha)) ok('controle: antes da falha, a região viva da conversa não diz "Não enviada"');
+  else anota(`controle: a região viva já dizia "${antesDaFalha}" antes da falha — a medição não distinguiria nada`);
   const enviosAntes = apiDe(ana, 'chat', 'enviar').length;
   falharEnvio.set(ana.id, 'waze');
   await ana.page.fill('#conversaInput', 'e o Instituto do Rim?');
@@ -526,6 +546,10 @@ try {
     const doWaze = await frase();
     if (/^Não enviada\. Tentar de novo$/.test(doWaze)) ok(`o Waze fora, com a rede boa: "${doWaze}" — sem mandar procurar sinal`);
     else anota(`frase da falha do Waze errada: ${doWaze}`);
+    const dito = await anuncioDaConversa();
+    const naTela = await fraseDaFalha();
+    if (dito && dito === naTela) ok(`o leitor de tela ouve a falha: "${dito}" — a mesma frase da tela`);
+    else anota(`a falha não chegou ao leitor de tela: ${JSON.stringify({ dito, naTela })}`);
     const botao = await alcancavel(ana, '#conversaMsgs .conversa-reenviar');
     if (botao.noCentro && botao.altura >= 44) ok(`"Tentar de novo" recebe o dedo (${botao.altura}px de alvo)`);
     else anota(`"Tentar de novo" não é alcançável: ${JSON.stringify(botao)}`);
@@ -548,6 +572,10 @@ try {
       const daRede = await frase();
       if (/^Não enviada, sem sinal\. Tentar de novo$/.test(daRede)) ok(`sem rede: "${daRede}"`);
       else anota(`frase da falha de rede errada: ${daRede}`);
+      const dito = await anuncioDaConversa();
+      const naTela = await fraseDaFalha();
+      if (dito && dito === naTela) ok(`sem rede, o leitor de tela ouve "${dito}" — a mesma frase da tela`);
+      else anota(`sem rede, a falha não chegou ao leitor de tela: ${JSON.stringify({ dito, naTela })}`);
     }
     falharEnvio.delete(ana.id);
     await ana.page.tap('#conversaMsgs .conversa-reenviar');
@@ -560,6 +588,15 @@ try {
       const ids = apiDe(ana, 'chat', 'enviar').slice(enviosAntes).map((x) => x.c.id);
       if (ids.length === 4 && ids.every((i) => i === ids[0])) ok('as quatro tentativas vão com o MESMO id');
       else anota(`as tentativas mudaram o id (ou não foram quatro): ${ids.join(' → ')}`);
+      // Cada falha dita, cada tentativa começando calada (a mesma frase outra
+      // vez é uma MUDANÇA, e é lida de novo), e o envio que deu certo sem a
+      // falha pra trás. Lido depois de a resposta da 4ª tentativa assentar.
+      await esperar(ana, () => ((Presenca.historico.get('183164343') || { msgs: [] }).msgs
+        .find((m) => m.meu && /Instituto do Rim/.test(m.texto)) || {}).estado === 'enviada', 'a 4ª tentativa não assentou como enviada');
+      const ditos = await ana.page.evaluate(() => window.__anuncios.slice());
+      const esperado = ['Não enviada.', '', 'Não enviada.', '', 'Não enviada, sem sinal.', ''];
+      if (JSON.stringify(ditos) === JSON.stringify(esperado)) ok('o leitor de tela ouve cada falha, a mesma frase outra vez também (a tentativa começa calada) — e o envio que dá certo não deixa a falha pra trás');
+      else anota(`o que a região viva da conversa disse nas tentativas: ${JSON.stringify(ditos)} (esperado ${JSON.stringify(esperado)})`);
     }
   }
 
