@@ -255,6 +255,7 @@ secao('CÓDIGO NO APARELHO');
   // servidor respondeu 405 em 1 arquivo" — sobre algo que não diz nada do código
   // nem do servidor (auditoria da rodada 12, R12-4-06). Fica fora da conta, e uma
   // linha diz o que ficou.
+  // MIGRACAO: diag-beacon-da-borda — ver tools/migracoes.mjs
   const daBorda = (u) => nome(u).startsWith('/cdn-cgi/');
   const semBorda = (o) => Object.fromEntries(Object.entries(o || {}).filter(([u]) => !daBorda(u)));
   const foraDaConta = [...new Set([...Object.keys(d.codigo || {}), ...Object.keys(d.cacheVsRede || {})])].filter(daBorda);

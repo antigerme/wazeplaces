@@ -145,4 +145,22 @@ export const MIGRACOES = [
         + 'ele o filtro usa 0 e tira TODO pouso gravado, que é o lado seguro '
         + '(esconder o que foi decidido, nunca mostrá-lo de novo).',
   },
+  {
+    id: 'diag-beacon-da-borda',
+    desde: '2026-10-07',
+    revisarEm: '2027-01-07',
+    familia: 'arquivo',
+    onde: 'tools/diag-resumo.mjs',
+    oque: 'O `/cdn-cgi/` fora da conta do código no `diag-resumo`. Até o '
+        + 'conserto do R12-4-06 o app levava no `codigo`/`cacheVsRede` o envio '
+        + 'do Web Analytics que a borda do Cloudflare injeta (`/cdn-cgi/rum?`, '
+        + 'mesma origem, só aceita POST): a releitura levava 405, e a triagem '
+        + 'de todo relatório de produção dizia "o servidor respondeu 405 em 1 '
+        + 'arquivo". O app novo não o leva mais; o leitor o tira dos relatórios '
+        + 'de antes, com uma linha "fora da conta".',
+    removerQuando: 'Os diagnósticos gerados antes do conserto deixarem de '
+        + 'interessar. Não expira por uso do app: arquivo enviado não se zera '
+        + '(está no disco e no WhatsApp, e é o que se usa pra comparar '
+        + 'antes/depois) — a mesma razão do `diag-formato-2`.',
+  },
 ];
