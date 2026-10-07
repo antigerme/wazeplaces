@@ -569,9 +569,10 @@ function montarPular({ pularGuarda = true, estrelado = null, noAnel = null } = {
     scheduleAction: (tipo, place, executor) => { envio.executor = executor(); },
   };
   const app = rodar(deps, [
-    ...['handleSkip', 'estreladoPeloApp', 'estreladosNoAparelho', 'anotarEstreladoPeloApp', 'chaveDoPedido'].map(fatiar),
+    ...['handleSkip', 'estreladoPeloApp', 'estreladosNoAparelho', 'anotarEstreladoPeloApp', 'chaveDoPedido',
+      'atualizarSeloDePular'].map(fatiar),
     treinoDeVerdade(),
-  ], ['handleSkip', 'Treino']);
+  ], ['handleSkip', 'Treino', 'atualizarSeloDePular']);
   return { app, AppState, toasts, enviadas, els, envio };
 }
 // O ↑ no 1º pedido: o que o treino ENSINA (a frase do aviso) e o que o modo real
@@ -616,4 +617,33 @@ test('R11-7-05: no ÚLTIMO exemplo a frase vai no "Treino concluído" — e segu
   m.app.handleSkip();
   assert.equal(m.els.treinoFimEfeito && m.els.treinoFimEfeito.textContent, 'treino.efeito.skip',
     'DEFEITO: o "Treino concluído" diz que pular daria ⭐ a um pedido que já a tem (R11-7-05)');
+});
+
+// ═══ Junção do lote 15 · o SELO do ↑ no card de verdade segue a MESMA régua ═══
+// O agente do treino viu, sem mexer: o selo "Pular ⭐" do card REAL aparecia
+// também num pedido já estrelado, onde o ↑ de verdade não manda nada — o que o
+// app MOSTRA e o que ele FAZ divergindo, como no R11-7-05. O `atualizarSeloDePular`
+// pergunta ao `Treino.pularGuardaria` (a régua do `handleSkip`), e o `montarCard`
+// passa o pedido (o card ainda não foi registrado quando o selo é escrito).
+test('junção do lote 15: o selo "Pular ⭐" do card só promete a ⭐ onde o ↑ de verdade a manda', async () => {
+  const casos = [
+    { nome: 'sem estrela (CONTROLE)', caso: {}, guarda: true },
+    { nome: 'com a ⭐ no card (isStarred)', caso: { estrelado: 1 }, guarda: false },
+    { nome: 'estrelado pelo app (o anel)', caso: { noAnel: 1 }, guarda: false },
+    { nome: 'outro pedido no anel', caso: { noAnel: 2 }, guarda: true },
+    { nome: '"Pular guarda" desligado', caso: { pularGuarda: false }, guarda: false },
+  ];
+  for (const c of casos) {
+    const m = montarPular(c.caso);
+    const selo = { k: null, setAttribute(a, v) { if (a === 'data-i18n') this.k = v; } };
+    const card = { querySelector: (sel) => (sel.includes('swipe-stamp-up') ? selo : null) };
+    m.app.atualizarSeloDePular(card, m.AppState.queue[0]);
+    const { manda } = await oQueOPularFaz(c.caso);
+    assert.equal(manda, c.guarda, `PRÉ-CONDIÇÃO (${c.nome}): o ↑ de verdade ${manda ? 'mandou' : 'não mandou'} a estrela — mudou a régua do handleSkip`);
+    assert.equal(selo.k, c.guarda ? 'card.stamp.skipGuarda' : 'card.stamp.skip',
+      `DEFEITO (${c.nome}): o selo diz "${selo.k}" e o ↑ de verdade ${manda ? 'manda' : 'NÃO manda'} a estrela`);
+  }
+  // O card que NASCE leva o pedido dele: sem isso o selo leria um pedido que ainda não foi registrado.
+  assert.match(fatiar('montarCard'), /atualizarSeloDePular\(card, place\)/,
+    'o montarCard não passa o pedido ao selo — o card novo seria decidido pelo card da frente');
 });

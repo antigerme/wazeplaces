@@ -12943,7 +12943,7 @@ function montarCard(place) {
     // nunca via estas 25 chaves. Resultado: em inglês/espanhol o card voltava pro
     // português A CADA SWIPE (o clone traz o texto pt hardcoded do HTML).
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
-    atualizarSeloDePular(card);
+    atualizarSeloDePular(card, place);
     if (typeof applyI18n === 'function') applyI18n(card);
 
     return card;
@@ -24572,7 +24572,14 @@ function setupAlturaDoHeader() {
     const medir = () => {
         document.documentElement.style.setProperty('--header-h', header.getBoundingClientRect().height + 'px');
     };
-    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header);
+    // A caixa de BORDA, não a de conteúdo (a padrão): a margem de segurança do
+    // iPhone entra no cabeçalho como PADDING, e o padding que muda sem mudar o
+    // conteúdo não dispara o observador da caixa de conteúdo. MEDIDO na emulação
+    // (auditoria da rodada 11, R11-4-06): a margem que chega depois do resize
+    // deixava o `--header-h` em 69 px com o cabeçalho em 116, e o "N esperando
+    // envio" ia pra baixo dele. A caixa de borda inclui o padding; navegador sem
+    // a opção a ignora e segue com a de conteúdo, como antes.
+    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header, { box: 'border-box' });
     window.addEventListener('resize', medir);
     medir();
 }
@@ -25277,12 +25284,20 @@ function renderPularGuardaPref() {
 // Escreve o ATRIBUTO e deixa o applyI18n traduzir, em vez de cravar o texto:
 // assim trocar de idioma com o card na tela reescreve o selo certo (o card vive
 // no documento, então o applyI18n global o alcança).
-function atualizarSeloDePular(card) {
+function atualizarSeloDePular(card, place) {
     const alvo = card || cardDaFrente();
     const el = alvo && alvo.querySelector('.swipe-stamp-up span[data-i18n]');
     if (!el) return;
-    el.setAttribute('data-i18n', AppState.preferences.pularGuarda === true
-        ? 'card.stamp.skipGuarda' : 'card.stamp.skip');
+    // O selo promete a ⭐ só onde o ↑ a MANDA: a régua do `handleSkip`, que é a do
+    // treino (`Treino.pularGuardaria`) — o "Pular guarda o pedido" ligado e o pedido
+    // sem a estrela, nem a do card (`isStarred`, R9-7-06) nem a que o app já deu
+    // (`estreladoPeloApp`, R10-2-05). Dizia "Pular ⭐" num pedido já estrelado,
+    // onde o ↑ não manda nada (o que o app MOSTRA e o que ele FAZ; lote 15). O
+    // `montarCard` passa o pedido (o card ainda não foi registrado); os outros
+    // chamadores falam do card da frente. Sem pedido conhecido, só a preferência.
+    const p = place || pedidoDoCard(alvo);
+    const guarda = AppState.preferences.pularGuarda === true && (!p || Treino.pularGuardaria(p));
+    el.setAttribute('data-i18n', guarda ? 'card.stamp.skipGuarda' : 'card.stamp.skip');
     if (typeof applyI18n === 'function') applyI18n(alvo);
 }
 

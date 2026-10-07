@@ -1071,6 +1071,10 @@ test('o aviso de conquista é banner (topo), não snackbar (rodapé)', () => {
   const fn = APP_.match(/function setupAlturaDoHeader\([\s\S]*?\n\}/)[0];
   assert.match(fn, /--header-h/, 'a medida do header não é mais publicada');
   assert.match(fn, /ResizeObserver/, 'a altura do header virou medida única, não acompanha mudança');
+  // A caixa de BORDA (R11-4-06, junção do lote 15): a margem de segurança entra no
+  // cabeçalho como padding, e a caixa de conteúdo (a padrão) não vê padding mudar.
+  assert.match(fn, /\.observe\(header, \{ box: 'border-box' \}\)/,
+    'o observador do cabeçalho voltou à caixa de conteúdo: a margem que chega depois não atualiza o --header-h');
   assert.match(APP_, /setupAlturaDoHeader\(\);/, 'o setup não é chamado na inicialização');
 
   // Camada: acima do card (z-50), abaixo dos modais (z-[60]).
