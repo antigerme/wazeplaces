@@ -59,6 +59,11 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
   await writeFile(relerVelho, '1|{}');
   const umaHoraAtras = new Date(Date.now() - 3600 * 1000);
   await utimes(relerVelho, umaHoraAtras, umaHoraAtras);
+  // E a lista do TOQUE na lixeira (`reler_toque_…`, a chave do gesto, R13-3-03):
+  // o mesmo prefixo, o mesmo carimbo, a mesma varredura.
+  const toqueVelho = join(dir, 'sess_reler_toque_' + 'b'.repeat(64));
+  await writeFile(toqueVelho, '1|{"gesto":"gesto-velho-01","id":"v1","images":[]}');
+  await utimes(toqueVelho, umaHoraAtras, umaHoraAtras);
 
   const { arquivos } = await comServidor(dir, async (api) => {
     const par = await api('parear', { action: 'create', sessionToken: token });
@@ -92,7 +97,7 @@ test('varredura da VM: preserva sessão viva e apaga pareamento vencido', async 
     assert.equal(depois.filter((n) => n.startsWith('sess_') && !n.startsWith('sess_pair_') && !n.startsWith('sess_reler_')).length, 1,
       'a SESSÃO não pode ser apagada pela varredura');
     assert.equal(depois.filter((n) => n.startsWith('sess_reler_')).length, 0,
-      'o cache da releitura de 1 h atrás seguiu no disco — ele vale 15 s, não 21 dias');
+      'o cache da releitura (ou a lista do toque) de 1 h atrás seguiu no disco — ele vale 15 s, não 21 dias');
 
     // E ela tem que seguir funcionando de verdade, não só existir no disco.
     const r = await api('perfil', { sessionToken: token, region: 'row' });

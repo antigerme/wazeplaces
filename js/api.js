@@ -577,12 +577,16 @@ const API = {
     // a exclusão (e a aprovação) do local só sai depois da resposta dele
     // (`vezDasFotosNoLocal`, auditoria da rodada 12, R12-3-01). Sem sessão não sai
     // nada, e não há o que esperar.
-    prepararExclusao(venueID, lat, lon, regiao) {
+    //
+    // `aquecimento`: o id do GESTO (`idDoGestoDaLixeira`), que a exclusão dele
+    // leva também — a lista lida aqui só serve a ela (R13-3-03). Sem ele, o
+    // servidor não lê nada.
+    prepararExclusao(venueID, lat, lon, regiao, aquecimento) {
         const sessionToken = this.sessionToken;
         if (!sessionToken) return;
         return this._post('excluir-foto', {
             sessionToken, region: regiao || this.getRegion(), action: 'preparar',
-            venueID, imageID: 'preparar', lat, lon,
+            venueID, imageID: 'preparar', lat, lon, aquecimento,
         }).catch(() => {});
     },
 
@@ -599,7 +603,9 @@ const API = {
         });
     },
 
-    async excluirFoto(venueID, imageID, lat, lon, regiao) {
+    // `aquecimento`: o gesto do toque na lixeira, quando ele saiu (ver o
+    // `prepararExclusao`).
+    async excluirFoto(venueID, imageID, lat, lon, regiao, aquecimento) {
         const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
@@ -610,7 +616,8 @@ const API = {
             venueID,
             imageID,
             lat,
-            lon
+            lon,
+            aquecimento
         });
     },
 

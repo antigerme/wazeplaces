@@ -382,6 +382,7 @@ function montarLightboxComJanela() {
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, sairDaEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
     API: { prepararExclusao() {}, getRegion: () => 'row' },
+    idDoGestoDaLixeira: () => 'gesto-teste-01',   // o gesto do toque na lixeira (R13-3-03)
     enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao: () => Promise.resolve(true),
     aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,
     // Nada no ar e nada travado: cada caso abre a SUA janela (L23, L24).

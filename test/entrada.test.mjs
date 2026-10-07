@@ -938,11 +938,16 @@ test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de foto
   // vive no máximo o prazo de uma gravação ANTERIOR, que a frase já cobre. E desde
   // a rodada 12 (R12-3-01) o AQUECIMENTO (a leitura do toque) também só grava por
   // cima da lista que estava lá quando ele saiu: sem gravar, vale o mesmo — a
-  // lista guardada é a de uma gravação anterior, ou nenhuma.
+  // lista guardada é a de uma gravação anterior, ou nenhuma. E desde a rodada 13
+  // (R13-3-03) a lista do TOQUE mora numa chave própria, do gesto: é a mesma
+  // lista de fotos do local, gravada no toque, com o mesmo prazo — a frase segue
+  // valendo pras duas.
   const CORE = ler('server/core.mjs');
   const CORE_SEM = CORE.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.ok(/const bruto = lidoEm \+ '\|' \+ JSON\.stringify\(enxuto\);\s*let gravou = false;\s*try \{\s*if \(!aquecimento \|\| \(await sessions\.store\.get\(chave\)\) === antes\) \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE_SEM),
+  assert.ok(/const bruto = lida\.lidoEm \+ '\|' \+ JSON\.stringify\(lida\.venue\);\s*let gravou = false;\s*try \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE_SEM),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
+  assert.ok(/await sessions\.store\.put\(await chaveDoToque\(data\), lida\.lidoEm \+ '\|' \+ JSON\.stringify\(\{ gesto, \.\.\.lida\.venue \}\), RELEITURA_TTL_STORE\)/.test(CORE_SEM),
+    'CONTROLE: a lista do toque mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
   assert.ok(/if \(rel\.bruto && \(await sessions\.store\.get\(chave\)\) === rel\.bruto\) \{\s*await sessions\.store\.put\(chave, rel\.lidoEm \+ '\|' \+ JSON\.stringify\(\{ id: venue\.id, images: restantes \}\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
   // O "depois da última vez que você toca na lixeira ou exclui uma foto", em

@@ -1931,7 +1931,7 @@ async function handleBuscarPlaces(data, { sessions }) {
   // é RARO (0,24% dos pedidos) e porque a alternativa — resolver no cliente,
   // quando o card aparece — custaria uma requisição ao NOSSO servidor por card
   // visto, e o nome apareceria depois da foto, piscando.
-  // `ctx` sem `cookies`, igual ao `relerLocal`: quem grava o cookie rotacionado
+  // `ctx` sem `cookies`, igual ao `lerLocalNoWaze`: quem grava o cookie rotacionado
   // é a chamada principal ali em cima, e não estas, que correm em paralelo.
   await resolverDuplicados(places, cookieHeader, csrf, region, { data, sessions });
 
@@ -2635,29 +2635,42 @@ export const RELEITURA_ESPERA_MS = 10000;
 // Hoje o cliente só diz QUAL foto quer excluir; quem monta a lista é o
 // servidor, a partir do que o Waze respondeu.
 const chaveDaReleitura = async (data) => 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
+// A lista do TOQUE na lixeira (o `preparar`) mora numa chave PRÓPRIA — uma por
+// sessão e local —, marcada com o GESTO que a pediu (auditoria da rodada 13,
+// R13-3-02 e R13-3-03). Ela gravava na chave de cima, a que as exclusões releem
+// e regravam, e podia chegar DEPOIS de quem já tinha escrito no local: com a
+// página saindo, a escrita não espera o toque (ver o `vezDasFotosNoLocal` no
+// app), e a leitura dele, feita ANTES da escrita, voltava e guardava a lista de
+// antes por cima. A conferência do lote 16 (só gravar por cima do registro que
+// estava lá quando ela saiu) não via a lista APAGADA por uma aprovação — apagada,
+// ela volta a ser a de antes: nenhuma — e não era atômica: o `get` e o `put` são
+// dois acessos, e a gravação da exclusão cabia entre eles. A exclusão seguinte
+// do local mandava a foto excluída de volta, ou a recém-aprovada como pendente,
+// com tudo `success: true` (MEDIDO de ponta a ponta, com um Waze de mentira).
+// Numa chave própria, a lista do toque não cobre nada: só a exclusão DO MESMO
+// GESTO a usa (`relerLocal`), e só quando a chave de cima não tem lista valendo.
+// O prefixo é o da releitura: a VM a varre pelo mesmo carimbo, e o prazo é o
+// mesmo (`RELEITURA_TTL_STORE`).
+const chaveDoToque = async (data) => 'reler_toque_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
+// O id do gesto que o app manda (`aquecimento`): o toque e a exclusão dele levam o
+// mesmo. Fora do formato, é como se não viesse.
+const gestoDaLixeira = (v) => (typeof v === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null);
 
-// `aquecimento`: a leitura do TOQUE na lixeira (`preparar`), que só grava por
-// cima do registro que estava lá quando ela saiu (ver a gravação, logo abaixo).
-async function relerLocal(data, sessions, cookieHeader, csrf, region, { aquecimento = false } = {}) {
+// O registro guardado, se ele ainda VALE (`RELEITURA_TTL` contados da leitura):
+// `{ lidoEm, dado }`, ou nulo. Registro ilegível lança — quem chama o trata como
+// ausente.
+function listaQueVale(bruto) {
+  if (!bruto) return null;
+  const corte = bruto.indexOf('|');
+  const ts = parseInt(bruto.slice(0, corte), 10);
+  if (!Number.isFinite(ts) || Math.floor(Date.now() / 1000) - ts > RELEITURA_TTL) return null;
+  return { lidoEm: ts, dado: JSON.parse(bruto.slice(corte + 1)) };
+}
+
+// Lê o local no Waze, pela caixa mínima: `{ venue, lidoEm }` (só o que a escrita
+// precisa), ou o erro.
+async function lerLocalNoWaze(data, cookieHeader, csrf, region, sessions) {
   const venueID = data.venueID;
-  const chave = await chaveDaReleitura(data);
-  // O registro que estava guardado quando esta leitura SAIU (vencido, ou nenhum).
-  let antes = null;
-  try {
-    const bruto = await sessions.store.get(chave);
-    antes = bruto == null ? null : bruto;
-    if (bruto) {
-      const corte = bruto.indexOf('|');
-      const ts = parseInt(bruto.slice(0, corte), 10);
-      if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
-        // `bruto`: o registro EXATO que esta exclusão leu — a regravação depois
-        // da escrita só acontece se ele ainda estiver lá (R11-3-01, ver o
-        // `handleExcluirFoto`).
-        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true, lidoEm: ts, bruto };
-      }
-    }
-  } catch (e) { /* cache ilegível é cache ausente */ }
-
   const d = RELEITURA_BBOX_GRAUS;
   const lat = Number(data.lat), lon = Number(data.lon);
   const q = new URLSearchParams({
@@ -2680,59 +2693,82 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region, { aquecime
   if (!venue) return { semLocal: true };
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
-  const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
-  // `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
-  // excluir tem que manter esta hora, não a da escrita (ver a regravação logo
-  // depois da escrita, no `handleExcluirFoto`).
-  const bruto = lidoEm + '|' + JSON.stringify(enxuto);
-  // O AQUECIMENTO só grava se o registro guardado ainda é o que estava lá quando
-  // ele SAIU (`antes`). A regravação depois da escrita confere o registro
-  // (`rel.bruto`, R11-3-01), mas só a da EXCLUSÃO: o aquecimento gravava sem
-  // conferir nada (auditoria da rodada 12, R12-3-01). Com o Waze lento, a
-  // leitura do toque na lixeira de X voltava DEPOIS de a exclusão de X sair (ela
-  // não achou a lista, releu sozinha, gravou e regravou sem X) e gravava por
-  // cima a lista de ANTES — com X, e com a foto P que uma aprovação acabasse de
-  // aprovar ainda pendente. A exclusão seguinte do local, nos `RELEITURA_TTL`
-  // dela, mandava X de volta e P como `approved: false`, com todas as respostas
-  // `success: true` (MEDIDO de ponta a ponta, num Waze de mentira com a leitura
-  // presa). Trocado no meio, o registro veio de quem leu ou escreveu o local
-  // depois de o aquecimento sair, e fica. Custa uma leitura do KV, nenhuma
-  // escrita (o aquecimento que não grava poupa uma).
-  //
-  // A releitura da EXCLUSÃO grava sempre, como antes: é a lista em que a escrita
-  // dela se baseia, e a regravação depois da escrita (que tira a foto) só
-  // acontece por cima dela. Conferindo também aqui, o aquecimento que pousasse
-  // com a leitura da exclusão no ar ficava guardado — lido ANTES da escrita, com
-  // a foto —, e a regravação, sem o registro dela, não acontecia: a exclusão
-  // seguinte devolvia a foto (visto no teste deste caso, com a conferência nas
-  // duas).
-  //
-  // Fica de fora a lista APAGADA no meio (a aprovação de uma foto do local a
-  // esquece, `esquecerReleitura`): apagada, ela volta a ser a de `antes`
-  // (nenhuma), e o aquecimento grava. No mesmo aparelho isso não acontece mais —
-  // o app só manda a exclusão e a aprovação do local depois da resposta do
-  // aquecimento (`vezDasFotosNoLocal`) —; entre abas da mesma sessão, fecharia
-  // só com uma marca gravada a cada aprovação.
-  let gravou = false;
-  try {
-    if (!aquecimento || (await sessions.store.get(chave)) === antes) {
-      await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
-      gravou = true;
-    }
-  } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false, lidoEm, bruto: gravou ? bruto : null };
+  return { venue: { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) }, lidoEm };
 }
 
-// Esquece a releitura guardada de um local: a próxima exclusão relê do Waze.
-// Lê antes de apagar, pelo mesmo motivo do `destroySession` (no KV o apagamento
-// é a cota curta), e o registro quase nunca existe — só no minuto depois de a
-// pessoa tocar numa lixeira daquele local.
-async function esquecerReleitura(data, sessions) {
+// A lista em que a EXCLUSÃO se baseia: a guardada na chave da releitura, se ela
+// vale; senão a do TOQUE deste gesto (`gesto`, ver `chaveDoToque`), se vale;
+// senão a do Waze, lida agora e guardada na chave da releitura.
+//
+// `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
+// excluir tem que manter esta hora, não a da escrita (ver a regravação logo
+// depois da escrita, no `handleExcluirFoto`). E `bruto`, o registro EXATO da
+// chave da releitura em que esta exclusão se baseia: a regravação depois da
+// escrita só acontece se ele ainda estiver lá (R11-3-01). A lista do TOQUE volta
+// com `bruto` nulo — não há o que regravar: a chave da releitura segue sem lista
+// valendo, e a exclusão seguinte do local relê (ou usa o toque DELA).
+//
+// A releitura da exclusão grava sempre, como antes: é a lista em que a escrita
+// dela se baseia, e a regravação depois da escrita (que tira a foto) só acontece
+// por cima dela.
+async function relerLocal(data, sessions, cookieHeader, csrf, region, { gesto = null } = {}) {
+  const chave = await chaveDaReleitura(data);
   try {
-    const chave = await chaveDaReleitura(data);
-    if ((await sessions.store.get(chave)) == null) return;
-    await sessions.store.delete(chave);
-  } catch (e) { /* sem apagar, o registro deixa de valer sozinho em RELEITURA_TTL */ }
+    const bruto = await sessions.store.get(chave);
+    const vale = listaQueVale(bruto);
+    if (vale) return { venue: vale.dado, doCache: true, lidoEm: vale.lidoEm, bruto };
+  } catch (e) { /* cache ilegível é cache ausente */ }
+  if (gesto) {
+    try {
+      const vale = listaQueVale(await sessions.store.get(await chaveDoToque(data)));
+      if (vale && vale.dado && vale.dado.gesto === gesto && Array.isArray(vale.dado.images)) {
+        return { venue: { id: vale.dado.id, images: vale.dado.images }, doCache: true, lidoEm: vale.lidoEm, bruto: null };
+      }
+    } catch (e) { /* ilegível é ausente */ }
+  }
+  const lida = await lerLocalNoWaze(data, cookieHeader, csrf, region, sessions);
+  if (!lida.venue) return lida;
+  const bruto = lida.lidoEm + '|' + JSON.stringify(lida.venue);
+  let gravou = false;
+  try {
+    await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
+    gravou = true;
+  } catch (e) { /* sem cache o app só fica mais lento */ }
+  return { venue: lida.venue, doCache: false, lidoEm: lida.lidoEm, bruto: gravou ? bruto : null };
+}
+
+// O TOQUE na lixeira (`preparar`): lê o local agora, pra a exclusão do gesto não
+// ter de ler depois da janela do Desfazer. Com a lista da releitura valendo, não
+// há o que ler. A lista vai pra chave do TOQUE, marcada com o gesto — nunca pra
+// da releitura (ver `chaveDoToque`). Devolve se a exclusão do gesto vai ter
+// lista pronta.
+async function aquecerReleitura(data, sessions, cookieHeader, csrf, region, gesto) {
+  try {
+    if (listaQueVale(await sessions.store.get(await chaveDaReleitura(data)))) return true;
+  } catch (e) { /* cache ilegível é cache ausente */ }
+  const lida = await lerLocalNoWaze(data, cookieHeader, csrf, region, sessions);
+  if (!lida.venue) return false;
+  try {
+    await sessions.store.put(await chaveDoToque(data), lida.lidoEm + '|' + JSON.stringify({ gesto, ...lida.venue }), RELEITURA_TTL_STORE);
+  } catch (e) { return false; }
+  return true;
+}
+
+// Esquece as listas guardadas de um local — a da releitura e a do toque —: a
+// próxima exclusão relê do Waze. Lê antes de apagar, pelo mesmo motivo do
+// `destroySession` (no KV o apagamento é a cota curta), e o registro quase nunca
+// existe — só no minuto depois de a pessoa tocar numa lixeira daquele local. A
+// do TOQUE também (R13-3-02): ela é da exclusão do mesmo gesto, e a aprovação
+// que pousa entre o toque e essa exclusão (de outra aba da mesma sessão) a deixa
+// velha, com a foto aprovada ainda pendente.
+async function esquecerReleitura(data, sessions) {
+  for (const chaveDe of [chaveDaReleitura, chaveDoToque]) {
+    try {
+      const chave = await chaveDe(data);
+      if ((await sessions.store.get(chave)) == null) continue;
+      await sessions.store.delete(chave);
+    } catch (e) { /* sem apagar, o registro deixa de valer sozinho em RELEITURA_TTL */ }
+  }
 }
 
 async function handleExcluirFoto(data, { sessions }) {
@@ -2766,20 +2802,22 @@ async function handleExcluirFoto(data, { sessions }) {
   // quando o editor TOCA na lixeira, pra os ~700ms dela correrem dentro da
   // janela do Desfazer. Não escreve nada NO WAZE (a lista vai pro store: até uma
   // escrita no KV) e não devolve a lista — quem decide o que gravar continua
-  // sendo o servidor.
+  // sendo o servidor. A lista é do GESTO (`aquecimento`, o id que o app manda
+  // no toque e na exclusão dele) e mora na chave do toque, que nenhuma outra
+  // escrita lê (R13-3-02 e R13-3-03, ver `chaveDoToque`). Sem o gesto, não há
+  // pra quem ler: a exclusão relê na hora.
   if (data.action === 'preparar') {
-    // Só grava a lista se ninguém mexeu nela enquanto a leitura vinha (R12-3-01,
-    // ver o `relerLocal`).
-    const prep = await relerLocal(data, sessions, cookieHeader, csrf, region, { aquecimento: true });
+    const gesto = gestoDaLixeira(data.aquecimento);
     // Falha aqui é silenciosa de propósito: preparar é otimização. Se der
     // errado, o `excluir` faz a releitura na hora e a pessoa só espera mais.
-    return { status: 200, body: { success: true, preparado: !prep.erro && !prep.semLocal && !prep.erroParse } };
+    const preparado = gesto ? await aquecerReleitura(data, sessions, cookieHeader, csrf, region, gesto) : false;
+    return { status: 200, body: { success: true, preparado } };
   }
 
   // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
   //    Vem do cache quando o cliente já pediu `preparar` ao tocar na lixeira —
   //    aí os ~700ms dela couberam na janela do Desfazer.
-  const rel = await relerLocal(data, sessions, cookieHeader, csrf, region);
+  const rel = await relerLocal(data, sessions, cookieHeader, csrf, region, { gesto: gestoDaLixeira(data.aquecimento) });
   if (rel.erro) {
     return {
       status: rel.erro.category === 'unauthorized' ? 401 : 500,
@@ -2856,6 +2894,11 @@ async function handleExcluirFoto(data, { sessions }) {
   //    outra aba, já a regravou sem a foto dela): por cima, ela voltaria. Custa
   //    uma leitura do KV, nenhuma escrita: sumida ou trocada, a próxima exclusão
   //    relê do Waze (ou usa a que está lá).
+  //
+  //    A exclusão que se baseou na lista do TOQUE (`bruto` nulo, ver o
+  //    `relerLocal`) não regrava nada: a chave da releitura não tinha lista
+  //    valendo, e segue sem — a exclusão seguinte do local relê, ou usa o toque
+  //    dela. Nenhuma leitura nem escrita a mais.
   try {
     const chave = await chaveDaReleitura(data);
     if (rel.bruto && (await sessions.store.get(chave)) === rel.bruto) {

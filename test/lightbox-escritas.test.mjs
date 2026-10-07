@@ -68,8 +68,10 @@ function lightbox(podeL6 = true) {
 // vez do local nas exclusões (R10-3-03), e a memória das fotos que saíram do mapa
 // (R12-3-02). O anúncio ao leitor de tela (R6-3-08) é anotado no `log` de quem
 // passar um.
+// E o gesto do toque na lixeira (R13-3-03).
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
+  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'idDoGestoDaLixeira',
+  'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
   anunciarNoLightbox: (texto, place) => { if (log) log.push('anuncio:' + texto); },
@@ -3387,6 +3389,7 @@ test('R10-3-04 a aprovação que VALE marca a foto como aprovada e redesenha a c
 function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } = {}) {
   const log = [];
   const aquecimentos = [];
+  const aquecimentosComGesto = [];
   const L = lightbox();
   L.idFotoAtual = () => L.idAprovadoDaFoto(L.urls[L.idx]);
   const fotos = (ur) => [FOTO('f1'), FOTO(ur), FOTO('f2')];
@@ -3400,14 +3403,18 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
   const timers = [];
   const decididos = new WeakSet();
   const ponte = { app: null };
-  const ida = (tipo, id, local) => new Promise((ok) => { idas.push({ tipo, id, local, responder: ok }); });
+  // `gesto`: o gesto do toque que a exclusão levou (R13-3-03).
+  const ida = (tipo, id, local, gesto) => new Promise((ok) => {
+    idas.push({ tipo, id, local, gesto, responder: ok });
+  });
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false, _salvo: null },
     API: {
-      excluirFoto: (venueID, imageID) => ida('excluir', imageID, venueID),
+      excluirFoto: (venueID, imageID, lat, lon, regiao, gesto) => ida('excluir', imageID, venueID, gesto),
       aprovarPedido: (venueID, ur) => ida('aprovar', ur, venueID),
-      prepararExclusao: (venueID) => {
+      prepararExclusao: (venueID, lat, lon, regiao, gesto) => {
         log.push('preparar:' + venueID);
+        aquecimentosComGesto.push(gesto);
         return aquecimentoNoAr ? new Promise((ok) => { aquecimentos.push(ok); }) : undefined;
       },
       getRegion: () => 'row',
@@ -3456,7 +3463,8 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
     ok({ success: true, preparado: true });
   };
   return { app, L, A, B, C, AppState, log, decididos, pend, abrirEm, irPara, vencerJanela, responder, responderAquecimento,
-    api: deps.API, saidas: () => idas.map((i) => i.tipo + ':' + i.id), aquecidas: () => log.filter((l) => l.startsWith('preparar:')) };
+    api: deps.API, idas, aquecimentosComGesto,
+    saidas: () => idas.map((i) => i.tipo + ':' + i.id), aquecidas: () => log.filter((l) => l.startsWith('preparar:')) };
 }
 
 test('R11-3-01 com o Desfazer, a APROVAÇÃO de uma foto do local só sai depois da resposta da EXCLUSÃO dele no ar — e a exclusão seguinte espera a aprovação', async () => {
@@ -3879,9 +3887,10 @@ test('R12-3-01 com a página SAINDO, a escrita da janela não espera o aquecimen
   // A descarga da página (`descarregarAcaoPendente`: fechar o app, trocar de app)
   // liga o `API.saindo` e despacha a janela. Esperando o aquecimento, a escrita
   // ficava pra depois da resposta dele — que a página morta nunca recebe —, e
-  // sumia: antes ela saía na hora, com keepalive. Sem esperar, quem cuida da
-  // ordem é o servidor (o aquecimento só grava por cima do que estava lá, em
-  // test/portao-servidor).
+  // sumia: antes ela saía na hora, com keepalive. Sem esperar, quem garante que
+  // o aquecimento que volta depois não estraga nada é o servidor: a lista dele
+  // mora numa chave do gesto, que só a exclusão daquele gesto lê (R13-3-02 e
+  // R13-3-03, em test/portao-servidor).
   const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   m.abrirEm(m.A, 'f1');
   m.app.pedirExclusaoDaFoto();                       // o toque: o aquecimento sai e fica no ar
@@ -3943,6 +3952,38 @@ test('R12-3-01 a API devolve a PROMESSA do aquecimento (que só termina com a re
   delete guardado.waze_session_token;
   ctx.API.setSession && ctx.API.setSession(null);
   assert.equal(ctx.API.prepararExclusao('v', -23, -46, 'row'), undefined, 'sem sessão o aquecimento devolveu algo pra esperar');
+});
+
+// ── R13-3-03: o toque e a exclusão levam o MESMO gesto ───────────────────────
+// No servidor, a lista que o toque lê mora numa chave do GESTO, e só a exclusão
+// daquele gesto a usa (`chaveDoToque`, test/portao-servidor). Aqui, o lado do
+// app: o toque manda um gesto novo, a exclusão dele leva o mesmo, e a exclusão
+// sem toque (tocada com outra escrita de foto do local no ar) não leva nenhum.
+test('R13-3-03 o toque na lixeira e a exclusão dele levam o MESMO gesto — e a exclusão sem toque não leva nenhum', async () => {
+  const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  m.abrirEm(m.A, 'f1');
+  m.app.pedirExclusaoDaFoto();
+  m.responderAquecimento(); await umTique();
+  m.vencerJanela(); await umTique();
+  const gesto = m.aquecimentosComGesto[0];
+  assert.match(String(gesto), /^[0-9a-f]{16}$/, `o toque não mandou um gesto: ${gesto}`);
+  assert.deepEqual(m.saidas(), ['excluir:f1'], 'PRÉ-CONDIÇÃO: a exclusão de f1 não saiu');
+  assert.equal(m.idas[0].gesto, gesto, 'a exclusão não levou o gesto do toque dela — o servidor relê o local, e o toque não serve');
+  m.irPara('f2');
+  m.app.pedirExclusaoDaFoto(); m.vencerJanela();      // tocada com a de f1 no ar: sem toque
+  m.responder('excluir', 'f1', { success: true, restantes: ['ur-A', 'f2'] });
+  await umTique(); await umTique();
+  assert.deepEqual(m.saidas(), ['excluir:f1', 'excluir:f2'], 'PRÉ-CONDIÇÃO: a exclusão de f2 não saiu');
+  assert.equal(m.aquecidas().length, 1, 'PRÉ-CONDIÇÃO: a lixeira de f2 aqueceu a lista com a exclusão de f1 no ar');
+  assert.equal(m.idas[1].gesto, undefined, 'a exclusão sem toque levou um gesto — o de outro toque');
+  // Cada toque, um gesto NOVO.
+  const n = fotosNoMesmoLocal();
+  n.abrirEm(n.A, 'f1');
+  n.app.pedirExclusaoDaFoto(); n.pend.e.desfazer();
+  n.irPara('f2');
+  n.app.pedirExclusaoDaFoto();
+  assert.equal(n.aquecimentosComGesto.length, 2, 'PRÉ-CONDIÇÃO: os dois toques não aqueceram');
+  assert.notEqual(n.aquecimentosComGesto[0], n.aquecimentosComGesto[1], 'dois toques com o MESMO gesto');
 });
 
 // ── R12-3-02: a MESMA foto excluída pela camada de A e pela do IRMÃO B ─────────

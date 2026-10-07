@@ -3811,10 +3811,11 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // lista de antes dela (ver o `pedirExclusaoDaFoto`). Menos com a página SAINDO
 // (`soAquecimentoNaFrente` + `API.saindo`): a escrita da janela que a descarga
 // despacha não espera um aquecimento — a página morreria antes da resposta dele,
-// e a escrita, que saía na hora com `keepalive`, sumia. Sem esperar, o servidor
-// cuida da ordem: o aquecimento só grava por cima da lista que estava lá quando
-// ele saiu (`relerLocal`). Uma ESCRITA na frente segue sendo esperada, como
-// acima.
+// e a escrita, que saía na hora com `keepalive`, sumia. Sem esperar, quem
+// garante que o aquecimento que volta depois não estraga nada é o servidor: a
+// lista dele mora numa chave do GESTO, que só a exclusão daquele gesto lê
+// (auditoria da rodada 13, R13-3-02 e R13-3-03, `chaveDoToque` no core). Uma
+// ESCRITA na frente segue sendo esperada, como acima.
 //
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
 // vez são exclusões — com uma no ar, a pílula do nome do local trava
@@ -3852,6 +3853,15 @@ function vezDasFotosNoLocal(alvo, tipo) {
 // página SAINDO com só o aquecimento na frente (ver acima).
 function esperaAVezDoLocal(vez) {
     return !!vez.anterior && !(vez.soAquecimentoNaFrente && typeof API !== 'undefined' && API.saindo === true);
+}
+
+// Um id novo por TOQUE na lixeira: o toque e a exclusão dele levam o mesmo, e a
+// lista que o toque lê só serve à exclusão deste gesto (`chaveDoToque` no core,
+// R13-3-03). Dígitos ao acaso, que não identificam ninguém.
+function idDoGestoDaLixeira() {
+    const b = new Uint8Array(8);
+    try { crypto.getRandomValues(b); } catch (e) { for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256); }
+    return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 }
 
 // As fotos que SAÍRAM do mapa por uma exclusão desta página, por LOCAL
@@ -4089,7 +4099,9 @@ async function enviarExclusao(alvo) {
     // resposta dela — e a do aquecimento da lixeira (R12-3-01), menos com a página
     // saindo (`esperaAVezDoLocal`). Sem nenhuma, nada espera — o envio sai na
     // hora, como antes. A pílula do nome do local trava com ela no ar
-    // (R11-3-06): a trava é reaplicada quando ela entra na vez e quando sai.
+    // (R11-3-06): a trava é reaplicada quando ela entra na vez e quando sai. O
+    // GESTO do toque (`alvo.aquecimento`) vai junto: a lista que ele leu é desta
+    // exclusão.
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
     aplicarTravaDeAcao();
     try {
@@ -4108,7 +4120,7 @@ async function enviarExclusao(alvo) {
         // época é a do GESTO, explícita: a espera pela vez pode atravessar a
         // queda, e a ida não sai com a sessão de quem entrou depois (o
         // `callWithRetry` a confere antes de CADA tentativa).
-        const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
+        const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao, alvo.aquecimento), idasSemRespostaDeAntes(alvoDasIdas));
         let r = await callWithRetry(enviar, epoca);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
@@ -4312,9 +4324,17 @@ function pedirExclusaoDaFoto() {
     // volta (e uma foto recém-aprovada, como pendente), com tudo `success: true`
     // (MEDIDO de ponta a ponta). Não custa espera: ele leva ~0,7 s, e a janela do
     // Desfazer, 3 s. O que não saiu (sem sessão) não segura nada.
+    //
+    // O toque leva o GESTO (`idDoGestoDaLixeira`), e a exclusão dele também
+    // (`alvo.aquecimento`): no servidor, a lista que o toque lê mora numa chave
+    // do gesto, que nenhuma outra escrita lê — com a página saindo, a escrita não
+    // espera o toque, e a leitura dele, que volta depois, guardava a lista de
+    // antes por cima (auditoria da rodada 13, R13-3-02 e R13-3-03).
     if (!escritasDeFotoNoLocal.has(place.venueID)) {
-        const aquecendo = API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
+        const gesto = idDoGestoDaLixeira();
+        const aquecendo = API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao, gesto);
         if (aquecendo && typeof aquecendo.then === 'function') {
+            alvo.aquecimento = gesto;
             const vez = vezDasFotosNoLocal(alvo, 'aquecer');
             aquecendo.then(vez.soltar, vez.soltar);
         }
