@@ -435,21 +435,30 @@ test('resposta que CHEGA é prova de rede, e é o terceiro gatilho', () => {
   assert.match(trecho, /try \{[^}]*this\.aoProvarRede\([^)]*\)[^}]*\} catch/,
     'o aviso roda sem try/catch: um erro no consumidor derruba a resposta');
 
-  // O CONSUMIDOR: sem ele o gancho é decoração.
+  // O CONSUMIDOR: sem ele o gancho é decoração. O corpo INTEIRO, pela estrutura
+  // (até o `};` que fecha a atribuição), e não uma janela de N caracteres: os
+  // ganchos de teto próprio subiram pra antes da saída cedo (R11-4-01), e a
+  // janela de 260 deixava o `esvaziarFilaDeSaida()` de fora (gotcha #67).
   const iReg = APP_SEM.indexOf('API.aoProvarRede =');
   assert.ok(iReg > 0, 'ninguém registra o gancho — o transporte avisa no vácuo');
-  const consumidor = APP_SEM.slice(iReg, iReg + 260);
+  const consumidor = APP_SEM.slice(iReg, APP_SEM.indexOf('\n};', iReg));
   assert.match(consumidor, /esvaziarFilaDeSaida\(\)/,
     'o gancho deixou de esvaziar a fila de saída');
   // SAI CEDO durante o esvaziamento: cada item que ele manda passaria por aqui e
   // marcaria `saidaPedidaDeNovo`, fazendo a passada re-executar no fim — o laço
   // que quebrou por rede ruim tentaria de novo NA HORA, gastando requisição
   // justamente quando ela falha. Contraria o "para no primeiro `transient`".
-  const iSai = consumidor.indexOf('if (esvaziandoSaida) return;');
+  // (A saída anota a prova engolida pra varredura do offline sair no fim do
+  // esvaziamento — R11-4-01 —, então o `return` pode vir dentro de um bloco.)
+  const iSai = consumidor.search(/if \(esvaziandoSaida\) (?:return;|\{[^}]*\breturn; \})/);
   const iChama = consumidor.indexOf('esvaziarFilaDeSaida()');
   assert.ok(iSai >= 0 && iSai < iChama,
     'o gancho deixou de sair cedo durante o esvaziamento: a fila volta a ser '
     + 'retentada na hora depois de um `transient`, contra a política de rede');
+  // E a varredura do offline fica do lado de DENTRO da saída cedo: no meio do
+  // esvaziamento ela disputaria a banda da rede que acabou de voltar.
+  const iVarre = consumidor.indexOf('offlineTalvezVarrer()');
+  assert.ok(iVarre > iSai, 'a varredura do offline subiu pra antes da saída cedo: ela sai no MEIO do esvaziamento');
 
   // gotcha #22: é o js/min/ que o navegador carrega.
   assert.ok(/aoProvarRede/.test(apiMin) && /aoProvarRede/.test(MIN),
@@ -612,6 +621,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     // A marca desta aba nas decisões no ar (R5-1 F1): uma aba só.
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
@@ -740,6 +750,7 @@ function aparelhoO5(guardado = new Map()) {
       // A marca da ABA nas decisões no ar (R5-1 F1). Cada `pagina()` é a MESMA aba
       // reaberta (a marca mora no `sessionStorage`, que sobrevive a recarregar).
       ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+      atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
     };
     const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
@@ -972,6 +983,7 @@ function drenarO8(itens, resposta) {
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // R5-1 F1: uma aba só
+    atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'devolverPedidoRecusado',
@@ -1069,6 +1081,7 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
       SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], SAIDA_TENTATIVAS_POR_ITEM: 3,
       SAIDA_TRAVA: 'waze_places_saida', SAIDA_REIVINDICACAO_MS: 60000, SAIDA_REIVINDICACAO_ASSENTA_MS: 10,
       ABA_DESTA_PAGINA: 'aba-' + nome,
+      atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
       // A marca da aba já conferida (a aba DUPLICADA: test/contas-abas, R6-2-10).
       marcaDaAbaConferida: Promise.resolve(),
       // O pouso: o que ele conta no Histórico é do APARELHO (as abas dividem).

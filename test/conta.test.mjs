@@ -202,6 +202,7 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     // A trava ENTRE ABAS (R4-O6): aqui, a do navegador, sempre livre.
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
+    atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;

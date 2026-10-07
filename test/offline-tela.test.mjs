@@ -548,7 +548,7 @@ test('R10-4-01: com o gesto NO card, o redesenho espera o fim dele — e acontec
 // (MEDIDO no navegador, n14 da auditoria: 15,9 s e contando; o controle sem a
 // fila de saída, 8 ms). Aqui o CORPO de verdade do gancho roda, com o resto do
 // app de mentira, nas duas situações.
-function rodarProvaDeRede({ esvaziando }) {
+function rodarProvaDeRede({ esvaziando, notaAntes = false }) {
   const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
   assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
   const corpo = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
@@ -565,23 +565,154 @@ function rodarProvaDeRede({ esvaziando }) {
   };
   const chaves = Object.keys(deps);
   const api = new Function(...chaves, `let buscaSemResposta = true; let esvaziandoSaida = ${esvaziando};
+    let provaNoEsvaziamento = ${notaAntes};
     const API = {};
     ${corpo}
-    return { API, estado: () => ({ buscaSemResposta }) };`)(...chaves.map((k) => deps[k]));
+    return { API, estado: () => ({ buscaSemResposta }), nota: () => provaNoEsvaziamento };`)(...chaves.map((k) => deps[k]));
   estado = api.estado;
   api.API.aoProvarRede('perfil');
+  chamou.nota = api.nota();
   return chamou;
 }
 
-test('R10-4-03: a prova de rede no MEIO do esvaziamento da fila de saída solta o card "sem foto" — e só ele', () => {
+// Desde a rodada 11 (R11-4-01) os três ganchos de TETO PRÓPRIO — o perfil que
+// faltou, o "invisível" do WME pendente e o token do tempo real — também rodam no
+// meio do esvaziamento: nenhum disputa a fila de saída, e nada mais os chamava
+// depois dele. O que segue fora é o que disputa: retentar a fila (o esvaziamento
+// de novo) e a varredura do offline, que fica ANOTADA pro fim dele.
+test('R10-4-03 + R11-4-01: a prova de rede no MEIO do esvaziamento solta o card "sem foto" e roda os ganchos de teto próprio — nada que dispute a banda', () => {
   const durante = rodarProvaDeRede({ esvaziando: true });
-  assert.deepEqual(durante, [['card', { redeProvada: true }, { buscaSemResposta: false }]],
-    'a prova que chegou com a fila de saída esvaziando não soltou o card de foto (ou soltou com a marca do lie-fi ainda acesa, '
-    + 'ou acordou o que tem que esperar o fim do esvaziamento)');
+  assert.deepEqual(durante.filter((x) => Array.isArray(x)), [['card', { redeProvada: true }, { buscaSemResposta: false }]],
+    'a prova que chegou com a fila de saída esvaziando não soltou o card de foto (ou soltou com a marca do lie-fi ainda acesa)');
+  assert.deepEqual(durante.filter((x) => typeof x === 'string'), ['perfil', 'desligarWme', 'presenca'],
+    'no meio do esvaziamento, a prova engoliu um gancho de teto próprio (o perfil que faltou, o "invisível" do WME, o token '
+    + 'do tempo real) — ou acordou o que tem que esperar o fim dele (o esvaziamento de novo, a varredura do offline)');
+  assert.equal(durante.nota, true, 'a prova engolida não ficou anotada: o fim do esvaziamento não vai varrer o offline');
   // CONTROLE: sem esvaziamento no ar, a prova faz tudo o que sempre fez — e o card também.
   const fora = rodarProvaDeRede({ esvaziando: false });
-  assert.deepEqual(fora.filter((x) => typeof x === 'string'), ['esvaziar', 'varrer', 'perfil', 'desligarWme', 'presenca']);
+  assert.deepEqual(fora.filter((x) => typeof x === 'string'), ['perfil', 'desligarWme', 'presenca', 'esvaziar', 'varrer']);
   assert.deepEqual(fora.filter((x) => Array.isArray(x)), [['card', { redeProvada: true }, { buscaSemResposta: false }]]);
+  assert.equal(fora.nota, false, 'a prova que varre na hora deixou a nota de pé (uma segunda varredura no fim)');
+  // A nota que ficou de uma prova engolida antes (o fim daquele esvaziamento não
+  // a alcançou): esta prova varre na hora, e a leva junto — sem ela, a fila vazia
+  // a atenderia no `esvaziarFilaDeSaida` E esta varreria de novo, e a segunda
+  // chamada com a varredura no ar pede outra inteira no fim dela.
+  const comNota = rodarProvaDeRede({ esvaziando: false, notaAntes: true });
+  assert.deepEqual([comNota.filter((x) => x === 'varrer').length, comNota.nota], [1, false],
+    'a prova fora do esvaziamento deixou a nota antiga de pé: a fila vazia a atende e a varredura sai duas vezes');
+});
+
+// ── R11-4-01: o esvaziamento de VERDADE, com as respostas provando a rede ──
+// A composição: o `esvaziarFilaDeSaida`, o corpo do `API.aoProvarRede` e o
+// `atenderProvaDoEsvaziamento` de verdade, e uma rede de mentira que faz o que o
+// `_post` faz — a resposta que CHEGA chama a prova de rede antes de voltar a
+// quem pediu. O caso MEDIDO no navegador (n26 da auditoria da rodada 11): a
+// abertura sem rede não trouxe o perfil, duas decisões esperavam envio, a rede
+// voltou pelo `online`, o esvaziamento as mandou — e o perfil seguia `null` 3 s
+// depois do fim, porque as duas respostas eram as únicas provas de rede e foram
+// engolidas. Cada chamada anota se o esvaziamento estava no ar naquela hora.
+// O `fatiar` deste arquivo começa na palavra `function`: o `async` de quem tem
+// fica de fora, e o `await` de dentro não compila.
+function fatiarComAsync(nome) {
+  const i = APP_SEM.indexOf('function ' + nome + '(');
+  return (APP_SEM.slice(i - 6, i) === 'async ' ? 'async ' : '') + fatiar(nome);
+}
+function esvaziamentoComProvas({ itens = ['v1', 'v2'], durante = null } = {}) {
+  const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')()('tok');
+  const guardado = new Map([
+    ['waze_places_saida', JSON.stringify(itens.map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v, conta: '1', s: marca, regiao: 'row' })))],
+    ['waze_places_conta', JSON.stringify({ id: '1', s: marca })],
+  ]);
+  const chamou = [];
+  let h = null;
+  const anota = (nome) => () => chamou.push([nome, h.estado().esvaziando]);
+  const deps = {
+    AppState: { authenticated: true, profile: null, stats: { read: 0, rejected: itens.length, skipped: 0 } },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    navigator: { onLine: true }, epocaDaSessao: 0,
+    CONTA_KEY: 'waze_places_conta', SAIDA_KEY: 'waze_places_saida', SAIDA_RITMO_MS: 0,
+    SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], SAIDA_TENTATIVAS_POR_ITEM: 3,
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    registrarPousoDeSaida: () => {}, handleUnauthorized: () => {}, updateInFlightIndicator: () => {},
+    updateStats: () => {}, saveStats: () => {}, dfato: () => {}, showToast: () => {}, t: (k) => k,
+    // O ritmo entre itens é uma volta do laço de eventos, como o `setTimeout` de verdade.
+    setTimeout: (f) => setImmediate(f), setImmediate,
+    recuperarCardSemFoto: anota('card'),
+    refazerPerfilSeFaltar: anota('perfil'),
+    presencaWmeRefazerDesligar: anota('desligarWme'),
+    offlineTalvezVarrer: anota('varrer'),
+    window: { Presenca: { aoProvarRede: anota('presenca') } },
+    durante: durante || (() => {}),
+  };
+  const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
+  assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
+  const prova = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
+  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba',
+    'esvaziarFilaDeSaida', 'atenderProvaDoEsvaziamento'];
+  const chaves = Object.keys(deps);
+  h = new Function(...chaves, `
+    let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false,
+      ultimaEscritaOkEm = 0, buscaSemResposta = false, provaNoEsvaziamento = false;
+    let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+    const pedidosEmAndamento = new Set();
+    const enviados = [];
+    // O _post: a resposta leva uma volta de rede, e a que CHEGA prova a rede
+    // ANTES de voltar a quem a pediu.
+    const responder = async (v) => {
+      enviados.push(v);
+      await new Promise((ok) => setImmediate(ok));
+      durante(v, esvaziarFilaDeSaida);
+      API.aoProvarRede();
+      return { success: true };
+    };
+    const API = { getSession: () => 'tok', rejectPlace: (v) => responder(v), markAsRead: (v) => responder(v) };
+    ${prova}
+    ${nomes.map(fatiarComAsync).join('\n')}
+    return { esvaziarFilaDeSaida, API, enviados, fila: carregarFilaDeSaida,
+             estado: () => ({ esvaziando: esvaziandoSaida, nota: provaNoEsvaziamento }) };`)(...chaves.map((k) => deps[k]));
+  return { h, chamou };
+}
+const nomesDe = (chamou, noAr) => chamou.filter(([, e]) => e === noAr).map(([n]) => n);
+
+test('R11-4-01: as respostas do esvaziamento pedem o perfil que faltou (e os outros ganchos de teto próprio) — e a varredura do offline sai no FIM, uma vez', async () => {
+  const m = esvaziamentoComProvas();
+  await m.h.esvaziarFilaDeSaida();
+  assert.deepEqual([m.h.enviados, m.h.fila().length], [['v1', 'v2'], 0], 'PRÉ-CONDIÇÃO: o esvaziamento não mandou as duas decisões');
+  const noAr = nomesDe(m.chamou, true);
+  for (const gancho of ['perfil', 'desligarWme', 'presenca']) {
+    assert.equal(noAr.filter((n) => n === gancho).length, 2,
+      `DEFEITO: as duas respostas do esvaziamento não chamaram "${gancho}" — com a rede voltando pelo \`online\` e decisões `
+      + `esperando envio, elas são as únicas provas de rede, e nada mais o chama depois (${JSON.stringify(m.chamou)})`);
+  }
+  assert.ok(!noAr.includes('varrer'), 'a varredura do offline saiu no MEIO do esvaziamento — disputa a banda da rede que acabou de voltar');
+  assert.deepEqual(m.chamou.filter(([n]) => n === 'varrer'), [['varrer', false]],
+    'o FIM do esvaziamento não varreu o offline pela prova engolida (ou varreu mais de uma vez)');
+  assert.equal(m.h.estado().nota, false, 'a nota da prova engolida ficou de pé depois de atendida');
+});
+
+test('R11-4-01: o gatilho pedido no MEIO acha a fila vazia — a prova engolida é atendida ali, sem passada nenhuma', async () => {
+  // O `online` (ou o perfil chegando) pede outro esvaziamento com este no ar
+  // (`saidaPedidaDeNovo`); o primeiro manda tudo, e o pedido acha a fila VAZIA.
+  // A nota não pode ficar esperando um esvaziamento que não vem.
+  let pediu = false;
+  const m = esvaziamentoComProvas({ durante: (v, esvaziar) => { if (!pediu) { pediu = true; esvaziar(); } } });
+  await m.h.esvaziarFilaDeSaida();
+  await new Promise((ok) => setImmediate(ok));
+  assert.ok(pediu, 'PRÉ-CONDIÇÃO: o gatilho do meio não aconteceu');
+  assert.deepEqual(m.chamou.filter(([n]) => n === 'varrer'), [['varrer', false]],
+    'a passada pedida no meio achou a fila vazia e a prova engolida ficou sem a varredura');
+  assert.equal(m.h.estado().nota, false);
+});
+
+test('R11-4-01 CONTROLE: sem nada esperando envio, a resposta varre NA HORA e roda os ganchos — uma vez cada', () => {
+  // O caminho de sempre (nenhum esvaziamento no ar): sem este, "varre só no fim"
+  // passaria com a varredura morta em todo caminho.
+  const m = esvaziamentoComProvas({ itens: [] });
+  m.h.API.aoProvarRede();
+  assert.deepEqual(m.chamou.map(([n]) => n), ['card', 'perfil', 'desligarWme', 'presenca', 'varrer']);
+  assert.equal(m.h.estado().nota, false);
 });
 
 test('a recuperação do card "sem foto" é chamada nos DOIS sinais de rede: `online` e a resposta que chega', () => {

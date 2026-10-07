@@ -19031,7 +19031,9 @@ async function esvaziarFilaDeSaida() {
     // `SAIDA_RECUO_401_MS`). O gatilho que chegar depois dele esvazia.
     if (saidaEmRecuo()) return;
     let f = carregarFilaDeSaida();
-    if (!f.length) return;
+    // Fila vazia: nenhuma passada a fazer — a prova de rede engolida pela
+    // passada anterior (a que pediu esta) é atendida agora (R11-4-01).
+    if (!f.length) { atenderProvaDoEsvaziamento(); return; }
     esvaziandoSaida = true;
     // ENTRE ABAS: uma esvazia de cada vez (ver `travaDaSaida`). Com a outra aba
     // esvaziando, esta espera ela soltar e tenta uma vez.
@@ -19269,6 +19271,9 @@ async function esvaziarFilaDeSaida() {
         saidaPedidaDeNovo = false;
         return esvaziarFilaDeSaida();
     }
+    // FIM do esvaziamento: a prova de rede que chegou no meio dele e não pôde
+    // varrer o offline (a banda) varre agora (ver `API.aoProvarRede`, R11-4-01).
+    atenderProvaDoEsvaziamento();
 }
 
 // O pouso de um item da fila de saída. É o `handleActionResult` SEM a parte do
@@ -19623,7 +19628,8 @@ function retomarBusca() {
 // re-executar no fim. Isso contraria o "para no primeiro `transient`" — o laço
 // que quebrou por rede ruim tentaria de novo NA HORA, gastando requisição
 // justamente quando ela falha. Quem está no ar já vai processar a fila inteira,
-// então não há nada a anotar.
+// então não há nada a anotar PRA FILA — a prova engolida fica anotada só pra
+// varredura do offline, que sai no fim dele (ver `atenderProvaDoEsvaziamento`).
 API.aoProvarRede = () => {
     // Uma resposta CHEGOU: a rede anda, e a foto que falhar daqui em diante não
     // é "falta de sinal" (ver `buscaSemResposta`). ANTES da saída abaixo: no
@@ -19639,24 +19645,53 @@ API.aoProvarRede = () => {
     // — só uma próxima resposta da nossa API o soltava (auditoria da rodada 10,
     // R10-4-03, MEDIDO: 15,9 s travado e contando, nos dois motores).
     recuperarCardSemFoto({ redeProvada: true });
-    // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
-    // estava escrito abaixo (retentar na hora contraria a política de rede). O
-    // segundo é novo: varrer o offline no meio do esvaziamento é competir por
-    // banda exatamente no pior momento — a rede acabou de voltar, muitas vezes
-    // em dados móveis. O guard de `test/fila-saida.test.mjs` cobra isto, e
-    // estava certo quando eu tentei tirar.
-    if (esvaziandoSaida) return;
-    esvaziarFilaDeSaida();
-    // Resposta que CHEGA prova rede, e as duas pontas do offline pegam carona
-    // nela: o que estava preso pra SAIR e o que falta ENTRAR.
-    offlineTalvezVarrer();
+    // Os três ganchos de TETO PRÓPRIO também vêm ANTES da saída cedo: o perfil
+    // que faltou (1×/min), o "invisível" do WME que não saiu (1×/min, um envio
+    // por vez) e o token do tempo real (5 min). Nenhum disputa a fila de saída —
+    // é um pedido cada, só quando falta —, e nenhum dos dois motivos da saída
+    // cedo (logo abaixo) vale pra eles. Moravam DEPOIS dela: com a rede voltando
+    // pelo `online` e decisões esperando envio, as respostas do esvaziamento
+    // eram as únicas provas de rede, todas engolidas, e o fim dele não chama
+    // nada — o perfil que faltava seguia faltando (sem nome, sem os portões de
+    // L6, sem a recusa automática e a presença) e o "invisível" pendente não
+    // saía, até a próxima resposta FORA de um esvaziamento: o próximo gesto
+    // (auditoria da rodada 11, R11-4-01 = R11-2-07 = R11-5-02, MEDIDO nos dois
+    // motores: duas decisões saindo e o perfil `null` 3 s depois do fim).
     refazerPerfilSeFaltar();
     presencaWmeRefazerDesligar();
     // O token do tempo real que faltou ou falhou: sem isto, nada mais o pedia
     // de novo e o chat ficava sem tempo real até reabrir o app. Com o teto de
     // 5 min da própria presença (ver `presencaAoProvarRede`).
     window.Presenca?.aoProvarRede?.();
+    // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
+    // estava escrito abaixo (retentar na hora contraria a política de rede). O
+    // segundo é novo: varrer o offline no meio do esvaziamento é competir por
+    // banda exatamente no pior momento — a rede acabou de voltar, muitas vezes
+    // em dados móveis. O guard de `test/fila-saida.test.mjs` cobra isto, e
+    // estava certo quando eu tentei tirar. A prova engolida fica ANOTADA, e o
+    // fim do esvaziamento varre (ver `atenderProvaDoEsvaziamento`): sem a nota,
+    // a varredura esperava a próxima resposta, que podia não vir.
+    if (esvaziandoSaida) { provaNoEsvaziamento = true; return; }
+    // Esta prova varre logo abaixo: a que foi engolida antes (e ainda não
+    // atendida) vai junto, sem uma segunda varredura.
+    provaNoEsvaziamento = false;
+    esvaziarFilaDeSaida();
+    // Resposta que CHEGA prova rede, e as duas pontas do offline pegam carona
+    // nela: o que estava preso pra SAIR e o que falta ENTRAR.
+    offlineTalvezVarrer();
 };
+
+// A prova de rede que chegou com o esvaziamento no AR (ver `API.aoProvarRede`):
+// a varredura do offline não sai no meio dele (a banda), e o FIM dele a chama —
+// o fim de uma passada sem outra pedida, ou a passada pedida que nem começou
+// porque a fila já estava vazia. Sem rede, sem sessão, conferindo um 401 ou no
+// recuo, a nota espera o próximo esvaziamento (o próximo gatilho).
+let provaNoEsvaziamento = false;
+function atenderProvaDoEsvaziamento() {
+    if (!provaNoEsvaziamento || esvaziandoSaida) return;
+    provaNoEsvaziamento = false;
+    offlineTalvezVarrer();
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DISPONÍVEL OFFLINE — o TRABALHO sobrevive à sombra de sinal

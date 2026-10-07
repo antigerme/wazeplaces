@@ -105,6 +105,7 @@ function aparelho({ fila = [], manuais = [] }) {
     // A trava ENTRE ABAS: a do navegador, livre (uma aba só).
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
     medidas, presos, manuais: new Set(manuais), setImmediate,
   };
   const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
