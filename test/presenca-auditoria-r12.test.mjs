@@ -208,3 +208,89 @@ test('R12-5-02 a frase a caminho: o terceiro "Enviar" só a adia (a região já 
   await rodarAFrase(b.c);
   assert.equal(anuncio(b.c), '', 'a falha do "Enviar" sem o perfil falou por cima do envio que deu certo');
 });
+
+// ── R12-5-03: a falha que o eco tira da tela sai do leitor de tela ──────────
+
+// A conversa com a CAF aberta; `enviar` responde cada envio, na ordem.
+async function aberta({ enviar = [], abrir = () => ({ success: true, mensagens: [], maisAntigas: false, lida: true }) } = {}) {
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? abrir(x) : x.acao === 'enviar' ? enviar.shift() : { success: true }) } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  return c;
+}
+const minhas = (c) => c.P.Presenca.historico.get(CAF).msgs.filter((m) => m.meu);
+
+test('R12-5-03 o envio sem resposta que o Waze GUARDOU: o eco tira "Não enviada" da tela E da região viva', async () => {
+  for (const [resposta, chave] of [[SEM_REDE, 'presenca.recibo.naoEnviada'], [WAZE_FORA, 'presenca.recibo.naoEnviadaErro']]) {
+    const c = await aberta({ enviar: [resposta] });
+    c.P.presencaEnviar('é a fachada?', null);
+    await tick(); await tick();
+    assert.equal(fraseNaTela(c), chave, `CONTROLE: a tela tinha que mostrar "${chave}"`);
+    assert.equal(anuncio(c), chave, 'CONTROLE: a região diz a falha (R11-5-03)');
+    c.relogio.agora = T + 5000;
+    await eco(c, minhas(c)[0], 4000);
+    await tick();
+    assert.deepEqual(minhas(c).map((m) => m.estado), ['enviada'], 'CONTROLE: o eco tinha que fazer a mensagem "Enviada"');
+    assert.equal(fraseNaTela(c), null, 'CONTROLE: a tela tinha que tirar a linha de falha');
+    assert.equal(anuncio(c), '', `DEFEITO: a tela diz "Enviada" e a região viva segue dizendo "${chave}"`);
+  }
+});
+
+test('R12-5-03 o HISTÓRICO que traz a mensagem guardada também tira a falha da região viva', async () => {
+  // O envio falha (sem resposta) com o histórico ainda carregando; o histórico
+  // chega com a mensagem que o Waze guardou.
+  let soltarAbrir = null;
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? new Promise((ok) => { soltarAbrir = ok; })
+    : x.acao === 'enviar' ? SEM_REDE : { success: true }) } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.equal(typeof soltarAbrir, 'function', 'CONTROLE: o histórico tinha que estar carregando');
+  c.P.presencaEnviar('é a fachada?', null);
+  await tick(); await tick();
+  assert.equal(anuncio(c), 'presenca.recibo.naoEnviada', 'CONTROLE: a falha foi dita');
+  const m = minhas(c)[0];
+  soltarAbrir({ success: true, maisAntigas: false, lida: true, mensagens: [
+    { id: m.id, ts: T + 4000, de: { tipo: 1, id: EU }, para: { tipo: 1, id: CAF }, classe: 'texto', texto: m.texto, recibo: null, contexto: { app: 'wazeplaces' } }] });
+  await tick(); await tick();
+  assert.equal(m.estado, 'enviada', 'CONTROLE: o histórico tinha que fazer a mensagem "Enviada"');
+  assert.equal(fraseNaTela(c), null, 'CONTROLE: a tela tinha que tirar a linha de falha');
+  assert.equal(anuncio(c), '', 'DEFEITO: o histórico trouxe a mensagem guardada e a região viva seguiu dizendo "Não enviada, sem sinal."');
+});
+
+test('R12-5-03 a região diz a falha que a TELA mostra, ou nada: a que segue na tela fica, e o que não é falha do envio também', async () => {
+  // Duas falhas com a MESMA frase; o eco tira a última, e a tela segue dizendo
+  // a mesma frase pela outra: a região também.
+  const a = await aberta({ enviar: [SEM_REDE, SEM_REDE] });
+  a.P.presencaEnviar('primeira', null); await tick(); await tick();
+  a.P.presencaEnviar('segunda', null); await tick(); await tick();
+  a.relogio.agora = T + 5000;
+  await eco(a, minhas(a)[1], 4000);
+  await tick();
+  assert.equal(fraseNaTela(a), 'presenca.recibo.naoEnviada', 'CONTROLE: a primeira segue falhada na tela');
+  assert.equal(anuncio(a), 'presenca.recibo.naoEnviada', 'a região calou a falha que a tela ainda mostra');
+  // Frases DIFERENTES: a última dizia "sem sinal" e o eco a tirou — a tela
+  // passa a dizer a da outra, e a região não pode seguir dizendo a que sumiu.
+  const b = await aberta({ enviar: [WAZE_FORA, SEM_REDE] });
+  b.P.presencaEnviar('primeira', null); await tick(); await tick();
+  b.P.presencaEnviar('segunda', null); await tick(); await tick();
+  assert.equal(anuncio(b), 'presenca.recibo.naoEnviada', 'CONTROLE: a região diz a falha da última');
+  b.relogio.agora = T + 5000;
+  await eco(b, minhas(b)[1], 4000);
+  await tick();
+  assert.equal(fraseNaTela(b), 'presenca.recibo.naoEnviadaErro', 'CONTROLE: a tela passa a dizer a falha da primeira');
+  assert.equal(anuncio(b), '', 'a região seguiu dizendo "sem sinal", que a tela já não mostra');
+  // A mensagem que CHEGOU, anunciada depois da falha, segue dita quando o eco
+  // tira a falha: só a frase de falha do envio é calada.
+  const c = await aberta({ enviar: [SEM_REDE] });
+  c.P.presencaEnviar('primeira', null); await tick(); await tick();
+  c.relogio.agora = T + 3000;
+  await chega(c, 2500);
+  await tick();
+  const dita = anuncio(c);
+  assert.match(dita, /^presenca\.conversa\.anuncio/, 'CONTROLE: a mensagem que chegou na conversa aberta foi anunciada');
+  c.relogio.agora = T + 5000;
+  await eco(c, minhas(c)[0], 4000);
+  await tick();
+  assert.equal(fraseNaTela(c), null, 'CONTROLE: a tela tirou a linha de falha');
+  assert.equal(anuncio(c), dita, 'o eco calou o anúncio da mensagem que chegou');
+});

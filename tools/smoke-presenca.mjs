@@ -68,8 +68,11 @@ const filas = new Map();          // id -> { itens: [{ inbox, bytes }], acordar 
 // O envio que falha: 'waze' é o Waze fora (gRPC 14) com a rede boa — o
 // servidor RESPONDE, com 500; 'borda' é a borda respondendo HTML (a nossa
 // origem fora, a cota do plano grátis) — CHEGA, mas não é JSON; 'rede' é a
-// resposta que nem chega.
+// resposta que nem chega; 'guarda' é a resposta que se perde na VOLTA, com a
+// mensagem já guardada no Waze — o eco dela a quem mandou fica em
+// `ecoSegurado` até o teste o entregar (a seção 13).
 const falharEnvio = new Map();
+const ecoSegurado = new Map();    // id de quem mandou -> a mensagem guardada
 // Quem tem uma página de mensagens ANTERIORES a pedir, que demora (a seção do
 // foco: o "Ver mensagens anteriores" carregando com o foco nele).
 const anterioresDe = new Set();
@@ -172,6 +175,8 @@ function responderApi(eu, rota, c) {
       const m = { id: c.id, ts: Date.now(), de: eu, para: c.para, texto: c.texto, ctx: { ...(c.contexto || {}), app: 'wazeplaces' } };
       if (!mensagens.some((x) => x.id === m.id)) mensagens.push(m);
       entregar(c.para, bytesMsg(m));
+      // Guardada, e a resposta se perde na volta: o eco espera o teste.
+      if (falha === 'guarda') { ecoSegurado.set(eu, m); return ABORTAR; }
       entregar(eu, bytesMsg(m));   // o eco, como o Waze faz
       return { success: true, id: m.id, ts: m.ts, ...confirmados };
     }
@@ -1329,6 +1334,49 @@ try {
       else if (chegou) anota(`religar pelo toque pediu à API: ${JSON.stringify(pedidos)}`);
     }
     await bia.page.evaluate(() => { delete navigator.onLine; }).catch(() => {});
+  }
+
+  // ── 13. O ENVIO SEM RESPOSTA QUE O WAZE GUARDOU ──────────────────────────
+  // A resposta do envio se perde na VOLTA (o sinal cai), mas o Waze guardou a
+  // mensagem: o ECO dela chega depois pelo tempo real, e a tela troca o "Não
+  // enviada, sem sinal." pelo "Enviada". A região viva da conversa seguia
+  // dizendo a falha a quem percorria a conversa com leitor de tela (auditoria da
+  // rodada 12, R12-5-03). Aqui no fim, na bia: a mensagem vai pra ana, que já
+  // saiu (seção 10), e nenhuma seção depois desta a lê.
+  console.log('\n13. o envio sem resposta que o Waze guardou: o eco tira a falha da tela e do leitor de tela');
+  await bia.page.evaluate(() => { if (document.getElementById('conversaModal').classList.contains('hidden')) presencaAbrirConversa('12444348'); });
+  if (await esperar(bia, () => !document.getElementById('conversaModal').classList.contains('hidden')
+      && (Presenca.historico.get('12444348') || {}).carregada && !!Presenca.fluxo && !Presenca.fluxoParado,
+    'a conversa da bia, com o tempo real de pé, não estava aberta')) {
+    const texto13 = 'chegou aí, mesmo sem resposta?';
+    falharEnvio.set(bia.id, 'guarda');
+    await bia.page.fill('#conversaInput', texto13);
+    await bia.page.tap('#conversaEnviar');
+    const falhou = await esperar(bia, () => /sem sinal/.test(((document.querySelector('#conversaMsgs .conversa-falhou') || {}).textContent) || ''),
+      'o envio sem resposta não mostrou a falha');
+    falharEnvio.delete(bia.id);
+    const lerFalha = () => bia.page.evaluate((t) => {
+      const p = document.querySelector('#conversaMsgs .conversa-falhou');
+      const b = [...document.querySelectorAll('#conversaMsgs .conversa-bolha.minha')].find((x) => x.textContent.includes(t));
+      const r = b && b.querySelector('.presenca-recibo');
+      return { tela: p && p.firstChild ? p.firstChild.textContent.trim() : '', recibo: r ? r.getAttribute('aria-label') : null,
+        regiao: document.getElementById('conversaAnuncio').textContent };
+    }, texto13);
+    const g = ecoSegurado.get(bia.id);
+    if (falhou && g) {
+      // CONTROLE: antes do eco, a região diz a falha — a mesma frase da tela.
+      const antes = await lerFalha();
+      if (antes.regiao === 'Não enviada, sem sinal.' && antes.regiao === antes.tela) ok(`controle: sem a resposta, a tela e a região viva dizem "${antes.regiao}"`);
+      else anota(`controle: a falha não estava na tela e na região antes do eco: ${JSON.stringify(antes)}`);
+      ecoSegurado.delete(bia.id);
+      entregar(bia.id, bytesMsg(g));   // o eco do que o Waze guardou
+      if (await esperar(bia, () => !document.querySelector('#conversaMsgs .conversa-falhou'), 'o eco não tirou a falha da tela')) {
+        await dormir(200);
+        const depois = await lerFalha();
+        if (depois.recibo === 'Enviada' && depois.regiao === '') ok('o eco do que o Waze guardou: a tela diz "Enviada", e a região viva não diz mais "Não enviada"');
+        else anota(`o eco tirou a falha da tela, e não do leitor de tela: ${JSON.stringify(depois)}`);
+      }
+    } else if (falhou) anota('controle: o Waze de mentira não guardou a mensagem da bia');
   }
 } finally {
   await browser.close();
