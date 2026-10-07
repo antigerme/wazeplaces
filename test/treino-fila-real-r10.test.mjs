@@ -5,6 +5,13 @@
 // fila SEM gesto da pessoa encerra o treino por baixo dela" (R9-7-04); a rodada
 // 10 achou o que ainda escapava, cada um MEDIDO no navegador pelos auditores com
 // o controle sem o treino:
+//   R10-1-01 — a TROCA DE CONTA pela renovação silenciosa (`esquecerOutraConta`)
+//              refazia a fila pelo `resetQueue`, que ENCERRA o treino: a faixa
+//              "nada é enviado ao Waze" sumia, o card da frente virava um pedido
+//              da conta que entrou e o ✕ seguinte ia ao Waze no nome dela. E o
+//              que o treino guardava — a fila e os exemplos, clones dela — era da
+//              conta ANTERIOR. Com a área da anterior no filtro, a fila da tela
+//              (os exemplos) contava como "há fila" sempre;
 //   R10-7-02 — o aviso do país anotado no treino se perdia quando ele terminava
 //              pelo ↻ (o "Aplicar" está em test/filtros-aplicar.test.mjs, com a
 //              página dos Filtros de lá);
@@ -111,6 +118,191 @@ const soSinteticos = (fila) => (fila || []).length > 0 && fila.every((p) => !!p.
 // O que trava a ENTRADA no treino (`Treino.motivoDeRecusa`): sem isto o buraco
 // negro — que é verdadeiro — a recusaria.
 const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map() });
+
+// ═══ R10-1-01 · a TROCA DE CONTA com o treino aberto ═══════════════════════════
+// A sessão de X cai e a extensão renova em silêncio com a de Y. A fila na tela
+// (com o treino aberto, a que ele guarda) é a de X, e ATRAVESSOU a sessão
+// (`filaAtravessouSessao`). Quando o perfil (ou a ponte) diz que a conta é
+// outra, o `esquecerOutraConta` tira do aparelho o que era de X e manda refazer
+// a fila. Aqui rodam a troca, o `resetQueue`, a `refazerFilaReal`, o
+// `offlineEsquecer` e o relatório do treino de verdade; o fechamento das camadas
+// é de mentira (o "Treino concluído" aberto fecha pela limpeza dele: o `sair()`).
+function montarTroca({ atravessou = true, area = false, fila = 'x' } = {}) {
+  const log = [];
+  const els = { treinoBanner: elemento(['hidden']) };
+  const real = fila === 'vazia' ? [] : [1, 2, 3, 4].map((i) => PRIV(fila, i));
+  const AppState = {
+    authenticated: true, pendingAction: null, fetchEpoch: 5, fetching: false, hasMore: true, loadError: false,
+    queue: real.slice(), currentPlace: real[0] || null, stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: real.length,
+    autorEmFoco: null, preferences: { comoFuncionaVisto: true }, history: {}, conquistas: {},
+    filters: { managedAreaId: area ? '5' : '', myArea: false, stateId: '' },
+  };
+  const base = { fila: { places: real.slice() } };   // a base do offline, com a fila guardada
+  const fim = { aberto: false };                       // o "Treino concluído"
+  let app = null;
+  const deps = {
+    AppState, ...LIVRE(), document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
+    t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
+    showToast: (m) => { log.push('toast:' + m); return { remover() {}, dispensar() {}, texto() {} }; },
+    startFetching: () => log.push('busca'),
+    showCurrentPlace: () => log.push('card:' + ((AppState.currentPlace || {}).venueID || '-')),
+    carregarFilaDeSaida: () => [], safeLS: { get: () => null, set() {}, remove() {} },
+    filaAtravessouSessao: atravessou,
+    // O offline (o `offlineEsquecer` de verdade): a base e o cache.
+    offlineEpoca: 0, offlineJanelaServida: 7, offlineUltimoResultado: 'pronto', offlineFilaGravadaEm: 1,
+    offlineFilaGravadaChaves: null, offlineFilaPreparada: 1, offlineFilaVarrida: null, offlineFeitosNaJanela: null,
+    diagTilesGuardadosQueFalharam: [],
+    indexedDB: { deleteDatabase: () => { delete base.fila; log.push('base apagada'); } },
+    window: { caches: true }, caches: { delete: async () => {} },
+    OFFLINE_DB: 'waze_places_offline', OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_POUSOS_KEY: 'waze_places_offline_pousos',
+    // O relatório do treino (`diagSeguro` de verdade).
+    DIAG_FUNDO: 12, Element: class {},
+    // A fila nova (o `resetQueue` de verdade).
+    pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    fecharOQueEraDaContaAnterior: (comAFila) => {
+      log.push('camadas' + (comAFila ? ' (todas)' : ''));
+      if (comAFila && fim.aberto) { fim.aberto = false; app.Treino.sair(); }
+    },
+  };
+  app = rodar(deps, [
+    ...['filaReal', 'filaRealComDevolvidos', 'refazerFilaReal', 'resetQueue', 'esquecerOutraConta', 'offlineEsquecer',
+      'diagSeguro', 'diagTreinoAgora', 'diagTreinoGuardado'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['Treino', 'esquecerOutraConta', 'diagTreinoGuardado', 'filaReal']);
+  return { app, AppState, log, els, base, fim, deps };
+}
+
+// O que a conta ANTERIOR deixou anotado no treino: a fila guardada do offline que
+// a abertura sem rede leu nele, o perfil dela (o país, a recusa automática), um
+// recusado de vez que voltaria no "Sair" e o foco num autor.
+function anotarDaContaAnterior(m) {
+  m.app.Treino.anotarFilaGuardada(4, 1785200000000);
+  m.app.Treino.anotarFilaRefeita({ chave: 'toast.paisDoPerfil', pais: 'France', regiao: 'row', id: 73 });
+  m.app.Treino.anotarPerfil();
+  m.app.Treino.anotarRecusa();
+  m.app.Treino._salvo.devolver.push(PRIV('x', 9));
+  m.app.Treino._salvo.autorEmFoco = 7001;
+}
+
+test('R10-1-01: OUTRA conta na renovação silenciosa com o treino ABERTO — o treino segue, sem nada da conta anterior, e a fila de quem entrou vem no "Sair"', () => {
+  // CONTROLE: sem o treino, a fila da conta anterior sai da tela e a de quem
+  // entrou é buscada (K2) — o instrumento enxerga a troca.
+  const c = montarTroca();
+  c.app.esquecerOutraConta('5151');
+  assert.deepEqual([ids(c.AppState.queue), c.log.filter((l) => l === 'busca')], [[], ['busca']],
+    'CONTROLE: sem o treino a troca de conta não refez a fila — o teste perdeu o sentido');
+
+  const m = montarTroca();
+  m.app.Treino.entrar();
+  anotarDaContaAnterior(m);
+  assert.match(JSON.stringify(m.AppState.queue), /PRIVx/, 'PRÉ-CONDIÇÃO: os exemplos não são clones da fila da conta anterior');
+  assert.match(JSON.stringify(m.app.diagTreinoGuardado()), /PRIVx/, 'PRÉ-CONDIÇÃO: o relatório do treino não leva a fila guardada');
+  // O que o `derrubarSessao` guarda pra dizer "sua fila continua aqui" (a época da fila na tela).
+  const filaDaQueda = m.AppState.fetchEpoch;
+  // E a época da fila REAL guardada: é por ela que o ✕ da conta anterior, que a
+  // queda devolve depois (`decisaoDepoisDaQueda`), acha a fila do gesto.
+  const epocaDaFilaReal = m.app.Treino._salvo.epoca;
+  const desde = m.log.length;
+  m.app.esquecerOutraConta('5151');
+  const depois = m.log.slice(desde);
+  assert.equal(m.app.Treino.ativo, true,
+    'DEFEITO: a troca de conta encerrou o treino CALADO — a faixa some e o ✕ seguinte vai ao Waze no nome de quem entrou (R10-1-01)');
+  assert.ok(m.els.treinoBanner.classList.contains('flex'), 'a faixa "nada é enviado ao Waze" sumiu');
+  assert.deepEqual(depois.filter((l) => l === 'busca'), [], 'a fila de quem entrou foi buscada com o treino aberto');
+  assert.ok(depois.includes('toast:toast.outraConta'), 'o aviso da troca de conta não saiu');
+  // Nada da conta anterior: nem nos exemplos (na tela e no relatório) nem no que o treino guarda pro "Sair".
+  assert.ok(soSinteticos(m.AppState.queue),
+    `DEFEITO: os exemplos na tela seguem clones dos pedidos da conta anterior (${lugares(m.AppState.queue)})`);
+  assert.equal(m.app.Treino.restam, m.AppState.queue.length, 'o "Restam" do treino não acompanhou os exemplos novos');
+  assert.ok(depois.includes('card:' + m.AppState.queue[0].venueID), 'o card da frente não foi redesenhado com o exemplo');
+  for (const [onde, txt] of [['a fila da tela', JSON.stringify(m.AppState.queue)], ['o card da frente', JSON.stringify(m.AppState.currentPlace)],
+    ['o relatório do treino', JSON.stringify(m.app.diagTreinoGuardado())]]) {
+    assert.doesNotMatch(txt, /PRIV/, `DEFEITO: dado de terceiro da conta anterior ficou n${onde === 'a fila da tela' ? 'a' : 'o'} ${onde}: ${txt.slice(0, 160)}`);
+  }
+  const s = m.app.Treino._salvo;
+  assert.deepEqual({ queue: s.queue, currentPlace: s.currentPlace, autorEmFoco: s.autorEmFoco, devolver: s.devolver,
+    abrirGuardada: s.abrirGuardada, filaGuardadaLida: s.filaGuardadaLida, avisoDoPais: s.avisoDoPais,
+    perfilChegou: s.perfilChegou, recusaPedida: s.recusaPedida, refazerFila: s.refazerFila },
+  { queue: [], currentPlace: null, autorEmFoco: null, devolver: [], abrirGuardada: false, filaGuardadaLida: null,
+    avisoDoPais: null, perfilChegou: false, recusaPedida: false, refazerFila: true },
+  'o treino guardou o que era da conta anterior (ou não anotou a fila de quem entrou pro "Sair")');
+  assert.notEqual(m.AppState.fetchEpoch, filaDaQueda,
+    'a fila da tela mudou e a época não: a renovação da queda diria "sua fila continua aqui" depois do "Outra conta entrou"');
+  // O ✕ da conta anterior que volta recusado depois da troca acha uma fila
+  // REFEITA: não espera o "Sair" no treino de quem entrou (nem vai no relatório dele).
+  assert.equal(m.app.Treino.guardarDevolucao(PRIV('x', 8), epocaDaFilaReal), false,
+    'o recusado da conta anterior ficou guardado no treino de quem entrou');
+  assert.deepEqual(m.app.Treino._salvo.devolver, []);
+  // O "Sair": a fila de quem entrou é buscada, e o aviso de país da conta anterior não sai.
+  const antesDoSair = m.log.length;
+  m.app.Treino.sair();
+  const noSair = m.log.slice(antesDoSair);
+  assert.equal(m.app.Treino.ativo, false);
+  assert.deepEqual(noSair.filter((l) => l === 'busca'), ['busca'], 'o "Sair" não buscou a fila de quem entrou');
+  assert.deepEqual(ids(m.AppState.queue), [], 'o "Sair" devolveu a fila da conta anterior');
+  assert.ok(!noSair.some((l) => l.startsWith('toast:toast.paisDoPerfil')), 'o aviso de país da conta ANTERIOR saiu pra quem entrou');
+});
+
+test('R10-1-01: com o "Treino concluído" aberto, a troca de conta fecha o diálogo e busca a fila de quem entrou UMA vez — sem mostrar a da anterior', () => {
+  const m = montarTroca();
+  m.app.Treino.entrar();
+  // Os exemplos acabaram (`Treino.agir` no último): o diálogo final está aberto.
+  m.AppState.queue = [];
+  m.AppState.currentPlace = null;
+  m.fim.aberto = true;
+  const desde = m.log.length;
+  m.app.esquecerOutraConta('5151');
+  const depois = m.log.slice(desde);
+  assert.equal(m.fim.aberto, false, 'PRÉ-CONDIÇÃO: o fechamento das camadas não fechou o "Treino concluído"');
+  assert.equal(m.app.Treino.ativo, false, 'o fechamento do diálogo (o "Ir para a fila") não saiu do treino');
+  assert.ok(!depois.some((l) => /^card:x/.test(l)),
+    `DEFEITO: o "Sair" do diálogo mostrou a fila da conta ANTERIOR antes de refazê-la (${depois.join(' | ')})`);
+  assert.deepEqual(depois.filter((l) => l === 'busca'), ['busca'],
+    'a fila de quem entrou foi buscada mais de uma vez — uma busca jogada fora no free tier');
+  assert.deepEqual(ids(m.AppState.queue), []);
+});
+
+test('R10-1-01: CONTROLE — a fila nascida NESTA sessão (o login já disse a conta) não sai do treino: nada a trocar, nada a buscar', () => {
+  const m = montarTroca({ atravessou: false });
+  m.app.Treino.entrar();
+  const exemplos = lugares(m.AppState.queue);
+  m.app.esquecerOutraConta('5151');
+  assert.equal(m.app.Treino.ativo, true);
+  assert.deepEqual(lugares(m.AppState.queue), exemplos, 'os exemplos da fila de quem entrou foram trocados sem motivo');
+  assert.deepEqual(ids(m.app.filaReal()), ['ux1', 'ux2', 'ux3', 'ux4'], 'a fila guardada (de quem entrou) saiu do treino');
+  assert.equal(m.app.Treino._salvo.refazerFila, false, 'uma fila desta sessão foi mandada refazer: uma busca a mais');
+  assert.deepEqual(m.log.filter((l) => l === 'busca'), []);
+});
+
+test('R10-1-01 (a hipótese do auditor): a ÁREA da conta anterior no filtro, com o treino aberto — quem conta é a fila REAL, nunca os exemplos', () => {
+  // CONTROLE: sem o treino, a fila que saiu filtrada pela área da anterior é
+  // refeita, e a área sai do filtro (F4).
+  const c = montarTroca({ atravessou: false, area: true, fila: 'y' });
+  c.app.esquecerOutraConta('5151');
+  assert.deepEqual([c.AppState.filters.managedAreaId, c.log.filter((l) => l === 'busca')], ['', ['busca']],
+    'CONTROLE: sem o treino a fila filtrada pela área da conta anterior não foi refeita — o teste perdeu o sentido');
+  // A fila real é de QUEM ENTROU (a busca saiu com a sessão dela), filtrada pela
+  // área da anterior: o treino segue, os exemplos ficam — são dela — e o "Sair" refaz.
+  const m = montarTroca({ atravessou: false, area: true, fila: 'y' });
+  m.app.Treino.entrar();
+  const exemplos = lugares(m.AppState.queue);
+  m.app.esquecerOutraConta('5151');
+  assert.equal(m.app.Treino.ativo, true, 'DEFEITO: a área da conta anterior encerrou o treino por baixo da pessoa');
+  assert.deepEqual(lugares(m.AppState.queue), exemplos, 'os exemplos da própria fila de quem entrou foram trocados');
+  assert.equal(m.app.Treino._salvo.refazerFila, true, 'a fila que saiu pela área da anterior não ficou pra refazer no "Sair"');
+  assert.deepEqual(m.log.filter((l) => l === 'busca'), [], 'a fila foi buscada com o treino aberto');
+  m.app.Treino.sair();
+  assert.deepEqual(m.log.filter((l) => l === 'busca'), ['busca'], 'o "Sair" não refez a fila');
+  // A fila real VAZIA: nada saiu pela área — e os EXEMPLOS não contam como fila.
+  const v = montarTroca({ atravessou: false, area: true, fila: 'vazia' });
+  v.app.Treino.entrar();
+  assert.ok(soSinteticos(v.AppState.queue), 'PRÉ-CONDIÇÃO: com a fila real vazia, o treino não pôs os exemplos sintéticos');
+  v.app.esquecerOutraConta('5151');
+  assert.equal(v.app.Treino.ativo, true,
+    'DEFEITO: os EXEMPLOS contaram como a fila que saiu pela área da conta anterior, e o treino foi encerrado');
+  assert.equal(v.app.Treino._salvo.refazerFila, false, 'a fila real vazia foi mandada refazer');
+  assert.equal(v.AppState.filters.managedAreaId, '', 'a área da conta anterior ficou no filtro');
+});
 
 // ═══ R10-7-02 · o aviso do país quando o treino termina pelo ↻ ═════════════════
 // O perfil diz que a pessoa edita OUTRO país com o treino aberto: o lugar muda já

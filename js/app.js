@@ -18494,12 +18494,30 @@ function esquecerOutraConta(id) {
     // saiu (ou está saindo) filtrada pela área da anterior: a abertura com a
     // sessão salva busca antes de o perfil dizer de quem ela é. No login, a conta
     // chega antes da primeira busca, e não há fila pra refazer.
-    const refazerFila = filaAtravessouSessao || (areaNaBusca && (AppState.fetching || AppState.queue.length));
+    //
+    // Com o TREINO aberto, a fila da tela são os EXEMPLOS, e a real é a que ele
+    // guarda (`filaRealComDevolvidos`): contar a da tela dava "há fila" sempre. E
+    // a troca de conta é a renovação silenciosa — nenhum gesto da pessoa —, então
+    // ela não encerra o treino por baixo dela (a regra do R9-7-04): o `resetQueue`
+    // daqui o encerrava CALADO, a faixa "nada é enviado ao Waze" sumia, o card da
+    // frente virava um pedido de quem entrou e o ✕ seguinte ia ao Waze no nome
+    // dela (R10-1-01, MEDIDO no navegador; auditoria da rodada 10). O treino
+    // segue, a fila de quem entrou vem no "Sair" dele (`refazerFilaReal`), e a da
+    // conta anterior sai dele já, com os exemplos clonados dela (ver
+    // `Treino.esquecerFilaDaContaAnterior`). Anotado ANTES de fechar as camadas:
+    // o "Treino concluído" aberto fecha por lá, e o `sair()` dele já refaz a fila.
+    const noTreino = typeof Treino !== 'undefined' && Treino.ativo === true;
+    const refazerFila = filaAtravessouSessao
+        || (areaNaBusca && (noTreino ? filaRealComDevolvidos().length > 0 : (AppState.fetching || AppState.queue.length)));
+    if (refazerFila && noTreino) {
+        if (filaAtravessouSessao) Treino.esquecerFilaDaContaAnterior();
+        refazerFilaReal();
+    }
     // O que a conta anterior tinha ABERTO na tela sai antes da fila trocar (ver
     // a função). DEPOIS do `Presenca.esquecer` lá em cima: o fechamento da
     // conversa pagaria o "lida" dela com a sessão de quem entrou.
     fecharOQueEraDaContaAnterior(refazerFila);
-    if (refazerFila) {
+    if (refazerFila && !noTreino) {
         resetQueue();
         startFetching();
     }
@@ -21186,6 +21204,42 @@ const Treino = {
         if (!this.ativo || !this._salvo) return;
         this._salvo.abrirGuardada = false;
         this._salvo.filaGuardadaLida = null;
+    },
+
+    // OUTRA conta entrou com o treino aberto e a fila real que ele guarda é da
+    // ANTERIOR — a que atravessou a queda da sessão (`esquecerOutraConta`,
+    // R10-1-01). Sai do treino tudo o que era dela: a fila, o pedido da frente, o
+    // foco no autor, os recusados que voltariam no "Sair", a fila guardada do
+    // offline anotada e o que o perfil dela anotou (o aviso do país, a recusa
+    // automática). E os exemplos NA TELA, que são clones dos pedidos dela: no
+    // lugar deles, os sintéticos — o treino de quem tem a fila vazia —, sem dado
+    // de terceiro no DOM nem no relatório (`diagTreinoGuardado`). A fila de quem
+    // entrou vem no "Sair" (quem chama anota o `refazerFilaReal`). A ÉPOCA da
+    // fila guardada sai também: o que estava no ar sobre ela (o ✕ que a queda
+    // devolve) acha uma fila refeita, como sem o treino; e a da tela sobe — a fila
+    // da tela mudou, e a renovação da queda não diz "sua fila continua aqui".
+    esquecerFilaDaContaAnterior() {
+        if (!this.ativo || !this._salvo) return;
+        const s = this._salvo;
+        s.queue = [];
+        s.currentPlace = null;
+        s.autorEmFoco = null;
+        s.devolver = [];
+        s.perfilChegou = false;
+        s.recusaPedida = false;
+        s.avisoDoPais = null;
+        this.esquecerFilaGuardada();
+        s.epoca = null;
+        AppState.fetchEpoch++;
+        s.epocaDoTreino = AppState.fetchEpoch;
+        AppState.autorEmFoco = null;
+        removeCurrentCardEl();
+        AppState.queue = this.cards();
+        this.restam = AppState.queue.length;
+        AppState.currentPlace = AppState.queue[0] || null;
+        updateStats(true);
+        updatePendingCount(true);
+        if (AppState.currentPlace) showCurrentPlace();
     },
 
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de
