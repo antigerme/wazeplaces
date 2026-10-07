@@ -720,9 +720,29 @@ try {
   console.log('\n9. carona na ação');
   naApp.delete(bia.id);   // a bia fechou o app
   await ana.page.evaluate(() => { closeModal('presencaModal'); });
+  // A carona desta ação diz "ninguém no app" e não há mensagem: a pílula SOME —
+  // com o foco do teclado nela (fechar a lista o devolve à pílula), ele caía no
+  // <body> (auditoria da rodada 11, R11-5-04). CONTROLE do instrumento:
+  // escondê-la cru, com o foco nela, põe o foco no <body> — a medição enxerga a
+  // perda. Lido depois de um tempo: o navegador só tira o foco do elemento
+  // escondido no próximo desenho.
+  const focoNoCabecalho = () => ana.page.evaluate(() => (document.activeElement ? document.activeElement.id || document.activeElement.tagName : null));
+  await ana.page.focus('#presencaPill');
+  await ana.page.evaluate(() => document.getElementById('presencaPill').classList.add('hidden'));
+  await dormir(150);
+  const cruDaPilula = await focoNoCabecalho();
+  if (cruDaPilula === 'BODY') ok('controle: esconder a pílula cru, com o foco nela, põe o foco no <body> — a medição enxerga a perda');
+  else anota(`controle: esconder a pílula cru não tirou o foco (${cruDaPilula}) — a medição não distinguiria nada`);
+  await ana.page.evaluate(() => presencaRenderPilula());   // a pílula de verdade de volta: a bia segue na lista da ana até a carona
+  await ana.page.focus('#presencaPill');
   const pedidosAntes = apiDe(ana, 'presenca-app').length;
   await ana.page.evaluate(() => handleReject());
   if (await esperar(ana, () => Presenca.online.length === 0, 'a lista não veio de carona na ação', 12000)) {
+    await dormir(150);
+    const pilulaSumiu = await ana.page.evaluate(() => document.getElementById('presencaPill').classList.contains('hidden'));
+    const focoDepois = await focoNoCabecalho();
+    if (pilulaSumiu && focoDepois === 'themeBtn') ok('a pílula sumiu com o foco nela: o foco foi pro vizinho do cabeçalho (o do tema) — não pro <body>');
+    else anota(`a pílula sumiu com o foco nela e o foco foi pra ${focoDepois} (pílula escondida: ${pilulaSumiu})`);
     const acao = reg(ana.id).api.find((x) => x.rota === 'validar-place');
     if (acao && acao.c.presenca && Array.isArray(acao.c.presenca.conhecidos) && acao.c.presenca.conhecidos.includes('183164343')) ok('a ação leva as conversas conhecidas de carona');
     else anota(`a ação não levou as conhecidas: ${JSON.stringify(acao && acao.c.presenca)}`);

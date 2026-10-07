@@ -299,3 +299,55 @@ test('R11-5-03 a página ANTERIOR que não carrega é dita; a primeira página q
   assert.equal(fraseNaTela(c, 'conversa-vazio'), null, 'CONTROLE: com o histórico na tela, a falha da primeira página não aparece');
   assert.equal(anuncio(c), '', 'o leitor de tela ouviu uma falha que a tela não mostra');
 });
+
+// ── R11-5-04: a pílula some com o foco nela ─────────────────────────────────
+
+// O cabeçalho na ordem do HTML (a pílula, o tema, o ↻, os Filtros, o ⓘ), com o
+// foco de verdade: `focus()` move o `activeElement`.
+function cabecalho(c, { semIrmaos = false } = {}) {
+  const ids = ['presencaPill', 'themeBtn', 'refreshBtn', 'filtersBtn', 'helpBtn'];
+  const els = ids.map((id) => c.$(id));
+  els.forEach((el, i) => {
+    el.nextElementSibling = semIrmaos ? null : els[i + 1] || null;
+    el.focus = () => { c.doc.activeElement = el; };
+  });
+  return Object.fromEntries(ids.map((id, i) => [id, els[i]]));
+}
+const CAF_NO_APP = { id: CAF, nome: 'cafanha', rank: 3, lat: -23.53, lon: -46.64 };
+
+// A pílula na tela (a CAF no app), com o foco do teclado nela; a carona
+// seguinte diz `online`.
+function pilulaComFoco({ online = [], foco = 'pilula', semIrmaos = false, escondidos = [] } = {}) {
+  const c = novoCliente({ agora: T });
+  const h = cabecalho(c, { semIrmaos });
+  for (const id of escondidos) h[id].classList.add('hidden');
+  c.P.presencaAoCarona({ online: [CAF_NO_APP], conversas: [] }, T - 100, 30);
+  const outro = c.$('qualquerOutro');
+  c.doc.activeElement = foco === 'pilula' ? h.presencaPill : outro;
+  const visivelAntes = !h.presencaPill.classList.contains('hidden');
+  c.relogio.agora = T + 1000;
+  c.P.presencaAoCarona({ online, conversas: [] }, T + 900, 30);
+  return { visivelAntes, escondida: h.presencaPill.classList.contains('hidden'), foco: c.doc.activeElement, h, outro };
+}
+
+test('R11-5-04 a pílula que some com o foco nela leva o foco ao vizinho do cabeçalho que segue na tela — nunca ao <body>', () => {
+  const r = pilulaComFoco();
+  assert.equal(r.visivelAntes, true, 'CONTROLE: a pílula tinha que estar na tela com a CAF no app');
+  assert.equal(r.escondida, true, 'CONTROLE: sem ninguém e sem mensagem, a pílula some');
+  assert.equal(r.foco, r.h.themeBtn, 'DEFEITO: a pílula sumiu com o foco nela e o foco não foi pro próximo do cabeçalho (no navegador, ele cai no <body>)');
+  // CONTROLE: a CAF segue no app — a pílula fica, e o foco também.
+  const k = pilulaComFoco({ online: [CAF_NO_APP] });
+  assert.equal(k.escondida, false);
+  assert.equal(k.foco, k.h.presencaPill, 'a pílula ficou na tela e o foco foi tirado dela');
+  // CONTROLE: o foco em outro lugar — a pílula some e ninguém mexe no foco.
+  const o = pilulaComFoco({ foco: 'outro' });
+  assert.equal(o.escondida, true);
+  assert.equal(o.foco, o.outro, 'a pílula sumiu SEM o foco nela e o foco foi puxado pro cabeçalho');
+});
+
+test('R11-5-04 o vizinho que não está na tela é pulado; sem nenhum, o foco vai pro ⓘ da Ajuda', () => {
+  const r = pilulaComFoco({ escondidos: ['themeBtn'] });
+  assert.equal(r.foco, r.h.refreshBtn, 'o foco não pulou o vizinho escondido');
+  const s = pilulaComFoco({ semIrmaos: true });
+  assert.equal(s.foco, s.h.helpBtn, 'sem vizinho, o foco não foi pro ⓘ da Ajuda');
+});

@@ -2546,7 +2546,11 @@ function presencaRenderPilula() {
     // ninguém no app — a mensagem pode vir de quem já saiu, e sem a pílula a
     // conversa não teria caminho de volta.
     const some = !ligado || (n === 0 && naoLidas === 0);
+    // O foco é lido ANTES de esconder: escondida, o navegador o tira da pílula e
+    // o põe no <body> (no próximo desenho) — lido depois, ele já pode estar lá.
+    const levaOFoco = some && document.activeElement === btn;
     btn.classList.toggle('hidden', some);
+    if (levaOFoco) presencaFocoForaDaPilula(btn);
     if (some) return;
     // Mensagem nova troca o ÍCONE (gente → balão), não só a cor: cor sozinha
     // não transmite informação (WCAG 1.4.1).
@@ -2562,6 +2566,23 @@ function presencaRenderPilula() {
         : t(n === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
+}
+
+// A pílula some com o foco nela: fechar a lista devolve o foco à pílula, e a
+// lista seguinte que diz "ninguém no app e nenhuma mensagem" (a carona de uma
+// ação dada pelo teclado) a escondia com o foco dentro — o foco caía no
+// <body>, e quem usa teclado ou leitor de tela recomeçava do topo da página
+// (auditoria da rodada 11, R11-5-04). Ele vai ao vizinho do cabeçalho que segue
+// na tela, o próximo na ordem do Tab (o do tema, hoje) — onde o Tab o levaria —
+// e, sem nenhum, ao ⓘ da Ajuda, a reserva do `devolverFoco` do app.js. Nunca ao
+// <body>. Quem usa o dedo não vê nada: o foco que não veio do teclado não
+// acende o anel (`:focus-visible`).
+function presencaFocoForaDaPilula(btn) {
+    const naTela = (el) => typeof focavelNaTela === 'function' && focavelNaTela(el);
+    let alvo = btn.nextElementSibling;
+    while (alvo && !naTela(alvo)) alvo = alvo.nextElementSibling;
+    if (!alvo) alvo = [document.getElementById('helpBtn')].find(naTela) || null;
+    if (alvo) alvo.focus({ preventScroll: true });
 }
 
 // De onde medir o "a 3 km daqui": o card NA TELA, que é onde a pessoa está
