@@ -3361,8 +3361,13 @@ test('R10-3-04 a aprovação que VALE marca a foto como aprovada e redesenha a c
 // das fotos do local e o `callWithRetry` de verdade; o Waze de mentira segura
 // cada ida até o teste responder. `ponte.app` deixa a trava de mentira ler o
 // "exclusão no ar" de verdade (R11-3-06).
-function fotosNoMesmoLocal() {
+// `aquecimentoNoAr`: o aquecimento da lixeira (`API.prepararExclusao`) devolve a
+// promessa do pedido, que fica no ar até o teste responder (`responderAquecimento`)
+// — como o de verdade (R12-3-01). Sem a opção, ele não devolve nada (o pedido sem
+// sessão, ou o dublê antigo), e nada espera por ele.
+function fotosNoMesmoLocal({ aquecimentoNoAr = false } = {}) {
   const log = [];
+  const aquecimentos = [];
   const L = lightbox();
   L.idFotoAtual = () => L.idAprovadoDaFoto(L.urls[L.idx]);
   const fotos = (ur) => [FOTO('f1'), FOTO(ur), FOTO('f2')];
@@ -3382,7 +3387,11 @@ function fotosNoMesmoLocal() {
     API: {
       excluirFoto: (venueID, imageID) => ida('excluir', imageID, venueID),
       aprovarPedido: (venueID, ur) => ida('aprovar', ur, venueID),
-      prepararExclusao: (venueID) => log.push('preparar:' + venueID), getRegion: () => 'row',
+      prepararExclusao: (venueID) => {
+        log.push('preparar:' + venueID);
+        return aquecimentoNoAr ? new Promise((ok) => { aquecimentos.push(ok); }) : undefined;
+      },
+      getRegion: () => 'row',
     },
     canDisableUndo: () => true, lixeiraOcupada: () => {}, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true,
     manterFocoNoLightbox: () => {}, aprovandoAgora: false, excluindoAgora: false, mantendoFocoNoCard: (f) => f(),
@@ -3421,7 +3430,12 @@ function fotosNoMesmoLocal() {
     assert.ok(i, `não há ${tipo} de ${id} no ar pra responder`);
     i.respondida = true; i.responder(r);
   };
-  return { app, L, A, B, C, AppState, log, decididos, pend, abrirEm, irPara, vencerJanela, responder,
+  const responderAquecimento = () => {
+    const ok = aquecimentos.shift();
+    assert.ok(ok, 'não há aquecimento no ar pra responder');
+    ok({ success: true, preparado: true });
+  };
+  return { app, L, A, B, C, AppState, log, decididos, pend, abrirEm, irPara, vencerJanela, responder, responderAquecimento,
     saidas: () => idas.map((i) => i.tipo + ':' + i.id), aquecidas: () => log.filter((l) => l.startsWith('preparar:')) };
 }
 
@@ -3785,4 +3799,87 @@ test('R11-3-06 a camada que abre no IRMÃO com uma exclusão (ou o nome) do loca
   c.els.lightboxNomeInput.focus = () => {}; c.els.lightboxNomeInput.setSelectionRange = () => {};
   c.app.abrirEdicaoNome();
   assert.equal(c.els.lightboxNome.classList.contains('editando'), true, 'CONTROLE: sem escrita no ar, a edição não abriu');
+});
+
+// ── R12-3-01: o AQUECIMENTO da lixeira entra na vez do local ──────────────────
+// (auditoria da rodada 12). O toque na lixeira dispara a leitura do local no
+// servidor (`preparar`), "dispara e esquece", fora da vez das escritas de foto do
+// local (R10-3-03, R11-3-01). Com o Waze lento, ela voltava DEPOIS de a exclusão
+// (ou a aprovação) do local sair e guardava no servidor a lista de ANTES, por
+// cima: a exclusão seguinte do local mandava a foto de volta, e a foto
+// recém-aprovada como pendente (MEDIDO de ponta a ponta, e3-preparar-tardio). O
+// lado do servidor está em test/portao-servidor; aqui, o do cliente: o
+// `pedirExclusaoDaFoto`, o `aprovarFotoAtual`, os envios e a vez de verdade, com
+// o aquecimento no ar até o teste responder.
+test('R12-3-01 com o Desfazer, o AQUECIMENTO da lixeira entra na vez do local: a exclusão — e a aprovação — do local só sai depois da resposta dele', async () => {
+  const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  m.abrirEm(m.A, 'f1');
+  m.app.pedirExclusaoDaFoto();                       // o toque: a foto sai da tela, a leitura do local sai
+  assert.deepEqual(m.aquecidas(), ['preparar:v1'], 'PRÉ-CONDIÇÃO: o toque não aqueceu a lista do local');
+  m.vencerJanela();                                  // a janela vence com o aquecimento no ar (o Waze lento)
+  await umTique(); await umTique();
+  assert.deepEqual(m.saidas(), [],
+    'DEFEITO: a exclusão saiu com o aquecimento do local no ar — ele volta depois e guarda no servidor a lista de antes, por cima');
+  m.responderAquecimento();
+  await umTique(); await umTique();
+  assert.deepEqual(m.saidas(), ['excluir:f1'], 'a exclusão não saiu depois da resposta do aquecimento');
+  // A APROVAÇÃO de uma foto do local também espera: tocou na lixeira, desfez (a
+  // exclusão não sai, o aquecimento segue no ar) e aprovou a proposta P.
+  const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  a.abrirEm(a.A, 'f1');
+  a.app.pedirExclusaoDaFoto();
+  a.pend.e.desfazer();
+  a.irPara('ur-A');
+  assert.equal(a.L.podeAprovarAtual(), true, 'PRÉ-CONDIÇÃO: a proposta P não está aprovável na camada');
+  a.app.aprovarFotoAtual(); a.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(a.saidas(), [],
+    'DEFEITO: a aprovação saiu com o aquecimento do local no ar — ele volta depois e guarda a foto aprovada como pendente');
+  a.responderAquecimento();
+  await umTique(); await umTique();
+  assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'a aprovação não saiu depois da resposta do aquecimento');
+  // CONTROLE: o aquecimento que responde DENTRO da janela (o de todo dia, ~0,7 s
+  // contra 3 s) não segura nada: a exclusão sai na hora em que a janela vence.
+  const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  c.abrirEm(c.A, 'f1');
+  c.app.pedirExclusaoDaFoto();
+  c.responderAquecimento();
+  await umTique();
+  c.vencerJanela();
+  assert.deepEqual(c.saidas(), ['excluir:f1'], 'CONTROLE: com o aquecimento já respondido, a exclusão esperou mesmo assim');
+  // CONTROLE: o aquecimento que nem saiu (sem sessão, a API não devolve nada)
+  // não segura a exclusão.
+  const s = fotosNoMesmoLocal();
+  s.abrirEm(s.A, 'f1');
+  s.app.pedirExclusaoDaFoto(); s.vencerJanela();
+  assert.deepEqual(s.saidas(), ['excluir:f1'], 'CONTROLE: o aquecimento que não saiu segurou a exclusão');
+});
+
+test('R12-3-01 a API devolve a PROMESSA do aquecimento (que só termina com a resposta), e nada sem sessão', async () => {
+  const { default: vm } = await import('node:vm');
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const API_JS = readFileSync(new URL('../js/api.js', import.meta.url), 'utf8');
+  const guardado = { waze_session_token: 'tok', waze_region: 'row', waze_lang: 'pt' };
+  let responder = null;
+  const ctx = {
+    navigator: { language: 'pt-BR', onLine: true }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: (k) => (k in guardado ? guardado[k] : null), setItem: (k, v) => { guardado[k] = v; }, removeItem: (k) => { delete guardado[k]; } },
+    fetch: () => new Promise((ok) => { responder = () => ok({ status: 200, headers: { get: () => null }, text: async () => '{"success":true,"preparado":true}' }); }),
+    performance: { now: () => 0 }, console, setTimeout, clearTimeout, AbortController,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + API_JS + '\nthis.API = API;', ctx);
+  const p = ctx.API.prepararExclusao('v', -23, -46, 'row');
+  assert.ok(p && typeof p.then === 'function', 'DEFEITO: o aquecimento não devolve a promessa — a vez do local não tem pelo que esperar');
+  let terminou = false;
+  p.then(() => { terminou = true; });
+  await umTique();
+  assert.equal(terminou, false, 'a promessa terminou antes da resposta do servidor');
+  responder();
+  await umTique(); await umTique();
+  assert.equal(terminou, true, 'a promessa não terminou com a resposta');
+  // Sem sessão não sai pedido, e não há o que esperar.
+  delete guardado.waze_session_token;
+  ctx.API.setSession && ctx.API.setSession(null);
+  assert.equal(ctx.API.prepararExclusao('v', -23, -46, 'row'), undefined, 'sem sessão o aquecimento devolveu algo pra esperar');
 });

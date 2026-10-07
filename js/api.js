@@ -559,11 +559,15 @@ const API = {
     // ligado: os ~700ms dela correm dentro da janela do Desfazer.
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
-    // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
+    // pessoa só espera mais. Por isso não trata erro. Mas devolve a PROMESSA, que
+    // nunca rejeita: o aquecimento entra na vez das escritas de foto do local, e
+    // a exclusão (e a aprovação) do local só sai depois da resposta dele
+    // (`vezDasFotosNoLocal`, auditoria da rodada 12, R12-3-01). Sem sessão não sai
+    // nada, e não há o que esperar.
     prepararExclusao(venueID, lat, lon, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) return;
-        this._post('excluir-foto', {
+        return this._post('excluir-foto', {
             sessionToken, region: regiao || this.getRegion(), action: 'preparar',
             venueID, imageID: 'preparar', lat, lon,
         }).catch(() => {});

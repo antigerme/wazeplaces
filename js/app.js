@@ -3729,9 +3729,14 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // que sumiu no meio da exclusão (`handleExcluirFoto`). O renomear fica de fora:
 // ele grava só o nome (PATCH), não a lista.
 //
-// `tipo`: 'excluir' ou 'aprovar'. `exclusoes`: quantas escritas da vez são
-// exclusões — com uma no ar, a pílula do nome do local trava
-// (`exclusaoDoLocalNoAr`, R11-3-06).
+// O AQUECIMENTO da lixeira (a leitura do local que o toque dispara, `preparar`)
+// entra também, como uma leitura (auditoria da rodada 12, R12-3-01): fora da
+// vez, ele podia voltar DEPOIS de uma escrita do local e guardar no servidor a
+// lista de antes dela (ver o `pedirExclusaoDaFoto`).
+//
+// `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
+// vez são exclusões — com uma no ar, a pílula do nome do local trava
+// (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada.
 const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, saiu: Set, n, exclusoes }
 
 function vezDasFotosNoLocal(alvo, tipo) {
@@ -4157,7 +4162,22 @@ function pedirExclusaoDaFoto() {
     // usa a lista da outra), e é uma ida a menos. Com uma APROVAÇÃO do local no
     // ar (R11-3-01) vale o mesmo: lida antes de ela pousar, a lista guardada via a
     // foto pendente.
-    if (!escritasDeFotoNoLocal.has(place.venueID)) API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
+    //
+    // E o próprio aquecimento ENTRA na vez do local, como uma leitura (auditoria
+    // da rodada 12, R12-3-01): a exclusão desta foto (e a de outra, e a aprovação
+    // de uma foto do local) só sai depois da resposta dele. Fora da vez, com o
+    // Waze lento, ele voltava DEPOIS de a exclusão sair e guardava no servidor a
+    // lista de antes, por cima — a exclusão seguinte do local mandava a foto de
+    // volta (e uma foto recém-aprovada, como pendente), com tudo `success: true`
+    // (MEDIDO de ponta a ponta). Não custa espera: ele leva ~0,7 s, e a janela do
+    // Desfazer, 3 s. O que não saiu (sem sessão) não segura nada.
+    if (!escritasDeFotoNoLocal.has(place.venueID)) {
+        const aquecendo = API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
+        if (aquecendo && typeof aquecendo.then === 'function') {
+            const vez = vezDasFotosNoLocal(alvo, 'aquecer');
+            aquecendo.then(vez.soltar, vez.soltar);
+        }
+    }
     Lightbox.removerFoto(alvo.id, place);
     // A ÚLTIMA foto do local saiu: o `removerFoto` FECHOU a foto ampliada e o
     // foco voltou à foto do card — que este redesenho tira da página. O foco
