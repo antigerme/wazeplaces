@@ -11837,6 +11837,21 @@ function cardDaFrente() {
     return document.querySelector('#cardStack .place-card:not(.card-fundo)');
 }
 
+// Há um GESTO neste card agora — o dedo nele, a volta pro lugar depois de um
+// arraste solto sem decidir, ou a saída? Quem responde é o swipe.js
+// (`gestoNoCard`), por SINAL POSITIVO: o `style.transform` não serve, a volta
+// pro lugar deixa `translate(0, 0) rotate(0deg)` escrito (R10-4-01). Quem
+// esperar o gesto acabar é chamado no fim dele (`aoFimDoGesto`).
+function cardSobGesto(card) {
+    return !!(card && window.gestoNoCard && window.gestoNoCard(card));
+}
+
+// O FIM de um gesto no card — o swipe.js avisa quando a volta pro lugar termina
+// e quando a saída termina: o que esperava o card parar roda agora.
+function aoFimDoGesto() {
+    redesenharCardAdiado();
+}
+
 // O PEDIDO QUE O GESTO VIU — e a ação só vale pra ele.
 //
 // ✕ ↑ ✓, a seta do teclado e o arraste decidem 350 ms DEPOIS do gesto (a
@@ -20636,7 +20651,19 @@ function marcarCardSemFoto(card, place) {
 //
 // O redesenho é do MESMO pedido e passa pelo `mantendoFocoNoCard`: o teclado no
 // ↑ (o único botão vivo do card sem a foto) ia pro <body> (R8-4-03).
+//
+// Com um GESTO no card (o dedo nele, a volta pro lugar, a saída), o redesenho
+// não arranca o card de debaixo do dedo: ESPERA o fim do gesto
+// (`redesenhoDoCardAdiado`, que o `aoFimDoGesto` atende). Quem dizia "há gesto"
+// era o `style.transform` do card, e a volta pro lugar o deixa escrito
+// (`translate(0, 0) rotate(0deg)`): o card de foto travado que a pessoa tentou
+// arrastar — a reação natural a ✕ e ✓ apagados — nunca mais saía do aviso com
+// o sinal de volta, e a promessa "a próxima prova de rede tenta de novo" não se
+// cumpria no lie-fi, onde não vem outra (auditoria da rodada 10, R10-4-01,
+// MEDIDO: 15 s travado no modo avião e no lie-fi, nos dois motores; sem o
+// arraste, 105 e 7 ms).
 let provandoFotoDe = null;   // { place, redeProvada, comRede }: a prova em voo
+let redesenhoDoCardAdiado = null;   // { place, porque }: o redesenho que espera o gesto acabar
 function recuperarCardSemFoto({ redeProvada = false } = {}) {
     if (navigator.onLine === false) return;
     const place = AppState.currentPlace;
@@ -20651,10 +20678,12 @@ function recuperarCardSemFoto({ redeProvada = false } = {}) {
     const u = f.urls[f.inicial];
     if (!u) return;
     if (redeProvada) {
-        // No meio de um arraste o `transform` é do gesto: não se mexe no card; a
-        // próxima prova de rede tenta de novo (a mesma regra do `redesenhar`).
-        if (card.style.transform) return;
-        dfato('foto.redeProvada');
+        // Com um gesto no card, o redesenho espera o fim dele (a mesma regra do
+        // `redesenhar`).
+        const porque = 'foto.redeProvada';
+        if (cardSobGesto(card)) { redesenhoDoCardAdiado = { place, porque }; return; }
+        redesenhoDoCardAdiado = null;
+        dfato(porque);
         mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
         return;
     }
@@ -20669,12 +20698,14 @@ function recuperarCardSemFoto({ redeProvada = false } = {}) {
     const redesenhar = (porque) => {
         if (redesenhou) return;
         soltar();
-        // O card pode ter mudado, ou estar no meio de um arraste (o `transform`
-        // é do gesto): aí não se mexe nele; a próxima prova de rede tenta de novo.
+        // O card pode ter mudado: aí não se mexe nele. Com um GESTO nele, o
+        // redesenho espera o fim do gesto (`aoFimDoGesto`).
         if (AppState.currentPlace !== place) return;
         const agora = cardDaFrente();
-        if (!agora || !agora.querySelector('.card-sem-foto') || agora.style.transform) return;
+        if (!agora || !agora.querySelector('.card-sem-foto')) return;
         redesenhou = true;
+        if (cardSobGesto(agora)) { redesenhoDoCardAdiado = { place, porque }; return; }
+        redesenhoDoCardAdiado = null;
         dfato(porque);
         mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
     };
@@ -20701,6 +20732,24 @@ function recuperarCardSemFoto({ redeProvada = false } = {}) {
 // pendurada. Numa rede só LENTA, o servidor da foto responde à sonda e o card é
 // redesenhado como o aberto com sinal: a foto aparece quando terminar de chegar.
 const FOTO_PROVA_TETO_MS = 10 * 1000;
+
+// O redesenho do card de foto que ESPERAVA o gesto acabar (ver
+// `recuperarCardSemFoto`), chamado no fim dele (`aoFimDoGesto`). As mesmas
+// conferências do redesenho na hora: o card ainda é o do pedido e ainda está
+// sem a foto, e não começou OUTRO gesto nele (aí segue esperando). Sem rede
+// agora, não redesenha: a foto falharia de novo, e o `online` que vier chama a
+// recuperação desde o começo.
+function redesenharCardAdiado() {
+    const a = redesenhoDoCardAdiado;
+    if (!a) return;
+    const card = cardDaFrente();
+    if (cardSobGesto(card)) return;
+    redesenhoDoCardAdiado = null;
+    if (navigator.onLine === false || AppState.currentPlace !== a.place) return;
+    if (!card || !card.querySelector('.card-sem-foto')) return;
+    dfato(a.porque);
+    mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
+}
 
 // O servidor da foto RESPONDE? O CDN de foto não manda CORS, então o pedido vai
 // sem (`no-cors`): a resposta é opaca, mas o `fetch` só REJEITA quando a rede
@@ -24636,6 +24685,7 @@ window.acoesTravadas = acoesTravadas;
 window.avisarTravaAoTocar = avisarTravaAoTocar;
 window.direcaoTravada = direcaoTravada;
 window.cardDaFrente = cardDaFrente;
+window.aoFimDoGesto = aoFimDoGesto;
 
 // Usados pelo presenca.js, que carrega DEPOIS deste arquivo.
 window.cardParaConversa = cardParaConversa;

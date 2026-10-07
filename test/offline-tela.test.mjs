@@ -207,7 +207,10 @@ test('área que ROLA no card não vira arraste: a rede de segurança (.card-cont
 // (R7-4-06) — 'responde' (qualquer resposta HTTP, o 404 da foto tirada do ar
 // inclusive), 'falha' (a rede não passa) ou 'pendura'.
 // `tetoProva`: o teto da prova da <img> (R8-4-08), curto aqui pra o teste não esperar.
-function montarRecuperacao({ online = true, semFoto = true, transform = '', servidorDaFoto = 'falha', tetoProva = 60 } = {}) {
+// `gesto`: há um GESTO no card (o dedo nele, a volta pro lugar, a saída) — o que
+// o swipe.js responde pelo `gestoNoCard` (R10-4-01). `transform` é só o que fica
+// escrito no card: a volta pro lugar deixa `translate(0, 0) rotate(0deg)`.
+function montarRecuperacao({ online = true, semFoto = true, transform = '', gesto = false, servidorDaFoto = 'falha', tetoProva = 60 } = {}) {
   const place = { venueID: 'v1', updateRequestID: 'ur1', purType: 'NEW_PHOTO', imageUrls: ['https://venue-image.waze.com/a', 'https://venue-image.waze.com/ur1'] };
   const redesenhos = [];
   const provas = [];
@@ -216,6 +219,7 @@ function montarRecuperacao({ online = true, semFoto = true, transform = '', serv
   // Quem guarda o foco no redesenho (R8-4-03): a opção com que foi chamado.
   const focos = [];
   const card = { style: { transform }, querySelector: (sel) => (sel === '.card-sem-foto' && semFoto ? {} : null) };
+  const estado = { gesto };
   class Image { set src(u) { this._src = u; provas.push(this); } get src() { return this._src; } }
   const fetch = (u, opcoes) => {
     sondas.push({ u, opcoes });
@@ -230,16 +234,21 @@ function montarRecuperacao({ online = true, semFoto = true, transform = '', serv
     cardDaFrente: () => card, fotosDoCard: new Function('return ' + fatiar('fotosDoCard'))(),
     urlDaFoto: (u) => u + '?w=7', Image, dfato: (k) => diario.push(k), showCurrentPlace: () => redesenhos.push(1),
     mantendoFocoNoCard: (redesenhar, opcoes) => { focos.push(opcoes); redesenhar(); },
+    cardSobGesto: (c) => estado.gesto && c === card,
     fetch, FOTO_SONDA_TETO_MS: 30, FOTO_PROVA_TETO_MS: tetoProva,
     // Os tetos não seguram o processo do teste depois do fim (a prova que o
     // teste deixa no ar estoura sozinha, sem ninguém olhando).
     setTimeout: (fn, ms) => { const h = setTimeout(fn, ms); if (h && h.unref) h.unref(); return h; },
   };
   const chaves = Object.keys(deps);
-  const recuperar = new Function(...chaves, 'let provandoFotoDe = null;\n' + fatiar('recuperarCardSemFoto')
+  const { recuperar, adiado } = new Function(...chaves, 'let provandoFotoDe = null, redesenhoDoCardAdiado = null;\n'
+    + fatiar('recuperarCardSemFoto')
     + '\nasync ' + fatiar('fotoServidorResponde')
-    + '\nreturn recuperarCardSemFoto;')(...chaves.map((k) => deps[k]));
-  return { recuperar, redesenhos, provas, sondas, diario, focos, deps, card };
+    + '\n' + fatiar('redesenharCardAdiado')
+    + '\nreturn { recuperar: recuperarCardSemFoto, adiado: redesenharCardAdiado };')(...chaves.map((k) => deps[k]));
+  // O fim do gesto, como o swipe.js o avisa (o `aoFimDoGesto` chama o redesenho adiado).
+  const fimDoGesto = () => { estado.gesto = false; adiado(); };
+  return { recuperar, redesenhos, provas, sondas, diario, focos, deps, card, estado, fimDoGesto, adiado };
 }
 // A sonda é assíncrona: deixa as promessas (e o teto, quando pendura) assentarem.
 const assentar = (ms = 0) => new Promise((r) => setTimeout(r, ms));
@@ -329,8 +338,8 @@ test('R9-4-06: a rede já PROVADA quando a prova nem começou redesenha NA HORA 
   assert.deepEqual([m.redesenhos.length, m.sondas.length], [1, 0], 'o redesenho repetiu, ou a sonda gastou um pedido à toa');
   // O redesenho passa pelo foco do card (R8-4-03): o ↑ do teclado no card novo.
   assert.deepEqual(m.focos, [{ mesmoBotao: true }]);
-  // CONTROLE: no meio de um arraste, não mexe — a próxima prova de rede tenta de novo.
-  const a = montarRecuperacao({ transform: 'translate(40px, 0px) rotate(3deg)' });
+  // CONTROLE: no meio de um arraste, não mexe — o redesenho espera o gesto acabar (R10-4-01).
+  const a = montarRecuperacao({ transform: 'translate(40px, 0px) rotate(3deg)', gesto: true });
   a.recuperar({ redeProvada: true });
   assert.deepEqual([a.redesenhos.length, a.provas.length], [0, 0], 'arrancou o card de debaixo do dedo');
   // CONTROLE: sem a rede provada (o `online`, que chega antes do sinal), a foto segue PROVADA antes.
@@ -462,10 +471,72 @@ test('card "sem foto": sem rede, sem o aviso, com o card trocado ou no meio do a
   trocou.deps.AppState.currentPlace = { venueID: 'outro' };
   trocou.provas[0].onload();
   assert.equal(trocou.redesenhos.length, 0, 'redesenhou o card de OUTRO pedido');
-  const arrastando = montarRecuperacao({ transform: 'translate(40px, 0px) rotate(3deg)' });
+  const arrastando = montarRecuperacao({ transform: 'translate(40px, 0px) rotate(3deg)', gesto: true });
   arrastando.recuperar();
   arrastando.provas[0].onload();
   assert.equal(arrastando.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
+});
+
+// ── R10-4-01: o card de foto que a pessoa TENTOU ARRASTAR ───────────────────
+// Com ✕ e ✓ apagados, tentar arrastar o card é a reação natural; a direção está
+// travada e ele volta pro lugar — e a volta deixa `translate(0, 0) rotate(0deg)`
+// ESCRITO no card. As duas saídas da recuperação tomavam qualquer `transform`
+// como "arraste em curso" e desistiam, prometendo que "a próxima prova de rede
+// tenta de novo": no modo avião a prova da foto CARREGAVA e o card seguia
+// travado; no lie-fi nenhuma prova saía (MEDIDO, n23 e n4b da auditoria da
+// rodada 10: 15 s travado, nos dois motores; sem o arraste, 105 e 7 ms). Quem diz
+// se há gesto é o swipe.js, por sinal positivo (`gestoNoCard`), e o redesenho
+// que o encontra ESPERA o fim dele.
+test('R10-4-01: o card que VOLTOU pro lugar (o transform de repouso escrito) sai do "precisa de sinal" com a rede de volta', () => {
+  const REPOUSO = 'translate(0px, 0px) rotate(0deg)';
+  // O lie-fi: a rede já provada (a resposta nossa).
+  const liefi = montarRecuperacao({ transform: REPOUSO });
+  liefi.recuperar({ redeProvada: true });
+  assert.deepEqual([liefi.redesenhos.length, liefi.diario], [1, ['foto.redeProvada']],
+    'o card que a pessoa tentou arrastar (e voltou pro lugar) seguiu travado com a rede provada');
+  // O modo avião: o `online` e a prova da foto que carrega.
+  const aviao = montarRecuperacao({ transform: REPOUSO });
+  aviao.recuperar();
+  aviao.provas[0].onload();
+  assert.deepEqual([aviao.redesenhos.length, aviao.diario], [1, ['foto.voltou']],
+    'o card que a pessoa tentou arrastar (e voltou pro lugar) seguiu travado com a foto chegando');
+});
+
+test('R10-4-01: com o gesto NO card, o redesenho espera o fim dele — e acontece uma vez, quando ele acaba', () => {
+  // A rede provada chega com o dedo no card (o n4b `arraste` da auditoria).
+  const m = montarRecuperacao({ transform: 'translate(80px, 0px) rotate(8deg)', gesto: true });
+  m.recuperar({ redeProvada: true });
+  assert.equal(m.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
+  m.fimDoGesto();
+  assert.deepEqual([m.redesenhos.length, m.diario, m.focos], [1, ['foto.redeProvada'], [{ mesmoBotao: true }]],
+    'o gesto acabou e o card seguiu travado — a rede provada no meio dele se perdeu');
+  m.fimDoGesto();
+  assert.equal(m.redesenhos.length, 1, 'o fim de outro gesto redesenhou o card de novo');
+  // A prova da foto que CARREGA no meio do gesto (o `online` do modo avião).
+  const p = montarRecuperacao({ gesto: true });
+  p.recuperar();
+  p.provas[0].onload();
+  assert.equal(p.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
+  p.fimDoGesto();
+  assert.deepEqual([p.redesenhos.length, p.diario], [1, ['foto.voltou']], 'a foto que chegou no meio do gesto se perdeu');
+  // Um gesto NOVO começou antes de o anterior avisar o fim: segue esperando.
+  const n = montarRecuperacao({ gesto: true });
+  n.recuperar({ redeProvada: true });
+  n.adiado();                                     // o aviso chega com o gesto ainda no card
+  assert.equal(n.redesenhos.length, 0, 'redesenhou com um gesto novo no card');
+  n.fimDoGesto();
+  assert.equal(n.redesenhos.length, 1, 'o fim do gesto novo não atendeu o redesenho que esperava');
+  // CONTROLES: o card trocou, ou a rede caiu, enquanto o gesto durava — nada se redesenha.
+  const trocou = montarRecuperacao({ gesto: true });
+  trocou.recuperar({ redeProvada: true });
+  trocou.deps.AppState.currentPlace = { venueID: 'outro' };
+  trocou.fimDoGesto();
+  assert.equal(trocou.redesenhos.length, 0, 'redesenhou o card de OUTRO pedido');
+  const caiu = montarRecuperacao({ gesto: true });
+  caiu.recuperar({ redeProvada: true });
+  caiu.deps.navigator.onLine = false;
+  caiu.fimDoGesto();
+  assert.equal(caiu.redesenhos.length, 0, 'redesenhou sem rede — a foto falharia de novo, com ✕ e ✓ travados outra vez');
 });
 
 // ── R10-4-03: a prova de rede que chega DURANTE o esvaziamento da fila de saída ──

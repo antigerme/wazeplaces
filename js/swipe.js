@@ -45,6 +45,52 @@ let dragTouchId = null;
 // vezes e cada momento carrega um `outerHTML` inteiro.
 let capturouNesteGesto = false;
 
+// O card que está VOLTANDO pro lugar (o arraste solto sem decidir: 400 ms) e o
+// que está SAINDO (350 ms). Com o arraste em curso, são o gesto no card — ver
+// `gestoNoCard`. `voltaVez` diz qual volta é a mais nova.
+let cardVoltando = null;
+let voltaVez = 0;
+let cardSaindo = null;
+
+// Há um GESTO neste card agora? O dedo nele (o arraste), a volta pro lugar
+// depois de um arraste solto sem decidir, ou a saída. SINAL POSITIVO, e por
+// card, pra quem mexe no card de FORA do gesto (o redesenho do card de foto que
+// a rede devolveu e o canto do FAB do modo dev, no app.js). Eles perguntavam ao
+// `style.transform` — e a volta pro lugar deixa `translate(0, 0) rotate(0deg)`
+// ESCRITO: o card de foto travado que a pessoa tentou arrastar (a reação
+// natural a ✕ e ✓ apagados) parecia arrastado pra sempre, e nunca saía de "A
+// foto precisa de sinal" com o sinal de volta (auditoria da rodada 10,
+// R10-4-01, MEDIDO no modo avião e no lie-fi, nos dois motores). Por card, e
+// não "há arraste em algum lugar": o arraste ÓRFÃO (o card trocado no meio do
+// gesto, ver o `handleDragStart`) deixa o `isDragging` preso no card que saiu,
+// e não pode travar o que entrou.
+function gestoNoCard(card) {
+    return !!card && ((isDragging && currentCard === card) || cardVoltando === card || cardSaindo === card);
+}
+
+// O gesto ACABOU (a volta pro lugar, ou a saída): quem esperava por ele roda
+// agora (`aoFimDoGesto`, no app.js). Nunca derruba o gesto.
+function avisarFimDoGesto(card) {
+    try { if (window.aoFimDoGesto) window.aoFimDoGesto(card); } catch (e) { /* nunca derruba o gesto */ }
+}
+
+// O card volta pro lugar: o arraste solto sem decidir, ou cancelado. A volta é
+// parte do gesto até terminar; terminada, avisa. Só a volta MAIS NOVA avisa: a
+// pessoa pode pegar o card de novo no meio desta, e é a volta DAQUELE arraste
+// que encerra o gesto.
+function voltarProLugar(card) {
+    card.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+    card.style.transform = 'translate(0, 0) rotate(0deg)';
+    cardVoltando = card;
+    const vez = ++voltaVez;
+    setTimeout(() => {
+        card.style.transition = '';
+        if (vez !== voltaVez) return;
+        cardVoltando = null;
+        avisarFimDoGesto(card);
+    }, 400);
+}
+
 // Acha o toque do arraste numa TouchList. `identifier` pode ser 0, então a
 // comparação é contra `null` e nunca `!id` — o mesmo cuidado que o
 // `autorEmFoco` já exigiu com id 0 (falsy que mandava o foco embora calado).
@@ -344,10 +390,7 @@ function handleDragCancel() {
     }
     currentCard.classList.remove('dragging');
     updateSwipeIndicator(0, 0, 0);
-    currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-    currentCard.style.transform = 'translate(0, 0) rotate(0deg)';
-    const cardRef = currentCard;
-    setTimeout(() => { if (cardRef) cardRef.style.transition = ''; }, 400);
+    voltarProLugar(currentCard);
     currentCard = null;
 }
 
@@ -409,13 +452,8 @@ function handleDragEnd(e) {
             if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft(card);
         });
     } else {
-        currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-        currentCard.style.transform = 'translate(0, 0) rotate(0deg)';
         updateSwipeIndicator(0, 0);
-        const cardRef = currentCard;
-        setTimeout(() => {
-            if (cardRef) cardRef.style.transition = '';
-        }, 400);
+        voltarProLugar(currentCard);
         currentCard = null;
     }
 }
@@ -429,6 +467,7 @@ function animateSwipeOut(direction, callback) {
     const card = currentCard;
     currentCard = null;
     animating = true;
+    cardSaindo = card;
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)
     if (navigator.vibrate) navigator.vibrate(VIBRACAO_COMMIT_MS);
@@ -449,8 +488,10 @@ function animateSwipeOut(direction, callback) {
     // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
     setTimeout(() => {
         animating = false;
+        if (cardSaindo === card) cardSaindo = null;
         updateSwipeIndicator(0, 0);
-        if (callback) callback(card);
+        try { if (callback) callback(card); }
+        finally { avisarFimDoGesto(card); }
     }, 350);
 }
 
@@ -504,3 +545,4 @@ function triggerSwipe(direction, callback) {
 window.enableSwipeOnCard = enableSwipeOnCard;
 window.triggerSwipe = triggerSwipe;
 window.isSwipeAnimating = () => animating;
+window.gestoNoCard = gestoNoCard;

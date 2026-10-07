@@ -695,3 +695,136 @@ test('r4 C14 o botão e a seta que chegam travados ao triggerSwipe também pedem
   assert.equal(agiu, 0, 'o triggerSwipe agiu com o card travado');
   assert.equal(pediu, 1, 'o triggerSwipe travado voltou calado');
 });
+
+// ── R10-4-01: o GESTO no card é sinal positivo do swipe.js ────────────────
+// O redesenho do card de foto que a rede devolveu (e o canto do FAB) perguntava
+// ao `style.transform` se havia gesto no card — e a volta pro lugar depois de um
+// arraste solto sem decidir deixa `translate(0, 0) rotate(0deg)` ESCRITO: o card
+// de foto travado que a pessoa tentou arrastar nunca mais saía de "A foto
+// precisa de sinal" (MEDIDO, n23 e n4b da auditoria da rodada 10). Agora quem
+// responde é o swipe.js (`gestoNoCard`): o dedo no card, a volta pro lugar e a
+// saída — e o fim do gesto é avisado (`aoFimDoGesto`), uma vez.
+test('R10-4-01 o gesto no card: o arraste, a volta pro lugar e a saída — e o fim avisa UMA vez', () => {
+  const g = montar({ largura: 400 });
+  const fins = [];
+  g.ctx.window.aoFimDoGesto = (card) => fins.push(card);
+  assert.equal(g.ctx.gestoNoCard(g.card), false, 'PRÉ-CONDIÇÃO: card parado com gesto');
+  // O dedo no card, abaixo do limiar: é gesto.
+  let t = g.toque(0, 200, 400);
+  g.noCard('touchstart', { touches: [t], changedTouches: [t] });
+  for (let i = 1; i <= 4; i++) { g.passo(40); t = g.toque(0, 200 + 15 * i, 400); g.noDoc('touchmove', { touches: [t], changedTouches: [t] }); }
+  assert.equal(g.ctx.gestoNoCard(g.card), true, 'o dedo no card não conta como gesto');
+  // Solta sem decidir: a VOLTA pro lugar ainda é o gesto — e deixa o transform de repouso escrito.
+  g.passo(200);
+  g.noDoc('touchend', { touches: [], changedTouches: [t] });
+  assert.equal(g.card.style.transform, 'translate(0, 0) rotate(0deg)', 'PRÉ-CONDIÇÃO: a volta pro lugar deixou de escrever o transform de repouso');
+  assert.equal(g.ctx.gestoNoCard(g.card), true, 'a volta pro lugar (400 ms) não conta como gesto');
+  assert.deepEqual(fins, [], 'o fim do gesto foi avisado antes de o card parar');
+  g.esvaziar();
+  assert.equal(g.ctx.gestoNoCard(g.card), false,
+    'o card PAROU (com o transform de repouso escrito) e segue "com gesto" — o card de foto nunca mais sai do aviso');
+  assert.deepEqual(fins, [g.card], 'o fim da volta pro lugar não foi avisado (ou foi mais de uma vez)');
+  // Pegou de novo NO MEIO da volta: só a volta mais nova avisa o fim. (Devagar,
+  // abaixo do limiar e da velocidade do flick: um passo só de 60 px em 40 ms é
+  // FLICK, e o card saía — a primeira versão deste trecho media a saída.)
+  const h = montar({ largura: 400 });
+  const finsH = [];
+  h.ctx.window.aoFimDoGesto = (card) => finsH.push(card);
+  for (let volta = 0; volta < 2; volta++) {
+    let u = h.toque(0, 200, 400);
+    h.noCard('touchstart', { touches: [u], changedTouches: [u] });
+    assert.equal(h.estado().isDragging, true, `PRÉ-CONDIÇÃO: o ${volta + 1}º arraste não começou (o card estava saindo?)`);
+    for (let i = 1; i <= 4; i++) { h.passo(40); u = h.toque(0, 200 + 15 * i, 400); h.noDoc('touchmove', { touches: [u], changedTouches: [u] }); }
+    h.passo(200); h.noDoc('touchend', { touches: [], changedTouches: [u] });
+  }
+  assert.deepEqual(h.decidiu, [], 'PRÉ-CONDIÇÃO: um dos dois arrastes decidiu (era pra voltar pro lugar)');
+  assert.equal(h.ctx.gestoNoCard(h.card), true);
+  h.esvaziar();
+  assert.deepEqual([finsH.length, h.ctx.gestoNoCard(h.card)], [1, false], 'a volta superada avisou o fim do gesto');
+  // A SAÍDA (o ↑): gesto até a animação acabar; o fim é avisado DEPOIS da decisão.
+  const s = montar({ largura: 400 });
+  const ordem = [];
+  s.ctx.window.aoFimDoGesto = () => ordem.push('fim');
+  s.ctx.onSwipeUp = () => ordem.push('decidiu');
+  let v = s.toque(0, 200, 500);
+  s.noCard('touchstart', { touches: [v], changedTouches: [v] });
+  for (let i = 1; i <= 20; i++) { s.passo(40); v = s.toque(0, 200, 500 - 10 * i); s.noDoc('touchmove', { touches: [v], changedTouches: [v] }); }
+  s.passo(200);
+  s.noDoc('touchend', { touches: [], changedTouches: [v] });
+  assert.equal(s.ctx.gestoNoCard(s.card), true, 'o card SAINDO não conta como gesto');
+  s.esvaziar();
+  assert.deepEqual([ordem, s.ctx.gestoNoCard(s.card)], [['decidiu', 'fim'], false]);
+  // CONTROLE: o arraste ÓRFÃO (o card trocado no meio do gesto) não prende o card que entrou.
+  const o = montar({ largura: 400 });
+  const w = o.toque(0, 200, 400);
+  o.noCard('touchstart', { touches: [w], changedTouches: [w] });
+  assert.equal(o.estado().isDragging, true);
+  assert.equal(o.ctx.gestoNoCard({ style: {} }), false, 'o arraste órfão do card que saiu travou o card que entrou');
+  assert.equal(o.ctx.gestoNoCard(null), false);
+});
+
+// A COMPOSIÇÃO: o swipe.js de verdade e a recuperação do card de foto de
+// verdade (fatiadas do app.js), no mesmo contexto. O card está sem a foto, ✕ e ✓
+// travados (`direcaoTravada`): o arraste pro lado volta pro lugar.
+function montarCardDeFotoTravado() {
+  const g = montar({ largura: 400 });
+  const place = { venueID: 'v1', updateRequestID: 'ur1', purType: 'NEW_PHOTO', imageUrls: ['https://venue-image.waze.com/ur1'] };
+  const redesenhos = [];
+  const diario = [];
+  class Image { set src(u) { this._src = u; } }
+  Object.assign(g.ctx, {
+    AppState: { currentPlace: place },
+    cardDaFrente: () => g.card, dfato: (k) => diario.push(k), navigator: { onLine: true },
+    showCurrentPlace: () => redesenhos.push(1), mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    urlDaFoto: (u) => u, Image, fotoServidorResponde: async () => false, FOTO_PROVA_TETO_MS: 10000,
+  });
+  // O card de foto SEM a foto (o aviso na caixa da imagem).
+  g.card.querySelector = (sel) => (sel === '.card-sem-foto' ? {} : { style: {}, querySelector: () => null });
+  g.ctx.window.direcaoTravada = (d) => d === 'left' || d === 'right';
+  vm.runInContext(['let provandoFotoDe = null, redesenhoDoCardAdiado = null;',
+    ...['fotosDoCard', 'cardSobGesto', 'aoFimDoGesto', 'recuperarCardSemFoto', 'redesenharCardAdiado'].map(fatiarApp),
+    'window.aoFimDoGesto = aoFimDoGesto;'].join('\n'), g.ctx);
+  // Arrasta pro lado além do limiar e SOLTA: a direção está travada, o card volta.
+  const arrastar = ({ soltar = true } = {}) => {
+    let t = g.toque(0, 120, 400);
+    g.noCard('touchstart', { touches: [t], changedTouches: [t] });
+    for (let i = 1; i <= 20; i++) { g.passo(40); t = g.toque(0, 120 + 8 * i, 400); g.noDoc('touchmove', { touches: [t], changedTouches: [t] }); }
+    if (soltar) { g.passo(200); g.noDoc('touchend', { touches: [], changedTouches: [t] }); }
+    return t;
+  };
+  return { g, place, redesenhos, diario, arrastar };
+}
+
+test('R10-4-01 composição: o card de foto travado que a pessoa ARRASTOU sai do aviso quando a rede volta (swipe.js + app.js)', () => {
+  // Arrastou, soltou, o card parou — e a rede é provada depois (o n4b `arraste-antes`, o n23).
+  const a = montarCardDeFotoTravado();
+  a.arrastar();
+  a.g.esvaziar();
+  assert.deepEqual([a.g.decidiu.length, a.g.card.style.transform], [0, 'translate(0, 0) rotate(0deg)'],
+    'PRÉ-CONDIÇÃO: o arraste com ✕ e ✓ travados decidiu, ou não voltou pro lugar');
+  a.g.ctx.recuperarCardSemFoto({ redeProvada: true });
+  assert.deepEqual([a.redesenhos.length, a.diario], [1, ['foto.redeProvada']],
+    'o card que a pessoa tentou arrastar seguiu com "A foto precisa de sinal" e ✕/✓ travados com a rede provada');
+  // A rede provada chega com o DEDO no card (o n4b `arraste`): espera, e o card sai quando o dedo solta e o card para.
+  const b = montarCardDeFotoTravado();
+  const t = b.arrastar({ soltar: false });
+  b.g.ctx.recuperarCardSemFoto({ redeProvada: true });
+  assert.equal(b.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
+  b.g.passo(200);
+  b.g.noDoc('touchend', { touches: [], changedTouches: [t] });
+  assert.equal(b.redesenhos.length, 0, 'redesenhou no meio da volta pro lugar');
+  b.g.esvaziar();
+  assert.deepEqual([b.redesenhos.length, b.diario], [1, ['foto.redeProvada']],
+    'a rede provada no meio do arraste se perdeu — o card seguiu travado');
+  // CONTROLE: sem arraste nenhum, a rede provada solta o card na hora.
+  const c = montarCardDeFotoTravado();
+  c.g.ctx.recuperarCardSemFoto({ redeProvada: true });
+  assert.equal(c.redesenhos.length, 1, 'CONTROLE: a rede provada deixou de soltar o card parado');
+  // CONTROLE do instrumento: o MESMO arraste, com a direção livre, decide — o card
+  // que volta pro lugar acima voltou pela trava, não por um arraste curto demais.
+  const d = montarCardDeFotoTravado();
+  d.g.ctx.window.direcaoTravada = () => false;
+  d.arrastar();
+  d.g.esvaziar();
+  assert.deepEqual(d.g.decidiu.map((x) => x[0]), ['right'], 'CONTROLE: o arraste do teste não passa do limiar');
+});
