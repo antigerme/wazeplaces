@@ -363,10 +363,15 @@ test('H3: a outra aba limpando tudo solta as três cópias; chave alheia não me
 test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
   const ouvintes = [];
   const aoGravarEmOutraAba = () => {};
+  // O canal do POUSO entre abas (R11-2-01) é aberto no mesmo lugar: é ele que
+  // leva às outras abas o que não passa pela fila de saída.
+  let canais = 0;
   const { setupSincroniaEntreAbas } = montar(['setupSincroniaEntreAbas'],
-    { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba }, ['setupSincroniaEntreAbas']);
+    { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba,
+      abrirCanalDosPousos: () => { canais++; } }, ['setupSincroniaEntreAbas']);
   setupSincroniaEntreAbas();
   assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba]], 'ninguém escuta o evento storage');
+  assert.equal(canais, 1, 'a abertura do app não abre o canal que avisa as outras abas do que pousou');
   assert.match(fatiar('initApp'), /^\s+setupSincroniaEntreAbas\(\);/m, 'a abertura do app não liga a sincronia entre abas');
 });
 

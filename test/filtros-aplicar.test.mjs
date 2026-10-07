@@ -159,6 +159,9 @@ const FUNCOES = [
   // As áreas gerenciadas por servidor (R10-6-03). Só se existir: no código de
   // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
   ...(/^function areasGerenciadasLidas\(/m.test(APP_SEM) ? ['areasGerenciadasLidas'] : []),
+  // O servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-03).
+  // Só se existir, pelo mesmo motivo.
+  ...(/^function servidorNuncaLido\(/m.test(APP_SEM) ? ['servidorNuncaLido'] : []),
   // O aviso do país que o treino encerrado pelo "Aplicar" levava junto (R10-7-02).
   'avisarPaisDoTreinoEncerrado',
 ];
@@ -2252,6 +2255,63 @@ test('R10-6-03: o 1º perfil que chega pela sonda de um 401 também deixa as ár
   assert.deepEqual(m.app.areasGerenciadasLidas('row'), [],
     'o perfil da sonda não deixou as áreas gerenciadas da ROW: o seletor seguiria o perfil guardado, de outro servidor');
   assert.equal(m.app.areasGerenciadasLidas('na'), null, 'um servidor que ninguém perguntou virou "sem áreas gerenciadas"');
+});
+
+// ═══ R11-6-03 · servidor NUNCA lido: o seletor mostra só "Nenhuma" ══════════
+// O R10-6-03 pôs no seletor as áreas do servidor que o app LEU; num servidor
+// nunca lido, ele mostrava as do perfil guardado — que, por construção, é o de
+// OUTRO servidor (a carga anota sempre o servidor em que perguntou). Quem edita
+// na ROW, trocando a região do modal pra NA, via "Área SP (ROW)" debaixo da NA,
+// e o "Aplicar" buscava `na area 7001`: a área de um servidor com a região de
+// outro (MEDIDO no navegador nos dois motores; auditoria da rodada 11). Decisão
+// do owner: servidor sem leitura mostra só "Nenhuma" (e a área salva, se for
+// daquele servidor) — a régua de "não cruzar" do país —, sem pedido novo.
+function paginaQueEditaNaRow({ salva = '' } = {}) {
+  const p = pagina({ regiao: 'row', pais: 30, filtros: { managedAreaId: salva } });
+  p.listas.perfil = (r) => Promise.resolve(r === 'row'
+    ? { success: true, profile: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [AREA_SP] } }
+    : { success: true, profile: { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  return p;
+}
+test('R11-6-03: quem edita na ROW troca a região do modal pra NA, NUNCA lida — só "Nenhuma", sem pedido novo, e o "Aplicar" não leva a área da ROW', async () => {
+  const p = paginaQueEditaNaRow();
+  await p.app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual([p.estado.regiao, p.estado.pais, p.log.getProfile], ['row', 30, ['row']],
+    'PRÉ-CONDIÇÃO: o perfil (lido na ROW, onde a pessoa edita) mexeu no lugar ou perguntou a outro servidor');
+  await p.abrir();
+  assert.deepEqual(opcoesDaArea(p), ['', '7001'], 'CONTROLE: a ROW, lida, não mostra a área gerenciada de lá');
+  await trocarRegiao(p, 'na');
+  assert.deepEqual(opcoesDaArea(p), [''],
+    `com a NA (nunca lida) na tela, o seletor mostra as áreas do perfil da ROW: ${opcoesDaArea(p)} — o "Aplicar" levaria a área de um servidor com a região de outro`);
+  assert.deepEqual(p.log.getProfile, ['row'], 'a troca de região perguntou o `/Session` da NA: pedido novo no free tier');
+  // A pessoa escolheria a 1ª área que o seletor oferecesse — não há nenhuma.
+  const area = p.els.filterManagedArea.opcoes.find((o) => o.value);
+  if (area) p.els.filterManagedArea.value = area.value;
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.log.salvos.at(-1).managedAreaId], ['na', ''],
+    'o "Aplicar" gravou a NA com a área gerenciada da ROW');
+  // CONTROLE: de volta à ROW no modal (agora a não aplicada), as áreas lidas de lá voltam.
+  await p.abrir();
+  await trocarRegiao(p, 'row');
+  assert.deepEqual(opcoesDaArea(p), ['', '7001'], 'CONTROLE: a ROW, lida, perdeu a área gerenciada de lá');
+});
+
+test('R11-6-03: a área SALVA sem o perfil (o atalho do ícone) aparece só debaixo da região DELA — na outra, só "Nenhuma"', async () => {
+  // Os Filtros abertos antes do perfil (o atalho `/?action=filters`): a área
+  // salva aparece "Carregando…" (F2), e é da região aplicada (a ROW).
+  const p = pagina({ regiao: 'row', pais: 30, perfil: null, filtros: { managedAreaId: '7001' } });
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  await p.abrir();
+  assert.deepEqual([opcoesDaArea(p), p.els.filterManagedArea.value], [['', '7001'], '7001'],
+    'CONTROLE: sem o perfil, a área salva não aparece na região dela (F2)');
+  await trocarRegiao(p, 'na');
+  assert.deepEqual(opcoesDaArea(p), [''],
+    `a área salva da ROW apareceu debaixo da NA: ${opcoesDaArea(p)} — dava pra aplicar \`na\` com a área da ROW`);
+  await trocarRegiao(p, 'row');
+  assert.deepEqual([opcoesDaArea(p), p.els.filterManagedArea.value], [['', '7001'], '7001'],
+    'de volta à região aplicada, a área salva não voltou (o "Aplicar" a apagaria)');
 });
 
 // ═══ R10-7-02 · o "Aplicar" que encerra o treino e o aviso do país ═══════════

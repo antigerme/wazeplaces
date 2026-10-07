@@ -2645,7 +2645,10 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
       const corte = bruto.indexOf('|');
       const ts = parseInt(bruto.slice(0, corte), 10);
       if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
-        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true, lidoEm: ts };
+        // `bruto`: o registro EXATO que esta exclusão leu — a regravação depois
+        // da escrita só acontece se ele ainda estiver lá (R11-3-01, ver o
+        // `handleExcluirFoto`).
+        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true, lidoEm: ts, bruto };
       }
     }
   } catch (e) { /* cache ilegível é cache ausente */ }
@@ -2671,10 +2674,11 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   // excluir tem que manter esta hora, não a da escrita (ver a regravação logo
   // depois da escrita, no `handleExcluirFoto`).
   const lidoEm = Math.floor(Date.now() / 1000);
+  const bruto = lidoEm + '|' + JSON.stringify(enxuto);
   try {
-    await sessions.store.put(chave, lidoEm + '|' + JSON.stringify(enxuto), RELEITURA_TTL_STORE);
+    await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
   } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false, lidoEm };
+  return { venue: enxuto, doCache: false, lidoEm, bruto };
 }
 
 // Esquece a releitura guardada de um local: a próxima exclusão relê do Waze.
@@ -2795,9 +2799,24 @@ async function handleExcluirFoto(data, { sessions }) {
   //    envelhecia além dos RELEITURA_TTL — MEDIDO: a leitura dos 0 s servia a
   //    exclusão dos 20 s, e a foto que outro editor subiu aos 16 s era apagada
   //    (auditoria de 2026-09-26).
+  //
+  //    E SÓ se a releitura guardada ainda é a que esta exclusão LEU (`rel.bruto`).
+  //    No meio da escrita ela pode ter SUMIDO: a aprovação de uma foto do local a
+  //    esquece quando pousa (`esquecerReleitura`, no `handleValidarPlace`), porque
+  //    a lista que ela guardava via a foto como pendente. A exclusão que voltava
+  //    depois a RECRIAVA com essa lista de antes, e a exclusão seguinte, nos
+  //    `RELEITURA_TTL` dela, gravava a foto recém-aprovada de volta como
+  //    `approved: false` — a aprovação se desfazia no Waze sem pedido nenhum
+  //    (auditoria da rodada 11, R11-3-01, MEDIDO no core e de ponta a ponta). O
+  //    mesmo vale pra uma releitura TROCADA no meio (outra exclusão do local, de
+  //    outra aba, já a regravou sem a foto dela): por cima, ela voltaria. Custa
+  //    uma leitura do KV, nenhuma escrita: sumida ou trocada, a próxima exclusão
+  //    relê do Waze (ou usa a que está lá).
   try {
-    await sessions.store.put(await chaveDaReleitura(data),
-      rel.lidoEm + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+    const chave = await chaveDaReleitura(data);
+    if (rel.bruto && (await sessions.store.get(chave)) === rel.bruto) {
+      await sessions.store.put(chave, rel.lidoEm + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+    }
   } catch (e) { /* sem cache, a próxima exclusão relê do Waze */ }
 
   // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto

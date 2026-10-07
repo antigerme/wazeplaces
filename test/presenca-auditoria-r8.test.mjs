@@ -612,7 +612,8 @@ function aparelho() {
     guardado, pedidos, relogio,
     gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
     pagina({ nome = 'aba', resposta = () => ({ success: true }) } = {}) {
-      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
+      // A página LOGADA, com a sessão na memória (R11-1-02).
+      const AppState = { authenticated: true, preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
       const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
       const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica',
         'relerPreferenciasDeOutraAba', 'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado',
@@ -621,7 +622,8 @@ function aparelho() {
         AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true,
         CONTA_KEY: constante('CONTA_KEY'), PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) }, dfato: () => {}, Date: { now: () => relogio.agora },
-        API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, ...c }); return resposta(c); } },
+        API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
+          presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, ...c }); return resposta(c); } },
         desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
         offlineEsquecer: () => {}, window: { Presenca: { desligar: () => {}, renderPilula: () => {} } },
       });

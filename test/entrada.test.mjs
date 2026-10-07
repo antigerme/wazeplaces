@@ -412,6 +412,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
     esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    esvaziarSeletorDeAreas: nada,   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
@@ -541,7 +542,9 @@ function montarExtensao(inicio = {}) {
   const negados = [];
   const deps = {
     window: win, document: { getElementById: () => null },
-    API: { setSession() {} }, AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
+    // A tela de entrada: nenhuma sessão na memória e nenhum login desta aba no ar (R11-1-03).
+    API: { setSession() {}, temSessaoNaMemoria: () => false, sessionToken: null }, authInFlight: false, resgateEmVoo: false,
+    AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
     extPerguntando: false, extRenovando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
     closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
@@ -624,7 +627,8 @@ test('login que DEU CERTO zera as marcas da página: depois de "Sair" e entrar d
   // E os outros dois caminhos de entrada, pelo arquivo/colar e pelo código.
   assert.match(fatiar('authenticateWithCookies'), /guardarPrazoDaSessao\(result\);\s*aoEntrarNestaPagina\(\);/,
     'entrar pelos cookies não zera as marcas da página');
-  assert.match(fatiar('resgatarPareamento'), /closeModal\('pairEnterModal'\);\s*aoEntrarNestaPagina\(\);/,
+  // (O resgate fecha os diálogos da entrada, o do código e o OUTRO que tenha ficado aberto: R11-1-04.)
+  assert.match(fatiar('resgatarPareamento'), /fecharModaisDaEntrada\(\{ focoComDestino: focoNoCard \}\);\s*aoEntrarNestaPagina\(\);/,
     'entrar pelo código não zera as marcas da página');
 });
 
@@ -923,10 +927,14 @@ test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de foto
   // regravada sem a foto, gotcha #57). A frase dizia "fica lá por até 1 minuto"
   // depois do toque, e a lista ficava 74 s (auditoria de 2026-09-29). O número
   // vem de `{listaFotosMin}`; a paridade com o core é do `test/consistencia`.
+  // Desde a rodada 11 (R11-3-01) a regravação depois da exclusão só acontece se
+  // a lista guardada ainda é a que a exclusão LEU: sumida (a aprovação a esqueceu)
+  // ou trocada (outra exclusão do local a regravou), ela não é coberta — e então
+  // vive no máximo o prazo de uma gravação ANTERIOR, que a frase já cobre.
   const CORE = ler('server/core.mjs');
-  assert.ok(/sessions\.store\.put\(chave, [^\n]*JSON\.stringify\(enxuto\), RELEITURA_TTL_STORE\)/.test(CORE),
+  assert.ok(/const bruto = lidoEm \+ '\|' \+ JSON\.stringify\(enxuto\);\s*try \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
-  assert.ok(/sessions\.store\.put\(await chaveDaReleitura\(data\),[\s\S]{0,160}?RELEITURA_TTL_STORE\)/.test(CORE),
+  assert.ok(/if \(rel\.bruto && \(await sessions\.store\.get\(chave\)\) === rel\.bruto\) \{\s*await sessions\.store\.put\(chave, rel\.lidoEm \+ '\|' \+ JSON\.stringify\(\{ id: venue\.id, images: restantes \}\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
   // O "depois da última vez que você toca na lixeira ou exclui uma foto", em
   // cada língua: o prazo conta da ÚLTIMA gravação, e a última pode ser a da exclusão.
@@ -1868,6 +1876,8 @@ function montarLogin(resposta, { peloTeclado = false } = {}) {
     loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {},
     showAccessDenied: () => toasts.push('[Acesso restrito]'), AppState: {},
     authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+    // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
+    focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {},
   };
   const { authenticateWithCookies, estado } = montar(['authenticateWithCookies'], deps,
     ['authenticateWithCookies', 'estado'], 'const estado = () => ({ focoDoTeclado });');
@@ -1934,7 +1944,9 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
     const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
       document: { getElementById: () => null }, resgateEmVoo: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
       closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
-      conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {} };
+      conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {},
+      // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
+      focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {} };
     const { resgatarPareamento, estado } = montar(['resgatarPareamento'], deps, ['resgatarPareamento', 'estado'],
       'const estado = () => ({ focoDoTeclado });');
     await resgatarPareamento('ABC234', { silencioso: true, peloTeclado });

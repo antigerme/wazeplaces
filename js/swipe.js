@@ -360,7 +360,16 @@ function handleDragMove(e) {
         // Puxando o card pra BAIXO com desvio de lado, o "Rejeitar" acendia
         // inteiro e prometia uma ação que o soltar não faz mais: o que o app
         // MOSTRA e o que ele ACEITA têm que ser a mesma coisa.
-        const opacity = Math.abs(deltaX) > Math.abs(deltaY) ? Math.min(Math.abs(deltaX) / 100, 1) : 0;
+        //
+        // E a mesma TRAVA do lado que o soltar respeita (`direcaoTravada`, a do
+        // `handleDragEnd`): no card de foto sem a foto ("A foto precisa de
+        // sinal", ✕ e ✓ travados), o arraste pro lado acendia o "Lido" ou o
+        // "Rejeitar" inteiro e soltar não decidia — o card voltava. Arrastar é
+        // justamente a reação a ✕ e ✓ apagados (auditoria da rodada 11,
+        // R11-4-02, MEDIDO nos dois motores: o selo a 1 com 170 px, nada decidido).
+        const horizontal = Math.abs(deltaX) > Math.abs(deltaY);
+        const travado = horizontal && !!(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'));
+        const opacity = horizontal && !travado ? Math.min(Math.abs(deltaX) / 100, 1) : 0;
         updateSwipeIndicator(deltaX, opacity);
     }
 }

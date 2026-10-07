@@ -270,14 +270,38 @@ secao('CÓDIGO NO APARELHO');
   // (MEDIDO em produção em 2026-09-25). Não é versão velha, e não vira alerta.
   const soBorda = (u, v) => (d._versaoDoDiag ?? 0) < 9 && nome(u) === '/' && v.bytesAparelho === v.bytesServidor;
   const reais = dif.filter(([u, v]) => !soBorda(u, v));
-  out(`${Object.keys(cvr).length} arquivos conferidos com o servidor · diferentes: ${reais.length}${erros.length ? ` · sem conferir: ${erros.length}` : ''}`);
+  // "Conferido" é só o que COMPAROU com o servidor. A linha dizia "11 arquivos
+  // conferidos com o servidor · diferentes: 0 · sem conferir: 11" num relatório
+  // feito sem rede, em que nenhum comparou — e "conferidos" com "diferentes: 0",
+  // na seção que se lê pra saber se o aparelho roda a versão do servidor, lia
+  // como "está em dia" (auditoria da rodada 11, R11-4-05).
+  const total = Object.keys(cvr).length;
+  const conferidos = total - erros.length;
+  if (!erros.length) out(`${total} arquivos conferidos com o servidor · diferentes: ${reais.length}`);
+  else if (!conferidos) out(`${total} arquivos · nenhum conferido com o servidor — este relatório não diz se o aparelho roda a versão do servidor`);
+  else out(`${total} arquivos · conferidos com o servidor: ${conferidos} · diferentes: ${reais.length} · sem conferir: ${erros.length}`);
+  const arquivos = (n) => `${n} ${n === 1 ? 'arquivo' : 'arquivos'}`;
   const porStatus = new Map();
   for (const [, v] of erros) if (semServidor(v)) porStatus.set(Number(v.http), (porStatus.get(Number(v.http)) || 0) + 1);
   for (const [status, n] of porStatus) {
-    out(`  sem conferir: o servidor respondeu ${status} em ${n} ${n === 1 ? 'arquivo' : 'arquivos'}`
+    out(`  sem conferir: o servidor respondeu ${status} em ${arquivos(n)}`
       + (status >= 500 ? ' — a origem fora do ar (quem respondeu foi a borda, com a página de erro dela)' : '')
       + ': não há com o que comparar');
   }
+  // O resto do "sem conferir", pelo motivo: sem rede na hora do relatório (o
+  // modo avião — a leitura do servidor nem sai do aparelho), a leitura que falhou
+  // com rede, a que não respondeu no orçamento (a linha da coleta, logo abaixo,
+  // diz quais) e o arquivo cuja cópia do aparelho não foi lida.
+  const semRede = (d.resumo || {}).rede === false || (d.ambiente || {}).online === false;
+  const porMotivo = new Map();
+  for (const [, v] of erros) {
+    if (semServidor(v)) continue;
+    const motivo = v.semResposta ? 'sem resposta no orçamento do relatório'
+      : v.erro === 'sem corpo local' ? 'a cópia do aparelho não foi lida'
+      : semRede ? `sem rede na hora do relatório (${v.erro})` : `a leitura do servidor falhou (${v.erro})`;
+    porMotivo.set(motivo, (porMotivo.get(motivo) || 0) + 1);
+  }
+  for (const [motivo, n] of porMotivo) out(`  sem conferir: ${motivo} em ${arquivos(n)}`);
   for (const [u, v] of dif) {
     out(`  DIFERENTE: ${nome(u)} (aparelho ${v.bytesAparelho} bytes · servidor ${v.bytesServidor} bytes)`
       + (soBorda(u, v) ? ' — com o mesmo tamanho: é o script que o Cloudflare injeta a cada resposta, que o relatório anterior ao v9 não descontava' : ''));

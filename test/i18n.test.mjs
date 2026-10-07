@@ -521,6 +521,29 @@ test('pt: "app" é masculino — no dicionário e no texto visível do HTML', ()
   assert.deepEqual(noHtml, [], '"app" no feminino no texto visível do index.src.html');
 });
 
+// "Marcar como LIDO os 3 pedidos…" (auditoria da rodada 11, R11-6-04): o
+// predicativo concorda com o objeto — "lidos os pedidos", "lido o pedido" —, como
+// o botão do MESMO diálogo ("Marcar como lidos") e o es/fr ("leídas las…",
+// "lues les…"). Vale pro dicionário pt e pro texto visível do HTML: o
+// `#batchReadMessage` não tem `data-i18n` (o JS o escreve), e o teste da reserva
+// (test/entrada.test.mjs) não o lê.
+const PREDICATIVO_DISCORDA = /\bcomo\s+(?:lid[oa]\s+(?:os|as)|lid[oa]s\s+(?:o|a))\b/iu;
+test('pt: "Marcar como lidos os pedidos" — o predicativo concorda com o número, no dicionário e no texto do HTML', () => {
+  // Contraprova: a regra enxerga as formas erradas, e deixa passar as certas.
+  for (const errado of ['Marcar como lido os 3 pedidos', 'Marcar como lido os pedidos da fila?', 'Marcar como lidos o pedido'])
+    assert.ok(PREDICATIVO_DISCORDA.test(errado), `a regra não enxerga "${errado}"`);
+  for (const certo of ['Marcar como lidos os 3 pedidos', 'Marcar como lido o 1 pedido', 'Marcar como lido (→)', 'Marcar como lidos'])
+    assert.ok(!PREDICATIVO_DISCORDA.test(certo), `a regra acusa "${certo}", que está certo`);
+  const noDicionario = Object.entries(DICT.pt)
+    .filter(([, v]) => PREDICATIVO_DISCORDA.test(String(v)))
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 90)}`);
+  assert.deepEqual(noDicionario, [], '"como lido os…" no português: o predicativo não concorda com o plural');
+  const html = textoVisivelDoHtml(read('index.src.html')).replace(/<[^>]+>/g, ' ');
+  assert.ok(html.includes('Marcar como lidos'), 'CONTROLE: o recorte do HTML perdeu o diálogo do "Marcar todos" — a regra leria nada');
+  const noHtml = [...html.matchAll(new RegExp(PREDICATIVO_DISCORDA.source, 'giu'))].map((m) => m[0]);
+  assert.deepEqual(noHtml, [], '"como lido os…" no texto visível do index.src.html (a reserva do diálogo do "Marcar todos")');
+});
+
 test('contagem regressiva com 1: forma SINGULAR, e o app a usa (era "Faltam 1…")', () => {
   // Aparecia justamente no último toque antes do modo dev, e na patente e no
   // gate do Desfazer (auditoria de 2026-09-25).
@@ -604,7 +627,14 @@ test('o que o Desfazer desfaz é o PEDIDO, não o local (e o erro da ação idem
 
 test('treino: com o "Pular guarda o pedido" ligado, o efeito do ↑ NÃO diz que "não envia nada"', () => {
   const app = read('js/app.js');
-  assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && AppState\.preferences\.pularGuarda === true \? 'skipGuarda' : tipo\)/);
+  // A frase da ⭐ sai quando o ↑ de verdade a mandaria (`Treino.pularGuardaria`, a
+  // régua do `handleSkip`): a preferência ligada e o pedido ainda sem a estrela. No
+  // pedido que já a tem, o ↑ de verdade não manda nada, e "não envia nada" é a
+  // verdade (R11-7-05). O comportamento nos dois modos, sobre o mesmo pedido, está
+  // em test/treino-auditoria-r11.test.mjs.
+  assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && this\.pularGuardaria\(AppState\.queue\[0\]\) \? 'skipGuarda' : tipo\)/);
+  assert.match(app, /pularGuardaria\(p\) \{\s*if \(AppState\.preferences\.pularGuarda !== true \|\|/,
+    'a frase da ⭐ deixou de exigir o "Pular guarda o pedido" ligado');
   for (const lang of LANGS) assert.match(DICT[lang]['treino.efeito.skipGuarda'], /⭐/, lang);
 });
 
@@ -627,6 +657,21 @@ test('o "Sair" e a Privacidade dizem o que o aparelho guarda e o que FICA (idiom
   // O que o logout MANTÉM é exatamente isso (a lista do teste de layout).
   const layout = read('test/layout.test.mjs');
   assert.match(layout, /const MANTIDAS = \['THEME_KEY', 'LANG_KEY'\];/);
+});
+
+// O lote 14 passou a guardar no aparelho os pedidos que o app ESTRELOU
+// (`waze_places_estrelados`, até 500 ids de pedidos de terceiros, R10-2-05), e a
+// Privacidade, que enumera o que fica no aparelho, não o citava em língua
+// nenhuma (auditoria da rodada 11, R11-6-05 = R11-7-04). A frase usa a ⭐, o
+// símbolo que a tela usa pra isso ("Pular ⭐", "O pedido ganha ⭐ no WME").
+test('a Privacidade conta os pedidos que o app marcou com ⭐ — o anel que o "Pular guarda o pedido" grava no aparelho', () => {
+  // CONTROLE: o anel existe — sem ele, a frase prometeria o que o app não guarda.
+  assert.match(read('js/app.js'), /^const ESTRELADOS_KEY = 'waze_places_estrelados';$/m,
+    'CONTROLE: o anel dos pedidos estrelados sumiu do app.js — a Privacidade não deve mais citá-lo');
+  for (const lang of LANGS) {
+    assert.match(DICT[lang]['help.privacy.device'], /⭐/,
+      `${lang}: a Privacidade não conta os pedidos que o app marcou com ⭐ (o anel waze_places_estrelados)`);
+  }
 });
 
 test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', () => {

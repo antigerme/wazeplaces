@@ -828,6 +828,27 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             }
             if (d.action !== 'sessao' || !d.token) return;
             if (epoca !== epocaDaSessao) return fim(false);   // saiu no meio: ver acima
+            // A pergunta da VOLTA à aba (silenciosa, sem manter fila) com um login
+            // DESTA aba no meio: a pessoa colou os cookies, digitou o código ou
+            // abriu o link enquanto a extensão respondia. O login que ela pediu
+            // vence, como na adoção (`adotarSessaoDoAparelho`) — e a resposta da
+            // extensão o TROCAVA: duas sessões no servidor (o "Sair" apaga uma, a
+            // outra fica órfã por até 21 dias) e, com outra conta no WME, a conta
+            // que a pessoa acabou de escolher ia embora com "Outra conta entrou
+            // neste aparelho…" (auditoria da rodada 11, R11-1-03, MEDIDO). Vale o
+            // login que já entrou (a memória com OUTRA sessão) e o que ainda está
+            // no ar. A sessão da extensão sai do servidor, menos se ela já é a do
+            // aparelho: a ponte dá o desfecho de UM login a todas as abas que
+            // perguntam juntas, e a outra pode estar com ela.
+            const tokenDaExtensao = String(d.token);
+            const voltaComLoginDestaAba = silencioso && !manterFila
+                && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo);
+            if (voltaComLoginDestaAba) {
+                if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
+                    callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
+                }
+                return fim(false);
+            }
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
             // O foco que estava NA tela de entrada (no "Colar cookies", no campo
@@ -845,11 +866,20 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // de quem é a sessão nova (ver `filaAtravessouSessao`).
             if (manterFila) filaAtravessouSessao = true;
             else resetQueue();
+            // O perfil da sessão nova é pedido ANTES de a conta ser conhecida: com
+            // OUTRA conta, a troca (`esquecerOutraConta`) refaz JÁ a fila que
+            // atravessou a sessão, e a busca de "Minha área" espera o perfil
+            // (`startFetching`). Pedido depois, a busca esperava o da sessão que
+            // caiu, já resolvido, e saía sem perfil: a tela de falha aparecia até o
+            // novo chegar (MEDIDO: ~1,5 s) — ou, com a carga anterior há mais de
+            // um minuto, o `refazerPerfilSeFaltar` da busca pedia o perfil e esta
+            // linha pedia de novo: DOIS `/Session` por servidor (auditoria da
+            // rodada 11, R11-6-02).
+            AppState._profilePromise = loadProfileAndAuxData();
             // A conta, quando a ponte a repassa (a versão da extensão que
             // repassa o `conta` do `testar-cookies`): com OUTRA conta, a fila
             // que atravessou a sessão sai JÁ, sem esperar o perfil (K2/K8).
             conhecerContaDoLogin(d.conta);
-            AppState._profilePromise = loadProfileAndAuxData();
             if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
@@ -1087,6 +1117,8 @@ const LIMPEZA_AO_FECHAR = {
         // Nem o resto do painel do Histórico: a patente, os totais e o Resumo do
         // mês de quem estava (R8-7-06).
         esvaziarPainelDoHistorico();
+        // Nem as áreas gerenciadas da conta, no seletor da aba Filtros (R11-1-05).
+        esvaziarSeletorDeAreas();
     },
     // A folha do autor: o nome dele e as linhas com a contagem (R6-1-05).
     autorModal() {
@@ -1502,6 +1534,12 @@ function perguntarAExtensaoAoVoltar() {
     // que estava sendo colado, e o aviso dizia "Você saiu em outra aba" a quem
     // nem tinha entrado (auditoria de 2026-10-06, R9-1-03).
     if (AppState.authenticated || API.temSessaoNaMemoria() || safeLS.get('waze_session_token')) return;
+    // Nem com um login DESTA aba no ar (os cookies sendo conferidos, o código ou
+    // o link sendo resgatado): o fim dele decide, como na adoção
+    // (`adotarSessaoDoAparelho`). A pergunta trazia uma sessão NOVA por cima do
+    // login que a pessoa pediu — duas sessões no servidor, e o "Sair" apagava só
+    // a última (auditoria da rodada 11, R11-1-03, MEDIDO).
+    if (authInFlight || resgateEmVoo) return;
     if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
     entrarPelaExtensao({ silencioso: true }).then((entrou) => {
         // A outra aba entrou enquanto a extensão respondia: a sessão dela entra,
@@ -2117,14 +2155,27 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
             }
             return false;
         }
-        closeModal('pairEnterModal');
+        // A tela de entrada some agora, e com ela o OUTRO diálogo que a pessoa
+        // abriu durante a espera (o link mostra a tela de entrada durante o
+        // resgate): o "Colar cookies", com o cookies.txt colado, ficava POR CIMA
+        // do app, e o "Confirmar" ali criava uma segunda sessão, com a primeira
+        // órfã no servidor (auditoria da rodada 11, R11-1-04, MEDIDO). Sai com a
+        // limpeza, como na entrada pela extensão (`MODAIS_DA_ENTRADA`). E o foco
+        // que estava NA tela de entrada vai ao ✕ do primeiro card: ela some sem
+        // gesto, e ele caía no <body> (R10-1-05; lido ANTES de fechar). O "Entrar
+        // com um código" de onde o resgate saiu segue a regra do teclado (R7-1-04):
+        // pelo mouse, o foco nele não se move.
+        const dialogoDoGesto = silencioso ? null : document.getElementById('pairEnterModal');
+        const focoNaEntrada = focoNaTelaDeEntrada() && !(dialogoDoGesto && dialogoDoGesto.contains(document.activeElement));
+        const focoNoCard = peloTeclado || focoNaEntrada;
+        fecharModaisDaEntrada({ focoComDestino: focoNoCard });
         aoEntrarNestaPagina();
         showToast(t('toast.pairSuccess'), 'success');
         showMainScreen();
         resetQueue();   // fila NOVA, como no login por cookies
         conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
         AppState._profilePromise = loadProfileAndAuxData();
-        if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+        if (focoNoCard) focoDoTeclado = BOTAO_DA_ACAO.left;
         startFetching();
         esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
         return true;
@@ -2579,14 +2630,25 @@ function anunciarNoCard(texto) {
 // motores). Ela fala pela região dela, com o mesmo texto, quando é de um irmão
 // NA FILA — o que o `aplicarNosIrmaos` alcança; uma camada que ele não alcançou
 // não mudou, e o desfecho não é dela.
-function anunciarDesfechoDaFoto(texto, place) {
+//
+// `soDosIrmaos`: o desfecho de uma escrita feita COM o Desfazer, que pousa
+// depois da janela (auditoria da rodada 11, R11-3-05). O banner já disse o
+// desfecho no gesto, e a tela do PRÓPRIO pedido mudou ali (a foto saiu, o nome
+// trocou); o que muda quando o Waze confirma é a do IRMÃO — a camada dele aberta,
+// ou o card dele na frente —, e só ela fala. Com a camada ou o card do próprio
+// pedido na tela, nada é dito de novo.
+function anunciarDesfechoDaFoto(texto, place, soDosIrmaos = false) {
     const aberta = Lightbox.isOpen() ? Lightbox.place : null;
     const irmaoAberto = !!aberta && aberta !== place && !!place && place.venueID != null
         && aberta.venueID === place.venueID
         && ((AppState.queue || []).includes(aberta) || filaRealComDevolvidos().includes(aberta));
-    if (aberta && (aberta === place || irmaoAberto)) { anunciarNoLightbox(texto, aberta); return; }
+    if (aberta && (aberta === place || irmaoAberto)) {
+        if (!(soDosIrmaos && aberta === place)) anunciarNoLightbox(texto, aberta);
+        return;
+    }
     const frente = AppState.currentPlace;
     if (!place || place.venueID == null || !frente || frente.venueID !== place.venueID) return;
+    if (soDosIrmaos && frente === place) return;
     if (semCamadaAberta()) anunciarNoCard(texto);
 }
 
@@ -2636,6 +2698,10 @@ const Lightbox = {
     scale: 1,
     tx: 0,
     ty: 0,
+    // A foto (a URL) de quem é o zoom de agora: o `_render` só o zera quando a
+    // foto na tela MUDA (R11-3-04). Abrir começa do 1× porque o `close` já o
+    // zera — e a camada fechada não redesenha.
+    _fotoComZoom: null,
     isOpen() {
         return !document.getElementById('imageLightbox').classList.contains('hidden');
     },
@@ -2867,7 +2933,18 @@ const Lightbox = {
             : `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
     },
     _render() {
-        this.resetZoom();
+        // O zoom e o deslocamento são da FOTO na tela. Trocar de foto (‹ ›, as
+        // setas, a tira, a que volta pelo Desfazer, a que sai da tela) recomeça
+        // em 1×; a MESMA foto redesenhada segue ampliada onde a pessoa a deixou.
+        // O `_render` zerava sempre, e o redesenho que não troca a foto — a
+        // RESPOSTA da aprovação (que marca a foto de novo, R10-3-04), o ✨ que
+        // volta na falha, a exclusão de OUTRA foto do pedido que pousa — tirava o
+        // zoom de quem conferia a fachada: com o Desfazer, uns 3 s depois do
+        // toque em "Aprovar" a foto voltava a 1× sozinha (auditoria da rodada 11,
+        // R11-3-04, MEDIDO nos dois motores; a da exclusão já existia antes).
+        const naTela = this.urls[this.idx];
+        if (naTela !== this._fotoComZoom) this.resetZoom();
+        this._fotoComZoom = naTela;
         const img = document.getElementById('lightboxImage');
         img.src = urlDaFoto(this.urls[this.idx]);
         // O MESMO texto do card (ver `altDaFoto`), com a posição desta foto.
@@ -3607,17 +3684,18 @@ function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia, place) 
 // efeito colateral sem motivo.
 let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 
-// A VEZ de cada local nas exclusões de foto (auditoria de 2026-10-07,
-// R10-3-03). O Waze não apaga uma foto: ele SUBSTITUI a lista inteira do local
-// (gotcha #57), e o servidor monta essa lista a partir da releitura guardada,
-// que só é regravada DEPOIS de a escrita voltar. Com o Desfazer, a exclusão que
-// já tinha saído (a janela venceu) e esperava o Waze não segurava a próxima do
-// MESMO local: ela saía 3 s depois, o servidor relia a lista de ANTES da
-// primeira — com a foto que ela tirou — e a última escrita a chegar ganhava. Uma
-// das duas exclusões se desfazia no Waze com as DUAS respostas `success: true`,
-// e a tela mostrando as duas fotos fora (MEDIDO no navegador, nos dois motores,
-// e no core). Sem o Desfazer não acontecia: a lixeira fica travada até a
-// resposta (`excluindoAgora`).
+// A VEZ de cada local nas escritas da LISTA DE FOTOS: as exclusões (auditoria de
+// 2026-10-07, R10-3-03) e as aprovações (R11-3-01, logo abaixo). O Waze não
+// apaga uma foto: ele SUBSTITUI a lista inteira do local (gotcha #57), e o
+// servidor monta essa lista a partir da releitura guardada, que só é regravada
+// DEPOIS de a escrita voltar. Com o Desfazer, a exclusão que já tinha saído (a
+// janela venceu) e esperava o Waze não segurava a próxima do MESMO local: ela
+// saía 3 s depois, o servidor relia a lista de ANTES da primeira — com a foto
+// que ela tirou — e a última escrita a chegar ganhava. Uma das duas exclusões
+// se desfazia no Waze com as DUAS respostas `success: true`, e a tela mostrando
+// as duas fotos fora (MEDIDO no navegador, nos dois motores, e no core). Sem o
+// Desfazer não acontecia: a lixeira fica travada até a resposta
+// (`excluindoAgora`).
 //
 // O ENVIO da próxima espera a resposta da anterior do mesmo local; o GESTO não:
 // a lixeira segue livre, e a foto seguinte sai da tela na hora, como sempre.
@@ -3633,16 +3711,35 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // irmão só a perde quando a primeira pousa (`aplicarNosIrmaos`) —, e a segunda
 // não vai ao Waze: iria só pra voltar "já excluída", e a tela diria "Outro
 // editor já tinha excluído 👍" sobre a exclusão da própria pessoa.
-const exclusoesNoLocal = new Map();   // venueID → { ultima, saiu: Set, n }
+//
+// A APROVAÇÃO de uma foto do local entra na MESMA vez (auditoria da rodada 11,
+// R11-3-01): ela também muda a lista do local (a pendente vira aprovada), e o
+// servidor ESQUECE a lista guardada quando ela pousa. Com o Desfazer, a exclusão
+// de X que já tinha saído (a janela venceu) não segurava a aprovação de P, do
+// mesmo local: ela saía e pousava, a resposta da exclusão chegava depois e
+// regravava a lista de antes (P pendente), e a exclusão seguinte, nos 15 s dela,
+// mandava P de volta como `approved: false` — a tela com P aprovada e a lixeira,
+// e no Waze a foto de volta a pendente, sem pedido nenhum (MEDIDO de ponta a
+// ponta, no navegador e no core). Agora a aprovação espera a exclusão do local
+// no ar, e a exclusão espera a aprovação; o servidor também não recria a lista
+// que sumiu no meio da exclusão (`handleExcluirFoto`). O renomear fica de fora:
+// ele grava só o nome (PATCH), não a lista.
+//
+// `tipo`: 'excluir' ou 'aprovar'. `exclusoes`: quantas escritas da vez são
+// exclusões — com uma no ar, a pílula do nome do local trava
+// (`exclusaoDoLocalNoAr`, R11-3-06).
+const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, saiu: Set, n, exclusoes }
 
-function vezDeExcluirNoLocal(alvo) {
+function vezDasFotosNoLocal(alvo, tipo) {
     const local = alvo.place.venueID;
-    let vez = exclusoesNoLocal.get(local);
-    if (!vez) { vez = { ultima: null, saiu: new Set(), n: 0 }; exclusoesNoLocal.set(local, vez); }
+    let vez = escritasDeFotoNoLocal.get(local);
+    if (!vez) { vez = { ultima: null, saiu: new Set(), n: 0, exclusoes: 0 }; escritasDeFotoNoLocal.set(local, vez); }
     const anterior = vez.ultima;
     let soltar;
     vez.ultima = new Promise((ok) => { soltar = ok; });
     vez.n++;
+    const excluir = tipo === 'excluir';
+    if (excluir) vez.exclusoes++;
     const v = vez;
     return {
         anterior,                                   // nula: a vez já é desta
@@ -3650,9 +3747,24 @@ function vezDeExcluirNoLocal(alvo) {
         saiuDoMapa: () => { v.saiu.add(alvo.id); },
         soltar: () => {
             soltar();
-            if (--v.n === 0 && exclusoesNoLocal.get(local) === v) exclusoesNoLocal.delete(local);
+            if (excluir) v.exclusoes--;
+            if (--v.n === 0 && escritasDeFotoNoLocal.get(local) === v) escritasDeFotoNoLocal.delete(local);
         },
     };
+}
+
+// Uma EXCLUSÃO de foto do local deste pedido está no ar — saiu pro Waze, ou
+// espera a vez do local pra sair (`vezDasFotosNoLocal`). A pílula do nome desse
+// local fica travada até a resposta (auditoria da rodada 11, R11-3-06): a
+// exclusão que tira a ÚLTIMA foto da camada a FECHA quando pousa
+// (`removerFoto`), e com ela a correção do nome que estivesse aberta — o nome
+// digitado sumia sem aviso nem nada dito ao leitor de tela (MEDIDO nos dois
+// motores, no próprio pedido sem o Desfazer e no IRMÃO com ele). Como a trava do
+// nome no ar (`renomeacaoNoAr`, L23): por LOCAL, que os irmãos dividem.
+function exclusaoDoLocalNoAr(place) {
+    if (!place || place.venueID == null) return false;
+    const vez = escritasDeFotoNoLocal.get(place.venueID);
+    return !!(vez && vez.exclusoes > 0);
 }
 
 // Uma escrita de FOTO SEM janela no ar (o caminho sem Desfazer): a aprovação ou
@@ -3832,14 +3944,18 @@ async function enviarExclusao(alvo) {
     const epoca = epocaDaSessao;
     // A foto, no local: o mesmo alvo visto de qualquer pedido do local (R6-3-04).
     const alvoDasIdas = 'excluir|' + alvo.place.venueID + '|' + alvo.id;
-    // A vez do LOCAL (R10-3-03): com outra exclusão dele no ar, o envio espera a
+    // A vez do LOCAL (R10-3-03): com outra escrita da lista dele no ar — outra
+    // exclusão, ou a aprovação de uma foto dele (R11-3-01) —, o envio espera a
     // resposta dela. Sem nenhuma, nada espera — o envio sai na hora, como antes.
-    const vez = vezDeExcluirNoLocal(alvo);
+    // A pílula do nome do local trava com ela no ar (R11-3-06): a trava é
+    // reaplicada quando ela entra na vez e quando sai.
+    const vez = vezDasFotosNoLocal(alvo, 'excluir');
+    aplicarTravaDeAcao();
     try {
         if (vez.anterior) {
             await vez.anterior;
             // A MESMA foto saiu do mapa pela anterior (pelo irmão, ver
-            // `vezDeExcluirNoLocal`): nada a mandar. O fim é o de uma exclusão que
+            // `vezDasFotosNoLocal`): nada a mandar. O fim é o de uma exclusão que
             // pousou — depois da queda, só pra quem ainda vê o pedido.
             if (vez.jaSaiu()) return epoca === epocaDaSessao || pedidoAindaNaTela(alvo.place);
         }
@@ -3901,8 +4017,10 @@ async function enviarExclusao(alvo) {
         showToast(t('toast.photoDeleteFailed'), 'error');
         return false;
     } finally {
-        // A vez do local passa pra próxima, dê certo ou não (R10-3-03).
+        // A vez do local passa pra próxima, dê certo ou não (R10-3-03) — e a
+        // pílula do nome do local destrava (R11-3-06).
         vez.soltar();
+        aplicarTravaDeAcao();
     }
 }
 
@@ -4026,14 +4144,16 @@ function pedirExclusaoDaFoto() {
 
     // Com janela: a foto some JÁ (é o retorno imediato) e o envio espera.
     // A releitura é aquecida agora — os ~557ms dela cabem dentro da janela.
-    // Menos com outra exclusão deste local no ar (R10-3-03): esta só sai depois
-    // da resposta dela (`vezDeExcluirNoLocal`), e o servidor usa a lista que ELA
-    // deixou guardada. Aquecida agora, a releitura podia ler o local ANTES da
-    // escrita da outra e guardá-lo com a hora nova, por cima: MEDIDO no core, a
-    // exclusão seguinte mandava de volta a foto que a primeira tirou, as duas
-    // com `success: true`. Sem o aquecimento, o servidor relê na hora (ou usa a
-    // lista da outra), e é uma ida a menos.
-    if (!exclusoesNoLocal.has(place.venueID)) API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
+    // Menos com outra escrita da lista deste local no ar (R10-3-03): esta só sai
+    // depois da resposta dela (`vezDasFotosNoLocal`), e o servidor usa a lista
+    // que ELA deixou guardada. Aquecida agora, a releitura podia ler o local
+    // ANTES da escrita da outra e guardá-lo com a hora nova, por cima: MEDIDO no
+    // core, a exclusão seguinte mandava de volta a foto que a primeira tirou, as
+    // duas com `success: true`. Sem o aquecimento, o servidor relê na hora (ou
+    // usa a lista da outra), e é uma ida a menos. Com uma APROVAÇÃO do local no
+    // ar (R11-3-01) vale o mesmo: lida antes de ela pousar, a lista guardada via a
+    // foto pendente.
+    if (!escritasDeFotoNoLocal.has(place.venueID)) API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
     Lightbox.removerFoto(alvo.id, place);
     // A ÚLTIMA foto do local saiu: o `removerFoto` FECHOU a foto ampliada e o
     // foco voltou à foto do card — que este redesenho tira da página. O foco
@@ -4050,7 +4170,16 @@ function pedirExclusaoDaFoto() {
         if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
         aplicarTravaDeAcao();
         removeUndoBanner();
-        enviarExclusao(alvo);
+        // O banner disse "Foto excluída" no GESTO, sobre ESTE pedido, e a tela
+        // dele mudou ali. Quando o Waze confirma (3 s depois, ou mais), quem muda
+        // é o IRMÃO do mesmo local (`aplicarNosIrmaos`): a foto sai da camada
+        // ampliada dele, ou do card dele na frente — e nada era dito ao leitor
+        // de tela, que no caminho SEM o Desfazer ouve o desfecho (auditoria da
+        // rodada 11, R11-3-05, MEDIDO nos dois motores). O mesmo anúncio, só
+        // pelo irmão: o próprio pedido já foi dito.
+        enviarExclusao(alvo).then((saiuDoMapa) => {
+            if (saiuDoMapa) anunciarDesfechoDaFoto(t('undo.photoDeleted'), place, true);
+        });
     };
     // Volta atrás sem enviar. É o Desfazer do editor e também o cancelamento
     // que o APP faz quando a sessão acaba (ver `cancelarPendenciasDoLightbox`).
@@ -4138,13 +4267,36 @@ async function enviarAprovacao(alvo) {
     aplicarTravaDeAcao();
     // O pedido aprovado é o alvo das idas sem resposta (R6-3-04).
     const alvoDasIdas = 'aprovar|' + chave;
+    let vez = null;
     try {
+        // A vez do LOCAL nas escritas da lista de fotos (R11-3-01, ver
+        // `vezDasFotosNoLocal`): com uma exclusão do local no ar, a aprovação
+        // espera a resposta dela — saindo junto, a resposta da exclusão
+        // regravava no servidor a lista de antes, com esta foto pendente, e a
+        // exclusão seguinte a devolvia ao Waze como `approved: false`.
+        vez = vezDasFotosNoLocal(alvo, 'aprovar');
+        if (vez.anterior) {
+            await vez.anterior;
+            // A OUTRA aba decidiu o pedido enquanto esta esperava a vez (o
+            // R11-3-02, na espera que a vez abriu): vale a decisão de lá. A
+            // aprovação não sai — o Waze receberia as duas, e a tela diria "Já
+            // tratado por outro editor" sobre a decisão da própria pessoa. Volta
+            // como no Desfazer (o ✨ e o "Aprovar"), e diz por quê.
+            if (epoca === epocaDaSessao && typeof decididosPorOutraAbaComCardAqui !== 'undefined'
+                && decididosPorOutraAbaComCardAqui.has(alvo.place) === true) {
+                Lightbox.desmarcarAprovada(alvo);
+                showToast(t('toast.decididoNaOutraAba'), 'info');
+                return false;
+            }
+        }
         // Retentativa como no excluir e no renomear; repetir é seguro — a 2ª
         // de uma aprovação que passou volta `already_processed`, e é DESTA
         // pessoa quando houve uma ida sem resposta antes, neste gesto ou num
-        // anterior (`contarIdasSemResposta`).
+        // anterior (`contarIdasSemResposta`). A época é a do GESTO, explícita,
+        // como na exclusão: a espera pela vez pode atravessar a queda, e a ida
+        // não sai com a sessão de quem entrou nesse meio.
         const enviar = contarIdasSemResposta(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
-        let r = await callWithRetry(enviar);
+        let r = await callWithRetry(enviar, epoca);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
         }
@@ -4207,6 +4359,8 @@ async function enviarAprovacao(alvo) {
         showToast(t('toast.photoApproveFailed'), 'error');
         return false;
     } finally {
+        // A vez do local passa pra próxima escrita da lista (R11-3-01).
+        if (vez) vez.soltar();
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
         marcarEmAndamento(alvo.place, false);
@@ -4408,6 +4562,19 @@ function aprovarFotoAtual() {
     let saiu = false;
     const enviar = () => {
         if (saiu) return;
+        // A OUTRA aba decidiu o pedido DURANTE a janela (auditoria da rodada 11,
+        // R11-3-02): a guarda de cima só vale no toque, e a aprovação saía no fim
+        // da janela — o Waze recebia as duas decisões, e a resposta "já tratado"
+        // virava "Já tratado por outro editor 👍" sobre a decisão da própria
+        // pessoa, na outra aba (MEDIDO nos dois motores). Vale a primeira decisão,
+        // como o ✕ do card na janela (`enfileirarSaida` → repetida): a aprovação
+        // é descartada como no Desfazer (sem contar como Desfazer do editor), e a
+        // frase diz por quê. Vale pra todo fim da janela — o relógio, o fechar da
+        // foto, a lixeira, o ↻, a página saindo.
+        if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(place) === true) {
+            if (cancelar()) showToast(t('toast.decididoNaOutraAba'), 'info');
+            return;
+        }
         saiu = true;
         clearTimeout(aprovacaoPendente && aprovacaoPendente.timer);
         aprovacaoPendente = null;
@@ -4507,10 +4674,21 @@ function mostrarNomeNoLightbox() {
     if (!pode) { fecharEdicaoNome(); return; }
     const txt = document.getElementById('lightboxNomeTxt');
     if (txt) txt.textContent = Lightbox.place.name;
+    // A trava da pílula é do LOCAL da camada (o nome dele no ar, L23; uma
+    // exclusão dele no ar, R11-3-06), e o `disabled` dela era o que a trava
+    // escreveu da última vez — com a camada de OUTRO pedido, ou fechada. A camada
+    // aberta num IRMÃO com uma escrita do local no ar nascia com a pílula VIVA: o
+    // toque nela não fazia nada (`abrirEdicaoNome` recusa calado) ou, antes do
+    // R11-3-06, abria a correção que a exclusão fechava ao pousar (MEDIDO nos dois
+    // motores). Quem escreve o `disabled` segue sendo só a trava (gotcha #63).
+    aplicarTravaDeAcao();
 }
 
 function abrirEdicaoNome() {
     if (!podeRenomearAqui() || Treino.ativo || acoesTravadas() || renomeacaoNoAr(Lightbox.place)) return;
+    // Uma exclusão de foto deste local no ar (R11-3-06): a pílula já está
+    // travada, e o teclado ou um script não furam a trava.
+    if (exclusaoDoLocalNoAr(Lightbox.place)) return;
     const cx = document.getElementById('lightboxNome');
     const nome = Lightbox.place.name;
     cx.classList.add('editando');
@@ -4649,7 +4827,13 @@ function confirmarRenomear() {
         renomeacaoPendente = null;
         aplicarTravaDeAcao();
         removeUndoBanner();
-        enviarRenomeacao(alvo);
+        // O nome novo vai aos IRMÃOS do local quando o Waze confirma
+        // (`aplicarNosIrmaos`): a pílula e o `alt` da camada aberta de um deles,
+        // ou o card dele na frente, mudam — e só o banner do gesto, sobre ESTE
+        // pedido, tinha falado (R11-3-05, como a exclusão logo acima).
+        enviarRenomeacao(alvo).then((gravou) => {
+            if (gravou) anunciarDesfechoDaFoto(t('lightbox.anuncio.renomeado', { nome: novo }), place, true);
+        });
     };
     const cancelar = () => {
         if (saiu) return false;
@@ -4936,6 +5120,18 @@ function editaveisLidos(regiao) {
     const lidos = editaveisPorServidor.lidos;
     return Object.prototype.hasOwnProperty.call(lidos, regiao) ? lidos[regiao] : null;
 }
+// O servidor `regiao` NUNCA foi lido pra conta do perfil de agora, e outro foi:
+// o que o perfil guardado traz (as áreas, as áreas gerenciadas) é de OUTRO
+// servidor, e não cruza com este — a mesma régua do país (os ids não cruzam
+// servidores). O app anota sempre o servidor em que perguntou o perfil (a carga
+// e a sonda), então o perfil de agora tem pelo menos uma leitura; sem nenhuma
+// (o perfil sem id), não se sabe de onde ele é, e nada se afirma.
+function servidorNuncaLido(regiao) {
+    const perfil = AppState.profile;
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return false;
+    if (editaveisPorServidor.conta !== String(perfil.id)) return false;
+    return !Object.prototype.hasOwnProperty.call(editaveisPorServidor.lidos, regiao);
+}
 
 // A lista de países que o seletor MOSTRA, pela MESMA régua na abertura dos
 // Filtros (a lista da região aplicada, `AppState.countries`) e na troca de
@@ -5214,16 +5410,27 @@ function aoMudarPaisNaTela() {
 // E as áreas são as do SERVIDOR da região que o modal mostra (`regiao`; por
 // padrão, a do seletor de região), que o app leu (`areasGerenciadasLidas`): as
 // áreas gerenciadas do `/Session` são POR SERVIDOR, e o perfil guardado é o do
-// servidor em que ele foi pedido (R10-6-03). Servidor que o app não leu: as do
-// perfil que ele tem, como antes.
+// servidor em que ele foi pedido (R10-6-03).
+//
+// Servidor que o app NUNCA LEU pra esta conta (`servidorNuncaLido`): só
+// "Nenhuma". As do perfil guardado são de OUTRO servidor, e o seletor as
+// mostrava debaixo da região nova — MEDIDO no navegador: quem edita na ROW,
+// trocando a região do modal pra NA (nunca lida), via "Área SP (ROW)", e o
+// "Aplicar" buscava `na area 7001`, a área de um servidor com a região de outro
+// (auditoria da rodada 11, R11-6-03). Decisão (2026-10-07): a mesma régua de
+// "não cruzar" do país, sem pedido novo. A área SALVA também é de um servidor
+// só, o da região APLICADA: o "Carregando…" dela (sem o perfil) aparece só
+// debaixo da região dela.
 function populateManagedAreaSelect({ manterEscolha = false, regiao = null } = {}) {
     const select = document.getElementById('filterManagedArea');
     const escolha = manterEscolha ? select.value : AppState.filters.managedAreaId;
     const regiaoNaTela = document.getElementById('filterRegion');
-    const lidas = areasGerenciadasLidas(regiao || (regiaoNaTela && regiaoNaTela.value) || API.getRegion());
-    const areas = Array.isArray(lidas) ? lidas : ((AppState.profile && AppState.profile.managedAreas) || []);
+    const mostrada = regiao || (regiaoNaTela && regiaoNaTela.value) || API.getRegion();
+    const lidas = areasGerenciadasLidas(mostrada);
+    const areas = Array.isArray(lidas) ? lidas
+        : servidorNuncaLido(mostrada) ? [] : ((AppState.profile && AppState.profile.managedAreas) || []);
     const salva = AppState.filters.managedAreaId;
-    const salvaSemNome = !AppState.profile && !!salva;
+    const salvaSemNome = !AppState.profile && !!salva && mostrada === API.getRegion();
     select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>'
         + (salvaSemNome ? `<option value="${escapeHtml(salva)}" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>` : '')
         + areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
@@ -5232,6 +5439,20 @@ function populateManagedAreaSelect({ manterEscolha = false, regiao = null } = {}
     // o que o "Aplicar" grava: com o `value` de uma opção que não existe, o
     // seletor aparecia VAZIO.
     if (select.selectedIndex < 0) select.value = '';
+}
+
+// O seletor "Área gerenciada" guarda o NOME das áreas da conta (o `/Session`
+// dela), e só era redesenhado ao abrir os Filtros: fechado, ele seguia no DOM
+// com as áreas de quem estava — depois do "Sair", na tela de entrada, e na
+// sessão de OUTRA conta que entrava pela renovação, cujo relatório do modo dev
+// leva o DOM (MEDIDO no navegador; auditoria da rodada 11, R11-1-05). Volta ao
+// que o HTML traz — só "Nenhuma", com a chave dela — pelos mesmos caminhos do
+// painel do Histórico (`esvaziarPainelDoHistorico`): o modal que fecha, a tela de
+// entrada e a troca de conta. Esvaziar é seguro: a abertura dos Filtros
+// (`openFiltersModal`, a ÚNICA que os abre) o redesenha antes de mostrar.
+function esvaziarSeletorDeAreas() {
+    const select = document.getElementById('filterManagedArea');
+    if (select) select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>';
 }
 
 // Preenche o select de categoria a partir das categorias vistas (B5).
@@ -5882,8 +6103,10 @@ function showAuthScreen() {
     if (anuncio) anuncio.textContent = '';
     // E a lista de autores rejeitados (ver a função): a folha do autor pode tê-la
     // redesenhado no painel fechado (R6-1-05) — e, com ela, o painel inteiro do
-    // Histórico, com a patente e os totais de quem estava (R8-7-06).
+    // Histórico, com a patente e os totais de quem estava (R8-7-06). E as áreas
+    // gerenciadas no seletor dos Filtros (R11-1-05).
     esvaziarPainelDoHistorico();
+    esvaziarSeletorDeAreas();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -5977,6 +6200,15 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
         if (result.success) {
             guardarPrazoDaSessao(result);
             aoEntrarNestaPagina();
+            // O que a tela de entrada tinha aberto sai COM a limpeza, e o foco que
+            // estava nela vai ao ✕ do primeiro card — como no resgate do código e
+            // na entrada pela extensão (R10-1-05). O "Entrar com um código" aberto
+            // durante a espera, com o código digitado, ficava POR CIMA do app, e o
+            // "Entrar" ali fazia um segundo login, com a primeira sessão órfã no
+            // servidor (auditoria da rodada 11, R11-1-04, MEDIDO). Lido ANTES de
+            // fechar.
+            const focoNaEntrada = focoNaTelaDeEntrada();
+            fecharModaisDaEntrada({ focoComDestino: peloTeclado || focoNaEntrada });
             showMainScreen();
             resetQueue();
             // DE QUEM é a sessão, NA HORA — o portão já leu o perfil (ver o
@@ -5987,8 +6219,9 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
             // `resetQueue`: a fila já é desta sessão, e a troca não a refaz.
             conhecerContaDoLogin(result.conta);
             AppState._profilePromise = loadProfileAndAuxData();
-            // O foco de quem entrou pelo teclado (ver acima, R7-1-04).
-            if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+            // O foco de quem entrou pelo teclado (ver acima, R7-1-04), ou que
+            // estava na tela de entrada quando ela sumiu (R11-1-04).
+            if (peloTeclado || focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
             showToast(t('toast.authSuccess'), 'success');
@@ -6016,10 +6249,15 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
 // volta a valer, se ainda estiver perdido: não é foco pulando pela tela, ele
 // volta pra onde estava (como o `guardarFocoDaTrava` do card). Com o login que
 // deu certo a tela de entrada some, e o botão escondido não recebe nada.
+//
+// O "Entrar com um código" trava junto: era o único caminho da tela de entrada
+// que seguia aberto, e o diálogo dele aberto durante a validação ficava POR CIMA
+// do app quando o login dava certo — o "Entrar" ali fazia um segundo login
+// (auditoria da rodada 11, R11-1-04, MEDIDO).
 let focoNoBotaoDeEntrada = null;
 function setAuthLoading(loading) {
     const ativo = document.activeElement;
-    ['uploadBtn', 'pasteBtn'].forEach(id => {
+    ['uploadBtn', 'pasteBtn', 'pairEnterBtn'].forEach(id => {
         const b = document.getElementById(id);
         if (b) {
             if (loading && b === ativo) focoNoBotaoDeEntrada = b;
@@ -6209,6 +6447,10 @@ async function completarPerfilChegado(perfil, epoca) {
     // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
     // dois só valiam na próxima busca.
     aplicarRecusaAutomatica();
+    // A decisão do lugar DESTA conta, nesta sessão, começou (ver
+    // `areaNoutroServidorSemDecisao`, R11-6-02). Logo no começo: nada antes dela
+    // pode lançar e deixá-la sem marca (a recusa automática é assíncrona).
+    decisaoDoLugarDe = { epoca, conta: String(perfil.id) };
     // Com o TREINO aberto a fila na tela é a de EXEMPLOS, e a real está guardada
     // nele: a ordem e a recusa (que no treino sai na primeira linha) ficam
     // ANOTADAS, e o `Treino.sair()` as aplica na fila real quando ela voltar.
@@ -6260,7 +6502,11 @@ async function completarPerfilChegado(perfil, epoca) {
         // a pessoa NÃO edita (ver `paisDoPerfil`).
         const destino = await paisDoPerfil(perfil, epoca);
         if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-        else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaReal();
+        // E a busca que ESPEROU por esta decisão enquanto ela corria (ver
+        // `areaNoutroServidorSemDecisao`, R11-6-02): a que saiu antes de ela
+        // começar (a troca de conta, dentro do `definirPerfil`) ou no meio (o
+        // `maybePrefetch`, qualquer chamada direta) também é refeita aqui.
+        else if ((refazerFila || refazerPelaArea || filaEsperaPerfil) && epoca === epocaDaSessao) refazerFilaReal();
     } finally {
         if (AppState._caixaDaMinhaAreaNoAr === decisao) AppState._caixaDaMinhaAreaNoAr = null;
         decidiu();
@@ -7080,15 +7326,24 @@ function diagDecididosAgora() {
 // contar, porque é nessa entrada que mora a falha que a sentinela procura. E o
 // que já estava na fila de saída quando o pedido entrou aqui não é marcado
 // nunca. Só em memória, e o que sai da fila some daqui junto.
+//
+// `chavesDoPouso`: as chaves que o aviso de POUSO da outra aba trouxe (o canal
+// entre abas, ver `aoPousarEmOutraAba`, R11-2-01). Ali não há fila de saída a
+// comparar — o que pousou lá é decisão, por definição —, e o resto é o MESMO.
 const decididosPorOutraAbaComCardAqui = new WeakSet();
-function anotarDecididosPorOutraAba(ev) {
-    let antes, depois;
-    try {
-        antes = JSON.parse((ev && ev.oldValue) || '[]');
-        depois = JSON.parse((ev && ev.newValue) || '[]');
-    } catch (e) { return; }
-    const tinha = new Set((Array.isArray(antes) ? antes : []).map(chaveDoPedido).filter(Boolean));
-    const novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
+function anotarDecididosPorOutraAba(ev, chavesDoPouso) {
+    let novas;
+    if (Array.isArray(chavesDoPouso)) {
+        novas = new Set(chavesDoPouso.filter((k) => typeof k === 'string' && k));
+    } else {
+        let antes, depois;
+        try {
+            antes = JSON.parse((ev && ev.oldValue) || '[]');
+            depois = JSON.parse((ev && ev.newValue) || '[]');
+        } catch (e) { return; }
+        const tinha = new Set((Array.isArray(antes) ? antes : []).map(chaveDoPedido).filter(Boolean));
+        novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
+    }
     if (!novas.size) return;
     // A fila REAL (`filaReal`), e não a da tela: com o treino aberto, a da tela
     // são os EXEMPLOS (o `updateRequestID` inerte nunca casa) e a real fica
@@ -7182,6 +7437,58 @@ function avisarDecididoNaOutraAba(place) {
     }
 }
 
+// ── O POUSO de uma aba chega às OUTRAS (auditoria de 2026-10-07, R11-2-01) ──
+// O aviso de cima é o `storage` da FILA DE SAÍDA, e por ela só passa o que o
+// card decide (o ✕/✓, o "Rejeitar os N", a descarga ao fechar). O "Marcar
+// todos", a recusa automática e a APROVAÇÃO de foto não escrevem nela, e a outra
+// aba seguia com esses pedidos como card: decididos de novo lá, contavam duas
+// vezes no placar, no Histórico e na "Mão firme", diziam "Já tratado por outro
+// editor" sobre a decisão da própria pessoa e, depois de um "Marcar todos", o ✕
+// de lá era EXECUTADO — ler não resolve o pedido (MEDIDO no navegador, n01 a n03
+// da rodada 11, nos dois motores).
+//
+// Toda decisão que pousa passa pelo `registrarPouso`, e é ele que avisa as
+// outras abas, por um `BroadcastChannel`: NADA vai pro aparelho (um `setItem` por
+// pouso seria um por swipe, e a gravação é síncrona), e por isso não há chave a
+// apagar no "Sair". A outra aba roda o MESMO anotar + tirar da fila do aviso da
+// fila de saída, com as mesmas regras: o card da TELA fica (o gesto nele é
+// descontado e diz por quê; a decisão dela que está na janela do Desfazer não
+// sai), o que está EM ANDAMENTO lá é de quem o manda, e com o treino aberto vale
+// a fila REAL. Só entre abas da MESMA conta: a mesma sessão, ou a mesma conta
+// (a régua do esvaziamento da fila de saída). A aba sem sessão na memória ignora
+// — e não pergunta ao `getSession`, que leria o aparelho (R9-1-03). Sem
+// `BroadcastChannel` (iOS < 15.4), segue como antes. A mensagem leva só as
+// chaves dos pedidos e a marca da sessão (nunca o token), e não sai do navegador.
+const CANAL_DOS_POUSOS = 'waze-places-pousos';
+let canalDosPousos = null;
+
+function abrirCanalDosPousos() {
+    if (canalDosPousos || typeof BroadcastChannel !== 'function') return;
+    try { canalDosPousos = new BroadcastChannel(CANAL_DOS_POUSOS); } catch (e) { canalDosPousos = null; return; }
+    canalDosPousos.onmessage = (ev) => aoPousarEmOutraAba(ev && ev.data);
+}
+
+// O que acabou de pousar NESTA aba, com a marca de quem decidiu. O canal não
+// entrega a mensagem ao objeto que a mandou: esta aba não recebe o próprio aviso.
+function avisarOutrasAbasDoPouso(chaves) {
+    if (!canalDosPousos || !Array.isArray(chaves) || !chaves.length || !API.temSessaoNaMemoria()) return;
+    try {
+        canalDosPousos.postMessage({ v: 1, chaves, conta: contaAgora(), s: marcaDaSessao(API.getSession()) });
+    } catch (e) { /* canal fechado: segue como antes */ }
+}
+
+// O pouso de OUTRA aba. Nada aqui grava no aparelho nem avisa de volta.
+function aoPousarEmOutraAba(aviso) {
+    if (!aviso || aviso.v !== 1 || !Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
+    if (!API.temSessaoNaMemoria()) return;
+    if (!(aviso.s && aviso.s === marcaDaSessao(API.getSession()))) {
+        const agora = contaAgora();
+        if (!aviso.conta || !agora || String(aviso.conta) !== agora) return;
+    }
+    anotarDecididosPorOutraAba(null, aviso.chaves);
+    tirarDaFilaOQueAOutraAbaDecidiu();
+}
+
 // `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
 // navegador: um elemento fora da tela cujo padding SÃO os env(), e então
 // `getComputedStyle` devolve os px resolvidos.
@@ -7218,7 +7525,13 @@ const DIAG_ALVOS = ['.place-card:not(.card-fundo)', '.card-fundo', '.card-conten
                     // cru de 140 KB. Dado que só está no HTML é dado que
                     // ninguém procura sem já saber a resposta.
                     '.card-map:not(.hidden)',
-                    '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
+                    // O "N esperando envio" entrou na rodada 11 (R11-4-04), e pelo
+                    // mesmo motivo do mapa: os quatro defeitos que o esconderam (o
+                    // FAB em cima, R9-4-05; o cabeçalho do iPhone instalado,
+                    // R10-4-02; o FAB atravessando a tela, R10-4-05; a outra aba,
+                    // R11-4-03) foram achados por auditoria, nenhum por relato — o
+                    // único sinal de decisão esperando sinal só existia no `dom`.
+                    '#cardStack', '#placar', '#inFlightIndicator', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
 // Modal e lightbox ABERTOS. Camada aberta cobre o que está atrás — é a função
@@ -7304,9 +7617,29 @@ function diagGeometria() {
                 // coberto por construção, e alertar nisso é ruído.
                 naCamada: camadas.some((c) => c.contains(e)),
                 camadaAberta: camadas.length > 0,
+                // NÚMERO a não cobrir (`.nao-cobrir`: o placar, e o "N esperando
+                // envio" com decisão esperando): o que está por cima dele — ver a
+                // sentinela `indicadorEscondido`.
+                ...(e.classList && e.classList.contains('nao-cobrir') ? diagNumeroACobrir(e, r) : {}),
             });
         }
     }
+    return fora;
+}
+
+// O que está por cima de um número a não cobrir (`.nao-cobrir`), no centro dele:
+// um aviso PASSAGEIRO do topo (`#bannerStack`, que some sozinho — o do rodapé já é
+// o `sobAviso`) ou o FAB do modo dev — e, se o FAB, se foi o EDITOR que o arrastou
+// pra lá (`devFabFixado`: aí o canto é escolha dele, não do app).
+function diagNumeroACobrir(el, r) {
+    const fora = { naoCobrir: true };
+    try {
+        const alvo = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+        if (alvo && alvo !== el && !el.contains(alvo) && alvo.closest) {
+            if (alvo.closest('#bannerStack')) fora.sobBanner = true;
+            if (alvo.closest('#devFab')) fora.sobFab = devFabFixado ? 'fixado' : true;
+        }
+    } catch (e) { /* sonda nunca derruba o diagnóstico */ }
     return fora;
 }
 
@@ -7663,6 +7996,25 @@ function diagSentinelas(comp) {
                 'pedido que já está esperando envio voltou como card — dá pra decidir de novo, '
                 + 'e o segundo gesto conta outra vez',
                 { n: dc.naFila });
+        }
+        // 11. O "N esperando envio" ESCONDIDO (R11-4-04).
+        //
+        // INVARIANTE desde o R9-4-05 e o R10-4-02: com decisão ESPERANDO envio
+        // (o indicador é `.nao-cobrir`), o número está à vista — o FAB não pousa
+        // nele e ele se ancora abaixo do cabeçalho medido. É o único sinal de que
+        // há decisão esperando sinal, e os quatro defeitos que o esconderam foram
+        // achados por auditoria, nenhum por relato: a geometria nem o media. Fora,
+        // como no toque: atrás de camada aberta (ela cobre tudo, de propósito),
+        // debaixo de aviso passageiro (some sozinho) e debaixo do FAB que o EDITOR
+        // arrastou pra lá. O "enviando" não é número a não cobrir (R10-4-05) e
+        // não entra.
+        for (const g of comp.geometria || []) {
+            if (g.sel !== '#inFlightIndicator' || !g.naoCobrir) continue;
+            if (!g.noCentro || g.noCentro === 'ele mesmo' || g.noCentro === 'nada') continue;
+            if ((g.camadaAberta && !g.naCamada) || g.sobAviso || g.sobBanner || g.sobFab === 'fixado') continue;
+            diga('indicadorEscondido',
+                'o "N esperando envio" está escondido: o dedo no meio dele cai em outra coisa',
+                { recebe: g.noCentro, ...(g.sobFab ? { fab: true } : {}) });
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
@@ -10384,7 +10736,15 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
     const epoca = epocaDaSessao;
-    const filaDaQueda = AppState.fetchEpoch;   // a fila na tela, que a renovação mantém
+    // A fila REAL, que a renovação mantém — pela ÉPOCA dela. Com o TREINO aberto,
+    // a `fetchEpoch` é a dos EXEMPLOS, e guardada ela a renovação errava nos dois
+    // sentidos: com a fila refeita no "Sair" (o perfil levou a outro país), "sua
+    // fila continua aqui" saía junto do "Mostrando a fila do país…"; sem o
+    // refazer, a fila continuava e o aviso não saía (R11-7-03, MEDIDO no
+    // navegador; auditoria da rodada 11). No treino, vale a que ele guarda, e null
+    // quando ela não volta no "Sair" (`Treino.epocaDaFilaGuardada`).
+    const epocaDaFilaReal = () => (Treino.ativo === true ? Treino.epocaDaFilaGuardada() : AppState.fetchEpoch);
+    const filaDaQueda = epocaDaFilaReal();
     entrarPelaExtensao({ silencioso: true, manterFila: true }).then(async (renovou) => {
         // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
         // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
@@ -10401,7 +10761,7 @@ function derrubarSessao(errorKey, { depois } = {}) {
                 new Promise((ok) => setTimeout(ok, AVISO_RENOVADA_ESPERA_PERFIL_MS)),
             ]);
             if (epoca !== epocaDaSessao) return;
-            if (AppState.fetchEpoch === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
+            if (filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
         // A extensão pode ter respondido que o PORTÃO recusou a conta (o nível
@@ -10791,6 +11151,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // depois da limpeza (ver a função; R8-1-04, L12-1).
     esquecerRegistrosDaPagina();
     AppState.profile = null;
+    // A conta que esta aba confirmou (`contaConfirmada`) sai junto: o que era
+    // dela já saiu da memória aqui, e quem entrar depois não é uma troca de conta
+    // NESTA aba (ver `aoConhecerConta`, R11-1-01).
+    contaConfirmadaNestaAba = null;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
     AppState.pendingAction = null;
@@ -11140,9 +11504,17 @@ function manterFocoNaFrente() {
     const dele = serieDoAutor(foco, { naTela: AppState.currentPlace });
     if (!dele.length) return;
     const naSerie = new Set(dele);
+    const atual = AppState.currentPlace;
+    const fica = atual && q[0] === atual && !naSerie.has(atual) ? atual : null;
     const resto = q.filter((x) => !naSerie.has(x));
     q.length = 0;
     q.push(...dele, ...resto);
+    // O card da TELA fica na frente mesmo FORA da série — o que a outra aba já
+    // decidiu (R11-2-06, ver `serieDoAutor`). Com a série passando por cima dele,
+    // `currentPlace` e `queue[0]` ficavam diferentes, e o gesto seguinte (o
+    // `advanceQueue` tira o PRIMEIRO da fila) levava junto um pedido da série,
+    // sem decisão nenhuma.
+    if (fica) q.unshift(...q.splice(q.indexOf(fica), 1));
 }
 
 // Pede a posição ao aparelho. APROXIMADA de propósito (`enableHighAccuracy:
@@ -11426,15 +11798,20 @@ function caixaDaMinhaArea(perfil) {
 // real: 8 e 1 áreas na ROW, 0 na NA e na IL), e o perfil do `AppState` é o do
 // servidor em que ele foi pedido: quem só edita na NA chega na ROW com zero
 // áreas, e o `paisDoPerfil` o leva pra NA com a caixa do perfil de LÁ — a que
-// ele leu (`anotarEditaveis`). Sem leitura do servidor, a do perfil que o app
-// tem (auditoria da rodada 9, R9-6-04) — o que, desde o R10-6-02, só sobra
-// quando a leitura do servidor que a pessoa aplicou falhou
-// (`lerServidorDaMinhaArea`).
+// ele leu (`anotarEditaveis`).
+//
+// Servidor NUNCA lido pra esta conta (`servidorNuncaLido`): `undefined` — NÃO SE
+// SABE. A caixa do perfil guardado é de OUTRO servidor e não cruza com este: a
+// busca ia ao servidor aplicado à mão com a área de outro (o "Tudo limpo! …
+// Confira o país e a região" com "Minha área" ligada; auditoria da rodada 11,
+// R11-6-01). Quem decide o que fazer sem saber é a busca (`fetchNextPage`: ela
+// espera). `null` é saber que lá não há área.
 function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
     const perfil = AppState.profile;
     const lidas = editaveisPorServidor.caixas;
     if (perfil && perfil.id !== null && perfil.id !== undefined && editaveisPorServidor.conta === String(perfil.id)
         && lidas && Object.prototype.hasOwnProperty.call(lidas, regiao)) return lidas[regiao];
+    if (servidorNuncaLido(regiao)) return undefined;
     return caixaDaMinhaArea(perfil);
 }
 
@@ -11448,33 +11825,43 @@ function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
 // `paisDoPerfil` faz: `API.getProfile(regiao)` + `anotarEditaveis`), e a busca
 // espera a resposta (`startFetching`).
 //
-// UMA ida por servidor e por sessão (`epocaDaSessao`): a que está no ar é
-// dividida, e a que o servidor RESPONDEU — deu certo ou não — não sai de novo; a
-// que falhou deixa a caixa do perfil que o app tem, como antes. A que NEM CHEGOU
-// (`_motivo`: a rede, o teto de 45 s) não conta, e sem rede nem se pergunta: a
-// busca também não sai, e quem aplicou a região num túnel teria a resposta
-// gasta numa falha do aparelho — com a rede de volta, a busca ia com a caixa de
-// outro servidor (o mesmo "Tudo limpo!"). Na MESMA busca ela não se repete (ver
-// o `startFetching`). E só depois de um GESTO: o servidor da busca só fica sem
-// leitura quando a pessoa aplica uma região à mão — o da abertura é lido com o
-// perfil, e o da ida pro país do perfil, pelo `paisDoPerfil`. Devolve a promessa
-// da ida (no ar ou nova), ou `null` quando não há o que perguntar.
-let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };
+// A ida que está no ar é dividida, e só a que LEU vale: a resposta boa fica
+// anotada (`anotarEditaveis`), e aquele servidor não é perguntado de novo. A
+// que FALHOU — o Waze fora (o 500 `transient` do core), a página de erro da
+// borda (o 502 que não é JSON), a que NEM CHEGOU (`_motivo`: a rede, o teto de
+// 45 s) — não vale pela ida: a busca ESPERA, com "Falha ao carregar" e "Tentar
+// de novo" (ver `fetchNextPage`), e o próximo gesto pergunta de novo — uma ida
+// por gesto, nenhuma por relógio. Até o lote 14 a falha valia pela SESSÃO
+// inteira, e a busca ia com a caixa do perfil de OUTRO servidor: "Tudo limpo! …
+// Confira o país e a região" com "Minha área" ligada, e nem o ↻ perguntava de
+// novo (MEDIDO no navegador, nos dois motores; auditoria da rodada 11,
+// R11-6-01). É a régua da lista de países: a que falha não fica
+// (`pedirListaDePaises`). O 401 vai pra conferência da sessão, e a recusa do
+// portão é terminal, como na carga do perfil: com a busca esperando, ninguém
+// mais os veria. Sem rede nem se pergunta: a busca também não sai (ela mostra o
+// "sem sinal"). Na MESMA busca a pergunta não se repete (ver o `startFetching`).
+// E só depois de um GESTO: o servidor da busca só fica sem leitura quando a
+// pessoa aplica uma região à mão — o da abertura é lido com o perfil, e o da
+// ida pro país do perfil, pelo `paisDoPerfil`. Devolve a promessa da ida (no ar
+// ou nova), ou `null` quando não há o que perguntar.
+let leiturasDaMinhaArea = { epoca: null, noAr: new Map() };
 function lerServidorDaMinhaArea(regiao = API.getRegion()) {
     const perfil = AppState.profile;
     if (!AppState.authenticated || !AppState.filters.myArea || !regiao) return null;
     if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return null;
     if (editaveisLidos(regiao) !== null) return null;
-    if (leiturasDaMinhaArea.epoca !== epocaDaSessao) leiturasDaMinhaArea = { epoca: epocaDaSessao, noAr: new Map(), feitas: new Set() };
+    if (leiturasDaMinhaArea.epoca !== epocaDaSessao) leiturasDaMinhaArea = { epoca: epocaDaSessao, noAr: new Map() };
     const estas = leiturasDaMinhaArea;
-    if (estas.feitas.has(regiao)) return null;
     if (estas.noAr.has(regiao)) return estas.noAr.get(regiao);
     if (navigator.onLine === false) return null;
     const epoca = epocaDaSessao;
-    let respondeu = true;
     const ida = Promise.resolve(API.getProfile(regiao)).then((r) => {
-        if (r && r._motivo) { respondeu = false; return; }
-        if (epoca !== epocaDaSessao || !(r && r.success && r.profile)) return;
+        if (epoca !== epocaDaSessao) return;
+        if (!(r && r.success && r.profile)) {
+            if (r && r.errorCategory === 'access_denied') { if (AppState.authenticated) recusaDoPortao(r); }
+            else if (r && r.errorCategory === 'unauthorized') handleUnauthorized();
+            return;
+        }
         // A conta que perguntou: a resposta de outra conta não entra na dela.
         if (!AppState.profile || String(AppState.profile.id) !== String(perfil.id)) return;
         anotarEditaveis(perfil, regiao, r.profile.editableCountryIDs, r.profile.areas, r.profile.managedAreas);
@@ -11483,7 +11870,6 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
         redesenharFiltrosComOPerfil();
     }).catch(() => {}).finally(() => {
         estas.noAr.delete(regiao);
-        if (respondeu) estas.feitas.add(regiao);
     });
     estas.noAr.set(regiao, ida);
     return ida;
@@ -11493,6 +11879,35 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
 // abertura): o perfil que chegar refaz a fila (`completarPerfilChegado`). Zera
 // no `resetQueue` — fila nova é outra busca.
 let filaEsperaPerfil = false;
+
+// A DECISÃO do lugar da conta de agora, nesta sessão, já COMEÇOU? `{ epoca,
+// conta }` da última que começou (`completarPerfilChegado`).
+let decisaoDoLugarDe = null;
+
+// "Minha área" de quem NÃO edita no servidor desta busca — a lista de editáveis
+// que o app LEU aqui é vazia, e a pessoa não é staff: a área está noutro
+// servidor (a regra do `completarPerfilChegado`, `areaNoutroServidor`,
+// R9-6-04) — com a decisão do lugar ainda POR TERMINAR: no ar
+// (`_caixaDaMinhaAreaNoAr`) ou nem começada nesta sessão pra esta conta. A troca
+// de conta pela renovação refaz a fila DENTRO do `definirPerfil` (o
+// `esquecerOutraConta`), antes de a decisão começar: a busca saía na ROW com o
+// perfil de quem só edita na NA, "Minha área" era desligada e gravada com "Seu
+// perfil do Waze não tem área de edição…" (a frase falsa), a tela dizia "Tudo
+// limpo!", e só depois a fila ia pros EUA, pelo país e com o aviso dele (MEDIDO
+// no navegador, nos dois motores; auditoria da rodada 11, R11-6-02). Aí a busca
+// ESPERA, e quem refaz a fila é a decisão. Vale pra qualquer chamada da busca
+// (o `maybePrefetch`, a troca de conta). Decidido o lugar, nada espera: sem área
+// em servidor nenhum, ou numa região que a pessoa aplicou à mão, o filtro
+// desliga e diz — esperar ali seria esperar pra sempre.
+function areaNoutroServidorSemDecisao() {
+    const perfil = AppState.profile;
+    if (!perfil || perfil.isStaff || perfil.id === null || perfil.id === undefined) return false;
+    const aqui = editaveisLidos(API.getRegion());
+    if (!Array.isArray(aqui) || aqui.length > 0) return false;
+    if (AppState._caixaDaMinhaAreaNoAr) return true;
+    const d = decisaoDoLugarDe;
+    return !(d && d.epoca === epocaDaSessao && d.conta === String(perfil.id));
+}
 
 // A última busca FALHOU POR REDE ou pelo SERVIDOR (`transient`: nada respondeu,
 // o teto de 45 s estourou, ou a origem devolveu 5xx). É o que deixa a fila
@@ -11585,6 +12000,16 @@ function fetchNextPage() {
     // false` encerra o laço do `startFetching` (gotcha #19). Com o perfil na mão
     // e SEM caixa NO SERVIDOR desta busca (`caixaDaMinhaAreaEm`, R9-6-04), o
     // filtro desliga e diz por quê.
+    //
+    // E sem SABER a caixa do servidor desta busca — o servidor aplicado à mão que
+    // o app nunca leu, porque a pergunta a ele falhou ou nem chegou
+    // (`lerServidorDaMinhaArea`) —, a busca também ESPERA, como sem o perfil: a
+    // caixa do perfil guardado é de OUTRO servidor, e com ela a tela dizia "Tudo
+    // limpo! … Confira o país e a região" com "Minha área" ligada (auditoria da
+    // rodada 11, R11-6-01). O "Tentar de novo" pergunta de novo: uma ida por
+    // gesto, sem relógio. E sem caixa AQUI, com a área noutro servidor e o lugar
+    // ainda por decidir, também espera: quem refaz a fila é a decisão (ver
+    // `areaNoutroServidorSemDecisao`, R11-6-02).
     if (AppState.filters.myArea) {
         if (!AppState.profile) {
             filaEsperaPerfil = true;
@@ -11595,7 +12020,16 @@ function fetchNextPage() {
             updatePendingCount();
             return Promise.resolve();
         }
-        if (!caixaDaMinhaAreaEm()) desligarMinhaAreaSemCaixa();
+        const caixa = caixaDaMinhaAreaEm();
+        if (caixa === undefined || (!caixa && areaNoutroServidorSemDecisao())) {
+            filaEsperaPerfil = true;
+            if (AppState.queue.length === 0) AppState.loadError = true;
+            AppState.hasMore = false;
+            dfato('busca.esperaCaixa', { regiao: API.getRegion(), por: caixa === undefined ? 'naoLido' : 'decisao' });
+            updatePendingCount();
+            return Promise.resolve();
+        }
+        if (!caixa) desligarMinhaAreaSemCaixa();
     }
 
     AppState.fetching = true;
@@ -11888,6 +12322,17 @@ let buscaEsperaOPerfil = false;
 async function startFetching() {
     // O `sair()` do treino busca; aqui, o laço abaixo esperaria uma busca que o
     // `fetchNextPage` recusa no treino — seria o laço do gotcha #19.
+    //
+    // E a pergunta se repete DEPOIS DE CADA `await` (o perfil, a caixa de "Minha
+    // área", a busca, a fila guardada): o treino pode ABRIR no meio de uma
+    // espera — a abertura com rede lenta ("Carregando…"), ⓘ → "Praticar" —, e
+    // esta busca voltava DENTRO dele. Com os exemplos acabados (o "Treino
+    // concluído" aberto), o laço chamava o `fetchNextPage`, que no treino volta
+    // sem mudar nada, pra sempre: a aba CONGELAVA inteira, sem nem o "Ir para a
+    // fila" responder (R11-7-01, MEDIDO no Chromium e no WebKit; auditoria da
+    // rodada 11). Com exemplos na fila, ela redesenhava o card de treino e o
+    // foco do teclado caía no <body>. Só a guarda daqui não basta: o laço já
+    // podia estar no `await`. Quem busca de novo é o `sair()` do treino.
     if (Treino.ativo) return;
     AppState.loadError = false;
     ultimaBuscaFalhouPorRede = false;
@@ -11925,7 +12370,7 @@ async function startFetching() {
     // nunca gira em falso (gotcha #19). E a pergunta ao servidor é UMA por busca:
     // a que não teve resposta não se repete aqui (fica pra próxima busca).
     let perguntou = false;
-    for (let volta = 0; volta < 4 && AppState.filters.myArea && AppState.authenticated; volta++) {
+    for (let volta = 0; volta < 4 && !Treino.ativo && AppState.filters.myArea && AppState.authenticated; volta++) {
         let decidindo = AppState._caixaDaMinhaAreaNoAr;
         if (!decidindo && !perguntou) {
             decidindo = lerServidorDaMinhaArea();
@@ -11937,8 +12382,23 @@ async function startFetching() {
         try { await decidindo; } catch (e) {} finally { buscaEsperaOPerfil = false; }
     }
 
-    while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
+    while (!Treino.ativo && AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
         await fetchNextPage();
+    }
+    // O treino abriu numa das esperas acima (ver o topo): a tela é dele.
+    if (Treino.ativo) return;
+
+    // A busca ESPEROU a decisão do lugar, que está no ar (ver `fetchNextPage` e
+    // `areaNoutroServidorSemDecisao`, R11-6-02 — a troca de conta pela renovação
+    // a dispara antes de a decisão começar): quem refaz a fila é a decisão, e
+    // esta busca espera junto, na tela de carregar, sem o "Falha ao carregar" no
+    // meio. Refeita a fila (outra época), quem a desenha é a busca dela. Só sem
+    // card pra mostrar: com a fila cheia, ela mostra o que tem.
+    if (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr && !AppState.queue.length && epoca === AppState.fetchEpoch) {
+        buscaEsperaOPerfil = true;
+        updatePendingCount();
+        try { await AppState._caixaDaMinhaAreaNoAr; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        if (epoca !== AppState.fetchEpoch) return;
     }
 
     // A busca falhou por REDE ou pelo SERVIDOR com a fila NOVA vazia (a
@@ -11954,8 +12414,9 @@ async function startFetching() {
         && epoca === AppState.fetchEpoch) {
         await abrirGuardadaDepoisDaFalha(epoca);
         // Abriu — por esta chamada ou por outra que esperava a MESMA busca: o
-        // card já está na tela, e a busca seguinte sai com o próximo gesto.
-        if (AppState.queue.length > 0) return;
+        // card já está na tela, e a busca seguinte sai com o próximo gesto. Ou o
+        // treino abriu durante a leitura (a fila guardada ficou anotada nele).
+        if (AppState.queue.length > 0 || Treino.ativo) return;
     }
 
     showLoading(false);
@@ -12615,7 +13076,7 @@ function montarCard(place) {
     // nunca via estas 25 chaves. Resultado: em inglês/espanhol o card voltava pro
     // português A CADA SWIPE (o clone traz o texto pt hardcoded do HTML).
     // Traduzir aqui, no clone, é o único ponto que pega todo card novo.
-    atualizarSeloDePular(card);
+    atualizarSeloDePular(card, place);
     if (typeof applyI18n === 'function') applyI18n(card);
 
     return card;
@@ -13801,7 +14262,14 @@ function focarAutor(id) {
     const daPessoa = serieDoAutor(id, { naTela: AppState.currentPlace });
     if (daPessoa.length === 0) return;
     const naSerie = new Set(daPessoa);
+    const atual = AppState.currentPlace;
+    const fica = atual && AppState.queue[0] === atual && !naSerie.has(atual) ? atual : null;
     AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => !naSerie.has(x))];
+    // O card da TELA que ficou FORA da série — o que a outra aba já decidiu
+    // (R11-2-06, ver `serieDoAutor`) — segue na frente, com a série logo depois:
+    // o "Ver +N" tocado nele conta os OUTROS, e trocá-lo seria trocar o card
+    // debaixo do dedo (a mesma regra do `manterFocoNaFrente`).
+    if (fica) AppState.queue.unshift(...AppState.queue.splice(AppState.queue.indexOf(fica), 1));
     AppState.autorEmFoco = id;
     AppState.currentPlace = AppState.queue[0];
     renderFocoAutor();
@@ -14338,8 +14806,11 @@ function aplicarTravaDeAcao() {
     // edição — editando ela é rótulo, e rótulo não se apaga.
     // E um TERCEIRO motivo: uma renomeação deste local no ar (L23). Corrigir de
     // novo com a primeira ainda voando fazia as duas cruzarem no Waze.
+    // E um QUARTO: uma EXCLUSÃO de foto deste local no ar (R11-3-06): a que tira
+    // a última foto da camada a fecha quando pousa, e jogava fora o nome que se
+    // corrigia (`exclusaoDoLocalNoAr`).
     const pilula = document.getElementById('lightboxNomeBtn');
-    if (pilula) pilula.disabled = travado || editandoNome() || renomeacaoNoAr(Lightbox.place);
+    if (pilula) pilula.disabled = travado || editandoNome() || renomeacaoNoAr(Lightbox.place) || exclusaoDoLocalNoAr(Lightbox.place);
     // O ✓ da edição também (o Enter vai pelo `confirmarRenomear`, que confere a
     // trava): quem escreve o `disabled` dele é o `atualizarBotaoSalvarNome`.
     if (editandoNome()) atualizarBotaoSalvarNome();
@@ -16005,6 +16476,9 @@ function desenharChavesDePreferencia() {
 
 function setupSincroniaEntreAbas() {
     window.addEventListener('storage', aoGravarEmOutraAba);
+    // O que POUSA numa aba sai da fila das outras (R11-2-01, ver
+    // `avisarOutrasAbasDoPouso`): o canal é aberto aqui, uma vez por página.
+    abrirCanalDosPousos();
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  Patentes e Conquistas — celebra, nunca cobra
@@ -16218,15 +16692,25 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
 // O lote de lidos confirma N de uma vez: UMA gravação e UMA avaliação, não N
 // (seriam N escritas síncronas no localStorage no meio da tela).
 // Sem guarda do treino, pela mesma razão da `registrarAcaoConfirmada`.
-// `gesto`: o momento do toque no "Marcar todos" (`carimboDoGesto`) — a hora e o
-// idioma em que a pessoa decidiu, como no ✕ e no ✓. Sem ele, vale agora.
+// `gesto`: o momento do toque no "Marcar todos" (`carimboDoGesto`) — a hora, o
+// dia e o idioma em que a pessoa decidiu, como no ✕ e no ✓. Sem ele, vale agora.
 function registrarLoteConfirmado(n, gesto) {
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + n;
     salvarConquistas();
     registrarIdiomaUsado(gesto ? gesto.lang : (typeof getLang === 'function' ? getLang() : ''));
     const hora = new Date(gesto && Number.isFinite(gesto.t) ? gesto.t : Date.now()).getHours();
-    checarConquistas({ madrugada: hora >= 0 && hora < 5 });
+    // "Centurião" é o balde do DIA do gesto, a régua da `registrarAcaoConfirmada`:
+    // o lote soma no `gesto.dia` (o `recordHistory` do `contarLidos` já somou), e
+    // julgado pelo balde de HOJE, o "Marcar todos" tocado às 23:59 e pousado
+    // depois da meia-noite não dava o "Centurião", com 120 no balde do gesto
+    // (MEDIDO no navegador; o ✓ do card, no mesmo instante, dava; auditoria de
+    // 2026-10-07, R11-7-06). Depois da virada, nada mais avalia aquele dia.
+    const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
+    checarConquistas({
+        ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
+        madrugada: hora >= 0 && hora < 5,
+    });
     checkUndoGateUnlock();   // ver `updateStats`
 }
 
@@ -17199,9 +17683,17 @@ const ICONE_RAIO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
 // · `todos`: a FRASE da folha fala do AUTOR ("Há N na fila agora") e conta os
 //   pedidos dele que ESTÃO na fila, em andamento ou não: "o único" com outro ali
 //   é falso. Só a frase; o que decide não os leva.
+// · O que a OUTRA aba já decidiu (`decididosPorOutraAbaComCardAqui`) fica FORA,
+//   em todos os modos — mesmo o card da tela, que é onde ele fica (ver
+//   `tirarDaFilaOQueAOutraAbaDecidiu`). Contado, o "Rejeitar os 3" mandava 2, e
+//   o 3º era descontado calado no envio: a folha dizia "2 pedidos · ✓ 2
+//   rejeitados" sem dizer do outro (MEDIDO no navegador, n08 da rodada 11;
+//   R11-2-06, decisão: fora da série, sem texto novo). Fora da série, o card da
+//   tela segue NA FRENTE (`manterFocoNaFrente`, `focarAutor`).
 function serieDoAutor(id, { naTela = null, todos = false } = {}) {
     if (id === null || id === undefined || id === '') return [];
     return (AppState.queue || []).filter((x) => x && x.creatorId === id
+        && !(typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(x) === true)
         && (todos || x === naTela || !pedidosEmAndamento.has(chaveDoPedido(x))));
 }
 
@@ -18676,6 +19168,17 @@ function aoConhecerConta(perfil) {
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
+    // A troca que OUTRA aba já fez no aparelho: ela entrou com esta conta (ou deu
+    // "Sair") e tirou de lá o que era da anterior — mas esta aba seguia com a
+    // MEMÓRIA dela. A aba cuja sessão caiu fica na tela de entrada com o que era
+    // de quem estava (a queda o mantém, pra MESMA conta voltar), e ao adotar a
+    // sessão da outra aba (ou entrar com os cookies dela) o "invisível" pendente
+    // da anterior saía no nome de quem entrou, o rascunho dela aparecia na
+    // conversa, e o relatório do modo dev levava o anel e as capturas dela
+    // (auditoria da rodada 11, R11-1-01, MEDIDO). A conta que ESTA aba confirmou
+    // por último diz: sendo outra, sai só o que a memória guarda — o aparelho a
+    // outra aba já limpou.
+    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: true });
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
     const s = marcaDaSessao(API.getSession());
@@ -18733,57 +19236,87 @@ function adotarSaidaSemMarca() {
 // — idioma, tema, filtros e as preferências, menos o que só valia pra conta
 // anterior (ver abaixo) — e a fila na tela, que já veio da busca de quem entrou
 // (menos a que a renovação da queda manteve: ver o fim).
-function esquecerOutraConta(id) {
-    dfato('conta.trocou');
-    const f = carregarFilaDeSaida();
-    const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
-    if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
-    esquecerAutores();
+//
+// `soMemoria`: a troca que OUTRA aba já fez no APARELHO (ver `aoConhecerConta`,
+// R11-1-01). Ele é de quem entrou e já não guarda nada da anterior; aqui sai só o
+// que ESTA aba guarda na memória. É a MESMA lista: as linhas que gravam ou
+// apagam no aparelho levam o `soMemoria`, como as do `handleLogout` levam o
+// `porOutraAba`. O placar, o Histórico, as preferências e os autores desta aba
+// são cópias do aparelho, e o aviso `storage` já as trouxe de lá (ver
+// `sincronizarComOutraAba`): zerar o placar aqui apagaria o que quem entrou já
+// fez na outra aba. E sem o aviso da troca: ele saiu onde ela aconteceu.
+function esquecerOutraConta(id, { soMemoria = false } = {}) {
+    dfato('conta.trocou', soMemoria ? { soMemoria: true } : undefined);
+    if (!soMemoria) {
+        const f = carregarFilaDeSaida();
+        const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
+        if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
+    }
+    if (soMemoria) AppState.autores = null;
+    else esquecerAutores();
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
     // depois (`loadProfileAndAuxData`): a fila de quem entrou volta à ordem dela.
     esquecerFocoAutor();
-    window.Presenca?.esquecer?.();
+    if (soMemoria) window.Presenca?.esquecer?.({ soMemoria: true });
+    else window.Presenca?.esquecer?.();
     AppState.history = null;
-    safeLS.remove(HISTORY_KEY);
-    safeLS.remove(CONQUISTAS_KEY);
-    // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel da
-    // anterior, o ↑ de quem entrou não guardava esses pedidos.
-    safeLS.remove(ESTRELADOS_KEY);
+    if (!soMemoria) {
+        safeLS.remove(HISTORY_KEY);
+        safeLS.remove(CONQUISTAS_KEY);
+        // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel
+        // da anterior, o ↑ de quem entrou não guardava esses pedidos.
+        safeLS.remove(ESTRELADOS_KEY);
+    }
     AppState.conquistas = null;
     atualizarSeloDeConquista();
     // E o painel do Histórico dela, que fica no DOM com os Filtros fechados (a
     // folha do autor o redesenha assim; ver a função; R8-7-06).
     esvaziarPainelDoHistorico();
-    AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
-    // placar, e o placar acabou de zerar: com a base da conta anterior (5
-    // pulados, digamos), os pulados de quem entrou não contavam, e a fila que
-    // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
-    // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
-    puladosNoInicioDaFila = 0;
+    if (!soMemoria) {
+        AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+        // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
+        // placar, e o placar acabou de zerar: com a base da conta anterior (5
+        // pulados, digamos), os pulados de quem entrou não contavam, e a fila que
+        // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
+        // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
+        puladosNoInicioDaFila = 0;
+    }
     // A presença no WME era da conta anterior: o freio, os contadores e — o que
     // importa — o "invisível" que ela deixou PENDENTE, que sem isto sairia pra
     // quem entrou, sem o gesto dela ("o app nunca desliga por conta própria").
     presencaWmeZerar();
     // As escolhas que valiam pelas regras DELA, as marcas do que só ela viu, e o
     // que ESCREVE no Waze no nome de alguém — que não se herda (ver a função).
-    esquecerEscolhasDaContaAnterior();
+    if (!soMemoria) {
+        esquecerEscolhasDaContaAnterior();
+    }
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
     // confere de novo (`esquecerAreaForaDoPerfil`). Com "Minha área" a busca vai
-    // pela caixa do perfil, não por ela.
+    // pela caixa do perfil, não por ela. Os filtros são da ABA (lidos na
+    // abertura): na troca só da memória, sai daqui sem gravar.
     const areaNaBusca = !!(AppState.filters && AppState.filters.managedAreaId) && !AppState.filters.myArea;
-    if (AppState.filters && AppState.filters.managedAreaId) { AppState.filters.managedAreaId = ''; saveFilters(); }
+    if (AppState.filters && AppState.filters.managedAreaId) {
+        AppState.filters.managedAreaId = '';
+        if (!soMemoria) saveFilters();
+    }
+    // E o seletor delas nos Filtros, com o NOME das áreas dela (R11-1-05).
+    esvaziarSeletorDeAreas();
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
     // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
     // com o perfil dele.
     referenciasDoPerfil = null;
     posicaoGps = null;
-    saveStats();
+    if (!soMemoria) saveStats();
     updateStats();
-    offlineEsquecer();
-    dlogApagar();
+    if (soMemoria) {
+        offlineEsquecer({ soMemoria: true });
+        dlogApagar({ soMemoria: true });
+    } else {
+        offlineEsquecer();
+        dlogApagar();
+    }
     // O anel de chamadas, como no "Sair": o `dlogApagar` tira os corpos, mas as
     // entradas ficavam — a rota, o status, a hora e o `n` da fila de cada pedido
     // da conta anterior, em sequência, iam no relatório e na cópia guardada de
@@ -18839,7 +19372,7 @@ function esquecerOutraConta(id) {
         resetQueue();
         startFetching();
     }
-    showToast(t('toast.outraConta'), 'info');
+    if (!soMemoria) showToast(t('toast.outraConta'), 'info');
 }
 
 // A troca de conta (`esquecerOutraConta`) tirava do aparelho o que era da conta
@@ -18892,6 +19425,13 @@ function esquecerEscolhasDaContaAnterior() {
     prefs.undoEnabled = true;
     prefs.pularGuarda = false;
     for (const marca of ['undoGateSeen', 'dicaDesfazerVista', 'comoFuncionaVisto', 'consequenciaVista']) delete prefs[marca];
+    // Menos o "Como funciona" com o TREINO aberto: a troca de conta pela renovação
+    // silenciosa não o encerra (R10-1-01), e quem está nele está aprendendo — o
+    // treino É o "Como funciona" (o `Treino.entrar` o marca pelo mesmo motivo).
+    // Sem isto, o "Sair" do treino abria o diálogo por cima do 1º card de quem
+    // entrou, e pelo teclado o Enter seguinte, dado pra agir no ✕, caía no
+    // "Quero treinar antes" e voltava ao treino (R11-7-02, MEDIDO no navegador).
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) prefs.comoFuncionaVisto = true;
     prefs.semUndoSeguidas = 0;
     savePreferences();
     safeLS.remove(PERFIL_GATE_KEY);
@@ -19021,7 +19561,9 @@ async function esvaziarFilaDeSaida() {
     // `SAIDA_RECUO_401_MS`). O gatilho que chegar depois dele esvazia.
     if (saidaEmRecuo()) return;
     let f = carregarFilaDeSaida();
-    if (!f.length) return;
+    // Fila vazia: nenhuma passada a fazer — a prova de rede engolida pela
+    // passada anterior (a que pediu esta) é atendida agora (R11-4-01).
+    if (!f.length) { atenderProvaDoEsvaziamento(); return; }
     esvaziandoSaida = true;
     // ENTRE ABAS: uma esvazia de cada vez (ver `travaDaSaida`). Com a outra aba
     // esvaziando, esta espera ela soltar e tenta uma vez.
@@ -19259,6 +19801,9 @@ async function esvaziarFilaDeSaida() {
         saidaPedidaDeNovo = false;
         return esvaziarFilaDeSaida();
     }
+    // FIM do esvaziamento: a prova de rede que chegou no meio dele e não pôde
+    // varrer o offline (a banda) varre agora (ver `API.aoProvarRede`, R11-4-01).
+    atenderProvaDoEsvaziamento();
 }
 
 // O pouso de um item da fila de saída. É o `handleActionResult` SEM a parte do
@@ -19415,6 +19960,11 @@ function offlineLerPousos() {
 // A cópia GRAVADA só existe com o offline ligado: é ela que a reabertura sem
 // rede consulta, e quem não ligou o offline não reabre sem rede. "Quem não
 // marca não paga nada."
+//
+// E é daqui que as OUTRAS abas ficam sabendo do pouso (R11-2-01, ver
+// `avisarOutrasAbasDoPouso`): por ser a fonte única, o aviso cobre os caminhos
+// que não passam pela fila de saída — o "Marcar todos", a recusa automática e a
+// aprovação de foto.
 function registrarPouso(places) {
     const agora = Date.now();
     // Uma escrita pousou: o Waze aceita escrita agora (ver `ultimaEscritaOkEm`).
@@ -19425,6 +19975,7 @@ function registrarPouso(places) {
         if (k) { chaves.push(k); pousosDaPagina.set(k, agora); }
     }
     if (!chaves.length) return;
+    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves);
     if (pousosDaPagina.size > 500) {
         for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
     }
@@ -19613,7 +20164,8 @@ function retomarBusca() {
 // re-executar no fim. Isso contraria o "para no primeiro `transient`" — o laço
 // que quebrou por rede ruim tentaria de novo NA HORA, gastando requisição
 // justamente quando ela falha. Quem está no ar já vai processar a fila inteira,
-// então não há nada a anotar.
+// então não há nada a anotar PRA FILA — a prova engolida fica anotada só pra
+// varredura do offline, que sai no fim dele (ver `atenderProvaDoEsvaziamento`).
 API.aoProvarRede = () => {
     // Uma resposta CHEGOU: a rede anda, e a foto que falhar daqui em diante não
     // é "falta de sinal" (ver `buscaSemResposta`). ANTES da saída abaixo: no
@@ -19629,24 +20181,53 @@ API.aoProvarRede = () => {
     // — só uma próxima resposta da nossa API o soltava (auditoria da rodada 10,
     // R10-4-03, MEDIDO: 15,9 s travado e contando, nos dois motores).
     recuperarCardSemFoto({ redeProvada: true });
-    // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
-    // estava escrito abaixo (retentar na hora contraria a política de rede). O
-    // segundo é novo: varrer o offline no meio do esvaziamento é competir por
-    // banda exatamente no pior momento — a rede acabou de voltar, muitas vezes
-    // em dados móveis. O guard de `test/fila-saida.test.mjs` cobra isto, e
-    // estava certo quando eu tentei tirar.
-    if (esvaziandoSaida) return;
-    esvaziarFilaDeSaida();
-    // Resposta que CHEGA prova rede, e as duas pontas do offline pegam carona
-    // nela: o que estava preso pra SAIR e o que falta ENTRAR.
-    offlineTalvezVarrer();
+    // Os três ganchos de TETO PRÓPRIO também vêm ANTES da saída cedo: o perfil
+    // que faltou (1×/min), o "invisível" do WME que não saiu (1×/min, um envio
+    // por vez) e o token do tempo real (5 min). Nenhum disputa a fila de saída —
+    // é um pedido cada, só quando falta —, e nenhum dos dois motivos da saída
+    // cedo (logo abaixo) vale pra eles. Moravam DEPOIS dela: com a rede voltando
+    // pelo `online` e decisões esperando envio, as respostas do esvaziamento
+    // eram as únicas provas de rede, todas engolidas, e o fim dele não chama
+    // nada — o perfil que faltava seguia faltando (sem nome, sem os portões de
+    // L6, sem a recusa automática e a presença) e o "invisível" pendente não
+    // saía, até a próxima resposta FORA de um esvaziamento: o próximo gesto
+    // (auditoria da rodada 11, R11-4-01 = R11-2-07 = R11-5-02, MEDIDO nos dois
+    // motores: duas decisões saindo e o perfil `null` 3 s depois do fim).
     refazerPerfilSeFaltar();
     presencaWmeRefazerDesligar();
     // O token do tempo real que faltou ou falhou: sem isto, nada mais o pedia
     // de novo e o chat ficava sem tempo real até reabrir o app. Com o teto de
     // 5 min da própria presença (ver `presencaAoProvarRede`).
     window.Presenca?.aoProvarRede?.();
+    // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
+    // estava escrito abaixo (retentar na hora contraria a política de rede). O
+    // segundo é novo: varrer o offline no meio do esvaziamento é competir por
+    // banda exatamente no pior momento — a rede acabou de voltar, muitas vezes
+    // em dados móveis. O guard de `test/fila-saida.test.mjs` cobra isto, e
+    // estava certo quando eu tentei tirar. A prova engolida fica ANOTADA, e o
+    // fim do esvaziamento varre (ver `atenderProvaDoEsvaziamento`): sem a nota,
+    // a varredura esperava a próxima resposta, que podia não vir.
+    if (esvaziandoSaida) { provaNoEsvaziamento = true; return; }
+    // Esta prova varre logo abaixo: a que foi engolida antes (e ainda não
+    // atendida) vai junto, sem uma segunda varredura.
+    provaNoEsvaziamento = false;
+    esvaziarFilaDeSaida();
+    // Resposta que CHEGA prova rede, e as duas pontas do offline pegam carona
+    // nela: o que estava preso pra SAIR e o que falta ENTRAR.
+    offlineTalvezVarrer();
 };
+
+// A prova de rede que chegou com o esvaziamento no AR (ver `API.aoProvarRede`):
+// a varredura do offline não sai no meio dele (a banda), e o FIM dele a chama —
+// o fim de uma passada sem outra pedida, ou a passada pedida que nem começou
+// porque a fila já estava vazia. Sem rede, sem sessão, conferindo um 401 ou no
+// recuo, a nota espera o próximo esvaziamento (o próximo gatilho).
+let provaNoEsvaziamento = false;
+function atenderProvaDoEsvaziamento() {
+    if (!provaNoEsvaziamento || esvaziandoSaida) return;
+    provaNoEsvaziamento = false;
+    offlineTalvezVarrer();
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DISPONÍVEL OFFLINE — o TRABALHO sobrevive à sombra de sinal
@@ -21205,12 +21786,14 @@ const Treino = {
         const c = JSON.parse(JSON.stringify(p));
         c.updateRequestID = this.UR_INERTE;
         c._treino = true;
-        // O id de verdade, SÓ pra achar a foto em decisão (`fotosDoCard`): o
+        // O id de verdade, SÓ pra LER: achar a foto em decisão (`fotosDoCard`): o
         // treino escolhe os cards por variedade justamente pra ensinar o card de
         // foto, e sem ele ensinava na foto errada — a antiga, sem ✨ nem a borda
         // âmbar (R6-7-6, auditoria de 2026-10-01; em 13 de 76 pedidos de foto da
         // fila do owner a proposta não é a 1ª). Escrita nenhuma o lê: as de foto
-        // têm o guard do treino, e as do card a trava no topo dos handlers.
+        // têm o guard do treino, e as do card a trava no topo dos handlers. A
+        // outra leitura é a frase do ↑ (`pularGuardaria`: o app já estrelou o
+        // pedido de verdade?), que só lê o anel das estrelas.
         c._urFoto = p.updateRequestID;
         return c;
     },
@@ -21443,8 +22026,12 @@ const Treino = {
         // A ÉPOCA volta com a fila (ver `entrar`): o que ainda estiver no ar sobre
         // ela pousa nela, como se o treino não tivesse existido. Só se a época é
         // a que o treino pôs: outra (nada a muda sem encerrar o treino hoje) seria
-        // uma fila refeita, e voltar a época apagaria isso.
-        if (Number.isInteger(s.epoca) && AppState.fetchEpoch === s.epocaDoTreino) AppState.fetchEpoch = s.epoca;
+        // uma fila refeita, e voltar a época apagaria isso. E nunca com a fila
+        // REFEITA logo abaixo (`refazerFila`): o `resetQueue` dela subiria a época
+        // de volta à do TREINO, e quem a guardou tomaria a fila nova pela mesma —
+        // era o "sua fila continua aqui" junto do "Mostrando a fila do país…"
+        // (R11-7-03). Sem repor, a fila nova ganha uma época que ninguém guardou.
+        if (Number.isInteger(s.epoca) && AppState.fetchEpoch === s.epocaDoTreino && !s.refazerFila) AppState.fetchEpoch = s.epoca;
         removeCurrentCardEl();
         // O PERFIL que chegou com o treino aberto (R7-2-04, auditoria de
         // 2026-10-02): a ordem por casa/trabalho e a recusa automática esperavam
@@ -21500,6 +22087,17 @@ const Treino = {
     // (o `enviarLote`, o `devolverPedidoRecusado`, a queda da sessão).
     filaGuardada(epoca) {
         return this.ativo && this._salvo && this._salvo.epoca === epoca ? this._salvo.queue : null;
+    },
+
+    // A época da fila REAL que o treino guarda — a que o `sair()` devolve —, ou
+    // null quando ela NÃO volta: a que o perfil mandou refazer no "Sair"
+    // (`anotarFilaRefeita`) e a da conta anterior (`esquecerFilaDaContaAnterior`,
+    // que tira a época). É por ela que a renovação da queda decide se a fila
+    // "continua aqui" (`derrubarSessao`, R11-7-03).
+    epocaDaFilaGuardada() {
+        if (!this.ativo || !this._salvo) return null;
+        const s = this._salvo;
+        return s.refazerFila || !Number.isInteger(s.epoca) ? null : s.epoca;
     },
 
     // O recusado de vez com o treino aberto, cuja fila é a guardada: espera o
@@ -21666,6 +22264,18 @@ const Treino = {
         fecharCamadasDeFoto();
     },
 
+    // O ↑ deste exemplo GUARDARIA o pedido no modo real? A régua do `handleSkip`:
+    // o "Pular guarda o pedido" ligado, e o pedido sem a estrela — nem a ⭐ do
+    // card (`isStarred`, R9-7-06) nem a que o app já deu, nesta aba ou noutra
+    // (`estreladoPeloApp`, R10-2-05). Nesses o ↑ de verdade não manda nada, e o
+    // treino dizia "pular daria ⭐" (R11-7-05, MEDIDO no navegador; auditoria da
+    // rodada 11). O clone leva o `updateRequestID` inerte: a chave do pedido de
+    // verdade é a do `_urFoto` (só lida aqui; escrita nenhuma o usa).
+    pularGuardaria(p) {
+        if (AppState.preferences.pularGuarda !== true || !p || p.isStarred === true) return false;
+        return estreladoPeloApp({ venueID: p.venueID, updateRequestID: p._urFoto || p.updateRequestID }) !== true;
+    },
+
     agir(tipo) {
         if (!this.ativo) return;
         const ultimo = AppState.queue.length <= 1;
@@ -21674,8 +22284,9 @@ const Treino = {
         // aviso flutuante sobre a área do card já vazia (o swipe animou o card
         // pra fora), e esperar pra ler deixava 2,2s de tela em branco.
         // O ↑ com o "Pular guarda o pedido" ligado ENVIA a estrela no modo real:
-        // "pular não envia nada" seria falso justamente pra quem o ligou.
-        const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && AppState.preferences.pularGuarda === true ? 'skipGuarda' : tipo);
+        // "pular não envia nada" seria falso justamente pra quem o ligou. Menos
+        // no pedido que já a tem (ver `pularGuardaria`).
+        const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && this.pularGuardaria(AppState.queue[0]) ? 'skipGuarda' : tipo);
         if (!ultimo) this.aviso = showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000);
         this.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
         this.restam = Math.max(0, this.restam - (tipo === 'skip' ? 0 : 1));
@@ -21955,8 +22566,10 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     // Sem SESSÃO (a janela da renovação pela extensão, com os Filtros abertos),
     // o gesto era descartado: a pessoa seguia visível no WME (auditoria de
     // 2026-09-30, R5-5-8). Fica pendente, como o sem perfil logo abaixo, e o
-    // perfil que chegar com a sessão nova o manda (`definirPerfil`).
-    if (!API.getSession()) {
+    // perfil que chegar com a sessão nova o manda (`definirPerfil`). A sessão
+    // DESTA aba é a da memória: o `getSession`, com ela vazia, GRAVA nela a que
+    // outra aba guardou no aparelho — é adotá-la (R9-1-03; R11-1-02).
+    if (!API.temSessaoNaMemoria()) {
         if (AppState.preferences.presenca === false) { presencaWme.desligarPendente = true; presencaWmeGravarPendente(); }
         return;
     }
@@ -22152,6 +22765,23 @@ function presencaWmeAnotarDesligar(r) {
 // `abaMorta`: a aba cujo carimbo a conferência achou MORTA (ver
 // `presencaWmeConferirAbaDoCarimbo`) — o carimbo dela não segura nada.
 function presencaWmeRefazerDesligar({ abaMorta = null } = {}) {
+    // Sem sessão nesta aba (a tela de entrada, a renovação no ar), o pendente
+    // ESPERA: quem o manda é o perfil que chegar com a sessão nova
+    // (`definirPerfil`). Seguir até o envio lia a sessão pelo `getSession`, que
+    // com a memória vazia GRAVA nela a que outra aba guardou no aparelho: a
+    // resposta de um código errado na tela de entrada ADOTAVA calada a sessão da
+    // outra aba — a volta à aba não a adotava mais, e o "Sair" de lá fechava o
+    // "Colar cookies" daqui (o R9-1-03 por outra porta; auditoria da rodada 11,
+    // R11-1-02, MEDIDO).
+    //
+    // E sem o PERFIL também: a sessão nova pode ser de OUTRA conta (a adotada da
+    // outra aba, a que a extensão trouxe), e só o perfil diz de quem ela é — a
+    // troca tira da memória o pendente da conta anterior (`aoConhecerConta`).
+    // Antes dele, a repetição gravava o pendente com a conta do APARELHO
+    // (`presencaWmeGravarPendente`), a de quem entrou na outra aba: MEDIDO, a
+    // busca respondendo antes do perfil, e a outra aba mandava o "invisível" de
+    // quem nunca o pediu (R11-1-01).
+    if (!AppState.authenticated || !AppState.profile) return;
     if (AppState.preferences.presenca !== false) return;
     // Com um envio no AR, quem decide é a resposta dele: o gravado é dele
     // (gravado no gesto, R7-5-03), e adotá-lo aqui marcava o pendente na memória
@@ -22209,7 +22839,7 @@ function presencaWmeRefazerDesligar({ abaMorta = null } = {}) {
     // o envio morreu junto, e esperar o teto era só atraso (R9-5-04; ver
     // `presencaWmeConferirAbaDoCarimbo`). O `typeof`: os testes que fatiam isto
     // sem a marca.
-    const sessao = marcaDaSessao(API.getSession());
+    const sessao = marcaDaSessao(API.sessionToken);
     const renovadaAqui = (s) => !!s && s === presencaWme.desligar401Sessao && s !== sessao;
     const daqui = renovadaAqui(presencaWme.desligarSessao) ? 0 : presencaWme.desligarEm;
     const aba = typeof ABA_DESTA_PAGINA === 'string' ? ABA_DESTA_PAGINA : null;
@@ -22758,16 +23388,46 @@ async function handleBatchMarkRead() {
     // auditoria de 2026-10-07, R10-2-03). Conta na sessão da RESPOSTA, como o
     // card: o que pousou antes de uma queda conta, o que chega depois não (o
     // `sessaoTrocou`, abaixo). O aviso "N marcados" segue um só, no fim.
-    const contarLidos = (n) => {
+    //
+    // E o "Restam" desce JUNTO, pelo mesmo pedaço (R11-2-05): o placar subia a
+    // cada pedaço e o "Restam" só descia no fim do laço, então no meio o que o
+    // Waze já marcou contava nos DOIS números (MEDIDO no navegador: lote de 60, o
+    // 1º pedaço pousado — "Lidos 65" e "Restam 60", 125 de 100; auditoria de
+    // 2026-10-07). Só na fila do GESTO (`epocaFila`), a régua do fim: a fila
+    // refeita no meio (↻, filtro) tem o "Restam" dela, que não conta estes
+    // pedidos. Eles seguem NA FILA até o fim do lote, o card da frente inclusive
+    // (o "Restam" é o `serverTotal`, não o tamanho da fila), e o fim desconta só
+    // o que não desceu aqui (`descontados`).
+    const descontados = new Set();
+    const contarLidos = (ps) => {
+        const n = ps.length;
         AppState.stats.read += n;
         recordHistory('read', n, gesto.dia, gesto.onde);
         registrarLoteConfirmado(n, gesto);
         updateStats();
         saveStats();
+        if (epocaFila !== AppState.fetchEpoch) return;
+        for (const p of ps) descontados.add(chaveDoPedido(p));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - n);
+        updatePendingCount();
     };
+    // O que a OUTRA aba decidiu COM O LOTE NO AR (R11-2-02). Os alvos deixam de
+    // fora o anotado uma vez só, no começo (a junção do R10-2-02), e o lote
+    // mandava depois o que a pessoa decidiu na outra aba no meio dele, e o
+    // contava como lido — por cima da rejeição de lá, ou lido duas vezes
+    // (MEDIDO no navegador: lote de 30, a outra aba rejeita o 28º com o 1º
+    // pedaço no ar — Histórico 31 pra 30 pedidos, e "30 marcados"; auditoria de
+    // 2026-10-07). Cada pedaço, e cada pedido do um a um, pergunta de novo antes
+    // de sair; e o "já tratado" de um anotado no meio da ida é a decisão de lá
+    // (`pousouPorOutraAba`), sem contar. Vale a primeira decisão. Eles saem da
+    // fila no fim (`daOutraAba`, lá embaixo), como sairiam no aviso da outra aba
+    // se não estivessem em andamento aqui (`tirarDaFilaOQueAOutraAbaDecidiu`).
+    const decididoNaOutraAba = (p) => typeof decididosPorOutraAbaComCardAqui !== 'undefined'
+        && decididosPorOutraAbaComCardAqui.has(p) === true;
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
-            const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
+            const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO).filter((p) => !decididoNaOutraAba(p));
+            if (!pedaco.length) continue;
             const r = await mandar(() => API.markAsReadBatch(itens(pedaco), regiao));
             if (epoca !== epocaDaSessao) {
                 sessaoTrocou = true;
@@ -22780,11 +23440,13 @@ async function handleBatchMarkRead() {
             // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
             // E conta junto (R10-2-03, ver `contarLidos`), DEPOIS do pouso: se a
             // conta quebrar, o pedido não volta por causa disso.
-            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco.length); continue; }
+            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco); continue; }
             if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
+                // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02).
+                if (decididoNaOutraAba(p)) continue;
                 const r1 = await mandar(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
                 if (epoca !== epocaDaSessao) {
                     sessaoTrocou = true;
@@ -22792,6 +23454,9 @@ async function handleBatchMarkRead() {
                     break;
                 }
                 if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) {
+                    // O "já tratado" de um pedido que a outra aba decidiu enquanto
+                    // ele ia é a decisão de lá, já contada lá (R11-2-02).
+                    if (!r1.success && decididoNaOutraAba(p)) { pousouPorOutraAba(p, 'read'); continue; }
                     registrarPouso(p);
                     // O "já tratado" de um pedido cuja aprovação desta pessoa
                     // pousou sem resposta é a aprovação DELA (R8-2-01): o
@@ -22799,7 +23464,7 @@ async function handleBatchMarkRead() {
                     // o placar dele nem subiu (`desfechoDaAprovacaoDela` sem
                     // `contado`). Na hora, como o lido (R10-2-03).
                     if (!r1.success && aprovacaoDelaJaPousou(p)) { aprovadas.push(p); desfechoDaAprovacaoDela('read', p, false); }
-                    else { feitos.push(p); contarLidos(1); }
+                    else { feitos.push(p); contarLidos([p]); }
                 }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; break; }
                 else { falhou = r1 || {}; break; }
@@ -22817,6 +23482,31 @@ async function handleBatchMarkRead() {
         updateInFlightIndicator();
         aplicarTravaDeAcao();
     }
+    // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que de
+    // fato SAIU — nunca por quantos o lote marcou. É isso que amarra o desconto
+    // à fila do gesto: o ↻ e a troca de filtro no meio do lote refazem a fila
+    // (`fetchEpoch`), e a nova já vem sem estes pedidos (eles estavam em
+    // andamento), então nada sai dela e nada é descontado — antes o "Restam" da
+    // fila nova descia pelos pedidos da velha. E uma aprovação de foto que pousou
+    // no meio já tirou o pedido dela e descontou sozinha. O que já desceu pedaço
+    // a pedaço (`descontados`, R11-2-05) não desce de novo. `saiuDaFila`: a fila
+    // mudou por baixo do card que fica (R11-2-04, lá embaixo).
+    let saiuDaFila = 0;
+    const tirarDaFilaNoFim = (ps) => {
+        const fora = new Set(ps.map(chaveDoPedido));
+        const saem = AppState.queue.filter((p) => fora.has(chaveDoPedido(p)));
+        if (!saem.length) return;
+        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - saem.filter((p) => !descontados.has(chaveDoPedido(p))).length);
+        saiuDaFila += saem.length;
+    };
+    // O que a OUTRA aba decidiu enquanto estava em andamento aqui (R11-2-02): o
+    // que o lote deixou de fora, o que ele nem alcançou (parou numa falha) e o
+    // "já tratado" de lá. Sai da fila, menos o card da TELA, que fica — trocar o
+    // card debaixo do dedo é pior que um gesto a mais, e o gesto nele diz por quê
+    // (`gestoNoDecididoPorOutraAba`): a régua do aviso da outra aba.
+    const daOutraAba = alvos.filter(decididoNaOutraAba);
+    const daOutraAbaForaDaTela = () => daOutraAba.filter((p) => p !== AppState.currentPlace);
     // A sessão TROCOU no meio do lote: nada MAIS grava — placar, Histórico,
     // avisos —, porque a resposta é da sessão que acabou (ver `epocaDaSessao`); o
     // que pousou ANTES da queda já contou na hora, na sessão dele (R10-2-03). Mas na
@@ -22841,33 +23531,25 @@ async function handleBatchMarkRead() {
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
         // devolvê-los como card.
         if (posQueda.length) registrarPouso(posQueda);
-        const fora = new Set([...feitos, ...aprovadas, ...posQueda].map(chaveDoPedido));
-        const antes = AppState.queue.length;
-        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
-        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
-        naoSaiuNaQueda = alvos.some((p) => !fora.has(chaveDoPedido(p)));
+        tirarDaFilaNoFim([...feitos, ...aprovadas, ...posQueda, ...daOutraAbaForaDaTela()]);
+        // O que a outra aba decidiu não é "o que não saiu": está decidido.
+        const resolvidos = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba].map(chaveDoPedido));
+        naoSaiuNaQueda = alvos.some((p) => !resolvidos.has(chaveDoPedido(p)));
         // Daqui pra baixo, só a TELA: nada a contar.
         feitos.length = 0;
         aprovadas.length = 0;
+        daOutraAba.length = 0;
         falhou = null;
     }
-    if (feitos.length || aprovadas.length) {
+    if (feitos.length || aprovadas.length || daOutraAba.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
         // conquistas. Antes o lote subia só o placar, e o Histórico, o Resumo do
         // mês e a patente discordavam dele. O pouso E a conta já foram feitos a
         // cada pedaço, lá no laço (O4, R10-2-03): aqui fica a fila e o aviso.
+        // O que a outra aba decidiu também é trabalho dela nesta fila, como no
+        // gesto (`gestoNoDecididoPorOutraAba`), e não entra no aviso.
         tratouNestaFila = true;
-        // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
-        // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
-        // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote
-        // refazem a fila (`fetchEpoch`), e a nova já vem sem estes pedidos (eles
-        // estavam em andamento), então nada sai dela e nada é descontado — antes
-        // o "Restam" da fila nova descia pelos pedidos da velha. E uma aprovação
-        // de foto que pousou no meio já tirou o pedido dela e descontou sozinha.
-        const fora = new Set([...feitos, ...aprovadas].map(chaveDoPedido));
-        const antes = AppState.queue.length;
-        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
-        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
+        tirarDaFilaNoFim([...feitos, ...aprovadas, ...daOutraAbaForaDaTela()]);
         updateStats();
         saveStats();
         if (feitos.length) showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
@@ -22886,8 +23568,9 @@ async function handleBatchMarkRead() {
     // filtro) ele não entrou — estava em andamento —, e ninguém o trazia: a fila
     // terminava em "Tudo limpo! … Confira o país" com os pedidos pendentes
     // (auditoria de 2026-09-29, V9). Volta pela busca (`devolverPedidoRecusado`),
-    // que sai na hora se a tela ficou sem card. O que a aprovação resolveu não volta.
-    const marcados = new Set([...feitos, ...aprovadas]);
+    // que sai na hora se a tela ficou sem card. O que a aprovação resolveu não
+    // volta, e o que a outra aba decidiu (R11-2-02) também não.
+    const marcados = new Set([...feitos, ...aprovadas, ...daOutraAba]);
     const naoMarcados = epocaFila !== AppState.fetchEpoch ? alvos.filter((p) => !marcados.has(p)) : [];
     // A fila na tela: o card da frente pode ter saído no lote.
     if (AppState.currentPlace && !AppState.queue.includes(AppState.currentPlace)) {
@@ -22901,6 +23584,15 @@ async function handleBatchMarkRead() {
         else if (AppState.hasMore) startFetching();
         else showNoPlaces();
     }
+    // O card da frente FICOU — já lido (R10-2-04), decidido na outra aba ou em
+    // andamento, que o lote deixa de fora — e a fila mudou por baixo dele: o
+    // card de FUNDO seguia mostrando um pedido que acabou de sair da fila, e o
+    // "Ver +N" e a barra do foco no autor contavam os que saíram (MEDIDO no
+    // navegador: fila u1–u5 do mesmo autor, u1 já lido — depois do lote, fila
+    // [u1], "Restam 1", o fundo ainda u2 e "Ver +4"; tocado, a barra "1 de 1";
+    // auditoria de 2026-10-07, R11-2-04). Quem acerta os três é o
+    // `aoMudarAFilaPorBaixo`, o mesmo da página que chega e da recusa automática.
+    else if (saiuDaFila) aoMudarAFilaPorBaixo();
     updatePendingCount();
 }
 
@@ -23257,6 +23949,28 @@ function removeUndoBanner() {
     }
 }
 
+// As decisões da fila de saída que a OUTRA aba está MANDANDO agora (a marca dela
+// no item, `reivindicadoPorOutraAba`): pro indicador desta aba elas são
+// "enviando", como as daqui. E a marca VENCE sozinha (`SAIDA_REIVINDICACAO_MS`:
+// a outra aba pode ter morrido com o envio no ar), sem nada que redesenhe o
+// indicador: um temporizador LOCAL no prazo da primeira que vence o redesenha —
+// sem rede, uma vez por prazo, e sai quando o indicador é redesenhado de novo.
+let indicadorMarcaVence = null;
+function saindoPelaOutraAba(fila) {
+    let n = 0, vence = Infinity;
+    for (const x of fila) {
+        if (!x || pedidosEmAndamento.has(chaveDoPedido(x)) || !reivindicadoPorOutraAba(x)) continue;
+        n++;
+        vence = Math.min(vence, (Number(x.rvEm) || 0) + SAIDA_REIVINDICACAO_MS);
+    }
+    clearTimeout(indicadorMarcaVence);
+    indicadorMarcaVence = null;
+    // A folga: o redesenho cai DEPOIS do prazo, e a marca já lê como vencida.
+    if (n) indicadorMarcaVence = setTimeout(() => { indicadorMarcaVence = null; updateInFlightIndicator(); },
+        Math.max(0, vence - Date.now()) + 50);
+    return n;
+}
+
 // UM indicador para os dois estados, e não dois: eles disputam o mesmo canto e
 // nunca dizem coisas independentes — "enviando" é o que está saindo AGORA,
 // "esperando" é o que ficou pra depois. Enviando ganha, porque é o estado que
@@ -23269,6 +23983,13 @@ function updateInFlightIndicator() {
     const eraLeitura = !!el && /(^|\s)nao-cobrir(\s|$)/.test(el.className);
     const fila = AppState.authenticated ? carregarFilaDeSaida() : [];
     const esperando = fila.length;
+    // O que a OUTRA aba está mandando é "enviando" aqui também (R11-4-03): dizia
+    // "1 esperando envio", com o relógio que quer dizer "parado esperando rede" —
+    // e, desde o R10-4-05, sem a marca de número a não cobrir, então no
+    // computador o FAB ficava por cima dele, cobrindo-o inteiro (auditoria da
+    // rodada 11, MEDIDO nos dois motores). O texto e a régua do FAB passam a
+    // dizer a mesma coisa: alguém está mandando.
+    const pelaOutraAba = saindoPelaOutraAba(fila);
     if (AppState.inFlightActions <= 0 && esperando <= 0) {
         // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
         // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
@@ -23292,13 +24013,14 @@ function updateInFlightIndicator() {
         el.style.top = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
         document.body.appendChild(el);
     }
-    // Girando só quando está MESMO saindo. "Esperando" com giro seria o app
-    // fingindo trabalho que não está acontecendo — e é justamente o estado em
-    // que não há rede pra trabalhar.
-    const enviando = AppState.inFlightActions > 0;
-    const n = enviando ? AppState.inFlightActions : esperando;
+    // Girando só quando está MESMO saindo — por esta aba ou pela outra (a marca
+    // dela). "Esperando" com giro seria o app fingindo trabalho que não está
+    // acontecendo — e é justamente o estado em que não há rede pra trabalhar.
+    const saindo = Math.max(0, AppState.inFlightActions) + pelaOutraAba;
+    const enviando = saindo > 0;
+    const n = enviando ? saindo : esperando;
     const texto = enviando
-        ? t('indicator.sending', { n: AppState.inFlightActions })
+        ? t('indicator.sending', { n: saindo })
         : t('indicator.waiting', { n: esperando });
 
     // ÍCONE + NÚMERO, sem pílula (decisão do owner, 2026-09-21, olhando mockups
@@ -23986,7 +24708,14 @@ function setupAlturaDoHeader() {
     const medir = () => {
         document.documentElement.style.setProperty('--header-h', header.getBoundingClientRect().height + 'px');
     };
-    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header);
+    // A caixa de BORDA, não a de conteúdo (a padrão): a margem de segurança do
+    // iPhone entra no cabeçalho como PADDING, e o padding que muda sem mudar o
+    // conteúdo não dispara o observador da caixa de conteúdo. MEDIDO na emulação
+    // (auditoria da rodada 11, R11-4-06): a margem que chega depois do resize
+    // deixava o `--header-h` em 69 px com o cabeçalho em 116, e o "N esperando
+    // envio" ia pra baixo dele. A caixa de borda inclui o padding; navegador sem
+    // a opção a ignora e segue com a de conteúdo, como antes.
+    if (typeof ResizeObserver === 'function') new ResizeObserver(medir).observe(header, { box: 'border-box' });
     window.addEventListener('resize', medir);
     medir();
 }
@@ -24691,12 +25420,20 @@ function renderPularGuardaPref() {
 // Escreve o ATRIBUTO e deixa o applyI18n traduzir, em vez de cravar o texto:
 // assim trocar de idioma com o card na tela reescreve o selo certo (o card vive
 // no documento, então o applyI18n global o alcança).
-function atualizarSeloDePular(card) {
+function atualizarSeloDePular(card, place) {
     const alvo = card || cardDaFrente();
     const el = alvo && alvo.querySelector('.swipe-stamp-up span[data-i18n]');
     if (!el) return;
-    el.setAttribute('data-i18n', AppState.preferences.pularGuarda === true
-        ? 'card.stamp.skipGuarda' : 'card.stamp.skip');
+    // O selo promete a ⭐ só onde o ↑ a MANDA: a régua do `handleSkip`, que é a do
+    // treino (`Treino.pularGuardaria`) — o "Pular guarda o pedido" ligado e o pedido
+    // sem a estrela, nem a do card (`isStarred`, R9-7-06) nem a que o app já deu
+    // (`estreladoPeloApp`, R10-2-05). Dizia "Pular ⭐" num pedido já estrelado,
+    // onde o ↑ não manda nada (o que o app MOSTRA e o que ele FAZ; lote 15). O
+    // `montarCard` passa o pedido (o card ainda não foi registrado); os outros
+    // chamadores falam do card da frente. Sem pedido conhecido, só a preferência.
+    const p = place || pedidoDoCard(alvo);
+    const guarda = AppState.preferences.pularGuarda === true && (!p || Treino.pularGuardaria(p));
+    el.setAttribute('data-i18n', guarda ? 'card.stamp.skipGuarda' : 'card.stamp.skip');
     if (typeof applyI18n === 'function') applyI18n(alvo);
 }
 

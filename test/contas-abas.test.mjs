@@ -1395,7 +1395,9 @@ function montarResgate({ dialogoNaTela = true } = {}) {
     resgateEmVoo: false,
     API: { resgatarPareamento: (c) => { pedidos.push(c); return new Promise((ok) => { soltar = ok; }); } },
     document: { getElementById: (id) => (id === 'pairEnterModal'
-      ? { classList: { contains: (c) => (c === 'hidden' ? !dialogoNaTela : false) } } : null) },
+      ? { classList: { contains: (c) => (c === 'hidden' ? !dialogoNaTela : false) }, contains: () => false } : null) },
+    // O foco e os diálogos da tela de entrada (R11-1-04) não são o assunto daqui.
+    focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada: () => {},
   };
   const h = montar(['resgatarPareamento'], deps);
   return { h, pedidos, soltar: (r) => soltar(r), deps };
@@ -2399,7 +2401,9 @@ function extensaoNaEntrada(tela) {
   const log = [];
   const deps = {
     window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {},
-    API: { setSession: (tok) => log.push('sessão ' + tok) },
+    // A aba da tela de entrada: nenhuma sessão na memória, nenhum login no ar (R11-1-03).
+    API: { setSession: (tok) => log.push('sessão ' + tok), temSessaoNaMemoria: () => false, sessionToken: null },
+    authInFlight: false, resgateEmVoo: false,
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
     extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
     setTimeout: () => 1, clearTimeout: () => {},
@@ -2434,4 +2438,461 @@ test('R10-1-05: a extensão que ENTRA com o foco na tela de entrada o promete ao
     const leu = corpo.indexOf('const focoNaEntrada = focoNaTelaDeEntrada();');
     assert.ok(leu >= 0 && leu < corpo.indexOf('fecharModaisDaEntrada('), `${nome}: o foco é lido depois de fechar os diálogos da entrada`);
   }
+});
+
+// ═══ R11-1 · a rodada 11: a conta, as abas e o login DESTA aba ════════════════
+// Cada teste foi visto REPROVANDO com o conserto desfeito (as sabotagens estão no
+// relatório do lote 15).
+
+// ── R11-1-01 · a troca que OUTRA aba já fez: esta solta a MEMÓRIA da anterior ──
+// A aba A caiu na tela de entrada com a memória de X (a queda a mantém, pra MESMA
+// conta voltar); na B entrou Y, e a troca de conta foi feita LÁ — o aparelho já
+// diz Y. Voltando à A, ela adota a sessão de Y (R10-1-03), e o `aoConhecerConta`
+// comparava só com o aparelho: a troca nunca rodava aqui. Sobravam o anel de
+// chamadas e as capturas de X (no relatório de Y), o rascunho de X na conversa,
+// os códigos de pareamento dele e o "invisível" pendente de X, que saía em nome
+// de Y (auditoria da rodada 11, R11-1-01, MEDIDO). A conta que ESTA aba confirmou
+// por último (`contaConfirmadaNestaAba`) diz que a conta mudou.
+function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242', token = 'tok-y' } = {}) {
+  const guardado = { [TOKEN]: token };
+  if (aparelhoDiz) guardado[CONTA_KEY] = { id: aparelhoDiz, s: marcaDe(token) };
+  const ap = aparelho(guardado);
+  const log = [];
+  const AppState = {
+    authenticated: true, profile: { id: 5151 },
+    // O placar e o Histórico desta aba são CÓPIAS do aparelho: a outra aba os
+    // zerou na troca, e o aviso `storage` os trouxe pra cá (Y já triou 3 lá).
+    stats: { read: 2, rejected: 1, skipped: 0 }, history: { _total: { read: 2 } }, conquistas: { c: {} }, autores: { r: {} },
+    // O filtro é da ABA: a área gerenciada de X segue nele.
+    filters: { managedAreaId: '91', myArea: false },
+    preferences: { presenca: false, presencaWmeDesligar: { conta: '4242', em: 1 } },
+    queue: [], fetching: false,
+  };
+  // O "invisível" que X pediu com o Waze fora: pendente na memória desta aba.
+  const presencaWme = { desligarPendente: true, desligarEm: 1, desligarSessao: 'x', ligarNaProxima: false };
+  const API = {
+    sessionToken: token,
+    // O anel: as chamadas de X (a sessão que caiu nesta aba) e a abertura de Y.
+    chamadas: [{ rota: 'perfil', s: marcaDe('tok-a') }, { rota: 'chat', s: marcaDe('tok-a') }, { rota: 'perfil', s: marcaDe(token) }],
+    getSession() { return this.sessionToken; },
+    cancelarPareamento: (c) => { log.push('cancelou ' + c); return Promise.resolve(); },
+  };
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API, presencaWme, CONTA_KEY,
+    SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
+    ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
+    contaConfirmadaNestaAba: estaAbaConfirmou ? { id: estaAbaConfirmou, s: marcaDe('tok-a') } : null,
+    saidaEsperandoConta: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    // Um "Conectar outro aparelho" que X abriu: o código vale uma sessão DELE por 5 min.
+    pareamentosEmitidos: new Set(['PRV234']), placeResolvidoPorAprovacao: null,
+    referenciasDoPerfil: { casa: [1, 2] }, posicaoGps: { ll: [1, 2] }, Treino: { ativo: false },
+    dfato: (k, d) => log.push(['dfato', k, d || null]),
+    window: { Presenca: { esquecer: (o) => log.push(['conversa', o || null]) } },
+    dlogApagar: (o) => log.push(['capturas', o || null]),
+    offlineEsquecer: (o) => log.push(['offline', o || null]),
+    esquecerAutores: () => { log.push('autores do aparelho'); ap.safeLS.remove('waze_places_autores'); },
+    esquecerFocoAutor: () => log.push('foco no autor'),
+    esquecerEscolhasDaContaAnterior: () => { log.push('escolhas'); ap.safeLS.set(PREFERENCES_KEY, '{}'); },
+    saveStats: () => ap.safeLS.set(STATS_KEY, JSON.stringify(AppState.stats)),
+    saveFilters: () => ap.safeLS.set('waze_places_filters', JSON.stringify(AppState.filters)),
+    esquecerRegistrosDaPagina: (fica) => log.push(['recursos', fica]),
+    esquecerListasDePaises: () => log.push('paises'),
+    semCamadaAberta: () => true, topOpenModal: () => null, fecharCamadasAbertas: () => log.push('camadas'),
+    showToast: (m) => log.push('toast ' + m), t: (k) => k,
+    resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+    // O que só desenha.
+    atualizarSeloDeConquista: () => {}, esvaziarPainelDoHistorico: () => {}, updateStats: () => {},
+    updateInFlightIndicator: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['aoConhecerConta', 'esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'carimbarContaNaSaida',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao',
+    'presencaWmeZerar', 'marcaDaSessao'], deps);
+  return { h, ap, log, AppState, API, presencaWme, deps };
+}
+const TROCOU = (soMemoria) => ['dfato', 'conta.trocou', soMemoria ? { soMemoria: true } : null];
+
+test('R11-1-01: a aba que adota (ou entra com) a conta que OUTRA aba já pôs no aparelho solta a MEMÓRIA da anterior — sem tocar no aparelho', () => {
+  const m = montarTrocaNaMemoria();
+  m.h.aoConhecerConta({ id: 5151 });                 // o perfil de Y chega na aba que adotou
+  assert.ok(m.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(true))),
+    'DEFEITO: a troca de conta não aconteceu nesta aba — o aparelho já dizia Y, e a memória de X ficou: ' + JSON.stringify(m.log));
+  // O que a MEMÓRIA desta aba guardava de X sai.
+  assert.equal(m.presencaWme.desligarPendente, false, 'o "invisível" pendente de X ficou — sairia em nome de Y, sem o gesto de Y');
+  assert.equal(m.AppState.preferences.presencaWmeDesligar, undefined, 'o "invisível" de X ficou na cópia das preferências desta aba');
+  assert.deepEqual(m.API.chamadas.map((c) => c.s === marcaDe('tok-y') ? 'Y' : 'X'), ['Y'],
+    'o anel de chamadas ficou com as de X (iriam no relatório do modo dev de Y)');
+  for (const o of [['conversa', { soMemoria: true }], ['capturas', { soMemoria: true }], ['offline', { soMemoria: true }]]) {
+    assert.ok(m.log.some((x) => JSON.stringify(x) === JSON.stringify(o)), `a troca não soltou a memória de: ${o[0]} — ${JSON.stringify(m.log)}`);
+  }
+  assert.ok(m.log.includes('cancelou PRV234'), 'o código de pareamento que X emitiu seguiu valendo (uma sessão de X por 5 min)');
+  assert.ok(m.log.includes('foco no autor'));
+  assert.equal(m.AppState.filters.managedAreaId, '', 'a área gerenciada de X ficou no filtro desta aba');
+  assert.equal(m.deps.posicaoGps, null);
+  // E NADA no aparelho: ele já é de Y (a outra aba fez a troca lá). A única
+  // escrita é a marca da sessão que o `aoConhecerConta` sempre grava.
+  assert.deepEqual(m.ap.escritas, ['grava:' + CONTA_KEY],
+    'a troca só da memória mexeu no aparelho, que é de Y: ' + JSON.stringify(m.ap.escritas));
+  assert.deepEqual(m.AppState.stats, { read: 2, rejected: 1, skipped: 0 },
+    'o placar desta aba (a cópia do aparelho: o que Y fez na outra) foi zerado');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('toast ')), 'o aviso da troca saiu de novo (já saiu onde ela aconteceu)');
+  assert.equal(m.deps.contaConfirmadaNestaAba.id, '5151', 'a conta desta aba não passou a ser Y');
+  // Sem aparelho com conta nenhuma (a outra aba deu "Sair"), e quem entra AQUI é
+  // outra conta (os cookies de Z colados): a memória de X sai do mesmo jeito.
+  const s = montarTrocaNaMemoria({ aparelhoDiz: null });
+  s.h.aoConhecerConta({ id: 5151 });
+  assert.ok(s.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(true))), 'depois do "Sair" da outra aba, a memória de X ficou pra quem entrou aqui');
+});
+
+test('R11-1-01: CONTROLES — a MESMA conta voltando fica com o que é dela; a troca no PRÓPRIO aparelho segue inteira; a aba sem conta confirmada não troca nada', () => {
+  // A mesma conta (a outra aba entrou de novo como X): nada sai — o rascunho, o
+  // pendente e o anel são dela.
+  const mesma = montarTrocaNaMemoria({ aparelhoDiz: '4242', estaAbaConfirmou: '4242' });
+  mesma.h.aoConhecerConta({ id: 4242 });
+  assert.ok(!mesma.log.some((x) => Array.isArray(x) && x[1] === 'conta.trocou'), 'a MESMA conta foi tratada como troca');
+  assert.equal(mesma.presencaWme.desligarPendente, true);
+  assert.equal(mesma.API.chamadas.length, 3);
+  // O aparelho ainda de X (uma aba só, a queda e outra conta entrando AQUI): a
+  // troca inteira, como sempre — o aparelho sai, o placar zera e o aviso sai.
+  const inteira = montarTrocaNaMemoria({ aparelhoDiz: '4242' });
+  inteira.h.aoConhecerConta({ id: 5151 });
+  assert.ok(inteira.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(false))), 'a troca no próprio aparelho deixou de acontecer');
+  assert.ok(inteira.log.includes('toast toast.outraConta'));
+  assert.ok(inteira.ap.escritas.includes('apaga:' + constante('HISTORY_KEY')), 'a troca inteira não apagou o Histórico do aparelho');
+  assert.deepEqual(inteira.AppState.stats, { read: 0, rejected: 0, skipped: 0 });
+  assert.ok(inteira.log.some((x) => JSON.stringify(x) === JSON.stringify(['conversa', null])), 'a troca inteira não apagou a conversa do aparelho');
+  // A aba que nunca confirmou conta (aberta agora, ou depois do "Sair" daqui): nada a trocar.
+  const nova = montarTrocaNaMemoria({ estaAbaConfirmou: null });
+  nova.h.aoConhecerConta({ id: 5151 });
+  assert.ok(!nova.log.some((x) => Array.isArray(x) && x[1] === 'conta.trocou'), 'a aba sem conta confirmada fez uma troca que não houve');
+});
+
+test('R11-1-01: o "Sair" esquece a conta que esta aba confirmou — e a QUEDA a mantém (é ela que diz, na volta, que a conta mudou)', async () => {
+  for (const porOutraAba of [false, true]) {
+    const m = montarSair();
+    m.deps.contaConfirmadaNestaAba = { id: '111', s: 'x' };
+    if (porOutraAba) m.deps.tokenTiradoPorOutraAba = 'tok-A';
+    await m.h.handleLogout(porOutraAba ? { porOutraAba: true } : undefined);
+    assert.equal(m.deps.contaConfirmadaNestaAba, null,
+      `DEFEITO (${porOutraAba ? 'o "Sair" da outra aba' : 'o "Sair"'}): a conta de quem saiu ficou como a desta aba — quem entrar depois "troca" de uma conta que já saiu`);
+  }
+  assert.doesNotMatch(fatiarDe(APP_SEM, 'derrubarSessao'), /contaConfirmadaNestaAba\s*=/,
+    'a queda esquece a conta confirmada: a troca na volta à aba (R11-1-01) ficaria cega');
+});
+
+// ── R11-1-02 · o "invisível" pendente não adota a sessão da outra aba ──────────
+// Com o "invisível" pendente que atravessou a queda, QUALQUER resposta da API na
+// aba da tela de entrada (um código errado, um cookies.txt recusado) rodava o
+// `presencaWmeRefazerDesligar`, que lia a sessão pelo `getSession` — e o
+// `getSession`, com a memória vazia, GRAVA nela a que outra aba guardou: a aba
+// adotava calada, a volta à aba não adotava mais, e o "Sair" da outra fechava o
+// "Colar cookies" daqui (auditoria da rodada 11, R11-1-02, MEDIDO). O `api.js`
+// aqui é o DE VERDADE (é nele que mora o efeito).
+const T_R11 = 1791000000000;
+function abaComInvisivelPendente({ autenticada = false, perfil = null, memoria = null } = {}) {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-y', [CONTA_KEY]: JSON.stringify({ id: '5151', s: marcaDe('tok-y') }),
+    [PREFERENCES_KEY]: JSON.stringify({ presenca: false }) });
+  if (memoria) real.API.sessionToken = memoria;     // a sessão DESTA aba (só a memória)
+  const enviados = [];
+  real.API.presencaWaze = async (c) => { enviados.push(c); return { success: true }; };
+  const escritas = [];
+  const localStorage = {
+    getItem: (k) => (real.dados.has(k) ? real.dados.get(k) : null),
+    setItem: (k, v) => { escritas.push(k); real.dados.set(k, String(v)); },
+    removeItem: (k) => { escritas.push('-' + k); real.dados.delete(k); },
+  };
+  const AppState = { authenticated: autenticada, profile: perfil, preferences: { presenca: false } };
+  // O pendente de X, de mais de um minuto atrás (o teto da repetição já passou).
+  const presencaWme = { desligarPendente: true, desligarEm: T_R11 - 120000, desligarSessao: marcaDe('tok-a'),
+    desligarVez: 1, desligarNoAr: 0, ligarNaProxima: false };
+  const deps = {
+    API: real.API, safeLS: { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) },
+    localStorage, AppState, presencaWme, CONTA_KEY, PREFERENCES_KEY,
+    PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+    preferenciasCarregadas: true, Date: { now: () => T_R11 }, dfato: () => {},
+    ABA_DESTA_PAGINA: 'aba-a', presencaWmeConferirAbaDoCarimbo: () => {},
+    sessaoVivaDepoisDe: () => false, handleUnauthorized: () => {},
+  };
+  const h = montar(['presencaWmeRefazerDesligar', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
+    'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'savePreferences', 'marcaDaSessao'], deps);
+  return { h, real, enviados, escritas, presencaWme };
+}
+
+test('R11-1-02: a resposta que chega à aba da TELA DE ENTRADA não adota a sessão da outra aba pelo "invisível" pendente — nem o grava com a conta de lá', async () => {
+  const m = abaComInvisivelPendente();
+  m.h.presencaWmeRefazerDesligar();                  // a prova de rede: um código errado respondeu
+  await tiqueAba();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false,
+    'DEFEITO: a aba da tela de entrada ADOTOU calada a sessão da outra aba (a volta à aba não adota mais, e o "Sair" de lá fecha o "Colar" daqui)');
+  assert.deepEqual(m.enviados, [], 'a aba sem sessão mandou o "invisível"');
+  assert.deepEqual(m.escritas, [],
+    'o pendente de X foi GRAVADO no aparelho com a conta de quem entrou na outra aba (ela o mandaria): ' + JSON.stringify(m.escritas));
+  assert.equal(m.presencaWme.desligarPendente, true, 'o pendente sumiu sem a troca de conta decidir');
+  // CONTROLE: a mesma aba LOGADA como X, com o perfil — a medida enxerga o envio.
+  const c = abaComInvisivelPendente({ autenticada: true, perfil: { id: 4242 }, memoria: 'tok-a' });
+  c.h.presencaWmeRefazerDesligar();
+  await tiqueAba();
+  assert.deepEqual(c.enviados, [{ userId: '4242', visivel: false }], 'CONTROLE: a medida não enxerga o envio');
+});
+
+test('R11-1-02: a sessão que ADOTOU (ou entrou) antes de o perfil dizer de quem é não manda nem grava o "invisível" de quem estava', async () => {
+  // A adoção da volta à aba (ou a extensão) com a busca respondendo antes do
+  // perfil: logada, a sessão de Y na memória, e o perfil ainda a caminho. A
+  // repetição gravava o pendente de X com a conta do aparelho — a de Y — e a
+  // aba de Y o mandava (MEDIDO no navegador: `presenca-waze` com o id de Y).
+  const m = abaComInvisivelPendente({ autenticada: true, memoria: 'tok-y' });
+  m.h.presencaWmeRefazerDesligar();
+  await tiqueAba();
+  assert.deepEqual(m.escritas, [],
+    'DEFEITO: o "invisível" de X foi gravado no aparelho com a conta de Y antes de o perfil dizer de quem é a sessão: ' + JSON.stringify(m.escritas));
+  assert.deepEqual(m.enviados, []);
+  assert.equal(m.presencaWme.desligarPendente, true, 'o pendente sumiu sem a troca de conta decidir');
+});
+
+test('R11-1-02: o desligar sem sessão NESTA aba fica pendente sem ler o aparelho pelo `getSession` — e com ela, sai', async () => {
+  const m = abaComInvisivelPendente();
+  m.h.presencaWmeDesligar();
+  await tiqueAba();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false, 'DEFEITO: o desligar sem sessão nesta aba adotou a sessão da outra');
+  assert.deepEqual(m.enviados, []);
+  assert.equal(m.presencaWme.desligarPendente, true, 'o desligar sem sessão foi descartado (R5-5-8)');
+  // CONTROLE: com a sessão desta aba e o perfil, o gesto sai.
+  const c = abaComInvisivelPendente({ autenticada: true, perfil: { id: 4242 }, memoria: 'tok-a' });
+  c.h.presencaWmeDesligar();
+  await tiqueAba();
+  assert.deepEqual(c.enviados, [{ userId: '4242', visivel: false }]);
+});
+
+// ── R11-1-03 · a pergunta à extensão da VOLTA e o login DESTA aba ──────────────
+// A adoção da volta espera o login desta aba (`authInFlight`, `resgateEmVoo`), e a
+// pergunta à extensão logo abaixo não: duas sessões criadas (o "Sair" apaga uma, a
+// outra fica órfã por até 21 dias), e a resposta que chegava DEPOIS do login o
+// TROCAVA — com outra conta no WME, a que a pessoa escolheu ia embora (auditoria
+// da rodada 11, R11-1-03, MEDIDO).
+test('R11-1-03: a volta à aba com um login DESTA aba no ar não pergunta à extensão — o fim dele decide', () => {
+  for (const noAr of ['authInFlight', 'resgateEmVoo']) {
+    const m = abaDaEntrada();
+    m.deps[noAr] = true;
+    m.h.aoVoltarAAba();
+    assert.deepEqual(m.log, [], `DEFEITO (${noAr}): a volta perguntou à extensão com o login desta aba no ar — duas sessões no servidor`);
+  }
+  // CONTROLE: sem login no ar, a volta pergunta (o ouvinte enxerga a tela de entrada).
+  const c = abaDaEntrada();
+  c.h.aoVoltarAAba();
+  assert.deepEqual(c.log, ['perguntou à extensão (em silêncio)']);
+});
+
+// A extensão que responde à pergunta da VOLTA, com o login desta aba no meio.
+function extensaoNaVolta({ memoria = null, noAr = null, tokenGuardado = null } = {}) {
+  const t = telaDeEntrada({});
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  const log = [];
+  const API = {
+    sessionToken: memoria,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(tok) { log.push('sessão ' + tok); this.sessionToken = tok; },
+    destroySession: (tok) => { log.push('apagou ' + tok); return Promise.resolve({ success: true }); },
+  };
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, API,
+    safeLS: { get: (k) => (k === TOKEN ? tokenGuardado : null) },
+    authInFlight: noAr === 'cookies', resgateEmVoo: noAr === 'codigo', callWithRetry: (fn) => fn(),
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id) => t.fechar(id),
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); },
+    resetQueue: () => {}, loadProfileAndAuxData: () => Promise.resolve(), conhecerContaDoLogin: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, responder, log, API };
+}
+
+test('R11-1-03: a resposta da extensão à VOLTA não troca o login que esta aba fez (ou faz) nesse meio — e a sessão dela sai do servidor', async () => {
+  for (const [caso, o] of [['os cookies colados entraram', { memoria: 'tok-c' }],
+    ['os cookies sendo conferidos', { noAr: 'cookies' }], ['o código sendo resgatado', { noAr: 'codigo' }]]) {
+    const m = extensaoNaVolta(o);
+    const p = m.h.entrarPelaExtensao({ silencioso: true });
+    m.responder({ action: 'sessao', token: 'tok-e', conta: '5151' });
+    assert.equal(await p, false, `DEFEITO (${caso}): a resposta da extensão entrou por cima do login desta aba`);
+    assert.ok(!m.log.includes('sessão tok-e') && !m.log.includes('app'),
+      `DEFEITO (${caso}): a sessão da extensão trocou a do login que a pessoa pediu: ` + JSON.stringify(m.log));
+    assert.ok(m.log.includes('apagou tok-e'), `(${caso}) a sessão da extensão ficou órfã no servidor, por até 21 dias`);
+    assert.equal(m.API.sessionToken, o.memoria || null, `(${caso}) a memória desta aba mudou`);
+  }
+  // A sessão da extensão já é a do aparelho (a ponte dá o desfecho de UM login a
+  // todas as abas que perguntam juntas, e outra a pôs lá): ela fica no servidor.
+  const outra = extensaoNaVolta({ memoria: 'tok-c', tokenGuardado: 'tok-e' });
+  const po = outra.h.entrarPelaExtensao({ silencioso: true });
+  outra.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await po, false);
+  assert.ok(!outra.log.includes('apagou tok-e'), 'a sessão que OUTRA aba está usando foi apagada do servidor');
+});
+
+test('R11-1-03: CONTROLES — sem login desta aba a extensão entra; a mesma sessão e a renovação da queda seguem como antes', async () => {
+  const m = extensaoNaVolta();
+  const p = m.h.entrarPelaExtensao({ silencioso: true });
+  m.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await p, true);
+  assert.deepEqual(m.log, ['sessão tok-e', 'app'], 'CONTROLE: a extensão deixou de entrar pela volta à aba');
+  // A memória já com a MESMA sessão que a extensão traz: não é outro login.
+  const mesma = extensaoNaVolta({ memoria: 'tok-e' });
+  const pm = mesma.h.entrarPelaExtensao({ silencioso: true });
+  mesma.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await pm, true);
+  // A renovação da QUEDA (`manterFila`) não é a volta: a regra não vale lá.
+  const queda = extensaoNaVolta({ noAr: 'cookies' });
+  const pq = queda.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  queda.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await pq, true, 'a renovação da queda passou a recusar a sessão da extensão');
+});
+
+// ── R11-1-04 · o login DESTA aba fecha os diálogos da entrada e leva o foco ao ✕ ──
+// O link de pareamento mostra a tela de entrada durante o resgate, e o login por
+// cookies não travava o "Entrar com um código": o diálogo aberto nesse meio — o
+// "Colar cookies" com o cookies.txt colado, o código digitado — ficava POR CIMA do
+// app quando o login dava certo, e confirmá-lo fazia um segundo login (a primeira
+// sessão ficava órfã). E o foco que estava na tela de entrada caía no <body>
+// (auditoria da rodada 11, R11-1-04, MEDIDO).
+function resgateNaEntrada(tela, { resposta = { success: true, sessionToken: 'tok-p', conta: '4242' } } = {}) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const deps = {
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, focoDoTeclado: null,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    API: { resgatarPareamento: async () => resposta },
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showToast: () => {}, t: (k) => k, msgDoServidor: (r, d) => d,
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); }, resetQueue: () => {}, conhecerContaDoLogin: () => {},
+    loadProfileAndAuxData: () => null, startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['resgatarPareamento', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, log, tela: t };
+}
+
+test('R11-1-04: o link de pareamento que DÁ CERTO fecha o "Colar cookies" aberto durante a espera — com a limpeza — e leva o foco ao ✕', async () => {
+  const m = resgateNaEntrada(COLANDO);
+  assert.equal(await m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true }), true);
+  assert.ok(m.log.includes('fechou pasteModal (o foco já tem destino)'),
+    'DEFEITO: o "Colar cookies", com o cookies.txt colado, ficou POR CIMA do app (e o "Confirmar" ali faria a 2ª sessão): ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, '', 'o cookies.txt colado (o chaveiro do navegador) ficou no campo');
+  assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o foco que estava no "Colar" caiu no <body> com a tela de entrada escondida');
+  // Só o foco no "Colar cookies" (o Tab, nenhum diálogo aberto): o mesmo destino.
+  const f = resgateNaEntrada({ foco: 'pasteBtn' });
+  await f.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+  assert.equal(f.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'DEFEITO: o foco no "Colar cookies" caiu no <body> (o Tab seguinte ia ao mapa do card)');
+  // CONTROLE: ninguém na tela de entrada (o foco no <body>): nada se move.
+  const c = resgateNaEntrada({});
+  await c.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+  assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido sem ninguém na tela de entrada');
+});
+
+test('R11-1-04: o "Entrar com um código" segue a regra do teclado — pelo mouse o foco nele não se move, pelo teclado vai ao ✕', async () => {
+  const CODIGO = { dialogo: 'pairEnterModal', texto: 'ABC-DEF', foco: 'pairCodeInput' };
+  const mouse = resgateNaEntrada(CODIGO);
+  assert.equal(await mouse.h.resgatarPareamento('ABCDEF'), true);
+  assert.ok(mouse.log.includes('fechou pairEnterModal'), 'o diálogo do código não fechou: ' + JSON.stringify(mouse.log));
+  assert.equal(mouse.deps.focoDoTeclado, null, 'o código pelo MOUSE prometeu o foco ao card (R7-1-04: o mouse não move o foco)');
+  const teclado = resgateNaEntrada(CODIGO);
+  await teclado.h.resgatarPareamento('ABCDEF', { peloTeclado: true });
+  assert.equal(teclado.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o código pelo teclado deixou de prometer o foco (R7-1-04)');
+  assert.ok(teclado.log.includes('fechou pairEnterModal (o foco já tem destino)'));
+});
+
+function loginNaEntrada(tela) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const deps = {
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, authInFlight: false, focoDoTeclado: null,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    API: { testCookies: async () => ({ success: true, sessionToken: 'tok-c', conta: '4242' }) },
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showToast: () => ({ dispensar() {} }), t: (k) => k, msgDoServidor: (r, d) => d, setAuthLoading: () => {},
+    guardarPrazoDaSessao: () => {}, showMainScreen: () => { log.push('app'); t.mostrarOApp(); }, resetQueue: () => {},
+    conhecerContaDoLogin: () => {}, loadProfileAndAuxData: () => null, startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['authenticateWithCookies', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, log, tela: t };
+}
+
+test('R11-1-04: o login por COOKIES que dá certo fecha o "Entrar com um código" aberto durante a validação — com o código — e leva o foco ao ✕', async () => {
+  const m = loginNaEntrada({ dialogo: 'pairEnterModal', texto: 'ABC-DEF', foco: 'pairCodeInput' });
+  await m.h.authenticateWithCookies('cookies');
+  assert.ok(m.log.includes('app'), 'PRÉ-CONDIÇÃO: o login não deu certo');
+  assert.ok(m.log.includes('fechou pairEnterModal (o foco já tem destino)'),
+    'DEFEITO: o diálogo do código ficou POR CIMA do app (o "Entrar" ali faria um segundo login): ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.pairCodeInput.value, '', 'o código digitado ficou no campo');
+  assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o foco que estava no diálogo caiu no <body>');
+  // CONTROLE: pelo mouse, sem nada aberto e o foco no <body> (o botão que travou o perdeu): nada se move.
+  const c = loginNaEntrada({});
+  await c.h.authenticateWithCookies('cookies');
+  assert.equal(c.deps.focoDoTeclado, null, 'o login pelo mouse prometeu o foco ao card (R7-1-04)');
+  assert.ok(!c.log.some((x) => x.startsWith('fechou ')));
+});
+
+test('R11-1-04: a validação dos cookies trava TAMBÉM o "Entrar com um código" — o diálogo dele não abre por baixo do login', () => {
+  const botoes = Object.fromEntries(['uploadBtn', 'pasteBtn', 'pairEnterBtn'].map((id) => [id, {
+    id, disabled: false, isConnected: true, classes: new Set(),
+    classList: { toggle(c, v) { if (v) botoes[id].classes.add(c); else botoes[id].classes.delete(c); } },
+  }]));
+  const doc = { body: { id: 'BODY' }, activeElement: null, getElementById: (id) => botoes[id] || null };
+  const h = montar(['setAuthLoading', 'focoPerdido'], { document: doc, focoNoBotaoDeEntrada: null, focavelNaTela: () => true });
+  h.setAuthLoading(true);
+  assert.equal(botoes.pairEnterBtn.disabled, true,
+    'DEFEITO: o "Entrar com um código" seguia aberto durante a validação — o diálogo dele ficava POR CIMA do app');
+  assert.ok(botoes.pairEnterBtn.classes.has('cursor-wait'), 'o "Entrar com um código" travado não mostra a espera, como os outros dois');
+  assert.ok(botoes.uploadBtn.disabled && botoes.pasteBtn.disabled, 'CONTROLE: os outros dois deixaram de travar');
+  h.setAuthLoading(false);
+  assert.ok(!botoes.pairEnterBtn.disabled && !botoes.pasteBtn.disabled && !botoes.uploadBtn.disabled, 'os botões não destravaram no fim');
+});
+
+// ── R11-6-02 (b) · a troca de conta que a ponte revela espera o perfil NOVO ──────
+// Com a extensão que repassa a conta (0.3.4), o `conhecerContaDoLogin` rodava
+// antes de existir a carga do perfil da sessão nova: a troca refazia a fila e
+// buscava JÁ (`esquecerOutraConta` → `startFetching`), e a busca de "Minha área"
+// esperava o perfil da sessão que caiu — já resolvido: "Falha ao carregar" por
+// ~1,5 s até o perfil novo chegar, ou, com a carga anterior há mais de um
+// minuto, o perfil carregado DUAS vezes (auditoria da rodada 11, R11-6-02, MEDIDO).
+test('R11-6-02: a troca de conta que a ponte da extensão revela acha o perfil da sessão NOVA no ar — uma carga só', async () => {
+  const t = telaDeEntrada({});
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const VELHA = Promise.resolve('o perfil da sessão que caiu');
+  const AppState = { _profilePromise: VELHA };
+  const cargas = [];
+  let aBuscaDaTrocaEsperou = null;
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState,
+    API: { setSession: () => {}, temSessaoNaMemoria: () => false, sessionToken: null },
+    authInFlight: false, resgateEmVoo: false, callWithRetry: (fn) => fn(), safeLS: { get: () => null },
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {}, closeModal: () => {}, showMainScreen: () => {}, resetQueue: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+    loadProfileAndAuxData: () => { const p = Promise.resolve('o perfil da sessão nova'); cargas.push(p); return p; },
+    // A conta da ponte é OUTRA: a troca refaz a fila e a busca sai JÁ — esperando o `_profilePromise` de agora.
+    conhecerContaDoLogin: (conta) => { if (conta === '222') aBuscaDaTrocaEsperou = AppState._profilePromise; },
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });   // a renovação da queda
+  for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', action: 'sessao', token: 'tokB', conta: '222' } });
+  assert.equal(await p, true, 'PRÉ-CONDIÇÃO: a renovação não entrou');
+  assert.equal(cargas.length, 1, `o perfil foi pedido ${cargas.length} vezes pela renovação`);
+  assert.notEqual(aBuscaDaTrocaEsperou, VELHA,
+    'DEFEITO: a troca de conta que a ponte revela buscou esperando o perfil da sessão que CAIU — "Falha ao carregar" até o novo chegar');
+  assert.equal(aBuscaDaTrocaEsperou, cargas[0], 'a troca não achou a carga do perfil da sessão nova');
 });

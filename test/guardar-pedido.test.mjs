@@ -421,6 +421,9 @@ test('o selo do ↑ muda com a preferência — e volta quando ela desliga', () 
       // O fallback do `atualizarSeloDePular` é o card da FRENTE, nunca um
       // `.place-card` qualquer — desde a pilha existem dois na tela.
       cardDaFrente: () => alvo,
+      // Sem pedido conhecido o selo decide só pela preferência (o pedido estrelado
+      // é o teste da junção do lote 15, em test/treino-auditoria-r11.test.mjs).
+      pedidoDoCard: () => null,
       applyI18n: () => {},
     };
     const nomes = Object.keys(escopo);

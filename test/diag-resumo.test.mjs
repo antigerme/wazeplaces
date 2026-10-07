@@ -359,7 +359,15 @@ test('diag-resumo v8: o CÓDIGO no aparelho — versões declaradas, arquivos di
   const s = rodar(relatorioV8());
   assert.match(s, /── CÓDIGO NO APARELHO ─+\napp 2026092402 · declarado nos arquivos: \/js\/min\/version\.js 2026092402 · \/service-worker\.js 2026092401/);
   assert.match(s, /nota: os arquivos declaram 2 versões diferentes/, 'a mistura de versões não foi notada');
-  assert.match(s, /3 arquivos conferidos com o servidor · diferentes: 1 · sem conferir: 1/);
+  assert.match(s, /3 arquivos · conferidos com o servidor: 2 · diferentes: 1 · sem conferir: 1/);
+  // O motivo do que ficou sem conferir (R11-4-05): este relatório foi feito sem
+  // rede (`online: false`), e a leitura do servidor nem saiu do aparelho.
+  assert.match(s, /  sem conferir: sem rede na hora do relatório \(Failed to fetch\) em 1 arquivo/);
+  // Com rede, a mesma falha é a leitura que falhou.
+  const comRede = relatorioV8();
+  comRede.resumo.rede = true;
+  comRede.ambiente = { ...(comRede.ambiente || {}), online: true };
+  assert.match(rodar(comRede), /  sem conferir: a leitura do servidor falhou \(Failed to fetch\) em 1 arquivo/);
   assert.match(s, /DIFERENTE: \/js\/min\/app\.js \(aparelho 70000 bytes · servidor 70100 bytes\)/);
   assert.match(s, /ATENÇÃO: o aparelho roda código diferente do servidor/);
   assert.ok(!s.includes(DOM), 'o corpo do CSS vazou na saída');
@@ -413,7 +421,8 @@ test('diag-resumo: com a ORIGEM FORA DO AR (a borda responde 502) nada é "difer
     '/js/min/api.js', '/js/min/mapa.js', '/js/min/app.js', '/js/min/presenca.js', '/js/min/swipe.js'];
   const com = (v) => Object.fromEntries(ARQUIVOS.map((u) => ['https://x.dev' + u, v]));
   const confere = (s, rotulo) => {
-    assert.match(s, /11 arquivos conferidos com o servidor · diferentes: 0 · sem conferir: 11/, `${rotulo}: a página de erro da borda contou como diferença`);
+    assert.match(s, /11 arquivos · nenhum conferido com o servidor — este relatório não diz se o aparelho roda a versão do servidor/,
+      `${rotulo}: a página de erro da borda contou como diferença (ou como conferida)`);
     assert.match(s, /sem conferir: o servidor respondeu 502 em 11 arquivos — a origem fora do ar/, `${rotulo}: a triagem não diz o status`);
     assert.doesNotMatch(s, /DIFERENTE: /, `${rotulo}: arquivo listado como diferente`);
     assert.doesNotMatch(s, /ATENÇÃO: o aparelho roda código diferente/, `${rotulo}: alarme falso de versão velha`);
@@ -776,4 +785,56 @@ test('diag-resumo: a aba marcada OUTRA ABA pelo app sai como tal mesmo tendo gra
   const sem = rodar(antesDesta({}));
   assert.doesNotMatch(sem, /abertura murdtpr1-67np5r · [^\n]*\n  OUTRA ABA/, 'sem a marca do app, a triagem inventou uma outra aba');
   assert.match(sem, /\[abertura anterior murdtpr1-67np5r\]/);
+});
+
+// ── R11-4-05: "conferido" é só o que COMPAROU com o servidor ─────────────────
+// Num relatório feito SEM REDE (o modo avião), a triagem dizia "11 arquivos
+// conferidos com o servidor · diferentes: 0 · sem conferir: 11" — nenhum tinha
+// sido conferido (o `cacheVsRede` todo `Failed to fetch` ou "sem corpo local"),
+// e "conferidos" com "diferentes: 0", na seção que se lê pra saber se o aparelho
+// roda a versão do servidor, lia como "está em dia" (n28 da auditoria da rodada
+// 11; o controle, n30, com rede: "11 conferidos · diferentes 0").
+const ARQUIVOS_DO_APP = ['/', '/service-worker.js', '/css/app.css', '/js/min/version.js', '/js/min/i18n.js', '/js/min/api.js',
+  '/js/min/mapa.js', '/js/min/swipe.js', '/js/min/app.js', '/js/min/presenca.js', '/js/min/sw-register.js'];
+const relatorioSemRede = () => {
+  const d = relatorioV8();
+  d._versaoDoDiag = 11;
+  d.resumo.rede = false;
+  d.ambiente = { ...(d.ambiente || {}), online: false };
+  // O formato do relatório de verdade (n28): a leitura do servidor falha no
+  // aparelho, e a cópia local do worker não foi lida.
+  d.cacheVsRede = Object.fromEntries(ARQUIVOS_DO_APP.map((u) => ['https://x.dev' + u,
+    u === '/service-worker.js' ? { erro: 'sem corpo local' } : { erro: 'Failed to fetch' }]));
+  return d;
+};
+
+test('R11-4-05: o relatório SEM REDE diz "nenhum conferido" — não "11 conferidos · diferentes: 0"', () => {
+  const s = rodar(relatorioSemRede());
+  assert.doesNotMatch(s, /11 arquivos conferidos com o servidor/,
+    'DEFEITO: a triagem chama de "conferidos" os 11 arquivos que nenhum comparou — lê como "o aparelho está em dia"');
+  assert.doesNotMatch(s, /diferentes: 0/, 'o "diferentes: 0" sem nada comparado voltou (lê como "está em dia")');
+  assert.match(s, /11 arquivos · nenhum conferido com o servidor — este relatório não diz se o aparelho roda a versão do servidor/);
+  assert.match(s, /  sem conferir: sem rede na hora do relatório \(Failed to fetch\) em 10 arquivos/,
+    'o motivo (a falta de rede na hora do relatório) não foi dito');
+  assert.match(s, /  sem conferir: a cópia do aparelho não foi lida em 1 arquivo/);
+  assert.doesNotMatch(s, /ATENÇÃO: o aparelho roda código diferente/, 'alarme de versão velha sem nada comparado');
+});
+
+test('R11-4-05 CONTROLE: com rede e tudo comparado, a linha de sempre — e a parte sem conferir conta à parte', () => {
+  const d = relatorioV8();
+  d._versaoDoDiag = 11;
+  d.cacheVsRede = Object.fromEntries(ARQUIVOS_DO_APP.map((u) => ['https://x.dev' + u,
+    { aparelho: 'aaaa', servidor: 'aaaa', igual: true, bytesAparelho: 100, bytesServidor: 100, http: 200 }]));
+  const s = rodar(d);
+  assert.match(s, /11 arquivos conferidos com o servidor · diferentes: 0\n/, 'CONTROLE: a linha do relatório com rede mudou');
+  assert.doesNotMatch(s, /sem conferir/);
+  // Metade comparada e metade sem resposta no orçamento: conferidos só os que compararam.
+  const m = relatorioV8();
+  m._versaoDoDiag = 11;
+  m.cacheVsRede = Object.fromEntries(ARQUIVOS_DO_APP.map((u, i) => ['https://x.dev' + u, i < 6
+    ? { aparelho: 'aaaa', servidor: 'aaaa', igual: true, bytesAparelho: 100, bytesServidor: 100, http: 200 }
+    : { erro: 'sem resposta', semResposta: true }]));
+  const t = rodar(m);
+  assert.match(t, /11 arquivos · conferidos com o servidor: 6 · diferentes: 0 · sem conferir: 5/);
+  assert.match(t, /  sem conferir: sem resposta no orçamento do relatório em 5 arquivos/);
 });

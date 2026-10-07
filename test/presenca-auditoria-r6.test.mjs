@@ -232,7 +232,8 @@ function aparelho() {
     guardado, pedidos,
     gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
     pagina({ perfil = null, resposta = { success: true }, sessao = 'tok' } = {}) {
-      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: perfil };
+      // A página com sessão é a LOGADA, com a sessão na memória (R11-1-02).
+      const AppState = { authenticated: !!sessao, preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: perfil };
       const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null };
       const fatos = [];
       const deps = {
@@ -241,7 +242,8 @@ function aparelho() {
         PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) },
         dfato: (k, o) => fatos.push([k, o]),
-        API: { getSession: () => sessao, presencaWaze: async (c) => { pedidos.push(c); return typeof resposta === 'function' ? resposta() : resposta; } },
+        API: { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, sessionToken: sessao,
+          presencaWaze: async (c) => { pedidos.push(c); return typeof resposta === 'function' ? resposta() : resposta; } },
       };
       const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'presencaWmeDesligar',
         'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
@@ -343,7 +345,7 @@ test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma f
   let agora = T;
   const pedidos = [];
   let resposta = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
-  const AppState = { preferences: { presenca: false }, profile: { id: Number(EU) } };
+  const AppState = { authenticated: true, preferences: { presenca: false }, profile: { id: Number(EU) } };
   const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null };
   const fatos = [];
   const deps = {
@@ -351,7 +353,8 @@ test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma f
     CONTA_KEY: 'c', safeLS: { get: () => null }, Date: { now: () => agora },
     PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
     dfato: (k, o) => fatos.push([k, o]),
-    API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+    API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
+      presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
   };
   const h = montar(['marcaDaSessao', 'savePreferences', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
     'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar'], deps);
@@ -409,6 +412,8 @@ function montarDesligar401({ sonda }) {
     VERIFICA_SESSAO_MS: 0, setTimeout,
     API: {
       getSession: () => sessao.token,
+      temSessaoNaMemoria: () => !!sessao.token,   // a sessão desta aba é a da memória (R11-1-02)
+      get sessionToken() { return sessao.token; },
       getRegion: () => 'row',   // a região em que a sonda pergunta (R8-6-03)
       // O Waze da presença recusa o "invisível" com 401, com a sessão viva.
       presencaWaze: async (c) => { pedidos.push(c); return { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.cookiesExpired', httpCode: 401 }; },

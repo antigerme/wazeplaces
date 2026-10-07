@@ -544,6 +544,89 @@ test('validar-place: aprovar a foto esquece a releitura guardada — a exclusão
   }
 });
 
+// R11-3-01 (auditoria da rodada 11): a aprovação que POUSA com uma exclusão do
+// MESMO local no ar. A aprovação esquece a releitura guardada (o teste de cima),
+// e a resposta da exclusão, que volta DEPOIS, a RECRIAVA com a lista lida antes —
+// P ainda pendente. A exclusão seguinte, nos 15 s dela, gravava P de volta como
+// `approved: false`: a aprovação se desfazia no Waze sem pedido nenhum (MEDIDO no
+// core e de ponta a ponta). O Waze de um local só, com a RESPOSTA da escrita da
+// lista presa até o teste soltar (o Waze já gravou; a resposta é que demora), e o
+// relógio de mentira. `meio` roda com a escrita de X gravada e a resposta presa.
+async function exclusaoComAlgoNoMeio(meio) {
+  const s = await sessaoDeTeste(COOKIES);
+  const w = wazeDeUmLocal('v1', [{ id: 'X', approved: true }, { id: 'Y', approved: true }, { id: 'P', approved: false }]);
+  let prender = null;
+  const waze = async (url, init) => {
+    const resposta = w.responder(url, init);                     // o Waze grava na hora…
+    const daLista = init.method === 'POST' && JSON.parse(init.body).actions._subActions[0].name === 'UPDATE_OBJECT';
+    if (daLista && prender) { const p = prender; prender = null; await p; }   // …e a resposta demora
+    return resposta;
+  };
+  const base = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+  const releitura = () => [...s.store.mem.keys()].find((k) => String(k).startsWith('reler_'));
+  const relogio = Date.now;
+  let agora = relogio();
+  Date.now = () => agora;
+  try {
+    await comWaze(waze, async () => {
+      await dispatch('excluir-foto', { ...base, imageID: 'X', action: 'preparar' }, s.ctx);   //  0 s: o toque na lixeira de X
+      agora += 3000;
+      let soltar;
+      prender = new Promise((ok) => { soltar = ok; });
+      const exclX = dispatch('excluir-foto', { ...base, imageID: 'X' }, s.ctx);              //  3 s: a janela vence, X sai
+      while (!w.escritas.length) await new Promise((ok) => setTimeout(ok, 1));               // o Waze gravou X; a resposta, presa
+      agora += 3000;
+      await meio({ s, chave: releitura() });                                                  //  6 s
+      agora += 1000;
+      soltar();
+      const rX = await exclX;                                                                 //  7 s: a resposta de X chega
+      assert.equal(rX.body.success, true, `PRÉ-CONDIÇÃO: a exclusão de X falhou: ${JSON.stringify(rX.body)}`);
+      w.depoisDeX = s.store.mem.get(releitura());
+      agora += 3000;
+      await dispatch('excluir-foto', { ...base, imageID: 'Y', action: 'preparar' }, s.ctx);   // 10 s: a lixeira de Y (≤ 15 s)
+      agora += 3000;
+      const rY = await dispatch('excluir-foto', { ...base, imageID: 'Y' }, s.ctx);           // 13 s
+      assert.equal(rY.body.success, true, `PRÉ-CONDIÇÃO: a exclusão de Y falhou: ${JSON.stringify(rY.body)}`);
+    });
+  } finally {
+    Date.now = relogio;
+  }
+  return w;
+}
+const comPendente = (l) => l.map((f) => f.id + (f.approved === false ? '(pendente)' : ''));
+
+test('excluir-foto: a resposta que volta DEPOIS de a aprovação do local pousar não recria a releitura que ela esqueceu — P fica aprovada (R11-3-01)', async () => {
+  const w = await exclusaoComAlgoNoMeio(async ({ s }) => {
+    const ap = await dispatch('validar-place', { ...s.dados, region: 'row', venueID: 'v1', updateRequestID: 'P', approve: true }, s.ctx);
+    assert.equal(ap.body.action, 'approved', 'PRÉ-CONDIÇÃO: a aprovação não passou');
+  });
+  assert.deepEqual(comPendente(w.fotos), ['P'],
+    `DEFEITO: a aprovação se desfez no Waze — a exclusão de Y gravou P de volta como pendente: ${JSON.stringify(w.escritas.map(comPendente))}`);
+  assert.equal(w.depoisDeX, undefined, 'a resposta de X recriou a releitura que a aprovação esqueceu');
+  assert.equal(w.leituras, 2, 'a exclusão de Y não releu o local (usou a lista de antes da aprovação)');
+  // CONTROLE: sem nada no meio, a resposta de X REGRAVA a releitura (sem X), e a
+  // exclusão de Y a usa sem reler — o conserto não é "nunca regravar".
+  const c = await exclusaoComAlgoNoMeio(async () => {});
+  assert.equal(c.leituras, 1, 'CONTROLE: sem nada no meio, a exclusão de Y releu — a regravação depois da exclusão sumiu?');
+  assert.deepEqual(c.escritas.map(comPendente), [['Y', 'P(pendente)'], ['P(pendente)']]);
+});
+
+test('excluir-foto: a releitura TROCADA no meio da exclusão (outra escrita do local a regravou) não é coberta pela lista desta (R11-3-01)', async () => {
+  // "Só regrava se ainda é a que esta exclusão leu" vale pra sumida E pra
+  // trocada: por cima da que outra exclusão do local deixou (sem a foto DELA, Y),
+  // a lista desta a devolveria na exclusão seguinte. A lista da outra tem de ser
+  // DIFERENTE da que esta regravaria (sem X: [Y, P]) — igual, o teste passaria
+  // com a regravação cega (visto na sabotagem: a primeira versão era igual).
+  const outra = String(Math.floor(Date.now() / 1000)) + '|' + JSON.stringify({ id: 'v1', images: [{ id: 'P', approved: false }] });
+  let chave = null;
+  const w = await exclusaoComAlgoNoMeio(async ({ s, chave: k }) => {
+    chave = k;
+    assert.ok(chave, 'CONTROLE: a releitura guardada pelo toque não está no store — o teste não mediria nada');
+    await s.store.put(chave, outra);
+  });
+  assert.equal(w.depoisDeX, outra, 'a resposta desta exclusão cobriu a releitura que OUTRA escrita do local deixou');
+});
+
 test('validar-place: rejeitar NÃO toca na releitura guardada (é o gesto de todo swipe; a cota do KV é contada)', async () => {
   const s = await sessaoDeTeste(COOKIES);
   const lidas = [];

@@ -1102,10 +1102,16 @@ test('R6-4-3: a busca que teve RESPOSTA não é lie-fi — nem a página de erro
 
 test('R5-4-4: a primeira resposta que CHEGA apaga o lie-fi — antes da saída do esvaziamento', () => {
   const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
-  // (Entre as duas, só a recuperação do card "sem foto", que também vale no
-  // meio do esvaziamento — R10-4-03, em `test/offline-tela.test.mjs`.)
-  assert.match(prova, /^API\.aoProvarRede = \(\) => \{\s*buscaSemResposta = false;\s*(?:recuperarCardSemFoto\(\{ redeProvada: true \}\);\s*)?if \(esvaziandoSaida\) return;/,
-    'a resposta que chega não apaga a marca do lie-fi (ou só depois da saída do esvaziamento)');
+  // A PRIMEIRA instrução do gancho, e antes da saída cedo do esvaziamento. (Entre
+  // as duas moram a recuperação do card "sem foto" e os ganchos de teto próprio,
+  // que também valem no meio do esvaziamento — R10-4-03 e R11-4-01, em
+  // `test/offline-tela.test.mjs`.)
+  assert.match(prova, /^API\.aoProvarRede = \(\) => \{\s*buscaSemResposta = false;/,
+    'a resposta que chega não apaga a marca do lie-fi logo de cara');
+  const corpo = prova.slice(0, prova.indexOf('\n};'));
+  const iApaga = corpo.indexOf('buscaSemResposta = false;');
+  const iSai = corpo.indexOf('if (esvaziandoSaida)');
+  assert.ok(iApaga > 0 && iSai > iApaga, 'a marca do lie-fi só se apaga depois da saída do esvaziamento');
 });
 
 // A `marcarCardSemFoto` de VERDADE, com o card de mentira.

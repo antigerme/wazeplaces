@@ -462,11 +462,13 @@ try {
   checa(fora.cvr.length > 0 && fora.cvr.every((v) => v.erro === 'http 502' && v.http === 502 && !('igual' in v)),
     'com a origem fora, o relatório marca cada arquivo "sem conferir", com o status — e não compara com a página de erro',
     JSON.stringify(fora.cvr.slice(0, 2)));
-  checa(/diferentes: 0 · sem conferir: \d+/.test(fora.triagem)
+  // (R11-4-05) Nenhum arquivo comparado: a triagem diz "nenhum conferido", e não
+  // "N conferidos · diferentes: 0", que lia como "está em dia".
+  checa(/arquivos · nenhum conferido com o servidor/.test(fora.triagem) && !/diferentes: 0/.test(fora.triagem)
     && /sem conferir: o servidor respondeu 502 em \d+ arquivos? — a origem fora do ar/.test(fora.triagem)
     && !/ATENÇÃO: o aparelho roda código diferente/.test(fora.triagem),
-    'e a triagem diz que o servidor respondeu 502 — sem acusar "código diferente do servidor"',
-    (fora.triagem.match(/.*(arquivos conferidos|sem conferir:|ATENÇÃO: o aparelho).*/g) || []).join(' / '));
+    'e a triagem diz que o servidor respondeu 502 e que nenhum arquivo foi conferido — sem acusar "código diferente do servidor"',
+    (fora.triagem.match(/.*(arquivos|sem conferir:|ATENÇÃO: o aparelho).*/g) || []).join(' / '));
   await pgF.close();
 } finally {
   await ctxBorda.close();

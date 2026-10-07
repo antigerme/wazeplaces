@@ -10480,7 +10480,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const FILA_ABAS = Array.from({ length: 3 }, (_, i) => Object.values(CARDS).map((p, k) => ({ ...p,
     venueID: `va${i}-${k}`, updateRequestID: `ua${i}-${k}` }))).flat();
   const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  const abrirAbas = async ({ semSessao = false } = {}) => {
+  // `fila`: a busca das duas abas (a seção 2c monta a dela); `guardado`: chaves a
+  // mais no aparelho antes da abertura (a lista de autores da recusa automática).
+  const abrirAbas = async ({ semSessao = false, fila = FILA_ABAS, guardado = null } = {}) => {
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const rede = [];
     // Sessões que MORRERAM no servidor: respondem o 401 carimbado do core. A
@@ -10521,8 +10523,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       }
       if (rota === 'perfil') return json({ success: true, profile: corpo.sessionToken === 'tok-outra' ? PERFIL_OUTRA : PERFIL_ABAS,
         visivelNoWme: true });
-      if (rota === 'buscar-places') return json({ success: true, places: FILA_ABAS, hasMore: false, page: 1,
-        total: FILA_ABAS.length, totalAll: FILA_ABAS.length, blocked: 0 });
+      if (rota === 'buscar-places') return json({ success: true, places: fila, hasMore: false, page: 1,
+        total: fila.length, totalAll: fila.length, blocked: 0 });
       if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
       if (rota === 'lista-estados') return json({ success: true, states: [] });
       if (rota === 'presenca-app') return json({ success: true, online: [], conversas: [] });
@@ -10544,12 +10546,13 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // A sessão salva e um placar com a cota do Desfazer cumprida (L6: 10): as
     // ações saem sem a janela, e o percurso não espera 3 s por ✕.
     const A = await abrir();
-    await A.evaluate(() => {
+    await A.evaluate((mais) => {
       localStorage.setItem('waze_session_token', 'tok-abas');
       localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 20, skipped: 0 }));
       localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: false, presenca: true,
         undoGateSeen: true, dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
-    });
+      for (const [k, v] of Object.entries(mais || {})) localStorage.setItem(k, v);
+    }, guardado);
     await A.reload({ waitUntil: 'domcontentloaded' });
     const B = await abrir();
     const pronta = () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
@@ -10778,6 +10781,121 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'duas abas: CONTROLE — sem a retirada e sem a anotação (o app de antes), o ✕ da B devia sair de novo e contar; a medida não enxerga o defeito',
     JSON.stringify({ antesD, filaD, enviosD, placarD }));
   await d.ctx.close();
+
+  // ── 2c. o que POUSA fora da fila de saída chega à outra aba (R11-2-01) ────
+  // O "Marcar todos", a recusa automática e a aprovação de foto não escrevem na
+  // fila de saída — o aviso da seção 1 —, e a outra aba seguia com esses pedidos
+  // como card: o ✕ dela saía pro Waze, contava de novo e dizia "outro editor"
+  // (MEDIDO, n01 a n03 da rodada 11). O aviso deles é o canal do POUSO
+  // (`BroadcastChannel`), aqui o de verdade, entre duas páginas. Cada caminho
+  // decide na A; na B, o que a A decidiu e não está na tela sai da fila (com o
+  // "Restam"), e o ✕ no card da frente, que a A decidiu, não sai nem conta — e
+  // diz por quê. CONTROLE: a B com o canal FECHADO (o app de antes) segue com
+  // os pedidos, e o ✕ dela sai pro Waze.
+  // A URL da foto proposta traz o id do PEDIDO (como no Waze): é por ele que o
+  // "Aprovar" sabe que a foto na tela é a proposta (`podeAprovarAtual`).
+  const FOTO_2C = 'https://venue-image.waze.com/thumbs/thumb700_uc0_abas2c.jpg';
+  const pedido2c = (i, extra = {}) => ({ venueID: `vc${i}`, updateRequestID: `uc${i}`, name: `Local 2c ${i}`,
+    categories: ['RESTAURANT'], address: `Rua ${i}, 10`, updateType: 'Novo Local', updateTypeKey: 'VENUE', reqType: 'VENUE',
+    purType: 'NEW_PLACE', createdBy: `autor${i}`, creatorId: 8000 + i, imageUrls: [], imageUrl: null, brand: null, changes: [],
+    mapa: null, dateAdded: 1785203731191 - i * 60000, lat: -23.5, lon: -46.6, ...extra });
+  const estadoDaB = (page) => page.evaluate(() => ({ frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+    fila: AppState.queue.map((p) => p.updateRequestID), restam: AppState.serverTotal,
+    restamNaTela: document.getElementById('pendingCount').textContent.trim(),
+    anotada: !!AppState.currentPlace && decididosPorOutraAbaComCardAqui.has(AppState.currentPlace) }));
+  // O ✕ da B no card da frente, que a A decidiu: não vai ao Waze, não conta, diz por quê.
+  const xNoQueAOutraDecidiu = async (m, rotulo) => {
+    const antes = m.rede.length;
+    const rej = await m.B.evaluate(() => AppState.stats.rejected);
+    await rejeitarNa(m.B);
+    await esperarNaPagina(m.B, () => AppState.inFlightActions === 0, 5000);
+    const r = await m.B.evaluate(() => ({ rejeitados: AppState.stats.rejected,
+      aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | ') }));
+    const saiu = m.rede.slice(antes).filter((x) => /^(validar-place|marcar-lido)$/.test(x.rota)).map((x) => x.rota);
+    checa(saiu.length === 0 && r.rejeitados === rej && /já foi decidido em outra aba/.test(r.aviso),
+      `duas abas (${rotulo}): o ✕ da aba B no card que a A decidiu saiu pro Waze, contou de novo ou não disse por quê`,
+      JSON.stringify({ saiu, rej, ...r, aviso: r.aviso.slice(0, 160) }));
+  };
+  {
+    // A APROVAÇÃO de foto: a A aprova a foto do card da frente (sem o Desfazer —
+    // a cota está cumprida); a B, com o mesmo card na frente, fica sabendo.
+    const m = await abrirAbas({ fila: [pedido2c(0, { updateType: 'Nova foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE',
+      purType: 'NEW_PHOTO', imageUrl: FOTO_2C, imageUrls: [FOTO_2C], newImageIdx: 0, approvedImageIds: [], localAprovado: true }),
+      pedido2c(1), pedido2c(2)] });
+    await m.A.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click());
+    await esperarOuExplodir(m.A, () => Lightbox.isOpen() && fotoDoLightboxNaTela() && Lightbox.podeAprovarAtual(),
+      'a aba A abrir a foto com o "Aprovar"');
+    await m.A.evaluate(() => document.getElementById('lightboxApprove').click());
+    const pousou = await esperarNaPagina(m.A, () => !aprovandoAgora && aprovacoesNoAr.size === 0, 5000);
+    checa(pousou.ok && m.rede.some((x) => x.rota === 'validar-place' && x.pedido === 'vc0'),
+      'duas abas (aprovação): PRÉ-CONDIÇÃO — a aprovação da aba A não saiu');
+    const soube = await esperarNaPagina(m.B, () => !!AppState.currentPlace && decididosPorOutraAbaComCardAqui.has(AppState.currentPlace), 5000);
+    checa(soube.ok, 'duas abas (aprovação): a aba B não ficou sabendo da foto que a A aprovou — o ✕ dela iria pro Waze',
+      JSON.stringify(await estadoDaB(m.B)));
+    await xNoQueAOutraDecidiu(m, 'aprovação');
+    checa(m.erros.length === 0, 'duas abas (aprovação): erro de JS', m.erros[0]);
+    await m.ctx.close();
+  }
+  const marcarTodosNaA = async (m) => {
+    await m.A.evaluate(() => openBatchReadConfirm());
+    await esperarOuExplodir(m.A, () => !document.getElementById('batchReadModal').classList.contains('hidden'),
+      'o "Marcar todos" abrir na aba A');
+    await m.A.evaluate(() => document.getElementById('confirmBatchRead').click());
+    return esperarNaPagina(m.A, () => !loteDeLidosEmVoo && AppState.inFlightActions === 0 && AppState.queue.length === 0, 8000);
+  };
+  {
+    // O "MARCAR TODOS": a B fica só com o card da frente (anotado), "Restam 1".
+    const m = await abrirAbas({ fila: [0, 1, 2, 3, 4].map((i) => pedido2c(i)) });
+    const pousou = await marcarTodosNaA(m);
+    checa(pousou.ok && m.rede.some((x) => x.rota === 'marcar-lido'), 'duas abas ("Marcar todos"): PRÉ-CONDIÇÃO — o lote da aba A não pousou');
+    const saiu = await esperarNaPagina(m.B, () => AppState.queue.length === 1 && AppState.serverTotal === 1
+      && document.getElementById('pendingCount').textContent.trim() === '1', 5000);
+    const b = await estadoDaB(m.B);
+    checa(saiu.ok && b.frente === 'uc0' && b.anotada,
+      'duas abas ("Marcar todos"): o que a aba A marcou seguiu na fila da B (ou o "Restam" não desceu, ou o card da TELA trocou)',
+      JSON.stringify(b));
+    await xNoQueAOutraDecidiu(m, '"Marcar todos"');
+    checa(m.erros.length === 0, 'duas abas ("Marcar todos"): erro de JS', m.erros[0]);
+    await m.ctx.close();
+  }
+  {
+    // A RECUSA AUTOMÁTICA: a A liga a recusa de um autor da lista e atualiza; o
+    // que ela rejeita sai da fila da B, e o card da frente (de outro autor) fica.
+    const hoje = new Date();
+    const dia = Date.UTC(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()) / 86400000;
+    const spam = { creatorId: 7777, createdBy: 'spam2c' };
+    const m = await abrirAbas({ fila: [pedido2c(0), pedido2c(1, spam), pedido2c(2, spam), pedido2c(3)],
+      guardado: { waze_places_autores: JSON.stringify({ v: [], r: { 7777: [3, 'spam2c', dia, 0] } }) } });
+    await m.A.evaluate(() => { alternarAutoDoAutor(7777); document.getElementById('refreshBtn').click(); });
+    const pousou = await esperarNaPagina(m.A, () => !recusaAutomaticaRodando && !AppState.fetching && AppState.inFlightActions === 0
+      && !!AppState.currentPlace && !AppState.queue.some((p) => p.creatorId === 7777), 8000);
+    checa(pousou.ok && ['vc1', 'vc2'].every((v) => m.rede.some((x) => x.rota === 'validar-place' && x.pedido === v)),
+      'duas abas (recusa automática): PRÉ-CONDIÇÃO — a recusa da aba A não rejeitou os dois do autor');
+    const saiu = await esperarNaPagina(m.B, () => !AppState.queue.some((p) => p.creatorId === 7777) && AppState.serverTotal === 2, 5000);
+    const b = await estadoDaB(m.B);
+    checa(saiu.ok && b.frente === 'uc0' && !b.anotada,
+      'duas abas (recusa automática): o que a recusa da aba A rejeitou seguiu na fila da B (ou o "Restam" não desceu, ou o card da TELA trocou)',
+      JSON.stringify(b));
+    checa(m.erros.length === 0, 'duas abas (recusa automática): erro de JS', m.erros[0]);
+    await m.ctx.close();
+  }
+  {
+    // CONTROLE: o "Marcar todos" com o canal da B FECHADO — o app de antes. A B
+    // segue com os cinco, e o ✕ dela no card da frente sai pro Waze.
+    const m = await abrirAbas({ fila: [0, 1, 2, 3, 4].map((i) => pedido2c(i)) });
+    await m.B.evaluate(() => canalDosPousos.close());
+    const pousou = await marcarTodosNaA(m);
+    await dormir(600);
+    const b = await estadoDaB(m.B);
+    const antes = m.rede.length;
+    await rejeitarNa(m.B);
+    await esperarNaPagina(m.B, () => AppState.inFlightActions === 0, 5000);
+    const deNovo = m.rede.slice(antes).filter((x) => x.rota === 'validar-place').length;
+    checa(pousou.ok && b.fila.length === 5 && !b.anotada && deNovo === 1,
+      'duas abas: CONTROLE — com o canal da aba B fechado (o app de antes), ela devia seguir com os 5 e o ✕ sair; a medida não enxerga o defeito',
+      JSON.stringify({ pousou: pousou.ok, fila: b.fila.length, anotada: b.anotada, deNovo }));
+    await m.ctx.close();
+  }
 
   // ── 3. a QUEDA numa aba, com o token VELHO, não apaga o NOVO da outra ────
   // A sessão morre no servidor. A aba A percebe primeiro, derruba e ENTRA DE
@@ -11639,7 +11757,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
-  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

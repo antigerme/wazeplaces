@@ -68,9 +68,11 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // E as escritas do lightbox no ar (a de foto sem janela, L24, e a renomeação
   // por local, L23), pelo mesmo motivo.
   // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
-  // lê — R5-2-07), também parada por padrão.
+  // lê — R5-2-07), também parada por padrão. E nenhum login desta aba no ar (o
+  // colar, o código), que a resposta da extensão à volta à aba confere (R11-1-03).
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false })) if (!(k in deps)) deps[k] = v;
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
+    authInFlight: false, resgateEmVoo: false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
@@ -286,8 +288,12 @@ function montarLightboxComJanelas() {
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     aplicarNomeNaTela: (p, n) => log.push('nome:' + n), devolverFoto: () => log.push('devolveu'),
-    enviarExclusao: () => log.push('ENVIOU:excluir'), enviarAprovacao: () => log.push('ENVIOU:aprovar'),
-    enviarRenomeacao: () => log.push('ENVIOU:renomear'), registrarDesfazer: () => log.push('desfazer-do-editor'),
+    // As escritas de verdade são `async`: o envio da janela espera a promessa
+    // pra dizer o desfecho no irmão (R11-3-05).
+    enviarExclusao: () => { log.push('ENVIOU:excluir'); return Promise.resolve(true); },
+    enviarAprovacao: () => { log.push('ENVIOU:aprovar'); return Promise.resolve(true); },
+    enviarRenomeacao: () => { log.push('ENVIOU:renomear'); return Promise.resolve(true); },
+    registrarDesfazer: () => log.push('desfazer-do-editor'),
     mostrarDesfazer: () => log.push('banner'),
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
     API: { getSession: () => 'tok-A', setSession() {}, getRegion: () => 'row', prepararExclusao() {},
@@ -869,7 +875,8 @@ function montarExtensao(extra = {}) {
     window, AppState: { authenticated: false, queue: [{ venueID: 'vA' }] }, epocaDaSessao: 1, saiuNestaPagina: false,
     extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
-    API: { setSession: (t) => { deps.token = t; }, getSession: () => deps.token || null }, token: null,
+    API: { setSession: (t) => { deps.token = t; }, getSession: () => deps.token || null,
+      temSessaoNaMemoria: () => !!deps.token, get sessionToken() { return deps.token || null; } }, token: null,
     ...extra,
   };
   const h = montar(['entrarPelaExtensao'], deps);
@@ -1039,6 +1046,8 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     window, AppState, safeLS, CONTA_KEY, epocaDaSessao: 0, saiuNestaPagina: false,
     extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
     puladosNoInicioDaFila: 0, saidaEsperandoConta: false,
+    // A conta que ESTA aba confirmou: A, que estava triando (ver `aoConhecerConta`, R11-1-01).
+    contaConfirmadaNestaAba: { id: '111', s: marcaDe('tokA') },
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout, clearTimeout,
     // O teto da espera pelo perfil, curto aqui (o caso do perfil que nunca chega).
     AVISO_RENOVADA_ESPERA_PERFIL_MS: 30,
@@ -1187,11 +1196,13 @@ test('K4: B entra no aparelho de A (5 pulados) e pula 1 — a fila NÃO termina 
 
 function montarPresencaWme(perfil = null) {
   const enviados = [];
-  const AppState = { profile: perfil, preferences: { presenca: true }, stats: {} };
+  // A aba LOGADA (aberta sem rede, com a sessão salva): a sessão está na memória dela.
+  const AppState = { authenticated: true, profile: perfil, preferences: { presenca: true }, stats: {} };
   const presencaWme = { ligarNaProxima: true, desligarPendente: false, ultimaEm: 0, perfilVisivel: null, perfilEm: 0 };
   const deps = {
     AppState, presencaWme, dfato: () => {},
-    API: { getSession: () => 'tok-A', presencaWaze: async (c) => { enviados.push(c); return { success: true }; } },
+    API: { getSession: () => 'tok-A', temSessaoNaMemoria: () => true, sessionToken: 'tok-A',
+      presencaWaze: async (c) => { enviados.push(c); return { success: true }; } },
     filaAtravessouSessao: false, safeLS: { remove() {} }, carregarFilaDeSaida: () => [], window: {},
   };
   const h = montar(['presencaWmeDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeAoCarregarPerfil',

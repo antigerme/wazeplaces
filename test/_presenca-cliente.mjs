@@ -33,7 +33,8 @@ const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
 const TRADUZIDAS = /^card\.updateType\./;
 
-const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA']
+const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
+  'focavelNaTela']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -54,6 +55,10 @@ function elemento(id) {
     id, innerHTML: '', textContent: '', value: '', disabled: false, dataset: {},
     scrollTop: 0, scrollHeight: 0, clientHeight: 0, childElementCount: 0,
     classList: new Classes(), atributos: {},
+    // Pro `focavelNaTela` do app.js (fatiado acima): está no documento, e só
+    // tem caixa na tela quando não está escondido — sem ancestrais aqui.
+    isConnected: true,
+    getClientRects() { return el.classList.contains('hidden') ? [] : [{ width: 44, height: 44 }]; },
     setAttribute(k, v) { this.atributos[k] = String(v); },
     getAttribute(k) { return this.atributos[k] ?? null; },
     removeAttribute(k) { delete this.atributos[k]; },
