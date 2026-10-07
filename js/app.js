@@ -548,21 +548,70 @@ function initApp() {
 // repassado (o portão negou a conta do WME) não aparece: quem fica é a sessão
 // do aparelho, de quem entrou na outra aba. E o que a tela de entrada tinha
 // aberto sai com a limpeza, como na entrada pela extensão (ver
-// `MODAIS_DA_ENTRADA`).
+// `MODAIS_DA_ENTRADA`). A adoção mora em `adotarSessaoDoAparelho`, que a volta à
+// aba e o link de pareamento que falhou também usam (R10-1-03 e R10-1-04).
 function aoFimDaPerguntaDaAbertura(entrou) {
     if (entrou) return;
     if (API.temSessaoNaMemoria() || AppState.authenticated) return;
-    // A adoção é o `getSession` da abertura (o do `initApp`): ele põe na memória
-    // desta aba a sessão guardada no aparelho. Sem nenhuma, a tela de entrada —
-    // um caminho ou o outro, nunca nenhum dos dois.
-    if (API.getSession()) {
-        tirarNegadoDaExtensao();
-        fecharModaisDaEntrada();
-        abrirComSessaoSalva();
-        return;
-    }
+    // A sessão guardada no aparelho entra como na abertura com sessão salva. Sem
+    // nenhuma (ou sem poder adotá-la), a tela de entrada — um caminho ou o outro,
+    // nunca nenhum dos dois.
+    if (adotarSessaoDoAparelho()) return;
     showAuthScreen();
     mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
+}
+
+// A sessão que OUTRA aba guardou no aparelho, ADOTADA por esta, que está sem
+// sessão: é a abertura com sessão salva — a que recarregar faz. Chegam aqui o
+// fim da pergunta da abertura (R9-1-03), a volta a esta aba na tela de entrada
+// (`aoVoltarAAba`) e o link de pareamento que falhou (`abrirPeloCodigoDaURL`).
+// Eram desfechos diferentes pra mesma situação: a abertura adotava, e a volta à
+// aba e o link vencido deixavam a pessoa no "Bem-vindo!" com a sessão viva no
+// aparelho, sem perguntar nada a ninguém, até recarregar (auditoria da rodada
+// 10, R10-1-03 e R10-1-04, MEDIDO).
+//
+// O que a tela de entrada tinha aberto sai com a limpeza (ver
+// `MODAIS_DA_ENTRADA`). A fila é NOVA, como em todo login: a que sobrou na
+// memória é da sessão que caiu NESTA aba (a queda a mantém pra renovação), e
+// sem o `resetQueue` o app voltava com o card dela na tela. E as marcas da
+// página recomeçam (`aoEntrarNestaPagina`), como em todo login que dá certo:
+// a recusa que a extensão tenha repassado não aparece — quem fica é a sessão do
+// aparelho, de quem entrou na outra aba.
+//
+// NÃO adota, e a tela fica como está:
+//   · com uma pergunta à extensão ou um resgate de código no ar: o fim deles
+//     decide, e passa por aqui;
+//   · com TEXTO DIGITADO num diálogo da entrada (o cookies.txt colado, o
+//     código): a pessoa estava entrando por ali — talvez com OUTRA conta —, e a
+//     adoção fecharia o diálogo jogando fora o que ela digitou. É o R9-1-03 (b):
+//     a aba da tela de entrada nunca vira "logada" sem mostrar o app, e aqui ela
+//     segue sem sessão nenhuma na memória (o "Sair" de lá não a encerra). Sem
+//     texto, o diálogo vazio fecha e a sessão entra.
+// Devolve se adotou.
+function adotarSessaoDoAparelho() {
+    if (API.temSessaoNaMemoria() || AppState.authenticated) return false;
+    if (extPerguntando || resgateEmVoo) return false;
+    // O aparelho se lê pelo `safeLS`: o `getSession`, com a memória vazia, GRAVA
+    // nela o que lê — e isso já é adotar (R9-1-03).
+    if (!safeLS.get('waze_session_token')) return false;
+    if (textoDigitadoNaEntrada()) return false;
+    API.getSession();   // a adoção: a sessão guardada vai pra memória desta aba
+    aoEntrarNestaPagina();
+    fecharModaisDaEntrada();
+    resetQueue();
+    abrirComSessaoSalva();
+    return true;
+}
+
+// O que a pessoa DIGITOU (ou colou) num diálogo ABERTO da tela de entrada: o
+// cookies.txt no "Colar cookies", o código no "Entrar com um código". O diálogo
+// fechado já teve o campo limpo (`LIMPEZA_AO_FECHAR`), e só um abre por vez.
+function textoDigitadoNaEntrada() {
+    return [['pasteModal', 'cookiesTextarea'], ['pairEnterModal', 'pairCodeInput']].some(([modal, campo]) => {
+        const m = document.getElementById(modal);
+        const c = document.getElementById(campo);
+        return !!(m && !m.classList.contains('hidden') && c && String(c.value || '').trim());
+    });
 }
 
 // O link de pareamento aberto neste aparelho. Num aparelho JÁ logado, o link
@@ -572,13 +621,30 @@ function aoFimDaPerguntaDaAbertura(entrou) {
 // sessão salva, a tela de entrada não aparece antes da resposta; se o código
 // valer, ele vence a sessão velha (é o pedido explícito de agora); se não
 // valer, o aviso de sempre sai e a sessão salva segue o caminho normal.
+//
+// SEM sessão salva, o link que falha deixava a pessoa no "Bem-vindo!" com o
+// "Código inválido" e mais nada: a abertura pelo link não pergunta à extensão,
+// e a sessão que OUTRA aba guardou durante o resgate não era adotada (auditoria
+// da rodada 10, R10-1-04, MEDIDO). Agora a sessão do aparelho entra, como na
+// abertura; sem ela, a extensão é perguntada como na abertura comum. O aviso do
+// código inválido já saiu e fica — o resgate é que o mostra.
 function abrirPeloCodigoDaURL(codigo) {
     const sessaoSalva = !!API.getSession();
     if (!sessaoSalva) showAuthScreen();
     return resgatarPareamento(codigo, { silencioso: true }).then((entrou) => {
-        if (entrou || !sessaoSalva) return;
-        if (API.getSession()) abrirComSessaoSalva();
-        else showAuthScreen();
+        if (entrou) return;
+        if (sessaoSalva) {
+            if (API.getSession()) abrirComSessaoSalva();
+            else showAuthScreen();
+            return;
+        }
+        // Entrou NESTA aba durante o resgate (o colar, outro código): nada aqui.
+        if (API.temSessaoNaMemoria() || AppState.authenticated) return;
+        // Com sessão no aparelho a extensão não é perguntada (traria uma sessão
+        // nova por cima da guardada): ela é adotada, ou — com texto digitado na
+        // tela de entrada — a tela fica como está.
+        if (safeLS.get('waze_session_token')) { adotarSessaoDoAparelho(); return; }
+        return entrarPelaExtensao().then(aoFimDaPerguntaDaAbertura);
     });
 }
 
@@ -1334,13 +1400,14 @@ function setupAppListeners() {
     });
     $('extJaInstalei')?.addEventListener('click', () => window.location.reload());
 
-    // E ao voltar pra esta aba, pergunta de novo — em silêncio. Hoje isso cobre
+    // E ao voltar pra esta aba, na tela de entrada: a sessão que outra aba
+    // guardou entra (em TODO aparelho), e sem ela a extensão é perguntada de
+    // novo, em silêncio, onde ela instala (ver `aoVoltarAAba`). A pergunta cobre
     // quem recarregou noutro lugar ou reabriu o WME; quando a extensão passar a
     // se injetar nas abas abertas (onInstalled + scripting, versão futura dela),
     // este mesmo caminho resolve a instalação sem toque nenhum e o botão acima
-    // deixa de ser necessário. Só onde extensão existe: no celular seria uma
-    // espera de 350ms por nada, repetida a cada troca de aba.
-    if (podeInstalarExtensao()) document.addEventListener('visibilitychange', perguntarAExtensaoAoVoltar);
+    // deixa de ser necessário.
+    document.addEventListener('visibilitychange', aoVoltarAAba);
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', () => {
         // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
@@ -1370,8 +1437,24 @@ function setupAppListeners() {
     window.addEventListener('pointerdown', () => { focoDoTeclado = null; }, true);
 }
 
-// A volta a esta aba na TELA DE ENTRADA pergunta à extensão, em silêncio (o
-// ouvinte mora no `setupAppListeners`, e só onde a extensão instala).
+// A VOLTA a esta aba (o `visibilitychange`; o ouvinte mora no
+// `setupAppListeners`), em TODO aparelho. Na tela de entrada, sem sessão na
+// memória: a sessão que OUTRA aba guardou no aparelho é adotada, como na
+// abertura (`adotarSessaoDoAparelho`); sem nenhuma, a extensão é perguntada em
+// silêncio — só onde ela instala: no celular seria uma espera de 350 ms por
+// nada, a cada troca de aba. O ouvinte inteiro morava só onde a extensão
+// instala, e a volta ADOTAVA em caso nenhum: a pessoa entrava pela outra aba,
+// voltava a esta e seguia no "Bem-vindo!" até recarregar (auditoria da rodada
+// 10, R10-1-03, MEDIDO no Chromium e decidido como o R9-1-03).
+function aoVoltarAAba() {
+    if (document.visibilityState !== 'visible') return;
+    if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
+    if (adotarSessaoDoAparelho()) return;
+    if (podeInstalarExtensao()) perguntarAExtensaoAoVoltar();
+}
+
+// A volta a esta aba na TELA DE ENTRADA pergunta à extensão, em silêncio (onde
+// ela instala: ver `aoVoltarAAba`).
 function perguntarAExtensaoAoVoltar() {
     if (document.visibilityState !== 'visible') return;
     // Quem deu "Sair" NESTA página não é relogado por trocar de aba:
@@ -1392,7 +1475,13 @@ function perguntarAExtensaoAoVoltar() {
     // nem tinha entrado (auditoria de 2026-10-06, R9-1-03).
     if (AppState.authenticated || API.temSessaoNaMemoria() || safeLS.get('waze_session_token')) return;
     if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
-    entrarPelaExtensao({ silencioso: true }).then((entrou) => { if (!entrou) mostrarNegadoDaExtensao(); });
+    entrarPelaExtensao({ silencioso: true }).then((entrou) => {
+        // A outra aba entrou enquanto a extensão respondia: a sessão dela entra,
+        // como no fim da pergunta da abertura (a volta não a adota com uma
+        // pergunta no ar — ver `adotarSessaoDoAparelho`).
+        if (entrou || adotarSessaoDoAparelho()) return;
+        mostrarNegadoDaExtensao();
+    });
 }
 
 // Seletor de idioma. São DOIS controles: um em Filtros → Preferências (onde se

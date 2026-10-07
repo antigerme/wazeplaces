@@ -537,7 +537,9 @@ test('app: quem mostra a recusa — a abertura, a volta à aba (uma vez por pág
     'a abertura sem sessão não mostra a recusa que a extensão repassou');
   assert.match(APP_SEM, /if \(saiuNestaPagina\) return;\s*if \(extNegadoNestaPagina\) return;/,
     'a volta à aba pergunta de novo à extensão depois de ela já ter dito que o portão recusou');
-  assert.match(APP_SEM, /entrarPelaExtensao\(\{ silencioso: true \}\)\.then\(\(entrou\) => \{ if \(!entrou\) mostrarNegadoDaExtensao\(\); \}\);/,
+  // A volta mostra a recusa quando nem a extensão nem a sessão de outra aba
+  // entraram (a adoção no fim da pergunta é o R10-1-03, em test/contas-abas).
+  assert.match(APP_SEM, /entrarPelaExtensao\(\{ silencioso: true \}\)\.then\(\(entrou\) => \{\s*if \(entrou \|\| adotarSessaoDoAparelho\(\)\) return;\s*mostrarNegadoDaExtensao\(\);\s*\}\);/,
     'a volta à aba não mostra a recusa');
   const queda = fatiar('derrubarSessao');
   assert.match(queda, /const negado = tirarNegadoDaExtensao\(\);/, 'a queda ignora a recusa que a extensão repassou');
@@ -562,10 +564,16 @@ test('login que DEU CERTO zera as marcas da página: depois de "Sair" e entrar d
 function montarCodigoDaURL({ token, resgate }) {
   const log = [];
   const deps = {
-    API: { getSession: () => token },
+    API: { getSession: () => token, temSessaoNaMemoria: () => !!token },
+    AppState: { authenticated: false },
+    // O aparelho: sem sessão de outra aba (o R10-1-04 com ela mora em test/contas-abas).
+    safeLS: { get: (k) => (k === 'waze_session_token' ? token : null) },
     showAuthScreen: () => log.push('entrada'),
     resgatarPareamento: async (codigo, opcoes) => { log.push('resgate:' + codigo + ':' + !!(opcoes && opcoes.silencioso)); return resgate; },
     abrirComSessaoSalva: () => log.push('sessaoSalva'),
+    adotarSessaoDoAparelho: () => { log.push('adotou'); return true; },
+    entrarPelaExtensao: (o) => { log.push('extensão' + (o && o.silencioso ? ' (em silêncio)' : '')); return Promise.resolve(false); },
+    aoFimDaPerguntaDaAbertura: (entrou) => log.push('fim da pergunta:' + entrou),
   };
   const { abrirPeloCodigoDaURL } = montar(['abrirPeloCodigoDaURL'], deps, ['abrirPeloCodigoDaURL']);
   return { abrirPeloCodigoDaURL, log };
@@ -580,10 +588,12 @@ test('link de pareamento vencido num aparelho LOGADO: o aviso sai e a sessão sa
   const trocou = montarCodigoDaURL({ token: 'SALVO', resgate: true });
   await trocou.abrirPeloCodigoDaURL('NOVO');
   assert.deepEqual(trocou.log, ['resgate:NOVO:true']);
-  // CONTROLE: sem sessão salva, a tela de entrada aparece como sempre.
+  // CONTROLE: sem sessão salva, a tela de entrada aparece como sempre — e, com o
+  // código recusado, a extensão é perguntada como na abertura comum (R10-1-04;
+  // o caso com a sessão de outra aba no aparelho mora em test/contas-abas).
   const deslogado = montarCodigoDaURL({ token: null, resgate: false });
   await deslogado.abrirPeloCodigoDaURL('VENCIDO');
-  assert.deepEqual(deslogado.log, ['entrada', 'resgate:VENCIDO:true']);
+  assert.deepEqual(deslogado.log, ['entrada', 'resgate:VENCIDO:true', 'extensão', 'fim da pergunta:false']);
 });
 
 // ── A19: o atalho do ícone aberto SEM sessão ────────────────────────────────
