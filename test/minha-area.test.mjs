@@ -79,8 +79,9 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'completarPerfilChegado', 'refazerFilaReal', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
   // A caixa da área POR SERVIDOR (R9-6-04): a busca usa a do servidor dela, lida com os editáveis.
+  // E o servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-01/03).
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
-    'anotarEditaveis']) if (achar(opcional)) nomes.push(opcional);
+    'anotarEditaveis', 'servidorNuncaLido']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0;\n'
@@ -229,7 +230,9 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
   };
   // O `/Session` de cada servidor: o que o teste deu; a falha que o servidor
   // RESPONDEU (o Waze fora); ou a que NEM CHEGOU (`_motivo`, como o `_post` marca).
+  // E o 401 (`semSessao`): a sessão que o servidor não reconhece.
   const resposta = (r) => (perfis[r] === 'semResposta' ? { success: false, errorCategory: 'transient', _motivo: 'TypeError' }
+    : perfis[r] === 'semSessao' ? { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' }
     : perfis[r] ? { success: true, profile: { ...perfis[r] } } : { success: false, errorCategory: 'transient' });
   const navegador = { onLine: true };
   const API = {
@@ -254,7 +257,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
     REGIOES_DO_WAZE: ['row', 'na', 'il'], navigator: navegador, Treino: { ativo: false, entradas: 0 },
     document: { getElementById: () => el() },
     dfato: () => {}, dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
-    handleUnauthorized: () => {}, showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
+    handleUnauthorized: () => log.push('confere-sessao'), showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
     t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
     guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {}, sortQueue: () => {},
     aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {}, offlineVarrer: () => {},
@@ -275,7 +278,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
     'startFetching', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'resetQueue',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises'];
-  for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas']) if (achar(opcional)) nomes.push(opcional);
+  for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
@@ -397,7 +400,17 @@ test('R10-6-02: sem área no servidor aplicado, "Minha área" desliga e diz — 
   assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa']);
 });
 
-test('R10-6-02: a ida é UMA por servidor e por sessão — a que está no ar é dividida, e a que o servidor respondeu com falha não sai de novo até a sessão mudar', async () => {
+// R11-6-01 (auditoria da rodada 11): a pergunta que o servidor respondeu com
+// FALHA (o Waze fora: o 500 `transient` do core; a página de erro da borda) valia
+// pela ida da sessão inteira, e a busca ia ao servidor aplicado com a caixa do
+// perfil de OUTRO servidor — "Tudo limpo! … Confira o país e a região" com
+// "Minha área" ligada, e nem o ↻ perguntava de novo (MEDIDO no navegador, nos dois
+// motores). Este teste era o do R10-6-02 que fixava esse contrato ("a que falhou
+// não sai de novo até a sessão mudar"; "a que falhou deixa a caixa do perfil que
+// o app tem") — o defeito escrito como regra. Agora: a ida no ar segue dividida,
+// a que FALHOU não vale (a busca ESPERA, com a tela de falha, sem a caixa de
+// outro servidor), o próximo GESTO pergunta de novo, e a que LEU não sai mais.
+test('R11-6-01: a ida no ar é dividida; a que o servidor respondeu com FALHA não vale — a busca espera, sem a caixa de outro servidor, e o próximo gesto pergunta de novo', async () => {
   const perfis = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
   // O servidor responde com falha (o Waze fora): `perfis.na` não existe.
   const m = montarServidores({ perfis, segurar: ['na'] });
@@ -413,18 +426,56 @@ test('R10-6-02: a ida é UMA por servidor e por sessão — a que está no ar é
   await primeira;
   await segunda;
   await tique(5);
-  await m.atualizar();                            // e o ↻ depois da falha
-  assert.deepEqual(m.perguntas, ['na'], `a pergunta que falhou saiu de novo na mesma sessão: ${m.perguntas}`);
-  // A que falhou deixa a caixa do perfil que o app tem, como antes.
-  assert.equal(m.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_BR));
-  // Sessão nova (a renovação): pode perguntar de novo.
-  m.app.novaSessao();
-  m.soltar.na = null;
-  const depois = m.atualizar();
+  assert.deepEqual(m.buscas, [],
+    `com a pergunta à NA falhando, a busca saiu com a caixa do perfil de OUTRO servidor: ${m.buscas} — o "Tudo limpo!" com "Minha área" ligada`);
+  assert.equal(m.AppState.loadError, true, 'a busca que espera não pediu a tela de falha (com "Tentar de novo"): o painel diria "Tudo limpo!"');
+  assert.equal(m.AppState.filters.myArea, true, `"Minha área" desligou sem saber se há área na NA: ${m.avisos()}`);
+  // O gesto seguinte (o "Tentar de novo", o ↻) pergunta de novo — e, com a NA
+  // respondendo, a busca vai pela caixa de lá.
+  perfis.na = { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [235], areas: AREA_NY, managedAreas: [] };
+  const terceira = m.atualizar();
   await tique();
-  assert.deepEqual(m.perguntas, ['na', 'na'], `na sessão nova, o servidor que a anterior não leu não foi perguntado: ${m.perguntas}`);
+  assert.deepEqual(m.perguntas, ['na', 'na'], `o gesto depois da falha não perguntou de novo: a falha valeu pela ida (${m.perguntas})`);
   m.soltar.na();
-  await depois;
+  await terceira;
+  await tique(5);
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `a busca do gesto não foi pela caixa da NA: ${m.buscas}`);
+  // A que LEU não sai de novo: nenhum pedido a mais no free tier.
+  await m.atualizar();
+  assert.deepEqual(m.perguntas, ['na', 'na'], `a NA que respondeu foi perguntada de novo: ${m.perguntas}`);
+  assert.equal(m.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY));
+});
+
+test('R11-6-01: a pergunta que NEM CHEGOU (`_motivo`) — a MESMA busca não sai com a caixa de outro servidor: espera, com a tela de falha', async () => {
+  const perfis = {
+    row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] },
+    na: 'semResposta',
+  };
+  const m = montarServidores({ perfis });
+  await m.chegaOPerfil();
+  assert.deepEqual(m.buscas, [], 'PRÉ-CONDIÇÃO: o perfil buscou sozinho');
+  await m.aplicarRegiao('na', 235);
+  assert.deepEqual(m.perguntas, ['na'], `PRÉ-CONDIÇÃO: a NA não foi perguntada (uma vez): ${m.perguntas}`);
+  assert.deepEqual(m.buscas, [],
+    `a MESMA busca saiu com a caixa do Brasil na NA: ${m.buscas} — o "Tudo limpo! … Confira o país e a região" até o próximo gesto`);
+  assert.deepEqual([m.AppState.loadError, m.AppState.filters.myArea], [true, true],
+    'a busca que espera a caixa não pediu a tela de falha, ou desligou "Minha área"');
+  assert.ok(!m.log.includes('confere-sessao'), 'a pergunta que nem chegou foi tratada como sessão caída');
+});
+
+test('R11-6-01: a pergunta ao servidor aplicado que leva 401 vai pra conferência da sessão — com a busca esperando, ninguém mais a veria', async () => {
+  const perfis = {
+    row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] },
+    na: 'semSessao',
+  };
+  const m = montarServidores({ perfis });
+  await m.chegaOPerfil();
+  await m.aplicarRegiao('na', 235);
+  await tique(5);
+  assert.deepEqual(m.perguntas, ['na'], `PRÉ-CONDIÇÃO: a NA não foi perguntada: ${m.perguntas}`);
+  assert.deepEqual(m.buscas, [], `com o 401 na pergunta, a busca saiu com a caixa de outro servidor: ${m.buscas}`);
+  assert.equal(m.log.filter((l) => l === 'confere-sessao').length, 1,
+    'o 401 da pergunta não foi conferido: com a sessão morta, a tela ficaria em "Falha ao carregar" a cada "Tentar de novo"');
 });
 
 test('R10-6-02: o servidor que a decisão do perfil JÁ leu não é perguntado de novo — a pessoa aplicou a NA enquanto o app a perguntava', async () => {

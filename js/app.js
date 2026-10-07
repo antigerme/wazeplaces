@@ -11512,15 +11512,20 @@ function caixaDaMinhaArea(perfil) {
 // real: 8 e 1 áreas na ROW, 0 na NA e na IL), e o perfil do `AppState` é o do
 // servidor em que ele foi pedido: quem só edita na NA chega na ROW com zero
 // áreas, e o `paisDoPerfil` o leva pra NA com a caixa do perfil de LÁ — a que
-// ele leu (`anotarEditaveis`). Sem leitura do servidor, a do perfil que o app
-// tem (auditoria da rodada 9, R9-6-04) — o que, desde o R10-6-02, só sobra
-// quando a leitura do servidor que a pessoa aplicou falhou
-// (`lerServidorDaMinhaArea`).
+// ele leu (`anotarEditaveis`).
+//
+// Servidor NUNCA lido pra esta conta (`servidorNuncaLido`): `undefined` — NÃO SE
+// SABE. A caixa do perfil guardado é de OUTRO servidor e não cruza com este: a
+// busca ia ao servidor aplicado à mão com a área de outro (o "Tudo limpo! …
+// Confira o país e a região" com "Minha área" ligada; auditoria da rodada 11,
+// R11-6-01). Quem decide o que fazer sem saber é a busca (`fetchNextPage`: ela
+// espera). `null` é saber que lá não há área.
 function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
     const perfil = AppState.profile;
     const lidas = editaveisPorServidor.caixas;
     if (perfil && perfil.id !== null && perfil.id !== undefined && editaveisPorServidor.conta === String(perfil.id)
         && lidas && Object.prototype.hasOwnProperty.call(lidas, regiao)) return lidas[regiao];
+    if (servidorNuncaLido(regiao)) return undefined;
     return caixaDaMinhaArea(perfil);
 }
 
@@ -11534,33 +11539,43 @@ function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
 // `paisDoPerfil` faz: `API.getProfile(regiao)` + `anotarEditaveis`), e a busca
 // espera a resposta (`startFetching`).
 //
-// UMA ida por servidor e por sessão (`epocaDaSessao`): a que está no ar é
-// dividida, e a que o servidor RESPONDEU — deu certo ou não — não sai de novo; a
-// que falhou deixa a caixa do perfil que o app tem, como antes. A que NEM CHEGOU
-// (`_motivo`: a rede, o teto de 45 s) não conta, e sem rede nem se pergunta: a
-// busca também não sai, e quem aplicou a região num túnel teria a resposta
-// gasta numa falha do aparelho — com a rede de volta, a busca ia com a caixa de
-// outro servidor (o mesmo "Tudo limpo!"). Na MESMA busca ela não se repete (ver
-// o `startFetching`). E só depois de um GESTO: o servidor da busca só fica sem
-// leitura quando a pessoa aplica uma região à mão — o da abertura é lido com o
-// perfil, e o da ida pro país do perfil, pelo `paisDoPerfil`. Devolve a promessa
-// da ida (no ar ou nova), ou `null` quando não há o que perguntar.
-let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };
+// A ida que está no ar é dividida, e só a que LEU vale: a resposta boa fica
+// anotada (`anotarEditaveis`), e aquele servidor não é perguntado de novo. A
+// que FALHOU — o Waze fora (o 500 `transient` do core), a página de erro da
+// borda (o 502 que não é JSON), a que NEM CHEGOU (`_motivo`: a rede, o teto de
+// 45 s) — não vale pela ida: a busca ESPERA, com "Falha ao carregar" e "Tentar
+// de novo" (ver `fetchNextPage`), e o próximo gesto pergunta de novo — uma ida
+// por gesto, nenhuma por relógio. Até o lote 14 a falha valia pela SESSÃO
+// inteira, e a busca ia com a caixa do perfil de OUTRO servidor: "Tudo limpo! …
+// Confira o país e a região" com "Minha área" ligada, e nem o ↻ perguntava de
+// novo (MEDIDO no navegador, nos dois motores; auditoria da rodada 11,
+// R11-6-01). É a régua da lista de países: a que falha não fica
+// (`pedirListaDePaises`). O 401 vai pra conferência da sessão, e a recusa do
+// portão é terminal, como na carga do perfil: com a busca esperando, ninguém
+// mais os veria. Sem rede nem se pergunta: a busca também não sai (ela mostra o
+// "sem sinal"). Na MESMA busca a pergunta não se repete (ver o `startFetching`).
+// E só depois de um GESTO: o servidor da busca só fica sem leitura quando a
+// pessoa aplica uma região à mão — o da abertura é lido com o perfil, e o da
+// ida pro país do perfil, pelo `paisDoPerfil`. Devolve a promessa da ida (no ar
+// ou nova), ou `null` quando não há o que perguntar.
+let leiturasDaMinhaArea = { epoca: null, noAr: new Map() };
 function lerServidorDaMinhaArea(regiao = API.getRegion()) {
     const perfil = AppState.profile;
     if (!AppState.authenticated || !AppState.filters.myArea || !regiao) return null;
     if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return null;
     if (editaveisLidos(regiao) !== null) return null;
-    if (leiturasDaMinhaArea.epoca !== epocaDaSessao) leiturasDaMinhaArea = { epoca: epocaDaSessao, noAr: new Map(), feitas: new Set() };
+    if (leiturasDaMinhaArea.epoca !== epocaDaSessao) leiturasDaMinhaArea = { epoca: epocaDaSessao, noAr: new Map() };
     const estas = leiturasDaMinhaArea;
-    if (estas.feitas.has(regiao)) return null;
     if (estas.noAr.has(regiao)) return estas.noAr.get(regiao);
     if (navigator.onLine === false) return null;
     const epoca = epocaDaSessao;
-    let respondeu = true;
     const ida = Promise.resolve(API.getProfile(regiao)).then((r) => {
-        if (r && r._motivo) { respondeu = false; return; }
-        if (epoca !== epocaDaSessao || !(r && r.success && r.profile)) return;
+        if (epoca !== epocaDaSessao) return;
+        if (!(r && r.success && r.profile)) {
+            if (r && r.errorCategory === 'access_denied') { if (AppState.authenticated) recusaDoPortao(r); }
+            else if (r && r.errorCategory === 'unauthorized') handleUnauthorized();
+            return;
+        }
         // A conta que perguntou: a resposta de outra conta não entra na dela.
         if (!AppState.profile || String(AppState.profile.id) !== String(perfil.id)) return;
         anotarEditaveis(perfil, regiao, r.profile.editableCountryIDs, r.profile.areas, r.profile.managedAreas);
@@ -11569,7 +11584,6 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
         redesenharFiltrosComOPerfil();
     }).catch(() => {}).finally(() => {
         estas.noAr.delete(regiao);
-        if (respondeu) estas.feitas.add(regiao);
     });
     estas.noAr.set(regiao, ida);
     return ida;
@@ -11671,6 +11685,14 @@ function fetchNextPage() {
     // false` encerra o laço do `startFetching` (gotcha #19). Com o perfil na mão
     // e SEM caixa NO SERVIDOR desta busca (`caixaDaMinhaAreaEm`, R9-6-04), o
     // filtro desliga e diz por quê.
+    //
+    // E sem SABER a caixa do servidor desta busca — o servidor aplicado à mão que
+    // o app nunca leu, porque a pergunta a ele falhou ou nem chegou
+    // (`lerServidorDaMinhaArea`) —, a busca também ESPERA, como sem o perfil: a
+    // caixa do perfil guardado é de OUTRO servidor, e com ela a tela dizia "Tudo
+    // limpo! … Confira o país e a região" com "Minha área" ligada (auditoria da
+    // rodada 11, R11-6-01). O "Tentar de novo" pergunta de novo: uma ida por
+    // gesto, sem relógio.
     if (AppState.filters.myArea) {
         if (!AppState.profile) {
             filaEsperaPerfil = true;
@@ -11681,7 +11703,16 @@ function fetchNextPage() {
             updatePendingCount();
             return Promise.resolve();
         }
-        if (!caixaDaMinhaAreaEm()) desligarMinhaAreaSemCaixa();
+        const caixa = caixaDaMinhaAreaEm();
+        if (caixa === undefined) {
+            filaEsperaPerfil = true;
+            if (AppState.queue.length === 0) AppState.loadError = true;
+            AppState.hasMore = false;
+            dfato('busca.esperaCaixa', { regiao: API.getRegion() });
+            updatePendingCount();
+            return Promise.resolve();
+        }
+        if (!caixa) desligarMinhaAreaSemCaixa();
     }
 
     AppState.fetching = true;
