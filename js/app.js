@@ -9212,9 +9212,29 @@ function diagAjustarRecursos() {
 // marca (`API.registrosDesde`) pras duas listas: o relatório só leva o recurso
 // que começou depois dela (`diagRecursosDaSessao`), e o anel não registra a
 // chamada que começou antes (`API._registrar`), termine quando terminar.
-function esquecerRegistrosDaPagina() {
-    try { API.registrosDesde = performance.now(); } catch (e) { /* sem a API: só a limpeza */ }
+//
+// `ficaASessao` (a marca da sessão, ver `marcaDaSessao`) é a da TROCA DE CONTA:
+// o login ou o perfil que a revela já é de quem ENTROU, e o que essa sessão fez
+// fica — no anel (`deixarSoAsChamadasDaSessao`) e na regra do instante, pra
+// chamada dela que ainda estava no ar (R10-1-02). O "Sair" não deixa nenhuma.
+// A lista de recursos do navegador não diz de que sessão cada entrada é, e
+// segue cortada pelo instante.
+function esquecerRegistrosDaPagina(ficaASessao = null) {
+    try {
+        API.registrosDesde = performance.now();
+        API.registrosDaSessao = ficaASessao || null;
+    } catch (e) { /* sem a API: só a limpeza */ }
     try { performance.clearResourceTimings(); } catch (e) {}
+}
+
+// O anel de chamadas fica só com o que a sessão `fica` fez (a marca que cada
+// registro leva, `API._marcaDaChamada`); sem sessão que fique, esvazia.
+function deixarSoAsChamadasDaSessao(fica) {
+    try {
+        for (let i = API.chamadas.length - 1; i >= 0; i--) {
+            if (!fica || API.chamadas[i].s !== fica) API.chamadas.splice(i, 1);
+        }
+    } catch (e) { /* sem a API: nada a tirar */ }
 }
 function diagRecursosDaSessao() {
     let lista = [];
@@ -18623,15 +18643,19 @@ function esquecerOutraConta(id) {
     // O anel de chamadas, como no "Sair": o `dlogApagar` tira os corpos, mas as
     // entradas ficavam — a rota, o status, a hora e o `n` da fila de cada pedido
     // da conta anterior, em sequência, iam no relatório e na cópia guardada de
-    // quem entrou (auditoria da rodada 9, R9-1-04 = R9-4-09, MEDIDO). Quem entra
-    // começa do zero, como depois do "Sair".
-    try { API.chamadas.length = 0; } catch (e) {}
+    // quem entrou (auditoria da rodada 9, R9-1-04 = R9-4-09, MEDIDO). Sai o que
+    // era da sessão ANTERIOR; o que a sessão de quem entrou já fez fica — o login
+    // que revelou a troca, e a abertura dela quando a troca só se descobre pelo
+    // perfil. Zerar tudo levava junto (auditoria da rodada 10, R10-1-02 =
+    // R10-4-07, MEDIDO: o anel de quem entrou pelo código ficava com 1 de 5).
+    const ficaASessao = API.sessionToken ? marcaDaSessao(API.sessionToken) : null;
+    deixarSoAsChamadasDaSessao(ficaASessao);
     // A lista de recursos do navegador, como no "Sair": a URL da foto de perfil
     // (com o id da conta anterior) e as das fotos da fila dela iam no relatório
     // do modo dev de quem entrou (MEDIDO; auditoria de 2026-10-03, R8-1-05). O
-    // que ainda estava no ar também fica de fora — da lista e do anel de chamadas
-    // (ver a função; L12-1).
-    esquecerRegistrosDaPagina();
+    // que ainda estava no ar também fica de fora — da lista, e do anel de
+    // chamadas o que não é da sessão de quem entrou (ver a função; L12-1).
+    esquecerRegistrosDaPagina(ficaASessao);
     // As listas de países guardadas por região valem pra uma sessão de UMA
     // conta, como no "Sair" (R9-6-01): quem entrou pede as dele.
     esquecerListasDePaises();

@@ -66,18 +66,20 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     presencaWmeZerar: () => {},   // a presença da conta anterior (test/costura-sessao, K5)
     esquecerEscolhasDaContaAnterior: () => log.push('escolhas'),   // (test/contas-abas, A3)
     fecharOQueEraDaContaAnterior: () => log.push('camadas'),   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
-    esquecerRegistrosDaPagina: () => log.push('recursos'),   // a lista de recursos e a marca do anel (R8-1-05, L12-1)
+    // a lista de recursos e a marca do anel (R8-1-05, L12-1), com a sessão que FICA (R10-1-02)
+    esquecerRegistrosDaPagina: (fica) => { log.push('recursos'); registrosFica.push(fica); },
     esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
     esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
+  const registrosFica = [];
   const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
-    'sessaoDestaAbaEhAGuardada'];
+    'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, contaConfirmadaNestaAba = null;\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
     ...chaves.map((k) => deps[k]));
-  return { app, guardado, log, AppState, sessao, deps };
+  return { app, guardado, log, AppState, sessao, deps, registrosFica };
 }
 const P = (v, u) => ({ venueID: v, updateRequestID: u, creatorId: 9 });
 
@@ -140,6 +142,33 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
   assert.ok(!c.log.includes('recursos') && !c.log.includes('painel'),
     'a MESMA conta voltando perdeu a lista de recursos (o relatório dela) ou o painel do Histórico (é dela)');
   assert.ok(!c.log.includes('paises'), 'a MESMA conta voltando pede de novo as listas de países que já tinha (R9-6-01)');
+});
+
+// ── R10-1-02 = R10-4-07: a troca tira do anel o que era da sessão ANTERIOR, e só ──
+// O login (ou o perfil) que revela a troca já é de quem ENTROU: zerar o anel
+// levava o `testar-cookies` do próprio login e, quando a troca só se descobre
+// pelo perfil (a renovação pela extensão publicada, o código de pareamento sem a
+// conta), a abertura inteira (MEDIDO: 1 de 5 chamadas no anel de quem entrou).
+// Cada registro leva a marca da sessão que o fez (`s`, ver o api.js).
+test('R10-1-02: OUTRA conta entrou — o anel perde as chamadas da anterior e fica com as de quem entrou', () => {
+  const m = montar({ perfil: { id: 'A' }, token: 'tok-A' });
+  m.app.aoConhecerConta({ id: 'A' });
+  const de = (tok) => m.app.marcaDaSessao(tok);
+  m.deps.API.chamadas.splice(0, Infinity,
+    { rota: 'perfil', http: 200, s: de('tok-A') }, { rota: 'buscar-places', http: 200, n: 3, s: de('tok-A') },
+    { rota: 'testar-cookies', http: 200, s: de('tok-B') },          // o login de B, que revela a troca
+    { rota: 'perfil', http: 200, s: de('tok-B') },                  // a abertura de B
+    { rota: 'parear', http: 200, s: null });                        // sem sessão (o cancelamento de um código)
+  m.AppState.profile = null;
+  m.sessao.token = 'tok-B';
+  m.AppState.profile = { id: 'B' };
+  m.app.aoConhecerConta({ id: 'B' });
+  assert.ok(m.log.includes('dfato:conta.trocou'), 'PRÉ-CONDIÇÃO: a troca de conta não aconteceu');
+  assert.deepEqual(m.deps.API.chamadas.map((c) => `${c.rota}:${c.s === de('tok-B') ? 'B' : 'outra'}`),
+    ['testar-cookies:B', 'perfil:B'],
+    'a troca levou as chamadas de QUEM ENTROU (ou deixou as da anterior, ou a sem sessão)');
+  // E a marca do instante deixa ficar a chamada de B que ainda está no ar.
+  assert.deepEqual(m.registrosFica, [de('tok-B')], 'a limpeza não diz que a sessão de quem entrou fica');
 });
 
 test('o esvaziamento que parou esperando a conta é chamado quando o perfil chega', () => {
@@ -359,7 +388,8 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
-    'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada'];
+    'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada',
+    'deixarSoAsChamadasDaSessao'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 }, contaConfirmadaNestaAba = null;
     ${nomes.map(fatiar).join('\n')}

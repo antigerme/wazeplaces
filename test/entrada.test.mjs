@@ -218,8 +218,10 @@ test('o "Sair" e a troca de conta limpam a lista de recursos que o diagnóstico 
   // Os dois passam pela MESMA limpeza — a troca de conta não passava por
   // nenhuma (auditoria de 2026-10-03, R8-1-05). Ancorado no começo da linha:
   // o comentário em volta cita o nome (gotcha #67).
-  for (const quem of ['handleLogout', 'esquecerOutraConta']) {
-    assert.match(fatiar(quem), /^\s+esquecerRegistrosDaPagina\(\);$/m,
+  // (A troca de conta diz qual sessão FICA — a de quem entrou, R10-1-02; o
+  // "Sair" não deixa nenhuma.)
+  for (const [quem, arg] of [['handleLogout', ''], ['esquecerOutraConta', 'ficaASessao']]) {
+    assert.match(fatiar(quem), new RegExp(`^\\s+esquecerRegistrosDaPagina\\(${arg}\\);$`, 'm'),
       `${quem}: a URL da foto de perfil (com o id de quem saiu) e as fotos dos pedidos seguem na lista de recursos`);
   }
 });
@@ -334,6 +336,68 @@ test('L12-1: a chamada que estava no AR no "Sair" não entra no anel de quem vem
   assert.deepEqual(Array.from(ctx.recursos(), (r) => r.name), ['/api/sessao'], 'a lista de recursos e o anel não usam a mesma marca');
 });
 
+// ═══ R10-1-02 = R10-4-07 · a TROCA de conta e o anel de quem ENTROU ═══════════
+// A troca não é o "Sair": o login (ou o perfil) que a revela já é de quem
+// entrou, e a abertura dele pode estar no ar. Zerar o anel tirava o
+// `testar-cookies` do próprio login e, quando a troca só se descobre pelo perfil,
+// a abertura inteira (MEDIDO, s07 da auditoria: o anel de quem entrou pelo código
+// com 1 de 5 chamadas; n17: sem o `testar-cookies`). Cada registro leva a marca
+// da sessão que o fez (`s`: a do token do pedido, ou, no login, a do token da
+// resposta), e a troca tira só o que é da ANTERIOR — no anel e na regra do
+// instante. Roda o `api.js` DE VERDADE com a limpeza do app.js, como no L12-1.
+test('R10-1-02: a troca de conta tira do anel o que era da sessão anterior — e o login e a abertura de quem entrou ficam', async () => {
+  const relogio = { agora: 0 };
+  const presos = new Map();
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console, setTimeout, clearTimeout, AbortController,
+    performance: { now: () => relogio.agora, clearResourceTimings: () => {}, getEntriesByType: () => [] },
+    // Cada pedido responde quando o teste solta (pela rota); o login devolve o token NOVO.
+    fetch: (url, op) => new Promise((ok) => {
+      const rota = String(url).split('/api/')[1];
+      const corpo = rota === 'testar-cookies' ? { success: true, sessionToken: 'tok-Y', conta: '5151' } : { success: true };
+      presos.set(rota + ':' + (JSON.parse(op.body).sessionToken || '-'), () => ok({ status: 200, headers: { get: () => null },
+        text: async () => JSON.stringify(corpo) }));
+    }),
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(ler('js/i18n.js') + '\n' + ler('js/api.js') + '\n'
+    + ['marcaDaSessao', 'esquecerRegistrosDaPagina', 'deixarSoAsChamadasDaSessao'].map(fatiar).join('\n')
+    + '\nthis.API = API; this.marca = marcaDaSessao; this.limpar = esquecerRegistrosDaPagina; this.deixar = deixarSoAsChamadasDaSessao;', ctx);
+  const { API } = ctx;
+  const soltar = async (chave) => { presos.get(chave)(); presos.delete(chave); for (let i = 0; i < 20; i++) await new Promise((ok) => setImmediate(ok)); };
+  const anel = () => Array.from(API.chamadas, (c) => `${c.rota}:${c.s === ctx.marca('tok-Y') ? 'Y' : c.s === ctx.marca('tok-X') ? 'X' : c.s}`);
+  // A sessão X (a anterior): uma chamada terminou, outra ficou no ar.
+  relogio.agora = 10; const px = API._post('perfil', { sessionToken: 'tok-X' }); await soltar('perfil:tok-X'); await px;
+  relogio.agora = 20; const bx = API._post('buscar-places', { sessionToken: 'tok-X', page: 1 });
+  // Y entra pelos cookies (sem token no pedido: a sessão é a da RESPOSTA) e abre: o perfil volta, a busca fica no ar.
+  relogio.agora = 100; const ly = API._post('testar-cookies', { cookies: 'c' }); await soltar('testar-cookies:-'); await ly;
+  relogio.agora = 200; const py = API._post('perfil', { sessionToken: 'tok-Y' }); await soltar('perfil:tok-Y'); await py;
+  relogio.agora = 210; const by = API._post('buscar-places', { sessionToken: 'tok-Y', page: 1 });
+  assert.deepEqual(anel(), ['perfil:X', 'testar-cookies:Y', 'perfil:Y'], 'PRÉ-CONDIÇÃO: o anel não marca a sessão de cada chamada');
+  // O perfil de Y revela a troca (aos 400): o que era de X sai.
+  relogio.agora = 400;
+  const fica = ctx.marca('tok-Y');
+  ctx.deixar(fica);
+  ctx.limpar(fica);
+  relogio.agora = 900;
+  await soltar('buscar-places:tok-X'); await bx;       // a de X, que estava no ar
+  await soltar('buscar-places:tok-Y'); await by;       // a de Y, que estava no ar
+  assert.deepEqual(anel(), ['testar-cookies:Y', 'perfil:Y', 'buscar-places:Y'],
+    'a troca levou do anel o login e a abertura de quem ENTROU (ou deixou entrar o que era da conta anterior)');
+  assert.ok(!/tok-[XY]/.test(JSON.stringify(Array.from(API.chamadas))), 'o token foi parar no registro — a marca é que vai');
+  // CONTROLE: o "Sair" não deixa sessão nenhuma — a chamada de Y no ar não entra (o L12-1 de sempre).
+  relogio.agora = 1000; const vy = API._post('validar-place', { sessionToken: 'tok-Y', venueID: 'v1', updateRequestID: 'u1' });
+  relogio.agora = 1100;
+  API.chamadas.length = 0;
+  ctx.limpar();
+  await soltar('validar-place:tok-Y'); await vy;
+  assert.deepEqual(anel(), [], 'CONTROLE: depois do "Sair", a chamada que estava no ar entrou no anel');
+});
+
 // ── A4: o autor em foco é da fila de QUEM ESTAVA aqui ──────────────────────
 test('outra conta entrando: o autor que a anterior focou sai — a fila dela não vem reordenada por ele', () => {
   const { registro, document } = domDeMentira({ focoAutorBar: { oculto: false }, focoAutorTexto: {}, focoAutorContagem: {} });
@@ -348,6 +412,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
     esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
