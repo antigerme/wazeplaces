@@ -22768,16 +22768,46 @@ async function handleBatchMarkRead() {
     // auditoria de 2026-10-07, R10-2-03). Conta na sessão da RESPOSTA, como o
     // card: o que pousou antes de uma queda conta, o que chega depois não (o
     // `sessaoTrocou`, abaixo). O aviso "N marcados" segue um só, no fim.
-    const contarLidos = (n) => {
+    //
+    // E o "Restam" desce JUNTO, pelo mesmo pedaço (R11-2-05): o placar subia a
+    // cada pedaço e o "Restam" só descia no fim do laço, então no meio o que o
+    // Waze já marcou contava nos DOIS números (MEDIDO no navegador: lote de 60, o
+    // 1º pedaço pousado — "Lidos 65" e "Restam 60", 125 de 100; auditoria de
+    // 2026-10-07). Só na fila do GESTO (`epocaFila`), a régua do fim: a fila
+    // refeita no meio (↻, filtro) tem o "Restam" dela, que não conta estes
+    // pedidos. Eles seguem NA FILA até o fim do lote, o card da frente inclusive
+    // (o "Restam" é o `serverTotal`, não o tamanho da fila), e o fim desconta só
+    // o que não desceu aqui (`descontados`).
+    const descontados = new Set();
+    const contarLidos = (ps) => {
+        const n = ps.length;
         AppState.stats.read += n;
         recordHistory('read', n, gesto.dia, gesto.onde);
         registrarLoteConfirmado(n, gesto);
         updateStats();
         saveStats();
+        if (epocaFila !== AppState.fetchEpoch) return;
+        for (const p of ps) descontados.add(chaveDoPedido(p));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - n);
+        updatePendingCount();
     };
+    // O que a OUTRA aba decidiu COM O LOTE NO AR (R11-2-02). Os alvos deixam de
+    // fora o anotado uma vez só, no começo (a junção do R10-2-02), e o lote
+    // mandava depois o que a pessoa decidiu na outra aba no meio dele, e o
+    // contava como lido — por cima da rejeição de lá, ou lido duas vezes
+    // (MEDIDO no navegador: lote de 30, a outra aba rejeita o 28º com o 1º
+    // pedaço no ar — Histórico 31 pra 30 pedidos, e "30 marcados"; auditoria de
+    // 2026-10-07). Cada pedaço, e cada pedido do um a um, pergunta de novo antes
+    // de sair; e o "já tratado" de um anotado no meio da ida é a decisão de lá
+    // (`pousouPorOutraAba`), sem contar. Vale a primeira decisão. Eles saem da
+    // fila no fim (`daOutraAba`, lá embaixo), como sairiam no aviso da outra aba
+    // se não estivessem em andamento aqui (`tirarDaFilaOQueAOutraAbaDecidiu`).
+    const decididoNaOutraAba = (p) => typeof decididosPorOutraAbaComCardAqui !== 'undefined'
+        && decididosPorOutraAbaComCardAqui.has(p) === true;
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
-            const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
+            const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO).filter((p) => !decididoNaOutraAba(p));
+            if (!pedaco.length) continue;
             const r = await mandar(() => API.markAsReadBatch(itens(pedaco), regiao));
             if (epoca !== epocaDaSessao) {
                 sessaoTrocou = true;
@@ -22790,11 +22820,13 @@ async function handleBatchMarkRead() {
             // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
             // E conta junto (R10-2-03, ver `contarLidos`), DEPOIS do pouso: se a
             // conta quebrar, o pedido não volta por causa disso.
-            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco.length); continue; }
+            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco); continue; }
             if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
+                // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02).
+                if (decididoNaOutraAba(p)) continue;
                 const r1 = await mandar(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
                 if (epoca !== epocaDaSessao) {
                     sessaoTrocou = true;
@@ -22802,6 +22834,9 @@ async function handleBatchMarkRead() {
                     break;
                 }
                 if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) {
+                    // O "já tratado" de um pedido que a outra aba decidiu enquanto
+                    // ele ia é a decisão de lá, já contada lá (R11-2-02).
+                    if (!r1.success && decididoNaOutraAba(p)) { pousouPorOutraAba(p, 'read'); continue; }
                     registrarPouso(p);
                     // O "já tratado" de um pedido cuja aprovação desta pessoa
                     // pousou sem resposta é a aprovação DELA (R8-2-01): o
@@ -22809,7 +22844,7 @@ async function handleBatchMarkRead() {
                     // o placar dele nem subiu (`desfechoDaAprovacaoDela` sem
                     // `contado`). Na hora, como o lido (R10-2-03).
                     if (!r1.success && aprovacaoDelaJaPousou(p)) { aprovadas.push(p); desfechoDaAprovacaoDela('read', p, false); }
-                    else { feitos.push(p); contarLidos(1); }
+                    else { feitos.push(p); contarLidos([p]); }
                 }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; break; }
                 else { falhou = r1 || {}; break; }
@@ -22827,6 +22862,31 @@ async function handleBatchMarkRead() {
         updateInFlightIndicator();
         aplicarTravaDeAcao();
     }
+    // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que de
+    // fato SAIU — nunca por quantos o lote marcou. É isso que amarra o desconto
+    // à fila do gesto: o ↻ e a troca de filtro no meio do lote refazem a fila
+    // (`fetchEpoch`), e a nova já vem sem estes pedidos (eles estavam em
+    // andamento), então nada sai dela e nada é descontado — antes o "Restam" da
+    // fila nova descia pelos pedidos da velha. E uma aprovação de foto que pousou
+    // no meio já tirou o pedido dela e descontou sozinha. O que já desceu pedaço
+    // a pedaço (`descontados`, R11-2-05) não desce de novo. `saiuDaFila`: a fila
+    // mudou por baixo do card que fica (R11-2-04, lá embaixo).
+    let saiuDaFila = 0;
+    const tirarDaFilaNoFim = (ps) => {
+        const fora = new Set(ps.map(chaveDoPedido));
+        const saem = AppState.queue.filter((p) => fora.has(chaveDoPedido(p)));
+        if (!saem.length) return;
+        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - saem.filter((p) => !descontados.has(chaveDoPedido(p))).length);
+        saiuDaFila += saem.length;
+    };
+    // O que a OUTRA aba decidiu enquanto estava em andamento aqui (R11-2-02): o
+    // que o lote deixou de fora, o que ele nem alcançou (parou numa falha) e o
+    // "já tratado" de lá. Sai da fila, menos o card da TELA, que fica — trocar o
+    // card debaixo do dedo é pior que um gesto a mais, e o gesto nele diz por quê
+    // (`gestoNoDecididoPorOutraAba`): a régua do aviso da outra aba.
+    const daOutraAba = alvos.filter(decididoNaOutraAba);
+    const daOutraAbaForaDaTela = () => daOutraAba.filter((p) => p !== AppState.currentPlace);
     // A sessão TROCOU no meio do lote: nada MAIS grava — placar, Histórico,
     // avisos —, porque a resposta é da sessão que acabou (ver `epocaDaSessao`); o
     // que pousou ANTES da queda já contou na hora, na sessão dele (R10-2-03). Mas na
@@ -22851,33 +22911,25 @@ async function handleBatchMarkRead() {
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
         // devolvê-los como card.
         if (posQueda.length) registrarPouso(posQueda);
-        const fora = new Set([...feitos, ...aprovadas, ...posQueda].map(chaveDoPedido));
-        const antes = AppState.queue.length;
-        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
-        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
-        naoSaiuNaQueda = alvos.some((p) => !fora.has(chaveDoPedido(p)));
+        tirarDaFilaNoFim([...feitos, ...aprovadas, ...posQueda, ...daOutraAbaForaDaTela()]);
+        // O que a outra aba decidiu não é "o que não saiu": está decidido.
+        const resolvidos = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba].map(chaveDoPedido));
+        naoSaiuNaQueda = alvos.some((p) => !resolvidos.has(chaveDoPedido(p)));
         // Daqui pra baixo, só a TELA: nada a contar.
         feitos.length = 0;
         aprovadas.length = 0;
+        daOutraAba.length = 0;
         falhou = null;
     }
-    if (feitos.length || aprovadas.length) {
+    if (feitos.length || aprovadas.length || daOutraAba.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
         // conquistas. Antes o lote subia só o placar, e o Histórico, o Resumo do
         // mês e a patente discordavam dele. O pouso E a conta já foram feitos a
         // cada pedaço, lá no laço (O4, R10-2-03): aqui fica a fila e o aviso.
+        // O que a outra aba decidiu também é trabalho dela nesta fila, como no
+        // gesto (`gestoNoDecididoPorOutraAba`), e não entra no aviso.
         tratouNestaFila = true;
-        // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
-        // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
-        // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote
-        // refazem a fila (`fetchEpoch`), e a nova já vem sem estes pedidos (eles
-        // estavam em andamento), então nada sai dela e nada é descontado — antes
-        // o "Restam" da fila nova descia pelos pedidos da velha. E uma aprovação
-        // de foto que pousou no meio já tirou o pedido dela e descontou sozinha.
-        const fora = new Set([...feitos, ...aprovadas].map(chaveDoPedido));
-        const antes = AppState.queue.length;
-        AppState.queue = AppState.queue.filter((p) => !fora.has(chaveDoPedido(p)));
-        AppState.serverTotal = Math.max(0, AppState.serverTotal - (antes - AppState.queue.length));
+        tirarDaFilaNoFim([...feitos, ...aprovadas, ...daOutraAbaForaDaTela()]);
         updateStats();
         saveStats();
         if (feitos.length) showToast(t(feitos.length === 1 ? 'toast.batchDone' : 'toast.batchDonePlural', { n: feitos.length }), 'success');
@@ -22896,8 +22948,9 @@ async function handleBatchMarkRead() {
     // filtro) ele não entrou — estava em andamento —, e ninguém o trazia: a fila
     // terminava em "Tudo limpo! … Confira o país" com os pedidos pendentes
     // (auditoria de 2026-09-29, V9). Volta pela busca (`devolverPedidoRecusado`),
-    // que sai na hora se a tela ficou sem card. O que a aprovação resolveu não volta.
-    const marcados = new Set([...feitos, ...aprovadas]);
+    // que sai na hora se a tela ficou sem card. O que a aprovação resolveu não
+    // volta, e o que a outra aba decidiu (R11-2-02) também não.
+    const marcados = new Set([...feitos, ...aprovadas, ...daOutraAba]);
     const naoMarcados = epocaFila !== AppState.fetchEpoch ? alvos.filter((p) => !marcados.has(p)) : [];
     // A fila na tela: o card da frente pode ter saído no lote.
     if (AppState.currentPlace && !AppState.queue.includes(AppState.currentPlace)) {
@@ -22911,6 +22964,15 @@ async function handleBatchMarkRead() {
         else if (AppState.hasMore) startFetching();
         else showNoPlaces();
     }
+    // O card da frente FICOU — já lido (R10-2-04), decidido na outra aba ou em
+    // andamento, que o lote deixa de fora — e a fila mudou por baixo dele: o
+    // card de FUNDO seguia mostrando um pedido que acabou de sair da fila, e o
+    // "Ver +N" e a barra do foco no autor contavam os que saíram (MEDIDO no
+    // navegador: fila u1–u5 do mesmo autor, u1 já lido — depois do lote, fila
+    // [u1], "Restam 1", o fundo ainda u2 e "Ver +4"; tocado, a barra "1 de 1";
+    // auditoria de 2026-10-07, R11-2-04). Quem acerta os três é o
+    // `aoMudarAFilaPorBaixo`, o mesmo da página que chega e da recusa automática.
+    else if (saiuDaFila) aoMudarAFilaPorBaixo();
     updatePendingCount();
 }
 
