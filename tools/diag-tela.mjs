@@ -26,7 +26,8 @@
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // `--cru` tira as MARCAS da ferramenta (hachura na imagem que faltou, moldura no
 // canvas e no FAB). Elas existem porque espaço vazio se confunde com "estava
@@ -92,6 +93,17 @@ function momentosEmOrdem(d, atuais) {
     .map((x) => x.m);
 }
 const momentos = momentosEmOrdem(d, atuais);
+
+// O endereço `file:` da página remontada, pra pasta de saída RELATIVA também.
+// Era `'file://' + caminho`: com uma pasta relativa (`tela-x`, que o uso
+// permite), o primeiro nome do caminho virava o HOST da URL — em minúsculas — e
+// a navegação morria em `net::ERR_INVALID_URL` (auditoria da rodada 10,
+// R10-4-09). Espaço, `#` e `%` no caminho também quebravam: a URL não os
+// codificava. `resolve` faz o caminho absoluto a partir da pasta de onde a
+// ferramenta foi chamada, e o `pathToFileURL` codifica o resto.
+function urlDoArquivo(caminho) {
+  return pathToFileURL(resolve(caminho)).href;
+}
 
 // As SENTINELAS: as do RELATÓRIO (`resumo.alertas`) e as de CADA CAPTURA, no
 // instante dela (`m.alertas`, relatório v4+). As da captura são as que importam
@@ -289,7 +301,7 @@ for (let i = 0; i < momentos.length; i++) {
     process.exit(1);
   }
   writeFileSync(tmp, pronto);
-  await page.goto('file://' + tmp, { waitUntil: 'load' });
+  await page.goto(urlDoArquivo(tmp), { waitUntil: 'load' });
   // A FONTE CARREGOU? Medido na página, e não deduzido da lista acima: o
   // `evaluate` roda mesmo com o JavaScript da página desligado. É a família que
   // o CSS do app pede pro corpo (`Inter`), e esperar as fontes antes do print

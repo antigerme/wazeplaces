@@ -16,8 +16,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const API = readFileSync(join(ROOT, 'tools/diag-api.mjs'), 'utf8');
@@ -232,6 +232,31 @@ test('diag-tela: relatório SEM captura é rotulado com a versão DELE e o paine
   const cap = [{ motivo: 'manual', dom: '<html></html>' }];
   assert.equal(momentosDoRelatorio({ momentos: cap, dom: 'x' }), cap);
   assert.deepEqual(momentosDoRelatorio({ momentos: [] }), []);
+});
+
+// ── R10-4-09: a pasta de saída RELATIVA ─────────────────────────────────────
+// O uso diz só `[pasta-de-saida]`. Com uma pasta relativa, a página remontada
+// era aberta em `'file://' + caminho`: o primeiro nome do caminho virava o HOST
+// da URL (em minúsculas) e a navegação morria em `net::ERR_INVALID_URL`
+// (auditoria da rodada 10, MEDIDO: `file://tela-7uccjh/.momento-1.html`). O
+// endereço sai do `urlDoArquivo` de VERDADE, com o `pathToFileURL` e o
+// `resolve` do Node.
+test('diag-tela: a pasta de saída RELATIVA vira um endereço `file:` que aponta pro arquivo (R10-4-09)', () => {
+  const ini = TELA.indexOf('\nfunction urlDoArquivo(');
+  assert.ok(ini > 0, 'urlDoArquivo sumiu do diag-tela');
+  const fim = TELA.indexOf('\n}\n', ini) + 2;
+  const urlDoArquivo = new Function('pathToFileURL', 'resolve', TELA.slice(ini, fim) + '\nreturn urlDoArquivo;')(pathToFileURL, resolve);
+  for (const caminho of ['tela-7ucCjH/.momento-1.html', 'saida/Tela Nova #1/.momento-2.html', '/tmp/diag-tela/.momento-3.html']) {
+    const u = urlDoArquivo(caminho);
+    assert.equal(new URL(u).protocol, 'file:', `${caminho}: não saiu um endereço file:`);
+    assert.equal(new URL(u).host, '', `${caminho}: o começo do caminho virou o HOST da URL (${u}) — a navegação morre em ERR_INVALID_URL`);
+    assert.equal(fileURLToPath(u), resolve(caminho), `${caminho}: o endereço não aponta pro arquivo que a ferramenta escreveu`);
+  }
+  // E é ele que a navegação usa (fora de comentário, gotcha #67).
+  const semCom = TELA.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(semCom, /await page\.goto\(urlDoArquivo\(tmp\), \{ waitUntil: 'load' \}\);/,
+    'a navegação não passa pelo urlDoArquivo');
+  assert.doesNotMatch(semCom, /'file:\/\/' \+/, 'voltou a URL montada à mão');
 });
 
 test('diag-api: decide por LISTA DE LEITURA — caminho torto até uma rota de escrita é recusado antes de ler o arquivo', () => {
