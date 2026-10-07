@@ -1527,6 +1527,9 @@ function setupAppListeners() {
     // E com o Histórico aberto: o que destravou com a página no fundo fica
     // visto na volta (`verConquistasAoVoltar`, R12-7-01).
     document.addEventListener('visibilitychange', verConquistasAoVoltar);
+    // E o aviso de UMA vez que saiu com a página no fundo espera a volta
+    // (`avisosAdiadosAoVoltar`, R13-7-01).
+    document.addEventListener('visibilitychange', avisosAdiadosAoVoltar);
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', () => {
         // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
@@ -13286,10 +13289,17 @@ for (const tipo of ['keydown', 'pointerdown', 'pointerup']) {
 // próximo toque. Chamado no FIM de cada fechamento; o que o próprio fechamento
 // pediu no meio (a foto que anda a fila ao fechar) é decidido depois, na
 // microtarefa, já com a marca.
+//
+// E os avisos de UMA vez que esperavam a camada fechar (R13-7-01) — DEPOIS do
+// "Como funciona": as duas microtarefas rodam na ordem, ele decide primeiro e,
+// aberto, o aviso espera por ele em vez de ficar por baixo. São banners, sem
+// entrada no voltar: nem o voltar do aparelho nem o nosso no ar os seguram.
 function aoFecharCamada(viaHistorico) {
-    if (AppState.preferences.comoFuncionaVisto) return;
-    if (viaHistorico) { comoFuncionaEsperaGesto = true; return; }
-    pedirComoFuncionaAdiado();
+    if (!AppState.preferences.comoFuncionaVisto) {
+        if (viaHistorico) comoFuncionaEsperaGesto = true;
+        else pedirComoFuncionaAdiado();
+    }
+    pedirAvisosAdiados();
 }
 
 // Direto no `openModal`, mesmo vindo da Ajuda: ele JÁ esconde o modal anterior
@@ -19519,6 +19529,8 @@ function avisarConsequencia(actionType) {
     if (typeof Treino !== 'undefined' && Treino.ativo === true) return;
     const vistas = AppState.preferences.consequenciaVista || {};
     if (vistas[actionType]) return;
+    // Nem por baixo de uma camada, nem com a página escondida (R13-7-01).
+    if (!avisoDeUmaVezSaiAgora('consequencia', actionType)) return;
     vistas[actionType] = true;
     AppState.preferences.consequenciaVista = vistas;
     savePreferences();
@@ -19527,6 +19539,85 @@ function avisarConsequencia(actionType) {
 // Só as que ESCREVEM no Waze. Pular é local — o pedido volta na próxima busca,
 // e isso o treino e o "Como funciona" já dizem.
 const CONSEQUENCIA_AVISADA = { reject: true, read: true };
+
+// ── Os avisos de UMA vez só saem onde a pessoa os VÊ ───────────────────────
+// São três, e cada um aparece uma vez na vida: a consequência do 1º ✕ e do 1º
+// ✓ (acima), o desbloqueio do Desfazer (`checkUndoGateUnlock`) e a dica "você
+// nunca desfaz" (`checkDicaDesfazer`). Os três saem no banner do topo
+// (#bannerStack, z-55), ABAIXO dos modais (z-60) e da foto e do mapa ampliados
+// (z-65), e a marca de visto era gravada na hora. A decisão que pousava com os
+// Filtros, a Ajuda ou a foto ampliada abertos — a camada aberta na janela do
+// Desfazer, o caso comum — punha o banner inteiro DEBAIXO da caixa da camada e
+// o gastava: nunca mais aparecia. O mesmo com a página no FUNDO (a fila de
+// saída esvaziando quando a rede volta, o app em segundo plano): o banner saía
+// e sumia antes de a pessoa voltar (R13-7-01, MEDIDO no Chromium e no WebKit,
+// no Pixel, no SE e no computador: a caixa do modal cobria 100% do banner, e o
+// toque caía no título dos Filtros; auditoria de 2026-10-07).
+//
+// A régua é a do treino (R8-7-01) e a do "Como funciona" adiado: com camada
+// aberta ou a página escondida, o aviso sai SEM marcar e fica PENDENTE. Quem
+// pede de novo é o fechamento da camada (`aoFecharCamada`) e a volta à página
+// (`avisosAdiadosAoVoltar`); e a próxima confirmação o reavalia de qualquer
+// jeito, porque nada foi marcado. Nenhum pedido de rede. A pendência é da
+// SESSÃO em que a pessoa decidiu (`epocaDaSessao`): o "Sair" e a queda a
+// descartam, e a troca de conta também (`esquecerOutraConta`) — o aviso diz
+// o que ESTA pessoa fez. Ela mora na memória da aba: fechada a página, quem
+// mostra é a próxima confirmação.
+let avisosAdiados = null;   // { epoca, consequencia: Set de tipos, desbloqueio, dica }
+let avisosAdiadosPedido = false;
+
+// O aviso `qual` (com o `tipo`, na consequência) sai AGORA? Senão, fica
+// pendente, e quem chamou sai sem marcar nada.
+function avisoDeUmaVezSaiAgora(qual, tipo) {
+    if (semCamadaAberta() && document.visibilityState !== 'hidden') return true;
+    if (!avisosAdiados || avisosAdiados.epoca !== epocaDaSessao) {
+        avisosAdiados = { epoca: epocaDaSessao, consequencia: new Set(), desbloqueio: false, dica: false };
+    }
+    if (qual === 'consequencia') avisosAdiados.consequencia.add(tipo);
+    else avisosAdiados[qual] = true;
+    return false;
+}
+
+// Decide DEPOIS da tarefa que pediu, numa microtarefa (o padrão do
+// `pedirComoFuncionaAdiado`): o fechamento que abre outra camada no mesmo
+// tique, ou o "Praticar" que fecha a Ajuda e abre o treino, já disseram o que
+// fica na tela quando ela roda.
+function pedirAvisosAdiados() {
+    if (!avisosAdiados || avisosAdiadosPedido) return;
+    avisosAdiadosPedido = true;
+    queueMicrotask(() => {
+        avisosAdiadosPedido = false;
+        // Acessório: uma falha aqui nunca derruba quem pediu.
+        try { atenderAvisosAdiados(); } catch (e) { console.error(e); }
+    });
+}
+
+function atenderAvisosAdiados() {
+    const a = avisosAdiados;
+    if (!a) return;
+    if (a.epoca !== epocaDaSessao || !AppState.authenticated) { avisosAdiados = null; return; }
+    // O TREINO segura: os avisos falam da fila real. Sem esta espera, a
+    // consequência e o desbloqueio sairiam pela guarda do treino deles (a do
+    // R8-7-01), que não os deixa pendentes, e a dica, que não tem uma, sairia
+    // por cima do card de treino.
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) return;
+    avisosAdiados = null;
+    // Cada um refaz a SUA conta (o que mudou enquanto esperava vale): a
+    // desfeita que zerou a sequência cala a dica, e o desbloqueio, que marca a
+    // dica como vista, vem antes dela — os dois não saem juntos. E com a tela
+    // ainda sem lugar (outra camada aberta no mesmo tique, a página de novo no
+    // fundo), cada um volta a ficar pendente pela régua de sempre.
+    for (const tipo of a.consequencia) avisarConsequencia(tipo);
+    if (a.desbloqueio) checkUndoGateUnlock();
+    if (a.dica) checkDicaDesfazer();
+}
+
+// A página VOLTOU à vista: o aviso que esperava por ela (o ouvinte mora no
+// `setupAppListeners`).
+function avisosAdiadosAoVoltar() {
+    if (document.visibilityState !== 'visible') return;
+    pedirAvisosAdiados();
+}
 
 // ── FILA DE SAÍDA: o que você fez não se perde quando a rede some ─────────
 //
@@ -20158,6 +20249,10 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     if (!soMemoria) {
         esquecerEscolhasDaContaAnterior();
     }
+    // E o aviso de UMA vez que esperava uma camada fechar (R13-7-01): ele dizia
+    // o que a ANTERIOR fez — "rejeição enviada em seu nome" pra quem entrou, que
+    // não rejeitou nada. Nas duas trocas: a da memória também é outra pessoa.
+    avisosAdiados = null;
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
@@ -26214,6 +26309,9 @@ function checkUndoGateUnlock() {
     if (typeof Treino !== 'undefined' && Treino.ativo === true) return;
     const tratados = Math.min(getUndoTreatedCount() - pedidosNaJanelaDoDesfazer(), pedidosConfirmados());
     if (tratados < getUndoUnlockThreshold()) return;
+    // Nem por baixo de uma camada, nem com a página escondida (R13-7-01): o
+    // banner e o confete saíam onde ninguém via, e a marca abaixo o gastava.
+    if (!avisoDeUmaVezSaiAgora('desbloqueio')) return;
     AppState.preferences.undoGateSeen = true;
     // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
     // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
@@ -26400,6 +26498,9 @@ function checkDicaDesfazer() {
     // desabilitado, e a dica viraria beco sem saída. O contador continua correndo
     // — quando a cota cair, a evidência já está pronta.
     if (!canDisableUndo()) return;
+    // Nem por baixo de uma camada, nem com a página escondida (R13-7-01): a
+    // janela vence sozinha com os Filtros abertos, e a dica saía debaixo deles.
+    if (!avisoDeUmaVezSaiAgora('dica')) return;
     AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
     showToast(

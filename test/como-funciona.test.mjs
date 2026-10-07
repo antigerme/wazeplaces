@@ -102,6 +102,9 @@ function montar({ visto = false, consumindo = false, treino = false } = {}) {
     savePreferences: () => salvas.push({ ...AppState.preferences }),
     history: { back: () => ops.push('back'), pushState: () => ops.push('push') },
     closeModal: () => {},
+    // Os avisos de UMA vez que esperavam a camada fechar (R13-7-01): têm teste
+    // próprio (test/treino-auditoria-r13); aqui o fechamento só os pede.
+    pedirAvisosAdiados: () => {},
     console,
   };
   const chaves = Object.keys(deps);

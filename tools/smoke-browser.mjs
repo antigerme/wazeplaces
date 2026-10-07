@@ -8731,6 +8731,199 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── OS AVISOS DE UMA VEZ SÓ SAEM ONDE A PESSOA OS VÊ (R13-7-01) ─────────────
+// A consequência do 1º ✕ e do 1º ✓, o desbloqueio do Desfazer e a dica "você
+// nunca desfaz" aparecem UMA vez na vida, no banner do topo (z-55) — abaixo dos
+// modais (z-60) e da foto ampliada (z-65). A decisão que pousava com os Filtros
+// ou a Ajuda abertos (abertos na janela do Desfazer, o caso comum) punha o banner
+// inteiro debaixo da caixa da camada, e a marca de visto o gastava; com a página
+// no fundo, ele saía e sumia antes de a pessoa voltar. Agora ele espera: a camada
+// fechar, a página voltar. Pelo `initApp` de verdade, com a API de mentira, e o
+// banner medido por hit-test em grade 3×3 (gotcha #26). CONTROLES: sem camada o
+// banner sai no pouso e recebe o toque; e a mesma grade, com os Filtros abertos
+// POR CIMA de um banner na tela, vê o banner coberto — sem isso, "nada cobre"
+// passaria com a grade cega.
+{
+  const PERFIL_L6 = { id: 12444348, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] };
+  const hoje = new Date();
+  const dia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  const pedido = (n) => ({ venueID: 'av' + n, updateRequestID: 'u' + n, name: 'Local ' + n, categories: ['PARK'],
+    address: 'Rua ' + n + ', 1', updateTypeKey: 'VENUE', purType: 'NEW_PLACE', createdBy: 'fulano' + n, creatorId: 900 + n,
+    creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null, localAprovado: true, dateAdded: Date.now() - 3600000 * n, imageUrls: [] });
+  const PREFS = {
+    consequencia: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true },
+    desbloqueio: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: false, dicaDesfazerVista: false,
+      consequenciaVista: { read: true, reject: true } },
+    dica: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: false, semUndoSeguidas: 19,
+      consequenciaVista: { read: true, reject: true } },
+  };
+  // `segurarLido`: o ✓ fica no ar até o teste soltar — a página vai pro fundo ANTES de ele pousar.
+  const abrirApp = async ({ viewport, aviso, segurarLido = false }) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const n0 = aviso === 'desbloqueio' ? 9 : 50;
+    await ctx.addInitScript(({ prefs, n0, dia }) => {
+      try {
+        if (sessionStorage.getItem('__avisosUmaVez')) return;
+        sessionStorage.setItem('__avisosUmaVez', '1');
+        localStorage.setItem('waze_session_token', 'token-smoke');
+        localStorage.setItem('waze_places_lang', 'pt');
+        localStorage.setItem('waze_places_preferences', JSON.stringify(prefs));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: n0, rejected: 0, skipped: 0 }));
+        localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: n0, rejected: 0 }, [dia]: { read: n0, rejected: 0 } }));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, { prefs: PREFS[aviso], n0, dia });
+    const places = [1, 2, 3, 4].map(pedido);
+    let soltar = null;
+    const lido = segurarLido ? new Promise((ok) => { soltar = ok; }) : null;
+    const envios = [];
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
+      let corpo = { success: true };
+      if (nome === 'perfil' || nome === 'testar-cookies') corpo = { success: true, visivelNoWme: true, referencias: null, profile: PERFIL_L6 };
+      else if (nome === 'lista-paises') corpo = { success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR', env: 'row' }] };
+      else if (nome === 'lista-estados') corpo = { success: true, states: [] };
+      else if (nome === 'presenca-app') corpo = { success: true, online: [], conversas: [] };
+      else if (nome === 'buscar-places') corpo = { success: true, places, hasMore: false, page: 1, total: places.length, totalAll: places.length, blocked: 0 };
+      else if (nome === 'validar-place' || nome === 'marcar-lido') {
+        envios.push(nome);
+        if (nome === 'marcar-lido' && lido) await lido;
+      }
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !!(window.AppState && AppState.authenticated && AppState.profile && AppState.currentPlace
+      && document.querySelector('#cardStack .place-card:not(.card-fundo)')), `avisos de uma vez (${aviso}): o app não abriu o 1º card`);
+    await doisQuadros(page);
+    return { ctx, page, erros, envios, soltar: () => soltar && soltar() };
+  };
+  // O banner do topo: o texto e quantos dos 9 pontos (grade 3×3, fora dos cantos
+  // arredondados) o recebem — medido com ele ASSENTADO (ele entra deslizando).
+  const banner = async (page) => { await assentar(page); return page.evaluate(() => {
+    const b = document.querySelector('#bannerContainer .toast');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    let recebe = 0;
+    for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.2, 0.5, 0.8]) {
+      const h = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+      if (h && b.contains(h)) recebe++;
+    }
+    return { texto: b.textContent.trim().slice(0, 40), recebe };
+  }); };
+  const marcas = (page) => page.evaluate(() => {
+    const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
+    return { reject: !!(p.consequenciaVista && p.consequenciaVista.reject), gate: p.undoGateSeen === true, dica: p.dicaDesfazerVista === true };
+  });
+  // POUSOU: o envio CHEGOU à API (contado no Node) e a resposta foi processada.
+  // Só o estado da página não serve: logo depois do toque, antes de a janela
+  // abrir (a animação do card), ele já diz "nada no ar".
+  const pousou = async (page, envios, n) => {
+    const t0 = Date.now();
+    while (envios.length < n) {
+      if (Date.now() - t0 > 15000) throw new Error(`avisos de uma vez: ${envios.length} envio(s) em 15 s, esperava ${n}`);
+      await dormir(50);
+    }
+    await esperarOuExplodir(page, () => !AppState.pendingAction && AppState.inFlightActions === 0, 'avisos de uma vez: a decisão não pousou', 15000);
+  };
+  const esconder = (page, oculta) => page.evaluate((oculta) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (oculta ? 'hidden' : 'visible') });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => oculta });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, oculta);
+  const FRENTE = '#cardStack .place-card:not(.card-fundo)';
+  const PIXEL = { width: 412, height: 915 };
+  const SE = { width: 320, height: 568 };
+
+  // (1) A consequência do 1º ✕ com os Filtros abertos na janela: espera, e sai ao fechá-los.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'avisos de uma vez (1): o ✕ não abriu a janela');
+    await page.click('#filtersBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', 'avisos de uma vez (1): os Filtros não abriram');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    checa(await banner(page) === null, 'avisos de uma vez (1): a consequência do 1º ✕ saiu POR BAIXO dos Filtros', JSON.stringify(await banner(page)));
+    checa(!(await marcas(page)).reject, 'avisos de uma vez (1): a consequência do 1º ✕ ficou GASTA debaixo dos Filtros — nunca mais aparece');
+    await page.keyboard.press('Escape');
+    const veio = await esperarNaPagina(page, () => !topOpenModal() && !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+    checa(veio.ok, 'avisos de uma vez (1): os Filtros fecharam e a consequência que esperava não apareceu');
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (1): o banner que esperava não recebe o toque inteiro', JSON.stringify(b));
+    checa((await marcas(page)).reject, 'avisos de uma vez (1): o banner apareceu e não ficou marcado (sairia de novo)');
+    checa(erros.length === 0, 'avisos de uma vez (1): erro de JS', erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE: sem camada, o banner sai no pouso — e a MESMA grade, com os
+  // Filtros abertos por cima dele, o vê coberto.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (CONTROLE): sem camada, a consequência não saiu no pouso, ou não recebe o toque', JSON.stringify(b));
+    checa((await marcas(page)).reject, 'avisos de uma vez (CONTROLE): a consequência saiu e não ficou marcada');
+    await page.evaluate(() => openFiltersModal());
+    await doisQuadros(page);
+    const coberto = await banner(page);
+    checa(!!coberto && coberto.recebe === 0, 'avisos de uma vez (CONTROLE): com os Filtros por cima, a grade ainda vê o banner — ela está cega',
+      JSON.stringify(coberto));
+    checa(erros.length === 0, 'avisos de uma vez (CONTROLE): erro de JS', erros[0]);
+    await ctx.close();
+  }
+  // (2) O desbloqueio do Desfazer que pousa com a página no FUNDO: espera a volta.
+  // E o CONTROLE à vista, com o mesmo ✓ segurado.
+  for (const fundo of [true, false]) {
+    const rot = `avisos de uma vez (2, ${fundo ? 'no fundo' : 'CONTROLE à vista'})`;
+    const { ctx, page, erros, envios, soltar } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio', segurarLido: true });
+    await page.click(FRENTE + ' .card-btn-read');
+    await esperarOuExplodir(page, () => !AppState.pendingAction && AppState.inFlightActions === 1, `${rot}: o ✓ não saiu no fim da janela`, 10000);
+    if (fundo) await esconder(page, true);
+    soltar();
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const noPouso = await banner(page);
+    if (fundo) {
+      checa(noPouso === null, `${rot}: o desbloqueio saiu com a página escondida — some antes de a pessoa voltar`, JSON.stringify(noPouso));
+      checa(!(await marcas(page)).gate, `${rot}: o desbloqueio (uma vez na vida) ficou GASTO com a página escondida`);
+      await esconder(page, false);
+      const veio = await esperarNaPagina(page, () => !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+      checa(veio.ok, `${rot}: a página voltou e o desbloqueio que esperava não apareceu`);
+    } else {
+      checa(!!noPouso, `${rot}: à vista, o desbloqueio não saiu no pouso`);
+    }
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, `${rot}: o banner do desbloqueio não recebe o toque inteiro`, JSON.stringify(b));
+    checa((await marcas(page)).gate, `${rot}: o desbloqueio apareceu e não ficou marcado`);
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (3) A dica "você nunca desfaz" no iPhone SE de 2016: a 20ª janela vence
+  // sozinha com a Ajuda aberta — espera ela fechar, pelo ✕ dela.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: SE, aviso: 'dica' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'avisos de uma vez (3): o ✕ não abriu a janela');
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'helpModal', 'avisos de uma vez (3): a Ajuda não abriu');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    checa(await banner(page) === null, 'avisos de uma vez (3): a dica saiu POR BAIXO da Ajuda', JSON.stringify(await banner(page)));
+    checa(!(await marcas(page)).dica, 'avisos de uma vez (3): a dica ficou GASTA debaixo da Ajuda');
+    await page.click('#closeHelp');
+    const veio = await esperarNaPagina(page, () => !topOpenModal() && !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+    checa(veio.ok, 'avisos de uma vez (3): a Ajuda fechou e a dica que esperava não apareceu');
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (3): o banner da dica não recebe o toque inteiro', JSON.stringify(b));
+    checa((await marcas(page)).dica, 'avisos de uma vez (3): a dica apareceu e não ficou marcada');
+    checa(erros.length === 0, 'avisos de uma vez (3): erro de JS', erros[0]);
+    await ctx.close();
+  }
+}
+
 // ── O CARIMBO DE NASCIMENTO EXISTE DEPOIS DE ABRIR ─────────────────────────
 //
 // É o guard que teria pego o defeito original, e nenhum outro pegaria: a função
@@ -11921,6 +12114,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
+  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
