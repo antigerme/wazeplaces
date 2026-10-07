@@ -1,4 +1,5 @@
-// A rodada 13 da auditoria na área da FILA (lote 17).
+// A rodada 13 da auditoria na área da FILA (lote 17). Dois achados, os dois de
+// tela que diz uma coisa e faz outra:
 //
 // R13-2-05 — com o foco do TECLADO na barra "Primeiro os de…" (o Enter no "Ver
 // +N" o leva pra lá, C10), a seta decide o último pedido do autor, o card
@@ -10,6 +11,13 @@
 // ficava por cima do "Tudo limpo!" dizendo "Primeiro os de X · 1 de 1", com o
 // foco do teclado nela (MEDIDO pela seta nos dois motores, e pelo toque, na
 // reprodução deste lote).
+//
+// R13-2-06 — a conta DESTA aba em dúvida (R6-1-04) que se resolve como a mesma
+// conta: a trava (`acoesTravadas`) já soltava quando o perfil chegava, mas os
+// três botões seguiam `disabled` até a carga INTEIRA do perfil terminar — o
+// `completarPerfilChegado` pode perguntar a outros servidores, segundos —, e
+// nesse meio o toque não dizia nada e a seta decidia (MEDIDO no navegador:
+// roteiros d1 e d1b da rodada 13).
 //
 // As funções rodam DE VERDADE, fatiadas do app.js, com o documento de mentira.
 // O foco pousando de fato, nos dois motores, está no bloco "O CARD" do
@@ -300,4 +308,102 @@ test('R13-2-05: o bundle GERADO tem o conserto (senão nada disso está no ar)',
   const foco = /function focarDepoisDoFocoNoAutor\([^)]*\)\{[\s\S]*?\n?\}function /.exec(MIN);
   assert.ok(foco, 'o focarDepoisDoFocoNoAutor sumiu do js/min/app.js');
   assert.match(foco[0], /aplicarFocoDoTeclado\(\)/, 'o js/min/app.js não leva o foco sem card ao painel — rode `npm run js`');
+});
+
+// ═══ R13-2-06 · a conta em dúvida que se resolve destrava o card NA HORA ═══════
+// A aba B (sessão `tok-b`, sem perfil) num aparelho cuja sessão guardada é a da
+// aba A (`tok-a`), com a conta 4242 confirmada por ela: a dúvida (R6-1-04). A
+// conferência pede o perfil; ele CHEGA (o `definirPerfil` de verdade) e a carga
+// segue no ar — o `completarPerfilChegado` perguntando a outros servidores —
+// até o teste soltar. A trava de verdade (`acoesTravadas` e `aplicarTravaDeAcao`)
+// escreve no card de mentira.
+function abaEmDuvida() {
+  const doc = montarDoc();
+  const aparelho = new Map([['waze_session_token', 'tok-a']]);
+  const safeLS = { get: (k) => (aparelho.has(k) ? aparelho.get(k) : null), set: (k, v) => aparelho.set(k, v), remove: (k) => aparelho.delete(k) };
+  const AppState = { authenticated: true, profile: null, pendingAction: null, currentPlace: P('M1', 9), queue: [P('M1', 9)] };
+  const estado = { card: cardDe(doc, { nome: 'M1' }), carga: null, saiu: null, pedidosDePerfil: 0 };
+  const deps = {
+    AppState, document: doc, safeLS, API: { sessionToken: 'tok-b' },
+    cardDaFrente: () => estado.card,
+    // A conta do perfil segue no aparelho? É a 4242 (a dona dele) — outra conta sai.
+    contaSegueNoAparelho: (id) => String(id) === '4242',
+    handleLogout: (o) => { estado.saiu = o || true; },
+    aoConhecerConta() {}, guardarReferencias() {}, guardarPerfilDoPortao() {}, guardarPrazoDaSessao() {},
+    renderProfileHeader() {}, presencaWmeAoCarregarPerfil() {}, presencaWmeRefazerDesligar() {},
+    redesenharFiltrosComOPerfil() {}, reavaliarFotoAbertaPeloPerfil() {},
+    // O que a trava de verdade toca fora do card: nada travando, nada aberto.
+    aprovacaoDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
+    dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, aplicarFocoDoTeclado() {},
+    cancelarPendenciasDoLightbox() {}, aprovacoesAtravessamAQueda() {},
+    // A carga do perfil: o teste diz quando o perfil CHEGA (o `definirPerfil`,
+    // no meio da carga) e quando a carga TERMINA (o fim do `completarPerfilChegado`).
+    loadProfileAndAuxData: () => {
+      estado.pedidosDePerfil++;
+      return new Promise((fim) => { estado.carga = { fim }; });
+    },
+  };
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, [
+    constante('CONTA_KEY'),
+    'let epocaDaSessao = 0; let conferindoContaDestaAba = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;',
+    'let aprovacaoPendente = null; let exclusaoPendente = null; let renomeacaoPendente = null;',
+    'let aprovandoAgora = false; let excluindoAgora = false;',
+    ...['marcaDaSessao', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'acoesTravadas', 'aplicarTravaDeAcao',
+      'conferirContaDestaAba', 'definirPerfil'].map(fatiar),
+    'return { marcaDaSessao, contaDestaAbaEmDuvida, acoesTravadas, conferirContaDestaAba, definirPerfil };',
+  ].join('\n'))(...nomes.map((n) => deps[n]));
+  // A conta 4242, confirmada pela sessão GUARDADA (a da aba A).
+  aparelho.set('waze_places_conta', JSON.stringify({ id: '4242', s: app.marcaDaSessao('tok-a') }));
+  const botoes = () => ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].map((s) => estado.card.querySelector(s).disabled);
+  return {
+    app, AppState, estado, botoes,
+    travadoNaTela: () => estado.card.classList.contains('acoes-travadas'),
+    // O perfil chega no meio da carga, como no `loadProfileAndAuxData` de verdade.
+    perfilChega: (perfil) => app.definirPerfil({ success: true, profile: perfil }),
+    terminaCarga: () => { estado.carga.fim(); return microtarefas(); },
+  };
+}
+
+test('R13-2-06: a conta em dúvida que se resolve como a MESMA destrava os botões quando o perfil CHEGA — não no fim da carga inteira', async () => {
+  const b = abaEmDuvida();
+  assert.equal(b.app.contaDestaAbaEmDuvida(), true, 'PRÉ-CONDIÇÃO: a conta desta aba não está em dúvida');
+  b.app.conferirContaDestaAba();
+  assert.equal(b.estado.pedidosDePerfil, 1, 'PRÉ-CONDIÇÃO: a conferência não pediu o perfil');
+  assert.equal(b.app.acoesTravadas(), true, 'PRÉ-CONDIÇÃO: a dúvida não travou o card');
+  assert.deepEqual(b.botoes(), [true, true, true], 'PRÉ-CONDIÇÃO: os botões não ficaram travados na dúvida');
+  assert.equal(b.travadoNaTela(), true, 'PRÉ-CONDIÇÃO: o card não ficou com cara de travado');
+  // O perfil chega (a mesma conta, 4242); a carga segue no ar.
+  assert.equal(b.perfilChega({ id: 4242 }), true, 'PRÉ-CONDIÇÃO: o perfil da mesma conta foi recusado');
+  assert.equal(b.app.acoesTravadas(), false, 'PRÉ-CONDIÇÃO: com o perfil, a trava não soltou');
+  assert.deepEqual(b.botoes(), [false, false, false],
+    'DEFEITO: o perfil chegou (a dúvida se resolveu) e os três botões seguiram `disabled` até a carga inteira terminar — o toque não diz nada e a seta decide');
+  assert.equal(b.travadoNaTela(), false, 'DEFEITO: o card seguiu com cara de travado com a trava solta');
+  assert.equal(b.AppState.contaEmDuvida, false, 'a dúvida resolvida seguiu acesa até o fim da carga');
+  await b.terminaCarga();
+  assert.deepEqual(b.botoes(), [false, false, false], 'o fim da carga travou o card de novo');
+  assert.equal(b.estado.saiu, null, 'a mesma conta tirou a aba');
+});
+
+test('R13-2-06: CONTROLES — o perfil que FALHA e o de OUTRA conta não destravam o card', async () => {
+  // A carga termina SEM perfil (rede, 5xx): a dúvida fica, e a trava também.
+  const f = abaEmDuvida();
+  f.app.conferirContaDestaAba();
+  await f.terminaCarga();
+  assert.equal(f.app.acoesTravadas(), true, 'CONTROLE: a carga sem perfil destravou a aba sem saber de quem ela é');
+  assert.deepEqual(f.botoes(), [true, true, true], 'CONTROLE: a carga sem perfil destravou os botões');
+  assert.equal(f.AppState.contaEmDuvida, true, 'CONTROLE: a dúvida se apagou sem perfil');
+  // O perfil de OUTRA conta: a aba sai (`handleLogout`) e o card não destrava.
+  const o = abaEmDuvida();
+  o.app.conferirContaDestaAba();
+  assert.equal(o.perfilChega({ id: 5151 }), false, 'CONTROLE: o perfil de outra conta foi aceito');
+  assert.ok(o.estado.saiu && o.estado.saiu.outraConta, 'CONTROLE: o perfil de outra conta não tirou a aba');
+  assert.deepEqual(o.botoes(), [true, true, true], 'CONTROLE: o perfil de OUTRA conta destravou os botões');
+  // E sem dúvida nenhuma (o perfil chega numa aba que não estava em dúvida),
+  // nada é reaplicado nem mexido: o card segue como estava.
+  const n = abaEmDuvida();
+  n.estado.card.querySelector('.card-btn-reject').disabled = true;   // a marca de que ninguém escreveu
+  n.perfilChega({ id: 4242 });
+  assert.equal(n.estado.card.querySelector('.card-btn-reject').disabled, true,
+    'CONTROLE: o perfil que chegou SEM dúvida nenhuma reescreveu a trava do card');
 });

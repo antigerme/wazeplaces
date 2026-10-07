@@ -6613,6 +6613,20 @@ function definirPerfil(res) {
     // E a foto ampliada aberta antes dele: o "Aprovar", a lixeira e a pílula do
     // nome dependem do portão, que lê o perfil (R6-3-07).
     reavaliarFotoAbertaPeloPerfil();
+    // A conta DESTA aba estava em dúvida (R6-1-04) e o perfil a resolveu: é a
+    // mesma conta (sendo outra, a aba já saiu, acima). O card destrava AGORA, e
+    // não no fim da carga do perfil: a trava lê a dúvida na hora
+    // (`acoesTravadas`), então a seta e o arraste já decidiam, e só os botões
+    // seguiam `disabled` — mudos ao toque — enquanto o `completarPerfilChegado`
+    // terminava (o país de quem entra pode perguntar a outros servidores,
+    // segundos). Botão morto com o gesto vivo é o gotcha #63 (MEDIDO no
+    // navegador: 3 s depois de o perfil chegar, a seta mandava o ✕ com os três
+    // botões travados; auditoria de 2026-10-07, R13-2-06). O fim da conferência
+    // (`conferirContaDestaAba`) reaplica a trava de novo, sem mudar nada.
+    if (AppState.contaEmDuvida === true && !contaDestaAbaEmDuvida()) {
+        AppState.contaEmDuvida = false;
+        aplicarTravaDeAcao();
+    }
     return true;
 }
 
