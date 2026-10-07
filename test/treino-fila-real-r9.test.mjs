@@ -503,7 +503,9 @@ function montarVarredura() {
      await __segurarGravacao();
      offlineFilaGravadaEm = 7;
      return true;
-   }`,
+   }
+   // A releitura da base antes da poda (R12-4-05): a fila guardada é a que esta varredura gravou.
+   async function offlineLerFila() { return offlineFilaGravadaEm === null ? null : { t: offlineFilaGravadaEm, places: [{}] }; }`,
   'estado: () => ({ resultado: offlineUltimoResultado, preparada: offlineFilaPreparada, gravada: offlineFilaGravadaEm })');
   return { app, AppState, baixados, podas, gravadas, soltar: () => soltarGravacao && soltarGravacao() };
 }

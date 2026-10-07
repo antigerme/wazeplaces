@@ -52,7 +52,12 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: concorrencia,
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
-    offlineGravarFila: async () => { gravou++; }, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
+    // A gravação da fila leva um carimbo (o `t`), como a de verdade, e a releitura
+    // da base o devolve: é com ele que a poda confere que a fila guardada ainda é a
+    // desta varredura (R12-4-05).
+    offlineGravarFila: async () => { gravou++; st.gravada = (st.gravada || 0) + 1; return true; },
+    offlineLerFila: async () => (st.gravada ? { t: st.gravada, places: [{ venueID: 'v' }] } : null),
+    offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return baixar(u); },
     offlineSondarRede: async (u) => { sondas.push(u); const r = await baixar(u); return r === true || r === 'definitivo'; },
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
@@ -306,7 +311,10 @@ function aparelhoComCache() {
     Date: { now: () => agora }, offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1, OFFLINE_ANUNCIAR_A_CADA: 50,
     OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'), OFFLINE_TILES_CACHE: 'waze-places-tiles',
-    offlineGravarFila: async () => true,
+    // A gravação leva um carimbo e a releitura da base o devolve (R12-4-05: a poda
+    // confere que a fila guardada ainda é a desta varredura).
+    offlineGravarFila: async () => { st.gravada = (st.gravada || 0) + 1; return true; },
+    offlineLerFila: async () => (st.gravada ? { t: st.gravada, places: [{ venueID: 'v' }] } : null),
     offlineItensDaFila: async () => fila.itens.map((u) => ({ u, tile: true })),
     offlineBaixar: async (u) => { baixados.push(u); cache.set(u, true); return true; },
     offlineSondarRede: async () => true,
@@ -1673,4 +1681,135 @@ test('gatilho: com a varredura NO AR, o gatilho não pede outra — quem decide 
   await assentarBase();
   assert.equal(p1.rede.varreduras, v + 1, 'o gatilho no meio da varredura pediu outra, que não tinha o que fazer');
   assert.match(p1.linha(), /prefs\.offline\.prontoB/);
+});
+
+// ── R12-4-05 (auditoria da rodada 12): DUAS ABAS varrendo juntas ────────────
+// A base do offline e o cache do mapa são do APARELHO, e cada aba grava a fila
+// DELA na mesma base e poda o cache aos tiles da fila DELA. O `online` chega às
+// duas, e com filas diferentes (a reposição de uma trouxe pedidos que a outra não
+// tem) as duas varreduras corriam juntas: a fila guardada ficava a de quem gravou
+// por último, e a poda da OUTRA apagava os tiles dos pedidos que só a primeira
+// tinha — sem rede esses cards abriam sem mapa, com a linha dizendo "Pronto — 12
+// pedidos no aparelho" (MEDIDO no navegador, n10 da auditoria: 6 de 12 sem mapa
+// em 3 de 3 rodadas; com uma aba só, nenhum). Aqui duas "abas" — cada uma com o
+// estado DELA — rodam o código de VERDADE (gravar a fila, varrer, reler a base,
+// podar) sobre a MESMA base e o MESMO cache, de mentira, com a ordem segura: os
+// downloads de uma esperam o teste soltar.
+function duasAbasComCache() {
+  const base = new Map();
+  const cache = new Map();
+  const relogio = { agora: 1492385 * 1200000 + 1000 };     // uma janela só
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+      });
+      return tx;
+    },
+  });
+  const caches = {
+    has: async () => cache.size > 0,
+    open: async () => ({
+      keys: async () => [...cache.keys()].map((url) => ({ url })),
+      delete: async (r) => { cache.delete(r.url); },
+    }),
+  };
+  function aba(fila) {
+    const rede = { segura: false, presos: [] };
+    const diario = [];
+    const AppState = { authenticated: true, queue: fila.slice(), filters: {} };
+    const deps = {
+      AppState, Treino: { ativo: false }, navigator: { onLine: true }, offlineLigado: () => true,
+      Date: { now: () => relogio.agora++ },
+      offlineDB, OFFLINE_STORE: 'fila', OFFLINE_TILES_CACHE: 'waze-places-tiles', caches,
+      offlinePodarPousos: () => {}, dfato: (k) => diario.push(k),
+      filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
+      marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+      OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+      OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+      // Um tile por pedido; o download grava no cache do aparelho, e com `segura`
+      // fica preso até o teste soltar.
+      offlineItensDaFila: async () => AppState.queue.map((p) => ({ u: 'tile-' + p.venueID, tile: true })),
+      offlineBaixar: (u) => new Promise((ok) => {
+        const r = () => { cache.set(u, true); ok(true); };
+        if (rede.segura) rede.presos.push(r); else r();
+      }),
+      offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {},
+      offlineGravarJanela: () => {}, setTimeout: (fn) => { fn(); return 0; },
+    };
+    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let offlineVarrendo = false, offlinePedidaDeNovo = false,
+        offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,
+        offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null,
+        offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null;
+      ${nomes.map(fatiar).join('\n')}
+      return { varrer: offlineVarrer,
+        estado: () => ({ resultado: offlineUltimoResultado, varrendo: offlineVarrendo, gravada: offlineFilaGravadaEm }) };`)(
+      ...chaves.map((k) => deps[k]));
+    const soltar = () => { rede.segura = false; for (const r of rede.presos.splice(0)) r(); };
+    return { ...app, rede, diario, soltar };
+  }
+  // Os pedidos da fila GUARDADA cujo mapa não está no aparelho.
+  const semMapa = () => (base.get('fila') ? base.get('fila').places : [])
+    .filter((p) => !cache.has('tile-' + p.venueID)).map((p) => p.venueID);
+  return { aba, base, cache, semMapa };
+}
+const P5 = (i) => ({ venueID: 'p' + i, updateRequestID: 'u' + i });
+
+test('R12-4-05: duas abas varrendo juntas — a poda de uma NÃO apaga o mapa da fila que a outra gravou por último', async () => {
+  const ap = duasAbasComCache();
+  const A = ap.aba([1, 2, 3].map(P5));
+  const B = ap.aba([1, 2, 3, 30, 31].map(P5));            // a reposição de B trouxe dois que A não tem
+  A.rede.segura = true;
+  const varreA = A.varrer();                               // A grava a fila DELA e fica baixando…
+  await assentarBase();
+  assert.deepEqual(ap.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3'], 'PRÉ-CONDIÇÃO: A não gravou a fila dela');
+  await B.varrer();                                        // …B grava a DELA por cima, baixa tudo e poda
+  await assentarBase();
+  assert.equal(B.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de B não ficou pronta');
+  assert.deepEqual(ap.semMapa(), [], 'PRÉ-CONDIÇÃO: com a varredura de B pronta, a fila guardada já tinha pedido sem mapa');
+  A.soltar();
+  await varreA;
+  await assentarBase();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de A não ficou pronta');
+  assert.deepEqual(ap.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3', 'p30', 'p31'],
+    'PRÉ-CONDIÇÃO: a fila guardada não é a de B (a que gravou por último)');
+  assert.deepEqual(ap.semMapa(), [],
+    'DEFEITO: a poda da aba A apagou o mapa dos pedidos que só a fila guardada (a de B) tem — sem rede, esses cards '
+    + 'abrem sem mapa com a linha dizendo "Pronto"');
+  assert.ok(!A.diario.includes('offline.podou'), 'a aba A podou o cache com a fila guardada sendo a de B');
+});
+
+test('R12-4-05 CONTROLE: a ordem inversa (A grava por último) e a aba sozinha — a poda segue valendo pra fila guardada', async () => {
+  // Quem gravou por último é A: a fila guardada é a dela, e o mapa dela fica todo.
+  const inv = duasAbasComCache();
+  const A = inv.aba([1, 2, 3].map(P5));
+  const B = inv.aba([1, 2, 3, 30, 31].map(P5));
+  B.rede.segura = true;
+  const varreB = B.varrer();
+  await assentarBase();
+  await A.varrer();
+  await assentarBase();
+  B.soltar();
+  await varreB;
+  await assentarBase();
+  assert.deepEqual(inv.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3']);
+  assert.deepEqual([A.estado().resultado, B.estado().resultado, inv.semMapa()], ['pronto', 'pronto', []],
+    'com A gravando por último, a fila guardada (a de A) ficou sem mapa');
+  // A aba SOZINHA: a poda segue tirando do cache o que não é da fila guardada
+  // (o tile de uma fila velha) — sem isto, "não podou" passaria com a poda morta.
+  const so = duasAbasComCache();
+  so.cache.set('tile-velho', true);
+  const C = so.aba([1, 2].map(P5));
+  await C.varrer();
+  await assentarBase();
+  assert.equal(C.estado().resultado, 'pronto');
+  assert.equal(so.cache.has('tile-velho'), false, 'CONTROLE: com a fila guardada sendo a desta aba, a poda não tirou o tile velho');
+  assert.ok(C.diario.includes('offline.podou'));
+  assert.deepEqual(so.semMapa(), []);
 });

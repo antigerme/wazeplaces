@@ -21420,8 +21420,24 @@ async function offlineVarrer() {
             // com a poda ainda apagando: contava como pronto o tile de um pedido
             // que voltou à fila e terminava "pronto" sem ele (R6-4-1). O resultado
             // já está decidido acima; a poda só arruma o cache.
-            const n = await offlinePodarTiles(tilesDaFila, epoca);
-            if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
+            //
+            // E só se a fila guardada AINDA é a que esta varredura gravou
+            // (`filaCoberta`, o `t` dela), relida da base agora. A base e o cache do
+            // mapa são do APARELHO, e outra aba grava a fila DELA por cima: com duas
+            // abas varrendo juntas (o `online` chega às duas), a poda desta mantinha
+            // só os tiles da fila desta e apagava os dos pedidos que só a outra tem —
+            // a fila guardada era a da outra, e sem rede esses cards abriam sem mapa,
+            // com a linha dizendo "Pronto — 12 pedidos no aparelho" (auditoria da
+            // rodada 12, R12-4-05, MEDIDO no navegador: 6 de 12 sem mapa, em 3 de 3
+            // rodadas). Se outra gravação veio depois (a outra aba, ou a busca desta
+            // durante a varredura), quem poda é a varredura DELA, que cobre a fila
+            // que ficou. A gravação que falhou (`filaCoberta` nulo) também não poda:
+            // a fila na base é outra, e o mapa dela fica.
+            const naBase = Number.isFinite(filaCoberta) ? await offlineLerFila() : null;
+            if (naBase && naBase.t === filaCoberta && epoca === offlineEpoca) {
+                const n = await offlinePodarTiles(tilesDaFila, epoca);
+                if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
+            }
         } else {
             offlineUltimoResultado = 'parcial';
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
