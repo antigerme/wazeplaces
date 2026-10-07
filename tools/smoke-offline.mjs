@@ -1341,6 +1341,21 @@ aviao = false; await ctx.setOffline(false);
 await esperarNaPagina(page, () => navigator.onLine === true, 5000);
 await dormir(300);   // o `online` dispara gatilhos (varredura); deixa nascerem, e espera acabarem
 await esperarNaPagina(page, () => !offlineVarrendo, 30000, 100);
+// (R12-4-06) A BORDA do Cloudflare injeta o Web Analytics, que manda o relatório
+// dele por `sendBeacon` pra MESMA origem (`/cdn-cgi/rum?`, que só aceita POST). O
+// pedido entra na lista de recursos, e o relatório o levava como CÓDIGO: a
+// releitura de comparação levava 405, e toda triagem de produção dizia "o
+// servidor respondeu 405 em 1 arquivo". A borda emulada aqui: POST 204, o resto
+// 405 — contando os GETs que chegam a ela.
+let getsNaBorda8b = 0;
+const borda8b = (r) => {
+  if (r.request().method() === 'POST') return r.fulfill({ status: 204, body: '' });
+  getsNaBorda8b++;
+  return r.fulfill({ status: 405, contentType: 'text/plain', body: 'Method Not Allowed' });
+};
+await page.route('**/cdn-cgi/rum*', borda8b);
+const beacon8b = await page.evaluate(() => navigator.sendBeacon(location.origin + '/cdn-cgi/rum?', '{}'));
+await esperarNaPagina(page, () => performance.getEntriesByType('resource').some((e) => /\/cdn-cgi\/rum\?/.test(e.name)), 5000, 100);
 const dirDiag = mkdtempSync(join(tmpdir(), 'diag-offline-'));
 let relatorio;
 try {
@@ -1377,6 +1392,13 @@ try {
       const e = Object.values(d.cacheVsRede || {});
       return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
     })(),
+    // (R12-4-06) O envio do beacon da borda: na lista de recursos (o caso foi
+    // encenado), e fora do código conferido.
+    borda: {
+      nosRecursos: (d.recursos || []).filter((r) => /\/cdn-cgi\//.test(r.url || '')).length,
+      noCodigo: Object.keys(d.codigo || {}).filter((u) => /\/cdn-cgi\//.test(u)).length,
+      noCvr: Object.keys(d.cacheVsRede || {}).filter((u) => /\/cdn-cgi\//.test(u)).length,
+    },
   };
   // O SEGUNDO relatório na mesma página (auditoria de 2026-09-26): as releituras
   // `?diag-rede=1` do primeiro ficam na lista de recursos, e o segundo as levava
@@ -1424,6 +1446,12 @@ diz('o 2º relatório na mesma página compara o MESMO código — sem as releit
   relatorio.segundo?.releiturasNosRecursos > 0 && relatorio.segundo?.comDiagRede === 0
   && relatorio.segundo?.n === relatorio.codigo?.n && relatorio.segundo?.cvr === relatorio.cvr?.n,
   JSON.stringify({ primeiro: relatorio.codigo?.n, segundo: relatorio.segundo }));
+await page.unroute('**/cdn-cgi/rum*', borda8b);
+// A PRÉ-CONDIÇÃO (o envio do beacon está na lista de recursos que o relatório lê)
+// é o controle: sem ela, "não levou" passaria sem o caso existir.
+diz('o envio do beacon da borda (`/cdn-cgi/rum?`) fica fora do código conferido — e nenhum GET vai à borda (R12-4-06)',
+  beacon8b === true && relatorio.borda?.nosRecursos >= 1 && relatorio.borda.noCodigo === 0 && relatorio.borda.noCvr === 0
+  && getsNaBorda8b === 0, JSON.stringify({ beacon8b, borda: relatorio.borda, getsNaBorda8b }));
 const docNoFim8b = await page.evaluate(() => window.__docDa8b).catch(() => null);
 diz('e a 8b rodou inteira no MESMO documento — nenhuma recarga no meio (o relatório é da página que viu a queda)',
   !!docDa8b && docNoFim8b === docDa8b, `${docDa8b} → ${docNoFim8b}`);
@@ -2750,6 +2778,8 @@ await ctx9h.route('**/*-tiles/live/base/**', servirTile);
 // A API desta seção: 'ok' traz 3; 'rede' aborta sem resposta (com o `onLine`
 // verdadeiro); '502' é a página de erro da borda (o corpo não é JSON).
 let api9h = 'ok';
+// As áreas do perfil (a caixa de "Minha área", parte 3): sem área até lá.
+let areas9h = [];
 const PED_9H = [171, 172, 173].map((i) => SO_MAPA(i));
 await ctx9h.route('**/api/*', (r) => {
   if (api9h === 'rede') return r.abort('connectionreset');
@@ -2757,7 +2787,7 @@ await ctx9h.route('**/api/*', (r) => {
   const rota = r.request().url().split('/api/')[1];
   const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
   if (rota === 'buscar-places') return json({ success: true, places: PED_9H, hasMore: false, page: 1, total: 3 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: areas9h } });
   return r.abort('failed');
 });
 const abrir9h = async (nome) => {
@@ -2834,6 +2864,46 @@ const diag9h = await p2_9h.evaluate(async () => { try { return (await fetch('/?d
 diz('CONTROLE: com a borda em 502, o que não passa pelo worker volta 502 — a origem está mesmo fora', diag9h === 502, `status ${diag9h}`);
 await p2_9h.close();
 borda9h = 'normal'; api9h = 'ok';
+
+// 3. COM "MINHA ÁREA" (auditoria da rodada 12, R12-4-02). A busca de "Minha área"
+// não sai sem o perfil (a caixa vem dele): ela ESPERA, e a espera não marcava a
+// falha por rede — a abertura com a API sem resposta, ou com a origem fora do ar,
+// terminava em "Falha ao carregar" com a fila guardada DESTE filtro no aparelho
+// (MEDIDO, n9 da auditoria). A fila guardada aqui é a de uma busca de "Minha
+// área" com rede; o PRÉ-REQUISITO de cada parte é a busca ter esperado o perfil.
+areas9h = [{ type: 'drive', bbox: [-43.5, -23.2, -42.9, -22.6] }];
+const prepM9h = await abrir9h('preparo, Minha área');
+await esperarNaPagina(prepM9h, () => typeof AppState !== 'undefined' && AppState.authenticated && !!AppState.profile, 20000, 100);
+await prepM9h.evaluate(() => { AppState.filters.myArea = true; saveFilters(); });
+await prepM9h.reload({ waitUntil: 'domcontentloaded' });
+const guardouM9h = await esperarNaPagina(prepM9h, async () => typeof offlineLerFila === 'function'
+  && AppState.filters.myArea === true && !!AppState.profile && !!cardDaFrente()
+  && ((await offlineLerFila()) || {}).busca === assinaturaDeBusca(true), 20000, 200);
+diz('PRÉ-CONDIÇÃO: com "Minha área" e a origem de pé, a fila da busca de "Minha área" foi guardada', guardouM9h.ok,
+  JSON.stringify(guardouM9h));
+await prepM9h.close({ runBeforeUnload: true });
+const minhaArea9h = (pg) => pg.evaluate(() => ({ myArea: AppState.filters.myArea, perfil: !!AppState.profile,
+  esperou: dfatoAnel.some((e) => e.k === 'busca.esperaPerfil') }));
+api9h = 'rede';
+const p3_9h = await abrir9h('Minha área, lie-fi');
+await decidiu9h(p3_9h);
+const t3_9h = await tela9h(p3_9h);
+const m3_9h = await minhaArea9h(p3_9h);
+diz('com "Minha área" e a API sem resposta (`onLine` verdadeiro), a busca espera o perfil — e a fila guardada entra (R12-4-02)',
+  m3_9h.myArea === true && !m3_9h.perfil && m3_9h.esperou && t3_9h.card && !t3_9h.falha
+  && JSON.stringify(t3_9h.fila) === ESPERADA_9H && !!t3_9h.abriu && t3_9h.abriu.aposFalha === true,
+  JSON.stringify({ t3_9h, m3_9h }));
+await p3_9h.close({ runBeforeUnload: true });
+borda9h = '502'; api9h = '502';
+const p4_9h = await abrir9h('Minha área, borda 502');
+await decidiu9h(p4_9h);
+const t4_9h = await tela9h(p4_9h);
+const m4_9h = await minhaArea9h(p4_9h).catch(() => null);
+diz('com "Minha área" e a ORIGEM fora do ar (502 em tudo), a fila guardada entra (R12-4-02)',
+  t4_9h.app && !!m4_9h && m4_9h.myArea === true && m4_9h.esperou && t4_9h.card && !t4_9h.falha
+  && JSON.stringify(t4_9h.fila) === ESPERADA_9H, JSON.stringify({ t4_9h, m4_9h }));
+await p4_9h.close();
+borda9h = 'normal'; api9h = 'ok'; areas9h = [];
 await ctx9h.close();
 await new Promise((ok) => proxy9h.close(ok));
 
@@ -3834,6 +3904,87 @@ diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu del
   && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
 diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
   comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
+// (R12-4-04) O "N esperando envio" que nasce NO MEIO de um arraste de card: a
+// decisão anterior, presa no ar, falha por rede com o dedo arrastando o card
+// seguinte. O FAB ESPERA o gesto acabar pra trocar de canto (a decisão do
+// R10-4-05) e fica por cima do número até o dedo soltar — e a captura automática
+// do MESMO arraste rodava a sentinela nesse instante e acusava
+// `indicadorEscondido`, num estado que o app não garante (MEDIDO, n4 da
+// auditoria). No computador (1280×800), como lá. CONTROLE: o FAB está MESMO por
+// cima do número durante o gesto (o caso foi encenado), e sai quando o dedo solta.
+const arraste9n = async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  let aviao = false;
+  let prender = false;
+  const presos = [];
+  await ctx.route('**/*-tiles/live/base/**', (r) => (aviao ? r.abort('internetdisconnected') : servirTile(r)));
+  await ctx.route('**/api/*', (r) => {
+    if (aviao) return r.abort('internetdisconnected');
+    if (prender && /\/api\/validar-place$/.test(r.request().url())) { presos.push(r); return; }
+    return rotaApi9k(r);
+  });
+  const pg = await abrirEm(ctx, 'arraste');
+  await esperarNaPagina(pg, () => typeof API !== 'undefined', 20000, 100);
+  await pg.evaluate(() => {
+    API.setSession('tok-9n-arraste');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-arraste') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoEnabled: false,
+      consequenciaVista: { reject: true, read: true } }));
+    localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
+  });
+  await pg.reload({ waitUntil: 'domcontentloaded' });
+  const pronta = await prontaComFab(pg);
+  await dormir(800);   // o FAB assenta no canto (ele se reposiciona quando o card assenta)
+  prender = true;
+  await pg.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+  const enviando = await esperarNaPagina(pg, () => AppState.inFlightActions === 1 && !!document.getElementById('inFlightIndicator')
+    && !window.isSwipeAnimating(), 10000, 50);
+  await dormir(300);
+  const c = await pg.evaluate(() => { const r = cardDaFrente().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.75 }; });
+  await pg.mouse.move(c.x, c.y); await pg.mouse.down();
+  for (let k = 1; k <= 5; k++) { await pg.mouse.move(c.x + 20 * k, c.y + 1); await dormir(20); }
+  // A decisão presa falha por REDE no meio do arraste: vira "esperando" (número a não cobrir).
+  aviao = true; await ctx.setOffline(true);
+  for (const r of presos.splice(0)) await r.abort('internetdisconnected').catch(() => {});
+  const esperando = await esperarNaPagina(pg, () => carregarFilaDeSaida().length === 1 && AppState.inFlightActions === 0
+    && !!document.getElementById('inFlightIndicator')?.classList.contains('nao-cobrir'), 10000, 50);
+  const noGesto = await pg.evaluate(() => {
+    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
+    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    // A contagem fica NA PÁGINA: a espera abaixo vai serializada (gotcha #28).
+    window.__capturas9n = dlogMomentos.length;
+    return { espera: fabEsperaOGesto, fabPorCima: !!(quem && quem.closest('#devFab')), capturas: dlogMomentos.length };
+  });
+  // Passa do limiar (25% da largura): a captura automática do arraste.
+  const limiar = 1280 * 0.25 + 30;
+  for (let k = 1; k <= 8; k++) { await pg.mouse.move(c.x + 100 + (limiar - 100) * k / 8, c.y + 2); await dormir(20); }
+  const capturou = await esperarNaPagina(pg, () => dlogMomentos.length > window.__capturas9n, 5000, 50);
+  const captura = await pg.evaluate(() => {
+    const m = dlogMomentos[dlogMomentos.length - 1];
+    return m ? { motivo: m.motivo, alertas: (m.alertas || []).map((a) => a.chave) } : null;
+  });
+  // O dedo volta ao meio e solta, sem decidir: o fim do gesto escolhe o canto.
+  await pg.mouse.move(c.x, c.y); await pg.mouse.up();
+  await esperarNaPagina(pg, () => !fabEsperaOGesto && !window.isSwipeAnimating(), 5000, 50);
+  await dormir(300);
+  const depois = await pg.evaluate(() => {
+    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
+    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { fabPorCima: !!(quem && quem.closest('#devFab')),
+      alertas: (diagNoInstante().alertas || []).map((a) => a.chave).filter((k) => k === 'indicadorEscondido') };
+  });
+  await ctx.close();
+  return { pronta: pronta.ok, enviando: enviando.ok, esperando: esperando.ok, noGesto, capturou: capturou.ok, captura, depois };
+};
+const arr9n = await arraste9n();
+diz('PRÉ-CONDIÇÃO: o "N esperando envio" nasceu no MEIO do arraste, com o FAB esperando o gesto e por cima do número',
+  arr9n.pronta && arr9n.enviando && arr9n.esperando && arr9n.noGesto.espera === true && arr9n.noGesto.fabPorCima === true,
+  JSON.stringify(arr9n));
+diz('a captura automática do arraste não acusa `indicadorEscondido` pelo FAB que espera o gesto (R12-4-04)',
+  arr9n.capturou && arr9n.captura?.motivo === 'auto:arraste' && Array.isArray(arr9n.captura.alertas)
+  && !arr9n.captura.alertas.includes('indicadorEscondido'), JSON.stringify(arr9n.captura));
+diz('CONTROLE: o dedo solta, o FAB sai de cima do número — e o diagnóstico segue sem acusar nada',
+  arr9n.depois.fabPorCima === false && arr9n.depois.alertas.length === 0, JSON.stringify(arr9n.depois));
 
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
@@ -3851,4 +4002,4 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta)');
