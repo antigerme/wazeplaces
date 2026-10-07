@@ -2401,3 +2401,54 @@ test('R10-7-02: o "Aplicar" que encerra o treino traz o aviso do país anotado n
   assert.deepEqual(await aplicar({ pais: 30 }), [], 'o aviso da França saiu com a fila do Brasil');
   assert.deepEqual(await aplicar({ minhaArea: true }), [], 'o aviso do país saiu com a fila da "Minha área"');
 });
+
+// ═══ R13-6-02 · o 401 do OUTRO servidor na pergunta da decisão pendente ═══════
+// (auditoria da rodada 13, regressão do lote 16). A decisão do lugar que ficou
+// SEM resposta (R12-6) é perguntada de novo no começo de cada busca, e o 401 do
+// `/Session` de outro servidor vai à conferência da sessão. A sonda pergunta o
+// perfil DAQUI, que responde: alarme falso, e a recomposição chamava o
+// `startFetching` SEM teto — que perguntava de novo ao servidor que acabou de
+// recusar, e o 401 voltava pra cá: sem "Minha área", 13 `/Session` da NA + 13
+// sondas, 12 "Conexão instável…" e 13 "Tudo limpo!" anunciados em 15 s, sem fim
+// (MEDIDO no navegador, nos dois motores). Aqui a conferência, a sonda e a
+// recomposição rodam DE VERDADE (`handleUnauthorized` → `rebuscarDepoisDeFalha`),
+// com a pendência de verdade (`decisaoSemResposta`) e a busca anotada.
+const PERFIL_SO_NA = { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] };
+const PENDENTE_NO_BRASIL = () => ({ epoca: 0, conta: '1', semResposta: { regioes: ['na'], regiao: 'row', pais: '30' } });
+
+test('R13-6-02: o alarme falso com a fila VAZIA que só espera a decisão pendente não recompõe — perguntar de novo sozinho era o laço; a busca que FALHOU recompõe', async () => {
+  const casos = [
+    // [rótulo, "Minha área", loadError, espera a decisão (`filaEsperaPerfil`), com a pendência, buscas esperadas]
+    ['"Tudo limpo!" sem "Minha área", com a decisão pendente', false, false, false, true, []],
+    ['"Minha área" esperando a decisão pendente ("Falha ao carregar")', true, true, true, true, []],
+    ['CONTROLE: a busca que FALHOU com um 401, com a decisão pendente', false, true, false, true, ['row']],
+    ['CONTROLE: "Tudo limpo!" sem decisão pendente (a recomposição de sempre)', false, false, false, false, ['row']],
+  ];
+  for (const [rotulo, myArea, loadError, espera, comPendencia, esperado] of casos) {
+    const m = paginaDaSondaComAFilaEsperando({ myArea, perfis: { row: PERFIL_SO_NA } });
+    Object.assign(m.p.AppState, { loadError, profile: { ...PERFIL_SO_NA } });
+    m.p.deps.filaEsperaPerfil = espera;
+    m.p.deps.decisaoDoLugarDe = comPendencia ? PENDENTE_NO_BRASIL() : null;
+    const conferindo = m.app.handleUnauthorized();
+    assert.ok(m.sonda(), `PRÉ-CONDIÇÃO (${rotulo}): o 401 não armou a sonda`);
+    m.sonda()();
+    await conferindo;
+    await tique(10);
+    assert.ok(m.p.log.toasts.some((x) => x.includes('toast.sessionKeptAlive')), `PRÉ-CONDIÇÃO (${rotulo}): a sonda não confirmou a sessão`);
+    assert.deepEqual(m.buscas, esperado, `${rotulo}: a recomposição saiu ${JSON.stringify(m.buscas)}`);
+  }
+});
+
+test('R13-6-02: a recomposição da fila vazia SEM falha tem o MESMO teto da que falhou — seguidas, sem nenhuma busca dar certo, elas param', () => {
+  const teto = constante('MAX_REBUSCAS_AUTO');
+  const m = paginaDaSondaComAFilaEsperando({ myArea: false, perfis: {} });
+  Object.assign(m.p.AppState, { loadError: false, profile: { id: 1, editableCountryIDs: [30], areas: [], managedAreas: [] } });
+  for (let i = 0; i < 6; i++) m.app.rebuscarDepoisDeFalha();
+  assert.ok(m.buscas.length > 0, 'CONTROLE: a recomposição da fila vazia sem falha não saiu nenhuma vez — o instrumento não a enxerga');
+  assert.equal(m.buscas.length, teto,
+    `a recomposição saiu ${m.buscas.length} vezes seguidas sem nenhuma busca dar certo: é o laço do R13-6-02 (falha → confere → alarme falso → busca…)`);
+  // O gesto (o ↻, o filtro: o `resetQueue`) recomeça a conta, como sempre.
+  m.p.deps.rebuscasAuto = 0;
+  m.app.rebuscarDepoisDeFalha();
+  assert.equal(m.buscas.length, teto + 1, 'depois do gesto, a recomposição não voltou a sair');
+});

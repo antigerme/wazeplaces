@@ -268,14 +268,16 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     },
   };
   const el = () => ({ classList: { add() {}, remove() {}, contains: () => false, toggle() {} } });
-  const ganchos = { aoConhecerConta: () => {} };
+  // A conferência da sessão (`handleUnauthorized`): por padrão só anota; o teste
+  // do laço do 401 (R13-6-02) a troca pelo desfecho do alarme falso.
+  const ganchos = { aoConhecerConta: () => {}, handleUnauthorized: () => log.push('confere-sessao') };
   const deps = {
     AppState, API, TYPES_ALL: constante('TYPES_ALL'), PREFETCH_THRESHOLD: constante('PREFETCH_THRESHOLD'),
     MAX_EMPTY_PAGES: constante('MAX_EMPTY_PAGES'), MAX_PAGINAS_POR_BUSCA: constante('MAX_PAGINAS_POR_BUSCA'),
     REGIOES_DO_WAZE: ['row', 'na', 'il'], navigator: navegador, Treino: { ativo: false, entradas: 0 },
     document: { getElementById: () => el() },
     dfato: () => {}, dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
-    handleUnauthorized: () => log.push('confere-sessao'), showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
+    handleUnauthorized: () => ganchos.handleUnauthorized(), showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
     t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
     guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {}, sortQueue: () => {},
     aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {}, offlineVarrer: () => {},
@@ -301,6 +303,10 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     // existem, vencem estas).
     lerServidorDaMinhaArea: () => null, areasGerenciadasLidas: () => null,
     decisaoSemResposta: () => null, refazerDecisaoSemResposta: () => null,
+    // A recomposição do alarme falso e o teto dela (R13-6-02); e o teto da espera
+    // pelo perfil da fila vazia (R13-6-04), quando existe.
+    MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'),
+    ...(/^const FILA_VAZIA_ESPERA_PERFIL_MS = /m.test(APP_SEM) ? { FILA_VAZIA_ESPERA_PERFIL_MS: constante('FILA_VAZIA_ESPERA_PERFIL_MS') } : {}),
   };
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'startFetching', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'resetQueue',
@@ -1002,4 +1008,42 @@ test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela
   assert.equal(s.AppState.filters.myArea, false, 'PRÉ-CONDIÇÃO: "Minha área" seguiu ligada num perfil sem área');
   assert.equal(s.AppState.fetchEpoch, 1, 'a fila de "Minha área" ficou na tela com o filtro desligado (o filtro que mente)');
   assert.deepEqual(s.buscas, ['row pais 30'], `a fila do país não saiu: ${s.buscas}`);
+});
+
+// ═══ R13-6-02 · o 401 do OUTRO servidor na pergunta da decisão: nenhum laço ═══
+// (auditoria da rodada 13, regressão do lote 16). A decisão do lugar fica
+// PENDENTE quando o `/Session` de outro servidor não responde (R12-6), e o 401
+// dele vai à conferência da sessão (`handleUnauthorized`). A sonda pergunta o
+// perfil DAQUI, que responde: alarme falso, e a recomposição
+// (`rebuscarDepoisDeFalha`) chamava o `startFetching`, que pergunta de novo a
+// decisão pendente (`refazerDecisaoSemResposta`) — 401 de novo, e o ciclo
+// recomeçava: sem "Minha área", 13 `/Session` da NA + 13 sondas, 12 "Conexão
+// instável…" e 13 "Tudo limpo!" anunciados em 15 s, sem fim (MEDIDO no
+// navegador, nos dois motores). A conferência aqui tem o desfecho do alarme
+// falso de verdade (a recomposição); a busca, a pendência e a pergunta rodam DE
+// VERDADE. Com teto: sem ele o laço do defeito penduraria o teste (gotcha #19).
+test('R13-6-02: o 401 do outro servidor na pergunta da decisão pendente — a sessão é conferida UMA vez e nada pergunta de novo sozinho; o gesto pergunta', async () => {
+  for (const myArea of [false, true]) {
+    const perfis = SO_NA_FALHANDO('semSessao');
+    const m = montarServidores({ perfis, vazias: ['row'] });
+    m.AppState.filters.myArea = myArea;
+    let conferencias = 0;
+    m.ganchos.handleUnauthorized = () => {
+      m.log.push('confere-sessao');
+      if (++conferencias < 20) setTimeout(() => m.app.rebuscarDepoisDeFalha(), 0);
+    };
+    await abrirOApp(m);
+    await tique(60);
+    const rotulo = myArea ? 'com "Minha área"' : 'sem "Minha área"';
+    assert.ok(m.app.pendencia(), `PRÉ-CONDIÇÃO (${rotulo}): o 401 da NA não deixou a decisão pendente`);
+    assert.deepEqual(m.perguntas, ['row', 'na', 'il'],
+      `(${rotulo}) a recomposição do alarme falso perguntou de novo à NA que acabou de recusar: ${m.perguntas.join(' ')} — o laço`);
+    assert.equal(conferencias, 1, `(${rotulo}) a sessão foi conferida ${conferencias} vezes: o laço`);
+    // O gesto (o ↻, o "Tentar de novo", o "Verificar novamente") pergunta de novo — e a NA, que agora responde, leva a pessoa à fila dela.
+    perfis.na = SO_NA.na;
+    await m.atualizar();
+    await tique(10);
+    assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `(${rotulo}) o gesto não perguntou de novo à NA: ${m.perguntas}`);
+    assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], `(${rotulo}) a resposta da NA não levou a fila pra lá`);
+  }
 });

@@ -7123,6 +7123,17 @@ function rebuscarDepoisDeFalha() {
     // 12, R12-6-01). No 1º perfil pela sonda (o R9-6-03), o
     // `completarPerfilChegado` já pôs a decisão no ar antes de chegar aqui.
     if (filaEsperaPerfil && AppState.profile && AppState._caixaDaMinhaAreaNoAr) return;
+    // E a fila VAZIA que só espera a decisão do lugar que ficou SEM resposta
+    // (`decisaoSemResposta`): o "Tudo limpo!" sem "Minha área", ou a busca de
+    // "Minha área" esperando por ela (`filaEsperaPerfil`). Nenhuma busca falhou:
+    // recompor era só perguntar de novo, 1,2 s depois, ao servidor que acabou de
+    // recusar com um 401 — o `/Session` de OUTRO servidor, num pedido que a pessoa
+    // nem fez, e o ritmo que faz um WAF marcar a conta. A sessão está viva (é o
+    // alarme falso que chama aqui), e quem pergunta de novo é a próxima busca da
+    // pessoa — o "Tentar de novo", o ↻, o "Verificar novamente": uma ida por
+    // busca, nenhuma por relógio, a régua da pendência (auditoria da rodada 13,
+    // R13-6-02). A busca que FALHOU (`loadError` sem a espera) segue abaixo.
+    if (AppState.queue.length === 0 && (!AppState.loadError || filaEsperaPerfil) && decisaoSemResposta()) return;
     if (AppState.queue.length > 0) {
         // COM card na fila: foi a REPOSIÇÃO que levou o 401. A busca que falhou
         // deixou `hasMore = false` e `loadError = true`, e com a sessão viva a
@@ -7139,8 +7150,20 @@ function rebuscarDepoisDeFalha() {
         return;
     }
     // Fila vazia SEM falha: não há o que repor, e o `startFetching` vai só
-    // pintar o "Tudo limpo!" — que aí é verdade.
-    if (!AppState.loadError) { startFetching(); return; }
+    // pintar o "Tudo limpo!" — que aí é verdade. Com o MESMO teto de baixo: o
+    // `startFetching` pergunta de novo a decisão do lugar que ficou pendente
+    // (`refazerDecisaoSemResposta`), e o 401 dela vem pra cá de novo — com o
+    // `/Session` de OUTRO servidor recusando (o 403 em rajada do WAF do Waze
+    // num servidor só) e a sonda daqui respondendo, eram duas idas ao Waze, um
+    // "Conexão instável…" e um "Tudo limpo!" anunciado a cada 1,2 s, SEM FIM
+    // (MEDIDO no navegador, nos dois motores: 13 + 13 pedidos em 15 s;
+    // auditoria da rodada 13, R13-6-02).
+    if (!AppState.loadError) {
+        if (rebuscasAuto >= MAX_REBUSCAS_AUTO) return;
+        rebuscasAuto++;
+        startFetching();
+        return;
+    }
     // TETO, e ele não é preciosismo: sem isto o desenho é um laço de requisição
     // (falha → confere → alarme falso → rebusca → falha…). Estourado o teto, o
     // erro FICA na tela com o botão de tentar de novo — honesto, e quem decide
