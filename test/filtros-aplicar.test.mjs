@@ -219,7 +219,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     esperaDosFiltros: { regiao: false, gps: false },
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
-    epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
+    epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, cargasDoPerfil: 0, lugarDoPedidoDoPerfil: null,
     editaveisPorServidor: { conta: null, lidos: {} },
     listasDePaisesNoAr: new Map(),
     // As listas que CHEGARAM, por região (R9-6-01).

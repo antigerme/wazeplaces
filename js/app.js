@@ -6455,6 +6455,8 @@ function showAccessDenied(result) {
 
 async function loadProfileAndAuxData() {
     const epoca = epocaDaSessao;
+    const pedidoAntes = perfilPedidoEm;
+    const carga = ++cargasDoPerfil;
     perfilPedidoEm = Date.now();
     perfilFalhouPorRede = false;
     // O lugar em que o perfil e os países são PEDIDOS (ver `lugarDoPedidoDoPerfil`).
@@ -6478,6 +6480,16 @@ async function loadProfileAndAuxData() {
     // fila guardada que entra assim ficava com "Sem Imagem" e ✕/✓ vivos. Apaga com
     // a primeira resposta que chegar, como sempre.
     if (perfilFalhouPorRede && typeof profileRes._motivo === 'string' && AppState.filters.myArea) buscaSemResposta = true;
+    // O pedido que nem teve RESPOSTA (o `_motivo` do `_post`: a rede, o prazo)
+    // não chegou ao servidor, e não conta no teto de um por minuto do
+    // `refazerPerfilSeFaltar` — a regra do token e da lista da presença. Contava:
+    // o app reaberto sem resposta da API, com a rede voltando em menos de um
+    // minuto, não pedia o perfil nas provas de rede que vinham (as respostas do
+    // esvaziamento da fila de saída), e sem ele faltavam o nome, os portões de
+    // L6, a recusa automática, a presença — e o "invisível" que esperava o perfil
+    // não saía, contra o "assim que o sinal volta" (auditoria da rodada 12,
+    // R12-5-04, MEDIDO). Só se nenhuma carga começou depois desta.
+    if ((!profileRes || typeof profileRes._motivo === 'string') && carga === cargasDoPerfil) perfilPedidoEm = pedidoAntes;
     // O portão reconferido pelo servidor: o nível ou a área mudou no Waze
     // depois do login (ver `handlePerfil`). A sessão já foi apagada lá. Não
     // passa pelo `handleUnauthorized`, porque não há o que confirmar (não é o
@@ -6701,7 +6713,11 @@ async function completarPerfilChegado(perfil, epoca) {
 // perdia a lixeira, o aprovar, o renomear e a recusa automática, e a presença
 // não subia (ela precisa do id), até recarregar. Refaz na próxima PROVA de rede
 // (`API.aoProvarRede`) — nunca por relógio — e no máximo uma vez por minuto.
+// O pedido que nem teve resposta não conta no teto (ver o fim da carga).
 let perfilPedidoEm = 0;
+// Quantas cargas do perfil começaram nesta página: a carga que acaba sem
+// resposta só devolve o carimbo do teto se nenhuma outra começou depois dela.
+let cargasDoPerfil = 0;
 // O LUGAR (região e país) de quando o perfil foi PEDIDO pela última vez — na
 // carga da abertura ou na que refaz o perfil que faltou. Os países editáveis do
 // perfil são do servidor DAQUELE pedido (`editableCountryIDs` é POR servidor), e

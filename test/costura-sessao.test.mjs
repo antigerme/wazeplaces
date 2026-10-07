@@ -1483,7 +1483,7 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
   const AppState = { profile: null, authenticated: true, countries: [], statesByCountry: {}, filters: { myArea: false, stateId: '', managedAreaId: '' },
     currentPlace: null, queue: [] };
   const deps = {
-    AppState, epocaDaSessao: 0, perfilPedidoEm: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    AppState, epocaDaSessao: 0, perfilPedidoEm: 0, cargasDoPerfil: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
     VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; }, REGIOES_DO_WAZE: ['row', 'na', 'il'],
     API: {
       getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, getRegion: () => 'row', getCountry: () => pais, setCountry: (p) => { pais = p; }, setRegion() {},

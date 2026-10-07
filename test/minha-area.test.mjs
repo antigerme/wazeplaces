@@ -311,7 +311,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
     + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
     + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null; let decisaoDoLugarDe = null;\n'
-    + 'let perfilPedidoEm = 0;\n'
+    + 'let perfilPedidoEm = 0; let cargasDoPerfil = 0;\n'
     // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
     + 'let perfilFalhouPorRede = false; let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {}, gerenciadas: {} };\n'

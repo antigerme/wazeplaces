@@ -14,7 +14,10 @@
 //  · R12-1-04 — o "Sair" dado noutra aba não alcançava a aba que CAIU na tela de
 //    entrada: a fila, o card, o rascunho e o anel da conta que saiu ficavam nela;
 //  · R12-1-05 — a volta à aba com TEXTO DIGITADO na entrada: a adoção respeitava,
-//    e a pergunta à extensão da mesma volta apagava o que foi digitado.
+//    e a pergunta à extensão da mesma volta apagava o que foi digitado;
+//  · R12-5-04 — o pedido do perfil que nem teve RESPOSTA contava no teto de um
+//    por minuto: com a rede voltando antes disso, nem o perfil nem o "invisível"
+//    saíam.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js (e o `api.js` inteiro,
 // num contexto do `vm`, onde o efeito do `getSession` mora): o que o teste não
@@ -641,4 +644,69 @@ test('R12-1-05: CONTROLE — sem texto digitado (o diálogo vazio, ou nenhum), a
     m.h.aoVoltarAAba();
     assert.deepEqual(m.log, ['perguntou à extensão (em silêncio)'], 'CONTROLE: a volta deixou de perguntar à extensão: ' + JSON.stringify(tela));
   }
+});
+
+// ═══ R12-5-04 · o pedido do perfil SEM resposta não conta no teto ═════════════
+function perfilQueFalta(respostaDoPerfil) {
+  const relogio = { t: T };
+  const pedidos = [];
+  const respostas = [];   // o soltar de CADA pedido, na ordem
+  const deps = {
+    AppState: { authenticated: true, profile: null }, epocaDaSessao: 0, perfilPedidoEm: 0, cargasDoPerfil: 0,
+    PERFIL_REFAZER_MS: constante('PERFIL_REFAZER_MS'), lugarDoPedidoDoPerfil: null, Date: { now: () => relogio.t },
+    API: {
+      getRegion: () => 'row', getCountry: () => 30,
+      // O perfil fica no ar até o TESTE soltar a resposta.
+      getProfile: () => { pedidos.push(relogio.t); return new Promise((ok) => { respostas.push(() => ok(respostaDoPerfil)); }); },
+    },
+    pedirListaDePaises: () => Promise.resolve({ success: false, errorCategory: 'transient', _motivo: 'TypeError' }),
+    definirPerfil: () => false, recusaDoPortao: () => {}, handleUnauthorized: () => {},
+  };
+  const h = montar(['loadProfileAndAuxData', 'refazerPerfilSeFaltar'], deps);
+  return { h, relogio, pedidos, soltar: (i = respostas.length - 1) => respostas[i](), deps };
+}
+const SEM_RESPOSTA = { success: false, error: 'x', errorCategory: 'transient', _motivo: 'TypeError' };
+const COM_RESPOSTA = { success: false, error: 'x', errorCategory: 'transient' };   // o 502 da borda: a resposta CHEGOU
+
+test('R12-5-04: o perfil que nem teve RESPOSTA não segura o teto de um minuto — a prova de rede seguinte o pede de novo', async () => {
+  const m = perfilQueFalta(SEM_RESPOSTA);
+  const carga = m.h.loadProfileAndAuxData();      // o app reaberto sem resposta da API
+  await tique();
+  m.relogio.t += 5000;
+  m.h.refazerPerfilSeFaltar();                    // uma prova de rede com o pedido NO AR: ele vale
+  assert.equal(m.pedidos.length, 1, 'com o pedido no ar, a prova de rede pediu o perfil de novo (dois no ar)');
+  m.soltar();
+  await carga;
+  m.relogio.t += 10000;                            // a rede volta 15 s depois da abertura
+  m.h.refazerPerfilSeFaltar();                    // a resposta do esvaziamento da fila de saída
+  assert.equal(m.pedidos.length, 2,
+    'DEFEITO: a tentativa que nem chegou ao servidor contou no teto — com a rede de volta, o perfil (e o "invisível" que espera por ele) só sairiam depois de um minuto, no próximo gesto');
+});
+
+test('R12-5-04: CONTROLE — a tentativa que TEVE resposta (o Waze fora, a borda com 502) segue contando no teto de um minuto', async () => {
+  const m = perfilQueFalta(COM_RESPOSTA);
+  const carga = m.h.loadProfileAndAuxData();
+  await tique();
+  m.soltar();
+  await carga;
+  m.relogio.t += 15000;
+  m.h.refazerPerfilSeFaltar();
+  assert.equal(m.pedidos.length, 1, 'a resposta que CHEGOU (prova de rede) deixou de contar no teto: um perfil por resposta da API');
+  m.relogio.t += 60000;
+  m.h.refazerPerfilSeFaltar();
+  assert.equal(m.pedidos.length, 2, 'passado o minuto, o perfil não foi pedido de novo');
+});
+
+test('R12-5-04: a carga sem resposta só devolve o teto se nenhuma outra começou depois dela', async () => {
+  const m = perfilQueFalta(SEM_RESPOSTA);
+  const primeira = m.h.loadProfileAndAuxData();
+  await tique();
+  m.relogio.t += 70000;                            // passado o minuto: a prova de rede pede de novo
+  m.h.refazerPerfilSeFaltar();
+  assert.equal(m.pedidos.length, 2);
+  m.soltar(0);                                    // a PRIMEIRA acaba sem resposta, com a segunda no ar
+  await primeira;
+  m.relogio.t += 1000;
+  m.h.refazerPerfilSeFaltar();
+  assert.equal(m.pedidos.length, 2, 'a carga velha devolveu o teto por cima da que está no ar: dois perfis no ar');
 });
