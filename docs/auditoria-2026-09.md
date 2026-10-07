@@ -16,24 +16,24 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-07 ~12:00 UTC)
+## 0. Estado agora (2026-10-07 ~15:30 UTC)
 
-- **Lote 13 em produção** (PR #260, `da70feb`, v2026.10.07-01), verificado com as duas contas: 112 ✓ na volta
-  inteira (os 4 ✗ eram do roteiro, consertados nele) e a seção "16. Lote 13 no ar" refeita com 26 ✓ · 0 ✗, nenhum
-  defeito do app.
-- **Rodada 10** completa (`scratchpad/r10-<n>/relatorio.md`, ~45 achados, 3 médios: desligar o autor no meio da
-  recusa automática não a parava; o card de foto arrastado ficava preso no "precisa de sinal"; o "N esperando envio"
-  escondido sob o cabeçalho no iPhone instalado). Confirmado no Waze real: as `managedAreas` são por servidor.
-- **Lote 14 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (treino e
-  a fila real, exemplos e foco do treino, foto ampliada, presença, Filtros e "Minha área", contas e a adoção da
-  sessão, fila e recusa automática, duas abas, diagnóstico e offline) mais o que a junção achou: o "Marcar todos", a
-  recusa automática e a aprovação de foto passaram a deixar de fora o que a outra aba decidiu, e um conflito de teste
-  (treino × filtros) resolvido pela união. Relatórios em `scratchpad/relatorio-l14-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 14": o voltar
-  no meio do treino, o placar que também perde entre abas com a recusa automática, e as decididas e reversíveis do lote).
+- **Lote 14 em produção** (PR #261, `f732676`, v2026.10.07-02), verificado com as duas contas: 123 ✓ · 0 ✗ na volta
+  inteira, com a seção "17. Lote 14 no ar" (8 ✓), nenhum defeito do app.
+- **Rodada 11** completa (`scratchpad/r11-<n>/relatorio.md`, ~35 achados): 1 alto (o app CONGELAVA no fim do treino
+  quando a busca lenta da abertura voltava dentro dele) e 2 médios (aprovar e excluir fotos do mesmo local desfazia a
+  aprovação no Waze; o envio que falha na conversa não chegava ao leitor de tela). O resto, baixos.
+- **Lote 15 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
+  ampliada, duas abas, fila e "Marcar todos", contas e a adoção, Filtros e "Minha área", diagnóstico e offline,
+  presença e conversa, treino) mais dois ajustes da junção (o selo "Pular ⭐" na régua do ↑; o observador do
+  cabeçalho pela caixa de borda) e um conflito em fonte (contas × filtros no `esquecerOutraConta`) resolvido pela
+  união. Relatórios em `scratchpad/relatorio-l15-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 15").
 - **Cookies** (2026-10-06): `a3bf0b4b-antigerme_cookies.txt` (L6+AM) e `83b3b403-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "17. Lote 14 no
-  ar") — e a rodada 11, com a pista da presença (a resposta que a lista já contou e o tempo real entrega depois).
+- **Próxima volta**: PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "18. Lote 15 no ar") — e a rodada 12,
+  com as pistas que os agentes deixaram: a pergunta do perfil a outro servidor que FALHA ainda vale como "não edita
+  lá" (filtros); a recusa automática no ar na aba que recebe o aviso e o aviso da fila de saída que não confere a
+  conta (abas); dois logins desta aba ao mesmo tempo (contas).
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -77,6 +77,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #258 | 2026100601 | rodada 11: treino e a fila real, foto ampliada, fila e lotes, diagnóstico e offline, presença, filtros, contas e Histórico; a extensão 0.3.3 | **107 ✓** + 21 da seção 15 em produção, nenhum defeito do app |
 | #259 | — | instrumento: a sonda falsa do "Marcar todos" espera o relógio andar; a espera dos smokes diz quando a página do WebKit cai; o relógio grosso | CI verde nos dois jobs |
 | #260 | 2026100701 | rodada 12: treino e a fila real, fila de saída, foto ampliada, diagnóstico, presença, filtros e "Minha área" por servidor, contas em duas abas; a extensão 0.3.4 | **112 ✓** em produção (os 4 ✗ do roteiro, consertados; a seção 16 refeita, 26 ✓ · 0 ✗), nenhum defeito do app |
+| #261 | 2026100702 | rodada 13: recusa automática e "Marcar todos", duas abas, treino, foto ampliada, presença, "Minha área" por servidor, entrada, offline e FAB | **123 ✓** em produção, com a seção 17 (8 ✓), nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
