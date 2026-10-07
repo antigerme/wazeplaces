@@ -21920,6 +21920,23 @@ async function handleBatchMarkRead() {
         refez = true;
         return (await refazerDepoisDo401(epoca, enviar)) || r;
     };
+    // O que o Waze marcou CONTA NA HORA, a cada pedaço (e a cada pedido do um a
+    // um) que pousa: placar, Histórico e conquistas, como o ✓ de um card conta.
+    // Somado só no fim do laço, fechar o app no meio deixava fora do placar e do
+    // Histórico o que o Waze JÁ tinha marcado, com a resposta recebida e o pouso
+    // registrado — o pedido não volta como card, e nada na tela dizia que o
+    // trabalho foi feito (MEDIDO no navegador: lote de 60, o 1º pedaço pousa e a
+    // página fecha — reaberta, Lidos 40 e Histórico 0, com 50 marcados no Waze;
+    // auditoria de 2026-10-07, R10-2-03). Conta na sessão da RESPOSTA, como o
+    // card: o que pousou antes de uma queda conta, o que chega depois não (o
+    // `sessaoTrocou`, abaixo). O aviso "N marcados" segue um só, no fim.
+    const contarLidos = (n) => {
+        AppState.stats.read += n;
+        recordHistory('read', n, gesto.dia, gesto.onde);
+        registrarLoteConfirmado(n, gesto);
+        updateStats();
+        saveStats();
+    };
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
@@ -21933,7 +21950,9 @@ async function handleBatchMarkRead() {
             // app no meio de um lote de 60 deixava os 25 que o Waze já marcou sem
             // pouso, e a reabertura sem rede os devolvia como card — dava pra
             // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
-            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); continue; }
+            // E conta junto (R10-2-03, ver `contarLidos`), DEPOIS do pouso: se a
+            // conta quebrar, o pedido não volta por causa disso.
+            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco.length); continue; }
             if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
@@ -21947,9 +21966,12 @@ async function handleBatchMarkRead() {
                 if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) {
                     registrarPouso(p);
                     // O "já tratado" de um pedido cuja aprovação desta pessoa
-                    // pousou sem resposta é a aprovação DELA (R8-2-01).
-                    if (!r1.success && aprovacaoDelaJaPousou(p)) aprovadas.push(p);
-                    else feitos.push(p);
+                    // pousou sem resposta é a aprovação DELA (R8-2-01): o
+                    // "Curador", e nenhum lido — este lote conta ao pousar, então
+                    // o placar dele nem subiu (`desfechoDaAprovacaoDela` sem
+                    // `contado`). Na hora, como o lido (R10-2-03).
+                    if (!r1.success && aprovacaoDelaJaPousou(p)) { aprovadas.push(p); desfechoDaAprovacaoDela('read', p, false); }
+                    else { feitos.push(p); contarLidos(1); }
                 }
                 else if (r1 && r1.errorCategory === 'unauthorized') { falhou = r1; break; }
                 else { falhou = r1 || {}; break; }
@@ -21967,8 +21989,9 @@ async function handleBatchMarkRead() {
         updateInFlightIndicator();
         aplicarTravaDeAcao();
     }
-    // A sessão TROCOU no meio do lote: nada grava — placar, Histórico, avisos —,
-    // porque a resposta é da sessão que acabou (ver `epocaDaSessao`). Mas na
+    // A sessão TROCOU no meio do lote: nada MAIS grava — placar, Histórico,
+    // avisos —, porque a resposta é da sessão que acabou (ver `epocaDaSessao`); o
+    // que pousou ANTES da queda já contou na hora, na sessão dele (R10-2-03). Mas na
     // renovação da queda com a MESMA conta a fila ATRAVESSOU a queda
     // (`epocaFila === AppState.fetchEpoch`), e o que o Waze já marcou seguia nela
     // como card: decidível de novo, com o "Restam" contando. MEDIDO (s15): lote
@@ -22003,18 +22026,9 @@ async function handleBatchMarkRead() {
     if (feitos.length || aprovadas.length) {
         // O que saiu conta como o ✓ de um card conta: placar, Histórico e
         // conquistas. Antes o lote subia só o placar, e o Histórico, o Resumo do
-        // mês e a patente discordavam dele. (O pouso já foi registrado a cada
-        // pedaço, lá no laço.)
+        // mês e a patente discordavam dele. O pouso E a conta já foram feitos a
+        // cada pedaço, lá no laço (O4, R10-2-03): aqui fica a fila e o aviso.
         tratouNestaFila = true;
-        if (feitos.length) {
-            AppState.stats.read += feitos.length;
-            recordHistory('read', feitos.length, gesto.dia, gesto.onde);
-            registrarLoteConfirmado(feitos.length, gesto);
-        }
-        // O pedido que a aprovação desta pessoa resolveu (R8-2-01): o "Curador",
-        // e nenhum lido — este lote conta ao pousar, então o placar dele nem
-        // subiu (`desfechoDaAprovacaoDela` sem `contado`).
-        for (const p of aprovadas) desfechoDaAprovacaoDela('read', p, false);
         // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que
         // de fato SAIU — nunca por quantos o lote marcou. É isso que amarra o
         // desconto à fila do gesto: o ↻ e a troca de filtro no meio do lote

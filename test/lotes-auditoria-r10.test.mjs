@@ -5,6 +5,8 @@
 //    automática no ar não parava nada: os pedidos que faltavam seguiam indo ao
 //    Waze como rejeitados, no nome da pessoa, e com o "Esquecer" o autor voltava
 //    à lista ("✕ 4 · rejeitado hoje"), recriado por essas rejeições;
+//  · R10-2-03 — o "Marcar todos" somava o placar, o Histórico e as conquistas
+//    só no FIM do laço: fechar o app no meio perdia o que o Waze já tinha marcado;
 //  · R10-2-07 — a recusa automática que levava 401 anotava "saida.abriu" no
 //    diário com a fila de saída vazia.
 //
@@ -348,10 +350,132 @@ test('R10-2-07: a recusa automática que leva 401 não anota "saida.abriu" — a
   assert.deepEqual(c.diario.filter((k) => k === 'saida.abriu'), ['saida.abriu'], 'CONTROLE: a fila de saída abriu e o diário não disse');
 });
 
+// ═══ "Marcar todos" ═════════════════════════════════════════════════════════
+
+const lido = (i, extra = {}) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, ...extra });
+
+// O "Marcar todos" de verdade (`openBatchReadConfirm` + `handleBatchMarkRead`),
+// com o placar GRAVADO de verdade (`saveStats`): é o que a reabertura do app
+// mostra. O Waze responde quando o teste solta.
+function montarMarcarTodos({ fila, pedaco = 2, aprovadaDela = () => false, placar = 40 } = {}) {
+  const { guardado, localStorage } = lsFalso();
+  const STATS_KEY = constante('STATS_KEY');
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: placar, rejected: 0, skipped: 0 },
+    serverTotal: fila.length, fetchEpoch: 0, hasMore: false, pendingAction: null, inFlightActions: 0 };
+  const mensagem = { textContent: '' };
+  const portoes = [];
+  const enviados = [];
+  const historico = [];
+  const confirmados = [];
+  const desfechos = [];
+  const toasts = [];
+  const modais = [];
+  const deps = {
+    AppState, localStorage, STATS_KEY, LOTE_LIDOS_PEDACO: pedaco, epocaDaSessao: 0, Treino: { ativo: false },
+    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0, tratouNestaFila: false,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, contaDestaAbaEmDuvida: () => false,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
+    API: {
+      getRegion: () => 'row',
+      markAsReadBatch: (itens) => new Promise((ok) => { enviados.push(itens.map((x) => x.updateRequestID).join('+')); portoes.push(ok); }),
+      markAsRead: (v, u) => new Promise((ok) => { enviados.push('um:' + u); portoes.push(ok); }),
+    },
+    carimboDoGesto: () => GESTO, chaveDoPedido: chave,
+    recordHistory: (tipo, n, dia, onde) => historico.push([tipo, n, dia, onde]),
+    registrarLoteConfirmado: (n, gesto) => confirmados.push([n, gesto && gesto.dia]),
+    aprovacaoDelaJaPousou: (p) => aprovadaDela(p),
+    desfechoDaAprovacaoDela: (tipo, p, contado) => desfechos.push(`${tipo}:${p.updateRequestID}:${contado}`),
+    showToast: (m, tipo) => toasts.push(`${tipo}:${m}`), msgDoServidor: (r, d) => d,
+    t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k),
+    document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
+    openModal: (id) => modais.push(id), closeModal: () => {},
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
+  };
+  const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
+    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats'], deps);
+  const gravado = () => JSON.parse(guardado.get(STATS_KEY) || 'null');
+  const soltar = (resp) => portoes.shift()(resp);
+  const fila_ = () => AppState.queue.map((p) => p.updateRequestID);
+  return { h, deps, AppState, mensagem, portoes, enviados, historico, confirmados, desfechos, toasts, modais, gravado, soltar,
+    fila: fila_ };
+}
+
+// ── R10-2-03: o que o Waze marcou conta NA HORA, pedaço a pedaço ─────────────
+// O roteiro do auditor (q06): lote de 60 em pedaços de 25; o 1º pedaço pousa,
+// o 2º está no ar, e a página FECHA. Reaberta: "Lidos 40" (era 40) e Histórico
+// 0, com 50 marcados no Waze. Aqui, pedaços de 2: o instante "fecha agora" é o
+// 2º pedaço no ar — o que está GRAVADO é o que a reabertura mostra.
+test('R10-2-03: "Marcar todos" — o pedaço que o Waze marcou já está no placar GRAVADO, no Histórico e nas conquistas com o próximo no ar', async () => {
+  const m = montarMarcarTodos({ fila: [1, 2, 3].map((i) => lido(i)) });
+  m.h.openBatchReadConfirm();
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+  // CONTROLE: o placar do lote não é otimista — nada conta antes de o Waze responder.
+  assert.equal(m.AppState.stats.read, 40, 'o lote contou ANTES de o Waze marcar');
+  assert.deepEqual(m.historico, []);
+  m.soltar({ success: true });                       // o 1º pedaço (u1+u2) pousa
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 2º pedaço está no ar');
+  // A página fecha AGORA: o que está gravado é o que a reabertura mostra.
+  assert.equal(m.gravado() && m.gravado().read, 42,
+    `DEFEITO: o pedaço que o Waze já marcou não está no placar gravado (${JSON.stringify(m.gravado())}) — fechar o app agora o perde`);
+  assert.deepEqual(m.historico, [['read', 2, GESTO.dia, GESTO.onde]],
+    `DEFEITO: o pedaço que o Waze já marcou não está no Histórico: ${JSON.stringify(m.historico)}`);
+  assert.deepEqual(m.confirmados, [[2, GESTO.dia]], 'DEFEITO: o pedaço que o Waze já marcou não passou pelas conquistas');
+  m.soltar({ success: true });                       // o 2º (u3)
+  await lote;
+  assert.equal(m.AppState.stats.read, 43);
+  assert.equal(m.gravado().read, 43);
+  assert.deepEqual(m.historico.map((x) => x[1]), [2, 1], 'o Histórico contou um pedaço duas vezes (ou deixou um de fora)');
+  assert.deepEqual(m.confirmados.map((x) => x[0]), [2, 1]);
+  // O aviso de fim segue UM só, com o total.
+  assert.deepEqual(m.toasts.filter((x) => x.startsWith('success:')), ['success:toast.batchDonePlural#3']);
+  assert.deepEqual(m.fila(), []);
+});
+
+test('R10-2-03: no caminho UM A UM (um pedido já resolvido no pedaço), cada pedido conta quando POUSA', async () => {
+  // O 1º do pedaço já estava resolvido: o Waze para nele e o app vai um a um.
+  const m = montarMarcarTodos({ fila: [1, 2, 3].map((i) => lido(i)), pedaco: 3 });
+  m.h.openBatchReadConfirm();
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o pedaço saiu');
+  m.soltar({ success: false, errorCategory: 'already_processed' });
+  await ateQue(() => m.portoes.length === 1 && m.enviados.length === 2, 'PRÉ-CONDIÇÃO: o um a um começou');
+  m.soltar({ success: false, errorCategory: 'already_processed' });   // u1: outro editor já tinha lido
+  await ateQue(() => m.portoes.length === 1 && m.enviados.length === 3, 'PRÉ-CONDIÇÃO: o u2 está no ar');
+  assert.equal(m.gravado() && m.gravado().read, 41,
+    `DEFEITO: o pedido que pousou no um a um não está no placar gravado com o próximo no ar (${JSON.stringify(m.gravado())})`);
+  assert.deepEqual(m.historico.map((x) => x[1]), [1], 'DEFEITO: o pedido que pousou no um a um não está no Histórico');
+  m.soltar({ success: true });
+  await ateQue(() => m.portoes.length === 1 && m.enviados.length === 4, 'o u3 saiu');
+  m.soltar({ success: true });
+  await lote;
+  assert.equal(m.AppState.stats.read, 43);
+  assert.deepEqual(m.historico.map((x) => x[1]), [1, 1, 1]);
+  assert.deepEqual(m.toasts.filter((x) => x.startsWith('success:')), ['success:toast.batchDonePlural#3']);
+});
+
+test('R10-2-03: o pedido que a APROVAÇÃO dela resolveu tem o desfecho dela na hora — e não vira lido', async () => {
+  const m = montarMarcarTodos({ fila: [1, 2].map((i) => lido(i)), pedaco: 2, aprovadaDela: (p) => p.updateRequestID === 'u1' });
+  m.h.openBatchReadConfirm();
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o pedaço saiu');
+  m.soltar({ success: false, errorCategory: 'already_processed' });
+  await ateQue(() => m.portoes.length === 1 && m.enviados.length === 2, 'PRÉ-CONDIÇÃO: o um a um começou');
+  m.soltar({ success: false, errorCategory: 'already_processed' });   // u1: a aprovação DELA, sem resposta
+  await ateQue(() => m.portoes.length === 1 && m.enviados.length === 3, 'PRÉ-CONDIÇÃO: o u2 está no ar');
+  assert.deepEqual(m.desfechos, ['read:u1:false'], 'DEFEITO: o "Curador" da aprovação dela não contou na hora');
+  assert.equal(m.AppState.stats.read, 40, 'a aprovação dela contou como lido');
+  m.soltar({ success: true });
+  await lote;
+  assert.deepEqual(m.desfechos, ['read:u1:false'], 'o desfecho da aprovação saiu duas vezes');
+  assert.equal(m.AppState.stats.read, 41);
+  assert.deepEqual(m.toasts.filter((x) => x.startsWith('success:')), ['success:toast.batchDone#1']);
+});
+
 // Os testes de cima fatiam o FONTE; o app carrega o `js/min/` (gotcha #22).
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const re of [/aindaVale/g]) {
+  for (const re of [/aindaVale/g, /registrarLoteConfirmado\(/g]) {
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
   }
 });
