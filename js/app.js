@@ -19820,6 +19820,11 @@ function aoConhecerConta(perfil) {
     // chegar (conta nula) é desta conta, e sem o carimbo a troca o levaria junto
     // com o da conta anterior.
     carimbarContaNaSaida(id);
+    // E o "invisível" pedido nesta sessão antes do perfil, pelo mesmo motivo
+    // (R12-5-05): LIDO antes da troca — que tira da memória o pendente da conta
+    // anterior (`presencaWmeZerar`) — e carimbado DEPOIS dela, com a conta de
+    // quem entrou (`carimbarContaNoInvisivel`, logo abaixo).
+    const invisivel = invisivelPedidoAntesDoPerfil();
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
@@ -19834,6 +19839,7 @@ function aoConhecerConta(perfil) {
     // por último diz: sendo outra, sai só o que a memória guarda — o aparelho a
     // outra aba já limpou.
     else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: true });
+    carimbarContaNoInvisivel(id, invisivel);
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
     const s = marcaDaSessao(API.getSession());
@@ -19868,6 +19874,37 @@ function carimbarContaNaSaida(id) {
         if (it && !it.conta && it.s === s) { it.conta = id; mudou = true; }
     }
     if (mudou) salvarFilaDeSaida(f);
+}
+
+// O "invisível" gravado só com a MARCA da sessão do gesto (o gesto feito antes
+// de o perfil chegar, ver `presencaWmeGravarPendente`), com o que a memória
+// desta aba sabe dele; sem ele, `null`.
+function invisivelPedidoAntesDoPerfil() {
+    const g = AppState.preferences && AppState.preferences.presencaWmeDesligar;
+    if (!g || g.conta || typeof g.s !== 'string') return null;
+    return { s: g.s, em: g.em, pendente: presencaWme.desligarPendente === true };
+}
+
+// O perfil da sessão chegou (`aoConhecerConta`): o "invisível" que esperava a
+// conta passa a ser DELA, e sai com o perfil dela (`presencaWmeRefazerDesligar`,
+// que o `definirPerfil` chama logo depois). Desta sessão, ele volta depois da
+// troca de conta, que o tinha tirado com o da conta anterior: o gesto é de quem
+// entrou (R12-5-05). O de OUTRA sessão, sem conta, tem dono desconhecido: sai sem
+// ir ao Waze, como o item sem dono da fila de saída — o app nunca desliga a
+// visibilidade de ninguém por conta própria.
+function carimbarContaNoInvisivel(id, invisivel) {
+    if (!invisivel) return;
+    const p = AppState.preferences;
+    if (!p || p.presenca !== false) return;   // religado nesse meio: não vale mais
+    if (invisivel.s === marcaDestaAba()) {
+        p.presencaWmeDesligar = { conta: String(id), em: invisivel.em };
+        if (invisivel.pendente) presencaWme.desligarPendente = true;
+    } else {
+        const g = p.presencaWmeDesligar;
+        if (!g || g.conta || g.s !== invisivel.s) return;
+        delete p.presencaWmeDesligar;
+    }
+    savePreferences();
 }
 
 // MIGRACAO: saida-sem-marca
@@ -23276,9 +23313,14 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     // falhou na abertura) o `visivel: false` não tem pra quem ir — e era
     // descartado: a volta da rede e a chegada do perfil não o mandavam nunca, e
     // a pessoa seguia visível no WME (auditoria da costura, 2026-09-26, K5).
-    // Fica pendente, e o perfil chegando o manda (`definirPerfil`).
+    // Fica pendente, e o perfil chegando o manda (`definirPerfil`). Gravado com
+    // a SESSÃO do gesto quando a conta dela ainda não se sabe (ver
+    // `presencaWmeGravarPendente`, R12-5-05).
     if (id === null || id === undefined) {
-        if (AppState.preferences.presenca === false) { presencaWme.desligarPendente = true; presencaWmeGravarPendente(); }
+        if (AppState.preferences.presenca === false) {
+            presencaWme.desligarPendente = true;
+            presencaWmeGravarPendente({ doGesto: marcaDestaAba() });
+        }
         return;
     }
     presencaWme.desligarEm = Date.now();
@@ -23394,15 +23436,35 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
 // apaga o gravado na troca. Sem nenhuma, fica só na memória: não há a quem
 // conferir.
 //
+// `doGesto` (a marca da sessão DESTA aba, `marcaDestaAba`): o GESTO feito com
+// sessão e sem o perfil. Aí a conta é a DESTA sessão — a do aparelho só se foi
+// vista com ela (`contaAgora`) —, e desconhecida, o gesto é gravado com a marca
+// da sessão (`{ s, em }`), e a conta sai do perfil DELA quando chegar
+// (`aoConhecerConta`), como os itens da fila de saída (`carimbarContaNaSaida`).
+// Lida do aparelho sem conferir a marca, a conta era a de OUTRA sessão: o perfil
+// que chegava era de quem entrou, a troca de conta jogava fora o gesto dela, e o
+// interruptor ficava desligado com a pessoa visível no WME (auditoria da rodada
+// 12, R12-5-05, MEDIDO).
+//
 // `tentadoEm` (com a `sessao` e a `aba`, a marca da aba do envio): a hora do
 // último ENVIO, que o gravado carrega pras outras abas respeitarem o teto da
 // repetição (R8-5-07, R9-5-04); 0 tira o carimbo (o envio que não teve
 // resposta, ou que morreu com a página). Sem ele, só grava o que ainda não está
 // gravado.
-function presencaWmeGravarPendente({ tentadoEm, sessao, aba } = {}) {
+function presencaWmeGravarPendente({ tentadoEm, sessao, aba, doGesto = null } = {}) {
     let conta = AppState.profile && AppState.profile.id;
     if (conta === null || conta === undefined || conta === '') {
-        try { const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); conta = c && c.id; } catch (e) { conta = null; }
+        if (doGesto) conta = contaAgora();
+        else {
+            try { const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); conta = c && c.id; } catch (e) { conta = null; }
+        }
+    }
+    if ((conta === null || conta === undefined || conta === '') && doGesto) {
+        const g = AppState.preferences.presencaWmeDesligar;
+        if (g && !g.conta && g.s === String(doGesto)) return;   // já gravado
+        AppState.preferences.presencaWmeDesligar = { s: String(doGesto), em: Date.now() };
+        savePreferences();
+        return;
     }
     if (conta === null || conta === undefined || conta === '') return;
     conta = String(conta);
@@ -25246,6 +25308,12 @@ function lerPreferenciasGuardadas() {
                     if (typeof pend.aba === 'string' && pend.aba) g.aba = pend.aba.slice(0, 40);
                 }
                 AppState.preferences.presencaWmeDesligar = g;
+            } else if (parsed.presenca === false && pend && typeof pend === 'object' && pend.conta === undefined
+                && typeof pend.s === 'string' && /^[0-9a-f]{1,8}$/.test(pend.s) && Number.isFinite(pend.em)) {
+                // O gesto feito antes de o perfil dizer de quem era a sessão: só
+                // a marca dela, e a conta sai do perfil que chegar com ela
+                // (`aoConhecerConta`, R12-5-05).
+                AppState.preferences.presencaWmeDesligar = { s: pend.s, em: pend.em };
             }
             // O `presencaWmeVisto` da fase 2 não é mais lido: sem carregar, o
             // próximo `savePreferences` já grava sem ele.

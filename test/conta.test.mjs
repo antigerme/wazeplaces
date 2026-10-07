@@ -73,8 +73,10 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
   const registrosFica = [];
-  // `marcaDestaAba`: a sessão desta aba é a da MEMÓRIA (R12-1-03).
+  // `marcaDestaAba`: a sessão desta aba é a da MEMÓRIA (R12-1-03); e o "invisível"
+  // pedido antes do perfil, carimbado com a conta dele (R12-5-05).
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
+    'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
     'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao'];
   const chaves = Object.keys(deps);
@@ -394,7 +396,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
   };
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada',
-    'deixarSoAsChamadasDaSessao'];
+    'deixarSoAsChamadasDaSessao', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 }, contaConfirmadaNestaAba = null;
     ${nomes.map(fatiar).join('\n')}

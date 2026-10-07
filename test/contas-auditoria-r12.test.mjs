@@ -17,7 +17,9 @@
 //    e a pergunta à extensão da mesma volta apagava o que foi digitado;
 //  · R12-5-04 — o pedido do perfil que nem teve RESPOSTA contava no teto de um
 //    por minuto: com a rede voltando antes disso, nem o perfil nem o "invisível"
-//    saíam.
+//    saíam;
+//  · R12-5-05 — o "invisível" do gesto SEM perfil era gravado com a conta do
+//    APARELHO, mesmo de outra sessão: a troca de conta o jogava fora.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js (e o `api.js` inteiro,
 // num contexto do `vm`, onde o efeito do `getSession` mora): o que o teste não
@@ -709,4 +711,110 @@ test('R12-5-04: a carga sem resposta só devolve o teto se nenhuma outra começo
   m.relogio.t += 1000;
   m.h.refazerPerfilSeFaltar();
   assert.equal(m.pedidos.length, 2, 'a carga velha devolveu o teto por cima da que está no ar: dois perfis no ar');
+});
+
+// ═══ R12-5-05 · o "invisível" do gesto SEM perfil leva a marca da SESSÃO ═══════
+// O aparelho diz X, de OUTRA sessão; a memória tem a sessão de Y, cujo perfil
+// ainda não chegou. O gesto de desligar era gravado com a conta X; o perfil de Y
+// chegava, a troca de conta jogava o pendente fora, e o `presenca-waze` nunca
+// saía — o interruptor desligado, e Y visível no WME.
+const X = '12444348';
+const Y = '183164343';
+function gestoSemPerfil({ contaDoAparelho = { id: X, s: marcaDe('tok-de-OUTRA-sessao') }, sessao = 'tok-y' } = {}) {
+  const ap = aparelho({ [TOKEN]: sessao, [CONTA_KEY]: contaDoAparelho, [PREFERENCES_KEY]: { presenca: true } });
+  const enviados = [];
+  const AppState = {
+    authenticated: true, profile: null, preferences: { presenca: true }, filters: {}, queue: [], fetching: false,
+    stats: { read: 0, rejected: 0, skipped: 0 },
+  };
+  const presencaWme = { desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0,
+    ligarNaProxima: false, desligar401Em: null, desligar401Sessao: null };
+  const API = {
+    sessionToken: sessao,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    getSession() { return this.sessionToken; },
+    presencaWaze: async (c) => { enviados.push(c); return { success: true }; },
+  };
+  const deps = {
+    API, safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, presencaWme, CONTA_KEY, PREFERENCES_KEY,
+    SAIDA_KEY: constante('SAIDA_KEY'), preferenciasCarregadas: true, Date: { now: () => T },
+    PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'), ABA_DESTA_PAGINA: 'aba-y',
+    contaConfirmadaNestaAba: null, saidaEsperandoConta: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    Treino: { ativo: false }, dfato: () => {},
+  };
+  const h = montar(['presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
+    'presencaWmeRefazerDesligar', 'presencaWmeZerar', 'savePreferences', 'aoConhecerConta', 'esquecerOutraConta',
+    'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
+    'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
+  // O gesto: o interruptor desligado (o ouvinte grava a preferência e chama o desligar).
+  const desligar = () => { AppState.preferences.presenca = false; h.presencaWmeDesligar(); };
+  // O perfil da sessão chega, na ordem do `definirPerfil`: a conta, e o "invisível" que esperava por ele.
+  const chegaOPerfil = (id) => { AppState.profile = { id: Number(id) }; h.aoConhecerConta(AppState.profile); h.presencaWmeRefazerDesligar(); };
+  return { h, ap, enviados, AppState, presencaWme, desligar, chegaOPerfil };
+}
+
+test('R12-5-05: o "invisível" pedido antes do perfil sai pro dono da SESSÃO do gesto — mesmo com o aparelho dizendo outra conta', async () => {
+  const m = gestoSemPerfil();
+  m.desligar();
+  assert.equal(m.presencaWme.desligarPendente, true, 'PRÉ-CONDIÇÃO: o gesto sem perfil não ficou pendente');
+  assert.notEqual((m.AppState.preferences.presencaWmeDesligar || {}).conta, X,
+    'DEFEITO: o gesto foi gravado com a conta do APARELHO, vista com OUTRA sessão — a troca de conta o jogaria fora');
+  m.chegaOPerfil(Y);
+  await tique();
+  assert.deepEqual(m.enviados, [{ userId: Y, visivel: false }],
+    'DEFEITO: o gesto de desligar de quem entrou nunca chegou ao WME — o interruptor desligado e a pessoa visível lá');
+});
+
+test('R12-5-05: CONTROLE — o perfil que chega é o da conta do aparelho: o "invisível" sai pra ela, como antes', async () => {
+  const m = gestoSemPerfil();
+  m.desligar();
+  m.chegaOPerfil(X);
+  await tique();
+  assert.deepEqual(m.enviados, [{ userId: X, visivel: false }]);
+});
+
+test('R12-5-05: CONTROLE — a conta do aparelho vista com ESTA sessão grava o gesto com a conta, como sempre', () => {
+  const m = gestoSemPerfil({ contaDoAparelho: { id: X, s: marcaDe('tok-y') } });
+  m.desligar();
+  assert.equal(m.AppState.preferences.presencaWmeDesligar.conta, X, 'a conta desta sessão, conhecida, deixou de valer pro gesto sem perfil');
+});
+
+test('R12-5-05: o gesto gravado só com a marca da sessão sobrevive ao app fechado — e sai com o perfil da MESMA sessão na reabertura', async () => {
+  const m = gestoSemPerfil();
+  m.desligar();
+  const gravado = JSON.parse(m.ap.dados.get(PREFERENCES_KEY));
+  assert.equal(gravado.presencaWmeDesligar && gravado.presencaWmeDesligar.s, marcaDe('tok-y'), 'o gesto não foi gravado com a marca da sessão');
+  // A reabertura: as preferências lidas do aparelho, pela leitura de verdade.
+  const AppState = { preferences: {} };
+  const ler = montar(['lerPreferenciasGuardadas'], { AppState, localStorage: m.ap.localStorage, PREFERENCES_KEY });
+  ler.lerPreferenciasGuardadas();
+  assert.deepEqual(AppState.preferences.presencaWmeDesligar, { s: marcaDe('tok-y'), em: gravado.presencaWmeDesligar.em },
+    'DEFEITO: o gesto gravado sem a conta não sobreviveu à leitura — fechar o app antes do perfil o perdia');
+  // A MESMA sessão reabre (a salva), sem nada na memória da página nova, e o perfil chega.
+  const r = gestoSemPerfil();
+  r.ap.dados.set(PREFERENCES_KEY, m.ap.dados.get(PREFERENCES_KEY));
+  r.AppState.preferences = { presenca: false, presencaWmeDesligar: AppState.preferences.presencaWmeDesligar };
+  r.chegaOPerfil(Y);
+  await tique();
+  assert.deepEqual(r.enviados, [{ userId: Y, visivel: false }], 'o gesto guardado não saiu na reabertura com o perfil da mesma sessão');
+});
+
+test('R12-5-05: o gesto de OUTRA sessão, sem conta, tem dono desconhecido — não sai no nome de quem entrar, e sai do aparelho', async () => {
+  // Página nova, com a sessão tok-z (de OUTRA conta, ou da mesma) e o gesto de
+  // tok-y gravado só com a marca: o dono dele é desconhecido.
+  for (const [caso, contaDoAparelho] of [['outra conta entrou', { id: X, s: marcaDe('tok-y') }],
+    ['a mesma conta, noutra sessão', { id: '555', s: marcaDe('tok-y') }]]) {
+    const m = gestoSemPerfil({ contaDoAparelho, sessao: 'tok-z' });
+    m.AppState.preferences = { presenca: false, presencaWmeDesligar: { s: marcaDe('tok-y'), em: T } };
+    m.h.savePreferences();
+    m.chegaOPerfil('555');
+    await tique();
+    assert.deepEqual(m.enviados, [], `(${caso}) o app desligou no WME a visibilidade de quem não fez o gesto`);
+    assert.equal(m.AppState.preferences.presencaWmeDesligar, undefined, `(${caso}) o gesto sem dono ficou na memória`);
+    if (caso === 'a mesma conta, noutra sessão') {
+      // Sem troca de conta, quem tira o gravado do APARELHO é o carimbo (a troca grava as preferências por si).
+      assert.equal(JSON.parse(m.ap.dados.get(PREFERENCES_KEY)).presencaWmeDesligar, undefined,
+        'o gesto sem dono ficou no aparelho, relido a cada resposta da API');
+    }
+  }
 });
