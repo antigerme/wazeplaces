@@ -1233,9 +1233,12 @@ function setupAppListeners() {
         // Sem rede, "atualizar" só jogava fora a fila (inclusive a guardada do
         // offline, que só voltava fechando e reabrindo o app): fica a de agora.
         if (navigator.onLine === false) { showToast(t('states.error.titleOffline'), 'info'); return; }
+        // Com o treino aberto, o aviso do país que espera o "Sair" dele (R10-7-02).
+        const avisoDoTreino = Treino.avisoDoPaisAnotado();
         resetQueue();
         startFetching();
         showToast(t('toast.refreshing'), 'info');
+        avisarPaisDoTreinoEncerrado(avisoDoTreino);
     });
     $('retryLoadBtn')?.addEventListener('click', async (ev) => {
         // Antes do `await`: depois dele o evento já não diz quem tinha o foco.
@@ -5266,8 +5269,12 @@ function applyFiltersFromModal() {
         aplicarSoAOrdem();
         return;
     }
+    // Com o treino aberto, o aviso do país que espera o "Sair" dele: sai com a
+    // fila nova, se ela ainda é do país dele (R10-7-02).
+    const avisoDoTreino = Treino.avisoDoPaisAnotado();
     resetQueue();
     startFetching();
+    avisarPaisDoTreinoEncerrado(avisoDoTreino);
 }
 
 // A ordem nova, sem pedido novo ao Waze. Com o treino aberto, a fila da tela é
@@ -6154,7 +6161,10 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
     let aviso = null;
     if (!minhaArea) {
         const nome = ((AppState.countries || []).find((c) => Number(c.id) === Number(pais)) || {}).name;
-        aviso = { chave: nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', pais: nome || '' };
+        // O LUGAR do aviso vai junto: o treino que termina pelo ↻ ou pelo
+        // "Aplicar" só o mostra se a busca ainda é desse lugar (R10-7-02).
+        aviso = { chave: nome ? 'toast.paisDoPerfil' : 'toast.paisDoPerfilSemNome', pais: nome || '',
+            regiao: API.getRegion(), id: Number(pais) };
     }
     // Os Filtros ABERTOS mostravam o país de antes, e o "Aplicar" o devolvia.
     redesenharLugarNosFiltros(antes);
@@ -6181,6 +6191,21 @@ function refazerFilaReal(aviso = null) {
     if (aviso) showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
     resetQueue();
     startFetching();
+}
+
+// O treino que termina por um GESTO de busca nova — o ↻, o "Aplicar" com outro
+// filtro — não passa pelo `sair()`: o `resetQueue` o encerra, e o aviso do país
+// que o perfil anotou nele (`Treino.anotarFilaRefeita`) ia embora com o `_salvo`
+// — a fila de outro país entrava sem explicação nenhuma (R10-7-02, MEDIDO no
+// navegador; auditoria da rodada 10). Quem encerra lê o aviso ANTES
+// (`Treino.avisoDoPaisAnotado`) e o passa aqui DEPOIS de aplicar o lugar. A fila
+// que vem é a do lugar de AGORA: o aviso (o mesmo do `refazerFilaReal`) sai só
+// se ela ainda é a do país dele — no "Aplicar" a pessoa pode ter escolhido outro
+// país, outra região ou "Minha área", e aí ele seria falso.
+function avisarPaisDoTreinoEncerrado(aviso) {
+    if (!aviso || AppState.filters.myArea) return;
+    if (aviso.regiao !== API.getRegion() || String(aviso.id) !== String(API.getCountry())) return;
+    showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
 }
 
 // O lugar APLICADO mudou por baixo dos Filtros abertos (o país do perfil chegou
@@ -21131,6 +21156,14 @@ const Treino = {
         if (aviso) this._salvo.avisoDoPais = aviso;
     },
 
+    // O aviso do país que o perfil anotou (`anotarFilaRefeita`) e espera o
+    // "Sair", ou null. O ↻ e o "Aplicar" com busca nova encerram o treino pelo
+    // `resetQueue`, que leva o `_salvo` — e o aviso — junto: eles o leem ANTES
+    // (`avisarPaisDoTreinoEncerrado`, R10-7-02).
+    avisoDoPaisAnotado() {
+        return this.ativo && this._salvo && this._salvo.refazerFila && this._salvo.avisoDoPais ? this._salvo.avisoDoPais : null;
+    },
+
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de
     // filtro, atualizar, sair, entrar), já que ele vai montar uma fila nova de
     // qualquer jeito. Sem isto, sair da conta com o treino aberto deixava o
@@ -21140,6 +21173,12 @@ const Treino = {
     encerrar() {
         if (!this.ativo) return;
         this.ativo = false;
+        // O aviso que o treino pôs no último gesto ("No modo real, isto
+        // enviaria…") sai com ele: ficava até 5 s sobre os ✕ ↑ ✓ do card REAL,
+        // falando de um gesto que não existe mais (auditoria da rodada 10, R10-7).
+        // Só o dele: os avisos de verdade têm o prazo deles. Pelo "Sair" (que passa
+        // por aqui) e pelo ↻ e o "Aplicar".
+        this.tirarAviso();
         // O foco da fila real volta (ver `entrar`), e a barra que estiver na tela
         // é a do TREINO: sai. Quem a desenha de novo é o card seguinte
         // (`renderFocoAutor`, no `sair()` com a fila real, ou na fila nova do
@@ -21153,6 +21192,13 @@ const Treino = {
     // O aviso que o PRÓPRIO treino pôs na tela — o efeito do último gesto, o
     // punho que o `showToast` devolve —, pra sair no próximo (`limparAvisos`).
     aviso: null,
+
+    // Tira esse aviso NA HORA, sem a animação (`remover`; ver `limparAvisos`).
+    tirarAviso() {
+        if (!this.aviso) return;
+        try { this.aviso.remover?.(); } catch (e) { /* o aviso já saiu */ }
+        this.aviso = null;
+    },
 
     // Chamado do TOPO dos handlers reais. Explica o que TERIA acontecido e
     // avança — sem stat, sem fila real, sem rede.
@@ -21172,10 +21218,7 @@ const Treino = {
         // HORA, sem a animação (`remover`): o que ainda estivesse saindo contava
         // no teto de 3 da pilha, e o aviso seguinte do treino empurrava pra fora
         // um de verdade.
-        if (this.aviso) {
-            try { this.aviso.remover?.(); } catch (e) { /* o aviso já saiu */ }
-            this.aviso = null;
-        }
+        this.tirarAviso();
         // Simétrico ao entrar(): sair com uma foto de TREINO aberta deixaria o
         // lightbox do modo real em cima de um pedido inerte.
         fecharCamadasDeFoto();

@@ -687,6 +687,27 @@ test('R9-7-02: o próximo gesto de treino tira só o aviso que o TREINO pôs —
   assert.equal(m.naPilha().filter((x) => x.startsWith('treino.efeito.')).length, 1, 'os avisos do treino se empilharam');
 });
 
+// ═══ R10-7 (a observação) · o aviso do treino por cima do card REAL ══════════
+// O aviso do último gesto de treino ("No modo real, isto enviaria uma rejeição…")
+// ficava até 5 s na pilha depois do "Sair", sobre os ✕ ↑ ✓ do card de verdade —
+// e depois do ↻ e do "Aplicar", que encerram o treino pelo `resetQueue` (MEDIDO
+// no navegador; auditoria da rodada 10). O treino que termina tira o PRÓPRIO
+// aviso; os de verdade ficam, com o prazo deles.
+test('R10-7: o treino que termina — pelo "Sair" ou pelo ↻/"Aplicar" — tira o aviso que ELE pôs; os avisos de verdade ficam', () => {
+  for (const fim of ['sair', 'encerrar']) {
+    const m = montarAvisos();
+    m.Treino.entrar();
+    m.showToast('2 rejeitados', 'success');           // um aviso de VERDADE, que chegou com o treino aberto
+    m.Treino.agir('reject');
+    assert.deepEqual(m.naPilha(), ['2 rejeitados', 'treino.efeito.reject'],
+      'PRÉ-CONDIÇÃO: o aviso do gesto de treino não está na pilha (o instrumento não o vê)');
+    m.Treino[fim]();
+    assert.equal(m.Treino.ativo, false, `PRÉ-CONDIÇÃO: o ${fim}() não saiu do treino`);
+    assert.deepEqual(m.naPilha(), ['2 rejeitados'],
+      `DEFEITO: depois do ${fim}() o aviso do treino seguiu sobre o card real (${JSON.stringify(m.naPilha())}) — R10-7`);
+  }
+});
+
 // ═══ R9-7-07 · o treino recusado pelo lote ou pela aprovação NO AR ══════════
 // O R8-7-09 fez o diálogo FICAR na recusa pela sessão. As outras recusas do
 // `Treino.entrar` — o "Marcar todos" no ar, a aprovação de uma foto no ar —

@@ -159,6 +159,8 @@ const FUNCOES = [
   // As áreas gerenciadas por servidor (R10-6-03). Só se existir: no código de
   // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
   ...(/^function areasGerenciadasLidas\(/m.test(APP_SEM) ? ['areasGerenciadasLidas'] : []),
+  // O aviso do país que o treino encerrado pelo "Aplicar" levava junto (R10-7-02).
+  'avisarPaisDoTreinoEncerrado',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -2250,4 +2252,36 @@ test('R10-6-03: o 1º perfil que chega pela sonda de um 401 também deixa as ár
   assert.deepEqual(m.app.areasGerenciadasLidas('row'), [],
     'o perfil da sonda não deixou as áreas gerenciadas da ROW: o seletor seguiria o perfil guardado, de outro servidor');
   assert.equal(m.app.areasGerenciadasLidas('na'), null, 'um servidor que ninguém perguntou virou "sem áreas gerenciadas"');
+});
+
+// ═══ R10-7-02 · o "Aplicar" que encerra o treino e o aviso do país ═══════════
+// Com o treino aberto, o perfil levou a pessoa pra França: o país do filtro já
+// é o 73, e o aviso "Mostrando a fila de France…" espera o "Sair" do treino
+// (`Treino.anotarFilaRefeita`, R9-7-04). O "Aplicar" com outro filtro encerra o
+// treino pelo `resetQueue`, que levava o aviso junto: a fila da França entrava
+// sem explicação (MEDIDO no navegador, auditoria da rodada 10). A fila que vem é
+// a do lugar aplicado AGORA — o aviso sai com ela só se ainda é o país dele.
+test('R10-7-02: o "Aplicar" que encerra o treino traz o aviso do país anotado nele — só se a busca ainda é do país dele', async () => {
+  const AVISO = { chave: 'toast.paisDoPerfil', pais: 'France', regiao: 'row', id: 73 };
+  const aplicar = async ({ aviso = AVISO, pais = null, minhaArea = false } = {}) => {
+    const p = pagina({ pais: 73 });
+    // O treino aberto, com o aviso anotado (o `resetQueue` daqui é de mentira:
+    // quem encerra o treino é ele, DEPOIS de o aviso ser lido).
+    p.deps.Treino = { avisoDoPaisAnotado: () => aviso };
+    await p.abrir();
+    assert.equal(p.els.filterCountry.value, '73', 'PRÉ-CONDIÇÃO: os Filtros não abriram no país do perfil');
+    p.els.filterUnreadOnly.checked = false;            // outro filtro: o "Aplicar" busca de novo
+    if (pais !== null) p.els.filterCountry.value = String(pais);
+    if (minhaArea) p.els.filterMyArea.checked = true;
+    p.app.applyFiltersFromModal();
+    assert.equal(p.log.buscas, 1, 'PRÉ-CONDIÇÃO: o "Aplicar" não refez a fila (não encerraria o treino)');
+    return p.log.toasts.filter((x) => x.includes('paisDoPerfil'));
+  };
+  // CONTROLE: sem aviso anotado (o treino sem o perfil, ou fora dele), nenhum aviso de país.
+  assert.deepEqual(await aplicar({ aviso: null }), [], 'CONTROLE: o "Aplicar" sem aviso anotado inventou um');
+  assert.deepEqual(await aplicar(), ['info:toast.paisDoPerfil'],
+    'DEFEITO: o "Aplicar" encerrou o treino e a fila da França veio sem o aviso do país (R10-7-02)');
+  // A pessoa escolheu OUTRO país (ou "Minha área") no mesmo "Aplicar": o aviso seria falso.
+  assert.deepEqual(await aplicar({ pais: 30 }), [], 'o aviso da França saiu com a fila do Brasil');
+  assert.deepEqual(await aplicar({ minhaArea: true }), [], 'o aviso do país saiu com a fila da "Minha área"');
 });
