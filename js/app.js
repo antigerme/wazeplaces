@@ -6250,6 +6250,10 @@ async function completarPerfilChegado(perfil, epoca) {
     // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
     // dois só valiam na próxima busca.
     aplicarRecusaAutomatica();
+    // A decisão do lugar DESTA conta, nesta sessão, começou (ver
+    // `areaNoutroServidorSemDecisao`, R11-6-02). Logo no começo: nada antes dela
+    // pode lançar e deixá-la sem marca (a recusa automática é assíncrona).
+    decisaoDoLugarDe = { epoca, conta: String(perfil.id) };
     // Com o TREINO aberto a fila na tela é a de EXEMPLOS, e a real está guardada
     // nele: a ordem e a recusa (que no treino sai na primeira linha) ficam
     // ANOTADAS, e o `Treino.sair()` as aplica na fila real quando ela voltar.
@@ -6301,7 +6305,11 @@ async function completarPerfilChegado(perfil, epoca) {
         // a pessoa NÃO edita (ver `paisDoPerfil`).
         const destino = await paisDoPerfil(perfil, epoca);
         if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-        else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaReal();
+        // E a busca que ESPEROU por esta decisão enquanto ela corria (ver
+        // `areaNoutroServidorSemDecisao`, R11-6-02): a que saiu antes de ela
+        // começar (a troca de conta, dentro do `definirPerfil`) ou no meio (o
+        // `maybePrefetch`, qualquer chamada direta) também é refeita aqui.
+        else if ((refazerFila || refazerPelaArea || filaEsperaPerfil) && epoca === epocaDaSessao) refazerFilaReal();
     } finally {
         if (AppState._caixaDaMinhaAreaNoAr === decisao) AppState._caixaDaMinhaAreaNoAr = null;
         decidiu();
@@ -11594,6 +11602,35 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
 // no `resetQueue` — fila nova é outra busca.
 let filaEsperaPerfil = false;
 
+// A DECISÃO do lugar da conta de agora, nesta sessão, já COMEÇOU? `{ epoca,
+// conta }` da última que começou (`completarPerfilChegado`).
+let decisaoDoLugarDe = null;
+
+// "Minha área" de quem NÃO edita no servidor desta busca — a lista de editáveis
+// que o app LEU aqui é vazia, e a pessoa não é staff: a área está noutro
+// servidor (a regra do `completarPerfilChegado`, `areaNoutroServidor`,
+// R9-6-04) — com a decisão do lugar ainda POR TERMINAR: no ar
+// (`_caixaDaMinhaAreaNoAr`) ou nem começada nesta sessão pra esta conta. A troca
+// de conta pela renovação refaz a fila DENTRO do `definirPerfil` (o
+// `esquecerOutraConta`), antes de a decisão começar: a busca saía na ROW com o
+// perfil de quem só edita na NA, "Minha área" era desligada e gravada com "Seu
+// perfil do Waze não tem área de edição…" (a frase falsa), a tela dizia "Tudo
+// limpo!", e só depois a fila ia pros EUA, pelo país e com o aviso dele (MEDIDO
+// no navegador, nos dois motores; auditoria da rodada 11, R11-6-02). Aí a busca
+// ESPERA, e quem refaz a fila é a decisão. Vale pra qualquer chamada da busca
+// (o `maybePrefetch`, a troca de conta). Decidido o lugar, nada espera: sem área
+// em servidor nenhum, ou numa região que a pessoa aplicou à mão, o filtro
+// desliga e diz — esperar ali seria esperar pra sempre.
+function areaNoutroServidorSemDecisao() {
+    const perfil = AppState.profile;
+    if (!perfil || perfil.isStaff || perfil.id === null || perfil.id === undefined) return false;
+    const aqui = editaveisLidos(API.getRegion());
+    if (!Array.isArray(aqui) || aqui.length > 0) return false;
+    if (AppState._caixaDaMinhaAreaNoAr) return true;
+    const d = decisaoDoLugarDe;
+    return !(d && d.epoca === epocaDaSessao && d.conta === String(perfil.id));
+}
+
 // A última busca FALHOU POR REDE ou pelo SERVIDOR (`transient`: nada respondeu,
 // o teto de 45 s estourou, ou a origem devolveu 5xx). É o que deixa a fila
 // guardada do offline entrar com `onLine` dizendo que há rede (ver
@@ -11692,7 +11729,9 @@ function fetchNextPage() {
     // caixa do perfil guardado é de OUTRO servidor, e com ela a tela dizia "Tudo
     // limpo! … Confira o país e a região" com "Minha área" ligada (auditoria da
     // rodada 11, R11-6-01). O "Tentar de novo" pergunta de novo: uma ida por
-    // gesto, sem relógio.
+    // gesto, sem relógio. E sem caixa AQUI, com a área noutro servidor e o lugar
+    // ainda por decidir, também espera: quem refaz a fila é a decisão (ver
+    // `areaNoutroServidorSemDecisao`, R11-6-02).
     if (AppState.filters.myArea) {
         if (!AppState.profile) {
             filaEsperaPerfil = true;
@@ -11704,11 +11743,11 @@ function fetchNextPage() {
             return Promise.resolve();
         }
         const caixa = caixaDaMinhaAreaEm();
-        if (caixa === undefined) {
+        if (caixa === undefined || (!caixa && areaNoutroServidorSemDecisao())) {
             filaEsperaPerfil = true;
             if (AppState.queue.length === 0) AppState.loadError = true;
             AppState.hasMore = false;
-            dfato('busca.esperaCaixa', { regiao: API.getRegion() });
+            dfato('busca.esperaCaixa', { regiao: API.getRegion(), por: caixa === undefined ? 'naoLido' : 'decisao' });
             updatePendingCount();
             return Promise.resolve();
         }
@@ -12056,6 +12095,18 @@ async function startFetching() {
 
     while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
         await fetchNextPage();
+    }
+
+    // A busca ESPEROU a decisão do lugar, que está no ar (ver `fetchNextPage` e
+    // `areaNoutroServidorSemDecisao`, R11-6-02 — a troca de conta pela renovação
+    // a dispara antes de a decisão começar): quem refaz a fila é a decisão, e
+    // esta busca espera junto, na tela de carregar, sem o "Falha ao carregar" no
+    // meio. Refeita a fila (outra época), quem a desenha é a busca dela.
+    if (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr && epoca === AppState.fetchEpoch) {
+        buscaEsperaOPerfil = true;
+        updatePendingCount();
+        try { await AppState._caixaDaMinhaAreaNoAr; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        if (epoca !== AppState.fetchEpoch) return;
     }
 
     // A busca falhou por REDE ou pelo SERVIDOR com a fila NOVA vazia (a
