@@ -640,6 +640,9 @@ function montarCodigoDaURL({ token, resgate }) {
     AppState: { authenticated: false },
     // O aparelho: sem sessão de outra aba (o R10-1-04 com ela mora em test/contas-abas).
     safeLS: { get: (k) => (k === 'waze_session_token' ? token : null) },
+    // Nenhum login desta aba no ar e nada digitado na entrada (o R13-1-03 com eles
+    // mora em test/contas-auditoria-r13).
+    authInFlight: false, textoDigitadoNaEntrada: () => false,
     showAuthScreen: () => log.push('entrada'),
     resgatarPareamento: async (codigo, opcoes) => { log.push('resgate:' + codigo + ':' + !!(opcoes && opcoes.silencioso)); return resgate; },
     abrirComSessaoSalva: () => log.push('sessaoSalva'),

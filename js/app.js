@@ -660,6 +660,19 @@ function abrirPeloCodigoDaURL(codigo) {
         }
         // Entrou NESTA aba durante o resgate (o colar, outro código): nada aqui.
         if (API.temSessaoNaMemoria() || AppState.authenticated) return;
+        // Nem com um login DESTA aba ainda no ar — os cookies colados e
+        // confirmados durante o resgate esperaram o desfecho dele (R12-1-01) e,
+        // com ele recusado, seguem AGORA — nem com TEXTO DIGITADO num diálogo da
+        // entrada: o fim desse login (ou a pessoa) decide, a régua da adoção
+        // (`adotarSessaoDoAparelho`) e da volta à aba (`perguntarAExtensaoAoVoltar`).
+        // A pergunta trazia a sessão da conta do WME por cima: dois logins na
+        // mesma aba — a extensão trocava a conta que a pessoa colou (ou o
+        // contrário, com o aviso "Outra conta entrou neste aparelho" sobre o
+        // login dela), uma das duas sessões ficava órfã no servidor, e o que
+        // estava colado e não confirmado ia embora com a limpeza do diálogo
+        // (auditoria da rodada 13, R13-1-03, MEDIDO). Outro resgate não cabe
+        // aqui: este acabou de terminar, e nada começa entre o fim dele e isto.
+        if (authInFlight || textoDigitadoNaEntrada()) return;
         // Com sessão no aparelho a extensão não é perguntada (traria uma sessão
         // nova por cima da guardada): ela é adotada, ou — com texto digitado na
         // tela de entrada — a tela fica como está.
@@ -834,29 +847,38 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // depois de a pessoa pedir pra sair (auditoria da rodada 12, R12-1-02,
             // MEDIDO). Menos se ela já é a do APARELHO: a ponte dá o desfecho de UM
             // login a todas as abas que perguntam juntas, e a outra aba (que entrou
-            // de novo depois do "Sair") pode estar com ela — a régua da volta,
-            // logo abaixo.
+            // de novo depois do "Sair") pode estar com ela — a régua logo abaixo.
             if (epoca !== epocaDaSessao) {
                 if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
                     callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
                 }
                 return fim(false);
             }
-            // A pergunta da VOLTA à aba (silenciosa, sem manter fila) com um login
-            // DESTA aba no meio: a pessoa colou os cookies, digitou o código ou
-            // abriu o link enquanto a extensão respondia. O login que ela pediu
-            // vence, como na adoção (`adotarSessaoDoAparelho`) — e a resposta da
-            // extensão o TROCAVA: duas sessões no servidor (o "Sair" apaga uma, a
-            // outra fica órfã por até 21 dias) e, com outra conta no WME, a conta
-            // que a pessoa acabou de escolher ia embora com "Outra conta entrou
-            // neste aparelho…" (auditoria da rodada 11, R11-1-03, MEDIDO). Vale o
-            // login que já entrou (a memória com OUTRA sessão) e o que ainda está
-            // no ar. A sessão da extensão sai do servidor, menos se ela já é a do
-            // aparelho: a ponte dá o desfecho de UM login a todas as abas que
-            // perguntam juntas, e a outra pode estar com ela.
-            const voltaComLoginDestaAba = silencioso && !manterFila
+            // Um login DESTA aba no meio da pergunta: a pessoa colou os cookies,
+            // digitou o código ou abriu o link enquanto a extensão respondia. O
+            // login que ela pediu vence, como na adoção (`adotarSessaoDoAparelho`)
+            // — e a resposta da extensão o TROCAVA: duas sessões no servidor (o
+            // "Sair" apaga uma, a outra fica órfã por até 21 dias) e, com outra
+            // conta no WME, a conta que a pessoa acabou de escolher ia embora com
+            // "Outra conta entrou neste aparelho…" (auditoria da rodada 11,
+            // R11-1-03, MEDIDO). Vale o login que já entrou (a memória com OUTRA
+            // sessão) e o que ainda está no ar. A sessão da extensão sai do
+            // servidor, menos se ela já é a do aparelho: a ponte dá o desfecho de
+            // UM login a todas as abas que perguntam juntas, e a outra pode estar
+            // com ela.
+            //
+            // Em TODA pergunta que não é a renovação da QUEDA (`manterFila`): a
+            // abertura e o link de pareamento que falhou (R10-1-04) também. A régua
+            // valia só pra pergunta da volta à aba, e o link recusado com os
+            // cookies colados e confirmados durante o resgate (que esperaram o
+            // desfecho dele e seguiam) fazia dois logins na mesma aba — o que
+            // respondesse por último trocava o outro, e uma das sessões ficava
+            // órfã no servidor (auditoria da rodada 13, R13-1-03, MEDIDO). A
+            // renovação da queda fica de fora: ali não há tela de entrada nem login
+            // desta aba, e a resposta da extensão É o login que a aba espera.
+            const loginDestaAbaVence = !manterFila
                 && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo);
-            if (voltaComLoginDestaAba) {
+            if (loginDestaAbaVence) {
                 if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
                     callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
                 }
