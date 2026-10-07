@@ -14921,7 +14921,17 @@ function focarDepoisDoFocoNoAutor(entrou) {
         return;
     }
     const card = cardDaFrente();
-    if (!card) return;
+    if (!card) {
+        // Sem card — o último pedido do autor era o FIM da fila (R13-2-05): o
+        // caminho de volta é o do teclado sem card, o botão do painel que tomou
+        // o lugar dele ("Verificar novamente", "Tentar de novo") ou o ✕ do card
+        // que chegar (o Desfazer, a próxima página), pela régua do
+        // `aplicarFocoDoTeclado` (R7-2-06). Antes nada acontecia, e o foco
+        // ficava na barra escondida — o navegador o largava no <body>.
+        focoDoTeclado = BOTAO_DA_ACAO.left;
+        aplicarFocoDoTeclado();
+        return;
+    }
     const alvo = ['.selo-lote', '.card-btn-reject', '.card-btn-skip', '.card-btn-read']
         .map((s) => card.querySelector(s)).find(focavelNaTela);
     if (alvo) alvo.focus({ preventScroll: true });
@@ -14963,28 +14973,40 @@ function renderFocoAutor() {
     if (!bar) return;
     const id = AppState.autorEmFoco;
     const atual = AppState.queue[0];
-    const semFoco = id === null || id === undefined;
-    if (semFoco || !atual || atual.creatorId !== id) {
-        if (!semFoco && atual && atual.creatorId !== id) AppState.autorEmFoco = null;
+    // Sem foco no autor a barra não tem o que dizer. Quem DESLIGOU o foco
+    // (`limparFocoAutor`: o toque na barra, a ordem nova dos Filtros) cuida do
+    // foco do teclado — o Enter na barra o leva ao "Ver +N" do card
+    // (`voltarAOrdemNormal`), e o clique do mouse não move foco nenhum.
+    if (id === null || id === undefined) {
         bar.classList.add('hidden');
         return;
     }
     // A série que o toque pôs na frente, pela régua ÚNICA (`serieDoAutor`): o
     // pedido em andamento foi pro resto, e a barra contá-lo dizia "3 de 4" com
     // o selo em "Ver +1" (R6-2-02).
-    const restam = serieDoAutor(id, { naTela: atual }).length;
-    // A série ACABOU com o card do autor ainda na tela: é o card que a OUTRA aba
-    // já decidiu, que fica fora da série (R11-2-06) e segue na frente. A barra
-    // dizia "Primeiro os de X · 0 de 3", e o leitor de tela "Mostrando primeiro
-    // os 0 pedidos de X" (MEDIDO no navegador: o "Marcar todos" da outra aba
-    // decide a série do autor em foco; auditoria de 2026-10-07, R12-2-06). É a
-    // regra de cima: a série acabou, a barra sai e o foco no autor também. O
-    // foco do TECLADO que estava nela vai ao caminho de volta no card (o "Ver
-    // +N", que aqui não existe, ou o ✕; travado, o ✕ fica prometido), e não ao
-    // <body> — numa microtarefa, porque o `renderCurrentCard` desenha a barra
-    // ANTES de pôr o card novo na tela. Quem pôs o foco em outro lugar ganha.
+    const restam = !atual || atual.creatorId !== id ? 0 : serieDoAutor(id, { naTela: atual }).length;
+    // A série ACABOU, por um de três caminhos, e a regra é UMA: a barra sai e,
+    // com card na tela, o foco no autor também.
+    //   · O card da frente é de OUTRO autor: a seta, o gesto ou o ✕ decidiram o
+    //     último pedido dele.
+    //   · Não há card: o último pedido dele era o FIM da fila, e o painel tomou
+    //     o lugar do card (`showNoPlaces`). O foco no autor FICA: o Desfazer que
+    //     devolve esse pedido devolve a barra junto.
+    //   · O card do autor segue na tela FORA da série: é o que a OUTRA aba já
+    //     decidiu (R11-2-06). A barra dizia "Primeiro os de X · 0 de 3", e o
+    //     leitor de tela "Mostrando primeiro os 0 pedidos de X" (MEDIDO no
+    //     navegador; auditoria de 2026-10-07, R12-2-06).
+    // O foco do TECLADO que estava na barra vai ao caminho de volta no card (o
+    // "Ver +N" ou o ✕; travado, o ✕ fica prometido; sem card, o botão do painel
+    // — ver `focarDepoisDoFocoNoAutor`), e não ao <body>. Só o terceiro caminho
+    // fazia isso: pela seta, com o foco do teclado na barra, o último pedido do
+    // autor saía e o foco caía no <body> — e quem usa teclado ou leitor de tela
+    // recomeçava do topo da página (MEDIDO nos dois motores; auditoria de
+    // 2026-10-07, R13-2-05). Numa microtarefa, porque o `renderCurrentCard`
+    // desenha a barra ANTES de pôr o card novo na tela. Quem pôs o foco em outro
+    // lugar nesse meio ganha.
     if (restam === 0) {
-        AppState.autorEmFoco = null;
+        if (atual) AppState.autorEmFoco = null;
         const comOFoco = bar.contains(document.activeElement);
         bar.classList.add('hidden');
         if (comOFoco) {
@@ -16300,6 +16322,13 @@ function showNoPlaces() {
     // anunciado de novo (ver `pedidoAnunciado`).
     pedidoAnunciado = null;
     removeCurrentCardEl();
+    // A barra "Primeiro os de…" é do CARD, e sai com ele: o último pedido do
+    // autor em foco era o fim da fila, e ela ficava por cima do "Tudo limpo!"
+    // dizendo "Primeiro os de X · 1 de 1" — com o foco do teclado nela, se ele
+    // estava lá (MEDIDO pela seta nos dois motores, e pelo toque; R13-2-05).
+    // Quem a tira é a regra de sempre (`renderFocoAutor`, sem card), e o foco
+    // no autor fica, pro Desfazer que devolve esse pedido.
+    renderFocoAutor();
     showLoading(false);
     const noMore = document.getElementById('noMoreCards');
     const errEl = document.getElementById('loadErrorState');

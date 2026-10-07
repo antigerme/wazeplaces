@@ -95,6 +95,8 @@ function montarFimDaFila({ skipped = 0, base = 0, tratou = true, treino = false 
     AppState, document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     atualizarConviteInstalar() {}, marcarBordaRolagem() {}, trocarTextoI18n() {},
+    // A barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor.
+    renderFocoAutor() {},
     checarConquistas: (x) => conquistas.push(x || {}),
     // Nada mais em jogo que possa voltar pra fila (F3): nem em andamento, nem na fila de saída.
     pedidosEmAndamento: new Set(), carregarFilaDeSaida: () => [],

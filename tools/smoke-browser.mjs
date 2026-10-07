@@ -10076,6 +10076,103 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
 
+  // ── R13-2-05: a série do autor ACABA pela seta, com o foco na barra ────
+  // O Enter no "Ver +1" leva o foco à barra (C10), e as setas decidem com ele
+  // ali. Quando o último pedido do autor saía e o próximo card era de OUTRO
+  // autor, a barra se escondia com o foco nela, e ele caía no <body> — pela seta
+  // e pelo `triggerSwipe`, o caminho do gesto e do botão (MEDIDO nos dois
+  // motores, roteiro c1 da rodada 13). E quando o último dele era o FIM da fila
+  // a barra nem saía: ficava sobre o "Tudo limpo!" dizendo "1 de 1", com o foco
+  // nela. Agora o foco vai ao caminho de volta no card novo (o "Ver +N" dele, ou
+  // o ✕), ou ao "Verificar novamente"; e o Desfazer do último devolve a barra
+  // junto com o pedido, com o foco no ✕ dele. CONTROLES: a seta com a série
+  // ainda viva mantém a barra e o foco nela; e pelo MOUSE o fim da fila tira a
+  // barra sem mover foco nenhum.
+  for (const caso of ['seta', 'botao', 'fim', 'desfazer', 'controle', 'mouse']) {
+    const id = `card/foco no autor ${MOTOR}: ${caso === 'controle' || caso === 'mouse' ? 'CONTROLE — ' : ''}${{
+      seta: 'a seta decide o último do autor (o próximo é de outro)', botao: 'o gesto decide o último do autor',
+      fim: 'a seta decide o último do autor, o fim da fila', desfazer: 'o Desfazer do último do autor, o fim da fila',
+      controle: 'a seta com a série ainda viva', mouse: 'o fim da fila pelo mouse' }[caso]}`;
+    const P = (x, autor) => cardPedido(x, { creatorId: autor, createdBy: 'autor' + autor });
+    const doFim = caso === 'fim' || caso === 'desfazer' || caso === 'mouse';
+    const g = await cardPagina(doFim ? [P('Z1', 7), P('Z2', 7)] : [P('Z1', 7), P('W1', 8), P('Z2', 7), P('W2', 8)],
+      { undo: caso === 'desfazer' });
+    const estadoAgora = () => g.page.evaluate(() => {
+      const b = document.getElementById('focoAutorBar');
+      const a = document.activeElement;
+      const f = cardDaFrente();
+      return { barra: !b.classList.contains('hidden'), contagem: document.getElementById('focoAutorContagem').textContent,
+        autor: AppState.autorEmFoco, frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+        fila: AppState.queue.map((p) => p.updateRequestID).join(','),
+        fim: !document.getElementById('noMoreCards').classList.contains('hidden'),
+        foco: !a || a === document.body ? 'body'
+          : (a.id ? '#' + a.id : ([...a.classList].find((c) => c.startsWith('card-btn-') || c === 'selo-lote') || a.tagName)),
+        focoNaFrente: !!(a && f && f.contains(a)) };
+    });
+    // O foco no autor 7: pelo TECLADO (Enter no "Ver +1" leva o foco à barra) ou pelo MOUSE.
+    if (caso === 'mouse') await g.page.click('#cardStack .place-card:not(.card-fundo) .selo-lote');
+    else {
+      await g.page.focus('#cardStack .place-card:not(.card-fundo) .selo-lote');
+      await g.page.keyboard.press('Enter');
+    }
+    await assentar(g.page);
+    const antes = await estadoAgora();
+    checa(antes.barra && antes.autor === 7 && antes.fila === (doFim ? 'Z1,Z2' : 'Z1,Z2,W1,W2'),
+      `${id}: PRÉ-CONDIÇÃO — o "Ver +1" não pôs a série do autor 7 na frente com a barra`, JSON.stringify(antes));
+    if (caso !== 'mouse') checa(antes.foco === '#focoAutorBar', `${id}: PRÉ-CONDIÇÃO — o foco não está na barra`, JSON.stringify(antes));
+    // Uma decisão no card da frente: pela seta (o foco SEGUE na barra), pelo
+    // `triggerSwipe` (o caminho do gesto e do botão) ou pelo ✕ do mouse.
+    const decidir = async () => {
+      if (caso === 'mouse') await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      else if (caso === 'botao') {
+        await g.page.focus('#focoAutorBar');
+        await g.page.evaluate(() => window.triggerSwipe('left', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleReject)));
+      } else await g.page.keyboard.press('ArrowLeft');
+    };
+    await decidir();
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const meio = await estadoAgora();
+    checa(meio.frente === 'Z2' && meio.barra && meio.contagem === (doFim ? '1 de 1' : '1 de 3'),
+      `${id}: PRÉ-CONDIÇÃO — a 1ª decisão não deixou o último do autor na frente, com a barra contando`, JSON.stringify(meio));
+    if (caso === 'controle') {
+      checa(meio.foco === '#focoAutorBar', `${id}: com a série viva, o foco saiu da barra`, JSON.stringify(meio));
+      checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+      await g.fechar();
+      continue;
+    }
+    await decidir();
+    if (caso === 'desfazer') {
+      // Na janela do Desfazer do último: a tecla z devolve o pedido.
+      await esperarOuExplodir(g.page, () => !!AppState.pendingAction, 'a janela do Desfazer do último pedido');
+      await doisQuadros(g.page);
+      const naJanela = await estadoAgora();
+      checa(!naJanela.barra && naJanela.fim, `${id}: na janela, a barra seguiu sobre o "Tudo limpo!"`, JSON.stringify(naJanela));
+      await g.page.keyboard.press('z');
+    }
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const d = await estadoAgora();
+    if (caso === 'seta' || caso === 'botao') {
+      checa(d.frente === 'W1' && !d.barra && d.autor === null, `${id}: a série acabou e a barra (ou o foco no autor) ficou`, JSON.stringify(d));
+      checa(d.foco === 'selo-lote' && d.focoNaFrente,
+        `${id}: DEFEITO — a barra sumiu com o foco nela e ele não foi ao "Ver +N" do card novo (caiu em ${d.foco})`, JSON.stringify(d));
+    } else if (caso === 'fim') {
+      checa(d.fim && !d.barra, `${id}: DEFEITO — a barra ficou sobre o "Tudo limpo!" dizendo "${d.contagem}"`, JSON.stringify(d));
+      checa(d.autor === 7, `${id}: o foco no autor saiu sem card (o Desfazer do último não devolveria a barra)`, JSON.stringify(d));
+      checa(d.foco === '#reloadBtn', `${id}: o foco do teclado não foi ao "Verificar novamente" (está em ${d.foco})`, JSON.stringify(d));
+    } else if (caso === 'desfazer') {
+      checa(d.frente === 'Z2' && d.barra && d.contagem === '1 de 1' && d.autor === 7,
+        `${id}: o Desfazer devolveu o último pedido do autor e a barra não voltou`, JSON.stringify(d));
+      checa(d.foco === 'card-btn-reject' && d.focoNaFrente, `${id}: o foco não foi ao ✕ do pedido devolvido (está em ${d.foco})`, JSON.stringify(d));
+    } else {
+      checa(d.fim && !d.barra, `${id}: DEFEITO — a barra ficou sobre o "Tudo limpo!" dizendo "${d.contagem}"`, JSON.stringify(d));
+      checa(d.foco !== '#reloadBtn', `${id}: pelo mouse, o fim da fila levou o foco ao "Verificar novamente"`, JSON.stringify(d));
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
   // ── A foto que falha DEPOIS de o foco do teclado pousar no ✕ ────────────
   // A família do C10: o foco pousa no ✕ do card novo (o de FOTO, ainda
   // carregando), a foto falha sem rede, a `marcarCardSemFoto` trava ✕ e ✓ — e o
@@ -11829,7 +11926,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
+  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`

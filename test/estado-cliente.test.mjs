@@ -526,6 +526,7 @@ function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     marcarBordaRolagem() {}, checarConquistas() {}, dlog() {}, filaZeradaConfirmada: () => false, trocarTextoI18n() {},
     convitePodeAparecer: () => true,   // o navegador oferece (ou é iOS) e ninguém dispensou
+    renderFocoAutor() {},   // a barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor
     queueMicrotask: () => {},
   };
   const chaves = Object.keys(deps);
@@ -840,6 +841,7 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
       document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
       dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
       atualizarConviteInstalar() {}, marcarBordaRolagem() {}, checarConquistas() {}, dlog() {},
+      renderFocoAutor() {},   // a barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor
       // A conquista "Tudo limpo" é perguntada no fim da tarefa (ver
       // test/conquistas-momento.test.mjs); aqui só interessa a frase.
       filaZeradaConfirmada: () => false,
