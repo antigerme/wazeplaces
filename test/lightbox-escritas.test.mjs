@@ -3338,3 +3338,89 @@ test('R10-3-04 a aprovação que VALE marca a foto como aprovada e redesenha a c
     assert.ok(!c.A.approvedImageIds.includes('ur-A'), `CONTROLE (${nome}): a foto virou "aprovada" sem a aprovação ter valido`);
   }
 });
+
+// ═══ Rodada 11 da auditoria (2026-10-07): a foto ampliada ═══════════════════
+
+// ── R11-3-04: o zoom é da FOTO na tela ───────────────────────────────────────
+// O `_render` zerava o zoom sempre, e o redesenho que não troca a foto — a
+// RESPOSTA da aprovação, que o R10-3-04 passou a marcar de novo; o ✨ que volta
+// na falha; a exclusão de OUTRA foto que pousa (essa já existia) — tirava o zoom
+// de quem conferia a fachada (MEDIDO nos dois motores). A camada com os métodos
+// de VERDADE (o `open`, o `_render`, o zoom, as escritas) e a tela de mentira.
+function camadaComZoom() {
+  const ref = { L: null };
+  const el = () => ({ classList: { c: new Set(), toggle(k, v) { if (v) this.c.add(k); else this.c.delete(k); },
+    add(k) { this.c.add(k); }, remove(k) { this.c.delete(k); }, contains(k) { return this.c.has(k); } },
+  setAttribute() {}, removeAttribute() {}, appendChild() {}, focus() {}, textContent: '', title: '', innerHTML: '', dataset: {} });
+  const img = { ...el(), style: {}, src: '', alt: '', offsetWidth: 800, offsetHeight: 600,
+    getBoundingClientRect: () => { const L = ref.L; return { left: 400 + L.tx - 400 * L.scale, top: 300 + L.ty - 300 * L.scale,
+      width: 800 * L.scale, height: 600 * L.scale }; } };
+  const els = { lightboxImage: img, imageLightbox: el() };
+  els.imageLightbox.classList.add('hidden');
+  const doc = { getElementById: (id) => els[id] || (els[id] = el()), createElement: () => el(), body: { style: {} }, activeElement: null };
+  // O `open`, o `close` e o `isOpen` de VERDADE: abrir de novo começa do 1×
+  // porque o fechar zera o zoom (a camada fechada não redesenha).
+  const nomes = ['isOpen', 'open', 'close', '_render', 'resetZoom', '_applyTransform', 'zoomTo', 'ampliada', 'next', 'prev',
+    'removerFoto', 'marcarComoAprovada', 'desmarcarAprovada', 'esquecerProposta', 'recolocarFoto', 'indiceDaFoto',
+    'idAprovadoDaFoto', '_anunciarFoto', 'dataDaFotoAtual', 'autorDaFotoAtual'];
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 't', 'anunciarNoLightbox', 'setTimeout',
+    'clearTimeout', 'ZOOM_VISIVEL_PX', 'urlDaFoto', 'altDaFoto', 'idadeDaFoto', 'i18nLocale', 'atualizarAcoesDeFoto',
+    'manterFocoNoLightbox', 'fecharEdicaoNome', 'avancarSeAprovado', 'topOpenModal', 'devolverFocoDaAmpliacao', 'aoFecharCamada', `return {
+    place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, scale: 1, tx: 0, ty: 0, _fotoComZoom: null,
+    _renderTira() {},
+    ${nomes.map(metodo).join(',\n')}
+  };`)(doc, { empilhar() {}, consumir() {} }, () => {}, (k) => k, () => {}, () => 0, () => {}, 8, (u) => u, () => '', () => '',
+    () => 'pt-BR', () => {}, () => {}, () => {}, () => {}, () => null, () => {}, () => {});
+  ref.L = L;
+  L.img = img;
+  L.abrir = (P, foto) => { L.open(P.imageUrls, P.imageUrls.indexOf(FOTO(foto)), P.imageUrls.indexOf(FOTO(P.updateRequestID)), P.name, false, P); };
+  // Ampliada e deslocada, como quem confere a fachada: o + duas vezes e as setas.
+  L.ampliar = () => { L.zoomTo(1.44, 400, 300); L.tx += 80; L.ty += 40; L._applyTransform(); };
+  L.zoom = () => ({ scale: L.scale, tx: L.tx, ty: L.ty, transform: img.style.transform });
+  return L;
+}
+const pedidoComTresFotos = () => ({ venueID: 'vZ', updateRequestID: 'uZ', purType: 'NEW_PHOTO', name: 'Padaria', lat: -23, lon: -46,
+  approvedImageIds: ['a1', 'a2'], imageUrls: [FOTO('a1'), FOTO('uZ'), FOTO('a2')] });
+
+test('R11-3-04 a MESMA foto redesenhada segue ampliada — a resposta da aprovação, o ✨ que volta, a exclusão de OUTRA foto', () => {
+  const casos = [
+    // [nome, a foto na tela, o que acontece com ela ampliada]
+    ['a RESPOSTA da aprovação com o Desfazer (o gesto já a marcou)', 'uZ', (L, P, alvo) => { L.marcarComoAprovada(alvo); }, (L, P, alvo) => L.marcarComoAprovada(alvo)],
+    ['a resposta da aprovação, com OUTRA foto do pedido na tela', 'a2', (L, P, alvo) => { L.marcarComoAprovada(alvo); }, (L, P, alvo) => L.marcarComoAprovada(alvo)],
+    ['a aprovação SEM o Desfazer (a foto vira aprovada na resposta)', 'uZ', () => {}, (L, P, alvo) => L.marcarComoAprovada(alvo)],
+    ['a aprovação que falha (o ✨ volta)', 'uZ', (L, P, alvo) => { L.marcarComoAprovada(alvo); }, (L, P, alvo) => L.desmarcarAprovada(alvo)],
+    ['o "já tratado" por outro editor (a proposta sai)', 'uZ', () => {}, (L, P, alvo) => L.esquecerProposta(alvo)],
+    ['a exclusão de OUTRA foto do pedido que pousa (antes da que está na tela)', 'a2', () => {}, (L, P) => L.removerFoto('a1', P)],
+  ];
+  for (const [nome, foto, antes, durante] of casos) {
+    const L = camadaComZoom();
+    const P = pedidoComTresFotos();
+    const alvo = { id: 'uZ', place: P, idx: 1 };
+    L.abrir(P, foto);
+    antes(L, P, alvo);
+    L.ampliar();
+    const z = L.zoom();
+    assert.ok(z.scale > 1 && z.tx !== 0 && z.transform, `${nome}: PRÉ-CONDIÇÃO — a foto não ficou ampliada`);
+    durante(L, P, alvo);
+    assert.ok(L.urls[L.idx].includes(foto), `${nome}: PRÉ-CONDIÇÃO — a foto na tela mudou`);
+    assert.deepEqual(L.zoom(), z, `DEFEITO (${nome}): a mesma foto voltou a 1× sozinha`);
+  }
+});
+
+test('R11-3-04 CONTROLES: trocar de foto (‹ ›, a que sai da tela, a que volta pelo Desfazer) e abrir de novo recomeçam em 1×', () => {
+  const casos = [
+    ['a seta (outra foto)', 'a2', (L) => L.next()],
+    ['a exclusão da foto NA TELA pousando (a seguinte toma o lugar)', 'a2', (L, P) => L.removerFoto('a2', P)],
+    ['a foto que volta pelo Desfazer (ela vira a da tela)', 'a2', (L) => L.recolocarFoto(FOTO('a9'), 0)],
+    ['abrir de novo na MESMA foto', 'a2', (L, P) => { L.close(); L.abrir(P, 'a2'); }],
+  ];
+  for (const [nome, foto, acao] of casos) {
+    const L = camadaComZoom();
+    const P = pedidoComTresFotos();
+    L.abrir(P, foto);
+    L.ampliar();
+    assert.ok(L.zoom().scale > 1, `${nome}: PRÉ-CONDIÇÃO — a foto não ficou ampliada`);
+    acao(L, P);
+    assert.deepEqual(L.zoom(), { scale: 1, tx: 0, ty: 0, transform: '' }, `${nome}: a foto nova (ou a camada reaberta) herdou o zoom`);
+  }
+});

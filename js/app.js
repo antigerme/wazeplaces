@@ -2687,6 +2687,10 @@ const Lightbox = {
     scale: 1,
     tx: 0,
     ty: 0,
+    // A foto (a URL) de quem é o zoom de agora: o `_render` só o zera quando a
+    // foto na tela MUDA (R11-3-04). Abrir começa do 1× porque o `close` já o
+    // zera — e a camada fechada não redesenha.
+    _fotoComZoom: null,
     isOpen() {
         return !document.getElementById('imageLightbox').classList.contains('hidden');
     },
@@ -2918,7 +2922,18 @@ const Lightbox = {
             : `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
     },
     _render() {
-        this.resetZoom();
+        // O zoom e o deslocamento são da FOTO na tela. Trocar de foto (‹ ›, as
+        // setas, a tira, a que volta pelo Desfazer, a que sai da tela) recomeça
+        // em 1×; a MESMA foto redesenhada segue ampliada onde a pessoa a deixou.
+        // O `_render` zerava sempre, e o redesenho que não troca a foto — a
+        // RESPOSTA da aprovação (que marca a foto de novo, R10-3-04), o ✨ que
+        // volta na falha, a exclusão de OUTRA foto do pedido que pousa — tirava o
+        // zoom de quem conferia a fachada: com o Desfazer, uns 3 s depois do
+        // toque em "Aprovar" a foto voltava a 1× sozinha (auditoria da rodada 11,
+        // R11-3-04, MEDIDO nos dois motores; a da exclusão já existia antes).
+        const naTela = this.urls[this.idx];
+        if (naTela !== this._fotoComZoom) this.resetZoom();
+        this._fotoComZoom = naTela;
         const img = document.getElementById('lightboxImage');
         img.src = urlDaFoto(this.urls[this.idx]);
         // O MESMO texto do card (ver `altDaFoto`), com a posição desta foto.
