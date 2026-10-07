@@ -728,7 +728,7 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
     stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3, fetchEpoch: 0, hasMore: false,
     pendingAction: null, inFlightActions: 0, preferences: {} };
   const deps = {
-    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
+    AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false }, CONTA_KEY: constante('CONTA_KEY'),
     LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
     API: { getRegion: () => 'row', getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, setSession() {}, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoesUm.push(ok)) },
@@ -741,8 +741,11 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace ? AppState.currentPlace.updateRequestID : '-')); },
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), devolverPedidoRecusado: () => log.push('devolveu'),
   };
+  // O pouso de depois da queda passa pelo `registrarPousoDepoisDaQueda` (R13-2-02), que chama o `registrarPouso`
+  // daqui — e confere a conta de AGORA contra a do gesto (`quemDecideAgora`), pelas funções de verdade.
   const h = montar(['acoesTravadas', 'acoesTravadasForaDaJanela', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
-    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao'], deps);
+    'marcarEmAndamento', 'chaveDoPedido', 'derrubarSessao', 'registrarPousoDepoisDaQueda', 'quemDecideAgora',
+    'marcaDestaAba', 'marcaDaSessao', 'contaAgora'], deps);
   const marcarTodos = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   // O 1º pedaço pousa; o 2º fica no ar, e a sessão cai e renova com a MESMA conta.
   const ateAQueda = async () => {
@@ -838,8 +841,12 @@ test('V6b: CONTROLE — sem a queda, o lote inteiro sai da fila e conta (o instr
 test('V6b: CONTROLE — com OUTRA conta a fila foi refeita: a resposta velha não mexe na fila nova', async () => {
   const m = montarLoteComQueda();
   const { lote } = await m.ateAQueda();
-  // Outra conta entrou: a fila é trocada (`esquecerOutraConta` → `resetQueue`).
+  // Outra conta entrou: a fila é trocada (`esquecerOutraConta` → `resetQueue`),
+  // e a conta de agora é a de quem entrou. (Só a fila refeita, com a MESMA conta,
+  // é a pessoa que entrou de novo — e aí o pouso vale: R13-2-02, medido em
+  // test/abas-auditoria-r13.test.mjs.)
   const Q = { venueID: 'q1', updateRequestID: 'uq1' };
+  m.AppState.profile = { id: 'B' };
   m.AppState.fetchEpoch++;
   m.AppState.queue = [Q, { venueID: 'u2x', updateRequestID: 'u2' }];
   m.AppState.currentPlace = Q;

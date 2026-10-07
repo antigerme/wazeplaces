@@ -4577,6 +4577,10 @@ function tirarAprovadoDaFila(place) {
 // não há tela daquele pedido.
 // `quem`: a marca de quem aprovou, tirada no envio — é com ela que as outras
 // abas ficam sabendo do pouso, que pode chegar sem sessão na memória (R12-2-04).
+// Com a fila REFEITA (a pessoa entrou de novo, ou outra conta entrou), o pouso
+// vale do mesmo jeito, pela régua de depois da queda: ele saía no `return` da
+// fila sem registrar, e com a MESMA conta entrando de novo a outra aba seguia com
+// o pedido como card (R13-2-02, ver `registrarPousoDepoisDaQueda`).
 function aprovacaoPousouDepoisDaQueda(alvo, valeu, quem) {
     if (valeu) {
         Lightbox.marcarComoAprovada(alvo);
@@ -4585,7 +4589,10 @@ function aprovacaoPousouDepoisDaQueda(alvo, valeu, quem) {
         Lightbox.esquecerProposta(alvo);
         if (pedidoAindaNaTela(alvo.place)) showToast(t('toast.alreadyProcessed'), 'info');
     }
-    if (alvo.epocaFila !== AppState.fetchEpoch) return;
+    if (alvo.epocaFila !== AppState.fetchEpoch) {
+        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(alvo.place, quem);
+        return;
+    }
     registrarPouso(alvo.place, quem);
     // Um gesto da sessão nova já o decidiu (o card ficou destravado na
     // renovação): ele já saiu da fila, e o "Restam" já desceu por ele.
@@ -18574,6 +18581,11 @@ async function enviarLote(places, opts = {}) {
     // Waze e voltou pra fila — nem rejeitado, nem falha.
     const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0, naoVale: 0 };
     const epoca = epocaDaSessao;
+    // E QUEM decide — a sessão e a conta desta mesma hora —, pro pouso que chegar
+    // depois de uma queda no meio do laço (R13-2-01, ver o ramo da época abaixo).
+    // Aqui e não no gesto, como a época: a janela do Desfazer do "Rejeitar os N"
+    // não atravessa uma queda (ela a cancela), e a recusa automática não tem janela.
+    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     // A FILA em que o lote começou. O ↻ e a troca de filtro no meio do laço a
     // refazem (`resetQueue`): a nova já vem sem os pedidos que faltam (estão em
     // andamento), então nem o "Restam" dela desce pelos pousos daqui, nem o que
@@ -18684,11 +18696,15 @@ async function enviarLote(places, opts = {}) {
             // depois com a sessão de agora. E, na renovação da queda, que mantém
             // a fila na tela, eles VOLTAM como card (V1): seguem pendentes no
             // Waze, já passaram pela fila, e nenhuma busca os trazia. Numa fila
-            // refeita (o "Sair", outra conta) nada volta.
+            // refeita (o "Sair", outra conta) nada volta. E o que POUSOU tem o
+            // pouso registrado, com a marca de quem decidiu (`quem`, lá no
+            // começo; R13-2-01, ver `registrarPousoDepoisDaQueda`).
             if (epoca !== epocaDaSessao) {
                 const i = places.indexOf(p);
-                const naoPousaram = places.slice(i + (pousouNoWaze(r) ? 1 : 0)).filter((q) => !repetidos.has(q));
+                const pousou = pousouNoWaze(r);
+                const naoPousaram = places.slice(i + (pousou ? 1 : 0)).filter((q) => !repetidos.has(q));
                 for (const q of places.slice(i)) if (anotados.delete(q)) tirarDaFilaDeSaida('reject', q);
+                if (pousou && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(p, quem);
                 if (!aoLandar) descontarGestoSemSessao('rejected', placar, naoPousaram.length);
                 if (naFilaDoLote()) for (const q of naoPousaram) voltarPraFila(q);
                 return;
@@ -23745,6 +23761,45 @@ function descontarGestoSemSessao(chave, placar, n) {
     saveStats();
 }
 
+// A decisão que POUSOU no Waze com a época da sessão já trocada: a queda (com a
+// renovação no ar, ou já feita), a conta desta aba em dúvida (R6-1-04), o login
+// de novo com a fila refeita. Do que é da SESSÃO nada grava (placar, Histórico,
+// conquistas: a regra da época), mas o POUSO é fato do PEDIDO — e era só ele que
+// faltava. Sem a prova no aparelho, a fila guardada do offline (tirada antes do
+// gesto) devolvia o pedido como card na reabertura sem rede, ou no lie-fi:
+// decidido de novo, o Waze recebia a segunda decisão — "Já tratado por outro
+// editor" sobre a da própria pessoa, o placar contando duas vezes, e o ✓ seguido
+// do ✕ executava os dois, porque ler não resolve o pedido. E a OUTRA aba não
+// ficava sabendo pelo canal dos pousos: o card seguia lá, e o ✕ dela ia ao Waze
+// (auditoria da rodada 13, R13-2-01 = R13-1-02 = R13-4-01, MEDIDO no navegador
+// no ✕/✓ do card, no "Rejeitar os N" e na recusa automática; e R13-2-02, nos
+// dois irmãos com a fila refeita: o "Marcar todos" e a aprovação de foto). O
+// pouso de depois da troca passa por aqui, com a marca de QUEM decidiu, tirada
+// no gesto (`quemDecideAgora`): a memória desta aba pode estar sem sessão (a
+// renovação no meio), e é com ela que as outras abas conferem a conta (R12-2-04).
+// Os dois irmãos, na fila do GESTO, registram direto (o R12-2-04): a fila de pé
+// já prova que nem o "Sair" nem a troca de conta aconteceram — os dois a refazem.
+//
+// Menos em dois casos, e nos dois não falta a ninguém:
+//  · depois do "Sair" sem um login novo (`saiuNestaPagina`): "sair é limpar de
+//    tudo", e o pouso devolveria à memória da página (`pousosDaPagina`) o id de
+//    um pedido de terceiro, depois da limpeza. As outras abas saem junto, e a
+//    fila guardada do offline saiu com o "Sair";
+//  · com OUTRA conta nesta aba agora (`contaAgora`, que só diz uma conta
+//    confirmada — na renovação no meio ela é desconhecida, e o pouso vale): a
+//    fila é dela, e o "lido" é de CADA pessoa — o pouso do "Marcar todos" de
+//    quem estava tiraria da busca no ar de quem entrou um pedido que, pra ela,
+//    segue não lido. A fila guardada da conta anterior saiu na troca
+//    (`esquecerOutraConta`), e as abas dela saem quando outra conta entra.
+// `=== true`: os harnesses dos testes devolvem objeto verdadeiro pra nome que
+// não conhecem.
+function registrarPousoDepoisDaQueda(places, quem) {
+    if (saiuNestaPagina === true) return;
+    const agora = contaAgora();
+    if (agora && !(quem && quem.conta && String(quem.conta) === agora)) return;
+    registrarPouso(places, quem);
+}
+
 // O ✕/✓ EM VOO cuja resposta chegou depois de a sessão acabar (a época mudou).
 // Nada dela grava (ver `epocaDaSessao`), e a anotação dela na fila de saída
 // (O2, `anotarAntesDoEnvio`) sai: ela não pode sair depois com a sessão de
@@ -23756,10 +23811,16 @@ function descontarGestoSemSessao(chave, placar, n) {
 // "Sair", outra conta) nada volta — a fila é de outra sessão. A fila que o
 // TREINO guardou é a do gesto (a sessão caiu com ele aberto): o pedido volta
 // quando ela voltar (ver `Treino.guardarDevolucao`, R7-7-04).
-function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila) {
+//
+// Se ela POUSOU, o pouso é registrado, com a marca de quem decidiu (`quem`,
+// tirada no gesto), em qualquer fila (R13-2-01, ver `registrarPousoDepoisDaQueda`).
+function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila, quem) {
     const anotado = anotadoAntesDoEnvio.delete(place);
     if (descargaNaFila.delete(place) || anotado) tirarDaFilaDeSaida(tipo, place);
-    if (pousouNoWaze(result)) return;
+    if (pousouNoWaze(result)) {
+        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(place, quem);
+        return;
+    }
     descontarGestoSemSessao(tipo === 'read' ? 'read' : 'rejected', placar, 1);
     if (epocaFila === AppState.fetchEpoch
         || (typeof Treino !== 'undefined' && Treino.ativo === true && Treino.filaGuardada(epocaFila))) devolverPedidoRecusado(place, epocaFila);
@@ -23786,6 +23847,8 @@ function handleMarkAsRead() {
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
+    // E QUEM decide, pro pouso que chegar depois da queda (R13-2-01, ver `decisaoDepoisDaQueda`).
+    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     scheduleAction('read', place, async () => {
         // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
         // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
@@ -23804,7 +23867,7 @@ function handleMarkAsRead() {
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
         if (epoca !== epocaDaSessao) {
-            decisaoDepoisDaQueda('read', place, result, placar, epocaFila);
+            decisaoDepoisDaQueda('read', place, result, placar, epocaFila, quem);
             return;
         }
         presencaWmeAoResponder(presenca, result);
@@ -23833,6 +23896,8 @@ function handleReject() {
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver `devolverPedidoRecusado`
     const gesto = carimboDoGesto();   // o dia e o lugar do GESTO, pro Histórico (R6-7-4)
+    // E QUEM decide, pro pouso que chegar depois da queda (R13-2-01, ver `decisaoDepoisDaQueda`).
+    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     scheduleAction('reject', place, async () => {
         // Anotada na fila de saída ANTES de sair (O2, ver `anotarAntesDoEnvio`).
         // A decisão deste pedido já esperava lá: vale a primeira, e este gesto
@@ -23851,7 +23916,7 @@ function handleReject() {
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
         if (epoca !== epocaDaSessao) {
-            decisaoDepoisDaQueda('reject', place, result, placar, epocaFila);
+            decisaoDepoisDaQueda('reject', place, result, placar, epocaFila, quem);
             return;
         }
         presencaWmeAoResponder(presenca, result);
@@ -24323,7 +24388,16 @@ async function handleBatchMarkRead() {
     // guarda" que a queda pega no ar (R6-2-08). Nada mais é dito nem contado.
     let naoSaiuNaQueda = false;
     if (sessaoTrocou) {
-        if (epocaFila !== AppState.fetchEpoch) return;
+        // A fila REFEITA (a pessoa entrou de novo, ou outra conta entrou): nada
+        // dela é deste lote — mas o pouso do que pousou depois da queda vale,
+        // pela régua de depois da queda (o "Sair" e a outra conta não gravam).
+        // Saía antes de registrar, e com a MESMA conta entrando de novo a outra
+        // aba seguia com os pedidos como card — o ✕ de lá ia ao Waze, lido e
+        // rejeitado (R13-2-02, MEDIDO no navegador; ver `registrarPousoDepoisDaQueda`).
+        if (epocaFila !== AppState.fetchEpoch) {
+            if (posQueda.length && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(posQueda, quem);
+            return;
+        }
         // O pouso do que pousou depois da queda (o de antes já foi registrado a
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
         // devolvê-los como card. Com a marca de quem DECIDIU: sem sessão na
