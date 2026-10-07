@@ -321,17 +321,23 @@ async function leiturasNoKv() {
 }
 
 test('README: as leituras no KV são as que o servidor faz — 1 por ação, e as da foto contadas (R12-6-03)', async () => {
-  const m = /Cada ação = (\d+) leitura, menos as da foto: a lixeira custa (\d+) leituras no toque e (\d+) na exclusão, e aprovar foto, (\d+)\./.exec(README);
+  // O toque na lixeira pode custar uma leitura a mais quando relê a lista de fotos
+  // do Waze do que com a lista ainda valendo: aí o README diz os dois, na forma
+  // "N leituras no toque (M com a lista de fotos ainda valendo)".
+  const m = /Cada ação = (\d+) leitura, menos as da foto: a lixeira custa (\d+) leituras no toque(?: \((\d+) com a lista de fotos ainda valendo\))? e (\d+) na exclusão, e aprovar foto, (\d+)\./.exec(README);
   assert.ok(m, 'CONTROLE: a conta das leituras no KV sumiu do README (ou mudou de forma)');
-  const [umaAcao, toque, exclusao, aprovar] = m.slice(1).map(Number);
+  const [umaAcao, toque, toqueValendo, exclusao, aprovar] = m.slice(1).map((x) => (x === undefined ? undefined : Number(x)));
   const n = await leiturasNoKv();
-  // CONTROLE: o instrumento separa os casos (senão "bate" por não medir nada).
-  assert.ok(n.perfil >= 1 && n.exclusao > n.toque && n.toque > n.perfil,
+  // CONTROLE: o instrumento separa os casos (senão "bate" por não medir nada):
+  // as da foto leem mais que uma ação comum.
+  assert.ok(n.perfil >= 1 && n.toque > n.perfil && n.toqueDeNovo > n.perfil && n.exclusao > n.perfil && n.aprovarSemLixeira > n.perfil,
     `CONTROLE: as leituras medidas não separam os casos: ${JSON.stringify(n)}`);
   for (const acao of ['perfil', 'busca', 'rejeitar', 'lido', 'estrela', 'renomear'])
     assert.equal(n[acao], umaAcao, `${acao}: o servidor lê ${n[acao]} vez(es) no KV, e o README diz ${umaAcao} por ação`);
-  for (const caso of ['toque', 'toqueDeNovo'])
-    assert.equal(n[caso], toque, `a lixeira (${caso}): o servidor lê ${n[caso]} vezes no KV, e o README diz ${toque} no toque`);
+  assert.equal(n.toque, toque, `a lixeira (o toque que relê a lista do Waze): o servidor lê ${n.toque} vezes no KV, e o README diz ${toque} no toque`);
+  const comALista = toqueValendo === undefined ? toque : toqueValendo;
+  assert.equal(n.toqueDeNovo, comALista,
+    `a lixeira (o toque com a lista ainda valendo): o servidor lê ${n.toqueDeNovo} vezes no KV, e o README diz ${comALista}`);
   for (const caso of ['exclusao', 'exclusaoVencida'])
     assert.equal(n[caso], exclusao, `a exclusão (${caso}): o servidor lê ${n[caso]} vezes no KV, e o README diz ${exclusao}`);
   for (const caso of ['aprovarSemLixeira', 'aprovarComLixeira'])
