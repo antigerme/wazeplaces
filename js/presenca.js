@@ -665,13 +665,23 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
         // vale zero, e a conta dela não serve de régua pras vivas (o que chegou
         // depois do "lida" segue contando por elas).
         const lidaDepois = (cid) => inicio < (Presenca.lidaSaiuEm.get(cid) || 0);
-        for (const c of Presenca.conversas) if (lidaDepois(c.id)) c.naoLidas = 0;
+        // A régua de cada conversa (`ateDaLista`) fica GUARDADA nela: vale nos
+        // dois sentidos. O que chegou ANTES desta lista ela tira das vivas
+        // (logo abaixo); o que chega DEPOIS com hora até ela, a lista já contou
+        // — e o tempo real não pode contar de novo (`presencaMensagemDoFluxo`,
+        // R11-5-01). Separada da `atividade`, que a prévia reescreve a cada
+        // mensagem que chega ou sai. A lista que não serve de régua (a de
+        // antes do "lida") guarda zero.
+        for (const c of Presenca.conversas) {
+            c.ateDaLista = lidaDepois(c.id) ? 0 : Math.max(Number.isFinite(c.atividade) ? c.atividade : 0,
+                c.ultima && Number.isFinite(c.ultima.ts) ? c.ultima.ts : 0);
+            if (lidaDepois(c.id)) c.naoLidas = 0;
+        }
         for (const [id, v] of Presenca.vivas) {
             if (v.ultimaTs < inicio) { Presenca.vivas.delete(id); continue; }
             if (lidaDepois(id)) continue;
             const c = Presenca.conversas.find((x) => x.id === id);
-            const ate = c ? Math.max(Number.isFinite(c.atividade) ? c.atividade : 0,
-                c.ultima && Number.isFinite(c.ultima.ts) ? c.ultima.ts : 0) : 0;
+            const ate = c ? c.ateDaLista : 0;
             if (!ate || !Array.isArray(v.servs)) continue;
             const depois = v.servs.filter((s) => !(s <= ate));
             if (depois.length === v.servs.length) continue;
@@ -1429,6 +1439,18 @@ function presencaMensagemDoFluxo(m, doLote) {
             presencaQuitarDivida(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
             if (!doLote || chegou > Presenca.atualizadaEm) {
+                // A resposta que a LISTA já contou e o tempo real entrega
+                // DEPOIS dela (a hora do Waze até a régua da lista que trouxe a
+                // conversa, `ateDaLista`) contava duas vezes — pela lista e pela
+                // viva —: "2 mensagens novas" com uma só, até a lista seguinte
+                // (auditoria da rodada 11, R11-5-01). A régua só rodava quando a
+                // LISTA chegava depois da mensagem. Ela PASSA da conta da lista
+                // pra viva, em vez de ficar de fora: viva, ela segue as regras
+                // de toda mensagem que chegou — o "lida" que volta não a apaga
+                // se ela chegou depois dele, e a lista que foi lida ANTES dela
+                // no Waze não a esquece. Fora da conta, as duas a perdiam.
+                const daLista = Presenca.conversas.find((x) => x.id === com);
+                if (daLista && daLista.naoLidas > 0 && msg.ts <= (daLista.ateDaLista || 0)) daLista.naoLidas -= 1;
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
                 v.n += 1;
                 v.ultimaTs = Math.max(v.ultimaTs, chegou);
@@ -1929,6 +1951,11 @@ function presencaZerarNaoLidas(id, ate, { recontar = false } = {}) {
 // O resto é do Waze, e não se conserta aqui: o `MarkConversationRead` marca a
 // conversa INTEIRA quando é processado, inclusive a resposta guardada antes
 // disso. A lista seguinte diz zero, e a resposta some sem ter sido vista.
+//
+// E a que está nas VIVAS fica de fora da conta: ela já conta por lá. É a resposta
+// que a lista contou e o tempo real entregou depois (passou da conta da lista pra
+// viva, R11-5-01): o histórico a tem, e contada aqui também ela voltava a valer
+// duas — "2 mensagens novas" com uma só, depois do "lida" que deu certo.
 function presencaNaoLidasDepoisDoLida(id, c) {
     const u = c.ultima;
     const h = Presenca.historico.get(id);
@@ -1937,7 +1964,9 @@ function presencaNaoLidasDepoisDoLida(id, c) {
     if (!u || !Number.isFinite(u.ts) || !h || !h.msgs.some((m) => !m.meu && m.ts === u.ts)) return c.naoLidas;
     const voo = presencaLidaNoAr(id);
     const coberto = Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0);
-    const depois = h.msgs.filter((m) => !m.meu && Number.isFinite(m.ts) && m.ts > coberto && m.ts <= u.ts).length;
+    const viva = Presenca.vivas.get(id);
+    const nasVivas = new Set(viva && Array.isArray(viva.servs) ? viva.servs : []);
+    const depois = h.msgs.filter((m) => !m.meu && Number.isFinite(m.ts) && m.ts > coberto && m.ts <= u.ts && !nasVivas.has(m.ts)).length;
     return Math.min(c.naoLidas, depois);
 }
 
