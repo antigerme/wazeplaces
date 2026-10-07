@@ -521,6 +521,29 @@ test('pt: "app" é masculino — no dicionário e no texto visível do HTML', ()
   assert.deepEqual(noHtml, [], '"app" no feminino no texto visível do index.src.html');
 });
 
+// "Marcar como LIDO os 3 pedidos…" (auditoria da rodada 11, R11-6-04): o
+// predicativo concorda com o objeto — "lidos os pedidos", "lido o pedido" —, como
+// o botão do MESMO diálogo ("Marcar como lidos") e o es/fr ("leídas las…",
+// "lues les…"). Vale pro dicionário pt e pro texto visível do HTML: o
+// `#batchReadMessage` não tem `data-i18n` (o JS o escreve), e o teste da reserva
+// (test/entrada.test.mjs) não o lê.
+const PREDICATIVO_DISCORDA = /\bcomo\s+(?:lid[oa]\s+(?:os|as)|lid[oa]s\s+(?:o|a))\b/iu;
+test('pt: "Marcar como lidos os pedidos" — o predicativo concorda com o número, no dicionário e no texto do HTML', () => {
+  // Contraprova: a regra enxerga as formas erradas, e deixa passar as certas.
+  for (const errado of ['Marcar como lido os 3 pedidos', 'Marcar como lido os pedidos da fila?', 'Marcar como lidos o pedido'])
+    assert.ok(PREDICATIVO_DISCORDA.test(errado), `a regra não enxerga "${errado}"`);
+  for (const certo of ['Marcar como lidos os 3 pedidos', 'Marcar como lido o 1 pedido', 'Marcar como lido (→)', 'Marcar como lidos'])
+    assert.ok(!PREDICATIVO_DISCORDA.test(certo), `a regra acusa "${certo}", que está certo`);
+  const noDicionario = Object.entries(DICT.pt)
+    .filter(([, v]) => PREDICATIVO_DISCORDA.test(String(v)))
+    .map(([k, v]) => `${k}: ${String(v).slice(0, 90)}`);
+  assert.deepEqual(noDicionario, [], '"como lido os…" no português: o predicativo não concorda com o plural');
+  const html = textoVisivelDoHtml(read('index.src.html')).replace(/<[^>]+>/g, ' ');
+  assert.ok(html.includes('Marcar como lidos'), 'CONTROLE: o recorte do HTML perdeu o diálogo do "Marcar todos" — a regra leria nada');
+  const noHtml = [...html.matchAll(new RegExp(PREDICATIVO_DISCORDA.source, 'giu'))].map((m) => m[0]);
+  assert.deepEqual(noHtml, [], '"como lido os…" no texto visível do index.src.html (a reserva do diálogo do "Marcar todos")');
+});
+
 test('contagem regressiva com 1: forma SINGULAR, e o app a usa (era "Faltam 1…")', () => {
   // Aparecia justamente no último toque antes do modo dev, e na patente e no
   // gate do Desfazer (auditoria de 2026-09-25).

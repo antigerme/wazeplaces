@@ -520,9 +520,9 @@ const I18N_DICT = {
     'toast.langChanged': 'Idioma alterado 🌎',
     // batch confirm body (plural)
     'modal.batchRead.body': 'Marcar como lido o {n} pedido que já está na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
-    'modal.batchRead.bodyPlural': 'Marcar como lido os {n} pedidos que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
+    'modal.batchRead.bodyPlural': 'Marcar como lidos os {n} pedidos que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
     'modal.batchRead.bodyNaoLidos': 'Marcar como lido o {n} pedido não lido que já está na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
-    'modal.batchRead.bodyNaoLidosPlural': 'Marcar como lido os {n} pedidos não lidos que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
+    'modal.batchRead.bodyNaoLidosPlural': 'Marcar como lidos os {n} pedidos não lidos que já estão na fila? Vai direto pro Waze e não dá pra desfazer em lote.',
     'toast.batchDone': '{n} pedido marcado como lido 👍', 'toast.batchDonePlural': '{n} pedidos marcados como lidos 👍',
     // undo / actions / indicator
     'undo.reject': 'Pedido rejeitado', 'undo.skip': 'Pedido pulado', 'undo.read': 'Marcado como lido',
