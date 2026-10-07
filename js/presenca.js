@@ -1438,6 +1438,7 @@ function presencaMensagemDoFluxo(m, doLote) {
             // (com a que tinha sido vista), e abrir a conversa marca tudo.
             presencaQuitarDivida(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
+            const daLista = Presenca.conversas.find((x) => x.id === com);
             if (!doLote || chegou > Presenca.atualizadaEm) {
                 // A resposta que a LISTA já contou e o tempo real entrega
                 // DEPOIS dela (a hora do Waze até a régua da lista que trouxe a
@@ -1449,7 +1450,6 @@ function presencaMensagemDoFluxo(m, doLote) {
                 // de toda mensagem que chegou — o "lida" que volta não a apaga
                 // se ela chegou depois dele, e a lista que foi lida ANTES dela
                 // no Waze não a esquece. Fora da conta, as duas a perdiam.
-                const daLista = Presenca.conversas.find((x) => x.id === com);
                 if (daLista && daLista.naoLidas > 0 && msg.ts <= (daLista.ateDaLista || 0)) daLista.naoLidas -= 1;
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
                 v.n += 1;
@@ -1457,6 +1457,18 @@ function presencaMensagemDoFluxo(m, doLote) {
                 if (Array.isArray(v.servs)) v.servs.push(msg.ts);
                 Presenca.vivas.set(com, v);
             }
+            // Com um "lida" NO AR, a lista que o Waze leu antes de processá-lo
+            // conta a mensagem VISTA junto com a resposta, e quem refaz essa
+            // conta pelo histórico é a chegada da lista — só que ela chegou
+            // ANTES da resposta, e o histórico ainda não a explicava. A resposta
+            // passava da conta pra viva (1 + 1) e a pílula dizia "2 mensagens
+            // novas", uma já vista, até o "lida" voltar (até 45 s; auditoria da
+            // rodada 12, R12-5-01). Com ela no histórico, a conta é refeita
+            // aqui, pela régua de sempre (`presencaNaoLidasDepoisDoLida`, que
+            // deixa de fora o que está nas vivas). Também a do LOTE que a régua
+            // de cima deixa de fora (guardada antes de a lista sair): a lista a
+            // contou, e a conta dela é refeita do mesmo jeito.
+            if (daLista && daLista.naoLidas > 0 && presencaLidaNoAr(com)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
         }
     }
     presencaRenderTudo();
