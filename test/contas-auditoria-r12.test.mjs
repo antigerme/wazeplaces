@@ -5,6 +5,8 @@
 //    (o link `/#pair=`, o "Entrar com um código") e os cookies colados e
 //    confirmados no meio. Os dois davam certo, o segundo trocava o primeiro, e o
 //    "Sair" apagava só o último — o outro ficava vivo no servidor, sem dono;
+//  · R12-1-02 — o token que a extensão entrega DEPOIS de um "Sair" no meio da
+//    pergunta era ignorado e NÃO apagado no servidor;
 //  · R12-1-03 — a adoção calada (R9-1-03) por mais duas portas: a resposta de um
 //    "invisível" que chega depois da queda, e o "Conectar outro aparelho" tocado
 //    durante a renovação — as perguntas "esta aba tem sessão?" liam o
@@ -275,6 +277,73 @@ test('R12-1-01: o resgate deixa a promessa do desfecho no ar enquanto corre, e a
     assert.equal(await desfecho, r.success === true, 'o desfecho prometido não é o do resgate');
     assert.equal(m.deps.resgateNoAr, null, 'a promessa ficou de pé depois do resgate');
   }
+});
+
+// ═══ R12-1-02 · o token da extensão depois de um "Sair" no meio da pergunta ════
+function extensaoPerguntando({ tokenGuardado = null } = {}) {
+  const t = telaDeEntrada({});
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  const log = [];
+  const API = {
+    sessionToken: null,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(tok) { log.push('entrou com ' + tok); this.sessionToken = tok; },
+    destroySession: (tok) => { log.push('apagou no servidor ' + tok); return Promise.resolve({ success: true }); },
+  };
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, API,
+    safeLS: { get: (k) => (k === TOKEN ? tokenGuardado : null) },
+    authInFlight: false, resgateEmVoo: false, callWithRetry: (fn) => fn(),
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 7, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id) => t.fechar(id), showMainScreen: () => log.push('app'),
+    resetQueue: () => {}, loadProfileAndAuxData: () => Promise.resolve(), conhecerContaDoLogin: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, responder, log, API };
+}
+
+test('R12-1-02: a sessão que a extensão entrega DEPOIS do "Sair" (a renovação da queda, a abertura) sai do servidor — e não entra', async () => {
+  for (const [caso, opcoes] of [['a renovação da queda', { silencioso: true, manterFila: true }], ['a abertura', {}],
+    ['a volta à aba', { silencioso: true }]]) {
+    const m = extensaoPerguntando();
+    const p = m.h.entrarPelaExtensao(opcoes);
+    m.responder({ action: 'aguarde' });
+    m.deps.epocaDaSessao++;                         // o "Sair" no meio (aqui, ou noutra aba)
+    m.responder({ action: 'sessao', token: 'tok-e', conta: '4242' });
+    assert.equal(await p, false, `(${caso}) a resposta entrou por cima do "Sair"`);
+    assert.ok(!m.log.includes('entrou com tok-e') && !m.log.includes('app'), `(${caso}) o "Sair" foi desfeito: ` + JSON.stringify(m.log));
+    assert.ok(m.log.includes('apagou no servidor tok-e'),
+      `DEFEITO (${caso}): a sessão que a extensão criou com os cookies da pessoa ficou no servidor, sem dono, depois do "Sair": ` + JSON.stringify(m.log));
+  }
+});
+
+test('R12-1-02: a sessão da extensão que JÁ é a do aparelho (a outra aba entrou de novo com ela) fica — a régua da volta', async () => {
+  const m = extensaoPerguntando({ tokenGuardado: 'tok-e' });
+  const p = m.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  m.deps.epocaDaSessao++;
+  m.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await p, false);
+  assert.ok(!m.log.includes('apagou no servidor tok-e'), 'a sessão que a OUTRA aba está usando foi apagada do servidor');
+});
+
+test('R12-1-02: CONTROLE — sem o "Sair" no meio, a renovação entra com a sessão da extensão, e nada é apagado', async () => {
+  const m = extensaoPerguntando();
+  const p = m.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+  m.responder({ action: 'sessao', token: 'tok-e' });
+  assert.equal(await p, true, 'CONTROLE: a renovação deixou de entrar');
+  assert.deepEqual(m.log, ['entrou com tok-e', 'app']);
 });
 
 // ═══ R12-1-03 · "esta aba tem sessão?" se responde pela MEMÓRIA ═══════════════

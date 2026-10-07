@@ -827,7 +827,21 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
                 return fim(false);
             }
             if (d.action !== 'sessao' || !d.token) return;
-            if (epoca !== epocaDaSessao) return fim(false);   // saiu no meio: ver acima
+            const tokenDaExtensao = String(d.token);
+            // Saiu no meio (ver acima): a resposta não entra — e a sessão que a
+            // extensão acabou de criar, com os cookies válidos da pessoa, SAI do
+            // servidor. Só ignorada, ela ficava lá sem dono por até 21 dias,
+            // depois de a pessoa pedir pra sair (auditoria da rodada 12, R12-1-02,
+            // MEDIDO). Menos se ela já é a do APARELHO: a ponte dá o desfecho de UM
+            // login a todas as abas que perguntam juntas, e a outra aba (que entrou
+            // de novo depois do "Sair") pode estar com ela — a régua da volta,
+            // logo abaixo.
+            if (epoca !== epocaDaSessao) {
+                if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
+                    callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
+                }
+                return fim(false);
+            }
             // A pergunta da VOLTA à aba (silenciosa, sem manter fila) com um login
             // DESTA aba no meio: a pessoa colou os cookies, digitou o código ou
             // abriu o link enquanto a extensão respondia. O login que ela pediu
@@ -840,7 +854,6 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // no ar. A sessão da extensão sai do servidor, menos se ela já é a do
             // aparelho: a ponte dá o desfecho de UM login a todas as abas que
             // perguntam juntas, e a outra pode estar com ela.
-            const tokenDaExtensao = String(d.token);
             const voltaComLoginDestaAba = silencioso && !manterFila
                 && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo);
             if (voltaComLoginDestaAba) {
