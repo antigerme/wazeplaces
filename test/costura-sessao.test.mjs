@@ -1189,11 +1189,13 @@ test('K4: B entra no aparelho de A (5 pulados) e pula 1 — a fila NÃO termina 
 
 function montarPresencaWme(perfil = null) {
   const enviados = [];
-  const AppState = { profile: perfil, preferences: { presenca: true }, stats: {} };
+  // A aba LOGADA (aberta sem rede, com a sessão salva): a sessão está na memória dela.
+  const AppState = { authenticated: true, profile: perfil, preferences: { presenca: true }, stats: {} };
   const presencaWme = { ligarNaProxima: true, desligarPendente: false, ultimaEm: 0, perfilVisivel: null, perfilEm: 0 };
   const deps = {
     AppState, presencaWme, dfato: () => {},
-    API: { getSession: () => 'tok-A', presencaWaze: async (c) => { enviados.push(c); return { success: true }; } },
+    API: { getSession: () => 'tok-A', temSessaoNaMemoria: () => true, sessionToken: 'tok-A',
+      presencaWaze: async (c) => { enviados.push(c); return { success: true }; } },
     filaAtravessouSessao: false, safeLS: { remove() {} }, carregarFilaDeSaida: () => [], window: {},
   };
   const h = montar(['presencaWmeDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeAoCarregarPerfil',

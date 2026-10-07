@@ -22273,8 +22273,10 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
     // Sem SESSÃO (a janela da renovação pela extensão, com os Filtros abertos),
     // o gesto era descartado: a pessoa seguia visível no WME (auditoria de
     // 2026-09-30, R5-5-8). Fica pendente, como o sem perfil logo abaixo, e o
-    // perfil que chegar com a sessão nova o manda (`definirPerfil`).
-    if (!API.getSession()) {
+    // perfil que chegar com a sessão nova o manda (`definirPerfil`). A sessão
+    // DESTA aba é a da memória: o `getSession`, com ela vazia, GRAVA nela a que
+    // outra aba guardou no aparelho — é adotá-la (R9-1-03; R11-1-02).
+    if (!API.temSessaoNaMemoria()) {
         if (AppState.preferences.presenca === false) { presencaWme.desligarPendente = true; presencaWmeGravarPendente(); }
         return;
     }
@@ -22470,6 +22472,23 @@ function presencaWmeAnotarDesligar(r) {
 // `abaMorta`: a aba cujo carimbo a conferência achou MORTA (ver
 // `presencaWmeConferirAbaDoCarimbo`) — o carimbo dela não segura nada.
 function presencaWmeRefazerDesligar({ abaMorta = null } = {}) {
+    // Sem sessão nesta aba (a tela de entrada, a renovação no ar), o pendente
+    // ESPERA: quem o manda é o perfil que chegar com a sessão nova
+    // (`definirPerfil`). Seguir até o envio lia a sessão pelo `getSession`, que
+    // com a memória vazia GRAVA nela a que outra aba guardou no aparelho: a
+    // resposta de um código errado na tela de entrada ADOTAVA calada a sessão da
+    // outra aba — a volta à aba não a adotava mais, e o "Sair" de lá fechava o
+    // "Colar cookies" daqui (o R9-1-03 por outra porta; auditoria da rodada 11,
+    // R11-1-02, MEDIDO).
+    //
+    // E sem o PERFIL também: a sessão nova pode ser de OUTRA conta (a adotada da
+    // outra aba, a que a extensão trouxe), e só o perfil diz de quem ela é — a
+    // troca tira da memória o pendente da conta anterior (`aoConhecerConta`).
+    // Antes dele, a repetição gravava o pendente com a conta do APARELHO
+    // (`presencaWmeGravarPendente`), a de quem entrou na outra aba: MEDIDO, a
+    // busca respondendo antes do perfil, e a outra aba mandava o "invisível" de
+    // quem nunca o pediu (R11-1-01).
+    if (!AppState.authenticated || !AppState.profile) return;
     if (AppState.preferences.presenca !== false) return;
     // Com um envio no AR, quem decide é a resposta dele: o gravado é dele
     // (gravado no gesto, R7-5-03), e adotá-lo aqui marcava o pendente na memória
@@ -22527,7 +22546,7 @@ function presencaWmeRefazerDesligar({ abaMorta = null } = {}) {
     // o envio morreu junto, e esperar o teto era só atraso (R9-5-04; ver
     // `presencaWmeConferirAbaDoCarimbo`). O `typeof`: os testes que fatiam isto
     // sem a marca.
-    const sessao = marcaDaSessao(API.getSession());
+    const sessao = marcaDaSessao(API.sessionToken);
     const renovadaAqui = (s) => !!s && s === presencaWme.desligar401Sessao && s !== sessao;
     const daqui = renovadaAqui(presencaWme.desligarSessao) ? 0 : presencaWme.desligarEm;
     const aba = typeof ABA_DESTA_PAGINA === 'string' ? ABA_DESTA_PAGINA : null;

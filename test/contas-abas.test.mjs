@@ -2574,3 +2574,86 @@ test('R11-1-01: o "Sair" esquece a conta que esta aba confirmou — e a QUEDA a 
   assert.doesNotMatch(fatiarDe(APP_SEM, 'derrubarSessao'), /contaConfirmadaNestaAba\s*=/,
     'a queda esquece a conta confirmada: a troca na volta à aba (R11-1-01) ficaria cega');
 });
+
+// ── R11-1-02 · o "invisível" pendente não adota a sessão da outra aba ──────────
+// Com o "invisível" pendente que atravessou a queda, QUALQUER resposta da API na
+// aba da tela de entrada (um código errado, um cookies.txt recusado) rodava o
+// `presencaWmeRefazerDesligar`, que lia a sessão pelo `getSession` — e o
+// `getSession`, com a memória vazia, GRAVA nela a que outra aba guardou: a aba
+// adotava calada, a volta à aba não adotava mais, e o "Sair" da outra fechava o
+// "Colar cookies" daqui (auditoria da rodada 11, R11-1-02, MEDIDO). O `api.js`
+// aqui é o DE VERDADE (é nele que mora o efeito).
+const T_R11 = 1791000000000;
+function abaComInvisivelPendente({ autenticada = false, perfil = null, memoria = null } = {}) {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-y', [CONTA_KEY]: JSON.stringify({ id: '5151', s: marcaDe('tok-y') }),
+    [PREFERENCES_KEY]: JSON.stringify({ presenca: false }) });
+  if (memoria) real.API.sessionToken = memoria;     // a sessão DESTA aba (só a memória)
+  const enviados = [];
+  real.API.presencaWaze = async (c) => { enviados.push(c); return { success: true }; };
+  const escritas = [];
+  const localStorage = {
+    getItem: (k) => (real.dados.has(k) ? real.dados.get(k) : null),
+    setItem: (k, v) => { escritas.push(k); real.dados.set(k, String(v)); },
+    removeItem: (k) => { escritas.push('-' + k); real.dados.delete(k); },
+  };
+  const AppState = { authenticated: autenticada, profile: perfil, preferences: { presenca: false } };
+  // O pendente de X, de mais de um minuto atrás (o teto da repetição já passou).
+  const presencaWme = { desligarPendente: true, desligarEm: T_R11 - 120000, desligarSessao: marcaDe('tok-a'),
+    desligarVez: 1, desligarNoAr: 0, ligarNaProxima: false };
+  const deps = {
+    API: real.API, safeLS: { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) },
+    localStorage, AppState, presencaWme, CONTA_KEY, PREFERENCES_KEY,
+    PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
+    preferenciasCarregadas: true, Date: { now: () => T_R11 }, dfato: () => {},
+    ABA_DESTA_PAGINA: 'aba-a', presencaWmeConferirAbaDoCarimbo: () => {},
+    sessaoVivaDepoisDe: () => false, handleUnauthorized: () => {},
+  };
+  const h = montar(['presencaWmeRefazerDesligar', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
+    'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'savePreferences', 'marcaDaSessao'], deps);
+  return { h, real, enviados, escritas, presencaWme };
+}
+
+test('R11-1-02: a resposta que chega à aba da TELA DE ENTRADA não adota a sessão da outra aba pelo "invisível" pendente — nem o grava com a conta de lá', async () => {
+  const m = abaComInvisivelPendente();
+  m.h.presencaWmeRefazerDesligar();                  // a prova de rede: um código errado respondeu
+  await tiqueAba();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false,
+    'DEFEITO: a aba da tela de entrada ADOTOU calada a sessão da outra aba (a volta à aba não adota mais, e o "Sair" de lá fecha o "Colar" daqui)');
+  assert.deepEqual(m.enviados, [], 'a aba sem sessão mandou o "invisível"');
+  assert.deepEqual(m.escritas, [],
+    'o pendente de X foi GRAVADO no aparelho com a conta de quem entrou na outra aba (ela o mandaria): ' + JSON.stringify(m.escritas));
+  assert.equal(m.presencaWme.desligarPendente, true, 'o pendente sumiu sem a troca de conta decidir');
+  // CONTROLE: a mesma aba LOGADA como X, com o perfil — a medida enxerga o envio.
+  const c = abaComInvisivelPendente({ autenticada: true, perfil: { id: 4242 }, memoria: 'tok-a' });
+  c.h.presencaWmeRefazerDesligar();
+  await tiqueAba();
+  assert.deepEqual(c.enviados, [{ userId: '4242', visivel: false }], 'CONTROLE: a medida não enxerga o envio');
+});
+
+test('R11-1-02: a sessão que ADOTOU (ou entrou) antes de o perfil dizer de quem é não manda nem grava o "invisível" de quem estava', async () => {
+  // A adoção da volta à aba (ou a extensão) com a busca respondendo antes do
+  // perfil: logada, a sessão de Y na memória, e o perfil ainda a caminho. A
+  // repetição gravava o pendente de X com a conta do aparelho — a de Y — e a
+  // aba de Y o mandava (MEDIDO no navegador: `presenca-waze` com o id de Y).
+  const m = abaComInvisivelPendente({ autenticada: true, memoria: 'tok-y' });
+  m.h.presencaWmeRefazerDesligar();
+  await tiqueAba();
+  assert.deepEqual(m.escritas, [],
+    'DEFEITO: o "invisível" de X foi gravado no aparelho com a conta de Y antes de o perfil dizer de quem é a sessão: ' + JSON.stringify(m.escritas));
+  assert.deepEqual(m.enviados, []);
+  assert.equal(m.presencaWme.desligarPendente, true, 'o pendente sumiu sem a troca de conta decidir');
+});
+
+test('R11-1-02: o desligar sem sessão NESTA aba fica pendente sem ler o aparelho pelo `getSession` — e com ela, sai', async () => {
+  const m = abaComInvisivelPendente();
+  m.h.presencaWmeDesligar();
+  await tiqueAba();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false, 'DEFEITO: o desligar sem sessão nesta aba adotou a sessão da outra');
+  assert.deepEqual(m.enviados, []);
+  assert.equal(m.presencaWme.desligarPendente, true, 'o desligar sem sessão foi descartado (R5-5-8)');
+  // CONTROLE: com a sessão desta aba e o perfil, o gesto sai.
+  const c = abaComInvisivelPendente({ autenticada: true, perfil: { id: 4242 }, memoria: 'tok-a' });
+  c.h.presencaWmeDesligar();
+  await tiqueAba();
+  assert.deepEqual(c.enviados, [{ userId: '4242', visivel: false }]);
+});

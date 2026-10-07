@@ -531,7 +531,9 @@ function aparelho() {
     pagina({ nome = 'aba', token = 'tok', aba = 'aba-' + nome, semLocks = false, resposta = () => ({ success: true }) } = {}) {
       travas.add(MARCA + aba);
       const sessao = { token };
-      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
+      // LOGADA é a página com a sessão na memória (R11-1-02).
+      const AppState = { get authenticated() { return !!sessao.token; },
+        preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: { id: Number(EU) } };
       const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
       const navigator = semLocks ? { onLine: true } : { onLine: true, locks: { query: async () => ({ held: [...travas].map((name) => ({ name })), pending: [] }) } };
       const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica',
@@ -542,7 +544,8 @@ function aparelho() {
         PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true,
         CONTA_KEY: constante('CONTA_KEY'), PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) }, dfato: () => {}, Date: { now: () => relogio.agora },
-        API: { getSession: () => sessao.token, presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, token: sessao.token, ...c }); return resposta(c); } },
+        API: { getSession: () => sessao.token, temSessaoNaMemoria: () => !!sessao.token, get sessionToken() { return sessao.token; },
+          presencaWaze: async (c) => { pedidos.push({ aba: nome, em: relogio.agora, token: sessao.token, ...c }); return resposta(c); } },
         desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
         offlineEsquecer: () => {}, window: { Presenca: { desligar: () => {}, renderPilula: () => {} } },
       });

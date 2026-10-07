@@ -470,7 +470,9 @@ function aparelho() {
     guardado, pedidos, relogio,
     gravado: () => (JSON.parse(guardado.get('waze_places_preferences') || '{}').presencaWmeDesligar || null),
     pagina({ nome = 'aba', perfil = { id: Number(EU) }, resposta = () => ({ success: true }), sessao = { token: 'tok' } } = {}) {
-      const AppState = { preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: perfil };
+      // LOGADA é a página com a sessão na memória (R11-1-02).
+      const AppState = { get authenticated() { return !!sessao.token; },
+        preferences: { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false }, profile: perfil };
       const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
       const deps = {
         AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'),
@@ -478,7 +480,8 @@ function aparelho() {
         PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) },
         dfato: () => {}, Date: { now: () => relogio.agora },
-        API: { getSession: () => sessao.token, presencaWaze: async (c) => { pedidos.push({ aba: nome, ...c }); return resposta(c); } },
+        API: { getSession: () => sessao.token, temSessaoNaMemoria: () => !!sessao.token, get sessionToken() { return sessao.token; },
+          presencaWaze: async (c) => { pedidos.push({ aba: nome, ...c }); return resposta(c); } },
         // O que a releitura de OUTRA aba redesenha: aqui, nada.
         desenharChavesDePreferencia: () => {}, atualizarSeloDePular: () => {}, atualizarLinhaDoOffline: () => {},
         offlineEsquecer: () => {}, window: { Presenca: { desligar: () => {}, renderPilula: () => {} } },
