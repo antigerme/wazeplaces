@@ -1483,7 +1483,18 @@ function presencaMensagemDoFluxo(m, doLote) {
             // deixa de fora o que está nas vivas). Também a do LOTE que a régua
             // de cima deixa de fora (guardada antes de a lista sair): a lista a
             // contou, e a conta dela é refeita do mesmo jeito.
-            if (daLista && daLista.naoLidas > 0 && presencaLidaNoAr(com)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
+            //
+            // E o mesmo com o "lida" que JÁ VOLTOU: a lista na tela saiu com
+            // ele no ar e pode ter sido lida no Waze antes de ele ser
+            // processado (a régua do `lidaVoltouEm`, a mesma da chegada da
+            // lista, R10-5-04). Voltando antes da resposta — o caso comum: o
+            // "lida" é rápido, e a carona espera a ação —, a conta da lista,
+            // com a vista dentro, ficava, e a pílula dizia "2 mensagens novas"
+            // com uma só não vista até a lista seguinte (auditoria da rodada
+            // 13, R13-5-01). A lista que saiu ANTES de ele sair o `lidaDepois`
+            // já zerou.
+            const lidaVoltouDepoisDaLista = Presenca.conversasSaiuEm < (Presenca.lidaVoltouEm.get(com) || 0);
+            if (daLista && daLista.naoLidas > 0 && (presencaLidaNoAr(com) || lidaVoltouDepoisDaLista)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
         }
     }
     presencaRenderTudo();
