@@ -69,6 +69,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     // a lista de recursos e a marca do anel (R8-1-05, L12-1), com a sessão que FICA (R10-1-02)
     esquecerRegistrosDaPagina: (fica) => { log.push('recursos'); registrosFica.push(fica); },
     esvaziarPainelDoHistorico: () => log.push('painel'),    // o painel do Histórico dela (R8-7-06)
+    esvaziarSeletorDeAreas: () => log.push('seletorDeAreas'),   // as áreas gerenciadas dela nos Filtros (R11-1-05)
     esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
   const registrosFica = [];
@@ -386,6 +387,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     contaSegueNoAparelho: () => true,   // uma aba só (a de outra conta: test/contas-abas)
     fecharOQueEraDaContaAnterior: () => {},   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     esquecerRegistrosDaPagina: () => {}, esvaziarPainelDoHistorico: () => {},   // (R8-1-05, R8-7-06)
+    esvaziarSeletorDeAreas: () => {},   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
   };
   const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',

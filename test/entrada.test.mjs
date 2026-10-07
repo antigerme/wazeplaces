@@ -412,6 +412,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
     esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    esvaziarSeletorDeAreas: nada,   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)

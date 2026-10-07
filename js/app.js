@@ -1087,6 +1087,8 @@ const LIMPEZA_AO_FECHAR = {
         // Nem o resto do painel do Histórico: a patente, os totais e o Resumo do
         // mês de quem estava (R8-7-06).
         esvaziarPainelDoHistorico();
+        // Nem as áreas gerenciadas da conta, no seletor da aba Filtros (R11-1-05).
+        esvaziarSeletorDeAreas();
     },
     // A folha do autor: o nome dele e as linhas com a contagem (R6-1-05).
     autorModal() {
@@ -5234,6 +5236,20 @@ function populateManagedAreaSelect({ manterEscolha = false, regiao = null } = {}
     if (select.selectedIndex < 0) select.value = '';
 }
 
+// O seletor "Área gerenciada" guarda o NOME das áreas da conta (o `/Session`
+// dela), e só era redesenhado ao abrir os Filtros: fechado, ele seguia no DOM
+// com as áreas de quem estava — depois do "Sair", na tela de entrada, e na
+// sessão de OUTRA conta que entrava pela renovação, cujo relatório do modo dev
+// leva o DOM (MEDIDO no navegador; auditoria da rodada 11, R11-1-05). Volta ao
+// que o HTML traz — só "Nenhuma", com a chave dela — pelos mesmos caminhos do
+// painel do Histórico (`esvaziarPainelDoHistorico`): o modal que fecha, a tela de
+// entrada e a troca de conta. Esvaziar é seguro: a abertura dos Filtros
+// (`openFiltersModal`, a ÚNICA que os abre) o redesenha antes de mostrar.
+function esvaziarSeletorDeAreas() {
+    const select = document.getElementById('filterManagedArea');
+    if (select) select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>';
+}
+
 // Preenche o select de categoria a partir das categorias vistas (B5).
 function populateCategorySelect() {
     const sel = document.getElementById('filterCategory');
@@ -5882,8 +5898,10 @@ function showAuthScreen() {
     if (anuncio) anuncio.textContent = '';
     // E a lista de autores rejeitados (ver a função): a folha do autor pode tê-la
     // redesenhado no painel fechado (R6-1-05) — e, com ela, o painel inteiro do
-    // Histórico, com a patente e os totais de quem estava (R8-7-06).
+    // Histórico, com a patente e os totais de quem estava (R8-7-06). E as áreas
+    // gerenciadas no seletor dos Filtros (R11-1-05).
     esvaziarPainelDoHistorico();
+    esvaziarSeletorDeAreas();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -18830,6 +18848,8 @@ function esquecerOutraConta(id) {
     // pela caixa do perfil, não por ela.
     const areaNaBusca = !!(AppState.filters && AppState.filters.managedAreaId) && !AppState.filters.myArea;
     if (AppState.filters && AppState.filters.managedAreaId) { AppState.filters.managedAreaId = ''; saveFilters(); }
+    // E o seletor delas nos Filtros, com o NOME das áreas dela (R11-1-05).
+    esvaziarSeletorDeAreas();
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
     // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
     // com o perfil dele.

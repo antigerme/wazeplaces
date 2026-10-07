@@ -109,7 +109,9 @@ const NOS = ['autoresBody', 'historyBody', 'autorTitle', 'autorCorpo', 'accessDe
   'lightboxImage', 'lightboxCount', 'lightboxNomeTxt', 'lightboxAnuncio', 'cardLiveRegion',
   // O mapa ampliado (R7-1-02): os marcadores com o nome do duplicado e das
   // entradas, a legenda, os tiles da área e o link do Street View.
-  'mapaLbTiles', 'mapaLbMarks', 'mapaLbLegenda', 'mapaLbStreetView'];
+  'mapaLbTiles', 'mapaLbMarks', 'mapaLbLegenda', 'mapaLbStreetView',
+  // O seletor "Área gerenciada" dos Filtros, com o nome das áreas da conta (R11-1-05).
+  'filterManagedArea'];
 const MODAIS = ['filtersModal', 'autorModal', 'accessDeniedModal', 'helpModal', 'logoutModal'];
 
 function montar() {
@@ -137,6 +139,7 @@ function montar() {
     fecharEdicaoNome() {}, avancarSeAprovado() {}, devolverFocoDaAmpliacao() {},
     Treino: { sair() {} },
     aoFecharCamada() {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
+    escapeHtml: (x) => String(x), t: (k) => k,   // a opção "Nenhuma" do seletor de áreas (R11-1-05)
   };
   const MODAL_IDS = MODAIS;
   const corpo = [
@@ -157,6 +160,9 @@ function montar() {
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'), fatiar('devolverFoco'),
     fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('esvaziarPainelDoHistorico'),
     fatiar('showAuthScreen'),
+    // O seletor de áreas volta a "Nenhuma" (R11-1-05). Só se existir: no código de
+    // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
+    ...(/^function esvaziarSeletorDeAreas\(/m.test(APP_SEM) ? [fatiar('esvaziarSeletorDeAreas')] : []),
     // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
     // ela pode dizer o nome do local ("Renomeado para …").
     fatiar('anunciarNoLightbox'),
@@ -174,6 +180,10 @@ function montar() {
     // Resumo do mês são o trabalho de quem estava (a marca no lugar dos números).
     els.historyBody.innerHTML = `<div class="conq-card">Zelador do Mapa ${MARCA} 1801 tratados</div>`
       + `<div>Hoje 34 · 7</div><button id="resumoBotao">Compartilhar meu resumo de ${MARCA}</button>`;
+    // As áreas gerenciadas da conta no seletor dos Filtros (R11-1-05): o desenho
+    // dele (`populateManagedAreaSelect`) põe o nome de cada uma numa opção.
+    els.filterManagedArea.innerHTML = '<option value="" data-i18n="filters.managedArea.none">Nenhuma</option>'
+      + `<option value="91">AreaGerenciada${MARCA}</option>`;
     els.autorTitle.textContent = `autor${MARCA}repetido`;
     els.autorCorpo.innerHTML = `<p>Você rejeitou 2 pedidos de autor${MARCA}repetido</p>`;
     els.accessDeniedProfile.innerHTML = `<strong>editor${MARCA}negado</strong> · L1 · não-AM`;
@@ -303,4 +313,36 @@ test('R8-7-06: o painel do Histórico sai do DOM ao fechar os Filtros (qualquer 
   // E a troca de conta (que não passa pela tela de entrada) chama a mesma limpeza.
   assert.match(fatiar('esquecerOutraConta'), /^\s+esvaziarPainelDoHistorico\(\);$/m,
     'a troca de conta deixou o painel do Histórico da conta anterior no DOM');
+});
+
+// ── R11-1-05: as ÁREAS GERENCIADAS de quem saiu (auditoria da rodada 11) ──────
+// O seletor "Área gerenciada" dos Filtros guarda o NOME das áreas da conta, e
+// só era redesenhado ao ABRIR os Filtros: fechado, ele seguia no DOM com as
+// áreas de quem estava — depois do "Sair", na tela de entrada, e na sessão de
+// OUTRA conta que entrava pela renovação, cujo relatório do modo dev leva o DOM
+// (MEDIDO no navegador). Sai pelos caminhos do painel do Histórico: o modal que
+// fecha (qualquer caminho), a tela de entrada e a troca de conta; e volta ao que
+// o HTML traz (só "Nenhuma", com a chave — a troca de idioma a alcança).
+test('R11-1-05: o seletor "Área gerenciada" volta a "Nenhuma" ao fechar os Filtros, na tela de entrada e na troca de conta', () => {
+  const AREAS = '<option value="" data-i18n="filters.managedArea.none">Nenhuma</option>'
+    + `<option value="91">AreaGerenciada${MARCA}</option>`;
+  const SO_NENHUMA = '<option value="" data-i18n="filters.managedArea.none">filters.managedArea.none</option>';
+  const m = montar();
+  m.els.filterManagedArea.innerHTML = AREAS;
+  // CONTROLE: a varredura enxerga a área no seletor (sem isto, "nada achado" passaria cego).
+  assert.ok(m.varrer().includes('filterManagedArea:texto'), 'CONTROLE: a varredura não viu a área gerenciada no seletor');
+  // Os Filtros fecham (o botão, o Esc, o fundo e o voltar passam pelo `closeModal`).
+  m.els.filtersModal.classList.remove('hidden');
+  m.app.closeModal('filtersModal');
+  assert.equal(m.els.filterManagedArea.innerHTML, SO_NENHUMA,
+    'DEFEITO: os Filtros FECHADOS seguiram com as áreas gerenciadas da conta no seletor (R11-1-05)');
+  // A troca de região que ficou no ar quando os Filtros fecharam redesenha o
+  // seletor FECHADO (`aoTrocarRegiaoNoModal`): a tela de entrada o tira de novo.
+  m.els.filterManagedArea.innerHTML = AREAS;
+  m.app.showAuthScreen();
+  assert.equal(m.els.filterManagedArea.innerHTML, SO_NENHUMA,
+    'DEFEITO: depois do "Sair", o seletor da tela de entrada guardou as áreas gerenciadas de quem saiu (R11-1-05)');
+  // E a troca de conta (que não passa pela tela de entrada) chama a mesma limpeza.
+  assert.match(fatiar('esquecerOutraConta'), /^\s+esvaziarSeletorDeAreas\(\);$/m,
+    'a troca de conta deixou as áreas gerenciadas da conta anterior no seletor dos Filtros (R11-1-05)');
 });
