@@ -21501,15 +21501,26 @@ async function offlineGravarFila(desde) {
     const fila = filaReal().filter((p) => !(typeof decididosPorOutraAbaComCardAqui !== 'undefined'
         && decididosPorOutraAbaComCardAqui.has(p) === true));
     if (!offlineLigado() || !fila.length) return false;
+    // E o DONO: a sessão DESTA aba, a da MEMÓRIA (`marcaDestaAba`, R12-1-03), e
+    // sem ela nada é gravado (R13-4-04). Era o `getSession`, que com a memória
+    // vazia GRAVA nela a sessão que outra aba guardou no aparelho: a busca que
+    // respondia depois da queda (a sessão desta aba caiu com o ↻ no ar, e a outra
+    // aba da mesma conta tinha entrado de novo) ADOTAVA calada a sessão de lá —
+    // a aba seguia na tela de entrada "logada", e o "Sair" da outra fechava o
+    // "Colar cookies" daqui com o que estava sendo colado —, e a fila saía SEM
+    // DONO (a conta é lida pela memória), por cima da boa (MEDIDO no navegador,
+    // p7 da rodada 13). Sem sessão a fila não tem de quem ser; a próxima busca ou
+    // varredura com sessão a grava.
+    const sessao = marcaDestaAba();
+    if (!sessao) return false;
     const valeDesde = Number.isFinite(desde) ? desde : Date.now();
     // Os filtros também são lidos antes do `await`.
     const filtros = JSON.parse(JSON.stringify(AppState.filters || {}));
     // O LUGAR da fila (ver `filaDeOnde`), lido AGORA pelo mesmo motivo.
     const lugar = filaDeOnde || lugarAgora();
-    // E o DONO: a conta, e a sessão (gravada antes de o perfil chegar, a conta
-    // ainda é desconhecida). Ver `filaGuardadaDestaConta`.
+    // E a conta (gravada antes de o perfil chegar, ela ainda é desconhecida, e a
+    // sessão responde). Ver `filaGuardadaDestaConta`.
     const conta = contaAgora();
-    const sessao = marcaDaSessao(API.getSession());
     let gravadaEm = null;
     let chaves = null;
     let mesmaFila = false;
@@ -22226,9 +22237,16 @@ function offlineAoMudarInterruptor(ligado) {
 // então a conta também (inclusive a gravada antes de o perfil chegar, sem
 // conta). De outra sessão, só se a conta que a gravou for a conhecida agora.
 // Como a fila de saída (O3).
+//
+// A sessão de agora é a DESTA aba, a da memória (`marcaDestaAba`, R13-4-04):
+// pelo `getSession`, a busca que falhava depois da queda (a memória vazia) lia a
+// sessão que outra aba guardou no aparelho — e já a ADOTAVA —, e a fila guardada
+// abria na aba deslogada, por baixo da tela de entrada (MEDIDO no navegador, p7
+// da rodada 13 com a busca falhando).
 function filaGuardadaDestaConta(g) {
     if (!g) return false;
-    if (g.s && g.s === marcaDaSessao(API.getSession())) return true;
+    const s = marcaDestaAba();
+    if (g.s && s && g.s === s) return true;
     const agora = contaAgora();
     return !!(g.conta && agora && String(g.conta) === agora);
 }
@@ -22240,6 +22258,13 @@ function filaGuardadaDestaConta(g) {
 // guardada não entra nela.
 async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     if (!offlineLigado() || (navigator.onLine !== false && !aposFalha)) return false;
+    // Só com SESSÃO (R13-4-04). A busca que falhava depois da queda chegava aqui
+    // pelo `startFetching` com a aba já na tela de entrada, e a fila guardada
+    // entrava por baixo dela — cards de uma sessão que esta aba não tem (MEDIDO
+    // no navegador, p7 da rodada 13: `offline.abriu` com 6 cards e a tela de
+    // entrada por cima). Sem sessão nada decide (`acoesTravadas`); quem volta a
+    // buscar é a entrada. Conferido de novo depois de ler a base, lá embaixo.
+    if (!AppState.authenticated) return false;
     // A fila desta abertura é a da tela no COMEÇO da leitura (ver o treino, abaixo).
     const epocaDaLeitura = AppState.fetchEpoch;
     const guardada = await offlineLerFila();
@@ -22272,6 +22297,8 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // ela o card pede a foto crua, que ninguém guardou. Só quando a memória não
     // tem uma — com o app vivo, a de memória é a mais nova (ver a função).
     await offlineRecuperarJanela();
+    // A sessão caiu enquanto a base era lida (ver o topo, R13-4-04).
+    if (!AppState.authenticated) return false;
     // A fila guardada é uma FOTO: não sabe do que foi decidido depois dela — na
     // sombra (está na fila de saída) nem com rede (pousou depois da foto). Sem
     // este filtro, tudo isso voltava como card (relato de 2026-09-22). Fila

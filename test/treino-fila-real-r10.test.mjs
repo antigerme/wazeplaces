@@ -397,7 +397,7 @@ function montarInterruptor({ comTreino }) {
     OFFLINE_CICLO_MS: 1200000, OFFLINE_STORE: 'fila', OFFLINE_DB: 'waze_places_offline',
     OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_POUSOS_KEY: 'waze_places_offline_pousos',
     lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
-    marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     safeLS: { get: () => null, set() {}, remove() {} },
     t: (k, v) => (v ? k + JSON.stringify(v) : k),
     // A base do offline: o `put` grava, e a transação fecha num tique; apagar a apaga.

@@ -645,7 +645,7 @@ test('R12-2-04: a aprovação de foto que pousa no meio da renovação avisa a o
 // reabertura), com a base do IndexedDB de mentira e o aparelho dividido.
 const NOMES_OFFLINE = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'lembrarDecididasPorOutraAba', 'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'offlineLerPousos',
-  'offlinePodarPousos', 'offlineGravarFila', 'semOsJaDecididos', 'marcaDaSessao', 'contaAgora'];
+  'offlinePodarPousos', 'offlineGravarFila', 'semOsJaDecididos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora'];
 function baseDeMentira() {
   const guardado = {};
   return {

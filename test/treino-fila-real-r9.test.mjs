@@ -556,7 +556,7 @@ function montarInterruptor() {
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_STORE: 'fila',
     offlineLigado: () => AppState.preferences.offlineDisponivel === true,
     offlineEsquecer: () => {}, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }),
-    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     offlinePodarPousos: () => {}, dfato: () => {},
     // A base do offline: o `put` grava, e a transação fecha num tique.
     offlineDB: async () => ({ close() {}, transaction: () => {

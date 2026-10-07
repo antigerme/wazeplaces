@@ -210,8 +210,15 @@ secao('2. A FILA SOBREVIVE (IndexedDB)');
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 const g = await page.evaluate(async () => {
   AppState.preferences.offlineDisponivel = true;
+  // A fila guardada tem DONO: a sessão desta aba, a da MEMÓRIA, e sem ela nada é
+  // gravado (R13-4-04). Esta página nunca entrou, e as seções até a 6 são "sem
+  // sessão" de propósito (não há rota da API aqui: com sessão, o que a página
+  // pedisse iria ao servidor e voltaria 401). A sessão vale SÓ pra gravar e ler:
+  // vai pra memória (o aparelho segue sem token) e sai em seguida.
+  API.sessionToken = 'tok-secao-2';
   const gravou = await offlineGravarFila();
   const lido = await offlineLerFila();
+  API.sessionToken = null;
   return { gravou, n: lido && lido.places ? lido.places.length : 0, t: !!(lido && lido.t) };
 });
 diz('grava a fila e lê os 3 de volta, com carimbo de hora', g.gravou === true && g.n === 3 && g.t, JSON.stringify(g));
@@ -310,11 +317,14 @@ secao('5. ABRIR SEM REDE');
 // Remonta os 3 ANTES de gravar: as seções do mapa trocam a fila, e sem isto a
 // asserção mediria o tamanho da última montagem em vez do que ela promete.
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
-await page.evaluate(() => offlineGravarFila());
+// A sessão desta aba grava a fila e a reabre (ver a seção 2), e sai depois.
+await page.evaluate(async () => { API.sessionToken = 'tok-secao-5'; await offlineGravarFila(); API.sessionToken = null; });
 await ctx.setOffline(true);
 const off = await page.evaluate(async () => {
   AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0; AppState.loadError = true;
+  API.sessionToken = 'tok-secao-5';
   const abriu = await offlineTentarAbrirSemRede();
+  API.sessionToken = null;
   return { abriu, n: AppState.queue.length, erro: AppState.loadError };
 });
 diz('a fila guardada entra no lugar da tela de falha', off.abriu === true && off.n === 3 && off.erro === false,
@@ -778,9 +788,13 @@ await dormir(1500);   // o aquecimento do próximo card é AGENDADO: deixa ele s
 const cruasAntes = fotosPedidas.filter((u) => u.indexOf('?w=') === -1);
 diz('CONTROLE: nenhuma foto foi pedida CRUA antes da varredura (o que abrir sem rede veio dela)',
   cruasAntes.length === 0, JSON.stringify(cruasAntes));
-await pgFoto.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
+// A sessão na MEMÓRIA SÓ pra gravar a fila e reabri-la (como na seção 2): sem ela a
+// fila guardada não tem dono e não é gravada (R13-4-04), e a reabertura lá
+// embaixo não teria o que abrir. Esta página não tem rota da API.
+await pgFoto.evaluate(() => { API.sessionToken = 'tok-6c'; offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
 await esperarNaPagina(pgFoto, () => offlineUltimoResultado !== null, 60000, 250);
+await pgFoto.evaluate(() => { API.sessionToken = null; });
 const enc6c = await pgFoto.evaluate(() => ({ res: offlineUltimoResultado, janela: offlineJanelaServida }));
 diz('a varredura fechou PRONTA', enc6c.res === 'pronto' && enc6c.janela !== null, JSON.stringify(enc6c));
 const sufixo = '?w=' + enc6c.janela;
@@ -838,7 +852,9 @@ await conferirCardDeFoto('foto denunciada na 3ª posição', FOTOS_REAIS[2]);
 const reaberta = await pgFoto.evaluate(async () => {
   offlineJanelaServida = null; offlineUltimoResultado = null;
   AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0; AppState.loadError = true;
+  API.sessionToken = 'tok-6c';
   const abriu = await offlineTentarAbrirSemRede();
+  API.sessionToken = null;
   return { abriu, n: AppState.queue.length, janela: offlineJanelaServida };
 });
 diz('REABERTA sem rede: volta a fila E a janela da última varredura completa',

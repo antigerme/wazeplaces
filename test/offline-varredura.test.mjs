@@ -211,7 +211,8 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     // O LUGAR da fila (ver `filaDeOnde`): a busca que a trouxe, ou o de agora.
     filaDeOnde: lugarDaFila, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // E o DONO (test/costura-sessao, K6).
-    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     // O carimbo da fila que está na base, e os pedidos dela (as variáveis do
     // módulo), e a cobertura (R6-4-2: a mesma fila regravada mantém o carimbo).
     offlineFilaGravadaEm: null, offlineFilaGravadaChaves: null, offlineFilaPreparada: null, chaveDoPedido,
@@ -396,7 +397,8 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     } }),
     offlinePodarPousos: () => {}, dfato: () => {},
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
-    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -429,7 +431,8 @@ test('O4: a fila guardada leva o LUGAR da busca que a trouxe (e o de agora, sem 
 
 function reabrir({ guardada, agora }) {
   const log = [];
-  const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0 };
+  // Com SESSÃO: sem ela a fila guardada não abre (R13-4-04).
+  const AppState = { authenticated: true, queue: [], hasMore: false, loadError: true, serverTotal: 0 };
   const deps = {
     AppState, navigator: { onLine: false }, offlineLigado: () => true,
     offlineLerFila: async () => guardada, offlineLerRegistroDaJanela: async () => null,
@@ -438,7 +441,7 @@ function reabrir({ guardada, agora }) {
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
     updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push('card'),
     // O DONO da fila guardada (test/costura-sessao, K6): a mesma conta.
-    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' }, chaveDoPedido,
+    contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' }, chaveDoPedido,
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
@@ -679,7 +682,7 @@ function aparelhoO8() {
   // Uma "página": memória nova, o armazenamento e a base de sempre.
   return function pagina({ onLine = false } = {}) {
     const log = [];
-    const AppState = { queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null,
+    const AppState = { authenticated: true, queue: [], hasMore: false, loadError: true, serverTotal: 0, filters: null,
       stats: { skipped: 0 }, fetchEpoch: 0 };
     const deps = {
       AppState, navigator: { onLine }, Treino: { ativo: false }, offlineLigado: () => true,
@@ -687,7 +690,7 @@ function aparelhoO8() {
       FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
       API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok' },
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
-      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
+      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', dfato: (k, o) => log.push([k, o || {}]),
       semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
       pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
       updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => log.push(['card', {}]),
@@ -955,7 +958,7 @@ function aparelhoO1({ filtros = null } = {}) {
       completarPerfilChegado: async () => {}, conferirContaDestaAba: () => {}, PERFIL_REFAZER_MS: 60000,
       redesenharFiltrosComOPerfil: () => {}, saveFilters: () => {},
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
-      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
+      contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', dfato: (k, o) => log.push([k, o || {}]),
       dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
       handleUnauthorized: () => log.push(['sessao', {}]), showToast: () => {}, msgDoServidor: (r, d) => d, t: (k) => k,
       guardarPrazoDaSessao: () => {}, trackSeenCategories: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => {},
@@ -1456,7 +1459,7 @@ function aparelhoDaLinha() {
       document: { getElementById: () => el }, t: (k) => k, escapeHtml: (s) => s,
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, dfato: () => {},
       lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
-      marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+      marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
       semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
       pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
       updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => {},
@@ -1910,7 +1913,7 @@ function duasAbasComCache() {
       offlineDB, OFFLINE_STORE: 'fila', OFFLINE_TILES_CACHE: 'waze-places-tiles', caches,
       offlinePodarPousos: () => {}, dfato: (k) => diario.push(k),
       filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
-      marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+      marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
       OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
       OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
       // Um tile por pedido; o download grava no cache do aparelho, e com `segura`
