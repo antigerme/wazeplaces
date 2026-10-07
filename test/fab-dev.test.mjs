@@ -280,7 +280,7 @@ function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
   const document = {
     getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : ids.get(id) || null),
     createElement: () => {
-      const el = { className: '', title: '', innerHTML: '', remove() { ids.delete(this.id); } };
+      const el = { className: '', title: '', innerHTML: '', style: {}, remove() { ids.delete(this.id); } };
       return el;
     },
     body: { appendChild: (el) => { ids.set(el.id, el); } },
@@ -301,12 +301,16 @@ function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
     naOutraAba: (i) => outraAba.add(`v${i}|u${i}`) };
 }
 const classesDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().className.split(/\s+/).filter(Boolean); };
+// O `top` do indicador (R10-4-02): ancorado no cabeçalho MEDIDO, com os 80 px de
+// antes como piso. É ele que diz se a caixa medida abaixo (80–97 px) ainda vale.
+const topoDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().style.top; };
+const TOPO_ANCORADO = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
 
 test('R9-4-05: no computador, o FAB NÃO pousa em cima do "N esperando envio" — o número é `.nao-cobrir` e a medida o enxerga', () => {
   // A RÉGUA: sem o indicador, o canto livre do computador é o preferido (`cima-dir`).
   assert.equal(telaDoFab({ larga: true }).canto, 'cima-dir', 'PRÉ-CONDIÇÃO: sem o indicador, o canto livre a 1280×800 é o cima-dir');
   const classes = classesDoIndicador();
-  assert.ok(classes.includes('fixed') && classes.includes('top-20') && classes.includes('right-4'),
+  assert.ok(classes.includes('fixed') && classes.includes('right-4') && topoDoIndicador() === TOPO_ANCORADO,
     'PRÉ-CONDIÇÃO: o indicador mudou de lugar — a caixa medida desta tela não vale mais');
   const t = telaDoFab({ larga: true, indicador: classes });
   assert.notEqual(t.canto, 'cima-dir', 'o FAB foi pro cima-dir, em cima do "N esperando envio" (o número de decisões sem sinal)');
@@ -430,4 +434,30 @@ test('R10-4-05: com um GESTO no card, o canto do FAB espera o card parar — e �
   assert.equal(t.fimDoGesto(), 'marcado', 'o fim de um gesto mediu o canto sem ninguém ter pedido');
   // CONTROLE: sem gesto, o canto é escolhido na hora (o R7-4-01 de sempre).
   assert.equal(telaDoFab().canto, 'baixo-dir');
+});
+
+// ── R10-4-02: o "N esperando envio" no iPhone com o app INSTALADO ──────────────
+// Com `viewport-fit=cover` e a barra translúcida, a margem de segurança de cima
+// (47 px; 59 com a Dynamic Island) entra no cabeçalho, que vai a 116–128 px — e o
+// indicador, a 80 px fixos (`top-20`), ficava DEBAIXO dele: o único sinal de que
+// há decisão esperando envio, sumido justo no app instalado (MEDIDO, n21 da
+// auditoria da rodada 10: o dedo no meio dele caía no ⓘ). DECISÃO: ancorar na
+// altura MEDIDA do cabeçalho (`--header-h`, como o `#bannerStack`), com a posição
+// IDÊNTICA onde não há margem — MEDIDO no navegador a 390×844, 375×667, 280×653,
+// 1280×800 (cabeçalho de 69 px) e 844×390 (53 px): 0 px de diferença. Aqui a
+// fórmula de verdade é avaliada pra cada altura de cabeçalho.
+test('R10-4-02: o indicador fica ABAIXO do cabeçalho medido — e onde não há margem, nos mesmos 80 px de antes', () => {
+  const topo = topoDoIndicador();
+  const m = /^max\((\d+(?:\.\d+)?)rem, calc\(var\(--header-h, (\d+(?:\.\d+)?)rem\) \+ (\d+)px\)\)$/.exec(topo || '');
+  assert.ok(m, `o indicador não está ancorado no cabeçalho medido (top: ${JSON.stringify(topo)}) — e com a margem do iPhone instalado ele some debaixo do cabeçalho`);
+  // A fórmula, com 1 rem = 16 px: o piso, a altura do cabeçalho (ou o padrão, antes de medida) e o vão.
+  const px = (h) => Math.max(Number(m[1]) * 16, (h === undefined ? Number(m[2]) * 16 : h) + Number(m[3]));
+  // Sem margem: os 80 px de antes, em pé e deitado, e antes de a altura ser medida.
+  assert.deepEqual([px(69), px(53), px(undefined)], [80, 80, 80],
+    'onde não há margem o indicador saiu do lugar em que foi desenhado (80 px)');
+  // Com a margem do iPhone instalado: abaixo do cabeçalho, com o mesmo vão de hoje (80 − 69 = 11 px).
+  assert.deepEqual([px(116), px(128)], [127, 139], 'com a margem de cima, o indicador não desceu junto com o cabeçalho');
+  for (let h = 0; h <= 300; h++) assert.ok(px(h) >= h + 11, `com o cabeçalho de ${h} px, o indicador fica por baixo dele`);
+  // E o 80 fixo não voltou como classe.
+  assert.ok(!classesDoIndicador().includes('top-20'), 'voltou o `top-20` fixo');
 });

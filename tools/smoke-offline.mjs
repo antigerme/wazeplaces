@@ -3737,6 +3737,52 @@ diz('CONTROLE: o contador enxerga uma troca de canto (a forçada)', trocas9n.con
 diz('com rede, o FAB NÃO muda de canto a cada decisão — o "1 enviando" não é número a não cobrir (R10-4-05)',
   trocas9n.trocas === 0 && trocas9n.canto === 'cima-dir', JSON.stringify(trocas9n));
 await ctx9nL.close();
+// (R10-4-02) O iPhone com o app INSTALADO: a margem de segurança de cima (47 px)
+// entra no cabeçalho, e o "N esperando envio" a 80 px fixos ficava DEBAIXO dele
+// (MEDIDO, n21 da auditoria: o dedo no meio dele caía no ⓘ). A margem vem do CDP
+// do Chromium e entra ANTES da carga, como no aparelho, que já abre com ela
+// (posta depois, o observador do cabeçalho, que olha a caixa de CONTEÚDO, não vê
+// o padding mudar). CONTROLE: sem margem, o indicador fica nos 80 px de sempre.
+const margem9n = async (topo) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  let aviao = false;
+  await ctx.route('**/*-tiles/live/base/**', (r) => (aviao ? r.abort('internetdisconnected') : servirTile(r)));
+  await ctx.route('**/api/*', (r) => (aviao ? r.abort('internetdisconnected') : rotaApi9k(r)));
+  const prep = await abrirEm(ctx, 'margem ' + topo + ', preparo');
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate(() => {
+    API.setSession('tok-9n-margem');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-margem') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+      consequenciaVista: { reject: true, read: true } }));
+  });
+  const cdp = await ctx.newCDPSession(prep);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: topo, topMax: topo, bottom: 0, bottomMax: 0,
+    left: 0, leftMax: 0, right: 0, rightMax: 0 } });
+  await prep.reload({ waitUntil: 'domcontentloaded' });
+  const pronta = await esperarNaPagina(prep, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
+  aviao = true; await ctx.setOffline(true);
+  await prep.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+  const esperando = await esperarNaPagina(prep, () => carregarFilaDeSaida().length === 1 && !AppState.pendingAction
+    && AppState.inFlightActions === 0 && !!document.getElementById('inFlightIndicator'), 15000, 100);
+  const m = await prep.evaluate(() => {
+    const h = document.querySelector('header').getBoundingClientRect();
+    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
+    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { cabecalho: Math.round(h.bottom), topo: Math.round(r.top),
+      noCentro: quem ? (quem.closest('#inFlightIndicator') ? 'indicador' : quem.closest('header') ? 'cabeçalho' : (quem.id || quem.tagName)) : null };
+  });
+  await ctx.close();
+  return { pronta: pronta.ok, esperando: esperando.ok, ...m };
+};
+const semMargem9n = await margem9n(0);
+diz('CONTROLE: sem a margem de cima, o "N esperando envio" fica nos 80 px de sempre, à vista',
+  semMargem9n.pronta && semMargem9n.esperando && semMargem9n.topo === 80 && semMargem9n.noCentro === 'indicador', JSON.stringify(semMargem9n));
+const comMargem9n = await margem9n(47);
+diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu dela', comMargem9n.pronta && comMargem9n.esperando
+  && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
+diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
+  comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
 
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));

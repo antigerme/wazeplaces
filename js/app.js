@@ -23134,6 +23134,18 @@ function updateInFlightIndicator() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
+        // ANCORADO NO CABEÇALHO MEDIDO (`--header-h`, o mesmo do `#bannerStack`).
+        // Era `top-20` (80 px fixos): no iPhone com o app INSTALADO a margem de
+        // segurança de cima (47 px; 59 com a Dynamic Island) entra no cabeçalho,
+        // que vai a 116–128 px, e o número ficava DEBAIXO dele — o único sinal de
+        // que há decisão esperando envio, sumido justo no app instalado, que é
+        // onde se usa o modo avião (auditoria da rodada 10, R10-4-02, MEDIDO: o
+        // dedo no meio dele caía no ⓘ). O vão de hoje até o cabeçalho (69 px de
+        // altura, 11 px de vão) fica, e o `max` com os 80 px de antes deixa a
+        // posição IDÊNTICA onde não há margem — inclusive deitado, onde o
+        // cabeçalho é mais baixo (53 px; MEDIDO a 390×844, 375×667, 280×653,
+        // 1280×800 e 844×390: 0 px de diferença).
+        el.style.top = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
         document.body.appendChild(el);
     }
     // Girando só quando está MESMO saindo. "Esperando" com giro seria o app
@@ -23196,7 +23208,7 @@ function updateInFlightIndicator() {
     // ia de "enviando" a "esperando" em milissegundos, e o FAB iria e voltaria
     // a cada um.
     const leitura = fila.some((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)) && !reivindicadoPorOutraAba(x));
-    el.className = (leitura ? 'nao-cobrir ' : '') + 'fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
+    el.className = (leitura ? 'nao-cobrir ' : '') + 'fixed right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
         + (enviando ? 'text-cyan-800 dark:text-cyan-300'
                     : 'text-amber-800 dark:text-amber-300');
     el.title = texto;
