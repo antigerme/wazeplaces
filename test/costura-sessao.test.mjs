@@ -70,9 +70,11 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // E a extensão renovando em silêncio (`extPerguntando`, que o aviso da trava
   // lê — R5-2-07), também parada por padrão. E nenhum login desta aba no ar (o
   // colar, o código), que a resposta da extensão à volta à aba confere (R11-1-03).
+  // E nada digitado num diálogo da entrada, que ela também confere (R13-1-05); a
+  // função de verdade, quando fatiada, vale por cima deste padrão.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
     aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
-    authInFlight: false, resgateEmVoo: false })) if (!(k in deps)) deps[k] = v;
+    authInFlight: false, resgateEmVoo: false, textoDigitadoNaEntrada: () => false })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).

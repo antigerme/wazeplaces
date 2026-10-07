@@ -2415,7 +2415,9 @@ function extensaoNaEntrada(tela) {
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
     showMainScreen: () => { log.push('app'); t.mostrarOApp(); },
   };
-  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  // O texto digitado na entrada (R13-1-05) é o de verdade, lido da tela daqui.
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina',
+    'textoDigitadoNaEntrada'], deps);
   return { h, deps, responder, log };
 }
 
@@ -2718,7 +2720,9 @@ function extensaoNaVolta({ memoria = null, noAr = null, tokenGuardado = null } =
     resetQueue: () => {}, loadProfileAndAuxData: () => Promise.resolve(), conhecerContaDoLogin: () => {},
     startFetching: () => {}, esvaziarFilaDeSaida: () => {},
   };
-  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  // O texto digitado na entrada (R13-1-05) é o de verdade, lido da tela daqui.
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina',
+    'textoDigitadoNaEntrada'], deps);
   return { h, deps, responder, log, API };
 }
 

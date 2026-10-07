@@ -364,3 +364,100 @@ test('R13-1-03: CONTROLES — sem login desta aba a abertura entra pela extensã
   queda.responder({ action: 'sessao', token: 'tok-e' });
   assert.equal(await pq, true, 'a renovação da queda passou a recusar a sessão da extensão');
 });
+
+// ═══ R13-1-05 · o texto colado DURANTE a pergunta da volta não é apagado ═══════
+// A volta à aba na tela de entrada pergunta à extensão em silêncio, e a tela de
+// entrada segue usável enquanto a pergunta corre (~1,8 s com a extensão de
+// verdade, até 8 s). O R12-1-05 conferia o texto só na hora de PERGUNTAR: o que
+// a pessoa colava nesse meio ia embora com a resposta — a sessão da extensão
+// entrava fechando o "Colar cookies" com a limpeza, e a recusa abria o "Acesso
+// restrito" por cima dele.
+function voltaComExtensao({ tela = {}, guardado = {} } = {}) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const real = apiDeVerdade(guardado);
+  real.API._post = async (rota, corpo) => { log.push('rota ' + rota + (corpo && corpo.action ? ' ' + corpo.action : '') + (corpo && corpo.sessionToken ? ' ' + corpo.sessionToken : '')); return { success: true }; };
+  const ext = janelaComExtensao(log);
+  const AppState = { authenticated: false, profile: null };
+  const deps = {
+    window: ext.window, document: t.document, API: real.API, safeLS: real.safeLS, AppState,
+    MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    resgateEmVoo: false, authInFlight: false, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    epocaDaSessao: 0, setTimeout: () => 1, clearTimeout: () => {}, callWithRetry: (fn) => fn(),
+    podeInstalarExtensao: () => true,
+    closeModal: (id) => { log.push('fechou ' + id); t.fechar(id); },
+    showMainScreen: () => { log.push('app com ' + real.API.sessionToken); AppState.authenticated = true; t.mostrarOApp(); },
+    resetQueue: () => {}, loadProfileAndAuxData: () => null, conhecerContaDoLogin: () => {}, startFetching: () => {},
+    esvaziarFilaDeSaida: () => {}, mostrarEntrandoPelaExtensao: () => {}, abrirComSessaoSalva: () => log.push('adotou'),
+    showAccessDenied: () => log.push('acesso restrito'),
+  };
+  const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', 'entrarPelaExtensao', 'adotarSessaoDoAparelho',
+    'textoDigitadoNaEntrada', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina',
+    'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao', 'negadoDaExtensao'], deps);
+  return { h, deps, log, real, tela: t, responder: ext.responder };
+}
+const NEGADO = { action: 'sem-sessao', motivo: 'negado', negado: { errorKey: 'srv.err.accessDenied', errorVars: { minLevel: 2 },
+  profile: { userName: 'fulano', rank: 0, isAreaManager: false, isStaff: false } } };
+
+test('R13-1-05: o cookies.txt colado DURANTE a pergunta da volta fica — a sessão da extensão não entra e sai do servidor', async () => {
+  for (const [modal, campo, texto] of [['pasteModal', 'cookiesTextarea', TEXTO_COLADO], ['pairEnterModal', 'pairCodeInput', 'ABC-234']]) {
+    const m = voltaComExtensao();
+    m.h.aoVoltarAAba();
+    assert.deepEqual(m.log, ['perguntou à extensão'], 'PRÉ-CONDIÇÃO: a volta (sem nada digitado) não perguntou à extensão');
+    m.tela.digitar(modal, campo, texto);              // a pessoa abre o diálogo e cola, com a pergunta no ar
+    m.responder({ action: 'aguarde' });
+    m.responder({ action: 'sessao', token: 'tok-e', conta: '222' });
+    await tiques();
+    assert.ok(!m.log.some((x) => x.startsWith('app com ')),
+      `DEFEITO (${modal}): a sessão da extensão entrou por cima do que a pessoa estava digitando: ` + JSON.stringify(m.log));
+    assert.equal(m.tela.els[campo].value, texto, `DEFEITO (${modal}): o que estava digitado foi apagado`);
+    assert.ok(!m.tela.els[modal].classList.contains('hidden'), `DEFEITO (${modal}): o diálogo fechou`);
+    assert.ok(m.log.includes('rota sessao destroy tok-e'), `(${modal}) a sessão da extensão ficou órfã no servidor: ` + JSON.stringify(m.log));
+    assert.equal(m.real.API.temSessaoNaMemoria(), false);
+  }
+});
+
+test('R13-1-05: a RECUSA que chega com o texto colado durante a pergunta não abre o "Acesso restrito" por cima — e a próxima volta pergunta de novo', async () => {
+  const m = voltaComExtensao();
+  m.h.aoVoltarAAba();
+  m.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);
+  m.responder({ action: 'aguarde' });
+  m.responder(NEGADO);
+  await tiques();
+  assert.ok(!m.log.includes('acesso restrito'),
+    'DEFEITO: o "Acesso restrito" abriu por cima do "Colar cookies" — o que estava colado iria embora com a limpeza: ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, TEXTO_COLADO);
+  assert.equal(m.deps.extNegado, null, 'a recusa ficou pendurada pra aparecer depois, fora de hora');
+  // A pessoa não viu o motivo: a marca de "já viu" não fica, e a volta seguinte — sem
+  // nada digitado — pergunta de novo e o mostra.
+  assert.equal(m.deps.extNegadoNestaPagina, false, 'DEFEITO: a marca de "já viu a recusa" ficou sem a recusa ter aparecido — a volta não pergunta mais');
+  m.tela.fechar('pasteModal');
+  m.h.aoVoltarAAba();
+  assert.equal(m.log.filter((x) => x === 'perguntou à extensão').length, 2, 'a volta seguinte, sem texto, não perguntou de novo');
+  m.responder(NEGADO);
+  await tiques();
+  assert.ok(m.log.includes('acesso restrito'), 'sem nada digitado, a recusa não apareceu');
+  assert.equal(m.deps.extNegadoNestaPagina, true);
+});
+
+test('R13-1-05: CONTROLES — sem nada digitado, a extensão entra pela volta e a recusa aparece; a abertura também passa pela régua', async () => {
+  const s = voltaComExtensao();
+  s.h.aoVoltarAAba();
+  s.responder({ action: 'sessao', token: 'tok-e', conta: '222' });
+  await tiques();
+  assert.ok(s.log.includes('app com tok-e'), 'CONTROLE: a extensão deixou de entrar pela volta: ' + JSON.stringify(s.log));
+  const n = voltaComExtensao();
+  n.h.aoVoltarAAba();
+  n.responder(NEGADO);
+  await tiques();
+  assert.ok(n.log.includes('acesso restrito'), 'CONTROLE: a recusa deixou de aparecer na volta sem texto');
+  // A ABERTURA (o `aoFimDaPerguntaDaAbertura` e o link que falhou) mostra a recusa
+  // pela MESMA função: com o texto colado, também não por cima dele.
+  const a = voltaComExtensao({ tela: COLANDO });
+  a.deps.extNegado = { success: false, errorCategory: 'access_denied' };
+  a.deps.extNegadoNestaPagina = true;
+  a.h.mostrarNegadoDaExtensao();
+  assert.ok(!a.log.includes('acesso restrito'), 'a recusa da abertura abriu por cima do texto colado');
+  assert.equal(a.deps.extNegadoNestaPagina, false);
+});

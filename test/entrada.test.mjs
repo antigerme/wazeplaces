@@ -557,8 +557,10 @@ function montarExtensao(inicio = {}) {
   // Os dublês pedidos por quem chama ganham dos padrões (o `document` e o
   // `closeModal` do teste dos modais, por exemplo).
   for (const [k, v] of Object.entries(inicio)) deps[k] = v;
+  // O texto digitado na entrada (R13-1-05) é o de verdade, lido do `document`
+  // daqui: sem campo com texto, nada muda.
   const app = montar(['entrarPelaExtensao', 'negadoDaExtensao', 'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao',
-    'aoEntrarNestaPagina', 'fecharModaisDaEntrada', 'focoNaTelaDeEntrada'], deps,
+    'aoEntrarNestaPagina', 'fecharModaisDaEntrada', 'focoNaTelaDeEntrada', 'textoDigitadoNaEntrada'], deps,
   ['entrarPelaExtensao', 'mostrarNegadoDaExtensao', 'estado'],
   constante('MODAIS_DA_ENTRADA') + '\nfunction estado() { return { extNegadoNestaPagina, extNegado, saiuNestaPagina, focoDoTeclado }; }');
   return { app, responder, negados };

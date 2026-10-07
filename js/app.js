@@ -876,8 +876,18 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // órfã no servidor (auditoria da rodada 13, R13-1-03, MEDIDO). A
             // renovação da queda fica de fora: ali não há tela de entrada nem login
             // desta aba, e a resposta da extensão É o login que a aba espera.
+            //
+            // E o TEXTO DIGITADO num diálogo da entrada (o cookies.txt colado, o
+            // código) é um login desta aba começando: a régua da adoção e da volta
+            // (`perguntarAExtensaoAoVoltar`, R12-1-05). Ela era conferida só na
+            // hora de PERGUNTAR — e a pergunta silenciosa da volta deixa a tela de
+            // entrada usável enquanto corre (~1,8 s com a extensão de verdade, até
+            // 8 s): o que a pessoa colava nesse meio ia embora com a limpeza do
+            // diálogo quando a extensão entrava (auditoria da rodada 13, R13-1-05,
+            // MEDIDO).
             const loginDestaAbaVence = !manterFila
-                && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo);
+                && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo
+                    || textoDigitadoNaEntrada());
             if (loginDestaAbaVence) {
                 if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
                     callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
@@ -970,9 +980,19 @@ function tirarNegadoDaExtensao() {
     return r;
 }
 
+// Menos com TEXTO DIGITADO num diálogo da entrada (o cookies.txt colado, o
+// código): a pessoa está entrando por ali — talvez com OUTRA conta —, e o
+// "Acesso restrito" abria por cima, escondendo o diálogo dela com a limpeza (o
+// que estava colado ia embora). A pergunta da volta é silenciosa e deixa a tela
+// de entrada usável enquanto corre, e a recusa que chegava depois do colar
+// apagava o texto (auditoria da rodada 13, R13-1-05, MEDIDO). Sem o diálogo, a
+// marca da página volta: ela quer dizer "a pessoa já viu o motivo", e ela não
+// viu — a próxima volta à aba, sem nada digitado, pergunta de novo e o mostra.
 function mostrarNegadoDaExtensao() {
     const r = tirarNegadoDaExtensao();
-    if (r) showAccessDenied(r);
+    if (!r) return;
+    if (textoDigitadoNaEntrada()) { extNegadoNestaPagina = false; return; }
+    showAccessDenied(r);
 }
 
 // Todo login que DEU CERTO começa um ciclo novo NESTA página. As duas marcas de
