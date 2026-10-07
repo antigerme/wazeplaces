@@ -1,6 +1,10 @@
 // A conta, as abas e o login DESTA aba (auditoria da rodada 12, R12-1 e R12-5 —
 // o lote 16 da área "contas"):
 //
+//  · R12-1-01 — dois logins DESTA aba ao mesmo tempo: o resgate do código no ar
+//    (o link `/#pair=`, o "Entrar com um código") e os cookies colados e
+//    confirmados no meio. Os dois davam certo, o segundo trocava o primeiro, e o
+//    "Sair" apagava só o último — o outro ficava vivo no servidor, sem dono;
 //  · R12-1-03 — a adoção calada (R9-1-03) por mais duas portas: a resposta de um
 //    "invisível" que chega depois da queda, e o "Conectar outro aparelho" tocado
 //    durante a renovação — as perguntas "esta aba tem sessão?" liam o
@@ -162,6 +166,116 @@ const BOTAO_DA_ACAO = constante('BOTAO_DA_ACAO');
 const marcaDe = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
 const tique = () => new Promise((ok) => setImmediate(ok));
 const COLANDO = { dialogo: 'pasteModal', texto: 'COOKIES_DE_OUTRA_CONTA', foco: 'cookiesTextarea' };
+
+// ═══ R12-1-01 · UM login por vez nesta aba ═══════════════════════════════════
+// O resgate do código e o login por cookies, os DOIS de verdade, contra um
+// servidor de mentira que cria a sessão quando o TESTE solta cada resposta.
+function doisLogins({ tela = {} } = {}) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const soltar = {};
+  const AppState = {};
+  const API = {
+    sessionToken: null,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    // Como o de verdade: o login que dá certo põe a sessão na memória (o `setSession`).
+    resgatarPareamento: () => new Promise((ok) => {
+      soltar.codigo = (r) => { if (r.success) { log.push('servidor criou ' + r.sessionToken); API.sessionToken = r.sessionToken; } ok(r); };
+    }),
+    testCookies: () => {
+      log.push('os cookies foram ao servidor');
+      return new Promise((ok) => {
+        soltar.cookies = (r) => { if (r.success) { log.push('servidor criou ' + r.sessionToken); API.sessionToken = r.sessionToken; } ok(r); };
+      });
+    },
+  };
+  const deps = {
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState, API,
+    resgateEmVoo: false, resgateNoAr: null, authInFlight: false, focoDoTeclado: null,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    closeModal: (id) => t.fechar(id),
+    showToast: () => ({ dispensar() {} }), t: (k) => k, msgDoServidor: (r, d) => d,
+    setAuthLoading: (v) => log.push('carregando:' + v), guardarPrazoDaSessao: () => {},
+    showMainScreen: () => { log.push('app'); AppState.authenticated = true; t.mostrarOApp(); },
+    resetQueue: () => {}, conhecerContaDoLogin: () => {}, loadProfileAndAuxData: () => null,
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {}, showAccessDenied: () => log.push('acesso restrito'),
+  };
+  const h = montar(['resgatarPareamento', 'authenticateWithCookies', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada',
+    'aoEntrarNestaPagina'], deps);
+  const criadas = () => log.filter((x) => x.startsWith('servidor criou '));
+  return { h, deps, log, soltar, API, criadas };
+}
+const PAREADO = { success: true, sessionToken: 'tok-p', conta: '4242' };
+const COOKIES_OK = { success: true, sessionToken: 'tok-c', conta: '4242' };
+
+test('R12-1-01: os cookies confirmados com o resgate do código no ar ESPERAM o desfecho dele — o resgate entrou, e nenhuma segunda sessão nasce', async () => {
+  const m = doisLogins();
+  const resgate = m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });   // o link /#pair=
+  const colar = m.h.authenticateWithCookies('cookies colados');
+  await tique();
+  assert.ok(!m.log.includes('os cookies foram ao servidor'),
+    'DEFEITO: os cookies saíram com o resgate do código no ar — dois logins desta aba ao mesmo tempo: ' + JSON.stringify(m.log));
+  m.soltar.codigo(PAREADO);
+  await resgate;
+  await colar;
+  assert.deepEqual(m.criadas(), ['servidor criou tok-p'],
+    'DEFEITO: duas sessões nasceram (o "Sair" apagaria só a última, a outra ficaria órfã por até 21 dias): ' + JSON.stringify(m.log));
+  assert.equal(m.API.sessionToken, 'tok-p', 'a sessão da aba não é a do login que entrou');
+  assert.ok(m.log.includes('carregando:false'), 'os botões da entrada ficaram travados depois da desistência');
+  assert.equal(m.deps.authInFlight, false, 'o login por cookies ficou "no ar" depois de desistir');
+});
+
+test('R12-1-01: o resgate que FALHA deixa os cookies seguirem — e só eles criam sessão', async () => {
+  const m = doisLogins();
+  const resgate = m.h.resgatarPareamento('CODIGOVENCIDO0000000', { silencioso: true });
+  const colar = m.h.authenticateWithCookies('cookies colados');
+  await tique();
+  m.soltar.codigo({ success: false, errorKey: 'srv.err.pairInvalid' });
+  await resgate;
+  await tique();
+  assert.ok(m.log.includes('os cookies foram ao servidor'), 'DEFEITO: com o código recusado, os cookies colados não foram conferidos');
+  m.soltar.cookies(COOKIES_OK);
+  await colar;
+  assert.deepEqual(m.criadas(), ['servidor criou tok-c']);
+  assert.ok(m.log.includes('app'), 'o login pelos cookies não abriu o app');
+});
+
+test('R12-1-01: pelo TECLADO, quem desiste porque o resgate entrou promete o foco ao ✕ (R7-1-04); pelo mouse, não', async () => {
+  for (const [peloTeclado, esperado] of [[true, BOTAO_DA_ACAO.left], [false, null]]) {
+    const m = doisLogins();
+    const resgate = m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+    const colar = m.h.authenticateWithCookies('cookies colados', { peloTeclado });
+    await tique();
+    m.soltar.codigo(PAREADO);
+    await resgate;
+    await colar;
+    assert.equal(m.deps.focoDoTeclado, esperado, `peloTeclado=${peloTeclado}: o foco ${esperado ? 'caiu no <body>' : 'foi movido pelo mouse'}`);
+  }
+});
+
+test('R12-1-01: CONTROLE — sem resgate no ar, os cookies vão ao servidor na hora (o instrumento enxerga o envio)', async () => {
+  const m = doisLogins();
+  const colar = m.h.authenticateWithCookies('cookies colados');
+  await tique();
+  assert.ok(m.log.includes('os cookies foram ao servidor'), 'CONTROLE: sem resgate nenhum, os cookies esperaram por nada');
+  m.soltar.cookies(COOKIES_OK);
+  await colar;
+  assert.deepEqual(m.criadas(), ['servidor criou tok-c']);
+  assert.equal(m.deps.resgateNoAr, null, 'a promessa do resgate nasceu sem resgate');
+});
+
+test('R12-1-01: o resgate deixa a promessa do desfecho no ar enquanto corre, e a solta no fim — dê certo ou não', async () => {
+  for (const r of [PAREADO, { success: false }]) {
+    const m = doisLogins();
+    const resgate = m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+    assert.ok(m.deps.resgateNoAr && typeof m.deps.resgateNoAr.then === 'function', 'o resgate no ar não deixou o desfecho pra quem espera');
+    const desfecho = m.deps.resgateNoAr;
+    m.soltar.codigo(r);
+    await resgate;
+    assert.equal(await desfecho, r.success === true, 'o desfecho prometido não é o do resgate');
+    assert.equal(m.deps.resgateNoAr, null, 'a promessa ficou de pé depois do resgate');
+  }
+});
 
 // ═══ R12-1-03 · "esta aba tem sessão?" se responde pela MEMÓRIA ═══════════════
 // A aba que caiu (a memória vazia) e a OUTRA aba com a sessão guardada no

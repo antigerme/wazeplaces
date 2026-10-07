@@ -1362,6 +1362,7 @@ function montarLoginDeB({ contaNoLogin }) {
   const AppState = { profile: null, authenticated: false, stats: { read: 7, rejected: 9, skipped: 0 }, history: null, queue: [] };
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, authInFlight: false, filaAtravessouSessao: false, saidaEsperandoConta: false,
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'),
     CONQUISTAS_KEY: constante('CONQUISTAS_KEY'), t: (k) => k, window: {},
     API: { getSession: () => token, testCookies: async () => { token = 'tok-B'; return { success: true, sessionToken: 'tok-B', ...(contaNoLogin ? { conta: '222' } : {}) }; } },

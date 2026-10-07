@@ -1882,6 +1882,7 @@ function montarLogin(resposta, { peloTeclado = false } = {}) {
     authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
     // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
     focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {},
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
   };
   const { authenticateWithCookies, estado } = montar(['authenticateWithCookies'], deps,
     ['authenticateWithCookies', 'estado'], 'const estado = () => ({ focoDoTeclado });');
@@ -1946,7 +1947,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   // E o resgate que DEU CERTO pelo teclado promete o foco, como o colar.
   const resgate = async (peloTeclado) => {
     const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
-      document: { getElementById: () => null }, resgateEmVoo: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+      document: { getElementById: () => null }, resgateEmVoo: false, resgateNoAr: null, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
       closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
       conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {},
       // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.

@@ -2767,7 +2767,7 @@ function resgateNaEntrada(tela, { resposta = { success: true, sessionToken: 'tok
   const t = telaDeEntrada(tela);
   const log = [];
   const deps = {
-    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, focoDoTeclado: null,
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, resgateNoAr: null, focoDoTeclado: null,
     saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     API: { resgatarPareamento: async () => resposta },
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
@@ -2813,6 +2813,7 @@ function loginNaEntrada(tela) {
   const log = [];
   const deps = {
     document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, authInFlight: false, focoDoTeclado: null,
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
     saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     API: { testCookies: async () => ({ success: true, sessionToken: 'tok-c', conta: '4242' }) },
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },

@@ -2134,6 +2134,10 @@ const TOAST_COPIAVEL_RECHECA_MS = 1500;
 // de fila, e um token jogado fora (auditoria de 2026-09-29, R4-5 A7). É o
 // `authInFlight` do login por cookies, pro código.
 let resgateEmVoo = false;
+// O DESFECHO do resgate no ar (entrou?), pro login por cookies que a pessoa
+// confirma com ele no ar: esse ESPERA por ele (ver `authenticateWithCookies`,
+// R12-1-01). `null` sem resgate no ar.
+let resgateNoAr = null;
 
 // `peloTeclado`: o Enter no campo, ou no "Entrar" focado. A tela de entrada some
 // com o foco nela (o "Entrar com um código", a quem o fechamento do diálogo o
@@ -2147,6 +2151,9 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
     // diálogo escondido (a trava acima não o pega: o 1º já tinha terminado).
     if (!silencioso && document.getElementById('pairEnterModal')?.classList.contains('hidden')) return false;
     resgateEmVoo = true;
+    let entrou = false;
+    let terminou = null;
+    resgateNoAr = new Promise((ok) => { terminou = ok; });
     try {
         const err = document.getElementById('pairEnterError');
         const r = await API.resgatarPareamento(code);
@@ -2182,9 +2189,12 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
         if (focoNoCard) focoDoTeclado = BOTAO_DA_ACAO.left;
         startFetching();
         esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
+        entrou = true;
         return true;
     } finally {
         resgateEmVoo = false;
+        resgateNoAr = null;
+        terminou(entrou);
     }
 }
 
@@ -6306,6 +6316,27 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
     // aviso de espera que já acabou é o app mentindo.
     const validando = showToast(t('toast.validatingCookies'), 'info');
     try {
+        // UM login por vez nesta aba. Com o resgate de um código no ar (o link
+        // `/#pair=`, que mostra a tela de entrada enquanto resgata, ou o "Entrar
+        // com um código" fechado no meio), os cookies colados e CONFIRMADOS
+        // faziam um segundo login: os dois davam certo, o segundo trocava o
+        // primeiro, e o "Sair" apagava só o último — o outro ficava vivo no
+        // servidor, sem dono, por até 21 dias (auditoria da rodada 12, R12-1-01,
+        // MEDIDO). Este espera o desfecho daquele: entrou, a pessoa já está no
+        // app, e o que ela colou não vai a lugar nenhum — o que a regra do
+        // R11-1-04 já faz com o "Colar" ainda aberto; não entrou, segue. O
+        // caminho inverso não existe: o "Entrar com um código" trava durante a
+        // conferência dos cookies (`setAuthLoading`), e o link só é resgatado na
+        // abertura.
+        if (resgateNoAr) {
+            const outroEntrou = await resgateNoAr;
+            if (outroEntrou || API.temSessaoNaMemoria() || AppState.authenticated) {
+                // Pelo teclado, o foco segue a regra de todo login (R7-1-04): o
+                // botão que ele tinha travou, e a tela de entrada já saiu.
+                if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+                return;
+            }
+        }
         const result = await API.testCookies(cookies);
         if (result.success) {
             guardarPrazoDaSessao(result);
