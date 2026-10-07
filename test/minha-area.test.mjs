@@ -1047,3 +1047,32 @@ test('R13-6-02: o 401 do outro servidor na pergunta da decisão pendente — a s
     assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], `(${rotulo}) a resposta da NA não levou a fila pra lá`);
   }
 });
+
+// ═══ R13-6-05 · a pergunta repetida lê os editáveis do SERVIDOR do lugar pendente ═══
+// (auditoria da rodada 13, regressão do lote 16). A pergunta repetida da decisão
+// pendente (`refazerDecisaoSemResposta`) usava o perfil de AGORA — e a sonda de um
+// 401 pergunta o perfil na região em que a pessoa ESTÁ, e o `definirPerfil` o
+// guarda: passando pela NA, o perfil de agora era o de lá, e o `paisDoPerfil` lia
+// os EUA como se fossem da ROW — `row/235`, uma fila que não existe, com "Mostrando
+// a fila do país onde você edita" e "Tudo limpo!" (MEDIDO no navegador, nos dois
+// motores). Aqui a pendência, a pergunta e a decisão rodam DE VERDADE, com o
+// perfil da NA no `AppState` e os editáveis de cada servidor anotados.
+test('R13-6-05: a pergunta repetida da decisão pendente usa os editáveis lidos no servidor do LUGAR — nunca os do perfil de agora, que pode ser de outro', async () => {
+  const perfis = SO_NA_FALHANDO(undefined);
+  const m = montarServidores({ perfis, vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  await abrirOApp(m);
+  assert.ok(m.app.pendencia(), 'PRÉ-CONDIÇÃO: a NA sem resposta não deixou a decisão pendente sobre o Brasil');
+  assert.deepEqual(m.app.editaveisLidos('row'), [], 'PRÉ-CONDIÇÃO: os editáveis da ROW não foram anotados');
+  // O perfil da NA no `AppState`, como a sonda de um 401 lá o deixa (e os editáveis de lá anotados).
+  m.app.anotarEditaveis(SO_NA.na, 'na', SO_NA.na.editableCountryIDs, SO_NA.na.areas, SO_NA.na.managedAreas);
+  m.AppState.profile = { ...SO_NA.na };
+  perfis.na = SO_NA.na;
+  await m.atualizar();                           // a busca seguinte pergunta de novo
+  await tique(10);
+  assert.notDeepEqual([m.lugar.regiao, m.lugar.pais], ['row', 235],
+    'a pergunta repetida leu os EUA (o perfil da NA) como se fossem da ROW: `row/235`, uma fila que não existe');
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `a pergunta repetida não perguntou à NA: ${m.perguntas}`);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'o par região/país não é o que a NA respondeu');
+  assert.equal(m.buscas.at(-1), 'na pais 235', `a busca não foi a dos EUA na NA: ${m.buscas}`);
+});

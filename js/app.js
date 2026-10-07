@@ -5910,6 +5910,12 @@ function applyFiltersFromModal() {
     AppState.filters.managedAreaId = $('filterManagedArea').value;
     if (lugarMudou && AppState.filters.managedAreaId === areaAplicada) AppState.filters.managedAreaId = '';
     AppState.filters.myArea = $('filterMyArea').checked;
+    // A decisão do lugar que ficou PENDENTE (`decisaoSemResposta`) é sobre o
+    // lugar de antes, e a pessoa escolheu outro: ela sai. Voltar àquele lugar à
+    // mão também é escolha dela — com a pendência de pé, a pergunta repetida a
+    // levava de volta ao país do perfil, com "Mostrando a fila de…", logo depois
+    // de ela trocar em Filtros (auditoria da rodada 13, R13-6-05).
+    if (lugarMudou && decisaoDoLugarDe && decisaoDoLugarDe.semResposta) decisaoDoLugarDe.semResposta = null;
     if (!$('filterCountry').dataset.carregando && $('filterCountry').value) API.setCountry($('filterCountry').value);
     // Troca de região: os países e estados em memória eram da região anterior. A
     // lista da região nova é a que a troca no modal acabou de trazer (guardada
@@ -12477,7 +12483,10 @@ function areaNoutroServidorSemDecisao() {
 // A decisão do lugar DESTA conta, nesta sessão, terminou sem destino e SEM a
 // resposta de um servidor (ver `paisDoPerfil`) — e o lugar ainda é o daquela
 // decisão (o que a pessoa aplica à mão vale por si: a escolha é dela). Devolve
-// as regiões que não responderam, ou `null`.
+// as regiões que não responderam, ou `null`. E o "Aplicar" que MUDA o lugar
+// tira a pendência (`applyFiltersFromModal`): voltando a ele à mão, a escolha
+// também é dela, e a pergunta repetida a levava de volta ao país do perfil
+// logo depois de ela trocar em Filtros (auditoria da rodada 13, R13-6-05).
 function decisaoSemResposta() {
     const d = decisaoDoLugarDe;
     const pendente = d && d.semResposta;
@@ -12498,10 +12507,19 @@ function decisaoSemResposta() {
 // (`irProPaisDoPerfil`, que refaz a fila); de novo sem resposta, segue
 // pendente; respondida sem destino, a decisão termina (sem área em servidor
 // nenhum, "Minha área" desliga e diz). Devolve a promessa da ida, ou `null`.
+//
+// Os editáveis "daqui" são os do servidor do LUGAR PENDENTE que o app leu
+// (`editaveisLidos`), nunca os do perfil de agora: a sonda de um 401 pergunta o
+// perfil na região em que a pessoa ESTÁ, e o `definirPerfil` o guarda — passando
+// pela NA à mão, o perfil de agora era o de lá, e a pergunta repetida lia os EUA
+// como se fossem da ROW: `row/235`, uma fila que não existe, com "Mostrando a
+// fila do país onde você edita" e "Tudo limpo!" (MEDIDO no navegador, nos dois
+// motores; auditoria da rodada 13, R13-6-05). Sem leitura de lá, `[]`: a
+// pendência só nasce com a lista daqui vazia (ver `paisDoPerfil`).
 function refazerDecisaoSemResposta() {
     const regioes = decisaoSemResposta();
     if (!regioes || !AppState.authenticated || AppState._caixaDaMinhaAreaNoAr || navigator.onLine === false) return null;
-    const perfil = AppState.profile;
+    const perfil = { ...AppState.profile, editableCountryIDs: editaveisLidos(API.getRegion()) || [] };
     const epoca = epocaDaSessao;
     const estaDecisao = decisaoDoLugarDe;
     const lugar = { regiao: API.getRegion(), pais: API.getCountry() };
@@ -12513,7 +12531,8 @@ function refazerDecisaoSemResposta() {
             const semResposta = [];
             const destino = await paisDoPerfil(perfil, epoca, { so: regioes, semResposta, lugar });
             // A sessão acabou, ou a pessoa aplicou outro lugar no meio (a escolha é
-            // dela): a pendência fica como estava, sobre o lugar dela.
+            // dela, e o "Aplicar" que muda o lugar já tirou a pendência): nada
+            // aqui decide mais.
             if (epoca !== epocaDaSessao || API.getRegion() !== lugar.regiao || String(API.getCountry()) !== String(lugar.pais)) return;
             estaDecisao.semResposta = semResposta.length ? { regioes: semResposta, regiao: lugar.regiao, pais: String(lugar.pais) } : null;
             if (destino) await irProPaisDoPerfil(destino);

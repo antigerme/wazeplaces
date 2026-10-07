@@ -2452,3 +2452,36 @@ test('R13-6-02: a recomposição da fila vazia SEM falha tem o MESMO teto da que
   m.app.rebuscarDepoisDeFalha();
   assert.equal(m.buscas.length, teto + 1, 'depois do gesto, a recomposição não voltou a sair');
 });
+
+// ═══ R13-6-05 · o "Aplicar" que muda o lugar tira a decisão pendente ════════
+// (auditoria da rodada 13, regressão do lote 16). A decisão do lugar que ficou
+// SEM resposta é sobre o lugar da abertura, e voltava a valer quando a pessoa
+// voltava a ele À MÃO: a pergunta repetida a levava de volta ao país do perfil,
+// com "Mostrando a fila de United States, onde você edita. Dá pra trocar em
+// Filtros.", logo depois de ela trocar em Filtros (MEDIDO no navegador). Aqui o
+// "Aplicar" de VERDADE, com a pendência de verdade (`decisaoSemResposta`).
+test('R13-6-05: o "Aplicar" que MUDA o lugar tira a decisão pendente — voltar a ele à mão é escolha da pessoa; o "Aplicar" que não muda o lugar a mantém', async () => {
+  const perfil = { id: 1, editableCountryIDs: [], managedAreas: [] };
+  // CONTROLE: o "Aplicar" só de um filtro (o lugar fica) — a busca seguinte
+  // pergunta de novo (a régua do R12-6), e o instrumento enxerga a pendência.
+  const c = pagina({ perfil });
+  c.deps.decisaoDoLugarDe = PENDENTE_NO_BRASIL();
+  await c.abrir();
+  c.els.filterUnreadOnly.checked = false;
+  c.app.applyFiltersFromModal();
+  assert.equal(c.log.buscas, 1, 'PRÉ-CONDIÇÃO: o "Aplicar" do filtro não buscou');
+  assert.deepEqual(c.app.decisaoSemResposta(), ['na'], 'CONTROLE: o "Aplicar" que não muda o lugar tirou a pendência');
+  // A pessoa troca de país (a França) e depois volta ao Brasil, à mão.
+  const p = pagina({ perfil });
+  p.deps.decisaoDoLugarDe = PENDENTE_NO_BRASIL();
+  await p.abrir();
+  p.els.filterCountry.value = '73';
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 73], 'PRÉ-CONDIÇÃO: o "Aplicar" não levou à França');
+  await p.abrir();
+  p.els.filterCountry.value = '30';
+  p.app.applyFiltersFromModal();
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['row', 30], 'PRÉ-CONDIÇÃO: o "Aplicar" não voltou ao Brasil');
+  assert.equal(p.app.decisaoSemResposta(), null,
+    'de volta ao Brasil À MÃO, a decisão pendente voltou a valer: a pergunta repetida levaria a pessoa de volta aos EUA');
+});
