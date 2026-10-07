@@ -1,8 +1,10 @@
 // A presença e a conversa depois da auditoria da rodada 13 (R13-5): a pílula
 // que dizia "2 mensagens novas" (uma já vista) com o "lida" que JÁ VOLTOU — o
-// caso irmão do R12-5-01, que só refazia a conta com ele no ar. Os rótulos
-// R13-5-n são os do relatório dessa rodada. Cada teste foi visto REPROVANDO com
-// o conserto desfeito.
+// caso irmão do R12-5-01, que só refazia a conta com ele no ar —, e o "Tentar
+// de novo" do histórico na espera do perfil, que punha "Carregando…" na tela e
+// deixava a falha no leitor de tela (irmão do R12-5-03 e do R11-5-03). Os
+// rótulos R13-5-n são os do relatório dessa rodada. Cada teste foi visto
+// REPROVANDO com o conserto desfeito.
 //
 // O instrumento é o js/presenca.js INTEIRO no navegador de mentira do
 // `_presenca-cliente.mjs`, como nas rodadas anteriores.
@@ -14,6 +16,9 @@ const T = 1790400000000;
 const tick = () => new Promise((r) => setImmediate(r));
 const EU = '12444348';
 const CAF = '183164343';
+const SEM_REDE = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+// O Waze fora com a rede boa: a resposta CHEGA (sem `_motivo`).
+const WAZE_FORA = { success: false, errorCategory: 'transient', httpCode: 200 };
 
 const uuid = (n) => `b0000000-0000-1000-8000-${String(n).padStart(12, '0')}`;
 const fluxoDe = (c, emLote = false) => ({ ctl: new AbortController(), emLote, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 });
@@ -25,6 +30,8 @@ const chega = async (c, n, { lote = false } = {}) => c.P.presencaQuadro(fluxoDe(
 // `T + n`), com `naoLidas` não lidas.
 const lista = (n, naoLidas) => ({ online: [], conversas: [{ id: CAF, nome: 'cafanha', naoLidas, atividade: T + n,
   ultima: { deMim: false, ts: T + n, recibo: false, texto: 'msg ' + n, card: null } }] });
+const doHistorico = (n) => ({ id: uuid(n), ts: T + n, de: { tipo: 1, id: CAF }, para: { tipo: 1, id: EU }, classe: 'texto',
+  texto: 'msg ' + n, recibo: null, contexto: { app: 'wazeplaces' } });
 const fechar = (c) => { c.$('conversaModal').classList.add('hidden'); c.P.presencaEsquecerAberta(); };
 const pilula = (c) => ({ selo: c.$('presencaCount').textContent, rotulo: c.$('presencaPill').getAttribute('aria-label') });
 const conta = (c) => c.P.presencaNaoLidasDe(CAF);
@@ -158,4 +165,125 @@ test('R13-5-01 CONTROLE: a lista que saiu DEPOIS de o "lida" voltar não é reco
   // E a mensagem que chega DEPOIS da lista (a lista não a conhece) soma.
   c.relogio.agora = T + 5000; await chega(c, 4800); await tick();
   assert.equal(conta(c), 2, 'a mensagem nova, que nenhuma lista contou, não somou');
+});
+
+// ── R13-5-02: o "Tentar de novo" do histórico na espera do perfil ──────────
+
+const anuncio = (c) => c.$('conversaAnuncio').textContent;
+// A frase que a TELA mostra antes de um "Tentar de novo" (`classe` diz qual:
+// `conversa-vazio` é a do histórico e a da página antiga, `conversa-falhou` é a
+// do envio), e se a tela diz "Carregando…".
+const fraseNaTela = (c, classe) => {
+  const m = new RegExp(`<p class="${classe}">([^<]*) <button`).exec(c.$('conversaMsgs').innerHTML);
+  return m ? m[1] : null;
+};
+const telaDiz = (c, chave) => c.$('conversaMsgs').innerHTML.includes(chave);
+// O toque no "Tentar de novo" do histórico (o `.conversa-recarregar`; com
+// `data-antigas`, o da página antiga) pelo ouvinte DELEGADO da conversa — o
+// mesmo caminho do dedo.
+const tocarTentarDeNovo = (c, { antigas = false } = {}) => c.$('conversaMsgs').disparar('click', {
+  target: { closest: (sel) => (sel === '.conversa-recarregar' ? { dataset: antigas ? { antigas: '1' } : {} } : null) } });
+
+// A conversa com a CAF aberta e o histórico que NÃO veio (o Waze fora). Com
+// `antigas`, a primeira página vem (com mais antigas), e é a página ANTIGA que
+// não vem. `abrir` responde as idas seguintes do histórico.
+async function historicoQueNaoVeio({ antigas = false, abrir = () => WAZE_FORA, enviar = () => ({ success: true }) } = {}) {
+  let primeira = true;
+  const c = novoCliente({ agora: T, api: { chat: (x) => {
+    if (x.acao === 'enviar') return enviar(x);
+    if (x.acao !== 'abrir') return { success: true };
+    if (primeira) {
+      primeira = false;
+      return antigas ? { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true } : WAZE_FORA;
+    }
+    return abrir(x);
+  } } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  if (antigas) {
+    c.P.presencaCarregarAntigas(CAF);                         // o "Ver mensagens anteriores"
+    await tick(); await tick();
+  }
+  const abertos = () => c.chamadas.chat.filter((x) => x.acao === 'abrir').length;
+  return { c, abertos };
+}
+
+test('R13-5-02 o "Tentar de novo" do histórico na espera do perfil: a tela diz "Carregando a conversa…", e a região viva deixa de dizer que não carregou', async () => {
+  const { c, abertos } = await historicoQueNaoVeio();
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), 'presenca.conversa.erro', 'CONTROLE: a tela mostra que o histórico não veio, com o "Tentar de novo"');
+  assert.equal(anuncio(c), 'presenca.conversa.erro', 'CONTROLE: a região viva diz a mesma falha (R11-5-03)');
+  c.AppState.profile = null;                                  // a renovação silenciosa: a sessão voltou, o perfil não
+  tocarTentarDeNovo(c);
+  await tick(); await tick();
+  assert.equal(c.chamadas.refazerPerfil, 1, 'CONTROLE: o toque na espera tinha que pedir o perfil');
+  assert.equal(abertos(), 1, 'CONTROLE: sem o perfil, o histórico não sai');
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), null, 'CONTROLE: a tela tinha que tirar a linha de falha');
+  assert.ok(telaDiz(c, 'presenca.conversa.carregando'), 'CONTROLE: a tela tinha que dizer "Carregando a conversa…"');
+  assert.equal(anuncio(c), '', 'DEFEITO: a tela diz "Carregando a conversa…" e a região viva segue dizendo "Não deu pra carregar a conversa."');
+  // O perfil volta: o histórico sai, e a falha de novo é dita de novo — da
+  // região calada pra frase, uma mudança que o leitor de tela lê.
+  c.AppState.profile = { id: Number(EU), userName: 'antigerme' };
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  assert.equal(abertos(), 2, 'CONTROLE: com o perfil de volta, o histórico que esperava tinha que sair');
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), 'presenca.conversa.erro', 'CONTROLE: a tela mostra a falha outra vez');
+  assert.equal(anuncio(c), 'presenca.conversa.erro', 'a falha outra vez não foi dita');
+});
+
+test('R13-5-02 o mesmo na página ANTIGA: "Carregando mensagens anteriores…" na tela, e a região deixa de dizer que elas não vieram', async () => {
+  const { c, abertos } = await historicoQueNaoVeio({ antigas: true });
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), 'presenca.conversa.anterioresErro', 'CONTROLE: a tela mostra que as anteriores não vieram');
+  assert.equal(anuncio(c), 'presenca.conversa.anterioresErro', 'CONTROLE: a região viva diz a mesma falha (R11-5-03)');
+  c.AppState.profile = null;
+  tocarTentarDeNovo(c, { antigas: true });
+  await tick(); await tick();
+  assert.equal(c.chamadas.refazerPerfil, 1, 'CONTROLE: o toque na espera tinha que pedir o perfil');
+  assert.equal(abertos(), 2, 'CONTROLE: sem o perfil, a página antiga não sai de novo');
+  assert.ok(telaDiz(c, 'presenca.conversa.anterioresCarregando'), 'CONTROLE: a tela tinha que dizer "Carregando mensagens anteriores…"');
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), null, 'CONTROLE: a tela tinha que tirar a linha de falha');
+  assert.equal(anuncio(c), '', 'DEFEITO: a tela diz "Carregando mensagens anteriores…" e a região viva segue dizendo que elas não vieram');
+});
+
+test('R13-5-02 só a falha do histórico sai da região: a de um envio que segue na tela, e a mensagem que chegou, ficam ditas', async () => {
+  // O envio sem o perfil (R6-5-5) entra como "Não enviada." e é dito (R11-5-03,
+  // com a região que já dizia a falha do histórico limpa antes e a frase a
+  // caminho, R12-5-02). O "Tentar de novo" do histórico não pode calar a falha
+  // do envio, que segue na tela.
+  const a = await historicoQueNaoVeio();
+  a.c.AppState.profile = null;
+  a.c.P.presencaEnviar('é a fachada?', null);
+  for (const x of a.c.timers.filter((t) => t.ms === a.c.P.PRESENCA_ANUNCIO_DE_NOVO_MS)) { a.c.timers.splice(a.c.timers.indexOf(x), 1); await x.fn(); }
+  assert.equal(anuncio(a.c), 'presenca.recibo.naoEnviadaErro', 'CONTROLE: a região diz a falha do envio');
+  tocarTentarDeNovo(a.c);
+  await tick(); await tick();
+  assert.equal(fraseNaTela(a.c, 'conversa-falhou'), 'presenca.recibo.naoEnviadaErro', 'CONTROLE: a falha do envio segue na tela');
+  assert.equal(anuncio(a.c), 'presenca.recibo.naoEnviadaErro', 'o "Tentar de novo" do histórico calou a falha do envio, que a tela ainda mostra');
+  // A mensagem que CHEGOU com a conversa na tela, anunciada depois da falha do
+  // histórico, também fica.
+  const b = await historicoQueNaoVeio();
+  b.c.relogio.agora = T + 2000;
+  await chega(b.c, 2000);
+  await tick();
+  const dita = anuncio(b.c);
+  assert.match(dita, /^presenca\.conversa\.anuncio/, 'CONTROLE: a mensagem que chegou na conversa aberta foi anunciada');
+  b.c.AppState.profile = null;
+  tocarTentarDeNovo(b.c);
+  await tick(); await tick();
+  assert.equal(b.c.chamadas.refazerPerfil, 1, 'CONTROLE: o toque na espera tinha que pedir o perfil');
+  assert.equal(anuncio(b.c), dita, 'o "Tentar de novo" do histórico calou o anúncio da mensagem que chegou');
+});
+
+test('R13-5-02 CONTROLE: com o perfil, o "Tentar de novo" sai com a região limpa (R11-5-03) e "Carregando a conversa…" na tela — a régua que a espera do perfil passou a seguir', async () => {
+  // Com o perfil, a tentativa começa limpando a região inteira e o histórico
+  // fica no ar: a tela diz "Carregando a conversa…" e a região, nada. É o que
+  // o caminho da espera do perfil não fazia.
+  const { c, abertos } = await historicoQueNaoVeio({ abrir: () => new Promise(() => {}) });
+  assert.equal(anuncio(c), 'presenca.conversa.erro', 'CONTROLE: a região viva diz que o histórico não veio');
+  tocarTentarDeNovo(c);
+  await tick(); await tick();
+  assert.equal(abertos(), 2, 'com o perfil, o histórico não saiu');
+  assert.equal(c.chamadas.refazerPerfil, 0, 'com o perfil na mão, o toque pediu o perfil');
+  assert.ok(telaDiz(c, 'presenca.conversa.carregando'), 'a tela não diz "Carregando a conversa…"');
+  assert.equal(anuncio(c), '', 'com o perfil, a tentativa saiu com a falha anterior na região viva');
 });

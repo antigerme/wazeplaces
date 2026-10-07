@@ -1669,6 +1669,25 @@ function presencaCalarFalhaQueSumiu(com) {
     el.textContent = '';
 }
 
+// O mesmo pra falha do HISTÓRICO (a primeira página ou a antiga): a região diz a
+// frase que a TELA mostra, ou nada. A tentativa com o perfil começa limpando a
+// região (R11-5-03); a da espera do perfil (`h.esperaPerfil`) não sai e não a
+// limpava: o "Tentar de novo" trocava na tela "Não deu pra carregar a
+// conversa." por "Carregando a conversa…", e quem percorria a conversa com
+// leitor de tela seguia ouvindo a falha até o perfil chegar (auditoria da
+// rodada 13, R13-5-02). Só a frase do histórico que a tela deixou de mostrar
+// sai: limpar a região inteira calaria também a falha de um envio que segue na
+// tela, e a mensagem que chegou. O que a tela mostra é o que o desenho decide
+// (`presencaRenderConversa` e `presencaHtmlAnteriores`).
+function presencaCalarFalhaDoHistoricoQueSumiu(id) {
+    const el = document.getElementById('conversaAnuncio');
+    const h = Presenca.historico.get(id);
+    if (!el || !h || Presenca.aberta !== id) return;
+    const dita = el.textContent;
+    if (dita === t('presenca.conversa.erro') && !(h.erro && !h.carregada)) el.textContent = '';
+    else if (dita === t('presenca.conversa.anterioresErro') && h.antigas !== 'erro') el.textContent = '';
+}
+
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
 // pessoa viu nela (`presencaVistaDe`). Sem mensagem dela vista, nada a guardar.
 function presencaDever(id) {
@@ -2201,6 +2220,9 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (h.esperaPerfil.antes) h.antigas = 'carregando';
         else h.erro = false;
         presencaRenderConversa();
+        // A tela diz "Carregando…": a falha que ela deixou de mostrar sai do
+        // leitor de tela também (R13-5-02).
+        presencaCalarFalhaDoHistoricoQueSumiu(id);
         presencaPedirPerfil();
         return;
     }
