@@ -99,7 +99,9 @@ const NOMES = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDeci
   'handleReject', 'handleMarkAsRead', 'offlineLerPousos', 'registrarPouso',
   'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
   'aplicarPousoDeOutraAba', 'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
-  'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'quemDecideAgora'];
+  'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'quemDecideAgora',
+  // O aviso que chega à aba SEM sessão na memória (R13-2-03, test/abas-auditoria-r13.test.mjs).
+  'aoPousarSemSessaoNaMemoria', 'guardaASessaoQueCaiu'];
 
 // Uma ABA, com a fila `fila` (o da frente na tela), num `aparelho` (Map) que as
 // abas dividem. `token`: a sessão na MEMÓRIA desta aba (`null`: sem sessão).
@@ -147,10 +149,11 @@ function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, trei
     reivindicacaoDestaAba: () => ({ rv: 'aba', rvEm: 1 }),
     historyTodayKey: () => '2026-10-07', ondeAgora: () => '30', getLang: () => 'pt',
     refazerDepoisDo401: async () => null, msgDoServidor: () => '', contarConquista: () => {},
+    document: { querySelector: () => null },
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let tratouNestaFila = false, epocaDaSessao = 0, ultimaEscritaOkEm = 0;',
+    'let tratouNestaFila = false, epocaDaSessao = 0, ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null;',
     'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
       + ' descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet(), pousosDaPagina = new Map();',
     CANAL, CANAL_VAR, ...DECIDIDAS,

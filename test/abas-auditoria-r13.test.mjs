@@ -1,9 +1,10 @@
 // Rodada 13 da auditoria (2026-10-07), a parte das DUAS ABAS e da QUEDA — o
 // lote 17. A decisão que POUSA no Waze depois de a época da sessão trocar (a
 // queda com a renovação, a conta em dúvida, o login de novo com a fila refeita)
-// não deixava prova nenhuma no aparelho nem avisava a outra aba. Nos dois casos o
-// MESMO pedido recebia uma SEGUNDA decisão no Waze (MEDIDO no navegador, roteiros
-// b1/b1b/b1c/b2/v5 do R13-2, s11 do R13-1 e p2 do R13-4):
+// não deixava prova nenhuma no aparelho nem avisava a outra aba, e a aba no meio
+// da renovação jogava fora o aviso que a outra mandava. Em todos os casos o MESMO
+// pedido recebia uma SEGUNDA decisão no Waze (MEDIDO no navegador, roteiros
+// b1/b1b/b1c/b2/v5/a1 do R13-2, s6/s11 do R13-1 e p2 do R13-4):
 //
 //  · R13-2-01 (= R13-1-02 = R13-4-01) — o ✕/✓ do card, o "Rejeitar os N" e a
 //    recusa automática que pousam depois da troca de época não chamavam o
@@ -11,11 +12,15 @@
 //    devolvia como card na reabertura sem rede, e a outra aba não ficava sabendo;
 //  · R13-2-02 — o "Marcar todos" e a aprovação de foto registravam o pouso de
 //    depois da queda só com a fila do gesto: com a fila REFEITA (a pessoa entrou
-//    de novo com a mesma conta), o `return` vinha antes do registro.
+//    de novo com a mesma conta), o `return` vinha antes do registro;
+//  · R13-2-03 (= R13-1-01) — a aba SEM sessão na memória (a renovação no meio)
+//    ignorava o aviso do canal dos pousos, e renovada com a mesma conta o ✕ dela
+//    ia ao Waze.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo onde o que
-// o teste não fornece é um "buraco negro" (o harness da rodada 12). Cada um tem o
-// CONTROLE que reprova como o app de antes, e foi visto
+// o teste não fornece é um "buraco negro" (o harness da rodada 12), ou em duas
+// abas de mentira que dividem o aparelho e um canal de mentira com a semântica do
+// de verdade. Cada um tem o CONTROLE que reprova como o app de antes, e foi visto
 // REPROVANDO com o conserto desfeito (sabotagem no relatório do lote 17).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,6 +52,7 @@ function fatiar(nome) {
   }
   throw new Error('não fechou: ' + nome);
 }
+const linhaDoFonte = (re, o) => { const m = re.exec(APP_SEM); assert.ok(m, `${o} sumiu do app.js`); return m[0]; };
 const constante = (nome) => {
   const m = new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM);
   assert.ok(m, `a constante ${nome} sumiu`);
@@ -55,6 +61,7 @@ const constante = (nome) => {
 const CONTA_KEY = constante('CONTA_KEY');
 const OFFLINE_POUSOS_KEY = constante('OFFLINE_POUSOS_KEY');
 const POUSO_NA_MEMORIA_MS = constante('POUSO_NA_MEMORIA_MS');
+const AVISOS_MAX = constante('AVISOS_DE_POUSO_SEM_CONTA_MAX');
 
 const tique = (ms = 2) => new Promise((ok) => setTimeout(ok, ms));
 // Espera por CONDIÇÃO, com teto de tempo real — nunca por prazo fixo.
@@ -407,6 +414,208 @@ test('R13-2-02: a aprovação de foto que pousa depois da queda com a fila REFEI
   }
 });
 
+// ═══ R13-2-03 · a aba SEM sessão na memória recebe o aviso do canal ══════════
+// Duas abas de mentira da mesma conta, com o canal e a conta de verdade (o
+// harness da rodada 12). A B confirmou a conta (o perfil chegou), e a sessão dela
+// CAI: a memória fica vazia, com a fila na tela (a renovação pela extensão no ar).
+function navegador() {
+  const canais = new Map();
+  const postados = [];
+  let entregas = 0;
+  class CanalDeMentira {
+    constructor(nome) {
+      this.nome = nome;
+      this.onmessage = null;
+      if (!canais.has(nome)) canais.set(nome, new Set());
+      canais.get(nome).add(this);
+    }
+    postMessage(msg) {
+      const dado = structuredClone(msg);
+      postados.push({ de: this, dado });
+      // Com TETO de entregas: uma aba que respondesse ao aviso avisando de volta
+      // viraria um laço, e o teste penduraria em vez de reprovar (gotcha #19).
+      for (const outro of canais.get(this.nome)) {
+        if (outro === this || ++entregas > 50) continue;
+        setTimeout(() => { if (typeof outro.onmessage === 'function') outro.onmessage({ data: structuredClone(dado) }); }, 0);
+      }
+    }
+    close() { canais.get(this.nome).delete(this); }
+  }
+  return { BroadcastChannel: CanalDeMentira, postados, entregue: () => new Promise((ok) => setTimeout(ok, 5)) };
+}
+
+const DECLARACOES = [
+  linhaDoFonte(/^const CANAL_DOS_POUSOS = '[^']+';$/m, 'o nome do canal dos pousos'),
+  linhaDoFonte(/^let canalDosPousos = null;$/m, 'o canal dos pousos'),
+  linhaDoFonte(/^const decididasPorOutraAba = new Map\(\);$/m, 'as chaves que a outra aba decidiu'),
+  linhaDoFonte(/^const DECIDIDAS_POR_OUTRA_ABA_MAX = \d+;$/m, 'o teto das chaves que a outra aba decidiu'),
+  linhaDoFonte(/^const avisosDePousoSemConta = \[\];$/m, 'os avisos que esperam a conta'),
+  linhaDoFonte(/^const AVISOS_DE_POUSO_SEM_CONTA_MAX = \d+;$/m, 'o teto dos avisos que esperam a conta'),
+];
+const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
+  'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
+  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'offlineLerPousos', 'registrarPouso',
+  'semOsJaDecididos', 'abrirCanalDosPousos', 'quemDecideAgora', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba',
+  'aoPousarSemSessaoNaMemoria', 'guardaASessaoQueCaiu', 'aplicarPousoDeOutraAba', 'guardarAvisoSemConta',
+  'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta',
+  'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
+
+// Uma ABA: a fila `fila` (o da frente na tela) num aparelho (`ap`, um Map) que as
+// abas dividem. `token`: a sessão na MEMÓRIA desta aba.
+function aba(nav, { fila, ap, token, perfil = { ...PERFIL } }) {
+  const log = [];
+  const AppState = { queue: fila.slice(), currentPlace: fila[0] || null, serverTotal: fila.length, profile: perfil,
+    stats: { read: 5, rejected: 5, skipped: 5 }, pendingAction: null, fetchEpoch: 0, preferences: {} };
+  let leituras = 0;
+  const API = {
+    sessionToken: token,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    // Como o de verdade: com a memória vazia, LÊ o aparelho e o ADOTA (R9-1-03).
+    getSession() {
+      if (!this.sessionToken) { leituras++; this.sessionToken = ap.get('waze_session_token') || null; }
+      return this.sessionToken;
+    },
+  };
+  const deps = {
+    AppState, API, Treino: { ativo: false, _salvo: null }, BroadcastChannel: nav.BroadcastChannel,
+    safeLS: { get: (k) => (ap.has(k) ? ap.get(k) : null), set: (k, v) => ap.set(k, String(v)), remove: (k) => ap.delete(k) },
+    SAIDA_KEY: constante('SAIDA_KEY'), CONTA_KEY, POUSO_NA_MEMORIA_MS, OFFLINE_POUSOS_KEY, OFFLINE_POUSOS_MAX: 1000,
+    offlineLigado: () => false,
+    updatePendingCount: () => log.push('restam'), aoMudarAFilaPorBaixo: () => log.push('fundo'),
+    esquecerOutraConta: (id) => { log.push('esqueceu:' + id); AppState.queue = []; AppState.currentPlace = null; },
+    esvaziarFilaDeSaida: () => {},
+    // O card desenhado na tela, como o `guardaASessaoQueCaiu` o procura.
+    document: { querySelector: (sel) => (sel === '#cardStack .place-card' && AppState.currentPlace ? {} : null) },
+  };
+  const chaves = Object.keys(deps);
+  const fonte = [
+    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, filaAtravessouSessao = false, saidaEsperandoConta = false;',
+    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
+    ...DECLARACOES,
+    ...NOMES_ABA.map(fatiar),
+    `return { ${NOMES_ABA.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p), pousosDaPagina,
+      decididas: decididasPorOutraAba, esperando: avisosDePousoSemConta, contaConfirmada: () => contaConfirmadaNestaAba,
+      sair: () => { contaConfirmadaNestaAba = null; esquecerDecididasPorOutraAba({ comOsAvisos: true }); } };`,
+  ].join('\n');
+  const app = new Function(...chaves, fonte)(...chaves.map((k) => deps[k]));
+  app.abrirCanalDosPousos();
+  return { app, AppState, API, log, leituras: () => leituras };
+}
+
+// A tem a sessão guardada no aparelho (`tok-a`) e a conta confirmada com ela; B,
+// a MESMA conta, com sessão própria (`tok-b`), confirmou a conta pelo perfil — ou
+// não (`confirmada: false`: a sessão caiu antes de o perfil chegar). Depois a
+// sessão de B CAI: memória vazia, a fila fica (a renovação no meio).
+function duasAbasComQuedaNaB({ fila, confirmada = true, contaB = PERFIL.id } = {}) {
+  const nav = navegador();
+  const ap = new Map([['waze_session_token', 'tok-a']]);
+  const A = aba(nav, { fila, ap, token: 'tok-a' });
+  ap.set(CONTA_KEY, JSON.stringify({ id: String(PERFIL.id), s: A.app.marcaDaSessao('tok-a') }));
+  const B = aba(nav, { fila, ap, token: 'tok-b', perfil: { id: contaB } });
+  if (confirmada) {
+    // O perfil de B chegou quando a conta dela era a do aparelho; depois a A
+    // entrou (a mesma conta, ou outra — a aba que CAIU não sai por isso, R13-1-06).
+    const dono = ap.get(CONTA_KEY);
+    ap.set(CONTA_KEY, JSON.stringify({ id: String(contaB), s: B.app.marcaDaSessao('tok-b') }));
+    B.app.aoConhecerConta({ id: contaB });
+    ap.set(CONTA_KEY, dono);
+    assert.ok(!B.log.some((x) => String(x).startsWith('esqueceu')), 'PRÉ-CONDIÇÃO: o perfil de B não foi uma troca de conta');
+  }
+  B.API.sessionToken = null;
+  B.AppState.profile = null;
+  return { nav, ap, A, B };
+}
+
+test('R13-2-03: a aba no meio da RENOVAÇÃO recebe o "Marcar todos" da outra — a mesma conta que ela confirmou vale na hora', async () => {
+  const fila = [1, 2, 3, 4].map((i) => P(i));
+  const { nav, A, B } = duasAbasComQuedaNaB({ fila });
+  assert.equal(B.app.contaConfirmada().id, '4242', 'PRÉ-CONDIÇÃO: a B confirmou a conta antes da queda');
+  A.app.registrarPouso([{ ...fila[0] }, { ...fila[1] }, { ...fila[2] }]);   // o "Marcar todos" da A
+  await nav.entregue();
+  assert.deepEqual(ids(B.AppState.queue), ['u1', 'u4'],
+    `DEFEITO: a aba sem sessão na memória jogou fora o aviso — os pedidos que a outra marcou seguem como card: ${ids(B.AppState.queue)}`);
+  assert.equal(B.app.marcado(fila[0]), true, 'DEFEITO: o card da TELA não ficou anotado — renovada a sessão, o ✕ dele iria ao Waze');
+  assert.equal(B.leituras(), 0, 'DEFEITO: o aviso fez a aba sem sessão ler o aparelho (e adotar a sessão da outra, R9-1-03)');
+  assert.equal(B.API.sessionToken, null, 'a aba sem sessão adotou a sessão guardada no aparelho');
+  // A renovação com a MESMA conta: o card segue anotado (o gesto nele não sai).
+  B.API.sessionToken = 'tok-b2';
+  B.AppState.profile = { ...PERFIL };
+  B.app.aoConhecerConta({ ...PERFIL });
+  assert.equal(B.app.marcado(B.AppState.currentPlace), true, 'a renovação com a mesma conta desfez a anotação');
+  assert.ok(!B.log.some((x) => String(x).startsWith('esqueceu')), 'a mesma conta foi tratada como troca de conta');
+});
+
+test('R13-2-03: a aba sem sessão que confirmou OUTRA conta não aplica o aviso — e não guarda nada', async () => {
+  const fila = [1, 2, 3].map((i) => P(i));
+  const { nav, A, B } = duasAbasComQuedaNaB({ fila, contaB: 5151 });
+  A.app.registrarPouso([{ ...fila[0] }, { ...fila[1] }]);
+  await nav.entregue();
+  assert.deepEqual(ids(B.AppState.queue), ['u1', 'u2', 'u3'], 'DEFEITO: o pouso de OUTRA conta tirou pedido da fila desta');
+  assert.equal(B.app.marcado(fila[0]), false);
+  assert.equal(B.app.esperando.length, 0, 'a aba de conta CONHECIDA guardou o aviso de outra conta');
+  assert.equal(B.leituras(), 0);
+});
+
+test('R13-2-03: sem conta confirmada (a sessão caiu antes do perfil), o aviso ESPERA a conta — e a renovação decide', async () => {
+  const fila = [1, 2, 3].map((i) => P(i));
+  for (const [contaQueEntra, fica] of [[PERFIL.id, ['u1', 'u3']], [5151, null]]) {
+    const { nav, A, B } = duasAbasComQuedaNaB({ fila, confirmada: false });
+    assert.equal(B.app.contaConfirmada(), null, 'PRÉ-CONDIÇÃO: a B não confirmou conta nenhuma');
+    A.app.registrarPouso([{ ...fila[0] }, { ...fila[1] }]);
+    await nav.entregue();
+    assert.deepEqual(ids(B.AppState.queue), ['u1', 'u2', 'u3'], 'sem saber a conta, a B aplicou o aviso');
+    assert.equal(B.app.esperando.length, 1, 'DEFEITO: o aviso que chegou sem a conta desta aba foi jogado fora');
+    assert.equal(B.leituras(), 0, 'o aviso fez a aba sem sessão ler o aparelho');
+    // A renovação revela a conta (o `aoConhecerConta` do login ou do perfil).
+    B.API.sessionToken = 'tok-b2';
+    B.AppState.profile = { id: contaQueEntra };
+    B.app.aoConhecerConta({ id: contaQueEntra });
+    assert.equal(B.app.esperando.length, 0, 'o aviso seguiu esperando depois de a conta se saber');
+    if (fica) {
+      assert.deepEqual(ids(B.AppState.queue), fica, `a MESMA conta: o que a outra aba decidiu seguiu como card: ${ids(B.AppState.queue)}`);
+      assert.equal(B.app.marcado(fila[0]), true);
+    } else {
+      assert.equal(B.app.marcado(fila[0]), false, 'OUTRA conta: o aviso da anterior anotou o card');
+      assert.equal(B.app.decididas.size, 0, 'OUTRA conta: as chaves da anterior ficaram');
+    }
+  }
+});
+
+test('R13-2-03: a aba sem sessão que não guarda nada da que caiu (nunca entrou, ou saiu) ignora o aviso — nenhum id de terceiro fica na memória', async () => {
+  const fila = [1, 2].map((i) => P(i));
+  const nav = navegador();
+  const ap = new Map([['waze_session_token', 'tok-a']]);
+  const A = aba(nav, { fila, ap, token: 'tok-a' });
+  ap.set(CONTA_KEY, JSON.stringify({ id: String(PERFIL.id), s: A.app.marcaDaSessao('tok-a') }));
+  // A aba que deu "Sair": sem sessão, sem conta confirmada, sem fila.
+  const saiu = aba(nav, { fila, ap, token: 'tok-b' });
+  saiu.app.aoConhecerConta({ ...PERFIL });
+  saiu.app.sair();
+  saiu.API.sessionToken = null;
+  saiu.AppState.profile = null;
+  saiu.AppState.queue = [];
+  saiu.AppState.currentPlace = null;
+  A.app.registrarPouso([{ ...fila[0] }]);
+  await nav.entregue();
+  assert.equal(saiu.app.esperando.length, 0, 'DEFEITO: a aba que saiu guardou na memória o aviso (id de pedido de terceiro)');
+  assert.equal(saiu.app.decididas.size, 0, 'DEFEITO: a aba que saiu anotou as chaves do aviso');
+  assert.equal(saiu.leituras(), 0);
+  // CONTROLE: a MESMA aba com a fila da sessão que caiu guardaria (a medida distingue).
+  saiu.AppState.queue = fila.slice();
+  saiu.AppState.currentPlace = saiu.AppState.queue[0];
+  A.app.registrarPouso([{ ...fila[1] }]);
+  await nav.entregue();
+  assert.equal(saiu.app.esperando.length, 1, 'CONTROLE: com a fila da sessão que caiu, o aviso não esperou a conta');
+});
+
+test('R13-2-03: os avisos que esperam na aba sem sessão têm o MESMO teto dos da conta em dúvida', () => {
+  const fila = [1].map((i) => P(i));
+  const { B } = duasAbasComQuedaNaB({ fila, confirmada: false });
+  for (let i = 0; i < AVISOS_MAX + 10; i++) B.app.aoPousarEmOutraAba({ v: 1, chaves: ['va|' + i], conta: '4242', s: 'outra' });
+  assert.equal(B.app.esperando.length, AVISOS_MAX, `os avisos que esperam a conta não têm teto: ${B.app.esperando.length}`);
+  assert.deepEqual(B.app.esperando[0].chaves, ['va|10'], 'o teto não tirou os MAIS ANTIGOS');
+});
+
 // ═══ a régua de depois da queda é UMA — e só ela pode chamar o pouso ali ══════
 // Todo caminho que decide um pedido e pode pousar com a época trocada passa por
 // ela (os quatro de hoje); um caminho de fora deixaria o pedido voltar como card
@@ -430,7 +639,7 @@ test('o pouso de depois da queda passa pela régua — nos quatro caminhos que d
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const nome of ['registrarPousoDepoisDaQueda', 'quemDecideAgora']) {
+  for (const nome of ['registrarPousoDepoisDaQueda', 'aoPousarSemSessaoNaMemoria', 'quemDecideAgora']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

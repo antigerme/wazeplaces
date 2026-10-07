@@ -7758,8 +7758,10 @@ function avisarDecididoNaOutraAba(place) {
 // descontado e diz por quê; a decisão dela que está na janela do Desfazer não
 // sai), o que está EM ANDAMENTO lá é de quem o manda, e com o treino aberto vale
 // a fila REAL. Só entre abas da MESMA conta: a mesma sessão, ou a mesma conta
-// (a régua do esvaziamento da fila de saída). A aba sem sessão na memória ignora
-// — e não pergunta ao `getSession`, que leria o aparelho (R9-1-03). Sem
+// (a régua do esvaziamento da fila de saída). A aba sem sessão na memória (a
+// renovação da queda no meio) decide pela conta que ela confirmou, ou espera a
+// conta (R13-2-03, ver `aoPousarSemSessaoNaMemoria`) — e não pergunta ao
+// `getSession`, que leria o aparelho (R9-1-03). Sem
 // `BroadcastChannel` (iOS < 15.4), segue como antes. A mensagem leva só as
 // chaves dos pedidos e a marca da sessão (nunca o token), e não sai do navegador.
 const CANAL_DOS_POUSOS = 'waze-places-pousos';
@@ -7807,7 +7809,9 @@ function avisarOutrasAbasDoPouso(chaves, quem) {
 // O pouso de OUTRA aba. Nada aqui grava no aparelho nem avisa de volta.
 function aoPousarEmOutraAba(aviso) {
     if (!aviso || aviso.v !== 1 || !Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
-    if (!API.temSessaoNaMemoria()) return;
+    // SEM sessão na memória (a renovação da queda no meio) não é "ignore" (R13-2-03,
+    // ver a função).
+    if (!API.temSessaoNaMemoria()) { aoPousarSemSessaoNaMemoria(aviso); return; }
     if (!(aviso.s && aviso.s === marcaDaSessao(API.getSession()))) {
         if (!aviso.conta) return;
         const agora = contaAgora();
@@ -7824,6 +7828,37 @@ function aoPousarEmOutraAba(aviso) {
 function aplicarPousoDeOutraAba(chaves, em) {
     anotarDecididosPorOutraAba(null, chaves, em);
     tirarDaFilaOQueAOutraAbaDecidiu();
+}
+
+// O aviso que chega com esta aba SEM sessão na memória. Era jogado fora — e a
+// renovação da queda deixa a memória vazia com a FILA na tela (`manterFila`): o
+// que a outra aba decidiu por um caminho que só passa pelo canal (o "Marcar
+// todos", a recusa automática, a aprovação de foto) seguia aqui como card, e,
+// renovada a sessão com a MESMA conta, o ✕ ia ao Waze como segunda decisão —
+// lido e rejeitado (auditoria da rodada 13, R13-2-03 = R13-1-01, MEDIDO no
+// navegador, nos dois motores). Era o espelho do R12-2-04: lá quem estava sem
+// sessão era a aba que manda.
+//
+// A régua é a conta de QUEM deixou a fila aqui: a que esta aba confirmou
+// (`contaConfirmadaNestaAba`), que fica na queda e sai no "Sair" e na troca de
+// conta. A mesma conta do aviso: vale agora, como valeria com a sessão (a
+// renovação com OUTRA conta refaz a fila de qualquer jeito, em
+// `esquecerOutraConta`). Outra conta: nada. Sem conta confirmada (a sessão caiu
+// antes de o perfil chegar), o aviso ESPERA a conta desta aba, como o da conta em
+// dúvida (R12-2-05, `guardarAvisoSemConta`): o `aoConhecerConta` da renovação o
+// aplica — mas só com o que a sessão que caiu deixou aqui (`guardaASessaoQueCaiu`,
+// a régua que faz o "Sair" da outra aba alcançar esta e levar os avisos): a aba
+// que nunca entrou, ou que saiu, não tem fila a proteger e não guarda id de pedido
+// de terceiro na memória. Nunca pelo `getSession`, que com a memória vazia ADOTA a
+// sessão guardada no aparelho (R9-1-03).
+function aoPousarSemSessaoNaMemoria(aviso) {
+    if (!aviso.conta) return;
+    const aqui = contaConfirmadaNestaAba;
+    if (aqui) {
+        if (String(aviso.conta) === aqui.id) aplicarPousoDeOutraAba(aviso.chaves);
+        return;
+    }
+    if (guardaASessaoQueCaiu()) guardarAvisoSemConta(aviso);
 }
 
 // Os avisos de pouso que chegaram com a conta DESTA aba desconhecida — o perfil
