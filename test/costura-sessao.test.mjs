@@ -1039,6 +1039,8 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     window, AppState, safeLS, CONTA_KEY, epocaDaSessao: 0, saiuNestaPagina: false,
     extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
     puladosNoInicioDaFila: 0, saidaEsperandoConta: false,
+    // A conta que ESTA aba confirmou: A, que estava triando (ver `aoConhecerConta`, R11-1-01).
+    contaConfirmadaNestaAba: { id: '111', s: marcaDe('tokA') },
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout, clearTimeout,
     // O teto da espera pelo perfil, curto aqui (o caso do perfil que nunca chega).
     AVISO_RENOVADA_ESPERA_PERFIL_MS: 30,

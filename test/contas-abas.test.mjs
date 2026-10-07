@@ -2435,3 +2435,142 @@ test('R10-1-05: a extensão que ENTRA com o foco na tela de entrada o promete ao
     assert.ok(leu >= 0 && leu < corpo.indexOf('fecharModaisDaEntrada('), `${nome}: o foco é lido depois de fechar os diálogos da entrada`);
   }
 });
+
+// ═══ R11-1 · a rodada 11: a conta, as abas e o login DESTA aba ════════════════
+// Cada teste foi visto REPROVANDO com o conserto desfeito (as sabotagens estão no
+// relatório do lote 15).
+
+// ── R11-1-01 · a troca que OUTRA aba já fez: esta solta a MEMÓRIA da anterior ──
+// A aba A caiu na tela de entrada com a memória de X (a queda a mantém, pra MESMA
+// conta voltar); na B entrou Y, e a troca de conta foi feita LÁ — o aparelho já
+// diz Y. Voltando à A, ela adota a sessão de Y (R10-1-03), e o `aoConhecerConta`
+// comparava só com o aparelho: a troca nunca rodava aqui. Sobravam o anel de
+// chamadas e as capturas de X (no relatório de Y), o rascunho de X na conversa,
+// os códigos de pareamento dele e o "invisível" pendente de X, que saía em nome
+// de Y (auditoria da rodada 11, R11-1-01, MEDIDO). A conta que ESTA aba confirmou
+// por último (`contaConfirmadaNestaAba`) diz que a conta mudou.
+function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242', token = 'tok-y' } = {}) {
+  const guardado = { [TOKEN]: token };
+  if (aparelhoDiz) guardado[CONTA_KEY] = { id: aparelhoDiz, s: marcaDe(token) };
+  const ap = aparelho(guardado);
+  const log = [];
+  const AppState = {
+    authenticated: true, profile: { id: 5151 },
+    // O placar e o Histórico desta aba são CÓPIAS do aparelho: a outra aba os
+    // zerou na troca, e o aviso `storage` os trouxe pra cá (Y já triou 3 lá).
+    stats: { read: 2, rejected: 1, skipped: 0 }, history: { _total: { read: 2 } }, conquistas: { c: {} }, autores: { r: {} },
+    // O filtro é da ABA: a área gerenciada de X segue nele.
+    filters: { managedAreaId: '91', myArea: false },
+    preferences: { presenca: false, presencaWmeDesligar: { conta: '4242', em: 1 } },
+    queue: [], fetching: false,
+  };
+  // O "invisível" que X pediu com o Waze fora: pendente na memória desta aba.
+  const presencaWme = { desligarPendente: true, desligarEm: 1, desligarSessao: 'x', ligarNaProxima: false };
+  const API = {
+    sessionToken: token,
+    // O anel: as chamadas de X (a sessão que caiu nesta aba) e a abertura de Y.
+    chamadas: [{ rota: 'perfil', s: marcaDe('tok-a') }, { rota: 'chat', s: marcaDe('tok-a') }, { rota: 'perfil', s: marcaDe(token) }],
+    getSession() { return this.sessionToken; },
+    cancelarPareamento: (c) => { log.push('cancelou ' + c); return Promise.resolve(); },
+  };
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API, presencaWme, CONTA_KEY,
+    SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
+    ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
+    contaConfirmadaNestaAba: estaAbaConfirmou ? { id: estaAbaConfirmou, s: marcaDe('tok-a') } : null,
+    saidaEsperandoConta: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    // Um "Conectar outro aparelho" que X abriu: o código vale uma sessão DELE por 5 min.
+    pareamentosEmitidos: new Set(['PRV234']), placeResolvidoPorAprovacao: null,
+    referenciasDoPerfil: { casa: [1, 2] }, posicaoGps: { ll: [1, 2] }, Treino: { ativo: false },
+    dfato: (k, d) => log.push(['dfato', k, d || null]),
+    window: { Presenca: { esquecer: (o) => log.push(['conversa', o || null]) } },
+    dlogApagar: (o) => log.push(['capturas', o || null]),
+    offlineEsquecer: (o) => log.push(['offline', o || null]),
+    esquecerAutores: () => { log.push('autores do aparelho'); ap.safeLS.remove('waze_places_autores'); },
+    esquecerFocoAutor: () => log.push('foco no autor'),
+    esquecerEscolhasDaContaAnterior: () => { log.push('escolhas'); ap.safeLS.set(PREFERENCES_KEY, '{}'); },
+    saveStats: () => ap.safeLS.set(STATS_KEY, JSON.stringify(AppState.stats)),
+    saveFilters: () => ap.safeLS.set('waze_places_filters', JSON.stringify(AppState.filters)),
+    esquecerRegistrosDaPagina: (fica) => log.push(['recursos', fica]),
+    esquecerListasDePaises: () => log.push('paises'),
+    semCamadaAberta: () => true, topOpenModal: () => null, fecharCamadasAbertas: () => log.push('camadas'),
+    showToast: (m) => log.push('toast ' + m), t: (k) => k,
+    resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+    // O que só desenha.
+    atualizarSeloDeConquista: () => {}, esvaziarPainelDoHistorico: () => {}, updateStats: () => {},
+    updateInFlightIndicator: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['aoConhecerConta', 'esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'carimbarContaNaSaida',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao',
+    'presencaWmeZerar', 'marcaDaSessao'], deps);
+  return { h, ap, log, AppState, API, presencaWme, deps };
+}
+const TROCOU = (soMemoria) => ['dfato', 'conta.trocou', soMemoria ? { soMemoria: true } : null];
+
+test('R11-1-01: a aba que adota (ou entra com) a conta que OUTRA aba já pôs no aparelho solta a MEMÓRIA da anterior — sem tocar no aparelho', () => {
+  const m = montarTrocaNaMemoria();
+  m.h.aoConhecerConta({ id: 5151 });                 // o perfil de Y chega na aba que adotou
+  assert.ok(m.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(true))),
+    'DEFEITO: a troca de conta não aconteceu nesta aba — o aparelho já dizia Y, e a memória de X ficou: ' + JSON.stringify(m.log));
+  // O que a MEMÓRIA desta aba guardava de X sai.
+  assert.equal(m.presencaWme.desligarPendente, false, 'o "invisível" pendente de X ficou — sairia em nome de Y, sem o gesto de Y');
+  assert.equal(m.AppState.preferences.presencaWmeDesligar, undefined, 'o "invisível" de X ficou na cópia das preferências desta aba');
+  assert.deepEqual(m.API.chamadas.map((c) => c.s === marcaDe('tok-y') ? 'Y' : 'X'), ['Y'],
+    'o anel de chamadas ficou com as de X (iriam no relatório do modo dev de Y)');
+  for (const o of [['conversa', { soMemoria: true }], ['capturas', { soMemoria: true }], ['offline', { soMemoria: true }]]) {
+    assert.ok(m.log.some((x) => JSON.stringify(x) === JSON.stringify(o)), `a troca não soltou a memória de: ${o[0]} — ${JSON.stringify(m.log)}`);
+  }
+  assert.ok(m.log.includes('cancelou PRV234'), 'o código de pareamento que X emitiu seguiu valendo (uma sessão de X por 5 min)');
+  assert.ok(m.log.includes('foco no autor'));
+  assert.equal(m.AppState.filters.managedAreaId, '', 'a área gerenciada de X ficou no filtro desta aba');
+  assert.equal(m.deps.posicaoGps, null);
+  // E NADA no aparelho: ele já é de Y (a outra aba fez a troca lá). A única
+  // escrita é a marca da sessão que o `aoConhecerConta` sempre grava.
+  assert.deepEqual(m.ap.escritas, ['grava:' + CONTA_KEY],
+    'a troca só da memória mexeu no aparelho, que é de Y: ' + JSON.stringify(m.ap.escritas));
+  assert.deepEqual(m.AppState.stats, { read: 2, rejected: 1, skipped: 0 },
+    'o placar desta aba (a cópia do aparelho: o que Y fez na outra) foi zerado');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('toast ')), 'o aviso da troca saiu de novo (já saiu onde ela aconteceu)');
+  assert.equal(m.deps.contaConfirmadaNestaAba.id, '5151', 'a conta desta aba não passou a ser Y');
+  // Sem aparelho com conta nenhuma (a outra aba deu "Sair"), e quem entra AQUI é
+  // outra conta (os cookies de Z colados): a memória de X sai do mesmo jeito.
+  const s = montarTrocaNaMemoria({ aparelhoDiz: null });
+  s.h.aoConhecerConta({ id: 5151 });
+  assert.ok(s.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(true))), 'depois do "Sair" da outra aba, a memória de X ficou pra quem entrou aqui');
+});
+
+test('R11-1-01: CONTROLES — a MESMA conta voltando fica com o que é dela; a troca no PRÓPRIO aparelho segue inteira; a aba sem conta confirmada não troca nada', () => {
+  // A mesma conta (a outra aba entrou de novo como X): nada sai — o rascunho, o
+  // pendente e o anel são dela.
+  const mesma = montarTrocaNaMemoria({ aparelhoDiz: '4242', estaAbaConfirmou: '4242' });
+  mesma.h.aoConhecerConta({ id: 4242 });
+  assert.ok(!mesma.log.some((x) => Array.isArray(x) && x[1] === 'conta.trocou'), 'a MESMA conta foi tratada como troca');
+  assert.equal(mesma.presencaWme.desligarPendente, true);
+  assert.equal(mesma.API.chamadas.length, 3);
+  // O aparelho ainda de X (uma aba só, a queda e outra conta entrando AQUI): a
+  // troca inteira, como sempre — o aparelho sai, o placar zera e o aviso sai.
+  const inteira = montarTrocaNaMemoria({ aparelhoDiz: '4242' });
+  inteira.h.aoConhecerConta({ id: 5151 });
+  assert.ok(inteira.log.some((x) => JSON.stringify(x) === JSON.stringify(TROCOU(false))), 'a troca no próprio aparelho deixou de acontecer');
+  assert.ok(inteira.log.includes('toast toast.outraConta'));
+  assert.ok(inteira.ap.escritas.includes('apaga:' + constante('HISTORY_KEY')), 'a troca inteira não apagou o Histórico do aparelho');
+  assert.deepEqual(inteira.AppState.stats, { read: 0, rejected: 0, skipped: 0 });
+  assert.ok(inteira.log.some((x) => JSON.stringify(x) === JSON.stringify(['conversa', null])), 'a troca inteira não apagou a conversa do aparelho');
+  // A aba que nunca confirmou conta (aberta agora, ou depois do "Sair" daqui): nada a trocar.
+  const nova = montarTrocaNaMemoria({ estaAbaConfirmou: null });
+  nova.h.aoConhecerConta({ id: 5151 });
+  assert.ok(!nova.log.some((x) => Array.isArray(x) && x[1] === 'conta.trocou'), 'a aba sem conta confirmada fez uma troca que não houve');
+});
+
+test('R11-1-01: o "Sair" esquece a conta que esta aba confirmou — e a QUEDA a mantém (é ela que diz, na volta, que a conta mudou)', async () => {
+  for (const porOutraAba of [false, true]) {
+    const m = montarSair();
+    m.deps.contaConfirmadaNestaAba = { id: '111', s: 'x' };
+    if (porOutraAba) m.deps.tokenTiradoPorOutraAba = 'tok-A';
+    await m.h.handleLogout(porOutraAba ? { porOutraAba: true } : undefined);
+    assert.equal(m.deps.contaConfirmadaNestaAba, null,
+      `DEFEITO (${porOutraAba ? 'o "Sair" da outra aba' : 'o "Sair"'}): a conta de quem saiu ficou como a desta aba — quem entrar depois "troca" de uma conta que já saiu`);
+  }
+  assert.doesNotMatch(fatiarDe(APP_SEM, 'derrubarSessao'), /contaConfirmadaNestaAba\s*=/,
+    'a queda esquece a conta confirmada: a troca na volta à aba (R11-1-01) ficaria cega');
+});

@@ -10893,6 +10893,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // depois da limpeza (ver a função; R8-1-04, L12-1).
     esquecerRegistrosDaPagina();
     AppState.profile = null;
+    // A conta que esta aba confirmou (`contaConfirmada`) sai junto: o que era
+    // dela já saiu da memória aqui, e quem entrar depois não é uma troca de conta
+    // NESTA aba (ver `aoConhecerConta`, R11-1-01).
+    contaConfirmadaNestaAba = null;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
     AppState.pendingAction = null;
@@ -18877,6 +18881,17 @@ function aoConhecerConta(perfil) {
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
+    // A troca que OUTRA aba já fez no aparelho: ela entrou com esta conta (ou deu
+    // "Sair") e tirou de lá o que era da anterior — mas esta aba seguia com a
+    // MEMÓRIA dela. A aba cuja sessão caiu fica na tela de entrada com o que era
+    // de quem estava (a queda o mantém, pra MESMA conta voltar), e ao adotar a
+    // sessão da outra aba (ou entrar com os cookies dela) o "invisível" pendente
+    // da anterior saía no nome de quem entrou, o rascunho dela aparecia na
+    // conversa, e o relatório do modo dev levava o anel e as capturas dela
+    // (auditoria da rodada 11, R11-1-01, MEDIDO). A conta que ESTA aba confirmou
+    // por último diz: sendo outra, sai só o que a memória guarda — o aparelho a
+    // outra aba já limpou.
+    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: true });
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
     const s = marcaDaSessao(API.getSession());
@@ -18934,48 +18949,71 @@ function adotarSaidaSemMarca() {
 // — idioma, tema, filtros e as preferências, menos o que só valia pra conta
 // anterior (ver abaixo) — e a fila na tela, que já veio da busca de quem entrou
 // (menos a que a renovação da queda manteve: ver o fim).
-function esquecerOutraConta(id) {
-    dfato('conta.trocou');
-    const f = carregarFilaDeSaida();
-    const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
-    if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
-    esquecerAutores();
+//
+// `soMemoria`: a troca que OUTRA aba já fez no APARELHO (ver `aoConhecerConta`,
+// R11-1-01). Ele é de quem entrou e já não guarda nada da anterior; aqui sai só o
+// que ESTA aba guarda na memória. É a MESMA lista: as linhas que gravam ou
+// apagam no aparelho levam o `soMemoria`, como as do `handleLogout` levam o
+// `porOutraAba`. O placar, o Histórico, as preferências e os autores desta aba
+// são cópias do aparelho, e o aviso `storage` já as trouxe de lá (ver
+// `sincronizarComOutraAba`): zerar o placar aqui apagaria o que quem entrou já
+// fez na outra aba. E sem o aviso da troca: ele saiu onde ela aconteceu.
+function esquecerOutraConta(id, { soMemoria = false } = {}) {
+    dfato('conta.trocou', soMemoria ? { soMemoria: true } : undefined);
+    if (!soMemoria) {
+        const f = carregarFilaDeSaida();
+        const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
+        if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
+    }
+    if (soMemoria) AppState.autores = null;
+    else esquecerAutores();
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
     // depois (`loadProfileAndAuxData`): a fila de quem entrou volta à ordem dela.
     esquecerFocoAutor();
-    window.Presenca?.esquecer?.();
+    if (soMemoria) window.Presenca?.esquecer?.({ soMemoria: true });
+    else window.Presenca?.esquecer?.();
     AppState.history = null;
-    safeLS.remove(HISTORY_KEY);
-    safeLS.remove(CONQUISTAS_KEY);
-    // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel da
-    // anterior, o ↑ de quem entrou não guardava esses pedidos.
-    safeLS.remove(ESTRELADOS_KEY);
+    if (!soMemoria) {
+        safeLS.remove(HISTORY_KEY);
+        safeLS.remove(CONQUISTAS_KEY);
+        // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel
+        // da anterior, o ↑ de quem entrou não guardava esses pedidos.
+        safeLS.remove(ESTRELADOS_KEY);
+    }
     AppState.conquistas = null;
     atualizarSeloDeConquista();
     // E o painel do Histórico dela, que fica no DOM com os Filtros fechados (a
     // folha do autor o redesenha assim; ver a função; R8-7-06).
     esvaziarPainelDoHistorico();
-    AppState.stats = { read: 0, rejected: 0, skipped: 0 };
-    // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
-    // placar, e o placar acabou de zerar: com a base da conta anterior (5
-    // pulados, digamos), os pulados de quem entrou não contavam, e a fila que
-    // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
-    // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
-    puladosNoInicioDaFila = 0;
+    if (!soMemoria) {
+        AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+        // A BASE dos pulados desta fila (ver `puladosNestaFila`) é uma leitura do
+        // placar, e o placar acabou de zerar: com a base da conta anterior (5
+        // pulados, digamos), os pulados de quem entrou não contavam, e a fila que
+        // terminava com PULADO dizia "Tudo limpo!", com confete e a conquista — o
+        // H9 de volta pela troca de conta (auditoria da costura, 2026-09-26, K4).
+        puladosNoInicioDaFila = 0;
+    }
     // A presença no WME era da conta anterior: o freio, os contadores e — o que
     // importa — o "invisível" que ela deixou PENDENTE, que sem isto sairia pra
     // quem entrou, sem o gesto dela ("o app nunca desliga por conta própria").
     presencaWmeZerar();
     // As escolhas que valiam pelas regras DELA, as marcas do que só ela viu, e o
     // que ESCREVE no Waze no nome de alguém — que não se herda (ver a função).
-    esquecerEscolhasDaContaAnterior();
+    if (!soMemoria) {
+        esquecerEscolhasDaContaAnterior();
+    }
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
     // confere de novo (`esquecerAreaForaDoPerfil`). Com "Minha área" a busca vai
-    // pela caixa do perfil, não por ela.
+    // pela caixa do perfil, não por ela. Os filtros são da ABA (lidos na
+    // abertura): na troca só da memória, sai daqui sem gravar.
     const areaNaBusca = !!(AppState.filters && AppState.filters.managedAreaId) && !AppState.filters.myArea;
-    if (AppState.filters && AppState.filters.managedAreaId) { AppState.filters.managedAreaId = ''; saveFilters(); }
+    if (AppState.filters && AppState.filters.managedAreaId) {
+        AppState.filters.managedAreaId = '';
+        if (!soMemoria) saveFilters();
+    }
     // E o seletor delas nos Filtros, com o NOME das áreas dela (R11-1-05).
     esvaziarSeletorDeAreas();
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
@@ -18983,10 +19021,15 @@ function esquecerOutraConta(id) {
     // com o perfil dele.
     referenciasDoPerfil = null;
     posicaoGps = null;
-    saveStats();
+    if (!soMemoria) saveStats();
     updateStats();
-    offlineEsquecer();
-    dlogApagar();
+    if (soMemoria) {
+        offlineEsquecer({ soMemoria: true });
+        dlogApagar({ soMemoria: true });
+    } else {
+        offlineEsquecer();
+        dlogApagar();
+    }
     // O anel de chamadas, como no "Sair": o `dlogApagar` tira os corpos, mas as
     // entradas ficavam — a rota, o status, a hora e o `n` da fila de cada pedido
     // da conta anterior, em sequência, iam no relatório e na cópia guardada de
@@ -19042,7 +19085,7 @@ function esquecerOutraConta(id) {
         resetQueue();
         startFetching();
     }
-    showToast(t('toast.outraConta'), 'info');
+    if (!soMemoria) showToast(t('toast.outraConta'), 'info');
 }
 
 // A troca de conta (`esquecerOutraConta`) tirava do aparelho o que era da conta
