@@ -127,7 +127,7 @@ const pedidoDe = (i, autor) => ({ venueID: 'v' + i, updateRequestID: (autor === 
 // marcado e u8. O registro do autor 777 com a recusa LIGADA, contagem 6. As
 // funções da recusa, do interruptor, do "Esquecer" e do registro de autores são
 // as de verdade, sobre um localStorage de mentira.
-function montarRecusa({ portao = () => true, conta = () => true, auto = 1 } = {}) {
+function montarRecusa({ portao = () => true, conta = () => true, auto = 1, decididos = null } = {}) {
   const { guardado, localStorage } = lsFalso();
   const AUTORES_KEY = constante('AUTORES_KEY');
   guardado.set(AUTORES_KEY, JSON.stringify({ v: [], r: { [String(AUTOR)]: [6, 'spam', hoje(), auto] } }));
@@ -170,6 +170,7 @@ function montarRecusa({ portao = () => true, conta = () => true, auto = 1 } = {}
     tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.indexOf(chave(p)); if (i < 0) return false; naSaida.splice(i, 1); return true; },
     reivindicacaoDestaAba: () => ({}),
   };
+  if (decididos) deps.decididosPorOutraAbaComCardAqui = decididos(fila);
   const h = montar(['aplicarRecusaAutomatica', 'enviarLote', 'callWithRetry', 'autoLigado', 'alternarAutoDoAutor', 'esquecerAutor',
     'esquecerAutorDaLista', 'loadAutores', 'salvarAutores', 'podarAutores', 'diaDeHoje', 'registrarRejeicaoDeAutor',
     'listaDeAutores', 'copiaEmDia', 'lembrarTextoDaCopia'], deps);
@@ -359,7 +360,7 @@ const lido = (i, extra = {}) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, .
 // O "Marcar todos" de verdade (`openBatchReadConfirm` + `handleBatchMarkRead`),
 // com o placar GRAVADO de verdade (`saveStats`): é o que a reabertura do app
 // mostra. O Waze responde quando o teste solta.
-function montarMarcarTodos({ fila, pedaco = 2, aprovadaDela = () => false, placar = 40 } = {}) {
+function montarMarcarTodos({ fila, pedaco = 2, aprovadaDela = () => false, placar = 40, decididos = null } = {}) {
   const { guardado, localStorage } = lsFalso();
   const STATS_KEY = constante('STATS_KEY');
   const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: placar, rejected: 0, skipped: 0 },
@@ -393,6 +394,7 @@ function montarMarcarTodos({ fila, pedaco = 2, aprovadaDela = () => false, placa
     openModal: (id) => modais.push(id), closeModal: () => {},
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
+  if (decididos) deps.decididosPorOutraAbaComCardAqui = decididos(fila);
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
     'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats'], deps);
   const gravado = () => JSON.parse(guardado.get(STATS_KEY) || 'null');
@@ -524,6 +526,63 @@ test('R10-2-04: sobrando UM não lido, a frase é a do singular; sobrando NENHUM
   await nenhum.h.handleBatchMarkRead();
   assert.deepEqual(nenhum.enviados, []);
   assert.equal(nenhum.AppState.stats.read, 40);
+});
+
+// ── Junção do lote 14: o que a OUTRA aba decidiu (R10-2-02) não vai no lote ────
+// O agente das duas abas mediu (q07c): a A rejeita o card da tela; o "Marcar
+// todos" da B dizia "os 4", mandava os 4 e contava 4 lidos — o mesmo pedido lido
+// aqui e rejeitado lá. Os de trás já saem da fila no aviso da outra aba; o da
+// tela FICA (trocar o card debaixo do dedo é pior), e o lote o deixa de fora.
+test('junção R10-2-02 × R10-2-04: o "Marcar todos" deixa de fora o card que a OUTRA aba já decidiu — no diálogo, no envio e no placar', async () => {
+  const fila = [1, 2, 3].map((i) => lido(i));
+  const m = montarMarcarTodos({ fila, pedaco: 25, decididos: (f) => new WeakSet([f[0]]) });
+  m.h.openBatchReadConfirm();
+  assert.equal(m.mensagem.textContent, 'modal.batchRead.bodyPlural#2',
+    `DEFEITO: o diálogo contou o pedido que a outra aba decidiu (disse "${m.mensagem.textContent}")`);
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o lote saiu');
+  assert.deepEqual(m.enviados, ['u2+u3'], `DEFEITO: o lote mandou o pedido que a outra aba decidiu: ${m.enviados}`);
+  m.soltar({ success: true });
+  await lote;
+  assert.equal(m.AppState.stats.read, 42, `DEFEITO: o placar contou o pedido da outra aba (${m.AppState.stats.read})`);
+  assert.deepEqual(m.fila(), ['u1'], 'o card da tela (decidido lá) devia ficar, e os marcados sair');
+  // CONTROLE: sem a anotação, o lote leva os três (o instrumento enxerga o card da tela).
+  const c = montarMarcarTodos({ fila: [1, 2, 3].map((i) => lido(i)), pedaco: 25, decididos: () => new WeakSet() });
+  c.h.openBatchReadConfirm();
+  const lc = c.h.handleBatchMarkRead();
+  await ateQue(() => c.portoes.length === 1, 'CONTROLE: o lote saiu');
+  assert.deepEqual(c.enviados, ['u1+u2+u3'], 'CONTROLE: sem a anotação o lote devia levar os três');
+  c.soltar({ success: true });
+  await lc;
+});
+
+test('junção R10-2-02 × R10-2-04: a outra aba decide o card da tela COM O DIÁLOGO ABERTO — o confirmar o deixa de fora', async () => {
+  const fila = [1, 2, 3].map((i) => lido(i));
+  const decididos = new WeakSet();
+  const m = montarMarcarTodos({ fila, pedaco: 25, decididos: () => decididos });
+  m.h.openBatchReadConfirm();
+  assert.equal(m.mensagem.textContent, 'modal.batchRead.bodyPlural#3', 'PRÉ-CONDIÇÃO: o diálogo abriu contando os três');
+  decididos.add(fila[0]);                           // o aviso da outra aba chega com o diálogo aberto
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o lote saiu');
+  assert.deepEqual(m.enviados, ['u2+u3'], `DEFEITO: o confirmar mandou o pedido que a outra aba decidiu com o diálogo aberto: ${m.enviados}`);
+  m.soltar({ success: true });
+  await lote;
+  assert.equal(m.AppState.stats.read, 42);
+});
+
+test('junção R10-2-02 × R10-2-01: a recusa automática não manda de novo o pedido do autor que a OUTRA aba decidiu', async () => {
+  const m = montarRecusa({ decididos: (f) => new WeakSet([f[2]]) });   // o x3
+  const recusa = m.h.aplicarRecusaAutomatica();
+  await terminar(m, recusa);
+  assert.deepEqual(m.enviados, ['x2', 'x4', 'x5', 'x6', 'x7'],
+    `DEFEITO: a recusa automática mandou o pedido que a outra aba decidiu: ${m.enviados.join(',')}`);
+  assert.ok(m.fila().includes('x3'), 'o pedido decidido lá saiu da fila desta aba pela recusa (quem o tira é o aviso da outra aba)');
+  // CONTROLE: sem a anotação, os seis vão.
+  const c = montarRecusa({ decididos: () => new WeakSet() });
+  const rc = c.h.aplicarRecusaAutomatica();
+  await terminar(c, rc);
+  assert.deepEqual(c.enviados, ['x2', 'x3', 'x4', 'x5', 'x6', 'x7'], 'CONTROLE: sem a anotação a recusa devia mandar os seis');
 });
 
 // Os testes de cima fatiam o FONTE; o app carrega o `js/min/` (gotcha #22).

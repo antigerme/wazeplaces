@@ -16845,8 +16845,11 @@ async function aplicarRecusaAutomatica() {
     // deixa os pedidos dele na fila até a resposta, e o perfil que chega no
     // meio dele (a prova de rede do próprio lote refaz o perfil que faltava)
     // rodava a recusa sobre eles — lido E rejeitado, duas decisões.
+    // E o que a OUTRA aba decidiu (R10-2-02): o card anotado que saiu da tela
+    // por uma troca de ordem segue na fila, e a recusa o mandaria de novo.
     const alvoFora = (naTela) => (x) => x && x !== naTela && x.creatorId !== undefined && x.creatorId !== null
-        && !pedidosEmAndamento.has(chaveDoPedido(x)) && autoLigado(x.creatorId);
+        && !pedidosEmAndamento.has(chaveDoPedido(x)) && autoLigado(x.creatorId)
+        && !(typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(x) === true);
     // No treino a fila da tela é de EXEMPLOS: a recusa fica ANOTADA, e o
     // `Treino.sair()` a roda na fila real quando ela voltar. Só sair perdia a 2ª
     // passada — a que a página que pousou com a 1ª no ar pediu
@@ -22414,8 +22417,14 @@ function openBatchReadConfirm() {
     // pra ser rejeitado ou pulado. Sobrando nenhum, é a fila sem o que marcar
     // ("Nada na fila para marcar"), e a frase do diálogo diz "não lidos" quando
     // a fila tem os dois, pro número bater com o que a pessoa vê.
+    //
+    // E o card que a OUTRA aba já decidiu (R10-2-02): a decisão de lá é a que
+    // vale, e o lote o levava junto — o mesmo pedido lido aqui e decidido lá, e
+    // contado de novo no placar (MEDIDO no navegador, q07c do lote 14). Os de
+    // trás já saíram da fila no aviso da outra aba; sobra o da tela, que fica.
     loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID && p.isRead !== true
-        && !pedidosEmAndamento.has(chaveDoPedido(p))).map(chaveDoPedido);
+        && !pedidosEmAndamento.has(chaveDoPedido(p))
+        && !(typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(p) === true)).map(chaveDoPedido);
     const n = loteDeLidosContado.length;
     if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     const comJaLidos = AppState.queue.some((p) => p && p.isRead === true);
@@ -22441,8 +22450,10 @@ async function handleBatchMarkRead() {
     if (acoesTravadasForaDaJanela()) { showToast(t(avisoDaTrava()), 'info'); return; }
     // E o que entrou em andamento com o diálogo aberto também fica de fora (V7).
     // (O já lido nem foi contado: ver o `openBatchReadConfirm`, R10-2-04.)
+    // E o que a outra aba decidiu com o diálogo aberto (R10-2-02).
     const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p))
-        && !pedidosEmAndamento.has(chaveDoPedido(p)));
+        && !pedidosEmAndamento.has(chaveDoPedido(p))
+        && !(typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(p) === true));
     if (alvos.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
     // Descarrega qualquer undo pendente antes (consistência de estado) — o do
     // card E os das ações de FOTO, que dividem o mesmo banner: o
