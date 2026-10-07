@@ -6302,6 +6302,7 @@ function showAccessDenied(result) {
 async function loadProfileAndAuxData() {
     const epoca = epocaDaSessao;
     perfilPedidoEm = Date.now();
+    perfilFalhouPorRede = false;
     // O lugar em que o perfil e os países são PEDIDOS (ver `lugarDoPedidoDoPerfil`).
     const regiaoPedida = API.getRegion();
     lugarDoPedidoDoPerfil = { regiao: regiaoPedida, pais: API.getCountry() };
@@ -6314,6 +6315,9 @@ async function loadProfileAndAuxData() {
     // Saiu enquanto o perfil vinha: sem isto ele voltava ao AppState, ao
     // cabeçalho e ao portão gravado — de quem já tinha saído.
     if (epoca !== epocaDaSessao) return;
+    // O perfil que não veio por REDE ou pelo SERVIDOR: a busca de "Minha área"
+    // que o espera falhou por rede (ver `ultimaBuscaFalhouPorRede`, R12-4-02).
+    perfilFalhouPorRede = !profileRes.success && profileRes.errorCategory === 'transient';
     // O portão reconferido pelo servidor: o nível ou a área mudou no Waze
     // depois do login (ver `handlePerfil`). A sessão já foi apagada lá. Não
     // passa pelo `handleUnauthorized`, porque não há o que confirmar (não é o
@@ -12066,6 +12070,11 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
     const epoca = epocaDaSessao;
     const ida = Promise.resolve(API.getProfile(regiao)).then((r) => {
         if (epoca !== epocaDaSessao) return;
+        // A falha por REDE ou pelo SERVIDOR é a da busca que espera por esta ida
+        // (ver `ultimaBuscaFalhouPorRede`, R12-4-02).
+        if (minhaAreaFalhouPorRede.epoca !== epoca) minhaAreaFalhouPorRede = { epoca, regioes: new Set() };
+        if (r && !r.success && r.errorCategory === 'transient') minhaAreaFalhouPorRede.regioes.add(regiao);
+        else minhaAreaFalhouPorRede.regioes.delete(regiao);
         if (!(r && r.success && r.profile)) {
             if (r && r.errorCategory === 'access_denied') { if (AppState.authenticated) recusaDoPortao(r); }
             else if (r && r.errorCategory === 'unauthorized') handleUnauthorized();
@@ -12180,7 +12189,27 @@ function refazerDecisaoSemResposta() {
 // o teto de 45 s estourou, ou a origem devolveu 5xx). É o que deixa a fila
 // guardada do offline entrar com `onLine` dizendo que há rede (ver
 // `startFetching` e o "Tentar de novo"). Zera a cada busca que começa.
+//
+// Com "Minha área", a busca que ESPERA o perfil (ou a caixa do servidor dela)
+// nem sai — e a ida que ela espera é a que falhou por rede: o perfil
+// (`perfilFalhouPorRede`) ou o `/Session` do servidor da busca
+// (`minhaAreaFalhouPorRedeEm`). Pra fila guardada, é a mesma falha. Sem isto, a
+// abertura com a rede que não anda (ou a origem fora do ar) terminava em "Falha
+// ao carregar" com a fila preparada no aparelho, deste lugar e desta conta, sem
+// uso — e o "Tentar de novo" repetia o mesmo: o O1 valia só pra quem não usa
+// "Minha área" (auditoria da rodada 12, R12-4-02, MEDIDO no navegador, com a API
+// sem resposta e com a borda em 502).
 let ultimaBuscaFalhouPorRede = false;
+// A última ida do PERFIL (`loadProfileAndAuxData`) falhou por rede ou pelo
+// servidor (`transient`). Zera quando a ida seguinte sai.
+let perfilFalhouPorRede = false;
+// A pergunta ao `/Session` do servidor da busca de "Minha área"
+// (`lerServidorDaMinhaArea`) que falhou por rede ou pelo servidor, por região e
+// por sessão. A que leu tira a região.
+let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };
+function minhaAreaFalhouPorRedeEm(regiao) {
+    return minhaAreaFalhouPorRede.epoca === epocaDaSessao && minhaAreaFalhouPorRede.regioes.has(regiao);
+}
 // A última busca ficou SEM RESPOSTA nenhuma (a rede fora, o teto de 45 s — não o
 // erro do servidor, que respondeu, nem a página de erro da borda: a marca é o
 // `_motivo` do `_post`) e nada respondeu DEPOIS: o "lie-fi", em que o
@@ -12277,11 +12306,23 @@ function fetchNextPage() {
     // gesto, sem relógio. E sem caixa AQUI, com a área noutro servidor e o lugar
     // ainda por decidir, também espera: quem refaz a fila é a decisão (ver
     // `areaNoutroServidorSemDecisao`, R11-6-02).
+    //
+    // A espera pelo perfil (ou pela caixa) que FALHOU por rede ou pelo servidor é
+    // a busca falhando por rede (ver `ultimaBuscaFalhouPorRede`, R12-4-02): a fila
+    // guardada entra como sem "Minha área".
+    //
+    // E com card na fila a espera é CALADA, e a fila não acaba: o `hasMore` só cai
+    // com ela VAZIA, que é o que encerra o laço do `startFetching`. Caindo com card
+    // (o `maybePrefetch` dos últimos cards chega aqui), o fim da fila dizia "Tudo
+    // limpo!" — com a fila guardada aberta no lie-fi, decididos os cards, "Tudo
+    // limpo!" com as decisões esperando envio e o Waze sem resposta (MEDIDO no
+    // navegador; sem "Minha área", a mesma fila termina em "Falha ao carregar").
+    // É o que a busca que falha por rede com card na tela já faz (`busca.esperaRede`).
     if (AppState.filters.myArea) {
         if (!AppState.profile) {
             filaEsperaPerfil = true;
-            if (AppState.queue.length === 0) AppState.loadError = true;
-            AppState.hasMore = false;
+            ultimaBuscaFalhouPorRede = perfilFalhouPorRede;
+            if (AppState.queue.length === 0) { AppState.loadError = true; AppState.hasMore = false; }
             dfato('busca.esperaPerfil', {});
             refazerPerfilSeFaltar();
             updatePendingCount();
@@ -12290,8 +12331,8 @@ function fetchNextPage() {
         const caixa = caixaDaMinhaAreaEm();
         if (caixa === undefined || (!caixa && areaNoutroServidorSemDecisao())) {
             filaEsperaPerfil = true;
-            if (AppState.queue.length === 0) AppState.loadError = true;
-            AppState.hasMore = false;
+            ultimaBuscaFalhouPorRede = caixa === undefined && minhaAreaFalhouPorRedeEm(API.getRegion());
+            if (AppState.queue.length === 0) { AppState.loadError = true; AppState.hasMore = false; }
             dfato('busca.esperaCaixa', { regiao: API.getRegion(), por: caixa === undefined ? 'naoLido' : 'decisao' });
             updatePendingCount();
             return Promise.resolve();

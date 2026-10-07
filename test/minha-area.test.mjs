@@ -83,12 +83,15 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   // área noutro servidor com o lugar por decidir (R11-6-02).
   // E a decisão que ficou SEM a resposta de um servidor (R12-6).
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
-    'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao', 'decisaoSemResposta'])
-    if (achar(opcional)) nomes.push(opcional);
+    'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao', 'decisaoSemResposta',
+    'minhaAreaFalhouPorRedeEm']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let decisaoDoLugarDe = null;\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };\n'
+    // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
+    + 'let ultimaBuscaFalhouPorRede = false; let perfilFalhouPorRede = false;\n'
+    + 'let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };\n'
     + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, completarPerfilChegado, resetQueue,'
     + ` anotarEditaveis: ${nomes.includes('anotarEditaveis') ? 'anotarEditaveis' : 'null'} };`)(...chaves.map((k) => deps[k]));
   // A fila refeita = época nova e uma busca.
@@ -301,7 +304,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
-    'decisaoSemResposta', 'refazerDecisaoSemResposta'])
+    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
@@ -309,6 +312,8 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
     + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null; let decisaoDoLugarDe = null;\n'
     + 'let perfilPedidoEm = 0;\n'
+    // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
+    + 'let perfilFalhouPorRede = false; let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {}, gerenciadas: {} };\n'
     + 'let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };\n'
     + nomes.map(fatiar).join('\n')
