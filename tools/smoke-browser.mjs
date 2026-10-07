@@ -8675,7 +8675,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const CARDS_ENT = Object.entries(CARDS).slice(0, 5).map(([, p]) => p);
     await page.evaluate(({ fila }) => {
       localStorage.setItem('waze_session_token', 't');
-      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      // `API` é `const` do api.js: NÃO mora no `window` (o `window.API &&` deixava a linha morta). Desde o
+      // R13-1-04 as rotas mandam a sessão da MEMÓRIA, sem adotar a do aparelho: sem o `setSession`, o ✕ voltava
+      // "sem sessão", a sessão caía e o bloco seguinte media a tela de entrada (o WebKit, mais lento, pegava isso).
+      if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
       // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
       // canDisableUndo() também exige a cota.
@@ -8783,7 +8786,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(300);
     await page.evaluate(() => {
-      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      // `API` é `const` do api.js: NÃO mora no `window` (o `window.API &&` deixava a linha morta). Desde o
+      // R13-1-04 as rotas mandam a sessão da MEMÓRIA, sem adotar a do aparelho: sem o `setSession`, o ✕ voltava
+      // "sem sessão", a sessão caía e o bloco seguinte media a tela de entrada (o WebKit, mais lento, pegava isso).
+      if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
       AppState.stats = { read: 100, rejected: 50, skipped: 0 };
