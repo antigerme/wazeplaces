@@ -652,6 +652,21 @@ test('o "Sair" e a Privacidade dizem o que o aparelho guarda e o que FICA (idiom
   assert.match(layout, /const MANTIDAS = \['THEME_KEY', 'LANG_KEY'\];/);
 });
 
+// O lote 14 passou a guardar no aparelho os pedidos que o app ESTRELOU
+// (`waze_places_estrelados`, até 500 ids de pedidos de terceiros, R10-2-05), e a
+// Privacidade, que enumera o que fica no aparelho, não o citava em língua
+// nenhuma (auditoria da rodada 11, R11-6-05 = R11-7-04). A frase usa a ⭐, o
+// símbolo que a tela usa pra isso ("Pular ⭐", "O pedido ganha ⭐ no WME").
+test('a Privacidade conta os pedidos que o app marcou com ⭐ — o anel que o "Pular guarda o pedido" grava no aparelho', () => {
+  // CONTROLE: o anel existe — sem ele, a frase prometeria o que o app não guarda.
+  assert.match(read('js/app.js'), /^const ESTRELADOS_KEY = 'waze_places_estrelados';$/m,
+    'CONTROLE: o anel dos pedidos estrelados sumiu do app.js — a Privacidade não deve mais citá-lo');
+  for (const lang of LANGS) {
+    assert.match(DICT[lang]['help.privacy.device'], /⭐/,
+      `${lang}: a Privacidade não conta os pedidos que o app marcou com ⭐ (o anel waze_places_estrelados)`);
+  }
+});
+
 test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', () => {
   // Auditoria de 2026-09-25: 71 textos diziam "solicitud" e dois "pedido"; e o
   // placar dizia "Leídos/Rechazados/Saltados" enquanto o Resumo do mês dizia
