@@ -5479,6 +5479,197 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(d.aberta && d.n === 2 && d.idx === 1, 'anúncio/Desfazer da foto: PRÉ-CONDIÇÃO — a foto não voltou pra tela', JSON.stringify(d));
     checa(d.anuncio === 'Foto 2 de 2', `anúncio/Desfazer da foto: a foto voltou à tela e a região da camada disse ${JSON.stringify(d.anuncio)}`);
   }
+
+  // ── Rodada 10 (auditoria de 2026-10-07): R10-3-01 a 04 ─────────────────────
+  // O selo da foto que volta numa camada REABERTA (01), a camada do IRMÃO que
+  // muda calada (02), duas exclusões do MESMO local no ar ao mesmo tempo (03) e a
+  // proposta já aprovada que voltava com o ✨ e os dois botões no mesmo canto (04).
+  // Cada caso mede ANTES do desfecho o estado que o defeito precisa (PRÉ-CONDIÇÃO),
+  // e a medida enxerga o que procura (CONTROLE). Reabrir só depois de o voltar da
+  // camada fechada assentar (`CamadaVoltar.consumindo`, gotcha #65).
+  const selo = () => page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    const minis = [...document.querySelectorAll('#lightboxStrip .lb-mini')]
+      .map((x) => (x.querySelector('.lb-mini-selo') || {}).textContent || '·').join('');
+    return { visivel: !b.classList.contains('hidden'), txt: b.textContent, nome: b.getAttribute('aria-label'), minis,
+      anuncio: document.getElementById('lightboxAnuncio').textContent, n: Lightbox.urls.length, idx: Lightbox.idx,
+      janela: !!document.getElementById('undoBtn') };
+  });
+  const canto = () => page.evaluate(() => {
+    const est = (id) => { const b = document.getElementById(id); return b.classList.contains('hidden') ? '—' : (b.disabled ? 'travado' : 'vivo'); };
+    const vivo = ['lightboxApprove', 'lightboxDelete'].map((id) => document.getElementById(id)).find((b) => !b.classList.contains('hidden'));
+    let dedo = null;
+    if (vivo) {
+      const r = vivo.getBoundingClientRect();
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      dedo = el && (el.closest('button') || el).id;
+    }
+    const b = document.getElementById('lightboxNewBadge');
+    return { aprovar: est('lightboxApprove'), lixeira: est('lightboxDelete'), selo: b.classList.contains('hidden') ? null : b.textContent, dedo };
+  });
+
+  // R10-3-01: a foto DENUNCIADA excluída com o Desfazer, a foto fechada e
+  // REABERTA pelo card dentro da janela (ela nasce do card, sem a denunciada), e
+  // o Desfazer: a denunciada volta com o 🚩 — ia o ✨ "foto nova", na camada, na
+  // tira e no anúncio. CONTROLE: a primeira abertura lê o 🚩 (a medida acha o selo).
+  {
+    const FLAG_PL = { ...FOTO_PL, venueID: 'v-r10-flag', updateRequestID: 'u-r10-flag', updateTypeKey: 'FLAG',
+      reqType: 'REQUEST', reqSubType: 'FLAG', purType: 'FLAGGED_PHOTO', flagSubjectType: 'IMAGE',
+      flagEntityID: 'denunciada-r10', imageUrls: [`${foto}#denunciada-r10`, `${foto}#aprovada-r10`],
+      approvedImageIds: ['denunciada-r10', 'aprovada-r10'] };
+    await montar(FLAG_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto denunciada');
+    const s0 = await selo();
+    checa(s0.visivel && s0.txt === '🚩' && s0.idx === 0 && s0.minis === '🚩·',
+      'selo/R10-3-01: PRÉ-CONDIÇÃO — a camada não abriu na denunciada com o 🚩 (a medida leria o selo errado)', JSON.stringify(s0));
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn') && Lightbox.urls.length === 1, 'o Desfazer da exclusão da denunciada');
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo, 'a foto fechar e o voltar assentar');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto reaberta pelo card');
+    const s1 = await selo();
+    checa(!s1.visivel && s1.n === 1 && s1.janela, 'selo/R10-3-01: PRÉ-CONDIÇÃO — a camada reaberta na janela não nasceu sem a denunciada', JSON.stringify(s1));
+    await page.evaluate(() => { document.getElementById('lightboxAnuncio').textContent = ''; });
+    await page.focus('#undoBtn'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => Lightbox.urls.length === 2, 'a denunciada voltar pelo Desfazer');
+    await doisQuadros(page);
+    const s2 = await selo();
+    checa(s2.visivel && s2.txt === '🚩' && s2.nome === s0.nome && s2.minis === '🚩·' && s2.anuncio.endsWith(s0.nome),
+      `selo/R10-3-01: a foto DENUNCIADA voltou à camada reaberta com ${JSON.stringify(s2.txt)} — o ✨ "foto nova" no lugar do 🚩`, JSON.stringify(s2));
+  }
+
+  // R10-3-02: sem o Desfazer, a exclusão de A pousa com a foto ampliada do IRMÃO
+  // B (o mesmo local, na frente depois do ✕ em A) aberta: a foto sai da camada de
+  // B e a região DELA diz. CONTROLE: com a camada do próprio A aberta, a região já
+  // dizia (a medida enxerga a região).
+  for (const irmao of [true, false]) {
+    const rot = irmao ? 'a camada do irmão' : 'CONTROLE, a camada do próprio pedido';
+    const B_PL = { ...FOTO_PL, updateRequestID: 'pend-r10-b', imageUrls: [`${foto}#pend-r10-b`, `${foto}#aprovada-02`],
+      approvedImageIds: ['aprovada-02'] };
+    await montar(FOTO_PL, { semDesfazer: true, depois: [B_PL] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada de A');
+    await page.keyboard.press('ArrowRight');
+    await esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    const solta = segurar('excluir-foto');
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => excluindoAgora === true, 'a exclusão no ar');
+    if (irmao) {
+      await page.keyboard.press('Escape');
+      await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo, 'a foto de A fechar');
+      await page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      await page.keyboard.press('Enter');             // A decidido: sem o Desfazer, sai na hora
+      await esperarOuExplodir(page, () => !!AppState.currentPlace && AppState.currentPlace.updateRequestID === 'pend-r10-b'
+        && !acoesTravadas(), 'o irmão B na frente');
+      await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+      await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada do irmão');
+    }
+    const antes = await page.evaluate(() => ({ de: Lightbox.place && Lightbox.place.updateRequestID, n: Lightbox.urls.length }));
+    checa(antes.de === (irmao ? 'pend-r10-b' : 'pend-01') && antes.n === 2,
+      `anúncio/R10-3-02 (${rot}): PRÉ-CONDIÇÃO — a camada aberta não é a esperada, com as duas fotos`, JSON.stringify(antes));
+    await page.evaluate(() => { for (const id of ['lightboxAnuncio', 'cardLiveRegion']) document.getElementById(id).textContent = ''; });
+    solta({ success: true, restantes: [] });
+    await esperarOuExplodir(page, () => !excluindoAgora, 'a exclusão pousar');
+    await doisQuadros(page);
+    const d = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), n: Lightbox.urls.length,
+      camada: document.getElementById('lightboxAnuncio').textContent, card: document.getElementById('cardLiveRegion').textContent }));
+    checa(d.aberta && d.n === 1, `anúncio/R10-3-02 (${rot}): PRÉ-CONDIÇÃO — a foto não saiu da camada aberta`, JSON.stringify(d));
+    checa(d.camada === 'Foto excluída' && d.card === '',
+      `anúncio/R10-3-02 (${rot}): a foto saiu da camada aberta e a região dela disse ${JSON.stringify(d.camada)} (a do card: ${JSON.stringify(d.card)})`);
+  }
+
+  // R10-3-03: com o Desfazer, duas exclusões no MESMO local. A janela da 1ª vence
+  // e ela fica no ar (o Waze de mentira a segura); a lixeira volta a valer e a 2ª
+  // é pedida — a janela dela vence e ela NÃO sai enquanto a 1ª não responder (o
+  // servidor relê a lista que a 1ª deixou), e a releitura não é aquecida com o
+  // local no ar. CONTROLE: com a resposta da 1ª, a 2ª SAI (a medida enxerga a ida).
+  {
+    const TRES = { ...FOTO_PL, venueID: 'v-r10-tres', updateRequestID: 'pend-r10-3',
+      imageUrls: [`${foto}#pend-r10-3`, `${foto}#aprovada-r10-a`, `${foto}#aprovada-r10-b`],
+      approvedImageIds: ['aprovada-r10-a', 'aprovada-r10-b'] };
+    const idas = [];
+    const presas = [];
+    const rota = async (route) => {
+      let corpo = {};
+      try { corpo = JSON.parse(route.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      const preparar = corpo.action === 'preparar';
+      idas.push({ id: corpo.imageID, preparar });
+      if (!preparar) await new Promise((ok) => presas.push(ok));
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(preparar ? { success: true, preparado: true } : { success: true, restantes: [] }) });
+    };
+    await page.route('**/api/excluir-foto', rota);     // registrada depois: é ela que responde
+    const exclusoes = () => idas.filter((i) => !i.preparar).map((i) => i.id);
+    const aquecidas = () => idas.filter((i) => i.preparar).length;
+    const ate = async (cond, oQue, teto = 15000) => {   // pelo lado do NODE: o registro é daqui
+      const t0 = Date.now();
+      while (!cond()) {
+        if (Date.now() - t0 > teto) throw new Error(`a espera por ${oQue} estourou (${teto}ms)`);
+        await dormir(50);
+      }
+    };
+    await montar(TRES);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');
+    const lixeiraViva = () => esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden')
+      && !document.getElementById('lightboxDelete').disabled, 'a lixeira viva');
+    await lixeiraViva();
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');   // a 1ª, com a janela
+    await ate(() => exclusoes().length === 1, 'a 1ª exclusão sair (a janela vencer)');
+    await lixeiraViva();                                // a janela acabou: a lixeira da foto seguinte vale
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');   // a 2ª, com a 1ª no ar
+    await esperarOuExplodir(page, () => !!exclusaoPendente, 'a janela da 2ª');
+    await esperarOuExplodir(page, () => !exclusaoPendente, 'a janela da 2ª vencer');
+    await dormir(600);                                  // o tempo de a ida chegar à rota, se ela saísse
+    const meio = { exclusoes: exclusoes(), aquecidas: aquecidas() };
+    checa(meio.exclusoes.length === 1,
+      'exclusão/R10-3-03: a 2ª exclusão do local saiu com a 1ª no ar — o servidor relê a lista de antes, e uma delas se desfaz no Waze', JSON.stringify(meio));
+    checa(meio.aquecidas === 1, 'exclusão/R10-3-03: o gesto da 2ª aqueceu a releitura com a 1ª no ar', JSON.stringify(meio));
+    presas.shift()();                                   // a resposta da 1ª
+    await ate(() => exclusoes().length === 2, 'a 2ª sair depois da resposta da 1ª').catch((e) => checa(false, 'exclusão/R10-3-03: CONTROLE — ' + e.message));
+    checa(JSON.stringify(exclusoes()) === JSON.stringify(['aprovada-r10-a', 'aprovada-r10-b']),
+      'exclusão/R10-3-03: CONTROLE — as duas exclusões não saíram na ordem dos gestos', JSON.stringify(exclusoes()));
+    while (presas.length) presas.shift()();
+    await page.unroute('**/api/excluir-foto', rota);
+  }
+
+  // R10-3-04: aprovar com o Desfazer, fechar a foto (o fechamento despacha a
+  // aprovação, que fica no ar) e REABRIR pelo card: sem o ✨ e só a lixeira no
+  // canto (travada até a resposta); com a resposta, a lixeira viva e o dedo nela.
+  // CONTROLE: a proposta abre com o ✨ e o "Aprovar", e o dedo pega o "Aprovar".
+  {
+    await montar(FOTO_PL);
+    const solta = segurar('validar-place');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxApprove').classList.contains('hidden'), 'o "Aprovar" da proposta');
+    const c0 = await canto();
+    checa(c0.selo === '✨' && c0.aprovar === 'vivo' && c0.lixeira === '—' && c0.dedo === 'lightboxApprove',
+      'canto/R10-3-04: PRÉ-CONDIÇÃO — a proposta não abriu com o ✨ e o "Aprovar"', JSON.stringify(c0));
+    await page.focus('#lightboxApprove'); await page.keyboard.press('Enter');   // com a janela do Desfazer
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn'), 'a janela da aprovação');
+    await page.keyboard.press('Escape');                // o fechamento despacha a aprovação
+    await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo && aprovacoesNoAr.size === 1,
+      'a aprovação no ar, com a foto fechada');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto reaberta pelo card');
+    await doisQuadros(page);
+    const c1 = await canto();
+    checa(c1.selo === null && c1.aprovar === '—' && c1.lixeira !== '—',
+      'canto/R10-3-04: reaberta com a aprovação no ar, a camada mostrou o ✨ na foto aprovada e/ou o "Aprovar" no canto da lixeira', JSON.stringify(c1));
+    solta({ success: true });
+    await esperarOuExplodir(page, () => aprovacoesNoAr.size === 0 && placeResolvidoPorAprovacao !== null, 'a aprovação pousar');
+    await doisQuadros(page);
+    const c2 = await canto();
+    checa(c2.selo === null && c2.aprovar === '—' && c2.lixeira === 'vivo' && c2.dedo === 'lightboxDelete',
+      'canto/R10-3-04: com a resposta, o canto não ficou só com a lixeira viva (o "Aprovar" voltou, ou o dedo pega outro)', JSON.stringify(c2));
+  }
   checa(erros.length === 0, 'foco: erro de JS', erros[0]);
   await ctx.close();
 }
