@@ -11371,9 +11371,17 @@ function manterFocoNaFrente() {
     const dele = serieDoAutor(foco, { naTela: AppState.currentPlace });
     if (!dele.length) return;
     const naSerie = new Set(dele);
+    const atual = AppState.currentPlace;
+    const fica = atual && q[0] === atual && !naSerie.has(atual) ? atual : null;
     const resto = q.filter((x) => !naSerie.has(x));
     q.length = 0;
     q.push(...dele, ...resto);
+    // O card da TELA fica na frente mesmo FORA da série — o que a outra aba já
+    // decidiu (R11-2-06, ver `serieDoAutor`). Com a série passando por cima dele,
+    // `currentPlace` e `queue[0]` ficavam diferentes, e o gesto seguinte (o
+    // `advanceQueue` tira o PRIMEIRO da fila) levava junto um pedido da série,
+    // sem decisão nenhuma.
+    if (fica) q.unshift(...q.splice(q.indexOf(fica), 1));
 }
 
 // Pede a posição ao aparelho. APROXIMADA de propósito (`enableHighAccuracy:
@@ -14121,7 +14129,14 @@ function focarAutor(id) {
     const daPessoa = serieDoAutor(id, { naTela: AppState.currentPlace });
     if (daPessoa.length === 0) return;
     const naSerie = new Set(daPessoa);
+    const atual = AppState.currentPlace;
+    const fica = atual && AppState.queue[0] === atual && !naSerie.has(atual) ? atual : null;
     AppState.queue = [...daPessoa, ...AppState.queue.filter((x) => !naSerie.has(x))];
+    // O card da TELA que ficou FORA da série — o que a outra aba já decidiu
+    // (R11-2-06, ver `serieDoAutor`) — segue na frente, com a série logo depois:
+    // o "Ver +N" tocado nele conta os OUTROS, e trocá-lo seria trocar o card
+    // debaixo do dedo (a mesma regra do `manterFocoNaFrente`).
+    if (fica) AppState.queue.unshift(...AppState.queue.splice(AppState.queue.indexOf(fica), 1));
     AppState.autorEmFoco = id;
     AppState.currentPlace = AppState.queue[0];
     renderFocoAutor();
@@ -17532,9 +17547,17 @@ const ICONE_RAIO = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewB
 // · `todos`: a FRASE da folha fala do AUTOR ("Há N na fila agora") e conta os
 //   pedidos dele que ESTÃO na fila, em andamento ou não: "o único" com outro ali
 //   é falso. Só a frase; o que decide não os leva.
+// · O que a OUTRA aba já decidiu (`decididosPorOutraAbaComCardAqui`) fica FORA,
+//   em todos os modos — mesmo o card da tela, que é onde ele fica (ver
+//   `tirarDaFilaOQueAOutraAbaDecidiu`). Contado, o "Rejeitar os 3" mandava 2, e
+//   o 3º era descontado calado no envio: a folha dizia "2 pedidos · ✓ 2
+//   rejeitados" sem dizer do outro (MEDIDO no navegador, n08 da rodada 11;
+//   R11-2-06, decisão: fora da série, sem texto novo). Fora da série, o card da
+//   tela segue NA FRENTE (`manterFocoNaFrente`, `focarAutor`).
 function serieDoAutor(id, { naTela = null, todos = false } = {}) {
     if (id === null || id === undefined || id === '') return [];
     return (AppState.queue || []).filter((x) => x && x.creatorId === id
+        && !(typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(x) === true)
         && (todos || x === naTela || !pedidosEmAndamento.has(chaveDoPedido(x))));
 }
 
