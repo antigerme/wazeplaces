@@ -275,3 +275,102 @@ test('R11-7-01: a FILA GUARDADA do offline lida depois de a busca falhar — o t
   const tela = m.log.slice(desde);
   assert.deepEqual(tela, [], `DEFEITO: a busca terminou por baixo do treino ("Tudo limpo"/"Falha ao carregar" sob o "Treino concluído"): ${tela.join(' | ')}`);
 });
+
+// ═══ R11-7-02 · a troca de conta com o treino aberto e o "Como funciona" ══════
+// A sessão de X cai e a extensão renova em silêncio com a de Y, com o treino
+// aberto: ele SEGUE (R10-1-01), com os exemplos sintéticos, e a fila de Y vem no
+// "Sair". A troca tira as marcas de "já viu" da conta anterior
+// (`esquecerEscolhasDaContaAnterior`) — e o "Como funciona" ia junto, embora a
+// pessoa siga no treino, que É o "Como funciona". Rodam a troca, o `resetQueue`,
+// a `refazerFilaReal`, o `Treino` e a decisão de abrir o diálogo
+// (`mostrarComoFuncionaSePrimeiraVez`) de verdade; a tela do card está livre.
+const PX = (pre, i) => ({ venueID: pre + i, updateRequestID: 'u' + pre + i, name: 'Padaria ' + pre + i, creatorId: 7000 + i,
+  updateTypeKey: 'VENUE', purType: 'NEW_PLACE', imageUrls: [], mapa: null, dateAdded: 1785203731191 - i * 1000 });
+function montarTrocaCF({ fimAberto = false } = {}) {
+  const log = [];
+  const gravadas = [];   // cada `savePreferences`, como foi gravado
+  const els = { treinoBanner: elemento(['hidden']) };
+  const real = [1, 2, 3].map((i) => PX('x', i));
+  const AppState = {
+    authenticated: true, pendingAction: null, fetchEpoch: 5, fetching: false, hasMore: true, loadError: false,
+    queue: real.slice(), currentPlace: real[0], stats: { read: 3, rejected: 2, skipped: 0 }, serverTotal: 3,
+    autorEmFoco: null, history: {}, conquistas: {}, filters: { managedAreaId: '', myArea: false, stateId: '' },
+    // As marcas e escolhas da conta ANTERIOR (X), que a troca tira.
+    preferences: { comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true, consequenciaVista: true,
+      undoEnabled: false, pularGuarda: true, semUndoSeguidas: 4 },
+  };
+  const fim = { aberto: false };
+  let app = null;
+  const deps = {
+    AppState, ...LIVRE(), document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
+    t: (k) => k, showToast: (m) => { log.push('toast:' + m); return { remover() {} }; },
+    savePreferences: () => gravadas.push(JSON.parse(JSON.stringify(AppState.preferences))),
+    safeLS: { get: () => null, set() {}, remove() {} }, carregarFilaDeSaida: () => [],
+    startFetching: () => log.push('busca'),
+    showCurrentPlace: () => log.push('card:' + ((AppState.currentPlace || {}).venueID || '-')),
+    openModal: (id) => log.push('modal:' + id),
+    filaAtravessouSessao: true,
+    pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    // A tela do card LIVRE: o diálogo abriria (ver o CONTROLE).
+    cardDaFrente: () => ({}), semCamadaAberta: () => true, acoesTravadas: () => false,
+    CamadaVoltar: { consumindo: false }, comoFuncionaEsperaVoltar: false, comoFuncionaEsperaGesto: false,
+    // O "Treino concluído" aberto fecha pela limpeza dele: o `sair()`.
+    fecharOQueEraDaContaAnterior: (comAFila) => { if (comAFila && fim.aberto) { fim.aberto = false; app.Treino.sair(); } },
+  };
+  app = rodar(deps, [
+    ...['filaReal', 'filaRealComDevolvidos', 'refazerFilaReal', 'resetQueue', 'esquecerOutraConta',
+      'esquecerEscolhasDaContaAnterior', 'mostrarComoFuncionaSePrimeiraVez', 'abrirComoFunciona'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['Treino', 'esquecerOutraConta', 'mostrarComoFuncionaSePrimeiraVez']);
+  if (fimAberto) fim.aberto = true;
+  return { app, AppState, log, gravadas, fim };
+}
+// A fila de quem entrou (Y) chega e monta o 1º card: é aí que o diálogo é decidido.
+function chegaAFilaDeY(m) {
+  m.AppState.queue = [1, 2].map((i) => PX('y', i));
+  m.AppState.currentPlace = m.AppState.queue[0];
+  m.app.mostrarComoFuncionaSePrimeiraVez();
+}
+const abriuOComoFunciona = (m) => m.log.includes('modal:comoFuncionaModal');
+
+test('R11-7-02: CONTROLE — sem o treino, outra conta entra e o "Como funciona" abre pro 1º card dela (quem entra não viu nada)', () => {
+  const c = montarTrocaCF();
+  c.app.esquecerOutraConta('5151');
+  assert.equal(c.AppState.preferences.comoFuncionaVisto, undefined, 'CONTROLE: a troca não tirou o "já viu" da conta anterior');
+  assert.deepEqual(c.log.filter((l) => l === 'busca'), ['busca'], 'CONTROLE: a fila de quem entrou não foi buscada');
+  chegaAFilaDeY(c);
+  assert.ok(abriuOComoFunciona(c), `CONTROLE: o "Como funciona" não abriu pra quem entrou — o instrumento não enxerga a abertura: ${c.log.join(' | ')}`);
+});
+
+test('R11-7-02: com o TREINO aberto, a troca de conta mantém o "Como funciona" visto — o "Sair" não o abre por cima do 1º card de quem entrou', () => {
+  const m = montarTrocaCF();
+  m.app.Treino.entrar();
+  assert.equal(m.AppState.preferences.comoFuncionaVisto, true, 'PRÉ-CONDIÇÃO: o treino não marcou o "Como funciona"');
+  m.app.esquecerOutraConta('5151');
+  assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: a troca de conta encerrou o treino (R10-1-01)');
+  assert.equal(m.AppState.preferences.comoFuncionaVisto, true,
+    'DEFEITO: a troca de conta apagou o "já viu o Como funciona" com a pessoa no treino — o "Sair" o abre por cima do 1º card de quem entrou (R11-7-02)');
+  assert.equal(m.gravadas.at(-1).comoFuncionaVisto, true, 'o "Como funciona" visto não ficou GRAVADO (o aparelho o perde ao reabrir)');
+  // As outras marcas e escolhas da conta anterior saem como sempre (R4-5 A3).
+  const p = m.AppState.preferences;
+  assert.deepEqual({ undoGateSeen: p.undoGateSeen, dicaDesfazerVista: p.dicaDesfazerVista, consequenciaVista: p.consequenciaVista,
+    undoEnabled: p.undoEnabled, pularGuarda: p.pularGuarda, semUndoSeguidas: p.semUndoSeguidas },
+  { undoGateSeen: undefined, dicaDesfazerVista: undefined, consequenciaVista: undefined, undoEnabled: true, pularGuarda: false, semUndoSeguidas: 0 },
+  'o treino aberto segurou outra escolha da conta anterior');
+  // O "Sair" do treino: a fila de quem entrou é buscada, chega, e o diálogo NÃO abre.
+  m.app.Treino.sair();
+  assert.deepEqual(m.log.filter((l) => l === 'busca'), ['busca'], 'PRÉ-CONDIÇÃO: o "Sair" não buscou a fila de quem entrou');
+  chegaAFilaDeY(m);
+  assert.ok(!abriuOComoFunciona(m), `DEFEITO: o "Como funciona" abriu por cima do 1º card de quem entrou, logo depois do treino: ${m.log.join(' | ')}`);
+});
+
+test('R11-7-02: com o "Treino concluído" aberto na troca — o diálogo fecha, a fila de quem entrou vem, e o "Como funciona" não abre', () => {
+  const m = montarTrocaCF({ fimAberto: true });
+  m.app.Treino.entrar();
+  m.app.esquecerOutraConta('5151');
+  assert.equal(m.app.Treino.ativo, false, 'PRÉ-CONDIÇÃO: o fechamento do "Treino concluído" não saiu do treino');
+  assert.equal(m.AppState.preferences.comoFuncionaVisto, true, 'DEFEITO: o "já viu o Como funciona" saiu com a pessoa no fim do treino');
+  chegaAFilaDeY(m);
+  assert.ok(!abriuOComoFunciona(m), `DEFEITO: o "Como funciona" abriu logo depois do "Treino concluído": ${m.log.join(' | ')}`);
+});

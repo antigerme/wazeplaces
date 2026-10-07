@@ -19087,6 +19087,13 @@ function esquecerEscolhasDaContaAnterior() {
     prefs.undoEnabled = true;
     prefs.pularGuarda = false;
     for (const marca of ['undoGateSeen', 'dicaDesfazerVista', 'comoFuncionaVisto', 'consequenciaVista']) delete prefs[marca];
+    // Menos o "Como funciona" com o TREINO aberto: a troca de conta pela renovação
+    // silenciosa não o encerra (R10-1-01), e quem está nele está aprendendo — o
+    // treino É o "Como funciona" (o `Treino.entrar` o marca pelo mesmo motivo).
+    // Sem isto, o "Sair" do treino abria o diálogo por cima do 1º card de quem
+    // entrou, e pelo teclado o Enter seguinte, dado pra agir no ✕, caía no
+    // "Quero treinar antes" e voltava ao treino (R11-7-02, MEDIDO no navegador).
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) prefs.comoFuncionaVisto = true;
     prefs.semUndoSeguidas = 0;
     savePreferences();
     safeLS.remove(PERFIL_GATE_KEY);
