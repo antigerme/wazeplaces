@@ -3201,9 +3201,16 @@ const liefiSegurado9j = async (nome, { comSaida = false } = {}) => {
 const a9jR = await liefiSegurado9j('arrastou o card travado');
 const arr9j = await a9jR.pg.evaluate(() => { const r = cardDaFrente().querySelector('.card-content').getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + 30 }; });
+// O selo do lado, com o dedo AINDA no card, ASSENTADO (a transição de 0,15 s da
+// opacidade termina antes da leitura): é o que a pessoa vê no meio do arraste.
+const seloA9j = () => a9jR.pg.evaluate(() => new Promise((ok) => setTimeout(() => {
+  const c = cardDaFrente();
+  ok({ direita: Number(getComputedStyle(c.querySelector('.swipe-right')).opacity), esquerda: Number(getComputedStyle(c.querySelector('.swipe-left')).opacity) });
+}, 350)));
 await a9jR.pg.mouse.move(arr9j.x, arr9j.y);
 await a9jR.pg.mouse.down();
 for (let i = 1; i <= 8; i++) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
+const seloTravadoA9j = await seloA9j();
 await a9jR.pg.mouse.up();
 // A volta pro lugar acabou (400 ms) — pelo FIM dela (o card parado), não por prazo.
 await esperarNaPagina(a9jR.pg, () => !window.gestoNoCard(cardDaFrente()), 5000, 50);
@@ -3213,9 +3220,29 @@ diz('PRÉ-CONDIÇÃO: lie-fi, o card de foto travado, ARRASTADO e de volta ao lu
   a9jR.pronto && a9jR.travado && a9jR.e.perfis.length >= 1 && antesA9j.aviso && antesA9j.rejeitar
   && /^translate\(0(px)?, 0(px)?\) rotate\(0deg\)$/.test(antesA9j.transform || '') && antesA9j.rejeitados === 0,
   JSON.stringify({ pronto: a9jR.pronto, travado: a9jR.travado, perfis: a9jR.e.perfis.length, antesA9j }));
+// (R11-4-02) O selo "Lido" acendia inteiro no arraste pro lado travado — e soltar
+// não decidia: o que o app MOSTRAVA e o que ele ACEITAVA discordavam (MEDIDO, n29
+// da auditoria da rodada 11, nos dois motores).
+diz('no card de foto travado, o arraste pro lado NÃO acende o selo daquele lado — soltar ali não decide (R11-4-02)',
+  seloTravadoA9j.direita === 0, JSON.stringify(seloTravadoA9j));
 const provaA9j = await a9jR.provar();
 diz('o card de foto que a pessoa TENTOU ARRASTAR sai do "precisa de sinal" quando a rede é provada (R10-4-01)',
   provaA9j.solto && provaA9j.ms < 2000 && provaA9j.diario.includes('foto.redeProvada'), JSON.stringify(provaA9j));
+// CONTROLE do selo: o MESMO arraste no MESMO card, agora solto do aviso, acende o
+// "Lido" — e volta pro meio antes de soltar, pra não decidir nada.
+await a9jR.pg.mouse.move(arr9j.x, arr9j.y);
+await a9jR.pg.mouse.down();
+for (let i = 1; i <= 8; i++) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
+const seloLivreA9j = await seloA9j();
+for (let i = 7; i >= 0; i--) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
+await dormir(200);
+await a9jR.pg.mouse.up();
+await esperarNaPagina(a9jR.pg, () => !window.gestoNoCard(cardDaFrente()), 5000, 50);
+const fimA9j = await a9jR.pg.evaluate(() => ({ lidos: AppState.stats.read, rejeitados: AppState.stats.rejected,
+  frente: AppState.currentPlace && AppState.currentPlace.venueID }));
+diz('CONTROLE: o mesmo arraste no card livre acende o "Lido" (o instrumento enxerga o selo), e voltar ao meio não decide',
+  seloLivreA9j.direita === 1 && fimA9j.lidos === 0 && fimA9j.rejeitados === 0 && fimA9j.frente === 'v221' && provaA9j.solto,
+  JSON.stringify({ seloLivreA9j, fimA9j }));
 await a9jR.fechar();
 
 // 5. (R10-4-03) A PROVA NO MEIO DO ESVAZIAMENTO: uma decisão de antes espera
@@ -3672,6 +3699,19 @@ diz('PRÉ-CONDIÇÃO: sem sinal, o ✕ ficou esperando envio, e o indicador est�
   JSON.stringify(com9n));
 diz('no computador, o FAB NÃO cobre o "N esperando envio" — reavaliado quando o número apareceu (R9-4-05)',
   com9n.cobre === 0 && com9n.noCentro === 'indicador' && com9n.canto !== 'cima-dir', JSON.stringify(com9n));
+// (R11-4-04) O que o DIAGNÓSTICO vê disso: o indicador na geometria, com a marca
+// de número a não cobrir, e a sentinela `indicadorEscondido` quieta. Pelo
+// computado + sentinelas DIRETO (sem a captura, que reposiciona o FAB ao contar).
+const diag9n = () => L9n.evaluate(() => {
+  const c = diagComputado();
+  const g = (c.geometria || []).find((x) => x.sel === '#inFlightIndicator') || null;
+  return { ind: g && { naoCobrir: g.naoCobrir, noCentro: g.noCentro, sobFab: g.sobFab },
+           alertas: diagSentinelas(c).filter((a) => a.chave === 'indicadorEscondido') };
+});
+const diagCom9n = await diag9n();
+diz('o diagnóstico MEDE o "N esperando envio" (número a não cobrir, à vista) e não acusa nada (R11-4-04)',
+  !!diagCom9n.ind && diagCom9n.ind.naoCobrir === true && diagCom9n.ind.noCentro === 'ele mesmo' && diagCom9n.alertas.length === 0,
+  JSON.stringify(diagCom9n));
 // CONTROLE: o instrumento ENXERGA a sobreposição — com o FAB posto à força no
 // `cima-dir`, ele cobre o número, e o dedo no meio dele cai no FAB.
 await L9n.evaluate(() => {
@@ -3683,6 +3723,17 @@ await L9n.evaluate(() => {
 const forcado9n = await fab9n();
 diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa o número coberto e o dedo no FAB',
   forcado9n.cobre > 0 && forcado9n.noCentro === 'FAB', JSON.stringify(forcado9n));
+// E o diagnóstico ACUSA a mesma cobertura — o defeito do R9-4-05/R11-4-03 que
+// nenhum relatório mostrava (R11-4-04) —, dizendo que é o FAB. O FAB que o
+// EDITOR pôs ali (`devFabFixado`) é escolha dele, e cala.
+const diagForcado9n = await diag9n();
+diz('com o FAB por cima do "N esperando envio", o diagnóstico acusa `indicadorEscondido`, dizendo que é o FAB (R11-4-04)',
+  diagForcado9n.alertas.length === 1 && diagForcado9n.alertas[0].fab === true && diagForcado9n.ind && diagForcado9n.ind.sobFab === true,
+  JSON.stringify(diagForcado9n));
+const diagFixado9n = await L9n.evaluate(() => { devFabFixado = true;
+  const n = diagSentinelas(diagComputado()).filter((a) => a.chave === 'indicadorEscondido').length;
+  devFabFixado = false; return n; });
+diz('o mesmo FAB, arrastado pelo editor pra lá, não vira alerta', diagFixado9n === 0, JSON.stringify({ diagFixado9n }));
 // A rede volta: a fila de saída esvazia, o indicador SOME — e o FAB volta ao canto preferido.
 aviao9n = false; await ctx9nL.setOffline(false);
 const saiu9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length === 0 && !document.getElementById('inFlightIndicator'), 20000, 100);
