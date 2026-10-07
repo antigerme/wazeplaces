@@ -16,24 +16,29 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-07 ~15:30 UTC)
+## 0. Estado agora (2026-10-07 ~18:30 UTC)
 
-- **Lote 14 em produção** (PR #261, `f732676`, v2026.10.07-02), verificado com as duas contas: 123 ✓ · 0 ✗ na volta
-  inteira, com a seção "17. Lote 14 no ar" (8 ✓), nenhum defeito do app.
-- **Rodada 11** completa (`scratchpad/r11-<n>/relatorio.md`, ~35 achados): 1 alto (o app CONGELAVA no fim do treino
-  quando a busca lenta da abertura voltava dentro dele) e 2 médios (aprovar e excluir fotos do mesmo local desfazia a
-  aprovação no Waze; o envio que falha na conversa não chegava ao leitor de tela). O resto, baixos.
-- **Lote 15 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
-  ampliada, duas abas, fila e "Marcar todos", contas e a adoção, Filtros e "Minha área", diagnóstico e offline,
-  presença e conversa, treino) mais dois ajustes da junção (o selo "Pular ⭐" na régua do ↑; o observador do
-  cabeçalho pela caixa de borda) e um conflito em fonte (contas × filtros no `esquecerOutraConta`) resolvido pela
-  união. Relatórios em `scratchpad/relatorio-l15-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 15").
+- **Lote 15 em produção** (PR #262, `d3ecfed`, v2026.10.07-03), verificado com as duas contas: 132 ✓ na volta
+  inteira, com a seção "18. Lote 15 no ar" (8 ✓). O único ✗ era do roteiro (a triagem do diagnóstico tinha mudado de
+  forma no próprio lote); refeita a seção, 25 ✓ · 0 ✗. Nenhum defeito do app.
+- **Rodada 12** completa (`scratchpad/r12-<n>/relatorio.md`, ~33 achados): nenhum alto; 4 médios (a recusa
+  automática no ar ignorava a decisão da outra aba; a busca no ar trazia de volta o pedido decidido lá; a fila
+  guardada do offline trazia de volta o card que a outra aba decidiu; com "Minha área", a fila guardada não abria no
+  lie-fi) e 1 médio-baixo (o aquecimento da lixeira que volta tarde gravava a lista velha). O resto, baixos.
+- **Lote 16 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
+  ampliada, duas abas, fila e "Marcar todos", contas e a adoção, diagnóstico e offline, presença e conversa, treino e
+  Histórico, Filtros e "Minha área") e três conflitos em fonte resolvidos pela união (os harnesses de
+  `test/minha-area`/`test/offline-varredura` entre filtros e diag; o README das leituras do KV entre filtros e foto
+  ampliada; o `handleLogout` e o `aprovacaoPousouDepoisDaQueda` entre foto ampliada e duas abas). Relatórios em
+  `scratchpad/relatorio-l16-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 16").
 - **Cookies** (2026-10-06): `a3bf0b4b-antigerme_cookies.txt` (L6+AM) e `83b3b403-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "18. Lote 15 no ar") — e a rodada 12,
-  com as pistas que os agentes deixaram: a pergunta do perfil a outro servidor que FALHA ainda vale como "não edita
-  lá" (filtros); a recusa automática no ar na aba que recebe o aviso e o aviso da fila de saída que não confere a
-  conta (abas); dois logins desta aba ao mesmo tempo (contas).
+- **Próxima volta**: PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "19. Lote 16 no ar": o que está no
+  ar comparado byte a byte com o juntado, o eco do envio sem resposta, o "Ver de novo" na janela do Desfazer e a busca
+  no ar × outra aba) — e a rodada 13, com as pistas dos agentes: com "Minha área", o perfil que chega quando a rede
+  volta REFAZ a fila guardada aberta no lie-fi (o card da tela troca); a série do autor que acaba pela seta com o foco
+  na barra larga o foco no `<body>`; a aba sem sessão na memória ignora o aviso do pouso; o `decisaoDepoisDaQueda` não
+  registra o pouso.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -78,6 +83,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #259 | — | instrumento: a sonda falsa do "Marcar todos" espera o relógio andar; a espera dos smokes diz quando a página do WebKit cai; o relógio grosso | CI verde nos dois jobs |
 | #260 | 2026100701 | rodada 12: treino e a fila real, fila de saída, foto ampliada, diagnóstico, presença, filtros e "Minha área" por servidor, contas em duas abas; a extensão 0.3.4 | **112 ✓** em produção (os 4 ✗ do roteiro, consertados; a seção 16 refeita, 26 ✓ · 0 ✗), nenhum defeito do app |
 | #261 | 2026100702 | rodada 13: recusa automática e "Marcar todos", duas abas, treino, foto ampliada, presença, "Minha área" por servidor, entrada, offline e FAB | **123 ✓** em produção, com a seção 17 (8 ✓), nenhum defeito do app |
+| #262 | 2026100703 | rodada 14: o congelamento no fim do treino com a busca lenta, aprovar × excluir foto no mesmo local, duas abas e o canal dos pousos, o envio que falha na conversa no leitor de tela, "Minha área" por servidor, entrada, offline e FAB | **132 ✓** em produção, com a seção 18 (8 ✓); o 1 ✗ era do roteiro (a triagem do diagnóstico mudou de forma), refeito: 25 ✓ · 0 ✗; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
