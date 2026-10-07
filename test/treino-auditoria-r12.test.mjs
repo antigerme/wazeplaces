@@ -5,7 +5,12 @@
 //              TELA acendia "nova" diante da pessoa e seguia em `novas`: fechado
 //              o modal, o ponto do botão de Filtros ficava aceso, e o toque
 //              seguinte era desviado pro Histórico pra mostrar de novo o que ela
-//              já tinha visto.
+//              já tinha visto;
+//   R12-7-02 — o perfil que chegava com os Filtros ABERTOS (o atalho do ícone, a
+//              rede lenta) redesenhava só a aba Filtros: as Preferências seguiam
+//              com o Desfazer travado ("Disponível depois de você logar…") e o
+//              Histórico com a vitrine "1 de 14", sem o "Curador" já ganho e sem
+//              o interruptor "Rejeitar sozinho", até fechar e abrir.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -273,11 +278,88 @@ test('R12-7-01: DUAS abas — a de FUNDO, com o Histórico aberto, não apaga o 
   assert.deepEqual(A2.desenhos.at(-1).aneis, ['primeiraFaxina']);
 });
 
+// ═══ R12-7-02 · o perfil que chega com os Filtros ABERTOS ═══════════════════
+const L6 = { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false };
+// A porta única do perfil (`definirPerfil`) DE VERDADE, com o redesenho dos
+// Filtros, a cota do Desfazer e o portão de L6 de verdade. O desenho do
+// Histórico anota o que a vitrine e a lista de autores mostrariam.
+function montarPerfil({ aba = 'prefs', modalAberto = true } = {}) {
+  const els = {
+    filtersModal: { classList: classes(...(modalAberto ? [] : ['hidden'])) },
+    filtersPanelHistory: { classList: classes(...(aba === 'hist' ? [] : ['hidden'])) },
+    prefUndoEnabled: { disabled: false, checked: false },
+    prefUndoGateMsg: { classList: classes('hidden'), textContent: '' },
+  };
+  const desenhos = [];
+  const guardado = {};   // o aparelho SEM o nível guardado: a 1ª entrada, ou depois de uma troca de conta
+  const AppState = { authenticated: true, profile: null, conquistas: null, devMode: { unlocked: false, active: false },
+    stats: { read: 100, rejected: 100, skipped: 0 },
+    preferences: { undoEnabled: true, undoGateSeen: true, comoFuncionaVisto: true } };
+  const deps = {
+    AppState, document: { visibilityState: 'visible', getElementById: (id) => els[id] || null },
+    safeLS: { get: (k) => (k in guardado ? guardado[k] : null), set: (k, v) => { guardado[k] = v; } },
+    PERFIL_GATE_KEY: 'waze_places_perfil_gate', preferenciasCarregadas: true,
+    UNDO_GATE_BASE: Number(/^const UNDO_GATE_BASE = (\d+);$/m.exec(APP_SEM)[1]),
+    t: (k) => k, savePreferences: () => {},
+    redesenhoDoHistoricoAgendado: false,
+    contaSegueNoAparelho: () => true,
+    handleLogout: () => assert.fail('o perfil da própria conta deslogou'),
+    marcarConquistasVistas: () => {},   // o R12-7-01, acima
+    renderHistory: () => desenhos.push({
+      vitrine: h.conquistasVisiveis().length,
+      curador: h.conquistasVisiveis().some((x) => x.id === 'curador'),
+      interruptor: h.podeRecusarAutomaticoAqui(),
+    }),
+  };
+  const fns = ['definirPerfil', 'redesenharFiltrosComOPerfil', 'renderUndoGateUI', 'initUndoGateSeen', 'undoGateAtingido',
+    'canDisableUndo', 'getUndoTreatedCount', 'getUndoUnlockThreshold', 'perfilDoPortao', 'guardarPerfilDoPortao',
+    'agendarRedesenhoDoHistorico', 'historicoNaTela', 'verConquistasNaTela', 'conquistasVisiveis',
+    'conquistasComPortaoAqui', 'podeAgirComoL6Aqui', 'podeRecusarAutomaticoAqui'];
+  const h = rodar(deps, [lista('CONQUISTAS'), ...fontes(fns)], fns);
+  return { h, els, desenhos, deps, AppState };
+}
+
+test('R12-7-02: o perfil que chega com os Filtros ABERTOS nas Preferências destrava o Desfazer — sem fechar e abrir', () => {
+  const p = montarPerfil({ aba: 'prefs' });
+  p.h.renderUndoGateUI();   // o que o `openFiltersModal` desenha, ANTES do perfil
+  assert.equal(p.els.prefUndoEnabled.disabled, true, 'PRÉ-CONDIÇÃO: sem o perfil, a cota do Desfazer era conhecida');
+  assert.equal(p.els.prefUndoGateMsg.textContent, 'prefs.undo.gate.noProfile', 'PRÉ-CONDIÇÃO: a frase não é a do perfil que falta');
+  p.h.definirPerfil({ success: true, profile: L6 });
+  assert.equal(p.els.prefUndoEnabled.disabled, false,
+    'DEFEITO: o Desfazer seguiu travado com o perfil já aqui (L6, 200 tratados) — só fechando e abrindo os Filtros');
+  assert.ok(p.els.prefUndoGateMsg.classList.contains('hidden'),
+    'DEFEITO: seguiu "🔒 Disponível depois de você logar e o app carregar seu perfil."');
+  assert.equal(p.els.prefUndoEnabled.checked, true, 'o interruptor não mostra a escolha guardada');
+});
+
+test('R12-7-02: … e com o Histórico na tela, a vitrine ganha as de L6 (o "Curador" já ganho) e a lista de autores o interruptor', async () => {
+  const p = montarPerfil({ aba: 'hist' });
+  p.deps.renderHistory();   // o que o `openFiltersModal` desenha, ANTES do perfil
+  assert.deepEqual(p.desenhos[0], { vitrine: 14, curador: false, interruptor: false },
+    'PRÉ-CONDIÇÃO: sem o perfil, a vitrine já mostrava as de L6');
+  p.h.definirPerfil({ success: true, profile: L6 });
+  await microtarefas();
+  assert.deepEqual(p.desenhos.at(-1), { vitrine: 16, curador: true, interruptor: true },
+    'DEFEITO: o Histórico na tela seguiu "1 de 14", sem o "Curador" e sem o "Rejeitar sozinho", com o perfil de L6 já aqui');
+});
+
+test('R12-7-02: CONTROLE — com os Filtros FECHADOS, o perfil não redesenha nada (a abertura desenha)', async () => {
+  const p = montarPerfil({ aba: 'hist', modalAberto: false });
+  p.h.renderUndoGateUI();
+  p.h.definirPerfil({ success: true, profile: L6 });
+  await microtarefas();
+  assert.equal(p.els.prefUndoEnabled.disabled, true, 'redesenhou as Preferências dos Filtros FECHADOS');
+  assert.equal(p.desenhos.length, 0, 'redesenhou o Histórico dos Filtros FECHADOS');
+  // A abertura (o `openFiltersModal` chama o mesmo `renderUndoGateUI`) já mostra o certo.
+  p.h.renderUndoGateUI();
+  assert.equal(p.els.prefUndoEnabled.disabled, false, 'o instrumento: com o perfil, a cota do Desfazer não destrava');
+});
+
 // ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════
 test('o js/min/app.js — o que o navegador carrega — tem os consertos deste lote', () => {
   const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
   const contar = (txt, re) => (txt.match(re) || []).length;
-  for (const re of [/verConquistasNaTela\(/g, /verConquistasAoVoltar\b/g]) {
+  for (const re of [/verConquistasNaTela\(/g, /verConquistasAoVoltar\b/g, /renderUndoGateUI\(/g]) {
     assert.ok(contar(APP_SEM, re) > 0, `o app.js não tem ${re}`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
   }

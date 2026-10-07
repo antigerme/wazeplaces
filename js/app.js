@@ -11737,6 +11737,15 @@ async function aoTrocarOrdenacao() {
 // deixou de existir: a casa que o perfil não tem vira "Mais recentes", como
 // numa abertura com ele (auditoria de 2026-09-29, F2). Chamada pelo
 // `definirPerfil`, a porta única do perfil.
+//
+// E as outras duas abas do MESMO modal, que também leem o perfil: a cota do
+// Desfazer (Preferências) e o portão de L6 da vitrine e do "Rejeitar sozinho"
+// (Histórico). Só a aba Filtros era redesenhada, e as outras ficavam velhas até
+// fechar e abrir: o Desfazer travado com "Disponível depois de você logar…", a
+// vitrine "1 de 14" sem o "Curador" já ganho, a lista de autores sem o
+// interruptor (R12-7-02, MEDIDO nos dois motores, também pelo atalho do ícone;
+// auditoria de 2026-10-07). O Histórico só é redesenhado NA TELA
+// (`agendarRedesenhoDoHistorico`): fora dela, entrar na aba já o desenha.
 function redesenharFiltrosComOPerfil() {
     const modal = document.getElementById('filtersModal');
     if (!modal || modal.classList.contains('hidden')) return;
@@ -11746,6 +11755,8 @@ function redesenharFiltrosComOPerfil() {
     popularOrdenacoes();
     if (sel && sel.value !== antes) atualizarDicaDeOrdem(null);
     peneirarPaisesComOPerfil();
+    renderUndoGateUI();
+    agendarRedesenhoDoHistorico();
 }
 
 // A lista de países que já estava no seletor quando o perfil chegou entrou SEM a
