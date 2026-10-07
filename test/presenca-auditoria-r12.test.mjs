@@ -132,3 +132,79 @@ test('R12-5-01 a conta refeita na chegada da resposta não come a mensagem que s
   await tick(); await tick();
   assert.equal(conta(c), 2, 'o "lida" que voltou mexeu nas respostas que ninguém viu');
 });
+
+// ── R12-5-02: o segundo "Enviar" sem o perfil, na região viva ───────────────
+
+// A frase que a TELA mostra (o texto antes do "Tentar de novo") e o que a região
+// viva da conversa diz.
+const fraseNaTela = (c) => {
+  const m = /<p class="conversa-falhou">([^<]*) <button/.exec(c.$('conversaMsgs').innerHTML);
+  return m ? m[1] : null;
+};
+const anuncio = (c) => c.$('conversaAnuncio').textContent;
+// Os relógios da frase a caminho da região (os de `PRESENCA_ANUNCIO_DE_NOVO_MS`),
+// e rodá-los — só eles: o resto (a rajada do "lida") não é desta medição.
+const aCaminho = (c) => c.timers.filter((x) => x.ms === c.P.PRESENCA_ANUNCIO_DE_NOVO_MS);
+async function rodarAFrase(c) {
+  for (const x of aCaminho(c)) { c.timers.splice(c.timers.indexOf(x), 1); await x.fn(); }
+}
+
+// A conversa com a CAF aberta (o histórico chegou), e o perfil que some (a
+// renovação silenciosa da sessão): o "Enviar" não manda, e a mensagem entra
+// como "Não enviada." (R6-5-5). `escritas` guarda CADA escrita na região viva
+// — o que um leitor de tela veria mudar.
+async function semPerfil({ enviar = () => ({ success: true }) } = {}) {
+  const c = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir'
+    ? { success: true, mensagens: [], maisAntigas: false, lida: true } : x.acao === 'enviar' ? enviar(x) : { success: true }) } });
+  const el = c.$('conversaAnuncio');
+  const escritas = [];
+  let v = el.textContent;
+  Object.defineProperty(el, 'textContent', { get: () => v, set: (x) => { escritas.push(String(x)); v = String(x); }, configurable: true });
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  const perfil = c.AppState.profile;
+  c.AppState.profile = null;
+  return { c, escritas, voltarOPerfil: () => { c.AppState.profile = perfil; } };
+}
+
+test('R12-5-02 sem o perfil, o segundo "Enviar" LIMPA a região viva e diz a falha de novo numa tarefa à parte — não reescreve a mesma frase', async () => {
+  const { c, escritas } = await semPerfil();
+  c.P.presencaEnviar('a', null);
+  assert.equal(anuncio(c), 'presenca.recibo.naoEnviadaErro', 'CONTROLE: o primeiro "Enviar" diz a falha na hora (R11-5-03)');
+  const antes = escritas.length;
+  c.P.presencaEnviar('b', null);
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 0, 'CONTROLE: sem o perfil, nada sai');
+  assert.equal(c.P.Presenca.historico.get(CAF).msgs.filter((m) => m.estado === 'falhou').length, 2, 'CONTROLE: as duas entram como "Não enviada."');
+  assert.deepEqual(escritas.slice(antes), [''], 'DEFEITO: o segundo "Enviar" reescreveu a MESMA frase na região viva sem limpar antes (ou limpou e escreveu no mesmo tique)');
+  assert.ok(c.P.PRESENCA_ANUNCIO_DE_NOVO_MS > 0 && aCaminho(c).length === 1, 'a frase não ficou a caminho numa tarefa à parte');
+  await rodarAFrase(c);
+  assert.deepEqual(escritas.slice(antes), ['', 'presenca.recibo.naoEnviadaErro'], 'a falha do segundo "Enviar" não foi dita de novo depois da região limpa');
+  assert.equal(anuncio(c), fraseNaTela(c), 'a região não diz a mesma frase da tela');
+});
+
+test('R12-5-02 a frase a caminho: o terceiro "Enviar" só a adia (a região já está limpa), e a tentativa com o perfil de volta não a deixa falar por cima', async () => {
+  // O terceiro "Enviar" no meio do atraso: a região foi limpa pelo segundo, e
+  // escrever já seria limpar e escrever sem o atraso no meio.
+  const a = await semPerfil();
+  a.c.P.presencaEnviar('a', null);
+  a.c.P.presencaEnviar('b', null);
+  const depoisDoSegundo = a.escritas.length;
+  a.c.P.presencaEnviar('c', null);
+  assert.deepEqual(a.escritas.slice(depoisDoSegundo), [''], 'o terceiro "Enviar" escreveu a frase sem o atraso depois da região limpa');
+  assert.equal(aCaminho(a.c).length, 1, 'ficou mais de uma frase a caminho');
+  await rodarAFrase(a.c);
+  assert.equal(anuncio(a.c), 'presenca.recibo.naoEnviadaErro', 'a frase a caminho não chegou');
+  // O perfil volta no meio do atraso e a pessoa manda OUTRA mensagem, que dá
+  // certo: a tentativa começa calada, e o envio que deu certo não deixa a falha
+  // pra trás (R11-5-03) — a frase que estava a caminho não fala depois dele.
+  const b = await semPerfil({ enviar: () => ({ success: true, ts: T + 50 }) });
+  b.c.P.presencaEnviar('a', null);
+  b.c.P.presencaEnviar('b', null);
+  assert.equal(aCaminho(b.c).length, 1, 'CONTROLE: a frase do segundo "Enviar" tinha que estar a caminho');
+  b.voltarOPerfil();
+  b.c.P.presencaEnviar('com o perfil', null);
+  await tick(); await tick();
+  assert.equal(b.c.chamadas.chat.filter((x) => x.acao === 'enviar').length, 1, 'CONTROLE: com o perfil de volta, a mensagem nova sai');
+  await rodarAFrase(b.c);
+  assert.equal(anuncio(b.c), '', 'a falha do "Enviar" sem o perfil falou por cima do envio que deu certo');
+});

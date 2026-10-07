@@ -83,6 +83,9 @@ const PRESENCA_LIDA_NO_AR_MS = 45_000;
 // No diário, mensagem (chegando ou saindo) entra no máximo uma vez por minuto
 // de cada tipo, com quantas vieram juntas — ver `presencaAnotarMsg`.
 const PRESENCA_DIAG_MSG_MS = 60_000;
+// Entre limpar a região viva da conversa e dizer de novo a MESMA frase de
+// falha (ver `presencaAnunciarFalhaOutraVez`).
+const PRESENCA_ANUNCIO_DE_NOVO_MS = 100;
 
 const PRESENCA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRESENCA_ID = /^\d{1,19}$/;
@@ -199,7 +202,9 @@ const Presenca = {
     // rodada 10, R10-5-04; ver `presencaNaoLidasDepoisDoLida`).
     lidaVoltouEm: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
-    timers: { fluxo: null, silencio: null, lida: null, nome: null },
+    // `anuncio`: a frase de falha a caminho da região viva da conversa (ver
+    // `presencaAnunciarFalhaOutraVez`).
+    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null },
 };
 
 // ── linha do tempo pro diagnóstico ──────────────────────────────────────────
@@ -1588,6 +1593,30 @@ function presencaAnunciarFalhaDoEnvio(com) {
     if (ultima) presencaDizerNaConversa(com, presencaFraseDaFalha(ultima));
 }
 
+// O "Enviar" sem o perfil diz a falha na MESMA tarefa do toque: não há ida à
+// rede no meio. O segundo, com a frase do primeiro ainda na região, a
+// reescrevia igual, sem limpar antes — e região viva reescrita com o mesmo
+// texto pode não ser lida de novo; limpar e escrever no mesmo tique dá no mesmo
+// (auditoria da rodada 12, R12-5-02). O envio com o perfil limpa ao sair e diz a
+// falha depois da resposta, numa tarefa à parte. Aqui, a região que já diz algo
+// é limpa AGORA e a frase volta `PRESENCA_ANUNCIO_DE_NOVO_MS` depois — o atraso
+// que a CDK do Angular usa pelo mesmo motivo (com NVDA ou JAWS no Chrome, a
+// mesma mensagem não é lida uma segunda vez sem limpar e esperar). Vazia, a
+// região muda com a frase: ela sai na hora. Quem chega com a frase ainda a
+// caminho (o terceiro "Enviar") só a adia: a região já está limpa.
+function presencaAnunciarFalhaOutraVez(com) {
+    const el = document.getElementById('conversaAnuncio');
+    const aCaminho = !!Presenca.timers.anuncio;
+    clearTimeout(Presenca.timers.anuncio);
+    Presenca.timers.anuncio = null;
+    if (!aCaminho && (!el || !el.textContent)) { presencaAnunciarFalhaDoEnvio(com); return; }
+    presencaDizerNaConversa(com, '');
+    Presenca.timers.anuncio = setTimeout(() => {
+        Presenca.timers.anuncio = null;
+        presencaAnunciarFalhaDoEnvio(com);
+    }, PRESENCA_ANUNCIO_DE_NOVO_MS);
+}
+
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
 // pessoa viu nela (`presencaVistaDe`). Sem mensagem dela vista, nada a guardar.
 function presencaDever(id) {
@@ -2289,8 +2318,9 @@ function presencaEnviar(legenda, card) {
     presencaAtualizarPrevia(id, msg);
     presencaRenderConversa({ rolarAoFim: true });
     if (eu) { presencaMandar(id, msg); return; }
-    // A tela diz "Não enviada." — o leitor de tela também (R11-5-03).
-    presencaAnunciarFalhaDoEnvio(id);
+    // A tela diz "Não enviada." — o leitor de tela também (R11-5-03), e o
+    // segundo "Enviar" na espera do perfil o diz outra vez (R12-5-02).
+    presencaAnunciarFalhaOutraVez(id);
     // No diário, como toda falha de envio (ver `presencaMandar`): esta nem saiu.
     presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
 }
@@ -2300,7 +2330,12 @@ async function presencaMandar(com, msg) {
     msg.motivo = null;
     presencaRenderConversa();
     // A tentativa começa sem a falha anterior no leitor de tela (ver
-    // `presencaDizerNaConversa`): a mesma falha de novo volta a ser dita.
+    // `presencaDizerNaConversa`): a mesma falha de novo volta a ser dita. E a
+    // do "Enviar" sem o perfil que ainda estava a caminho (ver
+    // `presencaAnunciarFalhaOutraVez`) não fala por cima desta tentativa: o
+    // envio que dá certo não deixa "Não enviada" na região.
+    clearTimeout(Presenca.timers.anuncio);
+    Presenca.timers.anuncio = null;
     presencaDizerNaConversa(com, '');
     // O cartão vai num campo que o WME não mostra, com a pergunta curta pra
     // prévia da lista. A MARCA do app quem põe é o servidor.
