@@ -10478,7 +10478,15 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
     const epoca = epocaDaSessao;
-    const filaDaQueda = AppState.fetchEpoch;   // a fila na tela, que a renovação mantém
+    // A fila REAL, que a renovação mantém — pela ÉPOCA dela. Com o TREINO aberto,
+    // a `fetchEpoch` é a dos EXEMPLOS, e guardada ela a renovação errava nos dois
+    // sentidos: com a fila refeita no "Sair" (o perfil levou a outro país), "sua
+    // fila continua aqui" saía junto do "Mostrando a fila do país…"; sem o
+    // refazer, a fila continuava e o aviso não saía (R11-7-03, MEDIDO no
+    // navegador; auditoria da rodada 11). No treino, vale a que ele guarda, e null
+    // quando ela não volta no "Sair" (`Treino.epocaDaFilaGuardada`).
+    const epocaDaFilaReal = () => (Treino.ativo === true ? Treino.epocaDaFilaGuardada() : AppState.fetchEpoch);
+    const filaDaQueda = epocaDaFilaReal();
     entrarPelaExtensao({ silencioso: true, manterFila: true }).then(async (renovou) => {
         // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
         // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
@@ -10495,7 +10503,7 @@ function derrubarSessao(errorKey, { depois } = {}) {
                 new Promise((ok) => setTimeout(ok, AVISO_RENOVADA_ESPERA_PERFIL_MS)),
             ]);
             if (epoca !== epocaDaSessao) return;
-            if (AppState.fetchEpoch === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
+            if (filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
         // A extensão pode ter respondido que o PORTÃO recusou a conta (o nível
@@ -21680,8 +21688,12 @@ const Treino = {
         // A ÉPOCA volta com a fila (ver `entrar`): o que ainda estiver no ar sobre
         // ela pousa nela, como se o treino não tivesse existido. Só se a época é
         // a que o treino pôs: outra (nada a muda sem encerrar o treino hoje) seria
-        // uma fila refeita, e voltar a época apagaria isso.
-        if (Number.isInteger(s.epoca) && AppState.fetchEpoch === s.epocaDoTreino) AppState.fetchEpoch = s.epoca;
+        // uma fila refeita, e voltar a época apagaria isso. E nunca com a fila
+        // REFEITA logo abaixo (`refazerFila`): o `resetQueue` dela subiria a época
+        // de volta à do TREINO, e quem a guardou tomaria a fila nova pela mesma —
+        // era o "sua fila continua aqui" junto do "Mostrando a fila do país…"
+        // (R11-7-03). Sem repor, a fila nova ganha uma época que ninguém guardou.
+        if (Number.isInteger(s.epoca) && AppState.fetchEpoch === s.epocaDoTreino && !s.refazerFila) AppState.fetchEpoch = s.epoca;
         removeCurrentCardEl();
         // O PERFIL que chegou com o treino aberto (R7-2-04, auditoria de
         // 2026-10-02): a ordem por casa/trabalho e a recusa automática esperavam
@@ -21737,6 +21749,17 @@ const Treino = {
     // (o `enviarLote`, o `devolverPedidoRecusado`, a queda da sessão).
     filaGuardada(epoca) {
         return this.ativo && this._salvo && this._salvo.epoca === epoca ? this._salvo.queue : null;
+    },
+
+    // A época da fila REAL que o treino guarda — a que o `sair()` devolve —, ou
+    // null quando ela NÃO volta: a que o perfil mandou refazer no "Sair"
+    // (`anotarFilaRefeita`) e a da conta anterior (`esquecerFilaDaContaAnterior`,
+    // que tira a época). É por ela que a renovação da queda decide se a fila
+    // "continua aqui" (`derrubarSessao`, R11-7-03).
+    epocaDaFilaGuardada() {
+        if (!this.ativo || !this._salvo) return null;
+        const s = this._salvo;
+        return s.refazerFila || !Number.isInteger(s.epoca) ? null : s.epoca;
     },
 
     // O recusado de vez com o treino aberto, cuja fila é a guardada: espera o

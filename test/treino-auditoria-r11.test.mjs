@@ -374,3 +374,168 @@ test('R11-7-02: com o "Treino concluído" aberto na troca — o diálogo fecha, 
   chegaAFilaDeY(m);
   assert.ok(!abriuOComoFunciona(m), `DEFEITO: o "Como funciona" abriu logo depois do "Treino concluído": ${m.log.join(' | ')}`);
 });
+
+// ═══ R11-7-03 · a renovação da queda com o treino aberto ═════════════════════
+// A sessão cai e a extensão renova em silêncio (`derrubarSessao` → a ponte
+// responde). No fim, "Acesso renovado pelo WME — sua fila continua aqui" sai só
+// se a fila REAL continua. Com o treino aberto, a queda guardava a época dos
+// EXEMPLOS, e o `sair()` com a fila refeita voltava à mesma época. Rodam a queda,
+// a ponte da extensão, a troca de conta, a `refazerFilaReal`, o `resetQueue` e o
+// `Treino` de verdade; o perfil da renovação chega na hora (a mesma conta).
+const CONTA_KEY = /^const CONTA_KEY = '([^']+)';/m.exec(APP)[1];
+const AVISO_FR = { chave: 'toast.paisDoPerfil', pais: 'France', regiao: 'row', id: 73 };
+function janelaFalsa() {
+  const ouvintes = new Set();
+  const w = {
+    location: { origin: 'https://app' },
+    addEventListener: (t, fn) => { if (t === 'message') ouvintes.add(fn); },
+    removeEventListener: (t, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+    // O que a ponte da extensão responderia.
+    responder: (data) => { for (const fn of [...ouvintes]) fn({ source: w, origin: w.location.origin, data }); },
+  };
+  return w;
+}
+function montarQueda() {
+  const log = [];
+  const toasts = [];
+  const ls = new Map();
+  const safeLS = { get: (k) => (ls.has(k) ? ls.get(k) : null), set: (k, v) => ls.set(k, String(v)), remove: (k) => ls.delete(k) };
+  const window = janelaFalsa();
+  const els = { treinoBanner: elemento(['hidden']) };
+  const real = [1, 2, 3].map((i) => PX('b', i));
+  let token = 'tokA';
+  const AppState = {
+    authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: true, loadError: false,
+    queue: real.slice(), currentPlace: real[0], stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 3,
+    autorEmFoco: null, history: {}, conquistas: {}, profile: { id: 111 },
+    preferences: { comoFuncionaVisto: true }, filters: { myArea: false, managedAreaId: '', stateId: '' },
+  };
+  let app = null;
+  const deps = {
+    AppState, ...LIVRE(), window, safeLS, CONTA_KEY,
+    document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
+    epocaDaSessao: 0, quedaAnunciada: false, saiuNestaPagina: false, extPerguntando: false, extRenovando: false,
+    extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    saidaEsperandoConta: false, contaConfirmadaNestaAba: null,
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, AVISO_RENOVADA_ESPERA_PERFIL_MS: 30, setTimeout, clearTimeout,
+    API: { setSession: (t) => { token = t; }, getSession: () => token, soltarSessao() {}, get sessionToken() { return token; } },
+    sessaoDestaAbaEhAGuardada: () => true,
+    t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
+    showToast: (m) => { toasts.push(m); return { remover() {} }; },
+    carregarFilaDeSaida: () => [],
+    // A busca da fila nova (no treino, o `startFetching` volta na hora: R11-7-01).
+    startFetching: () => { if (!app.Treino.ativo) log.push('busca'); },
+    rebuscarDepoisDeFalha: () => log.push('rebuscou'),
+    showCurrentPlace: () => log.push('card:' + ((AppState.currentPlace || {}).venueID || '-')),
+    loadProfileAndAuxData: () => Promise.resolve(),
+    pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
+    fecharOQueEraDaContaAnterior: () => {},
+  };
+  app = rodar(deps, [
+    ...['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
+      'esquecerEscolhasDaContaAnterior', 'marcaDaSessao', 'filaReal', 'filaRealComDevolvidos', 'refazerFilaReal',
+      'resetQueue'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['derrubarSessao', 'Treino', 'refazerFilaReal', 'marcaDaSessao']);
+  safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: app.marcaDaSessao('tokA') }));   // X estava triando
+  return { app, AppState, deps, log, toasts, window };
+}
+// A ponte responde com a sessão nova; a renovação termina (`rebuscou`, e a
+// decisão do aviso logo depois do perfil, que chega na hora).
+async function renovar(m, conta = null) {
+  m.window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokA2', ...(conta ? { conta } : {}) });
+  await ateQue(() => m.log.includes('rebuscou'), 'a renovação da queda não terminou');
+  await tiques(3);
+}
+const renovado = (m) => m.toasts.includes('toast.sessionRenewed');
+
+test('R11-7-03: CONTROLE — sem o treino, a queda renovada diz "sua fila continua aqui" (a fila continuou)', async () => {
+  const c = montarQueda();
+  c.app.derrubarSessao('srv.err.sessionExpired');
+  await renovar(c);
+  assert.deepEqual(c.toasts, ['toast.sessionRenewed'], 'CONTROLE: sem o treino o aviso da renovação não saiu — o instrumento não o enxerga');
+});
+
+test('R11-7-03: o "Sair" do treino durante a renovação, SEM refazer — a fila real continua, e o aviso diz isso', async () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  m.app.derrubarSessao('srv.err.sessionExpired');
+  m.app.Treino.sair();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['b1', 'b2', 'b3'], 'PRÉ-CONDIÇÃO: o "Sair" não devolveu a fila real');
+  await renovar(m);
+  assert.ok(renovado(m),
+    `DEFEITO: a fila real continuou depois da queda e o "sua fila continua aqui" não saiu — a queda guardou a época dos EXEMPLOS (R11-7-03): ${m.toasts.join(' | ')}`);
+});
+
+test('R11-7-03: o perfil mandou refazer a fila (outro país) e o "Sair" a refaz durante a renovação — sem "sua fila continua aqui" junto do aviso do país', async () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  m.app.refazerFilaReal(AVISO_FR);   // o perfil levou a outro país: anotado pro "Sair"
+  m.app.derrubarSessao('srv.err.sessionExpired');
+  m.app.Treino.sair();
+  assert.deepEqual([m.log.filter((l) => l === 'busca'), m.toasts], [['busca'], ['toast.paisDoPerfil(France)']],
+    'PRÉ-CONDIÇÃO: o "Sair" não refez a fila do país novo, com o aviso');
+  await renovar(m);
+  assert.ok(!renovado(m),
+    `DEFEITO: "sua fila continua aqui" junto do "Mostrando a fila do país…" — a fila foi trocada (R11-7-03): ${m.toasts.join(' | ')}`);
+});
+
+test('R11-7-03: o refazer chega DURANTE a renovação e o "Sair" vem antes de ela terminar — a fila trocou, sem "sua fila continua aqui"', async () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  m.app.derrubarSessao('srv.err.sessionExpired');
+  m.app.refazerFilaReal(AVISO_FR);
+  m.app.Treino.sair();
+  await renovar(m);
+  assert.ok(m.toasts.includes('toast.paisDoPerfil(France)'), 'PRÉ-CONDIÇÃO: a fila não foi refeita com o aviso do país');
+  assert.ok(!renovado(m), `DEFEITO: "sua fila continua aqui" sobre a fila refeita: ${m.toasts.join(' | ')}`);
+});
+
+test('R11-7-03: a renovação termina com o treino AINDA aberto — sem refazer, o aviso sai (a fila guardada continua); com o refazer anotado, não', async () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  m.app.derrubarSessao('srv.err.sessionExpired');
+  await renovar(m);
+  assert.ok(renovado(m), `a fila real guardada no treino continuou e o aviso não saiu: ${m.toasts.join(' | ')}`);
+  m.app.Treino.sair();
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['b1', 'b2', 'b3'], 'o "Sair" não devolveu a fila real');
+
+  const r = montarQueda();
+  r.app.Treino.entrar();
+  r.app.refazerFilaReal(AVISO_FR);
+  r.app.derrubarSessao('srv.err.sessionExpired');
+  await renovar(r);
+  assert.ok(!renovado(r),
+    `DEFEITO: "sua fila continua aqui" no treino, com a fila anotada pra ser trocada no "Sair" — o aviso do país vem depois e o contradiz: ${r.toasts.join(' | ')}`);
+  r.app.Treino.sair();
+  assert.ok(r.toasts.includes('toast.paisDoPerfil(France)'), 'o "Sair" não refez a fila com o aviso do país');
+});
+
+test('R11-7-03: OUTRA conta na renovação com o treino aberto (pela ponte) — "Outra conta entrou", e nunca "sua fila continua aqui"', async () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  m.app.derrubarSessao('srv.err.sessionExpired');
+  await renovar(m, '222');
+  assert.ok(m.toasts.includes('toast.outraConta'), `PRÉ-CONDIÇÃO: a troca de conta não foi detectada: ${m.toasts.join(' | ')}`);
+  assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: a troca de conta encerrou o treino (R10-1-01)');
+  assert.ok(!renovado(m), `DEFEITO: "sua fila continua aqui" junto do "Outra conta entrou": ${m.toasts.join(' | ')}`);
+});
+
+test('R11-7-03: a fila refeita no "Sair" do treino ganha uma época que NINGUÉM guardou — nem a do treino, nem a da fila real de antes', () => {
+  const m = montarQueda();
+  m.app.Treino.entrar();
+  const epocaDoTreino = m.AppState.fetchEpoch;
+  const epocaReal = m.app.Treino._salvo.epoca;
+  m.app.refazerFilaReal(AVISO_FR);
+  m.app.Treino.sair();
+  assert.ok(![epocaDoTreino, epocaReal].includes(m.AppState.fetchEpoch),
+    `DEFEITO: a fila refeita voltou com a época ${m.AppState.fetchEpoch} (treino ${epocaDoTreino}, real ${epocaReal}) — quem guardou a época do treino a toma pela mesma fila (R11-7-03)`);
+  // CONTROLE: sem o refazer, a fila REAL volta com a época dela (R7-7-04).
+  const c = montarQueda();
+  c.app.Treino.entrar();
+  const real = c.app.Treino._salvo.epoca;
+  c.app.Treino.sair();
+  assert.equal(c.AppState.fetchEpoch, real, 'CONTROLE: o "Sair" sem refazer não devolveu a época da fila real');
+});
