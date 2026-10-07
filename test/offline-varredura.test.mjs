@@ -941,6 +941,8 @@ function aparelhoO1() {
       bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(),
       pousosDaPagina: new Map(), offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
       refazerPerfilSeFaltar: () => {}, showLoading: () => {}, removeCurrentCardEl: () => {},
+      // A decisão do lugar que ficou sem resposta (R12-6): aqui, nenhuma pendente.
+      refazerDecisaoSemResposta: () => null,
       document: { getElementById: el },
       // A tela vazia diz se é a de FALHA (`loadError`) ou o "Tudo limpo!": o
       // instrumento que não distingue as duas conta uma pela outra.

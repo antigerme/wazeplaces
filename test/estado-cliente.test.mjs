@@ -672,7 +672,8 @@ test('país: vale a cada abertura, depois do perfil — e troca de verdade (fila
   const l = fatiar('loadProfileAndAuxData');
   assert.match(l, /if \(definirPerfil\(profileRes\)\) await completarPerfilChegado\(profileRes\.profile, epoca\);/);
   const c = fatiar('completarPerfilChegado');
-  assert.match(c, /const destino = await paisDoPerfil\(perfil, epoca\);\s*if \(destino && epoca === epocaDaSessao\) await irProPaisDoPerfil\(destino\);/);
+  // (As regiões que não responderam ficam anotadas no meio: a decisão pendente, R12-6.)
+  assert.match(c, /const destino = await paisDoPerfil\(perfil, epoca(?:, \{ semResposta \})?\);\s*(?:if \(semResposta\.length\) estaDecisao\.semResposta = [^\n]*\s*)?if \(destino && epoca === epocaDaSessao\) await irProPaisDoPerfil\(destino\);/);
   const ir = fatiar('irProPaisDoPerfil');
   for (const re of [/API\.setCountry\(pais\);/, /AppState\.filters\.stateId = '';/, /saveFilters\(\);/, /refazerFilaReal\(aviso\);/]) {
     assert.match(ir, re);

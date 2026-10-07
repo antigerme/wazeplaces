@@ -6458,7 +6458,8 @@ async function completarPerfilChegado(perfil, epoca) {
     // A decisão do lugar DESTA conta, nesta sessão, começou (ver
     // `areaNoutroServidorSemDecisao`, R11-6-02). Logo no começo: nada antes dela
     // pode lançar e deixá-la sem marca (a recusa automática é assíncrona).
-    decisaoDoLugarDe = { epoca, conta: String(perfil.id) };
+    const estaDecisao = { epoca, conta: String(perfil.id) };
+    decisaoDoLugarDe = estaDecisao;
     // Com o TREINO aberto a fila na tela é a de EXEMPLOS, e a real está guardada
     // nele: a ordem e a recusa (que no treino sai na primeira linha) ficam
     // ANOTADAS, e o `Treino.sair()` as aplica na fila real quando ela voltar.
@@ -6508,7 +6509,11 @@ async function completarPerfilChegado(perfil, epoca) {
     try {
         // O país de quem entra: só depois do perfil, e só quando o atual é um onde
         // a pessoa NÃO edita (ver `paisDoPerfil`).
-        const destino = await paisDoPerfil(perfil, epoca);
+        const semResposta = [];
+        const destino = await paisDoPerfil(perfil, epoca, { semResposta });
+        // Sem destino e SEM a resposta de um servidor onde a pessoa pode editar: a
+        // decisão fica PENDENTE sobre este lugar (ver `decisaoSemResposta`).
+        if (semResposta.length) estaDecisao.semResposta = { regioes: semResposta, regiao: API.getRegion(), pais: String(API.getCountry()) };
         if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
         // E a busca que ESPEROU por esta decisão enquanto ela corria (ver
         // `areaNoutroServidorSemDecisao`, R11-6-02): a que saiu antes de ela
@@ -6589,9 +6594,25 @@ function refazerPerfilSeFaltar() {
 // (que é de outro servidor, se a região mudou) nem é lida. É o que mantém
 // região e país coerentes: o país sai sempre da lista do servidor da região em
 // que ele vai valer (achado 10).
-async function paisDoPerfil(perfil, epoca) {
+//
+// A pergunta que FALHOU — o Waze fora (o 500 `transient`), a página de erro da
+// borda, a que nem chegou (`_motivo`) — não diz que a pessoa não edita lá: só a
+// que LEU vale (a régua do `lerServidorDaMinhaArea`, R11-6-01). Contava como "não
+// edita lá", e com "Minha área" a busca desligava o filtro e o GRAVAVA, com a
+// frase falsa "Seu perfil do Waze não tem área de edição" e "Tudo limpo! …
+// Confira o país e a região"; religar, o ↻, nada perguntava de novo até reabrir
+// o app — também na troca de conta pela renovação (MEDIDO no navegador, nos dois
+// motores; auditoria da rodada 12). Sem destino, as regiões SEM resposta vão
+// em `semResposta`, e a decisão fica pendente (`decisaoSemResposta`): a busca
+// de "Minha área" espera, com "Falha ao carregar", e a busca seguinte pergunta
+// de novo só a elas (`refazerDecisaoSemResposta`). O 401 vai à conferência da
+// sessão e a recusa do portão é terminal, como na carga do perfil.
+//
+// `so`: as regiões a perguntar (a pergunta repetida); `lugar`: o lugar sobre o
+// qual se decide (por padrão, o do pedido do perfil).
+async function paisDoPerfil(perfil, epoca, { so = null, semResposta = null, lugar = null } = {}) {
     const lugarMudou = () => {
-        const pedido = lugarDoPedidoDoPerfil;
+        const pedido = lugar || lugarDoPedidoDoPerfil;
         return !!pedido && (API.getRegion() !== pedido.regiao || String(API.getCountry()) !== String(pedido.pais));
     };
     if (!perfil || perfil.isStaff || lugarMudou()) return null;
@@ -6603,10 +6624,18 @@ async function paisDoPerfil(perfil, epoca) {
         if (minhaArea) return null;
         return aqui.includes(Number(API.getCountry())) ? null : { regiao: API.getRegion(), pais: aqui[0] };
     }
-    for (const regiao of REGIOES_DO_WAZE.filter((r) => r !== API.getRegion())) {
+    const falharam = [];
+    for (const regiao of (so || REGIOES_DO_WAZE).filter((r) => r !== API.getRegion())) {
         const r = await API.getProfile(regiao);
         if (epoca !== epocaDaSessao) return null;
-        const la = r && r.success && r.profile ? editaveis(r.profile.editableCountryIDs) : [];
+        if (!(r && r.success && r.profile)) {
+            if (r && r.errorCategory === 'access_denied') { if (AppState.authenticated) recusaDoPortao(r); return null; }
+            if (r && r.errorCategory === 'unauthorized') handleUnauthorized();
+            falharam.push(regiao);
+            if (lugarMudou()) return null;
+            continue;
+        }
+        const la = editaveis(r.profile.editableCountryIDs);
         // A lista que esta pergunta trouxe fica, pra peneira dos Filtros naquela
         // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
         // falhou não diz que a pessoa não edita lá.
@@ -6618,9 +6647,13 @@ async function paisDoPerfil(perfil, epoca) {
         // não vale mais. Jogada fora, a busca de "Minha área" no servidor que a
         // pessoa aplicou perguntava a ele de novo (`lerServidorDaMinhaArea`): duas
         // idas ao mesmo `/Session` (R10-6-02).
-        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la, r.profile.areas, r.profile.managedAreas);
+        anotarEditaveis(perfil, regiao, la, r.profile.areas, r.profile.managedAreas);
         if (lugarMudou()) return null;
         if (la.length) return minhaArea ? { regiao, pais: la[0], minhaArea: true } : { regiao, pais: la[0] };
+    }
+    if (falharam.length) {
+        dfato('pais.semResposta', { regioes: falharam });
+        if (semResposta) semResposta.push(...falharam);
     }
     return null;
 }
@@ -12054,6 +12087,12 @@ let decisaoDoLugarDe = null;
 // (o `maybePrefetch`, a troca de conta). Decidido o lugar, nada espera: sem área
 // em servidor nenhum, ou numa região que a pessoa aplicou à mão, o filtro
 // desliga e diz — esperar ali seria esperar pra sempre.
+//
+// E a decisão que terminou SEM a resposta de um servidor onde a área pode
+// estar (`decisaoSemResposta`, auditoria da rodada 12) também espera: não se
+// sabe se há área lá. A busca fica em "Falha ao carregar", e a seguinte (o
+// "Tentar de novo", o ↻) pergunta de novo — a régua do servidor aplicado à mão
+// (R11-6-01).
 function areaNoutroServidorSemDecisao() {
     const perfil = AppState.profile;
     if (!perfil || perfil.isStaff || perfil.id === null || perfil.id === undefined) return false;
@@ -12061,7 +12100,59 @@ function areaNoutroServidorSemDecisao() {
     if (!Array.isArray(aqui) || aqui.length > 0) return false;
     if (AppState._caixaDaMinhaAreaNoAr) return true;
     const d = decisaoDoLugarDe;
-    return !(d && d.epoca === epocaDaSessao && d.conta === String(perfil.id));
+    if (!(d && d.epoca === epocaDaSessao && d.conta === String(perfil.id))) return true;
+    return !!decisaoSemResposta();
+}
+
+// A decisão do lugar DESTA conta, nesta sessão, terminou sem destino e SEM a
+// resposta de um servidor (ver `paisDoPerfil`) — e o lugar ainda é o daquela
+// decisão (o que a pessoa aplica à mão vale por si: a escolha é dela). Devolve
+// as regiões que não responderam, ou `null`.
+function decisaoSemResposta() {
+    const d = decisaoDoLugarDe;
+    const pendente = d && d.semResposta;
+    const perfil = AppState.profile;
+    if (!pendente || !perfil || perfil.id === null || perfil.id === undefined) return null;
+    if (d.epoca !== epocaDaSessao || d.conta !== String(perfil.id)) return null;
+    if (API.getRegion() !== pendente.regiao || String(API.getCountry()) !== pendente.pais) return null;
+    return pendente.regioes;
+}
+
+// A pergunta que ficou SEM resposta na decisão do lugar (`decisaoSemResposta`)
+// sai de novo, SÓ a esses servidores, no COMEÇO de cada busca — o "Tentar de
+// novo", o ↻, o "Aplicar", a rede que volta: uma ida por busca, nenhuma por
+// relógio, e sem rede nem sai. A busca que a própria decisão refaz, ou que
+// esperou por ela, começou com ela no AR, e não repete: ali ela acabou de
+// perguntar. A ida fica no ar como a decisão (`_caixaDaMinhaAreaNoAr`): quem
+// busca espera por ela. Achou onde a pessoa edita, vai pra lá
+// (`irProPaisDoPerfil`, que refaz a fila); de novo sem resposta, segue
+// pendente; respondida sem destino, a decisão termina (sem área em servidor
+// nenhum, "Minha área" desliga e diz). Devolve a promessa da ida, ou `null`.
+function refazerDecisaoSemResposta() {
+    const regioes = decisaoSemResposta();
+    if (!regioes || !AppState.authenticated || AppState._caixaDaMinhaAreaNoAr || navigator.onLine === false) return null;
+    const perfil = AppState.profile;
+    const epoca = epocaDaSessao;
+    const estaDecisao = decisaoDoLugarDe;
+    const lugar = { regiao: API.getRegion(), pais: API.getCountry() };
+    let decidiu = null;
+    const decisao = new Promise((ok) => { decidiu = ok; });
+    AppState._caixaDaMinhaAreaNoAr = decisao;
+    (async () => {
+        try {
+            const semResposta = [];
+            const destino = await paisDoPerfil(perfil, epoca, { so: regioes, semResposta, lugar });
+            // A sessão acabou, ou a pessoa aplicou outro lugar no meio (a escolha é
+            // dela): a pendência fica como estava, sobre o lugar dela.
+            if (epoca !== epocaDaSessao || API.getRegion() !== lugar.regiao || String(API.getCountry()) !== String(lugar.pais)) return;
+            estaDecisao.semResposta = semResposta.length ? { regioes: semResposta, regiao: lugar.regiao, pais: String(lugar.pais) } : null;
+            if (destino) await irProPaisDoPerfil(destino);
+        } finally {
+            if (AppState._caixaDaMinhaAreaNoAr === decisao) AppState._caixaDaMinhaAreaNoAr = null;
+            decidiu();
+        }
+    })().catch(() => {});
+    return decisao;
 }
 
 // A última busca FALHOU POR REDE ou pelo SERVIDOR (`transient`: nada respondeu,
@@ -12498,6 +12589,18 @@ async function startFetching() {
     document.getElementById('loadErrorState')?.classList.add('hidden');
     removeCurrentCardEl();
     updatePendingCount();
+
+    // A decisão do lugar que ficou SEM a resposta de um servidor pergunta de
+    // novo, só a ele, antes da busca (ver `refazerDecisaoSemResposta`): achando
+    // onde a pessoa edita, a fila é refeita lá, e esta não vale mais. Antes de
+    // qualquer `await`: a busca que começa com a decisão no ar não repete.
+    const refazendoADecisao = refazerDecisaoSemResposta();
+    if (refazendoADecisao) {
+        buscaEsperaOPerfil = true;
+        updatePendingCount();
+        try { await refazendoADecisao; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        if (epoca !== AppState.fetchEpoch || Treino.ativo) return;
+    }
 
     // "Minha área" precisa do perfil (áreas/bbox). Se ainda não chegou, espera —
     // a busca sem ele não sai (ver `fetchNextPage`). E o perfil que FALHOU é
