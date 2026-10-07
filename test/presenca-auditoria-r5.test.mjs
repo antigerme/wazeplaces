@@ -356,6 +356,9 @@ function apiDeVerdade(fetch) {
     fetch, performance, AbortController, Response, ReadableStream, console: { error() {}, log() {}, warn() {} }, setTimeout, clearTimeout };
   vm.createContext(ctx);
   vm.runInContext(fonte, ctx);
+  // A abertura com a sessão salva: ela vai pra memória — as rotas mandam a da
+  // memória, nunca a do aparelho (R13-1-04).
+  ctx.API.getSession();
   let provas = 0;
   ctx.API.aoProvarRede = () => { provas += 1; };
   return { API: ctx.API, provas: () => provas };

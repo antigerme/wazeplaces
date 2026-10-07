@@ -115,7 +115,8 @@ const CONQUISTAS_INICIAIS = (extra = {}) => ({ c: {}, seq: 0, n: {}, langs: ['pt
 
 const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarConquistas', 'salvarConquistas', 'patenteDe',
   'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'temConquistaNova',
-  'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
+  // `novasNaVitrine`: o ponto e a marca de vista contam só o que a vitrine mostra (R13-7-02).
+  'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba'];
 
 // Uma ABA do app: a vitrine, o painel e o ponto de verdade, com o Histórico de

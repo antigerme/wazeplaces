@@ -62,6 +62,19 @@ const API = {
         } catch (e) { /* instrumento nunca derruba o login */ }
     },
 
+    // A ADOÇÃO: com a memória vazia, lê a sessão GUARDADA no aparelho e a grava
+    // na memória desta aba — é o que a abertura com sessão salva faz. Só onde a
+    // intenção é adotar: a abertura (`initApp` e o link de pareamento) e a
+    // adoção da sessão que outra aba guardou (`adotarSessaoDoAparelho`, no
+    // app.js). As ROTAS abaixo mandam a sessão da MEMÓRIA (`this.sessionToken`),
+    // nunca a deste método: com a memória vazia — a renovação da queda, a tela de
+    // entrada —, cada pedido adotava calado a sessão da outra aba. Abrir os
+    // Filtros durante a renovação (a lista de estados) a punha na memória: com a
+    // renovação falhando, a aba ficava na tela de entrada com a sessão alheia, a
+    // volta a ela não adotava mais, e o "Sair" dado lá fechava o "Colar cookies"
+    // daqui (auditoria da rodada 13, R13-1-04, MEDIDO; o R12-1-03 nas rotas).
+    // Sem sessão na memória, a rota responde "sem sessão" sem ir à rede, como
+    // numa aba só.
     getSession() {
         if (!this.sessionToken) this.sessionToken = safeLS.get('waze_session_token');
         return this.sessionToken;
@@ -448,7 +461,7 @@ const API = {
     },
 
     async fetchPlaces(page = 1, filters = {}) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -469,7 +482,7 @@ const API = {
     // do filtro pode ter mudado nesse meio. Pedido mandado ao servidor errado
     // volta "não encontrado", que o app lê como "já tratado" e conta como feito.
     async markAsRead(venueID, updateRequestID, presenca, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -483,7 +496,7 @@ const API = {
     },
 
     async markAsReadBatch(items, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -498,7 +511,7 @@ const API = {
     // EXPLÍCITO: o core exige boolean estrito e não tem padrão, porque é uma
     // flag de dois lados e coerção decidiria o lado errado em silêncio.
     async guardarPedido(venueID, updateRequestID, value, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -512,7 +525,7 @@ const API = {
     },
 
     async rejectPlace(venueID, updateRequestID, presenca, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -538,7 +551,7 @@ const API = {
     // errado e voltava "não encontrado", que na aprovação conta como feita
     // (auditoria de 2026-09-29, L26).
     async aprovarPedido(venueID, updateRequestID, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -564,12 +577,16 @@ const API = {
     // a exclusão (e a aprovação) do local só sai depois da resposta dele
     // (`vezDasFotosNoLocal`, auditoria da rodada 12, R12-3-01). Sem sessão não sai
     // nada, e não há o que esperar.
-    prepararExclusao(venueID, lat, lon, regiao) {
-        const sessionToken = this.getSession();
+    //
+    // `aquecimento`: o id do GESTO (`idDoGestoDaLixeira`), que a exclusão dele
+    // leva também — a lista lida aqui só serve a ela (R13-3-03). Sem ele, o
+    // servidor não lê nada.
+    prepararExclusao(venueID, lat, lon, regiao, aquecimento) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return;
         return this._post('excluir-foto', {
             sessionToken, region: regiao || this.getRegion(), action: 'preparar',
-            venueID, imageID: 'preparar', lat, lon,
+            venueID, imageID: 'preparar', lat, lon, aquecimento,
         }).catch(() => {});
     },
 
@@ -577,7 +594,7 @@ const API = {
     // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
     // verdade é o Waze, que valida permissão e lockRank na gravação.
     async renomearLocal(venueID, nome, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -586,8 +603,10 @@ const API = {
         });
     },
 
-    async excluirFoto(venueID, imageID, lat, lon, regiao) {
-        const sessionToken = this.getSession();
+    // `aquecimento`: o gesto do toque na lixeira, quando ele saiu (ver o
+    // `prepararExclusao`).
+    async excluirFoto(venueID, imageID, lat, lon, regiao, aquecimento) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -597,13 +616,14 @@ const API = {
             venueID,
             imageID,
             lat,
-            lon
+            lon,
+            aquecimento
         });
     },
 
     // `regiao` só pra quem PERGUNTA a outro servidor (ver `paisDoPerfil`).
     async getProfile(regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -617,7 +637,7 @@ const API = {
     // GESTO de desligar (`visivel: false`) — mover e ligar vão de carona nas
     // ações, sem requisição nova.
     async presencaWaze(campos) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return semSessao();
         return this._post('presenca-waze', {
             sessionToken,
@@ -630,14 +650,14 @@ const API = {
     // `token: true`, o token do tempo real. `campos` traz pais, userId,
     // conhecidos e, quando houver, a instalação e os ids a confirmar.
     async presencaApp(campos) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return semSessao();
         return this._post('presenca-app', { sessionToken, region: this.getRegion(), ...campos });
     },
 
     // O chat do WME: `abrir`, `enviar`, `lida` (e as outras ações da rota).
     async chat(campos) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return semSessao();
         return this._post('chat', { sessionToken, region: this.getRegion(), ...campos });
     },
@@ -645,7 +665,7 @@ const API = {
     // `regiao` pra quem mostra a lista de OUTRA região antes de ela valer (a
     // troca de região no modal de Filtros, antes do "Aplicar").
     async listCountries(regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -656,7 +676,7 @@ const API = {
     },
 
     async listStates(countryId, regiao) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
             return semSessao();
         }
@@ -672,7 +692,7 @@ const API = {
     // sente ao pedir pra sair) e a remota vira melhor-esforço com retentativa.
     // Sem o parâmetro, usa o token guardado e limpa como antes.
     async destroySession(tokenExplicito) {
-        const sessionToken = tokenExplicito || this.getSession();
+        const sessionToken = tokenExplicito || this.sessionToken;
         if (!sessionToken) return { success: true };
         const result = await this._post('sessao', {
             action: 'destroy',

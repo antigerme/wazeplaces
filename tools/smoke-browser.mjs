@@ -722,6 +722,128 @@ for (const [nome, vp, iOS] of [
   await ctx.close();
 }
 
+// ── Convite no iPhone FORA do Safari (R13-7-03) ─────────────────────────────
+// No Chrome, no Firefox e no Edge do iPhone (UA com CriOS, FxiOS, EdgiOS), o 1º
+// passo mandava tocar "na barra do Safari" — um navegador que a pessoa não está
+// usando; e antes do iOS 16.4 esses navegadores nem adicionam à Tela de Início,
+// então o convite era um beco sem saída. A frase nova ("no menu do navegador")
+// é medida nos 4 idiomas no Fold, no SE e no SE de 2016, LADO A LADO com a do
+// Safari no mesmo tamanho e idioma: QUAL variante a tela mostra se lê pela CHAVE
+// (`data-i18n-html`), nunca pelas palavras, e o texto na tela tem que ser o do
+// dicionário DAQUELE idioma (a troca de idioma relê a chave). A frase não
+// estoura a caixa nem parte palavra, o "Agora não" tem 44 px, e onde o convite
+// do Safari cabe na tela o da frase nova também cabe. Onde o do Safari já NÃO
+// cabia (o SE de 2016 em pt/es/fr, o Fold em fr: o "Agora não" fica 7 a 48 px
+// abaixo da dobra, com o painel rolando — MEDIDO antes da frase nova, com o
+// mesmo número nas duas variantes), a frase nova não desce o "Agora não" nem
+// um pixel além do dele: mexer no layout do convite é mudança visual, e ficou
+// pra decisão do owner. CONTROLES: o Safari do mesmo iOS segue com o passo da
+// barra do Safari, e o Safari de um iOS antigo segue com o convite.
+const UA_IOS = (marca, versao = '18_0') => `Mozilla/5.0 (iPhone; CPU iPhone OS ${versao} like Mac OS X) `
+  + `AppleWebKit/605.1.15 (KHTML, like Gecko) ${marca} Mobile/15E148 Safari/604.1`;
+const UA_SAFARI_IOS = (versao) => UA_IOS('Version/18.0', versao);
+const UA_CHROME_IOS = (versao) => UA_IOS('CriOS/130.0.6723.90', versao);
+const conviteNoIOS = async (vp, ua) => {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block', locale: 'pt-BR',
+    isMobile: true, hasTouch: true, userAgent: ua });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  return { ctx, page };
+};
+const medirConviteIOS = (page, lang) => page.evaluate((lang) => {
+  aplicarIdioma(lang);
+  AppState.authenticated = true;
+  AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+  AppState.stats = { read: 3, rejected: 1, skipped: 0 };
+  AppState.serverTotal = 0;
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appScreen').classList.remove('hidden');
+  renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+  AppState.queue = []; AppState.currentPlace = null;
+  tratouNestaFila = true; puladosNoInicioDaFila = 0;
+  showNoPlaces();
+  const box = document.getElementById('installInvite');
+  if (!box || box.classList.contains('hidden')) return { ausente: true };
+  const passo = document.getElementById('installIosStep1');
+  // A posição se mede com o painel no TOPO, onde ele aparece: onde o convite não
+  // cabe, o painel rola, e uma rolagem que sobrou da medição anterior mudava o
+  // número (no WebKit, 2 px entre as duas variantes iguais).
+  document.getElementById('noMoreCards').scrollTop = 0;
+  // Pros LADOS: nada do convite sai da largura da tela.
+  const lados = [];
+  for (const id of ['installIosSteps', 'installIosStep1', 'installDismissBtn']) {
+    const e = document.getElementById(id);
+    if (!e || e.classList.contains('hidden')) { lados.push(`${id} escondido`); continue; }
+    const r = e.getBoundingClientRect();
+    if (r.right > innerWidth + 1 || r.left < 0) lados.push(`${id} ${Math.round(r.left)}→${Math.round(r.right)}`);
+  }
+  // Palavra partida no meio (o Range de cada palavra em mais de uma linha).
+  const partidas = [];
+  const it = document.createTreeWalker(passo, NodeFilter.SHOW_TEXT); let n;
+  while ((n = it.nextNode())) {
+    const re = /\S{4,}/g; let x;
+    while ((x = re.exec(n.nodeValue))) {
+      const rg = document.createRange(); rg.setStart(n, x.index); rg.setEnd(n, x.index + x[0].length);
+      if (new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size > 1) partidas.push(x[0]);
+    }
+  }
+  const linhas = (() => { const rg = document.createRange(); rg.selectNodeContents(passo);
+    return new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size; })();
+  const dis = document.getElementById('installDismissBtn').getBoundingClientRect();
+  return { chave: passo.getAttribute('data-i18n-html'), texto: passo.textContent.trim(),
+    doDicionario: String((I18N_DICT[lang] || {})[passo.getAttribute('data-i18n-html')] || '').replace(/<[^>]+>/g, '').trim(),
+    botao: !document.getElementById('installInviteBtn').classList.contains('hidden'),
+    estouro: Math.max(0, passo.scrollWidth - passo.clientWidth), lados, partidas, linhas,
+    fimDoDispensar: Math.round(dis.bottom), cabe: dis.bottom <= innerHeight + 1,
+    alvoDispensar: Math.round(Math.min(dis.width, dis.height)) };
+}, lang);
+for (const [nome, vp] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }],
+  ['SE 2016', { width: 320, height: 568 }]]) {
+  const safari = await conviteNoIOS(vp, UA_SAFARI_IOS('18_0'));
+  const chrome = await conviteNoIOS(vp, UA_CHROME_IOS('18_0'));
+  for (const lang of LINGUAS) {
+    const s = await medirConviteIOS(safari.page, lang);
+    const m = await medirConviteIOS(chrome.page, lang);
+    const rot = `convite fora do Safari · ${nome} · ${lang}`;
+    checa(!s.ausente && s.chave === 'install.ios.step1', `${rot}: CONTROLE — o Safari perdeu o convite ou o passo da barra do Safari`,
+      JSON.stringify({ ausente: s.ausente, chave: s.chave }));
+    checa(!m.ausente, `${rot}: o convite sumiu do Chrome do iPhone (iOS 18), que adiciona à Tela de Início`);
+    if (m.ausente || s.ausente) continue;
+    checa(m.chave === 'install.ios.step1Navegador', `${rot}: o 1º passo segue mandando à barra do Safari`, m.chave);
+    checa(m.texto === m.doDicionario && m.texto.length > 0, `${rot}: o texto na tela não é o do dicionário deste idioma`,
+      `"${m.texto}" × "${m.doDicionario}"`);
+    checa(!m.botao, `${rot}: botão de instalar no iPhone, que não tem o prompt`);
+    checa(m.lados.length === 0, `${rot}: o convite sai pelos lados da tela`, m.lados.join(', '));
+    checa(m.estouro === 0, `${rot}: a frase estoura a caixa`, `${m.estouro}px`);
+    checa(m.partidas.length === 0, `${rot}: palavra partida no meio`, m.partidas.join(','));
+    checa(m.linhas <= 2, `${rot}: a frase passou de duas linhas`, `${m.linhas} linhas`);
+    checa(m.alvoDispensar >= 44, `${rot}: "Agora não" abaixo de 44px`, `${m.alvoDispensar}px`);
+    checa(m.cabe || !s.cabe, `${rot}: o "Agora não" saiu da tela, e com a frase do Safari ele cabe`,
+      `termina em ${m.fimDoDispensar} × ${s.fimDoDispensar} (Safari), tela ${vp.height}`);
+    checa(m.cabe || m.fimDoDispensar <= s.fimDoDispensar, `${rot}: a frase nova desceu o "Agora não" além do que a do Safari já descia`,
+      `termina em ${m.fimDoDispensar} × ${s.fimDoDispensar} (Safari), tela ${vp.height}`);
+  }
+  await safari.ctx.close();
+  await chrome.ctx.close();
+}
+{
+  // Antes do iOS 16.4: os navegadores de fora não adicionam — o convite não aparece.
+  const se = { width: 375, height: 667 };
+  for (const [marca, versao] of [['CriOS/130.0.6723.90', '16_3'], ['FxiOS/132.0', '15_7'], ['EdgiOS/130.0.2849.80', '16_0']]) {
+    const { ctx, page } = await conviteNoIOS(se, UA_IOS(marca, versao));
+    const m = await medirConviteIOS(page, 'pt');
+    checa(m.ausente, `convite fora do Safari · iOS ${versao} · ${marca.split('/')[0]}: o convite apareceu onde não há "Adicionar à Tela de Início"`);
+    await ctx.close();
+  }
+  // CONTROLE: o Safari de um iOS antigo segue com o convite e o passo dele.
+  const { ctx, page } = await conviteNoIOS(se, UA_SAFARI_IOS('16_3'));
+  const m = await medirConviteIOS(page, 'fr');
+  checa(!m.ausente && m.chave === 'install.ios.step1', 'convite · Safari do iOS 16.3: CONTROLE — perdeu o convite ou o passo da barra do Safari',
+    JSON.stringify({ ausente: m.ausente, chave: m.chave }));
+  await ctx.close();
+}
+
 // ── Laço de ResizeObserver com barra de rolagem que OCUPA ESPAÇO ────────────
 // O editor relatou um toast VERMELHO "Erro inesperado: ResizeObserver loop
 // completed with undelivered notifications" ao abrir a foto, no laptop.
@@ -8553,7 +8675,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const CARDS_ENT = Object.entries(CARDS).slice(0, 5).map(([, p]) => p);
     await page.evaluate(({ fila }) => {
       localStorage.setItem('waze_session_token', 't');
-      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      // `API` é `const` do api.js: NÃO mora no `window` (o `window.API &&` deixava a linha morta). Desde o
+      // R13-1-04 as rotas mandam a sessão da MEMÓRIA, sem adotar a do aparelho: sem o `setSession`, o ✕ voltava
+      // "sem sessão", a sessão caía e o bloco seguinte media a tela de entrada (o WebKit, mais lento, pegava isso).
+      if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
       // Desfazer DESLIGADO de verdade: a preferência sozinha não basta, o
       // canDisableUndo() também exige a cota.
@@ -8661,7 +8786,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(300);
     await page.evaluate(() => {
-      if (window.API && API.setSession) API.setSession('t', 'cookies');
+      // `API` é `const` do api.js: NÃO mora no `window` (o `window.API &&` deixava a linha morta). Desde o
+      // R13-1-04 as rotas mandam a sessão da MEMÓRIA, sem adotar a do aparelho: sem o `setSession`, o ✕ voltava
+      // "sem sessão", a sessão caía e o bloco seguinte media a tela de entrada (o WebKit, mais lento, pegava isso).
+      if (typeof API !== 'undefined' && API.setSession) API.setSession('t', 'cookies');
       AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
       AppState.stats = { read: 100, rejected: 50, skipped: 0 };
@@ -8727,6 +8855,199 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       `${c.id}: a SEGUNDA abertura ainda desvia — o desvio tem que valer uma vez por conquista`);
 
     checa(errosJS.length === 0, `${c.id}: erro de JS`, errosJS[0]);
+    await ctx.close();
+  }
+}
+
+// ── OS AVISOS DE UMA VEZ SÓ SAEM ONDE A PESSOA OS VÊ (R13-7-01) ─────────────
+// A consequência do 1º ✕ e do 1º ✓, o desbloqueio do Desfazer e a dica "você
+// nunca desfaz" aparecem UMA vez na vida, no banner do topo (z-55) — abaixo dos
+// modais (z-60) e da foto ampliada (z-65). A decisão que pousava com os Filtros
+// ou a Ajuda abertos (abertos na janela do Desfazer, o caso comum) punha o banner
+// inteiro debaixo da caixa da camada, e a marca de visto o gastava; com a página
+// no fundo, ele saía e sumia antes de a pessoa voltar. Agora ele espera: a camada
+// fechar, a página voltar. Pelo `initApp` de verdade, com a API de mentira, e o
+// banner medido por hit-test em grade 3×3 (gotcha #26). CONTROLES: sem camada o
+// banner sai no pouso e recebe o toque; e a mesma grade, com os Filtros abertos
+// POR CIMA de um banner na tela, vê o banner coberto — sem isso, "nada cobre"
+// passaria com a grade cega.
+{
+  const PERFIL_L6 = { id: 12444348, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] };
+  const hoje = new Date();
+  const dia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  const pedido = (n) => ({ venueID: 'av' + n, updateRequestID: 'u' + n, name: 'Local ' + n, categories: ['PARK'],
+    address: 'Rua ' + n + ', 1', updateTypeKey: 'VENUE', purType: 'NEW_PLACE', createdBy: 'fulano' + n, creatorId: 900 + n,
+    creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null, localAprovado: true, dateAdded: Date.now() - 3600000 * n, imageUrls: [] });
+  const PREFS = {
+    consequencia: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true },
+    desbloqueio: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: false, dicaDesfazerVista: false,
+      consequenciaVista: { read: true, reject: true } },
+    dica: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: false, semUndoSeguidas: 19,
+      consequenciaVista: { read: true, reject: true } },
+  };
+  // `segurarLido`: o ✓ fica no ar até o teste soltar — a página vai pro fundo ANTES de ele pousar.
+  const abrirApp = async ({ viewport, aviso, segurarLido = false }) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const n0 = aviso === 'desbloqueio' ? 9 : 50;
+    await ctx.addInitScript(({ prefs, n0, dia }) => {
+      try {
+        if (sessionStorage.getItem('__avisosUmaVez')) return;
+        sessionStorage.setItem('__avisosUmaVez', '1');
+        localStorage.setItem('waze_session_token', 'token-smoke');
+        localStorage.setItem('waze_places_lang', 'pt');
+        localStorage.setItem('waze_places_preferences', JSON.stringify(prefs));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: n0, rejected: 0, skipped: 0 }));
+        localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: n0, rejected: 0 }, [dia]: { read: n0, rejected: 0 } }));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, { prefs: PREFS[aviso], n0, dia });
+    const places = [1, 2, 3, 4].map(pedido);
+    let soltar = null;
+    const lido = segurarLido ? new Promise((ok) => { soltar = ok; }) : null;
+    const envios = [];
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
+      let corpo = { success: true };
+      if (nome === 'perfil' || nome === 'testar-cookies') corpo = { success: true, visivelNoWme: true, referencias: null, profile: PERFIL_L6 };
+      else if (nome === 'lista-paises') corpo = { success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR', env: 'row' }] };
+      else if (nome === 'lista-estados') corpo = { success: true, states: [] };
+      else if (nome === 'presenca-app') corpo = { success: true, online: [], conversas: [] };
+      else if (nome === 'buscar-places') corpo = { success: true, places, hasMore: false, page: 1, total: places.length, totalAll: places.length, blocked: 0 };
+      else if (nome === 'validar-place' || nome === 'marcar-lido') {
+        envios.push(nome);
+        if (nome === 'marcar-lido' && lido) await lido;
+      }
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !!(window.AppState && AppState.authenticated && AppState.profile && AppState.currentPlace
+      && document.querySelector('#cardStack .place-card:not(.card-fundo)')), `avisos de uma vez (${aviso}): o app não abriu o 1º card`);
+    await doisQuadros(page);
+    return { ctx, page, erros, envios, soltar: () => soltar && soltar() };
+  };
+  // O banner do topo: o texto e quantos dos 9 pontos (grade 3×3, fora dos cantos
+  // arredondados) o recebem — medido com ele ASSENTADO (ele entra deslizando).
+  const banner = async (page) => { await assentar(page); return page.evaluate(() => {
+    const b = document.querySelector('#bannerContainer .toast');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    let recebe = 0;
+    for (const fx of [0.1, 0.5, 0.9]) for (const fy of [0.2, 0.5, 0.8]) {
+      const h = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+      if (h && b.contains(h)) recebe++;
+    }
+    return { texto: b.textContent.trim().slice(0, 40), recebe };
+  }); };
+  const marcas = (page) => page.evaluate(() => {
+    const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
+    return { reject: !!(p.consequenciaVista && p.consequenciaVista.reject), gate: p.undoGateSeen === true, dica: p.dicaDesfazerVista === true };
+  });
+  // POUSOU: o envio CHEGOU à API (contado no Node) e a resposta foi processada.
+  // Só o estado da página não serve: logo depois do toque, antes de a janela
+  // abrir (a animação do card), ele já diz "nada no ar".
+  const pousou = async (page, envios, n) => {
+    const t0 = Date.now();
+    while (envios.length < n) {
+      if (Date.now() - t0 > 15000) throw new Error(`avisos de uma vez: ${envios.length} envio(s) em 15 s, esperava ${n}`);
+      await dormir(50);
+    }
+    await esperarOuExplodir(page, () => !AppState.pendingAction && AppState.inFlightActions === 0, 'avisos de uma vez: a decisão não pousou', 15000);
+  };
+  const esconder = (page, oculta) => page.evaluate((oculta) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (oculta ? 'hidden' : 'visible') });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => oculta });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, oculta);
+  const FRENTE = '#cardStack .place-card:not(.card-fundo)';
+  const PIXEL = { width: 412, height: 915 };
+  const SE = { width: 320, height: 568 };
+
+  // (1) A consequência do 1º ✕ com os Filtros abertos na janela: espera, e sai ao fechá-los.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'avisos de uma vez (1): o ✕ não abriu a janela');
+    await page.click('#filtersBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', 'avisos de uma vez (1): os Filtros não abriram');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    checa(await banner(page) === null, 'avisos de uma vez (1): a consequência do 1º ✕ saiu POR BAIXO dos Filtros', JSON.stringify(await banner(page)));
+    checa(!(await marcas(page)).reject, 'avisos de uma vez (1): a consequência do 1º ✕ ficou GASTA debaixo dos Filtros — nunca mais aparece');
+    await page.keyboard.press('Escape');
+    const veio = await esperarNaPagina(page, () => !topOpenModal() && !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+    checa(veio.ok, 'avisos de uma vez (1): os Filtros fecharam e a consequência que esperava não apareceu');
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (1): o banner que esperava não recebe o toque inteiro', JSON.stringify(b));
+    checa((await marcas(page)).reject, 'avisos de uma vez (1): o banner apareceu e não ficou marcado (sairia de novo)');
+    checa(erros.length === 0, 'avisos de uma vez (1): erro de JS', erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE: sem camada, o banner sai no pouso — e a MESMA grade, com os
+  // Filtros abertos por cima dele, o vê coberto.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (CONTROLE): sem camada, a consequência não saiu no pouso, ou não recebe o toque', JSON.stringify(b));
+    checa((await marcas(page)).reject, 'avisos de uma vez (CONTROLE): a consequência saiu e não ficou marcada');
+    await page.evaluate(() => openFiltersModal());
+    await doisQuadros(page);
+    const coberto = await banner(page);
+    checa(!!coberto && coberto.recebe === 0, 'avisos de uma vez (CONTROLE): com os Filtros por cima, a grade ainda vê o banner — ela está cega',
+      JSON.stringify(coberto));
+    checa(erros.length === 0, 'avisos de uma vez (CONTROLE): erro de JS', erros[0]);
+    await ctx.close();
+  }
+  // (2) O desbloqueio do Desfazer que pousa com a página no FUNDO: espera a volta.
+  // E o CONTROLE à vista, com o mesmo ✓ segurado.
+  for (const fundo of [true, false]) {
+    const rot = `avisos de uma vez (2, ${fundo ? 'no fundo' : 'CONTROLE à vista'})`;
+    const { ctx, page, erros, envios, soltar } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio', segurarLido: true });
+    await page.click(FRENTE + ' .card-btn-read');
+    await esperarOuExplodir(page, () => !AppState.pendingAction && AppState.inFlightActions === 1, `${rot}: o ✓ não saiu no fim da janela`, 10000);
+    if (fundo) await esconder(page, true);
+    soltar();
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const noPouso = await banner(page);
+    if (fundo) {
+      checa(noPouso === null, `${rot}: o desbloqueio saiu com a página escondida — some antes de a pessoa voltar`, JSON.stringify(noPouso));
+      checa(!(await marcas(page)).gate, `${rot}: o desbloqueio (uma vez na vida) ficou GASTO com a página escondida`);
+      await esconder(page, false);
+      const veio = await esperarNaPagina(page, () => !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+      checa(veio.ok, `${rot}: a página voltou e o desbloqueio que esperava não apareceu`);
+    } else {
+      checa(!!noPouso, `${rot}: à vista, o desbloqueio não saiu no pouso`);
+    }
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, `${rot}: o banner do desbloqueio não recebe o toque inteiro`, JSON.stringify(b));
+    checa((await marcas(page)).gate, `${rot}: o desbloqueio apareceu e não ficou marcado`);
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (3) A dica "você nunca desfaz" no iPhone SE de 2016: a 20ª janela vence
+  // sozinha com a Ajuda aberta — espera ela fechar, pelo ✕ dela.
+  {
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: SE, aviso: 'dica' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, 'avisos de uma vez (3): o ✕ não abriu a janela');
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'helpModal', 'avisos de uma vez (3): a Ajuda não abriu');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    checa(await banner(page) === null, 'avisos de uma vez (3): a dica saiu POR BAIXO da Ajuda', JSON.stringify(await banner(page)));
+    checa(!(await marcas(page)).dica, 'avisos de uma vez (3): a dica ficou GASTA debaixo da Ajuda');
+    await page.click('#closeHelp');
+    const veio = await esperarNaPagina(page, () => !topOpenModal() && !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+    checa(veio.ok, 'avisos de uma vez (3): a Ajuda fechou e a dica que esperava não apareceu');
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, 'avisos de uma vez (3): o banner da dica não recebe o toque inteiro', JSON.stringify(b));
+    checa((await marcas(page)).dica, 'avisos de uma vez (3): a dica apareceu e não ficou marcada');
+    checa(erros.length === 0, 'avisos de uma vez (3): erro de JS', erros[0]);
     await ctx.close();
   }
 }
@@ -10071,6 +10392,103 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       } else {
         checa(d.foco !== 'card-btn-reject', `${id}: pelo mouse, a barra que sumiu levou o foco ao ✕`, JSON.stringify(d));
       }
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── R13-2-05: a série do autor ACABA pela seta, com o foco na barra ────
+  // O Enter no "Ver +1" leva o foco à barra (C10), e as setas decidem com ele
+  // ali. Quando o último pedido do autor saía e o próximo card era de OUTRO
+  // autor, a barra se escondia com o foco nela, e ele caía no <body> — pela seta
+  // e pelo `triggerSwipe`, o caminho do gesto e do botão (MEDIDO nos dois
+  // motores, roteiro c1 da rodada 13). E quando o último dele era o FIM da fila
+  // a barra nem saía: ficava sobre o "Tudo limpo!" dizendo "1 de 1", com o foco
+  // nela. Agora o foco vai ao caminho de volta no card novo (o "Ver +N" dele, ou
+  // o ✕), ou ao "Verificar novamente"; e o Desfazer do último devolve a barra
+  // junto com o pedido, com o foco no ✕ dele. CONTROLES: a seta com a série
+  // ainda viva mantém a barra e o foco nela; e pelo MOUSE o fim da fila tira a
+  // barra sem mover foco nenhum.
+  for (const caso of ['seta', 'botao', 'fim', 'desfazer', 'controle', 'mouse']) {
+    const id = `card/foco no autor ${MOTOR}: ${caso === 'controle' || caso === 'mouse' ? 'CONTROLE — ' : ''}${{
+      seta: 'a seta decide o último do autor (o próximo é de outro)', botao: 'o gesto decide o último do autor',
+      fim: 'a seta decide o último do autor, o fim da fila', desfazer: 'o Desfazer do último do autor, o fim da fila',
+      controle: 'a seta com a série ainda viva', mouse: 'o fim da fila pelo mouse' }[caso]}`;
+    const P = (x, autor) => cardPedido(x, { creatorId: autor, createdBy: 'autor' + autor });
+    const doFim = caso === 'fim' || caso === 'desfazer' || caso === 'mouse';
+    const g = await cardPagina(doFim ? [P('Z1', 7), P('Z2', 7)] : [P('Z1', 7), P('W1', 8), P('Z2', 7), P('W2', 8)],
+      { undo: caso === 'desfazer' });
+    const estadoAgora = () => g.page.evaluate(() => {
+      const b = document.getElementById('focoAutorBar');
+      const a = document.activeElement;
+      const f = cardDaFrente();
+      return { barra: !b.classList.contains('hidden'), contagem: document.getElementById('focoAutorContagem').textContent,
+        autor: AppState.autorEmFoco, frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+        fila: AppState.queue.map((p) => p.updateRequestID).join(','),
+        fim: !document.getElementById('noMoreCards').classList.contains('hidden'),
+        foco: !a || a === document.body ? 'body'
+          : (a.id ? '#' + a.id : ([...a.classList].find((c) => c.startsWith('card-btn-') || c === 'selo-lote') || a.tagName)),
+        focoNaFrente: !!(a && f && f.contains(a)) };
+    });
+    // O foco no autor 7: pelo TECLADO (Enter no "Ver +1" leva o foco à barra) ou pelo MOUSE.
+    if (caso === 'mouse') await g.page.click('#cardStack .place-card:not(.card-fundo) .selo-lote');
+    else {
+      await g.page.focus('#cardStack .place-card:not(.card-fundo) .selo-lote');
+      await g.page.keyboard.press('Enter');
+    }
+    await assentar(g.page);
+    const antes = await estadoAgora();
+    checa(antes.barra && antes.autor === 7 && antes.fila === (doFim ? 'Z1,Z2' : 'Z1,Z2,W1,W2'),
+      `${id}: PRÉ-CONDIÇÃO — o "Ver +1" não pôs a série do autor 7 na frente com a barra`, JSON.stringify(antes));
+    if (caso !== 'mouse') checa(antes.foco === '#focoAutorBar', `${id}: PRÉ-CONDIÇÃO — o foco não está na barra`, JSON.stringify(antes));
+    // Uma decisão no card da frente: pela seta (o foco SEGUE na barra), pelo
+    // `triggerSwipe` (o caminho do gesto e do botão) ou pelo ✕ do mouse.
+    const decidir = async () => {
+      if (caso === 'mouse') await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      else if (caso === 'botao') {
+        await g.page.focus('#focoAutorBar');
+        await g.page.evaluate(() => window.triggerSwipe('left', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleReject)));
+      } else await g.page.keyboard.press('ArrowLeft');
+    };
+    await decidir();
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const meio = await estadoAgora();
+    checa(meio.frente === 'Z2' && meio.barra && meio.contagem === (doFim ? '1 de 1' : '1 de 3'),
+      `${id}: PRÉ-CONDIÇÃO — a 1ª decisão não deixou o último do autor na frente, com a barra contando`, JSON.stringify(meio));
+    if (caso === 'controle') {
+      checa(meio.foco === '#focoAutorBar', `${id}: com a série viva, o foco saiu da barra`, JSON.stringify(meio));
+      checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+      await g.fechar();
+      continue;
+    }
+    await decidir();
+    if (caso === 'desfazer') {
+      // Na janela do Desfazer do último: a tecla z devolve o pedido.
+      await esperarOuExplodir(g.page, () => !!AppState.pendingAction, 'a janela do Desfazer do último pedido');
+      await doisQuadros(g.page);
+      const naJanela = await estadoAgora();
+      checa(!naJanela.barra && naJanela.fim, `${id}: na janela, a barra seguiu sobre o "Tudo limpo!"`, JSON.stringify(naJanela));
+      await g.page.keyboard.press('z');
+    }
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const d = await estadoAgora();
+    if (caso === 'seta' || caso === 'botao') {
+      checa(d.frente === 'W1' && !d.barra && d.autor === null, `${id}: a série acabou e a barra (ou o foco no autor) ficou`, JSON.stringify(d));
+      checa(d.foco === 'selo-lote' && d.focoNaFrente,
+        `${id}: DEFEITO — a barra sumiu com o foco nela e ele não foi ao "Ver +N" do card novo (caiu em ${d.foco})`, JSON.stringify(d));
+    } else if (caso === 'fim') {
+      checa(d.fim && !d.barra, `${id}: DEFEITO — a barra ficou sobre o "Tudo limpo!" dizendo "${d.contagem}"`, JSON.stringify(d));
+      checa(d.autor === 7, `${id}: o foco no autor saiu sem card (o Desfazer do último não devolveria a barra)`, JSON.stringify(d));
+      checa(d.foco === '#reloadBtn', `${id}: o foco do teclado não foi ao "Verificar novamente" (está em ${d.foco})`, JSON.stringify(d));
+    } else if (caso === 'desfazer') {
+      checa(d.frente === 'Z2' && d.barra && d.contagem === '1 de 1' && d.autor === 7,
+        `${id}: o Desfazer devolveu o último pedido do autor e a barra não voltou`, JSON.stringify(d));
+      checa(d.foco === 'card-btn-reject' && d.focoNaFrente, `${id}: o foco não foi ao ✕ do pedido devolvido (está em ${d.foco})`, JSON.stringify(d));
+    } else {
+      checa(d.fim && !d.barra, `${id}: DEFEITO — a barra ficou sobre o "Tudo limpo!" dizendo "${d.contagem}"`, JSON.stringify(d));
+      checa(d.foco !== '#reloadBtn', `${id}: pelo mouse, o fim da fila levou o foco ao "Verificar novamente"`, JSON.stringify(d));
     }
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
@@ -11780,6 +12198,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
+  + `, + convite no iPhone FORA do Safari em 3 telas × ${LINGUAS.length} idiomas, lado a lado com o do Safari (o 1º passo pela CHAVE do navegador, o texto do dicionário do idioma, sem estourar nem partir palavra, e cabendo onde o do Safari cabe; antes do iOS 16.4 o convite some, com o CONTROLE do Safari antigo)`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true, e a pílula do nome travada e esmaecida na janela, com o CONTROLE viva antes e depois)`
   + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`
@@ -11824,12 +12243,13 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
+  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
+  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`

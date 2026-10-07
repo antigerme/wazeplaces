@@ -84,6 +84,7 @@ function montar({ offline = true } = {}) {
     historyTodayKey: () => '2026-09-22',
     contaAgora: () => null,   // a conta do gesto (ver test/conta.test.mjs)
     marcaDaSessao: () => 'marca',   // a sessão do gesto (idem)
+    marcaDestaAba: () => 'marca',   // e ela é a da memória desta aba (R13-1-04)
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
     pedidosQueEntraramNaFila: new Set(),

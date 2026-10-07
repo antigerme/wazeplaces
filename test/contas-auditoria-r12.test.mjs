@@ -522,7 +522,8 @@ function abaNaEntrada({ guardado = {}, conta = null, fila = [], card = false } =
     handleLogout: (o) => log.push(['sair', o]),
     relerPlacarDeOutraAba: () => log.push('placar'), relerPreferenciasDeOutraAba: () => log.push('preferencias'),
   };
-  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
+  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho',
     'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu'], deps);
   return { h, log, ap };
 }

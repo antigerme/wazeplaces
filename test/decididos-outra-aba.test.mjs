@@ -102,7 +102,8 @@ function abaB({ fila, treino = null } = {}) {
     handleActionResult: (tipo, place) => log.push('pousou:' + tipo + ':' + place.updateRequestID),
     reivindicacaoDestaAba: () => ({ rv: 'aba-B', rvEm: 1 }),
     historyTodayKey: () => '2026-10-07', ondeAgora: () => '30', getLang: () => 'pt', contaAgora: () => '4242',
-    marcaDaSessao: () => 'm', estreladoPeloApp: () => false, anotarEstreladoPeloApp: () => true,
+    marcaDaSessao: () => 'm', marcaDestaAba: () => 'm',   // a sessão do gesto, a da memória (R13-1-04)
+    estreladoPeloApp: () => false, anotarEstreladoPeloApp: () => true,
     refazerDepoisDo401: async () => null, msgDoServidor: () => '', contarConquista: () => {},
   };
   const chaves = Object.keys(deps);

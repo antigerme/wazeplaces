@@ -837,6 +837,7 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
     document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     atualizarConviteInstalar() {}, marcarBordaRolagem() {},
+    renderFocoAutor() {},   // a barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor
     trocarTextoI18n: (e, k) => { if (e) { e.attrs['data-i18n'] = k; textos[e === h3 ? 'titulo' : 'corpo'] = k; } },
     filaZeradaConfirmada: () => true, checarConquistas: (x) => conquistas.push(x),
   };

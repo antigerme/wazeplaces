@@ -903,6 +903,7 @@ function rodarApp(aba, { relogio = null, esperaMs = null, comoOAppDeAntes = fals
     conhecerContaDoLogin: (c) => contas.push(c),
     focoNaTelaDeEntrada: () => false,   // o foco da tela de entrada (R10-1-05) não é o assunto daqui
     authInFlight: false, resgateEmVoo: false,   // nenhum login desta aba no ar (R11-1-03)
+    textoDigitadoNaEntrada: () => false,        // nem nada digitado num diálogo da entrada (R13-1-05)
     setTimeout: relogio ? relogio.setTimeout : setTimeout, clearTimeout: relogio ? relogio.clearTimeout : clearTimeout,
   };
   const chaves = Object.keys(deps);

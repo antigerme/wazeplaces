@@ -122,14 +122,19 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // Com a época mudada nada grava — só o placar otimista do que não pousou
     // volta (test/costura-sessao, K7), a anotação dele sai da fila de saída e,
     // na fila que atravessou a queda, ele volta como card (V1). O bloco não
-    // tem chave NENHUMA dentro: nada de ramo que grave. (A ida passa antes pelo
-    // `desistir` da recusa automática, a cada tentativa — R10-2-01.)
+    // tem chave NENHUMA dentro: nada de ramo que grave — menos o POUSO do que
+    // pousou, que é fato do pedido, não da sessão (R13-2-01, pelo
+    // `registrarPousoDepoisDaQueda`, que não grava depois do "Sair"; medido em
+    // test/abas-auditoria-r13.test.mjs). (A ida passa antes pelo `desistir` da
+    // recusa automática, a cada tentativa — R10-2-01.)
     enviarLote: /await callWithRetry\(\(\) => \(desistir\(p\)\s*\? naoVale\s*: API\.rejectPlace\([^)]*\)\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
     // A lista de países é a ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
     loadProfileAndAuxData: /pedirListaDePaises\(regiaoPedida\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
     // e a resposta de outra sessão vai inteira pro `decisaoDepoisDaQueda`.
-    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila\);\s*return;\s*\}/,
+    // (Com a marca de QUEM decidiu, tirada no gesto: o pouso de depois da queda
+    // é registrado com ela — R13-2-01, test/abas-auditoria-r13.test.mjs.)
+    handleMarkAsRead: /API\.markAsRead\([^)]*\), epoca\);\s*if \(epoca !== epocaDaSessao\) \{\s*decisaoDepoisDaQueda\('read', place, result, placar, epocaFila, quem\);\s*return;\s*\}/,
     // As DUAS esperas do guardar: a ida e a conferência do 401 (C7 da
     // auditoria do card, 2026-09-29). A conferência só começa na MESMA época, e
     // depois das duas a época mudada sai sem gravar nada — só o aviso da estrela
@@ -521,6 +526,7 @@ function montarPainelComConvite({ tratou, skipped = 0, base = 0 }) {
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     marcarBordaRolagem() {}, checarConquistas() {}, dlog() {}, filaZeradaConfirmada: () => false, trocarTextoI18n() {},
     convitePodeAparecer: () => true,   // o navegador oferece (ou é iOS) e ninguém dispensou
+    renderFocoAutor() {},   // a barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor
     queueMicrotask: () => {},
   };
   const chaves = Object.keys(deps);
@@ -835,6 +841,7 @@ test('fila que termina com PULADOS não diz "Tudo limpo!" nem "confira o país":
       document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
       dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
       atualizarConviteInstalar() {}, marcarBordaRolagem() {}, checarConquistas() {}, dlog() {},
+      renderFocoAutor() {},   // a barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor
       // A conquista "Tudo limpo" é perguntada no fim da tarefa (ver
       // test/conquistas-momento.test.mjs); aqui só interessa a frase.
       filaZeradaConfirmada: () => false,

@@ -16,29 +16,30 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-07 ~18:30 UTC)
+## 0. Estado agora (2026-10-07 ~22:30 UTC)
 
-- **Lote 15 em produção** (PR #262, `d3ecfed`, v2026.10.07-03), verificado com as duas contas: 132 ✓ na volta
-  inteira, com a seção "18. Lote 15 no ar" (8 ✓). O único ✗ era do roteiro (a triagem do diagnóstico tinha mudado de
-  forma no próprio lote); refeita a seção, 25 ✓ · 0 ✗. Nenhum defeito do app.
-- **Rodada 12** completa (`scratchpad/r12-<n>/relatorio.md`, ~33 achados): nenhum alto; 4 médios (a recusa
-  automática no ar ignorava a decisão da outra aba; a busca no ar trazia de volta o pedido decidido lá; a fila
-  guardada do offline trazia de volta o card que a outra aba decidiu; com "Minha área", a fila guardada não abria no
-  lie-fi) e 1 médio-baixo (o aquecimento da lixeira que volta tarde gravava a lista velha). O resto, baixos.
-- **Lote 16 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
-  ampliada, duas abas, fila e "Marcar todos", contas e a adoção, diagnóstico e offline, presença e conversa, treino e
-  Histórico, Filtros e "Minha área") e três conflitos em fonte resolvidos pela união (os harnesses de
-  `test/minha-area`/`test/offline-varredura` entre filtros e diag; o README das leituras do KV entre filtros e foto
-  ampliada; o `handleLogout` e o `aprovacaoPousouDepoisDaQueda` entre foto ampliada e duas abas). Relatórios em
-  `scratchpad/relatorio-l16-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 16").
-- **Cookies** (2026-10-06): `a3bf0b4b-antigerme_cookies.txt` (L6+AM) e `83b3b403-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "19. Lote 16 no ar": o que está no
-  ar comparado byte a byte com o juntado, o eco do envio sem resposta, o "Ver de novo" na janela do Desfazer e a busca
-  no ar × outra aba) — e a rodada 13, com as pistas dos agentes: com "Minha área", o perfil que chega quando a rede
-  volta REFAZ a fila guardada aberta no lie-fi (o card da tela troca); a série do autor que acaba pela seta com o foco
-  na barra larga o foco no `<body>`; a aba sem sessão na memória ignora o aviso do pouso; o `decisaoDepoisDaQueda` não
-  registra o pouso.
+- **Lote 16 em produção** (PR #263, `4be3612`, v2026.10.07-04): os 13 arquivos que o app carrega iguais, byte a byte,
+  aos juntados (`scratchpad/prod-bytes.mjs`, com o controle de que a versão anterior difere), o CI da main verde, e os
+  cabeçalhos conferidos com o `_headers` — iguais, menos dois que o Managed Transform "Add security headers" do
+  Cloudflare troca na borda (X-Frame-Options e Referrer-Policy; decisão do owner). Com os cookies NOVOS das duas contas
+  (os de 2026-10-06 passaram a dar "guest user" no Waze, com o prazo em 2026-11-06), o `prod-auditoria.mjs` inteiro deu
+  132 ✓ e parou num erro do ROTEIRO na seção 19 (c), refeita: **24 ✓ · 0 ✗**. O roteiro media o eco com a falha que a
+  seção 18 deixa na conversa e com o envio que chega ao Waze antes da falha (em produção o eco do tempo real ganha a
+  resposta HTTP); hoje a falha vem primeiro e o mesmo corpo vai ao servidor depois. Nenhum defeito do app.
+- **Rodada 13** completa (`scratchpad/r13-<n>/relatorio.md`, ~28 achados): nenhum alto; médios — a decisão que pousa
+  depois da queda não registrava o pouso (três auditores), a aba no meio da renovação jogava fora o aviso do pouso, o
+  link de pareamento que falha com um login no ar, com "Minha área" o perfil que chega refazia a fila guardada aberta
+  sem rede, e um LAÇO de requisição quando o outro servidor responde 401 com a decisão do lugar pendente (regressão do
+  lote 16). O resto, baixos.
+- **Lote 17 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
+  ampliada, duas abas, fila e teclado, contas, offline, presença, treino e Histórico, Filtros e "Minha área"); dois
+  conflitos em fonte resolvidos pela união (o `definirPerfil` entre fila e treino; o `api.js` entre contas e foto
+  ampliada) e um harness que não enxergava a função nova de outra área. Relatórios em
+  `scratchpad/relatorio-l17-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 17").
+- **Cookies** (2026-10-07 ~22 h UTC): `82a8fa0f-antigerme_cookies.txt` (L6+AM) e `3c147ac2-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: PR, CI (Playwright 1.64: Chrome 156 e WebKit 27.2), merge, produção (`prod-bytes.mjs` e, com os
+  cookies novos, o `prod-auditoria.mjs` inteiro, com as seções 19 e 20) — e a rodada 14.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -84,6 +85,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #260 | 2026100701 | rodada 12: treino e a fila real, fila de saída, foto ampliada, diagnóstico, presença, filtros e "Minha área" por servidor, contas em duas abas; a extensão 0.3.4 | **112 ✓** em produção (os 4 ✗ do roteiro, consertados; a seção 16 refeita, 26 ✓ · 0 ✗), nenhum defeito do app |
 | #261 | 2026100702 | rodada 13: recusa automática e "Marcar todos", duas abas, treino, foto ampliada, presença, "Minha área" por servidor, entrada, offline e FAB | **123 ✓** em produção, com a seção 17 (8 ✓), nenhum defeito do app |
 | #262 | 2026100703 | rodada 14: o congelamento no fim do treino com a busca lenta, aprovar × excluir foto no mesmo local, duas abas e o canal dos pousos, o envio que falha na conversa no leitor de tela, "Minha área" por servidor, entrada, offline e FAB | **132 ✓** em produção, com a seção 18 (8 ✓); o 1 ✗ era do roteiro (a triagem do diagnóstico mudou de forma), refeito: 25 ✓ · 0 ✗; nenhum defeito do app |
+| #263 | 2026100704 | rodada 15: duas abas fora da fila (a recusa automática e a busca no ar, a fila guardada), a lixeira na vez do local, presença, "Minha área" pendente, entrada, offline e Histórico | **132 ✓** em produção e a seção 19 refeita (**24 ✓ · 0 ✗**; o erro era do roteiro), com cookies novos; os 13 arquivos byte a byte iguais ao juntado e os cabeçalhos conferidos com o `_headers` (2 trocados pela borda, decisão do owner); nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere

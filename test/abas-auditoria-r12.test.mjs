@@ -133,7 +133,9 @@ const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotar
   'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
   'aoConhecerConta', 'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada',
   // O "invisível" pedido antes do perfil, que o `aoConhecerConta` carimba (R12-5-05, a junção do lote 16).
-  'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
+  'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
+  // O aviso que chega à aba SEM sessão na memória (R13-2-03, test/abas-auditoria-r13.test.mjs).
+  'aoPousarSemSessaoNaMemoria', 'guardaASessaoQueCaiu'];
 
 function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, abrirCanal = true } = {}) {
   const log = [];
@@ -158,6 +160,7 @@ function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, abri
     updatePendingCount: () => log.push('restam'), aoMudarAFilaPorBaixo: () => log.push('fundo'),
     esquecerOutraConta: (id, o) => log.push('esqueceu:' + id + (o && o.soMemoria ? ':memoria' : '')),
     esvaziarFilaDeSaida: () => log.push('esvaziou'),
+    document: { querySelector: () => null },
   };
   const chaves = Object.keys(deps);
   const fonte = [
@@ -642,7 +645,7 @@ test('R12-2-04: a aprovação de foto que pousa no meio da renovação avisa a o
 // reabertura), com a base do IndexedDB de mentira e o aparelho dividido.
 const NOMES_OFFLINE = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'lembrarDecididasPorOutraAba', 'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'offlineLerPousos',
-  'offlinePodarPousos', 'offlineGravarFila', 'semOsJaDecididos', 'marcaDaSessao', 'contaAgora'];
+  'offlinePodarPousos', 'offlineGravarFila', 'semOsJaDecididos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora'];
 function baseDeMentira() {
   const guardado = {};
   return {

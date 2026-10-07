@@ -95,6 +95,8 @@ function montarFimDaFila({ skipped = 0, base = 0, tratou = true, treino = false 
     AppState, document: { getElementById: (id) => (id === 'noMoreCards' ? noMore : null) },
     dfato() {}, dlogCapturarAuto() {}, marcarTelaPronta() {}, removeCurrentCardEl() {}, showLoading() {},
     atualizarConviteInstalar() {}, marcarBordaRolagem() {}, trocarTextoI18n() {},
+    // A barra "Primeiro os de…" sai com o card (R13-2-05); aqui não há foco no autor.
+    renderFocoAutor() {},
     checarConquistas: (x) => conquistas.push(x || {}),
     // Nada mais em jogo que possa voltar pra fila (F3): nem em andamento, nem na fila de saída.
     pedidosEmAndamento: new Set(), carregarFilaDeSaida: () => [],
@@ -233,8 +235,9 @@ test('H11: a fila de saída guarda o idioma do gesto, e o pouso entrega hora, di
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-24', ondeAgora: () => '30', contaAgora: () => null,
     API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'fr', updateInFlightIndicator() {},
-    // A marca da sessão do gesto (o dono do item sem conta, do conserto do offline).
-    marcaDaSessao: () => 'marca',
+    // A marca da sessão do gesto (o dono do item sem conta, do conserto do offline):
+    // a da memória desta aba (`marcaDestaAba`, R13-1-04).
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',
   };
   const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
   enfileirarSaida('read', { venueID: 'v1', updateRequestID: 'u1' }, 'row');
@@ -379,6 +382,7 @@ function montarLightboxComJanela() {
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, sairDaEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
     API: { prepararExclusao() {}, getRegion: () => 'row' },
+    idDoGestoDaLixeira: () => 'gesto-teste-01',   // o gesto do toque na lixeira (R13-3-03)
     enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao: () => Promise.resolve(true),
     aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,
     // Nada no ar e nada travado: cada caso abre a SUA janela (L23, L24).
@@ -459,7 +463,7 @@ test('Detetive: rejeitar um duplicado conta pelo MOTIVO do reporte, com ou sem o
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null,
     API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'pt', updateInFlightIndicator() {},
-    marcaDaSessao: () => 'marca',
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
   const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
   enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1', flagType: 'DUPLICATE' }, 'row');

@@ -1221,11 +1221,13 @@
                             <!-- iOS não tem beforeinstallprompt: no Safari a instalação é
                                  manual. Sem estas duas linhas, quem usa iPhone não tem
                                  caminho NENHUM — e o pareamento por QR empurra justamente
-                                 pro celular. -->
+                                 pro celular. O 1º passo troca de CHAVE fora do Safari
+                                 (Chrome, Firefox e Edge do iPhone: "no menu do navegador";
+                                 ver `atualizarConviteInstalar`). -->
                             <ol id="installIosSteps" class="hidden text-sm text-slate-600 dark:text-slate-300 space-y-2 list-none">
                                 <li class="flex items-start gap-2">
                                     <svg class="w-5 h-5 flex-shrink-0 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0-12L8 8m4-4l4 4M6 14v4a2 2 0 002 2h8a2 2 0 002-2v-4"/></svg>
-                                    <span data-i18n-html="install.ios.step1">Toque em <strong>Compartilhar</strong>, na barra do Safari</span>
+                                    <span id="installIosStep1" data-i18n-html="install.ios.step1">Toque em <strong>Compartilhar</strong>, na barra do Safari</span>
                                 </li>
                                 <li class="flex items-start gap-2">
                                     <svg class="w-5 h-5 flex-shrink-0 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/></svg>

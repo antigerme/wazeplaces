@@ -1483,7 +1483,18 @@ function presencaMensagemDoFluxo(m, doLote) {
             // deixa de fora o que está nas vivas). Também a do LOTE que a régua
             // de cima deixa de fora (guardada antes de a lista sair): a lista a
             // contou, e a conta dela é refeita do mesmo jeito.
-            if (daLista && daLista.naoLidas > 0 && presencaLidaNoAr(com)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
+            //
+            // E o mesmo com o "lida" que JÁ VOLTOU: a lista na tela saiu com
+            // ele no ar e pode ter sido lida no Waze antes de ele ser
+            // processado (a régua do `lidaVoltouEm`, a mesma da chegada da
+            // lista, R10-5-04). Voltando antes da resposta — o caso comum: o
+            // "lida" é rápido, e a carona espera a ação —, a conta da lista,
+            // com a vista dentro, ficava, e a pílula dizia "2 mensagens novas"
+            // com uma só não vista até a lista seguinte (auditoria da rodada
+            // 13, R13-5-01). A lista que saiu ANTES de ele sair o `lidaDepois`
+            // já zerou.
+            const lidaVoltouDepoisDaLista = Presenca.conversasSaiuEm < (Presenca.lidaVoltouEm.get(com) || 0);
+            if (daLista && daLista.naoLidas > 0 && (presencaLidaNoAr(com) || lidaVoltouDepoisDaLista)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
         }
     }
     presencaRenderTudo();
@@ -1656,6 +1667,25 @@ function presencaCalarFalhaQueSumiu(com) {
     const ultima = presencaUltimaFalhada(com);
     if (ultima && presencaFraseDaFalha(ultima) === dita) return;
     el.textContent = '';
+}
+
+// O mesmo pra falha do HISTÓRICO (a primeira página ou a antiga): a região diz a
+// frase que a TELA mostra, ou nada. A tentativa com o perfil começa limpando a
+// região (R11-5-03); a da espera do perfil (`h.esperaPerfil`) não sai e não a
+// limpava: o "Tentar de novo" trocava na tela "Não deu pra carregar a
+// conversa." por "Carregando a conversa…", e quem percorria a conversa com
+// leitor de tela seguia ouvindo a falha até o perfil chegar (auditoria da
+// rodada 13, R13-5-02). Só a frase do histórico que a tela deixou de mostrar
+// sai: limpar a região inteira calaria também a falha de um envio que segue na
+// tela, e a mensagem que chegou. O que a tela mostra é o que o desenho decide
+// (`presencaRenderConversa` e `presencaHtmlAnteriores`).
+function presencaCalarFalhaDoHistoricoQueSumiu(id) {
+    const el = document.getElementById('conversaAnuncio');
+    const h = Presenca.historico.get(id);
+    if (!el || !h || Presenca.aberta !== id) return;
+    const dita = el.textContent;
+    if (dita === t('presenca.conversa.erro') && !(h.erro && !h.carregada)) el.textContent = '';
+    else if (dita === t('presenca.conversa.anterioresErro') && h.antigas !== 'erro') el.textContent = '';
 }
 
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
@@ -2172,7 +2202,18 @@ function presencaTetoAoAbrir(id) {
 async function presencaCarregarConversa(id, { antes = null } = {}) {
     let h = Presenca.historico.get(id);
     if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
-    if (h.carregando) return;
+    if (h.carregando) {
+        // A conversa REABERTA com a página ANTIGA ainda no ar pede a primeira
+        // página, e o `h.carregando` a segurava. É a primeira página que traz o
+        // que chegou com a conversa fechada e a marca como lida no Waze (o
+        // `abrir`): a mensagem que a pessoa viu ao reabrir ficava não lida lá, e
+        // a lista seguinte a devolvia como "1 mensagem nova" (achado no
+        // conserto do lote 17). Ela sai quando a antiga voltar
+        // (`primeiraDepois`, no fim): uma vez, e só com a conversa ainda
+        // aberta — nenhum pedido além do que a reabertura já faria.
+        if (!antes && h.antigas === 'carregando') h.primeiraDepois = true;
+        return;
+    }
     // De quem é a sessão decide o que é MEU no histórico (`presencaMsgDoWaze`).
     // Na renovação silenciosa (a extensão devolveu a sessão e o perfil ainda não
     // voltou), o `abrir` saía mesmo assim: as minhas mensagens vinham como
@@ -2184,12 +2225,30 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // "Ver mensagens anteriores" — é gesto: pede o perfil que falta (R6-5-5).
     const eu = presencaEu();
     if (!eu) {
+        // A PRIMEIRA página que já espera o perfil não é trocada pela antiga: é
+        // ela que traz o que chegou e marca a conversa como lida (o `abrir`).
+        // Com o perfil, a primeira página no ar segura o toque em "Ver
+        // mensagens anteriores" (o `h.carregando`, acima); na espera, o toque
+        // trocava o pedido da espera pela página antiga, e a conversa reaberta
+        // não era marcada como lida no Waze — a mensagem que a pessoa viu ao
+        // reabrir voltava na lista seguinte como "1 mensagem nova" (irmão do
+        // R13-5-02, lote 17). O toque segue pedindo o perfil: é gesto.
+        if (antes && h.esperaPerfil && !h.esperaPerfil.antes) { presencaPedirPerfil(); return; }
         // Sem o histórico na tela, o que espera é a PRIMEIRA página: a antiga
         // só existe depois dela.
         h.esperaPerfil = { antes: h.carregada ? antes : null };
         if (h.esperaPerfil.antes) h.antigas = 'carregando';
-        else h.erro = false;
+        // E a primeira página recomeça as duas, como no caminho com o perfil
+        // (logo abaixo). Só com o `erro` zerado, a conversa reaberta na espera
+        // trazia de volta o erro velho da página antiga ("Não deu pra carregar
+        // as mensagens anteriores.") — ou o "Carregando mensagens anteriores…"
+        // de um pedido que a espera já trocou pela primeira página (irmão do
+        // R13-5-02, lote 17).
+        else { h.erro = false; h.antigas = null; }
         presencaRenderConversa();
+        // A tela diz "Carregando…": a falha que ela deixou de mostrar sai do
+        // leitor de tela também (R13-5-02).
+        presencaCalarFalhaDoHistoricoQueSumiu(id);
         presencaPedirPerfil();
         return;
     }
@@ -2214,12 +2273,25 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     h.carregando = false;
     if (epoca !== Presenca.epoca) return;
     chatAoResponder(r, carona);
+    // A primeira página que a conversa reaberta pediu com ESTA página no ar
+    // (ver o `h.carregando`, no topo) sai agora, só com a conversa ainda
+    // aberta: fechada, a próxima abertura a pede, como sempre.
+    const primeiraDepois = !!h.primeiraDepois && Presenca.aberta === id;
+    h.primeiraDepois = false;
+    // E a resposta desenha a conversa só se ela ainda é a da tela. Com OUTRA
+    // aberta, o redesenho era o da outra — e o da primeira página, que rola até
+    // o fim, arrastava pro fim quem lia o começo dela (lote 17).
+    const naTela = Presenca.aberta === id;
     if (!r || !r.success) {
         if (antes) h.antigas = 'erro';
         else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
-        presencaRenderConversa();
+        // A página antiga é de uma abertura que já passou: com a primeira
+        // saindo, a falha dela não aparece nem é dita — a primeira recomeça as
+        // duas (P12).
+        if (primeiraDepois) { presencaCarregarConversa(id); return; }
+        if (naTela) presencaRenderConversa();
         // A tela diz que o histórico não veio; o leitor de tela também, com a
         // MESMA frase — e só quando a tela a mostra: a primeira página que
         // falha com o histórico já na tela não diz nada lá (R11-5-03).
@@ -2262,11 +2334,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (ultimaDela && r.lida === true) Presenca.lidaEnviadaAte.set(id, ultimaDela);
         if (r.lida === true) Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, saiuEm));
     }
-    presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
+    if (naTela) presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
     // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
     // que está na tela, marca.
     if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
+    if (primeiraDepois) presencaCarregarConversa(id);
 }
 
 // A página ANTES da primeira mensagem na tela.
