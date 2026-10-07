@@ -304,8 +304,11 @@ test('R8-2-01: "Marcar todos" com o pedido cuja APROVAÇÃO pousou sem resposta 
   assert.deepEqual(m.chamadas, ['lote:v1+v2+v3', 'um:v1', 'um:v2', 'um:v3'],
     'PRÉ-CONDIÇÃO: o lote parou no pedido resolvido e foi um a um');
   assert.equal(m.AppState.stats.read, 2, `DEFEITO: o pedido que a pessoa APROVOU contou como lido (${m.AppState.stats.read} de 2)`);
-  assert.deepEqual(m.log.filter((l) => /^(historico|conquistas):/.test(l)), ['historico:read:2', 'conquistas:2'],
-    'DEFEITO: a aprovação entrou no Histórico (ou nas conquistas) como lido');
+  // No um a um cada pedido conta quando POUSA (R10-2-03): a SOMA é que diz se a
+  // aprovação entrou como lido.
+  const somar = (prefixo) => m.log.filter((l) => l.startsWith(prefixo)).reduce((s, l) => s + Number(l.slice(prefixo.length)), 0);
+  assert.deepEqual([somar('historico:read:'), somar('conquistas:'), m.log.filter((l) => /^historico:(?!read:)/.test(l)).length],
+    [2, 2, 0], 'DEFEITO: a aprovação entrou no Histórico (ou nas conquistas) como lido');
   assert.deepEqual(m.toasts(), ['toast:info:toast.batchMarkingPlural#3', 'toast:success:toast.batchDonePlural#2'],
     'DEFEITO: o aviso contou a aprovação entre os marcados como lidos');
   assert.equal(m.log.filter((l) => l === 'conquista:fotos').length, 1, 'DEFEITO: o "Curador" não contou a aprovação dela');

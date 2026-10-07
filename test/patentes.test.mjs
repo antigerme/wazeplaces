@@ -226,6 +226,42 @@ test('cada patente e cada conquista tem texto nas QUATRO línguas', () => {
   assert.equal(achados, 4, 'controle: o arquivo deixou de ter os quatro blocos');
 });
 
+// O "Poliglota" se ganha DECIDINDO pedidos em dois idiomas: o idioma entra na
+// CONFIRMAÇÃO da decisão (`registrarIdiomaUsado(gesto.lang)`), e trocar o idioma
+// e passear pelos Filtros e pelo Histórico não conta (o H2, rodada 2). A
+// condição na vitrine dizia "usar o app em 2 idiomas" nas quatro línguas: quem
+// usava o app em francês e voltava não ganhava, sem nada na tela dizendo por
+// quê (R10-7-05, MEDIDO no navegador; auditoria de 2026-10-07). Ela diz agora o
+// verbo das vizinhas que contam ONDE o trabalho foi feito ("tratar em 2 países").
+test('R10-7-05: a condição do "Poliglota" diz TRATAR pedidos em 2 idiomas, no verbo das vizinhas — é a decisão que conta, não usar o app', () => {
+  // A REGRA que o texto descreve: o idioma só entra na confirmação de uma
+  // decisão (o ✕/✓ e o "Marcar todos"), nunca na troca de idioma.
+  const codigo = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+  const chamadas = codigo.filter((l) => l.includes('registrarIdiomaUsado(') && !l.includes('function registrarIdiomaUsado('));
+  assert.equal(chamadas.length, 2, `o idioma do "Poliglota" passou a entrar em outro lugar: ${chamadas.map((l) => l.trim()).join(' | ')}`);
+  for (const f of ['registrarAcaoConfirmada', 'registrarLoteConfirmado']) {
+    assert.match(fatiar(f), /\n\s+registrarIdiomaUsado\(gesto \? gesto\.lang/, `o "Poliglota" deixou de contar o idioma da decisão em ${f}`);
+  }
+  const verbo = (s) => s.trim().split(/\s+/)[0];
+  for (const l of ['pt', 'en', 'es', 'fr']) {
+    const ini = I18N.indexOf(`\n  ${l}: {`);
+    const bloco = I18N.slice(ini, I18N.indexOf('\n  },', ini));
+    const como = (id) => {
+      const m = new RegExp(`'conq\\.${id}\\.como': '([^']*)'`).exec(bloco);
+      assert.ok(m, `${l}: não achei a condição conq.${id}.como`);
+      return m[1];
+    };
+    // CONTROLE: as vizinhas que contam onde o trabalho foi feito concordam entre
+    // si — prova que a leitura pega a frase certa de cada língua.
+    assert.equal(verbo(como('andarilho')), verbo(como('viajante')),
+      `CONTROLE (${l}): "Andarilho" e "Viajante" não dizem o mesmo verbo — o teste perdeu o sentido`);
+    const poli = como('poliglota');
+    assert.equal(verbo(poli), verbo(como('viajante')),
+      `DEFEITO (${l}): a condição do "Poliglota" ("${poli}") não diz o verbo do "Viajante" ("${como('viajante')}") — o que conta é decidir pedidos`);
+    assert.doesNotMatch(poli, /\bapp\b/i, `${l}: a condição do "Poliglota" voltou a falar em usar o app ("${poli}")`);
+  }
+});
+
 // ── o que o desenho PROMETE, e o código tem que continuar cumprindo ────────
 test('nenhuma conquista mostra progresso — "3 de 10" é o mecanismo de pressão', () => {
   const html = fatiar('htmlConquistas');

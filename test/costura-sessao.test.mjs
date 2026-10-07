@@ -756,7 +756,10 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
   return { h, deps, AppState, portoes, portoesUm, log, pousos, marcarTodos, ateAQueda, fila };
 }
 
-test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o que o Waze JÁ marcou sai da fila, sem contar', async () => {
+// O que pousou ANTES da queda conta NA HORA, na sessão dele, como o ✕ de um card
+// que pousou (R10-2-03: somado só no fim do laço, fechar o app no meio o
+// perdia); a resposta que chega DEPOIS da queda não grava nada.
+test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o que o Waze JÁ marcou sai da fila; a resposta de depois da queda não conta', async () => {
   const m = montarLoteComQueda();
   const { lote, desde } = await m.ateAQueda();
   m.portoes[1]({ success: false, errorCategory: 'unauthorized' });   // a resposta da sessão que caiu
@@ -766,7 +769,10 @@ test('V6b: "Marcar todos" cortado pela queda, renovando com a MESMA conta — o 
   assert.equal(m.AppState.serverTotal, 2, 'o "Restam" seguiu contando o pedido já marcado');
   assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'u2',
     'o card da frente não foi refeito: ficou na tela o pedido já marcado');
-  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.equal(m.AppState.stats.read, 1,
+    'o placar: o u1, que pousou ANTES da queda, conta (R10-2-03); a resposta da sessão que caiu, não');
+  assert.deepEqual(m.log.slice(0, desde).filter((l) => l === 'historico' || l === 'conquistas'), ['historico', 'conquistas'],
+    'o u1, que pousou antes da queda, não entrou no Histórico e nas conquistas na hora em que pousou');
   assert.ok(!depois.includes('historico') && !depois.includes('conquistas'),
     `com a sessão trocada o lote gravou: ${depois}`);
   // O ÚNICO aviso é o de que o lote não saiu inteiro (R8-2-04): o u2 e o u3
@@ -786,7 +792,8 @@ test('V6b: o pedaço cuja resposta POUSA depois da queda também sai da fila —
   assert.deepEqual(m.fila(), ['u3'], 'o pedido que pousou depois da queda seguiu como card');
   assert.equal(m.AppState.serverTotal, 1);
   assert.deepEqual(m.pousos, ['u1', 'u2'], 'o que pousou depois da queda ficou sem pouso (a fila guardada o devolveria)');
-  assert.equal(m.AppState.stats.read, 0, 'a resposta da sessão que caiu contou no placar');
+  assert.equal(m.AppState.stats.read, 1,
+    'o placar: só o u1, que pousou ANTES da queda (R10-2-03) — a resposta da sessão que caiu (o u2) contou');
   assert.equal(m.portoes.length, 2, 'o lote seguiu mandando pedaços depois da queda');
 });
 
@@ -809,7 +816,7 @@ test('V6b: a queda no meio do caminho UM A UM também para o lote — e o que j�
   assert.deepEqual(m.fila(), ['u2', 'u3'], 'o pedido que pousou no um a um seguiu na fila');
   assert.equal(m.AppState.serverTotal, 2);
   assert.equal(m.portoes.length, 1, 'o lote mandou o pedaço seguinte DEPOIS da queda (com a sessão que caiu)');
-  assert.equal(m.AppState.stats.read, 0);
+  assert.equal(m.AppState.stats.read, 1, 'o placar: só o u1, que pousou no um a um ANTES da queda (R10-2-03)');
 });
 
 test('V6b: CONTROLE — sem a queda, o lote inteiro sai da fila e conta (o instrumento distingue)', async () => {

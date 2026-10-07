@@ -3132,6 +3132,114 @@ for (const r of p9j.fotos.splice(0)) await r.fulfill({ status: 404, body: 'nao' 
 for (const r of p9j.perfis.splice(0)) await r.abort('failed').catch(() => {});
 await ctxP9j.close();
 
+// 4 e 5. O MESMO lie-fi de cima, com o que a pessoa (e o app) fazem no meio
+// (auditoria da rodada 10). O 3 acima é o CONTROLE dos dois: sem nada no meio, o
+// perfil que responde solta o card na hora.
+//  · (R10-4-01) A pessoa tenta ARRASTAR o card travado — a reação natural a ✕ e
+//    ✓ apagados — e solta: a direção está travada, ele volta pro lugar, e a volta
+//    deixa `translate(0, 0) rotate(0deg)` escrito. A recuperação lia esse
+//    transform como "arraste em curso" e desistia: o card nunca mais saía do
+//    aviso (MEDIDO, n4b: 15 s e contando; n23, o mesmo no modo avião).
+//  · (R10-4-03) Uma decisão de antes ESPERA envio, e o esvaziamento da abertura
+//    fica no ar com ela pendurada: o perfil responde NO MEIO dele, e a prova de
+//    rede saía cedo antes de soltar o card (MEDIDO, n14: 15,9 s e contando).
+const liefiSegurado9j = async (nome, { comSaida = false } = {}) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
+  const e = { fase: 'prepara', perfis: [], fotos: [], saidas: [] };
+  const pedidos = [PLACE(221, 'NEW_PHOTO'), SO_MAPA(222)];
+  await ctx.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+    headers: { 'access-control-allow-origin': '*' } }));
+  await ctx.route('**/venue-image.waze.com/**', (r) => {
+    if (e.fase === 'prepara') return r.fulfill({ status: 200, contentType: 'image/png', body: PX });
+    if (e.fase === 'liefi') return r.abort('connectionreset');
+    e.fotos.push(r); return undefined;                         // 'prova': o pedido à foto fica PRESO
+  });
+  await ctx.route('**/api/*', (r) => {
+    const rota = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (e.fase !== 'prepara') {
+      if (rota === 'perfil') { e.perfis.push(r); return undefined; }          // a resposta nossa, segurada
+      if (rota === 'validar-place') { e.saidas.push(r); return undefined; }   // a decisão do esvaziamento, pendurada
+      return r.abort('connectionreset');                                     // o lie-fi: nada mais responde
+    }
+    if (rota === 'buscar-places') return json({ success: true, places: pedidos, hasMore: false, page: 1, total: 2 });
+    if (rota === 'perfil') return json(PERFIL_9J);
+    return r.abort('failed');
+  });
+  const prep = await abrir9j(ctx, nome + ', preparo');
+  await entrar9j(prep, 'tok-9j-' + nome.replace(/\W+/g, ''));
+  const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
+    && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+  // A decisão de ANTES, esperando envio (um pedido que não está na fila guardada).
+  if (comSaida) await prep.evaluate(() => enfileirarSaida('reject', { venueID: 'v229', updateRequestID: 'u229', creatorId: 229 }, 'row'));
+  await prep.close({ runBeforeUnload: true });
+  e.fase = 'liefi';
+  const pg = await abrir9j(ctx, nome);
+  const travado = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && !!cardDaFrente()
+    && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v221' && !!cardDaFrente().querySelector('.card-sem-foto'), 30000, 200);
+  const estado = () => pg.evaluate(() => { const c = cardDaFrente();
+    return { aviso: !!(c && c.querySelector('.card-sem-foto')), rejeitar: !!(c && c.querySelector('.card-btn-reject').disabled),
+      transform: c ? c.style.transform : null, rejeitados: AppState.stats.rejected, esvaziando: esvaziandoSaida,
+      saida: carregarFilaDeSaida().length }; });
+  // O perfil segurado RESPONDE (a prova de rede) e mede quanto o card leva pra sair do aviso.
+  const provar = async () => {
+    const t0 = Date.now();
+    if (e.perfis.length) await e.perfis.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PERFIL_9J) });
+    const solto = await esperarNaPagina(pg, () => { const c = cardDaFrente();
+      return !!(c && !c.querySelector('.card-sem-foto') && !c.querySelector('.card-btn-reject').disabled); }, 15000, 50);
+    return { solto: solto.ok, ms: Date.now() - t0, diario: await pg.evaluate(() => dfatoAnel.filter((x) => /^foto\./.test(x.k)).map((x) => x.k)) };
+  };
+  const fechar = async () => {
+    for (const r of [...e.fotos.splice(0), ...e.saidas.splice(0)]) await r.abort('failed').catch(() => {});
+    for (const r of e.perfis.splice(0)) await r.abort('failed').catch(() => {});
+    await ctx.close();
+  };
+  return { ctx, pg, e, pronto: pronto.ok, travado: travado.ok, estado, provar, fechar };
+};
+
+// 4. (R10-4-01) O ARRASTE: a pessoa arrasta o card travado 160 px pra direita e solta.
+const a9jR = await liefiSegurado9j('arrastou o card travado');
+const arr9j = await a9jR.pg.evaluate(() => { const r = cardDaFrente().querySelector('.card-content').getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + 30 }; });
+await a9jR.pg.mouse.move(arr9j.x, arr9j.y);
+await a9jR.pg.mouse.down();
+for (let i = 1; i <= 8; i++) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
+await a9jR.pg.mouse.up();
+// A volta pro lugar acabou (400 ms) — pelo FIM dela (o card parado), não por prazo.
+await esperarNaPagina(a9jR.pg, () => !window.gestoNoCard(cardDaFrente()), 5000, 50);
+a9jR.e.fase = 'prova';
+const antesA9j = await a9jR.estado();
+diz('PRÉ-CONDIÇÃO: lie-fi, o card de foto travado, ARRASTADO e de volta ao lugar (o transform de repouso escrito), nada decidido e o perfil segurado',
+  a9jR.pronto && a9jR.travado && a9jR.e.perfis.length >= 1 && antesA9j.aviso && antesA9j.rejeitar
+  && /^translate\(0(px)?, 0(px)?\) rotate\(0deg\)$/.test(antesA9j.transform || '') && antesA9j.rejeitados === 0,
+  JSON.stringify({ pronto: a9jR.pronto, travado: a9jR.travado, perfis: a9jR.e.perfis.length, antesA9j }));
+const provaA9j = await a9jR.provar();
+diz('o card de foto que a pessoa TENTOU ARRASTAR sai do "precisa de sinal" quando a rede é provada (R10-4-01)',
+  provaA9j.solto && provaA9j.ms < 2000 && provaA9j.diario.includes('foto.redeProvada'), JSON.stringify(provaA9j));
+await a9jR.fechar();
+
+// 5. (R10-4-03) A PROVA NO MEIO DO ESVAZIAMENTO: uma decisão de antes espera
+// envio, e o esvaziamento da abertura fica no ar com ela pendurada.
+const s9jR = await liefiSegurado9j('prova no meio do esvaziamento', { comSaida: true });
+const noAr9j = await esperarNaPagina(s9jR.pg, () => esvaziandoSaida === true, 10000, 50);
+for (let i = 0; i < 50 && !s9jR.e.saidas.length; i++) await dormir(100);
+s9jR.e.fase = 'prova';
+const antesS9j = await s9jR.estado();
+diz('PRÉ-CONDIÇÃO: lie-fi, o card de foto travado, o esvaziamento NO AR com a decisão pendurada, e o perfil segurado',
+  s9jR.pronto && s9jR.travado && noAr9j.ok && s9jR.e.saidas.length === 1 && s9jR.e.perfis.length >= 1
+  && antesS9j.aviso && antesS9j.rejeitar && antesS9j.esvaziando === true,
+  JSON.stringify({ pronto: s9jR.pronto, travado: s9jR.travado, noAr: noAr9j.ok, saidas: s9jR.e.saidas.length, perfis: s9jR.e.perfis.length, antesS9j }));
+const provaS9j = await s9jR.provar();
+const durante9j = await s9jR.estado();
+diz('a rede provada NO MEIO do esvaziamento da fila de saída solta o card de foto — com o esvaziamento ainda no ar (R10-4-03)',
+  provaS9j.solto && provaS9j.ms < 2000 && durante9j.esvaziando === true && provaS9j.diario.includes('foto.redeProvada'),
+  JSON.stringify({ provaS9j, durante9j }));
+// E o esvaziamento termina como sempre: a decisão pendurada pousa e a fila de saída esvazia.
+if (s9jR.e.saidas.length) await s9jR.e.saidas.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+const fimS9j = await esperarNaPagina(s9jR.pg, () => !esvaziandoSaida && carregarFilaDeSaida().length === 0, 10000, 50);
+diz('e o esvaziamento termina: a decisão de antes pousa e a fila de saída esvazia', fimS9j.ok, JSON.stringify(await s9jR.estado()));
+await s9jR.fechar();
+
 secao('9k. DUAS ABAS E O DIAGNÓSTICO: a poda, a outra aba no relatório e a sentinela');
 // Auditoria da rodada 7 (R7-4-03, R7-4-04, R7-4-05). Duas páginas do MESMO
 // contexto (o mesmo aparelho: a base, a fila de saída e o aviso `storage` são
@@ -3581,7 +3689,100 @@ const saiu9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length ===
 const depois9n = await fab9n();
 diz('com a rede de volta, o indicador some e o FAB volta ao cima-dir — reavaliado quando o número sumiu',
   saiu9n.ok && depois9n.indicador === false && depois9n.canto === 'cima-dir', JSON.stringify(depois9n));
+// (R10-4-05) COM rede, o indicador nasce em toda decisão ("1 enviando", a ida ao
+// Waze) — e a decisão que sai mora na fila de saída enquanto voa (anotada antes
+// do envio). Com o número a não cobrir em todo estado, o FAB atravessava a tela
+// duas vezes a cada ✕ (MEDIDO, n15 da auditoria da rodada 10: 6 trocas de canto
+// em 3 decisões). Aqui, um ✕ com a resposta levando 300 ms (cada ida é uma
+// tarefa à parte, como na rede de verdade) e sem a janela do Desfazer, com um
+// card ainda na fila depois dele (o fim da fila muda a tela, e o FAB mudaria de
+// canto por outro motivo); as trocas de canto contadas pela MUTAÇÃO do atributo,
+// com o valor de antes de cada uma.
+await L9n.route('**/api/validar-place', async (r) => { await dormir(300); return rotaApi9k(r); });
+await L9n.evaluate(() => {
+  AppState.preferences.undoEnabled = false;
+  const fab = document.getElementById('devFab');
+  window.__cantos9n = [];
+  window.__fab9nObs = new MutationObserver((ms) => { for (const m of ms) window.__cantos9n.push([m.oldValue, fab.dataset.canto]); });
+  window.__fab9nObs.observe(fab, { attributes: true, attributeFilter: ['data-canto'], attributeOldValue: true });
+  window.__indic9n = 0;
+  window.__indic9nObs = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.id === 'inFlightIndicator') window.__indic9n++; });
+  window.__indic9nObs.observe(document.body, { childList: true });
+});
+const decidiu9n = [];
+for (let i = 0; i < 1; i++) {
+  // (O placar de antes fica NA PÁGINA: a função da espera vai serializada, e uma
+  // variável do Node chegaria lá `undefined` — gotcha #28.)
+  await L9n.evaluate(() => { window.__antes9n = AppState.stats.rejected;
+    document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click(); });
+  decidiu9n.push((await esperarNaPagina(L9n, () => AppState.stats.rejected === window.__antes9n + 1 && AppState.inFlightActions === 0
+    && carregarFilaDeSaida().length === 0 && !document.getElementById('inFlightIndicator'), 15000, 50)).ok);
+}
+const trocas9n = await L9n.evaluate(() => {
+  const trocas = window.__cantos9n.filter(([de, para]) => de !== para).length;
+  // CONTROLE do instrumento: uma troca forçada é contada.
+  const fab = document.getElementById('devFab');
+  const era = fab.dataset.canto;
+  fab.dataset.canto = 'forcado';
+  return new Promise((ok) => setTimeout(() => {
+    const contou = window.__cantos9n.filter(([de, para]) => de !== para).length - trocas;
+    fab.dataset.canto = era;
+    window.__fab9nObs.disconnect(); window.__indic9nObs.disconnect();
+    ok({ trocas, contou, nasceu: window.__indic9n, canto: era, naFila: AppState.queue.length });
+  }, 0));
+});
+diz('PRÉ-CONDIÇÃO: o ✕ saiu com rede — o "enviando" nasceu, a fila de saída ficou vazia e sobrou um card',
+  decidiu9n.every(Boolean) && trocas9n.nasceu === 1 && trocas9n.naFila >= 1, JSON.stringify({ decidiu9n, trocas9n }));
+diz('CONTROLE: o contador enxerga uma troca de canto (a forçada)', trocas9n.contou === 1, JSON.stringify(trocas9n));
+diz('com rede, o FAB NÃO muda de canto a cada decisão — o "1 enviando" não é número a não cobrir (R10-4-05)',
+  trocas9n.trocas === 0 && trocas9n.canto === 'cima-dir', JSON.stringify(trocas9n));
 await ctx9nL.close();
+// (R10-4-02) O iPhone com o app INSTALADO: a margem de segurança de cima (47 px)
+// entra no cabeçalho, e o "N esperando envio" a 80 px fixos ficava DEBAIXO dele
+// (MEDIDO, n21 da auditoria: o dedo no meio dele caía no ⓘ). A margem vem do CDP
+// do Chromium e entra ANTES da carga, como no aparelho, que já abre com ela
+// (posta depois, o observador do cabeçalho, que olha a caixa de CONTEÚDO, não vê
+// o padding mudar). CONTROLE: sem margem, o indicador fica nos 80 px de sempre.
+const margem9n = async (topo) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  let aviao = false;
+  await ctx.route('**/*-tiles/live/base/**', (r) => (aviao ? r.abort('internetdisconnected') : servirTile(r)));
+  await ctx.route('**/api/*', (r) => (aviao ? r.abort('internetdisconnected') : rotaApi9k(r)));
+  const prep = await abrirEm(ctx, 'margem ' + topo + ', preparo');
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate(() => {
+    API.setSession('tok-9n-margem');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-margem') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+      consequenciaVista: { reject: true, read: true } }));
+  });
+  const cdp = await ctx.newCDPSession(prep);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: topo, topMax: topo, bottom: 0, bottomMax: 0,
+    left: 0, leftMax: 0, right: 0, rightMax: 0 } });
+  await prep.reload({ waitUntil: 'domcontentloaded' });
+  const pronta = await esperarNaPagina(prep, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
+  aviao = true; await ctx.setOffline(true);
+  await prep.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+  const esperando = await esperarNaPagina(prep, () => carregarFilaDeSaida().length === 1 && !AppState.pendingAction
+    && AppState.inFlightActions === 0 && !!document.getElementById('inFlightIndicator'), 15000, 100);
+  const m = await prep.evaluate(() => {
+    const h = document.querySelector('header').getBoundingClientRect();
+    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
+    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { cabecalho: Math.round(h.bottom), topo: Math.round(r.top),
+      noCentro: quem ? (quem.closest('#inFlightIndicator') ? 'indicador' : quem.closest('header') ? 'cabeçalho' : (quem.id || quem.tagName)) : null };
+  });
+  await ctx.close();
+  return { pronta: pronta.ok, esperando: esperando.ok, ...m };
+};
+const semMargem9n = await margem9n(0);
+diz('CONTROLE: sem a margem de cima, o "N esperando envio" fica nos 80 px de sempre, à vista',
+  semMargem9n.pronta && semMargem9n.esperando && semMargem9n.topo === 80 && semMargem9n.noCentro === 'indicador', JSON.stringify(semMargem9n));
+const comMargem9n = await margem9n(47);
+diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu dela', comMargem9n.pronta && comMargem9n.esperando
+  && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
+diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
+  comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
 
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));

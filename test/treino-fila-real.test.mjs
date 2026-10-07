@@ -142,7 +142,7 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
     'let filaEsperaPerfil = false; let referenciasDoPerfil = null; let posicaoGps = null;',
     ...['chaveDoPedido', 'serieDoAutor', 'manterFocoNaFrente', 'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue',
       'devolverPedidoRecusado', 'pousouNoWaze', 'descontarGestoSemSessao', 'decisaoDepoisDaQueda', 'enviarLote',
-      'aplicarRecusaAutomatica', 'completarPerfilChegado', 'esquecerFocoAutor',
+      'filaReal', 'aplicarRecusaAutomatica', 'completarPerfilChegado', 'esquecerFocoAutor',
       'limparFocoAutor', 'reordenarFilaNaTela', 'aplicarSoAOrdem'].map(fatiar),
     'const Treino = ' + objetoDoTreino() + ';',
     'return { Treino, devolverPedidoRecusado, decisaoDepoisDaQueda, aplicarRecusaAutomatica, completarPerfilChegado, aplicarSoAOrdem,',

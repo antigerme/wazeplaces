@@ -3018,6 +3018,16 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
         sairOk: vis(sair) && sair.getBoundingClientRect().height >= 44 && alcanca(sair),
         sobre: Math.round(sobre),
         estouroX: Math.max(0, doc.scrollWidth - doc.clientWidth),
+        // R10-7-01: a fila real é VAZIA aqui, então o card é um exemplo
+        // SINTÉTICO — sem lugar no mapa, e o ↗ dele abria o WME sem nada
+        // selecionado. Ele sai da TELA (não só ganha a classe: o CSS poderia
+        // vencer o `hidden`, gotcha #27). O CONTROLE, o ↗ do clone de um pedido
+        // real na tela, está no bloco seguinte.
+        linkDoExemplo: (() => {
+          const a = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-wme-link');
+          return { exemplo: AppState.currentPlace && AppState.currentPlace._exemplo, existe: !!a,
+            naTela: !!a && a.getClientRects().length > 0, href: a ? a.getAttribute('href') : null };
+        })(),
       };
     });
     const onde = `treino ${aparelho} ${lg}`;
@@ -3028,6 +3038,10 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
     checa(m.alvoPequeno === 0, `${onde}: alvo de toque abaixo de 44px`);
     checa(m.sairOk, `${onde}: o "Sair" do treino não está utilizável`);
     checa(m.estouroX === 0, `${onde}: estouro horizontal de ${m.estouroX}px`);
+    checa(!!m.linkDoExemplo.exemplo && m.linkDoExemplo.existe,
+      `${onde}: PRÉ-CONDIÇÃO — o card da frente não é um exemplo sintético com o ↗ no DOM`, JSON.stringify(m.linkDoExemplo));
+    checa(!m.linkDoExemplo.naTela && m.linkDoExemplo.href === null,
+      `${onde}: o ↗ do exemplo sintético está na tela — ele abre o WME sem nada selecionado (R10-7-01)`, JSON.stringify(m.linkDoExemplo));
     await ctx.close();
   }
 }
@@ -3098,6 +3112,17 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
       `${onde}: pedido real entrou no treino com o updateRequestID VIVO`);
     checa(est.cards.every((c) => c.v && c.v !== 'treino-inerte'),
       `${onde}: o venueID foi neutralizado — o ↗ do card deixa de abrir o lugar certo`);
+    // E o ↗ do clone segue NA TELA, com o lugar dele: o CONTROLE do exemplo
+    // sintético, que fica sem o ↗ (R10-7-01, no bloco da tela do treino) — prova
+    // que aquela medida enxerga um ↗ que existe.
+    const linkDoClone = await page.evaluate(() => {
+      const a = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-wme-link');
+      return { venue: AppState.currentPlace && AppState.currentPlace.venueID,
+        naTela: !!a && a.getClientRects().length > 0, href: a ? a.getAttribute('href') : null };
+    });
+    checa(linkDoClone.naTela && (linkDoClone.href || '').includes('venues=' + encodeURIComponent(linkDoClone.venue) + '&'),
+      `${onde}: CONTROLE — o ↗ do clone de um pedido real não está na tela com o lugar dele (a medida do exemplo sintético estaria cega)`,
+      JSON.stringify(linkDoClone));
 
     // A FOLHA DO AUTOR (o selo "✕ N") num card de TREINO (R9-7-05, auditoria de
     // 2026-10-06): ela oferecia o "Rejeitar os N", o "Esquecer" e o interruptor
@@ -3257,9 +3282,13 @@ for (const como of ['teclado', 'mouse']) {
 //   R8-7-08 — o "Quero treinar antes" pelo teclado devolvia o foco ao ✕ do card
 //             REAL, que o treino troca logo em seguida: caía no <body>. Vai ao ✕
 //             do card de treino.
-// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" (o foco volta a
-// quem abriu o diálogo — prova que a medida enxerga o fechamento devolvendo o
-// foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão focado.
+// E os da rodada 10 (auditoria de 2026-10-07): o "Entendi" e o Esc do "Como
+// funciona" que abre sozinho (R10-7-03) e o "Praticar" da Ajuda (R10-7-04) pelo
+// teclado caíam no ⓘ do topo. Vão ao ✕ do card.
+// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" pelo mouse no
+// que abre sozinho (o foco vai à reserva, o ⓘ — prova que a medida enxerga o
+// fechamento devolvendo o foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão
+// focado.
 {
   const montar = async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
@@ -3348,13 +3377,20 @@ for (const como of ['teclado', 'mouse']) {
   // R9-7-03: e o que abre SOZINHO no 1º card, sem nada focado antes. O
   // fechamento devolvia o foco à reserva, o ⓘ do topo — um controle vivo, e o
   // foco prometido ao card de treino desistia dele: o Enter seguinte reabria a
-  // Ajuda. O "Entendi" ali vai ao ⓘ (a reserva, R6-1-07): é o CONTROLE de que a
-  // medida enxerga o fechamento devolvendo o foco.
-  for (const como of ['Treinar', 'Entendi', 'mouse', 'TreinarSozinho', 'EntendiSozinho']) {
+  // Ajuda. R10-7-03: o "Entendi" e o Esc ali também caíam no ⓘ (MEDIDO no
+  // Chromium e no WebKit; auditoria de 2026-10-07), e vão agora ao ✕ do card na
+  // tela. O CONTROLE de que a medida enxerga o fechamento devolvendo o foco é o
+  // "Entendi" pelo MOUSE, que segue indo à reserva, o ⓘ (R6-1-07).
+  const COMO_FUNCIONA = {
+    Treinar: 'Enter no "Quero treinar antes"', Entendi: 'Enter no "Entendi"', mouse: 'o mouse no "Quero treinar antes"',
+    TreinarSozinho: 'Enter no "Quero treinar antes"', EntendiSozinho: 'Enter no "Entendi"', EscSozinho: 'o Esc',
+    mouseEntendiSozinho: 'o mouse no "Entendi"',
+  };
+  for (const [como, gesto] of Object.entries(COMO_FUNCIONA)) {
     const { ctx, page } = await montar();
     const sozinho = como.endsWith('Sozinho');
-    const onde = `"Como funciona"${sozinho ? ' que abre sozinho' : ''}, ${como.startsWith('Treinar') ? 'Enter no "Quero treinar antes"'
-      : como.startsWith('Entendi') ? 'Enter no "Entendi"' : 'o mouse no "Quero treinar antes"'}`;
+    const peloMouse = como.startsWith('mouse');
+    const onde = `"Como funciona"${sozinho ? ' que abre sozinho' : ''}, ${gesto}`;
     const antes = await page.evaluate((sozinho) => {
       if (!sozinho) cardDaFrente().querySelector('.card-btn-reject').focus();
       else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
@@ -3363,10 +3399,12 @@ for (const como of ['teclado', 'mouse']) {
       return !a || a === document.body ? 'body' : (a.id || String(a.className).split(' ')[0]);
     }, sozinho);
     if (sozinho) checa(antes === 'body', `${onde}: PRÉ-CONDIÇÃO — havia foco antes do diálogo (${antes})`);
-    const botao = como.startsWith('Entendi') ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
+    const botao = /Entendi/.test(como) ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
     let focado = null;
-    if (como === 'mouse') {
+    if (peloMouse) {
       await page.click('#' + botao);
+    } else if (como === 'EscSozinho') {
+      await page.keyboard.press('Escape');
     } else {
       await page.focus('#' + botao);
       focado = await focadoAgora(page);
@@ -3374,24 +3412,68 @@ for (const como of ['teclado', 'mouse']) {
     }
     const fechou = await esperarNaPagina(page, () => document.getElementById('comoFuncionaModal').classList.contains('hidden')
       && !!cardDaFrente(), 3000);
-    if (como === 'EntendiSozinho') { await esperarNaPagina(page, () => document.activeElement && document.activeElement.id === 'helpBtn', 3000); }
-    else if (como !== 'mouse') await focoNoX(page);
+    if (como === 'mouseEntendiSozinho') { await esperarNaPagina(page, () => document.activeElement && document.activeElement.id === 'helpBtn', 3000); }
+    else if (!peloMouse) await focoNoX(page);
     else { await esperarNaPagina(page, () => Treino.ativo, 3000); await doisQuadros(page); }
     const r = await foco(page);
     checa(fechou.ok, `${onde}: PRÉ-CONDIÇÃO — o diálogo não fechou`, JSON.stringify(r));
-    if (como !== 'mouse') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
+    if (!peloMouse && como !== 'EscSozinho') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
     if (como === 'Entendi') {
       checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
-        `${onde}: CONTROLE — o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
-    } else if (como === 'EntendiSozinho') {
+        `${onde}: o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
+    } else if (como === 'EntendiSozinho' || como === 'EscSozinho') {
+      checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card — no ⓘ do topo, o Enter seguinte reabre a Ajuda`, JSON.stringify(r));
+    } else if (como === 'mouseEntendiSozinho') {
       checa(!r.treino && r.foco === 'helpBtn',
-        `${onde}: CONTROLE — o foco não foi à reserva, o ⓘ (${r.foco}): a medida não enxerga o fechamento`, JSON.stringify(r));
+        `${onde}: CONTROLE — o foco não foi à reserva, o ⓘ (${r.foco}): a medida não enxerga o fechamento devolvendo o foco`, JSON.stringify(r));
     } else if (como.startsWith('Treinar')) {
       checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
       checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
         `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card de treino`, JSON.stringify(r));
     } else {
       checa(r.treino && !r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+
+  // R10-7-04: o "Praticar" da Ajuda pelo teclado (Enter no ⓘ, Enter no
+  // "Praticar") deixava o foco no ⓘ, e o Enter seguinte reabria a Ajuda — os
+  // dois botões que abrem o treino levavam o foco a lugares diferentes (MEDIDO no
+  // Chromium e no WebKit; auditoria de 2026-10-07). Vai ao ✕ do 1º card de
+  // treino. CONTROLE: pelo mouse, o foco não pula pro card.
+  for (const peloTeclado of [true, false]) {
+    const { ctx, page } = await montar();
+    const onde = `"Praticar" na Ajuda, ${peloTeclado ? 'pelo teclado' : 'pelo mouse'}`;
+    // Os controles da Ajuda que só existem com sessão (o `showMainScreen` os mostra).
+    await page.evaluate(() => mostrarControlesDeSessao(true));
+    let focado = null;
+    if (peloTeclado) {
+      await page.focus('#helpBtn');
+      await page.keyboard.press('Enter');
+    } else {
+      await page.click('#helpBtn');
+    }
+    const ajuda = await esperarNaPagina(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 3000);
+    checa(ajuda.ok, `${onde}: PRÉ-CONDIÇÃO — a Ajuda não abriu`);
+    if (peloTeclado) {
+      await page.focus('#abrirTreino');
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+      await focoNoX(page);
+    } else {
+      await page.click('#abrirTreino');
+      await esperarNaPagina(page, () => Treino.ativo, 3000);
+      await doisQuadros(page);
+    }
+    const r = await foco(page);
+    checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
+    if (peloTeclado) {
+      checa(focado === 'abrirTreino', `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no "Praticar" focado (${focado})`);
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card de treino — no ⓘ do topo, o Enter seguinte reabre a Ajuda`, JSON.stringify(r));
+    } else {
+      checa(!r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
     }
     await ctx.close();
   }
@@ -5396,6 +5478,197 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       anuncio: document.getElementById('lightboxAnuncio').textContent }));
     checa(d.aberta && d.n === 2 && d.idx === 1, 'anúncio/Desfazer da foto: PRÉ-CONDIÇÃO — a foto não voltou pra tela', JSON.stringify(d));
     checa(d.anuncio === 'Foto 2 de 2', `anúncio/Desfazer da foto: a foto voltou à tela e a região da camada disse ${JSON.stringify(d.anuncio)}`);
+  }
+
+  // ── Rodada 10 (auditoria de 2026-10-07): R10-3-01 a 04 ─────────────────────
+  // O selo da foto que volta numa camada REABERTA (01), a camada do IRMÃO que
+  // muda calada (02), duas exclusões do MESMO local no ar ao mesmo tempo (03) e a
+  // proposta já aprovada que voltava com o ✨ e os dois botões no mesmo canto (04).
+  // Cada caso mede ANTES do desfecho o estado que o defeito precisa (PRÉ-CONDIÇÃO),
+  // e a medida enxerga o que procura (CONTROLE). Reabrir só depois de o voltar da
+  // camada fechada assentar (`CamadaVoltar.consumindo`, gotcha #65).
+  const selo = () => page.evaluate(() => {
+    const b = document.getElementById('lightboxNewBadge');
+    const minis = [...document.querySelectorAll('#lightboxStrip .lb-mini')]
+      .map((x) => (x.querySelector('.lb-mini-selo') || {}).textContent || '·').join('');
+    return { visivel: !b.classList.contains('hidden'), txt: b.textContent, nome: b.getAttribute('aria-label'), minis,
+      anuncio: document.getElementById('lightboxAnuncio').textContent, n: Lightbox.urls.length, idx: Lightbox.idx,
+      janela: !!document.getElementById('undoBtn') };
+  });
+  const canto = () => page.evaluate(() => {
+    const est = (id) => { const b = document.getElementById(id); return b.classList.contains('hidden') ? '—' : (b.disabled ? 'travado' : 'vivo'); };
+    const vivo = ['lightboxApprove', 'lightboxDelete'].map((id) => document.getElementById(id)).find((b) => !b.classList.contains('hidden'));
+    let dedo = null;
+    if (vivo) {
+      const r = vivo.getBoundingClientRect();
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      dedo = el && (el.closest('button') || el).id;
+    }
+    const b = document.getElementById('lightboxNewBadge');
+    return { aprovar: est('lightboxApprove'), lixeira: est('lightboxDelete'), selo: b.classList.contains('hidden') ? null : b.textContent, dedo };
+  });
+
+  // R10-3-01: a foto DENUNCIADA excluída com o Desfazer, a foto fechada e
+  // REABERTA pelo card dentro da janela (ela nasce do card, sem a denunciada), e
+  // o Desfazer: a denunciada volta com o 🚩 — ia o ✨ "foto nova", na camada, na
+  // tira e no anúncio. CONTROLE: a primeira abertura lê o 🚩 (a medida acha o selo).
+  {
+    const FLAG_PL = { ...FOTO_PL, venueID: 'v-r10-flag', updateRequestID: 'u-r10-flag', updateTypeKey: 'FLAG',
+      reqType: 'REQUEST', reqSubType: 'FLAG', purType: 'FLAGGED_PHOTO', flagSubjectType: 'IMAGE',
+      flagEntityID: 'denunciada-r10', imageUrls: [`${foto}#denunciada-r10`, `${foto}#aprovada-r10`],
+      approvedImageIds: ['denunciada-r10', 'aprovada-r10'] };
+    await montar(FLAG_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto denunciada');
+    const s0 = await selo();
+    checa(s0.visivel && s0.txt === '🚩' && s0.idx === 0 && s0.minis === '🚩·',
+      'selo/R10-3-01: PRÉ-CONDIÇÃO — a camada não abriu na denunciada com o 🚩 (a medida leria o selo errado)', JSON.stringify(s0));
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn') && Lightbox.urls.length === 1, 'o Desfazer da exclusão da denunciada');
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo, 'a foto fechar e o voltar assentar');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto reaberta pelo card');
+    const s1 = await selo();
+    checa(!s1.visivel && s1.n === 1 && s1.janela, 'selo/R10-3-01: PRÉ-CONDIÇÃO — a camada reaberta na janela não nasceu sem a denunciada', JSON.stringify(s1));
+    await page.evaluate(() => { document.getElementById('lightboxAnuncio').textContent = ''; });
+    await page.focus('#undoBtn'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => Lightbox.urls.length === 2, 'a denunciada voltar pelo Desfazer');
+    await doisQuadros(page);
+    const s2 = await selo();
+    checa(s2.visivel && s2.txt === '🚩' && s2.nome === s0.nome && s2.minis === '🚩·' && s2.anuncio.endsWith(s0.nome),
+      `selo/R10-3-01: a foto DENUNCIADA voltou à camada reaberta com ${JSON.stringify(s2.txt)} — o ✨ "foto nova" no lugar do 🚩`, JSON.stringify(s2));
+  }
+
+  // R10-3-02: sem o Desfazer, a exclusão de A pousa com a foto ampliada do IRMÃO
+  // B (o mesmo local, na frente depois do ✕ em A) aberta: a foto sai da camada de
+  // B e a região DELA diz. CONTROLE: com a camada do próprio A aberta, a região já
+  // dizia (a medida enxerga a região).
+  for (const irmao of [true, false]) {
+    const rot = irmao ? 'a camada do irmão' : 'CONTROLE, a camada do próprio pedido';
+    const B_PL = { ...FOTO_PL, updateRequestID: 'pend-r10-b', imageUrls: [`${foto}#pend-r10-b`, `${foto}#aprovada-02`],
+      approvedImageIds: ['aprovada-02'] };
+    await montar(FOTO_PL, { semDesfazer: true, depois: [B_PL] });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada de A');
+    await page.keyboard.press('ArrowRight');
+    await esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    const solta = segurar('excluir-foto');
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => excluindoAgora === true, 'a exclusão no ar');
+    if (irmao) {
+      await page.keyboard.press('Escape');
+      await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo, 'a foto de A fechar');
+      await page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      await page.keyboard.press('Enter');             // A decidido: sem o Desfazer, sai na hora
+      await esperarOuExplodir(page, () => !!AppState.currentPlace && AppState.currentPlace.updateRequestID === 'pend-r10-b'
+        && !acoesTravadas(), 'o irmão B na frente');
+      await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+      await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada do irmão');
+    }
+    const antes = await page.evaluate(() => ({ de: Lightbox.place && Lightbox.place.updateRequestID, n: Lightbox.urls.length }));
+    checa(antes.de === (irmao ? 'pend-r10-b' : 'pend-01') && antes.n === 2,
+      `anúncio/R10-3-02 (${rot}): PRÉ-CONDIÇÃO — a camada aberta não é a esperada, com as duas fotos`, JSON.stringify(antes));
+    await page.evaluate(() => { for (const id of ['lightboxAnuncio', 'cardLiveRegion']) document.getElementById(id).textContent = ''; });
+    solta({ success: true, restantes: [] });
+    await esperarOuExplodir(page, () => !excluindoAgora, 'a exclusão pousar');
+    await doisQuadros(page);
+    const d = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), n: Lightbox.urls.length,
+      camada: document.getElementById('lightboxAnuncio').textContent, card: document.getElementById('cardLiveRegion').textContent }));
+    checa(d.aberta && d.n === 1, `anúncio/R10-3-02 (${rot}): PRÉ-CONDIÇÃO — a foto não saiu da camada aberta`, JSON.stringify(d));
+    checa(d.camada === 'Foto excluída' && d.card === '',
+      `anúncio/R10-3-02 (${rot}): a foto saiu da camada aberta e a região dela disse ${JSON.stringify(d.camada)} (a do card: ${JSON.stringify(d.card)})`);
+  }
+
+  // R10-3-03: com o Desfazer, duas exclusões no MESMO local. A janela da 1ª vence
+  // e ela fica no ar (o Waze de mentira a segura); a lixeira volta a valer e a 2ª
+  // é pedida — a janela dela vence e ela NÃO sai enquanto a 1ª não responder (o
+  // servidor relê a lista que a 1ª deixou), e a releitura não é aquecida com o
+  // local no ar. CONTROLE: com a resposta da 1ª, a 2ª SAI (a medida enxerga a ida).
+  {
+    const TRES = { ...FOTO_PL, venueID: 'v-r10-tres', updateRequestID: 'pend-r10-3',
+      imageUrls: [`${foto}#pend-r10-3`, `${foto}#aprovada-r10-a`, `${foto}#aprovada-r10-b`],
+      approvedImageIds: ['aprovada-r10-a', 'aprovada-r10-b'] };
+    const idas = [];
+    const presas = [];
+    const rota = async (route) => {
+      let corpo = {};
+      try { corpo = JSON.parse(route.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      const preparar = corpo.action === 'preparar';
+      idas.push({ id: corpo.imageID, preparar });
+      if (!preparar) await new Promise((ok) => presas.push(ok));
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(preparar ? { success: true, preparado: true } : { success: true, restantes: [] }) });
+    };
+    await page.route('**/api/excluir-foto', rota);     // registrada depois: é ela que responde
+    const exclusoes = () => idas.filter((i) => !i.preparar).map((i) => i.id);
+    const aquecidas = () => idas.filter((i) => i.preparar).length;
+    const ate = async (cond, oQue, teto = 15000) => {   // pelo lado do NODE: o registro é daqui
+      const t0 = Date.now();
+      while (!cond()) {
+        if (Date.now() - t0 > teto) throw new Error(`a espera por ${oQue} estourou (${teto}ms)`);
+        await dormir(50);
+      }
+    };
+    await montar(TRES);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');
+    const lixeiraViva = () => esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden')
+      && !document.getElementById('lightboxDelete').disabled, 'a lixeira viva');
+    await lixeiraViva();
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');   // a 1ª, com a janela
+    await ate(() => exclusoes().length === 1, 'a 1ª exclusão sair (a janela vencer)');
+    await lixeiraViva();                                // a janela acabou: a lixeira da foto seguinte vale
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');   // a 2ª, com a 1ª no ar
+    await esperarOuExplodir(page, () => !!exclusaoPendente, 'a janela da 2ª');
+    await esperarOuExplodir(page, () => !exclusaoPendente, 'a janela da 2ª vencer');
+    await dormir(600);                                  // o tempo de a ida chegar à rota, se ela saísse
+    const meio = { exclusoes: exclusoes(), aquecidas: aquecidas() };
+    checa(meio.exclusoes.length === 1,
+      'exclusão/R10-3-03: a 2ª exclusão do local saiu com a 1ª no ar — o servidor relê a lista de antes, e uma delas se desfaz no Waze', JSON.stringify(meio));
+    checa(meio.aquecidas === 1, 'exclusão/R10-3-03: o gesto da 2ª aqueceu a releitura com a 1ª no ar', JSON.stringify(meio));
+    presas.shift()();                                   // a resposta da 1ª
+    await ate(() => exclusoes().length === 2, 'a 2ª sair depois da resposta da 1ª').catch((e) => checa(false, 'exclusão/R10-3-03: CONTROLE — ' + e.message));
+    checa(JSON.stringify(exclusoes()) === JSON.stringify(['aprovada-r10-a', 'aprovada-r10-b']),
+      'exclusão/R10-3-03: CONTROLE — as duas exclusões não saíram na ordem dos gestos', JSON.stringify(exclusoes()));
+    while (presas.length) presas.shift()();
+    await page.unroute('**/api/excluir-foto', rota);
+  }
+
+  // R10-3-04: aprovar com o Desfazer, fechar a foto (o fechamento despacha a
+  // aprovação, que fica no ar) e REABRIR pelo card: sem o ✨ e só a lixeira no
+  // canto (travada até a resposta); com a resposta, a lixeira viva e o dedo nela.
+  // CONTROLE: a proposta abre com o ✨ e o "Aprovar", e o dedo pega o "Aprovar".
+  {
+    await montar(FOTO_PL);
+    const solta = segurar('validar-place');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxApprove').classList.contains('hidden'), 'o "Aprovar" da proposta');
+    const c0 = await canto();
+    checa(c0.selo === '✨' && c0.aprovar === 'vivo' && c0.lixeira === '—' && c0.dedo === 'lightboxApprove',
+      'canto/R10-3-04: PRÉ-CONDIÇÃO — a proposta não abriu com o ✨ e o "Aprovar"', JSON.stringify(c0));
+    await page.focus('#lightboxApprove'); await page.keyboard.press('Enter');   // com a janela do Desfazer
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn'), 'a janela da aprovação');
+    await page.keyboard.press('Escape');                // o fechamento despacha a aprovação
+    await esperarOuExplodir(page, () => !Lightbox.isOpen() && !CamadaVoltar.consumindo && aprovacoesNoAr.size === 1,
+      'a aprovação no ar, com a foto fechada');
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto reaberta pelo card');
+    await doisQuadros(page);
+    const c1 = await canto();
+    checa(c1.selo === null && c1.aprovar === '—' && c1.lixeira !== '—',
+      'canto/R10-3-04: reaberta com a aprovação no ar, a camada mostrou o ✨ na foto aprovada e/ou o "Aprovar" no canto da lixeira', JSON.stringify(c1));
+    solta({ success: true });
+    await esperarOuExplodir(page, () => aprovacoesNoAr.size === 0 && placeResolvidoPorAprovacao !== null, 'a aprovação pousar');
+    await doisQuadros(page);
+    const c2 = await canto();
+    checa(c2.selo === null && c2.aprovar === '—' && c2.lixeira === 'vivo' && c2.dedo === 'lightboxDelete',
+      'canto/R10-3-04: com a resposta, o canto não ficou só com a lixeira viva (o "Aprovar" voltou, ou o dedo pega outro)', JSON.stringify(c2));
   }
   checa(erros.length === 0, 'foco: erro de JS', erros[0]);
   await ctx.close();
@@ -10216,6 +10489,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const mortos = new Set();
     // A seção 5 SEGURA a resposta de um pedido (a 1ª decisão dele) até soltar.
     const segurar = new Map();
+    // A seção 6 abre um link de pareamento VENCIDO: o resgate é recusado, depois
+    // de esperar o que o teste segurar (`resgate.segurar`, uma promessa).
+    const resgate = { segurar: null };
     let logins = 0;
     await ctx.route('**/*.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG_1PX }));
     await ctx.route('**/api/**', async (r) => {
@@ -10227,6 +10503,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         const espera = segurar.get(corpo.venueID);
         segurar.delete(corpo.venueID);
         await espera;
+      }
+      if (rota === 'parear' && corpo.action === 'claim') {
+        if (resgate.segurar) await resgate.segurar;
+        return r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ success: false,
+          error: 'Código inválido ou expirado. Gere um novo no aparelho logado.', errorKey: 'srv.err.pairCodeInvalid' }) });
       }
       const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
       if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
@@ -10248,17 +10529,18 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       return json({ success: true });
     });
     const erros = [];
-    // `antesDeAbrir`: um script que roda na aba antes do app (a extensão de
-    // mentira da seção 6).
-    const abrir = async (antesDeAbrir) => {
+    // `antesDeAbrir`: um script (ou uma lista deles) que roda na aba antes do app
+    // (a extensão de mentira da seção 6). `caminho`: o que vem depois da raiz (o
+    // link de pareamento da seção 6).
+    const abrir = async (antesDeAbrir, caminho = '') => {
       const p = await ctx.newPage();
       p.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 120)));
-      if (antesDeAbrir) await p.addInitScript(antesDeAbrir);
-      await p.goto(BASE, { waitUntil: 'domcontentloaded' });
+      for (const script of [].concat(antesDeAbrir || [])) await p.addInitScript(script);
+      await p.goto(BASE + caminho, { waitUntil: 'domcontentloaded' });
       return p;
     };
     // A seção 6 abre as abas ela mesma, SEM sessão nenhuma no aparelho.
-    if (semSessao) return { ctx, rede, erros, abrir };
+    if (semSessao) return { ctx, rede, erros, abrir, resgate };
     // A sessão salva e um placar com a cota do Desfazer cumprida (L6: 10): as
     // ações saem sem a janela, e o percurso não espera 3 s por ✕.
     const A = await abrir();
@@ -10309,10 +10591,51 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 
   // ── 1. com o aviso de verdade entre as duas ─────────────────────────────
   const m = await abrirAbas();
+  // As duas abas abrem com a MESMA fila (a mesma busca): o que a A decide, a B
+  // tem como card — o da frente na tela, os outros mais atrás.
+  const filaNaB = () => m.B.evaluate(() => ({ frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+    fila: AppState.queue.map((p) => p.updateRequestID), restam: AppState.serverTotal,
+    fundo: (document.querySelector('#cardStack .card-fundo') || { dataset: {} }).dataset.pedido || null }));
+  const antesB = await filaNaB();
   // O placar: 3 ✕ na A e 1 na B. A B tem de VER os três antes do dela.
-  for (let i = 0; i < 3; i++) await rejeitarNa(m.A);
+  const decididosNaA = [];
+  for (let i = 0; i < 3; i++) {
+    decididosNaA.push(await m.A.evaluate(() => AppState.currentPlace.updateRequestID));
+    await rejeitarNa(m.A);
+  }
   const bViu = await esperarNaPagina(m.B, () => AppState.stats.rejected === 23, 5000);
   checa(bViu.ok, 'duas abas: a aba B não viu no placar os 3 ✕ da aba A');
+  // R10-2-02 — vale a PRIMEIRA decisão. O que a A decidiu sai da fila da B, com
+  // o "Restam" e o card de fundo; o da frente (o mesmo nas duas) FICA na tela, e
+  // o ✕ nele não sai pro Waze nem conta de novo: diz que foi decidido na outra.
+  checa(decididosNaA[0] === antesB.frente && decididosNaA.every((u) => antesB.fila.includes(u)),
+    'duas abas: PRÉ-CONDIÇÃO — a A não decidiu o card da frente da B e mais dois da fila dela (as abas não tinham a mesma fila)',
+    JSON.stringify({ decididosNaA, frente: antesB.frente }));
+  await m.B.evaluate((d) => { window.__decididosNaA = d; }, decididosNaA);
+  const saiuDaB = await esperarNaPagina(m.B, () => !AppState.queue.some((p) => window.__decididosNaA.slice(1).includes(p.updateRequestID))
+    && document.getElementById('pendingCount').textContent.trim() === String(AppState.serverTotal), 5000);
+  const depoisB = await filaNaB();
+  checa(saiuDaB.ok && depoisB.frente === antesB.frente && depoisB.fila.length === antesB.fila.length - 2
+    && depoisB.restam === antesB.restam - 2 && depoisB.fundo && !decididosNaA.some((u) => depoisB.fundo.endsWith('|' + u)),
+    'duas abas: o que a aba A decidiu seguiu na fila da B (ou o "Restam" e o card de fundo não acompanharam, ou o card da TELA trocou)',
+    JSON.stringify({ antesB: { frente: antesB.frente, n: antesB.fila.length, restam: antesB.restam, fundo: antesB.fundo },
+      depoisB: { frente: depoisB.frente, n: depoisB.fila.length, restam: depoisB.restam, fundo: depoisB.fundo } }));
+  const redeAntesDoFantasma = m.rede.length;
+  const vFrente = await m.B.evaluate(() => AppState.currentPlace.venueID);
+  await rejeitarNa(m.B);
+  const fantasma = await m.B.evaluate(() => ({ placar: AppState.stats.rejected, restam: AppState.serverTotal,
+    frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+    aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | ') }));
+  checa(!m.rede.slice(redeAntesDoFantasma).some((x) => x.rota === 'validar-place')
+    && m.rede.filter((x) => x.rota === 'validar-place' && x.pedido === vFrente).length === 1,
+    'duas abas: o ✕ da aba B no card que a A já decidiu saiu pro Waze (a segunda decisão do mesmo pedido)',
+    JSON.stringify(m.rede.slice(redeAntesDoFantasma)));
+  checa(fantasma.placar === 23 && fantasma.restam === depoisB.restam - 1 && fantasma.frente !== antesB.frente,
+    'duas abas: o ✕ da aba B no card que a A já decidiu contou de novo no placar (ou o card não saiu, ou o "Restam" não desceu)',
+    JSON.stringify(fantasma));
+  checa(/já foi decidido em outra aba/.test(fantasma.aviso),
+    'duas abas: o ✕ descontado na aba B não disse que o pedido foi decidido na outra aba', fantasma.aviso.slice(0, 160));
+  // E o ✕ seguinte da B, num pedido que a A NÃO decidiu, conta como sempre.
   await rejeitarNa(m.B);
   const aViu = await esperarNaPagina(m.A, () => AppState.stats.rejected === 24, 5000);
   const gravado = await rejeitadosGravados(m.A);
@@ -10420,6 +10743,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await c.B.evaluate(() => window.removeEventListener('storage', aoGravarEmOutraAba));
   for (let i = 0; i < 2; i++) await rejeitarNa(c.A);
   await dormir(300);
+  // O 1º ✕ da B cai no card da frente, que a A já decidiu: é descontado e não
+  // grava nada (R10-2-02, seção 1). O 2º é num pedido que a A não decidiu, e é
+  // ELE que grava o placar velho da B por cima.
+  await rejeitarNa(c.B);
   await rejeitarNa(c.B);
   await dormir(300);
   const controle = await rejeitadosGravados(c.A);
@@ -10431,6 +10758,26 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const surda = await c.B.evaluate(() => AppState.authenticated);
   checa(surda === true, 'duas abas: CONTROLE — sem o ouvinte, o "Sair" não devia chegar à B; o instrumento não vê o defeito');
   await c.ctx.close();
+
+  // ── 2b. CONTROLE do R10-2-02: a aba B sem a retirada e sem a anotação ────
+  // O app de antes, em miniatura: o que a A decide segue na fila da B, e o ✕ no
+  // card que as duas tinham na frente sai pro Waze e conta de novo. Se isto
+  // passar, as medidas da seção 1 não enxergam o defeito.
+  const d = await abrirAbas();
+  await d.B.evaluate(() => { window.tirarDaFilaOQueAOutraAbaDecidiu = () => {}; });
+  const antesD = await d.B.evaluate(() => AppState.queue.length);
+  for (let i = 0; i < 2; i++) await rejeitarNa(d.A);
+  await esperarNaPagina(d.B, () => AppState.stats.rejected === 22, 5000);
+  const filaD = await d.B.evaluate(() => AppState.queue.length);
+  const vD = await d.B.evaluate(() => { decididosPorOutraAbaComCardAqui.delete(AppState.currentPlace); return AppState.currentPlace.venueID; });
+  await rejeitarNa(d.B);
+  await esperarNaPagina(d.B, () => AppState.inFlightActions === 0, 5000);
+  const placarD = await d.B.evaluate(() => AppState.stats.rejected);
+  const enviosD = d.rede.filter((x) => x.rota === 'validar-place' && x.pedido === vD).length;
+  checa(filaD === antesD && enviosD === 2 && placarD === 23,
+    'duas abas: CONTROLE — sem a retirada e sem a anotação (o app de antes), o ✕ da B devia sair de novo e contar; a medida não enxerga o defeito',
+    JSON.stringify({ antesD, filaD, enviosD, placarD }));
+  await d.ctx.close();
 
   // ── 3. a QUEDA numa aba, com o token VELHO, não apaga o NOVO da outra ────
   // A sessão morre no servidor. A aba A percebe primeiro, derruba e ENTRA DE
@@ -10615,6 +10962,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   // CONTROLES: ninguém entrando, a A cai na tela de entrada; e com a sessão da
   // outra puxada pra memória da A à mão (o que a guarda antiga fazia), a medida
   // tem de ver a tela em branco e o "Sair" encerrando a A.
+  // Desde a rodada 10 (R10-1-03/04/05) a VOLTA à aba também adota (c), menos com
+  // texto digitado num diálogo da entrada (b); a extensão que entra pela volta
+  // leva o foco ao ✕ (d); e o link de pareamento que falha adota ou pergunta à
+  // extensão (e).
   const telaDaAba = (page) => page.evaluate(() => {
     const vis = (id) => {
       const e = document.getElementById(id);
@@ -10674,39 +11025,51 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'aba sem sessão: CONTROLE — com a sessão da outra puxada pra memória da A (a guarda antiga), a medida devia ver a tela EM BRANCO',
     JSON.stringify(d6a.tela));
 
+  // As perguntas que a aba faz à extensão (o `precisa-de-sessao` da ponte), contadas.
+  const contarPerguntas = () => {
+    window.__perguntas = 0;
+    window.addEventListener('message', (ev) => {
+      const d = ev.data;
+      if (d && d.source === 'wazeplaces' && d.action === 'precisa-de-sessao') window.__perguntas++;
+    });
+  };
+  const paradaNaEntrada = () => !extPerguntando && !document.getElementById('authScreen').classList.contains('hidden');
+  const COLANDO = 'TEXTO_QUE_ESTOU_COLANDO';
+
+  // (b) a volta à aba da TELA DE ENTRADA com o "Colar cookies" DIGITADO: a sessão
+  //     da outra não vai pra memória desta, e o "Sair" de lá não a encerra. A
+  //     volta ADOTA a sessão da outra (R10-1-03, a parte c abaixo); o que a
+  //     segura aqui é o texto digitado, que a adoção jogaria fora.
   const entradaComOSairDaOutra = async ({ puxar = false }) => {
     const s = await abrirAbas({ semSessao: true });
-    const A = await s.abrir(() => {
-      window.__perguntas = 0;
-      window.addEventListener('message', (ev) => {
-        const d = ev.data;
-        if (d && d.source === 'wazeplaces' && d.action === 'precisa-de-sessao') window.__perguntas++;
-      });
-    });
-    const parada = () => !extPerguntando && !document.getElementById('authScreen').classList.contains('hidden');
-    await esperarOuExplodir(A, parada, 'a aba A (sem sessão) chegar à tela de entrada');
+    const A = await s.abrir(contarPerguntas);
+    await esperarOuExplodir(A, paradaNaEntrada, 'a aba A (sem sessão) chegar à tela de entrada');
     // CONTROLE do ouvinte: sem sessão nenhuma no aparelho, a volta à aba pergunta
-    // à extensão — onde ela instala (o Chromium de computador; fora dele não há
-    // o ouvinte, e a volta não faz nada).
+    // à extensão — onde ela instala (o Chromium de computador; fora dele a volta
+    // não pergunta nada).
     const temOuvinte = await A.evaluate(() => podeInstalarExtensao());
     const p0 = await A.evaluate(() => window.__perguntas);
     await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await esperarOuExplodir(A, parada, 'a pergunta da volta à aba A acabar');
+    await esperarOuExplodir(A, paradaNaEntrada, 'a pergunta da volta à aba A acabar');
     const semSessaoPerguntou = (await A.evaluate(() => window.__perguntas)) - p0;
-    // A aba B entra pelos cookies; a pessoa volta à A e abre o "Colar cookies".
+    // A pessoa abre o "Colar cookies" na A e cola; a aba B entra pelos cookies; a pessoa volta à A.
+    await A.evaluate(() => document.getElementById('pasteBtn').click());
+    await esperarOuExplodir(A, () => !document.getElementById('pasteModal').classList.contains('hidden'), 'o "Colar cookies" abrir na aba A');
+    await A.evaluate((t) => { document.getElementById('cookiesTextarea').value = t; }, COLANDO);
     const B = await s.abrir();
-    await esperarOuExplodir(B, parada, 'a aba B (sem sessão) chegar à tela de entrada');
+    await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
     await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
     await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
     const p1 = await A.evaluate(() => window.__perguntas);
     await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     if (puxar) await A.evaluate(() => { API.getSession(); });   // o que a guarda antiga fazia
-    const naVolta = await A.evaluate(() => ({ memoria: API.temSessaoNaMemoria(), perguntando: extPerguntando }));
+    // A adoção é SÍNCRONA no ouvinte da volta: lida logo depois, ela já teria acontecido.
+    const naVolta = await A.evaluate(() => ({ memoria: API.temSessaoNaMemoria(), perguntando: extPerguntando,
+      colar: !document.getElementById('pasteModal').classList.contains('hidden'),
+      campo: document.getElementById('cookiesTextarea').value,
+      entrada: !document.getElementById('authScreen').classList.contains('hidden') }));
     const comSessaoPerguntou = (await A.evaluate(() => window.__perguntas)) - p1;
-    await A.evaluate(() => document.getElementById('pasteBtn').click());
-    await esperarOuExplodir(A, () => !document.getElementById('pasteModal').classList.contains('hidden'), 'o "Colar cookies" abrir na aba A');
     await A.evaluate(() => {
-      document.getElementById('cookiesTextarea').value = 'TEXTO_QUE_ESTOU_COLANDO';
       window.__sairChegou = false;
       window.addEventListener('storage', () => {
         if (!localStorage.getItem('waze_session_token') && !localStorage.getItem('waze_places_conta')) window.__sairChegou = true;
@@ -10728,14 +11091,17 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   };
   const r6b = await entradaComOSairDaOutra({});
   checa(MOTOR !== 'chromium' || r6b.temOuvinte,
-    'aba sem sessão: CONTROLE — no Chromium de computador a volta à aba devia ter o ouvinte da extensão; sem ele a parte (b) não mede nada');
+    'aba sem sessão: CONTROLE — no Chromium de computador a volta à aba devia perguntar à extensão; sem isso a parte (b) não mede a pergunta');
   checa(r6b.semSessaoPerguntou === (r6b.temOuvinte ? 1 : 0),
     'aba sem sessão: CONTROLE — sem sessão no aparelho, a volta à aba devia perguntar à extensão onde ela instala (e só lá)',
     JSON.stringify({ temOuvinte: r6b.temOuvinte, perguntas: r6b.semSessaoPerguntou }));
-  checa(!r6b.naVolta.memoria, 'aba sem sessão: a volta à aba da TELA DE ENTRADA gravou na memória dela a sessão que a outra aba guardou');
+  checa(!r6b.naVolta.memoria, 'aba sem sessão: a volta à aba com o "Colar cookies" digitado gravou na memória dela a sessão que a outra aba guardou');
+  checa(r6b.naVolta.colar && r6b.naVolta.campo === COLANDO && r6b.naVolta.entrada,
+    'aba sem sessão: a volta à aba fechou o "Colar cookies" digitado — a adoção da sessão da outra jogou fora o que a pessoa colava',
+    JSON.stringify(r6b.naVolta));
   checa(r6b.comSessaoPerguntou === 0 && !r6b.naVolta.perguntando,
     'aba sem sessão: com a sessão da outra aba no aparelho, a volta à aba perguntou à extensão (uma sessão nova por cima da guardada)');
-  checa(!r6b.encerrou && r6b.fim.colar && r6b.fim.campo === 'TEXTO_QUE_ESTOU_COLANDO',
+  checa(!r6b.encerrou && r6b.fim.colar && r6b.fim.campo === COLANDO,
     'aba sem sessão: o "Sair" da outra aba encerrou a aba da tela de entrada — o "Colar cookies" fechou e o que era colado sumiu',
     JSON.stringify(r6b.fim));
   checa(!r6b.fim.avisos.some((x) => /outra aba/.test(x)), 'aba sem sessão: "Você saiu em outra aba" numa aba que nunca entrou',
@@ -10745,6 +11111,237 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(d6b.naVolta.memoria && d6b.encerrou && !d6b.fim.colar,
     'aba sem sessão: CONTROLE — com a sessão da outra na memória da A (a guarda antiga), o "Sair" de lá devia encerrar a A; a medida não enxerga',
     JSON.stringify({ memoria: d6b.naVolta.memoria, encerrou: d6b.encerrou, fim: d6b.fim }));
+
+  // ── (c) a volta à aba da tela de entrada ADOTA a sessão da outra (R10-1-03) ──
+  // A pessoa entrou pela aba B e voltou à A, parada no "Bem-vindo!": a A seguia
+  // ali, sem perguntar nada a ninguém, até recarregar — e o ouvinte da volta só
+  // existia onde a extensão instala (auditoria da rodada 10, R10-1-03).
+  // DECIDIDO como o R9-1-03: a volta adota como a abertura, em TODO aparelho
+  // (aqui, nos dois motores; no WebKit a extensão nem é perguntada). E o foco que
+  // estava NA tela de entrada vai ao ✕ do primeiro card: ele caía no <body>, e o
+  // Tab seguinte ia ao mapa do card (R10-1-05).
+  // CONTROLES: antes da volta a A segue na entrada (quem adota é a VOLTA); com o
+  // ouvinte da volta TIRADO (o app de antes no celular), a medida vê a A parada no
+  // "Bem-vindo!"; com o foco no <body> (ninguém na tela de entrada), ele não vai
+  // ao ✕.
+  const focoNoX = () => {
+    const x = cardDaFrente() && cardDaFrente().querySelector('.card-btn-reject');
+    return !!x && document.activeElement === x;
+  };
+  // Onde está o foco, num rótulo curto (o id, ou o tipo de elemento).
+  const ondeEstaOFoco = (page) => page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) return 'BODY';
+    return a.id || (a.classList && a.classList.contains('card-btn-reject') ? '✕' : a.tagName);
+  });
+  // O foco na tela de entrada: no "Colar cookies" (`pasteBtn`), no campo dele com o
+  // diálogo aberto e VAZIO (`cookiesTextarea`), ou em lugar nenhum (`null`: o <body>).
+  const porOFoco = async (A, foco) => {
+    if (foco === 'cookiesTextarea') {
+      await A.evaluate(() => document.getElementById('pasteBtn').click());
+      await esperarOuExplodir(A, () => !document.getElementById('pasteModal').classList.contains('hidden'), 'o "Colar cookies" abrir na aba A');
+      await A.focus('#cookiesTextarea');
+    } else if (foco) await A.focus('#' + foco);
+    else await A.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+  };
+  const voltaComASessaoDaOutra = async ({ foco = 'pasteBtn', semOuvinte = false } = {}) => {
+    const s = await abrirAbas({ semSessao: true });
+    const A = await s.abrir(contarPerguntas);
+    await esperarOuExplodir(A, paradaNaEntrada, 'a aba A (sem sessão) chegar à tela de entrada');
+    if (semOuvinte) await A.evaluate(() => { if (typeof aoVoltarAAba === 'function') document.removeEventListener('visibilitychange', aoVoltarAAba); });
+    await porOFoco(A, foco);
+    const B = await s.abrir();
+    await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
+    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
+    const antesDaVolta = await telaDaAba(A);
+    const focoAntes = await ondeEstaOFoco(A);
+    const p1 = await A.evaluate(() => window.__perguntas);
+    await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    // A adoção é SÍNCRONA no ouvinte: a memória já diz se ela aconteceu.
+    const naVolta = await A.evaluate(() => ({ memoria: API.sessionToken, guardado: localStorage.getItem('waze_session_token') }));
+    const comCard = naVolta.memoria ? await esperarNaPagina(A, naFilaComCard, 8000) : { ok: false };
+    // O foco pousa quando o card nasce e destrava (`aplicarFocoDoTeclado`, depois da tarefa): espera a CONDIÇÃO, com teto.
+    const foiAoX = comCard.ok ? await esperarNaPagina(A, focoNoX, 3000) : { ok: false };
+    if (comCard.ok && !foiAoX.ok) await doisQuadros(A);
+    const tela = await telaDaAba(A);
+    const focoDepois = await ondeEstaOFoco(A);
+    const colarAberto = await A.evaluate(() => !document.getElementById('pasteModal').classList.contains('hidden'));
+    const perguntas = (await A.evaluate(() => window.__perguntas)) - p1;
+    const erros = s.erros.slice();
+    await s.ctx.close();
+    return { antesDaVolta, focoAntes, naVolta, comCard: comCard.ok, foiAoX: foiAoX.ok, tela, focoDepois, colarAberto, perguntas, erros };
+  };
+  for (const foco of ['pasteBtn', 'cookiesTextarea']) {
+    const r6c = await voltaComASessaoDaOutra({ foco });
+    checa(r6c.focoAntes === foco, `volta à aba (${foco}): PRÉ-CONDIÇÃO — o foco não estava na tela de entrada antes da volta`, r6c.focoAntes);
+    checa(r6c.antesDaVolta.entrada && !r6c.antesDaVolta.memoria,
+      `volta à aba (${foco}): CONTROLE — a aba A adotou a sessão da B antes de a pessoa voltar a ela (quem adota tem de ser a VOLTA)`,
+      JSON.stringify(r6c.antesDaVolta));
+    checa(r6c.naVolta.memoria && r6c.naVolta.memoria === r6c.naVolta.guardado && r6c.comCard && r6c.tela.app && !r6c.tela.entrada,
+      `volta à aba (${foco}): a aba da tela de entrada não ADOTOU a sessão que a outra guardou — seguiu no "Bem-vindo!" até recarregar`,
+      JSON.stringify({ naVolta: r6c.naVolta, comCard: r6c.comCard, tela: r6c.tela }));
+    checa(r6c.perguntas === 0, `volta à aba (${foco}): com a sessão da outra no aparelho, a volta perguntou à extensão`, String(r6c.perguntas));
+    checa(!r6c.colarAberto, `volta à aba (${foco}): o "Colar cookies" vazio ficou aberto por cima do app`);
+    checa(r6c.foiAoX, `volta à aba (${foco}): o foco que estava na tela de entrada não foi ao ✕ do primeiro card (R10-1-05)`, r6c.focoDepois);
+    checa(r6c.erros.length === 0, `volta à aba (${foco}): erro de JS`, r6c.erros[0]);
+  }
+  const c6c = await voltaComASessaoDaOutra({ foco: null });
+  checa(c6c.focoAntes === 'BODY', 'volta à aba (foco no <body>): PRÉ-CONDIÇÃO — o foco não estava no <body>', c6c.focoAntes);
+  checa(c6c.comCard, 'volta à aba (foco no <body>): PRÉ-CONDIÇÃO — a volta não adotou a sessão da outra (o controle abaixo não mede nada)');
+  checa(!c6c.foiAoX, 'volta à aba: CONTROLE — com o foco no <body> (ninguém na tela de entrada), a adoção levou o foco ao ✕ mesmo assim',
+    c6c.focoDepois);
+  const d6c = await voltaComASessaoDaOutra({ semOuvinte: true });
+  checa(!d6c.naVolta.memoria && d6c.tela.entrada && !d6c.tela.app,
+    'volta à aba: CONTROLE — sem o ouvinte da volta (o app de antes, no celular), a medida devia ver a aba A parada no "Bem-vindo!"',
+    JSON.stringify({ naVolta: d6c.naVolta, tela: d6c.tela }));
+
+  // ── (d) a EXTENSÃO que entra pela volta à aba leva o foco ao ✕ (R10-1-05) ────
+  // Na tela de entrada com o foco no campo do "Colar cookies", a pessoa troca de
+  // aba e volta; a extensão entra em silêncio, a tela de entrada some com o foco
+  // nela, e ele caía no <body>: o Tab seguinte ia ao mapa do card (auditoria da
+  // rodada 10, R10-1-05). A extensão de mentira só responde depois de o teste a
+  // LIGAR. A pergunta da volta só existe onde a extensão instala; no WebKit ela
+  // é feita pela mesma função que o ouvinte chama ali (`perguntarAExtensaoAoVoltar`).
+  // CONTROLE: com o foco no <body>, a extensão entra e o foco não vai ao ✕.
+  const extensaoQueEntraQuandoLigada = () => {
+    window.__extLigada = false;
+    window.__perguntas = 0;
+    window.addEventListener('message', (ev) => {
+      const d = ev.data;
+      if (!window.__extLigada || !d || d.source !== 'wazeplaces' || d.action !== 'precisa-de-sessao') return;
+      window.__perguntas++;
+      window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+      setTimeout(() => window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: 'tok-abas-ext', conta: '4242' },
+        location.origin), 300);
+    });
+  };
+  const extensaoNaVolta = async ({ foco }) => {
+    const s = await abrirAbas({ semSessao: true });
+    const A = await s.abrir(extensaoQueEntraQuandoLigada);
+    await esperarOuExplodir(A, paradaNaEntrada, 'a aba A (sem sessão) chegar à tela de entrada');
+    await porOFoco(A, foco);
+    const focoAntes = await ondeEstaOFoco(A);
+    await A.evaluate(() => {
+      window.__extLigada = true;
+      if (podeInstalarExtensao()) document.dispatchEvent(new Event('visibilitychange'));
+      else perguntarAExtensaoAoVoltar();
+    });
+    // A condição vai SERIALIZADA pra página: nada do Node dentro dela (o `naFilaComCard`
+    // daqui chegava lá indefinido, e a espera virava um teto de 8 s que nunca confirmava).
+    const entrou = await esperarNaPagina(A, () => AppState.authenticated && !!AppState.currentPlace
+      && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject') && API.sessionToken === 'tok-abas-ext', 8000);
+    const foiAoX = entrou.ok ? await esperarNaPagina(A, focoNoX, 3000) : { ok: false };
+    if (entrou.ok && !foiAoX.ok) await doisQuadros(A);
+    const focoDepois = await ondeEstaOFoco(A);
+    // O Tab seguinte: do ✕ ele vai ao ↑ do card (antes, do <body> ia ao mapa).
+    await A.keyboard.press('Tab');
+    const depoisDoTab = await A.evaluate(() => {
+      const a = document.activeElement;
+      return a ? (a.classList && a.classList.contains('card-btn-skip') ? '↑' : a.id || String(a.className).split(' ')[0] || a.tagName) : null;
+    });
+    const erros = s.erros.slice();
+    await s.ctx.close();
+    return { focoAntes, entrou: entrou.ok, foiAoX: foiAoX.ok, focoDepois, depoisDoTab, erros };
+  };
+  const r6d = await extensaoNaVolta({ foco: 'cookiesTextarea' });
+  checa(r6d.focoAntes === 'cookiesTextarea' && r6d.entrou,
+    'extensão na volta: PRÉ-CONDIÇÃO — o foco não estava no campo do "Colar cookies", ou a extensão não entrou', JSON.stringify(r6d));
+  checa(r6d.foiAoX && r6d.depoisDoTab === '↑',
+    'extensão na volta: o foco que estava no "Colar cookies" caiu no <body> quando a extensão entrou — o Tab seguinte não vai ao ↑ do card',
+    JSON.stringify({ foco: r6d.focoDepois, tab: r6d.depoisDoTab }));
+  checa(r6d.erros.length === 0, 'extensão na volta: erro de JS', r6d.erros[0]);
+  const c6d = await extensaoNaVolta({ foco: null });
+  checa(c6d.focoAntes === 'BODY' && c6d.entrou,
+    'extensão na volta (foco no <body>): PRÉ-CONDIÇÃO — o foco não estava no <body>, ou a extensão não entrou', JSON.stringify(c6d));
+  checa(!c6d.foiAoX, 'extensão na volta: CONTROLE — com o foco no <body>, a extensão entrou e o foco foi ao ✕ mesmo assim', c6d.focoDepois);
+
+  // ── (e) o link de pareamento que FALHA, sem sessão salva (R10-1-04) ─────────
+  // O link vencido (o QR de ontem) aberto sem sessão salva deixava a pessoa no
+  // "Bem-vindo!" com o "Código inválido": a abertura pelo link não pergunta à
+  // extensão, e a sessão que outra aba guardou durante o resgate não era adotada
+  // (auditoria da rodada 10, R10-1-04). Agora: com a sessão da outra no aparelho,
+  // ela entra (sem pergunta); sem ela, a extensão é perguntada como na abertura
+  // comum. O aviso do código inválido fica — o resgate é que o mostra, e ninguém
+  // o tira antes da hora (ele vive 4 s).
+  // CONTROLE: sem extensão e sem outra aba, a A pergunta, ninguém responde, e
+  // ela fica na tela de entrada com o aviso.
+  const extensaoLigada = () => {
+    window.__perguntas = 0;
+    window.addEventListener('message', (ev) => {
+      const d = ev.data;
+      if (!d || d.source !== 'wazeplaces' || d.action !== 'precisa-de-sessao') return;
+      window.__perguntas++;
+      window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+      setTimeout(() => window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: 'tok-abas-ext', conta: '4242' },
+        location.origin), 300);
+    });
+  };
+  const vigiarAvisoDoCodigo = () => {
+    window.__avisoDoCodigo = null;
+    new MutationObserver((ms) => {
+      for (const m of ms) {
+        for (const n of m.addedNodes) {
+          if (!window.__avisoDoCodigo && n.nodeType === 1 && m.target && m.target.id === 'toastContainer'
+            && /Código inválido/.test(n.textContent || '')) window.__avisoDoCodigo = { el: n, em: performance.now(), saiu: null };
+        }
+        for (const n of m.removedNodes) if (window.__avisoDoCodigo && n === window.__avisoDoCodigo.el) window.__avisoDoCodigo.saiu = performance.now();
+      }
+    }).observe(document, { childList: true, subtree: true });
+  };
+  const linkVencido = async ({ extensao = false, outraEntra = false } = {}) => {
+    const s = await abrirAbas({ semSessao: true });
+    let soltar = () => {};
+    if (outraEntra) s.resgate.segurar = new Promise((ok) => { soltar = ok; });
+    let B = null;
+    if (outraEntra) {
+      B = await s.abrir();
+      await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
+    }
+    // A extensão LIGADA desde o começo: a abertura pelo link não a pergunta, e a
+    // pergunta que vier depois do resgate não pode correr com o teste ligando-a.
+    const A = await s.abrir([extensao ? extensaoLigada : contarPerguntas, vigiarAvisoDoCodigo], '#pair=ABCDEFGHJKLMNPQRSTUV');
+    if (outraEntra) {
+      await esperarOuExplodir(A, () => !document.getElementById('authScreen').classList.contains('hidden'),
+        'a aba A mostrar a tela de entrada durante o resgate');
+      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies durante o resgate da A');
+      soltar();
+    }
+    // O FIM: o app com o card, ou a tela de entrada depois de o aviso sair e a pergunta acabar.
+    const fim = await esperarNaPagina(A, () => (AppState.authenticated && !!AppState.currentPlace
+      && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject')) || (!!window.__avisoDoCodigo && !extPerguntando
+      && !document.getElementById('authScreen').classList.contains('hidden') && document.getElementById('extLoginState').classList.contains('hidden')
+      && (window.__perguntas || 0) > 0), 10000);
+    const tela = await telaDaAba(A);
+    const r = await A.evaluate(() => {
+      const a = window.__avisoDoCodigo;
+      return { memoria: API.sessionToken, guardado: localStorage.getItem('waze_session_token'), perguntas: window.__perguntas || 0,
+        aviso: a ? { durouMs: Math.round((a.saiu === null ? performance.now() : a.saiu) - a.em), saiu: a.saiu !== null } : null };
+    });
+    const resgates = s.rede.filter((x) => x.rota === 'parear' && x.acao === 'claim').length;
+    const erros = s.erros.slice();
+    await s.ctx.close();
+    return { fim: fim.ok, tela, ...r, resgates, erros };
+  };
+  const avisoInteiro = (x) => !!x.aviso && (!x.aviso.saiu || x.aviso.durouMs >= 3500);
+  const r6e = await linkVencido({ extensao: true });
+  checa(r6e.resgates === 1, 'link vencido (extensão): PRÉ-CONDIÇÃO — o link não fez o resgate do código', String(r6e.resgates));
+  checa(r6e.fim && r6e.tela.app && r6e.memoria === 'tok-abas-ext' && r6e.perguntas === 1,
+    'link vencido: sem sessão salva, o código recusado deixou a pessoa no "Bem-vindo!" — a extensão não foi perguntada como na abertura',
+    JSON.stringify({ tela: r6e.tela, memoria: r6e.memoria, perguntas: r6e.perguntas }));
+  checa(avisoInteiro(r6e), 'link vencido (extensão): o aviso do código inválido sumiu antes da hora (ou nem saiu)', JSON.stringify(r6e.aviso));
+  checa(r6e.erros.length === 0, 'link vencido (extensão): erro de JS', r6e.erros[0]);
+  const o6e = await linkVencido({ outraEntra: true });
+  checa(o6e.fim && o6e.tela.app && !!o6e.memoria && o6e.memoria === o6e.guardado && o6e.perguntas === 0,
+    'link vencido: a sessão que a outra aba guardou durante o resgate não entrou (ou a extensão foi perguntada por cima dela)',
+    JSON.stringify({ tela: o6e.tela, memoria: o6e.memoria, guardado: o6e.guardado, perguntas: o6e.perguntas }));
+  checa(avisoInteiro(o6e), 'link vencido (outra aba): o aviso do código inválido sumiu antes da hora (ou nem saiu)', JSON.stringify(o6e.aviso));
+  checa(o6e.erros.length === 0, 'link vencido (outra aba): erro de JS', o6e.erros[0]);
+  const c6e = await linkVencido({});
+  checa(c6e.fim && c6e.tela.entrada && !c6e.memoria && c6e.perguntas === 1 && avisoInteiro(c6e),
+    'link vencido: CONTROLE — sem extensão e sem outra aba, a A devia perguntar à extensão UMA vez e ficar na tela de entrada com o aviso',
+    JSON.stringify({ fim: c6e.fim, tela: c6e.tela, memoria: c6e.memoria, perguntas: c6e.perguntas, aviso: c6e.aviso }));
 }
 
 // ── "SAIR" É LIMPAR DE TUDO — o DOM também (auditoria de 2026-10-02, R6-1-05) ──
@@ -11001,9 +11598,9 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
   + `, + o "Sair" do treino pelo TECLADO levando o foco ao ✕ do card real que volta (com o CONTROLE do mouse, que não move o foco)`
-  + `, + o fim do treino (Enter no "Ir para a fila" e Esc) e o "Quero treinar antes" pelo TECLADO levando o foco ao ✕ do card que entra — também no "Como funciona" que abre sozinho (com os CONTROLES do mouse e do "Entendi")`
-  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
-  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote, folha do autor e card mortos, com contraprova de que a lixeira e as linhas da folha EXISTEM fora do treino`
+  + `, + o fim do treino (Enter no "Ir para a fila" e Esc), o "Quero treinar antes" e o "Praticar" pelo TECLADO levando o foco ao ✕ do card que entra, e o "Entendi" e o Esc do "Como funciona" ao ✕ do card na tela — também no que abre sozinho (com os CONTROLES do mouse, que não move o foco pro card)`
+  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance, e o exemplo sintético SEM o ↗ na tela)`
+  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote, folha do autor e card mortos, com contraprova de que a lixeira e as linhas da folha EXISTEM fora do treino, e o ↗ do clone na tela com o lugar dele`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (9 prazos contados pela DATA com o relógio parado às 20h — "amanhã" com 20 h de prazo —, contraste composto, não vira alvo de toque e some no "Sair")`
@@ -11042,7 +11639,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
-  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

@@ -151,6 +151,8 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
     aoMudarAFilaPorBaixo: () => {}, caixaDaMinhaArea: () => [-38.5, -13, -38.2, -12.8], desligarMinhaAreaSemCaixa: () => {},
     // A caixa da área POR SERVIDOR e a lista de países pela fonte única (R9-6-04, R9-6-01, do lote dos Filtros).
     caixaDaMinhaAreaEm: () => [-38.5, -13, -38.2, -12.8],
+    // As áreas gerenciadas por servidor (R10-6-03, test/filtros-aplicar): nenhum lido, valem as do perfil.
+    areasGerenciadasLidas: () => null,
     listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
     // A busca de VERDADE não roda aqui: o que importa é ONDE ela sairia.
@@ -378,6 +380,7 @@ function montarDevolvido() {
     showToast: (m, tipo) => toasts.push(tipo + ':' + m), msgDoServidor: () => '',
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
     renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
+    exclusoesNoLocal: new Map(),   // a vez do local nas exclusões (R10-3-03)
     // O `devolverPedidoRecusado` de VERDADE: é ele que guarda o recusado no treino.
     pedidosQueEntraramNaFila: new Set(), manterFocoNaFrente: () => {}, aoMudarAFilaPorBaixo: () => {},
   });
@@ -385,7 +388,7 @@ function montarDevolvido() {
   app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela',
     'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401',
     'contarIdasSemResposta', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome',
-    'aplicarNomeNaTela'],
+    'aplicarNomeNaTela', 'vezDeExcluirNoLocal'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
   'setEpoca: (v) => { epocaDaSessao = v; }');
   return { app, A, A2, C, AppState, log, toasts, Lightbox, responder: (r) => responder(r) };

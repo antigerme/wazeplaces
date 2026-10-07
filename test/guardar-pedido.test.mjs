@@ -31,6 +31,26 @@ function fatiarFuncao(nome) {
   return APP.slice(ini, ini + 1 + fim);
 }
 
+// O ANEL do que o app estrelou (R10-2-05), DE VERDADE: as funções e as
+// constantes fatiadas do app.js, sobre um armazenamento de mentira. Duas "abas"
+// que recebem o MESMO `aparelho` dividem o anel, como dividem o localStorage.
+function anelDeEstrelas(aparelho = new Map()) {
+  const safeLS = {
+    get: (k) => (aparelho.has(k) ? aparelho.get(k) : null),
+    set: (k, v) => aparelho.set(k, String(v)),
+    remove: (k) => aparelho.delete(k),
+  };
+  const constantes = ['ESTRELADOS_KEY', 'ESTRELADOS_MAX'].map((n) => {
+    const m = new RegExp(`^const ${n} = [^;]+;`, 'm').exec(APP);
+    assert.ok(m, `a constante ${n} sumiu do app.js`);
+    return m[0];
+  }).join('\n');
+  const fns = ['chaveDoPedido', 'estreladosNoAparelho', 'estreladoPeloApp', 'anotarEstreladoPeloApp'].map(fatiarBloco).join('\n');
+  const anel = new Function('safeLS', `${constantes}\n${fns}
+    return { estreladoPeloApp, anotarEstreladoPeloApp, lista: estreladosNoAparelho, MAX: ESTRELADOS_MAX, CHAVE: ESTRELADOS_KEY };`)(safeLS);
+  return { ...anel, aparelho };
+}
+
 // ── 1. O PADRÃO ────────────────────────────────────────────────────────────
 test('a preferência nasce DESLIGADA, e só liga quem disse que quer', () => {
   // O padrão é o de FÁBRICA, fonte única do app recém-aberto e do "Sair"
@@ -48,16 +68,24 @@ test('a preferência nasce DESLIGADA, e só liga quem disse que quer', () => {
     'a carga virou opt-out: quem nunca abriu as Preferências passaria a guardar sem ter pedido');
 });
 
+// O anel de um aparelho onde o app ainda não estrelou nada.
+function semEstrelas() {
+  const a = anelDeEstrelas();
+  return { estreladoPeloApp: a.estreladoPeloApp, anotarEstreladoPeloApp: a.anotarEstreladoPeloApp };
+}
+
 // ── 2. A PROMESSA DO PULAR ─────────────────────────────────────────────────
-function rodarSkip({ pularGuarda, isStarred }) {
+function rodarSkip({ pularGuarda, isStarred, anel = anelDeEstrelas(), pedido = { venueID: 'v1', updateRequestID: 'ur1' },
+  responder = async () => ({ success: true }) }) {
   const chamadas = [];
   const conquistas = [];
   const agendadas = [];
   const escopo = {
     AppState: {
-      currentPlace: { venueID: 'v1', updateRequestID: 'ur1', name: 'Bar do Zé', ...(isStarred !== undefined ? { isStarred } : {}) },
+      currentPlace: { ...pedido, name: 'Bar do Zé', ...(isStarred !== undefined ? { isStarred } : {}) },
       queue: [], stats: { skipped: 0 }, preferences: { pularGuarda },
     },
+    estreladoPeloApp: anel.estreladoPeloApp, anotarEstreladoPeloApp: anel.anotarEstreladoPeloApp,
     acoesTravadas: () => false, epocaDaSessao: 0,
     Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
@@ -65,7 +93,7 @@ function rodarSkip({ pularGuarda, isStarred }) {
     // teste possa afirmar que contou — e não só que não quebrou.
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, executor) => { agendadas.push({ tipo, place, executor }); },
-    API: { getRegion: () => 'row', guardarPedido: async (v, u, val) => { chamadas.push({ v, u, val }); return { success: true }; } },
+    API: { getRegion: () => 'row', guardarPedido: async (v, u, val) => { chamadas.push({ v, u, val }); return responder(); } },
     callWithRetry: (fn) => fn(),
     showToast: () => {}, t: (k) => k, msgDoServidor: (r, txt) => txt,
   };
@@ -118,6 +146,80 @@ test('R9-7-06: o pedido que JÁ tem a estrela não ganha outra — e o ↑ não 
   assert.match(MIN, /pularGuarda===!0&&\w+\.isStarred!==!0/, 'js/min/app.js não tem o conserto — faltou `npm run js`');
 });
 
+// R10-2-05 (auditoria de 2026-10-07): com DUAS abas, a B carregou a fila antes de
+// a A pular o pedido, e o `isStarred` dela segue falso. O ↑ na B mandava outra
+// estrela e contava de novo no "Colecionador" — MEDIDO no navegador: duas
+// estrelas e `guardados: 2` com um pedido só (q03, Chromium e WebKit). As duas
+// "abas" daqui dividem o MESMO aparelho (o anel), e cada uma tem o SEU objeto do
+// pedido, com o `isStarred` da busca dela.
+test('R10-2-05: o pedido que a OUTRA aba já estrelou não ganha outra estrela — e o "Colecionador" conta pedido distinto', async () => {
+  const aparelho = new Map();
+  const a = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho) });
+  await a.agendadas[0].executor();
+  assert.equal(a.chamadas.length, 1, 'PRÉ-CONDIÇÃO: a aba A não guardou o pedido');
+  assert.deepEqual(a.conquistas, ['guardados'], 'PRÉ-CONDIÇÃO: a estrela da aba A não contou');
+  // A aba B, com o MESMO pedido e o `isStarred` de antes da estrela da A.
+  const b = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho) });
+  assert.equal(b.stats.skipped, 1, 'o ↑ da aba B deixou de contar como pular');
+  await b.agendadas[0].executor();
+  assert.deepEqual(b.chamadas, [], 'DEFEITO: a aba B mandou outra estrela pro pedido que a A já tinha guardado');
+  assert.deepEqual(b.conquistas, [], 'DEFEITO: o mesmo pedido contou duas vezes no "Colecionador"');
+  // CONTROLE: OUTRO pedido na aba B é guardado e conta (as duas estrelas são devidas).
+  const c = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho), pedido: { venueID: 'v2', updateRequestID: 'ur2' } });
+  await c.agendadas[0].executor();
+  assert.deepEqual(c.chamadas, [{ v: 'v2', u: 'ur2', val: true }], 'CONTROLE: outro pedido deixou de ser guardado');
+  assert.deepEqual(c.conquistas, ['guardados'], 'CONTROLE: a estrela de outro pedido deixou de contar');
+  // O js/min/ é o que o navegador carrega (gotcha #22).
+  const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
+  assert.match(MIN, /\|\|estreladoPeloApp\(\w+\)===!0\)return;/, 'js/min/app.js não tem o conserto — faltou `npm run js`');
+  assert.match(MIN, /anotarEstreladoPeloApp\(\w+\)&&contarConquista\("guardados"\)/, 'js/min/app.js não conta pedido distinto — faltou `npm run js`');
+});
+
+test('R10-2-05: a estrela da outra aba que POUSA durante a janela do Desfazer — o ↑ desta não manda outra', async () => {
+  const aparelho = new Map();
+  const b = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho) });
+  // A janela do Desfazer da B está correndo; nesse meio a estrela da A pousa.
+  anelDeEstrelas(aparelho).anotarEstreladoPeloApp({ venueID: 'v1', updateRequestID: 'ur1' });
+  await b.agendadas[0].executor();
+  assert.deepEqual(b.chamadas, [], 'DEFEITO: a estrela que a outra aba pousou na janela do Desfazer saiu de novo daqui');
+  assert.deepEqual(b.conquistas, [], 'DEFEITO: a estrela da janela contou de novo no "Colecionador"');
+  // CONTROLE: sem a estrela da outra aba, a janela vence e a estrela sai.
+  const c = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(new Map()) });
+  await c.agendadas[0].executor();
+  assert.equal(c.chamadas.length, 1);
+  assert.deepEqual(c.conquistas, ['guardados']);
+});
+
+test('R10-2-05: as duas abas pulam o MESMO pedido no mesmo instante — as duas estrelas saem, e só a primeira a pousar conta', async () => {
+  const aparelho = new Map();
+  const respostas = [];
+  const segurar = () => new Promise((ok) => respostas.push(ok));
+  const a = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho), responder: segurar });
+  const b = rodarSkip({ pularGuarda: true, isStarred: false, anel: anelDeEstrelas(aparelho), responder: segurar });
+  const fimA = a.agendadas[0].executor();
+  const fimB = b.agendadas[0].executor();
+  assert.equal(a.chamadas.length + b.chamadas.length, 2, 'PRÉ-CONDIÇÃO: as duas estrelas tinham que estar no ar juntas');
+  for (const ok of respostas.splice(0)) ok({ success: true });
+  await fimA; await fimB;
+  assert.equal(a.conquistas.length + b.conquistas.length, 1,
+    `DEFEITO: o mesmo pedido contou ${a.conquistas.length + b.conquistas.length} vezes no "Colecionador"`);
+  assert.deepEqual(anelDeEstrelas(aparelho).lista(), ['v1|ur1'], 'a chave entrou duas vezes no anel');
+});
+
+test('R10-2-05: o anel tem teto POR CONSTRUÇÃO — o mais velho sai', () => {
+  const anel = anelDeEstrelas();
+  assert.ok(anel.MAX >= 100 && anel.MAX <= 1000, `teto de ${anel.MAX} chaves: fora da faixa que cabe no ↑ sem custo`);
+  for (let i = 0; i <= anel.MAX; i++) anel.anotarEstreladoPeloApp({ venueID: 'v' + i, updateRequestID: 'u' + i });
+  const lista = anel.lista();
+  assert.equal(lista.length, anel.MAX, `o anel cresceu sem teto: ${lista.length} chaves`);
+  assert.equal(anel.estreladoPeloApp({ venueID: 'v0', updateRequestID: 'u0' }), false, 'o mais VELHO não saiu');
+  assert.equal(anel.estreladoPeloApp({ venueID: 'v' + anel.MAX, updateRequestID: 'u' + anel.MAX }), true, 'o mais novo não entrou');
+  // E o anel ilegível (outra versão, armazenamento estragado) não quebra o ↑.
+  const ruim = anelDeEstrelas(new Map([[anel.CHAVE, '{']]));
+  assert.equal(ruim.estreladoPeloApp({ venueID: 'v1', updateRequestID: 'u1' }), false);
+  assert.equal(ruim.anotarEstreladoPeloApp({ venueID: 'v1', updateRequestID: 'u1' }), true);
+});
+
 test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {
   // A janela do Desfazer dura segundos e o modal de Preferências continua
   // alcançável. Se o executor lesse a preferência na hora de rodar, mexer no
@@ -128,6 +230,7 @@ test('a decisão é do MOMENTO DO GESTO, não do despacho', async () => {
   const prefs = { pularGuarda: true };
   const escopo = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: prefs },
+    ...semEstrelas(),
     acoesTravadas: () => false, epocaDaSessao: 0, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
@@ -149,6 +252,7 @@ test('falhar ao guardar NÃO é silencioso', async () => {
   const avisos = [];
   const escopo = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 }, preferences: { pularGuarda: true } },
+    ...semEstrelas(),
     acoesTravadas: () => false, epocaDaSessao: 0, Treino: { ativo: false },
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {},
     // O executor conta "Colecionador" no sucesso. O stub REGISTRA, pra que o
@@ -193,7 +297,7 @@ async function pularCom401(respostas, { sonda = 'viva' } = {}) {
   const deps = {
     AppState: { currentPlace: { venueID: 'v1', updateRequestID: 'ur1' }, queue: [], stats: { skipped: 0 },
       preferences: { pularGuarda: true }, fetchEpoch: 0 },
-    acoesTravadas: () => false, Treino: { ativo: false },
+    acoesTravadas: () => false, Treino: { ativo: false }, ...semEstrelas(),
     updateStats: () => {}, saveStats: () => {}, advanceQueue: () => {}, aplicarTravaDeAcao: () => {},
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, ex) => executores.push(ex),

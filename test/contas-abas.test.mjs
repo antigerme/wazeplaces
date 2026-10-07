@@ -2033,22 +2033,81 @@ function apiDeVerdade(guardado = {}) {
   return { API: ctx.API, safeLS: ctx.safeLS, dados };
 }
 
+// A TELA DE ENTRADA de mentira: a tela (com o "Colar cookies"), os diálogos dela
+// (com o campo de cada um), a Ajuda (que não é dela) e o FOCO. O `contains` vai
+// pela cadeia de pais, como no DOM. A adoção e o foco (R10-1-03, R10-1-05) leem
+// isto — a tela de entrada na tela, os diálogos abertos e onde está o foco.
+function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
+  const els = {};
+  const el = (id, { oculto = false, pai = null } = {}) => {
+    const classes = new Set(oculto ? ['hidden'] : []);
+    const e = {
+      id, value: '', pai,
+      classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
+      contains(outro) { for (let x = outro; x; x = x.pai) if (x === e) return true; return false; },
+    };
+    els[id] = e;
+    return e;
+  };
+  const tela = el('authScreen');
+  el('pasteBtn', { pai: tela });
+  for (const [modal, campo] of [['pasteModal', 'cookiesTextarea'], ['pairEnterModal', 'pairCodeInput']]) {
+    const m = el(modal, { oculto: dialogo !== modal });
+    el(campo, { pai: m }).value = dialogo === modal ? texto : '';
+  }
+  el('closeAccessDenied', { pai: el('accessDeniedModal', { oculto: dialogo !== 'accessDeniedModal' }) });
+  el('langSelectHelp', { pai: el('helpModal', { oculto: dialogo !== 'helpModal' }) });
+  el('appScreen', { oculto: true });
+  const body = { id: 'BODY' };
+  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null };
+  Object.defineProperty(document, 'activeElement', { get: () => (foco ? els[foco] : body) });
+  return {
+    els, document,
+    // O `closeModal` de verdade: esconde e roda a limpeza do campo.
+    fechar(id) {
+      els[id].classList.add('hidden');
+      if (id === 'pasteModal') els.cookiesTextarea.value = '';
+      if (id === 'pairEnterModal') els.pairCodeInput.value = '';
+    },
+    // A abertura com sessão salva mostra o app (o `showMainScreen`).
+    mostrarOApp() { els.authScreen.classList.add('hidden'); els.appScreen.classList.remove('hidden'); },
+  };
+}
+const MODAIS_DA_ENTRADA = constante('MODAIS_DA_ENTRADA');
+const BOTAO_DA_ACAO = constante('BOTAO_DA_ACAO');
+// As funções da ADOÇÃO da sessão do aparelho (R9-1-03 a, R10-1-03, R10-1-04),
+// todas de verdade.
+const ADOCAO = ['adotarSessaoDoAparelho', 'textoDigitadoNaEntrada', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada',
+  'aoEntrarNestaPagina'];
+// O que a adoção lê e escreve, sem sessão e sem nada no ar; `log` anota o que ela faz.
+function depsDaAdocao(real, t, log, AppState) {
+  return {
+    API: real.API, safeLS: real.safeLS, AppState, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO,
+    extPerguntando: false, resgateEmVoo: false, authInFlight: false, saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    focoDoTeclado: null,
+    // O fechamento que NÃO devolve o foco a quem abriu (ele já foi prometido, R10-1-05) é anotado.
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    resetQueue: () => log.push('fila nova'),
+    // A abertura com sessão salva, com a sessão que a memória tem NA HORA — e o app na tela.
+    abrirComSessaoSalva: () => { log.push('abriu com ' + real.API.sessionToken); AppState.authenticated = true; t.mostrarOApp(); },
+  };
+}
+
 // A ABERTURA sem sessão, no fim da pergunta à extensão (`aoFimDaPerguntaDaAbertura`).
-function aberturaSemSessao(guardado = {}) {
+function aberturaSemSessao(guardado = {}, tela = {}) {
   const real = apiDeVerdade(guardado);
   const log = [];
   const AppState = { authenticated: false, profile: null };
+  const t = telaDeEntrada(tela);
   const deps = {
-    API: real.API, safeLS: real.safeLS, AppState,
+    ...depsDaAdocao(real, t, log, AppState),
+    // Uma recusa que a extensão repassou nesta pergunta (o portão negou a conta do WME).
+    extNegado: { errorCategory: 'access_denied' },
     showAuthScreen: () => log.push('tela de entrada'),
-    mostrarNegadoDaExtensao: () => log.push('recusa mostrada'),
-    tirarNegadoDaExtensao: () => log.push('recusa descartada'),
-    fecharModaisDaEntrada: () => log.push('modais da entrada fechados'),
-    // A abertura com sessão salva, com a sessão que a memória tem NA HORA.
-    abrirComSessaoSalva: () => log.push('abriu com ' + real.API.sessionToken),
+    showAccessDenied: () => log.push('recusa mostrada'),
   };
-  const h = montar(['aoFimDaPerguntaDaAbertura'], deps);
-  return { ...real, h, log, AppState };
+  const h = montar(['aoFimDaPerguntaDaAbertura', ...ADOCAO, 'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao'], deps);
+  return { ...real, h, log, AppState, deps, tela: t };
 }
 // A tela que a abertura decidiu — ou nenhuma: a tela EM BRANCO.
 const decidiuATela = (log) => log.some((x) => x === 'tela de entrada' || x.startsWith('abriu com '));
@@ -2062,8 +2121,10 @@ test('R9-1-03 (a): a abertura que pergunta à extensão ADOTA a sessão que OUTR
   m.h.aoFimDaPerguntaDaAbertura(false);
   assert.ok(decidiuATela(m.log),
     'DEFEITO: a aba ficou EM BRANCO — nem a tela de entrada, nem o app (a guarda tomou a sessão da outra aba pela desta)');
-  assert.deepEqual(m.log, ['recusa descartada', 'modais da entrada fechados', 'abriu com tok-da-outra'],
+  // A fila é NOVA, como em todo login (R10-1-03: a que sobra na memória é de uma sessão que caiu).
+  assert.deepEqual(m.log, ['fila nova', 'abriu com tok-da-outra'],
     'a sessão que a outra aba guardou não foi ADOTADA como numa abertura com sessão salva: ' + JSON.stringify(m.log));
+  assert.equal(m.deps.extNegado, null, 'a recusa que a extensão repassou ficou pendurada pra aparecer por cima do app');
   // CONTROLE: ninguém entrou — a tela de entrada (com a recusa, se houver), e a memória segue vazia.
   const c = aberturaSemSessao();
   c.h.aoFimDaPerguntaDaAbertura(false);
@@ -2087,24 +2148,30 @@ test('R9-1-03 (a): a abertura que pergunta à extensão ADOTA a sessão que OUTR
     'a abertura sem sessão deixou de passar por esta guarda');
 });
 
-// A aba da TELA DE ENTRADA: a volta a ela (o ouvinte da extensão, só onde ela
-// instala) e os avisos do "Sair" dado na outra.
-function abaDaEntrada(guardado = {}) {
+// A aba da TELA DE ENTRADA: a volta a ela (`aoVoltarAAba`, em todo aparelho; a
+// pergunta à extensão, onde ela instala) e os avisos do "Sair" dado na outra.
+function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
   const real = apiDeVerdade(guardado);
   const log = [];
+  const AppState = { authenticated: false, profile: null };
+  const t = telaDeEntrada(tela);
+  let responder = null;
   const deps = {
-    API: real.API, safeLS: real.safeLS, AppState: { authenticated: false, profile: null },
+    ...depsDaAdocao(real, t, log, AppState),
     CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
-    // A tela de entrada NA TELA; o app, fora dela.
-    document: { visibilityState: 'visible',
-      getElementById: (id) => ({ classList: { contains: (c) => c === 'hidden' && id === 'appScreen' } }) },
-    saiuNestaPagina: false, extNegadoNestaPagina: false, extPerguntando: false,
-    entrarPelaExtensao: (o) => { log.push('perguntou à extensão' + (o && o.silencioso ? ' (em silêncio)' : '')); return new Promise(() => {}); },
+    podeInstalarExtensao: () => podeInstalar,
+    // A pergunta fica no ar até o TESTE responder (`responderExtensao`).
+    entrarPelaExtensao: (o) => {
+      log.push('perguntou à extensão' + (o && o.silencioso ? ' (em silêncio)' : ''));
+      return new Promise((ok) => { responder = ok; });
+    },
+    mostrarNegadoDaExtensao: () => log.push('recusa'),
     handleLogout: (o) => log.push(['sair', o]),
   };
-  const h = montar(['perguntarAExtensaoAoVoltar', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+  const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', ...ADOCAO,
+    'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao'], deps);
-  return { ...real, h, log };
+  return { ...real, h, log, deps, AppState, tela: t, responderExtensao: (v) => responder(v) };
 }
 // O "Sair" na outra aba: o token e a conta saem do aparelho, e os avisos chegam aqui na ordem em que ela gravou.
 function sairNaOutra(m) {
@@ -2113,32 +2180,258 @@ function sairNaOutra(m) {
   m.dados.delete(CONTA_KEY);
   m.h.sincronizarComOutraAba(CONTA_KEY);
 }
+const DA_OUTRA = { [TOKEN]: 'tok-da-outra', [CONTA_KEY]: '{"id":"4242","s":"x"}' };
+const COLANDO = { dialogo: 'pasteModal', texto: 'COOKIES_QUE_ESTOU_COLANDO', foco: 'cookiesTextarea' };
 
-test('R9-1-03 (b): a volta à aba da TELA DE ENTRADA não puxa pra memória a sessão da outra — e o "Sair" de lá não encerra esta', () => {
-  const DA_OUTRA = { [TOKEN]: 'tok-da-outra', [CONTA_KEY]: '{"id":"4242","s":"x"}' };
-  const m = abaDaEntrada(DA_OUTRA);
-  m.h.perguntarAExtensaoAoVoltar();
+// A volta à aba ADOTA a sessão da outra (R10-1-03, abaixo) — menos com TEXTO
+// DIGITADO num diálogo da entrada: aí vale o que o R9-1-03 (b) garantiu, e a aba
+// segue sem sessão na memória, sem virar "logada" sem mostrar o app.
+test('R9-1-03 (b): a volta à aba com o "Colar cookies" digitado não puxa pra memória a sessão da outra — e o "Sair" de lá não encerra esta', () => {
+  const m = abaDaEntrada(DA_OUTRA, { tela: COLANDO });
+  m.h.aoVoltarAAba();
   assert.equal(m.API.temSessaoNaMemoria(), false,
     'DEFEITO: a volta à aba gravou na memória desta (que nunca entrou) a sessão que a outra guardou');
   assert.deepEqual(m.log, [],
-    'com a sessão da outra aba no aparelho, a volta à aba perguntou à extensão (traria uma sessão nova por cima da guardada)');
+    'com o "Colar cookies" digitado, a volta à aba fechou o diálogo, adotou a sessão da outra ou perguntou à extensão: ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, COLANDO.texto, 'o que estava sendo colado sumiu na volta à aba');
   sairNaOutra(m);
   assert.deepEqual(m.log, [],
     'DEFEITO: a aba que nunca entrou foi encerrada pelo "Sair" da outra — o "Colar cookies" fechava, apagando o colado, e o aviso dizia "Você saiu em outra aba"');
+  // O código digitado no "Entrar com um código" vale o mesmo.
+  const cod = abaDaEntrada(DA_OUTRA, { tela: { dialogo: 'pairEnterModal', texto: 'ABC-234', foco: 'pairCodeInput' } });
+  cod.h.aoVoltarAAba();
+  assert.deepEqual(cod.log, [], 'o código que a pessoa digitava foi jogado fora pela volta à aba');
+  assert.equal(cod.API.temSessaoNaMemoria(), false);
   // CONTROLE: sem sessão nenhuma no aparelho, a volta à aba pergunta à extensão (o ouvinte enxerga a tela de entrada).
   const c = abaDaEntrada();
-  c.h.perguntarAExtensaoAoVoltar();
+  c.h.aoVoltarAAba();
   assert.deepEqual(c.log, ['perguntou à extensão (em silêncio)']);
   // CONTROLE do instrumento: com a sessão da outra na memória desta (o que o
   // `getSession` de verdade faz com a memória vazia), o "Sair" de lá a encerra.
-  const d = abaDaEntrada(DA_OUTRA);
+  const d = abaDaEntrada(DA_OUTRA, { tela: COLANDO });
   assert.equal(d.API.getSession(), 'tok-da-outra');
   assert.equal(d.API.temSessaoNaMemoria(), true, 'CONTROLE: o `getSession` de verdade não grava mais na memória — o mecanismo mudou, reveja o teste');
   sairNaOutra(d);
   assert.deepEqual(d.log, [['sair', { porOutraAba: true }]],
     'CONTROLE: com a sessão na memória, o "Sair" da outra aba devia encerrar esta — a medida não enxerga o defeito');
-  // Quem chama: o ouvinte da volta à aba, onde a extensão instala.
-  assert.match(fatiarDe(APP_SEM, 'setupAppListeners'),
-    /^\s+if \(podeInstalarExtensao\(\)\) document\.addEventListener\('visibilitychange', perguntarAExtensaoAoVoltar\);/m,
-    'a volta à aba deixou de passar por esta guarda');
+});
+
+// ═══ R10-1-03 · a volta à aba da tela de entrada ADOTA a sessão do aparelho ═════
+// A pessoa entrou pela outra aba (ou tem outra aba logada) e voltou à que estava
+// na tela de entrada: ela seguia no "Bem-vindo!", sem perguntar à extensão nem
+// adotar a sessão guardada, até recarregar — e o ouvinte da volta só existia
+// onde a extensão instala (auditoria da rodada 10, R10-1-03, MEDIDO). DECIDIDO
+// como o R9-1-03: a volta adota como a abertura, em TODO aparelho.
+test('R10-1-03: a volta à aba da tela de entrada ADOTA a sessão que outra aba guardou — em todo aparelho, como a abertura', async () => {
+  for (const podeInstalar of [true, false]) {
+    const onde = podeInstalar ? 'computador com a extensão' : 'celular';
+    const m = abaDaEntrada(DA_OUTRA, { podeInstalar });
+    m.h.aoVoltarAAba();
+    assert.equal(m.API.sessionToken, 'tok-da-outra',
+      `DEFEITO (${onde}): a volta à aba deixou a pessoa no "Bem-vindo!" com a sessão viva no aparelho`);
+    assert.deepEqual(m.log, ['fila nova', 'abriu com tok-da-outra'],
+      `(${onde}) a volta não abriu como a abertura com sessão salva (fila nova, sem pergunta à extensão): ` + JSON.stringify(m.log));
+    // E agora a aba É logada, com o app na tela: o "Sair" da outra a encerra, como a qualquer aba logada.
+    sairNaOutra(m);
+    assert.deepEqual(m.log.slice(2), [['sair', { porOutraAba: true }]], `(${onde}) o "Sair" da outra não chegou à aba que adotou`);
+  }
+  // O diálogo da entrada ABERTO e VAZIO (o "Colar", o "Acesso restrito"): fecha com a limpeza, e a sessão entra.
+  for (const dialogo of ['pasteModal', 'accessDeniedModal']) {
+    const v = abaDaEntrada(DA_OUTRA, { tela: { dialogo, texto: '  ' } });
+    v.h.aoVoltarAAba();
+    assert.deepEqual(v.log, ['fechou ' + dialogo, 'fila nova', 'abriu com tok-da-outra'],
+      `com o ${dialogo} aberto e vazio, a volta não adotou (ou deixou o diálogo por cima do app): ` + JSON.stringify(v.log));
+  }
+  // CONTROLE: a página escondida, e a tela de entrada fora da tela (o "Entrando pelo WME…"): nada.
+  const f = abaDaEntrada(DA_OUTRA);
+  f.tela.document.visibilityState = 'hidden';
+  f.h.aoVoltarAAba();
+  const s = abaDaEntrada(DA_OUTRA);
+  s.tela.els.authScreen.classList.add('hidden');
+  s.h.aoVoltarAAba();
+  for (const x of [f, s]) {
+    assert.deepEqual(x.log, [], 'a volta adotou com a página escondida ou sem a tela de entrada');
+    assert.equal(x.API.temSessaoNaMemoria(), false);
+  }
+  // CONTROLE: uma pergunta à extensão, um resgate de código ou os cookies desta aba
+  // sendo conferidos, no AR — o fim deles decide (o login que a pessoa pediu vence).
+  for (const noAr of ['extPerguntando', 'resgateEmVoo', 'authInFlight']) {
+    const p = abaDaEntrada(DA_OUTRA);
+    p.deps[noAr] = true;
+    p.h.aoVoltarAAba();
+    assert.deepEqual(p.log, [], `a volta adotou com ${noAr} — duas aberturas uma por cima da outra`);
+    assert.equal(p.API.temSessaoNaMemoria(), false);
+  }
+  // O FIM da pergunta da volta: a outra aba entrou enquanto a extensão respondia
+  // (sem sessão) — a sessão dela entra, como no fim da pergunta da abertura.
+  const q = abaDaEntrada();
+  q.h.aoVoltarAAba();
+  assert.deepEqual(q.log, ['perguntou à extensão (em silêncio)'], 'PRÉ-CONDIÇÃO: sem sessão no aparelho, a volta pergunta à extensão');
+  q.dados.set(TOKEN, 'tok-da-outra');
+  q.responderExtensao(false);
+  await tiqueAba();
+  assert.deepEqual(q.log.slice(1), ['fila nova', 'abriu com tok-da-outra'],
+    'a sessão que a outra aba guardou durante a pergunta da volta não entrou: ' + JSON.stringify(q.log));
+  // CONTROLE: ninguém entrou nesse meio — a recusa (se houver), e a memória vazia.
+  const n = abaDaEntrada();
+  n.h.aoVoltarAAba();
+  n.responderExtensao(false);
+  await tiqueAba();
+  assert.deepEqual(n.log, ['perguntou à extensão (em silêncio)', 'recusa']);
+  assert.equal(n.API.temSessaoNaMemoria(), false);
+  // Quem chama: o ouvinte da volta, em TODO aparelho (a pergunta à extensão é que fica onde ela instala).
+  const ouvintes = fatiarDe(APP_SEM, 'setupAppListeners');
+  assert.match(ouvintes, /^\s+document\.addEventListener\('visibilitychange', aoVoltarAAba\);/m,
+    'a volta à aba deixou de passar por `aoVoltarAAba`');
+  assert.doesNotMatch(ouvintes, /if \(podeInstalarExtensao\(\)\) document\.addEventListener\('visibilitychange'/,
+    'o ouvinte da volta voltou a existir só onde a extensão instala: no celular a volta não adota');
+});
+
+// ═══ R10-1-04 · o link de pareamento que FALHA, sem sessão salva ════════════════
+// O link vencido (o QR de ontem) aberto sem sessão salva deixava a pessoa no
+// "Bem-vindo!" com o "Código inválido" e mais nada: a abertura pelo link não
+// pergunta à extensão, e a sessão que outra aba guardou durante o resgate não era
+// adotada (auditoria da rodada 10, R10-1-04, MEDIDO).
+function linkDePareamento({ guardado = {}, tela = {}, outraEntra = false, entraNestaAba = false } = {}) {
+  const real = apiDeVerdade(guardado);
+  const log = [];
+  const AppState = { authenticated: false, profile: null };
+  const t = telaDeEntrada(tela);
+  const deps = {
+    ...depsDaAdocao(real, t, log, AppState),
+    showAuthScreen: () => log.push('tela de entrada'),
+    // O resgate RECUSADO (o código venceu); nesse meio, a outra aba (ou esta) pode entrar.
+    // `entraNestaAba: 'so-memoria'`: o login desta aba que o aparelho NÃO guardou (o
+    // armazenamento bloqueado, o modo privado) — só a memória sabe dele.
+    resgatarPareamento: async (codigo, o) => {
+      if (outraEntra) real.dados.set(TOKEN, 'tok-da-outra');
+      if (entraNestaAba === 'so-memoria') real.API.sessionToken = 'tok-desta';
+      else if (entraNestaAba) real.API.setSession('tok-desta', 'cookies');
+      log.push('código inválido' + (o && o.silencioso ? ' (aviso)' : ''));
+      return false;
+    },
+    entrarPelaExtensao: (o) => { log.push('perguntou à extensão' + (o && o.silencioso ? ' (em silêncio)' : '')); return Promise.resolve(false); },
+    aoFimDaPerguntaDaAbertura: (entrou) => log.push('fim da pergunta da abertura:' + entrou),
+  };
+  const h = montar(['abrirPeloCodigoDaURL', ...ADOCAO], deps);
+  return { ...real, h, log };
+}
+
+test('R10-1-04: o link de pareamento que falha, sem sessão salva — a sessão da outra aba entra; sem ela, a extensão é perguntada como na abertura', async () => {
+  // A outra aba entrou durante o resgate: a sessão dela é adotada, sem perguntar à extensão.
+  const o = linkDePareamento({ outraEntra: true });
+  await o.h.abrirPeloCodigoDaURL('VENCIDO');
+  assert.equal(o.API.sessionToken, 'tok-da-outra', 'DEFEITO: a sessão que a outra aba guardou durante o resgate não entrou');
+  assert.deepEqual(o.log, ['tela de entrada', 'código inválido (aviso)', 'fila nova', 'abriu com tok-da-outra'],
+    'o link que falhou não abriu com a sessão do aparelho como a abertura: ' + JSON.stringify(o.log));
+  // Ninguém entrou: a extensão é perguntada como na ABERTURA comum (com o "Entrando pelo WME…"), e o fim é o dela.
+  const n = linkDePareamento();
+  await n.h.abrirPeloCodigoDaURL('VENCIDO');
+  assert.deepEqual(n.log, ['tela de entrada', 'código inválido (aviso)', 'perguntou à extensão', 'fim da pergunta da abertura:false'],
+    'DEFEITO: o link que falhou deixou a pessoa no "Bem-vindo!" sem perguntar à extensão: ' + JSON.stringify(n.log));
+  // CONTROLE: a pessoa entrou NESTA aba durante o resgate (o colar) — nada por cima, nem
+  // com o aparelho sem guardar a sessão dela (aí a extensão traria outra por cima da desta).
+  for (const entraNestaAba of [true, 'so-memoria']) {
+    const e = linkDePareamento({ entraNestaAba });
+    await e.h.abrirPeloCodigoDaURL('VENCIDO');
+    assert.deepEqual(e.log, ['tela de entrada', 'código inválido (aviso)'],
+      `o fim do resgate atropelou o login feito nesta aba (${entraNestaAba}): ` + JSON.stringify(e.log));
+    assert.equal(e.API.sessionToken, 'tok-desta');
+  }
+  // CONTROLE: a outra aba entrou, mas há TEXTO digitado no "Colar" — a tela fica como está, e a extensão
+  // não é perguntada (com sessão no aparelho, ela traria outra por cima da guardada).
+  const t = linkDePareamento({ outraEntra: true, tela: COLANDO });
+  await t.h.abrirPeloCodigoDaURL('VENCIDO');
+  assert.deepEqual(t.log, ['tela de entrada', 'código inválido (aviso)'], JSON.stringify(t.log));
+  assert.equal(t.API.temSessaoNaMemoria(), false);
+  // CONTROLE: com sessão SALVA, o caminho de sempre — a sessão salva abre, sem pergunta nem fila nova.
+  const s = linkDePareamento({ guardado: { [TOKEN]: 'tok-salvo' } });
+  await s.h.abrirPeloCodigoDaURL('VENCIDO');
+  assert.deepEqual(s.log, ['código inválido (aviso)', 'abriu com tok-salvo'], JSON.stringify(s.log));
+});
+
+// ═══ R10-1-05 · o foco que estava NA tela de entrada vai ao ✕ do primeiro card ══
+// A extensão que entra pela volta à aba (e a adoção da sessão do aparelho)
+// esconde a tela de entrada com o foco nela — no "Colar cookies", no campo dele
+// —, e o foco caía no <body>: o Tab seguinte ia ao mapa do card (auditoria da
+// rodada 10, R10-1-05, MEDIDO). Ele fica prometido ao ✕ do primeiro card, como
+// no login pelo teclado (R7-1-04); com o foco no <body>, nada se move.
+test('R10-1-05: a ADOÇÃO com o foco na tela de entrada (ou num diálogo dela) o promete ao ✕ do primeiro card; com ele no <body>, não', () => {
+  for (const tela of [{ foco: 'pasteBtn' }, { dialogo: 'pasteModal', foco: 'cookiesTextarea' },
+    { dialogo: 'accessDeniedModal', foco: 'closeAccessDenied' }]) {
+    const m = abaDaEntrada(DA_OUTRA, { tela });
+    m.h.aoVoltarAAba();
+    assert.equal(m.API.sessionToken, 'tok-da-outra', 'PRÉ-CONDIÇÃO: a volta não adotou ' + JSON.stringify(tela));
+    assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left,
+      `DEFEITO: o foco em ${tela.foco} caiu no <body> com a tela de entrada escondida (o Tab seguinte ia ao mapa do card)`);
+    // O diálogo fecha SEM devolver o foco a quem o abriu: o "Acesso restrito" que o app
+    // abriu sozinho o devolvia ao ⓘ do topo, que é vivo, e a promessa caía.
+    if (tela.dialogo) assert.ok(m.log.includes(`fechou ${tela.dialogo} (o foco já tem destino)`), JSON.stringify(m.log));
+  }
+  // A abertura que adota também (o fim da pergunta, R9-1-03 a).
+  const a = aberturaSemSessao({}, { foco: 'pasteBtn' });
+  a.dados.set(TOKEN, 'tok-da-outra');
+  a.h.aoFimDaPerguntaDaAbertura(false);
+  assert.equal(a.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'a adoção da abertura deixou o foco da tela de entrada cair no <body>');
+  // CONTROLE: ninguém estava na tela de entrada (o foco no <body>), ou ele está na Ajuda (que segue aberta): nada se move.
+  for (const tela of [{}, { dialogo: 'helpModal', foco: 'langSelectHelp' }]) {
+    const c = abaDaEntrada(DA_OUTRA, { tela });
+    c.h.aoVoltarAAba();
+    assert.equal(c.API.sessionToken, 'tok-da-outra', 'PRÉ-CONDIÇÃO: a volta não adotou ' + JSON.stringify(tela));
+    assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido ao ✕ sem estar na tela de entrada: ' + JSON.stringify(tela));
+  }
+});
+
+// A extensão que ENTRA (a pergunta da volta, a da abertura): a janela de mentira
+// repassa a resposta da ponte pelo `message`, como a de verdade.
+function extensaoNaEntrada(tela) {
+  const t = telaDeEntrada(tela);
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  const log = [];
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {},
+    API: { setSession: (tok) => log.push('sessão ' + tok) },
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); },
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, responder, log };
+}
+
+test('R10-1-05: a extensão que ENTRA com o foco na tela de entrada o promete ao ✕ do primeiro card; com ele no <body>, não', async () => {
+  for (const tela of [{ foco: 'pasteBtn' }, { dialogo: 'pasteModal', foco: 'cookiesTextarea' }]) {
+    const m = extensaoNaEntrada(tela);
+    const p = m.h.entrarPelaExtensao({ silencioso: true });
+    m.responder({ action: 'sessao', token: 'tok-ext' });
+    assert.equal(await p, true, 'PRÉ-CONDIÇÃO: a extensão não entrou');
+    assert.ok(m.log.includes('app'), 'PRÉ-CONDIÇÃO: o app não foi mostrado');
+    assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left,
+      `DEFEITO: com o foco em ${tela.foco}, a extensão entrou e ele caiu no <body> (o Tab seguinte ia ao mapa do card)`);
+    if (tela.dialogo) assert.ok(m.log.includes(`fechou ${tela.dialogo} (o foco já tem destino)`), JSON.stringify(m.log));
+  }
+  // CONTROLE: o foco no <body> (ninguém estava na tela de entrada): nada se move.
+  const c = extensaoNaEntrada({});
+  const pc = c.h.entrarPelaExtensao({ silencioso: true });
+  c.responder({ action: 'sessao', token: 'tok-ext' });
+  assert.equal(await pc, true);
+  assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido ao ✕ sem ninguém na tela de entrada');
+  // E o foco é lido ANTES de fechar os diálogos: no app, o fechamento o devolve ao
+  // botão da própria tela de entrada, que some em seguida (ou ao ⓘ do topo).
+  for (const nome of ['entrarPelaExtensao', 'adotarSessaoDoAparelho']) {
+    const corpo = fatiarDe(APP_SEM, nome);
+    const leu = corpo.indexOf('const focoNaEntrada = focoNaTelaDeEntrada();');
+    assert.ok(leu >= 0 && leu < corpo.indexOf('fecharModaisDaEntrada('), `${nome}: o foco é lido depois de fechar os diálogos da entrada`);
+  }
 });

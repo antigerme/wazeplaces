@@ -388,6 +388,7 @@ function montarLightboxComJanela() {
     registrarDesfazer: () => { reg.desfazer++; },
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
     refazerSelosSeOutroNaTela: () => {},   // o "Ver +N" do card da frente (R5-2-02)
+    exclusoesNoLocal: new Map(),           // nenhuma exclusão do local no ar (R10-3-03)
   };
   const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear'];
   const chaves = Object.keys(deps);

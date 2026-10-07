@@ -8,6 +8,78 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.07-02
+
+Décima terceira rodada da auditoria. Depois da v2026.10.07-01, conferida em produção com duas contas, sete auditores revisaram o app de novo. Os consertos cobrem a recusa automática e o "Marcar todos", o app aberto em duas abas, o treino, a foto ampliada, a presença e a conversa, "Minha área" e os Filtros, a entrada e a conta, o "Disponível offline" e o modo dev.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**Recusa automática e "Marcar todos"**
+- **Desligar "Rejeitar sozinho os próximos deste autor" (ou tocar em "Esquecer") enquanto o app ainda está rejeitando os pedidos dele para na hora.** Só termina o que já estava a caminho do Waze; os outros voltam pra fila. Antes, os que faltavam continuavam sendo rejeitados no seu nome, e o autor esquecido voltava pra lista.
+- **O "Marcar todos" conta no placar e no Histórico cada parte que o Waze confirma, na hora.** Fechar o app no meio não perde mais o que já foi marcado: antes, um lote de 60 fechado no meio deixava 25 pedidos já marcados no Waze fora do placar e do Histórico.
+- **Com "Apenas pedidos não lidos" desmarcado, o "Marcar todos" deixa de fora os pedidos que já estavam lidos.** O aviso diz quantos não lidos ele vai marcar, e o placar e o Histórico contam só esses; os já lidos continuam na fila, pra você rejeitar ou pular. Antes ele os contava como se tivesse acabado de marcá-los.
+
+**O app aberto em duas abas**
+- **Um pedido que você já decidiu numa aba sai da fila da outra.** Antes ele continuava lá: decidido de novo, contava duas vezes no placar, no Histórico e na "Mão firme", aparecia "Já tratado por outro editor" sobre a sua própria decisão e, se na primeira aba você tinha marcado como lido, o ✕ na segunda também ia pro Waze. Agora vale a primeira decisão. Se o pedido é o que está na tela, o gesto nele (e o "Aprovar" da foto) não vai ao Waze nem conta, e o app avisa: "Este pedido já foi decidido em outra aba do navegador." O "Marcar todos" e a recusa automática também o deixam de fora.
+- **Com "Pular guarda o pedido" ligado, pular o mesmo pedido nas duas abas não manda a ⭐ duas vezes nem conta duas vezes no "Colecionador".**
+
+**Treino**
+- **Se outra conta entra no aparelho com o treino aberto (o acesso renovado pelo WME, sem você fazer nada), o treino continua, sem nada da conta anterior.** Antes ele terminava sem aviso, o card da frente virava um pedido de verdade da conta que entrou e o próximo ✕ ia pro Waze no nome dela. Agora os exemplos do treino passam a ser os de quem ainda não tem fila, o aviso "Outra conta entrou neste aparelho" continua, e a fila de quem entrou aparece quando você sai do treino.
+- **Saindo do treino pelo ↻ ou pelo "Aplicar" dos Filtros, a fila do país onde você edita vem com o aviso "Mostrando a fila de…".** Antes ele só aparecia pelo "Sair" do treino. Se você escolheu outro país (ou "Minha área") no mesmo "Aplicar", ele não aparece.
+- **A explicação do treino ("No modo real, isto enviaria…") sai junto com ele.** Antes ela ficava alguns segundos por cima dos ✕ ↑ ✓ do primeiro pedido de verdade.
+- **No treino com poucos pedidos na fila, os exemplos (como a "Padaria Exemplo") não podem mais ser mandados pela conversa, e o card deles não tem mais o ↗.** A conversa mandava o exemplo de verdade pro chat do WME, com um link que não abria nada, e o ↗ abria o WME vazio. Os exemplos feitos dos seus pedidos continuam com o ↗.
+- **Pelo teclado, o "Praticar" da Ajuda e o "Entendi" (ou o Esc) do "Como funciona" levam o foco ao ✕ do primeiro card**, também quando o "Como funciona" aparece sozinho na primeira vez. Antes o foco ia pro botão da Ajuda, no topo, e o Enter seguinte abria a Ajuda de novo.
+
+**Foto ampliada**
+- **Desfazer a exclusão da foto denunciada (🚩) depois de fechar e reabrir a foto devolve o 🚩 a ela.** Antes ela voltava com o ✨ de "foto nova", e o leitor de tela dizia "Foto nova proposta neste pedido". O mesmo quando o Waze recusava a exclusão.
+- **Com o Desfazer, excluir duas fotos do mesmo local, uma logo depois da outra, não traz mais uma delas de volta pro mapa.** Com o Waze lento, a segunda saía junto e uma das duas exclusões era desfeita no Waze, com a tela mostrando as duas fora. Agora a segunda espera a resposta da primeira; você continua excluindo no seu ritmo.
+- **Aprovar uma foto com o Desfazer, fechar e reabrir a foto antes de o Waze responder não mostra mais o ✨ nem o "Aprovar" de novo.** Antes o "Aprovar" e a lixeira apareciam no mesmo canto, e o toque no "Aprovar" não fazia nada. Agora aparece só a lixeira.
+- **Com leitor de tela e sem o Desfazer, a exclusão de uma foto (ou o nome corrigido) é anunciada também quando você abriu a foto de outro pedido do mesmo local antes de o Waze responder.** Antes a foto sumia da tela aberta sem nada ser dito.
+
+**Presença e conversa**
+- **Uma mensagem que chega com a conversa aberta enquanto o app está em segundo plano conta como vista quando você volta.** Se o aviso de leitura falhava na volta, ela aparecia como "1 mensagem nova" e o aviso não saía mais, nem com o Waze de volta: quem mandou nunca via "Lida".
+- **No iPhone, quando o celular não avisa que a rede voltou, as suas ações no app religam a conversa em tempo real** (o acesso a ela é pedido de novo no máximo uma vez a cada 5 minutos), e a reconexão de cada 6 minutos não para mais achando que não há rede.
+- **Uma resposta que chega logo depois de você ler a conversa não aparece mais como "2 mensagens novas"** com o Waze lento.
+- **Com o app aberto em duas abas e o Waze lento, o aviso de que você leu uma mensagem sai uma vez só também enquanto uma aba ainda o está mandando.**
+- **Um aviso de leitura que ficou pendente desde a v2026.10.06-01 não marca mais como lida uma mensagem nova que você não viu.**
+
+**"Minha área" e Filtros**
+- **Com "Minha área" ligada, tocar em ↻ ou em "Aplicar" logo ao abrir o app não desliga mais "Minha área" de quem edita só na América do Norte (ou em Israel).** A busca espera o app conferir as suas áreas no servidor onde você edita. Antes, o toque nesse meio dizia "Seu perfil do Waze não tem área de edição", mostrava "Tudo limpo!" e depois levava você à fila do país sem avisar. E mudar "Minha área" nesse meio deixa o aviso certo.
+- **Com "Minha área" ligada, escolher outra região nos Filtros busca a sua área naquela região** (o app pergunta ao Waze, uma vez, quais são as suas áreas lá). Antes ele usava a área da outra região, e a fila vinha vazia com "Tudo limpo!".
+- **O campo "Área gerenciada" dos Filtros mostra as áreas da região escolhida.** O Waze guarda as áreas gerenciadas separadas por região; quem edita só na América do Norte via só "Nenhuma" depois de o app levá-lo pra lá.
+
+**Entrada e conta**
+- **Voltando a uma aba que tinha ficado na tela de entrada depois de entrar por outra aba, ela já abre com a sua entrada**, em todo navegador. Se você estava colando o cookies.txt ou digitando um código nela, ela não mexe no que você digitava.
+- **Um link de pareamento vencido (o QR de ontem), aberto sem estar conectado, não para mais no "Código inválido"**: se você usa a extensão e está logado no WME, o app entra por ela, como numa abertura comum. O aviso do código inválido continua.
+- **Pelo teclado: quando a extensão (ou a sua entrada em outra aba) faz você entrar sozinho, o foco que estava na tela de entrada vai ao ✕ do primeiro pedido.** Antes ele se perdia.
+
+**Disponível offline e o envio das decisões**
+- **O card de foto com "A foto precisa de sinal" sai do aviso quando o sinal volta, mesmo que você tenha tentado arrastá-lo.** Antes ele ficava preso no aviso até você pular ou recarregar.
+- **Com a internet ruim e uma decisão esperando envio, o card de foto sai do aviso assim que o app confirma que a rede funciona**, também quando isso acontece enquanto as decisões guardadas estão saindo.
+- **No iPhone, com o app instalado na tela de início, o número de decisões esperando envio aparece de novo.** Ele ficava escondido atrás do cabeçalho; agora fica logo abaixo dele. Nos outros aparelhos ele não mudou de lugar.
+- **No treino, desligar e religar o "Disponível offline" não diz mais que há pedidos guardados quando não há.**
+
+**Histórico e conquistas**
+- **A condição da conquista "Poliglota" agora diz o que conta: "tratar pedidos em 2 idiomas".** Dizia "usar o app em 2 idiomas", mas trocar o idioma e olhar os Filtros nunca contou.
+
+**Modo Desenvolvedor**
+- **No computador, no tablet e com o celular deitado, o botão do modo dev não atravessa mais a tela a cada decisão.** Ele só sai do canto quando há decisão de fato esperando envio, e não muda de canto enquanto você arrasta um card.
+- **Quando outra conta entra no aparelho, o diagnóstico de quem entrou guarda o próprio login e a abertura dele**; sai só o que era da conta anterior.
+- **O diário do diagnóstico não diz mais que a fila de saída abriu quando a recusa automática esbarra numa conferência da sessão**, e o diagnóstico feito no treino só diz que a recusa automática vai rodar quando você sair dele se algum autor com ela ligada tem pedido na sua fila.
+- **Ferramentas de leitura do relatório**: a tela reconstruída a partir de um relatório feito no treino diz quantos pedidos da fila guardada abrem quando você sai dele, e a remontagem das capturas aceita uma pasta de saída relativa.
+
+### Documentação
+- **O manual de instalação diz que a aprovação de foto só apaga a lista guardada da lixeira tocada na mesma sessão** de quem aprova, e não por qualquer pessoa.
+
+### Ficou pra decisão
+- **O voltar do celular no meio do treino sai do app**, em vez de sair só do treino.
+- **A recusa automática que você desliga no meio para calada**: os pedidos que faltavam voltam pra fila sem aviso. Uma frase seria texto novo.
+- **"Seu perfil do Waze não tem área de edição" ainda aparece pra quem escolhe à mão uma região onde não tem área, tendo área noutra.** A frase honesta ("nesta região") seria texto novo.
+- **Duas janelas do navegador lado a lado**: a que estava na tela de entrada só adota a sua entrada quando você volta a ela (troca de aba ou de app), não quando você só clica nela.
+- **A ⭐ que a outra aba pôs não aparece no card já desenhado nesta** (a estrela não é mais mandada de novo).
+
 ## v2026.10.07-01
 
 Décima segunda rodada da auditoria. Depois da v2026.10.06-01, conferida em produção com duas contas, sete auditores revisaram o app de novo, com atenção às costuras entre os consertos da rodada anterior, que são feitos em paralelo e juntados depois. Os consertos cobrem o treino, a fila de saída, a foto ampliada, o "Disponível offline" e o modo dev, a presença e a conversa, os Filtros e "Minha área", a conta em duas abas, e a extensão.

@@ -901,6 +901,7 @@ function rodarApp(aba, { relogio = null, esperaMs = null, comoOAppDeAntes = fals
     mostrarEntrandoPelaExtensao() {}, negadoDaExtensao: (n) => n, aoEntrarNestaPagina() {}, fecharModaisDaEntrada() {},
     showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {}, esvaziarFilaDeSaida() {},
     conhecerContaDoLogin: (c) => contas.push(c),
+    focoNaTelaDeEntrada: () => false,   // o foco da tela de entrada (R10-1-05) não é o assunto daqui
     setTimeout: relogio ? relogio.setTimeout : setTimeout, clearTimeout: relogio ? relogio.clearTimeout : clearTimeout,
   };
   const chaves = Object.keys(deps);

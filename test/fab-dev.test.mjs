@@ -142,7 +142,9 @@ const constanteDoApp = (nome, ctx = {}) => {
   assert.ok(m, `a constante ${nome} sumiu`);
   return new Function(...Object.keys(ctx), 'return (' + m[1] + ');')(...Object.values(ctx));
 };
-function telaDoFab({ banner = false, desfazer = false, modal = false, larga = false, indicador = null } = {}) {
+// `gesto`: há um GESTO no card da frente (o dedo nele, a volta pro lugar, a
+// saída) quando o canto é pedido — o que o swipe.js responde (R10-4-05).
+function telaDoFab({ banner = false, desfazer = false, modal = false, larga = false, indicador = null, gesto = false } = {}) {
   // `larga`: a tela do computador (1280×800), medida no navegador — ver abaixo.
   const LARGURA = larga ? 1280 : 390, ALTURA = larga ? 800 : 844;
   // Um nó: id, tag, classes, pai e a caixa. O `closest` casa seletor simples
@@ -213,17 +215,23 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
   };
   const DEV_FAB_ACIONAVEL = constanteDoApp('DEV_FAB_ACIONAVEL');
   const DEV_FAB_LEITURA = constanteDoApp('DEV_FAB_LEITURA');
+  const cardDaFrente = { id: 'cardDaFrente' };
+  const estado = { gesto };
   const deps = { document, innerWidth: LARGURA, innerHeight: ALTURA,
     DEV_FAB_CANTOS: constanteDoApp('DEV_FAB_CANTOS'), DEV_FAB_AMOSTRAS: constanteDoApp('DEV_FAB_AMOSTRAS'),
     DEV_FAB_MARGEM: constanteDoApp('DEV_FAB_MARGEM'), DEV_FAB_RESERVA_TOAST: constanteDoApp('DEV_FAB_RESERVA_TOAST'),
     DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }), DEV_FAB_LEITURA,
-    DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS') };
+    DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS'),
+    cardDaFrente: () => cardDaFrente, cardSobGesto: (c) => estado.gesto && c === cardDaFrente,
+    redesenharCardAdiado: () => {} };
   const chaves = Object.keys(deps);
-  const posicionar = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n'
-    + ['devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev'].map(fatiar).join('\n')
-    + '\nreturn posicionarFabDev;')(...chaves.map((k) => deps[k]));
+  const { posicionar, aoFimDoGesto } = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null, fabEsperaOGesto = false;\n'
+    + ['devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'aoFimDoGesto'].map(fatiar).join('\n')
+    + '\nreturn { posicionar: posicionarFabDev, aoFimDoGesto };')(...chaves.map((k) => deps[k]));
   posicionar();
-  return { canto: fab.dataset.canto, fab, btn };
+  // O fim do gesto, como o swipe.js o avisa.
+  const fimDoGesto = () => { estado.gesto = false; aoFimDoGesto(); return fab.dataset.canto; };
+  return { canto: fab.dataset.canto, fab, btn, fimDoGesto, posicionar, estado };
 }
 
 test('R7-4-01: com o banner do topo na tela, o FAB NÃO vai pra cima do placar (mede o que fica por baixo do banner)', () => {
@@ -257,33 +265,52 @@ test('R7-4-01: CONTROLE — camada que NÃO é aviso passageiro (um modal) segue
 // MARCADO), e a grade de 3×3 do FAB não o tocava — 17 px de altura cabiam
 // inteiros entre a 1ª e a 2ª linha. Aqui as classes vêm do `updateInFlightIndicator`
 // DE VERDADE, e o `posicionarFabDev` roda sobre a tela medida.
+// A fila de saída aqui é de pedidos com CHAVE (`v1|u1`…), e o que ESTA aba está
+// mandando agora fica em `emAndamento` (o `pedidosEmAndamento` do app): a decisão
+// que sai é anotada na fila ANTES do envio (`anotarAntesDoEnvio`), e só a que
+// ninguém está mandando conta como esperando (R10-4-05). `outraAba`: as chaves
+// que a OUTRA aba está mandando (a marca dela no item).
 function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
   const ids = new Map();
   const reavaliou = [];
-  let saida = Array.from({ length: fila }, () => ({}));
+  const item = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
+  let saida = Array.from({ length: fila }, (_, i) => item(i + 1));
+  const emAndamento = new Set();
+  const outraAba = new Set();
   const document = {
     getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : ids.get(id) || null),
     createElement: () => {
-      const el = { className: '', title: '', innerHTML: '', remove() { ids.delete(this.id); } };
+      const el = { className: '', title: '', innerHTML: '', style: {}, remove() { ids.delete(this.id); } };
       return el;
     },
     body: { appendChild: (el) => { ids.set(el.id, el); } },
   };
   const AppState = { authenticated: true, inFlightActions: noAr };
-  const deps = { document, AppState, carregarFilaDeSaida: () => saida, t: (k, v) => `${k}:${v.n}`,
-    escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => reavaliou.push(ids.has('inFlightIndicator')) };
+  const chaveDoPedido = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
+  const deps = { document, AppState, carregarFilaDeSaida: () => saida.map((x) => ({ ...x })), t: (k, v) => `${k}:${v.n}`,
+    escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => reavaliou.push(ids.has('inFlightIndicator')),
+    pedidosEmAndamento: emAndamento, chaveDoPedido, reivindicadoPorOutraAba: (x) => outraAba.has(chaveDoPedido(x)) };
   const chaves = Object.keys(deps);
   const atualizar = new Function(...chaves, fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
   return { atualizar, reavaliou, el: () => ids.get('inFlightIndicator') || null,
-    fila: (n) => { saida = Array.from({ length: n }, () => ({})); }, AppState };
+    fila: (n) => { saida = Array.from({ length: n }, (_, i) => item(i + 1)); }, AppState,
+    // A decisão `i` anotada na fila de saída, e saindo (em andamento) ou não.
+    anotar: (i, saindo = true) => { saida.push(item(i)); if (saindo) emAndamento.add(`v${i}|u${i}`); },
+    soltar: (i) => emAndamento.delete(`v${i}|u${i}`),
+    tirar: (i) => { saida = saida.filter((x) => x.venueID !== 'v' + i); },
+    naOutraAba: (i) => outraAba.add(`v${i}|u${i}`) };
 }
 const classesDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().className.split(/\s+/).filter(Boolean); };
+// O `top` do indicador (R10-4-02): ancorado no cabeçalho MEDIDO, com os 80 px de
+// antes como piso. É ele que diz se a caixa medida abaixo (80–97 px) ainda vale.
+const topoDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().style.top; };
+const TOPO_ANCORADO = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
 
 test('R9-4-05: no computador, o FAB NÃO pousa em cima do "N esperando envio" — o número é `.nao-cobrir` e a medida o enxerga', () => {
   // A RÉGUA: sem o indicador, o canto livre do computador é o preferido (`cima-dir`).
   assert.equal(telaDoFab({ larga: true }).canto, 'cima-dir', 'PRÉ-CONDIÇÃO: sem o indicador, o canto livre a 1280×800 é o cima-dir');
   const classes = classesDoIndicador();
-  assert.ok(classes.includes('fixed') && classes.includes('top-20') && classes.includes('right-4'),
+  assert.ok(classes.includes('fixed') && classes.includes('right-4') && topoDoIndicador() === TOPO_ANCORADO,
     'PRÉ-CONDIÇÃO: o indicador mudou de lugar — a caixa medida desta tela não vale mais');
   const t = telaDoFab({ larga: true, indicador: classes });
   assert.notEqual(t.canto, 'cima-dir', 'o FAB foi pro cima-dir, em cima do "N esperando envio" (o número de decisões sem sinal)');
@@ -308,4 +335,129 @@ test('R9-4-05: o indicador que NASCE ou SOME reavalia o FAB — e o número que 
   i.atualizar();
   assert.equal(i.el(), null, 'PRÉ-CONDIÇÃO: o indicador não sumiu');
   assert.deepEqual(i.reavaliou, [true, false], 'o indicador sumiu sem o FAB reavaliar — o canto que ele ocupava não volta a ser o do FAB');
+});
+
+// ── R10-4-05: o "enviando" de cada decisão com rede NÃO é número a não cobrir ──
+// O indicador não é só o "N esperando envio": ele nasce em TODA decisão com rede
+// ("1 enviando", durante a ida ao Waze) e some na resposta. Com o `nao-cobrir`
+// em todo estado, o FAB atravessava a tela larga duas vezes a cada ✕/✓ (MEDIDO,
+// n15 da auditoria da rodada 10: 6 trocas de canto em 3 decisões a 1280×800,
+// 844×390 e 768×1024, nos dois motores). A marca, e com ela a reavaliação do
+// canto, vale com decisão ESPERANDO envio (a fila de saída) — a que fica.
+test('R10-4-05: o "1 enviando" de uma decisão com rede não é `.nao-cobrir` nem mexe no FAB — nascendo ou sumindo', () => {
+  // O caminho de VERDADE de um ✕ com rede: o executor sobe o "no ar" e redesenha;
+  // a decisão é anotada na fila de saída ANTES do envio (e redesenha de novo);
+  // a resposta tira o item da fila; o executor solta o "em andamento", desce o
+  // "no ar" e redesenha — e o indicador some.
+  const i = indicadorDeVerdade({ fila: 0 });
+  i.AppState.inFlightActions = 1; i.atualizar();
+  i.anotar(1); i.atualizar();
+  assert.ok(i.el(), 'PRÉ-CONDIÇÃO: o "1 enviando" não nasceu');
+  assert.ok(!i.el().className.split(/\s+/).includes('nao-cobrir'),
+    'a decisão que está SAINDO virou número a não cobrir — o FAB foge dela a cada ✕/✓');
+  assert.deepEqual(i.reavaliou, [], 'o "1 enviando" nascendo reavaliou o FAB (e ele atravessa a tela a cada decisão)');
+  // E na tela larga, com o "1 enviando" no canto, o FAB segue no canto preferido.
+  assert.equal(telaDoFab({ larga: true, indicador: i.el().className.split(/\s+/) }).canto, 'cima-dir',
+    'o "1 enviando" tirou o FAB do canto preferido no computador');
+  i.tirar(1); i.atualizar();                                  // pousou
+  i.soltar(1); i.AppState.inFlightActions = 0; i.atualizar(); // o fim do executor
+  assert.equal(i.el(), null, 'PRÉ-CONDIÇÃO: o indicador não sumiu');
+  assert.deepEqual(i.reavaliou, [], 'o "1 enviando" sumindo reavaliou o FAB (a segunda travessia da tela)');
+  // CONTROLE: o MESMO ✕ sem rede — a resposta não pousa, a decisão FICA esperando
+  // envio: aí, sim, é número a não cobrir, e o FAB é reavaliado (R9-4-05).
+  const c = indicadorDeVerdade({ fila: 0 });
+  c.AppState.inFlightActions = 1; c.atualizar();
+  c.anotar(1); c.atualizar();
+  c.soltar(1); c.AppState.inFlightActions = 0; c.atualizar();
+  assert.ok(c.el().className.split(/\s+/).includes('nao-cobrir'), 'CONTROLE: a decisão que ficou esperando envio deixou de ser número a não cobrir (R9-4-05)');
+  assert.deepEqual(c.reavaliou, [true], 'CONTROLE: a espera começou sem o FAB reavaliar o canto');
+});
+
+test('R10-4-05: com decisão ESPERANDO envio, o número fica a não cobrir — também enquanto outra sai', () => {
+  // Sem rede, dois ✕: o FAB é reavaliado UMA vez ao começar a espera, e uma ao
+  // acabar — não a cada decisão do meio.
+  const i = indicadorDeVerdade({ fila: 0 });
+  i.AppState.inFlightActions = 1; i.atualizar(); i.anotar(1); i.atualizar();
+  i.soltar(1); i.AppState.inFlightActions = 0; i.atualizar();          // falhou: "1 esperando"
+  assert.deepEqual(i.reavaliou, [true], 'PRÉ-CONDIÇÃO: a espera começou sem o FAB reavaliar o canto');
+  i.AppState.inFlightActions = 1; i.atualizar(); i.anotar(2); i.atualizar();   // o 2º ✕ sai, com o 1º esperando
+  assert.ok(i.el().className.split(/\s+/).includes('nao-cobrir'),
+    'com decisão esperando, o "enviando" do ✕ seguinte tirou a marca — sem rede o FAB iria e voltaria a cada ✕');
+  i.soltar(2); i.AppState.inFlightActions = 0; i.atualizar();          // falhou também: "2 esperando"
+  assert.deepEqual(i.reavaliou, [true], 'o FAB foi reavaliado no meio da espera, a cada decisão');
+  i.tirar(1); i.atualizar(); i.tirar(2); i.atualizar();               // a rede voltou e a fila esvaziou
+  assert.equal(i.el(), null);
+  assert.deepEqual(i.reavaliou, [true, false], 'a espera acabou sem o FAB voltar ao canto que o número ocupava');
+  // A espera que acaba COM outra decisão saindo: o indicador fica ("1 enviando"),
+  // mas deixa de ser número a não cobrir — o FAB volta já, e não precisa esperar
+  // o indicador sumir (que, sem a marca, não reavalia mais nada).
+  const j = indicadorDeVerdade({ fila: 1 });
+  j.atualizar();
+  j.AppState.inFlightActions = 1; j.atualizar(); j.anotar(9); j.atualizar();
+  j.tirar(1); j.atualizar();                                          // a 1ª pousou pelo esvaziamento
+  assert.ok(j.el() && !j.el().className.split(/\s+/).includes('nao-cobrir'), 'PRÉ-CONDIÇÃO: só a decisão que está saindo');
+  assert.deepEqual(j.reavaliou, [true, true], 'a espera acabou com o indicador na tela, e o FAB não voltou ao canto');
+  j.tirar(9); j.atualizar(); j.soltar(9); j.AppState.inFlightActions = 0; j.atualizar();
+  assert.deepEqual([j.el(), j.reavaliou], [null, [true, true]]);
+  // A decisão que a OUTRA aba está mandando (a marca dela no item) também não é espera.
+  const o = indicadorDeVerdade({ fila: 1 });
+  o.naOutraAba(1);
+  o.atualizar();
+  assert.ok(o.el() && !o.el().className.split(/\s+/).includes('nao-cobrir'), 'a decisão que a outra aba está mandando virou número a não cobrir');
+  assert.deepEqual(o.reavaliou, []);
+});
+
+// E a ORDEM do fim do envio: o executor do ✕/✓ redesenhava o indicador ANTES de
+// soltar o "em andamento" — a decisão que ficou na fila (sem rede) contava como
+// saindo, e o "1 esperando" nascia sem a marca, com o FAB por cima dele, até a
+// próxima mudança. O lote e o "Marcar todos" já soltavam antes de redesenhar.
+test('R10-4-05: o fim do envio solta o "em andamento" ANTES de redesenhar o indicador', () => {
+  const m = /const runExecutor = async \(\) => \{[\s\S]*?\} finally \{([\s\S]*?)\n {8}\}/.exec(fatiar('scheduleAction'));
+  assert.ok(m, 'o `finally` do executor sumiu do scheduleAction');
+  const iSolta = m[1].indexOf('marcarEmAndamento(places, false);');
+  const iDesenha = m[1].indexOf('updateInFlightIndicator();');
+  assert.ok(iSolta >= 0 && iDesenha > iSolta,
+    'o executor redesenha o indicador com a decisão ainda "em andamento" — o "1 esperando" nasce sem o `nao-cobrir`');
+});
+
+// E com o card no MEIO do gesto, o canto não é medido: a tela é a do meio do
+// arraste, e o card deslocado deixa à mostra o canto que, parado, ele cobre
+// (MEDIDO, n16 da auditoria: o indicador sumindo com o card seguinte arrastado
+// pra direita, `baixo-dir` → `baixo-esq`, e o FAB ficava lá). A escolha espera o
+// fim do gesto, que o swipe.js avisa (`aoFimDoGesto`).
+test('R10-4-05: com um GESTO no card, o canto do FAB espera o card parar — e é escolhido quando ele para', () => {
+  const t = telaDoFab({ gesto: true });
+  assert.equal(t.canto, undefined, 'o canto foi medido com o card no meio do gesto');
+  assert.equal(t.fimDoGesto(), 'baixo-dir', 'o fim do gesto não escolheu o canto que esperava');
+  // O fim de OUTRO gesto, sem nada esperando, não mede de novo.
+  t.fab.dataset.canto = 'marcado';
+  assert.equal(t.fimDoGesto(), 'marcado', 'o fim de um gesto mediu o canto sem ninguém ter pedido');
+  // CONTROLE: sem gesto, o canto é escolhido na hora (o R7-4-01 de sempre).
+  assert.equal(telaDoFab().canto, 'baixo-dir');
+});
+
+// ── R10-4-02: o "N esperando envio" no iPhone com o app INSTALADO ──────────────
+// Com `viewport-fit=cover` e a barra translúcida, a margem de segurança de cima
+// (47 px; 59 com a Dynamic Island) entra no cabeçalho, que vai a 116–128 px — e o
+// indicador, a 80 px fixos (`top-20`), ficava DEBAIXO dele: o único sinal de que
+// há decisão esperando envio, sumido justo no app instalado (MEDIDO, n21 da
+// auditoria da rodada 10: o dedo no meio dele caía no ⓘ). DECISÃO: ancorar na
+// altura MEDIDA do cabeçalho (`--header-h`, como o `#bannerStack`), com a posição
+// IDÊNTICA onde não há margem — MEDIDO no navegador a 390×844, 375×667, 280×653,
+// 1280×800 (cabeçalho de 69 px) e 844×390 (53 px): 0 px de diferença. Aqui a
+// fórmula de verdade é avaliada pra cada altura de cabeçalho.
+test('R10-4-02: o indicador fica ABAIXO do cabeçalho medido — e onde não há margem, nos mesmos 80 px de antes', () => {
+  const topo = topoDoIndicador();
+  const m = /^max\((\d+(?:\.\d+)?)rem, calc\(var\(--header-h, (\d+(?:\.\d+)?)rem\) \+ (\d+)px\)\)$/.exec(topo || '');
+  assert.ok(m, `o indicador não está ancorado no cabeçalho medido (top: ${JSON.stringify(topo)}) — e com a margem do iPhone instalado ele some debaixo do cabeçalho`);
+  // A fórmula, com 1 rem = 16 px: o piso, a altura do cabeçalho (ou o padrão, antes de medida) e o vão.
+  const px = (h) => Math.max(Number(m[1]) * 16, (h === undefined ? Number(m[2]) * 16 : h) + Number(m[3]));
+  // Sem margem: os 80 px de antes, em pé e deitado, e antes de a altura ser medida.
+  assert.deepEqual([px(69), px(53), px(undefined)], [80, 80, 80],
+    'onde não há margem o indicador saiu do lugar em que foi desenhado (80 px)');
+  // Com a margem do iPhone instalado: abaixo do cabeçalho, com o mesmo vão de hoje (80 − 69 = 11 px).
+  assert.deepEqual([px(116), px(128)], [127, 139], 'com a margem de cima, o indicador não desceu junto com o cabeçalho');
+  for (let h = 0; h <= 300; h++) assert.ok(px(h) >= h + 11, `com o cabeçalho de ${h} px, o indicador fica por baixo dele`);
+  // E o 80 fixo não voltou como classe.
+  assert.ok(!classesDoIndicador().includes('top-20'), 'voltou o `top-20` fixo');
 });

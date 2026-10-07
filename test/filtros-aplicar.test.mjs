@@ -156,6 +156,11 @@ const FUNCOES = [
   'anotarEditaveis', 'editaveisLidos', 'peneirarPaisesComOPerfil',
   // A lista de países que a carga e os Filtros dividem (R8-6-04), guardada por região (R9-6-01).
   'pedirListaDePaises', 'esquecerListasDePaises',
+  // As áreas gerenciadas por servidor (R10-6-03). Só se existir: no código de
+  // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
+  ...(/^function areasGerenciadasLidas\(/m.test(APP_SEM) ? ['areasGerenciadasLidas'] : []),
+  // O aviso do país que o treino encerrado pelo "Aplicar" levava junto (R10-7-02).
+  'avisarPaisDoTreinoEncerrado',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -2128,4 +2133,155 @@ test('R9-6-01: a lista vale até o "Sair" ou outra conta — a queda da sessão 
   p.listas.paises = null;
   await p.app.pedirListaDePaises('na');
   assert.equal(contarListas(p, 'na'), 2, 'a lista que estava no ar quando a troca de conta a esqueceu ficou guardada');
+});
+
+// ═══ R10-6-03 · as áreas GERENCIADAS também são POR SERVIDOR ═════════════════
+// CONFIRMADO no Waze real (só leitura, as duas contas do owner, rodada 10): o
+// `/Session` traz `managedAreas` por servidor, como `areas` e
+// `editableCountryIDs` — 9, 0 e 0 (ROW, NA, IL) numa conta, 1, 0 e 0 na outra. O
+// seletor "Área gerenciada" e a conferência da área do filtro usavam as do
+// perfil da ABERTURA, mesmo com a fila noutro servidor: quem só edita na NA abria
+// na ROW, o app o levava pra NA, e o seletor mostrava só "Nenhuma" (MEDIDO no
+// navegador com um Waze de mentira, auditoria da rodada 10). Agora as do servidor
+// que o app leu ficam junto dos editáveis (`anotarEditaveis`), e o seletor monta
+// as da região que ele MOSTRA; servidor nunca lido, as do perfil, como antes.
+// Aqui a carga do perfil roda DE VERDADE (`loadProfileAndAuxData` →
+// `paisDoPerfil` → `irProPaisDoPerfil`), com o seletor de mentira que se
+// comporta como o do navegador.
+const MANHATTAN = { id: 9001, name: 'Manhattan' };
+const AREA_SP = { id: 7001, name: 'Área SP' };
+function paginaComGerenciadas({ regiao = 'row', pais = 30, segurar = [], gerenciadasRow = [] } = {}) {
+  const p = pagina({ regiao, pais });
+  const perfis = {
+    row: { id: 1, editableCountryIDs: [], areas: [], managedAreas: gerenciadasRow },
+    na: { id: 1, editableCountryIDs: [235], areas: [], managedAreas: [MANHATTAN] },
+    il: { id: 1, editableCountryIDs: [], areas: [], managedAreas: [] },
+  };
+  const soltar = {};
+  p.listas.perfil = (r) => (segurar.includes(r)
+    ? new Promise((ok) => { soltar[r] = () => ok({ success: true, profile: { ...perfis[r] } }); })
+    : Promise.resolve({ success: true, profile: { ...perfis[r] } }));
+  p.listas.paises = (r) => Promise.resolve({ success: true, countries: (r === 'na' ? LISTA_NA : BR_FR).map((c) => ({ ...c })) });
+  return { p, perfis, soltar };
+}
+const opcoesDaArea = (p) => p.els.filterManagedArea.opcoes.map((o) => o.value);
+
+test('R10-6-03: quem só edita na NA e abre na ROW — o seletor "Área gerenciada" mostra as áreas da NA, onde a fila está', async () => {
+  const { p } = paginaComGerenciadas();
+  await p.app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pra NA');
+  assert.deepEqual(p.AppState.profile.managedAreas, [], 'PRÉ-CONDIÇÃO: o perfil guardado não é o da ROW (sem áreas gerenciadas)');
+  await p.abrir();
+  assert.deepEqual(opcoesDaArea(p), ['', '9001'],
+    `com a fila na NA, o seletor mostra as áreas gerenciadas do perfil da ROW: ${opcoesDaArea(p)} (só "Nenhuma")`);
+  // CONTROLE: a sessão que começa na NA (o perfil lido lá) mostra o mesmo.
+  const c = paginaComGerenciadas({ regiao: 'na', pais: 235 });
+  await c.p.app.loadProfileAndAuxData();
+  await tique(10);
+  await c.p.abrir();
+  assert.deepEqual(opcoesDaArea(c.p), ['', '9001'], 'CONTROLE: começando na NA, o seletor não mostra a área de lá');
+});
+
+test('R10-6-03: trocar a região NO MODAL troca as áreas do seletor — as da região que ele mostra, e a aplicada volta na volta', async () => {
+  const { p } = paginaComGerenciadas({ gerenciadasRow: [AREA_SP] });
+  await p.app.loadProfileAndAuxData();             // a ROW lida (Área SP), a NA lida (Manhattan), a fila na NA
+  await tique(10);
+  p.AppState.filters.managedAreaId = '9001';         // a pessoa aplicou Manhattan
+  await p.abrir();
+  assert.deepEqual([opcoesDaArea(p), p.els.filterManagedArea.value], [['', '9001'], '9001'],
+    `a NA aberta mostra as áreas de outro servidor, e não a aplicada: ${opcoesDaArea(p)}`);
+  await trocarRegiao(p, 'row');
+  assert.deepEqual(opcoesDaArea(p), ['', '7001'],
+    `com a ROW no seletor de região, o de área segue com as da NA: ${opcoesDaArea(p)} — dava pra aplicar a área de um servidor com a região de outro`);
+  assert.equal(p.els.filterManagedArea.value, '', 'a área da NA seguiu escolhida com a ROW na tela');
+  await trocarRegiao(p, 'na');
+  assert.deepEqual([opcoesDaArea(p), p.els.filterManagedArea.value], [['', '9001'], '9001'],
+    'de volta à região aplicada, as áreas dela (e a aplicada) não voltaram');
+  // A lista da ROW é a que o app LEU lá, não a do perfil guardado: o perfil que
+  // a sonda de um 401 traz da NA vira o guardado, e a ROW segue com a dela.
+  p.app.definirPerfil({ success: true, profile: { id: 1, editableCountryIDs: [235], areas: [], managedAreas: [MANHATTAN] } });
+  await trocarRegiao(p, 'row');
+  assert.deepEqual(opcoesDaArea(p), ['', '7001'], `a ROW mostrou as áreas do perfil guardado (o da NA): ${opcoesDaArea(p)}`);
+});
+
+test('R10-6-03: a área do filtro é conferida com as áreas do servidor da FILA — a da NA não sai porque o perfil da ROW não a tem', async () => {
+  const { p, perfis } = paginaComGerenciadas();
+  const app = montar([...FUNCOES, 'esquecerAreaForaDoPerfil'], p.deps);
+  await app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual([p.estado.regiao, p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pra NA');
+  p.AppState.filters.managedAreaId = '9001';         // Manhattan, aplicada na NA
+  assert.equal(app.esquecerAreaForaDoPerfil(perfis.row), false, 'a área da NA "não está no perfil" da ROW');
+  assert.equal(p.AppState.filters.managedAreaId, '9001',
+    'a área da NA saiu do filtro porque o perfil da ROW não a tem — a fila da NA perdeu a área calada');
+  // CONTROLE: com a fila na ROW, cuja lista lida não tem Manhattan, ela sai.
+  p.estado.regiao = 'row'; p.estado.pais = 30;
+  assert.equal(app.esquecerAreaForaDoPerfil(perfis.row), true, 'CONTROLE: na ROW, sem Manhattan, a área não saiu');
+  assert.equal(p.AppState.filters.managedAreaId, '');
+  // E num servidor que o app NÃO leu (Israel), vale o perfil que chegou, como antes.
+  p.estado.regiao = 'il';
+  p.AppState.filters.managedAreaId = '9001';
+  assert.equal(app.esquecerAreaForaDoPerfil({ ...perfis.row, managedAreas: [MANHATTAN] }), false);
+  assert.equal(app.esquecerAreaForaDoPerfil(perfis.row), true, 'sem leitura do servidor, o perfil que chegou não decide');
+});
+
+test('R10-6-03: com os Filtros abertos, a ida pro país do perfil traz as áreas do servidor novo pro seletor', async () => {
+  const { p, soltar } = paginaComGerenciadas({ segurar: ['na'] });
+  const carga = p.app.loadProfileAndAuxData();
+  await tique(5);
+  assert.ok(soltar.na, 'PRÉ-CONDIÇÃO: o `/Session` da NA não ficou no ar');
+  await p.abrir();                                    // o atalho "Filtros" do ícone: os Filtros abertos na ROW
+  assert.deepEqual(opcoesDaArea(p), [''], `PRÉ-CONDIÇÃO: a ROW mostra outras áreas: ${opcoesDaArea(p)}`);
+  soltar.na();
+  await carga;
+  await tique(10);
+  assert.equal(p.els.filterRegion.value, 'na', 'PRÉ-CONDIÇÃO: os Filtros não acompanharam a ida pra NA (achado 11)');
+  assert.deepEqual(opcoesDaArea(p), ['', '9001'], `os Filtros mostram a NA com as áreas gerenciadas da ROW: ${opcoesDaArea(p)}`);
+});
+
+test('R10-6-03: o 1º perfil que chega pela sonda de um 401 também deixa as áreas gerenciadas do servidor em que ela perguntou', async () => {
+  const m = paginaDaSonda();
+  await m.app.loadProfileAndAuxData();
+  m.sonda()();
+  await tique(5);
+  m.soltarSonda();
+  await tique(10);
+  assert.equal(m.p.AppState.profile && m.p.AppState.profile.id, 1, 'PRÉ-CONDIÇÃO: a sonda não trouxe o perfil');
+  assert.equal(typeof m.app.areasGerenciadasLidas, 'function', 'as áreas gerenciadas por servidor sumiram do app.js');
+  assert.deepEqual(m.app.areasGerenciadasLidas('row'), [],
+    'o perfil da sonda não deixou as áreas gerenciadas da ROW: o seletor seguiria o perfil guardado, de outro servidor');
+  assert.equal(m.app.areasGerenciadasLidas('na'), null, 'um servidor que ninguém perguntou virou "sem áreas gerenciadas"');
+});
+
+// ═══ R10-7-02 · o "Aplicar" que encerra o treino e o aviso do país ═══════════
+// Com o treino aberto, o perfil levou a pessoa pra França: o país do filtro já
+// é o 73, e o aviso "Mostrando a fila de France…" espera o "Sair" do treino
+// (`Treino.anotarFilaRefeita`, R9-7-04). O "Aplicar" com outro filtro encerra o
+// treino pelo `resetQueue`, que levava o aviso junto: a fila da França entrava
+// sem explicação (MEDIDO no navegador, auditoria da rodada 10). A fila que vem é
+// a do lugar aplicado AGORA — o aviso sai com ela só se ainda é o país dele.
+test('R10-7-02: o "Aplicar" que encerra o treino traz o aviso do país anotado nele — só se a busca ainda é do país dele', async () => {
+  const AVISO = { chave: 'toast.paisDoPerfil', pais: 'France', regiao: 'row', id: 73 };
+  const aplicar = async ({ aviso = AVISO, pais = null, minhaArea = false } = {}) => {
+    const p = pagina({ pais: 73 });
+    // O treino aberto, com o aviso anotado (o `resetQueue` daqui é de mentira:
+    // quem encerra o treino é ele, DEPOIS de o aviso ser lido).
+    p.deps.Treino = { avisoDoPaisAnotado: () => aviso };
+    await p.abrir();
+    assert.equal(p.els.filterCountry.value, '73', 'PRÉ-CONDIÇÃO: os Filtros não abriram no país do perfil');
+    p.els.filterUnreadOnly.checked = false;            // outro filtro: o "Aplicar" busca de novo
+    if (pais !== null) p.els.filterCountry.value = String(pais);
+    if (minhaArea) p.els.filterMyArea.checked = true;
+    p.app.applyFiltersFromModal();
+    assert.equal(p.log.buscas, 1, 'PRÉ-CONDIÇÃO: o "Aplicar" não refez a fila (não encerraria o treino)');
+    return p.log.toasts.filter((x) => x.includes('paisDoPerfil'));
+  };
+  // CONTROLE: sem aviso anotado (o treino sem o perfil, ou fora dele), nenhum aviso de país.
+  assert.deepEqual(await aplicar({ aviso: null }), [], 'CONTROLE: o "Aplicar" sem aviso anotado inventou um');
+  assert.deepEqual(await aplicar(), ['info:toast.paisDoPerfil'],
+    'DEFEITO: o "Aplicar" encerrou o treino e a fila da França veio sem o aviso do país (R10-7-02)');
+  // A pessoa escolheu OUTRO país (ou "Minha área") no mesmo "Aplicar": o aviso seria falso.
+  assert.deepEqual(await aplicar({ pais: 30 }), [], 'o aviso da França saiu com a fila do Brasil');
+  assert.deepEqual(await aplicar({ minhaArea: true }), [], 'o aviso do país saiu com a fila da "Minha área"');
 });

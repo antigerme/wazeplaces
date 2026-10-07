@@ -156,7 +156,30 @@ const API = {
     // terminar: a resposta que chegava depois da limpeza entrava no anel de quem
     // entrou, com o corpo do pedido — o id do pedido de terceiro, e a posição e o
     // id de quem saiu, na carona da presença (MEDIDO; pista do lote 12, L12-1).
+    //
+    // Na TROCA DE CONTA a limpeza não é o "Sair": o login (ou o perfil) que a
+    // revela já é de quem ENTROU, e a abertura dele pode estar no ar. Zerar tudo
+    // tirava do anel o `testar-cookies` do próprio login e, quando a troca só se
+    // descobre pelo perfil (a renovação pela extensão publicada, que não repassa
+    // a conta; o código de pareamento sem ela), a abertura inteira — o `perfil`,
+    // a `lista-paises`, a busca da fila (auditoria da rodada 10, R10-1-02 =
+    // R10-4-07, MEDIDO: 1 de 5 chamadas no anel de quem entrou). Cada registro
+    // leva a SESSÃO que o fez (`s`, ver `_marcaDaChamada`), e a limpeza diz qual
+    // fica (`registrosDaSessao`): a chamada dela que começou antes da marca entra.
     registrosDesde: 0,
+    registrosDaSessao: null,
+
+    // A sessão de uma chamada, pela MARCA curta do token (`marcaDaSessao`, a do
+    // app — nunca o token): a do pedido, ou, nas rotas de ENTRADA (o login por
+    // cookies, o resgate do pareamento), a que a resposta criou. Sem token nos
+    // dois (o cancelamento de um código), nenhuma.
+    _marcaDaChamada(body, data) {
+        try {
+            const tok = (body && typeof body.sessionToken === 'string' && body.sessionToken)
+                || (data && typeof data.sessionToken === 'string' && data.sessionToken) || null;
+            return tok && typeof marcaDaSessao === 'function' ? marcaDaSessao(tok) : null;
+        } catch (e) { return null; }
+    },
 
     // Cabeçalhos que interessam pra depurar, e SÓ eles. `cf-ray` diz qual
     // datacenter e qual execução respondeu; `cf-cache-status` diz se a BORDA
@@ -249,8 +272,10 @@ const API = {
 
     _registrar(endpoint, inicio, http, data, extra) {
         // A chamada que COMEÇOU antes da última limpeza é de quem estava aqui
-        // (ver `registrosDesde`): o que chega depois dela não entra.
-        if (inicio < this.registrosDesde) return;
+        // (ver `registrosDesde`): o que chega depois dela não entra — menos a da
+        // sessão que a limpeza deixou ficar (a de quem entrou, na troca de conta).
+        const s = extra && extra.s ? extra.s : null;
+        if (inicio < this.registrosDesde && !(s && s === this.registrosDaSessao)) return;
         try {
             const reg = {
                 t: new Date().toISOString(),
@@ -350,6 +375,7 @@ const API = {
             } finally {
                 const corpo = !this._guardaCorpo() ? null : this._semSegredoNaResposta(endpoint, bruto);
                 this._registrar(endpoint, _t0, http, data, {
+                    s: this._marcaDaChamada(body, data),
                     cab,
                     naoEraJson,
                     corpoReq: this._semSegredo(body),
@@ -397,7 +423,7 @@ const API = {
             // JSON já foi registrado lá com o status REAL; registrar de novo
             // sobrescreveria o status por 0 e desfaria o conserto.
             if (!/resposta não é JSON/.test(String(error && error.message))) {
-                this._registrar(endpoint, _t0, 0, falha, { corpoReq: this._semSegredo(body) });
+                this._registrar(endpoint, _t0, 0, falha, { s: this._marcaDaChamada(body, null), corpoReq: this._semSegredo(body) });
             }
             return falha;
         } finally {

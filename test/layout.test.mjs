@@ -1623,6 +1623,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // logout com o resto. O efeito assumido é que sair com a fila cheia
     // descarta o que não foi enviado: é o que "sair é sair de tudo" promete.
     SAIDA_KEY: 'safeLS.remove(SAIDA_KEY)',
+    // Os pedidos que o app estrelou com o "Pular guarda o pedido" (R10-2-05): ids
+    // de pedidos de TERCEIROS, e a estrela é estado de quem saiu.
+    ESTRELADOS_KEY: 'safeLS.remove(ESTRELADOS_KEY)',
     // As duas do offline saem juntas, por `offlineEsquecer()`: uma é banco
     // (IndexedDB, não passa por safeLS) e a outra é Cache API. A fila guardada
     // tem nome de quem enviou e a foto é de terceiro — "sair é sair de tudo".

@@ -132,7 +132,9 @@ test('um já resolvido no meio: o pedaço vai UM A UM, e o resto é marcado (o l
   await m.app.handleBatchMarkRead();
   assert.ok(m.lidos.has('u3'), 'o que vinha DEPOIS do resolvido ficou sem marcar');
   assert.deepEqual(m.AppState.queue, [], 'o resolvido por outro editor ficou na fila');
-  assert.deepEqual(m.historico, [['read', 3]], 'o Histórico não contou o lote como o placar conta');
+  // No um a um, cada pedido entra no Histórico quando POUSA (R10-2-03): a soma é a do placar.
+  assert.ok(m.historico.every(([tipo]) => tipo === 'read'), `o lote de lidos gravou outra coisa: ${JSON.stringify(m.historico)}`);
+  assert.equal(m.historico.reduce((s, [, n]) => s + n, 0), 3, 'o Histórico não contou o lote como o placar conta');
   assert.equal(m.AppState.stats.read, 3);
   assert.ok(!m.toasts.includes('error'), 'erro por um pedido que outro editor já tinha tratado');
 });

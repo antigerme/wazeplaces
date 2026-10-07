@@ -480,11 +480,19 @@ test('auto: o aviso SOME quando acaba — nenhum banner sobra depois', () => {
 test('auto: nada acontece sem o portão, nem no treino, nem duas vezes ao mesmo tempo', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
-  const bloco = semComentarios.slice(i, i + 400);
+  // O corpo inteiro, até o `}` que a fecha no começo da linha — pela estrutura,
+  // não por distância (gotcha #67): a janela de 400 caracteres de antes parava
+  // no meio da função assim que o treino ganhou a conferência dos alvos.
+  const bloco = semComentarios.slice(i, semComentarios.indexOf('\n}\n', i));
   assert.match(bloco, /if \(!podeRecusarAutomaticoAqui\(\)\) return;/, 'o portão saiu da recusa automática');
-  // No treino ela não age sobre os exemplos: ANOTA, e o `Treino.sair()` a roda
-  // na fila real (R8-7-03, test/treino-fila-real-r8.test.mjs).
-  assert.match(bloco, /if \(Treino\.ativo\) \{ Treino\.anotarRecusa\(\); return; \}/, 'no treino a fila é de exemplos');
+  // No treino ela não age sobre os exemplos: ANOTA — só com alvo na fila REAL
+  // (R10-4-06, test/treino-fila-real-r10.test.mjs) —, e o `Treino.sair()` a roda
+  // na fila real (R8-7-03, test/treino-fila-real-r8.test.mjs). E sai ANTES de
+  // qualquer outra coisa: a trava da 2ª passagem e os alvos da fila da tela.
+  assert.match(bloco, /if \(Treino\.ativo\) \{\s*if \(filaReal\(\)\.some\([^\n]*\)\) Treino\.anotarRecusa\(\);\s*return;\s*\}/,
+    'no treino a fila é de exemplos');
+  const [iTreino, iRodando, iAlvos] = ['if (Treino.ativo)', 'if (recusaAutomaticaRodando)', 'const alvos ='].map((x) => bloco.indexOf(x));
+  assert.ok(iTreino > 0 && iTreino < iRodando && iRodando < iAlvos, 'o treino deixou de sair antes de a recusa agir');
   // A segunda passagem SAI (anotando o pedido pra rodar de novo no fim — V4,
   // medido em test/lote-autor.test.mjs), nunca corre junto da primeira.
   assert.match(bloco, /if \(recusaAutomaticaRodando\) \{ recusaAutomaticaPedidaDeNovo = true; return; \}/,

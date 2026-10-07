@@ -218,6 +218,45 @@ test('README: os apagamentos no KV são os que o servidor faz — o "Sair" e o c
   }), 0, 'CONTROLE: o perfil que passa no portão apagou no KV');
 });
 
+// R10-6-04 (auditoria da rodada 10): o README dizia que a aprovação apaga "só no
+// minuto depois de ALGUÉM tocar numa lixeira daquele local". A lista guardada é
+// POR SESSÃO (a chave é `reler_` + sha256 de `sessionToken|venueID`): a lixeira
+// de outro editor no mesmo local não conta, e a frase superestimava os
+// apagamentos da cota curta. O que o README diz sai do SERVIDOR DE VERDADE: a
+// lixeira tocada por uma sessão e a aprovação pela outra; e, de CONTROLE, as duas
+// pela mesma (que apaga 1). Mexeu na chave da lista, o README acompanha.
+test('README: a aprovação de foto só apaga a lista da lixeira tocada na MESMA sessão — a de outra sessão não conta (R10-6-04)', async () => {
+  const frase = (/Apagam: (.*?)Passou disso/.exec(README) || [])[1];
+  assert.ok(frase, 'CONTROLE: a conta dos apagamentos sumiu do README');
+  const trecho = (/a aprovação de foto[^)]*\)/.exec(frase) || [])[0];
+  assert.ok(trecho, `CONTROLE: a aprovação de foto sumiu da conta dos apagamentos: "${frase}"`);
+  const tocarALixeira = (sessions, sessionToken) => dispatch('excluir-foto',
+    { ...FOTO, sessionToken, action: 'preparar', imageID: 'preparar' }, { sessions });
+  const mesma = await apagamentosNoKv(async (amb) => {
+    await tocarALixeira(amb.sessions, amb.sessionToken);
+    amb.medir();
+    const r = await aprovar(amb);
+    assert.ok(r.body.success, 'CONTROLE: a aprovação de mentira não saiu');
+  });
+  const outra = await apagamentosNoKv(async ({ sessions, sessionToken, medir }) => {
+    await tocarALixeira(sessions, sessionToken);
+    const daOutraSessao = await sessions.createSession(COOKIES_DO_TESTE);
+    medir();
+    const r = await aprovar({ sessions, sessionToken: daOutraSessao });
+    assert.ok(r.body.success, 'CONTROLE: a aprovação da outra sessão não saiu');
+  });
+  assert.equal(mesma, 1, `CONTROLE: a lixeira e a aprovação na MESMA sessão apagaram ${mesma} vezes no KV`);
+  if (outra === 0) {
+    assert.match(trecho, /\bsua sessão\b/,
+      `só a lixeira da MESMA sessão faz a aprovação apagar, e o README não diz que a lista guardada é da sessão: "${trecho}"`);
+    assert.doesNotMatch(trecho, /\balguém\b/,
+      `só a lixeira da MESMA sessão faz a aprovação apagar, e o README conta a lixeira de qualquer um: "${trecho}"`);
+  } else {
+    assert.doesNotMatch(trecho, /\bsua sessão\b/,
+      `a lixeira de OUTRA sessão também faz a aprovação apagar (${outra}), e o README diz que só a da sua sessão conta: "${trecho}"`);
+  }
+});
+
 // ── A extensão ───────────────────────────────────────────────────────────────
 // T4/A14: o protocolo do README não tinha o `conta` do `sessao`, e dizia que
 // "nenhuma mudança de protocolo" tinha havido depois de duas. As respostas da
