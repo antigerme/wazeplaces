@@ -122,8 +122,9 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // Com a época mudada nada grava — só o placar otimista do que não pousou
     // volta (test/costura-sessao, K7), a anotação dele sai da fila de saída e,
     // na fila que atravessou a queda, ele volta como card (V1). O bloco não
-    // tem chave NENHUMA dentro: nada de ramo que grave.
-    enviarLote: /await callWithRetry\(\(\) => API\.rejectPlace\([^)]*\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
+    // tem chave NENHUMA dentro: nada de ramo que grave. (A ida passa antes pelo
+    // `desistir` da recusa automática, a cada tentativa — R10-2-01.)
+    enviarLote: /await callWithRetry\(\(\) => \(desistir\(p\)\s*\? naoVale\s*: API\.rejectPlace\([^)]*\)\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
     // A lista de países é a ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
     loadProfileAndAuxData: /pedirListaDePaises\(regiaoPedida\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),

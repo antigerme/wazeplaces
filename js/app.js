@@ -16529,6 +16529,14 @@ async function aplicarRecusaAutomatica() {
             contarAoLandar: true,
             regiao,
             gesto,
+            // As condições da ENTRADA, lidas de novo antes de CADA ida ao Waze
+            // (ver `aindaVale` no `enviarLote`): desligar o interruptor do autor
+            // (ou o "Esquecer") com a recusa no ar não parava nada — os pedidos
+            // que faltavam seguiam saindo como rejeitados, no nome da pessoa, e
+            // com o "Esquecer" o autor voltava à lista, recriado por essas
+            // rejeições (MEDIDO no navegador: 4 depois do gesto, nos dois casos;
+            // auditoria de 2026-10-07, R10-2-01). O portão e a conta também.
+            aindaVale: (p) => podeRecusarAutomaticoAqui() && contaConfirmada() && autoLigado(p.creatorId),
             aoProgredir: (faltam) => {
                 if (faltam > 0) aviso.texto(andando(faltam));
             },
@@ -16842,12 +16850,18 @@ function rejeitarLoteDoAutor(place, contados) {
 // não tem janela nenhuma — contar antes ali criaria uma divergência que ninguém
 // pode reconciliar se a página morrer no meio do laço.
 // `aoProgredir` recebe quantos AINDA FALTAM, pra quem quiser mostrar.
+// `aindaVale(p)` é conferido antes de CADA ida ao Waze — a primeira e cada
+// retentativa —, e o pedido em que ele diz não fica de fora e volta pra fila: é a
+// recusa automática relendo, a cada pedido, as condições que a fizeram começar
+// (R10-2-01). A ida que já está no ar segue: não há como cancelá-la.
 async function enviarLote(places, opts = {}) {
     // `fila` = foi pra fila de SAÍDA (sem rede): nem "foi pro Waze" nem "falhou".
     // `aprovada` = quem o resolveu foi a APROVAÇÃO desta pessoa, cuja resposta se
     // perdeu (R8-2-01, ver `aprovacaoDelaJaPousou`): nem rejeitado, nem "outro
     // editor" — e a folha não o conta.
-    const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0 };
+    // `naoVale` = o `aindaVale` disse não antes de ele sair (R10-2-01): não foi ao
+    // Waze e voltou pra fila — nem rejeitado, nem falha.
+    const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0, naoVale: 0 };
     const epoca = epocaDaSessao;
     // A FILA em que o lote começou. O ↻ e a troca de filtro no meio do laço a
     // refazem (`resetQueue`): a nova já vem sem os pedidos que faltam (estão em
@@ -16885,7 +16899,7 @@ async function enviarLote(places, opts = {}) {
     const aoLandar = !!opts.contarAoLandar;
     const progresso = () => {
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
-        if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada, conta);
+        if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada - conta.naoVale, conta);
     };
     // Em andamento até cada um resolver: uma busca que chegue no meio não os
     // traz de volta como card (ver `semOsJaDecididos`). A marca mora AQUI e não
@@ -16936,10 +16950,22 @@ async function enviarLote(places, opts = {}) {
     };
     AppState.inFlightActions++;
     updateInFlightIndicator();
+    // A recusa AUTOMÁTICA confere antes de CADA ida ao Waze — a primeira e cada
+    // retentativa do `callWithRetry` — que ainda vale pra este pedido
+    // (`opts.aindaVale`, R10-2-01): o interruptor desligado, o "Esquecer", o
+    // portão ou a conta que mudaram no meio do laço param o que falta, a partir
+    // do gesto. A ida que já está no ar segue: não há como cancelá-la. Só no modo
+    // que conta ao pousar: no lote da pessoa o pedido já está anotado na fila de
+    // saída e contado no placar. A identidade do objeto é a marca: nada fora
+    // daqui o lê.
+    const naoVale = { success: false };
+    const desistir = (p) => aoLandar && typeof opts.aindaVale === 'function' && !opts.aindaVale(p);
     try {
         for (const p of places) {
             if (repetidos.has(p)) continue;
-            const r = await callWithRetry(() => API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao));
+            const r = await callWithRetry(() => (desistir(p)
+                ? naoVale
+                : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
             // os que nem saíram) volta (K7). Contando ao pousar não há o que
@@ -16960,7 +16986,14 @@ async function enviarLote(places, opts = {}) {
             // desta pessoa que chegou ao Waze — sem contar de novo, nem como "outro
             // editor".
             const pousouNaOutra = () => anotados.delete(p) && tirarDaFilaDeSaida('reject', p) === false;
-            if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')
+            if (r === naoVale) {
+                // Não saiu: volta pra fila como o que a recusa automática não
+                // conseguiu mandar (`voltarPraFila`: pro fim da fila do lote, sem
+                // somar — o "Restam" nunca desceu por ele, e o card volta a
+                // contar nele). Nem rejeitado, nem falha.
+                conta.naoVale++;
+                voltarPraFila(p);
+            } else if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')
                 && pousouNaOutra()) {
                 conta.ok++;
                 pousouPorOutraAba(p, 'reject');
