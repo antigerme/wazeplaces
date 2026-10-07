@@ -6,6 +6,11 @@
 //              banner do topo (z-55) POR BAIXO de um modal (z-60) ou da foto
 //              ampliada (z-65), ou com a página escondida — e ficavam marcados
 //              como vistos: a pessoa nunca os via;
+//   R13-7-02 — sem o perfil, o ponto do botão de Filtros acendia por um
+//              "Curador" (ou "Corretor") que a vitrine ESCONDE (portão de L6): o
+//              toque levava ao Histórico "1 de 14", sem alvo, e a dava por vista;
+//              e o Histórico à vista sem perfil, redesenhado pelo aviso de OUTRA
+//              aba, dava por vista a conquista que a outra ganhou;
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -307,4 +312,171 @@ test('R13-7-01: quem pede de novo — o fechamento de TODA camada e a volta à p
     assert.ok(guarda > 0, `${nome} não passa pela régua da tela (avisoDeUmaVezSaiAgora)`);
     assert.ok(marcou > guarda, `${nome} marca o aviso como visto ANTES de saber se a tela o mostra`);
   }
+});
+
+// ═══ R13-7-02 · o ponto e a marca de vista contam só o que a vitrine MOSTRA ════
+const CONQ = 'waze_places_conquistas';
+// O que a pessoa VIU: as células com a etiqueta "nova".
+const aneis = (html) => [...html.matchAll(/class="conq-cel [^"]*\bnova\b[^"]*"\s+data-conq="(\w+)"/g)].map((m) => m[1]);
+const celula = (html, id) => (new RegExp(`class="(conq-cel [^"]*)"\\s+data-conq="${id}"`).exec(html) || [])[1] || null;
+const vitrine = (html) => (/<span class="tnum">([^<]*)<\/span>/.exec(html) || [])[1];
+
+// O APARELHO: o localStorage é um só pras abas, e o navegador avisa as OUTRAS
+// (o evento `storage`) — aqui o aviso é entregue à mão, na ordem em que viria.
+function aparelho(conquistas) {
+  const dados = new Map([[CONQ, JSON.stringify(conquistas)]]);
+  const abas = [], avisos = [];
+  return {
+    abas,
+    para(aba) {
+      return {
+        getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+        setItem: (k, v) => { dados.set(k, String(v)); for (const o of abas) if (o !== aba) avisos.push([o, k]); },
+        removeItem: (k) => { dados.delete(k); for (const o of abas) if (o !== aba) avisos.push([o, k]); },
+      };
+    },
+    entregar() { while (avisos.length) { const [aba, key] = avisos.shift(); aba.h.aoGravarEmOutraAba({ key }); } },
+    ler: (k = CONQ) => JSON.parse(dados.get(k)),
+  };
+}
+// Um L6 que aprovou 10 fotos: o "Curador" ganho e AINDA NÃO VISTO.
+const CURADOR_NOVO = () => ({ c: { primeiraFaxina: '2026-10-01', curador: '2026-10-06' }, seq: 0, n: { fotos: 10 },
+  langs: ['pt'], base: true, novas: ['curador'], patente: 1 });
+
+const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarConquistas', 'salvarConquistas', 'patenteDe',
+  'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'temConquistaNova',
+  'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
+  'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
+  'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab'];
+function lista(nome) {
+  const m = new RegExp('^const ' + nome + ' = \\[', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  return APP_SEM.slice(m.index, fechar(APP_SEM, m.index, '[', ']')) + ';';
+}
+const L6 = { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false };
+
+// Uma ABA do app: a vitrine, o painel, o ponto e o toque no botão de Filtros de
+// verdade; o perfil (`AppState.profile`) é o que o portão lê. `naTela`: o modal
+// aberto na aba Histórico. `visivel`: a página à vista.
+function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) {
+  const aba = { desenhos: [], abriu: [] };
+  const els = {
+    filtersModal: { classList: classes(...(naTela ? [] : ['hidden'])) },
+    filtersPanelHistory: { classList: classes(...(naTela ? [] : ['hidden'])) },
+    conqSelo: { classList: classes('hidden') },
+    filtersBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; } },
+  };
+  // As abas e os botões do rodapé do modal (o `switchFilterTab` os troca): genéricos.
+  const generico = () => ({ classList: classes(), setAttribute() {}, tabIndex: 0 });
+  const doc = { visibilityState: visivel ? 'visible' : 'hidden', getElementById: (id) => els[id] || (els[id] = generico()),
+    querySelectorAll: () => [] };
+  const AppState = { authenticated: true, profile: perfil, conquistas: null, history: null, autores: null };
+  const deps = {
+    AppState, document: doc, localStorage: comp.para(aba), textoDaCopia: new WeakMap(),
+    CONQUISTAS_KEY: CONQ, HISTORY_KEY: 'waze_places_history', AUTORES_KEY: 'waze_places_autores',
+    DEVMODE_KEY: 'waze_places_devmode',
+    redesenhoDoHistoricoAgendado: false, novasDestaAbertura: null, escadaAberta: false, conquistaTocada: null,
+    tokenTiradoPorOutraAba: null,
+    t: (k, v) => (v && v.a != null ? `${v.a} de ${v.b}` : k), escapeHtml: (s) => String(s),
+    loadHistory: () => ({ _total: { read: 100, rejected: 100 } }),
+    getHistoryStats: () => ({ total: { read: 100, rejected: 100 }, today: { read: 0, rejected: 0 } }),
+    geografiaDoHistorico: () => ({ paises: new Set(), estados: new Set() }),
+    maiorSequenciaDeDias: () => 0, historyTodayKey: () => '2026-10-07',
+    // O que a pessoa vê quando o painel é desenhado.
+    renderHistory: () => { const h = aba.h.htmlConquistas(); aba.desenhos.push({ aneis: aneis(h), curador: celula(h, 'curador'), vitrine: vitrine(h) }); },
+    // O perfil chega pela porta única (`definirPerfil`): o resto dela é de outros testes.
+    contaSegueNoAparelho: () => true,
+    // O toque no ponto: o modal abre na aba pedida (o `openFiltersModal` desenha o painel).
+    openFiltersModal: () => { els.filtersModal.classList.remove('hidden'); aba.abriu.push('filtros'); return Promise.resolve(); },
+    FILTER_TABS: [{ tab: 'filtersTabFilters', panel: 'filtersPanelFilters' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
+      { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }],
+  };
+  aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
+    ['temConquistaNova', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'checarConquistas', 'aoGravarEmOutraAba',
+      'definirPerfil', 'abrirConquistaNova', 'agendarRedesenhoDoHistorico', 'htmlConquistas']);
+  Object.assign(aba, { els, doc, AppState, deps, ponto: () => !els.conqSelo.classList.contains('hidden') });
+  comp.abas.push(aba);
+  return aba;
+}
+// O toque no botão de Filtros (o ouvinte do `setupAppListeners`): com o ponto
+// aceso, ele leva ao Histórico; sem, abre os Filtros.
+const tocarFiltros = (aba) => (aba.h.temConquistaNova() ? aba.h.abrirConquistaNova() : aba.deps.openFiltersModal());
+
+test('R13-7-02: sem o PERFIL, o "Curador" ganho e não visto NÃO acende o ponto — e o toque não o dá por visto sem mostrá-lo', async () => {
+  // CONTROLE: com o perfil (L6), o ponto acende e o toque leva até ele — "nova".
+  const c = abrirAba(aparelho(CURADOR_NOVO()), { perfil: L6 });
+  c.h.atualizarSeloDeConquista();
+  assert.equal(c.ponto(), true, 'CONTROLE: com o perfil, o "Curador" novo não acendeu o ponto — o teste perdeu o sentido');
+  await tocarFiltros(c);
+  assert.equal(c.desenhos.at(-1)?.curador, 'conq-cel on nova', 'CONTROLE: o toque não levou ao "Curador" novo');
+  // Sem o perfil (o `/Session` ainda vindo): a vitrine o ESCONDE ("1 de 14").
+  const comp = aparelho(CURADOR_NOVO());
+  const a = abrirAba(comp);
+  a.h.atualizarSeloDeConquista();
+  assert.equal(a.ponto(), false,
+    'DEFEITO: o ponto acendeu por uma conquista que a vitrine esconde — o toque leva a "1 de 14", sem alvo');
+  assert.equal(a.h.temConquistaNova(), false, 'DEFEITO: o toque em Filtros seria desviado pro Histórico sem nada pra mostrar');
+  // Entrar no Histórico assim mesmo (pela aba): o "Curador" não aparece, e NÃO é dado por visto.
+  await a.h.abrirConquistaNova();
+  assert.equal(a.desenhos.at(-1)?.vitrine, '1 de 14', 'PRÉ-CONDIÇÃO: sem o perfil, a vitrine não escondia as de L6');
+  assert.equal(a.desenhos.at(-1)?.curador, null);
+  assert.deepEqual(comp.ler().novas, ['curador'],
+    'DEFEITO: o "Curador" foi dado por VISTO sem nunca aparecer — quando o perfil chega, ele não é mais "novo"');
+});
+
+test('R13-7-02: o perfil que CHEGA acende o ponto (`definirPerfil`) — e o toque leva ao "Curador", que aí sim fica visto', async () => {
+  const comp = aparelho(CURADOR_NOVO());
+  const a = abrirAba(comp);
+  a.h.atualizarSeloDeConquista();
+  assert.equal(a.ponto(), false, 'PRÉ-CONDIÇÃO: o ponto acendeu sem o perfil');
+  assert.equal(a.h.definirPerfil({ success: true, profile: L6 }), true);
+  assert.equal(a.ponto(), true, 'o perfil L6 chegou e o ponto não acendeu pelo "Curador" que agora a vitrine mostra');
+  assert.equal(a.els.filtersBtn.aria, 'header.filters.aria — conq.selo.aria', 'o nome do botão não diz "conquista nova"');
+  await tocarFiltros(a);
+  assert.equal(a.desenhos.at(-1)?.vitrine, '2 de 16');
+  assert.equal(a.desenhos.at(-1)?.curador, 'conq-cel on nova', 'o toque não levou ao "Curador" novo');
+  assert.deepEqual(comp.ler().novas, [], 'o "Curador" mostrado ficou "novo" — o ponto voltaria');
+  assert.equal(a.ponto(), false);
+  // E o perfil de quem NÃO pode (um L5) apaga o ponto que só o "Curador" acendia.
+  const comp2 = aparelho(CURADOR_NOVO());
+  const b = abrirAba(comp2, { perfil: L6 });
+  b.h.atualizarSeloDeConquista();
+  assert.equal(b.ponto(), true, 'PRÉ-CONDIÇÃO');
+  b.h.definirPerfil({ success: true, profile: { ...L6, rank: 4 } });
+  assert.equal(b.ponto(), false, 'o perfil sem o portão deixou o ponto aceso por uma conquista escondida');
+});
+
+test('R13-7-02: DUAS abas — a outra, À VISTA com o Histórico aberto e SEM perfil, não dá por visto o "Curador" que esta ganhou', async () => {
+  for (const [nome, perfilDeA, esperado] of [['sem perfil', null, ['curador']], ['CONTROLE com perfil', L6, []]]) {
+    const comp = aparelho({ c: { primeiraFaxina: '2026-10-01' }, seq: 0, n: { fotos: 10 }, langs: ['pt'], base: true, novas: [], patente: 1 });
+    const A = abrirAba(comp, { perfil: perfilDeA, naTela: true });   // o Histórico aberto e à vista
+    const B = abrirAba(comp, { perfil: L6 });                          // a pessoa aprova fotos aqui
+    B.h.checarConquistas();   // o 10º "Aprovar": o "Curador"
+    assert.deepEqual(comp.ler().novas, ['curador'], 'PRÉ-CONDIÇÃO: a B não ganhou o "Curador"');
+    comp.entregar();          // o aviso do navegador chega à A, que redesenha o painel aberto
+    await microtarefas();
+    assert.ok(A.desenhos.length > 0, `PRÉ-CONDIÇÃO (${nome}): o painel da A não foi redesenhado pelo aviso`);
+    assert.deepEqual(comp.ler().novas, esperado, nome === 'sem perfil'
+      ? 'DEFEITO: a aba sem perfil deu por VISTO o "Curador" que ela nem mostra ("2 de 14") — o ponto da outra apagou'
+      : 'CONTROLE: a aba com o perfil mostrou o "Curador" diante da pessoa e não o deu por visto');
+    if (nome === 'sem perfil') {
+      assert.equal(A.desenhos.at(-1).curador, null, 'PRÉ-CONDIÇÃO: a aba sem perfil mostrou o "Curador"');
+      comp.entregar();
+      assert.equal(B.h.temConquistaNova(), true, 'o ponto da B apagou sem ninguém ver o "Curador"');
+    } else {
+      assert.equal(A.desenhos.at(-1).curador, 'conq-cel on nova');
+    }
+  }
+});
+
+test('R13-7-02: a patente e as conquistas sem portão seguem como sempre sem o perfil (o conserto só tira as ESCONDIDAS)', () => {
+  const comp = aparelho({ ...CURADOR_NOVO(), novas: ['curador', 'coruja'], patenteNova: true });
+  const a = abrirAba(comp);
+  a.h.atualizarSeloDeConquista();
+  assert.equal(a.ponto(), true, 'a "Coruja" e a patente novas não acenderam o ponto sem o perfil');
+  a.h.htmlConquistas();   // o desenho que o `switchFilterTab` faz antes de marcar
+  a.h.marcarConquistasVistas();
+  const g = comp.ler();
+  assert.deepEqual(g.novas, ['curador'], 'a marca levou a escondida junto, ou deixou a "Coruja" que a vitrine mostrou');
+  assert.equal(g.patenteNova, false, 'a patente (sempre na tela) não ficou vista');
 });

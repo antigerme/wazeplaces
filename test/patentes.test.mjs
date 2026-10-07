@@ -350,7 +350,10 @@ test('abrir a aba Histórico apaga o selo — e é na TROCA DE ABA, não no cliq
   assert.match(f, /filtersTabHistory'\)\s*\{\s*renderHistory\(\);\s*marcarConquistasVistas\(\);/,
     'a limpeza saiu do switchFilterTab (pelo teclado o selo ficaria aceso), ou passou a vir ANTES do desenho (o painel nasce sem anel)');
   const m = fatiar('marcarConquistasVistas');
-  assert.match(m, /g\.novas = \[\]/, 'parou de limpar as conquistas novas');
+  // Limpa as novas que a vitrine MOSTROU — a de L6 escondida pelo portão sem o
+  // perfil fica nova (R13-7-02; o comportamento, em test/treino-auditoria-r13).
+  assert.match(m, /const vistasAgora = novasNaVitrine\(g\);/, 'a marca deixou de olhar o que a vitrine mostra');
+  assert.match(m, /g\.novas = g\.novas\.filter\(\(id\) => !vistasAgora\.includes\(id\)\);/, 'parou de limpar as conquistas novas');
   assert.match(m, /g\.patenteNova = false/, 'parou de limpar a patente nova');
   assert.match(m, /salvarConquistas\(\)/, 'a limpeza não persiste — o selo voltaria na recarga');
   // NÃO re-renderiza: nesta abertura a pessoa ainda precisa VER o que ganhou.
@@ -385,7 +388,8 @@ const semComentariosJS = (txt) => txt.split('\n')
 
 test('a condição do ponto tem FONTE ÚNICA — quem acende e quem leva concordam', () => {
   const t = fatiar('temConquistaNova');
-  assert.match(t, /novas\.length > 0 \|\| g\.patenteNova/,
+  // As novas que a vitrine MOSTRA (R13-7-02) e a patente.
+  assert.match(t, /novasNaVitrine\(g\)\.length > 0 \|\| g\.patenteNova/,
     'temConquistaNova parou de considerar as duas origens de novidade');
   assert.match(t, /AppState\.authenticated/, 'o ponto voltaria a acender deslogado');
   assert.match(t, /carregarConquistas\(\)/,

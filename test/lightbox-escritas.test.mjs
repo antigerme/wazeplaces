@@ -2078,6 +2078,7 @@ function fotoAbertaSemPerfil({ aberta = true } = {}) {
     guardarPerfilDoPortao: () => {}, guardarPrazoDaSessao: () => {}, renderProfileHeader: () => {},
     presencaWmeAoCarregarPerfil: () => {}, presencaWmeRefazerDesligar: () => {}, redesenharFiltrosComOPerfil: () => {},
     aplicarTravaDeAcao: () => {},   // a trava da pílula, que é do local da camada (R11-3-06)
+    atualizarSeloDeConquista: () => {},   // o ponto de Filtros, que também lê o portão (R13-7-02)
     __P: P, __aberta: aberta,
   };
   const nomes = ['definirPerfil', 'reavaliarFotoAbertaPeloPerfil', 'mostrarNomeNoLightbox', 'podeRenomearAqui',

@@ -289,6 +289,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     aoConhecerConta: (p) => ganchos.aoConhecerConta(p), contaSegueNoAparelho: () => true, handleLogout: () => log.push('saiu'),
     guardarReferencias: () => {}, guardarPerfilDoPortao: () => {}, renderProfileHeader: () => {},
     presencaWmeAoCarregarPerfil: () => {}, presencaWmeRefazerDesligar: () => {}, reavaliarFotoAbertaPeloPerfil: () => {},
+    atualizarSeloDeConquista: () => {},   // o ponto de Filtros, que também lê o portão (R13-7-02)
     recusaDoPortao: () => log.push('recusa'),
     showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {},
     showNoPlaces: () => log.push('vazio'), abrirGuardadaDepoisDaFalha: async () => false,

@@ -142,7 +142,8 @@ function montarVitrine() {
     PATENTES: [{ id: 'aprendiz', emoji: '🧤', min: 0 }, { id: 'gari', emoji: '🧹', min: 100 }, { id: 'lixeiro', emoji: '🗑️', min: 500 }],
   };
   const preludio = 'let conquistaTocada = null, novasDestaAbertura = null, autoresExpandido = false, escadaAberta = false;';
-  const api = montar(['marcarConquistasVistas', 'htmlConquistas', 'htmlPatente'], deps, ['marcarConquistasVistas', 'htmlConquistas',
+  // `novasNaVitrine`: visto é só o que a vitrine mostra (R13-7-02).
+  const api = montar(['marcarConquistasVistas', 'novasNaVitrine', 'htmlConquistas', 'htmlPatente'], deps, ['marcarConquistasVistas', 'htmlConquistas',
     'htmlPatente', 'fecharModal: () => { novasDestaAbertura = null; }'], preludio);
   return { ...api, g };
 }

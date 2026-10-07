@@ -6672,6 +6672,10 @@ function definirPerfil(res) {
         AppState.contaEmDuvida = false;
         aplicarTravaDeAcao();
     }
+    // E o ponto do botão de Filtros, que também lê o portão: a conquista de L6
+    // ganha e não vista só passa a contar quando a vitrine pode mostrá-la — e o
+    // perfil de quem não pode a tira da conta (R13-7-02).
+    atualizarSeloDeConquista();
     return true;
 }
 
@@ -17719,10 +17723,24 @@ function garantirLinhaDeBaseDasConquistas() {
 // Lê do ARMAZENAMENTO, não do que estiver em memória: quem destravou ontem e
 // fechou o app voltaria sem nada até o primeiro swipe. Deslogado não carrega
 // nada — isto é estado de quem entrou.
+//
+// E conta só o que a vitrine MOSTRA agora (`novasNaVitrine`): o "Curador" e o
+// "Corretor" são de L6, e sem o perfil — o `/Session` é a chamada mais lenta da
+// abertura, e pendura no sinal ruim — o portão os esconde. O ponto acendia por
+// eles, e o toque levava ao Histórico "1 de 14", sem a célula e sem alvo
+// (R13-7-02, MEDIDO no navegador; auditoria de 2026-10-07). O perfil que chega
+// acende o ponto (`definirPerfil`), e aí ele leva até ela.
 function temConquistaNova() {
     if (!AppState.authenticated) return false;
     const g = carregarConquistas();
-    return !!g && (g.novas.length > 0 || g.patenteNova);
+    return !!g && (novasNaVitrine(g).length > 0 || g.patenteNova);
+}
+
+// As novas que a vitrine MOSTRA agora: as de portão (`l6`) só com ele. A
+// patente não entra — o cartão dela está sempre na tela.
+function novasNaVitrine(g) {
+    const mostra = new Set(conquistasVisiveis().map((x) => x.id));
+    return g.novas.filter((id) => mostra.has(id));
 }
 
 function atualizarSeloDeConquista() {
@@ -17741,15 +17759,22 @@ function atualizarSeloDeConquista() {
 // o que ela viu como novo fica em `novasDestaAbertura`: o painel é redesenhado
 // com ela aberta (ação que pousa, troca de idioma, toque numa célula), e sem
 // isso o anel sumia no primeiro redesenho, antes de ser visto.
+//
+// Visto é só o que a vitrine MOSTROU (`novasNaVitrine`): a de L6 escondida pelo
+// portão sem o perfil seguia pra "vista" sem nunca ter aparecido — no toque do
+// ponto, e no Histórico aberto que a OUTRA aba redesenha (R13-7-02). Ela fica
+// nova, e é vista quando o perfil a puser na tela.
 function marcarConquistasVistas() {
     const g = AppState.conquistas;
-    if (!g || (!g.novas.length && !g.patenteNova)) return;
+    if (!g) return;
+    const vistasAgora = novasNaVitrine(g);
+    if (!vistasAgora.length && !g.patenteNova) return;
     const vistas = novasDestaAbertura || { ids: [], patente: false };
     novasDestaAbertura = {
-        ids: [...new Set([...vistas.ids, ...g.novas])],
+        ids: [...new Set([...vistas.ids, ...vistasAgora])],
         patente: vistas.patente || g.patenteNova,
     };
-    g.novas = [];
+    g.novas = g.novas.filter((id) => !vistasAgora.includes(id));
     g.patenteNova = false;
     salvarConquistas();
     atualizarSeloDeConquista();
