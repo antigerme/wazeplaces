@@ -703,8 +703,10 @@ test('R11-6-02: a busca chamada DIRETO no meio de uma decisão SEM destino tamb�
 // e a região", anunciado ao leitor de tela, até a decisão levar a pessoa pra
 // fila dela (MEDIDO no navegador, nos dois motores: 1,3 s; 2,1 s com a busca
 // voltando antes do perfil). A espera do fim do `startFetching` pela decisão só
-// valia com "Minha área" (`filaEsperaPerfil`). Aqui a busca, a carga do perfil e
-// a decisão rodam DE VERDADE, com a fila do Brasil vazia (o filtro de permissão).
+// valia com "Minha área" (`filaEsperaPerfil`). Só a busca que RESPONDEU espera: a
+// que falhou tem a tela dela, e no lie-fi o perfil pendura junto (ver o
+// test/offline-varredura). Aqui a busca, a carga do perfil e a decisão rodam DE
+// VERDADE, com a fila do Brasil vazia (o filtro de permissão).
 test('R12-6-02: sem "Minha área", a fila do Brasil que volta vazia com a decisão no ar NÃO diz "Tudo limpo!" — espera, e a fila dos EUA é a que aparece', async () => {
   const m = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
   m.AppState.filters.myArea = false;
