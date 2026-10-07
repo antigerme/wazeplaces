@@ -3808,14 +3808,16 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // O AQUECIMENTO da lixeira (a leitura do local que o toque dispara, `preparar`)
 // entra também, como uma leitura (auditoria da rodada 12, R12-3-01): fora da
 // vez, ele podia voltar DEPOIS de uma escrita do local e guardar no servidor a
-// lista de antes dela (ver o `pedirExclusaoDaFoto`). Menos com a página SAINDO
-// (`soAquecimentoNaFrente` + `API.saindo`): a escrita da janela que a descarga
-// despacha não espera um aquecimento — a página morreria antes da resposta dele,
-// e a escrita, que saía na hora com `keepalive`, sumia. Sem esperar, quem
-// garante que o aquecimento que volta depois não estraga nada é o servidor: a
-// lista dele mora numa chave do GESTO, que só a exclusão daquele gesto lê
-// (auditoria da rodada 13, R13-3-02 e R13-3-03, `chaveDoToque` no core). Uma
-// ESCRITA na frente segue sendo esperada, como acima.
+// lista de antes dela (ver o `pedirExclusaoDaFoto`). Menos com a página SAINDO:
+// a escrita não espera um aquecimento — a página morreria antes da resposta
+// dele, e a escrita, que saía na hora com `keepalive`, sumia. A da janela, que a
+// descarga despacha, nem entra na espera (`soAquecimentoNaFrente` +
+// `API.saindo`); e a que JÁ esperava (a janela venceu com o Waze lento) é solta
+// pela descarga (`vezLiberada`, auditoria da rodada 13, R13-3-01). Sem esperar,
+// quem garante que o aquecimento que volta depois não estraga nada é o
+// servidor: a lista dele mora numa chave do GESTO, que só a exclusão daquele
+// gesto lê (R13-3-02 e R13-3-03, `chaveDoToque` no core). Uma ESCRITA na frente
+// segue sendo esperada, como acima.
 //
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
 // vez são exclusões — com uma no ar, a pílula do nome do local trava
@@ -3853,6 +3855,38 @@ function vezDasFotosNoLocal(alvo, tipo) {
 // página SAINDO com só o aquecimento na frente (ver acima).
 function esperaAVezDoLocal(vez) {
     return !!vez.anterior && !(vez.soAquecimentoNaFrente && typeof API !== 'undefined' && API.saindo === true);
+}
+
+// O que a escrita espera pra ter a vez do local (quando `esperaAVezDoLocal`). Com
+// só AQUECIMENTO na frente, a página saindo também solta a espera
+// (`soltarEsperasDoAquecimento`, na descarga): a exclusão — ou a aprovação — que
+// já tinha saído da janela do Desfazer e esperava a resposta de um toque lento
+// ficava pendurada quando o app fechava, porque a descarga só alcançava o que
+// estava na janela, e a foto seguia no mapa sem aviso nenhum (auditoria da
+// rodada 13, R13-3-01, MEDIDO no navegador, nos dois motores). Solta, ela sai na
+// hora, com `keepalive`; o aquecimento que ainda vai voltar não estraga nada (a
+// lista dele é do gesto). Uma ESCRITA na frente não é solta: as duas cruzariam
+// no servidor, que desfaz uma delas.
+const esperasSoDoAquecimento = new Set();
+
+function vezLiberada(vez) {
+    if (!vez.soAquecimentoNaFrente) return vez.anterior;
+    return new Promise((ok) => {
+        const soltar = () => { esperasSoDoAquecimento.delete(soltar); ok(); };
+        esperasSoDoAquecimento.add(soltar);
+        vez.anterior.then(soltar);
+    });
+}
+
+// A página está saindo (`descarregarAcaoPendente`): solta as escritas que
+// esperam só um aquecimento — com o transporte já no modo "saindo", pra elas
+// saírem com `keepalive`. O envio de cada uma corre nas microtarefas logo depois,
+// ainda dentro do `pagehide`. Devolve se soltou alguma.
+function soltarEsperasDoAquecimento() {
+    if (!esperasSoDoAquecimento.size) return false;
+    if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(true);
+    for (const soltar of [...esperasSoDoAquecimento]) soltar();
+    return true;
 }
 
 // Um id novo por TOQUE na lixeira: o toque e a exclusão dele levam o mesmo, e a
@@ -4097,15 +4131,15 @@ async function enviarExclusao(alvo) {
     // A vez do LOCAL (R10-3-03): com outra escrita da lista dele no ar — outra
     // exclusão, ou a aprovação de uma foto dele (R11-3-01) —, o envio espera a
     // resposta dela — e a do aquecimento da lixeira (R12-3-01), menos com a página
-    // saindo (`esperaAVezDoLocal`). Sem nenhuma, nada espera — o envio sai na
-    // hora, como antes. A pílula do nome do local trava com ela no ar
-    // (R11-3-06): a trava é reaplicada quando ela entra na vez e quando sai. O
-    // GESTO do toque (`alvo.aquecimento`) vai junto: a lista que ele leu é desta
-    // exclusão.
+    // saindo (`esperaAVezDoLocal`, e a que já esperava é solta quando a página
+    // sai, `vezLiberada`). Sem nenhuma, nada espera — o envio sai na hora, como
+    // antes. A pílula do nome do local trava com ela no ar (R11-3-06): a trava é
+    // reaplicada quando ela entra na vez e quando sai. O GESTO do toque
+    // (`alvo.aquecimento`) vai junto: a lista que ele leu é desta exclusão.
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
     aplicarTravaDeAcao();
     try {
-        if (esperaAVezDoLocal(vez)) await vez.anterior;
+        if (esperaAVezDoLocal(vez)) await vezLiberada(vez);
         // A MESMA foto já saiu do mapa por outra exclusão DESTA sessão — a do
         // irmão, que estava no ar com esta na vez (R10-3-03) ou que pousou com
         // esta ainda na janela do Desfazer (R12-3-02, `fotosQueSairamDoMapa`):
@@ -4462,10 +4496,11 @@ async function enviarAprovacao(alvo) {
         // regravava no servidor a lista de antes, com esta foto pendente, e a
         // exclusão seguinte a devolvia ao Waze como `approved: false`. E o
         // aquecimento da lixeira também é esperado (R12-3-01), menos com a página
-        // saindo (`esperaAVezDoLocal`).
+        // saindo (`esperaAVezDoLocal`, e a que já esperava é solta quando a página
+        // sai, `vezLiberada`, R13-3-01).
         vez = vezDasFotosNoLocal(alvo, 'aprovar');
         if (esperaAVezDoLocal(vez)) {
-            await vez.anterior;
+            await vezLiberada(vez);
             // A OUTRA aba decidiu o pedido enquanto esta esperava a vez (o
             // R11-3-02, na espera que a vez abriu): vale a decisão de lá. A
             // aprovação não sai — o Waze receberia as duas, e a tela diria "Já
@@ -26026,6 +26061,11 @@ function loadDevMode() {
 // hora, encurtando o "Desfazer" — e é o lado certo de errar: a ação ia comitar
 // em 3s de qualquer jeito, enquanto perdê-la é dano permanente no placar.
 function descarregarAcaoPendente() {
+    // A exclusão ou a aprovação da foto que JÁ saiu da janela do Desfazer e
+    // espera só a resposta do toque na lixeira (o Waze lento): solta agora, ela
+    // sai com `keepalive` — antes ficava pendurada, e sumia com a página
+    // (auditoria da rodada 13, R13-3-01, ver `vezLiberada`).
+    soltarEsperasDoAquecimento();
     // As três escritas do lightbox têm a mesma janela e o mesmo risco: sair da
     // página com uma pendente a faria sumir depois de a tela já ter mudado.
     for (const p of [renomeacaoPendente, aprovacaoPendente, exclusaoPendente]) {

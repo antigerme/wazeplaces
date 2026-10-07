@@ -751,6 +751,7 @@ function aparelhoO5(guardado = new Map()) {
       // reaberta (a marca mora no `sessionStorage`, que sobrevive a recarregar).
       ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
       atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
+      soltarEsperasDoAquecimento: () => false,   // as escritas da foto que esperam o toque (R13-3-01): aqui, nenhuma
     };
     const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',

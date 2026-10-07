@@ -68,11 +68,12 @@ function lightbox(podeL6 = true) {
 // vez do local nas exclusões (R10-3-03), e a memória das fotos que saíram do mapa
 // (R12-3-02). O anúncio ao leitor de tela (R6-3-08) é anotado no `log` de quem
 // passar um.
-// E o gesto do toque na lixeira (R13-3-03).
+// E a espera solta pela página saindo (R13-3-01) e o gesto do toque (R13-3-03).
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'idDoGestoDaLixeira',
+  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'soltarEsperasDoAquecimento', 'idDoGestoDaLixeira',
   'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
+  esperasSoDoAquecimento: new Set(),
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
   anunciarNoLightbox: (texto, place) => { if (log) log.push('anuncio:' + texto); },
   // A região do CARD, pro desfecho que fecha a camada (R7-3-04).
@@ -1461,7 +1462,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-    'vezDasFotosNoLocal', 'esperaAVezDoLocal'];
+    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -3403,9 +3404,10 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
   const timers = [];
   const decididos = new WeakSet();
   const ponte = { app: null };
-  // `gesto`: o gesto do toque que a exclusão levou (R13-3-03).
+  // `saindo`: o transporte no modo da página saindo (`keepalive`) quando a ida
+  // saiu (R13-3-01); `gesto`: o gesto do toque que a exclusão levou (R13-3-03).
   const ida = (tipo, id, local, gesto) => new Promise((ok) => {
-    idas.push({ tipo, id, local, gesto, responder: ok });
+    idas.push({ tipo, id, local, gesto, saindo: deps.API.saindo === true, responder: ok });
   });
   const deps = {
     AppState, Lightbox: L, Treino: { ativo: false, _salvo: null },
@@ -3418,7 +3420,9 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
         return aquecimentoNoAr ? new Promise((ok) => { aquecimentos.push(ok); }) : undefined;
       },
       getRegion: () => 'row',
+      saindo: false, setSaindo(v) { this.saindo = !!v; },
     },
+    renomeacaoPendente: null,   // a descarga da página (`descarregarAcaoPendente`, R13-3-01)
     canDisableUndo: () => true, lixeiraOcupada: () => {}, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true,
     manterFocoNoLightbox: () => {}, aprovandoAgora: false, excluindoAgora: false, mantendoFocoNoCard: (f) => f(),
     showCurrentPlace: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
@@ -3439,7 +3443,7 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
   };
   const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'aprovarFotoAtual', 'enviarAprovacao', 'concluirAprovacao',
     'tirarAprovadoDaFila', 'pousouNoWaze', 'chaveDoPedido', 'aplicarNosIrmaos', 'escritaDoLightboxSemSessao',
-    'contarIdasSemResposta', 'callWithRetry', ...R6_NOMES];
+    'contarIdasSemResposta', 'callWithRetry', 'descarregarAcaoPendente', ...R6_NOMES];
   if (quedaDeVerdade) { delete deps.aprovacaoPousouDepoisDaQueda; nomes.push('aprovacaoPousouDepoisDaQueda'); }
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n').replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -3890,7 +3894,8 @@ test('R12-3-01 com a página SAINDO, a escrita da janela não espera o aquecimen
   // sumia: antes ela saía na hora, com keepalive. Sem esperar, quem garante que
   // o aquecimento que volta depois não estraga nada é o servidor: a lista dele
   // mora numa chave do gesto, que só a exclusão daquele gesto lê (R13-3-02 e
-  // R13-3-03, em test/portao-servidor).
+  // R13-3-03, em test/portao-servidor). A que JÁ esperava quando a página saiu
+  // está no teste do R13-3-01, abaixo.
   const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   m.abrirEm(m.A, 'f1');
   m.app.pedirExclusaoDaFoto();                       // o toque: o aquecimento sai e fica no ar
@@ -3952,6 +3957,73 @@ test('R12-3-01 a API devolve a PROMESSA do aquecimento (que só termina com a re
   delete guardado.waze_session_token;
   ctx.API.setSession && ctx.API.setSession(null);
   assert.equal(ctx.API.prepararExclusao('v', -23, -46, 'row'), undefined, 'sem sessão o aquecimento devolveu algo pra esperar');
+});
+
+// ── R13-3-01: a escrita que JÁ saiu da janela e espera só o aquecimento ──────
+// (auditoria da rodada 13). Com o Waze lento, a leitura do toque na lixeira passa
+// dos 3 s da janela do Desfazer: a janela vence, e a exclusão (ou a aprovação)
+// fica esperando a resposta dele na vez do local (R12-3-01). Se a pessoa fecha o
+// app nesse meio, a descarga (`descarregarAcaoPendente`) não achava nada na
+// janela, e a espera não se reavaliava: a escrita nunca saía, e a foto ficava no
+// mapa sem aviso nenhum (MEDIDO no navegador, nos dois motores, roteiros a4 e
+// a4b). A descarga agora solta a espera (`soltarEsperasDoAquecimento`), e a
+// escrita sai na hora, com o transporte no modo da página saindo (`keepalive`).
+// Só com MICROTAREFAS entre a descarga e a ida: o `pagehide` não espera tarefa
+// nenhuma — uma espera por relógio aqui seria a escrita sumindo de novo.
+const microtarefas = async (n = 40) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
+
+test('R13-3-01 a exclusão — e a aprovação — que JÁ saiu da janela e espera só o aquecimento SAI quando a página sai: a descarga a solta, com keepalive', async () => {
+  const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  m.abrirEm(m.A, 'f1');
+  m.app.pedirExclusaoDaFoto();                       // o toque: o aquecimento sai e fica no ar (o Waze lento)
+  m.vencerJanela();                                  // a janela vence: a exclusão espera a resposta do toque
+  await umTique(); await umTique();
+  assert.deepEqual(m.saidas(), [], 'PRÉ-CONDIÇÃO: a exclusão não ficou esperando o aquecimento (o R12-3-01)');
+  assert.equal(m.pend.e, null, 'PRÉ-CONDIÇÃO: a exclusão ainda estava na janela — a descarga a alcançaria por lá');
+  m.app.descarregarAcaoPendente();                   // a página sai (o app fechado, ou trocado por outro)
+  await microtarefas();
+  assert.deepEqual(m.saidas(), ['excluir:f1'],
+    'DEFEITO: a exclusão que esperava o aquecimento não saiu com a página saindo — ela some com a página, e a foto fica no mapa');
+  assert.equal(m.idas[0].saindo, true, 'a exclusão solta saiu fora do modo da página saindo — sem keepalive, o navegador a corta');
+  // A APROVAÇÃO também (tocou na lixeira, desfez, aprovou a proposta P, e a
+  // janela da aprovação venceu com o toque ainda no ar).
+  const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  a.abrirEm(a.A, 'f1');
+  a.app.pedirExclusaoDaFoto();
+  a.pend.e.desfazer();
+  a.irPara('ur-A');
+  a.app.aprovarFotoAtual(); a.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(a.saidas(), [], 'PRÉ-CONDIÇÃO: a aprovação não ficou esperando o aquecimento');
+  a.app.descarregarAcaoPendente();
+  await microtarefas();
+  assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'DEFEITO: a aprovação que esperava o aquecimento não saiu com a página saindo');
+  assert.equal(a.idas[0].saindo, true, 'a aprovação solta saiu fora do modo da página saindo');
+  // CONTROLE: uma ESCRITA na frente (a exclusão de f1 no ar) não é solta — as
+  // duas cruzariam no servidor —, e a descarga sem nada a soltar não liga o modo
+  // da página saindo.
+  const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  c.abrirEm(c.A, 'f1');
+  c.app.pedirExclusaoDaFoto(); c.responderAquecimento(); await umTique();
+  c.vencerJanela(); await umTique();
+  assert.deepEqual(c.saidas(), ['excluir:f1'], 'PRÉ-CONDIÇÃO: a exclusão de f1 não saiu');
+  c.irPara('f2');
+  c.app.pedirExclusaoDaFoto(); c.vencerJanela();     // a de f2 espera a de f1 (uma escrita)
+  await umTique();
+  c.app.descarregarAcaoPendente();
+  await microtarefas();
+  assert.deepEqual(c.saidas(), ['excluir:f1'], 'CONTROLE: a descarga soltou a exclusão que esperava uma ESCRITA do local');
+  assert.equal(c.api.saindo, false, 'CONTROLE: a descarga ligou o modo da página saindo sem ter o que soltar');
+  // CONTROLE: sem a página sair, a espera continua até a resposta do toque.
+  const v = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  v.abrirEm(v.A, 'f1');
+  v.app.pedirExclusaoDaFoto(); v.vencerJanela();
+  await microtarefas(); await umTique();
+  assert.deepEqual(v.saidas(), [], 'CONTROLE: sem a página sair, a exclusão saiu antes da resposta do toque');
+  v.responderAquecimento();
+  await umTique(); await umTique();
+  assert.deepEqual(v.saidas(), ['excluir:f1'], 'CONTROLE: a exclusão não saiu com a resposta do toque');
+  assert.equal(v.idas[0].saindo, false, 'CONTROLE: a exclusão de todo dia saiu no modo da página saindo');
 });
 
 // ── R13-3-03: o toque e a exclusão levam o MESMO gesto ───────────────────────
