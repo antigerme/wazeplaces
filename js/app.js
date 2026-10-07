@@ -23364,6 +23364,28 @@ function removeUndoBanner() {
     }
 }
 
+// As decisões da fila de saída que a OUTRA aba está MANDANDO agora (a marca dela
+// no item, `reivindicadoPorOutraAba`): pro indicador desta aba elas são
+// "enviando", como as daqui. E a marca VENCE sozinha (`SAIDA_REIVINDICACAO_MS`:
+// a outra aba pode ter morrido com o envio no ar), sem nada que redesenhe o
+// indicador: um temporizador LOCAL no prazo da primeira que vence o redesenha —
+// sem rede, uma vez por prazo, e sai quando o indicador é redesenhado de novo.
+let indicadorMarcaVence = null;
+function saindoPelaOutraAba(fila) {
+    let n = 0, vence = Infinity;
+    for (const x of fila) {
+        if (!x || pedidosEmAndamento.has(chaveDoPedido(x)) || !reivindicadoPorOutraAba(x)) continue;
+        n++;
+        vence = Math.min(vence, (Number(x.rvEm) || 0) + SAIDA_REIVINDICACAO_MS);
+    }
+    clearTimeout(indicadorMarcaVence);
+    indicadorMarcaVence = null;
+    // A folga: o redesenho cai DEPOIS do prazo, e a marca já lê como vencida.
+    if (n) indicadorMarcaVence = setTimeout(() => { indicadorMarcaVence = null; updateInFlightIndicator(); },
+        Math.max(0, vence - Date.now()) + 50);
+    return n;
+}
+
 // UM indicador para os dois estados, e não dois: eles disputam o mesmo canto e
 // nunca dizem coisas independentes — "enviando" é o que está saindo AGORA,
 // "esperando" é o que ficou pra depois. Enviando ganha, porque é o estado que
@@ -23376,6 +23398,13 @@ function updateInFlightIndicator() {
     const eraLeitura = !!el && /(^|\s)nao-cobrir(\s|$)/.test(el.className);
     const fila = AppState.authenticated ? carregarFilaDeSaida() : [];
     const esperando = fila.length;
+    // O que a OUTRA aba está mandando é "enviando" aqui também (R11-4-03): dizia
+    // "1 esperando envio", com o relógio que quer dizer "parado esperando rede" —
+    // e, desde o R10-4-05, sem a marca de número a não cobrir, então no
+    // computador o FAB ficava por cima dele, cobrindo-o inteiro (auditoria da
+    // rodada 11, MEDIDO nos dois motores). O texto e a régua do FAB passam a
+    // dizer a mesma coisa: alguém está mandando.
+    const pelaOutraAba = saindoPelaOutraAba(fila);
     if (AppState.inFlightActions <= 0 && esperando <= 0) {
         // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
         // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
@@ -23399,13 +23428,14 @@ function updateInFlightIndicator() {
         el.style.top = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
         document.body.appendChild(el);
     }
-    // Girando só quando está MESMO saindo. "Esperando" com giro seria o app
-    // fingindo trabalho que não está acontecendo — e é justamente o estado em
-    // que não há rede pra trabalhar.
-    const enviando = AppState.inFlightActions > 0;
-    const n = enviando ? AppState.inFlightActions : esperando;
+    // Girando só quando está MESMO saindo — por esta aba ou pela outra (a marca
+    // dela). "Esperando" com giro seria o app fingindo trabalho que não está
+    // acontecendo — e é justamente o estado em que não há rede pra trabalhar.
+    const saindo = Math.max(0, AppState.inFlightActions) + pelaOutraAba;
+    const enviando = saindo > 0;
+    const n = enviando ? saindo : esperando;
     const texto = enviando
-        ? t('indicator.sending', { n: AppState.inFlightActions })
+        ? t('indicator.sending', { n: saindo })
         : t('indicator.waiting', { n: esperando });
 
     // ÍCONE + NÚMERO, sem pílula (decisão do owner, 2026-09-21, olhando mockups

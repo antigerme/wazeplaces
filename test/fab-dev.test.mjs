@@ -270,13 +270,25 @@ test('R7-4-01: CONTROLE — camada que NÃO é aviso passageiro (um modal) segue
 // que sai é anotada na fila ANTES do envio (`anotarAntesDoEnvio`), e só a que
 // ninguém está mandando conta como esperando (R10-4-05). `outraAba`: as chaves
 // que a OUTRA aba está mandando (a marca dela no item).
+// O prazo da marca da outra aba (`SAIDA_REIVINDICACAO_MS`), lido do app.
+const PRAZO_DA_MARCA = (() => {
+  const m = /^const SAIDA_REIVINDICACAO_MS = (\d+) \* 1000;/m.exec(APP_SEM);
+  assert.ok(m, 'o prazo da marca da outra aba (`SAIDA_REIVINDICACAO_MS`) mudou de forma');
+  return Number(m[1]) * 1000;
+})();
+// `outraAba` é a marca de VERDADE no item (`rv`/`rvEm`, lida pelo
+// `reivindicadoPorOutraAba` de verdade), com o relógio e os temporizadores de
+// mentira: a marca vence (R11-4-03), e o redesenho no prazo dela se mede
+// andando o relógio (`passar`), sem esperar 60 s nem deixar timer vivo.
 function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
   const ids = new Map();
   const reavaliou = [];
+  const relogio = { t: 5_000_000 };
+  const timers = new Map();
+  let proximoTimer = 0;
   const item = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
   let saida = Array.from({ length: fila }, (_, i) => item(i + 1));
   const emAndamento = new Set();
-  const outraAba = new Set();
   const document = {
     getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : ids.get(id) || null),
     createElement: () => {
@@ -287,18 +299,33 @@ function indicadorDeVerdade({ fila = 1, noAr = 0 } = {}) {
   };
   const AppState = { authenticated: true, inFlightActions: noAr };
   const chaveDoPedido = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
+  const Date = { now: () => relogio.t };
+  const reivindicadoPorOutraAba = new Function('ABA_DESTA_PAGINA', 'SAIDA_REIVINDICACAO_MS', 'Date',
+    fatiar('reivindicadoPorOutraAba') + '\nreturn reivindicadoPorOutraAba;')('aba-esta', PRAZO_DA_MARCA, Date);
   const deps = { document, AppState, carregarFilaDeSaida: () => saida.map((x) => ({ ...x })), t: (k, v) => `${k}:${v.n}`,
     escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => reavaliou.push(ids.has('inFlightIndicator')),
-    pedidosEmAndamento: emAndamento, chaveDoPedido, reivindicadoPorOutraAba: (x) => outraAba.has(chaveDoPedido(x)) };
+    pedidosEmAndamento: emAndamento, chaveDoPedido, reivindicadoPorOutraAba, SAIDA_REIVINDICACAO_MS: PRAZO_DA_MARCA, Date,
+    setTimeout: (fn, ms) => { const id = ++proximoTimer; timers.set(id, { fn, quando: relogio.t + ms }); return id; },
+    clearTimeout: (id) => { timers.delete(id); } };
   const chaves = Object.keys(deps);
-  const atualizar = new Function(...chaves, fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
+  const atualizar = new Function(...chaves, 'let indicadorMarcaVence = null;\n' + fatiar('saindoPelaOutraAba') + '\n'
+    + fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
   return { atualizar, reavaliou, el: () => ids.get('inFlightIndicator') || null,
     fila: (n) => { saida = Array.from({ length: n }, (_, i) => item(i + 1)); }, AppState,
     // A decisão `i` anotada na fila de saída, e saindo (em andamento) ou não.
     anotar: (i, saindo = true) => { saida.push(item(i)); if (saindo) emAndamento.add(`v${i}|u${i}`); },
     soltar: (i) => emAndamento.delete(`v${i}|u${i}`),
     tirar: (i) => { saida = saida.filter((x) => x.venueID !== 'v' + i); },
-    naOutraAba: (i) => outraAba.add(`v${i}|u${i}`) };
+    // A OUTRA aba marcou o item `i` (a anotação antes do envio dela), agora ou em `em`.
+    naOutraAba: (i, em = relogio.t) => { saida = saida.map((x) => (x.venueID === 'v' + i ? { ...x, rv: 'aba-outra', rvEm: em } : x)); },
+    // O relógio anda; o temporizador que venceu roda (só ele — nenhum laço de redesenho escondido).
+    passar: (ms) => {
+      relogio.t += ms;
+      for (const [id, tm] of [...timers].sort((x, y) => x[1].quando - y[1].quando)) {
+        if (tm.quando <= relogio.t && timers.has(id)) { timers.delete(id); tm.fn(); }
+      }
+    },
+    timers };
 }
 const classesDoIndicador = () => { const i = indicadorDeVerdade(); i.atualizar(); return i.el().className.split(/\s+/).filter(Boolean); };
 // O `top` do indicador (R10-4-02): ancorado no cabeçalho MEDIDO, com os 80 px de
@@ -405,6 +432,70 @@ test('R10-4-05: com decisão ESPERANDO envio, o número fica a não cobrir — t
   o.atualizar();
   assert.ok(o.el() && !o.el().className.split(/\s+/).includes('nao-cobrir'), 'a decisão que a outra aba está mandando virou número a não cobrir');
   assert.deepEqual(o.reavaliou, []);
+});
+
+// ── R11-4-03: a decisão que a OUTRA aba está mandando é "enviando" — e a marca vence ──
+// Com o app em duas abas, a decisão que a outra está mandando aparecia nesta
+// como "1 esperando envio", com o relógio que quer dizer "parado esperando rede"
+// — e sem o `.nao-cobrir` (R10-4-05), então no computador o FAB ficava por cima,
+// cobrindo-o inteiro (MEDIDO, n25 da auditoria da rodada 11, nos dois motores).
+// DECISÃO: ela conta como "enviando" (o estado que já existe: o giro, sem a
+// marca), e o indicador é redesenhado quando a marca vence — um temporizador
+// local no prazo dela, sem rede.
+const estadoDoIndicador = (i) => {
+  const el = i.el();
+  if (!el) return null;
+  return { titulo: el.title, gira: /animate-spin/.test(el.innerHTML), relogio: /M12 7v5l3 2/.test(el.innerHTML),
+           naoCobrir: el.className.split(/\s+/).includes('nao-cobrir') };
+};
+
+test('R11-4-03: a decisão que a OUTRA aba está mandando é "enviando" (o giro), não "esperando envio" — e o FAB não se mexe', () => {
+  const o = indicadorDeVerdade({ fila: 1 });
+  o.naOutraAba(1);
+  o.atualizar();
+  assert.deepEqual(estadoDoIndicador(o), { titulo: 'indicator.sending:1', gira: true, relogio: false, naoCobrir: false },
+    'DEFEITO: a decisão que a outra aba está mandando aparece como "esperando envio" (o relógio) — o que o indicador diz e o '
+    + 'que o FAB lê (alguém está mandando) discordam');
+  assert.deepEqual(o.reavaliou, [], 'o "enviando" da outra aba tirou o FAB do canto (o R10-4-05 de volta, por outro caminho)');
+  // As duas abas mandando ao mesmo tempo: a conta é de quem está saindo.
+  const d = indicadorDeVerdade({ fila: 1, noAr: 1 });
+  d.naOutraAba(1);
+  d.anotar(2);   // a decisão DESTA aba, no ar (anotada antes do envio, em andamento)
+  d.atualizar();
+  assert.equal(estadoDoIndicador(d).titulo, 'indicator.sending:2', 'a decisão da outra aba ficou fora da conta do "enviando"');
+  // CONTROLE: a mesma fila sem a marca da outra aba (ninguém mandando) é "esperando", com a marca de número.
+  const c = indicadorDeVerdade({ fila: 1 });
+  c.atualizar();
+  assert.deepEqual(estadoDoIndicador(c), { titulo: 'indicator.waiting:1', gira: false, relogio: true, naoCobrir: true },
+    'CONTROLE: a decisão que ninguém está mandando deixou de ser "esperando envio"');
+});
+
+test('R11-4-03: a marca da outra aba VENCE (a aba morreu no meio do envio) — o indicador vira "esperando" no prazo dela, sozinho, e o FAB sai de cima', () => {
+  const o = indicadorDeVerdade({ fila: 1 });
+  o.naOutraAba(1);
+  o.atualizar();
+  assert.equal(o.timers.size, 1, 'PRÉ-CONDIÇÃO: nenhum redesenho agendado pro prazo da marca');
+  o.passar(PRAZO_DA_MARCA - 1000);
+  assert.equal(estadoDoIndicador(o).titulo, 'indicator.sending:1', 'o indicador deixou de dizer "enviando" antes de a marca vencer');
+  o.passar(1100);
+  assert.deepEqual(estadoDoIndicador(o), { titulo: 'indicator.waiting:1', gira: false, relogio: true, naoCobrir: true },
+    'DEFEITO: a marca da outra aba venceu e o indicador seguiu girando — nada o redesenha no prazo dela');
+  assert.deepEqual(o.reavaliou, [true], 'a decisão passou a esperar envio e o FAB não foi reavaliado (segue em cima do número)');
+  assert.equal(o.timers.size, 0, 'sobrou temporizador depois de a marca vencer — sem marca, nada a esperar');
+  // CONTROLE: a outra aba ENTREGA antes do prazo (o item sai da fila, o aviso do
+  // armazenamento redesenha): o temporizador sai junto, e o prazo não faz nada.
+  const c = indicadorDeVerdade({ fila: 1 });
+  c.naOutraAba(1);
+  c.atualizar();
+  c.tirar(1);
+  c.atualizar();
+  assert.deepEqual([c.el(), c.timers.size], [null, 0], 'CONTROLE: a entrega da outra aba deixou o indicador ou o temporizador de pé');
+  c.passar(2 * PRAZO_DA_MARCA);
+  assert.deepEqual([c.el(), c.reavaliou], [null, []]);
+  // E sem marca nenhuma (só decisão esperando, sem rede), nenhum temporizador: nada a esperar, nada que ande sozinho.
+  const s = indicadorDeVerdade({ fila: 2 });
+  s.atualizar();
+  assert.equal(s.timers.size, 0, 'o indicador agendou redesenho sem marca de outra aba nenhuma');
 });
 
 // E a ORDEM do fim do envio: o executor do ✕/✓ redesenhava o indicador ANTES de
