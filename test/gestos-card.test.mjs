@@ -834,3 +834,62 @@ test('R10-4-01 composição: o card de foto travado que a pessoa ARRASTOU sai do
   d.g.esvaziar();
   assert.deepEqual(d.g.decidiu.map((x) => x[0]), ['right'], 'CONTROLE: o arraste do teste não passa do limiar');
 });
+
+// ── R11-4-02: o SELO do lado travado não acende ───────────────────────────
+// No card de foto sem a foto ("A foto precisa de sinal", ✕ e ✓ travados pela
+// `direcaoTravada`), o arraste pro lado acendia o "Lido" (ou o "Rejeitar")
+// inteiro — e soltar não decidia: o card voltava. O selo do lado só acende onde
+// SOLTAR decide, a mesma régua do `handleDragEnd` (MEDIDO nos dois motores, n29
+// da auditoria da rodada 11: o selo a 1 com 170 px, nada decidido). O ↑ segue
+// vivo no card sem foto, e o selo dele segue acendendo.
+function arrastarSemSoltar(g, [x0, y0], [x1, y1], n = 12) {
+  let t = g.toque(0, x0, y0);
+  g.noCard('touchstart', { touches: [t], changedTouches: [t] });
+  for (let i = 1; i <= n; i++) {
+    g.passo(25);
+    t = g.toque(0, x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n);
+    g.noDoc('touchmove', { touches: [t], changedTouches: [t] });
+  }
+  return t;
+}
+const opacidadesDoSelo = (g) => Object.fromEntries(['.swipe-left', '.swipe-right', '.swipe-up']
+  .map((s) => [s, g.selos[s] ? g.selos[s].style.opacity : undefined]));
+
+test('R11-4-02 card de foto sem a foto: arrastar pro lado travado NÃO acende o selo — e o ↑ segue acendendo', () => {
+  for (const [nome, dx, selo] of [['→ (Lido)', 170, '.swipe-right'], ['← (Rejeitar)', -170, '.swipe-left']]) {
+    const g = montar({ largura: 390 });
+    g.ctx.window.direcaoTravada = (d) => d === 'left' || d === 'right';
+    const t = arrastarSemSoltar(g, [200, 400], [200 + dx, 402]);
+    assert.equal(g.selos[selo].style.opacity, 0,
+      `${nome}: o selo acendeu (${g.selos[selo].style.opacity}) num lado em que soltar não decide — ${JSON.stringify(opacidadesDoSelo(g))}`);
+    g.passo(150);
+    g.noDoc('touchend', { touches: [], changedTouches: [t] });
+    g.esvaziar();
+    assert.deepEqual(g.decidiu.map((d) => d[0]), [], `PRÉ-CONDIÇÃO (${nome}): o lado travado decidiu ao soltar`);
+  }
+  // O ↑ (Pular) é o gesto que SOBRA no card sem foto: o selo dele acende.
+  const u = montar({ largura: 390 });
+  u.ctx.window.direcaoTravada = (d) => d === 'left' || d === 'right';
+  arrastarSemSoltar(u, [200, 400], [205, 250]);
+  assert.equal(u.selos['.swipe-up'].style.opacity, 1, 'o selo do ↑ apagou junto com os travados — o ↑ segue decidindo');
+});
+
+test('R11-4-02 CONTROLE: com o lado LIVRE, o mesmo arraste acende o selo e decide ao soltar', () => {
+  // Sem este, "o selo não acende" passaria com o instrumento cego (o arraste
+  // curto demais, ou o selo que nunca é escrito).
+  for (const [dx, selo, lado] of [[170, '.swipe-right', 'right'], [-170, '.swipe-left', 'left']]) {
+    const g = montar({ largura: 390 });
+    g.ctx.window.direcaoTravada = () => false;
+    const t = arrastarSemSoltar(g, [200, 400], [200 + dx, 402]);
+    assert.equal(g.selos[selo].style.opacity, 1, `CONTROLE: o selo ${selo} não acendeu num lado livre`);
+    g.passo(150);
+    g.noDoc('touchend', { touches: [], changedTouches: [t] });
+    g.esvaziar();
+    assert.deepEqual(g.decidiu.map((d) => d[0]), [lado], `CONTROLE: o arraste do teste não decidiu "${lado}"`);
+  }
+  // E travar SÓ um lado não apaga o outro (a régua é por lado, não pelo card).
+  const g = montar({ largura: 390 });
+  g.ctx.window.direcaoTravada = (d) => d === 'right';
+  arrastarSemSoltar(g, [200, 400], [30, 402]);
+  assert.equal(g.selos['.swipe-left'].style.opacity, 1, 'travar o → apagou o selo do ←');
+});
