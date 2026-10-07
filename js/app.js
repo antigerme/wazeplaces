@@ -1468,6 +1468,9 @@ function setupAppListeners() {
     // este mesmo caminho resolve a instalação sem toque nenhum e o botão acima
     // deixa de ser necessário.
     document.addEventListener('visibilitychange', aoVoltarAAba);
+    // E com o Histórico aberto: o que destravou com a página no fundo fica
+    // visto na volta (`verConquistasAoVoltar`, R12-7-01).
+    document.addEventListener('visibilitychange', verConquistasAoVoltar);
     $('themeBtn').addEventListener('click', toggleTheme);
     $('filtersBtn').addEventListener('click', () => {
         // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
@@ -17044,15 +17047,44 @@ function historicoNaTela() {
 // de uma ação grava o histórico, o autor e as conquistas em sequência, e o
 // painel tem que mostrar os três — daí o fim da tarefa, e não cada gravação.
 // Antes a ação que pousava com o painel aberto só aparecia fechando e
-// reabrindo o modal (auditoria de 2026-09-25).
+// reabrindo o modal (auditoria de 2026-09-25). E o que acende nele DIANTE da
+// pessoa fica visto, depois do redesenho (`verConquistasNaTela`).
 let redesenhoDoHistoricoAgendado = false;
 function agendarRedesenhoDoHistorico() {
     if (redesenhoDoHistoricoAgendado) return;
     redesenhoDoHistoricoAgendado = true;
     queueMicrotask(() => {
         redesenhoDoHistoricoAgendado = false;
-        if (historicoNaTela()) renderHistory();
+        if (!historicoNaTela()) return;
+        renderHistory();
+        verConquistasNaTela();
     });
+}
+
+// A conquista (ou a patente) que destrava com o painel do Histórico NA TELA
+// acende ali, com a etiqueta "nova", diante da pessoa: é ter visto, como entrar
+// na aba (`switchFilterTab`) — o redesenho põe o anel, e a marca o mantém nesta
+// abertura (`novasDestaAbertura`). Ela seguia em `novas`: fechado o modal,
+// o ponto do botão de Filtros ficava aceso ("Filtros — conquista nova"), e o
+// toque seguinte era desviado pro Histórico, com o pulso, pra mostrar o que a
+// pessoa acabara de ver (R12-7-01, MEDIDO nos dois motores; auditoria de
+// 2026-10-07).
+//
+// Só com a PÁGINA À VISTA. O painel também é redesenhado pelo aviso de OUTRA
+// aba (`aoGravarEmOutraAba`): esta aba no fundo, com o Histórico aberto, dava
+// por vista a conquista que a outra acabou de acender, e o ponto de lá apagava
+// sem ninguém ter olhado. Escondida, quem marca é a VOLTA à página
+// (`verConquistasAoVoltar`), com o painel ainda na tela.
+function verConquistasNaTela() {
+    if (document.visibilityState === 'hidden' || !historicoNaTela()) return;
+    marcarConquistasVistas();
+}
+
+// A página VOLTOU à vista com o Histórico aberto e algo novo nele — destravado
+// com ela no fundo, nesta aba ou noutra: o redesenho mostra, e dá por visto.
+function verConquistasAoVoltar() {
+    if (document.visibilityState !== 'visible' || !historicoNaTela() || !temConquistaNova()) return;
+    agendarRedesenhoDoHistorico();
 }
 
 function htmlPatente() {
