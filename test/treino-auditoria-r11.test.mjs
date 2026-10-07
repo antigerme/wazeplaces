@@ -539,3 +539,81 @@ test('R11-7-03: a fila refeita no "Sair" do treino ganha uma época que NINGUÉM
   c.app.Treino.sair();
   assert.equal(c.AppState.fetchEpoch, real, 'CONTROLE: o "Sair" sem refazer não devolveu a época da fila real');
 });
+
+// ═══ R11-7-05 · o que o ↑ ENSINA no treino é o que o ↑ de verdade FAZ ═════════
+// Com o "Pular guarda o pedido" ligado, o treino explicava o ↑ com "pular daria
+// ⭐ ao pedido no WME" — também num exemplo de pedido que JÁ tem a estrela (a ⭐
+// do card, ou a que o app já deu), onde o ↑ de verdade não manda nada (R9-7-06,
+// R10-2-05). Roda o `handleSkip` de verdade NOS DOIS MODOS, com o `Treino`, o
+// anel das estrelas (`estreladoPeloApp`) e a chave do pedido de verdade.
+const ESTRELADOS_KEY = /^const ESTRELADOS_KEY = '([^']+)';/m.exec(APP)[1];
+function montarPular({ pularGuarda = true, estrelado = null, noAnel = null } = {}) {
+  const toasts = [];
+  const enviadas = [];
+  const ls = new Map();
+  if (noAnel) ls.set(ESTRELADOS_KEY, JSON.stringify([`v${noAnel}|u${noAnel}`]));
+  const els = {};
+  const real = [1, 2, 3].map((n) => P(n, { isStarred: n === estrelado }));
+  const AppState = { authenticated: true, fetchEpoch: 0, pendingAction: null, autorEmFoco: null, queue: real.slice(),
+    currentPlace: real[0], stats: { read: 0, rejected: 0, skipped: 0 }, preferences: { comoFuncionaVisto: true, pularGuarda },
+    filters: {} };
+  const envio = { executor: null };
+  const deps = {
+    AppState, ...LIVRE(), ESTRELADOS_KEY, ESTRELADOS_MAX: 500,
+    safeLS: { get: (k) => (ls.has(k) ? ls.get(k) : null), set: (k, v) => ls.set(k, String(v)), remove: (k) => ls.delete(k) },
+    document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
+    t: (k) => k, showToast: (m) => { toasts.push(m); return { remover() {} }; },
+    acoesTravadas: () => false, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
+    API: { getRegion: () => 'row', guardarPedido: (v, u) => { enviadas.push(v + '|' + u); return Promise.resolve({ success: true }); } },
+    // A janela do Desfazer de mentira: o executor (o envio da estrela) roda já.
+    scheduleAction: (tipo, place, executor) => { envio.executor = executor(); },
+  };
+  const app = rodar(deps, [
+    ...['handleSkip', 'estreladoPeloApp', 'estreladosNoAparelho', 'anotarEstreladoPeloApp', 'chaveDoPedido'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['handleSkip', 'Treino']);
+  return { app, AppState, toasts, enviadas, els, envio };
+}
+// O ↑ no 1º pedido: o que o treino ENSINA (a frase do aviso) e o que o modo real
+// MANDA (a estrela ao Waze), sobre o MESMO pedido.
+async function oQueOPularFaz(caso) {
+  const t = montarPular(caso);
+  t.app.Treino.entrar();
+  assert.equal(t.AppState.currentPlace.venueID, 'v1', 'PRÉ-CONDIÇÃO: o 1º exemplo não é o clone do 1º pedido');
+  t.app.handleSkip();
+  assert.equal(t.enviadas.length, 0, 'o ↑ do TREINO mandou uma estrela de verdade');
+  const r = montarPular(caso);
+  r.app.handleSkip();
+  await r.envio.executor;
+  return { ensina: t.toasts.at(-1), manda: r.enviadas.length > 0 };
+}
+
+test('R11-7-05: o ↑ do treino ensina a ⭐ só onde o ↑ de verdade a manda — nunca num pedido que já a tem', async () => {
+  const casos = [
+    // CONTROLE: o pedido sem estrela — o treino ensina a ⭐ e o modo real a manda.
+    { nome: 'sem estrela (CONTROLE)', caso: {}, ensina: 'treino.efeito.skipGuarda', manda: true },
+    { nome: 'com a ⭐ no card (isStarred)', caso: { estrelado: 1 }, ensina: 'treino.efeito.skip', manda: false },
+    { nome: 'estrelado pelo app (o anel)', caso: { noAnel: 1 }, ensina: 'treino.efeito.skip', manda: false },
+    { nome: 'outro pedido no anel', caso: { noAnel: 2 }, ensina: 'treino.efeito.skipGuarda', manda: true },
+    { nome: '"Pular guarda" desligado', caso: { pularGuarda: false, estrelado: 1 }, ensina: 'treino.efeito.skip', manda: false },
+  ];
+  for (const c of casos) {
+    const r = await oQueOPularFaz(c.caso);
+    assert.equal(r.manda, c.manda, `PRÉ-CONDIÇÃO (${c.nome}): o ↑ de verdade ${c.manda ? 'não mandou' : 'mandou'} a estrela — mudou a régua do handleSkip`);
+    assert.equal(r.ensina, c.ensina,
+      `DEFEITO (${c.nome}): o treino ensina "${r.ensina}" e o ↑ de verdade ${r.manda ? 'manda' : 'NÃO manda'} a estrela (R11-7-05)`);
+    assert.equal(r.ensina === 'treino.efeito.skipGuarda', r.manda, `(${c.nome}) o que o treino ensina e o que o app faz divergem`);
+  }
+});
+
+test('R11-7-05: no ÚLTIMO exemplo a frase vai no "Treino concluído" — e segue a mesma régua', () => {
+  const m = montarPular({ estrelado: 3 });
+  m.app.Treino.entrar();
+  m.app.Treino.agir('read');
+  m.app.Treino.agir('read');
+  assert.equal(m.AppState.queue.length, 1, 'PRÉ-CONDIÇÃO: não sobrou só o último exemplo');
+  assert.equal(m.AppState.queue[0].isStarred, true, 'PRÉ-CONDIÇÃO: o último exemplo não é o do pedido estrelado');
+  m.app.handleSkip();
+  assert.equal(m.els.treinoFimEfeito && m.els.treinoFimEfeito.textContent, 'treino.efeito.skip',
+    'DEFEITO: o "Treino concluído" diz que pular daria ⭐ a um pedido que já a tem (R11-7-05)');
+});

@@ -21450,12 +21450,14 @@ const Treino = {
         const c = JSON.parse(JSON.stringify(p));
         c.updateRequestID = this.UR_INERTE;
         c._treino = true;
-        // O id de verdade, SÓ pra achar a foto em decisão (`fotosDoCard`): o
+        // O id de verdade, SÓ pra LER: achar a foto em decisão (`fotosDoCard`): o
         // treino escolhe os cards por variedade justamente pra ensinar o card de
         // foto, e sem ele ensinava na foto errada — a antiga, sem ✨ nem a borda
         // âmbar (R6-7-6, auditoria de 2026-10-01; em 13 de 76 pedidos de foto da
         // fila do owner a proposta não é a 1ª). Escrita nenhuma o lê: as de foto
-        // têm o guard do treino, e as do card a trava no topo dos handlers.
+        // têm o guard do treino, e as do card a trava no topo dos handlers. A
+        // outra leitura é a frase do ↑ (`pularGuardaria`: o app já estrelou o
+        // pedido de verdade?), que só lê o anel das estrelas.
         c._urFoto = p.updateRequestID;
         return c;
     },
@@ -21926,6 +21928,18 @@ const Treino = {
         fecharCamadasDeFoto();
     },
 
+    // O ↑ deste exemplo GUARDARIA o pedido no modo real? A régua do `handleSkip`:
+    // o "Pular guarda o pedido" ligado, e o pedido sem a estrela — nem a ⭐ do
+    // card (`isStarred`, R9-7-06) nem a que o app já deu, nesta aba ou noutra
+    // (`estreladoPeloApp`, R10-2-05). Nesses o ↑ de verdade não manda nada, e o
+    // treino dizia "pular daria ⭐" (R11-7-05, MEDIDO no navegador; auditoria da
+    // rodada 11). O clone leva o `updateRequestID` inerte: a chave do pedido de
+    // verdade é a do `_urFoto` (só lida aqui; escrita nenhuma o usa).
+    pularGuardaria(p) {
+        if (AppState.preferences.pularGuarda !== true || !p || p.isStarred === true) return false;
+        return estreladoPeloApp({ venueID: p.venueID, updateRequestID: p._urFoto || p.updateRequestID }) !== true;
+    },
+
     agir(tipo) {
         if (!this.ativo) return;
         const ultimo = AppState.queue.length <= 1;
@@ -21934,8 +21948,9 @@ const Treino = {
         // aviso flutuante sobre a área do card já vazia (o swipe animou o card
         // pra fora), e esperar pra ler deixava 2,2s de tela em branco.
         // O ↑ com o "Pular guarda o pedido" ligado ENVIA a estrela no modo real:
-        // "pular não envia nada" seria falso justamente pra quem o ligou.
-        const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && AppState.preferences.pularGuarda === true ? 'skipGuarda' : tipo);
+        // "pular não envia nada" seria falso justamente pra quem o ligou. Menos
+        // no pedido que já a tem (ver `pularGuardaria`).
+        const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && this.pularGuardaria(AppState.queue[0]) ? 'skipGuarda' : tipo);
         if (!ultimo) this.aviso = showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000);
         this.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
         this.restam = Math.max(0, this.restam - (tipo === 'skip' ? 0 : 1));

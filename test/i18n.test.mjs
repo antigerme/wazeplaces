@@ -627,7 +627,14 @@ test('o que o Desfazer desfaz é o PEDIDO, não o local (e o erro da ação idem
 
 test('treino: com o "Pular guarda o pedido" ligado, o efeito do ↑ NÃO diz que "não envia nada"', () => {
   const app = read('js/app.js');
-  assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && AppState\.preferences\.pularGuarda === true \? 'skipGuarda' : tipo\)/);
+  // A frase da ⭐ sai quando o ↑ de verdade a mandaria (`Treino.pularGuardaria`, a
+  // régua do `handleSkip`): a preferência ligada e o pedido ainda sem a estrela. No
+  // pedido que já a tem, o ↑ de verdade não manda nada, e "não envia nada" é a
+  // verdade (R11-7-05). O comportamento nos dois modos, sobre o mesmo pedido, está
+  // em test/treino-auditoria-r11.test.mjs.
+  assert.match(app, /'treino\.efeito\.' \+ \(tipo === 'skip' && this\.pularGuardaria\(AppState\.queue\[0\]\) \? 'skipGuarda' : tipo\)/);
+  assert.match(app, /pularGuardaria\(p\) \{\s*if \(AppState\.preferences\.pularGuarda !== true \|\|/,
+    'a frase da ⭐ deixou de exigir o "Pular guarda o pedido" ligado');
   for (const lang of LANGS) assert.match(DICT[lang]['treino.efeito.skipGuarda'], /⭐/, lang);
 });
 
