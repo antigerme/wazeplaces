@@ -11046,12 +11046,16 @@ function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
 // espera a resposta (`startFetching`).
 //
 // UMA ida por servidor e por sessão (`epocaDaSessao`): a que está no ar é
-// dividida, e a que terminou — deu certo ou não — não sai de novo; a que falhou
-// deixa a caixa do perfil que o app tem, como antes. E só depois de um GESTO: o
-// servidor da busca só fica sem leitura quando a pessoa aplica uma região à mão
-// — o da abertura é lido com o perfil, e o da ida pro país do perfil, pelo
-// `paisDoPerfil`. Devolve a promessa da ida (no ar ou nova), ou `null` quando não
-// há o que perguntar.
+// dividida, e a que o servidor RESPONDEU — deu certo ou não — não sai de novo; a
+// que falhou deixa a caixa do perfil que o app tem, como antes. A que NEM CHEGOU
+// (`_motivo`: a rede, o teto de 45 s) não conta, e sem rede nem se pergunta: a
+// busca também não sai, e quem aplicou a região num túnel teria a resposta
+// gasta numa falha do aparelho — com a rede de volta, a busca ia com a caixa de
+// outro servidor (o mesmo "Tudo limpo!"). Na MESMA busca ela não se repete (ver
+// o `startFetching`). E só depois de um GESTO: o servidor da busca só fica sem
+// leitura quando a pessoa aplica uma região à mão — o da abertura é lido com o
+// perfil, e o da ida pro país do perfil, pelo `paisDoPerfil`. Devolve a promessa
+// da ida (no ar ou nova), ou `null` quando não há o que perguntar.
 let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };
 function lerServidorDaMinhaArea(regiao = API.getRegion()) {
     const perfil = AppState.profile;
@@ -11062,8 +11066,11 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
     const estas = leiturasDaMinhaArea;
     if (estas.feitas.has(regiao)) return null;
     if (estas.noAr.has(regiao)) return estas.noAr.get(regiao);
+    if (navigator.onLine === false) return null;
     const epoca = epocaDaSessao;
+    let respondeu = true;
     const ida = Promise.resolve(API.getProfile(regiao)).then((r) => {
+        if (r && r._motivo) { respondeu = false; return; }
         if (epoca !== epocaDaSessao || !(r && r.success && r.profile)) return;
         // A conta que perguntou: a resposta de outra conta não entra na dela.
         if (!AppState.profile || String(AppState.profile.id) !== String(perfil.id)) return;
@@ -11073,7 +11080,7 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
         redesenharFiltrosComOPerfil();
     }).catch(() => {}).finally(() => {
         estas.noAr.delete(regiao);
-        estas.feitas.add(regiao);
+        if (respondeu) estas.feitas.add(regiao);
     });
     estas.noAr.set(regiao, ida);
     return ida;
@@ -11512,9 +11519,15 @@ async function startFetching() {
     // com a frase falsa, ou ia ao servidor novo com a área de outro. A busca
     // espera, e sai UMA vez, no lugar e com a caixa que a decisão deixar. Cada
     // volta espera uma promessa NO AR (as duas se apagam ao terminar), com teto:
-    // nunca gira em falso (gotcha #19).
+    // nunca gira em falso (gotcha #19). E a pergunta ao servidor é UMA por busca:
+    // a que não teve resposta não se repete aqui (fica pra próxima busca).
+    let perguntou = false;
     for (let volta = 0; volta < 4 && AppState.filters.myArea && AppState.authenticated; volta++) {
-        const decidindo = AppState._caixaDaMinhaAreaNoAr || lerServidorDaMinhaArea();
+        let decidindo = AppState._caixaDaMinhaAreaNoAr;
+        if (!decidindo && !perguntou) {
+            decidindo = lerServidorDaMinhaArea();
+            perguntou = !!decidindo;
+        }
         if (!decidindo) break;
         buscaEsperaOPerfil = true;
         updatePendingCount();

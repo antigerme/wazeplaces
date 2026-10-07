@@ -227,8 +227,11 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
       managedAreaId: '', categories: [], sortOrder: 'newest' },
     profile: null, countries: [], statesByCountry: {}, stats: { read: 0, rejected: 0, skipped: 0 }, pendingAction: null,
   };
-  // O `/Session` de cada servidor: o que o teste deu, ou a falha (rede).
-  const resposta = (r) => (perfis[r] ? { success: true, profile: { ...perfis[r] } } : { success: false, errorCategory: 'transient' });
+  // O `/Session` de cada servidor: o que o teste deu; a falha que o servidor
+  // RESPONDEU (o Waze fora); ou a que NEM CHEGOU (`_motivo`, como o `_post` marca).
+  const resposta = (r) => (perfis[r] === 'semResposta' ? { success: false, errorCategory: 'transient', _motivo: 'TypeError' }
+    : perfis[r] ? { success: true, profile: { ...perfis[r] } } : { success: false, errorCategory: 'transient' });
+  const navegador = { onLine: true };
   const API = {
     getRegion: () => lugar.regiao, setRegion: (r) => { lugar.regiao = r; },
     getCountry: () => lugar.pais, setCountry: (p) => { lugar.pais = Number(p); },
@@ -248,7 +251,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
   const deps = {
     AppState, API, TYPES_ALL: constante('TYPES_ALL'), PREFETCH_THRESHOLD: constante('PREFETCH_THRESHOLD'),
     MAX_EMPTY_PAGES: constante('MAX_EMPTY_PAGES'), MAX_PAGINAS_POR_BUSCA: constante('MAX_PAGINAS_POR_BUSCA'),
-    REGIOES_DO_WAZE: ['row', 'na', 'il'], navigator: { onLine: true }, Treino: { ativo: false, entradas: 0 },
+    REGIOES_DO_WAZE: ['row', 'na', 'il'], navigator: navegador, Treino: { ativo: false, entradas: 0 },
     document: { getElementById: () => el() },
     dfato: () => {}, dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
     handleUnauthorized: () => {}, showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
@@ -298,7 +301,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
   // "Aplicar" com outra REGIÃO (e o país dela) nos Filtros.
   const aplicarRegiao = (r, p) => { lugar.regiao = r; lugar.pais = p; return atualizar(); };
   const avisos = () => log.filter((l) => l.startsWith('toast:'));
-  return { app, AppState, lugar, log, buscas, perguntas, soltar, chegaOPerfil, atualizar, aplicarRegiao, avisos };
+  return { app, AppState, lugar, log, buscas, perguntas, soltar, chegaOPerfil, atualizar, aplicarRegiao, avisos, navegador };
 }
 const SO_NA = {
   row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [], areas: [], managedAreas: [] },
@@ -394,9 +397,9 @@ test('R10-6-02: sem área no servidor aplicado, "Minha área" desliga e diz — 
   assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa']);
 });
 
-test('R10-6-02: a ida é UMA por servidor e por sessão — a que está no ar é dividida, e a que falhou não sai de novo até a sessão mudar', async () => {
+test('R10-6-02: a ida é UMA por servidor e por sessão — a que está no ar é dividida, e a que o servidor respondeu com falha não sai de novo até a sessão mudar', async () => {
   const perfis = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
-  // A NA não responde (a rede, o Waze fora): `perfis.na` não existe.
+  // O servidor responde com falha (o Waze fora): `perfis.na` não existe.
   const m = montarServidores({ perfis, segurar: ['na'] });
   await m.chegaOPerfil();
   m.lugar.regiao = 'na';
@@ -473,4 +476,36 @@ test('R10-6-01: "Minha área" mudada num "Aplicar" no meio da pergunta ao servid
   assert.equal(on.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY), `PRÉ-CONDIÇÃO: a fila da NA não foi a da área: ${on.buscas}`);
   assert.ok(!on.avisos().some((a) => a.includes('toast.paisDoPerfil')),
     `o aviso "Mostrando a fila de…" saiu sobre a fila da ÁREA: ${on.avisos()}`);
+});
+
+test('R10-6-02: sem rede a pergunta nem sai, e a que NEM CHEGOU não conta — com a rede de volta, a busca pergunta (uma vez por busca)', async () => {
+  const perfis = {
+    row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] },
+    na: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [235], areas: AREA_NY, managedAreas: [] },
+  };
+  const m = montarServidores({ perfis });
+  await m.chegaOPerfil();
+  // A pessoa aplica a NA num túnel: nada sai (a busca também não).
+  m.navegador.onLine = false;
+  await m.aplicarRegiao('na', 235);
+  assert.deepEqual([m.perguntas, m.buscas], [[], []], `sem rede, a pergunta à NA saiu: ${m.perguntas} · ${m.buscas}`);
+  // A rede volta (o `online`, o "Tentar de novo"): a busca pergunta à NA e vai pela caixa de lá.
+  m.navegador.onLine = true;
+  await m.atualizar();
+  assert.deepEqual(m.perguntas, ['na'], `com a rede de volta, a NA não foi perguntada: ${m.perguntas}`);
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)],
+    `com a rede de volta, a busca foi com a caixa de outro servidor: ${m.buscas} — o "Tudo limpo!" com "Minha área" ligada`);
+  // A resposta que NEM CHEGOU (a rede caiu no meio, o teto de 45 s) também não conta,
+  // e na MESMA busca não se repete.
+  const daNa = { ...perfis, na: 'semResposta' };
+  const q = montarServidores({ perfis: daNa });
+  await q.chegaOPerfil();
+  await q.aplicarRegiao('na', 235);
+  assert.deepEqual(q.perguntas, ['na'], `a pergunta sem resposta se repetiu na mesma busca: ${q.perguntas}`);
+  daNa.na = perfis.na;                               // a rede volta de verdade
+  await q.atualizar();
+  assert.deepEqual(q.perguntas, ['na', 'na'], `a pergunta sem resposta valeu pela ida da NA: ${q.perguntas}`);
+  assert.equal(q.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY), `a busca seguinte não foi pela caixa da NA: ${q.buscas}`);
+  await q.atualizar();
+  assert.deepEqual(q.perguntas, ['na', 'na'], `a NA respondida foi perguntada de novo: ${q.perguntas}`);
 });
