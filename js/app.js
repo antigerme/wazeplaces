@@ -20926,6 +20926,15 @@ const pousosDaPagina = new Map();
 // Mais velho que isto, qualquer busca nova já o reflete — a poda só impede que
 // o mapa cresça numa sessão longa.
 const POUSO_NA_MEMORIA_MS = 10 * 60 * 1000;
+// O OBJETO do pedido que pousou NESTA página (ver `registrarPouso`). Quase sempre
+// ele já saiu da fila no gesto; os que FICAM nela depois de pousar são o alvo do
+// "Marcar todos" (até o fim do lote: os pedaços pousam um a um, e o lote os tira
+// da fila só no fim) e o pedido aprovado com a foto ainda aberta
+// (`placeResolvidoPorAprovacao`). É a gravação da fila guardada que pergunta
+// (`offlineGravarFila`, R13-2-04). Pelo OBJETO, não pela chave: o mesmo pedido
+// que volta numa busca de depois (o lido, com "lidos também") é outro objeto, e é
+// card legítimo.
+const pedidosQuePousaram = new WeakSet();
 
 function marcarEmAndamento(places, sim) {
     for (const p of (Array.isArray(places) ? places : [places])) {
@@ -20964,7 +20973,11 @@ function registrarPouso(places, quem) {
     const chaves = [];
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
-        if (k) { chaves.push(k); pousosDaPagina.set(k, agora); }
+        if (k) {
+            chaves.push(k);
+            pousosDaPagina.set(k, agora);
+            if (typeof pedidosQuePousaram !== 'undefined') pedidosQuePousaram.add(p);
+        }
     }
     if (!chaves.length) return;
     if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves, quem);
@@ -21479,8 +21492,9 @@ function offlineDB() {
 
 // `desde` é o instante a partir do qual a lista gravada vale: o começo da busca
 // que a trouxe, ou AGORA quando quem grava é a varredura (aí a lista é a fila
-// viva, que já não tem nada do que foi decidido nesta página). Vai gravado junto
-// porque é contra ele que a reabertura sem rede filtra os pousos.
+// viva, que já não tem nada do que foi decidido nesta página — o que segue nela
+// decidido sai logo abaixo, R13-2-04). Vai gravado junto porque é contra ele que
+// a reabertura sem rede filtra os pousos.
 async function offlineGravarFila(desde) {
     // A fila REAL (`filaReal`), lida AGORA, antes do `await`. No treino a da tela
     // é a de EXEMPLOS (`_treino`, e parte sintética, com id que não existe):
@@ -21498,8 +21512,22 @@ async function offlineGravarFila(desde) {
     // ia ao Waze (R12-4-01, MEDIDO no navegador: lido lá e rejeitado aqui). Pelo
     // OBJETO anotado, não pela chave: o mesmo pedido que volta numa busca de
     // depois (com "lidos também") é card legítimo, e vai.
+    //
+    // E SEM o que ESTA página já decidiu e segue na fila (R13-2-04): o que está EM
+    // ANDAMENTO (`pedidosEmAndamento`: o alvo do "Marcar todos", que só sai da
+    // fila no fim do lote, e a aprovação de foto no ar) e o que já POUSOU com o
+    // card ainda nela (`pedidosQuePousaram`: os pedaços do lote que já pousaram, e
+    // o pedido aprovado com a foto aberta). A poda logo abaixo apaga todo pouso
+    // mais velho que `desde`, porque a lista "já o reflete" — e isso só é verdade
+    // se ela não traz pedido decidido. A varredura que uma prova de rede dispara
+    // no meio de um "Marcar todos" gravava os 30 alvos e podava os pousos dos 25
+    // que o Waze já tinha marcado: reaberto sem rede, os 25 voltavam como card, e
+    // o ✕ num deles ia ao Waze (MEDIDO no navegador, o1 da rodada 13). O que o
+    // lote não marcar segue na fila e entra na próxima gravação.
     const fila = filaReal().filter((p) => !(typeof decididosPorOutraAbaComCardAqui !== 'undefined'
-        && decididosPorOutraAbaComCardAqui.has(p) === true));
+            && decididosPorOutraAbaComCardAqui.has(p) === true)
+        && !(typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(chaveDoPedido(p)) === true)
+        && !(typeof pedidosQuePousaram !== 'undefined' && pedidosQuePousaram.has(p) === true));
     if (!offlineLigado() || !fila.length) return false;
     // E o DONO: a sessão DESTA aba, a da MEMÓRIA (`marcaDestaAba`, R12-1-03), e
     // sem ela nada é gravado (R13-4-04). Era o `getSession`, que com a memória

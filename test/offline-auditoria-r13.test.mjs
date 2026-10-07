@@ -2,6 +2,11 @@
 // buracos na fila guardada do "Disponível offline", todos MEDIDOS no navegador
 // (os roteiros da rodada 13):
 //
+//  · R13-2-04 — a varredura que uma prova de rede dispara no MEIO de um "Marcar
+//    todos" gravava os 30 alvos na fila guardada (eles seguem na fila, em
+//    andamento, até o fim do lote) e podava os pousos dos 25 que o Waze já tinha
+//    marcado: reaberto sem rede, os 25 voltavam como card, e o ✕ num deles ia ao
+//    Waze. O mesmo com o pedido aprovado que fica na fila até a foto fechar;
 //  · R13-4-04 — a gravação da fila guardada (e a reabertura depois de uma busca
 //    que falhou) perguntava a sessão ao `getSession`, que com a memória vazia
 //    ADOTA a sessão que outra aba guardou no aparelho (R9-1-03): a busca que
@@ -55,6 +60,7 @@ const constante = (nome) => {
 const DECLARACOES = [
   linhaDoFonte(/^const pousosDaPagina = new Map\(\);$/m, 'os pousos da página'),
   linhaDoFonte(/^const pedidosEmAndamento = new Set\(\);$/m, 'os pedidos em andamento'),
+  linhaDoFonte(/^const pedidosQuePousaram = new WeakSet\(\);$/m, 'os pedidos (objetos) que pousaram'),
   linhaDoFonte(/^const decididosPorOutraAbaComCardAqui = new WeakSet\(\);$/m, 'o card que a outra aba decidiu'),
 ];
 const CONTA_KEY = constante('CONTA_KEY');
@@ -172,6 +178,80 @@ async function reabrirSemRede(aparelho, base) {
   return C.AppState.queue.map(chave);
 }
 
+// ═══ R13-2-04 · "Marcar todos" × a varredura no meio ═════════════════════════
+// O roteiro o1 da auditoria: a fila guardada coberta antes do lote; "Marcar
+// todos" em 30, o 1º pedaço (25) pousa; uma prova de rede dispara a varredura,
+// que grava a fila (desde = agora) e poda os pousos mais velhos; o 2º pedaço
+// pousa e o lote acaba. `fora`: o pedido que o lote deixa de fora (o já lido),
+// que segue como card.
+async function loteComVarreduraNoMeio({ varreNoMeio = true } = {}) {
+  const aparelho = aparelhoCom('tok-a');
+  const base = baseDeMentira();
+  const alvos = Array.from({ length: 30 }, (_, i) => P(i));
+  const fora = P(99);
+  const A = aba({ aparelho, base, fila: [...alvos, fora], memoria: 'tok-a', perfil: { id: 4242 } });
+  assert.equal(await A.app.offlineGravarFila(), true, 'PRÉ-CONDIÇÃO: a fila não foi gravada antes do lote');
+  await relogioAndou();
+  A.app.marcarEmAndamento(alvos, true);          // o lote no ar (`handleBatchMarkRead`)
+  A.app.registrarPouso(alvos.slice(0, 25));      // o 1º pedaço pousou
+  const tPouso = Date.now();
+  await relogioAndou(tPouso);
+  let gravadaNoMeio = null;
+  if (varreNoMeio) {
+    await A.app.offlineGravarFila();             // a varredura da prova de rede
+    gravadaNoMeio = base.guardado.get('fila').places.map(chave);
+  }
+  await relogioAndou();
+  A.app.registrarPouso(alvos.slice(25));         // o 2º pedaço pousou
+  A.app.marcarEmAndamento(alvos, false);         // o fim do lote: os 30 saem da fila
+  A.AppState.queue = [fora];
+  return { gravadaNoMeio, reaberta: await reabrirSemRede(aparelho, base) };
+}
+
+test('R13-2-04: a varredura no MEIO de um "Marcar todos" não grava os alvos — reaberto sem rede, o que o lote marcou não volta como card', async () => {
+  const r = await loteComVarreduraNoMeio();
+  assert.deepEqual(r.gravadaNoMeio, ['v99|u99'],
+    `DEFEITO: a gravação do meio do lote levou os alvos (em andamento, ou já marcados) pra fila guardada: ${r.gravadaNoMeio.length} pedidos`);
+  assert.deepEqual(r.reaberta, ['v99|u99'],
+    `DEFEITO: reaberto sem rede, ${r.reaberta.length - 1} pedidos que o lote marcou voltaram como card — o ✕ num deles iria ao Waze`);
+  // CONTROLE (o do auditor): o mesmo lote SEM a varredura no meio — a fila
+  // guardada de antes do lote, com os 30 pousos, reabre só com o de fora.
+  const c = await loteComVarreduraNoMeio({ varreNoMeio: false });
+  assert.deepEqual(c.reaberta, ['v99|u99'], 'CONTROLE: sem a varredura no meio, a reabertura trouxe pedido do lote');
+});
+
+// O outro pedido que POUSA e fica na fila: o aprovado com a foto ainda aberta
+// (`concluirAprovacao` → `placeResolvidoPorAprovacao`), que só sai quando ela
+// fecha. Uma varredura nesse meio o gravava, e podava o pouso dele.
+async function aprovadoComAFotoAberta({ objetoNovo = false } = {}) {
+  const aparelho = aparelhoCom('tok-a');
+  const base = baseDeMentira();
+  const Y = P(1), Z = P(2);
+  const A = aba({ aparelho, base, fila: [Y, Z], memoria: 'tok-a', perfil: { id: 4242 } });
+  assert.equal(await A.app.offlineGravarFila(), true, 'PRÉ-CONDIÇÃO: a fila não foi gravada');
+  await relogioAndou();
+  A.app.registrarPouso(Y);                       // a aprovação pousou; Y segue na fila
+  await relogioAndou();
+  // CONTROLE pelo OBJETO: a busca de depois trouxe o MESMO pedido de novo (o
+  // lido, com "lidos também") — outro objeto, card legítimo.
+  if (objetoNovo) A.AppState.queue[0] = { ...Y };
+  await A.app.offlineGravarFila();               // a varredura nesse meio
+  return { gravada: base.guardado.get('fila').places.map(chave), reaberta: await reabrirSemRede(aparelho, base) };
+}
+
+test('R13-2-04: o pedido APROVADO com a foto ainda aberta (ele fica na fila até ela fechar) não vai pra fila guardada', async () => {
+  const r = await aprovadoComAFotoAberta();
+  assert.deepEqual(r.gravada, ['v2|u2'], `DEFEITO: o pedido aprovado foi gravado na fila guardada: ${r.gravada}`);
+  assert.deepEqual(r.reaberta, ['v2|u2'], `DEFEITO: reaberto sem rede, o pedido aprovado voltou como card: ${r.reaberta}`);
+});
+
+test('R13-2-04: CONTROLE — pelo OBJETO, não pela chave: o mesmo pedido que ENTROU de novo numa busca de depois é gravado e reabre', async () => {
+  const r = await aprovadoComAFotoAberta({ objetoNovo: true });
+  assert.deepEqual(r.gravada, ['v1|u1', 'v2|u2'],
+    'a regra ficou larga demais: o pedido que voltou numa busca de depois (card legítimo) ficou fora da fila guardada');
+  assert.deepEqual(r.reaberta, ['v1|u1', 'v2|u2']);
+});
+
 // ═══ R13-4-04 · a gravação e a reabertura não ADOTAM a sessão de outra aba ═══
 // O roteiro p7: duas abas da MESMA conta com sessões diferentes — a B entrou de
 // novo, e o aparelho guarda a `tok-b`. A sessão de A cai com a busca no ar: a
@@ -239,7 +319,7 @@ test('R13-4-04: a sessão que CAI enquanto a base é lida também não deixa a f
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const nome of ['marcaDestaAba', 'filaGuardadaDestaConta']) {
+  for (const nome of ['marcaDestaAba', 'filaGuardadaDestaConta', 'pedidosQuePousaram']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);
