@@ -294,3 +294,50 @@ test('R12-5-03 a região diz a falha que a TELA mostra, ou nada: a que segue na 
   assert.equal(fraseNaTela(c), null, 'CONTROLE: a tela tirou a linha de falha');
   assert.equal(anuncio(c), dita, 'o eco calou o anúncio da mensagem que chegou');
 });
+
+// ── R12-5-06: a lista mais velha e as conversas da carona de outro país ─────
+
+// A pessoa da conversa no app (a parte da lista que não tem a ver com conversa).
+const CAF_NO_APP = { id: CAF, nome: 'cafanha', rank: 3, lat: -23.53, lon: -46.64 };
+
+// L0 (nada novo) → a M (a 2000) chega ao vivo → C1, a carona que SAIU em
+// T + 3000 (depois da M), conta a M — do país `paisDaCarona` → L1, a lista
+// cheia que SAIU em T + 1500 (antes da M, lida antes dela, e com a CAF no
+// app), chega por último.
+async function caronaDeOutroPais({ paisDaCarona }) {
+  const c = novoCliente({ agora: T + 100, pais: 30 });
+  c.P.presencaAoCarona(lista(3, 0), T + 100, 30);
+  c.relogio.agora = T + 2000; await chega(c, 2000); await tick();
+  const r = { aoVivo: conta(c) };
+  c.relogio.agora = T + 3500; c.P.presencaAoCarona(lista(2000, 1), T + 3000, paisDaCarona); await tick();
+  r.depoisDaCarona = conta(c);
+  c.relogio.agora = T + 4000; c.P.presencaAoCarona({ ...lista(3, 0), online: [CAF_NO_APP] }, T + 1500, 30); await tick();
+  r.depoisDaVelha = conta(c);
+  r.conversasSaiuEm = c.P.Presenca.conversasSaiuEm - T;
+  r.atualizadaEm = c.P.Presenca.atualizadaEm - T;
+  r.online = c.P.Presenca.online.map((p) => p.id);
+  return { c, r };
+}
+
+test('R12-5-06 a lista cheia que saiu ANTES da carona de outro país, chegando depois, não põe de volta as conversas de antes', async () => {
+  const { r } = await caronaDeOutroPais({ paisDaCarona: 73 });
+  assert.deepEqual([r.aoVivo, r.depoisDaCarona], [1, 1], 'CONTROLE: a resposta conta 1 ao vivo e pela carona');
+  assert.equal(r.depoisDaVelha, 1, 'DEFEITO: a lista mais velha que a carona pôs de volta as conversas de antes — a resposta sumiu da pílula');
+  assert.equal(r.conversasSaiuEm, 3000, 'a régua das conversas andou pra trás');
+  // CONTROLE: a parte de quem está no app da lista velha segue entrando — nela,
+  // não chegou nada mais novo.
+  assert.deepEqual(r.online, [CAF], 'a lista de quem está no app da lista velha ficou de fora');
+  assert.equal(r.atualizadaEm, 1500);
+  // CONTROLE: a carona do MESMO país já barrava a lista velha inteira (a régua
+  // de quem está no app anda com ela).
+  const { r: k } = await caronaDeOutroPais({ paisDaCarona: 30 });
+  assert.deepEqual([k.aoVivo, k.depoisDaCarona, k.depoisDaVelha], [1, 1, 1]);
+});
+
+test('R12-5-06 CONTROLE: a lista que saiu DEPOIS da carona de outro país ainda troca as conversas', async () => {
+  const { c } = await caronaDeOutroPais({ paisDaCarona: 73 });
+  // A resposta foi lida noutro lugar (o WME): a lista nova diz zero, e vale.
+  c.relogio.agora = T + 6000; c.P.presencaAoCarona(lista(2000, 0), T + 5000, 30); await tick();
+  assert.equal(conta(c), 0, 'a lista mais nova que a carona não trocou as conversas');
+  assert.equal(c.P.Presenca.conversasSaiuEm - T, 5000);
+});

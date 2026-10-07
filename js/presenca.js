@@ -648,7 +648,15 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
         if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
         else if (trocouDePais) { Presenca.online = []; incompleta = true; }
     }
-    if (Array.isArray(r.conversas)) {
+    // As CONVERSAS têm régua própria, a `conversasSaiuEm`: a carona de OUTRO
+    // país as traz sem mexer na `atualizadaEm` (a lista de quem está no app,
+    // dela, fica de fora), e a lista cheia que saiu ANTES dela e chegou DEPOIS
+    // passava pela régua de cima e punha de volta as conversas de antes — a
+    // resposta que só a carona contava sumia da pílula, e a `conversasSaiuEm`
+    // andava pra trás (auditoria da rodada 12, R12-5-06). Mais velhas que as da
+    // tela, as conversas dessa lista ficam de fora; a lista de quem está no app,
+    // dela, segue entrando (nela, não chegou nada mais novo).
+    if (Array.isArray(r.conversas) && !(inicio < Presenca.conversasSaiuEm)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         Presenca.conversasSaiuEm = inicio;
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
