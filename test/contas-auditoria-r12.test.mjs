@@ -224,11 +224,16 @@ test('R12-1-01: os cookies confirmados com o resgate do código no ar ESPERAM o 
   const resgate = m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });   // o link /#pair=
   const colar = m.h.authenticateWithCookies('cookies colados');
   await tique();
-  assert.ok(!m.log.includes('os cookies foram ao servidor'),
-    'DEFEITO: os cookies saíram com o resgate do código no ar — dois logins desta aba ao mesmo tempo: ' + JSON.stringify(m.log));
+  // O que a REDE viu com o resgate no ar, anotado antes de soltar qualquer resposta e conferido depois de
+  // tudo terminar: o teste que reprova não deixa promessa pendurada (nem derruba os seguintes).
+  const cookiesComOResgateNoAr = m.log.includes('os cookies foram ao servidor');
   m.soltar.codigo(PAREADO);
   await resgate;
+  await tique();
+  if (m.soltar.cookies) m.soltar.cookies(COOKIES_OK);   // só com o defeito: os cookies tinham ido ao servidor
   await colar;
+  assert.ok(!cookiesComOResgateNoAr,
+    'DEFEITO: os cookies saíram com o resgate do código no ar — dois logins desta aba ao mesmo tempo: ' + JSON.stringify(m.log));
   assert.deepEqual(m.criadas(), ['servidor criou tok-p'],
     'DEFEITO: duas sessões nasceram (o "Sair" apagaria só a última, a outra ficaria órfã por até 21 dias): ' + JSON.stringify(m.log));
   assert.equal(m.API.sessionToken, 'tok-p', 'a sessão da aba não é a do login que entrou');
@@ -259,6 +264,8 @@ test('R12-1-01: pelo TECLADO, quem desiste porque o resgate entrou promete o foc
     await tique();
     m.soltar.codigo(PAREADO);
     await resgate;
+    await tique();
+    if (m.soltar.cookies) m.soltar.cookies(COOKIES_OK);   // sem a espera, os cookies tinham ido: a resposta chega
     await colar;
     assert.equal(m.deps.focoDoTeclado, esperado, `peloTeclado=${peloTeclado}: o foco ${esperado ? 'caiu no <body>' : 'foi movido pelo mouse'}`);
   }
@@ -279,10 +286,10 @@ test('R12-1-01: o resgate deixa a promessa do desfecho no ar enquanto corre, e a
   for (const r of [PAREADO, { success: false }]) {
     const m = doisLogins();
     const resgate = m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
-    assert.ok(m.deps.resgateNoAr && typeof m.deps.resgateNoAr.then === 'function', 'o resgate no ar não deixou o desfecho pra quem espera');
     const desfecho = m.deps.resgateNoAr;
     m.soltar.codigo(r);
     await resgate;
+    assert.ok(desfecho && typeof desfecho.then === 'function', 'o resgate no ar não deixou o desfecho pra quem espera');
     assert.equal(await desfecho, r.success === true, 'o desfecho prometido não é o do resgate');
     assert.equal(m.deps.resgateNoAr, null, 'a promessa ficou de pé depois do resgate');
   }
