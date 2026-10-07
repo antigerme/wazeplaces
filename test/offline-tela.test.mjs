@@ -715,6 +715,133 @@ test('R11-4-01 CONTROLE: sem nada esperando envio, a resposta varre NA HORA e ro
   assert.equal(m.h.estado().nota, false);
 });
 
+// ── R12-4-03 (auditoria da rodada 12): a varredura DUPLA no `online` ─────────
+// O incompleto do R11-4-01. Com a rede voltando pelo `online`, decisões
+// esperando envio e a janela do offline vencida, o FIM do esvaziamento varre pela
+// prova engolida (`atenderProvaDoEsvaziamento`) — e o ouvinte do `online`, logo
+// depois, pedia OUTRA com ela no ar (`offlinePedidaDeNovo`): uma passada inteira
+// a mais, com a fila regravada, a janela e a poda refeitas e `offline.gravou`/
+// `offline.pronto` duas vezes no diário (MEDIDO no navegador, n1 da auditoria:
+// duas varreduras começavam; na base anterior ao R11-4-01, uma). Aqui roda tudo
+// de VERDADE, no mesmo escopo: o ouvinte do `online`, o esvaziamento com as
+// respostas provando a rede, a prova engolida, e a varredura com o estado dela
+// (só o que ela grava e baixa é de mentira). A varredura que COMEÇA grava a fila.
+function ouvinteDoOnline() {
+  const i = APP_SEM.indexOf("window.addEventListener('online', async () => {");
+  assert.ok(i >= 0, 'o ouvinte do `online` que esvazia a fila de saída sumiu');
+  const a = APP_SEM.indexOf('async () => {', i);
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', a); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) return APP_SEM.slice(a, j + 1);
+  }
+  throw new Error('o ouvinte do `online` não fechou');
+}
+const CICLO_DO_OFFLINE = /^const OFFLINE_CICLO_MS = ([^;]+);/m.exec(APP_SEM)[1].split('*')
+  .reduce((a, b) => a * Number(b.trim()), 1);
+function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
+  const marca = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')()('tok');
+  const guardado = new Map([
+    ['waze_places_saida', JSON.stringify(itens.map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v, conta: '1', s: marca, regiao: 'row' })))],
+    ['waze_places_conta', JSON.stringify({ id: '1', s: marca })],
+  ]);
+  const diario = [];
+  const comecaram = [];   // cada varredura que COMEÇOU (a fila gravada no começo dela)
+  const umaVolta = () => new Promise((ok) => setImmediate(ok));
+  const deps = {
+    AppState: { authenticated: true, profile: { id: 1 }, loadError: false, fetching: false,
+                queue: [{ venueID: 'q1', updateRequestID: 'uq1' }], stats: { read: 0, rejected: itens.length, skipped: 0 } },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
+    navigator: { onLine: true }, epocaDaSessao: 0,
+    CONTA_KEY: 'waze_places_conta', SAIDA_KEY: 'waze_places_saida', SAIDA_RITMO_MS: 0,
+    SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000], SAIDA_TENTATIVAS_POR_ITEM: 3,
+    ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
+    travaDaSaida: async () => ({ reserva: false, soltar() {} }),
+    registrarPousoDeSaida: () => {}, handleUnauthorized: () => {}, updateInFlightIndicator: () => {},
+    updateStats: () => {}, saveStats: () => {}, dfato: (k) => diario.push(k), showToast: () => {}, t: (k) => k,
+    setTimeout: (f) => setImmediate(f), setImmediate,
+    recuperarCardSemFoto: () => {}, refazerPerfilSeFaltar: () => {}, presencaWmeRefazerDesligar: () => {},
+    window: { Presenca: { aoProvarRede: () => {} } },
+    retomarBusca: () => { throw new Error('a busca não falhou: o `online` não tinha o que retomar'); },
+    // A varredura: o estado e as decisões de verdade; só a gravação e o download de mentira.
+    Treino: { ativo: false }, offlineLigado: () => true,
+    OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: CICLO_DO_OFFLINE, OFFLINE_CONCORRENCIA: 1,
+    OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: 3,
+    offlineGravarFila: async () => { comecaram.push('gravou'); await umaVolta(); return true; },
+    offlineItensDaFila: async () => [{ u: 'tile-1', tile: true }],
+    offlineBaixar: async () => { await umaVolta(); return true; },
+    offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {},
+    offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
+  };
+  const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
+  assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
+  const prova = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
+  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba',
+    'esvaziarFilaDeSaida', 'atenderProvaDoEsvaziamento',
+    'filaReal', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'];
+  const chaves = Object.keys(deps);
+  const h = new Function(...chaves, `
+    let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false,
+      ultimaEscritaOkEm = 0, buscaSemResposta = false, provaNoEsvaziamento = false;
+    let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
+    const pedidosEmAndamento = new Set();
+    // A janela VENCIDA (20+ min sem rede): a varredura é devida, e a última foi pronta.
+    let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),
+      offlineJanelaServida = Math.floor(Date.now() / OFFLINE_CICLO_MS) - 1, offlineUltimoResultado = 'pronto',
+      offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
+      offlineFilaPreparada = null, offlineFilaGravadaEm = null, offlineFilaVarrida = null;
+    const enviados = [];
+    const responder = async (v) => {
+      enviados.push(v);
+      await new Promise((ok) => setImmediate(ok));
+      API.aoProvarRede();
+      return { success: true };
+    };
+    const API = { getSession: () => 'tok', rejectPlace: (v) => responder(v), markAsRead: (v) => responder(v) };
+    ${prova}
+    ${nomes.map(fatiarComAsync).join('\n')}
+    const aoVoltarARede = ${ouvinteDoOnline()};
+    return { aoVoltarARede, enviados, fila: carregarFilaDeSaida,
+             estado: () => ({ varrendo: offlineVarrendo, pedida: offlinePedidaDeNovo, resultado: offlineUltimoResultado,
+                              nota: provaNoEsvaziamento }) };`)(...chaves.map((k) => deps[k]));
+  // Espera o FIM (nenhuma varredura no ar, nada pedido de novo), com teto (gotcha #19).
+  const assentar = async () => {
+    for (let i = 0; i < 400; i++) {
+      await umaVolta();
+      const e = h.estado();
+      if (!e.varrendo && !e.pedida) return true;
+    }
+    return false;
+  };
+  return { h, diario, comecaram, assentar };
+}
+
+test('R12-4-03: a rede volta pelo `online` com decisões esperando e a janela vencida — a varredura do offline sai UMA vez', async () => {
+  const m = onlineComVarredura();
+  await m.h.aoVoltarARede();
+  assert.ok(await m.assentar(), 'a varredura não terminou (ou ficou pedindo outra pra sempre)');
+  assert.deepEqual([m.h.enviados, m.h.fila().length], [['v1', 'v2'], 0], 'PRÉ-CONDIÇÃO: o esvaziamento não mandou as duas decisões');
+  assert.equal(m.h.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura não terminou pronta');
+  assert.equal(m.comecaram.length, 1,
+    `DEFEITO: ${m.comecaram.length} varreduras começaram depois do \`online\` — o fim do esvaziamento varreu pela prova engolida `
+    + 'e o ouvinte pediu outra com ela no ar (a fila regravada, a janela e a poda refeitas)');
+  assert.deepEqual(m.diario.filter((k) => /^offline\./.test(k)), ['offline.pronto'],
+    'o diário anotou a preparação mais de uma vez pela mesma volta da rede');
+  assert.equal(m.h.estado().nota, false, 'a prova engolida ficou de pé depois de atendida');
+});
+
+test('R12-4-03 CONTROLE: sem nada esperando envio, o próprio `online` varre — uma vez', async () => {
+  // Sem decisão esperando, nenhuma resposta prova a rede no esvaziamento e o fim
+  // dele não varre: quem varre é o ouvinte. Sem este controle, "uma varredura só"
+  // passaria com o ouvinte mudo.
+  const m = onlineComVarredura({ itens: [] });
+  await m.h.aoVoltarARede();
+  assert.ok(await m.assentar());
+  assert.equal(m.comecaram.length, 1, 'com a fila de saída vazia, o `online` não varreu o offline vencido');
+  assert.equal(m.h.estado().resultado, 'pronto');
+});
+
 test('a recuperação do card "sem foto" é chamada nos DOIS sinais de rede: `online` e a resposta que chega', () => {
   // O `online` não prova a rede (chega antes de ela passar tráfego): ali quem
   // prova é a foto, ou o servidor dela. A resposta NOSSA prova (R7-4-06).

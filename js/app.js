@@ -20471,7 +20471,17 @@ window.addEventListener('online', async () => {
     await esvaziarFilaDeSaida();
     // A rede voltou: é a janela pra repor o que venceu na sombra. Sai calado
     // com o toggle desligado, e só baixa o que de fato faltava.
-    offlineTalvezVarrer();
+    //
+    // Com a varredura JÁ NO AR, não pede outra. As respostas do esvaziamento
+    // provam a rede, e o FIM dele varre pela prova engolida
+    // (`atenderProvaDoEsvaziamento`) — pela MESMA volta da rede e na mesma
+    // janela. Pedida de novo aqui com ela no ar (`offlinePedidaDeNovo`), saía uma
+    // passada inteira a mais logo depois da primeira: a fila regravada, a janela
+    // e a poda refeitas, o `offline.gravou`/`offline.pronto` duas vezes no
+    // diário — e, com a primeira "parcial", os itens que falharam repetidos na
+    // hora, com a rede ainda firmando (auditoria da rodada 12, R12-4-03, MEDIDO:
+    // duas varreduras começavam depois do `online`).
+    if (!offlineVarrendo) offlineTalvezVarrer();
     recuperarCardSemFoto();
     // E refaz a BUSCA se ela tinha falhado. Sem isto o editor ficava olhando
     // "Falha ao carregar" com 4g funcionando até tocar no botão — a fila de
