@@ -20,6 +20,10 @@
 //             diálogo, e o aviso mandava tocar de novo num botão fora da tela;
 //   R9-7-03 — no "Como funciona" que abre sozinho, o "Quero treinar antes" pelo
 //             teclado largava o foco no ⓘ do topo.
+// E na rodada 10 (2026-10-07):
+//   R10-7-03 — no mesmo diálogo, o "Entendi" (e o Esc) pelo teclado largava o
+//             foco no ⓘ, e o Enter seguinte reabria a Ajuda;
+//   R10-7-04 — o "Praticar" da Ajuda pelo teclado, idem.
 //
 // Os testes RODAM as funções de verdade, fatiadas do app.js, num escopo só: o
 // que o teste não fornece é um "buraco negro" que aceita qualquer chamada. Por
@@ -776,11 +780,11 @@ test('R9-7-03: no "Como funciona" que abre SOZINHO no 1º card, "Quero treinar a
     m.app.openModal('comoFuncionaModal');   // …e o "Como funciona" abriu sozinho
     return m;
   };
-  // CONTROLE: o "Entendi" cai na reserva, o ⓘ (a regra do R6-1-07) — e prova
-  // que o instrumento enxerga o fechamento devolvendo o foco a ele.
+  // CONTROLE: o "Entendi" pelo MOUSE cai na reserva, o ⓘ (a regra do R6-1-07)
+  // — e prova que o instrumento enxerga o fechamento devolvendo o foco a ele.
+  // (Pelo TECLADO, desde o R10-7-03, o "Entendi" vai ao ✕ do card: abaixo.)
   const c = abrir();
-  c.els.comoFuncionaOk.focus();
-  await c.clicar('comoFuncionaOk', { teclado: true });
+  await c.clicar('comoFuncionaOk', { teclado: false });
   assert.equal(c.d.activeElement, c.els.helpBtn, `CONTROLE: o "Entendi" não devolveu o foco ao ⓘ (${c.focado()}) — o teste perdeu o sentido`);
   // O "Quero treinar antes" pelo teclado.
   const m = abrir();
@@ -813,4 +817,172 @@ test('R9-7-03: no "Como funciona" que abre SOZINHO no 1º card, "Quero treinar a
   assert.equal(j.estado.card, cardDeTreino, 'PRÉ-CONDIÇÃO: o card de treino foi trocado — o caso é outro');
   assert.equal(j.d.activeElement, j.els.helpBtn,
     `já no treino, o "Quero treinar antes" pelo teclado largou o foco em "${j.focado()}" — o botão escondido`);
+});
+
+// ═══ R10-7-03 · o "Entendi" (e o Esc) do "Como funciona" pelo TECLADO ════════
+// A frase publicada (v2026.10.03-01) diz que, pelo teclado, fechar o "Como
+// funciona" devolve o foco ao ✕ do pedido, e não ao botão da Ajuda. Só valia no
+// diálogo ADIADO, em que quem abriu era o ✕: no que abre SOZINHO no 1º card — o
+// de toda pessoa que chega — o Enter no "Entendi" (e o Esc) levava o foco ao ⓘ
+// do topo, e o Enter seguinte reabria a Ajuda (MEDIDO no navegador; auditoria de
+// 2026-10-07). O "Ver de novo" da Ajuda também. Agora a limpeza do modal
+// (`LIMPEZA_AO_FECHAR.comoFuncionaModal`) promete o ✕ do card NA TELA quando o
+// fechamento vem do teclado, e o foco pousa logo depois.
+const ABERTURAS_DO_COMO_FUNCIONA = {
+  // O 1º card montou e o diálogo abriu sozinho, com NADA focado.
+  'o que abre sozinho': (m) => {
+    m.deps.showCurrentPlace();
+    assert.equal(m.d.activeElement, m.d.body, 'PRÉ-CONDIÇÃO: havia foco antes do diálogo — não é o caminho do que abre sozinho');
+    m.app.openModal('comoFuncionaModal');
+  },
+  // O adiado (R7-7-01): abriu no fim da janela do 1º ✕, com o foco no ✕.
+  'o adiado': (m) => {
+    m.deps.showCurrentPlace();
+    m.botaoDoCard('.card-btn-reject').focus();
+    m.app.openModal('comoFuncionaModal');
+  },
+  // O "Ver de novo" da Ajuda (trocar de modal, sem fechar), aberta pelo ⓘ.
+  'o "Ver de novo"': (m) => {
+    m.deps.showCurrentPlace();
+    m.els.helpBtn.focus();
+    m.app.openModal('helpModal');
+    m.app.openModal('comoFuncionaModal');
+  },
+  // O mesmo DENTRO do treino: o card na tela é o de treino.
+  'o "Ver de novo" no treino': (m) => {
+    m.deps.showCurrentPlace();
+    m.app.Treino.entrar();
+    assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+    m.els.helpBtn.focus();
+    m.app.openModal('helpModal');
+    m.app.openModal('comoFuncionaModal');
+  },
+};
+const FECHAR_PELO_TECLADO = {
+  'Enter no "Entendi"': async (m) => { m.els.comoFuncionaOk.focus(); await m.clicar('comoFuncionaOk', { teclado: true }); },
+  Esc: async (m) => { m.app.handleKeyDown({ key: 'Escape', preventDefault() {} }); await tique(); },
+};
+
+test('R10-7-03: fechar o "Como funciona" pelo TECLADO (Enter no "Entendi", Esc) leva o foco ao ✕ do card NA TELA — também no que abre SOZINHO', async () => {
+  for (const [abertura, abrir] of Object.entries(ABERTURAS_DO_COMO_FUNCIONA)) {
+    for (const [caminho, fechar] of Object.entries(FECHAR_PELO_TECLADO)) {
+      const m = montarTela();
+      abrir(m);
+      const card = m.estado.card;
+      assert.equal(m.els.comoFuncionaModal.classes.has('hidden'), false, `PRÉ-CONDIÇÃO (${abertura}): o diálogo não abriu`);
+      await fechar(m);
+      assert.equal(m.els.comoFuncionaModal.classes.has('hidden'), true, `PRÉ-CONDIÇÃO (${abertura}, ${caminho}): o diálogo não fechou`);
+      assert.equal(m.estado.card, card, `PRÉ-CONDIÇÃO (${abertura}, ${caminho}): o card foi trocado — o caso é outro`);
+      assert.equal(m.d.activeElement, m.botaoDoCard('.card-btn-reject'),
+        `DEFEITO (${abertura}, ${caminho}): o foco ficou em "${m.focado()}" — no navegador, o ⓘ do topo, e o Enter seguinte reabre a Ajuda`);
+      assert.equal(m.deps.focoDoTeclado, null, `${abertura}, ${caminho}: sobrou foco prometido ao teclado`);
+    }
+  }
+});
+
+test('R10-7-03: CONTROLE — pelo mouse, pelo fundo e pelo voltar o foco NÃO pula pro card (o C10); sem card na tela, o teclado o devolve a quem abriu', async () => {
+  // O mouse no "Entendi" do que abre sozinho: a reserva, o ⓘ — e prova que o
+  // instrumento enxerga o fechamento devolvendo o foco.
+  const s = montarTela();
+  ABERTURAS_DO_COMO_FUNCIONA['o que abre sozinho'](s);
+  await s.clicar('comoFuncionaOk', { teclado: false });
+  assert.equal(s.d.activeElement, s.els.helpBtn, `pelo mouse, o foco foi pra "${s.focado()}"`);
+  assert.equal(s.deps.focoDoTeclado, null, 'o mouse deixou o foco prometido ao teclado');
+  // O fundo e o voltar do aparelho fecham sem `peloTeclado`: idem.
+  for (const [caminho, opcoes] of [['o fundo', {}], ['o voltar do aparelho', { viaHistorico: true }]]) {
+    const f = montarTela();
+    ABERTURAS_DO_COMO_FUNCIONA['o que abre sozinho'](f);
+    f.app.closeModal('comoFuncionaModal', opcoes);
+    await tique();
+    assert.equal(f.d.activeElement, f.els.helpBtn, `${caminho}: o foco foi pra "${f.focado()}"`);
+    assert.equal(f.deps.focoDoTeclado, null, `${caminho}: sobrou foco prometido ao teclado`);
+  }
+  // Sem card na tela (o "Tudo limpo!", e o "Ver de novo" da Ajuda): o teclado
+  // devolve o foco a quem abriu (o ⓘ) — e não ao botão do painel do fim.
+  for (const [caminho, fechar] of Object.entries(FECHAR_PELO_TECLADO)) {
+    const v = montarTela({ filaReal: 0 });
+    v.deps.showNoPlaces();
+    v.els.helpBtn.focus();
+    v.app.openModal('helpModal');
+    v.app.openModal('comoFuncionaModal');
+    await fechar(v);
+    assert.equal(v.els.comoFuncionaModal.classes.has('hidden'), true, `PRÉ-CONDIÇÃO (sem card, ${caminho}): o diálogo não fechou`);
+    assert.equal(v.d.activeElement, v.els.helpBtn, `sem card, ${caminho}: o foco foi pra "${v.focado()}", e não pra quem abriu (o ⓘ)`);
+    assert.equal(v.deps.focoDoTeclado, null, `sem card, ${caminho}: sobrou foco prometido ao teclado`);
+  }
+});
+
+test('R10-7-03: com o card TRAVADO (a janela do Desfazer de um ✕ anterior), o foco do "Entendi" pelo teclado espera — e pousa no ✕ quando a trava acaba', async () => {
+  const m = montarTela();
+  ABERTURAS_DO_COMO_FUNCIONA['o "Ver de novo"'](m);
+  let travado = true;
+  m.deps.acoesTravadas = () => travado;
+  await FECHAR_PELO_TECLADO['Enter no "Entendi"'](m);
+  assert.notEqual(m.d.activeElement, m.botaoDoCard('.card-btn-reject'), 'o foco pousou no ✕ com o card travado');
+  assert.equal(m.deps.focoDoTeclado, '.card-btn-reject', 'o foco prometido ao ✕ se perdeu na trava');
+  travado = false;
+  m.app.aplicarFocoDoTeclado();   // o `aplicarTravaDeAcao`, quando a trava acaba
+  assert.equal(m.d.activeElement, m.botaoDoCard('.card-btn-reject'), `com a trava solta, o foco foi pra "${m.focado()}"`);
+});
+
+// ═══ R10-7-04 · o "Praticar" da Ajuda pelo TECLADO ══════════════════════════
+// Os dois botões que abrem o treino levavam o foco a lugares diferentes: o
+// "Quero treinar antes" ao ✕ do card de treino (R8-7-08, R9-7-03), e o
+// "Praticar" ao ⓘ — o fechamento da Ajuda devolvia o foco a quem a abriu, e o
+// Enter seguinte a reabria (MEDIDO no navegador; auditoria de 2026-10-07).
+test('R10-7-04: "Praticar" (na Ajuda) pelo TECLADO leva o foco ao ✕ do 1º card de TREINO — não ao ⓘ', async () => {
+  const abrirAjuda = (m) => {
+    m.deps.showCurrentPlace();
+    m.els.helpBtn.focus();
+    m.app.openModal('helpModal');
+  };
+  const m = montarTela();
+  abrirAjuda(m);
+  m.els.abrirTreino.focus();
+  await m.clicar('abrirTreino', { teclado: true });
+  assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+  assert.ok(m.estado.card && /de treino/.test(m.estado.card.nome), 'PRÉ-CONDIÇÃO: o card de treino não entrou');
+  assert.equal(m.els.helpModal.classes.has('hidden'), true, 'PRÉ-CONDIÇÃO: a Ajuda não fechou');
+  assert.equal(m.d.activeElement, m.botaoDoCard('.card-btn-reject'),
+    `DEFEITO: o "Praticar" pelo teclado largou o foco em "${m.focado()}" — no navegador, o ⓘ do topo, e o Enter seguinte reabre a Ajuda`);
+  // CONTROLE do C10: pelo mouse nada é prometido, e o fechamento devolve o foco
+  // a quem abriu a Ajuda (o ⓘ) — o instrumento enxerga o fechamento.
+  const s = montarTela();
+  abrirAjuda(s);
+  await s.clicar('abrirTreino', { teclado: false });
+  assert.equal(s.app.Treino.ativo, true);
+  assert.equal(s.d.activeElement, s.els.helpBtn, `pelo mouse, o foco foi pra "${s.focado()}"`);
+  assert.equal(s.deps.focoDoTeclado, null, 'o mouse deixou o foco prometido ao teclado');
+});
+
+test('R10-7-04: o "Praticar" RECUSADO pelo teclado deixa a Ajuda aberta com o foco nele (R9-7-07); já no treino, o foco volta a quem abriu', async () => {
+  // O "Marcar todos" no ar: o treino é recusado, a Ajuda FICA, e nada é
+  // prometido a um card de treino que não vem.
+  const r = montarTela();
+  r.deps.showCurrentPlace();
+  r.els.helpBtn.focus();
+  r.app.openModal('helpModal');
+  r.deps.loteDeLidosEmVoo = true;
+  r.els.abrirTreino.focus();
+  await r.clicar('abrirTreino', { teclado: true });
+  assert.equal(r.els.helpModal.classes.has('hidden'), false, 'a Ajuda fechou no "Praticar" recusado');
+  assert.equal(r.app.Treino.ativo, false, 'o treino abriu com o lote no ar');
+  assert.deepEqual(r.estado.toasts, [['toast.esperaLote', 'info']]);
+  assert.equal(r.d.activeElement, r.els.abrirTreino, `o foco saiu do "Praticar", que segue na tela (${r.focado()})`);
+  assert.equal(r.deps.focoDoTeclado, null, 'o "Praticar" recusado prometeu o foco a um card de treino que não vem');
+  // Já DENTRO do treino (a Ajuda aberta de dentro dele): o `entrar` não troca
+  // o card, e o fechamento devolve o foco a quem abriu — como no "Quero treinar
+  // antes" (R9-7-03). Sem isso ele ficava no botão escondido.
+  const j = montarTela();
+  j.deps.showCurrentPlace();
+  j.app.Treino.entrar();
+  assert.equal(j.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+  const cardDeTreino = j.estado.card;
+  j.els.helpBtn.focus();
+  j.app.openModal('helpModal');
+  j.els.abrirTreino.focus();
+  await j.clicar('abrirTreino', { teclado: true });
+  assert.equal(j.estado.card, cardDeTreino, 'PRÉ-CONDIÇÃO: o card de treino foi trocado — o caso é outro');
+  assert.equal(j.d.activeElement, j.els.helpBtn,
+    `já no treino, o "Praticar" pelo teclado largou o foco em "${j.focado()}" — o botão escondido`);
 });

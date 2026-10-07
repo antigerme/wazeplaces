@@ -3282,9 +3282,13 @@ for (const como of ['teclado', 'mouse']) {
 //   R8-7-08 — o "Quero treinar antes" pelo teclado devolvia o foco ao ✕ do card
 //             REAL, que o treino troca logo em seguida: caía no <body>. Vai ao ✕
 //             do card de treino.
-// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" (o foco volta a
-// quem abriu o diálogo — prova que a medida enxerga o fechamento devolvendo o
-// foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão focado.
+// E os da rodada 10 (auditoria de 2026-10-07): o "Entendi" e o Esc do "Como
+// funciona" que abre sozinho (R10-7-03) e o "Praticar" da Ajuda (R10-7-04) pelo
+// teclado caíam no ⓘ do topo. Vão ao ✕ do card.
+// Os CONTROLES: o mouse (o foco não pula pro card) e o "Entendi" pelo mouse no
+// que abre sozinho (o foco vai à reserva, o ⓘ — prova que a medida enxerga o
+// fechamento devolvendo o foco). A PRÉ-CONDIÇÃO de cada Enter é cair no botão
+// focado.
 {
   const montar = async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
@@ -3373,13 +3377,20 @@ for (const como of ['teclado', 'mouse']) {
   // R9-7-03: e o que abre SOZINHO no 1º card, sem nada focado antes. O
   // fechamento devolvia o foco à reserva, o ⓘ do topo — um controle vivo, e o
   // foco prometido ao card de treino desistia dele: o Enter seguinte reabria a
-  // Ajuda. O "Entendi" ali vai ao ⓘ (a reserva, R6-1-07): é o CONTROLE de que a
-  // medida enxerga o fechamento devolvendo o foco.
-  for (const como of ['Treinar', 'Entendi', 'mouse', 'TreinarSozinho', 'EntendiSozinho']) {
+  // Ajuda. R10-7-03: o "Entendi" e o Esc ali também caíam no ⓘ (MEDIDO no
+  // Chromium e no WebKit; auditoria de 2026-10-07), e vão agora ao ✕ do card na
+  // tela. O CONTROLE de que a medida enxerga o fechamento devolvendo o foco é o
+  // "Entendi" pelo MOUSE, que segue indo à reserva, o ⓘ (R6-1-07).
+  const COMO_FUNCIONA = {
+    Treinar: 'Enter no "Quero treinar antes"', Entendi: 'Enter no "Entendi"', mouse: 'o mouse no "Quero treinar antes"',
+    TreinarSozinho: 'Enter no "Quero treinar antes"', EntendiSozinho: 'Enter no "Entendi"', EscSozinho: 'o Esc',
+    mouseEntendiSozinho: 'o mouse no "Entendi"',
+  };
+  for (const [como, gesto] of Object.entries(COMO_FUNCIONA)) {
     const { ctx, page } = await montar();
     const sozinho = como.endsWith('Sozinho');
-    const onde = `"Como funciona"${sozinho ? ' que abre sozinho' : ''}, ${como.startsWith('Treinar') ? 'Enter no "Quero treinar antes"'
-      : como.startsWith('Entendi') ? 'Enter no "Entendi"' : 'o mouse no "Quero treinar antes"'}`;
+    const peloMouse = como.startsWith('mouse');
+    const onde = `"Como funciona"${sozinho ? ' que abre sozinho' : ''}, ${gesto}`;
     const antes = await page.evaluate((sozinho) => {
       if (!sozinho) cardDaFrente().querySelector('.card-btn-reject').focus();
       else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
@@ -3388,10 +3399,12 @@ for (const como of ['teclado', 'mouse']) {
       return !a || a === document.body ? 'body' : (a.id || String(a.className).split(' ')[0]);
     }, sozinho);
     if (sozinho) checa(antes === 'body', `${onde}: PRÉ-CONDIÇÃO — havia foco antes do diálogo (${antes})`);
-    const botao = como.startsWith('Entendi') ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
+    const botao = /Entendi/.test(como) ? 'comoFuncionaOk' : 'comoFuncionaTreinar';
     let focado = null;
-    if (como === 'mouse') {
+    if (peloMouse) {
       await page.click('#' + botao);
+    } else if (como === 'EscSozinho') {
+      await page.keyboard.press('Escape');
     } else {
       await page.focus('#' + botao);
       focado = await focadoAgora(page);
@@ -3399,24 +3412,68 @@ for (const como of ['teclado', 'mouse']) {
     }
     const fechou = await esperarNaPagina(page, () => document.getElementById('comoFuncionaModal').classList.contains('hidden')
       && !!cardDaFrente(), 3000);
-    if (como === 'EntendiSozinho') { await esperarNaPagina(page, () => document.activeElement && document.activeElement.id === 'helpBtn', 3000); }
-    else if (como !== 'mouse') await focoNoX(page);
+    if (como === 'mouseEntendiSozinho') { await esperarNaPagina(page, () => document.activeElement && document.activeElement.id === 'helpBtn', 3000); }
+    else if (!peloMouse) await focoNoX(page);
     else { await esperarNaPagina(page, () => Treino.ativo, 3000); await doisQuadros(page); }
     const r = await foco(page);
     checa(fechou.ok, `${onde}: PRÉ-CONDIÇÃO — o diálogo não fechou`, JSON.stringify(r));
-    if (como !== 'mouse') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
+    if (!peloMouse && como !== 'EscSozinho') checa(focado === botao, `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no botão focado (${focado})`);
     if (como === 'Entendi') {
       checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
-        `${onde}: CONTROLE — o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
-    } else if (como === 'EntendiSozinho') {
+        `${onde}: o foco não voltou ao ✕ do card real, que abriu o diálogo (${r.foco})`, JSON.stringify(r));
+    } else if (como === 'EntendiSozinho' || como === 'EscSozinho') {
+      checa(!r.treino && r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card — no ⓘ do topo, o Enter seguinte reabre a Ajuda`, JSON.stringify(r));
+    } else if (como === 'mouseEntendiSozinho') {
       checa(!r.treino && r.foco === 'helpBtn',
-        `${onde}: CONTROLE — o foco não foi à reserva, o ⓘ (${r.foco}): a medida não enxerga o fechamento`, JSON.stringify(r));
+        `${onde}: CONTROLE — o foco não foi à reserva, o ⓘ (${r.foco}): a medida não enxerga o fechamento devolvendo o foco`, JSON.stringify(r));
     } else if (como.startsWith('Treinar')) {
       checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
       checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
         `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card de treino`, JSON.stringify(r));
     } else {
       checa(r.treino && !r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+
+  // R10-7-04: o "Praticar" da Ajuda pelo teclado (Enter no ⓘ, Enter no
+  // "Praticar") deixava o foco no ⓘ, e o Enter seguinte reabria a Ajuda — os
+  // dois botões que abrem o treino levavam o foco a lugares diferentes (MEDIDO no
+  // Chromium e no WebKit; auditoria de 2026-10-07). Vai ao ✕ do 1º card de
+  // treino. CONTROLE: pelo mouse, o foco não pula pro card.
+  for (const peloTeclado of [true, false]) {
+    const { ctx, page } = await montar();
+    const onde = `"Praticar" na Ajuda, ${peloTeclado ? 'pelo teclado' : 'pelo mouse'}`;
+    // Os controles da Ajuda que só existem com sessão (o `showMainScreen` os mostra).
+    await page.evaluate(() => mostrarControlesDeSessao(true));
+    let focado = null;
+    if (peloTeclado) {
+      await page.focus('#helpBtn');
+      await page.keyboard.press('Enter');
+    } else {
+      await page.click('#helpBtn');
+    }
+    const ajuda = await esperarNaPagina(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 3000);
+    checa(ajuda.ok, `${onde}: PRÉ-CONDIÇÃO — a Ajuda não abriu`);
+    if (peloTeclado) {
+      await page.focus('#abrirTreino');
+      focado = await focadoAgora(page);
+      await page.keyboard.press('Enter');
+      await focoNoX(page);
+    } else {
+      await page.click('#abrirTreino');
+      await esperarNaPagina(page, () => Treino.ativo, 3000);
+      await doisQuadros(page);
+    }
+    const r = await foco(page);
+    checa(r.treino && r.deTreino, `${onde}: PRÉ-CONDIÇÃO — o treino não abriu`, JSON.stringify(r));
+    if (peloTeclado) {
+      checa(focado === 'abrirTreino', `${onde}: PRÉ-CONDIÇÃO — o Enter não caiu no "Praticar" focado (${focado})`);
+      checa(r.foco === 'card-btn-reject' && r.noCardDaFrente,
+        `${onde}: o foco ficou em ${r.foco}, e não no ✕ do card de treino — no ⓘ do topo, o Enter seguinte reabre a Ajuda`, JSON.stringify(r));
+    } else {
+      checa(!r.noCardDaFrente, `${onde}: CONTROLE — o mouse moveu o foco pro card (${r.foco})`, JSON.stringify(r));
     }
     await ctx.close();
   }

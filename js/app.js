@@ -1097,6 +1097,24 @@ const LIMPEZA_AO_FECHAR = {
         Treino.sair();
         return peloTeclado;
     },
+    // O "Como funciona" explica os três botões do CARD. Fechado pelo TECLADO (o
+    // Enter no "Entendi", o Esc), o foco vai ao ✕ do card na tela — o que diz a
+    // frase publicada ("pelo teclado, fechar o 'Como funciona' devolve o foco
+    // ao ✕ do pedido, e não ao botão da Ajuda") e o que o "Quero treinar antes"
+    // já faz (R9-7-03). Ela só valia no diálogo ADIADO, em que quem abriu era o
+    // ✕: no que abre SOZINHO no 1º card, quem abriu é o <body>, o fechamento
+    // caía na reserva — o ⓘ do topo — e o Enter seguinte reabria a Ajuda
+    // (R10-7-03, MEDIDO no navegador; auditoria de 2026-10-07). O card já está
+    // na tela: o foco prometido pousa logo depois do fechamento, e espera a
+    // trava acabar, se houver (`aplicarFocoDoTeclado`). Sem card, ele volta a
+    // quem abriu, como sempre; pelo mouse, pelo dedo, pelo fundo e pelo voltar,
+    // nada muda.
+    comoFuncionaModal({ peloTeclado = false } = {}) {
+        if (!peloTeclado || !cardDaFrente()) return false;
+        focoDoTeclado = BOTAO_DA_ACAO.left;
+        queueMicrotask(aplicarFocoDoTeclado);
+        return true;
+    },
 };
 
 function closeModal(id, { viaHistorico = false, peloTeclado = false, focoComDestino = false } = {}) {
@@ -1243,7 +1261,9 @@ function setupAppListeners() {
     window.Presenca?.montar?.();
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
     $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
-    $('comoFuncionaOk')?.addEventListener('click', () => closeModal('comoFuncionaModal'));
+    // Só fecha: o foco de quem usa o TECLADO é da limpeza do modal, que vale
+    // também pro Esc (`LIMPEZA_AO_FECHAR.comoFuncionaModal`, R10-7-03).
+    $('comoFuncionaOk')?.addEventListener('click', (ev) => closeModal('comoFuncionaModal', { peloTeclado: veioDoTeclado(ev) }));
     // O treino pedido por um diálogo que o `Treino.entrar` vai RECUSAR — sem
     // sessão (a renovação silenciosa pela extensão), com o "Marcar todos" ou a
     // aprovação de uma foto no ar: diz o que esperar e o diálogo fica
@@ -1267,9 +1287,19 @@ function setupAppListeners() {
         closeModal('comoFuncionaModal', { focoComDestino: focoNoCardDeTreino });
         Treino.entrar();
     });
-    $('abrirTreino')?.addEventListener('click', () => {
+    // O "Praticar" (na Ajuda) pelo TECLADO, a MESMA regra do "Quero treinar
+    // antes": o foco vai ao ✕ do primeiro card de treino. O fechamento o
+    // devolvia a quem abriu a Ajuda — o ⓘ do topo —, e o Enter seguinte reabria
+    // a Ajuda: os dois botões que abrem o treino levavam o foco a lugares
+    // diferentes (R10-7-04, MEDIDO no navegador; auditoria de 2026-10-07). O
+    // recusado (`recusarTreino`) sai antes de prometer: a Ajuda fica, e o foco
+    // fica no "Praticar". Já dentro do treino, o fechamento devolve o foco a
+    // quem abriu, como no "Quero treinar antes".
+    $('abrirTreino')?.addEventListener('click', (ev) => {
         if (recusarTreino()) return;
-        closeModal('helpModal');
+        const focoNoCardDeTreino = veioDoTeclado(ev) && !Treino.ativo;
+        prometerFocoAoCardQueVem(ev);
+        closeModal('helpModal', { focoComDestino: focoNoCardDeTreino });
         Treino.entrar();
     });
     // O "Sair" some com a faixa do treino, e o card real volta: pelo teclado, o
