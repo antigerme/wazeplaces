@@ -16718,26 +16718,35 @@ async function aplicarRecusaAutomatica() {
     // A lista de autores é do APARELHO: só age com ela quem se confirmou dono
     // dela nesta sessão (ver `contaConfirmada`).
     if (!contaConfirmada()) return;
+    // Quem é ALVO. O card NA TELA fica de fora: o interruptor diz "os
+    // PRÓXIMOS", e é ligado justamente olhando um card do autor — que sumia e era
+    // rejeitado. Pior: a busca pousando durante os 350 ms da saída de um card
+    // trocava o da frente, e o gesto em curso rejeitava o SEGUINTE, que ninguém
+    // tinha visto. Com o da tela fora dos alvos, a recusa nunca troca o card
+    // debaixo do dedo.
+    // E o pedido EM ANDAMENTO também (`pedidosEmAndamento`): o lote de lidos
+    // deixa os pedidos dele na fila até a resposta, e o perfil que chega no
+    // meio dele (a prova de rede do próprio lote refaz o perfil que faltava)
+    // rodava a recusa sobre eles — lido E rejeitado, duas decisões.
+    const alvoFora = (naTela) => (x) => x && x !== naTela && x.creatorId !== undefined && x.creatorId !== null
+        && !pedidosEmAndamento.has(chaveDoPedido(x)) && autoLigado(x.creatorId);
     // No treino a fila da tela é de EXEMPLOS: a recusa fica ANOTADA, e o
     // `Treino.sair()` a roda na fila real quando ela voltar. Só sair perdia a 2ª
     // passada — a que a página que pousou com a 1ª no ar pediu
     // (`recusaAutomaticaPedidaDeNovo`, já zerada aqui) — quando a 1ª terminava
     // com o treino aberto: os pedidos do autor marcado voltavam como card
     // (auditoria de 2026-10-03, R8-7-03 = R8-2-03, MEDIDO no navegador).
-    if (Treino.ativo) { Treino.anotarRecusa(); return; }
+    // Anotada só quando HÁ o que recusar na fila REAL (com o card que volta à
+    // frente no "Sair" de fora, como lá): o perfil que chega no treino pede a
+    // recusa a todo L6+AM, e o relatório dizia "a recusa automática pedida com o
+    // treino aberto roda no Sair" sem autor nenhum marcado (R10-4-06; auditoria
+    // da rodada 10).
+    if (Treino.ativo) {
+        if (filaReal().some(alvoFora(Treino._salvo ? Treino._salvo.currentPlace : null))) Treino.anotarRecusa();
+        return;
+    }
     if (recusaAutomaticaRodando) { recusaAutomaticaPedidaDeNovo = true; return; }
-    // O card NA TELA fica de fora: o interruptor diz "os PRÓXIMOS", e é ligado
-    // justamente olhando um card do autor — que sumia e era rejeitado. Pior: a
-    // busca pousando durante os 350 ms da saída de um card trocava o da frente,
-    // e o gesto em curso rejeitava o SEGUINTE, que ninguém tinha visto. Com o
-    // da tela fora dos alvos, a recusa nunca troca o card debaixo do dedo.
-    // E o pedido EM ANDAMENTO também (`pedidosEmAndamento`): o lote de lidos
-    // deixa os pedidos dele na fila até a resposta, e o perfil que chega no
-    // meio dele (a prova de rede do próprio lote refaz o perfil que faltava)
-    // rodava a recusa sobre eles — lido E rejeitado, duas decisões.
-    const alvos = (AppState.queue || []).filter(
-        (x) => x && x !== AppState.currentPlace && x.creatorId !== undefined && x.creatorId !== null
-            && !pedidosEmAndamento.has(chaveDoPedido(x)) && autoLigado(x.creatorId));
+    const alvos = (AppState.queue || []).filter(alvoFora(AppState.currentPlace));
     if (alvos.length === 0) return;
 
     recusaAutomaticaRodando = true;
@@ -19704,6 +19713,9 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
     // resto do que o offline guardou.
     diagTilesGuardadosQueFalharam = [];
+    // A fila guardada que espera o "Sair" do treino é a da base que sai — aqui,
+    // ou na outra aba (`soMemoria`) —: a anotação dela sai junto (R10-4-04).
+    if (typeof Treino !== 'undefined') Treino.esquecerFilaGuardada?.();
     if (soMemoria) return;
     // Os pousos só existem pra filtrar a fila guardada, que sai na linha de
     // baixo: sem ela não há o que filtrar, e são ids de pedidos de terceiros.
@@ -21162,6 +21174,18 @@ const Treino = {
     // (`avisarPaisDoTreinoEncerrado`, R10-7-02).
     avisoDoPaisAnotado() {
         return this.ativo && this._salvo && this._salvo.refazerFila && this._salvo.avisoDoPais ? this._salvo.avisoDoPais : null;
+    },
+
+    // A base do offline foi apagada (`offlineEsquecer`: o interruptor desligado,
+    // aqui ou noutra aba, e a troca de conta): a fila guardada que a abertura sem
+    // rede leu com o treino aberto (`anotarFilaGuardada`) não está mais no
+    // aparelho. A anotação ficava: religado o interruptor, a linha dizia "4
+    // pedidos guardados" com a base VAZIA, e o "Sair" do treino caía em "sem
+    // sinal" com 0 cards (R10-4-04, MEDIDO no navegador; auditoria da rodada 10).
+    esquecerFilaGuardada() {
+        if (!this.ativo || !this._salvo) return;
+        this._salvo.abrirGuardada = false;
+        this._salvo.filaGuardadaLida = null;
     },
 
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de

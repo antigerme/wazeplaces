@@ -502,8 +502,9 @@ function montarRecusa() {
   // A recusa, o lote e a devolução de verdade (o `sair()` chama a recusa).
   delete deps.aplicarRecusaAutomatica;
   delete deps.devolverPedidoRecusado;
+  // A `filaReal` também: no treino, a recusa procura alvo na fila real (R10-4-06).
   const app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'pousouNoWaze', 'descontarGestoSemSessao', 'enviarLote',
-    'aplicarRecusaAutomatica'],
+    'filaReal', 'aplicarRecusaAutomatica'],
   'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false;',
   'pedidaDeNovo: () => recusaAutomaticaPedidaDeNovo, rodando: () => recusaAutomaticaRodando');
   return { app, AppState, waze };

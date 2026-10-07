@@ -8,6 +8,12 @@
 //   R10-7-02 — o aviso do país anotado no treino se perdia quando ele terminava
 //              pelo ↻ (o "Aplicar" está em test/filtros-aplicar.test.mjs, com a
 //              página dos Filtros de lá);
+//   R10-4-04 — com a fila guardada do offline esperando o "Sair", desligar e
+//              religar o "Disponível offline" apagava a base e deixava a
+//              anotação: a linha dizia "4 pedidos guardados" com nada no aparelho;
+//   R10-4-06 — o perfil que chega no treino anotava a recusa automática a todo
+//              L6+AM, sem autor nenhum marcado: o relatório dizia que ela rodaria
+//              no "Sair".
 // (A observação do R10-7 — o aviso do treino por cima do card real depois do
 // "Sair" — está em test/treino-avisos.test.mjs, com a pilha de avisos de lá.)
 //
@@ -168,3 +174,152 @@ test('R10-7-02: CONTROLE — o ↻ no treino SEM aviso anotado não inventa um',
   assert.deepEqual(m.log.filter((l) => /^(toast|busca)/.test(l)), ['busca:row/30', 'toast:toast.refreshing']);
 });
 
+// ═══ R10-4-04 · o "Disponível offline" desligado e religado no treino ═══════════
+// A reabertura sem rede leu a fila guardada (4 pedidos) com o treino aberto: ela
+// espera o "Sair" dele (R8-4-04), e a linha a conta (R9-4-03). Desligar o
+// interruptor apaga a base (`offlineEsquecer`); religar grava a fila REAL, que no
+// treino está vazia. A anotação ficava, e a linha dizia "4 pedidos guardados"
+// com nada no aparelho. Aqui rodam o interruptor, o `offlineEsquecer`, a gravação
+// e a linha de verdade, sobre uma base de mentira.
+const JANELA_AGORA = () => Math.floor(Date.now() / 1200000);
+const T_FILA = 1785200000000;
+function montarInterruptor({ comTreino }) {
+  const els = {};
+  const guardada = [1, 2, 3, 4].map((i) => PRIV('g', i));
+  const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false,
+    // Sem o treino, a fila guardada ABRIU (é a da tela); com ele, ela espera o "Sair".
+    queue: comTreino ? [] : guardada.slice(), currentPlace: comTreino ? null : guardada[0],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 0, autorEmFoco: null,
+    preferences: { comoFuncionaVisto: true, offlineDisponivel: true }, filters: { myArea: false } };
+  const base = { fila: { places: guardada.slice(), t: T_FILA } };
+  const deps = {
+    AppState, ...LIVRE(), navigator: { onLine: false }, escapeHtml: (s) => s,
+    document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
+    OFFLINE_CICLO_MS: 1200000, OFFLINE_STORE: 'fila', OFFLINE_DB: 'waze_places_offline',
+    OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_POUSOS_KEY: 'waze_places_offline_pousos',
+    lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
+    marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+    safeLS: { get: () => null, set() {}, remove() {} },
+    t: (k, v) => (v ? k + JSON.stringify(v) : k),
+    // A base do offline: o `put` grava, e a transação fecha num tique; apagar a apaga.
+    offlineDB: async () => ({ close() {}, transaction: () => {
+      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); } }) };
+      return tx;
+    } }),
+    indexedDB: { deleteDatabase: () => { delete base.fila; } },
+    window: { caches: true }, caches: { delete: async () => {} },
+    // A última preparação COMPLETA cobriu a fila guardada (`filaCoberta` = o `t` dela), nesta janela.
+    filaDeOnde: { regiao: 'row', pais: '30', busca: 'b' }, offlineVarrendo: false, offlinePedidaDeNovo: false,
+    offlineUltimoGesto: Date.now(), offlineJanelaServida: JANELA_AGORA(), offlineUltimoResultado: null, offlineEpoca: 0,
+    offlineFilaGravadaEm: comTreino ? null : T_FILA, offlineFilaGravadaChaves: null, offlineFilaPreparada: T_FILA,
+    offlineFilaVarrida: null, offlineFeitosNaJanela: null, diagTilesGuardadosQueFalharam: [],
+  };
+  const app = rodar(deps, [
+    ...['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineLigado', 'offlineGravarFila', 'offlineMarcarGesto',
+      'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'offlineAoMudarInterruptor', 'offlineEsquecer'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['Treino', 'offlineAoMudarInterruptor', 'offlineEsquecer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline']);
+  const linha = () => {
+    app.atualizarLinhaDoOffline(0, 0);
+    const html = (els.prefOfflineDesc || {}).innerHTML || '';
+    return [...html.matchAll(/prefs\.offline\.\w+(\{"n":\d+\})?/g)].map((x) => x[0]).join(' ');
+  };
+  return { app, AppState, base, linha };
+}
+
+test('R10-4-04: no treino, desligar e religar o "Disponível offline" apaga a fila guardada — e a linha deixa de dizer que ela está no aparelho', async () => {
+  // CONTROLE: sem o treino, a fila guardada está na tela: o religar a grava de
+  // novo, e a linha conta o que está no aparelho.
+  const c = montarInterruptor({ comTreino: false });
+  c.app.offlineAoMudarInterruptor(false);
+  c.app.offlineAoMudarInterruptor(true);
+  await tiques(5);
+  assert.deepEqual([c.base.fila ? ids(c.base.fila.places) : [], c.linha()],
+    [['ug1', 'ug2', 'ug3', 'ug4'], 'prefs.offline.esperaAPlural{"n":4} prefs.offline.esperaB'],
+    'CONTROLE: sem o treino o religar não regravou a fila (ou a linha não a contou) — o teste perdeu o sentido');
+  // Com o treino: a fila guardada espera o "Sair" dele.
+  const m = montarInterruptor({ comTreino: true });
+  m.app.Treino.entrar();
+  m.app.Treino.anotarFilaGuardada(4, T_FILA);
+  assert.equal(m.linha(), 'prefs.offline.prontoAPlural{"n":4} prefs.offline.prontoSemRedeB',
+    'PRÉ-CONDIÇÃO: a linha não contou a fila guardada que espera o "Sair" (R9-4-03)');
+  m.app.offlineAoMudarInterruptor(false);
+  m.app.offlineAoMudarInterruptor(true);
+  await tiques(5);
+  assert.equal(m.base.fila, undefined, 'PRÉ-CONDIÇÃO: o desligar não apagou a base (ou o religar gravou os exemplos)');
+  assert.equal(m.linha(), 'prefs.offline.vazioA prefs.offline.vazioB',
+    `DEFEITO: a linha diz "${m.linha()}" com a base VAZIA — a anotação do treino sobreviveu ao esquecer (R10-4-04)`);
+  assert.equal(m.app.filaGuardadaEsperandoOTreino(), null, 'o treino segue dizendo que a fila guardada espera o "Sair"');
+  assert.equal(m.app.Treino._salvo.abrirGuardada, false, 'o "Sair" do treino ainda tentaria abrir a fila guardada que saiu');
+});
+
+test('R10-4-04: o esquecer feito NOUTRA aba (`soMemoria`: a base já saiu por lá) também solta a anotação do treino', async () => {
+  const m = montarInterruptor({ comTreino: true });
+  m.app.Treino.entrar();
+  m.app.Treino.anotarFilaGuardada(4, T_FILA);
+  await m.app.offlineEsquecer({ soMemoria: true });
+  assert.equal(m.app.filaGuardadaEsperandoOTreino(), null, 'a anotação da fila que a outra aba apagou ficou no treino');
+  assert.ok(m.base.fila, 'o "só memória" apagou a base daqui');
+});
+
+// ═══ R10-4-06 · a recusa automática anotada no treino SEM o que recusar ════════
+// O perfil que chega com o treino aberto roda a recusa automática (é de L6+AM),
+// que no treino só ANOTA pro "Sair" (R8-7-03). Ela anotava antes de olhar se havia
+// alvo: todo relatório de L6+AM feito no treino depois do perfil dizia "a recusa
+// automática pedida com o treino aberto roda no Sair", sem autor nenhum marcado.
+// Aqui rodam a recusa, o `Treino` e o relatório de verdade.
+const P = (id, autor) => ({ venueID: 'v' + id, updateRequestID: 'u' + id, name: 'Local ' + id, creatorId: autor,
+  createdBy: 'autor' + autor, updateTypeKey: 'VENUE', imageUrls: [], dateAdded: 1785203731191 - id * 1000 });
+function montarRecusa({ fila, ligados = [], andamento = [] }) {
+  const log = [];
+  const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false,
+    queue: fila.slice(), currentPlace: fila[0], stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length,
+    autorEmFoco: null, preferences: { comoFuncionaVisto: true } };
+  const deps = {
+    AppState, ...LIVRE(), document: { getElementById: () => elemento() }, t: (k) => k,
+    showToast: () => ({ texto() {}, dispensar() {}, remover() {} }),
+    podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (id) => ligados.includes(id),
+    pedidosEmAndamento: new Set(andamento),
+    recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false, recusaAutomaticaNestaFila: false,
+    enviarLote: async (alvos) => { log.push(...alvos.map((p) => 'rejeita:' + p.updateRequestID)); },
+    API: { getRegion: () => 'row' }, carimboDoGesto: () => null, DIAG_FUNDO: 12, Element: class {},
+  };
+  const app = rodar(deps, [
+    ...['chaveDoPedido', 'filaReal', 'aplicarRecusaAutomatica', 'diagSeguro', 'diagTreinoAgora', 'diagTreinoGuardado'].map(fatiar),
+    treinoDeVerdade(),
+  ], ['Treino', 'aplicarRecusaAutomatica', 'diagTreinoGuardado']);
+  return { app, AppState, log };
+}
+
+const CASOS_DA_RECUSA = [
+  // O autor 777 marcado, com um pedido na fila real (que não é o da frente): há o que recusar.
+  { caso: 'o autor marcado tem pedido na fila real', fila: [P(1, 1), P(2, 777), P(3, 2)], ligados: [777],
+    anota: true, controle: ['rejeita:u2'] },
+  // Nenhum autor marcado: o perfil de todo L6+AM chegando no treino.
+  { caso: 'nenhum autor marcado', fila: [P(1, 1), P(2, 777), P(3, 2)], ligados: [], anota: false, controle: [] },
+  // O único pedido do autor é o card da FRENTE da fila real — o que volta à tela no
+  // "Sair", e que a recusa deixa de fora (o interruptor diz "os PRÓXIMOS").
+  { caso: 'o único pedido do autor é o card da frente', fila: [P(1, 777), P(2, 1)], ligados: [777], anota: false, controle: [] },
+  // O único pedido do autor está EM ANDAMENTO (a aprovação de foto no ar): duas decisões.
+  { caso: 'o único pedido do autor está em andamento', fila: [P(1, 1), P(2, 777)], ligados: [777], andamento: ['v2|u2'],
+    anota: false, controle: [] },
+];
+
+for (const { caso, fila, ligados, andamento, anota, controle } of CASOS_DA_RECUSA) {
+  test(`R10-4-06: no treino, a recusa automática só fica pedida pro "Sair" com o que recusar na fila real — ${caso}`, async () => {
+    // CONTROLE: fora do treino, a mesma fila e os mesmos autores — a recusa age (ou não) assim.
+    const c = montarRecusa({ fila, ligados, andamento });
+    await c.app.aplicarRecusaAutomatica();
+    await tiques(3);
+    assert.deepEqual(c.log, controle, 'CONTROLE: fora do treino a recusa não agiu como de costume — o teste perdeu o sentido');
+    const m = montarRecusa({ fila, ligados, andamento });
+    m.app.Treino.entrar();
+    await m.app.aplicarRecusaAutomatica();
+    await tiques(3);
+    assert.deepEqual(m.log, [], 'a recusa automática agiu com o treino aberto');
+    assert.equal(m.app.Treino._salvo.recusaPedida, anota,
+      anota ? 'a recusa com alvo na fila real não ficou pedida pro "Sair" (R8-7-03)'
+        : 'DEFEITO: a recusa ficou pedida pro "Sair" sem nada a recusar — o relatório diz que ela vai rodar (R10-4-06)');
+    assert.equal(m.app.diagTreinoGuardado().recusaPedida, anota, 'o relatório do treino não diz o que o treino guarda');
+  });
+}
