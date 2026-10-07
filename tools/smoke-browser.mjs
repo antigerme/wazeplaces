@@ -5042,7 +5042,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   };
   await page.route('**/api/**', async (route) => {
     const nome = route.request().url().split('/api/')[1].split('?')[0];
-    const segura = seguras[nome];
+    // O aquecimento da lixeira (`action: 'preparar'`, que sai no toque COM o Desfazer)
+    // divide a rota com a exclusão, e desde o lote 16 (R12-3-01) a exclusão do local
+    // ESPERA a resposta dele (a vez das escritas de foto): segurá-lo junto seria segurar
+    // a exclusão antes de ela sair. O que um `segurar('excluir-foto')` segura é a EXCLUSÃO.
+    let acao = null;
+    try { acao = JSON.parse(route.request().postData() || '{}').action; } catch { acao = null; }
+    const segura = acao === 'preparar' ? null : seguras[nome];
     const corpo = (segura && await segura) || (nome === 'lista-paises' ? { success: true, countries: [] }
       : nome === 'lista-estados' ? { success: true, states: [] }
         : nome === 'perfil' ? { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false } }
@@ -5069,6 +5075,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
     await page.evaluate(({ p0, semDesfazer: sem, depois: resto, mais: haMais }) => {
       setLang('pt'); applyI18n();
+      // As partes repetem os MESMOS ids de foto na mesma página, e a foto que uma
+      // exclusão já tirou do mapa não vai ao Waze de novo (`fotosQueSairamDoMapa`,
+      // R12-3-02, lote 16): sem zerar, a 2ª parte nunca tinha exclusão no ar.
+      if (typeof fotosQueSairamDoMapa !== 'undefined') fotosQueSairamDoMapa.clear();
       API.setSession('tok-smoke');
       AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
