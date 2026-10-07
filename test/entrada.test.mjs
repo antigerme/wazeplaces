@@ -927,10 +927,14 @@ test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de foto
   // regravada sem a foto, gotcha #57). A frase dizia "fica lá por até 1 minuto"
   // depois do toque, e a lista ficava 74 s (auditoria de 2026-09-29). O número
   // vem de `{listaFotosMin}`; a paridade com o core é do `test/consistencia`.
+  // Desde a rodada 11 (R11-3-01) a regravação depois da exclusão só acontece se
+  // a lista guardada ainda é a que a exclusão LEU: sumida (a aprovação a esqueceu)
+  // ou trocada (outra exclusão do local a regravou), ela não é coberta — e então
+  // vive no máximo o prazo de uma gravação ANTERIOR, que a frase já cobre.
   const CORE = ler('server/core.mjs');
-  assert.ok(/sessions\.store\.put\(chave, [^\n]*JSON\.stringify\(enxuto\), RELEITURA_TTL_STORE\)/.test(CORE),
+  assert.ok(/const bruto = lidoEm \+ '\|' \+ JSON\.stringify\(enxuto\);\s*try \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
-  assert.ok(/sessions\.store\.put\(await chaveDaReleitura\(data\),[\s\S]{0,160}?RELEITURA_TTL_STORE\)/.test(CORE),
+  assert.ok(/if \(rel\.bruto && \(await sessions\.store\.get\(chave\)\) === rel\.bruto\) \{\s*await sessions\.store\.put\(chave, rel\.lidoEm \+ '\|' \+ JSON\.stringify\(\{ id: venue\.id, images: restantes \}\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
   // O "depois da última vez que você toca na lixeira ou exclui uma foto", em
   // cada língua: o prazo conta da ÚLTIMA gravação, e a última pode ser a da exclusão.
