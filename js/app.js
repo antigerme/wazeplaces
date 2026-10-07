@@ -18502,10 +18502,12 @@ function esquecerOutraConta(id) {
     // daqui o encerrava CALADO, a faixa "nada é enviado ao Waze" sumia, o card da
     // frente virava um pedido de quem entrou e o ✕ seguinte ia ao Waze no nome
     // dela (R10-1-01, MEDIDO no navegador; auditoria da rodada 10). O treino
-    // segue, a fila de quem entrou vem no "Sair" dele (`refazerFilaReal`), e a da
-    // conta anterior sai dele já, com os exemplos clonados dela (ver
-    // `Treino.esquecerFilaDaContaAnterior`). Anotado ANTES de fechar as camadas:
-    // o "Treino concluído" aberto fecha por lá, e o `sair()` dele já refaz a fila.
+    // segue, e a fila de quem entrou vem no "Sair" dele (`refazerFilaReal`). A
+    // que atravessou a queda é da conta anterior: sai dele já, com os exemplos
+    // clonados dela (ver `Treino.esquecerFilaDaContaAnterior`). A que saiu pela
+    // área da anterior é de quem entrou (a busca foi com a sessão dela): fica, e
+    // só o refazer é anotado. Anotado ANTES de fechar as camadas: o "Treino
+    // concluído" aberto fecha por lá, e o `sair()` dele já refaz a fila.
     const noTreino = typeof Treino !== 'undefined' && Treino.ativo === true;
     const refazerFila = filaAtravessouSessao
         || (areaNaBusca && (noTreino ? filaRealComDevolvidos().length > 0 : (AppState.fetching || AppState.queue.length)));
@@ -21233,13 +21235,18 @@ const Treino = {
         AppState.fetchEpoch++;
         s.epocaDoTreino = AppState.fetchEpoch;
         AppState.autorEmFoco = null;
-        removeCurrentCardEl();
-        AppState.queue = this.cards();
-        this.restam = AppState.queue.length;
-        AppState.currentPlace = AppState.queue[0] || null;
-        updateStats(true);
-        updatePendingCount(true);
-        if (AppState.currentPlace) showCurrentPlace();
+        // O card da frente é TROCADO sem gesto, e o teclado pode estar nele (a
+        // trava da queda devolve o foco ao ✕ quando a sessão volta): ia pro
+        // <body>. Vai ao mesmo botão do exemplo novo (`mantendoFocoNoCard`).
+        mantendoFocoNoCard(() => {
+            removeCurrentCardEl();
+            AppState.queue = this.cards();
+            this.restam = AppState.queue.length;
+            AppState.currentPlace = AppState.queue[0] || null;
+            updateStats(true);
+            updatePendingCount(true);
+            if (AppState.currentPlace) showCurrentPlace();
+        }, { mesmoBotao: true });
     },
 
     // Encerra SEM devolver a fila salva: é o que o `resetQueue` quer (troca de

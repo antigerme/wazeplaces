@@ -159,6 +159,8 @@ function montarTroca({ atravessou = true, area = false, fila = 'x' } = {}) {
     DIAG_FUNDO: 12, Element: class {},
     // A fila nova (o `resetQueue` de verdade).
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    // O card trocado com o foco do teclado nele (o de verdade está em test/lightbox-foco-card).
+    mantendoFocoNoCard: (redesenhar, opcoes) => { log.push('foco:' + JSON.stringify(opcoes || {})); redesenhar(); },
     fecharOQueEraDaContaAnterior: (comAFila) => {
       log.push('camadas' + (comAFila ? ' (todas)' : ''));
       if (comAFila && fim.aberto) { fim.aberto = false; app.Treino.sair(); }
@@ -214,7 +216,12 @@ test('R10-1-01: OUTRA conta na renovação silenciosa com o treino ABERTO — o 
   assert.ok(soSinteticos(m.AppState.queue),
     `DEFEITO: os exemplos na tela seguem clones dos pedidos da conta anterior (${lugares(m.AppState.queue)})`);
   assert.equal(m.app.Treino.restam, m.AppState.queue.length, 'o "Restam" do treino não acompanhou os exemplos novos');
-  assert.ok(depois.includes('card:' + m.AppState.queue[0].venueID), 'o card da frente não foi redesenhado com o exemplo');
+  const iCard = depois.indexOf('card:' + m.AppState.queue[0].venueID);
+  assert.ok(iCard >= 0, 'o card da frente não foi redesenhado com o exemplo');
+  // O card é trocado SEM gesto, e o teclado pode estar no ✕ dele (a trava da
+  // queda o devolve quando a sessão volta): o exemplo novo nasce guardando o foco.
+  const iFoco = depois.indexOf('foco:{"mesmoBotao":true}');
+  assert.ok(iFoco >= 0 && iFoco < iCard, `o exemplo novo não foi montado guardando o foco do teclado — ele caía no <body> (${depois.join(' | ')})`);
   for (const [onde, txt] of [['a fila da tela', JSON.stringify(m.AppState.queue)], ['o card da frente', JSON.stringify(m.AppState.currentPlace)],
     ['o relatório do treino', JSON.stringify(m.app.diagTreinoGuardado())]]) {
     assert.doesNotMatch(txt, /PRIV/, `DEFEITO: dado de terceiro da conta anterior ficou n${onde === 'a fila da tela' ? 'a' : 'o'} ${onde}: ${txt.slice(0, 160)}`);
