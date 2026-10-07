@@ -88,6 +88,8 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), refazerPerfilSeFaltar: () => {},
     caixaDaMinhaArea: () => [1, 2, 3, 4], desligarMinhaAreaSemCaixa: () => {},
     caixaDaMinhaAreaEm: () => [1, 2, 3, 4],   // a caixa no servidor da busca (R9-6-04)
+    // O `/Session` do servidor aplicado à mão (R10-6-02, test/filtros-aplicar): aqui, já lido.
+    lerServidorDaMinhaArea: () => null,
     showLoading: (v) => tela.push(v ? 'esqueleto' : 'sem-esqueleto'), removeCurrentCardEl: () => {},
     showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
     abrirGuardadaDepoisDaFalha: async () => false,

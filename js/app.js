@@ -308,6 +308,8 @@ const AppState = {
     fetchEpoch: 0,
     _fetchPromise: null,
     _profilePromise: null,
+    // A decisão da caixa de "Minha área" no ar (ver `completarPerfilChegado`).
+    _caixaDaMinhaAreaNoAr: null,
     loadError: false,
     filters: filtrosDeFabrica(),
     preferences: preferenciasDeFabrica(),
@@ -5973,11 +5975,28 @@ async function completarPerfilChegado(perfil, epoca) {
     // A área gerenciada salva que este perfil não tem sai do filtro, e a fila que
     // saiu com ela é refeita (ver a função).
     const refazerPelaArea = esquecerAreaForaDoPerfil(perfil);
-    // O país de quem entra: só depois do perfil, e só quando o atual é um onde
-    // a pessoa NÃO edita (ver `paisDoPerfil`).
-    const destino = await paisDoPerfil(perfil, epoca);
-    if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
-    else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaReal();
+    // A DECISÃO do lugar (e, com ela, da caixa de "Minha área") fica no ar daqui
+    // até a fila ser refeita: pra quem só edita noutro servidor, é a pergunta ao
+    // `/Session` de lá. Um ↻ ou um "Aplicar" nesse meio (também pelo atalho
+    // "Filtros" do ícone) buscava JÁ, com o perfil daqui sem caixa: "Minha área"
+    // era desligada com a frase que o R9-6-04 tirou, a tela dizia "Tudo limpo!" e
+    // a fila virava a do país, sem o aviso (MEDIDO no navegador, auditoria da
+    // rodada 10, R10-6-01). A busca de "Minha área" espera por ela
+    // (`startFetching`), como espera o perfil; nenhuma busca nova sai por isso.
+    // Promessa no `AppState`, como a do perfil (`_profilePromise`).
+    let decidiu = null;
+    const decisao = new Promise((ok) => { decidiu = ok; });
+    AppState._caixaDaMinhaAreaNoAr = decisao;
+    try {
+        // O país de quem entra: só depois do perfil, e só quando o atual é um onde
+        // a pessoa NÃO edita (ver `paisDoPerfil`).
+        const destino = await paisDoPerfil(perfil, epoca);
+        if (destino && epoca === epocaDaSessao) await irProPaisDoPerfil(destino);
+        else if ((refazerFila || refazerPelaArea) && epoca === epocaDaSessao) refazerFilaReal();
+    } finally {
+        if (AppState._caixaDaMinhaAreaNoAr === decisao) AppState._caixaDaMinhaAreaNoAr = null;
+        decidiu();
+    }
     // A presença (fase 3) precisa do id do PERFIL — a lista exclui a própria
     // pessoa e o chat é dela. O `showMainScreen` chama a presença antes de o
     // perfil chegar, e ela desiste calada; sem esta linha, quem abria o app com
@@ -6064,20 +6083,28 @@ async function paisDoPerfil(perfil, epoca) {
     }
     for (const regiao of REGIOES_DO_WAZE.filter((r) => r !== API.getRegion())) {
         const r = await API.getProfile(regiao);
-        if (epoca !== epocaDaSessao || lugarMudou()) return null;
+        if (epoca !== epocaDaSessao) return null;
         const la = r && r.success && r.profile ? editaveis(r.profile.editableCountryIDs) : [];
         // A lista que esta pergunta trouxe fica, pra peneira dos Filtros naquela
         // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
         // falhou não diz que a pessoa não edita lá.
         // E a caixa das áreas de lá: com "Minha área", é ela que decide (R9-6-04).
         // E as áreas gerenciadas de lá, pro seletor dos Filtros (R10-6-03).
+        //
+        // Fica mesmo com o lugar mudado no meio (a pessoa aplicou outro nos
+        // Filtros): o que o servidor respondeu é dele, e a decisão abaixo é que
+        // não vale mais. Jogada fora, a busca de "Minha área" no servidor que a
+        // pessoa aplicou perguntava a ele de novo (`lerServidorDaMinhaArea`): duas
+        // idas ao mesmo `/Session` (R10-6-02).
         if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la, r.profile.areas, r.profile.managedAreas);
+        if (lugarMudou()) return null;
         if (la.length) return minhaArea ? { regiao, pais: la[0], minhaArea: true } : { regiao, pais: la[0] };
     }
     return null;
 }
 
-// `minhaArea`: a ida é pela REGIÃO da área (ver `paisDoPerfil`, R8-6-06).
+// `minhaArea`: a ida é pela REGIÃO da área (ver `paisDoPerfil`, R8-6-06). Quem
+// decide se a fila é a da área é o filtro na hora da ida (ver abaixo, R10-6-01).
 async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
     const epoca = epocaDaSessao;
     // O lugar de ANTES: pra saber se a pessoa aplicou outro durante a espera
@@ -6101,6 +6128,13 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
         AppState.statesByCountry = {};
         AppState.countries = r && r.success ? r.countries : [];
     }
+    // O "Minha área" que vale é o do filtro AGORA, não o de quando o
+    // `paisDoPerfil` começou a perguntar: a pessoa pode tê-lo desligado (ou
+    // ligado) num "Aplicar" no meio da pergunta ao outro servidor. Com o de
+    // antes, a fila ia pros EUA pelo país sem o aviso "Mostrando a fila de…"
+    // (auditoria da rodada 10, R10-6-01), ou o aviso saía sobre a fila da área.
+    // O destino é o mesmo nos dois casos (a região e o país onde ela edita).
+    minhaArea = !!AppState.filters.myArea;
     // "Minha área" vai pela região DA ÁREA se o perfil de LÁ tiver a caixa: as
     // `areas` do `/Session` são por servidor (R9-6-04), e o perfil de lá sem
     // área nenhuma é o "sem caixa" de verdade. Aí o filtro desliga e diz por
@@ -10990,13 +11024,59 @@ function caixaDaMinhaArea(perfil) {
 // servidor em que ele foi pedido: quem só edita na NA chega na ROW com zero
 // áreas, e o `paisDoPerfil` o leva pra NA com a caixa do perfil de LÁ — a que
 // ele leu (`anotarEditaveis`). Sem leitura do servidor, a do perfil que o app
-// tem (auditoria da rodada 9, R9-6-04).
+// tem (auditoria da rodada 9, R9-6-04) — o que, desde o R10-6-02, só sobra
+// quando a leitura do servidor que a pessoa aplicou falhou
+// (`lerServidorDaMinhaArea`).
 function caixaDaMinhaAreaEm(regiao = API.getRegion()) {
     const perfil = AppState.profile;
     const lidas = editaveisPorServidor.caixas;
     if (perfil && perfil.id !== null && perfil.id !== undefined && editaveisPorServidor.conta === String(perfil.id)
         && lidas && Object.prototype.hasOwnProperty.call(lidas, regiao)) return lidas[regiao];
     return caixaDaMinhaArea(perfil);
+}
+
+// "MINHA ÁREA" num servidor que o app NUNCA LEU pra esta conta: a região que a
+// pessoa APLICOU à mão nos Filtros. A busca ia ao servidor novo com a caixa do
+// perfil de OUTRO servidor (o da abertura) — MEDIDO no navegador: aplicada a NA
+// com "Minha área", a busca saía `na bbox` com a caixa do Brasil, nenhum
+// `/Session` da NA era pedido, e a tela dizia "Tudo limpo! … Confira o país e a
+// região" com "Minha área" ligada (auditoria da rodada 10, R10-6-02). Agora o
+// `/Session` de lá é perguntado ANTES de a busca decidir a caixa (como o
+// `paisDoPerfil` faz: `API.getProfile(regiao)` + `anotarEditaveis`), e a busca
+// espera a resposta (`startFetching`).
+//
+// UMA ida por servidor e por sessão (`epocaDaSessao`): a que está no ar é
+// dividida, e a que terminou — deu certo ou não — não sai de novo; a que falhou
+// deixa a caixa do perfil que o app tem, como antes. E só depois de um GESTO: o
+// servidor da busca só fica sem leitura quando a pessoa aplica uma região à mão
+// — o da abertura é lido com o perfil, e o da ida pro país do perfil, pelo
+// `paisDoPerfil`. Devolve a promessa da ida (no ar ou nova), ou `null` quando não
+// há o que perguntar.
+let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };
+function lerServidorDaMinhaArea(regiao = API.getRegion()) {
+    const perfil = AppState.profile;
+    if (!AppState.authenticated || !AppState.filters.myArea || !regiao) return null;
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return null;
+    if (editaveisLidos(regiao) !== null) return null;
+    if (leiturasDaMinhaArea.epoca !== epocaDaSessao) leiturasDaMinhaArea = { epoca: epocaDaSessao, noAr: new Map(), feitas: new Set() };
+    const estas = leiturasDaMinhaArea;
+    if (estas.feitas.has(regiao)) return null;
+    if (estas.noAr.has(regiao)) return estas.noAr.get(regiao);
+    const epoca = epocaDaSessao;
+    const ida = Promise.resolve(API.getProfile(regiao)).then((r) => {
+        if (epoca !== epocaDaSessao || !(r && r.success && r.profile)) return;
+        // A conta que perguntou: a resposta de outra conta não entra na dela.
+        if (!AppState.profile || String(AppState.profile.id) !== String(perfil.id)) return;
+        anotarEditaveis(perfil, regiao, r.profile.editableCountryIDs, r.profile.areas, r.profile.managedAreas);
+        // Os Filtros reabertos nesse meio mostram o que ele trouxe (a peneira dos
+        // países e as áreas gerenciadas de lá).
+        redesenharFiltrosComOPerfil();
+    }).catch(() => {}).finally(() => {
+        estas.noAr.delete(regiao);
+        estas.feitas.add(regiao);
+    });
+    estas.noAr.set(regiao, ida);
+    return ida;
 }
 
 // A busca recusou "Minha área" porque o perfil não tinha chegado (sinal ruim na
@@ -11423,6 +11503,22 @@ async function startFetching() {
             updatePendingCount();
             try { await AppState._profilePromise; } catch (e) {} finally { buscaEsperaOPerfil = false; }
         }
+    }
+    // E a CAIXA de "Minha área" que ainda está sendo decidida: o perfil que
+    // chegou e pergunta aos outros servidores (`completarPerfilChegado`,
+    // R10-6-01), ou o `/Session` do servidor que a pessoa aplicou à mão
+    // (`lerServidorDaMinhaArea`, R10-6-02). Com o perfil daqui na mão (sem caixa,
+    // ou com a de outro servidor), a busca decidia antes: "Minha área" desligava
+    // com a frase falsa, ou ia ao servidor novo com a área de outro. A busca
+    // espera, e sai UMA vez, no lugar e com a caixa que a decisão deixar. Cada
+    // volta espera uma promessa NO AR (as duas se apagam ao terminar), com teto:
+    // nunca gira em falso (gotcha #19).
+    for (let volta = 0; volta < 4 && AppState.filters.myArea && AppState.authenticated; volta++) {
+        const decidindo = AppState._caixaDaMinhaAreaNoAr || lerServidorDaMinhaArea();
+        if (!decidindo) break;
+        buscaEsperaOPerfil = true;
+        updatePendingCount();
+        try { await decidindo; } catch (e) {} finally { buscaEsperaOPerfil = false; }
     }
 
     while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {

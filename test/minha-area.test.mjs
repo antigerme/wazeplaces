@@ -192,3 +192,285 @@ test('R9-6-04: a busca vai pela caixa do servidor DELA — a área lida na NA, n
   assert.deepEqual([o.AppState.filters.myArea, o.buscas], [false, [{ bbox: null, stateId: '4' }]],
     'a caixa lida pra uma conta valeu pra outra');
 });
+
+// ═══ R10-6-01 e R10-6-02 · a busca de "Minha área" ESPERA o que decide a caixa ═══
+// As `areas` (e os editáveis) do `/Session` são POR SERVIDOR (R9-6-04). Dois
+// caminhos ainda faziam a busca decidir a caixa com o perfil de OUTRO servidor
+// (auditoria da rodada 10, MEDIDO no navegador nos dois motores):
+//   · R10-6-01: quem só edita na NA, com "Minha área" e o aparelho na ROW. O
+//     perfil da ROW chega sem área, e o app pergunta o `/Session` da NA. Um ↻
+//     (ou um "Aplicar", também pelo atalho "Filtros" do ícone) nesse meio
+//     buscava JÁ: "Minha área" desligada e gravada, com a frase "Seu perfil do
+//     Waze não tem área de edição", "Tudo limpo!" (`row pais 30`), e depois a
+//     fila dos EUA sem o aviso do país.
+//   · R10-6-02: a região aplicada À MÃO com "Minha área", num servidor que o app
+//     nunca leu: a busca ia lá com a caixa do perfil de outro servidor, sem
+//     perguntar o `/Session` de lá — "Tudo limpo!" com "Minha área" ligada.
+// Aqui o caminho roda DE VERDADE, fatiado do app.js: o perfil que chega
+// (`completarPerfilChegado` → `paisDoPerfil` → `irProPaisDoPerfil` →
+// `refazerFilaReal` → `resetQueue` + `startFetching`) e a busca (`startFetching`
+// → `fetchNextPage`), com a pergunta a cada servidor segura até o teste soltar,
+// e cada busca anotada com a REGIÃO em que sai e a caixa (ou o país) que leva.
+const CAIXA_BR = [-47, -24, -46, -23];
+const AREA_NY = [{ type: 'drive', bbox: CAIXA_NY }];
+const tique = (ms = 0) => new Promise((ok) => setTimeout(ok, ms));
+function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
+  const lugar = { regiao, pais };
+  const log = [];
+  const buscas = [];
+  const perguntas = [];
+  const soltar = {};
+  const AppState = {
+    authenticated: true, hasMore: true, fetching: false, fetchEpoch: 0, queue: [], currentPlace: null,
+    serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
+    filters: { unreadOnly: true, types: constante('TYPES_ALL').slice(), residential: '', myArea: true, stateId: '',
+      managedAreaId: '', categories: [], sortOrder: 'newest' },
+    profile: null, countries: [], statesByCountry: {}, stats: { read: 0, rejected: 0, skipped: 0 }, pendingAction: null,
+  };
+  // O `/Session` de cada servidor: o que o teste deu, ou a falha (rede).
+  const resposta = (r) => (perfis[r] ? { success: true, profile: { ...perfis[r] } } : { success: false, errorCategory: 'transient' });
+  const API = {
+    getRegion: () => lugar.regiao, setRegion: (r) => { lugar.regiao = r; },
+    getCountry: () => lugar.pais, setCountry: (p) => { lugar.pais = Number(p); },
+    getProfile: (r) => {
+      const de = r || lugar.regiao;
+      perguntas.push(de);
+      if (segurar.includes(de)) return new Promise((ok) => { soltar[de] = () => ok(resposta(de)); });
+      return Promise.resolve(resposta(de));
+    },
+    listCountries: async (r) => ({ success: true, countries: r === 'na' ? [{ id: 235, name: 'United States' }] : [{ id: 30, name: 'Brazil' }] }),
+    fetchPlaces: async (page, f) => {
+      buscas.push(lugar.regiao + (f.bbox ? ' bbox ' + JSON.stringify(f.bbox) : ' pais ' + lugar.pais));
+      return { success: true, places: [{ venueID: 'v' + buscas.length, updateRequestID: 'u' + buscas.length }], hasMore: false, total: 1, blocked: 0 };
+    },
+  };
+  const el = () => ({ classList: { add() {}, remove() {}, contains: () => false, toggle() {} } });
+  const deps = {
+    AppState, API, TYPES_ALL: constante('TYPES_ALL'), PREFETCH_THRESHOLD: constante('PREFETCH_THRESHOLD'),
+    MAX_EMPTY_PAGES: constante('MAX_EMPTY_PAGES'), MAX_PAGINAS_POR_BUSCA: constante('MAX_PAGINAS_POR_BUSCA'),
+    REGIOES_DO_WAZE: ['row', 'na', 'il'], navigator: { onLine: true }, Treino: { ativo: false, entradas: 0 },
+    document: { getElementById: () => el() },
+    dfato: () => {}, dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
+    handleUnauthorized: () => {}, showToast: (m) => log.push('toast:' + m), msgDoServidor: (r, d) => d,
+    t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
+    guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {}, sortQueue: () => {},
+    aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {}, offlineVarrer: () => {},
+    bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(), pousosDaPagina: new Map(),
+    offlineLigado: () => false, offlineLerPousos: () => [], carregarFilaDeSaida: () => [], console: { error: () => {} },
+    lugarAgora: () => ({ regiao: lugar.regiao, pais: String(lugar.pais) }), saveFilters: () => log.push('salvou'),
+    refazerPerfilSeFaltar: () => {}, window: {}, redesenharLugarNosFiltros: () => {}, redesenharFiltrosComOPerfil: () => {},
+    removeUndoBanner: () => {}, enviarPendenciasDoLightbox: () => {}, ORDEM_PADRAO: 'newest',
+    showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {},
+    showNoPlaces: () => log.push('vazio'), abrirGuardadaDepoisDaFalha: async () => false,
+    listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
+    // As funções do conserto: no código de antes elas não existem, e o teste tem
+    // de reprovar pelo COMPORTAMENTO, não por não achá-las (as de verdade, quando
+    // existem, vencem estas).
+    lerServidorDaMinhaArea: () => null, areasGerenciadasLidas: () => null,
+  };
+  const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
+    'startFetching', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'resetQueue',
+    'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
+    'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises'];
+  for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas']) if (achar(opcional)) nomes.push(opcional);
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
+    + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
+    + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
+    + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null;\n'
+    + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {}, gerenciadas: {} };\n'
+    + 'let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };\n'
+    + nomes.map(fatiar).join('\n')
+    + '\nreturn { startFetching, resetQueue, completarPerfilChegado, anotarEditaveis, editaveisLidos,\n'
+    + '  registrarPedidoDoPerfil: (l) => { lugarDoPedidoDoPerfil = l; }, novaSessao: () => { epocaDaSessao++; } };')(...chaves.map((k) => deps[k]));
+  // O perfil que CHEGA, como a carga da abertura o entrega (`loadProfileAndAuxData`):
+  // pedido na região de agora, anotado ali, guardado, e completado — a decisão do
+  // lugar fica no ar enquanto ela pergunta aos outros servidores.
+  const chegaOPerfil = () => {
+    const perfil = { ...perfis[lugar.regiao] };
+    app.registrarPedidoDoPerfil({ regiao: lugar.regiao, pais: lugar.pais });
+    app.anotarEditaveis(perfil, lugar.regiao, perfil.editableCountryIDs, perfil.areas, perfil.managedAreas);
+    AppState.profile = perfil;
+    return app.completarPerfilChegado(perfil, 0);
+  };
+  // O ↻ (e o "Aplicar" sem mexer, e o "Aplicar" pelo atalho): fila nova, e a busca.
+  const atualizar = () => { app.resetQueue(); return app.startFetching(); };
+  // "Aplicar" com outra REGIÃO (e o país dela) nos Filtros.
+  const aplicarRegiao = (r, p) => { lugar.regiao = r; lugar.pais = p; return atualizar(); };
+  const avisos = () => log.filter((l) => l.startsWith('toast:'));
+  return { app, AppState, lugar, log, buscas, perguntas, soltar, chegaOPerfil, atualizar, aplicarRegiao, avisos };
+}
+const SO_NA = {
+  row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [], areas: [], managedAreas: [] },
+  na: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [235], areas: AREA_NY, managedAreas: [] },
+  il: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [], areas: [], managedAreas: [] },
+};
+
+test('R10-6-01: o ↻ (ou o "Aplicar") com o app perguntando ao servidor da área ESPERA — uma busca só, lá, com a caixa de lá, e "Minha área" fica', async () => {
+  // CONTROLE: sem o ↻ no meio, a decisão leva a fila pra NA pela caixa de lá — o
+  // instrumento enxerga a busca que a decisão faz.
+  const c = montarServidores({ perfis: SO_NA, segurar: ['na'] });
+  const cDecisao = c.chegaOPerfil();
+  await tique();
+  assert.ok(c.soltar.na, 'PRÉ-CONDIÇÃO: o `/Session` da NA não ficou no ar');
+  c.soltar.na();
+  await cDecisao;
+  await tique(5);
+  assert.deepEqual(c.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `CONTROLE: a decisão não buscou na NA pela caixa de lá: ${c.buscas}`);
+  // O ↻ no meio da pergunta à NA.
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'] });
+  const decisao = m.chegaOPerfil();
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: o `/Session` da NA não ficou no ar');
+  const doToque = m.atualizar();
+  await tique(5);
+  assert.deepEqual(m.buscas, [], `o ↻ buscou com a pergunta à NA no ar (${m.buscas}): o "Tudo limpo!" do servidor errado`);
+  assert.equal(m.AppState.filters.myArea, true, `"Minha área" foi desligada antes de a NA responder: ${m.avisos()}`);
+  m.soltar.na();
+  await decisao;
+  await doToque;
+  await tique(5);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pra NA');
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)],
+    `a fila saiu ${m.buscas.length} vezes (${m.buscas}) — o ↻ buscou antes de a caixa estar decidida`);
+  assert.equal(m.AppState.filters.myArea, true, '"Minha área" foi desligada a quem tem área na NA');
+  assert.deepEqual(m.avisos(), [], `o app disse o que não é verdade: ${m.avisos()}`);
+});
+
+test('R10-6-01: CONTROLE — sem área em servidor NENHUM, a busca do ↻ sai depois da decisão, e "Minha área" desliga e diz', async () => {
+  const semArea = { row: SO_NA.row, na: { ...SO_NA.na, editableCountryIDs: [], areas: [] }, il: SO_NA.il };
+  const m = montarServidores({ perfis: semArea, segurar: ['na', 'il'] });
+  const decisao = m.chegaOPerfil();
+  await tique();
+  const doToque = m.atualizar();
+  await tique(5);
+  assert.deepEqual(m.buscas, [], `o ↻ buscou antes de a decisão terminar: ${m.buscas} (o R10-6-01)`);
+  m.soltar.na();
+  await tique(5);
+  assert.ok(m.soltar.il, 'PRÉ-CONDIÇÃO: o `/Session` de Israel não foi perguntado');
+  m.soltar.il();
+  await decisao;
+  await doToque;
+  await tique(5);
+  assert.deepEqual(m.buscas, ['row pais 30'], `a espera engoliu a busca (ou ela saiu em dobro): ${m.buscas}`);
+  assert.equal(m.AppState.filters.myArea, false, '"Minha área" ficou ligada sem área em servidor nenhum: o filtro mente');
+  assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa'], `o desligar não foi dito (uma vez): ${m.avisos()}`);
+});
+
+test('R10-6-02: a região aplicada À MÃO com "Minha área" — o `/Session` de lá é perguntado UMA vez, antes de a busca decidir a caixa', async () => {
+  const perfis = {
+    row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] },
+    na: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [235], areas: AREA_NY, managedAreas: [] },
+  };
+  const m = montarServidores({ perfis });
+  await m.chegaOPerfil();
+  await m.atualizar();
+  // CONTROLE: sem gesto (a abertura, o ↻ na região do perfil), nenhum `/Session` a mais.
+  assert.deepEqual([m.perguntas, m.buscas], [[], ['row bbox ' + JSON.stringify(CAIXA_BR)]],
+    'CONTROLE: a busca da região em que o perfil foi lido perguntou a outro servidor (ou não foi pela caixa de lá)');
+  // A pessoa aplica a NA nos Filtros.
+  await m.aplicarRegiao('na', 235);
+  assert.deepEqual(m.perguntas, ['na'], `o \`/Session\` da NA não foi perguntado antes da busca: ${m.perguntas}`);
+  assert.equal(m.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY),
+    `a busca da NA foi com a caixa do perfil de outro servidor: ${m.buscas.at(-1)} — o "Tudo limpo!" com "Minha área" ligada`);
+  assert.equal(m.AppState.filters.myArea, true);
+  // Uma ida por servidor e por sessão: o ↻ seguinte não pergunta de novo.
+  await m.atualizar();
+  assert.deepEqual(m.perguntas, ['na'], `o ↻ seguinte perguntou à NA de novo: ${m.perguntas}`);
+  assert.equal(m.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY));
+});
+
+test('R10-6-02: sem área no servidor aplicado, "Minha área" desliga e diz — e a fila é a do país (o caminho de quem já tinha lido lá)', async () => {
+  const perfis = {
+    row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] },
+    na: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [], areas: [], managedAreas: [] },
+  };
+  const m = montarServidores({ perfis });
+  await m.chegaOPerfil();
+  await m.aplicarRegiao('na', 235);
+  assert.deepEqual(m.perguntas, ['na'], `o \`/Session\` da NA não foi perguntado: ${m.perguntas}`);
+  assert.deepEqual(m.buscas, ['na pais 235'], `a busca da NA não foi a do país: ${m.buscas}`);
+  assert.equal(m.AppState.filters.myArea, false, '"Minha área" ficou ligada num servidor sem área: "Tudo limpo!" com o filtro mentindo');
+  assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa']);
+});
+
+test('R10-6-02: a ida é UMA por servidor e por sessão — a que está no ar é dividida, e a que falhou não sai de novo até a sessão mudar', async () => {
+  const perfis = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
+  // A NA não responde (a rede, o Waze fora): `perfis.na` não existe.
+  const m = montarServidores({ perfis, segurar: ['na'] });
+  await m.chegaOPerfil();
+  m.lugar.regiao = 'na';
+  m.lugar.pais = 235;
+  const primeira = m.atualizar();
+  await tique();
+  const segunda = m.atualizar();                 // outro ↻ com a pergunta no ar
+  await tique();
+  assert.deepEqual(m.perguntas, ['na'], `duas buscas com a pergunta no ar perguntaram ${m.perguntas.length} vezes`);
+  m.soltar.na();
+  await primeira;
+  await segunda;
+  await tique(5);
+  await m.atualizar();                            // e o ↻ depois da falha
+  assert.deepEqual(m.perguntas, ['na'], `a pergunta que falhou saiu de novo na mesma sessão: ${m.perguntas}`);
+  // A que falhou deixa a caixa do perfil que o app tem, como antes.
+  assert.equal(m.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_BR));
+  // Sessão nova (a renovação): pode perguntar de novo.
+  m.app.novaSessao();
+  m.soltar.na = null;
+  const depois = m.atualizar();
+  await tique();
+  assert.deepEqual(m.perguntas, ['na', 'na'], `na sessão nova, o servidor que a anterior não leu não foi perguntado: ${m.perguntas}`);
+  m.soltar.na();
+  await depois;
+});
+
+test('R10-6-02: o servidor que a decisão do perfil JÁ leu não é perguntado de novo — a pessoa aplicou a NA enquanto o app a perguntava', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'] });
+  const decisao = m.chegaOPerfil();
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: o `/Session` da NA não ficou no ar');
+  const doAplicar = m.aplicarRegiao('na', 235);   // Filtros › NA › Aplicar, com a pergunta no ar
+  await tique(5);
+  m.soltar.na();
+  await decisao;
+  await doAplicar;
+  await tique(5);
+  assert.deepEqual(m.perguntas, ['na'],
+    `o \`/Session\` da NA saiu ${m.perguntas.filter((r) => r === 'na').length} vezes: a resposta da decisão foi jogada fora porque o lugar mudou no meio`);
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `a busca do "Aplicar" não foi pela caixa da NA: ${m.buscas}`);
+  assert.equal(m.AppState.filters.myArea, true);
+});
+
+test('R10-6-01: "Minha área" mudada num "Aplicar" no meio da pergunta ao servidor da área — o aviso do país diz o que a fila é', async () => {
+  // Desligada: a fila vai pros EUA pelo país — com o aviso "Mostrando a fila de…".
+  const off = montarServidores({ perfis: SO_NA, segurar: ['na'] });
+  const decisaoOff = off.chegaOPerfil();
+  await tique();
+  assert.ok(off.soltar.na, 'PRÉ-CONDIÇÃO: o `/Session` da NA não ficou no ar');
+  off.AppState.filters.myArea = false;               // Filtros › desmarca "Minha área" › Aplicar
+  const aplicouOff = off.atualizar();
+  await tique(5);
+  off.soltar.na();
+  await decisaoOff;
+  await aplicouOff;
+  await tique(5);
+  assert.deepEqual([off.lugar.regiao, off.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pros EUA');
+  assert.equal(off.buscas.at(-1), 'na pais 235', `PRÉ-CONDIÇÃO: a fila dos EUA não foi a do país: ${off.buscas}`);
+  assert.ok(off.avisos().includes('toast:toast.paisDoPerfil(United States)'),
+    `a fila foi pros EUA pelo país sem o aviso "Mostrando a fila de…": ${off.avisos()}`);
+  // Ligada: a fila é a da área, na NA — sem o aviso do país, que diria o que ela não é.
+  const on = montarServidores({ perfis: SO_NA, segurar: ['na'] });
+  on.AppState.filters.myArea = false;
+  const decisaoOn = on.chegaOPerfil();
+  await tique();
+  on.AppState.filters.myArea = true;                 // Filtros › marca "Minha área" › Aplicar
+  const aplicouOn = on.atualizar();
+  await tique(5);
+  on.soltar.na();
+  await decisaoOn;
+  await aplicouOn;
+  await tique(5);
+  assert.equal(on.buscas.at(-1), 'na bbox ' + JSON.stringify(CAIXA_NY), `PRÉ-CONDIÇÃO: a fila da NA não foi a da área: ${on.buscas}`);
+  assert.ok(!on.avisos().some((a) => a.includes('toast.paisDoPerfil')),
+    `o aviso "Mostrando a fila de…" saiu sobre a fila da ÁREA: ${on.avisos()}`);
+});
