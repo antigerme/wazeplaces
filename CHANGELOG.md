@@ -8,6 +8,67 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.07-05
+
+Décima sexta rodada da auditoria. Depois da v2026.10.07-04, conferida em produção com duas contas, sete auditores revisaram o app de novo. Não houve achado grave. Os consertos cobrem o app aberto em duas abas e o acesso renovado, a foto ampliada, a presença e a conversa, "Minha área" e os Filtros, a entrada e a conta, o "Disponível offline", a fila e o teclado, o Histórico e o convite de instalar no iPhone.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**O app aberto em duas abas e o acesso renovado**
+- **Se o seu acesso cai e é renovado com um ✕ ou ✓ ainda a caminho do Waze, e a decisão chega lá, o pedido não volta mais como card quando o app reabre sem sinal.** Antes, com "Disponível offline" ligado, ele voltava na fila guardada no aparelho: decidi-lo de novo mandava uma segunda decisão ao Waze, o app dizia "Já tratado por outro editor 👍" sobre a sua própria decisão e o placar contava duas vezes (com ✓ e depois ✕, as duas valiam no Waze). Vale também pro "Rejeitar os N" e pra recusa automática.
+- **O que a recusa automática rejeita numa aba enquanto o acesso dela está sendo renovado também sai da fila da outra aba.** Antes a outra aba não ficava sabendo, e o pedido seguia lá como card.
+- **Se o seu acesso cai no meio do "Marcar todos" (ou de uma foto aprovada) e você entra de novo com a mesma conta, o que já tinha sido marcado também sai da fila da outra aba.** Antes ela seguia com esses pedidos como card, e o ✕ ali mandava uma segunda decisão ao Waze: lido e rejeitado.
+- **A aba cujo acesso está sendo renovado também fica sabendo do que você decide na outra.** Antes, o que o "Marcar todos", a recusa automática ou uma foto aprovada decidiam na outra aba nesse meio continuava como card nela depois da renovação, e o ✕ mandava uma segunda decisão ao Waze (Lidos 5 + Rejeitados 1 pra 5 pedidos). Agora o pedido na tela diz que já foi decidido em outra aba, e os outros saem da fila.
+- **Quando uma aba confere de quem é a sessão (depois de você entrar de novo em outra aba) e vê que é a mesma conta, os botões ✕ ↑ ✓ voltam a funcionar na hora.** Antes, pra quem edita em outra região do Waze, eles ficavam apagados alguns segundos a mais e não respondiam ao toque, enquanto as setas do teclado já decidiam.
+
+**Foto ampliada**
+- **Se você fecha o app (ou troca de app) logo depois de excluir uma foto com o Waze lento, a exclusão sai mesmo assim.** Ao tocar na lixeira, o app confere a lista de fotos do local; quando isso passava dos 3 segundos do Desfazer, a exclusão ficava esperando, e fechar o app nesse meio a perdia: a foto continuava no mapa, sem aviso. O mesmo valia pra aprovar uma foto logo depois de tocar na lixeira. Agora ela sai na hora em que o app fecha, como já saía quando o "Desfazer" ainda estava na tela.
+- **Trocar de app logo depois de tocar na lixeira não desfaz mais, no Waze, a aprovação de outra foto do mesmo local, nem devolve a foto que você excluiu.** Com o Waze lento, a conferência da lixeira podia chegar depois da sua aprovação (ou da exclusão) e deixar guardada a lista de antes; a exclusão seguinte nesse local, nos 15 segundos, mandava de volta a foto excluída e a recém-aprovada como pendente, com a tela mostrando o contrário. Agora a conferência de cada toque na lixeira serve só à exclusão daquele toque.
+
+**Presença e conversa**
+- **A resposta que chega logo depois de você ler uma conversa não aparece mais como "2 mensagens novas" quando o Waze confirma a sua leitura antes de ela chegar.** Ao fechar a conversa, o app avisa o Waze de que você leu; a atualização da lista que saía nesse meio contava junto a mensagem que você já tinha lido, e a pílula 👥 ficava em "2" até a atualização seguinte. A versão anterior tinha consertado só o caso em que a resposta chegava antes dessa confirmação; este é o mais comum.
+- **Com leitor de tela, o "Tentar de novo" de uma conversa que não carregou, tocado enquanto o seu acesso é renovado sozinho, não deixa mais o leitor dizendo "Não deu pra carregar a conversa."** A tela já mostrava "Carregando a conversa…", mas quem percorria a conversa continuava ouvindo a falha até o seu perfil chegar. Vale também pra "Não deu pra carregar as mensagens anteriores.".
+- **Reabrir uma conversa enquanto o seu acesso é renovado sozinho não traz mais de volta "Não deu pra carregar as mensagens anteriores." de uma tentativa antiga.** A conversa reabre como quando o acesso já está pronto, com o "Ver mensagens anteriores".
+- **Tocar em "Ver mensagens anteriores" enquanto o seu acesso é renovado sozinho não deixa mais a conversa reaberta como não lida.** Antes, o app trocava o carregamento da conversa pelo das mensagens anteriores: a mensagem que tinha chegado com a conversa fechada, e que você viu ao reabrir, continuava não lida no Waze e voltava na pílula 👥 como "1 mensagem nova". Agora a conversa carrega primeiro, como quando o acesso já está pronto, e as anteriores vêm no toque seguinte.
+- **Reabrir uma conversa enquanto as mensagens anteriores dela ainda estão carregando também não a deixa mais como não lida.** Antes, o app esperava as anteriores e não carregava a conversa de novo: a mensagem que você viu ao reabrir continuava não lida no Waze e voltava na pílula 👥 como "1 mensagem nova". Agora a conversa é carregada assim que as anteriores chegam.
+- **Se você troca de conversa enquanto a anterior ainda está carregando, a conversa nova não pula mais sozinha pro fim** quando a anterior termina de carregar.
+
+**"Minha área" e Filtros**
+- **Quando o servidor de outra região recusa a pergunta sobre onde você edita, o app não fica mais perguntando sem parar.** Antes, com essa recusa, o aviso "Conexão instável — sua sessão continua válida." voltava a cada segundo, o "Tudo limpo!" era anunciado de novo e a tela piscava, sem fim. Agora o app avisa uma vez e pergunta de novo quando você toca em "Verificar novamente", "Tentar de novo" ou ↻.
+- **O lugar que você escolhe nos Filtros vale.** Quando o app não tinha conseguido descobrir, ao abrir, onde você edita, voltar à mão ao Brasil fazia ele perguntar de novo e levar você de volta à América do Norte, logo depois de você trocar em Filtros. Depois de um aviso de conexão instável, ele abria uma fila que não existe, com "Tudo limpo!".
+- **Com a fila vazia, o "Restam" mostra 0 ao lado do "Tudo limpo!"**, e não mais "…", como se ainda estivesse carregando.
+- **Se o seu perfil demora a chegar, a fila vazia mostra o "Tudo limpo!" em até 4 segundos.** Antes, com a internet lenta, a tela de carregamento podia ficar até 45 segundos, também pra quem edita no país da fila e ia ver "Tudo limpo!" de qualquer jeito.
+
+**Entrada e conta**
+- **Se você abre um link de pareamento que não vale mais e, enquanto o app confere o código, cola e confirma os seus cookies, o app entra só com os cookies.** Antes, com a extensão instalada, o app também pedia pra extensão entrar: a conta do WME trocava a que você tinha colado (ou o contrário, com o aviso "Outra conta entrou neste aparelho" sobre a sua entrada), e uma das duas entradas continuava valendo no servidor depois do "Sair". Se você colou e ainda não confirmou, o que está colado fica no "Colar cookies".
+- **Ao voltar a uma aba que está na tela de entrada, o que você cola no "Colar cookies" (ou digita no "Entrar com um código") enquanto o app ainda confere a extensão não some mais.** Antes, quando a extensão respondia, ela entrava com a conta do WME e apagava o que você estava colando — ou abria o "Acesso restrito" por cima. Agora o que você colou fica, e quem decide é você.
+- **Com o app em duas abas, abrir os Filtros enquanto o seu acesso é renovado não faz mais a aba usar, escondido, o acesso da outra.** Antes, se a renovação não desse certo, a aba ficava na tela de entrada com o acesso da outra: voltar a ela não abria o app, e o "Sair" dado na outra fechava o "Colar cookies" desta, apagando o que estava sendo colado.
+- **Quando outra conta entra no app noutra aba, a aba que tinha caído na tela de entrada também esquece o que era da conta anterior** (a fila, o pedido que estava na tela e o registro de chamadas), como já esquecia com o "Sair". O "Colar cookies" que você estiver preenchendo lá continua como está.
+
+**Disponível offline**
+- **Com "Minha área" ligada, a fila guardada aberta sem sinal não é mais trocada quando o sinal volta.** Antes, quando o app conseguia carregar o seu perfil de novo, ele refazia a fila: o pedido da tela trocava, os que você tinha pulado voltavam como o próximo card, e a decisão que você tinha acabado de tomar ia pro Waze na hora, sem os 3 segundos do Desfazer. Agora a fila continua de onde você parou, como já acontecia sem "Minha área". Vale também se o sinal volta com o treino aberto: ao sair do treino, você encontra a sua fila como deixou, sem os pulados de volta.
+- **O que o "Marcar todos" já marcou não volta mais como card quando o app reabre sem sinal.** Se o "Disponível offline" se preparava no meio do lote (por exemplo, quando o sinal voltava), ele guardava no aparelho os pedidos do lote como se ainda estivessem pendentes: reaberto sem sinal, 25 dos 30 pedidos marcados voltavam, e o ✕ num deles ia pro Waze. O mesmo valia pro pedido de foto que você acabou de aprovar com a foto ainda aberta.
+- **Com o app aberto em duas abas com filas diferentes, a linha do "Disponível offline" não diz mais "Pronto" na aba cuja fila não é a que está guardada no aparelho.** Ela diz "Ainda não preparado", e a preparação dessa aba roda sozinha no próximo uso, baixando de novo o mapa que a outra aba tinha tirado do aparelho. Antes a linha dizia "Pronto — 12 pedidos no aparelho" com 6 deles sem mapa.
+- **Quando a sua sessão cai numa aba enquanto a fila carrega, essa aba não usa mais, escondido, o acesso da outra aba aberta.** Com o "Disponível offline" ligado, a fila que chegava depois da queda fazia a aba (já na tela de entrada) pegar o acesso da outra, e, se a carga falhava, a fila guardada abria por baixo da tela de entrada.
+
+**A fila e o teclado**
+- **Com "Primeiro os de…" ligado, a barra sai da tela quando o último pedido dessa pessoa é o último da fila.** Antes ela ficava por cima do "Tudo limpo!" dizendo "1 de 1". Se você desfaz esse último pedido, a barra volta junto com ele.
+- **Pelo teclado, com o foco na barra "Primeiro os de…", quando as setas decidem o último pedido dessa pessoa, o foco vai pro pedido seguinte** (pro "Ver +N" dele, ou pro ✕), ou pro "Verificar novamente" quando a fila acaba. Antes ele se perdia, e quem usa teclado ou leitor de tela voltava pro topo da página.
+
+**Histórico, conquistas e Ajuda**
+- **Os avisos que aparecem uma vez só não se perdem mais atrás de uma janela aberta.** O aviso do seu primeiro ✕ e do primeiro ✓, o "Mandou bem, wazer!" de quando o Desfazer passa a ser opcional e a dica "Você não desfez nenhum dos últimos 20 pedidos" saíam escondidos atrás dos Filtros, da Ajuda ou da foto ampliada quando a sua decisão chegava ao Waze com eles abertos, e nunca mais apareciam. Agora eles esperam você fechar a janela. Com o app em segundo plano, esperam você voltar.
+- **O ponto no botão de Filtros não acende mais por uma conquista que ainda não aparece na tela.** Logo ao abrir o app, antes de o seu perfil carregar, o "Curador" ou o "Corretor" ganho e ainda não visto acendia o ponto, mas a vitrine ainda não mostrava as conquistas de nível 6: o toque levava ao Histórico com "1 de 14", sem nada destacado, e a conquista contava como vista sem você vê-la. Agora o ponto acende quando o perfil chega, e o toque leva até ela.
+
+**Instalar no iPhone**
+- **No Chrome, no Firefox e no Edge do iPhone, o convite pra pôr o Waze Places na tela inicial diz onde fica o "Compartilhar" nesses navegadores**: "Toque em Compartilhar, no menu do navegador". Antes ele mandava procurar a barra do Safari, um navegador que você não estava usando. Num iPhone com iOS anterior ao 16.4, em que esses navegadores não põem apps na Tela de Início, o convite não aparece mais; no Safari ele segue como sempre.
+
+### Ficou pra decisão
+- **Quem edita só na América do Norte ou em Israel e tem o perfil demorando mais de 4 segundos ao abrir o app pode ver o "Tudo limpo!" por um instante antes de a fila aparecer.** É o preço do teto de 4 segundos, que tirou a espera de até 45 segundos de todo mundo.
+- **O convite de instalar no iPhone não cabe sem rolar no iPhone SE de 2016 (em português, espanhol e francês) nem no Galaxy Fold em francês**: o "Agora não" fica abaixo da dobra. Já era assim antes desta versão; consertar muda o layout e pede mockup.
+- **O Cloudflare troca dois cabeçalhos de segurança na borda** (o X-Frame-Options e o Referrer-Policy, pela opção "Add security headers"). Não muda nada pra quem usa o app, e o de referência que ele manda é até mais estrito; a escolha é de configuração do painel.
+
 ## v2026.10.07-04
 
 Décima quinta rodada da auditoria. Depois da v2026.10.07-03, conferida em produção com duas contas, sete auditores revisaram o app de novo. Não houve achado grave. Os consertos cobrem o app aberto em duas abas, a foto ampliada, a presença e a conversa, "Minha área" e os Filtros, a entrada e a conta, o "Disponível offline", o Histórico e a Ajuda, e o modo dev.
