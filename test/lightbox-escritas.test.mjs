@@ -1348,6 +1348,9 @@ test('L26 a API honra a região que vem da ação (e sem ela, a de agora)', asyn
   vm.createContext(ctx);
   vm.runInContext(I18N + '\n' + API_JS + '\nthis.API = API;', ctx);
   const API = ctx.API;
+  // A abertura com a sessão salva: ela vai pra memória — as rotas mandam a da
+  // memória, nunca a do aparelho (R13-1-04).
+  API.getSession();
   await API.aprovarPedido('v', 'u', 'row');
   await API.excluirFoto('v', 'f', -23, -46, 'row');
   API.prepararExclusao('v', -23, -46, 'row');
@@ -3923,6 +3926,9 @@ test('R12-3-01 a API devolve a PROMESSA do aquecimento (que só termina com a re
   };
   vm.createContext(ctx);
   vm.runInContext(I18N + '\n' + API_JS + '\nthis.API = API;', ctx);
+  // A abertura com a sessão salva: ela vai pra memória — as rotas mandam a da
+  // memória, nunca a do aparelho (R13-1-04).
+  ctx.API.getSession();
   const p = ctx.API.prepararExclusao('v', -23, -46, 'row');
   assert.ok(p && typeof p.then === 'function', 'DEFEITO: o aquecimento não devolve a promessa — a vez do local não tem pelo que esperar');
   let terminou = false;

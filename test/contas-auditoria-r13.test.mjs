@@ -461,3 +461,125 @@ test('R13-1-05: CONTROLES — sem nada digitado, a extensão entra pela volta e 
   assert.ok(!a.log.includes('acesso restrito'), 'a recusa da abertura abriu por cima do texto colado');
   assert.equal(a.deps.extNegadoNestaPagina, false);
 });
+
+// ═══ R13-1-04 · as rotas mandam a sessão da MEMÓRIA, nunca a do aparelho ══════
+// Na renovação da queda a memória fica vazia e o app (com os Filtros e as
+// Preferências) segue na tela. As rotas do `api.js` liam a sessão pelo
+// `getSession`, que com a memória vazia ADOTA a que outra aba guardou: abrir os
+// Filtros nesse meio (a lista de estados) a punha na memória, e com a renovação
+// falhando a aba ficava na tela de entrada com a sessão alheia — a volta a ela
+// não adotava mais, e o "Sair" dado lá fechava o "Colar cookies" daqui.
+
+// As rotas: todo método do `api.js` que manda uma sessão (o `const sessionToken
+// =` no corpo). Lidas do objeto de verdade — rota nova entra aqui sozinha.
+function rotasComSessao(API) {
+  return Object.keys(API).filter((k) => typeof API[k] === 'function' && /const sessionToken =/.test(String(API[k])));
+}
+// Uma chamada de cada rota, com argumentos que bastam pra ela chegar à rede.
+const ARGS = { listStates: [30], listCountries: [], fetchPlaces: [1, {}], markAsRead: ['v1', 'u1'], markAsReadBatch: [[{ venueID: 'v1', updateRequestID: 'u1' }]],
+  guardarPedido: ['v1', 'u1', true], rejectPlace: ['v1', 'u1'], aprovarPedido: ['v1', 'u1'], prepararExclusao: ['v1', -12, -38],
+  renomearLocal: ['v1', 'Nome'], excluirFoto: ['v1', 'f1', -12, -38], getProfile: [], presencaWaze: [{ visivel: false }],
+  presencaApp: [{ pais: 30 }], chat: [{ acao: 'conversas' }], criarPareamento: [{}], destroySession: [] };
+
+test('R13-1-04: sem sessão NA MEMÓRIA, nenhuma rota do api.js adota a sessão que outra aba guardou — "sem sessão", sem ir à rede', async () => {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b' });   // a OUTRA aba guardou a dela; esta caiu (memória vazia)
+  const rotas = rotasComSessao(real.API);
+  // O instrumento enxerga as rotas: sem isto, "nenhuma adotou" passaria com a lista vazia.
+  for (const r of ['listStates', 'listCountries', 'fetchPlaces', 'markAsRead', 'markAsReadBatch', 'rejectPlace', 'getProfile',
+    'presencaApp', 'chat', 'criarPareamento']) assert.ok(rotas.includes(r), `CONTROLE: o teste não acha a rota ${r} no api.js`);
+  const adotaram = [];
+  for (const r of rotas) {
+    const res = await real.API[r](...(ARGS[r] || []));
+    if (real.API.temSessaoNaMemoria()) { adotaram.push(r); real.API.soltarSessao(); }
+    if (res && res.success === false) assert.equal(res.errorCategory, 'unauthorized', `${r}: sem sessão, a resposta não é "sem sessão"`);
+  }
+  assert.deepEqual(adotaram, [],
+    'DEFEITO: estas rotas ADOTARAM calado a sessão da outra aba (com a renovação falhando, a aba fica na tela de entrada com ela, e o "Sair" de lá fecha o "Colar cookies" daqui): ' + adotaram.join(', '));
+  assert.deepEqual(real.pedidos, [], 'DEFEITO: rotas foram à rede com a sessão de OUTRA aba: ' + JSON.stringify(real.pedidos));
+});
+
+test('R13-1-04: CONTROLES — com a sessão desta aba as rotas mandam ELA; a ADOÇÃO explícita (a abertura) segue adotando', async () => {
+  const minha = apiDeVerdade({ [TOKEN]: 'tok-b' });
+  minha.API.sessionToken = 'tok-a';                   // a sessão DESTA aba (a outra guardou a dela)
+  await minha.API.listStates(30);
+  await minha.API.rejectPlace('v1', 'u1');
+  assert.deepEqual(minha.pedidos, [{ rota: 'lista-estados', token: 'tok-a' }, { rota: 'validar-place', token: 'tok-a' }],
+    'as rotas não mandaram a sessão desta aba');
+  // A abertura com sessão salva (o `initApp`) e a adoção (`adotarSessaoDoAparelho`) chamam o `getSession`.
+  const aberta = apiDeVerdade({ [TOKEN]: 'tok-b' });
+  assert.equal(aberta.API.getSession(), 'tok-b', 'CONTROLE: o `getSession` não adota mais — reveja a abertura e a adoção');
+  await aberta.API.listStates(30);
+  assert.deepEqual(aberta.pedidos, [{ rota: 'lista-estados', token: 'tok-b' }], 'depois da adoção, a rota não mandou a sessão adotada');
+  // E o guard estrutural: no api.js, só o próprio `getSession` lê o aparelho — nenhuma rota o chama.
+  assert.doesNotMatch(API_SEM, /this\.getSession\(\)/, 'uma rota do api.js voltou a ler a sessão pelo `getSession` (que adota)');
+});
+
+// A PORTA medida: os Filtros abertos na renovação pedem a lista de estados.
+test('R13-1-04: os Filtros abertos na renovação da queda (a lista de estados) não adotam a sessão da outra aba', async () => {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b' });
+  const select = { innerHTML: '', dataset: {}, value: '', appendChild() {} };
+  const deps = {
+    API: real.API, AppState: { statesByCountry: {}, filters: {} }, cargaDeEstados: 0,
+    document: { getElementById: (id) => (id === 'filterState' ? select : null), createElement: () => ({}) },
+    t: (k) => k, escapeHtml: (s) => String(s), i18nLocale: () => 'pt-BR',
+  };
+  const h = montar(['loadStatesIntoSelect', 'ordenarPorNome'], deps);
+  await h.loadStatesIntoSelect(30);
+  assert.equal(real.API.temSessaoNaMemoria(), false, 'DEFEITO: abrir os Filtros na renovação ADOTOU a sessão da outra aba');
+  assert.deepEqual(real.pedidos, [], 'DEFEITO: a lista de estados foi pedida com a sessão de OUTRA aba');
+  assert.match(select.innerHTML, /filters\.state\.naoCarregou/, 'sem sessão, o seletor não disse que a lista não carregou');
+});
+
+// As perguntas "qual é a sessão desta aba?" do app.js que liam pelo `getSession`:
+// a fila de saída (o gesto) e a conta que o perfil revela.
+function contaSemSessaoNaMemoria({ memoria = null, fila = [] } = {}) {
+  const SAIDA_KEY = constante('SAIDA_KEY');
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b', [SAIDA_KEY]: JSON.stringify(fila) });
+  real.API.sessionToken = memoria;
+  const deps = {
+    API: real.API, safeLS: real.safeLS, SAIDA_KEY, SAIDA_MAX: 1000, CONTA_KEY,
+    AppState: { profile: null, preferences: {} }, presencaWme: {}, contaConfirmadaNestaAba: null,
+    filaAtravessouSessao: false, saidaEsperandoConta: false,
+    dfato: () => {}, updateInFlightIndicator: () => {}, historyTodayKey: () => '2026-10-07', ondeAgora: () => '30', getLang: () => 'pt',
+    aplicarAvisosQueEsperavamAConta: () => {}, esquecerOutraConta: () => {},
+  };
+  const h = montar(['enfileirarSaida', 'carimbarContaNaSaida', 'aoConhecerConta', 'invisivelPedidoAntesDoPerfil',
+    'carimbarContaNoInvisivel', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'sessaoDestaAbaEhAGuardada',
+    'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
+  const filaGuardada = () => JSON.parse(real.dados.get(SAIDA_KEY) || '[]');
+  return { h, real, deps, filaGuardada };
+}
+
+test('R13-1-04: a fila de saída e a conta que o perfil revela, SEM sessão na memória, não adotam a sessão da outra aba', () => {
+  // O gesto anotado na fila de saída: a marca da sessão do gesto é a da memória.
+  const e = contaSemSessaoNaMemoria();
+  e.h.enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1' }, 'row');
+  assert.equal(e.real.API.temSessaoNaMemoria(), false, 'DEFEITO: anotar na fila de saída ADOTOU a sessão da outra aba');
+  assert.equal(e.filaGuardada()[0].s, null, 'o item saiu com a marca da sessão de OUTRA aba (o esvaziamento o mandaria no nome dela)');
+  // O carimbo da conta nos itens sem conta (o perfil chegou): sem sessão aqui, nada a carimbar —
+  // nem o item da outra aba, nem o anotado sem sessão nenhuma (dono desconhecido).
+  const c = contaSemSessaoNaMemoria({ fila: [{ tipo: 'read', venueID: 'v9', updateRequestID: 'u9', s: marcaDe('tok-b') },
+    { tipo: 'read', venueID: 'v7', updateRequestID: 'u7', s: null }] });
+  c.h.carimbarContaNaSaida('4242');
+  assert.equal(c.real.API.temSessaoNaMemoria(), false, 'DEFEITO: o carimbo da conta ADOTOU a sessão da outra aba');
+  assert.deepEqual(c.filaGuardada().map((it) => it.conta), [undefined, undefined],
+    'DEFEITO: um item de dono desconhecido (da OUTRA aba, ou sem sessão) ganhou a conta que esta aba conheceu');
+  // A conta que o perfil revela (`aoConhecerConta`).
+  const a = contaSemSessaoNaMemoria();
+  a.h.aoConhecerConta({ id: '4242' });
+  assert.equal(a.real.API.temSessaoNaMemoria(), false, 'DEFEITO: a conta conhecida ADOTOU a sessão da outra aba');
+  assert.equal(a.deps.contaConfirmadaNestaAba.s, null, 'a conta desta aba foi confirmada com a sessão de OUTRA aba');
+});
+
+test('R13-1-04: CONTROLE — com a sessão desta aba, o item e a conta levam a marca DELA, e o carimbo pega os itens dela', () => {
+  const e = contaSemSessaoNaMemoria({ memoria: 'tok-a' });
+  e.h.enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1' }, 'row');
+  assert.equal(e.filaGuardada()[0].s, marcaDe('tok-a'));
+  const c = contaSemSessaoNaMemoria({ memoria: 'tok-a', fila: [{ tipo: 'read', venueID: 'v9', updateRequestID: 'u9', s: marcaDe('tok-a') },
+    { tipo: 'read', venueID: 'v8', updateRequestID: 'u8', s: marcaDe('tok-b') }] });
+  c.h.carimbarContaNaSaida('4242');
+  assert.deepEqual(c.filaGuardada().map((it) => it.conta), ['4242', undefined], 'o carimbo não pegou só o item desta sessão');
+  const a = contaSemSessaoNaMemoria({ memoria: 'tok-a' });
+  a.h.aoConhecerConta({ id: '4242' });
+  assert.deepEqual(a.deps.contaConfirmadaNestaAba, { id: '4242', s: marcaDe('tok-a') });
+});

@@ -235,8 +235,9 @@ test('H11: a fila de saída guarda o idioma do gesto, e o pouso entrega hora, di
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-24', ondeAgora: () => '30', contaAgora: () => null,
     API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'fr', updateInFlightIndicator() {},
-    // A marca da sessão do gesto (o dono do item sem conta, do conserto do offline).
-    marcaDaSessao: () => 'marca',
+    // A marca da sessão do gesto (o dono do item sem conta, do conserto do offline):
+    // a da memória desta aba (`marcaDestaAba`, R13-1-04).
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',
   };
   const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
   enfileirarSaida('read', { venueID: 'v1', updateRequestID: 'u1' }, 'row');
@@ -461,7 +462,7 @@ test('Detetive: rejeitar um duplicado conta pelo MOTIVO do reporte, com ou sem o
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: (f) => salvos.push(f), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     dfato() {}, SAIDA_MAX: 1000, historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null,
     API: { getRegion: () => 'row', getSession: () => 'tok' }, getLang: () => 'pt', updateInFlightIndicator() {},
-    marcaDaSessao: () => 'marca',
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
   const { enfileirarSaida } = montar(['enfileirarSaida'], deps, ['enfileirarSaida']);
   enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1', flagType: 'DUPLICATE' }, 'row');

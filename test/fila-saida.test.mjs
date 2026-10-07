@@ -525,7 +525,7 @@ function montarResultado() {
     handleUnauthorized: () => chamadas.push('confere'),
     updateStats: () => {}, saveStats: () => {}, updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
-    marcaDaSessao: () => 'marca',
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
   const fontes = 'const descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();\n' + ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'devolverPedidoRecusado', 'handleActionResult'].map(fatiar).join('\n');
@@ -922,6 +922,7 @@ test('O2: com a `lista` de quem chama, o enfileirar não grava nem escreve no di
     API: { getRegion: () => 'row', getSession: () => 'tok', get sessionToken() { return 'tok'; } },
     dfato: (k) => diario.push(k), updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null, marcaDaSessao: () => 'marca',
+    marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida'].map(fatiar).join('\n')
@@ -1265,7 +1266,7 @@ function aparelhoDoGesto({ resposta }) {
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
     recordHistory: (tipo, n, dia, onde) => medidas.historico.push({ tipo, n, dia, onde }),
     historyTodayKey: () => filtro.dia, getLang: () => 'pt', handleUnauthorized: () => {},
-    marcaDaSessao: () => 'marca', contaAgora: () => '1', reivindicacaoDestaAba: () => ({ rv: 'aba' }),
+    marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca', contaAgora: () => '1', reivindicacaoDestaAba: () => ({ rv: 'aba' }),
     soltarMarcaDosItens: () => {}, anotarSeAbriuASaida: () => {}, devolverPedidoRecusado: () => {},
     tirarDaFilaDeSaida: () => true, pousouPorOutraAba: () => {}, decisaoDepoisDaQueda: () => {},
     API: { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row', getCountry: () => filtro.pais,

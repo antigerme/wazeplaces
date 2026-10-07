@@ -19980,7 +19980,9 @@ function aoConhecerConta(perfil) {
     carimbarContaNoInvisivel(id, invisivel);
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
-    const s = marcaDaSessao(API.getSession());
+    // A sessão DESTA aba, a da memória (`marcaDestaAba`): o `getSession`, com ela
+    // vazia, adotava a que outra aba guardou (R13-1-04, a régua do R12-1-03).
+    const s = marcaDestaAba();
     contaConfirmadaNestaAba = { id, s };
     // A marca do APARELHO é a da sessão GUARDADA nele: só esta aba a regrava
     // quando a sessão dela é a guardada, ou quando a conta muda (nenhuma, ou
@@ -20003,9 +20005,12 @@ function aoConhecerConta(perfil) {
 // Os itens da fila de saída SEM conta (gesto feito antes de o perfil chegar)
 // cuja marca é a da sessão de agora são desta conta: o token é o mesmo. Carimba.
 // Os de OUTRA marca ficam sem conta — o dono é desconhecido, e o esvaziamento
-// não os manda (auditoria de 2026-09-26, O3).
+// não os manda (auditoria de 2026-09-26, O3). A sessão é a DESTA aba, a da
+// memória: sem nenhuma, não há o que carimbar — e o `getSession` que ficava aqui
+// adotava, com a memória vazia, a sessão que outra aba guardou (R13-1-04).
 function carimbarContaNaSaida(id) {
-    const s = marcaDaSessao(API.getSession());
+    const s = marcaDestaAba();
+    if (!s) return;
     const f = carregarFilaDeSaida();
     let mudou = false;
     for (const it of f) {
@@ -20355,8 +20360,11 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
              // E a SESSÃO do gesto (a marca do token): numa sessão nova, antes
              // de o perfil chegar, a conta sai nula — e aí é a marca que diz de
              // quem é o item. Sem ela, o item nulo saía no nome de QUALQUER
-             // conta que entrasse depois (auditoria de 2026-09-26, O3).
-             s: marcaDaSessao(API.getSession()),
+             // conta que entrasse depois (auditoria de 2026-09-26, O3). A da
+             // MEMÓRIA (`marcaDestaAba`): o `getSession`, com ela vazia, adotava
+             // a sessão que outra aba guardou (R13-1-04). Sem sessão, `null`: dono
+             // desconhecido, e o esvaziamento não o manda.
+             s: marcaDestaAba(),
              // E a REGIÃO do Waze (row/na/il/world), pelo mesmo motivo: enviado
              // depois de a pessoa trocar de região, o pedido iria pro servidor
              // errado, voltaria "não encontrado" e contaria como feito.
