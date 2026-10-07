@@ -51,7 +51,11 @@ const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
 // O app: a busca, a tela de carregar e o contador de verdade. A API segura a
 // resposta até o teste soltar (`soltar(resposta)`); os quadros andam quando o
 // teste manda (`quadros(ms)`), como no `contadorDeMentira` do R5-2-10.
-function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, perfilNoAr = false, onLine = true } = {}) {
+// `tetos`: os prazos (`setTimeout`) do código fatiado ficam com o TESTE, que os
+// vence quando quer (`vencer(ms)`); sem ela, o relógio de verdade. `extra`: o que
+// o teste troca nos dependentes (a decisão do lugar pendente, por exemplo).
+function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, perfilNoAr = false, onLine = true, tetos = false,
+  extra = {} } = {}) {
   let relogio = 0;
   const pendentes = new Map();
   let proximo = 0;
@@ -95,12 +99,21 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     showLoading: (v) => tela.push(v ? 'esqueleto' : 'sem-esqueleto'), removeCurrentCardEl: () => {},
     showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
     abrirGuardadaDepoisDaFalha: async () => false,
+    // O teto da espera pelo perfil da fila vazia (R13-6-04), quando existe.
+    ...(/^const FILA_VAZIA_ESPERA_PERFIL_MS = /m.test(APP_SEM) ? { FILA_VAZIA_ESPERA_PERFIL_MS: constante('FILA_VAZIA_ESPERA_PERFIL_MS') } : {}),
   };
+  const prazos = [];
+  if (tetos) {
+    deps.setTimeout = (f, ms) => { prazos.push({ f, ms }); return prazos.length; };
+    deps.clearTimeout = (id) => { if (prazos[id - 1]) prazos[id - 1].f = null; };
+  }
+  Object.assign(deps, extra);
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'setCount', 'updatePendingCount'];
-  // A função do conserto: no código de antes ela não existe, e o teste tem de
-  // reprovar pelo COMPORTAMENTO, não por não achá-la.
+  // As funções do conserto: no código de antes elas não existem, e o teste tem de
+  // reprovar pelo COMPORTAMENTO, não por não achá-las.
   if (achar('pararContagemEmCurso')) nomes.push('pararContagemEmCurso');
+  if (achar('esperarOLugarDaFilaVazia')) nomes.push('esperarOLugarDaFilaVazia');
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;
     let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false; let buscaEsperaOPerfil = false;\n`
@@ -115,8 +128,10 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     }
   };
   const tique = () => new Promise((ok) => setTimeout(ok, 0));
+  // Vence os prazos armados com `ms` (os que ninguém desarmou).
+  const vencer = (ms) => { let n = 0; for (const p of prazos) if (p.f && p.ms === ms) { const f = p.f; p.f = null; f(); n++; } return n; };
   return { app, AppState, el, quadros, tique, tela, soltar: (r) => soltar(r), soltarPerfil: () => soltarPerfil(),
-    contando: () => pendentes.size > 0 };
+    contando: () => pendentes.size > 0, prazos, vencer };
 }
 
 const TRES = { success: true, places: [pedido(1), pedido(2), pedido(3)], hasMore: false, page: 1, total: 3, blocked: 0 };
@@ -238,4 +253,99 @@ test('R6-2-04: CONTROLE — a busca de fundo com cards na fila mostra o número,
   await busca;
   m.quadros(800);
   assert.equal(m.el.textContent, '6');
+});
+
+// ═══ R13-6-03 e R13-6-04 · a fila que volta VAZIA esperando o lugar (o R12-6-02) ═══
+// (auditoria da rodada 13). Com o perfil ainda vindo (ou a decisão do lugar no
+// ar), a busca que voltou VAZIA espera antes de dizer "Tudo limpo!" (R12-6-02):
+//   · R13-6-03 — a espera escrevia "…" no "Restam" e, terminada sem refazer a fila
+//     (a pessoa edita no país da fila), ninguém o redesenhava: "Tudo limpo!" com o
+//     contador dizendo "carregando" ao lado, pra sempre (MEDIDO no navegador, nos
+//     dois motores; e o mesmo depois da pergunta repetida da decisão pendente);
+//   · R13-6-04 — a espera pelo PERFIL não tinha teto próprio: com o `/Session`
+//     pendurado, o esqueleto ficava até o teto de 45 s do `_post` (MEDIDO: 45 165
+//     ms; antes do R12-6-02, 297 ms), também pra quem edita no país da fila.
+// Aqui RODAM o `startFetching`, a espera, o `updatePendingCount` e o `setCount` de
+// verdade, com os prazos nas mãos do teste.
+const VAZIA = { success: true, places: [], hasMore: false, page: 1, total: 0, blocked: 0 };
+const TETO = /^const FILA_VAZIA_ESPERA_PERFIL_MS = /m.test(APP_SEM) ? constante('FILA_VAZIA_ESPERA_PERFIL_MS') : 4000;
+
+test('R13-6-03: a fila VAZIA que esperou o perfil diz "Tudo limpo!" com "Restam 0" — nunca o "…" de carregando ao lado', async () => {
+  const m = montar({ texto: '—', perfilNoAr: true, tetos: true });
+  const busca = m.app.startFetching();
+  await m.tique();
+  m.soltar(VAZIA);
+  await m.tique();
+  assert.ok(!m.tela.includes('vazio'), 'PRÉ-CONDIÇÃO: a fila vazia não esperou o perfil (o R12-6-02)');
+  assert.equal(m.el.textContent, '…', 'PRÉ-CONDIÇÃO: esperando o perfil, a fila está carregando');
+  m.soltarPerfil();
+  await busca;
+  m.quadros(800);
+  assert.deepEqual(m.tela.slice(-1), ['vazio'], 'PRÉ-CONDIÇÃO: o painel da fila vazia');
+  assert.equal(m.el.textContent, '0', `"Tudo limpo!" com "Restam ${m.el.textContent}" ao lado`);
+  // E depois da pergunta repetida da decisão PENDENTE (a outra espera, no começo da
+  // busca), com a fila que já tinha acabado: o mesmo.
+  let soltarDecisao = null;
+  const d = montar({ texto: '0', extra: { refazerDecisaoSemResposta: () => new Promise((ok) => { soltarDecisao = ok; }) } });
+  d.AppState.hasMore = false;
+  const buscaD = d.app.startFetching();
+  await d.tique();
+  assert.equal(d.el.textContent, '…', 'PRÉ-CONDIÇÃO: a pergunta repetida não deixou a fila carregando');
+  soltarDecisao();
+  await buscaD;
+  d.quadros(800);
+  assert.deepEqual(d.tela.slice(-1), ['vazio']);
+  assert.equal(d.el.textContent, '0', `depois da pergunta repetida, "Tudo limpo!" com "Restam ${d.el.textContent}"`);
+});
+
+test('R13-6-04: com o PERFIL pendurado, a fila VAZIA espera só até o teto — depois o "Tudo limpo!" aparece (e o "Restam 0")', async () => {
+  const m = montar({ texto: '—', perfilNoAr: true, tetos: true });
+  const busca = m.app.startFetching();
+  await m.tique();
+  m.soltar(VAZIA);
+  await m.tique();
+  assert.ok(!m.tela.includes('vazio'), 'PRÉ-CONDIÇÃO: a fila vazia não esperou o perfil (o R12-6-02)');
+  assert.ok(m.prazos.some((p) => p.f && p.ms === TETO),
+    'a espera pelo perfil não armou teto: o esqueleto fica até o perfil chegar ou falhar (45 s com o `/Session` pendurado)');
+  assert.ok(TETO >= 2000 && TETO <= 6000, `o teto (${TETO} ms) saiu da faixa medida: o perfil normal chega em menos de 1 s`);
+  m.vencer(TETO);
+  await busca;
+  m.quadros(800);
+  assert.deepEqual(m.tela.slice(-1), ['vazio'], `vencido o teto, a tela ficou no esqueleto: ${m.tela}`);
+  assert.equal(m.el.textContent, '0');
+});
+
+test('R13-6-04: CONTROLES — a DECISÃO do lugar não tem teto, e o perfil que chega DENTRO do teto traz a decisão inteira', async () => {
+  // A decisão no ar (o perfil já chegou e pergunta aos outros servidores): nenhum
+  // prazo, e a busca espera até ela terminar.
+  let soltarDecisao = null;
+  const d = montar({ texto: '—', tetos: true });
+  d.AppState.profile = { areas: [] };
+  d.AppState._caixaDaMinhaAreaNoAr = new Promise((ok) => { soltarDecisao = () => { d.AppState._caixaDaMinhaAreaNoAr = null; ok(); }; });
+  const buscaD = d.app.startFetching();
+  await d.tique();
+  d.soltar(VAZIA);
+  await d.tique();
+  assert.ok(!d.prazos.some((p) => p.f), 'a espera pela DECISÃO no ar ganhou teto: o "Tudo limpo!" pisca pra quem só edita na NA');
+  assert.ok(!d.tela.includes('vazio'), 'com a decisão no ar, a fila vazia disse "Tudo limpo!"');
+  soltarDecisao();
+  await buscaD;
+  assert.deepEqual(d.tela.slice(-1), ['vazio']);
+  // O perfil chega DENTRO do teto e começa a decisão (`completarPerfilChegado`): o
+  // teto que vence com ela no ar não corta a espera — a carga só termina depois dela.
+  const m = montar({ texto: '—', perfilNoAr: true, tetos: true });
+  const busca = m.app.startFetching();
+  await m.tique();
+  m.soltar(VAZIA);
+  await m.tique();
+  let fimDaDecisao = null;
+  m.AppState.profile = { areas: [] };
+  m.AppState._caixaDaMinhaAreaNoAr = new Promise((ok) => { fimDaDecisao = () => { m.AppState._caixaDaMinhaAreaNoAr = null; ok(); }; });
+  m.vencer(TETO);
+  await m.tique();
+  assert.ok(!m.tela.includes('vazio'), 'o teto do perfil cortou a espera pela DECISÃO que ele começou: o "Tudo limpo!" no meio');
+  fimDaDecisao();
+  m.soltarPerfil();
+  await busca;
+  assert.deepEqual(m.tela.slice(-1), ['vazio']);
 });

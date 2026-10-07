@@ -12967,6 +12967,35 @@ function fetchNextPage() {
 // (ver `updatePendingCount`).
 let buscaEsperaOPerfil = false;
 
+// A fila que voltou VAZIA com o lugar por decidir espera (ver o fim do
+// `startFetching`, R12-6-02) — a DECISÃO no ar inteira, e o PERFIL ainda vindo
+// só até um TETO. A espera pelo perfil valia pra toda fila vazia, não só pra de
+// quem vai ser levado a outro país: quem edita no Brasil e limpou a fila ficava
+// no esqueleto, com "Restam …", até o perfil chegar ou falhar — com o `/Session`
+// pendurado, até o teto de 45 s do `_post` (MEDIDO no navegador: 45 165 ms,
+// contra 297 ms antes do R12-6-02; auditoria da rodada 13, R13-6-04) —, pra ver o
+// mesmo "Tudo limpo!" que a tela já sabia.
+//
+// Por que 4 s: o perfil normal chega em menos de 1 s, e a busca que volta antes
+// dele (a fila vazia de verdade: a do país que a pessoa edita, sem nada) é a que
+// espera; a decisão que o perfil traz (a pergunta aos outros servidores, ~1,3 s
+// MEDIDOS no R12-6-02) fica FORA do teto. É o mesmo teto que a renovação já usa
+// pra esperar o perfil antes de seguir sem ele (`AVISO_RENOVADA_ESPERA_PERFIL_MS`).
+// Passado ele, o painel aparece, e o perfil que chegar depois ainda leva a
+// pessoa à fila dela, com o aviso de sempre (como antes do R12-6-02): o "Tudo
+// limpo!" só volta a piscar pra quem só edita noutro servidor com o perfil
+// levando mais de 4 s além da busca.
+const FILA_VAZIA_ESPERA_PERFIL_MS = 4000;
+async function esperarOLugarDaFilaVazia(promessa) {
+    if (promessa === AppState._caixaDaMinhaAreaNoAr) { await promessa; return; }
+    let relogio = null;
+    const teto = new Promise((ok) => { relogio = setTimeout(ok, FILA_VAZIA_ESPERA_PERFIL_MS); });
+    try { await Promise.race([promessa, teto]); } finally { clearTimeout(relogio); }
+    // O perfil chegou dentro do teto, e a decisão que ele começou está no ar (a
+    // carga só termina depois dela): ela vem inteira, como sempre.
+    if (AppState.profile && AppState._caixaDaMinhaAreaNoAr) await AppState._caixaDaMinhaAreaNoAr;
+}
+
 async function startFetching() {
     // O `sair()` do treino busca; aqui, o laço abaixo esperaria uma busca que o
     // `fetchNextPage` recusa no treino — seria o laço do gotcha #19.
@@ -13069,13 +13098,14 @@ async function startFetching() {
     // Só a busca que RESPONDEU vazia: a que FALHOU tem a tela dela — a de falha,
     // ou a fila guardada do "Disponível offline" logo abaixo —, e no "lie-fi" o
     // perfil pendura junto, até o teto de 45 s: esperando por ele, a fila
-    // guardada não entrava (MEDIDO no smoke do offline, 9j).
+    // guardada não entrava (MEDIDO no smoke do offline, 9j). E o perfil ainda
+    // vindo tem teto próprio (ver `esperarOLugarDaFilaVazia`, R13-6-04).
     const decidindoOLugar = (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr)
         || (!AppState.loadError && (AppState._caixaDaMinhaAreaNoAr || (!AppState.profile && AppState._profilePromise)));
     if (decidindoOLugar && !AppState.queue.length && epoca === AppState.fetchEpoch) {
         buscaEsperaOPerfil = true;
         updatePendingCount();
-        try { await decidindoOLugar; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        try { await esperarOLugarDaFilaVazia(decidindoOLugar); } catch (e) {} finally { buscaEsperaOPerfil = false; }
         if (epoca !== AppState.fetchEpoch) return;
     }
 
@@ -13098,6 +13128,13 @@ async function startFetching() {
     }
 
     showLoading(false);
+    // O "Restam" das esperas acima ("…", `buscaEsperaOPerfil`) volta a dizer o
+    // número: o `showNoPlaces` não o redesenha, e quem desenhou por último foi a
+    // espera — o painel dizia "Tudo limpo!" com o contador em "carregando" ao
+    // lado, pra sempre (MEDIDO no navegador, nos dois motores; auditoria da
+    // rodada 13, R13-6-03). Aqui, e não no fim de cada espera: com a fila
+    // refeita no meio (outra época), quem desenha é a busca dela.
+    updatePendingCount();
 
     if (AppState.queue.length > 0) {
         showCurrentPlace();
