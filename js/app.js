@@ -6810,7 +6810,17 @@ function rebuscarDepoisDeFalha() {
     // tela dizia "Tudo limpo! … Confira o país e a região" até o perfil de lá
     // responder (MEDIDO no navegador, auditoria da rodada 9, R9-6-03). Sem o
     // perfil ainda, segue abaixo: o `startFetching` o pede e espera.
-    if (filaEsperaPerfil && AppState.profile) return;
+    //
+    // E só com a decisão NO AR (`_caixaDaMinhaAreaNoAr`): é ela que refaz a
+    // fila. Sem ela, ninguém refazia. Um 401 passageiro na pergunta ao servidor
+    // que a pessoa aplicou à mão (`lerServidorDaMinhaArea`) vai à conferência;
+    // a sonda responde ("sua sessão continua válida") e já LÊ esse servidor —
+    // e a busca que esperava a caixa dele ficava em "Falha ao carregar …
+    // Verifique sua conexão" até o "Tentar de novo", com o que faltava na mão
+    // (MEDIDO no navegador, nos dois motores: 0,4 a 15 s; auditoria da rodada
+    // 12, R12-6-01). No 1º perfil pela sonda (o R9-6-03), o
+    // `completarPerfilChegado` já pôs a decisão no ar antes de chegar aqui.
+    if (filaEsperaPerfil && AppState.profile && AppState._caixaDaMinhaAreaNoAr) return;
     if (AppState.queue.length > 0) {
         // COM card na fila: foi a REPOSIÇÃO que levou o 401. A busca que falhou
         // deixou `hasMore = false` e `loadError = true`, e com a sessão viva a
