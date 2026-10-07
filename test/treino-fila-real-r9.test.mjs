@@ -389,7 +389,7 @@ function montarDevolvido() {
   app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela',
     'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401',
     'contarIdasSemResposta', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome',
-    'aplicarNomeNaTela', 'vezDasFotosNoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
+    'aplicarNomeNaTela', 'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
   'setEpoca: (v) => { epocaDaSessao = v; }');
   return { app, A, A2, C, AppState, log, toasts, Lightbox, responder: (r) => responder(r) };

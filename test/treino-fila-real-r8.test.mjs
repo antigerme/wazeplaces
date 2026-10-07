@@ -158,7 +158,7 @@ function montarEscritaNaQueda() {
   app = montar(deps, ['filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela', 'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto',
     'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401', 'contarIdasSemResposta', 'idasSemRespostaDeAntes',
     'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela', 'vezDasFotosNoLocal',
-    'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
+    'esperaAVezDoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
   'setEpoca: (v) => { epocaDaSessao = v; }');
   return { app, A, B, C, AppState, log, toasts, Lightbox, responder: (r) => responder(r) };

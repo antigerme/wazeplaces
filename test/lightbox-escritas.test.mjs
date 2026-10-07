@@ -69,7 +69,7 @@ function lightbox(podeL6 = true) {
 // (R12-3-02). O anúncio ao leitor de tela (R6-3-08) é anotado no `log` de quem
 // passar um.
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-  'vezDasFotosNoLocal', 'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
+  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
   anunciarNoLightbox: (texto, place) => { if (log) log.push('anuncio:' + texto); },
@@ -1456,7 +1456,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-    'vezDasFotosNoLocal'];
+    'vezDasFotosNoLocal', 'esperaAVezDoLocal'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -3452,7 +3452,7 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
     ok({ success: true, preparado: true });
   };
   return { app, L, A, B, C, AppState, log, decididos, pend, abrirEm, irPara, vencerJanela, responder, responderAquecimento,
-    saidas: () => idas.map((i) => i.tipo + ':' + i.id), aquecidas: () => log.filter((l) => l.startsWith('preparar:')) };
+    api: deps.API, saidas: () => idas.map((i) => i.tipo + ':' + i.id), aquecidas: () => log.filter((l) => l.startsWith('preparar:')) };
 }
 
 test('R11-3-01 com o Desfazer, a APROVAÇÃO de uma foto do local só sai depois da resposta da EXCLUSÃO dele no ar — e a exclusão seguinte espera a aprovação', async () => {
@@ -3869,6 +3869,44 @@ test('R12-3-01 com o Desfazer, o AQUECIMENTO da lixeira entra na vez do local: a
   s.abrirEm(s.A, 'f1');
   s.app.pedirExclusaoDaFoto(); s.vencerJanela();
   assert.deepEqual(s.saidas(), ['excluir:f1'], 'CONTROLE: o aquecimento que não saiu segurou a exclusão');
+});
+
+test('R12-3-01 com a página SAINDO, a escrita da janela não espera o aquecimento — sai na hora, como antes (uma escrita na frente segue sendo esperada)', async () => {
+  // A descarga da página (`descarregarAcaoPendente`: fechar o app, trocar de app)
+  // liga o `API.saindo` e despacha a janela. Esperando o aquecimento, a escrita
+  // ficava pra depois da resposta dele — que a página morta nunca recebe —, e
+  // sumia: antes ela saía na hora, com keepalive. Sem esperar, quem cuida da
+  // ordem é o servidor (o aquecimento só grava por cima do que estava lá, em
+  // test/portao-servidor).
+  const m = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  m.abrirEm(m.A, 'f1');
+  m.app.pedirExclusaoDaFoto();                       // o toque: o aquecimento sai e fica no ar
+  m.api.saindo = true;                               // a página saindo…
+  m.pend.e.enviar();                                 // …e a descarga despacha a janela
+  assert.deepEqual(m.saidas(), ['excluir:f1'],
+    'DEFEITO: com a página saindo, a exclusão esperou o aquecimento — a página morre antes da resposta dele, e a exclusão nunca sai');
+  // A aprovação também (tocou na lixeira, desfez, aprovou e fechou o app).
+  const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  a.abrirEm(a.A, 'f1');
+  a.app.pedirExclusaoDaFoto();
+  a.pend.e.desfazer();
+  a.irPara('ur-A');
+  a.app.aprovarFotoAtual();
+  a.api.saindo = true;
+  a.pend.a.enviar();
+  await umTique();
+  assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'DEFEITO: com a página saindo, a aprovação esperou o aquecimento');
+  // CONTROLE: uma ESCRITA na frente (a exclusão de outra foto do local no ar)
+  // segue sendo esperada com a página saindo — as duas cruzariam no servidor.
+  const c = fotosNoMesmoLocal();
+  c.abrirEm(c.A, 'f1');
+  c.app.pedirExclusaoDaFoto(); c.vencerJanela();     // a exclusão de f1, no ar
+  c.irPara('f2');
+  c.app.pedirExclusaoDaFoto();
+  c.api.saindo = true;
+  c.pend.e.enviar();
+  await umTique();
+  assert.deepEqual(c.saidas(), ['excluir:f1'], 'CONTROLE: com a página saindo, a 2ª exclusão do local não esperou a 1ª, que estava no ar');
 });
 
 test('R12-3-01 a API devolve a PROMESSA do aquecimento (que só termina com a resposta), e nada sem sessão', async () => {

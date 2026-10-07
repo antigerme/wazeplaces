@@ -3732,32 +3732,50 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // O AQUECIMENTO da lixeira (a leitura do local que o toque dispara, `preparar`)
 // entra também, como uma leitura (auditoria da rodada 12, R12-3-01): fora da
 // vez, ele podia voltar DEPOIS de uma escrita do local e guardar no servidor a
-// lista de antes dela (ver o `pedirExclusaoDaFoto`).
+// lista de antes dela (ver o `pedirExclusaoDaFoto`). Menos com a página SAINDO
+// (`soAquecimentoNaFrente` + `API.saindo`): a escrita da janela que a descarga
+// despacha não espera um aquecimento — a página morreria antes da resposta dele,
+// e a escrita, que saía na hora com `keepalive`, sumia. Sem esperar, o servidor
+// cuida da ordem: o aquecimento só grava por cima da lista que estava lá quando
+// ele saiu (`relerLocal`). Uma ESCRITA na frente segue sendo esperada, como
+// acima.
 //
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
 // vez são exclusões — com uma no ar, a pílula do nome do local trava
-// (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada.
-const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, n, exclusoes }
+// (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada. `escritas`:
+// quantas não são aquecimento.
+const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, n, exclusoes, escritas }
 
 function vezDasFotosNoLocal(alvo, tipo) {
     const local = alvo.place.venueID;
     let vez = escritasDeFotoNoLocal.get(local);
-    if (!vez) { vez = { ultima: null, n: 0, exclusoes: 0 }; escritasDeFotoNoLocal.set(local, vez); }
+    if (!vez) { vez = { ultima: null, n: 0, exclusoes: 0, escritas: 0 }; escritasDeFotoNoLocal.set(local, vez); }
     const anterior = vez.ultima;
+    const soAquecimentoNaFrente = vez.escritas === 0;
     let soltar;
     vez.ultima = new Promise((ok) => { soltar = ok; });
     vez.n++;
     const excluir = tipo === 'excluir';
+    const escrita = tipo !== 'aquecer';
     if (excluir) vez.exclusoes++;
+    if (escrita) vez.escritas++;
     const v = vez;
     return {
         anterior,                                   // nula: a vez já é desta
+        soAquecimentoNaFrente,                      // na frente, só aquecimento (ou nada)
         soltar: () => {
             soltar();
             if (excluir) v.exclusoes--;
+            if (escrita) v.escritas--;
             if (--v.n === 0 && escritasDeFotoNoLocal.get(local) === v) escritasDeFotoNoLocal.delete(local);
         },
     };
+}
+
+// A escrita espera a vez do local? Sempre que houver alguém na frente — menos a
+// página SAINDO com só o aquecimento na frente (ver acima).
+function esperaAVezDoLocal(vez) {
+    return !!vez.anterior && !(vez.soAquecimentoNaFrente && typeof API !== 'undefined' && API.saindo === true);
 }
 
 // As fotos que SAÍRAM do mapa por uma exclusão desta página, por LOCAL
@@ -3992,13 +4010,14 @@ async function enviarExclusao(alvo) {
     const alvoDasIdas = 'excluir|' + alvo.place.venueID + '|' + alvo.id;
     // A vez do LOCAL (R10-3-03): com outra escrita da lista dele no ar — outra
     // exclusão, ou a aprovação de uma foto dele (R11-3-01) —, o envio espera a
-    // resposta dela. Sem nenhuma, nada espera — o envio sai na hora, como antes.
-    // A pílula do nome do local trava com ela no ar (R11-3-06): a trava é
-    // reaplicada quando ela entra na vez e quando sai.
+    // resposta dela — e a do aquecimento da lixeira (R12-3-01), menos com a página
+    // saindo (`esperaAVezDoLocal`). Sem nenhuma, nada espera — o envio sai na
+    // hora, como antes. A pílula do nome do local trava com ela no ar
+    // (R11-3-06): a trava é reaplicada quando ela entra na vez e quando sai.
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
     aplicarTravaDeAcao();
     try {
-        if (vez.anterior) await vez.anterior;
+        if (esperaAVezDoLocal(vez)) await vez.anterior;
         // A MESMA foto já saiu do mapa por outra exclusão DESTA sessão — a do
         // irmão, que estava no ar com esta na vez (R10-3-03) ou que pousou com
         // esta ainda na janela do Desfazer (R12-3-02, `fotosQueSairamDoMapa`):
@@ -4345,9 +4364,11 @@ async function enviarAprovacao(alvo) {
         // `vezDasFotosNoLocal`): com uma exclusão do local no ar, a aprovação
         // espera a resposta dela — saindo junto, a resposta da exclusão
         // regravava no servidor a lista de antes, com esta foto pendente, e a
-        // exclusão seguinte a devolvia ao Waze como `approved: false`.
+        // exclusão seguinte a devolvia ao Waze como `approved: false`. E o
+        // aquecimento da lixeira também é esperado (R12-3-01), menos com a página
+        // saindo (`esperaAVezDoLocal`).
         vez = vezDasFotosNoLocal(alvo, 'aprovar');
-        if (vez.anterior) {
+        if (esperaAVezDoLocal(vez)) {
             await vez.anterior;
             // A OUTRA aba decidiu o pedido enquanto esta esperava a vez (o
             // R11-3-02, na espera que a vez abriu): vale a decisão de lá. A
