@@ -288,8 +288,12 @@ function montarLightboxComJanelas() {
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     aplicarNomeNaTela: (p, n) => log.push('nome:' + n), devolverFoto: () => log.push('devolveu'),
-    enviarExclusao: () => log.push('ENVIOU:excluir'), enviarAprovacao: () => log.push('ENVIOU:aprovar'),
-    enviarRenomeacao: () => log.push('ENVIOU:renomear'), registrarDesfazer: () => log.push('desfazer-do-editor'),
+    // As escritas de verdade são `async`: o envio da janela espera a promessa
+    // pra dizer o desfecho no irmão (R11-3-05).
+    enviarExclusao: () => { log.push('ENVIOU:excluir'); return Promise.resolve(true); },
+    enviarAprovacao: () => { log.push('ENVIOU:aprovar'); return Promise.resolve(true); },
+    enviarRenomeacao: () => { log.push('ENVIOU:renomear'); return Promise.resolve(true); },
+    registrarDesfazer: () => log.push('desfazer-do-editor'),
     mostrarDesfazer: () => log.push('banner'),
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
     API: { getSession: () => 'tok-A', setSession() {}, getRegion: () => 'row', prepararExclusao() {},

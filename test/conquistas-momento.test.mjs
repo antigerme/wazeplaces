@@ -379,7 +379,7 @@ function montarLightboxComJanela() {
     document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Nome Novo' } : null) },
     fecharEdicaoNome() {}, sairDaEdicaoNome() {}, aplicarNomeNaTela() {}, devolverFoto() {}, showCurrentPlace() {},
     API: { prepararExclusao() {}, getRegion: () => 'row' },
-    enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao() {},
+    enviarAprovacao: () => Promise.resolve(true), enviarExclusao: () => Promise.resolve(true), enviarRenomeacao: () => Promise.resolve(true),
     aplicarTravaDeAcao() {}, removeUndoBanner() {}, t: (k) => k,
     // Nada no ar e nada travado: cada caso abre a SUA janela (L23, L24).
     aprovandoAgora: false, excluindoAgora: false, acoesTravadas: () => false, renomeacaoNoAr: () => false,
@@ -388,7 +388,8 @@ function montarLightboxComJanela() {
     registrarDesfazer: () => { reg.desfazer++; },
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
     refazerSelosSeOutroNaTela: () => {},   // o "Ver +N" do card da frente (R5-2-02)
-    exclusoesNoLocal: new Map(),           // nenhuma exclusão do local no ar (R10-3-03)
+    escritasDeFotoNoLocal: new Map(),      // nenhuma escrita da lista do local no ar (R10-3-03, R11-3-01)
+    anunciarDesfechoDaFoto: () => {},      // o desfecho dito no irmão quando a escrita pousa (R11-3-05)
   };
   const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear'];
   const chaves = Object.keys(deps);
