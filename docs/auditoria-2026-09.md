@@ -16,28 +16,24 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-07 ~00:00 UTC)
+## 0. Estado agora (2026-10-07 ~12:00 UTC)
 
-- **Lote 12 em produção** (PR #258, `e236e5f`, v2026.10.06-01), verificado com as duas contas: 107 ✓ e as 21 da
-  seção "15. Lote 12 no ar", nenhum defeito do app. O **#259** (`efa181c`) consertou dois instrumentos: a sonda falsa
-  do "Marcar todos" responde depois de o relógio andar, e a espera dos smokes diz quando a página do WebKit CAI (a
-  queda é do motor sob carga, na mesma proporção com o código do lote 11).
-- **Rodada 9** completa (`scratchpad/r9-relatorios/r9-{1..7}.md`, ~40 achados, 1 médio — o perfil que chegava com o
-  treino aberto o encerrava calado).
-- **Lote 13 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (treino e a
-  fila real, avisos e folha do treino, fila de saída, foto ampliada, diagnóstico e FAB, presença, Filtros e "Minha
-  área", contas em duas abas, extensão 0.3.4) mais o que a junção achou: o harness do treino sem a lista de países
-  pela fonte única, o relatório feito no treino sem a fila que o perfil mandou refazer, e o 🚩 que não voltava com a
-  foto denunciada no Desfazer. `npm test` 2292/2292, também com o relógio grosso. Relatórios em
-  `scratchpad/relatorio-l13-<área>.md`.
-- **Decisões pro owner**: `scratchpad/r5-pendencias.md` e a página `scratchpad/mockups/decisoes-em-aberto.html`
-  (com as do lote 13: o limite do Histórico com duas abas no computador, o Desfazer do nome calado pro leitor de
-  tela, a frase de "Minha área" quando o outro servidor não responde, a tentativa condenada da extensão, e três
-  decididas e reversíveis), a medição nova do aviso do treino (cobre ✕ ↑ ✓ em 4 de 4 aparelhos) e a extensão 0.3.4
-  pra publicar.
+- **Lote 13 em produção** (PR #260, `da70feb`, v2026.10.07-01), verificado com as duas contas: 112 ✓ na volta
+  inteira (os 4 ✗ eram do roteiro, consertados nele) e a seção "16. Lote 13 no ar" refeita com 26 ✓ · 0 ✗, nenhum
+  defeito do app.
+- **Rodada 10** completa (`scratchpad/r10-<n>/relatorio.md`, ~45 achados, 3 médios: desligar o autor no meio da
+  recusa automática não a parava; o card de foto arrastado ficava preso no "precisa de sinal"; o "N esperando envio"
+  escondido sob o cabeçalho no iPhone instalado). Confirmado no Waze real: as `managedAreas` são por servidor.
+- **Lote 14 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (treino e
+  a fila real, exemplos e foco do treino, foto ampliada, presença, Filtros e "Minha área", contas e a adoção da
+  sessão, fila e recusa automática, duas abas, diagnóstico e offline) mais o que a junção achou: o "Marcar todos", a
+  recusa automática e a aprovação de foto passaram a deixar de fora o que a outra aba decidiu, e um conflito de teste
+  (treino × filtros) resolvido pela união. Relatórios em `scratchpad/relatorio-l14-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 14": o voltar
+  no meio do treino, o placar que também perde entre abas com a recusa automática, e as decididas e reversíveis do lote).
 - **Cookies** (2026-10-06): `a3bf0b4b-antigerme_cookies.txt` (L6+AM) e `83b3b403-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "16. Lote 13 no
-  ar") — e a rodada 10.
+- **Próxima volta**: smokes no HEAD, PR, CI, merge, produção (`prod-auditoria.mjs` com a seção "17. Lote 14 no
+  ar") — e a rodada 11, com a pista da presença (a resposta que a lista já contou e o tempo real entrega depois).
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -80,6 +76,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #257 | 2026100301 | rodada 10: conta e duas abas, fila e fim da fila, foto ampliada, offline e modo dev, presença, filtros, treino, "Como funciona" e textos; a extensão 0.3.2 | **101 ✓** em produção, nas duas rodadas (os ✗ foram do roteiro, consertados nele) |
 | #258 | 2026100601 | rodada 11: treino e a fila real, foto ampliada, fila e lotes, diagnóstico e offline, presença, filtros, contas e Histórico; a extensão 0.3.3 | **107 ✓** + 21 da seção 15 em produção, nenhum defeito do app |
 | #259 | — | instrumento: a sonda falsa do "Marcar todos" espera o relógio andar; a espera dos smokes diz quando a página do WebKit cai; o relógio grosso | CI verde nos dois jobs |
+| #260 | 2026100701 | rodada 12: treino e a fila real, fila de saída, foto ampliada, diagnóstico, presença, filtros e "Minha área" por servidor, contas em duas abas; a extensão 0.3.4 | **112 ✓** em produção (os 4 ✗ do roteiro, consertados; a seção 16 refeita, 26 ✓ · 0 ✗), nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
