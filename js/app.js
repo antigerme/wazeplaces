@@ -12101,8 +12101,9 @@ async function startFetching() {
     // `areaNoutroServidorSemDecisao`, R11-6-02 — a troca de conta pela renovação
     // a dispara antes de a decisão começar): quem refaz a fila é a decisão, e
     // esta busca espera junto, na tela de carregar, sem o "Falha ao carregar" no
-    // meio. Refeita a fila (outra época), quem a desenha é a busca dela.
-    if (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr && epoca === AppState.fetchEpoch) {
+    // meio. Refeita a fila (outra época), quem a desenha é a busca dela. Só sem
+    // card pra mostrar: com a fila cheia, ela mostra o que tem.
+    if (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr && !AppState.queue.length && epoca === AppState.fetchEpoch) {
         buscaEsperaOPerfil = true;
         updatePendingCount();
         try { await AppState._caixaDaMinhaAreaNoAr; } catch (e) {} finally { buscaEsperaOPerfil = false; }
