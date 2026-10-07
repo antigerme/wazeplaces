@@ -130,8 +130,10 @@ const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotar
   'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
   'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'offlineLerPousos', 'registrarPouso',
   'semOsJaDecididos', 'abrirCanalDosPousos', 'quemDecideAgora', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba',
-  'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'contaAgora',
-  'aoConhecerConta', 'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada'];
+  'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
+  'aoConhecerConta', 'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada',
+  // O "invisível" pedido antes do perfil, que o `aoConhecerConta` carimba (R12-5-05, a junção do lote 16).
+  'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
 
 function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, abrirCanal = true } = {}) {
   const log = [];
@@ -570,7 +572,7 @@ const sessaoDeMentira = (token) => ({
   getSession() { return this.sessionToken; },
   getRegion: () => 'row',
 });
-const NOMES_AVISO = ['registrarPouso', 'avisarOutrasAbasDoPouso', 'quemDecideAgora', 'marcaDaSessao', 'contaAgora'];
+const NOMES_AVISO = ['registrarPouso', 'avisarOutrasAbasDoPouso', 'quemDecideAgora', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora'];
 const depsDoAviso = (canal) => ({ canalDosPousos: canal, pousosDaPagina: new Map(), POUSO_NA_MEMORIA_MS,
   offlineLigado: () => false, ultimaEscritaOkEm: 0, CONTA_KEY, safeLS: { get: () => null, set() {}, remove() {} } });
 // A QUEDA da sessão com a escrita no ar: a época troca (`derrubarSessao`) e a

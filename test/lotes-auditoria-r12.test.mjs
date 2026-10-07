@@ -147,7 +147,8 @@ function montarMarcarTodos({ fila, decididos = new WeakSet(), resolvidos = [], p
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     decididosPorOutraAbaComCardAqui: decididos,
     API: {
-      getRegion: () => 'row', getSession: () => 'tok-A',
+      // A sessão NA MEMÓRIA desta aba (`marcaDestaAba`, R12-1-03, a junção do lote 16).
+      getRegion: () => 'row', getSession: () => 'tok-A', sessionToken: 'tok-A',
       markAsReadBatch: async (itens) => {
         chamadas.push('lote:' + itens.map((i) => i.venueID).join('+'));
         const n = chamadas.filter((c) => c.startsWith('lote:')).length;
@@ -182,7 +183,7 @@ function montarMarcarTodos({ fila, decididos = new WeakSet(), resolvidos = [], p
   };
   const h = montar(['chaveDoPedido', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'aprovacaoDelaJaPousou',
     'desfechoDaAprovacaoDela', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'avisoDaTrava',
-    'marcarEmAndamento', 'marcaDaSessao', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
+    'marcarEmAndamento', 'marcaDaSessao', 'marcaDestaAba', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
     'handleUnauthorized', 'refazerDepoisDo401', 'openBatchReadConfirm', 'handleBatchMarkRead'], deps);
   // O lote, e a conferência que ele abriu.
   const marcarTodos = async () => {

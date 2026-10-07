@@ -661,7 +661,9 @@ function perfilQueFalta(respostaDoPerfil) {
   const pedidos = [];
   const respostas = [];   // o soltar de CADA pedido, na ordem
   const deps = {
-    AppState: { authenticated: true, profile: null }, epocaDaSessao: 0, perfilPedidoEm: 0, cargasDoPerfil: 0,
+    // `filters` e as marcas da falha por rede: a carga do perfil as lê desde o R12-4-02 (a junção do lote 16).
+    AppState: { authenticated: true, profile: null, filters: { myArea: false } }, epocaDaSessao: 0, perfilPedidoEm: 0, cargasDoPerfil: 0,
+    perfilFalhouPorRede: false, buscaSemResposta: false,
     PERFIL_REFAZER_MS: constante('PERFIL_REFAZER_MS'), lugarDoPedidoDoPerfil: null, Date: { now: () => relogio.t },
     API: {
       getRegion: () => 'row', getCountry: () => 30,

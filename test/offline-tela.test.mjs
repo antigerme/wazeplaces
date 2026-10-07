@@ -776,7 +776,7 @@ function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
   const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
   assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
   const prova = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
-  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba',
     'esvaziarFilaDeSaida', 'atenderProvaDoEsvaziamento',
     'filaReal', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'];
@@ -798,7 +798,7 @@ function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
       API.aoProvarRede();
       return { success: true };
     };
-    const API = { getSession: () => 'tok', rejectPlace: (v) => responder(v), markAsRead: (v) => responder(v) };
+    const API = { getSession: () => 'tok', get sessionToken() { return 'tok'; }, rejectPlace: (v) => responder(v), markAsRead: (v) => responder(v) };
     ${prova}
     ${nomes.map(fatiarComAsync).join('\n')}
     const aoVoltarARede = ${ouvinteDoOnline()};

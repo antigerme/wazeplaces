@@ -985,7 +985,8 @@ function aparelhoO1({ filtros = null } = {}) {
         buscaEsperaOPerfil = false, perfilPedidoEm = 0, lugarDoPedidoDoPerfil = null, epocaDaSessao = 0,
         decisaoDoLugarDe = null, leiturasDaMinhaArea = { epoca: null, noAr: new Map() },
         editaveisPorServidor = ${JSON.stringify(editaveis || { conta: null, lidos: {}, caixas: {}, gerenciadas: {} })},
-        perfilFalhouPorRede = false, minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };
+        perfilFalhouPorRede = false, minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() },
+        cargasDoPerfil = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();

@@ -7773,8 +7773,10 @@ function abrirCanalDosPousos() {
 // esta marca, tirada quando a decisão saiu (`registrarPouso(…, quem)`). Sem
 // sessão na memória no gesto, `null`.
 function quemDecideAgora() {
-    if (!API.temSessaoNaMemoria()) return null;
-    return { s: marcaDaSessao(API.getSession()), conta: contaAgora() };
+    // A sessão DESTA aba, pela régua única (`marcaDestaAba`, R12-1-03).
+    const s = marcaDestaAba();
+    if (!s) return null;
+    return { s, conta: contaAgora() };
 }
 
 // O que acabou de pousar NESTA aba, com a marca de quem decidiu: a do GESTO,
