@@ -182,12 +182,22 @@ const Presenca = {
     // deixou de valer) pela OUTRA aba: pagar de novo era um "lida" a mais
     // (auditoria da rodada 9, R9-5-05; ver `presencaPagarDevidas`).
     dividasNoAparelho: new Set(),
+    // A marca `pagando` (`aba|em`) de outra aba que a conferência achou MORTA (o
+    // "lida" dela morreu com ela), e as que estão sendo conferidas agora (ver
+    // `presencaOutraAbaPagando`, R10-5-05).
+    pagandoMortos: new Set(),
+    conferindoPagando: new Set(),
     // As MINHAS mensagens que um recibo de "lida" citou pelo id antes de a hora
     // do Waze delas chegar (ver `presencaLidaPorId`).
     lidasPorId: new Set(),
     // Quando saiu (no relógio DAQUI) o último "lida" CONFIRMADO de cada
     // conversa — o do `abrir` e o do `chat/lida` (ver `presencaAplicarLista`).
     lidaSaiuEm: new Map(),
+    // E quando VOLTOU o último `chat/lida` confirmado: a lista que saiu com ele
+    // no ar e chegou depois dele pode ter sido lida no Waze antes de ele ser
+    // processado — e contar a mensagem VISTA junto com a resposta (auditoria da
+    // rodada 10, R10-5-04; ver `presencaNaoLidasDepoisDoLida`).
+    lidaVoltouEm: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     timers: { fluxo: null, silencio: null, lida: null, nome: null },
 };
@@ -396,6 +406,9 @@ function chatAoResponder(r, carona) {
 // quando ela é PAGA (ou deixa de valer: chegou mensagem que a pessoa não viu) —
 // não quando o pagamento sai, que a página pode morrer com ele no ar. Sai no
 // "Sair" e na troca de conta com o resto do chat (`presencaEsquecer`).
+//
+// `pagando`: a aba que está pagando a dívida AGORA — o "lida" dela no ar
+// (`{ aba, em }`, ver `chatMarcarPagando`).
 function chatDividas() {
     const d = chatGuardado().devendo;
     const out = {};
@@ -403,12 +416,25 @@ function chatDividas() {
     for (const [id, v] of Object.entries(d)) {
         if (!PRESENCA_ID.test(id) || !v || !Number.isFinite(v.ate) || v.ate <= 0) continue;
         out[id] = { ate: v.ate, n: Number.isFinite(v.n) && v.n > 0 ? Math.floor(v.n) : 0 };
+        if (chatPagandoValido(v.pagando)) out[id].pagando = { aba: v.pagando.aba, em: v.pagando.em };
     }
     return out;
 }
 
+// A marca desta ABA (`ABA_DESTA_PAGINA`, do app.js: a mesma da fila de saída e
+// do "invisível"). O `typeof`: os testes que rodam este arquivo sem ela.
+function presencaMinhaAba() {
+    return typeof ABA_DESTA_PAGINA === 'string' && ABA_DESTA_PAGINA ? ABA_DESTA_PAGINA : null;
+}
+
+function chatPagandoValido(p) {
+    return !!p && typeof p === 'object' && typeof p.aba === 'string' && !!p.aba && Number.isFinite(p.em);
+}
+
 // `vista` nula tira a conversa. Sem escrita quando nada muda (o `setItem` é
 // síncrono, e quem tira chama isto a cada mensagem que chega fora da vista).
+// Regravar a dívida mantém o `pagando` de OUTRA aba (o "lida" dela segue no ar)
+// e tira o desta: quem a regrava não está mais pagando — o "lida" daqui falhou.
 function chatGuardarDivida(id, vista) {
     const k = String(id);
     if (!PRESENCA_ID.test(k)) return;
@@ -416,8 +442,10 @@ function chatGuardarDivida(id, vista) {
     const d = g.devendo && typeof g.devendo === 'object' && !Array.isArray(g.devendo) ? g.devendo : {};
     if (vista) {
         const atual = d[k];
-        if (atual && atual.ate === vista.ate && atual.n === vista.n) return;
-        d[k] = { ate: vista.ate, n: vista.n };
+        const minha = presencaMinhaAba();
+        const pagando = atual && chatPagandoValido(atual.pagando) && atual.pagando.aba !== minha ? atual.pagando : null;
+        if (atual && atual.ate === vista.ate && atual.n === vista.n && (atual.pagando || null) === pagando) return;
+        d[k] = pagando ? { ate: vista.ate, n: vista.n, pagando } : { ate: vista.ate, n: vista.n };
         // Teto: ficam as vistas mais novas.
         g.devendo = Object.fromEntries(Object.entries(d).sort((a, b) => (b[1].ate || 0) - (a[1].ate || 0)).slice(0, PRESENCA_LIDAS_MAX));
     } else {
@@ -426,6 +454,23 @@ function chatGuardarDivida(id, vista) {
         if (Object.keys(d).length) g.devendo = d;
         else delete g.devendo;
     }
+    chatGuardar(g);
+}
+
+// O "lida" desta aba SAIU numa conversa com dívida GRAVADA no aparelho: ele a
+// paga (o Waze marca a conversa inteira), e a marca diz isso às outras abas —
+// que não a pagam de novo enquanto esta vive e o "lida" pode estar no ar (ver
+// `presencaOutraAbaPagando`). Só a dívida que existe: não cria nenhuma. Quem
+// tira a marca é o desfecho dele (a dívida paga sai inteira; a que volta a
+// dever é regravada sem ela), e o teto do "lida" no ar vence a que sobrar.
+function chatMarcarPagando(id) {
+    const aba = presencaMinhaAba();
+    const k = String(id);
+    if (!aba || !PRESENCA_ID.test(k)) return;
+    const g = chatGuardado();
+    const d = g.devendo;
+    if (!d || typeof d !== 'object' || Array.isArray(d) || !d[k] || typeof d[k] !== 'object') return;
+    d[k].pagando = { aba, em: Date.now() };
     chatGuardar(g);
 }
 
@@ -544,7 +589,11 @@ async function presencaAtualizar({ token = false } = {}) {
                 // O prazo vem no relógio do servidor; vai pro daqui (ver `desvio`).
                 Presenca.chat = Number.isFinite(r.chat.expiraEm)
                     ? { ...r.chat, expiraEm: r.chat.expiraEm - Presenca.desvio } : r.chat;
-                presencaFluxoGarantir();
+                // O token chegou numa RESPOSTA: a rede está provada, e o tempo
+                // real abre já, mesmo com o `onLine` preso em falso. Pelo portão,
+                // ele parava e só o recuo do parado o abria, 2 s depois e com um
+                // "parou"/"religou" no diário (R10-5-02).
+                presencaFluxoGarantir({ comRede: true, via: 'token' });
             }
             if (querToken) {
                 // O prazo JÁ levado pro relógio daqui (o `Presenca.chat` de
@@ -667,14 +716,28 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
         // a pílula perdia a resposta que ninguém viu (auditoria da rodada 9,
         // R9-5-01). A que deve, não: a mensagem que chega fora da vista tira a
         // dívida (`presencaMensagemDoFluxo`).
+        //
+        // E a resposta que ninguém viu não traz a VISTA junto: lida no Waze antes
+        // do "lida" que voa, a lista conta as duas — 2 com uma só não vista. A
+        // conta é refeita pelo histórico, quando ele a explica (ver
+        // `presencaNaoLidasDepoisDoLida`; auditoria da rodada 10, R10-5-04).
         for (const id of new Set([...Presenca.lidaDevendo, ...presencaComLidaNoAr()])) {
             if (id === olhando) continue;
             const c = Presenca.conversas.find((x) => x.id === id);
             if (!c) continue;
             const devendo = Presenca.lidaDevendo.has(id);
             const voo = devendo ? null : presencaLidaNoAr(id);
-            if (presencaDividaTemNaoVista(id, voo ? voo.ate : Infinity)) { if (devendo) presencaQuitarDivida(id); }
-            else c.naoLidas = 0;
+            if (presencaDividaTemNaoVista(id, voo ? voo.ate : Infinity)) {
+                if (devendo) presencaQuitarDivida(id);
+                else c.naoLidas = presencaNaoLidasDepoisDoLida(id, c);
+            } else c.naoLidas = 0;
+        }
+        // O mesmo pra lista que saiu com o "lida" no ar e só CHEGOU depois de ele
+        // voltar: o voo já não está aqui, e ela entrava com a vista contada como
+        // nova (R10-5-04). A que saiu antes de ele SAIR o `lidaDepois` já zerou.
+        for (const c of Presenca.conversas) {
+            if (!c.naoLidas || c.id === olhando || Presenca.lidaDevendo.has(c.id) || presencaLidaNoAr(c.id)) continue;
+            if (inicio < (Presenca.lidaVoltouEm.get(c.id) || 0)) c.naoLidas = presencaNaoLidasDepoisDoLida(c.id, c);
         }
         // Conversa que o servidor diz ser do app o aparelho passa a conhecer:
         // é isso que a mantém na lista quando a resposta vier pelo WME, sem a
@@ -749,6 +812,8 @@ function presencaDesligar() {
     Presenca.dividaGuardada.clear();
     Presenca.dividasAdotadas = false;
     Presenca.dividasNoAparelho.clear();
+    Presenca.pagandoMortos.clear();
+    Presenca.conferindoPagando.clear();
     clearTimeout(Presenca.timers.nome);
     Presenca.online = [];
     Presenca.conversas = [];
@@ -759,6 +824,7 @@ function presencaDesligar() {
     Presenca.lidaEnviadaAte.clear();
     Presenca.lidasPorId.clear();
     Presenca.lidaSaiuEm.clear();
+    Presenca.lidaVoltouEm.clear();
     Presenca.fotosFalhas.clear();
     Presenca.pais = null;
     Presenca.atualizadaEm = 0;
@@ -832,7 +898,17 @@ function presencaTokenAbre() {
 // `pedirToken: false` é pra quem ACABOU de pedir a lista: ela já levou o pedido
 // do token que faltava (ver o `querToken` do `presencaAtualizar`). `via` é quem
 // chamou, pro diário do tempo real parado (ver `presencaAnotarParado`).
-function presencaFluxoGarantir({ pedirToken = true, via = 'outro' } = {}) {
+//
+// `comRede`: quem chama acabou de PROVAR que há rede — uma resposta da nossa API
+// (a prova de rede, o token que chegou) ou o fim NORMAL de uma conexão que viveu
+// (`presencaFluxoReagendar`). Contra a prova, o `onLine` falso não vale: ele pode
+// ficar preso em falso com a rede de pé (o iPhone que não manda o `online`, a
+// premissa do R8-5-01 e do R9-5-03). Pelo portão, a prova de rede SEM token
+// parava aqui antes de pedir o token, e o tempo real nunca abria só com ações; e
+// cada fim normal (~6 min) virava um episódio de "parado" — a marca piscando, o
+// diário com "parou" e "religou" e a volta 2 s mais tarde (auditoria da rodada
+// 10, R10-5-02 e R10-5-03). O portão fica pra quem não tem prova nenhuma.
+function presencaFluxoGarantir({ pedirToken = true, via = 'outro', comRede = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (document.visibilityState === 'hidden') return;
     // Sem rede não se tenta nada AGORA, e o fluxo fica PARADO, no recuo dele
@@ -846,7 +922,7 @@ function presencaFluxoGarantir({ pedirToken = true, via = 'outro' } = {}) {
     // trocando de torre) não é queda, e a marca acendia com a conexão viva — o
     // diagnóstico dizia "aberto" e "parado" juntos (R9-5-06). Se a rede foi
     // mesmo embora, a conexão cai sozinha, e o recuo dela para aqui.
-    if (navigator.onLine === false) { if (!Presenca.fluxo) presencaFluxoParar(); return; }
+    if (!comRede && navigator.onLine === false) { if (!Presenca.fluxo) presencaFluxoParar(); return; }
     if (Presenca.fluxoParado) { Presenca.fluxoParado = false; Presenca.paradoVia = via; }
     // A renovação vai À PARTE, com o teto de 5 min: falta token, ele está na
     // última hora, ou o Google o recusou. Chega pelo `presencaAtualizar`, que
@@ -863,7 +939,9 @@ function presencaFluxoGarantir({ pedirToken = true, via = 'outro' } = {}) {
 // fluxo desiste sem token e nenhum timer ficava de pé, então o tempo real
 // só voltava reabrindo o app (auditoria de 2026-09-26). Aqui ele é pedido de
 // novo, com o MESMO teto de 5 min — e nada além disso: com token, quem cuida
-// do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google.
+// do fluxo é o recuo, senão cada ação viraria uma reconexão ao Google. E sem o
+// portão do `onLine` (`comRede`): a resposta acabou de provar a rede, e com ele
+// preso em falso o pedido do token nunca saía (R10-5-02).
 //
 // A exceção é o fluxo PARADO (`fluxoParado`): ele caiu sem rede, e o `online`
 // que o religaria pode não vir (R8-5-01). A resposta que chegou prova a rede:
@@ -872,7 +950,7 @@ function presencaFluxoGarantir({ pedirToken = true, via = 'outro' } = {}) {
 // novo. Mesmo com o `onLine` ainda dizendo que não há rede: quem acabou de
 // provar que há é a resposta.
 function presencaAoProvarRede() {
-    if (!presencaTokenAbre()) { presencaFluxoGarantir(); return; }
+    if (!presencaTokenAbre()) { presencaFluxoGarantir({ comRede: true, via: 'prova' }); return; }
     presencaFluxoReligarParado('prova');
 }
 
@@ -1047,7 +1125,12 @@ function presencaFluxoReagendar(fimNormal) {
         espera = Math.round(base * (0.75 + Math.random() * 0.5));
         Presenca.fluxoTentativa += 1;
     }
-    Presenca.timers.fluxo = setTimeout(() => presencaFluxoGarantir({ via: 'recuo' }), espera);
+    // O fim NORMAL prova a rede (a conexão viveu e o Google a fechou): reabre sem
+    // o portão do `onLine`, com a mesma conferência de token e visibilidade e a
+    // renovação do token do garantir. Com o `onLine` preso em falso, cada fim
+    // normal virava um episódio de "parado" — 20 linhas por hora no diário e a
+    // volta 2 s mais tarde (auditoria da rodada 10, R10-5-03).
+    Presenca.timers.fluxo = setTimeout(() => presencaFluxoGarantir({ via: 'recuo', comRede: fimNormal }), espera);
 }
 
 // O fluxo é UM array JSON que chega aos pedaços e nunca fecha enquanto a
@@ -1484,12 +1567,32 @@ function presencaComLidaNoAr() {
 // não deve nada: sai sem pedido. O resto vira dívida como qualquer outra — a
 // lista vale zero pra ela (sem mensagem que a pessoa não viu) e o
 // `presencaSincronizar`, ou o próximo fechamento, paga.
+//
+// O `n` nunca passa da contagem do Waze de AGORA: é "vistas que o Waze ainda
+// conta como não lidas". A dívida guardada pela v2026.10.06-01 (antes do teto
+// das vistas, R9-5-07) podia vir com ele inflado — o histórico inteiro dela, o
+// lido havia muito —, e ele valia até a dívida cair: a régua `naoLidas > n`
+// não via a mensagem nova que só a lista conhece, e pagar a dívida a marcava
+// no Waze sem ninguém ter visto (auditoria da rodada 10, R10-5-06). Limitado à
+// contagem da lista, ele serve às listas seguintes. E o guardado que PASSA da
+// contagem não é informação — inflado, ou a conversa foi lida noutro lugar
+// e o que o Waze conta agora é de depois —: sem saber o que da lista foi visto,
+// a dívida sai e a conta fica, como com a mensagem que só a lista conhece
+// (R7-5-01). Menos quando a lista prova que viu tudo: a última mensagem dela é
+// DELA e não passa do que a pessoa viu.
 function presencaAdotarDividas() {
     Presenca.dividasAdotadas = true;
-    for (const [id, vista] of Object.entries(chatDividas())) {
+    for (const [id, guardada] of Object.entries(chatDividas())) {
         if (Presenca.lidaDevendo.has(id) || presencaLidaNoAr(id)) continue;
         const c = Presenca.conversas.find((x) => x.id === id);
         if (c && !c.naoLidas && !Presenca.vivas.has(id)) { chatGuardarDivida(id, null); continue; }
+        const vista = { ate: guardada.ate, n: guardada.n };
+        if (c && vista.n > (c.naoLidas || 0)) {
+            const u = c.ultima;
+            const listaViuTudo = !!u && !u.deMim && !u.recibo && Number.isFinite(u.ts) && u.ts <= vista.ate;
+            if (!listaViuTudo) { chatGuardarDivida(id, null); continue; }
+            vista.n = c.naoLidas || 0;
+        }
         Presenca.dividaGuardada.set(id, vista);
         Presenca.lidaDevendo.add(id);
         Presenca.dividasNoAparelho.add(id);
@@ -1568,22 +1671,67 @@ function presencaPagarLida({ fechando = false } = {}) {
 // valer lá (chegou mensagem que ninguém viu): sai sem pedido. As duas abas
 // pagavam a mesma, um "lida" a mais por dívida no free tier (auditoria da
 // rodada 9, R9-5-05).
+//
+// E a que a OUTRA aba está pagando AGORA — o "lida" dela no ar, que só tira a
+// dívida do aparelho quando volta — também não sai daqui: a marca `pagando`
+// diz quem paga, e esta espera enquanto aquela aba vive e o "lida" dela pode
+// estar no ar. Era um "lida" a mais por dívida (auditoria da rodada 10,
+// R10-5-05). Quando o dela volta, a dívida some do aparelho e esta a solta sem
+// pedido (a regra de cima); se falha, a marca sai, e esta paga no próximo gesto.
 function presencaPagarDevidas() {
     if (!Presenca.lidaDevendo.size || !presencaEu()) return;
-    const noAparelho = Presenca.dividasNoAparelho.size ? chatDividas() : null;
+    const noAparelho = chatDividas();
     for (const id of [...Presenca.lidaDevendo]) {
         if (id === Presenca.lidaPendente && Presenca.timers.lida) continue;
-        if (noAparelho && Presenca.dividasNoAparelho.has(id) && !Object.prototype.hasOwnProperty.call(noAparelho, id)) {
+        if (Presenca.dividasNoAparelho.has(id) && !Object.prototype.hasOwnProperty.call(noAparelho, id)) {
             presencaQuitarDivida(id);
             continue;
         }
         if (presencaDividaTemNaoVista(id)) { presencaQuitarDivida(id); continue; }
+        if (noAparelho[id] && presencaOutraAbaPagando(noAparelho[id].pagando)) continue;
         // Sai da MEMÓRIA com o pedido (no ar, quem a carrega é o `lidaNoAr`); a
         // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
         // com ele no ar (R8-5-04).
         Presenca.lidaDevendo.delete(id);
         presencaMarcarLida(id, { fechando: true });
     }
+}
+
+// A marca `pagando` é de OUTRA aba que ainda pode estar com o "lida" no ar:
+// dentro do teto do "lida" no ar (`PRESENCA_LIDA_NO_AR_MS`) e com a aba VIVA.
+// Viva é a aba que segura a trava da marca dela (`segurarMarcaDaAba`, no
+// app.js), e quem diz é o navegador, pelo `navigator.locks.query()`, que só LÊ
+// (a régua do "invisível", R9-5-04): a página que o sistema descartou no fundo
+// levou o "lida" junto, e esperar o teto era só atraso. A conferência é
+// assíncrona: até ela responder, a dívida espera; morta, ela é paga na hora.
+// Sem a trava no navegador, vale o teto. A marca DESTA aba não segura nada: é
+// de uma página anterior dela (recarregada), e o "lida" desta memória é o
+// `lidaNoAr`.
+function presencaOutraAbaPagando(p) {
+    if (!chatPagandoValido(p)) return false;
+    const minha = presencaMinhaAba();
+    if (minha && p.aba === minha) return false;
+    if (Date.now() - p.em >= PRESENCA_LIDA_NO_AR_MS) return false;
+    const chave = p.aba + '|' + p.em;
+    if (Presenca.pagandoMortos.has(chave)) return false;
+    presencaConferirAbaPagando(p.aba, chave);
+    return true;
+}
+
+function presencaConferirAbaPagando(aba, chave) {
+    let locks = null;
+    try { locks = navigator.locks && typeof navigator.locks.query === 'function' ? navigator.locks : null; } catch (e) {}
+    if (!locks || typeof MARCA_DA_ABA_TRAVA !== 'string' || Presenca.conferindoPagando.has(chave)) return;
+    Presenca.conferindoPagando.add(chave);
+    const epoca = Presenca.epoca;
+    Promise.resolve().then(() => locks.query()).then((r) => {
+        Presenca.conferindoPagando.delete(chave);
+        if (epoca !== Presenca.epoca || !r || !Array.isArray(r.held)) return;
+        const nome = MARCA_DA_ABA_TRAVA + aba;
+        if (r.held.some((l) => l && l.name === nome)) return;   // viva: o "lida" dela pode estar no ar
+        Presenca.pagandoMortos.add(chave);
+        presencaPagarDevidas();
+    }).catch(() => { Presenca.conferindoPagando.delete(chave); });
 }
 
 // A hora da mensagem MAIS NOVA dela na conversa daqui (`historico`). Pra
@@ -1685,6 +1833,9 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (noAr && noAr.ate >= ultimaDela) return;
     const voo = { ate: ultimaDela, em: Date.now() };
     Presenca.lidaNoAr.set(id, voo);
+    // A dívida GRAVADA desta conversa (desta aba ou de outra) está sendo paga:
+    // as outras abas esperam (R10-5-05).
+    chatMarcarPagando(id);
     const carona = chatCarona();
     const epoca = Presenca.epoca;
     const enviadoEm = Date.now();
@@ -1702,10 +1853,11 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     if (r && r.success) {
         Presenca.lidaEnviadaAte.set(id, Math.max(Presenca.lidaEnviadaAte.get(id) || 0, ultimaDela));
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
+        Presenca.lidaVoltouEm.set(id, Math.max(Presenca.lidaVoltouEm.get(id) || 0, Date.now()));
         // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga
         // — inclusive a guardada no aparelho.
         presencaQuitarDivida(id);
-        presencaZerarNaoLidas(id, enviadoEm);
+        presencaZerarNaoLidas(id, enviadoEm, { recontar: true });
     } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
         // lida no Waze e nada a refazia — o fechamento não pagava mais nada, e
@@ -1745,15 +1897,48 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
 // mensagem que ela conta além do que ele cobre ninguém viu — zerada aqui, a
 // resposta que chegou com a conversa fechada sumia da pílula (auditoria da
 // rodada 9, R9-5-01; a régua é a do `lidaSaiuEm` no `presencaAplicarLista`).
-function presencaZerarNaoLidas(id, ate) {
+//
+// Só que essa lista pode ter sido lida no Waze ANTES de ele processar o "lida":
+// aí ela conta a mensagem VISTA junto com a resposta, e a conta ficava 2 com uma
+// só não vista (auditoria da rodada 10, R10-5-04). `recontar` (o "lida" que deu
+// certo): a contagem dela é refeita pelo histórico, quando ele a explica (ver
+// `presencaNaoLidasDepoisDoLida`).
+function presencaZerarNaoLidas(id, ate, { recontar = false } = {}) {
     const c = Presenca.conversas.find((x) => x.id === id);
     const v = Presenca.vivas.get(id);
     const tinha = !!(c && c.naoLidas) || !!v;
     if (c && !(Presenca.conversasSaiuEm > ate)) c.naoLidas = 0;
+    else if (c && c.naoLidas && recontar) c.naoLidas = presencaNaoLidasDepoisDoLida(id, c);
     if (v && v.ultimaTs <= ate) Presenca.vivas.delete(id);
     if (!tinha) return;
     presencaRenderPilula();
     presencaRenderLista();
+}
+
+// As não lidas da lista que saiu depois do "lida" que deu certo, contadas pelo
+// HISTÓRICO: as mensagens dela depois do que os "lida" cobrem (o confirmado e o
+// que ainda voa) — essas a pessoa não viu. Só quando o histórico EXPLICA a
+// lista: a última mensagem da conversa nela é DELA e está no histórico (o tempo
+// real a trouxe, e com ela o que veio antes: ele reentrega o que não foi
+// confirmado). E nunca mais do que a lista contou: o que ela não conta o Waze já
+// marcou, e a conta não ressuscita. Com a última MINHA, ou só da lista (o tempo
+// real fora), o histórico não sabe o que a lista sabe, e a conta dela fica
+// (R9-5-01). Tudo no relógio do Waze, que carimba a mensagem ao guardar: a hora
+// da lista e a do histórico são a mesma.
+//
+// O resto é do Waze, e não se conserta aqui: o `MarkConversationRead` marca a
+// conversa INTEIRA quando é processado, inclusive a resposta guardada antes
+// disso. A lista seguinte diz zero, e a resposta some sem ter sido vista.
+function presencaNaoLidasDepoisDoLida(id, c) {
+    const u = c.ultima;
+    const h = Presenca.historico.get(id);
+    // A última da lista é uma mensagem DELA que o histórico tem: a minha e o
+    // recibo não são mensagem dela, e a que só a lista conhece não está aqui.
+    if (!u || !Number.isFinite(u.ts) || !h || !h.msgs.some((m) => !m.meu && m.ts === u.ts)) return c.naoLidas;
+    const voo = presencaLidaNoAr(id);
+    const coberto = Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0);
+    const depois = h.msgs.filter((m) => !m.meu && Number.isFinite(m.ts) && m.ts > coberto && m.ts <= u.ts).length;
+    return Math.min(c.naoLidas, depois);
 }
 
 // ── a conversa ──────────────────────────────────────────────────────────────
@@ -2636,7 +2821,40 @@ function presencaAoVoltar() {
     clearTimeout(Presenca.timers.fluxo);
     presencaFluxoGarantir({ via: 'volta' });
     // Voltar pra tela com a conversa aberta É ler o que chegou nesse meio-tempo.
-    if (Presenca.aberta) presencaAgendarLida(Presenca.aberta);
+    if (Presenca.aberta) {
+        if (presencaOlhando(Presenca.aberta)) presencaVistasNaVolta(Presenca.aberta);
+        presencaAgendarLida(Presenca.aberta);
+    }
+}
+
+// A conversa aberta VOLTOU pra tela (a página voltou do fundo, ou do bfcache):
+// o que chegou com ela escondida está na tela agora — VISTO, e não lido no Waze
+// até o "lida" da volta. Entra no TETO das vistas (`tetoVistas`, ver
+// `presencaVistaDe`), como o que chega com ela na tela, e sai da contagem de
+// não lidas: olhando é lida. Fora do teto, o "lida" da volta que falhava deixava
+// a dívida com `n` zero, e a lista seguinte (que ainda contava a mensagem)
+// devolvia a VISTA como "1 mensagem nova" — tirando a dívida sem pagar: o
+// "lida" não saía mais, nem com o Waze de volta. E sem falha nenhuma, a lista
+// que saía depois do "lida" da volta (lida no Waze antes de ele ser processado)
+// a contava como nova até a lista seguinte (auditoria da rodada 10, R10-5-01,
+// regressão do teto do lote 13).
+//
+// O que chegou escondida está nas `vivas`, ou na contagem da lista que chegou
+// com a página escondida (ela absorve as vivas que conta): o teto ganha as vivas
+// e passa a cobrir também a contagem da lista — tudo isso está na tela. O teto é
+// só um limite: o `n` segue contando as mensagens do histórico.
+function presencaVistasNaVolta(id) {
+    const h = Presenca.historico.get(id);
+    const c = Presenca.conversas.find((x) => x.id === id);
+    const v = Presenca.vivas.get(id);
+    const chegaram = v ? v.n : 0;
+    const daLista = c ? c.naoLidas || 0 : 0;
+    if (!chegaram && !daLista) return;
+    if (h && Number.isFinite(h.tetoVistas)) h.tetoVistas = chegaram + Math.max(h.tetoVistas, daLista);
+    if (c) c.naoLidas = 0;
+    Presenca.vivas.delete(id);
+    presencaRenderPilula();
+    presencaRenderLista();
 }
 
 // A página vai pro fundo (`visibilitychange` oculto) ou SAI (`pagehide`) com o

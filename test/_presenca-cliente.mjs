@@ -33,7 +33,7 @@ const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
 const TRADUZIDAS = /^card\.updateType\./;
 
-const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum']
+const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -66,8 +66,9 @@ function elemento(id) {
 }
 
 // Cria um cliente novo. `api` responde por rota: `presencaApp(campos)` e
-// `chat(campos)` devolvem a resposta (ou uma promessa dela).
-export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined } = {}) {
+// `chat(campos)` devolvem a resposta (ou uma promessa dela). `aba` é a marca
+// da aba (`ABA_DESTA_PAGINA`, do app.js); sem ela, a página não tem marca.
+export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined } = {}) {
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   const armazenado = new Map();
@@ -147,6 +148,8 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     // presença. Sem ele, a presença usa o do filtro (`API.getCountry`). O teste
     // que o quer passa o de verdade, fatiado do app.js.
     paisDaFila,
+    // Do app.js: a marca desta aba (a da fila de saída e do "invisível").
+    ABA_DESTA_PAGINA: aba,
   };
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);
