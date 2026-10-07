@@ -990,6 +990,7 @@ function aparelhoO1({ filtros = null } = {}) {
       AppState.filters = filtrosDeFabrica();
       loadFilters();
       return { startFetching, fetchNextPage, abrirGuardadaDepoisDaFalha, offlineTentarAbrirSemRede,
+        carregarPerfil: loadProfileAndAuxData,
         falhouPorRede: () => ultimaBuscaFalhouPorRede, semResposta: () => buscaSemResposta };`)(...chaves.map((k) => deps[k]));
     return { app, AppState, log, deps, base };
   };
@@ -1232,6 +1233,44 @@ test('R5-4-4: a busca SEM resposta anota o lie-fi; a que teve resposta (502 da o
   d.AppState.hasMore = true;
   await d.app.startFetching();
   assert.equal(d.app.semResposta(), false, 'a busca que deu certo não apagou a marca do lie-fi');
+});
+
+// ── R12-4-02: o LIE-FI com "Minha área" ──────────────────────────────────────
+// Com "Minha área" a busca nem sai: a ida que fica sem resposta é a do PERFIL (ou
+// a da caixa do servidor da busca) que ela espera. Sem anotar o lie-fi ali, a fila
+// guardada que agora entra (acima) trazia o card de FOTO cuja foto não vem com
+// "Sem Imagem" e ✕/✓ VIVOS — decidir a foto sem vê-la —, enquanto sem "Minha
+// área" o mesmo card trava com "a foto precisa de sinal" (R5-4-4).
+test('R12-4-02: com "Minha área", o perfil (ou a caixa) SEM resposta anota o lie-fi; o que teve resposta (502), não', async () => {
+  for (const [rotulo, falha, lieFi] of [['sem resposta', FALHA_REDE, true], ['a borda em 502', FALHA_BORDA_502, false]]) {
+    const pagina = await prepararMinhaArea();
+    const b = pagina({ onLine: true, api: () => FALHA_REDE, perfil: () => falha });
+    await b.app.startFetching();
+    assert.equal(b.AppState.queue.length, 3, `PRÉ-CONDIÇÃO (${rotulo}): a fila guardada não entrou`);
+    assert.equal(b.app.semResposta(), lieFi, lieFi
+      ? 'DEFEITO: o perfil que a busca de "Minha área" espera ficou SEM resposta, e o lie-fi não foi anotado — o card de foto sem a foto fica com ✕/✓ vivos'
+      : 'a origem que RESPONDEU 502 ao perfil virou "sem rede" pra foto');
+  }
+  // A caixa do servidor aplicado à mão, sem resposta.
+  const pagina = await prepararMinhaArea({ regiao: 'na', editaveis: { conta: '1', lidos: { row: [30], na: [235] },
+    caixas: { row: CAIXA_R, na: [-74.1, 40.6, -73.8, 40.9] }, gerenciadas: {} } });
+  const c = pagina({ onLine: true, regiao: 'na', profile: { ...PERFIL_AREA, areas: [] }, editaveis: LIDO_ROW,
+    api: () => FALHA_REDE, perfil: () => FALHA_REDE });
+  await c.app.startFetching();
+  assert.deepEqual([c.AppState.queue.length, c.app.semResposta()], [3, true],
+    'a caixa que a busca de "Minha área" espera ficou SEM resposta, e o lie-fi não foi anotado');
+  // CONTROLE: sem "Minha área", a busca sem resposta anota o lie-fi, como sempre (R5-4-4).
+  const o1 = await prepararO1();
+  const d = o1({ onLine: true, api: () => FALHA_REDE });
+  await d.app.startFetching();
+  assert.equal(d.app.semResposta(), true);
+  // E sem "Minha área" o perfil não é a busca: a busca que DEU CERTO segue valendo,
+  // e o perfil que falha sem resposta depois dela não acende o lie-fi da foto.
+  const e = o1({ onLine: true, api: () => TRES(), perfil: () => FALHA_REDE });
+  await e.app.startFetching();
+  await e.app.carregarPerfil();
+  assert.deepEqual([e.AppState.queue.length, e.app.semResposta()], [3, false],
+    'sem "Minha área", o perfil sem resposta acendeu o lie-fi por cima da busca que deu certo');
 });
 
 // ── R6-4-3: a marca do lie-fi decidia pelo `httpCode` (auditoria de 2026-10-01) ─

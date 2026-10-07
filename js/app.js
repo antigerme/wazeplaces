@@ -6318,6 +6318,12 @@ async function loadProfileAndAuxData() {
     // O perfil que não veio por REDE ou pelo SERVIDOR: a busca de "Minha área"
     // que o espera falhou por rede (ver `ultimaBuscaFalhouPorRede`, R12-4-02).
     perfilFalhouPorRede = !profileRes.success && profileRes.errorCategory === 'transient';
+    // E SEM resposta nenhuma (o `_motivo` do `_post`): com "Minha área" a busca
+    // espera este perfil e nem sai — é ela ficando sem resposta, o "lie-fi" que o
+    // card de foto lê (`buscaSemResposta`, R5-4-4). Sem a marca, o card de foto da
+    // fila guardada que entra assim ficava com "Sem Imagem" e ✕/✓ vivos. Apaga com
+    // a primeira resposta que chegar, como sempre.
+    if (perfilFalhouPorRede && typeof profileRes._motivo === 'string' && AppState.filters.myArea) buscaSemResposta = true;
     // O portão reconferido pelo servidor: o nível ou a área mudou no Waze
     // depois do login (ver `handlePerfil`). A sessão já foi apagada lá. Não
     // passa pelo `handleUnauthorized`, porque não há o que confirmar (não é o
@@ -12073,8 +12079,12 @@ function lerServidorDaMinhaArea(regiao = API.getRegion()) {
         // A falha por REDE ou pelo SERVIDOR é a da busca que espera por esta ida
         // (ver `ultimaBuscaFalhouPorRede`, R12-4-02).
         if (minhaAreaFalhouPorRede.epoca !== epoca) minhaAreaFalhouPorRede = { epoca, regioes: new Set() };
-        if (r && !r.success && r.errorCategory === 'transient') minhaAreaFalhouPorRede.regioes.add(regiao);
-        else minhaAreaFalhouPorRede.regioes.delete(regiao);
+        if (r && !r.success && r.errorCategory === 'transient') {
+            minhaAreaFalhouPorRede.regioes.add(regiao);
+            // Sem resposta nenhuma: o lie-fi da busca que espera por ela (ver
+            // `loadProfileAndAuxData`).
+            if (typeof r._motivo === 'string') buscaSemResposta = true;
+        } else minhaAreaFalhouPorRede.regioes.delete(regiao);
         if (!(r && r.success && r.profile)) {
             if (r && r.errorCategory === 'access_denied') { if (AppState.authenticated) recusaDoPortao(r); }
             else if (r && r.errorCategory === 'unauthorized') handleUnauthorized();
