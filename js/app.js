@@ -12549,10 +12549,22 @@ async function startFetching() {
     // esta busca espera junto, na tela de carregar, sem o "Falha ao carregar" no
     // meio. Refeita a fila (outra época), quem a desenha é a busca dela. Só sem
     // card pra mostrar: com a fila cheia, ela mostra o que tem.
-    if (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr && !AppState.queue.length && epoca === AppState.fetchEpoch) {
+    //
+    // E SEM "Minha área" também: a fila que volta VAZIA com o lugar ainda por
+    // decidir. Na primeira abertura (e depois de todo "Sair") o aparelho está no
+    // Brasil, e pra quem só edita na NA ou em Israel a busca de lá volta vazia
+    // enquanto o perfil pergunta aos outros servidores: a tela dizia "Tudo limpo!
+    // … Confira o país e a região" — e o leitor de tela o anunciava — até a
+    // decisão levar a pessoa pra fila dela (MEDIDO no navegador, nos dois
+    // motores: 1,3 s; auditoria da rodada 12, R12-6-02). Com a decisão no ar, ou
+    // com o PERFIL ainda vindo (a busca que volta antes dele: a carga da
+    // abertura só termina depois da decisão), a busca espera. Sem refazer a
+    // fila, o painel vem depois, e diz a verdade.
+    const decidindoOLugar = AppState._caixaDaMinhaAreaNoAr || (!AppState.profile && AppState._profilePromise);
+    if (decidindoOLugar && !AppState.queue.length && epoca === AppState.fetchEpoch) {
         buscaEsperaOPerfil = true;
         updatePendingCount();
-        try { await AppState._caixaDaMinhaAreaNoAr; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        try { await decidindoOLugar; } catch (e) {} finally { buscaEsperaOPerfil = false; }
         if (epoca !== AppState.fetchEpoch) return;
     }
 

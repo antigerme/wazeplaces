@@ -220,7 +220,7 @@ test('R9-6-04: a busca vai pela caixa do servidor DELA — a área lida na NA, n
 const CAIXA_BR = [-47, -24, -46, -23];
 const AREA_NY = [{ type: 'drive', bbox: CAIXA_NY }];
 const tique = (ms = 0) => new Promise((ok) => setTimeout(ok, ms));
-function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
+function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vazias = [] }) {
   const lugar = { regiao, pais };
   const log = [];
   const buscas = [];
@@ -252,6 +252,9 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
     listCountries: async (r) => ({ success: true, countries: r === 'na' ? [{ id: 235, name: 'United States' }] : [{ id: 30, name: 'Brazil' }] }),
     fetchPlaces: async (page, f) => {
       buscas.push(lugar.regiao + (f.bbox ? ' bbox ' + JSON.stringify(f.bbox) : ' pais ' + lugar.pais));
+      // A fila VAZIA de quem não edita naquele servidor (`vazias`, R12-6-02): o
+      // filtro de permissão do servidor tira tudo.
+      if (vazias.includes(lugar.regiao)) return { success: true, places: [], hasMore: false, total: 0, blocked: 0 };
       return { success: true, places: [{ venueID: 'v' + buscas.length, updateRequestID: 'u' + buscas.length }], hasMore: false, total: 1, blocked: 0 };
     },
   };
@@ -684,4 +687,85 @@ test('R11-6-02: a busca chamada DIRETO no meio de uma decisão SEM destino tamb�
   assert.deepEqual(m.buscas, ['row pais 30'], `a busca que esperou a decisão sem destino não foi refeita: ${m.buscas}`);
   assert.equal(m.AppState.filters.myArea, false);
   assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa']);
+});
+
+// ═══ R12-6-02 · a fila que volta VAZIA com o lugar por decidir ESPERA ═══════
+// (auditoria da rodada 12, pré-existente). Na primeira abertura (e depois de
+// todo "Sair") o aparelho está no Brasil (`row/30`). Pra quem só edita na NA (ou
+// em Israel), SEM "Minha área", a busca de lá volta vazia enquanto o perfil
+// pergunta aos outros servidores — e a tela dizia "Tudo limpo! … Confira o país
+// e a região", anunciado ao leitor de tela, até a decisão levar a pessoa pra
+// fila dela (MEDIDO no navegador, nos dois motores: 1,3 s; 2,1 s com a busca
+// voltando antes do perfil). A espera do fim do `startFetching` pela decisão só
+// valia com "Minha área" (`filaEsperaPerfil`). Aqui a busca, a carga do perfil e
+// a decisão rodam DE VERDADE, com a fila do Brasil vazia (o filtro de permissão).
+test('R12-6-02: sem "Minha área", a fila do Brasil que volta vazia com a decisão no ar NÃO diz "Tudo limpo!" — espera, e a fila dos EUA é a que aparece', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  const decisao = m.chegaOPerfil();              // o perfil da ROW chegou e pergunta à NA
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  const abertura = m.app.startFetching();        // a busca da abertura, no Brasil
+  await tique(5);
+  assert.deepEqual(m.buscas, ['row pais 30'], `PRÉ-CONDIÇÃO: a busca do Brasil não saiu (uma vez): ${m.buscas}`);
+  assert.ok(!m.log.includes('vazio'),
+    'com a decisão do lugar no ar, a fila vazia do Brasil virou "Tudo limpo! … Confira o país e a região" (e o leitor de tela o anuncia)');
+  m.soltar.na();
+  await decisao;
+  await abertura;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pros EUA');
+  assert.deepEqual(m.buscas, ['row pais 30', 'na pais 235'], `as buscas: ${m.buscas}`);
+  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não foi do esqueleto direto pro card: ${m.log}`);
+  assert.ok(m.avisos().includes('toast:toast.paisDoPerfil(United States)'), `a fila dos EUA entrou sem o aviso: ${m.avisos()}`);
+});
+
+test('R12-6-02: a busca que volta ANTES do perfil espera ele (e a decisão que ele traz) — sem "Tudo limpo!" no meio', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['row', 'na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  // A abertura: a carga do perfil e a busca saem juntas (o `initApp`).
+  m.AppState._profilePromise = m.app.loadProfileAndAuxData();
+  const abertura = m.app.startFetching();
+  await tique(5);
+  assert.ok(m.soltar.row, 'PRÉ-CONDIÇÃO: o perfil da ROW não ficou no ar');
+  assert.deepEqual(m.buscas, ['row pais 30'], `PRÉ-CONDIÇÃO: a busca do Brasil não saiu antes do perfil: ${m.buscas}`);
+  assert.ok(!m.log.includes('vazio'), 'a busca que voltou antes do perfil disse "Tudo limpo!" sem saber onde a pessoa edita');
+  m.soltar.row();
+  await tique(5);
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  assert.ok(!m.log.includes('vazio'), 'com o perfil na mão e a decisão no ar, "Tudo limpo!" apareceu');
+  m.soltar.na();
+  await m.AppState._profilePromise;
+  await abertura;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pros EUA');
+  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não foi do esqueleto direto pro card: ${m.log}`);
+});
+
+test('R12-6-02: CONTROLES — quem edita no Brasil: a fila com pedido aparece SEM esperar o perfil, e a vazia diz "Tudo limpo!" uma vez, sem pergunta a mais', async () => {
+  const NO_BR = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [], managedAreas: [] } };
+  // A fila com pedido: o card não espera o perfil (nem a decisão).
+  const c = montarServidores({ perfis: NO_BR, segurar: ['row'] });
+  c.AppState.filters.myArea = false;
+  c.AppState._profilePromise = c.app.loadProfileAndAuxData();
+  const aberturaC = c.app.startFetching();
+  await tique(5);
+  assert.ok(c.soltar.row, 'PRÉ-CONDIÇÃO: o perfil não ficou no ar');
+  assert.ok(c.log.includes('card'), `a fila com pedido esperou o perfil pra mostrar o card: ${c.log}`);
+  c.soltar.row();
+  await c.AppState._profilePromise;
+  await aberturaC;
+  // A fila vazia de verdade: "Tudo limpo!" quando o perfil chega — uma vez, sem
+  // perguntar a outro servidor nem buscar de novo.
+  const v = montarServidores({ perfis: NO_BR, segurar: ['row'], vazias: ['row'] });
+  v.AppState.filters.myArea = false;
+  v.AppState._profilePromise = v.app.loadProfileAndAuxData();
+  const aberturaV = v.app.startFetching();
+  await tique(5);
+  v.soltar.row();
+  await v.AppState._profilePromise;
+  await aberturaV;
+  await tique(10);
+  assert.deepEqual(v.log.filter((l) => l === 'vazio' || l === 'card'), ['vazio'], `a fila vazia de verdade não disse "Tudo limpo!" (uma vez): ${v.log}`);
+  assert.deepEqual([v.perguntas, v.buscas], [['row'], ['row pais 30']], 'a espera custou uma pergunta (ou uma busca) a mais');
 });
