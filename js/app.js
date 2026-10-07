@@ -7805,14 +7805,21 @@ function diagGeometria() {
 // O que está por cima de um número a não cobrir (`.nao-cobrir`), no centro dele:
 // um aviso PASSAGEIRO do topo (`#bannerStack`, que some sozinho — o do rodapé já é
 // o `sobAviso`) ou o FAB do modo dev — e, se o FAB, se foi o EDITOR que o arrastou
-// pra lá (`devFabFixado`: aí o canto é escolha dele, não do app).
+// pra lá (`devFabFixado`: aí o canto é escolha dele, não do app), ou se o app
+// ADIOU a troca de canto até o fim de um gesto no card (`fabEsperaOGesto`, a
+// decisão do R10-4-05: o card deslocado mostra um canto que, parado, ele cobre).
+// O "N esperando envio" que nasce NO MEIO do arraste — a decisão anterior que
+// falha por rede, a marca da outra aba que vence — fica debaixo do FAB até o
+// dedo soltar, por desenho; a captura automática do mesmo arraste o acusava
+// como escondido (auditoria da rodada 12, R12-4-04, MEDIDO nos dois motores: o
+// alerta na captura, e o FAB fora de cima dele logo depois do gesto).
 function diagNumeroACobrir(el, r) {
     const fora = { naoCobrir: true };
     try {
         const alvo = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
         if (alvo && alvo !== el && !el.contains(alvo) && alvo.closest) {
             if (alvo.closest('#bannerStack')) fora.sobBanner = true;
-            if (alvo.closest('#devFab')) fora.sobFab = devFabFixado ? 'fixado' : true;
+            if (alvo.closest('#devFab')) fora.sobFab = devFabFixado ? 'fixado' : fabEsperaOGesto ? 'gesto' : true;
         }
     } catch (e) { /* sonda nunca derruba o diagnóstico */ }
     return fora;
@@ -8180,13 +8187,16 @@ function diagSentinelas(comp) {
         // há decisão esperando sinal, e os quatro defeitos que o esconderam foram
         // achados por auditoria, nenhum por relato: a geometria nem o media. Fora,
         // como no toque: atrás de camada aberta (ela cobre tudo, de propósito),
-        // debaixo de aviso passageiro (some sozinho) e debaixo do FAB que o EDITOR
-        // arrastou pra lá. O "enviando" não é número a não cobrir (R10-4-05) e
-        // não entra.
+        // debaixo de aviso passageiro (some sozinho), debaixo do FAB que o EDITOR
+        // arrastou pra lá e debaixo do FAB que espera o fim de um gesto no card
+        // pra trocar de canto (`'gesto'`, R12-4-04: o app adia a troca de
+        // propósito, e o número sai de baixo dele quando o dedo solta). O
+        // "enviando" não é número a não cobrir (R10-4-05) e não entra.
         for (const g of comp.geometria || []) {
             if (g.sel !== '#inFlightIndicator' || !g.naoCobrir) continue;
             if (!g.noCentro || g.noCentro === 'ele mesmo' || g.noCentro === 'nada') continue;
-            if ((g.camadaAberta && !g.naCamada) || g.sobAviso || g.sobBanner || g.sobFab === 'fixado') continue;
+            if ((g.camadaAberta && !g.naCamada) || g.sobAviso || g.sobBanner || g.sobFab === 'fixado'
+                || g.sobFab === 'gesto') continue;
             diga('indicadorEscondido',
                 'o "N esperando envio" está escondido: o dedo no meio dele cai em outra coisa',
                 { recebe: g.noCentro, ...(g.sobFab ? { fab: true } : {}) });

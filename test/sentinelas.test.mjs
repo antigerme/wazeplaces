@@ -557,17 +557,85 @@ test('R11-4-04: a geometria MEDE o indicador, e o coletor diz do DOM quem está 
   assert.ok(k > 0, 'o coletor do número a não cobrir sumiu');
   const fonte = APP.slice(k, APP.indexOf('\n}', k) + 2);
   const no = (ids) => ({ closest: (sel) => (ids.includes(sel) ? {} : null) });
-  const coletar = (alvo, fixado = false) => {
+  const coletar = (alvo, fixado = false, gesto = false) => {
     const el = { contains: (x) => x === el };
     const document = { elementFromPoint: () => (alvo === 'ele' ? el : alvo) };
-    return new Function('document', 'devFabFixado', fonte + '\nreturn diagNumeroACobrir;')(document, fixado)(el, { left: 351, top: 80, width: 23, height: 17 });
+    return new Function('document', 'devFabFixado', 'fabEsperaOGesto', fonte + '\nreturn diagNumeroACobrir;')(document, fixado, gesto)(
+      el, { left: 351, top: 80, width: 23, height: 17 });
   };
   assert.deepEqual(coletar(no(['#devFab'])), { naoCobrir: true, sobFab: true }, 'o FAB do app por cima do número não ficou anotado');
   assert.deepEqual(coletar(no(['#devFab']), true), { naoCobrir: true, sobFab: 'fixado' }, 'o FAB arrastado pelo editor não se distingue do app');
+  // R12-4-04: o FAB que o app deixou onde estava até o fim de um gesto no card.
+  assert.deepEqual(coletar(no(['#devFab']), false, true), { naoCobrir: true, sobFab: 'gesto' },
+    'o FAB que espera o fim do gesto pra trocar de canto não se distingue do FAB parado em cima do número');
+  assert.deepEqual(coletar(no(['#devFab']), true, true), { naoCobrir: true, sobFab: 'fixado' },
+    'o FAB arrastado pelo editor deixou de valer como escolha dele durante um gesto');
   assert.deepEqual(coletar(no(['#bannerStack'])), { naoCobrir: true, sobBanner: true }, 'o banner passageiro do topo não ficou anotado');
   assert.deepEqual(coletar('ele'), { naoCobrir: true }, 'CONTROLE: o número à vista ganhou marca de coberto');
   assert.deepEqual(coletar(no([])), { naoCobrir: true }, 'CONTROLE: outra coisa por cima (o cabeçalho) virou FAB ou aviso');
   // E a sentinela é a do coletor: o nome que ela lê é o que ele grava.
   const s = semComentario(APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas('))));
   assert.match(s, /g\.sel !== '#inFlightIndicator' \|\| !g\.naoCobrir/, 'a sentinela do indicador não lê o que o coletor grava');
+});
+
+// ── R12-4-04 (auditoria da rodada 12): o falso positivo da captura do ARRASTE ─
+// O "N esperando envio" que nasce NO MEIO de um arraste de card (a decisão
+// anterior falhando por rede, a marca da outra aba vencendo) fica debaixo do FAB
+// até o dedo soltar: o FAB ESPERA o fim do gesto pra trocar de canto
+// (`fabEsperaOGesto`, a decisão do R10-4-05). A captura automática do mesmo
+// arraste rodava a sentinela nesse instante e acusava `indicadorEscondido` num
+// estado que o app não garante — e a regra das sentinelas é "só invariante que o
+// app GARANTE" (MEDIDO no navegador, n4 da auditoria, nos dois motores: o alerta
+// na captura `auto:arraste`, e o FAB saindo de cima do número quando o gesto
+// acabou, sem alerta).
+test('R12-4-04: o FAB que espera o fim do gesto pra trocar de canto não vira `indicadorEscondido`', () => {
+  const s = montar();
+  assert.deepEqual(s(comIndicador({ noCentro: '#devFabBtn', sobFab: 'gesto' })), [],
+    'DEFEITO: o número debaixo do FAB que o app ADIOU até o fim do gesto virou alerta — o app não garante isso no meio do arraste');
+  // CONTROLE: o FAB parado em cima do número (sem gesto) segue acusado.
+  assert.deepEqual(chaves(s(comIndicador({ noCentro: '#devFabBtn', sobFab: true }))), ['indicadorEscondido']);
+});
+
+test('R12-4-04: a marca do gesto é a ESPERA do FAB — vale enquanto o gesto dura, e acaba com ele', () => {
+  // O `posicionarFabDev` (quem marca a espera), o `aoFimDoGesto` (quem a atende) e
+  // o coletor da geometria (quem a lê) no MESMO escopo: o nome que um grava é o que
+  // o outro lê. A tela é a do computador com o número no canto do FAB e nenhum
+  // canto livre (todo canto tem vítima): o FAB fica onde está, por cima dele.
+  const pega = (nome) => {
+    const i = APP.indexOf('function ' + nome + '(');
+    assert.ok(i > 0, `${nome} sumiu do app.js`);
+    return APP.slice(i, APP.indexOf('\n}', i) + 2);
+  };
+  const fab = { classList: { contains: () => false, remove() {} }, style: {}, dataset: {},
+                getBoundingClientRect: () => ({ width: 44, height: 44 }) };
+  const btn = { style: {} };
+  const numero = { contains: (x) => x === numero };
+  const sobOFab = { closest: (sel) => (sel === '#devFab' ? fab : null) };
+  const document = { getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : null),
+                     elementFromPoint: () => sobOFab };
+  let gesto = true;
+  const h = new Function('document', 'cardSobGesto', 'cardDaFrente', 'devFabVitimas', 'devFabCoords', 'DEV_FAB_CANTOS',
+    'redesenharCardAdiado',
+    `let devFabFixado = false, fabEsperaOGesto = false, devFabDedo = null;
+    ${['posicionarFabDev', 'aoFimDoGesto', 'diagNumeroACobrir'].map(pega).join('\n')}
+    return { posicionarFabDev, aoFimDoGesto, diagNumeroACobrir, espera: () => fabEsperaOGesto };`)(
+    document, () => gesto, () => ({}), () => 1, () => ({ x: 1220, y: 77 }), ['cima-dir', 'cima-esq'], () => {});
+  const r = { left: 1241, top: 80, width: 23, height: 17 };
+  const geometria = (marca) => ({ ...sao(), geometria: [indicador({ noCentro: '#devFabBtn', ...marca })] });
+  // O número nasce no meio do arraste: o app reavalia o canto e ADIA.
+  h.posicionarFabDev();
+  assert.equal(h.espera(), true, 'PRÉ-CONDIÇÃO: com o gesto no card, o FAB não esperou o fim dele');
+  const noGesto = h.diagNumeroACobrir(numero, r);
+  assert.deepEqual(noGesto, { naoCobrir: true, sobFab: 'gesto' }, 'o coletor não leu a espera do FAB');
+  assert.deepEqual(montar()(geometria(noGesto)), [], 'a captura do arraste acusou o FAB que espera o gesto');
+  // O dedo solta: o fim do gesto escolhe o canto, e a espera acaba. Sem canto
+  // livre, o FAB segue por cima — e AGORA é defeito (CONTROLE: a marca não é
+  // eterna, e a sentinela volta a valer).
+  gesto = false;
+  h.aoFimDoGesto();
+  assert.equal(h.espera(), false, 'a espera do FAB não acabou com o gesto');
+  const depois = h.diagNumeroACobrir(numero, r);
+  assert.deepEqual(depois, { naoCobrir: true, sobFab: true });
+  assert.deepEqual(chaves(montar()(geometria(depois))), ['indicadorEscondido'],
+    'CONTROLE: o FAB parado em cima do número, sem gesto, deixou de ser acusado');
 });
