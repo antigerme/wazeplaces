@@ -781,9 +781,14 @@ function montarCardDeFotoTravado() {
   // O card de foto SEM a foto (o aviso na caixa da imagem).
   g.card.querySelector = (sel) => (sel === '.card-sem-foto' ? {} : { style: {}, querySelector: () => null });
   g.ctx.window.direcaoTravada = (d) => d === 'left' || d === 'right';
-  vm.runInContext(['let provandoFotoDe = null, redesenhoDoCardAdiado = null;',
+  g.ctx.__errosNoFim = [];
+  // (O canto do FAB que espera o gesto, R10-4-05, é medido no test/fab-dev.)
+  g.ctx.posicionarFabDev = () => {};
+  vm.runInContext(['let provandoFotoDe = null, redesenhoDoCardAdiado = null, fabEsperaOGesto = false;',
     ...['fotosDoCard', 'cardSobGesto', 'aoFimDoGesto', 'recuperarCardSemFoto', 'redesenharCardAdiado'].map(fatiarApp),
-    'window.aoFimDoGesto = aoFimDoGesto;'].join('\n'), g.ctx);
+    // O swipe.js ENGOLE o erro de quem ouve o fim do gesto (nunca derruba o
+    // gesto): um erro aqui passaria calado. O ouvinte de teste o deixa à mostra.
+    'window.aoFimDoGesto = (c) => { try { aoFimDoGesto(c); } catch (e) { __errosNoFim.push(String(e)); } };'].join('\n'), g.ctx);
   // Arrasta pro lado além do limiar e SOLTA: a direção está travada, o card volta.
   const arrastar = ({ soltar = true } = {}) => {
     let t = g.toque(0, 120, 400);
@@ -816,6 +821,7 @@ test('R10-4-01 composição: o card de foto travado que a pessoa ARRASTOU sai do
   b.g.esvaziar();
   assert.deepEqual([b.redesenhos.length, b.diario], [1, ['foto.redeProvada']],
     'a rede provada no meio do arraste se perdeu — o card seguiu travado');
+  assert.deepEqual(b.g.ctx.__errosNoFim, [], 'o fim do gesto lançou (o swipe.js engole: passaria calado)');
   // CONTROLE: sem arraste nenhum, a rede provada solta o card na hora.
   const c = montarCardDeFotoTravado();
   c.g.ctx.recuperarCardSemFoto({ redeProvada: true });

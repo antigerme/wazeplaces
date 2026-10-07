@@ -8620,6 +8620,9 @@ const DEV_FAB_LEITURA = '.nao-cobrir';
 const DEV_FAB_EVITAR = DEV_FAB_ACIONAVEL + ', ' + DEV_FAB_LEITURA;
 
 let devFabFixado = false;   // o editor arrastou → o app não escolhe mais
+// O canto foi pedido com um GESTO no card da frente (ver `posicionarFabDev`): o
+// fim do gesto o escolhe (`aoFimDoGesto`).
+let fabEsperaOGesto = false;
 // O ponteiro que está no botão agora (null = nenhum dedo). Módulo, e não só do
 // gesto, porque o `posicionarFabDev` precisa saber se o "pego" tem dedo (D7).
 let devFabDedo = null;
@@ -8720,6 +8723,15 @@ function devFabVitimas(canto, w, h, fab) {
 function posicionarFabDev() {
     const fab = document.getElementById('devFab');
     if (!fab || devFabFixado || fab.classList.contains('hidden')) return;
+    // Com um GESTO no card da frente — o dedo nele, a volta pro lugar, a saída —
+    // a tela é a do MEIO do gesto: o card deslocado deixa à mostra o canto que,
+    // parado, ele cobre. Medido assim, o FAB ia pro canto que o card deslocado
+    // liberava e FICAVA lá (o indicador sumindo com o card seguinte arrastado:
+    // `baixo-dir` → `baixo-esq`, auditoria da rodada 10, R10-4-05). A escolha
+    // espera o card parar (`aoFimDoGesto`) — a mesma regra da captura do
+    // arraste, que só acerta o número (`reposicionar: false`).
+    if (cardSobGesto(cardDaFrente())) { fabEsperaOGesto = true; return; }
+    fabEsperaOGesto = false;
     // Pego (segurado, sem ter andado ainda): não se mexe debaixo do dedo. Mas só
     // com um DEDO de verdade no botão: o "pego" que sobrou sem dedo (o relógio
     // órfão de dois dedos) travava o botão ali pra sempre — crescido, parado,
@@ -11850,6 +11862,7 @@ function cardSobGesto(card) {
 // e quando a saída termina: o que esperava o card parar roda agora.
 function aoFimDoGesto() {
     redesenharCardAdiado();
+    if (fabEsperaOGesto) posicionarFabDev();
 }
 
 // O PEDIDO QUE O GESTO VIU — e a ação só vale pra ele.
@@ -22815,9 +22828,14 @@ function scheduleAction(type, place, executor, opts = {}) {
         } catch (err) {
             console.error('action error', err);
         } finally {
+            // O "em andamento" sai ANTES de o indicador ser redesenhado, como no
+            // fim do lote e do "Marcar todos": a decisão que ficou na fila de
+            // saída (rede, sessão) só conta como ESPERANDO envio depois de sair
+            // daqui — redesenhado antes, o "1 esperando" nascia sem o
+            // `nao-cobrir` (ver `updateInFlightIndicator`, R10-4-05).
+            marcarEmAndamento(places, false);
             AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
             updateInFlightIndicator();
-            marcarEmAndamento(places, false);
         }
     };
 
@@ -23079,13 +23097,16 @@ function updateInFlightIndicator() {
     // O diálogo do "Sair", aberto, conta a MESMA fila (ver a função).
     if (!document.getElementById('logoutModal')?.classList.contains('hidden')) desenharAvisoDoSair();
     let el = document.getElementById('inFlightIndicator');
-    const esperando = AppState.authenticated ? carregarFilaDeSaida().length : 0;
+    // Ele era NÚMERO A NÃO COBRIR (o `nao-cobrir` lá embaixo) antes desta volta?
+    const eraLeitura = !!el && /(^|\s)nao-cobrir(\s|$)/.test(el.className);
+    const fila = AppState.authenticated ? carregarFilaDeSaida() : [];
+    const esperando = fila.length;
     if (AppState.inFlightActions <= 0 && esperando <= 0) {
-        // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo).
-        if (el) { el.remove(); atualizarFabDev(); }
+        // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
+        // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
+        if (el) { el.remove(); if (eraLeitura) atualizarFabDev(); }
         return;
     }
-    const nasceu = !el;
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
@@ -23136,7 +23157,22 @@ function updateInFlightIndicator() {
     // no tablet e no computador o placar não passa por baixo do `cima-dir`, o canto
     // lia como livre, e o FAB tapava 100% do indicador (auditoria da rodada 9,
     // R9-4-05, MEDIDO a 1280×800, 844×390 e 768×1024, nos dois motores).
-    el.className = 'nao-cobrir fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
+    //
+    // SÓ com decisão ESPERANDO envio (na fila de saída e parada esperando a
+    // rede), e não no "enviando" de cada decisão com rede, que dura a ida ao
+    // Waze: com a marca nele também, o FAB atravessava a tela larga DUAS vezes a
+    // cada ✕/✓ — pro `cima-esq` quando o "1 enviando" nascia e de volta quando
+    // sumia (auditoria da rodada 10, R10-4-05, MEDIDO: 6 trocas de canto em 3
+    // decisões a 1280×800, 844×390 e 768×1024, nos dois motores). A decisão que
+    // está SAINDO também mora na fila de saída (anotada antes do envio, ver
+    // `anotarAntesDoEnvio`), então "tem fila" não basta: ESPERANDO é o item que
+    // ninguém está mandando agora — nem esta aba (`pedidosEmAndamento`), nem a
+    // outra (a marca dela). E com decisão esperando, a marca fica também
+    // enquanto outra sai ("1 enviando" na frente do número): sem rede, cada ✕
+    // ia de "enviando" a "esperando" em milissegundos, e o FAB iria e voltaria
+    // a cada um.
+    const leitura = fila.some((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)) && !reivindicadoPorOutraAba(x));
+    el.className = (leitura ? 'nao-cobrir ' : '') + 'fixed top-20 right-4 z-40 flex items-center gap-1 text-[0.6875rem] font-semibold '
         + (enviando ? 'text-cyan-800 dark:text-cyan-300'
                     : 'text-amber-800 dark:text-amber-300');
     el.title = texto;
@@ -23145,11 +23181,12 @@ function updateInFlightIndicator() {
     // mais nada — e "3" sozinho não diz nem o que são, nem em que estado estão.
     el.innerHTML = icone + `<span class="tnum" aria-hidden="true">${escapeHtml(String(n))}</span>`
         + `<span class="sr-only">${escapeHtml(texto)}</span>`;
-    // O indicador aparece SEM camada mudando — e o FAB só reavalia o canto quando
-    // uma camada muda (ver `ligarFabDev`): sem isto, ele ficava onde estava, em
-    // cima do número que acabou de nascer. Só no nascer e no sumir (acima), não a
-    // cada número: é a geometria que muda ali. Sem o modo dev, não faz nada.
-    if (nasceu) atualizarFabDev();
+    // O número a não cobrir aparece SEM camada mudando — e o FAB só reavalia o
+    // canto quando uma camada muda (ver `ligarFabDev`): sem isto, ele ficava onde
+    // estava, em cima do número que acabou de nascer. Só quando ele PASSA a ser
+    // número a não cobrir ou DEIXA de ser (e no sumir, acima), não a cada número:
+    // é o que o FAB evita que muda ali. Sem o modo dev, não faz nada.
+    if (leitura !== eraLeitura) atualizarFabDev();
 }
 
 // Feedback quando um número muda. São DOIS mecanismos, porque contar não serve
