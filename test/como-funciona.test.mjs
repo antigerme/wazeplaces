@@ -328,8 +328,11 @@ test('R7-7-02: o "Ver de novo" da Ajuda dá o diálogo por VISTO — o card que 
   m.h.pedirComoFuncionaAdiado();
   await microtarefas();
   assert.deepEqual(m.abertos, ['comoFuncionaModal'], 'o diálogo que a pessoa já leu reabriu');
-  // O botão da Ajuda passa por esta função.
-  assert.match(fatiar('setupAppListeners'), /\$\('reverComoFunciona'\)\?\.addEventListener\('click', abrirComoFunciona\);/);
+  // O botão da Ajuda passa por esta função — pelo "Ver de novo", que despacha a
+  // janela do Desfazer antes de abrir (R12-7-03, test/treino-auditoria-r12).
+  assert.match(fatiar('setupAppListeners'), /\$\('reverComoFunciona'\)\?\.addEventListener\('click', verDeNovoComoFunciona\);/);
+  assert.match(fatiar('verDeNovoComoFunciona'), /^\s+abrirComoFunciona\(\);$/m,
+    'o "Ver de novo" deixou de passar pela função que dá o diálogo por visto');
 });
 
 test('o treino É o "Como funciona": com ele ativo, nada abre (nem se dá por visto)', async () => {

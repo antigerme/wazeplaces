@@ -1391,7 +1391,8 @@ function setupAppListeners() {
     // js/presenca.js, que carrega depois deste arquivo.
     window.Presenca?.montar?.();
     $('closeHelp').addEventListener('click', () => closeModal('helpModal'));
-    $('reverComoFunciona')?.addEventListener('click', abrirComoFunciona);
+    // Despacha a janela do Desfazer antes de abrir (R12-7-03, ver a função).
+    $('reverComoFunciona')?.addEventListener('click', verDeNovoComoFunciona);
     // Só fecha: o foco de quem usa o TECLADO é da limpeza do modal, que vale
     // também pro Esc (`LIMPEZA_AO_FECHAR.comoFuncionaModal`, R10-7-03).
     $('comoFuncionaOk')?.addEventListener('click', (ev) => closeModal('comoFuncionaModal', { peloTeclado: veioDoTeclado(ev) }));
@@ -12694,6 +12695,20 @@ function abrirComoFunciona() {
         savePreferences();
     }
     openModal('comoFuncionaModal');
+}
+
+// O "Ver de novo" da Ajuda é um GESTO, e ele chega também logo depois de um ✕
+// ou ✓, com a janela do Desfazer correndo. O automático espera a janela
+// (`acoesTravadas`, R7-7-01); o aberto à mão não esperava, e o banner (z-70)
+// ficava por cima do "Entendi" e do "Quero treinar antes": no iPhone SE e com o
+// celular deitado, o toque no "Entendi" caía no "Desfazer" e desfazia a decisão
+// por trás do diálogo, sem nada ir ao Waze (R12-7-03, MEDIDO nos dois motores;
+// auditoria de 2026-10-07). Ele DESPACHA a janela antes de abrir, como o
+// "Praticar" (`Treino.entrar`) e a folha da presença: a decisão sai agora, e o
+// banner sai com ela. Sem janela, nada muda.
+function verDeNovoComoFunciona() {
+    despacharJanelaDoDesfazer();
+    abrirComoFunciona();
 }
 
 // O tipo do pedido, em UMA função: o rótulo visível e o que o leitor de tela

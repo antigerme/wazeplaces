@@ -10,7 +10,10 @@
 //              rede lenta) redesenhava só a aba Filtros: as Preferências seguiam
 //              com o Desfazer travado ("Disponível depois de você logar…") e o
 //              Histórico com a vitrine "1 de 14", sem o "Curador" já ganho e sem
-//              o interruptor "Rejeitar sozinho", até fechar e abrir.
+//              o interruptor "Rejeitar sozinho", até fechar e abrir;
+//   R12-7-03 — o "Ver de novo 'Como funciona'" aberto à mão na janela do Desfazer
+//              ficava por baixo do banner (z-70): no iPhone SE e deitado, o toque
+//              no "Entendi" caía no "Desfazer" e desfazia o ✕, sem nada ir ao Waze.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -355,11 +358,95 @@ test('R12-7-02: CONTROLE — com os Filtros FECHADOS, o perfil não redesenha na
   assert.equal(p.els.prefUndoEnabled.disabled, false, 'o instrumento: com o perfil, a cota do Desfazer não destrava');
 });
 
+// ═══ R12-7-03 · o "Ver de novo" à mão na janela do Desfazer ═════════════════
+// A janela DE VERDADE (`scheduleAction`, com o banner e o relógio), o despacho
+// e o "Desfazer" do banner. O `openModal` de mentira anota o que estava na tela
+// quando o diálogo abriu.
+function montarJanela() {
+  const banners = [];
+  const abertos = [];
+  const enviados = [];
+  const timers = new Map();
+  let proximo = 1;
+  const container = {
+    get children() { return banners; },
+    set innerHTML(v) { if (v === '') banners.length = 0; },
+    appendChild: (el) => { banners.push(el); },
+    contains: () => false,
+  };
+  const botaoDesfazer = { addEventListener: (tipo, fn) => { botaoDesfazer.clique = fn; } };
+  const AppState = { pendingAction: null, preferences: { undoEnabled: true, comoFuncionaVisto: true },
+    stats: { read: 0, rejected: 1, skipped: 0 }, queue: [], serverTotal: 3, inFlightActions: 0 };
+  const deps = {
+    AppState,
+    document: {
+      getElementById: (id) => (id === 'undoContainer' ? container : id === 'undoBtn' && banners.length ? botaoDesfazer : null),
+      createElement: () => ({ className: '', innerHTML: '' }), activeElement: null,
+    },
+    // O relógio da janela, nas mãos do teste.
+    setTimeout: (fn) => { const id = proximo++; timers.set(id, fn); return id; },
+    clearTimeout: (id) => { timers.delete(id); },
+    UNDO_WINDOW_MS: 3000, t: (k) => k, escapeHtml: (s) => String(s),
+    canDisableUndo: () => false, presencaFolhaAberta: () => false,
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    MapaLightbox: { isOpen: () => false },
+    savePreferences: () => {},
+    openModal: (id) => abertos.push({ id, banner: banners.length > 0, janela: !!AppState.pendingAction }),
+  };
+  const fns = ['scheduleAction', 'showUndoBanner', 'removeUndoBanner', 'desfazerAcaoPendente', 'despacharJanelaDoDesfazer',
+    'enviarPendenciasDoLightbox', 'abrirComoFunciona', 'verDeNovoComoFunciona'];
+  const h = rodar(deps, fontes(fns), fns);
+  return {
+    h, AppState, abertos, enviados, banners, botaoDesfazer,
+    // O ✕ no card: a decisão entra na janela do Desfazer.
+    rejeitar: () => h.scheduleAction('reject', { venueID: 'v1', updateRequestID: 'u1' }, async () => { enviados.push('v1'); }, {}),
+    venceAJanela: () => { for (const [id, fn] of [...timers]) { timers.delete(id); fn(); } },
+  };
+}
+
+test('R12-7-03: o "Ver de novo" aberto À MÃO na janela do Desfazer a despacha ANTES de abrir — o diálogo abre sem o banner por cima', () => {
+  const m = montarJanela();
+  m.rejeitar();
+  assert.equal(m.banners.length, 1, 'PRÉ-CONDIÇÃO: o ✕ não pôs o banner do Desfazer na tela');
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: o ✕ não abriu a janela');
+  m.h.verDeNovoComoFunciona();   // ⓘ → "Ver de novo 'Como funciona'"
+  assert.deepEqual(m.abertos, [{ id: 'comoFuncionaModal', banner: false, janela: false }],
+    'DEFEITO: o "Como funciona" abriu com o banner do Desfazer por cima — o toque no "Entendi" cai no "Desfazer"');
+  assert.deepEqual(m.enviados, ['v1'], 'a decisão do ✕ não saiu ao abrir o diálogo');
+  assert.equal(m.AppState.stats.rejected, 1, 'o placar do ✕ mudou');
+  m.venceAJanela();   // o relógio da janela foi desligado: nada mais sai
+  assert.deepEqual(m.enviados, ['v1'], 'a decisão saiu DUAS vezes — o relógio da janela seguiu correndo');
+  // O botão da Ajuda passa por aqui.
+  assert.match(fatiar('setupAppListeners'), /^\s+\$\('reverComoFunciona'\)\?\.addEventListener\('click', verDeNovoComoFunciona\);$/m,
+    'o "Ver de novo" da Ajuda não passa pelo despacho');
+});
+
+test('R12-7-03: CONTROLE — aberto direto, como era, o banner fica por cima do diálogo, e o toque nele DESFAZ o ✕', () => {
+  // O instrumento enxerga o defeito: sem o despacho, o diálogo abre com a
+  // janela correndo e o banner na tela, e o "Desfazer" devolve o ✕ por trás dele.
+  const m = montarJanela();
+  m.rejeitar();
+  m.h.abrirComoFunciona();
+  assert.deepEqual(m.abertos, [{ id: 'comoFuncionaModal', banner: true, janela: true }],
+    'o instrumento não vê o banner por cima do diálogo');
+  m.botaoDesfazer.clique({ detail: 1 });   // o toque na parte de baixo do "Entendi", que cai no "Desfazer"
+  assert.equal(m.AppState.stats.rejected, 0, 'o instrumento não reproduz o ✕ desfeito');
+  m.venceAJanela();
+  assert.deepEqual(m.enviados, [], 'o instrumento não reproduz: nada vai ao Waze');
+});
+
+test('R12-7-03: CONTROLE — sem janela, o "Ver de novo" só abre o diálogo (nada sai)', () => {
+  const m = montarJanela();
+  m.h.verDeNovoComoFunciona();
+  assert.deepEqual(m.abertos, [{ id: 'comoFuncionaModal', banner: false, janela: false }]);
+  assert.deepEqual(m.enviados, [], 'o "Ver de novo" sem janela mandou alguma coisa');
+});
+
 // ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════
 test('o js/min/app.js — o que o navegador carrega — tem os consertos deste lote', () => {
   const MIN = readFileSync(new URL('../js/min/app.js', import.meta.url), 'utf8');
   const contar = (txt, re) => (txt.match(re) || []).length;
-  for (const re of [/verConquistasNaTela\(/g, /verConquistasAoVoltar\b/g, /renderUndoGateUI\(/g]) {
+  for (const re of [/verConquistasNaTela\(/g, /verConquistasAoVoltar\b/g, /verDeNovoComoFunciona\b/g, /renderUndoGateUI\(/g]) {
     assert.ok(contar(APP_SEM, re) > 0, `o app.js não tem ${re}`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
   }
