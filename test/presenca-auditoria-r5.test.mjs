@@ -407,10 +407,10 @@ test('R5-5-3 os leitores de `_motivo` são só os da presença (conferidos acima
   // A marca mudou de sentido pra resposta não-JSON: quem a lê precisa ter sido
   // conferido. Hoje são três na presença (pelo `presencaSemResposta`), o
   // desligar da presença no WME e a marca do lie-fi da busca (`buscaSemResposta`,
-  // R6-4-3, conferida em test/offline-varredura), e a pergunta de "Minha área" ao
-  // servidor aplicado à mão (`lerServidorDaMinhaArea`, R10-6-02: a que NEM
-  // chegou não vale pela ida daquele servidor; conferida em test/minha-area); o
-  // `api.js` só a escreve.
+  // R6-4-3, conferida em test/offline-varredura); o `api.js` só a escreve. A
+  // pergunta de "Minha área" ao servidor aplicado à mão (`lerServidorDaMinhaArea`)
+  // deixou de ler: desde o R11-6-01 só a resposta BOA vale pela ida, e a falha —
+  // com ou sem resposta — não vale (conferida em test/minha-area).
   const leitores = [];
   for (const arq of ['api.js', 'app.js', 'presenca.js', 'i18n.js', 'swipe.js', 'mapa.js', 'qr.js', 'sw-register.js', 'version.js']) {
     let fonte;
@@ -420,6 +420,6 @@ test('R5-5-3 os leitores de `_motivo` são só os da presença (conferidos acima
       leitores.push(`${arq}:${/_motivo:/.test(l) ? 'escreve' : 'lê'}`);
     });
   }
-  assert.deepEqual(leitores.sort(), ['api.js:escreve', 'app.js:lê', 'app.js:lê', 'app.js:lê', 'presenca.js:lê'].sort(),
+  assert.deepEqual(leitores.sort(), ['api.js:escreve', 'app.js:lê', 'app.js:lê', 'presenca.js:lê'].sort(),
     `apareceu um leitor (ou escritor) novo de \`_motivo\`: ${leitores.join(', ')} — confira se ele quer "a resposta NEM chegou"`);
 });
