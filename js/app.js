@@ -16218,15 +16218,25 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
 // O lote de lidos confirma N de uma vez: UMA gravação e UMA avaliação, não N
 // (seriam N escritas síncronas no localStorage no meio da tela).
 // Sem guarda do treino, pela mesma razão da `registrarAcaoConfirmada`.
-// `gesto`: o momento do toque no "Marcar todos" (`carimboDoGesto`) — a hora e o
-// idioma em que a pessoa decidiu, como no ✕ e no ✓. Sem ele, vale agora.
+// `gesto`: o momento do toque no "Marcar todos" (`carimboDoGesto`) — a hora, o
+// dia e o idioma em que a pessoa decidiu, como no ✕ e no ✓. Sem ele, vale agora.
 function registrarLoteConfirmado(n, gesto) {
     const g = carregarConquistas();
     g.seq = (g.seq || 0) + n;
     salvarConquistas();
     registrarIdiomaUsado(gesto ? gesto.lang : (typeof getLang === 'function' ? getLang() : ''));
     const hora = new Date(gesto && Number.isFinite(gesto.t) ? gesto.t : Date.now()).getHours();
-    checarConquistas({ madrugada: hora >= 0 && hora < 5 });
+    // "Centurião" é o balde do DIA do gesto, a régua da `registrarAcaoConfirmada`:
+    // o lote soma no `gesto.dia` (o `recordHistory` do `contarLidos` já somou), e
+    // julgado pelo balde de HOJE, o "Marcar todos" tocado às 23:59 e pousado
+    // depois da meia-noite não dava o "Centurião", com 120 no balde do gesto
+    // (MEDIDO no navegador; o ✓ do card, no mesmo instante, dava; auditoria de
+    // 2026-10-07, R11-7-06). Depois da virada, nada mais avalia aquele dia.
+    const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
+    checarConquistas({
+        ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
+        madrugada: hora >= 0 && hora < 5,
+    });
     checkUndoGateUnlock();   // ver `updateStats`
 }
 
