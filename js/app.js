@@ -2393,7 +2393,9 @@ function atualizarAcoesDeFoto() {
     if (del) del.classList.toggle('hidden', some || !Lightbox.idFotoAtual());
     // Mutuamente exclusivos: pendente se APROVA, aprovada se EXCLUI. Sem isso
     // os dois brigariam pelo mesmo canto, e o editor teria que adivinhar qual
-    // vale pra foto que está vendo.
+    // vale pra foto que está vendo. A exclusão é por CONSTRUÇÃO: as duas
+    // perguntas leem a mesma régua de "aprovada" (`Lightbox.idAprovadoDaFoto`),
+    // uma pelo sim e a outra pelo não (R10-3-04).
     const apr = document.getElementById('lightboxApprove');
     if (apr) apr.classList.toggle('hidden', some || !Lightbox.podeAprovarAtual());
 }
@@ -2568,8 +2570,21 @@ function anunciarNoCard(texto) {
 // local na frente (o pedido, ou um irmão, que recebe a mesma escrita:
 // `aplicarNosIrmaos`) e nenhuma camada por cima. Com outro local na tela, ou
 // outra camada aberta, o desfecho não é do que se vê, e nada é dito.
+//
+// A camada aberta pode ser a de um IRMÃO do mesmo local: a pessoa decidiu o
+// pedido, o irmão veio pra frente e ela abriu a foto dele com a escrita no ar. A
+// escrita muda a camada dele junto (`aplicarNosIrmaos`) — a foto sai da tela e a
+// contagem cai, a pílula e o `alt` ganham o nome novo — e nada era dito, nem
+// pela camada nem pelo card (auditoria de 2026-10-07, R10-3-02, MEDIDO nos dois
+// motores). Ela fala pela região dela, com o mesmo texto, quando é de um irmão
+// NA FILA — o que o `aplicarNosIrmaos` alcança; uma camada que ele não alcançou
+// não mudou, e o desfecho não é dela.
 function anunciarDesfechoDaFoto(texto, place) {
-    if (Lightbox.isOpen() && Lightbox.place === place) { anunciarNoLightbox(texto, place); return; }
+    const aberta = Lightbox.isOpen() ? Lightbox.place : null;
+    const irmaoAberto = !!aberta && aberta !== place && !!place && place.venueID != null
+        && aberta.venueID === place.venueID
+        && ((AppState.queue || []).includes(aberta) || filaRealComDevolvidos().includes(aberta));
+    if (aberta && (aberta === place || irmaoAberto)) { anunciarNoLightbox(texto, aberta); return; }
     const frente = AppState.currentPlace;
     if (!place || place.venueID == null || !frente || frente.venueID !== place.venueID) return;
     if (semCamadaAberta()) anunciarNoCard(texto);
@@ -2642,6 +2657,16 @@ const Lightbox = {
         this.idx = Math.max(0, Math.min(startIdx || 0, urls.length - 1));
         this.newIdx = (newImageIdx !== undefined && newImageIdx !== null) ? newImageIdx : -1;
         this.eDenuncia = !!eDenuncia;
+        // A PROPOSTA que já está entre as aprovadas não leva o ✨: ela deixou de
+        // ser "a foto em decisão". O card a aponta pelo pedido (`fotosDoCard`), e
+        // o pedido segue na tela até a resposta da aprovação: aprovada com o
+        // Desfazer e despachada ao fechar a foto, a camada REABERTA pelo card
+        // voltava com o ✨ na foto que a pessoa acabou de aprovar e com o
+        // "Aprovar" e a lixeira no mesmo canto — e, com a resposta, o "Aprovar"
+        // vivo por cima da lixeira, sem fazer nada (auditoria de 2026-10-07,
+        // R10-3-04, MEDIDO nos dois motores). A 🚩 fica: a foto denunciada é
+        // uma das aprovadas por definição (ela está no mapa).
+        if (!this.eDenuncia && this.newIdx >= 0 && this.idAprovadoDaFoto(this.urls[this.newIdx])) this.newIdx = -1;
         this.placeName = placeName || '';
         // Quem abriu (a foto do card, que tem `tabindex="-1"` pra isso): é pra
         // ela que o foco volta no fechamento (ver `devolverFocoDaAmpliacao`).
@@ -3004,6 +3029,13 @@ const Lightbox = {
     // vezes pelo mesmo pedido — o que a aprovação pousada depois da queda deixava
     // acontecer (R6-3-01). É aqui, e não só no toque, porque esta função decide
     // também se o botão APARECE: o que a tela mostra e o que ela aceita juntos.
+    //
+    // E a foto que JÁ está entre as aprovadas não se aprova: ela é da lixeira
+    // (`idFotoAtual`), pela MESMA régua (`idAprovadoDaFoto`). Com as duas
+    // perguntas lendo a mesma lista, o "Aprovar" e a lixeira nunca disputam o
+    // canto — o slot é exclusivo por construção, e não por cada caminho que
+    // mexe no ✨ lembrar de tirá-lo (R10-3-04: a camada reaberta com a
+    // aprovação no ar mostrava os dois).
     podeAprovarAtual() {
         const p = this.place;
         if (!p || this.eDenuncia) return false;
@@ -3012,7 +3044,19 @@ const Lightbox = {
         if (this.idx !== this.newIdx || this.newIdx < 0) return false;
         if (!p.venueID || !p.updateRequestID) return false;
         if ((this.urls[this.idx] || '').indexOf(String(p.updateRequestID)) === -1) return false;
+        if (this.idAprovadoDaFoto(this.urls[this.idx])) return false;
         return podeAgirComoL6Aqui();   // mesmo portão, decisão do owner
+    },
+    // O id que a foto desta URL tem entre as APROVADAS do pedido aberto (a foto
+    // já está no mapa), ou nulo. A URL traz o id da foto, como no
+    // `indiceDaFoto`. É a régua ÚNICA de "aprovada" da camada: a lixeira
+    // (`idFotoAtual`) é dela, e o "Aprovar" (`podeAprovarAtual`) e o ✨ da
+    // proposta (`open`) são do contrário.
+    idAprovadoDaFoto(url) {
+        const p = this.place;
+        const ids = p && Array.isArray(p.approvedImageIds) ? p.approvedImageIds : [];
+        const u = String(url || '');
+        return ids.find((id) => id && u.indexOf(id) !== -1) || null;
     },
     // Depois de aprovada, a foto passa a estar no mapa: o ✨ some e ela entra
     // na lista de excluíveis — o botão vira lixeira sozinho.
@@ -3110,9 +3154,9 @@ const Lightbox = {
         const p = this.place;
         if (!p || !p.venueID || !Number.isFinite(Number(p.lat)) || !Number.isFinite(Number(p.lon))) return null;
         if (!podeExcluirFotoAqui()) return null;
-        const url = this.urls[this.idx] || '';
-        const ids = Array.isArray(p.approvedImageIds) ? p.approvedImageIds : [];
-        return ids.find(id => id && url.indexOf(id) !== -1) || null;
+        // A régua de "aprovada" é UMA, e o "Aprovar" pergunta o contrário dela
+        // (R10-3-04, ver `podeAprovarAtual`).
+        return this.idAprovadoDaFoto(this.urls[this.idx]);
     },
     // Recoloca a foto na posição em que estava — usado pelo Desfazer e quando o
     // envio falha. Sem isto, desfazer devolveria a foto pro fim da lista e a
@@ -3130,11 +3174,20 @@ const Lightbox = {
     // Desfazer a devolvia SEM o 🚩 na camada aberta — o card, redesenhado,
     // mostrava o selo, e o anúncio dizia "Foto 1 de 2" sem ele (achado de
     // passagem do lote 13, medido com os métodos de verdade).
-    recolocarFoto(url, idx, eraSelo = false) {
+    //
+    // `eDenuncia`: QUAL selo ela tinha, o do gesto (o alvo da exclusão o guarda).
+    // A camada REABERTA pelo card dentro da janela do Desfazer nasce sem a foto
+    // denunciada — o card já não a tem —, e com ela o `open` recebe
+    // `eDenuncia: false`: o Desfazer (ou a exclusão que falha) devolvia a foto com
+    // o selo no lugar certo e do TIPO errado, o ✨ "Foto nova proposta neste
+    // pedido" sobre a foto DENUNCIADA, na camada, na tira e no anúncio (auditoria
+    // de 2026-10-07, R10-3-01, MEDIDO nos dois motores). Sem o tipo, fica o da
+    // camada.
+    recolocarFoto(url, idx, eraSelo = false, eDenuncia = this.eDenuncia) {
         if (!url || this.urls.some((u) => u === url)) return;
         const pos = Math.max(0, Math.min(idx, this.urls.length));
         this.urls.splice(pos, 0, url);
-        if (eraSelo === true) this.newIdx = pos;
+        if (eraSelo === true) { this.newIdx = pos; this.eDenuncia = eDenuncia === true; }
         else if (this.newIdx >= pos) this.newIdx += 1;
         this.idx = pos;
         if (!this.isOpen()) return;
@@ -3554,6 +3607,54 @@ function openLightbox(urls, startIdx, newImageIdx, placeName, eDenuncia, place) 
 // efeito colateral sem motivo.
 let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 
+// A VEZ de cada local nas exclusões de foto (auditoria de 2026-10-07,
+// R10-3-03). O Waze não apaga uma foto: ele SUBSTITUI a lista inteira do local
+// (gotcha #57), e o servidor monta essa lista a partir da releitura guardada,
+// que só é regravada DEPOIS de a escrita voltar. Com o Desfazer, a exclusão que
+// já tinha saído (a janela venceu) e esperava o Waze não segurava a próxima do
+// MESMO local: ela saía 3 s depois, o servidor relia a lista de ANTES da
+// primeira — com a foto que ela tirou — e a última escrita a chegar ganhava. Uma
+// das duas exclusões se desfazia no Waze com as DUAS respostas `success: true`,
+// e a tela mostrando as duas fotos fora (MEDIDO no navegador, nos dois motores,
+// e no core). Sem o Desfazer não acontecia: a lixeira fica travada até a
+// resposta (`excluindoAgora`).
+//
+// O ENVIO da próxima espera a resposta da anterior do mesmo local; o GESTO não:
+// a lixeira segue livre, e a foto seguinte sai da tela na hora, como sempre.
+// Cada exclusão entra na vez do local quando sai pro Waze (`enviarExclusao`) e a
+// solta quando termina, dê certo ou não. Sem outra do local no ar, nada espera.
+// A vez vale também com a página SAINDO (a descarga da janela): sem esperar, as
+// duas cruzariam no servidor, que desfaz uma delas; esperando, a segunda se
+// perde se a página morrer antes da resposta da primeira — a mesma perda, e a
+// espera é a que acerta quando a página só foi pro fundo e volta.
+//
+// `saiu`: as fotos que JÁ saíram do mapa por uma exclusão desta vez. A MESMA
+// foto pode ser excluída de novo pela foto ampliada de um IRMÃO do local — o
+// irmão só a perde quando a primeira pousa (`aplicarNosIrmaos`) —, e a segunda
+// não vai ao Waze: iria só pra voltar "já excluída", e a tela diria "Outro
+// editor já tinha excluído 👍" sobre a exclusão da própria pessoa.
+const exclusoesNoLocal = new Map();   // venueID → { ultima, saiu: Set, n }
+
+function vezDeExcluirNoLocal(alvo) {
+    const local = alvo.place.venueID;
+    let vez = exclusoesNoLocal.get(local);
+    if (!vez) { vez = { ultima: null, saiu: new Set(), n: 0 }; exclusoesNoLocal.set(local, vez); }
+    const anterior = vez.ultima;
+    let soltar;
+    vez.ultima = new Promise((ok) => { soltar = ok; });
+    vez.n++;
+    const v = vez;
+    return {
+        anterior,                                   // nula: a vez já é desta
+        jaSaiu: () => v.saiu.has(alvo.id),
+        saiuDoMapa: () => { v.saiu.add(alvo.id); },
+        soltar: () => {
+            soltar();
+            if (--v.n === 0 && exclusoesNoLocal.get(local) === v) exclusoesNoLocal.delete(local);
+        },
+    };
+}
+
 // Uma escrita de FOTO SEM janela no ar (o caminho sem Desfazer): a aprovação ou
 // a exclusão já saiu e espera o Waze. Enquanto isso os dois botões de foto
 // ficam travados — e quem ESCREVE o `disabled` deles é só a função da trava
@@ -3731,18 +3832,33 @@ async function enviarExclusao(alvo) {
     const epoca = epocaDaSessao;
     // A foto, no local: o mesmo alvo visto de qualquer pedido do local (R6-3-04).
     const alvoDasIdas = 'excluir|' + alvo.place.venueID + '|' + alvo.id;
+    // A vez do LOCAL (R10-3-03): com outra exclusão dele no ar, o envio espera a
+    // resposta dela. Sem nenhuma, nada espera — o envio sai na hora, como antes.
+    const vez = vezDeExcluirNoLocal(alvo);
     try {
+        if (vez.anterior) {
+            await vez.anterior;
+            // A MESMA foto saiu do mapa pela anterior (pelo irmão, ver
+            // `vezDeExcluirNoLocal`): nada a mandar. O fim é o de uma exclusão que
+            // pousou — depois da queda, só pra quem ainda vê o pedido.
+            if (vez.jaSaiu()) return epoca === epocaDaSessao || pedidoAindaNaTela(alvo.place);
+        }
         // Com a MESMA política de retentativa do resto (o renomear já a tinha):
         // uma oscilação de rede virava "não deu pra excluir" na primeira falha
         // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
         // e a foto que já saiu volta como `jaExcluida` — de quem, diz a conta
-        // das idas (`contarIdasSemResposta`), deste gesto e dos anteriores.
+        // das idas (`contarIdasSemResposta`), deste gesto e dos anteriores. A
+        // época é a do GESTO, explícita: a espera pela vez pode atravessar a
+        // queda, e a ida não sai com a sessão de quem entrou depois (o
+        // `callWithRetry` a confere antes de CADA tentativa).
         const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
-        let r = await callWithRetry(enviar);
+        let r = await callWithRetry(enviar, epoca);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
             r = await refazerDepoisDo401(epoca, enviar);
         }
         lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, !!(r && r.success), epoca);
+        // A foto saiu do mapa: a mesma foto, numa exclusão que espera a vez, não sai de novo.
+        if (r && r.success) vez.saiuDoMapa();
         // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a foto
         // que a exclusão não tirou do mapa volta pra tela (V2).
         const outraSessao = epoca !== epocaDaSessao;
@@ -3784,6 +3900,9 @@ async function enviarExclusao(alvo) {
         devolverFoto(alvo);
         showToast(t('toast.photoDeleteFailed'), 'error');
         return false;
+    } finally {
+        // A vez do local passa pra próxima, dê certo ou não (R10-3-03).
+        vez.soltar();
     }
 }
 
@@ -3825,7 +3944,7 @@ function devolverFoto(alvo) {
         if (Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(alvo.id)) p.approvedImageIds.push(alvo.id);
         p.imageUrl = p.imageUrls[0] || null;
     }
-    if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx, alvo.selo === true);
+    if (Lightbox.place === p) Lightbox.recolocarFoto(alvo.url, alvo.idx, alvo.selo === true, alvo.eDenuncia);
     // O card é redesenhado debaixo do foco — o Desfazer pela tecla z, com a foto
     // já fechada, e a falha que chega depois (R5-3-07). É o MESMO pedido: o foco
     // num ✕ ↑ ✓ fica no mesmo botão (`mesmoBotao`, R9-3-04).
@@ -3853,8 +3972,10 @@ function pedirExclusaoDaFoto() {
     // A região é a do GESTO (L26): o envio sai até 3 s depois.
     // `selo`: a foto excluída é a do selo da camada (a 🚩 denunciada, num pedido de
     // foto denunciada) — o Desfazer o devolve junto com ela (ver `recolocarFoto`).
+    // `eDenuncia`: e QUAL selo, que a camada reaberta pelo card dentro da janela
+    // já não sabe (R10-3-01).
     const alvo = { id, place, idx: Lightbox.idx, url: Lightbox.urls[Lightbox.idx], regiao: API.getRegion(),
-        selo: Lightbox.newIdx >= 0 && Lightbox.newIdx === Lightbox.idx };
+        selo: Lightbox.newIdx >= 0 && Lightbox.newIdx === Lightbox.idx, eDenuncia: Lightbox.eDenuncia === true };
 
     // Uma exclusão por vez: tocar na lixeira de novo despacha a anterior, como
     // o swipe faz. Sem isto, duas janelas correndo escreveriam listas que se
@@ -3905,7 +4026,14 @@ function pedirExclusaoDaFoto() {
 
     // Com janela: a foto some JÁ (é o retorno imediato) e o envio espera.
     // A releitura é aquecida agora — os ~557ms dela cabem dentro da janela.
-    API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
+    // Menos com outra exclusão deste local no ar (R10-3-03): esta só sai depois
+    // da resposta dela (`vezDeExcluirNoLocal`), e o servidor usa a lista que ELA
+    // deixou guardada. Aquecida agora, a releitura podia ler o local ANTES da
+    // escrita da outra e guardá-lo com a hora nova, por cima: MEDIDO no core, a
+    // exclusão seguinte mandava de volta a foto que a primeira tirou, as duas
+    // com `success: true`. Sem o aquecimento, o servidor relê na hora (ou usa a
+    // lista da outra), e é uma ida a menos.
+    if (!exclusoesNoLocal.has(place.venueID)) API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao);
     Lightbox.removerFoto(alvo.id, place);
     // A ÚLTIMA foto do local saiu: o `removerFoto` FECHOU a foto ampliada e o
     // foco voltou à foto do card — que este redesenho tira da página. O foco
@@ -4038,6 +4166,13 @@ async function enviarAprovacao(alvo) {
         if (valeu) {
             // Sem toast de sucesso: o ✨ sumindo e o botão virando lixeira JÁ
             // dizem que valeu — mesma razão do excluir.
+            //
+            // A foto vira APROVADA aqui, com e sem a janela do Desfazer — o
+            // mesmo gesto idempotente, que redesenha a camada DESTE pedido se ela
+            // estiver aberta. Com a janela, só o gesto a marcava, na camada de
+            // antes: a camada REABERTA pelo card com a aprovação no ar voltava
+            // com o ✨, e a resposta não o tirava (R10-3-04).
+            Lightbox.marcarComoAprovada(alvo);
             concluirAprovacao(alvo);
             // "Curador" conta CURADORIA SUA. O `already_processed` logo abaixo
             // (sem ida perdida antes) é outro editor que tratou antes — conta
@@ -4247,10 +4382,10 @@ function aprovarFotoAtual() {
         // Só marca com a aprovação VALENDO: o `.finally` de antes marcava
         // também na falha, e a foto pendente virava "aprovada" na tela — com a
         // lixeira no lugar, que então apagava a foto e deixava o pedido órfão.
+        // Quem marca é o próprio envio, no sucesso (`enviarAprovacao`, R10-3-04).
         enviarAprovacao(alvo).then((valeu) => {
             estadoAprovando(false);
             if (!valeu) return;
-            Lightbox.marcarComoAprovada(alvo);
             // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu (R6-3-08).
             anunciarNoLightbox(t('undo.photoApproved'), place);
         });

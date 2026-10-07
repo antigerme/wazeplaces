@@ -152,10 +152,11 @@ function montarEscritaNaQueda() {
     showToast: (m, tipo) => toasts.push(tipo + ':' + m), msgDoServidor: () => '',
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
     renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
+    exclusoesNoLocal: new Map(),   // a vez do local nas exclusões (R10-3-03)
   });
   app = montar(deps, ['filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela', 'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto',
     'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401', 'contarIdasSemResposta', 'idasSemRespostaDeAntes',
-    'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela'],
+    'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela', 'vezDeExcluirNoLocal'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
   'setEpoca: (v) => { epocaDaSessao = v; }');
   return { app, A, B, C, AppState, log, toasts, Lightbox, responder: (r) => responder(r) };
