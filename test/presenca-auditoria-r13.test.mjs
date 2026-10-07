@@ -2,12 +2,14 @@
 // que dizia "2 mensagens novas" (uma já vista) com o "lida" que JÁ VOLTOU — o
 // caso irmão do R12-5-01, que só refazia a conta com ele no ar —, e o "Tentar
 // de novo" do histórico na espera do perfil, que punha "Carregando…" na tela e
-// deixava a falha no leitor de tela (irmão do R12-5-03 e do R11-5-03). E os
-// dois irmãos dele achados no conserto (lote 17), no mesmo caminho da espera do
-// perfil: a reabertura que trazia de volta o erro velho da página antiga, e o
-// "Ver mensagens anteriores" que trocava a primeira página que esperava. Os
-// rótulos R13-5-n são os do relatório dessa rodada. Cada teste foi visto
-// REPROVANDO com o conserto desfeito.
+// deixava a falha no leitor de tela (irmão do R12-5-03 e do R11-5-03). E o que
+// o conserto achou comparando o caminho da espera do perfil com o caminho com
+// o perfil (lote 17): a reabertura na espera que trazia de volta o erro velho
+// da página antiga; o "Ver mensagens anteriores" na espera que trocava a
+// primeira página que esperava; e, no caminho com o perfil, a reabertura com a
+// página antiga no ar, que não pedia a primeira página. Os rótulos R13-5-n são
+// os do relatório dessa rodada. Cada teste foi visto REPROVANDO com o conserto
+// desfeito.
 //
 // O instrumento é o js/presenca.js INTEIRO no navegador de mentira do
 // `_presenca-cliente.mjs`, como nas rodadas anteriores.
@@ -409,4 +411,147 @@ test('R13-5-02 (irmão) na espera do perfil, "Ver mensagens anteriores" não tro
   const { r: com } = await reabertaNaEspera({ tocar: true, comPerfil: true });
   assert.deepEqual(com.abrirNoAr, ['primeira'], 'CONTROLE: com o perfil, o toque com a primeira página no ar não pede a antiga');
   assert.equal(com.lidaAte, 2000, 'CONTROLE: com o perfil, a reabertura marca a 2000 como lida');
+});
+
+// ── A conversa reaberta com a página ANTIGA no ar (caminho com o perfil) ─────
+// Achado no conserto do lote 17, comparando os dois caminhos: o `h.carregando`
+// da página antiga segurava a primeira página que a reabertura pede.
+
+const OUTRA = '555000111';
+// A conversa com a CAF carregada (a 1, e há mais antigas); "Ver mensagens
+// anteriores" sai e a página antiga fica NO AR (`soltarAntiga`). A conversa
+// fecha, a 2000 chega com ela fechada, e ela é reaberta (`reabrir`). As
+// primeiras páginas seguintes trazem a 1 e a 2000 (`primeira`: o que elas
+// respondem; o padrão é responder na hora).
+async function antigaNoAr({ reabrir = true, primeira = null } = {}) {
+  let soltarAntiga = null;
+  let inicial = true;
+  const c = novoCliente({ agora: T + 10, api: { chat: (x) => {
+    if (x.acao !== 'abrir') return { success: true };
+    if (x.com === OUTRA) return { success: true, mensagens: [], maisAntigas: false, lida: true };
+    if (inicial) { inicial = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }; }
+    if (x.antesDe) return new Promise((ok) => { soltarAntiga = ok; });
+    return primeira ? primeira(x) : { success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: true, lida: true };
+  } } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  tocarVerAnteriores(c);
+  await tick();
+  const r = { antigaNoAr: typeof soltarAntiga === 'function' };
+  if (reabrir) {
+    fechar(c);
+    c.relogio.agora = T + 2000; await chega(c, 2000);          // com a conversa FECHADA
+    r.contaFechada = conta(c);
+    c.relogio.agora = T + 3000;
+    c.P.presencaAbrirConversa(CAF);
+    await tick(); await tick();
+    r.viuA2000 = c.$('conversaMsgs').innerHTML.includes('msg 2000');
+  }
+  const daCaf = () => c.chamadas.chat.filter((x) => x.acao === 'abrir' && x.com === CAF);
+  r.antesDeSoltar = daCaf().length;
+  return { c, r, soltarAntiga: (resp) => soltarAntiga(resp), daCaf };
+}
+const ANTIGA_OK = { success: true, mensagens: [doHistorico(-5000)], maisAntigas: false, lida: false };
+
+test('lote 17: reaberta com a página ANTIGA no ar, a conversa pede a primeira página quando a antiga volta — e a mensagem vista ao reabrir é marcada como lida no Waze', async () => {
+  const { c, r, soltarAntiga, daCaf } = await antigaNoAr();
+  assert.equal(r.antigaNoAr, true, 'CONTROLE: a página antiga tinha que estar no ar');
+  assert.equal(r.contaFechada, 1, 'CONTROLE: a 2000 chegou com a conversa fechada e conta como nova');
+  assert.equal(r.viuA2000, true, 'CONTROLE: reaberta, a conversa mostra a 2000');
+  assert.equal(r.antesDeSoltar, 2, 'CONTROLE: com a antiga no ar, a reabertura não manda nada ainda');
+  c.relogio.agora = T + 4000;
+  soltarAntiga(ANTIGA_OK);
+  await tick(); await tick(); await tick();
+  assert.deepEqual(daCaf().slice(2).map((x) => (x.antesDe ? 'antiga' : 'primeira')), ['primeira'],
+    'DEFEITO: a antiga voltou e a primeira página da reabertura não saiu — a 2000, vista, fica não lida no Waze');
+  assert.equal((c.P.Presenca.lidaEnviadaAte.get(CAF) || 0) - T, 2000, 'a 2000, vista ao reabrir, não foi coberta pelo "lida" do `abrir`');
+  // Sem pedido a mais: fechar não manda outro "lida" (o do `abrir` cobriu).
+  const lidas = c.chamadas.chat.filter((x) => x.acao === 'lida').length;
+  fechar(c);
+  await tick(); await tick();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'lida').length, lidas, 'fechar mandou um "lida" a mais');
+  // CONTROLE: com a conversa ABERTA o tempo todo (sem reabrir), a antiga que
+  // volta não pede primeira página nenhuma.
+  const k = await antigaNoAr({ reabrir: false });
+  k.soltarAntiga(ANTIGA_OK);
+  await tick(); await tick(); await tick();
+  assert.deepEqual(k.daCaf().map((x) => (x.antesDe ? 'antiga' : 'primeira')), ['primeira', 'antiga'], 'CONTROLE: sem reabrir, a antiga que volta pediu outra página');
+});
+
+test('lote 17: a falha da página ANTIGA com a primeira saindo não aparece nem é dita — a primeira recomeça as duas (P12)', async () => {
+  const { c, soltarAntiga, daCaf } = await antigaNoAr({ primeira: () => new Promise(() => {}) });
+  const el = c.$('conversaAnuncio');
+  const escritas = [];
+  let v = el.textContent;
+  Object.defineProperty(el, 'textContent', { get: () => v, set: (x) => { escritas.push(String(x)); v = String(x); }, configurable: true });
+  soltarAntiga(WAZE_FORA);
+  await tick(); await tick(); await tick();
+  assert.deepEqual(daCaf().slice(2).map((x) => (x.antesDe ? 'antiga' : 'primeira')), ['primeira'], 'a antiga falhou e a primeira página da reabertura não saiu');
+  assert.equal(escritas.includes('presenca.conversa.anterioresErro'), false, 'a falha da página antiga de uma abertura que já passou foi dita ao leitor de tela');
+  assert.equal(fraseNaTela(c, 'conversa-vazio'), null, 'a falha da página antiga de uma abertura que já passou apareceu na tela');
+  assert.equal(botaoVerAnteriores(c), true, 'com a primeira página no ar, a conversa não oferece "Ver mensagens anteriores"');
+});
+
+test('lote 17 CONTROLE: fechada de novo antes de a antiga voltar, a conversa não pede a primeira página — a próxima abertura pede, como sempre', async () => {
+  const { c, soltarAntiga, daCaf } = await antigaNoAr();
+  fechar(c);
+  await tick();
+  soltarAntiga(ANTIGA_OK);
+  await tick(); await tick(); await tick();
+  assert.equal(daCaf().length, 2, 'com a conversa fechada, a antiga que voltou pediu a primeira página — um pedido que ninguém vai ver');
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  assert.deepEqual(daCaf().slice(2).map((x) => (x.antesDe ? 'antiga' : 'primeira')), ['primeira'], 'CONTROLE: a abertura seguinte pede a primeira página');
+  // E com a PRIMEIRA página no ar (não a antiga), a reabertura não pede outra:
+  // a que está no ar já traz o histórico, e o "lida" do que chegou depois sai
+  // pela rajada, como sempre (R5-5-1).
+  let soltar = null;
+  const d = novoCliente({ agora: T + 10, api: { chat: (x) => (x.acao === 'abrir' ? new Promise((ok) => { soltar = ok; }) : { success: true }) } });
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  fechar(d);
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  soltar({ success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true });
+  await tick(); await tick(); await tick();
+  assert.equal(d.chamadas.chat.filter((x) => x.acao === 'abrir').length, 1, 'com a primeira página no ar, a reabertura pediu outra — um pedido a mais');
+});
+
+test('lote 17: a resposta de uma conversa que não é mais a da tela não desenha a outra — nem a arrasta pro fim', async () => {
+  // A primeira página da CAF fica no ar; a pessoa fecha e abre a conversa com
+  // OUTRA pessoa, e lê o começo dela (rolou pra cima).
+  let soltar = null;
+  const c = novoCliente({ agora: T, api: { chat: (x) => {
+    if (x.acao !== 'abrir') return { success: true };
+    if (x.com === OUTRA) return { success: true, mensagens: [], maisAntigas: false, lida: true };
+    return new Promise((ok) => { soltar = ok; });
+  } } });
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  assert.equal(typeof soltar, 'function', 'CONTROLE: a primeira página da CAF tinha que estar no ar');
+  fechar(c);
+  c.P.presencaAbrirConversa(OUTRA);
+  await tick(); await tick();
+  const corpo = c.$('conversaMsgs');
+  corpo.scrollHeight = 5000;
+  corpo.scrollTop = 120;
+  const desenhado = corpo.innerHTML;
+  soltar({ success: true, mensagens: [doHistorico(1)], maisAntigas: false, lida: true });
+  await tick(); await tick();
+  assert.equal(c.P.Presenca.aberta, OUTRA, 'CONTROLE: a conversa na tela é a outra');
+  assert.ok(c.P.Presenca.historico.get(CAF).carregada, 'CONTROLE: o histórico da CAF chegou e foi guardado');
+  assert.equal(corpo.scrollTop, 120, 'DEFEITO: a resposta da conversa que saiu da tela arrastou a outra pro fim');
+  assert.equal(corpo.innerHTML, desenhado, 'a resposta da conversa que saiu da tela mexeu no desenho da outra');
+  // CONTROLE: a resposta da conversa que SEGUE na tela rola até o fim, como sempre.
+  let soltar2 = null;
+  const d = novoCliente({ agora: T, api: { chat: (x) => (x.acao === 'abrir' ? new Promise((ok) => { soltar2 = ok; }) : { success: true }) } });
+  d.P.presencaAbrirConversa(CAF);
+  await tick();
+  const corpoD = d.$('conversaMsgs');
+  corpoD.scrollHeight = 5000;
+  corpoD.scrollTop = 120;
+  soltar2({ success: true, mensagens: [doHistorico(1)], maisAntigas: false, lida: true });
+  await tick(); await tick();
+  assert.equal(corpoD.scrollTop, 5000, 'CONTROLE: a resposta da conversa na tela tinha que rolar até o fim');
 });

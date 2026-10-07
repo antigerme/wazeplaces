@@ -2202,7 +2202,18 @@ function presencaTetoAoAbrir(id) {
 async function presencaCarregarConversa(id, { antes = null } = {}) {
     let h = Presenca.historico.get(id);
     if (!h) { h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false }; Presenca.historico.set(id, h); }
-    if (h.carregando) return;
+    if (h.carregando) {
+        // A conversa REABERTA com a página ANTIGA ainda no ar pede a primeira
+        // página, e o `h.carregando` a segurava. É a primeira página que traz o
+        // que chegou com a conversa fechada e a marca como lida no Waze (o
+        // `abrir`): a mensagem que a pessoa viu ao reabrir ficava não lida lá, e
+        // a lista seguinte a devolvia como "1 mensagem nova" (achado no
+        // conserto do lote 17). Ela sai quando a antiga voltar
+        // (`primeiraDepois`, no fim): uma vez, e só com a conversa ainda
+        // aberta — nenhum pedido além do que a reabertura já faria.
+        if (!antes && h.antigas === 'carregando') h.primeiraDepois = true;
+        return;
+    }
     // De quem é a sessão decide o que é MEU no histórico (`presencaMsgDoWaze`).
     // Na renovação silenciosa (a extensão devolveu a sessão e o perfil ainda não
     // voltou), o `abrir` saía mesmo assim: as minhas mensagens vinham como
@@ -2262,12 +2273,25 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     h.carregando = false;
     if (epoca !== Presenca.epoca) return;
     chatAoResponder(r, carona);
+    // A primeira página que a conversa reaberta pediu com ESTA página no ar
+    // (ver o `h.carregando`, no topo) sai agora, só com a conversa ainda
+    // aberta: fechada, a próxima abertura a pede, como sempre.
+    const primeiraDepois = !!h.primeiraDepois && Presenca.aberta === id;
+    h.primeiraDepois = false;
+    // E a resposta desenha a conversa só se ela ainda é a da tela. Com OUTRA
+    // aberta, o redesenho era o da outra — e o da primeira página, que rola até
+    // o fim, arrastava pro fim quem lia o começo dela (lote 17).
+    const naTela = Presenca.aberta === id;
     if (!r || !r.success) {
         if (antes) h.antigas = 'erro';
         else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
-        presencaRenderConversa();
+        // A página antiga é de uma abertura que já passou: com a primeira
+        // saindo, a falha dela não aparece nem é dita — a primeira recomeça as
+        // duas (P12).
+        if (primeiraDepois) { presencaCarregarConversa(id); return; }
+        if (naTela) presencaRenderConversa();
         // A tela diz que o histórico não veio; o leitor de tela também, com a
         // MESMA frase — e só quando a tela a mostra: a primeira página que
         // falha com o histórico já na tela não diz nada lá (R11-5-03).
@@ -2310,11 +2334,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (ultimaDela && r.lida === true) Presenca.lidaEnviadaAte.set(id, ultimaDela);
         if (r.lida === true) Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, saiuEm));
     }
-    presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
+    if (naTela) presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
     // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
     // que está na tela, marca.
     if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
+    if (primeiraDepois) presencaCarregarConversa(id);
 }
 
 // A página ANTES da primeira mensagem na tela.
