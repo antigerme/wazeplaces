@@ -12044,6 +12044,17 @@ let buscaEsperaOPerfil = false;
 async function startFetching() {
     // O `sair()` do treino busca; aqui, o laço abaixo esperaria uma busca que o
     // `fetchNextPage` recusa no treino — seria o laço do gotcha #19.
+    //
+    // E a pergunta se repete DEPOIS DE CADA `await` (o perfil, a caixa de "Minha
+    // área", a busca, a fila guardada): o treino pode ABRIR no meio de uma
+    // espera — a abertura com rede lenta ("Carregando…"), ⓘ → "Praticar" —, e
+    // esta busca voltava DENTRO dele. Com os exemplos acabados (o "Treino
+    // concluído" aberto), o laço chamava o `fetchNextPage`, que no treino volta
+    // sem mudar nada, pra sempre: a aba CONGELAVA inteira, sem nem o "Ir para a
+    // fila" responder (R11-7-01, MEDIDO no Chromium e no WebKit; auditoria da
+    // rodada 11). Com exemplos na fila, ela redesenhava o card de treino e o
+    // foco do teclado caía no <body>. Só a guarda daqui não basta: o laço já
+    // podia estar no `await`. Quem busca de novo é o `sair()` do treino.
     if (Treino.ativo) return;
     AppState.loadError = false;
     ultimaBuscaFalhouPorRede = false;
@@ -12081,7 +12092,7 @@ async function startFetching() {
     // nunca gira em falso (gotcha #19). E a pergunta ao servidor é UMA por busca:
     // a que não teve resposta não se repete aqui (fica pra próxima busca).
     let perguntou = false;
-    for (let volta = 0; volta < 4 && AppState.filters.myArea && AppState.authenticated; volta++) {
+    for (let volta = 0; volta < 4 && !Treino.ativo && AppState.filters.myArea && AppState.authenticated; volta++) {
         let decidindo = AppState._caixaDaMinhaAreaNoAr;
         if (!decidindo && !perguntou) {
             decidindo = lerServidorDaMinhaArea();
@@ -12093,9 +12104,11 @@ async function startFetching() {
         try { await decidindo; } catch (e) {} finally { buscaEsperaOPerfil = false; }
     }
 
-    while (AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
+    while (!Treino.ativo && AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
         await fetchNextPage();
     }
+    // O treino abriu numa das esperas acima (ver o topo): a tela é dele.
+    if (Treino.ativo) return;
 
     // A busca ESPEROU a decisão do lugar, que está no ar (ver `fetchNextPage` e
     // `areaNoutroServidorSemDecisao`, R11-6-02 — a troca de conta pela renovação
@@ -12123,8 +12136,9 @@ async function startFetching() {
         && epoca === AppState.fetchEpoch) {
         await abrirGuardadaDepoisDaFalha(epoca);
         // Abriu — por esta chamada ou por outra que esperava a MESMA busca: o
-        // card já está na tela, e a busca seguinte sai com o próximo gesto.
-        if (AppState.queue.length > 0) return;
+        // card já está na tela, e a busca seguinte sai com o próximo gesto. Ou o
+        // treino abriu durante a leitura (a fila guardada ficou anotada nele).
+        if (AppState.queue.length > 0 || Treino.ativo) return;
     }
 
     showLoading(false);
