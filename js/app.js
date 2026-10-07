@@ -2146,14 +2146,27 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
             }
             return false;
         }
-        closeModal('pairEnterModal');
+        // A tela de entrada some agora, e com ela o OUTRO diálogo que a pessoa
+        // abriu durante a espera (o link mostra a tela de entrada durante o
+        // resgate): o "Colar cookies", com o cookies.txt colado, ficava POR CIMA
+        // do app, e o "Confirmar" ali criava uma segunda sessão, com a primeira
+        // órfã no servidor (auditoria da rodada 11, R11-1-04, MEDIDO). Sai com a
+        // limpeza, como na entrada pela extensão (`MODAIS_DA_ENTRADA`). E o foco
+        // que estava NA tela de entrada vai ao ✕ do primeiro card: ela some sem
+        // gesto, e ele caía no <body> (R10-1-05; lido ANTES de fechar). O "Entrar
+        // com um código" de onde o resgate saiu segue a regra do teclado (R7-1-04):
+        // pelo mouse, o foco nele não se move.
+        const dialogoDoGesto = silencioso ? null : document.getElementById('pairEnterModal');
+        const focoNaEntrada = focoNaTelaDeEntrada() && !(dialogoDoGesto && dialogoDoGesto.contains(document.activeElement));
+        const focoNoCard = peloTeclado || focoNaEntrada;
+        fecharModaisDaEntrada({ focoComDestino: focoNoCard });
         aoEntrarNestaPagina();
         showToast(t('toast.pairSuccess'), 'success');
         showMainScreen();
         resetQueue();   // fila NOVA, como no login por cookies
         conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
         AppState._profilePromise = loadProfileAndAuxData();
-        if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+        if (focoNoCard) focoDoTeclado = BOTAO_DA_ACAO.left;
         startFetching();
         esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
         return true;
@@ -6045,6 +6058,15 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
         if (result.success) {
             guardarPrazoDaSessao(result);
             aoEntrarNestaPagina();
+            // O que a tela de entrada tinha aberto sai COM a limpeza, e o foco que
+            // estava nela vai ao ✕ do primeiro card — como no resgate do código e
+            // na entrada pela extensão (R10-1-05). O "Entrar com um código" aberto
+            // durante a espera, com o código digitado, ficava POR CIMA do app, e o
+            // "Entrar" ali fazia um segundo login, com a primeira sessão órfã no
+            // servidor (auditoria da rodada 11, R11-1-04, MEDIDO). Lido ANTES de
+            // fechar.
+            const focoNaEntrada = focoNaTelaDeEntrada();
+            fecharModaisDaEntrada({ focoComDestino: peloTeclado || focoNaEntrada });
             showMainScreen();
             resetQueue();
             // DE QUEM é a sessão, NA HORA — o portão já leu o perfil (ver o
@@ -6055,8 +6077,9 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
             // `resetQueue`: a fila já é desta sessão, e a troca não a refaz.
             conhecerContaDoLogin(result.conta);
             AppState._profilePromise = loadProfileAndAuxData();
-            // O foco de quem entrou pelo teclado (ver acima, R7-1-04).
-            if (peloTeclado) focoDoTeclado = BOTAO_DA_ACAO.left;
+            // O foco de quem entrou pelo teclado (ver acima, R7-1-04), ou que
+            // estava na tela de entrada quando ela sumiu (R11-1-04).
+            if (peloTeclado || focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
             showToast(t('toast.authSuccess'), 'success');
@@ -6084,10 +6107,15 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
 // volta a valer, se ainda estiver perdido: não é foco pulando pela tela, ele
 // volta pra onde estava (como o `guardarFocoDaTrava` do card). Com o login que
 // deu certo a tela de entrada some, e o botão escondido não recebe nada.
+//
+// O "Entrar com um código" trava junto: era o único caminho da tela de entrada
+// que seguia aberto, e o diálogo dele aberto durante a validação ficava POR CIMA
+// do app quando o login dava certo — o "Entrar" ali fazia um segundo login
+// (auditoria da rodada 11, R11-1-04, MEDIDO).
 let focoNoBotaoDeEntrada = null;
 function setAuthLoading(loading) {
     const ativo = document.activeElement;
-    ['uploadBtn', 'pasteBtn'].forEach(id => {
+    ['uploadBtn', 'pasteBtn', 'pairEnterBtn'].forEach(id => {
         const b = document.getElementById(id);
         if (b) {
             if (loading && b === ativo) focoNoBotaoDeEntrada = b;

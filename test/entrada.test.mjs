@@ -627,7 +627,8 @@ test('login que DEU CERTO zera as marcas da página: depois de "Sair" e entrar d
   // E os outros dois caminhos de entrada, pelo arquivo/colar e pelo código.
   assert.match(fatiar('authenticateWithCookies'), /guardarPrazoDaSessao\(result\);\s*aoEntrarNestaPagina\(\);/,
     'entrar pelos cookies não zera as marcas da página');
-  assert.match(fatiar('resgatarPareamento'), /closeModal\('pairEnterModal'\);\s*aoEntrarNestaPagina\(\);/,
+  // (O resgate fecha os diálogos da entrada, o do código e o OUTRO que tenha ficado aberto: R11-1-04.)
+  assert.match(fatiar('resgatarPareamento'), /fecharModaisDaEntrada\(\{ focoComDestino: focoNoCard \}\);\s*aoEntrarNestaPagina\(\);/,
     'entrar pelo código não zera as marcas da página');
 });
 
@@ -1871,6 +1872,8 @@ function montarLogin(resposta, { peloTeclado = false } = {}) {
     loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {},
     showAccessDenied: () => toasts.push('[Acesso restrito]'), AppState: {},
     authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+    // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
+    focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {},
   };
   const { authenticateWithCookies, estado } = montar(['authenticateWithCookies'], deps,
     ['authenticateWithCookies', 'estado'], 'const estado = () => ({ focoDoTeclado });');
@@ -1937,7 +1940,9 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
     const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
       document: { getElementById: () => null }, resgateEmVoo: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
       closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
-      conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {} };
+      conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {},
+      // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
+      focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {} };
     const { resgatarPareamento, estado } = montar(['resgatarPareamento'], deps, ['resgatarPareamento', 'estado'],
       'const estado = () => ({ focoDoTeclado });');
     await resgatarPareamento('ABC234', { silencioso: true, peloTeclado });

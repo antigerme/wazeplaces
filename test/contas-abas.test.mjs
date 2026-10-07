@@ -1395,7 +1395,9 @@ function montarResgate({ dialogoNaTela = true } = {}) {
     resgateEmVoo: false,
     API: { resgatarPareamento: (c) => { pedidos.push(c); return new Promise((ok) => { soltar = ok; }); } },
     document: { getElementById: (id) => (id === 'pairEnterModal'
-      ? { classList: { contains: (c) => (c === 'hidden' ? !dialogoNaTela : false) } } : null) },
+      ? { classList: { contains: (c) => (c === 'hidden' ? !dialogoNaTela : false) }, contains: () => false } : null) },
+    // O foco e os diálogos da tela de entrada (R11-1-04) não são o assunto daqui.
+    focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada: () => {},
   };
   const h = montar(['resgatarPareamento'], deps);
   return { h, pedidos, soltar: (r) => soltar(r), deps };
@@ -2752,4 +2754,103 @@ test('R11-1-03: CONTROLES — sem login desta aba a extensão entra; a mesma ses
   const pq = queda.h.entrarPelaExtensao({ silencioso: true, manterFila: true });
   queda.responder({ action: 'sessao', token: 'tok-e' });
   assert.equal(await pq, true, 'a renovação da queda passou a recusar a sessão da extensão');
+});
+
+// ── R11-1-04 · o login DESTA aba fecha os diálogos da entrada e leva o foco ao ✕ ──
+// O link de pareamento mostra a tela de entrada durante o resgate, e o login por
+// cookies não travava o "Entrar com um código": o diálogo aberto nesse meio — o
+// "Colar cookies" com o cookies.txt colado, o código digitado — ficava POR CIMA do
+// app quando o login dava certo, e confirmá-lo fazia um segundo login (a primeira
+// sessão ficava órfã). E o foco que estava na tela de entrada caía no <body>
+// (auditoria da rodada 11, R11-1-04, MEDIDO).
+function resgateNaEntrada(tela, { resposta = { success: true, sessionToken: 'tok-p', conta: '4242' } } = {}) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const deps = {
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, focoDoTeclado: null,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    API: { resgatarPareamento: async () => resposta },
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showToast: () => {}, t: (k) => k, msgDoServidor: (r, d) => d,
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); }, resetQueue: () => {}, conhecerContaDoLogin: () => {},
+    loadProfileAndAuxData: () => null, startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['resgatarPareamento', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, log, tela: t };
+}
+
+test('R11-1-04: o link de pareamento que DÁ CERTO fecha o "Colar cookies" aberto durante a espera — com a limpeza — e leva o foco ao ✕', async () => {
+  const m = resgateNaEntrada(COLANDO);
+  assert.equal(await m.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true }), true);
+  assert.ok(m.log.includes('fechou pasteModal (o foco já tem destino)'),
+    'DEFEITO: o "Colar cookies", com o cookies.txt colado, ficou POR CIMA do app (e o "Confirmar" ali faria a 2ª sessão): ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, '', 'o cookies.txt colado (o chaveiro do navegador) ficou no campo');
+  assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o foco que estava no "Colar" caiu no <body> com a tela de entrada escondida');
+  // Só o foco no "Colar cookies" (o Tab, nenhum diálogo aberto): o mesmo destino.
+  const f = resgateNaEntrada({ foco: 'pasteBtn' });
+  await f.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+  assert.equal(f.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'DEFEITO: o foco no "Colar cookies" caiu no <body> (o Tab seguinte ia ao mapa do card)');
+  // CONTROLE: ninguém na tela de entrada (o foco no <body>): nada se move.
+  const c = resgateNaEntrada({});
+  await c.h.resgatarPareamento('ABCDEFGHJKLMNPQRSTUV', { silencioso: true });
+  assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido sem ninguém na tela de entrada');
+});
+
+test('R11-1-04: o "Entrar com um código" segue a regra do teclado — pelo mouse o foco nele não se move, pelo teclado vai ao ✕', async () => {
+  const CODIGO = { dialogo: 'pairEnterModal', texto: 'ABC-DEF', foco: 'pairCodeInput' };
+  const mouse = resgateNaEntrada(CODIGO);
+  assert.equal(await mouse.h.resgatarPareamento('ABCDEF'), true);
+  assert.ok(mouse.log.includes('fechou pairEnterModal'), 'o diálogo do código não fechou: ' + JSON.stringify(mouse.log));
+  assert.equal(mouse.deps.focoDoTeclado, null, 'o código pelo MOUSE prometeu o foco ao card (R7-1-04: o mouse não move o foco)');
+  const teclado = resgateNaEntrada(CODIGO);
+  await teclado.h.resgatarPareamento('ABCDEF', { peloTeclado: true });
+  assert.equal(teclado.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o código pelo teclado deixou de prometer o foco (R7-1-04)');
+  assert.ok(teclado.log.includes('fechou pairEnterModal (o foco já tem destino)'));
+});
+
+function loginNaEntrada(tela) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const deps = {
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, authInFlight: false, focoDoTeclado: null,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    API: { testCookies: async () => ({ success: true, sessionToken: 'tok-c', conta: '4242' }) },
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showToast: () => ({ dispensar() {} }), t: (k) => k, msgDoServidor: (r, d) => d, setAuthLoading: () => {},
+    guardarPrazoDaSessao: () => {}, showMainScreen: () => { log.push('app'); t.mostrarOApp(); }, resetQueue: () => {},
+    conhecerContaDoLogin: () => {}, loadProfileAndAuxData: () => null, startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+  };
+  const h = montar(['authenticateWithCookies', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, log, tela: t };
+}
+
+test('R11-1-04: o login por COOKIES que dá certo fecha o "Entrar com um código" aberto durante a validação — com o código — e leva o foco ao ✕', async () => {
+  const m = loginNaEntrada({ dialogo: 'pairEnterModal', texto: 'ABC-DEF', foco: 'pairCodeInput' });
+  await m.h.authenticateWithCookies('cookies');
+  assert.ok(m.log.includes('app'), 'PRÉ-CONDIÇÃO: o login não deu certo');
+  assert.ok(m.log.includes('fechou pairEnterModal (o foco já tem destino)'),
+    'DEFEITO: o diálogo do código ficou POR CIMA do app (o "Entrar" ali faria um segundo login): ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.pairCodeInput.value, '', 'o código digitado ficou no campo');
+  assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'o foco que estava no diálogo caiu no <body>');
+  // CONTROLE: pelo mouse, sem nada aberto e o foco no <body> (o botão que travou o perdeu): nada se move.
+  const c = loginNaEntrada({});
+  await c.h.authenticateWithCookies('cookies');
+  assert.equal(c.deps.focoDoTeclado, null, 'o login pelo mouse prometeu o foco ao card (R7-1-04)');
+  assert.ok(!c.log.some((x) => x.startsWith('fechou ')));
+});
+
+test('R11-1-04: a validação dos cookies trava TAMBÉM o "Entrar com um código" — o diálogo dele não abre por baixo do login', () => {
+  const botoes = Object.fromEntries(['uploadBtn', 'pasteBtn', 'pairEnterBtn'].map((id) => [id, {
+    id, disabled: false, isConnected: true, classes: new Set(),
+    classList: { toggle(c, v) { if (v) botoes[id].classes.add(c); else botoes[id].classes.delete(c); } },
+  }]));
+  const doc = { body: { id: 'BODY' }, activeElement: null, getElementById: (id) => botoes[id] || null };
+  const h = montar(['setAuthLoading', 'focoPerdido'], { document: doc, focoNoBotaoDeEntrada: null, focavelNaTela: () => true });
+  h.setAuthLoading(true);
+  assert.equal(botoes.pairEnterBtn.disabled, true,
+    'DEFEITO: o "Entrar com um código" seguia aberto durante a validação — o diálogo dele ficava POR CIMA do app');
+  assert.ok(botoes.pairEnterBtn.classes.has('cursor-wait'), 'o "Entrar com um código" travado não mostra a espera, como os outros dois');
+  assert.ok(botoes.uploadBtn.disabled && botoes.pasteBtn.disabled, 'CONTROLE: os outros dois deixaram de travar');
+  h.setAuthLoading(false);
+  assert.ok(!botoes.pairEnterBtn.disabled && !botoes.pasteBtn.disabled && !botoes.uploadBtn.disabled, 'os botões não destravaram no fim');
 });
