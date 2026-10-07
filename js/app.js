@@ -11986,7 +11986,7 @@ function montarCard(place) {
     // num WME em português. O `/editor` cru responde 200 direto (medido, sem
     // redirect HTTP) e o Waze resolve o idioma pela conta de quem abriu — que é
     // exatamente o certo, porque quem decide não somos nós.
-    card.querySelector('.card-wme-link').href = linkWmeDoPedido(place, API.getRegion());
+    prepararLinkDoWme(card.querySelector('.card-wme-link'), place);
 
     renderCardImages(card, place);
 
@@ -12013,6 +12013,20 @@ function montarCard(place) {
     if (typeof applyI18n === 'function') applyI18n(card);
 
     return card;
+}
+
+// O ↗ do card. O de um EXEMPLO sintético do treino (`_exemplo`) não levava a
+// lugar nenhum: o `venueID` dele ("treino1") não existe, e o ↗ abria o WME sem
+// nada selecionado — o treino ensinando errado (R10-7-01, MEDIDO no navegador;
+// auditoria de 2026-10-07). Ação impossível sai da frente: o card do exemplo
+// fica sem ele. O clone de um pedido real (`Treino.neutralizar`) mantém o
+// `venueID` real, e o ↗ abre o lugar certo.
+function prepararLinkDoWme(link, place) {
+    if (!link) return;
+    const semLugar = !!(place && place._exemplo);
+    link.classList.toggle('hidden', semLugar);
+    if (semLugar) link.removeAttribute('href');
+    else link.href = linkWmeDoPedido(place, API.getRegion());
 }
 
 // ── A PILHA: o próximo pedido aparece POR BAIXO do atual ────────────────────
@@ -13979,7 +13993,9 @@ function altDaFoto(place, i, n) {
 function cardParaConversa() {
     const place = AppState.currentPlace;
     if (!place || !place.venueID) return null;
-    if (place._treino) return null;   // pedido inerte não existe pra mais ninguém
+    // Pedido de treino — o clone inerte e o exemplo sintético, os dois com a
+    // marca (R10-7-01) — não existe pra mais ninguém.
+    if (place._treino) return null;
     // A foto que o CARD mostra, pela mesma regra do carrossel (`fotosDoCard`):
     // num pedido de foto, a que está EM DECISÃO. Mandava `place.imageUrl`, que é
     // a PRIMEIRA do local — num pedido de "Nova foto" o colega recebia uma foto
@@ -20519,8 +20535,18 @@ const Treino = {
     // Exemplos sintéticos: sem foto de propósito (não dependem de rede, e
     // "pedido sem foto" é caso real — 20% da fila medida). Os três cobrem os
     // três desfechos que a pessoa vai encontrar de verdade.
+    //
+    // São de TREINO (`_treino`), como os clones do `neutralizar`: só os clones
+    // levavam a marca, e com a fila real curta (vazia: os três) a conversa
+    // oferecia "Mandar o pedido aberto" num exemplo e o mandava ao chat do WME
+    // de verdade — "📍 Padaria Exemplo" e um link `venues=treino1` que não abre
+    // nada, debaixo da faixa "nada é enviado ao Waze" (R10-7-01, MEDIDO no
+    // navegador; auditoria de 2026-10-07). Quem lê a marca é o
+    // `cardParaConversa`. Sem lugar de verdade, o card deles também não tem o ↗
+    // (`prepararLinkDoWme`, pelo `_exemplo`).
     sinteticos() {
         const base = {
+            _treino: true,
             updateRequestID: 'treino', reqSubType: '', isDelete: false,
             creatorRank: 0, source: null,
             flagType: null, flagSubjectType: null, flagEntityID: null, flagComment: '',

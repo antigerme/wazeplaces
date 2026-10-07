@@ -3018,6 +3018,16 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
         sairOk: vis(sair) && sair.getBoundingClientRect().height >= 44 && alcanca(sair),
         sobre: Math.round(sobre),
         estouroX: Math.max(0, doc.scrollWidth - doc.clientWidth),
+        // R10-7-01: a fila real é VAZIA aqui, então o card é um exemplo
+        // SINTÉTICO — sem lugar no mapa, e o ↗ dele abria o WME sem nada
+        // selecionado. Ele sai da TELA (não só ganha a classe: o CSS poderia
+        // vencer o `hidden`, gotcha #27). O CONTROLE, o ↗ do clone de um pedido
+        // real na tela, está no bloco seguinte.
+        linkDoExemplo: (() => {
+          const a = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-wme-link');
+          return { exemplo: AppState.currentPlace && AppState.currentPlace._exemplo, existe: !!a,
+            naTela: !!a && a.getClientRects().length > 0, href: a ? a.getAttribute('href') : null };
+        })(),
       };
     });
     const onde = `treino ${aparelho} ${lg}`;
@@ -3028,6 +3038,10 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
     checa(m.alvoPequeno === 0, `${onde}: alvo de toque abaixo de 44px`);
     checa(m.sairOk, `${onde}: o "Sair" do treino não está utilizável`);
     checa(m.estouroX === 0, `${onde}: estouro horizontal de ${m.estouroX}px`);
+    checa(!!m.linkDoExemplo.exemplo && m.linkDoExemplo.existe,
+      `${onde}: PRÉ-CONDIÇÃO — o card da frente não é um exemplo sintético com o ↗ no DOM`, JSON.stringify(m.linkDoExemplo));
+    checa(!m.linkDoExemplo.naTela && m.linkDoExemplo.href === null,
+      `${onde}: o ↗ do exemplo sintético está na tela — ele abre o WME sem nada selecionado (R10-7-01)`, JSON.stringify(m.linkDoExemplo));
     await ctx.close();
   }
 }
@@ -3098,6 +3112,17 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
       `${onde}: pedido real entrou no treino com o updateRequestID VIVO`);
     checa(est.cards.every((c) => c.v && c.v !== 'treino-inerte'),
       `${onde}: o venueID foi neutralizado — o ↗ do card deixa de abrir o lugar certo`);
+    // E o ↗ do clone segue NA TELA, com o lugar dele: o CONTROLE do exemplo
+    // sintético, que fica sem o ↗ (R10-7-01, no bloco da tela do treino) — prova
+    // que aquela medida enxerga um ↗ que existe.
+    const linkDoClone = await page.evaluate(() => {
+      const a = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-wme-link');
+      return { venue: AppState.currentPlace && AppState.currentPlace.venueID,
+        naTela: !!a && a.getClientRects().length > 0, href: a ? a.getAttribute('href') : null };
+    });
+    checa(linkDoClone.naTela && (linkDoClone.href || '').includes('venues=' + encodeURIComponent(linkDoClone.venue) + '&'),
+      `${onde}: CONTROLE — o ↗ do clone de um pedido real não está na tela com o lugar dele (a medida do exemplo sintético estaria cega)`,
+      JSON.stringify(linkDoClone));
 
     // A FOLHA DO AUTOR (o selo "✕ N") num card de TREINO (R9-7-05, auditoria de
     // 2026-10-06): ela oferecia o "Rejeitar os N", o "Esquecer" e o interruptor
