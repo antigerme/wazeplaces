@@ -468,6 +468,51 @@ test('card "sem foto": sem rede, sem o aviso, com o card trocado ou no meio do a
   assert.equal(arrastando.redesenhos.length, 0, 'arrancou o card de debaixo do dedo');
 });
 
+// ── R10-4-03: a prova de rede que chega DURANTE o esvaziamento da fila de saída ──
+// O `API.aoProvarRede` sai cedo com a fila de saída esvaziando (não retentar na
+// hora, não varrer o offline no meio). A recuperação do card "sem foto" morava
+// DEPOIS dessa saída: no lie-fi com uma decisão esperando envio, a resposta do
+// perfil chegava no meio do esvaziamento, era engolida, e o fim do esvaziamento
+// não chama nada — o card seguia com "A foto precisa de sinal" e ✕/✓ travados
+// (MEDIDO no navegador, n14 da auditoria: 15,9 s e contando; o controle sem a
+// fila de saída, 8 ms). Aqui o CORPO de verdade do gancho roda, com o resto do
+// app de mentira, nas duas situações.
+function rodarProvaDeRede({ esvaziando }) {
+  const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
+  assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
+  const corpo = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
+  const chamou = [];
+  let estado = null;
+  const deps = {
+    esvaziarFilaDeSaida: () => chamou.push('esvaziar'),
+    offlineTalvezVarrer: () => chamou.push('varrer'),
+    refazerPerfilSeFaltar: () => chamou.push('perfil'),
+    presencaWmeRefazerDesligar: () => chamou.push('desligarWme'),
+    // O redesenho do card lê a marca do lie-fi: ela já tem que estar apagada.
+    recuperarCardSemFoto: (o) => chamou.push(['card', o, estado()]),
+    window: { Presenca: { aoProvarRede: () => chamou.push('presenca') } },
+  };
+  const chaves = Object.keys(deps);
+  const api = new Function(...chaves, `let buscaSemResposta = true; let esvaziandoSaida = ${esvaziando};
+    const API = {};
+    ${corpo}
+    return { API, estado: () => ({ buscaSemResposta }) };`)(...chaves.map((k) => deps[k]));
+  estado = api.estado;
+  api.API.aoProvarRede('perfil');
+  return chamou;
+}
+
+test('R10-4-03: a prova de rede no MEIO do esvaziamento da fila de saída solta o card "sem foto" — e só ele', () => {
+  const durante = rodarProvaDeRede({ esvaziando: true });
+  assert.deepEqual(durante, [['card', { redeProvada: true }, { buscaSemResposta: false }]],
+    'a prova que chegou com a fila de saída esvaziando não soltou o card de foto (ou soltou com a marca do lie-fi ainda acesa, '
+    + 'ou acordou o que tem que esperar o fim do esvaziamento)');
+  // CONTROLE: sem esvaziamento no ar, a prova faz tudo o que sempre fez — e o card também.
+  const fora = rodarProvaDeRede({ esvaziando: false });
+  assert.deepEqual(fora.filter((x) => typeof x === 'string'), ['esvaziar', 'varrer', 'perfil', 'desligarWme', 'presenca']);
+  assert.deepEqual(fora.filter((x) => Array.isArray(x)), [['card', { redeProvada: true }, { buscaSemResposta: false }]]);
+});
+
 test('a recuperação do card "sem foto" é chamada nos DOIS sinais de rede: `online` e a resposta que chega', () => {
   // O `online` não prova a rede (chega antes de ela passar tráfego): ali quem
   // prova é a foto, ou o servidor dela. A resposta NOSSA prova (R7-4-06).

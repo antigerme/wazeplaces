@@ -19423,6 +19423,16 @@ API.aoProvarRede = () => {
     // é "falta de sinal" (ver `buscaSemResposta`). ANTES da saída abaixo: no
     // meio do esvaziamento também é prova.
     buscaSemResposta = false;
+    // A resposta que chegou JÁ prova a rede: a foto que ainda falhar é falha
+    // dela, e o card sai do "precisa de sinal" (ver `recuperarCardSemFoto`).
+    // ANTES da saída abaixo, como a marca do lie-fi: redesenhar o card não pede
+    // nada à rede e não disputa nada com o esvaziamento. Morava depois dela, e a
+    // prova que chegava com a fila de saída esvaziando (a resposta do perfil,
+    // ou a da própria decisão que saía) era engolida: o card seguia com "A foto
+    // precisa de sinal" e ✕/✓ travados, e o fim do esvaziamento não chama nada
+    // — só uma próxima resposta da nossa API o soltava (auditoria da rodada 10,
+    // R10-4-03, MEDIDO: 15,9 s travado e contando, nos dois motores).
+    recuperarCardSemFoto({ redeProvada: true });
     // SAI CEDO durante o esvaziamento, e agora por DOIS motivos. O primeiro já
     // estava escrito abaixo (retentar na hora contraria a política de rede). O
     // segundo é novo: varrer o offline no meio do esvaziamento é competir por
@@ -19435,9 +19445,6 @@ API.aoProvarRede = () => {
     // nela: o que estava preso pra SAIR e o que falta ENTRAR.
     offlineTalvezVarrer();
     refazerPerfilSeFaltar();
-    // A resposta que chegou JÁ prova a rede: a foto que ainda falhar é falha
-    // dela, e o card sai do "precisa de sinal" (ver `recuperarCardSemFoto`).
-    recuperarCardSemFoto({ redeProvada: true });
     presencaWmeRefazerDesligar();
     // O token do tempo real que faltou ou falhou: sem isto, nada mais o pedia
     // de novo e o chat ficava sem tempo real até reabrir o app. Com o teto de

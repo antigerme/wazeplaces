@@ -1102,7 +1102,9 @@ test('R6-4-3: a busca que teve RESPOSTA não é lie-fi — nem a página de erro
 
 test('R5-4-4: a primeira resposta que CHEGA apaga o lie-fi — antes da saída do esvaziamento', () => {
   const prova = APP_SEM.slice(APP_SEM.indexOf('API.aoProvarRede = () => {'));
-  assert.match(prova, /^API\.aoProvarRede = \(\) => \{\s*buscaSemResposta = false;\s*if \(esvaziandoSaida\) return;/,
+  // (Entre as duas, só a recuperação do card "sem foto", que também vale no
+  // meio do esvaziamento — R10-4-03, em `test/offline-tela.test.mjs`.)
+  assert.match(prova, /^API\.aoProvarRede = \(\) => \{\s*buscaSemResposta = false;\s*(?:recuperarCardSemFoto\(\{ redeProvada: true \}\);\s*)?if \(esvaziandoSaida\) return;/,
     'a resposta que chega não apaga a marca do lie-fi (ou só depois da saída do esvaziamento)');
 });
 
