@@ -12663,7 +12663,13 @@ async function startFetching() {
     // com o PERFIL ainda vindo (a busca que volta antes dele: a carga da
     // abertura só termina depois da decisão), a busca espera. Sem refazer a
     // fila, o painel vem depois, e diz a verdade.
-    const decidindoOLugar = AppState._caixaDaMinhaAreaNoAr || (!AppState.profile && AppState._profilePromise);
+    //
+    // Só a busca que RESPONDEU vazia: a que FALHOU tem a tela dela — a de falha,
+    // ou a fila guardada do "Disponível offline" logo abaixo —, e no "lie-fi" o
+    // perfil pendura junto, até o teto de 45 s: esperando por ele, a fila
+    // guardada não entrava (MEDIDO no smoke do offline, 9j).
+    const decidindoOLugar = (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr)
+        || (!AppState.loadError && (AppState._caixaDaMinhaAreaNoAr || (!AppState.profile && AppState._profilePromise)));
     if (decidindoOLugar && !AppState.queue.length && epoca === AppState.fetchEpoch) {
         buscaEsperaOPerfil = true;
         updatePendingCount();

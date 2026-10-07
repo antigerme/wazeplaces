@@ -1042,6 +1042,23 @@ test('R4-O1: a fila que MUDA enquanto a base é lida (↻, filtro) não recebe a
   assert.equal(eventos(d, 'card').length, 1, 'a fila guardada foi aberta duas vezes');
 });
 
+// R12-6-02 (auditoria da rodada 12): a fila que volta VAZIA com o lugar ainda por
+// decidir espera a decisão — e o PERFIL ainda vindo —, em vez de dizer "Tudo
+// limpo!" (test/minha-area). Mas só a busca que RESPONDEU: no lie-fi o perfil
+// pendura junto com a busca, até o teto de 45 s, e esperando por ele a fila
+// guardada não entrava (MEDIDO no smoke do offline, 9j, na primeira versão do
+// conserto). A falha tem a tela dela.
+test('R12-6-02: a busca que FALHA por rede com o perfil ainda pendurado (o lie-fi) não espera por ele — a fila guardada entra na hora', async () => {
+  const pagina = await prepararO1();
+  const b = pagina({ onLine: true, api: () => FALHA_REDE });
+  b.AppState._profilePromise = new Promise(() => {});   // o perfil pendurado, como a busca
+  const desfecho = await Promise.race([b.app.startFetching().then(() => 'terminou'),
+    new Promise((ok) => setTimeout(() => ok('pendurou no perfil'), 5000))]);
+  assert.equal(desfecho, 'terminou', 'a busca que falhou por rede ficou esperando o perfil pendurado');
+  assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], 'a fila guardada não entrou no lie-fi');
+  assert.equal(eventos(b, 'card').length, 1);
+});
+
 // ── R5-4-4: o card de foto no LIE-FI (auditoria de 2026-09-30) ───────────────
 // A fila guardada aberta pelo lie-fi (o O1: `onLine` VERDADEIRO e a busca sem
 // resposta) mostrava o card de foto cuja foto não veio com "Sem Imagem" e ✕/✓
