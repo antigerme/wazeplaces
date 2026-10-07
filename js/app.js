@@ -26052,14 +26052,45 @@ function ehIOS() {
     return /Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1;
 }
 
+// O navegador do iPhone que NÃO é o Safari: o Chrome (CriOS), o Firefox (FxiOS)
+// e o Edge (EdgiOS). Todo navegador do iPhone é WebKit por baixo, e a UA traz a
+// marca dele. O convite mandava tocar "na barra do Safari" a quem não está no
+// Safari — e o QR do pareamento abre no navegador PADRÃO do iPhone, que pode
+// ser um desses (R13-7-03, MEDIDO com a UA de cada um no WebKit; auditoria de
+// 2026-10-07).
+function navegadorDoIOSForaDoSafari() {
+    return /\b(?:CriOS|FxiOS|EdgiOS)\//.test(navigator.userAgent || '');
+}
+
+// A versão do iOS que a UA diz ("iPhone OS 16_3"; no iPad, "CPU OS 16_4"), como
+// [maior, menor]. `null` quando ela não vem: o iPad que se anuncia como Mac.
+function versaoDoIOS() {
+    const m = /(?:iPhone|CPU) OS (\d+)_(\d+)/.exec(navigator.userAgent || '');
+    return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+// Dá pra pôr o app na Tela de Início DAQUI? No Safari, sempre. Nos outros
+// navegadores do iPhone, só a partir do iOS 16.4: antes dele o menu de
+// compartilhar deles não tem o "Adicionar à Tela de Início", e o convite seria o
+// beco sem saída que a régua "isto é acionável AQUI?" proíbe — ele não aparece,
+// como a extensão no celular. É conhecimento da PLATAFORMA, não medição: não há
+// iPhone neste ambiente. Sem a versão na UA (o iPad que se diz Mac), vale como
+// recente: o iPadOS de antes do 16.4 é raro, e esconder tiraria o caminho de quem
+// pode.
+function iOSAdicionaATelaDeInicioAqui() {
+    if (!navegadorDoIOSForaDoSafari()) return true;
+    const v = versaoDoIOS();
+    return !v || v[0] > 16 || (v[0] === 16 && v[1] >= 4);
+}
+
 const CHAVE_INSTALL_DISPENSADO = 'waze_places_install_dispensado';
 
 function convitePodeAparecer() {
     if (appJaInstalada()) return false;
     if (safeLS && safeLS.get && safeLS.get(CHAVE_INSTALL_DISPENSADO) === '1') return false;
     // Só há o que oferecer se houver prompt (Chrome/Android/desktop) ou se for
-    // iOS, onde mostramos o passo a passo manual.
-    return !!promptInstalacao || ehIOS();
+    // iOS, onde mostramos o passo a passo manual — onde ele funciona.
+    return !!promptInstalacao || (ehIOS() && iOSAdicionaATelaDeInicioAqui());
 }
 
 // O convite vive no "Tudo limpo!" porque é o ÚNICO momento em que o editor
@@ -26078,6 +26109,15 @@ function atualizarConviteInstalar() {
     // Com prompt: botão. Sem prompt e iOS: passo a passo. Nunca os dois.
     document.getElementById('installInviteBtn').classList.toggle('hidden', !promptInstalacao);
     document.getElementById('installIosSteps').classList.toggle('hidden', !!promptInstalacao);
+    // O 1º passo diz ONDE está o "Compartilhar": na barra do Safari, ou no menu
+    // do navegador fora dele (R13-7-03). A CHAVE troca — a troca de idioma relê
+    // dela —, e o texto sai do dicionário.
+    const passo = !promptInstalacao && document.getElementById('installIosStep1');
+    if (!passo) return;
+    const chave = navegadorDoIOSForaDoSafari() ? 'install.ios.step1Navegador' : 'install.ios.step1';
+    if (passo.getAttribute('data-i18n-html') === chave) return;
+    passo.setAttribute('data-i18n-html', chave);
+    passo.innerHTML = t(chave);
 }
 
 function atualizarBotaoInstalar() {

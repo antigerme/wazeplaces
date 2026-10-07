@@ -306,6 +306,10 @@ const I18N_DICT = {
     'install.invite': '🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.',
     'install.action': 'Instalar o aplicativo',
     'install.ios.step1': 'Toque em <strong>Compartilhar</strong>, na barra do Safari',
+    // O mesmo passo FORA do Safari (Chrome, Firefox e Edge do iPhone, iOS 16.4
+    // ou mais novo): o "Compartilhar" fica no menu do navegador, e o 2º passo é
+    // o mesmo (R13-7-03).
+    'install.ios.step1Navegador': 'Toque em <strong>Compartilhar</strong>, no menu do navegador',
     'install.ios.step2': 'Escolha <strong>Adicionar à Tela de Início</strong>',
     'install.dismiss': 'Agora não',
     // Rótulos de campo do diff — vinham do SERVIDOR em português (js/i18n.js é a
@@ -965,6 +969,7 @@ const I18N_DICT = {
     'install.invite': '🚗💨 Put Waze Places on your home screen: one tap to open, more room for the photo.',
     'install.action': 'Install the app',
     'install.ios.step1': 'Tap <strong>Share</strong> in the Safari bar',
+    'install.ios.step1Navegador': 'Tap <strong>Share</strong> in the browser menu',
     'install.ios.step2': 'Choose <strong>Add to Home Screen</strong>',
     'install.dismiss': 'Not now',
     'card.field.name': 'Name', 'card.field.description': 'Description',
@@ -1599,6 +1604,7 @@ const I18N_DICT = {
     'install.invite': '🚗💨 Pon Waze Places en tu pantalla de inicio: se abre de un toque y cabe más foto.',
     'install.action': 'Instalar la aplicación',
     'install.ios.step1': 'Toca <strong>Compartir</strong> en la barra de Safari',
+    'install.ios.step1Navegador': 'Toca <strong>Compartir</strong> en el menú del navegador',
     'install.ios.step2': 'Elige <strong>Añadir a pantalla de inicio</strong>',
     'install.dismiss': 'Ahora no',
     'card.field.name': 'Nombre', 'card.field.description': 'Descripción',
@@ -2232,6 +2238,7 @@ const I18N_DICT = {
     'install.invite': '🚗💨 Mettez Waze Places sur votre écran d’accueil : un seul appui pour ouvrir, plus de place pour la photo.',
     'install.action': 'Installer l’app',
     'install.ios.step1': 'Touchez <strong>Partager</strong> dans la barre de Safari',
+    'install.ios.step1Navegador': 'Touchez <strong>Partager</strong> dans le menu du navigateur',
     'install.ios.step2': 'Choisissez <strong>Sur l’écran d’accueil</strong>',
     'install.dismiss': 'Pas maintenant',
     'card.field.name': 'Nom', 'card.field.description': 'Description',

@@ -722,6 +722,128 @@ for (const [nome, vp, iOS] of [
   await ctx.close();
 }
 
+// ── Convite no iPhone FORA do Safari (R13-7-03) ─────────────────────────────
+// No Chrome, no Firefox e no Edge do iPhone (UA com CriOS, FxiOS, EdgiOS), o 1º
+// passo mandava tocar "na barra do Safari" — um navegador que a pessoa não está
+// usando; e antes do iOS 16.4 esses navegadores nem adicionam à Tela de Início,
+// então o convite era um beco sem saída. A frase nova ("no menu do navegador")
+// é medida nos 4 idiomas no Fold, no SE e no SE de 2016, LADO A LADO com a do
+// Safari no mesmo tamanho e idioma: QUAL variante a tela mostra se lê pela CHAVE
+// (`data-i18n-html`), nunca pelas palavras, e o texto na tela tem que ser o do
+// dicionário DAQUELE idioma (a troca de idioma relê a chave). A frase não
+// estoura a caixa nem parte palavra, o "Agora não" tem 44 px, e onde o convite
+// do Safari cabe na tela o da frase nova também cabe. Onde o do Safari já NÃO
+// cabia (o SE de 2016 em pt/es/fr, o Fold em fr: o "Agora não" fica 7 a 48 px
+// abaixo da dobra, com o painel rolando — MEDIDO antes da frase nova, com o
+// mesmo número nas duas variantes), a frase nova não desce o "Agora não" nem
+// um pixel além do dele: mexer no layout do convite é mudança visual, e ficou
+// pra decisão do owner. CONTROLES: o Safari do mesmo iOS segue com o passo da
+// barra do Safari, e o Safari de um iOS antigo segue com o convite.
+const UA_IOS = (marca, versao = '18_0') => `Mozilla/5.0 (iPhone; CPU iPhone OS ${versao} like Mac OS X) `
+  + `AppleWebKit/605.1.15 (KHTML, like Gecko) ${marca} Mobile/15E148 Safari/604.1`;
+const UA_SAFARI_IOS = (versao) => UA_IOS('Version/18.0', versao);
+const UA_CHROME_IOS = (versao) => UA_IOS('CriOS/130.0.6723.90', versao);
+const conviteNoIOS = async (vp, ua) => {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block', locale: 'pt-BR',
+    isMobile: true, hasTouch: true, userAgent: ua });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(300);
+  return { ctx, page };
+};
+const medirConviteIOS = (page, lang) => page.evaluate((lang) => {
+  aplicarIdioma(lang);
+  AppState.authenticated = true;
+  AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+  AppState.stats = { read: 3, rejected: 1, skipped: 0 };
+  AppState.serverTotal = 0;
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('appScreen').classList.remove('hidden');
+  renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+  AppState.queue = []; AppState.currentPlace = null;
+  tratouNestaFila = true; puladosNoInicioDaFila = 0;
+  showNoPlaces();
+  const box = document.getElementById('installInvite');
+  if (!box || box.classList.contains('hidden')) return { ausente: true };
+  const passo = document.getElementById('installIosStep1');
+  // A posição se mede com o painel no TOPO, onde ele aparece: onde o convite não
+  // cabe, o painel rola, e uma rolagem que sobrou da medição anterior mudava o
+  // número (no WebKit, 2 px entre as duas variantes iguais).
+  document.getElementById('noMoreCards').scrollTop = 0;
+  // Pros LADOS: nada do convite sai da largura da tela.
+  const lados = [];
+  for (const id of ['installIosSteps', 'installIosStep1', 'installDismissBtn']) {
+    const e = document.getElementById(id);
+    if (!e || e.classList.contains('hidden')) { lados.push(`${id} escondido`); continue; }
+    const r = e.getBoundingClientRect();
+    if (r.right > innerWidth + 1 || r.left < 0) lados.push(`${id} ${Math.round(r.left)}→${Math.round(r.right)}`);
+  }
+  // Palavra partida no meio (o Range de cada palavra em mais de uma linha).
+  const partidas = [];
+  const it = document.createTreeWalker(passo, NodeFilter.SHOW_TEXT); let n;
+  while ((n = it.nextNode())) {
+    const re = /\S{4,}/g; let x;
+    while ((x = re.exec(n.nodeValue))) {
+      const rg = document.createRange(); rg.setStart(n, x.index); rg.setEnd(n, x.index + x[0].length);
+      if (new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size > 1) partidas.push(x[0]);
+    }
+  }
+  const linhas = (() => { const rg = document.createRange(); rg.selectNodeContents(passo);
+    return new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size; })();
+  const dis = document.getElementById('installDismissBtn').getBoundingClientRect();
+  return { chave: passo.getAttribute('data-i18n-html'), texto: passo.textContent.trim(),
+    doDicionario: String((I18N_DICT[lang] || {})[passo.getAttribute('data-i18n-html')] || '').replace(/<[^>]+>/g, '').trim(),
+    botao: !document.getElementById('installInviteBtn').classList.contains('hidden'),
+    estouro: Math.max(0, passo.scrollWidth - passo.clientWidth), lados, partidas, linhas,
+    fimDoDispensar: Math.round(dis.bottom), cabe: dis.bottom <= innerHeight + 1,
+    alvoDispensar: Math.round(Math.min(dis.width, dis.height)) };
+}, lang);
+for (const [nome, vp] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }],
+  ['SE 2016', { width: 320, height: 568 }]]) {
+  const safari = await conviteNoIOS(vp, UA_SAFARI_IOS('18_0'));
+  const chrome = await conviteNoIOS(vp, UA_CHROME_IOS('18_0'));
+  for (const lang of LINGUAS) {
+    const s = await medirConviteIOS(safari.page, lang);
+    const m = await medirConviteIOS(chrome.page, lang);
+    const rot = `convite fora do Safari · ${nome} · ${lang}`;
+    checa(!s.ausente && s.chave === 'install.ios.step1', `${rot}: CONTROLE — o Safari perdeu o convite ou o passo da barra do Safari`,
+      JSON.stringify({ ausente: s.ausente, chave: s.chave }));
+    checa(!m.ausente, `${rot}: o convite sumiu do Chrome do iPhone (iOS 18), que adiciona à Tela de Início`);
+    if (m.ausente || s.ausente) continue;
+    checa(m.chave === 'install.ios.step1Navegador', `${rot}: o 1º passo segue mandando à barra do Safari`, m.chave);
+    checa(m.texto === m.doDicionario && m.texto.length > 0, `${rot}: o texto na tela não é o do dicionário deste idioma`,
+      `"${m.texto}" × "${m.doDicionario}"`);
+    checa(!m.botao, `${rot}: botão de instalar no iPhone, que não tem o prompt`);
+    checa(m.lados.length === 0, `${rot}: o convite sai pelos lados da tela`, m.lados.join(', '));
+    checa(m.estouro === 0, `${rot}: a frase estoura a caixa`, `${m.estouro}px`);
+    checa(m.partidas.length === 0, `${rot}: palavra partida no meio`, m.partidas.join(','));
+    checa(m.linhas <= 2, `${rot}: a frase passou de duas linhas`, `${m.linhas} linhas`);
+    checa(m.alvoDispensar >= 44, `${rot}: "Agora não" abaixo de 44px`, `${m.alvoDispensar}px`);
+    checa(m.cabe || !s.cabe, `${rot}: o "Agora não" saiu da tela, e com a frase do Safari ele cabe`,
+      `termina em ${m.fimDoDispensar} × ${s.fimDoDispensar} (Safari), tela ${vp.height}`);
+    checa(m.cabe || m.fimDoDispensar <= s.fimDoDispensar, `${rot}: a frase nova desceu o "Agora não" além do que a do Safari já descia`,
+      `termina em ${m.fimDoDispensar} × ${s.fimDoDispensar} (Safari), tela ${vp.height}`);
+  }
+  await safari.ctx.close();
+  await chrome.ctx.close();
+}
+{
+  // Antes do iOS 16.4: os navegadores de fora não adicionam — o convite não aparece.
+  const se = { width: 375, height: 667 };
+  for (const [marca, versao] of [['CriOS/130.0.6723.90', '16_3'], ['FxiOS/132.0', '15_7'], ['EdgiOS/130.0.2849.80', '16_0']]) {
+    const { ctx, page } = await conviteNoIOS(se, UA_IOS(marca, versao));
+    const m = await medirConviteIOS(page, 'pt');
+    checa(m.ausente, `convite fora do Safari · iOS ${versao} · ${marca.split('/')[0]}: o convite apareceu onde não há "Adicionar à Tela de Início"`);
+    await ctx.close();
+  }
+  // CONTROLE: o Safari de um iOS antigo segue com o convite e o passo dele.
+  const { ctx, page } = await conviteNoIOS(se, UA_SAFARI_IOS('16_3'));
+  const m = await medirConviteIOS(page, 'fr');
+  checa(!m.ausente && m.chave === 'install.ios.step1', 'convite · Safari do iOS 16.3: CONTROLE — perdeu o convite ou o passo da barra do Safari',
+    JSON.stringify({ ausente: m.ausente, chave: m.chave }));
+  await ctx.close();
+}
+
 // ── Laço de ResizeObserver com barra de rolagem que OCUPA ESPAÇO ────────────
 // O editor relatou um toast VERMELHO "Erro inesperado: ResizeObserver loop
 // completed with undelivered notifications" ao abrir a foto, no laptop.
@@ -12070,6 +12192,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
+  + `, + convite no iPhone FORA do Safari em 3 telas × ${LINGUAS.length} idiomas, lado a lado com o do Safari (o 1º passo pela CHAVE do navegador, o texto do dicionário do idioma, sem estourar nem partir palavra, e cabendo onde o do Safari cabe; antes do iOS 16.4 o convite some, com o CONTROLE do Safari antigo)`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true, e a pílula do nome travada e esmaecida na janela, com o CONTROLE viva antes e depois)`
   + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`

@@ -11,6 +11,9 @@
 //              toque levava ao Histórico "1 de 14", sem alvo, e a dava por vista;
 //              e o Histórico à vista sem perfil, redesenhado pelo aviso de OUTRA
 //              aba, dava por vista a conquista que a outra ganhou;
+//   R13-7-03 — no iPhone fora do Safari (Chrome, Firefox, Edge), o convite de
+//              instalar mandava tocar "na barra do Safari" — e antes do iOS 16.4
+//              esses navegadores nem adicionam à Tela de Início.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -479,4 +482,102 @@ test('R13-7-02: a patente e as conquistas sem portão seguem como sempre sem o p
   const g = comp.ler();
   assert.deepEqual(g.novas, ['curador'], 'a marca levou a escondida junto, ou deixou a "Coruja" que a vitrine mostrou');
   assert.equal(g.patenteNova, false, 'a patente (sempre na tela) não ficou vista');
+});
+
+// ═══ R13-7-03 · o convite de instalar no iPhone FORA do Safari ════════════════
+const UA = (navegador, versao = '18_0', aparelhoUa = 'iPhone; CPU iPhone OS') => {
+  const base = `Mozilla/5.0 (${aparelhoUa} ${versao} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) `;
+  return base + ({ safari: 'Version/18.0 Mobile/15E148 Safari/604.1', chrome: 'CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1',
+    firefox: 'FxiOS/132.0 Mobile/15E148 Safari/605.1.15', edge: 'EdgiOS/130.0.2849.80 Version/18.0 Mobile/15E148 Safari/604.1' })[navegador];
+};
+// O iPad que se anuncia como Mac (o padrão do iPadOS), com toque.
+const UA_IPAD_MAC = (marca) => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) ' + marca;
+
+function montarConvite({ userAgent, toques = 5, prompt = false }) {
+  const el = (attrs = {}) => ({ classList: classes('hidden'), attrs, innerHTML: '',
+    getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute: (k, v) => { attrs[k] = String(v); } });
+  const els = { installInvite: el(), installInviteBtn: el(), installIosSteps: el(),
+    installIosStep1: el({ 'data-i18n-html': 'install.ios.step1' }) };
+  const deps = {
+    navigator: { userAgent, maxTouchPoints: toques, standalone: false },
+    window: { matchMedia: () => ({ matches: false }) },
+    document: { getElementById: (id) => els[id] || null },
+    safeLS: { get: () => null },
+    CHAVE_INSTALL_DISPENSADO: 'waze_places_install_dispensado',
+    promptInstalacao: prompt ? { prompt() {} } : null,
+    filaTerminouLimpa: () => true,   // o "Tudo limpo!" de quem terminou a fila
+    t: (k) => 'T:' + k,
+  };
+  const h = rodar(deps, fontes(['appJaInstalada', 'ehIOS', 'navegadorDoIOSForaDoSafari', 'versaoDoIOS',
+    'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer', 'atualizarConviteInstalar']), ['atualizarConviteInstalar']);
+  h.atualizarConviteInstalar();
+  const visivel = (id) => !els[id].classList.contains('hidden');
+  return { convite: visivel('installInvite'), passos: visivel('installInvite') && visivel('installIosSteps'),
+    botao: visivel('installInvite') && visivel('installInviteBtn'),
+    chave: els.installIosStep1.getAttribute('data-i18n-html'), texto: els.installIosStep1.innerHTML };
+}
+
+test('R13-7-03: no Chrome, no Firefox e no Edge do iPhone, o 1º passo NÃO manda à barra do Safari — e o 2º é o mesmo', () => {
+  // CONTROLE: o Safari do iPhone segue com o passo do Safari.
+  const c = montarConvite({ userAgent: UA('safari') });
+  assert.equal(c.convite && c.passos, true, 'CONTROLE: o Safari do iPhone ficou sem os passos — o teste perdeu o sentido');
+  assert.equal(c.chave, 'install.ios.step1', 'CONTROLE: o Safari perdeu o passo da barra do Safari');
+  for (const nav of ['chrome', 'firefox', 'edge']) {
+    const m = montarConvite({ userAgent: UA(nav) });
+    assert.equal(m.convite && m.passos, true, `${nav} do iPhone (iOS 18) ficou sem o convite, e ele adiciona à Tela de Início`);
+    assert.equal(m.botao, false, `${nav}: o iPhone não tem prompt de instalar — botão é beco sem saída`);
+    assert.equal(m.chave, 'install.ios.step1Navegador',
+      `DEFEITO: no ${nav} do iPhone o 1º passo mandava tocar "na barra do Safari", um navegador que a pessoa não está usando`);
+    assert.equal(m.texto, 'T:install.ios.step1Navegador', `${nav}: a chave trocou e o texto na tela não`);
+  }
+});
+
+test('R13-7-03: fora do Safari num iOS ANTERIOR ao 16.4 o convite NÃO aparece — lá esses navegadores não adicionam à Tela de Início', () => {
+  for (const nav of ['chrome', 'firefox', 'edge']) {
+    for (const versao of ['16_3', '15_7', '12_5_7']) {
+      const m = montarConvite({ userAgent: UA(nav, versao) });
+      assert.equal(m.convite, false,
+        `DEFEITO: o convite apareceu no ${nav} do iOS ${versao.replace(/_/g, '.')} — beco sem saída: ali não há "Adicionar à Tela de Início"`);
+    }
+    // A fronteira: o 16.4 adiciona.
+    assert.equal(montarConvite({ userAgent: UA(nav, '16_4') }).convite, true, `${nav} do iOS 16.4 ficou sem o convite`);
+    assert.equal(montarConvite({ userAgent: UA(nav, '17_0') }).convite, true);
+    // O iPad ("CPU OS"), com a mesma régua.
+    assert.equal(montarConvite({ userAgent: UA(nav, '16_3', 'iPad; CPU OS') }).convite, false, `${nav} do iPadOS 16.3`);
+    assert.equal(montarConvite({ userAgent: UA(nav, '16_4', 'iPad; CPU OS') }).convite, true, `${nav} do iPadOS 16.4`);
+  }
+  // CONTROLE: o Safari de qualquer iOS sempre adicionou — convite com o passo dele.
+  for (const versao of ['15_7', '16_3', '12_5_7']) {
+    const s = montarConvite({ userAgent: UA('safari', versao) });
+    assert.equal(s.convite && s.chave === 'install.ios.step1', true, `o Safari do iOS ${versao} perdeu o convite`);
+  }
+  // Sem a versão na UA (o iPad que se anuncia como Mac): vale como recente.
+  const ipad = montarConvite({ userAgent: UA_IPAD_MAC('CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1') });
+  assert.equal(ipad.convite && ipad.chave === 'install.ios.step1Navegador', true, 'o Chrome do iPad (UA de Mac) perdeu o convite');
+  // CONTROLE: o computador com o prompt do navegador segue com o BOTÃO, e o Mac
+  // de mesa sem toque, sem convite (não é iOS).
+  const pc = montarConvite({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36', toques: 0, prompt: true });
+  assert.equal(pc.botao, true, 'CONTROLE: o computador com o prompt perdeu o botão');
+  assert.equal(pc.passos, false);
+  assert.equal(montarConvite({ userAgent: UA_IPAD_MAC('Version/18.0 Safari/605.1.15'), toques: 0 }).convite, false,
+    'CONTROLE: o Mac de mesa (sem toque) ganhou o convite do iPhone');
+});
+
+test('R13-7-03: a frase nova existe nos 4 idiomas, curta, com o "Compartilhar" em negrito e SEM "Safari"', () => {
+  for (const l of ['pt', 'en', 'es', 'fr']) {
+    const ini = I18N.indexOf(`\n  ${l}: {`);
+    assert.ok(ini >= 0, `o bloco ${l} sumiu do i18n.js`);
+    const bloco = I18N.slice(ini, I18N.indexOf('\n  },', ini));
+    const m = /'install\.ios\.step1Navegador': '([^']*)'/.exec(bloco);
+    assert.ok(m, `${l}: falta a chave install.ios.step1Navegador`);
+    const safari = /'install\.ios\.step1': '([^']*)'/.exec(bloco)[1];
+    assert.ok(!/Safari/i.test(m[1]), `${l}: a frase de FORA do Safari fala do Safari`);
+    assert.equal((m[1].match(/<strong>[^<]+<\/strong>/g) || []).length, 1, `${l}: o "Compartilhar" não está em negrito, uma vez`);
+    // O mesmo botão do passo do Safari (a palavra da plataforma, em negrito).
+    assert.equal(/<strong>([^<]+)<\/strong>/.exec(m[1])[1], /<strong>([^<]+)<\/strong>/.exec(safari)[1], `${l}: o botão mudou de nome`);
+    assert.ok(m[1].replace(/<[^>]+>/g, '').length <= 60, `${l}: a frase cresceu (${m[1].length}) — ela mora numa linha do convite`);
+  }
+  // O passo 1 tem id: é por ele que a chave troca (e a troca de idioma relê dela).
+  assert.match(HTML, /<span id="installIosStep1" data-i18n-html="install\.ios\.step1">/,
+    'o 1º passo do iPhone perdeu o id (ou o data-i18n-html: com <strong>, data-i18n mostraria a tag crua)');
 });
