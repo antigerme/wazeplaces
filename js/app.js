@@ -17235,6 +17235,9 @@ function setupSincroniaEntreAbas() {
     // O que POUSA numa aba sai da fila das outras (R11-2-01, ver
     // `avisarOutrasAbasDoPouso`): o canal é aberto aqui, uma vez por página.
     abrirCanalDosPousos();
+    // E a fila guardada do offline que outra aba gravou (R13-4-03, ver
+    // `avisarOutrasAbasDaFilaGuardada`).
+    abrirCanalDoOffline();
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  Patentes e Conquistas — celebra, nunca cobra
@@ -21412,8 +21415,11 @@ let offlineEpoca = 0;
 // FALTOU. Ela refazia a lista INTEIRA, e cada prova de rede pedia de novo todos
 // os tiles (39 por prova numa fila de 30 pedidos, auditoria de 2026-09-30,
 // R5-4-1). Vale pra janela E a época em que foi enchida: janela nova renova
-// tudo (a foto vence), e esquecer apaga o cache que ela descreve.
-let offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
+// tudo (a foto vence), e esquecer apaga o cache que ela descreve. `guardados`:
+// os TILES que baixaram, o pedaço da lista que o cache do aparelho tem que ter —
+// conferido com ele no começo de cada varredura, porque a poda de OUTRA aba
+// apaga dele sem esta saber (R13-4-03).
+let offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
 
 function offlineLigado() {
     return AppState.preferences.offlineDisponivel === true;
@@ -21594,12 +21600,58 @@ async function offlineGravarFila(desde) {
         // A fila que está na base AGORA (ver `offlineFilaPreparada`).
         offlineFilaGravadaEm = gravadaEm;
         offlineFilaGravadaChaves = new Set(chaves);
+        // E as OUTRAS abas ficam sabendo que a fila guardada é esta (R13-4-03,
+        // ver `aoGravarFilaGuardadaEmOutraAba`).
+        if (typeof avisarOutrasAbasDaFilaGuardada === 'function') avisarOutrasAbasDaFilaGuardada(gravadaEm);
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
         // valendo contra a fila velha, que é a que a reabertura vai ler.
         offlinePodarPousos(valeDesde);
         dfato('offline.gravou', { n: fila.length, ...(mesmaFila ? { mesma: true } : {}) });
         return true;
     } catch (e) { return false; }
+}
+
+// ── Duas abas, UMA fila guardada (R13-4-03) ──────────────────────────────
+// A base e o cache do mapa são do APARELHO; a MEMÓRIA de cada aba diz qual fila
+// está guardada (`offlineFilaGravadaEm`) e se a preparação a cobriu. Com a fila
+// de OUTRA aba gravada por cima, a linha desta seguia dizendo "Pronto — 12
+// pedidos no aparelho" — com a fila guardada sendo a da outra, e a poda de lá
+// tendo apagado o mapa dos pedidos que só esta tinha (MEDIDO no navegador, p3 da
+// rodada 13: 6 dos 12 sem mapa). A gravação avisa as outras abas por um
+// `BroadcastChannel` — nada vai pro aparelho, e a mensagem leva só o carimbo da
+// fila —, e quem recebe passa a saber que a fila guardada é outra: a linha diz
+// "Ainda não preparado", e o próximo gatilho (a prova de rede, abrir as
+// Preferências) prepara a fila DESTA aba, com o mapa que a poda de lá levou (ver
+// os `guardados` da varredura). A fila guardada é a da última aba que gravou, a
+// do uso. Sem `BroadcastChannel` (iOS < 15.4), segue como antes. O canal é
+// aberto uma vez por página (`setupSincroniaEntreAbas`).
+const CANAL_DO_OFFLINE = 'waze-places-offline';
+let canalDoOffline = null;
+
+function abrirCanalDoOffline() {
+    if (canalDoOffline || typeof BroadcastChannel !== 'function') return;
+    try { canalDoOffline = new BroadcastChannel(CANAL_DO_OFFLINE); } catch (e) { canalDoOffline = null; return; }
+    canalDoOffline.onmessage = (ev) => aoGravarFilaGuardadaEmOutraAba(ev && ev.data);
+}
+
+// O canal não entrega a mensagem ao objeto que a mandou: esta aba não recebe o
+// próprio aviso.
+function avisarOutrasAbasDaFilaGuardada(t) {
+    if (!canalDoOffline || !Number.isFinite(t)) return;
+    try { canalDoOffline.postMessage({ v: 1, filaGuardada: t }); } catch (e) { /* canal fechado: segue como antes */ }
+}
+
+// A fila guardada agora é a que OUTRA aba gravou. Nada aqui grava no aparelho.
+// A varredura no ar desta aba segue: no fim, a poda dela confere de quem é a fila
+// na base (R12-4-05). O aviso da MESMA fila que esta aba tem (o mesmo carimbo) não
+// muda nada.
+function aoGravarFilaGuardadaEmOutraAba(aviso) {
+    if (!aviso || aviso.v !== 1 || !Number.isFinite(aviso.filaGuardada)) return;
+    if (aviso.filaGuardada === offlineFilaGravadaEm) return;
+    offlineFilaGravadaEm = aviso.filaGuardada;
+    dfato('offline.outraAba', {});
+    // As Preferências podem estar abertas: a linha diz o que é verdade agora.
+    atualizarLinhaDoOffline(0, 0);
 }
 
 // A JANELA SERVIDA também fica guardada, na mesma base e com a mesma vida (o
@@ -21683,7 +21735,7 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineFilaVarrida = null;
     // O que estava pronto descreve o cache que sai logo abaixo (e são endereços
     // de pedidos de terceiros): vai junto.
-    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };
+    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
     // As URLs de tile dizem ONDE ficam pedidos de terceiros: vão junto com o
     // resto do que o offline guardou.
     diagTilesGuardadosQueFalharam = [];
@@ -21891,7 +21943,10 @@ async function offlinePodarTiles(manter, epoca) {
             if (!manter.has(req.url)) {
                 // Sai da lista ANTES do cache: o contrário deixaria, nesse meio, um
                 // tile "pronto" que já não está no aparelho.
-                if (offlineFeitosNaJanela.epoca === epoca) offlineFeitosNaJanela.us.delete(req.url);
+                if (offlineFeitosNaJanela.epoca === epoca) {
+                    offlineFeitosNaJanela.us.delete(req.url);
+                    offlineFeitosNaJanela.guardados?.delete(req.url);
+                }
                 await c.delete(req);
                 n++;
             }
@@ -21946,9 +22001,32 @@ async function offlineVarrer() {
         // Baixa só o que FALTA nesta janela (ver `offlineFeitosNaJanela`): a
         // retomada do "parcial" e a reposição não repetem o que já ficou pronto.
         if (offlineFeitosNaJanela.janela !== janela || offlineFeitosNaJanela.epoca !== epoca) {
-            offlineFeitosNaJanela = { janela, epoca, us: new Set() };
+            offlineFeitosNaJanela = { janela, epoca, us: new Set(), guardados: new Set() };
         }
         const feitos = offlineFeitosNaJanela.us;
+        // Os TILES que esta aba guardou no cache nesta janela: o pedaço do "feito"
+        // que o cache tem que ter (o que se mostrou defeito do item — o 4xx, o que
+        // esgotou as tentativas — não está lá, e não volta a ser pedido).
+        const guardados = offlineFeitosNaJanela.guardados || (offlineFeitosNaJanela.guardados = new Set());
+        // O cache do mapa é do APARELHO, e a poda da OUTRA aba (a varredura pronta
+        // dela, sobre a fila guardada dela) apaga os tiles dos pedidos que só esta
+        // aba tem. O "feito" desta janela é da MEMÓRIA desta aba e não sabia disso:
+        // a varredura seguinte, na mesma janela, pulava esses tiles como prontos e
+        // terminava "Pronto — 13 pedidos no aparelho" com 6 sem mapa (R13-4-03,
+        // MEDIDO no navegador, p3 da rodada 13). Antes de pular, confere com o
+        // cache: o que sumiu dele volta pro que falta. Uma leitura do cache (o
+        // mesmo `keys()` da poda), nenhuma requisição — e só quando há o que
+        // conferir: a primeira varredura da janela não lê nada.
+        if (guardados.size && typeof caches !== 'undefined') {
+            let noCache = null;
+            try {
+                noCache = (await caches.has(OFFLINE_TILES_CACHE))
+                    ? new Set((await (await caches.open(OFFLINE_TILES_CACHE)).keys()).map((r) => r.url))
+                    : new Set();
+            } catch (e) { noCache = null; }   // sem como ler: fica como estava
+            if (epoca !== offlineEpoca) return;   // esqueceram no meio
+            if (noCache) for (const u of [...guardados]) if (!noCache.has(u)) { guardados.delete(u); feitos.delete(u); }
+        }
         const pend = todos.filter((it) => !feitos.has(it.u));
         const jaFeitos = total - pend.length;
         let falhas = 0;
@@ -22012,6 +22090,7 @@ async function offlineVarrer() {
                 if (ok === true) {
                     sucessos++;
                     feitos.add(it.u);
+                    if (it.tile) guardados.add(it.u);
                     penduradasSeguidas = 0;
                     if (it.tile && ++tilesNovos % OFFLINE_ANUNCIAR_A_CADA === 0) offlineAnunciarTiles();
                 } else if (ok === 'definitivo') {

@@ -7,6 +7,11 @@
 //    andamento, até o fim do lote) e podava os pousos dos 25 que o Waze já tinha
 //    marcado: reaberto sem rede, os 25 voltavam como card, e o ✕ num deles ia ao
 //    Waze. O mesmo com o pedido aprovado que fica na fila até a foto fechar;
+//  · R13-4-03 — duas abas com filas diferentes: a poda de uma apagava do cache do
+//    APARELHO o mapa dos pedidos que só a outra tinha, o "feito nesta janela" da
+//    outra (memória dela) não sabia, e a varredura seguinte terminava "Pronto —
+//    13" com 6 sem mapa; e a linha da aba que não gravou por último dizia
+//    "Pronto — 12" sobre a fila guardada da outra;
 //  · R13-4-04 — a gravação da fila guardada (e a reabertura depois de uma busca
 //    que falhou) perguntava a sessão ao `getSession`, que com a memória vazia
 //    ADOTA a sessão que outra aba guardou no aparelho (R9-1-03): a busca que
@@ -62,6 +67,8 @@ const DECLARACOES = [
   linhaDoFonte(/^const pedidosEmAndamento = new Set\(\);$/m, 'os pedidos em andamento'),
   linhaDoFonte(/^const pedidosQuePousaram = new WeakSet\(\);$/m, 'os pedidos (objetos) que pousaram'),
   linhaDoFonte(/^const decididosPorOutraAbaComCardAqui = new WeakSet\(\);$/m, 'o card que a outra aba decidiu'),
+  linhaDoFonte(/^const CANAL_DO_OFFLINE = '[^']+';$/m, 'o nome do canal do offline'),
+  linhaDoFonte(/^let canalDoOffline = null;$/m, 'o canal do offline'),
 ];
 const CONTA_KEY = constante('CONTA_KEY');
 const SAIDA_KEY = constante('SAIDA_KEY');
@@ -316,10 +323,233 @@ test('R13-4-04: a sessão que CAI enquanto a base é lida também não deixa a f
   assert.equal(await B.app.offlineTentarAbrirSemRede(true, 0), true, 'CONTROLE: a fila guardada não abriu');
 });
 
+// ═══ R13-4-03 · duas abas, UMA fila guardada e UM cache do mapa ══════════════
+// O roteiro p3, com a varredura, a poda, a linha e o canal de VERDADE sobre a
+// base, o cache e o canal de mentira que as duas abas dividem. Um tile por
+// pedido; o relógio anda 1 ms por leitura, dentro de UMA janela.
+function navegador() {
+  const canais = new Map();
+  let entregas = 0;
+  class CanalDeMentira {
+    constructor(nome) {
+      this.nome = nome;
+      this.onmessage = null;
+      if (!canais.has(nome)) canais.set(nome, new Set());
+      canais.get(nome).add(this);
+    }
+    // Às OUTRAS instâncias, numa tarefa à parte, por cópia (como o de verdade),
+    // com TETO de entregas: um aviso que gerasse outro viraria laço (gotcha #19).
+    postMessage(msg) {
+      const dado = structuredClone(msg);
+      for (const outro of canais.get(this.nome)) {
+        if (outro === this || ++entregas > 50) continue;
+        setTimeout(() => { if (typeof outro.onmessage === 'function') outro.onmessage({ data: structuredClone(dado) }); }, 0);
+      }
+    }
+    close() { canais.get(this.nome).delete(this); }
+  }
+  return { BroadcastChannel: CanalDeMentira };
+}
+const entregue = () => new Promise((ok) => setTimeout(ok, 5));
+
+const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles',
+  'offlineVarrer', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline',
+  'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba'];
+function aparelhoDeDuasAbas({ canal = true } = {}) {
+  const base = baseDeMentira();
+  const cache = new Map();
+  const caches = {
+    has: async () => cache.size > 0,
+    open: async () => ({
+      keys: async () => [...cache.keys()].map((url) => ({ url })),
+      delete: async (r) => { cache.delete(r.url); },
+    }),
+  };
+  const relogio = { agora: 1492385 * OFFLINE_CICLO_MS + 1000 };   // começo de uma janela
+  const nav = navegador();
+  function aba(fila) {
+    const diario = [];
+    const baixados = [];
+    const el = { textContent: '', innerHTML: '' };
+    const AppState = { authenticated: true, queue: fila.slice(), filters: {} };
+    const deps = {
+      AppState, Treino: { ativo: false }, navigator: { onLine: true }, offlineLigado: () => true,
+      Date: { now: () => relogio.agora++ },
+      offlineDB: base.offlineDB, OFFLINE_STORE, OFFLINE_TILES_CACHE: 'waze-places-tiles', caches,
+      BroadcastChannel: canal ? nav.BroadcastChannel : undefined,
+      offlinePodarPousos: () => {}, dfato: (k) => diario.push(k),
+      filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '4242',
+      marcaDestaAba: () => 'm-tok',
+      OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS, OFFLINE_CONCORRENCIA: 1,
+      OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+      offlineItensDaFila: async () => AppState.queue.map((p) => ({ u: 'tile-' + p.venueID, tile: true })),
+      // O tile "404" é defeito do item (4xx): não vai pro cache.
+      offlineBaixar: async (u) => { baixados.push(u); if (/404/.test(u)) return 'definitivo'; cache.set(u, true); return true; },
+      offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {},
+      setTimeout: (fn) => { fn(); return 0; },
+      document: { getElementById: () => el }, t: (k) => k, escapeHtml: (s) => s,
+    };
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, [
+      'let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,',
+      '    offlineUltimoResultado = null, offlineEpoca = 0, offlineFilaGravadaEm = null, offlineFilaPreparada = null,',
+      '    offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
+      '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };',
+      ...DECLARACOES.filter((d) => /CANAL_DO_OFFLINE|canalDoOffline/.test(d)),
+      ...NOMES_VARREDURA.map(fatiar),
+      'abrirCanalDoOffline();',
+      `return { varrer: offlineVarrer, gravarFila: offlineGravarFila, gatilho: offlineTalvezVarrer,
+        precisaVarrer: offlinePrecisaVarrer,
+        linha: () => { atualizarLinhaDoOffline(0, 0); const e = document.getElementById('prefOfflineDesc'); return e.innerHTML || e.textContent; },
+        // A linha como ESTÁ na tela agora, sem redesenhar (as Preferências abertas).
+        naTela: () => { const e = document.getElementById('prefOfflineDesc'); return e.innerHTML || e.textContent; },
+        estado: () => ({ resultado: offlineUltimoResultado, varrendo: offlineVarrendo, gravada: offlineFilaGravadaEm,
+          preparada: offlineFilaPreparada }) };`,
+    ].join('\n'))(...chaves.map((k) => deps[k]));
+    // A busca que traz pedido novo, como o `fetchNextPage`: põe na fila, grava a
+    // fila e chama a varredura.
+    const buscar = async (novos) => {
+      AppState.queue.push(...novos);
+      await app.gravarFila(relogio.agora);
+      await app.varrer();
+    };
+    return { ...app, AppState, diario, baixados, buscar };
+  }
+  // Os pedidos que estão na fila guardada da base e não têm o tile no cache.
+  const semMapaNaGuardada = () => (base.guardado.get('fila') || { places: [] }).places
+    .map((p) => 'tile-' + p.venueID).filter((u) => !/404/.test(u) && !cache.has(u));
+  // Um aviso no canal, como o de uma aba que gravou a fila `t` (só o canal: nada
+  // na base).
+  const avisar = (t) => new nav.BroadcastChannel(CANAL).postMessage({ v: 1, filaGuardada: t });
+  return { aba, base, cache, semMapaNaGuardada, avisar, canal: () => nav.BroadcastChannel };
+}
+const CANAL = /^const CANAL_DO_OFFLINE = '([^']+)';$/m.exec(APP_SEM)[1];
+// O FIM de uma varredura nova (a que um gatilho disparou sem devolver a promessa):
+// pelo diário, por SINAL POSITIVO e com teto — nunca por prazo fixo.
+async function varreduraTerminou(aba, antes, rotulo) {
+  const fim = performance.now() + 5000;
+  const prontas = () => aba.diario.filter((k) => k === 'offline.pronto' || k === 'offline.parcial').length;
+  while (!(prontas() > antes && !aba.estado().varrendo)) {
+    if (performance.now() > fim) assert.fail(`${rotulo}: a varredura não terminou em 5 s`);
+    await tique(2);
+  }
+}
+const PRONTO = /prefs\.offline\.prontoA/;
+const PENDENTE = /prefs\.offline\.pendenteA/;
+const comuns = () => [1, 2, 3, 4, 5, 6].map(P);
+const so = (de, ate) => Array.from({ length: ate - de + 1 }, (_, i) => P(de + i));
+
+test('R13-4-03: a poda da OUTRA aba apaga o mapa que esta deu como pronto — a varredura seguinte, na MESMA janela, confere com o cache e o baixa de novo', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = ap.aba([...comuns(), ...so(40, 45)]);
+  await A.varrer();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a preparação de A não ficou pronta');
+  const B = ap.aba([...comuns(), ...so(30, 35)]);
+  await B.varrer();
+  await entregue();
+  assert.equal(B.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a preparação de B não ficou pronta');
+  assert.ok(B.diario.includes('offline.podou'), 'PRÉ-CONDIÇÃO: a poda de B não apagou nada');
+  assert.equal(ap.cache.has('tile-v40'), false, 'PRÉ-CONDIÇÃO: a poda de B não apagou o mapa dos pedidos que só A tem');
+  // A busca de A traz um pedido novo, na MESMA janela: A grava a fila dela e varre.
+  const antes = A.baixados.length;
+  await A.buscar([P(50)]);
+  await entregue();
+  assert.equal(A.estado().resultado, 'pronto');
+  assert.deepEqual(A.baixados.slice(antes).sort(), [...so(40, 45), P(50)].map((p) => 'tile-' + p.venueID).sort(),
+    'DEFEITO: a varredura pulou como "prontos" os tiles que a poda da outra aba apagou');
+  assert.deepEqual(ap.semMapaNaGuardada(), [],
+    'DEFEITO: a fila guardada ficou com pedidos SEM mapa no aparelho — e a linha diz "Pronto"');
+  assert.match(A.linha(), PRONTO);
+});
+
+test('R13-4-03: CONTROLE — a conferência com o cache não baixa de novo o que está lá, nem o tile que é defeito do item (4xx)', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = ap.aba([P(1), P(2), P(404)]);
+  await A.varrer();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: o tile 4xx segurou a preparação');
+  const antes = A.baixados.length;
+  await A.buscar([P(5)]);
+  assert.deepEqual(A.baixados.slice(antes), ['tile-v5'],
+    'a conferência baixou de novo o que está no cache — ou pediu de novo o tile que é defeito do item (o R5-4-1)');
+  assert.equal(A.estado().resultado, 'pronto');
+});
+
+test('R13-4-03: a linha da aba que NÃO gravou por último não diz "Pronto" sobre a fila da outra — e o próximo gatilho prepara a dela', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = ap.aba([...comuns(), ...so(40, 45)]);
+  await A.varrer();
+  assert.match(A.linha(), PRONTO, 'PRÉ-CONDIÇÃO: a preparação de A não ficou pronta');
+  assert.equal(A.precisaVarrer(), false, 'PRÉ-CONDIÇÃO: A, pronta, ainda pede varredura');
+  // B abre com a fila dela e varre: a fila guardada do aparelho passa a ser a de B,
+  // e a poda de B leva o mapa de 40..45.
+  const B = ap.aba([...comuns(), ...so(30, 35)]);
+  await B.varrer();
+  await entregue();
+  // As Preferências abertas em A: a linha muda SOZINHA, com o aviso.
+  assert.match(A.naTela(), PENDENTE,
+    `DEFEITO: com as Preferências abertas, a linha de A segue dizendo "Pronto" sobre a fila guardada de B: ${A.naTela()}`);
+  const linhaA = A.linha();
+  assert.doesNotMatch(linhaA, PRONTO,
+    `DEFEITO: a linha de A diz "Pronto" com a fila guardada sendo a de B (e o mapa de 6 pedidos de A fora do aparelho): ${linhaA}`);
+  assert.match(linhaA, PENDENTE);
+  assert.equal(A.precisaVarrer(), true, 'DEFEITO: o próximo gatilho de A não prepararia a fila dela');
+  // O gatilho de A (a prova de rede, abrir as Preferências): a fila dela volta a ser
+  // a guardada, com o mapa inteiro — e agora é a linha de B que deixa de dizer "Pronto".
+  const antes = A.diario.filter((k) => k === 'offline.pronto' || k === 'offline.parcial').length;
+  A.gatilho();
+  await varreduraTerminou(A, antes, 'o gatilho de A');
+  await entregue();
+  assert.equal(A.estado().resultado, 'pronto');
+  assert.deepEqual(ap.semMapaNaGuardada(), [], 'a fila guardada de A ficou sem o mapa que a poda de B levou');
+  assert.match(A.linha(), PRONTO);
+  assert.match(B.linha(), PENDENTE, 'a linha de B segue "Pronto" com a fila guardada sendo a de A');
+});
+
+test('R13-4-03: CONTROLE — uma aba só, ou o aviso da MESMA fila que esta tem: a linha segue "Pronto", nada é preparado de novo e o carimbo fica', async () => {
+  const ap = aparelhoDeDuasAbas();
+  const A = ap.aba([...comuns(), ...so(40, 45)]);
+  await A.varrer();
+  await entregue();
+  assert.match(A.linha(), PRONTO);
+  assert.equal(A.precisaVarrer(), false);
+  const t = A.estado().gravada;
+  // O aviso da MESMA fila guardada que A tem (o carimbo dela), e um aviso que não
+  // é desta versão: nada muda — nem a linha, nem o diário, nem o carimbo.
+  ap.avisar(t);
+  new (ap.canal())('waze-places-offline').postMessage({ v: 1, filaGuardada: 'x' });
+  await entregue();
+  assert.match(A.naTela(), PRONTO, 'o aviso da própria fila guardada de A mudou a linha');
+  assert.equal(A.precisaVarrer(), false, 'o aviso da própria fila guardada de A pediu outra varredura');
+  assert.ok(!A.diario.includes('offline.outraAba'), 'o diário de A diz que outra aba gravou OUTRA fila — era a mesma');
+  assert.equal(A.estado().gravada, t, 'um aviso que não é desta versão trocou o carimbo da fila guardada');
+  // A MESMA fila regravada mantém o carimbo e segue coberta (o R6-4-2).
+  await A.gravarFila();
+  assert.equal(A.estado().gravada, t, 'a mesma fila, regravada depois do aviso, perdeu o carimbo');
+  assert.match(A.linha(), PRONTO);
+  // E o aviso de OUTRA fila chega a A (a instrumentação enxerga o aviso).
+  ap.avisar(t + 1);
+  await entregue();
+  assert.match(A.naTela(), PENDENTE, 'CONTROLE: o aviso de outra fila guardada não chegou a A');
+});
+
+test('R13-4-03: sem `BroadcastChannel` (iOS < 15.4) nada quebra — segue como antes', async () => {
+  const ap = aparelhoDeDuasAbas({ canal: false });
+  const A = ap.aba([...comuns(), ...so(40, 45)]);
+  await A.varrer();
+  const B = ap.aba([...comuns(), ...so(30, 35)]);
+  await B.varrer();
+  assert.equal(B.estado().resultado, 'pronto');
+  // A não fica sabendo (não há canal), mas a varredura dela confere o cache: a
+  // fila guardada que ela gravar sai com o mapa inteiro.
+  await A.buscar([P(50)]);
+  assert.deepEqual(ap.semMapaNaGuardada(), []);
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const nome of ['marcaDestaAba', 'filaGuardadaDestaConta', 'pedidosQuePousaram']) {
+  for (const nome of ['marcaDestaAba', 'filaGuardadaDestaConta', 'pedidosQuePousaram', 'abrirCanalDoOffline',
+    'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'CANAL_DO_OFFLINE']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

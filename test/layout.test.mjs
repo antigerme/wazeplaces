@@ -1686,6 +1686,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // R11-2-01: o aviso de POUSO entre as abas não grava nada no aparelho (é a
     // razão de ele ser um canal, e não uma chave): não há o que apagar no "Sair".
     'waze-places-pousos': 'nome do BroadcastChannel que avisa as outras abas do que pousou (CANAL_DOS_POUSOS)',
+    // R13-4-03: idem, o aviso da fila guardada do offline que outra aba gravou —
+    // leva só o carimbo da fila, e nada vai pro aparelho.
+    'waze-places-offline': 'nome do BroadcastChannel que avisa as outras abas da fila guardada do offline (CANAL_DO_OFFLINE)',
   };
 
   // Nome da constante quando existe; senão a própria chave literal.

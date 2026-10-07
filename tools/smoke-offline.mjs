@@ -4002,6 +4002,123 @@ diz('a captura automática do arraste não acusa `indicadorEscondido` pelo FAB q
 diz('CONTROLE: o dedo solta, o FAB sai de cima do número — e o diagnóstico segue sem acusar nada',
   arr9n.depois.fabPorCima === false && arr9n.depois.alertas.length === 0, JSON.stringify(arr9n.depois));
 
+secao('9o. DUAS ABAS, UMA FILA GUARDADA: a linha da outra aba diz a verdade, e o mapa que a poda de lá levou volta');
+// Auditoria da rodada 13 (R13-4-03). A base e o cache do mapa são do APARELHO; o
+// "feito nesta janela" e a linha das Preferências são da MEMÓRIA de cada aba. A
+// abre com a fila dela (com pedidos que só ela tem) e prepara; B abre com a dela e
+// prepara: a fila guardada passa a ser a de B, e a poda de B leva o mapa dos
+// pedidos que só A tem. A linha de A seguia "Pronto — 12" sobre a fila guardada
+// de B, e a varredura seguinte de A, na mesma janela, pulava esses tiles como
+// prontos: "Pronto — 13" com 6 sem mapa (MEDIDO, p3 da rodada 13). Aqui com o
+// canal entre abas, o cache do mapa e o IndexedDB de VERDADE — duas páginas do
+// mesmo contexto, as duas abrindo pelo `initApp` com a sessão guardada.
+// CONTROLE: UMA aba só — a linha segue "Pronto", e o gatilho não prepara nada de
+// novo (nenhum tile pedido).
+const fila9o = (ids) => ids.map((i) => SO_MAPA(i));
+const COMUNS_9O = [301, 302, 303, 304, 305, 306];
+const cenario9o = async (nome, listas) => {
+  const ctx9o = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  let tiles9o = 0;
+  await ctx9o.route('**/*-tiles/live/base/**', (r) => { tiles9o++; return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+    headers: { 'access-control-allow-origin': '*' } }); });
+  const rota9o = (lista) => (r) => {
+    const rota = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'buscar-places') return json({ success: true, places: fila9o(lista), hasMore: false, page: 1, total: lista.length });
+    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
+    return json({ success: true });
+  };
+  // O aparelho: a sessão e o "Disponível offline" ligado, por uma página que fecha.
+  const prep = await ctx9o.newPage();
+  await prep.route('**/api/*', rota9o([]));
+  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate(() => {
+    API.setSession('tok-9o');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9o') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
+  });
+  await prep.close({ runBeforeUnload: true });
+  const abrir9o = async (lista, rotulo) => {
+    const pg = await ctx9o.newPage();
+    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
+    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
+    await pg.route('**/api/*', rota9o(lista));
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
+      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo, 30000, 100);
+    return { pg, ok: ok.ok };
+  };
+  // Os pedidos da fila DESTA aba sem o tile no cache do aparelho, e os da fila guardada.
+  const medir = (pg) => pg.evaluate(async () => {
+    const g = await offlineLerFila();
+    const c = await caches.open('waze-places-tiles');
+    const noCache = new Set((await c.keys()).map((x) => x.url));
+    const faixa = offlineFaixaDeCaixas();
+    const sem = (pls) => pls.filter((p) => [...tilesDaFaixa(p, faixa)].some((u) => !noCache.has(u))).map((p) => p.venueID);
+    const el = document.getElementById('prefOfflineDesc');
+    const n = AppState.queue.length;
+    return { semMapaNaAba: sem(AppState.queue), semMapaNaGuardada: g ? sem(g.places) : null,
+      guardada: g ? g.places.map((p) => p.venueID) : null,
+      // A linha como ESTÁ na tela (sem redesenhar), conferida pela CHAVE do dicionário.
+      pronto: el.textContent.startsWith(t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n })),
+      pendente: el.textContent.startsWith(t('prefs.offline.pendenteA')) };
+  });
+  const A = await abrir9o(listas[0], 'A');
+  const res = { prontaA: A.ok, depoisDeB: null, depoisDoGatilho: null, linhaDeB: null };
+  if (listas[1]) {
+    const B = await abrir9o(listas[1], 'B');
+    res.prontaB = B.ok;
+    await dormir(300);   // o aviso do canal é uma tarefa à parte
+    res.depoisDeB = await medir(A.pg);
+    // O gatilho de A: abrir as Preferências (ou uma prova de rede). O fim da
+    // varredura por SINAL POSITIVO: um "pronto" a mais no diário (a contagem fica
+    // NA PÁGINA — a espera vai serializada, gotcha #28).
+    const tiles = tiles9o;
+    await A.pg.evaluate(() => {
+      window.__prontas9o = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
+      offlineMarcarGesto(); offlineTalvezVarrer();
+    });
+    res.varreu = (await esperarNaPagina(A.pg, () => dfatoAnel.filter((e) => e.k === 'offline.pronto').length > window.__prontas9o
+      && !offlineVarrendo, 30000, 100)).ok;
+    res.tilesDoGatilho = tiles9o - tiles;
+    await dormir(300);
+    res.depoisDoGatilho = await medir(A.pg);
+    res.linhaDeB = await medir(B.pg);
+  } else {
+    // A varredura que COMEÇA liga a bandeira antes do primeiro `await`: lida logo
+    // depois do gatilho, ela diz se o gatilho preparou de novo, sem prazo.
+    const tiles = tiles9o;
+    const g = await A.pg.evaluate(() => { offlineMarcarGesto(); const precisava = offlinePrecisaVarrer();
+      offlineTalvezVarrer(); return { precisava, comecou: offlineVarrendo }; });
+    res.varreu = g.precisava || g.comecou;
+    await dormir(300);   // folga pra um tile tardio aparecer, se o defeito voltar
+    res.tilesDoGatilho = tiles9o - tiles;
+    res.depoisDoGatilho = await medir(A.pg);
+  }
+  await ctx9o.close();
+  return res;
+};
+const duas9o = await cenario9o('duas abas', [[...COMUNS_9O, 340, 341, 342, 343, 344, 345], [...COMUNS_9O, 330, 331, 332, 333, 334, 335]]);
+diz('PRÉ-CONDIÇÃO: as duas abas abriram e prepararam; a fila guardada é a de B, e a poda de B levou o mapa dos 6 pedidos que só A tem',
+  duas9o.prontaA && duas9o.prontaB && duas9o.depoisDeB?.guardada?.includes('v330')
+  && duas9o.depoisDeB?.semMapaNaAba?.length === 6, JSON.stringify(duas9o.depoisDeB));
+diz('a linha de A (as Preferências abertas, sem redesenhar) deixa de dizer "Pronto" — diz "Ainda não preparado" (R13-4-03)',
+  duas9o.depoisDeB?.pronto === false && duas9o.depoisDeB?.pendente === true, JSON.stringify(duas9o.depoisDeB));
+diz('o gatilho de A prepara a fila dela: o mapa que a poda de B levou é baixado de novo, e a fila guardada fica sem buraco (R13-4-03)',
+  duas9o.varreu && duas9o.tilesDoGatilho > 0 && Array.isArray(duas9o.depoisDoGatilho?.semMapaNaGuardada)
+  && duas9o.depoisDoGatilho.semMapaNaGuardada.length === 0 && duas9o.depoisDoGatilho.guardada?.includes('v340')
+  && duas9o.depoisDoGatilho.pronto === true, JSON.stringify({ tiles: duas9o.tilesDoGatilho, ...duas9o.depoisDoGatilho }));
+diz('e agora é a linha de B que deixa de dizer "Pronto" (a fila guardada é a de A)',
+  duas9o.linhaDeB?.pronto === false && duas9o.linhaDeB?.pendente === true, JSON.stringify(duas9o.linhaDeB));
+const uma9o = await cenario9o('uma aba', [[...COMUNS_9O, 340, 341, 342, 343, 344, 345]]);
+diz('CONTROLE: uma aba só — a linha segue "Pronto", e o gatilho não prepara nada de novo (nenhum tile pedido)',
+  uma9o.prontaA && uma9o.depoisDoGatilho?.pronto === true && uma9o.varreu === false && uma9o.tilesDoGatilho === 0
+  && uma9o.depoisDoGatilho?.semMapaNaGuardada?.length === 0, JSON.stringify(uma9o));
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
@@ -4018,4 +4135,4 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta), e DUAS ABAS com filas diferentes e uma fila guardada só: a linha da aba que não gravou por último deixando de dizer "Pronto", e o mapa que a poda da outra levou voltando no gatilho dela (com o CONTROLE de uma aba só)');

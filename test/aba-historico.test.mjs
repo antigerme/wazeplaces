@@ -368,13 +368,16 @@ test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
   const aoGravarEmOutraAba = () => {};
   // O canal do POUSO entre abas (R11-2-01) é aberto no mesmo lugar: é ele que
   // leva às outras abas o que não passa pela fila de saída.
+  // E o canal da fila guardada do offline (R13-4-03), também uma vez por página.
   let canais = 0;
+  let canaisDoOffline = 0;
   const { setupSincroniaEntreAbas } = montar(['setupSincroniaEntreAbas'],
     { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba,
-      abrirCanalDosPousos: () => { canais++; } }, ['setupSincroniaEntreAbas']);
+      abrirCanalDosPousos: () => { canais++; }, abrirCanalDoOffline: () => { canaisDoOffline++; } }, ['setupSincroniaEntreAbas']);
   setupSincroniaEntreAbas();
   assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba]], 'ninguém escuta o evento storage');
   assert.equal(canais, 1, 'a abertura do app não abre o canal que avisa as outras abas do que pousou');
+  assert.equal(canaisDoOffline, 1, 'a abertura do app não abre o canal que avisa as outras abas da fila guardada do offline (R13-4-03)');
   assert.match(fatiar('initApp'), /^\s+setupSincroniaEntreAbas\(\);/m, 'a abertura do app não liga a sincronia entre abas');
 });
 
