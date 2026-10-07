@@ -2214,11 +2214,26 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // "Ver mensagens anteriores" — é gesto: pede o perfil que falta (R6-5-5).
     const eu = presencaEu();
     if (!eu) {
+        // A PRIMEIRA página que já espera o perfil não é trocada pela antiga: é
+        // ela que traz o que chegou e marca a conversa como lida (o `abrir`).
+        // Com o perfil, a primeira página no ar segura o toque em "Ver
+        // mensagens anteriores" (o `h.carregando`, acima); na espera, o toque
+        // trocava o pedido da espera pela página antiga, e a conversa reaberta
+        // não era marcada como lida no Waze — a mensagem que a pessoa viu ao
+        // reabrir voltava na lista seguinte como "1 mensagem nova" (irmão do
+        // R13-5-02, lote 17). O toque segue pedindo o perfil: é gesto.
+        if (antes && h.esperaPerfil && !h.esperaPerfil.antes) { presencaPedirPerfil(); return; }
         // Sem o histórico na tela, o que espera é a PRIMEIRA página: a antiga
         // só existe depois dela.
         h.esperaPerfil = { antes: h.carregada ? antes : null };
         if (h.esperaPerfil.antes) h.antigas = 'carregando';
-        else h.erro = false;
+        // E a primeira página recomeça as duas, como no caminho com o perfil
+        // (logo abaixo). Só com o `erro` zerado, a conversa reaberta na espera
+        // trazia de volta o erro velho da página antiga ("Não deu pra carregar
+        // as mensagens anteriores.") — ou o "Carregando mensagens anteriores…"
+        // de um pedido que a espera já trocou pela primeira página (irmão do
+        // R13-5-02, lote 17).
+        else { h.erro = false; h.antigas = null; }
         presencaRenderConversa();
         // A tela diz "Carregando…": a falha que ela deixou de mostrar sai do
         // leitor de tela também (R13-5-02).

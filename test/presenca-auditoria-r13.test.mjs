@@ -2,7 +2,10 @@
 // que dizia "2 mensagens novas" (uma já vista) com o "lida" que JÁ VOLTOU — o
 // caso irmão do R12-5-01, que só refazia a conta com ele no ar —, e o "Tentar
 // de novo" do histórico na espera do perfil, que punha "Carregando…" na tela e
-// deixava a falha no leitor de tela (irmão do R12-5-03 e do R11-5-03). Os
+// deixava a falha no leitor de tela (irmão do R12-5-03 e do R11-5-03). E os
+// dois irmãos dele achados no conserto (lote 17), no mesmo caminho da espera do
+// perfil: a reabertura que trazia de volta o erro velho da página antiga, e o
+// "Ver mensagens anteriores" que trocava a primeira página que esperava. Os
 // rótulos R13-5-n são os do relatório dessa rodada. Cada teste foi visto
 // REPROVANDO com o conserto desfeito.
 //
@@ -286,4 +289,124 @@ test('R13-5-02 CONTROLE: com o perfil, o "Tentar de novo" sai com a região limp
   assert.equal(c.chamadas.refazerPerfil, 0, 'com o perfil na mão, o toque pediu o perfil');
   assert.ok(telaDiz(c, 'presenca.conversa.carregando'), 'a tela não diz "Carregando a conversa…"');
   assert.equal(anuncio(c), '', 'com o perfil, a tentativa saiu com a falha anterior na região viva');
+});
+
+// ── Os irmãos do R13-5-02, achados no conserto (lote 17) ────────────────────
+// O que o caminho da ESPERA do perfil deixava de fazer e o caminho com o
+// perfil faz, comparados campo a campo no `presencaCarregarConversa`: a
+// primeira página recomeça as duas (`h.antigas`), e a primeira página no ar
+// segura o toque em "Ver mensagens anteriores" (`h.carregando`).
+
+const botaoVerAnteriores = (c) => c.$('conversaMsgs').innerHTML.includes('class="conversa-anteriores">presenca.conversa.anteriores<');
+// O toque em "Ver mensagens anteriores" (o `.conversa-anteriores`), pelo ouvinte
+// DELEGADO da conversa.
+const tocarVerAnteriores = (c) => c.$('conversaMsgs').disparar('click', {
+  target: { closest: (sel) => (sel === '.conversa-anteriores' ? {} : null) } });
+
+// A página antiga que NÃO veio, a conversa fechada e reaberta — com o perfil
+// (a primeira página fica no ar) ou na espera dele.
+async function reabertaDepoisDaAntigaQueFalhou({ semPerfil }) {
+  const { c, abertos } = await historicoQueNaoVeio({ antigas: true, abrir: (x) => (x.antesDe ? WAZE_FORA : new Promise(() => {})) });
+  const antes = fraseNaTela(c, 'conversa-vazio');
+  fechar(c);
+  if (semPerfil) c.AppState.profile = null;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  return { antes, tela: c.$('conversaMsgs').innerHTML, frase: fraseNaTela(c, 'conversa-vazio'), botao: botaoVerAnteriores(c),
+    carregandoAntigas: telaDiz(c, 'presenca.conversa.anterioresCarregando'), pediuPerfil: c.chamadas.refazerPerfil, abertos: abertos(), c };
+}
+
+test('R13-5-02 (irmão) reaberta na espera do perfil, a conversa não traz de volta o erro velho da página antiga — a MESMA tela da reabertura com o perfil (P12)', async () => {
+  const com = await reabertaDepoisDaAntigaQueFalhou({ semPerfil: false });
+  assert.equal(com.antes, 'presenca.conversa.anterioresErro', 'CONTROLE: a página antiga não veio');
+  assert.equal(com.abertos, 3, 'CONTROLE: com o perfil, a reabertura pede a primeira página');
+  assert.equal(com.frase, null, 'CONTROLE: com o perfil, a reabertura não traz o erro velho (P12)');
+  assert.equal(com.botao, true, 'CONTROLE: com o perfil, a reabertura oferece "Ver mensagens anteriores"');
+  const sem = await reabertaDepoisDaAntigaQueFalhou({ semPerfil: true });
+  assert.equal(sem.antes, 'presenca.conversa.anterioresErro', 'CONTROLE: a página antiga não veio');
+  assert.equal(sem.abertos, 2, 'CONTROLE: na espera do perfil, nada sai');
+  assert.equal(sem.pediuPerfil, 1, 'CONTROLE: a reabertura na espera pede o perfil');
+  assert.equal(sem.frase, null, 'DEFEITO: reaberta na espera do perfil, a conversa trouxe de volta "Não deu pra carregar as mensagens anteriores."');
+  assert.equal(sem.botao, true, 'a reabertura na espera não ofereceu "Ver mensagens anteriores"');
+  assert.equal(sem.tela, com.tela, 'na espera do perfil, a conversa reaberta não mostra a mesma tela da reabertura com o perfil');
+});
+
+test('R13-5-02 (irmão) o "Carregando mensagens anteriores…" de um toque na espera não volta numa reabertura: quem espera é a primeira página', async () => {
+  const { c, abertos } = await historicoQueNaoVeio({ antigas: true, abrir: (x) => (x.antesDe ? WAZE_FORA : new Promise(() => {})) });
+  c.AppState.profile = null;
+  tocarTentarDeNovo(c, { antigas: true });                    // a página antiga, na espera
+  await tick(); await tick();
+  assert.ok(telaDiz(c, 'presenca.conversa.anterioresCarregando'), 'CONTROLE: o toque na espera diz "Carregando mensagens anteriores…"');
+  fechar(c);
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  assert.equal(abertos(), 2, 'CONTROLE: na espera do perfil, nada sai');
+  assert.equal(telaDiz(c, 'presenca.conversa.anterioresCarregando'), false,
+    'DEFEITO: reaberta na espera, a conversa diz "Carregando mensagens anteriores…" — e o que espera o perfil é a primeira página');
+  assert.equal(botaoVerAnteriores(c), true, 'a reabertura na espera não ofereceu "Ver mensagens anteriores"');
+});
+
+// A conversa com a CAF já carregada (a 1, e há mais antigas), fechada; a 2000
+// chega com ela FECHADA (não vista); o perfil some (a renovação silenciosa) e a
+// pessoa REABRE a conversa — e vê a 2000. `tocar`: ela toca "Ver mensagens
+// anteriores" ainda na espera. `comPerfil`: o CONTROLE, sem a espera — a
+// primeira página da reabertura fica no ar até `soltar`.
+async function reabertaNaEspera({ tocar, comPerfil = false }) {
+  let soltar = null;
+  let primeira = true;
+  const c = novoCliente({ agora: T + 10, api: { chat: (x) => {
+    if (x.acao !== 'abrir') return { success: true };
+    if (primeira) { primeira = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }; }
+    if (x.antesDe) return { success: true, mensagens: [doHistorico(-5000)], maisAntigas: false, lida: false };
+    const r = { success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: true, lida: true };
+    return comPerfil ? new Promise((ok) => { soltar = () => ok(r); }) : r;
+  } } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  fechar(c);
+  await tick();
+  c.relogio.agora = T + 2000; await chega(c, 2000);            // com a conversa FECHADA
+  const r = { contaAntes: conta(c) };
+  const perfil = c.AppState.profile;
+  if (!comPerfil) c.AppState.profile = null;
+  const depoisDaReabertura = c.chamadas.chat.length;
+  c.relogio.agora = T + 3000;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  r.viuA2000 = c.$('conversaMsgs').innerHTML.includes('msg 2000');
+  r.botao = botaoVerAnteriores(c);
+  if (tocar) { tocarVerAnteriores(c); await tick(); await tick(); }
+  r.pediuPerfil = c.chamadas.refazerPerfil;
+  if (comPerfil) { r.abrirNoAr = c.chamadas.chat.slice(depoisDaReabertura).filter((x) => x.acao === 'abrir').map((x) => (x.antesDe ? 'antiga' : 'primeira')); soltar(); }
+  c.AppState.profile = perfil;
+  c.relogio.agora = T + 4000;
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  r.abrir = c.chamadas.chat.slice(depoisDaReabertura).filter((x) => x.acao === 'abrir').map((x) => (x.antesDe ? 'antiga' : 'primeira'));
+  r.lidaAte = (c.P.Presenca.lidaEnviadaAte.get(CAF) || 0) - T;
+  return { c, r };
+}
+
+test('R13-5-02 (irmão) na espera do perfil, "Ver mensagens anteriores" não troca a PRIMEIRA página que espera — e a conversa reaberta é marcada como lida quando o perfil volta', async () => {
+  const { c, r } = await reabertaNaEspera({ tocar: true });
+  assert.equal(r.contaAntes, 1, 'CONTROLE: a 2000 chegou com a conversa fechada e conta como nova');
+  assert.equal(r.viuA2000, true, 'CONTROLE: reaberta, a conversa mostra a 2000');
+  assert.equal(r.botao, true, 'CONTROLE: reaberta, a conversa oferece "Ver mensagens anteriores"');
+  assert.equal(r.pediuPerfil, 2, 'o toque na espera não pediu o perfil (é gesto, R6-5-5)');
+  assert.deepEqual(r.abrir, ['primeira'], 'DEFEITO: o toque na espera trocou a primeira página pela antiga — a conversa reaberta não foi pedida (nem marcada como lida) quando o perfil voltou');
+  assert.equal(r.lidaAte, 2000, 'a 2000, vista ao reabrir, não foi marcada como lida no Waze');
+  // Com a primeira página na tela, "Ver mensagens anteriores" funciona como
+  // sempre: o toque não se perdeu pra sempre, como com o perfil.
+  tocarVerAnteriores(c);
+  await tick(); await tick();
+  assert.equal(c.chamadas.chat.filter((x) => x.acao === 'abrir' && x.antesDe).length, 1, 'com o perfil de volta, "Ver mensagens anteriores" não pediu a página antiga');
+  // CONTROLES: sem o toque, a primeira página espera e sai; COM o perfil, a
+  // primeira página no ar segura o toque (`h.carregando`) — a régua que a
+  // espera passou a seguir.
+  const { r: semToque } = await reabertaNaEspera({ tocar: false });
+  assert.deepEqual([semToque.abrir, semToque.lidaAte], [['primeira'], 2000], 'CONTROLE: sem o toque, a primeira página tinha que sair e marcar a 2000 como lida');
+  const { r: com } = await reabertaNaEspera({ tocar: true, comPerfil: true });
+  assert.deepEqual(com.abrirNoAr, ['primeira'], 'CONTROLE: com o perfil, o toque com a primeira página no ar não pede a antiga');
+  assert.equal(com.lidaAte, 2000, 'CONTROLE: com o perfil, a reabertura marca a 2000 como lida');
 });
