@@ -23422,13 +23422,29 @@ async function handleBatchMarkRead() {
     // (`pousouPorOutraAba`), sem contar. Vale a primeira decisão. Eles saem da
     // fila no fim (`daOutraAba`, lá embaixo), como sairiam no aviso da outra aba
     // se não estivessem em andamento aqui (`tirarDaFilaOQueAOutraAbaDecidiu`).
+    //
+    // E a pergunta vale pra CADA IDA, não só pra primeira (R12-2-03): o pedaço
+    // (ou o pedido do um a um) que leva 401 sai de novo depois da conferência da
+    // sessão (`refazerDepoisDo401`, uma sonda inteira — segundos), e a ida da
+    // rede que falhou é retentada (`callWithRetry`). O reenvio levava o pedaço
+    // montado ANTES da espera: o pedido que a outra aba decidiu nesse meio ia ao
+    // Waze e contava como lido (MEDIDO no navegador: lote de 30, o 2º pedaço leva
+    // 401, a outra aba rejeita o 28º durante a sonda — o reenvio leva os 5,
+    // "Lidos 30 + Rejeitados 1" pra 30 pedidos e "30 marcados"; auditoria de
+    // 2026-10-07, rodada 12). O que vai é montado NA HORA de cada ida (`enviar`),
+    // e o que foi na que valeu é o que pousa e conta. Sobrando nada, não sai
+    // nada (`{ success: true }` sem pedido: nada pousa, nada conta).
     const decididoNaOutraAba = (p) => typeof decididosPorOutraAbaComCardAqui !== 'undefined'
         && decididosPorOutraAbaComCardAqui.has(p) === true;
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
-            const pedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO).filter((p) => !decididoNaOutraAba(p));
+            const doPedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
+            let pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
             if (!pedaco.length) continue;
-            const r = await mandar(() => API.markAsReadBatch(itens(pedaco), regiao));
+            const r = await mandar(() => {
+                pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
+                return pedaco.length ? API.markAsReadBatch(itens(pedaco), regiao) : { success: true };
+            });
             if (epoca !== epocaDaSessao) {
                 sessaoTrocou = true;
                 if (r && r.success) posQueda.push(...pedaco);
@@ -23440,19 +23456,31 @@ async function handleBatchMarkRead() {
             // decidi-los de novo (MEDIDO: 25 de volta; auditoria de 2026-09-29, O4).
             // E conta junto (R10-2-03, ver `contarLidos`), DEPOIS do pouso: se a
             // conta quebrar, o pedido não volta por causa disso.
-            if (r && r.success) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco); continue; }
+            if (r && r.success) {
+                if (pedaco.length) { feitos.push(...pedaco); registrarPouso(pedaco); contarLidos(pedaco); }
+                continue;
+            }
             if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
             for (const p of pedaco) {
                 // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02).
                 if (decididoNaOutraAba(p)) continue;
-                const r1 = await mandar(() => API.markAsRead(p.venueID, p.updateRequestID, null, regiao));
+                // E a cada ida deste pedido, como a do pedaço (R12-2-03): `saiu`
+                // diz se a que valeu foi mesmo ao Waze.
+                let saiu = true;
+                const r1 = await mandar(() => {
+                    saiu = !decididoNaOutraAba(p);
+                    return saiu ? API.markAsRead(p.venueID, p.updateRequestID, null, regiao) : { success: true };
+                });
                 if (epoca !== epocaDaSessao) {
                     sessaoTrocou = true;
-                    if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
+                    if (saiu && r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
                     break;
                 }
+                // A outra aba o decidiu antes de ele sair de novo: a decisão de lá
+                // vale, e ele sai da fila no fim (`daOutraAba`).
+                if (!saiu) continue;
                 if (r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) {
                     // O "já tratado" de um pedido que a outra aba decidiu enquanto
                     // ele ia é a decisão de lá, já contada lá (R11-2-02).
