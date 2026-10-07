@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina, esperarOuExplodir } from './esperar-saida.mjs';
-import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_PORT || 8123);
@@ -8551,7 +8551,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await presencaViva(ctx);
     const page = await ctx.newPage();
     const errosJS = [];
-    page.on('pageerror', (e) => errosJS.push(String(e.message || e)));
+    // O WebKit às vezes loga como "controle de acesso" o pedido que o modo avião
+    // daqui aborta, e o Playwright o entrega como `pageerror` (ver `ruidoDoMotor`).
+    page.on('pageerror', (e) => { const m = String(e.message || e); if (!ruidoDoMotor(m)) errosJS.push(m); });
     let semRede = false;
     let enviosDeAcao = [];
     let atrasoDaAcaoMs = 0;   // usado só pra alargar a janela do teste de reenvio
