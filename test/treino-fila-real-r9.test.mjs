@@ -163,8 +163,10 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
   // O `devolverPedidoRecusado` de VERDADE, quando o teste mede o que ele mostra.
   const nomesDoDevolver = devolverDeVerdade ? ['chaveDoPedido', 'devolverPedidoRecusado'] : [];
   if (devolverDeVerdade) delete deps.devolverPedidoRecusado;
-  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaReal', 'pedirListaDePaises', 'irProPaisDoPerfil', 'paisDoPerfil',
-    'esquecerAreaForaDoPerfil', 'completarPerfilChegado'],
+  // O "só retoma" de VERDADE (`retomarBusca`): com card na fila real e "Minha área"
+  // de pé, o perfil que chega não refaz a fila — sem o treino (R13-6-01).
+  const app = montar(deps, [...nomesDoDevolver, 'filaReal', 'resetQueue', 'refazerFilaReal', 'retomarBusca', 'pedirListaDePaises',
+    'irProPaisDoPerfil', 'paisDoPerfil', 'esquecerAreaForaDoPerfil', 'completarPerfilChegado'],
   `let epocaDaSessao = 0, lugarDoPedidoDoPerfil = null, filaEsperaPerfil = false, tratouNestaFila = false,
      recusaAutomaticaNestaFila = false, filaAtravessouSessao = false, puladosNoInicioDaFila = 0, rebuscasAuto = 0,
      filaDeOnde = null;`,
@@ -178,9 +180,12 @@ const CASOS_DO_PERFIL = {
   // A área gerenciada salva (5) que o perfil não tem: sai do filtro e a fila é refeita no mesmo país.
   area: { filtros: { managedAreaId: '5' }, perfil: { id: 7, editableCountryIDs: [30], managedAreas: [] },
     final: { lugar: 'row/30', busca: ['busca:row/30'], toasts: [] } },
-  // "Minha área" com a busca que esperou o perfil (`filaEsperaPerfil`).
+  // "Minha área" com a busca que esperou o perfil (`filaEsperaPerfil`). Com a fila
+  // real COM card (a fila guardada do offline aberta sem rede), SEM o treino o
+  // perfil só RETOMA a busca (`retomarBusca`): a fila fica, e o card da frente
+  // com ela (R13-6-01). Com o treino aberto ele segue ANOTANDO, e o "Sair" refaz.
   espera: { filtros: { myArea: true }, esperando: true, perfil: { id: 7, editableCountryIDs: [30], areas: [{ bbox: [1, 2, 3, 4] }] },
-    final: { lugar: 'row/30', busca: ['busca:row/30'], toasts: [] } },
+    final: { lugar: 'row/30', busca: ['busca:row/30'], toasts: [] }, filaDoControle: ['u1', 'u2', 'u3'] },
 };
 
 async function perfilChegaNoTreino(caso, { comTreino }) {
@@ -208,7 +213,10 @@ for (const caso of Object.keys(CASOS_DO_PERFIL)) {
     const controle = await perfilChegaNoTreino(caso, { comTreino: false });
     assert.deepEqual(controle.final, esperado,
       'CONTROLE: sem o treino o perfil não refez a fila como sempre — o teste perdeu o sentido');
-    assert.deepEqual(controle.fila, [], 'CONTROLE: a fila não foi refeita (o `resetQueue` de verdade a zera)');
+    // A fila REFEITA (o `resetQueue` de verdade a zera) — ou, na busca que esperou o
+    // perfil com card na fila, só RETOMADA (R13-6-01): a fila e o card ficam.
+    assert.deepEqual(controle.fila, CASOS_DO_PERFIL[caso].filaDoControle || [],
+      'CONTROLE: a fila não foi refeita (ou, com card e "Minha área", foi refeita em vez de só retomada)');
     const r = await perfilChegaNoTreino(caso, { comTreino: true });
     assert.equal(r.noTreino.ativo, true,
       'DEFEITO: o perfil encerrou o treino CALADO — a faixa "nada é enviado ao Waze" some e o ✕ seguinte vai pro Waze (R9-7-04)');

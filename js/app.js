@@ -6765,7 +6765,26 @@ async function completarPerfilChegado(perfil, epoca) {
         // `areaNoutroServidorSemDecisao`, R11-6-02): a que saiu antes de ela
         // começar (a troca de conta, dentro do `definirPerfil`) ou no meio (o
         // `maybePrefetch`, qualquer chamada direta) também é refeita aqui.
-        else if ((refazerFila || refazerPelaArea || filaEsperaPerfil) && epoca === epocaDaSessao) refazerFilaReal();
+        //
+        // Com "Minha área" de pé (a área do perfil vale), pelo `retomarBusca`: com
+        // a fila VAZIA ele é o atualizar de sempre (`refazerFilaReal`), e com CARD
+        // na fila só RETOMA, como sem "Minha área". Com card é a fila guardada do
+        // "Disponível offline" aberta sem rede (o lie-fi do R12-4-02, ou o modo
+        // avião), cuja reposição esperou o perfil (`fetchNextPage`) e armou a
+        // espera: refeita, o `resetQueue` arrancava o card da mão, trazia de volta
+        // os que a pessoa pulou e mandava na hora a decisão da janela do Desfazer
+        // (MEDIDO no navegador, nos dois motores: o ✕ saía ~0,4 s depois do toque,
+        // com o pulado de volta como o card da frente; auditoria da rodada 13,
+        // R13-6-01 = R13-4-02). A área salva que o perfil não tem
+        // (`refazerPelaArea`) e "Minha área" desligada pela falta de caixa mudam o
+        // FILTRO, e a fila da tela é de outro filtro: é refeita. O treino aberto
+        // anota, como sempre (R9-7-04).
+        else if ((refazerFila || refazerPelaArea || filaEsperaPerfil) && epoca === epocaDaSessao) {
+            if (!refazerPelaArea && AppState.filters.myArea && !(typeof Treino !== 'undefined' && Treino.ativo === true)) {
+                filaEsperaPerfil = false;
+                retomarBusca();
+            } else refazerFilaReal();
+        }
     } finally {
         if (AppState._caixaDaMinhaAreaNoAr === decisao) AppState._caixaDaMinhaAreaNoAr = null;
         decidiu();

@@ -164,6 +164,14 @@ const FUNCOES = [
   ...(/^function servidorNuncaLido\(/m.test(APP_SEM) ? ['servidorNuncaLido'] : []),
   // O aviso do país que o treino encerrado pelo "Aplicar" levava junto (R10-7-02).
   'avisarPaisDoTreinoEncerrado',
+  // A decisão do lugar que ficou PENDENTE (R12-6): o "Aplicar" que muda o lugar a
+  // tira, e a recomposição do alarme falso não pergunta de novo por ela (R13-6-05,
+  // R13-6-02). De VERDADE: no buraco negro ela seria VERDADEIRA.
+  'decisaoSemResposta',
+  // A fila real e o "só retoma" (R13-6-01): o perfil que chega com "Minha área"
+  // passa pelo `retomarBusca`, que com a fila vazia é o atualizar de sempre. No
+  // buraco negro ele não buscaria nada, calado.
+  'filaReal', 'retomarBusca',
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -220,6 +228,8 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
     epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, cargasDoPerfil: 0, lugarDoPedidoDoPerfil: null,
+    // Nenhuma decisão do lugar pendente (R12-6), salvo onde o teste a põe.
+    decisaoDoLugarDe: null,
     editaveisPorServidor: { conta: null, lidos: {} },
     listasDePaisesNoAr: new Map(),
     // As listas que CHEGARAM, por região (R9-6-01).

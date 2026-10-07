@@ -76,8 +76,10 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   };
   AppState.stats = { read: 0, rejected: 0, skipped: 0 };
   AppState.pendingAction = null;
+  // A fila real e o "só retoma" de VERDADE: o perfil que chega com card na fila
+  // não a refaz (R13-6-01).
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
-    'completarPerfilChegado', 'refazerFilaReal', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
+    'completarPerfilChegado', 'refazerFilaReal', 'resetQueue', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'filaReal', 'retomarBusca'];
   // A caixa da área POR SERVIDOR (R9-6-04): a busca usa a do servidor dela, lida com os editáveis.
   // E o servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-01/03), e a
   // área noutro servidor com o lugar por decidir (R11-6-02).
@@ -302,6 +304,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
   };
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'startFetching', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'resetQueue',
+    'filaReal', 'retomarBusca', 'rebuscarDepoisDeFalha',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
@@ -319,6 +322,8 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     + 'let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };\n'
     + nomes.map(fatiar).join('\n')
     + '\nreturn { startFetching, resetQueue, completarPerfilChegado, anotarEditaveis, editaveisLidos, loadProfileAndAuxData, fetchNextPage,\n'
+    + '  rebuscarDepoisDeFalha, filaEsperaPerfil: () => filaEsperaPerfil,\n'
+    + '  pendencia: () => (decisaoDoLugarDe && decisaoDoLugarDe.semResposta) || null,\n'
     + '  registrarPedidoDoPerfil: (l) => { lugarDoPedidoDoPerfil = l; }, novaSessao: () => { epocaDaSessao++; } };')(...chaves.map((k) => deps[k]));
   // O perfil que CHEGA, como a carga da abertura o entrega (`loadProfileAndAuxData`):
   // pedido na região de agora, anotado ali, guardado, e completado — a decisão do
@@ -935,4 +940,66 @@ test('R12-6: o 401 da pergunta vai à conferência da sessão, a recusa do port�
   assert.deepEqual(f.perguntas, ['row', 'na', 'il'], `a França aplicada à mão perguntou à NA de novo: ${f.perguntas}`);
   assert.deepEqual([f.lugar.regiao, f.lugar.pais, f.buscas.at(-1)], ['row', 73, 'row pais 73'],
     `a pendência sobre o Brasil tirou a pessoa da França que ela escolheu: ${f.lugar.regiao}/${f.lugar.pais} · ${f.buscas}`);
+});
+
+// ═══ R13-6-01 · a fila guardada aberta sem rede, com "Minha área": o perfil só RETOMA ═══
+// (auditoria da rodada 13; o mesmo do R13-4-02). Com "Minha área" e o
+// "Disponível offline", a fila guardada abre sem rede (o lie-fi do R12-4-02, ou o
+// modo avião) com o perfil ainda por chegar, e a reposição dela espera o perfil
+// (`fetchNextPage` marca `filaEsperaPerfil`, também com card na fila). Quando a
+// rede volta e o perfil chega, o `completarPerfilChegado` REFAZIA a fila: o
+// `resetQueue` arrancava o card da mão, trazia de volta os que a pessoa pulou e
+// mandava na hora a decisão da janela do Desfazer (MEDIDO no navegador, nos dois
+// motores: o ✕ saía ~0,4 s depois do toque, e o pulado voltava como o card da
+// frente). Sem "Minha área", a mesma fila só retoma. Aqui o perfil chega DE
+// VERDADE (`completarPerfilChegado` → `retomarBusca` → `startFetching`).
+const NO_BR_COM_AREA = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30],
+  areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
+// A fila guardada aberta sem rede, com os dois primeiros já pulados (ficam fora
+// da fila), a decisão do 3º na janela do Desfazer, e a reposição esperando o perfil.
+async function comAFilaGuardadaEsperandoOPerfil(m, fila) {
+  m.AppState.queue = fila.map((i) => ({ venueID: 'b' + i, updateRequestID: 'ub' + i }));
+  m.AppState.currentPlace = m.AppState.queue[0] || null;
+  m.AppState.pendingAction = { execute: () => m.log.push('despachou'), cancel: () => {} };
+  await m.app.fetchNextPage();                   // o `maybePrefetch` dos últimos cards: espera o perfil
+}
+
+test('R13-6-01: a fila guardada com card e "Minha área" — o perfil que chega só RETOMA a busca: o card fica, os pulados não voltam e a janela do Desfazer não é despachada', async () => {
+  const m = montarServidores({ perfis: NO_BR_COM_AREA });
+  await comAFilaGuardadaEsperandoOPerfil(m, [3, 4, 5]);
+  assert.equal(m.app.filaEsperaPerfil(), true, 'PRÉ-CONDIÇÃO: a reposição da fila guardada não esperou o perfil');
+  const epoca = m.AppState.fetchEpoch;
+  await m.chegaOPerfil();
+  await tique(10);
+  assert.ok(!m.log.includes('despachou'),
+    'o perfil que chegou mandou ao Waze a decisão da janela do Desfazer, antes da hora (o `resetQueue` de uma fila refeita)');
+  assert.equal(m.AppState.fetchEpoch, epoca, 'o perfil que chegou REFEZ a fila com card na mão (época nova): os pulados voltam');
+  assert.deepEqual(m.AppState.queue.map((p) => p.venueID), ['b3', 'b4', 'b5'], 'a fila da tela foi trocada');
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.venueID, 'b3', 'o card da frente foi trocado');
+  // Só retoma: a busca volta a poder repor a fila (pela caixa da área, no `maybePrefetch`).
+  assert.deepEqual([m.AppState.hasMore, m.AppState.loadError, m.app.filaEsperaPerfil()], [true, false, false],
+    'a busca não foi retomada: a fila guardada nunca mais se repõe');
+  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não ficou no card: ${m.log}`);
+  assert.equal(m.AppState.filters.myArea, true);
+});
+
+test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela caixa da área), e "Minha área" desligada pela falta de caixa também (o filtro mudou)', async () => {
+  // A fila vazia: o "Minha área" sem o perfil na abertura (F5).
+  const v = montarServidores({ perfis: NO_BR_COM_AREA });
+  await comAFilaGuardadaEsperandoOPerfil(v, []);
+  assert.equal(v.app.filaEsperaPerfil(), true, 'PRÉ-CONDIÇÃO: a busca não esperou o perfil');
+  await v.chegaOPerfil();
+  await tique(10);
+  assert.equal(v.AppState.fetchEpoch, 1, 'a fila vazia que esperou o perfil não foi refeita');
+  assert.deepEqual(v.buscas, ['row bbox ' + JSON.stringify(CAIXA_BR)], `a fila refeita não foi pela caixa da área: ${v.buscas}`);
+  // Com card, mas o perfil SEM caixa: "Minha área" desliga e diz, e a fila da tela
+  // (de "Minha área") é de outro filtro — é refeita, pelo país.
+  const semCaixa = { row: { ...NO_BR_COM_AREA.row, areas: [] } };
+  const s = montarServidores({ perfis: semCaixa });
+  await comAFilaGuardadaEsperandoOPerfil(s, [3, 4, 5]);
+  await s.chegaOPerfil();
+  await tique(10);
+  assert.equal(s.AppState.filters.myArea, false, 'PRÉ-CONDIÇÃO: "Minha área" seguiu ligada num perfil sem área');
+  assert.equal(s.AppState.fetchEpoch, 1, 'a fila de "Minha área" ficou na tela com o filtro desligado (o filtro que mente)');
+  assert.deepEqual(s.buscas, ['row pais 30'], `a fila do país não saiu: ${s.buscas}`);
 });
