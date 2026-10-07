@@ -1679,6 +1679,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   const NAO_SAO_CHAVES = {
     wazeplaces: 'marca do protocolo de postMessage com a extensão (source do pedido)',
     'wazeplaces-ext': 'idem, a marca das respostas DELA',
+    // R11-2-01: o aviso de POUSO entre as abas não grava nada no aparelho (é a
+    // razão de ele ser um canal, e não uma chave): não há o que apagar no "Sair".
+    'waze-places-pousos': 'nome do BroadcastChannel que avisa as outras abas do que pousou (CANAL_DOS_POUSOS)',
   };
 
   // Nome da constante quando existe; senão a própria chave literal.

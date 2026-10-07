@@ -7193,15 +7193,24 @@ function diagDecididosAgora() {
 // contar, porque é nessa entrada que mora a falha que a sentinela procura. E o
 // que já estava na fila de saída quando o pedido entrou aqui não é marcado
 // nunca. Só em memória, e o que sai da fila some daqui junto.
+//
+// `chavesDoPouso`: as chaves que o aviso de POUSO da outra aba trouxe (o canal
+// entre abas, ver `aoPousarEmOutraAba`, R11-2-01). Ali não há fila de saída a
+// comparar — o que pousou lá é decisão, por definição —, e o resto é o MESMO.
 const decididosPorOutraAbaComCardAqui = new WeakSet();
-function anotarDecididosPorOutraAba(ev) {
-    let antes, depois;
-    try {
-        antes = JSON.parse((ev && ev.oldValue) || '[]');
-        depois = JSON.parse((ev && ev.newValue) || '[]');
-    } catch (e) { return; }
-    const tinha = new Set((Array.isArray(antes) ? antes : []).map(chaveDoPedido).filter(Boolean));
-    const novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
+function anotarDecididosPorOutraAba(ev, chavesDoPouso) {
+    let novas;
+    if (Array.isArray(chavesDoPouso)) {
+        novas = new Set(chavesDoPouso.filter((k) => typeof k === 'string' && k));
+    } else {
+        let antes, depois;
+        try {
+            antes = JSON.parse((ev && ev.oldValue) || '[]');
+            depois = JSON.parse((ev && ev.newValue) || '[]');
+        } catch (e) { return; }
+        const tinha = new Set((Array.isArray(antes) ? antes : []).map(chaveDoPedido).filter(Boolean));
+        novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
+    }
     if (!novas.size) return;
     // A fila REAL (`filaReal`), e não a da tela: com o treino aberto, a da tela
     // são os EXEMPLOS (o `updateRequestID` inerte nunca casa) e a real fica
@@ -7293,6 +7302,58 @@ function avisarDecididoNaOutraAba(place) {
     if (place && typeof place === 'object' && decididosPorOutraAbaComCardAqui.has(place)) {
         showToast(t('toast.decididoNaOutraAba'), 'info');
     }
+}
+
+// ── O POUSO de uma aba chega às OUTRAS (auditoria de 2026-10-07, R11-2-01) ──
+// O aviso de cima é o `storage` da FILA DE SAÍDA, e por ela só passa o que o
+// card decide (o ✕/✓, o "Rejeitar os N", a descarga ao fechar). O "Marcar
+// todos", a recusa automática e a APROVAÇÃO de foto não escrevem nela, e a outra
+// aba seguia com esses pedidos como card: decididos de novo lá, contavam duas
+// vezes no placar, no Histórico e na "Mão firme", diziam "Já tratado por outro
+// editor" sobre a decisão da própria pessoa e, depois de um "Marcar todos", o ✕
+// de lá era EXECUTADO — ler não resolve o pedido (MEDIDO no navegador, n01 a n03
+// da rodada 11, nos dois motores).
+//
+// Toda decisão que pousa passa pelo `registrarPouso`, e é ele que avisa as
+// outras abas, por um `BroadcastChannel`: NADA vai pro aparelho (um `setItem` por
+// pouso seria um por swipe, e a gravação é síncrona), e por isso não há chave a
+// apagar no "Sair". A outra aba roda o MESMO anotar + tirar da fila do aviso da
+// fila de saída, com as mesmas regras: o card da TELA fica (o gesto nele é
+// descontado e diz por quê; a decisão dela que está na janela do Desfazer não
+// sai), o que está EM ANDAMENTO lá é de quem o manda, e com o treino aberto vale
+// a fila REAL. Só entre abas da MESMA conta: a mesma sessão, ou a mesma conta
+// (a régua do esvaziamento da fila de saída). A aba sem sessão na memória ignora
+// — e não pergunta ao `getSession`, que leria o aparelho (R9-1-03). Sem
+// `BroadcastChannel` (iOS < 15.4), segue como antes. A mensagem leva só as
+// chaves dos pedidos e a marca da sessão (nunca o token), e não sai do navegador.
+const CANAL_DOS_POUSOS = 'waze-places-pousos';
+let canalDosPousos = null;
+
+function abrirCanalDosPousos() {
+    if (canalDosPousos || typeof BroadcastChannel !== 'function') return;
+    try { canalDosPousos = new BroadcastChannel(CANAL_DOS_POUSOS); } catch (e) { canalDosPousos = null; return; }
+    canalDosPousos.onmessage = (ev) => aoPousarEmOutraAba(ev && ev.data);
+}
+
+// O que acabou de pousar NESTA aba, com a marca de quem decidiu. O canal não
+// entrega a mensagem ao objeto que a mandou: esta aba não recebe o próprio aviso.
+function avisarOutrasAbasDoPouso(chaves) {
+    if (!canalDosPousos || !Array.isArray(chaves) || !chaves.length || !API.temSessaoNaMemoria()) return;
+    try {
+        canalDosPousos.postMessage({ v: 1, chaves, conta: contaAgora(), s: marcaDaSessao(API.getSession()) });
+    } catch (e) { /* canal fechado: segue como antes */ }
+}
+
+// O pouso de OUTRA aba. Nada aqui grava no aparelho nem avisa de volta.
+function aoPousarEmOutraAba(aviso) {
+    if (!aviso || aviso.v !== 1 || !Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
+    if (!API.temSessaoNaMemoria()) return;
+    if (!(aviso.s && aviso.s === marcaDaSessao(API.getSession()))) {
+        const agora = contaAgora();
+        if (!aviso.conta || !agora || String(aviso.conta) !== agora) return;
+    }
+    anotarDecididosPorOutraAba(null, aviso.chaves);
+    tirarDaFilaOQueAOutraAbaDecidiu();
 }
 
 // `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
@@ -16264,6 +16325,9 @@ function desenharChavesDePreferencia() {
 
 function setupSincroniaEntreAbas() {
     window.addEventListener('storage', aoGravarEmOutraAba);
+    // O que POUSA numa aba sai da fila das outras (R11-2-01, ver
+    // `avisarOutrasAbasDoPouso`): o canal é aberto aqui, uma vez por página.
+    abrirCanalDosPousos();
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  Patentes e Conquistas — celebra, nunca cobra
@@ -19737,6 +19801,11 @@ function offlineLerPousos() {
 // A cópia GRAVADA só existe com o offline ligado: é ela que a reabertura sem
 // rede consulta, e quem não ligou o offline não reabre sem rede. "Quem não
 // marca não paga nada."
+//
+// E é daqui que as OUTRAS abas ficam sabendo do pouso (R11-2-01, ver
+// `avisarOutrasAbasDoPouso`): por ser a fonte única, o aviso cobre os caminhos
+// que não passam pela fila de saída — o "Marcar todos", a recusa automática e a
+// aprovação de foto.
 function registrarPouso(places) {
     const agora = Date.now();
     // Uma escrita pousou: o Waze aceita escrita agora (ver `ultimaEscritaOkEm`).
@@ -19747,6 +19816,7 @@ function registrarPouso(places) {
         if (k) { chaves.push(k); pousosDaPagina.set(k, agora); }
     }
     if (!chaves.length) return;
+    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves);
     if (pousosDaPagina.size > 500) {
         for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
     }
