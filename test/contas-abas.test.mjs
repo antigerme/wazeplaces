@@ -2035,8 +2035,8 @@ function apiDeVerdade(guardado = {}) {
 
 // A TELA DE ENTRADA de mentira: a tela (com o "Colar cookies"), os diálogos dela
 // (com o campo de cada um), a Ajuda (que não é dela) e o FOCO. O `contains` vai
-// pela cadeia de pais, como no DOM. A adoção (R10-1-03) lê isto — a tela de
-// entrada na tela e os diálogos abertos.
+// pela cadeia de pais, como no DOM. A adoção e o foco (R10-1-03, R10-1-05) leem
+// isto — a tela de entrada na tela, os diálogos abertos e onde está o foco.
 function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
   const els = {};
   const el = (id, { oculto = false, pai = null } = {}) => {
@@ -2077,14 +2077,16 @@ const MODAIS_DA_ENTRADA = constante('MODAIS_DA_ENTRADA');
 const BOTAO_DA_ACAO = constante('BOTAO_DA_ACAO');
 // As funções da ADOÇÃO da sessão do aparelho (R9-1-03 a, R10-1-03, R10-1-04),
 // todas de verdade.
-const ADOCAO = ['adotarSessaoDoAparelho', 'textoDigitadoNaEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'];
+const ADOCAO = ['adotarSessaoDoAparelho', 'textoDigitadoNaEntrada', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada',
+  'aoEntrarNestaPagina'];
 // O que a adoção lê e escreve, sem sessão e sem nada no ar; `log` anota o que ela faz.
 function depsDaAdocao(real, t, log, AppState) {
   return {
     API: real.API, safeLS: real.safeLS, AppState, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO,
     extPerguntando: false, resgateEmVoo: false, saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     focoDoTeclado: null,
-    closeModal: (id) => { log.push('fechou ' + id); t.fechar(id); },
+    // O fechamento que NÃO devolve o foco a quem abriu (ele já foi prometido, R10-1-05) é anotado.
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
     resetQueue: () => log.push('fila nova'),
     // A abertura com sessão salva, com a sessão que a memória tem NA HORA — e o app na tela.
     abrirComSessaoSalva: () => { log.push('abriu com ' + real.API.sessionToken); AppState.authenticated = true; t.mostrarOApp(); },
@@ -2345,4 +2347,90 @@ test('R10-1-04: o link de pareamento que falha, sem sessão salva — a sessão 
   const s = linkDePareamento({ guardado: { [TOKEN]: 'tok-salvo' } });
   await s.h.abrirPeloCodigoDaURL('VENCIDO');
   assert.deepEqual(s.log, ['código inválido (aviso)', 'abriu com tok-salvo'], JSON.stringify(s.log));
+});
+
+// ═══ R10-1-05 · o foco que estava NA tela de entrada vai ao ✕ do primeiro card ══
+// A extensão que entra pela volta à aba (e a adoção da sessão do aparelho)
+// esconde a tela de entrada com o foco nela — no "Colar cookies", no campo dele
+// —, e o foco caía no <body>: o Tab seguinte ia ao mapa do card (auditoria da
+// rodada 10, R10-1-05, MEDIDO). Ele fica prometido ao ✕ do primeiro card, como
+// no login pelo teclado (R7-1-04); com o foco no <body>, nada se move.
+test('R10-1-05: a ADOÇÃO com o foco na tela de entrada (ou num diálogo dela) o promete ao ✕ do primeiro card; com ele no <body>, não', () => {
+  for (const tela of [{ foco: 'pasteBtn' }, { dialogo: 'pasteModal', foco: 'cookiesTextarea' },
+    { dialogo: 'accessDeniedModal', foco: 'closeAccessDenied' }]) {
+    const m = abaDaEntrada(DA_OUTRA, { tela });
+    m.h.aoVoltarAAba();
+    assert.equal(m.API.sessionToken, 'tok-da-outra', 'PRÉ-CONDIÇÃO: a volta não adotou ' + JSON.stringify(tela));
+    assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left,
+      `DEFEITO: o foco em ${tela.foco} caiu no <body> com a tela de entrada escondida (o Tab seguinte ia ao mapa do card)`);
+    // O diálogo fecha SEM devolver o foco a quem o abriu: o "Acesso restrito" que o app
+    // abriu sozinho o devolvia ao ⓘ do topo, que é vivo, e a promessa caía.
+    if (tela.dialogo) assert.ok(m.log.includes(`fechou ${tela.dialogo} (o foco já tem destino)`), JSON.stringify(m.log));
+  }
+  // A abertura que adota também (o fim da pergunta, R9-1-03 a).
+  const a = aberturaSemSessao({}, { foco: 'pasteBtn' });
+  a.dados.set(TOKEN, 'tok-da-outra');
+  a.h.aoFimDaPerguntaDaAbertura(false);
+  assert.equal(a.deps.focoDoTeclado, BOTAO_DA_ACAO.left, 'a adoção da abertura deixou o foco da tela de entrada cair no <body>');
+  // CONTROLE: ninguém estava na tela de entrada (o foco no <body>), ou ele está na Ajuda (que segue aberta): nada se move.
+  for (const tela of [{}, { dialogo: 'helpModal', foco: 'langSelectHelp' }]) {
+    const c = abaDaEntrada(DA_OUTRA, { tela });
+    c.h.aoVoltarAAba();
+    assert.equal(c.API.sessionToken, 'tok-da-outra', 'PRÉ-CONDIÇÃO: a volta não adotou ' + JSON.stringify(tela));
+    assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido ao ✕ sem estar na tela de entrada: ' + JSON.stringify(tela));
+  }
+});
+
+// A extensão que ENTRA (a pergunta da volta, a da abertura): a janela de mentira
+// repassa a resposta da ponte pelo `message`, como a de verdade.
+function extensaoNaEntrada(tela) {
+  const t = telaDeEntrada(tela);
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  const log = [];
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {},
+    API: { setSession: (tok) => log.push('sessão ' + tok) },
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
+    showMainScreen: () => { log.push('app'); t.mostrarOApp(); },
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps, responder, log };
+}
+
+test('R10-1-05: a extensão que ENTRA com o foco na tela de entrada o promete ao ✕ do primeiro card; com ele no <body>, não', async () => {
+  for (const tela of [{ foco: 'pasteBtn' }, { dialogo: 'pasteModal', foco: 'cookiesTextarea' }]) {
+    const m = extensaoNaEntrada(tela);
+    const p = m.h.entrarPelaExtensao({ silencioso: true });
+    m.responder({ action: 'sessao', token: 'tok-ext' });
+    assert.equal(await p, true, 'PRÉ-CONDIÇÃO: a extensão não entrou');
+    assert.ok(m.log.includes('app'), 'PRÉ-CONDIÇÃO: o app não foi mostrado');
+    assert.equal(m.deps.focoDoTeclado, BOTAO_DA_ACAO.left,
+      `DEFEITO: com o foco em ${tela.foco}, a extensão entrou e ele caiu no <body> (o Tab seguinte ia ao mapa do card)`);
+    if (tela.dialogo) assert.ok(m.log.includes(`fechou ${tela.dialogo} (o foco já tem destino)`), JSON.stringify(m.log));
+  }
+  // CONTROLE: o foco no <body> (ninguém estava na tela de entrada): nada se move.
+  const c = extensaoNaEntrada({});
+  const pc = c.h.entrarPelaExtensao({ silencioso: true });
+  c.responder({ action: 'sessao', token: 'tok-ext' });
+  assert.equal(await pc, true);
+  assert.equal(c.deps.focoDoTeclado, null, 'o foco foi prometido ao ✕ sem ninguém na tela de entrada');
+  // E o foco é lido ANTES de fechar os diálogos: no app, o fechamento o devolve ao
+  // botão da própria tela de entrada, que some em seguida (ou ao ⓘ do topo).
+  for (const nome of ['entrarPelaExtensao', 'adotarSessaoDoAparelho']) {
+    const corpo = fatiarDe(APP_SEM, nome);
+    const leu = corpo.indexOf('const focoNaEntrada = focoNaTelaDeEntrada();');
+    assert.ok(leu >= 0 && leu < corpo.indexOf('fecharModaisDaEntrada('), `${nome}: o foco é lido depois de fechar os diálogos da entrada`);
+  }
 });

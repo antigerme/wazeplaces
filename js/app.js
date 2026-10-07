@@ -587,6 +587,7 @@ function aoFimDaPerguntaDaAbertura(entrou) {
 //     a aba da tela de entrada nunca vira "logada" sem mostrar o app, e aqui ela
 //     segue sem sessão nenhuma na memória (o "Sair" de lá não a encerra). Sem
 //     texto, o diálogo vazio fecha e a sessão entra.
+// O foco que estava NA tela de entrada vai ao ✕ do primeiro card (R10-1-05).
 // Devolve se adotou.
 function adotarSessaoDoAparelho() {
     if (API.temSessaoNaMemoria() || AppState.authenticated) return false;
@@ -595,11 +596,13 @@ function adotarSessaoDoAparelho() {
     // nela o que lê — e isso já é adotar (R9-1-03).
     if (!safeLS.get('waze_session_token')) return false;
     if (textoDigitadoNaEntrada()) return false;
+    const focoNaEntrada = focoNaTelaDeEntrada();
     API.getSession();   // a adoção: a sessão guardada vai pra memória desta aba
     aoEntrarNestaPagina();
-    fecharModaisDaEntrada();
+    fecharModaisDaEntrada({ focoComDestino: focoNaEntrada });
     resetQueue();
     abrirComSessaoSalva();
+    if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
     return true;
 }
 
@@ -612,6 +615,21 @@ function textoDigitadoNaEntrada() {
         const c = document.getElementById(campo);
         return !!(m && !m.classList.contains('hidden') && c && String(c.value || '').trim());
     });
+}
+
+// O foco está NA tela de entrada — num botão dela ou num diálogo dela? Quem a
+// esconde sem gesto (a extensão que entra, a sessão do aparelho adotada) levava
+// o foco junto: o diálogo fechado o devolve ao botão da própria tela de
+// entrada, que some logo depois, e ele caía no <body> — o Tab seguinte ia ao
+// mapa do card, não ao ✕ (auditoria da rodada 10, R10-1-05, MEDIDO). Com ele
+// aqui, o foco fica prometido ao ✕ do primeiro card (`focoDoTeclado`), como no
+// login pelo teclado (R7-1-04); com o foco no <body> (ninguém estava na tela de
+// entrada), nada se move. Lido ANTES de fechar os diálogos.
+function focoNaTelaDeEntrada() {
+    const ativo = document.activeElement;
+    if (!ativo || ativo === document.body || ativo === document.documentElement) return false;
+    if (document.getElementById('authScreen')?.contains(ativo)) return true;
+    return MODAIS_DA_ENTRADA.some((id) => !!document.getElementById(id)?.contains(ativo));
 }
 
 // O link de pareamento aberto neste aparelho. Num aparelho JÁ logado, o link
@@ -810,9 +828,13 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             if (epoca !== epocaDaSessao) return fim(false);   // saiu no meio: ver acima
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
+            // O foco que estava NA tela de entrada (no "Colar cookies", no campo
+            // dele) vai ao ✕ do primeiro card: ela some agora, sem gesto, e ele
+            // caía no <body> (R10-1-05; ver a função). Lido antes de fechar.
+            const focoNaEntrada = focoNaTelaDeEntrada();
             // O que a tela de entrada tinha aberto (o "Colar", com o chaveiro
             // colado) sai COM a limpeza — ver `MODAIS_DA_ENTRADA`.
-            fecharModaisDaEntrada();
+            fecharModaisDaEntrada({ focoComDestino: focoNaEntrada });
             showMainScreen();
             // Fila NOVA, como no login por cookies: a que sobrou na memória é
             // da sessão que caiu (e o treino, se aberto, sai junto). Menos na
@@ -826,6 +848,7 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // que atravessou a sessão sai JÁ, sem esperar o perfil (K2/K8).
             conhecerContaDoLogin(d.conta);
             AppState._profilePromise = loadProfileAndAuxData();
+            if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
             fim(true);
@@ -922,12 +945,15 @@ const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersMod
 // pessoa seguinte abria "Colar" e o encontrava (auditoria de 2026-09-26).
 const MODAIS_DA_ENTRADA = ['pasteModal', 'pairEnterModal', 'accessDeniedModal'];
 
-function fecharModaisDaEntrada() {
+// `focoComDestino`: o foco que estava na tela de entrada já foi prometido ao ✕
+// do primeiro card (R10-1-05), e o fechamento não o devolve a quem abriu o
+// diálogo — o "Acesso restrito" que o app abriu sozinho o devolvia ao ⓘ do topo.
+function fecharModaisDaEntrada({ focoComDestino = false } = {}) {
     // Só os abertos: o `closeModal` anota no diário antes de conferir, e três
     // "fechou" de modal que nem estava aberto contariam uma história falsa.
     for (const id of MODAIS_DA_ENTRADA) {
         const m = document.getElementById(id);
-        if (m && !m.classList.contains('hidden')) closeModal(id);
+        if (m && !m.classList.contains('hidden')) closeModal(id, { focoComDestino });
     }
 }
 

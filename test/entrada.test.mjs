@@ -483,13 +483,16 @@ function montarExtensao(inicio = {}) {
     conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)
     showAccessDenied: (r) => negados.push(r),
   };
+  // O foco prometido ao teclado (R10-1-05): o seletor do ✕, e a promessa em si.
+  deps.BOTAO_DA_ACAO = { left: '.card-btn-reject' };
+  deps.focoDoTeclado = null;
   // Os dublês pedidos por quem chama ganham dos padrões (o `document` e o
   // `closeModal` do teste dos modais, por exemplo).
   for (const [k, v] of Object.entries(inicio)) deps[k] = v;
   const app = montar(['entrarPelaExtensao', 'negadoDaExtensao', 'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao',
-    'aoEntrarNestaPagina', 'fecharModaisDaEntrada'], deps,
+    'aoEntrarNestaPagina', 'fecharModaisDaEntrada', 'focoNaTelaDeEntrada'], deps,
   ['entrarPelaExtensao', 'mostrarNegadoDaExtensao', 'estado'],
-  constante('MODAIS_DA_ENTRADA') + '\nfunction estado() { return { extNegadoNestaPagina, extNegado, saiuNestaPagina }; }');
+  constante('MODAIS_DA_ENTRADA') + '\nfunction estado() { return { extNegadoNestaPagina, extNegado, saiuNestaPagina, focoDoTeclado }; }');
   return { app, responder, negados };
 }
 
