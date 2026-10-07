@@ -499,3 +499,75 @@ test('R7-4-05: o aviso da outra aba é ouvido, e o diário do repetido diz que f
   assert.match(enf, /dfato\('saida\.repetida', \{ tipo, \.\.\.\(daOutraAba \? \{ outraAba: true \} : \{\}\) \}\);/,
     'o "repetida" do diário voltou a soar como caminho furado quando foi a outra aba que decidiu');
 });
+
+// ── R11-4-04: o "N esperando envio" ESCONDIDO ──────────────────────────────
+// O relatório e as capturas do modo dev não mediam o `#inFlightIndicator`: com
+// ele 100% debaixo do FAB (o R11-4-03, MEDIDO no n25b da auditoria da rodada
+// 11), a captura saía sem ele na geometria e com `alertas: []`. Os quatro
+// defeitos que o esconderam — o FAB em cima (R9-4-05), o cabeçalho do iPhone
+// instalado (R10-4-02), o FAB atravessando a tela (R10-4-05) e a outra aba
+// (R11-4-03) — foram achados por auditoria, nenhum por relato. O app GARANTE,
+// desde o R9-4-05 e o R10-4-02, que o número ESPERANDO envio (`.nao-cobrir`)
+// fica à vista: é invariante, e entra.
+const indicador = (extra) => ({ sel: '#inFlightIndicator', x: 351, y: 80, w: 23, h: 17, noCentro: 'ele mesmo',
+  naoCobrir: true, camadaAberta: false, naCamada: false, ...extra });
+const comIndicador = (extra) => { const c = sao(); c.geometria.push(indicador(extra)); return c; };
+
+test('R11-4-04: o "N esperando envio" debaixo do FAB ou do cabeçalho vira alerta', () => {
+  // O R11-4-03: o FAB que o app pôs no canto, por cima do número.
+  const fab = montar()(comIndicador({ noCentro: '#devFabBtn', sobFab: true }));
+  assert.deepEqual(chaves(fab), ['indicadorEscondido'], 'o indicador debaixo do FAB não gerou alerta');
+  assert.equal(fab[0].recebe, '#devFabBtn');
+  assert.equal(fab[0].fab, true, 'o alerta não diz que foi o FAB');
+  // O R10-4-02: o cabeçalho que cresceu com a margem do iPhone instalado.
+  assert.deepEqual(chaves(montar()(comIndicador({ noCentro: 'HEADER.bg-white/80' }))), ['indicadorEscondido'],
+    'o indicador debaixo do cabeçalho não gerou alerta');
+});
+
+test('R11-4-04 CONTROLE: à vista, "enviando", atrás de camada, sob aviso passageiro ou do FAB que o EDITOR arrastou — sem alerta', () => {
+  const s = montar();
+  assert.deepEqual(s(comIndicador({})), [], 'o indicador À VISTA gerou alerta');
+  // O "enviando" não é número a não cobrir (R10-4-05): o FAB pode passar por cima.
+  assert.deepEqual(s(comIndicador({ naoCobrir: undefined, noCentro: '#devFabBtn', sobFab: true })), [],
+    'o "enviando" debaixo do FAB gerou alerta — e ele é coberto por desenho');
+  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.modal-root', camadaAberta: true, naCamada: false })), [],
+    'a camada aberta por cima gerou alerta (ela cobre tudo, de propósito)');
+  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.toast', sobBanner: true })), [], 'o banner passageiro do topo gerou alerta');
+  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.toast', sobAviso: true })), [], 'o aviso passageiro do rodapé gerou alerta');
+  assert.deepEqual(s(comIndicador({ noCentro: '#devFabBtn', sobFab: 'fixado' })), [],
+    'o FAB que o EDITOR arrastou pra cima do número gerou alerta — o canto é escolha dele');
+  // O placar também é `.nao-cobrir`, e não é desta sentinela (o canto do FAB o protege, e a do toque olha os botões).
+  const p = sao();
+  p.geometria.push({ sel: '#placar', noCentro: '#devFabBtn', naoCobrir: true, sobFab: true, camadaAberta: false, naCamada: false });
+  assert.deepEqual(s(p), []);
+});
+
+test('R11-4-04: a geometria MEDE o indicador, e o coletor diz do DOM quem está por cima do número', () => {
+  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = APP.indexOf('const DIAG_ALVOS');
+  const lista = semComentario(APP.slice(i, APP.indexOf('];', i)));
+  assert.match(lista, /'#inFlightIndicator'/, 'o `#inFlightIndicator` saiu do DIAG_ALVOS: o relatório volta a não medir o número');
+  const g = APP.indexOf('function diagGeometria(');
+  assert.match(semComentario(APP.slice(g, APP.indexOf('\n}', g))),
+    /\.\.\.\(e\.classList && e\.classList\.contains\('nao-cobrir'\) \? diagNumeroACobrir\(e, r\) : \{\}\),/,
+    'a geometria parou de marcar o número a não cobrir (a sentinela fica muda)');
+  // O coletor, EXECUTADO num documento de mentira: o centro do número cai num
+  // aviso do topo, no FAB do app, no FAB arrastado, ou nele mesmo.
+  const k = APP.indexOf('function diagNumeroACobrir(');
+  assert.ok(k > 0, 'o coletor do número a não cobrir sumiu');
+  const fonte = APP.slice(k, APP.indexOf('\n}', k) + 2);
+  const no = (ids) => ({ closest: (sel) => (ids.includes(sel) ? {} : null) });
+  const coletar = (alvo, fixado = false) => {
+    const el = { contains: (x) => x === el };
+    const document = { elementFromPoint: () => (alvo === 'ele' ? el : alvo) };
+    return new Function('document', 'devFabFixado', fonte + '\nreturn diagNumeroACobrir;')(document, fixado)(el, { left: 351, top: 80, width: 23, height: 17 });
+  };
+  assert.deepEqual(coletar(no(['#devFab'])), { naoCobrir: true, sobFab: true }, 'o FAB do app por cima do número não ficou anotado');
+  assert.deepEqual(coletar(no(['#devFab']), true), { naoCobrir: true, sobFab: 'fixado' }, 'o FAB arrastado pelo editor não se distingue do app');
+  assert.deepEqual(coletar(no(['#bannerStack'])), { naoCobrir: true, sobBanner: true }, 'o banner passageiro do topo não ficou anotado');
+  assert.deepEqual(coletar('ele'), { naoCobrir: true }, 'CONTROLE: o número à vista ganhou marca de coberto');
+  assert.deepEqual(coletar(no([])), { naoCobrir: true }, 'CONTROLE: outra coisa por cima (o cabeçalho) virou FAB ou aviso');
+  // E a sentinela é a do coletor: o nome que ela lê é o que ele grava.
+  const s = semComentario(APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas('))));
+  assert.match(s, /g\.sel !== '#inFlightIndicator' \|\| !g\.naoCobrir/, 'a sentinela do indicador não lê o que o coletor grava');
+});

@@ -7218,7 +7218,13 @@ const DIAG_ALVOS = ['.place-card:not(.card-fundo)', '.card-fundo', '.card-conten
                     // cru de 140 KB. Dado que só está no HTML é dado que
                     // ninguém procura sem já saber a resposta.
                     '.card-map:not(.hidden)',
-                    '#cardStack', '#placar', 'header', '.modal-root:not(.hidden) > div',
+                    // O "N esperando envio" entrou na rodada 11 (R11-4-04), e pelo
+                    // mesmo motivo do mapa: os quatro defeitos que o esconderam (o
+                    // FAB em cima, R9-4-05; o cabeçalho do iPhone instalado,
+                    // R10-4-02; o FAB atravessando a tela, R10-4-05; a outra aba,
+                    // R11-4-03) foram achados por auditoria, nenhum por relato — o
+                    // único sinal de decisão esperando sinal só existia no `dom`.
+                    '#cardStack', '#placar', '#inFlightIndicator', 'header', '.modal-root:not(.hidden) > div',
                     '#imageLightbox:not(.hidden)', '#devFab:not(.hidden)',
                     '.card-btn-reject', '.card-btn-skip', '.card-btn-read'];
 // Modal e lightbox ABERTOS. Camada aberta cobre o que está atrás — é a função
@@ -7304,9 +7310,29 @@ function diagGeometria() {
                 // coberto por construção, e alertar nisso é ruído.
                 naCamada: camadas.some((c) => c.contains(e)),
                 camadaAberta: camadas.length > 0,
+                // NÚMERO a não cobrir (`.nao-cobrir`: o placar, e o "N esperando
+                // envio" com decisão esperando): o que está por cima dele — ver a
+                // sentinela `indicadorEscondido`.
+                ...(e.classList && e.classList.contains('nao-cobrir') ? diagNumeroACobrir(e, r) : {}),
             });
         }
     }
+    return fora;
+}
+
+// O que está por cima de um número a não cobrir (`.nao-cobrir`), no centro dele:
+// um aviso PASSAGEIRO do topo (`#bannerStack`, que some sozinho — o do rodapé já é
+// o `sobAviso`) ou o FAB do modo dev — e, se o FAB, se foi o EDITOR que o arrastou
+// pra lá (`devFabFixado`: aí o canto é escolha dele, não do app).
+function diagNumeroACobrir(el, r) {
+    const fora = { naoCobrir: true };
+    try {
+        const alvo = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+        if (alvo && alvo !== el && !el.contains(alvo) && alvo.closest) {
+            if (alvo.closest('#bannerStack')) fora.sobBanner = true;
+            if (alvo.closest('#devFab')) fora.sobFab = devFabFixado ? 'fixado' : true;
+        }
+    } catch (e) { /* sonda nunca derruba o diagnóstico */ }
     return fora;
 }
 
@@ -7663,6 +7689,25 @@ function diagSentinelas(comp) {
                 'pedido que já está esperando envio voltou como card — dá pra decidir de novo, '
                 + 'e o segundo gesto conta outra vez',
                 { n: dc.naFila });
+        }
+        // 11. O "N esperando envio" ESCONDIDO (R11-4-04).
+        //
+        // INVARIANTE desde o R9-4-05 e o R10-4-02: com decisão ESPERANDO envio
+        // (o indicador é `.nao-cobrir`), o número está à vista — o FAB não pousa
+        // nele e ele se ancora abaixo do cabeçalho medido. É o único sinal de que
+        // há decisão esperando sinal, e os quatro defeitos que o esconderam foram
+        // achados por auditoria, nenhum por relato: a geometria nem o media. Fora,
+        // como no toque: atrás de camada aberta (ela cobre tudo, de propósito),
+        // debaixo de aviso passageiro (some sozinho) e debaixo do FAB que o EDITOR
+        // arrastou pra lá. O "enviando" não é número a não cobrir (R10-4-05) e
+        // não entra.
+        for (const g of comp.geometria || []) {
+            if (g.sel !== '#inFlightIndicator' || !g.naoCobrir) continue;
+            if (!g.noCentro || g.noCentro === 'ele mesmo' || g.noCentro === 'nada') continue;
+            if ((g.camadaAberta && !g.naCamada) || g.sobAviso || g.sobBanner || g.sobFab === 'fixado') continue;
+            diga('indicadorEscondido',
+                'o "N esperando envio" está escondido: o dedo no meio dele cai em outra coisa',
+                { recebe: g.noCentro, ...(g.sobFab ? { fab: true } : {}) });
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no
