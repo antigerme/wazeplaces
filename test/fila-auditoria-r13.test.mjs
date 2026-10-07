@@ -332,6 +332,8 @@ function abaEmDuvida() {
     aoConhecerConta() {}, guardarReferencias() {}, guardarPerfilDoPortao() {}, guardarPrazoDaSessao() {},
     renderProfileHeader() {}, presencaWmeAoCarregarPerfil() {}, presencaWmeRefazerDesligar() {},
     redesenharFiltrosComOPerfil() {}, reavaliarFotoAbertaPeloPerfil() {},
+    // O ponto do botão de Filtros que o perfil atualiza (R13-7-02, da área do treino).
+    atualizarSeloDeConquista() {},
     // O que a trava de verdade toca fora do card: nada travando, nada aberto.
     aprovacaoDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
     dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, aplicarFocoDoTeclado() {},
