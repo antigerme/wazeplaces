@@ -1550,6 +1550,46 @@ test('R9-1-01: depois do "Sair" ou da troca de conta, o relatório ainda leva o 
   assert.deepEqual(new Function(fatiarFn(APP, 'diagUrlsDoDocumento') + '\nreturn diagUrlsDoDocumento();')(), []);
 });
 
+// ── R12-4-06 (auditoria da rodada 12): o 405 do relatório de produção ────────
+// O Web Analytics que a borda do Cloudflare injeta manda o relatório dele por
+// `sendBeacon` pra MESMA origem (`/cdn-cgi/rum?`, que só aceita POST). O pedido
+// entra na lista de recursos da página (tipo "beacon"), não é `/api/` nem
+// binário, e virava "código": o GET de comparação levava 405, e toda triagem de
+// produção dizia "sem conferir: o servidor respondeu 405 em 1 arquivo" — sobre
+// algo que não é código (reproduzido emulando a borda, n11 da auditoria). Aqui a
+// composição do `diagCorpo` roda de verdade: o documento de mentira com o código
+// e o beacon de terceiro, a lista de recursos com o envio do beacon.
+test('R12-4-06: o endereço reservado da borda (`/cdn-cgi/`) não entra no `codigo` — o envio do beacon nem o script do Bot Fight Mode', () => {
+  const meu = 'https://x.dev';
+  const script = (src) => ({ tagName: 'SCRIPT', attrs: { src }, src: new URL(src, meu + '/').href });
+  const elementos = [{ tagName: 'LINK', attrs: { rel: 'stylesheet', href: 'css/app.css' }, href: meu + '/css/app.css' },
+    script('js/min/version.js'), script('js/min/app.js'),
+    { tagName: 'SCRIPT', attrs: { src: 'x' }, src: 'https://static.cloudflareinsights.com/beacon.min.js' }];
+  const recursos = [['/css/app.css', 5], ['/js/min/version.js', 8], ['/js/min/app.js', 12], ['/api/perfil', 40],
+    // O que a borda põe na lista: o envio do Web Analytics (o caminho do 405) e,
+    // se um dia carregar, o script do Bot Fight Mode — os dois na MESMA origem.
+    ['/cdn-cgi/rum?', 900], ['/cdn-cgi/challenge-platform/scripts/jsd/main.js', 30]]
+    .map(([u, t]) => ({ name: meu + u, startTime: t }));
+  const performance = { now: () => 1000, clearResourceTimings: () => {},
+    getEntriesByType: (tipo) => (tipo === 'resource' ? recursos.slice() : []) };
+  const fns = new Function('performance', 'API', 'document',
+    ['diagRecursosDaSessao', 'diagUrlsDoDocumento', 'diagUrlsDoCodigo'].map((n) => fatiarFn(APP, n)).join('\n')
+    + '\nreturn { diagRecursosDaSessao, diagUrlsDoDocumento, diagUrlsDoCodigo };')(
+    performance, { registrosDesde: 0 }, documentoDeMentira(elementos));
+  const codigo = fns.diagUrlsDoCodigo([...fns.diagUrlsDoDocumento(), ...fns.diagRecursosDaSessao().map((r) => r.name)], meu, meu + '/')
+    .map((u) => u.slice(meu.length));
+  assert.ok(fns.diagRecursosDaSessao().some((r) => r.name === meu + '/cdn-cgi/rum?'),
+    'PRÉ-CONDIÇÃO: o envio do beacon não está na lista de recursos — o caso não foi encenado');
+  assert.deepEqual(codigo.filter((u) => u.startsWith('/cdn-cgi/')), [],
+    'DEFEITO: o endereço da borda entrou no `codigo` — o GET de comparação leva 405, e a triagem diz "o servidor respondeu 405"');
+  // CONTROLE: o código nosso segue todo lá, e só a RAIZ reservada sai (o mesmo
+  // nome noutro lugar do caminho é arquivo nosso como qualquer outro).
+  assert.deepEqual(codigo, ['/', '/service-worker.js', '/css/app.css', '/js/min/version.js', '/js/min/app.js']);
+  assert.deepEqual(fns.diagUrlsDoCodigo([meu + '/js/min/cdn-cgi.js', meu + '/docs/cdn-cgi/x.js'], meu, meu + '/')
+    .map((u) => u.slice(meu.length)), ['/', '/service-worker.js', '/js/min/cdn-cgi.js', '/docs/cdn-cgi/x.js'],
+    'o filtro da borda pegou arquivo nosso que só tem "cdn-cgi" no nome');
+});
+
 // ── D9 (auditoria de 2026-09-26): o tile guardado que falhou, UMA vez ───────
 // A sentinela lia o anel ACUMULADO da página, sem janela e sem hora: depois de
 // uma falha, toda captura e todo relatório a repetiam — inclusive num card sem

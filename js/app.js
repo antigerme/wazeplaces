@@ -10138,11 +10138,22 @@ function chamadaFalhou(c) {
 // que fica na lista de recursos da página: o 2º relatório na mesma página
 // comparava 23 arquivos em vez de 11, dobrava as requisições e levava o CSS
 // duas vezes (auditoria de 2026-09-26).
+//
+// **E o endereço RESERVADO da borda (`/cdn-cgi/`)**, que é da Cloudflare e nunca
+// é código nosso. O Web Analytics que a borda injeta manda o relatório dele por
+// `sendBeacon` pra MESMA origem (`/cdn-cgi/rum?`, que só aceita POST), e o pedido
+// entra na lista de recursos (tipo "beacon"): virava "código", o GET de
+// comparação levava 405, e TODO relatório de produção dizia "sem conferir: o
+// servidor respondeu 405 em 1 arquivo" — sobre algo que não diz nada do código
+// nem do servidor, e com 2 GETs à borda a cada relatório (auditoria da rodada
+// 12, R12-4-06, reproduzido emulando a borda). O mesmo vale pro script do Bot
+// Fight Mode (`/cdn-cgi/challenge-platform/…`), se um dia ele carregar.
 function diagUrlsDoCodigo(urlsDosRecursos, meu, aqui) {
     return [...new Set([aqui, meu + '/service-worker.js',
         ...urlsDosRecursos.filter((u) => typeof u === 'string' && u.startsWith(meu))])]
         .filter((u) => !/\.(woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|ico|mp4|webm)(\?|$)/i.test(u))
         .filter((u) => !u.startsWith(meu + '/api/'))
+        .filter((u) => !u.startsWith(meu + '/cdn-cgi/'))
         .filter((u) => !/[?&]diag-rede=/.test(u));
 }
 

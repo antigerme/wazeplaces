@@ -838,3 +838,45 @@ test('R11-4-05 CONTROLE: com rede e tudo comparado, a linha de sempre — e a pa
   assert.match(t, /11 arquivos · conferidos com o servidor: 6 · diferentes: 0 · sem conferir: 5/);
   assert.match(t, /  sem conferir: sem resposta no orçamento do relatório em 5 arquivos/);
 });
+
+// ── R12-4-06: o 405 dos relatórios de produção ──────────────────────────────
+// O envio do Web Analytics que a borda injeta (`/cdn-cgi/rum?`, mesma origem, só
+// aceita POST) entrava no `codigo` pela lista de recursos, e a releitura do
+// "servidor" levava 405: TODO relatório de produção dizia "12 arquivos ·
+// conferidos 11 · sem conferir: 1 / o servidor respondeu 405 em 1 arquivo" —
+// sobre algo que não é código (n11 da auditoria da rodada 12, emulando a borda).
+// O app deixou de levá-lo; os relatórios JÁ recebidos (arquivo enviado não se
+// zera) são lidos com ele fora da conta, e a triagem diz que ficou.
+const comOBeacon = () => {
+  const d = relatorioV8();
+  d._versaoDoDiag = 11;
+  d.cacheVsRede = Object.fromEntries(ARQUIVOS_DO_APP.map((u) => ['https://x.dev' + u,
+    { aparelho: 'aaaa', servidor: 'aaaa', igual: true, bytesAparelho: 100, bytesServidor: 100, http: 200 }]));
+  // O formato do relatório de produção: a cópia do aparelho lida, a releitura com 405.
+  d.cacheVsRede['https://x.dev/cdn-cgi/rum?'] = { erro: 'http 405', http: 405 };
+  d.codigo = { 'https://x.dev/cdn-cgi/rum?': { http: 204, tipo: null, bytes: 0, hash: 'e3b0c442' } };
+  return d;
+};
+
+test('R12-4-06: o envio do beacon da borda (`/cdn-cgi/rum?`) fica fora da conta — nada de "o servidor respondeu 405"', () => {
+  const s = rodar(comOBeacon());
+  assert.doesNotMatch(s, /respondeu 405/,
+    'DEFEITO: a triagem diz que o servidor respondeu 405 — sobre o envio do Web Analytics, que não é código do app');
+  assert.match(s, /11 arquivos conferidos com o servidor · diferentes: 0\n/,
+    'o endereço da borda contou como arquivo do app (12 arquivos, 1 sem conferir)');
+  assert.match(s, /  fora da conta: \/cdn-cgi\/rum\? — endereço da borda do Cloudflare, não é código do app/,
+    'a triagem não diz o que ficou fora da conta');
+  // CONTROLE: um 405 num arquivo NOSSO segue "sem conferir", com o status — a
+  // exceção é o endereço da borda, não o status.
+  const c = comOBeacon();
+  c.cacheVsRede['https://x.dev/js/min/app.js'] = { erro: 'http 405', http: 405 };
+  const t = rodar(c);
+  assert.match(t, /11 arquivos · conferidos com o servidor: 10 · diferentes: 0 · sem conferir: 1/);
+  assert.match(t, /  sem conferir: o servidor respondeu 405 em 1 arquivo: não há com o que comparar/,
+    'CONTROLE: o 405 num arquivo do app deixou de ser dito');
+  // CONTROLE: sem o endereço da borda, a linha "fora da conta" não aparece.
+  const sem = comOBeacon();
+  delete sem.cacheVsRede['https://x.dev/cdn-cgi/rum?'];
+  delete sem.codigo['https://x.dev/cdn-cgi/rum?'];
+  assert.doesNotMatch(rodar(sem), /fora da conta/);
+});

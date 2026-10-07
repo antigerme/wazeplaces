@@ -248,9 +248,18 @@ else {
 // `cacheVsRede` compara o que o aparelho tem com o que o servidor serve AGORA.
 secao('CÓDIGO NO APARELHO');
 {
-  const cod = d.codigo || {};
-  const cvr = d.cacheVsRede || {};
   const nome = (u) => String(u).replace(/^https?:\/\/[^/]+/, '') || '/';
+  // O endereço RESERVADO da borda (`/cdn-cgi/`, da Cloudflare) não é código do
+  // app. O relatório anterior ao conserto levava o envio do Web Analytics que a
+  // borda injeta (`/cdn-cgi/rum?`, que só aceita POST), e a triagem dizia "o
+  // servidor respondeu 405 em 1 arquivo" — sobre algo que não diz nada do código
+  // nem do servidor (auditoria da rodada 12, R12-4-06). Fica fora da conta, e uma
+  // linha diz o que ficou.
+  const daBorda = (u) => nome(u).startsWith('/cdn-cgi/');
+  const semBorda = (o) => Object.fromEntries(Object.entries(o || {}).filter(([u]) => !daBorda(u)));
+  const foraDaConta = [...new Set([...Object.keys(d.codigo || {}), ...Object.keys(d.cacheVsRede || {})])].filter(daBorda);
+  const cod = semBorda(d.codigo);
+  const cvr = semBorda(d.cacheVsRede);
   const versoes = Object.entries(cod).filter(([, v]) => v && v.versao).map(([u, v]) => `${nome(u)} ${v.versao}`);
   out(`app ${d.app?.versao ?? '?'}${versoes.length ? ' · declarado nos arquivos: ' + versoes.join(' · ') : ''}`);
   // Nota e não alerta: numa atualização em curso o worker novo já chegou e a
@@ -280,6 +289,9 @@ secao('CÓDIGO NO APARELHO');
   if (!erros.length) out(`${total} arquivos conferidos com o servidor · diferentes: ${reais.length}`);
   else if (!conferidos) out(`${total} arquivos · nenhum conferido com o servidor — este relatório não diz se o aparelho roda a versão do servidor`);
   else out(`${total} arquivos · conferidos com o servidor: ${conferidos} · diferentes: ${reais.length} · sem conferir: ${erros.length}`);
+  if (foraDaConta.length) {
+    out(`  fora da conta: ${foraDaConta.map(nome).join(', ')} — endereço da borda do Cloudflare, não é código do app`);
+  }
   const arquivos = (n) => `${n} ${n === 1 ? 'arquivo' : 'arquivos'}`;
   const porStatus = new Map();
   for (const [, v] of erros) if (semServidor(v)) porStatus.set(Number(v.http), (porStatus.get(Number(v.http)) || 0) + 1);
