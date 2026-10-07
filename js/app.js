@@ -10439,6 +10439,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
         // é que sair com a fila cheia descarta o que ainda não foi enviado: é
         // exatamente o que "sair é sair de tudo" promete (e o diálogo diz quantos).
         safeLS.remove(SAIDA_KEY);
+        // Os pedidos que o app estrelou (`ESTRELADOS_KEY`, R10-2-05): ids de
+        // pedidos de terceiros, e a estrela é de quem saiu.
+        safeLS.remove(ESTRELADOS_KEY);
     }
     // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
     // Quem entrar depois começa do zero: a fila dele vem da busca dele. As idas
@@ -18315,6 +18318,9 @@ function esquecerOutraConta(id) {
     AppState.history = null;
     safeLS.remove(HISTORY_KEY);
     safeLS.remove(CONQUISTAS_KEY);
+    // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel da
+    // anterior, o ↑ de quem entrou não guardava esses pedidos.
+    safeLS.remove(ESTRELADOS_KEY);
     AppState.conquistas = null;
     atualizarSeloDeConquista();
     // E o painel do Histórico dela, que fica no DOM com os Filtros fechados (a
@@ -21877,6 +21883,58 @@ function handleReject() {
     }, { gesto });
 }
 
+// ── O que o APP estrelou ("Pular guarda o pedido"), no aparelho ────────────
+// O `isStarred` que a busca traz é o do MOMENTO da busca, e cada aba tem a sua.
+// Com o app aberto em duas abas, a B carregou a fila antes de a A pular o
+// pedido: o ↑ na B mandava OUTRA estrela e contava de novo no "Colecionador" —
+// MEDIDO: duas estrelas e `guardados: 2` com um pedido só, o mesmo defeito do
+// R9-7-06 por outro caminho (auditoria de 2026-10-07, R10-2-05). A fila
+// guardada do offline traz o `isStarred` da hora da busca dela, pelo mesmo
+// motivo. Daqui, o aparelho lembra as CHAVES (`chaveDoPedido`) dos pedidos que
+// o app estrelou com sucesso: o ↑ confere no gesto (e de novo no fim da janela
+// do Desfazer, onde a estrela da outra aba pode ter pousado), e o
+// "Colecionador" conta pedido DISTINTO — a estrela só conta se a chave entrou
+// agora.
+//
+// Teto POR CONSTRUÇÃO (a regra da casa pra estrutura que cresce por item): o
+// mais velho sai. 500 chaves são ~22 KB, lidas no ↑ (1,1% das ações, MEDIDO na
+// fila do owner) e gravadas só quando a estrela pousa; é bem mais que o tempo
+// em que uma aba esquecida aberta ou a fila guardada seguem com o dado velho.
+// O custo assumido: tirar a estrela no WME não tira a chave daqui — o ↑ do
+// mesmo pedido não manda outra até ela sair do anel.
+//
+// São ids de pedidos de TERCEIROS e estado do EDITOR sobre eles: saem no
+// "Sair" (`handleLogout`) e na troca de conta (`esquecerOutraConta`).
+const ESTRELADOS_KEY = 'waze_places_estrelados';
+const ESTRELADOS_MAX = 500;
+
+function estreladosNoAparelho() {
+    try {
+        const v = JSON.parse(safeLS.get(ESTRELADOS_KEY) || '[]');
+        return Array.isArray(v) ? v.filter((k) => typeof k === 'string') : [];
+    } catch (e) { return []; }
+}
+
+// O app JÁ estrelou este pedido (nesta aba ou noutra)?
+function estreladoPeloApp(place) {
+    const k = chaveDoPedido(place);
+    return !!k && estreladosNoAparelho().includes(k);
+}
+
+// A estrela POUSOU: a chave entra no anel. Devolve se ela entrou AGORA — é o
+// "pedido distinto" do "Colecionador" (duas abas pulando o mesmo pedido no
+// mesmo instante mandam duas estrelas, e só a primeira a pousar conta).
+function anotarEstreladoPeloApp(place) {
+    const k = chaveDoPedido(place);
+    if (!k) return false;
+    const lista = estreladosNoAparelho();
+    if (lista.includes(k)) return false;
+    lista.push(k);
+    while (lista.length > ESTRELADOS_MAX) lista.shift();
+    safeLS.set(ESTRELADOS_KEY, JSON.stringify(lista));
+    return true;
+}
+
 function handleSkip() {
     if (!AppState.currentPlace) return;
     if (acoesTravadas()) return;   // janela do Desfazer correndo
@@ -21896,7 +21954,8 @@ function handleSkip() {
     // card) não ganha outra: ela não muda nada no Waze, gasta uma requisição e
     // contava de novo no "Colecionador" — o mesmo pedido pulado dez vezes dava
     // a conquista (MEDIDO: 2 estrelas e `guardados: 2` com um pedido só;
-    // auditoria de 2026-10-06, R9-7-06). O ↑ segue sendo pular.
+    // auditoria de 2026-10-06, R9-7-06). O ↑ segue sendo pular. O que o APP já
+    // estrelou, nesta aba ou noutra, é conferido no executor (R10-2-05).
     const guardar = AppState.preferences.pularGuarda === true && place.isStarred !== true;
     // Sem a preferência, o Pular continua sendo o que sempre foi: REDE ZERO.
     // O place segue pendente no Waze e o executor é no-op — o scheduleAction
@@ -21909,6 +21968,12 @@ function handleSkip() {
     scheduleAction('skip', place, async () => {
         if (!guardar) return;
         if (!place || !place.venueID || !place.updateRequestID) return;
+        // O que o APP já estrelou, nesta aba ou noutra (`estreladoPeloApp`,
+        // R10-2-05): o `isStarred` desta aba pode ser de antes da estrela. A
+        // conferência é AQUI, na hora de mandar — no gesto sem o Desfazer, no
+        // fim da janela com ele —, e não no gesto: a estrela da outra aba pode
+        // pousar durante a janela, e o anel só cresce até lá.
+        if (estreladoPeloApp(place) === true) return;
         const enviar = () => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao);
         let r = await callWithRetry(enviar, epoca);
         // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
@@ -21947,7 +22012,9 @@ function handleSkip() {
             showToast(t('toast.guardarFalhou') + (motivo ? ' · ' + motivo : ''), 'error');
             return;
         }
-        contarConquista('guardados');
+        // O "Colecionador" conta pedido DISTINTO (R10-2-05): a estrela que a
+        // outra aba pousou antes desta não conta de novo.
+        if (anotarEstreladoPeloApp(place)) contarConquista('guardados');
     });
 }
 

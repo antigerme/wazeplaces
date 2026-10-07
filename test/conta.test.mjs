@@ -52,6 +52,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
       chamadas: [{ rota: 'perfil', http: 200 }, { rota: 'buscar-places', http: 200, n: 3 }, { rota: 'validar-place', http: 200 }] },
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
+    ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
     dfato: (k) => log.push('dfato:' + k),
     updateInFlightIndicator: () => {}, historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     esquecerAutores: () => log.push('autores'), atualizarSeloDeConquista: () => {},
@@ -118,6 +119,9 @@ test('OUTRA conta entrou: o que era da anterior sai do aparelho — e o dela que
     assert.ok(m.log.includes(o), `a troca de conta não levou: ${o}`);
   }
   assert.ok(m.log.includes('-waze_places_history') && m.log.includes('-waze_places_conquistas'));
+  // Os pedidos que o app estrelou eram estrelas de A (R10-2-05): com o anel dela,
+  // o ↑ de B não guardaria esses pedidos.
+  assert.ok(m.log.includes('-waze_places_estrelados'), 'os pedidos que A estrelou ficaram no aparelho de B');
   assert.deepEqual(m.AppState.stats, { read: 0, rejected: 0, skipped: 0 }, 'o placar de A ficou pra B');
   assert.equal(JSON.parse(m.guardado.get('waze_places_conta')).id, 'B');
   // O anel de chamadas de A — a rota, o status e o `n` da fila de cada pedido dela
@@ -332,6 +336,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     anotarEditaveis: () => {},
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
+    ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
     VERIFICA_SESSAO_MS: 0, setTimeout: (f) => f(),
     dlog: () => {}, dfato: (k) => log.push('dfato:' + k), dlogCapturarAuto: () => {},
     showToast: (m) => log.push('toast:' + m), t: (k) => k,
