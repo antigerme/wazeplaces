@@ -1149,6 +1149,41 @@ try {
   // A rede cai com a conversa aberta, e volta (sem o `online`) com a resposta da
   // ana esperando no Google. `degrau: 'ultimo'`: o recuo já no degrau de 1 min.
   const pararEVoltar = async (texto, { degrau = null } = {}) => {
+    // O que a bia recebeu e ainda não confirmou (a confirmação vai DE CARONA no
+    // próximo pedido à API) é entregue de novo a cada conexão. O Google de
+    // verdade segura a conexão aberta depois de entregar; o daqui a ENCERRA (o
+    // `route.fulfill` não faz fluxo), e com um item pendente o tempo real abria e
+    // fechava a cada segundo — a espera abaixo nunca o pegava aberto (MEDIDO na
+    // junção do lote 13, no WebKit: 59 aberturas e 60 entregas em ~1 min, com a
+    // pré-condição reprovando). Uma carona confirma a fila antes, como o próximo
+    // gesto dela faria; e a espera abaixo pega o tempo real PRESO, como o do Google.
+    // A carona sai quando o app JÁ guardou o que está pendente: o eco da mensagem
+    // que a bia mandou na seção 11 chega pelo tempo real DEPOIS da última carona
+    // (MEDIDO com uma sonda: o app o guardava pra confirmar, certo, e nenhum
+    // pedido seguinte o levava).
+    const ate = Date.now() + 10_000;
+    while (fila(bia.id).itens.length && Date.now() < ate) {
+      const pendentes = fila(bia.id).itens.map((x) => x.inbox);
+      const guardou = await bia.page.evaluate((pp) => { const l = chatAConfirmar(); return pp.every((x) => l.includes(x)); }, pendentes);
+      if (guardou) await bia.page.evaluate(() => { Presenca.tentadaEm = 0; Presenca.atualizadaEm = 0; return presencaAtualizar(); });
+      await dormir(200);
+    }
+    if (fila(bia.id).itens.length) { anota(`a carona da bia não confirmou a fila do tempo real (${fila(bia.id).itens.length} pendentes)`); return null; }
+    // E a RESPOSTA da carona tem que ter chegado: o servidor de mentira tira o
+    // item da fila ao receber o pedido, e a resposta que chegasse com a rede já
+    // caída seria prova de rede pro app — que religa o tempo real (certo), e o
+    // controle de baixo leria "religou sem o toque".
+    //
+    // E nenhum "lida" pendente ou no ar: o da mensagem da parte (a) sai pela
+    // rajada (1,2 s), e no WebKit caía DENTRO da janela do controle da (b) — a
+    // resposta dele é prova de rede, e o app religa o tempo real parado (certo,
+    // é o desenho). MEDIDO com uma sonda: `chat/lida` 166 ms depois da volta da
+    // rede e o fluxo de pé 10 ms depois. O controle mede "sem gesto, sem
+    // `online` e sem resposta nossa, nada religa": a premissa tem que valer.
+    for (const fim = Date.now() + 10_000; Date.now() < fim;) {
+      if (await bia.page.evaluate(() => !Presenca.pedindo && !Presenca.lidaPendente && Presenca.lidaNoAr.size === 0)) break;
+      await dormir(100);
+    }
     if (!await esperar(bia, () => !!Presenca.fluxo && !Presenca.fluxoParado, 'o tempo real da bia não estava aberto antes de a rede cair')) return null;
     semRede.add(bia.id);
     const onLine = await bia.page.evaluate((d) => {
