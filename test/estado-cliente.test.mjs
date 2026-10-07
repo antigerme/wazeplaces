@@ -749,6 +749,8 @@ test('filtros: a dica de "só os países que você pode editar" diz o que A LIST
     cargaDePaises: 0,   // o número de cada carga da lista de países (R56-6, test/filtros-aplicar)
     // A lista pela fonte única, guardada por região (R9-6-01, test/filtros-aplicar).
     epocaDaSessao: 0, listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
+    // As áreas gerenciadas da região nova (R10-6-03, test/filtros-aplicar).
+    populateManagedAreaSelect: () => {},
   }, ['aoTrocarRegiaoNoModal']);
   const ouvinte = aoTrocarRegiaoNoModal;
   AppState.profile = { editableCountryIDs: [30] };

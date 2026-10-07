@@ -4629,16 +4629,37 @@ function mostrarDesfazer(mensagem, aoDesfazer) {
 // (MEDIDO no Waze real, nas duas contas do owner: 8 e 1 áreas na ROW, 0 na NA e
 // na IL). Fica a CAIXA de "Minha área" daquele servidor (`caixas`, lida por
 // `caixaDaMinhaAreaEm`); sem a lista (não veio), a daquele servidor não muda.
-let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };
-function anotarEditaveis(perfil, regiao, lista, areas) {
+//
+// `gerenciadas`: as ÁREAS GERENCIADAS do mesmo `/Session`, também POR SERVIDOR
+// (MEDIDO no Waze real, só leitura, nas duas contas do owner: 9 na ROW e 0 na NA
+// e na IL; 1, 0 e 0). O seletor "Área gerenciada" e a conferência da área do
+// filtro usavam as do perfil da ABERTURA, mesmo com a fila noutro servidor: quem
+// só edita na NA abria na ROW, o app o levava pra NA, e o seletor mostrava só
+// "Nenhuma" (auditoria da rodada 10, R10-6-03). Ficam as daquele servidor (lidas
+// por `areasGerenciadasLidas`); sem a lista, as daquele servidor não mudam.
+let editaveisPorServidor = { conta: null, lidos: {}, caixas: {}, gerenciadas: {} };
+function anotarEditaveis(perfil, regiao, lista, areas, gerenciadas) {
     if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined || !regiao) return;
     const ids = (Array.isArray(lista) ? lista : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    if (editaveisPorServidor.conta !== String(perfil.id)) editaveisPorServidor = { conta: String(perfil.id), lidos: {}, caixas: {} };
+    if (editaveisPorServidor.conta !== String(perfil.id)) editaveisPorServidor = { conta: String(perfil.id), lidos: {}, caixas: {}, gerenciadas: {} };
     editaveisPorServidor.lidos[regiao] = ids;
     if (Array.isArray(areas)) {
         if (!editaveisPorServidor.caixas) editaveisPorServidor.caixas = {};
         editaveisPorServidor.caixas[regiao] = caixaDaMinhaArea({ areas });
     }
+    if (Array.isArray(gerenciadas)) {
+        if (!editaveisPorServidor.gerenciadas) editaveisPorServidor.gerenciadas = {};
+        editaveisPorServidor.gerenciadas[regiao] = gerenciadas.filter((a) => a && typeof a === 'object');
+    }
+}
+// As áreas gerenciadas do servidor `regiao` que o app leu pra conta de `perfil`
+// (por padrão, a de agora), ou `null` quando não leu: aí quem pergunta usa as do
+// perfil que tem, como antes (R10-6-03).
+function areasGerenciadasLidas(regiao, perfil = AppState.profile) {
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return null;
+    if (editaveisPorServidor.conta !== String(perfil.id)) return null;
+    const lidas = editaveisPorServidor.gerenciadas;
+    return lidas && Object.prototype.hasOwnProperty.call(lidas, regiao) ? lidas[regiao] : null;
 }
 // Os editáveis do servidor `regiao` que o app leu pra conta de agora, ou
 // `null` quando não leu (`[]` é "leu, e a pessoa não edita lá").
@@ -4867,6 +4888,11 @@ async function aoTrocarRegiaoNoModal(e) {
     // 2026-09-29, achado 12). Outra região é outro país: a área gerenciada que o
     // seletor mostrava era do país de antes, e o `populateCountrySelect` a tira
     // (ver `aoMudarPaisNaTela`).
+    //
+    // As OPÇÕES de área também são da região que o seletor mostra agora: as
+    // áreas gerenciadas são por servidor (R10-6-03), e com as da região de antes
+    // dava pra aplicar a área de um servidor junto da região de outro.
+    populateManagedAreaSelect({ manterEscolha: true, regiao });
     if (populateCountrySelect(r.countries || [], regiao)) {
         const area = $('filterManagedArea');
         if (area) {
@@ -4918,10 +4944,18 @@ function aoMudarPaisNaTela() {
 // As duas opções de texto levam o `data-i18n`, como a do HTML: sem ele, trocar
 // o idioma nas Preferências deixava "Nenhuma" em português na aba Filtros do
 // mesmo modal (F6), porque o `applyI18n` só alcança quem tem a chave.
-function populateManagedAreaSelect({ manterEscolha = false } = {}) {
+//
+// E as áreas são as do SERVIDOR da região que o modal mostra (`regiao`; por
+// padrão, a do seletor de região), que o app leu (`areasGerenciadasLidas`): as
+// áreas gerenciadas do `/Session` são POR SERVIDOR, e o perfil guardado é o do
+// servidor em que ele foi pedido (R10-6-03). Servidor que o app não leu: as do
+// perfil que ele tem, como antes.
+function populateManagedAreaSelect({ manterEscolha = false, regiao = null } = {}) {
     const select = document.getElementById('filterManagedArea');
     const escolha = manterEscolha ? select.value : AppState.filters.managedAreaId;
-    const areas = (AppState.profile && AppState.profile.managedAreas) || [];
+    const regiaoNaTela = document.getElementById('filterRegion');
+    const lidas = areasGerenciadasLidas(regiao || (regiaoNaTela && regiaoNaTela.value) || API.getRegion());
+    const areas = Array.isArray(lidas) ? lidas : ((AppState.profile && AppState.profile.managedAreas) || []);
     const salva = AppState.filters.managedAreaId;
     const salvaSemNome = !AppState.profile && !!salva;
     select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>'
@@ -5796,9 +5830,11 @@ async function loadProfileAndAuxData() {
     }
     // Os editáveis do perfil são do servidor em que ele foi PEDIDO (ver
     // `editaveisLidos`, R7-6-02).
-    // E a caixa das áreas do mesmo `/Session`, que também é dele (R9-6-04).
+    // E a caixa das áreas do mesmo `/Session`, que também é dele (R9-6-04), e as
+    // áreas gerenciadas (R10-6-03).
     if (profileRes.success && profileRes.profile) {
-        anotarEditaveis(profileRes.profile, regiaoPedida, profileRes.profile.editableCountryIDs, profileRes.profile.areas);
+        anotarEditaveis(profileRes.profile, regiaoPedida, profileRes.profile.editableCountryIDs, profileRes.profile.areas,
+            profileRes.profile.managedAreas);
     }
     if (definirPerfil(profileRes)) await completarPerfilChegado(profileRes.profile, epoca);
 }
@@ -6034,7 +6070,8 @@ async function paisDoPerfil(perfil, epoca) {
         // região (ver `editaveisLidos`, R7-6-02). Só a que VEIO: a pergunta que
         // falhou não diz que a pessoa não edita lá.
         // E a caixa das áreas de lá: com "Minha área", é ela que decide (R9-6-04).
-        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la, r.profile.areas);
+        // E as áreas gerenciadas de lá, pro seletor dos Filtros (R10-6-03).
+        if (r && r.success && r.profile) anotarEditaveis(perfil, regiao, la, r.profile.areas, r.profile.managedAreas);
         if (la.length) return minhaArea ? { regiao, pais: la[0], minhaArea: true } : { regiao, pais: la[0] };
     }
     return null;
@@ -6141,6 +6178,8 @@ function redesenharLugarNosFiltros(antes) {
     const abrindo = !!paisSel.dataset.carregando && !esperaDosFiltros.regiao;
     if (String(paisSel.value) !== String(antes.pais) && !(abrindo && API.getRegion() !== antes.regiao)) return;
     regiaoSel.value = API.getRegion();
+    // As áreas gerenciadas da região que a tela passa a mostrar (R10-6-03).
+    populateManagedAreaSelect();
     // Estado e área eram do país de antes (o `irProPaisDoPerfil` os zerou).
     aoMudarPaisNaTela();
     popularPaisEstado();
@@ -9736,8 +9775,10 @@ async function handleUnauthorized() {
             // da rodada 8, R8-6-03, MEDIDO no navegador). Antes do
             // `definirPerfil`, na ordem da carga: a anotação é da conta do
             // perfil, e outra conta recomeça a lista.
-            // A caixa das áreas também (R9-6-04).
-            if (r.success && r.profile) anotarEditaveis(r.profile, regiaoDaSonda, r.profile.editableCountryIDs, r.profile.areas);
+            // A caixa das áreas também (R9-6-04), e as áreas gerenciadas (R10-6-03).
+            if (r.success && r.profile) {
+                anotarEditaveis(r.profile, regiaoDaSonda, r.profile.editableCountryIDs, r.profile.areas, r.profile.managedAreas);
+            }
             const primeiroPerfil = !AppState.profile;
             if (definirPerfil(r) && primeiroPerfil) completarPerfilChegado(r.profile, epocaDaSessao);
             // O perfil revelou que OUTRA conta tomou o aparelho noutra aba, e
@@ -10985,10 +11026,17 @@ let buscaSemResposta = false;
 // 2026-10-01, R5-1 F4 e R56-2). Sai do filtro e é gravado. Devolve se a fila
 // tinha saído com ela — com "Minha área" a busca vai pela caixa, não por ela.
 // Perfil sem a lista (não se sabe) não decide nada.
+//
+// A lista que confere é a do SERVIDOR da fila (a região aplicada), quando o app
+// a leu: as áreas gerenciadas são por servidor (R10-6-03), e a área do filtro é
+// buscada lá. Sem leitura de lá, a do perfil que chegou, como antes.
 function esquecerAreaForaDoPerfil(perfil) {
     const salva = AppState.filters.managedAreaId;
-    if (!salva || !perfil || !Array.isArray(perfil.managedAreas)) return false;
-    if (perfil.managedAreas.some((a) => a && String(a.id) === String(salva))) return false;
+    if (!salva || !perfil) return false;
+    const lidas = areasGerenciadasLidas(API.getRegion(), perfil);
+    const areas = Array.isArray(lidas) ? lidas : perfil.managedAreas;
+    if (!Array.isArray(areas)) return false;
+    if (areas.some((a) => a && String(a.id) === String(salva))) return false;
     AppState.filters.managedAreaId = '';
     saveFilters();
     return !AppState.filters.myArea;

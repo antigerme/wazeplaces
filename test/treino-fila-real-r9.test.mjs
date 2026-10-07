@@ -151,6 +151,8 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
     aoMudarAFilaPorBaixo: () => {}, caixaDaMinhaArea: () => [-38.5, -13, -38.2, -12.8], desligarMinhaAreaSemCaixa: () => {},
     // A caixa da área POR SERVIDOR e a lista de países pela fonte única (R9-6-04, R9-6-01, do lote dos Filtros).
     caixaDaMinhaAreaEm: () => [-38.5, -13, -38.2, -12.8],
+    // As áreas gerenciadas por servidor (R10-6-03, test/filtros-aplicar): nenhum lido, valem as do perfil.
+    areasGerenciadasLidas: () => null,
     listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
     // A busca de VERDADE não roda aqui: o que importa é ONDE ela sairia.

@@ -104,6 +104,8 @@ function montarRegiao({ resposta }) {
       listCountries: () => new Promise((ok) => { soltar = ok; }), listStates: async () => ({ success: true, states: [] }) },
     escapeHtml: (x) => String(x), t: (k) => k, showToast: (m, tipo) => log.push(tipo + ':' + m),
     ordenarPorNome: (l) => l, i18nLocale: () => 'pt-BR',
+    // As áreas gerenciadas da região nova (R10-6-03, test/filtros-aplicar).
+    populateManagedAreaSelect: () => {},
   };
   const chaves = Object.keys(deps);
   // O botão tem UM escritor (`aplicarEsperaDosFiltros`, test/filtros-aplicar),
