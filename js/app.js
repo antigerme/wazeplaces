@@ -3710,11 +3710,11 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // perde se a página morrer antes da resposta da primeira — a mesma perda, e a
 // espera é a que acerta quando a página só foi pro fundo e volta.
 //
-// `saiu`: as fotos que JÁ saíram do mapa por uma exclusão desta vez. A MESMA
-// foto pode ser excluída de novo pela foto ampliada de um IRMÃO do local — o
-// irmão só a perde quando a primeira pousa (`aplicarNosIrmaos`) —, e a segunda
-// não vai ao Waze: iria só pra voltar "já excluída", e a tela diria "Outro
-// editor já tinha excluído 👍" sobre a exclusão da própria pessoa.
+// A MESMA foto pode ser excluída de novo pela foto ampliada de um IRMÃO do local
+// — o irmão só a perde quando a primeira pousa (`aplicarNosIrmaos`) —, e a
+// segunda não vai ao Waze: iria só pra voltar "já excluída", e a tela diria
+// "Outro editor já tinha excluído 👍" sobre a exclusão da própria pessoa. Quem
+// lembra que ela saiu é a página, não a vez (`fotosQueSairamDoMapa`, R12-3-02).
 //
 // A APROVAÇÃO de uma foto do local entra na MESMA vez (auditoria da rodada 11,
 // R11-3-01): ela também muda a lista do local (a pendente vira aprovada), e o
@@ -3737,12 +3737,12 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
 // vez são exclusões — com uma no ar, a pílula do nome do local trava
 // (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada.
-const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, saiu: Set, n, exclusoes }
+const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, n, exclusoes }
 
 function vezDasFotosNoLocal(alvo, tipo) {
     const local = alvo.place.venueID;
     let vez = escritasDeFotoNoLocal.get(local);
-    if (!vez) { vez = { ultima: null, saiu: new Set(), n: 0, exclusoes: 0 }; escritasDeFotoNoLocal.set(local, vez); }
+    if (!vez) { vez = { ultima: null, n: 0, exclusoes: 0 }; escritasDeFotoNoLocal.set(local, vez); }
     const anterior = vez.ultima;
     let soltar;
     vez.ultima = new Promise((ok) => { soltar = ok; });
@@ -3752,14 +3752,51 @@ function vezDasFotosNoLocal(alvo, tipo) {
     const v = vez;
     return {
         anterior,                                   // nula: a vez já é desta
-        jaSaiu: () => v.saiu.has(alvo.id),
-        saiuDoMapa: () => { v.saiu.add(alvo.id); },
         soltar: () => {
             soltar();
             if (excluir) v.exclusoes--;
             if (--v.n === 0 && escritasDeFotoNoLocal.get(local) === v) escritasDeFotoNoLocal.delete(local);
         },
     };
+}
+
+// As fotos que SAÍRAM do mapa por uma exclusão desta página, por LOCAL
+// (`venueID|foto`) e com a época da sessão em que saíram (auditoria da rodada 12,
+// R12-3-02). Morava na VEZ do local (R10-3-03), que é apagada quando esvazia: a
+// exclusão de X pela camada de A que POUSAVA com a de X pela camada do IRMÃO B
+// ainda na janela do Desfazer (não tinha entrado na vez) esvaziava a vez e
+// esquecia que X saiu. A de B saía depois: um 2º pedido ao Waze, e "Outro editor
+// já tinha excluído 👍" sobre a exclusão da própria pessoa. E o Desfazer de B
+// nesse meio devolvia X à camada e ao dado de B como aprovada, com a lixeira,
+// com a foto já fora do mapa (MEDIDO nos dois casos, s12 e s12b, com os
+// controles).
+//
+// Duas perguntas, e a sessão só entra numa:
+//   · a exclusão NÃO VAI ao Waze (e não diz "outro editor") com a foto que saiu
+//     NESTA sessão (`soNestaSessao`) — quem a tirou foi esta pessoa;
+//   · o `devolverFoto` não devolve à tela a foto que saiu, seja de que sessão
+//     for: é fato do mapa. E a queda sobe a época ANTES de cancelar a janela do
+//     Desfazer (`derrubarSessao`), que devolve a foto.
+// Sai no "Sair" (`handleLogout`), com a memória das idas sem resposta. O teto é
+// o da corrida, não o do dia: a pergunta só importa enquanto uma janela do
+// Desfazer (3 s) ou uma escrita do local estiver no ar.
+const fotosQueSairamDoMapa = new Map();   // 'venueID|foto' → epocaDaSessao
+const FOTOS_QUE_SAIRAM_TETO = 50;
+
+function fotoSaiuDoMapa(place, id, soNestaSessao = false) {
+    if (!place || place.venueID == null) return false;
+    const epoca = fotosQueSairamDoMapa.get(place.venueID + '|' + id);
+    return epoca !== undefined && (!soNestaSessao || epoca === epocaDaSessao);
+}
+
+function anotarFotoQueSaiuDoMapa(place, id) {
+    if (!place || place.venueID == null) return;
+    const chave = place.venueID + '|' + id;
+    fotosQueSairamDoMapa.delete(chave);
+    fotosQueSairamDoMapa.set(chave, epocaDaSessao);
+    if (fotosQueSairamDoMapa.size > FOTOS_QUE_SAIRAM_TETO) {
+        fotosQueSairamDoMapa.delete(fotosQueSairamDoMapa.keys().next().value);
+    }
 }
 
 // Uma EXCLUSÃO de foto do local deste pedido está no ar — saiu pro Waze, ou
@@ -3961,13 +3998,13 @@ async function enviarExclusao(alvo) {
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
     aplicarTravaDeAcao();
     try {
-        if (vez.anterior) {
-            await vez.anterior;
-            // A MESMA foto saiu do mapa pela anterior (pelo irmão, ver
-            // `vezDasFotosNoLocal`): nada a mandar. O fim é o de uma exclusão que
-            // pousou — depois da queda, só pra quem ainda vê o pedido.
-            if (vez.jaSaiu()) return epoca === epocaDaSessao || pedidoAindaNaTela(alvo.place);
-        }
+        if (vez.anterior) await vez.anterior;
+        // A MESMA foto já saiu do mapa por outra exclusão DESTA sessão — a do
+        // irmão, que estava no ar com esta na vez (R10-3-03) ou que pousou com
+        // esta ainda na janela do Desfazer (R12-3-02, `fotosQueSairamDoMapa`):
+        // nada a mandar. O fim é o de uma exclusão que pousou — depois da queda,
+        // só pra quem ainda vê o pedido.
+        if (fotoSaiuDoMapa(alvo.place, alvo.id, true)) return epoca === epocaDaSessao || pedidoAindaNaTela(alvo.place);
         // Com a MESMA política de retentativa do resto (o renomear já a tinha):
         // uma oscilação de rede virava "não deu pra excluir" na primeira falha
         // (auditoria de 2026-09-25). Repetir é seguro: a exclusão relê o local,
@@ -3982,8 +4019,6 @@ async function enviarExclusao(alvo) {
             r = await refazerDepoisDo401(epoca, enviar);
         }
         lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, !!(r && r.success), epoca);
-        // A foto saiu do mapa: a mesma foto, numa exclusão que espera a vez, não sai de novo.
-        if (r && r.success) vez.saiuDoMapa();
         // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a foto
         // que a exclusão não tirou do mapa volta pra tela (V2).
         const outraSessao = epoca !== epocaDaSessao;
@@ -4000,6 +4035,10 @@ async function enviarExclusao(alvo) {
             // novo), no pedido e no irmão (auditoria de 2026-10-01, R6-3-01).
             // Só pra quem ainda vê o pedido: depois do "Sair" não há tela.
             if (outraSessao && !pedidoAindaNaTela(alvo.place)) return false;
+            // A foto saiu do mapa: a MESMA foto, pela camada de um irmão — na vez
+            // ou ainda na janela do Desfazer —, não sai de novo nem volta à tela
+            // (R12-3-02, `fotosQueSairamDoMapa`).
+            anotarFotoQueSaiuDoMapa(alvo.place, alvo.id);
             // Sem toast de sucesso: a foto sumindo JÁ é a confirmação, e
             // anunciar o que a pessoa está vendo acontecer é ruído. O aviso
             // fica só pro caso em que nada muda na tela por causa dela — e só
@@ -4064,8 +4103,15 @@ function aplicarNosIrmaos(place, aplicar) {
 }
 
 // Recoloca a foto onde estava — no desfazer e na falha do envio.
+//
+// Menos a foto que JÁ SAIU do mapa por outra exclusão desta página — a da camada
+// de um IRMÃO, que pousou com esta na janela do Desfazer (R12-3-02,
+// `fotosQueSairamDoMapa`): ela voltava à camada e ao pedido como aprovada, com a
+// lixeira, sem estar no mapa. Nada volta, e devolve `false`: quem avisa que a
+// foto voltou (`escritaDoLightboxSemSessao`) fica calado.
 function devolverFoto(alvo) {
     const p = alvo.place;
+    if (fotoSaiuDoMapa(p, alvo.id)) return false;
     if (p && Array.isArray(p.imageUrls) && !p.imageUrls.some((u) => u.indexOf(alvo.id) !== -1)) {
         p.imageUrls.splice(Math.min(alvo.idx, p.imageUrls.length), 0, alvo.url);
         if (Array.isArray(p.approvedImageIds) && !p.approvedImageIds.includes(alvo.id)) p.approvedImageIds.push(alvo.id);
@@ -11436,10 +11482,12 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
     // Quem entrar depois começa do zero: a fila dele vem da busca dele. As idas
     // sem resposta das escritas da foto também (R6-3-04): eram de quem saiu. E o
-    // que a outra aba decidiu, com os avisos que esperavam a conta (R12-2-01/05).
+    // que a outra aba decidiu, com os avisos que esperavam a conta (R12-2-01/05),
+    // e as fotos que as exclusões de quem saiu tiraram do mapa (R12-3-02).
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
     idasSemRespostaGuardadas.clear();
+    fotosQueSairamDoMapa.clear();
     if (typeof esquecerDecididasPorOutraAba === 'function') esquecerDecididasPorOutraAba({ comOsAvisos: true });
     // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
     // de tudo" nao abre excecao que ninguem decidiu. Leva junto os pousos
