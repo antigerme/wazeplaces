@@ -6838,10 +6838,17 @@ async function completarPerfilChegado(perfil, epoca) {
         // com o pulado de volta como o card da frente; auditoria da rodada 13,
         // R13-6-01 = R13-4-02). A área salva que o perfil não tem
         // (`refazerPelaArea`) e "Minha área" desligada pela falta de caixa mudam o
-        // FILTRO, e a fila da tela é de outro filtro: é refeita. O treino aberto
-        // anota, como sempre (R9-7-04).
+        // FILTRO, e a fila da tela é de outro filtro: é refeita.
+        //
+        // Com o TREINO aberto, a mesma régua, pela fila REAL que ele guarda (o
+        // `retomarBusca` pergunta à `filaReal`): VAZIA, o refazer fica anotado pro
+        // `sair()` (R9-7-04); com CARD, só retoma — o `startFetching` sai na
+        // primeira linha no treino, e o `sair()` devolve a fila e repõe pelo
+        // `maybePrefetch`. Anotado, o "Sair" do treino refazia a fila guardada: os
+        // pulados voltavam como o card da frente (MEDIDO no navegador; o irmão do
+        // R13-6-01, gotcha #63).
         else if ((refazerFila || refazerPelaArea || filaEsperaPerfil) && epoca === epocaDaSessao) {
-            if (!refazerPelaArea && AppState.filters.myArea && !(typeof Treino !== 'undefined' && Treino.ativo === true)) {
+            if (!refazerPelaArea && AppState.filters.myArea) {
                 filaEsperaPerfil = false;
                 retomarBusca();
             } else refazerFilaReal();
@@ -7052,9 +7059,10 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
 }
 
 // A fila REAL refeita SEM gesto da pessoa: porque o PERFIL chegou — o país de
-// quem entra (`irProPaisDoPerfil`), a busca que esperava por ele ("Minha área")
-// ou a área salva que ele não tem (`completarPerfilChegado`) — ou porque a rede
-// voltou com a fila vazia (`retomarBusca`). Com o TREINO aberto, a fila real
+// quem entra (`irProPaisDoPerfil`), a busca que esperava por ele ("Minha área",
+// com a fila vazia: com card ela só retoma, R13-6-01) ou a área salva que ele
+// não tem (`completarPerfilChegado`) — ou porque a rede voltou com a fila vazia
+// (`retomarBusca`). Com o TREINO aberto, a fila real
 // está guardada nele e a da tela são os EXEMPLOS: o `resetQueue` daqui o
 // encerrava CALADO — a faixa "nada é enviado ao Waze" sumia, o card da frente
 // virava um pedido real e o ✕ seguinte ia pro Waze no nome da pessoa (R9-7-04,
