@@ -73,7 +73,8 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
   };
   const registrosFica = [];
-  const nomes = ['marcaDaSessao', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
+  // `marcaDestaAba`: a sessão desta aba é a da MEMÓRIA (R12-1-03).
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
     'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao'];
   const chaves = Object.keys(deps);
@@ -191,7 +192,8 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
     AppState, navigator: { onLine: true }, epocaDaSessao: 0,
     API: {
-      getSession: () => token,
+      // A sessão desta aba é a da MEMÓRIA (R12-1-03): a mesma, nos dois.
+      getSession: () => token, sessionToken: token,
       markAsRead: async (v) => { enviados.push(v); return { success: true }; },
       rejectPlace: async (v) => { enviados.push(v); return { success: true }; },
     },
@@ -209,7 +211,7 @@ function drenar({ itens, perfil, token = 'tok-B', guardada = null }) {
   const app = new Function(...chaves, `let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
     const pedidosEmAndamento = new Set();
-    ${['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',
+    ${['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida', 'sessaoVivaDepoisDe',
        'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba', 'esvaziarFilaDeSaida'].map(fatiar).join('\n')}
     return { esvaziarFilaDeSaida, carregarFilaDeSaida, esperando: () => saidaEsperandoConta };`)(...chaves.map((k) => deps[k]));
   return { app, enviados, log, AppState, guardado };
@@ -390,7 +392,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esvaziarSeletorDeAreas: () => {},   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
   };
-  const nomes = ['marcaDaSessao', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada',
     'deixarSoAsChamadasDaSessao'];
   const chaves = Object.keys(deps);
@@ -436,9 +438,9 @@ test('a recusa automática só age com a conta CONFIRMADA nesta sessão (`contaC
     const g = new Map();
     if (guardada) g.set('waze_places_conta', JSON.stringify(guardada));
     return new Function('AppState', 'safeLS', 'CONTA_KEY', 'API', 'contaConfirmadaNestaAba',
-      fatiar('marcaDaSessao') + '\n' + fatiar('contaConfirmada')
+      fatiar('marcaDaSessao') + '\n' + fatiar('marcaDestaAba') + '\n' + fatiar('contaConfirmada')
       + '\nreturn contaConfirmada();')({ profile: perfil }, { get: (k) => (g.has(k) ? g.get(k) : null) },
-      'waze_places_conta', { getSession: () => token }, nestaAba);
+      'waze_places_conta', { getSession: () => token, sessionToken: token }, nestaAba);
   };
   assert.equal(confirma({ id: 222 }, { id: '222', s: marca('tok-B') }, 'tok-B'), true);
   assert.equal(confirma({ id: 222 }, { id: '111', s: marca('tok-A') }, 'tok-B'), false,

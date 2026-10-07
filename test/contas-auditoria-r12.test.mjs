@@ -1,0 +1,308 @@
+// A conta, as abas e o login DESTA aba (auditoria da rodada 12, R12-1 e R12-5 —
+// o lote 16 da área "contas"):
+//
+//  · R12-1-03 — a adoção calada (R9-1-03) por mais duas portas: a resposta de um
+//    "invisível" que chega depois da queda, e o "Conectar outro aparelho" tocado
+//    durante a renovação — as perguntas "esta aba tem sessão?" liam o
+//    `getSession`, que com a memória vazia GRAVA nela a sessão da outra aba.
+//
+// O harness roda as funções DE VERDADE, fatiadas do app.js (e o `api.js` inteiro,
+// num contexto do `vm`, onde o efeito do `getSession` mora): o que o teste não
+// fornece vira um "buraco negro" que aceita qualquer chamada e anota o nome. Cada
+// teste foi visto REPROVANDO com o conserto desfeito (as sabotagens estão no
+// relatório do lote).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const ler = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+// Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
+const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+const APP = ler('js/app.js');
+const APP_SEM = semComentario(APP);
+const I18N = ler('js/i18n.js');
+
+function fatiar(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let par = 0, i = APP_SEM.indexOf('(', m.index);
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '(') par++;
+    else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+  }
+  let prof = 0;
+  for (let j = APP_SEM.indexOf('{', i); j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '{') prof++;
+    else if (APP_SEM[j] === '}' && --prof === 0) {
+      const corpo = APP_SEM.slice(m.index, j + 1);
+      assert.ok(corpo.length > 40, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
+      return corpo;
+    }
+  }
+  throw new Error('não fechou: ' + nome);
+}
+const constante = (nome) => {
+  const m = new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP);
+  assert.ok(m, `sumiu a constante ${nome}`);
+  return new Function(`return ${m[1]};`)();
+};
+
+// Um "buraco negro": aceita qualquer propriedade e qualquer chamada, e anota as
+// chamadas pelo caminho.
+function buracoNegro(nome, chamou) {
+  const f = function () {};
+  return new Proxy(f, {
+    get: (t, k) => {
+      if (k === Symbol.toPrimitive) return () => '';
+      if (k === 'then' || typeof k !== 'string') return undefined;
+      return buracoNegro(nome + '.' + k, chamou);
+    },
+    apply: () => { chamou.push(nome); return buracoNegro(nome + '()', chamou); },
+    set: () => true,
+  });
+}
+
+// `deps`: o que as funções enxergam (funções e as variáveis de módulo, que elas
+// leem e escrevem direto no objeto). O resto é buraco negro.
+function montar(nomes, deps) {
+  const chamou = [];
+  const escopo = new Proxy(deps, {
+    has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
+    get: (t, k) => {
+      if (k === Symbol.unscopables) return undefined;
+      if (k in t) return t[k];
+      if (typeof k !== 'string') return undefined;
+      return buracoNegro(k, chamou);
+    },
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  const corpo = nomes.map(fatiar).join('\n');
+  const fns = new Function('__escopo', `with (__escopo) {\n${corpo}\nreturn { ${nomes.join(', ')} };\n}`)(escopo);
+  return { ...fns, deps, chamou };
+}
+
+// O armazenamento de UMA aba, espionado: "não grava nada" se mede contando escritas.
+function aparelho(inicial = {}) {
+  const dados = new Map(Object.entries(inicial).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+  const escritas = [];
+  const localStorage = {
+    getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+    setItem: (k, v) => { escritas.push('grava:' + k); dados.set(k, String(v)); },
+    removeItem: (k) => { escritas.push('apaga:' + k); dados.delete(k); },
+  };
+  const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
+  return { dados, escritas, localStorage, safeLS };
+}
+
+// O `api.js` DE VERDADE: é nele que mora o efeito do `getSession` (com a memória
+// vazia, ele LÊ o aparelho e GRAVA na memória o que leu — adota). Um dublê
+// esconderia exatamente o defeito.
+function apiDeVerdade(guardado = {}) {
+  const dados = new Map(Object.entries(guardado));
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: {
+      getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+      setItem: (k, v) => { dados.set(k, String(v)); },
+      removeItem: (k) => { dados.delete(k); },
+    },
+    console, setTimeout, clearTimeout,
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API; this.safeLS = safeLS;', ctx);
+  return { API: ctx.API, safeLS: ctx.safeLS, dados };
+}
+
+// A TELA DE ENTRADA de mentira: a tela (com o "Colar cookies"), os diálogos dela
+// (com o campo de cada um) e o FOCO.
+function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
+  const els = {};
+  const el = (id, { oculto = false, pai = null } = {}) => {
+    const classes = new Set(oculto ? ['hidden'] : []);
+    const e = {
+      id, value: '', pai,
+      classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
+      contains(outro) { for (let x = outro; x; x = x.pai) if (x === e) return true; return false; },
+    };
+    els[id] = e;
+    return e;
+  };
+  const tela = el('authScreen');
+  el('pasteBtn', { pai: tela });
+  for (const [modal, campo] of [['pasteModal', 'cookiesTextarea'], ['pairEnterModal', 'pairCodeInput']]) {
+    const m = el(modal, { oculto: dialogo !== modal });
+    el(campo, { pai: m }).value = dialogo === modal ? texto : '';
+  }
+  el('closeAccessDenied', { pai: el('accessDeniedModal', { oculto: dialogo !== 'accessDeniedModal' }) });
+  el('appScreen', { oculto: true });
+  const body = { id: 'BODY' };
+  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null,
+    querySelector: () => null };
+  Object.defineProperty(document, 'activeElement', { get: () => (foco ? els[foco] : body) });
+  return {
+    els, document,
+    fechar(id) {
+      els[id].classList.add('hidden');
+      if (id === 'pasteModal') els.cookiesTextarea.value = '';
+      if (id === 'pairEnterModal') els.pairCodeInput.value = '';
+    },
+    mostrarOApp() { els.authScreen.classList.add('hidden'); els.appScreen.classList.remove('hidden'); },
+  };
+}
+
+const TOKEN = 'waze_session_token';
+const CONTA_KEY = constante('CONTA_KEY');
+const STATS_KEY = constante('STATS_KEY');
+const PREFERENCES_KEY = constante('PREFERENCES_KEY');
+const MODAIS_DA_ENTRADA = constante('MODAIS_DA_ENTRADA');
+const BOTAO_DA_ACAO = constante('BOTAO_DA_ACAO');
+const marcaDe = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
+const tique = () => new Promise((ok) => setImmediate(ok));
+const COLANDO = { dialogo: 'pasteModal', texto: 'COOKIES_DE_OUTRA_CONTA', foco: 'cookiesTextarea' };
+
+// ═══ R12-1-03 · "esta aba tem sessão?" se responde pela MEMÓRIA ═══════════════
+// A aba que caiu (a memória vazia) e a OUTRA aba com a sessão guardada no
+// aparelho: nenhuma das seis perguntas pode adotar a sessão de lá.
+function abaSemSessaoNaMemoria({ perfil = null } = {}) {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b', [CONTA_KEY]: JSON.stringify({ id: '4242', s: marcaDe('tok-b') }) });
+  const deps = {
+    API: real.API, safeLS: real.safeLS, CONTA_KEY, AppState: { profile: perfil },
+    // A prova de vida e o recuo que a OUTRA aba deixou — da sessão dela.
+    sessaoVivaEm: { s: marcaDe('tok-b'), em: 10 }, saidaRecuo: { s: marcaDe('tok-b'), n: 1, ate: Date.now() + 60000 },
+    contaConfirmadaNestaAba: null, SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'), dfato: () => {},
+  };
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'contaConfirmada', 'sessaoVivaDepoisDe',
+    'marcarSessaoViva', 'recuarSaida', 'saidaEmRecuo'], deps);
+  return { h, real, deps };
+}
+
+test('R12-1-03: as seis perguntas pela sessão DESTA aba, com a memória vazia, não adotam a sessão que outra aba guardou', () => {
+  const perguntas = {
+    contaAgora: (h) => assert.equal(h.contaAgora(), null, 'a conta da OUTRA aba (vista com a sessão dela) passou como a desta'),
+    contaConfirmada: (h) => assert.equal(h.contaConfirmada(), false, 'a conta foi dada como confirmada sem sessão nesta aba'),
+    sessaoVivaDepoisDe: (h) => assert.equal(h.sessaoVivaDepoisDe(0), false, 'a prova de vida da OUTRA aba valeu pra esta, sem sessão'),
+    marcarSessaoViva: (h) => h.marcarSessaoViva(),
+    recuarSaida: (h) => h.recuarSaida(),
+    saidaEmRecuo: (h) => assert.equal(h.saidaEmRecuo(), false, 'o recuo da OUTRA aba valeu pra esta, sem sessão'),
+  };
+  for (const [nome, perguntar] of Object.entries(perguntas)) {
+    const m = abaSemSessaoNaMemoria({ perfil: nome === 'contaConfirmada' ? { id: 4242 } : null });
+    perguntar(m.h);
+    assert.equal(m.real.API.temSessaoNaMemoria(), false,
+      `DEFEITO (${nome}): a pergunta ADOTOU calada a sessão da outra aba — a aba fica "logada" na tela de entrada, e o "Sair" de lá fecha o "Colar cookies" daqui`);
+  }
+  // CONTROLE do instrumento: o `getSession` de verdade, com a memória vazia, adota.
+  const c = abaSemSessaoNaMemoria();
+  assert.equal(c.real.API.getSession(), 'tok-b');
+  assert.equal(c.real.API.temSessaoNaMemoria(), true, 'CONTROLE: o `getSession` de verdade não grava mais na memória — o mecanismo mudou, reveja o teste');
+});
+
+test('R12-1-03: CONTROLE — com a sessão desta aba na memória, as perguntas respondem por ELA', () => {
+  const m = abaSemSessaoNaMemoria();
+  m.real.API.sessionToken = 'tok-b';                // a mesma sessão do aparelho, nesta aba
+  assert.equal(m.h.contaAgora(), '4242', 'a conta vista com a sessão desta aba deixou de valer');
+  assert.equal(m.h.sessaoVivaDepoisDe(0), true, 'a prova de vida desta sessão deixou de valer');
+  assert.equal(m.h.saidaEmRecuo(), true, 'o recuo desta sessão deixou de valer');
+  m.real.API.sessionToken = 'tok-OUTRA';            // outra sessão: nada da de lá vale
+  assert.equal(m.h.contaAgora(), null);
+  assert.equal(m.h.sessaoVivaDepoisDe(0), false);
+});
+
+// O "Conectar outro aparelho" durante a renovação da queda: a Ajuda ainda mostra
+// o botão, a memória está vazia, e a outra aba guardou a sessão dela.
+function pareamentoNaRenovacao({ memoria = null } = {}) {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b', [CONTA_KEY]: JSON.stringify({ id: '4242', s: marcaDe('tok-b') }) });
+  real.API.sessionToken = memoria;
+  const enviados = [];
+  real.API._post = async (rota, corpo) => { enviados.push([rota, corpo.sessionToken]); return { success: true, code: 'PRIVQRSTUVWXYZ234567', expiresIn: 300 }; };
+  const log = [];
+  const deps = {
+    API: real.API, safeLS: real.safeLS, CONTA_KEY, AppState: { profile: null, authenticated: false },
+    epocaDaSessao: 3, aberturaDoPareamento: 0, pareamentosEmitidos: new Set(), pairQrVenceEm: 0,
+    openModal: (id) => log.push('abriu ' + id), closeModal: (id) => log.push('fechou ' + id),
+    showToast: (msg) => log.push('aviso ' + msg), t: (k) => k, msgDoServidor: (r, d) => d,
+    handleUnauthorized: () => log.push('conferiu a sessão'),
+    desenharQrPareamento: () => log.push('desenhou o QR'), iniciarTickerPareamento: () => {},
+  };
+  const h = montar(['abrirPareamento', 'pareamentoTardio', 'avisarFalhaDoPareamento', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
+  return { h, real, enviados, log, deps };
+}
+
+test('R12-1-03: "Conectar outro aparelho" sem sessão NESTA aba não adota a da outra nem cria código com ela — "não deu pra gerar"', async () => {
+  const m = pareamentoNaRenovacao();
+  await m.h.abrirPareamento();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false,
+    'DEFEITO: o "Conectar outro aparelho" ADOTOU calado a sessão da outra aba (a tela de entrada vem com ela na memória)');
+  assert.deepEqual(m.enviados, [], 'DEFEITO: um código de pareamento foi criado com a sessão da OUTRA aba: ' + JSON.stringify(m.enviados));
+  assert.ok(m.log.includes('fechou pairShowModal') && m.log.includes('aviso toast.pairCreateError'),
+    'sem sessão, o diálogo não fechou com o "não deu pra gerar o código": ' + JSON.stringify(m.log));
+  assert.equal(m.deps.pareamentosEmitidos.size, 0);
+});
+
+test('R12-1-03: CONTROLE — com a sessão desta aba, o código sai com ELA (não com a guardada no aparelho)', async () => {
+  const m = pareamentoNaRenovacao({ memoria: 'tok-a' });
+  await m.h.abrirPareamento();
+  assert.deepEqual(m.enviados, [['parear', 'tok-a']], 'o código não saiu com a sessão desta aba');
+  assert.ok(m.log.includes('desenhou o QR') && !m.log.includes('fechou pairShowModal'));
+  assert.equal(m.deps.pareamentosEmitidos.size, 1);
+});
+
+// A RESPOSTA de um "invisível" que chega DEPOIS da queda desta aba, com a série de
+// 401 do desligar já conferida (`desligar401Em`): o `.then` perguntava pela prova
+// de vida pelo `getSession` — e adotava a sessão da outra aba.
+const T = 1791000000000;
+function desligarNoArNaQueda({ espiaoDaProva = false } = {}) {
+  const real = apiDeVerdade({ [TOKEN]: 'tok-b', [CONTA_KEY]: JSON.stringify({ id: '4242', s: marcaDe('tok-b') }),
+    [PREFERENCES_KEY]: JSON.stringify({ presenca: false }) });
+  real.API.sessionToken = 'tok-a';                  // a sessão DESTA aba (a outra é a guardada)
+  let responder = null;
+  real.API.presencaWaze = () => new Promise((ok) => { responder = ok; });
+  const ap = { localStorage: { getItem: (k) => (real.dados.has(k) ? real.dados.get(k) : null), setItem: (k, v) => real.dados.set(k, String(v)),
+    removeItem: (k) => real.dados.delete(k) } };
+  const AppState = { authenticated: true, profile: { id: 4242 }, preferences: { presenca: false } };
+  // A série de 401 do desligar JÁ conferida, e a prova de vida da sessão desta aba depois dela.
+  const presencaWme = { desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 1, desligarNoAr: 0,
+    ligarNaProxima: false, desligar401Em: T - 5000 };
+  const provas = [];
+  const deps = {
+    API: real.API, safeLS: real.safeLS, localStorage: ap.localStorage, AppState, presencaWme, CONTA_KEY, PREFERENCES_KEY,
+    preferenciasCarregadas: true, Date: { now: () => T }, dfato: () => {}, ABA_DESTA_PAGINA: 'aba-a',
+    sessaoVivaEm: { s: marcaDe('tok-a'), em: T - 1000 }, handleUnauthorized: () => {},
+  };
+  const nomes = ['presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
+    'savePreferences', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora'];
+  if (espiaoDaProva) deps.sessaoVivaDepoisDe = (t) => { provas.push(t); return false; };
+  else nomes.push('sessaoVivaDepoisDe');
+  const h = montar(nomes, deps);
+  // A queda desta aba: a memória solta, o perfil e o `authenticated` também.
+  const cair = () => { real.API.soltarSessao(); AppState.profile = null; AppState.authenticated = false; };
+  return { h, real, responder: (r) => responder(r), cair, provas, presencaWme };
+}
+
+test('R12-1-03: a resposta 401 de um "invisível" que chega DEPOIS da queda não adota a sessão da outra aba', async () => {
+  const m = desligarNoArNaQueda();
+  m.h.presencaWmeDesligar({ repeticao: true });    // a repetição no ar
+  m.cair();
+  m.responder({ success: false, errorCategory: 'unauthorized' });
+  await tique();
+  await tique();
+  assert.equal(m.real.API.temSessaoNaMemoria(), false,
+    'DEFEITO: a resposta do "invisível" ADOTOU calada a sessão da outra aba — a tela de entrada fica com ela na memória');
+});
+
+test('R12-1-03: a prova de vida só é perguntada com o 401 — a resposta boa (ou a falha de rede) não pergunta nada', async () => {
+  for (const [caso, resposta, perguntas] of [['sucesso', { success: true }, 0], ['rede', { success: false, errorCategory: 'transient', _motivo: 'TypeError' }, 0],
+    ['401 (CONTROLE)', { success: false, errorCategory: 'unauthorized' }, 1]]) {
+    const m = desligarNoArNaQueda({ espiaoDaProva: true });
+    m.h.presencaWmeDesligar({ repeticao: true });
+    m.cair();
+    m.responder(resposta);
+    await tique();
+    await tique();
+    assert.equal(m.provas.length, perguntas,
+      `(${caso}) a prova de vida foi perguntada ${m.provas.length} vez(es) — fora do 401 ela é pergunta à toa, e com a memória vazia era a porta da adoção`);
+  }
+});

@@ -19575,19 +19575,34 @@ function moverProFimDaSaida(item, campos) {
     return f;
 }
 
+// A marca da sessão DESTA aba — a da MEMÓRIA —, ou `null` sem nenhuma. As
+// perguntas "esta aba tem sessão, e qual?" se respondem por aqui, nunca pelo
+// `getSession`: com a memória vazia ele GRAVA nela a sessão que outra aba
+// guardou no aparelho, e isso já é ADOTÁ-LA (R9-1-03). A resposta de um
+// "invisível" que chegava depois da queda (`sessaoVivaDepoisDe`) e o "Conectar
+// outro aparelho" tocado durante a renovação (`contaAgora`) adotavam calados a
+// sessão da outra aba: a aba ficava "logada" na tela de entrada, a volta a ela
+// não adotava mais, e o "Sair" de lá fechava o "Colar cookies" daqui, com o que
+// estava sendo colado (auditoria da rodada 12, R12-1-03, MEDIDO).
+function marcaDestaAba() {
+    return API.sessionToken ? marcaDaSessao(API.sessionToken) : null;
+}
+
 // A sonda do `handleUnauthorized` RESPONDEU com o perfil: a sessão de agora está
 // viva neste instante.
 function marcarSessaoViva() {
-    sessaoVivaEm = { s: marcaDaSessao(API.getSession()), em: Date.now() };
+    sessaoVivaEm = { s: marcaDestaAba(), em: Date.now() };
 }
 
-// Houve confirmação de sessão viva, NESTA sessão, depois de `t`?
+// Houve confirmação de sessão viva, NESTA sessão, depois de `t`? Sem sessão
+// nesta aba, nenhuma.
 function sessaoVivaDepoisDe(t) {
-    return Number.isFinite(t) && sessaoVivaEm.s === marcaDaSessao(API.getSession()) && sessaoVivaEm.em > t;
+    const s = marcaDestaAba();
+    return Number.isFinite(t) && !!s && sessaoVivaEm.s === s && sessaoVivaEm.em > t;
 }
 
 function recuarSaida() {
-    const s = marcaDaSessao(API.getSession());
+    const s = marcaDestaAba();
     const n = saidaRecuo.s === s ? saidaRecuo.n + 1 : 1;
     const espera = SAIDA_RECUO_401_MS[Math.min(n, SAIDA_RECUO_401_MS.length) - 1];
     saidaRecuo = { s, n, ate: Date.now() + espera };
@@ -19595,7 +19610,8 @@ function recuarSaida() {
 }
 
 function saidaEmRecuo() {
-    return saidaRecuo.s === marcaDaSessao(API.getSession()) && Date.now() < saidaRecuo.ate;
+    const s = marcaDestaAba();
+    return !!s && saidaRecuo.s === s && Date.now() < saidaRecuo.ate;
 }
 
 // Tira da fila de saída o item deste pedido, achado pela chave: é a resposta do
@@ -19646,13 +19662,15 @@ function marcaDaSessao(token) {
 // A conta de AGORA: a do perfil vivo; sem ele (aberto sem rede), a guardada —
 // mas só se foi vista nesta MESMA sessão. Numa sessão nova, antes de o perfil
 // chegar, é desconhecida (`null`): a guardada é da sessão anterior, que pode
-// ser de outra pessoa.
+// ser de outra pessoa. E sem sessão NESTA aba (a renovação da queda, a tela de
+// entrada), também: a sessão é a da memória (`marcaDestaAba`, R12-1-03).
 function contaAgora() {
     const vivo = AppState.profile && AppState.profile.id;
     if (vivo !== undefined && vivo !== null && vivo !== '') return String(vivo);
     try {
         const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
-        if (c && c.id && c.s === marcaDaSessao(API.getSession())) return String(c.id);
+        const s = marcaDestaAba();
+        if (c && c.id && s && c.s === s) return String(c.id);
     } catch (e) { /* ilegível: desconhecida */ }
     return null;
 }
@@ -19679,7 +19697,9 @@ function contaConfirmada() {
     try {
         const c = JSON.parse(safeLS.get(CONTA_KEY) || 'null');
         if (!c || String(c.id) !== String(vivo)) return false;
-        const s = marcaDaSessao(API.getSession());
+        // A sessão DESTA aba, a da memória (R12-1-03): sem ela, nada confirmado.
+        const s = marcaDestaAba();
+        if (!s) return false;
         const aqui = contaConfirmadaNestaAba;
         return c.s === s || !!(aqui && aqui.id === String(vivo) && aqui.s === s);
     } catch (e) { return false; }
@@ -23239,7 +23259,12 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
             // anota pelo limitador. A sonda que não confirmou nada (5xx, rede)
             // não é prova, e numa sessão nova a marca é outra: o 401 dela
             // confere de novo — a sessão morta de verdade segue caindo.
-            const vivaDepois = typeof sessaoVivaDepoisDe === 'function'
+            //
+            // Perguntado SÓ com o 401: a resposta pode chegar depois da queda,
+            // com a memória desta aba vazia, e qualquer leitura da sessão pelo
+            // `getSession` ali adotava calada a que outra aba guardou no aparelho
+            // (R12-1-03; a pergunta, hoje, lê a memória — `marcaDestaAba`).
+            const vivaDepois = e401 && typeof sessaoVivaDepoisDe === 'function'
                 && sessaoVivaDepoisDe(presencaWme.desligar401Em) === true;
             if (e401 && !vivaDepois) {
                 presencaWme.desligar401Em = Date.now();

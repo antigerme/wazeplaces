@@ -97,7 +97,7 @@ const NOMES = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDeci
   'tirarDaFilaOQueAOutraAbaDecidiu', 'gestoNoDecididoPorOutraAba', 'avisarDecididoNaOutraAba',
   'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
   'handleReject', 'handleMarkAsRead', 'offlineLerPousos', 'registrarPouso',
-  'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'contaAgora',
+  'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
   'aplicarPousoDeOutraAba', 'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
   'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'quemDecideAgora'];
 

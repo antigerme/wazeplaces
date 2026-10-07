@@ -516,7 +516,7 @@ function montarResultado() {
     // O pedido recusado volta a ser card (F3).
     pedidosQueEntraramNaFila: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     showCurrentPlace: () => chamadas.push('card'), startFetching: () => chamadas.push('busca'),
-    API: { getRegion: () => 'row', getSession: () => 'tok' },
+    API: { getRegion: () => 'row', getSession: () => 'tok', get sessionToken() { return 'tok'; } },
     dlog: () => {}, dfato: () => {},
     registrarPouso: () => chamadas.push('pouso'), recordHistory: () => chamadas.push('historico'),
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
@@ -623,7 +623,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
-  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
     'devolverPedidoRecusado', 'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'pousouPorOutraAba', 'esvaziarFilaDeSaida',
     'handleActionResult', 'handleUnauthorized'];
@@ -644,7 +644,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
       await new Promise((ok) => setImmediate(ok)); relogio.t += 50; aoProvarRede(); return resposta();
     };
     const API = {
-      getSession: () => 'tok', getRegion: () => 'row',
+      getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row',
       getProfile: () => { medidas.sondas++; return rede(sonda); },
       rejectPlace: () => { const n = ++medidas.escritas; return rede(() => escrita(n)); },
       markAsRead: () => { const n = ++medidas.escritas; return rede(() => escrita(n)); },
@@ -693,10 +693,10 @@ test('O1: sonda que NÃO confirma (5xx, rede) não tira o item — mas o ciclo t
 });
 
 test('O1: a confirmação de OUTRA sessão não vale — e um pouso zera o recuo', () => {
-  const src = ['marcaDaSessao', 'marcarSessaoViva', 'sessaoVivaDepoisDe'].map(fatiar).join('\n');
+  const src = ['marcaDaSessao', 'marcaDestaAba', 'marcarSessaoViva', 'sessaoVivaDepoisDe'].map(fatiar).join('\n');
   const sessao = { token: 'tok-A', t: 1000 };
   const f = new Function('API', 'Date', `let sessaoVivaEm = { s: null, em: 0 };\n${src}
-    return { marcarSessaoViva, sessaoVivaDepoisDe };`)({ getSession: () => sessao.token }, { now: () => sessao.t });
+    return { marcarSessaoViva, sessaoVivaDepoisDe };`)({ getSession: () => sessao.token, get sessionToken() { return sessao.token; } }, { now: () => sessao.t });
   sessao.t = 2000; f.marcarSessaoViva();
   assert.equal(f.sessaoVivaDepoisDe(1500), true);
   assert.equal(f.sessaoVivaDepoisDe(2500), false, 'confirmação ANTES do 401 valeu como depois');
@@ -752,7 +752,7 @@ function aparelhoO5(guardado = new Map()) {
       ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
       atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
     };
-    const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
       'saidaEmRecuo', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'pousouPorOutraAba',
       'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
@@ -773,7 +773,7 @@ function aparelhoO5(guardado = new Map()) {
         aoProvarRede();
         return r === '702' ? { success: false, errorCategory: 'already_processed' } : { success: true };
       };
-      const API = { getSession: () => 'tok', getRegion: () => 'row', getCountry: () => 30, setSaindo: () => {},
+      const API = { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row', getCountry: () => 30, setSaindo: () => {},
         rejectPlace: (v) => rede('rejeitar', v), markAsRead: (v) => rede('ler', v) };
       ${nomes.map(fatiarComAsync).join('\n')}
       return { handleReject, descarregarAcaoPendente, esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
@@ -919,7 +919,7 @@ test('O2: com a `lista` de quem chama, o enfileirar não grava nem escreve no di
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null),
       set: (k, v) => { gravacoes++; guardado.set(k, String(v)); }, remove: (k) => guardado.delete(k) },
     SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 3,
-    API: { getRegion: () => 'row', getSession: () => 'tok' },
+    API: { getRegion: () => 'row', getSession: () => 'tok', get sessionToken() { return 'tok'; } },
     dfato: (k) => diario.push(k), updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null, marcaDaSessao: () => 'marca',
   };
@@ -966,7 +966,7 @@ function drenarO8(itens, resposta) {
     // TETO do instrumento: um laço que volte (mover e seguir na mesma passada)
     // não pode prender o processo do teste — passado o teto, a "rede" nunca
     // responde, e as contagens reprovam em vez de pendurar.
-    API: { getSession: () => 'tok',
+    API: { getSession: () => 'tok', get sessionToken() { return 'tok'; },
       rejectPlace: async (v) => { if (medidas.enviados.length > 60) return new Promise(() => {});
         relogio.t += 50; medidas.enviados.push(v); return resposta(v); },
       markAsRead: async (v) => { if (medidas.enviados.length > 60) return new Promise(() => {});
@@ -985,7 +985,7 @@ function drenarO8(itens, resposta) {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // R5-1 F1: uma aba só
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
-  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'devolverPedidoRecusado',
     'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'esvaziarFilaDeSaida'];
   const chaves = Object.keys(deps);
@@ -1074,7 +1074,7 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
     const deps = {
       AppState, navigator: { onLine: true, locks: aparelho.locks }, epocaDaSessao: 0,
       safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
-      API: { getSession: () => 'tok',
+      API: { getSession: () => 'tok', get sessionToken() { return 'tok'; },
         rejectPlace: async (v) => { aparelho.enviados.push(v); return rede(v, aparelho, nome); },
         markAsRead: async (v) => { aparelho.enviados.push(v); return rede(v, aparelho, nome); } },
       SAIDA_KEY: 'waze_places_saida', CONTA_KEY: 'waze_places_conta', SAIDA_RITMO_MS: 5,
@@ -1094,7 +1094,7 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
       // é ali que outra aba "grava por cima" no mesmo instante.
       setTimeout: (fn, ms) => { if (ms === 10 && aparelho.aoAssentar) aparelho.aoAssentar(nome); return setTimeout(fn, ms); },
     };
-    const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
       'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'travaDaSaida', 'esperarOutraAbaEsvaziar',
       'reivindicadoPorOutraAba', 'reivindicarNaSaida', 'soltarReivindicacoes', 'esvaziarFilaDeSaida'];
     const chaves = Object.keys(deps);
@@ -1268,7 +1268,7 @@ function aparelhoDoGesto({ resposta }) {
     marcaDaSessao: () => 'marca', contaAgora: () => '1', reivindicacaoDestaAba: () => ({ rv: 'aba' }),
     soltarMarcaDosItens: () => {}, anotarSeAbriuASaida: () => {}, devolverPedidoRecusado: () => {},
     tirarDaFilaDeSaida: () => true, pousouPorOutraAba: () => {}, decisaoDepoisDaQueda: () => {},
-    API: { getSession: () => 'tok', getRegion: () => 'row', getCountry: () => filtro.pais,
+    API: { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row', getCountry: () => filtro.pais,
       rejectPlace: async (v) => { medidas.envios.push(v); await null; return resposta(); } },
     console: { error: () => {} },
   };
