@@ -866,11 +866,20 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // de quem é a sessão nova (ver `filaAtravessouSessao`).
             if (manterFila) filaAtravessouSessao = true;
             else resetQueue();
+            // O perfil da sessão nova é pedido ANTES de a conta ser conhecida: com
+            // OUTRA conta, a troca (`esquecerOutraConta`) refaz JÁ a fila que
+            // atravessou a sessão, e a busca de "Minha área" espera o perfil
+            // (`startFetching`). Pedido depois, a busca esperava o da sessão que
+            // caiu, já resolvido, e saía sem perfil: a tela de falha aparecia até o
+            // novo chegar (MEDIDO: ~1,5 s) — ou, com a carga anterior há mais de
+            // um minuto, o `refazerPerfilSeFaltar` da busca pedia o perfil e esta
+            // linha pedia de novo: DOIS `/Session` por servidor (auditoria da
+            // rodada 11, R11-6-02).
+            AppState._profilePromise = loadProfileAndAuxData();
             // A conta, quando a ponte a repassa (a versão da extensão que
             // repassa o `conta` do `testar-cookies`): com OUTRA conta, a fila
             // que atravessou a sessão sai JÁ, sem esperar o perfil (K2/K8).
             conhecerContaDoLogin(d.conta);
-            AppState._profilePromise = loadProfileAndAuxData();
             if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
             startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora

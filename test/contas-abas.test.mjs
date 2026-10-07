@@ -2854,3 +2854,45 @@ test('R11-1-04: a validação dos cookies trava TAMBÉM o "Entrar com um código
   h.setAuthLoading(false);
   assert.ok(!botoes.pairEnterBtn.disabled && !botoes.pasteBtn.disabled && !botoes.uploadBtn.disabled, 'os botões não destravaram no fim');
 });
+
+// ── R11-6-02 (b) · a troca de conta que a ponte revela espera o perfil NOVO ──────
+// Com a extensão que repassa a conta (0.3.4), o `conhecerContaDoLogin` rodava
+// antes de existir a carga do perfil da sessão nova: a troca refazia a fila e
+// buscava JÁ (`esquecerOutraConta` → `startFetching`), e a busca de "Minha área"
+// esperava o perfil da sessão que caiu — já resolvido: "Falha ao carregar" por
+// ~1,5 s até o perfil novo chegar, ou, com a carga anterior há mais de um
+// minuto, o perfil carregado DUAS vezes (auditoria da rodada 11, R11-6-02, MEDIDO).
+test('R11-6-02: a troca de conta que a ponte da extensão revela acha o perfil da sessão NOVA no ar — uma carga só', async () => {
+  const t = telaDeEntrada({});
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: () => {},
+  };
+  const VELHA = Promise.resolve('o perfil da sessão que caiu');
+  const AppState = { _profilePromise: VELHA };
+  const cargas = [];
+  let aBuscaDaTrocaEsperou = null;
+  const deps = {
+    window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState,
+    API: { setSession: () => {}, temSessaoNaMemoria: () => false, sessionToken: null },
+    authInFlight: false, resgateEmVoo: false, callWithRetry: (fn) => fn(), safeLS: { get: () => null },
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {}, closeModal: () => {}, showMainScreen: () => {}, resetQueue: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {},
+    loadProfileAndAuxData: () => { const p = Promise.resolve('o perfil da sessão nova'); cargas.push(p); return p; },
+    // A conta da ponte é OUTRA: a troca refaz a fila e a busca sai JÁ — esperando o `_profilePromise` de agora.
+    conhecerContaDoLogin: (conta) => { if (conta === '222') aBuscaDaTrocaEsperou = AppState._profilePromise; },
+  };
+  const h = montar(['entrarPelaExtensao', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });   // a renovação da queda
+  for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', action: 'sessao', token: 'tokB', conta: '222' } });
+  assert.equal(await p, true, 'PRÉ-CONDIÇÃO: a renovação não entrou');
+  assert.equal(cargas.length, 1, `o perfil foi pedido ${cargas.length} vezes pela renovação`);
+  assert.notEqual(aBuscaDaTrocaEsperou, VELHA,
+    'DEFEITO: a troca de conta que a ponte revela buscou esperando o perfil da sessão que CAIU — "Falha ao carregar" até o novo chegar');
+  assert.equal(aBuscaDaTrocaEsperou, cargas[0], 'a troca não achou a carga do perfil da sessão nova');
+});
