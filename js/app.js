@@ -4938,6 +4938,18 @@ function editaveisLidos(regiao) {
     const lidos = editaveisPorServidor.lidos;
     return Object.prototype.hasOwnProperty.call(lidos, regiao) ? lidos[regiao] : null;
 }
+// O servidor `regiao` NUNCA foi lido pra conta do perfil de agora, e outro foi:
+// o que o perfil guardado traz (as áreas, as áreas gerenciadas) é de OUTRO
+// servidor, e não cruza com este — a mesma régua do país (os ids não cruzam
+// servidores). O app anota sempre o servidor em que perguntou o perfil (a carga
+// e a sonda), então o perfil de agora tem pelo menos uma leitura; sem nenhuma
+// (o perfil sem id), não se sabe de onde ele é, e nada se afirma.
+function servidorNuncaLido(regiao) {
+    const perfil = AppState.profile;
+    if (!perfil || typeof perfil !== 'object' || perfil.id === null || perfil.id === undefined) return false;
+    if (editaveisPorServidor.conta !== String(perfil.id)) return false;
+    return !Object.prototype.hasOwnProperty.call(editaveisPorServidor.lidos, regiao);
+}
 
 // A lista de países que o seletor MOSTRA, pela MESMA régua na abertura dos
 // Filtros (a lista da região aplicada, `AppState.countries`) e na troca de
@@ -5216,16 +5228,27 @@ function aoMudarPaisNaTela() {
 // E as áreas são as do SERVIDOR da região que o modal mostra (`regiao`; por
 // padrão, a do seletor de região), que o app leu (`areasGerenciadasLidas`): as
 // áreas gerenciadas do `/Session` são POR SERVIDOR, e o perfil guardado é o do
-// servidor em que ele foi pedido (R10-6-03). Servidor que o app não leu: as do
-// perfil que ele tem, como antes.
+// servidor em que ele foi pedido (R10-6-03).
+//
+// Servidor que o app NUNCA LEU pra esta conta (`servidorNuncaLido`): só
+// "Nenhuma". As do perfil guardado são de OUTRO servidor, e o seletor as
+// mostrava debaixo da região nova — MEDIDO no navegador: quem edita na ROW,
+// trocando a região do modal pra NA (nunca lida), via "Área SP (ROW)", e o
+// "Aplicar" buscava `na area 7001`, a área de um servidor com a região de outro
+// (auditoria da rodada 11, R11-6-03). Decisão (2026-10-07): a mesma régua de
+// "não cruzar" do país, sem pedido novo. A área SALVA também é de um servidor
+// só, o da região APLICADA: o "Carregando…" dela (sem o perfil) aparece só
+// debaixo da região dela.
 function populateManagedAreaSelect({ manterEscolha = false, regiao = null } = {}) {
     const select = document.getElementById('filterManagedArea');
     const escolha = manterEscolha ? select.value : AppState.filters.managedAreaId;
     const regiaoNaTela = document.getElementById('filterRegion');
-    const lidas = areasGerenciadasLidas(regiao || (regiaoNaTela && regiaoNaTela.value) || API.getRegion());
-    const areas = Array.isArray(lidas) ? lidas : ((AppState.profile && AppState.profile.managedAreas) || []);
+    const mostrada = regiao || (regiaoNaTela && regiaoNaTela.value) || API.getRegion();
+    const lidas = areasGerenciadasLidas(mostrada);
+    const areas = Array.isArray(lidas) ? lidas
+        : servidorNuncaLido(mostrada) ? [] : ((AppState.profile && AppState.profile.managedAreas) || []);
     const salva = AppState.filters.managedAreaId;
-    const salvaSemNome = !AppState.profile && !!salva;
+    const salvaSemNome = !AppState.profile && !!salva && mostrada === API.getRegion();
     select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>'
         + (salvaSemNome ? `<option value="${escapeHtml(salva)}" data-i18n="filters.carregando">${escapeHtml(t('filters.carregando'))}</option>` : '')
         + areas.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('');
