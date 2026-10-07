@@ -6811,8 +6811,88 @@ function anotarDecididosPorOutraAba(ev) {
     // e de volta à fila a sentinela acusava "voltou como card" e o ✕ aqui anotava
     // um `saida.repetida` sem `outraAba` (auditoria de 2026-10-03, R8-4-02). A
     // régua é a das outras perguntas de identidade (`filaRealComDevolvidos`).
-    for (const p of filaRealComDevolvidos()) {
+    //
+    // E o que está na JANELA DO DESFAZER desta aba (R10-2-02): o gesto daqui
+    // ainda não saiu, e a decisão da outra chegou antes à fila de saída — vale a
+    // primeira. No fim da janela a decisão daqui é descartada (`enfileirarSaida`
+    // a dá por repetida, mesmo depois de a de lá pousar e sair da fila de saída),
+    // e desfeita ela volta como card já anotado.
+    const pendente = AppState.pendingAction ? AppState.pendingAction.place : null;
+    const naJanela = Array.isArray(pendente) ? pendente : pendente ? [pendente] : [];
+    for (const p of [...filaRealComDevolvidos(), ...naJanela]) {
         if (p && typeof p === 'object' && novas.has(chaveDoPedido(p))) decididosPorOutraAbaComCardAqui.add(p);
+    }
+}
+
+// O que a OUTRA aba decidiu sai da fila DESTA (auditoria de 2026-10-07,
+// R10-2-02). Cada aba tem a sua fila de pedidos, e a decisão de lá não tirava o
+// card daqui: decidido de novo, ele contava outra vez no placar, no Histórico e
+// na "Mão firme", e dizia "Já tratado por outro editor" sobre a decisão da
+// própria pessoa — e, se lá tinha sido ✓, o ✕ daqui era EXECUTADO, porque ler
+// não resolve o pedido: o Waze recebia as duas decisões (MEDIDO no navegador,
+// q07 da rodada 10). Vale a PRIMEIRA decisão, a regra do `saida.repetida`.
+//
+// Roda logo depois de `anotarDecididosPorOutraAba`, no MESMO aviso (o evento
+// `storage` da fila de saída), e tira da fila REAL (`filaReal`: com o treino
+// aberto, a guardada nele, e o que volta no `sair()` dele) os pedidos anotados
+// que NÃO estão na tela, com o "Restam" e o card de fundo acompanhando. O da
+// tela FICA — trocar o card debaixo do dedo é pior que um gesto a mais —, e o
+// gesto nele é descontado e não sai (`gestoNoDecididoPorOutraAba`). O que está
+// EM ANDAMENTO aqui (o lote de lidos no ar) é de quem o está mandando, que o
+// tira da fila quando a resposta chega. O que a outra aba devolver depois
+// (recusado de vez) é dela: volta como card LÁ. Nada aqui grava no aparelho: o
+// aviso só chega à outra aba, e responder gravando mandaria outro de volta.
+function tirarDaFilaOQueAOutraAbaDecidiu() {
+    const salvo = typeof Treino !== 'undefined' && Treino.ativo === true && Treino._salvo ? Treino._salvo : null;
+    const naTela = salvo ? salvo.currentPlace : AppState.currentPlace;
+    const sai = (p) => !!p && typeof p === 'object' && p !== naTela && decididosPorOutraAbaComCardAqui.has(p)
+        && !pedidosEmAndamento.has(chaveDoPedido(p));
+    const fila = filaReal();
+    const fora = new Set(fila.filter(sai));
+    const devolver = salvo && Array.isArray(salvo.devolver) ? salvo.devolver : [];
+    const foraDosDevolvidos = new Set(devolver.filter(sai));
+    if (!fora.size && !foraDosDevolvidos.size) return;
+    if (fora.size) {
+        const ficam = fila.filter((p) => !fora.has(p));
+        if (salvo) salvo.queue = ficam;
+        else AppState.queue = ficam;
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - fora.size);
+    }
+    // O devolvido ainda não voltou a contar no "Restam" (ver `Treino.guardarDevolucao`).
+    if (foraDosDevolvidos.size) salvo.devolver = devolver.filter((p) => !foraDosDevolvidos.has(p));
+    updatePendingCount();
+    // O card de fundo e o "Ver +N" do da frente passam a dizer a fila de agora.
+    // Com o treino aberto o card da tela é um exemplo: o `sair()` desenha a fila real.
+    if (!salvo) aoMudarAFilaPorBaixo();
+}
+
+// O gesto (✕ ↑ ✓, por qualquer caminho) no card NA TELA que a OUTRA aba já
+// decidiu (R10-2-02, ver acima): o pedido sai da tela como saiu da fila de lá, o
+// "Restam" desce, e nada mais — nem o placar, nem o Histórico, nem a "Mão
+// firme", nem o Waze. A pessoa fica sabendo por quê, numa frase. Conta como
+// trabalho feito NESTA fila (`tratouNestaFila`): a decisão foi dela, noutra aba,
+// e a fila que termina assim é "Tudo limpo!", não "Confira o país e a região".
+// Devolve se o gesto era num pedido assim.
+function gestoNoDecididoPorOutraAba(tipo) {
+    const place = AppState.currentPlace;
+    if (!place || typeof place !== 'object' || !decididosPorOutraAbaComCardAqui.has(place)) return false;
+    tratouNestaFila = true;
+    AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+    // O mesmo fato do diário que a decisão repetida já anota (`enfileirarSaida`):
+    // a segunda decisão de um pedido que a outra aba decidiu, descontada. Uma
+    // linha por card assim — é raro, e não por swipe.
+    dfato('saida.repetida', { tipo, outraAba: true, naTela: true });
+    advanceQueue();
+    showToast(t('toast.decididoNaOutraAba'), 'info');
+    return true;
+}
+
+// A decisão da janela do Desfazer que a outra aba tomou ANTES (ver
+// `anotarDecididosPorOutraAba`) não saiu nem contou — o executor a descartou,
+// três segundos depois do gesto. Diz por quê.
+function avisarDecididoNaOutraAba(place) {
+    if (place && typeof place === 'object' && decididosPorOutraAbaComCardAqui.has(place)) {
+        showToast(t('toast.decididoNaOutraAba'), 'info');
     }
 }
 
@@ -8297,11 +8377,13 @@ function setupGuardaDoDiagnostico() {
     });
     // O retrato SÍNCRONO primeiro: é o que chega ao fim quando a página morre.
     window.addEventListener('pagehide', () => { diagRetratoAoSair(); diagGuardarAbertura('saida'); });
-    // A decisão que a OUTRA aba põe na fila de saída com o card ainda nesta: só
+    // A decisão que a OUTRA aba põe na fila de saída com o card ainda nesta:
     // ANOTA, pra sentinela `pedidoDecididoNaFila` não chamá-la de falha de
-    // entrada (ver `anotarDecididosPorOutraAba`). Roda com ou sem o modo dev: o
-    // relatório pode ser baixado depois de ligá-lo, e anotar não grava nada.
-    window.addEventListener('storage', (ev) => { if (ev.key === SAIDA_KEY) anotarDecididosPorOutraAba(ev); });
+    // entrada (ver `anotarDecididosPorOutraAba`), e tira da fila desta o que não
+    // está na tela — vale a primeira decisão (R10-2-02, ver
+    // `tirarDaFilaOQueAOutraAbaDecidiu`). Na MESMA ordem: quem sai é o anotado.
+    // Roda com ou sem o modo dev, e nenhum dos dois grava nada.
+    window.addEventListener('storage', (ev) => { if (ev.key === SAIDA_KEY) { anotarDecididosPorOutraAba(ev); tirarDaFilaOQueAOutraAbaDecidiu(); } });
     // O DOWNLOAD feito na outra aba levou telas e diário DESTA: contam como
     // entregues aqui, na hora (R9-4-10, ver `diagAplicarEntregues`). Só marca a
     // memória — não grava nada.
@@ -18490,10 +18572,14 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
     // escapou do filtro, e o diário diz. Vale a PRIMEIRA decisão, e quem chama
     // desfaz a contagem do gesto repetido. Com DUAS ABAS acontece sem caminho
     // nenhum escapar — a outra decidiu o pedido com o card já aqui —, e o diário
-    // diz isso também (`outraAba`, ver `anotarDecididosPorOutraAba`).
+    // diz isso também (`outraAba`, ver `anotarDecididosPorOutraAba`). E a decisão
+    // da outra aba vale também DEPOIS de pousar e sair desta fila (R10-2-02): a
+    // daqui seria a segunda, e um ✕ depois do ✓ de lá era executado. É o que
+    // cobre o gesto que já estava na janela do Desfazer quando a de lá chegou, o
+    // lote do autor que leva o card da tela e a descarga ao fechar o app.
     const chave = chaveDoPedido(place);
-    if (chave && f.some((it) => chaveDoPedido(it) === chave)) {
-        const daOutraAba = typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(place);
+    const daOutraAba = typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(place) === true;
+    if (daOutraAba || (chave && f.some((it) => chaveDoPedido(it) === chave))) {
         dfato('saida.repetida', { tipo, ...(daOutraAba ? { outraAba: true } : {}) });
         return 'repetida';
     }
@@ -21803,6 +21889,8 @@ function handleMarkAsRead() {
     if (direcaoTravada('right')) return;   // foto em decisão que não veio (sem rede)
     // Treino ANTES de tudo: nem stat, nem fila, nem rede.
     if (Treino.ativo) return Treino.agir('read');
+    // A OUTRA aba já decidiu este pedido: vale a primeira decisão (R10-2-02).
+    if (typeof gestoNoDecididoPorOutraAba === 'function' && gestoNoDecididoPorOutraAba('read') === true) return;
     const place = AppState.currentPlace;
     tratouNestaFila = true;
     AppState.stats.read++;
@@ -21824,6 +21912,8 @@ function handleMarkAsRead() {
             placar.read = Math.max(0, (placar.read || 0) - 1);
             updateStats();
             saveStats();
+            // Foi a OUTRA aba, durante a janela do Desfazer (R10-2-02): diz.
+            if (typeof avisarDecididoNaOutraAba === 'function') avisarDecididoNaOutraAba(place);
             return;
         }
         const presenca = presencaWmeDaAcao(place, pais);
@@ -21846,6 +21936,8 @@ function handleReject() {
     if (direcaoTravada('left')) return;   // foto em decisão que não veio (sem rede)
     // Treino ANTES de tudo: nem stat, nem fila, nem rede.
     if (Treino.ativo) return Treino.agir('reject');
+    // A OUTRA aba já decidiu este pedido: vale a primeira decisão (R10-2-02).
+    if (typeof gestoNoDecididoPorOutraAba === 'function' && gestoNoDecididoPorOutraAba('reject') === true) return;
     const place = AppState.currentPlace;
     tratouNestaFila = true;
     AppState.stats.rejected++;
@@ -21867,6 +21959,8 @@ function handleReject() {
             placar.rejected = Math.max(0, (placar.rejected || 0) - 1);
             updateStats();
             saveStats();
+            // Foi a OUTRA aba, durante a janela do Desfazer (R10-2-02): diz.
+            if (typeof avisarDecididoNaOutraAba === 'function') avisarDecididoNaOutraAba(place);
             return;
         }
         const presenca = presencaWmeDaAcao(place, pais);
@@ -21940,6 +22034,8 @@ function handleSkip() {
     if (acoesTravadas()) return;   // janela do Desfazer correndo
     // Treino ANTES de tudo: nem stat, nem fila, nem rede.
     if (Treino.ativo) return Treino.agir('skip');
+    // A OUTRA aba já decidiu este pedido: vale a primeira decisão (R10-2-02).
+    if (typeof gestoNoDecididoPorOutraAba === 'function' && gestoNoDecididoPorOutraAba('skip') === true) return;
     const place = AppState.currentPlace;
     AppState.stats.skipped++;
     updateStats();

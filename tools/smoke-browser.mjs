@@ -10391,10 +10391,51 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 
   // ── 1. com o aviso de verdade entre as duas ─────────────────────────────
   const m = await abrirAbas();
+  // As duas abas abrem com a MESMA fila (a mesma busca): o que a A decide, a B
+  // tem como card — o da frente na tela, os outros mais atrás.
+  const filaNaB = () => m.B.evaluate(() => ({ frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+    fila: AppState.queue.map((p) => p.updateRequestID), restam: AppState.serverTotal,
+    fundo: (document.querySelector('#cardStack .card-fundo') || { dataset: {} }).dataset.pedido || null }));
+  const antesB = await filaNaB();
   // O placar: 3 ✕ na A e 1 na B. A B tem de VER os três antes do dela.
-  for (let i = 0; i < 3; i++) await rejeitarNa(m.A);
+  const decididosNaA = [];
+  for (let i = 0; i < 3; i++) {
+    decididosNaA.push(await m.A.evaluate(() => AppState.currentPlace.updateRequestID));
+    await rejeitarNa(m.A);
+  }
   const bViu = await esperarNaPagina(m.B, () => AppState.stats.rejected === 23, 5000);
   checa(bViu.ok, 'duas abas: a aba B não viu no placar os 3 ✕ da aba A');
+  // R10-2-02 — vale a PRIMEIRA decisão. O que a A decidiu sai da fila da B, com
+  // o "Restam" e o card de fundo; o da frente (o mesmo nas duas) FICA na tela, e
+  // o ✕ nele não sai pro Waze nem conta de novo: diz que foi decidido na outra.
+  checa(decididosNaA[0] === antesB.frente && decididosNaA.every((u) => antesB.fila.includes(u)),
+    'duas abas: PRÉ-CONDIÇÃO — a A não decidiu o card da frente da B e mais dois da fila dela (as abas não tinham a mesma fila)',
+    JSON.stringify({ decididosNaA, frente: antesB.frente }));
+  await m.B.evaluate((d) => { window.__decididosNaA = d; }, decididosNaA);
+  const saiuDaB = await esperarNaPagina(m.B, () => !AppState.queue.some((p) => window.__decididosNaA.slice(1).includes(p.updateRequestID))
+    && document.getElementById('pendingCount').textContent.trim() === String(AppState.serverTotal), 5000);
+  const depoisB = await filaNaB();
+  checa(saiuDaB.ok && depoisB.frente === antesB.frente && depoisB.fila.length === antesB.fila.length - 2
+    && depoisB.restam === antesB.restam - 2 && depoisB.fundo && !decididosNaA.some((u) => depoisB.fundo.endsWith('|' + u)),
+    'duas abas: o que a aba A decidiu seguiu na fila da B (ou o "Restam" e o card de fundo não acompanharam, ou o card da TELA trocou)',
+    JSON.stringify({ antesB: { frente: antesB.frente, n: antesB.fila.length, restam: antesB.restam, fundo: antesB.fundo },
+      depoisB: { frente: depoisB.frente, n: depoisB.fila.length, restam: depoisB.restam, fundo: depoisB.fundo } }));
+  const redeAntesDoFantasma = m.rede.length;
+  const vFrente = await m.B.evaluate(() => AppState.currentPlace.venueID);
+  await rejeitarNa(m.B);
+  const fantasma = await m.B.evaluate(() => ({ placar: AppState.stats.rejected, restam: AppState.serverTotal,
+    frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+    aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | ') }));
+  checa(!m.rede.slice(redeAntesDoFantasma).some((x) => x.rota === 'validar-place')
+    && m.rede.filter((x) => x.rota === 'validar-place' && x.pedido === vFrente).length === 1,
+    'duas abas: o ✕ da aba B no card que a A já decidiu saiu pro Waze (a segunda decisão do mesmo pedido)',
+    JSON.stringify(m.rede.slice(redeAntesDoFantasma)));
+  checa(fantasma.placar === 23 && fantasma.restam === depoisB.restam - 1 && fantasma.frente !== antesB.frente,
+    'duas abas: o ✕ da aba B no card que a A já decidiu contou de novo no placar (ou o card não saiu, ou o "Restam" não desceu)',
+    JSON.stringify(fantasma));
+  checa(/já foi decidido em outra aba/.test(fantasma.aviso),
+    'duas abas: o ✕ descontado na aba B não disse que o pedido foi decidido na outra aba', fantasma.aviso.slice(0, 160));
+  // E o ✕ seguinte da B, num pedido que a A NÃO decidiu, conta como sempre.
   await rejeitarNa(m.B);
   const aViu = await esperarNaPagina(m.A, () => AppState.stats.rejected === 24, 5000);
   const gravado = await rejeitadosGravados(m.A);
@@ -10502,6 +10543,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await c.B.evaluate(() => window.removeEventListener('storage', aoGravarEmOutraAba));
   for (let i = 0; i < 2; i++) await rejeitarNa(c.A);
   await dormir(300);
+  // O 1º ✕ da B cai no card da frente, que a A já decidiu: é descontado e não
+  // grava nada (R10-2-02, seção 1). O 2º é num pedido que a A não decidiu, e é
+  // ELE que grava o placar velho da B por cima.
+  await rejeitarNa(c.B);
   await rejeitarNa(c.B);
   await dormir(300);
   const controle = await rejeitadosGravados(c.A);
@@ -10513,6 +10558,26 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const surda = await c.B.evaluate(() => AppState.authenticated);
   checa(surda === true, 'duas abas: CONTROLE — sem o ouvinte, o "Sair" não devia chegar à B; o instrumento não vê o defeito');
   await c.ctx.close();
+
+  // ── 2b. CONTROLE do R10-2-02: a aba B sem a retirada e sem a anotação ────
+  // O app de antes, em miniatura: o que a A decide segue na fila da B, e o ✕ no
+  // card que as duas tinham na frente sai pro Waze e conta de novo. Se isto
+  // passar, as medidas da seção 1 não enxergam o defeito.
+  const d = await abrirAbas();
+  await d.B.evaluate(() => { window.tirarDaFilaOQueAOutraAbaDecidiu = () => {}; });
+  const antesD = await d.B.evaluate(() => AppState.queue.length);
+  for (let i = 0; i < 2; i++) await rejeitarNa(d.A);
+  await esperarNaPagina(d.B, () => AppState.stats.rejected === 22, 5000);
+  const filaD = await d.B.evaluate(() => AppState.queue.length);
+  const vD = await d.B.evaluate(() => { decididosPorOutraAbaComCardAqui.delete(AppState.currentPlace); return AppState.currentPlace.venueID; });
+  await rejeitarNa(d.B);
+  await esperarNaPagina(d.B, () => AppState.inFlightActions === 0, 5000);
+  const placarD = await d.B.evaluate(() => AppState.stats.rejected);
+  const enviosD = d.rede.filter((x) => x.rota === 'validar-place' && x.pedido === vD).length;
+  checa(filaD === antesD && enviosD === 2 && placarD === 23,
+    'duas abas: CONTROLE — sem a retirada e sem a anotação (o app de antes), o ✕ da B devia sair de novo e contar; a medida não enxerga o defeito',
+    JSON.stringify({ antesD, filaD, enviosD, placarD }));
+  await d.ctx.close();
 
   // ── 3. a QUEDA numa aba, com o token VELHO, não apaga o NOVO da outra ────
   // A sessão morre no servidor. A aba A percebe primeiro, derruba e ENTRA DE
@@ -11124,7 +11189,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
-  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo)`
+  + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

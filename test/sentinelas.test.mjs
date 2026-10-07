@@ -491,8 +491,9 @@ test('R7-4-05: o aviso da outra aba é ouvido, e o diário do repetido diz que f
   const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const i = APP.indexOf('function setupGuardaDoDiagnostico(');
   const setup = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
-  assert.match(setup, /window\.addEventListener\('storage', \(ev\) => \{ if \(ev\.key === SAIDA_KEY\) anotarDecididosPorOutraAba\(ev\); \}\);/,
-    'ninguém ouve a outra aba gravando a fila de saída');
+  // R10-2-02: no MESMO aviso, depois de anotar, sai da fila o que não está na tela.
+  assert.match(setup, /window\.addEventListener\('storage', \(ev\) => \{ if \(ev\.key === SAIDA_KEY\) \{ anotarDecididosPorOutraAba\(ev\); tirarDaFilaOQueAOutraAbaDecidiu\(\); \} \}\);/,
+    'ninguém ouve a outra aba gravando a fila de saída (ou o que ela decidiu não sai daqui depois de anotado)');
   const j = APP.indexOf('function enfileirarSaida(');
   const enf = semComentario(APP.slice(j, APP.indexOf('\n}', j)));
   assert.match(enf, /dfato\('saida\.repetida', \{ tipo, \.\.\.\(daOutraAba \? \{ outraAba: true \} : \{\}\) \}\);/,
