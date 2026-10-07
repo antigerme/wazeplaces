@@ -580,7 +580,9 @@ function aoFimDaPerguntaDaAbertura(entrou) {
 //
 // NÃO adota, e a tela fica como está:
 //   · com uma pergunta à extensão ou um resgate de código no ar: o fim deles
-//     decide, e passa por aqui;
+//     decide, e passa por aqui; e com os cookies DESTA aba sendo conferidos (o
+//     "Colar" já confirmado): o login que a pessoa pediu vence, e adotar antes
+//     mostraria por um instante a conta da outra aba;
 //   · com TEXTO DIGITADO num diálogo da entrada (o cookies.txt colado, o
 //     código): a pessoa estava entrando por ali — talvez com OUTRA conta —, e a
 //     adoção fecharia o diálogo jogando fora o que ela digitou. É o R9-1-03 (b):
@@ -591,7 +593,7 @@ function aoFimDaPerguntaDaAbertura(entrou) {
 // Devolve se adotou.
 function adotarSessaoDoAparelho() {
     if (API.temSessaoNaMemoria() || AppState.authenticated) return false;
-    if (extPerguntando || resgateEmVoo) return false;
+    if (extPerguntando || resgateEmVoo || authInFlight) return false;
     // O aparelho se lê pelo `safeLS`: o `getSession`, com a memória vazia, GRAVA
     // nela o que lê — e isso já é adotar (R9-1-03).
     if (!safeLS.get('waze_session_token')) return false;

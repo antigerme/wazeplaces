@@ -2083,7 +2083,7 @@ const ADOCAO = ['adotarSessaoDoAparelho', 'textoDigitadoNaEntrada', 'focoNaTelaD
 function depsDaAdocao(real, t, log, AppState) {
   return {
     API: real.API, safeLS: real.safeLS, AppState, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO,
-    extPerguntando: false, resgateEmVoo: false, saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
+    extPerguntando: false, resgateEmVoo: false, authInFlight: false, saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     focoDoTeclado: null,
     // O fechamento que NÃO devolve o foco a quem abriu (ele já foi prometido, R10-1-05) é anotado.
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
@@ -2253,8 +2253,9 @@ test('R10-1-03: a volta à aba da tela de entrada ADOTA a sessão que outra aba 
     assert.deepEqual(x.log, [], 'a volta adotou com a página escondida ou sem a tela de entrada');
     assert.equal(x.API.temSessaoNaMemoria(), false);
   }
-  // CONTROLE: uma pergunta à extensão ou um resgate de código no AR — o fim deles decide.
-  for (const noAr of ['extPerguntando', 'resgateEmVoo']) {
+  // CONTROLE: uma pergunta à extensão, um resgate de código ou os cookies desta aba
+  // sendo conferidos, no AR — o fim deles decide (o login que a pessoa pediu vence).
+  for (const noAr of ['extPerguntando', 'resgateEmVoo', 'authInFlight']) {
     const p = abaDaEntrada(DA_OUTRA);
     p.deps[noAr] = true;
     p.h.aoVoltarAAba();
