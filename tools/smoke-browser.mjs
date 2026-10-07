@@ -11083,9 +11083,9 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + primeira execução ("Como funciona" uma vez só, scrim cobrindo o card, Esc sem sair do app, e o "Já instalei" que recarrega)`
   + `, + modo treino × ${LINGUAS.length} idiomas com a trava medida pela REDE (botão, tecla e gesto, com a janela do Desfazer vencida), e o fim do treino fechado pelos 4 caminhos (botão, Esc, voltar e fundo) devolvendo a fila real`
   + `, + o "Sair" do treino pelo TECLADO levando o foco ao ✕ do card real que volta (com o CONTROLE do mouse, que não move o foco)`
-  + `, + o fim do treino (Enter no "Ir para a fila" e Esc) e o "Quero treinar antes" pelo TECLADO levando o foco ao ✕ do card que entra — também no "Como funciona" que abre sozinho (com os CONTROLES do mouse e do "Entendi")`
-  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance)`
-  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote, folha do autor e card mortos, com contraprova de que a lixeira e as linhas da folha EXISTEM fora do treino`
+  + `, + o fim do treino (Enter no "Ir para a fila" e Esc), o "Quero treinar antes" e o "Praticar" pelo TECLADO levando o foco ao ✕ do card que entra, e o "Entendi" e o Esc do "Como funciona" ao ✕ do card na tela — também no que abre sozinho (com os CONTROLES do mouse, que não move o foco pro card)`
+  + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance, e o exemplo sintético SEM o ↗ na tela)`
+  + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote, folha do autor e card mortos, com contraprova de que a lixeira e as linhas da folha EXISTEM fora do treino, e o ↗ do clone na tela com o lugar dele`
   + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (9 prazos contados pela DATA com o relógio parado às 20h — "amanhã" com 20 h de prazo —, contraste composto, não vira alvo de toque e some no "Sair")`
