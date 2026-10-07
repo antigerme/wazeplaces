@@ -109,16 +109,18 @@ function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, ap
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
     API: { temSessaoNaMemoria: () => naMemoria, sessionToken: naMemoria ? 'tok-desta' : null },
-    AppState: { authenticated: autenticado, profile: perfil ? { id: perfil } : null },
+    AppState: { authenticated: autenticado, profile: perfil ? { id: perfil } : null, queue: [], currentPlace: null },
+    // A aba da tela de entrada que nunca entrou: nenhum card, nenhuma conta confirmada (R12-1-04).
     document: { getElementById: (id) => (id === 'appScreen'
-      ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null) },
+      ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null), querySelector: () => null },
+    contaConfirmadaNestaAba: null,
     extPerguntando: perguntando,
     handleLogout: (o) => log.push(['sair', o]),
     relerPlacarDeOutraAba: () => log.push('placar'),
     relerPreferenciasDeOutraAba: () => log.push('preferencias'),
   };
   const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
-    'sessaoDestaAbaEhAGuardada'], deps);
+    'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu'], deps);
   return { h, log, ap };
 }
 const SAIU = ['sair', { porOutraAba: true }];
@@ -2061,7 +2063,8 @@ function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
   el('langSelectHelp', { pai: el('helpModal', { oculto: dialogo !== 'helpModal' }) });
   el('appScreen', { oculto: true });
   const body = { id: 'BODY' };
-  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null };
+  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null,
+    querySelector: () => null };   // nenhum card na página (a aba que nunca entrou, R12-1-04)
   Object.defineProperty(document, 'activeElement', { get: () => (foco ? els[foco] : body) });
   return {
     els, document,
@@ -2155,7 +2158,7 @@ test('R9-1-03 (a): a abertura que pergunta à extensão ADOTA a sessão que OUTR
 function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
   const real = apiDeVerdade(guardado);
   const log = [];
-  const AppState = { authenticated: false, profile: null };
+  const AppState = { authenticated: false, profile: null, queue: [], currentPlace: null };
   const t = telaDeEntrada(tela);
   let responder = null;
   const deps = {
@@ -2169,10 +2172,12 @@ function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
     },
     mostrarNegadoDaExtensao: () => log.push('recusa'),
     handleLogout: (o) => log.push(['sair', o]),
+    contaConfirmadaNestaAba: null,   // a aba que nunca entrou (R12-1-04)
   };
   const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', ...ADOCAO,
     'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
-    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba'], deps);
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba',
+    'guardaASessaoQueCaiu'], deps);
   return { ...real, h, log, deps, AppState, tela: t, responderExtensao: (v) => responder(v) };
 }
 // O "Sair" na outra aba: o token e a conta saem do aparelho, e os avisos chegam aqui na ordem em que ela gravou.

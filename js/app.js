@@ -11405,7 +11405,14 @@ function desenharAvisoDoSair() {
 // então o que é da conta sai do aparelho aqui, pela mesma lista. A sessão já
 // caiu (`derrubarSessao`) e o servidor já a apagou: não há diálogo do "Sair" a
 // fechar nem sessão a destruir, e o token da memória já saiu.
-async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false } = {}) {
+//
+// `naEntrada` (com o `porOutraAba`): esta aba estava na TELA DE ENTRADA, com a
+// memória da sessão que CAIU nela (ver `aoSairEmOutraAba`, R12-1-04). Sai a
+// mesma lista, menos o que é da tela de entrada: as camadas da sessão já
+// fecharam na queda, e o que está aberto agora — o "Colar cookies", o código —
+// é de quem está entrando, com o que ela digita (R9-1-03). E sem o aviso: a tela
+// não muda, e a sessão desta aba já tinha saído.
+async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false, naEntrada = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
     saiuNestaPagina = true;
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
@@ -11475,7 +11482,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     if (porOutraAba) {
         AppState.profile = null;
         AppState.authenticated = false;
-        fecharCamadasAbertas();
+        // Na tela de entrada, o que está aberto é de quem está entrando (ver o
+        // `naEntrada`, acima): fica.
+        if (!naEntrada) fecharCamadasAbertas();
     }
     // Os códigos de pareamento emitidos aqui param de valer (sem esperar rede:
     // sem ela, eles vencem sozinhos em 5 min). Cada aba cancela os que ELA
@@ -11618,7 +11627,7 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     updateDevBadge();
     removeCurrentCardEl();
     showAuthScreen();
-    showToast(t(outraConta ? 'toast.outraContaNoutraAba' : porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
+    if (!naEntrada) showToast(t(outraConta ? 'toast.outraContaNoutraAba' : porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
 
     // A exclusão no servidor é METADE da promessa do "Sair", e falhava calada
     // com a rede fora: o `_post` devolve erro em vez de lançar, então ninguém
@@ -16941,13 +16950,35 @@ function conferirContaDestaAba() {
 // conta, que chega logo depois.
 function aoSairEmOutraAba() {
     if (safeLS.get('waze_session_token') || safeLS.get(CONTA_KEY)) return false;
-    // Esta aba não tem o que encerrar: nenhuma sessão na memória, o app fora da
-    // tela e nenhuma pergunta à extensão no ar — que traria uma sessão NOVA por
-    // cima do "Sair" de lá.
+    // Esta aba não tem SESSÃO a encerrar: nenhuma na memória, o app fora da tela
+    // e nenhuma pergunta à extensão no ar — que traria uma sessão NOVA por cima
+    // do "Sair" de lá.
     const appNaTela = !document.getElementById('appScreen')?.classList.contains('hidden');
-    if (!API.temSessaoNaMemoria() && !AppState.authenticated && !appNaTela && !extPerguntando) return false;
+    if (!API.temSessaoNaMemoria() && !AppState.authenticated && !appNaTela && !extPerguntando) {
+        // Mas a aba que CAIU na tela de entrada guarda a MEMÓRIA da sessão que
+        // caiu (ver a função): sem isto, a fila, o card (dado de terceiro, no DOM
+        // debaixo da tela de entrada), o rascunho da conversa e o anel de
+        // chamadas da conta que saiu ficavam nela — e voltavam com a mesma conta
+        // entrando de novo ali (auditoria da rodada 12, R12-1-04, MEDIDO). Sai a
+        // parte de memória e de tela do "Sair", sem gravar no aparelho (a outra
+        // aba já o limpou) e sem fechar o que a pessoa abriu na tela de entrada:
+        // o "Colar cookies", com o que ela digita, fica (R9-1-03). A aba que
+        // nunca entrou não guarda nada, e segue como estava.
+        if (!guardaASessaoQueCaiu()) return false;
+        handleLogout({ porOutraAba: true, naEntrada: true });
+        return true;
+    }
     handleLogout({ porOutraAba: true });
     return true;
+}
+
+// A aba que CAIU na tela de entrada (a sessão venceu e não foi renovada) guarda,
+// de propósito, a memória da sessão que caiu — pra MESMA conta voltar (ver
+// `derrubarSessao`): a conta que ela confirmou, a fila e o card. A aba que nunca
+// entrou não tem nenhum dos três.
+function guardaASessaoQueCaiu() {
+    return !!contaConfirmadaNestaAba || AppState.queue.length > 0 || !!AppState.currentPlace
+        || !!document.querySelector('#cardStack .place-card');
 }
 
 // O placar que a outra aba gravou, relido NO MESMO objeto: o desconto de uma

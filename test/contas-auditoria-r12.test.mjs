@@ -11,6 +11,8 @@
 //    "invisível" que chega depois da queda, e o "Conectar outro aparelho" tocado
 //    durante a renovação — as perguntas "esta aba tem sessão?" liam o
 //    `getSession`, que com a memória vazia GRAVA nela a sessão da outra aba;
+//  · R12-1-04 — o "Sair" dado noutra aba não alcançava a aba que CAIU na tela de
+//    entrada: a fila, o card, o rascunho e o anel da conta que saiu ficavam nela;
 //  · R12-1-05 — a volta à aba com TEXTO DIGITADO na entrada: a adoção respeitava,
 //    e a pergunta à extensão da mesma volta apagava o que foi digitado.
 //
@@ -490,6 +492,118 @@ test('R12-1-03: a prova de vida só é perguntada com o 401 — a resposta boa (
     assert.equal(m.provas.length, perguntas,
       `(${caso}) a prova de vida foi perguntada ${m.provas.length} vez(es) — fora do 401 ela é pergunta à toa, e com a memória vazia era a porta da adoção`);
   }
+});
+
+// ═══ R12-1-04 · o "Sair" de outra aba alcança a aba que CAIU na tela de entrada ═
+function abaNaEntrada({ guardado = {}, conta = null, fila = [], card = false } = {}) {
+  const ap = aparelho(guardado);
+  const log = [];
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
+    API: { temSessaoNaMemoria: () => false, sessionToken: null },
+    AppState: { authenticated: false, profile: null, queue: fila, currentPlace: fila[0] || null },
+    document: {
+      getElementById: (id) => (id === 'appScreen' ? { classList: { contains: (c) => c === 'hidden' } } : null),
+      querySelector: (sel) => (card && sel === '#cardStack .place-card' ? { id: 'card' } : null),
+    },
+    contaConfirmadaNestaAba: conta, extPerguntando: false,
+    handleLogout: (o) => log.push(['sair', o]),
+    relerPlacarDeOutraAba: () => log.push('placar'), relerPreferenciasDeOutraAba: () => log.push('preferencias'),
+  };
+  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
+    'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu'], deps);
+  return { h, log, ap };
+}
+const NA_ENTRADA = ['sair', { porOutraAba: true, naEntrada: true }];
+
+test('R12-1-04: o "Sair" noutra aba encerra a memória da aba que CAIU na tela de entrada — pela conta confirmada, pela fila ou pelo card', () => {
+  for (const [caso, estado] of [['a conta que ela confirmou', { conta: { id: '4242', s: 'x' } }],
+    ['a fila da sessão que caiu', { fila: [{ venueID: 'p0', updateRequestID: 'up0' }] }],
+    ['o card no DOM', { card: true }]]) {
+    const m = abaNaEntrada(estado);
+    m.h.sincronizarComOutraAba(CONTA_KEY);         // o aviso da conta: o "Sair" de lá
+    assert.deepEqual(m.log, [NA_ENTRADA],
+      `DEFEITO (${caso}): a aba que caiu na tela de entrada guardou a memória da conta que SAIU — fila, card, rascunho e anel: ` + JSON.stringify(m.log));
+  }
+});
+
+test('R12-1-04: CONTROLES — a aba que nunca entrou segue como estava, e a QUEDA noutra aba (a conta fica no aparelho) não é "Sair"', () => {
+  const nova = abaNaEntrada();
+  nova.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(nova.log, [], 'a aba que nunca entrou foi encerrada pelo "Sair" da outra (R9-1-03)');
+  const queda = abaNaEntrada({ guardado: { [CONTA_KEY]: { id: '4242', s: 'x' } }, conta: { id: '4242', s: 'x' } });
+  queda.h.sincronizarComOutraAba(TOKEN);
+  assert.deepEqual(queda.log, [], 'a QUEDA da sessão noutra aba foi tratada como "Sair"');
+});
+
+// O `handleLogout` DE VERDADE, no modo da aba que caiu: tudo o que o "Sair" solta
+// na memória e na tela, sem gravar no aparelho, sem fechar o que a pessoa abriu
+// na tela de entrada e sem o aviso.
+function montarSairNaEntrada() {
+  const ap = aparelho({ [STATS_KEY]: '{"rejected":0}' });
+  const log = [];
+  const AppState = {
+    authenticated: false, profile: null, stats: { read: 0, rejected: 0, skipped: 0 }, filters: { velho: true },
+    preferences: { presenca: false }, devMode: { unlocked: false, active: false }, history: { _total: {} },
+    conquistas: { c: {} }, autores: { r: {} }, pendingAction: null, inFlightActions: 0, sessaoExpiraEm: null,
+    queue: [{ venueID: 'p0' }], currentPlace: { venueID: 'p0' },
+  };
+  const API = {
+    sessionToken: null, chamadas: [{ rota: 'perfil' }, { rota: 'buscar-places' }],
+    getSession() { return this.sessionToken; },
+    setSession(t) { log.push('setSession:' + t); },
+    soltarSessao() { this.sessionToken = null; },
+    destroySession: (t) => { log.push('destroy:' + t); return Promise.resolve({ success: true }); },
+    cancelarPareamento: (c) => { log.push('cancelou:' + c); return Promise.resolve(); },
+    setRegion: () => log.push('regiao'), setCountry: () => log.push('pais'), esquecerLugar: () => log.push('esqueceu o lugar'),
+  };
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API,
+    window: { Presenca: { esquecer: (o) => log.push(['conversa', o || null]) } },
+    epocaDaSessao: 2, saiuNestaPagina: false, pareamentosEmitidos: new Set(), tokenTiradoPorOutraAba: null,
+    HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: 'waze_places_conquistas', CHAVE_INSTALL_DISPENSADO: 'waze_places_install_dispensado',
+    PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'), CONTA_KEY, SESSOES_KEY: 'waze_places_sessoes', NASCIMENTO_KEY: 'waze_places_nascimento',
+    SAIDA_KEY: 'waze_places_saida', pousosDaPagina: new Set(['p9|u9']), pedidosEmAndamento: new Set(),
+    referenciasDoPerfil: null, posicaoGps: null, avatarPendente: null, avatarFalhou: null, telaPronta: true,
+    contaConfirmadaNestaAba: { id: '4242', s: 'x' },
+    fecharCamadasAbertas: () => log.push('fechou as camadas'), closeModal: (id) => log.push('fechou:' + id),
+    dlogApagar: (o) => log.push(['capturas', o || null]), resetQueue: () => log.push('fila nova'),
+    filtrosDeFabrica: () => ({ fabrica: true }), offlineEsquecer: (o) => log.push(['offline', o || null]),
+    esquecerAutores: () => log.push('autores do aparelho'), esquecerPrazoDaSessao: () => log.push('prazo do aparelho'),
+    registrarEventoDeSessao: (e) => log.push('diario:' + e),
+    saveStats: () => ap.safeLS.set(STATS_KEY, '{}'), saveFilters: () => ap.safeLS.set('waze_places_filters', '{}'),
+    savePreferences: () => ap.safeLS.set(PREFERENCES_KEY, '{}'), saveDevMode: () => ap.safeLS.set('waze_places_devmode', '{}'),
+    callWithRetry: (fn) => fn(), t: (k) => k, showToast: (m) => log.push('aviso ' + m),
+    removeCurrentCardEl: () => log.push('o card saiu do DOM'), showAuthScreen: () => log.push('tela de entrada'),
+  };
+  const h = montar(['handleLogout', 'preferenciasDeFabrica'], deps);
+  return { h, ap, log, AppState, API, deps };
+}
+
+test('R12-1-04: na aba que caiu, o "Sair" de lá solta a fila, o card, a conversa, as capturas e o anel — sem gravar no aparelho, sem fechar o "Colar" e sem aviso', async () => {
+  const m = montarSairNaEntrada();
+  await m.h.handleLogout({ porOutraAba: true, naEntrada: true });
+  assert.deepEqual(m.ap.escritas, [], 'a aba que caiu mexeu no aparelho (a outra já o limpou): ' + m.ap.escritas.join(' '));
+  assert.ok(m.log.includes('fila nova') && m.log.includes('o card saiu do DOM'), 'a fila e o card da conta que saiu ficaram: ' + JSON.stringify(m.log));
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'conversa'), ['conversa', { soMemoria: true }], 'o rascunho da conversa ficou');
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'capturas'), ['capturas', { soMemoria: true }]);
+  assert.equal(m.API.chamadas.length, 0, 'o anel de chamadas da sessão que saiu ficou (voltaria no relatório de quem entrar)');
+  assert.equal(m.deps.contaConfirmadaNestaAba, null);
+  assert.equal(m.deps.saiuNestaPagina, true, 'voltar a esta aba relogaria pela extensão, desfazendo o "Sair"');
+  assert.equal(m.deps.pousosDaPagina.size, 0);
+  assert.ok(!m.log.includes('fechou as camadas'),
+    'DEFEITO: o "Sair" da outra aba fechou o que a pessoa abriu na tela de entrada (o "Colar cookies", com o que ela digita — R9-1-03)');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('aviso ')), 'o aviso de "Sair" apareceu numa tela que não mudou: ' + JSON.stringify(m.log));
+  assert.ok(!m.log.some((x) => typeof x === 'string' && (x.startsWith('destroy:') || x.startsWith('setSession'))));
+});
+
+test('R12-1-04: CONTROLE — na aba LOGADA, o "Sair" de lá fecha as camadas e avisa, como sempre', async () => {
+  const m = montarSairNaEntrada();
+  m.AppState.authenticated = true;
+  await m.h.handleLogout({ porOutraAba: true });
+  assert.ok(m.log.includes('fechou as camadas'), 'CONTROLE: o "Sair" da outra aba deixou de fechar o que estava aberto na aba logada');
+  assert.ok(m.log.includes('aviso toast.saiuNoutraAba'));
+  assert.deepEqual(m.ap.escritas, []);
 });
 
 // ═══ R12-1-05 · a volta à aba com TEXTO DIGITADO não pergunta à extensão ═══════
