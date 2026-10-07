@@ -119,7 +119,8 @@ function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, ap
     relerPlacarDeOutraAba: () => log.push('placar'),
     relerPreferenciasDeOutraAba: () => log.push('preferencias'),
   };
-  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
+  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho',
     'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu'], deps);
   return { h, log, ap };
 }
@@ -534,6 +535,7 @@ function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0
     SAIDA_KEY: 'waze_places_saida', updateInFlightIndicator: () => { aba.indicador = (aba.indicador || 0) + 1; },
   };
   const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'outraContaTomouOAparelhoDaQueCaiu',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'relerPlacarDeOutraAba', 'placarGuardado',
     'relerPreferenciasDeOutraAba', 'lerPreferenciasGuardadas', 'preferenciasDeFabrica', 'saveStats', 'savePreferences',
     'descontarGestoSemSessao', 'puladosNestaFila', 'presencaLigada'];
@@ -1129,6 +1131,7 @@ function abaSemPerfil(comp, { token = 'tok-x' } = {}) {
     desenharPlacar: () => {}, updateStats: () => {}, updateInFlightIndicator: () => {},
   };
   const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'outraContaTomouOAparelhoDaQueCaiu',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao', 'marcaDestaAba',
     'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
   Object.assign(aba, montar(nomes, deps), { AppState, deps, soltarPerfil: (perfil) => {
@@ -1987,6 +1990,7 @@ test('R8-1-03: pelos avisos de verdade — o do token diz QUAL sessão saiu, e o
     m.API.sessionToken = desta;
     m.API.temSessaoNaMemoria = function () { return !!this.sessionToken; };
     const h = montar(['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+      'outraContaTomouOAparelhoDaQueCaiu',
       'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'handleLogout', 'preferenciasDeFabrica'], m.deps);
     // A outra aba dá "Sair": tira o token e, depois, a conta.
     m.ap.dados.delete(TOKEN);
@@ -2175,7 +2179,7 @@ function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
     contaConfirmadaNestaAba: null,   // a aba que nunca entrou (R12-1-04)
   };
   const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', ...ADOCAO,
-    'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'outraContaTomouOAparelhoDaQueCaiu',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba',
     'guardaASessaoQueCaiu'], deps);
   return { ...real, h, log, deps, AppState, tela: t, responderExtensao: (v) => responder(v) };

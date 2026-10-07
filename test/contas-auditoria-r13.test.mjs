@@ -583,3 +583,135 @@ test('R13-1-04: CONTROLE — com a sessão desta aba, o item e a conta levam a m
   a.h.aoConhecerConta({ id: '4242' });
   assert.deepEqual(a.deps.contaConfirmadaNestaAba, { id: '4242', s: marcaDe('tok-a') });
 });
+
+// ═══ R13-1-06 · OUTRA conta entrando noutra aba alcança a aba que CAIU ═════════
+// A aba que caiu na tela de entrada guarda a memória da sessão que caiu (a fila, o
+// card e a conta que confirmou), pra MESMA conta voltar. Outra conta entrando
+// noutra aba não a alcançava: sem perfil, o `contaSegueNoAparelho` respondia
+// "segue", e o card (dado de terceiro), a fila e o anel da conta anterior ficavam.
+// `memoria`, `autenticada` e `appNaTela` soltos: cada um, sozinho, diz que a aba
+// ainda tem sessão a encerrar (e aí não é a aba que caiu).
+function abaQueCaiu({ guardado = {}, conta = { id: '111', s: marcaDe('tok-a') }, fila = [{ venueID: 'p0', updateRequestID: 'up0' }],
+  card = true, perguntando = false, logada = false, memoria = logada, autenticada = logada, appNaTela = logada } = {}) {
+  const ap = aparelho(guardado);
+  const log = [];
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
+    API: { temSessaoNaMemoria: () => memoria, sessionToken: memoria ? 'tok-a' : null },
+    AppState: { authenticated: autenticada, profile: logada ? { id: 111 } : null, queue: fila, currentPlace: fila[0] || null },
+    document: {
+      getElementById: (id) => (id === 'appScreen' ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null),
+      querySelector: (sel) => (card && sel === '#cardStack .place-card' ? { id: 'card' } : null),
+    },
+    contaConfirmadaNestaAba: conta, extPerguntando: perguntando,
+    handleLogout: (o) => log.push(['sair', o]), conferirContaDestaAba: () => log.push('conferiu a conta'),
+    relerPlacarDeOutraAba: () => log.push('placar'), relerPreferenciasDeOutraAba: () => log.push('preferencias'),
+  };
+  const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'outraContaTomouOAparelhoDaQueCaiu',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu', 'contaDestaAbaEmDuvida', 'marcaDaSessao'], deps);
+  return { h, log, ap };
+}
+// O aparelho depois de a conta 222 entrar noutra aba (a sessão e a conta dela).
+const DA_222 = { [TOKEN]: 'tok-y', [CONTA_KEY]: { id: '222', s: marcaDe('tok-y') } };
+const OUTRA_NA_ENTRADA = ['sair', { porOutraAba: true, outraConta: true, naEntrada: true }];
+
+test('R13-1-06: OUTRA conta entrando noutra aba encerra a memória da aba que CAIU na tela de entrada — sem gravar, sem fechar nada, sem aviso', () => {
+  for (const [caso, estado] of [['com a fila e o card', {}], ['só a conta confirmada', { fila: [], card: false }]]) {
+    const m = abaQueCaiu({ guardado: DA_222, ...estado });
+    m.h.sincronizarComOutraAba(CONTA_KEY);            // o aviso da conta: o aparelho agora é da 222
+    assert.deepEqual(m.log, [OUTRA_NA_ENTRADA],
+      `DEFEITO (${caso}): a aba que caiu guardou a memória da conta anterior (fila, card, anel) com o aparelho já de OUTRA conta: ` + JSON.stringify(m.log));
+  }
+});
+
+test('R13-1-06: CONTROLES — a MESMA conta, o aviso do token antes do da conta, a aba que nunca entrou e a pergunta à extensão no ar não encerram nada', () => {
+  const mesma = abaQueCaiu({ guardado: { [TOKEN]: 'tok-y', [CONTA_KEY]: { id: '111', s: marcaDe('tok-y') } } });
+  mesma.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(mesma.log, [], 'a MESMA conta entrando noutra aba encerrou a memória dela aqui (a queda a mantém pra ela voltar)');
+  // A outra aba grava o token ANTES da conta: no aviso do token o aparelho ainda diz a conta anterior.
+  const token = abaQueCaiu({ guardado: { [TOKEN]: 'tok-y', [CONTA_KEY]: { id: '111', s: marcaDe('tok-a') } } });
+  token.h.sincronizarComOutraAba(TOKEN);
+  assert.deepEqual(token.log, [], 'o aviso do TOKEN decidiu antes do da conta');
+  const nova = abaQueCaiu({ guardado: DA_222, conta: null, fila: [], card: false });
+  nova.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(nova.log, [], 'a aba que nunca entrou foi encerrada (R9-1-03)');
+  // A pergunta à extensão da volta no ar: o fim dela decide (a extensão que entra, ou a adoção, limpam pela memória).
+  const perguntando = abaQueCaiu({ guardado: DA_222, perguntando: true });
+  perguntando.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(perguntando.log, [], 'com a pergunta à extensão no ar, a outra conta encerrou esta por cima dela');
+  // O "Sair" de lá segue sendo o R12-1-04, e a aba LOGADA sai pela troca de conta de sempre.
+  const sair = abaQueCaiu();
+  sair.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(sair.log, [['sair', { porOutraAba: true, naEntrada: true }]], 'o "Sair" de outra aba deixou de alcançar a aba que caiu');
+  const logada = abaQueCaiu({ guardado: DA_222, logada: true });
+  logada.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(logada.log, [['sair', { porOutraAba: true, outraConta: true }]], 'a aba LOGADA deixou de sair pela troca de conta de sempre');
+  // Sem perfil, mas com sessão a encerrar — a da memória (a abertura pelo link, antes do perfil), o app
+  // autenticado (o perfil a caminho: quem decide é a conferência do R6-1-04) ou o app ainda na tela (a
+  // renovação que falhou, antes da tela de entrada): não é a aba que caiu.
+  for (const [caso, o] of [['a sessão na memória', { memoria: true }], ['autenticada', { autenticada: true }],
+    ['o app na tela', { appNaTela: true }]]) {
+    const c = abaQueCaiu({ guardado: DA_222, ...o });
+    c.h.sincronizarComOutraAba(CONTA_KEY);
+    assert.ok(!c.log.some((x) => Array.isArray(x) && x[1] && x[1].naEntrada),
+      `(${caso}) a saída da aba que caiu rodou numa aba que ainda tem sessão a encerrar: ` + JSON.stringify(c.log));
+  }
+});
+
+// O `handleLogout` DE VERDADE, no modo da aba que caiu com OUTRA conta no aparelho.
+function montarSaidaDaQueCaiu() {
+  const ap = aparelho({ [STATS_KEY]: '{"rejected":0}', ...DA_222 });
+  const log = [];
+  const AppState = {
+    authenticated: false, profile: null, stats: { read: 0, rejected: 0, skipped: 0 }, filters: { velho: true },
+    preferences: { presenca: false }, devMode: { unlocked: false, active: false }, history: { _total: {} },
+    conquistas: { c: {} }, autores: { r: {} }, pendingAction: null, inFlightActions: 0, sessaoExpiraEm: null,
+    queue: [{ venueID: 'p0' }], currentPlace: { venueID: 'p0' },
+  };
+  const API = {
+    sessionToken: null, chamadas: [{ rota: 'perfil' }, { rota: 'buscar-places' }],
+    getSession() { return this.sessionToken; },
+    setSession(t) { log.push('setSession:' + t); },
+    soltarSessao() { this.sessionToken = null; },
+    destroySession: (t) => { log.push('destroy:' + t); return Promise.resolve({ success: true }); },
+    cancelarPareamento: (c) => { log.push('cancelou:' + c); return Promise.resolve(); },
+    setRegion: () => log.push('regiao'), setCountry: () => log.push('pais'), esquecerLugar: () => log.push('esqueceu o lugar'),
+  };
+  const deps = {
+    safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API,
+    window: { Presenca: { esquecer: (o) => log.push(['conversa', o || null]) } },
+    epocaDaSessao: 2, saiuNestaPagina: false, pareamentosEmitidos: new Set(), tokenTiradoPorOutraAba: null,
+    HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: 'waze_places_conquistas', CHAVE_INSTALL_DISPENSADO: 'waze_places_install_dispensado',
+    PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'), CONTA_KEY, SESSOES_KEY: 'waze_places_sessoes', NASCIMENTO_KEY: 'waze_places_nascimento',
+    SAIDA_KEY: 'waze_places_saida', pousosDaPagina: new Set(['p9|u9']), pedidosEmAndamento: new Set(),
+    referenciasDoPerfil: null, posicaoGps: null, avatarPendente: null, avatarFalhou: null, telaPronta: true,
+    contaConfirmadaNestaAba: { id: '111', s: marcaDe('tok-a') },
+    fecharCamadasAbertas: () => log.push('fechou as camadas'), closeModal: (id) => log.push('fechou:' + id),
+    dlogApagar: (o) => log.push(['capturas', o || null]), resetQueue: () => log.push('fila nova'),
+    filtrosDeFabrica: () => ({ fabrica: true }), offlineEsquecer: (o) => log.push(['offline', o || null]),
+    esquecerAutores: () => log.push('autores do aparelho'), esquecerPrazoDaSessao: () => log.push('prazo do aparelho'),
+    registrarEventoDeSessao: (e) => log.push('diario:' + e),
+    saveStats: () => ap.safeLS.set(STATS_KEY, '{}'), saveFilters: () => ap.safeLS.set('waze_places_filters', '{}'),
+    savePreferences: () => ap.safeLS.set(PREFERENCES_KEY, '{}'), saveDevMode: () => ap.safeLS.set('waze_places_devmode', '{}'),
+    callWithRetry: (fn) => fn(), t: (k) => k, showToast: (m) => log.push('aviso ' + m),
+    removeCurrentCardEl: () => log.push('o card saiu do DOM'), showAuthScreen: () => log.push('tela de entrada'),
+  };
+  const h = montar(['handleLogout', 'preferenciasDeFabrica', 'sessaoDestaAbaEhAGuardada'], deps);
+  return { h, ap, log, AppState, API, deps };
+}
+
+test('R13-1-06: a saída da aba que caiu, com OUTRA conta no aparelho, solta a fila, o card, a conversa, as capturas e o anel — e não toca no aparelho nem na sessão da outra conta', async () => {
+  const m = montarSaidaDaQueCaiu();
+  await m.h.handleLogout({ porOutraAba: true, outraConta: true, naEntrada: true });
+  assert.deepEqual(m.ap.escritas, [], 'a aba que caiu mexeu no aparelho (ele é da outra conta): ' + m.ap.escritas.join(' '));
+  assert.equal(m.ap.dados.get(TOKEN), 'tok-y', 'a sessão da outra conta saiu do aparelho');
+  assert.ok(m.log.includes('fila nova') && m.log.includes('o card saiu do DOM'), 'a fila e o card da conta anterior ficaram: ' + JSON.stringify(m.log));
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'conversa'), ['conversa', { soMemoria: true }], 'o rascunho da conversa ficou');
+  assert.deepEqual(m.log.find((x) => Array.isArray(x) && x[0] === 'capturas'), ['capturas', { soMemoria: true }]);
+  assert.equal(m.API.chamadas.length, 0, 'o anel de chamadas da conta anterior ficou (voltaria no relatório de quem entrar)');
+  assert.equal(m.deps.contaConfirmadaNestaAba, null);
+  assert.ok(!m.log.includes('fechou as camadas'), 'o que a pessoa abriu na tela de entrada (o "Colar cookies", com o que ela digita) fechou');
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('aviso ')), 'o aviso apareceu numa tela que não mudou: ' + JSON.stringify(m.log));
+  assert.ok(!m.log.some((x) => typeof x === 'string' && (x.startsWith('destroy:') || x.startsWith('setSession'))),
+    'a saída apagou uma sessão (a da outra conta?) ou mexeu no token: ' + JSON.stringify(m.log));
+});

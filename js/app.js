@@ -17015,13 +17015,39 @@ function contaSegueNoAparelho(id) {
 // a conta desta aba não se sabe ainda; quando ele chega, o `definirPerfil`
 // confere o mesmo — e ele é pedido NA HORA, com o card travado até chegar
 // (`conferirContaDestaAba`, R6-1-04).
+//
+// A aba que CAIU na tela de entrada também não tem perfil (a tela de entrada o
+// solta), e por ele a resposta era "segue" — mas ela sabe a conta: a que
+// confirmou por último (ver `outraContaTomouOAparelhoDaQueCaiu`). Com OUTRA conta
+// no aparelho, sai a parte de memória e de tela, como no "Sair" de lá (R12-1-04).
 function aoEntrarOutraContaEmOutraAba() {
     if (contaSegueNoAparelho(AppState.profile && AppState.profile.id)) {
         if (contaDestaAbaEmDuvida()) conferirContaDestaAba();
-        return false;
+        if (!outraContaTomouOAparelhoDaQueCaiu()) return false;
+        handleLogout({ porOutraAba: true, outraConta: true, naEntrada: true });
+        return true;
     }
     handleLogout({ porOutraAba: true, outraConta: true });
     return true;
+}
+
+// A aba que CAIU na tela de entrada guarda, de propósito, a memória da sessão
+// que caiu — a fila, o card e a conta que confirmou (`contaConfirmadaNestaAba`)
+// —, pra MESMA conta voltar (ver `guardaASessaoQueCaiu`). Quando OUTRA conta
+// toma o aparelho noutra aba, isso tudo é de quem saiu: o card (dado de
+// terceiro, no DOM debaixo da tela de entrada), a fila e o anel de chamadas da
+// conta anterior ficavam nela até alguém entrar ali — MEDIDO no navegador:
+// fila 5, o nome do local no DOM e 5 chamadas, com o aparelho já da outra conta
+// (auditoria da rodada 13, R13-1-06; o irmão do R12-1-04). Sem sessão a encerrar
+// aqui (nenhuma na memória, o app fora da tela) e sem pergunta à extensão no ar
+// (o fim dela decide, e a adoção limpa pela memória). A conta se compara como a
+// das abas logadas (`contaSegueNoAparelho`), pelo aparelho como ele está: no
+// aviso do token a conta guardada ainda é a anterior, e decide o aviso da conta.
+function outraContaTomouOAparelhoDaQueCaiu() {
+    const appNaTela = !document.getElementById('appScreen')?.classList.contains('hidden');
+    if (API.temSessaoNaMemoria() || AppState.authenticated || appNaTela || extPerguntando) return false;
+    // Sem conta confirmada (a aba que nunca entrou), "segue": nada a encerrar.
+    return !contaSegueNoAparelho(contaConfirmadaNestaAba && contaConfirmadaNestaAba.id);
 }
 
 // A conta DESTA aba ainda não se sabe — o perfil não chegou (falhou na
