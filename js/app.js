@@ -1557,6 +1557,14 @@ function perguntarAExtensaoAoVoltar() {
     // login que a pessoa pediu — duas sessões no servidor, e o "Sair" apagava só
     // a última (auditoria da rodada 11, R11-1-03, MEDIDO).
     if (authInFlight || resgateEmVoo) return;
+    // Nem com TEXTO DIGITADO num diálogo da entrada (o cookies.txt colado, o
+    // código): a pessoa estava entrando por ali — talvez com OUTRA conta —, a
+    // MESMA régua da adoção (`adotarSessaoDoAparelho`). A adoção a respeitava, e
+    // a pergunta da mesma volta não: a resposta da extensão fechava o diálogo
+    // com a limpeza e entrava com a conta do WME (o que estava colado ia
+    // embora), e o "negado" abria o "Acesso restrito" por cima dele (auditoria
+    // da rodada 12, R12-1-05, MEDIDO).
+    if (textoDigitadoNaEntrada()) return;
     if (document.getElementById('authScreen')?.classList.contains('hidden')) return;
     entrarPelaExtensao({ silencioso: true }).then((entrou) => {
         // A outra aba entrou enquanto a extensão respondia: a sessão dela entra,

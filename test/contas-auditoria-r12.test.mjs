@@ -10,7 +10,9 @@
 //  · R12-1-03 — a adoção calada (R9-1-03) por mais duas portas: a resposta de um
 //    "invisível" que chega depois da queda, e o "Conectar outro aparelho" tocado
 //    durante a renovação — as perguntas "esta aba tem sessão?" liam o
-//    `getSession`, que com a memória vazia GRAVA nela a sessão da outra aba.
+//    `getSession`, que com a memória vazia GRAVA nela a sessão da outra aba;
+//  · R12-1-05 — a volta à aba com TEXTO DIGITADO na entrada: a adoção respeitava,
+//    e a pergunta à extensão da mesma volta apagava o que foi digitado.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js (e o `api.js` inteiro,
 // num contexto do `vm`, onde o efeito do `getSession` mora): o que o teste não
@@ -487,5 +489,42 @@ test('R12-1-03: a prova de vida só é perguntada com o 401 — a resposta boa (
     await tique();
     assert.equal(m.provas.length, perguntas,
       `(${caso}) a prova de vida foi perguntada ${m.provas.length} vez(es) — fora do 401 ela é pergunta à toa, e com a memória vazia era a porta da adoção`);
+  }
+});
+
+// ═══ R12-1-05 · a volta à aba com TEXTO DIGITADO não pergunta à extensão ═══════
+function voltaNaEntrada(tela) {
+  const real = apiDeVerdade({});                  // nenhuma sessão no aparelho: a adoção não tem o que adotar
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const deps = {
+    API: real.API, safeLS: real.safeLS, AppState: { authenticated: false, profile: null }, document: t.document,
+    MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, extPerguntando: false, resgateEmVoo: false, authInFlight: false,
+    saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null, focoDoTeclado: null,
+    closeModal: (id) => { log.push('fechou ' + id); t.fechar(id); },
+    podeInstalarExtensao: () => true,
+    entrarPelaExtensao: (o) => { log.push('perguntou à extensão' + (o && o.silencioso ? ' (em silêncio)' : '')); return new Promise(() => {}); },
+  };
+  const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', 'adotarSessaoDoAparelho', 'textoDigitadoNaEntrada',
+    'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, log, tela: t };
+}
+
+test('R12-1-05: a volta à aba com o cookies.txt colado (ou o código digitado) não pergunta à extensão — a régua da adoção', () => {
+  for (const tela of [COLANDO, { dialogo: 'pairEnterModal', texto: 'ABC-234', foco: 'pairCodeInput' }]) {
+    const m = voltaNaEntrada(tela);
+    m.h.aoVoltarAAba();
+    assert.deepEqual(m.log, [],
+      `DEFEITO (${tela.dialogo}): a volta perguntou à extensão com o texto digitado — a resposta fecharia o diálogo (o que estava colado ia embora) e entraria com a conta do WME: ` + JSON.stringify(m.log));
+    const campo = tela.dialogo === 'pasteModal' ? 'cookiesTextarea' : 'pairCodeInput';
+    assert.equal(m.tela.els[campo].value, tela.texto);
+  }
+});
+
+test('R12-1-05: CONTROLE — sem texto digitado (o diálogo vazio, ou nenhum), a volta pergunta à extensão em silêncio', () => {
+  for (const tela of [{}, { dialogo: 'pasteModal', texto: '', foco: 'cookiesTextarea' }]) {
+    const m = voltaNaEntrada(tela);
+    m.h.aoVoltarAAba();
+    assert.deepEqual(m.log, ['perguntou à extensão (em silêncio)'], 'CONTROLE: a volta deixou de perguntar à extensão: ' + JSON.stringify(tela));
   }
 });
