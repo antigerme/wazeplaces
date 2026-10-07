@@ -7,6 +7,8 @@
 //    à lista ("✕ 4 · rejeitado hoje"), recriado por essas rejeições;
 //  · R10-2-03 — o "Marcar todos" somava o placar, o Histórico e as conquistas
 //    só no FIM do laço: fechar o app no meio perdia o que o Waze já tinha marcado;
+//  · R10-2-04 — o "Marcar todos" com "Apenas não lidos" desmarcado contava como
+//    lidos os pedidos que JÁ estavam lidos (a faixa "já lido" do card);
 //  · R10-2-07 — a recusa automática que levava 401 anotava "saida.abriu" no
 //    diário com a fila de saída vazia.
 //
@@ -472,10 +474,62 @@ test('R10-2-03: o pedido que a APROVAÇÃO dela resolveu tem o desfecho dela na 
   assert.deepEqual(m.toasts.filter((x) => x.startsWith('success:')), ['success:toast.batchDone#1']);
 });
 
+// ── R10-2-04: o já lido fica de fora — do diálogo, do envio, do aviso e do placar
+// O roteiro do auditor (q10): "Apenas pedidos não lidos" desmarcado, u1–u3 já
+// lidos e u4–u5 não. O diálogo dizia "os 5", mandava os 5, avisava "5 pedidos
+// marcados" e somava 5 — igual ao CONTROLE com os cinco não lidos.
+test('R10-2-04: "Marcar todos" com pedidos JÁ LIDOS na fila — conta, manda, avisa e soma só os não lidos', async () => {
+  const fila = [1, 2, 3].map((i) => lido(i, { isRead: true })).concat([4, 5].map((i) => lido(i)));
+  const m = montarMarcarTodos({ fila, pedaco: 25 });
+  m.h.openBatchReadConfirm();
+  assert.deepEqual(m.modais, ['batchReadModal'], 'PRÉ-CONDIÇÃO: o diálogo abriu');
+  assert.equal(m.mensagem.textContent, 'modal.batchRead.bodyNaoLidosPlural#2',
+    `DEFEITO: o diálogo não diz os 2 NÃO LIDOS (disse "${m.mensagem.textContent}")`);
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o lote saiu');
+  assert.deepEqual(m.enviados, ['u4+u5'], `DEFEITO: o lote mandou os já lidos: ${m.enviados}`);
+  m.soltar({ success: true });
+  await lote;
+  assert.deepEqual(m.toasts, ['info:toast.batchMarkingPlural#2', 'success:toast.batchDonePlural#2'],
+    `DEFEITO: o aviso contou os já lidos: ${JSON.stringify(m.toasts)}`);
+  assert.equal(m.AppState.stats.read, 42, `DEFEITO: o placar somou os já lidos (${m.AppState.stats.read})`);
+  assert.deepEqual(m.historico.map((x) => x[1]), [2], 'DEFEITO: o Histórico somou os já lidos');
+  // Os já lidos SEGUEM na fila, como card: continuam pendentes no Waze.
+  assert.deepEqual(m.fila(), ['u1', 'u2', 'u3'], 'os já lidos saíram da fila (ou os marcados ficaram)');
+  assert.equal(m.AppState.serverTotal, 3, 'o "Restam" não acompanha a fila');
+});
+
+test('R10-2-04: CONTROLE — a fila só de não lidos segue com a frase de sempre e marca todos', async () => {
+  const m = montarMarcarTodos({ fila: [1, 2, 3, 4, 5].map((i) => lido(i)), pedaco: 25 });
+  m.h.openBatchReadConfirm();
+  assert.equal(m.mensagem.textContent, 'modal.batchRead.bodyPlural#5');
+  const lote = m.h.handleBatchMarkRead();
+  await ateQue(() => m.portoes.length === 1, 'o lote saiu');
+  assert.deepEqual(m.enviados, ['u1+u2+u3+u4+u5']);
+  m.soltar({ success: true });
+  await lote;
+  assert.equal(m.AppState.stats.read, 45);
+  assert.deepEqual(m.fila(), []);
+});
+
+test('R10-2-04: sobrando UM não lido, a frase é a do singular; sobrando NENHUM, é a fila sem o que marcar (sem diálogo)', async () => {
+  const um = montarMarcarTodos({ fila: [lido(1, { isRead: true }), lido(2)], pedaco: 25 });
+  um.h.openBatchReadConfirm();
+  assert.equal(um.mensagem.textContent, 'modal.batchRead.bodyNaoLidos#1');
+  const nenhum = montarMarcarTodos({ fila: [lido(1, { isRead: true }), lido(2, { isRead: true })], pedaco: 25 });
+  nenhum.h.openBatchReadConfirm();
+  assert.deepEqual(nenhum.modais, [], 'DEFEITO: o diálogo abriu pra marcar como lido o que já está lido');
+  assert.deepEqual(nenhum.toasts, ['info:toast.batchEmpty'], `a fila só de já lidos não disse que não há o que marcar: ${nenhum.toasts}`);
+  // E o confirmar (o diálogo de antes, se a fila mudasse com ele aberto) não manda nada.
+  await nenhum.h.handleBatchMarkRead();
+  assert.deepEqual(nenhum.enviados, []);
+  assert.equal(nenhum.AppState.stats.read, 40);
+});
+
 // Os testes de cima fatiam o FONTE; o app carrega o `js/min/` (gotcha #22).
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const re of [/aindaVale/g, /registrarLoteConfirmado\(/g]) {
+  for (const re of [/aindaVale/g, /modal\.batchRead\.bodyNaoLidos/g, /registrarLoteConfirmado\(/g]) {
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
   }
 });

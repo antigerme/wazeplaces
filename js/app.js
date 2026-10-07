@@ -21840,12 +21840,26 @@ function openBatchReadConfirm() {
     // uma SEGUNDA decisão sobre o mesmo pedido, contada no placar (MEDIDO: o
     // diálogo dizia 3 com 2 pedidos a decidir; auditoria de 2026-09-29, V7). É a
     // mesma régua da recusa automática.
-    loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID
+    //
+    // E o que JÁ FOI LIDO também (`isRead`, a faixa "já lido" do card), que só
+    // vem com "Apenas pedidos não lidos" desmarcado: o diálogo dizia "os 5",
+    // mandava os 5, avisava "5 pedidos marcados" e somava 5 no placar e no
+    // Histórico, com 3 deles já lidos (MEDIDO no navegador; auditoria de
+    // 2026-10-07, R10-2-04). Fica na fila como card — segue pendente no Waze,
+    // pra ser rejeitado ou pulado. Sobrando nenhum, é a fila sem o que marcar
+    // ("Nada na fila para marcar"), e a frase do diálogo diz "não lidos" quando
+    // a fila tem os dois, pro número bater com o que a pessoa vê.
+    loteDeLidosContado = AppState.queue.filter((p) => p.venueID && p.updateRequestID && p.isRead !== true
         && !pedidosEmAndamento.has(chaveDoPedido(p))).map(chaveDoPedido);
     const n = loteDeLidosContado.length;
     if (n === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
+    const comJaLidos = AppState.queue.some((p) => p && p.isRead === true);
     const msgEl = document.getElementById('batchReadMessage');
-    if (msgEl) msgEl.textContent = t(n === 1 ? 'modal.batchRead.body' : 'modal.batchRead.bodyPlural', { n });
+    if (msgEl) {
+        msgEl.textContent = comJaLidos
+            ? t(n === 1 ? 'modal.batchRead.bodyNaoLidos' : 'modal.batchRead.bodyNaoLidosPlural', { n })
+            : t(n === 1 ? 'modal.batchRead.body' : 'modal.batchRead.bodyPlural', { n });
+    }
     openModal('batchReadModal');
 }
 
@@ -21861,6 +21875,7 @@ async function handleBatchMarkRead() {
     // desta aba em dúvida, R7-2-02; a conferência de um 401).
     if (acoesTravadasForaDaJanela()) { showToast(t(avisoDaTrava()), 'info'); return; }
     // E o que entrou em andamento com o diálogo aberto também fica de fora (V7).
+    // (O já lido nem foi contado: ver o `openBatchReadConfirm`, R10-2-04.)
     const alvos = AppState.queue.filter((p) => p.venueID && p.updateRequestID && contados.has(chaveDoPedido(p))
         && !pedidosEmAndamento.has(chaveDoPedido(p)));
     if (alvos.length === 0) { showToast(t('toast.batchEmpty'), 'info'); return; }
