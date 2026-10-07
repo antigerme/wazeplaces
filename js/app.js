@@ -4265,6 +4265,8 @@ function estadoAprovando(ligado) {
 // o `aprovacaoPousouDepoisDaQueda`, e aqui sai `false`: nada mais a fazer.
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
+    // QUEM decide, pro aviso às outras abas se ela pousar depois da queda (R12-2-04).
+    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     // No ar: o card do pedido trava até a resposta (ver `aprovacaoDaTelaNoAr`).
     const chave = chaveDoPedido(alvo.place);
     aprovacoesNoAr.add(chave);
@@ -4316,7 +4318,7 @@ async function enviarAprovacao(alvo) {
         // pousou vai pra tela como pousou (R6-3-01).
         if (epoca !== epocaDaSessao) {
             if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
-            else aprovacaoPousouDepoisDaQueda(alvo, valeu);
+            else aprovacaoPousouDepoisDaQueda(alvo, valeu, quem);
             return false;
         }
         if (valeu) {
@@ -4442,14 +4444,16 @@ function tirarAprovadoDaFila(place) {
 // proposta, sem ação nenhuma, e avisa quem ainda vê o pedido (o L30). Em
 // qualquer fila: a foto aberta é a mesma, e a marca vive no próprio pedido.
 // Placar, Histórico e "Curador" seguem de fora — são da sessão que caiu.
-function aprovacaoPousouDepoisDaQueda(alvo, valeu) {
+// `quem`: a marca de quem aprovou, tirada no envio — é com ela que as outras
+// abas ficam sabendo do pouso, que pode chegar sem sessão na memória (R12-2-04).
+function aprovacaoPousouDepoisDaQueda(alvo, valeu, quem) {
     if (valeu) Lightbox.marcarComoAprovada(alvo);
     else {
         Lightbox.esquecerProposta(alvo);
         if (pedidoAindaNaTela(alvo.place)) showToast(t('toast.alreadyProcessed'), 'info');
     }
     if (alvo.epocaFila !== AppState.fetchEpoch) return;
-    registrarPouso(alvo.place);
+    registrarPouso(alvo.place, quem);
     // Um gesto da sessão nova já o decidiu (o card ficou destravado na
     // renovação): ele já saiu da fila, e o "Restam" já desceu por ele.
     if (!AppState.queue.includes(alvo.place)) return;
@@ -7334,8 +7338,10 @@ function diagDecididosAgora() {
 // `chavesDoPouso`: as chaves que o aviso de POUSO da outra aba trouxe (o canal
 // entre abas, ver `aoPousarEmOutraAba`, R11-2-01). Ali não há fila de saída a
 // comparar — o que pousou lá é decisão, por definição —, e o resto é o MESMO.
+// `em`: quando esta aba soube, se não foi agora (o aviso que esperou a conta
+// desta aba, R12-2-05).
 const decididosPorOutraAbaComCardAqui = new WeakSet();
-function anotarDecididosPorOutraAba(ev, chavesDoPouso) {
+function anotarDecididosPorOutraAba(ev, chavesDoPouso, em) {
     let novas;
     if (Array.isArray(chavesDoPouso)) {
         novas = new Set(chavesDoPouso.filter((k) => typeof k === 'string' && k));
@@ -7349,6 +7355,10 @@ function anotarDecididosPorOutraAba(ev, chavesDoPouso) {
         novas = new Set((Array.isArray(depois) ? depois : []).map(chaveDoPedido).filter((k) => k && !tinha.has(k)));
     }
     if (!novas.size) return;
+    // As CHAVES também, com a hora: o que está FORA da fila agora — a recusa
+    // automática no ar, a busca no ar — também não decide de novo (R12-2-01,
+    // R12-2-02, ver `lembrarDecididasPorOutraAba`).
+    if (typeof lembrarDecididasPorOutraAba === 'function') lembrarDecididasPorOutraAba(novas, em);
     // A fila REAL (`filaReal`), e não a da tela: com o treino aberto, a da tela
     // são os EXEMPLOS (o `updateRequestID` inerte nunca casa) e a real fica
     // guardada nele — junto do que o Waze recusou de vez nesse meio, que volta
@@ -7367,6 +7377,65 @@ function anotarDecididosPorOutraAba(ev, chavesDoPouso) {
     for (const p of [...filaRealComDevolvidos(), ...naJanela]) {
         if (p && typeof p === 'object' && novas.has(chaveDoPedido(p))) decididosPorOutraAbaComCardAqui.add(p);
     }
+}
+
+// ── O que a OUTRA aba decidiu, pela CHAVE (auditoria da rodada 12) ──────────
+// A anotação de cima é por OBJETO, e só alcança o pedido que está na fila (ou
+// na janela do Desfazer) quando o aviso chega. Dois caminhos pegavam o pedido
+// FORA dela nessa hora, e o decidiam de novo:
+//   · a recusa automática NO AR tira os alvos da fila antes de mandar: o pedido
+//     que a pessoa acabou de marcar como lido na outra aba saía daqui rejeitado,
+//     segundos depois — lido e rejeitado no Waze, e o placar com 8 pra 7 pedidos
+//     (R12-2-01, MEDIDO no navegador, nos dois motores);
+//   · a BUSCA no ar — a da abertura da segunda aba, a do ↻, a da troca de
+//     filtro — começou antes da decisão de lá e voltava depois com o pedido
+//     como card, e o ✕ aqui ia ao Waze (R12-2-02, MEDIDO).
+// Por isso as chaves ficam aqui, com a hora em que ESTA aba soube (a mais nova,
+// quando soube duas vezes: a anotação na fila de saída, e depois o pouso). A
+// régua é a do `semOsJaDecididos`: o que foi decidido DEPOIS de a lista ser
+// tirada (os alvos da recusa, a página da busca) fica de fora; o de antes, quem
+// manda é o Waze, porque a lista que saiu depois da decisão já a reflete — com
+// "lidos também", o lido volta como card legítimo, como volta numa aba só. Pra
+// busca, a chave vai também pros pousos da página (`pousosDaPagina`), que é o
+// que o filtro dela lê. Só em memória, com teto; sai no "Sair" e na troca de
+// conta (`esquecerDecididasPorOutraAba`). Os pousos da página seguem a regra
+// deles (saem no "Sair"): a troca de conta mantém a fila desta sessão, e o que
+// ela decidiu tem que continuar fora da busca que está no ar.
+const decididasPorOutraAba = new Map();
+const DECIDIDAS_POR_OUTRA_ABA_MAX = 2000;
+
+function lembrarDecididasPorOutraAba(chaves, em) {
+    const quando = Number.isFinite(em) ? em : Date.now();
+    for (const k of chaves) {
+        if (typeof k !== 'string' || !k) continue;
+        const antes = decididasPorOutraAba.get(k);
+        // Reinserida no FIM: o teto tira do começo, a que não muda há mais tempo.
+        decididasPorOutraAba.delete(k);
+        decididasPorOutraAba.set(k, antes >= quando ? antes : quando);
+        if (!(pousosDaPagina.get(k) >= quando)) pousosDaPagina.set(k, quando);
+    }
+    while (decididasPorOutraAba.size > DECIDIDAS_POR_OUTRA_ABA_MAX) {
+        decididasPorOutraAba.delete(decididasPorOutraAba.keys().next().value);
+    }
+    // A mesma poda do `registrarPouso`: esta aba pode só RECEBER, sem pousar nada.
+    if (pousosDaPagina.size > 500) {
+        const agora = Date.now();
+        for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
+    }
+}
+
+// A OUTRA aba decidiu este pedido em `desde` ou depois?
+function decididoNaOutraAbaDepoisDe(p, desde) {
+    const k = chaveDoPedido(p);
+    const t = k ? decididasPorOutraAba.get(k) : undefined;
+    return t !== undefined && t >= desde;
+}
+
+// O "Sair" leva também os avisos que esperavam a conta (`comOsAvisos`, R12-2-05);
+// a troca de conta não: quem os consome é o `aoConhecerConta` que a revelou.
+function esquecerDecididasPorOutraAba({ comOsAvisos = false } = {}) {
+    decididasPorOutraAba.clear();
+    if (comOsAvisos) avisosDePousoSemConta.length = 0;
 }
 
 // O que a OUTRA aba decidiu sai da fila DESTA (auditoria de 2026-10-07,
@@ -7472,12 +7541,34 @@ function abrirCanalDosPousos() {
     canalDosPousos.onmessage = (ev) => aoPousarEmOutraAba(ev && ev.data);
 }
 
-// O que acabou de pousar NESTA aba, com a marca de quem decidiu. O canal não
-// entrega a mensagem ao objeto que a mandou: esta aba não recebe o próprio aviso.
-function avisarOutrasAbasDoPouso(chaves) {
-    if (!canalDosPousos || !Array.isArray(chaves) || !chaves.length || !API.temSessaoNaMemoria()) return;
+// QUEM decide, tirado no GESTO: a marca da sessão (nunca o token) e a conta. A
+// decisão que pousa com a sessão já caída — a queda chegou com o "Marcar todos"
+// ou a aprovação de foto no ar, e a renovação ainda não respondeu — não tem
+// sessão na memória pra dizer de quem é, e o aviso não saía: a outra aba, com a
+// mesma sessão antiga, seguia com os pedidos como card, e o ✕ de lá ia ao Waze
+// (R12-2-04, MEDIDO no navegador com a queda forçada). Quem pousa assim passa
+// esta marca, tirada quando a decisão saiu (`registrarPouso(…, quem)`). Sem
+// sessão na memória no gesto, `null`.
+function quemDecideAgora() {
+    if (!API.temSessaoNaMemoria()) return null;
+    return { s: marcaDaSessao(API.getSession()), conta: contaAgora() };
+}
+
+// O que acabou de pousar NESTA aba, com a marca de quem decidiu: a do GESTO,
+// quando quem pousa a trouxe (`quem`, ver `quemDecideAgora`), senão a de agora.
+// O canal não entrega a mensagem ao objeto que a mandou: esta aba não recebe o
+// próprio aviso.
+function avisarOutrasAbasDoPouso(chaves, quem) {
+    if (!canalDosPousos || !Array.isArray(chaves) || !chaves.length) return;
+    let de = quem && typeof quem.s === 'string' && quem.s ? quem : null;
+    if (!de) {
+        // A de agora — e sem sessão na memória, nada: não pergunta ao
+        // `getSession`, que leria o aparelho (R9-1-03).
+        if (!API.temSessaoNaMemoria()) return;
+        de = { s: marcaDaSessao(API.getSession()), conta: contaAgora() };
+    }
     try {
-        canalDosPousos.postMessage({ v: 1, chaves, conta: contaAgora(), s: marcaDaSessao(API.getSession()) });
+        canalDosPousos.postMessage({ v: 1, chaves, conta: de.conta ?? null, s: de.s });
     } catch (e) { /* canal fechado: segue como antes */ }
 }
 
@@ -7486,11 +7577,48 @@ function aoPousarEmOutraAba(aviso) {
     if (!aviso || aviso.v !== 1 || !Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
     if (!API.temSessaoNaMemoria()) return;
     if (!(aviso.s && aviso.s === marcaDaSessao(API.getSession()))) {
+        if (!aviso.conta) return;
         const agora = contaAgora();
-        if (!aviso.conta || !agora || String(aviso.conta) !== agora) return;
+        // A conta DESTA aba ainda não se sabe (o perfil não chegou; a conta em
+        // dúvida, R6-1-04): o aviso ESPERA por ela (R12-2-05, ver a função).
+        if (!agora) { guardarAvisoSemConta(aviso); return; }
+        if (String(aviso.conta) !== agora) return;
     }
-    anotarDecididosPorOutraAba(null, aviso.chaves);
+    aplicarPousoDeOutraAba(aviso.chaves);
+}
+
+// O MESMO anotar + tirar da fila do aviso da fila de saída. `em`: quando esta aba
+// soube, se não foi agora (o aviso que esperou a conta).
+function aplicarPousoDeOutraAba(chaves, em) {
+    anotarDecididosPorOutraAba(null, chaves, em);
     tirarDaFilaOQueAOutraAbaDecidiu();
+}
+
+// Os avisos de pouso que chegaram com a conta DESTA aba desconhecida — o perfil
+// falhou, ou não chegou ainda, e a outra aba tem outra sessão (a conta em dúvida
+// da outra aba que entrou de novo, R6-1-04). Não dava pra saber se eram da mesma
+// conta, e eles eram jogados fora: quando o perfil chegava e dizia que era a
+// mesma, os pedidos decididos lá seguiam como card aqui, e o ✕ ia ao Waze
+// (R12-2-05, MEDIDO no navegador). Esperam aqui, só em memória e com teto (os
+// mais antigos saem primeiro), até o `aoConhecerConta`: a mesma conta, valem como
+// se tivessem chegado agora (com a hora em que chegaram); outra, saem sem efeito.
+// O "Sair" os leva (`esquecerDecididasPorOutraAba`).
+const avisosDePousoSemConta = [];
+const AVISOS_DE_POUSO_SEM_CONTA_MAX = 50;
+
+function guardarAvisoSemConta(aviso) {
+    const chaves = aviso.chaves.filter((k) => typeof k === 'string' && k);
+    if (!chaves.length) return;
+    avisosDePousoSemConta.push({ chaves, conta: String(aviso.conta), em: Date.now() });
+    while (avisosDePousoSemConta.length > AVISOS_DE_POUSO_SEM_CONTA_MAX) avisosDePousoSemConta.shift();
+}
+
+// A conta desta aba ficou conhecida (`aoConhecerConta`): todos os avisos que
+// esperavam saem daqui — os desta conta valem, os de outra não.
+function aplicarAvisosQueEsperavamAConta(id) {
+    if (!avisosDePousoSemConta.length) return;
+    const esperando = avisosDePousoSemConta.splice(0);
+    for (const a of esperando) if (a.conta === String(id)) aplicarPousoDeOutraAba(a.chaves, a.em);
 }
 
 // `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
@@ -11213,10 +11341,12 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     }
     // O que foi decidido nesta página (ids de pedidos de terceiros, em memória).
     // Quem entrar depois começa do zero: a fila dele vem da busca dele. As idas
-    // sem resposta das escritas da foto também (R6-3-04): eram de quem saiu.
+    // sem resposta das escritas da foto também (R6-3-04): eram de quem saiu. E o
+    // que a outra aba decidiu, com os avisos que esperavam a conta (R12-2-01/05).
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
     idasSemRespostaGuardadas.clear();
+    if (typeof esquecerDecididasPorOutraAba === 'function') esquecerDecididasPorOutraAba({ comOsAvisos: true });
     // A fila guardada tem nome de quem enviou e foto de terceiro. "Sair e sair
     // de tudo" nao abre excecao que ninguem decidiu. Leva junto os pousos
     // gravados (`OFFLINE_POUSOS_KEY`). Na outra aba, a varredura em voo PARA
@@ -17648,6 +17778,14 @@ async function aplicarRecusaAutomatica() {
     AppState.queue = AppState.queue.filter((x) => !fora.has(x));
     updatePendingCount();
     aoMudarAFilaPorBaixo();
+    // Fora da fila, o aviso da OUTRA aba não os alcança (ele anota o que está na
+    // fila): o que a pessoa decidir lá daqui pra frente fica pela CHAVE, com a
+    // hora (`decididoNaOutraAbaDepoisDe`), e é conferido antes de cada ida
+    // (R12-2-01). `=== true`: os harnesses devolvem objeto verdadeiro pra nome
+    // que não conhecem (a régua da anotação).
+    const desde = Date.now();
+    const decididoNaOutraAba = (p) => typeof decididoNaOutraAbaDepoisDe === 'function'
+        && decididoNaOutraAbaDepoisDe(p, desde) === true;
 
     // O aviso é só ACOMPANHAMENTO: conta enquanto acontece e some quando acaba.
     // Decisão do owner — "a ideia do toast é só informar". Não sobra banner
@@ -17687,8 +17825,13 @@ async function aplicarRecusaAutomatica() {
             // que faltavam seguiam saindo como rejeitados, no nome da pessoa, e
             // com o "Esquecer" o autor voltava à lista, recriado por essas
             // rejeições (MEDIDO no navegador: 4 depois do gesto, nos dois casos;
-            // auditoria de 2026-10-07, R10-2-01). O portão e a conta também.
-            aindaVale: (p) => podeRecusarAutomaticoAqui() && contaConfirmada() && autoLigado(p.creatorId),
+            // auditoria de 2026-10-07, R10-2-01). O portão e a conta também. E o
+            // que a OUTRA aba decidiu com a recusa no ar (R12-2-01): o pedido que a
+            // pessoa marcou como lido lá saía daqui rejeitado, segundos depois.
+            aindaVale: (p) => podeRecusarAutomaticoAqui() && contaConfirmada() && autoLigado(p.creatorId) && !decididoNaOutraAba(p),
+            // Esse está DECIDIDO: não volta pra fila como card (seria decidido de
+            // novo aqui) — sai, e o "Restam" desce, como no aviso de lá.
+            decididoNaOutraAba,
             aoProgredir: (faltam) => {
                 if (faltam > 0) aviso.texto(andando(faltam));
             },
@@ -18152,7 +18295,13 @@ async function enviarLote(places, opts = {}) {
                 // somar — o "Restam" nunca desceu por ele, e o card volta a
                 // contar nele). Nem rejeitado, nem falha.
                 conta.naoVale++;
-                voltarPraFila(p);
+                // Menos o que a OUTRA aba decidiu com o lote no ar
+                // (`opts.decididoNaOutraAba`, R12-2-01): está decidido — de volta
+                // como card, seria decidido de novo aqui. Sai, e o "Restam" desce
+                // por ele, como desce no aviso de lá (só na fila do lote).
+                if (typeof opts.decididoNaOutraAba === 'function' && opts.decididoNaOutraAba(p) === true) {
+                    if (naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+                } else voltarPraFila(p);
             } else if (r && (r.success || r.errorCategory === 'already_processed' || r.errorCategory === 'not_found')
                 && pousouNaOutra()) {
                 conta.ok++;
@@ -19273,6 +19422,11 @@ function aoConhecerConta(perfil) {
     if (!antes || String(antes.id) !== id || sessaoDestaAbaEhAGuardada()) {
         safeLS.set(CONTA_KEY, JSON.stringify({ id, s }));
     }
+    // Os avisos de pouso da outra aba que chegaram sem dar pra saber de quem eram
+    // (a conta desta ainda desconhecida): os DESTA conta valem agora, os de outra
+    // saem (R12-2-05, ver `avisosDePousoSemConta`). Depois da troca de conta, que
+    // tira o que era da anterior.
+    if (typeof aplicarAvisosQueEsperavamAConta === 'function') aplicarAvisosQueEsperavamAConta(id);
     if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
 }
 
@@ -19337,6 +19491,8 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
     // depois (`loadProfileAndAuxData`): a fila de quem entrou volta à ordem dela.
     esquecerFocoAutor();
+    // O que a outra aba da conta anterior decidiu, pela chave (R12-2-01).
+    if (typeof esquecerDecididasPorOutraAba === 'function') esquecerDecididasPorOutraAba();
     if (soMemoria) window.Presenca?.esquecer?.({ soMemoria: true });
     else window.Presenca?.esquecer?.();
     AppState.history = null;
@@ -20044,8 +20200,9 @@ function offlineLerPousos() {
 // E é daqui que as OUTRAS abas ficam sabendo do pouso (R11-2-01, ver
 // `avisarOutrasAbasDoPouso`): por ser a fonte única, o aviso cobre os caminhos
 // que não passam pela fila de saída — o "Marcar todos", a recusa automática e a
-// aprovação de foto.
-function registrarPouso(places) {
+// aprovação de foto. `quem`: a marca de quem DECIDIU, tirada no gesto, pra
+// decisão que pousa com a sessão já caída (R12-2-04, ver `quemDecideAgora`).
+function registrarPouso(places, quem) {
     const agora = Date.now();
     // Uma escrita pousou: o Waze aceita escrita agora (ver `ultimaEscritaOkEm`).
     ultimaEscritaOkEm = agora;
@@ -20055,7 +20212,7 @@ function registrarPouso(places) {
         if (k) { chaves.push(k); pousosDaPagina.set(k, agora); }
     }
     if (!chaves.length) return;
-    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves);
+    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves, quem);
     if (pousosDaPagina.size > 500) {
         for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
     }
@@ -20568,7 +20725,16 @@ async function offlineGravarFila(desde) {
     // guardados" com a base vazia: fechado e reaberto sem sinal, a tela era a de
     // "sem sinal" (R9-4-02, MEDIDO no navegador; auditoria de 2026-10-06). A real,
     // que o treino guarda, é a que a estrada vai precisar.
-    const fila = filaReal();
+    //
+    // SEM o que a OUTRA aba decidiu com o card ainda aqui (o da tela fica, por
+    // decisão do R10-2-02, e o em andamento também): a lista vale a partir de
+    // `desde`, e a poda logo abaixo apaga o pouso de lá, que é mais velho —
+    // reaberto sem rede, o pedido voltava como card, e a segunda decisão, outra,
+    // ia ao Waze (R12-4-01, MEDIDO no navegador: lido lá e rejeitado aqui). Pelo
+    // OBJETO anotado, não pela chave: o mesmo pedido que volta numa busca de
+    // depois (com "lidos também") é card legítimo, e vai.
+    const fila = filaReal().filter((p) => !(typeof decididosPorOutraAbaComCardAqui !== 'undefined'
+        && decididosPorOutraAbaComCardAqui.has(p) === true));
     if (!offlineLigado() || !fila.length) return false;
     const valeDesde = Number.isFinite(desde) ? desde : Date.now();
     // Os filtros também são lidos antes do `await`.
@@ -23417,6 +23583,8 @@ async function handleBatchMarkRead() {
     // O dia e o lugar do GESTO (`carimboDoGesto`): o lote anda em pedaços, e os
     // Filtros seguem alcançáveis com ele no ar (R6-7-4).
     const gesto = carimboDoGesto();
+    // E QUEM decide, pro aviso às outras abas do que pousar depois da queda (R12-2-04).
+    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     const itens = (ps) => ps.map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
     // No ar: trava as outras decisões e tira os pedidos das buscas que chegarem
     // no meio (`semOsJaDecididos`) — o ↻ trazia de volta, como card, o que o
@@ -23637,8 +23805,9 @@ async function handleBatchMarkRead() {
         if (epocaFila !== AppState.fetchEpoch) return;
         // O pouso do que pousou depois da queda (o de antes já foi registrado a
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
-        // devolvê-los como card.
-        if (posQueda.length) registrarPouso(posQueda);
+        // devolvê-los como card. Com a marca de quem DECIDIU: sem sessão na
+        // memória (a renovação no meio), o aviso às outras abas não saía (R12-2-04).
+        if (posQueda.length) registrarPouso(posQueda, quem);
         tirarDaFilaNoFim([...feitos, ...aprovadas, ...posQueda, ...daOutraAbaForaDaTela()]);
         // O que a outra aba decidiu não é "o que não saiu": está decidido.
         const resolvidos = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba].map(chaveDoPedido));
