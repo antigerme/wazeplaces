@@ -17050,7 +17050,12 @@ async function enviarLote(places, opts = {}) {
                     if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                     voltarPraFila(q);
                 }
-                ficouNaSaida();
+                // A fila de saída só ABRIU no placar otimista: contando ao pousar
+                // (a recusa automática), nada foi pra ela — o que falta voltou pra
+                // fila de pedidos —, e o diário dizia "saida.abriu" com ela vazia
+                // (MEDIDO: `["saida.abriu","sessao.alarmeFalso"]` e a fila de
+                // saída `[]`; auditoria de 2026-10-07, R10-2-07).
+                if (!aoLandar) ficouNaSaida();
                 handleUnauthorized();
                 return;
             } else if (r && r.errorCategory === 'transient' && !aoLandar && (anotados.has(p) || enfileirarSaida('reject', p, opts.regiao, opts.gesto))) {

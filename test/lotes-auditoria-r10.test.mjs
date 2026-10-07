@@ -1,10 +1,12 @@
-// A recusa automática diante do que muda NO MEIO dela
+// A recusa automática e o "Marcar todos" diante do que muda NO MEIO deles
 // (auditoria de 2026-10-07, rodada 10 — o lote 14 da fila):
 //
 //  · R10-2-01 — desligar o interruptor do autor (ou o "Esquecer") com a recusa
 //    automática no ar não parava nada: os pedidos que faltavam seguiam indo ao
 //    Waze como rejeitados, no nome da pessoa, e com o "Esquecer" o autor voltava
-//    à lista ("✕ 4 · rejeitado hoje"), recriado por essas rejeições.
+//    à lista ("✕ 4 · rejeitado hoje"), recriado por essas rejeições;
+//  · R10-2-07 — a recusa automática que levava 401 anotava "saida.abriu" no
+//    diário com a fila de saída vazia.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js: o que o teste não
 // fornece vira um "buraco negro" que aceita qualquer chamada (o `montar` de
@@ -319,6 +321,31 @@ test('R10-2-01: todo `enviarLote` que conta ao pousar passa o `aindaVale` — co
       assert.ok(m[1].includes(termo), `DEFEITO: o \`aindaVale\` não confere ${termo}, que a entrada confere`);
     }
   }
+});
+
+// ═══ R10-2-07 · o 401 da recusa automática e o diário ══════════════════════════
+
+test('R10-2-07: a recusa automática que leva 401 não anota "saida.abriu" — a fila de saída nem abriu', async () => {
+  const m = montarRecusa();
+  const recusa = m.h.aplicarRecusaAutomatica();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedido saiu');
+  m.soltar(R401);
+  await recusa;
+  assert.ok(m.log.includes('confere-sessao'), 'PRÉ-CONDIÇÃO: o 401 foi pra conferência da sessão');
+  assert.deepEqual(m.naSaida, [], 'PRÉ-CONDIÇÃO: a recusa automática não usa a fila de saída');
+  assert.deepEqual(m.fila(), ['u1', 'u8', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'], 'PRÉ-CONDIÇÃO: os pedidos voltaram pra fila de pedidos');
+  assert.ok(!m.diario.includes('saida.abriu'),
+    `DEFEITO: o diário diz que a fila de saída abriu, e ela está vazia: ${JSON.stringify(m.diario)}`);
+  // CONTROLE: o "Rejeitar os N" da pessoa com o mesmo 401 — aí a fila de saída
+  // abriu de verdade (os pedidos ficam nela), e o diário diz isso uma vez.
+  const c = montarRecusa();
+  const alvos = c.AppState.queue.slice(1, 4);
+  const lote = c.h.enviarLote(alvos, { regiao: 'row', gesto: GESTO });
+  await ateQue(() => c.portoes.length === 1, 'CONTROLE: o lote da pessoa saiu');
+  c.soltar(R401);
+  await lote;
+  assert.deepEqual(c.naSaida, ['v2|x2', 'v3|x3', 'v4|x4'], 'CONTROLE: os do lote não ficaram na fila de saída');
+  assert.deepEqual(c.diario.filter((k) => k === 'saida.abriu'), ['saida.abriu'], 'CONTROLE: a fila de saída abriu e o diário não disse');
 });
 
 // Os testes de cima fatiam o FONTE; o app carrega o `js/min/` (gotcha #22).
