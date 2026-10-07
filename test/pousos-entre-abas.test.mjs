@@ -50,6 +50,14 @@ function fatiar(nome) {
 const linhaDoFonte = (re, o) => { const m = re.exec(APP_SEM); assert.ok(m, `${o} sumiu do app.js`); return m[0]; };
 const CANAL = linhaDoFonte(/^const CANAL_DOS_POUSOS = '[^']+';$/m, 'o nome do canal dos pousos');
 const CANAL_VAR = linhaDoFonte(/^let canalDosPousos = null;$/m, 'o canal dos pousos');
+// As chaves que a outra aba decidiu e os avisos que esperam a conta (rodada 12,
+// test/abas-auditoria-r12.test.mjs): o aviso do canal passa por elas.
+const DECIDIDAS = [
+  linhaDoFonte(/^const decididasPorOutraAba = new Map\(\);$/m, 'as chaves que a outra aba decidiu'),
+  linhaDoFonte(/^const DECIDIDAS_POR_OUTRA_ABA_MAX = \d+;$/m, 'o teto das chaves que a outra aba decidiu'),
+  linhaDoFonte(/^const avisosDePousoSemConta = \[\];$/m, 'os avisos que esperam a conta'),
+  linhaDoFonte(/^const AVISOS_DE_POUSO_SEM_CONTA_MAX = \d+;$/m, 'o teto dos avisos que esperam a conta'),
+];
 const CONTA_KEY = 'waze_places_conta';
 const SAIDA_KEY = 'waze_places_saida';
 
@@ -89,7 +97,9 @@ const NOMES = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDeci
   'tirarDaFilaOQueAOutraAbaDecidiu', 'gestoNoDecididoPorOutraAba', 'avisarDecididoNaOutraAba',
   'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
   'handleReject', 'handleMarkAsRead', 'offlineLerPousos', 'registrarPouso',
-  'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'contaAgora'];
+  'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
+  'aplicarPousoDeOutraAba', 'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
+  'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'quemDecideAgora'];
 
 // Uma ABA, com a fila `fila` (o da frente na tela), num `aparelho` (Map) que as
 // abas dividem. `token`: a sessão na MEMÓRIA desta aba (`null`: sem sessão).
@@ -143,10 +153,10 @@ function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, trei
     'let tratouNestaFila = false, epocaDaSessao = 0, ultimaEscritaOkEm = 0;',
     'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
       + ' descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet(), pousosDaPagina = new Map();',
-    CANAL, CANAL_VAR,
+    CANAL, CANAL_VAR, ...DECIDIDAS,
     ...NOMES.map(fatiar),
     `return { ${NOMES.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p), emAndamento: pedidosEmAndamento,
-      canal: () => canalDosPousos };`,
+      canal: () => canalDosPousos, pousosDaPagina, decididas: decididasPorOutraAba, esperando: avisosDePousoSemConta };`,
   ].join('\n');
   const app = new Function(...chaves, fonte)(...chaves.map((k) => deps[k]));
   if (abrirCanal) app.abrirCanalDosPousos();

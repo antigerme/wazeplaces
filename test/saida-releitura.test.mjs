@@ -108,7 +108,7 @@ function aparelho({ fila = [], manuais = [] }) {
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
     medidas, presos, manuais: new Set(manuais), setImmediate,
   };
-  const nomes = ['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
     'saidaEmRecuo', 'moverProFimDaSaida', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
     'pousouPorOutraAba', 'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
@@ -132,7 +132,7 @@ function aparelho({ fila = [], manuais = [] }) {
       return new Promise((ok) => setImmediate(() => ok(chegou(primeira ? { success: true }
         : { success: false, errorCategory: 'already_processed' }))));
     };
-    const API = { getSession: () => 'tok', getRegion: () => 'row', getCountry: () => 30,
+    const API = { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row', getCountry: () => 30,
       rejectPlace: (v) => rede(v), markAsRead: (v) => rede(v) };
     ${nomes.map(fatiar).join('\n')}
     return { handleReject, enviarLote, esvaziarFilaDeSaida, carregarFilaDeSaida, emAndamento: pedidosEmAndamento };`)(

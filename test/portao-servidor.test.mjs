@@ -627,6 +627,126 @@ test('excluir-foto: a releitura TROCADA no meio da exclusão (outra escrita do l
   assert.equal(w.depoisDeX, outra, 'a resposta desta exclusão cobriu a releitura que OUTRA escrita do local deixou');
 });
 
+// R12-3-01 (auditoria da rodada 12): o AQUECIMENTO da lixeira (`preparar`) cuja
+// leitura volta DEPOIS de a exclusão do local sair. O `rel.bruto` do R11-3-01 só
+// guarda a regravação da EXCLUSÃO; o aquecimento gravava sem conferir nada. Com o
+// Waze lento, a leitura do toque na lixeira de X (servida com X ainda no local)
+// voltava depois de a exclusão de X — que não achou a lista, releu sozinha,
+// gravou e regravou sem X — e gravava por cima a lista de ANTES, com a hora
+// nova: a exclusão seguinte do local, nos 15 s, mandava X de volta (MEDIDO de
+// ponta a ponta, e3-preparar-tardio). O Waze de um local só; as RESPOSTAS das
+// leituras presas (o Waze já leu a lista, com X) esperam o teste soltar; o
+// relógio é de mentira. `pousa`: quando a leitura do aquecimento volta —
+//   'depois'  : depois de a exclusão de X terminar (a do auditor);
+//   'no-meio' : com a releitura da PRÓPRIA exclusão de X no ar (ela também lê o
+//               local, sem lista guardada), e antes dela;
+//   'antes'   : antes de X sair — o caso de todo dia, o CONTROLE.
+async function aquecimentoQueVoltaTarde({ pousa }) {
+  const s = await sessaoDeTeste(COOKIES);
+  const w = wazeDeUmLocal('v1', [{ id: 'X', approved: true }, { id: 'Y', approved: true }, { id: 'P', approved: false }]);
+  const soltar = [];
+  let segurar = { depois: 1, 'no-meio': 2, antes: 0 }[pousa];
+  const waze = async (url, init) => {
+    const resposta = w.responder(url, init);                  // o Waze lê (ou grava) na hora…
+    if ((init.method || 'GET') === 'GET' && segurar > 0) {    // …e a resposta demora
+      segurar--;
+      await new Promise((ok) => { soltar.push(ok); });
+    }
+    return resposta;
+  };
+  const leu = async (n) => { while (w.leituras < n) await new Promise((ok) => setTimeout(ok, 1)); };
+  const base = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+  const relogio = Date.now;
+  let agora = relogio();
+  Date.now = () => agora;
+  try {
+    await comWaze(waze, async () => {
+      const prep = dispatch('excluir-foto', { ...base, imageID: 'preparar', action: 'preparar' }, s.ctx);   // 0 s: o toque na lixeira de X
+      await leu(1);                                                                                           // o Waze leu (com X)
+      if (pousa === 'antes') await prep;
+      agora += 3000;
+      const exclX = dispatch('excluir-foto', { ...base, imageID: 'X' }, s.ctx);                              // 3 s: a janela vence, X sai
+      if (pousa === 'no-meio') {
+        await leu(2);                                     // a releitura da exclusão de X saiu (sem lista guardada)
+        agora += 100;
+        soltar[0]();                                      // o aquecimento volta com ela no ar…
+        await prep;
+        soltar[1]();                                      // …e depois ela
+      }
+      const rX = await exclX;
+      assert.equal(rX.body.success, true, `PRÉ-CONDIÇÃO: a exclusão de X falhou: ${JSON.stringify(rX.body)}`);
+      agora += 200;
+      if (pousa === 'depois') soltar[0]();                // 3,2 s: a leitura do toque volta
+      const rp = await prep;
+      assert.equal(rp.body.success, true, `PRÉ-CONDIÇÃO: o aquecimento falhou: ${JSON.stringify(rp.body)}`);
+      agora += 2000;
+      const rY = await dispatch('excluir-foto', { ...base, imageID: 'Y' }, s.ctx);                           // 5,2 s: a lixeira de Y (≤ 15 s)
+      assert.equal(rY.body.success, true, `PRÉ-CONDIÇÃO: a exclusão de Y falhou: ${JSON.stringify(rY.body)}`);
+    });
+  } finally {
+    Date.now = relogio;
+  }
+  return w;
+}
+
+test('excluir-foto: o aquecimento da lixeira que volta DEPOIS da exclusão do local não grava a lista de antes por cima — X não volta ao Waze (R12-3-01)', async () => {
+  const w = await aquecimentoQueVoltaTarde({ pousa: 'depois' });
+  assert.ok(w.escritas.length === 2 && w.leituras === 2,
+    `PRÉ-CONDIÇÃO: não foram 2 leituras (o toque e a exclusão de X) e 2 escritas: ${w.leituras} leituras, ${JSON.stringify(w.escritas.map(comPendente))}`);
+  assert.deepEqual(comPendente(w.fotos), ['P(pendente)'],
+    `DEFEITO: a exclusão de Y mandou de volta a foto que a de X tirou — o aquecimento atrasado gravou a lista de antes por cima: ${JSON.stringify(w.escritas.map(comPendente))}`);
+  // CONTROLE: o aquecimento que volta ANTES (o caso de todo dia) segue gravando a
+  // lista — a exclusão de X a usa, regrava sem X, e a de Y usa a regravação, sem
+  // reler. O conserto não é "o aquecimento nunca grava".
+  const c = await aquecimentoQueVoltaTarde({ pousa: 'antes' });
+  assert.equal(c.leituras, 1, 'CONTROLE: com o aquecimento no tempo certo, as exclusões releram o local — a lista dele não foi gravada?');
+  assert.deepEqual(c.escritas.map(comPendente), [['Y', 'P(pendente)'], ['P(pendente)']]);
+});
+
+test('excluir-foto: o aquecimento que volta com a releitura da EXCLUSÃO no ar grava, e a exclusão grava e regrava por cima dele — X não volta (R12-3-01)', async () => {
+  // A conferência é SÓ do aquecimento. Na releitura da exclusão ela guardaria o
+  // aquecimento (lido ANTES da escrita de X, com X) e pularia a regravação, que
+  // só acontece por cima do registro da própria exclusão: a de Y devolveria X.
+  const w = await aquecimentoQueVoltaTarde({ pousa: 'no-meio' });
+  assert.equal(w.leituras, 2, `PRÉ-CONDIÇÃO: não foram 2 leituras (o toque e a exclusão de X): ${w.leituras}`);
+  assert.deepEqual(comPendente(w.fotos), ['P(pendente)'],
+    `DEFEITO: a exclusão de Y mandou de volta a foto que a de X tirou: ${JSON.stringify(w.escritas.map(comPendente))}`);
+  assert.deepEqual(w.escritas.map(comPendente), [['Y', 'P(pendente)'], ['P(pendente)']]);
+});
+
+test('excluir-foto: a lista guardada vale os 15 s a partir da IDA da leitura, não da resposta — a leitura lenta não estica a janela da corrida (R12-3-01)', async () => {
+  // A lista é a do Waze em algum instante entre a ida e a volta; com a hora da
+  // RESPOSTA, a leitura de 9 s servia a exclusão 16 s depois da ida.
+  const cenario = async (depois) => {
+    const s = await sessaoDeTeste(COOKIES);
+    const w = wazeDeUmLocal('v1', [{ id: 'A', approved: true }, { id: 'B', approved: true }]);
+    const relogio = Date.now;
+    let agora = Math.floor(relogio() / 1000) * 1000;              // num segundo redondo
+    Date.now = () => agora;
+    const lenta = (url, init) => {
+      if ((init.method || 'GET') === 'GET') agora += 9000;        // a leitura leva 9 s (o teto dela é 10)
+      return w.responder(url, init);
+    };
+    const base = { ...s.dados, region: 'row', venueID: 'v1', lat: -23.5, lon: -46.6 };
+    try {
+      await comWaze(lenta, async () => {
+        await dispatch('excluir-foto', { ...base, imageID: 'preparar', action: 'preparar' }, s.ctx);   // 0 s → volta aos 9 s
+        agora += depois * 1000 - 9000;
+        const r = await dispatch('excluir-foto', { ...base, imageID: 'A' }, s.ctx);
+        assert.equal(r.body.success, true, JSON.stringify(r.body));
+      });
+    } finally {
+      Date.now = relogio;
+    }
+    return w.leituras;
+  };
+  assert.equal(await cenario(16), 2,
+    'DEFEITO: a lista lida aos 0 s (resposta aos 9 s) serviu a exclusão aos 16 s — a janela da corrida passou dos 15 s');
+  // CONTROLE: dentro dos 15 s contados da ida, a lista guardada serve (o
+  // instrumento enxerga o cache).
+  assert.equal(await cenario(14), 1, 'CONTROLE: aos 14 s da ida a exclusão releu o local — a lista guardada deixou de servir');
+});
+
 test('validar-place: rejeitar NÃO toca na releitura guardada (é o gesto de todo swipe; a cota do KV é contada)', async () => {
   const s = await sessaoDeTeste(COOKIES);
   const lidas = [];

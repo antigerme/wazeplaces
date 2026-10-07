@@ -5042,7 +5042,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   };
   await page.route('**/api/**', async (route) => {
     const nome = route.request().url().split('/api/')[1].split('?')[0];
-    const segura = seguras[nome];
+    // O aquecimento da lixeira (`action: 'preparar'`, que sai no toque COM o Desfazer)
+    // divide a rota com a exclusão, e desde o lote 16 (R12-3-01) a exclusão do local
+    // ESPERA a resposta dele (a vez das escritas de foto): segurá-lo junto seria segurar
+    // a exclusão antes de ela sair. O que um `segurar('excluir-foto')` segura é a EXCLUSÃO.
+    let acao = null;
+    try { acao = JSON.parse(route.request().postData() || '{}').action; } catch { acao = null; }
+    const segura = acao === 'preparar' ? null : seguras[nome];
     const corpo = (segura && await segura) || (nome === 'lista-paises' ? { success: true, countries: [] }
       : nome === 'lista-estados' ? { success: true, states: [] }
         : nome === 'perfil' ? { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false } }
@@ -5069,6 +5075,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await page.waitForTimeout(150);   // fechar e abrir no mesmo tique é o gotcha #65
     await page.evaluate(({ p0, semDesfazer: sem, depois: resto, mais: haMais }) => {
       setLang('pt'); applyI18n();
+      // As partes repetem os MESMOS ids de foto na mesma página, e a foto que uma
+      // exclusão já tirou do mapa não vai ao Waze de novo (`fotosQueSairamDoMapa`,
+      // R12-3-02, lote 16): sem zerar, a 2ª parte nunca tinha exclusão no ar.
+      if (typeof fotosQueSairamDoMapa !== 'undefined') fotosQueSairamDoMapa.clear();
       API.setSession('tok-smoke');
       AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
@@ -10002,6 +10012,70 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
 
+  // ── R12-2-06: a série do autor ACABA com o card dele na tela ────────────
+  // Com o foco no autor, a OUTRA aba decide a série inteira (o "Marcar todos"
+  // de lá): o card da tela, decidido lá, fica fora da série (R11-2-06) e na
+  // frente — e a barra dizia "Primeiro os de X · 0 de 3", com o leitor de tela
+  // ouvindo "os 0 pedidos" (roteiro e13 da rodada 12). A barra SOME, o foco no
+  // autor sai, e o foco do TECLADO que estava nela vai ao ✕ do card, nunca ao
+  // <body>. O aviso da outra aba entra pelo caminho de verdade
+  // (`aoPousarEmOutraAba`, o que o canal dos pousos entrega). CONTROLES: a
+  // outra aba decide só o pedido de TRÁS (a série segue com o card da tela, e a
+  // barra fica, contando, com o foco nela); e pelo MOUSE a barra some sem mover
+  // foco nenhum.
+  for (const caso of ['serie', 'controle', 'mouse']) {
+    const id = `card/foco no autor ${MOTOR}: ${caso === 'serie' ? '' : 'CONTROLE — '}${
+      { serie: 'a outra aba decide a série INTEIRA', controle: 'a outra aba decide só o de trás', mouse: 'a série inteira, pelo mouse' }[caso]}`;
+    const P = (x, autor, data) => cardPedido(x, { creatorId: autor, createdBy: 'autor' + autor, dateAdded: data });
+    const g = await cardPagina([P('Z1', 7, 5000), P('W1', 8, 4000), P('Z2', 7, 3000), P('W2', 8, 2000)]);
+    // O foco no autor 7: pelo TECLADO (Enter no "Ver +1" leva o foco à barra, C10) ou pelo MOUSE.
+    if (caso === 'mouse') await g.page.click('#cardStack .place-card:not(.card-fundo) .selo-lote');
+    else {
+      await g.page.focus('#cardStack .place-card:not(.card-fundo) .selo-lote');
+      await g.page.keyboard.press('Enter');
+    }
+    await assentar(g.page);
+    const antes = await g.page.evaluate(() => ({ foco: (document.activeElement || {}).id || null,
+      fila: AppState.queue.map((p) => p.updateRequestID).join(','),
+      barra: !document.getElementById('focoAutorBar').classList.contains('hidden'),
+      contagem: document.getElementById('focoAutorContagem').textContent }));
+    checa(antes.fila === 'Z1,Z2,W1,W2' && antes.barra && antes.contagem === '2 de 4',
+      `${id}: PRÉ-CONDIÇÃO — o "Ver +1" não pôs a série na frente com a barra "2 de 4"`, JSON.stringify(antes));
+    if (caso !== 'mouse') checa(antes.foco === 'focoAutorBar', `${id}: PRÉ-CONDIÇÃO — o foco não está na barra`, JSON.stringify(antes));
+    // O aviso da outra aba: a série inteira (o card da tela incluído), ou só o de trás.
+    await g.page.evaluate((soODeTras) => {
+      const ps = AppState.queue.filter((p) => (soODeTras ? p.updateRequestID === 'Z2' : p.creatorId === 7));
+      aoPousarEmOutraAba({ v: 1, chaves: ps.map(chaveDoPedido), s: marcaDaSessao(API.getSession()) });
+    }, caso === 'controle');
+    await assentar(g.page);
+    const d = await g.page.evaluate(() => {
+      const b = document.getElementById('focoAutorBar');
+      const a = document.activeElement;
+      const f = cardDaFrente();
+      return { barra: !b.classList.contains('hidden'), contagem: document.getElementById('focoAutorContagem').textContent,
+        aria: b.getAttribute('aria-label'), autor: AppState.autorEmFoco,
+        fila: AppState.queue.map((p) => p.updateRequestID).join(','), frente: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+        foco: !a || a === document.body ? 'body'
+          : (a.id ? '#' + a.id : ([...a.classList].find((c) => c.startsWith('card-btn-')) || a.tagName)),
+        focoNaFrente: !!(a && f && f.contains(a)) };
+    });
+    checa(d.fila === 'Z1,W1,W2' && d.frente === 'Z1', `${id}: PRÉ-CONDIÇÃO — o aviso não tirou o de trás (ou trocou o da tela)`, JSON.stringify(d));
+    if (caso === 'controle') {
+      checa(d.barra && d.contagem === '1 de 3' && d.autor === 7, `${id}: com a série viva, a barra saiu (ou deixou de contar)`, JSON.stringify(d));
+      checa(d.foco === '#focoAutorBar', `${id}: o foco saiu da barra que ficou`, JSON.stringify(d));
+    } else {
+      checa(!d.barra, `${id}: DEFEITO — a barra seguiu na tela com a série VAZIA ("${d.contagem}", "${d.aria}")`, JSON.stringify(d));
+      checa(d.autor === null, `${id}: a série acabou e o foco no autor seguiu ligado`, JSON.stringify(d));
+      if (caso === 'serie') {
+        checa(d.foco === 'card-btn-reject' && d.focoNaFrente, `${id}: a barra sumiu com o foco nela e ele não foi ao ✕ do card`, JSON.stringify(d));
+      } else {
+        checa(d.foco !== 'card-btn-reject', `${id}: pelo mouse, a barra que sumiu levou o foco ao ✕`, JSON.stringify(d));
+      }
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
   // ── A foto que falha DEPOIS de o foco do teclado pousar no ✕ ────────────
   // A família do C10: o foco pousa no ✕ do card novo (o de FOTO, ainda
   // carregando), a foto falha sem rede, a `marcarCardSemFoto` trava ✕ e ✓ — e o
@@ -11755,7 +11829,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
-  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
+  + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`

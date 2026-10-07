@@ -930,9 +930,13 @@ test('a Ajuda diz a verdade sobre o SERVIDOR: além dos cookies, a lista de foto
   // Desde a rodada 11 (R11-3-01) a regravação depois da exclusão só acontece se
   // a lista guardada ainda é a que a exclusão LEU: sumida (a aprovação a esqueceu)
   // ou trocada (outra exclusão do local a regravou), ela não é coberta — e então
-  // vive no máximo o prazo de uma gravação ANTERIOR, que a frase já cobre.
+  // vive no máximo o prazo de uma gravação ANTERIOR, que a frase já cobre. E desde
+  // a rodada 12 (R12-3-01) o AQUECIMENTO (a leitura do toque) também só grava por
+  // cima da lista que estava lá quando ele saiu: sem gravar, vale o mesmo — a
+  // lista guardada é a de uma gravação anterior, ou nenhuma.
   const CORE = ler('server/core.mjs');
-  assert.ok(/const bruto = lidoEm \+ '\|' \+ JSON\.stringify\(enxuto\);\s*try \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE),
+  const CORE_SEM = CORE.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.ok(/const bruto = lidoEm \+ '\|' \+ JSON\.stringify\(enxuto\);\s*let gravou = false;\s*try \{\s*if \(!aquecimento \|\| \(await sessions\.store\.get\(chave\)\) === antes\) \{\s*await sessions\.store\.put\(chave, bruto, RELEITURA_TTL_STORE\)/.test(CORE_SEM),
     'CONTROLE: a releitura mudou de forma no core — confira se a frase da Ajuda segue verdadeira');
   assert.ok(/if \(rel\.bruto && \(await sessions\.store\.get\(chave\)\) === rel\.bruto\) \{\s*await sessions\.store\.put\(chave, rel\.lidoEm \+ '\|' \+ JSON\.stringify\(\{ id: venue\.id, images: restantes \}\), RELEITURA_TTL_STORE\)/.test(CORE),
     'CONTROLE: a regravação da lista depois da exclusão mudou de forma — a frase conta dela ("depois da última exclusão")');
@@ -1878,6 +1882,7 @@ function montarLogin(resposta, { peloTeclado = false } = {}) {
     authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
     // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
     focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {},
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
   };
   const { authenticateWithCookies, estado } = montar(['authenticateWithCookies'], deps,
     ['authenticateWithCookies', 'estado'], 'const estado = () => ({ focoDoTeclado });');
@@ -1942,7 +1947,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   // E o resgate que DEU CERTO pelo teclado promete o foco, como o colar.
   const resgate = async (peloTeclado) => {
     const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
-      document: { getElementById: () => null }, resgateEmVoo: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
+      document: { getElementById: () => null }, resgateEmVoo: false, resgateNoAr: null, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
       closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
       conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {},
       // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.

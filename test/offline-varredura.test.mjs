@@ -52,7 +52,12 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: concorrencia,
     OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
-    offlineGravarFila: async () => { gravou++; }, offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
+    // A gravação da fila leva um carimbo (o `t`), como a de verdade, e a releitura
+    // da base o devolve: é com ele que a poda confere que a fila guardada ainda é a
+    // desta varredura (R12-4-05).
+    offlineGravarFila: async () => { gravou++; st.gravada = (st.gravada || 0) + 1; return true; },
+    offlineLerFila: async () => (st.gravada ? { t: st.gravada, places: [{ venueID: 'v' }] } : null),
+    offlineItensDaFila: async () => itens.map((u) => ({ u, tile: /tile/.test(u) })),
     offlineBaixar: async (u) => { tentativas.set(u, (tentativas.get(u) || 0) + 1); return baixar(u); },
     offlineSondarRede: async (u) => { sondas.push(u); const r = await baixar(u); return r === true || r === 'definitivo'; },
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
@@ -306,7 +311,10 @@ function aparelhoComCache() {
     Date: { now: () => agora }, offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1, OFFLINE_ANUNCIAR_A_CADA: 50,
     OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'), OFFLINE_TILES_CACHE: 'waze-places-tiles',
-    offlineGravarFila: async () => true,
+    // A gravação leva um carimbo e a releitura da base o devolve (R12-4-05: a poda
+    // confere que a fila guardada ainda é a desta varredura).
+    offlineGravarFila: async () => { st.gravada = (st.gravada || 0) + 1; return true; },
+    offlineLerFila: async () => (st.gravada ? { t: st.gravada, places: [{ venueID: 'v' }] } : null),
     offlineItensDaFila: async () => fila.itens.map((u) => ({ u, tile: true })),
     offlineBaixar: async (u) => { baixados.push(u); cache.set(u, true); return true; },
     offlineSondarRede: async () => true,
@@ -903,8 +911,10 @@ const FALHA_502 = await doCore(async () => new Response('bad gateway', { status:
 const FALHA_SESSAO = await falhaDaBusca(respondeCom(401,
   JSON.stringify({ success: false, error: 'Sessão inválida', errorKey: 'srv.err.sessionInvalid', errorCategory: 'unauthorized' }),
   'application/json'));
-function aparelhoO1() {
+// `filtros`: os filtros guardados no aparelho ("Minha área", R12-4-02).
+function aparelhoO1({ filtros = null } = {}) {
   const ls = new Map();
+  if (filtros) ls.set('waze_places_filters', JSON.stringify(filtros));
   const base = new Map();
   const offlineDB = async () => ({
     close() {},
@@ -919,11 +929,14 @@ function aparelhoO1() {
       return tx;
     },
   });
-  return function pagina({ onLine = true, offline = true, api }) {
+  // Com "Minha área" (R12-4-02): `perfil(regiao)` é a resposta do `/Session` (a
+  // carga do perfil e a pergunta ao servidor da busca, as de VERDADE); `profile`, o
+  // perfil já na mão; `editaveis`, o que o app já leu por servidor; `regiao`, a da busca.
+  return function pagina({ onLine = true, offline = true, api, perfil = null, profile = null, editaveis = null, regiao = 'row' }) {
     const log = [];
     const AppState = {
       authenticated: true, hasMore: true, fetching: false, fetchEpoch: 0, queue: [], currentPlace: null,
-      serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null, profile: null, filters: null,
+      serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null, profile, filters: null,
     };
     const el = () => ({ classList: { add() {}, remove() {} } });
     const deps = {
@@ -931,7 +944,13 @@ function aparelhoO1() {
       localStorage: { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) },
       FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
       PREFETCH_THRESHOLD: PREFETCH_R, MAX_EMPTY_PAGES: MAX_VAZIAS_R, MAX_PAGINAS_POR_BUSCA: MAX_PAGINAS_R,
-      API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok', fetchPlaces: async (p) => api(p) },
+      API: { getRegion: () => regiao, getCountry: () => 30, getSession: () => 'tok', fetchPlaces: async (p) => api(p),
+             getProfile: async (r) => { log.push(['perfil', { r: r || regiao }]); return perfil ? perfil(r || regiao) : { success: false, errorCategory: 'unknown' }; } },
+      // O resto da carga do perfil, que não é o que se mede aqui.
+      pedirListaDePaises: async () => ({ success: false }), recusaDoPortao: () => log.push(['recusa', {}]),
+      definirPerfil: (res) => { if (!(res && res.success && res.profile)) return false; AppState.profile = res.profile; return true; },
+      completarPerfilChegado: async () => {}, conferirContaDestaAba: () => {}, PERFIL_REFAZER_MS: 60000,
+      redesenharFiltrosComOPerfil: () => {}, saveFilters: () => {},
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
       contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, dfato: (k, o) => log.push([k, o || {}]),
       dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
@@ -940,7 +959,9 @@ function aparelhoO1() {
       aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {}, offlineVarrer: () => {},
       bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(),
       pousosDaPagina: new Map(), offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
-      refazerPerfilSeFaltar: () => {}, showLoading: () => {}, removeCurrentCardEl: () => {},
+      showLoading: () => {}, removeCurrentCardEl: () => {},
+      // A decisão do lugar que ficou sem resposta (R12-6): aqui, nenhuma pendente.
+      refazerDecisaoSemResposta: () => null,
       document: { getElementById: el },
       // A tela vazia diz se é a de FALHA (`loadError`) ou o "Tudo limpo!": o
       // instrumento que não distingue as duas conta uma pela outra.
@@ -950,15 +971,27 @@ function aparelhoO1() {
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
       'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'filaGuardadaDestaConta',
       'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
-      'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha'];
+      'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha',
+      // "Minha área": a carga do perfil, a caixa por servidor e a pergunta ao servidor da busca.
+      'refazerPerfilSeFaltar', 'loadProfileAndAuxData', 'anotarEditaveis', 'editaveisLidos', 'servidorNuncaLido',
+      'caixaDaMinhaArea', 'caixaDaMinhaAreaEm', 'lerServidorDaMinhaArea', 'areaNoutroServidorSemDecisao',
+      'desligarMinhaAreaSemCaixa'];
+    // A marca da falha por rede da espera de "Minha área" (R12-4-02): sem ela, o código de antes.
+    if (/^function minhaAreaFalhouPorRedeEm\(/m.test(APP_SEM)) nomes.push('minhaAreaFalhouPorRedeEm');
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
         offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,
-        abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false, buscaSemResposta = false;
+        abrindoGuardadaDepoisDaFalha = null, rebuscasAuto = 0, filaEsperaPerfil = false, buscaSemResposta = false,
+        buscaEsperaOPerfil = false, perfilPedidoEm = 0, lugarDoPedidoDoPerfil = null, epocaDaSessao = 0,
+        decisaoDoLugarDe = null, leiturasDaMinhaArea = { epoca: null, noAr: new Map() },
+        editaveisPorServidor = ${JSON.stringify(editaveis || { conta: null, lidos: {}, caixas: {}, gerenciadas: {} })},
+        perfilFalhouPorRede = false, minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() },
+        cargasDoPerfil = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
-      return { startFetching, abrirGuardadaDepoisDaFalha, offlineTentarAbrirSemRede,
+      return { startFetching, fetchNextPage, abrirGuardadaDepoisDaFalha, offlineTentarAbrirSemRede,
+        carregarPerfil: loadProfileAndAuxData,
         falhouPorRede: () => ultimaBuscaFalhouPorRede, semResposta: () => buscaSemResposta };`)(...chaves.map((k) => deps[k]));
     return { app, AppState, log, deps, base };
   };
@@ -1040,6 +1073,141 @@ test('R4-O1: a fila que MUDA enquanto a base é lida (↻, filtro) não recebe a
   assert.equal(eventos(d, 'card').length, 1, 'a fila guardada foi aberta duas vezes');
 });
 
+// R12-6-02 (auditoria da rodada 12): a fila que volta VAZIA com o lugar ainda por
+// decidir espera a decisão — e o PERFIL ainda vindo —, em vez de dizer "Tudo
+// limpo!" (test/minha-area). Mas só a busca que RESPONDEU: no lie-fi o perfil
+// pendura junto com a busca, até o teto de 45 s, e esperando por ele a fila
+// guardada não entrava (MEDIDO no smoke do offline, 9j, na primeira versão do
+// conserto). A falha tem a tela dela.
+test('R12-6-02: a busca que FALHA por rede com o perfil ainda pendurado (o lie-fi) não espera por ele — a fila guardada entra na hora', async () => {
+  const pagina = await prepararO1();
+  const b = pagina({ onLine: true, api: () => FALHA_REDE });
+  b.AppState._profilePromise = new Promise(() => {});   // o perfil pendurado, como a busca
+  const desfecho = await Promise.race([b.app.startFetching().then(() => 'terminou'),
+    new Promise((ok) => setTimeout(() => ok('pendurou no perfil'), 5000))]);
+  assert.equal(desfecho, 'terminou', 'a busca que falhou por rede ficou esperando o perfil pendurado');
+  assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], 'a fila guardada não entrou no lie-fi');
+  assert.equal(eventos(b, 'card').length, 1);
+});
+
+// ── R12-4-02 (auditoria da rodada 12): o O1 com "MINHA ÁREA" ─────────────────
+// A busca de "Minha área" não sai sem o perfil (a caixa das áreas vem dele), nem
+// sem a caixa do servidor dela: ela ESPERA (`busca.esperaPerfil`,
+// `busca.esperaCaixa`), com a tela de falha. Mas a espera não marcava a falha por
+// rede, e sem a marca nem a abertura nem o "Tentar de novo" tentavam a fila
+// guardada: com a rede que não anda (ou a origem fora do ar em 502), a abertura
+// terminava em "Falha ao carregar" com a fila preparada no aparelho, deste lugar
+// e desta conta, sem uso (MEDIDO no navegador, n9 da auditoria: 0 cards, só
+// `busca.esperaPerfil`; sem "Minha área", 4 cards). Aqui a carga do perfil e a
+// pergunta ao servidor da busca são as de VERDADE, com as falhas do `_post` de
+// verdade, e a fila guardada é a de uma busca de "Minha área" com rede.
+const CAIXA_R = [-43.5, -23.2, -42.9, -22.6];
+const PERFIL_AREA = { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_R }] };
+const LIDO_ROW = { conta: '1', lidos: { row: [30] }, caixas: { row: CAIXA_R }, gerenciadas: {} };
+// Com rede e o perfil na mão: a busca de "Minha área" traz a fila, e o offline a grava.
+async function prepararMinhaArea({ regiao = 'row', editaveis = LIDO_ROW } = {}) {
+  const pagina = aparelhoO1({ filtros: { myArea: true, unreadOnly: true } });
+  const a = pagina({ api: () => TRES(), profile: PERFIL_AREA, editaveis, regiao });
+  await a.app.startFetching();
+  await assentar();
+  assert.ok(a.AppState.filters.myArea, 'PRÉ-CONDIÇÃO: o filtro guardado não é "Minha área"');
+  assert.deepEqual(a.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], 'PRÉ-CONDIÇÃO: a busca de "Minha área" com rede não trouxe a fila');
+  assert.equal(a.base.has('fila'), true, 'PRÉ-CONDIÇÃO: a fila da busca de "Minha área" não foi gravada');
+  return pagina;
+}
+
+test('R12-4-02: "Minha área" com o PERFIL falhando por rede (sem resposta, ou a borda em 502) — a fila guardada entra', async () => {
+  for (const [rotulo, falha] of [['sem resposta', FALHA_REDE], ['a borda em 502', FALHA_BORDA_502]]) {
+    const pagina = await prepararMinhaArea();
+    const b = pagina({ onLine: true, api: () => FALHA_REDE, perfil: () => falha });
+    await b.app.startFetching();
+    assert.ok(eventos(b, 'perfil').length >= 1 && eventos(b, 'busca.esperaPerfil').length >= 1,
+      `PRÉ-CONDIÇÃO (${rotulo}): a busca não esperou o perfil que falhou`);
+    assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'],
+      `DEFEITO (${rotulo}): com "Minha área", a fila guardada não entrou — a tela é "Falha ao carregar" com ela no aparelho`);
+    assert.equal(eventos(b, 'falha').length + eventos(b, 'tudoLimpo').length, 0,
+      `${rotulo}: a tela vazia apareceu por cima, ou antes, da fila guardada`);
+    const abriu = eventos(b, 'offline.abriu')[0];
+    assert.ok(abriu && abriu[1].aposFalha === true, `${rotulo}: o diário não diz que abriu com o aparelho dizendo que há rede`);
+  }
+});
+
+test('R12-4-02: "Minha área" com a CAIXA do servidor aplicado à mão falhando por rede — a fila guardada daquele servidor entra', async () => {
+  // O servidor da NA, que a pessoa aplicou à mão: a fila guardada é de lá.
+  const pagina = await prepararMinhaArea({ regiao: 'na', editaveis: { conta: '1', lidos: { row: [30], na: [235] },
+    caixas: { row: CAIXA_R, na: [-74.1, 40.6, -73.8, 40.9] }, gerenciadas: {} } });
+  // Reaberto: a abertura leu o perfil da ROW (o `/Session` de lá), e o da NA, que a
+  // busca pergunta, não responde.
+  const b = pagina({ onLine: true, regiao: 'na', profile: { ...PERFIL_AREA, areas: [] }, editaveis: LIDO_ROW,
+    api: () => FALHA_REDE, perfil: () => FALHA_REDE });
+  await b.app.startFetching();
+  assert.deepEqual(eventos(b, 'perfil').map(([, o]) => o.r), ['na'], 'PRÉ-CONDIÇÃO: a busca não perguntou o `/Session` do servidor dela');
+  assert.equal(eventos(b, 'busca.esperaCaixa').length >= 1, true, 'PRÉ-CONDIÇÃO: a busca não esperou a caixa');
+  assert.deepEqual(b.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'],
+    'DEFEITO: com a caixa que falhou por rede, a fila guardada do servidor da busca não entrou');
+  assert.equal(eventos(b, 'falha').length, 0);
+  // CONTROLE: a pergunta que o servidor respondeu com recusa (não é rede) não abre
+  // a guardada — a espera é outra, e a tela é a de falha.
+  const c = pagina({ onLine: true, regiao: 'na', profile: { ...PERFIL_AREA, areas: [] }, editaveis: LIDO_ROW,
+    api: () => FALHA_REDE, perfil: () => ({ success: false, errorCategory: 'unknown' }) });
+  await c.app.startFetching();
+  assert.deepEqual([c.AppState.queue, eventos(c, 'falha').length, c.app.falhouPorRede()], [[], 1, false],
+    'CONTROLE: a caixa que falhou por outro motivo abriu a fila guardada');
+});
+
+test('R12-4-02 CONTROLE: o perfil que falha por outro motivo (401, erro do app) não abre a fila guardada — e sem fila guardada a falha por rede fica anotada pro "Tentar de novo"', async () => {
+  const pagina = await prepararMinhaArea();
+  for (const [rotulo, falha] of [['401', FALHA_SESSAO], ['erro do app', { success: false, errorCategory: 'unknown' }]]) {
+    const b = pagina({ onLine: true, api: () => FALHA_REDE, perfil: () => falha });
+    await b.app.startFetching();
+    assert.deepEqual(b.AppState.queue, [], `CONTROLE (${rotulo}): o perfil que não falhou por rede abriu a fila guardada`);
+    assert.equal(eventos(b, 'falha').length, 1, `CONTROLE (${rotulo}): a tela de falha não apareceu (o instrumento enxerga a tela)`);
+    assert.equal(b.app.falhouPorRede(), false, `${rotulo}: a falha que não é de rede ficou anotada como rede`);
+  }
+  // Sem o offline (nada pra abrir), a falha por rede da espera fica anotada: é ela
+  // que o "Tentar de novo" (`offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)`) lê.
+  const semGuardada = aparelhoO1({ filtros: { myArea: true, unreadOnly: true } });
+  const d = semGuardada({ onLine: true, offline: false, api: () => FALHA_REDE, perfil: () => FALHA_REDE });
+  await d.app.startFetching();
+  assert.deepEqual([eventos(d, 'falha').length, d.app.falhouPorRede()], [1, true],
+    'a espera pelo perfil que falhou por rede não ficou anotada pro "Tentar de novo"');
+});
+
+test('R12-4-02: a fila guardada aberta assim TERMINA em "Falha ao carregar" — nunca em "Tudo limpo!"', async () => {
+  // Aberta no lie-fi, a fila guardada diz "pode haver mais" (`hasMore`). Com card
+  // na fila, os últimos cards pedem a próxima busca (o `maybePrefetch`), e ela
+  // ESPERA o perfil de novo: o `hasMore = false` dali fazia o FIM da fila dizer
+  // "Tudo limpo!" — decididos os cards, com as decisões esperando envio e o Waze
+  // sem resposta (MEDIDO no navegador, n9c; sem "Minha área", "Falha ao carregar").
+  const fim = async (pagina, extra) => {
+    const b = pagina({ onLine: true, api: () => FALHA_REDE, ...extra });
+    await b.app.startFetching();
+    assert.equal(b.AppState.queue.length, 3, 'PRÉ-CONDIÇÃO: a fila guardada não entrou');
+    await b.app.fetchNextPage();                          // o `maybePrefetch` com 3 cards
+    const hasMoreComCard = b.AppState.hasMore;
+    // A pessoa decide os 3 (as decisões vão pra fila de saída): o que o
+    // `advanceQueue` faz com a fila vazia.
+    b.AppState.queue = [];
+    b.AppState.currentPlace = null;
+    b.log.length = 0;
+    if (b.AppState.hasMore) await b.app.startFetching(); else b.deps.showNoPlaces();
+    return { hasMoreComCard, falha: eventos(b, 'falha').length, tudoLimpo: eventos(b, 'tudoLimpo').length };
+  };
+  const minha = await fim(await prepararMinhaArea(), { perfil: () => FALHA_REDE });
+  assert.equal(minha.hasMoreComCard, true, 'a espera pelo perfil, com card na fila, deu a fila por acabada (`hasMore` caiu)');
+  assert.deepEqual([minha.falha, minha.tudoLimpo], [1, 0],
+    'DEFEITO: o fim da fila guardada com "Minha área" disse "Tudo limpo!" — o Waze nem respondeu');
+  // O mesmo pela espera da CAIXA (o servidor aplicado à mão que não responde).
+  const caixa = await fim(await prepararMinhaArea({ regiao: 'na', editaveis: { conta: '1', lidos: { row: [30], na: [235] },
+    caixas: { row: CAIXA_R, na: [-74.1, 40.6, -73.8, 40.9] }, gerenciadas: {} } }),
+  { regiao: 'na', profile: { ...PERFIL_AREA, areas: [] }, editaveis: LIDO_ROW, perfil: () => FALHA_REDE });
+  assert.deepEqual([caixa.hasMoreComCard, caixa.falha, caixa.tudoLimpo], [true, 1, 0],
+    'o fim da fila guardada aberta pela espera da CAIXA disse "Tudo limpo!" (ou deu a fila por acabada com card)');
+  // CONTROLE: sem "Minha área" (o O1 de sempre), o mesmo fim é a tela de falha.
+  const sem = await fim(await prepararO1(), {});
+  assert.deepEqual([sem.hasMoreComCard, sem.falha, sem.tudoLimpo], [true, 1, 0]);
+});
+
 // ── R5-4-4: o card de foto no LIE-FI (auditoria de 2026-09-30) ───────────────
 // A fila guardada aberta pelo lie-fi (o O1: `onLine` VERDADEIRO e a busca sem
 // resposta) mostrava o card de foto cuja foto não veio com "Sem Imagem" e ✕/✓
@@ -1066,6 +1234,44 @@ test('R5-4-4: a busca SEM resposta anota o lie-fi; a que teve resposta (502 da o
   d.AppState.hasMore = true;
   await d.app.startFetching();
   assert.equal(d.app.semResposta(), false, 'a busca que deu certo não apagou a marca do lie-fi');
+});
+
+// ── R12-4-02: o LIE-FI com "Minha área" ──────────────────────────────────────
+// Com "Minha área" a busca nem sai: a ida que fica sem resposta é a do PERFIL (ou
+// a da caixa do servidor da busca) que ela espera. Sem anotar o lie-fi ali, a fila
+// guardada que agora entra (acima) trazia o card de FOTO cuja foto não vem com
+// "Sem Imagem" e ✕/✓ VIVOS — decidir a foto sem vê-la —, enquanto sem "Minha
+// área" o mesmo card trava com "a foto precisa de sinal" (R5-4-4).
+test('R12-4-02: com "Minha área", o perfil (ou a caixa) SEM resposta anota o lie-fi; o que teve resposta (502), não', async () => {
+  for (const [rotulo, falha, lieFi] of [['sem resposta', FALHA_REDE, true], ['a borda em 502', FALHA_BORDA_502, false]]) {
+    const pagina = await prepararMinhaArea();
+    const b = pagina({ onLine: true, api: () => FALHA_REDE, perfil: () => falha });
+    await b.app.startFetching();
+    assert.equal(b.AppState.queue.length, 3, `PRÉ-CONDIÇÃO (${rotulo}): a fila guardada não entrou`);
+    assert.equal(b.app.semResposta(), lieFi, lieFi
+      ? 'DEFEITO: o perfil que a busca de "Minha área" espera ficou SEM resposta, e o lie-fi não foi anotado — o card de foto sem a foto fica com ✕/✓ vivos'
+      : 'a origem que RESPONDEU 502 ao perfil virou "sem rede" pra foto');
+  }
+  // A caixa do servidor aplicado à mão, sem resposta.
+  const pagina = await prepararMinhaArea({ regiao: 'na', editaveis: { conta: '1', lidos: { row: [30], na: [235] },
+    caixas: { row: CAIXA_R, na: [-74.1, 40.6, -73.8, 40.9] }, gerenciadas: {} } });
+  const c = pagina({ onLine: true, regiao: 'na', profile: { ...PERFIL_AREA, areas: [] }, editaveis: LIDO_ROW,
+    api: () => FALHA_REDE, perfil: () => FALHA_REDE });
+  await c.app.startFetching();
+  assert.deepEqual([c.AppState.queue.length, c.app.semResposta()], [3, true],
+    'a caixa que a busca de "Minha área" espera ficou SEM resposta, e o lie-fi não foi anotado');
+  // CONTROLE: sem "Minha área", a busca sem resposta anota o lie-fi, como sempre (R5-4-4).
+  const o1 = await prepararO1();
+  const d = o1({ onLine: true, api: () => FALHA_REDE });
+  await d.app.startFetching();
+  assert.equal(d.app.semResposta(), true);
+  // E sem "Minha área" o perfil não é a busca: a busca que DEU CERTO segue valendo,
+  // e o perfil que falha sem resposta depois dela não acende o lie-fi da foto.
+  const e = o1({ onLine: true, api: () => TRES(), perfil: () => FALHA_REDE });
+  await e.app.startFetching();
+  await e.app.carregarPerfil();
+  assert.deepEqual([e.AppState.queue.length, e.app.semResposta()], [3, false],
+    'sem "Minha área", o perfil sem resposta acendeu o lie-fi por cima da busca que deu certo');
 });
 
 // ── R6-4-3: a marca do lie-fi decidia pelo `httpCode` (auditoria de 2026-10-01) ─
@@ -1654,4 +1860,135 @@ test('gatilho: com a varredura NO AR, o gatilho não pede outra — quem decide 
   await assentarBase();
   assert.equal(p1.rede.varreduras, v + 1, 'o gatilho no meio da varredura pediu outra, que não tinha o que fazer');
   assert.match(p1.linha(), /prefs\.offline\.prontoB/);
+});
+
+// ── R12-4-05 (auditoria da rodada 12): DUAS ABAS varrendo juntas ────────────
+// A base do offline e o cache do mapa são do APARELHO, e cada aba grava a fila
+// DELA na mesma base e poda o cache aos tiles da fila DELA. O `online` chega às
+// duas, e com filas diferentes (a reposição de uma trouxe pedidos que a outra não
+// tem) as duas varreduras corriam juntas: a fila guardada ficava a de quem gravou
+// por último, e a poda da OUTRA apagava os tiles dos pedidos que só a primeira
+// tinha — sem rede esses cards abriam sem mapa, com a linha dizendo "Pronto — 12
+// pedidos no aparelho" (MEDIDO no navegador, n10 da auditoria: 6 de 12 sem mapa
+// em 3 de 3 rodadas; com uma aba só, nenhum). Aqui duas "abas" — cada uma com o
+// estado DELA — rodam o código de VERDADE (gravar a fila, varrer, reler a base,
+// podar) sobre a MESMA base e o MESMO cache, de mentira, com a ordem segura: os
+// downloads de uma esperam o teste soltar.
+function duasAbasComCache() {
+  const base = new Map();
+  const cache = new Map();
+  const relogio = { agora: 1492385 * 1200000 + 1000 };     // uma janela só
+  const offlineDB = async () => ({
+    close() {},
+    transaction: () => {
+      const tx = {};
+      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      tx.objectStore = () => ({
+        put: (v, k) => { base.set(k, JSON.parse(JSON.stringify(v))); fim(); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+      });
+      return tx;
+    },
+  });
+  const caches = {
+    has: async () => cache.size > 0,
+    open: async () => ({
+      keys: async () => [...cache.keys()].map((url) => ({ url })),
+      delete: async (r) => { cache.delete(r.url); },
+    }),
+  };
+  function aba(fila) {
+    const rede = { segura: false, presos: [] };
+    const diario = [];
+    const AppState = { authenticated: true, queue: fila.slice(), filters: {} };
+    const deps = {
+      AppState, Treino: { ativo: false }, navigator: { onLine: true }, offlineLigado: () => true,
+      Date: { now: () => relogio.agora++ },
+      offlineDB, OFFLINE_STORE: 'fila', OFFLINE_TILES_CACHE: 'waze-places-tiles', caches,
+      offlinePodarPousos: () => {}, dfato: (k) => diario.push(k),
+      filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
+      marcaDaSessao: (t) => 'm-' + t, API: { getSession: () => 'tok' },
+      OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
+      OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+      // Um tile por pedido; o download grava no cache do aparelho, e com `segura`
+      // fica preso até o teste soltar.
+      offlineItensDaFila: async () => AppState.queue.map((p) => ({ u: 'tile-' + p.venueID, tile: true })),
+      offlineBaixar: (u) => new Promise((ok) => {
+        const r = () => { cache.set(u, true); ok(true); };
+        if (rede.segura) rede.presos.push(r); else r();
+      }),
+      offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {},
+      offlineGravarJanela: () => {}, setTimeout: (fn) => { fn(); return 0; },
+    };
+    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
+    const chaves = Object.keys(deps);
+    const app = new Function(...chaves, `let offlineVarrendo = false, offlinePedidaDeNovo = false,
+        offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,
+        offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null,
+        offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null;
+      ${nomes.map(fatiar).join('\n')}
+      return { varrer: offlineVarrer,
+        estado: () => ({ resultado: offlineUltimoResultado, varrendo: offlineVarrendo, gravada: offlineFilaGravadaEm }) };`)(
+      ...chaves.map((k) => deps[k]));
+    const soltar = () => { rede.segura = false; for (const r of rede.presos.splice(0)) r(); };
+    return { ...app, rede, diario, soltar };
+  }
+  // Os pedidos da fila GUARDADA cujo mapa não está no aparelho.
+  const semMapa = () => (base.get('fila') ? base.get('fila').places : [])
+    .filter((p) => !cache.has('tile-' + p.venueID)).map((p) => p.venueID);
+  return { aba, base, cache, semMapa };
+}
+const P5 = (i) => ({ venueID: 'p' + i, updateRequestID: 'u' + i });
+
+test('R12-4-05: duas abas varrendo juntas — a poda de uma NÃO apaga o mapa da fila que a outra gravou por último', async () => {
+  const ap = duasAbasComCache();
+  const A = ap.aba([1, 2, 3].map(P5));
+  const B = ap.aba([1, 2, 3, 30, 31].map(P5));            // a reposição de B trouxe dois que A não tem
+  A.rede.segura = true;
+  const varreA = A.varrer();                               // A grava a fila DELA e fica baixando…
+  await assentarBase();
+  assert.deepEqual(ap.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3'], 'PRÉ-CONDIÇÃO: A não gravou a fila dela');
+  await B.varrer();                                        // …B grava a DELA por cima, baixa tudo e poda
+  await assentarBase();
+  assert.equal(B.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de B não ficou pronta');
+  assert.deepEqual(ap.semMapa(), [], 'PRÉ-CONDIÇÃO: com a varredura de B pronta, a fila guardada já tinha pedido sem mapa');
+  A.soltar();
+  await varreA;
+  await assentarBase();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de A não ficou pronta');
+  assert.deepEqual(ap.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3', 'p30', 'p31'],
+    'PRÉ-CONDIÇÃO: a fila guardada não é a de B (a que gravou por último)');
+  assert.deepEqual(ap.semMapa(), [],
+    'DEFEITO: a poda da aba A apagou o mapa dos pedidos que só a fila guardada (a de B) tem — sem rede, esses cards '
+    + 'abrem sem mapa com a linha dizendo "Pronto"');
+  assert.ok(!A.diario.includes('offline.podou'), 'a aba A podou o cache com a fila guardada sendo a de B');
+});
+
+test('R12-4-05 CONTROLE: a ordem inversa (A grava por último) e a aba sozinha — a poda segue valendo pra fila guardada', async () => {
+  // Quem gravou por último é A: a fila guardada é a dela, e o mapa dela fica todo.
+  const inv = duasAbasComCache();
+  const A = inv.aba([1, 2, 3].map(P5));
+  const B = inv.aba([1, 2, 3, 30, 31].map(P5));
+  B.rede.segura = true;
+  const varreB = B.varrer();
+  await assentarBase();
+  await A.varrer();
+  await assentarBase();
+  B.soltar();
+  await varreB;
+  await assentarBase();
+  assert.deepEqual(inv.base.get('fila').places.map((p) => p.venueID), ['p1', 'p2', 'p3']);
+  assert.deepEqual([A.estado().resultado, B.estado().resultado, inv.semMapa()], ['pronto', 'pronto', []],
+    'com A gravando por último, a fila guardada (a de A) ficou sem mapa');
+  // A aba SOZINHA: a poda segue tirando do cache o que não é da fila guardada
+  // (o tile de uma fila velha) — sem isto, "não podou" passaria com a poda morta.
+  const so = duasAbasComCache();
+  so.cache.set('tile-velho', true);
+  const C = so.aba([1, 2].map(P5));
+  await C.varrer();
+  await assentarBase();
+  assert.equal(C.estado().resultado, 'pronto');
+  assert.equal(so.cache.has('tile-velho'), false, 'CONTROLE: com a fila guardada sendo a desta aba, a poda não tirou o tile velho');
+  assert.ok(C.diario.includes('offline.podou'));
+  assert.deepEqual(so.semMapa(), []);
 });

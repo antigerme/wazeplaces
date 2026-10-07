@@ -273,9 +273,9 @@ test('R5-3-07 a aprovação que anda a fila e a foto que volta passam pelo foco 
   // A foto que volta (o Desfazer pela tecla z, a falha): o card é redesenhado.
   ordem.length = 0;
   const P = { imageUrls: [], approvedImageIds: [] };
-  const devolver = new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard',
+  const devolver = new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard', 'fotoSaiuDoMapa',
     fatiar('devolverFoto') + '\nreturn devolverFoto;')(
-    { place: null }, { currentPlace: P }, () => ordem.push('redesenhou'), guarda);
+    { place: null }, { currentPlace: P }, () => ordem.push('redesenhou'), guarda, () => false);
   devolver({ id: 'f1', place: P, idx: 0, url: 'https://venue-image.waze.com/f1.jpg' });
   assert.deepEqual(ordem, ['guarda', 'redesenhou'], 'a foto que volta redesenha o card por fora do foco (caminho 3, a tecla z)');
 });
@@ -465,8 +465,8 @@ test('R9-3-02 CONTROLES: sem sessão vale a reserva; o lugar que a pessoa escolh
 // `mantendoFocoNoCard` de verdade; o `.then` e o irmão em
 // test/lightbox-escritas ("R5-3-07 excluir sem o Desfazer…").
 test('R9-3-04 a foto que volta (a falha, o Desfazer) redesenha o MESMO pedido: o foco no ✕ ↑ ✓ fica no mesmo botão — na foto, fica na foto', () => {
-  const devolverCom = (m, P, novo) => new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard',
-    fatiar('devolverFoto') + '\nreturn devolverFoto;')({ place: null }, { currentPlace: P }, () => m.trocarCard(novo), m.app.mantendoFocoNoCard);
+  const devolverCom = (m, P, novo) => new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard', 'fotoSaiuDoMapa',
+    fatiar('devolverFoto') + '\nreturn devolverFoto;')({ place: null }, { currentPlace: P }, () => m.trocarCard(novo), m.app.mantendoFocoNoCard, () => false);
   for (const sel of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
     const m = tela();
     m.card().filhos[sel].focus();                       // o Tab levou o foco ao botão

@@ -559,11 +559,15 @@ const API = {
     // ligado: os ~700ms dela correm dentro da janela do Desfazer.
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
-    // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
+    // pessoa só espera mais. Por isso não trata erro. Mas devolve a PROMESSA, que
+    // nunca rejeita: o aquecimento entra na vez das escritas de foto do local, e
+    // a exclusão (e a aprovação) do local só sai depois da resposta dele
+    // (`vezDasFotosNoLocal`, auditoria da rodada 12, R12-3-01). Sem sessão não sai
+    // nada, e não há o que esperar.
     prepararExclusao(venueID, lat, lon, regiao) {
         const sessionToken = this.getSession();
         if (!sessionToken) return;
-        this._post('excluir-foto', {
+        return this._post('excluir-foto', {
             sessionToken, region: regiao || this.getRegion(), action: 'preparar',
             venueID, imageID: 'preparar', lat, lon,
         }).catch(() => {});
@@ -684,8 +688,15 @@ const API = {
     // QR. São registros diferentes no servidor, com forças diferentes — ver
     // `derivarChave` no core. O padrão é o forte, de propósito.
     // `conta`: de quem é a sessão, pro aparelho que resgatar saber na hora.
+    //
+    // A sessão é a DESTA aba, a da MEMÓRIA — nunca a que o `getSession` iria
+    // buscar no aparelho com ela vazia: o código é uma CÓPIA da sessão que ele
+    // leva. Tocado durante a renovação da queda (a Ajuda ainda mostra o botão),
+    // ele adotava calado a sessão que outra aba guardou e criava um código com
+    // ela (auditoria da rodada 12, R12-1-03, MEDIDO). Sem sessão aqui, não sai:
+    // "não deu pra gerar o código", como sem sessão nenhuma no aparelho.
     async criarPareamento({ comCodigo = false, conta = null } = {}) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return semSessao();
         return this._post('parear', { action: 'create', sessionToken, comCodigo, ...(conta ? { conta } : {}) });
     },

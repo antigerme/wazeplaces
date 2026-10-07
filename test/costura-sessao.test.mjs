@@ -150,7 +150,7 @@ test('K1: o ✕ de A em voo, a sessão cai e a extensão renova com B — a rete
     AppState, epocaDaSessao: 0, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5],
     navigator: { onLine: true }, Treino: { ativo: false },
     API: {
-      getRegion: () => 'row', getCountry: () => 30, getSession: () => token, setSession: (t) => { token = t; },
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => token, get sessionToken() { return token; }, setSession: (t) => { token = t; },
       rejectPlace: (v) => {
         if (!token) return Promise.resolve({ success: false, errorCategory: 'unauthorized' });
         envios.push({ v, token });
@@ -296,7 +296,7 @@ function montarLightboxComJanelas() {
     registrarDesfazer: () => log.push('desfazer-do-editor'),
     mostrarDesfazer: () => log.push('banner'),
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {}, UNDO_WINDOW_MS: 3000,
-    API: { getSession: () => 'tok-A', setSession() {}, getRegion: () => 'row', prepararExclusao() {},
+    API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, setSession() {}, getRegion: () => 'row', prepararExclusao() {},
       setRegion() {}, setCountry() {}, cancelarPareamento: () => Promise.resolve(), chamadas: [] },
     entrarPelaExtensao: () => new Promise(() => {}), console, pareamentosEmitidos: new Set(),
   };
@@ -359,7 +359,7 @@ function montarVoo({ janela = false, extras = [] } = {}) {
     SAIDA_KEY: constante('SAIDA_KEY'), SAIDA_MAX: constante('SAIDA_MAX'), CONTA_KEY: constante('CONTA_KEY'),
     TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], UNDO_WINDOW_MS: 3000,
     API: {
-      getRegion: () => 'row', getCountry: () => 30, getSession: () => token, setSession: (t) => { token = t; },
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => token, get sessionToken() { return token; }, setSession: (t) => { token = t; },
       rejectPlace: () => new Promise((ok) => pendentes.push(ok)), markAsRead: () => new Promise((ok) => pendentes.push(ok)),
     },
     direcaoTravada: () => false, canDisableUndo: () => !janela, presencaWmeDaAcao: () => null,
@@ -374,7 +374,7 @@ function montarVoo({ janela = false, extras = [] } = {}) {
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
-    'chaveDoPedido', 'marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
+    'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
     'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
     'handleReject', 'handleMarkAsRead', 'derrubarSessao', ...extras], deps);
@@ -666,7 +666,7 @@ function montarLoteNaTrocaDeSessao() {
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
     LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
-    API: { getRegion: () => 'row', getSession: () => token, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
+    API: { getRegion: () => 'row', getSession: () => token, get sessionToken() { return token; }, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), destroySession: async () => ({ success: true }) },
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
@@ -730,7 +730,7 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
     LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
-    API: { getRegion: () => 'row', getSession: () => 'tok-A', setSession() {}, setRegion() {}, setCountry() {},
+    API: { getRegion: () => 'row', getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, setSession() {}, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoesUm.push(ok)) },
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
@@ -1051,7 +1051,7 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout, clearTimeout,
     // O teto da espera pelo perfil, curto aqui (o caso do perfil que nunca chega).
     AVISO_RENOVADA_ESPERA_PERFIL_MS: 30,
-    API: { setSession: (t) => { token = t; }, getSession: () => token },
+    API: { setSession: (t) => { token = t; }, getSession: () => token, get sessionToken() { return token; } },
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     showToast: (m) => toasts.push(m), t: (k) => k, carregarFilaDeSaida: () => [],
     // O contrato do `resetQueue` que importa aqui: a fila na tela passa a ser OUTRA.
@@ -1063,7 +1063,7 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     }),
   };
   h = montar(['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta',
-    'esquecerOutraConta', 'marcaDaSessao'], deps);
+    'esquecerOutraConta', 'marcaDaSessao', 'marcaDestaAba'], deps);
   safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('tokA') }));   // A estava triando
   h.derrubarSessao('srv.err.cookiesExpired');
   window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB',
@@ -1110,7 +1110,7 @@ test('K3: "Sair" com a extensão ainda respondendo — o token atrasado NÃO ent
     extNegadoNestaPagina: false, filaAtravessouSessao: false, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
     setTimeout: () => 1, clearTimeout: () => {}, pareamentosEmitidos: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
-    API: { setSession: (t) => sessoes.push(t), getSession: () => null, setRegion() {}, setCountry() {},
+    API: { setSession: (t) => sessoes.push(t), getSession: () => null, get sessionToken() { return null; }, setRegion() {}, setCountry() {},
       cancelarPareamento: () => Promise.resolve(), chamadas: [] },
   };
   const h = montar(['entrarPelaExtensao', 'handleLogout'], deps);
@@ -1256,13 +1256,13 @@ function montarReabertura({ token, contaGuardada = null, perfil = null, fila }) 
     preferences: { offlineDisponivel: true } };
   const deps = {
     AppState, safeLS, navigator: { onLine: false }, CONTA_KEY: constante('CONTA_KEY'),
-    API: { getSession: () => token, getRegion: () => 'row', getCountry: () => 30 },
+    API: { getSession: () => token, get sessionToken() { return token; }, getRegion: () => 'row', getCountry: () => 30 },
     offlineLigado: () => true, offlineLerFila: async () => fila, offlineLerJanela: async () => null,
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), offlineJanelaServida: null, filaDeOnde: null,
     semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
     pedidosQueEntraramNaFila: new Set(),
   };
-  return montar(['marcaDaSessao', 'contaAgora', 'mesmoLugar', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'], deps);
+  return montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'mesmoLugar', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'], deps);
 }
 const FILA = (dono) => ({ t: Date.now(), desde: Date.now(), regiao: 'row', pais: '30', ...dono,
   places: [{ venueID: 'vA1', updateRequestID: 'uA1' }] });
@@ -1298,13 +1298,13 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
   const deps = {
     AppState: { queue: [{ venueID: 'v1' }], filters: {}, profile: { id: 111 } }, Treino: { ativo: false },
     offlineLigado: () => true, OFFLINE_STORE: 'fila', filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
-    safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A' },
+    safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
     offlineDB: async () => ({ close() {}, transaction: () => {
       const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
       return tx;
     } }),
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'filaReal', 'offlineGravarFila'], deps);
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'filaReal', 'offlineGravarFila'], deps);
   assert.equal(await h.offlineGravarFila(), true);
   assert.equal(puts[0].conta, '111', 'a fila guardada não diz de que conta é');
   assert.equal(puts[0].s, marcaDe('tok-A'), 'a fila guardada não diz de que sessão é');
@@ -1362,6 +1362,7 @@ function montarLoginDeB({ contaNoLogin }) {
   const AppState = { profile: null, authenticated: false, stats: { read: 7, rejected: 9, skipped: 0 }, history: null, queue: [] };
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, authInFlight: false, filaAtravessouSessao: false, saidaEsperandoConta: false,
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
     CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'),
     CONQUISTAS_KEY: constante('CONQUISTAS_KEY'), t: (k) => k, window: {},
     API: { getSession: () => token, testCookies: async () => { token = 'tok-B'; return { success: true, sessionToken: 'tok-B', ...(contaNoLogin ? { conta: '222' } : {}) }; } },
@@ -1371,7 +1372,7 @@ function montarLoginDeB({ contaNoLogin }) {
     recordHistory: (tipo, n) => { AppState.history = AppState.history || { _total: { rejected: 0 } }; AppState.history._total.rejected += n; },
     registrarRejeicaoDeAutor: () => log.push('autor-de-B'),
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
     'carimbarContaNaSaida', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'authenticateWithCookies'], deps);
   return { h, AppState, log, guardado };
 }
@@ -1482,10 +1483,10 @@ test('K11: o 1º perfil barrado por um 401 passageiro — os países que chegara
   const AppState = { profile: null, authenticated: true, countries: [], statesByCountry: {}, filters: { myArea: false, stateId: '', managedAreaId: '' },
     currentPlace: null, queue: [] };
   const deps = {
-    AppState, epocaDaSessao: 0, perfilPedidoEm: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
+    AppState, epocaDaSessao: 0, perfilPedidoEm: 0, cargasDoPerfil: 0, verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 },
     VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; }, REGIOES_DO_WAZE: ['row', 'na', 'il'],
     API: {
-      getSession: () => 'tok-A', getRegion: () => 'row', getCountry: () => pais, setCountry: (p) => { pais = p; }, setRegion() {},
+      getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, getRegion: () => 'row', getCountry: () => pais, setCountry: (p) => { pais = p; }, setRegion() {},
       getProfile: async () => (perfilN++ === 0
         ? { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' }   // o blip do KV
         : { success: true, profile: { id: 111, userName: 'a', editableCountryIDs: [73] } }),      // edita na França
@@ -1624,7 +1625,7 @@ function montarSaidaMorta() {
     travaDaSaida: async () => ({ reserva: false, soltar() {} }),
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // a marca da aba (test/contas-abas, F1)
     API: {
-      getSession: () => 'tok-A',
+      getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; },
       getRegion: () => 'row',   // a região em que a sonda pergunta (R8-6-03)
       // Como o `_post`: a resposta que CHEGA é prova de rede, e a prova chama o
       // esvaziamento ANTES de a resposta voltar pra quem pediu.
@@ -1637,7 +1638,7 @@ function montarSaidaMorta() {
       getProfile: () => new Promise((ok) => { sonda = ok; }),
     },
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'reivindicadoPorOutraAba',
     'esvaziarFilaDeSaida', 'handleUnauthorized'], deps);
   return { h, deps, envios, responderSonda: (r) => sonda(r) };
@@ -1720,7 +1721,7 @@ function montarXQueLeva401() {
     historyTodayKey: () => '2026-10-02', ondeAgora: () => '30', getLang: () => 'pt', t: (k) => k,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, console,
     API: {
-      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A',
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; },
       // Como o `_post`: a resposta CHEGA (uma volta de rede), a prova de rede
       // roda (o `API.aoProvarRede`, que só chama sem esvaziamento no ar) e SÓ
       // DEPOIS a resposta volta a quem pediu.
@@ -1733,7 +1734,7 @@ function montarXQueLeva401() {
       getProfile: () => new Promise((ok) => { sonda = ok; }),
     },
   };
-  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'chaveDoPedido', 'marcaDaSessao', 'contaAgora',
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
     'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
     'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'travaDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',
@@ -1792,7 +1793,7 @@ test('R6-1-03: "espere a conferência" só DEPOIS do `aguarde` da extensão — 
     const deps = { window, AppState: { authenticated: false, queue: [] }, epocaDaSessao: 1, saiuNestaPagina: false,
       extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
       EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout: () => 1, clearTimeout: () => {},
-      API: { setSession() {}, getSession: () => null } };
+      API: { setSession() {}, getSession: () => null, get sessionToken() { return null; } } };
     const h = montar(['entrarPelaExtensao', 'avisoDaTrava'], deps);
     const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });
     assert.equal(deps.extPerguntando, true, 'CONTROLE: a pergunta à extensão não saiu');

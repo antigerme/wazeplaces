@@ -2636,11 +2636,16 @@ export const RELEITURA_ESPERA_MS = 10000;
 // servidor, a partir do que o Waze respondeu.
 const chaveDaReleitura = async (data) => 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
 
-async function relerLocal(data, sessions, cookieHeader, csrf, region) {
+// `aquecimento`: a leitura do TOQUE na lixeira (`preparar`), que só grava por
+// cima do registro que estava lá quando ela saiu (ver a gravação, logo abaixo).
+async function relerLocal(data, sessions, cookieHeader, csrf, region, { aquecimento = false } = {}) {
   const venueID = data.venueID;
   const chave = await chaveDaReleitura(data);
+  // O registro que estava guardado quando esta leitura SAIU (vencido, ou nenhum).
+  let antes = null;
   try {
     const bruto = await sessions.store.get(chave);
+    antes = bruto == null ? null : bruto;
     if (bruto) {
       const corte = bruto.indexOf('|');
       const ts = parseInt(bruto.slice(0, corte), 10);
@@ -2659,6 +2664,12 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
     bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
     v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
   });
+  // `lidoEm` é a hora de ANTES da leitura (auditoria da rodada 12, R12-3-01): a
+  // lista é a do Waze em algum instante entre a ida e a volta, e só a ida é um
+  // limite seguro pra idade dela. Com a hora da RESPOSTA, uma leitura lenta (o
+  // teto dela é `RELEITURA_ESPERA_MS`, 10 s) esticava em até 10 s a janela da
+  // corrida de `RELEITURA_TTL` que este arquivo promete.
+  const lidoEm = Math.floor(Date.now() / 1000);
   const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions },
     { tetoMs: RELEITURA_ESPERA_MS });
   if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
@@ -2673,12 +2684,43 @@ async function relerLocal(data, sessions, cookieHeader, csrf, region) {
   // `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
   // excluir tem que manter esta hora, não a da escrita (ver a regravação logo
   // depois da escrita, no `handleExcluirFoto`).
-  const lidoEm = Math.floor(Date.now() / 1000);
   const bruto = lidoEm + '|' + JSON.stringify(enxuto);
+  // O AQUECIMENTO só grava se o registro guardado ainda é o que estava lá quando
+  // ele SAIU (`antes`). A regravação depois da escrita confere o registro
+  // (`rel.bruto`, R11-3-01), mas só a da EXCLUSÃO: o aquecimento gravava sem
+  // conferir nada (auditoria da rodada 12, R12-3-01). Com o Waze lento, a
+  // leitura do toque na lixeira de X voltava DEPOIS de a exclusão de X sair (ela
+  // não achou a lista, releu sozinha, gravou e regravou sem X) e gravava por
+  // cima a lista de ANTES — com X, e com a foto P que uma aprovação acabasse de
+  // aprovar ainda pendente. A exclusão seguinte do local, nos `RELEITURA_TTL`
+  // dela, mandava X de volta e P como `approved: false`, com todas as respostas
+  // `success: true` (MEDIDO de ponta a ponta, num Waze de mentira com a leitura
+  // presa). Trocado no meio, o registro veio de quem leu ou escreveu o local
+  // depois de o aquecimento sair, e fica. Custa uma leitura do KV, nenhuma
+  // escrita (o aquecimento que não grava poupa uma).
+  //
+  // A releitura da EXCLUSÃO grava sempre, como antes: é a lista em que a escrita
+  // dela se baseia, e a regravação depois da escrita (que tira a foto) só
+  // acontece por cima dela. Conferindo também aqui, o aquecimento que pousasse
+  // com a leitura da exclusão no ar ficava guardado — lido ANTES da escrita, com
+  // a foto —, e a regravação, sem o registro dela, não acontecia: a exclusão
+  // seguinte devolvia a foto (visto no teste deste caso, com a conferência nas
+  // duas).
+  //
+  // Fica de fora a lista APAGADA no meio (a aprovação de uma foto do local a
+  // esquece, `esquecerReleitura`): apagada, ela volta a ser a de `antes`
+  // (nenhuma), e o aquecimento grava. No mesmo aparelho isso não acontece mais —
+  // o app só manda a exclusão e a aprovação do local depois da resposta do
+  // aquecimento (`vezDasFotosNoLocal`) —; entre abas da mesma sessão, fecharia
+  // só com uma marca gravada a cada aprovação.
+  let gravou = false;
   try {
-    await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
+    if (!aquecimento || (await sessions.store.get(chave)) === antes) {
+      await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
+      gravou = true;
+    }
   } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false, lidoEm, bruto };
+  return { venue: enxuto, doCache: false, lidoEm, bruto: gravou ? bruto : null };
 }
 
 // Esquece a releitura guardada de um local: a próxima exclusão relê do Waze.
@@ -2726,7 +2768,9 @@ async function handleExcluirFoto(data, { sessions }) {
   // escrita no KV) e não devolve a lista — quem decide o que gravar continua
   // sendo o servidor.
   if (data.action === 'preparar') {
-    const prep = await relerLocal(data, sessions, cookieHeader, csrf, region);
+    // Só grava a lista se ninguém mexeu nela enquanto a leitura vinha (R12-3-01,
+    // ver o `relerLocal`).
+    const prep = await relerLocal(data, sessions, cookieHeader, csrf, region, { aquecimento: true });
     // Falha aqui é silenciosa de propósito: preparar é otimização. Se der
     // errado, o `excluir` faz a releitura na hora e a pessoa só espera mais.
     return { status: 200, body: { success: true, preparado: !prep.erro && !prep.semLocal && !prep.erroParse } };

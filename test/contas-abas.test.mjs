@@ -109,16 +109,18 @@ function montarDecisao({ guardado = {}, naMemoria = true, autenticado = true, ap
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, STATS_KEY, PREFERENCES_KEY,
     API: { temSessaoNaMemoria: () => naMemoria, sessionToken: naMemoria ? 'tok-desta' : null },
-    AppState: { authenticated: autenticado, profile: perfil ? { id: perfil } : null },
+    AppState: { authenticated: autenticado, profile: perfil ? { id: perfil } : null, queue: [], currentPlace: null },
+    // A aba da tela de entrada que nunca entrou: nenhum card, nenhuma conta confirmada (R12-1-04).
     document: { getElementById: (id) => (id === 'appScreen'
-      ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null) },
+      ? { classList: { contains: (c) => (c === 'hidden' ? !appNaTela : false) } } : null), querySelector: () => null },
+    contaConfirmadaNestaAba: null,
     extPerguntando: perguntando,
     handleLogout: (o) => log.push(['sair', o]),
     relerPlacarDeOutraAba: () => log.push('placar'),
     relerPreferenciasDeOutraAba: () => log.push('preferencias'),
   };
   const h = montar(['sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba', 'contaSegueNoAparelho',
-    'sessaoDestaAbaEhAGuardada'], deps);
+    'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu'], deps);
   return { h, log, ap };
 }
 const SAIU = ['sair', { porOutraAba: true }];
@@ -1127,7 +1129,7 @@ function abaSemPerfil(comp, { token = 'tok-x' } = {}) {
     desenharPlacar: () => {}, updateStats: () => {}, updateInFlightIndicator: () => {},
   };
   const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
-    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao',
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao', 'marcaDestaAba',
     'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
   Object.assign(aba, montar(nomes, deps), { AppState, deps, soltarPerfil: (perfil) => {
     if (perfil) AppState.profile = perfil;
@@ -1229,7 +1231,7 @@ function abaDaConta(comp, { token, perfilId = null }) {
   const deps = { AppState, safeLS, localStorage, CONTA_KEY, API: { sessionToken: token, getSession: () => token },
     contaConfirmadaNestaAba: null, saidaEsperandoConta: false, filaAtravessouSessao: false,
     carimbarContaNaSaida: () => {}, esquecerOutraConta: (id) => { aba.trocou = id; }, esvaziarFilaDeSaida: () => {} };
-  Object.assign(aba, montar(['aoConhecerConta', 'contaConfirmada', 'sessaoDestaAbaEhAGuardada', 'marcaDaSessao'], deps),
+  Object.assign(aba, montar(['aoConhecerConta', 'contaConfirmada', 'sessaoDestaAbaEhAGuardada', 'marcaDaSessao', 'marcaDestaAba'], deps),
     { AppState, deps });
   // O perfil chegou (o `definirPerfil`: o perfil na memória e a conta conferida).
   aba.perfilChegou = (id) => { AppState.profile = { id }; aba.aoConhecerConta({ id }); };
@@ -1518,7 +1520,7 @@ function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_00
   const deps = {
     AppState: { authenticated: true, profile: { id: 1 }, stats: { read: 0, rejected: 5, skipped: 0 } },
     navigator: { onLine: true }, epocaDaSessao: 0, safeLS, Date: { now: () => relogio.t },
-    API: { getSession: () => 'tok', getRegion: () => 'row',
+    API: { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row',
       rejectPlace: async (v) => { enviados.push(nome + ':' + v); return { success: true }; },
       markAsRead: async (v) => { enviados.push(nome + ':' + v); return { success: true }; } },
     SAIDA_KEY: 'waze_places_saida', CONTA_KEY, SAIDA_MAX: 1000, SAIDA_RITMO_MS: 0, SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000],
@@ -1535,7 +1537,7 @@ function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_00
     ondeAgora: () => '30', getLang: () => 'pt',
     registrarPousoDeSaida: (tipo, place, r) => { if (r && r.success) historico.push(tipo); },
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'anotarAntesDoEnvio', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
     'reivindicarNaSaida', 'soltarReivindicacoes', 'pousouPorOutraAba', 'soltarMarcaDosItens', 'moverProFimDaSaida', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida', 'handleActionResult'], deps);
@@ -1722,7 +1724,7 @@ async function loteDeDuas({ outraAbaPousaX1 = false, respostaX1, respostaX2 = { 
     AppState: { authenticated: true, stats: { read: 0, rejected: 2, skipped: 0 }, fetchEpoch: 0, inFlightActions: 0, queue: [], serverTotal: 0 },
     epocaDaSessao: 0, navigator: { onLine: true }, Date: { now: () => 1_000_000 },
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
-    API: { getSession: () => 'tok', getRegion: () => 'row', rejectPlace: () => new Promise((ok) => respostas.push(ok)) },
+    API: { getSession: () => 'tok', get sessionToken() { return 'tok'; }, getRegion: () => 'row', rejectPlace: () => new Promise((ok) => respostas.push(ok)) },
     SAIDA_KEY: 'waze_places_saida', CONTA_KEY, SAIDA_MAX: 1000, ABA_DESTA_PAGINA: 'aba-A', SAIDA_REIVINDICACAO_MS: 60000,
     callWithRetry: (fn) => fn(), marcarEmAndamento: () => {}, dfato: (k) => diario.push(k),
     recordHistory: (tipo) => historico.push(tipo), registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
@@ -1730,7 +1732,7 @@ async function loteDeDuas({ outraAbaPousaX1 = false, respostaX1, respostaX2 = { 
     saveStats: () => {}, updateInFlightIndicator: () => {}, updatePendingCount: () => {}, handleUnauthorized: () => {},
     historyTodayKey: () => '2026-10-01', ondeAgora: () => '30', getLang: () => 'pt',
   };
-  const h = montar(['marcaDaSessao', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'reivindicacaoDestaAba', 'pousouPorOutraAba', 'soltarMarcaDosItens',
     'pousouNoWaze', 'enviarLote'], deps);
   const envio = h.enviarLote([PEDIDO('x1'), PEDIDO('x2')], { regiao: 'row' });
@@ -2061,7 +2063,8 @@ function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
   el('langSelectHelp', { pai: el('helpModal', { oculto: dialogo !== 'helpModal' }) });
   el('appScreen', { oculto: true });
   const body = { id: 'BODY' };
-  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null };
+  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null,
+    querySelector: () => null };   // nenhum card na página (a aba que nunca entrou, R12-1-04)
   Object.defineProperty(document, 'activeElement', { get: () => (foco ? els[foco] : body) });
   return {
     els, document,
@@ -2155,7 +2158,7 @@ test('R9-1-03 (a): a abertura que pergunta à extensão ADOTA a sessão que OUTR
 function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
   const real = apiDeVerdade(guardado);
   const log = [];
-  const AppState = { authenticated: false, profile: null };
+  const AppState = { authenticated: false, profile: null, queue: [], currentPlace: null };
   const t = telaDeEntrada(tela);
   let responder = null;
   const deps = {
@@ -2169,10 +2172,12 @@ function abaDaEntrada(guardado = {}, { tela = {}, podeInstalar = true } = {}) {
     },
     mostrarNegadoDaExtensao: () => log.push('recusa'),
     handleLogout: (o) => log.push(['sair', o]),
+    contaConfirmadaNestaAba: null,   // a aba que nunca entrou (R12-1-04)
   };
   const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', ...ADOCAO,
     'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
-    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao'], deps);
+    'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba',
+    'guardaASessaoQueCaiu'], deps);
   return { ...real, h, log, deps, AppState, tela: t, responderExtensao: (v) => responder(v) };
 }
 // O "Sair" na outra aba: o token e a conta saem do aparelho, e os avisos chegam aqui na ordem em que ela gravou.
@@ -2506,7 +2511,7 @@ function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242',
   };
   const h = montar(['aoConhecerConta', 'esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'carimbarContaNaSaida',
     'carregarFilaDeSaida', 'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao',
-    'presencaWmeZerar', 'marcaDaSessao'], deps);
+    'presencaWmeZerar', 'marcaDaSessao', 'marcaDestaAba'], deps);
   return { h, ap, log, AppState, API, presencaWme, deps };
 }
 const TROCOU = (soMemoria) => ['dfato', 'conta.trocou', soMemoria ? { soMemoria: true } : null];
@@ -2613,7 +2618,7 @@ function abaComInvisivelPendente({ autenticada = false, perfil = null, memoria =
     sessaoVivaDepoisDe: () => false, handleUnauthorized: () => {},
   };
   const h = montar(['presencaWmeRefazerDesligar', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
-    'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'savePreferences', 'marcaDaSessao'], deps);
+    'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'savePreferences', 'marcaDaSessao', 'marcaDestaAba'], deps);
   return { h, real, enviados, escritas, presencaWme };
 }
 
@@ -2767,7 +2772,7 @@ function resgateNaEntrada(tela, { resposta = { success: true, sessionToken: 'tok
   const t = telaDeEntrada(tela);
   const log = [];
   const deps = {
-    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, focoDoTeclado: null,
+    document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, resgateEmVoo: false, resgateNoAr: null, focoDoTeclado: null,
     saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     API: { resgatarPareamento: async () => resposta },
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },
@@ -2813,6 +2818,7 @@ function loginNaEntrada(tela) {
   const log = [];
   const deps = {
     document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, authInFlight: false, focoDoTeclado: null,
+    resgateNoAr: null,   // nenhum resgate de código no ar (R12-1-01)
     saiuNestaPagina: false, extNegadoNestaPagina: false, extNegado: null,
     API: { testCookies: async () => ({ success: true, sessionToken: 'tok-c', conta: '4242' }) },
     closeModal: (id, o) => { log.push('fechou ' + id + (o && o.focoComDestino ? ' (o foco já tem destino)' : '')); t.fechar(id); },

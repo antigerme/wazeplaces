@@ -83,6 +83,9 @@ const PRESENCA_LIDA_NO_AR_MS = 45_000;
 // No diário, mensagem (chegando ou saindo) entra no máximo uma vez por minuto
 // de cada tipo, com quantas vieram juntas — ver `presencaAnotarMsg`.
 const PRESENCA_DIAG_MSG_MS = 60_000;
+// Entre limpar a região viva da conversa e dizer de novo a MESMA frase de
+// falha (ver `presencaAnunciarFalhaOutraVez`).
+const PRESENCA_ANUNCIO_DE_NOVO_MS = 100;
 
 const PRESENCA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRESENCA_ID = /^\d{1,19}$/;
@@ -199,7 +202,9 @@ const Presenca = {
     // rodada 10, R10-5-04; ver `presencaNaoLidasDepoisDoLida`).
     lidaVoltouEm: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
-    timers: { fluxo: null, silencio: null, lida: null, nome: null },
+    // `anuncio`: a frase de falha a caminho da região viva da conversa (ver
+    // `presencaAnunciarFalhaOutraVez`).
+    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null },
 };
 
 // ── linha do tempo pro diagnóstico ──────────────────────────────────────────
@@ -643,7 +648,15 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
         if (Array.isArray(r.online)) Presenca.online = r.online.filter((p) => p && PRESENCA_ID.test(String(p.id)));
         else if (trocouDePais) { Presenca.online = []; incompleta = true; }
     }
-    if (Array.isArray(r.conversas)) {
+    // As CONVERSAS têm régua própria, a `conversasSaiuEm`: a carona de OUTRO
+    // país as traz sem mexer na `atualizadaEm` (a lista de quem está no app,
+    // dela, fica de fora), e a lista cheia que saiu ANTES dela e chegou DEPOIS
+    // passava pela régua de cima e punha de volta as conversas de antes — a
+    // resposta que só a carona contava sumia da pílula, e a `conversasSaiuEm`
+    // andava pra trás (auditoria da rodada 12, R12-5-06). Mais velhas que as da
+    // tela, as conversas dessa lista ficam de fora; a lista de quem está no app,
+    // dela, segue entrando (nela, não chegou nada mais novo).
+    if (Array.isArray(r.conversas) && !(inicio < Presenca.conversasSaiuEm)) {
         Presenca.conversas = r.conversas.filter((c) => c && PRESENCA_ID.test(String(c.id)));
         Presenca.conversasSaiuEm = inicio;
         // O que chegou ao vivo ANTES de o pedido sair o servidor já contou. E o
@@ -1402,7 +1415,9 @@ function presencaMensagemDoFluxo(m, doLote) {
     // `abrir` no ar ficava de fora (a resposta dele podia ser anterior a ela) e
     // sumia da conversa — e o "lida" saía por uma mensagem que ninguém viu.
     const h = Presenca.historico.get(com);
-    if (h) presencaJuntarMsgs(h, [msg]);
+    // O ECO de um envio sem resposta que o Waze guardou tira a falha da tela —
+    // e do leitor de tela também (`presencaCalarFalhaQueSumiu`, R12-5-03).
+    if (h && presencaJuntarMsgs(h, [msg])) presencaCalarFalhaQueSumiu(com);
     if (deMim) presencaLidaPorId(com, msg);
     presencaAtualizarPrevia(com, msg);
     const nova = !Presenca.vistas.has(msg.id);
@@ -1438,6 +1453,7 @@ function presencaMensagemDoFluxo(m, doLote) {
             // (com a que tinha sido vista), e abrir a conversa marca tudo.
             presencaQuitarDivida(com);
             const chegou = doLote ? msg.ts - Presenca.desvio : Date.now();
+            const daLista = Presenca.conversas.find((x) => x.id === com);
             if (!doLote || chegou > Presenca.atualizadaEm) {
                 // A resposta que a LISTA já contou e o tempo real entrega
                 // DEPOIS dela (a hora do Waze até a régua da lista que trouxe a
@@ -1449,7 +1465,6 @@ function presencaMensagemDoFluxo(m, doLote) {
                 // de toda mensagem que chegou — o "lida" que volta não a apaga
                 // se ela chegou depois dele, e a lista que foi lida ANTES dela
                 // no Waze não a esquece. Fora da conta, as duas a perdiam.
-                const daLista = Presenca.conversas.find((x) => x.id === com);
                 if (daLista && daLista.naoLidas > 0 && msg.ts <= (daLista.ateDaLista || 0)) daLista.naoLidas -= 1;
                 const v = Presenca.vivas.get(com) || { n: 0, ultimaTs: 0, servs: [] };
                 v.n += 1;
@@ -1457,24 +1472,43 @@ function presencaMensagemDoFluxo(m, doLote) {
                 if (Array.isArray(v.servs)) v.servs.push(msg.ts);
                 Presenca.vivas.set(com, v);
             }
+            // Com um "lida" NO AR, a lista que o Waze leu antes de processá-lo
+            // conta a mensagem VISTA junto com a resposta, e quem refaz essa
+            // conta pelo histórico é a chegada da lista — só que ela chegou
+            // ANTES da resposta, e o histórico ainda não a explicava. A resposta
+            // passava da conta pra viva (1 + 1) e a pílula dizia "2 mensagens
+            // novas", uma já vista, até o "lida" voltar (até 45 s; auditoria da
+            // rodada 12, R12-5-01). Com ela no histórico, a conta é refeita
+            // aqui, pela régua de sempre (`presencaNaoLidasDepoisDoLida`, que
+            // deixa de fora o que está nas vivas). Também a do LOTE que a régua
+            // de cima deixa de fora (guardada antes de a lista sair): a lista a
+            // contou, e a conta dela é refeita do mesmo jeito.
+            if (daLista && daLista.naoLidas > 0 && presencaLidaNoAr(com)) daLista.naoLidas = presencaNaoLidasDepoisDoLida(com, daLista);
         }
     }
     presencaRenderTudo();
 }
 
 // Junta sem repetir (o fluxo reentrega, e o eco da minha própria mensagem
-// volta por ele) e mantém a ordem do relógio.
+// volta por ele) e mantém a ordem do relógio. Devolve se uma mensagem minha
+// que estava FALHADA virou enviada (ver `presencaCalarFalhaQueSumiu`).
 function presencaJuntarMsgs(h, novas) {
+    let falhaSumiu = false;
     for (const m of novas) {
         if (!m.id) continue;
         const i = h.msgs.findIndex((x) => x.id === m.id);
         if (i < 0) { h.msgs.push(m); continue; }
         const velha = h.msgs[i];
         // A minha, que estava saindo, virou enviada; o resto não rebaixa.
-        if (velha.meu && velha.estado !== 'enviada') { velha.estado = 'enviada'; velha.motivo = null; }
+        if (velha.meu && velha.estado !== 'enviada') {
+            if (velha.estado === 'falhou') falhaSumiu = true;
+            velha.estado = 'enviada';
+            velha.motivo = null;
+        }
         if (Number.isFinite(m.ts)) velha.ts = m.ts;
     }
     h.msgs.sort((a, b) => a.ts - b.ts);
+    return falhaSumiu;
 }
 
 // A minha mensagem que um recibo de "lida" citou pelo id quando ela ainda não
@@ -1570,10 +1604,58 @@ function presencaFraseDaFalha(m) {
 
 // A tela diz a frase da ÚLTIMA mensagem minha que falhou (ver
 // `presencaHtmlDasMsgs`), e o anúncio diz a mesma.
-function presencaAnunciarFalhaDoEnvio(com) {
+function presencaUltimaFalhada(com) {
     const h = Presenca.historico.get(com);
-    const ultima = h ? h.msgs.filter((m) => m.meu && m.estado === 'falhou').pop() : null;
+    return h ? h.msgs.filter((m) => m.meu && m.estado === 'falhou').pop() || null : null;
+}
+
+function presencaAnunciarFalhaDoEnvio(com) {
+    const ultima = presencaUltimaFalhada(com);
     if (ultima) presencaDizerNaConversa(com, presencaFraseDaFalha(ultima));
+}
+
+// O "Enviar" sem o perfil diz a falha na MESMA tarefa do toque: não há ida à
+// rede no meio. O segundo, com a frase do primeiro ainda na região, a
+// reescrevia igual, sem limpar antes — e região viva reescrita com o mesmo
+// texto pode não ser lida de novo; limpar e escrever no mesmo tique dá no mesmo
+// (auditoria da rodada 12, R12-5-02). O envio com o perfil limpa ao sair e diz a
+// falha depois da resposta, numa tarefa à parte. Aqui, a região que já diz algo
+// é limpa AGORA e a frase volta `PRESENCA_ANUNCIO_DE_NOVO_MS` depois — o atraso
+// que a CDK do Angular usa pelo mesmo motivo (com NVDA ou JAWS no Chrome, a
+// mesma mensagem não é lida uma segunda vez sem limpar e esperar). Vazia, a
+// região muda com a frase: ela sai na hora. Quem chega com a frase ainda a
+// caminho (o terceiro "Enviar") só a adia: a região já está limpa.
+function presencaAnunciarFalhaOutraVez(com) {
+    const el = document.getElementById('conversaAnuncio');
+    const aCaminho = !!Presenca.timers.anuncio;
+    clearTimeout(Presenca.timers.anuncio);
+    Presenca.timers.anuncio = null;
+    if (!aCaminho && (!el || !el.textContent)) { presencaAnunciarFalhaDoEnvio(com); return; }
+    presencaDizerNaConversa(com, '');
+    Presenca.timers.anuncio = setTimeout(() => {
+        Presenca.timers.anuncio = null;
+        presencaAnunciarFalhaDoEnvio(com);
+    }, PRESENCA_ANUNCIO_DE_NOVO_MS);
+}
+
+// A falha que SUMIU da tela sai também do leitor de tela. O envio que não teve
+// resposta pode ter chegado ao Waze: o eco (ou o histórico) traz a mensagem, e
+// a tela troca o "Não enviada" pelo "Enviada" — a região viva seguia dizendo
+// "Não enviada, sem sinal." a quem percorria a conversa (auditoria da rodada
+// 12, R12-5-03). A região diz a frase da falha que a TELA mostra (a da última
+// mensagem minha que segue falhada, `presencaUltimaFalhada`), ou nada: fora
+// isso, só a frase de falha do envio é calada — a mensagem que chegou e o
+// histórico que não veio seguem ditos. Calar não fala: vale também com a
+// conversa escondida por outra camada, que não volta à tela com uma falha que
+// já não existe.
+function presencaCalarFalhaQueSumiu(com) {
+    const el = document.getElementById('conversaAnuncio');
+    if (!el || Presenca.aberta !== com) return;
+    const dita = el.textContent;
+    if (dita !== presencaFraseDaFalha({ motivo: 'conexao' }) && dita !== presencaFraseDaFalha(null)) return;
+    const ultima = presencaUltimaFalhada(com);
+    if (ultima && presencaFraseDaFalha(ultima) === dita) return;
+    el.textContent = '';
 }
 
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
@@ -2151,7 +2233,9 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         .filter((m) => m && m.classe === 'texto' && m.id)
         .map((m) => presencaMsgDoWaze(m, eu));
     for (const m of msgs) presencaMarcarVista(m.id);
-    presencaJuntarMsgs(h, msgs);
+    // O histórico também traz a mensagem cujo envio ficou sem resposta e que o
+    // Waze guardou: a falha sai da tela, e do leitor de tela (R12-5-03).
+    if (presencaJuntarMsgs(h, msgs)) presencaCalarFalhaQueSumiu(id);
     // `maisAntigas` diz se há página ANTES da que chegou. Na primeira, é a
     // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
     h.maisAntigas = !!r.maisAntigas;
@@ -2277,8 +2361,9 @@ function presencaEnviar(legenda, card) {
     presencaAtualizarPrevia(id, msg);
     presencaRenderConversa({ rolarAoFim: true });
     if (eu) { presencaMandar(id, msg); return; }
-    // A tela diz "Não enviada." — o leitor de tela também (R11-5-03).
-    presencaAnunciarFalhaDoEnvio(id);
+    // A tela diz "Não enviada." — o leitor de tela também (R11-5-03), e o
+    // segundo "Enviar" na espera do perfil o diz outra vez (R12-5-02).
+    presencaAnunciarFalhaOutraVez(id);
     // No diário, como toda falha de envio (ver `presencaMandar`): esta nem saiu.
     presencaAnotar('chat.envio', { ok: false, categoria: 'semPerfil', bytes: String(msg.texto || '').length, comPedido: !!msg.card });
 }
@@ -2288,7 +2373,12 @@ async function presencaMandar(com, msg) {
     msg.motivo = null;
     presencaRenderConversa();
     // A tentativa começa sem a falha anterior no leitor de tela (ver
-    // `presencaDizerNaConversa`): a mesma falha de novo volta a ser dita.
+    // `presencaDizerNaConversa`): a mesma falha de novo volta a ser dita. E a
+    // do "Enviar" sem o perfil que ainda estava a caminho (ver
+    // `presencaAnunciarFalhaOutraVez`) não fala por cima desta tentativa: o
+    // envio que dá certo não deixa "Não enviada" na região.
+    clearTimeout(Presenca.timers.anuncio);
+    Presenca.timers.anuncio = null;
     presencaDizerNaConversa(com, '');
     // O cartão vai num campo que o WME não mostra, com a pergunta curta pra
     // prévia da lista. A MARCA do app quem põe é o servidor.

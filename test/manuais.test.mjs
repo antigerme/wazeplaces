@@ -257,6 +257,93 @@ test('README: a aprovação de foto só apaga a lista da lixeira tocada na MESMA
   }
 });
 
+// R12-6-03 (auditoria da rodada 12): a conta das LEITURAS no KV dizia "Cada ação
+// = 1 leitura". As da foto custam mais — a lixeira confere a lista de fotos
+// guardada, o lote 15 somou à exclusão a conferência do registro que ela leu
+// (R11-3-01), e aprovar foto confere a lista da lixeira antes de apagá-la —, e o
+// README não contava (MEDIDO: 2 no toque, 3 na exclusão, 2 na aprovação). Os
+// números saem do SERVIDOR DE VERDADE (o `dispatch`, com um store que conta os
+// `get`) e de um Waze de mentira, em cada variante que muda o caminho: a lista de
+// fotos valendo ou vencida, a aprovação com e sem a lixeira guardada. Mexeu numa
+// leitura do core, o README acompanha.
+async function leiturasNoKv() {
+  const VENUE = '1.2.3';
+  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }, { id: 'p', approved: false }];
+  const original = globalThis.fetch, agora = Date.now;
+  let adiante = 0;
+  Date.now = () => agora.call(Date) + adiante;
+  const json = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (/\/Session\b/.test(u)) return json(PERFIL_QUE_PASSA);
+    if (/Issues\/Search/.test(u)) return json({ urs: { objects: [] }, venues: { objects: [] }, users: { objects: [] }, hasMore: false });
+    if (/Issues\/(Read|Star)/.test(u)) return json({});
+    if ((init.method || 'GET') === 'GET') return json({ venues: { objects: [{ id: VENUE, images: imagens }] } });
+    const sub = JSON.parse(init.body).actions._subActions[0];
+    if (sub.name === 'UPDATE_OBJECT' && sub.attributes.images) imagens = sub.attributes.images;
+    return json({ venues: { objects: [{ id: VENUE, images: imagens, name: sub.attributes && sub.attributes.name }] } });
+  };
+  try {
+    const mem = new Map();
+    let leituras = 0;
+    const store = { get: async (k) => { leituras++; return mem.has(k) ? mem.get(k) : null; }, put: async (k, v) => { mem.set(k, v); },
+      delete: async (k) => { mem.delete(k); } };
+    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
+    const sessionToken = await sessions.createSession(COOKIES_DO_TESTE);
+    const medir = async (rota, corpo) => {
+      const antes = leituras;
+      const r = await dispatch(rota, { sessionToken, region: 'row', ...corpo }, { sessions });
+      assert.ok(r.body && r.body.success, `CONTROLE: ${rota} de mentira não deu certo: ${JSON.stringify(r.body).slice(0, 160)}`);
+      return leituras - antes;
+    };
+    const FOTO_AQUI = { venueID: VENUE, lat: -23.5, lon: -46.6 };
+    const PEDIDO = { venueID: '9.9.9', updateRequestID: '99' };
+    const n = {};
+    n.perfil = await medir('perfil', {});
+    n.busca = await medir('buscar-places', { countryId: 30 });
+    n.rejeitar = await medir('validar-place', PEDIDO);
+    n.lido = await medir('marcar-lido', PEDIDO);
+    n.estrela = await medir('guardar-pedido', { ...PEDIDO, value: true });
+    n.renomear = await medir('renomear-local', { ...FOTO_AQUI, nome: 'Nome novo' });
+    n.aprovarSemLixeira = await medir('validar-place', { ...FOTO_AQUI, updateRequestID: '98', approve: true });
+    n.toque = await medir('excluir-foto', { ...FOTO_AQUI, action: 'preparar', imageID: 'preparar' });
+    n.exclusao = await medir('excluir-foto', { ...FOTO_AQUI, imageID: 'a' });
+    n.toqueDeNovo = await medir('excluir-foto', { ...FOTO_AQUI, action: 'preparar', imageID: 'preparar' });
+    adiante += 60 * 1000;   // a lista de fotos guardada vence antes do envio
+    n.exclusaoVencida = await medir('excluir-foto', { ...FOTO_AQUI, imageID: 'b' });
+    await medir('excluir-foto', { ...FOTO_AQUI, action: 'preparar', imageID: 'preparar' });
+    n.aprovarComLixeira = await medir('validar-place', { ...FOTO_AQUI, updateRequestID: '97', approve: true });
+    return n;
+  } finally {
+    globalThis.fetch = original;
+    Date.now = agora;
+  }
+}
+
+test('README: as leituras no KV são as que o servidor faz — 1 por ação, e as da foto contadas (R12-6-03)', async () => {
+  // O toque na lixeira pode custar uma leitura a mais quando relê a lista de fotos
+  // do Waze do que com a lista ainda valendo: aí o README diz os dois, na forma
+  // "N leituras no toque (M com a lista de fotos ainda valendo)".
+  const m = /Cada ação = (\d+) leitura, menos as da foto: a lixeira custa (\d+) leituras no toque(?: \((\d+) com a lista de fotos ainda valendo\))? e (\d+) na exclusão, e aprovar foto, (\d+)\./.exec(README);
+  assert.ok(m, 'CONTROLE: a conta das leituras no KV sumiu do README (ou mudou de forma)');
+  const [umaAcao, toque, toqueValendo, exclusao, aprovar] = m.slice(1).map((x) => (x === undefined ? undefined : Number(x)));
+  const n = await leiturasNoKv();
+  // CONTROLE: o instrumento separa os casos (senão "bate" por não medir nada):
+  // as da foto leem mais que uma ação comum.
+  assert.ok(n.perfil >= 1 && n.toque > n.perfil && n.toqueDeNovo > n.perfil && n.exclusao > n.perfil && n.aprovarSemLixeira > n.perfil,
+    `CONTROLE: as leituras medidas não separam os casos: ${JSON.stringify(n)}`);
+  for (const acao of ['perfil', 'busca', 'rejeitar', 'lido', 'estrela', 'renomear'])
+    assert.equal(n[acao], umaAcao, `${acao}: o servidor lê ${n[acao]} vez(es) no KV, e o README diz ${umaAcao} por ação`);
+  assert.equal(n.toque, toque, `a lixeira (o toque que relê a lista do Waze): o servidor lê ${n.toque} vezes no KV, e o README diz ${toque} no toque`);
+  const comALista = toqueValendo === undefined ? toque : toqueValendo;
+  assert.equal(n.toqueDeNovo, comALista,
+    `a lixeira (o toque com a lista ainda valendo): o servidor lê ${n.toqueDeNovo} vezes no KV, e o README diz ${comALista}`);
+  for (const caso of ['exclusao', 'exclusaoVencida'])
+    assert.equal(n[caso], exclusao, `a exclusão (${caso}): o servidor lê ${n[caso]} vezes no KV, e o README diz ${exclusao}`);
+  for (const caso of ['aprovarSemLixeira', 'aprovarComLixeira'])
+    assert.equal(n[caso], aprovar, `aprovar foto (${caso}): o servidor lê ${n[caso]} vezes no KV, e o README diz ${aprovar}`);
+});
+
 // ── A extensão ───────────────────────────────────────────────────────────────
 // T4/A14: o protocolo do README não tinha o `conta` do `sessao`, e dizia que
 // "nenhuma mudança de protocolo" tinha havido depois de duas. As respostas da

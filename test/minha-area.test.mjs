@@ -81,12 +81,17 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   // A caixa da área POR SERVIDOR (R9-6-04): a busca usa a do servidor dela, lida com os editáveis.
   // E o servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-01/03), e a
   // área noutro servidor com o lugar por decidir (R11-6-02).
+  // E a decisão que ficou SEM a resposta de um servidor (R12-6).
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
-    'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao']) if (achar(opcional)) nomes.push(opcional);
+    'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao', 'decisaoSemResposta',
+    'minhaAreaFalhouPorRedeEm']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let decisaoDoLugarDe = null;\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };\n'
+    // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
+    + 'let ultimaBuscaFalhouPorRede = false; let perfilFalhouPorRede = false;\n'
+    + 'let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };\n'
     + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, completarPerfilChegado, resetQueue,'
     + ` anotarEditaveis: ${nomes.includes('anotarEditaveis') ? 'anotarEditaveis' : 'null'} };`)(...chaves.map((k) => deps[k]));
   // A fila refeita = época nova e uma busca.
@@ -220,7 +225,7 @@ test('R9-6-04: a busca vai pela caixa do servidor DELA — a área lida na NA, n
 const CAIXA_BR = [-47, -24, -46, -23];
 const AREA_NY = [{ type: 'drive', bbox: CAIXA_NY }];
 const tique = (ms = 0) => new Promise((ok) => setTimeout(ok, ms));
-function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
+function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vazias = [] }) {
   const lugar = { regiao, pais };
   const log = [];
   const buscas = [];
@@ -236,8 +241,10 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
   // O `/Session` de cada servidor: o que o teste deu; a falha que o servidor
   // RESPONDEU (o Waze fora); ou a que NEM CHEGOU (`_motivo`, como o `_post` marca).
   // E o 401 (`semSessao`): a sessão que o servidor não reconhece.
+  // E a recusa do portão (`negado`): o nível ou a área mudou no Waze (R12-6).
   const resposta = (r) => (perfis[r] === 'semResposta' ? { success: false, errorCategory: 'transient', _motivo: 'TypeError' }
     : perfis[r] === 'semSessao' ? { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' }
+    : perfis[r] === 'negado' ? { success: false, errorCategory: 'access_denied', errorKey: 'srv.err.notAreaManager' }
     : perfis[r] ? { success: true, profile: { ...perfis[r] } } : { success: false, errorCategory: 'transient' });
   const navegador = { onLine: true };
   const API = {
@@ -252,6 +259,9 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
     listCountries: async (r) => ({ success: true, countries: r === 'na' ? [{ id: 235, name: 'United States' }] : [{ id: 30, name: 'Brazil' }] }),
     fetchPlaces: async (page, f) => {
       buscas.push(lugar.regiao + (f.bbox ? ' bbox ' + JSON.stringify(f.bbox) : ' pais ' + lugar.pais));
+      // A fila VAZIA de quem não edita naquele servidor (`vazias`, R12-6-02): o
+      // filtro de permissão do servidor tira tudo.
+      if (vazias.includes(lugar.regiao)) return { success: true, places: [], hasMore: false, total: 0, blocked: 0 };
       return { success: true, places: [{ venueID: 'v' + buscas.length, updateRequestID: 'u' + buscas.length }], hasMore: false, total: 1, blocked: 0 };
     },
   };
@@ -287,19 +297,23 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30 }) {
     // de reprovar pelo COMPORTAMENTO, não por não achá-las (as de verdade, quando
     // existem, vencem estas).
     lerServidorDaMinhaArea: () => null, areasGerenciadasLidas: () => null,
+    decisaoSemResposta: () => null, refazerDecisaoSemResposta: () => null,
   };
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'startFetching', 'completarPerfilChegado', 'paisDoPerfil', 'irProPaisDoPerfil', 'refazerFilaReal', 'resetQueue',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
-  for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao'])
+  for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
+    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
     + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
     + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null; let decisaoDoLugarDe = null;\n'
-    + 'let perfilPedidoEm = 0;\n'
+    + 'let perfilPedidoEm = 0; let cargasDoPerfil = 0;\n'
+    // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
+    + 'let perfilFalhouPorRede = false; let minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() };\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {}, gerenciadas: {} };\n'
     + 'let leiturasDaMinhaArea = { epoca: null, noAr: new Map(), feitas: new Set() };\n'
     + nomes.map(fatiar).join('\n')
@@ -684,4 +698,240 @@ test('R11-6-02: a busca chamada DIRETO no meio de uma decisão SEM destino tamb�
   assert.deepEqual(m.buscas, ['row pais 30'], `a busca que esperou a decisão sem destino não foi refeita: ${m.buscas}`);
   assert.equal(m.AppState.filters.myArea, false);
   assert.deepEqual(m.avisos(), ['toast:toast.minhaAreaSemCaixa']);
+});
+
+// ═══ R12-6-02 · a fila que volta VAZIA com o lugar por decidir ESPERA ═══════
+// (auditoria da rodada 12, pré-existente). Na primeira abertura (e depois de
+// todo "Sair") o aparelho está no Brasil (`row/30`). Pra quem só edita na NA (ou
+// em Israel), SEM "Minha área", a busca de lá volta vazia enquanto o perfil
+// pergunta aos outros servidores — e a tela dizia "Tudo limpo! … Confira o país
+// e a região", anunciado ao leitor de tela, até a decisão levar a pessoa pra
+// fila dela (MEDIDO no navegador, nos dois motores: 1,3 s; 2,1 s com a busca
+// voltando antes do perfil). A espera do fim do `startFetching` pela decisão só
+// valia com "Minha área" (`filaEsperaPerfil`). Só a busca que RESPONDEU espera: a
+// que falhou tem a tela dela, e no lie-fi o perfil pendura junto (ver o
+// test/offline-varredura). Aqui a busca, a carga do perfil e a decisão rodam DE
+// VERDADE, com a fila do Brasil vazia (o filtro de permissão).
+test('R12-6-02: sem "Minha área", a fila do Brasil que volta vazia com a decisão no ar NÃO diz "Tudo limpo!" — espera, e a fila dos EUA é a que aparece', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  const decisao = m.chegaOPerfil();              // o perfil da ROW chegou e pergunta à NA
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  const abertura = m.app.startFetching();        // a busca da abertura, no Brasil
+  await tique(5);
+  assert.deepEqual(m.buscas, ['row pais 30'], `PRÉ-CONDIÇÃO: a busca do Brasil não saiu (uma vez): ${m.buscas}`);
+  assert.ok(!m.log.includes('vazio'),
+    'com a decisão do lugar no ar, a fila vazia do Brasil virou "Tudo limpo! … Confira o país e a região" (e o leitor de tela o anuncia)');
+  m.soltar.na();
+  await decisao;
+  await abertura;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pros EUA');
+  assert.deepEqual(m.buscas, ['row pais 30', 'na pais 235'], `as buscas: ${m.buscas}`);
+  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não foi do esqueleto direto pro card: ${m.log}`);
+  assert.ok(m.avisos().includes('toast:toast.paisDoPerfil(United States)'), `a fila dos EUA entrou sem o aviso: ${m.avisos()}`);
+});
+
+test('R12-6-02: a busca que volta ANTES do perfil espera ele (e a decisão que ele traz) — sem "Tudo limpo!" no meio', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['row', 'na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  // A abertura: a carga do perfil e a busca saem juntas (o `initApp`).
+  m.AppState._profilePromise = m.app.loadProfileAndAuxData();
+  const abertura = m.app.startFetching();
+  await tique(5);
+  assert.ok(m.soltar.row, 'PRÉ-CONDIÇÃO: o perfil da ROW não ficou no ar');
+  assert.deepEqual(m.buscas, ['row pais 30'], `PRÉ-CONDIÇÃO: a busca do Brasil não saiu antes do perfil: ${m.buscas}`);
+  assert.ok(!m.log.includes('vazio'), 'a busca que voltou antes do perfil disse "Tudo limpo!" sem saber onde a pessoa edita');
+  m.soltar.row();
+  await tique(5);
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  assert.ok(!m.log.includes('vazio'), 'com o perfil na mão e a decisão no ar, "Tudo limpo!" apareceu');
+  m.soltar.na();
+  await m.AppState._profilePromise;
+  await abertura;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'PRÉ-CONDIÇÃO: a decisão não levou a fila pros EUA');
+  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não foi do esqueleto direto pro card: ${m.log}`);
+});
+
+test('R12-6-02: CONTROLES — quem edita no Brasil: a fila com pedido aparece SEM esperar o perfil, e a vazia diz "Tudo limpo!" uma vez, sem pergunta a mais', async () => {
+  const NO_BR = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30], areas: [], managedAreas: [] } };
+  // A fila com pedido: o card não espera o perfil (nem a decisão).
+  const c = montarServidores({ perfis: NO_BR, segurar: ['row'] });
+  c.AppState.filters.myArea = false;
+  c.AppState._profilePromise = c.app.loadProfileAndAuxData();
+  const aberturaC = c.app.startFetching();
+  await tique(5);
+  assert.ok(c.soltar.row, 'PRÉ-CONDIÇÃO: o perfil não ficou no ar');
+  assert.ok(c.log.includes('card'), `a fila com pedido esperou o perfil pra mostrar o card: ${c.log}`);
+  c.soltar.row();
+  await c.AppState._profilePromise;
+  await aberturaC;
+  // A fila vazia de verdade: "Tudo limpo!" quando o perfil chega — uma vez, sem
+  // perguntar a outro servidor nem buscar de novo.
+  const v = montarServidores({ perfis: NO_BR, segurar: ['row'], vazias: ['row'] });
+  v.AppState.filters.myArea = false;
+  v.AppState._profilePromise = v.app.loadProfileAndAuxData();
+  const aberturaV = v.app.startFetching();
+  await tique(5);
+  v.soltar.row();
+  await v.AppState._profilePromise;
+  await aberturaV;
+  await tique(10);
+  assert.deepEqual(v.log.filter((l) => l === 'vazio' || l === 'card'), ['vazio'], `a fila vazia de verdade não disse "Tudo limpo!" (uma vez): ${v.log}`);
+  assert.deepEqual([v.perguntas, v.buscas], [['row'], ['row pais 30']], 'a espera custou uma pergunta (ou uma busca) a mais');
+});
+
+// ═══ R12-6 (a pista) · a pergunta a OUTRO servidor que FALHA não é "não edita lá" ═══
+// (auditoria da rodada 12; a régua é a do R11-6-01, decidida no lote 15). Quem só
+// edita na NA, com o aparelho na ROW: a decisão do lugar pergunta o `/Session` da
+// NA e de Israel (`paisDoPerfil`). A pergunta que FALHAVA — o Waze fora (o 500
+// `transient`), a página de erro da borda, a que nem chegou (`_motivo`) — contava
+// como "não edita lá": com "Minha área", a busca desligava o filtro e o GRAVAVA,
+// com a frase falsa "Seu perfil do Waze não tem área de edição" e "Tudo limpo! …
+// Confira o país e a região"; o ↻ e religar "Minha área" não perguntavam a NA de
+// novo até reabrir o app; e o mesmo na troca de conta pela renovação (MEDIDO no
+// navegador, nos dois motores). Agora a decisão fica PENDENTE sobre o lugar: a
+// busca de "Minha área" espera ("Falha ao carregar"), e a busca seguinte — o
+// "Tentar de novo", o ↻ — pergunta de novo SÓ ao servidor que não respondeu.
+// Aqui a carga do perfil, a decisão e a busca rodam DE VERDADE.
+const SO_NA_FALHANDO = (falha) => ({ row: SO_NA.row, na: falha, il: SO_NA.il });
+async function abrirOApp(m) {
+  m.AppState._profilePromise = m.app.loadProfileAndAuxData();   // a abertura: o perfil e a busca juntos
+  const abertura = m.app.startFetching();
+  await m.AppState._profilePromise;
+  await abertura;
+  await tique(10);
+}
+
+test('R12-6: "Minha área" com a NA SEM RESPOSTA na abertura — não desliga nem grava, sem a frase falsa: espera com a tela de falha, e o "Tentar de novo" pergunta SÓ à NA', async () => {
+  // `undefined`: o Waze fora (o 500 `transient`); 'semResposta': a que nem chegou (`_motivo`).
+  for (const falha of [undefined, 'semResposta']) {
+    const perfis = SO_NA_FALHANDO(falha);
+    const m = montarServidores({ perfis, vazias: ['row'] });
+    await abrirOApp(m);
+    const rotulo = falha || 'o Waze fora';
+    assert.deepEqual(m.perguntas, ['row', 'na', 'il'], `PRÉ-CONDIÇÃO (${rotulo}): a decisão não perguntou à NA e a Israel: ${m.perguntas}`);
+    assert.equal(m.AppState.filters.myArea, true, `(${rotulo}) "Minha área" desligou sem a NA ter respondido: ${m.avisos()}`);
+    assert.ok(!m.log.includes('salvou'), `(${rotulo}) o filtro desligado foi GRAVADO: volta desligado na próxima abertura`);
+    assert.deepEqual(m.avisos(), [], `(${rotulo}) o app disse o que não sabe: ${m.avisos()}`);
+    assert.deepEqual(m.buscas, [], `(${rotulo}) buscou o país com "Minha área" sem saber se há área na NA: ${m.buscas}`);
+    assert.equal(m.AppState.loadError, true, `(${rotulo}) a busca que espera não pediu a tela de falha (com "Tentar de novo")`);
+    // O "Tentar de novo" (a fila nova e a busca): a NA responde agora.
+    perfis.na = SO_NA.na;
+    await m.atualizar();
+    await tique(10);
+    assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'],
+      `(${rotulo}) o gesto não perguntou de novo SÓ à NA (a falha valeu como "não edita lá", ou Israel foi perguntada de novo): ${m.perguntas}`);
+    assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], `(${rotulo}) a resposta da NA não levou a fila pra lá`);
+    assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `(${rotulo}) a busca não foi pela caixa da NA: ${m.buscas}`);
+    assert.equal(m.AppState.filters.myArea, true);
+    assert.deepEqual(m.avisos(), [], `(${rotulo}) avisos: ${m.avisos()}`);
+    // A NA que respondeu não é perguntada de novo: nenhum pedido a mais.
+    await m.atualizar();
+    await tique(10);
+    assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `(${rotulo}) a NA que respondeu foi perguntada de novo: ${m.perguntas}`);
+  }
+});
+
+test('R12-6: a pergunta que falha de novo segue pendente — uma ida por busca, nenhuma sem gesto, e nenhuma sem rede', async () => {
+  const perfis = SO_NA_FALHANDO(undefined);
+  const m = montarServidores({ perfis, vazias: ['row'] });
+  await abrirOApp(m);
+  // A busca que a própria decisão faz (ou que esperou por ela) não repete a pergunta.
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il'], `a decisão perguntou de novo sem gesto nenhum: ${m.perguntas}`);
+  await m.atualizar();                           // o "Tentar de novo": a NA falha de novo
+  await tique(10);
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `o gesto perguntou ${m.perguntas.length - 3} vezes: ${m.perguntas}`);
+  assert.deepEqual([m.AppState.filters.myArea, m.AppState.loadError, m.buscas], [true, true, []],
+    'a segunda falha decidiu alguma coisa (desligou, buscou ou tirou a tela de falha)');
+  m.navegador.onLine = false;                    // num túnel: o gesto não pergunta
+  await m.atualizar();
+  await tique(10);
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `sem rede, a pergunta saiu: ${m.perguntas}`);
+  m.navegador.onLine = true;                     // a rede volta: o gesto seguinte pergunta, e a NA responde
+  perfis.na = SO_NA.na;
+  await m.atualizar();
+  await tique(10);
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na', 'na'], `com a rede de volta, o gesto não perguntou: ${m.perguntas}`);
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `a busca não foi pela caixa da NA: ${m.buscas}`);
+});
+
+test('R12-6: sem "Minha área", a NA sem resposta deixa a fila do Brasil — e o ↻ (ou religar "Minha área") pergunta de novo, sem a frase falsa', async () => {
+  // A fila do Brasil vazia é verdade ("Tudo limpo! … Confira o país e a região");
+  // o que não pode é a falha valer como "não edita lá" até reabrir o app.
+  const perfis = SO_NA_FALHANDO(undefined);
+  const m = montarServidores({ perfis, vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  await abrirOApp(m);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais, m.buscas], ['row', 30, ['row pais 30']], 'PRÉ-CONDIÇÃO: a abertura não ficou na fila do Brasil');
+  perfis.na = SO_NA.na;
+  await m.atualizar();                           // o ↻ (ou o "Verificar novamente")
+  await tique(10);
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `o ↻ não perguntou de novo à NA: ${m.perguntas}`);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'a NA respondeu e a fila não foi pros EUA');
+  assert.equal(m.buscas.at(-1), 'na pais 235', `a busca dos EUA não saiu: ${m.buscas}`);
+  assert.ok(m.avisos().includes('toast:toast.paisDoPerfil(United States)'), `a fila dos EUA entrou sem o aviso: ${m.avisos()}`);
+  // Religar "Minha área" (Filtros › liga › Aplicar, sem mexer na região), com a NA ainda falhando.
+  const r = montarServidores({ perfis: SO_NA_FALHANDO(undefined), vazias: ['row'] });
+  r.AppState.filters.myArea = false;
+  await abrirOApp(r);
+  r.AppState.filters.myArea = true;
+  await r.atualizar();                           // o "Aplicar": a NA falha de novo
+  await tique(10);
+  assert.deepEqual(r.perguntas, ['row', 'na', 'il', 'na'], `religar não perguntou de novo à NA: ${r.perguntas}`);
+  assert.equal(r.AppState.filters.myArea, true, `religar "Minha área" a desligou de novo, com a frase falsa: ${r.avisos()}`);
+  assert.deepEqual(r.avisos(), []);
+});
+
+test('R12-6: a troca de conta pela renovação com a NA sem resposta — "Minha área" fica, sem a frase falsa, e o "Tentar de novo" leva à fila da NA', async () => {
+  const perfis = { row: SO_NA_B.row, il: SO_NA_B.il };   // a NA de B: o Waze fora
+  const m = montarServidores({ perfis, vazias: ['row'] });
+  m.ganchos.aoConhecerConta = () => { m.app.resetQueue(); m.app.startFetching(); };
+  await m.app.loadProfileAndAuxData();
+  await tique(10);
+  assert.deepEqual(m.perguntas, ['row', 'na', 'il'], `PRÉ-CONDIÇÃO: a decisão não perguntou à NA e a Israel: ${m.perguntas}`);
+  assert.equal(m.AppState.filters.myArea, true, `"Minha área" desligou na troca de conta sem a NA ter respondido: ${m.avisos()}`);
+  assert.deepEqual([m.avisos(), m.buscas, m.AppState.loadError], [[], [], true],
+    'a frase falsa, a busca do país ou a falta da tela de falha na troca de conta');
+  perfis.na = SO_NA_B.na;
+  await m.atualizar();
+  await tique(10);
+  assert.deepEqual(m.buscas, ['na bbox ' + JSON.stringify(CAIXA_NY)], `o "Tentar de novo" não levou à fila da área na NA: ${m.buscas}`);
+});
+
+test('R12-6: o 401 da pergunta vai à conferência da sessão, a recusa do portão é terminal — e o lugar aplicado À MÃO vale por si (sem a pergunta repetida)', async () => {
+  // 401: conferido (com a busca esperando, ninguém mais o veria), e a decisão fica pendente.
+  const s = montarServidores({ perfis: SO_NA_FALHANDO('semSessao'), vazias: ['row'] });
+  await abrirOApp(s);
+  assert.equal(s.log.filter((l) => l === 'confere-sessao').length, 1, `o 401 da pergunta à NA não foi conferido: ${s.log}`);
+  assert.deepEqual([s.AppState.filters.myArea, s.avisos(), s.buscas], [true, [], []], 'o 401 valeu como "não edita lá"');
+  // A recusa do portão na pergunta à NA: terminal, como na carga do perfil — e
+  // Israel nem é perguntada.
+  const g = montarServidores({ perfis: SO_NA_FALHANDO('negado'), vazias: ['row'] });
+  await abrirOApp(g);
+  assert.ok(g.log.includes('recusa'), `a recusa do portão na pergunta à NA não foi terminal: ${g.log}`);
+  assert.deepEqual(g.perguntas, ['row', 'na'], `depois da recusa do portão a decisão seguiu perguntando: ${g.perguntas}`);
+  // O lugar que a pessoa aplica À MÃO, com a decisão pendente no Brasil: vale a
+  // régua do servidor aplicado (R11-6-01), e a pendência não pergunta junto.
+  const a = montarServidores({ perfis: SO_NA_FALHANDO(undefined), vazias: ['row'] });
+  await abrirOApp(a);
+  await a.aplicarRegiao('na', 235);              // a NA ainda falha: só UMA pergunta a ela
+  await tique(10);
+  assert.deepEqual(a.perguntas, ['row', 'na', 'il', 'na'], `o lugar aplicado à mão perguntou à NA mais de uma vez: ${a.perguntas}`);
+  assert.deepEqual([a.AppState.filters.myArea, a.buscas], [true, []], 'a NA aplicada à mão, sem resposta, não esperou');
+  // E o país que a pessoa escolhe à mão NA MESMA região (a França, sem "Minha
+  // área"): a escolha é dela — a pendência sobre o Brasil não pergunta de novo, e
+  // a NA, que agora responderia, não a tira da França.
+  const perfisF = SO_NA_FALHANDO(undefined);
+  const f = montarServidores({ perfis: perfisF, vazias: ['row'] });
+  f.AppState.filters.myArea = false;
+  await abrirOApp(f);
+  perfisF.na = SO_NA.na;
+  await f.aplicarRegiao('row', 73);
+  await tique(10);
+  assert.deepEqual(f.perguntas, ['row', 'na', 'il'], `a França aplicada à mão perguntou à NA de novo: ${f.perguntas}`);
+  assert.deepEqual([f.lugar.regiao, f.lugar.pais, f.buscas.at(-1)], ['row', 73, 'row pais 73'],
+    `a pendência sobre o Brasil tirou a pessoa da França que ela escolheu: ${f.lugar.regiao}/${f.lugar.pais} · ${f.buscas}`);
 });

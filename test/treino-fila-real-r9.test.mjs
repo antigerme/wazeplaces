@@ -381,6 +381,7 @@ function montarDevolvido() {
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
     renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
     escritasDeFotoNoLocal: new Map(),   // a vez do local nas escritas da lista de fotos (R10-3-03, R11-3-01)
+    fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,   // as fotos que saíram do mapa (R12-3-02)
     // O `devolverPedidoRecusado` de VERDADE: é ele que guarda o recusado no treino.
     pedidosQueEntraramNaFila: new Set(), manterFocoNaFrente: () => {}, aoMudarAFilaPorBaixo: () => {},
   });
@@ -388,7 +389,7 @@ function montarDevolvido() {
   app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela',
     'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401',
     'contarIdasSemResposta', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome',
-    'aplicarNomeNaTela', 'vezDasFotosNoLocal'],
+    'aplicarNomeNaTela', 'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
   'setEpoca: (v) => { epocaDaSessao = v; }');
   return { app, A, A2, C, AppState, log, toasts, Lightbox, responder: (r) => responder(r) };
@@ -503,7 +504,9 @@ function montarVarredura() {
      await __segurarGravacao();
      offlineFilaGravadaEm = 7;
      return true;
-   }`,
+   }
+   // A releitura da base antes da poda (R12-4-05): a fila guardada é a que esta varredura gravou.
+   async function offlineLerFila() { return offlineFilaGravadaEm === null ? null : { t: offlineFilaGravadaEm, places: [{}] }; }`,
   'estado: () => ({ resultado: offlineUltimoResultado, preparada: offlineFilaPreparada, gravada: offlineFilaGravadaEm })');
   return { app, AppState, baixados, podas, gravadas, soltar: () => soltarGravacao && soltarGravacao() };
 }

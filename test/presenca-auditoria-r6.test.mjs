@@ -245,7 +245,7 @@ function aparelho() {
         API: { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, sessionToken: sessao,
           presencaWaze: async (c) => { pedidos.push(c); return typeof resposta === 'function' ? resposta() : resposta; } },
       };
-      const h = montar(['marcaDaSessao', 'savePreferences', 'lerPreferenciasGuardadas', 'presencaWmeDesligar',
+      const h = montar(['marcaDaSessao', 'marcaDestaAba', 'savePreferences', 'lerPreferenciasGuardadas', 'presencaWmeDesligar',
         'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
         'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar'], deps);
       h.lerPreferenciasGuardadas();
@@ -356,7 +356,7 @@ test('R6-5-3 o desligar repetido com o Waze fora não enche o diário: a mesma f
     API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
       presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
   };
-  const h = montar(['marcaDaSessao', 'savePreferences', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'savePreferences', 'presencaWmeDesligar', 'presencaWmeGravarPendente',
     'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar'], deps);
   const linhas = () => fatos.filter(([k]) => k === 'presencaWme.visivel');
   h.presencaWmeDesligar();                                  // o gesto
@@ -428,7 +428,7 @@ function montarDesligar401({ sonda }) {
     showToast: (k) => toasts.push(k), t: (k) => k,
     rebuscarDepoisDeFalha: () => {}, esvaziarFilaDeSaida: () => {},
   };
-  const h = montar(['marcaDaSessao', 'savePreferences', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'handleUnauthorized',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'savePreferences', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'handleUnauthorized',
     'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
     'presencaWmeRefazerDesligar'], deps);
   const assentar = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0)); };

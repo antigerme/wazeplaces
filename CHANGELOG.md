@@ -8,6 +8,69 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.07-04
+
+Décima quinta rodada da auditoria. Depois da v2026.10.07-03, conferida em produção com duas contas, sete auditores revisaram o app de novo. Não houve achado grave. Os consertos cobrem o app aberto em duas abas, a foto ampliada, a presença e a conversa, "Minha área" e os Filtros, a entrada e a conta, o "Disponível offline", o Histórico e a Ajuda, e o modo dev.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**"Marcar todos" e o app aberto em duas abas**
+- **Se o "Marcar todos" para no meio com "Conexão instável — sua sessão continua válida", o pedido que você decidiu em outra aba nesse meio também fica de fora do lote.** Antes o app mandava de novo a parte que tinha parado, e esse pedido ia junto pro Waze como lido e contava duas vezes: "Lidos 30 + Rejeitados 1" pra 30 pedidos, e o aviso dizia "30 pedidos marcados". Agora ele fica de fora, como já ficava sem a interrupção.
+- **Com "Primeiro os de…" ligado, quando você decide em outra aba todos os pedidos dessa pessoa, a barra sai da tela**, como já saía quando acabavam os pedidos dela. Antes ela ficava dizendo "0 de 3", e o leitor de tela anunciava "os 0 pedidos". Pelo teclado, o foco que estava na barra vai pro ✕ do pedido na tela.
+- **A recusa automática não rejeita mais um pedido que você acabou de decidir em outra aba.** Com a recusa de um autor rodando numa aba, o pedido dele que você marcava como lido na outra ainda era rejeitado aqui segundos depois: o Waze recebia as duas decisões e o placar contava duas vezes. Agora vale a primeira decisão, e o pedido sai da fila desta aba.
+- **Os pedidos que estavam chegando quando você decidiu em outra aba não voltam mais como card.** Ao abrir uma segunda aba, tocar em ↻ ou trocar um filtro, a fila que chegava trazia o pedido que você tinha acabado de decidir na outra, e decidi-lo de novo mandava uma segunda decisão ao Waze.
+- **O que o "Marcar todos" marca, ou a foto que você aprova, enquanto o seu acesso está sendo renovado também sai da fila da outra aba.** Antes, nesse momento, a outra aba não ficava sabendo, e o pedido continuava lá como card.
+- **Quando uma aba fica conferindo de quem é a sessão (depois de você entrar de novo na outra), o que você decide na outra nesse meio sai da fila dela assim que a conferência termina.** Antes esses pedidos ficavam como card, e o ✕ ali ia pro Waze.
+
+**Foto ampliada**
+- **Com o Waze lento, excluir fotos não traz mais de volta uma foto que você já tinha tirado, nem desfaz a aprovação de outra.** Ao tocar na lixeira, o app confere a lista de fotos do local; quando isso demorava mais que os 3 segundos do Desfazer, a exclusão seguinte nesse local devolvia ao Waze a foto que você tinha acabado de excluir, e a foto que você tinha acabado de aprovar voltava a ficar pendente, com a tela mostrando o contrário. Agora a exclusão e a aprovação esperam essa conferência terminar. No dia a dia ela termina bem antes de a janela fechar, e você não espera nada a mais; e se você fecha o app logo depois de tocar na lixeira, a exclusão sai na hora, como antes.
+- **A mesma foto excluída na foto ampliada de dois pedidos do mesmo local vai ao Waze uma vez só, e o app não diz mais "Outro editor já tinha excluído 👍" sobre a sua própria exclusão.** E o "Desfazer" da segunda, depois de a primeira já ter tirado a foto do mapa, não traz mais a foto de volta pra tela como se ela ainda estivesse lá.
+- **A foto que você aprova num pedido passa a ter a lixeira também na foto ampliada dos outros pedidos do mesmo local.** Antes ela aparecia ali sem a lixeira até você recarregar o app.
+
+**Presença e conversa**
+- **Com a internet lenta, a resposta que chega logo depois de você ler uma conversa não aparece mais como "2 mensagens novas".** Ao fechar a conversa, o app avisa o Waze de que você leu; se a resposta chegava antes de o Waze confirmar (até 45 segundos), a pílula 👥 contava junto a mensagem que você já tinha lido.
+- **Com leitor de tela, a segunda mensagem que não sai seguida também é anunciada** quando o acesso é renovado sozinho e o seu perfil ainda não chegou. Antes a frase "Não enviada." era escrita de novo igual, sem pausa, e alguns leitores de tela não a repetem.
+- **Com leitor de tela, a mensagem que aparecia como "Não enviada, sem sinal." e acaba chegando ao Waze deixa de ser anunciada como não enviada.** A tela já trocava pra "Enviada" quando a confirmação chegava pela conversa, mas o leitor de tela continuava dizendo "Não enviada" a quem percorria a conversa.
+- **Uma resposta na conversa não some mais da pílula 👥 quando uma atualização antiga da lista chega atrasada** (raro: com "Minha área", logo depois de abrir o app). Antes a lista mais antiga punha de volta as conversas de antes da resposta, até a próxima atualização.
+
+**"Minha área" e Filtros**
+- **Na primeira vez que você abre o app (e depois do "Sair"), quem só edita na América do Norte ou em Israel não vê mais "Tudo limpo! … Confira o país e a região" enquanto o app descobre onde você edita.** A tela segue carregando até a sua fila aparecer, e o leitor de tela não anuncia mais aquele "Tudo limpo!".
+- **Se o servidor da região onde você edita não responde quando o app pergunta por você, "Minha área" não é mais desligada.** Antes o app dizia "Seu perfil do Waze não tem área de edição", desligava "Minha área" (e ela continuava desligada nas próximas aberturas) e mostrava "Tudo limpo!" na fila do Brasil; religar ou atualizar repetia a mesma frase até reabrir o app. Agora a tela diz "Falha ao carregar", e o "Tentar de novo" (ou o ↻) pergunta de novo só a esse servidor. Sem "Minha área", o ↻ e o "Verificar novamente" também perguntam de novo, e a fila vai pro país onde você edita assim que ele responde. Vale também quando o acesso é renovado pelo WME com outra conta.
+- **Com "Minha área" e uma região escolhida nos Filtros, um erro passageiro de acesso na pergunta pelas suas áreas não deixa mais "Falha ao carregar" na tela.** Antes, logo depois do aviso "Conexão instável — sua sessão continua válida", a tela continuava em "Falha ao carregar … Verifique sua conexão" até você tocar em "Tentar de novo". Agora a fila aparece sozinha, cerca de um segundo depois.
+
+**Entrada e conta**
+- **Se você cola os cookies enquanto um link de pareamento (ou um código) ainda está entrando, o app espera esse login terminar.** Se o código entrar, você já está no app e os cookies colados não criam uma segunda entrada; se não entrar, os cookies seguem. Antes as duas entradas davam certo, a segunda trocava a primeira, e uma delas continuava valendo no servidor depois do "Sair".
+- **Se você dá "Sair" enquanto a extensão está entrando ou renovando o seu acesso, a entrada que ela traz depois é apagada no servidor.** Antes ela era só ignorada e continuava valendo lá por até 21 dias.
+- **Voltar a uma aba com os cookies colados (ou um código digitado) na tela de entrada não faz mais a extensão entrar por cima.** Antes, ao voltar, ela entrava com a conta do WME e o que você estava colando sumia (ou o "Acesso restrito" abria por cima dele).
+- **Com o app em duas abas, a aba que caiu na tela de entrada não usa mais, escondido, o acesso da outra.** Isso acontecia quando chegava uma resposta atrasada do "Ver quem está no app", ou ao tocar em "Conectar outro aparelho" enquanto o acesso era renovado — agora aparece "Não deu pra gerar o código". Antes um código era criado com o acesso da outra aba, e o "Sair" de lá fechava o "Colar cookies" desta.
+- **O "Sair" dado numa aba agora limpa também a outra aba que tinha caído na tela de entrada**: a fila, o pedido que estava na tela, o rascunho da conversa e o registro de chamadas da conta que saiu não ficam mais guardados nela, e voltar a ela não faz a extensão entrar de novo. O "Colar cookies" que você estiver preenchendo lá continua como está.
+- **Quando o app abre sem conseguir falar com o servidor e o sinal volta em menos de um minuto, ele busca o seu perfil logo na volta.** Antes ele só tentava de novo depois de um minuto, no seu próximo gesto: até lá faltavam o seu nome, os recursos de L6, a recusa automática e a lista de quem está no app, e o "Ver quem está no app" desligado sem sinal não chegava ao WME.
+- **O "Ver quem está no app" desligado logo depois de entrar, antes de o app saber de quem é a conta, vale pra conta que entrou.** Antes, se o aparelho guardava outra conta, o pedido era jogado fora: o interruptor ficava desligado e você seguia visível no WME.
+
+**Disponível offline**
+- **Com o app em duas abas e "Disponível offline" ligado, o pedido que você decidiu numa aba não volta mais como card quando a outra reabre sem sinal.** Antes ele voltava, e decidi-lo de novo mandava uma segunda decisão, diferente, ao Waze.
+- **Com "Minha área" ligada, a fila guardada no aparelho abre também quando a internet não responde ou o servidor está fora do ar**, como já abria sem "Minha área". Antes a tela ficava em "Falha ao carregar", e o "Tentar de novo" repetia o mesmo, com a fila preparada no aparelho sem uso. Terminando essa fila sem a internet voltar, a tela diz "Falha ao carregar", e não "Tudo limpo!". O card de foto cuja foto não veio diz "A foto precisa de sinal" e trava ✕ e ✓, como sem "Minha área".
+- **Com o app aberto em duas abas, a preparação do "Disponível offline" numa aba não apaga mais o mapa dos pedidos que só a outra tem.** Antes, com o sinal voltando nas duas ao mesmo tempo, parte dos pedidos guardados abria sem mapa sem sinal, com a linha dizendo "Pronto".
+- **Quando o sinal volta com decisões esperando envio, a preparação do "Disponível offline" roda uma vez só.** Antes rodava duas vezes seguidas, gastando dados à toa.
+
+**Histórico, conquistas e Ajuda**
+- **Uma conquista (ou uma patente nova) que acende com a aba Histórico aberta na sua frente conta como vista.** Antes, depois de fechar, o ponto no botão de Filtros continuava aceso ("conquista nova"), e o toque seguinte em Filtros levava de novo ao Histórico pra mostrar o que você já tinha visto. Com o app aberto em duas abas, a aba que está no fundo não apaga o ponto da outra: a conquista conta como vista quando você volta à aba que a mostra.
+- **Os Filtros abertos antes de o seu perfil carregar se atualizam inteiros quando ele chega.** Pelo atalho "Filtros" do ícone do app, ou com a internet lenta, as abas Preferências e Histórico ficavam como estavam até fechar e abrir de novo: o "Permitir desfazer ações" seguia travado com "Disponível depois de você logar e o app carregar seu perfil.", a vitrine de conquistas não mostrava as de nível 6 (o "Curador" e o "Corretor", mesmo já ganhos), e a lista de autores ficava sem o "Rejeitar sozinho os próximos deste autor".
+- **O "Ver de novo 'Como funciona'" da Ajuda, aberto logo depois de um ✕ ou ✓, envia a decisão na hora e abre sem a faixa do Desfazer por cima.** Antes, no iPhone SE e com o celular deitado, a faixa cobria o "Entendi", e tocar ali desfazia a decisão por trás do aviso, sem nada ir ao Waze.
+
+**Modo Desenvolvedor**
+- **O relatório não confere mais o envio da medição de acesso da Cloudflare como se fosse um arquivo do app.** A triagem dos relatórios feitos no app publicado dizia "o servidor respondeu 405 em 1 arquivo" sem haver problema nenhum. Os relatórios já enviados também são lidos sem ele.
+- **A captura automática feita no meio do arraste de um card não acusa mais como "escondido" o número de decisões esperando envio que aparece durante o gesto.** O botão do modo dev só sai de cima dele quando o dedo solta, de propósito.
+
+**Manuais**
+- **README (free tier do Cloudflare)**: a conta das leituras do KV diz quanto custam as ações de foto, em vez de "1 por ação" (os números na frase do README, conferidos contra o servidor).
+
+### Ficou pra decisão
+- **Sem "Minha área", quando o servidor da região onde você edita não responde, a tela diz "Tudo limpo! … Confira o país e a região"**, embora não tenha chegado resposta. O "Verificar novamente" pergunta de novo, e a fila vai pro país certo quando o servidor responde.
+- **O "Falha ao carregar … Verifique sua conexão" aparece também quando quem falhou foi o servidor do Waze**, com a sua conexão boa. Corrigir pede uma frase nova.
+
 ## v2026.10.07-03
 
 Décima quarta rodada da auditoria. Depois da v2026.10.07-02, conferida em produção com duas contas, sete auditores revisaram o app de novo. O achado mais grave: com a internet lenta, o app podia travar por inteiro no fim do treino. Os consertos cobrem também a foto ampliada, o "Marcar todos" e o app aberto em duas abas, a presença e a conversa, "Minha área" e os Filtros, a entrada e a conta, o "Disponível offline" e o modo dev.

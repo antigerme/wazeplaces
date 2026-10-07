@@ -237,7 +237,7 @@ function montarMarcarTodos({ fila, resolvidos = [], pedaco = constante('LOTE_LID
     verificandoSessao: false, conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 },
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     API: {
-      getRegion: () => 'row', getSession: () => 'tok-A',
+      getRegion: () => 'row', getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; },
       markAsReadBatch: async (itens) => {
         chamadas.push('lote:' + itens.map((i) => i.venueID).join('+'));
         const n = chamadas.filter((c) => c.startsWith('lote:')).length;
@@ -281,7 +281,7 @@ function montarMarcarTodos({ fila, resolvidos = [], pedaco = constante('LOTE_LID
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
   const h = montar([...MEMORIA, 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'avisoDaTrava',
-    'marcarEmAndamento', 'marcaDaSessao', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
+    'marcarEmAndamento', 'marcaDaSessao', 'marcaDestaAba', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
     'handleUnauthorized', 'refazerDepoisDo401', 'openBatchReadConfirm', 'handleBatchMarkRead'], deps);
   // O lote, e a conferência que ele (ou o código de antes, sem esperá-la) abriu.
   const marcarTodos = async () => {
@@ -451,7 +451,7 @@ function montarPassada({ saida, fila = [] }) {
       return setTimeout(fn, ms === RITMO ? 0 : ms);
     },
     API: {
-      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A',
+      getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; },
       rejectPlace: (v) => {
         envios.push({ v, conferindo: deps.verificandoSessao, epoca: deps.epocaDaSessao });
         const resposta = deps.proxima ? Promise.resolve(deps.proxima(v)) : new Promise((ok) => noAr.push({ v, ok }));
@@ -464,7 +464,7 @@ function montarPassada({ saida, fila = [] }) {
       getProfile: () => new Promise((ok) => { sonda = ok; }),
     },
   };
-  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'chaveDoPedido', 'marcaDaSessao', 'contaAgora',
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
     'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
     'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',

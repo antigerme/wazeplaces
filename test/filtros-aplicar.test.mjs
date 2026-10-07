@@ -219,7 +219,7 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     esperaDosFiltros: { regiao: false, gps: false },
     posicaoGps, posicaoDoModal: null, pedidoDePosicao: 0, referenciasDoPerfil: referencias,
     estadoDaDicaDeOrdem: null, cargaDeEstados: 0, cargaDePaises: 0,
-    epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, lugarDoPedidoDoPerfil: null,
+    epocaDaSessao: 0, filaEsperaPerfil: false, perfilPedidoEm: 0, cargasDoPerfil: 0, lugarDoPedidoDoPerfil: null,
     editaveisPorServidor: { conta: null, lidos: {} },
     listasDePaisesNoAr: new Map(),
     // As listas que CHEGARAM, por região (R9-6-01).
@@ -1967,6 +1967,52 @@ test('R9-6-03: quem só edita noutro servidor — nenhuma busca sai no servidor 
   if (m.soltar.il) { m.soltar.il(); await tique(10); }
   assert.deepEqual([m.p.estado.regiao, m.p.estado.pais], ['na', 235], 'PRÉ-CONDIÇÃO: o perfil não levou a fila pro servidor da área');
   assert.deepEqual(m.buscas, ['na'], `a fila saiu em ${m.buscas} — a busca no servidor errado, antes da certa`);
+});
+
+// ═══ R12-6-01 · o 401 passageiro na pergunta ao servidor APLICADO ═══════════
+// (incompleto do R11-6-01, auditoria da rodada 12). Com "Minha área" e a NA
+// aplicada à mão, a busca espera a caixa de lá (`filaEsperaPerfil`), e a
+// pergunta ao `/Session` da NA leva um 401 passageiro: vai à conferência, e a
+// sonda responde — ela pergunta o perfil na região de AGORA, a NA, e o anota — e
+// o app diz "sua sessão continua válida". A recomposição do alarme falso saía
+// cedo pela regra do R9-6-03 (fila esperando + perfil na mão), feita pro caso em
+// que a DECISÃO do lugar refaz a fila; aqui não havia decisão nenhuma no ar, e a
+// tela ficava em "Falha ao carregar … Verifique sua conexão" até o "Tentar de
+// novo" (MEDIDO no navegador, nos dois motores: de 0,39 a 15,4 s). Aqui a sonda,
+// o perfil e a recomposição rodam DE VERDADE, com o perfil da ROW já na mão.
+test('R12-6-01: o 401 passageiro na pergunta à NA aplicada — a sonda confirma a sessão e lê a NA, e a busca que esperava sai sozinha, uma vez', async () => {
+  const perfis = { na: { id: 1, editableCountryIDs: [235], areas: [{ type: 'drive', bbox: CAIXA_NY }], managedAreas: [] } };
+  const PERFIL_DA_ROW = { id: 1, editableCountryIDs: [30], areas: [{ type: 'drive', bbox: CAIXA_SP }], managedAreas: [] };
+  const naNa = (m) => {
+    m.p.estado.regiao = 'na';                       // Filtros › NA › Aplicar: a busca espera a caixa de lá
+    m.p.estado.pais = 235;
+    m.p.AppState.profile = { ...PERFIL_DA_ROW };    // o perfil da abertura, lido na ROW
+  };
+  const m = paginaDaSondaComAFilaEsperando({ perfis });
+  naNa(m);
+  const conferindo = m.app.handleUnauthorized();
+  assert.ok(m.sonda(), 'PRÉ-CONDIÇÃO: o 401 não armou a sonda do alarme falso');
+  m.sonda()();
+  await conferindo;
+  await tique(10);
+  assert.deepEqual(m.p.log.getProfile, ['na'], `PRÉ-CONDIÇÃO: a sonda não perguntou o perfil na NA: ${m.p.log.getProfile}`);
+  assert.ok(m.p.log.toasts.some((x) => x.includes('toast.sessionKeptAlive')),
+    `PRÉ-CONDIÇÃO: a sonda não confirmou a sessão: ${m.p.log.toasts}`);
+  assert.equal(m.p.AppState._caixaDaMinhaAreaNoAr || null, null,
+    'PRÉ-CONDIÇÃO: uma decisão do lugar ficou no ar (aí o caso é o do R9-6-03, e quem refaz a fila é ela)');
+  assert.deepEqual(m.buscas, ['na'],
+    `com a sessão confirmada e a NA já lida, a busca que esperava a caixa de lá não saiu (${m.buscas}) — "Falha ao carregar" até o "Tentar de novo"`);
+  // CONTROLE: a sonda que diz que a sessão MORREU não recompõe nada — é a queda,
+  // não o alarme falso (o instrumento só vê a busca do alarme falso).
+  const c = paginaDaSondaComAFilaEsperando({ perfis });
+  naNa(c);
+  c.p.listas.perfil = () => Promise.resolve({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' });
+  const conferindoC = c.app.handleUnauthorized();
+  c.sonda()();
+  await conferindoC;
+  await tique(10);
+  assert.ok(c.app.chamou.includes('derrubarSessao'), `CONTROLE: a sonda que levou 401 não derrubou a sessão: ${c.app.chamou}`);
+  assert.deepEqual(c.buscas, [], `CONTROLE: a sessão caiu e a fila foi buscada assim mesmo: ${c.buscas}`);
 });
 
 // ═══ R9-6-04 · as ÁREAS do perfil são POR SERVIDOR, como os editáveis ═══════

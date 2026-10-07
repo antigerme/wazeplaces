@@ -80,6 +80,8 @@ function montarPainel({ modalAberto = true, abaNaTela = true } = {}) {
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30',
     renderHistory: () => { desenhos.n++; }, garantirLinhaDeBaseDasConquistas: () => {},
     textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
+    // O que acende no painel na tela fica visto (R12-7-01, test/treino-auditoria-r12): aqui não é o assunto.
+    verConquistasNaTela: () => {},
   };
   const api = montar(['historicoNaTela', 'agendarRedesenhoDoHistorico', 'copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory',
     'recordHistory'], deps,
