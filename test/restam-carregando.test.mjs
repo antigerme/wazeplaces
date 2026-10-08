@@ -97,6 +97,10 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     // E a decisão do lugar que ficou sem resposta (R12-6): aqui, nenhuma pendente.
     refazerDecisaoSemResposta: () => null,
     showLoading: (v) => tela.push(v ? 'esqueleto' : 'sem-esqueleto'), removeCurrentCardEl: () => {},
+    // A barra do foco no autor, que sai com o card no esqueleto (R14-2-04).
+    renderFocoAutor: () => {},
+    // A sessão da busca (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
     showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
     abrirGuardadaDepoisDaFalha: async () => false,
     // O teto da espera pelo perfil da fila vazia (R13-6-04), quando existe.

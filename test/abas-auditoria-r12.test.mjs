@@ -342,6 +342,8 @@ function abaComBusca(nav, { aparelho, token = 'tok-x' }) {
     offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
     Treino: { ativo: false }, console: { error: () => {} },
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), ORDEM_PADRAO: 'newest', filaEsperaPerfil: false,
+    // A sessão de quando a busca saiu (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
     BroadcastChannel: nav.BroadcastChannel, POUSO_NA_MEMORIA_MS,
     safeLS: { get: (k) => (aparelho.has(k) ? aparelho.get(k) : null), set: (k, v) => aparelho.set(k, String(v)),
       remove: (k) => aparelho.delete(k) },

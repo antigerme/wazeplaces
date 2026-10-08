@@ -358,6 +358,8 @@ function montarBusca() {
     aprovacoesDaQueda: new Map(), enviarPendenciasDoLightbox: () => {}, devolverPedidoRecusado: () => {},
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
     devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
+    // A sessão da busca (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
   };
   const fontes = [
     'let filaDeOnde = null; let rebuscasAuto = 0; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false; let filaEsperaPerfil = false;',

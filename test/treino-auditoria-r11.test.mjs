@@ -157,6 +157,9 @@ function montarBusca({ myArea = false, perfil = true, perfilNoAr = false, caixaN
     caixaDaMinhaAreaEm: () => [-39, -13.5, -38, -12.5], lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     ultimaBuscaFalhouPorRede: false, buscaSemResposta: false, rebuscasAuto: 0, filaEsperaPerfil: false,
     buscaEsperaOPerfil: false, filaDeOnde: null,
+    // A sessão da busca: o buraco negro é OUTRO a cada leitura, e a busca a daria
+    // por caída (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
     fetchNextPage: () => {
       contagem.chamadas++;
       if (contagem.chamadas > TETO_DO_LACO) { contagem.girou = true; AppState.hasMore = false; }

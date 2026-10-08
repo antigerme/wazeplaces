@@ -1025,7 +1025,20 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // que atravessou a sessão sai JÁ, sem esperar o perfil (K2/K8).
             conhecerContaDoLogin(d.conta);
             if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
-            startFetching();
+            // A fila NOVA é buscada aqui. A que ATRAVESSOU a queda (`manterFila`)
+            // não: quem a recompõe é o `rebuscarDepoisDeFalha` da renovação (ver
+            // `derrubarSessao`), que lê o que a queda deixou — a busca que levou o
+            // 401 (`loadError`), a reposição que ficou no meio. Este
+            // `startFetching` cru rodava ANTES dele e zerava o `loadError` com o
+            // `hasMore` falso da busca 401: ele já não via a falha, a fila nunca
+            // era buscada com a sessão nova, e a tela dizia "Tudo limpo!" com a
+            // fila pendente no Waze — no caminho MAIS COMUM da renovação, abrir o
+            // app com a sessão salva vencida e a extensão logada no WME; na
+            // reposição com card, ainda com confete e a conquista "Tudo limpo"
+            // (MEDIDO no navegador, nos dois motores; igual desde o #252;
+            // auditoria da rodada 14, R14-1-01). Com card na tela e nada a
+            // recompor, o card fica — o `showMainScreen` já o destravou.
+            if (!manterFila) startFetching();
             esvaziarFilaDeSaida();   // o que ficou esperando a sessão sai agora
             fim(true);
         }
@@ -13193,6 +13206,9 @@ function fetchNextPage() {
     // treino, ainda no ar, voltaria a valer. Ela segue descartada pelo número de
     // vezes que o treino abriu: quem busca de novo é o `sair()`.
     const treinoAntes = Treino.entradas;
+    // E a SESSÃO: a queda não refaz a fila (ela a mantém pra renovação), então a
+    // época da fila não muda — ver o descarte logo depois do pedido.
+    const sessaoDaBusca = epocaDaSessao;
     const filters = {
         unreadOnly: AppState.filters.unreadOnly !== false
     };
@@ -13261,6 +13277,27 @@ function fetchNextPage() {
                 const result = await API.fetchPlaces(pagina, filters);
                 // reset (ou o treino) durante o fetch → descarta
                 if (epoch !== AppState.fetchEpoch || treinoAntes !== Treino.entradas) return;
+                // A SESSÃO caiu com a busca no ar (a queda, a conta em dúvida): a
+                // página é de uma sessão que já não vale, e entrava na fila da aba
+                // deslogada — o card montado atrás da tela de entrada e anunciado ao
+                // leitor de tela ("Novo pedido: …", na região que o `showAuthScreen`
+                // acabou de limpar); e a aba que caía antes do perfil ficava com os
+                // pedidos de terceiro DEPOIS do "Sair" da outra (MEDIDO no navegador,
+                // nos dois motores; auditoria da rodada 14, R14-1-02 = R14-4-03 =
+                // R14-8-02). Descartada, como toda resposta em voo que grava depois
+                // de um `await` de rede (`epocaDaSessao`). Sem sessão agora, ela vale
+                // como a busca que levou o 401 (`loadError`, `hasMore` falso): é o
+                // que a renovação lê pra buscar de novo, com a sessão nova
+                // (`rebuscarDepoisDeFalha`, R14-1-01). Com a sessão de volta (a
+                // renovação chegou antes desta resposta), nada a marcar: o laço do
+                // `startFetching` — ou o `maybePrefetch` do próximo card — busca de
+                // novo, já com ela.
+                if (sessaoDaBusca !== epocaDaSessao) {
+                    dlogVoltou('buscar');
+                    dfato('busca.daSessaoQueCaiu', { comSessao: AppState.authenticated });
+                    if (!AppState.authenticated) { AppState.loadError = true; AppState.hasMore = false; }
+                    return;
+                }
                 if (!result.success) {
                     dlogVoltou('buscar');
                     dfato('busca.falhou', { key: result.errorKey || null,
@@ -13623,6 +13660,13 @@ async function startFetching() {
         if (AppState.queue.length > 0 || Treino.ativo) return;
     }
 
+    // A SESSÃO caiu durante a busca: nada se desenha nem se anuncia — nem o card,
+    // nem o "Tudo limpo!", que o `showNoPlaces` diz na região viva que o
+    // `showAuthScreen` acabou de limpar (auditoria da rodada 14, R14-1-02). A
+    // busca da sessão que caiu já não pôs nada na fila (ver `fetchNextPage`): a
+    // tela fica no carregando, e quem a desenha é a renovação (o
+    // `rebuscarDepoisDeFalha`) ou a tela de entrada.
+    if (!AppState.authenticated) return;
     showLoading(false);
     // O "Restam" das esperas acima ("…", `buscaEsperaOPerfil`) volta a dizer o
     // número: o `showNoPlaces` não o redesenha, e quem desenhou por último foi a

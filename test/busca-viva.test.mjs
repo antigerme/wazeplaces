@@ -114,6 +114,9 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     // A fila que espera o perfil ("Minha área"): aqui, nenhuma (R9-6-03 em
     // test/filtros-aplicar.test.mjs).
     filaEsperaPerfil: false,
+    // A sessão da busca: aqui, nenhuma queda (a que cai no meio é descartada,
+    // R14-1-02 em test/busca-auditoria-r14.test.mjs).
+    epocaDaSessao: 0,
   };
   const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage']

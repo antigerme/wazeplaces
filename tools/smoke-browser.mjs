@@ -2239,6 +2239,190 @@ for (const status of [404, 403]) {
   await ctx.close();
 }
 
+// ── A BUSCA atravessando a QUEDA da sessão (R14-1-01, R14-1-02) ─────────────
+//
+// R14-1-01 (auditoria da rodada 14, a mais grave dela; igual desde o #252):
+// abrir o app com a sessão salva VENCIDA e a extensão logada no WME — o caminho
+// mais comum da renovação. A busca da abertura leva o 401, a sessão cai e a
+// extensão a renova em silêncio; a renovação chamava um `startFetching` cru, que
+// apagava a falha da busca, e a recomposição (`rebuscarDepoisDeFalha`) já não
+// via o que recompor: "Tudo limpo!", com a fila inteira pendente no Waze. Aqui a
+// abertura de VERDADE, com a API de mentira (a sessão salva morta, a nova viva)
+// e a extensão de mentira respondendo pela ponte (`precisa-de-sessao` →
+// `aguarde` + `sessao`). O que se mede é o que a pessoa vê: a fila chega, e o
+// "Tudo limpo!" não aparece em momento NENHUM (um observador conta cada vez que
+// o painel aparece). CONTROLE: a mesma abertura na ordem do app de antes (o
+// `startFetching` antes da recomposição, injetado na página) — o painel TEM de
+// aparecer, senão o instrumento não enxerga o defeito.
+//
+// R14-1-02: a busca que estava no ar quando a sessão CAI responde depois, com a
+// aba já na tela de entrada. Ela entrava na fila: o card montado atrás da tela de
+// entrada e "Novo pedido: …" na região viva que o `showAuthScreen` acabou de
+// limpar. CONTROLE: a mesma resposta ANTES da queda entra (é o desenho: a queda
+// mantém a fila pra renovação), e o instrumento enxerga o card no DOM.
+{
+  const sessaoMorta = { success: false, error: 'Sessão expirada', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' };
+  const pedidoR = (n) => ({ venueID: 'vr' + n, updateRequestID: 'ur' + n, purType: 'NEW_PLACE', updateTypeKey: 'NEW_PLACE',
+    name: `Local da renovação ${n}`, categories: ['PARK'], address: '', createdBy: 'wazer' + n, creatorId: 300 + n,
+    imageUrls: [], mapa: null, lat: -12.9, lon: -38.3, dateAdded: Date.UTC(2026, 9, 7, 12, 0, 0) - n * 60000 });
+  const CINCO = [1, 2, 3, 4, 5].map(pedidoR);
+  // A API de mentira: as sessões vivas (`vivas`), e a busca segurada quando o
+  // teste quer (`segurar.promessa`). A presença responde sempre (o assunto aqui é
+  // a busca, e a sentinela do 401 da presença fica quieta).
+  const montarApi = async (ctx, { vivas, segurar = {} }) => {
+    const rede = [];
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch { corpo = {}; }
+      rede.push({ nome, token: corpo.sessionToken || null });
+      // A resposta é decidida na CHEGADA, com a sessão de então: a busca segurada
+      // passou pelo servidor antes de a sessão morrer, e volta BOA.
+      let resp;
+      if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'sessao') resp = { success: true };
+      else if (!vivas.has(corpo.sessionToken)) resp = sessaoMorta;
+      else if (nome === 'perfil') {
+        resp = { success: true, visivelNoWme: true, referencias: null, profile: { id: 111, userName: 'ed111', rank: 5,
+          isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] } };
+      } else if (nome === 'buscar-places') resp = { success: true, places: CINCO, hasMore: false, page: 1, total: 5, blocked: 0 };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [{ id: 30, name: 'Brazil' }] };
+      else resp = { success: true };
+      if (nome === 'buscar-places' && segurar.promessa) await segurar.promessa;
+      await r.fulfill({ status: resp.errorCategory === 'unauthorized' ? 401 : 200, contentType: 'application/json',
+        body: JSON.stringify(resp) }).catch(() => {});
+    });
+    return rede;
+  };
+  // A aba, com a sessão salva no aparelho. `extensao`: a ponte de mentira renova
+  // com a sessão nova. `antigaOrdem`: o CONTROLE do R14-1-01. Conta cada vez que
+  // o "Tudo limpo!" aparece e cada anúncio da região viva do card.
+  const abrirAba = async ({ token, vivas, extensao = false, antigaOrdem = false, segurar = {} }) => {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const rede = await montarApi(ctx, { vivas, segurar });
+    await ctx.addInitScript(({ token, extensao, antigaOrdem }) => {
+      try {
+        if (!sessionStorage.getItem('__r14busca')) {
+          sessionStorage.setItem('__r14busca', '1');
+          localStorage.setItem('waze_session_token', token);
+          localStorage.setItem('waze_places_lang', 'pt');
+        }
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+      window.__perguntasDaExtensao = 0;
+      if (extensao) {
+        window.addEventListener('message', (ev) => {
+          const d = ev.data;
+          if (ev.source !== window || !d || d.source !== 'wazeplaces' || d.action !== 'precisa-de-sessao') return;
+          window.__perguntasDaExtensao++;
+          window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+          setTimeout(() => window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: 'tok-r14-nova', conta: '111' },
+            location.origin), 200);
+        });
+      }
+      window.__tudoLimpoApareceu = 0;
+      window.__anuncios = [];
+      document.addEventListener('DOMContentLoaded', () => {
+        const painel = document.getElementById('noMoreCards');
+        let escondido = painel.classList.contains('hidden');
+        new MutationObserver(() => {
+          const agora = painel.classList.contains('hidden');
+          if (escondido && !agora) window.__tudoLimpoApareceu++;
+          escondido = agora;
+        }).observe(painel, { attributes: true, attributeFilter: ['class'] });
+        const regiao = document.getElementById('cardLiveRegion');
+        new MutationObserver(() => { if (regiao.textContent) window.__anuncios.push(regiao.textContent); })
+          .observe(regiao, { childList: true, characterData: true, subtree: true });
+        // O CONTROLE: a ordem do app de antes — o `startFetching` cru da renovação
+        // rodava ANTES da recomposição, e apagava a falha que ela lia.
+        if (antigaOrdem) {
+          const recompor = window.rebuscarDepoisDeFalha;
+          window.rebuscarDepoisDeFalha = function () { startFetching(); return recompor.apply(this, arguments); };
+        }
+      });
+    }, { token, extensao, antigaOrdem });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 120)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    return { ctx, page, rede, erros };
+  };
+
+  // ── R14-1-01: a abertura com a sessão salva morta, e a extensão que renova ──
+  const renovar = async ({ antigaOrdem }) => {
+    const a = await abrirAba({ token: 'tok-r14-velha', vivas: new Set(['tok-r14-nova']), extensao: true, antigaOrdem });
+    // O FIM: a sessão nova na memória, nada no ar, e a tela decidida (o card ou o painel).
+    const fim = await esperarNaPagina(a.page, () => typeof API !== 'undefined' && API.sessionToken === 'tok-r14-nova'
+      && !extPerguntando && !AppState.fetching && AppState.inFlightActions === 0
+      && (!!AppState.currentPlace || window.__tudoLimpoApareceu > 0), 15000);
+    const r = await a.page.evaluate(() => ({ fila: AppState.queue.length, tudoLimpo: window.__tudoLimpoApareceu,
+      perguntas: window.__perguntasDaExtensao, card: !!document.querySelector('#cardStack .place-card:not(.card-fundo)') }));
+    const buscas = a.rede.filter((x) => x.nome === 'buscar-places').map((x) => x.token);
+    const erros = a.erros.slice();
+    await a.ctx.close();
+    return { fim: fim.ok, ...r, buscas, erros };
+  };
+  const r1 = await renovar({ antigaOrdem: false });
+  checa(r1.fim, 'renovação (R14-1-01): a abertura não chegou ao fim (a sessão nova, nada no ar)', JSON.stringify(r1));
+  checa(r1.buscas[0] === 'tok-r14-velha' && r1.perguntas >= 1,
+    'renovação (R14-1-01): PRÉ-CONDIÇÃO — a busca da abertura não saiu com a sessão salva morta, ou a extensão não foi perguntada',
+    JSON.stringify(r1));
+  checa(r1.buscas.includes('tok-r14-nova') && r1.fila === 5 && r1.card,
+    'renovação (R14-1-01): a fila não foi buscada com a sessão nova — a pessoa fica sem os pedidos pendentes no Waze', JSON.stringify(r1));
+  checa(r1.tudoLimpo === 0, 'renovação (R14-1-01): "Tudo limpo!" apareceu no meio da renovação, com a fila pendente no Waze',
+    JSON.stringify(r1));
+  checa(r1.erros.length === 0, 'renovação (R14-1-01): erro de JS', r1.erros[0]);
+  const c1 = await renovar({ antigaOrdem: true });
+  checa(c1.tudoLimpo > 0 && !c1.buscas.includes('tok-r14-nova'),
+    'renovação (R14-1-01): CONTROLE — na ordem do app de antes, o "Tudo limpo!" tinha de aparecer sem a busca da sessão nova; a medida não enxerga o defeito',
+    JSON.stringify(c1));
+
+  // ── R14-1-02: a busca do ↻ responde DEPOIS da queda (sem extensão) ──
+  const depoisDaQueda = async ({ soltarAntes }) => {
+    const vivas = new Set(['tok-r14-a']);
+    const segurar = {};
+    const a = await abrirAba({ token: 'tok-r14-a', vivas, segurar });
+    await esperarOuExplodir(a.page, () => AppState.authenticated && !!AppState.currentPlace && !AppState.fetching,
+      'a abertura com a fila (R14-1-02)');
+    segurar.promessa = new Promise((ok) => { segurar.soltar = ok; });
+    await a.page.evaluate(() => document.getElementById('refreshBtn').click());
+    await esperarOuExplodir(a.page, () => AppState.fetching === true, 'a busca do ↻ no ar (R14-1-02)');
+    if (soltarAntes) {
+      segurar.soltar();
+      await esperarOuExplodir(a.page, () => !AppState.fetching && !!AppState.currentPlace, 'a busca do ↻ responder antes da queda');
+    }
+    // A sessão morre no servidor, e a conferência a derruba (sem extensão: a tela de entrada).
+    vivas.delete('tok-r14-a');
+    await a.page.evaluate(() => { handleUnauthorized(); });
+    await esperarOuExplodir(a.page, () => !extPerguntando && !document.getElementById('authScreen').classList.contains('hidden'),
+      'a aba cair na tela de entrada (R14-1-02)', 12000);
+    const anunciosNaQueda = await a.page.evaluate(() => window.__anuncios.length);
+    if (!soltarAntes) {
+      segurar.soltar();
+      await esperarNaPagina(a.page, () => !AppState.fetching, 5000);
+    }
+    await dormir(300);
+    const r = await a.page.evaluate((n0) => ({ fila: AppState.queue.length,
+      cardNoDom: !!document.querySelector('#cardStack .place-card:not(.card-fundo)'),
+      regiaoViva: document.getElementById('cardLiveRegion').textContent,
+      anunciosDepois: window.__anuncios.slice(n0), entrada: !document.getElementById('authScreen').classList.contains('hidden') }),
+    anunciosNaQueda);
+    const erros = a.erros.slice();
+    await a.ctx.close();
+    return { ...r, erros };
+  };
+  const r2 = await depoisDaQueda({ soltarAntes: false });
+  checa(r2.entrada && r2.fila === 0 && !r2.cardNoDom,
+    'busca depois da queda (R14-1-02): os pedidos da busca de antes da queda entraram na fila da aba deslogada (o card montado atrás da tela de entrada)',
+    JSON.stringify(r2));
+  checa(r2.anunciosDepois.length === 0 && r2.regiaoViva === '',
+    'busca depois da queda (R14-1-02): a região viva anunciou um pedido na tela de entrada', JSON.stringify(r2));
+  checa(r2.erros.length === 0, 'busca depois da queda (R14-1-02): erro de JS', r2.erros[0]);
+  const c2 = await depoisDaQueda({ soltarAntes: true });
+  checa(c2.fila === 5 && c2.cardNoDom && c2.anunciosDepois.length === 0 && c2.regiaoViva === '',
+    'busca depois da queda (R14-1-02): CONTROLE — a resposta de ANTES da queda devia ficar na fila (o card no DOM), sem anúncio depois da queda; a medida não enxerga o card',
+    JSON.stringify(c2));
+}
+
 // ── O local da divisa não entra duas vezes ────────────────────────────────
 //
 // MEDIDO na fila real do Brasil (2026-09-25): o Waze pagina por PEDIDO, mas cada

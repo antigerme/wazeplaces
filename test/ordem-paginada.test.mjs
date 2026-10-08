@@ -110,6 +110,8 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), refazerPerfilSeFaltar: () => {},
     limparFocoAutor: () => {}, removeCurrentCardEl: () => {},
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace && AppState.currentPlace.venueID)); },
+    // A sessão da busca (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
   };
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue', 'manterFocoNaFrente', 'assinaturaDeBusca', 'reordenarFilaNaTela'];

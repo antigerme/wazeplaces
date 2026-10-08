@@ -90,6 +90,8 @@ function montar({ fila = [], naTela = true, pendentesNoWaze = [], painel = false
     pedidosEmAndamento: new Set(), console: { error: () => {} }, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     document: { getElementById: (id) => (id === 'noMoreCards' ? { classList: { contains: (c) => painelClasses.has(c) } } : null) },
     ORDEM_PADRAO: 'newest', refazerPerfilSeFaltar: () => {},
+    // A sessão da busca (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
   };
   const nomes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'tirarDaFilaDeSaida',
     'marcarNaSaida', 'handleActionResult', 'registrarPousoDeSaida', 'semOsJaDecididos', 'registrarEntradaNaFila',
