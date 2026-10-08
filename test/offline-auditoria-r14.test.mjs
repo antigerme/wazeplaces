@@ -9,22 +9,23 @@
 //  · R14-4-02 — o pedido que a OUTRA aba decidiu, com o aviso dele ESPERANDO a
 //    conta desta aba, ia pra fila guardada e a poda apagava a prova do pouso:
 //    reaberto sem rede, ele voltava como card;
+//  · R14-4-04 — a gravação da fila guardada não conferia a ÉPOCA do offline
+//    depois de abrir a base: o "Sair" de OUTRA aba apaga a base, e a gravação
+//    que já estava a caminho (a resposta de uma busca chegou antes do aviso) a
+//    abria de novo — abrir CRIA a base — e gravava nela os pedidos de terceiros,
+//    com a aba já sem sessão;
 //  · R14-4-05 — a sentinela `tokenNaoPersiste` do diagnóstico acusava
 //    "navegação privada, cookies bloqueados ou armazenamento cheio" quando quem
 //    tirou o token do aparelho foi a queda da OUTRA aba (sessões diferentes);
 //  · R14-4-06 — o relatório não explicava a linha do offline: dizia `resultado
 //    pronto` com a linha em "Ainda não preparado" (o carimbo da fila guardada e
-//    o que a última preparação cobriu não iam no arquivo);
-//  · R14-4-04 — a gravação da fila guardada não conferia a ÉPOCA do offline
-//    depois de abrir a base: o "Sair" de OUTRA aba apaga a base, e a gravação
-//    que já estava a caminho (a resposta de uma busca chegou antes do aviso) a
-//    abria de novo — abrir CRIA a base — e gravava nela os pedidos de terceiros,
-//    com a aba já sem sessão.
+//    o que a última preparação cobriu não iam no arquivo).
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, sobre uma base do
 // IndexedDB de mentira que se comporta como a de verdade no que importa aqui: a
 // abertura leva uma tarefa, a transação só fecha depois de TODOS os pedidos dela
-// (inclusive os feitos no `onsuccess` de outro), e apagar a base apaga tudo.
+// (inclusive os feitos no `onsuccess` de outro), uma transação por vez, e apagar
+// a base apaga tudo.
 // Cada teste tem o CONTROLE que dá o resultado oposto, e foi visto REPROVANDO
 // com o conserto desfeito (sabotagem no relatório do lote 18).
 import test from 'node:test';
