@@ -1309,7 +1309,9 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
     offlineLigado: () => true, OFFLINE_STORE: 'fila', filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     offlineEpoca: 0, safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
+      // A gravação lê os pedidos da fila guardada e a janela antes (R14-4-01): base vazia.
+      const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); },
+        get: () => { const r = {}; setTimeout(() => { if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
   };

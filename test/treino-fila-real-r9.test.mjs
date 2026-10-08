@@ -628,9 +628,11 @@ function montarInterruptor() {
     offlineEsquecer: () => {}, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }),
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     offlinePodarPousos: () => {}, dfato: () => {},
-    // A base do offline: o `put` grava, e a transação fecha num tique.
+    // A base do offline: o `put` grava, e a transação fecha num tique. A gravação
+    // lê os pedidos da fila guardada e a janela antes (R14-4-01).
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); } }) };
+      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base[k] === undefined ? undefined : JSON.parse(JSON.stringify(base[k])); if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
     t: (k, v) => (v ? k + JSON.stringify(v) : k),
@@ -649,6 +651,9 @@ test('R9-4-02: ligar o "Disponível offline" SEM SINAL com o treino aberto guard
     if (comTreino) m.app.Treino.entrar();
     m.app.offlineAoMudarInterruptor(true);
     await tiques(5);
+    // A gravação lê a base antes de gravar (R14-4-01) e leva mais de uma tarefa:
+    // espera a CONDIÇÃO, com teto — nunca um prazo fixo.
+    for (let i = 0; i < 500 && !m.base.fila; i++) await new Promise((ok) => setTimeout(ok, 2));
     m.app.atualizarLinhaDoOffline(0, 0);
     const n = /\{"n":(\d+)\}/.exec(m.linha());
     return { linhaN: n ? Number(n[1]) : null, guardados: m.base.fila ? ids(m.base.fila.places) : [],

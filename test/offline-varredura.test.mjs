@@ -202,7 +202,9 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
       return {
         close() {},
         transaction: () => {
-          const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
+          // A gravação lê os pedidos da fila guardada e a janela antes (R14-4-01): base vazia.
+          const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); },
+            get: () => { const r = {}; setTimeout(() => { if (r.onsuccess) r.onsuccess(); }); return r; } }) };
           return tx;
         },
       };
@@ -393,7 +395,8 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
   const deps = {
     AppState, Treino: { ativo: false }, offlineLigado: () => true, OFFLINE_STORE: 'fila',
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: () => { setTimeout(() => tx.onabort && tx.onabort()); } }) };
+      const tx = { objectStore: () => ({ put: () => { setTimeout(() => tx.onabort && tx.onabort()); },
+        get: () => { const r = {}; setTimeout(() => { if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
     offlinePodarPousos: () => {}, dfato: () => {},
@@ -564,6 +567,12 @@ function gatilhosDaVarredura(janela) {
   return { f, st, rede, total };
 }
 const assentar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
+// A gravação da fila que ninguém espera (a da busca): pela CONDIÇÃO, com teto —
+// a gravação lê a base antes de gravar (R14-4-01) e leva mais de uma tarefa.
+const ateQueNaBase = async (cond, ms = 2000) => {
+  const fim = Date.now() + ms;
+  while (!cond() && Date.now() < fim) await new Promise((r) => setTimeout(r, 2));
+};
 
 test('R4-O3: preparação PARCIAL na MESMA janela é retomada pelo próximo gatilho — a promessa da linha', async () => {
   const janela = 1492263;
@@ -1011,6 +1020,8 @@ async function prepararO1(opcoes = {}) {
   const a = pagina({ api: () => TRES(), ...opcoes });
   await a.app.startFetching();
   await assentar();
+  // A gravação da busca não é esperada por ela (sai calada): espera a CONDIÇÃO, com teto.
+  if (opcoes.offline !== false) await ateQueNaBase(() => a.base.has('fila'));
   assert.equal(a.base.has('fila'), opcoes.offline !== false, 'PRÉ-CONDIÇÃO: a fila da busca não foi (ou foi) gravada');
   return pagina;
 }
@@ -1118,6 +1129,7 @@ async function prepararMinhaArea({ regiao = 'row', editaveis = LIDO_ROW } = {}) 
   const a = pagina({ api: () => TRES(), profile: PERFIL_AREA, editaveis, regiao });
   await a.app.startFetching();
   await assentar();
+  await ateQueNaBase(() => a.base.has('fila'));
   assert.ok(a.AppState.filters.myArea, 'PRÉ-CONDIÇÃO: o filtro guardado não é "Minha área"');
   assert.deepEqual(a.AppState.queue.map((p) => p.venueID), ['v1', 'v2', 'v3'], 'PRÉ-CONDIÇÃO: a busca de "Minha área" com rede não trouxe a fila');
   assert.equal(a.base.has('fila'), true, 'PRÉ-CONDIÇÃO: a fila da busca de "Minha área" não foi gravada');
@@ -1428,18 +1440,25 @@ function aparelhoDaLinha() {
   const base = new Map();
   const relogio = { agora: 1492385 * 1200000 + 1000 };     // começo de uma janela
   const fila = { falhar: false, segurar: false, presas: [] };
+  // A transação fecha quando NÃO sobra pedido — inclusive o `put` feito no
+  // `onsuccess` de um `get`, como a de verdade (a gravação lê antes de gravar,
+  // R14-4-01) —, e a abortada não grava mais nada.
   const offlineDB = async () => ({
     close() {},
     transaction: () => {
       const tx = {};
-      const fim = () => setTimeout(() => tx.oncomplete && tx.oncomplete());
+      let pendentes = 0, fechou = false, abortou = false;
+      const fechar = () => { if (!fechou && !abortou) { fechou = true; setTimeout(() => tx.oncomplete && tx.oncomplete()); } };
+      const pronto = () => { if (--pendentes === 0) fechar(); };
       tx.objectStore = () => ({
         put: (v, k) => {
-          if (k === 'fila' && fila.falhar) { setTimeout(() => tx.onabort && tx.onabort()); return; }
+          if (abortou) return;
+          if (k === 'fila' && fila.falhar) { abortou = true; setTimeout(() => tx.onabort && tx.onabort()); return; }
+          pendentes++;
           base.set(k, JSON.parse(JSON.stringify(v)));
-          if (k === 'fila' && fila.segurar) fila.presas.push(fim); else fim();
+          if (k === 'fila' && fila.segurar) fila.presas.push(() => setTimeout(pronto)); else setTimeout(pronto);
         },
-        get: (k) => { const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); fim(); }); return r; },
+        get: (k) => { pendentes++; const r = {}; setTimeout(() => { r.result = base.get(k); if (r.onsuccess) r.onsuccess(); pronto(); }); return r; },
       });
       return tx;
     },

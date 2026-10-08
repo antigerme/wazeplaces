@@ -653,7 +653,12 @@ function baseDeMentira() {
     offlineDB: async () => ({
       close() {},
       transaction: () => {
-        const tx = { objectStore: () => ({ put: (v, k) => { guardado[k] = structuredClone(v); setTimeout(() => tx.oncomplete()); } }) };
+        // A gravação lê os pedidos da fila guardada e a janela na MESMA transação
+        // (R14-4-01): o `get` responde numa tarefa à parte, como o de verdade.
+        const tx = { objectStore: () => ({
+          put: (v, k) => { guardado[k] = structuredClone(v); setTimeout(() => tx.oncomplete()); },
+          get: (k) => { const r = {}; setTimeout(() => { r.result = guardado[k] === undefined ? undefined : structuredClone(guardado[k]); if (r.onsuccess) r.onsuccess(); }); return r; },
+        }) };
         return tx;
       },
     }),

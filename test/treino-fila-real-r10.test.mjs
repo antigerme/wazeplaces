@@ -401,11 +401,13 @@ function montarInterruptor({ comTreino }) {
     safeLS: { get: () => null, set() {}, remove() {} },
     t: (k, v) => (v ? k + JSON.stringify(v) : k),
     // A base do offline: o `put` grava, e a transação fecha num tique; apagar a apaga.
+    // A gravação lê os pedidos da fila guardada e a janela antes (R14-4-01).
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); } }) };
+      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base[k] === undefined ? undefined : JSON.parse(JSON.stringify(base[k])); if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
-    indexedDB: { deleteDatabase: () => { delete base.fila; } },
+    indexedDB: { deleteDatabase: () => { for (const k of Object.keys(base)) delete base[k]; } },
     window: { caches: true }, caches: { delete: async () => {} },
     // A última preparação COMPLETA cobriu a fila guardada (`filaCoberta` = o `t` dela), nesta janela.
     filaDeOnde: { regiao: 'row', pais: '30', busca: 'b' }, offlineVarrendo: false, offlinePedidaDeNovo: false,

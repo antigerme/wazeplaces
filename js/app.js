@@ -21996,6 +21996,37 @@ function offlineDB() {
     });
 }
 
+// ── A MESMA fila guardada mantém o CARIMBO (R6-4-2, R14-4-01) ────────────────
+// O carimbo (`t`) da fila guardada é a VERSÃO dela: é por ele que a linha das
+// Preferências sabe se a última preparação completa a cobriu
+// (`offlineFilaPreparada`), e um carimbo novo avisa as outras abas de que a fila
+// guardada é outra (R13-4-03). A fila regravada com os MESMOS pedidos que a fila
+// guardada coberta tem — ou com parte deles, o que foi decidido saiu — mantém o
+// carimbo: a renovação de cada janela grava a fila de novo no começo, e o carimbo
+// novo quebrava a cobertura (R6-4-2).
+//
+// A pergunta "é a mesma fila?" se responde pela BASE, e não pela memória da aba
+// (R14-4-01). Pela memória, a segunda aba — que nunca gravou, e a memória dela
+// não tinha carimbo — gravava os mesmos pedidos com carimbo novo e avisava a
+// primeira, que passava a dizer "Ainda não preparado" (sem rede: "O mapa e as
+// fotos chegam quando houver sinal") sobre a fila que ela mesma preparou, com
+// tudo no aparelho; e a preparação de cada uma gravava carimbo novo e avisava a
+// outra, SEM FIM: 4 gatilhos alternados, 4 preparações da fila inteira (MEDIDO
+// no navegador, e1 da rodada 14, nos dois motores). Por isso a gravação lê, na
+// MESMA transação do `put`, os pedidos da fila guardada (`resumo`, o registro
+// `filaChaves`) e a última preparação completa do aparelho (`registro`, o da
+// janela). Mantém o carimbo quando:
+//   · a fila guardada está COBERTA — por esta aba (a preparação dela) ou por
+//     qualquer uma (o registro da janela diz que cobriu este carimbo); e
+//   · os pedidos são os MESMOS — venha de que aba vier: a fila guardada não muda,
+//     e nenhuma aba perde nada; ou
+//   · são PARTE deles e a fila guardada é a que ESTA aba gravou por último (o
+//     carimbo e os pedidos que ela conhece; o aviso de outra aba os apaga): parte
+//     da fila de OUTRA aba com o carimbo dela tirava da base os pedidos que só a
+//     outra tem — e a poda daqui, o mapa deles —, com a outra dizendo "Pronto".
+// Pedido NOVO é carimbo novo — e "não coberta", como sempre. A base de versão
+// anterior não tem o `filaChaves`: a primeira gravação ganha carimbo novo.
+//
 // `desde` é o instante a partir do qual a lista gravada vale: o começo da busca
 // que a trouxe, ou AGORA quando quem grava é a varredura (aí a lista é a fila
 // viva, que já não tem nada do que foi decidido nesta página — o que segue nela
@@ -22067,6 +22098,26 @@ async function offlineGravarFila(desde) {
     // E a conta (gravada antes de o perfil chegar, ela ainda é desconhecida, e a
     // sessão responde). Ver `filaGuardadaDestaConta`.
     const conta = contaAgora();
+    // A MESMA fila guardada (R6-4-2, R14-4-01, ver acima): `resumo` são os
+    // pedidos da fila guardada agora, `registro` a última preparação completa do
+    // aparelho, os dois lidos da base na transação do `put`.
+    // Registro ilegível na base vale como "outra fila" (carimbo novo), nunca derruba a gravação.
+    const mesmaFilaGuardada = (resumo, registro, chaves) => {
+        try {
+            if (!resumo || !Number.isFinite(resumo.t) || !Array.isArray(resumo.chaves)) return false;
+            if (!chaves.length || chaves.some((k) => k === null)) return false;
+            const coberta = resumo.t === offlineFilaPreparada || !!(registro && registro.filaCoberta === resumo.t);
+            if (!coberta) return false;
+            const naBase = new Set(resumo.chaves);
+            const novas = new Set(chaves);
+            for (const k of novas) if (!naBase.has(k)) return false;           // pedido NOVO
+            if (novas.size === naBase.size) return true;                         // os MESMOS, de qualquer aba
+            // PARTE deles: só da fila que ESTA aba gravou por último.
+            if (resumo.t !== offlineFilaGravadaEm || offlineFilaGravadaChaves === null) return false;
+            for (const k of naBase) if (!offlineFilaGravadaChaves.has(k)) return false;
+            return true;
+        } catch (e) { return false; }
+    };
     let gravadaEm = null;
     let chaves = null;
     let mesmaFila = false;
@@ -22079,36 +22130,44 @@ async function offlineGravarFila(desde) {
             desfazer();
             return false;
         }
+        let gravou = false;
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+            const loja = tx.objectStore(OFFLINE_STORE);
             // Os pedidos do que vai pra base, lidos junto do `put` (a fila pode ter
             // mudado durante o `await`).
             chaves = fila.map(chaveDoPedido);
-            // A MESMA fila — ou parte dela: o que foi decidido saiu — por cima da
-            // fila guardada que a última preparação COMPLETA cobriu MANTÉM o
-            // carimbo. A renovação de cada janela grava a fila de novo no começo,
-            // e o carimbo novo quebrava a cobertura: com o sinal caindo no meio
-            // dela (o "sai de casa"), ou o app fechado no meio, a linha sem sinal
-            // voltava a "O mapa e as fotos chegam quando houver rede" com os dois
-            // no aparelho (auditoria de 2026-10-01, R6-4-2). Pedido NOVO na fila
-            // é carimbo novo — e "não coberta", como sempre.
-            mesmaFila = offlineFilaGravadaEm !== null && offlineFilaGravadaEm === offlineFilaPreparada
-                && offlineFilaGravadaChaves !== null
-                && chaves.every((k) => k !== null && offlineFilaGravadaChaves.has(k));
-            gravadaEm = mesmaFila ? offlineFilaGravadaEm : Date.now();
-            tx.objectStore(OFFLINE_STORE).put({
-                t: gravadaEm,
-                desde: valeDesde,
-                filtros,
-                regiao: lugar.regiao,
-                pais: lugar.pais,
-                // A assinatura da busca, sem a ordem: é ela que a reabertura
-                // compara (`mesmoLugar`). Os `filtros` acima vão pro diagnóstico.
-                busca: lugar.busca,
-                conta,
-                s: sessao,
-                places: fila,
-            }, 'fila');
+            // A fila guardada AGORA (os pedidos dela, em `filaChaves`) e a última
+            // preparação completa do APARELHO (`janela`), lidas NA MESMA transação
+            // do `put`: outra aba que grave junto espera esta terminar (ver
+            // `mesmaFilaGuardada`). Os pedidos e não a fila inteira: são
+            // ~357 KB pra decodificar no meio do swipe, e a pergunta é só "quais".
+            const lerResumo = loja.get('filaChaves');
+            const lerJanela = loja.get('janela');
+            // Os pedidos de uma transação são atendidos em ordem: o `onsuccess` da
+            // ÚLTIMA leitura já tem a primeira.
+            lerJanela.onsuccess = () => {
+                // Esqueceram com as leituras no ar (R14-4-04): nada é gravado.
+                if (epoca !== offlineEpoca) return;
+                mesmaFila = mesmaFilaGuardada(lerResumo.result, lerJanela.result, chaves);
+                gravadaEm = mesmaFila ? lerResumo.result.t : Date.now();
+                loja.put({
+                    t: gravadaEm,
+                    desde: valeDesde,
+                    filtros,
+                    regiao: lugar.regiao,
+                    pais: lugar.pais,
+                    // A assinatura da busca, sem a ordem: é ela que a reabertura
+                    // compara (`mesmoLugar`). Os `filtros` acima vão pro diagnóstico.
+                    busca: lugar.busca,
+                    conta,
+                    s: sessao,
+                    places: fila,
+                }, 'fila');
+                // E os pedidos dela, com o MESMO carimbo, na mesma transação.
+                loja.put({ t: gravadaEm, chaves: [...new Set(chaves)].sort() }, 'filaChaves');
+                gravou = true;
+            };
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
             // `onabort` também: a cota estourada ABORTA a transação sem sempre
             // passar pelo `onerror`, e a promessa pendurada prendia a varredura
@@ -22119,12 +22178,16 @@ async function offlineGravarFila(desde) {
         // Esqueceram com a transação no ar: o que ela gravou sai (e a memória, o
         // aviso às outras abas e a poda dos pousos não são desta base).
         if (epoca !== offlineEpoca) { desfazer(); return false; }
+        if (!gravou) return false;
         // A fila que está na base AGORA (ver `offlineFilaPreparada`).
         offlineFilaGravadaEm = gravadaEm;
         offlineFilaGravadaChaves = new Set(chaves);
-        // E as OUTRAS abas ficam sabendo que a fila guardada é esta (R13-4-03,
-        // ver `aoGravarFilaGuardadaEmOutraAba`).
-        if (typeof avisarOutrasAbasDaFilaGuardada === 'function') avisarOutrasAbasDaFilaGuardada(gravadaEm);
+        // E as OUTRAS abas ficam sabendo que a fila guardada é OUTRA (R13-4-03,
+        // ver `aoGravarFilaGuardadaEmOutraAba`). A MESMA fila manteve o carimbo
+        // que elas já conhecem, e não há o que avisar: o aviso de um carimbo novo
+        // a cada gravação era o que fazia a outra aba dizer "Ainda não preparado"
+        // sobre a fila que ela mesma preparou (R14-4-01).
+        if (!mesmaFila && typeof avisarOutrasAbasDaFilaGuardada === 'function') avisarOutrasAbasDaFilaGuardada(gravadaEm);
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
         // valendo contra a fila velha, que é a que a reabertura vai ler.
         offlinePodarPousos(valeDesde);
@@ -22166,11 +22229,15 @@ function avisarOutrasAbasDaFilaGuardada(t) {
 // A fila guardada agora é a que OUTRA aba gravou. Nada aqui grava no aparelho.
 // A varredura no ar desta aba segue: no fim, a poda dela confere de quem é a fila
 // na base (R12-4-05). O aviso da MESMA fila que esta aba tem (o mesmo carimbo) não
-// muda nada.
+// muda nada — e a outra aba que grava os MESMOS pedidos mantém o carimbo e nem
+// avisa (R14-4-01, ver a `offlineGravarFila`).
 function aoGravarFilaGuardadaEmOutraAba(aviso) {
     if (!aviso || aviso.v !== 1 || !Number.isFinite(aviso.filaGuardada)) return;
     if (aviso.filaGuardada === offlineFilaGravadaEm) return;
     offlineFilaGravadaEm = aviso.filaGuardada;
+    // Os pedidos que esta aba conhece eram os da fila de ANTES: os da guardada
+    // agora são os da outra, e "parte da fila que eu gravei" já não vale.
+    offlineFilaGravadaChaves = null;
     dfato('offline.outraAba', {});
     // As Preferências podem estar abertas: a linha diz o que é verdade agora.
     atualizarLinhaDoOffline(0, 0);
@@ -22186,12 +22253,32 @@ function aoGravarFilaGuardadaEmOutraAba(aviso) {
 // varredura pela metade é foto que não está no cache. Vai junto QUAL fila ela
 // cobriu (`filaCoberta`, ver `offlineFilaPreparada`); o registro de versão
 // anterior não tem o campo, e a linha das Preferências o lê como não coberta.
+//
+// E o registro é do APARELHO: é por ele que a gravação de QUALQUER aba sabe que a
+// fila guardada está coberta (R14-4-01, ver `offlineGravarFila`). A preparação
+// que termina DEPOIS de outra aba ter gravado a fila guardada por cima — as duas
+// preparando juntas — cobriu uma fila que já não é a guardada, e o registro dela
+// apagava o da outra aba, que cobre a fila guardada: a gravação seguinte, com os
+// mesmos pedidos, não reconhecia mais a fila coberta, ganhava carimbo novo e a
+// outra aba voltava a "Ainda não preparado". Lido na MESMA transação: se a fila
+// guardada agora não é a que esta preparação cobriu, e o registro que está lá é
+// o dela, ele fica.
 async function offlineGravarJanela(janela, filaCoberta = null) {
     try {
         const db = await offlineDB();
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-            tx.objectStore(OFFLINE_STORE).put({ janela, t: Date.now(), filaCoberta }, 'janela');
+            const loja = tx.objectStore(OFFLINE_STORE);
+            const lerResumo = loja.get('filaChaves');
+            const lerJanela = loja.get('janela');
+            lerJanela.onsuccess = () => {
+                const resumo = lerResumo.result;
+                const atual = lerJanela.result;
+                const guardadaAgora = resumo && Number.isFinite(resumo.t) ? resumo.t : null;
+                if (guardadaAgora !== null && guardadaAgora !== filaCoberta
+                    && atual && atual.filaCoberta === guardadaAgora) return;
+                loja.put({ janela, t: Date.now(), filaCoberta }, 'janela');
+            };
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
             // `onabort` também: a cota estourada ABORTA a transação sem sempre
             // passar pelo `onerror`, e a promessa pendurada prendia a varredura
