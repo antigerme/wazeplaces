@@ -19449,6 +19449,15 @@ async function enviarLote(places, opts = {}) {
                 const naoPousaram = places.slice(i + (pousou ? 1 : 0)).filter((q) => !repetidos.has(q));
                 for (const q of places.slice(i)) if (anotados.delete(q)) tirarDaFilaDeSaida('reject', q);
                 if (pousou && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(p, quem);
+                // Contando ao pousar (a recusa automática), o "Restam" desce QUANDO o
+                // pedido pousa — os alvos saem da fila antes de ir —, e o pouso de
+                // depois da queda não descia: a renovação mantinha a fila com um a
+                // mais por pedido, e o fim dela dizia "Tudo limpo!" com "Restam 1"
+                // (auditoria da rodada 14, R14-2-01, MEDIDO no navegador, nos dois
+                // motores). O mesmo do ramo do sucesso, lá embaixo: só na fila do
+                // lote (a fila refeita tem o "Restam" dela, que não conta este
+                // pedido). Placar e Histórico seguem de fora: são da sessão que caiu.
+                if (pousou && aoLandar && naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
                 if (!aoLandar) descontarGestoSemSessao('rejected', placar, naoPousaram.length);
                 if (naFilaDoLote()) for (const q of naoPousaram) voltarPraFila(q);
                 return;
