@@ -2664,6 +2664,42 @@ function manterFocoNoLightbox() {
     }
 }
 
+// Entre limpar uma região viva e dizer nela de novo a MESMA frase (ver
+// `dizerNaRegiao`). O atraso da conversa (`PRESENCA_ANUNCIO_DE_NOVO_MS`, R12-5-02)
+// e o da CDK do Angular, pelo mesmo motivo.
+const ANUNCIO_DE_NOVO_MS = 100;
+// A frase A CAMINHO de cada região (região → relógio dela).
+const anunciosDeNovo = new Map();
+
+// Escreve `texto` na região viva `el` — a da foto ampliada e a do card. A MESMA
+// frase que a região JÁ diz era reescrita igual, e região viva reescrita com o
+// mesmo texto pode não ser lida de novo (o precedente do R12-5-02, na conversa;
+// leitor de tela não há aqui pra medir). Calava dois desfechos (auditoria da
+// rodada 14, R14-3-01, MEDIDO com um MutationObserver nos dois motores): o
+// Desfazer de uma exclusão depois de navegar até a foto — a região seguia com
+// "Foto 1 de 3" da navegação, e a foto que volta dizia "Foto 1 de 3" de novo (o
+// R9-3-05 prometeu que ela é anunciada) —, e, sem o Desfazer, a segunda exclusão
+// seguida ("Foto excluída" duas vezes). Agora a região que já diz a frase é
+// limpa AGORA e a frase volta `ANUNCIO_DE_NOVO_MS` depois. Frase diferente sai na
+// hora, como sempre. Quem chega com a região RECÉM-LIMPA por aqui (uma frase
+// ainda a caminho) só troca a frase e a adia: escrever já seria limpar e
+// escrever sem o atraso no meio. Sem texto, a região se esvazia na hora, e a
+// frase a caminho não sai. A frase a caminho só sai se a região SEGUE limpa —
+// outro anúncio escrito nela nesse meio (o card novo, o fim da fila) vale, e
+// ela não fala por cima dele — e se a tela ainda é a dela (`aindaDaTela`).
+function dizerNaRegiao(el, texto, aindaDaTela) {
+    const frase = texto || '';
+    const recemLimpa = anunciosDeNovo.has(el) && !el.textContent;
+    clearTimeout(anunciosDeNovo.get(el));
+    anunciosDeNovo.delete(el);
+    if (!frase || (!recemLimpa && el.textContent !== frase)) { el.textContent = frase; return; }
+    if (el.textContent) el.textContent = '';
+    anunciosDeNovo.set(el, setTimeout(() => {
+        anunciosDeNovo.delete(el);
+        if (!el.textContent && aindaDaTela()) el.textContent = frase;
+    }, ANUNCIO_DE_NOVO_MS));
+}
+
 // O que o leitor de tela OUVE da foto ampliada, pela região viva DELA
 // (`#lightboxAnuncio`, `sr-only`: nada muda na tela). A troca de foto e, no
 // caminho SEM o Desfazer, o desfecho de aprovar, excluir e renomear — com o
@@ -2671,11 +2707,13 @@ function manterFocoNoLightbox() {
 // (R6-3-08, auditoria de 2026-10-01). `place`: o desfecho que chega depois do
 // gesto só é dito com a foto DESTE pedido aberta — com a de outro na tela, "Foto
 // aprovada" falaria da foto errada. Sem texto, a região se esvazia (ao fechar).
+// A mesma frase outra vez sai depois de a região ser limpa (`dizerNaRegiao`,
+// R14-3-01), com a foto deste pedido ainda aberta.
 function anunciarNoLightbox(texto, place) {
     const el = document.getElementById('lightboxAnuncio');
     if (!el) return;
     if (place !== undefined && !(Lightbox.isOpen() && Lightbox.place === place)) return;
-    el.textContent = texto || '';
+    dizerNaRegiao(el, texto, () => Lightbox.isOpen() && (place === undefined || Lightbox.place === place));
 }
 
 // O desfecho de uma escrita da foto que FECHOU a camada é dito pela região viva
@@ -2684,10 +2722,13 @@ function anunciarNoLightbox(texto, place) {
 // e a região dela já não fala: o foco ia pro mapa do card e nada dizia que a
 // foto saiu — o card é redesenhado com o MESMO pedido, então nem o "Novo
 // pedido" sai (`pedidoAnunciado`; auditoria de 2026-10-02, R7-3-04, MEDIDO nos
-// dois motores).
+// dois motores). A mesma frase outra vez — a segunda exclusão seguida com a foto
+// já fechada — sai depois de a região ser limpa (`dizerNaRegiao`, R14-3-01), só
+// com a sessão de pé: a tela de entrada limpa esta região (`showAuthScreen`), e
+// o desfecho de uma foto não é dito lá.
 function anunciarNoCard(texto) {
     const el = document.getElementById('cardLiveRegion');
-    if (el) el.textContent = texto || '';
+    if (el) dizerNaRegiao(el, texto, () => AppState.authenticated === true);
 }
 
 // O desfecho de uma escrita da foto SEM o Desfazer (a exclusão, o nome), dito

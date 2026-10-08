@@ -5612,6 +5612,90 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(d.anuncio === 'Foto 2 de 2', `anúncio/Desfazer da foto: a foto voltou à tela e a região da camada disse ${JSON.stringify(d.anuncio)}`);
   }
 
+  // ── R14-3-01 (auditoria da rodada 14): a MESMA frase outra vez na região viva.
+  // A região da camada era reescrita com o MESMO texto, sem limpar antes — e
+  // região viva reescrita igual pode não ser lida de novo (o R12-5-02, na
+  // conversa). (a) O Desfazer de uma exclusão com a região AINDA dizendo a
+  // navegação ("Foto 2 de 2" — o caso comum, que o bloco de cima esvazia de
+  // propósito): ela é LIMPA e a frase volta numa tarefa à parte. (b) Sem o
+  // Desfazer, a 2ª exclusão seguida ("Foto excluída" duas vezes). O observador
+  // anota cada mudança, com a hora. CONTROLES: o Desfazer com a região vazia diz a
+  // frase na hora, numa mudança só, e a 1ª exclusão (a região dizia a navegação)
+  // também — a medida enxerga a frase que não precisa de atraso.
+  const observarRegiao = () => page.evaluate(() => {
+    const el = document.getElementById('lightboxAnuncio');
+    window.__regiaoR14 = [];
+    if (window.__obsR14) window.__obsR14.disconnect();
+    window.__obsR14 = new MutationObserver(() => window.__regiaoR14.push([el.textContent, performance.now()]));
+    window.__obsR14.observe(el, { childList: true, characterData: true, subtree: true });
+    return el.textContent;
+  });
+  // A espera vai à página SERIALIZADA, sem as variáveis daqui (gotcha #28): o
+  // que ela confere vai antes, pela janela.
+  const mudancasDaRegiao = async (frase, vezes) => {
+    await page.evaluate((a) => { window.__esperaR14 = a; }, { frase, vezes });
+    await esperarOuExplodir(page, () => window.__regiaoR14.filter(([t]) => t === window.__esperaR14.frase).length
+      >= window.__esperaR14.vezes, `a região dizer "${frase}" (${vezes}×)`);
+    await page.waitForTimeout(300);                  // e nada mudando depois
+    return page.evaluate(() => {
+      const r = window.__regiaoR14;
+      window.__obsR14.disconnect();
+      return { textos: r.map(([t]) => t), ms: r.map(([, t], i) => (i ? Math.round(t - r[i - 1][1]) : 0)) };
+    });
+  };
+  for (const esvazia of [false, true]) {
+    const rot = esvazia ? 'CONTROLE, a região vazia antes do Desfazer' : 'a região ainda dizendo a navegação';
+    await montar(FOTO_PL);
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');
+    await esperarOuExplodir(page, () => fotoDoLightboxNaTela()
+      && !document.getElementById('lightboxDelete').classList.contains('hidden'), 'a lixeira da foto no mapa');
+    await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+    await esperarOuExplodir(page, () => !!document.getElementById('undoBtn') && Lightbox.urls.length === 1, 'o Desfazer da exclusão');
+    if (esvazia) await page.evaluate(() => { document.getElementById('lightboxAnuncio').textContent = ''; });
+    const antes = await observarRegiao();
+    checa(antes === (esvazia ? '' : 'Foto 2 de 2'), `anúncio/R14-3-01 (a) ${rot}: PRÉ-CONDIÇÃO — a região dizia ${JSON.stringify(antes)} antes do Desfazer`);
+    await page.focus('#undoBtn'); await page.keyboard.press('Enter');
+    const m = await mudancasDaRegiao('Foto 2 de 2', 1);
+    if (esvazia) {
+      checa(JSON.stringify(m.textos) === '["Foto 2 de 2"]', `anúncio/R14-3-01 (a) ${rot}: a frase não saiu na hora, numa mudança só`, JSON.stringify(m));
+    } else {
+      checa(JSON.stringify(m.textos) === '["","Foto 2 de 2"]' && m.ms[1] >= 50,
+        'anúncio/R14-3-01 (a): o Desfazer reescreveu na região a MESMA frase da navegação, sem limpar antes numa tarefa à parte — a foto que voltou pode não ser dita',
+        JSON.stringify(m));
+    }
+  }
+  {
+    // (b): a proposta e DUAS fotos já no mapa, sem o Desfazer — a camada segue
+    // aberta depois das duas exclusões.
+    const TRES = { ...FOTO_PL, venueID: 'v-r14-tres', updateRequestID: 'pend-r14-3',
+      imageUrls: [`${foto}#pend-r14-3`, `${foto}#aprovada-r14-a`, `${foto}#aprovada-r14-b`],
+      approvedImageIds: ['aprovada-r14-a', 'aprovada-r14-b'] };
+    await montar(TRES, { semDesfazer: true });
+    await page.click('#cardStack .place-card:not(.card-fundo) .card-image');
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada');
+    await page.keyboard.press('ArrowRight');
+    const excluir = async (n) => {
+      await esperarOuExplodir(page, () => fotoDoLightboxNaTela() && !excluindoAgora
+        && !document.getElementById('lightboxDelete').classList.contains('hidden')
+        && !document.getElementById('lightboxDelete').disabled, `a lixeira da ${n}ª foto no mapa`);
+      await page.evaluate((resta) => { window.__restamR14 = resta; }, 3 - n);
+      await page.focus('#lightboxDelete'); await page.keyboard.press('Enter');
+      await esperarOuExplodir(page, () => !excluindoAgora && Lightbox.urls.length === window.__restamR14, `a ${n}ª exclusão pousar`);
+    };
+    const antes = await observarRegiao();
+    checa(antes === 'Foto 2 de 3', `anúncio/R14-3-01 (b): PRÉ-CONDIÇÃO — a região dizia ${JSON.stringify(antes)} antes da 1ª exclusão`);
+    await excluir(1);
+    await excluir(2);
+    const m = await mudancasDaRegiao('Foto excluída', 2);
+    const d = await page.evaluate(() => ({ aberta: Lightbox.isOpen(), n: Lightbox.urls.length }));
+    checa(d.aberta && d.n === 1, 'anúncio/R14-3-01 (b): PRÉ-CONDIÇÃO — as duas exclusões não pousaram com a camada aberta', JSON.stringify(d));
+    checa(JSON.stringify(m.textos) === '["Foto excluída","","Foto excluída"]' && m.ms[2] >= 50,
+      'anúncio/R14-3-01 (b): sem o Desfazer, a 2ª exclusão reescreveu "Foto excluída" igual, sem limpar antes numa tarefa à parte (ou a 1ª não saiu na hora — o CONTROLE)',
+      JSON.stringify(m));
+  }
+
   // ── Rodada 10 (auditoria de 2026-10-07): R10-3-01 a 04 ─────────────────────
   // O selo da foto que volta numa camada REABERTA (01), a camada do IRMÃO que
   // muda calada (02), duas exclusões do MESMO local no ar ao mesmo tempo (03) e a

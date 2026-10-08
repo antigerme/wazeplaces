@@ -164,7 +164,14 @@ function montar() {
     // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
     ...(/^function esvaziarSeletorDeAreas\(/m.test(APP_SEM) ? [fatiar('esvaziarSeletorDeAreas')] : []),
     // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
-    // ela pode dizer o nome do local ("Renomeado para …").
+    // ela pode dizer o nome do local ("Renomeado para …"). Quem escreve nela é o
+    // `dizerNaRegiao` (R14-3-01), com o atraso e a frase a caminho dele.
+    ...['ANUNCIO_DE_NOVO_MS', 'anunciosDeNovo'].map((nome) => {
+      const m = new RegExp('^const ' + nome + ' = [^\\n]*;$', 'm').exec(APP_SEM);
+      assert.ok(m, `const ${nome} sumiu do app.js`);
+      return m[0];
+    }),
+    fatiar('dizerNaRegiao'),
     fatiar('anunciarNoLightbox'),
     fatiarConst('LIMPEZA_AO_FECHAR'),
     'return { openModal, closeModal, showAuthScreen, Lightbox, MapaLightbox };',
