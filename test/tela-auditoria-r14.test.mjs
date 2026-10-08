@@ -209,6 +209,9 @@ function montarAviso() {
     setTimeout: (fn, ms) => { relogios.push(ms); return relogios.length; }, clearTimeout() {},
     dlog() {}, t: (k) => k, escapeHtml: (s) => s, console, TOAST_COPIAVEL_RECHECA_MS: 1500,
     Treino: { ativo: false }, AppState: { preferences: {} }, avisoDeUmaVezSaiAgora: () => true, savePreferences() {},
+    // O punho do aviso de uma vez, que o treino tira da tela e devolve no fim (R14-7-A5, área "treino"):
+    // aqui só se registra (a junção do lote 18 pôs as duas mudanças na mesma linha).
+    anotarAvisoDeUmaVezNaTela() {},
   };
   const fonte = [fatiar('showToast'), constante('CONSEQUENCIA_AVISADA'), fatiar('avisarConsequencia'),
     'return { showToast, avisarConsequencia };'].join('\n');
