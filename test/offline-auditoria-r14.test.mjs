@@ -12,6 +12,9 @@
 //  · R14-4-05 — a sentinela `tokenNaoPersiste` do diagnóstico acusava
 //    "navegação privada, cookies bloqueados ou armazenamento cheio" quando quem
 //    tirou o token do aparelho foi a queda da OUTRA aba (sessões diferentes);
+//  · R14-4-06 — o relatório não explicava a linha do offline: dizia `resultado
+//    pronto` com a linha em "Ainda não preparado" (o carimbo da fila guardada e
+//    o que a última preparação cobriu não iam no arquivo);
 //  · R14-4-04 — a gravação da fila guardada não conferia a ÉPOCA do offline
 //    depois de abrir a base: o "Sair" de OUTRA aba apaga a base, e a gravação
 //    que já estava a caminho (a resposta de uma busca chegou antes do aviso) a
@@ -26,7 +29,10 @@
 // com o conserto desfeito (sabotagem no relatório do lote 18).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import vm from 'node:vm';
 
 const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
@@ -749,6 +755,128 @@ test('R14-4-05: a sonda do RELATÓRIO e a da sentinela são UMA só (`diagSondaD
   assert.match(corpo, /diagSondaDeEscrita\(\)/, 'o relatório deixou de usar a sonda de escrita única');
   assert.ok(!corpo.includes("'__diag_probe__'"), 'o relatório voltou a ter uma sonda de escrita própria');
   assert.match(fatiar('diagSentinelas'), /diagSondaDeEscrita\(\)/, 'a sentinela do token deixou de perguntar à sonda');
+});
+
+// ═══ R14-4-06 · o relatório explica a LINHA do offline ════════════════════════
+// O retrato do offline (`diagOfflineAgora`, o da captura e a base da seção do
+// relatório) e a linha das Preferências (`atualizarLinhaDoOffline`) DE VERDADE,
+// sobre o MESMO estado: o `cobreAFila` do relatório tem de ser a conta da linha.
+const JANELA_AGORA = 1492385;
+function linhaEDiag({ gravada, preparada, varrida = null, treinoEsperando = null, fila = [P(1), P(2)] }) {
+  const el = { textContent: '', innerHTML: '' };
+  const deps = {
+    AppState: { queue: treinoEsperando ? [] : fila },
+    Treino: treinoEsperando ? { ativo: true, _salvo: { queue: [], filaGuardadaLida: treinoEsperando } } : { ativo: false },
+    navigator: { onLine: true }, offlineLigado: () => true, OFFLINE_CICLO_MS,
+    Date: { now: () => JANELA_AGORA * OFFLINE_CICLO_MS + 1000 },
+    document: { getElementById: () => el }, t: (k) => k, escapeHtml: (x) => x,
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, [
+    `let offlineJanelaServida = ${JANELA_AGORA}, offlineUltimoResultado = 'pronto', offlineVarrendo = false,`,
+    `    offlineFilaGravadaEm = ${gravada}, offlineFilaPreparada = ${preparada}, offlineFilaVarrida = ${varrida};`,
+    ...['filaReal', 'filaGuardadaEsperandoOTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'diagOfflineAgora'].map(fatiar),
+    "return { diag: diagOfflineAgora, linha: () => { atualizarLinhaDoOffline(0, 0); const e = document.getElementById('prefOfflineDesc'); return e.innerHTML || e.textContent; } };",
+  ].join('\n'))(...chaves.map((k) => deps[k]));
+  return { diag: app.diag(), linha: app.linha() };
+}
+
+test('R14-4-06: o retrato do offline diz o que decide a linha — e o `cobreAFila` é a MESMA conta dela', () => {
+  // A fila guardada que OUTRA aba gravou (o carimbo dela), com a preparação desta
+  // cobrindo a de antes: a linha diz "Ainda não preparado" com o resultado "pronto".
+  const outra = linhaEDiag({ gravada: 2000, preparada: 1000, varrida: 1000 });
+  assert.match(outra.linha, PENDENTE, 'PRÉ-CONDIÇÃO: a linha não está em "Ainda não preparado"');
+  assert.equal(outra.diag.resultado, 'pronto', 'PRÉ-CONDIÇÃO');
+  assert.deepEqual([outra.diag.filaGravadaEm, outra.diag.filaPreparada, outra.diag.filaVarrida], [2000, 1000, 1000],
+    `DEFEITO: o retrato não traz os carimbos que decidem a linha: ${JSON.stringify(outra.diag)}`);
+  assert.equal(outra.diag.cobreAFila, false, 'DEFEITO: o retrato diz que a preparação cobre a fila guardada, e a linha diz que não');
+  assert.equal(outra.diag.precisaVarrer, true, 'o retrato não diz que o próximo gatilho prepara');
+  // CONTROLE: a fila coberta — a linha diz "Pronto", e o retrato também.
+  const coberta = linhaEDiag({ gravada: 1000, preparada: 1000, varrida: 1000 });
+  assert.match(coberta.linha, PRONTO);
+  assert.equal(coberta.diag.cobreAFila, true);
+  assert.equal(coberta.diag.precisaVarrer, false);
+  // No treino com a fila real vazia, a linha fala da fila guardada que espera o
+  // "Sair" dele (R9-4-03): o retrato conta igual.
+  const treino = linhaEDiag({ gravada: null, preparada: 3000, treinoEsperando: { n: 4, t: 3000 } });
+  assert.match(treino.linha, PRONTO, 'PRÉ-CONDIÇÃO: no treino a linha não fala da fila que espera o "Sair"');
+  assert.equal(treino.diag.cobreAFila, true, 'no treino o retrato não conta a fila guardada que a linha conta');
+  assert.equal(treino.diag.filaGravadaEm, 3000);
+});
+
+test('R14-4-06: a seção `offline` do relatório leva o carimbo da fila guardada na base e o que o registro do aparelho cobriu', async () => {
+  const deps = {
+    window: {}, OFFLINE_TILES_CACHE: 'waze-places-tiles', diagTilesGuardadosQueFalharam: [],
+    diagOfflineAgora: () => ({ ligado: true, resultado: 'pronto', cobreAFila: false }),
+    offlineLerFila: async () => ({ t: 2000, desde: 1990, places: [P(1), P(2)] }),
+    // A fila desta aba: um pedido que a guardada também tem, e um que só esta tem.
+    filaReal: () => [P(2), P(3)], chaveDoPedido: chave,
+    offlineLerPousos: () => [], offlineLerRegistroDaJanela: async () => ({ janela: JANELA_AGORA, t: 1500, filaCoberta: 1000 }),
+  };
+  const chaves = Object.keys(deps);
+  const diagOffline = new Function(...chaves, fatiar('diagOffline') + '\nreturn diagOffline;')(...chaves.map((k) => deps[k]));
+  const o = await diagOffline();
+  assert.equal(o.filaGuardada && o.filaGuardada.t, 2000, `DEFEITO: a seção não traz o carimbo da fila guardada: ${JSON.stringify(o)}`);
+  assert.equal(o.filaCobertaGuardada, 1000, 'DEFEITO: a seção não traz qual fila o registro do aparelho cobriu');
+  assert.equal(o.janelaGuardada, JANELA_AGORA, 'a janela guardada saiu da seção');
+  assert.equal(o.filaGuardada.n, 2, 'a fila guardada segue indo só como NÚMERO');
+  assert.deepEqual([o.filaGuardada.soNestaAba, o.filaGuardada.soNaGuardada], [1, 1],
+    'a seção não conta os pedidos desta aba que a fila guardada não tem (e vice-versa)');
+  assert.ok(!JSON.stringify(o).includes('Local 1'), 'dado de terceiro (o conteúdo da fila guardada) foi pra seção');
+});
+
+// A TRIAGEM (`tools/diag-resumo.mjs`), rodada de verdade sobre um relatório
+// sintético: o estado do R14-4-01 (a outra aba gravou a fila guardada; esta
+// preparou a de antes).
+function triagem(offline) {
+  const rel = { _versaoDoDiag: 11, _gerado: '2026-10-07T23:00:00.000Z', app: { versao: '2026100705', rotulo: '2026.10.07-05' },
+    ambiente: { ua: 'x', online: true, tela: { w: 390, h: 844, dpr: 3, janela: '390x844' } },
+    resumo: { momentos: 0, chamadas: 0, falhas: 0, errosDeJs: 0, rede: true, offline: 'pronto',
+      telaAgora: { tela: 'app', painel: 'card', cardMontado: true, modais: [], lightbox: false }, alertas: [] },
+    offline, diario: [], chamadas: [], momentos: [], erros: [], localStorage: {} };
+  const dir = mkdtempSync(join(tmpdir(), 'diag-r14-'));
+  const arq = join(dir, 'd.json');
+  writeFileSync(arq, JSON.stringify(rel));
+  const saida = execFileSync(process.execPath, [new URL('../tools/diag-resumo.mjs', import.meta.url).pathname, arq],
+    { encoding: 'utf8', timeout: 20000 });
+  const i = saida.indexOf('── OFFLINE');
+  return saida.slice(i, saida.indexOf('\n──', i + 5));
+}
+const OFFLINE_DA_OUTRA_ABA = () => ({ ligado: true, janelaServida: JANELA_AGORA, janelaAtual: JANELA_AGORA, resultado: 'pronto',
+  varrendo: false, filaGravadaEm: 2000, filaPreparada: 1000, filaVarrida: 1000, cobreAFila: false, precisaVarrer: true,
+  filaGuardada: { n: 12, idadeMin: 0, desdeMin: 0, t: 2000, soNestaAba: 0, soNaGuardada: 0 }, filaCobertaGuardada: 2000,
+  janelaGuardada: JANELA_AGORA,
+  tilesNoCache: 12, tilesGuardadosQueFalharam: 0, pousosGravados: 0 });
+
+test('R14-4-06: a triagem diz se a última preparação cobre a fila guardada — e por que a linha não diz "Pronto" com o resultado "pronto"', () => {
+  const s = triagem(OFFLINE_DA_OUTRA_ABA());
+  assert.match(s, /a última preparação cobre a fila guardada: NÃO · carimbo da fila guardada 2000 \(esta aba conhece 2000\) · coberto pela preparação desta aba 1000 · pelo registro do aparelho 2000 · prepara no próximo gatilho: sim/,
+    `DEFEITO: a triagem não diz se a preparação cobre a fila guardada:\n${s}`);
+  assert.match(s, /ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila/,
+    'a triagem não explica o "pronto" com a linha em "Ainda não preparado"');
+  assert.match(s, /nota: a fila guardada tem os MESMOS pedidos desta aba e o registro do aparelho diz que ela está coberta/);
+  // Com pedidos DIFERENTES (a fila guardada é a de outra aba), a nota é a outra:
+  // o próximo gatilho prepara a fila desta — não "volta a dizer Pronto".
+  const outrosPedidos = OFFLINE_DA_OUTRA_ABA();
+  outrosPedidos.filaGuardada = { ...outrosPedidos.filaGuardada, soNestaAba: 6, soNaGuardada: 6 };
+  const sd = triagem(outrosPedidos);
+  assert.match(sd, /nota: a fila guardada é OUTRA — esta aba tem 6 pedido\(s\) que ela não tem, e ela tem 6 que esta aba não tem/,
+    `a triagem não diz que a fila guardada é a de outra aba com outros pedidos:\n${sd}`);
+  assert.ok(!/MESMOS pedidos desta aba/.test(sd), 'a triagem promete "Pronto" no próximo gatilho com pedidos diferentes');
+  // A fila guardada que esta aba NÃO conhece (o aviso não chegou).
+  const semAviso = triagem({ ...OFFLINE_DA_OUTRA_ABA(), filaGravadaEm: 1000, cobreAFila: true, precisaVarrer: false });
+  assert.match(semAviso, /cobre a fila guardada: sim/);
+  assert.match(semAviso, /ATENÇÃO: a fila guardada na base não é a que esta aba conhece/,
+    'a triagem não diz que a fila guardada é de outra aba que esta não conhece');
+  // CONTROLE: coberta, e a base é a que a aba conhece — nada de ATENÇÃO.
+  const ok = triagem({ ...OFFLINE_DA_OUTRA_ABA(), filaGravadaEm: 2000, filaPreparada: 2000, cobreAFila: true, precisaVarrer: false });
+  assert.match(ok, /cobre a fila guardada: sim/);
+  assert.ok(!/ATENÇÃO/.test(ok), `CONTROLE: a fila coberta ganhou ATENÇÃO:\n${ok}`);
+  // Relatório de ANTES (sem os campos): diz que a versão não trazia, sem inventar.
+  const velho = OFFLINE_DA_OUTRA_ABA();
+  for (const k of ['filaGravadaEm', 'filaPreparada', 'filaVarrida', 'cobreAFila', 'precisaVarrer', 'filaCobertaGuardada']) delete velho[k];
+  delete velho.filaGuardada.t;
+  assert.match(triagem(velho), /a última preparação cobre a fila guardada: \(ausente nesta versão\)/);
 });
 
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════

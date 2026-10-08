@@ -142,6 +142,32 @@ else if (off.ligado === false) {
   out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
+  // O que decide a LINHA das Preferências (R14-4-06): ela diz "Pronto" sobre a
+  // fila guardada que a última preparação completa COBRIU, e o `resultado`
+  // sozinho dizia "pronto" com a linha em "Ainda não preparado" (a fila guardada
+  // era outra). Carimbos são a hora de gravação: o que importa é se são IGUAIS.
+  if (off.ligado) {
+    const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : String(x));
+    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : undefined;
+    if (off.cobreAFila === undefined) out(`a última preparação cobre a fila guardada: ${AUSENTE}`);
+    else {
+      out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? 'sim' : 'não'}`);
+      if (!off.cobreAFila && off.resultado === 'pronto') {
+        out('ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila — a linha diz "Ainda não preparado" (sem rede: que o mapa e as fotos chegam quando houver sinal).');
+      }
+      if (typeof naBase === 'number' && typeof off.filaGravadaEm === 'number' && naBase !== off.filaGravadaEm) {
+        out('ATENÇÃO: a fila guardada na base não é a que esta aba conhece — outra aba a gravou e o aviso não chegou aqui (ou este navegador não tem o canal entre abas).');
+      }
+      // Os pedidos desta aba × os da fila guardada (só números, desde o lote 18).
+      const fgd = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada : {};
+      const mesmos = fgd.soNestaAba === 0 && fgd.soNaGuardada === 0;
+      if (!off.cobreAFila && typeof fgd.soNestaAba === 'number' && !mesmos) {
+        out(`nota: a fila guardada é OUTRA — esta aba tem ${fgd.soNestaAba} pedido(s) que ela não tem, e ela tem ${fgd.soNaGuardada} que esta aba não tem: o próximo gatilho desta aba prepara a fila DESTA aba e a grava por cima, baixando de novo o mapa dos pedidos que só esta aba tem (o custo de uma fila guardada por aparelho).`);
+      } else if (!off.cobreAFila && typeof naBase === 'number' && off.filaCobertaGuardada === naBase) {
+        out('nota: a fila guardada tem os MESMOS pedidos desta aba e o registro do aparelho diz que ela está coberta (outra aba, ou uma abertura anterior, a preparou) — o próximo gatilho desta aba confere sem baixar de novo e volta a dizer "Pronto".');
+      }
+    }
+  }
 }
 
 // Só os NÚMEROS que o app mediu (`resumo.saida`). O conteúdo da fila de saída

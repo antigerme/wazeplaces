@@ -7757,11 +7757,25 @@ function diagRedeAgora() {
     return { online: navigator.onLine, tipo: c.effectiveType || null };
 }
 
+// E o que decide a LINHA das Preferências (R14-4-06): o relatório dizia
+// `resultado pronto` com a linha em "Ainda não preparado", e só o diário (dois
+// `offline.outraAba`) dava a pista. A linha diz "Pronto" sobre a fila guardada
+// que a última preparação completa COBRIU: o carimbo da fila guardada que esta
+// aba conhece (`filaGravadaEm`; no treino com a fila real vazia, o da que espera
+// o "Sair" dele), o que a preparação cobriu (`filaPreparada`) e sobre qual fila
+// ela trabalhou por último (`filaVarrida`). `cobreAFila` é a MESMA conta da linha
+// (`atualizarLinhaDoOffline`), e `precisaVarrer`, a do próximo gatilho. Só
+// carimbos (hora de gravação) e booleanos — nada de terceiro.
 function diagOfflineAgora() {
     try {
+        const esperando = filaReal().length ? null : filaGuardadaEsperandoOTreino();
+        const gravadaEm = esperando ? esperando.t : offlineFilaGravadaEm;
         return { ligado: offlineLigado(), janelaServida: offlineJanelaServida,
                  janelaAtual: Math.floor(Date.now() / OFFLINE_CICLO_MS),
-                 resultado: offlineUltimoResultado, varrendo: offlineVarrendo };
+                 resultado: offlineUltimoResultado, varrendo: offlineVarrendo,
+                 filaGravadaEm: gravadaEm, filaPreparada: offlineFilaPreparada, filaVarrida: offlineFilaVarrida,
+                 cobreAFila: offlineFilaPreparada !== null && offlineFilaPreparada === gravadaEm,
+                 precisaVarrer: offlinePrecisaVarrer() };
     } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }
 
@@ -10641,14 +10655,33 @@ async function diagOffline() {
     try {
         const f = await offlineLerFila();
         // `desdeMin`: de quando é a LISTA (o começo da busca que a trouxe). É
-        // contra ele que os pousos filtram a reabertura sem rede.
+        // contra ele que os pousos filtram a reabertura sem rede. `t`: o CARIMBO
+        // dela, o que a linha compara com o que a preparação cobriu (R14-4-06).
         o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - f.t) / 60000),
-                               desdeMin: Number.isFinite(f.desde) ? Math.round((Date.now() - f.desde) / 60000) : null } : null;
+                               desdeMin: Number.isFinite(f.desde) ? Math.round((Date.now() - f.desde) / 60000) : null,
+                               t: Number.isFinite(f.t) ? f.t : null } : null;
+        // E QUANTOS pedidos desta aba a fila guardada não tem, e vice-versa: os
+        // MESMOS pedidos de outra aba são a mesma fila (a linha volta a "Pronto"
+        // no próximo gatilho, sem baixar nada); pedidos a mais aqui são a fila
+        // guardada de outra aba, e o próximo gatilho prepara a desta. Só números.
+        if (f) {
+            const daqui = new Set(filaReal().map(chaveDoPedido).filter(Boolean));
+            const naBase = new Set(f.places.map(chaveDoPedido).filter(Boolean));
+            o.filaGuardada.soNestaAba = [...daqui].filter((k) => !naBase.has(k)).length;
+            o.filaGuardada.soNaGuardada = [...naBase].filter((k) => !daqui.has(k)).length;
+        }
     } catch (e) { o.filaGuardada = { erro: String((e && e.message) || e).slice(0, 120) }; }
     // Quantos pedidos pousaram no Waze depois da foto — os que a reabertura sem
     // rede tira da fila guardada. Só o número.
     try { o.pousosGravados = offlineLerPousos().length; } catch (e) {}
-    try { o.janelaGuardada = await offlineLerJanela(); } catch (e) {}
+    // A janela da última preparação completa do APARELHO e QUAL fila ela cobriu
+    // (`filaCoberta`): é por ele que a reabertura — e a gravação de qualquer aba
+    // — sabe se a fila guardada está coberta (R14-4-01, R14-4-06).
+    try {
+        const reg = await offlineLerRegistroDaJanela();
+        o.janelaGuardada = reg ? reg.janela : null;
+        o.filaCobertaGuardada = reg && Number.isFinite(reg.filaCoberta) ? reg.filaCoberta : null;
+    } catch (e) {}
     try {
         if (window.caches && await caches.has(OFFLINE_TILES_CACHE)) {
             o.tilesNoCache = (await (await caches.open(OFFLINE_TILES_CACHE)).keys()).length;
