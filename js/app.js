@@ -20490,7 +20490,10 @@ function avisarConsequencia(actionType) {
     vistas[actionType] = true;
     AppState.preferences.consequenciaVista = vistas;
     savePreferences();
-    const punho = showToast(t('consequencia.' + actionType), 'hint', 7000);
+    // O banner do `hint` (o lugar, a cor e os 7 s), com o "i" de informação: o
+    // relógio do `hint` diz "esperando envio" sobre o que acabou de SAIR (R14-8-13).
+    // O punho fica guardado: o treino tira o aviso da tela e o devolve no fim (R14-7-A5).
+    const punho = showToast(t('consequencia.' + actionType), 'hint', 7000, null, { icone: 'informacao' });
     anotarAvisoDeUmaVezNaTela({ qual: 'consequencia', tipo: actionType, punho });
 }
 // Só as que ESCREVEM no Waze. Pular é local — o pedido volta na próxima busca,
@@ -28231,7 +28234,9 @@ function toggleTheme() {
 // tela junto com a seleção; e o relógio espera enquanto houver texto dele
 // selecionado (auditoria de 2026-09-26). A aparência não muda.
 // `sensivel`: o texto é credencial e fica FORA do diário (ver abaixo).
-function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false, sensivel = false } = {}) {
+// `icone`: o ícone de OUTRO conceito no mesmo tipo de aviso (o lugar, a cor e a
+// duração seguem o `type`) — ver `informacao` abaixo.
+function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false, sensivel = false, icone = null } = {}) {
     // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
     // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
@@ -28271,11 +28276,20 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null, { 
         info: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
         achievement: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 21h8m-4-4v4m6-17v4a6 6 0 11-12 0V4h12zm0 2h2a2 2 0 010 4h-2m-12-4H4a2 2 0 000 4h2"></path></svg>',
         // Cronômetro: a dica é sobre TEMPO, e o ícone diz isso antes do texto.
-        hint: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+        hint: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+        // O "i" do `info`, no tamanho do banner. É o do aviso de primeira vez da
+        // CONSEQUÊNCIA ("Rejeição enviada ao Waze em seu nome…", `avisarConsequencia`),
+        // que saía com o RELÓGIO do `hint` — e o relógio, no app, é "parado
+        // esperando envio" (o indicador da fila de saída), dito sobre uma ação
+        // que acabou de SAIR (auditoria da rodada 14, R14-8-13). O ✓ diria
+        // "lido" (o verde do ✓ é o marcar como lido): informação é o "i". O
+        // relógio fica com o que é sobre tempo: a dica do Desfazer e o
+        // "Rejeitando N…" da recusa automática.
+        informacao: '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
     };
 
     toast.className = `toast ${colors[type] || colors.info} text-white font-medium text-sm`;
-    toast.innerHTML = `${(icons[type] || icons.info)}<span class="flex-1">${escapeHtml(message)}</span>`;
+    toast.innerHTML = `${(icons[icone] || icons[type] || icons.info)}<span class="flex-1">${escapeHtml(message)}</span>`;
     toast.title = t('toast.dismissHint');
 
     let removed = false;

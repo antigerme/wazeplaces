@@ -5,12 +5,15 @@
 //  R14-8-01 · a SETA com o foco num ✕ ↑ ✓ do card tirava o card com o botão
 //             focado e o foco caía no <body>; o Enter no MESMO botão já levava o
 //             foco ao equivalente do card seguinte (C10). MEDIDO nos dois motores.
+//  R14-8-13 · o aviso de primeira vez "Rejeição enviada ao Waze…" saía com o
+//             RELÓGIO do `hint`, que no app quer dizer "esperando envio".
 //
 // (O R14-8-05, a idade de MESES em francês, mora em test/idade.test.mjs; os do
 // Galaxy Fold — R14-8-03, -11 e -12 —, em test/tela-fold.test.mjs.)
 //
 // O foco pousando de verdade, nos dois motores, está no bloco "O CARD"
-// (card/teclado) do `tools/smoke-browser.mjs`.
+// (card/teclado) do `tools/smoke-browser.mjs`; o ícone do aviso, no bloco "OS
+// AVISOS DE UMA VEZ".
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -179,4 +182,62 @@ test('R14-8-01: as TRÊS setas passam pela promessa, ANTES do `triggerSwipe`', (
     const re = new RegExp(`e\\.key === '${k}'\\) \\{\\s*e\\.preventDefault\\(\\);\\s*prometerFocoDaSeta\\('${d}'\\);\\s*if \\(window\\.triggerSwipe\\)`);
     assert.match(teclas, re, `a seta ${k} decide sem prometer o foco ao card que fica`);
   }
+});
+
+// ═══ R14-8-13 · o ícone do aviso de primeira vez ═════════════════════════════
+// O `showToast` e o `avisarConsequencia` DE VERDADE, com o DOM de mentira.
+const CAMINHO_RELOGIO = 'M12 8v4l3 3';
+const CAMINHO_INFO = 'M13 16h-1v-4h-1m1-4h.01';
+function montarAviso() {
+  const toasts = [];
+  const containers = {};
+  const container = (id) => (containers[id] ||= { id, children: [], appendChild(el) { this.children.push(el); toasts.push({ container: id, el }); },
+    removeChild() {}, get firstElementChild() { return this.children[0]; } });
+  const relogios = [];
+  const deps = {
+    document: {
+      getElementById: (id) => container(id),
+      createElement: () => ({ style: {}, className: '', innerHTML: '', title: '', addEventListener() {}, querySelector: () => null, remove() {} }),
+    },
+    window: { getSelection: () => ({ isCollapsed: true }) },
+    setTimeout: (fn, ms) => { relogios.push(ms); return relogios.length; }, clearTimeout() {},
+    dlog() {}, t: (k) => k, escapeHtml: (s) => s, console, TOAST_COPIAVEL_RECHECA_MS: 1500,
+    Treino: { ativo: false }, AppState: { preferences: {} }, avisoDeUmaVezSaiAgora: () => true, savePreferences() {},
+  };
+  const fonte = [fatiar('showToast'), constante('CONSEQUENCIA_AVISADA'), fatiar('avisarConsequencia'),
+    'return { showToast, avisarConsequencia };'].join('\n');
+  const nomes = Object.keys(deps);
+  const app = new Function(...nomes, fonte)(...nomes.map((n) => deps[n]));
+  return { app, toasts, relogios };
+}
+
+test('R14-8-13: o aviso de primeira vez da consequência sai com o "i" de informação, não com o relógio de "esperando envio"', () => {
+  for (const tipo of ['reject', 'read']) {
+    const m = montarAviso();
+    m.app.avisarConsequencia(tipo);
+    assert.equal(m.toasts.length, 1, `PRÉ-CONDIÇÃO (${tipo}): o aviso não saiu`);
+    const { container, el } = m.toasts[0];
+    assert.equal(container, 'bannerContainer', `${tipo}: o aviso deixou de ser o banner do topo`);
+    assert.match(el.className, /from-cyan-700/, `${tipo}: o aviso perdeu a cor do banner de dica`);
+    assert.equal(m.relogios[0], 7000, `${tipo}: o aviso mudou de duração`);
+    assert.ok(!el.innerHTML.includes(CAMINHO_RELOGIO),
+      `DEFEITO (${tipo}): o aviso "${'consequencia.' + tipo}" saiu com o RELÓGIO — no app ele é "parado esperando envio", dito sobre o que acabou de SAIR (R14-8-13)`);
+    assert.ok(el.innerHTML.includes(CAMINHO_INFO), `${tipo}: o aviso não saiu com o "i" de informação`);
+    assert.match(el.innerHTML, /^<svg class="w-6 h-6 flex-shrink-0"/, `${tipo}: o ícone não tem o tamanho dos outros banners (24px)`);
+  }
+});
+
+test('R14-8-13 CONTROLE: o relógio continua com o que é sobre TEMPO, e o "i" é o MESMO do aviso de informação', () => {
+  const m = montarAviso();
+  m.app.showToast('toast.undoHint', 'hint', 20000, () => {});
+  m.app.showToast('auto.andando', 'hint', 600000);
+  m.app.showToast('qualquer', 'info');
+  const [dica, recusa, info] = m.toasts.map((x) => x.el.innerHTML);
+  assert.ok(dica.includes(CAMINHO_RELOGIO), 'a dica do Desfazer perdeu o relógio');
+  assert.ok(recusa.includes(CAMINHO_RELOGIO), 'o "Rejeitando N…" perdeu o relógio');
+  // Mesmo conceito, mesmo ícone: o desenho do "i" do banner é o do `info`.
+  const caminho = (h) => (/ d="([^"]+)"/.exec(h) || [])[1];
+  const n = montarAviso();
+  n.app.avisarConsequencia('reject');
+  assert.equal(caminho(n.toasts[0].el.innerHTML), caminho(info), 'o "i" da consequência não é o mesmo desenho do aviso de informação');
 });

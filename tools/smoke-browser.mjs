@@ -9437,8 +9437,13 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const h = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
       if (h && b.contains(h)) recebe++;
     }
-    return { texto: b.textContent.trim().slice(0, 40), recebe };
+    // O ícone (o traço do svg): o "i" de informação na consequência, o relógio
+    // na dica do Desfazer (R14-8-13).
+    const traco = b.querySelector('svg path');
+    return { texto: b.textContent.trim().slice(0, 40), recebe, icone: traco ? traco.getAttribute('d') : null };
   }); };
+  const ICONE_INFO = 'M13 16h-1v-4h-1m1-4h.01';
+  const ICONE_RELOGIO = 'M12 8v4l3 3';
   const marcas = (page) => page.evaluate(() => {
     const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
     return { reject: !!(p.consequenciaVista && p.consequenciaVista.reject), gate: p.undoGateSeen === true, dica: p.dicaDesfazerVista === true };
@@ -9479,6 +9484,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(veio.ok, 'avisos de uma vez (1): os Filtros fecharam e a consequência que esperava não apareceu');
     const b = await banner(page);
     checa(!!b && b.recebe === 9, 'avisos de uma vez (1): o banner que esperava não recebe o toque inteiro', JSON.stringify(b));
+    checa(!!b && String(b.icone).startsWith(ICONE_INFO),
+      'avisos de uma vez (1): a consequência do 1º ✕ saiu sem o "i" de informação — o relógio, no app, é "esperando envio" (R14-8-13)', JSON.stringify(b));
     checa((await marcas(page)).reject, 'avisos de uma vez (1): o banner apareceu e não ficou marcado (sairia de novo)');
     checa(erros.length === 0, 'avisos de uma vez (1): erro de JS', erros[0]);
     await ctx.close();
@@ -9492,6 +9499,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     await doisQuadros(page);
     const b = await banner(page);
     checa(!!b && b.recebe === 9, 'avisos de uma vez (CONTROLE): sem camada, a consequência não saiu no pouso, ou não recebe o toque', JSON.stringify(b));
+    checa(!!b && String(b.icone).startsWith(ICONE_INFO),
+      'avisos de uma vez (CONTROLE): a consequência saiu sem o "i" de informação (R14-8-13)', JSON.stringify(b));
     checa((await marcas(page)).reject, 'avisos de uma vez (CONTROLE): a consequência saiu e não ficou marcada');
     await page.evaluate(() => openFiltersModal());
     await doisQuadros(page);
@@ -9545,6 +9554,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(veio.ok, 'avisos de uma vez (3): a Ajuda fechou e a dica que esperava não apareceu');
     const b = await banner(page);
     checa(!!b && b.recebe === 9, 'avisos de uma vez (3): o banner da dica não recebe o toque inteiro', JSON.stringify(b));
+    // CONTROLE do ícone: a dica é sobre TEMPO e segue com o relógio — a medida
+    // distingue os dois desenhos.
+    checa(!!b && String(b.icone).startsWith(ICONE_RELOGIO), 'avisos de uma vez (3): a dica do Desfazer perdeu o relógio', JSON.stringify(b));
     checa((await marcas(page)).dica, 'avisos de uma vez (3): a dica apareceu e não ficou marcada');
     checa(erros.length === 0, 'avisos de uma vez (3): erro de JS', erros[0]);
     await ctx.close();
