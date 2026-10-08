@@ -15,7 +15,11 @@
 //    DECIDIDO: a viva volta a guardar a sua. O aviso do token sozinho não separa a
 //    queda do "Sair" — MEDIDO: no "Sair" ele chega com a CONTA ainda no aparelho
 //    (abas em processos diferentes) —, e quem diz que foi a queda é a aba que caiu,
-//    pelo canal da sessão.
+//    pelo canal da sessão;
+//  · a pista s18 (pedido extra do lote) — o "Sair" de outra aba numa aba que CAIU na
+//    tela de entrada com a pergunta à extensão NO AR ia pelo caminho cheio: o
+//    "Colar cookies" fechava com o texto, e "Você saiu em outra aba" aparecia numa
+//    aba que nem estava logada.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js: o que o teste não
 // fornece vira um "buraco negro" que aceita qualquer chamada e anota o nome. Cada
@@ -921,4 +925,137 @@ test('R14-1-03: CONTROLES — a recusa do PORTÃO (terminal) e a queda de uma se
   assert.deepEqual(recusa.recebidos, [], 'a recusa do portão avisou as outras abas — a viva guardaria a sessão de uma conta recusada');
   const soNestaAba = abaQueCai({ guardada: false });
   assert.deepEqual(soNestaAba.recebidos, [], 'a queda de uma sessão que não é a do aparelho avisou (o aparelho segue com a da outra aba)');
+});
+
+
+// ═══ a pista s18 · o "Sair" de outra aba com a pergunta à extensão NO AR ══════
+// A aba que CAIU na tela de entrada (a fila, o card e a conta 111 na memória), com
+// a pergunta da VOLTA à extensão no ar e os cookies sendo colados; noutra aba a
+// MESMA conta entra e dá "Sair". O `handleLogout` DE VERDADE (a mesma lista do
+// "Sair"), com o fechamento das camadas e o aviso espionados: o fechamento de
+// mentira fecha os diálogos abertos com a limpeza deles, como o de verdade.
+function sairComPerguntaNoAr({ nuncaEntrou = false } = {}) {
+  const t = telaDeEntrada({});
+  const log = [];
+  const real = apiDeVerdade(nuncaEntrou ? {} : { [CONTA_KEY]: JSON.stringify({ id: '111', s: marcaDe('TOK-A') }) });
+  real.API._post = async (rota, corpo) => { log.push('rota ' + rota + (corpo && corpo.action ? ' ' + corpo.action : '') + (corpo && corpo.sessionToken ? ' ' + corpo.sessionToken : '')); return { success: true }; };
+  const ext = janelaComExtensao(log);
+  const AppState = { authenticated: false, profile: null, queue: nuncaEntrou ? [] : [{ venueID: 'p1' }],
+    currentPlace: nuncaEntrou ? null : { venueID: 'p1' } };
+  const deps = {
+    window: ext.window, document: t.document, API: real.API, safeLS: real.safeLS, AppState, CONTA_KEY,
+    MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    resgateEmVoo: false, authInFlight: false, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    epocaDaSessao: 0, setTimeout: () => 1, clearTimeout: () => {}, callWithRetry: (fn) => fn(),
+    podeInstalarExtensao: () => true,
+    contaConfirmadaNestaAba: nuncaEntrou ? null : { id: '111', s: marcaDe('TOK-A') },
+    tokenTiradoPorOutraAba: null, pareamentosEmitidos: new Set(),
+    closeModal: (id) => { log.push('fechou ' + id); t.fechar(id); },
+    fecharCamadasAbertas: () => {
+      log.push('fechou as camadas');
+      for (const id of ['pasteModal', 'pairEnterModal']) if (!t.els[id].classList.contains('hidden')) t.fechar(id);
+    },
+    showToast: (m) => log.push('aviso ' + m), t: (k) => k,
+    showMainScreen: () => { log.push('app com ' + real.API.sessionToken); AppState.authenticated = true; t.mostrarOApp(); },
+    showAuthScreen: () => log.push('tela de entrada'),
+    resetQueue: () => {}, loadProfileAndAuxData: () => null, conhecerContaDoLogin: () => {}, startFetching: () => {},
+    esvaziarFilaDeSaida: () => {}, mostrarEntrandoPelaExtensao: () => {}, abrirComSessaoSalva: () => log.push('adotou'),
+    showAccessDenied: () => log.push('acesso restrito'), conferirContaDestaAba: () => log.push('conferiu a conta'),
+    relerPlacarDeOutraAba: () => {}, relerPreferenciasDeOutraAba: () => {}, updateInFlightIndicator: () => {},
+    guardarDeVoltaASessaoDestaAba: () => false,
+  };
+  const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', 'entrarPelaExtensao', 'adotarSessaoDoAparelho',
+    'textoDigitadoNaEntrada', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina',
+    'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao', 'negadoDaExtensao', 'aoFimDaPerguntaDaAbertura',
+    'seOutraContaTomouOAparelhoDaQueCaiu', 'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho',
+    'sessaoDestaAbaEhAGuardada', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'guardaASessaoQueCaiu', 'contaDestaAbaEmDuvida', 'marcaDaSessao', 'handleLogout'], deps);
+  // A MESMA conta entra noutra aba (o token e a conta dela) e dá "Sair": o token
+  // sai, depois a conta — a ordem do `handleLogout` de lá, um aviso por chave.
+  const outraAbaEntraESai = () => {
+    real.dados.set(TOKEN, 'TOK-C');
+    h.sincronizarComOutraAba(TOKEN);
+    real.dados.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('TOK-C') }));
+    h.sincronizarComOutraAba(CONTA_KEY);
+    real.dados.delete(TOKEN);
+    h.sincronizarComOutraAba(TOKEN);
+    real.dados.delete(CONTA_KEY);
+    h.sincronizarComOutraAba(CONTA_KEY);
+  };
+  return { h, deps, log, real, tela: t, responder: ext.responder, outraAbaEntraESai };
+}
+
+test('pista s18: o "Sair" de outra aba com a pergunta da VOLTA no ar e o cookies.txt colado — o "Colar" fica com o texto, sem aviso, e a resposta da extensão não entra por cima', async () => {
+  const m = sairComPerguntaNoAr();
+  m.h.aoVoltarAAba();
+  assert.ok(m.log.includes('perguntou à extensão'), 'PRÉ-CONDIÇÃO: a volta não perguntou à extensão');
+  m.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);
+  m.outraAbaEntraESai();
+  await tiques();
+  assert.ok(!m.log.includes('fechou as camadas') && !m.log.includes('aviso toast.saiuNoutraAba'),
+    'DEFEITO: o "Sair" de outra aba foi pelo caminho CHEIO numa aba na tela de entrada — fechou o que a pessoa abriu e avisou "Você saiu em outra aba": ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, TEXTO_COLADO, 'o que estava colado foi apagado');
+  assert.ok(!m.tela.els.pasteModal.classList.contains('hidden'), 'o "Colar cookies" fechou');
+  assert.equal(m.deps.epocaDaSessao, 1, 'a saída não subiu a época — a pergunta no ar seguiria valendo');
+  assert.equal(m.deps.contaConfirmadaNestaAba, null, 'a memória da sessão que caiu ficou (R12-1-04)');
+  // A pergunta que estava no ar responde DEPOIS do "Sair" de lá, com uma sessão: ela
+  // não entra por cima dele (o K3/R12-1-02), e sai do servidor.
+  m.responder({ action: 'aguarde' });
+  m.responder({ action: 'sessao', token: 'TOK-EXT', conta: '111' });
+  await tiques();
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('app com ')),
+    'a resposta da extensão entrou por cima do "Sair" da outra aba: ' + JSON.stringify(m.log));
+  assert.ok(m.log.includes('rota sessao destroy TOK-EXT'), 'a sessão que a extensão criou ficou órfã no servidor');
+  assert.equal(m.tela.els.cookiesTextarea.value, TEXTO_COLADO);
+});
+
+test('pista s18: a aba que NUNCA entrou, com a pergunta da ABERTURA no ar — o "Sair" de outra aba cancela a pergunta sem avisar nem fechar nada', async () => {
+  // NADA digitado de propósito: com texto no "Colar", a régua do R13-1-05 barraria a
+  // resposta sozinha, e a medida não veria se a pergunta foi mesmo cancelada.
+  const m = sairComPerguntaNoAr({ nuncaEntrou: true });
+  m.h.entrarPelaExtensao().then(m.h.aoFimDaPerguntaDaAbertura);
+  m.outraAbaEntraESai();
+  await tiques();
+  assert.ok(!m.log.includes('fechou as camadas') && !m.log.includes('aviso toast.saiuNoutraAba'),
+    'DEFEITO: "Você saiu em outra aba" numa aba que nem estava logada (ou as camadas fecharam): ' + JSON.stringify(m.log));
+  m.responder({ action: 'aguarde' });
+  m.responder({ action: 'sessao', token: 'TOK-EXT', conta: '111' });
+  await tiques();
+  assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('app com ')),
+    'DEFEITO: a resposta da extensão entrou por cima do "Sair" da outra aba (a pergunta no ar não foi cancelada): ' + JSON.stringify(m.log));
+  assert.ok(m.log.includes('rota sessao destroy TOK-EXT'), 'a sessão que a extensão criou ficou órfã no servidor');
+});
+
+test('pista s18: CONTROLE da medida — sem o "Sair" no meio, a mesma resposta da extensão ENTRA (a pergunta da abertura de sempre)', async () => {
+  const m = sairComPerguntaNoAr({ nuncaEntrou: true });
+  const p = m.h.entrarPelaExtensao().then(m.h.aoFimDaPerguntaDaAbertura);
+  m.responder({ action: 'aguarde' });
+  m.responder({ action: 'sessao', token: 'TOK-EXT', conta: '111' });
+  await p;
+  assert.ok(m.log.includes('app com TOK-EXT'), 'CONTROLE: a pergunta da abertura deixou de entrar pela extensão — a medida acima não prova nada: ' + JSON.stringify(m.log));
+});
+
+test('pista s18: CONTROLES — sem pergunta no ar, a aba que caiu sai pelo mesmo caminho (R12-1-04); a que nunca entrou não sai; e a RENOVAÇÃO no ar (o app na tela) segue pelo caminho cheio', async () => {
+  // A aba que caiu, SEM pergunta no ar: o R12-1-04 de sempre — a medida enxerga o caminho bom.
+  const c = sairComPerguntaNoAr();
+  c.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);
+  c.outraAbaEntraESai();
+  await tiques();
+  assert.ok(!c.log.includes('fechou as camadas') && !c.log.includes('aviso toast.saiuNoutraAba'), JSON.stringify(c.log));
+  assert.equal(c.tela.els.cookiesTextarea.value, TEXTO_COLADO);
+  assert.equal(c.deps.epocaDaSessao, 1, 'CONTROLE: a aba que caiu deixou de ser alcançada pelo "Sair" de outra aba');
+  // A que nunca entrou, sem pergunta no ar: não tem o que encerrar (R9-1-03).
+  const n = sairComPerguntaNoAr({ nuncaEntrou: true });
+  n.outraAbaEntraESai();
+  await tiques();
+  assert.equal(n.deps.epocaDaSessao, 0, 'a aba que só mostrava a tela de entrada ganhou um "Sair" que não era dela');
+  // A RENOVAÇÃO da queda pergunta com o app AINDA na tela: aba com sessão a encerrar, o caminho cheio.
+  const r = sairComPerguntaNoAr();
+  r.tela.mostrarOApp();
+  r.deps.extPerguntando = true;
+  r.outraAbaEntraESai();
+  await tiques();
+  assert.ok(r.log.includes('fechou as camadas') && r.log.includes('aviso toast.saiuNoutraAba'),
+    'a aba com o app na tela (a renovação no ar) deixou de sair pelo caminho cheio: ' + JSON.stringify(r.log));
 });

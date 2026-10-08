@@ -141,11 +141,18 @@ test('A1: o "Sair" noutra aba (token E conta fora do aparelho) encerra esta — 
   m = montarDecisao();
   m.h.sincronizarComOutraAba(null);
   assert.deepEqual(m.log, [SAIU], 'o armazenamento limpo noutra aba não encerrou esta');
-  // Esta só perguntava à extensão (a abertura, ou a renovação de uma queda): a
-  // resposta traria uma sessão NOVA por cima do "Sair".
+  // Esta só perguntava à extensão: a resposta traria uma sessão NOVA por cima do
+  // "Sair". Na RENOVAÇÃO de uma queda (o app ainda na tela), pelo caminho cheio;
+  // na TELA DE ENTRADA (a abertura, a volta a esta aba), pelo caminho dela, que
+  // também sobe a época mas não fecha o que a pessoa abriu ali nem avisa (a pista
+  // s18 da rodada 14, em test/contas-auditoria-r14).
+  m = montarDecisao({ naMemoria: false, autenticado: false, appNaTela: true, perguntando: true });
+  m.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(m.log, [SAIU], 'a pergunta da renovação em voo desfaria o "Sair" da outra aba');
   m = montarDecisao({ naMemoria: false, autenticado: false, appNaTela: false, perguntando: true });
   m.h.sincronizarComOutraAba(CONTA_KEY);
-  assert.deepEqual(m.log, [SAIU], 'a pergunta à extensão em voo desfaria o "Sair" da outra aba');
+  assert.deepEqual(m.log, [['sair', { porOutraAba: true, naEntrada: true }]],
+    'a pergunta à extensão em voo na tela de entrada desfaria o "Sair" da outra aba (ou ele fechou o que a pessoa abriu ali)');
 });
 
 test('A1: CONTROLES — a QUEDA noutra aba, a entrada nova e a aba já na tela de entrada não encerram nada', () => {

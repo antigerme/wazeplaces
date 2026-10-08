@@ -12077,7 +12077,8 @@ function abrirDialogoDoSair() {
 // fechar nem sessão a destruir, e o token da memória já saiu.
 //
 // `naEntrada` (com o `porOutraAba`): esta aba estava na TELA DE ENTRADA, com a
-// memória da sessão que CAIU nela (ver `aoSairEmOutraAba`, R12-1-04). Sai a
+// memória da sessão que CAIU nela ou com uma pergunta à extensão no ar (ver
+// `aoSairEmOutraAba`, R12-1-04 e a pista s18 da rodada 14). Sai a
 // mesma lista, menos o que é da tela de entrada: as camadas da sessão já
 // fecharam na queda, e o que está aberto agora — o "Colar cookies", o código —
 // é de quem está entrando, com o que ela digita (R9-1-03). E sem o aviso: a tela
@@ -17830,11 +17831,11 @@ function conferirContaDestaAba() {
 // conta, que chega logo depois.
 function aoSairEmOutraAba() {
     if (safeLS.get('waze_session_token') || safeLS.get(CONTA_KEY)) return false;
-    // Esta aba não tem SESSÃO a encerrar: nenhuma na memória, o app fora da tela
-    // e nenhuma pergunta à extensão no ar — que traria uma sessão NOVA por cima
-    // do "Sair" de lá.
+    // Esta aba está na TELA DE ENTRADA: nenhuma sessão na memória e o app fora da
+    // tela. (A renovação da queda pergunta à extensão com o app AINDA na tela: é
+    // aba com sessão a encerrar, e sai pelo caminho de baixo.)
     const appNaTela = !document.getElementById('appScreen')?.classList.contains('hidden');
-    if (!API.temSessaoNaMemoria() && !AppState.authenticated && !appNaTela && !extPerguntando) {
+    if (!API.temSessaoNaMemoria() && !AppState.authenticated && !appNaTela) {
         // Mas a aba que CAIU na tela de entrada guarda a MEMÓRIA da sessão que
         // caiu (ver a função): sem isto, a fila, o card (dado de terceiro, no DOM
         // debaixo da tela de entrada), o rascunho da conversa e o anel de
@@ -17844,7 +17845,16 @@ function aoSairEmOutraAba() {
         // aba já o limpou) e sem fechar o que a pessoa abriu na tela de entrada:
         // o "Colar cookies", com o que ela digita, fica (R9-1-03). A aba que
         // nunca entrou não guarda nada, e segue como estava.
-        if (!guardaASessaoQueCaiu()) return false;
+        //
+        // Com uma pergunta à extensão NO AR (a volta a esta aba, a abertura), a
+        // resposta traria uma sessão NOVA por cima do "Sair" de lá: a saída sobe a
+        // época, e a resposta não entra (ver `entrarPelaExtensao`) — também na aba
+        // que nunca entrou. Pelo MESMO caminho da tela de entrada: a pergunta no
+        // ar mandava esta aba pelo caminho cheio, que fecha as camadas e avisa — o
+        // "Colar cookies" fechava com o que a pessoa estava colando, e "Você saiu
+        // em outra aba do navegador" aparecia numa aba que nem estava logada
+        // (auditoria da rodada 14, pista s18, MEDIDO nos dois motores).
+        if (!extPerguntando && !guardaASessaoQueCaiu()) return false;
         handleLogout({ porOutraAba: true, naEntrada: true });
         return true;
     }
