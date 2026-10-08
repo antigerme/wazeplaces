@@ -804,6 +804,59 @@ let extNegado = null;   // a recusa que ainda não foi mostrada (quem mostra, co
 // (ver `esquecerOutraConta`). Todo `resetQueue` a zera.
 let filaAtravessouSessao = false;
 
+// ── A sessão que a extensão entrega a VÁRIAS abas ─────────────────────────────
+// A ponte faz UM login por vez pra todas as abas (`loginDaPonte` da extensão): a
+// pergunta que chega com um login no ar recebe o desfecho DELE — o MESMO token.
+// A aba que não fica com ele (o login dela vence, ou ela deu "Sair" no meio) o
+// apagava do servidor, menos se ele já fosse o do aparelho. Com duas abas
+// perguntando juntas, a que decidia PRIMEIRO apagava o token que a outra ainda
+// ia usar: a outra entrava com uma sessão apagada — "Falha ao carregar", o 401 e
+// a renovação com um login NOVO no Waze, no nome da pessoa (auditoria da rodada
+// 14, pista do lote 17, MEDIDO no navegador: com a outra decidindo primeiro, ou
+// sozinha, nada se perdia).
+//
+// Conferir de novo "uns segundos depois" só troca a corrida de lugar: a outra aba
+// pode decidir depois do prazo (no fundo, ocupada), e o token que ela guardou
+// pode já ter sido trocado no aparelho por outro login. O certo por construção é
+// saber se OUTRA aba ainda está perguntando — é ela que recebe o mesmo desfecho,
+// e é ela que decide o dele —, e quem diz é o navegador: cada pergunta segura uma
+// trava com o nome da página (`navigator.locks`, solta no fim da pergunta, e
+// sozinha quando a página morre), e quem perde pergunta ao navegador quem mais a
+// segura (`query`, que só LÊ). Com outra perguntando, não apaga; sem nenhuma, e
+// com o token fora do aparelho, apaga — e a última das abas a decidir é a que
+// apaga, se ninguém ficou com ele. O pior caso que sobra (as duas decidindo no
+// mesmo instante) é a sessão ficar órfã no servidor até vencer — o caso aceito
+// do R12-1-06 —, nunca uma sessão em uso apagada. Sem `navigator.locks`, segue
+// como antes. O nome é da trava, não do armazenamento: trava não grava nada.
+const PERGUNTA_EXT_TRAVA = '__perguntaExt:';
+const PERGUNTA_EXT_ID = Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 8);
+
+// Segura a trava desta página enquanto a pergunta corre; devolve quem a solta.
+function segurarTravaDaPergunta(locks) {
+    let soltar = null, soltou = false;
+    try {
+        locks.request(PERGUNTA_EXT_TRAVA + PERGUNTA_EXT_ID, (lock) => {
+            if (!lock || soltou) return undefined;
+            return new Promise((ok) => { soltar = ok; });
+        }).catch(() => {});
+    } catch (e) { /* sem a trava: a outra aba decide como antes */ }
+    return () => { soltou = true; if (soltar) soltar(); };
+}
+
+// OUTRA página está perguntando à extensão agora? `false` sem resposta: o caminho
+// de antes.
+async function outraAbaPerguntandoAExtensao(locks) {
+    try {
+        const r = await locks.query();
+        const minha = PERGUNTA_EXT_TRAVA + PERGUNTA_EXT_ID;
+        const travas = [...(Array.isArray(r && r.held) ? r.held : []), ...(Array.isArray(r && r.pending) ? r.pending : [])];
+        return travas.some((l) => {
+            const nome = String((l && l.name) || '');
+            return nome.startsWith(PERGUNTA_EXT_TRAVA) && nome !== minha;
+        });
+    } catch (e) { return false; }
+}
+
 // `silencioso`: sem o "Entrando pelo WME…" por cima da tela. `manterFila`: a fila
 // que está na tela continua — só a renovação da QUEDA (`derrubarSessao`), com a
 // pessoa no meio da triagem. Eram a mesma chave, e a volta à aba (que vem da
@@ -814,6 +867,29 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
     if (extPerguntando) return Promise.resolve(false);
     extPerguntando = true;
     extNegado = null;   // uma recusa de pergunta ANTERIOR não é desta
+    // Outra aba que perguntar junto recebe o MESMO desfecho: a trava diz a ela que
+    // esta ainda decide (ver `segurarTravaDaPergunta`). Sem as travas do
+    // navegador, o caminho de antes.
+    let travas = null;
+    try {
+        const l = navigator.locks;
+        travas = l && typeof l.request === 'function' && typeof l.query === 'function' ? l : null;
+    } catch (e) { travas = null; }
+    const soltarTravaDaPergunta = travas ? segurarTravaDaPergunta(travas) : () => {};
+    // A sessão que a extensão entregou e ESTA aba não usa sai do servidor — menos
+    // se ela é a do aparelho, ou se OUTRA aba ainda está perguntando: é ela que
+    // recebe o mesmo desfecho, e ela decide o dele (ver `segurarTravaDaPergunta`).
+    // O aparelho se confere de novo DEPOIS da resposta do navegador: a outra pode
+    // tê-la guardado nesse meio. Sem as travas, na hora, como antes.
+    const apagarSessaoQueNaoEntrou = (tok) => {
+        if (!tok || tok === safeLS.get('waze_session_token')) return;
+        const apagar = () => { callWithRetry(() => API.destroySession(tok), null).catch(() => {}); };
+        if (!travas) { apagar(); return; }
+        outraAbaPerguntandoAExtensao(travas).then((outra) => {
+            if (outra || tok === safeLS.get('waze_session_token')) return;
+            apagar();
+        }).catch(() => {});
+    };
     // A época de quando a pergunta SAIU. A resposta leva até 8 s, e o "Sair"
     // pode acontecer nesse meio (o botão fica na Ajuda durante a renovação da
     // queda): o token que chegava depois entrava de novo, e o "Sair" era
@@ -832,6 +908,7 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             clearTimeout(prazo);
             extPerguntando = false;
             extRenovando = false;
+            soltarTravaDaPergunta();
             mostrarEntrandoPelaExtensao(false);
             resolve(ok);
         }
@@ -868,13 +945,13 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // extensão acabou de criar, com os cookies válidos da pessoa, SAI do
             // servidor. Só ignorada, ela ficava lá sem dono por até 21 dias,
             // depois de a pessoa pedir pra sair (auditoria da rodada 12, R12-1-02,
-            // MEDIDO). Menos se ela já é a do APARELHO: a ponte dá o desfecho de UM
-            // login a todas as abas que perguntam juntas, e a outra aba (que entrou
-            // de novo depois do "Sair") pode estar com ela — a régua logo abaixo.
+            // MEDIDO). Menos se ela já é a do APARELHO, ou se outra aba ainda está
+            // perguntando: a ponte dá o desfecho de UM login a todas as abas que
+            // perguntam juntas, e a outra aba (que entrou de novo depois do "Sair")
+            // pode estar com ela, ou ficar com ela (R14-1, ver
+            // `segurarTravaDaPergunta`).
             if (epoca !== epocaDaSessao) {
-                if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
-                    callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
-                }
+                apagarSessaoQueNaoEntrou(tokenDaExtensao);
                 return fim(false);
             }
             // Um login DESTA aba no meio da pergunta: a pessoa colou os cookies,
@@ -886,9 +963,10 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // "Outra conta entrou neste aparelho…" (auditoria da rodada 11,
             // R11-1-03, MEDIDO). Vale o login que já entrou (a memória com OUTRA
             // sessão) e o que ainda está no ar. A sessão da extensão sai do
-            // servidor, menos se ela já é a do aparelho: a ponte dá o desfecho de
-            // UM login a todas as abas que perguntam juntas, e a outra pode estar
-            // com ela.
+            // servidor, menos se ela já é a do aparelho ou se outra aba ainda está
+            // perguntando: a ponte dá o desfecho de UM login a todas as abas que
+            // perguntam juntas, e a outra pode estar com ela — ou ficar com ela
+            // (R14-1, ver `segurarTravaDaPergunta`).
             //
             // Em TODA pergunta que não é a renovação da QUEDA (`manterFila`): a
             // abertura e o link de pareamento que falhou (R10-1-04) também. A régua
@@ -912,9 +990,7 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
                 && ((API.temSessaoNaMemoria() && API.sessionToken !== tokenDaExtensao) || authInFlight || resgateEmVoo
                     || textoDigitadoNaEntrada());
             if (loginDestaAbaVence) {
-                if (tokenDaExtensao !== safeLS.get('waze_session_token')) {
-                    callWithRetry(() => API.destroySession(tokenDaExtensao), null).catch(() => {});
-                }
+                apagarSessaoQueNaoEntrou(tokenDaExtensao);
                 return fim(false);
             }
             API.setSession(String(d.token), 'extensao');

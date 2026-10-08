@@ -445,3 +445,133 @@ test('R14-1-04 (irmão): a RENOVAÇÃO da queda falha com OUTRA conta tendo toma
   await c.cair();
   assert.deepEqual(c.log.filter((x) => Array.isArray(x)), [], 'a MESMA conta encerrou a memória da aba que caiu');
 });
+
+// ═══ a pista do lote 17 (s13) · a sessão que a extensão entrega a VÁRIAS abas ══
+const PERGUNTA_EXT_TRAVA = constante('PERGUNTA_EXT_TRAVA');
+// As travas do navegador de mentira, DIVIDIDAS pelas abas: `request` segura a
+// trava até o callback devolver (uma promessa, aqui), `query` diz quem segura.
+// `antesDeResponder`: o que acontece ENQUANTO a pergunta ao navegador corre.
+function travasDoNavegador() {
+  const seguras = new Map();
+  const t = {
+    antesDeResponder: null,
+    de: () => ({
+      request(nome, cb) {
+        return new Promise((ok, erro) => {
+          queueMicrotask(async () => {
+            seguras.set(nome, true);
+            try { ok(await cb({ name: nome })); } catch (e) { erro(e); } finally { seguras.delete(nome); }
+          });
+        });
+      },
+      async query() {
+        await tique();
+        if (typeof t.antesDeResponder === 'function') t.antesDeResponder();
+        return { held: [...seguras.keys()].map((name) => ({ name, mode: 'exclusive' })), pending: [] };
+      },
+    }),
+    seguras,
+  };
+  return t;
+}
+
+// Uma ABA perguntando à extensão, sobre o aparelho de todas (`ap`, um Map) e as
+// travas de todas. `noAr`: um login desta aba no meio (o login dela vence).
+function abaPerguntando(nome, { ap, travas, apagadas, noAr = null, comTravas = true }) {
+  const log = [];
+  const ext = janelaComExtensao(log);
+  const t = telaDeEntrada({});
+  const API = {
+    sessionToken: null,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(tok) { log.push('entrou com ' + tok); this.sessionToken = tok; ap.set(TOKEN, tok); },
+    destroySession: (tok) => { apagadas.push(nome + ' apagou ' + tok); return Promise.resolve({ success: true }); },
+  };
+  const deps = {
+    window: ext.window, document: t.document, MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, AppState: {}, API,
+    navigator: comTravas ? { locks: travas.de() } : {},
+    PERGUNTA_EXT_TRAVA, PERGUNTA_EXT_ID: nome,
+    safeLS: { get: (k) => (ap.has(k) ? ap.get(k) : null) },
+    authInFlight: noAr === 'cookies', resgateEmVoo: false, callWithRetry: (fn) => fn(),
+    EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    setTimeout: () => 1, clearTimeout: () => {},
+    closeModal: (id) => t.fechar(id), showMainScreen: () => log.push('app'),
+    resetQueue: () => {}, loadProfileAndAuxData: () => Promise.resolve(), conhecerContaDoLogin: () => {},
+    startFetching: () => {}, esvaziarFilaDeSaida: () => {}, mostrarEntrandoPelaExtensao: () => {},
+  };
+  const h = montar(['entrarPelaExtensao', 'segurarTravaDaPergunta', 'outraAbaPerguntandoAExtensao', 'textoDigitadoNaEntrada',
+    'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina'], deps);
+  return { h, log, API, responder: ext.responder, perguntar: () => h.entrarPelaExtensao({ silencioso: true }) };
+}
+const SESSAO_EXT = { action: 'sessao', token: 'TOK-EXT', conta: '111' };
+
+test('pista s13: duas abas perguntam à extensão e uma tem um login no ar — a que decide PRIMEIRO não apaga a sessão que a outra vai usar', async () => {
+  const ap = new Map(), travas = travasDoNavegador(), apagadas = [];
+  const X = abaPerguntando('X', { ap, travas, apagadas, noAr: 'cookies' });
+  const Y = abaPerguntando('Y', { ap, travas, apagadas });
+  const px = X.perguntar(), py = Y.perguntar();
+  await tiques();
+  assert.equal(travas.seguras.size, 2, 'PRÉ-CONDIÇÃO: as duas perguntas não seguraram a trava delas');
+  X.responder(SESSAO_EXT);                       // X decide primeiro: o login dela vence
+  assert.equal(await px, false, 'PRÉ-CONDIÇÃO: o login de X no ar não venceu a sessão da extensão');
+  await tiques(6);
+  assert.deepEqual(apagadas, [], 'DEFEITO: X apagou no servidor a sessão que a ponte entregou também a Y, que ainda vai usá-la');
+  Y.responder(SESSAO_EXT);
+  assert.equal(await py, true);
+  await tiques(6);
+  assert.deepEqual(Y.log.filter((x) => x.startsWith('entrou')), ['entrou com TOK-EXT']);
+  assert.deepEqual(apagadas, [], 'a sessão que Y usa foi apagada do servidor');
+  assert.equal(travas.seguras.size, 0, 'uma pergunta acabou sem soltar a trava (a outra aba nunca mais apagaria nada)');
+});
+
+test('pista s13: as DUAS perdem (um login no ar em cada) — a ÚLTIMA a decidir apaga, uma vez só', async () => {
+  const ap = new Map(), travas = travasDoNavegador(), apagadas = [];
+  const X = abaPerguntando('X', { ap, travas, apagadas, noAr: 'cookies' });
+  const Y = abaPerguntando('Y', { ap, travas, apagadas, noAr: 'cookies' });
+  X.perguntar(); Y.perguntar();
+  await tiques();
+  X.responder(SESSAO_EXT);
+  await tiques(6);
+  assert.deepEqual(apagadas, [], 'X apagou com Y ainda perguntando');
+  Y.responder(SESSAO_EXT);
+  await tiques(6);
+  assert.deepEqual(apagadas, ['Y apagou TOK-EXT'],
+    'DEFEITO: ninguém ficou com a sessão da extensão e ela não saiu do servidor (ou saiu duas vezes): ' + JSON.stringify(apagadas));
+});
+
+test('pista s13: a outra aba guarda a sessão ENQUANTO a pergunta ao navegador corre — a conferência do aparelho se repete depois dela', async () => {
+  const ap = new Map(), travas = travasDoNavegador(), apagadas = [];
+  const X = abaPerguntando('X', { ap, travas, apagadas, noAr: 'cookies' });
+  X.perguntar();
+  await tiques();
+  // Ninguém mais pergunta quando o navegador responde — mas a outra aba (que já
+  // acabou a dela) acabou de guardar a sessão no aparelho.
+  travas.antesDeResponder = () => ap.set(TOKEN, 'TOK-EXT');
+  X.responder(SESSAO_EXT);
+  await tiques(6);
+  assert.deepEqual(apagadas, [], 'DEFEITO: X apagou a sessão que a outra aba guardou enquanto a conferência corria');
+});
+
+test('pista s13: CONTROLES — sozinha (ou sem as travas do navegador), a aba cujo login venceu apaga a sessão da extensão, como antes', async () => {
+  const ap = new Map(), travas = travasDoNavegador(), apagadas = [];
+  const X = abaPerguntando('X', { ap, travas, apagadas, noAr: 'cookies' });
+  X.perguntar();
+  await tiques();
+  X.responder(SESSAO_EXT);
+  await tiques(6);
+  assert.deepEqual(apagadas, ['X apagou TOK-EXT'], 'CONTROLE: sozinha, a sessão da extensão que perdeu ficou órfã no servidor');
+  const semTravas = [];
+  const S = abaPerguntando('S', { ap: new Map(), travas, apagadas: semTravas, noAr: 'cookies', comTravas: false });
+  S.perguntar();
+  S.responder(SESSAO_EXT);
+  assert.deepEqual(semTravas, ['S apagou TOK-EXT'], 'sem as travas do navegador, o caminho de antes (na hora) mudou');
+  // A guardada no aparelho segue sem sair (R11-1-03).
+  const g = new Map([[TOKEN, 'TOK-EXT']]), ag = [];
+  const G = abaPerguntando('G', { ap: g, travas: travasDoNavegador(), apagadas: ag, noAr: 'cookies' });
+  G.perguntar();
+  await tiques();
+  G.responder(SESSAO_EXT);
+  await tiques(6);
+  assert.deepEqual(ag, [], 'a sessão da extensão que já é a do aparelho saiu do servidor');
+});
