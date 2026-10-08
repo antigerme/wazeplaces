@@ -20290,7 +20290,8 @@ function avisarConsequencia(actionType) {
     vistas[actionType] = true;
     AppState.preferences.consequenciaVista = vistas;
     savePreferences();
-    showToast(t('consequencia.' + actionType), 'hint', 7000);
+    const punho = showToast(t('consequencia.' + actionType), 'hint', 7000);
+    anotarAvisoDeUmaVezNaTela({ qual: 'consequencia', tipo: actionType, punho });
 }
 // Só as que ESCREVEM no Waze. Pular é local — o pedido volta na próxima busca,
 // e isso o treino e o "Como funciona" já dizem.
@@ -20326,12 +20327,68 @@ let avisosAdiadosPedido = false;
 // pendente, e quem chamou sai sem marcar nada.
 function avisoDeUmaVezSaiAgora(qual, tipo) {
     if (semCamadaAberta() && document.visibilityState !== 'hidden') return true;
+    adiarAvisoDeUmaVez(qual, tipo);
+    return false;
+}
+
+// O aviso `qual` fica PENDENTE na sessão de agora: quem o mostra é o próximo
+// `pedirAvisosAdiados`. Fonte única da pendência — a da tela que não está livre
+// (acima) e a do aviso que o treino tira da tela ao abrir
+// (`devolverAvisosDeUmaVezDaTela`).
+function adiarAvisoDeUmaVez(qual, tipo) {
     if (!avisosAdiados || avisosAdiados.epoca !== epocaDaSessao) {
         avisosAdiados = { epoca: epocaDaSessao, consequencia: new Set(), desbloqueio: false, dica: false };
     }
     if (qual === 'consequencia') avisosAdiados.consequencia.add(tipo);
     else avisosAdiados[qual] = true;
-    return false;
+}
+
+// Os avisos de UMA vez que estão NA TELA (o punho do `showToast`, e o confete do
+// desbloqueio): o treino que abre por cima deles os tira e os devolve a
+// pendentes. Eles ficavam por cima do card de treino e da faixa "nada é enviado
+// ao Waze" — a consequência do 1º ✕ até 7 s, o desbloqueio do Desfazer
+// (dourado) até 20 s —, a leitura confusa que o R8-7-01 tirou do aviso que SAI
+// com o treino aberto: quem está aprendendo lia que o TREINO tinha mandado
+// (R14-7-A5, MEDIDO no Chromium; auditoria da rodada 14). Decisão do owner:
+// saem e VOLTAM a pendentes, com a marca de visto desfeita, e saem de novo,
+// inteiros, quando o treino acaba (`Treino.encerrar`). Fechada a página no meio
+// do treino, a marca desfeita deixa a próxima confirmação mostrá-los, como
+// qualquer pendente.
+let avisosDeUmaVezNaTela = [];   // [{ qual, tipo?, punho, epoca, dicaAntes?, confete? }]
+
+function anotarAvisoDeUmaVezNaTela(aviso) {
+    if (!aviso || !aviso.punho) return;
+    // Só os que ainda estão na tela ficam na lista (são no máximo quatro na vida).
+    avisosDeUmaVezNaTela = avisosDeUmaVezNaTela.filter((a) => a.punho.naTela?.() === true);
+    avisosDeUmaVezNaTela.push({ ...aviso, epoca: epocaDaSessao });
+}
+
+function devolverAvisosDeUmaVezDaTela() {
+    const lista = avisosDeUmaVezNaTela;
+    avisosDeUmaVezNaTela = [];
+    let desfez = false;
+    for (const a of lista) {
+        // O que já saiu da tela (o prazo, o toque, o teto da pilha) foi visto.
+        if (a.punho.naTela?.() !== true) continue;
+        try { a.punho.remover(); } catch (e) { /* já saiu */ }
+        try { a.confete?.remove?.(); } catch (e) { /* já saiu */ }
+        // O de outra sessão sai da tela e não volta: ele fala de outra pessoa.
+        if (a.epoca !== epocaDaSessao) continue;
+        const p = AppState.preferences;
+        if (a.qual === 'consequencia') {
+            if (p.consequenciaVista) delete p.consequenciaVista[a.tipo];
+        } else if (a.qual === 'desbloqueio') {
+            p.undoGateSeen = false;
+            // O desbloqueio marcou a dica junto (os dois diriam o mesmo): ela
+            // volta ao que era antes dele.
+            p.dicaDesfazerVista = a.dicaAntes === true;
+        } else if (a.qual === 'dica') {
+            p.dicaDesfazerVista = false;
+        } else continue;
+        adiarAvisoDeUmaVez(a.qual, a.tipo);
+        desfez = true;
+    }
+    if (desfez) savePreferences();
 }
 
 // Decide DEPOIS da tarefa que pediu, numa microtarefa (o padrão do
@@ -21013,7 +21070,10 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // E o aviso de UMA vez que esperava uma camada fechar (R13-7-01): ele dizia
     // o que a ANTERIOR fez — "rejeição enviada em seu nome" pra quem entrou, que
     // não rejeitou nada. Nas duas trocas: a da memória também é outra pessoa.
+    // Os que estão NA TELA também são dela: o treino que abrir não os devolve a
+    // pendentes pra quem entrou (R14-7-A5).
     avisosAdiados = null;
+    avisosDeUmaVezNaTela = [];
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
@@ -24024,6 +24084,11 @@ const Treino = {
         AppState.autorEmFoco = null;
         this.ativo = true;
         this.passo = 0;
+        // Os avisos de UMA vez que JÁ estavam na tela (a consequência do 1º ✕, o
+        // desbloqueio do Desfazer, a dica) saem com a fila real e VOLTAM a
+        // pendentes: o `encerrar` os mostra de novo (R14-7-A5, decisão do owner;
+        // ver `devolverAvisosDeUmaVezDaTela`).
+        devolverAvisosDeUmaVezDaTela();
         // Quem entra no treino já foi aprender: o "Como funciona" por cima dos
         // cards de treino abria DOIS modais no mesmo tique que fechava a Ajuda
         // (gotcha #65: o voltar seguinte saía do app).
@@ -24262,6 +24327,17 @@ const Treino = {
         this._salvo = null;
         document.getElementById('focoAutorBar')?.classList.add('hidden');
         document.getElementById('treinoBanner')?.classList.replace('flex', 'hidden');
+        // Os avisos de UMA vez que o treino SEGUROU (`atenderAvisosAdiados`) — os
+        // que esperavam uma camada fechar quando ele abriu, e os que ele tirou da
+        // tela ao abrir (`devolverAvisosDeUmaVezDaTela`) — saem agora, pelos
+        // quatro fins: o "Sair" da faixa e o "Ir para a fila" (o `sair()`), o ↻ e
+        // o "Aplicar" (o `resetQueue`). Só o "Ir para a fila" os soltava, por
+        // fechar uma camada; pelos outros eles esperavam a próxima, e a
+        // consequência do 1º ✕ aparecia ao fechar os Filtros, fora de contexto
+        // (R14-7-A1, MEDIDO nos dois motores; auditoria da rodada 14). A
+        // microtarefa confere a camada, a página e a sessão — o "Sair" da conta
+        // (a época troca) os descarta.
+        pedirAvisosAdiados();
     },
 
     // O aviso que o PRÓPRIO treino pôs na tela — o efeito do último gesto, o
@@ -27487,14 +27563,17 @@ function checkUndoGateUnlock() {
     // Nem por baixo de uma camada, nem com a página escondida (R13-7-01): o
     // banner e o confete saíam onde ninguém via, e a marca abaixo o gastava.
     if (!avisoDeUmaVezSaiAgora('desbloqueio')) return;
+    // A dica como estava ANTES deste aviso: o treino que abre por cima dele o
+    // devolve a pendente e desfaz as duas marcas (`devolverAvisosDeUmaVezDaTela`).
+    const dicaAntes = AppState.preferences.dicaDesfazerVista === true;
     AppState.preferences.undoGateSeen = true;
     // Este aviso já abre a mesma porta. Sem isto, quem cruza a cota com 20
     // janelas sem desfazer nas costas (o L6 passa em 20 pedidos — dá empate)
     // levaria os dois banners quase juntos, dizendo a mesma coisa duas vezes.
     AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
-    dispararConfeteNaFila();
-    showToast(
+    const confete = dispararConfeteNaFila();
+    const punho = showToast(
         t('toast.undoUnlocked', { n: getUndoUnlockThreshold() }),
         'achievement',
         // 20s. A mensagem tem 16 palavras: a ~200 palavras/min de leitura atenta
@@ -27512,20 +27591,23 @@ function checkUndoGateUnlock() {
         20000,
         abrirPreferenciaDoUndo
     );
+    anotarAvisoDeUmaVezNaTela({ qual: 'desbloqueio', punho, dicaAntes, confete });
 }
 
 // Confete por cima da fila, reaproveitando o mesmo CSS do "Tudo limpo!".
-// Some sozinho — nada fica pendurado no DOM.
+// Some sozinho — nada fica pendurado no DOM. Devolve o elemento (ou null): o
+// treino que abre por cima do desbloqueio tira o confete junto do aviso.
 function dispararConfeteNaFila() {
-    if (prefersReducedMotion()) return;
+    if (prefersReducedMotion()) return null;
     const stack = document.getElementById('cardStack');
-    if (!stack) return;
+    if (!stack) return null;
     const burst = document.createElement('div');
     burst.className = 'confetti confetti-burst';
     burst.setAttribute('aria-hidden', 'true');
     burst.innerHTML = '<span></span>'.repeat(12);
     stack.appendChild(burst);
     setTimeout(() => burst.remove(), 2200);
+    return burst;
 }
 
 // Abre o modal JÁ na aba pedida, sem esperar a rede.
@@ -27678,7 +27760,7 @@ function checkDicaDesfazer() {
     if (!avisoDeUmaVezSaiAgora('dica')) return;
     AppState.preferences.dicaDesfazerVista = true;
     savePreferences();
-    showToast(
+    const punho = showToast(
         // {undoSeg} é global (setI18nVars) — não passa aqui de propósito, pra ter
         // UMA definição servindo esta frase e a de prefs.undo.desc, que é aplicada
         // por applyI18n() e não tem call site onde passar parâmetro.
@@ -27689,6 +27771,7 @@ function checkDicaDesfazer() {
         20000,
         abrirPreferenciaDoUndo
     );
+    anotarAvisoDeUmaVezNaTela({ qual: 'dica', punho });
 }
 
 function canDisableUndo() {
@@ -27928,6 +28011,10 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null, { 
         // lugar dele (o treino, um por vez), e o que ainda estivesse saindo
         // contava no teto de 3 acima — o novo empurraria outro pra fora.
         remover() { clearTimeout(relogio); removed = true; toast.remove(); },
+        // Ainda na tela? Nem saindo (o prazo, o toque, o `dispensar`), nem
+        // empurrado pra fora pelo teto de 3 da pilha. Quem pergunta é o treino
+        // que abre por cima de um aviso de uma vez (`devolverAvisosDeUmaVezDaTela`).
+        naTela() { return !removed && toast.isConnected === true; },
     };
 }
 

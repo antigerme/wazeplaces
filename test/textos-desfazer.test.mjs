@@ -108,6 +108,8 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     // Entrar no treino despacha as escritas do lightbox que estavam na janela
     // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
     enviarPendenciasDoLightbox: () => {},
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
     aprovacoesNoAr: new Set(),   // nenhuma aprovação de foto no ar (R5-2-04)
     aprovacoesDaQueda: new Map(),   // nem de uma sessão que caiu
     aprovacaoPendente: null,        // nem na janela do Desfazer (R6-2-07)

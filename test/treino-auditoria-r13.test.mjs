@@ -100,8 +100,8 @@ function classes(...iniciais) {
 const FUNCOES_DOS_AVISOS = ['handleActionResult', 'avisarConsequencia', 'registrarAcaoConfirmada', 'checkUndoGateUnlock',
   'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'undoGateAtingido',
   'canDisableUndo', 'checkDicaDesfazer', 'registrarJanelaSemUndo', 'semCamadaAberta', 'aoFecharCamada',
-  // as do conserto
-  'avisoDeUmaVezSaiAgora', 'pedirAvisosAdiados', 'atenderAvisosAdiados', 'avisosAdiadosAoVoltar'];
+  // as do conserto (e a pendência como fonte única, do lote 18: `adiarAvisoDeUmaVez`)
+  'avisoDeUmaVezSaiAgora', 'adiarAvisoDeUmaVez', 'pedirAvisosAdiados', 'atenderAvisosAdiados', 'avisosAdiadosAoVoltar'];
 function montarAvisos({ camada = null, visivel = true, treino = false, confirmados = 9, prefs = {} } = {}) {
   const toasts = [], confetes = [];
   const hist = { _total: { read: confirmados, rejected: 0 } };

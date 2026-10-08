@@ -1,0 +1,384 @@
+// A rodada 14 da auditoria do treino, das Preferências e do convite de
+// instalar (2026-10-07). Cada achado foi MEDIDO no navegador pelo auditor, com o
+// controle ao lado:
+//   R14-7-A1 — o aviso de UMA vez que o TREINO segurou (a consequência do 1º ✕
+//              que pousou com a Ajuda aberta, o desbloqueio do Desfazer, a dica)
+//              só saía pelo "Ir para a fila", que fecha uma camada: pelo "Sair"
+//              da faixa e pelo ↻ (e o "Aplicar") ele esperava a PRÓXIMA camada
+//              fechar — e a consequência aparecia ao fechar os Filtros, fora de
+//              contexto;
+//   R14-7-A5 — o aviso de uma vez que JÁ estava na tela quando o treino abria
+//              ficava por cima do card de treino e da faixa "nada é enviado ao
+//              Waze" (até 7 s; o desbloqueio, dourado, até 20 s).
+//
+// Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
+// teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
+// o CONTROLE (o desfecho de sempre, que valida o instrumento) e foi visto
+// REPROVANDO com o conserto desfeito (as sabotagens estão no relatório do lote 18).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+const APP = ler('js/app.js');
+const HTML = ler('index.src.html');
+// Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
+const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+
+function fechar(txt, i, abre = '{', fecha = '}') {
+  let prof = 0;
+  for (let j = txt.indexOf(abre, i); j < txt.length; j++) {
+    if (txt[j] === abre) prof++;
+    else if (txt[j] === fecha) { prof--; if (prof === 0) return j + 1; }
+  }
+  return txt.length;
+}
+function fatiar(nome) {
+  const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
+  assert.ok(m, `${nome} sumiu do app.js`);
+  let par = 0, i = APP_SEM.indexOf('(', m.index);
+  for (let j = i; j < APP_SEM.length; j++) {
+    if (APP_SEM[j] === '(') par++;
+    else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
+  }
+  const corpo = APP_SEM.slice(m.index, fechar(APP_SEM, i));
+  assert.ok(corpo.length > 60, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
+  return corpo;
+}
+// As funções NOVAS deste lote só são fatiadas se existirem: no código de antes do
+// conserto o teste reprova pelo COMPORTAMENTO (o que não existe vira buraco
+// negro e não faz nada), não por não achá-las.
+const existe = (nome) => new RegExp('^(async )?function ' + nome + '\\(', 'm').test(APP_SEM);
+const fontes = (nomes) => nomes.filter(existe).map(fatiar);
+const existeConst = (nome) => new RegExp('^const ' + nome + ' = ', 'm').test(APP_SEM);
+// A declaração `const NOME = …;` INTEIRA: objeto, lista ou valor de uma linha.
+function declaracao(nome) {
+  const m = new RegExp('^const ' + nome + ' = ', 'm').exec(APP_SEM);
+  assert.ok(m, `a constante ${nome} sumiu do app.js`);
+  const ini = m.index + m[0].length;
+  const c = APP_SEM[ini];
+  const fim = c === '{' ? fechar(APP_SEM, ini) : c === '[' ? fechar(APP_SEM, ini, '[', ']') : APP_SEM.indexOf(';', ini);
+  return APP_SEM.slice(m.index, fim) + ';';
+}
+
+function buracoNegro() {
+  return new Proxy(function () {}, {
+    get: (t, k) => (k === Symbol.toPrimitive ? () => '' : k === 'then' || typeof k !== 'string' ? undefined : buracoNegro()),
+    apply: () => buracoNegro(), set: () => true,
+  });
+}
+// As funções de verdade num escopo só, com `deps` por fora: o que não está nem
+// nelas nem no `globalThis` vira buraco negro. As variáveis de MÓDULO que elas
+// escrevem (`avisosAdiados`, `avisosDeUmaVezNaTela`…) moram em `deps`.
+function rodar(deps, codigo, devolve) {
+  const escopo = new Proxy(deps, {
+    has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
+    get: (t, k) => (k === Symbol.unscopables ? undefined : k in t ? t[k] : typeof k === 'string' ? buracoNegro() : undefined),
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  return new Function('__escopo', `with (__escopo) {\n${codigo.join('\n')}\nreturn { ${devolve.join(', ')} };\n}`)(escopo);
+}
+// O pedido adiado é decidido numa microtarefa (`pedirAvisosAdiados`).
+const microtarefas = () => new Promise((ok) => setImmediate(ok));
+function classes(...iniciais) {
+  const s = new Set(iniciais);
+  return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c),
+    replace: (a, b) => { if (s.delete(a)) s.add(b); },
+    toggle: (c, f) => { const ter = f === undefined ? !s.has(c) : !!f; if (ter) s.add(c); else s.delete(c); return ter; } };
+}
+// O que cada conserto deixou no CÓDIGO: o js/min/app.js — o que o navegador
+// carrega — tem que ter o mesmo (gotcha #22). Cada seção acrescenta o dela.
+const NO_BUNDLE = [];
+function dicionario() {
+  const ctx = { navigator: { language: 'pt-BR' }, document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: { getItem: () => null, setItem() {} }, console };
+  vm.createContext(ctx);
+  vm.runInContext(ler('js/i18n.js') + '\nthis.D = I18N_DICT;', ctx);
+  return ctx.D;
+}
+
+// ═══ R14-7-A1 e A5 · os avisos de UMA vez e o TREINO ════════════════════════
+// O `Treino` de verdade (entrar, sair, encerrar), o `showToast` de verdade numa
+// pilha de mentira — o banner do topo (#bannerContainer), com o teto de 3 e um
+// RELÓGIO de mentira (nada sai sozinho até o teste mandar) —, o confete de
+// verdade, e os três avisos com a régua da tela de verdade. L6 (cota 10).
+NO_BUNDLE.push(/devolverAvisosDeUmaVezDaTela\(/g, /anotarAvisoDeUmaVezNaTela\(/g, /adiarAvisoDeUmaVez\(/g);
+const FUNCOES_DOS_AVISOS = ['avisarConsequencia', 'checkUndoGateUnlock', 'checkDicaDesfazer', 'getUndoTreatedCount',
+  'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'undoGateAtingido', 'canDisableUndo',
+  'semCamadaAberta', 'aoFecharCamada', 'avisoDeUmaVezSaiAgora', 'pedirAvisosAdiados', 'atenderAvisosAdiados',
+  'avisosAdiadosAoVoltar', 'dispararConfeteNaFila', 'showToast',
+  // as do conserto
+  'adiarAvisoDeUmaVez', 'anotarAvisoDeUmaVezNaTela', 'devolverAvisosDeUmaVezDaTela'];
+
+function no() {
+  const n = {
+    pai: null, className: '', title: '', style: {}, dataset: {}, _html: '', attrs: {},
+    set innerHTML(v) { n._html = String(v); },
+    get innerHTML() { return n._html; },
+    get textContent() { return n._html.replace(/<[^>]+>/g, ''); },
+    get isConnected() { return !!n.pai; },
+    addEventListener() {}, querySelector: () => null, setAttribute(k, v) { n.attrs[k] = String(v); },
+    remove() {
+      if (!n.pai) return;
+      const i = n.pai.filhos.indexOf(n);
+      if (i >= 0) n.pai.filhos.splice(i, 1);
+      n.pai = null;
+    },
+  };
+  return n;
+}
+function pilha() {
+  const p = no();
+  p.filhos = [];
+  p.pai = { filhos: [p] };   // a própria pilha está na página
+  Object.defineProperty(p, 'children', { get: () => p.filhos });
+  Object.defineProperty(p, 'firstElementChild', { get: () => p.filhos[0] || null });
+  p.appendChild = (n) => { n.remove(); n.pai = p; p.filhos.push(n); return n; };
+  p.removeChild = (n) => { n.remove(); return n; };
+  return p;
+}
+
+function montarTreinoComAvisos({ confirmados = 50, prefs = {}, fila = 4 } = {}) {
+  const els = { bannerContainer: pilha(), toastContainer: pilha(), cardStack: pilha(),
+    treinoBanner: { classList: classes('hidden') }, focoAutorBar: { classList: classes('hidden') },
+    noMoreCards: { classList: classes('hidden') } };
+  // O relógio PARADO: o aviso só vence quando o teste manda (`vencer`).
+  const timers = new Map();
+  let proximo = 0;
+  const vencer = () => {
+    for (let volta = 0; volta < 10 && timers.size; volta++) {
+      const agora = [...timers.values()];
+      timers.clear();
+      for (const fn of agora) fn();
+    }
+  };
+  const tela = { modal: null, foto: false, mapa: false };
+  const doc = { visibilityState: 'visible', getElementById: (id) => els[id] || null, createElement: () => no() };
+  const hist = { _total: { read: confirmados, rejected: 0 } };
+  const P = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i, updateTypeKey: 'VENUE', imageUrls: [] });
+  const AppState = { authenticated: true, pendingAction: null, fetchEpoch: 0, fetching: false, hasMore: false,
+    queue: Array.from({ length: fila }, (_, i) => P(i + 1)), currentPlace: null, autorEmFoco: null,
+    stats: { read: confirmados, rejected: 0, skipped: 0 }, serverTotal: fila,
+    preferences: { undoEnabled: true, undoGateSeen: true, dicaDesfazerVista: true, consequenciaVista: { read: true, reject: true },
+      comoFuncionaVisto: true, semUndoSeguidas: 0, ...prefs },
+    devMode: { active: false } };
+  AppState.currentPlace = AppState.queue[0];
+  const salvas = [];
+  const deps = {
+    AppState, document: doc,
+    topOpenModal: () => tela.modal, Lightbox: { isOpen: () => tela.foto }, MapaLightbox: { isOpen: () => tela.mapa },
+    perfilDoPortao: () => ({ rank: 5, isStaff: false }),
+    loadHistory: () => hist,
+    savePreferences: () => salvas.push(JSON.parse(JSON.stringify(AppState.preferences))),
+    t: (k) => k, escapeHtml: (x) => String(x), dlog: () => {},
+    setTimeout: (fn) => { const id = ++proximo; timers.set(id, fn); return id; },
+    clearTimeout: (id) => { timers.delete(id); },
+    prefersReducedMotion: () => false,
+    DICA_SEM_UNDO: 20,
+    // o que seguraria o treino: nada, aqui
+    loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    // O estado de MÓDULO (os `let` do app).
+    epocaDaSessao: 0, avisosAdiados: null, avisosAdiadosPedido: false, avisosDeUmaVezNaTela: [],
+    comoFuncionaEsperaGesto: false,
+  };
+  const app = rodar(deps, [declaracao('UNDO_GATE_BASE'), declaracao('CONSEQUENCIA_AVISADA'), declaracao('Treino'),
+    ...fontes(FUNCOES_DOS_AVISOS)],
+  ['Treino', 'avisarConsequencia', 'checkUndoGateUnlock', 'checkDicaDesfazer', 'aoFecharCamada', 'showToast']);
+  // O que está NA TELA, no banner do topo.
+  const banners = () => els.bannerContainer.filhos.map((n) => n.textContent);
+  const confetes = () => els.cardStack.filhos.filter((n) => /confetti/.test(n.className)).length;
+  // O "Praticar" da Ajuda: fecha a Ajuda (a camada) e abre o treino no MESMO
+  // tique — o ouvinte do `abrirTreino`.
+  const praticar = async () => {
+    tela.modal = null;
+    app.aoFecharCamada(false);
+    app.Treino.entrar();
+    await microtarefas();
+  };
+  return { app, AppState, deps, tela, doc, els, hist, banners, confetes, vencer, praticar, salvas,
+    prefs: () => AppState.preferences };
+}
+
+// Os quatro fins do treino. O "Ir para a fila" (e o Esc, o fundo, o voltar) é o
+// fechamento do "Treino concluído": a limpeza do modal SAI do treino e o
+// `closeModal` termina no `aoFecharCamada` — o caminho que já soltava os avisos.
+const FINS = {
+  'o "Sair" da faixa': (m) => m.app.Treino.sair(),
+  'o ↻ e o "Aplicar" (o `resetQueue`)': (m) => m.app.Treino.encerrar(),
+  'o "Ir para a fila" (CONTROLE)': (m) => { m.app.Treino.sair(); m.app.aoFecharCamada(false); },
+};
+
+test('R14-7-A1: a consequência que o treino SEGUROU sai quando ele acaba — pelo "Sair" da faixa e pelo ↻/"Aplicar", não só pelo "Ir para a fila"', async () => {
+  for (const [fim, terminar] of Object.entries(FINS)) {
+    for (const tipo of ['reject', 'read']) {
+      const m = montarTreinoComAvisos({ prefs: { consequenciaVista: {} } });
+      // A decisão da janela do Desfazer pousa com a Ajuda aberta: o aviso fica pendente (R13-7-01).
+      m.tela.modal = { id: 'helpModal' };
+      m.app.avisarConsequencia(tipo);
+      assert.deepEqual(m.banners(), [], `PRÉ-CONDIÇÃO (${fim}, ${tipo}): o aviso saiu por baixo da Ajuda`);
+      await m.praticar();
+      assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+      assert.deepEqual(m.banners(), [], `PRÉ-CONDIÇÃO (${fim}): o aviso da fila real saiu por cima do TREINO`);
+      assert.notEqual(m.prefs().consequenciaVista[tipo], true, `PRÉ-CONDIÇÃO (${fim}): o aviso ficou gasto no treino`);
+      terminar(m);
+      await microtarefas();
+      assert.equal(m.app.Treino.ativo, false, `PRÉ-CONDIÇÃO: ${fim} não saiu do treino`);
+      assert.deepEqual(m.banners(), ['consequencia.' + tipo],
+        `DEFEITO: o treino acabou por ${fim} e a consequência que ele segurou não saiu — ela esperava a PRÓXIMA camada fechar (os Filtros, fora de contexto)`);
+      assert.equal(m.prefs().consequenciaVista[tipo], true, `${fim}: o aviso saiu sem ficar visto`);
+      // Uma vez só: o fechamento seguinte de uma camada não repete.
+      m.tela.modal = null;
+      m.app.aoFecharCamada(false);
+      await microtarefas();
+      assert.equal(m.banners().length, 1, `${fim}: o aviso saiu duas vezes`);
+    }
+  }
+});
+
+test('R14-7-A1: o desbloqueio do Desfazer (banner e confete) e a dica que o treino segurou saem nos quatro fins', async () => {
+  for (const [fim, terminar] of Object.entries(FINS)) {
+    // O 10º confirmado do L6 com a Ajuda aberta: o desbloqueio fica pendente.
+    const d = montarTreinoComAvisos({ confirmados: 10, prefs: { undoGateSeen: false, dicaDesfazerVista: false } });
+    d.tela.modal = { id: 'helpModal' };
+    d.app.checkUndoGateUnlock();
+    assert.equal(d.prefs().undoGateSeen, false, 'PRÉ-CONDIÇÃO: o desbloqueio ficou gasto debaixo da Ajuda');
+    await d.praticar();
+    assert.deepEqual([d.banners(), d.confetes()], [[], 0], `PRÉ-CONDIÇÃO (${fim}): o desbloqueio saiu sobre o treino`);
+    terminar(d);
+    await microtarefas();
+    assert.deepEqual(d.banners(), ['toast.undoUnlocked'],
+      `DEFEITO: o treino acabou por ${fim} e o desbloqueio que ele segurou não saiu`);
+    assert.equal(d.confetes(), 1, `${fim}: o desbloqueio saiu sem o confete`);
+    assert.equal(d.prefs().undoGateSeen, true);
+    // A dica (L6 bem acima da cota, a 20ª janela sem desfazer) com os Filtros abertos.
+    const h = montarTreinoComAvisos({ confirmados: 50, prefs: { dicaDesfazerVista: false, semUndoSeguidas: 20 } });
+    h.tela.modal = { id: 'filtersModal' };
+    h.app.checkDicaDesfazer();
+    assert.notEqual(h.prefs().dicaDesfazerVista, true, 'PRÉ-CONDIÇÃO: a dica ficou gasta debaixo dos Filtros');
+    await h.praticar();
+    assert.deepEqual(h.banners(), [], `PRÉ-CONDIÇÃO (${fim}): a dica saiu sobre o treino`);
+    terminar(h);
+    await microtarefas();
+    assert.deepEqual(h.banners(), ['toast.undoHint'], `DEFEITO: o treino acabou por ${fim} e a dica que ele segurou não saiu`);
+    assert.equal(h.prefs().dicaDesfazerVista, true);
+  }
+});
+
+test('R14-7-A1: CONTROLE — o treino que acaba pelo "Sair" da CONTA (a época troca, deslogado) não mostra o aviso da sessão que acabou', async () => {
+  const m = montarTreinoComAvisos({ prefs: { consequenciaVista: {} } });
+  m.tela.modal = { id: 'helpModal' };
+  m.app.avisarConsequencia('reject');
+  await m.praticar();
+  // O `handleLogout`: a época sobe antes de tudo, e o `resetQueue` encerra o treino.
+  m.deps.epocaDaSessao++;
+  m.AppState.authenticated = false;
+  m.app.Treino.encerrar();
+  await microtarefas();
+  assert.deepEqual(m.banners(), [], 'o aviso de uma decisão da sessão que ACABOU saiu na tela de entrada');
+  // E o treino que acaba SEM nada pendente não mostra nada (o pedido não inventa aviso).
+  const c = montarTreinoComAvisos();
+  await c.praticar();
+  c.app.Treino.sair();
+  await microtarefas();
+  assert.deepEqual(c.banners(), [], 'o fim do treino mostrou um aviso que ninguém deixou pendente');
+});
+
+test('R14-7-A5: a consequência que JÁ estava na tela quando o treino abriu sai dele — e volta, inteira, quando ele acaba', async () => {
+  for (const [fim, terminar] of Object.entries(FINS)) {
+    const m = montarTreinoComAvisos({ prefs: { consequenciaVista: {} } });
+    // O 1º ✕ pousa sem camada: o aviso sai na hora e fica visto.
+    m.app.avisarConsequencia('reject');
+    assert.deepEqual(m.banners(), ['consequencia.reject'], 'CONTROLE: a 1ª rejeição sem camada não avisou — o teste perdeu o sentido');
+    assert.equal(m.prefs().consequenciaVista.reject, true);
+    // "Praticar" com ele na tela (o auditor: 1,6 s depois).
+    await m.praticar();
+    assert.equal(m.app.Treino.ativo, true, 'PRÉ-CONDIÇÃO: o treino não abriu');
+    assert.deepEqual(m.banners(), [],
+      'DEFEITO: "Rejeição enviada ao Waze em seu nome" ficou por cima do card de TREINO e da faixa "nada é enviado ao Waze"');
+    assert.notEqual(m.prefs().consequenciaVista.reject, true,
+      'DEFEITO: o aviso saiu da tela no treino e ficou GASTO — não volta onde ele explica alguma coisa');
+    assert.notEqual(m.salvas.at(-1).consequenciaVista.reject, true, 'a marca desfeita não foi GRAVADA (fechada a página, ele se perdia)');
+    // Nada dele no treino, nem quando uma camada fecha nele.
+    m.tela.modal = null;
+    m.app.aoFecharCamada(false);
+    await microtarefas();
+    assert.deepEqual(m.banners(), [], 'o aviso voltou por cima do treino ao fechar uma camada nele');
+    terminar(m);
+    await microtarefas();
+    assert.deepEqual(m.banners(), ['consequencia.reject'], `o aviso que o treino tirou da tela não voltou quando ele acabou por ${fim}`);
+    assert.equal(m.prefs().consequenciaVista.reject, true, `${fim}: voltou sem ficar visto`);
+  }
+});
+
+test('R14-7-A5: o desbloqueio na tela (banner dourado E confete) sai com o treino e volta no fim — a dica, como estava antes dele', async () => {
+  for (const dicaAntes of [false, true]) {
+    const m = montarTreinoComAvisos({ confirmados: 10, prefs: { undoGateSeen: false, dicaDesfazerVista: dicaAntes } });
+    m.app.checkUndoGateUnlock();
+    assert.deepEqual([m.banners(), m.confetes()], [['toast.undoUnlocked'], 1], 'CONTROLE: o 10º confirmado não comemorou');
+    assert.equal(m.prefs().dicaDesfazerVista, true, 'CONTROLE: o desbloqueio não marcou a dica junto');
+    await m.praticar();
+    assert.deepEqual([m.banners(), m.confetes()], [[], 0],
+      'DEFEITO: o desbloqueio do Desfazer (banner dourado, 20 s) e o confete ficaram por cima do TREINO');
+    assert.equal(m.prefs().undoGateSeen, false, 'DEFEITO: o desbloqueio saiu da tela e ficou GASTO');
+    assert.equal(m.prefs().dicaDesfazerVista, dicaAntes, `a dica não voltou ao que era antes do desbloqueio (${dicaAntes})`);
+    m.app.Treino.sair();
+    await microtarefas();
+    assert.deepEqual([m.banners(), m.confetes()], [['toast.undoUnlocked'], 1], 'o desbloqueio não voltou no fim do treino');
+    assert.deepEqual([m.prefs().undoGateSeen, m.prefs().dicaDesfazerVista], [true, true]);
+  }
+  // A dica na tela.
+  const h = montarTreinoComAvisos({ confirmados: 50, prefs: { dicaDesfazerVista: false, semUndoSeguidas: 20 } });
+  h.app.checkDicaDesfazer();
+  assert.deepEqual(h.banners(), ['toast.undoHint'], 'CONTROLE: a 20ª janela sem desfazer não ofereceu a dica');
+  await h.praticar();
+  assert.deepEqual(h.banners(), [], 'DEFEITO: a dica ficou por cima do treino');
+  assert.equal(h.prefs().dicaDesfazerVista, false, 'DEFEITO: a dica saiu da tela e ficou gasta');
+  h.app.Treino.encerrar();
+  await microtarefas();
+  assert.deepEqual(h.banners(), ['toast.undoHint'], 'a dica não voltou no fim do treino');
+});
+
+test('R14-7-A5: CONTROLES — o aviso que JÁ SAIU da tela não volta, o aviso comum fica, e o de outra sessão sai sem voltar', async () => {
+  // Vencido (os 7 s passaram) antes do treino: foi visto, e o fim do treino não o repete.
+  const v = montarTreinoComAvisos({ prefs: { consequenciaVista: {} } });
+  v.app.avisarConsequencia('read');
+  v.vencer();
+  assert.deepEqual(v.banners(), [], 'PRÉ-CONDIÇÃO: o relógio de mentira não venceu o aviso');
+  await v.praticar();
+  v.app.Treino.sair();
+  await microtarefas();
+  assert.deepEqual(v.banners(), [], 'o aviso que já tinha saído da tela voltou no fim do treino (duas vezes na vida)');
+  assert.equal(v.prefs().consequenciaVista.read, true, 'a marca do aviso já visto foi desfeita');
+  // Um aviso comum (o resultado de uma ação) não é de uma vez: fica com o prazo dele.
+  const c = montarTreinoComAvisos();
+  c.app.showToast('2 rejeitados', 'hint');
+  await c.praticar();
+  assert.deepEqual(c.banners(), ['2 rejeitados'], 'o treino tirou da tela um aviso que não é de uma vez');
+  // O de OUTRA sessão (a época trocou com ele na tela): sai da tela e não volta.
+  const o = montarTreinoComAvisos({ prefs: { consequenciaVista: {} } });
+  o.app.avisarConsequencia('reject');
+  o.deps.epocaDaSessao++;
+  await o.praticar();
+  assert.deepEqual(o.banners(), [], 'o aviso da sessão anterior ficou por cima do treino');
+  o.app.Treino.sair();
+  await microtarefas();
+  assert.deepEqual(o.banners(), [], 'o aviso de OUTRA sessão voltou no fim do treino ("rejeição enviada em seu nome" pra quem não rejeitou)');
+});
+
+test('R14-7-A5: a troca de conta esquece os avisos de uma vez que estão na tela — eram da conta anterior', () => {
+  const corpo = fatiar('esquecerOutraConta');
+  assert.match(corpo, /^    avisosAdiados = null;\n    avisosDeUmaVezNaTela = \[\];$/m,
+    'a troca de conta não esquece os avisos de uma vez NA TELA: o treino de quem entrou os devolveria a pendentes');
+});
+
+// ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════
+test('o js/min/app.js — o que o navegador carrega — tem os consertos deste lote', () => {
+  const MIN = ler('js/min/app.js');
+  const contar = (txt, re) => (txt.match(re) || []).length;
+  assert.ok(NO_BUNDLE.length > 0, 'CONTROLE: nenhuma seção disse o que o bundle tem que ter');
+  for (const re of NO_BUNDLE) {
+    assert.ok(contar(APP_SEM, re) > 0, `o app.js não tem ${re}`);
+    assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${re} — falta \`npm run js\``);
+  }
+});

@@ -118,6 +118,8 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
     // o que seguraria o treino: nada, aqui
     loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {},
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
     // a fila
     pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(),
     // a recusa automática (L6+AM, a conta é a dona do aparelho, o 777 marcado)
@@ -354,6 +356,8 @@ function montarBusca() {
     maybePrefetch: () => log.push('prefetch'), startFetching: () => log.push('busca'), showNoPlaces: () => {},
     openModal: () => {}, loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(),
     aprovacoesDaQueda: new Map(), enviarPendenciasDoLightbox: () => {}, devolverPedidoRecusado: () => {},
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
   };
   const fontes = [
     'let filaDeOnde = null; let rebuscasAuto = 0; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false; let filaEsperaPerfil = false;',
@@ -463,6 +467,8 @@ function montarSairPeloTeclado() {
     loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {}, acoesTravadas: () => false, cardDaFrente: () => naTela, topOpenModal: () => null,
     Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
   };
   let focoDoTecladoPendente = null;
   const fontes = [

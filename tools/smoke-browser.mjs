@@ -9134,6 +9134,77 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(erros.length === 0, 'avisos de uma vez (3): erro de JS', erros[0]);
     await ctx.close();
   }
+  // (4) R14-7-A1: o aviso que esperava a Ajuda fechar e que o TREINO segurou (o
+  // "Praticar" fecha a Ajuda e abre o treino no mesmo tique) sai quando o treino
+  // acaba — pelo "Sair" da faixa e pelo ↻, e não só pelo "Ir para a fila", que
+  // fecha uma camada. Antes, ele esperava a PRÓXIMA camada fechar (os Filtros,
+  // fora de contexto). A grade e a marca de visto são as de cima.
+  for (const fim of ['faixa', 'atualizar']) {
+    const rot = `avisos de uma vez (4, treino e ${fim === 'faixa' ? 'o "Sair" da faixa' : 'o ↻'})`;
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, `${rot}: o ✕ não abriu a janela`);
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'helpModal', `${rot}: a Ajuda não abriu`);
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    checa(await banner(page) === null, `${rot}: PRÉ-CONDIÇÃO — a consequência saiu por baixo da Ajuda`);
+    await page.click('#abrirTreino');
+    await esperarOuExplodir(page, () => Treino.ativo === true && !topOpenModal(), `${rot}: o "Praticar" não abriu o treino`);
+    await doisQuadros(page);
+    checa(await banner(page) === null, `${rot}: a consequência da fila real saiu por cima do TREINO`, JSON.stringify(await banner(page)));
+    checa(!(await marcas(page)).reject, `${rot}: a consequência ficou gasta no treino`);
+    await page.click(fim === 'faixa' ? '#treinoSairBtn' : '#refreshBtn');
+    const veio = await esperarNaPagina(page, () => Treino.ativo === false && !!document.querySelector('#bannerContainer .toast'), 5000, 50);
+    checa(veio.ok, `${rot}: o treino acabou e a consequência que ele segurou não saiu — ela esperava a PRÓXIMA camada fechar`);
+    const b = await banner(page);
+    checa(!!b && b.recebe === 9, `${rot}: o banner que o treino segurou não recebe o toque inteiro`, JSON.stringify(b));
+    checa((await marcas(page)).reject, `${rot}: o banner apareceu e não ficou marcado`);
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (5) R14-7-A5: o aviso que JÁ está na tela quando o treino abre sai dele (não
+  // fica sobre o card de treino e a faixa "nada é enviado ao Waze") e VOLTA,
+  // inteiro, no "Sair" do treino — decisão do owner. CONTROLE: o aviso que a
+  // pessoa já dispensou (o toque nele) não volta.
+  for (const dispensado of [false, true]) {
+    const rot = `avisos de uma vez (5, ${dispensado ? 'CONTROLE dispensado antes' : 'na tela quando o treino abre'})`;
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const antes = await banner(page);
+    checa(!!antes && antes.recebe === 9, `${rot}: PRÉ-CONDIÇÃO — sem camada, a consequência não saiu no pouso`, JSON.stringify(antes));
+    if (dispensado) {
+      await page.click('#bannerContainer .toast');
+      await esperarOuExplodir(page, () => !document.querySelector('#bannerContainer .toast'), `${rot}: o toque não dispensou o aviso`);
+    }
+    await page.click('#helpBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'helpModal', `${rot}: a Ajuda não abriu`);
+    await page.click('#abrirTreino');
+    await esperarOuExplodir(page, () => Treino.ativo === true && !topOpenModal(), `${rot}: o "Praticar" não abriu o treino`);
+    await doisQuadros(page);
+    const noTreino = await page.evaluate(() => ({ faixa: !document.getElementById('treinoBanner').classList.contains('hidden'),
+      banners: document.querySelectorAll('#bannerContainer .toast').length }));
+    checa(noTreino.faixa && noTreino.banners === 0,
+      `${rot}: "Rejeição enviada ao Waze em seu nome" ficou por cima do card de TREINO e da faixa "nada é enviado ao Waze"`, JSON.stringify(noTreino));
+    checa((await marcas(page)).reject === dispensado, dispensado
+      ? `${rot}: a marca do aviso já visto foi desfeita`
+      : `${rot}: o aviso saiu da tela no treino e ficou GASTO — não volta`);
+    await page.click('#treinoSairBtn');
+    await esperarOuExplodir(page, () => Treino.ativo === false, `${rot}: o "Sair" não saiu do treino`);
+    const veio = await esperarNaPagina(page, () => !!document.querySelector('#bannerContainer .toast'), dispensado ? 1500 : 5000, 50);
+    if (dispensado) {
+      checa(!veio.ok, `${rot}: o aviso que a pessoa dispensou voltou no fim do treino (duas vezes na vida)`);
+    } else {
+      checa(veio.ok, `${rot}: o aviso que o treino tirou da tela não voltou quando ele acabou`);
+      const b = await banner(page);
+      checa(!!b && b.recebe === 9, `${rot}: o banner que voltou não recebe o toque inteiro`, JSON.stringify(b));
+      checa((await marcas(page)).reject, `${rot}: o banner voltou e não ficou marcado`);
+    }
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
 }
 
 // ── O CARIMBO DE NASCIMENTO EXISTE DEPOIS DE ABRIR ─────────────────────────
@@ -12368,7 +12439,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
-  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto)`
+  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto; o que o TREINO segurou sai no "Sair" da faixa e no ↻, o que estava na tela quando ele abriu sai dele e volta no fim, com o CONTROLE do dispensado que não volta)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
