@@ -12,7 +12,10 @@
 //              Waze" (até 7 s; o desbloqueio, dourado, até 20 s);
 //   R14-7-A3 — com as Preferências abertas, o interruptor "Permitir desfazer
 //              ações" não acompanhava o placar: vivo abaixo da cota, e desligá-lo
-//              deixava a chave desligada na tela com o Desfazer ligado, calado.
+//              deixava a chave desligada na tela com o Desfazer ligado, calado;
+//   R14-7-A4 — a frase dele prometia o Desfazer só pro "Lido" e o "Rejeitar", e
+//              o interruptor desliga a janela de TODAS as ações (o ↑ com ⭐ e, pra
+//              L6+AM, aprovar, excluir e corrigir o nome da foto).
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -462,6 +465,44 @@ test('R14-7-A3: CONTROLE — fora das Preferências (os Filtros fechados, ou out
     m.h.updateStats();
     assert.equal(m.estado().viva, true, `com ${onde}, o placar redesenhou a cota (a abertura já a desenha)`);
   }
+});
+
+// ═══ R14-7-A4 · a frase do interruptor diz o que ele desliga ════════════════
+test('R14-7-A4: "Permitir desfazer ações" fala de CADA ação — não só do "Lido" e do "Rejeitar" — nos 4 idiomas, e a reserva do HTML diz o mesmo', () => {
+  const D = dicionario();
+  // O termo do app pra "cada ação" é o do fim do treino ("o Desfazer te dá 3s em cada ação").
+  const TERMO = { pt: 'cada ação', en: 'every action', es: 'cada acción', fr: 'chaque action' };
+  for (const [l, termo] of Object.entries(TERMO)) {
+    assert.ok(D[l]['treino.fim.body'].includes(termo), `CONTROLE (${l}): o fim do treino não usa "${termo}" — o termo do app mudou`);
+    const frase = D[l]['prefs.undo.desc'];
+    assert.ok(frase.includes('{undoSeg}'), `${l}: a frase perdeu o {undoSeg}`);
+    // Os nomes do ✕ e do ✓ (os selos do card) como palavra inteira.
+    for (const chave of ['card.stamp.reject', 'card.stamp.read']) {
+      const nome = D[l][chave];
+      assert.ok(nome, `CONTROLE (${l}): o selo ${chave} sumiu do dicionário`);
+      assert.doesNotMatch(frase, new RegExp('(?<!\\p{L})' + nome + '(?!\\p{L})', 'u'),
+        `DEFEITO (${l}): a frase promete o Desfazer só pro "${nome}" — e o interruptor desliga a janela de TODA ação (o ↑ com ⭐, aprovar, excluir e corrigir o nome da foto)`);
+    }
+    assert.ok(frase.includes(termo), `${l}: a frase não diz "${termo}", o termo que o app usa pro Desfazer`);
+  }
+  // A reserva do HTML (o que se lê antes do JS) é a frase do pt.
+  const m = /data-i18n="prefs\.undo\.desc">([^<]*)</.exec(HTML);
+  assert.ok(m, 'CONTROLE: a frase sumiu do index.src.html');
+  assert.equal(m[1], D.pt['prefs.undo.desc'].replace('{undoSeg}', '3'), 'a reserva do HTML diz outra coisa que o dicionário pt');
+  // E o que o navegador carrega (gotcha #22): o js/min/i18n.js e o index.html gerados.
+  assert.ok(ler('js/min/i18n.js').includes(D.pt['prefs.undo.desc']), 'js/min/i18n.js está atrás do fonte — falta `npm run js`');
+  assert.ok(ler('index.html').includes(m[1]), 'o index.html está atrás do index.src.html — falta `npm run html`');
+});
+
+test('R14-7-A4: CONTROLE — o interruptor desliga MESMO a janela das escritas da foto e do ↑ (a frase geral é a verdade)', () => {
+  // A MESMA condição do `scheduleAction` (o ✕, o ✓, o ↑ e o lote) nas três escritas
+  // do lightbox: se uma delas deixar de ler o interruptor, a frase volta a ser revista.
+  for (const nome of ['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear']) {
+    assert.match(fatiar(nome), /const semJanela = AppState\.preferences\.undoEnabled === false && canDisableUndo\(\);/,
+      `${nome} não lê mais o interruptor do Desfazer`);
+  }
+  assert.match(fatiar('scheduleAction'), /if \(AppState\.preferences\.undoEnabled === false && canDisableUndo\(\)\) \{/,
+    'o scheduleAction não lê mais o interruptor do Desfazer');
 });
 
 // ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════
