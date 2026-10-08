@@ -4853,10 +4853,10 @@ function aprovacaoPousouDepoisDaQueda(alvo, valeu, quem) {
         if (pedidoAindaNaTela(alvo.place)) showToast(t('toast.alreadyProcessed'), 'info');
     }
     if (alvo.epocaFila !== AppState.fetchEpoch) {
-        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(alvo.place, quem);
+        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(alvo.place, quem, alvo.epocaFila);
         return;
     }
-    registrarPouso(alvo.place, quem);
+    registrarPouso(alvo.place, quem, alvo.epocaFila);
     // Um gesto da sessão nova já o decidiu (o card ficou destravado na
     // renovação): ele já saiu da fila, e o "Restam" já desceu por ele.
     if (!AppState.queue.includes(alvo.place)) return;
@@ -8018,11 +8018,15 @@ function decididoNaOutraAbaDepoisDe(p, desde) {
     return t !== undefined && t >= desde;
 }
 
-// O "Sair" leva também os avisos que esperavam a conta (`comOsAvisos`, R12-2-05);
-// a troca de conta não: quem os consome é o `aoConhecerConta` que a revelou.
+// O "Sair" leva também os avisos que esperavam a conta (`comOsAvisos`, R12-2-05)
+// e as marcas que esta aba avisou sem a conta (R14-2-03); a troca de conta não:
+// quem os consome é o `aoConhecerConta` que a revelou.
 function esquecerDecididasPorOutraAba({ comOsAvisos = false } = {}) {
     decididasPorOutraAba.clear();
-    if (comOsAvisos) avisosDePousoSemConta.length = 0;
+    if (comOsAvisos) {
+        avisosDePousoSemConta.length = 0;
+        if (typeof marcasQueAvisaramSemConta !== 'undefined') marcasQueAvisaramSemConta.clear();
+    }
 }
 
 // O que a OUTRA aba decidiu sai da fila DESTA (auditoria de 2026-10-07,
@@ -8149,35 +8153,146 @@ function quemDecideAgora() {
 // quando quem pousa a trouxe (`quem`, ver `quemDecideAgora`), senão a de agora.
 // O canal não entrega a mensagem ao objeto que a mandou: esta aba não recebe o
 // próprio aviso.
-function avisarOutrasAbasDoPouso(chaves, quem) {
+//
+// A CONTA de quem decidiu pode ser desconhecida (`contaAgora()` nula entre a
+// entrada sem a conta — a extensão publicada não a repassa, ou o perfil falhou —
+// e o perfil chegar), e o aviso sem conta era jogado fora pela aba de OUTRA
+// sessão da mesma conta: o ✕ de lá ia ao Waze sobre o que o "Marcar todos" daqui
+// tinha marcado (auditoria da rodada 14, R14-2-03, MEDIDO no navegador). Duas
+// saídas, e nenhuma aplica nada a uma conta possivelmente OUTRA — "lido" é de
+// cada pessoa:
+//   · a conta do gesto desconhecida, mas PROVADA agora (a marca da sessão do
+//     gesto é a desta aba, ou a fila do gesto atravessou a queda: ver
+//     `contaDoGestoEhADeAgora`): o aviso sai com a conta de agora;
+//   · sem prova ainda: o aviso sai sem conta, a outra aba o guarda pela MARCA
+//     (`guardarAvisoSemConta`), e esta aba, quando souber a conta da sessão do
+//     gesto (`aoConhecerConta`), diz pelo mesmo canal "a marca S é da conta X"
+//     (`avisarAContaDasMarcas`). `epocaFila`: a fila do gesto, a prova da queda.
+function avisarOutrasAbasDoPouso(chaves, quem, epocaFila) {
     if (!canalDosPousos || !Array.isArray(chaves) || !chaves.length) return;
     let de = quem && typeof quem.s === 'string' && quem.s ? quem : null;
+    const doGesto = !!de;
     if (!de) {
         // A de agora — e sem sessão na memória, nada: não pergunta ao
         // `getSession`, que leria o aparelho (R9-1-03).
         if (!API.temSessaoNaMemoria()) return;
         de = { s: marcaDaSessao(API.getSession()), conta: contaAgora() };
     }
+    // (As guardas `typeof`: os harnesses dos testes fatiam esta função sem as
+    // irmãs, e o `=== true` recusa o objeto verdadeiro que eles devolvem.)
+    const filaDoAviso = doGesto ? epocaFila
+        : (typeof epocaDaFilaRealAgora === 'function' ? epocaDaFilaRealAgora() : undefined);
+    let conta = de.conta ?? null;
+    if (!conta && typeof contaDoGestoEhADeAgora === 'function' && contaDoGestoEhADeAgora(de, filaDoAviso) === true) {
+        conta = contaAgora();
+    }
     try {
-        canalDosPousos.postMessage({ v: 1, chaves, conta: de.conta ?? null, s: de.s });
-    } catch (e) { /* canal fechado: segue como antes */ }
+        canalDosPousos.postMessage({ v: 1, chaves, conta, s: de.s });
+    } catch (e) { return; /* canal fechado: segue como antes */ }
+    if (!conta && typeof lembrarMarcaQueAvisouSemConta === 'function') lembrarMarcaQueAvisouSemConta(de.s, filaDoAviso);
 }
 
-// O pouso de OUTRA aba. Nada aqui grava no aparelho nem avisa de volta.
-function aoPousarEmOutraAba(aviso) {
-    if (!aviso || aviso.v !== 1 || !Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
+// A época da fila REAL agora: com o treino aberto, a que ele guarda (null quando
+// ela não volta no "Sair" dele); senão a da tela.
+function epocaDaFilaRealAgora() {
+    if (typeof Treino !== 'undefined' && Treino.ativo === true) return Treino.epocaDaFilaGuardada();
+    return AppState.fetchEpoch;
+}
+
+// A fila do GESTO (`epocaFila`) é a que está aqui agora — na tela, ou guardada
+// pelo treino aberto: nenhum `resetQueue` desde o gesto. O login de novo, o
+// "Sair" e a troca de conta refazem a fila; a renovação da queda com a MESMA
+// conta é o único caminho de sessão nova que a mantém (`manterFila`, e o
+// `aoConhecerConta` a refaz se a conta for outra).
+function filaDoGestoSegueAqui(epocaFila) {
+    if (!Number.isInteger(epocaFila)) return false;
+    if (epocaFila === AppState.fetchEpoch) return true;
+    return typeof Treino !== 'undefined' && Treino.ativo === true && !!Treino.filaGuardada(epocaFila);
+}
+
+// A conta do GESTO, desconhecida quando ele saiu, é a de AGORA? Só com prova
+// POSITIVA (a decisão do owner, R14-2-03): a marca da sessão do gesto é a desta
+// aba (a mesma sessão é a mesma conta), ou a fila do gesto atravessou a queda (a
+// renovação com a mesma conta manteve a fila). Sem conta agora, nada a provar.
+function contaDoGestoEhADeAgora(quem, epocaFila) {
+    if (!contaAgora()) return false;
+    const s = quem && typeof quem.s === 'string' && quem.s ? quem.s : null;
+    if (s && s === marcaDestaAba()) return true;
+    return filaDoGestoSegueAqui(epocaFila);
+}
+
+// As marcas de sessão pelas quais ESTA aba avisou um pouso SEM a conta, com a
+// fila em que ele aconteceu (a prova de depois). Só em memória, com teto; o
+// `aoConhecerConta` as resolve (`avisarAContaDasMarcas`) e o "Sair" as leva.
+const marcasQueAvisaramSemConta = new Map();
+const MARCAS_QUE_AVISARAM_SEM_CONTA_MAX = 20;
+
+function lembrarMarcaQueAvisouSemConta(s, epocaFila) {
+    if (typeof s !== 'string' || !s) return;
+    marcasQueAvisaramSemConta.delete(s);
+    marcasQueAvisaramSemConta.set(s, Number.isInteger(epocaFila) ? epocaFila : null);
+    while (marcasQueAvisaramSemConta.size > MARCAS_QUE_AVISARAM_SEM_CONTA_MAX) {
+        marcasQueAvisaramSemConta.delete(marcasQueAvisaramSemConta.keys().next().value);
+    }
+}
+
+// A conta desta aba ficou conhecida (`aoConhecerConta`): as marcas que avisaram
+// sem conta e são PROVADAMENTE desta conta — a sessão de agora, ou uma anterior
+// cuja fila atravessou a queda até aqui — ganham a conta, pelo canal: "a marca
+// S é da conta X". A que não se prova (a fila foi refeita: entrou de novo, ou
+// outra conta) sai sem aviso — nada se aplica a uma conta possivelmente outra.
+// A mensagem não tem `chaves`: as versões de antes a ignoram.
+function avisarAContaDasMarcas(id) {
+    if (!marcasQueAvisaramSemConta.size) return;
+    const marcas = [...marcasQueAvisaramSemConta];
+    marcasQueAvisaramSemConta.clear();
+    if (!canalDosPousos) return;
+    for (const [s, epocaFila] of marcas) {
+        if (s !== marcaDestaAba() && !filaDoGestoSegueAqui(epocaFila)) continue;
+        try {
+            canalDosPousos.postMessage({ v: 1, tipo: 'conta', s, conta: String(id) });
+        } catch (e) { return; }
+    }
+}
+
+// O pouso de OUTRA aba. Nada aqui grava no aparelho nem avisa de volta. `em`:
+// quando esta aba soube, se não foi agora (o aviso que esperou a conta de quem
+// mandou, R14-2-03).
+function aoPousarEmOutraAba(aviso, em) {
+    if (!aviso || aviso.v !== 1) return;
+    // "A marca S é da conta X" (R14-2-03, ver `avisarAContaDasMarcas`).
+    if (aviso.tipo === 'conta') { aoSaberAContaDeUmaMarca(aviso); return; }
+    if (!Array.isArray(aviso.chaves) || !aviso.chaves.length) return;
     // SEM sessão na memória (a renovação da queda no meio) não é "ignore" (R13-2-03,
     // ver a função).
-    if (!API.temSessaoNaMemoria()) { aoPousarSemSessaoNaMemoria(aviso); return; }
+    if (!API.temSessaoNaMemoria()) { aoPousarSemSessaoNaMemoria(aviso, em); return; }
     if (!(aviso.s && aviso.s === marcaDaSessao(API.getSession()))) {
-        if (!aviso.conta) return;
+        // A conta de QUEM mandou ainda não se sabe: o aviso espera, pela marca
+        // da sessão dele, que ele diga de quem era (R14-2-03). Era jogado fora.
+        if (!aviso.conta) { guardarAvisoSemConta(aviso, em); return; }
         const agora = contaAgora();
         // A conta DESTA aba ainda não se sabe (o perfil não chegou; a conta em
         // dúvida, R6-1-04): o aviso ESPERA por ela (R12-2-05, ver a função).
-        if (!agora) { guardarAvisoSemConta(aviso); return; }
+        if (!agora) { guardarAvisoSemConta(aviso, em); return; }
         if (String(aviso.conta) !== agora) return;
     }
-    aplicarPousoDeOutraAba(aviso.chaves);
+    aplicarPousoDeOutraAba(aviso.chaves, em);
+}
+
+// "A marca S é da conta X", da aba que avisou sem a conta (R14-2-03): os avisos
+// que esperavam por essa marca seguem o caminho de qualquer aviso COM a conta —
+// valem se é a conta desta aba, saem se é outra, e esperam a conta desta aba se
+// ela ainda não se sabe —, com a hora em que chegaram.
+function aoSaberAContaDeUmaMarca(aviso) {
+    const s = aviso.s;
+    const conta = aviso.conta === null || aviso.conta === undefined ? '' : String(aviso.conta);
+    if (typeof s !== 'string' || !s || !/^\d{1,19}$/.test(conta)) return;
+    const desta = [];
+    for (let i = 0; i < avisosDePousoSemConta.length;) {
+        const a = avisosDePousoSemConta[i];
+        if (a.conta === null && a.s === s) { desta.push(a); avisosDePousoSemConta.splice(i, 1); } else i++;
+    }
+    for (const a of desta) aoPousarEmOutraAba({ v: 1, chaves: a.chaves, conta, s }, a.em);
 }
 
 // O MESMO anotar + tirar da fila do aviso da fila de saída. `em`: quando esta aba
@@ -8208,14 +8323,19 @@ function aplicarPousoDeOutraAba(chaves, em) {
 // que nunca entrou, ou que saiu, não tem fila a proteger e não guarda id de pedido
 // de terceiro na memória. Nunca pelo `getSession`, que com a memória vazia ADOTA a
 // sessão guardada no aparelho (R9-1-03).
-function aoPousarSemSessaoNaMemoria(aviso) {
-    if (!aviso.conta) return;
+function aoPousarSemSessaoNaMemoria(aviso, em) {
     const aqui = contaConfirmadaNestaAba;
-    if (aqui) {
-        if (String(aviso.conta) === aqui.id) aplicarPousoDeOutraAba(aviso.chaves);
+    // Sem a conta de QUEM mandou (R14-2-03): espera a dele, pela marca — só com
+    // fila a proteger aqui, a mesma régua de baixo.
+    if (!aviso.conta) {
+        if (aqui || guardaASessaoQueCaiu()) guardarAvisoSemConta(aviso, em);
         return;
     }
-    if (guardaASessaoQueCaiu()) guardarAvisoSemConta(aviso);
+    if (aqui) {
+        if (String(aviso.conta) === aqui.id) aplicarPousoDeOutraAba(aviso.chaves, em);
+        return;
+    }
+    if (guardaASessaoQueCaiu()) guardarAvisoSemConta(aviso, em);
 }
 
 // Os avisos de pouso que chegaram com a conta DESTA aba desconhecida — o perfil
@@ -8227,22 +8347,35 @@ function aoPousarSemSessaoNaMemoria(aviso) {
 // mais antigos saem primeiro), até o `aoConhecerConta`: a mesma conta, valem como
 // se tivessem chegado agora (com a hora em que chegaram); outra, saem sem efeito.
 // O "Sair" os leva (`esquecerDecididasPorOutraAba`).
+//
+// E os que chegaram SEM a conta de quem mandou (R14-2-03, ver
+// `avisarOutrasAbasDoPouso`): `conta: null` e a MARCA da sessão de lá (`s`).
+// Esperam o "a marca S é da conta X" daquela aba (`aoSaberAContaDeUmaMarca`) — a
+// conta desta aba não diz nada deles. Mesmo teto e mesmo "Sair".
 const avisosDePousoSemConta = [];
 const AVISOS_DE_POUSO_SEM_CONTA_MAX = 50;
 
-function guardarAvisoSemConta(aviso) {
+function guardarAvisoSemConta(aviso, em) {
     const chaves = aviso.chaves.filter((k) => typeof k === 'string' && k);
     if (!chaves.length) return;
-    avisosDePousoSemConta.push({ chaves, conta: String(aviso.conta), em: Date.now() });
+    const quando = Number.isFinite(em) ? em : Date.now();
+    if (aviso.conta === null || aviso.conta === undefined || aviso.conta === '') {
+        if (typeof aviso.s !== 'string' || !aviso.s) return;   // sem marca, ninguém o resolve
+        avisosDePousoSemConta.push({ chaves, conta: null, s: aviso.s, em: quando });
+    } else avisosDePousoSemConta.push({ chaves, conta: String(aviso.conta), em: quando });
     while (avisosDePousoSemConta.length > AVISOS_DE_POUSO_SEM_CONTA_MAX) avisosDePousoSemConta.shift();
 }
 
 // A conta desta aba ficou conhecida (`aoConhecerConta`): todos os avisos que
-// esperavam saem daqui — os desta conta valem, os de outra não.
+// esperavam saem daqui — os desta conta valem, os de outra não. Os que esperam
+// a conta de QUEM MANDOU (`conta: null`) seguem esperando.
 function aplicarAvisosQueEsperavamAConta(id) {
     if (!avisosDePousoSemConta.length) return;
     const esperando = avisosDePousoSemConta.splice(0);
-    for (const a of esperando) if (a.conta === String(id)) aplicarPousoDeOutraAba(a.chaves, a.em);
+    for (const a of esperando) {
+        if (a.conta === null) { avisosDePousoSemConta.push(a); continue; }
+        if (a.conta === String(id)) aplicarPousoDeOutraAba(a.chaves, a.em);
+    }
 }
 
 // `env(safe-area-inset-*)` não é legível por API. O jeito é pedir ao próprio
@@ -19454,7 +19587,7 @@ async function enviarLote(places, opts = {}) {
                 const pousou = pousouNoWaze(r);
                 const naoPousaram = places.slice(i + (pousou ? 1 : 0)).filter((q) => !repetidos.has(q));
                 for (const q of places.slice(i)) if (anotados.delete(q)) tirarDaFilaDeSaida('reject', q);
-                if (pousou && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(p, quem);
+                if (pousou && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(p, quem, epocaFila);
                 // Contando ao pousar (a recusa automática), o "Restam" desce QUANDO o
                 // pedido pousa — os alvos saem da fila antes de ir —, e o pouso de
                 // depois da queda não descia: a renovação mantinha a fila com um a
@@ -20722,6 +20855,11 @@ function aoConhecerConta(perfil) {
     // saem (R12-2-05, ver `avisosDePousoSemConta`). Depois da troca de conta, que
     // tira o que era da anterior.
     if (typeof aplicarAvisosQueEsperavamAConta === 'function') aplicarAvisosQueEsperavamAConta(id);
+    // E os pousos que ESTA aba avisou sem a conta (a dela ainda desconhecida): as
+    // outras abas os guardaram pela marca da sessão, e agora ficam sabendo de
+    // quem eram — só as marcas provadamente desta conta (R14-2-03, ver a função).
+    // Depois da troca de conta, que refaz a fila que atravessou a queda.
+    if (typeof avisarAContaDasMarcas === 'function') avisarAContaDasMarcas(id);
     if (saidaEsperandoConta) { saidaEsperandoConta = false; esvaziarFilaDeSaida(); }
 }
 
@@ -21546,8 +21684,10 @@ function offlineLerPousos() {
 // `avisarOutrasAbasDoPouso`): por ser a fonte única, o aviso cobre os caminhos
 // que não passam pela fila de saída — o "Marcar todos", a recusa automática e a
 // aprovação de foto. `quem`: a marca de quem DECIDIU, tirada no gesto, pra
-// decisão que pousa com a sessão já caída (R12-2-04, ver `quemDecideAgora`).
-function registrarPouso(places, quem) {
+// decisão que pousa com a sessão já caída (R12-2-04, ver `quemDecideAgora`), e
+// `epocaFila`, a fila do gesto — a prova de que a conta dele, desconhecida no
+// gesto, é a de agora (R14-2-03, ver `avisarOutrasAbasDoPouso`).
+function registrarPouso(places, quem, epocaFila) {
     const agora = Date.now();
     // Uma escrita pousou: o Waze aceita escrita agora (ver `ultimaEscritaOkEm`).
     ultimaEscritaOkEm = agora;
@@ -21561,7 +21701,7 @@ function registrarPouso(places, quem) {
         }
     }
     if (!chaves.length) return;
-    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves, quem);
+    if (typeof avisarOutrasAbasDoPouso === 'function') avisarOutrasAbasDoPouso(chaves, quem, epocaFila);
     if (pousosDaPagina.size > 500) {
         for (const [k, t] of pousosDaPagina) if (agora - t > POUSO_NA_MEMORIA_MS) pousosDaPagina.delete(k);
     }
@@ -24921,13 +25061,28 @@ function descontarGestoSemSessao(chave, placar, n) {
 //    quem estava tiraria da busca no ar de quem entrou um pedido que, pra ela,
 //    segue não lido. A fila guardada da conta anterior saiu na troca
 //    (`esquecerOutraConta`), e as abas dela saem quando outra conta entra.
+//
+// E a conta do GESTO pode ser DESCONHECIDA (`quem.conta` nula: o gesto saiu antes
+// de o perfil chegar — a extensão publicada não repassa a conta, ou o perfil
+// falhou). Com o perfil da renovação chegando antes da resposta, a conta de agora
+// já se sabia e o pouso saía SEM registro nenhum — nem na página, nem no
+// aparelho, nem o aviso às outras abas (auditoria da rodada 14, R14-2-03,
+// MEDIDO no navegador). Vale com prova POSITIVA de que não é outra conta (a
+// decisão do owner): a marca da sessão do gesto é a desta aba, ou a fila do
+// GESTO (`epocaFila`) atravessou a queda — ver `contaDoGestoEhADeAgora`. Sem
+// prova (a fila foi refeita), nada: pode ser outra pessoa.
 // `=== true`: os harnesses dos testes devolvem objeto verdadeiro pra nome que
 // não conhecem.
-function registrarPousoDepoisDaQueda(places, quem) {
+function registrarPousoDepoisDaQueda(places, quem, epocaFila) {
     if (saiuNestaPagina === true) return;
     const agora = contaAgora();
-    if (agora && !(quem && quem.conta && String(quem.conta) === agora)) return;
-    registrarPouso(places, quem);
+    if (agora) {
+        const doGesto = quem && quem.conta ? String(quem.conta) : null;
+        const provada = !doGesto && typeof contaDoGestoEhADeAgora === 'function'
+            && contaDoGestoEhADeAgora(quem, epocaFila) === true;
+        if (doGesto ? doGesto !== agora : !provada) return;
+    }
+    registrarPouso(places, quem, epocaFila);
 }
 
 // O ✕/✓ EM VOO cuja resposta chegou depois de a sessão acabar (a época mudou).
@@ -24955,7 +25110,7 @@ function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila, quem) {
     const anotado = anotadoAntesDoEnvio.delete(place);
     if (descargaNaFila.delete(place) || anotado) tirarDaFilaDeSaida(tipo, place);
     if (pousouNoWaze(result)) {
-        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(place, quem);
+        if (typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(place, quem, epocaFila);
         return;
     }
     descontarGestoSemSessao(tipo === 'read' ? 'read' : 'rejected', placar, 1);
@@ -25545,7 +25700,7 @@ async function handleBatchMarkRead() {
         // refeita pelo ↻ ou pelo filtro) nos ramos da sessão trocada. Sem sessão
         // (o "Sair"), nada.
         if (epocaFila !== AppState.fetchEpoch) {
-            if (posQueda.length && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(posQueda, quem);
+            if (posQueda.length && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(posQueda, quem, epocaFila);
             if (AppState.authenticated === true) {
                 const pousaram = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba]);
                 const naoPousaram = alvos.filter((p) => !pousaram.has(p));
@@ -25557,7 +25712,7 @@ async function handleBatchMarkRead() {
         // cada pedaço): é a mesma conta, e a fila guardada do offline não pode
         // devolvê-los como card. Com a marca de quem DECIDIU: sem sessão na
         // memória (a renovação no meio), o aviso às outras abas não saía (R12-2-04).
-        if (posQueda.length) registrarPouso(posQueda, quem);
+        if (posQueda.length) registrarPouso(posQueda, quem, epocaFila);
         tirarDaFilaNoFim([...feitos, ...aprovadas, ...posQueda, ...daOutraAbaForaDaTela()]);
         // O que a outra aba decidiu não é "o que não saiu": está decidido.
         const resolvidos = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba].map(chaveDoPedido));
