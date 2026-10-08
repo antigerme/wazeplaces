@@ -219,3 +219,229 @@ test('R14-8-06: CONTROLE — a decisão que acabou de sair (em andamento) não e
   esperando.h.desenharAvisoDoSair();
   assert.equal(esperando.el.escondido, true);
 });
+
+// ═══ R14-1-04 · outra conta com a pergunta à extensão NO AR ═══════════════════
+const MODAIS_DA_ENTRADA = constante('MODAIS_DA_ENTRADA');
+const BOTAO_DA_ACAO = constante('BOTAO_DA_ACAO');
+// A tela de entrada de mentira: a tela (com o "Colar cookies"), os diálogos dela
+// (com o campo de cada um) e o FOCO.
+function telaDeEntrada({ dialogo = null, texto = '', foco = null } = {}) {
+  const els = {};
+  const el = (id, { oculto = false, pai = null } = {}) => {
+    const classes = new Set(oculto ? ['hidden'] : []);
+    const e = {
+      id, value: '', pai,
+      classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c), remove: (c) => classes.delete(c) },
+      contains(outro) { for (let x = outro; x; x = x.pai) if (x === e) return true; return false; },
+    };
+    els[id] = e;
+    return e;
+  };
+  const tela = el('authScreen');
+  el('pasteBtn', { pai: tela });
+  for (const [modal, campo] of [['pasteModal', 'cookiesTextarea'], ['pairEnterModal', 'pairCodeInput']]) {
+    const m = el(modal, { oculto: dialogo !== modal });
+    el(campo, { pai: m }).value = dialogo === modal ? texto : '';
+  }
+  el('closeAccessDenied', { pai: el('accessDeniedModal', { oculto: dialogo !== 'accessDeniedModal' }) });
+  el('appScreen', { oculto: true });
+  const body = { id: 'BODY' };
+  const document = { visibilityState: 'visible', body, documentElement: { id: 'HTML' }, getElementById: (id) => els[id] || null,
+    querySelector: () => null };
+  Object.defineProperty(document, 'activeElement', { get: () => (foco ? els[foco] : body) });
+  return {
+    els, document,
+    fechar(id) {
+      els[id].classList.add('hidden');
+      if (id === 'pasteModal') els.cookiesTextarea.value = '';
+      if (id === 'pairEnterModal') els.pairCodeInput.value = '';
+    },
+    digitar(modal, campo, valor) { els[modal].classList.remove('hidden'); els[campo].value = valor; foco = campo; },
+    mostrarOApp() { els.authScreen.classList.add('hidden'); els.appScreen.classList.remove('hidden'); },
+  };
+}
+
+// A janela de mentira: o que o app posta à extensão (a pergunta) fica anotado, e
+// `responder` entrega a resposta da ponte pelo `message`, como a de verdade.
+function janelaComExtensao(log) {
+  const ouvintes = new Set();
+  const window = {
+    location: { origin: 'https://app' },
+    addEventListener: (tipo, fn) => { if (tipo === 'message') ouvintes.add(fn); },
+    removeEventListener: (tipo, fn) => ouvintes.delete(fn),
+    postMessage: (m) => { if (m && m.action === 'precisa-de-sessao') log.push('perguntou à extensão'); },
+  };
+  const responder = (data) => {
+    for (const fn of [...ouvintes]) fn({ source: window, origin: window.location.origin, data: { source: 'wazeplaces-ext', ...data } });
+  };
+  return { window, responder };
+}
+
+// O `api.js` DE VERDADE (num contexto do `vm`): é nele que mora o `getSession` que
+// a adoção usa.
+function apiDeVerdade(guardado = {}) {
+  const dados = new Map(Object.entries(guardado));
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: {
+      getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+      setItem: (k, v) => { dados.set(k, String(v)); },
+      removeItem: (k) => { dados.delete(k); },
+    },
+    performance, AbortController, Response, console, setTimeout, clearTimeout,
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + ler('js/api.js') + '\nthis.API = API; this.safeLS = safeLS;', ctx);
+  return { API: ctx.API, safeLS: ctx.safeLS, dados };
+}
+
+// A aba que CAIU na tela de entrada (a fila, o card e a conta 111 na memória, o
+// aparelho sem sessão) e volta à vista: a pergunta silenciosa à extensão sai.
+function voltaDaQueCaiu({ tela = {} } = {}) {
+  const t = telaDeEntrada(tela);
+  const log = [];
+  const real = apiDeVerdade({ [CONTA_KEY]: JSON.stringify({ id: '111', s: marcaDe('TOK-A') }) });
+  real.API._post = async (rota, corpo) => { log.push('rota ' + rota + (corpo && corpo.action ? ' ' + corpo.action : '') + (corpo && corpo.sessionToken ? ' ' + corpo.sessionToken : '')); return { success: true }; };
+  const ext = janelaComExtensao(log);
+  const AppState = { authenticated: false, profile: null, queue: [{ venueID: 'p1' }], currentPlace: { venueID: 'p1' } };
+  const deps = {
+    window: ext.window, document: t.document, API: real.API, safeLS: real.safeLS, AppState, CONTA_KEY,
+    MODAIS_DA_ENTRADA, BOTAO_DA_ACAO, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000,
+    resgateEmVoo: false, authInFlight: false, extPerguntando: false, extRenovando: false,
+    extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false, filaAtravessouSessao: false, focoDoTeclado: null,
+    epocaDaSessao: 0, setTimeout: () => 1, clearTimeout: () => {}, callWithRetry: (fn) => fn(),
+    podeInstalarExtensao: () => true, contaConfirmadaNestaAba: { id: '111', s: marcaDe('TOK-A') },
+    closeModal: (id) => { log.push('fechou ' + id); t.fechar(id); },
+    showMainScreen: () => { log.push('app com ' + real.API.sessionToken); AppState.authenticated = true; t.mostrarOApp(); },
+    showAuthScreen: () => log.push('tela de entrada'),
+    resetQueue: () => {}, loadProfileAndAuxData: () => null, conhecerContaDoLogin: () => {}, startFetching: () => {},
+    esvaziarFilaDeSaida: () => {}, mostrarEntrandoPelaExtensao: () => {}, abrirComSessaoSalva: () => log.push('adotou'),
+    showAccessDenied: () => log.push('acesso restrito'),
+    handleLogout: (o) => log.push(['sair', o]), conferirContaDestaAba: () => log.push('conferiu a conta'),
+    relerPlacarDeOutraAba: () => {}, relerPreferenciasDeOutraAba: () => {}, updateInFlightIndicator: () => {},
+    guardarDeVoltaASessaoDestaAba: () => false,
+  };
+  const h = montar(['aoVoltarAAba', 'perguntarAExtensaoAoVoltar', 'entrarPelaExtensao', 'adotarSessaoDoAparelho',
+    'textoDigitadoNaEntrada', 'focoNaTelaDeEntrada', 'fecharModaisDaEntrada', 'aoEntrarNestaPagina',
+    'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao', 'negadoDaExtensao', 'aoFimDaPerguntaDaAbertura',
+    'seOutraContaTomouOAparelhoDaQueCaiu', 'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho',
+    'sessaoDestaAbaEhAGuardada', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+    'guardaASessaoQueCaiu', 'contaDestaAbaEmDuvida', 'marcaDaSessao'], deps);
+  // OUTRA conta (222) entra noutra aba: o token e a conta dela chegam ao aparelho, com o aviso.
+  const outraContaEntra = () => {
+    real.dados.set(TOKEN, 'TOK-C');
+    h.sincronizarComOutraAba(TOKEN);
+    real.dados.set(CONTA_KEY, JSON.stringify({ id: '222', s: marcaDe('TOK-C') }));
+    h.sincronizarComOutraAba(CONTA_KEY);
+  };
+  const saiu = () => log.filter((x) => Array.isArray(x) && x[0] === 'sair').map((x) => x[1]);
+  return { h, deps, log, real, tela: t, responder: ext.responder, outraContaEntra, saiu };
+}
+const SAIDA_DA_QUE_CAIU = { porOutraAba: true, outraConta: true, naEntrada: true };
+
+test('R14-1-04: OUTRA conta entra com a pergunta da VOLTA no ar e o cookies.txt colado — o fim da pergunta (sem entrar nem adotar) alcança a aba que caiu, e o texto fica', async () => {
+  for (const resposta of [{ action: 'sessao', token: 'TOK-EXT', conta: '111' }, { action: 'sem-sessao' }]) {
+    const m = voltaDaQueCaiu();
+    m.h.aoVoltarAAba();
+    assert.ok(m.log.includes('perguntou à extensão'), 'PRÉ-CONDIÇÃO: a volta não perguntou à extensão');
+    m.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);   // a pessoa cola, com a pergunta no ar
+    m.outraContaEntra();
+    assert.deepEqual(m.saiu(), [], 'PRÉ-CONDIÇÃO: com a pergunta no ar, o aviso da outra conta já decidiu (o R13-1-06 deixa pro fim dela)');
+    m.responder({ action: 'aguarde' });
+    m.responder(resposta);
+    await tiques();
+    assert.deepEqual(m.saiu(), [SAIDA_DA_QUE_CAIU],
+      `DEFEITO (${resposta.action}): a aba que caiu segue com a fila, o card e a conta da anterior, com o aparelho já de OUTRA conta: ` + JSON.stringify(m.log));
+    assert.equal(m.tela.els.cookiesTextarea.value, TEXTO_COLADO, `(${resposta.action}) o que estava colado foi apagado`);
+    assert.ok(!m.tela.els.pasteModal.classList.contains('hidden'), `(${resposta.action}) o "Colar cookies" fechou`);
+    assert.ok(!m.log.some((x) => typeof x === 'string' && x.startsWith('app com ')), 'entrou alguma sessão nesta aba');
+  }
+});
+
+test('R14-1-04: CONTROLES — a MESMA conta no aparelho não encerra nada; sem texto, a sessão da outra aba é ADOTADA (como hoje)', async () => {
+  const mesma = voltaDaQueCaiu();
+  mesma.h.aoVoltarAAba();
+  mesma.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);
+  mesma.real.dados.set(TOKEN, 'TOK-Y');
+  mesma.real.dados.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('TOK-Y') }));
+  mesma.responder({ action: 'sem-sessao' });
+  await tiques();
+  assert.deepEqual(mesma.saiu(), [], 'a MESMA conta entrando noutra aba encerrou a memória desta (a queda a mantém pra ela voltar)');
+  const semTexto = voltaDaQueCaiu();
+  semTexto.h.aoVoltarAAba();
+  semTexto.outraContaEntra();
+  semTexto.responder({ action: 'sem-sessao' });
+  await tiques();
+  assert.ok(semTexto.log.includes('adotou'), 'CONTROLE: sem texto, o fim da pergunta deixou de adotar a sessão do aparelho');
+  assert.deepEqual(semTexto.saiu(), [], 'a adoção já limpa pela memória (aoConhecerConta): sair aqui seria em dobro');
+});
+
+test('R14-1-04: o fim da pergunta da ABERTURA que não entrou nem adotou também confere de quem é o aparelho', () => {
+  const m = voltaDaQueCaiu({ tela: { dialogo: 'pasteModal', texto: TEXTO_COLADO, foco: 'cookiesTextarea' } });
+  m.real.dados.set(TOKEN, 'TOK-C');
+  m.real.dados.set(CONTA_KEY, JSON.stringify({ id: '222', s: marcaDe('TOK-C') }));
+  m.h.aoFimDaPerguntaDaAbertura(false);
+  assert.ok(m.log.includes('tela de entrada'));
+  assert.deepEqual(m.saiu(), [SAIDA_DA_QUE_CAIU], 'DEFEITO: o fim da pergunta da abertura não conferiu a conta do aparelho');
+  // CONTROLE: o aparelho da mesma conta.
+  const c = voltaDaQueCaiu({ tela: { dialogo: 'pasteModal', texto: TEXTO_COLADO, foco: 'cookiesTextarea' } });
+  c.real.dados.set(TOKEN, 'TOK-Y');
+  c.h.aoFimDaPerguntaDaAbertura(false);
+  assert.deepEqual(c.saiu(), []);
+});
+
+// O irmão: a pergunta da RENOVAÇÃO da queda (o app ainda na tela) no ar quando a
+// outra conta entra, e a renovação falha. O `derrubarSessao` de verdade.
+function quedaComRenovacaoNoAr({ conta = '222' } = {}) {
+  const log = [];
+  const ap = aparelho({ [TOKEN]: 'TOK-A', [CONTA_KEY]: { id: '111', s: marcaDe('TOK-A') } });
+  const appScreen = { hidden: false, classList: { contains: (c) => (c === 'hidden' ? appScreen.hidden : false) } };
+  let redirecionar = null;
+  const deps = {
+    safeLS: ap.safeLS, CONTA_KEY, AppState: { authenticated: true, profile: { id: 111 }, pendingAction: null, fetchEpoch: 1, queue: [{ venueID: 'p1' }] },
+    API: {
+      sessionToken: 'TOK-A',
+      temSessaoNaMemoria() { return !!this.sessionToken; },
+      setSession(t) { this.sessionToken = t; if (t) ap.safeLS.set(TOKEN, t); else ap.safeLS.remove(TOKEN); },
+      soltarSessao() { this.sessionToken = null; },
+    },
+    document: { getElementById: (id) => (id === 'appScreen' ? appScreen : null), querySelector: () => null },
+    epocaDaSessao: 0, quedaAnunciada: false, Treino: { ativo: false }, extPerguntando: false,
+    contaConfirmadaNestaAba: { id: '111', s: marcaDe('TOK-A') },
+    entrarPelaExtensao: () => Promise.resolve(false),   // a renovação não deu certo
+    tirarNegadoDaExtensao: () => null,
+    setTimeout: (f) => { redirecionar = f; return 1; },
+    fecharCamadasAbertas: (f) => { if (typeof f === 'function') f(); },
+    showAuthScreen: () => { log.push('tela de entrada'); appScreen.hidden = true; },
+    handleLogout: (o) => log.push(['sair', o]),
+    avisarOutrasAbasDaQueda: () => {},
+  };
+  const h = montar(['derrubarSessao', 'sessaoDestaAbaEhAGuardada', 'seOutraContaTomouOAparelhoDaQueCaiu',
+    'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho', 'marcaDaSessao'], deps);
+  return {
+    log, ap, h,
+    async cair() {
+      h.derrubarSessao('srv.err.sessionExpired');
+      // Com a renovação no ar, OUTRA conta entra noutra aba (o token e a conta dela).
+      ap.dados.set(TOKEN, 'TOK-C');
+      ap.dados.set(CONTA_KEY, JSON.stringify({ id: conta, s: marcaDe('TOK-C') }));
+      await tiques();
+      assert.equal(typeof redirecionar, 'function', 'PRÉ-CONDIÇÃO: a renovação que falhou não agendou a tela de entrada');
+      redirecionar();
+    },
+  };
+}
+
+test('R14-1-04 (irmão): a RENOVAÇÃO da queda falha com OUTRA conta tendo tomado o aparelho no meio — a aba que caiu não fica com a memória da anterior', async () => {
+  const m = quedaComRenovacaoNoAr();
+  await m.cair();
+  assert.ok(m.log.includes('tela de entrada'));
+  assert.deepEqual(m.log.filter((x) => Array.isArray(x)), [['sair', SAIDA_DA_QUE_CAIU]],
+    'DEFEITO: a renovação que falhou deixou a aba na tela de entrada com a fila, o card e a conta da anterior (o aparelho já de OUTRA conta): ' + JSON.stringify(m.log));
+  // CONTROLE: a MESMA conta no aparelho fica (a memória é pra ela voltar).
+  const c = quedaComRenovacaoNoAr({ conta: '111' });
+  await c.cair();
+  assert.deepEqual(c.log.filter((x) => Array.isArray(x)), [], 'a MESMA conta encerrou a memória da aba que caiu');
+});

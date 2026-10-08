@@ -558,7 +558,30 @@ function aoFimDaPerguntaDaAbertura(entrou) {
     // nunca nenhum dos dois.
     if (adotarSessaoDoAparelho()) return;
     showAuthScreen();
+    // A pergunta que não entrou nem adotou confere de novo de quem é o aparelho
+    // (ver a função, R14-1-04).
+    seOutraContaTomouOAparelhoDaQueCaiu();
     mostrarNegadoDaExtensao();   // o portão recusou: o motivo, não o silêncio
+}
+
+// OUTRA conta tomou o aparelho noutra aba enquanto ESTA perguntava à extensão: o
+// aviso dela chegou com a pergunta no ar, e a régua do R13-1-06 deixou a decisão
+// pro FIM da pergunta (a sessão que a extensão traz, ou a adoção, limpam pela
+// memória). Mas o fim que não entra nem adota — o texto digitado no "Colar
+// cookies" barra a sessão da extensão (`loginDestaAbaVence`) e a adoção
+// (`adotarSessaoDoAparelho`), ou a extensão não tinha sessão — não conferia nada:
+// a aba seguia com a fila, o card (dado de terceiro, no DOM debaixo da tela de
+// entrada), o anel de chamadas e a conta da anterior, com o aparelho já da outra
+// (auditoria da rodada 14, R14-1-04, MEDIDO no navegador). O mesmo na RENOVAÇÃO
+// da queda que falha (a pergunta no ar com o app ainda na tela, ver
+// `derrubarSessao`). Aqui ela é conferida de novo, pela MESMA régua do aviso
+// (`outraContaTomouOAparelhoDaQueCaiu`), e sai a parte de memória e de tela, sem
+// fechar o que a pessoa abriu na tela de entrada (o "Colar cookies", com o texto)
+// e sem aviso — como no R13-1-06. Devolve se saiu.
+function seOutraContaTomouOAparelhoDaQueCaiu() {
+    if (!outraContaTomouOAparelhoDaQueCaiu()) return false;
+    handleLogout({ porOutraAba: true, outraConta: true, naEntrada: true });
+    return true;
 }
 
 // A sessão que OUTRA aba guardou no aparelho, ADOTADA por esta, que está sem
@@ -1613,6 +1636,9 @@ function perguntarAExtensaoAoVoltar() {
         // como no fim da pergunta da abertura (a volta não a adota com uma
         // pergunta no ar — ver `adotarSessaoDoAparelho`).
         if (entrou || adotarSessaoDoAparelho()) return;
+        // Nem entrou nem adotou (o texto digitado barra as duas): OUTRA conta pode
+        // ter tomado o aparelho com a pergunta no ar (R14-1-04, ver a função).
+        seOutraContaTomouOAparelhoDaQueCaiu();
         mostrarNegadoDaExtensao();
     });
 }
@@ -11455,6 +11481,12 @@ function derrubarSessao(errorKey, { depois } = {}) {
                 if (negado) showAccessDenied(negado);
                 showAuthScreen();
             });
+            // A renovação que não deu certo também é o fim de uma pergunta à
+            // extensão: OUTRA conta que tomou o aparelho com ela no ar não foi
+            // conferida (o app seguia na tela), e esta aba ficava na tela de
+            // entrada com a fila, o card e a conta da anterior (R14-1-04, MEDIDO;
+            // ver a função).
+            seOutraContaTomouOAparelhoDaQueCaiu();
         }, UNAUTHORIZED_REDIRECT_MS);
     });
 }
