@@ -33,8 +33,10 @@ const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
 const TRADUZIDAS = /^card\.updateType\./;
 
+// `marcaDestaAba`: a sessão da MEMÓRIA (`API.sessionToken`), que a presença
+// guarda na saída de cada pedido — o 401 tardio é da sessão que já se foi.
 const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
-  'focavelNaTela']
+  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -109,6 +111,9 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }],
   };
   const API = {
+    // A sessão da MEMÓRIA (a que as rotas levam): o teste a troca pra simular a
+    // renovação silenciosa (outra sessão, a mesma conta).
+    sessionToken: 'token-de-teste',
     getSession: () => 'token-de-teste',
     getCountry: () => pais,
     getRegion: () => 'row',

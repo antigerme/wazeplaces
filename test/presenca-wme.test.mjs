@@ -595,6 +595,43 @@ test('desligar com 401: pendente e a sessão conferida — o teto segura o laço
   assert.equal(presencaWme.desligarPendente, false, 'recusa de verdade passou a ficar pendente');
 });
 
+// O 401 da sessão que LEVOU o "invisível" e já se foi — ela caiu e a extensão a
+// renovou com a mesma conta, e a sessão nova está na memória — conferia a de
+// agora, viva: uma sonda do perfil a mais e o "Conexão instável" logo depois do
+// "Acesso renovado" (auditoria da rodada 14, R14-5-02). O pendente fica, e a
+// sessão nova o manda.
+test('desligar: o 401 da sessão ANTERIOR, chegando depois da renovação, não confere a sessão de agora — e o "invisível" segue pendente', async () => {
+  async function tardio({ renovar }) {
+    let sessao = 'token-velho';
+    let soltar = null;
+    let conferidas = 0;
+    const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
+    const API = { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, get sessionToken() { return sessao; },
+      presencaWaze: () => new Promise((ok) => { soltar = ok; }) };
+    const escopo = comAjudantesDoDesligar({
+      AppState: { authenticated: true, preferences: { presenca: false }, profile: { id: 12444348 } },
+      presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
+      // A sessão da MEMÓRIA, a de verdade (`marcaDestaAba`): é ela que diz de quem é o 401.
+      marcaDestaAba: montar('marcaDestaAba', { API, marcaDaSessao }),
+      handleUnauthorized: () => { conferidas += 1; },
+      API,
+    });
+    montar('presencaWmeDesligar', escopo)();
+    assert.equal(typeof soltar, 'function', 'CONTROLE: o "invisível" tinha que estar no ar');
+    if (renovar) sessao = 'token-renovado';
+    soltar({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' });
+    await new Promise((r) => setTimeout(r, 0));
+    return { conferidas, pendente: presencaWme.desligarPendente };
+  }
+  const tarde = await tardio({ renovar: true });
+  assert.equal(tarde.conferidas, 0, 'DEFEITO: o 401 da sessão que já se foi conferiu a sessão renovada — a sonda a mais e o "Conexão instável"');
+  assert.equal(tarde.pendente, true, 'o "invisível" que levou o 401 da sessão anterior deixou de ficar pendente');
+  // CONTROLE: o 401 da sessão de AGORA confere (gotcha #42).
+  const agora = await tardio({ renovar: false });
+  assert.equal(agora.conferidas, 1, 'CONTROLE: o 401 da própria sessão tinha que ser conferido');
+  assert.equal(agora.pendente, true);
+});
+
 // A DESCARGA (a página indo pro fundo com a ação na janela do Desfazer) não leva
 // posição: a regra escrita é "nunca pela fila de saída, lote, recusa automática
 // ou descarga", e ela levava (auditoria de 2026-09-29, R4-1 P12).

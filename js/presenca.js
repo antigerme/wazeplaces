@@ -542,6 +542,28 @@ function presencaSemResposta(r) {
     return !r || typeof r._motivo === 'string';
 }
 
+// A sessão DESTA aba agora — a da MEMÓRIA, que é a que os pedidos levam
+// (`marcaDestaAba`, do app.js). O `typeof`: os testes que rodam este arquivo
+// sem ela.
+function presencaSessaoAgora() {
+    return typeof marcaDestaAba === 'function' ? marcaDestaAba() : null;
+}
+
+// O 401 de um pedido da presença confere a sessão (`handleUnauthorized`, gotcha
+// #42) — só se ela ainda é a que o pedido LEVOU (`sessao`, tirada na saída). O
+// 401 de uma resposta TARDIA é da sessão que já se foi: a que caiu e a extensão
+// renovou com a mesma conta. Conferida, a sessão de AGORA (viva) dava uma sonda
+// do perfil a mais, o `sessao.alarmeFalso` no diário e o "Conexão instável — sua
+// sessão continua válida." logo depois do "Acesso renovado pelo WME" (auditoria
+// da rodada 14, R14-5-02). É a régua do pareamento (R6-1-08) e das ações (a
+// época da sessão). A falha do próprio pedido (a mensagem "Não enviada.", a
+// conversa que não carregou) segue como é.
+function presencaConferirSessao(r, sessao) {
+    if (!r || r.errorCategory !== 'unauthorized') return;
+    if (sessao !== presencaSessaoAgora()) return;
+    if (typeof handleUnauthorized === 'function') handleUnauthorized();
+}
+
 async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
@@ -555,6 +577,8 @@ async function presencaAtualizar({ token = false } = {}) {
     const tentadaAntes = Presenca.tentadaEm;
     Presenca.tentadaEm = inicio;
     let refazer = false;
+    // A sessão que o pedido leva: o 401 dele é DELA (ver `presencaConferirSessao`).
+    const sessao = presencaSessaoAgora();
     Presenca.pedindo = (async () => {
         try {
             const r = await API.presencaApp(campos);
@@ -578,7 +602,7 @@ async function presencaAtualizar({ token = false } = {}) {
                 // swipe no free tier (auditoria de 2026-09-26).
                 if (querToken && presencaSemResposta(r)) Presenca.tokenPedidoEm = 0;
                 presencaAnotarLista({ via: 'pedido', falhou: (r && r.errorCategory) || 'sem resposta' });
-                if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+                presencaConferirSessao(r, sessao);
                 return;
             }
             // Trocou de país no meio: a LISTA que chegou é do país velho e fica
@@ -2269,6 +2293,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // A hora em que o `abrir` SAI: o "lida" dele só cobre o que já estava
     // guardado (ver o `corte`, abaixo).
     const saiuEm = Date.now();
+    const sessao = presencaSessaoAgora();
     const r = await API.chat({ acao: 'abrir', com: id, ...(antes ? { antesDe: antes } : {}), ...carona });
     h.carregando = false;
     if (epoca !== Presenca.epoca) return;
@@ -2286,7 +2311,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (antes) h.antigas = 'erro';
         else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
         // A página antiga é de uma abertura que já passou: com a primeira
         // saindo, a falha dela não aparece nem é dita — a primeira recomeça as
         // duas (P12).
@@ -2460,6 +2485,7 @@ async function presencaMandar(com, msg) {
     // Uma tentativa só, sem `callWithRetry`: repetir sozinho pode duplicar a
     // mensagem no Waze. Quem repete é a pessoa, no "Tentar de novo" — com o
     // MESMO id, que é o que dá ao Waze a chance de reconhecer a repetição.
+    const sessao = presencaSessaoAgora();
     const r = await API.chat({
         acao: 'enviar', para: com, id: msg.id, texto: msg.texto, de: presencaEu(),
         ...(contexto ? { contexto } : {}), ...carona,
@@ -2480,7 +2506,7 @@ async function presencaMandar(com, msg) {
         // a mensagem, e foi a resposta que se perdeu no caminho. Rebaixar pra
         // "Não enviada" mentia, e o "Tentar de novo" mandaria de novo o que já
         // chegou (auditoria de 2026-09-25).
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
     } else {
         msg.estado = 'falhou';
         // "Sem conexão" só quando a resposta NEM CHEGOU (o `_post` põe
@@ -2488,7 +2514,7 @@ async function presencaMandar(com, msg) {
         // rede está boa, e dizer "sem conexão" mandava a pessoa procurar sinal
         // (auditoria de 2026-09-29). Aí é o "Não enviada." sem motivo.
         msg.motivo = presencaSemResposta(r) ? 'conexao' : 'erro';
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
     }
     presencaRenderConversa();
     presencaRenderLista();

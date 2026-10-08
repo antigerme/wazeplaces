@@ -24056,9 +24056,14 @@ function presencaWmeDesligar({ repeticao = false } = {}) {
             // com a memória desta aba vazia, e qualquer leitura da sessão pelo
             // `getSession` ali adotava calada a que outra aba guardou no aparelho
             // (R12-1-03; a pergunta, hoje, lê a memória — `marcaDestaAba`).
+            //
+            // E só o 401 da sessão de AGORA: o da sessão que levou o envio e já se
+            // foi (a extensão a renovou com a mesma conta) conferia a nova, viva —
+            // o "Conexão instável" logo depois do "Acesso renovado" (R14-5-02).
             const vivaDepois = e401 && typeof sessaoVivaDepoisDe === 'function'
                 && sessaoVivaDepoisDe(presencaWme.desligar401Em) === true;
-            if (e401 && !vivaDepois) {
+            const daSessaoDeAgora = typeof marcaDestaAba !== 'function' || marcaDestaAba() === sessaoDoEnvio;
+            if (e401 && !vivaDepois && daSessaoDeAgora) {
                 presencaWme.desligar401Em = Date.now();
                 if (typeof handleUnauthorized === 'function') handleUnauthorized();
             }
