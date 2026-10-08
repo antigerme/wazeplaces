@@ -6429,6 +6429,9 @@ function showAuthScreen() {
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
     AppState.profile = null;
+    // O "N esperando envio" é da sessão (sem ela a fila de saída não aparece, ver
+    // `updateInFlightIndicator`): ficava no canto da tela de entrada (R14-8-09).
+    updateInFlightIndicator();
     // Deslogado não tem crachá, então não tem sala. Fecha o socket na hora em
     // vez de deixar a conexão viva com uma sessão que já não vale.
     window.Presenca?.desligar?.();
@@ -6454,6 +6457,9 @@ function showMainScreen() {
     // Com a sessão de volta (a renovação pela extensão, com o card na tela), o
     // card destrava: sem sessão ele fica travado (ver `acoesTravadas`).
     aplicarTravaDeAcao();
+    // E o que esperava a sessão na fila de saída volta a aparecer — a queda o
+    // tirou da tela (`derrubarSessao`, R14-8-09) —, até o esvaziamento mandá-lo.
+    updateInFlightIndicator();
     updateDevBadge();
     // A sala só faz sentido logado: é o crachá do WME que abre a porta.
     window.Presenca?.sincronizar?.();
@@ -11356,6 +11362,14 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // Sem sessão o card não decide (ver `acoesTravadas`): durante a renovação
     // pela extensão ele segue na tela, e os botões ficam com cara de travados.
     aplicarTravaDeAcao();
+    // E o "N esperando envio" segue a MESMA régua: sem sessão, a fila de saída
+    // não aparece (ver `updateInFlightIndicator`). Ninguém o redesenhava aqui, e
+    // o "⏰ 1 esperando envio" da sessão que caiu ficava no canto do "Bem-vindo!",
+    // com o relógio que quer dizer "parado esperando rede" com a rede boa
+    // (auditoria da rodada 14, R14-8-09, MEDIDO nos dois motores). A decisão
+    // segue na fila: a sessão que voltar a manda, e o indicador volta com ela
+    // (`showMainScreen`).
+    updateInFlightIndicator();
     // O cabeçalho é de QUEM ESTAVA: o nome e a foto seguiam lá durante a
     // renovação — e depois dela, se o perfil de quem entrou não chegasse
     // (MEDIDO: "contaA" com a sessão de B). O perfil que chegar o redesenha.

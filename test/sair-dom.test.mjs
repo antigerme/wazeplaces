@@ -140,6 +140,9 @@ function montar() {
     Treino: { sair() {} },
     aoFecharCamada() {},   // o "Como funciona" adiado (R7-7-01), em test/como-funciona
     escapeHtml: (x) => String(x), t: (k) => k,   // a opção "Nenhuma" do seletor de áreas (R11-1-05)
+    // O "N esperando envio" que a tela de entrada redesenha (R14-8-09, em
+    // test/contas-auditoria-r14): sem sessão ele não mostra a fila de saída.
+    updateInFlightIndicator() {},
   };
   const MODAL_IDS = MODAIS;
   const corpo = [
