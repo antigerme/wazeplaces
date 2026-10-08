@@ -301,3 +301,75 @@ test('R14-1-02: a renovação que chega ANTES da resposta velha — ela sai, e a
   assert.deepEqual(ids(m.AppState.queue), ['u1', 'u2'], 'a fila não é a da sessão nova');
   assert.ok(m.log.includes('card'), 'a fila da sessão nova não chegou à tela');
 });
+
+// ═══ R14-2-04 · a barra "Primeiro os de…" sobre o ESQUELETO ═══════════════════
+// (auditoria da rodada 14; = R14-8-04; o R13-2-05 tirou a barra do painel do
+// fim, e o esqueleto ficou de fora). A fila do autor em foco acaba com a próxima
+// página ainda vindo (o fim da fila com `hasMore`), ou o ↻ refaz a fila: o
+// `startFetching` tirava o card e punha o esqueleto, e a barra ficava por cima
+// dele dizendo "1 de 1" (pelo ↻, "2 de 3") — com o foco do teclado nela e o
+// nome anunciando ao leitor de tela que a série estava na frente (MEDIDO no
+// navegador, nos dois motores; roteiros r14-2/s/c5, c7 e r14-8/repro c6).
+function montarBarra({ fila = [], comFocoNaBarra = true } = {}) {
+  const doc = { body: { nome: 'body' }, activeElement: null, els: {} };
+  const el = (nome, { classes = [] } = {}) => {
+    const e = { nome, isConnected: true, textContent: '', attrs: {}, classes: new Set(classes) };
+    e.classList = { add: (c) => e.classes.add(c), remove: (c) => e.classes.delete(c), contains: (c) => e.classes.has(c) };
+    e.getClientRects = () => (e.classes.has('hidden') ? [] : [1]);
+    e.setAttribute = (k, v) => { e.attrs[k] = String(v); };
+    e.getAttribute = (k) => (k in e.attrs ? e.attrs[k] : null);
+    e.contains = (x) => x === e;
+    e.focus = () => { doc.activeElement = e; };
+    return e;
+  };
+  for (const id of ['focoAutorBar', 'focoAutorTexto', 'focoAutorContagem', 'noMoreCards', 'loadErrorState']) doc.els[id] = el(id);
+  doc.getElementById = (id) => doc.els[id] || null;
+  const barra = doc.els.focoAutorBar;
+  doc.activeElement = comFocoNaBarra ? barra : doc.body;
+  const log = [];
+  let soltar = null;
+  const AppState = { autorEmFoco: 7, queue: fila.slice(), currentPlace: fila[0] || null, hasMore: true, loadError: false,
+    authenticated: true, fetchEpoch: 0, filters: { myArea: false }, profile: { id: 1 }, _profilePromise: null,
+    _caixaDaMinhaAreaNoAr: null, pendingAction: null };
+  const deps = {
+    AppState, document: doc, Treino: { ativo: false }, navigator: { onLine: true },
+    BOTAO_DA_ACAO: constante('BOTAO_DA_ACAO'),
+    showLoading: (v) => log.push('carregando:' + v), removeCurrentCardEl: () => log.push('tirou o card'),
+    updatePendingCount: () => {}, refazerDecisaoSemResposta: () => null, cardDaFrente: () => null,
+    aplicarFocoDoTeclado: () => log.push('foco prometido: ' + deps.focoDoTeclado),
+    // A série do autor (`serieDoAutor`): o card da tela é dele.
+    serieDoAutor: (id, { naTela }) => [naTela],
+    t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k),
+    // A próxima página, segurada até o teste soltar.
+    fetchNextPage: () => new Promise((ok) => { soltar = () => { AppState.hasMore = false; ok(); }; }),
+    showCurrentPlace: () => log.push('card'), showNoPlaces: () => log.push('vazio'), maybePrefetch: () => {},
+    ultimaBuscaFalhouPorRede: false, buscaEsperaOPerfil: false, filaEsperaPerfil: false, lugarDoPedidoDoPerfil: null,
+    focoDoTeclado: null, pedidosQueEntraramNaFila: new Set(),
+  };
+  const h = montar(['startFetching', 'renderFocoAutor', 'focarDepoisDoFocoNoAutor', 'focavelNaTela',
+    ...(achar('decideOLugarDeAgora') ? ['decideOLugarDeAgora'] : [])], deps);
+  return { h, deps, AppState, doc, barra, log, soltar: () => soltar && soltar(),
+    visivel: () => !barra.classes.has('hidden') };
+}
+
+test('R14-2-04: o fim da série com a próxima página ainda vindo — a barra sai com o card, o foco no autor fica e o do teclado é prometido ao ✕', async () => {
+  const m = montarBarra({ fila: [] });
+  assert.equal(m.visivel(), true, 'PRÉ-CONDIÇÃO: a barra "Primeiro os de…" na tela, com o foco do teclado nela');
+  const busca = m.h.startFetching();               // o último do autor saiu; o esqueleto, e a página vindo
+  await tique();
+  assert.ok(m.log.includes('carregando:true'), 'PRÉ-CONDIÇÃO: o esqueleto não entrou');
+  assert.equal(m.visivel(), false,
+    'DEFEITO: a barra "Primeiro os de… · 1 de 1" ficou por cima do esqueleto, contando uma fila que já não existe (R14-2-04)');
+  assert.equal(m.AppState.autorEmFoco, 7, 'o foco no autor saiu — a página que traz a série de volta não a mostra mais');
+  assert.equal(m.deps.focoDoTeclado, '.card-btn-reject', 'o foco do teclado que estava na barra não ficou prometido ao ✕');
+  m.soltar();
+  await busca;
+});
+
+test('R14-2-04: CONTROLE — com o card do autor na fila, a barra FICA, contando (o instrumento enxerga a barra na tela)', async () => {
+  const c = montarBarra({ fila: [P(1, { creatorId: 7, createdBy: 'autor7' })] });
+  await c.h.startFetching();
+  assert.equal(c.visivel(), true, 'CONTROLE: a barra sumiu com o card do autor na fila');
+  assert.equal(c.doc.els.focoAutorContagem.textContent, '1 de 1');
+  assert.equal(c.AppState.autorEmFoco, 7);
+});

@@ -977,6 +977,8 @@ function aparelhoO1({ filtros = null } = {}) {
       bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(), pedidosEmAndamento: new Set(),
       pousosDaPagina: new Map(), offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
       showLoading: () => {}, removeCurrentCardEl: () => {},
+      // A barra do foco no autor, que sai com o card no esqueleto (R14-2-04).
+      renderFocoAutor: () => {},
       // A decisão do lugar que ficou sem resposta (R12-6): aqui, nenhuma pendente.
       refazerDecisaoSemResposta: () => null,
       document: { getElementById: el },

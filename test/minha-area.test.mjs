@@ -295,7 +295,9 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     presencaWmeAoCarregarPerfil: () => {}, presencaWmeRefazerDesligar: () => {}, reavaliarFotoAbertaPeloPerfil: () => {},
     atualizarSeloDeConquista: () => {},   // o ponto de Filtros, que também lê o portão (R13-7-02)
     recusaDoPortao: () => log.push('recusa'),
-    showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {},
+    showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => log.push('repor'),
+    // A barra do foco no autor, que sai com o card no esqueleto (R14-2-04).
+    renderFocoAutor: () => {},
     showNoPlaces: () => log.push('vazio'), abrirGuardadaDepoisDaFalha: async () => false,
     listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     // As funções do conserto: no código de antes elas não existem, e o teste tem

@@ -13552,6 +13552,17 @@ async function startFetching() {
     document.getElementById('noMoreCards').classList.add('hidden');
     document.getElementById('loadErrorState')?.classList.add('hidden');
     removeCurrentCardEl();
+    // A barra "Primeiro os de…" é do CARD, e sai com ele (a regra do
+    // `showNoPlaces`, R13-2-05). Sem card na tela — o esqueleto da próxima
+    // página no fim da fila, o ↻ —, ela ficava por cima do carregando, contando
+    // uma fila que já não existe ("1 de 1"; pelo ↻, "2 de 3"), com o nome
+    // dizendo ao leitor de tela que a série estava na frente e o foco do teclado
+    // nela (MEDIDO no navegador, nos dois motores; auditoria da rodada 14,
+    // R14-2-04 = R14-8-04). Quem a tira é a regra de sempre (`renderFocoAutor`):
+    // sem card, o foco no autor FICA (a página que traz a série de volta a
+    // mostra de novo), e o foco do teclado que estava nela fica prometido ao ✕
+    // do card que chegar. Com card na fila, ela segue contando.
+    renderFocoAutor();
     updatePendingCount();
 
     // A decisão do lugar que ficou SEM a resposta de um servidor pergunta de
