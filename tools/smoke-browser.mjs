@@ -10654,9 +10654,18 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.page.evaluate(() => { openBatchReadConfirm(); handleBatchMarkRead(); });
     await esperarOuExplodir(g.page, () => acoesTravadas() && !!cardDaFrente()
       && cardDaFrente().querySelector('.card-btn-reject').disabled, 'o lote travar o card');
-    // O "Marcando 6 como lidos…" do próprio lote cobre os botões no Fold nos
-    // 4 s dele: tocar ali é tocar no toast (medido — o 1º toque do teste caía
-    // nele). O caso do relato é DEPOIS que ele sai.
+    // O "Marcando 6 como lidos…" FICA enquanto o lote está no ar (R14-8-10):
+    // como aviso solto de 4 s, ele sumia no meio do lote lento (e no rápido ficava
+    // junto do "6 marcados"). Passados os 4 s, com o lote PRESO, ele segue lá.
+    const marcando = await g.page.evaluate(() => t('toast.batchMarkingPlural', { n: 6 }));
+    await g.page.waitForTimeout(4500);
+    const naTelaAos45 = await g.page.evaluate((x) => [...document.querySelectorAll('#toastContainer .toast')]
+      .some((e) => e.textContent.trim() === x && e.style.opacity !== '0'), marcando);
+    checa(naTelaAos45, `${id}: DEFEITO — o "Marcando 6 como lidos…" sumiu com o lote no ar (R14-8-10)`);
+    // No Fold ele cobre os botões: tocar ali é tocar no aviso (medido — o 1º
+    // toque do teste caía nele), e o toque o dispensa. O caso do relato é DEPOIS
+    // que ele sai.
+    if (naTelaAos45) await g.page.click('#toastContainer .toast');
     await esperarOuExplodir(g.page, () => !document.querySelector('#toastContainer .toast'), 'o toast do lote sair', 8000);
     // 1) o TOQUE no ✕ travado: botão `disabled` não recebe `click`, e a
     //    barra ouve o pointerdown/up.
@@ -10788,6 +10797,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.page.evaluate(() => { openBatchReadConfirm(); handleBatchMarkRead(); });
     await esperarOuExplodir(g.page, () => acoesTravadas() && !!cardDaFrente()
       && cardDaFrente().querySelector('.card-btn-reject').disabled, 'o lote travar o card');
+    // O "Marcando…" fica enquanto o lote está no ar (R14-8-10): o toque o dispensa.
+    await g.page.click('#toastContainer .toast');
     await semToast('o toast do lote sair');
     // CONTROLE: o ✕ travado do card responde na mesma trava.
     const x = await centroDe('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
