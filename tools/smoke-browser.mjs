@@ -3395,6 +3395,9 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
         inalcancavel: botoes.filter((b) => vis(b) && !alcanca(b)).length,
         alvoPequeno: botoes.filter((b) => vis(b) && b.getBoundingClientRect().height < 44).length,
         sairOk: vis(sair) && sair.getBoundingClientRect().height >= 44 && alcanca(sair),
+        // E a LARGURA (R14-8-12, auditoria da rodada 14): no Fold o "Sair" tinha
+        // 37–42px (pt, en, es) — o rótulo curto com o padding de 12px.
+        sairLargura: vis(sair) ? Math.round(sair.getBoundingClientRect().width * 10) / 10 : 0,
         sobre: Math.round(sobre),
         estouroX: Math.max(0, doc.scrollWidth - doc.clientWidth),
         // R10-7-01: a fila real é VAZIA aqui, então o card é um exemplo
@@ -3416,6 +3419,7 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
     checa(m.inalcancavel === 0, `${onde}: ${m.inalcancavel} botão(ões) cobertos por outro elemento`);
     checa(m.alvoPequeno === 0, `${onde}: alvo de toque abaixo de 44px`);
     checa(m.sairOk, `${onde}: o "Sair" do treino não está utilizável`);
+    checa(m.sairLargura >= 44, `${onde}: o "Sair" do treino com ${m.sairLargura}px de largura (mín. 44, R14-8-12)`);
     checa(m.estouroX === 0, `${onde}: estouro horizontal de ${m.estouroX}px`);
     checa(!!m.linkDoExemplo.exemplo && m.linkDoExemplo.existe,
       `${onde}: PRÉ-CONDIÇÃO — o card da frente não é um exemplo sintético com o ↗ no DOM`, JSON.stringify(m.linkDoExemplo));
@@ -6489,6 +6493,160 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       }
       await ctx.close();
     }
+  }
+}
+
+// ── OS DIÁLOGOS E OS ÍCONES NO FOLD (R14-8-03, R14-8-11) ───────────────────
+// R14-8-03: as linhas de DOIS botões dos diálogos (`.dialogo-acoes`) dividem a
+// largura por `flex-1`, e um botão flex não encolhe abaixo da palavra mais longa
+// do rótulo. No Galaxy Fold (280px) a soma passava da linha: em francês o "Se
+// déconnecter" saía da CAIXA do diálogo (cortado na borda, com rolagem
+// horizontal: 258 > 248), e o "Confirmar" (pt/es), o "Se connecter", o "J'ai
+// compris" e o "Appliquer" comiam o padding (auditoria da rodada 14, MEDIDO nos
+// dois motores). Abaixo de 320px o botão encolhe, perde padding e quebra o
+// rótulo DENTRO dele. O guard mede o que a TELA deu: o botão dentro do conteúdo
+// da linha, a caixa sem rolagem lateral, 44px de altura, o rótulo sem vazar — e
+// a quebra no MEIO de uma palavra só onde a palavra não cabe nem assim (sem
+// isto, encolher a metade da linha cortava "Cancelar" em pt e es: "Cancela/r").
+// R14-8-11: o ícone ao lado de um rótulo que quebra linha encolhia sem o
+// `flex-shrink-0` (o "Copiar link" com 6–14px em vez de 16, em todo celular).
+// CONTROLES: a mesma medida, com a regra da tela estreita desligada na página,
+// acusa o "Se déconnecter" fora da caixa; e o ícone com o encolher de volta é
+// acusado — sem isso, "nada sai da caixa" passaria com o instrumento cego.
+{
+  const DIALOGOS = ['logoutModal', 'pasteModal', 'pairEnterModal', 'comoFuncionaModal', 'batchReadModal', 'filtersModal', 'resumoModal'];
+  const ICONES = ['uploadBtn', 'pasteBtn', 'pairEnterBtn', 'pairShowCodeBtn', 'pairCopyLinkBtn', 'batchReadBtn', 'pairCreateBtn', 'logoutBtn'];
+  // A linha de dois botões do diálogo `id`, medida na tela.
+  const medirLinha = (page, id) => page.evaluate((mid) => {
+    document.querySelectorAll('[role="dialog"]').forEach((m) => m.classList.add('hidden'));
+    const m = document.getElementById(mid);
+    m.classList.remove('hidden');
+    if (mid === 'filtersModal') switchFilterTab('filtersTabFilters');
+    const linha = m.querySelector('.dialogo-acoes');
+    if (!linha) return { erro: 'sem a linha .dialogo-acoes' };
+    const cs = getComputedStyle(linha);
+    const lr = linha.getBoundingClientRect();
+    const conteudo = [lr.left + parseFloat(cs.paddingLeft), lr.right - parseFloat(cs.paddingRight)];
+    let caixa = linha.parentElement;
+    while (caixa && caixa !== m && !/(auto|scroll)/.test(getComputedStyle(caixa).overflowY)) caixa = caixa.parentElement;
+    const botoes = [...linha.children].filter((b) => b.tagName === 'BUTTON' && b.getClientRects().length).map((b) => {
+      const r = b.getBoundingClientRect();
+      const bs = getComputedStyle(b);
+      const largura = b.clientWidth - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight);
+      // Onde o rótulo quebra: caractere a caractere, pelo topo da linha.
+      const tn = [...b.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+      let meio = 0, maiorPalavra = 0;
+      if (tn) {
+        const txt = tn.textContent;
+        let topo = null;
+        for (let i = 0; i < txt.length; i++) {
+          if (/\s/.test(txt[i])) continue;
+          const rg = document.createRange(); rg.setStart(tn, i); rg.setEnd(tn, i + 1);
+          const rc = rg.getBoundingClientRect();
+          if (!rc.width) continue;
+          const t = Math.round(rc.top);
+          if (topo !== null && Math.abs(t - topo) > 3 && !/\s/.test(txt[i - 1])) meio++;
+          topo = t;
+        }
+        // A palavra mais longa, na fonte do botão (num span fora da tela).
+        const sp = document.createElement('span');
+        sp.style.cssText = `position:absolute;left:-9999px;white-space:nowrap;font:${bs.fontWeight} ${bs.fontSize} ${bs.fontFamily};letter-spacing:${bs.letterSpacing}`;
+        document.body.appendChild(sp);
+        for (const w of txt.trim().split(/\s+/)) { sp.textContent = w; maiorPalavra = Math.max(maiorPalavra, sp.getBoundingClientRect().width); }
+        sp.remove();
+      }
+      return { id: b.id, txt: (b.textContent || '').trim(), l: r.left, r: r.right, h: r.height,
+        vaza: b.scrollWidth > b.clientWidth + 1, meio, maiorPalavra, largura };
+    });
+    return { conteudo, botoes, rolagem: caixa && caixa !== m ? caixa.scrollWidth - caixa.clientWidth : 0 };
+  }, id);
+  const icones = (page, ids) => page.evaluate((lista) => lista.map((id) => {
+    const b = document.getElementById(id);
+    const s = b && b.querySelector('svg');
+    if (!s || !s.getClientRects().length) return { id, visivel: false };
+    const m = /(?:^|\s)w-(\d+(?:\.\d+)?)(?:\s|$)/.exec(s.getAttribute('class') || '');
+    return { id, visivel: true, w: s.getBoundingClientRect().width, quer: m ? Number(m[1]) * 4 : null };
+  }), ids);
+  const abrir = async (viewport, lang) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: lang === 'en' ? 'en-US' : lang });
+    const page = await ctx.newPage();
+    await page.addInitScript((l) => {
+      localStorage.setItem('waze_places_lang', l);
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    }, lang);
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(450);
+    // A largura da palavra é a da fonte do app (a Inter): medida antes de ela
+    // chegar, seria a da fonte do sistema.
+    await page.evaluate(() => document.fonts.ready.then(() => true));
+    return { ctx, page };
+  };
+  for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['SE 2016', { width: 320, height: 568 }],
+                                ['iPhone SE', { width: 375, height: 667 }]]) {
+    for (const lang of LINGUAS) {
+      const { ctx, page } = await abrir(viewport, lang);
+      const onde = `diálogos/${ap}/${lang}`;
+      // Os ícones da ENTRADA, na tela de entrada de verdade (deslogado).
+      for (const i of await icones(page, ['uploadBtn', 'pasteBtn', 'pairEnterBtn'])) {
+        checa(i.visivel, `${onde}: PRÉ-CONDIÇÃO — o ícone de #${i.id} não está na tela de entrada`);
+        if (i.visivel) checa(i.w >= i.quer - 0.5, `${onde}: o ícone de #${i.id} encolheu pra ${i.w.toFixed(1)}px (quer ${i.quer}, R14-8-11)`);
+      }
+      // Os diálogos, com a sessão de mentira (os controles de sessão da Ajuda na tela).
+      await page.evaluate(() => { AppState.authenticated = true; mostrarControlesDeSessao(true); });
+      for (const id of DIALOGOS) {
+        await assentar(page, 0);
+        const d = await medirLinha(page, id);
+        if (d.erro) { checa(false, `${onde}/${id}: ${d.erro}`); continue; }
+        checa(d.botoes.length >= 2 || id === 'resumoModal' || id === 'filtersModal',
+          `${onde}/${id}: PRÉ-CONDIÇÃO — a linha não tem os dois botões`, JSON.stringify(d.botoes.map((b) => b.id)));
+        checa(d.rolagem <= 1, `${onde}/${id}: a caixa do diálogo ganhou rolagem lateral de ${d.rolagem}px (um botão saiu dela)`);
+        for (const b of d.botoes) {
+          const nome = `${onde}/${id}: "${b.txt}"`;
+          checa(b.l >= d.conteudo[0] - 0.5 && b.r <= d.conteudo[1] + 0.5,
+            `${nome} sai da linha (${Math.round(b.l)}..${Math.round(b.r)} × ${Math.round(d.conteudo[0])}..${Math.round(d.conteudo[1])}) — R14-8-03`);
+          checa(b.h >= 44, `${nome} com ${Math.round(b.h)}px de altura (mín. 44)`);
+          checa(!b.vaza, `${nome} com o rótulo vazando do botão`);
+          checa(!b.meio || b.maiorPalavra > b.largura + 0.5,
+            `${nome} quebra no MEIO de uma palavra que cabia (a maior: ${b.maiorPalavra.toFixed(1)}px, cabe ${b.largura.toFixed(1)}px)`);
+        }
+      }
+      // Os ícones do pareamento, dos Filtros e da Ajuda.
+      await page.evaluate(() => {
+        document.querySelectorAll('[role="dialog"]').forEach((m) => m.classList.add('hidden'));
+        for (const id of ['pairShowModal', 'helpModal']) document.getElementById(id).classList.remove('hidden');
+        document.getElementById('filtersModal').classList.remove('hidden');
+        switchFilterTab('filtersTabFilters');
+      });
+      for (const i of await icones(page, ICONES.slice(3))) {
+        checa(i.visivel, `${onde}: PRÉ-CONDIÇÃO — o ícone de #${i.id} não está na tela`);
+        if (i.visivel) checa(i.w >= i.quer - 0.5, `${onde}: o ícone de #${i.id} encolheu pra ${i.w.toFixed(1)}px (quer ${i.quer}, R14-8-11)`);
+      }
+      await ctx.close();
+    }
+  }
+  // CONTROLES, no pior caso (o Fold em francês): a medida ENXERGA o defeito.
+  {
+    const { ctx, page } = await abrir({ width: 280, height: 653 }, 'fr');
+    await page.evaluate(() => {
+      AppState.authenticated = true;
+      const s = document.createElement('style');
+      // A regra da tela estreita desligada — a hifenização junto: ela sozinha
+      // já encolhe a palavra mínima do botão (o pedaço "décon-") —, e o ícone
+      // encolhendo de novo.
+      s.textContent = '.dialogo-acoes > button { min-width: auto !important; padding-left: 1rem !important; padding-right: 1rem !important;'
+        + ' -webkit-hyphens: manual !important; hyphens: manual !important; overflow-wrap: normal !important; }'
+        + ' #pairCopyLinkBtn svg { flex-shrink: 1 !important; }';
+      document.head.appendChild(s);
+    });
+    const d = await medirLinha(page, 'logoutModal');
+    const sair = (d.botoes || []).find((b) => b.id === 'confirmLogout');
+    checa(!!sair && (sair.r > d.conteudo[1] + 0.5 || d.rolagem > 1),
+      'diálogos CONTROLE: sem a regra da tela estreita, a medida não viu o "Se déconnecter" sair da caixa — o instrumento está cego', JSON.stringify(sair));
+    await page.evaluate(() => { document.querySelectorAll('[role="dialog"]').forEach((m) => m.classList.add('hidden')); document.getElementById('pairShowModal').classList.remove('hidden'); });
+    const [ic] = await icones(page, ['pairCopyLinkBtn']);
+    checa(ic.visivel && ic.w < ic.quer - 0.5,
+      'diálogos CONTROLE: com o ícone encolhendo de novo, a medida não o viu encolher — o instrumento está cego', JSON.stringify(ic));
+    await ctx.close();
   }
 }
 
