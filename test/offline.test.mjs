@@ -653,7 +653,10 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   const i9c = CODIGO.indexOf("secao('9c.");
   const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
   assert.match(bloco9c, /hasTouch: true, isMobile: true/, 'a 9c tem que rodar num contexto com TOQUE — o botão responde a toque');
+  // O toque de verdade é o do MOTOR (lote 18): o do DevTools no Chromium, e o
+  // `touchscreen` do Playwright no WebKit — que não tem o protocolo do DevTools.
   assert.match(bloco9c, /Input\.dispatchTouchEvent/, 'a 9c tem que TOCAR o botão, não chamar a captura por fora');
+  assert.match(bloco9c, /await pg\.touchscreen\.tap\(c\.x, c\.y\);/, 'fora do Chromium, a 9c tem que TOCAR o botão (o `touchscreen`)');
   // E o toque espera o botão NO LUGAR que o app pôs, não três amostras iguais:
   // MEDIDO no WebKit (lote 18), a transição da troca de canto fica parada no
   // ponto de partida por mais de 300 ms às vezes, e o toque caía no lugar velho
@@ -663,7 +666,10 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(bloco9c, /parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo/,
     'o toque da 9c conta como parado o FAB que ainda desliza');
   assert.doesNotMatch(bloco9c, /dlogCapturar\(/, 'a 9c chamou a captura por fora — o toque de verdade é o que se mede');
-  assert.match(bloco9c, /\.close\(\{ runBeforeUnload: true \}\)/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
+  // Fechar como o usuário fecha é a porta única (lote 18): no WebKit 27.2 o
+  // `close({ runBeforeUnload: true })` nem fecha a página (MEDIDO); a porta usa o
+  // `close()` puro lá, e o `test/navegador.test.mjs` cobra a forma dela.
+  assert.match(bloco9c, /await fecharComoOUsuario\(p1d\);/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
   // Ir pro FUNDO sem descarregar: descarregar aborta o IndexedDB em voo, e aí
   // "guarda a captura já baixada" e "grava sem o modo dev" passavam limpas
   // (medido: as duas sabotagens sobreviveram antes disto).

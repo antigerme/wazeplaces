@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { carregarPlaywright, abrirChromium } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
 import { subirServidorLocal } from './servidor-local.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,7 +45,45 @@ const BASE = `http://127.0.0.1:${PORTA}`;
 // Carregar e abrir passam pela fonte única (`tools/navegador.mjs`): ela exige
 // o Playwright do REPO — o mesmo do CI, o mais novo — e diz no log qual
 // navegador abriu.
+//
+// E o MOTOR é o pedido (`MOTOR=chromium|webkit`). Este smoke rodava SÓ no
+// Chromium porque o modo avião simulado do Playwright no WebKit derrubava até a
+// resposta que o service worker tinha guardada. No Playwright 1.64 (WebKit
+// 27.2) isso caducou — MEDIDO, com o worker no comando: o asset guardado
+// responde 200 sem rede, o não guardado falha ("Response served by service
+// worker is an error"), uma página NOVA abre com o app e o `navigator.onLine`
+// fica falso, como no Chromium (auditoria da rodada 14, R14-4-07/R14-6-07).
+//
+// MAS o WebKit tem OUTRO limite, e é ele que decide o que roda lá: com o worker
+// no comando, a ROTA do Playwright — a do contexto e a da página — não vê
+// NENHUM pedido da página. MEDIDO no 27.2 (e7/e7b do lote 18): o tile pela
+// `<img>` e pelo `fetch` da varredura, a foto e o POST da API saem pela rede de
+// verdade — o tile chega do Waze real (2200 bytes, sem a marca da rota) e a API
+// cai no servidor local (401) —, 0 de 3 pela rota; com o worker BLOQUEADO, 3 de
+// 3; e no Chromium, 3 de 3 nos dois casos. As seções que rodam com o worker no
+// comando dependem da rota pro tile, pra foto e pra API (o modo avião aqui é
+// `abort` MAIS `setOffline`), então ficam SÓ NO CHROMIUM — puladas pelo nome,
+// com o motivo, e contadas no fim (`pularForaDoChromium`). No WebKit rodam as
+// que bloqueiam o worker: a foto no cache HTTP, o diagnóstico com a rede
+// pendurada, o diagnóstico que atravessa o fechar, as duas abas e o FAB. E o
+// que só o protocolo do DevTools faz (encerrar o worker, a margem do iPhone
+// instalado) é pulado do mesmo jeito, como a reserva da 9i sem `navigator.locks`
+// (um defeito do app que só aparece lá — ver a 9i).
 const pw = await carregarPlaywright();
+const MOTOR = motorPedido();
+// Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
+// que o aparelho dispara ao sair do app — e é o que a descarga da janela do
+// Desfazer e o retrato do diagnóstico escutam. O mesmo `close()` não é o mesmo
+// evento em todo lugar, e cada diferença foi MEDIDA pelo próprio app:
+//  · Chromium (Playwright 1.49, Chromium 131): o `close()` puro destrói a
+//    página SEM nenhum dos dois; o `close({ runBeforeUnload: true })` dispara
+//    os dois — e segue disparando no 1.64 (Chromium 156).
+//  · WebKit (Playwright 1.64, WebKit 27.2): o `close({ runBeforeUnload: true })`
+//    NÃO FECHA a página (`isClosed()` falso, nenhum evento) — ela fica aberta,
+//    calada, no meio do teste; o `close()` puro fecha com `pagehide` e
+//    `visibilitychange` (MEDIDO, e6 da auditoria da rodada 14).
+// Uma porta só, pra o fechar de cada seção ser o mesmo gesto nos dois motores.
+const fecharComoOUsuario = (pg) => (MOTOR === 'chromium' ? pg.close({ runBeforeUnload: true }) : pg.close());
 
 // ── servidor ───────────────────────────────────────────────────────────────
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
@@ -85,7 +123,7 @@ const PLACE = (i, purType = 'NEW_PLACE') => ({
   dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2,
 });
 
-const browser = await abrirChromium(pw);
+const browser = await abrirNavegador(pw, {}, MOTOR);
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
   serviceWorkers: 'allow', locale: 'pt-BR', colorScheme: 'dark' });
 let rotaTile = 0;
@@ -151,6 +189,11 @@ const montarNa = (pg, pls) => pg.evaluate((ps) => {
 }, pls);
 const montar = (pls) => montarNa(page, pls);
 
+// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
+// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
+// for declarado aqui não existe depois dele.
+if (!pularForaDoChromium(MOTOR, '1 a 6 — o mapa, a fila em IndexedDB, o sufixo da foto, a varredura, abrir e reabrir sem rede e o card de foto, com o service worker no comando',
+  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('1. O MAPA COM O TOGGLE DESLIGADO (o defeito que foi a produção)');
 // DUAS camadas, e a segunda é a única que responde ao relato do owner ("o mapa
 // parou de carregar"). A primeira mede uma <img> SOLTA; a segunda mede o
@@ -358,14 +401,20 @@ await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
 const encheu5b = await page.evaluate(() => offlineUltimoResultado);
 diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app', encheu5b === 'pronto', String(encheu5b));
 aviao = true; await ctx.setOffline(true);
-const cdpReabrir = await ctx.newCDPSession(page);
+// Encerrar o worker é do protocolo do DevTools, que só o Chromium tem: lá a
+// variante do worker ENCERRADO roda; fora dele ela é pulada pelo nome.
+const cdpReabrir = MOTOR === 'chromium' ? await ctx.newCDPSession(page) : null;
 let estadosReabrir = [];
-cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.versions.map((v) => v.runningStatus); });
-await cdpReabrir.send('ServiceWorker.enable');
+if (cdpReabrir) {
+  cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.versions.map((v) => v.runningStatus); });
+  await cdpReabrir.send('ServiceWorker.enable');
+}
 for (const variante of [
   { nome: 'worker VIVO (o caso do relato)', parar: false },
   { nome: 'worker ENCERRADO (o app fechado por mais de ~30s)', parar: true },
 ]) {
+  if (variante.parar && pularForaDoChromium(MOTOR, '5b. reabrir sem rede com o worker ENCERRADO',
+    'encerrar o service worker é do protocolo do DevTools do Chromium (`ServiceWorker.stopAllWorkers`), que o WebKit do Playwright não tem')) continue;
   if (variante.parar) {
     estadosReabrir = [];
     await cdpReabrir.send('ServiceWorker.stopAllWorkers');
@@ -729,6 +778,7 @@ diz('com a rede PROVADA, o card sai do "precisa de sinal" NA HORA e destrava ✕
   JSON.stringify({ ms6g, solto6g, depois6g, presos: presos6g.length }));
 for (const r of presos6g.splice(0)) await r.fulfill({ status: 404, body: 'nao', headers: { 'cache-control': 'no-store' } }).catch(() => {});
 await ctx.unroute('**/thumb700_presa*', fotoPresa);
+} // fim do bloco só do Chromium que começa na seção 1 (ver o `pularForaDoChromium` lá)
 
 secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
@@ -868,6 +918,11 @@ await conferirCardDeFoto('REABERTA, foto proposta na 2ª posição', FOTOS_REAIS
 aviao = false;
 await ctxFoto.close();
 
+// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
+// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
+// for declarado aqui não existe depois dele.
+if (!pularForaDoChromium(MOTOR, '7 a 8b — a estrada, a caixa curta, o worker encerrado, a preparação interrompida, o deploy e o diagnóstico do offline, com o service worker no comando',
+  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('7. A ESTRADA: marco o toggle, encho, entro no avião e volto');
 // É o teste de ACEITAÇÃO do recurso — a promessa que o owner pediu em palavras:
 // "sair de casa, marcar o toggle, sair tratando as solicitações e ter a mesma
@@ -1109,30 +1164,36 @@ await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().q
   return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
 const comWorkerVivo = await tileNaFrente();
 diz('CONTROLE: com o worker vivo, o tile guardado aparece sem rede', comWorkerVivo.ok > 0, JSON.stringify(comWorkerVivo));
-const cdp = await ctx.newCDPSession(page);
-let estadosDoWorker = [];
-cdp.on('ServiceWorker.workerVersionUpdated', (e) => { estadosDoWorker = e.versions.map((v) => v.runningStatus); });
-await cdp.send('ServiceWorker.enable');
-await cdp.send('ServiceWorker.stopAllWorkers');
-// CONTROLE do instrumento: o worker foi MESMO encerrado. Sem isto, a asserção
-// de baixo passaria com ele vivo — e mediria o caso que já funcionava.
-for (let i = 0; i < 30 && !estadosDoWorker.includes('stopped'); i++) await dormir(100);
-diz('CONTROLE: o service worker foi de fato ENCERRADO', estadosDoWorker.includes('stopped'),
-  JSON.stringify(estadosDoWorker));
-await montar([SO_MAPA(71)]);
-await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
-  return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
-const acordou = await tileNaFrente();
-diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
-  JSON.stringify(acordou));
-// O worker recriado responde ao diagnóstico pela boca DELE — e é esta a
-// resposta que teria mostrado o defeito do relato sem precisar reproduzi-lo:
-// nascido agora, lista lida, servindo do cache.
-const guardadosAgora = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
-const doSw = await page.evaluate(() => diagServiceWorker());
-diz('o worker RECRIADO se apresenta: nasceu há pouco, com a lista lida e servindo do cache',
-  !!doSw && doSw.idadeMs < 60000 && doSw.listaPronta === true && doSw.tilesNaLista === guardadosAgora && doSw.doCache > 0,
-  JSON.stringify(doSw) + ' cache=' + guardadosAgora);
+// Encerrar o worker à força é do protocolo do DevTools do Chromium. No WebKit o
+// controle de cima (o worker VIVO servindo o tile guardado sem rede) roda; o
+// worker ENCERRADO, não — e é dito no fim.
+if (!pularForaDoChromium(MOTOR, '7c. o worker ENCERRADO acordando sabendo dos tiles',
+  'encerrar o service worker é do protocolo do DevTools do Chromium (`ServiceWorker.stopAllWorkers`), que o WebKit do Playwright não tem')) {
+  const cdp = await ctx.newCDPSession(page);
+  let estadosDoWorker = [];
+  cdp.on('ServiceWorker.workerVersionUpdated', (e) => { estadosDoWorker = e.versions.map((v) => v.runningStatus); });
+  await cdp.send('ServiceWorker.enable');
+  await cdp.send('ServiceWorker.stopAllWorkers');
+  // CONTROLE do instrumento: o worker foi MESMO encerrado. Sem isto, a asserção
+  // de baixo passaria com ele vivo — e mediria o caso que já funcionava.
+  for (let i = 0; i < 30 && !estadosDoWorker.includes('stopped'); i++) await dormir(100);
+  diz('CONTROLE: o service worker foi de fato ENCERRADO', estadosDoWorker.includes('stopped'),
+    JSON.stringify(estadosDoWorker));
+  await montar([SO_MAPA(71)]);
+  await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+    return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
+  const acordou = await tileNaFrente();
+  diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
+    JSON.stringify(acordou));
+  // O worker recriado responde ao diagnóstico pela boca DELE — e é esta a
+  // resposta que teria mostrado o defeito do relato sem precisar reproduzi-lo:
+  // nascido agora, lista lida, servindo do cache.
+  const guardadosAgora = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
+  const doSw = await page.evaluate(() => diagServiceWorker());
+  diz('o worker RECRIADO se apresenta: nasceu há pouco, com a lista lida e servindo do cache',
+    !!doSw && doSw.idadeMs < 60000 && doSw.listaPronta === true && doSw.tilesNaLista === guardadosAgora && doSw.doCache > 0,
+    JSON.stringify(doSw) + ' cache=' + guardadosAgora);
+}
 const falhasGuardadas = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
 diz('nenhum tile GUARDADO falhou na tela — é o que a sentinela do mapa acusaria',
   falhasGuardadas === 0, 'anel=' + falhasGuardadas);
@@ -1544,6 +1605,7 @@ diz('CONTROLE: sem o dev, a lista para no teto do navegador — e o relatório S
 diz('com o dev ligado o teto sobe e nada se perde',
   recComDev.n > 300 && recComDev.encheu === false, JSON.stringify(recComDev));
 await ctxR.close();
+} // fim do bloco só do Chromium que começa na seção 7 (ver o `pularForaDoChromium` lá)
 
 secao('8c. O DIAGNÓSTICO COM A REDE PENDURADA sai no orçamento — e diz o que não chegou');
 // Auditoria de 2026-09-26 (D15): as leituras do relatório eram em SÉRIE, cada
@@ -1590,6 +1652,11 @@ diz('e diz, no arquivo, o que não chegou',
   && relPendurado.coleta.orcamentoMs > 0, String(JSON.stringify(relPendurado?.coleta ?? relPendurado)).slice(0, 300));
 await ctxL.close();
 
+// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
+// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
+// for declarado aqui não existe depois dele.
+if (!pularForaDoChromium(MOTOR, '9 e 9b — esquecer com a varredura em voo, e o que foi tratado não volta ao reabrir, com o service worker no comando',
+  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
@@ -1806,12 +1873,13 @@ const naJanela = await p1.evaluate(() => { const p = AppState.pendingAction && A
 diz('PRÉ-CONDIÇÃO: o terceiro ✕ está na JANELA do Desfazer quando o app é fechado',
   naJanela === k3 && !!k3, JSON.stringify({ naJanela, k3 }));
 // Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
-// que o aparelho dispara ao sair do app. O `close()` puro muda de semântica
-// entre as versões — MEDIDO: no Playwright 1.49 (o do CI, Chromium 131) ele
-// destrói a página SEM disparar nenhum dos dois; no 1.56 (o do sandbox)
-// dispara. Sem o `runBeforeUnload`, esta asserção passava aqui e reprovava no
-// CI por motivo de instrumento.
-await p1.close({ runBeforeUnload: true });
+// que o aparelho dispara ao sair do app. O `close()` muda de semântica entre
+// as versões e entre os motores — MEDIDO: no Playwright 1.49 (Chromium 131) o
+// puro destrói a página SEM disparar nenhum dos dois; no WebKit 27.2 o
+// `runBeforeUnload` nem fecha. Por isso a porta única (`fecharComoOUsuario`,
+// lá em cima): sem ela, esta asserção passava num lugar e reprovava no outro
+// por motivo de instrumento.
+await fecharComoOUsuario(p1);
 
 // 4. Reaberta de novo, sem rede: nada do que foi decidido volta.
 const p2 = await abrirFria9b('reaberta 2');
@@ -2032,7 +2100,7 @@ const k9 = await p7.evaluate(() => { const p = AppState.pendingAction && AppStat
 diz('9: PRÉ-CONDIÇÃO — o ✕ está na JANELA do Desfazer quando o app é fechado, e a preparação ficou pronta',
   !!k9 && (await p7.evaluate(() => offlineUltimoResultado)) === 'pronto', JSON.stringify({ k9 }));
 lieFi9b = true;
-await p7.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p7);
 await dormir(500);
 lieFi9b = false;
 aviao = true; await ctx.setOffline(true);
@@ -2061,6 +2129,7 @@ diz('9: a rede de volta manda a decisão UMA vez, e o placar a conta UMA vez',
 await p8.evaluate(() => { API.setSession(null); });
 await p8.close();
 await ctx.unroute('**/api/*', rotaApi9b);
+} // fim do bloco só do Chromium que começa na seção 9 (ver o `pularForaDoChromium` lá)
 
 secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP — o número do botão e o relatório');
 // O mesmo relato do 9b: "usei o FAB 2 vezes, fechei e abri a aplicação e o
@@ -2130,6 +2199,12 @@ const selo9c = (pg) => pg.evaluate(() => { const s = document.getElementById('de
 // toque caía ali, o `pointerdown` do botão (que zera a transição) o mandava pra
 // 704, e o `pointerup` ia pro que estava embaixo: sem captura em 6 de 40
 // toques (com esta condição, 0 de 40).
+//
+// O DEDO é o de cada motor (`dedo9c`): no Chromium, o toque do protocolo do
+// DevTools — o mesmo do bloco do FAB no smoke de layout —; fora dele, o
+// `touchscreen` do Playwright, que no WebKit chega ao botão como toque de
+// verdade (o `pointerdown`/`pointerup` que ele escuta). `cdp` nulo = o segundo.
+const dedo9c = (contexto, pg) => (MOTOR === 'chromium' ? contexto.newCDPSession(pg) : Promise.resolve(null));
 const tocar9c = async (pg, cdp) => {
   let ultimo = '';
   for (let j = 0, parado = 0; j < 60 && parado < 3; j++) {
@@ -2148,9 +2223,13 @@ const tocar9c = async (pg, cdp) => {
   const antes = await pg.evaluate(() => dlogMomentos.length);
   const c = await pg.evaluate(() => { const b = document.getElementById('devFab').getBoundingClientRect();
     return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
-  await dormir(60);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  if (cdp) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+    await dormir(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } else {
+    await pg.touchscreen.tap(c.x, c.y);
+  }
   for (let j = 0; j < 50 && (await pg.evaluate(() => dlogMomentos.length)) <= antes; j++) await dormir(100);
   return (await pg.evaluate(() => dlogMomentos.length)) > antes;
 };
@@ -2207,14 +2286,14 @@ await prep9c.evaluate(() => {
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
 });
-await prep9c.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9c);
 const semDev = await abrir9c('modo dev desligado');
 await pronta9c(semDev);
 await irProFundo9c(semDev);
 const gSemDev = await guardado9c(semDev);
 diz('com o modo dev DESLIGADO, abrir e ir pro fundo não cria nada no aparelho', gSemDev.existe === false, JSON.stringify(gSemDev));
 await semDev.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
-await semDev.close({ runBeforeUnload: true });
+await fecharComoOUsuario(semDev);
 
 // 1. Modo dev ligado: dois toques no botão — um com a tela sã e outro com um
 //    DEFEITO na tela (o pedido da frente posto na fila de saída, que a
@@ -2222,7 +2301,7 @@ await semDev.close({ runBeforeUnload: true });
 const p1d = await abrir9c('abertura 1');
 await pronta9c(p1d);
 await carregou9c(p1d);
-const cdp1d = await ctx9c.newCDPSession(p1d);
+const cdp1d = await dedo9c(ctx9c, p1d);
 const id1d = await p1d.evaluate(() => DIAG_ABERTURA.id);
 const tocou1 = await tocar9c(p1d, cdp1d);
 await p1d.evaluate(() => { const p = AppState.currentPlace; localStorage.setItem('waze_places_saida',
@@ -2246,7 +2325,7 @@ diz('a captura do defeito ACUSA a sentinela, e o guardado leva a acusação',
 diz('as chamadas vão pro aparelho SEM corpo', g1d.abertas.every((a) => !a.comCorpo), JSON.stringify(g1d));
 // Como no aparelho: o app vai pro fundo (os recentes) e depois é fechado.
 await irProFundo9c(p1d);
-await p1d.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p1d);
 
 // 2. Reaberta: o número volta, e o relatório de verdade leva a abertura anterior.
 const p2d = await abrir9c('abertura 2');
@@ -2260,7 +2339,7 @@ diz('REABERTA, o número do botão continua 2 — o relato',
 diz('CONTROLE: nenhuma captura NESTA abertura — as 2 vieram do aparelho, da abertura anterior',
   r2d.desta === 0 && r2d.anteriores.length === 1 && r2d.anteriores[0].id === id1d && r2d.anteriores[0].n === 2,
   JSON.stringify(r2d));
-const cdp2d = await ctx9c.newCDPSession(p2d);
+const cdp2d = await dedo9c(ctx9c, p2d);
 await tocar9c(p2d, cdp2d);
 const s3d = await selo9c(p2d);
 diz('uma captura nova soma às guardadas: 3', s3d.txt === '3', JSON.stringify(s3d));
@@ -2374,7 +2453,7 @@ const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
 const tocouPos = await tocar9c(p2d, cdp2d);
 await guardouNesta9c(p2d, 2);
 await irProFundo9c(p2d);
-await p2d.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p2d);
 
 // 3. Reaberta depois do download: o que foi entregue não volta.
 const p3d = await abrir9c('abertura 3');
@@ -2404,7 +2483,7 @@ await p3d.evaluate(() => new Promise((ok) => {
     tx.oncomplete = () => { db.close(); ok(); };
   };
 }));
-await p3d.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p3d);
 const p4d = await abrir9c('abertura 4');
 await pronta9c(p4d);
 await carregou9c(p4d);
@@ -2438,13 +2517,13 @@ const r5d = await p4d.evaluate(() => ({ memoria: diagAberturasAnteriores.length,
 diz('o 2º toque DESLIGA o modo dev e apaga o guardado — do aparelho e da memória',
   apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ apagouDev, r5d }));
 await p4d.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
-await p4d.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p4d);
 
 // 6. O "Sair" leva o que foi guardado junto.
 const p5d = await abrir9c('abertura 5');
 await pronta9c(p5d);
 await carregou9c(p5d);
-const cdp5d = await ctx9c.newCDPSession(p5d);
+const cdp5d = await dedo9c(ctx9c, p5d);
 const tocou5 = await tocar9c(p5d, cdp5d);
 // Espera o REGISTRO com a captura, não a base existir: a base nasce vazia na
 // própria abertura (a leitura do guardado a abre), então "existe" chegava antes
@@ -2506,7 +2585,7 @@ const pre9d = await p9d.evaluate((s) => ({
   dataRaw: !!document.getElementById('pairCode').dataset.raw }), SEGREDO_9D);
 diz('PRÉ-CONDIÇÃO: o link com o segredo segue na tela (o toast copiável), e fechar o modal já apagou o `data-raw`',
   pre9d.toast && !pre9d.dataRaw, JSON.stringify(pre9d));
-const cdp9d = await ctx9d.newCDPSession(p9d);
+const cdp9d = await dedo9c(ctx9d, p9d);
 const tocou9d = await tocar9c(p9d, cdp9d);
 await guardouNesta9c(p9d, 1);
 const base9d = await p9d.evaluate((s) => new Promise((ok) => {
@@ -2574,7 +2653,7 @@ await prep9e.evaluate(() => {
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
 });
 await devLigado9e(prep9e, true);
-await prep9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9e);
 
 // 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma
 // captura NÃO BAIXADA. Ela é do APARELHO (está na base), e desligar em A a
@@ -2583,7 +2662,7 @@ await prep9e.close({ runBeforeUnload: true });
 // e a aba B desliga junto.
 const a9e = await abrir9e('A'), b9e = await abrir9e('B');
 await pronta9c(a9e); await pronta9c(b9e);
-const cdpB9e = await ctx9e.newCDPSession(b9e);
+const cdpB9e = await dedo9c(ctx9e, b9e);
 const tocouB = await tocar9c(b9e, cdpB9e);
 const guardouB = await guardouNesta9c(b9e, 1);
 diz('PRÉ-CONDIÇÃO: a captura da aba B foi pro aparelho', tocouB && guardouB.ok, JSON.stringify({ tocouB, guardouB }));
@@ -2605,7 +2684,7 @@ const chegouB = await esperarNaPagina(b9e, () => AppState.devMode.active === fal
 diz('desligado na aba A, a aba B desliga junto: o botão some e as capturas saem da memória', chegouB.ok,
   JSON.stringify(await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }))));
 await irProFundo9c(b9e);
-await b9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(b9e);
 const semBase1 = await esperarNaPagina(a9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
 diz('a aba B, indo pro fundo e fechando, não recria a base que a aba A apagou', semBase1.ok);
 
@@ -2613,11 +2692,11 @@ diz('a aba B, indo pro fundo e fechando, não recria a base que a aba A apagou',
 // esta aba (a memória diz ligado). Encenada escrevendo NA PRÓPRIA aba — o evento
 // `storage` não dispara em quem escreve. A captura não pode ir pro aparelho.
 await devLigado9e(a9e, true);
-await a9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(a9e);
 const c9e = await abrir9e('C');
 await pronta9c(c9e);
 await devLigado9e(c9e, false);                         // storage desligado, memória ligada
-const cdpC9e = await ctx9e.newCDPSession(c9e);
+const cdpC9e = await dedo9c(ctx9e, c9e);
 const tocouC = await tocar9c(c9e, cdpC9e);
 await c9e.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
 // A base pode EXISTIR (a leitura do guardado a abre, vazia, na abertura com o
@@ -2629,10 +2708,10 @@ diz('com o modo dev desligado no ARMAZENAMENTO (o aviso ainda não chegou), a ca
 
 // 3. O "Sair" na aba D chega à aba E: ela tinha uma captura guardada.
 await devLigado9e(c9e, true);
-await c9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(c9e);
 const d9e = await abrir9e('D'), e9e = await abrir9e('E');
 await pronta9c(d9e); await pronta9c(e9e);
-const cdpE9e = await ctx9e.newCDPSession(e9e);
+const cdpE9e = await dedo9c(ctx9e, e9e);
 const tocouE = await tocar9c(e9e, cdpE9e);
 const guardouE = await guardouNesta9c(e9e, 1);
 diz('PRÉ-CONDIÇÃO: a captura da aba E foi pro aparelho', tocouE && guardouE.ok, JSON.stringify({ tocouE, guardouE }));
@@ -2641,7 +2720,7 @@ const chegouE = await esperarNaPagina(e9e, () => AppState.devMode.active === fal
   && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
 diz('o "Sair" na aba D chega à aba E: o modo dev desliga, o botão some e as capturas saem', chegouE.ok);
 await irProFundo9c(e9e);
-await e9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(e9e);
 const semBase3 = await esperarNaPagina(d9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
 diz('e nada volta pro aparelho quando a aba E fecha', semBase3.ok);
 await d9e.close();
@@ -2661,7 +2740,7 @@ await f9e.evaluate(() => new Promise((ok) => {
     tx.oncomplete = () => { db.close(); ok(); }; };
 }));
 diz('PRÉ-CONDIÇÃO: a sobra está no aparelho', await temBase9e(f9e));
-await f9e.close({ runBeforeUnload: true });
+await fecharComoOUsuario(f9e);
 const g9e = await abrir9e('G');
 const faxina = await esperarNaPagina(g9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 diz('com o modo dev DESLIGADO, a sobra sai do aparelho na abertura', faxina.ok
@@ -2723,7 +2802,7 @@ await prep9f.evaluate(() => {
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
-await prep9f.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9f);
 
 // 1. RECARREGAR, direto.
 const a9f = await abrir9f('recarregar');
@@ -2741,7 +2820,7 @@ diz('e o retrato saiu do localStorage ao ir pra base', rA9f.retratosNoAparelho =
 
 // 2. FECHAR a aba, direto — e olhar o aparelho ANTES de o app reabrir.
 const idB9f = await a9f.evaluate(() => { dfato('smoke.9f.antesDeFechar'); return DIAG_ABERTURA.id; });
-await a9f.close({ runBeforeUnload: true });
+await fecharComoOUsuario(a9f);
 const vB9f = await olhar9f();
 diz('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato DESTA abertura (o instrumento enxerga)',
   vB9f.app === false && vB9f.retratos.length === 1 && vB9f.retratos[0].endsWith(':' + idB9f), JSON.stringify(vB9f));
@@ -2757,7 +2836,7 @@ await c9f.evaluate(() => localStorage.setItem('waze_places_diag_retrato:plantado
 await c9f.evaluate(() => { handleLogout(); });
 const sairou9f = await esperarNaPagina(c9f, () => !Object.keys(localStorage).some((k) => k.startsWith('waze_places_diag_retrato')), 5000, 100);
 diz('o SAIR apaga o retrato do fechar', sairou9f.ok, JSON.stringify(sairou9f));
-await c9f.close({ runBeforeUnload: true });
+await fecharComoOUsuario(c9f);
 
 // 4. Modo dev DESLIGADO: fechar direto não escreve NADA no aparelho.
 const prep9f2 = await abrir9f('preparo 2');
@@ -2767,16 +2846,21 @@ await prep9f2.evaluate(() => {
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
 });
-await prep9f2.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9f2);
 const d9f = await abrir9f('modo dev desligado');
 await pronta9c(d9f);
 await d9f.evaluate(() => dfato('smoke.9f.semDev'));
-await d9f.close({ runBeforeUnload: true });
+await fecharComoOUsuario(d9f);
 const vD9f = await olhar9f();
 diz('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho — nem retrato, nem base',
   vD9f.app === false && vD9f.retratos.length === 0 && vD9f.base === false, JSON.stringify(vD9f));
 await ctx9f.close();
 
+// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
+// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
+// for declarado aqui não existe depois dele.
+if (!pularForaDoChromium(MOTOR, '9h — a origem fora do ar e a rede que não anda, com o service worker no comando',
+  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9h. A ORIGEM FORA DO AR E A REDE QUE NÃO ANDA: a fila guardada entra com o `onLine` verdadeiro');
 // Auditoria de 2026-09-29 (O1). O "Disponível offline" só cobria o modo avião,
 // e duas falhas deixavam a fila preparada no aparelho sem uso:
@@ -2857,7 +2941,7 @@ await prep9h.reload({ waitUntil: 'domcontentloaded' });
 const guardou9h = await esperarNaPagina(prep9h, async () => typeof offlineLerFila === 'function'
   && ((await offlineLerFila()) || {}).places?.length === 3, 20000, 200);
 diz('PRÉ-CONDIÇÃO: com a origem de pé, o worker assumiu e a fila da busca foi guardada (3)', guardou9h.ok, JSON.stringify(guardou9h));
-await prep9h.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9h);
 
 // 1. A REDE QUE NÃO ANDA: a API não responde, e o aparelho diz que há rede.
 api9h = 'rede';
@@ -2874,7 +2958,7 @@ await p1_9h.evaluate(() => {
   p.offlineDisponivel = false;
   localStorage.setItem('waze_places_preferences', JSON.stringify(p));
 });
-await p1_9h.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p1_9h);
 const c1_9h = await abrir9h('controle, offline desligado');
 await decidiu9h(c1_9h);
 const tc_9h = await tela9h(c1_9h);
@@ -2885,7 +2969,7 @@ await c1_9h.evaluate(() => {
   p.offlineDisponivel = true;
   localStorage.setItem('waze_places_preferences', JSON.stringify(p));
 });
-await c1_9h.close({ runBeforeUnload: true });
+await fecharComoOUsuario(c1_9h);
 
 // 2. A ORIGEM FORA DO AR: 502 em TUDO (a página, os scripts, a API).
 borda9h = '502'; api9h = '502';
@@ -2915,7 +2999,7 @@ const guardouM9h = await esperarNaPagina(prepM9h, async () => typeof offlineLerF
   && ((await offlineLerFila()) || {}).busca === assinaturaDeBusca(true), 20000, 200);
 diz('PRÉ-CONDIÇÃO: com "Minha área" e a origem de pé, a fila da busca de "Minha área" foi guardada', guardouM9h.ok,
   JSON.stringify(guardouM9h));
-await prepM9h.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prepM9h);
 const minhaArea9h = (pg) => pg.evaluate(() => ({ myArea: AppState.filters.myArea, perfil: !!AppState.profile,
   esperou: dfatoAnel.some((e) => e.k === 'busca.esperaPerfil') }));
 api9h = 'rede';
@@ -2927,7 +3011,7 @@ diz('com "Minha área" e a API sem resposta (`onLine` verdadeiro), a busca esper
   m3_9h.myArea === true && !m3_9h.perfil && m3_9h.esperou && t3_9h.card && !t3_9h.falha
   && JSON.stringify(t3_9h.fila) === ESPERADA_9H && !!t3_9h.abriu && t3_9h.abriu.aposFalha === true,
   JSON.stringify({ t3_9h, m3_9h }));
-await p3_9h.close({ runBeforeUnload: true });
+await fecharComoOUsuario(p3_9h);
 borda9h = '502'; api9h = '502';
 const p4_9h = await abrir9h('Minha área, borda 502');
 await decidiu9h(p4_9h);
@@ -2940,6 +3024,7 @@ await p4_9h.close();
 borda9h = 'normal'; api9h = 'ok'; areas9h = [];
 await ctx9h.close();
 await new Promise((ok) => proxy9h.close(ok));
+} // fim do bloco só do Chromium que começa na seção 9h (ver o `pularForaDoChromium` lá)
 
 secao('9i. DUAS ABAS E A REDE VOLTANDO: cada decisão da fila de saída sai UMA vez');
 // Auditoria de 2026-09-29 (O6). A trava do esvaziamento era da ABA, e a fila de
@@ -3015,17 +3100,34 @@ diz('duas abas e a rede voltando: cada decisão saiu UMA vez pro Waze',
   Object.keys(duas9i.porPedido).length === 3 && Object.values(duas9i.porPedido).every((n) => n === 1), JSON.stringify(duas9i.porPedido));
 diz('e o Histórico contou 3 rejeitados (não em dobro), com a fila vazia',
   duas9i.hist.rejeitados === 3 && duas9i.hist.fila === 0, JSON.stringify(duas9i.hist));
-const reserva9i = await cenario9i('sem a trava', 2, true);
-diz('PRÉ-CONDIÇÃO: sem `navigator.locks` (a reserva) de fato — 3 decisões esperando',
-  reserva9i.travas === false && reserva9i.naFila === 3, JSON.stringify(reserva9i));
-diz('sem a trava do navegador, cada item REIVINDICADO sai uma vez e conta uma vez',
-  Object.keys(reserva9i.porPedido).length === 3 && Object.values(reserva9i.porPedido).every((n) => n === 1)
-  && reserva9i.hist.rejeitados === 3 && reserva9i.hist.fila === 0, JSON.stringify(reserva9i));
+// A RESERVA (sem `navigator.locks`) confia no localStorage: marca o item, espera
+// 60 ms e relê. No WebKit as duas abas ficam em PROCESSOS diferentes, e a marca
+// de uma chega à outra atrasada; com a máquina carregada, as duas releem a
+// própria marca e mandam o mesmo item. MEDIDO (e9 do lote 18): 1 de 6 rodadas do
+// smoke inteiro; isolado, 0 de 42; com a espera de 60 ms zerada (a janela da
+// corrida maior), 9 de 12 — e no Chromium 0 de 12 nas duas formas, e no WebKit
+// com a trava 0 de 12 mesmo zerada. É defeito do app, só em navegador SEM a
+// trava (iOS antes do 15.4), e ficou pra decisão; aqui ele é pulado pelo nome,
+// pra não virar uma reprovação aleatória no job do WebKit.
+if (!pularForaDoChromium(MOTOR, '9i. duas abas SEM `navigator.locks` (a reserva por item)',
+  'no WebKit as abas ficam em processos diferentes e a marca da reserva chega atrasada à outra aba: o mesmo item sai duas vezes (MEDIDO: 1 de 6 no smoke inteiro, 9 de 12 com a espera zerada; 0 no Chromium) — defeito do app só sem a trava (iOS antes do 15.4), que ficou pra decisão')) {
+  const reserva9i = await cenario9i('sem a trava', 2, true);
+  diz('PRÉ-CONDIÇÃO: sem `navigator.locks` (a reserva) de fato — 3 decisões esperando',
+    reserva9i.travas === false && reserva9i.naFila === 3, JSON.stringify(reserva9i));
+  diz('sem a trava do navegador, cada item REIVINDICADO sai uma vez e conta uma vez',
+    Object.keys(reserva9i.porPedido).length === 3 && Object.values(reserva9i.porPedido).every((n) => n === 1)
+    && reserva9i.hist.rejeitados === 3 && reserva9i.hist.fila === 0, JSON.stringify(reserva9i));
+}
 const uma9i = await cenario9i('controle', 1, false);
 diz('CONTROLE: uma aba só — cada decisão sai e conta uma vez (o instrumento conta certo)',
   Object.keys(uma9i.porPedido).length === 3 && Object.values(uma9i.porPedido).every((n) => n === 1)
   && uma9i.hist.rejeitados === 3, JSON.stringify(uma9i));
 
+// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
+// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
+// for declarado aqui não existe depois dele.
+if (!pularForaDoChromium(MOTOR, '9j — a foto quebrada no fim da fila e o card de foto no lie-fi, com o service worker no comando',
+  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9j. A FOTO QUEBRADA NO FIM DA FILA, E O CARD DE FOTO NO LIE-FI');
 // Auditoria de 2026-09-30.
 // (R5-4-1) A foto que falha sempre e é a ÚLTIMA a falhar (a do último pedido,
@@ -3147,7 +3249,7 @@ const liefi9j = async (nome, { fotoChega }) => {
   await entrar9j(prep, 'tok-9j-foto');
   const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
     && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
-  await prep.close({ runBeforeUnload: true });
+  await fecharComoOUsuario(prep);
   // Reaberto no lie-fi: a API sem resposta, e o aparelho dizendo que há rede.
   estado.liefi = true;
   const pg = await abrir9j(ctx, nome);
@@ -3208,7 +3310,7 @@ const prepP9j = await abrir9j(ctxP9j, 'rede provada antes, preparo');
 await entrar9j(prepP9j, 'tok-9j-prova');
 const prontoP9j = await esperarNaPagina(prepP9j, () => typeof offlineUltimoResultado !== 'undefined'
   && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
-await prepP9j.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prepP9j);
 p9j.fase = 'liefi';
 const pgP9j = await abrir9j(ctxP9j, 'rede provada antes');
 const travadoP9j = await esperarNaPagina(pgP9j, () => typeof AppState !== 'undefined' && !!cardDaFrente()
@@ -3276,7 +3378,7 @@ const liefiSegurado9j = async (nome, { comSaida = false } = {}) => {
     && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
   // A decisão de ANTES, esperando envio (um pedido que não está na fila guardada).
   if (comSaida) await prep.evaluate(() => enfileirarSaida('reject', { venueID: 'v229', updateRequestID: 'u229', creatorId: 229 }, 'row'));
-  await prep.close({ runBeforeUnload: true });
+  await fecharComoOUsuario(prep);
   e.fase = 'liefi';
   const pg = await abrir9j(ctx, nome);
   const travado = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && !!cardDaFrente()
@@ -3370,6 +3472,7 @@ if (s9jR.e.saidas.length) await s9jR.e.saidas.shift().fulfill({ status: 200, con
 const fimS9j = await esperarNaPagina(s9jR.pg, () => !esvaziandoSaida && carregarFilaDeSaida().length === 0, 10000, 50);
 diz('e o esvaziamento termina: a decisão de antes pousa e a fila de saída esvazia', fimS9j.ok, JSON.stringify(await s9jR.estado()));
 await s9jR.fechar();
+} // fim do bloco só do Chromium que começa na seção 9j (ver o `pularForaDoChromium` lá)
 
 secao('9k. DUAS ABAS E O DIAGNÓSTICO: a poda, a outra aba no relatório e a sentinela');
 // Auditoria da rodada 7 (R7-4-03, R7-4-04, R7-4-05). Duas páginas do MESMO
@@ -3414,7 +3517,7 @@ const prepararDev = async (contexto, token) => {
     localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
     localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
   }, token);
-  await prep.close({ runBeforeUnload: true });
+  await fecharComoOUsuario(prep);
 };
 const prontaComFab = (pg) => esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated
   && !!cardDaFrente() && AppState.queue.length === 3 && !document.getElementById('devFab').classList.contains('hidden'), 20000, 100);
@@ -3611,7 +3714,7 @@ await esperarNaPagina(A9m, () => dfatoAnel.some((e) => e.k === 'diag.aberturas' 
 const travaDeB = (pg, id) => pg.evaluate(async (i) => (await navigator.locks.query()).held.some((l) => l.name === '__diagAbertura:' + i), id);
 const vivaComA9m = await travaDeB(A9m, idB9m);
 await B9m.evaluate(() => { window.diagGuardarAbertura = () => Promise.resolve(false); });
-await B9m.close({ runBeforeUnload: true });
+await fecharComoOUsuario(B9m);
 let soltou9m = false;
 for (let i = 0; i < 50 && !soltou9m; i++) { soltou9m = !(await travaDeB(A9m, idB9m)); if (!soltou9m) await dormir(100); }
 const inicioA9m = await A9m.evaluate(() => DIAG_ABERTURA.inicio);
@@ -3684,7 +3787,7 @@ await prep9n.evaluate(() => {
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
-await prep9n.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prep9n);
 const A9n = await abrirEm(ctx9n, 'A');
 const prontaA9n = await prontaComFab(A9n);
 const trocou9n = await esperarNaPagina(A9n, () => dfatoAnel.some((e) => e.k === 'conta.trocou'), 10000, 100);
@@ -3764,7 +3867,7 @@ await prepL9n.evaluate(() => {
     consequenciaVista: { reject: true, read: true } }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
-await prepL9n.close({ runBeforeUnload: true });
+await fecharComoOUsuario(prepL9n);
 const L9n = await abrirEm(ctx9nL, 'computador');
 const prontaL9n = await prontaComFab(L9n);
 // O FAB PARADO (ele tem transição, e a reposição sai por quadro), e quanto da
@@ -3911,9 +4014,13 @@ const margem9n = async (topo) => {
     localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
       consequenciaVista: { reject: true, read: true } }));
   });
-  const cdp = await ctx.newCDPSession(prep);
-  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: topo, topMax: topo, bottom: 0, bottomMax: 0,
-    left: 0, leftMax: 0, right: 0, rightMax: 0 } });
+  // A margem é emulada pelo protocolo do DevTools, que só o Chromium tem: fora
+  // dele roda só o CONTROLE sem margem (ver o pulo, abaixo).
+  if (MOTOR === 'chromium') {
+    const cdp = await ctx.newCDPSession(prep);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: topo, topMax: topo, bottom: 0, bottomMax: 0,
+      left: 0, leftMax: 0, right: 0, rightMax: 0 } });
+  }
   await prep.reload({ waitUntil: 'domcontentloaded' });
   const pronta = await esperarNaPagina(prep, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
   aviao = true; await ctx.setOffline(true);
@@ -3933,11 +4040,14 @@ const margem9n = async (topo) => {
 const semMargem9n = await margem9n(0);
 diz('CONTROLE: sem a margem de cima, o "N esperando envio" fica nos 80 px de sempre, à vista',
   semMargem9n.pronta && semMargem9n.esperando && semMargem9n.topo === 80 && semMargem9n.noCentro === 'indicador', JSON.stringify(semMargem9n));
-const comMargem9n = await margem9n(47);
-diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu dela', comMargem9n.pronta && comMargem9n.esperando
-  && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
-diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
-  comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
+if (!pularForaDoChromium(MOTOR, '9n. o "N esperando envio" com a margem do iPhone instalado (R10-4-02)',
+  'a margem de segurança só se emula pelo protocolo do DevTools do Chromium (`Emulation.setSafeAreaInsetsOverride`), que o WebKit do Playwright não tem')) {
+  const comMargem9n = await margem9n(47);
+  diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu dela', comMargem9n.pronta && comMargem9n.esperando
+    && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
+  diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
+    comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
+}
 // (R12-4-04) O "N esperando envio" que nasce NO MEIO de um arraste de card: a
 // decisão anterior, presa no ar, falha por rede com o dedo arrastando o card
 // seguinte. O FAB ESPERA o gesto acabar pra trocar de canto (a decisão do
@@ -4058,7 +4168,7 @@ const cenario9o = async (nome, listas) => {
     localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
       offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
   });
-  await prep.close({ runBeforeUnload: true });
+  await fecharComoOUsuario(prep);
   const abrir9o = async (lista, rotulo) => {
     const pg = await ctx9o.newPage();
     pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
@@ -4153,11 +4263,21 @@ diz('CONTROLE: uma aba só — a linha segue "Pronto", e o gatilho não prepara 
   && uma9o.depoisDoGatilho?.semMapaNaGuardada?.length === 0, JSON.stringify(uma9o));
 
 secao('10. NADA DE ERRO, NADA DE CSP');
-diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
+// O que o MOTOR diz e não é erro do app (`ruidoDoMotor`, a lista FECHADA e
+// medida de tools/navegador.mjs): no WebKit, o pedido à nossa API que este smoke
+// ABORTA (o modo avião de mentira) às vezes sai como `pageerror` "… due to access
+// control checks." — e o app trata a rejeição. Fica fora da conta, e DITO.
+const ruidoDoMotorNoPercurso = errosJs.filter((e) => ruidoDoMotor(e.txt));
+const errosDaPagina = errosJs.filter((e) => !ruidoDoMotor(e.txt));
+if (ruidoDoMotorNoPercurso.length) {
+  console.log(`  · ${ruidoDoMotorNoPercurso.length} aviso(s) do motor fora da conta (ruidoDoMotor): ${JSON.stringify(ruidoDoMotorNoPercurso.slice(0, 2))}`);
+}
+diz('nenhum erro de JS em todo o percurso', errosDaPagina.length === 0, JSON.stringify(errosDaPagina.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
 
 await browser.close();
 servidor.kill();
+if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
