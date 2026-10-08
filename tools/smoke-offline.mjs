@@ -1580,11 +1580,14 @@ try {
 }
 diz('CONTROLE: com a rede boa, o relatório não marca nada sem resposta',
   relL?.coleta && relL.coleta.semResposta.length === 0 && relL.semResposta === 0, JSON.stringify(relL));
+// O detalhe diz o ERRO quando o arquivo nem saiu, e nunca LANÇA: o
+// `JSON.stringify(undefined)` devolve `undefined`, e o `.slice` nele derrubava o
+// smoke inteiro num TypeError aqui, calando as seções de baixo (gotcha #62).
 diz('com a rede PENDURADA o arquivo sai dentro do orçamento (eram ~48 s)',
-  relPendurado?.s <= 15 && pendurados >= 10, JSON.stringify({ s: relPendurado?.s, pendurados }));
+  relPendurado?.s <= 15 && pendurados >= 10, JSON.stringify({ s: relPendurado?.s, pendurados, erro: relPendurado?.erro }));
 diz('e diz, no arquivo, o que não chegou',
   relPendurado?.coleta?.semResposta?.length >= 10 && relPendurado.semResposta >= 10
-  && relPendurado.coleta.orcamentoMs > 0, JSON.stringify(relPendurado?.coleta).slice(0, 300));
+  && relPendurado.coleta.orcamentoMs > 0, String(JSON.stringify(relPendurado?.coleta ?? relPendurado)).slice(0, 300));
 await ctxL.close();
 
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
