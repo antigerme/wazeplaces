@@ -27264,14 +27264,69 @@ function ehIOS() {
     return /Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1;
 }
 
-// O navegador do iPhone que NÃO é o Safari: o Chrome (CriOS), o Firefox (FxiOS)
-// e o Edge (EdgiOS). Todo navegador do iPhone é WebKit por baixo, e a UA traz a
-// marca dele. O convite mandava tocar "na barra do Safari" a quem não está no
-// Safari — e o QR do pareamento abre no navegador PADRÃO do iPhone, que pode
-// ser um desses (R13-7-03, MEDIDO com a UA de cada um no WebKit; auditoria de
-// 2026-10-07).
+// ── Qual navegador do iPhone é este? ──────────────────────────────────────
+// Todo navegador do iPhone é WebKit por baixo, e a UA traz a marca dele. O
+// convite mandava tocar "na barra do Safari" a quem não está no Safari — e o QR
+// do pareamento abre no navegador PADRÃO do iPhone, que pode ser outro
+// (R13-7-03). O conserto reconhecia três marcas (Chrome, Firefox, Edge), e todo
+// navegador que ele não conhecia ganhava o passo do Safari: o Opera, o
+// DuckDuckGo e o app do Google mandavam à "barra do Safari", e o Facebook e o
+// Instagram por dentro mostravam um convite que ali não se cumpre (R14-7-A2 =
+// R14-6-08 = R14-8-07, MEDIDO com a UA de cada um nos dois motores; auditoria da
+// rodada 14).
+//
+// Decisão do owner: o SAFARI se reconhece pela POSITIVA — a UA dele tem
+// `Version/` e `Safari/`, e nenhuma marca de outro navegador nem de app. As duas
+// listas abaixo são FECHADAS, cada marca com o motivo (como a do `ruidoDoMotor`
+// dos smokes), e são conhecimento da PLATAFORMA — as UAs que cada navegador
+// publica —, não medição: não há iPhone neste ambiente. Marca nova entra com o
+// motivo escrito aqui, e o test/treino-auditoria-r14.test.mjs cobra as UAs.
+//
+// Os NAVEGADORES fora do Safari (todos trazem `Safari/`): o 1º passo é o do
+// menu do navegador (`install.ios.step1Navegador`), e o convite só aparece do
+// iOS 16.4 em diante (`iOSAdicionaATelaDeInicioAqui`).
+const MARCAS_DE_NAVEGADOR_NO_IOS = [
+    /\bCriOS\//,        // Chrome
+    /\bFxiOS\//,        // Firefox
+    /\bEdgiOS\//,       // Edge — traz `Version/` também: sem a marca, passaria por Safari
+    /\bOPT\//,          // Opera (o antigo "Opera Touch") — traz `Version/`
+    /\bOPiOS\//,        // Opera Mini
+    /\bDuckDuckGo\//,   // DuckDuckGo, até a versão 7 — traz `Version/`
+    /\bDdg\//,          // DuckDuckGo, as versões de depois — traz `Version/`
+    /\bGSA\//,          // o app do Google: a busca abre a página no navegador dele
+];
+// Os navegadores DENTRO de outro app (o WebView do Facebook, do Instagram…): ali
+// não há "Adicionar à Tela de Início", e o convite seria o beco sem saída que a
+// régua "isto é acionável AQUI?" proíbe — ele não aparece. A UA da maioria vem
+// SEM o `Safari/`, e isso basta (`webViewDeAppNoIOS`); as marcas pegam os que o
+// trazem.
+const MARCAS_DE_APP_NO_IOS = [
+    /\bFBAN\/|\bFBAV\/|\bFBIOS\b/,   // Facebook (e o Messenger)
+    /\bInstagram\b/,                  // Instagram
+    /\bLinkedInApp\b/,                // LinkedIn
+    /\bLine\//,                       // LINE
+    /\bMicroMessenger\//,             // WeChat
+    /\bSnapchat\//,                   // Snapchat — a UA traz "(like Safari/…)", que sozinha passaria por navegador
+];
+
+// A página está num navegador DENTRO de outro app? Só no iPhone isso decide
+// alguma coisa (o convite de instalar).
+function webViewDeAppNoIOS() {
+    const ua = navigator.userAgent || '';
+    return !/\bSafari\//.test(ua) || MARCAS_DE_APP_NO_IOS.some((r) => r.test(ua));
+}
+
+// O Safari, pela POSITIVA (ver acima).
+function safariDoIOS() {
+    const ua = navigator.userAgent || '';
+    return /\bVersion\/\d/.test(ua) && /\bSafari\//.test(ua)
+        && !MARCAS_DE_NAVEGADOR_NO_IOS.some((r) => r.test(ua)) && !MARCAS_DE_APP_NO_IOS.some((r) => r.test(ua));
+}
+
+// Um navegador do iPhone que NÃO é o Safari — nem o de dentro de um app, que não
+// tem convite: o 1º passo é o do menu dele.
 function navegadorDoIOSForaDoSafari() {
-    return /\b(?:CriOS|FxiOS|EdgiOS)\//.test(navigator.userAgent || '');
+    return !safariDoIOS() && !webViewDeAppNoIOS();
 }
 
 // A versão do iOS que a UA diz ("iPhone OS 16_3"; no iPad, "CPU OS 16_4"), como
@@ -27281,16 +27336,17 @@ function versaoDoIOS() {
     return m ? [Number(m[1]), Number(m[2])] : null;
 }
 
-// Dá pra pôr o app na Tela de Início DAQUI? No Safari, sempre. Nos outros
-// navegadores do iPhone, só a partir do iOS 16.4: antes dele o menu de
-// compartilhar deles não tem o "Adicionar à Tela de Início", e o convite seria o
-// beco sem saída que a régua "isto é acionável AQUI?" proíbe — ele não aparece,
-// como a extensão no celular. É conhecimento da PLATAFORMA, não medição: não há
-// iPhone neste ambiente. Sem a versão na UA (o iPad que se diz Mac), vale como
-// recente: o iPadOS de antes do 16.4 é raro, e esconder tiraria o caminho de quem
-// pode.
+// Dá pra pôr o app na Tela de Início DAQUI? No Safari, sempre. Dentro de outro
+// app, nunca (R14-7-A2). Nos outros navegadores do iPhone, só a partir do iOS
+// 16.4: antes dele o menu de compartilhar deles não tem o "Adicionar à Tela de
+// Início", e o convite seria o beco sem saída que a régua "isto é acionável
+// AQUI?" proíbe — ele não aparece, como a extensão no celular. É conhecimento da
+// PLATAFORMA, não medição: não há iPhone neste ambiente. Sem a versão na UA (o
+// iPad que se diz Mac), vale como recente: o iPadOS de antes do 16.4 é raro, e
+// esconder tiraria o caminho de quem pode.
 function iOSAdicionaATelaDeInicioAqui() {
-    if (!navegadorDoIOSForaDoSafari()) return true;
+    if (webViewDeAppNoIOS()) return false;
+    if (safariDoIOS()) return true;
     const v = versaoDoIOS();
     return !v || v[0] > 16 || (v[0] === 16 && v[1] >= 4);
 }

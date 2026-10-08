@@ -508,8 +508,10 @@ function montarConvite({ userAgent, toques = 5, prompt = false }) {
     filaTerminouLimpa: () => true,   // o "Tudo limpo!" de quem terminou a fila
     t: (k) => 'T:' + k,
   };
-  const h = rodar(deps, fontes(['appJaInstalada', 'ehIOS', 'navegadorDoIOSForaDoSafari', 'versaoDoIOS',
-    'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer', 'atualizarConviteInstalar']), ['atualizarConviteInstalar']);
+  // O Safari reconhecido pela POSITIVA, com as listas fechadas de marcas (lote 18, R14-7-A2).
+  const marcas = ['MARCAS_DE_NAVEGADOR_NO_IOS', 'MARCAS_DE_APP_NO_IOS'].filter((n) => new RegExp('^const ' + n + ' = ', 'm').test(APP_SEM)).map(declaracao);
+  const h = rodar(deps, [...marcas, ...fontes(['appJaInstalada', 'ehIOS', 'webViewDeAppNoIOS', 'safariDoIOS', 'navegadorDoIOSForaDoSafari', 'versaoDoIOS',
+    'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer', 'atualizarConviteInstalar'])], ['atualizarConviteInstalar']);
   h.atualizarConviteInstalar();
   const visivel = (id) => !els[id].classList.contains('hidden');
   return { convite: visivel('installInvite'), passos: visivel('installInvite') && visivel('installIosSteps'),

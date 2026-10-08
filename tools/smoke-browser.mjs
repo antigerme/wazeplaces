@@ -842,6 +842,33 @@ for (const [nome, vp] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone
   checa(!m.ausente && m.chave === 'install.ios.step1', 'convite · Safari do iOS 16.3: CONTROLE — perdeu o convite ou o passo da barra do Safari',
     JSON.stringify({ ausente: m.ausente, chave: m.chave }));
   await ctx.close();
+  // R14-7-A2: os OUTROS navegadores do iPhone e os de DENTRO de apps. O Safari se
+  // reconhece pela POSITIVA (`Version/` e `Safari/`, sem marca de outro): o
+  // Opera, o DuckDuckGo e o app do Google ganham o passo do menu do navegador (e
+  // nenhum convite antes do iOS 16.4); dentro do Facebook e do Instagram (sem
+  // `Safari/` na UA) e do Snapchat ("like Safari/"), nenhum convite — ali não há
+  // "Adicionar à Tela de Início". As UAs são as que cada um PUBLICA:
+  // conhecimento da plataforma, não medição (não há iPhone aqui).
+  const IOS = (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS ${v} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)`;
+  for (const [nome, ua, vale] of [
+    ['Opera', IOS('18_0') + ' Version/18.0 Mobile/15E148 Safari/604.1 OPT/5.2.0', 'install.ios.step1Navegador'],
+    ['DuckDuckGo', IOS('18_0') + ' Version/18.0 Mobile/15E148 Ddg/18.0 Safari/604.1', 'install.ios.step1Navegador'],
+    ['app do Google', IOS('18_0') + ' GSA/380.0.773383853 Mobile/15E148 Safari/604.1', 'install.ios.step1Navegador'],
+    ['Opera do iOS 16.3', IOS('16_3') + ' Version/16.3 Mobile/15E148 Safari/604.1 OPT/3.4.6', null],
+    ['Facebook por dentro', IOS('18_0') + ' Mobile/22A3354 [FBAN/FBIOS;FBAV/480.0.0.0;FBDV/iPhone15,2;FBMD/iPhone;FBSN/iOS;FBSV/18.0;FBLC/pt_BR]', null],
+    ['Instagram por dentro', IOS('18_0') + ' Mobile/15E148 Instagram 350.0.0.0 (iPhone15,2; iOS 18_0; pt_BR; pt; scale=3.00; 1179x2556)', null],
+    ['Snapchat por dentro', IOS('18_0') + ' Mobile/15E148 Snapchat/13.0.0.0 (like Safari/8619.1.26.30.5, panda)', null],
+  ]) {
+    const outro = await conviteNoIOS(se, ua);
+    const r = await medirConviteIOS(outro.page, 'pt');
+    if (vale) {
+      checa(!r.ausente && r.chave === vale, `convite · ${nome} (R14-7-A2): o 1º passo não é o do menu do navegador`,
+        JSON.stringify({ ausente: r.ausente, chave: r.chave }));
+    } else {
+      checa(r.ausente, `convite · ${nome} (R14-7-A2): o convite apareceu onde não há "Adicionar à Tela de Início"`);
+    }
+    await outro.ctx.close();
+  }
 }
 
 // ── Laço de ResizeObserver com barra de rolagem que OCUPA ESPAÇO ────────────
@@ -12429,7 +12456,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa ampliado (abrir, arrastar buscando tile novo, zoom, recentrar, as quatro setas andando, Esc e ✕)`
   + `, + escala do mapa medindo o que diz (card e ampliado, pela barra DESENHADA contra o movimento que o core mediu, e o rótulo cabendo no traço do z8 ao z4)`
   + `, + convite de instalar em 3 telas apertadas × ${LINGUAS.length} idiomas`
-  + `, + convite no iPhone FORA do Safari em 3 telas × ${LINGUAS.length} idiomas, lado a lado com o do Safari (o 1º passo pela CHAVE do navegador, o texto do dicionário do idioma, sem estourar nem partir palavra, e cabendo onde o do Safari cabe; antes do iOS 16.4 o convite some, com o CONTROLE do Safari antigo)`
+  + `, + convite no iPhone FORA do Safari em 3 telas × ${LINGUAS.length} idiomas, lado a lado com o do Safari (o 1º passo pela CHAVE do navegador, o texto do dicionário do idioma, sem estourar nem partir palavra, e cabendo onde o do Safari cabe; antes do iOS 16.4 o convite some, com o CONTROLE do Safari antigo; e o Safari reconhecido pela POSITIVA: o Opera, o DuckDuckGo e o app do Google com o passo do menu do navegador, e nenhum convite no Opera de um iOS antigo nem dentro do Facebook, do Instagram e do Snapchat)`
   + `, + lixeira do lightbox (portão L6+AM, alvo, foto pendente e a janela de Desfazer)`
   + `, + aprovar foto nova (exclusividade com a lixeira, portão com staff, envio só ao fim da janela e approve=true, e a pílula do nome travada e esmaecida na janela, com o CONTROLE viva antes e depois)`
   + `, + foto que NÃO carregou (sem aprovar nem lixeira, nem pelo clique no botão escondido, com o CONTROLE da foto que carrega)`

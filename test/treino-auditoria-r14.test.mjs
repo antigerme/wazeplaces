@@ -15,7 +15,12 @@
 //              deixava a chave desligada na tela com o Desfazer ligado, calado;
 //   R14-7-A4 — a frase dele prometia o Desfazer só pro "Lido" e o "Rejeitar", e
 //              o interruptor desliga a janela de TODAS as ações (o ↑ com ⭐ e, pra
-//              L6+AM, aprovar, excluir e corrigir o nome da foto).
+//              L6+AM, aprovar, excluir e corrigir o nome da foto);
+//   R14-7-A2 (= R14-6-08 = R14-8-07) — o convite de instalar no iPhone mandava
+//              tocar "na barra do Safari" quem está no Opera, no DuckDuckGo, no
+//              app do Google e nos navegadores DENTRO de apps (Facebook,
+//              Instagram), e aparecia num iOS antigo, onde nada disso adiciona à
+//              Tela de Início.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -503,6 +508,125 @@ test('R14-7-A4: CONTROLE — o interruptor desliga MESMO a janela das escritas d
   }
   assert.match(fatiar('scheduleAction'), /if \(AppState\.preferences\.undoEnabled === false && canDisableUndo\(\)\) \{/,
     'o scheduleAction não lê mais o interruptor do Desfazer');
+});
+
+// ═══ R14-7-A2 · o convite de instalar: o Safari pela POSITIVA ═══════════════
+// As UAs abaixo são as que cada navegador PUBLICA — conhecimento da plataforma,
+// não medição (não há iPhone aqui). As de app com `Safari/` foram montadas pra
+// exercitar a marca; sem o `Safari/`, a regra de cima já as pega.
+NO_BUNDLE.push(/safariDoIOS\(/g, /webViewDeAppNoIOS\(/g);
+const UA_BASE = (v) => `Mozilla/5.0 (iPhone; CPU iPhone OS ${v} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)`;
+const UAS = {
+  // o Safari (CONTROLE): o passo da barra do Safari, em qualquer iOS
+  'Safari 17.4': [UA_BASE('17_4') + ' Version/17.4 Mobile/15E148 Safari/604.1', 'safari'],
+  'Safari 15.0': [UA_BASE('15_0') + ' Version/15.0 Mobile/15E148 Safari/604.1', 'safari'],
+  'Safari 16.3': [UA_BASE('16_3') + ' Version/16.3 Mobile/15E148 Safari/604.1', 'safari'],
+  // os navegadores: o passo do menu deles, do iOS 16.4 em diante
+  'Chrome 17.4 (CONTROLE)': [UA_BASE('17_4') + ' CriOS/123.0.6312.52 Mobile/15E148 Safari/604.1', 'navegador'],
+  'Edge 17.4 (CONTROLE)': [UA_BASE('17_4') + ' EdgiOS/123.0.2420.56 Version/17.0 Mobile/15E148 Safari/604.1', 'navegador'],
+  'Opera 17.4 (OPT)': [UA_BASE('17_4') + ' Version/17.4 Mobile/15E148 Safari/604.1 OPT/4.5.0', 'navegador'],
+  'Opera Mini 17.4 (OPiOS)': [UA_BASE('17_4') + ' OPiOS/16.0.15.124050 Mobile/15E148 Safari/9537.53', 'navegador'],
+  'DuckDuckGo 17.4 (DuckDuckGo/7)': [UA_BASE('17_4') + ' Version/17.4 Mobile/15E148 DuckDuckGo/7 Safari/605.1.15', 'navegador'],
+  'DuckDuckGo 18.5 (Ddg/)': [UA_BASE('18_5') + ' Version/18.5 Mobile/15E148 Ddg/18.5 Safari/604.1', 'navegador'],
+  'app do Google 17.4 (GSA)': [UA_BASE('17_4') + ' GSA/313.0.627131925 Mobile/15E148 Safari/604.1', 'navegador'],
+  // um navegador que a lista NÃO conhece (com `Safari/`, sem `Version/`): pela
+  // positiva ele não é o Safari — é o caso que a negativa errava sempre
+  'navegador desconhecido 17.4': [UA_BASE('17_4') + ' Mobile/15E148 Safari/604.1', 'navegador'],
+  'Chrome 16.3 (CONTROLE)': [UA_BASE('16_3') + ' CriOS/110.0.5481.83 Mobile/15E148 Safari/604.1', 'nada'],
+  'Opera 16.3 (OPT)': [UA_BASE('16_3') + ' Version/16.3 Mobile/15E148 Safari/604.1 OPT/3.4.6', 'nada'],
+  'DuckDuckGo 16.3': [UA_BASE('16_3') + ' Version/16.3 Mobile/15E148 DuckDuckGo/7 Safari/605.1.15', 'nada'],
+  'app do Google 16.3 (GSA)': [UA_BASE('16_3') + ' GSA/250.0.512345678 Mobile/15E148 Safari/604.1', 'nada'],
+  // DENTRO de outro app: sem convite em iOS nenhum
+  'Facebook 17.4': [UA_BASE('17_4') + ' Mobile/21E219 [FBAN/FBIOS;FBAV/455.0.0.39.107;FBDV/iPhone15,2;FBMD/iPhone;FBSN/iOS;FBSV/17.4;FBLC/pt_BR;FBOP/5]', 'nada'],
+  'Facebook 15.0': [UA_BASE('15_0') + ' Mobile/19A346 [FBAN/FBIOS;FBAV/350.0.0.0;FBDV/iPhone12,1;FBMD/iPhone;FBSN/iOS;FBSV/15.0;FBLC/pt_BR]', 'nada'],
+  'Instagram 17.4': [UA_BASE('17_4') + ' Mobile/15E148 Instagram 323.0.0.24.111 (iPhone15,2; iOS 17_4; pt_BR; pt; scale=3.00; 1179x2556; 581045925)', 'nada'],
+  'LINE 17.4': [UA_BASE('17_4') + ' Mobile/15E148 Safari Line/13.10.0', 'nada'],
+  'WeChat 17.4': [UA_BASE('17_4') + ' Mobile/15E148 MicroMessenger/8.0.47(0x18002f2c) NetType/WIFI Language/zh_CN', 'nada'],
+  'Snapchat 17.4 ("like Safari/")': [UA_BASE('17_4') + ' Mobile/15E148 Snapchat/12.80.0.33 (like Safari/8617.1.17.10.10, panda)', 'nada'],
+  'LinkedIn com Safari/ (montada)': [UA_BASE('17_4') + ' Mobile/15E148 Safari/604.1 [LinkedInApp]/9.29.6', 'nada'],
+  'Facebook com Safari/ (montada)': [UA_BASE('17_4') + ' Version/17.4 Mobile/15E148 Safari/604.1 [FBAN/FBIOS;FBAV/455.0.0.39.107]', 'nada'],
+  'app sem marca e sem Safari/': [UA_BASE('17_4') + ' Mobile/15E148', 'nada'],
+};
+
+function montarConvite({ userAgent, toques = 5, prompt = false }) {
+  const el = (attrs = {}, innerHTML = '') => ({ classList: classes('hidden'), attrs, innerHTML,
+    getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute: (k, v) => { attrs[k] = String(v); } });
+  // O 1º passo nasce com a chave e o texto do Safari (o HTML, depois do `applyI18n`).
+  const els = { installInvite: el(), installInviteBtn: el(), installIosSteps: el(),
+    installIosStep1: el({ 'data-i18n-html': 'install.ios.step1' }, 'T:install.ios.step1') };
+  const deps = {
+    navigator: { userAgent, maxTouchPoints: toques, standalone: false },
+    window: { matchMedia: () => ({ matches: false }) },
+    document: { getElementById: (id) => els[id] || null },
+    safeLS: { get: () => null },
+    CHAVE_INSTALL_DISPENSADO: 'waze_places_install_dispensado',
+    promptInstalacao: prompt ? { prompt() {} } : null,
+    filaTerminouLimpa: () => true,   // o "Tudo limpo!" de quem terminou a fila
+    t: (k) => 'T:' + k,
+  };
+  const marcas = ['MARCAS_DE_NAVEGADOR_NO_IOS', 'MARCAS_DE_APP_NO_IOS'].filter(existeConst).map(declaracao);
+  const h = rodar(deps, [...marcas, ...fontes(['appJaInstalada', 'ehIOS', 'webViewDeAppNoIOS', 'safariDoIOS',
+    'navegadorDoIOSForaDoSafari', 'versaoDoIOS', 'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer',
+    'atualizarConviteInstalar'])], ['atualizarConviteInstalar']);
+  h.atualizarConviteInstalar();
+  const visivel = (id) => !els[id].classList.contains('hidden');
+  const convite = visivel('installInvite');
+  return { convite, botao: convite && visivel('installInviteBtn'), passos: convite && visivel('installIosSteps'),
+    chave: els.installIosStep1.getAttribute('data-i18n-html'), texto: els.installIosStep1.innerHTML };
+}
+// O que a tela deve mostrar com cada UA: o passo do Safari, o do navegador, ou nada.
+const ESPERADO = {
+  safari: { convite: true, passos: true, botao: false, chave: 'install.ios.step1' },
+  navegador: { convite: true, passos: true, botao: false, chave: 'install.ios.step1Navegador' },
+};
+
+test('R14-7-A2: no Opera, no DuckDuckGo e no app do Google do iPhone, o 1º passo é o do MENU do navegador — o do Safari, só no Safari', () => {
+  for (const [nome, [ua, vale]] of Object.entries(UAS)) {
+    if (vale === 'nada') continue;
+    const m = montarConvite({ userAgent: ua });
+    const visto = { convite: m.convite, passos: m.passos, botao: m.botao, chave: m.chave };
+    assert.deepEqual(visto, ESPERADO[vale], vale === 'safari'
+      ? `CONTROLE (${nome}): o Safari perdeu o convite ou o passo da barra do Safari`
+      : `DEFEITO (${nome}): o convite manda "Toque em Compartilhar, na barra do Safari" a quem NÃO está no Safari (ou nem aparece)`);
+    assert.equal(m.texto, 'T:' + m.chave, `${nome}: a chave trocou e o texto na tela não`);
+  }
+});
+
+test('R14-7-A2: DENTRO de um app (Facebook, Instagram, LINE, WeChat, Snapchat…) e fora do Safari num iOS antes do 16.4, o convite NÃO aparece', () => {
+  for (const [nome, [ua, vale]] of Object.entries(UAS)) {
+    if (vale !== 'nada') continue;
+    const m = montarConvite({ userAgent: ua });
+    assert.equal(m.convite, false,
+      `DEFEITO (${nome}): o convite apareceu onde não há "Adicionar à Tela de Início" — o beco sem saída da régua "isto é acionável AQUI?"`);
+  }
+  // CONTROLE: o Safari de um iOS antigo segue com o convite (ele sempre adicionou).
+  assert.equal(montarConvite({ userAgent: UAS['Safari 15.0'][0] }).convite, true, 'CONTROLE: o Safari do iOS 15 perdeu o convite');
+  // CONTROLE: o iPad que se anuncia como Mac — o Safari e o Chrome dele — segue com o convite.
+  const mac = (marca) => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) ' + marca;
+  const ipadSafari = montarConvite({ userAgent: mac('Version/18.0 Safari/605.1.15') });
+  assert.deepEqual([ipadSafari.convite, ipadSafari.chave], [true, 'install.ios.step1'], 'CONTROLE: o Safari do iPad (UA de Mac) perdeu o convite');
+  const ipadChrome = montarConvite({ userAgent: mac('CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1') });
+  assert.deepEqual([ipadChrome.convite, ipadChrome.chave], [true, 'install.ios.step1Navegador'], 'CONTROLE: o Chrome do iPad perdeu o convite');
+  // CONTROLE: o computador sem toque não é iOS, e com o prompt do navegador é o BOTÃO.
+  assert.equal(montarConvite({ userAgent: mac('Version/18.0 Safari/605.1.15'), toques: 0 }).convite, false,
+    'CONTROLE: o Mac de mesa (sem toque) ganhou o convite do iPhone');
+  const pc = montarConvite({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36', toques: 0, prompt: true });
+  assert.deepEqual([pc.botao, pc.passos], [true, false], 'CONTROLE: o computador com o prompt perdeu o botão');
+});
+
+test('R14-7-A2: as listas de marcas são FECHADAS e cada marca diz o motivo — e o Safari se reconhece pela POSITIVA', () => {
+  for (const nome of ['MARCAS_DE_NAVEGADOR_NO_IOS', 'MARCAS_DE_APP_NO_IOS']) {
+    // No FONTE com os comentários: cada linha de marca leva o seu `// motivo`.
+    const ini = APP.search(new RegExp('^const ' + nome + ' = \\[', 'm'));
+    assert.ok(ini >= 0, `a lista ${nome} sumiu do app.js`);
+    const bloco = APP.slice(ini, APP.indexOf('\n];', ini));
+    const linhas = bloco.split('\n').slice(1).filter((l) => /^\s+\//.test(l));
+    assert.ok(linhas.length >= 5, `CONTROLE: só ${linhas.length} marcas em ${nome} — o recorte quebrou`);
+    for (const l of linhas) assert.match(l, /,\s+\/\/ \S/, `${nome}: marca sem o motivo escrito — "${l.trim()}"`);
+  }
+  const safari = fatiar('safariDoIOS');
+  assert.match(safari, /\\bVersion\\\/\\d/, 'o Safari deixou de exigir o `Version/` (a positiva)');
+  assert.match(safari, /\\bSafari\\\//, 'o Safari deixou de exigir o `Safari/`');
 });
 
 // ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════
