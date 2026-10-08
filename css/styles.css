@@ -282,10 +282,17 @@ body.dark {
 
 /* Pulo do contador quando o número muda. É o que comunica "isso mexeu" no caso
    de +1 — onde contar não mostraria nada (não há inteiro entre 12 e 13).
-   `scale` não afeta layout, então nada empurra os vizinhos do grid. */
+   `scale` não afeta layout, então nada empurra os vizinhos do grid — desde que
+   a regra NÃO troque o `display`. Os quatro números são `<p>`, caixa de BLOCO,
+   onde o `transform` já vale. Até o lote 18 havia aqui um `display:
+   inline-block` ("transform não se aplica a caixa inline pura"): ele trocava o
+   `<p>` de bloco pra linha, o alinhamento pela linha de base crescia a célula,
+   e abaixo de 360 px (o placar 2×2) o placar crescia 2 px e EMPURRAVA o card a
+   cada decisão (MEDIDO nos dois motores; o smoke de layout cobra). Elemento
+   novo que use o pulo tem de ser de BLOCO (ou já inline-block por conta
+   própria), nunca ganhar o `display` daqui. */
 .count-pop {
   animation: countPop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
-  display: inline-block; /* transform não se aplica a caixa inline pura */
 }
 
 @keyframes countPop {

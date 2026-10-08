@@ -827,6 +827,52 @@ for (const [nome, vp] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone
   await safari.ctx.close();
   await chrome.ctx.close();
 }
+// O PULO do contador do placar (`.count-pop`) não mexe na ALTURA do placar —
+// MEDIDO no lote 18: o `display: inline-block` que a regra punha no número (um
+// `<p>`, caixa de BLOCO, onde o `transform` já vale) o trocava de bloco pra
+// linha, e o alinhamento pela linha de base crescia a célula enquanto a animação
+// corria. Abaixo de 360 px (o placar em 2×2: SE de 2016, Galaxy Fold) o placar
+// crescia 2 px e EMPURRAVA o card 2 px pra baixo por 0,32 s a CADA decisão — e o
+// bloco do convite acima reprovava sob carga (o "Agora não" 4 px mais baixo numa
+// das duas páginas, medida no meio do pulo da outra). CONTROLE: o instrumento vê
+// a classe no meio do pulo, e a CONTRAPROVA põe o `inline-block` de volta à mão e
+// precisa ver a altura mudar (senão a medida é cega).
+for (const [nome, vp] of [['SE 2016', { width: 320, height: 568 }], ['Galaxy Fold', { width: 280, height: 653 }],
+  ['Pixel', { width: 412, height: 915 }]]) {
+  const ctx = await browser.newContext({ viewport: vp, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  const m = await page.evaluate(async () => {
+    const quadro = () => new Promise((r) => requestAnimationFrame(() => r()));
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    renderProfileHeader(AppState.profile); showLoading(false);
+    AppState.stats = { read: 3, rejected: 1, skipped: 0 }; updateStats(true);
+    await quadro(); await quadro();
+    const el = document.getElementById('rejectedCount');
+    const alt = () => document.getElementById('placar').getBoundingClientRect().height;
+    const topo = () => document.getElementById('cardStack').getBoundingClientRect().top;
+    const antes = { placar: alt(), pilha: topo() };
+    AppState.stats.rejected += 1; updateStats();
+    await quadro();
+    const durante = { placar: alt(), pilha: topo(), classe: el.classList.contains('count-pop') };
+    // CONTRAPROVA: o `inline-block` de antes, à mão, no mesmo número.
+    el.style.display = 'inline-block';
+    const comInline = alt();
+    el.style.display = '';
+    return { antes, durante, comInline };
+  });
+  const rot = `pulo do contador · ${nome}`;
+  checa(m.durante.classe, `${rot}: CONTROLE — a medida não pegou o número no meio do pulo`, JSON.stringify(m));
+  checa(Math.abs(m.durante.placar - m.antes.placar) < 0.5 && Math.abs(m.durante.pilha - m.antes.pilha) < 0.5,
+    `${rot}: o pulo do contador mudou a altura do placar e empurrou o card`,
+    `placar ${m.antes.placar} → ${m.durante.placar}, card ${m.antes.pilha} → ${m.durante.pilha}`);
+  if (vp.width < 360) checa(Math.abs(m.comInline - m.antes.placar) >= 0.5,
+    `${rot}: CONTRAPROVA — com o inline-block de volta a altura não mudou, a medida é cega`, JSON.stringify(m));
+  await ctx.close();
+}
 {
   // Antes do iOS 16.4: os navegadores de fora não adicionam — o convite não aparece.
   const se = { width: 375, height: 667 };
