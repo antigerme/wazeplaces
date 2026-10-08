@@ -2448,9 +2448,22 @@ function setupModalListeners() {
     // funcionava assim (setupLanguageSwitcher); undo e dev mode agora também —
     // antes, trocar o switch e fechar sem "Aplicar" perdia a mudança em silêncio.
     $('prefUndoEnabled').addEventListener('change', (e) => {
-        // Gate: sem cota o checkbox fica disabled e nem dispara change; o
-        // canDisableUndo aqui é cinto de segurança contra DOM editado à mão.
-        AppState.preferences.undoEnabled = canDisableUndo() ? e.target.checked : true;
+        // Gate: sem cota o checkbox fica disabled e nem dispara change. Mas a
+        // cota lê o placar OTIMISTA, e ele pode descer com as Preferências na
+        // tela (o "Desfazer" da decisão que a completou, cujo banner fica por
+        // cima do modal; a recusa do Waze): o interruptor seguia vivo, e
+        // desligá-lo deixava a chave desligada na tela com o Desfazer LIGADO por
+        // baixo, calado (R14-7-A3, MEDIDO nos dois motores; auditoria da rodada
+        // 14). O redesenho pelo placar (`desenharPlacar`) fecha a janela; aqui,
+        // sem a cota, a chave volta ao estado REAL — travada, ligada, com a
+        // frase do que falta.
+        if (!canDisableUndo()) {
+            AppState.preferences.undoEnabled = true;
+            savePreferences();
+            renderUndoGateUI();
+            return;
+        }
+        AppState.preferences.undoEnabled = e.target.checked;
         savePreferences();
     });
     $('prefOfflineDisponivel')?.addEventListener('change', (e) => offlineAoMudarInterruptor(e.target.checked));
@@ -26522,6 +26535,19 @@ function desenharPlacar(semAnimar = false) {
     setCount(document.getElementById('rejectedCount'), st.rejected, '', semAnimar);
     setCount(document.getElementById('skippedCount'), st.skipped, '', semAnimar);
     updatePendingCount(semAnimar);
+    // A cota do Desfazer lê o placar REAL: com as Preferências na tela, o
+    // interruptor acompanha o número que muda por baixo dele — a decisão que
+    // completou a cota e voltou (o "Desfazer", a recusa do Waze), o placar de
+    // outra aba. Ele seguia vivo abaixo da cota, e desligá-lo não desligava nada
+    // (R14-7-A3). Só na tela: a abertura dos Filtros já desenha a cota.
+    if (preferenciasNaTela()) renderUndoGateUI();
+}
+
+// A aba Preferências dos Filtros está NA TELA (o irmão do `historicoNaTela`).
+function preferenciasNaTela() {
+    const modal = document.getElementById('filtersModal');
+    const painel = document.getElementById('filtersPanelPrefs');
+    return !!modal && !!painel && !modal.classList.contains('hidden') && !painel.classList.contains('hidden');
 }
 
 // ── Ponto no ícone do app instalado ──────────────────────────────────────

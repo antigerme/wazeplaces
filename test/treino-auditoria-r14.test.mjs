@@ -9,7 +9,10 @@
 //              contexto;
 //   R14-7-A5 — o aviso de uma vez que JÁ estava na tela quando o treino abria
 //              ficava por cima do card de treino e da faixa "nada é enviado ao
-//              Waze" (até 7 s; o desbloqueio, dourado, até 20 s).
+//              Waze" (até 7 s; o desbloqueio, dourado, até 20 s);
+//   R14-7-A3 — com as Preferências abertas, o interruptor "Permitir desfazer
+//              ações" não acompanhava o placar: vivo abaixo da cota, e desligá-lo
+//              deixava a chave desligada na tela com o Desfazer ligado, calado.
 //
 // Os testes RODAM o código de verdade, fatiado do app.js, num escopo só: o que o
 // teste não fornece é um "buraco negro" que aceita qualquer chamada. Cada um tem
@@ -370,6 +373,95 @@ test('R14-7-A5: a troca de conta esquece os avisos de uma vez que estão na tela
   const corpo = fatiar('esquecerOutraConta');
   assert.match(corpo, /^    avisosAdiados = null;\n    avisosDeUmaVezNaTela = \[\];$/m,
     'a troca de conta não esquece os avisos de uma vez NA TELA: o treino de quem entrou os devolveria a pendentes');
+});
+
+// ═══ R14-7-A3 · o interruptor do Desfazer acompanha o placar ════════════════
+// O `desenharPlacar` (por onde TODA mudança do placar passa: o gesto, o
+// "Desfazer", a recusa, o placar de outra aba), a cota do Desfazer
+// (`renderUndoGateUI`) e o ouvinte do interruptor, de verdade. L6: cota 10.
+NO_BUNDLE.push(/preferenciasNaTela\(/g);
+const L6 = { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false };
+function ouvinteDoInterruptor() {
+  const m = /\$\('prefUndoEnabled'\)\.addEventListener\('change', \((\w+)\) => \{\n([\s\S]*?)\n    \}\);/.exec(APP_SEM);
+  assert.ok(m, 'CONTROLE: o ouvinte do interruptor "Permitir desfazer ações" sumiu do setupAppListeners');
+  return `const ouvinte = (${m[1]}) => {\n${m[2]}\n};`;
+}
+function montarCota({ placar = 10, prefsNaTela = true, modalAberto = true, undoEnabled = true } = {}) {
+  const els = {
+    filtersModal: { classList: classes(...(modalAberto ? [] : ['hidden'])) },
+    filtersPanelPrefs: { classList: classes(...(prefsNaTela ? [] : ['hidden'])) },
+    prefUndoEnabled: { disabled: false, checked: undoEnabled },
+    prefUndoGateMsg: { classList: classes('hidden'), textContent: '' },
+  };
+  const salvas = [];
+  const AppState = { authenticated: true, profile: L6, stats: { read: placar, rejected: 0, skipped: 0 },
+    preferences: { undoEnabled, undoGateSeen: true }, devMode: { active: false } };
+  const deps = {
+    AppState, document: { getElementById: (id) => els[id] || null },
+    Treino: { ativo: false, stats: { read: 0, rejected: 0, skipped: 0 } },
+    setCount: () => {}, updatePendingCount: () => {},
+    savePreferences: () => salvas.push(AppState.preferences.undoEnabled),
+    preferenciasCarregadas: true, safeLS: { get: () => null, set: () => {} }, PERFIL_GATE_KEY: 'waze_places_perfil_gate',
+    t: (k, v) => (v ? `${k} ${JSON.stringify(v)}` : k),
+  };
+  const h = rodar(deps, [declaracao('UNDO_GATE_BASE'),
+    ...fontes(['updateStats', 'desenharPlacar', 'preferenciasNaTela', 'renderUndoGateUI', 'initUndoGateSeen', 'undoGateAtingido',
+      'canDisableUndo', 'getUndoTreatedCount', 'getUndoUnlockThreshold', 'perfilDoPortao']),
+    ouvinteDoInterruptor()], ['updateStats', 'desenharPlacar', 'renderUndoGateUI', 'ouvinte']);
+  const caixa = els.prefUndoEnabled;
+  // O dedo na chave: o navegador inverte o `checked` e dispara o `change`.
+  const tocar = () => { caixa.checked = !caixa.checked; h.ouvinte({ target: caixa }); };
+  const estado = () => ({ viva: !caixa.disabled, ligada: caixa.checked, pref: AppState.preferences.undoEnabled,
+    frase: els.prefUndoGateMsg.classList.contains('hidden') ? '' : els.prefUndoGateMsg.textContent.split(' ')[0] });
+  return { h, AppState, els, caixa, tocar, estado, salvas };
+}
+
+test('R14-7-A3: com as Preferências NA TELA, o interruptor acompanha o placar — a decisão que completou a cota e VOLTOU o trava de novo', () => {
+  // CONTROLE: a abertura (o `openFiltersModal`) desenha a cota — viva com 10 (a 10ª no ar).
+  const m = montarCota({ placar: 10 });
+  m.h.renderUndoGateUI();
+  assert.deepEqual(m.estado(), { viva: true, ligada: true, pref: true, frase: '' }, 'CONTROLE: com 10 (L6) o interruptor não destravou');
+  // O "Desfazer" da 10ª (o banner fica por cima do modal), ou a recusa do Waze: o placar volta a 9.
+  m.AppState.stats.read = 9;
+  m.h.updateStats();
+  assert.deepEqual(m.estado(), { viva: false, ligada: true, pref: true, frase: 'prefs.undo.gate.countdownUm' },
+    'DEFEITO: o placar voltou a 9 (abaixo da cota 10) e o interruptor seguiu VIVO nas Preferências abertas');
+  // E o inverso: o placar que sobe com elas na tela (o de outra aba, `relerPlacarDeOutraAba`) destrava.
+  m.AppState.stats.read = 10;
+  m.h.desenharPlacar(true);
+  assert.deepEqual(m.estado(), { viva: true, ligada: true, pref: true, frase: '' },
+    'o placar cruzou a cota com as Preferências na tela e o interruptor seguiu travado');
+});
+
+test('R14-7-A3: desligar a chave SEM a cota a devolve ao estado REAL — travada, ligada, com o que falta — e nunca a deixa mentindo', () => {
+  // A chave ficou viva por baixo da cota (o caminho que o redesenho não alcança: DOM
+  // velho, outra aba): o toque não desliga nada — e a tela tem que DIZER isso.
+  const m = montarCota({ placar: 10 });
+  m.h.renderUndoGateUI();
+  m.AppState.stats.read = 9;   // sem redesenho: a chave segue viva na tela
+  assert.equal(m.estado().viva, true, 'PRÉ-CONDIÇÃO: a chave já estava travada');
+  m.tocar();
+  assert.equal(m.AppState.preferences.undoEnabled, true, 'o toque sem a cota desligou o Desfazer');
+  assert.deepEqual(m.estado(), { viva: false, ligada: true, pref: true, frase: 'prefs.undo.gate.countdownUm' },
+    'DEFEITO: a chave ficou DESLIGADA na tela com o Desfazer LIGADO por baixo — o que o app mostra e o que ele faz divergem');
+  // CONTROLE: com a cota, o toque desliga de verdade, e a chave fica como o dedo deixou.
+  const c = montarCota({ placar: 10 });
+  c.h.renderUndoGateUI();
+  c.tocar();
+  assert.deepEqual(c.estado(), { viva: true, ligada: false, pref: false, frase: '' }, 'CONTROLE: com a cota, desligar não desligou');
+  assert.deepEqual(c.salvas, [false], 'CONTROLE: a escolha não foi gravada');
+  c.tocar();
+  assert.deepEqual(c.estado(), { viva: true, ligada: true, pref: true, frase: '' }, 'CONTROLE: religar não religou');
+});
+
+test('R14-7-A3: CONTROLE — fora das Preferências (os Filtros fechados, ou outra aba deles) o placar não redesenha a cota', () => {
+  for (const [onde, op] of [['os Filtros fechados', { modalAberto: false }], ['a aba Filtros', { prefsNaTela: false }]]) {
+    const m = montarCota({ placar: 10, ...op });
+    m.h.renderUndoGateUI();   // o último desenho, de quando estavam abertas
+    m.AppState.stats.read = 9;
+    m.h.updateStats();
+    assert.equal(m.estado().viva, true, `com ${onde}, o placar redesenhou a cota (a abertura já a desenha)`);
+  }
 });
 
 // ═══ O bundle gerado tem os consertos (gotcha #22) ═════════════════════════

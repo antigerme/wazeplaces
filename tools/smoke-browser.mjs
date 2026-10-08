@@ -9205,6 +9205,41 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
     await ctx.close();
   }
+  // (6) R14-7-A3: as Preferências abertas na janela do ✓ que completa a cota do
+  // Desfazer (L6, o 10º): o interruptor está vivo (CONTROLE); o "Desfazer" do
+  // banner, POR CIMA do modal, devolve o placar a 9 — e o interruptor trava na
+  // hora, ligado, com "falta 1". Ele seguia vivo, e desligá-lo deixava a chave
+  // desligada na tela com o Desfazer ligado por baixo.
+  {
+    const rot = 'avisos de uma vez (6, a cota do Desfazer com as Preferências abertas)';
+    const { ctx, page, erros } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio' });
+    await page.click(FRENTE + ' .card-btn-read');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, `${rot}: o ✓ não abriu a janela`);
+    await page.click('#filtersBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: os Filtros não abriram`);
+    await page.click('#filtersTabPrefs');
+    const chave = () => page.evaluate(() => {
+      const cb = document.getElementById('prefUndoEnabled');
+      const msg = document.getElementById('prefUndoGateMsg');
+      return { placar: AppState.stats.read + AppState.stats.rejected, viva: !cb.disabled, ligada: cb.checked,
+        frase: !msg.classList.contains('hidden') && msg.textContent.trim().length > 0, janela: !!AppState.pendingAction };
+    });
+    const antes = await chave();
+    checa(antes.janela && antes.placar === 10 && antes.viva && antes.ligada,
+      `${rot}: CONTROLE — com o 10º na janela, o interruptor não estava vivo`, JSON.stringify(antes));
+    // O "Desfazer" recebe o toque por cima do modal (o banner é z-70).
+    const quem = await page.evaluate(() => { const r = document.getElementById('undoBtn').getBoundingClientRect();
+      const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return h && (h.id || h.closest('#undoBtn')?.id); });
+    checa(quem === 'undoBtn', `${rot}: PRÉ-CONDIÇÃO — o "Desfazer" não recebe o toque por cima dos Filtros`, String(quem));
+    await page.click('#undoBtn');
+    await esperarOuExplodir(page, () => !AppState.pendingAction, `${rot}: o "Desfazer" não fechou a janela`);
+    await doisQuadros(page);
+    const depois = await chave();
+    checa(depois.placar === 9 && !depois.viva && depois.ligada && depois.frase,
+      `${rot}: o placar voltou a 9 (abaixo da cota) e o interruptor seguiu VIVO nas Preferências abertas`, JSON.stringify(depois));
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
 }
 
 // ── O CARIMBO DE NASCIMENTO EXISTE DEPOIS DE ABRIR ─────────────────────────
@@ -12439,7 +12474,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + pilha do próximo pedido em 2 aparelhos × 2 temas × ${LINGUAS.length} idiomas (dedo em grade 3×3 nunca chega ao card de fundo, Tab REAL nunca pousando nele, com contraprova sem inert, inert/aria/ponteiro, véu computado, tirar o véu MUDANDO pixel, e ZERO ouvinte no card de fundo por clique programático com controle na frente, e o mapa do fundo DESENHADO pro mesmo tamanho do da frente — a promessa que o relato do iPhone mostrou quebrada)`
   + `, + fila de saída offline (modo avião com rota ABORTADA, placar que não reverte, fila sobrevivendo a matar o app, esvaziamento com ritmo medido e UMA requisição por ação, gatilho da ABERTURA drenando sem nenhum evento online, rede voltando em DOIS TEMPOS sem engolir o 2º evento online (janela alargada de propósito, com controle de que o esvaziamento está mesmo no ar), resposta que CHEGA drenando a fila SEM nenhum evento online novo (o relato do iPhone, com controle de que ela não drenou antes), app MORTO no meio do voo reenviando sem contar duas vezes, pouso que falha DE VERDADE desfazendo o placar GRAVADO, e CONTROLE de erro que não é rede)`
   + `, + carimbo de nascimento escrito na carga (normal E pelo código de pareamento, com o ramo EXIGIDO, sem reescrever no reload, e o diário como CONTROLE)`
-  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto; o que o TREINO segurou sai no "Sair" da faixa e no ↻, o que estava na tela quando ele abriu sai dele e volta no fim, com o CONTROLE do dispensado que não volta)`
+  + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto; o que o TREINO segurou sai no "Sair" da faixa e no ↻, o que estava na tela quando ele abriu sai dele e volta no fim, com o CONTROLE do dispensado que não volta; e o interruptor do Desfazer travando com as Preferências abertas quando o "Desfazer" devolve o placar abaixo da cota)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
