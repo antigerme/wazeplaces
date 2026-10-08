@@ -17225,12 +17225,23 @@ function showNoPlaces() {
 // mensagem certa — foi assim que eu descobri, tentando ligar o `short` pra
 // todo mundo de uma vez.
 //
-// Então a escolha é POR IDIOMA e por MEDIÇÃO, não por gosto: usa a abreviação
-// oficial se ela passar na mesma invariante que o teste cobra (nenhuma unidade
-// pode ser PREFIXO de outra), e cai pro extenso quando não passar. Duas
-// consequências boas: o espanhol volta pro curto sozinho no dia em que o CLDR
-// consertar, e a regra que decide aqui é a MESMA que o teste enforca — não há
-// duas versões dela pra divergirem.
+// Então a escolha é por MEDIÇÃO, não por gosto: usa a abreviação oficial se
+// ela passar na mesma invariante que o teste cobra (nenhuma unidade pode ser
+// PREFIXO de outra), e cai pro extenso quando não passar. Duas consequências
+// boas: o idioma volta pro curto sozinho no dia em que o CLDR consertar, e a
+// regra que decide aqui é a MESMA que o teste enforca — não há duas versões
+// dela pra divergirem.
+//
+// E a escolha é POR UNIDADE (desde o R14-8-05; era por idioma): só a unidade
+// ambígua vai pro extenso. O FRANCÊS escreve mês como `m.`, e o ponto escondia a
+// colisão com `min` de quem comparava a frase inteira — o card dizia "il y a 2
+// m.", e em francês "m" é metro. A régua compara a UNIDADE, sem o ponto, e o mês
+// sai "il y a 2 mois" (o que a idade da foto já dizia ao lado, `idadeDaFoto`);
+// hora, minuto e dia seguem curtos. Por idioma, o francês inteiro iria pro
+// extenso, e o rótulo do tipo, na mesma linha, passava a ser cortado no Galaxy
+// Fold em 26 de 40 combinações (eram 12; por unidade, 16). O espanhol, que caía
+// inteiro no extenso pelo mesmo "m", ganha hora, minuto e dia curtos ("hace 23
+// h"), com o mês por extenso. Os números estão em `estiloDaIdade`.
 //
 // Curiosidade que confirma a régua: em português o próprio "short" do CLDR já
 // escreve "dias" e "meses" por extenso, e só abrevia `h` e `min.` — não existe
@@ -17297,19 +17308,59 @@ function idadeComNormaLocal(loc, estilo, n, unidade) {
     }
 }
 
-function estiloDaIdade(loc) {
-    if (ESTILO_DA_IDADE.has(loc)) return ESTILO_DA_IDADE.get(loc);
-    let estilo = 'long';
-    try {
-        const curto = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'short' });
-        // n = 9: qualquer n >= 2 serve (em n = 1 vários idiomas usam palavra
-        // própria — "ontem", "mês passado" — e a comparação perde o sentido).
-        const saidas = UNIDADES_DA_IDADE.map((u) => curto.format(-9, u));
-        const ambiguo = saidas.some((a) => saidas.some((b) => a !== b && b.startsWith(a)));
-        if (!ambiguo) estilo = 'short';
-    } catch (e) { /* sem Intl ou locale estranho: o extenso nunca é ambíguo */ }
-    ESTILO_DA_IDADE.set(loc, estilo);
-    return estilo;
+function estiloDaIdade(loc, unidade) {
+    let porUnidade = ESTILO_DA_IDADE.get(loc);
+    if (!porUnidade) {
+        porUnidade = {};
+        try {
+            const curto = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'short' });
+            const longo = new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'long' });
+            // A UNIDADE como quem lê a vê: a palavra logo depois do número, SEM o
+            // ponto de abreviatura. Comparando a frase inteira, o PONTO escondia a
+            // colisão do francês: "il y a 9 m." (meses) não é prefixo de "il y a 9
+            // min", e o card dizia "il y a 2 m." — em francês "m" é metro, e
+            // minuto se escreve "min": o mesmo "há 9m" do relato, num pedido de
+            // dois meses (auditoria da rodada 14, R14-8-05, igual nos dois
+            // motores). E a palavra, não o resto da frase: em inglês a unidade vem
+            // no MEIO ("9 mo. ago"), e a frase inteira nunca seria prefixo de
+            // outra. Estrutura que não se reconhece (sem palavra depois do número)
+            // vira palavra vazia, que conta como ambígua: o extenso nunca é.
+            // n = 9: qualquer n >= 2 serve (em n = 1 vários idiomas usam palavra
+            // própria — "ontem", "mês passado" — e a comparação perde o sentido).
+            const palavra = (rtf, u) => {
+                const partes = rtf.formatToParts(-9, u);
+                const i = partes.findIndex((p) => p.type === 'integer');
+                const depois = i >= 0 && partes[i + 1] && partes[i + 1].type === 'literal' ? partes[i + 1].value : '';
+                return depois.trim().split(/\s+/)[0].replace(/\.$/, '');
+            };
+            // Ambígua é a unidade cuja palavra é o COMEÇO da de outra (ou igual).
+            const ambigua = (u, ditas) => !ditas[u]
+                || UNIDADES_DA_IDADE.some((v) => v !== u && ditas[v].startsWith(ditas[u]));
+            const curtas = {};
+            for (const u of UNIDADES_DA_IDADE) curtas[u] = palavra(curto, u);
+            // POR UNIDADE: só a ambígua vai pro extenso — "m" (mês) é o começo de
+            // "min", e o mês sai "mois"/"meses"; hora, minuto e dia seguem curtos.
+            // Era POR IDIOMA, e o francês inteiro iria pro extenso: MEDIDO no
+            // card de verdade, no Galaxy Fold, o rótulo do TIPO ("Nouvelle
+            // photo", que divide a linha com a idade) passava a ser cortado em
+            // 26 de 40 combinações tipo × idade (eram 12) — por mês, em 16. E o
+            // espanhol, que caía INTEIRO no extenso pelo mesmo "m", ganha a hora,
+            // o minuto e o dia curtos ("hace 23 h"), com o mês por extenso: no
+            // Fold, 16 → 11 cortados.
+            for (const u of UNIDADES_DA_IDADE) porUnidade[u] = ambigua(u, curtas) ? 'long' : 'short';
+            // E confere o que a tela vai MOSTRAR, curtas e extensas misturadas:
+            // sobrou colisão, o idioma inteiro vai pro extenso.
+            const ditas = {};
+            for (const u of UNIDADES_DA_IDADE) ditas[u] = porUnidade[u] === 'short' ? curtas[u] : palavra(longo, u);
+            if (UNIDADES_DA_IDADE.some((u) => ambigua(u, ditas))) for (const u of UNIDADES_DA_IDADE) porUnidade[u] = 'long';
+        } catch (e) {
+            // Sem Intl ou locale estranho: o extenso nunca é ambíguo.
+            for (const u of UNIDADES_DA_IDADE) porUnidade[u] = 'long';
+        }
+        ESTILO_DA_IDADE.set(loc, porUnidade);
+    }
+    // Unidade fora da lista (o "agora", em segundos): o extenso.
+    return porUnidade[unidade] || 'long';
 }
 
 // A IDADE DO PEDIDO, e ela já MENTIU pro owner — três vezes, com relato.
@@ -17355,8 +17406,7 @@ function formatRelativeTime(ts) {
     // inventa idade negativa nem se esconde o pedido.
     const loc = i18nLocale();
     try {
-        const estilo = estiloDaIdade(loc);
-        const f = (n, u) => idadeComNormaLocal(loc, estilo, n, u);
+        const f = (n, u) => idadeComNormaLocal(loc, estiloDaIdade(loc, u), n, u);
         if (diff < 0) return f(0, 'second');
         const sec = Math.floor(diff / 1000);
         if (sec < 60) return f(0, 'second');
