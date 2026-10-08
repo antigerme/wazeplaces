@@ -33,6 +33,307 @@ const pedidos = (c, desde = 0) => c.chamadas.chat.slice(desde).map((x) => x.acao
 const tocarVerAnteriores = (c) => c.$('conversaMsgs').disparar('click', {
   target: { closest: (sel) => (sel === '.conversa-anteriores' ? {} : null) } });
 
+// ── R14-5-01: o que a REABERTURA mostrou e ninguém marcou ───────────────────
+//
+// A conversa com a CAF carregada (a 1, e há mais antigas) e fechada; a 2000
+// chega com ela FECHADA (o tempo real a junta ao histórico), e a REABERTURA a
+// mostra. Quem a marcaria no Waze é a primeira página da reabertura (o
+// `abrir`), mas ela fica pra depois: (a) a página ANTIGA no ar; (b) a espera do
+// perfil. A conversa fecha antes.
+
+// (a): `antiga` — "Ver mensagens anteriores" antes de fechar (a página antiga
+// fica no ar até `soltarAntiga`). `lida` responde o "lida".
+async function reabertaComAntigaNoAr({ antiga = true, lidaResp = () => ({ success: true }) } = {}) {
+  let soltarAntiga = null;
+  let inicial = true;
+  const c = novoCliente({ agora: T + 10, api: { chat: (x) => {
+    if (x.acao === 'lida') return lidaResp(x);
+    if (x.acao !== 'abrir') return { success: true };
+    if (x.com !== CAF) return { success: true, mensagens: [], maisAntigas: false, lida: true };
+    if (inicial) { inicial = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }; }
+    if (x.antesDe) return new Promise((ok) => { soltarAntiga = ok; });
+    return { success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: true, lida: true };
+  } } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  if (antiga) { tocarVerAnteriores(c); await tick(); }
+  fechar(c);
+  await tick();
+  c.relogio.agora = T + 2000; await chega(c, 2000);           // com a conversa FECHADA
+  const r = { contaFechada: conta(c) };
+  c.relogio.agora = T + 3000;
+  const antesDaReabertura = c.chamadas.chat.length;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  r.viuA2000 = c.$('conversaMsgs').innerHTML.includes('msg 2000');
+  r.naReabertura = pedidos(c, antesDaReabertura);
+  c.relogio.agora = T + 3500;
+  const antesDoFechamento = c.chamadas.chat.length;
+  fechar(c);                                                   // FECHA antes de a antiga voltar
+  await tick(); await tick();
+  r.noFechamento = pedidos(c, antesDoFechamento);
+  return { c, r, soltarAntiga: (resp) => soltarAntiga(resp) };
+}
+const ANTIGA_OK = { success: true, mensagens: [doHistorico(-5000)], maisAntigas: false, lida: false };
+
+test('R14-5-01 (a) reaberta com a página ANTIGA no ar e fechada antes de ela voltar: o fechamento marca como lida a mensagem que a reabertura mostrou — um "lida", nenhuma primeira página', async () => {
+  const { c, r, soltarAntiga } = await reabertaComAntigaNoAr();
+  assert.equal(r.contaFechada, 1, 'CONTROLE: a 2000 chegou com a conversa fechada e conta como nova');
+  assert.equal(r.viuA2000, true, 'CONTROLE: a reabertura mostra a 2000');
+  assert.deepEqual(r.naReabertura, [], 'CONTROLE: com a antiga no ar, a reabertura não pede nada ainda (o lote 17)');
+  assert.deepEqual(r.noFechamento, ['lida'], 'DEFEITO: fechada antes de a antiga voltar, a mensagem vista ficou não lida no Waze — nenhum "lida" saiu');
+  assert.equal(lidaAte(c), 2000, 'o "lida" do fechamento não cobriu a 2000');
+  // A antiga volta com a conversa fechada: nenhuma primeira página "que
+  // ninguém vê" (o controle do lote 17 segue valendo).
+  const antesDaAntiga = c.chamadas.chat.length;
+  c.relogio.agora = T + 4000;
+  soltarAntiga(ANTIGA_OK);
+  await tick(); await tick(); await tick();
+  assert.deepEqual(pedidos(c, antesDaAntiga), [], 'a antiga voltou com a conversa fechada e pediu outra página');
+  // A lista seguinte — a carona de uma ação que SAIU antes do "lida" e foi lida
+  // no Waze antes dele — não devolve a vista como "1 mensagem nova".
+  c.relogio.agora = T + 5000;
+  c.P.presencaAoCarona(lista(2000, 1), T + 3400, 30);
+  await tick();
+  assert.equal(conta(c), 0, 'a lista seguinte devolveu a mensagem vista como "1 mensagem nova"');
+  assert.equal(c.P.Presenca.lidaDevendo.size, 0, 'o "lida" pago ficou como dívida');
+  // CONTROLE: sem nada adiado, quem marca é o `abrir` da reabertura — e o
+  // fechamento não manda "lida" nenhum (seria o mesmo pedido em dobro).
+  const k = await reabertaComAntigaNoAr({ antiga: false });
+  assert.deepEqual(k.r.naReabertura, ['abrir'], 'CONTROLE: sem a antiga no ar, a reabertura pede a primeira página');
+  assert.deepEqual(k.r.noFechamento, [], 'CONTROLE: o `abrir` da reabertura já cobriu a 2000, e o fechamento mandou um "lida" a mais');
+  assert.equal(lidaAte(k.c), 2000, 'CONTROLE: o `abrir` da reabertura marca a 2000');
+});
+
+test('R14-5-01 (a) o "lida" do fechamento que FALHA volta a dever, e o próximo fechamento o paga', async () => {
+  let falhar = true;
+  const { c } = await reabertaComAntigaNoAr({ lidaResp: () => (falhar ? { success: false, errorCategory: 'transient', _motivo: 'TypeError' } : { success: true }) });
+  assert.equal(lidaAte(c), 1, 'CONTROLE: o "lida" do fechamento falhou');
+  assert.ok(c.P.Presenca.lidaDevendo.has(CAF), 'o "lida" que falhou não ficou devendo');
+  assert.equal(c.guardado().devendo[CAF].ate, T + 2000, 'a dívida guardada no aparelho não diz o que a pessoa viu (a 2000)');
+  falhar = false;
+  // Outra conversa abre e fecha: o fechamento paga as dívidas.
+  c.P.presencaAbrirConversa('555000111');
+  await tick(); await tick();
+  fechar(c);
+  await tick(); await tick();
+  assert.equal(lidaAte(c), 2000, 'o fechamento seguinte não pagou a dívida da mensagem vista');
+});
+
+// (b): a reabertura na ESPERA do perfil (a renovação silenciosa).
+async function reabertaNaEsperaDoPerfil({ fecharAntes = true, lista: daLista = () => ({ success: true, online: [], conversas: [] }) } = {}) {
+  let inicial = true;
+  const c = novoCliente({ agora: T + 10, api: {
+    chat: (x) => {
+      if (x.acao !== 'abrir') return { success: true };
+      if (inicial) { inicial = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }; }
+      return { success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: true, lida: true };
+    },
+    presencaApp: (x) => daLista(x),
+  } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  fechar(c);
+  await tick();
+  c.relogio.agora = T + 2000; await chega(c, 2000);            // com a conversa FECHADA
+  const perfil = c.AppState.profile;
+  c.AppState.profile = null;                                   // a renovação silenciosa
+  c.relogio.agora = T + 3000;
+  const antes = c.chamadas.chat.length;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  const r = { viuA2000: c.$('conversaMsgs').innerHTML.includes('msg 2000') };
+  if (fecharAntes) { c.relogio.agora = T + 3500; fechar(c); await tick(); await tick(); }
+  r.naEspera = pedidos(c, antes);
+  r.devendo = c.P.Presenca.lidaDevendo.has(CAF);
+  r.guardada = (c.guardado().devendo || {})[CAF] || null;
+  c.AppState.profile = perfil;                                 // o perfil volta
+  c.relogio.agora = T + 70_000;
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  r.depoisDoPerfil = pedidos(c, antes);
+  r.lidaAte = lidaAte(c);
+  return { c, r };
+}
+
+test('R14-5-01 (b) reaberta na ESPERA do perfil e fechada antes de ele voltar: o "lida" da mensagem vista fica devendo e sai quando o perfil volta', async () => {
+  const { r } = await reabertaNaEsperaDoPerfil();
+  assert.equal(r.viuA2000, true, 'CONTROLE: a reabertura na espera mostra a 2000');
+  assert.deepEqual(r.naEspera, [], 'CONTROLE: sem o perfil, nada sai (R5-5-2)');
+  assert.equal(r.devendo, true, 'DEFEITO: fechada na espera do perfil, a conversa não ficou devendo o "lida" da mensagem vista');
+  assert.equal(r.guardada && r.guardada.ate, T + 2000, 'a dívida guardada no aparelho não diz o que a pessoa viu (a 2000)');
+  assert.deepEqual(r.depoisDoPerfil, ['lida'], 'o perfil voltou e o "lida" da mensagem vista não saiu (ou saiu uma primeira página que ninguém vê)');
+  assert.equal(r.lidaAte, 2000, 'a 2000, vista na reabertura, não foi marcada como lida no Waze');
+  // CONTROLE: aberta até o perfil voltar, quem marca é a primeira página que
+  // esperava (o `abrir`) — e nenhum "lida" a mais.
+  const { r: k } = await reabertaNaEsperaDoPerfil({ fecharAntes: false });
+  assert.deepEqual(k.depoisDoPerfil, ['abrir'], 'CONTROLE: aberta, a primeira página que esperava o perfil sai quando ele volta');
+  assert.equal(k.devendo, false, 'CONTROLE: aberta, nada fica devendo');
+  assert.equal(k.lidaAte, 2000, 'CONTROLE: o `abrir` marca a 2000');
+});
+
+test('R14-5-01 (b) a lista que chega com o perfil e conta uma mensagem que a pessoa NÃO viu tira a dívida — nada marca o que ninguém viu (R7-5-01)', async () => {
+  // A 2500 chegou durante a espera (o tempo real fica fechado sem o perfil):
+  // a lista que o perfil traz a conhece, e pagar marcaria ela também.
+  const { c, r } = await reabertaNaEsperaDoPerfil({ lista: () => ({ success: true, ...lista(2500, 2) }) });
+  assert.equal(r.devendo, true, 'CONTROLE: fechada na espera, a conversa devia o "lida" da 2000');
+  assert.deepEqual(r.depoisDoPerfil, [], 'a dívida da 2000 foi paga com a 2500, que ninguém viu, na lista — o "lida" a marcaria também');
+  assert.equal(c.P.Presenca.lidaDevendo.has(CAF), false, 'a dívida ficou de pé com a mensagem que ninguém viu');
+  assert.equal(conta(c), 2, 'a conta da lista não ficou (a vista e a que ninguém viu seguem não lidas no Waze)');
+});
+
+// (c): a PRIMEIRA página da abertura anterior ainda NO AR quando a conversa
+// reabre (o `soltar` a devolve). Quem marca a 2000 é o "lida" depois dela (a
+// rajada, R5-5-1), e a rajada só existe com a conversa na tela.
+async function primeiraNoAr({ fecharAntes = true, resposta = { success: true, mensagens: [doHistorico(1)], maisAntigas: false, lida: true },
+  depoisDeFechar = null } = {}) {
+  let soltar = null;
+  const c = novoCliente({ agora: T + 10, api: { chat: (x) => (x.acao === 'abrir' ? new Promise((ok) => { soltar = ok; }) : { success: true }) } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick();
+  fechar(c);
+  await tick();
+  c.relogio.agora = T + 2000; await chega(c, 2000);            // com a conversa FECHADA
+  c.relogio.agora = T + 3000;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  const r = { viuA2000: c.$('conversaMsgs').innerHTML.includes('msg 2000'), abrir: c.chamadas.chat.filter((x) => x.acao === 'abrir').length };
+  if (fecharAntes) { fechar(c); await tick(); }
+  if (depoisDeFechar) await depoisDeFechar(c);
+  r.antesDaPrimeira = pedidos(c, 1);
+  c.relogio.agora = T + 4000;
+  soltar(resposta);
+  await tick(); await tick(); await tick();
+  c.relogio.agora = T + 6000;
+  await c.rodarTimers();
+  await tick(); await tick();
+  r.depoisDaPrimeira = pedidos(c, 1);
+  r.lidaAte = lidaAte(c);
+  return { c, r };
+}
+
+test('R14-5-01 (c) a primeira página da abertura anterior no ar, a conversa reaberta e fechada antes de ela voltar: quando ela volta, sai o "lida" do que ela não cobre — um pedido', async () => {
+  const { c, r } = await primeiraNoAr();
+  assert.equal(r.viuA2000, true, 'CONTROLE: a reabertura mostra a 2000');
+  assert.equal(r.abrir, 1, 'CONTROLE: com a primeira página no ar, a reabertura não pede outra');
+  assert.deepEqual(r.antesDaPrimeira, [], 'com a primeira página no ar, o fechamento mandou um "lida" antes da resposta dela — o pedido em dobro');
+  assert.deepEqual(r.depoisDaPrimeira, ['lida'], 'DEFEITO: a primeira página voltou com a conversa fechada e nada marcou a 2000, vista na reabertura');
+  assert.equal(r.lidaAte, 2000, 'a 2000 não foi marcada como lida no Waze');
+  assert.equal(c.P.Presenca.lidaDevendo.size, 0, 'a dívida paga ficou de pé');
+  // CONTROLE: com a conversa ABERTA quando a primeira volta, quem marca é a
+  // rajada (R5-5-1) — o MESMO pedido.
+  const { r: k } = await primeiraNoAr({ fecharAntes: false });
+  assert.deepEqual(k.depoisDaPrimeira, ['lida'], 'CONTROLE: aberta, a rajada marca a 2000');
+  assert.equal(k.lidaAte, 2000);
+});
+
+test('R14-5-01 (c) a primeira página que volta com mensagem DELA mais nova que a vista não paga a dívida — o "lida" marcaria o que ninguém viu (R7-5-01)', async () => {
+  // A página foi lida no Waze depois de a 2500 chegar (o tempo real ainda não
+  // a trouxe): a 2500 está nela, e ninguém a viu.
+  const { c, r } = await primeiraNoAr({ resposta: { success: true, mensagens: [doHistorico(1), doHistorico(2500)], maisAntigas: false, lida: true } });
+  assert.deepEqual(r.depoisDaPrimeira, [], 'a primeira página trouxe a 2500, que ninguém viu, e o "lida" saiu assim mesmo');
+  assert.equal(c.P.Presenca.lidaDevendo.has(CAF), false, 'a dívida ficou de pé com a mensagem que ninguém viu');
+  // E a mensagem que chega pelo tempo real DEPOIS do fechamento (ninguém a viu)
+  // também tira a dívida: a página volta e nada sai.
+  const { r: k } = await primeiraNoAr({ depoisDeFechar: async (d) => { d.relogio.agora = T + 3500; await chega(d, 3500); } });
+  assert.deepEqual(k.depoisDaPrimeira, [], 'chegou a 3500 com a conversa fechada, e o "lida" da dívida a marcou também');
+  // CONTROLE: a mesma página sem a 2500 paga (o teste de cima).
+  const { r: ok } = await primeiraNoAr();
+  assert.deepEqual(ok.depoisDaPrimeira, ['lida'], 'CONTROLE: sem mensagem não vista, a dívida é paga');
+});
+
+test('R14-5-01 a reabertura COMUM (o `abrir` sai na hora) fechada antes de a resposta voltar não manda "lida" a mais — e só manda o que o `abrir` não marcou', async () => {
+  // A conversa carregada e fechada; a 2000 chega; a reabertura pede a primeira
+  // página (no ar até `soltar`), e a conversa fecha antes de ela voltar.
+  async function comum(resposta) {
+    let soltar = null;
+    let inicial = true;
+    const c = novoCliente({ agora: T + 10, api: { chat: (x) => {
+      if (x.acao !== 'abrir') return { success: true };
+      if (x.com !== CAF) return { success: true, mensagens: [], maisAntigas: false, lida: true };
+      if (inicial) { inicial = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: false, lida: true }; }
+      return new Promise((ok) => { soltar = ok; });
+    } } });
+    c.P.presencaAbrirConversa(CAF);
+    await tick(); await tick();
+    fechar(c);
+    c.relogio.agora = T + 2000; await chega(c, 2000);
+    c.relogio.agora = T + 3000;
+    c.P.presencaAbrirConversa(CAF);
+    await tick();
+    fechar(c);
+    await tick(); await tick();
+    const noFechamento = pedidos(c, 2);
+    c.relogio.agora = T + 4000;
+    soltar(resposta);
+    await tick(); await tick(); await tick();
+    return { c, noFechamento, depois: pedidos(c, 2) };
+  }
+  const coberta = await comum({ success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: false, lida: true });
+  assert.deepEqual(coberta.noFechamento, [], 'o fechamento mandou um "lida" com o `abrir` da reabertura no ar');
+  assert.deepEqual(coberta.depois, [], 'o `abrir` marcou a 2000 e mesmo assim saiu um "lida" a mais');
+  assert.equal(lidaAte(coberta.c), 2000, 'CONTROLE: o `abrir` da reabertura marca a 2000');
+  // O `abrir` que NÃO marcou (`lida: false`, o Waze falhou a marca): o "lida"
+  // que faltou sai — o mesmo que a rajada mandaria com a conversa aberta.
+  const semMarca = await comum({ success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: false, lida: false });
+  assert.deepEqual(semMarca.depois, ['lida'], 'o `abrir` não marcou e nada mandou o "lida" da 2000, vista na reabertura');
+  // A primeira página que FALHA (o Waze fora) não paga nada na resposta — nada
+  // sai por relógio com o Waze fora —, e a dívida fica pro próximo gesto: o
+  // fechamento de outra conversa a paga, com o histórico de antes.
+  const falhou = await comum({ success: false, errorCategory: 'transient', httpCode: 500 });
+  assert.deepEqual(falhou.depois, [], 'a primeira página falhou e um "lida" saiu na resposta, sem gesto nenhum');
+  assert.ok(falhou.c.P.Presenca.lidaDevendo.has(CAF), 'a primeira página falhou e a dívida da 2000, vista na reabertura, sumiu');
+  falhou.c.P.presencaAbrirConversa('555000111');
+  await tick(); await tick();
+  fechar(falhou.c);
+  await tick(); await tick();
+  assert.ok(pedidos(falhou.c, 2).includes('lida'), 'o fechamento seguinte não pagou a dívida da 2000');
+  assert.equal(lidaAte(falhou.c), 2000);
+});
+
+test('R14-5-01 a página indo pro FUNDO com a conversa reaberta (a antiga no ar): o "lida" da mensagem vista sai na hora, com keepalive', async () => {
+  // Sem fechar: o celular bloqueia, ou a pessoa troca de app — e o sistema pode
+  // encerrar o app no fundo antes de a antiga voltar (R7-5-05).
+  let soltarAntiga = null;
+  let inicial = true;
+  const c = novoCliente({ agora: T + 10, api: { chat: (x) => {
+    if (x.acao !== 'abrir') return { success: true };
+    if (inicial) { inicial = false; return { success: true, mensagens: [doHistorico(1)], maisAntigas: true, lida: true }; }
+    if (x.antesDe) return new Promise((ok) => { soltarAntiga = ok; });
+    return { success: true, mensagens: [doHistorico(1), doHistorico(2000)], maisAntigas: true, lida: true };
+  } } });
+  c.P.presencaMontar();
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  tocarVerAnteriores(c);
+  await tick();
+  fechar(c);
+  c.relogio.agora = T + 2000; await chega(c, 2000);
+  c.relogio.agora = T + 3000;
+  c.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  assert.equal(typeof soltarAntiga, 'function', 'CONTROLE: a antiga tinha que estar no ar');
+  const antes = c.chamadas.chat.length;
+  c.doc.visibilityState = 'hidden';
+  for (const fn of c.doc._ouv.visibilitychange || []) fn();
+  await tick(); await tick();
+  assert.deepEqual(pedidos(c, antes), ['lida'], 'a página foi pro fundo e o "lida" da mensagem vista não saiu');
+  assert.equal(c.chamadas.saindoNoChat[antes], true, 'o "lida" de quem vai pro fundo saiu sem keepalive');
+  assert.equal(lidaAte(c), 2000);
+  // CONTROLE: com a conversa carregada sem nada adiado, ir pro fundo não manda nada.
+  const k = novoCliente({ agora: T + 10, api: { chat: (x) => (x.acao === 'abrir' ? { success: true, mensagens: [doHistorico(1)], maisAntigas: false, lida: true } : { success: true }) } });
+  k.P.presencaMontar();
+  k.P.presencaAbrirConversa(CAF);
+  await tick(); await tick();
+  k.doc.visibilityState = 'hidden';
+  for (const fn of k.doc._ouv.visibilitychange || []) fn();
+  await tick();
+  assert.deepEqual(pedidos(k, 1), [], 'CONTROLE: sem nada adiado, ir pro fundo mandou um "lida"');
+});
+
 // ── R14-5-02: o 401 de uma resposta da sessão ANTERIOR ──────────────────────
 //
 // O pedido sai com a sessão A; ela morre e a extensão a renova (a mesma conta,
