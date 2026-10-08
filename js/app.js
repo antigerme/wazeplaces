@@ -1114,6 +1114,7 @@ function mostrarNegadoDaExtensao() {
 // não era mais relogado pela extensão ao voltar à aba (auditoria de 2026-09-26).
 function aoEntrarNestaPagina() {
     saiuNestaPagina = false;
+    sessaoCaiuNestaPagina = false;
     extNegadoNestaPagina = false;
     extNegado = null;
 }
@@ -11644,6 +11645,7 @@ function sessaoDestaAbaEhAGuardada() {
 function derrubarSessao(errorKey, { depois } = {}) {
     epocaDaSessao++;   // o que estava em voo pertencia à sessão que morreu
     quedaAnunciada = false;   // esta queda ainda não foi dita (ver o fim da renovação)
+    sessaoCaiuNestaPagina = true;   // esta aba teve sessão, e ela caiu (ver a declaração)
     // O que é do APARELHO — o token guardado, o diário de sessões e o prazo —
     // só sai se a sessão que caiu é a guardada nele. Senão ele é o da sessão
     // da outra aba, viva, e aqui cai só a cópia da memória (ver a função).
@@ -12028,6 +12030,15 @@ function limparCabecalhoDoPerfil() {
 // expiram pelo Waze) NÃO chama isso — preserva tudo pra próximo login.
 // "Sair" deliberado nesta página (ver o `visibilitychange` da extensão).
 let saiuNestaPagina = false;
+// A sessão DESTA aba caiu nesta página (`derrubarSessao`), e ela não entrou de novo
+// desde então (`aoEntrarNestaPagina`, o "Sair"). É o que faz dela "a aba que CAIU"
+// mesmo sem guardar nada da sessão que caiu: a queda ANTES de o perfil chegar (a
+// sessão salva que morre entre a busca da abertura e o perfil) não deixa conta
+// confirmada, nem fila, nem card — e o "Sair" de outra aba não a alcançava; na volta
+// a ela, a extensão era perguntada e a aba ENTRAVA de novo, depois de a pessoa ter
+// pedido "Sair" (auditoria da rodada 14, R14-1, roteiro s15b, MEDIDO). Ver
+// `aoSairEmOutraAba`.
+let sessaoCaiuNestaPagina = false;
 
 // Quantas decisões o "Sair" descarta: a fila de saída sai com ele (ver abaixo),
 // e o que estava nela NÃO chega ao Waze. O diálogo falava dos dados do app e
@@ -12101,6 +12112,7 @@ function abrirDialogoDoSair() {
 async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false, naEntrada = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
     saiuNestaPagina = true;
+    sessaoCaiuNestaPagina = false;   // o que ela guardava da sessão que caiu sai agora
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
     // qualquer coisa (a foto ampliada, os Filtros, a conversa, o QR do
     // pareamento): tudo fecha, com a limpeza de cada um — mais abaixo, depois de
@@ -17943,7 +17955,14 @@ function aoSairEmOutraAba() {
         // "Colar cookies" fechava com o que a pessoa estava colando, e "Você saiu
         // em outra aba do navegador" aparecia numa aba que nem estava logada
         // (auditoria da rodada 14, pista s18, MEDIDO nos dois motores).
-        if (!extPerguntando && !guardaASessaoQueCaiu()) return false;
+        //
+        // E a aba cuja sessão CAIU antes de o perfil chegar não guarda nada do que
+        // o `guardaASessaoQueCaiu` procura (conta, fila, card) e também é a aba que
+        // caiu (`sessaoCaiuNestaPagina`): ela sai por aqui, e o `saiuNestaPagina`
+        // que a saída liga impede que a volta a ela pergunte à extensão e ENTRE de
+        // novo depois do "Sair" (R14-1, roteiro s15b). `=== true`: só a marca de
+        // verdade.
+        if (!extPerguntando && !guardaASessaoQueCaiu() && sessaoCaiuNestaPagina !== true) return false;
         handleLogout({ porOutraAba: true, naEntrada: true });
         return true;
     }

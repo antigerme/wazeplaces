@@ -19,7 +19,10 @@
 //  · a pista s18 (pedido extra do lote) — o "Sair" de outra aba numa aba que CAIU na
 //    tela de entrada com a pergunta à extensão NO AR ia pelo caminho cheio: o
 //    "Colar cookies" fechava com o texto, e "Você saiu em outra aba" aparecia numa
-//    aba que nem estava logada.
+//    aba que nem estava logada;
+//  · o resto do s15b (R14-1, pedido extra do lote) — a aba cuja sessão caiu ANTES de o
+//    perfil chegar não guarda nada (conta, fila, card), o "Sair" de outra aba não a
+//    alcançava, e a volta a ela perguntava à extensão e ENTRAVA de novo.
 //
 // O harness roda as funções DE VERDADE, fatiadas do app.js: o que o teste não
 // fornece vira um "buraco negro" que aceita qualquer chamada e anota o nome. Cada
@@ -1058,4 +1061,81 @@ test('pista s18: CONTROLES — sem pergunta no ar, a aba que caiu sai pelo mesmo
   await tiques();
   assert.ok(r.log.includes('fechou as camadas') && r.log.includes('aviso toast.saiuNoutraAba'),
     'a aba com o app na tela (a renovação no ar) deixou de sair pelo caminho cheio: ' + JSON.stringify(r.log));
+});
+
+
+// ═══ o resto do s15b · a aba que caiu ANTES do perfil e o "Sair" de outra aba ══
+// A sessão salva morre entre a busca da abertura e o perfil: a aba cai na tela de
+// entrada sem conta confirmada, sem fila e sem card — nada do que o
+// `guardaASessaoQueCaiu` procura. A marca `sessaoCaiuNestaPagina` diz que ela é "a aba
+// que CAIU" assim mesmo.
+function quedaAntesDoPerfil() {
+  const ap = aparelho({ [TOKEN]: 'TOK-A' });
+  const deps = {
+    safeLS: ap.safeLS, AppState: { authenticated: true, profile: null, pendingAction: null, fetchEpoch: 1, queue: [] },
+    API: {
+      sessionToken: 'TOK-A',
+      setSession(t) { this.sessionToken = t; if (t) ap.safeLS.set(TOKEN, t); else ap.safeLS.remove(TOKEN); },
+      soltarSessao() { this.sessionToken = null; },
+    },
+    epocaDaSessao: 0, quedaAnunciada: false, Treino: { ativo: false }, sessaoCaiuNestaPagina: false,
+    entrarPelaExtensao: () => new Promise(() => {}),   // a renovação, no ar
+    avisarOutrasAbasDaQueda: () => {},
+  };
+  const h = montar(['derrubarSessao', 'sessaoDestaAbaEhAGuardada', 'aoEntrarNestaPagina'], deps);
+  return { h, deps };
+}
+
+test('s15b: a QUEDA marca a aba como a que caiu (`sessaoCaiuNestaPagina`), e todo login que dá certo nela tira a marca', () => {
+  const m = quedaAntesDoPerfil();
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(m.deps.sessaoCaiuNestaPagina, true,
+    'DEFEITO: a queda não marcou a aba — sem perfil, fila nem card, nada mais diz que ela é a aba que caiu');
+  m.h.aoEntrarNestaPagina();
+  assert.equal(m.deps.sessaoCaiuNestaPagina, false, 'entrar de novo nesta aba não tirou a marca da queda');
+});
+
+test('s15b: a aba que caiu ANTES do perfil é alcançada pelo "Sair" de outra aba — sem fechar o que está aberto nem avisar — e a volta a ela NÃO pergunta à extensão', async () => {
+  // A tela de entrada da aba que caiu antes do perfil: nada na memória, só a marca.
+  const m = sairComPerguntaNoAr({ nuncaEntrou: true });
+  m.deps.sessaoCaiuNestaPagina = true;
+  m.tela.digitar('pasteModal', 'cookiesTextarea', TEXTO_COLADO);
+  // Quem grava no aparelho a partir DESTA aba passa pelo `safeLS` (o do app e o do
+  // api.js de verdade, que é o mesmo objeto); a outra aba escreve direto no aparelho.
+  const escritas = [];
+  for (const metodo of ['set', 'remove']) {
+    const original = m.real.safeLS[metodo];
+    m.real.safeLS[metodo] = (...args) => { escritas.push(metodo + ' ' + String(args[0])); return original(...args); };
+  }
+  m.outraAbaEntraESai();
+  await tiques();
+  assert.equal(m.deps.epocaDaSessao, 1,
+    'DEFEITO: o "Sair" de outra aba não alcançou a aba que caiu antes do perfil (R12-1-04): ' + JSON.stringify(m.log));
+  assert.equal(m.deps.saiuNestaPagina, true);
+  assert.equal(m.deps.sessaoCaiuNestaPagina, false, 'a marca da queda ficou depois do "Sair"');
+  assert.ok(m.log.includes('tela de entrada'), 'a tela de entrada não foi redesenhada (memória e TELA, R12-1-04)');
+  assert.deepEqual(escritas, [], 'a aba alcançada gravou no aparelho, que é da aba do "Sair" (R12-1-04)');
+  assert.ok(!m.log.includes('fechou as camadas') && !m.log.includes('aviso toast.saiuNoutraAba'),
+    'o "Sair" de outra aba fechou o que a pessoa abriu na entrada, ou avisou: ' + JSON.stringify(m.log));
+  assert.equal(m.tela.els.cookiesTextarea.value, TEXTO_COLADO);
+  // A volta à aba (com a extensão logada no WME): ela não é perguntada — a aba não ENTRA
+  // de novo sozinha depois de a pessoa ter pedido "Sair".
+  m.tela.fechar('pasteModal');
+  m.h.aoVoltarAAba();
+  assert.ok(!m.log.includes('perguntou à extensão'),
+    'DEFEITO: depois do "Sair", a volta à aba que caiu perguntou à extensão (e entraria de novo): ' + JSON.stringify(m.log));
+  assert.deepEqual(escritas, [], 'a volta à aba gravou no aparelho depois do "Sair"');
+});
+
+test('s15b: CONTROLE — a aba que NUNCA entrou não é alcançada (R9-1-03): a volta a ela pergunta à extensão e entra, como sempre', async () => {
+  const m = sairComPerguntaNoAr({ nuncaEntrou: true });
+  m.outraAbaEntraESai();
+  await tiques();
+  assert.equal(m.deps.epocaDaSessao, 0, 'a aba que nunca entrou ganhou um "Sair" que não era dela');
+  assert.equal(m.deps.saiuNestaPagina, false);
+  m.h.aoVoltarAAba();
+  assert.ok(m.log.includes('perguntou à extensão'), 'CONTROLE: a volta à aba que nunca entrou deixou de perguntar à extensão');
+  m.responder({ action: 'sessao', token: 'TOK-EXT', conta: '111' });
+  await tiques();
+  assert.ok(m.log.includes('app com TOK-EXT'), 'CONTROLE: a extensão deixou de entrar na aba que nunca entrou: ' + JSON.stringify(m.log));
 });
