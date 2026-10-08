@@ -216,6 +216,7 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     // O carimbo da fila que está na base, e os pedidos dela (as variáveis do
     // módulo), e a cobertura (R6-4-2: a mesma fila regravada mantém o carimbo).
     offlineFilaGravadaEm: null, offlineFilaGravadaChaves: null, offlineFilaPreparada: null, chaveDoPedido,
+    offlineEpoca: 0,
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -399,6 +400,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
+    offlineEpoca: 0,
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -703,7 +705,7 @@ function aparelhoO8() {
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
         offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,
-        filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0;
+        filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0, offlineEpoca = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
@@ -992,7 +994,7 @@ function aparelhoO1({ filtros = null } = {}) {
         decisaoDoLugarDe = null, leiturasDaMinhaArea = { epoca: null, noAr: new Map() },
         editaveisPorServidor = ${JSON.stringify(editaveis || { conta: null, lidos: {}, caixas: {}, gerenciadas: {} })},
         perfilFalhouPorRede = false, minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() },
-        cargasDoPerfil = 0;
+        cargasDoPerfil = 0, offlineEpoca = 0;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();

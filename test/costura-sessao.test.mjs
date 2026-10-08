@@ -1307,7 +1307,7 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
   const deps = {
     AppState: { queue: [{ venueID: 'v1' }], filters: {}, profile: { id: 111 } }, Treino: { ativo: false },
     offlineLigado: () => true, OFFLINE_STORE: 'fila', filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
-    safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
+    offlineEpoca: 0, safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
     offlineDB: async () => ({ close() {}, transaction: () => {
       const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
       return tx;

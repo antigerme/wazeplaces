@@ -165,7 +165,7 @@ function aba({ aparelho, base, fila = [], memoria = null, perfil = null, autenti
   const chaves = Object.keys(deps);
   const fonte = [
     'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null,',
-    '    offlineJanelaServida = null, ultimaEscritaOkEm = 0;',
+    '    offlineJanelaServida = null, ultimaEscritaOkEm = 0, offlineEpoca = 0;',
     ...DECLARACOES,
     ...NOMES.map(fatiar),
     `return { ${NOMES.join(', ')} };`,

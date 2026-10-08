@@ -673,7 +673,7 @@ function abaOffline({ aparelho, base, fila }) {
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null;',
+    'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineEpoca = 0;',
     'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_OFFLINE.map(fatiar),

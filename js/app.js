@@ -22047,6 +22047,18 @@ async function offlineGravarFila(desde) {
     // varredura com sessão a grava.
     const sessao = marcaDestaAba();
     if (!sessao) return false;
+    // A ÉPOCA do offline, lida AGORA (R14-4-04), como a varredura e o download
+    // (`offlineBaixar`) já faziam: o "Sair" de OUTRA aba apaga a base do aparelho
+    // (`deleteDatabase`), e o aviso dele chega aqui numa tarefa à parte
+    // (`offlineEsquecer({ soMemoria })`). A gravação que já estava a caminho —
+    // a resposta de uma busca chegou antes do aviso — abria a base de novo (abrir
+    // CRIA a base apagada) e gravava a fila nela: a aba já sem sessão deixava no
+    // aparelho, depois do "Sair", os pedidos de terceiros que a outra acabara de
+    // apagar (MEDIDO no navegador, e7 da rodada 14, com a ordem forçada: 3
+    // pedidos de volta à base). Mudou no meio: não grava, e a base que esta
+    // gravação recriou sai de novo.
+    const epoca = offlineEpoca;
+    const desfazer = () => { try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {} };
     const valeDesde = Number.isFinite(desde) ? desde : Date.now();
     // Os filtros também são lidos antes do `await`.
     const filtros = JSON.parse(JSON.stringify(AppState.filters || {}));
@@ -22060,6 +22072,13 @@ async function offlineGravarFila(desde) {
     let mesmaFila = false;
     try {
         const db = await offlineDB();
+        // Esqueceram enquanto a base abria: nada é gravado, e a base que esta
+        // abertura recriou vazia sai.
+        if (epoca !== offlineEpoca) {
+            try { db.close(); } catch (e) {}
+            desfazer();
+            return false;
+        }
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
             // Os pedidos do que vai pra base, lidos junto do `put` (a fila pode ter
@@ -22097,6 +22116,9 @@ async function offlineGravarFila(desde) {
             tx.onabort = () => erro(tx.error || new Error('abort'));
         });
         db.close();
+        // Esqueceram com a transação no ar: o que ela gravou sai (e a memória, o
+        // aviso às outras abas e a poda dos pousos não são desta base).
+        if (epoca !== offlineEpoca) { desfazer(); return false; }
         // A fila que está na base AGORA (ver `offlineFilaPreparada`).
         offlineFilaGravadaEm = gravadaEm;
         offlineFilaGravadaChaves = new Set(chaves);
