@@ -463,3 +463,24 @@ test('R14-5-03 o histórico que a resposta ganha não marca nada — e o "lida" 
   assert.equal((c.guardado().devendo || {})[CAF], undefined, 'a dívida com a mensagem que ninguém viu foi guardada no aparelho');
   assert.equal(conta(c), 1, 'a resposta que ninguém viu deixou de contar');
 });
+
+// ── R14-8-15: abrir a conversa não abre o teclado do celular ───────────────
+
+test('R14-8-15 abrir a conversa no DEDO não põe o foco no campo (o teclado cobriria a conversa); com mouse, põe', () => {
+  const abrir = (grosso) => {
+    const c = novoCliente({ agora: T });
+    const consultas = [];
+    c.win.matchMedia = (q) => { consultas.push(q); return { matches: grosso && q === '(pointer: coarse)' }; };
+    c.P.presencaAbrirConversa(CAF);
+    return { focado: !!c.$('conversaInput').focado, consultas };
+  };
+  const dedo = abrir(true);
+  assert.ok(dedo.consultas.includes('(pointer: coarse)'), 'CONTROLE: a abertura tinha que perguntar pelo ponteiro (a régua da tela de entrada)');
+  assert.equal(dedo.focado, false, 'DEFEITO: no dedo, abrir a conversa pôs o foco no campo — o teclado do celular sobe por cima dela');
+  const mouse = abrir(false);
+  assert.equal(mouse.focado, true, 'com mouse, abrir a conversa deixou de pôr o foco no campo (onde já se digita)');
+  // Sem `matchMedia`, o que o app sempre fez: o foco no campo.
+  const c = novoCliente({ agora: T });
+  c.P.presencaAbrirConversa(CAF);
+  assert.equal(!!c.$('conversaInput').focado, true, 'sem matchMedia, o campo perdeu o foco');
+});

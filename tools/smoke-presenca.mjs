@@ -417,11 +417,32 @@ try {
     if (tela.titulo === 'cafanha' && tela.estado === `No app agora · L4 · a ${KM} km daqui` && /chat do WME/.test(tela.aviso)) ok(`o topo diz onde ela está e que a conversa fica no WME`);
     else anota(`topo da conversa errado: ${JSON.stringify(tela)}`);
   }
+  // O FOCO de quem abriu a conversa pelo toque: no DEDO, nunca o campo — no
+  // celular ele abre o teclado por cima da conversa, bem quando a pessoa a abriu
+  // pra LER (auditoria da rodada 14, R14-8-15). A régua é a do app (`pointer:
+  // coarse`, a da tela de entrada); com mouse, o campo. Lido logo depois do
+  // toque, antes de qualquer outro gesto.
+  const focoAoAbrir = await ana.page.evaluate(() => ({ dedo: matchMedia('(pointer: coarse)').matches,
+    ativo: document.activeElement ? document.activeElement.id || document.activeElement.tagName : null }));
+  if (focoAoAbrir.dedo ? focoAoAbrir.ativo !== 'conversaInput' : focoAoAbrir.ativo === 'conversaInput') {
+    ok(`abrir a conversa ${focoAoAbrir.dedo ? 'no dedo deixa o foco fora do campo (o teclado não sobe)' : 'com mouse põe o foco no campo'}: ${focoAoAbrir.ativo}`);
+  } else anota(`abrir a conversa pôs o foco em ${focoAoAbrir.ativo} (ponteiro de dedo: ${focoAoAbrir.dedo})`);
   if (apiDe(ana, 'chat', 'abrir').length === 1) ok('abrir a conversa custa UM pedido (histórico e "lida" juntos)');
   else anota(`abrir a conversa custou ${apiDe(ana, 'chat', 'abrir').length} pedidos`);
   const campo = await alcancavel(ana, '#conversaInput');
   if (campo.noCentro && campo.dentroDaTela) ok('o campo de texto está na tela e recebe o dedo');
   else anota(`o campo da conversa não é alcançável: ${JSON.stringify(campo)}`);
+  // CONTROLE: a mesma abertura com o ponteiro do OUTRO tipo põe o foco no lugar
+  // do outro tipo — a medição enxerga a diferença, e a decisão é mesmo da régua.
+  // Depois da conta de pedidos acima: reabrir pede o histórico de novo.
+  const focoNoOutro = await ana.page.evaluate((dedo) => {
+    const real = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' ? !dedo : real.call(window, q).matches });
+    try { presencaAbrirConversa('183164343'); } finally { window.matchMedia = real; }
+    return document.activeElement ? document.activeElement.id || document.activeElement.tagName : null;
+  }, focoAoAbrir.dedo);
+  if (focoAoAbrir.dedo ? focoNoOutro === 'conversaInput' : focoNoOutro !== 'conversaInput') ok(`controle: com o ponteiro do outro tipo, o foco vai pra ${focoNoOutro}`);
+  else anota(`controle: com o ponteiro do outro tipo, o foco foi pra ${focoNoOutro} — a medição não distinguiria nada`);
 
   // ── 4. MANDAR: texto puro, e a outra pessoa recebe AO VIVO ─────────────────
   console.log('\n4. mandar e receber');

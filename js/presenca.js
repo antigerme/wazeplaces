@@ -2296,8 +2296,21 @@ function presencaAbrirConversa(id) {
     presencaRenderPilula();
     presencaRenderLista();
     presencaCarregarConversa(id);
-    const campo = document.getElementById('conversaInput');
-    if (campo) campo.focus();
+    // O foco vai pro campo só com mouse (o computador, onde já se digita). No
+    // DEDO, o foco no campo abre o teclado do celular por cima da conversa, bem
+    // na hora em que a pessoa a abriu pra LER o que chegou (auditoria da rodada
+    // 14, R14-8-15): fica onde o `openModal` o pôs, no ✕ da conversa. A régua é
+    // a da tela de entrada (`pointer: coarse`): dedo, não largura de tela.
+    if (!presencaPonteiroDeDedo()) {
+        const campo = document.getElementById('conversaInput');
+        if (campo) campo.focus();
+    }
+}
+
+// O ponteiro principal é o DEDO (`pointer: coarse`, a régua da tela de entrada
+// no styles.css). Sem `matchMedia`, vale o mouse: é o que o app sempre fez.
+function presencaPonteiroDeDedo() {
+    try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; }
 }
 
 // O TETO das vistas que o Waze ainda conta como não lidas (ver
