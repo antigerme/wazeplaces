@@ -1765,6 +1765,17 @@ function aplicarIdioma(valor) {
     // Os exemplos do treino têm o texto no card (R6-7-10): retraduzidos ANTES de
     // o card ser redesenhado.
     Treino.retraduzirExemplos();
+    // A região viva do card ("Novo pedido: …", o desfecho de uma escrita da
+    // foto, o "Tudo limpo!") é texto do JS, no idioma de ANTES: trocar o idioma
+    // com o card na tela a deixava em português até o próximo card, e quem
+    // percorre a página com leitor de tela ouvia português num app em francês
+    // (auditoria da rodada 14, R14-8-14). ESVAZIADA, não reescrita: reescrever é
+    // anunciar de novo um pedido que não mudou (quem diz quando ele muda é o
+    // `pedidoAnunciado`, que fica como está), por cima do "Idioma alterado" — e
+    // tirar o texto de uma região viva não se anuncia (o `aria-relevant` padrão
+    // é "additions text"). O próximo card já fala no idioma novo.
+    const anuncio = document.getElementById('cardLiveRegion');
+    if (anuncio) anuncio.textContent = '';
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
     updatePendingCount();

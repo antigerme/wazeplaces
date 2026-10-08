@@ -7,6 +7,8 @@
 //             foco ao equivalente do card seguinte (C10). MEDIDO nos dois motores.
 //  R14-8-13 · o aviso de primeira vez "Rejeição enviada ao Waze…" saía com o
 //             RELÓGIO do `hint`, que no app quer dizer "esperando envio".
+//  R14-8-14 · trocar o idioma com um card na tela deixava a região viva do card
+//             no idioma anterior até o próximo card.
 //
 // (O R14-8-05, a idade de MESES em francês, mora em test/idade.test.mjs; os do
 // Galaxy Fold — R14-8-03, -11 e -12 —, em test/tela-fold.test.mjs.)
@@ -240,4 +242,90 @@ test('R14-8-13 CONTROLE: o relógio continua com o que é sobre TEMPO, e o "i" �
   const n = montarAviso();
   n.app.avisarConsequencia('reject');
   assert.equal(caminho(n.toasts[0].el.innerHTML), caminho(info), 'o "i" da consequência não é o mesmo desenho do aviso de informação');
+});
+
+// ═══ R14-8-14 · a região viva do card no idioma novo ═════════════════════════
+// O `aplicarIdioma` de verdade, com o resto do app de buraco negro (a função que
+// não é fornecida existe e não faz nada), e o `showCurrentPlace` fazendo o que o
+// `renderCurrentCard` faz com a região viva — o TRECHO DE VERDADE, recortado.
+function buracoNegro(nome, chamou) {
+  const f = function () {};
+  return new Proxy(f, {
+    get: (t, k) => {
+      if (k === Symbol.toPrimitive) return () => '';
+      if (k === 'then' || typeof k !== 'string') return undefined;
+      return buracoNegro(nome + '.' + k, chamou);
+    },
+    apply: () => { chamou.push(nome); return buracoNegro(nome + '()', chamou); },
+    set: () => true,
+  });
+}
+function trechoDoAnuncio() {
+  const render = fatiar('renderCurrentCard');
+  const i = render.indexOf("const liveRegion = document.getElementById('cardLiveRegion');");
+  assert.ok(i >= 0, 'o renderCurrentCard não escreve mais a região viva do card — o instrumento quebrou');
+  const ini = render.indexOf('if (liveRegion && place !== pedidoAnunciado) {', i);
+  assert.ok(ini > i, 'a regra do `pedidoAnunciado` sumiu do renderCurrentCard');
+  let prof = 0;
+  for (let j = render.indexOf('{', ini); j < render.length; j++) {
+    if (render[j] === '{') prof++;
+    else if (render[j] === '}' && --prof === 0) return render.slice(i, j + 1);
+  }
+  throw new Error('o trecho do anúncio não fechou');
+}
+function montarIdioma({ lingua = 'pt' } = {}) {
+  const regiao = { escritas: [], _t: '' };
+  Object.defineProperty(regiao, 'textContent', { get() { return this._t; }, set(v) { this._t = String(v); this.escritas.push(this._t); } });
+  const PEDIDO = { updateRequestID: 'u1', name: 'Congregação Cristã No Brasil' };
+  const estado = { lingua };
+  const chamou = [];
+  const deps = {
+    setLang: (l) => { estado.lingua = l; },
+    t: (k, v) => `${estado.lingua}:${k}` + (v ? `(${Object.values(v).join('|')})` : ''),
+    document: { getElementById: (id) => (id === 'cardLiveRegion' ? regiao : null) },
+    SELETORES_IDIOMA: [], LANG_KEY: 'waze_places_lang', safeLS: { set() {} },
+    AppState: { profile: null, currentPlace: PEDIDO, authenticated: false, queue: [PEDIDO] },
+    Treino: { retraduzirExemplos() {} }, showToast() {}, estadoDaDicaDeOrdem: null,
+    identidadeDoPlace: (p) => ({ titulo: p.name }), rotuloDoTipo: () => 'card.updateType.UPDATE',
+  };
+  const escopo = new Proxy(deps, {
+    has: (tt, k) => typeof k === 'string' && (k in tt || !(k in globalThis)),
+    get: (tt, k) => {
+      if (k === Symbol.unscopables) return undefined;
+      if (k in tt) return tt[k];
+      if (typeof k !== 'string') return undefined;
+      return buracoNegro(k, chamou);
+    },
+    set: (tt, k, v) => { tt[k] = v; return true; },
+  });
+  const corpo = [
+    'let pedidoAnunciado = null;',
+    // O que o `renderCurrentCard` faz com a região viva, recortado dele.
+    `function showCurrentPlace() { const place = AppState.currentPlace; ${trechoDoAnuncio()} }`,
+    fatiar('aplicarIdioma'),
+    'return { aplicarIdioma, showCurrentPlace, anunciado: () => pedidoAnunciado };',
+  ].join('\n');
+  const app = new Function('__escopo', `with (__escopo) {\n${corpo}\n}`)(escopo);
+  return { app, regiao, estado, PEDIDO, frente: (p) => { deps.AppState.currentPlace = p; } };
+}
+
+test('R14-8-14: trocar o idioma com um card na tela não deixa a região viva no idioma de antes — nem anuncia o mesmo card de novo', () => {
+  const m = montarIdioma();
+  m.app.showCurrentPlace();
+  assert.match(m.regiao.textContent, /^pt:card\.live\.newRequest/, 'PRÉ-CONDIÇÃO: o card na tela não foi anunciado em português');
+  assert.equal(m.app.anunciado(), m.PEDIDO);
+  const antes = m.regiao.escritas.length;
+  m.app.aplicarIdioma('fr');
+  assert.ok(!m.regiao.textContent.startsWith('pt:'),
+    `DEFEITO: a região viva do card ficou no idioma de ANTES depois da troca pro francês ("${m.regiao.textContent}") — o leitor de tela lê português (R14-8-14)`);
+  const novas = m.regiao.escritas.slice(antes).filter(Boolean);
+  assert.deepEqual(novas, [],
+    'a troca de idioma ANUNCIOU o card de novo — o pedido não mudou (quem diz quando ele muda é o `pedidoAnunciado`)');
+  assert.equal(m.regiao.textContent, '', 'a região viva não foi esvaziada');
+  assert.equal(m.app.anunciado(), m.PEDIDO, 'a troca de idioma mexeu no `pedidoAnunciado` (o card seria anunciado de novo no próximo redesenho)');
+  // CONTROLE: o PRÓXIMO card fala, e no idioma NOVO — a régua de anunciar
+  // segue viva (sem isto, "não anunciou" passaria com a região morta).
+  m.frente({ updateRequestID: 'u2', name: 'Padaria' });
+  m.app.showCurrentPlace();
+  assert.match(m.regiao.textContent, /^fr:card\.live\.newRequest\(Padaria/, 'CONTROLE: o card seguinte não foi anunciado no idioma novo');
 });
