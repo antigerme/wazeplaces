@@ -1539,7 +1539,7 @@ function setupAppListeners() {
         // voltava fechando e reabrindo o app (e, com o `onLine` verdadeiro, nem
         // assim: auditoria de 2026-09-29, O1).
         if (await offlineTentarAbrirSemRede(ultimaBuscaFalhouPorRede)) return;
-        retomarBusca();
+        retomarBusca({ gesto: true });
     });
     $('diagBtn')?.addEventListener('click', baixarDiagnostico);
     $('helpBtn').addEventListener('click', () => openModal('helpModal'));
@@ -7267,8 +7267,15 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
 // sem o treino: é por ele que o ↻ e os Filtros buscam, se a pessoa sair do
 // treino por eles. Nada que refaça a fila sem gesto da pessoa encerra o treino
 // por baixo dela.
-function refazerFilaReal(aviso = null) {
+//
+// E nada que refaça a fila sem gesto corta a JANELA do Desfazer: com ela aberta
+// (a última decisão de uma fila que ficou vazia), o `resetQueue` mandava a
+// decisão ao Waze antes da hora e o "Desfazer" sumia (R14-2-05/R14-6-02, ver o
+// `retomarBusca`). O refazer fica pro fim dela (`aoFim`). `gesto`: o "Tentar de
+// novo", que despacha a janela como o ↻.
+function refazerFilaReal(aviso = null, { gesto = false } = {}) {
     if (typeof Treino !== 'undefined' && Treino.ativo === true) { Treino.anotarFilaRefeita(aviso); return; }
+    if (!gesto && AppState.pendingAction) { AppState.pendingAction.aoFim = () => refazerFilaReal(aviso); return; }
     if (aviso) showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
     resetQueue();
     startFetching();
@@ -12318,7 +12325,12 @@ function resetQueue() {
     // pendente (nunca enviada ao Waze) era re-buscada e o "Desfazer" duplicava o
     // place + dobrava stats. Refresh/filtros honram o swipe (execute); logout e
     // sessão expirada cancelam a ação antes de chamar resetQueue.
+    //
+    // O refazer que o app tinha adiado pro fim da janela (`aoFim`, ver o
+    // `retomarBusca`) é ESTE: a fila já está sendo refeita, e atendido depois do
+    // `execute` ele a refaria de novo — uma busca a mais no free tier.
     if (AppState.pendingAction) {
+        AppState.pendingAction.aoFim = null;
         AppState.pendingAction.execute();
         AppState.pendingAction = null;
     }
@@ -21998,7 +22010,12 @@ window.addEventListener('online', async () => {
 // voltavam, e com card na tela ele ainda arrancava o card e despachava a ação
 // da janela do Desfazer antes da hora. `hasMore` volta a ser verdade porque a
 // falha o tinha desligado, e o `fetchNextPage` sai na primeira linha sem ele.
-function retomarBusca() {
+//
+// `gesto`: o "Tentar de novo" — a pessoa pediu, e a janela do Desfazer sai como
+// no ↻ (o gesto honra o swipe). Sem ele é o app retomando SOZINHO (a rede que
+// volta, o perfil que chega), e a janela da última decisão não é cortada (ver
+// abaixo, R14-2-05/R14-6-02).
+function retomarBusca({ gesto = false } = {}) {
     // Com a fila VAZIA (a tela de "sem conexão"), voltar é ATUALIZAR: os pedidos
     // que passaram pela fila sem decisão — pulados sem sinal, como o card de foto
     // cuja foto não veio — voltam. Sem o reset, a rede voltava e a fila terminava
@@ -22012,13 +22029,33 @@ function retomarBusca() {
     // sem refazer — os pulados sem sinal não voltavam —, e no ÚLTIMO card do
     // treino o `resetQueue` daqui o encerrava por baixo do "Treino concluído"
     // (auditoria de 2026-10-06, junto do R9-7-04).
+    //
+    // E a fila vazia pode ser a da ÚLTIMA decisão, com a janela do Desfazer dela
+    // ainda correndo (a fila guardada aberta sem sinal; com "Minha área", o perfil
+    // que chega): o refazer sozinho a despachava — o ✕ ia ao Waze 1,4 s depois do
+    // toque e o "Desfazer" sumia (MEDIDO no navegador, nos dois motores;
+    // auditoria da rodada 14, R14-2-05 e R14-6-02, os irmãos do R13-6-01 na fila
+    // vazia). Ele fica pro FIM da janela (`aoFim`, no objeto dela; ver o
+    // `scheduleAction`): saída a decisão, a fila vazia é atualizada como sempre;
+    // desfeita, o card volta e a busca só retoma. O "Tentar de novo" é gesto, e
+    // despacha a janela como o ↻.
     if (filaReal().length === 0) {
-        refazerFilaReal();
+        if (!gesto && AppState.pendingAction) {
+            if (!AppState.pendingAction.aoFim) AppState.pendingAction.aoFim = () => retomarBusca();
+            return;
+        }
+        refazerFilaReal(null, { gesto });
         return;
     }
+    // Com card na fila, só RETOMA — como o `rebuscarDepoisDeFalha` com card: a
+    // busca volta a poder repor a fila, e o `maybePrefetch` busca agora se ela
+    // está no limite (ou quando chegar lá). Era o `startFetching`, que tirava o
+    // card da tela e o desenhava de novo: o foco do teclado no ✕ dele caía no
+    // <body> (MEDIDO no navegador, nos dois motores, com "Minha área": o perfil
+    // que chega com card na fila guardada; auditoria da rodada 14, R14-6-01).
     AppState.loadError = false;
     AppState.hasMore = true;
-    startFetching();
+    maybePrefetch();
 }
 
 // O TERCEIRO gatilho, e o único que não depende do navegador avisar nada: uma
@@ -26056,12 +26093,31 @@ function scheduleAction(type, place, executor, opts = {}) {
     marcarEmAndamento(places, true);
 
     let executed = false;
+    // A JANELA desta ação (o `pendingAction` dela, quando ela abre). O que o app
+    // adiou pro fim dela — o refazer sozinho da fila que ficou vazia
+    // (`aoFim`, ver o `retomarBusca`, R14-2-05/R14-6-02) — é atendido quando ela
+    // acaba: a decisão saiu (o `runExecutor`, por ela ter vencido ou por ter
+    // sido despachada), foi desfeita, ou foi pra fila de saída com a página
+    // saindo. Numa microtarefa: depois de o envio da decisão sair e de quem
+    // fechou a janela soltar o `pendingAction`. O `cancel` (a queda, o "Sair", a
+    // conta em dúvida) NÃO o atende: ali quem recompõe a fila é a renovação ou a
+    // entrada seguinte, e o refazer adiado morre com a janela.
+    let janela = null;
+    const atenderOFimDaJanela = () => {
+        const aoFim = janela && janela.aoFim;
+        if (typeof aoFim !== 'function') return;
+        janela.aoFim = null;
+        // Sem sessão até lá (a queda, o "Sair"), nada: a busca nem sairia, e o
+        // `retomarBusca` apagaria o `loadError` que a renovação lê (R14-1-01).
+        queueMicrotask(() => { if (AppState.authenticated) aoFim(); });
+    };
     const runExecutor = async () => {
         // A ação saiu: a janela do Desfazer acabou e os botões voltam.
         AppState.pendingAction = null;
         aplicarTravaDeAcao();
         AppState.inFlightActions++;
         updateInFlightIndicator();
+        atenderOFimDaJanela();
         try {
             await executor();
         } catch (err) {
@@ -26110,7 +26166,7 @@ function scheduleAction(type, place, executor, opts = {}) {
         }
     }, UNDO_WINDOW_MS);
 
-    AppState.pendingAction = {
+    janela = AppState.pendingAction = {
         type,
         place,
         execute: () => {
@@ -26180,6 +26236,7 @@ function scheduleAction(type, place, executor, opts = {}) {
                     reverterPlacar(true);
                     removeUndoBanner();
                     aplicarTravaDeAcao();
+                    atenderOFimDaJanela();
                     return;
                 }
                 if (r) descargaNaFila.add(places[0]);
@@ -26207,6 +26264,7 @@ function scheduleAction(type, place, executor, opts = {}) {
             if (r === 'repetida') reverterPlacar(true);
             removeUndoBanner();
             aplicarTravaDeAcao();
+            atenderOFimDaJanela();
             return true;
         },
         undo: () => {
@@ -26239,6 +26297,9 @@ function scheduleAction(type, place, executor, opts = {}) {
                 // mostraria o card de outro autor, e leria como se o Desfazer
                 // tivesse feito outra coisa.
                 showCurrentPlace();
+                // O refazer que esperava a janela: com o card de volta, ele só
+                // retoma a busca (ver o `retomarBusca`).
+                atenderOFimDaJanela();
             }
         }
     };

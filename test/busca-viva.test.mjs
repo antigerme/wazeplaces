@@ -400,18 +400,23 @@ test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com c
   // voltava e a fila terminava VAZIA, com os pedidos pendentes (2026-09-25).
   const r = fatiar('retomarBusca');
   const chamadas = [];
-  const AppState = { queue: [], loadError: true, hasMore: false };
+  const AppState = { queue: [], loadError: true, hasMore: false, pendingAction: null };
   // A fila vazia é a REAL (`filaReal`), e o atualizar passa pela função que
   // respeita o treino aberto (`refazerFilaReal`; o treino em test/treino-fila-real-r9).
-  const rodar = new Function('AppState', 'resetQueue', 'startFetching',
+  // Com card, a busca só RETOMA, pelo `maybePrefetch` (R14-6-01): o
+  // `startFetching` tirava o card da tela e o desenhava de novo, e o foco do
+  // teclado no ✕ dele caía no <body>.
+  const rodar = new Function('AppState', 'resetQueue', 'startFetching', 'maybePrefetch',
     [fatiar('filaReal'), fatiar('refazerFilaReal'), r].join('\n') + '\nreturn retomarBusca;')(
-    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'));
+    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'), () => chamadas.push('repor'));
   rodar();
   assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');
   chamadas.length = 0;
   AppState.queue = [{ venueID: 'v' }];
   rodar();
-  assert.deepEqual(chamadas, ['buscar'], 'com card na tela, a volta ZEROU a fila (arranca o card da mão)');
+  assert.ok(!chamadas.includes('reset'), 'com card na tela, a volta ZEROU a fila (arranca o card da mão)');
+  assert.deepEqual(chamadas, ['repor'],
+    'com card na tela, a volta não retomou pela reposição (o `startFetching` tira o card da tela e o desenha de novo: o foco do teclado cai no <body>, R14-6-01)');
   assert.equal(AppState.loadError, false);
   assert.equal(AppState.hasMore, true);
   assert.match(APP_SEM, /if \(AppState\.authenticated && AppState\.loadError && !AppState\.fetching\) \{\s*retomarBusca\(\);\s*\}/,
@@ -419,8 +424,9 @@ test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com c
   // A fila guardada entra também depois de uma busca que falhou por rede com o
   // `onLine` verdadeiro (R4-O1, em test/offline-varredura.test.mjs).
   // (O foco prometido ao card que vem, pelo teclado, sai antes do `await`: R6-2-13.)
-  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\);/,
-    'o "Tentar de novo" voltou a zerar a fila (e a descartar a guardada do offline)');
+  // E ele é GESTO: com a janela do Desfazer aberta, despacha como o ↻ (R14-2-05).
+  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\{ gesto: true \}\);/,
+    'o "Tentar de novo" voltou a zerar a fila (e a descartar a guardada do offline), ou deixou de ser gesto');
   assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
     'o ↻ sem rede joga fora a fila (inclusive a guardada)');
 });

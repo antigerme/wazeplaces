@@ -373,3 +373,140 @@ test('R14-2-04: CONTROLE — com o card do autor na fila, a barra FICA, contando
   assert.equal(c.doc.els.focoAutorContagem.textContent, '1 de 1');
   assert.equal(c.AppState.autorEmFoco, 7);
 });
+
+// ═══ R14-2-05 + R14-6-02 · o refazer AUTOMÁTICO da fila VAZIA e a janela do Desfazer ═══
+// (auditoria da rodada 14; os irmãos do R13-6-01 na fila vazia). A última
+// decisão da fila — a fila guardada aberta sem sinal, ou com "Minha área" a que
+// esperava o perfil — fica na janela do Desfazer com a fila VAZIA. O refazer
+// sozinho dela (a rede que volta: `online` → `retomarBusca`; o perfil que chega
+// com "Minha área": `completarPerfilChegado` → `retomarBusca`) passava pelo
+// `resetQueue`, que DESPACHA a janela: o ✕ ia ao Waze 1,4 s depois do toque e o
+// "Desfazer" sumia (MEDIDO no navegador, nos dois motores; roteiros
+// r14-2/s/k3, r14-6/p1u). Agora o refazer espera o FIM da janela (`aoFim`, no
+// objeto dela); o "Tentar de novo" é gesto, e despacha como o ↻.
+//
+// Aqui roda o `scheduleAction` de VERDADE (a janela, o timer e os ganchos do fim
+// dela), com o `retomarBusca`, a `refazerFilaReal`, a `filaReal` e o
+// `resetQueue` de verdade. A busca é um espião.
+function montarJanela({ fila = [] } = {}) {
+  const log = [];
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0] || null, hasMore: false, loadError: true,
+    fetchEpoch: 0, serverTotal: fila.length, pendingAction: null, inFlightActions: 0, stats: { read: 0, rejected: 0, skipped: 0 },
+    preferences: { undoEnabled: true }, serverBlocked: 0, blockedPartial: false, ultimaBusca: null };
+  const deps = {
+    AppState, Treino: { ativo: false }, API: { getRegion: () => 'row' },
+    UNDO_WINDOW_MS: 40, canDisableUndo: () => false, presencaFolhaAberta: () => false,
+    startFetching: () => log.push('busca (fila refeita)'), maybePrefetch: () => log.push('reposição'),
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
+    updatePendingCount: () => {}, t: (k) => k, showToast: (m) => log.push('aviso:' + m),
+    pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    tratouNestaFila: false, recusaAutomaticaNestaFila: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    filaEsperaPerfil: false, rebuscasAuto: 0, filaDeOnde: null,
+  };
+  const h = montar(['scheduleAction', 'retomarBusca', 'refazerFilaReal', 'filaReal', 'resetQueue'], deps);
+  // O ✕ no ÚLTIMO card: a janela do Desfazer abre com a fila vazia.
+  const decidir = () => h.scheduleAction('reject', P(1), async () => { log.push('✕ enviado'); });
+  return { h, deps, AppState, log, decidir };
+}
+
+test('R14-2-05: a rede que volta DENTRO da janela da última decisão (fila vazia) — a janela corre até o fim, e a fila é atualizada depois', async () => {
+  const m = montarJanela();
+  m.decidir();
+  assert.ok(m.AppState.pendingAction, 'PRÉ-CONDIÇÃO: a janela do Desfazer não abriu');
+  m.h.retomarBusca();                              // o `online`
+  await tique(5);
+  assert.deepEqual(m.log, [], `DEFEITO: o refazer automático despachou a janela do Desfazer antes da hora (R14-2-05): ${m.log}`);
+  assert.ok(m.AppState.pendingAction, 'DEFEITO: o "Desfazer" sumiu antes do fim da janela (R14-2-05)');
+  await ateQue(() => m.log.includes('busca (fila refeita)'), 'a fila atualizada no fim da janela');
+  assert.deepEqual(m.log, ['✕ enviado', 'busca (fila refeita)'],
+    'no fim da janela a decisão sai e a fila vazia é atualizada, nessa ordem, uma vez');
+  assert.equal(m.AppState.fetchEpoch, 1, 'a fila vazia não foi refeita (o atualizar: os pulados sem sinal não voltam)');
+});
+
+test('R14-2-05: CONTROLE — o "Tentar de novo" (gesto) despacha a janela na hora, como o ↻ (o instrumento enxerga o despacho)', async () => {
+  const c = montarJanela();
+  c.decidir();
+  c.h.retomarBusca({ gesto: true });
+  await tique(1);
+  assert.deepEqual(c.log.slice(0, 2), ['✕ enviado', 'busca (fila refeita)'],
+    `CONTROLE: o gesto não despachou a janela — o instrumento não enxerga o despacho: ${c.log}`);
+  assert.equal(c.AppState.pendingAction, null);
+  await tique(60);
+  assert.deepEqual(c.log, ['✕ enviado', 'busca (fila refeita)'], 'a fila foi refeita DUAS vezes (o fim da janela refez de novo)');
+});
+
+test('R14-2-05: desfeita a última decisão, o card volta e a busca só RETOMA (a fila não é refeita por baixo do card)', async () => {
+  const m = montarJanela();
+  m.decidir();
+  m.h.retomarBusca();
+  m.AppState.pendingAction.undo();                 // o "Desfazer" (o `desfazerAcaoPendente`)
+  m.AppState.pendingAction = null;
+  await tique(5);
+  assert.deepEqual(m.log, ['card', 'reposição'], `o Desfazer não devolveu o card, ou a busca não só retomou: ${m.log}`);
+  assert.deepEqual([m.AppState.fetchEpoch, m.AppState.loadError, m.AppState.hasMore], [0, false, true],
+    'a busca não foi retomada (ou a fila foi refeita por baixo do card que voltou)');
+  await tique(60);
+  assert.ok(!m.log.includes('✕ enviado'), 'a decisão desfeita foi enviada');
+});
+
+test('R14-2-05: a queda (ou o "Sair") cancela a janela — e o refazer que esperava por ela não acontece', async () => {
+  const m = montarJanela();
+  m.decidir();
+  m.h.retomarBusca();
+  m.AppState.pendingAction.cancel(true);           // a queda: `derrubarSessao`
+  m.AppState.pendingAction = null;
+  m.AppState.authenticated = false;
+  await tique(80);
+  assert.ok(!m.log.includes('busca (fila refeita)') && !m.log.includes('reposição'),
+    `o refazer adiado rodou depois da queda — apagaria a falha que a renovação lê (R14-1-01): ${m.log}`);
+  // E com a sessão de pé: a conta em dúvida (`conferirContaDestaAba`) também
+  // cancela a janela, e a aba segue com sessão — o refazer adiado não roda nela.
+  const d = montarJanela();
+  d.decidir();
+  d.h.retomarBusca();
+  d.AppState.pendingAction.cancel(true);
+  d.AppState.pendingAction = null;
+  await tique(80);
+  assert.ok(!d.log.includes('busca (fila refeita)') && !d.log.includes('reposição'),
+    `o refazer adiado rodou depois de a janela ser CANCELADA (a conta em dúvida): ${d.log}`);
+  assert.ok(d.log.includes('card'), 'PRÉ-CONDIÇÃO: o cancelamento não devolveu o pedido à fila');
+});
+
+test('R14-2-05: o ↻ DENTRO da janela, com o refazer automático esperando — a fila é refeita UMA vez (a do ↻)', async () => {
+  const m = montarJanela();
+  m.decidir();
+  m.h.retomarBusca();
+  m.h.resetQueue();                                // o ↻: `resetQueue` + `startFetching`
+  m.deps.startFetching();
+  await tique(60);
+  assert.equal(m.log.filter((l) => l === 'busca (fila refeita)').length, 1,
+    `a fila foi refeita duas vezes — uma busca a mais no free tier: ${m.log}`);
+  assert.equal(m.AppState.fetchEpoch, 1);
+});
+
+test('R14-2-05: a janela que acaba pela FILA DE SAÍDA (a página saindo sem rede, ou a decisão que outra aba já tinha) também atende o refazer', async () => {
+  for (const [rotulo, r, fechar] of [['sem rede', true, (p) => p.enfileirarSemRede()], ['repetida', 'repetida', (p) => p.descarregar()]]) {
+    const m = montarJanela();
+    m.deps.enfileirarSaida = () => r;
+    m.decidir();
+    m.h.retomarBusca();
+    await tique(1);
+    assert.deepEqual(m.log, [], `(${rotulo}) PRÉ-CONDIÇÃO: o refazer não esperou a janela`);
+    fechar(m.AppState.pendingAction);
+    await tique(5);
+    assert.ok(!m.log.includes('✕ enviado'), `(${rotulo}) PRÉ-CONDIÇÃO: a decisão saiu pela rede em vez da fila de saída`);
+    assert.ok(m.log.includes('busca (fila refeita)'),
+      `(${rotulo}) a janela acabou pela fila de saída e o refazer que esperava por ela não aconteceu: ${m.log}`);
+  }
+});
+
+test('R14-6-02: a `refazerFilaReal` sozinha (o perfil, o país do perfil) também espera a janela da última decisão', async () => {
+  const m = montarJanela();
+  m.decidir();
+  m.h.refazerFilaReal({ chave: 'toast.paisDoPerfil', pais: 'France' });
+  await tique(5);
+  assert.deepEqual(m.log, [], `a fila foi refeita (e a janela despachada) antes do fim dela: ${m.log}`);
+  await ateQue(() => m.log.includes('busca (fila refeita)'), 'a fila refeita no fim da janela');
+  assert.deepEqual(m.log, ['✕ enviado', 'aviso:toast.paisDoPerfil', 'busca (fila refeita)'],
+    'no fim da janela a decisão sai, e só então a fila é refeita, com o aviso dela');
+});

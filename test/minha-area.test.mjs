@@ -69,6 +69,9 @@ function montar({ profile = null, regiao = 'row' } = {}) {
     // O que o `completarPerfilChegado` chama além do que se mede aqui.
     epocaDaSessao: 0, window: {}, paisDoPerfil: async () => null, irProPaisDoPerfil: async () => log.push('pais'),
     startFetching: () => log.push('busca'),
+    // O lugar do pedido do perfil, que a decisão leva (R14-6-04), e a reposição
+    // do "só retoma" com card (R14-6-01).
+    lugarDoPedidoDoPerfil: null, maybePrefetch: () => log.push('repor'),
     // O `resetQueue` é o de VERDADE: é ele que diz que a fila nova não espera mais o perfil.
     removeUndoBanner: () => {},
     enviarPendenciasDoLightbox: () => {},   // as escritas do lightbox na janela saem (L25)
@@ -960,7 +963,9 @@ test('R12-6: o 401 da pergunta vai à conferência da sessão, a recusa do port�
 // mandava na hora a decisão da janela do Desfazer (MEDIDO no navegador, nos dois
 // motores: o ✕ saía ~0,4 s depois do toque, e o pulado voltava como o card da
 // frente). Sem "Minha área", a mesma fila só retoma. Aqui o perfil chega DE
-// VERDADE (`completarPerfilChegado` → `retomarBusca` → `startFetching`).
+// VERDADE (`completarPerfilChegado` → `retomarBusca` → `maybePrefetch`; era o
+// `startFetching`, que desenhava o card de novo: o foco do teclado no ✕ dele caía
+// no <body>, R14-6-01).
 const NO_BR_COM_AREA = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30],
   areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
 // A fila guardada aberta sem rede, com os dois primeiros já pulados (ficam fora
@@ -970,6 +975,15 @@ async function comAFilaGuardadaEsperandoOPerfil(m, fila) {
   m.AppState.currentPlace = m.AppState.queue[0] || null;
   m.AppState.pendingAction = { execute: () => m.log.push('despachou'), cancel: () => {} };
   await m.app.fetchNextPage();                   // o `maybePrefetch` dos últimos cards: espera o perfil
+}
+// A janela do Desfazer ACABA: o `runExecutor` do `scheduleAction` solta o
+// `pendingAction` e atende o que o app adiou pra depois dela (`aoFim`, ver o
+// `retomarBusca`, R14-2-05/R14-6-02). O gancho de verdade é medido em
+// test/busca-auditoria-r14.test.mjs.
+function fimDaJanela(m) {
+  const aoFim = m.AppState.pendingAction && m.AppState.pendingAction.aoFim;
+  m.AppState.pendingAction = null;
+  if (typeof aoFim === 'function') aoFim();
 }
 
 test('R13-6-01: a fila guardada com card e "Minha área" — o perfil que chega só RETOMA a busca: o card fica, os pulados não voltam e a janela do Desfazer não é despachada', async () => {
@@ -987,7 +1001,9 @@ test('R13-6-01: a fila guardada com card e "Minha área" — o perfil que chega 
   // Só retoma: a busca volta a poder repor a fila (pela caixa da área, no `maybePrefetch`).
   assert.deepEqual([m.AppState.hasMore, m.AppState.loadError, m.app.filaEsperaPerfil()], [true, false, false],
     'a busca não foi retomada: a fila guardada nunca mais se repõe');
-  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não ficou no card: ${m.log}`);
+  // O card FICA — e não é desenhado de novo (R14-6-01): quem retoma é a reposição.
+  assert.ok(!m.log.includes('vazio') && !m.log.includes('card'), `a tela não ficou no card, ou o card foi desenhado de novo: ${m.log}`);
+  assert.ok(m.log.includes('repor'), `a busca não foi retomada pela reposição: ${m.log}`);
   assert.equal(m.AppState.filters.myArea, true);
 });
 
@@ -998,6 +1014,12 @@ test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela
   assert.equal(v.app.filaEsperaPerfil(), true, 'PRÉ-CONDIÇÃO: a busca não esperou o perfil');
   await v.chegaOPerfil();
   await tique(10);
+  // A janela do Desfazer da última decisão ainda corre: o refazer ESPERA o fim
+  // dela, sem despachá-la (R14-6-02 — o mesmo do R13-6-01, com a fila vazia).
+  assert.ok(!v.log.includes('despachou'), 'o perfil que chegou despachou a janela do Desfazer da última decisão (R14-6-02)');
+  assert.equal(v.AppState.fetchEpoch, 0, 'a fila vazia foi refeita com a janela do Desfazer aberta (R14-6-02)');
+  fimDaJanela(v);
+  await tique(10);
   assert.equal(v.AppState.fetchEpoch, 1, 'a fila vazia que esperou o perfil não foi refeita');
   assert.deepEqual(v.buscas, ['row bbox ' + JSON.stringify(CAIXA_BR)], `a fila refeita não foi pela caixa da área: ${v.buscas}`);
   // Com card, mas o perfil SEM caixa: "Minha área" desliga e diz, e a fila da tela
@@ -1006,6 +1028,10 @@ test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela
   const s = montarServidores({ perfis: semCaixa });
   await comAFilaGuardadaEsperandoOPerfil(s, [3, 4, 5]);
   await s.chegaOPerfil();
+  await tique(10);
+  // Também ele espera a janela (`refazerFilaReal`, R14-6-02).
+  assert.ok(!s.log.includes('despachou'), 'o refazer pelo filtro desligado despachou a janela do Desfazer (R14-6-02)');
+  fimDaJanela(s);
   await tique(10);
   assert.equal(s.AppState.filters.myArea, false, 'PRÉ-CONDIÇÃO: "Minha área" seguiu ligada num perfil sem área');
   assert.equal(s.AppState.fetchEpoch, 1, 'a fila de "Minha área" ficou na tela com o filtro desligado (o filtro que mente)');
