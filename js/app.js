@@ -19440,9 +19440,15 @@ async function enviarLote(places, opts = {}) {
             // depois com a sessão de agora. E, na renovação da queda, que mantém
             // a fila na tela, eles VOLTAM como card (V1): seguem pendentes no
             // Waze, já passaram pela fila, e nenhuma busca os trazia. Numa fila
-            // refeita (o "Sair", outra conta) nada volta. E o que POUSOU tem o
-            // pouso registrado, com a marca de quem decidiu (`quem`, lá no
-            // começo; R13-2-01, ver `registrarPousoDepoisDaQueda`).
+            // REFEITA com a sessão de pé — a pessoa entrou de novo (cookies,
+            // código, a sessão do aparelho adotada; a mesma conta ou outra) —,
+            // eles voltam pela BUSCA da sessão de agora: a fila nova saiu sem eles
+            // (estavam em andamento), e sumiam — "Tudo limpo!" com os pedidos
+            // pendentes no Waze (auditoria da rodada 14, R14-2-02, o irmão do V9).
+            // Quem decide o que volta é a busca, nunca o objeto velho (ver
+            // `devolverPedidoRecusado`). Sem sessão (o "Sair"), nada volta. E o que
+            // POUSOU tem o pouso registrado, com a marca de quem decidiu (`quem`,
+            // lá no começo; R13-2-01, ver `registrarPousoDepoisDaQueda`).
             if (epoca !== epocaDaSessao) {
                 const i = places.indexOf(p);
                 const pousou = pousouNoWaze(r);
@@ -19459,7 +19465,7 @@ async function enviarLote(places, opts = {}) {
                 // pedido). Placar e Histórico seguem de fora: são da sessão que caiu.
                 if (pousou && aoLandar && naFilaDoLote()) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
                 if (!aoLandar) descontarGestoSemSessao('rejected', placar, naoPousaram.length);
-                if (naFilaDoLote()) for (const q of naoPousaram) voltarPraFila(q);
+                if (naFilaDoLote() || AppState.authenticated === true) for (const q of naoPousaram) voltarPraFila(q);
                 return;
             }
             // A OUTRA aba já o pousou e contou (ver `pousouPorOutraAba`): é decisão
@@ -19584,9 +19590,12 @@ async function enviarLote(places, opts = {}) {
         saveStats();
         // Os que voltam (ver `voltarPraFila`) entram DEPOIS de o "em andamento"
         // sair: a busca que a devolução dispara numa fila refeita não pode
-        // filtrá-los. Com a sessão trocada no meio, só na fila que atravessou a
-        // queda — nunca uma busca na fila de outra sessão.
-        if (devolver.length && (epoca === epocaDaSessao || naFilaDoLote())) devolverPedidoRecusado(devolver, epocaFila);
+        // filtrá-los. Com a sessão trocada no meio: na fila que atravessou a
+        // queda, como card; numa fila refeita por quem entrou de novo (a sessão
+        // de pé), pela busca da sessão de AGORA, que diz o que o Waze tem pra ela
+        // — o objeto velho nunca entra na fila nova (R14-2-02). Sem sessão (o
+        // "Sair"), nada.
+        if (devolver.length && (epoca === epocaDaSessao || naFilaDoLote() || AppState.authenticated === true)) devolverPedidoRecusado(devolver, epocaFila);
         updatePendingCount();
         // O que falhou voltou pra fila (`voltarPraFila`). Sem card na tela — o
         // "Rejeitar os N" esvaziou a fila, ou a recusa automática levou tudo o
@@ -24928,10 +24937,17 @@ function registrarPousoDepoisDaQueda(places, quem) {
 // gesto volta (K7) — e, na renovação da queda, que mantém a fila na tela, o
 // pedido VOLTA como o próximo card (V1, auditoria de 2026-09-29): ele segue
 // pendente no Waze e já passou pela fila, então nenhuma busca o trazia, e a
-// fila terminava em "Tudo limpo!" com ele pendente. Numa fila refeita (o
-// "Sair", outra conta) nada volta — a fila é de outra sessão. A fila que o
-// TREINO guardou é a do gesto (a sessão caiu com ele aberto): o pedido volta
-// quando ela voltar (ver `Treino.guardarDevolucao`, R7-7-04).
+// fila terminava em "Tudo limpo!" com ele pendente. A fila que o TREINO
+// guardou é a do gesto (a sessão caiu com ele aberto): o pedido volta quando
+// ela voltar (ver `Treino.guardarDevolucao`, R7-7-04). Numa fila REFEITA com a
+// sessão de pé — a pessoa entrou de novo (cookies, código, a sessão do
+// aparelho adotada), com a mesma conta ou outra — a fila nova saiu sem ele (em
+// andamento) e ele sumia: "Tudo limpo!" com o pedido pendente e o ✕ que nunca
+// chegou ao Waze (auditoria da rodada 14, R14-2-02, MEDIDO no navegador). Ele
+// volta pela BUSCA da sessão de agora (`devolverPedidoRecusado` numa fila que
+// não é a do gesto: reabre o "pode haver mais" e busca se a tela ficou sem
+// card), que diz o que o Waze tem pra ela — nunca o objeto velho na fila nova.
+// Sem sessão (o "Sair"), nada volta.
 //
 // Se ela POUSOU, o pouso é registrado, com a marca de quem decidiu (`quem`,
 // tirada no gesto), em qualquer fila (R13-2-01, ver `registrarPousoDepoisDaQueda`).
@@ -24944,7 +24960,8 @@ function decisaoDepoisDaQueda(tipo, place, result, placar, epocaFila, quem) {
     }
     descontarGestoSemSessao(tipo === 'read' ? 'read' : 'rejected', placar, 1);
     if (epocaFila === AppState.fetchEpoch
-        || (typeof Treino !== 'undefined' && Treino.ativo === true && Treino.filaGuardada(epocaFila))) devolverPedidoRecusado(place, epocaFila);
+        || (typeof Treino !== 'undefined' && Treino.ativo === true && Treino.filaGuardada(epocaFila))
+        || AppState.authenticated === true) devolverPedidoRecusado(place, epocaFila);
 }
 
 function handleMarkAsRead() {
@@ -25515,8 +25532,25 @@ async function handleBatchMarkRead() {
         // Saía antes de registrar, e com a MESMA conta entrando de novo a outra
         // aba seguia com os pedidos como card — o ✕ de lá ia ao Waze, lido e
         // rejeitado (R13-2-02, MEDIDO no navegador; ver `registrarPousoDepoisDaQueda`).
+        //
+        // E o que NÃO pousou segue pendente no Waze, e a fila nova (a busca da
+        // sessão de agora) saiu sem ele — estava em andamento: ninguém o trazia, e
+        // a tela dizia "Tudo limpo!" com os pedidos pendentes (auditoria da rodada
+        // 14, R14-2-02, MEDIDO no navegador: lote de 30, o 2º pedaço nunca saiu,
+        // M25 a M29 sumiram). Com a sessão de pé (quem entrou de novo, a mesma
+        // conta ou outra), volta pela BUSCA da sessão de agora
+        // (`devolverPedidoRecusado` numa fila que não é a do gesto: reabre o "pode
+        // haver mais" e busca se a tela ficou sem card) — quem decide o que volta é
+        // o Waze, pra ela; o objeto velho nunca entra na fila nova. É o V9 (a fila
+        // refeita pelo ↻ ou pelo filtro) nos ramos da sessão trocada. Sem sessão
+        // (o "Sair"), nada.
         if (epocaFila !== AppState.fetchEpoch) {
             if (posQueda.length && typeof registrarPousoDepoisDaQueda === 'function') registrarPousoDepoisDaQueda(posQueda, quem);
+            if (AppState.authenticated === true) {
+                const pousaram = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba]);
+                const naoPousaram = alvos.filter((p) => !pousaram.has(p));
+                if (naoPousaram.length) devolverPedidoRecusado(naoPousaram, epocaFila);
+            }
             return;
         }
         // O pouso do que pousou depois da queda (o de antes já foi registrado a

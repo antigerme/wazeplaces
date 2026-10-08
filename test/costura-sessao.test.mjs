@@ -631,7 +631,10 @@ test('V1: CONTROLE — o lote em voo com a fila REFEITA (o "Sair"): nada volta, 
   const m = montarLoteDaQueda();
   const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
   await tique(); m.pendentes[0]({ success: true });
-  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;
+  // O "Sair" de verdade: a época e a fila trocam, e a página fica SEM sessão
+  // (`handleLogout` põe `authenticated = false`). Sem sessão, nada volta nem
+  // busca (R14-2-02: com a sessão de pé, a busca da sessão de agora decide).
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++; m.AppState.authenticated = false;
   m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
   m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
@@ -645,6 +648,7 @@ test('V1: CONTROLE — o que o Waze RECUSOU antes da queda também não entra (n
   const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
   await tique(); m.pendentes[0]({ success: false, errorCategory: 'unknown' });   // o 1º: recusa de verdade
   await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;               // o "Sair" com o 2º no ar
+  m.AppState.authenticated = false;                                           // (que deixa a página sem sessão)
   m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
   m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
@@ -860,7 +864,11 @@ test('V6b: CONTROLE — com OUTRA conta a fila foi refeita: a resposta velha nã
   assert.equal(m.AppState.serverTotal, 2, 'a resposta da sessão de A descontou o "Restam" da fila de B');
   assert.equal(m.AppState.currentPlace, Q);
   assert.deepEqual(m.pousos, ['u1'], 'a resposta da sessão de A gravou pouso na fila de B');
-  assert.deepEqual(m.log.slice(logAntes), [], 'a resposta da sessão de A redesenhou a tela de B');
+  // O que o lote de A NÃO marcou (o u3) segue pendente no Waze: com a sessão de
+  // pé, ele passa pela devolução da fila refeita (R14-2-02), que não põe o
+  // objeto velho na fila de B — só reabre a busca, e quem decide o que volta é a
+  // busca da sessão de B. Nada mais redesenha a tela de B.
+  assert.deepEqual(m.log.slice(logAntes), ['devolveu'], 'a resposta da sessão de A redesenhou a tela de B');
 });
 
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══

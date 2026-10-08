@@ -201,7 +201,7 @@ function montarLote({ auto = true } = {}) {
     portoes.shift()(resposta);
     await fim;
   };
-  return { h, deps, AppState, espiao, safeLS, fila, enviados, buscas, disparar };
+  return { h, deps, AppState, espiao, safeLS, fila, enviados, buscas, disparar, agendadas, portoes };
 }
 
 // ═══ R14-2-01 · a recusa automática que pousa depois da queda e o "Restam" ═══
@@ -236,6 +236,187 @@ test('R14-2-01: CONTROLES — a fila REFEITA tem o "Restam" dela, e o "Rejeitar 
     `o "Rejeitar os N" desceu o "Restam" de novo no pouso de depois da queda: ${l.AppState.serverTotal} com ${l.AppState.queue.length} cards`);
 });
 
+// ═══ R14-2-02 · a decisão que NÃO pousou, com a fila REFEITA por quem entrou ═══
+// Entrar de novo depois da queda (cookies, código, a sessão do aparelho
+// adotada) refaz a fila, e a busca nova deixa de fora o que estava EM ANDAMENTO.
+// O que não pousou segue pendente no Waze e não voltava por ninguém: "Tudo
+// limpo!" com os pedidos pendentes. Agora passa pela devolução da fila refeita
+// (`devolverPedidoRecusado`, de verdade): o objeto velho NÃO entra na fila nova,
+// o "pode haver mais" reabre, e sem card na tela a busca da sessão de AGORA sai.
+test('R14-2-02: a recusa automática cortada pela queda, com a fila REFEITA por quem entrou de novo — o que não saiu volta pela BUSCA da sessão de agora', async () => {
+  const m = montarLote();
+  await m.disparar((h) => entrarDeNovo(h, []));
+  assert.deepEqual(m.enviados, ['x2'], 'PRÉ-CONDIÇÃO: depois da queda o laço parou (x3 e x4 nunca saíram)');
+  assert.deepEqual(ids(m.AppState.queue), [], 'o objeto velho entrou na fila NOVA (quem decide o que volta é a busca)');
+  assert.equal(m.AppState.hasMore, true,
+    'DEFEITO: o que não saiu sumiu — a fila nova seguiu dizendo que não há mais nada ("Tudo limpo!" com x3 e x4 pendentes)');
+  assert.deepEqual(m.buscas, [1], `DEFEITO: com a tela sem card, a busca da sessão de agora não saiu: ${m.buscas}`);
+  // Com card na tela, a busca espera a fila acabar (o "pode haver mais" reaberto).
+  const c = montarLote();
+  await c.disparar((h) => entrarDeNovo(h, [pedidoDe(8, 1008)]));
+  assert.deepEqual([ids(c.AppState.queue), c.AppState.hasMore, c.buscas], [['u8'], true, []],
+    'com card na tela, a devolução trocou a fila (ou buscou por cima do card)');
+});
+
+test('R14-2-02: CONTROLES do lote — o "Sair" (sem sessão) não devolve nem busca; a renovação (a fila que atravessou) devolve como card', async () => {
+  const s = montarLote();
+  await s.disparar(sair);
+  assert.deepEqual([ids(s.AppState.queue), s.AppState.hasMore, s.buscas], [[], false, []],
+    'depois do "Sair", o lote da sessão anterior mexeu na página (devolveu ou buscou)');
+  const r = montarLote();
+  await r.disparar(renovar);
+  assert.deepEqual(ids(r.AppState.queue), ['u1', 'u5', 'x3', 'x4'], 'CONTROLE: a renovação não devolveu o que não saiu como card');
+  assert.deepEqual(r.buscas, [], 'CONTROLE: a renovação buscou');
+});
+
+// O "Rejeitar os N" com o 1º pedido RECUSADO pelo Waze antes da queda (ele vai
+// pra devolução do fim do lote) e o 2º no ar quando a sessão cai.
+async function rejeitarComRecusaAntesDaQueda(entre) {
+  const m = montarLote({ auto: false });
+  m.h.rejeitarLoteDoAutor(m.fila[1]);
+  assert.equal(m.agendadas.length, 1, 'PRÉ-CONDIÇÃO: o "Rejeitar os N" agendou o lote');
+  const fim = m.agendadas[0]();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o x2 saiu');
+  m.portoes.shift()({ success: false, errorCategory: 'unknown' });        // recusa de verdade, antes da queda
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o x3 saiu');
+  cair(m.h);
+  entre(m.h);
+  await relogioAndou();
+  m.portoes.shift()({ success: false, errorCategory: 'unauthorized', httpCode: 401 });
+  await fim;
+  return m;
+}
+
+test('R14-2-02: o "Rejeitar os N" com uma recusa ANTES da queda — entrando de novo, volta pela busca; depois do "Sair", nada', async () => {
+  const e = await rejeitarComRecusaAntesDaQueda((h) => entrarDeNovo(h, []));
+  assert.deepEqual([ids(e.AppState.queue), e.AppState.hasMore, e.buscas], [[], true, [1]],
+    'DEFEITO: entrando de novo, o recusado e os que não saíram sumiram (ou o objeto velho entrou na fila nova)');
+  const s = await rejeitarComRecusaAntesDaQueda(sair);
+  assert.deepEqual([ids(s.AppState.queue), s.AppState.hasMore, s.buscas], [[], false, []],
+    'depois do "Sair", o recusado da sessão anterior foi devolvido (ou buscou) na página sem sessão');
+});
+
+// O ✕/✓ do card: o `handleReject`/`handleMarkAsRead` de verdade, a decisão no
+// ar, a QUEDA, e a resposta (401: não pousou) chegando depois de `entre(m)`.
+function montarCard(fila = [1, 2, 3].map((i) => P(i))) {
+  const espiao = espiaoDoCanal();
+  const { safeLS } = aparelho();
+  let soltar = null;
+  const agendadas = [];
+  const buscas = [];
+  const AppState = { authenticated: true, profile: { ...PERFIL }, queue: fila.slice(), currentPlace: fila[0],
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, fetchEpoch: 0, pendingAction: null,
+    hasMore: false, autorEmFoco: null };
+  const rede = () => new Promise((ok) => { soltar = ok; });
+  const API = { ...sessaoDeMentira('tok-gesto'), rejectPlace: rede, markAsRead: rede };
+  const deps = {
+    AppState, API, ...depsDoPouso(espiao.canal, safeLS), epocaDaSessao: 0, Treino: { ativo: false },
+    acoesTravadas: () => false, direcaoTravada: () => false,
+    advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
+    scheduleAction: (tipo, place, ex) => agendadas.push(ex), callWithRetry: (fn) => fn(),
+    anotarAntesDoEnvio: () => true, tirarDaFilaDeSaida: () => true,
+    anotadoAntesDoEnvio: new WeakSet(), descargaNaFila: new WeakSet(), pedidosQueEntraramNaFila: new Set(),
+    updateStats() {}, saveStats() {}, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
+    startFetching: () => buscas.push(AppState.fetchEpoch),
+  };
+  const h = montar(['handleReject', 'handleMarkAsRead', 'decisaoDepoisDaQueda', 'descontarGestoSemSessao',
+    'devolverPedidoRecusado', ...NOMES_POUSO], deps);
+  const decidir = async (gesto, entre, resposta = { success: false, errorCategory: 'unauthorized', httpCode: 401 }) => {
+    h[gesto]();
+    assert.equal(agendadas.length, 1, 'PRÉ-CONDIÇÃO: o gesto agendou o envio');
+    const envio = agendadas[0]();
+    await ateQue(() => typeof soltar === 'function', 'PRÉ-CONDIÇÃO: a decisão saiu ao Waze');
+    cair(h);
+    entre(h);
+    await relogioAndou();
+    soltar(resposta);
+    await envio;
+  };
+  return { h, deps, AppState, espiao, safeLS, fila, buscas, decidir };
+}
+
+for (const [gesto, chaveDoPlacar] of [['handleReject', 'rejected'], ['handleMarkAsRead', 'read']]) {
+  test(`R14-2-02: o ${chaveDoPlacar === 'rejected' ? '✕' : '✓'} que voltou 401 com a fila REFEITA por quem entrou de novo — o pedido volta pela busca, e não some`, async () => {
+    // O roteiro k1b do auditor: a busca nova traz D2 (D1 em andamento fica de fora).
+    const m = montarCard([P(1), P(2)]);
+    await m.decidir(gesto, (h) => entrarDeNovo(h, [P(2)]));
+    assert.equal(m.AppState.stats[chaveDoPlacar], 0, 'PRÉ-CONDIÇÃO: o placar do gesto que não pousou desceu (K7)');
+    assert.deepEqual(ids(m.AppState.queue), ['u2'], 'o objeto velho entrou na fila nova');
+    assert.equal(m.AppState.hasMore, true,
+      'DEFEITO: o pedido que não pousou sumiu — decidido o u2, a fila diria "Tudo limpo!" com o u1 pendente');
+    // Sem card na tela (a fila nova veio vazia): a busca da sessão de agora sai já.
+    const v = montarCard([P(1)]);
+    await v.decidir(gesto, (h) => entrarDeNovo(h, []));
+    assert.deepEqual(v.buscas, [1], `DEFEITO: com a tela sem card, a busca não saiu: ${v.buscas}`);
+  });
+}
+
+test('R14-2-02: CONTROLES do card — o "Sair" não devolve nem busca; a renovação devolve como o próximo card (V1); o que POUSOU não volta', async () => {
+  const s = montarCard([P(1)]);
+  await s.decidir('handleReject', sair);
+  assert.deepEqual([ids(s.AppState.queue), s.AppState.hasMore, s.buscas], [[], false, []],
+    'depois do "Sair", a resposta da sessão anterior devolveu ou buscou');
+  const r = montarCard();
+  await r.decidir('handleReject', renovar);
+  assert.deepEqual(ids(r.AppState.queue), ['u2', 'u1', 'u3'], 'CONTROLE: a renovação não devolveu o pedido como o próximo card');
+  const p = montarCard([P(1)]);
+  await p.decidir('handleReject', (h) => entrarDeNovo(h, []), { success: true });
+  assert.deepEqual([p.AppState.hasMore, p.buscas], [false, []], 'o que POUSOU depois da queda voltou a ser procurado');
+});
+
+// O "Marcar todos" de verdade, em pedaços de 2: o 1º pedaço no ar, a QUEDA, e
+// `entre(m)` antes da resposta (que pousa: o Waze marcou o 1º pedaço); o 2º
+// pedaço nunca sai.
+async function marcarTodosComQueda(entre) {
+  const espiao = espiaoDoCanal();
+  const { safeLS } = aparelho();
+  const fila = [1, 2, 3].map((i) => P(i));
+  const portoes = [];
+  const buscas = [];
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: 40, rejected: 0, skipped: 0 },
+    serverTotal: fila.length, fetchEpoch: 0, hasMore: false, pendingAction: null, inFlightActions: 0, profile: { ...PERFIL },
+    autorEmFoco: null };
+  const API = { ...sessaoDeMentira('tok-gesto'),
+    markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoes.push(ok)) };
+  const deps = {
+    AppState, API, ...depsDoPouso(espiao.canal, safeLS), LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
+    pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false,
+    escritasConferindo: 0, aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    contaDestaAbaEmDuvida: () => false, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
+    carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k, msgDoServidor: (r, d) => d,
+    document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
+    updatePendingCount() {}, aoMudarAFilaPorBaixo() {}, removeCurrentCardEl() {},
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
+    startFetching: () => buscas.push(AppState.fetchEpoch), showNoPlaces() {},
+  };
+  const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
+    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'devolverPedidoRecusado', ...NOMES_POUSO], deps);
+  h.openBatchReadConfirm();
+  const lote = h.handleBatchMarkRead();
+  await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+  cair(h);
+  entre(h);
+  await relogioAndou();
+  portoes.shift()({ success: true });            // o 1º pedaço pousa depois da queda
+  await lote;
+  return { h, deps, AppState, espiao, safeLS, buscas, portoes };
+}
+
+test('R14-2-02: o "Marcar todos" cortado pela queda, com a fila REFEITA por quem entrou de novo — o pedaço que nunca saiu volta pela busca', async () => {
+  const m = await marcarTodosComQueda((h) => entrarDeNovo(h, []));
+  assert.equal(m.portoes.length, 0, 'PRÉ-CONDIÇÃO: o 2º pedaço (o u3) nunca saiu');
+  assert.deepEqual(pousosNoAparelho(m.safeLS), ['v1|u1', 'v2|u2'], 'PRÉ-CONDIÇÃO: o pedaço que pousou depois da queda ganhou o pouso');
+  assert.deepEqual(ids(m.AppState.queue), [], 'o objeto velho entrou na fila nova');
+  assert.equal(m.AppState.hasMore, true,
+    'DEFEITO: o pedido que o lote não marcou sumiu — a fila nova dizia "Tudo limpo!" com ele pendente no Waze');
+  assert.deepEqual(m.buscas, [1], `DEFEITO: a tela sem card não buscou o que não saiu: ${m.buscas}`);
+  // CONTROLE: o "Sair" (sem sessão) não devolve nem busca.
+  const s = await marcarTodosComQueda(sair);
+  assert.deepEqual([s.AppState.hasMore, s.buscas], [false, []], 'depois do "Sair", o lote da sessão anterior devolveu ou buscou');
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
@@ -247,4 +428,10 @@ test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no 
   const desconto = /AppState\.serverTotal\s*=\s*Math\.max\(0,\s*AppState\.serverTotal\s*-\s*1\)/g;
   assert.ok(contar(APP_SEM, desconto) > 0, 'PRÉ-CONDIÇÃO: o instrumento não acha o desconto no fonte');
   assert.equal(contar(MIN, desconto), contar(APP_SEM, desconto), 'js/min/app.js está atrás do fonte — falta `npm run js`');
+  // R14-2-02: a sessão de pé decide a devolução da fila refeita, nos três ramos.
+  const sessaoDePe = /AppState\.authenticated\s*===\s*(?:true|!0)/g;
+  for (const nome of ['enviarLote', 'decisaoDepoisDaQueda', 'handleBatchMarkRead']) {
+    assert.ok(contar(fatiar(nome), sessaoDePe) > 0, `PRÉ-CONDIÇÃO: o conserto sumiu de ${nome}`);
+  }
+  assert.equal(contar(MIN, sessaoDePe), contar(APP_SEM, sessaoDePe), 'js/min/app.js está atrás do fonte — falta `npm run js`');
 });
