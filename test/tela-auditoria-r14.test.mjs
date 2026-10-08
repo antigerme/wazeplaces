@@ -149,10 +149,14 @@ test('R14-8-01 CONTROLE: com o foco FORA do card, ou na seta que não decide, na
   const fora = { nome: 'Filtros', tagName: 'BUTTON', isConnected: true, getClientRects: () => [1], closest: () => null, focus() { f.doc.activeElement = fora; } };
   fora.focus();
   f.tecla('ArrowLeft');
+  assert.equal(f.estado.saiu.length, 1, 'CONTROLE: a seta deixou de decidir');
+  // Nada prometido JÁ na tecla: o `aplicarFocoDoTeclado` apagaria a promessa
+  // com o foco vivo noutro lugar, e a asserção depois dele não distinguiria —
+  // mas o controle de fora que SOME junto (a barra "Primeiro os de…" no fim da
+  // série) deixaria a promessa pousar no card.
+  assert.equal(f.app.pendente(), null, 'a seta prometeu o foco de quem nem estava no card');
   f.doc.activeElement = fora;   // o controle de fora não saiu com o card
   f.app.aplicarFocoDoTeclado();
-  assert.equal(f.estado.saiu.length, 1, 'CONTROLE: a seta deixou de decidir');
-  assert.equal(f.app.pendente(), null, 'a seta prometeu o foco de quem nem estava no card');
   assert.equal(f.doc.activeElement, fora, 'o foco foi arrancado de um controle fora do card');
   // Sem foco nenhum (o <body>): idem.
   const b = montarSeta();
