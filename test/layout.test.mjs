@@ -1689,6 +1689,9 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // R13-4-03: idem, o aviso da fila guardada do offline que outra aba gravou —
     // leva só o carimbo da fila, e nada vai pro aparelho.
     'waze-places-offline': 'nome do BroadcastChannel que avisa as outras abas da fila guardada do offline (CANAL_DO_OFFLINE)',
+    // R14-1-03: idem, o aviso da QUEDA da sessão guardada — leva só a marca da
+    // sessão que caiu (nunca o token), e nada vai pro aparelho.
+    'waze-places-sessao': 'nome do BroadcastChannel que avisa as outras abas da queda da sessão guardada (CANAL_DA_SESSAO)',
   };
 
   // Nome da constante quando existe; senão a própria chave literal.

@@ -11405,6 +11405,8 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // só sai se a sessão que caiu é a guardada nele. Senão ele é o da sessão
     // da outra aba, viva, e aqui cai só a cópia da memória (ver a função).
     const doAparelho = sessaoDestaAbaEhAGuardada();
+    // A marca dela vai no aviso às outras abas (ver `avisarOutrasAbasDaQueda`).
+    const tokenQueCaiu = API.sessionToken;
     // A queda é a decisão mais cara do app e era a ÚNICA que não chegava ao
     // anel sem portão: havia `dlog('sessao.confere')`, que o dev mode desligado
     // engole, e `dfato` só no ALARME FALSO — ou seja o caso em que ela NÃO cai.
@@ -11506,6 +11508,11 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // Nos dois casos a tela de entrada vem pelo `fecharCamadasAbertas`, que fecha
     // o que estava aberto por cima ANTES de ela (e do diálogo) aparecer.
     if (typeof depois === 'function') { fecharCamadasAbertas(depois); return; }
+    // A sessão GUARDADA caiu: a outra aba da mesma conta que segue viva com a dela
+    // volta a guardá-la (R14-1-03, ver `avisarOutrasAbasDaQueda`). Só na QUEDA: o
+    // `depois` acima é o portão recusando a conta, que é terminal (o que é da
+    // conta sai do aparelho logo depois, como no "Sair").
+    if (doAparelho) avisarOutrasAbasDaQueda(tokenQueCaiu);
     const epoca = epocaDaSessao;
     // A fila REAL, que a renovação mantém — pela ÉPOCA dela. Com o TREINO aberto,
     // a `fetchEpoch` é a dos EXEMPLOS, e guardada ela a renovação errava nos dois
@@ -17357,6 +17364,10 @@ function sincronizarComOutraAba(chave) {
     const tudo = chave === null;   // a outra aba limpou o armazenamento inteiro
     if ((tudo || chave === 'waze_session_token' || chave === CONTA_KEY)
         && (aoSairEmOutraAba() || aoEntrarOutraContaEmOutraAba())) return;
+    // O token mudou noutra aba: se foi a QUEDA da sessão guardada lá (o aviso
+    // dela, pelo canal), esta, viva, volta a guardar a sua (R14-1-03, ver a
+    // função). O aviso e a saída do token chegam em ordem qualquer.
+    if (chave === 'waze_session_token') guardarDeVoltaASessaoDestaAba();
     if (tudo || chave === STATS_KEY) relerPlacarDeOutraAba();
     if (tudo || chave === PREFERENCES_KEY) relerPreferenciasDeOutraAba();
     // A fila de saída é do aparelho, e só UMA aba a esvazia (ver `travaDaSaida`):
@@ -17528,6 +17539,130 @@ function guardaASessaoQueCaiu() {
         || !!document.querySelector('#cardStack .place-card');
 }
 
+// ── A sessão GUARDADA caiu noutra aba, e esta segue viva (R14-1-03) ──────────
+// Com o app em duas abas da MESMA conta, cada uma com a SUA sessão (a outra entrou
+// de novo — o ACESSAR do WME, os cookies colados), o aparelho guarda uma delas: a
+// da última que entrou. Quando ELA cai, a queda a tira do aparelho
+// (`derrubarSessao` só mexe nele com a sessão guardada), e o aparelho ficava SEM
+// sessão nenhuma, com esta aba viva: recarregá-la levava à tela de entrada, com a
+// sessão dela órfã no servidor, e o diagnóstico dizia que o token "morre ao fechar
+// a aba" (auditoria da rodada 14, R14-1-03, MEDIDO no navegador). DECIDIDO: esta
+// aba volta a guardar a SUA sessão, com a marca da conta (a régua do
+// `aoConhecerConta`: quem regrava a marca é a sessão guardada). A que caiu segue
+// as regras de sempre: a volta a ela adota esta sessão (`adotarSessaoDoAparelho`),
+// nunca com texto digitado.
+//
+// O aviso do TOKEN saindo não basta pra saber que foi a QUEDA: no "Sair" dado lá,
+// ele chega aqui com a CONTA ainda no aparelho — ela só sai no aviso seguinte
+// (MEDIDO com as abas em processos diferentes, o padrão do computador: 3 de 3 no
+// Chromium, 2 de 2 no WebKit) —, e guardar a sessão nesse aviso DESFARIA o "Sair".
+// A recusa do portão também tira o token antes da conta, e a ponte da extensão o
+// tira pra o botão do WME entrar com o dele. Por isso quem diz que foi a queda é a
+// aba que CAIU (`avisarOutrasAbasDaQueda`, por um `BroadcastChannel`: nada vai pro
+// aparelho, e a mensagem leva só a marca da sessão que caiu, nunca o token), e esta
+// age com os dois — o aviso da queda E o aparelho sem token na visão dela —, que
+// chegam em ordem qualquer: quem chega por último decide, e a guarda se confirma
+// um instante depois, no aparelho como ele está então (ver a função). E só com a
+// MESMA conta no aparelho e sem login, resgate ou pergunta desta aba no ar (o fim
+// deles decide). O aviso vale pouco: a queda e a saída do token partem juntas de
+// lá (a segunda chega milissegundos depois), e um aviso velho é de uma aba que
+// ficou parada — o aparelho pode ter mudado de um jeito que ela ainda não viu.
+// Sem `BroadcastChannel` (iOS < 15.4), segue como antes.
+const CANAL_DA_SESSAO = 'waze-places-sessao';
+const QUEDA_DE_OUTRA_ABA_VALE_MS = 5000;
+let canalDaSessao = null;
+let quedaDeOutraAba = null;   // { s, em }: a marca da sessão guardada que caiu noutra aba
+
+function abrirCanalDaSessao() {
+    if (canalDaSessao || typeof BroadcastChannel !== 'function') return;
+    try { canalDaSessao = new BroadcastChannel(CANAL_DA_SESSAO); } catch (e) { canalDaSessao = null; return; }
+    canalDaSessao.onmessage = (ev) => aoCairASessaoGuardadaEmOutraAba(ev && ev.data);
+}
+
+// A sessão GUARDADA caiu NESTA aba (a queda, não o "Sair" nem a recusa do portão —
+// ver `derrubarSessao`). O canal não entrega a mensagem a quem a mandou.
+function avisarOutrasAbasDaQueda(token) {
+    if (!canalDaSessao || !token) return;
+    try {
+        canalDaSessao.postMessage({ v: 1, caiu: marcaDaSessao(token), em: Date.now() });
+    } catch (e) { /* canal fechado: segue como antes */ }
+}
+
+function aoCairASessaoGuardadaEmOutraAba(aviso) {
+    if (!aviso || aviso.v !== 1 || typeof aviso.caiu !== 'string' || !aviso.caiu || !Number.isFinite(aviso.em)) return;
+    quedaDeOutraAba = { s: aviso.caiu, em: aviso.em };
+    guardarDeVoltaASessaoDestaAba();
+}
+
+// A conta desta aba, se ela a sabe: a do perfil, ou a que o login confirmou com a
+// sessão DESTA aba (`contaConfirmadaNestaAba`). `null` sem nenhuma.
+function contaSabidaDestaAba() {
+    const vivo = AppState.profile && AppState.profile.id;
+    if (vivo !== undefined && vivo !== null && vivo !== '') return String(vivo);
+    const c = contaConfirmadaNestaAba;
+    const s = marcaDestaAba();
+    return c && c.id && s && c.s === s ? String(c.id) : null;
+}
+
+// Pelo aviso da queda e pelo do token (`sincronizarComOutraAba`). Com os dois
+// (o aviso, e o aparelho sem token na visão desta aba), AGENDA a guarda — e a
+// guarda confere tudo de novo, um instante depois: a gravação de outra aba chega
+// a esta junto com o aviso dela, um por chave, e o que a aba que caiu (ou um login
+// noutra aba) gravou logo depois da saída do token pode ainda estar a caminho.
+// Guardada na hora, a sessão desta aba podia cair POR CIMA de outra conta que
+// acabava de entrar — e a outra é que sairia (`aoEntrarOutraContaEmOutraAba`) —, e
+// o diário do aparelho perdia a linha que a que caiu gravou depois. Devolve se
+// agendou.
+const GUARDAR_DE_VOLTA_ESPERA_MS = 500;
+let guardarDeVoltaAgendado = null;
+function guardarDeVoltaASessaoDestaAba() {
+    const q = quedaDeOutraAba;
+    if (!q) return false;
+    if (Date.now() - q.em > QUEDA_DE_OUTRA_ABA_VALE_MS) { quedaDeOutraAba = null; return false; }
+    const guardado = safeLS.get('waze_session_token');
+    if (guardado) {
+        // A saída do token ainda não chegou a esta aba: o aviso dela decide.
+        if (marcaDaSessao(guardado) === q.s) return false;
+        // OUTRA sessão já foi guardada (a renovação de lá, outro login): fica ela.
+        quedaDeOutraAba = null;
+        return false;
+    }
+    quedaDeOutraAba = null;
+    const minha = API.sessionToken;
+    if (!contaQuePodeGuardarDeVolta(q)) return false;
+    clearTimeout(guardarDeVoltaAgendado);
+    guardarDeVoltaAgendado = setTimeout(() => {
+        guardarDeVoltaAgendado = null;
+        // Tudo de novo, no aparelho como ele está AGORA.
+        if (API.sessionToken !== minha || safeLS.get('waze_session_token')) return;
+        const id = contaQuePodeGuardarDeVolta(q);
+        if (!id) return;
+        API.setSession(minha);
+        safeLS.set(CONTA_KEY, JSON.stringify({ id, s: marcaDaSessao(minha) }));
+        // A sessão guardada agora já estava ativa: o diário do aparelho ganha o
+        // início dela, como na abertura com sessão salva (ver a função).
+        marcarSessaoJaAtiva();
+        dfato('sessao.guardadaDeVolta');
+    }, GUARDAR_DE_VOLTA_ESPERA_MS);
+    return true;
+}
+
+// Esta aba pode voltar a guardar a SUA sessão no lugar da que caiu (`q`)? A conta
+// dela, se pode; senão `null`.
+function contaQuePodeGuardarDeVolta(q) {
+    const minha = API.sessionToken;
+    if (!minha || !AppState.authenticated || AppState.contaEmDuvida === true) return null;
+    // A que caiu era a desta aba também (as duas com a mesma sessão): o próximo
+    // pedido daqui descobre a queda.
+    if (marcaDaSessao(minha) === q.s) return null;
+    if (authInFlight || resgateEmVoo || extPerguntando) return null;
+    const id = contaSabidaDestaAba();
+    if (!id) return null;
+    let dono = null;
+    try { dono = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { dono = null; }
+    return dono && dono.id && String(dono.id) === id ? id : null;
+}
+
 // O placar que a outra aba gravou, relido NO MESMO objeto: o desconto de uma
 // decisão em voo é feito no placar DO GESTO, achado pela identidade (ver
 // `descontarGestoSemSessao`) — trocar o objeto o deixaria órfão.
@@ -17600,6 +17735,9 @@ function setupSincroniaEntreAbas() {
     // E a fila guardada do offline que outra aba gravou (R13-4-03, ver
     // `avisarOutrasAbasDaFilaGuardada`).
     abrirCanalDoOffline();
+    // E a QUEDA da sessão guardada noutra aba (R14-1-03, ver
+    // `guardarDeVoltaASessaoDestaAba`).
+    abrirCanalDaSessao();
 }
 // ═══════════════════════════════════════════════════════════════════════════
 //  Patentes e Conquistas — celebra, nunca cobra

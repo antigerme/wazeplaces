@@ -575,3 +575,350 @@ test('pista s13: CONTROLES — sozinha (ou sem as travas do navegador), a aba cu
   await tiques(6);
   assert.deepEqual(ag, [], 'a sessão da extensão que já é a do aparelho saiu do servidor');
 });
+
+// ═══ R14-1-03 · a aba viva volta a guardar a sua sessão ══════════════════════
+const SESSOES_KEY = constante('SESSOES_KEY');
+const SESSOES_TETO = constante('SESSOES_TETO');
+const CANAL_DA_SESSAO = constante('CANAL_DA_SESSAO');
+const QUEDA_DE_OUTRA_ABA_VALE_MS = constante('QUEDA_DE_OUTRA_ABA_VALE_MS');
+const GUARDAR_DE_VOLTA_ESPERA_MS = constante('GUARDAR_DE_VOLTA_ESPERA_MS');
+// O APARELHO de várias abas com a VISÃO de cada uma: a gravação de uma chega à
+// outra JUNTO com o aviso (`storage`), um por chave e na ordem em que foi feita —
+// é como o navegador faz com as abas em processos diferentes, o padrão do
+// computador (MEDIDO no Chromium e no WebKit). É o que faz o aviso do TOKEN, no
+// "Sair" de lá, chegar com a CONTA ainda no aparelho desta aba.
+function aparelhoDeAbas(inicial = {}) {
+  const abas = new Map();
+  const fila = [];
+  const texto = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+  return {
+    aba(nome, ouvir = null) {
+      const dados = new Map(Object.entries(inicial).map(([k, v]) => [k, texto(v)]));
+      const reg = { dados, ouvir };
+      abas.set(nome, reg);
+      const escrever = (k, v) => {
+        const antes = dados.has(k) ? dados.get(k) : null;
+        if (v === null) dados.delete(k); else dados.set(k, String(v));
+        for (const outro of abas.keys()) {
+          if (outro !== nome) fila.push({ para: outro, key: k, oldValue: antes, newValue: v === null ? null : String(v) });
+        }
+      };
+      const localStorage = {
+        getItem: (k) => (dados.has(k) ? dados.get(k) : null),
+        setItem: (k, v) => escrever(k, v),
+        removeItem: (k) => escrever(k, null),
+      };
+      const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
+      return { dados, localStorage, safeLS, ouvir: (fn) => { reg.ouvir = fn; } };
+    },
+    // Entrega `n` avisos (todos, sem `n`): a gravação entra na visão da aba e o
+    // ouvinte dela roda. Com TETO: uma aba que respondesse gravando ao aviso da
+    // outra mandaria outro de volta, e o laço penduraria o teste (gotcha #19).
+    entregar(n = Infinity) {
+      let i = 0;
+      while (fila.length && i < n) {
+        i++;
+        assert.ok(i <= 200, 'LAÇO: as abas gravam em resposta ao aviso uma da outra');
+        const ev = fila.shift();
+        const a = abas.get(ev.para);
+        if (ev.newValue === null) a.dados.delete(ev.key); else a.dados.set(ev.key, ev.newValue);
+        if (a.ouvir) a.ouvir({ key: ev.key, oldValue: ev.oldValue, newValue: ev.newValue });
+      }
+    },
+    pendentes: () => fila.map((e) => e.para + ':' + e.key),
+  };
+}
+
+// O `BroadcastChannel` de mentira: cada mensagem fica na fila até o teste entregá-la
+// (a ordem entre o canal e o `storage` é o teste que escolhe — no navegador não há).
+function canais() {
+  const inscritos = new Map();
+  const fila = [];
+  class CanalDeMentira {
+    constructor(nome) {
+      this.nome = nome;
+      this.onmessage = null;
+      if (!inscritos.has(nome)) inscritos.set(nome, new Set());
+      inscritos.get(nome).add(this);
+    }
+    postMessage(msg) { for (const o of inscritos.get(this.nome)) if (o !== this) fila.push([o, structuredClone(msg)]); }
+    close() { inscritos.get(this.nome).delete(this); }
+  }
+  return {
+    BroadcastChannel: CanalDeMentira,
+    entregar() {
+      let i = 0;
+      while (fila.length) {
+        assert.ok(++i <= 50, 'LAÇO no canal');
+        const [o, m] = fila.shift();
+        if (typeof o.onmessage === 'function') o.onmessage({ data: m });
+      }
+    },
+    pendentes: () => fila.length,
+  };
+}
+
+// A aba A, VIVA, com a SUA sessão (a que NÃO é a guardada): o caminho do aviso
+// (`aoGravarEmOutraAba` → `sincronizarComOutraAba`) e o do canal, de verdade.
+const NOMES_ABA_VIVA = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
+  'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu',
+  'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba', 'abrirCanalDaSessao', 'aoCairASessaoGuardadaEmOutraAba',
+  'contaSabidaDestaAba', 'guardarDeVoltaASessaoDestaAba', 'contaQuePodeGuardarDeVolta', 'marcarSessaoJaAtiva',
+  'lerDiarioDeSessoes', 'registrarEventoDeSessao'];
+
+function abaViva(ap, rede, { token = 'TOK-A', perfil = { id: 111 }, confirmada = null, noAr = null, emDuvida = false } = {}) {
+  const log = [];
+  const v = ap.aba('A');
+  // O relógio de mentira: a guarda AGENDADA só roda quando o teste passa o tempo.
+  const relogio = [];
+  const API = {
+    sessionToken: token,
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(t) {
+      log.push('setSession:' + t);
+      this.sessionToken = t;
+      if (t) v.localStorage.setItem(TOKEN, t); else v.localStorage.removeItem(TOKEN);
+    },
+    soltarSessao() { this.sessionToken = null; },
+  };
+  const deps = {
+    safeLS: v.safeLS, localStorage: v.localStorage, API, BroadcastChannel: rede.BroadcastChannel,
+    AppState: { authenticated: true, profile: perfil, queue: [{ venueID: 'p1' }], currentPlace: { venueID: 'p1' }, contaEmDuvida: emDuvida },
+    document: { getElementById: (id) => (id === 'appScreen' ? { classList: { contains: () => false } } : null), querySelector: () => null },
+    CONTA_KEY, SESSOES_KEY, SESSOES_TETO, CANAL_DA_SESSAO, QUEDA_DE_OUTRA_ABA_VALE_MS,
+    canalDaSessao: null, quedaDeOutraAba: null, tokenTiradoPorOutraAba: null,
+    contaConfirmadaNestaAba: confirmada,
+    extPerguntando: noAr === 'pergunta', authInFlight: noAr === 'cookies', resgateEmVoo: noAr === 'codigo',
+    handleLogout: (o) => log.push(['sair', o]), conferirContaDestaAba: () => log.push('conferiu a conta'),
+    dfato: (k) => log.push('dfato:' + k), GUARDAR_DE_VOLTA_ESPERA_MS, guardarDeVoltaAgendado: null,
+    setTimeout: (f, ms) => { relogio.push({ f, ms }); return relogio.length; },
+    clearTimeout: (id) => { if (relogio[id - 1]) relogio[id - 1].f = null; },
+  };
+  const h = montar(NOMES_ABA_VIVA, deps);
+  v.ouvir((ev) => h.aoGravarEmOutraAba(ev));
+  h.abrirCanalDaSessao();
+  // O tempo passa: roda o que estava agendado (a guarda confere tudo de novo).
+  const passarTempo = () => {
+    for (const t of relogio.splice(0)) {
+      assert.equal(t.ms, GUARDAR_DE_VOLTA_ESPERA_MS);
+      if (t.f) t.f();
+    }
+  };
+  return { h, deps, log, API, v, passarTempo, agendou: () => relogio.some((t) => t.f), guardou: () => log.includes('setSession:' + token) };
+}
+
+// O aparelho com a sessão de B guardada (a da última que entrou), da conta 111.
+const COM_B = { [TOKEN]: 'TOK-B', [CONTA_KEY]: { id: '111', s: marcaDe('TOK-B') } };
+// A QUEDA da sessão guardada em B, na ordem do `derrubarSessao`: o diário, o token
+// sai, e o aviso pelo canal (a conta FICA).
+function quedaEmB(B, canalB, { em = Date.now() } = {}) {
+  B.localStorage.setItem(SESSOES_KEY, JSON.stringify([{ t: 1, e: 'token+' }, { t: 2, e: 'caiu' }]));
+  B.localStorage.removeItem(TOKEN);
+  B.localStorage.setItem(SESSOES_KEY, JSON.stringify([{ t: 1, e: 'token+' }, { t: 2, e: 'caiu' }, { t: 3, e: 'token-' }]));
+  canalB.postMessage({ v: 1, caiu: marcaDe('TOK-B'), em });
+}
+
+test('R14-1-03: a sessão GUARDADA cai na outra aba — esta, viva e da mesma conta, volta a guardar a SUA, com a marca da conta (o aviso do canal chega ANTES da saída do token)', () => {
+  const ap = aparelhoDeAbas(COM_B);
+  const rede = canais();
+  const A = abaViva(ap, rede);
+  const B = ap.aba('B');
+  quedaEmB(B, new rede.BroadcastChannel(CANAL_DA_SESSAO));
+  rede.entregar();                                   // o aviso da queda chega primeiro
+  assert.equal(A.v.dados.get(TOKEN), 'TOK-B', 'PRÉ-CONDIÇÃO: a saída do token já tinha chegado a esta aba');
+  assert.ok(!A.agendou(), 'agendou a guarda com o aparelho ainda com o token de lá');
+  ap.entregar();                                     // o diário e a saída do token chegam
+  assert.ok(A.agendou(), 'DEFEITO: com o aviso da queda e o aparelho sem sessão, a aba viva não agendou a guarda da sua');
+  A.passarTempo();
+  assert.ok(A.guardou(),
+    'DEFEITO: a aba viva não voltou a guardar a sua sessão — o aparelho ficou SEM sessão (recarregar leva à tela de entrada, e ela fica órfã no servidor): ' + JSON.stringify(A.log));
+  assert.equal(A.v.dados.get(TOKEN), 'TOK-A');
+  assert.deepEqual(JSON.parse(A.v.dados.get(CONTA_KEY)), { id: '111', s: marcaDe('TOK-A') },
+    'a marca da conta não acompanhou a sessão guardada (a régua do `aoConhecerConta`)');
+  // O diário do aparelho ganha o início dela (a sessão já estava ativa: `jaAtiva`),
+  // DEPOIS da linha que a que caiu gravou logo após a saída do token.
+  assert.deepEqual(JSON.parse(A.v.dados.get(SESSOES_KEY)).map((e) => e.e), ['token+', 'caiu', 'token-', 'jaAtiva']);
+  assert.ok(A.log.includes('dfato:sessao.guardadaDeVolta'));
+  assert.ok(!A.log.some((x) => Array.isArray(x)), 'a aba viva saiu (ou foi tratada como troca de conta): ' + JSON.stringify(A.log));
+  // E a aba que caiu vê a sessão guardada: a volta a ela a adota (as regras de hoje).
+  ap.entregar();
+  assert.equal(B.dados.get(TOKEN), 'TOK-A');
+});
+
+test('R14-1-03: a mesma queda com a saída do token chegando ANTES do aviso do canal — quem chega por último decide', () => {
+  const ap = aparelhoDeAbas(COM_B);
+  const rede = canais();
+  const A = abaViva(ap, rede);
+  quedaEmB(ap.aba('B'), new rede.BroadcastChannel(CANAL_DA_SESSAO));
+  ap.entregar();
+  assert.equal(A.v.dados.get(TOKEN), undefined, 'PRÉ-CONDIÇÃO: a saída do token não chegou');
+  assert.ok(!A.agendou(), 'agendou a guarda só pelo aviso do token — sem saber se foi a queda ou o "Sair"');
+  rede.entregar();
+  A.passarTempo();
+  assert.ok(A.guardou(), 'DEFEITO: com o aviso da queda chegando depois, a aba viva não guardou a sua sessão');
+  assert.equal(A.v.dados.get(TOKEN), 'TOK-A');
+});
+
+test('R14-1-03: o "SAIR" dado na outra aba — o aviso do token chega com a conta AINDA no aparelho, e esta NÃO guarda nada: sai junto, e o aparelho fica limpo', () => {
+  const ap = aparelhoDeAbas(COM_B);
+  const rede = canais();
+  const A = abaViva(ap, rede);
+  const B = ap.aba('B');
+  // O `handleLogout` de B: o token sai primeiro, a conta depois (e nenhum aviso de queda).
+  B.localStorage.removeItem(TOKEN);
+  B.localStorage.removeItem('waze_places_history');
+  B.localStorage.removeItem(CONTA_KEY);
+  ap.entregar(1);                                    // só o aviso do TOKEN
+  assert.ok(A.v.dados.has(CONTA_KEY),
+    'PRÉ-CONDIÇÃO (a ordem MEDIDA no navegador): no aviso do token, a conta ainda está no aparelho desta aba');
+  assert.ok(!A.agendou(), 'DEFEITO: a aba viva agendou a guarda da sua sessão no MEIO do "Sair" da outra — o "Sair" ficaria desfeito');
+  rede.entregar();
+  ap.entregar();
+  A.passarTempo();
+  assert.deepEqual(A.log.filter((x) => Array.isArray(x)), [['sair', { porOutraAba: true }]], 'o "Sair" de lá não chegou a esta aba');
+  assert.ok(!A.guardou());
+  assert.equal(B.dados.get(TOKEN), undefined, 'o aparelho ficou com uma sessão depois do "Sair"');
+});
+
+test('R14-1-03: OUTRA conta entra noutra aba logo depois da queda (os avisos chegam juntos) — a guarda, conferida de novo, não cai por cima dela', () => {
+  const ap = aparelhoDeAbas(COM_B);
+  const rede = canais();
+  const A = abaViva(ap, rede);
+  const B = ap.aba('B');
+  quedaEmB(B, new rede.BroadcastChannel(CANAL_DA_SESSAO));
+  rede.entregar();
+  B.localStorage.setItem(TOKEN, 'TOK-C');
+  B.localStorage.setItem(CONTA_KEY, JSON.stringify({ id: '222', s: marcaDe('TOK-C') }));
+  ap.entregar(2);                                    // o diário e a saída do token: a outra conta ainda a caminho
+  assert.ok(A.agendou(), 'PRÉ-CONDIÇÃO: a guarda nem foi agendada (o caso que a conferência de depois existe pra pegar)');
+  ap.entregar();                                     // a outra conta chega: esta aba sai pela troca de sempre
+  A.passarTempo();
+  assert.ok(!A.guardou(),
+    'DEFEITO: a sessão desta aba foi guardada POR CIMA da outra conta que acabou de entrar — e a outra é que sairia: ' + JSON.stringify(A.log));
+  assert.deepEqual(A.log.filter((x) => Array.isArray(x)), [['sair', { porOutraAba: true, outraConta: true }]]);
+});
+
+test('R14-1-03: CONTROLES — outra sessão já guardada (antes ou durante a espera), a conta de outro, a mesma sessão, o aviso velho e um login desta aba no ar: nada é guardado', () => {
+  // A renovação de lá (ou outro login da mesma conta) guardou OUTRA sessão antes de o aviso chegar.
+  {
+    const ap = aparelhoDeAbas(COM_B);
+    const rede = canais();
+    const A = abaViva(ap, rede);
+    const B = ap.aba('B');
+    quedaEmB(B, new rede.BroadcastChannel(CANAL_DA_SESSAO));
+    B.localStorage.setItem(TOKEN, 'TOK-B2');
+    ap.entregar();
+    rede.entregar();
+    A.passarTempo();
+    assert.ok(!A.guardou(), 'guardou por cima da sessão que a renovação de lá acabou de guardar');
+    assert.equal(A.deps.quedaDeOutraAba, null, 'o aviso ficou pendurado depois de outra sessão ser guardada');
+  }
+  // ... ou DURANTE a espera.
+  {
+    const ap = aparelhoDeAbas(COM_B);
+    const rede = canais();
+    const A = abaViva(ap, rede);
+    const B = ap.aba('B');
+    quedaEmB(B, new rede.BroadcastChannel(CANAL_DA_SESSAO));
+    ap.entregar();
+    rede.entregar();
+    assert.ok(A.agendou(), 'PRÉ-CONDIÇÃO: a guarda não foi agendada');
+    B.localStorage.setItem(TOKEN, 'TOK-B2');
+    ap.entregar();
+    A.passarTempo();
+    assert.ok(!A.guardou(), 'a guarda agendada caiu por cima da sessão que a renovação guardou durante a espera');
+  }
+  for (const [caso, o, aparelhoInicial] of [
+    ['o aparelho é de OUTRA conta', {}, { [TOKEN]: 'TOK-B', [CONTA_KEY]: { id: '222', s: marcaDe('TOK-B') } }],
+    ['a sessão que caiu é a desta aba', { token: 'TOK-B' }, COM_B],
+    ['um login desta aba (os cookies) no ar', { noAr: 'cookies' }, COM_B],
+    ['um código sendo resgatado nesta aba', { noAr: 'codigo' }, COM_B],
+    ['uma pergunta à extensão no ar nesta aba', { noAr: 'pergunta' }, COM_B],
+    ['a conta desta aba em dúvida (R6-1-04)', { emDuvida: true }, COM_B],
+    ['sem perfil e sem conta confirmada nesta aba', { perfil: null }, COM_B],
+    ['a conta confirmada com OUTRA sessão', { perfil: null, confirmada: { id: '111', s: marcaDe('TOK-X') } }, COM_B],
+  ]) {
+    const ap = aparelhoDeAbas(aparelhoInicial);
+    const rede = canais();
+    const A = abaViva(ap, rede, o);
+    quedaEmB(ap.aba('B'), new rede.BroadcastChannel(CANAL_DA_SESSAO));
+    ap.entregar();
+    rede.entregar();
+    A.passarTempo();
+    assert.ok(!A.log.some((x) => typeof x === 'string' && x.startsWith('setSession')),
+      `(${caso}) a aba guardou uma sessão no aparelho: ` + JSON.stringify(A.log));
+  }
+  // O login desta aba que COMEÇA durante a espera: a conferência de depois o vê.
+  {
+    const ap = aparelhoDeAbas(COM_B);
+    const rede = canais();
+    const A = abaViva(ap, rede);
+    quedaEmB(ap.aba('B'), new rede.BroadcastChannel(CANAL_DA_SESSAO));
+    ap.entregar();
+    rede.entregar();
+    A.deps.authInFlight = true;
+    A.passarTempo();
+    assert.ok(!A.guardou(), 'a guarda agendada não conferiu de novo o login desta aba no ar');
+  }
+  // O aviso VELHO (de uma aba que ficou parada): não vale.
+  const ap = aparelhoDeAbas(COM_B);
+  const rede = canais();
+  const A = abaViva(ap, rede);
+  quedaEmB(ap.aba('B'), new rede.BroadcastChannel(CANAL_DA_SESSAO), { em: Date.now() - QUEDA_DE_OUTRA_ABA_VALE_MS - 1000 });
+  ap.entregar();
+  rede.entregar();
+  A.passarTempo();
+  assert.ok(!A.guardou(), 'o aviso velho de queda valeu');
+  // CONTROLE: sem perfil, a conta confirmada COM a sessão desta aba basta.
+  const c = aparelhoDeAbas(COM_B);
+  const rc = canais();
+  const C = abaViva(c, rc, { perfil: null, confirmada: { id: '111', s: marcaDe('TOK-A') } });
+  quedaEmB(c.aba('B'), new rc.BroadcastChannel(CANAL_DA_SESSAO));
+  c.entregar();
+  rc.entregar();
+  C.passarTempo();
+  assert.ok(C.guardou(), 'CONTROLE: a conta confirmada com a sessão desta aba não bastou');
+});
+
+// O lado da aba que CAI: o `derrubarSessao` de verdade avisa as outras abas — só
+// na queda da sessão GUARDADA, e nunca na recusa do portão (o `depois`, terminal).
+function abaQueCai({ guardada = true, depois = null } = {}) {
+  const rede = canais();
+  const ouvinte = new rede.BroadcastChannel(CANAL_DA_SESSAO);
+  const recebidos = [];
+  ouvinte.onmessage = (ev) => recebidos.push(ev.data);
+  const ap = aparelho({ [TOKEN]: guardada ? 'TOK-B' : 'TOK-OUTRA' });
+  const API = {
+    sessionToken: 'TOK-B',
+    setSession(t) { this.sessionToken = t; if (t) ap.safeLS.set(TOKEN, t); else ap.safeLS.remove(TOKEN); },
+    soltarSessao() { this.sessionToken = null; },
+  };
+  const deps = {
+    safeLS: ap.safeLS, API, BroadcastChannel: rede.BroadcastChannel, CANAL_DA_SESSAO, canalDaSessao: null,
+    AppState: { authenticated: true, profile: { id: 111 }, pendingAction: null, fetchEpoch: 1 },
+    epocaDaSessao: 0, quedaAnunciada: false, Treino: { ativo: false },
+    entrarPelaExtensao: () => new Promise(() => {}),   // a renovação, no ar
+    fecharCamadasAbertas: (f) => { if (typeof f === 'function') f(); },
+  };
+  const h = montar(['derrubarSessao', 'sessaoDestaAbaEhAGuardada', 'abrirCanalDaSessao', 'avisarOutrasAbasDaQueda', 'marcaDaSessao'], deps);
+  h.abrirCanalDaSessao();
+  h.derrubarSessao('srv.err.sessionExpired', depois ? { depois } : undefined);
+  rede.entregar();
+  return { recebidos, ap };
+}
+
+test('R14-1-03: o `derrubarSessao` avisa as outras abas da QUEDA da sessão guardada — com a marca dela, nunca o token', () => {
+  const q = abaQueCai();
+  assert.equal(q.recebidos.length, 1, 'DEFEITO: a queda da sessão guardada não avisou as outras abas — a viva nunca volta a guardar a dela');
+  assert.equal(q.recebidos[0].caiu, marcaDe('TOK-B'));
+  assert.ok(!JSON.stringify(q.recebidos).includes('TOK-B'), 'o aviso levou o TOKEN (credencial) pro canal');
+  assert.ok(Math.abs(q.recebidos[0].em - Date.now()) < 5000);
+  assert.equal(q.ap.dados.get(TOKEN), undefined, 'PRÉ-CONDIÇÃO: a queda não tirou o token do aparelho');
+});
+
+test('R14-1-03: CONTROLES — a recusa do PORTÃO (terminal) e a queda de uma sessão que não é a guardada não avisam', () => {
+  const recusa = abaQueCai({ depois: () => {} });
+  assert.deepEqual(recusa.recebidos, [], 'a recusa do portão avisou as outras abas — a viva guardaria a sessão de uma conta recusada');
+  const soNestaAba = abaQueCai({ guardada: false });
+  assert.deepEqual(soNestaAba.recebidos, [], 'a queda de uma sessão que não é a do aparelho avisou (o aparelho segue com a da outra aba)');
+});

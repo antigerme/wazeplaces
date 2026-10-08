@@ -11542,15 +11542,30 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   // CONTROLE: a MESMA conta entrando de novo na A não derruba a B.
   const o = await abrirAbas();
   const cookiesDa = (conta) => `.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-${conta}`;
-  const entrarNaA = async (conta) => {
+  // A QUEDA da sessão da aba A, até a entrada dela; e o login dela, à parte: entre
+  // os dois, a aba B, VIVA com OUTRA sessão da mesma conta, volta a guardar a sua
+  // no aparelho (R14-1-03, `guardarDeVoltaASessaoDestaAba`).
+  const cairNaA = async () => {
     await o.A.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
     await esperarOuExplodir(o.A, naEntrada, 'a aba A voltar à entrada depois da queda');
+  };
+  const logarNaA = async (conta) => {
     await o.A.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
     await esperarOuExplodir(o.A, () => AppState.authenticated && !!AppState.profile
       && String(AppState.profile.id) === String(JSON.parse(localStorage.getItem('waze_places_conta') || '{}').id),
       `a aba A entrar com a conta ${conta}`);
   };
-  await entrarNaA(4242);
+  // As duas abas com a MESMA sessão (`tok-abas`): a que caiu na A é a da B também,
+  // e a B não a guarda de volta — o aparelho segue sem sessão até a A entrar. A A
+  // leva mais que a espera da guarda pra chegar à entrada (a pergunta à extensão e
+  // o redirecionamento): uma guarda agendada já teria gravado. É o CONTROLE da
+  // medida do R14-1-03, logo abaixo.
+  await cairNaA();
+  const quedaComum = await o.B.evaluate(() => ({ token: localStorage.getItem('waze_session_token'), agendada: guardarDeVoltaAgendado !== null }));
+  checa(quedaComum.token === null && !quedaComum.agendada,
+    'duas abas: CONTROLE — a sessão que caiu na A era a da B também, e a B a guardou (ou agendou guardar) de volta no aparelho',
+    JSON.stringify(quedaComum));
+  await logarNaA(4242);
   await dormir(600);
   const bFica = await o.B.evaluate(() => ({ auth: AppState.authenticated, memoria: API.temSessaoNaMemoria(),
     card: !!document.querySelector('#cardStack .place-card:not(.card-fundo)') }));
@@ -11573,9 +11588,24 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const espiou4 = await o.B.evaluate(() => window.__escritasDaB.slice());
     checa(espiou4.includes('setItem:waze_places_stats'),
       'duas abas: CONTROLE — o espião da aba B não viu o ✕ dela gravar o placar (ele estaria cego na troca de conta)', JSON.stringify(espiou4));
-    await o.B.evaluate(() => { window.__escritasDaB.length = 0; });
     const redeNaTroca = o.rede.length;
-    await entrarNaA(5151);
+    // A sessão da A (a GUARDADA, `tok-abas-1`) cai, e a B segue viva com a sua
+    // (`tok-abas`): a B volta a guardá-la, com a marca da conta (R14-1-03) — antes o
+    // aparelho ficava sem sessão, e recarregar a B a levava à tela de entrada.
+    await cairNaA();
+    const guardouDeVolta = await esperarNaPagina(o.B, () => localStorage.getItem('waze_session_token') === 'tok-abas', 5000);
+    const marcaNaB = await o.B.evaluate(() => {
+      const c = JSON.parse(localStorage.getItem('waze_places_conta') || 'null');
+      return { conta: c && c.id, marcaCerta: !!c && c.s === marcaDaSessao('tok-abas') };
+    });
+    checa(guardouDeVolta.ok && String(marcaNaB.conta) === '4242' && marcaNaB.marcaCerta,
+      'duas abas: a sessão GUARDADA caiu na A e a B, viva e da mesma conta, não voltou a guardar a sua no aparelho (ou sem a marca da conta)',
+      JSON.stringify(marcaNaB));
+    // Daqui em diante o espião mede a SAÍDA da B pela troca de conta, que não mexe no
+    // aparelho: as gravações da guarda acima (o token, a conta e o diário) eram da
+    // conta dela, com o aparelho ainda dela.
+    await o.B.evaluate(() => { window.__escritasDaB.length = 0; });
+    await logarNaA(5151);
     const bSaiu4 = await esperarNaPagina(o.B, naEntrada, 5000);
     checa(bSaiu4.ok, 'duas abas: OUTRA conta entrou na aba A e a B seguiu logada com a anterior — o placar e o Histórico dela iriam pra conta nova');
     const b4 = await o.B.evaluate(() => ({ memoria: API.temSessaoNaMemoria(), perfil: !!AppState.profile,
