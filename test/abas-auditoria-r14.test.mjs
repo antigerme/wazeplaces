@@ -848,6 +848,96 @@ test('R14-8-10: "Enviando N…" com o "Marcar todos" no ar diz os pedidos do lot
   assert.equal(indicador({ noAr: 0, loteNoAr: false, lidosNoAr: 0 }), null, 'CONTROLE: sem nada no ar, o indicador apareceu');
 });
 
+// ═══ Observação do R14-2 · o Desfazer do ÚLTIMO pedido da série do autor ═══════
+// Com o foco num autor ("Primeiro os de X"), decidir o último pedido dele com o
+// card de OUTRO autor atrás encerra o foco (a regra do R13-2-05: com card na tela,
+// o foco sai); no fim da fila o foco FICA, e o Desfazer devolve a barra. O mesmo
+// Desfazer dava dois resultados: com outro autor atrás, o pedido voltava sem a
+// barra. Agora o Desfazer do gesto que encerrou o foco o devolve junto.
+function docDaBarra() {
+  const els = {};
+  const el = (nome, classes = []) => {
+    const e = { nome, textContent: '', attrs: {}, classes: new Set(classes) };
+    e.classList = { add: (c) => e.classes.add(c), remove: (c) => e.classes.delete(c), contains: (c) => e.classes.has(c) };
+    e.setAttribute = (k, v) => { e.attrs[k] = String(v); };
+    e.removeAttribute = (k) => { delete e.attrs[k]; };
+    e.contains = (x) => x === e;
+    return e;
+  };
+  for (const id of ['focoAutorBar', 'focoAutorTexto', 'focoAutorContagem']) els[id] = el(id, ['hidden']);
+  return { els, body: {}, activeElement: null, getElementById: (id) => els[id] || null, querySelector: () => null };
+}
+const Pa = (id, autor) => ({ venueID: 'v' + id, updateRequestID: 'u' + id, creatorId: autor, createdBy: 'autor' + autor });
+
+function serieComDesfazer(fila, { foco = 7 } = {}) {
+  const document = docDaBarra();
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0] || null, autorEmFoco: foco,
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, fetchEpoch: 0, pendingAction: null,
+    preferences: { undoEnabled: true } };
+  let h = null;
+  const deps = {
+    AppState, document, API: { getRegion: () => 'row' }, UNDO_WINDOW_MS: 60_000, epocaDaSessao: 0, Treino: { ativo: false },
+    pedidosEmAndamento: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    acoesTravadas: () => false, direcaoTravada: () => false, canDisableUndo: () => false, presencaFolhaAberta: () => false,
+    t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k),
+    // O `advanceQueue` + `showCurrentPlace` de um gesto: a fila anda e o card novo
+    // desenha a barra (`renderCurrentCard` → `renderFocoAutor`), na MESMA tarefa.
+    advanceQueue: () => { AppState.queue.shift(); deps.showCurrentPlace(); },
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; h.renderFocoAutor(); },
+  };
+  h = montar(['handleReject', 'scheduleAction', 'desfazerAcaoPendente', 'renderFocoAutor', 'serieDoAutor',
+    'chaveDoPedido', 'marcarEmAndamento'], deps);
+  const barra = () => ({ visivel: !document.els.focoAutorBar.classes.has('hidden'), cont: document.els.focoAutorContagem.textContent,
+    autor: AppState.autorEmFoco });
+  return { h, deps, AppState, barra };
+}
+
+test('Observação R14-2: o Desfazer do último pedido do autor, com o card de OUTRO autor atrás, devolve a barra "Primeiro os de…" — como no fim da fila', async () => {
+  const m = serieComDesfazer([Pa('Z2', 7), Pa('W1', 8)]);
+  m.h.renderFocoAutor();
+  assert.deepEqual(m.barra(), { visivel: true, cont: '1 de 2', autor: 7 }, 'PRÉ-CONDIÇÃO: a barra do foco no autor 7');
+  m.h.handleReject();                               // o ✕ no Z2, o último dele: o W1 (do 8) vem à frente
+  assert.deepEqual(m.barra(), { visivel: false, cont: '1 de 2', autor: null },
+    'PRÉ-CONDIÇÃO: a série acabou com outro autor na frente — a barra e o foco saem (o R13-2-05)');
+  await tique();                                    // outra tarefa: o Desfazer é um toque de depois
+  m.h.desfazerAcaoPendente();
+  assert.equal(m.AppState.currentPlace && m.AppState.currentPlace.updateRequestID, 'uZ2', 'PRÉ-CONDIÇÃO: o Desfazer devolveu o Z2');
+  assert.deepEqual(m.barra(), { visivel: true, cont: '1 de 2', autor: 7 },
+    'DEFEITO: o Desfazer devolveu o último pedido do autor SEM a barra — no fim da fila ela volta (dois resultados pro mesmo Desfazer)');
+  // CONTROLE: o fim da fila (o foco fica, e o Desfazer devolve a barra — já era assim).
+  const f = serieComDesfazer([Pa('Z2', 7)]);
+  f.h.renderFocoAutor();
+  f.h.handleReject();
+  assert.equal(f.AppState.autorEmFoco, 7, 'CONTROLE: no fim da fila, o foco saiu');
+  await tique();
+  f.h.desfazerAcaoPendente();
+  assert.deepEqual(f.barra(), { visivel: true, cont: '1 de 1', autor: 7 }, 'CONTROLE: no fim da fila, a barra não voltou');
+});
+
+test('Observação R14-2: CONTROLES — o foco posto em outro autor na janela fica; o gesto de DEPOIS (outra tarefa) não ressuscita um foco antigo', async () => {
+  // A pessoa pôs o foco no 8 (o "Ver +N" do W1) dentro da janela: o Desfazer
+  // devolve o Z2, sem trazer o 7 de volta por cima da escolha dela.
+  const m = serieComDesfazer([Pa('Z2', 7), Pa('W1', 8)]);
+  m.h.renderFocoAutor();
+  m.h.handleReject();
+  await tique();
+  m.AppState.autorEmFoco = 8;
+  m.h.desfazerAcaoPendente();
+  assert.notEqual(m.AppState.autorEmFoco, 7, 'o Desfazer passou por cima do foco que a pessoa pôs em outro autor');
+  // A série do 7 acabou numa tarefa ANTERIOR (o card do 8 na frente); numa de
+  // DEPOIS, o ✕ num pedido do 7 que chegou sem foco: o Desfazer dele não traz o 7.
+  const d = serieComDesfazer([Pa('W1', 8)]);
+  d.h.renderFocoAutor();
+  assert.equal(d.AppState.autorEmFoco, null, 'PRÉ-CONDIÇÃO: a série do 7 acabou com o card do 8 na frente');
+  await tique();
+  d.AppState.queue = [Pa('Z9', 7), Pa('W2', 8)];
+  d.AppState.currentPlace = d.AppState.queue[0];
+  d.h.handleReject();                               // o ✕ no Z9, sem foco nenhum
+  await tique();
+  d.h.desfazerAcaoPendente();
+  assert.equal(d.AppState.autorEmFoco, null, 'o Desfazer de um gesto SEM foco trouxe de volta um foco antigo');
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
@@ -868,8 +958,8 @@ test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no 
   // R14-2-03: as funções novas são de TOPO (o esbuild não troca esses nomes).
   for (const nome of ['contaDoGestoEhADeAgora', 'filaDoGestoSegueAqui', 'epocaDaFilaRealAgora', 'lembrarMarcaQueAvisouSemConta',
     'avisarAContaDasMarcas', 'aoSaberAContaDeUmaMarca',
-    // R14-8-10: a contagem do lote no ar.
-    'lidosDoLoteNoAr']) {
+    // R14-8-10: a contagem do lote no ar; a Observação do R14-2: o foco que o gesto encerrou.
+    'lidosDoLoteNoAr', 'focoEncerradoNestaTarefa']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

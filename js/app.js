@@ -15598,6 +15598,13 @@ function esquecerFocoAutor() {
     }
 }
 
+// O foco no autor que a série encerrou NESTA tarefa, com o card de outro autor
+// chegando à frente (ver `renderFocoAutor`). O gesto que a encerrou — o ✕ ✓ ↑ do
+// último pedido do autor, o "Rejeitar os N" — o leva pro Desfazer dele
+// (`scheduleAction`), que o devolve junto com o pedido. Uma microtarefa o apaga:
+// ele é do gesto desta tarefa, nunca de um gesto de depois.
+let focoEncerradoNestaTarefa = null;
+
 // A barra some sozinha quando a série acaba — sem isso ela ficaria mentindo
 // sobre um foco que não existe mais assim que o card muda de autor.
 function renderFocoAutor() {
@@ -15637,8 +15644,18 @@ function renderFocoAutor() {
     // 2026-10-07, R13-2-05). Numa microtarefa, porque o `renderCurrentCard`
     // desenha a barra ANTES de pôr o card novo na tela. Quem pôs o foco em outro
     // lugar nesse meio ganha.
+    //
+    // E o foco que sai com o card na tela é DO GESTO que acabou a série: o
+    // Desfazer dele o devolve (`focoEncerradoNestaTarefa`), como devolve no fim da
+    // fila, onde o foco fica. Eram dois resultados pro mesmo Desfazer: com outro
+    // autor atrás, o último pedido voltava sem a barra (auditoria da rodada 14,
+    // observação do R14-2, MEDIDO no navegador).
     if (restam === 0) {
-        if (atual) AppState.autorEmFoco = null;
+        if (atual) {
+            AppState.autorEmFoco = null;
+            focoEncerradoNestaTarefa = id;
+            queueMicrotask(() => { focoEncerradoNestaTarefa = null; });
+        }
         const comOFoco = bar.contains(document.activeElement);
         bar.classList.add('hidden');
         if (comOFoco) {
@@ -25865,6 +25882,9 @@ function scheduleAction(type, place, executor, opts = {}) {
                    undo: AppState.preferences.undoEnabled !== false });
     const places = Array.isArray(place) ? place : [place];
     const n = places.length;
+    // O foco no autor que ESTE gesto encerrou (ver `focoEncerradoNestaTarefa`):
+    // o Desfazer o devolve junto com o pedido.
+    const focoQueOGestoEncerrou = typeof focoEncerradoNestaTarefa !== 'undefined' ? focoEncerradoNestaTarefa : null;
     const aoSair = opts.aoSair === 'cancel' ? 'cancel' : 'execute';
     const regiaoDoGesto = API.getRegion();   // ver `API.markAsRead`
     // O dia e o lugar do gesto (`carimboDoGesto`), que o handler carimbou: a
@@ -26062,6 +26082,14 @@ function scheduleAction(type, place, executor, opts = {}) {
                 // a ordem, e a fila voltaria embaralhada — sem erro visível, só
                 // discordando do WME na hora de conferir.
                 AppState.queue.unshift(...places);
+                // O foco no autor que o gesto encerrou volta com o pedido dele (a
+                // tela de ANTES do gesto), menos se alguém pôs o foco em outro
+                // autor nesse meio (o "Ver +N" do card de trás).
+                if (focoQueOGestoEncerrou !== null && focoQueOGestoEncerrou !== undefined
+                    && (AppState.autorEmFoco === null || AppState.autorEmFoco === undefined)
+                    && places.some((p) => p && p.creatorId === focoQueOGestoEncerrou)) {
+                    AppState.autorEmFoco = focoQueOGestoEncerrou;
+                }
                 updatePendingCount();
                 // Volta pro PRIMEIRO dos restaurados. Sem isto, desfazer um lote
                 // mostraria o card de outro autor, e leria como se o Desfazer
