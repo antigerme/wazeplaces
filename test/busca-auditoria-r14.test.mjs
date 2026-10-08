@@ -402,8 +402,13 @@ function montarJanela({ fila = [] } = {}) {
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
     tratouNestaFila: false, recusaAutomaticaNestaFila: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
     filaEsperaPerfil: false, rebuscasAuto: 0, filaDeOnde: null,
+    // As janelas da foto ampliada: nenhuma aberta (o irmão é medido logo abaixo).
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
   };
-  const h = montar(['scheduleAction', 'retomarBusca', 'refazerFilaReal', 'filaReal', 'resetQueue'], deps);
+  // A janela aberta e o fim dela (`janelaDoDesfazerAberta`, `atenderOFimDaJanela`):
+  // de VERDADE quando existem (no código de antes eram do `scheduleAction`).
+  const h = montar(['scheduleAction', 'retomarBusca', 'refazerFilaReal', 'filaReal', 'resetQueue',
+    ...['janelaDoDesfazerAberta', 'atenderOFimDaJanela'].filter(achar)], deps);
   // O ✕ no ÚLTIMO card: a janela do Desfazer abre com a fila vazia.
   const decidir = () => h.scheduleAction('reject', P(1), async () => { log.push('✕ enviado'); });
   return { h, deps, AppState, log, decidir };
@@ -509,4 +514,172 @@ test('R14-6-02: a `refazerFilaReal` sozinha (o perfil, o país do perfil) també
   await ateQue(() => m.log.includes('busca (fila refeita)'), 'a fila refeita no fim da janela');
   assert.deepEqual(m.log, ['✕ enviado', 'aviso:toast.paisDoPerfil', 'busca (fila refeita)'],
     'no fim da janela a decisão sai, e só então a fila é refeita, com o aviso dela');
+});
+
+// ═══ O irmão na FOTO AMPLIADA (pedido extra do lote 18) ═══════════════════════
+// As escritas da foto ampliada — aprovar, excluir, renomear — têm janela do
+// Desfazer PRÓPRIA, e o `resetQueue` também as despacha
+// (`enviarPendenciasDoLightbox`). A fila fica VAZIA com uma delas correndo pelo
+// caminho natural: aprovar a foto nova do ÚLTIMO pedido (com a foto aberta, ela
+// pousa e o pedido só sai quando a foto fechar), tirar a foto velha (ou corrigir
+// o nome) e fechar a foto. A rede que voltava nesse meio mandava a escrita ao
+// Waze ~0,9 s depois do toque, com o "Desfazer" sumindo (MEDIDO no navegador,
+// nos dois motores; roteiro l18-busca/rx/f1-lightbox-janela.mjs). Agora o
+// refazer sem gesto espera também essas janelas (`janelaDoDesfazerAberta`), e o
+// fim de cada uma o atende (`atenderOFimDaJanela`).
+//
+// Aqui rodam as funções DE VERDADE que abrem cada janela (`pedirExclusaoDaFoto`,
+// `aprovarFotoAtual`, `confirmarRenomear`), com o `retomarBusca`, a
+// `refazerFilaReal`, o `resetQueue` e os despachos de verdade. O envio ao Waze e
+// a busca são espiões.
+function montarJanelaDaFoto() {
+  const log = [];
+  // O pedido de foto nova JÁ aprovado, que saiu da fila: a foto dele segue
+  // aberta no lightbox de mentira (a exclusão e o nome agem sobre ele).
+  const P1 = { venueID: 'v1', updateRequestID: 'u1', name: 'Padaria Velha', purType: 'NEW_PHOTO', approvedImageIds: ['velha'] };
+  const AppState = { authenticated: true, queue: [], currentPlace: null, hasMore: false, loadError: true, fetchEpoch: 0,
+    serverTotal: 0, pendingAction: null, inFlightActions: 0, stats: { read: 0, rejected: 0, skipped: 0 },
+    preferences: { undoEnabled: true }, serverBlocked: 0, blockedPartial: false, ultimaBusca: null };
+  const Lightbox = { place: P1, idx: 1, newIdx: 0, eDenuncia: false, urls: ['https://x/u1.jpg', 'https://x/velha.jpg'],
+    isOpen: () => true, idFotoAtual: () => 'velha', podeAprovarAtual: () => true,
+    removerFoto: () => log.push('a foto saiu da tela'), marcarComoAprovada: () => {}, desmarcarAprovada: () => {} };
+  const deps = {
+    AppState, Lightbox, Treino: { ativo: false }, UNDO_WINDOW_MS: 40, canDisableUndo: () => false,
+    API: { getRegion: () => 'row', prepararExclusao: () => null },
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    aprovandoAgora: false, excluindoAgora: false, escritasDeFotoNoLocal: new Map(), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    fotoDoLightboxNaTela: () => true, podeRenomearAqui: () => true, acoesTravadas: () => false, renomeacaoNoAr: () => false,
+    editandoNome: () => true, document: { getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Padaria Nova' } : null) },
+    aplicarNomeNaTela: (p, n) => { p.name = n; },
+    enviarExclusao: () => { log.push('exclusão enviada'); return Promise.resolve(true); },
+    enviarAprovacao: () => { log.push('aprovação enviada'); return Promise.resolve(true); },
+    enviarRenomeacao: () => { log.push('nome enviado'); return Promise.resolve(true); },
+    devolverFoto: () => log.push('a foto voltou'),
+    startFetching: () => log.push('busca (fila refeita)'), maybePrefetch: () => log.push('reposição'),
+    showCurrentPlace: () => {}, updatePendingCount: () => {}, t: (k) => k, showToast: (m) => log.push('aviso:' + m),
+    pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
+    tratouNestaFila: false, recusaAutomaticaNestaFila: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
+    filaEsperaPerfil: false, rebuscasAuto: 0, filaDeOnde: null,
+    console: { error: (...a) => log.push('ERRO:' + a.join(' ')) },
+  };
+  const h = montar(['pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear', 'retomarBusca', 'refazerFilaReal',
+    'filaReal', 'resetQueue', 'enviarPendenciasDoLightbox', 'cancelarPendenciasDoLightbox',
+    ...['janelaDoDesfazerAberta', 'atenderOFimDaJanela'].filter(achar)], deps);
+  const abrir = { excluir: () => h.pedirExclusaoDaFoto(), aprovar: () => h.aprovarFotoAtual(), renomear: () => h.confirmarRenomear() };
+  const ENVIO = { excluir: 'exclusão enviada', aprovar: 'aprovação enviada', renomear: 'nome enviado' };
+  const janela = () => deps.exclusaoPendente || deps.aprovacaoPendente || deps.renomeacaoPendente;
+  const buscas = () => log.filter((l) => l === 'busca (fila refeita)').length;
+  return { h, deps, AppState, log, P1, abrir, ENVIO, janela, buscas };
+}
+const ESCRITAS_DA_FOTO = ['excluir', 'aprovar', 'renomear'];
+
+test('foto ampliada: a rede que volta com a fila VAZIA e a janela de uma escrita da foto correndo — ela corre até o fim, e a fila é atualizada depois (excluir, aprovar, renomear)', async () => {
+  for (const e of ESCRITAS_DA_FOTO) {
+    const m = montarJanelaDaFoto();
+    m.abrir[e]();
+    assert.ok(m.janela(), `(${e}) PRÉ-CONDIÇÃO: a janela do Desfazer da foto não abriu`);
+    m.h.retomarBusca();                            // o `online`, com a fila vazia em "sem sinal"
+    await tique(5);
+    assert.ok(!m.log.includes(m.ENVIO[e]) && m.buscas() === 0,
+      `(${e}) DEFEITO: o refazer automático despachou a janela da foto antes da hora: ${m.log}`);
+    assert.ok(m.janela(), `(${e}) DEFEITO: o "Desfazer" da foto sumiu antes do fim da janela`);
+    await ateQue(() => m.buscas() > 0, `(${e}) a fila atualizada no fim da janela`);
+    const i = m.log.indexOf(m.ENVIO[e]);
+    assert.ok(i >= 0 && i < m.log.indexOf('busca (fila refeita)'),
+      `(${e}) no fim da janela a escrita sai, e só então a fila vazia é atualizada: ${m.log}`);
+    await tique(20);
+    assert.deepEqual([m.buscas(), m.log.filter((l) => l === m.ENVIO[e]).length], [1, 1], `(${e}) uma escrita e uma busca: ${m.log}`);
+    assert.equal(m.AppState.fetchEpoch, 1, `(${e}) a fila vazia não foi refeita (o atualizar)`);
+  }
+});
+
+test('foto ampliada: CONTROLE — o "Tentar de novo" (gesto) despacha a janela da foto na hora, como o ↻ (o instrumento enxerga o despacho)', async () => {
+  for (const e of ESCRITAS_DA_FOTO) {
+    const c = montarJanelaDaFoto();
+    c.abrir[e]();
+    c.h.retomarBusca({ gesto: true });
+    await tique(1);
+    assert.ok(c.log.includes(c.ENVIO[e]) && c.buscas() === 1,
+      `(${e}) CONTROLE: o gesto não despachou a janela da foto — o instrumento não enxerga o despacho: ${c.log}`);
+    assert.equal(c.janela(), null);
+    await tique(60);
+    assert.deepEqual([c.buscas(), c.log.filter((l) => l === c.ENVIO[e]).length], [1, 1],
+      `(${e}) a fila foi refeita (ou a escrita saiu) DUAS vezes: ${c.log}`);
+  }
+});
+
+test('foto ampliada: desfeita a escrita da foto, ela não sai — e o refazer que esperava pela janela acontece (a fila segue vazia)', async () => {
+  for (const e of ESCRITAS_DA_FOTO) {
+    const m = montarJanelaDaFoto();
+    m.abrir[e]();
+    m.h.retomarBusca();
+    m.janela().desfazer();                         // o "Desfazer" do banner
+    await tique(5);
+    assert.equal(m.buscas(), 1, `(${e}) o refazer que esperava a janela não aconteceu depois do Desfazer: ${m.log}`);
+    await tique(60);
+    assert.ok(!m.log.includes(m.ENVIO[e]), `(${e}) a escrita desfeita foi enviada: ${m.log}`);
+    assert.equal(m.buscas(), 1, `(${e}) a fila foi refeita duas vezes: ${m.log}`);
+  }
+});
+
+test('foto ampliada: a sessão que acaba cancela a janela da foto — e o refazer que esperava por ela não acontece', async () => {
+  for (const comSessao of [false, true]) {          // a queda e o "Sair"; a conta em dúvida (a sessão de pé)
+    const m = montarJanelaDaFoto();
+    m.abrir.excluir();
+    m.h.retomarBusca();
+    if (!comSessao) m.AppState.authenticated = false;
+    m.h.cancelarPendenciasDoLightbox();
+    await tique(80);
+    assert.ok(m.log.includes('a foto voltou'), 'PRÉ-CONDIÇÃO: o cancelamento não devolveu a foto');
+    assert.ok(m.buscas() === 0 && !m.log.includes('reposição') && !m.log.includes('exclusão enviada'),
+      `(${comSessao ? 'conta em dúvida' : 'queda'}) o refazer adiado rodou depois de a janela da foto ser CANCELADA: ${m.log}`);
+  }
+});
+
+test('foto ampliada: o ↻ DENTRO da janela da foto, com o refazer automático esperando — a escrita sai e a fila é refeita UMA vez (a do ↻)', async () => {
+  for (const e of ESCRITAS_DA_FOTO) {
+    const m = montarJanelaDaFoto();
+    m.abrir[e]();
+    m.h.retomarBusca();
+    m.h.resetQueue();                              // o ↻: `resetQueue` + `startFetching`
+    m.deps.startFetching();
+    await tique(60);
+    assert.equal(m.log.filter((l) => l === m.ENVIO[e]).length, 1, `(${e}) o ↻ não despachou a escrita da foto: ${m.log}`);
+    assert.equal(m.buscas(), 1, `(${e}) a fila foi refeita duas vezes — uma busca a mais no free tier: ${m.log}`);
+  }
+});
+
+test('foto ampliada: a `refazerFilaReal` sozinha (o país do perfil) também espera a janela da foto, e o aviso sai com a fila', async () => {
+  const m = montarJanelaDaFoto();
+  m.abrir.excluir();
+  m.h.refazerFilaReal({ chave: 'toast.paisDoPerfil', pais: 'France' });
+  await tique(5);
+  assert.equal(m.buscas(), 0, `a fila foi refeita (e a janela da foto despachada) antes do fim dela: ${m.log}`);
+  await ateQue(() => m.buscas() > 0, 'a fila refeita no fim da janela da foto');
+  assert.deepEqual(m.log.slice(1), ['exclusão enviada', 'aviso:toast.paisDoPerfil', 'busca (fila refeita)'],
+    'no fim da janela a exclusão sai, e só então a fila é refeita, com o aviso dela');
+});
+
+test('foto ampliada: a aprovação que acaba porque a OUTRA aba decidiu o pedido também atende o refazer (a janela acabou, a sessão segue)', async () => {
+  const m = montarJanelaDaFoto();
+  m.abrir.aprovar();
+  m.h.retomarBusca();
+  m.deps.decididosPorOutraAbaComCardAqui.add(m.P1);   // a outra aba decidiu durante a janela
+  await ateQue(() => m.buscas() > 0, 'a fila atualizada no fim da janela da aprovação descartada');
+  assert.ok(m.log.includes('aviso:toast.decididoNaOutraAba') && !m.log.includes('aprovação enviada'),
+    `PRÉ-CONDIÇÃO: a aprovação não foi descartada pela decisão da outra aba: ${m.log}`);
+});
+
+test('foto ampliada: o refazer adiado com o aviso do país não é trocado pelo da rede que volta no meio da janela (o aviso sai com a fila)', async () => {
+  const m = montarJanelaDaFoto();
+  m.abrir.excluir();
+  m.h.refazerFilaReal({ chave: 'toast.paisDoPerfil', pais: 'France' });   // o país do perfil, adiado pro fim da janela
+  m.h.retomarBusca();                              // e a rede que volta, no meio da mesma janela
+  await tique(5);
+  assert.equal(m.buscas(), 0, `PRÉ-CONDIÇÃO: a fila foi refeita antes do fim da janela da foto: ${m.log}`);
+  await ateQue(() => m.buscas() > 0, 'a fila refeita no fim da janela da foto');
+  await tique(20);
+  assert.ok(m.log.includes('aviso:toast.paisDoPerfil'),
+    `o aviso do país sumiu: a volta da rede trocou o refazer adiado, e a fila de outro país entra sem explicação (R10-7-02): ${m.log}`);
+  assert.equal(m.buscas(), 1, `a fila foi refeita duas vezes: ${m.log}`);
 });

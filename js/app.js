@@ -4578,6 +4578,11 @@ function pedirExclusaoDaFoto() {
     if (AppState.currentPlace === place) mantendoFocoNoCard(showCurrentPlace, { mesmoBotao: true });
 
     let saiu = false;
+    // A JANELA desta exclusão (o `exclusaoPendente` dela). O refazer da fila que
+    // o app adiou pro fim dela (`aoFim`, ver `janelaDoDesfazerAberta`) é atendido
+    // quando ela acaba — a exclusão saiu ou foi desfeita —, nunca no `cancelar`
+    // da sessão que acaba (`cancelarPendenciasDoLightbox`).
+    let janela = null;
     const enviar = () => {
         if (saiu) return;
         saiu = true;
@@ -4595,6 +4600,7 @@ function pedirExclusaoDaFoto() {
         enviarExclusao(alvo).then((saiuDoMapa) => {
             if (saiuDoMapa) anunciarDesfechoDaFoto(t('undo.photoDeleted'), place, true);
         });
+        atenderOFimDaJanela(janela);
     };
     // Volta atrás sem enviar. É o Desfazer do editor e também o cancelamento
     // que o APP faz quando a sessão acaba (ver `cancelarPendenciasDoLightbox`).
@@ -4616,9 +4622,9 @@ function pedirExclusaoDaFoto() {
     // É o MESMO Desfazer do card (o mesmo banner): zera a "Mão firme" e conta a
     // "Segunda chance" como lá (auditoria de 2026-09-25). O cancelamento do app
     // não conta: quem desfez não foi o editor.
-    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
+    const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
-    exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
+    janela = exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
     // A lixeira com o foco travou (ou sumiu com a foto): o foco fica na camada.
@@ -5009,6 +5015,8 @@ function aprovarFotoAtual() {
     // Com janela: o ✨ some JÁ (é o retorno imediato) e o envio espera.
     Lightbox.marcarComoAprovada(alvo);
     let saiu = false;
+    // A janela desta aprovação: o refazer adiado pro fim dela, como na exclusão.
+    let janela = null;
     const enviar = () => {
         if (saiu) return;
         // A OUTRA aba decidiu o pedido DURANTE a janela (auditoria da rodada 11,
@@ -5021,7 +5029,10 @@ function aprovarFotoAtual() {
         // frase diz por quê. Vale pra todo fim da janela — o relógio, o fechar da
         // foto, a lixeira, o ↻, a página saindo.
         if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(place) === true) {
-            if (cancelar()) showToast(t('toast.decididoNaOutraAba'), 'info');
+            if (cancelar()) {
+                showToast(t('toast.decididoNaOutraAba'), 'info');
+                atenderOFimDaJanela(janela);
+            }
             return;
         }
         saiu = true;
@@ -5030,6 +5041,7 @@ function aprovarFotoAtual() {
         aplicarTravaDeAcao();
         removeUndoBanner();
         enviarAprovacao(alvo);
+        atenderOFimDaJanela(janela);
     };
     const cancelar = () => {
         if (saiu) return false;
@@ -5047,8 +5059,8 @@ function aprovarFotoAtual() {
         return true;
     };
     // O mesmo Desfazer do card — ver a exclusão acima.
-    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
-    aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
+    const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
+    janela = aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
     // O "Aprovar" com o foco virou lixeira travada: o foco fica na camada.
@@ -5269,6 +5281,8 @@ function confirmarRenomear() {
     }
 
     let saiu = false;
+    // A janela desta renomeação: o refazer adiado pro fim dela, como na exclusão.
+    let janela = null;
     const enviar = () => {
         if (saiu) return;
         saiu = true;
@@ -5283,6 +5297,7 @@ function confirmarRenomear() {
         enviarRenomeacao(alvo).then((gravou) => {
             if (gravou) anunciarDesfechoDaFoto(t('lightbox.anuncio.renomeado', { nome: novo }), place, true);
         });
+        atenderOFimDaJanela(janela);
     };
     const cancelar = () => {
         if (saiu) return false;
@@ -5295,8 +5310,8 @@ function confirmarRenomear() {
         return true;
     };
     // O mesmo Desfazer do card — ver a exclusão de foto.
-    const desfazer = () => { if (cancelar()) registrarDesfazer(); };
-    renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
+    const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
+    janela = renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
     mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
     manterFocoNoLightbox();
@@ -5472,9 +5487,13 @@ function cancelarPendenciasDoLightbox() {
 // ~2,5 s sem banner nenhum na tela ("espere o Desfazer" de um Desfazer que
 // sumiu) e a escrita saía no fim mesmo assim (auditoria de 2026-09-29, L25). A
 // ordem é a do "Marcar todos" (`handleBatchMarkRead`), que já fazia isto.
-function enviarPendenciasDoLightbox() {
+// `semORefazerAdiado`: quem despacha é o próprio refazer da fila (o
+// `resetQueue`), e o refazer que o app adiou pro fim da janela
+// (`janelaDoDesfazerAberta`) faria a fila duas vezes — uma busca a mais.
+function enviarPendenciasDoLightbox({ semORefazerAdiado = false } = {}) {
     for (const p of [aprovacaoPendente, exclusaoPendente, renomeacaoPendente]) {
         if (!p || typeof p.enviar !== 'function') continue;
+        if (semORefazerAdiado) p.aoFim = null;
         try { p.enviar(); } catch (e) { console.error('Falha ao enviar escrita do lightbox:', e); }
     }
 }
@@ -7286,17 +7305,49 @@ async function irProPaisDoPerfil({ regiao, pais, minhaArea = false }) {
 // treino por eles. Nada que refaça a fila sem gesto da pessoa encerra o treino
 // por baixo dela.
 //
-// E nada que refaça a fila sem gesto corta a JANELA do Desfazer: com ela aberta
-// (a última decisão de uma fila que ficou vazia), o `resetQueue` mandava a
-// decisão ao Waze antes da hora e o "Desfazer" sumia (R14-2-05/R14-6-02, ver o
+// E nada que refaça a fila sem gesto corta uma JANELA do Desfazer — a do card
+// ou uma da foto ampliada (ver `janelaDoDesfazerAberta`): com ela aberta (a
+// última decisão de uma fila que ficou vazia), o `resetQueue` mandava a escrita
+// ao Waze antes da hora e o "Desfazer" sumia (R14-2-05/R14-6-02, ver o
 // `retomarBusca`). O refazer fica pro fim dela (`aoFim`). `gesto`: o "Tentar de
 // novo", que despacha a janela como o ↻.
 function refazerFilaReal(aviso = null, { gesto = false } = {}) {
     if (typeof Treino !== 'undefined' && Treino.ativo === true) { Treino.anotarFilaRefeita(aviso); return; }
-    if (!gesto && AppState.pendingAction) { AppState.pendingAction.aoFim = () => refazerFilaReal(aviso); return; }
+    const janela = !gesto && janelaDoDesfazerAberta();
+    if (janela) { janela.aoFim = () => refazerFilaReal(aviso); return; }
     if (aviso) showToast(t(aviso.chave, { pais: aviso.pais }), 'info', 7000);
     resetQueue();
     startFetching();
+}
+
+// A JANELA do Desfazer aberta agora, ou nada: a do card (`AppState.pendingAction`)
+// ou uma das três da FOTO AMPLIADA (aprovar, excluir, renomear). É o que o
+// refazer da fila SEM gesto espera (`refazerFilaReal`, `retomarBusca`): o
+// `resetQueue` despacha as quatro, e as da foto também saíam antes da hora —
+// aprovar a foto nova do ÚLTIMO pedido, tirar a foto velha e fechar a foto deixa
+// a fila vazia com a janela da exclusão correndo, e a rede que voltava mandava a
+// exclusão ao Waze ~0,9 s depois do toque, com o "Desfazer" sumindo (MEDIDO no
+// navegador, nos dois motores; o irmão do R14-2-05 na foto ampliada, pedido
+// extra do lote 18). Só uma corre de cada vez (`acoesTravadas` trava as outras
+// ações), e quem espera pergunta de novo quando ela acaba.
+function janelaDoDesfazerAberta() {
+    return AppState.pendingAction || aprovacaoPendente || exclusaoPendente || renomeacaoPendente || null;
+}
+
+// O FIM de uma janela do Desfazer — a escrita saiu, foi desfeita, foi descartada
+// porque a outra aba já decidiu o pedido (a aprovação), ou (a do card) foi pra
+// fila de saída com a página saindo: o que o app adiou pro fim dela
+// (`aoFim`, posto pelo refazer sem gesto) roda numa microtarefa, depois de a
+// janela sair de cena. Sem sessão até lá (a queda, o "Sair"), nada: a busca nem
+// sairia, e o `retomarBusca` apagaria o `loadError` que a renovação lê
+// (R14-1-01). O `cancel`/`cancelar` da sessão que acaba não passa por aqui: o
+// adiado vai embora com a janela. FONTE ÚNICA das quatro janelas (a do
+// `scheduleAction` e as três da foto).
+function atenderOFimDaJanela(janela) {
+    const aoFim = janela && janela.aoFim;
+    if (typeof aoFim !== 'function') return;
+    janela.aoFim = null;
+    queueMicrotask(() => { if (AppState.authenticated) aoFim(); });
 }
 
 // O treino que termina por um GESTO de busca nova — o ↻, o "Aplicar" com outro
@@ -12366,8 +12417,9 @@ function resetQueue() {
     }
     // E as do lightbox, que têm janela própria: o `removeUndoBanner` logo
     // abaixo deixava a janela delas correndo sem o botão (L25). Com a fila do
-    // gesto ainda de pé — a aprovação sabe dela (`epocaFila`).
-    enviarPendenciasDoLightbox();
+    // gesto ainda de pé — a aprovação sabe dela (`epocaFila`). O refazer adiado
+    // pro fim delas também é ESTE (`semORefazerAdiado`).
+    enviarPendenciasDoLightbox({ semORefazerAdiado: true });
     removeUndoBanner();
     AppState.fetchEpoch++;              // invalida fetch em voo (descarta obsoleto)
     AppState.queue = [];
@@ -22188,13 +22240,18 @@ function retomarBusca({ gesto = false } = {}) {
     // que chega): o refazer sozinho a despachava — o ✕ ia ao Waze 1,4 s depois do
     // toque e o "Desfazer" sumia (MEDIDO no navegador, nos dois motores;
     // auditoria da rodada 14, R14-2-05 e R14-6-02, os irmãos do R13-6-01 na fila
-    // vazia). Ele fica pro FIM da janela (`aoFim`, no objeto dela; ver o
-    // `scheduleAction`): saída a decisão, a fila vazia é atualizada como sempre;
-    // desfeita, o card volta e a busca só retoma. O "Tentar de novo" é gesto, e
-    // despacha a janela como o ↻.
+    // vazia). Ele fica pro FIM da janela (`aoFim`, no objeto dela; ver
+    // `atenderOFimDaJanela`): saída a decisão, a fila vazia é atualizada como
+    // sempre; desfeita, o card volta e a busca só retoma. O "Tentar de novo" é
+    // gesto, e despacha a janela como o ↻. A janela pode ser também a de uma
+    // escrita da FOTO AMPLIADA — a foto velha que saiu, o nome corrigido —, com
+    // a mesma régua (`janelaDoDesfazerAberta`).
     if (filaReal().length === 0) {
-        if (!gesto && AppState.pendingAction) {
-            if (!AppState.pendingAction.aoFim) AppState.pendingAction.aoFim = () => retomarBusca();
+        const janela = !gesto && janelaDoDesfazerAberta();
+        if (janela) {
+            // O refazer que JÁ espera a janela fica: o da `refazerFilaReal` leva o
+            // aviso do país que explica a fila nova (R10-7-02).
+            if (!janela.aoFim) janela.aoFim = () => retomarBusca();
             return;
         }
         refazerFilaReal(null, { gesto });
@@ -26247,30 +26304,21 @@ function scheduleAction(type, place, executor, opts = {}) {
 
     let executed = false;
     // A JANELA desta ação (o `pendingAction` dela, quando ela abre). O que o app
-    // adiou pro fim dela — o refazer sozinho da fila que ficou vazia
-    // (`aoFim`, ver o `retomarBusca`, R14-2-05/R14-6-02) — é atendido quando ela
-    // acaba: a decisão saiu (o `runExecutor`, por ela ter vencido ou por ter
-    // sido despachada), foi desfeita, ou foi pra fila de saída com a página
-    // saindo. Numa microtarefa: depois de o envio da decisão sair e de quem
-    // fechou a janela soltar o `pendingAction`. O `cancel` (a queda, o "Sair", a
-    // conta em dúvida) NÃO o atende: ali quem recompõe a fila é a renovação ou a
-    // entrada seguinte, e o refazer adiado morre com a janela.
+    // adiou pro fim dela — o refazer sozinho da fila (`aoFim`, ver
+    // `janelaDoDesfazerAberta`) — é atendido quando ela acaba
+    // (`atenderOFimDaJanela`): a decisão saiu (o `runExecutor`, por ela ter
+    // vencido ou por ter sido despachada), foi desfeita, ou foi pra fila de
+    // saída com a página saindo. O `cancel` (a queda, o "Sair", a conta em
+    // dúvida) NÃO o atende: ali quem recompõe a fila é a renovação ou a entrada
+    // seguinte, e o refazer adiado morre com a janela.
     let janela = null;
-    const atenderOFimDaJanela = () => {
-        const aoFim = janela && janela.aoFim;
-        if (typeof aoFim !== 'function') return;
-        janela.aoFim = null;
-        // Sem sessão até lá (a queda, o "Sair"), nada: a busca nem sairia, e o
-        // `retomarBusca` apagaria o `loadError` que a renovação lê (R14-1-01).
-        queueMicrotask(() => { if (AppState.authenticated) aoFim(); });
-    };
     const runExecutor = async () => {
         // A ação saiu: a janela do Desfazer acabou e os botões voltam.
         AppState.pendingAction = null;
         aplicarTravaDeAcao();
         AppState.inFlightActions++;
         updateInFlightIndicator();
-        atenderOFimDaJanela();
+        atenderOFimDaJanela(janela);
         try {
             await executor();
         } catch (err) {
@@ -26389,7 +26437,7 @@ function scheduleAction(type, place, executor, opts = {}) {
                     reverterPlacar(true);
                     removeUndoBanner();
                     aplicarTravaDeAcao();
-                    atenderOFimDaJanela();
+                    atenderOFimDaJanela(janela);
                     return;
                 }
                 if (r) descargaNaFila.add(places[0]);
@@ -26417,7 +26465,7 @@ function scheduleAction(type, place, executor, opts = {}) {
             if (r === 'repetida') reverterPlacar(true);
             removeUndoBanner();
             aplicarTravaDeAcao();
-            atenderOFimDaJanela();
+            atenderOFimDaJanela(janela);
             return true;
         },
         undo: () => {
@@ -26452,7 +26500,7 @@ function scheduleAction(type, place, executor, opts = {}) {
                 showCurrentPlace();
                 // O refazer que esperava a janela: com o card de volta, ele só
                 // retoma a busca (ver o `retomarBusca`).
-                atenderOFimDaJanela();
+                atenderOFimDaJanela(janela);
             }
         }
     };

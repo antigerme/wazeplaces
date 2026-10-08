@@ -103,6 +103,9 @@ function depsDoTreino(AppState, log, els, extra = {}) {
     enviarPendenciasDoLightbox: () => {},
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
     devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
+    // As outras duas janelas da foto, que o refazer sem gesto também espera
+    // (`janelaDoDesfazerAberta`; o irmão do R14-2-05, pedido extra do lote 18).
+    exclusaoPendente: null, renomeacaoPendente: null,
     // o que o `sair()` chama e não é deste arquivo
     limparFocoAutor: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => log.push('recusa'),
     devolverPedidoRecusado: (lista) => { AppState.queue.splice(1, 0, ...(Array.isArray(lista) ? lista : [lista])); },
@@ -111,6 +114,8 @@ function depsDoTreino(AppState, log, els, extra = {}) {
   };
 }
 function montar(deps, nomes, extraFonte = '', retorno = '') {
+  // O refazer sem gesto pergunta pela janela do Desfazer aberta: a de VERDADE.
+  if (nomes.includes('refazerFilaReal') || nomes.includes('retomarBusca')) nomes = [...nomes, 'janelaDoDesfazerAberta'];
   const chaves = Object.keys(deps);
   const fonte = [extraFonte, ...nomes.map(fatiar), 'const Treino = ' + objetoDoTreino() + ';',
     `return { Treino, ${[...nomes, retorno].filter(Boolean).join(', ')} };`].join('\n');

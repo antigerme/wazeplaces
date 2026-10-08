@@ -94,7 +94,12 @@ function elemento(iniciais = []) {
 }
 // O que trava a ENTRADA no treino (`Treino.motivoDeRecusa`): sem isto o buraco
 // negro — que é verdadeiro — a recusaria.
-const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map() });
+const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+  // As outras janelas da foto, que o refazer sem gesto espera (`janelaDoDesfazerAberta`).
+  exclusaoPendente: null, renomeacaoPendente: null });
+// A janela do Desfazer aberta, de VERDADE (o irmão do R14-2-05 na foto, pedido
+// extra do lote 18): no buraco negro ela seria VERDADEIRA, e a fila nunca seria refeita.
+const JANELA = /^function janelaDoDesfazerAberta\(/m.test(APP_SEM) ? ['janelaDoDesfazerAberta'] : [];
 const P = (n, extra = {}) => ({ venueID: 'v' + n, updateRequestID: 'u' + n, name: 'Local ' + n, updateTypeKey: 'VENUE',
   purType: 'NEW_PLACE', imageUrls: [], mapa: null, dateAdded: 1785203731191 - n * 1000, ...extra });
 
@@ -323,7 +328,7 @@ function montarTrocaCF({ fimAberto = false } = {}) {
   };
   app = rodar(deps, [
     ...['filaReal', 'filaRealComDevolvidos', 'refazerFilaReal', 'resetQueue', 'esquecerOutraConta',
-      'esquecerEscolhasDaContaAnterior', 'mostrarComoFuncionaSePrimeiraVez', 'abrirComoFunciona'].map(fatiar),
+      'esquecerEscolhasDaContaAnterior', 'mostrarComoFuncionaSePrimeiraVez', 'abrirComoFunciona', ...JANELA].map(fatiar),
     treinoDeVerdade(),
   ], ['Treino', 'esquecerOutraConta', 'mostrarComoFuncionaSePrimeiraVez']);
   if (fimAberto) fim.aberto = true;
@@ -439,7 +444,7 @@ function montarQueda() {
   app = rodar(deps, [
     ...['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
       'esquecerEscolhasDaContaAnterior', 'marcaDaSessao', 'filaReal', 'filaRealComDevolvidos', 'refazerFilaReal',
-      'resetQueue'].map(fatiar),
+      'resetQueue', ...JANELA].map(fatiar),
     treinoDeVerdade(),
   ], ['derrubarSessao', 'Treino', 'refazerFilaReal', 'marcaDaSessao']);
   safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: app.marcaDaSessao('tokA') }));   // X estava triando

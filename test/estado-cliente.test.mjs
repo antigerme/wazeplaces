@@ -162,7 +162,8 @@ function montarAgenda() {
     UNDO_WINDOW_MS: 3000,
     console: { error: () => {} },
   };
-  const { scheduleAction } = montar(['scheduleAction'], deps, ['scheduleAction']);
+  // O fim da janela, que atende o refazer da fila adiado pra ele (`atenderOFimDaJanela`).
+  const { scheduleAction } = montar(['scheduleAction', 'atenderOFimDaJanela'], deps, ['scheduleAction']);
   return { scheduleAction, AppState, log };
 }
 

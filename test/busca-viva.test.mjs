@@ -406,9 +406,12 @@ test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com c
   // Com card, a busca só RETOMA, pelo `maybePrefetch` (R14-6-01): o
   // `startFetching` tirava o card da tela e o desenhava de novo, e o foco do
   // teclado no ✕ dele caía no <body>.
+  // A janela do Desfazer que o refazer sem gesto espera (`janelaDoDesfazerAberta`):
+  // nenhuma aberta aqui (as janelas: test/busca-auditoria-r14.test.mjs).
   const rodar = new Function('AppState', 'resetQueue', 'startFetching', 'maybePrefetch',
-    [fatiar('filaReal'), fatiar('refazerFilaReal'), r].join('\n') + '\nreturn retomarBusca;')(
-    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'), () => chamadas.push('repor'));
+    'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente',
+    [fatiar('filaReal'), fatiar('refazerFilaReal'), fatiar('janelaDoDesfazerAberta'), r].join('\n') + '\nreturn retomarBusca;')(
+    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'), () => chamadas.push('repor'), null, null, null);
   rodar();
   assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');
   chamadas.length = 0;

@@ -83,7 +83,10 @@ function lightbox(podeL6 = true) {
 // E a espera solta pela página saindo (R13-3-01) e o gesto do toque (R13-3-03).
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
   'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'soltarEsperasDoAquecimento', 'idDoGestoDaLixeira',
-  'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
+  'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa',
+  // O fim das janelas da foto atende o refazer da fila adiado pra ele (o irmão do
+  // R14-2-05 na foto ampliada, pedido extra do lote 18).
+  'atenderOFimDaJanela'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
   esperasSoDoAquecimento: new Set(),
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
@@ -1306,7 +1309,10 @@ test('L25 as três escritas do lightbox na janela SAEM com a fila trocada — pe
   // Quem troca a fila com a sessão viva chama ANTES de tirar o banner (senão a
   // janela corre sem ele). Por LINHA, sem comentário (gotcha #67).
   for (const [nome, corpo] of [['resetQueue', fatiar('resetQueue')], ['Treino.entrar', trechoDoTreino('entrar')]]) {
-    const i = corpo.indexOf('enviarPendenciasDoLightbox();');
+    // O `resetQueue` despacha SEM o refazer adiado pro fim delas: quem refaz a
+    // fila é ele (o irmão do R14-2-05 na foto ampliada, pedido extra do lote 18).
+    const m = /enviarPendenciasDoLightbox\((\{ semORefazerAdiado: true \})?\);/.exec(corpo);
+    const i = m ? m.index : -1;
     assert.ok(i > 0, `${nome}: não despacha as escritas do lightbox — o banner some e a janela segue correndo`);
     assert.ok(i < corpo.indexOf('removeUndoBanner();'), `${nome}: tira o banner ANTES de despachar a janela`);
   }
@@ -1474,7 +1480,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada'];
+    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -3754,6 +3760,8 @@ test('R11-3-05 com o Desfazer, o nome que o Waze grava é dito pelo IRMÃO (o `a
       setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
       aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
       anunciarDesfechoDaFoto: (...a) => ditos.push(a),
+      // Nenhum refazer da fila adiado pro fim desta janela (medido em test/busca-auditoria-r14.test.mjs).
+      atenderOFimDaJanela: () => {},
     };
     const corpo = fatiar('confirmarRenomear').replace(/renomeacaoPendente/g, '__pend.r');
     const confirmar = new Function(...Object.keys(deps), '__pend', corpo + '\nreturn confirmarRenomear;')(...Object.values(deps), { r: null });

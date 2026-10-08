@@ -117,7 +117,12 @@ const lugares = (fila) => (fila || []).map((p) => p.venueID);
 const soSinteticos = (fila) => (fila || []).length > 0 && fila.every((p) => !!p._exemplo);
 // O que trava a ENTRADA no treino (`Treino.motivoDeRecusa`): sem isto o buraco
 // negro — que é verdadeiro — a recusaria.
-const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map() });
+const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+  // As outras janelas da foto, que o refazer sem gesto espera (`janelaDoDesfazerAberta`).
+  exclusaoPendente: null, renomeacaoPendente: null });
+// A janela do Desfazer aberta, de VERDADE (o irmão do R14-2-05 na foto, pedido
+// extra do lote 18): no buraco negro ela seria VERDADEIRA, e a fila nunca seria refeita.
+const JANELA = /^function janelaDoDesfazerAberta\(/m.test(APP_SEM) ? ['janelaDoDesfazerAberta'] : [];
 
 // ═══ R10-1-01 · a TROCA DE CONTA com o treino aberto ═══════════════════════════
 // A sessão de X cai e a extensão renova em silêncio com a de Y. A fila na tela
@@ -168,7 +173,7 @@ function montarTroca({ atravessou = true, area = false, fila = 'x' } = {}) {
   };
   app = rodar(deps, [
     ...['filaReal', 'filaRealComDevolvidos', 'refazerFilaReal', 'resetQueue', 'esquecerOutraConta', 'offlineEsquecer',
-      'diagSeguro', 'diagTreinoAgora', 'diagTreinoGuardado'].map(fatiar),
+      'diagSeguro', 'diagTreinoAgora', 'diagTreinoGuardado', ...JANELA].map(fatiar),
     treinoDeVerdade(),
   ], ['Treino', 'esquecerOutraConta', 'diagTreinoGuardado', 'filaReal']);
   return { app, AppState, log, els, base, fim, deps };
@@ -339,7 +344,7 @@ function montarRefresh() {
     pedidosQueEntraramNaFila: new Set(), bloqueadosPorPagina: new Map(),
   };
   const app = rodar(deps, [
-    ...['filaReal', 'refazerFilaReal', 'resetQueue', 'avisarPaisDoTreinoEncerrado', 'irProPaisDoPerfil'].map(fatiar),
+    ...['filaReal', 'refazerFilaReal', 'resetQueue', 'avisarPaisDoTreinoEncerrado', 'irProPaisDoPerfil', ...JANELA].map(fatiar),
     treinoDeVerdade(), ouvinte('refreshBtn'),
   ], ['Treino', 'irProPaisDoPerfil']);
   return { app, AppState, log, lugar, ouvintes };

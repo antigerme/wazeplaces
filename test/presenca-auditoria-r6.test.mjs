@@ -533,7 +533,7 @@ function montarAgenda({ folha }) {
     console: { error: () => {} }, reivindicacaoDestaAba: () => null,
     presencaFolhaAberta: () => folha,
   };
-  const { scheduleAction } = montar(['scheduleAction'], deps);
+  const { scheduleAction } = montar(['scheduleAction', 'atenderOFimDaJanela'], deps);
   return { scheduleAction, AppState, log };
 }
 

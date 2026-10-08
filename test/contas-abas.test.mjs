@@ -1897,8 +1897,12 @@ test('F4: a área gerenciada salva que o perfil não tem sai do filtro — e a f
       saveFilters: () => log.push('grava'), resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
       epocaDaSessao: 0, filaEsperaPerfil: false, paisDoPerfil: async () => null, caixaDaMinhaArea: () => [1, 2, 3, 4],
       aplicarRecusaAutomatica: () => {}, sortQueue: () => {}, window: {},
+      // Nenhuma janela do Desfazer aberta: a `refazerFilaReal` pergunta por ela
+      // (`janelaDoDesfazerAberta`, de verdade; no buraco negro seria VERDADEIRA).
+      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     };
-    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaReal'], deps);
+    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaReal',
+      ...(/^function janelaDoDesfazerAberta\(/m.test(APP_SEM) ? ['janelaDoDesfazerAberta'] : [])], deps);
     return { h, deps, log };
   };
   let m = montarArea();

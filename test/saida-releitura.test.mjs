@@ -112,7 +112,8 @@ function aparelho({ fila = [], manuais = [] }) {
     'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
     'saidaEmRecuo', 'moverProFimDaSaida', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
     'pousouPorOutraAba', 'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
-    'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'carimboDoGesto', 'pousouNoWaze', 'enviarLote'];
+    'atenderOFimDaJanela', 'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'carimboDoGesto', 'pousouNoWaze',
+    'enviarLote'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false,

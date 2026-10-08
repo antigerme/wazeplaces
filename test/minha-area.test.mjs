@@ -87,11 +87,14 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   // E o servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-01/03), e a
   // área noutro servidor com o lugar por decidir (R11-6-02).
   // E a decisão que ficou SEM a resposta de um servidor (R12-6).
+  // E a JANELA do Desfazer que o refazer sem gesto espera — a do card ou uma da
+  // foto ampliada (o irmão do R14-2-05, pedido extra do lote 18).
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
     'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao', 'decisaoSemResposta',
-    'minhaAreaFalhouPorRedeEm']) if (achar(opcional)) nomes.push(opcional);
+    'minhaAreaFalhouPorRedeEm', 'janelaDoDesfazerAberta']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
+    + 'let aprovacaoPendente = null; let exclusaoPendente = null; let renomeacaoPendente = null;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let decisaoDoLugarDe = null;\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };\n'
     // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
@@ -320,10 +323,11 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
     'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia',
-    'decideOLugarDeAgora'])
+    'decideOLugarDeAgora', 'janelaDoDesfazerAberta'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
+    + 'let aprovacaoPendente = null; let exclusaoPendente = null; let renomeacaoPendente = null;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
     + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
     + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null; let decisaoDoLugarDe = null;\n'

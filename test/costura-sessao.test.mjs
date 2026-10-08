@@ -81,6 +81,17 @@ function montar(nomes, deps, fonte = APP_SEM) {
   if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesDaQueda' in deps)) deps.aprovacoesDaQueda = new Map();
+  // O refazer da fila sem gesto pergunta pela JANELA do Desfazer aberta, e o fim
+  // de cada janela atende o que esperava por ela (o irmão do R14-2-05 na foto
+  // ampliada, pedido extra do lote 18): as funções de verdade, quando existem, e
+  // as janelas da foto fechadas por padrão (no buraco negro seriam VERDADEIRAS).
+  const existe = (n) => new RegExp('^function ' + n + '\\(', 'm').test(fonte);
+  if ((nomes.includes('refazerFilaReal') || nomes.includes('retomarBusca')) && !nomes.includes('janelaDoDesfazerAberta')
+    && existe('janelaDoDesfazerAberta')) nomes = [...nomes, 'janelaDoDesfazerAberta'];
+  if (nomes.includes('scheduleAction') && !nomes.includes('atenderOFimDaJanela') && existe('atenderOFimDaJanela')) {
+    nomes = [...nomes, 'atenderOFimDaJanela'];
+  }
+  for (const k of ['aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente']) if (!(k in deps)) deps[k] = null;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
