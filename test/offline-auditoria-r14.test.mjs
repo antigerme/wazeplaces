@@ -1,6 +1,14 @@
 // Rodada 14 da auditoria (2026-10-07), a parte do OFFLINE e do DIAGNÓSTICO — o
 // lote 18. Todos MEDIDOS no navegador pelos roteiros da rodada 14 (r14-4):
 //
+//  · R14-4-01 — duas abas com a MESMA fila: a segunda gravava os mesmos pedidos
+//    com carimbo novo e avisava a primeira, que passava a dizer "Ainda não
+//    preparado" (sem rede: "O mapa e as fotos chegam quando houver sinal") com
+//    tudo no aparelho; e cada preparação de uma derrubava a cobertura da outra,
+//    sem fim (4 gatilhos alternados, 4 preparações da fila inteira);
+//  · R14-4-02 — o pedido que a OUTRA aba decidiu, com o aviso dele ESPERANDO a
+//    conta desta aba, ia pra fila guardada e a poda apagava a prova do pouso:
+//    reaberto sem rede, ele voltava como card;
 //  · R14-4-04 — a gravação da fila guardada não conferia a ÉPOCA do offline
 //    depois de abrir a base: o "Sair" de OUTRA aba apaga a base, e a gravação
 //    que já estava a caminho (a resposta de uma busca chegou antes do aviso) a
@@ -16,10 +24,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const APP = ler('js/app.js');
 const MIN = ler('js/min/app.js');
+const I18N = ler('js/i18n.js');
+const API_JS = ler('js/api.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
@@ -509,10 +520,178 @@ test('R14-4-01: CONTROLE — a aba sozinha: a mesma fila (ou parte dela) regrava
   assert.deepEqual(resumo.chaves, ap.base.guardado.get('fila').places.map(chave).sort());
 });
 
+// ═══ R14-4-02 · o aviso de pouso que ESPERA a conta × a fila guardada ═════════
+// O roteiro e3 do auditor, com o aviso do canal dos pousos, a espera pela conta,
+// a gravação, a poda dos pousos e a reabertura sem rede DE VERDADE — e o api.js
+// INTEIRO, num contexto do `vm`, sobre o armazenamento (`Map`) que as abas
+// dividem. A aba A tem a sessão `tok-a`, sem o perfil (a conta DESTA aba
+// desconhecida); a B, outra sessão da MESMA conta, decide v3 por um caminho que
+// só passa pelo canal (o pouso do "Marcar todos", da recusa automática, da
+// aprovação de foto).
+const CONTA_KEY = constante('CONTA_KEY');
+const SAIDA_KEY = constante('SAIDA_KEY');
+const OFFLINE_POUSOS_MAX = constante('OFFLINE_POUSOS_MAX');
+const POUSO_NA_MEMORIA_MS = constante('POUSO_NA_MEMORIA_MS');
+const DECL_AVISOS = [
+  /^const pousosDaPagina = new Map\(\);$/m, /^const pedidosEmAndamento = new Set\(\);$/m,
+  /^const pedidosQuePousaram = new WeakSet\(\);$/m, /^const decididosPorOutraAbaComCardAqui = new WeakSet\(\);$/m,
+  /^const decididasPorOutraAba = new Map\(\);$/m, /^const DECIDIDAS_POR_OUTRA_ABA_MAX = \d+;$/m,
+  /^const avisosDePousoSemConta = \[\];$/m, /^const AVISOS_DE_POUSO_SEM_CONTA_MAX = \d+;$/m,
+].map((re) => { const m = re.exec(APP_SEM); assert.ok(m, `a declaração ${re} sumiu do app.js`); return m[0]; });
+
+// O api.js de VERDADE, sobre um armazenamento (`Map`) que as abas DIVIDEM.
+function apiSobre(aparelho) {
+  const ctx = {
+    navigator: { language: 'pt', onLine: true },
+    document: { documentElement: {}, querySelectorAll: () => [] },
+    localStorage: {
+      getItem: (k) => (aparelho.has(k) ? aparelho.get(k) : null),
+      setItem: (k, v) => { aparelho.set(k, String(v)); },
+      removeItem: (k) => { aparelho.delete(k); },
+    },
+    console, setTimeout, clearTimeout,
+  };
+  ctx.window = {};
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\n' + API_JS + '\nthis.API = API; this.safeLS = safeLS;', ctx);
+  return { API: ctx.API, safeLS: ctx.safeLS };
+}
+
+const NOMES_AVISO = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
+  'registrarPouso', 'carregarFilaDeSaida', 'offlineLerPousos', 'offlinePodarPousos', 'semOsJaDecididos', 'mesmoLugar',
+  'offlineGravarFila', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede',
+  'anotarDecididosPorOutraAba', 'lembrarDecididasPorOutraAba', 'tirarDaFilaOQueAOutraAbaDecidiu', 'aoPousarEmOutraAba',
+  'aoPousarSemSessaoNaMemoria', 'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta',
+  'chavesQueEsperamAConta'];
+// `perfil`: o perfil desta aba (sem ele, a conta é a guardada no aparelho — se a
+// marca for a desta sessão).
+function abaDaConta({ aparelho, base, fila = [], sessao, perfil = null, onLine = true }) {
+  const { API, safeLS } = apiSobre(aparelho);
+  API.sessionToken = sessao;
+  const diario = [];
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0] || null, filters: { countryId: 30 },
+    profile: perfil, preferences: { offlineDisponivel: true }, pendingAction: null, fetchEpoch: 0, hasMore: false,
+    loadError: true, serverTotal: fila.length };
+  const deps = {
+    AppState, API, safeLS, Treino: { ativo: false, _salvo: null }, navigator: { onLine },
+    CONTA_KEY, SAIDA_KEY, OFFLINE_POUSOS_KEY, OFFLINE_POUSOS_MAX, OFFLINE_STORE, OFFLINE_DB, POUSO_NA_MEMORIA_MS,
+    offlineLigado: () => AppState.preferences.offlineDisponivel === true,
+    offlineDB: base.offlineDB, indexedDB: base.indexedDB, dfato: (k, o) => diario.push([k, o || {}]),
+    lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), offlineRecuperarJanela: async () => {},
+    pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {}, updatePendingCount: () => {},
+    sortQueue: () => {}, showCurrentPlace: () => {}, aoMudarAFilaPorBaixo: () => {},
+    guardaASessaoQueCaiu: () => true,
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, [
+    'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null,',
+    '    offlineJanelaServida = null, ultimaEscritaOkEm = 0, offlineEpoca = 0, contaConfirmadaNestaAba = null;',
+    ...DECL_AVISOS,
+    ...NOMES_AVISO.map(fatiar),
+    `return { ${NOMES_AVISO.join(', ')}, esperando: () => avisosDePousoSemConta.length };`,
+  ].join('\n'))(...chaves.map((k) => deps[k]));
+  return { app, AppState, API, diario };
+}
+// O aparelho da conta 4242, com a sessão `tok-b` guardada e confirmada com ela
+// (a da OUTRA aba, que entrou de novo): a marca não é a de `tok-a`, e a conta de
+// A só se sabe pelo perfil (o R6-1-04).
+function aparelhoDaOutraAba() {
+  return new Map([['waze_session_token', 'tok-b'], [CONTA_KEY, JSON.stringify({ id: '4242', s: marcaDe('tok-b') })]]);
+}
+// Reaberto SEM rede: página NOVA, a mesma base e o mesmo aparelho.
+async function reabrirSemRede(aparelho, base, sessao = 'tok-a') {
+  const C = abaDaConta({ aparelho, base, sessao, onLine: false });
+  await C.app.offlineTentarAbrirSemRede();
+  return C.AppState.queue.map(chave);
+}
+async function relogioAndou(t = Date.now()) {
+  const fim = performance.now() + 2000;
+  while (Date.now() <= t) {
+    if (performance.now() > fim) assert.fail('o relógio de parede não andou');
+    await tique(1);
+  }
+}
+// `caso`: 'reposicao' (a busca de A grava a fila, desde = o começo dela) ou
+// 'varredura' (a preparação que a resposta do perfil dispara: desde = agora);
+// `pouso`: B decide v3; `perfilAntes`: a conta de A já se sabe quando o aviso
+// chega; `contaDoAviso`: a conta de quem decidiu.
+async function avisoEsperandoAConta({ caso = 'reposicao', pouso = true, perfilAntes = false, contaDoAviso = '4242' } = {}) {
+  const aparelho = aparelhoDaOutraAba();
+  const base = baseIDB();
+  const fila = [1, 2, 3, 4, 5, 6].map(P);
+  const A = abaDaConta({ aparelho, base, fila, sessao: 'tok-a', perfil: perfilAntes ? { id: 4242 } : null });
+  assert.equal(await A.app.offlineGravarFila(Date.now()), true, 'PRÉ-CONDIÇÃO: a fila de A não foi gravada');
+  await relogioAndou();
+  if (pouso) {
+    // B decide v3: o pouso vai pro aparelho (o offline está ligado lá) e o aviso
+    // chega a A pelo canal, com a conta e a marca da sessão de B.
+    const B = abaDaConta({ aparelho, base, fila: [P(3)], sessao: 'tok-b', perfil: { id: 4242 } });
+    B.app.registrarPouso([B.AppState.queue[0]]);
+    A.app.aoPousarEmOutraAba({ v: 1, chaves: ['v3|u3'], conta: contaDoAviso, s: marcaDe('tok-b') });
+  }
+  const esperando = A.app.esperando();
+  await relogioAndou();
+  // A grava a fila COM o aviso esperando a conta.
+  if (caso === 'reposicao') {
+    const inicioDaBusca = Date.now();
+    A.AppState.queue.push(P(7));
+    assert.equal(await A.app.offlineGravarFila(inicioDaBusca), true, 'PRÉ-CONDIÇÃO: a reposição de A não gravou');
+  } else {
+    assert.equal(await A.app.offlineGravarFila(), true, 'PRÉ-CONDIÇÃO: a preparação de A não gravou');
+  }
+  const guardada = base.guardado.get('fila').places.map(chave);
+  const pousos = A.app.offlineLerPousos().map((e) => e[0]);
+  // O perfil de A chega: a conta se sabe, e os avisos que esperavam valem (ou não).
+  if (!perfilAntes) {
+    A.AppState.profile = { id: 4242 };
+    A.app.aplicarAvisosQueEsperavamAConta('4242');
+  }
+  const naMemoria = A.AppState.queue.map(chave);
+  // E a próxima gravação, com a conta já sabida.
+  await relogioAndou();
+  await A.app.offlineGravarFila();
+  const depois = base.guardado.get('fila').places.map(chave);
+  return { esperando, guardada, pousos, naMemoria, depois, reaberta: await reabrirSemRede(aparelho, base) };
+}
+
+test('R14-4-02: o pedido que a outra aba decidiu, com o aviso ESPERANDO a conta desta, não vai pra fila guardada — reaberto sem rede, não volta (a reposição)', async () => {
+  const r = await avisoEsperandoAConta({ caso: 'reposicao' });
+  assert.equal(r.esperando, 1, 'PRÉ-CONDIÇÃO: o aviso do pouso não ficou esperando a conta de A');
+  assert.ok(!r.guardada.includes('v3|u3'),
+    `DEFEITO: a reposição de A gravou na fila guardada o pedido que B decidiu: ${r.guardada}`);
+  assert.ok(!r.naMemoria.includes('v3|u3'), 'PRÉ-CONDIÇÃO: o perfil chegou e o pedido decidido não saiu da fila de A');
+  assert.ok(!r.reaberta.includes('v3|u3'),
+    `DEFEITO: reaberto sem rede, o pedido que B decidiu voltou como card — o ✕ seria uma segunda decisão: ${r.reaberta}`);
+  assert.deepEqual(r.reaberta, ['v1|u1', 'v2|u2', 'v4|u4', 'v5|u5', 'v6|u6', 'v7|u7']);
+});
+
+test('R14-4-02: o mesmo com a gravação da PREPARAÇÃO que a resposta do perfil dispara (antes do `definirPerfil`)', async () => {
+  const r = await avisoEsperandoAConta({ caso: 'varredura' });
+  assert.equal(r.esperando, 1, 'PRÉ-CONDIÇÃO');
+  assert.ok(!r.guardada.includes('v3|u3'), `DEFEITO: a preparação gravou o pedido que B decidiu: ${r.guardada}`);
+  assert.ok(!r.reaberta.includes('v3|u3'), `DEFEITO: reaberto sem rede, o pedido que B decidiu voltou como card: ${r.reaberta}`);
+});
+
+test('R14-4-02: CONTROLE — sem o pouso o pedido vai e volta (o instrumento o vê); com a conta já sabida o aviso vale na hora; e o aviso de OUTRA conta não tira nada', async () => {
+  const sem = await avisoEsperandoAConta({ pouso: false });
+  assert.ok(sem.guardada.includes('v3|u3') && sem.reaberta.includes('v3|u3'),
+    'CONTROLE: sem o pouso o pedido não foi gravado ou não reabriu — o teste perdeu o sentido');
+  const antes = await avisoEsperandoAConta({ perfilAntes: true });
+  assert.equal(antes.esperando, 0, 'CONTROLE: com a conta sabida o aviso esperou');
+  assert.ok(!antes.guardada.includes('v3|u3') && !antes.reaberta.includes('v3|u3'));
+  // O aviso de OUTRA conta: fica fora enquanto espera, e a conta que chega (outra)
+  // o descarta — o pedido segue pendente pra esta, e a próxima gravação o inclui.
+  const outra = await avisoEsperandoAConta({ contaDoAviso: '9999' });
+  assert.equal(outra.esperando, 1, 'PRÉ-CONDIÇÃO: o aviso de outra conta não esperou');
+  assert.ok(outra.naMemoria.includes('v3|u3'), 'o aviso de OUTRA conta tirou o pedido da fila desta');
+  assert.ok(outra.depois.includes('v3|u3'), 'DEFEITO: o pedido da fila desta conta não voltou à fila guardada na gravação seguinte');
+  assert.ok(outra.reaberta.includes('v3|u3'), 'o pedido pendente desta conta não reabriu sem rede');
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const nome of ['offlineGravarFila', 'offlineEpoca']) {
+  for (const nome of ['offlineGravarFila', 'offlineEpoca', 'filaChaves', 'chavesQueEsperamAConta']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

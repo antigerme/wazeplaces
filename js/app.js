@@ -21996,6 +21996,30 @@ function offlineDB() {
     });
 }
 
+// ── O que ESPERA a conta desta aba fica fora da fila guardada (R14-4-02) ────
+// O pouso de OUTRA aba chega com a conta DESTA desconhecida — o perfil não
+// chegou, a conta em dúvida (R12-2-05), a renovação sem perfil (R13-2-03) — e o
+// aviso dele ESPERA a conta (`avisosDePousoSemConta`): o pedido segue na fila
+// daqui até o `aoConhecerConta` aplicá-lo. A gravação da fila guardada nesse meio
+// (a reposição, ou a preparação que a própria resposta do perfil dispara — a
+// prova de rede roda ANTES do `definirPerfil`) levava o pedido pra fila guardada,
+// e a poda dos pousos, por TEMPO, apagava a prova de que ele foi decidido (o
+// pouso de lá é mais velho que `desde`): o perfil chegava, o pedido saía da
+// memória, mas reaberto sem rede ele voltava como card, e o ✕ ali seria uma
+// segunda decisão ao Waze — lido lá e rejeitado aqui (MEDIDO no navegador, e3 da
+// rodada 14, `defeito` e `pelo-perfil`). As chaves dos avisos que esperam ficam
+// fora da gravação; se a conta for OUTRA (o aviso sai sem efeito), o pedido
+// segue na fila e a próxima gravação o inclui. Toda estrutura que guarde aviso
+// de pouso esperando a conta entra AQUI — é a fonte única da gravação. Só em
+// memória, como os avisos.
+function chavesQueEsperamAConta() {
+    const fora = new Set();
+    for (const a of avisosDePousoSemConta) {
+        for (const k of (Array.isArray(a && a.chaves) ? a.chaves : [])) if (typeof k === 'string' && k) fora.add(k);
+    }
+    return fora;
+}
+
 // ── A MESMA fila guardada mantém o CARIMBO (R6-4-2, R14-4-01) ────────────────
 // O carimbo (`t`) da fila guardada é a VERSÃO dela: é por ele que a linha das
 // Preferências sabe se a última preparação completa a cobriu
@@ -22061,10 +22085,16 @@ async function offlineGravarFila(desde) {
     // que o Waze já tinha marcado: reaberto sem rede, os 25 voltavam como card, e
     // o ✕ num deles ia ao Waze (MEDIDO no navegador, o1 da rodada 13). O que o
     // lote não marcar segue na fila e entra na próxima gravação.
+    //
+    // E SEM o que a OUTRA aba decidiu e cujo aviso ainda ESPERA a conta desta
+    // (R14-4-02, ver `chavesQueEsperamAConta`): o pedido segue na fila daqui até
+    // a conta se saber, e a poda apagava o pouso de lá, mais velho que `desde`.
+    const esperandoAConta = typeof chavesQueEsperamAConta === 'function' ? chavesQueEsperamAConta() : null;
     const fila = filaReal().filter((p) => !(typeof decididosPorOutraAbaComCardAqui !== 'undefined'
             && decididosPorOutraAbaComCardAqui.has(p) === true)
         && !(typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(chaveDoPedido(p)) === true)
-        && !(typeof pedidosQuePousaram !== 'undefined' && pedidosQuePousaram.has(p) === true));
+        && !(typeof pedidosQuePousaram !== 'undefined' && pedidosQuePousaram.has(p) === true)
+        && !(esperandoAConta && esperandoAConta.has(chaveDoPedido(p)) === true));
     if (!offlineLigado() || !fila.length) return false;
     // E o DONO: a sessão DESTA aba, a da MEMÓRIA (`marcaDestaAba`, R12-1-03), e
     // sem ela nada é gravado (R13-4-04). Era o `getSession`, que com a memória
