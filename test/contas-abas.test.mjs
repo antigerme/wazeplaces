@@ -1480,8 +1480,11 @@ test('A11: a fila que muda com o diálogo ABERTO muda a frase (a rede volta, a f
   const f = montarAviso([ITEM('v1')], { dialogoAberto: false });
   f.h.updateInFlightIndicator();
   assert.equal(f.el.textContent, 'velho', 'com o diálogo fechado não há o que redesenhar');
-  // Abrir o diálogo desenha a frase ANTES de mostrá-lo.
-  assert.match(APP_SEM, /\$\('logoutBtn'\)\.addEventListener\('click', \(\) => \{\s*desenharAvisoDoSair\(\);[^\n]*\n\s*openModal\('logoutModal'\);/);
+  // Abrir o diálogo desenha a frase ANTES de mostrá-lo — e DEPOIS de a janela do
+  // Desfazer sair (R14-8-06, em test/contas-auditoria-r14): a decisão dela não
+  // é descartada calada pelo "Sair".
+  assert.match(APP_SEM, /\$\('logoutBtn'\)\.addEventListener\('click', \(\) => abrirDialogoDoSair\(\)\);/);
+  assert.match(fatiarDe(APP_SEM, 'abrirDialogoDoSair'), /despacharJanelaDoDesfazer\(\);\s*desenharAvisoDoSair\(\);[^\n]*\n\s*openModal\('logoutModal'\);/);
 });
 
 test('A11: a frase mora no diálogo do "Sair", nas 4 línguas, com o número de verdade', () => {

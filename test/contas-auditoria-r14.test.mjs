@@ -179,3 +179,43 @@ test('R14-8-09: a sessão que VOLTA (`showMainScreen`, a renovação) mostra de 
   v.h.showMainScreen();
   assert.equal(v.indicador(), null);
 });
+
+// ═══ R14-8-06 · o "Sair" aberto na janela do Desfazer ════════════════════════
+function sairNaJanela({ noAr = [] } = {}) {
+  const log = [];
+  const el = { textContent: '', escondido: true, classList: { toggle: (c, v) => { if (c === 'hidden') el.escondido = v; } } };
+  const AppState = { pendingAction: { type: 'reject', execute: () => log.push('a decisão da janela saiu') } };
+  const deps = {
+    AppState, t: (k, v) => k + (v ? ':' + JSON.stringify(v) : ''),
+    document: { getElementById: (id) => (id === 'logoutSaidaAviso' ? el : null) },
+    enviarPendenciasDoLightbox: () => log.push('as da foto saíram'),
+    removeUndoBanner: () => log.push('o banner saiu'),
+    openModal: (id) => log.push('abriu ' + id),
+    // A decisão da janela é anotada na fila de saída quando sai, e está EM ANDAMENTO desde o gesto.
+    carregarFilaDeSaida: () => noAr.map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v })),
+    pedidosEmAndamento: new Set(noAr.map((v) => v + '|u' + v)),
+    chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, reivindicadoPorOutraAba: () => false,
+  };
+  const h = montar(['abrirDialogoDoSair', 'despacharJanelaDoDesfazer', 'desenharAvisoDoSair'], deps);
+  return { h, log, el, AppState };
+}
+
+test('R14-8-06: abrir o "Sair" na janela do Desfazer DESPACHA a janela — a decisão (e as da foto) sai, o banner sai, e só então o diálogo abre', () => {
+  const m = sairNaJanela();
+  m.h.abrirDialogoDoSair();
+  assert.deepEqual(m.log, ['a decisão da janela saiu', 'as da foto saíram', 'o banner saiu', 'abriu logoutModal'],
+    'DEFEITO: o diálogo do "Sair" abriu com a janela correndo — o banner fica por cima dele e o "Sair" descarta a decisão calado: ' + JSON.stringify(m.log));
+  assert.equal(m.AppState.pendingAction, null);
+  // E o "Sair" da Ajuda passa por aqui.
+  assert.match(APP_SEM, /\$\('logoutBtn'\)\.addEventListener\('click', \(\) => abrirDialogoDoSair\(\)\);/,
+    'o botão "Sair" não abre o diálogo pelo `abrirDialogoDoSair`');
+});
+
+test('R14-8-06: CONTROLE — a decisão que acabou de sair (em andamento) não entra no aviso; o que ESPERA envio entra, como antes', () => {
+  const noAr = sairNaJanela({ noAr: ['v1'] });
+  noAr.h.abrirDialogoDoSair();
+  assert.equal(noAr.el.escondido, true, 'a decisão que acabou de sair foi contada como "descartada"');
+  const esperando = sairNaJanela();
+  esperando.h.desenharAvisoDoSair();
+  assert.equal(esperando.el.escondido, true);
+});

@@ -1393,10 +1393,7 @@ function setupAppListeners() {
     const $ = id => document.getElementById(id);
 
     // openModal fecha o helpModal automaticamente (modais não empilham)
-    $('logoutBtn').addEventListener('click', () => {
-        desenharAvisoDoSair();   // quantas decisões o "Sair" descarta, se houver
-        openModal('logoutModal');
-    });
+    $('logoutBtn').addEventListener('click', () => abrirDialogoDoSair());
     // Sem o evento: o `handleLogout` lê o 1º argumento como opções.
     $('confirmLogout').addEventListener('click', () => handleLogout());
     $('cancelLogout').addEventListener('click', () => closeModal('logoutModal'));
@@ -11693,6 +11690,24 @@ function desenharAvisoDoSair() {
         && !reivindicadoPorOutraAba(x)).length;
     el.textContent = n ? t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }) : '';
     el.classList.toggle('hidden', !n);
+}
+
+// O "Sair" da Ajuda. Aberto na janela do Desfazer, o banner "Pedido rejeitado ·
+// Desfazer" seguia na tela POR CIMA do diálogo (ele mora no `#notifyStack`, acima
+// dos modais), o diálogo não dizia nada da decisão — o aviso conta só a fila de
+// saída —, e confirmar a DESCARTAVA calada: nenhuma ida ao Waze (auditoria da
+// rodada 14, R14-8-06, MEDIDO). As da foto ampliada também (aprovar, excluir,
+// renomear), cada uma com a janela dela. Abrir o diálogo DESPACHA a janela, como
+// a folha da presença, o "Marcar todos" e o treino: a decisão que a pessoa tomou
+// sai agora, e o banner sai com ela (`despacharJanelaDoDesfazer`). É o que fecha
+// sem frase nova: contar a decisão da janela no aviso valeria só pra do card (as
+// da foto não são "pedido esperando envio"), e o banner seguiria em cima do
+// diálogo. A decisão no ar não entra no aviso (ver `desenharAvisoDoSair`): ela já
+// saiu, e chega ao Waze com o "Sair" no meio.
+function abrirDialogoDoSair() {
+    despacharJanelaDoDesfazer();
+    desenharAvisoDoSair();   // quantas decisões o "Sair" descarta, se houver
+    openModal('logoutModal');
 }
 
 // `porOutraAba`: o "Sair" foi dado numa OUTRA aba deste aparelho (ver
