@@ -16,30 +16,29 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-07 ~22:30 UTC)
+## 0. Estado agora (2026-10-08 ~02:30 UTC)
 
-- **Lote 16 em produção** (PR #263, `4be3612`, v2026.10.07-04): os 13 arquivos que o app carrega iguais, byte a byte,
-  aos juntados (`scratchpad/prod-bytes.mjs`, com o controle de que a versão anterior difere), o CI da main verde, e os
-  cabeçalhos conferidos com o `_headers` — iguais, menos dois que o Managed Transform "Add security headers" do
-  Cloudflare troca na borda (X-Frame-Options e Referrer-Policy; decisão do owner). Com os cookies NOVOS das duas contas
-  (os de 2026-10-06 passaram a dar "guest user" no Waze, com o prazo em 2026-11-06), o `prod-auditoria.mjs` inteiro deu
-  132 ✓ e parou num erro do ROTEIRO na seção 19 (c), refeita: **24 ✓ · 0 ✗**. O roteiro media o eco com a falha que a
-  seção 18 deixa na conversa e com o envio que chega ao Waze antes da falha (em produção o eco do tempo real ganha a
-  resposta HTTP); hoje a falha vem primeiro e o mesmo corpo vai ao servidor depois. Nenhum defeito do app.
-- **Rodada 13** completa (`scratchpad/r13-<n>/relatorio.md`, ~28 achados): nenhum alto; médios — a decisão que pousa
-  depois da queda não registrava o pouso (três auditores), a aba no meio da renovação jogava fora o aviso do pouso, o
-  link de pareamento que falha com um login no ar, com "Minha área" o perfil que chega refazia a fila guardada aberta
-  sem rede, e um LAÇO de requisição quando o outro servidor responde 401 com a decisão do lugar pendente (regressão do
-  lote 16). O resto, baixos.
-- **Lote 17 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): oito agentes (foto
-  ampliada, duas abas, fila e teclado, contas, offline, presença, treino e Histórico, Filtros e "Minha área"); dois
-  conflitos em fonte resolvidos pela união (o `definirPerfil` entre fila e treino; o `api.js` entre contas e foto
-  ampliada) e um harness que não enxergava a função nova de outra área. Relatórios em
-  `scratchpad/relatorio-l17-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 17").
+- **Lote 17 em produção** (PR #264, v2026.10.07-05): os 13 arquivos que o app carrega iguais, byte a byte, aos juntados,
+  e o `prod-auditoria.mjs` inteiro com as duas contas deu **142 ✓ · 1 ✗**. O ✗ era do ROTEIRO (seção 19: o recibo
+  chegou "Lida", com a outra conta na conversa aberta); refeito, **31 ✓ · 0 ✗**. Nenhum defeito do app.
+- **Rodada 14** completa (`scratchpad/r14-<n>/relatorio.md`), com um auditor novo, de PONTA A PONTA (o app usado como um
+  editor usaria, nos dois motores, em três telas e nos quatro idiomas). Um ALTO antigo (igual desde o #252): a renovação
+  pela extensão depois de a busca levar o 401 terminava em "Tudo limpo!" com a fila pendente no Waze. O resto, médios e
+  baixos: duas abas (a sessão guardada que caía com a outra, a preparação do offline negando o que estava no aparelho),
+  o "Sair" descartando a decisão da janela do Desfazer, a conversa reaberta que ficava não lida, o teclado (as setas),
+  telas estreitas (botões de diálogo, ícones, o pulo do placar), o convite de instalar fora do Safari e textos.
+- **Lote 18 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (busca, abas,
+  contas, offline, offline no WebKit, presença, foto ampliada, treino, ponta a ponta) e três pedidos extras (contas: o
+  "Sair" com a pergunta à extensão no ar e a aba que caiu antes do perfil; busca: o refazer automático e a janela do
+  Desfazer). Na junção: dois conflitos em fonte resolvidos pela união, um harness que não enxergava a função nova de
+  outra área, um teste instável (a decisão conferida por prazo, trocado pela espera da condição) e um defeito do APP
+  achado por uma medida instável — o pulo do contador do placar crescia o placar e empurrava o card no SE e no Fold.
+  O smoke do offline passou a rodar também no WebKit (menos as seções com o worker no comando). Relatórios em
+  `scratchpad/relatorio-l18-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 18").
 - **Cookies** (2026-10-07 ~22 h UTC): `82a8fa0f-antigerme_cookies.txt` (L6+AM) e `3c147ac2-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI (Playwright 1.64: Chrome 156 e WebKit 27.2), merge, produção (`prod-bytes.mjs` e, com os
-  cookies novos, o `prod-auditoria.mjs` inteiro, com as seções 19 e 20) — e a rodada 14.
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 21) — e a
+  rodada 15.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -86,6 +85,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #261 | 2026100702 | rodada 13: recusa automática e "Marcar todos", duas abas, treino, foto ampliada, presença, "Minha área" por servidor, entrada, offline e FAB | **123 ✓** em produção, com a seção 17 (8 ✓), nenhum defeito do app |
 | #262 | 2026100703 | rodada 14: o congelamento no fim do treino com a busca lenta, aprovar × excluir foto no mesmo local, duas abas e o canal dos pousos, o envio que falha na conversa no leitor de tela, "Minha área" por servidor, entrada, offline e FAB | **132 ✓** em produção, com a seção 18 (8 ✓); o 1 ✗ era do roteiro (a triagem do diagnóstico mudou de forma), refeito: 25 ✓ · 0 ✗; nenhum defeito do app |
 | #263 | 2026100704 | rodada 15: duas abas fora da fila (a recusa automática e a busca no ar, a fila guardada), a lixeira na vez do local, presença, "Minha área" pendente, entrada, offline e Histórico | **132 ✓** em produção e a seção 19 refeita (**24 ✓ · 0 ✗**; o erro era do roteiro), com cookies novos; os 13 arquivos byte a byte iguais ao juntado e os cabeçalhos conferidos com o `_headers` (2 trocados pela borda, decisão do owner); nenhum defeito do app |
+| #264 | 2026100705 | rodada 16: a decisão que pousa depois da queda, o aviso do pouso na renovação, o link de pareamento com um login no ar, "Minha área" com a fila guardada sem rede, o laço de pedidos do 401 de outro servidor, a lixeira e o toque, presença e treino | **142 ✓** em produção, com as seções 19 e 20; o 1 ✗ era do roteiro (o recibo chegou "Lida", e não "Enviada": a outra conta estava com a conversa aberta), refeito: **31 ✓ · 0 ✗**; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
