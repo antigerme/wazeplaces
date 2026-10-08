@@ -6457,17 +6457,21 @@ function handleKeyDown(e) {
     }
 
     // A ação vale pro pedido do card que SAIU, não pro da frente 350 ms depois
-    // (ver `agirNoPedidoDoGesto`).
+    // (ver `agirNoPedidoDoGesto`). E o foco que estava DENTRO do card é prometido
+    // ao card que fica, como no Enter (ver `prometerFocoDaSeta`, R14-8-01).
     if (e.key === 'ArrowLeft') {
         e.preventDefault();
+        prometerFocoDaSeta('left');
         if (window.triggerSwipe) window.triggerSwipe('left', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleReject));
         else handleReject();
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
+        prometerFocoDaSeta('right');
         if (window.triggerSwipe) window.triggerSwipe('right', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleMarkAsRead));
         else handleMarkAsRead();
     } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        prometerFocoDaSeta('up');
         if (window.triggerSwipe) window.triggerSwipe('up', (card) => agirNoPedidoDoGesto(pedidoDoCard(card), handleSkip));
         else handleSkip();
     }
@@ -16253,6 +16257,30 @@ let focoDoTeclado = null;   // o seletor do botão que recebe o foco (ou a lista
 function pedirFocoDoTeclado(botao, peloTeclado, acao) {
     if (!peloTeclado || !botao || document.activeElement !== botao) return;
     focoDoTeclado = BOTAO_DA_ACAO[acao] || null;
+}
+
+// A SETA com o foco DENTRO do card da frente (R14-8-01, auditoria da rodada 14).
+// As setas decidem como o ✕ ↑ ✓ — é o atalho que a Ajuda e o "Como funciona"
+// ensinam —, e o card sai levando o controle focado. O Enter no MESMO botão
+// promete o foco ao equivalente do card que fica (C10); a seta não prometia, e o
+// foco caía no <body>. MEDIDO nos dois motores: Enter no ↑ → o ↑ do card novo;
+// a seta ↑ com o foco no mesmo ↑ → <body>. E é o próprio app que põe o foco
+// ali (o "Entendi" pelo teclado, o fim da série do autor, o Enter no ✕), então
+// a seta seguinte o jogava fora — quem usa leitor de tela perdia o lugar.
+//
+// A régua é a do controle que SOME com o foco nele: o foco vai ao MESMO botão do
+// card que fica (o ✕ focado → o ✕, decida a seta o que decidir); de outro
+// controle do card (a seta da foto, o ↗, o "Ver +N"), ao ✕. Quem pousa é o
+// `aplicarFocoDoTeclado`, com as regras dele (espera a trava, cede a quem mexeu).
+// Tecla é sempre teclado: não há `detail` a conferir. A seta que não decide nada
+// (← → num card de foto sem a foto, `direcaoTravada`) não promete.
+function prometerFocoDaSeta(direcao) {
+    if (direcaoTravada(direcao)) return;
+    const card = cardDaFrente();
+    const ativo = document.activeElement;
+    if (!card || !ativo || ativo === document.body || !card.contains(ativo)) return;
+    focoDoTeclado = ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].find((s) => card.querySelector(s) === ativo)
+        || BOTAO_DA_ACAO.left;
 }
 
 // A trava que LIGA com o foco num ✕ ↑ ✓ do card da frente (R5-2-05): o botão

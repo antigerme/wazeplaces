@@ -10833,6 +10833,48 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
 
+  // ── R14-8-01: a SETA com o foco DENTRO do card (auditoria da rodada 14) ────
+  // As setas decidem como o ✕ ↑ ✓, e o card saía levando o botão focado: o foco
+  // caía no <body> (MEDIDO nos dois motores) — enquanto o Enter no MESMO botão o
+  // leva ao equivalente do card que fica (o C10, acima). E é o próprio app que
+  // põe o foco ali (o "Entendi" pelo teclado, o fim da série do autor). O foco
+  // vai ao MESMO botão do card que fica, decida a seta o que decidir; de outro
+  // controle do card (o ↗), ao ✕. CONTROLE: com o foco FORA do card, a seta
+  // decide e o foco fica onde a pessoa o pôs — sem isto, "o foco foi ao card"
+  // passaria com uma seta que puxa o foco de qualquer lugar.
+  for (const [nome, sel, cls, seta, undo] of [
+    ['← com o foco no ✕, com a janela do Desfazer', '.card-btn-reject', 'card-btn-reject', 'ArrowLeft', true],
+    ['↑ com o foco no ↑, com a janela do Desfazer', '.card-btn-skip', 'card-btn-skip', 'ArrowUp', true],
+    ['→ com o foco no ✕, sem a janela', '.card-btn-reject', 'card-btn-reject', 'ArrowRight', false],
+    ['← com o foco no ↗ (outro controle do card)', '.card-wme-link', 'card-btn-reject', 'ArrowLeft', false],
+  ]) {
+    const id = `card/teclado ${MOTOR}: a seta ${nome}`;
+    const g = await cardPagina([cardPedido('kA'), cardPedido('kB'), cardPedido('kC')], { undo });
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) ' + sel);
+    const antes = await g.page.evaluate((s) => document.activeElement === document.querySelector('#cardStack .place-card:not(.card-fundo) ' + s), sel);
+    checa(antes, `${id}: PRÉ-CONDIÇÃO — o controle do card não ficou com o foco`);
+    await g.page.keyboard.press(seta);
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(f.frente === 'kB', `${id}: PRÉ-CONDIÇÃO — a seta não decidiu`, JSON.stringify(f));
+    checa(f.onde === cls && f.naFrente, `${id}: DEFEITO — o foco não foi ao ${cls} do card que fica (ficou em ${f.onde})`, JSON.stringify(f));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    const id = `card/teclado ${MOTOR}: CONTROLE — a seta com o foco FORA do card`;
+    const g = await cardPagina([cardPedido('kA'), cardPedido('kB')], { undo: false });
+    await g.page.focus('#filtersBtn');
+    await g.page.keyboard.press('ArrowLeft');
+    await esperarNaPagina(g.page, acaoTerminou, 8000);
+    await doisQuadros(g.page);
+    const f = await focoAgora(g.page);
+    checa(f.frente === 'kB', `${id}: PRÉ-CONDIÇÃO — a seta deixou de decidir com o foco no cabeçalho`, JSON.stringify(f));
+    checa(f.onde === '#filtersBtn', `${id}: a seta puxou o foco de fora pro card (o foco pulando pela tela)`, JSON.stringify(f));
+    await g.fechar();
+  }
+
   // ── C4: a foto em decisão falha no meio da saída pelo ✕ ─────────────────
   for (const falha of [true, false]) {
     const id = `card/foto ${MOTOR}: ${falha ? '' : 'CONTROLE — '}a foto em decisão ${falha ? 'FALHA' : 'chega'} durante a saída pelo ✕`;
