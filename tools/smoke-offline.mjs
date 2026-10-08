@@ -2120,13 +2120,28 @@ const selo9c = (pg) => pg.evaluate(() => { const s = document.getElementById('de
 // assenta (`posicionarFabDev` escolhe o canto pelo que está na tela), e o toque
 // calculado no lugar velho cai fora dele — foi o que fez o primeiro toque de
 // cada abertura sumir na primeira rodada desta seção.
+//
+// E PARADO é estar NO LUGAR que o app pôs — o retângulo bate com o `left`/`top`
+// escrito, e nenhuma transição anda —, não três amostras iguais: a mudança de
+// canto desliza (0,16 s), e o WebKit do Playwright, que desenha um quadro a
+// cada ~100 ms, segura a transição no PONTO DE PARTIDA por mais de 300 ms às
+// vezes. MEDIDO (e8 do lote 18, 2ª de duas abas): o `top` já escrito em 704 px,
+// a transição "running" e o retângulo parado em 77 por quatro amostras — o
+// toque caía ali, o `pointerdown` do botão (que zera a transição) o mandava pra
+// 704, e o `pointerup` ia pro que estava embaixo: sem captura em 6 de 40
+// toques (com esta condição, 0 de 40).
 const tocar9c = async (pg, cdp) => {
   let ultimo = '';
   for (let j = 0, parado = 0; j < 60 && parado < 3; j++) {
     const agora = await pg.evaluate(() => { const f = document.getElementById('devFab');
       const b = f.getBoundingClientRect();
-      return f.classList.contains('hidden') ? 'escondido' : `${Math.round(b.left)},${Math.round(b.top)}`; });
-    parado = agora !== 'escondido' && agora === ultimo ? parado + 1 : 0;
+      const escrito = (v) => (/px$/.test(v) ? parseFloat(v) : null);
+      const [x, y] = [escrito(f.style.left), escrito(f.style.top)];
+      const noLugar = !f.getAnimations().some((a) => a.playState === 'running')
+        && (x === null || Math.abs(b.left - x) < 1) && (y === null || Math.abs(b.top - y) < 1);
+      if (f.classList.contains('hidden')) return 'escondido';
+      return noLugar ? `${Math.round(b.left)},${Math.round(b.top)}` : 'deslizando'; });
+    parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo ? parado + 1 : 0;
     ultimo = agora;
     await dormir(100);
   }

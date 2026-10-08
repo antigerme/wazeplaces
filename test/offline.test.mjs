@@ -654,6 +654,14 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
   assert.match(bloco9c, /hasTouch: true, isMobile: true/, 'a 9c tem que rodar num contexto com TOQUE — o botão responde a toque');
   assert.match(bloco9c, /Input\.dispatchTouchEvent/, 'a 9c tem que TOCAR o botão, não chamar a captura por fora');
+  // E o toque espera o botão NO LUGAR que o app pôs, não três amostras iguais:
+  // MEDIDO no WebKit (lote 18), a transição da troca de canto fica parada no
+  // ponto de partida por mais de 300 ms às vezes, e o toque caía no lugar velho
+  // (6 de 40 sem captura; 0 de 40 com a condição).
+  assert.match(bloco9c, /const noLugar = !f\.getAnimations\(\)\.some\(\(a\) => a\.playState === 'running'\)/,
+    'o toque da 9c voltou a esperar só três amostras iguais — a transição parada no começo engana');
+  assert.match(bloco9c, /parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo/,
+    'o toque da 9c conta como parado o FAB que ainda desliza');
   assert.doesNotMatch(bloco9c, /dlogCapturar\(/, 'a 9c chamou a captura por fora — o toque de verdade é o que se mede');
   assert.match(bloco9c, /\.close\(\{ runBeforeUnload: true \}\)/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
   // Ir pro FUNDO sem descarregar: descarregar aborta o IndexedDB em voo, e aí
