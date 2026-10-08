@@ -142,6 +142,8 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
   const fontes = [
     'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false;',
     'let filaEsperaPerfil = false; let referenciasDoPerfil = null; let posicaoGps = null;',
+    // O lugar do pedido do perfil, que a decisão leva (R14-6-04).
+    'let lugarDoPedidoDoPerfil = null;',
     ...['chaveDoPedido', 'serieDoAutor', 'manterFocoNaFrente', 'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue',
       'devolverPedidoRecusado', 'pousouNoWaze', 'descontarGestoSemSessao', 'decisaoDepoisDaQueda', 'enviarLote',
       'filaReal', 'aplicarRecusaAutomatica', 'completarPerfilChegado', 'esquecerFocoAutor',

@@ -118,9 +118,12 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
   // reprovar pelo COMPORTAMENTO, não por não achá-las.
   if (achar('pararContagemEmCurso')) nomes.push('pararContagemEmCurso');
   if (achar('esperarOLugarDaFilaVazia')) nomes.push('esperarOLugarDaFilaVazia');
+  // A decisão do lugar DE AGORA (R14-6-04).
+  if (achar('decideOLugarDeAgora')) nomes.push('decideOLugarDeAgora');
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;
-    let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false; let buscaEsperaOPerfil = false;\n`
+    let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false; let buscaEsperaOPerfil = false;
+    let lugarDoPedidoDoPerfil = null;\n`
     + nomes.map(fatiar).join('\n') + '\nreturn { startFetching, fetchNextPage, updatePendingCount };')(...chaves.map((k) => deps[k]));
   // Roda os quadros pendentes até `ms` adiante (cada um agenda o seguinte).
   const quadros = (ms) => {
@@ -352,4 +355,53 @@ test('R13-6-04: CONTROLES — a DECISÃO do lugar não tem teto, e o perfil que 
   m.soltarPerfil();
   await busca;
   assert.deepEqual(m.tela.slice(-1), ['vazio']);
+});
+
+// ═══ R14-6-03 · a espera de uma fila que o ↻ já trocou não segura o "…" ════════
+// (auditoria da rodada 14; o R13-6-03 incompleto). A marca da espera
+// (`buscaEsperaOPerfil`) era GLOBAL: a abertura esperando o perfil (o teto de 4 s)
+// a mantinha ligada, o ↻ nesse meio começava OUTRA fila, a busca dela FALHAVA — e
+// o "Restam" dizia "…" ao lado do "Falha ao carregar", e seguia dizendo depois do
+// teto da abertura, que sai pela época trocada sem redesenhar nada (MEDIDO no
+// navegador, nos dois motores; roteiro r14-6/t3; o mesmo pelo "Aplicar" com a
+// decisão do lugar no ar, t2 E). Hoje a marca é a ÉPOCA da fila que espera, e o
+// contador só diz "…" pela espera da fila de agora.
+test('R14-6-03: o ↻ cuja busca FALHA durante a espera da abertura — "Falha ao carregar" com "Restam —", nunca o "…" da fila de antes', async () => {
+  const m = montar({ texto: '—', perfilNoAr: true, tetos: true });
+  const abertura = m.app.startFetching();
+  await m.tique();
+  m.soltar(VAZIA);                                 // a abertura: vazia, e espera o perfil (o teto de 4 s)
+  await m.tique();
+  assert.equal(m.el.textContent, '…', 'PRÉ-CONDIÇÃO: a abertura não ficou esperando o perfil');
+  const doToque = atualizar(m);                    // o ↻
+  await m.tique();
+  m.soltar(FALHA);                                 // a busca do ↻ falha (a borda com a origem fora: 502)
+  await doToque;
+  m.quadros(800);
+  assert.deepEqual(m.tela.slice(-1), ['vazio'], 'PRÉ-CONDIÇÃO: o painel de falha do ↻');
+  assert.equal(m.AppState.loadError, true, 'PRÉ-CONDIÇÃO: a busca do ↻ falhou');
+  assert.equal(m.el.textContent, '—',
+    `DEFEITO: "Falha ao carregar" com "Restam ${m.el.textContent}" — a espera da fila de ANTES segura o "carregando" (R14-6-03)`);
+  m.vencer(TETO);                                  // o teto da abertura vence: ela sai pela época trocada
+  await abertura;
+  m.quadros(800);
+  assert.equal(m.el.textContent, '—', `depois do teto da abertura, "Restam ${m.el.textContent}" com a falha na tela`);
+});
+
+test('R14-6-03: CONTROLE — a busca do ↻ que volta VAZIA espera o perfil ela mesma: "…" enquanto espera, e "0" depois', async () => {
+  const c = montar({ texto: '—', perfilNoAr: true, tetos: true });
+  const abertura = c.app.startFetching();
+  await c.tique();
+  c.soltar(VAZIA);
+  await c.tique();
+  const doToque = atualizar(c);
+  await c.tique();
+  c.soltar(VAZIA);
+  await c.tique();
+  assert.equal(c.el.textContent, '…', 'CONTROLE: a espera da fila de AGORA deixou de dizer "…" — o conserto calou o carregando de verdade');
+  c.vencer(TETO);
+  await doToque;
+  await abertura;
+  c.quadros(800);
+  assert.equal(c.el.textContent, '0');
 });

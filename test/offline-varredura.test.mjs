@@ -997,6 +997,8 @@ function aparelhoO1({ filtros = null } = {}) {
       'desligarMinhaAreaSemCaixa'];
     // A marca da falha por rede da espera de "Minha área" (R12-4-02): sem ela, o código de antes.
     if (/^function minhaAreaFalhouPorRedeEm\(/m.test(APP_SEM)) nomes.push('minhaAreaFalhouPorRedeEm');
+    // A decisão do lugar DE AGORA (R14-6-04): sem ela, o código de antes.
+    if (/^function decideOLugarDeAgora\(/m.test(APP_SEM)) nomes.push('decideOLugarDeAgora');
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, ultimaBuscaFalhouPorRede = false,
         offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,

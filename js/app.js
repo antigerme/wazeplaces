@@ -7004,9 +7004,11 @@ async function completarPerfilChegado(perfil, epoca) {
     // a fila virava a do país, sem o aviso (MEDIDO no navegador, auditoria da
     // rodada 10, R10-6-01). A busca de "Minha área" espera por ela
     // (`startFetching`), como espera o perfil; nenhuma busca nova sai por isso.
-    // Promessa no `AppState`, como a do perfil (`_profilePromise`).
+    // Promessa no `AppState`, como a do perfil (`_profilePromise`). Ela leva o
+    // LUGAR sobre o qual decide (`decideOLugarDeAgora`, R14-6-04).
     let decidiu = null;
     const decisao = new Promise((ok) => { decidiu = ok; });
+    decisao.lugar = lugarDoPedidoDoPerfil ? { regiao: lugarDoPedidoDoPerfil.regiao, pais: String(lugarDoPedidoDoPerfil.pais) } : null;
     AppState._caixaDaMinhaAreaNoAr = decisao;
     try {
         // O país de quem entra: só depois do perfil, e só quando o atual é um onde
@@ -13027,6 +13029,8 @@ function refazerDecisaoSemResposta() {
     const lugar = { regiao: API.getRegion(), pais: API.getCountry() };
     let decidiu = null;
     const decisao = new Promise((ok) => { decidiu = ok; });
+    // O lugar sobre o qual ela decide (`decideOLugarDeAgora`, R14-6-04).
+    decisao.lugar = { regiao: lugar.regiao, pais: String(lugar.pais) };
     AppState._caixaDaMinhaAreaNoAr = decisao;
     (async () => {
         try {
@@ -13509,7 +13513,9 @@ function fetchNextPage() {
 
 // O `startFetching` ESPERANDO o perfil pra buscar ("Minha área" sem as áreas
 // ainda): a fila está carregando, como com a busca no ar, e o "Restam" diz "…"
-// (ver `updatePendingCount`).
+// (ver `updatePendingCount`). Guarda a ÉPOCA da fila da busca que espera (o
+// `fetchEpoch` dela), ou `false` sem espera nenhuma: a espera de uma fila que o
+// ↻ já trocou não é desta (R14-6-03).
 let buscaEsperaOPerfil = false;
 
 // A fila que voltou VAZIA com o lugar por decidir espera (ver o fim do
@@ -13539,6 +13545,14 @@ async function esperarOLugarDaFilaVazia(promessa) {
     // O perfil chegou dentro do teto, e a decisão que ele começou está no ar (a
     // carga só termina depois dela): ela vem inteira, como sempre.
     if (AppState.profile && AppState._caixaDaMinhaAreaNoAr) await AppState._caixaDaMinhaAreaNoAr;
+}
+
+// A decisão do lugar decide sobre o lugar de QUANDO o perfil foi pedido
+// (`lugarDoPedidoDoPerfil`, a régua do `paisDoPerfil`) — ou, na pergunta repetida
+// (`refazerDecisaoSemResposta`), sobre o lugar dela. A promessa no ar o leva
+// (`lugar`). Ainda é o lugar de agora? Sem lugar conhecido, sim: é o de sempre.
+function decideOLugarDeAgora(lugar) {
+    return !lugar || (API.getRegion() === lugar.regiao && String(API.getCountry()) === String(lugar.pais));
 }
 
 async function startFetching() {
@@ -13581,11 +13595,14 @@ async function startFetching() {
     // novo, só a ele, antes da busca (ver `refazerDecisaoSemResposta`): achando
     // onde a pessoa edita, a fila é refeita lá, e esta não vale mais. Antes de
     // qualquer `await`: a busca que começa com a decisão no ar não repete.
+    //
+    // As esperas daqui marcam a busca que espera pela ÉPOCA da fila dela
+    // (`buscaEsperaOPerfil`, R14-6-03), e cada uma só apaga a própria marca.
     const refazendoADecisao = refazerDecisaoSemResposta();
     if (refazendoADecisao) {
-        buscaEsperaOPerfil = true;
+        buscaEsperaOPerfil = epoca;
         updatePendingCount();
-        try { await refazendoADecisao; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        try { await refazendoADecisao; } catch (e) {} finally { if (buscaEsperaOPerfil === epoca) buscaEsperaOPerfil = false; }
         if (epoca !== AppState.fetchEpoch || Treino.ativo) return;
     }
 
@@ -13599,9 +13616,9 @@ async function startFetching() {
             // Esperando o perfil a fila está CARREGANDO, e o "Restam" diz "…" —
             // não o "0+" escrito logo acima, que ficava até o perfil chegar
             // (R6-2-04; ver o `updatePendingCount`).
-            buscaEsperaOPerfil = true;
+            buscaEsperaOPerfil = epoca;
             updatePendingCount();
-            try { await AppState._profilePromise; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+            try { await AppState._profilePromise; } catch (e) {} finally { if (buscaEsperaOPerfil === epoca) buscaEsperaOPerfil = false; }
         }
     }
     // E a CAIXA de "Minha área" que ainda está sendo decidida: o perfil que
@@ -13622,9 +13639,9 @@ async function startFetching() {
             perguntou = !!decidindo;
         }
         if (!decidindo) break;
-        buscaEsperaOPerfil = true;
+        buscaEsperaOPerfil = epoca;
         updatePendingCount();
-        try { await decidindo; } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        try { await decidindo; } catch (e) {} finally { if (buscaEsperaOPerfil === epoca) buscaEsperaOPerfil = false; }
     }
 
     while (!Treino.ativo && AppState.queue.length === 0 && AppState.hasMore && AppState.authenticated) {
@@ -13656,12 +13673,27 @@ async function startFetching() {
     // perfil pendura junto, até o teto de 45 s: esperando por ele, a fila
     // guardada não entrava (MEDIDO no smoke do offline, 9j). E o perfil ainda
     // vindo tem teto próprio (ver `esperarOLugarDaFilaVazia`, R13-6-04).
-    const decidindoOLugar = (filaEsperaPerfil && AppState._caixaDaMinhaAreaNoAr)
-        || (!AppState.loadError && (AppState._caixaDaMinhaAreaNoAr || (!AppState.profile && AppState._profilePromise)));
+    //
+    // E só a decisão sobre o lugar DE AGORA (`decideOLugarDeAgora`): a que está no
+    // ar decide sobre o lugar de quando o perfil foi pedido, e com outro aplicado
+    // à mão nos Filtros ela não decide nada aqui — a escolha é da pessoa, e ela
+    // acaba jogada fora (`paisDoPerfil`). A busca do lugar escolhido esperava por
+    // ela: com o `/Session` da NA lento, 14 s de carregando até o "Tudo limpo!"
+    // da França (MEDIDO no navegador, nos dois motores; auditoria da rodada 14,
+    // R14-6-04, o irmão do R13-6-05). O mesmo vale pro perfil ainda vindo, que
+    // decide sobre o lugar do pedido dele. A espera de "Minha área"
+    // (`filaEsperaPerfil`) fica como está: a decisão também LÊ as áreas dos
+    // outros servidores, que é o que aquela busca espera.
+    const decisaoNoAr = AppState._caixaDaMinhaAreaNoAr;
+    const decisaoDaqui = decisaoNoAr && decideOLugarDeAgora(decisaoNoAr.lugar) ? decisaoNoAr : null;
+    const perfilVindoDaqui = !AppState.profile && AppState._profilePromise && decideOLugarDeAgora(lugarDoPedidoDoPerfil)
+        ? AppState._profilePromise : null;
+    const decidindoOLugar = (filaEsperaPerfil && decisaoNoAr)
+        || (!AppState.loadError && (decisaoDaqui || perfilVindoDaqui));
     if (decidindoOLugar && !AppState.queue.length && epoca === AppState.fetchEpoch) {
-        buscaEsperaOPerfil = true;
+        buscaEsperaOPerfil = epoca;
         updatePendingCount();
-        try { await esperarOLugarDaFilaVazia(decidindoOLugar); } catch (e) {} finally { buscaEsperaOPerfil = false; }
+        try { await esperarOLugarDaFilaVazia(decidindoOLugar); } catch (e) {} finally { if (buscaEsperaOPerfil === epoca) buscaEsperaOPerfil = false; }
         if (epoca !== AppState.fetchEpoch) return;
     }
 
@@ -26788,8 +26820,13 @@ function updatePendingCount(semAnimar = false) {
         return;
     }
     // CARREGANDO: a busca no ar, ou o `startFetching` esperando o perfil pra
-    // buscar (`buscaEsperaOPerfil`), com a fila vazia (R6-2-04).
-    if ((AppState.fetching || buscaEsperaOPerfil) && AppState.serverTotal === 0) {
+    // buscar (`buscaEsperaOPerfil`), com a fila vazia (R6-2-04). A espera é a da
+    // fila DE AGORA: a marca leva a época da busca que espera, e a de uma fila que
+    // o ↻ ou o "Aplicar" já trocou não diz nada desta — ela segurava o "Restam …"
+    // ao lado do "Falha ao carregar" da busca nova (MEDIDO no navegador, nos dois
+    // motores; auditoria da rodada 14, R14-6-03). `!== false`: a época 0 é falsa.
+    if ((AppState.fetching || (buscaEsperaOPerfil !== false && buscaEsperaOPerfil === AppState.fetchEpoch))
+        && AppState.serverTotal === 0) {
         el.textContent = '…';
         pararContagemEmCurso(el);
         return;

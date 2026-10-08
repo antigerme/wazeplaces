@@ -319,7 +319,8 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
-    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia'])
+    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia',
+    'decideOLugarDeAgora'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
@@ -1103,4 +1104,78 @@ test('R13-6-05: a pergunta repetida da decisão pendente usa os editáveis lidos
   assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `a pergunta repetida não perguntou à NA: ${m.perguntas}`);
   assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'o par região/país não é o que a NA respondeu');
   assert.equal(m.buscas.at(-1), 'na pais 235', `a busca não foi a dos EUA na NA: ${m.buscas}`);
+});
+
+// ═══ R14-6-04 · a busca do lugar escolhido À MÃO não espera a decisão do lugar ANTIGO ═══
+// (auditoria da rodada 14, pré-existente; o irmão do R13-6-05). Quem só edita na
+// NA abre no Brasil, e a decisão do lugar pergunta ao `/Session` de lá. Nesse
+// meio a pessoa aplica OUTRO lugar nos Filtros (a França) cuja fila é vazia: o
+// "Aplicar" tirava a PENDÊNCIA (R13-6-05), mas a busca de lá ESPERAVA a decisão
+// sobre o Brasil — que no fim é jogada fora (`paisDoPerfil`: a escolha é da
+// pessoa). Com a NA lenta, 14 s de esqueleto antes do "Tudo limpo!" da França
+// (MEDIDO no navegador, nos dois motores; roteiro r14-6/t2). A decisão leva o
+// lugar sobre o qual decide (`decisao.lugar`, `decideOLugarDeAgora`), e a espera
+// do fim da busca só vale pra decisão do lugar de agora. O irmão: o PERFIL ainda
+// vindo decide sobre o lugar do pedido dele (`lugarDoPedidoDoPerfil`).
+test('R14-6-04: a França aplicada à mão com a decisão sobre o Brasil no ar — a fila vazia de lá não espera por ela', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  const decisao = m.chegaOPerfil();              // o perfil da ROW chegou (no Brasil) e pergunta à NA
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  const doAplicar = m.aplicarRegiao('row', 73);  // Filtros › França › Aplicar
+  await tique(5);
+  assert.deepEqual(m.buscas, ['row pais 73'], `PRÉ-CONDIÇÃO: a busca da França não saiu (uma vez): ${m.buscas}`);
+  assert.ok(m.log.includes('vazio'),
+    'DEFEITO: a fila vazia da França esperou a decisão sobre o Brasil — o esqueleto até o `/Session` da NA responder (R14-6-04)');
+  m.soltar.na();
+  await decisao;
+  await doAplicar;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['row', 73], 'a decisão sobre o Brasil tirou a pessoa da França que ela escolheu');
+});
+
+test('R14-6-04: CONTROLE — o ↻ no MESMO lugar (o Brasil) espera a decisão no ar, como o R12-6-02 manda', async () => {
+  const c = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  c.AppState.filters.myArea = false;
+  const decisao = c.chegaOPerfil();
+  await tique();
+  const doToque = c.atualizar();
+  await tique(5);
+  assert.ok(!c.log.includes('vazio'),
+    'CONTROLE: a busca do MESMO lugar não esperou a decisão no ar — o instrumento não distingue as duas (ou o R12-6-02 voltou)');
+  c.soltar.na();
+  await decisao;
+  await doToque;
+  await tique(10);
+  assert.deepEqual([c.lugar.regiao, c.lugar.pais], ['na', 235], 'CONTROLE: a decisão não levou a fila pros EUA');
+});
+
+test('R14-6-04: com o PERFIL ainda vindo — a fila vazia do lugar escolhido à mão não espera um perfil que decide sobre outro lugar (e o do mesmo lugar espera)', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['row'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  m.AppState._profilePromise = m.app.loadProfileAndAuxData();   // pedido no Brasil, ainda no ar
+  await tique();
+  assert.ok(m.soltar.row, 'PRÉ-CONDIÇÃO: o perfil não ficou no ar');
+  const doAplicar = m.aplicarRegiao('row', 73);
+  await tique(5);
+  assert.ok(m.log.includes('vazio'),
+    'DEFEITO: a fila vazia da França esperou o perfil pedido no Brasil, que decide sobre o Brasil (R14-6-04, o irmão do perfil vindo)');
+  m.soltar.row();
+  await m.AppState._profilePromise;
+  await doAplicar;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['row', 73], 'o perfil que chegou tirou a pessoa da França que ela escolheu');
+  // CONTROLE: no mesmo lugar, a fila vazia espera o perfil (o R12-6-02).
+  const c = montarServidores({ perfis: SO_NA, segurar: ['row'], vazias: ['row'] });
+  c.AppState.filters.myArea = false;
+  c.AppState._profilePromise = c.app.loadProfileAndAuxData();
+  await tique();
+  const doToque = c.atualizar();
+  await tique(5);
+  assert.ok(!c.log.includes('vazio'), 'CONTROLE: a fila vazia do MESMO lugar não esperou o perfil — o instrumento não distingue');
+  c.soltar.row();
+  await c.AppState._profilePromise;
+  await doToque;
+  await tique(10);
 });
