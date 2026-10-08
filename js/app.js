@@ -3860,6 +3860,15 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // gesto lê (R13-3-02 e R13-3-03, `chaveDoToque` no core). Uma ESCRITA na frente
 // segue sendo esperada, como acima.
 //
+// O toque DESFEITO solta a vez do aquecimento dele na hora (auditoria da rodada
+// 14, R14-3-03): a lista que ele lê só serve à exclusão DAQUELE gesto, que não
+// sai mais, e nenhuma escrita lê essa lista. Tocar na lixeira, desfazer e
+// aprovar outra foto do local deixava a aprovação esperando a resposta do toque
+// — até os 10 s do teto do servidor —, com o card travado ("Espere a
+// aprovação…"); e a lixeira tocada de novo nesse meio nem aquecia (havia alguém
+// na vez), e a exclusão saía sem lista pronta. A exclusão do MESMO gesto segue
+// esperando a lista dele, como acima.
+//
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
 // vez são exclusões — com uma no ar, a pílula do nome do local trava
 // (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada. `escritas`:
@@ -3880,10 +3889,17 @@ function vezDasFotosNoLocal(alvo, tipo) {
     if (excluir) vez.exclusoes++;
     if (escrita) vez.escritas++;
     const v = vez;
+    let solta = false;
     return {
         anterior,                                   // nula: a vez já é desta
         soAquecimentoNaFrente,                      // na frente, só aquecimento (ou nada)
+        // Uma vez só: o aquecimento de um toque DESFEITO solta a vez no Desfazer
+        // (R14-3-03, no `pedirExclusaoDaFoto`), e a resposta dele, que chega
+        // depois, soltaria de novo — a conta do local descontaria quem está no
+        // ar atrás dele, e a vez sumiria com uma escrita do local ainda no ar.
         soltar: () => {
+            if (solta) return;
+            solta = true;
             soltar();
             if (excluir) v.exclusoes--;
             if (escrita) v.escritas--;
@@ -4405,13 +4421,15 @@ function pedirExclusaoDaFoto() {
     // do gesto, que nenhuma outra escrita lê — com a página saindo, a escrita não
     // espera o toque, e a leitura dele, que volta depois, guardava a lista de
     // antes por cima (auditoria da rodada 13, R13-3-02 e R13-3-03).
+    // A vez do aquecimento fica à mão: o Desfazer a solta (R14-3-03, no `cancelar`).
+    let vezDoToque = null;
     if (!escritasDeFotoNoLocal.has(place.venueID)) {
         const gesto = idDoGestoDaLixeira();
         const aquecendo = API.prepararExclusao(place.venueID, place.lat, place.lon, alvo.regiao, gesto);
         if (aquecendo && typeof aquecendo.then === 'function') {
             alvo.aquecimento = gesto;
-            const vez = vezDasFotosNoLocal(alvo, 'aquecer');
-            aquecendo.then(vez.soltar, vez.soltar);
+            vezDoToque = vezDasFotosNoLocal(alvo, 'aquecer');
+            aquecendo.then(vezDoToque.soltar, vezDoToque.soltar);
         }
     }
     Lightbox.removerFoto(alvo.id, place);
@@ -4443,9 +4461,14 @@ function pedirExclusaoDaFoto() {
     };
     // Volta atrás sem enviar. É o Desfazer do editor e também o cancelamento
     // que o APP faz quando a sessão acaba (ver `cancelarPendenciasDoLightbox`).
+    // O toque deste gesto fica sem exclusão: a vez do aquecimento dele sai agora,
+    // sem esperar a resposta (auditoria da rodada 14, R14-3-03, ver o
+    // `vezDasFotosNoLocal`) — a aprovação de uma foto do local e o toque seguinte
+    // na lixeira não esperam a leitura que ninguém vai usar.
     const cancelar = () => {
         if (saiu) return false;
         saiu = true;
+        if (vezDoToque) vezDoToque.soltar();
         clearTimeout(exclusaoPendente && exclusaoPendente.timer);
         if (exclusaoPendente && exclusaoPendente.id === alvo.id) exclusaoPendente = null;
         aplicarTravaDeAcao();

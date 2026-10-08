@@ -3867,21 +3867,25 @@ test('R12-3-01 com o Desfazer, o AQUECIMENTO da lixeira entra na vez do local: a
   m.responderAquecimento();
   await umTique(); await umTique();
   assert.deepEqual(m.saidas(), ['excluir:f1'], 'a exclusão não saiu depois da resposta do aquecimento');
-  // A APROVAÇÃO de uma foto do local também espera: tocou na lixeira, desfez (a
-  // exclusão não sai, o aquecimento segue no ar) e aprovou a proposta P.
+  // A APROVAÇÃO de uma foto do local também espera: tocou na lixeira e aprovou a
+  // proposta P — o gesto da aprovação despacha a exclusão do toque, que espera a
+  // leitura dele, e a aprovação espera a exclusão. (Tocar e DESFAZER deixa o
+  // toque órfão, e aí nada espera por ele: o R14-3-03, mais abaixo.)
   const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   a.abrirEm(a.A, 'f1');
   a.app.pedirExclusaoDaFoto();
-  a.pend.e.desfazer();
   a.irPara('ur-A');
   assert.equal(a.L.podeAprovarAtual(), true, 'PRÉ-CONDIÇÃO: a proposta P não está aprovável na camada');
   a.app.aprovarFotoAtual(); a.vencerJanela();
   await umTique(); await umTique();
   assert.deepEqual(a.saidas(), [],
-    'DEFEITO: a aprovação saiu com o aquecimento do local no ar — ele volta depois e guarda a foto aprovada como pendente');
+    'DEFEITO: a aprovação (ou a exclusão do toque) saiu com o aquecimento do local no ar — ele volta depois e guarda a lista de antes');
   a.responderAquecimento();
   await umTique(); await umTique();
-  assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'a aprovação não saiu depois da resposta do aquecimento');
+  assert.deepEqual(a.saidas(), ['excluir:f1'], 'a exclusão do toque não saiu depois da resposta do aquecimento (ou a aprovação não a esperou)');
+  a.responder('excluir', 'f1', { success: true, restantes: ['ur-A', 'f2'] });
+  await umTique(); await umTique();
+  assert.deepEqual(a.saidas(), ['excluir:f1', 'aprovar:ur-A'], 'a aprovação não saiu depois da exclusão do local');
   // CONTROLE: o aquecimento que responde DENTRO da janela (o de todo dia, ~0,7 s
   // contra 3 s) não segura nada: a exclusão sai na hora em que a janela vence.
   const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
@@ -3915,7 +3919,8 @@ test('R12-3-01 com a página SAINDO, a escrita da janela não espera o aquecimen
   m.pend.e.enviar();                                 // …e a descarga despacha a janela
   assert.deepEqual(m.saidas(), ['excluir:f1'],
     'DEFEITO: com a página saindo, a exclusão esperou o aquecimento — a página morre antes da resposta dele, e a exclusão nunca sai');
-  // A aprovação também (tocou na lixeira, desfez, aprovou e fechou o app).
+  // A aprovação também (tocou na lixeira, desfez, aprovou e fechou o app) — desde
+  // o R14-3-03 o toque desfeito não segura nada, com a página saindo ou não.
   const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   a.abrirEm(a.A, 'f1');
   a.app.pedirExclusaoDaFoto();
@@ -3997,13 +4002,15 @@ test('R13-3-01 a exclusão — e a aprovação — que JÁ saiu da janela e espe
   assert.deepEqual(m.saidas(), ['excluir:f1'],
     'DEFEITO: a exclusão que esperava o aquecimento não saiu com a página saindo — ela some com a página, e a foto fica no mapa');
   assert.equal(m.idas[0].saindo, true, 'a exclusão solta saiu fora do modo da página saindo — sem keepalive, o navegador a corta');
-  // A APROVAÇÃO também (tocou na lixeira, desfez, aprovou a proposta P, e a
-  // janela da aprovação venceu com o toque ainda no ar).
-  const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
-  a.abrirEm(a.A, 'f1');
-  a.app.pedirExclusaoDaFoto();
-  a.pend.e.desfazer();
-  a.irPara('ur-A');
+  // A APROVAÇÃO também, quando só um aquecimento está na frente dela. O gesto
+  // chegava a isso tocando na lixeira, desfazendo e aprovando a proposta P com o
+  // toque ainda no ar; desde o R14-3-03 o toque desfeito solta a vez dele (mais
+  // abaixo), e o que não é desfeito tem a exclusão do gesto na frente — uma
+  // escrita. A defesa do `enviarAprovacao` fica, e é medida com o aquecimento
+  // posto na vez à mão (o `vezDasFotosNoLocal` de verdade, preso até o teste).
+  const a = fotosNoMesmoLocal();
+  a.abrirEm(a.A, 'ur-A');
+  const aquecimentoPreso = a.app.vezDasFotosNoLocal({ place: a.A }, 'aquecer');
   a.app.aprovarFotoAtual(); a.vencerJanela();
   await umTique(); await umTique();
   assert.deepEqual(a.saidas(), [], 'PRÉ-CONDIÇÃO: a aprovação não ficou esperando o aquecimento');
@@ -4011,6 +4018,7 @@ test('R13-3-01 a exclusão — e a aprovação — que JÁ saiu da janela e espe
   await microtarefas();
   assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'DEFEITO: a aprovação que esperava o aquecimento não saiu com a página saindo');
   assert.equal(a.idas[0].saindo, true, 'a aprovação solta saiu fora do modo da página saindo');
+  aquecimentoPreso.soltar();                         // a resposta dele, que a página morta nem veria
   // CONTROLE: uma ESCRITA na frente (a exclusão de f1 no ar) não é solta — as
   // duas cruzariam no servidor —, e a descarga sem nada a soltar não liga o modo
   // da página saindo.
@@ -4068,6 +4076,93 @@ test('R13-3-03 o toque na lixeira e a exclusão dele levam o MESMO gesto — e a
   n.app.pedirExclusaoDaFoto();
   assert.equal(n.aquecimentosComGesto.length, 2, 'PRÉ-CONDIÇÃO: os dois toques não aqueceram');
   assert.notEqual(n.aquecimentosComGesto[0], n.aquecimentosComGesto[1], 'dois toques com o MESMO gesto');
+});
+
+// ── R14-3-03: o toque DESFEITO não segura a vez do local ─────────────────────
+// (auditoria da rodada 14). Desde a chave do gesto (R13-3-03), a lista que o
+// toque na lixeira lê só serve à exclusão DAQUELE gesto. Tocar e desfazer deixa o
+// toque órfão — e a vez do local seguia presa à resposta dele: a aprovação de
+// outra foto do local esperava a leitura até o teto de 10 s do servidor, com o
+// card travado ("Espere a aprovação…"; MEDIDO no navegador com o Waze lendo em
+// 8 s: 7,2 s até a aprovação chegar, contra 3,1 s sem o toque), e a lixeira tocada
+// de novo nesse meio nem aquecia. O `cancelar` da exclusão — o Desfazer e o
+// cancelamento do app na queda — solta a vez do toque, e a resposta que chega
+// depois não a solta de novo.
+test('R14-3-03 tocar na lixeira e DESFAZER (ou o app cancelar) solta a vez do toque: a aprovação de outra foto do local sai sem esperar a leitura dele', async () => {
+  for (const como of ['desfazer', 'cancelar']) {
+    const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+    a.abrirEm(a.A, 'f1');
+    a.app.pedirExclusaoDaFoto();                     // o toque: a leitura do local no ar (o Waze lento)
+    assert.deepEqual(a.aquecidas(), ['preparar:v1'], `${como}: PRÉ-CONDIÇÃO — o toque não aqueceu`);
+    a.pend.e[como]();                                // a exclusão deste gesto não sai mais
+    a.irPara('ur-A');
+    assert.equal(a.L.podeAprovarAtual(), true, `${como}: PRÉ-CONDIÇÃO — a proposta P não está aprovável na camada`);
+    a.app.aprovarFotoAtual(); a.vencerJanela();
+    await umTique(); await umTique();
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A'],
+      `DEFEITO (${como}): a aprovação ficou esperando a leitura de um toque DESFEITO — que nenhuma escrita usa — com o card travado`);
+    // A resposta do toque desfeito chega DEPOIS, com a aprovação no ar: ela não
+    // solta a vez de novo. A lixeira tocada agora não aquece (há uma escrita do
+    // local no ar), e a exclusão dela espera a aprovação (R11-3-01).
+    a.responderAquecimento();
+    await umTique(); await umTique();
+    a.irPara('f2');
+    a.app.pedirExclusaoDaFoto(); a.vencerJanela();
+    await umTique(); await umTique();
+    assert.deepEqual(a.aquecidas(), ['preparar:v1'], `${como}: a lixeira aqueceu com a aprovação do local no ar`);
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A'], `${como}: a exclusão de f2 saiu com a aprovação do local no ar`);
+    a.responder('aprovar', 'ur-A', { success: true });
+    await umTique(); await umTique();
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A', 'excluir:f2'], `${como}: a exclusão de f2 não saiu depois da aprovação`);
+  }
+  // CONTROLE: sem desfazer, a exclusão do MESMO gesto segue esperando a lista do
+  // toque dela (o R12-3-01, acima) — e a aprovação, atrás dela.
+  const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  c.abrirEm(c.A, 'f1');
+  c.app.pedirExclusaoDaFoto();
+  c.irPara('ur-A');
+  c.app.aprovarFotoAtual(); c.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(c.saidas(), [], 'CONTROLE: com a exclusão do toque de pé, a aprovação (ou a exclusão) não esperou a leitura do toque');
+});
+
+test('R14-3-03 a lixeira tocada DEPOIS de um toque desfeito aquece a lista DELA, e a exclusão leva o gesto dela — a resposta do toque órfão não a solta', async () => {
+  const t = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  t.abrirEm(t.A, 'f1');
+  t.app.pedirExclusaoDaFoto(); t.pend.e.desfazer();  // tocou em f1 e desfez: a leitura do toque 1 segue no ar
+  t.irPara('f2');
+  t.app.pedirExclusaoDaFoto();                       // tocou em f2
+  assert.equal(t.aquecidas().length, 2,
+    'DEFEITO: a lixeira de f2 não aqueceu — o toque desfeito de f1 seguia segurando a vez do local, e a exclusão de f2 sairia sem lista pronta');
+  t.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), [], 'a exclusão de f2 saiu antes da leitura do toque DELA (o R12-3-01)');
+  t.responderAquecimento();                          // a resposta do toque 1 (o órfão)
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), [], 'a resposta do toque DESFEITO soltou a exclusão de outro gesto, antes da lista dela');
+  t.responderAquecimento();                          // a do toque 2
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), ['excluir:f2'], 'a exclusão de f2 não saiu com a resposta do toque dela');
+  assert.equal(t.idas[0].gesto, t.aquecimentosComGesto[1], 'a exclusão de f2 não levou o gesto do toque dela');
+});
+
+// O `soltar` da vez é de UMA vez: com o toque desfeito, ele é chamado no
+// `cancelar` e de novo pela resposta do toque. Contado duas vezes com alguém atrás
+// na MESMA vez, a conta do local zerava e a vez sumia com uma escrita do local
+// no ar — a exclusão seguinte cruzaria com ela no servidor (R11-3-01).
+test('R14-3-03 o `soltar` da vez do local vale UMA vez: soltado de novo, não desconta quem está no ar atrás', () => {
+  const m = fotosNoMesmoLocal();
+  const aquecer = m.app.vezDasFotosNoLocal({ place: m.A }, 'aquecer');
+  const aprovar = m.app.vezDasFotosNoLocal({ place: m.A }, 'aprovar');
+  assert.equal(aprovar.soAquecimentoNaFrente, true, 'PRÉ-CONDIÇÃO: a aprovação não entrou atrás do aquecimento');
+  aquecer.soltar();
+  aquecer.soltar();
+  const depois = m.app.vezDasFotosNoLocal({ place: m.A }, 'excluir');
+  assert.ok(depois.anterior, 'DEFEITO: soltado duas vezes, o aquecimento descontou a aprovação no ar — a exclusão seguinte não a espera');
+  assert.equal(depois.soAquecimentoNaFrente, false, 'a exclusão seguinte não viu a aprovação (uma escrita) na frente');
+  aprovar.soltar(); depois.soltar();
+  // CONTROLE: com todos soltos, a vez esvazia — a próxima escrita sai na hora.
+  assert.equal(m.app.vezDasFotosNoLocal({ place: m.A }, 'excluir').anterior, null, 'CONTROLE: a vez não esvaziou com todos soltos');
 });
 
 // ── R12-3-02: a MESMA foto excluída pela camada de A e pela do IRMÃO B ─────────
