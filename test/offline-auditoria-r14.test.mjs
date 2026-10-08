@@ -9,6 +9,9 @@
 //  · R14-4-02 — o pedido que a OUTRA aba decidiu, com o aviso dele ESPERANDO a
 //    conta desta aba, ia pra fila guardada e a poda apagava a prova do pouso:
 //    reaberto sem rede, ele voltava como card;
+//  · R14-4-05 — a sentinela `tokenNaoPersiste` do diagnóstico acusava
+//    "navegação privada, cookies bloqueados ou armazenamento cheio" quando quem
+//    tirou o token do aparelho foi a queda da OUTRA aba (sessões diferentes);
 //  · R14-4-04 — a gravação da fila guardada não conferia a ÉPOCA do offline
 //    depois de abrir a base: o "Sair" de OUTRA aba apaga a base, e a gravação
 //    que já estava a caminho (a resposta de uma busca chegou antes do aviso) a
@@ -688,10 +691,70 @@ test('R14-4-02: CONTROLE — sem o pouso o pedido vai e volta (o instrumento o v
   assert.ok(outra.reaberta.includes('v3|u3'), 'o pedido pendente desta conta não reabriu sem rede');
 });
 
+// ═══ R14-4-05 · a sentinela `tokenNaoPersiste` e a queda da OUTRA aba ════════
+// O roteiro d1 do auditor: duas abas de sessões diferentes da mesma conta; a
+// sessão GUARDADA (a da outra aba) cai, a queda tira o token do aparelho, e esta
+// aba segue viva com a dela. A sentinela de VERDADE, com a sonda de escrita de
+// VERDADE, sobre um armazenamento de mentira que grava, que recusa (navegação
+// privada, cota cheia: o `setItem` lança) ou que "aceita" e não guarda nada.
+const COMPUTADO_SAO = () => ({
+  janela: { innerW: 390, innerH: 844 },
+  varsCss: { '--kb-inset': '0px', '--header-h': '69px' },
+  foco: { tag: 'BUTTON', id: 'x', emModal: false, abreTeclado: false },
+  tema: { htmlClasse: 'dark', guardado: 'dark' }, media: {}, geometria: [],
+});
+function sentinelaDoToken({ autenticada = true, tokenNoAparelho = null, armazenamento = 'grava' } = {}) {
+  const guardado = new Map();
+  if (tokenNoAparelho) guardado.set('waze_session_token', tokenNoAparelho);
+  const localStorage = {
+    setItem: (k, v) => {
+      if (armazenamento === 'recusa') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+      if (armazenamento !== 'perde') guardado.set(k, String(v));
+    },
+    getItem: (k) => (guardado.has(k) ? guardado.get(k) : null),
+    removeItem: (k) => { guardado.delete(k); },
+  };
+  const deps = {
+    AppState: { authenticated: autenticada }, localStorage,
+    safeLS: { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } } },
+  };
+  const chaves = Object.keys(deps);
+  const sentinelas = new Function(...chaves, fatiar('diagSondaDeEscrita') + '\n' + fatiar('diagSentinelas')
+    + '\nreturn diagSentinelas;')(...chaves.map((k) => deps[k]));
+  const alertas = sentinelas(COMPUTADO_SAO());
+  // A sonda não deixa resto no armazenamento.
+  assert.equal(guardado.has('__diag_probe__'), false, 'a sonda de escrita deixou a chave de teste no aparelho');
+  return alertas.filter((a) => a.chave === 'tokenNaoPersiste');
+}
+
+test('R14-4-05: a queda da OUTRA aba tirou o token do aparelho, e o armazenamento GRAVA — a sentinela não acusa navegação privada', () => {
+  const r = sentinelaDoToken({ autenticada: true, tokenNoAparelho: null, armazenamento: 'grava' });
+  assert.deepEqual(r, [],
+    `DEFEITO: a sentinela acusa "o token morre ao fechar a aba (navegação privada…)" com o armazenamento funcionando: ${JSON.stringify(r)}`);
+});
+
+test('R14-4-05: CONTROLE — sem o token E com o armazenamento que não grava (recusa, ou aceita e perde), a sentinela acusa; com o token, ou deslogada, não', () => {
+  const recusa = sentinelaDoToken({ armazenamento: 'recusa' });
+  assert.equal(recusa.length, 1, 'CONTROLE: o armazenamento que RECUSA a escrita não foi acusado — a sentinela ficou muda');
+  assert.match(recusa[0].erro || '', /Quota/, 'o alerta não diz o erro da sonda');
+  assert.equal(sentinelaDoToken({ armazenamento: 'perde' }).length, 1,
+    'CONTROLE: o armazenamento que aceita e NÃO guarda não foi acusado');
+  assert.deepEqual(sentinelaDoToken({ tokenNoAparelho: 'tok-a', armazenamento: 'recusa' }), [],
+    'com o token no aparelho a sentinela acusou (o token persiste)');
+  assert.deepEqual(sentinelaDoToken({ autenticada: false, armazenamento: 'recusa' }), [], 'deslogada, a sentinela acusou');
+});
+
+test('R14-4-05: a sonda do RELATÓRIO e a da sentinela são UMA só (`diagSondaDeEscrita`)', () => {
+  const corpo = fatiar('diagCorpo');
+  assert.match(corpo, /diagSondaDeEscrita\(\)/, 'o relatório deixou de usar a sonda de escrita única');
+  assert.ok(!corpo.includes("'__diag_probe__'"), 'o relatório voltou a ter uma sonda de escrita própria');
+  assert.match(fatiar('diagSentinelas'), /diagSondaDeEscrita\(\)/, 'a sentinela do token deixou de perguntar à sonda');
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
-  for (const nome of ['offlineGravarFila', 'offlineEpoca', 'filaChaves', 'chavesQueEsperamAConta']) {
+  for (const nome of ['offlineGravarFila', 'offlineEpoca', 'filaChaves', 'chavesQueEsperamAConta', 'diagSondaDeEscrita']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

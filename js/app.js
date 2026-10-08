@@ -8519,6 +8519,21 @@ function diagArmazenamentoDuravel() {
     return f;
 }
 
+// O armazenamento local GRAVA mesmo? O `safeLS` engole exceção de propósito,
+// então armazenamento cheio ou navegação privada falham em SILÊNCIO — só uma
+// sonda escreve-lê-apaga diz. FONTE ÚNICA: o relatório (`armazenamento.escreve`)
+// e a sentinela `tokenNaoPersiste` perguntam por aqui.
+function diagSondaDeEscrita() {
+    const r = { escreve: null, erroEscrita: null };
+    try {
+        const k = '__diag_probe__', v = String(Date.now());
+        localStorage.setItem(k, v);
+        r.escreve = localStorage.getItem(k) === v;
+        localStorage.removeItem(k);
+    } catch (e) { r.escreve = false; r.erroEscrita = String((e && e.message) || e); }
+    return r;
+}
+
 function diagSentinelas(comp) {
     const alertas = [];
     const diga = (chave, msg, dado) => alertas.push({ chave, msg, ...(dado || {}) });
@@ -8570,15 +8585,28 @@ function diagSentinelas(comp) {
                     .filter(Boolean).join('; '),
                 { classe: cl, barra });
         }
-        // 4. O armazenamento não está guardando NADA — e o app parece boa.
-        //    Invariante dura: depois de entrar, o token ESTÁ no localStorage.
-        //    Se há sessão ativa e ele não está lá, a sessão morre ao fechar a
-        //    aba, toda vez, e nenhum outro campo deste arquivo diz isso.
+        // 4. O armazenamento não está guardando NADA — e o app parece bom.
+        //    Com sessão ativa e o token fora do localStorage, a sessão morre ao
+        //    fechar a aba, toda vez, e nenhum outro campo deste arquivo diz isso.
+        //    Mas a FALTA do token não é a invariante: com duas abas de sessões
+        //    diferentes, a queda da sessão GUARDADA tira o token do aparelho
+        //    (`sessaoDestaAbaEhAGuardada`) e a outra aba segue viva com a dela — e
+        //    a sentinela acusava "navegação privada, cookies bloqueados ou
+        //    armazenamento cheio" com o armazenamento funcionando (MEDIDO no
+        //    navegador, d1 da rodada 14, R14-4-05). Quem diz se o armazenamento
+        //    grava é a SONDA de escrita (`diagSondaDeEscrita`, a mesma do
+        //    relatório), e ela só roda quando o token falta — é raro, e escreve
+        //    uma chave de teste e a apaga.
         try {
             if (AppState.authenticated && !safeLS.get('waze_session_token')) {
-                diga('tokenNaoPersiste',
-                    'há sessão ativa mas o token NÃO está no armazenamento — ele morre ao fechar a aba '
-                    + '(navegação privada, cookies bloqueados ou armazenamento cheio)');
+                const sonda = diagSondaDeEscrita();
+                if (sonda.escreve !== true) {
+                    diga('tokenNaoPersiste',
+                        'há sessão ativa, o token NÃO está no armazenamento e o armazenamento não grava (a sonda de '
+                        + 'escrita falhou) — o token morre ao fechar a aba (navegação privada, cookies bloqueados ou '
+                        + 'armazenamento cheio)',
+                        sonda.erroEscrita ? { erro: sonda.erroEscrita } : {});
+                }
             }
         } catch (e) { /* sonda nunca derruba o diagnóstico */ }
         // 5. O ambiente apaga o armazenamento antes do prazo que o app promete.
@@ -10896,12 +10924,11 @@ async function diagCorpo() {
         armazenamento.quota = e.quota; armazenamento.uso = e.usage;
         armazenamento.sobraPct = e.quota ? +(100 - (e.usage / e.quota) * 100).toFixed(2) : null;
     } catch (e) { armazenamento.erroQuota = String(e); }
-    try {
-        const k = '__diag_probe__', v = String(Date.now());
-        localStorage.setItem(k, v);
-        armazenamento.escreve = localStorage.getItem(k) === v;
-        localStorage.removeItem(k);
-    } catch (e) { armazenamento.escreve = false; armazenamento.erroEscrita = String((e && e.message) || e); }
+    {
+        const sonda = diagSondaDeEscrita();
+        armazenamento.escreve = sonda.escreve;
+        if (sonda.erroEscrita) armazenamento.erroEscrita = sonda.erroEscrita;
+    }
     try { armazenamento.persistente = await navigator.storage.persisted(); } catch (e) {}
 
     // ── Relógio do aparelho × do servidor ──────────────────────────────────
