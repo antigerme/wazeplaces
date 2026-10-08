@@ -713,6 +713,141 @@ test('R14-2-03: os avisos que esperam pela marca dividem o teto dos que esperam 
   assert.equal(B.app.esperando.length, MAX, 'uma conta mal formada resolveu os avisos');
 });
 
+// ═══ R14-8-10 · o "Marcando N como lidos…" e o indicador do lote ═══════════════
+// O aviso era solto, de 4 s: o lote rápido o deixava junto do "N pedidos marcados
+// como lidos 👍" (o presente contínuo e o passado empilhados), e o lento (mais de
+// 4 s) o perdia antes do fim. E o indicador dizia "Enviando 1…" com 5 no ar: o
+// lote é UMA ação no `inFlightActions`.
+// O prazo do aviso do lote no ar: muito além de um lote lento — quem o tira é o
+// fim do lote (os 4 s de um aviso solto eram o defeito).
+const PRAZO_MINIMO_DO_AVISO_DO_LOTE_MS = 60_000;
+
+// O "Marcar todos" de verdade, em pedaços de 2, com um diário de AVISOS (o punho
+// de cada um, como o `showToast` de verdade devolve) e as respostas seguradas.
+function marcarTodosComAvisos({ fila = [1, 2, 3].map((i) => P(i)) } = {}) {
+  const portoes = [];
+  const diario = [];
+  const duracoes = new Map();
+  const AppState = { authenticated: true, queue: fila.slice(), currentPlace: fila[0], stats: { read: 0, rejected: 0, skipped: 0 },
+    serverTotal: fila.length, fetchEpoch: 0, hasMore: false, pendingAction: null, inFlightActions: 0, profile: { ...PERFIL },
+    autorEmFoco: null };
+  const API = { ...sessaoDeMentira('tok-gesto'),
+    markAsReadBatch: (itens) => new Promise((ok) => portoes.push({ ok, n: itens.length })),
+    markAsRead: () => new Promise((ok) => portoes.push({ ok, n: 1 })) };
+  const deps = {
+    AppState, API, LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
+    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, lidosDoLoteNoAr: 0,
+    escritasConferindo: 0, aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
+    contaDestaAbaEmDuvida: () => false, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
+    carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    t: (k, v) => k + (v && v.n !== undefined ? ':' + v.n : ''), msgDoServidor: (r, d) => d,
+    showToast: (msg, tipo, dur) => {
+      const aviso = { msg, tipo, dur, fora: false };
+      duracoes.set(msg, dur);
+      diario.push(['entra', msg]);
+      return { texto() {}, dispensar() { diario.push(['esmaece', msg]); aviso.fora = true; },
+        remover() { diario.push(['sai', msg]); aviso.fora = true; } };
+    },
+    // O indicador, por fora: quantos pedidos do lote ele contaria AGORA.
+    updateInFlightIndicator: () => diario.push(['indicador', deps.loteDeLidosEmVoo ? deps.lidosDoLoteNoAr : 0]),
+    document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
+    registrarPouso: () => {}, recordHistory: () => {}, registrarLoteConfirmado: () => {}, updateStats() {}, saveStats() {},
+    updatePendingCount() {}, aoMudarAFilaPorBaixo() {}, removeCurrentCardEl() {}, showNoPlaces() {}, startFetching() {},
+    showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
+  };
+  const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
+    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'chaveDoPedido', 'pousouNoWaze'], deps);
+  const marcar = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
+  const avisos = () => diario.filter((x) => x[0] !== 'indicador');
+  return { h, deps, AppState, portoes, diario, avisos, marcar, duracoes };
+}
+
+test('R14-8-10: o "Marcando N como lidos…" fica na tela enquanto o lote está no ar — e sai ANTES do "N marcados", nunca junto', async () => {
+  const m = marcarTodosComAvisos();
+  const lote = m.marcar();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+  const entrou = m.avisos()[0];
+  assert.deepEqual(entrou, ['entra', 'toast.batchMarkingPlural:3'], 'PRÉ-CONDIÇÃO: o "Marcando 3…" entrou');
+  // O prazo do aviso: muito além de um lote lento (o fim é quem o tira).
+  const prazo = m.duracoes.get('toast.batchMarkingPlural:3');
+  assert.ok(prazo >= PRAZO_MINIMO_DO_AVISO_DO_LOTE_MS,
+    `DEFEITO: o "Marcando" saiu com o prazo de um aviso solto (${prazo} ms) — no lote lento ele some antes do fim`);
+  await relogioAndou();
+  m.portoes.shift().ok({ success: true });          // o 1º pedaço (2) pousa
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 2º pedaço saiu');
+  assert.ok(!m.avisos().some((x) => x[0] !== 'entra'), `DEFEITO: o "Marcando" saiu com o lote no ar: ${JSON.stringify(m.avisos())}`);
+  await relogioAndou();
+  m.portoes.shift().ok({ success: true });
+  await lote;
+  assert.deepEqual(m.avisos(), [['entra', 'toast.batchMarkingPlural:3'], ['sai', 'toast.batchMarkingPlural:3'],
+    ['entra', 'toast.batchDonePlural:3']],
+    `DEFEITO: o "Marcando" e o "N marcados" ficaram juntos (ou o "Marcando" não saiu no fim): ${JSON.stringify(m.avisos())}`);
+});
+
+test('R14-8-10: o "Marcando" sai também quando o lote falha, e antes do erro', async () => {
+  const m = marcarTodosComAvisos();
+  const lote = m.marcar();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+  await relogioAndou();
+  m.portoes.shift().ok({ success: false, errorCategory: 'unknown', httpCode: 500 });
+  await lote;
+  const avisos = m.avisos().map((x) => x[0] + ':' + x[1]);
+  assert.deepEqual(avisos, ['entra:toast.batchMarkingPlural:3', 'sai:toast.batchMarkingPlural:3', 'entra:toast.batchError'],
+    `o "Marcando" ficou junto do erro: ${avisos}`);
+});
+
+test('R14-8-10: o indicador conta os PEDIDOS do lote no ar — e desce a cada pedaço que responde', async () => {
+  const m = marcarTodosComAvisos();
+  const lote = m.marcar();
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
+  assert.equal(m.deps.lidosDoLoteNoAr, 3, `DEFEITO: com o lote de 3 no ar, o indicador conta ${m.deps.lidosDoLoteNoAr}`);
+  const desenhos = m.diario.filter((x) => x[0] === 'indicador').map((x) => x[1]);
+  assert.equal(desenhos[0], 3, `o PRIMEIRO desenho do indicador, com o lote saindo, não contou os pedidos dele: ${desenhos}`);
+  await relogioAndou();
+  m.portoes.shift().ok({ success: true });
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o 2º pedaço saiu');
+  assert.equal(m.deps.lidosDoLoteNoAr, 1, `com o 1º pedaço (2) respondido, o indicador seguiu contando ${m.deps.lidosDoLoteNoAr}`);
+  assert.ok(m.diario.some((x) => x[0] === 'indicador' && x[1] === 1), 'o indicador não foi redesenhado quando o pedaço respondeu');
+  await relogioAndou();
+  m.portoes.shift().ok({ success: true });
+  await lote;
+  assert.deepEqual([m.deps.lidosDoLoteNoAr, m.deps.loteDeLidosEmVoo], [0, false], 'o lote acabou e a contagem ficou');
+});
+
+// O `updateInFlightIndicator` de verdade, com o DOM de mentira.
+function indicador({ noAr = 1, loteNoAr = false, lidosNoAr = 0 } = {}) {
+  const els = new Map();
+  const document = {
+    getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : els.get(id) || null),
+    createElement: () => ({ className: '', title: '', innerHTML: '', style: {}, remove() { els.delete(this.id); } }),
+    body: { appendChild: (el) => { els.set(el.id, el); } },
+  };
+  const deps = { document, AppState: { authenticated: true, inFlightActions: noAr }, carregarFilaDeSaida: () => [],
+    t: (k, v) => `${k}:${v.n}`, escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => {},
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID, reivindicadoPorOutraAba: () => false,
+    SAIDA_REIVINDICACAO_MS: 60000, setTimeout: () => 0, clearTimeout: () => {},
+    loteDeLidosEmVoo: loteNoAr, lidosDoLoteNoAr: lidosNoAr };
+  const chaves = Object.keys(deps);
+  const atualizar = new Function(...chaves, 'let indicadorMarcaVence = null;\n' + fatiar('saindoPelaOutraAba') + '\n'
+    + fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
+  atualizar();
+  const el = els.get('inFlightIndicator');
+  return el ? (/<span class="sr-only">([^<]*)</.exec(el.innerHTML) || [])[1] : null;
+}
+
+test('R14-8-10: "Enviando N…" com o "Marcar todos" no ar diz os pedidos do lote, não "1"', () => {
+  assert.equal(indicador({ noAr: 1, loteNoAr: true, lidosNoAr: 5 }), 'indicator.sending:5',
+    'DEFEITO: com 5 pedidos do lote no ar, o indicador diz outra coisa ("Enviando 1…")');
+  // Um ✕ saindo junto do lote: os dois contam.
+  assert.equal(indicador({ noAr: 2, loteNoAr: true, lidosNoAr: 5 }), 'indicator.sending:6');
+  // CONTROLES: sem o lote (um ✕ só), 1; o lote que a queda soltou (`loteDeLidosEmVoo`
+  // falso: ele não é mais desta sessão) não conta os pedidos dele.
+  assert.equal(indicador({ noAr: 1 }), 'indicator.sending:1', 'CONTROLE: o ✕ sozinho não diz 1');
+  assert.equal(indicador({ noAr: 1, loteNoAr: false, lidosNoAr: 5 }), 'indicator.sending:1',
+    'CONTROLE: o lote solto pela queda seguiu contando os pedidos dele');
+  assert.equal(indicador({ noAr: 0, loteNoAr: false, lidosNoAr: 0 }), null, 'CONTROLE: sem nada no ar, o indicador apareceu');
+});
+
 // ═══ os testes fatiam o FONTE; o app carrega o `js/min/` (gotcha #22) ═════════
 test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no ar)', () => {
   const contar = (s, re) => (s.match(re) || []).length;
@@ -732,7 +867,9 @@ test('o bundle GERADO tem os consertos da rodada 14 (senão nada disso está no 
   assert.equal(contar(MIN, sessaoDePe), contar(APP_SEM, sessaoDePe), 'js/min/app.js está atrás do fonte — falta `npm run js`');
   // R14-2-03: as funções novas são de TOPO (o esbuild não troca esses nomes).
   for (const nome of ['contaDoGestoEhADeAgora', 'filaDoGestoSegueAqui', 'epocaDaFilaRealAgora', 'lembrarMarcaQueAvisouSemConta',
-    'avisarAContaDasMarcas', 'aoSaberAContaDeUmaMarca']) {
+    'avisarAContaDasMarcas', 'aoSaberAContaDeUmaMarca',
+    // R14-8-10: a contagem do lote no ar.
+    'lidosDoLoteNoAr']) {
     const re = new RegExp('\\b' + nome + '\\b', 'g');
     assert.ok(contar(APP_SEM, re) > 0, `PRÉ-CONDIÇÃO: ${nome} sumiu do fonte`);
     assert.equal(contar(MIN, re), contar(APP_SEM, re), `js/min/app.js está atrás do fonte em ${nome} — falta \`npm run js\``);

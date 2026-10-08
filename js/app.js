@@ -25368,6 +25368,13 @@ let loteDeLidosContado = null;
 // eles seria a segunda (MEDIDO: 8 lidos + 1 rejeitado pra 8 pedidos; e o lote
 // repetido contava o placar em dobro).
 let loteDeLidosEmVoo = false;
+// Quantos pedidos do lote no ar ainda não tiveram resposta. O indicador
+// "Enviando N…" conta DECISÕES, e o lote é UMA ação no `inFlightActions`: ele
+// dizia "Enviando 1…" com 5 pedidos no ar (auditoria da rodada 14, R14-8-10,
+// MEDIDO no navegador). Desce a cada pedaço (e a cada pedido do um a um) que
+// responde, e só vale com o lote no ar (`loteDeLidosEmVoo`, que a queda e o
+// "Sair" soltam). Ver `updateInFlightIndicator`.
+let lidosDoLoteNoAr = 0;
 // Pedidos por requisição. O Waze processa o lote EM ORDEM e PARA no primeiro
 // pedido que outro editor já resolveu — MEDIDO em 2026-09-25 com a conta L2:
 // [real, inexistente, real] → HTTP 500, código 300, com o PRIMEIRO marcado e o
@@ -25469,11 +25476,29 @@ async function handleBatchMarkRead() {
     // no meio (`semOsJaDecididos`) — o ↻ trazia de volta, como card, o que o
     // lote já tinha marcado. Sai no `finally`, em QUALQUER desfecho.
     loteDeLidosEmVoo = true;
+    // O indicador conta os pedidos do lote no ar (ver `lidosDoLoteNoAr`).
+    lidosDoLoteNoAr = alvos.length;
     marcarEmAndamento(alvos, true);
     aplicarTravaDeAcao();
     AppState.inFlightActions++;
     updateInFlightIndicator();
-    showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }), 'info');
+    // O "Marcando N como lidos…" fica na tela enquanto o lote está no ar, e quem
+    // o tira é o FIM do lote (o `finally`), como na recusa automática: com os 4 s
+    // de um aviso solto, o lote rápido o deixava junto do "N pedidos marcados
+    // como lidos 👍" — o presente contínuo e o passado empilhados —, e o lento
+    // (mais de 4 s) o perdia antes do fim, sem nada na tela dizendo que o lote
+    // seguia (auditoria da rodada 14, R14-8-10, MEDIDO no navegador). O prazo
+    // folgado (10 min) é só o teto de quem nunca terminasse: o `_post` tem o
+    // dele (45 s) e o `callWithRetry` repete duas vezes.
+    const avisoDoLote = showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }),
+        'info', 600000);
+    // Quantos ainda estão no ar, a partir do pedido `i` dos alvos (os de antes
+    // responderam). Só o lote DESTA sessão escreve: depois da queda o laço para.
+    const noAr = (i) => {
+        if (epoca !== epocaDaSessao || lidosDoLoteNoAr === alvos.length - i) return;
+        lidosDoLoteNoAr = Math.max(0, alvos.length - i);
+        updateInFlightIndicator();
+    };
     const feitos = [];   // lidos agora, ou já resolvidos por outro editor: saem da fila
     // Os que a APROVAÇÃO desta pessoa já tinha resolvido, com a resposta perdida
     // (R8-2-01, ver `aprovacaoDelaJaPousou`): saem da fila e do "Restam" como os
@@ -25566,6 +25591,7 @@ async function handleBatchMarkRead() {
     try {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const doPedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
+            noAr(i);
             let pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
             if (!pedaco.length) continue;
             const r = await mandar(() => {
@@ -25593,6 +25619,7 @@ async function handleBatchMarkRead() {
             for (const p of pedaco) {
                 // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02).
                 if (decididoNaOutraAba(p)) continue;
+                noAr(alvos.indexOf(p));
                 // E a cada ida deste pedido, como a do pedaço (R12-2-03): `saiu`
                 // diz se a que valeu foi mesmo ao Waze.
                 let saiu = true;
@@ -25630,12 +25657,18 @@ async function handleBatchMarkRead() {
     } finally {
         // Só o lote DESTA sessão solta a trava: a queda e o "Sair" já a soltaram
         // (ver `loteDeLidosEmVoo`), e um lote velho que voltar depois não pode
-        // soltar o que um lote da sessão nova travou.
-        if (epoca === epocaDaSessao) loteDeLidosEmVoo = false;
+        // soltar o que um lote da sessão nova travou. O mesmo com a contagem do
+        // indicador (`lidosDoLoteNoAr`).
+        if (epoca === epocaDaSessao) { loteDeLidosEmVoo = false; lidosDoLoteNoAr = 0; }
         marcarEmAndamento(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         aplicarTravaDeAcao();
+        // O lote acabou: o "Marcando N…" sai ANTES do desfecho ("N marcados", o
+        // erro), em qualquer desfecho — também o da queda (R14-8-10). Sai NA HORA
+        // (`remover`): o desfecho toma o lugar dele, e esmaecendo ele ainda ocupava
+        // a pilha (e o teto de 3) quando o "N marcados" entrava.
+        if (avisoDoLote && typeof avisoDoLote.remover === 'function') avisoDoLote.remover();
     }
     // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que de
     // fato SAIU — nunca por quantos o lote marcou. É isso que amarra o desconto
@@ -26198,7 +26231,15 @@ function updateInFlightIndicator() {
     // Girando só quando está MESMO saindo — por esta aba ou pela outra (a marca
     // dela). "Esperando" com giro seria o app fingindo trabalho que não está
     // acontecendo — e é justamente o estado em que não há rede pra trabalhar.
-    const saindo = Math.max(0, AppState.inFlightActions) + pelaOutraAba;
+    //
+    // E o número conta DECISÕES: o "Marcar todos" é UMA ação no `inFlightActions`
+    // e manda até 25 pedidos por ida — dizia "Enviando 1…" com 5 no ar (R14-8-10).
+    // Os pedidos dele que ainda não responderam (`lidosDoLoteNoAr`) entram no
+    // lugar desse 1, só com o lote no ar. (`typeof`: os harnesses dos testes
+    // fatiam esta função sem as variáveis do lote.)
+    const doLote = typeof loteDeLidosEmVoo !== 'undefined' && loteDeLidosEmVoo === true
+        && typeof lidosDoLoteNoAr === 'number' && lidosDoLoteNoAr > 1 ? lidosDoLoteNoAr - 1 : 0;
+    const saindo = Math.max(0, AppState.inFlightActions) + pelaOutraAba + doLote;
     const enviando = saindo > 0;
     const n = enviando ? saindo : esperando;
     const texto = enviando
