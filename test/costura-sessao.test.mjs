@@ -438,7 +438,10 @@ test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida �
     assert.equal(m.pendentes.length, 1, `${caso}: PRÉ-CONDIÇÃO: o ✕ saiu e está no ar`);
     m.h.conferirContaDestaAba();
     m.pendentes[0](resposta);
-    await tique(20);
+    // Espera o FIM do voo (o `finally` do executor zera o contador), nunca um
+    // prazo: com a suíte disputando a CPU, 20 ms venciam antes da resposta ser
+    // processada e o teste reprovava 1 em 16 (lote 18).
+    await ateQue(() => m.AppState.inFlightActions === 0, `${caso}: a resposta foi processada`);
     for (const gravaria of ['recordHistory', 'registrarRejeicaoDeAutor', 'registrarAcaoConfirmada', 'avisarConsequencia']) {
       assert.ok(!m.h.chamou.includes(gravaria), `DEFEITO (${caso}): a resposta com a conta em dúvida chegou a ${gravaria}`);
     }
@@ -453,7 +456,7 @@ test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida �
   c.h.handleReject();
   await tique();
   c.pendentes[0]({ success: true });
-  await tique(20);
+  await ateQue(() => c.AppState.inFlightActions === 0, 'CONTROLE: a resposta foi processada');
   assert.ok(c.h.chamou.includes('recordHistory'), 'CONTROLE: sem dúvida a resposta não gravou — o teste perdeu o sentido');
 });
 
