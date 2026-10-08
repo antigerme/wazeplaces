@@ -68,6 +68,18 @@ function montar(loc) {
 const idadeDe = { minute: (n) => n * 60000 + 5000, hour: (n) => n * 3600000 + 60000,
                   day: (n) => n * DIA + 3600000, month: (n) => Math.round(n * 30) * DIA + DIA / 2 };
 
+// A UNIDADE como quem lê a vê: a palavra logo depois do número, sem o ponto de
+// abreviatura. Comparar a frase INTEIRA deixou passar o francês (R14-8-05, rodada
+// 14 da auditoria): "il y a 9 m." (meses) não é prefixo de "il y a 9 min" — o
+// PONTO separa as duas —, e o card dizia "il y a 2 m.", que em francês se lê
+// metro (minuto é "min"). E em inglês a unidade vem no MEIO ("9 mo. ago"), onde
+// a frase inteira nunca é prefixo de nada. Medido na saída, não no código: um
+// "short" sem ponto ou com a unidade noutro lugar não engana esta régua.
+const unidadeLida = (s) => {
+  const m = /\d+\s*([^\s\d]+)/.exec(s);
+  return m ? m[1].replace(/\.$/, '') : s;
+};
+
 test('nenhuma unidade de tempo é PREFIXO de outra — a colisão que gerou o relato', () => {
   for (const [lang, loc] of Object.entries(LOCALES)) {
     const f = montar(loc);
@@ -80,10 +92,28 @@ test('nenhuma unidade de tempo é PREFIXO de outra — a colisão que gerou o re
           if (ua === ub) continue;
           assert.ok(!(sa !== sb && sb.startsWith(sa)),
             `${lang}: "${sa}" (${ua}) é prefixo de "${sb}" (${ub}) — ambíguo, é o defeito de "há 9m"`);
+          const [ta, tb] = [unidadeLida(sa), unidadeLida(sb)];
+          assert.ok(!tb.startsWith(ta),
+            `${lang}: a unidade "${ta}" de "${sa}" (${ua}) se lê como o começo de "${tb}" em "${sb}" (${ub}) — ambíguo, é o defeito de "há 9m" (R14-8-05)`);
         }
       }
     }
   }
+});
+
+test('R14-8-05: o mês em FRANCÊS diz "mois", nunca "m." (que se lê metro, e é o começo de "min")', () => {
+  const fr = montar(LOCALES.fr);
+  for (const meses of [2, 9]) {
+    const s = fr(AGORA - idadeDe.month(meses));
+    assert.ok(!/\bm\.?$/.test(s), `DEFEITO: ${meses} meses em francês sai "${s}" — "m." se lê metro, e é o começo de "min"`);
+    assert.match(s, /mois/, `${meses} meses em francês precisa dizer "mois": "${s}"`);
+  }
+  // CONTROLE: o instrumento enxerga o "m." — o "short" cru do CLDR francês o
+  // escreve, e a régua o acusa como prefixo de "min". Sem isto, a asserção acima
+  // passaria com um formatador que nunca escreve mês nenhum.
+  const crua = new Intl.RelativeTimeFormat(LOCALES.fr, { numeric: 'auto', style: 'short' });
+  assert.equal(unidadeLida(crua.format(-9, 'month')), 'm', 'CONTROLE: o CLDR francês deixou de abreviar mês como "m." — reveja o R14-8-05');
+  assert.ok(unidadeLida(crua.format(-9, 'minute')).startsWith('m'), 'CONTROLE: a régua não lê a unidade do minuto');
 });
 
 test('9 MESES nunca sai como "há 9m" — o caso exato do relato', () => {
@@ -228,23 +258,38 @@ test('usa a abreviação OFICIAL do idioma onde ela é inequívoca, e cai pro ex
   // Este teste é o lado POSITIVO da regra. Sem ele, alguém trava tudo em 'long'
   // e o ganho some sem nada reprovar — o teste de prefixo acima ficaria verde,
   // porque o extenso nunca é ambíguo.
-  const esperado = { pt: 'short', en: 'short', fr: 'short', es: 'long' };
+  //
+  // E a escolha é POR UNIDADE (R14-8-05, rodada 14): só a unidade ambígua vai
+  // pro extenso — o MÊS, em espanhol e em FRANCÊS (o "short" francês escreve
+  // "m.", e o ponto escondia a colisão com "min" de quem comparava a frase
+  // inteira; antes este teste esperava o francês inteiro `short`: media a
+  // regra, não a saída do mês). Hora, minuto e dia seguem curtos — por idioma,
+  // o francês inteiro no extenso cortava o rótulo do TIPO no Galaxy Fold em 26
+  // de 40 combinações (eram 12; por unidade, 16).
+  const curtoMenos = (...longas) => Object.fromEntries(['minute', 'hour', 'day', 'month', 'year']
+    .map((u) => [u, longas.includes(u) ? 'long' : 'short']));
+  const esperado = { pt: curtoMenos(), en: curtoMenos(), fr: curtoMenos('month'), es: curtoMenos('month') };
   const src = 'const ESTILO_DA_IDADE = new Map();\n'
     + fatiarConst('UNIDADES_DA_IDADE') + '\n'
     + fatiar('estiloDaIdade') + '\nreturn estiloDaIdade;';
   const estiloDaIdade = new Function(src)();
   for (const [lang, quero] of Object.entries(esperado)) {
-    assert.equal(estiloDaIdade(LOCALES[lang]), quero,
-      `${lang}: esperava estilo "${quero}"`);
+    for (const [u, estilo] of Object.entries(quero)) {
+      assert.equal(estiloDaIdade(LOCALES[lang], u), estilo, `${lang}/${u}: esperava estilo "${estilo}"`);
+    }
   }
   // E o efeito na TELA, que é o que importa: em pt a hora abrevia e o mês não.
   const f = montar(LOCALES.pt);
   assert.match(f(AGORA - 12 * 3600000), /^há 12 ?h$/, 'pt deveria abreviar hora');
   assert.match(f(AGORA - 286 * DIA), /meses/, 'pt NÃO deve abreviar mês — não há forma curta segura');
-  // O espanhol, caído no extenso, escreve os dois.
+  // O espanhol: a hora curta, com o espaço da RAE; o mês por extenso.
   const fes = montar(LOCALES.es);
-  assert.match(fes(AGORA - 12 * 3600000), /horas/, 'es caiu pro extenso: hora por extenso');
-  assert.match(fes(AGORA - 286 * DIA), /meses/, 'es caiu pro extenso: mês por extenso');
+  assert.match(fes(AGORA - 12 * 3600000), /^hace 12 h$/, 'es: a hora abrevia (não colide com nada)');
+  assert.match(fes(AGORA - 286 * DIA), /meses/, 'es: o mês vai por extenso — "m" é o começo de "min"');
+  // O francês (R14-8-05): a hora curta, o mês por extenso.
+  const ffr = montar(LOCALES.fr);
+  assert.match(ffr(AGORA - 12 * 3600000), /^il y a 12.h$/, 'fr: a hora abrevia');
+  assert.match(ffr(AGORA - 286 * DIA), /mois/, 'fr: o mês vai por extenso — "m." se lê metro, e é o começo de "min"');
 });
 
 test('a TIPOGRAFIA segue a norma de cada idioma, e elas divergem', () => {

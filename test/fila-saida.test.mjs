@@ -756,7 +756,7 @@ function aparelhoO5(guardado = new Map()) {
     const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
       'saidaEmRecuo', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'pousouPorOutraAba',
-      'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
+      'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction', 'atenderOFimDaJanela',
       'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'handleReject', 'descarregarAcaoPendente', 'carimboDoGesto'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `
@@ -1276,8 +1276,8 @@ function aparelhoDoGesto({ resposta }) {
   };
   // O país da fila com "Minha área" sai dos editáveis por servidor (R7-6-05).
   const nomes = ['carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarEmAndamento', 'enfileirarSaida',
-    'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora', 'carimboDoGesto',
-    'anotarEditaveis', 'editaveisLidos', 'paisDaMinhaArea', 'paisDaFila'];
+    'handleActionResult', 'scheduleAction', 'atenderOFimDaJanela', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora',
+    'carimboDoGesto', 'anotarEditaveis', 'editaveisLidos', 'paisDaMinhaArea', 'paisDaFila'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let tratouNestaFila = false;

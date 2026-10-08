@@ -141,11 +141,18 @@ test('A1: o "Sair" noutra aba (token E conta fora do aparelho) encerra esta — 
   m = montarDecisao();
   m.h.sincronizarComOutraAba(null);
   assert.deepEqual(m.log, [SAIU], 'o armazenamento limpo noutra aba não encerrou esta');
-  // Esta só perguntava à extensão (a abertura, ou a renovação de uma queda): a
-  // resposta traria uma sessão NOVA por cima do "Sair".
+  // Esta só perguntava à extensão: a resposta traria uma sessão NOVA por cima do
+  // "Sair". Na RENOVAÇÃO de uma queda (o app ainda na tela), pelo caminho cheio;
+  // na TELA DE ENTRADA (a abertura, a volta a esta aba), pelo caminho dela, que
+  // também sobe a época mas não fecha o que a pessoa abriu ali nem avisa (a pista
+  // s18 da rodada 14, em test/contas-auditoria-r14).
+  m = montarDecisao({ naMemoria: false, autenticado: false, appNaTela: true, perguntando: true });
+  m.h.sincronizarComOutraAba(CONTA_KEY);
+  assert.deepEqual(m.log, [SAIU], 'a pergunta da renovação em voo desfaria o "Sair" da outra aba');
   m = montarDecisao({ naMemoria: false, autenticado: false, appNaTela: false, perguntando: true });
   m.h.sincronizarComOutraAba(CONTA_KEY);
-  assert.deepEqual(m.log, [SAIU], 'a pergunta à extensão em voo desfaria o "Sair" da outra aba');
+  assert.deepEqual(m.log, [['sair', { porOutraAba: true, naEntrada: true }]],
+    'a pergunta à extensão em voo na tela de entrada desfaria o "Sair" da outra aba (ou ele fechou o que a pessoa abriu ali)');
 });
 
 test('A1: CONTROLES — a QUEDA noutra aba, a entrada nova e a aba já na tela de entrada não encerram nada', () => {
@@ -1480,8 +1487,11 @@ test('A11: a fila que muda com o diálogo ABERTO muda a frase (a rede volta, a f
   const f = montarAviso([ITEM('v1')], { dialogoAberto: false });
   f.h.updateInFlightIndicator();
   assert.equal(f.el.textContent, 'velho', 'com o diálogo fechado não há o que redesenhar');
-  // Abrir o diálogo desenha a frase ANTES de mostrá-lo.
-  assert.match(APP_SEM, /\$\('logoutBtn'\)\.addEventListener\('click', \(\) => \{\s*desenharAvisoDoSair\(\);[^\n]*\n\s*openModal\('logoutModal'\);/);
+  // Abrir o diálogo desenha a frase ANTES de mostrá-lo — e DEPOIS de a janela do
+  // Desfazer sair (R14-8-06, em test/contas-auditoria-r14): a decisão dela não
+  // é descartada calada pelo "Sair".
+  assert.match(APP_SEM, /\$\('logoutBtn'\)\.addEventListener\('click', \(\) => abrirDialogoDoSair\(\)\);/);
+  assert.match(fatiarDe(APP_SEM, 'abrirDialogoDoSair'), /despacharJanelaDoDesfazer\(\);\s*desenharAvisoDoSair\(\);[^\n]*\n\s*openModal\('logoutModal'\);/);
 });
 
 test('A11: a frase mora no diálogo do "Sair", nas 4 línguas, com o número de verdade', () => {
@@ -1887,8 +1897,12 @@ test('F4: a área gerenciada salva que o perfil não tem sai do filtro — e a f
       saveFilters: () => log.push('grava'), resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
       epocaDaSessao: 0, filaEsperaPerfil: false, paisDoPerfil: async () => null, caixaDaMinhaArea: () => [1, 2, 3, 4],
       aplicarRecusaAutomatica: () => {}, sortQueue: () => {}, window: {},
+      // Nenhuma janela do Desfazer aberta: a `refazerFilaReal` pergunta por ela
+      // (`janelaDoDesfazerAberta`, de verdade; no buraco negro seria VERDADEIRA).
+      aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     };
-    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaReal'], deps);
+    const h = montar(['completarPerfilChegado', 'esquecerAreaForaDoPerfil', 'refazerFilaReal',
+      ...(/^function janelaDoDesfazerAberta\(/m.test(APP_SEM) ? ['janelaDoDesfazerAberta'] : [])], deps);
     return { h, deps, log };
   };
   let m = montarArea();

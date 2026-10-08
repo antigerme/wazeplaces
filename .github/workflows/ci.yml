@@ -228,26 +228,29 @@ jobs:
   # convite de instalar que o Safari nunca dispara) passaram por um CI que só
   # conhecia o Chromium.
   #
-  # Job PARALELO, pra não somar ao tempo do outro. Roda os três smokes que
-  # funcionam igual nos dois motores; o que só se mede no Chromium (toque com
-  # arraste pelo protocolo do DevTools) é PULADO pelo nome e contado no fim
-  # (tools/navegador.mjs). O do offline fica de fora INTEIRO, e por MEDIÇÃO: o
-  # modo avião simulado do Playwright no WebKit derruba até a resposta que o
-  # service worker tem guardada ("Load failed"), então o smoke mediria o
-  # instrumento. Contraprova: com o servidor derrubado de VERDADE, o worker do
-  # WebKit serve o app do cache igual ao Chromium.
+  # Job PARALELO, pra não somar ao tempo do outro. Roda os quatro smokes; o que
+  # só se mede no Chromium é PULADO pelo nome e contado no fim
+  # (tools/navegador.mjs). O do offline ficou de fora até o lote 18, porque o
+  # modo avião simulado do Playwright no WebKit derrubava até a resposta que o
+  # service worker tinha guardada — no 1.64 (WebKit 27.2) não derruba mais
+  # (MEDIDO: o guardado responde 200 sem rede, o não guardado falha, e uma
+  # página nova abre com o app). Mas, com o worker no comando, a ROTA do
+  # Playwright não vê NENHUM pedido da página no WebKit (o tile, a foto e a API
+  # iriam à rede de verdade), então as seções com o worker ligado seguem SÓ no
+  # Chromium, puladas pelo nome; aqui rodam as que o bloqueiam: a foto no cache
+  # HTTP, o diagnóstico (rede pendurada, o fechar, as duas abas) e o FAB.
   #
-  # O que isto NÃO é: o Safari do iPhone. É o mesmo motor (WebKit 26.x, o do
-  # Safari 26), num Linux — pega o que é do MOTOR (CSS, JavaScript, o fluxo do
-  # tempo real, IndexedDB) e não o que é do iOS (teclado de verdade, PWA
-  # instalado, o apagamento de armazenamento depois de 7 dias).
+  # O que isto NÃO é: o Safari do iPhone. É o mesmo motor (o WebKit da vez —
+  # 27.2 no Playwright 1.64), num Linux — pega o que é do MOTOR (CSS,
+  # JavaScript, o fluxo do tempo real, IndexedDB) e não o que é do iOS (teclado
+  # de verdade, PWA instalado, o apagamento de armazenamento depois de 7 dias).
   webkit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: 22 }
-      - name: Smokes no WebKit (layout, fluxo e presença)
+      - name: Smokes no WebKit (layout, fluxo, presença e offline)
         env:
           # O mesmo botão do job do Chromium: o mais novo, e com ele o WebKit da vez.
           PLAYWRIGHT_VERSAO: latest
@@ -262,3 +265,4 @@ jobs:
           npm run test:browser
           npm run test:fluxo
           npm run test:presenca
+          npm run test:offline

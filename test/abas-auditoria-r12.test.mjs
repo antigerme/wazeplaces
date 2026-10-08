@@ -342,6 +342,8 @@ function abaComBusca(nav, { aparelho, token = 'tok-x' }) {
     offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
     Treino: { ativo: false }, console: { error: () => {} },
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), ORDEM_PADRAO: 'newest', filaEsperaPerfil: false,
+    // A sessão de quando a busca saiu (a que cai no meio é descartada, R14-1-02).
+    epocaDaSessao: 0,
     BroadcastChannel: nav.BroadcastChannel, POUSO_NA_MEMORIA_MS,
     safeLS: { get: (k) => (aparelho.has(k) ? aparelho.get(k) : null), set: (k, v) => aparelho.set(k, String(v)),
       remove: (k) => aparelho.delete(k) },
@@ -653,7 +655,12 @@ function baseDeMentira() {
     offlineDB: async () => ({
       close() {},
       transaction: () => {
-        const tx = { objectStore: () => ({ put: (v, k) => { guardado[k] = structuredClone(v); setTimeout(() => tx.oncomplete()); } }) };
+        // A gravação lê os pedidos da fila guardada e a janela na MESMA transação
+        // (R14-4-01): o `get` responde numa tarefa à parte, como o de verdade.
+        const tx = { objectStore: () => ({
+          put: (v, k) => { guardado[k] = structuredClone(v); setTimeout(() => tx.oncomplete()); },
+          get: (k) => { const r = {}; setTimeout(() => { r.result = guardado[k] === undefined ? undefined : structuredClone(guardado[k]); if (r.onsuccess) r.onsuccess(); }); return r; },
+        }) };
         return tx;
       },
     }),
@@ -673,7 +680,7 @@ function abaOffline({ aparelho, base, fila }) {
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null;',
+    'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineEpoca = 0;',
     'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_OFFLINE.map(fatiar),

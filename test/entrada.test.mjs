@@ -606,13 +606,14 @@ test('app: a recusa que a extensão repassa vira o MESMO "Acesso restrito" do lo
 });
 
 test('app: quem mostra a recusa — a abertura, a volta à aba (uma vez por página) e a queda da sessão', () => {
-  assert.match(APP_SEM, /showAuthScreen\(\);\s*mostrarNegadoDaExtensao\(\);/,
+  // (Entre os dois, a conta do aparelho conferida de novo: R14-1-04, em test/contas-auditoria-r14.)
+  assert.match(APP_SEM, /showAuthScreen\(\);\s*seOutraContaTomouOAparelhoDaQueCaiu\(\);\s*mostrarNegadoDaExtensao\(\);/,
     'a abertura sem sessão não mostra a recusa que a extensão repassou');
   assert.match(APP_SEM, /if \(saiuNestaPagina\) return;\s*if \(extNegadoNestaPagina\) return;/,
     'a volta à aba pergunta de novo à extensão depois de ela já ter dito que o portão recusou');
   // A volta mostra a recusa quando nem a extensão nem a sessão de outra aba
   // entraram (a adoção no fim da pergunta é o R10-1-03, em test/contas-abas).
-  assert.match(APP_SEM, /entrarPelaExtensao\(\{ silencioso: true \}\)\.then\(\(entrou\) => \{\s*if \(entrou \|\| adotarSessaoDoAparelho\(\)\) return;\s*mostrarNegadoDaExtensao\(\);\s*\}\);/,
+  assert.match(APP_SEM, /entrarPelaExtensao\(\{ silencioso: true \}\)\.then\(\(entrou\) => \{\s*if \(entrou \|\| adotarSessaoDoAparelho\(\)\) return;\s*seOutraContaTomouOAparelhoDaQueCaiu\(\);\s*mostrarNegadoDaExtensao\(\);\s*\}\);/,
     'a volta à aba não mostra a recusa');
   const queda = fatiar('derrubarSessao');
   assert.match(queda, /const negado = tirarNegadoDaExtensao\(\);/, 'a queda ignora a recusa que a extensão repassou');
@@ -778,7 +779,8 @@ test('queda da sessão: os TRÊS caminhos passam pelo fechamento — e o diálog
   assert.match(queda, /if \(typeof depois === 'function'\) \{ fecharCamadasAbertas\(depois\); return; \}/,
     'o portão fechado voltou a abrir o diálogo por cima das camadas');
   // (A época conferida antes: o "Sair" no meio da renovação já fez a tela dele — test/costura-sessao, K3.)
-  assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
+  // (Depois da tela de entrada, a conta do aparelho conferida de novo: R14-1-04, em test/contas-auditoria-r14.)
+  assert.match(queda, /setTimeout\(\(\) => \{\s*if \(epoca !== epocaDaSessao\) return;\s*fecharCamadasAbertas\(\(\) => \{\s*if \(negado\) showAccessDenied\(negado\);\s*showAuthScreen\(\);\s*\}\);\s*seOutraContaTomouOAparelhoDaQueCaiu\(\);\s*\}, UNAUTHORIZED_REDIRECT_MS\);/,
     'a queda comum voltou a mostrar a entrada com as camadas abertas por cima');
   // O diálogo ANTES da tela de entrada (a ordem que o `Presenca.desligar` exige).
   // O portão que fecha na reconferência (a abertura e a sonda de um 401) passa

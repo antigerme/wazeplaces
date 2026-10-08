@@ -99,6 +99,8 @@ function depsDoTreino(AppState, log, els, extra = {}) {
     t: (k, v) => (v ? k + JSON.stringify(v) : k), openModal: () => {}, trocarTextoI18n: () => {}, semJanelaDeDesfazer: () => false,
     loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {},
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
     // o que o `sair()` chama e não é deste arquivo
     limparFocoAutor: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => log.push('recusa'),
     devolverPedidoRecusado: (lista) => { AppState.queue.splice(1, 0, ...(Array.isArray(lista) ? lista : [lista])); },

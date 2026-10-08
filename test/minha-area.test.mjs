@@ -69,6 +69,9 @@ function montar({ profile = null, regiao = 'row' } = {}) {
     // O que o `completarPerfilChegado` chama além do que se mede aqui.
     epocaDaSessao: 0, window: {}, paisDoPerfil: async () => null, irProPaisDoPerfil: async () => log.push('pais'),
     startFetching: () => log.push('busca'),
+    // O lugar do pedido do perfil, que a decisão leva (R14-6-04), e a reposição
+    // do "só retoma" com card (R14-6-01).
+    lugarDoPedidoDoPerfil: null, maybePrefetch: () => log.push('repor'),
     // O `resetQueue` é o de VERDADE: é ele que diz que a fila nova não espera mais o perfil.
     removeUndoBanner: () => {},
     enviarPendenciasDoLightbox: () => {},   // as escritas do lightbox na janela saem (L25)
@@ -84,11 +87,14 @@ function montar({ profile = null, regiao = 'row' } = {}) {
   // E o servidor nunca lido pra conta, que não cruza com o perfil guardado (R11-6-01/03), e a
   // área noutro servidor com o lugar por decidir (R11-6-02).
   // E a decisão que ficou SEM a resposta de um servidor (R12-6).
+  // E a JANELA do Desfazer que o refazer sem gesto espera — a do card ou uma da
+  // foto ampliada (o irmão do R14-2-05, pedido extra do lote 18).
   for (const opcional of ['caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil', 'caixaDaMinhaAreaEm',
     'anotarEditaveis', 'servidorNuncaLido', 'editaveisLidos', 'areaNoutroServidorSemDecisao', 'decisaoSemResposta',
-    'minhaAreaFalhouPorRedeEm']) if (achar(opcional)) nomes.push(opcional);
+    'minhaAreaFalhouPorRedeEm', 'janelaDoDesfazerAberta']) if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
+    + 'let aprovacaoPendente = null; let exclusaoPendente = null; let renomeacaoPendente = null;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let decisaoDoLugarDe = null;\n'
     + 'let editaveisPorServidor = { conta: null, lidos: {}, caixas: {} };\n'
     // A espera pelo perfil (ou pela caixa) que falhou por rede (R12-4-02).
@@ -295,7 +301,9 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     presencaWmeAoCarregarPerfil: () => {}, presencaWmeRefazerDesligar: () => {}, reavaliarFotoAbertaPeloPerfil: () => {},
     atualizarSeloDeConquista: () => {},   // o ponto de Filtros, que também lê o portão (R13-7-02)
     recusaDoPortao: () => log.push('recusa'),
-    showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => {},
+    showLoading: () => {}, removeCurrentCardEl: () => {}, showCurrentPlace: () => log.push('card'), maybePrefetch: () => log.push('repor'),
+    // A barra do foco no autor, que sai com o card no esqueleto (R14-2-04).
+    renderFocoAutor: () => {},
     showNoPlaces: () => log.push('vazio'), abrirGuardadaDepoisDaFalha: async () => false,
     listasDePaisesNoAr: new Map(), listasDePaisesGuardadas: new Map(), geracaoDasListasDePaises: 0,
     // As funções do conserto: no código de antes elas não existem, e o teste tem
@@ -314,10 +322,12 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'caixaDaMinhaArea', 'desligarMinhaAreaSemCaixa', 'esquecerAreaForaDoPerfil',
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
-    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia'])
+    'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia',
+    'decideOLugarDeAgora', 'janelaDoDesfazerAberta'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'
+    + 'let aprovacaoPendente = null; let exclusaoPendente = null; let renomeacaoPendente = null;\n'
     + 'let tratouNestaFila = false; let puladosNoInicioDaFila = 0; let recusaAutomaticaNestaFila = false;\n'
     + 'let filaAtravessouSessao = false; let ultimaBuscaFalhouPorRede = false; let buscaSemResposta = false;\n'
     + 'let buscaEsperaOPerfil = false; let epocaDaSessao = 0; let lugarDoPedidoDoPerfil = null; let decisaoDoLugarDe = null;\n'
@@ -958,7 +968,9 @@ test('R12-6: o 401 da pergunta vai à conferência da sessão, a recusa do port�
 // mandava na hora a decisão da janela do Desfazer (MEDIDO no navegador, nos dois
 // motores: o ✕ saía ~0,4 s depois do toque, e o pulado voltava como o card da
 // frente). Sem "Minha área", a mesma fila só retoma. Aqui o perfil chega DE
-// VERDADE (`completarPerfilChegado` → `retomarBusca` → `startFetching`).
+// VERDADE (`completarPerfilChegado` → `retomarBusca` → `maybePrefetch`; era o
+// `startFetching`, que desenhava o card de novo: o foco do teclado no ✕ dele caía
+// no <body>, R14-6-01).
 const NO_BR_COM_AREA = { row: { id: 1, rank: 5, isAreaManager: true, editableCountryIDs: [30],
   areas: [{ type: 'drive', bbox: CAIXA_BR }], managedAreas: [] } };
 // A fila guardada aberta sem rede, com os dois primeiros já pulados (ficam fora
@@ -968,6 +980,15 @@ async function comAFilaGuardadaEsperandoOPerfil(m, fila) {
   m.AppState.currentPlace = m.AppState.queue[0] || null;
   m.AppState.pendingAction = { execute: () => m.log.push('despachou'), cancel: () => {} };
   await m.app.fetchNextPage();                   // o `maybePrefetch` dos últimos cards: espera o perfil
+}
+// A janela do Desfazer ACABA: o `runExecutor` do `scheduleAction` solta o
+// `pendingAction` e atende o que o app adiou pra depois dela (`aoFim`, ver o
+// `retomarBusca`, R14-2-05/R14-6-02). O gancho de verdade é medido em
+// test/busca-auditoria-r14.test.mjs.
+function fimDaJanela(m) {
+  const aoFim = m.AppState.pendingAction && m.AppState.pendingAction.aoFim;
+  m.AppState.pendingAction = null;
+  if (typeof aoFim === 'function') aoFim();
 }
 
 test('R13-6-01: a fila guardada com card e "Minha área" — o perfil que chega só RETOMA a busca: o card fica, os pulados não voltam e a janela do Desfazer não é despachada', async () => {
@@ -985,7 +1006,9 @@ test('R13-6-01: a fila guardada com card e "Minha área" — o perfil que chega 
   // Só retoma: a busca volta a poder repor a fila (pela caixa da área, no `maybePrefetch`).
   assert.deepEqual([m.AppState.hasMore, m.AppState.loadError, m.app.filaEsperaPerfil()], [true, false, false],
     'a busca não foi retomada: a fila guardada nunca mais se repõe');
-  assert.ok(m.log.includes('card') && !m.log.includes('vazio'), `a tela não ficou no card: ${m.log}`);
+  // O card FICA — e não é desenhado de novo (R14-6-01): quem retoma é a reposição.
+  assert.ok(!m.log.includes('vazio') && !m.log.includes('card'), `a tela não ficou no card, ou o card foi desenhado de novo: ${m.log}`);
+  assert.ok(m.log.includes('repor'), `a busca não foi retomada pela reposição: ${m.log}`);
   assert.equal(m.AppState.filters.myArea, true);
 });
 
@@ -996,6 +1019,12 @@ test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela
   assert.equal(v.app.filaEsperaPerfil(), true, 'PRÉ-CONDIÇÃO: a busca não esperou o perfil');
   await v.chegaOPerfil();
   await tique(10);
+  // A janela do Desfazer da última decisão ainda corre: o refazer ESPERA o fim
+  // dela, sem despachá-la (R14-6-02 — o mesmo do R13-6-01, com a fila vazia).
+  assert.ok(!v.log.includes('despachou'), 'o perfil que chegou despachou a janela do Desfazer da última decisão (R14-6-02)');
+  assert.equal(v.AppState.fetchEpoch, 0, 'a fila vazia foi refeita com a janela do Desfazer aberta (R14-6-02)');
+  fimDaJanela(v);
+  await tique(10);
   assert.equal(v.AppState.fetchEpoch, 1, 'a fila vazia que esperou o perfil não foi refeita');
   assert.deepEqual(v.buscas, ['row bbox ' + JSON.stringify(CAIXA_BR)], `a fila refeita não foi pela caixa da área: ${v.buscas}`);
   // Com card, mas o perfil SEM caixa: "Minha área" desliga e diz, e a fila da tela
@@ -1004,6 +1033,10 @@ test('R13-6-01: CONTROLES — a fila VAZIA que esperou o perfil é refeita (pela
   const s = montarServidores({ perfis: semCaixa });
   await comAFilaGuardadaEsperandoOPerfil(s, [3, 4, 5]);
   await s.chegaOPerfil();
+  await tique(10);
+  // Também ele espera a janela (`refazerFilaReal`, R14-6-02).
+  assert.ok(!s.log.includes('despachou'), 'o refazer pelo filtro desligado despachou a janela do Desfazer (R14-6-02)');
+  fimDaJanela(s);
   await tique(10);
   assert.equal(s.AppState.filters.myArea, false, 'PRÉ-CONDIÇÃO: "Minha área" seguiu ligada num perfil sem área');
   assert.equal(s.AppState.fetchEpoch, 1, 'a fila de "Minha área" ficou na tela com o filtro desligado (o filtro que mente)');
@@ -1075,4 +1108,78 @@ test('R13-6-05: a pergunta repetida da decisão pendente usa os editáveis lidos
   assert.deepEqual(m.perguntas, ['row', 'na', 'il', 'na'], `a pergunta repetida não perguntou à NA: ${m.perguntas}`);
   assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['na', 235], 'o par região/país não é o que a NA respondeu');
   assert.equal(m.buscas.at(-1), 'na pais 235', `a busca não foi a dos EUA na NA: ${m.buscas}`);
+});
+
+// ═══ R14-6-04 · a busca do lugar escolhido À MÃO não espera a decisão do lugar ANTIGO ═══
+// (auditoria da rodada 14, pré-existente; o irmão do R13-6-05). Quem só edita na
+// NA abre no Brasil, e a decisão do lugar pergunta ao `/Session` de lá. Nesse
+// meio a pessoa aplica OUTRO lugar nos Filtros (a França) cuja fila é vazia: o
+// "Aplicar" tirava a PENDÊNCIA (R13-6-05), mas a busca de lá ESPERAVA a decisão
+// sobre o Brasil — que no fim é jogada fora (`paisDoPerfil`: a escolha é da
+// pessoa). Com a NA lenta, 14 s de esqueleto antes do "Tudo limpo!" da França
+// (MEDIDO no navegador, nos dois motores; roteiro r14-6/t2). A decisão leva o
+// lugar sobre o qual decide (`decisao.lugar`, `decideOLugarDeAgora`), e a espera
+// do fim da busca só vale pra decisão do lugar de agora. O irmão: o PERFIL ainda
+// vindo decide sobre o lugar do pedido dele (`lugarDoPedidoDoPerfil`).
+test('R14-6-04: a França aplicada à mão com a decisão sobre o Brasil no ar — a fila vazia de lá não espera por ela', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  const decisao = m.chegaOPerfil();              // o perfil da ROW chegou (no Brasil) e pergunta à NA
+  await tique();
+  assert.ok(m.soltar.na, 'PRÉ-CONDIÇÃO: a decisão do lugar não perguntou à NA');
+  const doAplicar = m.aplicarRegiao('row', 73);  // Filtros › França › Aplicar
+  await tique(5);
+  assert.deepEqual(m.buscas, ['row pais 73'], `PRÉ-CONDIÇÃO: a busca da França não saiu (uma vez): ${m.buscas}`);
+  assert.ok(m.log.includes('vazio'),
+    'DEFEITO: a fila vazia da França esperou a decisão sobre o Brasil — o esqueleto até o `/Session` da NA responder (R14-6-04)');
+  m.soltar.na();
+  await decisao;
+  await doAplicar;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['row', 73], 'a decisão sobre o Brasil tirou a pessoa da França que ela escolheu');
+});
+
+test('R14-6-04: CONTROLE — o ↻ no MESMO lugar (o Brasil) espera a decisão no ar, como o R12-6-02 manda', async () => {
+  const c = montarServidores({ perfis: SO_NA, segurar: ['na'], vazias: ['row'] });
+  c.AppState.filters.myArea = false;
+  const decisao = c.chegaOPerfil();
+  await tique();
+  const doToque = c.atualizar();
+  await tique(5);
+  assert.ok(!c.log.includes('vazio'),
+    'CONTROLE: a busca do MESMO lugar não esperou a decisão no ar — o instrumento não distingue as duas (ou o R12-6-02 voltou)');
+  c.soltar.na();
+  await decisao;
+  await doToque;
+  await tique(10);
+  assert.deepEqual([c.lugar.regiao, c.lugar.pais], ['na', 235], 'CONTROLE: a decisão não levou a fila pros EUA');
+});
+
+test('R14-6-04: com o PERFIL ainda vindo — a fila vazia do lugar escolhido à mão não espera um perfil que decide sobre outro lugar (e o do mesmo lugar espera)', async () => {
+  const m = montarServidores({ perfis: SO_NA, segurar: ['row'], vazias: ['row'] });
+  m.AppState.filters.myArea = false;
+  m.AppState._profilePromise = m.app.loadProfileAndAuxData();   // pedido no Brasil, ainda no ar
+  await tique();
+  assert.ok(m.soltar.row, 'PRÉ-CONDIÇÃO: o perfil não ficou no ar');
+  const doAplicar = m.aplicarRegiao('row', 73);
+  await tique(5);
+  assert.ok(m.log.includes('vazio'),
+    'DEFEITO: a fila vazia da França esperou o perfil pedido no Brasil, que decide sobre o Brasil (R14-6-04, o irmão do perfil vindo)');
+  m.soltar.row();
+  await m.AppState._profilePromise;
+  await doAplicar;
+  await tique(10);
+  assert.deepEqual([m.lugar.regiao, m.lugar.pais], ['row', 73], 'o perfil que chegou tirou a pessoa da França que ela escolheu');
+  // CONTROLE: no mesmo lugar, a fila vazia espera o perfil (o R12-6-02).
+  const c = montarServidores({ perfis: SO_NA, segurar: ['row'], vazias: ['row'] });
+  c.AppState.filters.myArea = false;
+  c.AppState._profilePromise = c.app.loadProfileAndAuxData();
+  await tique();
+  const doToque = c.atualizar();
+  await tique(5);
+  assert.ok(!c.log.includes('vazio'), 'CONTROLE: a fila vazia do MESMO lugar não esperou o perfil — o instrumento não distingue');
+  c.soltar.row();
+  await c.AppState._profilePromise;
+  await doToque;
+  await tique(10);
 });

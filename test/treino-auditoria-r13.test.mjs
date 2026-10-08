@@ -100,8 +100,8 @@ function classes(...iniciais) {
 const FUNCOES_DOS_AVISOS = ['handleActionResult', 'avisarConsequencia', 'registrarAcaoConfirmada', 'checkUndoGateUnlock',
   'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'undoGateAtingido',
   'canDisableUndo', 'checkDicaDesfazer', 'registrarJanelaSemUndo', 'semCamadaAberta', 'aoFecharCamada',
-  // as do conserto
-  'avisoDeUmaVezSaiAgora', 'pedirAvisosAdiados', 'atenderAvisosAdiados', 'avisosAdiadosAoVoltar'];
+  // as do conserto (e a pendência como fonte única, do lote 18: `adiarAvisoDeUmaVez`)
+  'avisoDeUmaVezSaiAgora', 'adiarAvisoDeUmaVez', 'pedirAvisosAdiados', 'atenderAvisosAdiados', 'avisosAdiadosAoVoltar'];
 function montarAvisos({ camada = null, visivel = true, treino = false, confirmados = 9, prefs = {} } = {}) {
   const toasts = [], confetes = [];
   const hist = { _total: { read: confirmados, rejected: 0 } };
@@ -508,8 +508,10 @@ function montarConvite({ userAgent, toques = 5, prompt = false }) {
     filaTerminouLimpa: () => true,   // o "Tudo limpo!" de quem terminou a fila
     t: (k) => 'T:' + k,
   };
-  const h = rodar(deps, fontes(['appJaInstalada', 'ehIOS', 'navegadorDoIOSForaDoSafari', 'versaoDoIOS',
-    'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer', 'atualizarConviteInstalar']), ['atualizarConviteInstalar']);
+  // O Safari reconhecido pela POSITIVA, com as listas fechadas de marcas (lote 18, R14-7-A2).
+  const marcas = ['MARCAS_DE_NAVEGADOR_NO_IOS', 'MARCAS_DE_APP_NO_IOS'].filter((n) => new RegExp('^const ' + n + ' = ', 'm').test(APP_SEM)).map(declaracao);
+  const h = rodar(deps, [...marcas, ...fontes(['appJaInstalada', 'ehIOS', 'webViewDeAppNoIOS', 'safariDoIOS', 'navegadorDoIOSForaDoSafari', 'versaoDoIOS',
+    'iOSAdicionaATelaDeInicioAqui', 'convitePodeAparecer', 'atualizarConviteInstalar'])], ['atualizarConviteInstalar']);
   h.atualizarConviteInstalar();
   const visivel = (id) => !els[id].classList.contains('hidden');
   return { convite: visivel('installInvite'), passos: visivel('installInvite') && visivel('installIosSteps'),

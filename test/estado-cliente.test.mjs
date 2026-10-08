@@ -162,7 +162,8 @@ function montarAgenda() {
     UNDO_WINDOW_MS: 3000,
     console: { error: () => {} },
   };
-  const { scheduleAction } = montar(['scheduleAction'], deps, ['scheduleAction']);
+  // O fim da janela, que atende o refazer da fila adiado pra ele (`atenderOFimDaJanela`).
+  const { scheduleAction } = montar(['scheduleAction', 'atenderOFimDaJanela'], deps, ['scheduleAction']);
   return { scheduleAction, AppState, log };
 }
 
@@ -223,6 +224,8 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
     enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
     aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
     // A aprovação ainda na JANELA do Desfazer (R6-2-07): o despacho a poria no ar.
     aprovacaoPendente: aprovacaoNaJanela ? { enviar: () => {} } : null,
     ...extraDeps,

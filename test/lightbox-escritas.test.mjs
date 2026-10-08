@@ -46,6 +46,18 @@ function metodo(nome) {
   return APP_SEM.slice(i, fechar(APP_SEM, k)).trim();
 }
 
+// A região viva de VERDADE (R14-3-01): o `dizerNaRegiao`, com o atraso e a
+// frase a caminho dele. Quem fatia o `anunciarNoLightbox` ou o `anunciarNoCard`
+// leva isto junto.
+function regiaoViva() {
+  const linha = (nome) => {
+    const m = new RegExp('^const ' + nome + ' = [^\\n]*;$', 'm').exec(APP_SEM);
+    assert.ok(m, `const ${nome} sumiu do app.js`);
+    return m[0];
+  };
+  return [linha('ANUNCIO_DE_NOVO_MS'), linha('anunciosDeNovo'), fatiar('dizerNaRegiao')].join('\n') + '\n';
+}
+
 // O Lightbox com os métodos de VERDADE e a tela de mentira. `L.resolvido.v` é o
 // `placeResolvidoPorAprovacao` do app: o pedido cuja aprovação JÁ pousou e só
 // espera a foto fechar (o `podeAprovarAtual` o lê, R6-3-01).
@@ -71,7 +83,10 @@ function lightbox(podeL6 = true) {
 // E a espera solta pela página saindo (R13-3-01) e o gesto do toque (R13-3-03).
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
   'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'soltarEsperasDoAquecimento', 'idDoGestoDaLixeira',
-  'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'];
+  'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa',
+  // O fim das janelas da foto atende o refazer da fila adiado pra ele (o irmão do
+  // R14-2-05 na foto ampliada, pedido extra do lote 18).
+  'atenderOFimDaJanela'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
   esperasSoDoAquecimento: new Set(),
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
@@ -1294,7 +1309,10 @@ test('L25 as três escritas do lightbox na janela SAEM com a fila trocada — pe
   // Quem troca a fila com a sessão viva chama ANTES de tirar o banner (senão a
   // janela corre sem ele). Por LINHA, sem comentário (gotcha #67).
   for (const [nome, corpo] of [['resetQueue', fatiar('resetQueue')], ['Treino.entrar', trechoDoTreino('entrar')]]) {
-    const i = corpo.indexOf('enviarPendenciasDoLightbox();');
+    // O `resetQueue` despacha SEM o refazer adiado pro fim delas: quem refaz a
+    // fila é ele (o irmão do R14-2-05 na foto ampliada, pedido extra do lote 18).
+    const m = /enviarPendenciasDoLightbox\((\{ semORefazerAdiado: true \})?\);/.exec(corpo);
+    const i = m ? m.index : -1;
     assert.ok(i > 0, `${nome}: não despacha as escritas do lightbox — o banner some e a janela segue correndo`);
     assert.ok(i < corpo.indexOf('removeUndoBanner();'), `${nome}: tira o banner ANTES de despachar a janela`);
   }
@@ -1462,7 +1480,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada'];
+    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')
@@ -2143,7 +2161,7 @@ test('R6-3-08 a troca de foto é ANUNCIADA: a posição, e o selo quando é a pr
 test('R6-3-08 a região é da CAMADA: o anúncio da foto de outro pedido não sai, e ela se esvazia ao fechar', () => {
   const regiao = { textContent: '' };
   const P = { venueID: 'v1' }, Q = { venueID: 'v2' };
-  const anunciar = (aberta, place) => new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(
+  const anunciar = (aberta, place) => new Function('document', 'Lightbox', regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(
     { getElementById: (id) => (id === 'lightboxAnuncio' ? regiao : null) }, { isOpen: () => aberta, place });
   anunciar(true, P)('Foto aprovada', P);
   assert.equal(regiao.textContent, 'Foto aprovada');
@@ -2459,8 +2477,8 @@ function exclusaoQueAnuncia(fotos, { fechadaAntes = false, dito = '', aoFechar =
     semCamadaAberta: () => !porTras.L.isOpen() && !outraCamada.aberta,
   } });
   porTras.L = m.L;
-  porTras.lb = new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
-  porTras.card = new Function('document', fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc);
+  porTras.lb = new Function('document', 'Lightbox', regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
+  porTras.card = new Function('document', 'AppState', regiaoViva() + fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc, m.AppState);
   Object.assign(m.A, { approvedImageIds: fotos.slice(), lat: -23, lon: -46, imageUrls: fotos.map(FOTO) });
   Object.assign(m.L, { urls: fotos.map(FOTO), idx: 0, newIdx: -1, idFotoAtual: () => fotos[0] });
   if (aoFechar) {
@@ -3053,7 +3071,7 @@ function desfechoComCamada({ aberta, frente, fila }) {
     AppState: { currentPlace: frente, queue: fila }, Treino: { ativo: false, _salvo: null },
     semCamadaAberta: () => !Lightbox.isOpen() };
   const nomes = ['anunciarDesfechoDaFoto', 'anunciarNoLightbox', 'anunciarNoCard', 'filaReal', 'filaRealComDevolvidos'];
-  const h = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(
+  const h = new Function(...Object.keys(deps), regiaoViva() + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(
     ...Object.values(deps));
   return { h, regioes };
 }
@@ -3108,8 +3126,8 @@ test('R10-3-02 de ponta a ponta: a exclusão de A pousa com a camada de B aberta
     porTras.L = m.L;
     porTras.irmaos = new Function('AppState', 'filaRealComDevolvidos', 'montarCardDeFundo',
       fatiar('aplicarNosIrmaos') + '\nreturn aplicarNosIrmaos;')(m.AppState, () => m.AppState.queue, () => {});
-    porTras.lb = new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
-    porTras.card = new Function('document', fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc);
+    porTras.lb = new Function('document', 'Lightbox', regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
+    porTras.card = new Function('document', 'AppState', regiaoViva() + fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc, m.AppState);
     const fotos = (ur) => [FOTO('f1'), FOTO(ur), FOTO('f2')];
     Object.assign(m.A, { approvedImageIds: ['f1', 'f2'], imageUrls: fotos('ur-A'), lat: -23, lon: -46 });
     const B = { venueID: m.A.venueID, updateRequestID: 'ur-B', purType: 'NEW_PHOTO', approvedImageIds: ['f1', 'f2'], imageUrls: fotos('ur-B') };
@@ -3694,8 +3712,8 @@ test('R11-3-05 com o Desfazer, a exclusão de A pousa com a camada (ou o card) d
     porTras.L = m.L;
     porTras.irmaos = new Function('AppState', 'filaRealComDevolvidos', 'montarCardDeFundo',
       fatiar('aplicarNosIrmaos') + '\nreturn aplicarNosIrmaos;')(m.AppState, () => m.AppState.queue, () => {});
-    porTras.lb = new Function('document', 'Lightbox', fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
-    porTras.card = new Function('document', fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc);
+    porTras.lb = new Function('document', 'Lightbox', regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L);
+    porTras.card = new Function('document', 'AppState', regiaoViva() + fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc, m.AppState);
     const fotos = (ur) => [FOTO('f1'), FOTO(ur), FOTO('f2')];
     Object.assign(m.A, { approvedImageIds: ['f1', 'f2'], imageUrls: fotos('ur-A'), lat: -23, lon: -46 });
     const B = { venueID: m.A.venueID, updateRequestID: 'ur-B', purType: 'NEW_PHOTO', approvedImageIds: ['f1', 'f2'], imageUrls: fotos('ur-B') };
@@ -3742,6 +3760,8 @@ test('R11-3-05 com o Desfazer, o nome que o Waze grava é dito pelo IRMÃO (o `a
       setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
       aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, registrarDesfazer: () => {},
       anunciarDesfechoDaFoto: (...a) => ditos.push(a),
+      // Nenhum refazer da fila adiado pro fim desta janela (medido em test/busca-auditoria-r14.test.mjs).
+      atenderOFimDaJanela: () => {},
     };
     const corpo = fatiar('confirmarRenomear').replace(/renomeacaoPendente/g, '__pend.r');
     const confirmar = new Function(...Object.keys(deps), '__pend', corpo + '\nreturn confirmarRenomear;')(...Object.values(deps), { r: null });
@@ -3855,21 +3875,25 @@ test('R12-3-01 com o Desfazer, o AQUECIMENTO da lixeira entra na vez do local: a
   m.responderAquecimento();
   await umTique(); await umTique();
   assert.deepEqual(m.saidas(), ['excluir:f1'], 'a exclusão não saiu depois da resposta do aquecimento');
-  // A APROVAÇÃO de uma foto do local também espera: tocou na lixeira, desfez (a
-  // exclusão não sai, o aquecimento segue no ar) e aprovou a proposta P.
+  // A APROVAÇÃO de uma foto do local também espera: tocou na lixeira e aprovou a
+  // proposta P — o gesto da aprovação despacha a exclusão do toque, que espera a
+  // leitura dele, e a aprovação espera a exclusão. (Tocar e DESFAZER deixa o
+  // toque órfão, e aí nada espera por ele: o R14-3-03, mais abaixo.)
   const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   a.abrirEm(a.A, 'f1');
   a.app.pedirExclusaoDaFoto();
-  a.pend.e.desfazer();
   a.irPara('ur-A');
   assert.equal(a.L.podeAprovarAtual(), true, 'PRÉ-CONDIÇÃO: a proposta P não está aprovável na camada');
   a.app.aprovarFotoAtual(); a.vencerJanela();
   await umTique(); await umTique();
   assert.deepEqual(a.saidas(), [],
-    'DEFEITO: a aprovação saiu com o aquecimento do local no ar — ele volta depois e guarda a foto aprovada como pendente');
+    'DEFEITO: a aprovação (ou a exclusão do toque) saiu com o aquecimento do local no ar — ele volta depois e guarda a lista de antes');
   a.responderAquecimento();
   await umTique(); await umTique();
-  assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'a aprovação não saiu depois da resposta do aquecimento');
+  assert.deepEqual(a.saidas(), ['excluir:f1'], 'a exclusão do toque não saiu depois da resposta do aquecimento (ou a aprovação não a esperou)');
+  a.responder('excluir', 'f1', { success: true, restantes: ['ur-A', 'f2'] });
+  await umTique(); await umTique();
+  assert.deepEqual(a.saidas(), ['excluir:f1', 'aprovar:ur-A'], 'a aprovação não saiu depois da exclusão do local');
   // CONTROLE: o aquecimento que responde DENTRO da janela (o de todo dia, ~0,7 s
   // contra 3 s) não segura nada: a exclusão sai na hora em que a janela vence.
   const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
@@ -3903,7 +3927,8 @@ test('R12-3-01 com a página SAINDO, a escrita da janela não espera o aquecimen
   m.pend.e.enviar();                                 // …e a descarga despacha a janela
   assert.deepEqual(m.saidas(), ['excluir:f1'],
     'DEFEITO: com a página saindo, a exclusão esperou o aquecimento — a página morre antes da resposta dele, e a exclusão nunca sai');
-  // A aprovação também (tocou na lixeira, desfez, aprovou e fechou o app).
+  // A aprovação também (tocou na lixeira, desfez, aprovou e fechou o app) — desde
+  // o R14-3-03 o toque desfeito não segura nada, com a página saindo ou não.
   const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
   a.abrirEm(a.A, 'f1');
   a.app.pedirExclusaoDaFoto();
@@ -3985,13 +4010,15 @@ test('R13-3-01 a exclusão — e a aprovação — que JÁ saiu da janela e espe
   assert.deepEqual(m.saidas(), ['excluir:f1'],
     'DEFEITO: a exclusão que esperava o aquecimento não saiu com a página saindo — ela some com a página, e a foto fica no mapa');
   assert.equal(m.idas[0].saindo, true, 'a exclusão solta saiu fora do modo da página saindo — sem keepalive, o navegador a corta');
-  // A APROVAÇÃO também (tocou na lixeira, desfez, aprovou a proposta P, e a
-  // janela da aprovação venceu com o toque ainda no ar).
-  const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
-  a.abrirEm(a.A, 'f1');
-  a.app.pedirExclusaoDaFoto();
-  a.pend.e.desfazer();
-  a.irPara('ur-A');
+  // A APROVAÇÃO também, quando só um aquecimento está na frente dela. O gesto
+  // chegava a isso tocando na lixeira, desfazendo e aprovando a proposta P com o
+  // toque ainda no ar; desde o R14-3-03 o toque desfeito solta a vez dele (mais
+  // abaixo), e o que não é desfeito tem a exclusão do gesto na frente — uma
+  // escrita. A defesa do `enviarAprovacao` fica, e é medida com o aquecimento
+  // posto na vez à mão (o `vezDasFotosNoLocal` de verdade, preso até o teste).
+  const a = fotosNoMesmoLocal();
+  a.abrirEm(a.A, 'ur-A');
+  const aquecimentoPreso = a.app.vezDasFotosNoLocal({ place: a.A }, 'aquecer');
   a.app.aprovarFotoAtual(); a.vencerJanela();
   await umTique(); await umTique();
   assert.deepEqual(a.saidas(), [], 'PRÉ-CONDIÇÃO: a aprovação não ficou esperando o aquecimento');
@@ -3999,6 +4026,7 @@ test('R13-3-01 a exclusão — e a aprovação — que JÁ saiu da janela e espe
   await microtarefas();
   assert.deepEqual(a.saidas(), ['aprovar:ur-A'], 'DEFEITO: a aprovação que esperava o aquecimento não saiu com a página saindo');
   assert.equal(a.idas[0].saindo, true, 'a aprovação solta saiu fora do modo da página saindo');
+  aquecimentoPreso.soltar();                         // a resposta dele, que a página morta nem veria
   // CONTROLE: uma ESCRITA na frente (a exclusão de f1 no ar) não é solta — as
   // duas cruzariam no servidor —, e a descarga sem nada a soltar não liga o modo
   // da página saindo.
@@ -4056,6 +4084,93 @@ test('R13-3-03 o toque na lixeira e a exclusão dele levam o MESMO gesto — e a
   n.app.pedirExclusaoDaFoto();
   assert.equal(n.aquecimentosComGesto.length, 2, 'PRÉ-CONDIÇÃO: os dois toques não aqueceram');
   assert.notEqual(n.aquecimentosComGesto[0], n.aquecimentosComGesto[1], 'dois toques com o MESMO gesto');
+});
+
+// ── R14-3-03: o toque DESFEITO não segura a vez do local ─────────────────────
+// (auditoria da rodada 14). Desde a chave do gesto (R13-3-03), a lista que o
+// toque na lixeira lê só serve à exclusão DAQUELE gesto. Tocar e desfazer deixa o
+// toque órfão — e a vez do local seguia presa à resposta dele: a aprovação de
+// outra foto do local esperava a leitura até o teto de 10 s do servidor, com o
+// card travado ("Espere a aprovação…"; MEDIDO no navegador com o Waze lendo em
+// 8 s: 7,2 s até a aprovação chegar, contra 3,1 s sem o toque), e a lixeira tocada
+// de novo nesse meio nem aquecia. O `cancelar` da exclusão — o Desfazer e o
+// cancelamento do app na queda — solta a vez do toque, e a resposta que chega
+// depois não a solta de novo.
+test('R14-3-03 tocar na lixeira e DESFAZER (ou o app cancelar) solta a vez do toque: a aprovação de outra foto do local sai sem esperar a leitura dele', async () => {
+  for (const como of ['desfazer', 'cancelar']) {
+    const a = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+    a.abrirEm(a.A, 'f1');
+    a.app.pedirExclusaoDaFoto();                     // o toque: a leitura do local no ar (o Waze lento)
+    assert.deepEqual(a.aquecidas(), ['preparar:v1'], `${como}: PRÉ-CONDIÇÃO — o toque não aqueceu`);
+    a.pend.e[como]();                                // a exclusão deste gesto não sai mais
+    a.irPara('ur-A');
+    assert.equal(a.L.podeAprovarAtual(), true, `${como}: PRÉ-CONDIÇÃO — a proposta P não está aprovável na camada`);
+    a.app.aprovarFotoAtual(); a.vencerJanela();
+    await umTique(); await umTique();
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A'],
+      `DEFEITO (${como}): a aprovação ficou esperando a leitura de um toque DESFEITO — que nenhuma escrita usa — com o card travado`);
+    // A resposta do toque desfeito chega DEPOIS, com a aprovação no ar: ela não
+    // solta a vez de novo. A lixeira tocada agora não aquece (há uma escrita do
+    // local no ar), e a exclusão dela espera a aprovação (R11-3-01).
+    a.responderAquecimento();
+    await umTique(); await umTique();
+    a.irPara('f2');
+    a.app.pedirExclusaoDaFoto(); a.vencerJanela();
+    await umTique(); await umTique();
+    assert.deepEqual(a.aquecidas(), ['preparar:v1'], `${como}: a lixeira aqueceu com a aprovação do local no ar`);
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A'], `${como}: a exclusão de f2 saiu com a aprovação do local no ar`);
+    a.responder('aprovar', 'ur-A', { success: true });
+    await umTique(); await umTique();
+    assert.deepEqual(a.saidas(), ['aprovar:ur-A', 'excluir:f2'], `${como}: a exclusão de f2 não saiu depois da aprovação`);
+  }
+  // CONTROLE: sem desfazer, a exclusão do MESMO gesto segue esperando a lista do
+  // toque dela (o R12-3-01, acima) — e a aprovação, atrás dela.
+  const c = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  c.abrirEm(c.A, 'f1');
+  c.app.pedirExclusaoDaFoto();
+  c.irPara('ur-A');
+  c.app.aprovarFotoAtual(); c.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(c.saidas(), [], 'CONTROLE: com a exclusão do toque de pé, a aprovação (ou a exclusão) não esperou a leitura do toque');
+});
+
+test('R14-3-03 a lixeira tocada DEPOIS de um toque desfeito aquece a lista DELA, e a exclusão leva o gesto dela — a resposta do toque órfão não a solta', async () => {
+  const t = fotosNoMesmoLocal({ aquecimentoNoAr: true });
+  t.abrirEm(t.A, 'f1');
+  t.app.pedirExclusaoDaFoto(); t.pend.e.desfazer();  // tocou em f1 e desfez: a leitura do toque 1 segue no ar
+  t.irPara('f2');
+  t.app.pedirExclusaoDaFoto();                       // tocou em f2
+  assert.equal(t.aquecidas().length, 2,
+    'DEFEITO: a lixeira de f2 não aqueceu — o toque desfeito de f1 seguia segurando a vez do local, e a exclusão de f2 sairia sem lista pronta');
+  t.vencerJanela();
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), [], 'a exclusão de f2 saiu antes da leitura do toque DELA (o R12-3-01)');
+  t.responderAquecimento();                          // a resposta do toque 1 (o órfão)
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), [], 'a resposta do toque DESFEITO soltou a exclusão de outro gesto, antes da lista dela');
+  t.responderAquecimento();                          // a do toque 2
+  await umTique(); await umTique();
+  assert.deepEqual(t.saidas(), ['excluir:f2'], 'a exclusão de f2 não saiu com a resposta do toque dela');
+  assert.equal(t.idas[0].gesto, t.aquecimentosComGesto[1], 'a exclusão de f2 não levou o gesto do toque dela');
+});
+
+// O `soltar` da vez é de UMA vez: com o toque desfeito, ele é chamado no
+// `cancelar` e de novo pela resposta do toque. Contado duas vezes com alguém atrás
+// na MESMA vez, a conta do local zerava e a vez sumia com uma escrita do local
+// no ar — a exclusão seguinte cruzaria com ela no servidor (R11-3-01).
+test('R14-3-03 o `soltar` da vez do local vale UMA vez: soltado de novo, não desconta quem está no ar atrás', () => {
+  const m = fotosNoMesmoLocal();
+  const aquecer = m.app.vezDasFotosNoLocal({ place: m.A }, 'aquecer');
+  const aprovar = m.app.vezDasFotosNoLocal({ place: m.A }, 'aprovar');
+  assert.equal(aprovar.soAquecimentoNaFrente, true, 'PRÉ-CONDIÇÃO: a aprovação não entrou atrás do aquecimento');
+  aquecer.soltar();
+  aquecer.soltar();
+  const depois = m.app.vezDasFotosNoLocal({ place: m.A }, 'excluir');
+  assert.ok(depois.anterior, 'DEFEITO: soltado duas vezes, o aquecimento descontou a aprovação no ar — a exclusão seguinte não a espera');
+  assert.equal(depois.soAquecimentoNaFrente, false, 'a exclusão seguinte não viu a aprovação (uma escrita) na frente');
+  aprovar.soltar(); depois.soltar();
+  // CONTROLE: com todos soltos, a vez esvazia — a próxima escrita sai na hora.
+  assert.equal(m.app.vezDasFotosNoLocal({ place: m.A }, 'excluir').anterior, null, 'CONTROLE: a vez não esvaziou com todos soltos');
 });
 
 // ── R12-3-02: a MESMA foto excluída pela camada de A e pela do IRMÃO B ─────────
@@ -4218,4 +4333,229 @@ test('R12-3-03 a aprovação que POUSA depois da queda chega aos irmãos — e n
   c.responder('aprovar', 'ur-A', { success: true });
   await umTique(); await umTique();
   assert.ok(!B2.approvedImageIds.includes('ur-A'), 'CONTROLE: o desfecho da sessão que caiu entrou na fila de OUTRA conta');
+});
+
+// ═══ Rodada 14 da auditoria (2026-10-08): a foto ampliada ═══════════════════
+
+// ── R14-3-01: a MESMA frase outra vez na região viva ──────────────────────────
+// A região viva da foto ampliada (`#lightboxAnuncio`) e a do card
+// (`#cardLiveRegion`) eram reescritas com o MESMO texto que já tinham, sem limpar
+// antes — e região viva reescrita igual pode não ser lida de novo (o precedente
+// do R12-5-02, na conversa). Calava o Desfazer de uma exclusão depois de navegar
+// até a foto ("Foto 1 de 3" → "Foto 1 de 3": o R9-3-05 prometeu que a foto que
+// volta é anunciada) e, sem o Desfazer, a 2ª exclusão seguida ("Foto excluída"
+// duas vezes) — MEDIDO com um MutationObserver nos dois motores. O
+// `dizerNaRegiao` de verdade: a região que já diz a frase é limpa AGORA, e a
+// frase volta `ANUNCIO_DE_NOVO_MS` depois, numa tarefa à parte.
+
+// O relógio de mentira do `dizerNaRegiao`: `aCaminho()` conta as frases a caminho
+// (os relógios de `ANUNCIO_DE_NOVO_MS`), e `rodar()` as solta.
+function relogioDaRegiao() {
+  const ms = Number((/^const ANUNCIO_DE_NOVO_MS = (\d+);$/m.exec(APP_SEM) || [])[1]);
+  const timers = [];
+  return {
+    ms,
+    setTimeout: (fn, t) => { const x = { fn, t, vivo: true }; timers.push(x); return x; },
+    clearTimeout: (x) => { if (x) x.vivo = false; },
+    aCaminho: () => timers.filter((x) => x.vivo && x.t === ms).length,
+    rodar: () => { for (const x of timers.splice(0)) if (x.vivo && x.t === ms) x.fn(); },
+  };
+}
+// Uma região viva de mentira que guarda CADA escrita — o que um leitor de tela
+// veria mudar.
+function regiaoQueAnota(inicial = '') {
+  let v = inicial;
+  const el = { escritas: [] };
+  Object.defineProperty(el, 'textContent', { get: () => v, set: (x) => { el.escritas.push(String(x)); v = String(x); } });
+  return el;
+}
+// As duas regiões, com o `anunciarNoLightbox`, o `anunciarNoCard` e o
+// `dizerNaRegiao` de verdade.
+function regioesQueAnunciam({ camada = '', card = '' } = {}) {
+  const rel = relogioDaRegiao();
+  const lb = regiaoQueAnota(camada);
+  const cr = regiaoQueAnota(card);
+  const L = { aberto: true, place: null, isOpen() { return this.aberto; } };
+  const AppState = { authenticated: true };
+  const doc = { getElementById: (id) => ({ lightboxAnuncio: lb, cardLiveRegion: cr })[id] || null };
+  const h = new Function('document', 'Lightbox', 'AppState', 'setTimeout', 'clearTimeout',
+    regiaoViva() + fatiar('anunciarNoLightbox') + '\n' + fatiar('anunciarNoCard') + '\nreturn { anunciarNoLightbox, anunciarNoCard };')(
+    doc, L, AppState, rel.setTimeout, rel.clearTimeout);
+  return { h, rel, lb, cr, L, AppState };
+}
+
+test('R14-3-01 a MESMA frase outra vez numa região viva: ela é LIMPA agora e a frase volta numa tarefa à parte — frase diferente sai na hora', () => {
+  const r = regioesQueAnunciam({ camada: 'Foto 1 de 3', card: 'Foto excluída' });
+  assert.ok(r.rel.ms > 0, 'PRÉ-CONDIÇÃO: o atraso da frase repetida sumiu do app.js');
+  r.h.anunciarNoLightbox('Foto 1 de 3');
+  assert.deepEqual(r.lb.escritas, [''],
+    'DEFEITO: a região da foto ampliada foi reescrita com a MESMA frase sem limpar antes (ou limpa e escrita no mesmo tique) — o leitor de tela pode não dizer de novo');
+  assert.equal(r.rel.aCaminho(), 1, 'a frase não ficou a caminho numa tarefa à parte');
+  r.rel.rodar();
+  assert.deepEqual(r.lb.escritas, ['', 'Foto 1 de 3'], 'a frase não foi dita de novo depois de a região ser limpa');
+  r.h.anunciarNoCard('Foto excluída');
+  assert.deepEqual(r.cr.escritas, [''], 'DEFEITO: a região do CARD foi reescrita com a MESMA frase sem limpar antes');
+  r.rel.rodar();
+  assert.deepEqual(r.cr.escritas, ['', 'Foto excluída'], 'a frase não foi dita de novo na região do card');
+  // CONTROLE: frase DIFERENTE sai na hora, sem relógio — como sempre.
+  r.h.anunciarNoLightbox('Foto 2 de 3');
+  r.h.anunciarNoCard('Novo pedido: Padaria');
+  assert.deepEqual([r.lb.escritas.at(-1), r.cr.escritas.at(-1), r.rel.aCaminho()], ['Foto 2 de 3', 'Novo pedido: Padaria', 0],
+    'CONTROLE: a frase diferente não saiu na hora (ou deixou relógio)');
+});
+
+test('R14-3-01 a frase a caminho: a seguinte só a troca e adia, outro anúncio no meio vale, e ela não sai com a camada fechada nem na tela de entrada', () => {
+  // A terceira com a frase a caminho: a região acabou de ser limpa — escrever já
+  // seria limpar e escrever sem o atraso. Ela só troca a frase e adia.
+  const a = regioesQueAnunciam({ camada: 'Foto excluída' });
+  a.h.anunciarNoLightbox('Foto excluída');
+  a.h.anunciarNoLightbox('Foto 1 de 2');
+  assert.deepEqual(a.lb.escritas, [''], 'a frase seguinte, com outra a caminho, foi escrita sem o atraso depois de a região ser limpa');
+  assert.equal(a.rel.aCaminho(), 1, 'ficou mais de uma frase a caminho');
+  a.rel.rodar();
+  assert.deepEqual(a.lb.escritas, ['', 'Foto 1 de 2'], 'a frase mais nova não chegou (ou a velha falou)');
+  // Outro anúncio escrito na região no meio (o card novo, pelo `renderCurrentCard`,
+  // que não passa por aqui): a frase a caminho não fala por cima dele.
+  const b = regioesQueAnunciam({ card: 'Foto excluída' });
+  b.h.anunciarNoCard('Foto excluída');
+  b.cr.textContent = 'Novo pedido: Mercado';
+  b.rel.rodar();
+  assert.equal(b.cr.textContent, 'Novo pedido: Mercado', 'a frase a caminho falou por cima do anúncio do card novo');
+  // A camada fechada no meio (o `close` esvazia a região): nada sai depois.
+  const c = regioesQueAnunciam({ camada: 'Foto 1 de 3' });
+  c.h.anunciarNoLightbox('Foto 1 de 3');
+  c.L.aberto = false; c.h.anunciarNoLightbox('');
+  c.rel.rodar();
+  assert.deepEqual(c.lb.escritas, ['', ''], 'a frase a caminho saiu com a foto ampliada fechada');
+  // A foto de OUTRO pedido aberta no meio (sem o `close` ter passado): o desfecho
+  // era do pedido de antes, e não é dito.
+  const P = { venueID: 'v1' }, Q = { venueID: 'v2' };
+  const d = regioesQueAnunciam({ camada: 'undo.photoDeleted' });
+  d.L.place = P;
+  d.h.anunciarNoLightbox('undo.photoDeleted', P);
+  d.L.place = Q;
+  d.rel.rodar();
+  assert.equal(d.lb.textContent, '', 'a frase a caminho do pedido P saiu com a foto de OUTRO pedido aberta');
+  // A sessão caiu no meio (a tela de entrada limpa a região do card): o desfecho
+  // de uma foto não é dito lá.
+  const e = regioesQueAnunciam({ card: 'Foto excluída' });
+  e.h.anunciarNoCard('Foto excluída');
+  e.AppState.authenticated = false; e.cr.textContent = '';
+  e.rel.rodar();
+  assert.equal(e.cr.textContent, '', 'a frase a caminho saiu na tela de entrada');
+  // CONTROLE: nada disso acontecendo, a frase sai (a medida enxerga a saída).
+  const f = regioesQueAnunciam({ card: 'Foto excluída' });
+  f.h.anunciarNoCard('Foto excluída');
+  f.rel.rodar();
+  assert.equal(f.cr.textContent, 'Foto excluída', 'CONTROLE: a frase a caminho não saiu');
+});
+
+// O caso (a) de ponta a ponta: a camada aberta pelo card (o `fotosDoCard`), a
+// navegação até a foto (`next`), a lixeira COM o Desfazer (`pedirExclusaoDaFoto`)
+// e o Desfazer (`devolverFoto` → `recolocarFoto` → `_anunciarFoto`), todos de
+// verdade, com a região da camada de verdade.
+function camadaQueAnuncia() {
+  const rel = relogioDaRegiao();
+  const regiao = regiaoQueAnota('');
+  const porTras = {};
+  const el = () => ({ classList: { add() {}, remove() {} }, focus() {} });
+  const doc = { getElementById: (id) => (id === 'lightboxAnuncio' ? regiao : el()), body: { style: {} }, activeElement: null };
+  const nomes = ['open', 'next', 'prev', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual', 'idAprovadoDaFoto', 'idFotoAtual',
+    'indiceDaFoto', '_anunciarFoto', 'marcarComoAprovada', 'desmarcarAprovada', 'esquecerProposta'];
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', 'podeExcluirFotoAqui',
+    '__res', 't', 'anunciarNoLightbox', `return {
+    place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
+    isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
+    ${nomes.map(metodo).join(',\n').replace(/placeResolvidoPorAprovacao/g, '__res.v')}
+  };`)(doc, { empilhar() {} }, () => {}, () => true, () => true, { v: null },
+    (k, v) => (v ? `${k}${JSON.stringify(v)}` : k), (...a) => porTras.anunciar(...a));
+  porTras.anunciar = new Function('document', 'Lightbox', 'setTimeout', 'clearTimeout',
+    regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, L, rel.setTimeout, rel.clearTimeout);
+  const fotosDoCard = new Function(fatiar('fotosDoCard') + '\nreturn fotosDoCard;')();
+  L.abrirPeloCard = (P) => {
+    const f = fotosDoCard(P);
+    L.open(f.urls, f.inicial, f.emDecisao, P.name, f.eDenuncia, P);
+    L.aberto = true;
+  };
+  L.devolverFoto = new Function('Lightbox', 'AppState', 'showCurrentPlace', 'mantendoFocoNoCard', 'fotoSaiuDoMapa',
+    fatiar('devolverFoto') + '\nreturn devolverFoto;')(L, { currentPlace: null }, () => {}, (f) => f(), () => false);
+  return { L, rel, regiao };
+}
+
+test('R14-3-01 (a) o Desfazer de uma exclusão depois de NAVEGAR até a foto diz a foto que volta — a região dizia a mesma frase da navegação', () => {
+  const DITO = 'lightbox.anuncio.foto{"i":1,"n":3}';
+  for (const navega of [true, false]) {
+    const caso = navega ? 'navegou até a foto' : 'CONTROLE: abriu direto na foto';
+    const { L, rel, regiao } = camadaQueAnuncia();
+    const m = montarEscritas({ resposta: { success: true }, preferencias: { undoEnabled: true },
+      extra: { Lightbox: L, devolverFoto: L.devolverFoto, semCamadaAberta: () => !L.isOpen(), registrarDesfazer: () => {} } });
+    const P = { venueID: 'vD', updateRequestID: 'uD', purType: 'NEW_PHOTO', name: 'Padaria', lat: -23, lon: -46,
+      approvedImageIds: ['x', 'y'], imageUrls: [FOTO('x'), FOTO('y'), FOTO('uD')] };
+    if (navega) {
+      L.abrirPeloCard(P);                            // abre na proposta
+      for (let i = 0; i < 3 && L.urls[L.idx] !== FOTO('x'); i++) L.next();
+      assert.equal(regiao.textContent, DITO, `${caso}: PRÉ-CONDIÇÃO — a navegação até a foto não foi dita`);
+    } else {
+      L.open(P.imageUrls, 0, 2, P.name, false, P);   // direto na foto x, sem navegar
+      L.aberto = true;
+      assert.equal(regiao.textContent, '', `${caso}: PRÉ-CONDIÇÃO — a região já dizia algo`);
+    }
+    assert.equal(L.urls[L.idx], FOTO('x'), `${caso}: PRÉ-CONDIÇÃO — a camada não está na foto x`);
+    m.app.pedirExclusaoDaFoto();                     // a lixeira, com a janela do Desfazer
+    assert.ok(m.pend.e && L.urls.length === 2, `${caso}: PRÉ-CONDIÇÃO — a foto não saiu da camada com a janela correndo`);
+    const antes = regiao.escritas.length;
+    m.pend.e.desfazer();                             // a foto volta e passa a ser a da tela
+    assert.deepEqual([L.urls.length, L.urls[L.idx]], [3, FOTO('x')], `${caso}: PRÉ-CONDIÇÃO — a foto não voltou pra tela`);
+    if (navega) {
+      assert.deepEqual(regiao.escritas.slice(antes), [''],
+        'DEFEITO: o Desfazer reescreveu na região a MESMA frase da navegação ("Foto 1 de 3") — a foto que volta não é dita de novo');
+      rel.rodar();
+    }
+    assert.deepEqual(regiao.escritas.slice(antes), navega ? ['', DITO] : [DITO],
+      `${caso}: a foto que voltou pelo Desfazer não foi dita (${regiao.escritas.slice(antes).join(' | ')})`);
+  }
+});
+
+// O caso (b) de ponta a ponta: sem o Desfazer, duas exclusões seguidas — com a
+// camada aberta (a região dela) e com ela fechada antes de cada resposta (a do
+// card, `anunciarDesfechoDaFoto`). O `pedirExclusaoDaFoto`, o `enviarExclusao`, o
+// `removerFoto` e as duas regiões de verdade.
+function exclusoesSemJanelaQueAnunciam() {
+  const rel = relogioDaRegiao();
+  const regioes = { lightboxAnuncio: regiaoQueAnota(''), cardLiveRegion: regiaoQueAnota('') };
+  const doc = { getElementById: (id) => regioes[id] || null };
+  const porTras = {};
+  const m = montarEscritas({ resposta: { success: true }, extra: {
+    document: doc, anunciarNoLightbox: (...a) => porTras.lb(...a), anunciarNoCard: (...a) => porTras.card(...a),
+  } });
+  porTras.lb = new Function('document', 'Lightbox', 'setTimeout', 'clearTimeout',
+    regiaoViva() + fatiar('anunciarNoLightbox') + '\nreturn anunciarNoLightbox;')(doc, m.L, rel.setTimeout, rel.clearTimeout);
+  porTras.card = new Function('document', 'AppState', 'setTimeout', 'clearTimeout',
+    regiaoViva() + fatiar('anunciarNoCard') + '\nreturn anunciarNoCard;')(doc, m.AppState, rel.setTimeout, rel.clearTimeout);
+  const fotos = ['f1', 'f2', 'f3'];
+  Object.assign(m.A, { approvedImageIds: fotos.slice(), lat: -23, lon: -46, imageUrls: fotos.map(FOTO) });
+  Object.assign(m.L, { urls: fotos.map(FOTO), idx: 0, newIdx: -1 });
+  m.L.idFotoAtual = () => m.L.idAprovadoDaFoto(m.L.urls[m.L.idx]);
+  return { ...m, rel, regioes };
+}
+
+test('R14-3-01 (b) sem o Desfazer, a 2ª exclusão seguida diz "Foto excluída" de novo — na camada e, com ela fechada, no card', async () => {
+  for (const onde of ['lightboxAnuncio', 'cardLiveRegion']) {
+    const m = exclusoesSemJanelaQueAnunciam();
+    const r = m.regioes[onde];
+    const excluir = async () => {
+      if (onde === 'cardLiveRegion') m.L.aberto = true;
+      m.app.pedirExclusaoDaFoto();
+      if (onde === 'cardLiveRegion') m.L.aberto = false;   // a foto fechada antes da resposta (R9-3-05)
+      await umTique(); await umTique();
+    };
+    await excluir();
+    assert.deepEqual(r.escritas, ['undo.photoDeleted'], `${onde}: PRÉ-CONDIÇÃO — a 1ª exclusão não foi dita nesta região`);
+    await excluir();
+    assert.equal(m.A.imageUrls.length, 1, `${onde}: PRÉ-CONDIÇÃO — as duas exclusões não pousaram`);
+    assert.deepEqual(r.escritas, ['undo.photoDeleted', ''],
+      `DEFEITO (${onde}): a 2ª exclusão reescreveu "Foto excluída" igual, sem limpar antes — o leitor de tela pode não dizer de novo`);
+    m.rel.rodar();
+    assert.deepEqual(r.escritas, ['undo.photoDeleted', '', 'undo.photoDeleted'], `${onde}: a 2ª exclusão não foi dita depois de a região ser limpa`);
+  }
 });

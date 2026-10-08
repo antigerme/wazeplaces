@@ -500,7 +500,10 @@ function constanteDoApp(nome) {
 }
 const DEPS_DO_TECLADO = ['document', 'window', 'AppState', 'MapaLightbox', 'Lightbox', 'topOpenModal',
   'trapTabInModal', 'closeModal', 'desfazerAcaoPendente', 'acoesTravadas', 'agirNoPedidoDoGesto',
-  'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado', 'avisarTravaAoTocar'];
+  'pedidoDoCard', 'handleReject', 'handleMarkAsRead', 'handleSkip', 'desfazerPeloTeclado', 'avisarTravaAoTocar',
+  // O foco que a seta promete ao card que fica (R14-8-01) não é o assunto daqui:
+  // test/tela-auditoria-r14.test.mjs roda o de verdade.
+  'prometerFocoDaSeta'];
 function montarTeclado() { return montarTecladoCom({}); }
 function montarTecladoCom(trocas) {
   const doc = { activeElement: null, getElementById: () => null };
@@ -515,7 +518,7 @@ function montarTecladoCom(trocas) {
     topOpenModal: () => null, trapTabInModal() {}, closeModal() {}, desfazerAcaoPendente() {},
     acoesTravadas: () => false, agirNoPedidoDoGesto() {}, pedidoDoCard: () => null,
     handleReject() {}, handleMarkAsRead() {}, handleSkip() {}, desfazerPeloTeclado: () => false,
-    avisarTravaAoTocar() {},
+    avisarTravaAoTocar() {}, prometerFocoDaSeta() {},
     ...trocas,
   };
   const fonte = [constanteDoApp('TECLAS_DE_CURSOR'), fatiarApp('focoEmCampoDeTexto'),

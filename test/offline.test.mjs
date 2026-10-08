@@ -653,9 +653,23 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   const i9c = CODIGO.indexOf("secao('9c.");
   const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
   assert.match(bloco9c, /hasTouch: true, isMobile: true/, 'a 9c tem que rodar num contexto com TOQUE — o botão responde a toque');
+  // O toque de verdade é o do MOTOR (lote 18): o do DevTools no Chromium, e o
+  // `touchscreen` do Playwright no WebKit — que não tem o protocolo do DevTools.
   assert.match(bloco9c, /Input\.dispatchTouchEvent/, 'a 9c tem que TOCAR o botão, não chamar a captura por fora');
+  assert.match(bloco9c, /await pg\.touchscreen\.tap\(c\.x, c\.y\);/, 'fora do Chromium, a 9c tem que TOCAR o botão (o `touchscreen`)');
+  // E o toque espera o botão NO LUGAR que o app pôs, não três amostras iguais:
+  // MEDIDO no WebKit (lote 18), a transição da troca de canto fica parada no
+  // ponto de partida por mais de 300 ms às vezes, e o toque caía no lugar velho
+  // (6 de 40 sem captura; 0 de 40 com a condição).
+  assert.match(bloco9c, /const noLugar = !f\.getAnimations\(\)\.some\(\(a\) => a\.playState === 'running'\)/,
+    'o toque da 9c voltou a esperar só três amostras iguais — a transição parada no começo engana');
+  assert.match(bloco9c, /parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo/,
+    'o toque da 9c conta como parado o FAB que ainda desliza');
   assert.doesNotMatch(bloco9c, /dlogCapturar\(/, 'a 9c chamou a captura por fora — o toque de verdade é o que se mede');
-  assert.match(bloco9c, /\.close\(\{ runBeforeUnload: true \}\)/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
+  // Fechar como o usuário fecha é a porta única (lote 18): no WebKit 27.2 o
+  // `close({ runBeforeUnload: true })` nem fecha a página (MEDIDO); a porta usa o
+  // `close()` puro lá, e o `test/navegador.test.mjs` cobra a forma dela.
+  assert.match(bloco9c, /await fecharComoOUsuario\(p1d\);/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
   // Ir pro FUNDO sem descarregar: descarregar aborta o IndexedDB em voo, e aí
   // "guarda a captura já baixada" e "grava sem o modo dev" passavam limpas
   // (medido: as duas sabotagens sobreviveram antes disto).
@@ -702,6 +716,28 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(CI, /npm run test:offline/,
     'o CI não roda o smoke do offline — sem isso ele vira arquivo morto no dia em'
     + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
+});
+
+// A ESPERA DO FIM DE UMA PREPARAÇÃO também é uma só (`preparacaoAssentada`, no
+// smoke do offline): a espera pelo resultado CRU (`offlineUltimoResultado !==
+// null`) acordava no "pronto" de uma preparação VELHA — a volta da rede dispara a
+// da fila de antes, e o pedido do teste vira `offlinePedidaDeNovo`. MEDIDO no
+// lote 18 (a 5b: 1 em ~7 rodadas, o cache com os tiles da fila anterior) e
+// reproduzido atrasando os tiles: o "pronto" chegava com `offlineVarrendo`
+// verdadeiro e a fila guardada não coberta. Sem comentário na conta (gotcha #67).
+test('o smoke do offline espera o FIM da preparação (`preparacaoAssentada`), nunca o resultado cru', () => {
+  const OFF = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const codigo = OFF.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.match(codigo, /const preparacaoAssentada = \(\) =>[^;]*offlineUltimoResultado !== null[^;]*!offlineVarrendo[^;]*!offlinePedidaDeNovo/,
+    'sumiu a espera única do fim da preparação, ou ela deixou de exigir nada no ar e nada pedido pra depois');
+  assert.doesNotMatch(codigo, /esperarNaPagina\(\w+, \(\) => offlineUltimoResultado !== null,/,
+    'voltou a espera pelo resultado CRU da preparação — ela acorda no "pronto" de uma preparação velha; use preparacaoAssentada');
+  assert.ok((codigo.match(/esperarNaPagina\(\w+, preparacaoAssentada,/g) || []).length >= 10,
+    'as esperas do fim da preparação deixaram de passar pela preparacaoAssentada');
+  // E a 5b confere que o "pronto" é o da fila que vai ser reaberta — o controle
+  // que teria pegado a corrida.
+  assert.match(codigo, /cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm/,
+    'a PRÉ-CONDIÇÃO da 5b deixou de conferir que a preparação cobre a fila guardada');
 });
 
 // A ESPERA DO ESVAZIAMENTO É FONTE ÚNICA, e este guard existe porque a lição

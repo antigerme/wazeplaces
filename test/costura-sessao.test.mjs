@@ -81,6 +81,17 @@ function montar(nomes, deps, fonte = APP_SEM) {
   if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesDaQueda' in deps)) deps.aprovacoesDaQueda = new Map();
+  // O refazer da fila sem gesto pergunta pela JANELA do Desfazer aberta, e o fim
+  // de cada janela atende o que esperava por ela (o irmão do R14-2-05 na foto
+  // ampliada, pedido extra do lote 18): as funções de verdade, quando existem, e
+  // as janelas da foto fechadas por padrão (no buraco negro seriam VERDADEIRAS).
+  const existe = (n) => new RegExp('^function ' + n + '\\(', 'm').test(fonte);
+  if ((nomes.includes('refazerFilaReal') || nomes.includes('retomarBusca')) && !nomes.includes('janelaDoDesfazerAberta')
+    && existe('janelaDoDesfazerAberta')) nomes = [...nomes, 'janelaDoDesfazerAberta'];
+  if (nomes.includes('scheduleAction') && !nomes.includes('atenderOFimDaJanela') && existe('atenderOFimDaJanela')) {
+    nomes = [...nomes, 'atenderOFimDaJanela'];
+  }
+  for (const k of ['aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente']) if (!(k in deps)) deps[k] = null;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
@@ -438,7 +449,10 @@ test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida �
     assert.equal(m.pendentes.length, 1, `${caso}: PRÉ-CONDIÇÃO: o ✕ saiu e está no ar`);
     m.h.conferirContaDestaAba();
     m.pendentes[0](resposta);
-    await tique(20);
+    // Espera o FIM do voo (o `finally` do executor zera o contador), nunca um
+    // prazo: com a suíte disputando a CPU, 20 ms venciam antes da resposta ser
+    // processada e o teste reprovava 1 em 16 (lote 18).
+    await ateQue(() => m.AppState.inFlightActions === 0, `${caso}: a resposta foi processada`);
     for (const gravaria of ['recordHistory', 'registrarRejeicaoDeAutor', 'registrarAcaoConfirmada', 'avisarConsequencia']) {
       assert.ok(!m.h.chamou.includes(gravaria), `DEFEITO (${caso}): a resposta com a conta em dúvida chegou a ${gravaria}`);
     }
@@ -453,7 +467,7 @@ test('R7-2-01: a resposta do ✕ que estava NO AR chega com a conta em dúvida �
   c.h.handleReject();
   await tique();
   c.pendentes[0]({ success: true });
-  await tique(20);
+  await ateQue(() => c.AppState.inFlightActions === 0, 'CONTROLE: a resposta foi processada');
   assert.ok(c.h.chamou.includes('recordHistory'), 'CONTROLE: sem dúvida a resposta não gravou — o teste perdeu o sentido');
 });
 
@@ -631,7 +645,10 @@ test('V1: CONTROLE — o lote em voo com a fila REFEITA (o "Sair"): nada volta, 
   const m = montarLoteDaQueda();
   const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
   await tique(); m.pendentes[0]({ success: true });
-  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;
+  // O "Sair" de verdade: a época e a fila trocam, e a página fica SEM sessão
+  // (`handleLogout` põe `authenticated = false`). Sem sessão, nada volta nem
+  // busca (R14-2-02: com a sessão de pé, a busca da sessão de agora decide).
+  await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++; m.AppState.authenticated = false;
   m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
   m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
@@ -645,6 +662,7 @@ test('V1: CONTROLE — o que o Waze RECUSOU antes da queda também não entra (n
   const envio = m.h.enviarLote(m.lote, { regiao: 'row' });
   await tique(); m.pendentes[0]({ success: false, errorCategory: 'unknown' });   // o 1º: recusa de verdade
   await tique(); m.deps.epocaDaSessao++; m.AppState.fetchEpoch++;               // o "Sair" com o 2º no ar
+  m.AppState.authenticated = false;                                           // (que deixa a página sem sessão)
   m.AppState.queue = []; m.AppState.currentPlace = null; m.AppState.serverTotal = 0;
   m.pendentes[1]({ success: false, errorCategory: 'unauthorized' });
   await envio;
@@ -860,7 +878,11 @@ test('V6b: CONTROLE — com OUTRA conta a fila foi refeita: a resposta velha nã
   assert.equal(m.AppState.serverTotal, 2, 'a resposta da sessão de A descontou o "Restam" da fila de B');
   assert.equal(m.AppState.currentPlace, Q);
   assert.deepEqual(m.pousos, ['u1'], 'a resposta da sessão de A gravou pouso na fila de B');
-  assert.deepEqual(m.log.slice(logAntes), [], 'a resposta da sessão de A redesenhou a tela de B');
+  // O que o lote de A NÃO marcou (o u3) segue pendente no Waze: com a sessão de
+  // pé, ele passa pela devolução da fila refeita (R14-2-02), que não põe o
+  // objeto velho na fila de B — só reabre a busca, e quem decide o que volta é a
+  // busca da sessão de B. Nada mais redesenha a tela de B.
+  assert.deepEqual(m.log.slice(logAntes), ['devolveu'], 'a resposta da sessão de A redesenhou a tela de B');
 });
 
 // ═══ K2 · a renovação com OUTRA conta não mantém a fila nem o cabeçalho de A ══
@@ -1307,9 +1329,11 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
   const deps = {
     AppState: { queue: [{ venueID: 'v1' }], filters: {}, profile: { id: 111 } }, Treino: { ativo: false },
     offlineLigado: () => true, OFFLINE_STORE: 'fila', filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
-    safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
+    offlineEpoca: 0, safeLS: { get: () => null }, CONTA_KEY: constante('CONTA_KEY'), API: { getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; } },
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); } }) };
+      // A gravação lê os pedidos da fila guardada e a janela antes (R14-4-01): base vazia.
+      const tx = { objectStore: () => ({ put: (v) => { puts.push(v); setTimeout(() => tx.oncomplete()); },
+        get: () => { const r = {}; setTimeout(() => { if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
   };

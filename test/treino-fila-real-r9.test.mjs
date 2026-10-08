@@ -101,6 +101,11 @@ function depsDoTreino(AppState, log, els, extra = {}) {
     t: (k, v) => (v ? k + JSON.stringify(v) : k), openModal: () => {}, trocarTextoI18n: () => {}, semJanelaDeDesfazer: () => false,
     loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {},
+    // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
+    devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
+    // As outras duas janelas da foto, que o refazer sem gesto também espera
+    // (`janelaDoDesfazerAberta`; o irmão do R14-2-05, pedido extra do lote 18).
+    exclusaoPendente: null, renomeacaoPendente: null,
     // o que o `sair()` chama e não é deste arquivo
     limparFocoAutor: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => log.push('recusa'),
     devolverPedidoRecusado: (lista) => { AppState.queue.splice(1, 0, ...(Array.isArray(lista) ? lista : [lista])); },
@@ -109,6 +114,8 @@ function depsDoTreino(AppState, log, els, extra = {}) {
   };
 }
 function montar(deps, nomes, extraFonte = '', retorno = '') {
+  // O refazer sem gesto pergunta pela janela do Desfazer aberta: a de VERDADE.
+  if (nomes.includes('refazerFilaReal') || nomes.includes('retomarBusca')) nomes = [...nomes, 'janelaDoDesfazerAberta'];
   const chaves = Object.keys(deps);
   const fonte = [extraFonte, ...nomes.map(fatiar), 'const Treino = ' + objetoDoTreino() + ';',
     `return { Treino, ${[...nomes, retorno].filter(Boolean).join(', ')} };`].join('\n');
@@ -163,8 +170,10 @@ function montarPerfil({ filtros = {}, listaNa = null, devolverDeVerdade = false 
     // de verdade, ela NÃO sai com o treino aberto (a primeira linha do
     // `startFetching`): o "só retoma" passa por ela no treino (R13-6-01).
     startFetching: () => { if (vivo.app && vivo.app.Treino.ativo) return; log.push('busca:' + lugar.regiao + '/' + lugar.pais); },
-    // A reposição da fila que volta do treino (o `maybePrefetch` do `sair()`).
-    maybePrefetch: () => log.push('repoe'),
+    // A reposição da fila que volta do treino (o `maybePrefetch` do `sair()`) — e
+    // o "só retoma" da fila real com card (R14-6-01). Como a de verdade, ela não
+    // repõe com o treino aberto (a primeira linha do `maybePrefetch`).
+    maybePrefetch: () => { if (vivo.app && vivo.app.Treino.ativo) return; log.push('repoe'); },
     t: (k, v) => k + (v && v.pais ? '(' + v.pais + ')' : ''),
     manterFocoNaFrente: () => {},
   });
@@ -195,10 +204,12 @@ const CASOS_DO_PERFIL = {
   // treino aberto, o MESMO: nada fica anotado, e o "Sair" devolve a fila guardada
   // e a repõe (`maybePrefetch`). Anotado, o "Sair" refazia a fila e os pulados
   // voltavam (o irmão do R13-6-01, MEDIDO no navegador). A régua do R9-7-04 segue
-  // nos outros casos e na fila real VAZIA (ver o teste do R13-6-01 abaixo).
+  // nos outros casos e na fila real VAZIA (ver o teste do R13-6-01 abaixo). O
+  // "só retoma" é a REPOSIÇÃO (`maybePrefetch`, 'repoe'), não o `startFetching`,
+  // que desenhava o card de novo — o foco do teclado no ✕ caía no <body> (R14-6-01).
   espera: { filtros: { myArea: true }, esperando: true, perfil: { id: 7, editableCountryIDs: [30], areas: [{ bbox: [1, 2, 3, 4] }] },
-    final: { lugar: 'row/30', busca: ['busca:row/30'], toasts: [] }, filaDoControle: ['u1', 'u2', 'u3'],
-    noSair: { final: { lugar: 'row/30', busca: [], toasts: [] }, fila: ['u1', 'u2', 'u3'] } },
+    final: { lugar: 'row/30', busca: ['repoe'], toasts: [] }, filaDoControle: ['u1', 'u2', 'u3'],
+    noSair: { final: { lugar: 'row/30', busca: ['repoe'], toasts: [] }, fila: ['u1', 'u2', 'u3'] } },
 };
 
 async function perfilChegaNoTreino(caso, { comTreino }) {
@@ -212,7 +223,9 @@ async function perfilChegaNoTreino(caso, { comTreino }) {
   const desde = m.log.length;
   await m.app.completarPerfilChegado(c.perfil, 0);
   const lugar = () => m.lugar.regiao + '/' + m.lugar.pais;
-  const buscas = () => m.log.slice(desde).filter((l) => l.startsWith('busca'));
+  // Por onde a busca sai: refeita (`startFetching`, 'busca:…') ou só retomada
+  // pela reposição (`maybePrefetch`, 'repoe').
+  const buscas = () => m.log.slice(desde).filter((l) => l.startsWith('busca') || l === 'repoe');
   const noTreino = comTreino ? { ativo: m.app.Treino.ativo, exemplos: soExemplos(m.AppState.queue),
     real: ids(m.app.filaReal()), buscas: buscas(), toasts: m.toasts.slice(), lugar: lugar() } : null;
   if (comTreino) m.app.Treino.sair();
@@ -628,9 +641,11 @@ function montarInterruptor() {
     offlineEsquecer: () => {}, lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }),
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     offlinePodarPousos: () => {}, dfato: () => {},
-    // A base do offline: o `put` grava, e a transação fecha num tique.
+    // A base do offline: o `put` grava, e a transação fecha num tique. A gravação
+    // lê os pedidos da fila guardada e a janela antes (R14-4-01).
     offlineDB: async () => ({ close() {}, transaction: () => {
-      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); } }) };
+      const tx = { objectStore: () => ({ put: (v, k) => { base[k] = JSON.parse(JSON.stringify(v)); setTimeout(() => tx.oncomplete()); },
+        get: (k) => { const r = {}; setTimeout(() => { r.result = base[k] === undefined ? undefined : JSON.parse(JSON.stringify(base[k])); if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
     } }),
     t: (k, v) => (v ? k + JSON.stringify(v) : k),
@@ -649,6 +664,9 @@ test('R9-4-02: ligar o "Disponível offline" SEM SINAL com o treino aberto guard
     if (comTreino) m.app.Treino.entrar();
     m.app.offlineAoMudarInterruptor(true);
     await tiques(5);
+    // A gravação lê a base antes de gravar (R14-4-01) e leva mais de uma tarefa:
+    // espera a CONDIÇÃO, com teto — nunca um prazo fixo.
+    for (let i = 0; i < 500 && !m.base.fila; i++) await new Promise((ok) => setTimeout(ok, 2));
     m.app.atualizarLinhaDoOffline(0, 0);
     const n = /\{"n":(\d+)\}/.exec(m.linha());
     return { linhaN: n ? Number(n[1]) : null, guardados: m.base.fila ? ids(m.base.fila.places) : [],
@@ -749,7 +767,9 @@ test('R9-4-03: CONTROLE — a fila guardada de OUTRO lugar não fica esperando n
 // passa pela função que respeita o treino aberto; o `resetQueue` direto nesses
 // caminhos é como o treino volta a sair calado (R9-7-04).
 test('R9-7-04: o perfil e a volta da rede refazem a fila só pela `refazerFilaReal` — nunca pelo `resetQueue` direto', () => {
-  assert.match(fatiar('retomarBusca'), /if \(filaReal\(\)\.length === 0\) \{\s*refazerFilaReal\(\);/,
+  // (Dentro do `if`, antes do refazer, a espera pela janela do Desfazer aberta —
+  // R14-2-05; o refazer segue sendo o da `refazerFilaReal`, com o gesto dele.)
+  assert.match(fatiar('retomarBusca'), /if \(filaReal\(\)\.length === 0\) \{[\s\S]*?\n\s*refazerFilaReal\(null, \{ gesto \}\);\s*return;\s*\}/,
     'a volta da rede decide pela fila da TELA (no treino, os exemplos), ou refaz sem respeitar o treino');
   for (const nome of ['completarPerfilChegado', 'irProPaisDoPerfil', 'retomarBusca']) {
     const corpo = fatiar(nome);

@@ -94,6 +94,8 @@ function montar({ camada = null, escala = 1, travado = false } = {}) {
     acoesTravadas: () => travado, avisarTravaAoTocar: () => log.push('aviso-da-trava'),
     agirNoPedidoDoGesto: () => {}, pedidoDoCard: () => null,
     handleReject: () => log.push('rejeitou'), handleMarkAsRead: () => log.push('leu'), handleSkip: () => log.push('pulou'),
+    // O foco que a seta promete (R14-8-01): test/tela-auditoria-r14.test.mjs.
+    prometerFocoDaSeta: () => {},
   };
   const fonte = [constante('TECLAS_DE_CURSOR'), fatiar('focoEmCampoDeTexto'), constante('AREAS_DO_CARD_QUE_ROLAM'),
     fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),

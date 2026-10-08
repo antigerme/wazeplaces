@@ -95,12 +95,17 @@ test('UM anúncio: o toast cala quando o painel fala', () => {
 
 test('a rede voltando refaz a BUSCA, não só a fila de saída', () => {
   // O ouvinte que REFAZ a busca — não "o primeiro do arquivo", que hoje é o do
-  // diagnóstico anotando a transição da rede (gotcha #67).
+  // diagnóstico anotando a transição da rede (gotcha #67). Fatiado pela
+  // ESTRUTURA (até o `});` que fecha o ouvinte), não por uma distância: os 700
+  // caracteres de antes alcançavam o corpo do `retomarBusca`, logo depois, e era
+  // o `startFetching()` DELE que o guard via (o R14-6-01 o trocou pela
+  // reposição). Quem refaz a busca é o `retomarBusca` — com a fila vazia, o
+  // atualizar; com card, só retoma (o comportamento em test/busca-viva.test.mjs).
   const ouvintes = [...APP_SEM.matchAll(/addEventListener\('online'/g)]
-    .map((m) => APP_SEM.slice(m.index, m.index + 700));
+    .map((m) => APP_SEM.slice(m.index, APP_SEM.indexOf('\n});', m.index)));
   assert.ok(ouvintes.length > 0, 'sumiu o ouvinte de `online`');
-  const ouvinte = ouvintes.find((o) => /startFetching\(\)/.test(o)) || '';
-  assert.match(ouvinte, /startFetching\(\)/,
+  const ouvinte = ouvintes.find((o) => /retomarBusca\(\)/.test(o)) || '';
+  assert.match(ouvinte, /retomarBusca\(\)/,
     'a busca não é refeita quando a rede volta: o editor fica olhando "Falha ao carregar" com 4g');
   // PORTÃO: sem `loadError` isto vira uma requisição a cada oscilação de
   // rede, e o free tier é restrição de projeto, não detalhe.
@@ -116,7 +121,7 @@ test('a rede voltando refaz a BUSCA, não só a fila de saída', () => {
   assert.match(ouvinte, /await esvaziarFilaDeSaida\(\)/,
     'o esvaziamento voltou a correr EM PARALELO com o refetch');
   const iEsv = ouvinte.indexOf('esvaziarFilaDeSaida()');
-  const iRef = ouvinte.indexOf('startFetching()');
+  const iRef = ouvinte.indexOf('retomarBusca()');
   assert.ok(iEsv > 0 && iRef > iEsv,
     'o refetch ficou ANTES do esvaziamento: o trabalho do editor vem primeiro');
 });

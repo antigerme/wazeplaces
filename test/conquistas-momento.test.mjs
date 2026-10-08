@@ -395,7 +395,9 @@ function montarLightboxComJanela() {
     escritasDeFotoNoLocal: new Map(),      // nenhuma escrita da lista do local no ar (R10-3-03, R11-3-01)
     anunciarDesfechoDaFoto: () => {},      // o desfecho dito no irmão quando a escrita pousa (R11-3-05)
   };
-  const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear'];
+  // O fim da janela, que atende o refazer da fila adiado pra ele (o irmão do
+  // R14-2-05 na foto ampliada, pedido extra do lote 18): de verdade.
+  const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   // As pendentes são `let` de MÓDULO no app: aqui, um objeto no escopo.
   const corpo = nomes.map(fatiar).join('\n')

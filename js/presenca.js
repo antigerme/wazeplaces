@@ -542,6 +542,28 @@ function presencaSemResposta(r) {
     return !r || typeof r._motivo === 'string';
 }
 
+// A sessão DESTA aba agora — a da MEMÓRIA, que é a que os pedidos levam
+// (`marcaDestaAba`, do app.js). O `typeof`: os testes que rodam este arquivo
+// sem ela.
+function presencaSessaoAgora() {
+    return typeof marcaDestaAba === 'function' ? marcaDestaAba() : null;
+}
+
+// O 401 de um pedido da presença confere a sessão (`handleUnauthorized`, gotcha
+// #42) — só se ela ainda é a que o pedido LEVOU (`sessao`, tirada na saída). O
+// 401 de uma resposta TARDIA é da sessão que já se foi: a que caiu e a extensão
+// renovou com a mesma conta. Conferida, a sessão de AGORA (viva) dava uma sonda
+// do perfil a mais, o `sessao.alarmeFalso` no diário e o "Conexão instável — sua
+// sessão continua válida." logo depois do "Acesso renovado pelo WME" (auditoria
+// da rodada 14, R14-5-02). É a régua do pareamento (R6-1-08) e das ações (a
+// época da sessão). A falha do próprio pedido (a mensagem "Não enviada.", a
+// conversa que não carregou) segue como é.
+function presencaConferirSessao(r, sessao) {
+    if (!r || r.errorCategory !== 'unauthorized') return;
+    if (sessao !== presencaSessaoAgora()) return;
+    if (typeof handleUnauthorized === 'function') handleUnauthorized();
+}
+
 async function presencaAtualizar({ token = false } = {}) {
     if (!presencaPodeConectar()) return;
     if (Presenca.pedindo) return Presenca.pedindo;
@@ -555,6 +577,8 @@ async function presencaAtualizar({ token = false } = {}) {
     const tentadaAntes = Presenca.tentadaEm;
     Presenca.tentadaEm = inicio;
     let refazer = false;
+    // A sessão que o pedido leva: o 401 dele é DELA (ver `presencaConferirSessao`).
+    const sessao = presencaSessaoAgora();
     Presenca.pedindo = (async () => {
         try {
             const r = await API.presencaApp(campos);
@@ -578,7 +602,7 @@ async function presencaAtualizar({ token = false } = {}) {
                 // swipe no free tier (auditoria de 2026-09-26).
                 if (querToken && presencaSemResposta(r)) Presenca.tokenPedidoEm = 0;
                 presencaAnotarLista({ via: 'pedido', falhou: (r && r.errorCategory) || 'sem resposta' });
-                if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+                presencaConferirSessao(r, sessao);
                 return;
             }
             // Trocou de país no meio: a LISTA que chegou é do país velho e fica
@@ -1414,7 +1438,20 @@ function presencaMensagemDoFluxo(m, doLote) {
     // Junta MESMO com a conversa carregando: a mensagem que chegava com o
     // `abrir` no ar ficava de fora (a resposta dele podia ser anterior a ela) e
     // sumia da conversa — e o "lida" saía por uma mensagem que ninguém viu.
-    const h = Presenca.historico.get(com);
+    let h = Presenca.historico.get(com);
+    // A conversa SEM histórico nesta página com um "lida" no ar ou que já
+    // voltou — o da dívida GUARDADA, que a abertura do app paga
+    // (`presencaAdotarDividas`) — ganha um, com o que chega por aqui. É ele que
+    // EXPLICA a lista que contou a mensagem vista junto com a resposta
+    // (`presencaNaoLidasDepoisDoLida`): sem ele, a conta da lista ficava, e a
+    // pílula dizia "2 mensagens novas" com uma só não vista até a lista
+    // seguinte — os consertos R10-5-04, R12-5-01 e R13-5-01 valiam só na
+    // conversa aberta nesta página (auditoria da rodada 14, R14-5-03). Não
+    // marca nada: o "lida" exige o histórico CARREGADO (`presencaMarcarLida`).
+    if (!h && (presencaLidaNoAr(com) || Presenca.lidaVoltouEm.has(com))) {
+        h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
+        Presenca.historico.set(com, h);
+    }
     // O ECO de um envio sem resposta que o Waze guardou tira a falha da tela —
     // e do leitor de tela também (`presencaCalarFalhaQueSumiu`, R12-5-03).
     if (h && presencaJuntarMsgs(h, [msg])) presencaCalarFalhaQueSumiu(com);
@@ -1845,20 +1882,92 @@ function presencaPagarLida({ fechando = false } = {}) {
 function presencaPagarDevidas() {
     if (!Presenca.lidaDevendo.size || !presencaEu()) return;
     const noAparelho = chatDividas();
-    for (const id of [...Presenca.lidaDevendo]) {
-        if (id === Presenca.lidaPendente && Presenca.timers.lida) continue;
-        if (Presenca.dividasNoAparelho.has(id) && !Object.prototype.hasOwnProperty.call(noAparelho, id)) {
-            presencaQuitarDivida(id);
-            continue;
-        }
-        if (presencaDividaTemNaoVista(id)) { presencaQuitarDivida(id); continue; }
-        if (noAparelho[id] && presencaOutraAbaPagando(noAparelho[id].pagando)) continue;
-        // Sai da MEMÓRIA com o pedido (no ar, quem a carrega é o `lidaNoAr`); a
-        // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
-        // com ele no ar (R8-5-04).
-        Presenca.lidaDevendo.delete(id);
-        presencaMarcarLida(id, { fechando: true });
+    for (const id of [...Presenca.lidaDevendo]) presencaPagarDividaDe(id, noAparelho);
+}
+
+// A dívida de UMA conversa, pelas regras de cima. Sozinha, ela é paga quando a
+// primeira página da conversa VOLTA (ver `presencaPagarNaChegada`).
+//
+// Com a primeira página dela NO AR, a dívida espera a resposta: é ela que traz
+// o histórico (sem ele não há o que marcar, e o pagamento caía calado da
+// memória) e marca como lido no Waze o que estava guardado quando saiu (o
+// `abrir`) — pago antes, o "lida" seria o mesmo pedido em dobro (auditoria da
+// rodada 14, R14-5-01). A página que falha não paga nada: a dívida espera o
+// próximo gesto, como toda dívida (com o Waze fora, nada sai por relógio).
+function presencaPagarDividaDe(id, noAparelho = chatDividas()) {
+    if (!Presenca.lidaDevendo.has(id) || !presencaEu()) return;
+    if (id === Presenca.lidaPendente && Presenca.timers.lida) return;
+    if (Presenca.dividasNoAparelho.has(id) && !Object.prototype.hasOwnProperty.call(noAparelho, id)) {
+        presencaQuitarDivida(id);
+        return;
     }
+    if (presencaDividaTemNaoVista(id)) { presencaQuitarDivida(id); return; }
+    if (noAparelho[id] && presencaOutraAbaPagando(noAparelho[id].pagando)) return;
+    if (presencaPrimeiraPaginaNoAr(Presenca.historico.get(id))) return;
+    // Sai da MEMÓRIA com o pedido (no ar, quem a carrega é o `lidaNoAr`); a
+    // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
+    // com ele no ar (R8-5-04).
+    Presenca.lidaDevendo.delete(id);
+    presencaMarcarLida(id, { fechando: true });
+}
+
+// A PRIMEIRA página da conversa (o `abrir`, que marca a conversa como lida no
+// Waze) está no ar — e não a página antiga, que tem estado próprio (`antigas`).
+function presencaPrimeiraPaginaNoAr(h) {
+    return !!h && !!h.carregando && h.antigas !== 'carregando';
+}
+
+// A primeira página que a conversa pediu ao abrir ficou pra DEPOIS: a reabertura
+// com a página antiga no ar (`primeiraDepois`) ou na espera do perfil
+// (`esperaPerfil` sem `antes`).
+function presencaPrimeiraPaginaAdiada(h) {
+    return !!h && (!!h.primeiraDepois || !!(h.esperaPerfil && !h.esperaPerfil.antes));
+}
+
+// "Olhando é lida" vale até o FECHAMENTO também quando quem marcaria a conversa
+// como lida é a PRIMEIRA PÁGINA. A conversa reaberta mostra o que chegou com ela
+// fechada (o tempo real o juntou ao histórico), e quem o marca no Waze é o
+// `abrir` da reabertura. Ele podia ficar pra depois — a página antiga no ar, a
+// espera do perfil — ou estar no ar desde a abertura anterior, e os três só
+// marcavam com a conversa AINDA aberta: fechada antes, a mensagem VISTA ficava
+// não lida no Waze, quem a mandou nunca via "Lida", e a lista seguinte a
+// devolvia como "1 mensagem nova" (auditoria da rodada 14, R14-5-01; o primeiro
+// caso era o conserto do lote 17 incompleto).
+//
+// No fechamento (e com a página indo pro fundo, `presencaPagarAoSair`), o que a
+// conversa mostrou e nenhum "lida" cobre vira DÍVIDA (`presencaDever`): o mesmo
+// pedido que o fechamento já manda, pago na hora com o perfil, quando o perfil
+// voltar (o `presencaSincronizar`) ou quando a primeira página no ar voltar
+// (`presencaPagarNaChegada`). Nenhuma primeira página sai por isso: a conversa
+// fechada não pede o que ninguém vai ver (o controle do lote 17).
+//
+// O que ela mostrou é o histórico dela inteiro (`presencaUltimaDela`): a
+// mensagem que chega com a conversa FORA da vista tira a dívida
+// (`presencaMensagemDoFluxo`). Com a rajada desta conversa esperando, o "lida"
+// dela sai antes e cobre a dívida (o Waze marca a conversa INTEIRA), que só sai
+// do aparelho quando ele chega — a página pode morrer com ele no ar (R8-5-04).
+function presencaDeverOQueFoiVisto(id) {
+    const h = id ? Presenca.historico.get(id) : null;
+    if (!h || !(presencaPrimeiraPaginaNoAr(h) || presencaPrimeiraPaginaAdiada(h))) return;
+    const visto = presencaUltimaDela(h);
+    const voo = presencaLidaNoAr(id);
+    if (!(visto > Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0))) return;
+    presencaDever(id);
+}
+
+// A primeira página VOLTOU com a conversa fora da vista, e ela DEVE um "lida" —
+// o que ela mostrou ao reabrir, com a página no ar (ver
+// `presencaDeverOQueFoiVisto`): paga agora, um pedido, o mesmo que o fechamento
+// mandaria. Só o que a página não cobriu: o `abrir` que marcou o que estava
+// guardado quando saiu o deixa sem nada a pagar (`presencaMarcarLida`). E se a
+// página trouxe mensagem DELA mais nova que a última vista (`vistaAntes`, o que
+// a pessoa viu antes de ela chegar), ninguém a viu: a dívida sai sem pagar —
+// pagá-la marcaria essa também (a regra do R7-5-01) —, e abrir a conversa marca
+// tudo.
+function presencaPagarNaChegada(id, h, vistaAntes) {
+    if (vistaAntes === null || !Presenca.lidaDevendo.has(id)) return;
+    if (presencaUltimaDela(h) > vistaAntes) { presencaQuitarDivida(id); return; }
+    presencaPagarDividaDe(id);
 }
 
 // A marca `pagando` é de OUTRA aba que ainda pode estar com o "lida" no ar:
@@ -2043,7 +2152,11 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
         // `lidaNoAr` no `presencaAplicarLista`, R8-5-05), e segue valendo com a
         // dívida de volta; a conta de ANTES dele fica até a próxima lista, como
         // sempre ficou (o Waze segue contando).
-        if (presencaUltimaDela(h) > ultimaDela) presencaQuitarDivida(id);
+        //
+        // O histórico de AGORA, não o de quando ele saiu: a conversa sem
+        // histórico ganha um com a mensagem que chega com ele no ar (ver
+        // `presencaMensagemDoFluxo`, R14-5-03).
+        if (presencaUltimaDela(Presenca.historico.get(id)) > ultimaDela) presencaQuitarDivida(id);
         else presencaDever(id);
         // No diário, que não mostrava falha nenhuma do "lida": uma linha por
         // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
@@ -2183,8 +2296,21 @@ function presencaAbrirConversa(id) {
     presencaRenderPilula();
     presencaRenderLista();
     presencaCarregarConversa(id);
-    const campo = document.getElementById('conversaInput');
-    if (campo) campo.focus();
+    // O foco vai pro campo só com mouse (o computador, onde já se digita). No
+    // DEDO, o foco no campo abre o teclado do celular por cima da conversa, bem
+    // na hora em que a pessoa a abriu pra LER o que chegou (auditoria da rodada
+    // 14, R14-8-15): fica onde o `openModal` o pôs, no ✕ da conversa. A régua é
+    // a da tela de entrada (`pointer: coarse`): dedo, não largura de tela.
+    if (!presencaPonteiroDeDedo()) {
+        const campo = document.getElementById('conversaInput');
+        if (campo) campo.focus();
+    }
+}
+
+// O ponteiro principal é o DEDO (`pointer: coarse`, a régua da tela de entrada
+// no styles.css). Sem `matchMedia`, vale o mouse: é o que o app sempre fez.
+function presencaPonteiroDeDedo() {
+    try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; }
 }
 
 // O TETO das vistas que o Waze ainda conta como não lidas (ver
@@ -2269,6 +2395,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     // A hora em que o `abrir` SAI: o "lida" dele só cobre o que já estava
     // guardado (ver o `corte`, abaixo).
     const saiuEm = Date.now();
+    const sessao = presencaSessaoAgora();
     const r = await API.chat({ acao: 'abrir', com: id, ...(antes ? { antesDe: antes } : {}), ...carona });
     h.carregando = false;
     if (epoca !== Presenca.epoca) return;
@@ -2286,7 +2413,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
         if (antes) h.antigas = 'erro';
         else h.erro = true;
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
         // A página antiga é de uma abertura que já passou: com a primeira
         // saindo, a falha dela não aparece nem é dita — a primeira recomeça as
         // duas (P12).
@@ -2304,6 +2431,9 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     const msgs = (Array.isArray(r.mensagens) ? r.mensagens : [])
         .filter((m) => m && m.classe === 'texto' && m.id)
         .map((m) => presencaMsgDoWaze(m, eu));
+    // O que a pessoa VIU desta conversa antes de a primeira página chegar, se
+    // ela deve um "lida" (ver `presencaPagarNaChegada`).
+    const vistaAntes = !antes && Presenca.lidaDevendo.has(id) ? presencaVistaDe(id).ate : null;
     for (const m of msgs) presencaMarcarVista(m.id);
     // O histórico também traz a mensagem cujo envio ficou sem resposta e que o
     // Waze guardou: a falha sai da tela, e do leitor de tela (R12-5-03).
@@ -2337,8 +2467,10 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (naTela) presencaRenderConversa({ rolarAoFim: !antes, manterTopo: !!antes });
     // O que chegou pelo fluxo DURANTE o carregamento entrou no histórico (ver
     // `presencaMensagemDoFluxo`) depois do "lida" que o `abrir` já fez: agora
-    // que está na tela, marca.
+    // que está na tela, marca. Fora da vista, o que ela mostrou antes e ficou
+    // devendo é pago agora (R14-5-01).
     if (!antes && presencaOlhando(id)) presencaAgendarLida(id);
+    else if (!antes) presencaPagarNaChegada(id, h, vistaAntes);
     if (primeiraDepois) presencaCarregarConversa(id);
 }
 
@@ -2375,6 +2507,9 @@ function presencaTrocarRascunho(id) {
 // Chamado por LIMPEZA_AO_FECHAR['conversaModal'] — ou seja, por QUALQUER
 // caminho de fechamento (✕, Esc, scrim, voltar do aparelho).
 function presencaEsquecerAberta() {
+    // O que ela mostrou e a primeira página adiada (ou no ar) ia marcar fica
+    // DEVENDO — e o fechamento paga (ver `presencaDeverOQueFoiVisto`, R14-5-01).
+    presencaDeverOQueFoiVisto(Presenca.aberta);
     // O "lida" pendente é da conversa que sai da tela: sai agora (ver
     // `presencaPagarLida`).
     presencaPagarLida({ fechando: true });
@@ -2460,6 +2595,7 @@ async function presencaMandar(com, msg) {
     // Uma tentativa só, sem `callWithRetry`: repetir sozinho pode duplicar a
     // mensagem no Waze. Quem repete é a pessoa, no "Tentar de novo" — com o
     // MESMO id, que é o que dá ao Waze a chance de reconhecer a repetição.
+    const sessao = presencaSessaoAgora();
     const r = await API.chat({
         acao: 'enviar', para: com, id: msg.id, texto: msg.texto, de: presencaEu(),
         ...(contexto ? { contexto } : {}), ...carona,
@@ -2480,7 +2616,7 @@ async function presencaMandar(com, msg) {
         // a mensagem, e foi a resposta que se perdeu no caminho. Rebaixar pra
         // "Não enviada" mentia, e o "Tentar de novo" mandaria de novo o que já
         // chegou (auditoria de 2026-09-25).
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
     } else {
         msg.estado = 'falhou';
         // "Sem conexão" só quando a resposta NEM CHEGOU (o `_post` põe
@@ -2488,7 +2624,7 @@ async function presencaMandar(com, msg) {
         // rede está boa, e dizer "sem conexão" mandava a pessoa procurar sinal
         // (auditoria de 2026-09-29). Aí é o "Não enviada." sem motivo.
         msg.motivo = presencaSemResposta(r) ? 'conexao' : 'erro';
-        if (r && r.errorCategory === 'unauthorized' && typeof handleUnauthorized === 'function') handleUnauthorized();
+        presencaConferirSessao(r, sessao);
     }
     presencaRenderConversa();
     presencaRenderLista();
@@ -3130,7 +3266,12 @@ function presencaVistasNaVolta(id) {
 // da janela do Desfazer. O modo vale só pra ESTE envio: a página escondida
 // segue viva, e as outras requisições dela não são desta conta. Sem nada
 // esperando, nada sai.
+//
+// E o que a conversa NA TELA mostrou e a primeira página adiada (ou no ar) ia
+// marcar também: o app encerrado no fundo não a pede mais (ver
+// `presencaDeverOQueFoiVisto`, R14-5-01).
 function presencaPagarAoSair() {
+    if (Presenca.aberta && presencaConversaNaTela()) presencaDeverOQueFoiVisto(Presenca.aberta);
     if (!Presenca.lidaPendente && !Presenca.lidaDevendo.size) return;
     const antes = API.saindo;
     const trocar = typeof API.setSaindo === 'function';

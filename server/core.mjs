@@ -2760,7 +2760,11 @@ async function aquecerReleitura(data, sessions, cookieHeader, csrf, region, gest
 // existe — só no minuto depois de a pessoa tocar numa lixeira daquele local. A
 // do TOQUE também (R13-3-02): ela é da exclusão do mesmo gesto, e a aprovação
 // que pousa entre o toque e essa exclusão (de outra aba da mesma sessão) a deixa
-// velha, com a foto aprovada ainda pendente.
+// velha, com a foto aprovada ainda pendente. Isto só protege quando a aprovação
+// pousa DEPOIS de o toque gravar: pousando no voo da leitura do toque, a gravação
+// dele chega depois deste esquecer, e a exclusão daquele gesto usa a lista velha
+// (R14-3-04, decidido no lote 16: fechar custaria uma marca da aprovação e +1
+// leitura do KV em toda exclusão).
 async function esquecerReleitura(data, sessions) {
   for (const chaveDe of [chaveDaReleitura, chaveDoToque]) {
     try {

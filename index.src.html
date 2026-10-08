@@ -368,7 +368,7 @@
                                 <a id="extInstallLink" href="https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn" target="_blank" rel="noopener noreferrer"
                                    class="inline-flex items-center gap-1 mt-3 min-h-[44px] bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold py-2.5 px-4 rounded-lg transition-all">
                                     <span data-i18n="auth.autoLogin.cta">Instalar na Chrome Web Store</span>
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                 </a>
                                 <!-- "Instalei… e agora?" — o beco sem saída medido. O app pergunta
                                      à extensão UMA vez, no carregamento, e só espera 350ms; e o
@@ -378,7 +378,7 @@
                                      quem nem foi à loja). -->
                                 <button id="extJaInstalei" type="button" hidden
                                         class="hidden w-full items-center justify-center gap-1.5 mt-3 min-h-[44px] bg-white hover:bg-purple-50 text-purple-700 text-sm font-semibold py-2.5 px-4 rounded-lg border border-purple-300 transition-all dark:bg-slate-800 dark:text-purple-200 dark:border-purple-500/50 dark:hover:bg-purple-500/10">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                                     <span data-i18n="auth.autoLogin.jaInstalei">Já instalei — entrar</span>
                                 </button>
                                 <p class="text-[0.6875rem] text-slate-600 mt-2 dark:text-slate-300" data-i18n-html="auth.autoLogin.credito">Extensão por <a href="https://www.waze.com/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · comunidade WME</p>
@@ -397,20 +397,20 @@
 
                     <button id="uploadBtn" type="button" class="auth-opt-upload group w-full relative overflow-hidden bg-gradient-to-r from-cyan-700 to-blue-700 hover:from-cyan-600 hover:to-blue-600 text-white font-semibold py-4 px-6 rounded-2xl transition-all shadow-lg hover:shadow-cyan-500/25">
                         <span class="relative z-10 flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                             <span data-i18n="auth.uploadBtn">Fazer upload do cookies.txt</span>
                         </span>
                     </button>
                     <input type="file" id="fileInput" accept=".txt" class="hidden auth-opt-hidden">
 
                     <button id="pasteBtn" type="button" class="auth-opt-paste w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
-                        <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                        <svg class="w-5 h-5 flex-shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                         <span data-i18n="auth.pasteBtn">Colar conteúdo dos cookies</span>
                     </button>
                     <!-- Terceiro caminho: quem está no celular, onde copiar cookies é
                          inviável. Loga uma vez no computador e traz a sessão por código. -->
                     <button id="pairEnterBtn" type="button" class="auth-opt-pair w-full bg-slate-50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 font-semibold py-4 px-6 rounded-2xl transition-all border border-slate-200 hover:border-slate-300 flex items-center justify-center space-x-2 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700">
-                        <svg class="w-5 h-5 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                        <svg class="w-5 h-5 flex-shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                         <span data-i18n="auth.pairBtn">Entrar com um código</span>
                     </button>
                 </div>
@@ -460,7 +460,7 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o conteúdo dos cookies</h3>
                 <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" data-i18n-aria="modal.paste.textarea.aria" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…" data-i18n-ph="modal.paste.textarea.ph"></textarea>
-                <div class="flex space-x-3 mt-4">
+                <div class="dialogo-acoes flex space-x-3 mt-4">
                     <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">
                         Cancelar
                     </button>
@@ -508,7 +508,7 @@
 
                 <!-- Dismissiva à esquerda, afirmativa à direita (M3/HIG). "Treinar"
                      é a dismissiva aqui: quem clica NÃO está seguindo pro trabalho. -->
-                <div class="flex gap-3">
+                <div class="dialogo-acoes flex gap-3">
                     <button id="comoFuncionaTreinar" type="button" class="flex-1 min-h-[48px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-100 font-semibold py-2 px-3 rounded-lg transition text-sm" data-i18n="treino.experimentar">Quero treinar antes</button>
                     <button id="comoFuncionaOk" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.gotIt">Entendi</button>
                 </div>
@@ -543,7 +543,7 @@
                      Dizer isso aqui é o único momento em que a informação chega a
                      quem precisa dela. -->
                 <p class="text-sm text-slate-500 mb-6 dark:text-slate-400" data-i18n-html="modal.logout.waze">Isto apaga os dados daqui e do servidor, mas <strong>não desconecta você do Waze</strong> — os seus cookies continuam válidos. Para encerrar de verdade, saia também no <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.</p>
-                <div class="flex space-x-3">
+                <div class="dialogo-acoes flex space-x-3">
                     <button id="cancelLogout" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="confirmLogout" type="button" class="flex-1 min-h-[48px] bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.logout">Sair</button>
                 </div>
@@ -700,7 +700,7 @@
                         <div class="pt-1 border-t border-slate-100 dark:border-slate-700">
                             <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-3 dark:text-slate-400" data-i18n="filters.section.batch">Ações em lote</h4>
                             <button id="batchReadBtn" type="button" class="w-full min-h-[48px] bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-emerald-100 dark:border-emerald-400/30">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                                 <span data-i18n="batch.button">Marcar todos os pendentes como lidos</span>
                             </button>
                             <p class="text-[0.6875rem] text-slate-500 mt-1.5 dark:text-slate-400" data-i18n="batch.hint">Marca de uma vez todos os pedidos já carregados na fila. Vai direto pro Waze, sem desfazer.</p>
@@ -746,7 +746,7 @@
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span>
                                     <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.undo.label">Permitir desfazer ações</span>
-                                    <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.undo.desc">Mostra um aviso por 3 segundos pra você desfazer "Lido" ou "Rejeitar" antes do envio.</span>
+                                    <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.undo.desc">Mostra um aviso por 3 segundos pra você desfazer cada ação antes do envio.</span>
                                 </span>
                                 <input id="prefUndoEnabled" type="checkbox" class="ui-switch" checked>
                             </label>
@@ -822,7 +822,7 @@
                 </div>
 
                 <!-- Rodapé contextual: gap-3 (e não space-x) pra botão escondido não deixar vão -->
-                <div class="flex gap-3 px-6 py-4 border-t border-slate-100 flex-shrink-0 dark:border-slate-700">
+                <div class="dialogo-acoes flex gap-3 px-6 py-4 border-t border-slate-100 flex-shrink-0 dark:border-slate-700">
                     <button id="cancelFilters" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="applyFilters" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition disabled:opacity-60" data-i18n="common.apply">Aplicar</button>
                     <button id="closeFiltersFooter" type="button" class="hidden flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.close">Fechar</button>
@@ -865,7 +865,7 @@
                      decorativa. Sob demanda, ele existe só pra quem precisa
                      dele, e por 5 minutos. -->
                 <button id="pairShowCodeBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/><path stroke-linecap="round" stroke-width="2" d="M3 3l18 18"/></svg>
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/><path stroke-linecap="round" stroke-width="2" d="M3 3l18 18"/></svg>
                     <span data-i18n="pair.show.noCamera">Sem câmera? Mostrar um código</span>
                 </button>
                 <div id="pairCodeReveal" class="hidden">
@@ -877,7 +877,7 @@
                 </div>
 
                 <button id="pairCopyLinkBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
                     <span data-i18n="pair.copyLink">Copiar link (abre direto no outro aparelho)</span>
                 </button>
                 <button id="pairShowClose" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
@@ -895,7 +895,7 @@
                        class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
                 <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
 
-                <div class="flex gap-3">
+                <div class="dialogo-acoes flex gap-3">
                     <button id="pairEnterCancel" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.cancel">Cancelar</button>
                     <button id="pairEnterConfirm" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="pair.enter.confirm">Entrar</button>
                 </div>
@@ -906,7 +906,7 @@
             <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="batchReadTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.batchRead.title">Marcar em lote?</h3>
                 <p id="batchReadMessage" class="text-sm text-slate-500 mb-6 dark:text-slate-400">Marcar como lidos os pedidos da fila?</p>
-                <div class="flex space-x-3">
+                <div class="dialogo-acoes flex space-x-3">
                     <button id="cancelBatchRead" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.batchRead.confirm">Marcar como lidos</button>
                 </div>
@@ -1021,7 +1021,7 @@
                 </div>
                 <div class="p-4 flex flex-col gap-3">
                     <img id="resumoImg" alt="" class="w-full rounded-xl bg-slate-900 max-h-[42dvh] object-contain">
-                    <div class="flex gap-3">
+                    <div class="dialogo-acoes flex gap-3">
                         <button id="resumoBaixar" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="resumo.baixar">Baixar imagem</button>
                         <button id="resumoCompartilhar" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="resumo.compartilhar">Compartilhar</button>
                     </div>
@@ -1083,7 +1083,7 @@
             <div id="treinoBanner" class="hidden w-full items-center gap-3 rounded-2xl px-3 py-2.5 bg-amber-100 border border-amber-300 text-amber-900 shadow-sm dark:bg-amber-500/20 dark:border-amber-400/40 dark:text-amber-100" role="status">
                 <span class="text-lg leading-none flex-shrink-0" aria-hidden="true">🎓</span>
                 <p class="text-xs font-semibold leading-snug flex-1" data-i18n="treino.banner">Modo treino — nada é enviado ao Waze</p>
-                <button id="treinoSairBtn" type="button" class="flex-shrink-0 min-h-[44px] px-3 text-xs font-bold underline" data-i18n="treino.sair">Sair</button>
+                <button id="treinoSairBtn" type="button" class="flex-shrink-0 min-w-[44px] min-h-[44px] px-3 text-xs font-bold underline" data-i18n="treino.sair">Sair</button>
             </div>
 
             <div id="placar" class="nao-cobrir bg-white/80 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/50 p-2 dark:bg-slate-800/80 dark:border-slate-700">
@@ -1215,7 +1215,7 @@
                         <div id="installInvite" class="hidden mt-6 pt-5 border-t border-slate-200 dark:border-slate-700 text-left">
                             <p class="text-sm text-slate-600 dark:text-slate-300 mb-3" data-i18n="install.invite">🚗💨 Bota o Waze Places na tela inicial: abre num toque e sobra mais tela pra foto.</p>
                             <button id="installInviteBtn" type="button" class="hidden w-full min-h-[48px] bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+                                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
                                 <span data-i18n="install.action">Instalar o aplicativo</span>
                             </button>
                             <!-- iOS não tem beforeinstallprompt: no Safari a instalação é
@@ -1615,7 +1615,7 @@
                 </div>
 
                 <button id="pairCreateBtn" data-so-com-sessao type="button" class="w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                     <span data-i18n="pair.createBtn">Conectar outro aparelho</span>
                 </button>
 
@@ -1722,7 +1722,7 @@
                         <li data-i18n-html="help.privacy.zeroKnowledge">E a chave que abre depende de um segredo que fica <strong>no seu aparelho</strong>: sozinho, o servidor não decifra os seus cookies — nem quem opera o app, com o que fica guardado. Se o banco vazar ou for entregue a alguém, o que sai de lá não serve para nada. A exceção é o código de pareamento digitado, que existe por 5 minutos e some no primeiro uso.</li>
                         <li data-i18n="help.privacy.notStored">Os pedidos NÃO são guardados pelo app: nome, endereço e coordenada de place existem só na memória, enquanto o app está aberto. As fotos e o mapa passam pelo cache do próprio navegador, como as imagens de qualquer site: vencem em até 1 hora e saem quando você limpa os dados de navegação. As exceções são opcionais e ficam só neste aparelho: com o “Disponível offline” ligado, os pedidos e o mapa ficam guardados pra você seguir sem sinal; com o Modo Desenvolvedor ligado, os registros ficam até você baixar o diagnóstico, no máximo 24 h.</li>
                         <li data-i18n="help.privacy.retention">Prazo: 21 dias sem uso, ou até você tocar em “Sair” — o que vier primeiro. Código de pareamento dura 5 minutos e é de uso único.</li>
-                        <li data-i18n="help.privacy.device">Neste aparelho ficam o id da sua conta do Waze (pra saber de quem são estes dados), o seu nível no Waze e quando a sua sessão de lá vence, placar, histórico, conquistas, filtros, preferências, as ações esperando envio, os autores que você rejeitou (id e nome, pra contar a reincidência), os pedidos que o app já marcou com ⭐ (pra não marcar de novo), um diário de quando a sessão começou e caiu e, das conversas, quais são do app e até onde cada pessoa leu. Tudo isso é apagado no “Sair”; ficam só o idioma e o tema.</li>
+                        <li data-i18n="help.privacy.device">Neste aparelho ficam o id da sua conta do Waze (pra saber de quem são estes dados), o seu nível no Waze e quando a sua sessão de lá vence, placar, histórico, conquistas, filtros, preferências, as ações esperando envio, os autores que você rejeitou (id e nome, pra contar a reincidência), os pedidos que o app já marcou com ⭐ (pra não marcar de novo), um diário de quando a sessão começou e caiu e, das conversas, quais são do app, até onde cada pessoa leu, até onde você leu o que o Waze ainda não marcou como lido, e a identificação deste aparelho no chat do Waze e das mensagens que ele ainda vai confirmar. Tudo isso é apagado no “Sair”; ficam só o idioma e o tema.</li>
                         <li data-i18n="help.privacy.credentials">Seus cookies são credenciais: permitem que o app aja no Waze em seu nome. Ele rejeita, marca como lido, dá ⭐ no pedido e envia as mensagens que você escreve na conversa; e, só para L6+AM ou staff, aprova a foto nova do pedido, exclui fotos do local e corrige o nome do local.</li>
                         <li data-i18n="help.privacy.infra">Roda na Cloudflare (hospedagem e medição de acesso sem cookies). Sem anúncios e sem rastreadores.</li>
                         <li data-i18n-html="help.privacy.contact">Dúvidas, acesso aos seus dados ou pedido de exclusão: fale com <a href="https://www.waze.com/user/editor/antigerme" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">@antigerme</a>.</li>
@@ -1744,11 +1744,11 @@
                          em app.js e o convite vem parar aqui, onde o editor
                          decide a hora. -->
                     <button id="installAppBtn" type="button" class="hidden w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
                         <span data-i18n="install.action">Instalar o aplicativo</span>
                     </button>
                     <button id="logoutBtn" data-so-com-sessao type="button" class="w-full min-h-[48px] bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         <span data-i18n="common.logout">Sair</span>
                     </button>
                 </div>

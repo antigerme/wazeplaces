@@ -674,6 +674,42 @@ test('a Privacidade conta os pedidos que o app marcou com ⭐ — o anel que o "
   }
 });
 
+// A chave do chat (`waze_places_chat`) guarda mais do que "quais são do app e
+// até onde cada pessoa leu": o "lida" DEVIDO (`devendo`, desde o lote 12,
+// R8-5-04 — até onde VOCÊ leu, com o "lida" sem ter chegado ao Waze), a
+// instalação do aparelho no chat do Waze (`inst`) e os ids das mensagens
+// recebidas que ele ainda vai confirmar (`confirmar`). A Privacidade, que
+// enumera o que fica no aparelho, não citava nenhum dos três (auditoria da
+// rodada 14, R14-5-04). O "chat do Waze" é o MESMO termo da Ajuda da conversa.
+test('a Privacidade conta o que a conversa guarda no aparelho: até onde você leu sem o Waze saber e a identificação do aparelho e das mensagens no chat do Waze', () => {
+  const presenca = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  // CONTROLE: os três campos existem na chave do chat — sem eles, a frase
+  // prometeria o que o app não guarda.
+  for (const campo of ['devendo', 'inst', 'confirmar']) {
+    assert.match(presenca, new RegExp(`^\\s+g\\.${campo} = `, 'm'),
+      `CONTROLE: o campo \`${campo}\` sumiu da chave do chat (js/presenca.js) — a Privacidade não deve mais citá-lo`);
+  }
+  const conta = {
+    pt: { devendo: 'até onde você leu o que o Waze ainda não marcou como lido', chat: 'chat do Waze',
+      aparelho: 'identificação deste aparelho no chat do Waze e das mensagens que ele ainda vai confirmar' },
+    en: { devendo: 'how far you have read what Waze hasn’t marked as read yet', chat: 'Waze chat',
+      aparelho: 'id of this device in the Waze chat and of the messages it has yet to confirm' },
+    es: { devendo: 'hasta dónde leíste lo que Waze aún no marcó como leído', chat: 'chat de Waze',
+      aparelho: 'identificación de este dispositivo en el chat de Waze y de los mensajes que aún tiene que confirmar' },
+    fr: { devendo: 'jusqu’où vous avez lu ce que Waze n’a pas encore marqué comme lu', chat: 'chat de Waze',
+      aparelho: 'identifiant de cet appareil dans le chat de Waze et des messages qu’il doit encore confirmer' },
+  };
+  assert.deepEqual(Object.keys(conta).sort(), [...LANGS].sort(), 'CONTROLE: o teste não cobre todas as línguas');
+  for (const lang of LANGS) {
+    const frase = DICT[lang]['help.privacy.device'];
+    const { devendo, chat, aparelho } = conta[lang];
+    assert.ok(frase.includes(devendo), `${lang}: a Privacidade não conta o "lida" devido (o \`devendo\` da chave do chat)`);
+    assert.ok(frase.includes(aparelho), `${lang}: a Privacidade não conta a identificação do aparelho no chat e das mensagens a confirmar (\`inst\`, \`confirmar\`)`);
+    assert.ok(DICT[lang]['help.presenca.conversa'].includes(chat) && aparelho.includes(chat),
+      `${lang}: o chat do Waze tem outro nome na Privacidade e na Ajuda da conversa`);
+  }
+});
+
 test('espanhol: pedido é "solicitud" (feminino), e o placar concorda com ela', () => {
   // Auditoria de 2026-09-25: 71 textos diziam "solicitud" e dois "pedido"; e o
   // placar dizia "Leídos/Rechazados/Saltados" enquanto o Resumo do mês dizia

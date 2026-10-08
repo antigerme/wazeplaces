@@ -154,9 +154,13 @@ test('os smokes que o CI roda no WebKit abrem pelo motor pedido', () => {
   // O job é PARALELO: esperar o outro somaria os dois tempos.
   assert.doesNotMatch(job, /^\s+needs:/m, 'o job do WebKit passou a esperar o outro — o CI dobra de tempo');
   const rodados = [...job.matchAll(/npm run (test:[a-z]+)/g)].map((m) => m[1]).sort();
-  assert.deepEqual(rodados, ['test:browser', 'test:fluxo', 'test:presenca'],
-    'mudou o que roda no WebKit — o offline fica de fora por MEDIÇÃO (ver o comentário do job)');
-  const script = { 'test:browser': 'smoke-browser', 'test:fluxo': 'smoke-fluxo', 'test:presenca': 'smoke-presenca' };
+  // O offline entrou no lote 18: no Playwright 1.64 o modo avião simulado do
+  // WebKit deixou de derrubar o que o worker guardou (R14-4-07), e o que ainda
+  // não se mede lá — as seções com o worker no comando, que a rota do Playwright
+  // não enxerga no WebKit — é pulado pelo nome, dentro do próprio smoke.
+  assert.deepEqual(rodados, ['test:browser', 'test:fluxo', 'test:offline', 'test:presenca'],
+    'mudou o que roda no WebKit — smoke que sai do job sai com a medição no comentário dele');
+  const script = { 'test:browser': 'smoke-browser', 'test:fluxo': 'smoke-fluxo', 'test:offline': 'smoke-offline', 'test:presenca': 'smoke-presenca' };
   for (const t of rodados) {
     const codigo = semComentario(ler(`tools/${script[t]}.mjs`));
     assert.match(codigo, /abrirNavegador\(pw\b/, `${script[t]} não abre pelo motor pedido — no job do WebKit ele abriria o Chromium`);
@@ -175,7 +179,18 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // E a roda FINA da foto ampliada (auditoria de 2026-10-02, R7-3-03): o WebKit
   // do Playwright descarta o evento de roda com |delta| abaixo de 1 px (MEDIDO),
   // e o defeito mora abaixo de ~0,55 px; a conta é medida em test/lightbox-zoom.
-  const ESPERADOS = { 'smoke-browser.mjs': 5 };
+  // smoke-offline (lote 18): os CINCO blocos de seções que rodam com o service
+  // worker no comando — no WebKit 27.2 a rota do Playwright (do contexto e da
+  // página) não vê nenhum pedido dessa página, e o tile, a foto e a API iriam à
+  // rede de verdade (MEDIDO: 0 de 3 pela rota; 3 de 3 com o worker bloqueado e
+  // no Chromium) —, e os TRÊS trechos que só o protocolo do DevTools faz:
+  // encerrar o worker (a reabertura da 5b e a 7c) e a margem do iPhone instalado
+  // (9n). Os dois primeiros estão dentro dos blocos, e ficam pra quando a rota
+  // passar a ver o worker no WebKit. E a 9i SEM `navigator.locks`: a reserva por
+  // item manda o mesmo item duas vezes no WebKit, onde as abas ficam em
+  // processos diferentes (MEDIDO: 1 de 6 no smoke inteiro, 9 de 12 com a espera
+  // zerada, 0 no Chromium) — defeito do app que ficou pra decisão.
+  const ESPERADOS = { 'smoke-browser.mjs': 5, 'smoke-offline.mjs': 9 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));
@@ -188,9 +203,54 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   }
   assert.deepEqual(achados, ESPERADOS, 'a lista de pulos mudou — pulo novo entra aqui com o motivo, não calado');
   // E o fim de cada smoke do WebKit DIZ quantos pulou.
-  for (const f of ['smoke-browser', 'smoke-fluxo', 'smoke-presenca']) {
+  for (const f of ['smoke-browser', 'smoke-fluxo', 'smoke-presenca', 'smoke-offline']) {
     assert.match(semComentario(ler(`tools/${f}.mjs`)), /if \(resumoDosPulos\(MOTOR\)\) console\.log\(resumoDosPulos\(MOTOR\)\);/,
       `${f} não imprime os pulos no fim`);
+  }
+});
+
+test('o smoke do offline no WebKit: o fechar é o do motor, e o worker no comando fica só no Chromium', () => {
+  // Duas diferenças do WebKit 27.2 (Playwright 1.64), MEDIDAS no lote 18, que
+  // fariam o smoke medir o INSTRUMENTO lá:
+  //  · o `close({ runBeforeUnload: true })` NÃO fecha a página no WebKit
+  //    (`isClosed()` falso, nenhum evento): a página "fechada" seguiria aberta,
+  //    calada, no meio do teste. O `close()` puro fecha com `pagehide` e
+  //    `visibilitychange`. Uma porta só (`fecharComoOUsuario`) escolhe pelo motor.
+  //  · com o service worker no comando, a rota do Playwright não vê NENHUM
+  //    pedido da página: o tile, a foto e a API iriam à rede de verdade (o Waze
+  //    real). Toda seção que liga o worker fica num bloco só do Chromium.
+  const cru = ler('tools/smoke-offline.mjs');
+  const codigo = semComentario(cru);
+  assert.match(codigo, /const fecharComoOUsuario = \(pg\) => \(MOTOR === 'chromium' \? pg\.close\(\{ runBeforeUnload: true \}\) : pg\.close\(\)\);/,
+    'a porta do fechar sumiu ou mudou: no WebKit o `runBeforeUnload` não fecha a página');
+  assert.equal((codigo.match(/close\(\{ runBeforeUnload: true \}\)/g) || []).length, 1,
+    'um fechar com `runBeforeUnload` FORA da porta única: no WebKit essa página não fecha');
+  assert.ok((codigo.match(/await fecharComoOUsuario\(/g) || []).length >= 20, 'o guard perdeu o alcance: as seções não fecham pela porta única');
+  // Os blocos: cada um abre com o pulo pelo nome e fecha no marcador que diz de
+  // que seção é; lidos no texto CRU (os marcadores são código, com o comentário
+  // colado ao fecho), e cada um tem de conter o cabeçalho da seção que diz abrir.
+  const linhas = cru.split('\n');
+  const blocos = [];
+  linhas.forEach((l, i) => {
+    const m = /^\} \/\/ fim do bloco só do Chromium que começa na seção (\S+) /.exec(l);
+    if (!m) return;
+    let ini = i;
+    while (ini >= 0 && !linhas[ini].startsWith(`if (!pularForaDoChromium(MOTOR, '${m[1]} `)) ini--;
+    assert.ok(ini >= 0, `o bloco que fecha na linha ${i + 1} não tem o pulo da seção ${m[1]}`);
+    assert.ok(linhas.slice(ini, i).some((x) => x.startsWith(`secao('${m[1]}.`)), `o bloco da seção ${m[1]} não contém a seção ${m[1]}`);
+    blocos.push([ini, i]);
+  });
+  assert.equal(blocos.length, 5, `esperava os 5 blocos só do Chromium, achei ${blocos.length}`);
+  // Todo contexto que LIGA o worker fica dentro de um bloco, menos o PRIMEIRO —
+  // o principal, cuja única medida fora dos blocos é o worker assumir (o app e
+  // o worker, só do servidor local).
+  const ligam = [];
+  linhas.forEach((l, i) => { if (!/^\s*\/\//.test(l) && /serviceWorkers:\s*'allow'/.test(l)) ligam.push(i); });
+  assert.ok(ligam.length >= 4, `o guard perdeu o alcance: achou ${ligam.length} contextos que ligam o worker`);
+  assert.match(linhas[ligam[0] - 1] + linhas[ligam[0]], /const ctx = await browser\.newContext\(/, 'o primeiro contexto com o worker não é mais o principal');
+  for (const i of ligam.slice(1)) {
+    assert.ok(blocos.some(([a, b]) => i > a && i < b),
+      `o contexto da linha ${i + 1} liga o worker FORA de um bloco só do Chromium — no WebKit a rota não o vê, e ele iria ao Waze real`);
   }
 });
 

@@ -84,14 +84,28 @@ test('README: a linha do `unauthorized` diz o que o app faz hoje — e o código
 // regravação) quando a exclusão sai sem ela. O toque e a exclusão levam o GESTO,
 // como o app manda. Os números saem do SERVIDOR DE VERDADE, com um Waze de
 // mentira e o relógio adiantado — mexeu no core, o README tem que acompanhar.
-async function escritasDaLixeira(segundosAteOEnvio) {
+//
+// E a exclusão SEM toque (auditoria da rodada 14, R14-3-02 e R14-6-05): com o
+// Desfazer desligado o app não manda o toque, e com outra escrita de foto do
+// local no ar também não (a exclusão espera a vez do local). O README do lote 17
+// contava só o caminho com o toque ("1 por exclusão … e mais 2"), e o servidor
+// grava 2 nesses — ou 1, quando a lista que outra exclusão do local releu ainda
+// vale. `toque`: o app mandou o toque (e a exclusão leva o gesto dele);
+// `antes(excluir)`: o que o local viveu antes da exclusão medida, sem contar.
+async function escritasDaLixeira({ toque = true, segundosAteOEnvio = 3, antes = null } = {}) {
   const VENUE = '1.2.3';
-  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }];
+  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }, { id: 'p', approved: false }];
   const original = globalThis.fetch, agora = Date.now;
   let adiante = 0;
   Date.now = () => agora.call(Date) + adiante;
   globalThis.fetch = async (url, init = {}) => {
-    if (init.method === 'POST') imagens = JSON.parse(init.body).actions._subActions[0].attributes.images;
+    if (init.method === 'POST') {
+      const sub = JSON.parse(init.body).actions._subActions[0];
+      // A aprovação da foto p (o caminho de `validar-place` com `approve`); o
+      // resto é a lista do local que a exclusão manda.
+      if (sub.name === 'UPDATE_PLACE_UPDATE') imagens = imagens.map((f) => (f.id === 'p' ? { ...f, approved: true } : f));
+      else imagens = sub.attributes.images;
+    }
     return new Response(JSON.stringify({ venues: { objects: [{ id: VENUE, images: imagens }] } }),
       { status: 200, headers: { 'content-type': 'application/json' } });
   };
@@ -102,11 +116,21 @@ async function escritasDaLixeira(segundosAteOEnvio) {
     const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
     const sessionToken = await sessions.createSession(['.waze.com\tTRUE\t/\tTRUE\t9999999999\t_csrf_token\tc',
       '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\ts'].join('\n'));
-    escritas = 0;   // a sessão do login não é da lixeira
     const base = { sessionToken, region: 'row', venueID: VENUE, lat: -23.5, lon: -46.6 };
-    await dispatch('excluir-foto', { ...base, action: 'preparar', imageID: 'preparar', aquecimento: 'gesto-conta-01' }, { sessions });
+    const excluir = async (imageID, gesto) => {
+      if (gesto) await dispatch('excluir-foto', { ...base, action: 'preparar', imageID: 'preparar', aquecimento: gesto }, { sessions });
+      const r = await dispatch('excluir-foto', { ...base, imageID, ...(gesto ? { aquecimento: gesto } : {}) }, { sessions });
+      assert.ok(r.body && r.body.success && !r.body.jaExcluida, `CONTROLE: a exclusão de mentira de ${imageID} não saiu`);
+    };
+    const aprovar = async () => {
+      const r = await dispatch('validar-place', { ...base, updateRequestID: 'p', approve: true }, { sessions });
+      assert.ok(r.body && r.body.success, 'CONTROLE: a aprovação de mentira não saiu');
+    };
+    if (antes) await antes({ excluir, aprovar });
+    escritas = 0;   // a sessão do login e o que veio antes não são desta exclusão
+    if (toque) await dispatch('excluir-foto', { ...base, action: 'preparar', imageID: 'preparar', aquecimento: 'gesto-conta-01' }, { sessions });
     adiante += segundosAteOEnvio * 1000;
-    const r = await dispatch('excluir-foto', { ...base, imageID: 'a', aquecimento: 'gesto-conta-01' }, { sessions });
+    const r = await dispatch('excluir-foto', { ...base, imageID: 'a', ...(toque ? { aquecimento: 'gesto-conta-01' } : {}) }, { sessions });
     assert.ok(r.body && r.body.success && !r.body.jaExcluida, 'CONTROLE: a exclusão de mentira não saiu');
     return escritas;
   } finally {
@@ -115,19 +139,44 @@ async function escritasDaLixeira(segundosAteOEnvio) {
   }
 }
 
-test('README: as escritas no KV da lixeira de foto são as que o servidor faz (R56-8)', async () => {
+test('README: as escritas no KV da lixeira de foto são as que o servidor faz (R56-8, R14-3-02)', async () => {
   const frase = (/a lixeira de foto \(([^)]*)\)/.exec(README) || [])[1];
   assert.ok(frase, 'CONTROLE: a lixeira sumiu da conta das escritas do README');
   const ttl = Number((/^const RELEITURA_TTL = (\d+);/m.exec(ler('server/core.mjs')) || [])[1]);
   assert.ok(ttl > 3, 'CONTROLE: o RELEITURA_TTL sumiu do core (ou ficou menor que a janela do Desfazer)');
-  const comum = await escritasDaLixeira(3);             // o toque e o envio no fim da janela do Desfazer
-  const vencida = await escritasDaLixeira(ttl + 1);     // a lista guardada venceu antes do envio
+  // As duas partes da frase: com o toque (o Desfazer ligado) e sem ele.
+  const corte = frase.indexOf('; com o Desfazer desligado');
+  assert.ok(corte > 0, `o README não separa a exclusão SEM o toque (o Desfazer desligado) da com o toque: "${frase}"`);
+  const comToque = frase.slice(0, corte), semToque = frase.slice(corte);
+  const comum = await escritasDaLixeira();                                  // o toque e o envio no fim da janela do Desfazer
+  const vencida = await escritasDaLixeira({ segundosAteOEnvio: ttl + 1 });  // a lista guardada venceu antes do envio
   assert.ok(comum >= 1 && vencida > comum, `CONTROLE: o servidor gravou ${comum} e ${vencida} — a medida não separa os casos`);
-  assert.ok(frase.includes(`${comum} por exclusão`),
-    `o servidor grava ${comum} vezes numa exclusão comum, e o README diz: "${frase}"`);
-  assert.ok(frase.includes(`mais ${vencida - comum} cada vez`),
-    `com a lista vencida o servidor grava ${vencida} (mais ${vencida - comum}), e o README não conta a releitura: "${frase}"`);
-  assert.ok(frase.includes(`${ttl} s`), `a lista vale ${ttl} s no servidor, e o README diz outra coisa: "${frase}"`);
+  assert.ok(comToque.includes(`${comum} por exclusão`),
+    `o servidor grava ${comum} vezes numa exclusão comum, e o README diz: "${comToque}"`);
+  assert.ok(comToque.includes(`mais ${vencida - comum} cada vez`),
+    `com a lista vencida o servidor grava ${vencida} (mais ${vencida - comum}), e o README não conta a releitura: "${comToque}"`);
+  assert.ok(comToque.includes(`${ttl} s`), `a lista vale ${ttl} s no servidor, e o README diz outra coisa: "${comToque}"`);
+  // SEM o toque: o Desfazer desligado (a exclusão sai no toque, sem a leitura
+  // antes), e a exclusão que esperou outra escrita de foto do mesmo local — uma
+  // exclusão que usou a lista do toque dela (a releitura do local não fica
+  // guardada) ou uma aprovação (que esquece as listas). E com a lista que OUTRA
+  // exclusão do local releu ainda valendo (duas seguidas sem o Desfazer).
+  const sem = await escritasDaLixeira({ toque: false, segundosAteOEnvio: 0 });
+  const depoisDoToque = await escritasDaLixeira({ toque: false, segundosAteOEnvio: 0, antes: ({ excluir }) => excluir('b', 'gesto-conta-02') });
+  const depoisDaAprovacao = await escritasDaLixeira({ toque: false, segundosAteOEnvio: 0, antes: ({ aprovar }) => aprovar() });
+  const comALista = await escritasDaLixeira({ toque: false, segundosAteOEnvio: 0, antes: ({ excluir }) => excluir('b') });
+  assert.ok(comALista >= 1 && sem > comALista, `CONTROLE: sem o toque o servidor gravou ${sem} e, com a lista relida valendo, ${comALista} — a medida não separa os casos`);
+  assert.deepEqual([depoisDoToque, depoisDaAprovacao], [sem, sem],
+    `a exclusão que esperou outra escrita do local grava ${depoisDoToque} (depois de uma exclusão com o toque) e ${depoisDaAprovacao} (depois de uma aprovação), não ${sem} — o README conta um número só`);
+  assert.ok(semToque.includes(`${sem} por exclusão`),
+    `sem o toque o servidor grava ${sem} vezes por exclusão, e o README diz: "${semToque}"`);
+  assert.ok(semToque.includes(`ou ${comALista} quando`),
+    `com a lista relida por outra exclusão ainda valendo o servidor grava ${comALista}, e o README não diz: "${semToque}"`);
+  assert.ok(semToque.includes('espera outra escrita de foto do mesmo local'),
+    `o README não diz que a exclusão que espera outra escrita de foto do local também sai sem o toque: "${semToque}"`);
+  assert.ok(!comToque.includes('espera outra escrita'),
+    `o README conta a espera por outra escrita do local no caminho COM o toque (o app não manda o toque nela): "${comToque}"`);
+  assert.ok(semToque.includes(`${ttl} s`), `a lista relida vale ${ttl} s no servidor, e o README diz outra coisa: "${semToque}"`);
 });
 
 // R9-6-07 (auditoria da rodada 9): a conta dos APAGAMENTOS no KV — a cota curta
@@ -281,7 +330,8 @@ test('README: a aprovação de foto só apaga a lista da lixeira tocada na MESMA
 // leitura do core, o README acompanha.
 async function leiturasNoKv() {
   const VENUE = '1.2.3';
-  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }, { id: 'p', approved: false }];
+  let imagens = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }, { id: 'd', approved: true },
+    { id: 'p', approved: false }];
   const original = globalThis.fetch, agora = Date.now;
   let adiante = 0;
   Date.now = () => agora.call(Date) + adiante;
@@ -332,6 +382,10 @@ async function leiturasNoKv() {
     n.exclusaoComALista = await medir('excluir-foto', { ...FOTO_AQUI, imageID: 'c', aquecimento: 'gesto-le-03' });
     await medir('excluir-foto', toque('gesto-le-04'));
     n.aprovarComLixeira = await medir('validar-place', { ...FOTO_AQUI, updateRequestID: '97', approve: true });
+    // A exclusão SEM o toque (o Desfazer desligado, ou a que esperou outra escrita
+    // de foto do local, R14-3-02): relê o local e confere a regravação — as mesmas
+    // leituras da exclusão com o toque.
+    n.exclusaoSemToque = await medir('excluir-foto', { ...FOTO_AQUI, imageID: 'd' });
     return n;
   } finally {
     globalThis.fetch = original;
@@ -362,7 +416,7 @@ test('README: as leituras no KV são as que o servidor faz — 1 por ação, e a
     `a lixeira (o toque com a lista ainda valendo): o servidor lê ${n.toqueDeNovo} vezes no KV, e o README diz ${comALista}`);
   assert.equal(n.toqueComALista, comALista,
     `a lixeira (o toque com a lista da releitura valendo): o servidor lê ${n.toqueComALista} vezes no KV, e o README diz ${comALista}`);
-  for (const caso of ['exclusao', 'exclusaoComALista'])
+  for (const caso of ['exclusao', 'exclusaoComALista', 'exclusaoSemToque'])
     assert.equal(n[caso], exclusao, `a exclusão (${caso}): o servidor lê ${n[caso]} vezes no KV, e o README diz ${exclusao}`);
   const vencida = exclusaoVencidaReadme === undefined ? exclusao : exclusaoVencidaReadme;
   assert.equal(n.exclusaoVencida, vencida,

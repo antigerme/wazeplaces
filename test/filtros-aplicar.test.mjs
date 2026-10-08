@@ -172,6 +172,10 @@ const FUNCOES = [
   // passa pelo `retomarBusca`, que com a fila vazia é o atualizar de sempre. No
   // buraco negro ele não buscaria nada, calado.
   'filaReal', 'retomarBusca',
+  // A janela do Desfazer que o refazer sem gesto espera (o irmão do R14-2-05 na
+  // foto ampliada, pedido extra do lote 18). De VERDADE: no buraco negro ela
+  // seria VERDADEIRA, e a fila nunca seria refeita.
+  ...(/^function janelaDoDesfazerAberta\(/m.test(APP_SEM) ? ['janelaDoDesfazerAberta'] : []),
 ];
 function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, referencias = null, posicaoGps = null,
   paises = [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }], estados = {}, geo = null } = {}) {
@@ -246,6 +250,8 @@ function pagina({ regiao = 'row', pais = 30, filtros = {}, perfil = null, refere
     closeModal: () => { log.fechou++; els.filtersModal.classList.add('hidden'); },
     resetQueue: () => { log.buscas++; }, startFetching: () => {}, reordenarFilaNaTela: () => {},
     enforceDevGatedFilters: () => {},
+    // Nenhuma janela do Desfazer aberta, da foto ampliada (`janelaDoDesfazerAberta`).
+    aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
   };
   const app = montar(FUNCOES, deps);
   // A abertura dos Filtros, na ORDEM do `openFiltersModal` (a parte que é
