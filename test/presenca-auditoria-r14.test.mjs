@@ -388,3 +388,78 @@ test('R14-5-02 o envio da sessão anterior que volta 401 depois da renovação n
   const agora = await respostaTardia({ disparar, chat, renovar: false });
   assert.equal(agora.chamadas.unauthorized, 1, 'CONTROLE: o 401 da própria sessão tinha que ser conferido');
 });
+
+// ── R14-5-03: a conversa SEM histórico nesta página ─────────────────────────
+//
+// A página anterior fechou devendo o "lida" da 1 (vista e não confirmada); a
+// abertura adota a dívida guardada e a paga (o "lida" fica no ar até `soltar`).
+// Uma carona SAI com ele no ar e é lida no Waze antes de ele ser processado: ela
+// conta a 1 (vista) e a resposta da CAF (a 3600) — 2. Os passos vêm na `ordem`
+// pedida: L, a lista chega; V, o "lida" VOLTA; R, a resposta chega pelo tempo
+// real. A conversa não foi aberta nesta página.
+async function dividaGuardada(ordem) {
+  let soltar = null;
+  const c = novoCliente({ agora: T + 2000, api: {
+    chat: (x) => (x.acao === 'lida' ? new Promise((ok) => { soltar = ok; }) : { success: true }),
+    presencaApp: () => ({ success: true, ...lista(1, 1) }),
+  } });
+  c.armazenado.set('waze_places_chat', JSON.stringify({ inst: INST, conhecidos: [CAF], devendo: { [CAF]: { ate: T + 1, n: 1 } } }));
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  const r = { lidaNoAr: typeof soltar === 'function', semHistorico: !c.P.Presenca.historico.has(CAF) };
+  const passos = {
+    L: async () => { c.P.presencaAoCarona(lista(3600, 2), T + 3500, 30); await tick(); },
+    V: async () => { soltar({ success: true }); await tick(); await tick(); },
+    R: async () => { await chega(c, 3600); await tick(); },
+  };
+  let agora = 4000;
+  for (const p of ordem) {
+    c.relogio.agora = T + agora;
+    agora += 500;
+    await passos[p]();
+    r[p] = conta(c);
+  }
+  r.selo = c.$('presencaCount').textContent;
+  c.relogio.agora = T + 60_000; await tick();
+  r.aos60s = conta(c);
+  return { c, r };
+}
+
+test('R14-5-03 a dívida guardada que a abertura paga: a resposta que a lista contou junto com a vista conta UMA — também na conversa sem histórico nesta página', async () => {
+  for (const ordem of ['VLR', 'LVR', 'RVL']) {
+    const { r } = await dividaGuardada(ordem);
+    assert.equal(r.lidaNoAr, true, `${ordem} CONTROLE: a abertura tinha que pagar a dívida guardada (o "lida" no ar)`);
+    assert.equal(r.semHistorico, true, `${ordem} CONTROLE: a conversa não foi aberta nesta página`);
+    assert.equal(r.R, 1, `${ordem} DEFEITO: com a resposta chegada, a pílula seguiu dizendo "2 mensagens novas" (uma já vista)`);
+    assert.equal(r.selo, '1', `${ordem}: a pílula mostrou ${r.selo}`);
+    assert.equal(r.aos60s, 1, `${ordem}: a conta mudou sozinha depois`);
+  }
+  // CONTROLE: a ordem LVR com a lista ANTES da resposta segue contando 2 até a
+  // resposta chegar — o histórico ainda não explica a lista (como na conversa
+  // com histórico, R13-5-01).
+  const { r: k } = await dividaGuardada('LVR');
+  assert.deepEqual([k.L, k.V], [2, 2], 'CONTROLE: antes da resposta, a lista conta a vista e a resposta');
+});
+
+test('R14-5-03 o histórico que a resposta ganha não marca nada — e o "lida" no ar que FALHA com ela chegada não volta a dever (R7-5-01)', async () => {
+  let soltar = null;
+  const c = novoCliente({ agora: T + 2000, api: {
+    chat: (x) => (x.acao === 'lida' ? new Promise((ok) => { soltar = ok; }) : { success: true }),
+    presencaApp: () => ({ success: true, ...lista(1, 1) }),
+  } });
+  c.armazenado.set('waze_places_chat', JSON.stringify({ inst: INST, conhecidos: [CAF], devendo: { [CAF]: { ate: T + 1, n: 1 } } }));
+  await c.P.presencaSincronizar();
+  await tick(); await tick();
+  assert.equal(typeof soltar, 'function', 'CONTROLE: o "lida" da dívida guardada tinha que estar no ar');
+  c.relogio.agora = T + 4000;
+  await chega(c, 3600);                                       // ninguém a viu (a conversa está fechada)
+  await tick();
+  const h = c.P.Presenca.historico.get(CAF);
+  assert.ok(h && h.msgs.some((m) => m.ts === T + 3600), 'CONTROLE: a resposta entrou num histórico da conversa');
+  assert.equal(h.carregada, false, 'o histórico da resposta passou por carregado — e o "lida" sairia sem a conversa aberta');
+  soltar({ success: false, errorCategory: 'transient', _motivo: 'TypeError' });
+  await tick(); await tick();
+  assert.equal(c.P.Presenca.lidaDevendo.has(CAF), false, 'o "lida" falhou e a dívida voltou com a 3600, que ninguém viu — pagá-la a marcaria');
+  assert.equal((c.guardado().devendo || {})[CAF], undefined, 'a dívida com a mensagem que ninguém viu foi guardada no aparelho');
+  assert.equal(conta(c), 1, 'a resposta que ninguém viu deixou de contar');
+});

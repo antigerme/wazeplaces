@@ -1438,7 +1438,20 @@ function presencaMensagemDoFluxo(m, doLote) {
     // Junta MESMO com a conversa carregando: a mensagem que chegava com o
     // `abrir` no ar ficava de fora (a resposta dele podia ser anterior a ela) e
     // sumia da conversa — e o "lida" saía por uma mensagem que ninguém viu.
-    const h = Presenca.historico.get(com);
+    let h = Presenca.historico.get(com);
+    // A conversa SEM histórico nesta página com um "lida" no ar ou que já
+    // voltou — o da dívida GUARDADA, que a abertura do app paga
+    // (`presencaAdotarDividas`) — ganha um, com o que chega por aqui. É ele que
+    // EXPLICA a lista que contou a mensagem vista junto com a resposta
+    // (`presencaNaoLidasDepoisDoLida`): sem ele, a conta da lista ficava, e a
+    // pílula dizia "2 mensagens novas" com uma só não vista até a lista
+    // seguinte — os consertos R10-5-04, R12-5-01 e R13-5-01 valiam só na
+    // conversa aberta nesta página (auditoria da rodada 14, R14-5-03). Não
+    // marca nada: o "lida" exige o histórico CARREGADO (`presencaMarcarLida`).
+    if (!h && (presencaLidaNoAr(com) || Presenca.lidaVoltouEm.has(com))) {
+        h = { msgs: [], maisAntigas: false, carregada: false, erro: false, carregando: false };
+        Presenca.historico.set(com, h);
+    }
     // O ECO de um envio sem resposta que o Waze guardou tira a falha da tela —
     // e do leitor de tela também (`presencaCalarFalhaQueSumiu`, R12-5-03).
     if (h && presencaJuntarMsgs(h, [msg])) presencaCalarFalhaQueSumiu(com);
@@ -2139,7 +2152,11 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
         // `lidaNoAr` no `presencaAplicarLista`, R8-5-05), e segue valendo com a
         // dívida de volta; a conta de ANTES dele fica até a próxima lista, como
         // sempre ficou (o Waze segue contando).
-        if (presencaUltimaDela(h) > ultimaDela) presencaQuitarDivida(id);
+        //
+        // O histórico de AGORA, não o de quando ele saiu: a conversa sem
+        // histórico ganha um com a mensagem que chega com ele no ar (ver
+        // `presencaMensagemDoFluxo`, R14-5-03).
+        if (presencaUltimaDela(Presenca.historico.get(id)) > ultimaDela) presencaQuitarDivida(id);
         else presencaDever(id);
         // No diário, que não mostrava falha nenhuma do "lida": uma linha por
         // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
