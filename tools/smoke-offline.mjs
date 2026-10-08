@@ -189,6 +189,19 @@ const montarNa = (pg, pls) => pg.evaluate((ps) => {
 }, pls);
 const montar = (pls) => montarNa(page, pls);
 
+// A PREPARAÇÃO ASSENTADA, a espera única do FIM de uma preparação: com
+// resultado, nenhuma no ar e nenhuma pedida pra depois. Esperar só o resultado
+// (`offlineUltimoResultado !== null`) acordava no "pronto" de uma preparação
+// VELHA: a volta da rede dispara a da fila de ANTES, o pedido do teste vira
+// `offlinePedidaDeNovo` (o `offlineVarrer` com outra no ar só anota), e o
+// "pronto" dela liberava o teste, que cortava a rede com a fila DELE ainda
+// baixando. MEDIDO na 5b (lote 18): 1 em ~7 rodadas, com o cache guardando os
+// tiles da fila anterior; e reproduzido de propósito atrasando os tiles — o
+// "pronto" chegava com `offlineVarrendo` verdadeiro e a fila guardada NÃO
+// coberta. É o "espere o FIM, não um sinal do meio" outra vez.
+const preparacaoAssentada = () => typeof offlineUltimoResultado !== 'undefined'
+  && offlineUltimoResultado !== null && !offlineVarrendo && !offlinePedidaDeNovo;
+
 // SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
 // código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
 // for declarado aqui não existe depois dele.
@@ -298,7 +311,7 @@ secao('4. A VARREDURA ENCHE, E O TILE VOLTA DO CACHE');
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
+await esperarNaPagina(page, preparacaoAssentada, 25000);
 const varredura = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado, janela: offlineJanelaServida };
@@ -338,7 +351,7 @@ await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado 
   if (typeof offlineFeitosNaJanela !== 'undefined') offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
+await esperarNaPagina(page, preparacaoAssentada, 25000);
 const revalidou = { rota: rotaTile, res: await page.evaluate(() => offlineUltimoResultado) };
 diz('a varredura da janela seguinte REVALIDA pela rede os tiles que já estavam guardados',
   revalidou.rota > 0 && revalidou.res === 'pronto', JSON.stringify(revalidou));
@@ -397,9 +410,13 @@ await page.evaluate(() => {
   API.setSession('tok-reabrir');
   offlineJanelaServida = null; offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer();
 });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
-const encheu5b = await page.evaluate(() => offlineUltimoResultado);
-diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app', encheu5b === 'pronto', String(encheu5b));
+await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
+// E o "pronto" tem que ser o da fila que vai ser reaberta: o CONTROLE que teria
+// pegado a corrida da preparação velha (ver `preparacaoAssentada`).
+const encheu5b = await page.evaluate(() => ({ r: offlineUltimoResultado,
+  cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm }));
+diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app — e cobre a fila guardada AGORA',
+  encheu5b.r === 'pronto' && encheu5b.cobre === true, JSON.stringify(encheu5b));
 aviao = true; await ctx.setOffline(true);
 // Encerrar o worker é do protocolo do DevTools, que só o Chromium tem: lá a
 // variante do worker ENCERRADO roda; fora dele ela é pulada pelo nome.
@@ -843,7 +860,7 @@ diz('CONTROLE: nenhuma foto foi pedida CRUA antes da varredura (o que abrir sem 
 // embaixo não teria o que abrir. Esta página não tem rota da API.
 await pgFoto.evaluate(() => { API.sessionToken = 'tok-6c'; offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(pgFoto, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(pgFoto, preparacaoAssentada, 60000, 250);
 await pgFoto.evaluate(() => { API.sessionToken = null; });
 const enc6c = await pgFoto.evaluate(() => ({ res: offlineUltimoResultado, janela: offlineJanelaServida }));
 diz('a varredura fechou PRONTA', enc6c.res === 'pronto' && enc6c.janela !== null, JSON.stringify(enc6c));
@@ -969,7 +986,7 @@ await page.evaluate(() => {
 await montar(ESTRADA);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 120000, 250);
+await esperarNaPagina(page, preparacaoAssentada, 120000, 250);
 const estradaEncheu = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado };
@@ -1123,7 +1140,7 @@ CURTA.mapa = geo ? { centro: geo.centro, entradas: geo.entradas } : CURTA.mapa;
 await montar([ALTO, CURTA]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
 aviao = true; await ctx.setOffline(true);
 await montar([CURTA]);
 const tilesDaCurta = () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
@@ -1154,7 +1171,7 @@ secao('7c. O ANDROID ENCERRA O SERVICE WORKER OCIOSO — e o mapa guardado não 
 await montar([SO_MAPA(70), SO_MAPA(71)]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
 aviao = true; await ctx.setOffline(true);
 const tileNaFrente = () => page.evaluate(() => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
   const tl = b ? [...b.querySelectorAll('.card-map-tiles img')] : [];
@@ -1780,7 +1797,7 @@ const histAntes9b = await historico9b(page);
 await montar(DEC_9B.map((p) => ({ ...p })));
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
 const foto9b = await page.evaluate(async () => ({ res: offlineUltimoResultado,
   n: ((await offlineLerFila()) || {}).places?.length }));
 diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU e a fila guardada tem os 5',
@@ -2009,7 +2026,7 @@ await p4.reload({ waitUntil: 'domcontentloaded' });
 await esperarNaPagina(p4, () => typeof AppState !== 'undefined' && AppState.queue.length === 4, 20000, 100);
 await p4.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(p4, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(p4, preparacaoAssentada, 60000, 250);
 const foto7 = await p4.evaluate(async () => ({ res: offlineUltimoResultado, n: ((await offlineLerFila()) || {}).places?.length }));
 await p4.close();
 diz('7: PRÉ-CONDIÇÃO — com rede, a fila guardada tem os 4 pendentes', foto7.res === 'pronto' && foto7.n === 4,
@@ -2090,7 +2107,7 @@ await p7.reload({ waitUntil: 'domcontentloaded' });
 await esperarNaPagina(p7, () => typeof AppState !== 'undefined' && AppState.queue.length >= 3 && !!cardDaFrente(), 20000, 100);
 await p7.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(p7, () => offlineUltimoResultado !== null, 60000, 250);
+await esperarNaPagina(p7, preparacaoAssentada, 60000, 250);
 const rejeitados9 = await p7.evaluate(() => AppState.stats.rejected);
 await p7.evaluate(() => { AppState.preferences.undoEnabled = true; });
 await p7.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click());
@@ -3195,7 +3212,7 @@ const preparar9j = async (nome, { redeCaiNaFoto }) => {
   const pg = await abrir9j(ctx, nome);
   await entrar9j(pg, 'tok-9j');
   const fim = await esperarNaPagina(pg, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado !== null && !offlineVarrendo, 60000, 200);
+    && offlineUltimoResultado !== null && !offlineVarrendo && !offlinePedidaDeNovo, 60000, 200);
   const r = await pg.evaluate(() => {
     const ev = dfatoAnel.filter((e) => e.k === 'offline.pronto' || e.k === 'offline.parcial').at(-1) || null;
     return { resultado: offlineUltimoResultado, janela: offlineJanelaServida,
@@ -3248,7 +3265,7 @@ const liefi9j = async (nome, { fotoChega }) => {
   const prep = await abrir9j(ctx, nome + ', preparo');
   await entrar9j(prep, 'tok-9j-foto');
   const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+    && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
   await fecharComoOUsuario(prep);
   // Reaberto no lie-fi: a API sem resposta, e o aparelho dizendo que há rede.
   estado.liefi = true;
@@ -3309,7 +3326,7 @@ await ctxP9j.route('**/api/*', (r) => {
 const prepP9j = await abrir9j(ctxP9j, 'rede provada antes, preparo');
 await entrar9j(prepP9j, 'tok-9j-prova');
 const prontoP9j = await esperarNaPagina(prepP9j, () => typeof offlineUltimoResultado !== 'undefined'
-  && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+  && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
 await fecharComoOUsuario(prepP9j);
 p9j.fase = 'liefi';
 const pgP9j = await abrir9j(ctxP9j, 'rede provada antes');
@@ -3375,7 +3392,7 @@ const liefiSegurado9j = async (nome, { comSaida = false } = {}) => {
   const prep = await abrir9j(ctx, nome + ', preparo');
   await entrar9j(prep, 'tok-9j-' + nome.replace(/\W+/g, ''));
   const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado === 'pronto' && !offlineVarrendo, 30000, 200);
+    && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
   // A decisão de ANTES, esperando envio (um pedido que não está na fila guardada).
   if (comSaida) await prep.evaluate(() => enfileirarSaida('reject', { venueID: 'v229', updateRequestID: 'u229', creatorId: 229 }, 'row'));
   await fecharComoOUsuario(prep);
@@ -4177,7 +4194,7 @@ const cenario9o = async (nome, listas) => {
     await pg.route('**/api/*', rota9o(lista));
     await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
     const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
-      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo, 30000, 100);
+      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
     return { pg, ok: ok.ok };
   };
   // Os pedidos da fila DESTA aba sem o tile no cache do aparelho, e os da fila guardada.
@@ -4215,7 +4232,7 @@ const cenario9o = async (nome, listas) => {
       return offlineVarrendo;
     });
     res.varreu = comecou && (await esperarNaPagina(A.pg, () => dfatoAnel.filter((e) => e.k === 'offline.pronto').length > window.__prontas9o
-      && !offlineVarrendo, 30000, 100)).ok;
+      && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100)).ok;
     res.tilesDoGatilho = tiles9o - tiles;
     await dormir(300);
     res.depoisDoGatilho = await medir(A.pg);

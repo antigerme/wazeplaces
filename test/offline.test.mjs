@@ -718,6 +718,28 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
 });
 
+// A ESPERA DO FIM DE UMA PREPARAÇÃO também é uma só (`preparacaoAssentada`, no
+// smoke do offline): a espera pelo resultado CRU (`offlineUltimoResultado !==
+// null`) acordava no "pronto" de uma preparação VELHA — a volta da rede dispara a
+// da fila de antes, e o pedido do teste vira `offlinePedidaDeNovo`. MEDIDO no
+// lote 18 (a 5b: 1 em ~7 rodadas, o cache com os tiles da fila anterior) e
+// reproduzido atrasando os tiles: o "pronto" chegava com `offlineVarrendo`
+// verdadeiro e a fila guardada não coberta. Sem comentário na conta (gotcha #67).
+test('o smoke do offline espera o FIM da preparação (`preparacaoAssentada`), nunca o resultado cru', () => {
+  const OFF = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
+  const codigo = OFF.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.match(codigo, /const preparacaoAssentada = \(\) =>[^;]*offlineUltimoResultado !== null[^;]*!offlineVarrendo[^;]*!offlinePedidaDeNovo/,
+    'sumiu a espera única do fim da preparação, ou ela deixou de exigir nada no ar e nada pedido pra depois');
+  assert.doesNotMatch(codigo, /esperarNaPagina\(\w+, \(\) => offlineUltimoResultado !== null,/,
+    'voltou a espera pelo resultado CRU da preparação — ela acorda no "pronto" de uma preparação velha; use preparacaoAssentada');
+  assert.ok((codigo.match(/esperarNaPagina\(\w+, preparacaoAssentada,/g) || []).length >= 10,
+    'as esperas do fim da preparação deixaram de passar pela preparacaoAssentada');
+  // E a 5b confere que o "pronto" é o da fila que vai ser reaberta — o controle
+  // que teria pegado a corrida.
+  assert.match(codigo, /cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm/,
+    'a PRÉ-CONDIÇÃO da 5b deixou de conferir que a preparação cobre a fila guardada');
+});
+
 // A ESPERA DO ESVAZIAMENTO É FONTE ÚNICA, e este guard existe porque a lição
 // não pegou por estar escrita: o comentário dentro do `smoke-browser.mjs` já
 // listava as armadilhas do `page.waitForFunction`, e eu as repeti todas ao

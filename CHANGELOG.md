@@ -90,7 +90,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 
 ### Notas
 - Os testes automáticos do **"Disponível offline"** passaram a rodar também no **motor do Safari** (o WebKit, o de todo navegador do iPhone). Cobrem a foto guardada no aparelho, o diagnóstico que sobrevive a fechar o app, o app aberto em duas abas e o botão do modo dev. As partes que dependem do modo offline com o app instalado (o mapa e as fotos sem sinal, a fila guardada) seguem testadas só no motor do Chrome, por um limite da ferramenta de teste no motor do Safari.
-- Dois testes que às vezes reprovavam com a máquina carregada (uma decisão conferida 20 ms depois da resposta, e a medida do convite de instalar no meio do pulo do placar) passaram a esperar o fim do que medem.
+- Três testes que às vezes reprovavam sem defeito no app passaram a esperar o fim do que medem: uma decisão conferida 20 ms depois da resposta, a medida do convite de instalar no meio do pulo do placar, e a preparação do "Disponível offline" dada por pronta pelo resultado de uma preparação anterior.
 
 ### Ficou pra decisão
 - **Num iPhone com iOS anterior ao 15.4, com o app aberto em duas abas, uma decisão que esperava sinal pode ir ao Waze duas vezes quando a rede volta.** O Waze responde "já tratado" à segunda, e o placar e o Histórico contam uma vez só. Nos navegadores de hoje isso não acontece.
