@@ -31,8 +31,8 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 - **Lote 20 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.13-02): cinco
   agentes (presença, fila, offline, servidor e documentos, treino), mais dois pedidos extras (fila: os avisos de uma
   vez devolvidos na renovação da mesma conta e o foco do pareamento deitado; offline: a hipótese do desfazer do tile,
-  que reproduziu). Na junção: conflitos só em arquivos gerados (regenerados). `npm test` 3035/3035, também com o relógio
-  grosso. Relatórios em `scratchpad/relatorio-l20-<área>.md`.
+  que reproduziu). Na junção: conflitos só em arquivos gerados (regenerados). `npm test` 3036/3036, também com o relógio
+  grosso. O smoke do diag-tela achou, na junção, um defeito do próprio lote: o `preventScroll` do `openModal` deixou os diálogos reabrirem onde estavam (a Ajuda reabria no fim depois do gesto do modo dev); o `openModal` passou a zerar a rolagem na abertura. Os nove smokes, nos dois motores, saíram com 0 ✗. Relatórios em `scratchpad/relatorio-l20-<área>.md`.
 - **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 20": a Ajuda a
   280 px, a legenda do mini-mapa, a extensão 0.3.5, a rajada de "lida").
 - **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
