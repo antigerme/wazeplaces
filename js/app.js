@@ -4079,6 +4079,37 @@ function vezLiberada(vez) {
     });
 }
 
+// As escritas de foto (exclusão, aprovação) que já saíram da janela do Desfazer e
+// ESPERAM a vez do local — a resposta do toque na lixeira, ou de outra escrita da
+// lista de fotos. Não estão na fila de saída nem em andamento, e o "Sair"
+// confirmado nesse meio as descarta calado: a época muda e o `callWithRetry` não
+// envia (auditoria da rodada 15, R15-3-01, MEDIDO nos dois motores: o toque lento,
+// "Foto excluída" na tela, o "Sair" e a foto segue no Waze). Soltá-las pra sair
+// junto com o "Sair" disputaria com o apagamento da sessão no servidor; o que o
+// app faz é DIZER, no diálogo (`desenharAvisoDoSair`), que elas serão descartadas.
+// Cada uma é uma marca avulsa; sai quando a espera acaba, por qualquer caminho
+// (a resposta, a descarga da página), e o "Sair" esvazia o conjunto.
+const escritasEsperandoAVez = new Set();
+
+// O diálogo do "Sair", se estiver aberto, diz a conta de agora.
+function redesenharAvisoDoSairSeAberto() {
+    if (!document.getElementById('logoutModal')?.classList.contains('hidden')) desenharAvisoDoSair();
+}
+
+// Só se chama com `esperaAVezDoLocal(vez)` verdadeiro: sem espera nenhuma o envio
+// sai na hora, no mesmo tique (a descarga da página depende disso).
+async function esperarAVezContandoNoSair(vez) {
+    const marca = {};
+    escritasEsperandoAVez.add(marca);
+    redesenharAvisoDoSairSeAberto();
+    try {
+        await vezLiberada(vez);
+    } finally {
+        escritasEsperandoAVez.delete(marca);
+        redesenharAvisoDoSairSeAberto();
+    }
+}
+
 // A página está saindo (`descarregarAcaoPendente`): solta as escritas que
 // esperam só um aquecimento — com o transporte já no modo "saindo", pra elas
 // saírem com `keepalive`. O envio de cada uma corre nas microtarefas logo depois,
@@ -4340,7 +4371,7 @@ async function enviarExclusao(alvo) {
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
     aplicarTravaDeAcao();
     try {
-        if (esperaAVezDoLocal(vez)) await vezLiberada(vez);
+        if (esperaAVezDoLocal(vez)) await esperarAVezContandoNoSair(vez);
         // A MESMA foto já saiu do mapa por outra exclusão DESTA sessão — a do
         // irmão, que estava no ar com esta na vez (R10-3-03) ou que pousou com
         // esta ainda na janela do Desfazer (R12-3-02, `fotosQueSairamDoMapa`):
@@ -4714,7 +4745,7 @@ async function enviarAprovacao(alvo) {
         // sai, `vezLiberada`, R13-3-01).
         vez = vezDasFotosNoLocal(alvo, 'aprovar');
         if (esperaAVezDoLocal(vez)) {
-            await vezLiberada(vez);
+            await esperarAVezContandoNoSair(vez);
             // A OUTRA aba decidiu o pedido enquanto esta esperava a vez (o
             // R11-3-02, na espera que a vez abriu): vale a decisão de lá. A
             // aprovação não sai — o Waze receberia as duas, e a tela diria "Já
@@ -11708,6 +11739,23 @@ function sessaoDestaAbaEhAGuardada() {
     return !!naMemoria && safeLS.get('waze_session_token') === naMemoria;
 }
 
+// A aba que cai ANTES de o perfil chegar (o `/Session` falhou, ou ainda vinha a
+// caminho) não confirmou conta nenhuma, e sem ela a régua da OUTRA conta
+// (`outraContaTomouOAparelhoDaQueCaiu`, R13-1-06) a dava como "segue": a fila, o
+// card (dado de terceiro no DOM) e o anel de chamadas da conta anterior ficavam
+// nela quando outra conta entrava noutra aba, e, ao entrar depois com a conta
+// nova, a troca nem era detectada (a do aparelho já era a nova, e a desta aba,
+// nula) — o anel da anterior ia no relatório de quem entrou (auditoria da rodada
+// 15, R15-1-01, MEDIDO). O aparelho sabe de quem era a sessão que caiu quando a
+// marca guardada é a dela (`contaAgora`): essa conta passa a ser a que esta aba
+// confirmou, como se o perfil tivesse chegado. NUNCA zera a que já havia (o
+// "Sair" é quem esquece), e sem prova da conta não inventa nenhuma.
+function lembrarAContaDaQueda(tokenQueCaiu) {
+    if (contaConfirmadaNestaAba || !tokenQueCaiu) return;
+    const id = contaAgora();
+    if (id) contaConfirmadaNestaAba = { id, s: marcaDaSessao(tokenQueCaiu) };
+}
+
 function derrubarSessao(errorKey, { depois } = {}) {
     epocaDaSessao++;   // o que estava em voo pertencia à sessão que morreu
     quedaAnunciada = false;   // esta queda ainda não foi dita (ver o fim da renovação)
@@ -11718,6 +11766,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
     const doAparelho = sessaoDestaAbaEhAGuardada();
     // A marca dela vai no aviso às outras abas (ver `avisarOutrasAbasDaQueda`).
     const tokenQueCaiu = API.sessionToken;
+    // A conta que esta aba tinha, mesmo sem o perfil (R15-1-01): lida ANTES de a
+    // sessão e o perfil saírem da memória, que é de onde ela vem.
+    lembrarAContaDaQueda(tokenQueCaiu);
     // A queda é a decisão mais cara do app e era a ÚNICA que não chegava ao
     // anel sem portão: havia `dlog('sessao.confere')`, que o dev mode desligado
     // engole, e `dfato` só no ALARME FALSO — ou seja o caso em que ela NÃO cai.
@@ -12130,8 +12181,21 @@ function desenharAvisoDoSair() {
     // saída desde o O2, e já saiu: ela chega ao Waze com o "Sair" no meio. A
     // frase a contava e dizia que ela "não chega" (auditoria de 2026-10-01, R5-1
     // F7).
-    const n = carregarFilaDeSaida().filter((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x))
+    //
+    // Mas o pedido de um LOTE que ainda não saiu (o "Rejeitar os N", os pedaços
+    // seguintes do "Marcar todos") também está "em andamento" desde o gesto — e
+    // não saiu: o "Sair" para o laço depois da ida que está no ar e o resto some
+    // calado (auditoria da rodada 15, R15-2-F4, MEDIDO: 6 pedidos, o diálogo sem
+    // aviso nenhum, 4 deles descartados). Esses entram na conta pelo conjunto
+    // (`pedidosDoLoteSemEnviar`), estejam na fila de saída (o rejeitar) ou não (o
+    // lido). Todo pedido do conjunto está em `pedidosEmAndamento`, então o filtro
+    // abaixo o deixa de fora e ele não é contado duas vezes.
+    let n = carregarFilaDeSaida().filter((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x))
         && !reivindicadoPorOutraAba(x)).length;
+    n += pedidosDoLoteSemEnviar.size;
+    // E a exclusão (ou aprovação) de foto que espera a vez do local: saiu da janela
+    // do Desfazer, não está na fila de saída, e o "Sair" a descarta (R15-3-01).
+    n += escritasEsperandoAVez.size;
     el.textContent = n ? t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }) : '';
     el.classList.toggle('hidden', !n);
 }
@@ -12356,6 +12420,8 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // e as fotos que as exclusões de quem saiu tiraram do mapa (R12-3-02).
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
+    pedidosDoLoteSemEnviar.clear();
+    escritasEsperandoAVez.clear();
     idasSemRespostaGuardadas.clear();
     fotosQueSairamDoMapa.clear();
     if (typeof esquecerDecididasPorOutraAba === 'function') esquecerDecididasPorOutraAba({ comOsAvisos: true });
@@ -19892,6 +19958,9 @@ async function enviarLote(places, opts = {}) {
             saveStats();
         }
     }
+    // O que ainda não saiu: o diálogo do "Sair" conta (R15-2-F4). Só o lote da
+    // PESSOA — a recusa automática é o app agindo, sem decisão dela a descartar.
+    if (!aoLandar) marcarLoteSemEnviar(places.filter((q) => !repetidos.has(q)), true);
     // A fila de saída ABRIU por este lote: a transição vai pro diário uma vez
     // (a anotação antes do envio é calada, ver `enfileirarSaida`).
     let abriuAnotado = false;
@@ -19917,6 +19986,7 @@ async function enviarLote(places, opts = {}) {
     try {
         for (const p of places) {
             if (repetidos.has(p)) continue;
+            if (!aoLandar) marcarLoteSemEnviar(p, false);   // entra no ar: já não é o que o "Sair" descarta
             const r = await callWithRetry(() => (desistir(p)
                 ? naoVale
                 : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)));
@@ -20072,6 +20142,7 @@ async function enviarLote(places, opts = {}) {
         // Todos, inclusive os que não chegaram a sair (sessão morta no meio).
         marcarEmAndamento(places, false);
         rejeicoesDeLoteNoAr.delete(noAr);
+        if (!aoLandar) marcarLoteSemEnviar(places, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         updateStats();
@@ -22109,6 +22180,25 @@ function marcarEmAndamento(places, sim) {
         if (sim) pedidosEmAndamento.add(k);
         else pedidosEmAndamento.delete(k);
     }
+}
+
+// Os pedidos de um LOTE DA PESSOA (o "Rejeitar os N", o "Marcar todos") que ainda
+// não saíram: todos estão em `pedidosEmAndamento` desde o gesto, mas o lote manda
+// um a um (ou em pedaços), e o "Sair" para o laço depois da ida que está no ar. O
+// diálogo do "Sair" conta o que sobra aqui (`desenharAvisoDoSair`, R15-2-F4). Cada
+// pedido sai do conjunto ao ENTRAR no ar, e o lote tira os seus todos no `finally`.
+// Em memória, como o `pedidosEmAndamento`; o "Sair" o esvazia.
+const pedidosDoLoteSemEnviar = new Set();
+function marcarLoteSemEnviar(places, sim) {
+    for (const p of (Array.isArray(places) ? places : [places])) {
+        const k = chaveDoPedido(p);
+        if (!k) continue;
+        if (sim) pedidosDoLoteSemEnviar.add(k);
+        else pedidosDoLoteSemEnviar.delete(k);
+    }
+    // O diálogo do "Sair" aberto diz a conta de agora (a frase não pode seguir
+    // contando o que já está no ar).
+    redesenharAvisoDoSairSeAberto();
 }
 
 function offlineLerPousos() {
@@ -26074,6 +26164,9 @@ async function handleBatchMarkRead() {
     // O indicador conta os pedidos do lote no ar (ver `lidosDoLoteNoAr`).
     lidosDoLoteNoAr = alvos.length;
     marcarEmAndamento(alvos, true);
+    // E o diálogo do "Sair" conta os que ainda não saíram (R15-2-F4): o laço para
+    // depois do pedaço que está no ar, e os seguintes não vão ao Waze.
+    marcarLoteSemEnviar(alvos, true);
     aplicarTravaDeAcao();
     AppState.inFlightActions++;
     updateInFlightIndicator();
@@ -26188,6 +26281,7 @@ async function handleBatchMarkRead() {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const doPedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
             noAr(i);
+            marcarLoteSemEnviar(doPedaco, false);   // o pedaço entra no ar
             let pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
             if (!pedaco.length) continue;
             const r = await mandar(() => {
@@ -26257,6 +26351,7 @@ async function handleBatchMarkRead() {
         // indicador (`lidosDoLoteNoAr`).
         if (epoca === epocaDaSessao) { loteDeLidosEmVoo = false; lidosDoLoteNoAr = 0; }
         marcarEmAndamento(alvos, false);
+        marcarLoteSemEnviar(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         aplicarTravaDeAcao();

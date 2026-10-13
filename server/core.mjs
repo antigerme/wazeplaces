@@ -1866,13 +1866,30 @@ async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx
 // todos, de um local atualizado há pouco): a ordem fina segue sendo do cliente.
 const ORDENS_DA_BUSCA = new Set(['SORTING_UPDATE_TIME_DESC', 'SORTING_UPDATE_TIME_ASC']);
 
+// O país que o corpo traz, como número: o que o app manda (`number`) ou um texto
+// só de dígitos. O resto (texto, `true`, lista, objeto) é NaN — quem chama o
+// recusa. FONTE ÚNICA das duas rotas que recebem `countryId`.
+function inteiroDoPais(bruto) {
+  return typeof bruto === 'number' ? bruto
+    : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+}
+
 async function handleBuscarPlaces(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
   const page = data.page ? Math.max(1, parseInt(data.page, 10) || 1) : 1;
-  const countryId = data.countryId ? parseInt(data.countryId, 10) || 30 : 30;
+  // O país, quando vem, é um inteiro positivo (a mesma régua do `lista-estados`):
+  // o `parseInt(...) || 30` lia 'abc', 0, '30abc', `true` e `[]` como o Brasil e
+  // '1e400' como 1, e o -5 seguia pro Waze — a fila do Brasil entregue por um
+  // campo mal lido, sem erro nenhum (auditoria da rodada 15, R15-6-03). AUSENTE
+  // (`undefined`/`null`) segue valendo 30: a busca por área (`bbox`) nem o usa.
+  let countryId = 30;
+  if (data.countryId !== undefined && data.countryId !== null) {
+    countryId = inteiroDoPais(data.countryId);
+    if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
+  }
   const stateId = data.stateId !== undefined && data.stateId !== '' && data.stateId !== null ? parseInt(data.stateId, 10) : null;
   const managedAreaId = data.managedAreaId !== undefined && data.managedAreaId !== '' && data.managedAreaId !== null ? parseInt(data.managedAreaId, 10) : null;
   const bbox = Array.isArray(data.bbox) && data.bbox.length === 4 ? data.bbox : null;
@@ -3141,9 +3158,7 @@ async function handleListaEstados(data, { sessions }) {
   // `true`, `[]`, `{}` e 'NaN' passavam e iam ao Waze com countryId=0, voltando
   // 200 com a lista vazia (auditoria de 2026-09-29). `!(> 0)` pega o NaN; o
   // mesmo 400 do país ausente, antes do Waze.
-  const bruto = data.countryId;
-  const countryId = typeof bruto === 'number' ? bruto
-    : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+  const countryId = inteiroDoPais(data.countryId);
   if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 

@@ -204,6 +204,7 @@ function sairNaJanela({ noAr = [] } = {}) {
     // A decisão da janela é anotada na fila de saída quando sai, e está EM ANDAMENTO desde o gesto.
     carregarFilaDeSaida: () => noAr.map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v })),
     pedidosEmAndamento: new Set(noAr.map((v) => v + '|u' + v)),
+    pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),   // R15-2-F4 e R15-3-01: ver contas-auditoria-r15
     chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, reivindicadoPorOutraAba: () => false,
   };
   const h = montar(['abrirDialogoDoSair', 'despacharJanelaDoDesfazer', 'desenharAvisoDoSair'], deps);

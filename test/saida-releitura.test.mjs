@@ -94,6 +94,7 @@ function aparelho({ fila = [], manuais = [] }) {
     saveStats: () => {}, aoMudarAFilaPorBaixo: () => {}, mostrarResultadoDoLote: () => {},
     canDisableUndo: () => true, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
     acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
+    marcarLoteSemEnviar: () => {},   // o aviso do "Sair" (R15-2-F4): coberto em contas-auditoria-r15
     presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, presencaFolhaAberta: () => false,
     callWithRetry: (fn) => fn(),
     registrarPouso: () => {}, recordHistory: (tipo) => medidas.historico.push(tipo),

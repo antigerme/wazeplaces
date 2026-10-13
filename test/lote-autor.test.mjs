@@ -55,7 +55,7 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
     registrarPouso: () => {}, recordHistory: (tipo, q, dia, onde) => historicoCompleto.push({ dia, onde }),
     registrarRejeicaoDeAutor: () => {},
     registrarAcaoConfirmada: (tipo, p, gesto) => gestosConfirmados.push(gesto ? gesto.dia + '|' + gesto.onde : null),
-    marcarEmAndamento: () => {}, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, handleUnauthorized: () => {},
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     // Com a `lista` de quem chama (o lote), só põe nela: quem grava é quem chama.
     enfileirarSaida: (tipo, p, regiao, extra, calado, lista) => {
@@ -180,7 +180,7 @@ test('F4: aprovar a foto leva a fila do GESTO no alvo (`epocaFila`)', async () =
     aplicarTravaDeAcao: () => {}, removeUndoBanner: () => {}, mostrarDesfazer: () => {}, t: (k) => k,
     registrarDesfazer: () => {}, UNDO_WINDOW_MS: 3000,
     // Do lightbox (L3, o foco, o "em andamento" da aprovação).
-    fotoDoLightboxNaTela: () => true, marcarEmAndamento: () => {}, manterFocoNoLightbox: () => {},
+    fotoDoLightboxNaTela: () => true, marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, manterFocoNoLightbox: () => {},
     refazerSelosSeOutroNaTela: () => {},   // o "Ver +N" do card da frente (R5-2-02)
     anunciarNoLightbox: () => {},   // o desfecho dito ao leitor de tela (R6-3-08)
   };
@@ -322,7 +322,7 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
       },
     },
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
-    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, carimboDoGesto: () => null,
   };
@@ -362,7 +362,7 @@ test('R6-7-4: trocar o PAÍS com a recusa automática no ar não muda o "onde" n
     },
     registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
     recordHistory: (tipo, n, dia, onde) => historico.push({ dia, onde }),
-    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, historyTodayKey: () => estado.dia, getLang: () => 'pt',
   };
@@ -520,7 +520,7 @@ function montarAprovacaoRecusada({ resposta = RECUSA } = {}) {
   const deps = {
     AppState, epocaDaSessao: 0, callWithRetry: (fn) => fn(), API: { aprovarPedido: async () => resposta },
     Lightbox: { desmarcarAprovada: () => log.push('desmarcou') }, showToast: () => log.push('toast'), msgDoServidor: () => '',
-    t: (k) => k, marcarEmAndamento: () => {}, concluirAprovacao: () => log.push('concluiu'), contarConquista: () => {},
+    t: (k) => k, marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, concluirAprovacao: () => log.push('concluiu'), contarConquista: () => {},
     refazerDepoisDo401: async () => null, chaveDoPedido: chave, pedidosQueEntraramNaFila: new Set([chave(P)]),
     updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => log.push('fundo'),
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
@@ -576,7 +576,7 @@ function montarRecusa() {
     API: { getRegion: () => 'row',
       rejectPlace: (v) => new Promise((ok) => { enviados.push(v); portoes.push(() => ok({ success: true })); }) },
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
-    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
     carimboDoGesto: () => null,
@@ -832,7 +832,7 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
     pedidosEmAndamento: new Set(), chaveDoPedido: chave, epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { getRegion: () => 'row', rejectPlace: () => new Promise((ok) => portoes.push(() => ok({ success: true }))) },
     registrarPouso: () => {}, recordHistory: () => {}, registrarRejeicaoDeAutor: () => {}, registrarAcaoConfirmada: () => {},
-    marcarEmAndamento: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
+    marcarEmAndamento: () => {}, marcarLoteSemEnviar: () => {}, enfileirarSaida: () => true, handleUnauthorized: () => {},
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
     // O momento do gesto pro Histórico (R6-7-4, lote 10 do Histórico): um carimbo neutro.

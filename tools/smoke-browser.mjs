@@ -12319,6 +12319,104 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(o.erros.length === 0, 'duas abas: erro de JS na troca de conta', o.erros[0]);
   await o.ctx.close();
 
+  // ── 4b. a aba que cai ANTES do perfil, e OUTRA conta entra noutra aba (R15-1-01) ──
+  // A sessão salva morre entre a busca da abertura e o perfil: a aba cai na tela de
+  // entrada com a fila e o card na memória, sem conta nenhuma confirmada. A queda
+  // passou a guardar a conta que o APARELHO confirmou pra sessão que caiu, e é ela que
+  // faz a outra conta entrando noutra aba alcançar esta aba (antes "seguia": a fila, o
+  // card de terceiro no DOM e o anel de chamadas da conta anterior ficavam nela).
+  // CONTROLE: a MESMA conta entrando noutra aba não encerra a que caiu.
+  {
+    const quedaSemPerfil = async (conta) => {
+      const q = await abrirAbas();
+      const erros4b = [];
+      // O perfil que não chegou: nada confirmado NESTA aba (o aparelho ainda guarda a conta, de antes).
+      await q.A.evaluate(() => { AppState.profile = null; contaConfirmadaNestaAba = null; });
+      await q.A.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+      await esperarOuExplodir(q.A, naEntrada, 'a aba A cair antes do perfil e voltar à entrada');
+      const medir = () => q.A.evaluate(() => ({ fila: AppState.queue.length, card: !!document.querySelector('#cardStack .place-card'),
+        anel: API.chamadas.length, conta: contaConfirmadaNestaAba && contaConfirmadaNestaAba.id }));
+      const antes = await medir();
+      const C = await q.ctx.newPage();
+      C.on('pageerror', (e) => erros4b.push(String(e.message || e).slice(0, 120)));
+      await C.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await esperarOuExplodir(C, naEntrada, 'a aba C abrir na entrada');
+      await C.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+      await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile, `a aba C entrar com a conta ${conta}`);
+      await dormir(600);
+      const depois = await medir();
+      await q.ctx.close();
+      return { antes, depois, erros: [...q.erros, ...erros4b] };
+    };
+    const outra = await quedaSemPerfil(5151);
+    checa(outra.antes.fila > 0 && outra.antes.card && outra.antes.anel > 0 && outra.antes.conta === '4242',
+      'duas abas: PRÉ-CONDIÇÃO — a aba que caiu antes do perfil deveria guardar a fila, o card, as chamadas e a conta que o aparelho confirmou (4242)',
+      JSON.stringify(outra.antes));
+    checa(outra.depois.fila === 0 && !outra.depois.card && outra.depois.anel === 0,
+      'duas abas: OUTRA conta entrou noutra aba e a aba que caiu ANTES do perfil seguiu com a fila, o card ou as chamadas da conta anterior',
+      JSON.stringify(outra.depois));
+    const mesma = await quedaSemPerfil(4242);
+    checa(mesma.depois.fila > 0 && mesma.depois.card,
+      'duas abas: CONTROLE — a MESMA conta entrando noutra aba encerrou a aba que caiu antes do perfil',
+      JSON.stringify(mesma.depois));
+    checa(outra.erros.length === 0 && mesma.erros.length === 0, 'duas abas: erro de JS na queda antes do perfil', [...outra.erros, ...mesma.erros][0]);
+  }
+
+  // ── 4c. o "Sair" com o "Rejeitar os N" no ar conta o que o lote ainda não mandou (R15-2-F4) ──
+  // O lote manda UM A UM e o "Sair" para o laço depois da ida que está no ar: o diálogo
+  // dizia nada, e o resto sumia calado. Com o 1º pedido preso no Waze, o aviso conta os
+  // 3 que faltam, o "Sair" os descarta de verdade (só o 1º chega ao Waze), e o aviso
+  // desce a cada ida. CONTROLE: o ✕ de um card só (já no ar) não entra no aviso.
+  {
+    const modelo = Object.values(CARDS)[0];
+    const filaLote = [...Array.from({ length: 4 }, (_, i) => ({ ...modelo, venueID: `vl${i}`, updateRequestID: `ul${i}`,
+      creatorId: 8801, createdBy: 'autor_do_lote' })), { ...modelo, venueID: 'vx', updateRequestID: 'ux', creatorId: 1, createdBy: 'outro' }];
+    const textoDoAviso = (page) => page.evaluate(() => {
+      const el = document.getElementById('logoutSaidaAviso');
+      return { texto: el.classList.contains('hidden') ? '' : el.textContent, tres: t('modal.logout.saidaPlural', { n: 3 }),
+        dois: t('modal.logout.saidaPlural', { n: 2 }) };
+    });
+    const l = await abrirAbas({ fila: filaLote });
+    let soltar1;
+    l.segurar.set('vl0', new Promise((ok) => { soltar1 = ok; }));
+    await l.A.evaluate(() => rejeitarLoteDoAutor(AppState.currentPlace));
+    await esperarNaPagina(l.A, () => pedidosDoLoteSemEnviar.size > 0, 5000);
+    const idasAoWaze = () => l.rede.filter((x) => x.rota === 'validar-place').map((x) => x.pedido);
+    await esperarOuExplodir(l.A, () => AppState.inFlightActions > 0, 'o lote estar no ar');
+    await l.A.evaluate(() => { document.getElementById('helpBtn').click(); });
+    await dormir(150);
+    await l.A.evaluate(() => { document.getElementById('logoutBtn').click(); });
+    await esperarOuExplodir(l.A, () => !document.getElementById('logoutModal').classList.contains('hidden'), 'o diálogo do "Sair" abrir');
+    const noDialogo = await textoDoAviso(l.A);
+    checa(noDialogo.texto === noDialogo.tres,
+      'duas abas: o "Sair" com o "Rejeitar os 4" no ar (a 1ª ida presa) não diz que os 3 que faltam serão descartados',
+      JSON.stringify(noDialogo));
+    await l.A.evaluate(() => document.getElementById('confirmLogout').click());
+    await esperarOuExplodir(l.A, naEntrada, 'a aba A voltar à entrada depois do "Sair"');
+    soltar1();
+    await dormir(800);
+    const idas = idasAoWaze();
+    checa(idas.length === 1 && idas[0] === 'vl0',
+      'duas abas: a promessa do aviso do "Sair" não se cumpriu — esperado: só a ida que estava no ar chegou ao Waze, e os 3 do resto foram descartados', JSON.stringify(idas));
+    checa(l.erros.length === 0, 'duas abas: erro de JS no "Sair" com o lote no ar', l.erros[0]);
+    await l.ctx.close();
+    // CONTROLE: um ✕ de card só, preso no Waze — já está no ar, e o "Sair" não o descarta.
+    const c = await abrirAbas({ fila: filaLote });
+    let soltarC;
+    const ucc = await c.A.evaluate(() => AppState.currentPlace.venueID);
+    c.segurar.set(ucc, new Promise((ok) => { soltarC = ok; }));
+    await c.A.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
+    await esperarOuExplodir(c.A, () => AppState.inFlightActions > 0 || !!AppState.pendingAction, 'o ✕ estar no ar');
+    await c.A.evaluate(() => { document.getElementById('helpBtn').click(); });
+    await dormir(150);
+    await c.A.evaluate(() => { document.getElementById('logoutBtn').click(); });
+    await esperarOuExplodir(c.A, () => !document.getElementById('logoutModal').classList.contains('hidden'), 'o diálogo do "Sair" abrir (controle)');
+    const semLote = await textoDoAviso(c.A);
+    checa(semLote.texto === '', 'duas abas: CONTROLE — o ✕ de um card só (já no ar) entrou no aviso do "Sair"', JSON.stringify(semLote));
+    soltarC();
+    await c.ctx.close();
+  }
+
   // ── 5. a decisão NO AR numa aba não sai de novo pela OUTRA ──────────────
   // Desde o O2 a decisão entra na fila de saída ANTES do envio, e a fila é do
   // aparelho: a outra aba, esvaziando (a resposta de qualquer chamada dela é

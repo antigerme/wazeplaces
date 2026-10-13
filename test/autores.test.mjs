@@ -798,7 +798,7 @@ function lote({ respostas, camada = null }) {
     AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
     epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { rejectPlace: async () => fila.shift() },
-    registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
+    registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {}, marcarLoteSemEnviar() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     enfileirarSaida: () => 'ok', reivindicacaoDestaAba: () => ({}), soltarMarcaDosItens() {}, handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
