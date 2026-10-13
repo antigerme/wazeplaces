@@ -1908,7 +1908,7 @@ function presencaPagarDividaDe(id, noAparelho = chatDividas()) {
     // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
     // com ele no ar (R8-5-04).
     Presenca.lidaDevendo.delete(id);
-    presencaMarcarLida(id, { fechando: true });
+    presencaMarcarLida(id, { fechando: true, devida: true });
 }
 
 // A PRIMEIRA página da conversa (o `abrir`, que marca a conversa como lida no
@@ -1919,9 +1919,12 @@ function presencaPrimeiraPaginaNoAr(h) {
 
 // A primeira página que a conversa pediu ao abrir ficou pra DEPOIS: a reabertura
 // com a página antiga no ar (`primeiraDepois`) ou na espera do perfil
-// (`esperaPerfil` sem `antes`).
+// (`esperaPerfil` sem `antes`) — ou FALHOU (`primeiraFalhou`, limpo na primeira
+// página boa): com o histórico já na tela, a falha não aparece nem tem "Tentar
+// de novo", e o `abrir` que marcaria a mensagem vista não vai mais sair
+// (auditoria da rodada 15, R15-5-01).
 function presencaPrimeiraPaginaAdiada(h) {
-    return !!h && (!!h.primeiraDepois || !!(h.esperaPerfil && !h.esperaPerfil.antes));
+    return !!h && (!!h.primeiraDepois || !!(h.esperaPerfil && !h.esperaPerfil.antes) || !!h.primeiraFalhou);
 }
 
 // "Olhando é lida" vale até o FECHAMENTO também quando quem marcaria a conversa
@@ -2076,7 +2079,7 @@ function presencaVistaDe(id, limite = Infinity) {
 
 // `fechando`: o pago no fechamento — a conversa já saiu (ou está saindo) da
 // tela, e era nela que a pessoa estava olhando (ver `presencaPagarLida`).
-async function presencaMarcarLida(id, { fechando = false } = {}) {
+async function presencaMarcarLida(id, { fechando = false, devida = false } = {}) {
     if (!fechando && !presencaOlhando(id)) return;
     const h = Presenca.historico.get(id);
     let ultimaDela;
@@ -2086,6 +2089,13 @@ async function presencaMarcarLida(id, { fechando = false } = {}) {
     // R8-5-04): o histórico não está aqui, e o que a pessoa viu é o que o
     // aparelho guardou.
     else if (fechando && Presenca.dividaGuardada.has(id)) ultimaDela = Presenca.dividaGuardada.get(id).ate;
+    // A dívida de uma conversa cujo histórico NUNCA carregou nesta página (a
+    // primeira página falhou, ou ainda não voltou): o que a pessoa viu é o que
+    // chegou com ela na tela, e `presencaVistaDe` o sabe. Sem isto a dívida saía
+    // da memória com o gesto e nenhum "lida" ia — a mensagem vista voltava como
+    // "1 mensagem nova" (auditoria da rodada 15, R15-5-02). Só a dívida: a
+    // mensagem que chegou fora da vista já a tirou (`presencaMensagemDoFluxo`).
+    else if (fechando && devida && presencaVistaDe(id).ate > 0) ultimaDela = presencaVistaDe(id).ate;
     else return;
     // Nada dela, ou nada depois do último "lida": não há o que marcar, e o
     // pedido seria à toa (voltar pra tela chama isto sempre) — nem dívida a
@@ -2411,7 +2421,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     const naTela = Presenca.aberta === id;
     if (!r || !r.success) {
         if (antes) h.antigas = 'erro';
-        else h.erro = true;
+        else { h.erro = true; h.primeiraFalhou = true; }
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         presencaConferirSessao(r, sessao);
         // A página antiga é de uma abertura que já passou: com a primeira
@@ -2443,6 +2453,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     h.maisAntigas = !!r.maisAntigas;
     h.carregada = true;
     if (antes) h.antigas = null;
+    else h.primeiraFalhou = false;
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
         // O "lida" do `abrir` cobre só o que já estava guardado quando ele
@@ -2653,8 +2664,16 @@ function presencaAnexarCard() {
     if (!Presenca.aberta) return;
     const card = window.cardParaConversa ? window.cardParaConversa() : null;
     if (!card) return;   // sem pedido aberto não há o que prender
+    // A tirinha encolhe a lista de mensagens (57 px medidos no Fold): quem
+    // estava no fim dela, lendo a última mensagem, deixava de vê-la — a rolagem
+    // não acompanha sozinha. Re-ancora no fim, com a mesma folga de 80 px do
+    // redesenho da conversa (`presencaRenderConversa`); quem lia o começo fica
+    // onde estava (auditoria da rodada 15, R15-8-02).
+    const corpo = document.getElementById('conversaMsgs');
+    const noFim = !!corpo && corpo.scrollHeight - corpo.scrollTop - corpo.clientHeight < 80;
     Presenca.anexo = card;
     presencaRenderAnexo();
+    if (noFim) corpo.scrollTop = corpo.scrollHeight;
     const campo = document.getElementById('conversaInput');
     if (campo) campo.focus();
 }

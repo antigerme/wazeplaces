@@ -485,6 +485,41 @@ try {
   });
   if (anexou.botaoVisivel && anexou.tirinha && anexou.botaoSaiu && anexou.nome.includes('Padaria')) ok('a tirinha mostra o pedido antes de mandar, e o botão some de verdade');
   else anota(`tirinha errada: ${JSON.stringify(anexou)}`);
+  // 6a. A tirinha encolhe a lista de mensagens, e a lista que estava NO FIM tem
+  // que continuar no fim — a última mensagem não pode ficar escondida atrás dela
+  // (auditoria da rodada 15, R15-8-02). A lista da conversa curta não rola, então
+  // um enchimento a torna rolável; o CONTROLE é a lista que estava lendo o começo,
+  // que não é arrancada pro fim, e a medida de que a lista MESMO encolheu.
+  const reancora = await ana.page.evaluate(async () => {
+    const corpo = document.getElementById('conversaMsgs');
+    const aoFim = () => Math.round(corpo.scrollHeight - corpo.clientHeight - corpo.scrollTop);
+    const quadro = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    presencaSoltarAnexo();
+    await quadro();
+    const enchimento = document.createElement('div');
+    enchimento.style.height = '3000px';
+    corpo.appendChild(enchimento);
+    const medir = async (rolarPara) => {
+      presencaSoltarAnexo();
+      await quadro();
+      corpo.scrollTop = rolarPara === 'fim' ? corpo.scrollHeight : 40;
+      await quadro();
+      const alturaAntes = corpo.clientHeight, topoAntes = corpo.scrollTop;
+      document.getElementById('conversaCardBtn').click();
+      await quadro();
+      return { encolheu: alturaAntes - corpo.clientHeight, aoFim: aoFim(), moveu: Math.round(corpo.scrollTop - topoAntes) };
+    };
+    const noFim = await medir('fim');
+    const noComeco = await medir('comeco');
+    corpo.removeChild(enchimento);
+    return { noFim, noComeco };
+  });
+  if (reancora.noFim.encolheu > 0 && reancora.noComeco.encolheu > 0) ok(`controle: a tirinha encolheu a lista (${reancora.noFim.encolheu} px)`);
+  else anota(`controle: a tirinha não encolheu a lista (${JSON.stringify(reancora)}) — a medição não distinguiria nada`);
+  if (reancora.noFim.aoFim <= 1) ok('com a lista no fim, prender o pedido a mantém no fim — a última mensagem não fica atrás da tirinha');
+  else anota(`a última mensagem ficou ${reancora.noFim.aoFim} px abaixo do que se vê depois de prender o pedido`);
+  if (reancora.noComeco.moveu === 0) ok('controle: quem lia o começo da conversa não é arrancado pro fim');
+  else anota(`quem lia o começo foi movido ${reancora.noComeco.moveu} px ao prender o pedido`);
   await ana.page.fill('#conversaInput', 'isso é fachada ou é a sala?');
   await ana.page.tap('#conversaEnviar');
   await esperar(ana, () => document.querySelectorAll('#conversaMsgs .conversa-pedido').length === 1, 'o cartão não ficou na conversa da ana');

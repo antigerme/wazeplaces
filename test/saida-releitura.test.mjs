@@ -94,6 +94,7 @@ function aparelho({ fila = [], manuais = [] }) {
     saveStats: () => {}, aoMudarAFilaPorBaixo: () => {}, mostrarResultadoDoLote: () => {},
     canDisableUndo: () => true, registrarJanelaSemUndo: () => {}, zerarJanelasSemUndo: () => {},
     acoesTravadas: () => false, direcaoTravada: () => false, Treino: { ativo: false }, advanceQueue: () => {},
+    marcarLoteSemEnviar: () => {},   // o aviso do "Sair" (R15-2-F4): coberto em contas-auditoria-r15
     presencaWmeDaAcao: () => null, presencaWmeAoResponder: () => {}, presencaFolhaAberta: () => false,
     callWithRetry: (fn) => fn(),
     registrarPouso: () => {}, recordHistory: (tipo) => medidas.historico.push(tipo),
@@ -116,6 +117,7 @@ function aparelho({ fila = [], manuais = [] }) {
     'enviarLote'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
+    const rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false,
       verificandoSessao = false, ultimaEscritaOkEm = 0;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };

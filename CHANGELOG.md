@@ -8,6 +8,48 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.13-01
+
+Décima oitava rodada da auditoria. Depois da v2026.10.08-01, conferida em produção com duas contas (150 verificações, nenhuma falha), oito auditores revisaram o app de novo, cada um numa área. Os consertos abaixo são os achados que sobreviveram à conferência; nenhum deles era grave.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila e o acesso renovado**
+- **Se o seu acesso cai com uma foto aprovada ainda a caminho do Waze e você entra de novo, e a aprovação não chega ao Waze, o pedido volta pra fila.** Antes ele sumia, e o app dizia "Tudo limpo!" com o pedido ainda pendente no Waze.
+- **A parte nova da fila que chega não desenha de novo o card que o "Desfazer" acabou de devolver.** Antes, se você desfazia o último pedido enquanto a próxima parte da fila carregava, o card era refeito quando ela chegava: o foco do teclado saía do ✕, a foto voltava para a primeira e, com o mouse, o card que você estava arrastando se perdia debaixo do dedo.
+- **Se você troca de app (ou fecha o app) logo depois de decidir o último pedido da fila, a fila é atualizada quando você volta, e não mais com o app já indo embora.** Antes a busca saía justo nessa hora, sem o limite de tempo de 45 segundos: com o sinal ruim ela podia ficar pendurada e o "Tentar de novo" não fazia nada até recarregar. O mesmo vale para a foto aprovada, excluída ou renomeada ainda no prazo do "Desfazer".
+- **O "Rejeitar os N" cancelado porque você trocou de app não deixa mais a fila em "Falha ao carregar".** Antes, se o sinal tinha voltado nesse meio tempo, os pedidos voltavam pra fila mas a busca que ia atualizá-la nunca acontecia.
+- **Abrir o "Sair" logo depois de decidir o último pedido não gasta mais uma busca à toa.** A decisão continua saindo na hora em que o diálogo abre; a atualização da fila espera: se você cancela o "Sair", ela acontece; se confirma, não acontece.
+
+**Os avisos e o "Sair"**
+- **Os avisos que estavam na tela quando o seu acesso acaba saem com ele.** Antes, o "Marcando N como lidos…", o "Rejeitando N…" da recusa automática, o aviso dourado de que o Desfazer ficou opcional, a dica e o aviso da primeira rejeição ou leitura continuavam por cima da tela de entrada — e tocar neles abria os Filtros sem você estar logado, e o que você mexia ali era gravado. Agora eles saem quando você sai do app, quando o acesso cai e quando outra conta entra (a "Rejeição enviada ao Waze em seu nome" da conta anterior não aparece mais sobre a fila de quem entrou).
+- **O "Enviando N…" não fica mais no canto da tela de entrada.** E, no "Rejeitar os N" e na recusa automática, ele passa a contar os pedidos que faltam (5, 4, 3…), em vez de dizer "2" ou "1".
+- **O diálogo do "Sair" conta também os pedidos de um "Rejeitar os N" ou de um "Marcar todos" que ainda não foram ao Waze.** Antes, com o lote a caminho, o diálogo não dizia nada e o "Sair" descartava o resto do lote sem avisar. A frase vai baixando conforme os pedidos saem.
+- **O diálogo do "Sair" avisa quando uma alteração de foto (excluir ou aprovar) ainda espera a vez de ir ao Waze** (com o Waze lento, logo depois de tocar na lixeira): "1 alteração de foto esperando envio será descartada: ela não chega ao Waze." Antes ela era descartada sem aviso, depois de a tela já ter dito que a foto saiu.
+- **Ao abrir as Preferências, a chave "Permitir desfazer ações" já mostra o que falta.** Antes, se o seu total de pedidos tratados caísse da cota, a chave aparecia liberada e ligada até você tocar nela.
+- **"Acesso renovado pelo WME — sua fila continua aqui." só aparece se havia fila.** Antes saía também quando você abria o app com o acesso vencido e ainda não havia fila nenhuma.
+- **O "Sair" dado em outra aba enquanto esta confere a extensão tira o "Entrando pelo WME…".** Antes ele ficava na tela junto do "Bem-vindo!" até a extensão responder.
+- **No iPhone, o convite para instalar reconhece o navegador Yandex e o app do Bing** e manda procurar no menu do navegador, não na barra do Safari.
+
+**O app aberto em duas abas e a conta**
+- **Se o seu acesso cai antes de o app carregar o seu perfil e outra conta entra noutra aba, a aba que tinha caído também esquece o que era da conta anterior.** Antes ela ficava na tela de entrada com a fila, o pedido que estava na tela e o registro de chamadas de quem estava, e esse registro ia junto no relatório de quem entrava depois.
+
+**Disponível offline**
+- **Com o app aberto em duas abas e a "Disponível offline" ligada, se numa aba você pula um pedido, a linha das Preferências da outra aba deixa de dizer "Pronto" sobre um pedido cujo mapa já saiu do aparelho.** Antes, sem sinal, ela dizia que estava tudo guardado e o mapa desse pedido abria vazio. Agora ela volta a "Ainda não preparado" e, com sinal, baixa só o que falta.
+- **Se você dá "Sair" numa aba enquanto a outra ainda está guardando mapa, nada do que a outra baixava volta pro aparelho.** Antes, um pedaço de mapa (com o endereço de um pedido de outra pessoa) e a anotação da última preparação podiam reaparecer depois do "Sair".
+- **O relatório do modo dev conta os pedaços de mapa que falharam sem passar do número que o mapa pediu**, e mede a idade da fila guardada pela última gravação (o carimbo da fila vai à parte).
+
+**A conversa**
+- **Se o app não conseguia reabrir o histórico de uma conversa (sinal ruim, Waze fora) e você já tinha lido a mensagem nova que chegou, ela continuava aparecendo como "1 mensagem nova" e quem mandou nunca via "Lida".** Agora o app marca como lida ao fechar a conversa. A mesma coisa valia para uma conversa aberta pela primeira vez, quando a resposta chegava ao vivo e o histórico falhava.
+- **Ao mandar um pedido aberto, a lista de mensagens que já estava no fim continua no fim**; a última mensagem não fica escondida atrás da prévia do pedido.
+
+**Bastidores**
+- A busca de pedidos recusa um país inválido em vez de abrir a fila do Brasil sem avisar.
+
+---
+
 ## v2026.10.08-01
 
 Décima sétima rodada da auditoria. Depois da v2026.10.07-05, conferida em produção com duas contas, oito auditores revisaram o app de novo — um deles usando o app de ponta a ponta, como um editor usaria, nos dois motores, em três tamanhos de tela e nos quatro idiomas. O achado mais sério: com o acesso vencido e a extensão logada no WME, o app renovava o acesso mas mostrava "Tudo limpo!" no lugar da fila. Os consertos cobrem a fila e o acesso renovado, o app aberto em duas abas, o "Sair", a foto ampliada, a presença e a conversa, o "Disponível offline", o treino e as Preferências, o convite de instalar no iPhone, as telas estreitas, o teclado e o leitor de tela.

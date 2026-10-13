@@ -78,9 +78,9 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
     'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'enfileirarSaida',
-    'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao'];
+    'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao', 'dispensarAvisosDaSessao'];
   const chaves = Object.keys(deps);
-  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, contaConfirmadaNestaAba = null;\n${nomes.map(fatiar).join('\n')}
+  const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, contaConfirmadaNestaAba = null;\nlet avisosDeUmaVezNaTela = [], avisoDoLoteMarcando = null, avisoDaRecusaAutomatica = null;   // os avisos da sessão (R15-7-F1)\n${nomes.map(fatiar).join('\n')}
     return { ${nomes.join(', ')}, esperando: () => saidaEsperandoConta, esperar: () => { saidaEsperandoConta = true; } };`)(
     ...chaves.map((k) => deps[k]));
   return { app, guardado, log, AppState, sessao, deps, registrosFica };
@@ -396,9 +396,10 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
   };
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada',
-    'deixarSoAsChamadasDaSessao', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
+    'deixarSoAsChamadasDaSessao', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel', 'dispensarAvisosDaSessao'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaEsperandoConta = false, filaAtravessouSessao = false, verificandoSessao = false, sessaoVivaEm = { s: null, em: 0 }, contaConfirmadaNestaAba = null;
+    let avisosDeUmaVezNaTela = [], avisoDoLoteMarcando = null, avisoDaRecusaAutomatica = null;   // os avisos da sessão (R15-7-F1)
     ${nomes.map(fatiar).join('\n')}
     return { handleUnauthorized };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState, guardado };

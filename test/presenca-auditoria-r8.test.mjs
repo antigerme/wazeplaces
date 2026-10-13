@@ -173,7 +173,7 @@ function paginaComOuvintes(ordem) {
   Object.assign(c.P.Presenca, { atualizadaEm: T, tentadaEm: T, pais: 30, tokenPedidoEm: T,
     chat: { token: 'tk', base: GOOGLE, chave: 'k', expiraEm: T + 20 * 3600e3 } });
   const registrar = {
-    setupFimDoModoSaindo: () => montar(['setupFimDoModoSaindo'], { document: c.doc, window: c.win, API: real.API }).setupFimDoModoSaindo(),
+    setupFimDoModoSaindo: () => montar(['setupFimDoModoSaindo'], { document: c.doc, window: c.win, API: real.API, atenderORefazerAdiadoDaDescarga: () => {} }).setupFimDoModoSaindo(),
     setupAppListeners: () => c.P.presencaMontar(),
     // A ação da janela do Desfazer sai com keepalive: a descarga LIGA o modo.
     setupDescargaAoSair: () => montar(['setupDescargaAoSair'], { document: c.doc, window: c.win, API: real.API,

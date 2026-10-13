@@ -16,29 +16,25 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-08 ~02:30 UTC)
+## 0. Estado agora (2026-10-13 ~18:00 UTC)
 
-- **Lote 17 em produção** (PR #264, v2026.10.07-05): os 13 arquivos que o app carrega iguais, byte a byte, aos juntados,
-  e o `prod-auditoria.mjs` inteiro com as duas contas deu **142 ✓ · 1 ✗**. O ✗ era do ROTEIRO (seção 19: o recibo
-  chegou "Lida", com a outra conta na conversa aberta); refeito, **31 ✓ · 0 ✗**. Nenhum defeito do app.
-- **Rodada 14** completa (`scratchpad/r14-<n>/relatorio.md`), com um auditor novo, de PONTA A PONTA (o app usado como um
-  editor usaria, nos dois motores, em três telas e nos quatro idiomas). Um ALTO antigo (igual desde o #252): a renovação
-  pela extensão depois de a busca levar o 401 terminava em "Tudo limpo!" com a fila pendente no Waze. O resto, médios e
-  baixos: duas abas (a sessão guardada que caía com a outra, a preparação do offline negando o que estava no aparelho),
-  o "Sair" descartando a decisão da janela do Desfazer, a conversa reaberta que ficava não lida, o teclado (as setas),
-  telas estreitas (botões de diálogo, ícones, o pulo do placar), o convite de instalar fora do Safari e textos.
-- **Lote 18 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`): nove agentes (busca, abas,
-  contas, offline, offline no WebKit, presença, foto ampliada, treino, ponta a ponta) e três pedidos extras (contas: o
-  "Sair" com a pergunta à extensão no ar e a aba que caiu antes do perfil; busca: o refazer automático e a janela do
-  Desfazer). Na junção: dois conflitos em fonte resolvidos pela união, um harness que não enxergava a função nova de
-  outra área, um teste instável (a decisão conferida por prazo, trocado pela espera da condição) e um defeito do APP
-  achado por uma medida instável — o pulo do contador do placar crescia o placar e empurrava o card no SE e no Fold.
-  O smoke do offline passou a rodar também no WebKit (menos as seções com o worker no comando). Relatórios em
-  `scratchpad/relatorio-l18-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 18").
-- **Cookies** (2026-10-07 ~22 h UTC): `82a8fa0f-antigerme_cookies.txt` (L6+AM) e `3c147ac2-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 21) — e a
-  rodada 15.
+- **Lote 18 em produção** (PR #265, 9b602fd, v2026.10.08-01), deploy às 04:09 UTC: os 13 arquivos que o app carrega
+  iguais, byte a byte, aos juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **150 ✓ · 0 ✗** (a primeira
+  volta sem ✗ nenhum), com a seção 21 (7 ✓). Nenhum defeito do app.
+- **Rodada 15** completa (`scratchpad/r15-<n>/relatorio.md`): oito auditores, cerca de 25 achados, nenhum alto. Médios e
+  baixos: a aprovação de foto que não pousa na fila refeita, a página que chega redesenhando o card do Desfazer, o
+  refazer adiado e a descarga da página, os avisos (dourado, dica, "Marcando N…") que sobreviviam à queda e ao "Sair",
+  o número do "Enviando N…", o diálogo do "Sair" sem o lote e a foto na vez, a outra conta entrando noutra aba, a fila
+  guardada do offline regravada com parte dos pedidos, a conversa reaberta que falha e a lista escondida pela prévia.
+- **Lote 19 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.13-01): cinco
+  agentes (fila, avisos, contas, offline, presença). Na junção: um conflito em fonte resolvido pela união
+  (`enviarLote`, o `finally` com o registro do lote de rejeição e o do lote do "Sair"), conflitos só em arquivos
+  gerados (regenerados) e harnesses que fatiam funções ganhando as peças novas. `npm test` 2957/2957, também com o
+  relógio grosso. Relatórios em `scratchpad/relatorio-l19-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 19").
+- **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 22) — e a
+  rodada 16.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -86,6 +82,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #262 | 2026100703 | rodada 14: o congelamento no fim do treino com a busca lenta, aprovar × excluir foto no mesmo local, duas abas e o canal dos pousos, o envio que falha na conversa no leitor de tela, "Minha área" por servidor, entrada, offline e FAB | **132 ✓** em produção, com a seção 18 (8 ✓); o 1 ✗ era do roteiro (a triagem do diagnóstico mudou de forma), refeito: 25 ✓ · 0 ✗; nenhum defeito do app |
 | #263 | 2026100704 | rodada 15: duas abas fora da fila (a recusa automática e a busca no ar, a fila guardada), a lixeira na vez do local, presença, "Minha área" pendente, entrada, offline e Histórico | **132 ✓** em produção e a seção 19 refeita (**24 ✓ · 0 ✗**; o erro era do roteiro), com cookies novos; os 13 arquivos byte a byte iguais ao juntado e os cabeçalhos conferidos com o `_headers` (2 trocados pela borda, decisão do owner); nenhum defeito do app |
 | #264 | 2026100705 | rodada 16: a decisão que pousa depois da queda, o aviso do pouso na renovação, o link de pareamento com um login no ar, "Minha área" com a fila guardada sem rede, o laço de pedidos do 401 de outro servidor, a lixeira e o toque, presença e treino | **142 ✓** em produção, com as seções 19 e 20; o 1 ✗ era do roteiro (o recibo chegou "Lida", e não "Enviada": a outra conta estava com a conversa aberta), refeito: **31 ✓ · 0 ✗**; nenhum defeito do app |
+| #265 | 2026100801 | rodada 17: a renovação pela extensão que terminava em "Tudo limpo!", duas abas (a sessão guardada, a preparação do offline, o pouso sem a conta), o "Sair" com a janela do Desfazer, a conversa reaberta, o teclado e as telas estreitas (o pulo do placar), o convite fora do Safari e o offline no WebKit | **150 ✓ · 0 ✗** em produção, com a seção 21 (7 ✓); os 13 arquivos byte a byte iguais ao merge e os cabeçalhos conferidos (2 trocados pela borda, decisão do owner); nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere

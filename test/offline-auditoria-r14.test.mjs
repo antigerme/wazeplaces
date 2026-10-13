@@ -285,7 +285,7 @@ const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'offlineLerFila',
   'offlineGravarJanela', 'offlineLerRegistroDaJanela', 'offlineRecuperarJanela', 'offlinePodarTiles', 'offlineVarrer',
   'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'filaGuardadaEsperandoOTreino',
-  'atualizarLinhaDoOffline', 'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba'];
+  'atualizarLinhaDoOffline', 'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'aoManterOCarimboComPartes'];
 function aparelhoDeDuasAbas() {
   const base = baseIDB();
   const cache = new Map();

@@ -70,6 +70,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     // A constante DO APP, lida do fonte: fixar 25 aqui deixaria a sabotagem da
     // constante passar (o harness não a enxergaria).
     AppState, Treino: { ativo: false }, epocaDaSessao: 0,
+    marcarLoteSemEnviar: () => {},   // o aviso do "Sair" (R15-2-F4): coberto em contas-auditoria-r15
     LOTE_LIDOS_PEDACO: Number(/^const LOTE_LIDOS_PEDACO = (\d+);/m.exec(APP_SEM)[1]),
     chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     closeModal: () => {}, openModal: (id) => modais.push(id),

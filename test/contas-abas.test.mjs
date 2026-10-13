@@ -1459,6 +1459,8 @@ function montarAviso(itens, { dialogoAberto = true, noAr = [] } = {}) {
     AppState: { authenticated: false, inFlightActions: 0 },
     // O que está NO AR nesta aba (o gesto até o fim do envio) e a marca desta aba.
     pedidosEmAndamento: new Set(noAr), ABA_DESTA_PAGINA: 'aba-esta', SAIDA_REIVINDICACAO_MS: 60000,
+    // O que o lote ainda não mandou e as escritas de foto na vez do local (R15-2-F4, R15-3-01): no contas-auditoria-r15.
+    pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),
   };
   const h = montar(['desenharAvisoDoSair', 'carregarFilaDeSaida', 'updateInFlightIndicator', 'chaveDoPedido',
     'reivindicadoPorOutraAba'], deps);

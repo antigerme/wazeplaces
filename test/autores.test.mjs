@@ -236,7 +236,7 @@ test('lote: quem agenda o lote pede o cancelamento ao sair', () => {
   // O executor leva a região e o momento do gesto (`{ regiao, gesto }`, R6-7-4),
   // então ele tem vírgula dentro: casa até o `{ aoSair` em vez de parar na
   // primeira vírgula.
-  assert.match(bloco, /scheduleAction\('reject', places, \(\) => enviarLote\(places, \{ regiao, gesto \}\), \{ aoSair: 'cancel' \}\)/,
+  assert.match(bloco, /scheduleAction\('reject', places, \(\) => enviarLote\(places, \{ regiao, gesto, dentroDeUmaAcao: true \}\), \{ aoSair: 'cancel' \}\)/,
     'sem o aoSair o lote herda o despacho do card único');
 });
 
@@ -798,7 +798,7 @@ function lote({ respostas, camada = null }) {
     AppState: { stats: { rejected: 0 }, serverTotal: 9, queue: [], inFlightActions: 0 },
     epocaDaSessao: 0, callWithRetry: (fn) => fn(),
     API: { rejectPlace: async () => fila.shift() },
-    registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {},
+    registrarPouso() {}, recordHistory: (tipo, n) => historico.push([tipo, n]), registrarRejeicaoDeAutor() {}, marcarEmAndamento() {}, marcarLoteSemEnviar() {},
     registrarAcaoConfirmada: () => { confirmadas.n++; },
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R8-2-01): aqui, nenhuma
     enfileirarSaida: () => 'ok', reivindicacaoDestaAba: () => ({}), soltarMarcaDosItens() {}, handleUnauthorized() {}, updateInFlightIndicator() {}, updateStats() {},
@@ -811,6 +811,7 @@ function lote({ respostas, camada = null }) {
     document: { getElementById: (id) => els[id] || null },
     t: (k, v) => (v && v.n != null ? `${k}#${v.n}` : k), escapeHtml: (x) => x,
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const enviar = new Function(...chaves, fatiarFn('enviarLote') + '\n' + fatiarFn('mostrarResultadoDoLote')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));

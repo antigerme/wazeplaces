@@ -82,13 +82,15 @@ function lightbox(podeL6 = true) {
 // passar um.
 // E a espera solta pela página saindo (R13-3-01) e o gesto do toque (R13-3-03).
 const R6_NOMES = ['pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'soltarEsperasDoAquecimento', 'idDoGestoDaLixeira',
+  'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'esperarAVezContandoNoSair', 'soltarEsperasDoAquecimento', 'idDoGestoDaLixeira',
   'exclusaoDoLocalNoAr', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa',
   // O fim das janelas da foto atende o refazer da fila adiado pra ele (o irmão do
   // R14-2-05 na foto ampliada, pedido extra do lote 18).
   'atenderOFimDaJanela'];
 const r6Deps = (log = null) => ({ idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50, escritasDeFotoNoLocal: new Map(),
   esperasSoDoAquecimento: new Set(),
+  // O aviso do "Sair" com a escrita esperando a vez (R15-3-01): aqui só a marca; o aviso é do contas-auditoria-r15.
+  escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {},
   fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,
   anunciarNoLightbox: (texto, place) => { if (log) log.push('anuncio:' + texto); },
   // A região do CARD, pro desfecho que fecha a camada (R7-3-04).
@@ -1480,7 +1482,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
-    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'atenderOFimDaJanela'];
+    'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'esperarAVezContandoNoSair', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
     .replace(/placeResolvidoPorAprovacao = /g, '__res.v = ')

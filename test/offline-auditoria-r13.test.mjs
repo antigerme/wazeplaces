@@ -354,7 +354,7 @@ const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
 const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles',
   'offlineVarrer', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline',
-  'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba'];
+  'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'aoManterOCarimboComPartes'];
 function aparelhoDeDuasAbas({ canal = true } = {}) {
   const base = baseDeMentira();
   const cache = new Map();

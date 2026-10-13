@@ -420,7 +420,8 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
   };
   const { esquecerOutraConta, manterFocoNaFrente } = montar(['esquecerOutraConta', 'esquecerFocoAutor', 'manterFocoNaFrente',
-    'serieDoAutor'], deps, ['esquecerOutraConta', 'manterFocoNaFrente']);
+    'serieDoAutor', 'dispensarAvisosDaSessao'], deps, ['esquecerOutraConta', 'manterFocoNaFrente'],
+    'let avisosDeUmaVezNaTela = [], avisoDoLoteMarcando = null, avisoDaRecusaAutomatica = null;');
   // CONTROLE: com o foco da anterior, a fila de quem entrou vem com o autor dela na frente.
   AppState.queue = [{ creatorId: 2002 }, { creatorId: 1001 }];
   manterFocoNaFrente();
