@@ -140,10 +140,18 @@ test('a janela servida só avança quando a varredura TERMINA', () => {
   const corpo = fatiar('offlineVarrer');
   const i = corpo.indexOf('offlineJanelaServida = janela');
   assert.ok(i > 0, 'a janela precisa ser atribuída na varredura');
-  const antes = corpo.slice(Math.max(0, i - 160), i);
-  // Fila vazia E nada desistido por rede (ver `offlineVarrer`).
-  assert.match(antes, /if \(!pend\.length && !desistidosPorRede\.length\)/,
-    'a atribuição tem que estar COLADA na condição de fila vazia');
+  // Fila vazia E nada desistido por rede (ver `offlineVarrer`): a atribuição mora
+  // DENTRO desse bloco — a condição abre um `{` que ainda não fechou até ela. (Era
+  // "colada" por distância; o R16-4-01 pôs a leitura da fila guardada no meio, e
+  // distância é o jeito errado de amarrar o guard, gotcha #67.)
+  const cond = /if \(!pend\.length && !desistidosPorRede\.length\) \{/.exec(corpo);
+  assert.ok(cond && cond.index < i, 'a atribuição tem que vir depois da condição de fila vazia');
+  let prof = 1;
+  for (const c of corpo.slice(cond.index + cond[0].length, i)) {
+    if (c === '{') prof++;
+    else if (c === '}' && --prof === 0) break;
+  }
+  assert.ok(prof >= 1, 'a atribuição tem que estar DENTRO do bloco da condição de fila vazia');
 });
 
 test('`onLine` é usado de UMA MÃO só: só o false muda comportamento', () => {
@@ -394,7 +402,7 @@ test('a trava de ação respeita o card sem foto — terminar a ação anterior 
 // em segundo plano) nascia com a janela nula, pedia a foto CRUA — que a
 // varredura nunca guarda — e todo card de foto abria com "precisa de sinal".
 test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () => {
-  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*offlineGravarJanela\(janela, filaCoberta\);/,
+  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*(?:const gravandoAJanela = )?offlineGravarJanela\(janela, cobertaDeFato\);/,
     'a janela tem de ser gravada no MESMO tique em que vira — sem await antes, um "Sair"'
     + ' logo depois entra na fila do IndexedDB atrás dela e apaga tudo');
   const abrir = fatiar('offlineTentarAbrirSemRede');

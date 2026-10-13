@@ -65,7 +65,7 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     dfato: (k, o) => diario.push([k, o]),
     setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = [fatiar('filaReal'), fatiar('offlineVarrer')].join('\n')
+  const corpo = [fatiar('filaReal'), fatiar('chaveDoPedido'), fatiar('pedidoForaDaFilaGuardada'), fatiar('offlineVarrer')].join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -161,14 +161,17 @@ test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de R
   const guardados = [];
   const deps = {
     offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
+    OFFLINE_4XX_PASSAGEIRO: new Function('return ' + /^const OFFLINE_4XX_PASSAGEIRO = (new Set\(\[[^\]]*\]\));/m.exec(APP_SEM)[1])(),
     caches: { open: async () => ({ put: async (u) => guardados.push(u) }) },
-    Image: class {},
+    Image: class {}, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
   };
   const chaves = Object.keys(deps);
   const baixarCom = (resposta) => new Function(...chaves, 'fetch', fatiar('offlineBaixar') + '\nreturn offlineBaixar;')(
     ...chaves.map((k) => deps[k]), async () => { if (resposta === 'rede') throw new TypeError('Failed to fetch'); return { ok: resposta < 300, status: resposta }; });
   assert.equal(await baixarCom(404)('https://www.waze.com/row-tiles/live/base/1', true), 'definitivo');
   assert.equal(await baixarCom(410)('https://www.waze.com/row-tiles/live/base/2', true), 'definitivo');
+  assert.equal(await baixarCom(400)('https://www.waze.com/row-tiles/live/base/6', true), 'definitivo');
+  assert.equal(await baixarCom(403)('https://www.waze.com/row-tiles/live/base/7', true), 'definitivo');
   assert.equal(await baixarCom(503)('https://www.waze.com/row-tiles/live/base/3', true), false);
   assert.equal(await baixarCom('rede')('https://www.waze.com/row-tiles/live/base/4', true), false);
   assert.equal(await baixarCom(200)('https://www.waze.com/row-tiles/live/base/5', true), true);
@@ -221,7 +224,7 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     offlineEpoca: 0,
   };
   const chaves = Object.keys(deps);
-  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('pedidoForaDaFilaGuardada') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   return { gravar, puts };
 }
 
@@ -332,7 +335,7 @@ function aparelhoComCache() {
       }),
     },
   };
-  const corpo = [fatiar('filaReal'), fatiar('offlinePodarTiles'), fatiar('offlineVarrer')].join('\n')
+  const corpo = [fatiar('filaReal'), fatiar('chaveDoPedido'), fatiar('pedidoForaDaFilaGuardada'), fatiar('offlinePodarTiles'), fatiar('offlineVarrer')].join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -403,10 +406,10 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
-    offlineEpoca: 0,
+    offlineEpoca: 0, chaveDoPedido,
   };
   const chaves = Object.keys(deps);
-  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
+  const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('pedidoForaDaFilaGuardada') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   const r = await Promise.race([gravar(), new Promise((ok) => setTimeout(() => ok('PENDUROU'), 500))]);
   assert.equal(r, false, 'a gravação abortada pendurou (a varredura ficaria presa)');
 });
@@ -501,7 +504,7 @@ test('O9: download PENDURADO estoura o teto — tile e foto — e conta como fal
     set src(v) { if (v === '') cancelouFoto = true; }
   }
   const deps = { offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30,
-    caches: { open: async () => ({ put: async () => {} }) }, Image: ImagemPendurada };
+    caches: { open: async () => ({ put: async () => {} }) }, Image: ImagemPendurada, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0 };
   const chaves = Object.keys(deps);
   // O `fetch` pendurado só termina se o pedido for ABORTADO — como na rede de verdade.
   const pendurado = (u, opts) => new Promise((_, falha) => {
@@ -553,7 +556,7 @@ function gatilhosDaVarredura(janela) {
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     offlinePodarTiles: async () => 0, dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = ['filaReal', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
+  const corpo = ['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -630,7 +633,7 @@ function interruptor(onLine) {
     offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0,
     dfato: () => {}, setTimeout: (fn) => { fn(); return 0; },
   };
-  const corpo = ['filaReal', 'offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
+  const corpo = ['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineMarcarGesto', 'offlineVarrer', 'offlineAoMudarInterruptor'].map(fatiar).join('\n')
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
@@ -709,7 +712,7 @@ function aparelhoO8() {
       enviarPendenciasDoLightbox: () => {}, removeUndoBanner: () => {}, bloqueadosPorPagina: new Map(),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'saveFilters', 'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'resetQueue',
+      'saveFilters', 'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'resetQueue',
       'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
@@ -988,7 +991,7 @@ function aparelhoO1({ filtros = null } = {}) {
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'filaGuardadaDestaConta',
+      'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'filaGuardadaDestaConta',
       'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha',
       // "Minha área": a carga do perfil, a caixa por servidor e a pergunta ao servidor da busca.
@@ -1504,7 +1507,7 @@ function aparelhoDaLinha() {
       offlineAnunciarTiles: () => {}, offlinePodarTiles: async () => 0,
       setTimeout: (fn) => { fn(); return 0; },
     };
-    const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
+    const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
       'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
@@ -1951,7 +1954,7 @@ function duasAbasComCache() {
       offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {},
       offlineGravarJanela: () => {}, setTimeout: (fn) => { fn(); return 0; },
     };
-    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
+    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let offlineVarrendo = false, offlinePedidaDeNovo = false,
         offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,

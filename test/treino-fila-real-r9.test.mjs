@@ -578,7 +578,7 @@ function montarVarredura() {
     offlinePodarTiles: async (manter) => { podas.push([...manter]); return 0; }, dfato: () => {},
     setTimeout: (fn) => { fn(); return 0; },
   });
-  const app = montar(deps, ['filaReal', 'offlineItensDaFila', 'offlineVarrer'],
+  const app = montar(deps, ['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineItensDaFila', 'offlineVarrer'],
   `let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,
      offlineUltimoResultado = null, offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
      offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaVarrida = null;
@@ -588,8 +588,9 @@ function montarVarredura() {
      offlineFilaGravadaEm = 7;
      return true;
    }
-   // A releitura da base antes da poda (R12-4-05): a fila guardada é a que esta varredura gravou.
-   async function offlineLerFila() { return offlineFilaGravadaEm === null ? null : { t: offlineFilaGravadaEm, places: [{}] }; }`,
+   // A releitura da base antes da poda (R12-4-05): a fila guardada é a que esta varredura gravou
+   // (e o fim da varredura confere se ela tem os pedidos da fila real, R16-4-01).
+   async function offlineLerFila() { return offlineFilaGravadaEm === null ? null : { t: offlineFilaGravadaEm, places: filaReal().slice() }; }`,
   'estado: () => ({ resultado: offlineUltimoResultado, preparada: offlineFilaPreparada, gravada: offlineFilaGravadaEm })');
   return { app, AppState, baixados, podas, gravadas, soltar: () => soltarGravacao && soltarGravacao() };
 }
@@ -650,7 +651,7 @@ function montarInterruptor() {
     } }),
     t: (k, v) => (v ? k + JSON.stringify(v) : k),
   });
-  const app = montar(deps, ['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineGravarFila', 'offlineMarcarGesto',
+  const app = montar(deps, ['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineMarcarGesto',
     'offlineVarrer', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'offlineAoMudarInterruptor'],
   `let filaDeOnde = { regiao: 'row', pais: '30', busca: 'b' }, offlineVarrendo = false, offlinePedidaDeNovo = false,
      offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,

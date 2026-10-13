@@ -1338,7 +1338,7 @@ test('K6: a fila é gravada com a conta e a sessão de quem a buscou', async () 
       return tx;
     } }),
   };
-  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'filaReal', 'offlineGravarFila'], deps);
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada'], deps);
   assert.equal(await h.offlineGravarFila(), true);
   assert.equal(puts[0].conta, '111', 'a fila guardada não diz de que conta é');
   assert.equal(puts[0].s, marcaDe('tok-A'), 'a fila guardada não diz de que sessão é');

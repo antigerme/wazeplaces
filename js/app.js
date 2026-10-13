@@ -22906,6 +22906,23 @@ function chavesQueEsperamAConta() {
     return fora;
 }
 
+// O pedido que a gravação da fila guardada deixa de fora (R16-4-03, fonte única):
+// o que a OUTRA aba decidiu e o card segue aqui, o que está em andamento, o que
+// já pousou com o card ainda na fila e o que espera a conta (acima). A gravação
+// (`offlineGravarFila`), o aviso de PARTE (`aoManterOCarimboComPartes`) e o fim da
+// varredura (`offlineVarrer`) perguntam a ELE: a conta do "fora" que não é a da
+// gravação tirava a cobertura da aba por um pedido que nenhuma gravação grava, e
+// o conserto de um dos lados sem o outro é o gotcha #63. `esperandoAConta`: o
+// conjunto de `chavesQueEsperamAConta()`, lido UMA vez pelo chamador que varre a
+// fila (cada leitura monta o conjunto de novo).
+function pedidoForaDaFilaGuardada(p, esperandoAConta) {
+    if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(p) === true) return true;
+    const k = chaveDoPedido(p);
+    if (typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(k) === true) return true;
+    if (typeof pedidosQuePousaram !== 'undefined' && pedidosQuePousaram.has(p) === true) return true;
+    return !!(esperandoAConta && esperandoAConta.has(k) === true);
+}
+
 // ── A MESMA fila guardada mantém o CARIMBO (R6-4-2, R14-4-01) ────────────────
 // O carimbo (`t`) da fila guardada é a VERSÃO dela: é por ele que a linha das
 // Preferências sabe se a última preparação completa a cobriu
@@ -22976,11 +22993,7 @@ async function offlineGravarFila(desde) {
     // (R14-4-02, ver `chavesQueEsperamAConta`): o pedido segue na fila daqui até
     // a conta se saber, e a poda apagava o pouso de lá, mais velho que `desde`.
     const esperandoAConta = typeof chavesQueEsperamAConta === 'function' ? chavesQueEsperamAConta() : null;
-    const fila = filaReal().filter((p) => !(typeof decididosPorOutraAbaComCardAqui !== 'undefined'
-            && decididosPorOutraAbaComCardAqui.has(p) === true)
-        && !(typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(chaveDoPedido(p)) === true)
-        && !(typeof pedidosQuePousaram !== 'undefined' && pedidosQuePousaram.has(p) === true)
-        && !(esperandoAConta && esperandoAConta.has(chaveDoPedido(p)) === true));
+    const fila = filaReal().filter((p) => !pedidoForaDaFilaGuardada(p, esperandoAConta));
     if (!offlineLigado() || !fila.length) return false;
     // E o DONO: a sessão DESTA aba, a da MEMÓRIA (`marcaDestaAba`, R12-1-03), e
     // sem ela nada é gravado (R13-4-04). Era o `getSession`, que com a memória
@@ -23198,11 +23211,13 @@ function aoGravarFilaGuardadaEmOutraAba(aviso) {
 // daqui no aviso de pouso, que pode chegar um instante depois deste.
 function aoManterOCarimboComPartes(aviso) {
     const naBase = new Set(aviso.chaves.filter((k) => typeof k === 'string' && k));
+    // O MESMO "fora" da gravação (R16-4-03): o pedido que ela nunca grava não
+    // conta como "a mais".
+    const esperandoAConta = typeof chavesQueEsperamAConta === 'function' ? chavesQueEsperamAConta() : null;
     const fora = filaReal().filter((p) => {
-        if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(p) === true) return false;
+        if (pedidoForaDaFilaGuardada(p, esperandoAConta)) return false;
         const k = chaveDoPedido(p);
         if (!k) return false;
-        if (typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(k) === true) return false;
         return !naBase.has(k);
     }).length;
     if (!fora) return;
@@ -23437,6 +23452,16 @@ async function offlineItensDaFila(janela) {
 // de ~200 KB a ~55 kbps; tile tem 10–30 KB.
 const OFFLINE_ITEM_TETO_MS = 30 * 1000;
 
+// A última gravação de tile que COMEÇOU para cada endereço (a geração dela), até
+// terminar sem ser desfeita. Só existe pra o desfazer de uma gravação velha não
+// apagar o tile que a seguinte pôs (R16-8-05).
+const offlineGravandoTile = new Map();
+let offlineGeracaoDeTile = 0;
+
+// Os 4xx que NÃO dizem "este tile não existe" (R16-4-02): 408, 425 e 429. O resto
+// dos 4xx segue definitivo.
+const OFFLINE_4XX_PASSAGEIRO = new Set([408, 425, 429]);
+
 function offlineBaixar(u, tile) {
     // Tile vai pro NOSSO cache (tem CORS, então a resposta é transparente e
     // custa 1,01× de orçamento). Foto vai pro cache do navegador via <img>, que
@@ -23479,8 +23504,14 @@ function offlineBaixar(u, tile) {
             const resp = await fetch(u, { mode: 'cors', cache: 'no-cache', signal: ctrl.signal });
             // 4xx é DEFINITIVO (o tile não existe): repetir não muda nada, e era
             // o que fazia a varredura martelar a mesma URL centenas de vezes.
-            // 5xx segue como falha de rede: o servidor pode voltar.
-            if (resp.status >= 400 && resp.status < 500) return 'definitivo';
+            // 5xx segue como falha de rede: o servidor pode voltar. E três 4xx
+            // NÃO são "não existe" — o próprio app os trata como passageiros
+            // (`categorizeWazeError`): 408 (o servidor desistiu de esperar), 425
+            // (cedo demais) e 429 (limite de taxa, que a varredura de 3 em paralelo
+            // pode provocar). Como definitivos, o tile entrava em `feitos` sem ir ao
+            // cache e não era pedido de novo na janela, com a linha em "Pronto"
+            // (R16-4-02): voltam como falha, e a sonda decide se é a rede.
+            if (resp.status >= 400 && resp.status < 500 && !OFFLINE_4XX_PASSAGEIRO.has(resp.status)) return 'definitivo';
             if (!resp.ok) return false;
             // Última trava antes de ESCREVER: se esqueceram durante o download,
             // gravar aqui recria o cache que o "Sair" acabou de apagar.
@@ -23493,8 +23524,13 @@ function offlineBaixar(u, tile) {
             // tile). Conferida de novo depois do `open` e depois do `put`; mudou,
             // o que esta gravação pôs sai (e o cache, se ficou vazio).
             if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, false); return false; }
+            // Esta gravação põe o tile: quem o desfaz só o tira se NINGUÉM gravou o
+            // mesmo endereço depois (R16-8-05, ver `offlineDesfazerTile`).
+            const meu = ++offlineGeracaoDeTile;
+            offlineGravandoTile.set(u, meu);
             await c.put(u, resp);
-            if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, true); return false; }
+            if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, true, meu); return false; }
+            if (offlineGravandoTile.get(u) === meu) offlineGravandoTile.delete(u);
             return true;
         } catch (e) { return estourou ? 'teto' : false; }
         finally { clearTimeout(teto); }
@@ -23505,9 +23541,17 @@ function offlineBaixar(u, tile) {
 // época mudar — o "Sair" de outra aba, R15-4-02. Tira o tile e, se o cache ficou
 // vazio, o cache: um enchimento NOVO (a época seguinte) que já pôs tiles nele os
 // mantém. Nunca lança.
-async function offlineDesfazerTile(c, u, gravou) {
+async function offlineDesfazerTile(c, u, gravou, meu) {
     try {
-        if (gravou) await c.delete(u);
+        // O tile é do ENDEREÇO, e a gravação da época SEGUINTE (o "Sair" de outra aba
+        // seguido de uma varredura nova, no mesmo cache que o `open` desta recriou)
+        // grava o mesmo: apagado aqui, o mapa daquele pedido abria sem tile e a
+        // varredura nova o dava por feito (R16-8-05, MEDIDO no navegador com a ordem
+        // forçada). Só sai se esta gravação é a ÚLTIMA que começou para o endereço;
+        // a mais nova, se for a que perdeu a época, desfaz a sua.
+        if (gravou) {
+            if (offlineGravandoTile.get(u) === meu) { offlineGravandoTile.delete(u); await c.delete(u); }
+        }
         if (!(await c.keys()).length) await caches.delete(OFFLINE_TILES_CACHE);
     } catch (e) { /* o desfazer nunca derruba a varredura */ }
 }
@@ -23735,15 +23779,46 @@ async function offlineVarrer() {
         // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
         if (epoca !== offlineEpoca) return;   // esqueceram: não grava resultado
         if (!pend.length && !desistidosPorRede.length) {
-            offlineFilaPreparada = filaCoberta;
+            // A fila guardada AGORA, relida ANTES de dar a cobertura (R16-4-01): a
+            // outra aba pode tê-la regravado com PARTE dos pedidos — mesmo carimbo —
+            // enquanto esta baixava, e a poda de lá tira do cache o mapa do pedido
+            // que só esta aba tem (o ↑ da outra não vai pelo canal de pouso). O
+            // aviso (`aoManterOCarimboComPartes`) zerava a cobertura, e este fim a
+            // devolvia: a linha dizia "Pronto" sobre um card sem mapa, e o gatilho
+            // seguinte não reparava (Gravada == Preparada). A pergunta se responde
+            // pela BASE, e não por um aviso que pode não ter vindo (iOS < 15.4 não
+            // tem o canal): todo pedido que a gravação gravaria está nela? O mesmo
+            // "fora" dela decide (`pedidoForaDaFilaGuardada`). A mesma leitura serve à
+            // poda, logo abaixo.
+            const naBase = Number.isFinite(filaCoberta) ? await offlineLerFila() : null;
+            // A época conferida DEPOIS do `await`: o que vem em seguida é SÍNCRONO.
+            if (epoca !== offlineEpoca) return;
+            let semPedidos = 0;
+            if (naBase && naBase.t === filaCoberta) {
+                const nela = new Set(naBase.places.map(chaveDoPedido));
+                const esperandoAConta = typeof chavesQueEsperamAConta === 'function' ? chavesQueEsperamAConta() : null;
+                semPedidos = filaReal().filter((p) => {
+                    const k = chaveDoPedido(p);
+                    return k && !pedidoForaDaFilaGuardada(p, esperandoAConta) && !nela.has(k);
+                }).length;
+            }
+            // Sem cobertura a fila guardada não está "varrida" também: o gatilho
+            // seguinte prepara a fila DESTA aba (grava os pedidos que faltam, com
+            // carimbo novo, e a varredura baixa só o que o cache não tem) — como na
+            // aba parada (R15-4-01). Sem pedido de novo na hora: duas abas varrendo
+            // juntas se desfariam a cobertura uma da outra, sem gesto nenhum.
+            const cobertaDeFato = semPedidos ? null : filaCoberta;
+            if (semPedidos && offlineFilaVarrida === filaCoberta) offlineFilaVarrida = null;
+            offlineFilaPreparada = cobertaDeFato;
             offlineJanelaServida = janela;
             // SEM `await` antes, e isso importa: o `open` sai neste mesmo tique,
             // logo depois da checagem de época acima — um "Sair" que venha em
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
-            offlineGravarJanela(janela, filaCoberta);
+            const gravandoAJanela = offlineGravarJanela(janela, cobertaDeFato);
             offlineUltimoResultado = 'pronto';
             dfato('offline.pronto', { n: filaReal().length, itens: total, ...(definitivos ? { definitivos } : {}),
-                                      ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
+                                      ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
+                                      ...(semPedidos ? { semNaBase: semPedidos } : {}) });
             // Só no "pronto": a lista inteira é a da fila guardada. AGUARDADA, com
             // a varredura ainda no ar (`offlineVarrendo`): o gatilho que chegar
             // nesse meio fica pra depois dela (`offlinePedidaDeNovo`). Solta, a
@@ -23764,11 +23839,15 @@ async function offlineVarrer() {
             // durante a varredura), quem poda é a varredura DELA, que cobre a fila
             // que ficou. A gravação que falhou (`filaCoberta` nulo) também não poda:
             // a fila na base é outra, e o mapa dela fica.
-            const naBase = Number.isFinite(filaCoberta) ? await offlineLerFila() : null;
             if (naBase && naBase.t === filaCoberta && epoca === offlineEpoca) {
                 const n = await offlinePodarTiles(tilesDaFila, epoca);
                 if (n && epoca === offlineEpoca) { offlineAnunciarTiles(); dfato('offline.podou', { n }); }
             }
+            // A janela gravada ANTES de a varredura baixar a bandeira: a gravação
+            // saía solta, e a leitura da fila guardada que passou pra antes dela
+            // (R16-4-01) a deixava terminar depois do fim da varredura — o próximo
+            // gatilho (ou o teste) via a base no meio da escrita. Nunca rejeita.
+            await gravandoAJanela;
         } else {
             offlineUltimoResultado = 'parcial';
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
