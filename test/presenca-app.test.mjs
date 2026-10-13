@@ -381,16 +381,13 @@ test('carona: a lista que falha some da resposta — a ação e a escrita seguem
 
 // ── chat: abrir uma conversa ─────────────────────────────────────────────────
 
-test('chat abrir: o histórico e o "lida" numa ida, em paralelo', { timeout: 5000 }, async () => {
-  const soltar = [];
-  const esperaAsDuas = (resp) => () => new Promise((ok) => {
-    soltar.push(() => ok(resp()));
-    if (soltar.length === 2) soltar.forEach((f) => f());
-  });
+test('chat abrir: o histórico e o "lida" numa ida ao nosso servidor — o "lida" só sai DEPOIS do histórico', { timeout: 5000 }, async () => {
+  // Em paralelo (como era até a rodada 16) o "lida" saía mesmo com o histórico
+  // falhando (R16-5-02); a ordem dos dois pedidos ao Waze é a do teste.
   const hist = g.junta(g.campo.bytes(1, msg({ id: 'a0000000-0000-1000-8000-000000000009', de: '183164343', para: EU, texto: 'WP-TESTE oi', ctx: { app: APP_CONTEXTO } })));
   const { resultado, pedidos } = await comWaze({
-    ListMessages: esperaAsDuas(() => respostaGrpc({ dados: hist })),
-    MarkConversationRead: esperaAsDuas(() => respostaGrpc({ dados: deB64(F.marcarLida.res) })),
+    ListMessages: () => respostaGrpc({ dados: hist }),
+    MarkConversationRead: () => respostaGrpc({ dados: deB64(F.marcarLida.res) }),
   }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.equal(resultado.body.mensagens.length, 1);
@@ -398,6 +395,7 @@ test('chat abrir: o histórico e o "lida" numa ida, em paralelo', { timeout: 500
   assert.deepEqual(resultado.body.mensagens[0].contexto, { app: APP_CONTEXTO });
   assert.equal(resultado.body.recibos.length, 2, 'os recibos que o Waze gerou ao marcar como lida sumiram');
   assert.equal(resultado.body.lida, true, 'o "lida" deu certo e a resposta não diz');
+  assert.deepEqual(pedidos.map((p) => p.metodo), ['ListMessages', 'MarkConversationRead'], 'o "lida" não saiu depois do histórico');
   // As duas chamadas falam da MESMA conversa.
   const comDe = (p, n) => new TextDecoder().decode(um(g.lerCampos(um(g.lerCampos(p.corpo), n)), 2));
   assert.equal(comDe(pedidos.find((p) => p.metodo === 'ListMessages'), 2), '183164343');

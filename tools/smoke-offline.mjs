@@ -4297,6 +4297,264 @@ diz('CONTROLE: uma aba só — a linha segue "Pronto", e o gatilho não prepara 
   uma9o.prontaA && uma9o.depoisDoGatilho?.pronto === true && uma9o.varreu === false && uma9o.tilesDoGatilho === 0
   && uma9o.depoisDoGatilho?.semMapaNaGuardada?.length === 0, JSON.stringify(uma9o));
 
+secao('9p. DUAS ABAS E O AVISO DE PARTE: a aba PARADA e a aba VARRENDO perdem a cobertura do pedido que a poda de lá levou');
+// Auditoria da rodada 15 (R15-4-01) e da 16 (R16-4-01). A e B abrem a MESMA fila e
+// terminam "Pronto" (carimbo T). B PULA um pedido (o ↑ não vai pelo canal de pouso)
+// e prepara: grava PARTE da fila guardada (mesmo carimbo) e a poda de B tira do
+// cache o mapa do pedido que só A tem. A aba que ficou PARADA já perdia a cobertura
+// (o aviso de PARTE); a que estava VARRENDO a devolvia no fim da própria varredura
+// ("Pronto — 6 pedidos" sobre um card sem mapa, e o gatilho seguinte não reparava).
+// Aqui com o canal, o cache do mapa e o IndexedDB de VERDADE. O CONTROLE de cada
+// leitura é o outro cenário (o "A varrendo" tem a parada; a MESMA fila nas duas, sem
+// pular nada, segue "Pronto"). Sem service worker, nos dois motores.
+const cenario9p = async (nome, { modo }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const resp = (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } });
+  await ctx.route('**/*-tiles/live/base/**', resp);
+  const rota = (r) => {
+    const rt = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rt === 'buscar-places') return json({ success: true, places: fila9o(COMUNS_9O), hasMore: false, page: 1, total: COMUNS_9O.length });
+    if (rt === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    if (rt === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
+    return json({ success: true });
+  };
+  const prep = await ctx.newPage();
+  await prep.route('**/api/*', rota);
+  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate(() => {
+    API.setSession('tok-9p');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9p') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
+  });
+  await fecharComoOUsuario(prep);
+  const abrir = async (rotulo) => {
+    const pg = await ctx.newPage();
+    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
+    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
+    await pg.route('**/api/*', rota);
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
+      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
+    return { pg, ok: ok.ok };
+  };
+  const A = await abrir('A');
+  const B = await abrir('B');
+  const out = { prontas: [A.ok, B.ok] };
+  // A janela VIRA nas duas (a de 20 min): a varredura seguinte baixa tudo de novo.
+  const virar = (pg) => pg.evaluate(() => {
+    offlineJanelaServida -= 1; offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
+    offlineMarcarGesto(); window.__prontas = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
+  });
+  await virar(A.pg); await virar(B.pg);
+  const fimDaPreparacao = (pg) => esperarNaPagina(pg, () => dfatoAnel.filter((e) => e.k === 'offline.pronto').length > window.__prontas
+    && !offlineVarrendo && !offlinePedidaDeNovo, 40000, 100);
+  const alvo = 'v301';
+  const tilesDoAlvo = await A.pg.evaluate((p) => { const f = offlineFaixaDeCaixas(); const pl = AppState.queue.find((x) => x.venueID === p);
+    return [...tilesDaFaixa(pl, f)]; }, alvo);
+  out.tilesDoAlvo = tilesDoAlvo.length;
+  if (modo === 'varrendo') {
+    // A fica LENTA (250 ms por tile) e começa a varrer; espera guardar o mapa do alvo.
+    await A.pg.route('**/*-tiles/live/base/**', async (r) => { await dormir(250); return resp(r); });
+    await A.pg.evaluate((t) => { window.__tilesAlvo = t; offlineTalvezVarrer(); }, tilesDoAlvo);
+    const baixou = await esperarNaPagina(A.pg, () => window.__tilesAlvo.every((u) => offlineFeitosNaJanela.us.has(u)), 20000, 50);
+    out.baixouOAlvo = baixou.ok;
+    out.varrendoAoBaixar = await A.pg.evaluate(() => offlineVarrendo);
+  }
+  if (modo !== 'mesma') {
+    // B pula o alvo (o ↑ não vai pelo canal de pouso) e prepara: PARTE, carimbo mantido.
+    await B.pg.evaluate((p) => { AppState.queue = AppState.queue.filter((x) => x.venueID !== p); updatePendingCount(); offlineTalvezVarrer(); }, alvo);
+  } else {
+    await B.pg.evaluate(() => { offlineTalvezVarrer(); });
+  }
+  out.fimB = (await fimDaPreparacao(B.pg)).ok;
+  if (modo === 'varrendo') out.fimA = (await fimDaPreparacao(A.pg)).ok;
+  if (modo === 'varrendo' || modo === 'parada') await esperarNaPagina(A.pg, () => !offlineVarrendo && !offlinePedidaDeNovo, 20000, 50);
+  const medir = (pg) => pg.evaluate(async (p) => {
+    const c = await caches.open('waze-places-tiles');
+    const noCache = new Set((await c.keys()).map((x) => x.url));
+    const pl = AppState.queue.find((x) => x.venueID === p);
+    const f = offlineFaixaDeCaixas();
+    const el = document.getElementById('prefOfflineDesc');
+    const n = AppState.queue.length;
+    return { temAlvo: !!pl, semMapaDoAlvo: pl ? [...tilesDaFaixa(pl, f)].filter((u) => !noCache.has(u)).length : null,
+      cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm,
+      pronto: el.textContent.startsWith(t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n })),
+      // Só diz alguma coisa na aba que VARREU na janela nova (a parada também "precisa" por a janela ter virado).
+      precisaVarrer: offlinePrecisaVarrer() };
+  }, alvo);
+  out.A = await medir(A.pg);
+  // Sem rede, a linha de A: a que mentia ("Pronto — … você segue com o que está guardado").
+  await ctx.setOffline(true);
+  out.semRede = await A.pg.evaluate(() => { atualizarLinhaDoOffline(0, 0); const el = document.getElementById('prefOfflineDesc');
+    return { dizTudoGuardado: el.textContent.includes(t('prefs.offline.prontoSemRedeB')) }; });
+  await ctx.setOffline(false);
+  if (modo !== 'mesma') {
+    // O gatilho seguinte de A prepara a fila DELA e baixa o mapa que a poda levou.
+    out.A.gatilhoVarre = await A.pg.evaluate(() => { window.__prontas = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
+      offlineMarcarGesto(); offlineTalvezVarrer(); return offlineVarrendo; });
+    out.fimDoGatilho = out.A.gatilhoVarre && (await fimDaPreparacao(A.pg)).ok;
+    out.depoisDoGatilho = await medir(A.pg);
+  }
+  await ctx.close();
+  return out;
+};
+const varr9p = await cenario9p('A varrendo', { modo: 'varrendo' });
+diz('PRÉ-CONDIÇÃO: A baixou o mapa do pedido com a varredura no ar, e a poda de B o levou (o cache de A não o tem mais)',
+  varr9p.prontas.every(Boolean) && varr9p.baixouOAlvo && varr9p.varrendoAoBaixar && varr9p.fimB && varr9p.fimA
+  && varr9p.A.temAlvo && varr9p.A.semMapaDoAlvo > 0, JSON.stringify(varr9p));
+diz('A varrendo: A termina SEM cobertura — a linha não diz "Pronto", nem sem rede, e o gatilho seguinte prepara (R16-4-01)',
+  varr9p.A.cobre === false && varr9p.A.pronto === false && varr9p.semRede?.dizTudoGuardado === false && varr9p.A.precisaVarrer === true,
+  JSON.stringify({ A: varr9p.A, semRede: varr9p.semRede }));
+diz('o gatilho de A baixa o mapa que a poda levou, e a linha volta a dizer "Pronto"',
+  varr9p.A.gatilhoVarre && varr9p.fimDoGatilho && varr9p.depoisDoGatilho.semMapaDoAlvo === 0 && varr9p.depoisDoGatilho.pronto === true,
+  JSON.stringify(varr9p.depoisDoGatilho));
+const par9p = await cenario9p('A parada', { modo: 'parada' });
+diz('CONTROLE: a aba PARADA perde a cobertura do mesmo jeito (R15-4-01) — o instrumento enxerga os dois lados',
+  par9p.prontas.every(Boolean) && par9p.fimB && par9p.A.temAlvo && par9p.A.semMapaDoAlvo > 0
+  && par9p.A.cobre === false && par9p.A.pronto === false && par9p.semRede?.dizTudoGuardado === false,
+  JSON.stringify(par9p));
+const mes9p = await cenario9p('mesma fila', { modo: 'mesma' });
+diz('CONTROLE: B prepara a MESMA fila, sem pular nada — A segue "Pronto", com o mapa inteiro, na tela e sem rede (R14-4-01)',
+  mes9p.prontas.every(Boolean) && mes9p.fimB && mes9p.A.cobre === true && mes9p.A.pronto === true && mes9p.A.semMapaDoAlvo === 0
+  && mes9p.semRede?.dizTudoGuardado === true, JSON.stringify(mes9p));
+
+secao('9q. O "SAIR" DE OUTRA ABA COM O DOWNLOAD NO AR: o cache e a base não voltam');
+// Auditoria da rodada 15 (R15-4-02). A varredura de A está no meio de um download: o
+// `caches.open` fica preso num portão do teste. B dá "Sair" (apaga o cache do mapa e a
+// base, e avisa A, que sobe a época). O portão solta: o `open`/`put` que estava a
+// caminho gravava o tile do pedido de um terceiro no cache RECRIADO. Nos dois motores,
+// com o CacheStorage e o IndexedDB de verdade, e a ordem forçada pelo portão em DUAS
+// posições (o `open` resolve depois do apagamento — recria — ou antes — órfão). O
+// CONTROLE é o mesmo roteiro SEM o "Sair": o tile fica e a base fica.
+const cenario9q = async (nome, { abrirAntes, sair }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  await ctx.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } }));
+  const rota = (r) => {
+    const rt = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rt === 'buscar-places') return json({ success: true, places: fila9o(COMUNS_9O), hasMore: false, page: 1, total: COMUNS_9O.length });
+    if (rt === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    if (rt === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
+    return json({ success: true });
+  };
+  const prep = await ctx.newPage();
+  await prep.route('**/api/*', rota);
+  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
+  await prep.evaluate(() => {
+    API.setSession('tok-9q');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9q') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
+  });
+  await fecharComoOUsuario(prep);
+  const abrir = async (rotulo) => {
+    const pg = await ctx.newPage();
+    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
+    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
+      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
+    await pg.route('**/api/*', rota);
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
+      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
+    return { pg, ok: ok.ok };
+  };
+  const A = await abrir('A');
+  const B = await abrir('B');
+  // A: nova varredura, com o `caches.open` do mapa SEGURADO pelo portão do teste.
+  await A.pg.evaluate((antes) => {
+    const real = caches.open.bind(caches);
+    // Quantos `put` o cache do mapa recebeu depois do portão: com a época trocada, NENHUM
+    // (gravar e desfazer deixaria o tile no aparelho por um instante, e a página que
+    // morre entre os dois o deixaria de vez).
+    window.__puts = 0;
+    const putReal = Cache.prototype.put;
+    Cache.prototype.put = function (...a) { window.__puts++; return putReal.apply(this, a); };
+    window.__seguros = 0; window.__sol = [];
+    window.__soltar = () => { window.__passou = true; window.__sol.splice(0).forEach((f) => f()); };
+    caches.open = async (nome) => {
+      if (nome !== 'waze-places-tiles' || window.__passou) return real(nome);
+      window.__seguros++;
+      if (antes) { const c = await real(nome); await new Promise((ok) => window.__sol.push(ok)); return c; }
+      await new Promise((ok) => window.__sol.push(ok));
+      return real(nome);
+    };
+    offlineJanelaServida -= 1; offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
+    offlineMarcarGesto(); offlineTalvezVarrer();
+  }, abrirAntes);
+  const preso = await esperarNaPagina(A.pg, () => window.__seguros > 0, 15000, 50);
+  const out = { preso: preso.ok };
+  if (sair) {
+    await B.pg.evaluate(() => handleLogout());
+    // O aviso chega a A (a época sobe): por sinal positivo, a aba sem sessão.
+    out.avisou = (await esperarNaPagina(A.pg, () => !AppState.authenticated, 15000, 50)).ok;
+  }
+  await A.pg.evaluate(() => window.__soltar());
+  // O fim: a varredura de A acabou (nada no ar), por sinal positivo.
+  out.fim = (await esperarNaPagina(A.pg, () => !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100)).ok;
+  Object.assign(out, await A.pg.evaluate(async () => {
+    const tem = await caches.has('waze-places-tiles');
+    return { cache: tem, puts: window.__puts, tiles: tem ? (await (await caches.open('waze-places-tiles')).keys()).length : 0,
+      dbs: (await indexedDB.databases()).map((d) => d.name) };
+  }));
+  await ctx.close();
+  return out;
+};
+for (const [rot, antes] of [['o `open` resolve DEPOIS do apagamento (recria o cache)', false], ['o `open` resolve ANTES do apagamento (cache órfão)', true]]) {
+  const r = await cenario9q(rot, { abrirAntes: antes, sair: true });
+  diz(`depois do "Sair" de B, com ${rot}: o cache do mapa e a base de A não voltam (R15-4-02)`,
+    r.preso && r.avisou && r.fim && r.cache === false && r.tiles === 0 && r.dbs.length === 0 && r.puts === 0, JSON.stringify(r));
+}
+const sem9q = await cenario9q('sem Sair', { abrirAntes: false, sair: false });
+diz('CONTROLE: o mesmo roteiro SEM o "Sair" — o cache do mapa tem os tiles e a base existe (o instrumento enxerga os dois lados)',
+  sem9q.preso && sem9q.fim && sem9q.cache === true && sem9q.puts > 0 && sem9q.tiles > 0 && sem9q.dbs.length > 0, JSON.stringify(sem9q));
+
+secao('9r. O DESFAZER DE UMA GRAVAÇÃO VELHA NÃO APAGA O TILE DA ÉPOCA SEGUINTE');
+// Auditoria da rodada 16 (R16-8-05). O `put` da época 0 fica preso (portão do teste); a
+// época sobe SEM o cache ser apagado (o "Sair" de outra aba, que já o apagou, chegando a
+// um cache que o `open` desta recriou); a época seguinte guarda o MESMO tile nesse
+// cache; o portão solta, e o desfazer da gravação velha apagava o tile da nova. Com o
+// CacheStorage de verdade, nos dois motores. CONTROLE: sem a gravação da época nova, o
+// desfazer da velha tira o tile (R15-4-02) — o instrumento enxerga os dois lados.
+const ctx9r = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
+await ctx9r.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } }));
+const pg9r = await ctx9r.newPage();
+pg9r.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+await pg9r.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+await esperarNaPagina(pg9r, () => typeof offlineBaixar === 'function', 20000, 100);
+const r9r = await pg9r.evaluate(async () => {
+  const cenario = async (comNova) => {
+    const U = 'https://www.waze.com/row-tiles/live/base/17/' + (comNova ? 1 : 2) + '/2.png';
+    await caches.delete('waze-places-tiles');
+    let soltar; const portao = new Promise((ok) => { soltar = ok; });
+    const putReal = Cache.prototype.put; let n = 0;
+    Cache.prototype.put = async function (...a) { if (n++ === 0) await portao; return putReal.apply(this, a); };
+    try {
+      const velha = offlineBaixar(U, true);
+      await new Promise((ok) => setTimeout(ok, 300));      // o `put` da época velha está preso
+      offlineEpoca++;                                       // a época sobe; o cache NÃO é apagado aqui
+      const nova = comNova ? await offlineBaixar(U, true) : null;
+      const durante = !!(await (await caches.open('waze-places-tiles')).match(U));
+      soltar();
+      const rv = await velha;
+      const depois = !!(await caches.has('waze-places-tiles') && await (await caches.open('waze-places-tiles')).match(U));
+      return { velha: rv, nova, durante, depois };
+    } finally { Cache.prototype.put = putReal; await caches.delete('waze-places-tiles'); }
+  };
+  return { comNova: await cenario(true), semNova: await cenario(false) };
+});
+diz('PRÉ-CONDIÇÃO: a gravação da época velha falha (a época trocou) e a da época nova guardou o tile',
+  r9r.comNova.velha === false && r9r.comNova.nova === true && r9r.comNova.durante === true, JSON.stringify(r9r));
+diz('o desfazer da gravação velha NÃO apaga o tile que a época seguinte guardou (R16-8-05)',
+  r9r.comNova.depois === true, JSON.stringify(r9r.comNova));
+diz('CONTROLE: sem gravação da época nova, o desfazer da velha tira o tile (R15-4-02)',
+  r9r.semNova.velha === false && r9r.semNova.depois === false, JSON.stringify(r9r.semNova));
+await ctx9r.close();
+
 secao('10. NADA DE ERRO, NADA DE CSP');
 // O que o MOTOR diz e não é erro do app (`ruidoDoMotor`, a lista FECHADA e
 // medida de tools/navegador.mjs): no WebKit, o pedido à nossa API que este smoke

@@ -3329,6 +3329,93 @@ for (const lg of LINGUAS) {
   await ctx.close();
 }
 
+// ── Treino: o "Treino concluído" tem que caber na tela quando o ÚLTIMO exemplo é o ✓ ──
+// R16-7-01. O card do último exemplo fica no DOM enquanto o fim do treino aparece,
+// e a saída do swipe o deixou em `translateX(+1,5 largura)` (opacidade 0, fora da
+// vista) à direita do ✓: no Chromium do celular o viewport de LAYOUT crescia
+// (innerWidth 1095 num aparelho de 393) e o diálogo, centrado nele, caía fora dos
+// 393 px que a pessoa vê — sobrava o véu, sem a mensagem nem o "Ir para a fila";
+// no WebKit, o `scrollWidth` (rolagem horizontal atrás do diálogo). Com ✕ ou ↑ não
+// acontecia (o card sai pela esquerda ou por cima), e esses entram como CONTROLE do
+// roteiro. É medido com `isMobile` (o desktop não deixa o viewport crescer) nos dois
+// aparelhos mais estreitos do treino. CONTROLE do instrumento: com o card de volta à
+// conta de layout, a mesma medida TEM que acusar a página mais larga que o aparelho
+// — senão "coube" não prova nada (gotcha #28).
+for (const [aparelho, viewport] of [['iPhone 14 (393)', { width: 393, height: 851 }], ['Galaxy Fold', { width: 280, height: 653 }]]) {
+  for (const via of ['botão ✓', 'ArrowRight', 'botão ✕', 'botão ↑']) {
+    const onde = `treino concluído ${aparelho} ${MOTOR}, último exemplo por ${via}`;
+    const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, locale: 'pt-BR', serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => localStorage.setItem('waze_places_lang', 'pt'));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      API.setSession('token-de-teste');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 99; AppState.hasMore = false;
+      AppState.queue = [{ venueID: 'real1', updateRequestID: 'r1', name: 'Local Real',
+        categories: ['OTHER'], address: 'Rua Real, 1', updateType: 'Novo Local',
+        updateTypeKey: 'VENUE', purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'x',
+        changes: [], imageUrls: [], mapa: null, dateAdded: Date.now() }];
+      AppState.currentPlace = AppState.queue[0];
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+    });
+    await esperarOuExplodir(page, () => !!document.querySelector('#cardStack .place-card'), `${onde}: o card`, 8000);
+    await page.evaluate(() => Treino.entrar());
+    await esperarOuExplodir(page, () => Treino.ativo && AppState.queue.length >= 3, `${onde}: o treino com os exemplos`, 8000);
+    await doisQuadros(page);
+    const restam = await page.evaluate(() => AppState.queue.length);
+    // Os dois primeiros exemplos saem por ↑ (não alargam nada); o ÚLTIMO, pela via medida.
+    for (let i = 0; i < restam - 1; i++) {
+      const antes = await page.evaluate(() => Treino.passo);
+      await page.click('#cardStack .place-card:not(.card-fundo) .card-btn-skip');
+      // Pelo lado do NODE, por sinal positivo: o passo do treino ANDOU (a animação do swipe acabou).
+      for (let t = 0; t < 160 && (await page.evaluate(() => Treino.passo)) <= antes; t++) await page.waitForTimeout(50);
+      await doisQuadros(page);
+    }
+    const ultimoNaFila = await page.evaluate(() => AppState.queue.length);
+    checa(ultimoNaFila === 1, `${onde}: PRÉ-CONDIÇÃO — sobrou ${ultimoNaFila} exemplos, não 1`);
+    if (via === 'ArrowRight') await page.keyboard.press('ArrowRight');
+    else await page.click('#cardStack .place-card:not(.card-fundo) ' + { 'botão ✓': '.card-btn-read', 'botão ✕': '.card-btn-reject', 'botão ↑': '.card-btn-skip' }[via]);
+    const abriu = await esperarNaPagina(page, () => !document.getElementById('treinoFimModal').classList.contains('hidden'), 8000);
+    checa(abriu.ok, `${onde}: o fim do treino não abriu`);
+    // Dois quadros: a conta de layout assenta antes da medida (nada de prazo fixo).
+    await doisQuadros(page);
+    const W = viewport.width;
+    const medir = () => page.evaluate(() => {
+      const ok = document.getElementById('treinoFimOk').getBoundingClientRect();
+      const cx = ok.left + ok.width / 2, cy = ok.top + ok.height / 2;
+      const alvo = document.elementFromPoint(cx, cy);
+      const c = document.querySelector('#cardStack .place-card');
+      return { iw: window.innerWidth, sw: document.documentElement.scrollWidth, esq: Math.round(ok.left), dir: Math.round(ok.right),
+        recebe: !!alvo && (alvo.id === 'treinoFimOk' || !!alvo.closest('#treinoFimOk')),
+        card: c ? { display: c.style.display, x: (/translateX\((-?[\d.]+)px/.exec(c.style.transform) || [])[1] || null } : null };
+    });
+    const m = await medir();
+    const larg = Math.max(m.iw, m.sw);
+    checa(larg <= W, `${onde}: a página ficou com ${larg}px de largura num aparelho de ${W} — o card que saiu pela direita ainda conta no layout (R16-7-01)`, JSON.stringify(m));
+    checa(m.esq >= 0 && m.dir <= W, `${onde}: o "Ir para a fila" (${m.esq}–${m.dir}) está fora dos ${W}px que a pessoa vê`, JSON.stringify(m));
+    checa(m.recebe, `${onde}: o toque no centro do "Ir para a fila" não chega nele`, JSON.stringify(m));
+    if (via === 'botão ✓' || via === 'ArrowRight') {
+      // CONTROLE: o card segue no DOM, fora da vista à direita. Devolvido à conta de
+      // layout, a mesma medida TEM que acusar a página mais larga que o aparelho.
+      checa(m.card && m.card.display === 'none' && Number(m.card.x) > 0,
+        `${onde}: PRÉ-CONDIÇÃO — o card do último exemplo devia estar escondido e deslocado pra direita`, JSON.stringify(m.card));
+      await page.evaluate(() => { document.querySelector('#cardStack .place-card').style.display = ''; });
+      await doisQuadros(page);
+      const c = await medir();
+      checa(Math.max(c.iw, c.sw) > W,
+        `${onde}: CONTROLE falhou — com o card de volta à conta de layout a página NÃO alargou, então "coube" não prova nada`, JSON.stringify(c));
+    }
+    await ctx.close();
+  }
+}
+
 // ── Treino: a tela dele NÃO pode se sobrepor nem cortar os botões ────────
 // A faixa "nada é enviado" nasceu dentro do #bannerStack, que é `fixed` e existe
 // pra aviso TRANSITÓRIO. Faixa PERMANENTE ali flutua por cima do conteúdo pra
@@ -13196,6 +13283,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await page.evaluate((u) => aquecer(u), 'https://venue-image.waze.com/thumbs/thumb700_LENTA_PRIVSAIR.png');
   const fotoNoAr = await Promise.race([fotoLentaPedida.then(() => true), dormir(5000).then(() => false)]);
   checa(fotoNoAr, 'sair/recursos: PRÉ-CONDIÇÃO — a foto lenta nem foi pedida antes do "Sair"');
+  // As categorias vistas na fila de quem sai (R16-6-04): CONTROLE — antes do "Sair"
+  // o seletor dos Filtros as conhece (a fila é toda BAKERY); depois, não.
+  const categoriasAntes = await page.evaluate(() => [...AppState.seenCategories]);
+  checa(categoriasAntes.includes('BAKERY'),
+    'sair/categorias: CONTROLE — antes do "Sair" a fila não tinha deixado categoria vista (a medida não enxerga o caso)', JSON.stringify(categoriasAntes));
   // O "Sair", pela Ajuda.
   await tocar('#helpBtn');
   await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
@@ -13204,6 +13296,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#confirmLogout');
   await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated,
     'a tela de entrada depois do "Sair"');
+  const categoriasDepois = await page.evaluate(() => [...AppState.seenCategories]);
+  checa(categoriasDepois.length === 0,
+    'sair/categorias: depois do "Sair" o seletor dos Filtros de quem entrar ainda oferece as categorias da fila de quem saiu', JSON.stringify(categoriasDepois));
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
   const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
@@ -13329,5 +13424,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo — e a aba que cai ANTES do perfil sendo alcançada quando OUTRA conta entra noutra aba (sem fila, card nem chamadas da anterior), com o CONTROLE da MESMA conta que não a encerra — e o diálogo do "Sair" contando os pedidos do "Rejeitar os N" que ainda não saíram, com só a ida no ar chegando ao Waze e o CONTROLE do ✕ isolado, que não entra na conta)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
+  + `, + o "Treino concluído" cabendo na tela em 2 aparelhos com isMobile quando o ÚLTIMO exemplo é o ✓ (botão e seta) — a página não alarga e o "Ir para a fila" fica dentro da vista —, com ✕ e ↑ de CONTROLE e o card de volta à conta de layout alargando a página`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

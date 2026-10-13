@@ -175,7 +175,7 @@ function canaisDeMentira() {
 }
 const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
-const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'offlineLerFila',
+const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila',
   'offlineGravarJanela', 'offlineLerRegistroDaJanela', 'offlineRecuperarJanela', 'offlinePodarTiles', 'offlineVarrer',
   'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'filaGuardadaEsperandoOTreino',
   'atualizarLinhaDoOffline', 'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba',
@@ -386,7 +386,7 @@ function tileDeMentira({ aoAbrir = null, aoGravar = null, ficaVazio = true } = {
   const deps = {
     caches, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000, AbortController,
     fetch: async () => ({ ok: true, status: 200 }),
-    Image: class {}, setTimeout, clearTimeout,
+    Image: class {}, setTimeout, clearTimeout, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, [

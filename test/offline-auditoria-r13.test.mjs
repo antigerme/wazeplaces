@@ -143,7 +143,7 @@ function baseDeMentira() {
 // aparelho e a base são das duas abas.
 const NOMES = ['chaveDoPedido', 'filaReal', 'marcarEmAndamento', 'registrarPouso', 'carregarFilaDeSaida',
   'offlineLerPousos', 'offlinePodarPousos', 'semOsJaDecididos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
-  'mesmoLugar', 'offlineGravarFila', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
+  'mesmoLugar', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
 function aba({ aparelho, base, fila = [], memoria = null, perfil = null, autenticada = true, onLine = true,
   recuperarJanela = async () => {} } = {}) {
   const { API, safeLS } = apiSobre(aparelho);
@@ -352,7 +352,7 @@ function navegador() {
 }
 const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
-const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'offlineLerFila', 'offlinePodarTiles',
+const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlinePodarTiles',
   'offlineVarrer', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline',
   'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'aoManterOCarimboComPartes'];
 function aparelhoDeDuasAbas({ canal = true } = {}) {

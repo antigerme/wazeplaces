@@ -1952,6 +1952,8 @@ function presencaPrimeiraPaginaAdiada(h) {
 function presencaDeverOQueFoiVisto(id) {
     const h = id ? Presenca.historico.get(id) : null;
     if (!h || !(presencaPrimeiraPaginaNoAr(h) || presencaPrimeiraPaginaAdiada(h))) return;
+    // Mensagem que a pílula contava e a tela não mostrou: o "lida" a marcaria.
+    if (presencaSemVerAoAbrir(id)) return;
     const visto = presencaUltimaDela(h);
     const voo = presencaLidaNoAr(id);
     if (!(visto > Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0))) return;
@@ -2008,6 +2010,35 @@ function presencaConferirAbaPagando(aba, chave) {
         Presenca.pagandoMortos.add(chave);
         presencaPagarDevidas();
     }).catch(() => { Presenca.conferindoPagando.delete(chave); });
+}
+
+// A conversa abriu com mensagem NÃO VISTA que a tela não mostrou: a pílula
+// contava `n` não lidas e o histórico daqui não tinha essas mensagens, porque a
+// primeira página (o `abrir`) falhou. O Waze marca a conversa INTEIRA como lida,
+// então o "lida" que pagasse a dívida de uma mensagem vista depois marcaria
+// também essa — "Lida" pra quem a mandou, e a não lida sumindo da pílula sem
+// ninguém ter visto (a regra do R7-5-01; auditoria da rodada 16, R16-5-01, que o
+// lote 19 abriu ao mandar o "lida" no fechamento da conversa que nunca
+// carregou). A dívida não nasce e a que existe sai sem pagar; a mensagem segue
+// não lida, e a lista seguinte a devolve à pílula. A primeira página boa limpa
+// a marca (o `abrir` marcou tudo e a tela mostra tudo).
+function presencaSemVerAoAbrir(id) {
+    const h = id ? Presenca.historico.get(id) : null;
+    return !!h && !!h.primeiraFalhou && h.naoVistoAoAbrir > 0;
+}
+
+// Tirado quando a conversa ABRE, antes de a contagem ser zerada: quantas das
+// não lidas que a pílula contava não estão no histórico daqui (o que está, a
+// reabertura mostra). Enquanto a primeira página seguir falhando vale o MAIOR
+// valor: a segunda abertura já não sabe delas (a contagem foi zerada na
+// primeira), e abrir de novo não pode apagar o que a primeira viu faltar.
+function presencaGuardarNaoVistoAoAbrir(id) {
+    const h = Presenca.historico.get(id);
+    if (!h) return;
+    // `presencaVistaDe(id).n`: as dela que o histórico daqui já tem (a reabertura
+    // as mostra) e as da dívida guardada, que o Waze ainda conta como não lidas.
+    const falta = Math.max(0, presencaNaoLidasDe(id) - presencaVistaDe(id).n);
+    h.naoVistoAoAbrir = h.primeiraFalhou ? Math.max(h.naoVistoAoAbrir || 0, falta) : falta;
 }
 
 // A hora da mensagem MAIS NOVA dela na conversa daqui (`historico`). Pra
@@ -2087,8 +2118,10 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
     if (h && h.carregada) ultimaDela = Math.max(0, ...h.msgs.filter((m) => !m.meu).map((m) => m.ts));
     // A dívida que veio GUARDADA no aparelho (a página anterior fechou devendo,
     // R8-5-04): o histórico não está aqui, e o que a pessoa viu é o que o
-    // aparelho guardou.
-    else if (fechando && Presenca.dividaGuardada.has(id)) ultimaDela = Presenca.dividaGuardada.get(id).ate;
+    // aparelho guardou — ou, se for maior, o que chegou com a conversa na tela
+    // (`presencaVistaDe`; R16-5-04): com só o guardado, o `lidaEnviadaAte` ficava
+    // atrás do que o Waze marcou, e o próximo fechamento mandava OUTRO "lida".
+    else if (fechando && Presenca.dividaGuardada.has(id)) ultimaDela = Math.max(Presenca.dividaGuardada.get(id).ate, presencaVistaDe(id).ate);
     // A dívida de uma conversa cujo histórico NUNCA carregou nesta página (a
     // primeira página falhou, ou ainda não voltou): o que a pessoa viu é o que
     // chegou com ela na tela, e `presencaVistaDe` o sabe. Sem isto a dívida saía
@@ -2294,6 +2327,7 @@ function presencaAbrirConversa(id) {
     chatConhecer(id);
     // ANTES de zerar a contagem: ela é o teto do que fica visto e não lido.
     presencaTetoAoAbrir(id);
+    presencaGuardarNaoVistoAoAbrir(id);
     // Abrir é ler: o servidor marca como lida no mesmo pedido do histórico.
     const c = Presenca.conversas.find((x) => x.id === id);
     if (c) c.naoLidas = 0;
@@ -2421,7 +2455,16 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     const naTela = Presenca.aberta === id;
     if (!r || !r.success) {
         if (antes) h.antigas = 'erro';
-        else { h.erro = true; h.primeiraFalhou = true; }
+        else {
+            h.erro = true;
+            h.primeiraFalhou = true;
+            // A dívida do "lida" que nasceu com esta página no ar (fechada
+            // enquanto ela voltava, R14-5-01) pagaria a conversa INTEIRA, com a
+            // mensagem que a pílula contava e a tela nunca mostrou: sai agora,
+            // da memória e do aparelho — onde a próxima página a adotaria e
+            // pagaria sem saber disso (R16-5-01).
+            if (presencaSemVerAoAbrir(id)) presencaQuitarDivida(id);
+        }
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         presencaConferirSessao(r, sessao);
         // A página antiga é de uma abertura que já passou: com a primeira
@@ -2453,12 +2496,15 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     h.maisAntigas = !!r.maisAntigas;
     h.carregada = true;
     if (antes) h.antigas = null;
-    else h.primeiraFalhou = false;
+    else { h.primeiraFalhou = false; h.naoVistoAoAbrir = 0; }
     presencaAnotar('chat.abrir', { ok: true, mensagens: msgs.length, maisAntigas: h.maisAntigas, pagina: antes ? 'antiga' : 'primeira' });
     if (!antes) {
         // O "lida" do `abrir` cobre só o que já estava guardado quando ele
-        // SAIU: o servidor lê o histórico e marca como lida EM PARALELO, e a
-        // mensagem guardada entre os dois vem no histórico sem ter sido marcada.
+        // SAIU: o servidor lê o histórico e marca como lida logo DEPOIS dele (era
+        // em paralelo até a rodada 16, R16-5-02), e a mensagem guardada entre a
+        // saída e a marca pode vir no histórico sem ter sido marcada — ou, se
+        // chegou depois da leitura, ser marcada sem estar nele (o tempo real a
+        // entrega à conversa aberta, ver `presencaMensagemDoFluxo`).
         // Contada como coberta, nem a rajada nem o fechamento a marcavam: ela
         // ficava não lida no Waze, quem mandou nunca via "Lida", e a lista
         // seguinte a devolvia como "1 mensagem nova" (auditoria de 2026-09-30,
@@ -3298,6 +3344,36 @@ function presencaPagarAoSair() {
     try { presencaPagarLida({ fechando: true }); } finally { if (trocar) API.setSaindo(antes); }
 }
 
+// A lista de mensagens ENCOLHE por motivo que não é um redesenho dela: o teclado
+// virtual sobe ao tocar no campo (`--kb-inset`), o campo é focado ao prender o
+// pedido, a tirinha aparece. Quem estava no fim, lendo a última mensagem, deixava
+// de vê-la — a rolagem só acompanhava o redesenho (`presencaRenderConversa`) e a
+// tirinha (`presencaAnexarCard`, R15-8-02). Medido a 390x440: a última bolha
+// ficava 238 px abaixo da área visível, nos dois motores (auditoria da rodada
+// 16, R16-5-03; o teclado de verdade e o iPhone não foram medidos). O
+// observador é da caixa da lista e re-ancora no fim com a MESMA folga de 80 px
+// dos outros dois: ela é medida com a altura de ANTES de encolher, e quem lia o
+// começo fica onde estava. Sem custo de rede. Fechada ou escondida (altura 0),
+// a conversa não faz nada.
+//
+// Gotcha #35 (callback de `ResizeObserver` que escreve no DOM só AGENDA): aqui
+// escreve SÍNCRONO, de propósito — só o `scrollTop`, que não muda tamanho de
+// nada observado, e o aviso de laço do `ResizeObserver` é de quem mexe em
+// tamanho; agendar custaria um quadro com a última bolha fora. Medido em
+// Chromium e WebKit, com o teclado simulado: nenhum `pageerror` nem
+// `console.error` (com controle de que o coletor enxerga os dois).
+function presencaVigiarAlturaDaConversa(corpo) {
+    if (typeof ResizeObserver !== 'function') return;
+    let antes = corpo.clientHeight;
+    new ResizeObserver(() => {
+        const agora = corpo.clientHeight;
+        const eraAltura = antes;
+        antes = agora;
+        if (!Presenca.aberta || !(agora > 0 && agora < eraAltura)) return;
+        if (corpo.scrollHeight - corpo.scrollTop - eraAltura < 80) corpo.scrollTop = corpo.scrollHeight;
+    }).observe(corpo);
+}
+
 function presencaMontar() {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') presencaAoVoltar();
@@ -3368,6 +3444,7 @@ function presencaMontar() {
     // bolha vazaria a cada render.
     const msgs = document.getElementById('conversaMsgs');
     if (msgs) {
+        presencaVigiarAlturaDaConversa(msgs);
         msgs.addEventListener('click', (ev) => {
             const id = Presenca.aberta;
             if (!id) return;

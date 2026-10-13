@@ -338,6 +338,8 @@ function abaEmDuvida() {
     aprovacaoDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
     dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, aplicarFocoDoTeclado() {},
     cancelarPendenciasDoLightbox() {}, aprovacoesAtravessamAQueda() {},
+    // O lote da sessão que acabou deixa de contar no "Sair" (R16-1-03).
+    soltarOsLotesDaSessaoQueAcabou() {},
     // A carga do perfil: o teste diz quando o perfil CHEGA (o `definirPerfil`,
     // no meio da carga) e quando a carga TERMINA (o fim do `completarPerfilChegado`).
     loadProfileAndAuxData: () => {

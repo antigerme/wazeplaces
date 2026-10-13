@@ -143,7 +143,7 @@ function baseIDB() {
 // ── UMA aba: a gravação e o esquecer DE VERDADE ──────────────────────────────
 // `sessao`: o token na MEMÓRIA desta aba (o `marcaDestaAba` de verdade lê o
 // `API.sessionToken`). `canal`: o que esta aba avisou às outras.
-const NOMES = ['chaveDoPedido', 'filaReal', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'offlineEsquecer'];
+const NOMES = ['chaveDoPedido', 'filaReal', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineEsquecer'];
 function aba({ base, fila = [], sessao = 'tok-a' } = {}) {
   const diario = [];
   const avisos = [];
@@ -282,7 +282,7 @@ function canaisDeMentira() {
 }
 const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
-const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'offlineLerFila',
+const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila',
   'offlineGravarJanela', 'offlineLerRegistroDaJanela', 'offlineRecuperarJanela', 'offlinePodarTiles', 'offlineVarrer',
   'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'filaGuardadaEsperandoOTreino',
   'atualizarLinhaDoOffline', 'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'aoManterOCarimboComPartes'];
@@ -569,7 +569,7 @@ function apiSobre(aparelho) {
 
 const NOMES_AVISO = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
   'registrarPouso', 'carregarFilaDeSaida', 'offlineLerPousos', 'offlinePodarPousos', 'semOsJaDecididos', 'mesmoLugar',
-  'offlineGravarFila', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede',
+  'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede',
   'anotarDecididosPorOutraAba', 'lembrarDecididasPorOutraAba', 'tirarDaFilaOQueAOutraAbaDecidiu', 'aoPousarEmOutraAba',
   'aoPousarSemSessaoNaMemoria', 'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta',
   'chavesQueEsperamAConta'];

@@ -503,3 +503,62 @@ test('R15-3-02: a ordem — o modo "saindo" é desligado ANTES de o refazer adia
   assert.match(corpo, /visibilityState === 'visible'\) acabou\(\)/);
   assert.match(corpo, /addEventListener\('pageshow', acabou\)/, 'a volta do bfcache (`pageshow`) também atende o refazer adiado');
 });
+
+// ═══ R16-1-02 = R16-2-01 = R16-3-01 · a VOLTA da página com o diálogo do "Sair" aberto ═══
+// (auditoria da rodada 16, três auditores). O R15-3-03 segura o refazer adiado
+// enquanto o diálogo está aberto — mas o `acabou()` do `setupFimDoModoSaindo`
+// (a volta do fundo, `pageshow`) o atendia com o diálogo AINDA na tela: uma busca
+// antes de a pessoa decidir se sai, jogada fora se confirma.
+test('R16-1-02: voltar do fundo com o diálogo do "Sair" ABERTO não roda o refazer adiado — cancelar o diálogo o roda (uma busca); confirmar, nenhuma', async () => {
+  const m = montarDescarga();
+  m.decidir();
+  m.h.retomarBusca();                              // fila vazia por falha: o refazer espera a janela
+  m.h.abrirDialogoDoSair();                        // despacha a janela, mantém o refazer, abre o diálogo
+  await tique(10);
+  assert.equal(m.sair.escondido, false, 'PRÉ-CONDIÇÃO: o diálogo não abriu');
+  assert.equal(m.buscas(), 0, `PRÉ-CONDIÇÃO: abrir o "Sair" já mandou a busca: ${m.log}`);
+  m.paraOFundo();                                  // a página vai pro fundo com o diálogo aberto...
+  await tique(10);
+  m.volta();                                       // ...e volta: o diálogo segue na tela
+  await tique(10);
+  assert.equal(m.buscas(), 0,
+    `DEFEITO: a volta da página rodou a busca com o diálogo do "Sair" ainda aberto (R16-1-02): ${m.log}`);
+  // CANCELAR: o fechamento do diálogo atende o refazer que ficou guardado — uma vez.
+  m.sair.escondido = true;
+  limpezaDoSair(m.h);
+  await tique(10);
+  assert.deepEqual(m.log.filter((l) => l.startsWith('busca (')), ['busca (fila refeita, saindo=false)'],
+    `cancelado o "Sair", o refazer guardado tem que rodar, uma vez: ${m.log}`);
+});
+
+test('R16-1-02: CONFIRMAR o "Sair" depois da volta da página não deixa busca nenhuma — e o CONTROLE (diálogo fechado) roda na volta', async () => {
+  const c = montarDescarga();
+  c.decidir();
+  c.h.retomarBusca();
+  c.h.abrirDialogoDoSair();
+  await tique(10);
+  c.paraOFundo(); await tique(10); c.volta(); await tique(10);
+  c.deps.epocaDaSessao++;                          // o `handleLogout` muda a época antes de fechar o diálogo
+  c.sair.escondido = true;
+  limpezaDoSair(c.h);
+  await tique(10);
+  assert.equal(c.buscas(), 0, `o "Sair" confirmado deixou uma busca jogada fora: ${c.log}`);
+  // CONTROLE: a mesma ida ao fundo e volta, sem o diálogo aberto, roda o refazer na volta.
+  const d = montarDescarga();
+  d.decidir();
+  d.h.retomarBusca();
+  d.paraOFundo(); await tique(10);
+  d.volta(); await tique(10);
+  assert.equal(d.buscas(), 1, `CONTROLE: sem o diálogo aberto a volta tem que rodar o refazer: ${d.log}`);
+});
+
+test('R16-1-02 (estrutura): `atenderORefazerAdiadoDaDescarga` e `atenderOFimDaJanela` leem o diálogo pelo MESMO predicado (`#logoutModal` sem `hidden`)', () => {
+  const corpoA = fatiar('atenderORefazerAdiadoDaDescarga');
+  const corpoB = fatiar('atenderOFimDaJanela');
+  const predicado = /getElementById\('logoutModal'\)[\s\S]*?classList\.contains\('hidden'\) === false/;
+  assert.match(corpoA, predicado, 'a volta da página não confere o diálogo do "Sair"');
+  assert.match(corpoB, predicado, 'o fim da janela não confere o diálogo do "Sair"');
+  // E o diálogo é conferido ANTES de o refazer ser consumido (zerar e depois sair perderia o refazer).
+  assert.ok(corpoA.indexOf("getElementById('logoutModal')") < corpoA.indexOf('refazerAdiadoDaDescarga = null'),
+    'o refazer é consumido antes de o diálogo ser conferido: o cancelar não teria o que atender');
+});

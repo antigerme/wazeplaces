@@ -8,6 +8,57 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.13-02
+
+Décima nona rodada da auditoria. Depois da v2026.10.13-01, conferida em produção com duas contas (155 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área; um deles usou o app de ponta a ponta, nos dois motores e em três tamanhos de tela. A maior parte dos achados foi de consertos da rodada anterior que ficaram incompletos. Nenhum era grave.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A conversa**
+- **Se a conversa não carrega, o app não marca como lida uma mensagem que você nunca viu.** Antes, se a conversa abria com erro ("Não deu pra carregar") e uma mensagem nova chegava com ela na tela, ao fechar o app marcava a conversa inteira como lida no Waze: a mensagem que ficou fora da tela passava a aparecer como "Lida" para quem a mandou e saía do aviso da lista. Agora ela continua não lida, e a lista seguinte volta a avisar.
+- **Abrir uma conversa que não carregou não manda mais o pedido de "lida" ao Waze.** Antes, o pedido de "lida" saía junto com o do histórico; se só o histórico falhava, a conversa podia ficar marcada mesmo com a tela dizendo que não carregou. Agora o "lida" só sai depois de o histórico chegar (a abertura pode levar uma fração de segundo a mais, sem pedido novo ao nosso servidor).
+- **Reabrir e fechar uma conversa que não carregou não manda um segundo "lida" à toa** quando a mensagem já tinha sido marcada.
+- **Se o teclado do celular sobe sobre a conversa, a última mensagem continua à vista.** Antes, a lista encolhia e a última mensagem ficava escondida até você rolar. (Medido no computador, com a tela encolhida; o teclado de verdade e o iPhone não foram testados.)
+
+**A fila, o "Sair" e os avisos**
+- **Se você troca de app e volta com o diálogo do "Sair" ainda aberto, a fila não é mais atualizada à toa.** Antes, a busca saía na volta, antes de você decidir se saía; se você confirmava o "Sair", ela era jogada fora. Agora ela espera: se você cancela o diálogo, a fila é atualizada; se confirma, não.
+- **O diálogo do "Sair" conta o que ainda falta mandar do "Marcar todos"** quando o Waze para num pedido já tratado por outro editor e o app passa a mandar um por um. Antes o diálogo não dizia nada e o que faltava sumia sem aviso.
+- **O diálogo do "Sair" também avisa das decisões que estão esperando a segunda tentativa.** Antes, se o Waze falhava na primeira vez e o app esperava alguns segundos para tentar de novo, o "Sair" nessa hora descartava a decisão sem avisar. Vale para o ✕, o ✓, o "Rejeitar os N" e o "Marcar todos"; a decisão que já está a caminho do Waze continua fora da conta, porque ela chega.
+- **Depois que o seu acesso é renovado, o "Rejeitar os N" que ficou da sessão anterior não aparece mais como "Enviando 2…" nem no aviso do "Sair".** Antes, até a resposta do Waze chegar (às vezes quase um minuto), o canto da tela e o diálogo diziam que havia pedidos a descartar, quando eles já tinham voltado para a fila.
+- **Se o seu acesso cai e é renovado enquanto um aviso de primeira vez está na tela, o aviso volta.** Antes ("Rejeição enviada ao Waze em seu nome…", o aviso dourado do Desfazer opcional e a dica) saía da tela com o acesso e nunca mais aparecia, sem você ter tido tempo de ler. Agora volta na próxima tela livre. Com outra conta, ao sair do app ou quando o acesso não é renovado, continua como antes.
+- **O "Sair" também esquece as categorias que a sua fila mostrava:** quem entra em seguida, no mesmo aparelho, vê no filtro de categoria só as categorias da própria fila (o mesmo vale quando outra conta assume o aparelho).
+
+**O app aberto em duas abas e a conta**
+- **Se uma aba perde o acesso antes de carregar o seu perfil e o WME entra de novo com a mesma conta em outra aba, ela ainda lembra de quem era.** Antes, quando uma conta diferente entrava depois, essa aba ficava com a fila, o pedido na tela e o registro de chamadas da conta anterior, e eles iam no relatório de quem entrava.
+
+**Disponível offline**
+- **Se você usa o app em duas abas e uma delas pula um pedido (↑) enquanto a outra ainda está preparando o "Disponível offline", a linha das Preferências não diz mais "Pronto" por engano.** Antes, a aba que terminava depois dizia "Pronto — 6 pedidos no aparelho" com o mapa de um deles já apagado do aparelho pela outra aba, e só dava pra notar sem sinal. Agora ela diz "Ainda não preparado" e, no próximo gatilho, baixa só o que falta. Vale também em navegadores sem aviso entre abas (iPhone antigo).
+- **Um mapa que o servidor recusa por pressa ou demora (408, 425, 429) agora é tentado de novo**, em vez de ficar de fora da preparação com a linha em "Pronto". Só o mapa que realmente não existe (404 e parecidos) é dado como perdido.
+- **O pedido que espera a confirmação da conta, ou que acabou de ser decidido com a foto ainda aberta, não faz mais a aba perder o "Pronto" à toa** quando a outra aba grava a fila.
+- **Dar "Sair" noutra aba com um mapa ainda sendo baixado aqui não deixa mais, nem por um instante, o mapa de um pedido de terceiro guardado no aparelho** (e se a outra aba já está preparando o mesmo mapa, o que ela guardou não é apagado por engano).
+
+**Foto e mapa ampliados**
+- **Quando o celular interrompe o seu dedo no meio do arraste sobre a foto ampliada (a palma da mão, uma ligação), a foto não troca nem fecha mais.** Antes o cancelamento era tratado como se você tivesse soltado o dedo.
+- **Ao arrastar o mapa ampliado por cima da linha de data (Fiji, Chukotka, Aleutas), o botão do Street View abre o lugar certo.** Antes o link saía com uma longitude além de 180°.
+
+**O treino, as Preferências e a Ajuda**
+- **O "Treino concluído" volta a aparecer inteiro no celular quando o último exemplo é lido com o ✓.** Antes, nesse caso o card do último exemplo ficava escondido fora da tela, à direita, e alargava a página: o aviso final e o botão "Ir para a fila" saíam da área que você vê e só sobrava a tela escurecida (no iPhone, a página ganhava rolagem para o lado atrás do aviso). Com o ✕ ou o ↑ no último exemplo isso não acontecia.
+- **Se você desliga o modo desenvolvedor em outra aba, a chave "Permitir desfazer ações" daqui trava na hora, com a frase de quanto falta.** Antes ela continuava livre, sem explicação, com as Preferências abertas.
+- **A Ajuda diz a verdade sobre o que fica no aparelho depois do "Sair".** Antes dizia que ficavam só o idioma e o tema; ficam também as escolhas de fábrica do app (placar zerado, filtros e preferências de fábrica), sem nada seu.
+- **Quem usa leitor de tela ouve o motivo quando a chave "Permitir desfazer ações" está travada** ("Disponível depois de tratar N pedidos…"). Antes ouvia só o nome da chave.
+- **O aviso "Como funciona" do primeiro acesso agora começa com o foco no "Entendi".** Antes o foco ficava em "Quero treinar antes", e quem apertava Enter para dispensar o aviso começava o treino sem querer. Aberto pela Ajuda ("Ver de novo") continua como era.
+
+**Telas**
+- **"Conectar outro aparelho" abre no topo também com o celular deitado.** Antes, no iPhone SE deitado, ele abria rolado até o "Fechar", com o título e a parte de cima do QR escondidos. O mesmo vale para todos os diálogos: abrem sempre no topo, e não onde você os deixou (a Ajuda, depois de tocar na versão no fim dela, reabria no fim).
+
+**Bastidores**
+- Uma resposta do Waze com a forma quebrada por dentro (uma lista que vem como número, ou um item vazio no meio dela) agora é tratada como "resposta inesperada do Waze", e não como erro interno nosso. Na tela é a mesma de antes ("Falha ao carregar").
+- Os formulários de bug e de sugestão no GitHub apontam a versão para o fim da Ajuda (ⓘ) e citam as três exceções de aprovação (foto nova, excluir foto e corrigir o nome); o README manda o Node da instalação com Apache escutar só no 127.0.0.1.
+
+---
+
 ## v2026.10.13-01
 
 Décima oitava rodada da auditoria. Depois da v2026.10.08-01, conferida em produção com duas contas (150 verificações, nenhuma falha), oito auditores revisaram o app de novo, cada um numa área. Os consertos abaixo são os achados que sobreviveram à conferência; nenhum deles era grave.

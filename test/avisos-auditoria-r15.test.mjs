@@ -413,7 +413,9 @@ test('R15-2-F3: "Enviando N…" conta os PEDIDOS do lote de rejeição — N no 
   assert.equal(indicadorDeMentira({ noAr: 1, lotes: [lote(0, 1)] }).texto(), 'indicator.sending:1');
   // CONTROLES: o ✕ sozinho é 1; o registro de OUTRA sessão não conta; sem nada no ar, nada.
   assert.equal(indicadorDeMentira({ noAr: 1 }).texto(), 'indicator.sending:1', 'CONTROLE: o ✕ sozinho não diz 1');
-  assert.equal(indicadorDeMentira({ noAr: 1, lotes: [lote(5, 1, 3)], epoca: 4 }).texto(), 'indicator.sending:1',
+  // (Com o ✕ de agora, que também ocupa uma unidade: o lote de OUTRA sessão não soma os pedidos
+  // dele nem a unidade dele — R16-1-03; antes a unidade dele ficava no canto.)
+  assert.equal(indicadorDeMentira({ noAr: 2, lotes: [lote(5, 1, 3)], epoca: 4 }).texto(), 'indicator.sending:1',
     'CONTROLE: o lote de uma sessão que acabou seguiu contando');
   assert.equal(indicadorDeMentira({ noAr: 0 }).texto(), null, 'CONTROLE: sem nada no ar, o indicador apareceu');
 });

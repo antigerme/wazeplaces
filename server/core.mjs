@@ -497,7 +497,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 // O chat vem de outra página do WME (`/chat/embed`) e se identifica com
 // `X-User-Agent`; a presença, não. Os cabeçalhos seguem cada um.
 const WME_CHAT_URL = 'https://www.waze.com/chat/embed?app_id=WAZE_MAP_EDITOR';
-async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false } = {}) {
+async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false, tetoMs = WAZE_ESPERA_MS } = {}) {
   const headers = {
     Accept: 'application/grpc-web-text',
     'Content-Type': 'application/grpc-web-text',
@@ -517,7 +517,7 @@ async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat
   if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WAZE_ESPERA_MS);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, texto;
     try {
       res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
@@ -688,6 +688,20 @@ function respostaInesperadaDoWaze() {
   throw new ApiError({
     success: false, error: 'Resposta inesperada do Waze', errorKey: 'srv.err.badWazeResponse', errorCategory: 'unknown',
   }, 500);
+}
+
+// A lista que o Waze manda DENTRO de uma resposta 200 (`areas`, `countries`,
+// `venues.objects`…). Ausente, `null`, `0`, `''` e `false` são "sem nada", como
+// sempre foram; lista que veio como número, texto ou `true`, ou com um elemento
+// que não é objeto, é a mesma resposta inesperada do `objetoDoWaze` — antes
+// estourava um TypeError no laço e saía pelo `catch` do `dispatch` como "Erro
+// interno", sem categoria (auditoria de 2026-10-13, R16-6-08). `objetos: false`
+// só confere que é lista (o laço já tolera elemento estranho).
+function listaDoWaze(v, { objetos = true } = {}) {
+  if (!v) return [];
+  if (!Array.isArray(v)) respostaInesperadaDoWaze();
+  if (objetos) for (const e of v) if (!e || typeof e !== 'object') respostaInesperadaDoWaze();
+  return v;
 }
 
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
@@ -2032,13 +2046,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   const usersDict = {};
   // Guarda o objeto inteiro, não só o nome: o rank de quem PEDIU é sinal de
   // triagem (L1 anônimo × L5 editor) e vinha sendo jogado fora aqui.
-  for (const u of rd?.users?.objects || []) usersDict[u.id] = u;
+  for (const u of listaDoWaze(rd?.users?.objects)) usersDict[u.id] = u;
   const streetsDict = {};
-  for (const s of rd?.streets?.objects || []) streetsDict[s.id] = s;
+  for (const s of listaDoWaze(rd?.streets?.objects)) streetsDict[s.id] = s;
   const citiesDict = {};
-  for (const c of rd?.cities?.objects || []) citiesDict[c.id] = c;
+  for (const c of listaDoWaze(rd?.cities?.objects)) citiesDict[c.id] = c;
   const statesDict = {};
-  for (const st of rd?.states?.objects || []) statesDict[st.id] = st.name;
+  for (const st of listaDoWaze(rd?.states?.objects)) statesDict[st.id] = st.name;
 
   // Sem protótipo: uma marca chamada "constructor" ou "toString" daria
   // "conhecida" num objeto comum.
@@ -2080,7 +2094,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
 
   const places = [];
   let blocked = 0;
-  for (const venue of rd?.venues?.objects || []) {
+  for (const venue of listaDoWaze(rd?.venues?.objects)) {
     if (!Array.isArray(venue.venueUpdateRequests) || venue.venueUpdateRequests.length === 0) continue;
     // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = sem permissão.
     // Antes descartávamos o venue aqui. Agora seguimos o laço só pra CONTAR
@@ -3061,12 +3075,12 @@ async function handlePerfil(data, { sessions }) {
   }
 
   const areas = [];
-  for (const area of rd.areas || []) {
+  for (const area of listaDoWaze(rd.areas, { objetos: false })) {
     // Polygon e MultiPolygon, de qualquer tamanho (ver `caixaDaGeometria`).
     areas.push({ type: area?.type ?? null, bbox: caixaDaGeometria(area?.geometry) });
   }
   const managedAreas = [];
-  for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
+  for (const ma of listaDoWaze(rd.managedAreas)) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
 
   // Casa e trabalho, pro "Perto de casa/do trabalho" do filtro. O `/Session`
   // devolve os dois como ponto GeoJSON (MEDIDO com os cookies do owner:
@@ -3134,7 +3148,7 @@ async function handleListaPaises(data, { sessions }) {
     };
   }
   const rd = objetoDoWaze(result.response);
-  const countries = (rd.countries || []).map((c) => ({
+  const countries = listaDoWaze(rd.countries).map((c) => ({
     id: c.id ?? null,
     name: c.name || '',
     abbr: c.abbr || '',
@@ -3172,7 +3186,7 @@ async function handleListaEstados(data, { sessions }) {
   }
   const rd = objetoDoWaze(result.response);
   const states = [];
-  for (const s of rd.states || []) {
+  for (const s of listaDoWaze(rd.states)) {
     if (Number(s.countryId) !== countryId) continue;
     states.push({ id: s.id ?? null, name: s.name || '', countryId: s.countryId ?? null });
   }
@@ -3743,25 +3757,26 @@ async function comConfirmados(resposta, confirmacao) {
   return resposta;
 }
 
-// Abrir uma conversa no app: o histórico e o "lida" numa ida só (fase 3). O
-// "lida" é acessório: QUALQUER falha dele vira `recibos: []` e o histórico
-// segue — inclusive a conversa que ainda não existe (status 7 com
-// NO_EXISTING_CONVERSATION, medido), que não é erro nenhum. Marcar como lida
-// já gera, no servidor do Waze, os recibos que o remetente recebe (fase 1).
+// O teto do "lida" do `abrir`, que sai DEPOIS do histórico: o histórico segue
+// com o teto cheio (`WAZE_ESPERA_MS`) e a soma tem que caber nos 45 s do cliente
+// (`test/portao-servidor.test.mjs`). O "lida" é acessório pro histórico: o que
+// não voltou até aqui vira `lida: false`, e o "lida" da rajada tenta de novo.
+export const ABRIR_LIDA_ESPERA_MS = 10000;
+
+// Abrir uma conversa no app: o histórico e o "lida" numa ida só ao nosso
+// servidor (fase 3), um depois do outro ao Waze. O "lida" é acessório: QUALQUER
+// falha dele vira `recibos: []` e o histórico segue — inclusive a conversa que
+// ainda não existe (status 7 com NO_EXISTING_CONVERSATION, medido), que não é
+// erro nenhum. Marcar como lida já gera, no servidor do Waze, os recibos que o
+// remetente recebe (fase 1).
 async function abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }) {
   const com = idWaze(data.com);
   const antesDe = instante(data.antesDe);
   const { cookieHeader } = prepareAuth(cookies);
   const base = WAZE_WMP[region] || WAZE_WMP.row;
   const cabLida = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
-  const [hist, lida] = await Promise.all([
-    callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
-      region, { data, sessions, cookies }, { chat: true }),
-    // Página mais antiga (`antesDe`) é só leitura: quem rola pra trás não está
-    // lendo mensagem nova.
-    antesDe ? null : callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
-      corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true }),
-  ]);
+  const hist = await callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
+    region, { data, sessions, cookies }, { chat: true });
   const cat = categorizeGrpcError(hist);
   if (cat) return respostaDeErroGrpc(cat, hist);
   let resultado;
@@ -3770,6 +3785,18 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   } catch {
     respostaInesperadaDoWaze();
   }
+  // O "lida" SÓ sai depois de o histórico voltar bem: o Waze marca a conversa
+  // INTEIRA, e mandado em paralelo o pedido já tinha saído quando o histórico
+  // falhava — a conversa podia ficar marcada no Waze enquanto a tela dizia "Não
+  // deu pra carregar", com mensagem que ninguém viu (auditoria da rodada 16,
+  // R16-5-02; medido que o pedido saía, o que o Waze faz com ele é hipótese).
+  // Custa uma ida a mais ao Waze na abertura, mas nenhuma ao nosso `/api`. Em
+  // SÉRIE com o histórico, ele tem teto próprio (`ABRIR_LIDA_ESPERA_MS`): os
+  // dois no teto cheio passariam dos 45 s em que o cliente desiste. Página mais
+  // antiga (`antesDe`) é só leitura: quem rola pra trás não está lendo mensagem
+  // nova.
+  const lida = antesDe ? null : await callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
+    corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true, tetoMs: ABRIR_LIDA_ESPERA_MS });
   // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
   // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
   // o que marcar" eram a mesma resposta, o app dava como lida uma conversa que

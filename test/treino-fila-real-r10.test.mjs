@@ -421,7 +421,7 @@ function montarInterruptor({ comTreino }) {
     offlineFilaVarrida: null, offlineFeitosNaJanela: null, diagTilesGuardadosQueFalharam: [],
   };
   const app = rodar(deps, [
-    ...['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineLigado', 'offlineGravarFila', 'offlineMarcarGesto',
+    ...['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineLigado', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineMarcarGesto',
       'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'offlineAoMudarInterruptor', 'offlineEsquecer'].map(fatiar),
     treinoDeVerdade(),
   ], ['Treino', 'offlineAoMudarInterruptor', 'offlineEsquecer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline']);
