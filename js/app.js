@@ -1295,6 +1295,12 @@ const LIMPEZA_AO_FECHAR = {
         const corpo = document.getElementById('autorCorpo');
         if (corpo) corpo.innerHTML = '';
     },
+    // O "Sair" cancelado (ou fechado por qualquer caminho): o refazer da fila que
+    // esperava o diálogo roda agora (R15-3-03, ver `atenderOFimDaJanela`). O
+    // "Sair" CONFIRMADO muda a época da sessão antes de fechar (`handleLogout`), e
+    // aí o refazer adiado é descartado. Numa microtarefa: a limpeza roda no meio
+    // do `closeModal`, antes de o foco voltar.
+    logoutModal() { queueMicrotask(atenderORefazerAdiadoDaDescarga); },
     // O "Acesso restrito": o nome, o nível e a área de quem o portão recusou
     // ficavam no diálogo fechado, na tela de entrada (R6-1-05).
     accessDeniedModal() {
@@ -7401,13 +7407,21 @@ function janelaDoDesfazerAberta() {
 // que morre é uma requisição jogada fora no free tier (auditoria da rodada 15,
 // R15-3-02, MEDIDO nos dois motores). Ele fica esperando a volta da página
 // (`atenderORefazerAdiadoDaDescarga`, no `setupFimDoModoSaindo`).
+//
+// Nem com o diálogo do "Sair" aberto (R15-3-03): abri-lo despacha a janela
+// (`abrirDialogoDoSair`, R14-8-06) — a DECISÃO sai —, mas a busca que atualiza a
+// fila é pra quem fica: confirmado o "Sair", era uma requisição jogada fora (a
+// sessão acaba, e o aparelho é limpo); cancelado, a fila é atualizada ao fechar
+// o diálogo (`LIMPEZA_AO_FECHAR.logoutModal`), a mesma busca de antes.
 function atenderOFimDaJanela(janela) {
     const aoFim = janela && janela.aoFim;
     if (typeof aoFim !== 'function') return;
     janela.aoFim = null;
     queueMicrotask(() => {
         if (!AppState.authenticated) return;
-        if (typeof API !== 'undefined' && API.saindo === true) { guardarORefazerAteAVolta(aoFim); return; }
+        const sair = typeof document !== 'undefined' && document.getElementById ? document.getElementById('logoutModal') : null;
+        const saindo = typeof API !== 'undefined' && API.saindo === true;
+        if (saindo || (sair && sair.classList.contains('hidden') === false)) { guardarORefazerAteAVolta(aoFim); return; }
         aoFim();
     });
 }
@@ -7424,6 +7438,9 @@ function guardarORefazerAteAVolta(aoFim) {
 // A página VOLTOU (o modo "saindo" já acabou): atende o refazer que ficou
 // esperando, se ainda for dele (ver acima). Uma vez só.
 function atenderORefazerAdiadoDaDescarga() {
+    // Ainda saindo (o diálogo do "Sair" fechou com a página no fundo): continua
+    // esperando; quem o atende é a volta da página.
+    if (typeof API !== 'undefined' && API.saindo === true) return;
     const a = refazerAdiadoDaDescarga;
     refazerAdiadoDaDescarga = null;
     if (!a || !AppState.authenticated) return;

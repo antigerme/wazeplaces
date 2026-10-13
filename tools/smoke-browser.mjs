@@ -11670,7 +11670,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       };
     });
     const buscasDe = (page) => page.evaluate(() => window.__modo.filter((m) => m.rota === 'buscar-places'));
-    for (const caso of ['fundo', 'a janela vence com a página à vista']) {
+    for (const caso of ['fundo', 'a janela vence com a página à vista', 'abre o "Sair" e cancela', 'abre o "Sair" e confirma']) {
       const id = `card/descarga ${MOTOR}: R15-3-02 — o ✕ do último sem sinal, a rede volta na janela (${caso})`;
       const g = await cardPagina([cardPedido('kA')], { resposta: (nome) => (nome === 'buscar-places' ? vazia : null) });
       let semRede = false;
@@ -11697,6 +11697,31 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         checa(naVolta.length === 1 && naVolta[0].keepalive === false && naVolta[0].sinal === true,
           `${id}: na volta o refazer tem que sair UMA vez, como busca normal (sem keepalive, com o teto)`, JSON.stringify(naVolta));
         checa(await g.page.evaluate(() => API.saindo) === false, `${id}: o modo "saindo" seguiu ligado na volta`);
+      } else if (caso.startsWith('abre o "Sair"')) {
+        // R15-3-03: abrir o diálogo despacha a DECISÃO (R14-8-06), mas a busca que
+        // atualiza a fila espera o diálogo fechar — cancelar a manda (uma), confirmar
+        // a descarta (a sessão acaba): nenhuma requisição jogada fora.
+        await g.page.evaluate(() => abrirDialogoDoSair());
+        await esperarNaPagina(g.page, () => !AppState.pendingAction && AppState.inFlightActions === 0, 8000);
+        await doisQuadros(g.page);
+        checa((await g.page.evaluate(() => window.__modo.some((m) => m.rota === 'validar-place'))),
+          `${id}: PRÉ-CONDIÇÃO — abrir o "Sair" não despachou a decisão`);
+        const aberto = await buscasDe(g.page);
+        checa(aberto.length === 0, `${id}: DEFEITO — abrir o "Sair" já mandou a busca da fila (R15-3-03)`, JSON.stringify(aberto));
+        if (caso.endsWith('cancela')) {
+          await g.page.click('#cancelLogout');
+          await esperarOuExplodir(g.page, () => window.__modo.some((m) => m.rota === 'buscar-places'), 'a fila atualizada ao cancelar o "Sair"');
+          await esperarNaPagina(g.page, () => !AppState.fetching, 8000);
+          const depoisDeCancelar = await buscasDe(g.page);
+          checa(depoisDeCancelar.length === 1 && depoisDeCancelar[0].keepalive === false,
+            `${id}: cancelado o "Sair", a fila vazia tem que ser atualizada, uma vez, normal`, JSON.stringify(depoisDeCancelar));
+        } else {
+          await g.page.click('#confirmLogout');
+          await esperarOuExplodir(g.page, () => !AppState.authenticated && !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+          await doisQuadros(g.page);
+          const depoisDeSair = await buscasDe(g.page);
+          checa(depoisDeSair.length === 0, `${id}: DEFEITO — o "Sair" confirmado mandou a busca da fila (requisição jogada fora)`, JSON.stringify(depoisDeSair));
+        }
       } else {
         await esperarOuExplodir(g.page, () => window.__modo.some((m) => m.rota === 'buscar-places'), 'o refazer no fim da janela');
         await esperarNaPagina(g.page, () => !AppState.fetching, 8000);

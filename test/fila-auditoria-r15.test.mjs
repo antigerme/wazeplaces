@@ -254,7 +254,10 @@ function montarDescarga({ lote = false } = {}) {
     removerFoto: () => {}, marcarComoAprovada: () => {}, desmarcarAprovada: () => {} };
   // O document/window do `setupFimDoModoSaindo`: os ouvintes ficam à mão do teste.
   const ouvintes = {};
-  const doc = { visibilityState: 'visible', getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Padaria Nova' } : null), addEventListener: (tipo, fn) => { (ouvintes['doc:' + tipo] ||= []).push(fn); } };
+  // O diálogo do "Sair": escondido até o `openModal` o abrir (o teste o fecha à mão).
+  const sair = { escondido: true };
+  const elSair = { classList: { contains: (c) => c === 'hidden' && sair.escondido } };
+  const doc = { visibilityState: 'visible', getElementById: (id) => (id === 'lightboxNomeInput' ? { value: 'Padaria Nova' } : id === 'logoutModal' ? elSair : null), addEventListener: (tipo, fn) => { (ouvintes['doc:' + tipo] ||= []).push(fn); } };
   const win = { addEventListener: (tipo, fn) => { (ouvintes['win:' + tipo] ||= []).push(fn); } };
   const deps = {
     AppState, API, Lightbox, document: doc, window: win, Treino: { ativo: false }, UNDO_WINDOW_MS: 40, canDisableUndo: () => false,
@@ -278,11 +281,12 @@ function montarDescarga({ lote = false } = {}) {
     tratouNestaFila: false, recusaAutomaticaNestaFila: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
     filaEsperaPerfil: false, rebuscasAuto: 0, filaDeOnde: null,
     descargaNaFila: new Set(), reivindicacaoDestaAba: () => ({}),
+    openModal: (id) => { if (id === 'logoutModal') sair.escondido = false; }, desenharAvisoDoSair: () => {},
     console: { error: (...a) => log.push('ERRO:' + a.join(' ')) },
   };
   const h = montar(['scheduleAction', 'descarregarAcaoPendente', 'retomarBusca', 'refazerFilaReal', 'filaReal', 'resetQueue',
     'janelaDoDesfazerAberta', 'atenderOFimDaJanela', 'guardarORefazerAteAVolta', 'atenderORefazerAdiadoDaDescarga',
-    'setupFimDoModoSaindo', 'enviarPendenciasDoLightbox', 'pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear'], deps);
+    'setupFimDoModoSaindo', 'abrirDialogoDoSair', 'despacharJanelaDoDesfazer', 'enviarPendenciasDoLightbox', 'pedirExclusaoDaFoto', 'aprovarFotoAtual', 'confirmarRenomear'], deps);
   h.setupFimDoModoSaindo();
   // A decisão que abre a janela com a fila VAZIA: o ✕ do último card, ou o lote.
   const decidir = () => {
@@ -297,7 +301,7 @@ function montarDescarga({ lote = false } = {}) {
   const paraOFundo = () => { doc.visibilityState = 'hidden'; h.descarregarAcaoPendente(); };
   const volta = () => { doc.visibilityState = 'visible'; for (const fn of ouvintes['doc:visibilitychange'] || []) fn(); };
   const buscas = () => log.filter((l) => l.startsWith('busca (')).length;
-  return { h, deps, AppState, API, log, decidir, abrirFoto, janelaDaFoto, paraOFundo, volta, buscas, ouvintes, pedidosDoLote };
+  return { h, deps, AppState, API, log, decidir, abrirFoto, janelaDaFoto, paraOFundo, volta, buscas, ouvintes, pedidosDoLote, sair };
 }
 
 test('R15-6-01: o "Rejeitar os N" cancelado pela descarga da página — na volta, o refazer que esperava a janela RETOMA a busca (a fila não fica em "Falha ao carregar")', async () => {
@@ -423,6 +427,72 @@ test('R15-6-01: a QUEDA, o "Sair" e a conta em dúvida também cancelam o lote (
     assert.equal(m.buscas(), 0, `(${rotulo}) o refazer adiado sobreviveu ao cancelamento da sessão: ${m.log}`);
     assert.ok(!m.log.some((l) => l.startsWith('reposição')), `(${rotulo}) o cancelamento da sessão atendeu o refazer adiado: ${m.log}`);
   }
+});
+
+// O que o `closeModal` faz com o diálogo do "Sair": a limpeza do modal, lida do
+// `LIMPEZA_AO_FECHAR` DE VERDADE (a entrada `logoutModal`), rodando a função real.
+function limpezaDoSair(h) {
+  const m = /^    logoutModal\(\) \{([^}]*)\},?$/m.exec(APP_SEM);
+  assert.ok(m, 'o `LIMPEZA_AO_FECHAR` não tem mais a entrada do `logoutModal` (R15-3-03)');
+  return new Function('queueMicrotask', 'atenderORefazerAdiadoDaDescarga', m[1])(queueMicrotask, h.atenderORefazerAdiadoDaDescarga);
+}
+
+test('R15-3-03: abrir o diálogo do "Sair" despacha a decisão mas NÃO atualiza a fila — cancelar o diálogo atualiza (uma busca)', async () => {
+  const m = montarDescarga();
+  m.decidir();
+  m.h.retomarBusca();                              // fila vazia por falha: o refazer espera a janela
+  m.h.abrirDialogoDoSair();                        // despacha a janela: o ✕ sai
+  await tique(10);
+  assert.ok(m.log.includes('✕ enviado'), `PRÉ-CONDIÇÃO: abrir o diálogo não despachou a decisão (R14-8-06): ${m.log}`);
+  assert.equal(m.sair.escondido, false, 'PRÉ-CONDIÇÃO: o diálogo não abriu');
+  assert.equal(m.buscas(), 0,
+    `DEFEITO: abrir o "Sair" já mandou a busca que atualiza a fila — jogada fora se a pessoa confirma (R15-3-03): ${m.log}`);
+  m.sair.escondido = true;                         // cancelar: o `closeModal` esconde e roda a limpeza
+  limpezaDoSair(m.h);
+  await tique(10);
+  assert.deepEqual(m.log.filter((l) => l.startsWith('busca (')), ['busca (fila refeita, saindo=false)'],
+    `cancelado o "Sair", a fila vazia tem que ser atualizada, uma vez: ${m.log}`);
+});
+
+test('R15-3-03: o "Sair" CONFIRMADO descarta o refazer adiado — nenhuma busca', async () => {
+  const m = montarDescarga();
+  m.decidir();
+  m.h.retomarBusca();
+  m.h.abrirDialogoDoSair();
+  await tique(10);
+  // O `handleLogout` muda a época ANTES de fechar o diálogo (o `authenticated`
+  // só cai depois): quem descarta o refazer é a época, não a falta de sessão.
+  m.deps.epocaDaSessao++;
+  m.sair.escondido = true;
+  limpezaDoSair(m.h);
+  await tique(10);
+  assert.equal(m.buscas(), 0, `o "Sair" confirmado mandou a busca da fila: ${m.log}`);
+  // Nem na volta da página, com a sessão nova de pé: o refazer era da que saiu.
+  m.volta();
+  assert.equal(m.buscas(), 0, `o refazer da sessão que saiu rodou na sessão nova: ${m.log}`);
+});
+
+test('R15-3-03: CONTROLE — sem o diálogo aberto, a janela vence e a fila é atualizada na hora (o instrumento enxerga o diálogo)', async () => {
+  const m = montarDescarga();
+  m.decidir();
+  m.h.retomarBusca();
+  assert.equal(m.sair.escondido, true, 'PRÉ-CONDIÇÃO: o diálogo estava aberto');
+  m.AppState.pendingAction.execute();
+  await tique(10);
+  assert.equal(m.buscas(), 1, `CONTROLE: com o diálogo fechado o refazer tem que sair no fim da janela: ${m.log}`);
+});
+
+test('R15-3-03: o diálogo fechado com a página ainda no fundo não consome o refazer — quem o atende é a volta', async () => {
+  const m = montarDescarga();
+  m.decidir();
+  m.h.retomarBusca();
+  m.paraOFundo();                                  // a descarga: o refazer espera a volta
+  await tique(10);
+  limpezaDoSair(m.h);                              // um diálogo qualquer do "Sair" fecha com a página escondida
+  await tique(10);
+  assert.equal(m.buscas(), 0, `o fechamento do diálogo mandou a busca com a página ainda saindo: ${m.log}`);
+  m.volta();
+  assert.equal(m.buscas(), 1, `o refazer se perdeu: ${m.log}`);
 });
 
 test('R15-3-02: a ordem — o modo "saindo" é desligado ANTES de o refazer adiado rodar (a busca dele leva o teto de 45 s)', () => {
