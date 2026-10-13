@@ -1275,6 +1275,24 @@ diz('o mapa guardado numa preparação INTERROMPIDA aparece sem rede, inteiro',
   mapa7d.pedidos > 0 && mapa7d.falharam === 0 && mapa7d.ok === mapa7d.pedidos, JSON.stringify(mapa7d));
 const anel7d = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
 diz('e a sentinela do mapa não tem o que acusar', anel7d === anel7dAntes, `${anel7dAntes} → ${anel7d}`);
+// R15-4-04: sem rede, o mapa de um pedido que NÃO está guardado desenha duas vezes
+// (a reserva de 400×240 e a caixa real), e o <img> do desenho velho, já tirado
+// do DOM, ainda falha depois: a falha dele caía na conta do desenho real e
+// `falharam` passava de `pedidos` no relatório. Um pedido longe de tudo que a
+// varredura guardou, e a espera é pelo FIM (todo tile falhou e saiu da tela).
+const ALVO_SEM_TILE = { ...SO_MAPA(99), mapa: { centro: [-31.1, -51.7], entradas: [] } };
+await montar([ALVO_SEM_TILE]);
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  return !!b && Number(b.dataset.tilesPedidos) > 0 && b.querySelectorAll('.card-map-tiles img').length === 0; }, 15000, 100);
+await dormir(500);
+const semTile7d = await page.evaluate(() => { const b = cardDaFrente().querySelector('.card-map');
+  const g = diagGeometria().find((e) => e.tiles) || null;
+  return { pedidos: Number(b.dataset.tilesPedidos), falharam: Number(b.dataset.tilesFalharam),
+           naTela: b.querySelectorAll('.card-map-tiles img').length, geometria: g ? g.tiles : null }; });
+diz('CONTROLE: o mapa de um pedido não guardado falhou sem rede (o instrumento vê a falha)',
+  semTile7d.pedidos > 0 && semTile7d.falharam > 0 && semTile7d.naTela === 0, JSON.stringify(semTile7d));
+diz('o relatório não conta mais falhas que tiles pedidos (a falha do desenho velho não cai no real)',
+  semTile7d.falharam <= semTile7d.pedidos, JSON.stringify(semTile7d));
 aviao = false; await ctx.setOffline(false);
 // A volta do sinal RETOMA a preparação parcial (R4-O3, auditoria de
 // 2026-09-29): o `online` dispara a varredura, e ela, pronta, PODA o cache do

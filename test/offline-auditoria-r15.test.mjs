@@ -522,7 +522,7 @@ test('R15-4-03: o relatório mede `idadeMin` pela ÚLTIMA GRAVAÇÃO e traz o ca
 });
 
 test('R15-4-03: a reabertura sem rede também conta a idade pela última gravação', () => {
-  const corpo = APP_SEM.slice(APP_SEM.indexOf('async function offlineTentarAbrirSemRede'));
+  const corpo = fatiar('offlineTentarAbrirSemRede');
   const usos = corpo.match(/idade: Math\.round\(\(Date\.now\(\) - \(Number\.isFinite\(guardada\.gravadoEm\) \? guardada\.gravadoEm : guardada\.t\)\) \/ 60000\)/g) || [];
   assert.equal(usos.length, 2, 'o `offline.abriu` (com e sem pedido) deixou de medir a idade pela última gravação');
 });
