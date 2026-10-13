@@ -1231,7 +1231,7 @@ test('fechar o modal aberto a partir da Ajuda (ou sair pelo teclado) devolve o f
 
 test('"Conectar outro aparelho" abre com o foco no "Fechar", não no botão que cria o código FRACO', () => {
   const abrir = fatiar('abrirPareamento');
-  assert.match(abrir, /openModal\('pairShowModal'\);\s*document\.getElementById\('pairShowClose'\)\?\.focus\(\);/,
+  assert.match(abrir, /openModal\('pairShowModal'\);\s*document\.getElementById\('pairShowClose'\)\?\.focus\(\{ preventScroll: true \}\);/,
     'o foco inicial do pareamento caiu no "Sem câmera? Mostrar um código" — um Enter cria a cópia fraca do segredo');
   // CONTROLE: o primeiro botão do modal é mesmo o do código fraco (é por isso
   // que o foco padrão do `openModal` cairia nele).

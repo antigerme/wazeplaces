@@ -395,7 +395,7 @@ function aparelho(inicial = {}) {
   const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
   return { dados, safeLS };
 }
-function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)], perfil = { id: 111 } } = {}) {
+function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)], perfil = { id: 111 }, extraDeps = {}, extraNomes = [] } = {}) {
   const tela = dialogoDoSair();
   const ap = aparelho({ [TOKEN]: 'TOK-A', [CONTA_KEY]: { id: '111', s: marcaDe('TOK-A') } });
   const deps = {
@@ -415,8 +415,9 @@ function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)], perfil = { id: 111 }
     t: (k, v) => k + ':' + (v && v.n),
     entrarPelaExtensao: () => new Promise(() => {}),   // a renovação, no ar
     avisarOutrasAbasDaQueda: () => {},
+    ...extraDeps,
   };
-  const h = montar(['derrubarSessao', 'lembrarAContaDaQueda', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao',
+  const h = montar([...extraNomes, 'derrubarSessao', 'lembrarAContaDaQueda', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao',
     'soltarOsLotesDaSessaoQueAcabou', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido',
     'lembrarAContaDoAparelho', 'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho'], deps);
   return { h, deps, tela, ap };
@@ -530,4 +531,156 @@ test('R16-1-01 (estrutura): a abertura com a sessão salva (e portanto a adoçã
   assert.ok(abre.indexOf('lembrarAContaDoAparelho()') < abre.indexOf('loadProfileAndAuxData()'), 'a conta é registrada depois de o perfil ser pedido');
   assert.match(fatiar('adotarSessaoDoAparelho'), /abrirComSessaoSalva\(\);/, 'a adoção da sessão do aparelho não passa pela abertura');
   assert.doesNotMatch(fatiar('derrubarSessao'), /contaConfirmadaNestaAba\s*=(?!=)/, 'a queda atribui a conta confirmada direto (R11-1-01)');
+});
+
+// ═══ R16-8-04 · a queda que a extensão renova (a MESMA conta) não gasta os avisos de uma vez ═══
+// A "Rejeição enviada ao Waze em seu nome…", o dourado do Desfazer opcional e a dica, que
+// estavam na tela quando a sessão caiu, saíam com ela (`dispensarAvisosDaSessao`) com a
+// marca de visto JÁ gravada: ninguém os lia e eles nunca mais apareciam. A queda os
+// devolve a uma guarda (marca desfeita, como o treino faz), a renovação com a mesma conta
+// os passa a pendentes, e a OUTRA conta, o "Sair" e a recusa do portão não os recebem.
+function avisosDeMentira({ epoca = 1, autenticado = true } = {}) {
+  const removidos = [];
+  const punho = (nome) => ({ naTela: () => true, remover() { removidos.push(nome); } });
+  const deps = {
+    epocaDaSessao: epoca,
+    AppState: { authenticated: autenticado, preferences: { consequenciaVista: { reject: true }, undoGateSeen: true, dicaDesfazerVista: true } },
+    avisosDeUmaVezNaTela: [
+      { qual: 'consequencia', tipo: 'reject', punho: punho('consequencia'), epoca },
+      { qual: 'desbloqueio', punho: punho('desbloqueio'), epoca, dicaAntes: false },
+      { qual: 'dica', punho: punho('dica'), epoca },
+    ],
+    avisosAdiados: null, avisosDaQueda: null, avisosAdiadosPedido: false,
+    savePreferences() { deps.salvou = (deps.salvou || 0) + 1; },
+    pedirAvisosAdiados() { deps.pediu = (deps.pediu || 0) + 1; },
+  };
+  const h = montar(['devolverAvisosDeUmaVezDaTela', 'adiarAvisoDeUmaVez', 'guardarAvisoDaQueda', 'guardarAvisosDeUmaVezDaQueda',
+    'restaurarAvisosDeUmaVezDaQueda'], deps);
+  return { h, deps, removidos };
+}
+
+test('R16-8-04: a queda devolve os avisos de uma vez que estavam na tela — marca de visto desfeita, guardados para a renovação', () => {
+  const m = avisosDeMentira();
+  m.deps.epocaDaSessao = 2;                              // a queda subiu a época
+  m.h.guardarAvisosDeUmaVezDaQueda(1);
+  assert.deepEqual(m.removidos.sort(), ['consequencia', 'desbloqueio', 'dica'], 'os avisos não saíram da tela');
+  const p = m.deps.AppState.preferences;
+  assert.equal(p.consequenciaVista.reject, undefined, 'DEFEITO: a marca de visto da consequência ficou gravada — o aviso nunca mais aparece (R16-8-04)');
+  assert.equal(p.undoGateSeen, false, 'DEFEITO: o desbloqueio do Desfazer ficou marcado como visto');
+  assert.equal(p.dicaDesfazerVista, false, 'DEFEITO: a dica ficou marcada como vista');
+  assert.ok(m.deps.salvou >= 1, 'a marca desfeita não foi gravada');
+  const g = m.deps.avisosDaQueda;
+  assert.ok(g && g.epoca === 2 && g.consequencia.has('reject') && g.desbloqueio === true && g.dica === true,
+    'os avisos não ficaram guardados para a renovação, na época da sessão renovada: ' + JSON.stringify(g && { ...g, consequencia: [...g.consequencia] }));
+  assert.equal(m.deps.avisosAdiados, null, 'foram direto para os pendentes da época que acabou (que o `atenderAvisosAdiados` descarta)');
+});
+
+test('R16-8-04: a renovação com a MESMA conta passa a guarda a pendentes da sessão renovada e os pede — uma vez só', () => {
+  const m = avisosDeMentira();
+  m.deps.epocaDaSessao = 2;
+  m.h.guardarAvisosDeUmaVezDaQueda(1);
+  m.h.restaurarAvisosDeUmaVezDaQueda();
+  const a = m.deps.avisosAdiados;
+  assert.ok(a && a.epoca === 2 && a.consequencia.has('reject') && a.desbloqueio === true && a.dica === true,
+    'DEFEITO: a renovação não deixou os avisos pendentes na sessão renovada');
+  assert.equal(m.deps.pediu, 1, 'os pendentes não foram pedidos (só saem na próxima confirmação)');
+  assert.equal(m.deps.avisosDaQueda, null);
+  m.h.restaurarAvisosDeUmaVezDaQueda();
+  assert.equal(m.deps.pediu, 1, 'a guarda foi restaurada duas vezes');
+});
+
+test('R16-8-04: CONTROLES — OUTRA conta (a guarda esvaziada), o "Sair" (a época mudou) e a renovação sem sessão não deixam aviso nenhum', () => {
+  // OUTRA conta: `esquecerOutraConta` esvazia a guarda antes de a renovação a restaurar.
+  const o = avisosDeMentira();
+  o.deps.epocaDaSessao = 2;
+  o.h.guardarAvisosDeUmaVezDaQueda(1);
+  o.deps.avisosDaQueda = null;
+  o.h.restaurarAvisosDeUmaVezDaQueda();
+  assert.equal(o.deps.avisosAdiados, null, 'os avisos da conta anterior chegaram a quem entrou');
+  assert.equal(o.deps.pediu, undefined);
+  // "Sair" no meio da renovação: a época mudou, e a guarda é da sessão que acabou.
+  const s = avisosDeMentira();
+  s.deps.epocaDaSessao = 2;
+  s.h.guardarAvisosDeUmaVezDaQueda(1);
+  s.deps.epocaDaSessao = 3;
+  s.h.restaurarAvisosDeUmaVezDaQueda();
+  assert.equal(s.deps.avisosAdiados, null, 'o "Sair" não descartou os avisos guardados');
+  // Sem sessão ao fim da renovação: nada.
+  const n = avisosDeMentira();
+  n.deps.epocaDaSessao = 2;
+  n.h.guardarAvisosDeUmaVezDaQueda(1);
+  n.deps.AppState.authenticated = false;
+  n.h.restaurarAvisosDeUmaVezDaQueda();
+  assert.equal(n.deps.avisosAdiados, null);
+  // Um aviso de OUTRA sessão que sobrou na tela (época diferente da que caiu) não vem junto.
+  const v = avisosDeMentira({ epoca: 0 });
+  v.deps.epocaDaSessao = 2;
+  v.h.guardarAvisosDeUmaVezDaQueda(1);
+  assert.equal(v.deps.avisosDaQueda, null, 'um aviso de outra sessão foi guardado para a renovação');
+  // CONTROLE do instrumento: o `devolver` do TREINO (época de agora) segue indo para os pendentes normais.
+  const t = avisosDeMentira();
+  t.h.devolverAvisosDeUmaVezDaTela();
+  assert.ok(t.deps.avisosAdiados && t.deps.avisosAdiados.consequencia.has('reject'), 'CONTROLE: o treino deixou de devolver a pendentes');
+});
+
+test('R16-8-04: a pendência do treino (`avisosAdiados` da época que caiu) atravessa a queda junto — e a recusa do portão não guarda nada', () => {
+  const m = avisosDeMentira();
+  m.deps.avisosDeUmaVezNaTela = [];
+  m.deps.avisosAdiados = { epoca: 1, consequencia: new Set(['read']), desbloqueio: false, dica: true };
+  m.deps.epocaDaSessao = 2;
+  m.h.guardarAvisosDeUmaVezDaQueda(1);
+  const g = m.deps.avisosDaQueda;
+  assert.ok(g && g.consequencia.has('read') && g.dica === true && g.desbloqueio === false, 'a pendência do treino se perdeu na queda');
+  // Estrutura: a queda guarda ANTES de dispensar e só quando não é a recusa do portão (`depois`); a renovação restaura; a troca de conta esvazia.
+  const q = fatiar('derrubarSessao');
+  assert.match(q, /if \(typeof depois !== 'function'\) guardarAvisosDeUmaVezDaQueda\(epocaDaSessao - 1\);\s*else avisosDaQueda = null;\s*dispensarAvisosDaSessao\(\);/,
+    'a queda não guarda os avisos antes de dispensá-los (ou guarda na recusa do portão, que é terminal)');
+  assert.match(q, /restaurarAvisosDeUmaVezDaQueda\(\);\s*if \(haviaFilaNaQueda/, 'a renovação com sucesso não restaura os avisos');
+  assert.match(fatiar('esquecerOutraConta'), /avisosDaQueda = null;/, 'a troca de conta não esvazia a guarda dos avisos da conta anterior');
+});
+
+test('R16-8-04: a `derrubarSessao` DE VERDADE guarda os avisos que estavam na tela — e a recusa do portão (`depois`) não guarda', () => {
+  const montarQueda = (depois) => {
+    const base = avisosDeMentira();
+    const m = quedaComLote({ extraDeps: { ...base.deps, epocaDaSessao: 1 }, extraNomes: ['devolverAvisosDeUmaVezDaTela', 'adiarAvisoDeUmaVez',
+      'guardarAvisoDaQueda', 'guardarAvisosDeUmaVezDaQueda', 'dispensarAvisosDaSessao'] });
+    m.h.derrubarSessao('srv.err.sessionExpired', depois ? { depois: () => {} } : {});
+    return { m, deps: m.deps };
+  };
+  const q = montarQueda(false);
+  assert.equal(q.deps.epocaDaSessao, 2, 'PRÉ-CONDIÇÃO: a queda não subiu a época');
+  assert.ok(q.deps.avisosDaQueda && q.deps.avisosDaQueda.consequencia.has('reject'), 'DEFEITO: a queda não guardou os avisos de uma vez para a renovação (R16-8-04)');
+  assert.equal(q.deps.AppState.preferences.consequenciaVista.reject, undefined, 'DEFEITO: a marca de visto continuou gravada depois da queda');
+  const portao = montarQueda(true);
+  assert.equal(portao.deps.avisosDaQueda, null, 'a recusa do portão (terminal) guardou avisos para uma renovação que não existe');
+});
+
+// ═══ R16-8-02 · o "Conectar outro aparelho" abre no TOPO, não rolado até o "Fechar" ═══
+// O foco inicial vai ao "Fechar" (o ÚLTIMO controle: o primeiro cria o código fraco), e o
+// navegador rolava o corpo do diálogo até ele: no iPhone SE deitado (667×375) abria rolado
+// 173 de 230 px, com o título e o topo do QR fora da dobra. `preventScroll` leva o foco ao
+// mesmo botão sem rolar. O outro foco inicial do diálogo (o do `openModal`) não rola.
+test('R16-8-02: o foco inicial do pareamento vai ao "Fechar" SEM rolar (`preventScroll`) — e continua indo ao "Fechar"', async () => {
+  const chamadas = [];
+  const botao = { focus: (opcoes) => chamadas.push(opcoes) };
+  const deps = {
+    document: { getElementById: (id) => (id === 'pairShowClose' ? botao : buracoNegro(id, [])) },
+    openModal() {}, pairQrVenceEm: 0, CamadaVoltar: {},
+  };
+  // O `abrirPareamento` inteiro tem muita dependência: aqui só o trecho do foco, fatiado do código.
+  const corpo = fatiar('abrirPareamento');
+  const m = /openModal\('pairShowModal'\);[\s\S]*?(document\.getElementById\('pairShowClose'\)\?\.focus\([^;]*\);)/.exec(corpo);
+  assert.ok(m, 'o foco inicial do pareamento mudou de lugar: reescreva este teste');
+  new Function('document', m[1])(deps.document);
+  assert.equal(chamadas.length, 1, 'PRÉ-CONDIÇÃO: o foco não foi ao "Fechar"');
+  assert.deepEqual(chamadas[0], { preventScroll: true },
+    'DEFEITO: o foco no "Fechar" rola o diálogo até o último botão — abre rolado, com o título e o QR cortados no celular deitado (R16-8-02)');
+});
+
+test('R16-8-02: o foco inicial do `openModal` também não rola o corpo do diálogo — o primeiro controle do pareamento fica abaixo do QR no celular deitado', () => {
+  const corpo = fatiar('openModal');
+  assert.match(corpo, /if \(focusable\) focusable\.focus\(\{ preventScroll: true \}\);/,
+    'DEFEITO: o foco inicial do `openModal` rola o diálogo até o primeiro controle (WebKit: o do pareamento abre rolado, R16-8-02)');
+  // CONTROLE do instrumento: o seletor do primeiro controle segue o de sempre (o foco inicial não mudou de ALVO).
+  assert.match(corpo, /m\.querySelector\('textarea, input:not\(\[type=hidden\]\):not\(:disabled\), select, button'\)/, 'o primeiro controle do foco inicial mudou');
 });

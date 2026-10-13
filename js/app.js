@@ -1259,7 +1259,11 @@ function openModal(id) {
     m.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
     const focusable = m.querySelector('textarea, input:not([type=hidden]):not(:disabled), select, button');
-    if (focusable) focusable.focus();
+    // `preventScroll`: o foco inicial é um primeiro controle, e levá-lo à vista é rolar o
+    // corpo do diálogo à toa — o do pareamento (primeiro controle abaixo do QR) abria
+    // rolado no celular deitado, com o título e o QR cortados (R16-8-02, MEDIDO no WebKit).
+    // Os outros abrem em scrollTop 0 porque o primeiro controle já está à vista.
+    if (focusable) focusable.focus({ preventScroll: true });
 }
 
 // Limpeza específica de cada modal. Fica AQUI e não no botão de fechar porque
@@ -2071,7 +2075,14 @@ async function abrirPareamento() {
     // código", que CRIA o código FRACO (~30 bits) — um Enter a mais, e a cópia
     // fraca passava a existir no servidor ao lado do QR (auditoria de
     // 2026-09-26). O "Fechar" não cria nada e é a saída de quem só olhou.
-    document.getElementById('pairShowClose')?.focus();
+    //
+    // `preventScroll`: o "Fechar" é o ÚLTIMO controle do diálogo, e focá-lo rolava o
+    // corpo até ele. No iPhone SE deitado (667×375) o diálogo abria rolado 173 de
+    // 230 px, com o título e o topo do QR — o caminho principal do pareamento — fora
+    // da dobra (R16-8-02, MEDIDO nos dois motores; os outros diálogos abrem com o
+    // foco no primeiro controle e em scrollTop 0). O foco vai ao botão do mesmo jeito;
+    // o diálogo abre no topo.
+    document.getElementById('pairShowClose')?.focus({ preventScroll: true });
     const codeEl = document.getElementById('pairCode');
     const expEl = document.getElementById('pairExpiry');
     codeEl.textContent = '······';
@@ -11914,6 +11925,10 @@ function derrubarSessao(errorKey, { depois } = {}) {
     removeUndoBanner();
     // E os avisos da sessão que acabou (ver a função): o dourado do Desfazer, a dica e
     // a consequência, o "Marcando N…" e o "Rejeitando N…" (R15-7-F1, R15-2-F2).
+    // Os de uma vez que estavam na tela voltam a pendentes pra renovação com a MESMA conta
+    // (R16-8-04); a recusa do portão (`depois`) é terminal e não os guarda.
+    if (typeof depois !== 'function') guardarAvisosDeUmaVezDaQueda(epocaDaSessao - 1);
+    else avisosDaQueda = null;
     dispensarAvisosDaSessao();
     // O token só sai do aparelho se é o desta aba. Senão só a memória solta —
     // pelo `setSession`, o de lá (o da outra aba) sairia, e o diário ganharia
@@ -12007,6 +12022,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
                 new Promise((ok) => setTimeout(ok, AVISO_RENOVADA_ESPERA_PERFIL_MS)),
             ]);
             if (epoca !== epocaDaSessao) return;
+            // Os avisos de uma vez que a queda tirou da tela voltam, se a conta é a mesma
+            // (R16-8-04): com OUTRA, a troca de conta esvaziou a guarda.
+            restaurarAvisosDeUmaVezDaQueda();
             if (haviaFilaNaQueda && filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
@@ -20958,7 +20976,10 @@ function dispensarAvisosDaSessao({ soOsDeUmaVez = false } = {}) {
     document.getElementById('bannerContainer')?.replaceChildren();
 }
 
-function devolverAvisosDeUmaVezDaTela() {
+// `epocaDeOrigem`: a sessão cujos avisos voltam — a de agora (o treino) ou a que ACABOU
+// de cair (a renovação, `guardarAvisosDeUmaVezDaQueda`). `guardar(qual, tipo)`: onde
+// a pendência fica.
+function devolverAvisosDeUmaVezDaTela({ epocaDeOrigem = epocaDaSessao, guardar = adiarAvisoDeUmaVez } = {}) {
     const lista = avisosDeUmaVezNaTela;
     avisosDeUmaVezNaTela = [];
     let desfez = false;
@@ -20968,7 +20989,7 @@ function devolverAvisosDeUmaVezDaTela() {
         try { a.punho.remover(); } catch (e) { /* já saiu */ }
         try { a.confete?.remove?.(); } catch (e) { /* já saiu */ }
         // O de outra sessão sai da tela e não volta: ele fala de outra pessoa.
-        if (a.epoca !== epocaDaSessao) continue;
+        if (a.epoca !== epocaDeOrigem) continue;
         const p = AppState.preferences;
         if (a.qual === 'consequencia') {
             if (p.consequenciaVista) delete p.consequenciaVista[a.tipo];
@@ -20980,10 +21001,62 @@ function devolverAvisosDeUmaVezDaTela() {
         } else if (a.qual === 'dica') {
             p.dicaDesfazerVista = false;
         } else continue;
-        adiarAvisoDeUmaVez(a.qual, a.tipo);
+        guardar(a.qual, a.tipo);
         desfez = true;
     }
     if (desfez) savePreferences();
+}
+
+// ── A QUEDA que a extensão renova (a MESMA conta) não gasta os avisos de uma vez ──
+// Eles saíam da tela com a sessão (`dispensarAvisosDaSessao`, R15-7-F1) com a marca de
+// visto JÁ gravada: a "Rejeição enviada ao Waze em seu nome…" (7 s), o dourado do
+// Desfazer opcional (20 s) e a dica, que estavam na tela quando a sessão caiu, nunca
+// eram lidos — e nunca mais apareciam (auditoria da rodada 16, R16-8-04, MEDIDO; era a
+// pista que o dono tinha aberta: "devolver a pendentes na renovação com a mesma
+// conta", DECIDIDO). Agora a queda os devolve (a marca de visto desfeita, como o treino
+// faz) para uma GUARDA à parte, e a renovação que dá certo os passa a pendentes da
+// sessão renovada (`restaurarAvisosDeUmaVezDaQueda`), que saem na próxima tela livre.
+// Não vão direto a `avisosAdiados`: aquela pendência é da época da sessão que acabou e
+// o `atenderAvisosAdiados` a descarta sem sessão. Quem NÃO os recebe: a OUTRA conta
+// (`esquecerOutraConta` esvazia a guarda — a "rejeição em seu nome" seria de outra
+// pessoa), o "Sair" e a recusa do portão (a época muda / nem se guarda) e a renovação
+// que não deu certo (a marca desfeita faz o próximo ✕/✓ mostrá-los).
+let avisosDaQueda = null;   // { epoca, consequencia: Set de tipos, desbloqueio, dica }
+
+function guardarAvisoDaQueda(qual, tipo) {
+    if (!avisosDaQueda || avisosDaQueda.epoca !== epocaDaSessao) {
+        avisosDaQueda = { epoca: epocaDaSessao, consequencia: new Set(), desbloqueio: false, dica: false };
+    }
+    if (qual === 'consequencia') avisosDaQueda.consequencia.add(tipo);
+    else avisosDaQueda[qual] = true;
+}
+
+// Chamada pela queda LOGO DEPOIS de a época subir (`epocaDaQueda` é a da sessão que
+// caiu) e ANTES de `dispensarAvisosDaSessao`: os que estão na tela voltam a pendentes
+// (marca desfeita), e a pendência que o treino segurava (`avisosAdiados`, da época que
+// acabou) vem junto.
+function guardarAvisosDeUmaVezDaQueda(epocaDaQueda) {
+    avisosDaQueda = null;
+    devolverAvisosDeUmaVezDaTela({ epocaDeOrigem: epocaDaQueda, guardar: guardarAvisoDaQueda });
+    const antes = avisosAdiados;
+    if (antes && antes.epoca === epocaDaQueda) {
+        for (const tipo of antes.consequencia) guardarAvisoDaQueda('consequencia', tipo);
+        if (antes.desbloqueio) guardarAvisoDaQueda('desbloqueio');
+        if (antes.dica) guardarAvisoDaQueda('dica');
+    }
+}
+
+// A renovação deu certo: se a guarda é desta sessão (a época não mudou desde a queda e
+// a conta não foi trocada — `esquecerOutraConta` a esvaziou), os avisos viram
+// pendentes dela e são pedidos. Uma vez só.
+function restaurarAvisosDeUmaVezDaQueda() {
+    const q = avisosDaQueda;
+    avisosDaQueda = null;
+    if (!q || q.epoca !== epocaDaSessao || !AppState.authenticated) return;
+    for (const tipo of q.consequencia) adiarAvisoDeUmaVez('consequencia', tipo);
+    if (q.desbloqueio) adiarAvisoDeUmaVez('desbloqueio');
+    if (q.dica) adiarAvisoDeUmaVez('dica');
+    pedirAvisosAdiados();
 }
 
 // Decide DEPOIS da tarefa que pediu, numa microtarefa (o padrão do
@@ -21669,6 +21742,7 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // pendentes pra quem entrou (R14-7-A5).
     avisosAdiados = null;
     dispensarAvisosDaSessao({ soOsDeUmaVez: true });
+    avisosDaQueda = null;   // a guarda da renovação também é da conta anterior (R16-8-04)
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
