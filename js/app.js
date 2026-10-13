@@ -14192,7 +14192,7 @@ function mostrarComoFuncionaSePrimeiraVez() {
     // aprovação (R7-3-01, auditoria de 2026-10-02).
     if (CamadaVoltar.consumindo) { comoFuncionaEsperaVoltar = true; return; }
     if (comoFuncionaEsperaGesto) return;
-    abrirComoFunciona();
+    abrirComoFunciona(true);
 }
 
 // O `popstate` do voltar NOSSO chegou: a tentativa que esperava por ele vai de
@@ -14252,12 +14252,20 @@ function aoFecharCamada(viaHistorico) {
 // aberto enquanto a fila carregava não marcava: o card montava com ele aberto,
 // o adiado ficava esperando, e o diálogo reabria no 1º gesto — com o banner do
 // Desfazer por cima (R7-7-02, auditoria de 2026-10-02).
-function abrirComoFunciona() {
+//
+// Aberto SOZINHO (o 1º login), o foco inicial é o "Entendi": o 1º controle do
+// diálogo é o "Quero treinar antes", e o Enter de quem só quer dispensar o
+// aviso começava o treino (R16-7-06). Aberto à mão ("Ver de novo") fica como
+// sempre: quem pediu o diálogo olhou pra ele.
+function abrirComoFunciona(automatico = false) {
     if (!AppState.preferences.comoFuncionaVisto) {
         AppState.preferences.comoFuncionaVisto = true;
         savePreferences();
     }
     openModal('comoFuncionaModal');
+    // O `openModal` pôs o foco no 1º controle; aqui, só no automático, ele vai pro
+    // "Entendi" no mesmo tique (nada se desenha no meio).
+    if (automatico) document.getElementById('comoFuncionaOk')?.focus();
 }
 
 // O "Ver de novo" da Ajuda é um GESTO, e ele chega também logo depois de um ✕
@@ -18015,6 +18023,11 @@ function aoMudarModoDevEmOutraAba() {
         dlogApagar();          // (o `atualizarFabDev` vem junto)
         enforceDevGatedFilters();
     } else atualizarFabDev();
+    // O modo dev é um dos DOIS motivos de a chave do Desfazer estar livre
+    // (`canDisableUndo`): desligado noutra aba, a chave daqui ficava livre e ligada,
+    // sem a frase "falta N", com as Preferências abertas (R16-7-03, MEDIDO). Ligado,
+    // ela se libera pelo mesmo caminho.
+    renderUndoGateUI();
 }
 
 // O "Sair", o placar e as preferências, vindos da OUTRA aba (auditoria de
@@ -25073,6 +25086,15 @@ const Treino = {
         // 2,2s de área em branco antes do modal final, o que lê como app quebrado.
         // Quem limpa é o `sair()`.
         if (AppState.currentPlace) { removeCurrentCardEl(); showCurrentPlace(); return; }
+        // Mas SAIU DA VISTA: o swipe o jogou pra fora (opacidade 0, 350 ms atrás),
+        // e com o ✓ ele fica em `translateX(+1,5 largura)`, à DIREITA. Esse
+        // deslocamento ainda conta pra largura do conteúdo: no Chromium do celular
+        // o viewport de layout CRESCE (innerWidth 1095 num aparelho de 393) e o
+        // "Treino concluído", centrado, cai fora dos 393 px que a pessoa vê — sobra
+        // o véu, sem a mensagem nem o botão —; no WebKit é o `scrollWidth` (R16-7-01,
+        // MEDIDO; com ✕ ou ↑ não acontece, o card sai pela esquerda ou por cima).
+        // `display: none` tira o card da conta e não muda um pixel visível.
+        tirarDaContaOCardQueSaiu();
         const efeito = document.getElementById('treinoFimEfeito');
         if (efeito) {
             efeito.textContent = t(efeitoChave);
@@ -25087,6 +25109,13 @@ const Treino = {
     },
 };
 window.Treino = Treino;
+
+// O card do ÚLTIMO exemplo do treino, já fora da vista (R16-7-01): sai da árvore
+// da conta de layout sem sair do DOM, que o `sair()` limpa. Função à parte pra
+// quem fatia o `Treino` sem DOM não precisar de um `document.querySelectorAll`.
+function tirarDaContaOCardQueSaiu() {
+    document.querySelectorAll('#cardStack .place-card').forEach((c) => { c.style.display = 'none'; });
+}
 
 // A fila REAL — a que o Waze tem pra esta pessoa —, esteja ou não na tela. Com
 // o TREINO aberto, a `AppState.queue` é a fila de EXEMPLOS (clones com o

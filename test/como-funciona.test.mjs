@@ -71,7 +71,7 @@ function objeto(nome) {
 function secao() {
   const ini = APP_SEM.indexOf('let comoFuncionaPedido = false;');
   assert.ok(ini >= 0, 'a seção do "Como funciona" mudou de forma — o instrumento ficou cego');
-  const fim = fechar(APP_SEM, APP_SEM.indexOf('function abrirComoFunciona() {', ini));
+  const fim = fechar(APP_SEM, APP_SEM.indexOf('function abrirComoFunciona(', ini));
   const txt = APP_SEM.slice(ini, fim);
   assert.match(txt, /window\.addEventListener\('popstate'/, 'a seção perdeu o ouvinte do voltar');
   return txt;

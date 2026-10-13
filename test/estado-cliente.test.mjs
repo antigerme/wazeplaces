@@ -386,6 +386,7 @@ function montarComoFunciona() {
     // do aparelho) moram em test/como-funciona; aqui, nenhuma.
     acoesTravadas: () => false, CamadaVoltar: { consumindo: false },
     comoFuncionaEsperaVoltar: false, comoFuncionaEsperaGesto: false,
+    document: { getElementById: () => ({ focus() {} }) },   // o foco no "Entendi" (R16-7-06), em test/treino-auditoria-r16
   };
   const { mostrarComoFuncionaSePrimeiraVez } = montar(['semCamadaAberta', 'abrirComoFunciona', 'mostrarComoFuncionaSePrimeiraVez'], deps,
     ['mostrarComoFuncionaSePrimeiraVez']);

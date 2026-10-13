@@ -690,6 +690,7 @@ function abaComModoDev({ guardado, memoria = { unlocked: true, active: true } })
     HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c', AUTORES_KEY: 'a',
     dlogApagar: () => apagou.push(1), atualizarFabDev: () => fab.push(1), updateDevBadge() {}, renderDevModeSection() {},
     diagAjustarRecursos() {}, enforceDevGatedFilters() {}, atualizarSeloDeConquista() {}, agendarRedesenhoDoHistorico() {},
+    renderUndoGateUI() {},   // a chave do Desfazer segue o modo dev (R16-7-03), em test/treino-auditoria-r16
     sincronizarComOutraAba() {} };   // o "Sair", o placar e as preferências da outra aba: test/contas-abas
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, ['devModeDoArmazenamento', 'modoDevDesligadoNoArmazenamento',

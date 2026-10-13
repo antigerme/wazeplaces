@@ -90,6 +90,7 @@ function elemento(iniciais = []) {
     classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c),
       toggle: (c, f) => (f ? classes.add(c) : classes.delete(c)), replace: (a, b) => { if (classes.delete(a)) classes.add(b); } },
     textContent: '', innerHTML: '', removeAttribute() {}, setAttribute() {}, children: [],
+    focus() {},   // o "Entendi" do "Como funciona" aberto sozinho recebe o foco (R16-7-06)
   };
 }
 // O que trava a ENTRADA no treino (`Treino.motivoDeRecusa`): sem isto o buraco

@@ -114,6 +114,7 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     aprovacoesDaQueda: new Map(),   // nem de uma sessão que caiu
     aprovacaoPendente: null,        // nem na janela do Desfazer (R6-2-07)
     aoFecharCamada: () => {},       // o "Como funciona" adiado (R7-7-01), em test/como-funciona
+    tirarDaContaOCardQueSaiu: () => {},   // o card do último exemplo sai da conta de layout (R16-7-01), em test/treino-auditoria-r16
   };
   const corpo = [
     'let lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',
