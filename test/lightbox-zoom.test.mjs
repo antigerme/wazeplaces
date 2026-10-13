@@ -398,7 +398,7 @@ function gestosDaFoto(escala, tamanho) {
     img.h.pointerdown(ev(x, y)); img.h.pointerup(ev(x, y));
     T += 400;
   };
-  return { L, log, arrastar, toqueDuplo };
+  return { L, log, arrastar, toqueDuplo, img };
 }
 
 test('R8-3-01 os GESTOS num fio de zoom invisível: o arraste troca de foto e fecha, e o duplo toque AMPLIA — ampliada de verdade, o arraste anda', () => {
@@ -528,4 +528,39 @@ test('R8-3-01 quem lê a escala pergunta `ampliada()`, nunca `=== 1`/`> 1` por c
   }
   assert.match(semComentario(fatiarFuncao('handleKeyDown')), /Lightbox\.ampliada\(\) && Object\.prototype\.hasOwnProperty\.call\(SETAS_QUE_ANDAM, e\.key\)/,
     'as setas da foto deixaram de perguntar a régua única');
+});
+
+// ── R16-3-02: o `pointercancel` na foto ampliada não decide nada ──────────────
+// (auditoria da rodada 16). O `endPointer` está registrado em `pointerup` E em
+// `pointercancel` e decidia pelas coordenadas do evento: o sistema tomando o toque
+// no meio do arraste (a palma, a ligação, a aba de notificações) trocava de foto ou
+// FECHAVA a camada sem a pessoa ter soltado nada. O card (`swipe.js`) e o mapa
+// ampliado já tratam o cancelamento como arraste que não terminou.
+function cancelarNoMeio(g, [x0, y0], [x1, y1]) {
+  const img = g.img;
+  const ev = (tipo, x, y) => ({ type: tipo, pointerId: 1, clientX: x, clientY: y, preventDefault() {} });
+  img.h.pointerdown(ev('pointerdown', x0, y0));
+  img.h.pointermove(ev('pointermove', x1, y1));
+  img.h.pointercancel(ev('pointercancel', x1, y1));
+}
+
+test('R16-3-02 o toque cancelado pelo sistema NÃO troca de foto nem fecha — o soltar de verdade, nas mesmas coordenadas, sim (CONTROLE)', () => {
+  const g = gestosDaFoto(1);
+  cancelarNoMeio(g, [300, 400], [150, 400]);          // |dx| = 150 > 60
+  assert.deepEqual(g.log, [], 'DEFEITO: o `pointercancel` trocou de foto como se o dedo tivesse soltado (R16-3-02)');
+  cancelarNoMeio(g, [300, 300], [300, 520]);          // dy = 220 > 80
+  assert.deepEqual(g.log, [], 'DEFEITO: o `pointercancel` fechou a camada como se o dedo tivesse soltado (R16-3-02)');
+  // O cancelamento limpa o estado: o arraste seguinte, soltado de verdade, decide normalmente.
+  g.arrastar([300, 400], [150, 400]);
+  assert.deepEqual(g.log, ['next'], 'CONTROLE: depois de um cancelamento o soltar de verdade não troca de foto (o estado do arraste ficou sujo)');
+  g.arrastar([300, 300], [300, 520]);
+  assert.deepEqual(g.log, ['next', 'recuou'], 'CONTROLE: o soltar de verdade não fechou');
+});
+
+test('R16-3-02 (estrutura): o `endPointer` só decide quando o evento NÃO é `pointercancel`, e os dois eventos seguem ligados a ele (o ponteiro sai da conta nos dois)', () => {
+  const corpo = fatiarFuncao('setupLightbox');
+  assert.match(corpo, /const endPointer = \(e\) => \{[\s\S]*?pointers\.delete\(e\.pointerId\);[\s\S]*?if \(e\.type !== 'pointercancel' && dragging && pointers\.size === 0 && !Lightbox\.ampliada\(\)\)/,
+    'o `endPointer` decide mesmo com o evento cancelado');
+  assert.match(corpo, /img\.addEventListener\('pointerup', endPointer\);\s*img\.addEventListener\('pointercancel', endPointer\);/,
+    'o cancelamento não passa mais pelo `endPointer`: o ponteiro ficaria na conta');
 });

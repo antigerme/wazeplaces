@@ -260,3 +260,39 @@ test('dar zoom pelos botões + e − NÃO conta como escolher um ponto — a pro
   o.zoom(1, 20, 20);
   assert.deepEqual(o.pontoDoStreetView(), o.centro, 'o zoom num ponto escolhido não virou o viewpoint');
 });
+
+// ── 5. A LONGITUDE volta para [-180, 180) (R16-3-03) ───────────────────────
+// Arrastando o mapa ampliado pela linha de data o centro passa de ±180 (o mapa dá a
+// volta; `desprojetar` não normaliza): o link saía com `viewpoint=-16.46,-180.12147`
+// (MEDIDO no roteiro da rodada 16, Fiji/Chukotka/Aleutas). A conta é no próprio
+// link, a fonte única dos quatro caminhos que mexem no centro.
+const lonDoLink = (linkStreetView, lat, lon) => {
+  const vp = new URL(linkStreetView([lat, lon])).searchParams.get('viewpoint');
+  const [la, lo] = vp.split(',').map(Number);
+  return { la, lo };
+};
+
+test('R16-3-03: a longitude fora de ±180 volta para a faixa — -180.12 vira 179.88, 180.5 vira -179.5, e o 180 exato vira -180', () => {
+  const { linkStreetView } = carregar();
+  const casos = [[-180.12147, 179.87853], [180.5, -179.5], [180, -180], [-180.0001, 179.9999], [540, -180], [-540.25, 179.75], [360.4, 0.4]];
+  for (const [entrada, esperada] of casos) {
+    const { la, lo } = lonDoLink(linkStreetView, -16.46, entrada);
+    assert.ok(Math.abs(lo - esperada) < 1e-9, `DEFEITO: a longitude ${entrada} saiu ${lo} no link (esperava ${esperada}) — R16-3-03`);
+    assert.equal(la, -16.46, 'a latitude mexeu');
+  }
+  // Varredura: nenhuma longitude de entrada deixa o link fora de [-180, 180).
+  for (let lon = -725; lon <= 725; lon += 0.37) {
+    const { lo } = lonDoLink(linkStreetView, 10, lon);
+    assert.ok(lo >= -180 && lo < 180, `a longitude ${lon} saiu ${lo} no link`);
+  }
+});
+
+test('R16-3-03: CONTROLE — a longitude que já está na faixa sai INTACTA (nem uma casa decimal mexe), inclusive as bordas -180 e 179.99', () => {
+  const { linkStreetView } = carregar();
+  for (const lon of [-180, -179.98, -46.481807, 0, 46.481807, 179.98, 179.999999]) {
+    const vp = new URL(linkStreetView([-23.427056, lon])).searchParams.get('viewpoint');
+    assert.equal(vp, `-23.427056,${lon}`, `a longitude ${lon} da faixa foi recalculada`);
+  }
+  // E a contraprova do instrumento: fora da faixa o texto MUDA (senão o teste acima não distinguiria nada).
+  assert.notEqual(new URL(linkStreetView([0, 200])).searchParams.get('viewpoint'), '0,200');
+});

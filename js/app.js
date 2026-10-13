@@ -3906,7 +3906,14 @@ function setupLightbox() {
         // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
         // (editando o nome, sai só da edição — ver `recuarNaFoto`). "Sem zoom"
         // é a régua única (`ampliada`, R8-3-01), não o 1 exato.
-        if (dragging && pointers.size === 0 && !Lightbox.ampliada()) {
+        //
+        // O `pointercancel` (o sistema tomou o toque: a palma, a ligação que chega, a
+        // aba de notificações) é um arraste que NÃO terminou: decidir pelas
+        // coordenadas do evento trocava de foto ou FECHAVA a camada sem a pessoa ter
+        // soltado nada (R16-3-02, MEDIDO). O card (`swipe.js`, `handleDragCancel`) e o
+        // mapa ampliado (`soltar`) já tratam o cancelamento assim: o ponteiro sai da
+        // conta e nada se decide.
+        if (e.type !== 'pointercancel' && dragging && pointers.size === 0 && !Lightbox.ampliada()) {
             const dx = e.clientX - dragStartX;
             const dy = e.clientY - dragStartY;
             if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
@@ -15264,8 +15271,13 @@ function renderMapa(card, place, refazendo) {
 function linkStreetView(centro) {
     if (!Array.isArray(centro) || centro.length < 2) return null;
     const lat = Number(centro[0]);
-    const lon = Number(centro[1]);
+    let lon = Number(centro[1]);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    // Arrastando o mapa pela linha de data o centro passa de ±180 (o mapa dá a volta,
+    // `desprojetar` não normaliza): o link saía com `-180.12` (R16-3-03). A longitude
+    // volta para [-180, 180); a que já está na faixa NÃO é recalculada (o resto de
+    // ponto flutuante mexeria na casa decimal de quem não precisa).
+    if (lon < -180 || lon >= 180) lon = ((((lon + 180) % 360) + 360) % 360) - 180;
     const p = new URLSearchParams({ api: '1', map_action: 'pano', viewpoint: lat + ',' + lon });
     return STREET_VIEW_URL + '?' + p;
 }
