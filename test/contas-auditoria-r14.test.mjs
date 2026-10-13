@@ -153,10 +153,13 @@ function telaComIndicador({ autenticado = true, fila = ['v1'] } = {}) {
     // O `derrubarSessao`: a sessão desta aba é a guardada, e a renovação fica no ar.
     API: { sessionToken: 'TOK-A', setSession() {}, soltarSessao() {} }, safeLS: { get: () => 'TOK-A' },
     epocaDaSessao: 0, quedaAnunciada: false, Treino: { ativo: false },
+    rejeicoesDeLoteNoAr: new Set(),   // os lotes de rejeição no ar, que o indicador conta (R15-2-F3)
+    // Os avisos da sessão que a queda tira da tela (R15-7-F1, R15-2-F2).
+    avisosDeUmaVezNaTela: [], avisoDoLoteMarcando: null, avisoDaRecusaAutomatica: null,
     entrarPelaExtensao: () => new Promise(() => {}), avisarOutrasAbasDaQueda: () => {},
   };
   const h = montar(['updateInFlightIndicator', 'saindoPelaOutraAba', 'showAuthScreen', 'showMainScreen', 'derrubarSessao',
-    'sessaoDestaAbaEhAGuardada'], deps);
+    'sessaoDestaAbaEhAGuardada', 'dispensarAvisosDaSessao'], deps);
   const indicador = () => (els.inFlightIndicator ? els.inFlightIndicator.title : null);
   return { h, AppState, indicador };
 }

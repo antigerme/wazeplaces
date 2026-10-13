@@ -379,7 +379,9 @@ test('R14-7-A5: CONTROLES — o aviso que JÁ SAIU da tela não volta, o aviso c
 
 test('R14-7-A5: a troca de conta esquece os avisos de uma vez que estão na tela — eram da conta anterior', () => {
   const corpo = fatiar('esquecerOutraConta');
-  assert.match(corpo, /^    avisosAdiados = null;\n    avisosDeUmaVezNaTela = \[\];$/m,
+  // Os tira DA TELA também (`dispensarAvisosDaSessao`, R15-7-F1): só zerar a lista os deixava
+  // por cima da fila de quem entrou (test/avisos-auditoria-r15.test.mjs mede os punhos).
+  assert.match(corpo, /^    avisosAdiados = null;\n    dispensarAvisosDaSessao\(\{ soOsDeUmaVez: true \}\);$/m,
     'a troca de conta não esquece os avisos de uma vez NA TELA: o treino de quem entrou os devolveria a pendentes');
 });
 
@@ -529,6 +531,9 @@ const UAS = {
   'DuckDuckGo 17.4 (DuckDuckGo/7)': [UA_BASE('17_4') + ' Version/17.4 Mobile/15E148 DuckDuckGo/7 Safari/605.1.15', 'navegador'],
   'DuckDuckGo 18.5 (Ddg/)': [UA_BASE('18_5') + ' Version/18.5 Mobile/15E148 Ddg/18.5 Safari/604.1', 'navegador'],
   'app do Google 17.4 (GSA)': [UA_BASE('17_4') + ' GSA/313.0.627131925 Mobile/15E148 Safari/604.1', 'navegador'],
+  // R15-7-CV-A2: dois que a lista não conhecia e traziam o `Version/` (passavam por Safari)
+  'Yandex 17.5 (YaBrowser)': [UA_BASE('17_5') + ' Version/17.0 YaBrowser/24.6.3.514.10 SA/3 Mobile/15E148 Safari/604.1', 'navegador'],
+  'app do Bing 17.5 (BingSapphire)': [UA_BASE('17_5') + ' Version/17.0 BingSapphire/28.6.430601002 Mobile/15E148 Safari/605.1.15', 'navegador'],
   // um navegador que a lista NÃO conhece (com `Safari/`, sem `Version/`): pela
   // positiva ele não é o Safari — é o caso que a negativa errava sempre
   'navegador desconhecido 17.4': [UA_BASE('17_4') + ' Mobile/15E148 Safari/604.1', 'navegador'],
@@ -536,6 +541,7 @@ const UAS = {
   'Opera 16.3 (OPT)': [UA_BASE('16_3') + ' Version/16.3 Mobile/15E148 Safari/604.1 OPT/3.4.6', 'nada'],
   'DuckDuckGo 16.3': [UA_BASE('16_3') + ' Version/16.3 Mobile/15E148 DuckDuckGo/7 Safari/605.1.15', 'nada'],
   'app do Google 16.3 (GSA)': [UA_BASE('16_3') + ' GSA/250.0.512345678 Mobile/15E148 Safari/604.1', 'nada'],
+  'Yandex 15.7 (YaBrowser)': [UA_BASE('15_7') + ' Version/15.0 YaBrowser/23.3.0.000 SA/3 Mobile/15E148 Safari/604.1', 'nada'],
   // DENTRO de outro app: sem convite em iOS nenhum
   'Facebook 17.4': [UA_BASE('17_4') + ' Mobile/21E219 [FBAN/FBIOS;FBAV/455.0.0.39.107;FBDV/iPhone15,2;FBMD/iPhone;FBSN/iOS;FBSV/17.4;FBLC/pt_BR;FBOP/5]', 'nada'],
   'Facebook 15.0': [UA_BASE('15_0') + ' Mobile/19A346 [FBAN/FBIOS;FBAV/350.0.0.0;FBDV/iPhone12,1;FBMD/iPhone;FBSN/iOS;FBSV/15.0;FBLC/pt_BR]', 'nada'],

@@ -1093,8 +1093,9 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
       setTimeout(() => { if (perfil === 'chega') h.aoConhecerConta({ id: contaDoPerfil }); ok(); }, 5);
     }),
   };
+  // `filaRealComDevolvidos`/`filaReal`: "havia fila na queda?" (R15-6-02) lê a fila de verdade.
   h = montar(['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta',
-    'esquecerOutraConta', 'marcaDaSessao', 'marcaDestaAba'], deps);
+    'esquecerOutraConta', 'marcaDaSessao', 'marcaDestaAba', 'filaRealComDevolvidos', 'filaReal'], deps);
   safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('tokA') }));   // A estava triando
   h.derrubarSessao('srv.err.cookiesExpired');
   window.responder({ source: 'wazeplaces-ext', action: 'sessao', token: 'tokB',

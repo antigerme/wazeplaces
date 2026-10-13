@@ -57,6 +57,7 @@ test('H1: entrar na aba Histórico DESENHA o painel, e antes de marcar as novas 
     FILTER_TABS: [{ tab: 'filtersTabFilters', panel: 'filtersPanelFilters' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
                   { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }],
     renderHistory: () => ordem.push('desenhou'), marcarConquistasVistas: () => ordem.push('marcou'),
+    renderUndoGateUI: () => {},   // a cota do Desfazer, redesenhada ao entrar nas Preferências (R15-7-A3-INC)
   };
   const { switchFilterTab } = montar(['switchFilterTab'], deps, ['switchFilterTab']);
   switchFilterTab('filtersTabPrefs');

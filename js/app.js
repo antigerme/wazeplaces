@@ -1865,6 +1865,13 @@ function switchFilterTab(tabId) {
         renderHistory();
         marcarConquistasVistas();
     }
+    // A cota do Desfazer lê o placar REAL, que anda enquanto as Preferências estão
+    // escondidas (o "Desfazer" do banner com os Filtros abertos, a recusa do Waze, o
+    // placar de outra aba): o `desenharPlacar` só a redesenha com a aba NA TELA, e
+    // ao entrar nela a chave aparecia viva e ligada, sem o "falta N", até o primeiro
+    // toque (R15-7-A3-INC, MEDIDO nos dois motores). Redesenhar ao ENTRAR fecha o
+    // outro lado — e não custa nada por swipe, que é onde a outra opção custaria.
+    if (tabId === 'filtersTabPrefs') renderUndoGateUI();
     const isFilters = tabId === 'filtersTabFilters';
     $('cancelFilters').classList.toggle('hidden', !isFilters);
     $('applyFilters').classList.toggle('hidden', !isFilters);
@@ -11757,6 +11764,9 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // E as do lightbox, que têm janela própria (ver a função).
     cancelarPendenciasDoLightbox();
     removeUndoBanner();
+    // E os avisos da sessão que acabou (ver a função): o dourado do Desfazer, a dica e
+    // a consequência, o "Marcando N…" e o "Rejeitando N…" (R15-7-F1, R15-2-F2).
+    dispensarAvisosDaSessao();
     // O token só sai do aparelho se é o desta aba. Senão só a memória solta —
     // pelo `setSession`, o de lá (o da outra aba) sairia, e o diário ganharia
     // um "token-" de uma sessão que ele já tinha dado por encerrada.
@@ -11827,6 +11837,12 @@ function derrubarSessao(errorKey, { depois } = {}) {
     // quando ela não volta no "Sair" (`Treino.epocaDaFilaGuardada`).
     const epocaDaFilaReal = () => (Treino.ativo === true ? Treino.epocaDaFilaGuardada() : AppState.fetchEpoch);
     const filaDaQueda = epocaDaFilaReal();
+    // Havia FILA na queda? Na abertura (a sessão salva que venceu, renovada pela
+    // extensão) nunca houve, e "sua fila continua aqui" prometia uma fila que ainda
+    // não existia (R15-6-02). Lida DEPOIS do `cancel(true)` acima, que devolve à fila o
+    // pedido da janela do Desfazer — esse é um pedido que continua —, e pela fila REAL
+    // (no treino, a da tela são os exemplos).
+    const haviaFilaNaQueda = filaRealComDevolvidos().length > 0 || (Treino.ativo !== true && !!AppState.currentPlace);
     entrarPelaExtensao({ silencioso: true, manterFila: true }).then(async (renovou) => {
         // O "Sair" no meio da renovação: a tela e o aviso já são os dele, e um
         // "sua sessão expirou" depois dele diria o que não aconteceu (K3).
@@ -11843,7 +11859,7 @@ function derrubarSessao(errorKey, { depois } = {}) {
                 new Promise((ok) => setTimeout(ok, AVISO_RENOVADA_ESPERA_PERFIL_MS)),
             ]);
             if (epoca !== epocaDaSessao) return;
-            if (filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
+            if (haviaFilaNaQueda && filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
         // A extensão pode ter respondido que o PORTÃO recusou a conta (o nível
@@ -12379,10 +12395,18 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     AppState.statesByCountry = {};
     esquecerListasDePaises();
     removeUndoBanner();
+    // Os avisos da sessão que saiu: o banner do topo é tocável, e abria os Filtros sem
+    // sessão por cima do "Bem-vindo!" (ver a função; R15-7-F1, R15-2-F2).
+    dispensarAvisosDaSessao();
     updateInFlightIndicator();
     updateStats();
     updateDevBadge();
     removeCurrentCardEl();
+    // O "Entrando pelo WME…" da pergunta da abertura (a extensão ainda não
+    // respondeu) sai com a tela de entrada: a resposta dela não entra mais (a
+    // época trocou), e os dois juntos eram o "Bem-vindo!" empurrado 276 px
+    // (R15-1-02, MEDIDO). Quem desliga o spinner é quem decide a tela.
+    mostrarEntrandoPelaExtensao(false);
     showAuthScreen();
     if (!naEntrada) showToast(t(outraConta ? 'toast.outraContaNoutraAba' : porOutraAba ? 'toast.saiuNoutraAba' : 'toast.loggedOut'), 'info');
 
@@ -19424,6 +19448,7 @@ async function aplicarRecusaAutomatica() {
         return t(q === 1 ? 'auto.andando' : 'auto.andandoPlural', { n: q, autor });
     };
     const aviso = showToast(andando(n), 'hint', 600000);
+    avisoDaRecusaAutomatica = aviso;
     try {
         await enviarLote(alvos, {
             silencioso: true,
@@ -19452,6 +19477,8 @@ async function aplicarRecusaAutomatica() {
         // Acabou: o aviso sai. Desligar o automático de alguém continua onde
         // sempre esteve — o interruptor da lista, na aba Histórico.
         aviso.dispensar();
+        // Só o nosso (R15-2-F2, ver `avisoDaRecusaAutomatica`).
+        if (avisoDaRecusaAutomatica === aviso) avisoDaRecusaAutomatica = null;
         // Quem falhou voltou pra fila (ver `enviarLote`).
         aoMudarAFilaPorBaixo();
     }
@@ -19749,7 +19776,8 @@ function rejeitarLoteDoAutor(place, contados) {
     else { removeCurrentCardEl(); showNoPlaces(); }
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const gesto = carimboDoGesto();   // o dia e o lugar do GESTO (R6-7-4)
-    scheduleAction('reject', places, () => enviarLote(places, { regiao, gesto }), { aoSair: 'cancel' });
+    // `dentroDeUmaAcao`: o `scheduleAction` soma a unidade dele no `inFlightActions`.
+    scheduleAction('reject', places, () => enviarLote(places, { regiao, gesto, dentroDeUmaAcao: true }), { aoSair: 'cancel' });
 }
 
 // Um a um, e o resultado NÃO é um número só: cada pedido tem destino próprio.
@@ -19816,7 +19844,12 @@ async function enviarLote(places, opts = {}) {
     };
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const aoLandar = !!opts.contarAoLandar;
+    // O que este lote diz ao indicador "Enviando N…" (ver `rejeicoesDeLoteNoAr`). Os
+    // `repetidos` não saem nem entram na conta, e ficam de fora do que resta.
+    const noAr = { epoca, restam: places.length, acoes: 1 + (opts.dentroDeUmaAcao === true ? 1 : 0) };
     const progresso = () => {
+        noAr.restam = Math.max(0, places.length - repetidos.size - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada - conta.naoVale);
+        updateInFlightIndicator();
         if (aoLandar) { updateStats(); saveStats(); updatePendingCount(); }
         if (opts.aoProgredir) opts.aoProgredir(places.length - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada - conta.naoVale, conta);
     };
@@ -19867,6 +19900,8 @@ async function enviarLote(places, opts = {}) {
         abriuAnotado = true;
         dfato('saida.abriu', { tipo: 'reject' });
     };
+    noAr.restam = places.length - repetidos.size;
+    rejeicoesDeLoteNoAr.add(noAr);
     AppState.inFlightActions++;
     updateInFlightIndicator();
     // A recusa AUTOMÁTICA confere antes de CADA ida ao Waze — a primeira e cada
@@ -20036,6 +20071,7 @@ async function enviarLote(places, opts = {}) {
     } finally {
         // Todos, inclusive os que não chegaram a sair (sessão morta no meio).
         marcarEmAndamento(places, false);
+        rejeicoesDeLoteNoAr.delete(noAr);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         updateStats();
@@ -20666,6 +20702,35 @@ function anotarAvisoDeUmaVezNaTela(aviso) {
     // Só os que ainda estão na tela ficam na lista (são no máximo quatro na vida).
     avisosDeUmaVezNaTela = avisosDeUmaVezNaTela.filter((a) => a.punho.naTela?.() === true);
     avisosDeUmaVezNaTela.push({ ...aviso, epoca: epocaDaSessao });
+}
+
+// Os avisos que são DE UMA SESSÃO saem da tela quando ela acaba (a queda, o "Sair")
+// ou muda de dono (a troca de conta). O banner do topo (`#bannerContainer`) sobrevivia
+// aos três — o dourado do Desfazer, a dica, a consequência do 1º ✕/✓ e o "Rejeitando
+// N…" da recusa automática — e ficava por cima da tela de entrada, TOCÁVEL: abria os
+// Filtros e as Preferências sem sessão, e o que se mexia ali era gravado. Com OUTRA
+// conta entrando, a "Rejeição enviada ao Waze em seu nome" da anterior aparecia sobre
+// a fila dela, sem ela ter decidido nada (R15-7-F1, MEDIDO nos dois motores; a árvore
+// de antes igual). O "Marcando N como lidos…" do lote ficava ao lado do "Sessão
+// encerrada e dados apagados." (R15-2-F2).
+//
+// `soOsDeUmaVez`: a troca de conta tira só os de uma vez (e o confete do desbloqueio) —
+// o resto do banner pode ser o da conta que ENTROU (a recusa automática dela).
+function dispensarAvisosDaSessao({ soOsDeUmaVez = false } = {}) {
+    const lista = avisosDeUmaVezNaTela;
+    avisosDeUmaVezNaTela = [];
+    for (const a of lista) {
+        try { a.punho.remover(); } catch (e) { /* já saiu */ }
+        try { a.confete?.remove?.(); } catch (e) { /* já saiu */ }
+    }
+    if (soOsDeUmaVez) return;
+    for (const punho of [avisoDoLoteMarcando, avisoDaRecusaAutomatica]) {
+        try { punho?.remover?.(); } catch (e) { /* já saiu */ }
+    }
+    avisoDoLoteMarcando = null;
+    avisoDaRecusaAutomatica = null;
+    // O banner do topo só guarda estes quatro tipos (`hint` e `achievement`).
+    document.getElementById('bannerContainer')?.replaceChildren();
 }
 
 function devolverAvisosDeUmaVezDaTela() {
@@ -21378,7 +21443,7 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // Os que estão NA TELA também são dela: o treino que abrir não os devolve a
     // pendentes pra quem entrou (R14-7-A5).
     avisosAdiados = null;
-    avisosDeUmaVezNaTela = [];
+    dispensarAvisosDaSessao({ soOsDeUmaVez: true });
     // E a ÁREA GERENCIADA do filtro, que vem do perfil dela: a busca de quem
     // entrou saía filtrada pela área de outra pessoa, com os Filtros dizendo
     // "Nenhuma" (auditoria de 2026-10-01, R5-1 F4). O perfil de quem entrou
@@ -25888,6 +25953,23 @@ let loteDeLidosEmVoo = false;
 // responde, e só vale com o lote no ar (`loteDeLidosEmVoo`, que a queda e o
 // "Sair" soltam). Ver `updateInFlightIndicator`.
 let lidosDoLoteNoAr = 0;
+// Os avisos que ACOMPANHAM um envio no ar: o "Marcando N como lidos…" do lote e o
+// banner "Rejeitando N…" da recusa automática. O `finally` de cada um os tira
+// quando o Waze responde — e a resposta pode levar até 45 s × 3 tentativas. A
+// queda e o "Sair" não esperam por ela: o punho fica aqui pra `dispensarAvisosDaSessao`
+// os tirar na hora, senão "Marcando 5…" ficava ao lado do "Sessão encerrada e
+// dados apagados." na tela de entrada (R15-2-F2, MEDIDO nos dois motores).
+let avisoDoLoteMarcando = null;
+let avisoDaRecusaAutomatica = null;
+// Os lotes de REJEIÇÃO no ar (`enviarLote`: o "Rejeitar os N" e a recusa automática),
+// com quantos pedidos de cada um ainda não responderam. O "Enviando N…" conta
+// DECISÕES, como o do "Marcar todos" (R14-8-10): o `enviarLote` é UMA ação no
+// `inFlightActions` — duas no "Rejeitar os N", que passa pelo `scheduleAction` e
+// soma a dele —, e o canto dizia "Enviando 2…" com 5 saindo e "Enviando 1…" na
+// recusa automática (R15-2-F3, MEDIDO). `acoes` é quantas unidades do
+// `inFlightActions` o lote ocupa, e o indicador as troca pelos pedidos dele. Cada
+// registro leva a época da sessão: o de uma sessão que acabou não conta na seguinte.
+const rejeicoesDeLoteNoAr = new Set();   // { epoca, restam, acoes }
 // Pedidos por requisição. O Waze processa o lote EM ORDEM e PARA no primeiro
 // pedido que outro editor já resolveu — MEDIDO em 2026-09-25 com a conta L2:
 // [real, inexistente, real] → HTTP 500, código 300, com o PRIMEIRO marcado e o
@@ -26005,6 +26087,7 @@ async function handleBatchMarkRead() {
     // dele (45 s) e o `callWithRetry` repete duas vezes.
     const avisoDoLote = showToast(t(alvos.length === 1 ? 'toast.batchMarking' : 'toast.batchMarkingPlural', { n: alvos.length }),
         'info', 600000);
+    avisoDoLoteMarcando = avisoDoLote;
     // Quantos ainda estão no ar, a partir do pedido `i` dos alvos (os de antes
     // responderam). Só o lote DESTA sessão escreve: depois da queda o laço para.
     const noAr = (i) => {
@@ -26182,6 +26265,8 @@ async function handleBatchMarkRead() {
         // (`remover`): o desfecho toma o lugar dele, e esmaecendo ele ainda ocupava
         // a pilha (e o teto de 3) quando o "N marcados" entrava.
         if (avisoDoLote && typeof avisoDoLote.remover === 'function') avisoDoLote.remover();
+        // Só o nosso: um lote da sessão nova pode já ter posto o dele (R15-2-F2).
+        if (avisoDoLoteMarcando === avisoDoLote) avisoDoLoteMarcando = null;
     }
     // Sai da fila o que ESTÁ nela, pela chave, e o "Restam" desce pelo que de
     // fato SAIU — nunca por quantos o lote marcou. É isso que amarra o desconto
@@ -26744,7 +26829,11 @@ function updateInFlightIndicator() {
     // rodada 11, MEDIDO nos dois motores). O texto e a régua do FAB passam a
     // dizer a mesma coisa: alguém está mandando.
     const pelaOutraAba = saindoPelaOutraAba(fila);
-    if (AppState.inFlightActions <= 0 && esperando <= 0) {
+    // Sem sessão não há "enviando" nem "esperando" a mostrar: a decisão que ficou no
+    // ar é da sessão que acabou (a queda não zera o `inFlightActions`, e a resposta
+    // dela só chega depois), e o "Enviando 1…" ficava no canto da tela de entrada
+    // (R15-2-F2, MEDIDO: da queda até ~11 s depois). Pela mesma saída do "nada no ar".
+    if (AppState.authenticated !== true || (AppState.inFlightActions <= 0 && esperando <= 0)) {
         // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
         // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
         if (el) { el.remove(); if (eraLeitura) atualizarFabDev(); }
@@ -26778,7 +26867,18 @@ function updateInFlightIndicator() {
     // fatiam esta função sem as variáveis do lote.)
     const doLote = typeof loteDeLidosEmVoo !== 'undefined' && loteDeLidosEmVoo === true
         && typeof lidosDoLoteNoAr === 'number' && lidosDoLoteNoAr > 1 ? lidosDoLoteNoAr - 1 : 0;
-    const saindo = Math.max(0, AppState.inFlightActions) + pelaOutraAba + doLote;
+    // Os lotes de rejeição no ar (R15-2-F3): os pedidos deles no lugar das unidades
+    // que ocupam no `inFlightActions`. Um lote em seus últimos instantes (nada a
+    // responder, o `finally` ainda por rodar) conta 1, como o "Marcar todos".
+    let acoesDeLote = 0, pedidosDeLote = 0;
+    if (typeof rejeicoesDeLoteNoAr !== 'undefined') {
+        for (const l of rejeicoesDeLoteNoAr) {
+            if (l.epoca !== epocaDaSessao) continue;
+            acoesDeLote += l.acoes;
+            pedidosDeLote += Math.max(1, l.restam);
+        }
+    }
+    const saindo = Math.max(0, Math.max(0, AppState.inFlightActions) - acoesDeLote) + pedidosDeLote + pelaOutraAba + doLote;
     const enviando = saindo > 0;
     const n = enviando ? saindo : esperando;
     const texto = enviando
@@ -27721,6 +27821,8 @@ const MARCAS_DE_NAVEGADOR_NO_IOS = [
     /\bDuckDuckGo\//,   // DuckDuckGo, até a versão 7 — traz `Version/`
     /\bDdg\//,          // DuckDuckGo, as versões de depois — traz `Version/`
     /\bGSA\//,          // o app do Google: a busca abre a página no navegador dele
+    /\bYaBrowser\//,    // Yandex Browser — traz `Version/` (R15-7-CV-A2)
+    /\bBingSapphire\//, // o app do Bing: abre a página no navegador dele, como o do Google (R15-7-CV-A2)
 ];
 // Os navegadores DENTRO de outro app (o WebView do Facebook, do Instagram…): ali
 // não há "Adicionar à Tela de Início", e o convite seria o beco sem saída que a
@@ -28145,6 +28247,9 @@ function abrirModalNaAba(aba) {
 
 // Leva direto ao interruptor em vez de mandar procurar em Filtros → Preferências.
 async function abrirPreferenciaDoUndo() {
+    // Sem sessão não há Filtros nem Preferências a abrir: o banner que sobrou da
+    // sessão anterior abria os Filtros por cima da tela de entrada (R15-7-F1).
+    if (AppState.authenticated !== true) return;
     const pendente = abrirModalNaAba('filtersTabPrefs');
     const linha = document.getElementById('prefUndoRow');
     if (linha && !prefersReducedMotion()) {

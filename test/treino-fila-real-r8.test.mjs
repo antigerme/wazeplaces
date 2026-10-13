@@ -510,7 +510,7 @@ function montarRecusa() {
   // A `filaReal` também: no treino, a recusa procura alvo na fila real (R10-4-06).
   const app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'pousouNoWaze', 'descontarGestoSemSessao', 'enviarLote',
     'filaReal', 'aplicarRecusaAutomatica'],
-  'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false;',
+  'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false; const rejeicoesDeLoteNoAr = new Set();',
   'pedidaDeNovo: () => recusaAutomaticaPedidaDeNovo, rodando: () => recusaAutomaticaRodando');
   return { app, AppState, waze };
 }

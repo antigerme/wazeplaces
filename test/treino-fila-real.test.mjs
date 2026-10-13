@@ -141,6 +141,8 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
   };
   const fontes = [
     'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false; let recusaAutomaticaNestaFila = false;',
+    // O indicador do "Enviando N…" (R15-2-F3).
+    'const rejeicoesDeLoteNoAr = new Set();',
     'let filaEsperaPerfil = false; let referenciasDoPerfil = null; let posicaoGps = null;',
     // O lugar do pedido do perfil, que a decisão leva (R14-6-04).
     'let lugarDoPedidoDoPerfil = null;',

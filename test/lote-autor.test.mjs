@@ -80,6 +80,7 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
     aoMudarAFilaPorBaixo: () => log.push('fundo:' + (AppState.queue[1] ? AppState.queue[1].venueID : '-')),
     Treino: { ativo: false },
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const enviarLote = new Function(...chaves, fatiar('enviarLote') + '\n' + fatiar('devolverPedidoRecusado')
     + '\nreturn enviarLote;')(...chaves.map((k) => deps[k]));
@@ -325,6 +326,7 @@ test('F7: trocar a região com a recusa automática no ar não manda o resto pro
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, carimboDoGesto: () => null,
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n' + fatiar('enviarLote') + '\n'
     + fatiar('aplicarRecusaAutomatica') + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -364,6 +366,7 @@ test('R6-7-4: trocar o PAÍS com a recusa automática no ar não muda o "onde" n
     updateInFlightIndicator: () => {}, updateStats: () => {}, saveStats: () => {}, mostrarResultadoDoLote: () => {},
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, historyTodayKey: () => estado.dia, getLang: () => 'pt',
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n'
     + ['enviarLote', 'aplicarRecusaAutomatica', 'ondeAgora', 'carimboDoGesto'].map(fatiar).join('\n')
@@ -578,6 +581,7 @@ function montarRecusa() {
     pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, devolverPedidoRecusado: () => {},
     carimboDoGesto: () => null,
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const recusar = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;\n'
     + fatiar('enviarLote') + '\n' + fatiar('aplicarRecusaAutomatica') + '\nreturn aplicarRecusaAutomatica;')(...chaves.map((k) => deps[k]));
@@ -841,6 +845,7 @@ function montarRecusaNaAbertura({ autoLigado = (id) => id === 777, fila = [pedid
     trocarTextoI18n: (e, k) => { if (e) { e.attrs['data-i18n'] = k; textos[e === h3 ? 'titulo' : 'corpo'] = k; } },
     filaZeradaConfirmada: () => true, checarConquistas: (x) => conquistas.push(x),
   };
+  deps.rejeicoesDeLoteNoAr = new Set();   // o indicador do "Enviando N…" (R15-2-F3)
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let recusaAutomaticaRodando = false; let recusaAutomaticaPedidaDeNovo = false;'
     + ' let tratouNestaFila = false; let recusaAutomaticaNestaFila = false; let puladosNoInicioDaFila = 0;'
