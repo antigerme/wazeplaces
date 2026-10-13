@@ -9385,7 +9385,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       consequenciaVista: { read: true, reject: true } },
   };
   // `segurarLido`: o ✓ fica no ar até o teste soltar — a página vai pro fundo ANTES de ele pousar.
-  const abrirApp = async ({ viewport, aviso, segurarLido = false }) => {
+  // `segurarRejeitar`: o `validar-place` (o ✕ e o "Rejeitar os N") fica no ar até o teste soltar.
+  // `pedidos`: a fila de pedidos (padrão: quatro de autores diferentes). `semDesfazer`: o Desfazer
+  // desligado (a cota cumprida, L6 com 50 tratados), pra o lote sair na hora, sem a janela.
+  const abrirApp = async ({ viewport, aviso, segurarLido = false, segurarRejeitar = false, pedidos = null, semDesfazer = false }) => {
     const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
     const n0 = aviso === 'desbloqueio' ? 9 : 50;
     await ctx.addInitScript(({ prefs, n0, dia }) => {
@@ -9398,10 +9401,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         localStorage.setItem('waze_places_stats', JSON.stringify({ read: n0, rejected: 0, skipped: 0 }));
         localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: n0, rejected: 0 }, [dia]: { read: n0, rejected: 0 } }));
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
-    }, { prefs: PREFS[aviso], n0, dia });
-    const places = [1, 2, 3, 4].map(pedido);
+    }, { prefs: semDesfazer ? { ...PREFS[aviso], undoEnabled: false } : PREFS[aviso], n0, dia });
+    const places = pedidos || [1, 2, 3, 4].map(pedido);
     let soltar = null;
-    const lido = segurarLido ? new Promise((ok) => { soltar = ok; }) : null;
+    const lido = segurarLido || segurarRejeitar ? new Promise((ok) => { soltar = ok; }) : null;
     const envios = [];
     await ctx.route('**/api/**', async (r) => {
       const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
@@ -9413,7 +9416,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       else if (nome === 'buscar-places') corpo = { success: true, places, hasMore: false, page: 1, total: places.length, totalAll: places.length, blocked: 0 };
       else if (nome === 'validar-place' || nome === 'marcar-lido') {
         envios.push(nome);
-        if (nome === 'marcar-lido' && lido) await lido;
+        if (nome === 'marcar-lido' && lido && segurarLido) await lido;
+        if (nome === 'validar-place' && lido && segurarRejeitar) await lido;
       }
       await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
     });
@@ -9664,6 +9668,108 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const depois = await chave();
     checa(depois.placar === 9 && !depois.viva && depois.ligada && depois.frase,
       `${rot}: o placar voltou a 9 (abaixo da cota) e o interruptor seguiu VIVO nas Preferências abertas`, JSON.stringify(depois));
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (6b) R15-7-A3-INC: o mesmo placar que cai (o "Desfazer" do banner, POR CIMA dos
+  // Filtros), mas com as Preferências ESCONDIDAS (a aba Filtros, a de abertura): o
+  // `desenharPlacar` só redesenha a cota com a aba na tela, e ao ENTRAR nela a chave
+  // aparecia viva e ligada, sem o "falta 1", até o primeiro toque. CONTROLE: o mesmo
+  // percurso, com o placar em 10 (sem o "Desfazer"), deixa a chave viva — o instrumento
+  // distingue as duas.
+  for (const desfaz of [true, false]) {
+    const rot = `avisos de uma vez (6b, ${desfaz ? 'o placar cai com as Preferências escondidas' : 'CONTROLE sem o Desfazer'})`;
+    const { ctx, page, erros } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio' });
+    await page.click(FRENTE + ' .card-btn-read');
+    await esperarOuExplodir(page, () => !!AppState.pendingAction, `${rot}: o ✓ não abriu a janela`);
+    await page.click('#filtersBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: os Filtros não abriram`);
+    if (desfaz) {
+      await page.click('#undoBtn');
+      await esperarOuExplodir(page, () => !AppState.pendingAction, `${rot}: o "Desfazer" não fechou a janela`);
+    } else {
+      await page.evaluate(() => { despacharJanelaDoDesfazer(); });
+      await esperarOuExplodir(page, () => !AppState.pendingAction, `${rot}: a janela não fechou`);
+    }
+    await page.click('#filtersTabPrefs');
+    await doisQuadros(page);
+    const chave = await page.evaluate(() => {
+      const cb = document.getElementById('prefUndoEnabled');
+      const msg = document.getElementById('prefUndoGateMsg');
+      return { placar: AppState.stats.read + AppState.stats.rejected, viva: !cb.disabled, ligada: cb.checked,
+        frase: !msg.classList.contains('hidden') && msg.textContent.trim().length > 0 };
+    });
+    if (desfaz) {
+      checa(chave.placar === 9 && !chave.viva && chave.ligada && chave.frase,
+        `${rot}: a aba Preferências abriu com a chave VIVA abaixo da cota (9 de 10), sem o "falta 1"`, JSON.stringify(chave));
+    } else {
+      checa(chave.placar === 10 && chave.viva && chave.ligada && !chave.frase,
+        `${rot}: CONTROLE — com a cota cumprida a chave devia estar viva`, JSON.stringify(chave));
+    }
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (7) R15-7-F1: o aviso que está na tela quando a sessão ACABA — o "Sair" e a queda — sai
+  // com ela. Ficava por cima da tela de entrada, tocável: abria os Filtros sem sessão. O
+  // CONTROLE é o PRÉ-CONDIÇÃO de cada caso (o aviso recebe o toque inteiro antes de a sessão
+  // acabar: a grade enxerga o banner) e o caso 'sem sessão' do `abrirPreferenciaDoUndo`.
+  for (const saida of ['sair', 'queda']) {
+    const rot = `avisos de uma vez (7, ${saida === 'sair' ? 'o "Sair"' : 'a queda da sessão'})`;
+    const { ctx, page, erros, envios } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia' });
+    await page.click(FRENTE + ' .card-btn-reject');
+    await pousou(page, envios, 1);
+    await doisQuadros(page);
+    const antes = await banner(page);
+    checa(!!antes && antes.recebe === 9, `${rot}: PRÉ-CONDIÇÃO — a consequência não estava na tela antes de a sessão acabar`, JSON.stringify(antes));
+    if (saida === 'sair') {
+      await page.click('#helpBtn');
+      await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'helpModal', `${rot}: a Ajuda não abriu`);
+      await page.click('#logoutBtn');
+      await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'logoutModal', `${rot}: o diálogo do "Sair" não abriu`);
+      await page.click('#confirmLogout');
+    } else {
+      await page.evaluate(() => { derrubarSessao('srv.err.sessionExpired'); });
+    }
+    await esperarOuExplodir(page, () => !AppState.authenticated, `${rot}: a sessão não acabou`);
+    await doisQuadros(page);
+    const depois = await page.evaluate(() => ({ banners: document.querySelectorAll('#bannerContainer .toast').length,
+      indicador: !!document.getElementById('inFlightIndicator') }));
+    checa(depois.banners === 0, `${rot}: o aviso da sessão que acabou ficou na tela (tocável, abre os Filtros sem sessão)`, JSON.stringify(depois));
+    // O toque no `abrirPreferenciaDoUndo` (o que o banner do Desfazer faz) sem sessão não abre nada.
+    await page.evaluate(() => { abrirPreferenciaDoUndo(); });
+    await doisQuadros(page);
+    const modal = await page.evaluate(() => (topOpenModal() || {}).id || null);
+    checa(modal === null, `${rot}: o toque no aviso do Desfazer abriu "${modal}" SEM sessão`);
+    checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // (8) R15-2-F2/F3: o canto "Enviando N…" conta os PEDIDOS do "Rejeitar os N" (e não 2) e some
+  // com a sessão — sem sessão, o inFlightActions da que acabou não aparece no "Bem-vindo!".
+  // O Desfazer vai desligado (a cota cumprida) pra o lote sair na hora; o `validar-place` fica
+  // preso no servidor de mentira até o teste soltar.
+  {
+    const rot = 'avisos de uma vez (8, o canto "Enviando N…" do "Rejeitar os N")';
+    const mesmoAutor = [1, 2, 3, 4, 5].map((n) => ({ ...pedido(n), creatorId: 4242, createdBy: 'mesma_pessoa' }));
+    const { ctx, page, erros, soltar } = await abrirApp({ viewport: PIXEL, aviso: 'consequencia', segurarRejeitar: true,
+      pedidos: mesmoAutor, semDesfazer: true });
+    await page.evaluate(() => { rejeitarLoteDoAutor(AppState.currentPlace); });
+    const ate5 = await esperarNaPagina(page, () => AppState.inFlightActions >= 1 && !!document.getElementById('inFlightIndicator'), 8000, 50);
+    checa(ate5.ok, `${rot}: PRÉ-CONDIÇÃO — o canto não apareceu com o lote no ar`);
+    const quanto = () => page.evaluate(() => {
+      const el = document.getElementById('inFlightIndicator');
+      return { texto: el ? (el.querySelector('.sr-only') || el).textContent.trim() : null, inFlight: AppState.inFlightActions };
+    });
+    const esperado = await page.evaluate(() => t('indicator.sending', { n: 5 }));
+    const durante = await quanto();
+    checa(durante.texto === esperado, `${rot}: com 5 pedidos saindo o canto diz "${durante.texto}", não "${esperado}"`, JSON.stringify(durante));
+    checa(durante.inFlight >= 2, `${rot}: CONTROLE — o inFlightActions devia estar em 2 (o app de antes dizia isso no canto)`, JSON.stringify(durante));
+    // A queda com o lote no ar: o canto some (sem sessão não há "Enviando").
+    await page.evaluate(() => { derrubarSessao('srv.err.sessionExpired'); });
+    await esperarOuExplodir(page, () => !AppState.authenticated, `${rot}: a sessão não acabou`);
+    await doisQuadros(page);
+    const semSessao = await quanto();
+    checa(semSessao.texto === null, `${rot}: o "Enviando" da sessão que acabou ficou no canto da tela de entrada`, JSON.stringify(semSessao));
+    soltar();
     checa(erros.length === 0, `${rot}: erro de JS`, erros[0]);
     await ctx.close();
   }
