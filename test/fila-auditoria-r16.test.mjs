@@ -73,6 +73,15 @@ function montar(nomes, deps) {
 
 const tique = () => new Promise((ok) => setImmediate(ok));
 const tiques = async (n = 6) => { for (let i = 0; i < n; i++) await tique(); };
+// Espera a CONDIÇÃO, com teto — nunca um prazo fixo (o runner estrangula o timer; gotcha do "teste de
+// browser não espera por prazo", vale pro de unidade também).
+async function ateQue(cond, msg, teto = 3000) {
+  const fim = Date.now() + teto;
+  while (!cond()) {
+    if (Date.now() > fim) assert.fail('a espera estourou: ' + msg);
+    await tique();
+  }
+}
 const chaveDe = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
 const P = (i, extra = {}) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 77, createdBy: 'spam', ...extra });
 
@@ -203,13 +212,16 @@ function decisaoNaRetentativa({ tipo = 'reject' } = {}) {
   const tela = dialogoDoSair();
   const place = P(1);
   const respostas = [];                                   // cada ida fica segura até o teste soltá-la
+  const recuos = [];                                      // cada recuo do `callWithRetry`, até o teste acabá-lo
   const fila = [{ tipo, venueID: place.venueID, updateRequestID: place.updateRequestID }];
   const AppState = { authenticated: true, currentPlace: place, queue: [], stats: { read: 0, rejected: 0, skipped: 0 },
     serverTotal: 1, fetchEpoch: 0, pendingAction: null, inFlightActions: 0 };
   const ida = () => new Promise((ok) => respostas.push(ok));
   const deps = {
     AppState, document: tela.document, epocaDaSessao: 0, Treino: { ativo: false }, navigator: { onLine: true },
-    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [15, 15],
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1500, 3500],
+    // O recuo do `callWithRetry` com o relógio à mão: o teste decide quando ele acaba.
+    setTimeout: (fn) => { recuos.push(fn); return recuos.length; },
     pedidosEmAndamento: new Set([chaveDe(place)]), pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),
     API: { getRegion: () => 'row', rejectPlace: ida, markAsRead: ida },
     carregarFilaDeSaida: () => fila, reivindicadoPorOutraAba: () => false,
@@ -222,9 +234,9 @@ function decisaoNaRetentativa({ tipo = 'reject' } = {}) {
   };
   const h = montar([tipo === 'reject' ? 'handleReject' : 'handleMarkAsRead', 'callWithRetry', 'sessaoTrocou', 'marcarEmAndamento',
     'marcarLoteSemEnviar', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido'], deps);
-  return { h, deps, tela, place, respostas, fila };
+  const fimDoRecuo = () => recuos.shift()();
+  return { h, deps, tela, place, respostas, recuos, fila, fimDoRecuo };
 }
-const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 for (const tipo of ['reject', 'read']) {
   test(`R16-2-03: o ${tipo === 'reject' ? '✕' : '✓'} esperando a retentativa entra no aviso do "Sair" — e sai dele quando a ida seguinte vai ao ar`, async () => {
@@ -236,15 +248,15 @@ for (const tipo of ['reject', 'read']) {
     m.h.desenharAvisoDoSair();
     assert.equal(m.tela.texto(), '', 'a decisão com a requisição no ar entrou no aviso (R15-2-F4 a deixa de fora)');
     m.respostas.shift()({ success: false, errorCategory: 'transient', httpCode: 503 });
-    await tiques();
+    await ateQue(() => m.recuos.length === 1, 'PRÉ-CONDIÇÃO: a decisão não entrou no recuo do `callWithRetry`');
     assert.equal(m.respostas.length, 0, 'PRÉ-CONDIÇÃO: a 2ª ida ainda espera o recuo (nada no ar)');
     // No recuo: nada no ar, o "Sair" cancelaria a retentativa — o aviso tem que contar.
     m.h.desenharAvisoDoSair();
     assert.equal(m.tela.texto(), 'modal.logout.saida:1',
       'DEFEITO: a decisão no recuo do `callWithRetry` não está na conta do "Sair", que a cancela sem aviso (R16-2-03): «' + m.tela.texto() + '»');
     // O recuo acaba e a ida seguinte vai ao ar: a decisão sai da conta SOZINHA (o diálogo segue aberto).
-    await esperar(60);
-    assert.equal(m.respostas.length, 1, 'PRÉ-CONDIÇÃO: a retentativa foi ao ar');
+    m.fimDoRecuo();
+    await ateQue(() => m.respostas.length === 1, 'PRÉ-CONDIÇÃO: a retentativa não foi ao ar');
     assert.equal(m.tela.texto(), '', 'a frase seguiu dizendo que a decisão seria descartada, com ela de volta ao ar: «' + m.tela.texto() + '»');
     m.respostas.shift()({ success: true });
     await m.deps.executor;
@@ -258,12 +270,13 @@ test('R16-2-03: o diálogo ABERTO acompanha o recuo (a frase aparece e some sem 
   await tiques();
   m.tela.modal.classList.remove('hidden');               // o diálogo já está na tela
   m.respostas.shift()({ success: false, errorCategory: 'transient', httpCode: 503 });
-  await tiques();
+  await ateQue(() => m.recuos.length === 1, 'PRÉ-CONDIÇÃO: a decisão não entrou no recuo');
   assert.equal(m.tela.texto(), 'modal.logout.saida:1', 'DEFEITO: o diálogo aberto não ganhou a frase quando a decisão entrou no recuo');
   // O "Sair" confirmado: a época muda, o conjunto é esvaziado (`handleLogout`) e a retentativa não sai.
   m.deps.epocaDaSessao++;
   m.deps.pedidosDoLoteSemEnviar.clear();
-  await esperar(60);
+  m.fimDoRecuo();                                        // o recuo acaba com a sessão já trocada
+  await m.deps.executor;                                 // o executor termina (a resposta é `session_changed`)
   assert.equal(m.respostas.length, 0, 'a retentativa saiu depois do "Sair"');
   assert.equal(m.deps.pedidosDoLoteSemEnviar.size, 0, 'a decisão cancelada ficou no conjunto');
 });
@@ -277,11 +290,15 @@ test('R16-2-03: CONTROLE — sem recuo (a 1ª ida pousa) nada entra no conjunto;
   assert.equal(m.deps.pedidosDoLoteSemEnviar.size, 0);
   // `callWithRetry` sozinho, com a ordem dos avisos.
   const eventos = [];
-  const deps = { epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5] };
+  const relogio = [];                                    // o recuo à mão: cada espera é um prazo que o teste acaba
+  const deps = { epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5],
+    setTimeout: (fn) => { relogio.push(fn); return relogio.length; } };
   const c = montar(['callWithRetry', 'sessaoTrocou'], deps);
   let n = 0;
-  const r = await c.callWithRetry(async () => { eventos.push('ida'); return ++n < 3 ? { success: false, errorCategory: 'transient' } : { success: true }; },
+  const andando = c.callWithRetry(async () => { eventos.push('ida'); return ++n < 3 ? { success: false, errorCategory: 'transient' } : { success: true }; },
     undefined, (sim) => eventos.push(sim ? 'espera' : 'fim-da-espera'));
+  for (let i = 0; i < 2; i++) { await ateQue(() => relogio.length === 1, 'o recuo não começou'); relogio.shift()(); }
+  const r = await andando;
   assert.equal(r.success, true);
   assert.deepEqual(eventos, ['ida', 'espera', 'fim-da-espera', 'ida', 'espera', 'fim-da-espera', 'ida'], 'a ordem dos avisos do recuo mudou');
   // Sem recuo (sucesso na 1ª) e sem rede (não se retenta): nenhum aviso.
@@ -294,8 +311,9 @@ test('R16-2-03: CONTROLE — sem recuo (a 1ª ida pousa) nada entra no conjunto;
   deps.navigator.onLine = true;
   const cortado = [];
   const pendente = c.callWithRetry(async () => ({ success: false, errorCategory: 'transient' }), undefined, (sim) => cortado.push(sim));
-  await tique();
+  await ateQue(() => relogio.length === 1, 'o recuo não começou');
   deps.epocaDaSessao++;
+  relogio.shift()();
   const rc = await pendente;
   assert.equal(rc.errorCategory, 'session_changed');
   assert.deepEqual(cortado, [true], 'o fim da espera foi avisado depois de a sessão acabar (apagaria o conjunto da sessão nova)');

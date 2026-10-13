@@ -22346,7 +22346,14 @@ function marcarEmAndamento(places, sim) {
 // um a um (ou em pedaços), e o "Sair" para o laço depois da ida que está no ar. O
 // diálogo do "Sair" conta o que sobra aqui (`desenharAvisoDoSair`, R15-2-F4). Cada
 // pedido sai do conjunto ao ENTRAR no ar, e o lote tira os seus todos no `finally`.
-// Em memória, como o `pedidosEmAndamento`; o "Sair" o esvazia.
+// Em memória, como o `pedidosEmAndamento`; o "Sair" o esvazia (e a queda e a conta em
+// dúvida também: `soltarOsLotesDaSessaoQueAcabou`).
+//
+// Guarda também o que ESPERA A RETENTATIVA do `callWithRetry` (R16-2-03): a decisão
+// ✕/✓, o pedido do "Rejeitar os N" ou o pedaço do "Marcar todos" cuja ida voltou
+// `transient` fica 1,5 s e 3,5 s sem requisição no ar, e o "Sair" a cancela. Entra aí
+// pelo `aoEsperar` do `callWithRetry` e sai quando a ida seguinte vai ao ar — a
+// decisão com a requisição NO AR segue de fora da conta (o Waze a recebe).
 const pedidosDoLoteSemEnviar = new Set();
 function marcarLoteSemEnviar(places, sim) {
     for (const p of (Array.isArray(places) ? places : [places])) {
