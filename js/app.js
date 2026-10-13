@@ -12426,6 +12426,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // depois da limpeza (ver a função; R8-1-04, L12-1).
     esquecerRegistrosDaPagina();
     AppState.profile = null;
+    // As categorias que a fila de quem saiu mostrou também: o seletor dos Filtros
+    // de quem entrar na mesma página oferecia as da conta anterior (R16-6-04).
+    AppState.seenCategories = [];
     // A conta que esta aba confirmou (`contaConfirmada`) sai junto: o que era
     // dela já saiu da memória aqui, e quem entrar depois não é uma troca de conta
     // NESTA aba (ver `aoConhecerConta`, R11-1-01).
@@ -21665,6 +21668,11 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     const noTreino = typeof Treino !== 'undefined' && Treino.ativo === true;
     const refazerFila = filaAtravessouSessao
         || (areaNaBusca && (noTreino ? filaRealComDevolvidos().length > 0 : (AppState.fetching || AppState.queue.length)));
+    // As categorias que o seletor dos Filtros oferece saem da fila (R16-6-04): as
+    // da conta anterior vão embora. Se a fila que fica é de quem entrou, as dela
+    // são recontadas; se vai ser refeita, a busca nova as traz.
+    AppState.seenCategories = [];
+    if (!refazerFila && typeof trackSeenCategories === 'function') trackSeenCategories(filaReal());
     if (refazerFila && noTreino) {
         if (filaAtravessouSessao) Treino.esquecerFilaDaContaAnterior();
         refazerFilaReal();

@@ -13196,6 +13196,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await page.evaluate((u) => aquecer(u), 'https://venue-image.waze.com/thumbs/thumb700_LENTA_PRIVSAIR.png');
   const fotoNoAr = await Promise.race([fotoLentaPedida.then(() => true), dormir(5000).then(() => false)]);
   checa(fotoNoAr, 'sair/recursos: PRÉ-CONDIÇÃO — a foto lenta nem foi pedida antes do "Sair"');
+  // As categorias vistas na fila de quem sai (R16-6-04): CONTROLE — antes do "Sair"
+  // o seletor dos Filtros as conhece (a fila é toda BAKERY); depois, não.
+  const categoriasAntes = await page.evaluate(() => [...AppState.seenCategories]);
+  checa(categoriasAntes.includes('BAKERY'),
+    'sair/categorias: CONTROLE — antes do "Sair" a fila não tinha deixado categoria vista (a medida não enxerga o caso)', JSON.stringify(categoriasAntes));
   // O "Sair", pela Ajuda.
   await tocar('#helpBtn');
   await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
@@ -13204,6 +13209,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#confirmLogout');
   await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated,
     'a tela de entrada depois do "Sair"');
+  const categoriasDepois = await page.evaluate(() => [...AppState.seenCategories]);
+  checa(categoriasDepois.length === 0,
+    'sair/categorias: depois do "Sair" o seletor dos Filtros de quem entrar ainda oferece as categorias da fila de quem saiu', JSON.stringify(categoriasDepois));
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
   const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
