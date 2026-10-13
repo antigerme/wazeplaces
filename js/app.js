@@ -7441,6 +7441,14 @@ function atenderORefazerAdiadoDaDescarga() {
     // Ainda saindo (o diálogo do "Sair" fechou com a página no fundo): continua
     // esperando; quem o atende é a volta da página.
     if (typeof API !== 'undefined' && API.saindo === true) return;
+    // Nem com o diálogo do "Sair" ABERTO (R16-1-02): a página que volta do fundo
+    // com ele na tela rodava a busca que o `atenderOFimDaJanela` tinha segurado
+    // por isso (R15-3-03) — jogada fora se a pessoa confirma. O refazer fica
+    // guardado, sem consumir; quem o atende é o fechamento do diálogo
+    // (`LIMPEZA_AO_FECHAR.logoutModal`), que já chama esta função. É o MESMO
+    // predicado do `atenderOFimDaJanela` (o `#logoutModal` sem `hidden`).
+    const sair = typeof document !== 'undefined' && document.getElementById ? document.getElementById('logoutModal') : null;
+    if (sair && sair.classList.contains('hidden') === false) return;
     const a = refazerAdiadoDaDescarga;
     refazerAdiadoDaDescarga = null;
     if (!a || !AppState.authenticated) return;
