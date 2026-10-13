@@ -497,7 +497,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 // O chat vem de outra página do WME (`/chat/embed`) e se identifica com
 // `X-User-Agent`; a presença, não. Os cabeçalhos seguem cada um.
 const WME_CHAT_URL = 'https://www.waze.com/chat/embed?app_id=WAZE_MAP_EDITOR';
-async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false } = {}) {
+async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false, tetoMs = WAZE_ESPERA_MS } = {}) {
   const headers = {
     Accept: 'application/grpc-web-text',
     'Content-Type': 'application/grpc-web-text',
@@ -517,7 +517,7 @@ async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat
   if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WAZE_ESPERA_MS);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, texto;
     try {
       res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
@@ -3757,25 +3757,26 @@ async function comConfirmados(resposta, confirmacao) {
   return resposta;
 }
 
-// Abrir uma conversa no app: o histórico e o "lida" numa ida só (fase 3). O
-// "lida" é acessório: QUALQUER falha dele vira `recibos: []` e o histórico
-// segue — inclusive a conversa que ainda não existe (status 7 com
-// NO_EXISTING_CONVERSATION, medido), que não é erro nenhum. Marcar como lida
-// já gera, no servidor do Waze, os recibos que o remetente recebe (fase 1).
+// O teto do "lida" do `abrir`, que sai DEPOIS do histórico: o histórico segue
+// com o teto cheio (`WAZE_ESPERA_MS`) e a soma tem que caber nos 45 s do cliente
+// (`test/portao-servidor.test.mjs`). O "lida" é acessório pro histórico: o que
+// não voltou até aqui vira `lida: false`, e o "lida" da rajada tenta de novo.
+export const ABRIR_LIDA_ESPERA_MS = 10000;
+
+// Abrir uma conversa no app: o histórico e o "lida" numa ida só ao nosso
+// servidor (fase 3), um depois do outro ao Waze. O "lida" é acessório: QUALQUER
+// falha dele vira `recibos: []` e o histórico segue — inclusive a conversa que
+// ainda não existe (status 7 com NO_EXISTING_CONVERSATION, medido), que não é
+// erro nenhum. Marcar como lida já gera, no servidor do Waze, os recibos que o
+// remetente recebe (fase 1).
 async function abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }) {
   const com = idWaze(data.com);
   const antesDe = instante(data.antesDe);
   const { cookieHeader } = prepareAuth(cookies);
   const base = WAZE_WMP[region] || WAZE_WMP.row;
   const cabLida = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
-  const [hist, lida] = await Promise.all([
-    callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
-      region, { data, sessions, cookies }, { chat: true }),
-    // Página mais antiga (`antesDe`) é só leitura: quem rola pra trás não está
-    // lendo mensagem nova.
-    antesDe ? null : callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
-      corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true }),
-  ]);
+  const hist = await callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
+    region, { data, sessions, cookies }, { chat: true });
   const cat = categorizeGrpcError(hist);
   if (cat) return respostaDeErroGrpc(cat, hist);
   let resultado;
@@ -3784,6 +3785,18 @@ async function abrirConversa(data, { sessions, cookies, region, cabecalho, insta
   } catch {
     respostaInesperadaDoWaze();
   }
+  // O "lida" SÓ sai depois de o histórico voltar bem: o Waze marca a conversa
+  // INTEIRA, e mandado em paralelo o pedido já tinha saído quando o histórico
+  // falhava — a conversa podia ficar marcada no Waze enquanto a tela dizia "Não
+  // deu pra carregar", com mensagem que ninguém viu (auditoria da rodada 16,
+  // R16-5-02; medido que o pedido saía, o que o Waze faz com ele é hipótese).
+  // Custa uma ida a mais ao Waze na abertura, mas nenhuma ao nosso `/api`. Em
+  // SÉRIE com o histórico, ele tem teto próprio (`ABRIR_LIDA_ESPERA_MS`): os
+  // dois no teto cheio passariam dos 45 s em que o cliente desiste. Página mais
+  // antiga (`antesDe`) é só leitura: quem rola pra trás não está lendo mensagem
+  // nova.
+  const lida = antesDe ? null : await callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
+    corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true, tetoMs: ABRIR_LIDA_ESPERA_MS });
   // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
   // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
   // o que marcar" eram a mesma resposta, o app dava como lida uma conversa que

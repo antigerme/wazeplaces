@@ -85,6 +85,15 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     fetch: [], dfato: [], refazerPerfil: 0, despacharJanela: 0 };
   const timers = [];
   let proximoTimer = 1;
+  // O `ResizeObserver` do navegador, de mentira: guarda quem observa o quê, e
+  // quem o quer (`redimensionar`) o dispara com a caixa já na altura nova.
+  const observadores = [];
+  class ResizeObserverFalso {
+    constructor(fn) { this.fn = fn; this.alvos = []; observadores.push(this); }
+    observe(el) { this.alvos.push(el); }
+    unobserve() {}
+    disconnect() { this.alvos = []; }
+  }
   const relogio = { agora: agora ?? Date.now() };
   const DateFalso = class extends Date {
     constructor(...a) { if (a.length) super(...a); else super(relogio.agora); }
@@ -160,6 +169,7 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     paisDaFila,
     // Do app.js: a marca desta aba (a da fila de saída e do "invisível").
     ABA_DESTA_PAGINA: aba,
+    ResizeObserver: ResizeObserverFalso,
   };
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);
@@ -168,7 +178,9 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
   // Todos os elementos que a presença consulta nascem ESCONDIDOS, como no HTML.
   for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'pedidoModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
   return {
-    P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo,
+    P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo, observadores,
+    // O navegador avisa que a caixa de `el` mudou de tamanho.
+    redimensionar(el) { for (const o of observadores) if (o.alvos.includes(el)) o.fn([{ target: el }]); },
     // Roda os timers pendentes (os que existem AGORA), em ordem de prazo.
     async rodarTimers() {
       const agora = timers.splice(0).sort((a, b) => a.ms - b.ms);

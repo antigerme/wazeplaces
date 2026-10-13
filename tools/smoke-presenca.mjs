@@ -520,6 +520,47 @@ try {
   else anota(`a última mensagem ficou ${reancora.noFim.aoFim} px abaixo do que se vê depois de prender o pedido`);
   if (reancora.noComeco.moveu === 0) ok('controle: quem lia o começo da conversa não é arrancado pro fim');
   else anota(`quem lia o começo foi movido ${reancora.noComeco.moveu} px ao prender o pedido`);
+  // 6b. O teclado virtual sobe (`--kb-inset`) e a caixa da lista encolhe por um
+  // motivo que não é redesenho: quem estava no fim continua no fim — a última
+  // bolha não pode ficar abaixo da área visível (auditoria da rodada 16,
+  // R16-5-03; o teclado de verdade e o iPhone não são medidos aqui, só a
+  // mecânica: a caixa encolhe). Mesmo roteiro da 6a: o enchimento torna a lista
+  // rolável, o CONTROLE é a medida de que ela encolheu e a lista de quem lia o
+  // começo, que não é arrancada pro fim.
+  const tecladoSobe = await ana.page.evaluate(async () => {
+    const corpo = document.getElementById('conversaMsgs');
+    const raiz = document.documentElement;
+    const antes = raiz.style.getPropertyValue('--kb-inset');
+    const aoFim = () => Math.round(corpo.scrollHeight - corpo.clientHeight - corpo.scrollTop);
+    const quadro = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const enchimento = document.createElement('div');
+    enchimento.style.height = '3000px';
+    corpo.appendChild(enchimento);
+    const medir = async (rolarPara) => {
+      raiz.style.setProperty('--kb-inset', '0px');
+      await quadro();
+      corpo.scrollTop = rolarPara === 'fim' ? corpo.scrollHeight : 40;
+      await quadro();
+      const alturaAntes = corpo.clientHeight, topoAntes = corpo.scrollTop;
+      raiz.style.setProperty('--kb-inset', '300px');
+      await quadro(); await quadro();
+      const r = { encolheu: alturaAntes - corpo.clientHeight, aoFim: aoFim(), moveu: Math.round(corpo.scrollTop - topoAntes) };
+      raiz.style.setProperty('--kb-inset', '0px');
+      await quadro();
+      return r;
+    };
+    const noFim = await medir('fim');
+    const noComeco = await medir('comeco');
+    corpo.removeChild(enchimento);
+    if (antes) raiz.style.setProperty('--kb-inset', antes); else raiz.style.removeProperty('--kb-inset');
+    return { noFim, noComeco };
+  });
+  if (tecladoSobe.noFim.encolheu > 0 && tecladoSobe.noComeco.encolheu > 0) ok(`controle: o teclado encolheu a lista (${tecladoSobe.noFim.encolheu} px)`);
+  else anota(`controle: o teclado não encolheu a lista (${JSON.stringify(tecladoSobe)}) — a medição não distinguiria nada`);
+  if (tecladoSobe.noFim.aoFim <= 1) ok('com a lista no fim, o teclado que sobe a mantém no fim — a última mensagem não fica abaixo da área visível');
+  else anota(`a última mensagem ficou ${tecladoSobe.noFim.aoFim} px abaixo do que se vê depois de o teclado subir`);
+  if (tecladoSobe.noComeco.moveu === 0) ok('controle: quem lia o começo da conversa não é arrancado pro fim quando o teclado sobe');
+  else anota(`quem lia o começo foi movido ${tecladoSobe.noComeco.moveu} px quando o teclado subiu`);
   await ana.page.fill('#conversaInput', 'isso é fachada ou é a sala?');
   await ana.page.tap('#conversaEnviar');
   await esperar(ana, () => document.querySelectorAll('#conversaMsgs .conversa-pedido').length === 1, 'o cartão não ficou na conversa da ana');
