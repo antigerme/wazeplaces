@@ -311,6 +311,8 @@ Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
 User=nobody
 ExecStart=/usr/bin/node /opt/wazeplaces/server/node.mjs
 Environment=PORT=8080
+# O Apache é o único que fala com a internet; o Node escuta só aqui dentro.
+Environment=HOST=127.0.0.1
 Environment=ENCRYPTION_KEY=<gere com: openssl rand -base64 32>
 Environment=SESSION_DIR=/var/lib/wazeplaces/sessions
 Restart=on-failure
