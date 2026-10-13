@@ -949,7 +949,9 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
   const mapa = fatiarFn(semCom, 'renderMapa');
   assert.match(mapa, /box\.dataset\.tilesPedidos = String\(r\.tiles\.length\);/,
     'o mapa deixou de dizer quantos tiles pediu');
-  assert.match(mapa, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(box, t\.url\); im\.remove\(\); \};/,
+  // (desde o R15-4-04 só conta a falha do desenho VIGENTE; a ordem segue: registra
+  // ANTES de tirar da tela)
+  assert.match(mapa, /im\.onerror = \(\) => \{\s*if \(box\._desenhoDoMapa === desenho\) registrarFalhaDeTile\(box, t\.url\);\s*im\.remove\(\);\s*\};/,
     'o tile que falha voltou a sumir SEM ser contado');
   // (o do ampliado ganhou mais linhas — lembra o tile que falhou, L17 —, e a
   // ordem que importa segue: registra ANTES de tirar da tela)

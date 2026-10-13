@@ -10892,7 +10892,15 @@ async function diagOffline() {
         // `desdeMin`: de quando é a LISTA (o começo da busca que a trouxe). É
         // contra ele que os pousos filtram a reabertura sem rede. `t`: o CARIMBO
         // dela, o que a linha compara com o que a preparação cobriu (R14-4-06).
-        o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - f.t) / 60000),
+        //
+        // `idadeMin`: há quanto tempo a fila foi GRAVADA pela última vez (`gravadoEm`).
+        // Com o carimbo mantido pela mesma fila (R14-4-01) ele deixou de ser essa
+        // hora, e `carimboMin` é a idade do CARIMBO — desde que esta fila (ou a que
+        // ela veio de ser parte) ganhou o `t` (R15-4-03). A base de versão anterior
+        // não tem `gravadoEm`, e aí as duas coincidem.
+        const gravadoEm = Number.isFinite(f && f.gravadoEm) ? f.gravadoEm : (f ? f.t : null);
+        o.filaGuardada = f ? { n: f.places.length, idadeMin: Math.round((Date.now() - gravadoEm) / 60000),
+                               carimboMin: Math.round((Date.now() - f.t) / 60000),
                                desdeMin: Number.isFinite(f.desde) ? Math.round((Date.now() - f.desde) / 60000) : null,
                                t: Number.isFinite(f.t) ? f.t : null } : null;
         // E QUANTOS pedidos desta aba a fila guardada não tem, e vice-versa: os
@@ -14896,6 +14904,15 @@ function renderMapa(card, place, refazendo) {
     // diagnóstico lê os dois.
     box.dataset.tilesPedidos = String(r.tiles.length);
     box.dataset.tilesFalharam = '0';
+    // O número deste DESENHO (R15-4-04). Todo card com mapa desenha duas vezes (o
+    // `montarCard`, com a caixa de reserva de 400×240, e o `desenharMapaComCaixa`,
+    // com a caixa real), e o `<img>` do desenho velho — tirado do DOM pelo
+    // `textContent = ''` logo abaixo — ainda dispara o `onerror` depois. A falha
+    // dele caía na conta do desenho NOVO (MEDIDO sem rede: `falharam: 4` para 2
+    // tiles pedidos), e o relatório dizia que passou do que pediu. Só a falha de
+    // um tile do desenho vigente conta.
+    const desenho = (box._desenhoDoMapa || 0) + 1;
+    box._desenhoDoMapa = desenho;
     vigiarCaixaDoMapa(box, card, place);
 
     const tiles = box.querySelector('.card-map-tiles');
@@ -14915,7 +14932,10 @@ function renderMapa(card, place, refazendo) {
         im.style.cssText = `left:${t.left}px;top:${t.top}px;width:${r.tamanho}px;height:${r.tamanho}px`;
         // Tile que não vem não pode deixar um alt quebrado no meio do mapa —
         // mas a falha é CONTADA antes, senão some a prova junto com o ícone.
-        im.onerror = () => { registrarFalhaDeTile(box, t.url); im.remove(); };
+        im.onerror = () => {
+            if (box._desenhoDoMapa === desenho) registrarFalhaDeTile(box, t.url);
+            im.remove();
+        };
         tiles.appendChild(im);
     }
     // Qual ponto de `pontos` é cada pixel: o `mapaMontar` diz (`idx`), e
@@ -22761,6 +22781,9 @@ async function offlineGravarFila(desde) {
     let gravadaEm = null;
     let chaves = null;
     let mesmaFila = false;
+    // A fila regravada manteve o carimbo com PARTE ESTRITA dos pedidos (R15-4-01):
+    // as outras abas ficam sabendo quais pedidos a base tem agora.
+    let parteDosPedidos = false;
     try {
         const db = await offlineDB();
         // Esqueceram enquanto a base abria: nada é gravado, e a base que esta
@@ -22791,8 +22814,13 @@ async function offlineGravarFila(desde) {
                 if (epoca !== offlineEpoca) return;
                 mesmaFila = mesmaFilaGuardada(lerResumo.result, lerJanela.result, chaves);
                 gravadaEm = mesmaFila ? lerResumo.result.t : Date.now();
+                parteDosPedidos = mesmaFila && new Set(chaves).size < lerResumo.result.chaves.length;
                 loja.put({
                     t: gravadaEm,
+                    // A HORA em que esta gravação aconteceu, à parte do carimbo `t`:
+                    // a mesma fila (ou parte dela) mantém o `t`, e o relatório
+                    // media a "idade" da gravação por ele (R15-4-03).
+                    gravadoEm: Date.now(),
                     desde: valeDesde,
                     filtros,
                     regiao: lugar.regiao,
@@ -22827,7 +22855,15 @@ async function offlineGravarFila(desde) {
         // que elas já conhecem, e não há o que avisar: o aviso de um carimbo novo
         // a cada gravação era o que fazia a outra aba dizer "Ainda não preparado"
         // sobre a fila que ela mesma preparou (R14-4-01).
+        //
+        // A PARTE dos pedidos mantém o carimbo e AVISA também (R15-4-01), levando
+        // os pedidos que a base tem agora: a outra aba que tem um pedido fora deles
+        // sabe que a poda do mapa dele pode vir (ou veio) e deixa de dizer "Pronto"
+        // — o pular (↑) não vai pelo canal de pouso, então ela segue com o pedido.
         if (!mesmaFila && typeof avisarOutrasAbasDaFilaGuardada === 'function') avisarOutrasAbasDaFilaGuardada(gravadaEm);
+        else if (parteDosPedidos && typeof avisarOutrasAbasDaFilaGuardada === 'function') {
+            avisarOutrasAbasDaFilaGuardada(gravadaEm, [...new Set(chaves)].sort());
+        }
         // Só DEPOIS de a gravação fechar: se ela falhar, os pousos continuam
         // valendo contra a fila velha, que é a que a reabertura vai ler.
         offlinePodarPousos(valeDesde);
@@ -22861,9 +22897,14 @@ function abrirCanalDoOffline() {
 
 // O canal não entrega a mensagem ao objeto que a mandou: esta aba não recebe o
 // próprio aviso.
-function avisarOutrasAbasDaFilaGuardada(t) {
+// `chaves`: só quando a gravação manteve o carimbo com PARTE dos pedidos (R15-4-01)
+// — os pedidos que a base tem agora. A aba de versão anterior ignora o campo (o
+// carimbo é o mesmo que ela conhece, e o aviso é descartado).
+function avisarOutrasAbasDaFilaGuardada(t, chaves) {
     if (!canalDoOffline || !Number.isFinite(t)) return;
-    try { canalDoOffline.postMessage({ v: 1, filaGuardada: t }); } catch (e) { /* canal fechado: segue como antes */ }
+    try {
+        canalDoOffline.postMessage(Array.isArray(chaves) ? { v: 1, filaGuardada: t, chaves } : { v: 1, filaGuardada: t });
+    } catch (e) { /* canal fechado: segue como antes */ }
 }
 
 // A fila guardada agora é a que OUTRA aba gravou. Nada aqui grava no aparelho.
@@ -22873,13 +22914,49 @@ function avisarOutrasAbasDaFilaGuardada(t) {
 // avisa (R14-4-01, ver a `offlineGravarFila`).
 function aoGravarFilaGuardadaEmOutraAba(aviso) {
     if (!aviso || aviso.v !== 1 || !Number.isFinite(aviso.filaGuardada)) return;
-    if (aviso.filaGuardada === offlineFilaGravadaEm) return;
+    if (aviso.filaGuardada === offlineFilaGravadaEm) {
+        // O MESMO carimbo, mas a outra aba gravou PARTE dos pedidos (R15-4-01).
+        if (Array.isArray(aviso.chaves)) aoManterOCarimboComPartes(aviso);
+        return;
+    }
     offlineFilaGravadaEm = aviso.filaGuardada;
     // Os pedidos que esta aba conhece eram os da fila de ANTES: os da guardada
     // agora são os da outra, e "parte da fila que eu gravei" já não vale.
     offlineFilaGravadaChaves = null;
     dfato('offline.outraAba', {});
     // As Preferências podem estar abertas: a linha diz o que é verdade agora.
+    atualizarLinhaDoOffline(0, 0);
+}
+
+// A outra aba regravou a fila guardada com PARTE dos pedidos e manteve o carimbo
+// (R15-4-01, o irmão do R14-4-01). O carimbo mantido diz "a preparação cobriu esta
+// fila" — e cobriu, os pedidos que a outra aba ainda tem. Mas o que esta aba tem a
+// MAIS (o pedido que a outra pulou com o ↑, que não vai pelo canal de pouso) já
+// não está na base, e a poda da preparação de lá apaga do cache o mapa dele. Com o
+// carimbo igual, a linha SEM REDE desta aba seguia dizendo "Pronto — 12 pedidos…
+// você segue com o que está guardado" com um card sem mapa (MEDIDO no navegador,
+// r15-4, parte2: 1 de 12 sem tile). A aba que tem pedido fora dos da base perde a
+// cobertura — "Ainda não preparado" — e o próximo gatilho prepara a fila DELA,
+// baixando só o que falta (a varredura confere o cache). Os pedidos que esta aba já
+// deu por decididos pela outra (o card ainda na tela) não contam: saem da fila
+// daqui no aviso de pouso, que pode chegar um instante depois deste.
+function aoManterOCarimboComPartes(aviso) {
+    const naBase = new Set(aviso.chaves.filter((k) => typeof k === 'string' && k));
+    const fora = filaReal().filter((p) => {
+        if (typeof decididosPorOutraAbaComCardAqui !== 'undefined' && decididosPorOutraAbaComCardAqui.has(p) === true) return false;
+        const k = chaveDoPedido(p);
+        if (!k) return false;
+        if (typeof pedidosEmAndamento !== 'undefined' && pedidosEmAndamento.has(k) === true) return false;
+        return !naBase.has(k);
+    }).length;
+    if (!fora) return;
+    // `offlineFilaVarrida` também: sem ele o gatilho da fila não coberta (que
+    // volta uma vez por fila gravada) não prepara de novo uma fila que esta aba
+    // já varreu — a varredura de antes foi sobre os pedidos a mais, mas o mapa
+    // deles pode ter saído da poda de lá.
+    if (offlineFilaPreparada === aviso.filaGuardada) offlineFilaPreparada = null;
+    if (offlineFilaVarrida === aviso.filaGuardada) offlineFilaVarrida = null;
+    dfato('offline.outraAbaParte', { fora });
     atualizarLinhaDoOffline(0, 0);
 }
 
@@ -22904,8 +22981,15 @@ function aoGravarFilaGuardadaEmOutraAba(aviso) {
 // guardada agora não é a que esta preparação cobriu, e o registro que está lá é
 // o dela, ele fica.
 async function offlineGravarJanela(janela, filaCoberta = null) {
+    // A ÉPOCA, lida AGORA (R15-4-02), como a gravação da fila (R14-4-04): o
+    // "Sair" de OUTRA aba apaga a base, e a abertura que já estava a caminho a
+    // RECRIA com a janela e a fila que ela cobriu (a janela órfã que o login
+    // seguinte restaurava, `offlineRecuperarJanela`).
+    const epoca = offlineEpoca;
+    const desfazer = () => { try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {} };
     try {
         const db = await offlineDB();
+        if (epoca !== offlineEpoca) { try { db.close(); } catch (e) {} desfazer(); return; }
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
             const loja = tx.objectStore(OFFLINE_STORE);
@@ -22926,6 +23010,8 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
             tx.onabort = () => erro(tx.error || new Error('abort'));
         });
         db.close();
+        // Esqueceram com a transação no ar: o que ela gravou sai.
+        if (epoca !== offlineEpoca) desfazer();
     } catch (e) {}
 }
 
@@ -23144,11 +23230,30 @@ function offlineBaixar(u, tile) {
             // gravar aqui recria o cache que o "Sair" acabou de apagar.
             if (epoca !== offlineEpoca) return false;
             const c = await caches.open(OFFLINE_TILES_CACHE);
+            // O "Sair" de OUTRA aba apaga o cache do mapa, e o aviso dele chega
+            // numa tarefa à parte (R15-4-02): o `open` que já estava a caminho o
+            // RECRIA, e o `put` grava nele o endereço de um pedido de terceiro
+            // (MEDIDO no navegador, com a ordem forçada: o cache de volta com 1
+            // tile). Conferida de novo depois do `open` e depois do `put`; mudou,
+            // o que esta gravação pôs sai (e o cache, se ficou vazio).
+            if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, false); return false; }
             await c.put(u, resp);
+            if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, true); return false; }
             return true;
         } catch (e) { return estourou ? 'teto' : false; }
         finally { clearTimeout(teto); }
     })();
+}
+
+// O tile que uma gravação pôs (ou o cache que o `open` dela recriou) depois de a
+// época mudar — o "Sair" de outra aba, R15-4-02. Tira o tile e, se o cache ficou
+// vazio, o cache: um enchimento NOVO (a época seguinte) que já pôs tiles nele os
+// mantém. Nunca lança.
+async function offlineDesfazerTile(c, u, gravou) {
+    try {
+        if (gravou) await c.delete(u);
+        if (!(await c.keys()).length) await caches.delete(OFFLINE_TILES_CACHE);
+    } catch (e) { /* o desfazer nunca derruba a varredura */ }
 }
 
 // A rede ANDA? Um pedido de um tile DESTA fila, conferido com o servidor
@@ -23667,7 +23772,7 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // falha de rede), não uma fila vazia que se passaria por "Tudo limpo!".
     if (!filtrada.places.length) {
         dfato('offline.abriu', { n: 0, excluidos: filtrada.excluidos,
-                                 idade: Math.round((Date.now() - guardada.t) / 60000) });
+                                 idade: Math.round((Date.now() - (Number.isFinite(guardada.gravadoEm) ? guardada.gravadoEm : guardada.t)) / 60000) });
         return false;
     }
     // O TREINO abriu enquanto a base era lida (ⓘ → "Praticar" durante a leitura,
@@ -23715,7 +23820,7 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // `aposFalha`: abriu com o aparelho dizendo que há rede — a busca é que
     // falhou (o "lie-fi", a origem fora do ar).
     dfato('offline.abriu', { n: AppState.queue.length, excluidos: filtrada.excluidos,
-                             idade: Math.round((Date.now() - guardada.t) / 60000),
+                             idade: Math.round((Date.now() - (Number.isFinite(guardada.gravadoEm) ? guardada.gravadoEm : guardada.t)) / 60000),
                              ...(navigator.onLine !== false ? { aposFalha: true } : {}) });
     return true;
 }

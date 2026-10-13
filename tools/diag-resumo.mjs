@@ -161,10 +161,28 @@ else if (off.ligado === false) {
       // Os pedidos desta aba × os da fila guardada (só números, desde o lote 18).
       const fgd = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada : {};
       const mesmos = fgd.soNestaAba === 0 && fgd.soNaGuardada === 0;
+      // "Cobre: sim" com pedidos que SÓ esta aba tem (R15-4-01): o carimbo foi
+      // mantido pela regravação de PARTE dos pedidos (outra aba pulou um), e o
+      // mapa dos pedidos que sobraram aqui pode ter saído do cache na poda de lá.
+      // O app de agora avisa a aba e a linha volta a "Ainda não preparado"; o
+      // relatório de uma versão anterior (ou de uma aba que não recebeu o aviso)
+      // diz "sim" sobre uma fila que não é a desta aba.
+      if (off.cobreAFila && typeof fgd.soNestaAba === 'number' && fgd.soNestaAba > 0) {
+        out(`ATENÇÃO: a preparação "cobre" a fila guardada, mas esta aba tem ${fgd.soNestaAba} pedido(s) que a fila guardada não tem — outra aba a regravou com PARTE dos pedidos e manteve o carimbo; o mapa desses pedidos pode ter saído do aparelho na poda de lá, e a linha das Preferências (sem sinal) diria "Pronto" sobre eles.`);
+      }
       if (!off.cobreAFila && typeof fgd.soNestaAba === 'number' && !mesmos) {
         out(`nota: a fila guardada é OUTRA — esta aba tem ${fgd.soNestaAba} pedido(s) que ela não tem, e ela tem ${fgd.soNaGuardada} que esta aba não tem: o próximo gatilho desta aba prepara a fila DESTA aba e a grava por cima, baixando de novo o mapa dos pedidos que só esta aba tem (o custo de uma fila guardada por aparelho).`);
       } else if (!off.cobreAFila && typeof naBase === 'number' && off.filaCobertaGuardada === naBase) {
         out('nota: a fila guardada tem os MESMOS pedidos desta aba e o registro do aparelho diz que ela está coberta (outra aba, ou uma abertura anterior, a preparou) — o próximo gatilho desta aba confere sem baixar de novo e volta a dizer "Pronto".');
+      }
+      // A idade: `idadeMin` é desde a última GRAVAÇÃO da fila; `carimboMin`, desde o
+      // carimbo dela — a mesma fila (ou parte dela) regravada mantém o carimbo, então
+      // os dois se separam (R15-4-03). O relatório do lote 18 (o primeiro que traz o
+      // carimbo `t`) só tem a `idadeMin`, que nele era a do CARIMBO.
+      if (typeof fgd.carimboMin === 'number' && typeof fgd.idadeMin === 'number' && fgd.carimboMin > fgd.idadeMin) {
+        out(`nota: a fila foi gravada pela última vez há ${fgd.idadeMin} min, mas o carimbo dela tem ${fgd.carimboMin} min — a mesma fila regravada mantém o carimbo (é por ele que a linha sabe que a preparação a cobriu).`);
+      } else if (typeof fgd.carimboMin !== 'number' && typeof fgd.idadeMin === 'number' && typeof fgd.t === 'number') {
+        out('nota: este relatório é de antes do campo `carimboMin` — a `idadeMin` dele é a do CARIMBO da fila, que a regravação da mesma fila mantém: pode ser bem mais velha que a última gravação.');
       }
     }
   }
