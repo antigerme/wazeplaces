@@ -1264,6 +1264,11 @@ function openModal(id) {
     // rolado no celular deitado, com o título e o QR cortados (R16-8-02, MEDIDO no WebKit).
     // Os outros abrem em scrollTop 0 porque o primeiro controle já está à vista.
     if (focusable) focusable.focus({ preventScroll: true });
+    // Sem o `preventScroll` o foco rolava o corpo do diálogo de volta ao topo (o primeiro controle
+    // fica lá), e com ele o diálogo reabre onde estava: a Ajuda, depois de tocar na versão no fim
+    // dela, reabria no fim (MEDIDO pelo smoke do diag-tela: 18,8% de pixels diferentes). Abrir
+    // começa no topo, por escolha, e não por efeito do foco.
+    for (const el of [m, ...(m.querySelectorAll?.('*') || [])]) if (el.scrollTop) el.scrollTop = 0;
 }
 
 // Limpeza específica de cada modal. Fica AQUI e não no botão de fechar porque

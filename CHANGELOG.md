@@ -51,7 +51,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 - **O aviso "Como funciona" do primeiro acesso agora começa com o foco no "Entendi".** Antes o foco ficava em "Quero treinar antes", e quem apertava Enter para dispensar o aviso começava o treino sem querer. Aberto pela Ajuda ("Ver de novo") continua como era.
 
 **Telas**
-- **"Conectar outro aparelho" abre no topo também com o celular deitado.** Antes, no iPhone SE deitado, ele abria rolado até o "Fechar", com o título e a parte de cima do QR escondidos. O mesmo cuidado vale para todos os diálogos: abrir não rola o conteúdo à toa.
+- **"Conectar outro aparelho" abre no topo também com o celular deitado.** Antes, no iPhone SE deitado, ele abria rolado até o "Fechar", com o título e a parte de cima do QR escondidos. O mesmo vale para todos os diálogos: abrem sempre no topo, e não onde você os deixou (a Ajuda, depois de tocar na versão no fim dela, reabria no fim).
 
 **Bastidores**
 - Uma resposta do Waze com a forma quebrada por dentro (uma lista que vem como número, ou um item vazio no meio dela) agora é tratada como "resposta inesperada do Waze", e não como erro interno nosso. Na tela é a mesma de antes ("Falha ao carregar").

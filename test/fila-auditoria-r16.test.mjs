@@ -684,3 +684,19 @@ test('R16-8-02: o foco inicial do `openModal` também não rola o corpo do diál
   // CONTROLE do instrumento: o seletor do primeiro controle segue o de sempre (o foco inicial não mudou de ALVO).
   assert.match(corpo, /m\.querySelector\('textarea, input:not\(\[type=hidden\]\):not\(:disabled\), select, button'\)/, 'o primeiro controle do foco inicial mudou');
 });
+
+// ═══ O `preventScroll` do `openModal` não pode deixar o diálogo reabrir ONDE ESTAVA ═══
+// Sem ele o foco rolava o corpo do diálogo de volta ao topo (o 1º controle fica lá); com ele a
+// Ajuda, depois de tocar na versão no fim dela (o gesto do modo dev), reabria no FIM — o smoke do
+// diag-tela acusou 18,8% de pixels diferentes entre a tela e a remontagem. Abrir começa no topo.
+test('openModal: abre no TOPO — zera a rolagem do diálogo e de quem rola dentro dele (o `preventScroll` deixou de fazê-lo pelo foco)', () => {
+  const corpo = fatiar('openModal');
+  const m = /(for \(const el of \[m, \.\.\.\(m\.querySelectorAll\?\.\('\*'\) \|\| \[\]\)\]\) if \(el\.scrollTop\) el\.scrollTop = 0;)/.exec(corpo);
+  assert.ok(m, 'DEFEITO: o `openModal` não zera a rolagem na abertura — a Ajuda reabre no fim depois do gesto do modo dev');
+  const filho = { scrollTop: 340 }, neto = { scrollTop: 0 };
+  const dialogo = { scrollTop: 90, querySelectorAll: () => [filho, neto] };
+  new Function('m', m[1])(dialogo);
+  assert.deepEqual([dialogo.scrollTop, filho.scrollTop, neto.scrollTop], [0, 0, 0], 'a rolagem do diálogo e do filho que rola não voltou a 0');
+  // CONTROLE: a ordem importa — zerar DEPOIS do foco (o foco sem `preventScroll` rolaria de novo).
+  assert.ok(corpo.indexOf('focusable.focus({ preventScroll: true })') < corpo.indexOf(m[1]), 'zerar a rolagem antes do foco deixa o foco rolar de novo');
+});
