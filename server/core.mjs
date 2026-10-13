@@ -690,6 +690,20 @@ function respostaInesperadaDoWaze() {
   }, 500);
 }
 
+// A lista que o Waze manda DENTRO de uma resposta 200 (`areas`, `countries`,
+// `venues.objects`…). Ausente, `null`, `0`, `''` e `false` são "sem nada", como
+// sempre foram; lista que veio como número, texto ou `true`, ou com um elemento
+// que não é objeto, é a mesma resposta inesperada do `objetoDoWaze` — antes
+// estourava um TypeError no laço e saía pelo `catch` do `dispatch` como "Erro
+// interno", sem categoria (auditoria de 2026-10-13, R16-6-08). `objetos: false`
+// só confere que é lista (o laço já tolera elemento estranho).
+function listaDoWaze(v, { objetos = true } = {}) {
+  if (!v) return [];
+  if (!Array.isArray(v)) respostaInesperadaDoWaze();
+  if (objetos) for (const e of v) if (!e || typeof e !== 'object') respostaInesperadaDoWaze();
+  return v;
+}
+
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
   if (fetchError) return { category: 'transient', message: 'Erro de conexão: ' + fetchError, messageKey: 'srv.err.connection' };
   if (httpCode === 401 || httpCode === 403) return { category: 'unauthorized', message: 'Cookies expirados ou inválidos', messageKey: 'srv.err.cookiesExpired' };
@@ -2032,13 +2046,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   const usersDict = {};
   // Guarda o objeto inteiro, não só o nome: o rank de quem PEDIU é sinal de
   // triagem (L1 anônimo × L5 editor) e vinha sendo jogado fora aqui.
-  for (const u of rd?.users?.objects || []) usersDict[u.id] = u;
+  for (const u of listaDoWaze(rd?.users?.objects)) usersDict[u.id] = u;
   const streetsDict = {};
-  for (const s of rd?.streets?.objects || []) streetsDict[s.id] = s;
+  for (const s of listaDoWaze(rd?.streets?.objects)) streetsDict[s.id] = s;
   const citiesDict = {};
-  for (const c of rd?.cities?.objects || []) citiesDict[c.id] = c;
+  for (const c of listaDoWaze(rd?.cities?.objects)) citiesDict[c.id] = c;
   const statesDict = {};
-  for (const st of rd?.states?.objects || []) statesDict[st.id] = st.name;
+  for (const st of listaDoWaze(rd?.states?.objects)) statesDict[st.id] = st.name;
 
   // Sem protótipo: uma marca chamada "constructor" ou "toString" daria
   // "conhecida" num objeto comum.
@@ -2080,7 +2094,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
 
   const places = [];
   let blocked = 0;
-  for (const venue of rd?.venues?.objects || []) {
+  for (const venue of listaDoWaze(rd?.venues?.objects)) {
     if (!Array.isArray(venue.venueUpdateRequests) || venue.venueUpdateRequests.length === 0) continue;
     // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = sem permissão.
     // Antes descartávamos o venue aqui. Agora seguimos o laço só pra CONTAR
@@ -3061,12 +3075,12 @@ async function handlePerfil(data, { sessions }) {
   }
 
   const areas = [];
-  for (const area of rd.areas || []) {
+  for (const area of listaDoWaze(rd.areas, { objetos: false })) {
     // Polygon e MultiPolygon, de qualquer tamanho (ver `caixaDaGeometria`).
     areas.push({ type: area?.type ?? null, bbox: caixaDaGeometria(area?.geometry) });
   }
   const managedAreas = [];
-  for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
+  for (const ma of listaDoWaze(rd.managedAreas)) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
 
   // Casa e trabalho, pro "Perto de casa/do trabalho" do filtro. O `/Session`
   // devolve os dois como ponto GeoJSON (MEDIDO com os cookies do owner:
@@ -3134,7 +3148,7 @@ async function handleListaPaises(data, { sessions }) {
     };
   }
   const rd = objetoDoWaze(result.response);
-  const countries = (rd.countries || []).map((c) => ({
+  const countries = listaDoWaze(rd.countries).map((c) => ({
     id: c.id ?? null,
     name: c.name || '',
     abbr: c.abbr || '',
@@ -3172,7 +3186,7 @@ async function handleListaEstados(data, { sessions }) {
   }
   const rd = objetoDoWaze(result.response);
   const states = [];
-  for (const s of rd.states || []) {
+  for (const s of listaDoWaze(rd.states)) {
     if (Number(s.countryId) !== countryId) continue;
     states.push({ id: s.id ?? null, name: s.name || '', countryId: s.countryId ?? null });
   }
