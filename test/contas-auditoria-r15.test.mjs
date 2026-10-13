@@ -411,8 +411,8 @@ for (const tipo of ['excluir', 'aprovar']) {
     assert.deepEqual(m.enviadas, [], 'PRÉ-CONDIÇÃO: a escrita espera o toque (não saiu)');
     assert.equal(m.deps.esperasSoDoAquecimento.size, 1, 'PRÉ-CONDIÇÃO: ela é uma espera só do aquecimento');
     m.h.desenharAvisoDoSair();
-    assert.equal(m.tela.texto(), 'modal.logout.saida:1',
-      'DEFEITO: o "Sair" descarta a escrita que espera o toque e o diálogo não diz nada: «' + m.tela.texto() + '»');
+    assert.equal(m.tela.texto(), 'modal.logout.foto:1',
+      'DEFEITO: o "Sair" descarta a escrita que espera o toque e o diálogo não diz nada (ou diz "pedido esperando envio", que a foto não é): «' + m.tela.texto() + '»');
     // O toque responde: a vez chega, a escrita sai e o aviso (o diálogo segue aberto) some sozinho.
     m.toque.soltar();
     await m.envio;
@@ -435,11 +435,29 @@ test('R15-3-01: o aviso soma com a fila de saída, e a descarga da página (que 
   const m = escritaDeFotoEsperandoOToque();
   await tiques();
   m.h.desenharAvisoDoSair();
-  assert.equal(m.tela.texto(), 'modal.logout.saida:1');
+  assert.equal(m.tela.texto(), 'modal.logout.foto:1');
   for (const soltar of [...m.deps.esperasSoDoAquecimento]) soltar();
   await m.envio;
   assert.equal(m.deps.escritasEsperandoAVez.size, 0);
   assert.deepEqual(m.enviadas, ['excluir']);
+});
+
+test('R15-3-01: pedidos do lote e fotos na vez juntos — duas frases, cada uma com a SUA chave e a SUA conta (plural por chave)', async () => {
+  const m = loteDeRejeitar({ n: 4 });
+  const lote = m.h.enviarLote(m.places, { regiao: 'row', gesto: {} });
+  await tiques();
+  m.deps.escritasEsperandoAVez.add({});
+  m.h.desenharAvisoDoSair();
+  assert.equal(m.tela.texto(), 'modal.logout.saidaPlural:3 modal.logout.foto:1',
+    'as duas contas não saíram cada uma na sua frase: «' + m.tela.texto() + '»');
+  m.deps.escritasEsperandoAVez.add({});
+  m.h.desenharAvisoDoSair();
+  assert.equal(m.tela.texto(), 'modal.logout.saidaPlural:3 modal.logout.fotoPlural:2', 'duas fotos têm que ir no plural: «' + m.tela.texto() + '»');
+  m.deps.escritasEsperandoAVez.clear();
+  m.h.desenharAvisoDoSair();
+  assert.equal(m.tela.texto(), 'modal.logout.saidaPlural:3', 'sem fotos na vez, a frase dos pedidos fica sozinha: «' + m.tela.texto() + '»');
+  for (let i = 0; i < 4; i++) { m.portoes.shift()({ success: true }); await tiques(); }
+  await lote;
 });
 
 test('R15-3-01 (estrutura): as duas escritas esperam a vez PELA função que conta, e só quando há espera (sem espera o envio sai no mesmo tique)', () => {

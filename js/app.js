@@ -12193,11 +12193,17 @@ function desenharAvisoDoSair() {
     let n = carregarFilaDeSaida().filter((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x))
         && !reivindicadoPorOutraAba(x)).length;
     n += pedidosDoLoteSemEnviar.size;
-    // E a exclusão (ou aprovação) de foto que espera a vez do local: saiu da janela
-    // do Desfazer, não está na fila de saída, e o "Sair" a descarta (R15-3-01).
-    n += escritasEsperandoAVez.size;
-    el.textContent = n ? t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }) : '';
-    el.classList.toggle('hidden', !n);
+    // E a alteração de FOTO (excluir, aprovar) que espera a vez do local: saiu da
+    // janela do Desfazer, não está na fila de saída, e o "Sair" a descarta
+    // (R15-3-01). Frase PRÓPRIA: não é "pedido esperando envio" nem "decisão" no
+    // pedido — a exclusão de uma foto velha não é um ✕ nem um ✓ —, e a mesma
+    // frase dos pedidos diria o que não aconteceu.
+    const nFotos = escritasEsperandoAVez.size;
+    const frases = [];
+    if (n) frases.push(t(n === 1 ? 'modal.logout.saida' : 'modal.logout.saidaPlural', { n }));
+    if (nFotos) frases.push(t(nFotos === 1 ? 'modal.logout.foto' : 'modal.logout.fotoPlural', { n: nFotos }));
+    el.textContent = frases.join(' ');
+    el.classList.toggle('hidden', frases.length === 0);
 }
 
 // O "Sair" da Ajuda. Aberto na janela do Desfazer, o banner "Pedido rejeitado ·
@@ -12212,6 +12218,9 @@ function desenharAvisoDoSair() {
 // da foto não são "pedido esperando envio"), e o banner seguiria em cima do
 // diálogo. A decisão no ar não entra no aviso (ver `desenharAvisoDoSair`): ela já
 // saiu, e chega ao Waze com o "Sair" no meio.
+// (As alterações de foto que já saíram da janela e esperam a vez do local, essas
+// sim, entram no aviso — numa frase à parte, das FOTOS —, porque nada as manda
+// depois do "Sair"; R15-3-01.)
 function abrirDialogoDoSair() {
     despacharJanelaDoDesfazer();
     desenharAvisoDoSair();   // quantas decisões o "Sair" descarta, se houver
