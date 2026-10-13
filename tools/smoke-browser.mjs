@@ -11593,6 +11593,152 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
+
+  // ── R15 (lote 19): a página que chega, a aprovação e o refazer adiado ──────
+  //
+  //  F1  · o último pedido decidido com a próxima página no ar (o esqueleto na
+  //        tela), o Desfazer devolve o card — com o foco no ✕ —, e a página que
+  //        chega apagava o card e o desenhava de novo: foco no <body>, carrossel
+  //        na 1ª foto, nó do arraste perdido (R15-2-F1). Agora só se acerta o que
+  //        vem POR BAIXO.
+  //  3-02 · o refazer da fila vazia que esperava a janela do Desfazer rodava
+  //  6-01   com a página SAINDO (busca `keepalive`, sem o teto de 45 s), e o do
+  //        "Rejeitar os N" cancelado pela descarga morria: a fila ficava em
+  //        "Falha ao carregar" com a rede de pé (R15-3-02, R15-6-01). Agora ele
+  //        espera a VOLTA da página e sai como busca normal.
+  //
+  // CONTROLES: o redesenho de verdade troca o nó e larga o foco (a medida
+  // enxerga); a janela que vence com a página à vista manda a busca no fim dela.
+  {
+    const id = `card/teclado ${MOTOR}: R15-2-F1 — a página que chega com o card do Desfazer na tela`;
+    let solta = null;
+    const presa = new Promise((ok) => { solta = ok; });
+    const g = await cardPagina([cardPedido('kA')], { resposta: (nome) => (nome === 'buscar-places' ? presa : null) });
+    await g.page.evaluate(() => { AppState.hasMore = true; });
+    await g.page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+    await g.page.keyboard.press('Enter');
+    await esperarOuExplodir(g.page, () => !!document.getElementById('undoBtn') && AppState.fetching === true, 'o banner do Desfazer, com a página vindo');
+    await g.page.keyboard.press('z');
+    await esperarNaPagina(g.page, acaoTerminou, 5000);
+    await doisQuadros(g.page);
+    const antes = await focoAgora(g.page);
+    checa(antes.frente === 'kA' && antes.onde === 'card-btn-reject' && antes.naFrente,
+      `${id}: PRÉ-CONDIÇÃO — o Desfazer não devolveu o card com o foco no ✕`, JSON.stringify(antes));
+    await g.page.evaluate(() => { cardDaFrente().__marcaDoF1 = 1; });
+    // A página chega: dois pedidos novos atrás do que voltou.
+    solta({ success: true, places: [cardPedido('kB'), cardPedido('kC')], hasMore: false, page: 1, total: 3, totalAll: 3, blocked: 0 });
+    await esperarOuExplodir(g.page, () => AppState.queue.length === 3 && !AppState.fetching, 'a página nova na fila');
+    await doisQuadros(g.page);
+    const depois = await focoAgora(g.page);
+    const mesmo = await g.page.evaluate(() => ({ marca: cardDaFrente() && cardDaFrente().__marcaDoF1 === 1,
+      cards: document.querySelectorAll('#cardStack .place-card').length }));
+    checa(mesmo.marca, `${id}: DEFEITO — a página que chegou redesenhou o card que o Desfazer devolveu (R15-2-F1)`, JSON.stringify(mesmo));
+    checa(depois.onde === 'card-btn-reject' && depois.naFrente && depois.frente === 'kA',
+      `${id}: DEFEITO — o foco do teclado saiu do ✕ quando a página chegou`, JSON.stringify(depois));
+    // O que vem por baixo foi acertado: o card de fundo anuncia o próximo.
+    await esperarNaPagina(g.page, () => {
+      const f = document.querySelector('#cardStack .card-fundo');
+      return !!f && f.dataset.pedido === chaveDoPedido(AppState.queue[1]);
+    }, 6000);
+    const fundo = await g.page.evaluate(() => { const f = document.querySelector('#cardStack .card-fundo');
+      return { tem: !!f, ok: !!f && f.dataset.pedido === chaveDoPedido(AppState.queue[1]) }; });
+    checa(fundo.ok, `${id}: o card de fundo não anuncia o próximo pedido depois da página`, JSON.stringify(fundo));
+    // CONTROLE: o redesenho de verdade troca o nó e larga o foco (a medida enxerga).
+    await g.page.evaluate(() => showCurrentPlace());
+    await doisQuadros(g.page);
+    const redesenhado = await g.page.evaluate(() => ({ marca: cardDaFrente() && cardDaFrente().__marcaDoF1 === 1, onde: document.activeElement === document.body }));
+    checa(!redesenhado.marca && redesenhado.onde, `${id}: CONTROLE — o redesenho de verdade não trocou o nó nem largou o foco: a medida está cega`, JSON.stringify(redesenhado));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+  {
+    // O ✕ do ÚLTIMO pedido sem sinal: a fila vazia, a rede volta DENTRO da janela
+    // (o refazer fica adiado) e a página vai pro fundo — ou a janela vence com a
+    // página à vista (o CONTROLE). `buscar-places` conta com o modo da requisição.
+    const vizinho = async (page, v) => page.evaluate((v) => {
+      Object.defineProperty(document, 'visibilityState', { get: () => v, configurable: true });
+      Object.defineProperty(document, 'hidden', { get: () => v === 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, v);
+    const vazia = { success: true, places: [], hasMore: false, total: 0, totalAll: 0, blocked: 0 };
+    const registrar = (page) => page.evaluate(() => {
+      window.__modo = [];
+      const orig = window.fetch;
+      window.fetch = function (url, init) {
+        try { const u = String(url); if (u.includes('/api/')) window.__modo.push({ rota: u.split('/api/')[1].split('?')[0], keepalive: !!(init && init.keepalive), sinal: !!(init && init.signal) }); } catch (e) { /* o registro não pode derrubar a requisição */ }
+        return orig.apply(this, arguments);
+      };
+    });
+    const buscasDe = (page) => page.evaluate(() => window.__modo.filter((m) => m.rota === 'buscar-places'));
+    for (const caso of ['fundo', 'a janela vence com a página à vista']) {
+      const id = `card/descarga ${MOTOR}: R15-3-02 — o ✕ do último sem sinal, a rede volta na janela (${caso})`;
+      const g = await cardPagina([cardPedido('kA')], { resposta: (nome) => (nome === 'buscar-places' ? vazia : null) });
+      let semRede = false;
+      await g.ctx.route('**/api/**', (r) => (semRede ? r.abort('internetdisconnected') : r.fallback()));
+      await registrar(g.page);
+      await g.page.evaluate(() => { AppState.hasMore = true; });
+      semRede = true; await g.ctx.setOffline(true);
+      await g.page.click('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      await esperarOuExplodir(g.page, () => !!AppState.pendingAction && AppState.queue.length === 0, 'a janela do ✕ com a fila vazia');
+      await esperarOuExplodir(g.page, () => AppState.loadError === true, 'a fila vazia sem sinal');
+      semRede = false; await g.ctx.setOffline(false);
+      await esperarOuExplodir(g.page, () => !!(AppState.pendingAction && AppState.pendingAction.aoFim), 'o refazer adiado na janela');
+      if (caso === 'fundo') {
+        await vizinho(g.page, 'hidden');                       // a descarga manda a decisão com `keepalive`
+        await esperarNaPagina(g.page, () => !AppState.pendingAction && AppState.inFlightActions === 0, 8000);
+        await doisQuadros(g.page);
+        const noFundo = { saindo: await g.page.evaluate(() => API.saindo), buscas: await buscasDe(g.page) };
+        checa(noFundo.saindo === true, `${id}: PRÉ-CONDIÇÃO — o modo "saindo" não ficou ligado`, JSON.stringify(noFundo));
+        checa(noFundo.buscas.length === 0, `${id}: DEFEITO — o refazer rodou com a página saindo (busca keepalive, sem o teto de 45 s; R15-3-02)`, JSON.stringify(noFundo.buscas));
+        await vizinho(g.page, 'visible');
+        await esperarOuExplodir(g.page, () => window.__modo.some((m) => m.rota === 'buscar-places'), 'o refazer na volta da página');
+        await esperarNaPagina(g.page, () => !AppState.fetching, 8000);
+        const naVolta = await buscasDe(g.page);
+        checa(naVolta.length === 1 && naVolta[0].keepalive === false && naVolta[0].sinal === true,
+          `${id}: na volta o refazer tem que sair UMA vez, como busca normal (sem keepalive, com o teto)`, JSON.stringify(naVolta));
+        checa(await g.page.evaluate(() => API.saindo) === false, `${id}: o modo "saindo" seguiu ligado na volta`);
+      } else {
+        await esperarOuExplodir(g.page, () => window.__modo.some((m) => m.rota === 'buscar-places'), 'o refazer no fim da janela');
+        await esperarNaPagina(g.page, () => !AppState.fetching, 8000);
+        const fim = await buscasDe(g.page);
+        checa(fim.length === 1 && fim[0].keepalive === false, `${id}: CONTROLE — sem a descarga o refazer sai no fim da janela, uma vez, normal`, JSON.stringify(fim));
+      }
+      checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+      await g.fechar();
+    }
+  }
+  {
+    // O "Rejeitar os N" (folha do autor) na janela do Desfazer, com a fila vazia
+    // por FALHA e o refazer adiado pela rede que voltou; a página vai pro fundo e
+    // a descarga CANCELA o lote (os pedidos voltam à fila): na volta a busca é
+    // retomada, e a fila não fica em "Falha ao carregar" com a rede de pé.
+    const id = `card/descarga ${MOTOR}: R15-6-01 — o "Rejeitar os N" cancelado pela descarga`;
+    const g = await cardPagina([cardPedido('lA', { creatorId: 777, createdBy: 'fulano' }), cardPedido('lB', { creatorId: 777, createdBy: 'fulano' })],
+      { resposta: (nome) => (nome === 'buscar-places' ? { success: true, places: [], hasMore: false, total: 0, totalAll: 0, blocked: 0 } : null) });
+    await g.page.evaluate(() => { window.__modo = []; const orig = window.fetch;
+      window.fetch = function (url, init) { try { const u = String(url); if (u.includes('/api/')) window.__modo.push({ rota: u.split('/api/')[1].split('?')[0], keepalive: !!(init && init.keepalive) }); } catch (e) { /* o registro não derruba a requisição */ }
+        return orig.apply(this, arguments); };
+      AppState.loadError = true; });                                    // a reposição que falhou, com cards na tela
+    await g.page.evaluate(() => abrirFolhaDoAutor(AppState.currentPlace));
+    await esperarOuExplodir(g.page, () => !!document.getElementById('autorRejeitar'), 'o "Rejeitar os N" da folha do autor');
+    await g.page.click('#autorRejeitar');
+    await esperarOuExplodir(g.page, () => !!AppState.pendingAction && AppState.queue.length === 0, 'a janela do lote, com a fila vazia');
+    await g.page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await esperarOuExplodir(g.page, () => !!(AppState.pendingAction && AppState.pendingAction.aoFim), 'o refazer adiado na janela do lote');
+    await g.page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+    await esperarNaPagina(g.page, () => !AppState.pendingAction, 5000);
+    const cancelado = await g.page.evaluate(() => ({ fila: AppState.queue.map((p) => p.updateRequestID), saindo: API.saindo }));
+    checa(cancelado.fila.join() === 'lA,lB' && cancelado.saindo === true,
+      `${id}: PRÉ-CONDIÇÃO — a descarga não cancelou o lote devolvendo os pedidos`, JSON.stringify(cancelado));
+    await g.page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+    await esperarNaPagina(g.page, () => AppState.loadError === false, 4000);
+    const volta = await g.page.evaluate(() => ({ loadError: AppState.loadError, hasMore: AppState.hasMore,
+      falha: !document.getElementById('loadErrorState').classList.contains('hidden'), fila: AppState.queue.length }));
+    checa(volta.loadError === false && volta.fila === 2,
+      `${id}: DEFEITO — o refazer adiado morreu com o lote cancelado: a fila segue em falha com a rede de pé (R15-6-01)`, JSON.stringify(volta));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
 }
 
 // ── MAPA E PÍLULA: nada sai da caixa (auditoria de 2026-09-26) ─────────────
@@ -13154,6 +13300,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
+  + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo — e a aba que cai ANTES do perfil sendo alcançada quando OUTRA conta entra noutra aba (sem fila, card nem chamadas da anterior), com o CONTROLE da MESMA conta que não a encerra — e o diálogo do "Sair" contando os pedidos do "Rejeitar os N" que ainda não saíram, com só a ida no ar chegando ao Waze e o CONTROLE do ✕ isolado, que não entra na conta)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
