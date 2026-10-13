@@ -377,12 +377,12 @@ function aparelho(inicial = {}) {
   const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
   return { dados, safeLS };
 }
-function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)] } = {}) {
+function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)], perfil = { id: 111 } } = {}) {
   const tela = dialogoDoSair();
   const ap = aparelho({ [TOKEN]: 'TOK-A', [CONTA_KEY]: { id: '111', s: marcaDe('TOK-A') } });
   const deps = {
     safeLS: ap.safeLS, CONTA_KEY,
-    AppState: { authenticated: true, profile: { id: 111 }, pendingAction: null, fetchEpoch: 1, queue: [P(1)], currentPlace: P(1) },
+    AppState: { authenticated: true, profile: perfil, pendingAction: null, fetchEpoch: 1, queue: [P(1)], currentPlace: P(1) },
     API: {
       sessionToken: 'TOK-A',
       temSessaoNaMemoria() { return !!this.sessionToken; },
@@ -399,7 +399,8 @@ function quedaComLote({ pedidosDoLote = [P(2), P(3), P(4)] } = {}) {
     avisarOutrasAbasDaQueda: () => {},
   };
   const h = montar(['derrubarSessao', 'lembrarAContaDaQueda', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao',
-    'soltarOsLotesDaSessaoQueAcabou', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido'], deps);
+    'soltarOsLotesDaSessaoQueAcabou', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido',
+    'lembrarAContaDoAparelho', 'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho'], deps);
   return { h, deps, tela, ap };
 }
 
@@ -435,4 +436,80 @@ test('R16-1-03: a conta em dúvida (a época também muda) esvazia o conjunto �
     assert.match(fatiar(nome), /epocaDaSessao\+\+;[^\n]*\n\s*soltarOsLotesDaSessaoQueAcabou\(\);/, `${nome} troca a época sem soltar o lote`);
   }
   assert.match(fatiar('handleLogout'), /^\s+pedidosDoLoteSemEnviar\.clear\(\);/m, 'o "Sair" não esvazia o conjunto');
+});
+
+// ═══ R16-1-01 · a aba que cai antes do perfil, com a marca do aparelho já trocada ═══
+// O aparelho tem a conta 111 com a marca da sessão TOK-A; a aba A abriu com ela e o
+// `/Session` falhou (sem perfil). Outra aba da MESMA conta entrou de novo (TOK-B: o
+// ACESSAR do WME, cookies colados) e passou a marca do aparelho a ser a dela. A queda
+// da sessão de A, agora, não achava a conta (`contaAgora` exige a marca desta sessão):
+// quando OUTRA conta (222) entrava numa aba, A "seguia" com a fila e o card da 111.
+const naEntradaSemSessao = (m) => {
+  m.deps.AppState.authenticated = false;
+  m.deps.document.getElementById = () => ({ classList: { contains: () => true } });
+};
+const outraSessaoDaMesmaConta = (m, id = '111') => {   // a aba B entra de novo: o token e a marca do aparelho são os dela
+  m.ap.dados.set(TOKEN, 'TOK-B');
+  m.ap.dados.set(CONTA_KEY, JSON.stringify({ id, s: marcaDe('TOK-B') }));
+};
+const outraContaToma = (m, id = '222') => {
+  m.ap.dados.set(TOKEN, 'TOK-C');
+  m.ap.dados.set(CONTA_KEY, JSON.stringify({ id, s: marcaDe('TOK-C') }));
+};
+
+test('R16-1-01: a abertura grava a conta que o aparelho confirmou pra sessão desta aba — e a queda, com a marca do aparelho já trocada pela outra aba, ainda a lembra', () => {
+  const m = quedaComLote({ perfil: null });
+  assert.equal(m.deps.contaConfirmadaNestaAba, null, 'PRÉ-CONDIÇÃO: a aba não confirmou conta (o perfil não chegou)');
+  m.h.lembrarAContaDoAparelho();                          // o `abrirComSessaoSalva`
+  assert.deepEqual(m.deps.contaConfirmadaNestaAba, { id: '111', s: marcaDe('TOK-A') },
+    'DEFEITO: a abertura com a sessão guardada não registrou a conta que o aparelho confirmou pra ela');
+  outraSessaoDaMesmaConta(m);                             // a outra aba da mesma conta entra de novo
+  m.h.derrubarSessao('srv.err.sessionExpired');           // sem a conta guardada, aqui `contaAgora()` era null (a marca já era a de TOK-B)
+  assert.deepEqual(m.deps.contaConfirmadaNestaAba, { id: '111', s: marcaDe('TOK-A') });
+  naEntradaSemSessao(m);
+  assert.equal(m.h.outraContaTomouOAparelhoDaQueCaiu(), false, 'PRÉ-CONDIÇÃO: a MESMA conta no aparelho não encerra a aba que caiu');
+  outraContaToma(m, '222');
+  assert.equal(m.h.outraContaTomouOAparelhoDaQueCaiu(), true,
+    'DEFEITO: a conta 222 tomou o aparelho e a aba que caiu (da 111) segue com a fila, o card e o anel dela (R16-1-01)');
+});
+
+test('R16-1-01: CONTROLE — sem a abertura ter gravado a conta, o defeito reaparece (o instrumento enxerga a diferença)', () => {
+  const m = quedaComLote({ perfil: null });
+  outraSessaoDaMesmaConta(m);
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  assert.equal(m.deps.contaConfirmadaNestaAba, null, 'PRÉ-CONDIÇÃO: a queda não pode inventar a conta quando a marca do aparelho é de OUTRA sessão');
+  naEntradaSemSessao(m);
+  outraContaToma(m, '222');
+  assert.equal(m.h.outraContaTomouOAparelhoDaQueCaiu(), false, 'CONTROLE: sem a conta a aba "segue" (é o que o conserto da abertura evita)');
+});
+
+test('R16-1-01: `lembrarAContaDoAparelho` só afirma o que o aparelho prova — marca de outra sessão, sem sessão na memória, sem conta guardada e a conta já confirmada não mudam nada', () => {
+  // A marca guardada é de OUTRA sessão: a conta de quem é esta sessão não se sabe.
+  const outra = quedaComLote({ perfil: null });
+  outra.ap.dados.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('TOK-Z') }));
+  outra.h.lembrarAContaDoAparelho();
+  assert.equal(outra.deps.contaConfirmadaNestaAba, null, 'a aba afirmou uma conta que o aparelho confirmou com OUTRA sessão');
+  // Sem sessão na memória (a renovação, a tela de entrada): nada.
+  const sem = quedaComLote({ perfil: null });
+  sem.deps.API.sessionToken = null;
+  sem.h.lembrarAContaDoAparelho();
+  assert.equal(sem.deps.contaConfirmadaNestaAba, null, 'a aba sem sessão afirmou uma conta');
+  // Sem conta guardada.
+  const nada = quedaComLote({ perfil: null });
+  nada.ap.dados.delete(CONTA_KEY);
+  nada.h.lembrarAContaDoAparelho();
+  assert.equal(nada.deps.contaConfirmadaNestaAba, null, 'a aba inventou uma conta');
+  // A que a aba já confirmou (o perfil e o login decidem) não é trocada.
+  const ja = quedaComLote({ perfil: null });
+  ja.deps.contaConfirmadaNestaAba = { id: '999', s: 'antiga' };
+  ja.h.lembrarAContaDoAparelho();
+  assert.deepEqual(ja.deps.contaConfirmadaNestaAba, { id: '999', s: 'antiga' }, 'a abertura trocou a conta que a aba já tinha confirmado');
+});
+
+test('R16-1-01 (estrutura): a abertura com a sessão salva (e portanto a adoção) registra a conta ANTES do perfil — e a queda continua sem atribuir a conta à mão (R11-1-01)', () => {
+  const abre = fatiar('abrirComSessaoSalva');
+  assert.match(abre, /^\s+lembrarAContaDoAparelho\(\);/m, 'a abertura com a sessão salva não registra a conta do aparelho');
+  assert.ok(abre.indexOf('lembrarAContaDoAparelho()') < abre.indexOf('loadProfileAndAuxData()'), 'a conta é registrada depois de o perfil ser pedido');
+  assert.match(fatiar('adotarSessaoDoAparelho'), /abrirComSessaoSalva\(\);/, 'a adoção da sessão do aparelho não passa pela abertura');
+  assert.doesNotMatch(fatiar('derrubarSessao'), /contaConfirmadaNestaAba\s*=(?!=)/, 'a queda atribui a conta confirmada direto (R11-1-01)');
 });

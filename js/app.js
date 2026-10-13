@@ -710,6 +710,8 @@ function abrirComSessaoSalva() {
     // O token veio do armazenamento, não do login: sem isto o ciclo desta
     // sessão nasce sem início e a duração não existe (ver a função).
     marcarSessaoJaAtiva();
+    // A conta que o aparelho confirmou pra esta sessão, antes de o perfil chegar (R16-1-01).
+    lembrarAContaDoAparelho();
     // O que a fila de saída guardou por versão anterior, sem a marca da
     // sessão, é desta sessão aberta (ver a função). ANTES do esvaziamento.
     adotarSaidaSemMarca();
@@ -11822,6 +11824,25 @@ function lembrarAContaDaQueda(tokenQueCaiu) {
     if (contaConfirmadaNestaAba || !tokenQueCaiu) return;
     const id = contaAgora();
     if (id) contaConfirmadaNestaAba = { id, s: marcaDaSessao(tokenQueCaiu) };
+}
+
+// A abertura (e a adoção) com a sessão GUARDADA no aparelho: se o aparelho diz de
+// quem ela é — a marca guardada com a conta é a DESTA sessão —, a aba passa a saber
+// a conta desde já, mesmo que o perfil falhe ou demore (R16-1-01). Só na queda ela
+// era lembrada (`lembrarAContaDaQueda`), e aí era tarde: se outra aba da MESMA conta
+// entrou de novo com outra sessão (o ACESSAR do WME, cookies colados), a marca do
+// aparelho já era a dela, esta aba não achava a conta, e quando OUTRA conta entrava
+// noutra aba a daqui não era alcançada — a fila, o card e o anel de chamadas da
+// conta anterior ficavam e iam no relatório de quem entrou depois (MEDIDO, auditoria
+// da rodada 16). A marca que bate é prova: a sessão foi vista com essa conta quando
+// entrou. NUNCA troca a que a aba já confirmou (o perfil e o login são quem
+// decide) e, sem sessão na memória ou sem conta no aparelho, não afirma nada. A
+// marca do APARELHO segue sendo só da sessão guardada: isto fica na memória desta aba.
+function lembrarAContaDoAparelho() {
+    if (contaConfirmadaNestaAba) return;
+    const id = contaAgora();
+    const s = marcaDestaAba();
+    if (id && s) contaConfirmadaNestaAba = { id, s };
 }
 
 function derrubarSessao(errorKey, { depois } = {}) {
