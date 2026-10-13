@@ -11826,6 +11826,7 @@ function lembrarAContaDaQueda(tokenQueCaiu) {
 
 function derrubarSessao(errorKey, { depois } = {}) {
     epocaDaSessao++;   // o que estava em voo pertencia à sessão que morreu
+    soltarOsLotesDaSessaoQueAcabou();   // o lote dela já não conta no "Sair" (R16-1-03)
     quedaAnunciada = false;   // esta queda ainda não foi dita (ver o fim da renovação)
     sessaoCaiuNestaPagina = true;   // esta aba teve sessão, e ela caiu (ver a declaração)
     // O que é do APARELHO — o token guardado, o diário de sessões e o prazo —
@@ -17768,11 +17769,19 @@ function escapeHtml(str) {
 // época). Quem chama passa a época do GESTO; sem ela vale a da chamada, que
 // basta pras retentativas. `null` desliga a conferência: é o "Sair", que manda
 // o token velho EXPLÍCITO e precisa apagá-lo no servidor mesmo depois.
+//
+// `aoEsperar(sim)`: avisa quando a decisão está ESPERANDO a retentativa (1,5 s e
+// 3,5 s depois de um `transient`) — sem requisição no ar e com o "Sair" podendo
+// cancelá-la pela época. A decisão que espera assim não chega ao Waze se a
+// pessoa confirma o "Sair", e o diálogo tem que contá-la (R16-2-03): quem
+// chama passa `marcarLoteSemEnviar(os pedidos, sim)`. `true` antes de cada
+// espera, `false` ao fim dela, antes da ida seguinte; se a sessão acabou
+// durante a espera, quem trocou a época já esvaziou o conjunto.
 function sessaoTrocou() {
     return { success: false, errorCategory: 'session_changed' };
 }
 
-async function callWithRetry(fn, epoca = epocaDaSessao) {
+async function callWithRetry(fn, epoca = epocaDaSessao, aoEsperar = null) {
     const outraSessao = () => epoca !== null && epoca !== epocaDaSessao;
     if (outraSessao()) return sessaoTrocou();
     let result = await fn();
@@ -17789,8 +17798,10 @@ async function callWithRetry(fn, epoca = epocaDaSessao) {
     while (result && !result.success && result.errorCategory === 'transient'
            && !semRede() && attempt < TRANSIENT_RETRY_ATTEMPTS) {
         const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
+        if (typeof aoEsperar === 'function') aoEsperar(true);
         await new Promise(r => setTimeout(r, delay));
         if (outraSessao()) return sessaoTrocou();
+        if (typeof aoEsperar === 'function') aoEsperar(false);
         attempt++;
         result = await fn();
     }
@@ -18169,6 +18180,7 @@ function conferirContaDestaAba() {
     if (AppState.contaEmDuvida !== true) {
         AppState.contaEmDuvida = true;
         epocaDaSessao++;
+        soltarOsLotesDaSessaoQueAcabou();   // R16-1-03
         if (AppState.pendingAction) {
             AppState.pendingAction.cancel(true);
             AppState.pendingAction = null;
@@ -20016,7 +20028,9 @@ async function enviarLote(places, opts = {}) {
     const aoLandar = !!opts.contarAoLandar;
     // O que este lote diz ao indicador "Enviando N…" (ver `rejeicoesDeLoteNoAr`). Os
     // `repetidos` não saem nem entram na conta, e ficam de fora do que resta.
-    const noAr = { epoca, restam: places.length, acoes: 1 + (opts.dentroDeUmaAcao === true ? 1 : 0) };
+    // `pedidos`: os dele, pro indicador não contar como "esperando envio" o que a queda
+    // deixou na fila de saída até a ida em voo responder (R16-1-03).
+    const noAr = { epoca, restam: places.length, acoes: 1 + (opts.dentroDeUmaAcao === true ? 1 : 0), pedidos: places };
     const progresso = () => {
         noAr.restam = Math.max(0, places.length - repetidos.size - conta.ok - conta.fila - conta.ja - conta.erro - conta.aprovada - conta.naoVale);
         updateInFlightIndicator();
@@ -20091,9 +20105,12 @@ async function enviarLote(places, opts = {}) {
         for (const p of places) {
             if (repetidos.has(p)) continue;
             if (!aoLandar) marcarLoteSemEnviar(p, false);   // entra no ar: já não é o que o "Sair" descarta
+            // O lote da PESSOA esperando a retentativa também conta no "Sair" (R16-2-03);
+            // a recusa automática é o app agindo, e fica de fora.
             const r = await callWithRetry(() => (desistir(p)
                 ? naoVale
-                : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)));
+                : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)), undefined,
+                aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
             // os que nem saíram) volta (K7). Contando ao pousar não há o que
@@ -22307,6 +22324,17 @@ function marcarLoteSemEnviar(places, sim) {
     }
     // O diálogo do "Sair" aberto diz a conta de agora (a frase não pode seguir
     // contando o que já está no ar).
+    redesenharAvisoDoSairSeAberto();
+}
+
+// A sessão acabou (a queda, a conta em dúvida; o "Sair" faz o mesmo à mão): o
+// laço do lote dela PARA depois da ida que está no ar, e os pedidos que ele não
+// mandou VOLTAM à fila — já não são o que o "Sair" da sessão que vem descartaria.
+// Sem isto o diálogo contava "5 pedidos serão descartados" quando eles voltavam
+// ao card, até a ida em voo responder (auditoria da rodada 16, R16-1-03, MEDIDO).
+// Chamada logo depois de `epocaDaSessao++`.
+function soltarOsLotesDaSessaoQueAcabou() {
+    pedidosDoLoteSemEnviar.clear();
     redesenharAvisoDoSairSeAberto();
 }
 
@@ -26027,7 +26055,9 @@ function handleMarkAsRead() {
             return;
         }
         const presenca = presencaWmeDaAcao(place, pais);
-        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca);
+        // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
+        const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca,
+            (sim) => marcarLoteSemEnviar(place, sim));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26076,7 +26106,9 @@ function handleReject() {
             return;
         }
         const presenca = presencaWmeDaAcao(place, pais);
-        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca);
+        // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
+        const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca,
+            (sim) => marcarLoteSemEnviar(place, sim));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26417,8 +26449,10 @@ async function handleBatchMarkRead() {
     // saída), e conferir de novo seria outra sonda e outro "conexão instável".
     // O lote para e avisa (lá embaixo).
     let refez = false;
-    const mandar = async (enviar) => {
-        const r = await callWithRetry(enviar);
+    // `quais`: os pedidos desta ida, pro "Sair" contar o que espera a retentativa
+    // (R16-2-03). Uma função: o pedaço é remontado a cada ida.
+    const mandar = async (enviar, quais) => {
+        const r = await callWithRetry(enviar, undefined, (sim) => marcarLoteSemEnviar(quais(), sim));
         if (refez || epoca !== epocaDaSessao || !(r && r.errorCategory === 'unauthorized')) return r;
         refez = true;
         return (await refazerDepoisDo401(epoca, enviar)) || r;
@@ -26491,7 +26525,7 @@ async function handleBatchMarkRead() {
             const r = await mandar(() => {
                 pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
                 return pedaco.length ? API.markAsReadBatch(itens(pedaco), regiao) : { success: true };
-            });
+            }, () => pedaco);
             if (epoca !== epocaDaSessao) {
                 sessaoTrocou = true;
                 if (r && r.success) posQueda.push(...pedaco);
@@ -26510,9 +26544,19 @@ async function handleBatchMarkRead() {
             if (r && r.errorCategory === 'unauthorized') { falhou = r; break; }
             if (!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'))) { falhou = r || {}; break; }
             // Um do pedaço já estava resolvido e o Waze parou nele: um a um.
+            // Os pedidos do pedaço VOLTAM ao que o diálogo do "Sair" conta (R16-2-02):
+            // entraram no ar com o pedaço (`marcarLoteSemEnviar(doPedaco, false)`, lá em
+            // cima), mas o pedaço respondeu "parei no resolvido" e cada um só sai de
+            // verdade quando ENTRA no ar, sozinho. Sem isto, o "Sair" no meio do um a um
+            // não contava os que faltavam e os descartava sem aviso. Cada um deixa a
+            // conta ao entrar no ar (logo abaixo), e o `finally` tira o que sobrar.
+            marcarLoteSemEnviar(pedaco, true);
             for (const p of pedaco) {
-                // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02).
-                if (decididoNaOutraAba(p)) continue;
+                // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02): essa
+                // decisão não é do "Sair" descartar.
+                if (decididoNaOutraAba(p)) { marcarLoteSemEnviar(p, false); continue; }
+                // Entra no ar: já não é o que o "Sair" descarta.
+                marcarLoteSemEnviar(p, false);
                 noAr(alvos.indexOf(p));
                 // E a cada ida deste pedido, como a do pedaço (R12-2-03): `saiu`
                 // diz se a que valeu foi mesmo ao Waze.
@@ -26520,7 +26564,7 @@ async function handleBatchMarkRead() {
                 const r1 = await mandar(() => {
                     saiu = !decididoNaOutraAba(p);
                     return saiu ? API.markAsRead(p.venueID, p.updateRequestID, null, regiao) : { success: true };
-                });
+                }, () => [p]);
                 if (epoca !== epocaDaSessao) {
                     sessaoTrocou = true;
                     if (saiu && r1 && (r1.success || r1.errorCategory === 'already_processed' || r1.errorCategory === 'not_found')) posQueda.push(p);
@@ -27119,8 +27163,8 @@ function updateInFlightIndicator() {
     let el = document.getElementById('inFlightIndicator');
     // Ele era NÚMERO A NÃO COBRIR (o `nao-cobrir` lá embaixo) antes desta volta?
     const eraLeitura = !!el && /(^|\s)nao-cobrir(\s|$)/.test(el.className);
-    const fila = AppState.authenticated ? carregarFilaDeSaida() : [];
-    const esperando = fila.length;
+    let fila = AppState.authenticated ? carregarFilaDeSaida() : [];
+    let esperando = fila.length;
     // O que a OUTRA aba está mandando é "enviando" aqui também (R11-4-03): dizia
     // "1 esperando envio", com o relógio que quer dizer "parado esperando rede" —
     // e, desde o R10-4-05, sem a marca de número a não cobrir, então no
@@ -27132,12 +27176,57 @@ function updateInFlightIndicator() {
     // ar é da sessão que acabou (a queda não zera o `inFlightActions`, e a resposta
     // dela só chega depois), e o "Enviando 1…" ficava no canto da tela de entrada
     // (R15-2-F2, MEDIDO: da queda até ~11 s depois). Pela mesma saída do "nada no ar".
+    // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
+    // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
+    const sumir = () => { if (el) { el.remove(); if (eraLeitura) atualizarFabDev(); } };
     if (AppState.authenticated !== true || (AppState.inFlightActions <= 0 && esperando <= 0)) {
-        // Sumiu: o canto que ele ocupava pode voltar a ser o do FAB (ver abaixo)
-        // — se ele era número a não cobrir; o "enviando" nunca afastou o FAB.
-        if (el) { el.remove(); if (eraLeitura) atualizarFabDev(); }
+        sumir();
         return;
     }
+    // Girando só quando está MESMO saindo — por esta aba ou pela outra (a marca
+    // dela). "Esperando" com giro seria o app fingindo trabalho que não está
+    // acontecendo — e é justamente o estado em que não há rede pra trabalhar.
+    //
+    // E o número conta DECISÕES: o "Marcar todos" é UMA ação no `inFlightActions`
+    // e manda até 25 pedidos por ida — dizia "Enviando 1…" com 5 no ar (R14-8-10).
+    // Os pedidos dele que ainda não responderam (`lidosDoLoteNoAr`) entram no
+    // lugar desse 1, só com o lote no ar. (`typeof`: os harnesses dos testes
+    // fatiam esta função sem as variáveis do lote.)
+    const doLote = typeof loteDeLidosEmVoo !== 'undefined' && loteDeLidosEmVoo === true
+        && typeof lidosDoLoteNoAr === 'number' && lidosDoLoteNoAr > 1 ? lidosDoLoteNoAr - 1 : 0;
+    // Os lotes de rejeição no ar (R15-2-F3): os pedidos deles no lugar das unidades
+    // que ocupam no `inFlightActions`. Um lote em seus últimos instantes (nada a
+    // responder, o `finally` ainda por rodar) conta 1, como o "Marcar todos".
+    let acoesDeLote = 0, pedidosDeLote = 0;
+    const doLoteVelho = new Set();   // as chaves dos pedidos dos lotes de sessões que acabaram
+    if (typeof rejeicoesDeLoteNoAr !== 'undefined') {
+        for (const l of rejeicoesDeLoteNoAr) {
+            // As unidades que o lote ocupa no `inFlightActions` saem da conta em
+            // qualquer época, mas os pedidos dele só contam na sessão dele: o lote
+            // de uma sessão que acabou (a queda com renovação) segue com a ida em
+            // voo, o laço parou e os pedidos voltam à fila — "Enviando 2…" dizia o
+            // que a sessão de agora não está mandando (R16-1-03).
+            acoesDeLote += l.acoes;
+            if (l.epoca !== epocaDaSessao) {
+                if (Array.isArray(l.pedidos)) for (const q of l.pedidos) doLoteVelho.add(chaveDoPedido(q));
+                continue;
+            }
+            pedidosDeLote += Math.max(1, l.restam);
+        }
+    }
+    // E as anotações que esse lote deixou na fila de saída até a ida em voo
+    // responder (é ela que as tira): os pedidos VOLTAM à fila, e "6 esperando
+    // envio" seria o mesmo engano com outro número.
+    if (doLoteVelho.size) {
+        fila = fila.filter((x) => !doLoteVelho.has(chaveDoPedido(x)));
+        esperando = fila.length;
+    }
+    const saindo = Math.max(0, Math.max(0, AppState.inFlightActions) - acoesDeLote) + pedidosDeLote + pelaOutraAba + doLote;
+    // E sem NADA que contar: as unidades do `inFlightActions` que sobram são só as
+    // do lote de uma sessão que acabou (R16-1-03). Sem esta saída o canto ficava
+    // com "0 esperando envio" e o relógio, por uma ida que a sessão de agora não
+    // está esperando.
+    if (saindo <= 0 && esperando <= 0) { sumir(); return; }
     if (!el) {
         el = document.createElement('div');
         el.id = 'inFlightIndicator';
@@ -27155,29 +27244,6 @@ function updateInFlightIndicator() {
         el.style.top = 'max(5rem, calc(var(--header-h, 4rem) + 11px))';
         document.body.appendChild(el);
     }
-    // Girando só quando está MESMO saindo — por esta aba ou pela outra (a marca
-    // dela). "Esperando" com giro seria o app fingindo trabalho que não está
-    // acontecendo — e é justamente o estado em que não há rede pra trabalhar.
-    //
-    // E o número conta DECISÕES: o "Marcar todos" é UMA ação no `inFlightActions`
-    // e manda até 25 pedidos por ida — dizia "Enviando 1…" com 5 no ar (R14-8-10).
-    // Os pedidos dele que ainda não responderam (`lidosDoLoteNoAr`) entram no
-    // lugar desse 1, só com o lote no ar. (`typeof`: os harnesses dos testes
-    // fatiam esta função sem as variáveis do lote.)
-    const doLote = typeof loteDeLidosEmVoo !== 'undefined' && loteDeLidosEmVoo === true
-        && typeof lidosDoLoteNoAr === 'number' && lidosDoLoteNoAr > 1 ? lidosDoLoteNoAr - 1 : 0;
-    // Os lotes de rejeição no ar (R15-2-F3): os pedidos deles no lugar das unidades
-    // que ocupam no `inFlightActions`. Um lote em seus últimos instantes (nada a
-    // responder, o `finally` ainda por rodar) conta 1, como o "Marcar todos".
-    let acoesDeLote = 0, pedidosDeLote = 0;
-    if (typeof rejeicoesDeLoteNoAr !== 'undefined') {
-        for (const l of rejeicoesDeLoteNoAr) {
-            if (l.epoca !== epocaDaSessao) continue;
-            acoesDeLote += l.acoes;
-            pedidosDeLote += Math.max(1, l.restam);
-        }
-    }
-    const saindo = Math.max(0, Math.max(0, AppState.inFlightActions) - acoesDeLote) + pedidosDeLote + pelaOutraAba + doLote;
     const enviando = saindo > 0;
     const n = enviando ? saindo : esperando;
     const texto = enviando
