@@ -101,7 +101,7 @@ function montar({ serverTotal = 0, texto = '—', fila = [], myArea = false, per
     renderFocoAutor: () => {},
     // A sessão da busca (a que cai no meio é descartada, R14-1-02).
     epocaDaSessao: 0,
-    showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
+    cardDaFrente: () => null, showCurrentPlace: () => tela.push('card'), maybePrefetch: () => {}, showNoPlaces: () => tela.push('vazio'),
     abrirGuardadaDepoisDaFalha: async () => false,
     // O teto da espera pelo perfil da fila vazia (R13-6-04), quando existe.
     ...(/^const FILA_VAZIA_ESPERA_PERFIL_MS = /m.test(APP_SEM) ? { FILA_VAZIA_ESPERA_PERFIL_MS: constante('FILA_VAZIA_ESPERA_PERFIL_MS') } : {}),

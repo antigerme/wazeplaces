@@ -4779,9 +4779,20 @@ async function enviarAprovacao(alvo) {
         // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a
         // aprovação que não pousou devolve o ✨ e o "Aprovar" (V2); a que
         // pousou vai pra tela como pousou (R6-3-01).
+        //
+        // E a que não pousou, na fila REFEITA por quem entrou de novo (cookies,
+        // código, a sessão do aparelho), volta pela BUSCA da sessão de agora
+        // (`voltarDaAprovacaoRecusada`): ele estava em andamento e a busca da
+        // sessão nova o deixou de fora — sem isto, "Tudo limpo!" com o pedido
+        // pendente no Waze (auditoria da rodada 15, R15-2-F0, MEDIDO no
+        // navegador; o irmão da aprovação do R14-2-02, que cobriu o ✕/✓, o lote
+        // e a recusa automática). Na fila que atravessou a queda ele nunca saiu
+        // dela, e sem sessão (o "Sair") não há a quem devolver nada.
         if (epoca !== epocaDaSessao) {
-            if (!pousouNoWaze(r)) escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
-            else aprovacaoPousouDepoisDaQueda(alvo, valeu, quem);
+            if (!pousouNoWaze(r)) {
+                escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
+                if (AppState.authenticated === true) voltarDaAprovacaoRecusada(alvo);
+            } else aprovacaoPousouDepoisDaQueda(alvo, valeu, quem);
             return false;
         }
         if (valeu) {
@@ -4828,7 +4839,9 @@ async function enviarAprovacao(alvo) {
         return false;
     } catch (e) {
         if (epoca !== epocaDaSessao) {
+            // A ida que lançou depois da queda não pousou: o mesmo que acima.
             escritaDoLightboxSemSessao(alvo.place, () => Lightbox.desmarcarAprovada(alvo), 'toast.photoApproveFailed');
+            if (AppState.authenticated === true) voltarDaAprovacaoRecusada(alvo);
             return false;
         }
         Lightbox.desmarcarAprovada(alvo);
@@ -7381,11 +7394,41 @@ function janelaDoDesfazerAberta() {
 // (R14-1-01). O `cancel`/`cancelar` da sessão que acaba não passa por aqui: o
 // adiado vai embora com a janela. FONTE ÚNICA das quatro janelas (a do
 // `scheduleAction` e as três da foto).
+//
+// Com a página SAINDO (`API.saindo`: foi pro fundo ou está fechando, e a janela
+// acabou pela descarga) o refazer NÃO roda: a busca sairia com `keepalive` e sem
+// o teto de 45 s — pendurada, prendia a fila até recarregar —, e pra uma página
+// que morre é uma requisição jogada fora no free tier (auditoria da rodada 15,
+// R15-3-02, MEDIDO nos dois motores). Ele fica esperando a volta da página
+// (`atenderORefazerAdiadoDaDescarga`, no `setupFimDoModoSaindo`).
 function atenderOFimDaJanela(janela) {
     const aoFim = janela && janela.aoFim;
     if (typeof aoFim !== 'function') return;
     janela.aoFim = null;
-    queueMicrotask(() => { if (AppState.authenticated) aoFim(); });
+    queueMicrotask(() => {
+        if (!AppState.authenticated) return;
+        if (typeof API !== 'undefined' && API.saindo === true) { guardarORefazerAteAVolta(aoFim); return; }
+        aoFim();
+    });
+}
+
+// O refazer que a janela adiou e cuja página estava saindo quando ela acabou.
+// Vale só pra QUEM o pediu: a mesma sessão (`epocaDaSessao`) e a mesma fila
+// (`fetchEpoch`) — o ↻, um filtro, a troca de conta ou o "Sair" nesse meio já
+// refizeram o que ele ia refazer, e rodá-lo de novo seria uma busca a mais.
+let refazerAdiadoDaDescarga = null;
+function guardarORefazerAteAVolta(aoFim) {
+    refazerAdiadoDaDescarga = { aoFim, sessao: epocaDaSessao, fila: AppState.fetchEpoch };
+}
+
+// A página VOLTOU (o modo "saindo" já acabou): atende o refazer que ficou
+// esperando, se ainda for dele (ver acima). Uma vez só.
+function atenderORefazerAdiadoDaDescarga() {
+    const a = refazerAdiadoDaDescarga;
+    refazerAdiadoDaDescarga = null;
+    if (!a || !AppState.authenticated) return;
+    if (a.sessao !== epocaDaSessao || a.fila !== AppState.fetchEpoch) return;
+    a.aoFim();
 }
 
 // O treino que termina por um GESTO de busca nova — o ↻, o "Aplicar" com outro
@@ -13919,7 +13962,18 @@ async function startFetching() {
     updatePendingCount();
 
     if (AppState.queue.length > 0) {
-        showCurrentPlace();
+        // O card da frente JÁ É o do pedido que abre a fila — o Desfazer do
+        // último pedido devolveu o card enquanto a página ainda vinha, com o
+        // esqueleto na tela —: desenhá-lo de novo tira o foco do teclado do ✕
+        // (que o Desfazer acabara de prometer: cai no <body>), volta o carrossel
+        // pra 1ª foto e arranca do dedo o nó do arraste do mouse (auditoria da
+        // rodada 15, R15-2-F1, MEDIDO nos dois motores). O card que está na tela
+        // é novo desde o começo desta busca (ela o tirou no topo), então o que a
+        // página trouxe só muda o que vem POR BAIXO dele: o "Ver +N", a barra do
+        // autor e o card de fundo. Sem card (ou com o de outro pedido), desenha.
+        if (cardDaFrente() && pedidoDoCard(cardDaFrente()) === AppState.queue[0]
+            && AppState.currentPlace === AppState.queue[0]) aoMudarAFilaPorBaixo();
+        else showCurrentPlace();
         maybePrefetch();
     } else {
         showNoPlaces();
@@ -27641,14 +27695,27 @@ function descarregarAcaoPendente() {
         // `true` grava o placar revertido: o número inflado já foi pro
         // armazenamento quando o lote foi agendado, e sem isto ele sobreviveria
         // ao recarregamento contando pedidos que nunca saíram.
-        if (AppState.pendingAction.aoSair === 'cancel') AppState.pendingAction.cancel(true);
-        // A decisão entra na fila de saída ANTES do envio (ver `descarregar`):
-        // a página pode morrer antes da resposta — e o envio com ela, no
-        // "lie-fi". Na fila, a reabertura sem rede já não a devolve como card
-        // (`semOsJaDecididos`), e ela sai quando houver rede. O POUSO não vai
-        // mais antes do envio: gravado sem a resposta, ele escondia o pedido de
-        // uma decisão que talvez nunca tenha saído.
-        else AppState.pendingAction.descarregar();
+        //
+        // A janela do lote acabou, e o refazer que o app adiou pra ela (`aoFim`,
+        // ver `retomarBusca`) não podia morrer com ela: os pedidos voltaram pra
+        // fila, mas a rede que voltou já tinha gasto o gatilho — a fila ficava
+        // em "Falha ao carregar" com `hasMore` falso e a rede de pé (auditoria
+        // da rodada 15, R15-6-01, MEDIDO nos dois motores). Aqui, e NÃO dentro do
+        // `cancel`: a queda da sessão e o "Sair" também chamam `cancel(true)`, e
+        // ali a renovação recompõe a fila. Com a página saindo ele espera a volta
+        // (ver `atenderOFimDaJanela`).
+        //
+        // A decisão de um pedido só, ao contrário, entra na fila de saída ANTES
+        // do envio (ver `descarregar`): a página pode morrer antes da resposta —
+        // e o envio com ela, no "lie-fi". Na fila, a reabertura sem rede já não a
+        // devolve como card (`semOsJaDecididos`), e ela sai quando houver rede. O
+        // POUSO não vai mais antes do envio: gravado sem a resposta, ele escondia
+        // o pedido de uma decisão que talvez nunca tenha saído.
+        const janelaDaAcao = AppState.pendingAction;
+        if (janelaDaAcao.aoSair === 'cancel') {
+            janelaDaAcao.cancel(true);
+            atenderOFimDaJanela(janelaDaAcao);
+        } else AppState.pendingAction.descarregar();
     } catch (e) {
         console.error('Falha ao descarregar a ação pendente:', e);
     }
@@ -27687,11 +27754,19 @@ function setupDescargaAoSair() {
 // a lista, o token do tempo real e as confirmações de carona paravam até
 // recarregar (auditoria da rodada 8, R8-5-02, medido no Chromium: aos 46,5 s o
 // pedido seguia no ar, e tocar na pílula mandava 0 pedidos).
+//
+// E o refazer da fila que a janela adiou e a descarga segurou (R15-3-02,
+// R15-6-01, ver `atenderOFimDaJanela`) roda AQUI, já com o modo desligado: é uma
+// busca como as outras, com o teto de 45 s, e só se ainda for a fila dele.
 function setupFimDoModoSaindo() {
+    const acabou = () => {
+        if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
+        atenderORefazerAdiadoDaDescarga();
+    };
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
+        if (document.visibilityState === 'visible') acabou();
     });
-    window.addEventListener('pageshow', () => { if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false); });
+    window.addEventListener('pageshow', acabou);
 }
 
 // O banner do topo se ancora abaixo do header, e o header não tem altura fixa:

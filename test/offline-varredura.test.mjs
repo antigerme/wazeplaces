@@ -984,7 +984,7 @@ function aparelhoO1({ filtros = null } = {}) {
       document: { getElementById: el },
       // A tela vazia diz se é a de FALHA (`loadError`) ou o "Tudo limpo!": o
       // instrumento que não distingue as duas conta uma pela outra.
-      showCurrentPlace: () => log.push(['card', {}]), maybePrefetch: () => {},
+      cardDaFrente: () => null, showCurrentPlace: () => log.push(['card', {}]), maybePrefetch: () => {},
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
