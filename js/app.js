@@ -27820,6 +27820,8 @@ function scheduleAction(type, place, executor, opts = {}) {
     janela = AppState.pendingAction = {
         type,
         place,
+        // Quantos pedidos a janela guarda: o aviso do lote que a página saindo cancelou (R19-2-03).
+        quantos: n,
         execute: () => {
             if (!executed) {
                 executed = true;
@@ -28873,6 +28875,9 @@ function descarregarAcaoPendente() {
         if (janelaDaAcao.aoSair === 'cancel') {
             janelaDaAcao.cancel(true);
             atenderOFimDaJanela(janelaDaAcao);
+            // O lote que sumiu: a fila voltou, o placar zerou e NADA foi ao Waze — a pessoa tocou,
+            // esperou e saiu achando que foi (R19-2-03). Diz quando ela voltar.
+            lembrarDoLoteQueNaoSaiu(janelaDaAcao.quantos);
         } else AppState.pendingAction.descarregar();
     } catch (e) {
         console.error('Falha ao descarregar a ação pendente:', e);
@@ -28916,10 +28921,29 @@ function setupDescargaAoSair() {
 // E o refazer da fila que a janela adiou e a descarga segurou (R15-3-02,
 // R15-6-01, ver `atenderOFimDaJanela`) roda AQUI, já com o modo desligado: é uma
 // busca como as outras, com o teto de 45 s, e só se ainda for a fila dele.
+// O "Rejeitar os N" que a página indo pro fundo CANCELOU na janela do Desfazer (`aoSair: 'cancel'`,
+// de propósito: meio lote enviado não tem sintoma) sumia calado: a fila voltava de 8 pra 12, o
+// placar zerava, 0 requisições e nenhum aviso (R19-2-03, MEDIDO). O comportamento segue; o que
+// faltava era DIZER. A página está escondida na hora do cancelamento, então o aviso espera a
+// volta (`dizerOLoteQueNaoSaiu`, no fim do modo "saindo"): um toast de 4 s dito no escuro
+// vencia antes de alguém ver. Só vale na sessão em que foi cancelado.
+let loteQueNaoSaiu = null;
+function lembrarDoLoteQueNaoSaiu(quantos) {
+    const n = Number(quantos);
+    loteQueNaoSaiu = n >= 1 ? { n, epoca: epocaDaSessao } : null;
+}
+function dizerOLoteQueNaoSaiu() {
+    const l = loteQueNaoSaiu;
+    loteQueNaoSaiu = null;
+    if (!l || l.epoca !== epocaDaSessao || AppState.authenticated !== true) return;
+    showToast(t(l.n === 1 ? 'toast.loteNaoSaiu' : 'toast.loteNaoSaiuPlural', { n: l.n }), 'info');
+}
+
 function setupFimDoModoSaindo() {
     const acabou = () => {
         if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
         atenderORefazerAdiadoDaDescarga();
+        if (typeof dizerOLoteQueNaoSaiu === 'function') dizerOLoteQueNaoSaiu();
     };
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') acabou();

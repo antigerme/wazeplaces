@@ -600,3 +600,87 @@ test('R19-2-02 (estrutura): a trava é do molde da `travaDaSaida` e é solta no 
   assert.match(corpo, /\} finally \{\s*recusaAutomaticaRodando = false;\s*if \(trava\) trava\.soltar\(\);/, 'a trava entre abas não é solta no `finally` do laço');
   assert.match(corpo, /if \(trava === null\) \{ esperarOutraAbaNaRecusaAutomatica\(\); return; \}/, 'a aba que não pega a trava não espera a outra');
 });
+
+// ───────────────────── R19-2-03: o "Rejeitar os N" cancelado pelo segundo plano avisa ─────────────────────
+// A página indo pro fundo na janela do Desfazer CANCELA o lote (`aoSair: 'cancel'`, de propósito: meio
+// lote enviado não tem sintoma): a fila voltava de 8 pra 12, o placar zerava, 0 requisições e NENHUM
+// aviso. O comportamento segue; agora o app diz, quando a pessoa volta.
+function paginaComLoteNaJanela({ aoSair = 'cancel', quantos = 4, autenticada = true } = {}) {
+  const toasts = [];
+  const cancelados = [];
+  const deps = {
+    AppState: { authenticated: autenticada, pendingAction: { aoSair, quantos, cancel: (salvar) => cancelados.push(salvar), descarregar: () => cancelados.push('despachou') } },
+    epocaDaSessao: 3, loteQueNaoSaiu: null, renomeacaoPendente: null, aprovacaoPendente: null, exclusaoPendente: null,
+    soltarEsperasDoAquecimento() {}, atenderOFimDaJanela() {}, navigator: { onLine: true }, API: { setSaindo() {} },
+    showToast: (m, tipo) => { toasts.push([m, tipo]); return { remover() {} }; },
+    t: (k, v) => k + (v && v.n !== undefined ? ':' + v.n : ''),
+  };
+  const h = montar(['descarregarAcaoPendente', 'lembrarDoLoteQueNaoSaiu', 'dizerOLoteQueNaoSaiu'], deps);
+  return { h, deps, toasts, cancelados };
+}
+
+test('R19-2-03: o lote cancelado pela página saindo é DITO na volta — uma vez, com a contagem', () => {
+  const m = paginaComLoteNaJanela({ quantos: 4 });
+  m.h.descarregarAcaoPendente();                           // a página vai pro fundo: o lote é cancelado
+  assert.deepEqual(m.cancelados, [true], 'PRÉ-CONDIÇÃO: o lote deveria ser cancelado com o placar gravado');
+  assert.deepEqual(m.toasts, [], 'o aviso saiu com a página ESCONDIDA (vence antes de alguém ver)');
+  m.h.dizerOLoteQueNaoSaiu();                              // a volta
+  assert.deepEqual(m.toasts, [['toast.loteNaoSaiuPlural:4', 'info']],
+    'DEFEITO: o lote cancelado voltou calado — a fila volta de 8 pra 12 sem uma palavra');
+  m.h.dizerOLoteQueNaoSaiu();
+  assert.equal(m.toasts.length, 1, 'o aviso saiu duas vezes');
+  // O singular tem frase própria.
+  const um = paginaComLoteNaJanela({ quantos: 1 });
+  um.h.descarregarAcaoPendente(); um.h.dizerOLoteQueNaoSaiu();
+  assert.deepEqual(um.toasts, [['toast.loteNaoSaiu:1', 'info']], 'o lote de UM pedido usa a chave do singular');
+});
+
+test('R19-2-03: CONTROLES — a decisão única despachada, a sessão trocada e a tela de entrada NÃO avisam', () => {
+  // Uma decisão única (ou o lote que despacha) não foi cancelada: sai com keepalive.
+  const unica = paginaComLoteNaJanela({ aoSair: 'execute' });
+  unica.h.descarregarAcaoPendente(); unica.h.dizerOLoteQueNaoSaiu();
+  assert.deepEqual([unica.cancelados, unica.toasts], [['despachou'], []], 'CONTROLE: a decisão despachada gerou o aviso do lote');
+  // Sem nada cancelado, a volta não diz nada.
+  const nada = paginaComLoteNaJanela({ aoSair: 'execute' });
+  nada.h.dizerOLoteQueNaoSaiu();
+  assert.deepEqual(nada.toasts, [], 'CONTROLE: a volta disse algo sem lote cancelado');
+  // A sessão trocou entre o cancelamento e a volta (o "Sair", a queda): o aviso é de outra sessão.
+  const trocada = paginaComLoteNaJanela();
+  trocada.h.descarregarAcaoPendente();
+  trocada.deps.epocaDaSessao++;
+  trocada.h.dizerOLoteQueNaoSaiu();
+  assert.deepEqual(trocada.toasts, [], 'o aviso do lote saiu numa sessão que já não é a dele');
+  // Sem sessão (a tela de entrada), nada a dizer.
+  const fora = paginaComLoteNaJanela();
+  fora.h.descarregarAcaoPendente();
+  fora.deps.AppState.authenticated = false;
+  fora.h.dizerOLoteQueNaoSaiu();
+  assert.deepEqual(fora.toasts, [], 'o aviso do lote saiu na tela de entrada');
+});
+
+test('R19-2-03 (estrutura): a janela do lote guarda quantos pedidos tem, e o fim do modo "saindo" (a volta) diz o aviso', () => {
+  assert.match(fatiar('scheduleAction'), /quantos: n,/, 'a janela do Desfazer deixou de guardar quantos pedidos tem');
+  assert.match(fatiar('setupFimDoModoSaindo'), /atenderORefazerAdiadoDaDescarga\(\);\s*if \(typeof dizerOLoteQueNaoSaiu === 'function'\) dizerOLoteQueNaoSaiu\(\);/,
+    'a volta à página deixou de dizer o lote que não saiu');
+  assert.match(fatiar('descarregarAcaoPendente'), /janelaDaAcao\.cancel\(true\);\s*atenderOFimDaJanela\(janelaDaAcao\);\s*lembrarDoLoteQueNaoSaiu\(janelaDaAcao\.quantos\);/,
+    'o cancelamento do lote deixou de lembrar do aviso');
+});
+
+test('R19-2-03: a frase existe nos 4 idiomas, no singular e no plural, sem culpar a rede e com "app" no gênero certo', async () => {
+  const vm = await import('node:vm');
+  const ctx = { navigator: { language: 'pt' }, document: { documentElement: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\nthis.__DICT = I18N_DICT;', ctx);
+  const D = ctx.__DICT;
+  assert.deepEqual(Object.keys(D).sort(), ['en', 'es', 'fr', 'pt'], 'CONTROLE: o teste não cobre todas as línguas');
+  for (const lang of Object.keys(D)) {
+    const um = D[lang]['toast.loteNaoSaiu'], varios = D[lang]['toast.loteNaoSaiuPlural'];
+    assert.ok(um && varios, `${lang}: faltou a frase do lote que não saiu`);
+    assert.doesNotMatch(um, /\{n\}/, `${lang}: o singular leva a contagem`);
+    assert.match(varios, /\{n\}/, `${lang}: o plural não leva a contagem`);
+    // A falta de rede tem palavra própria ("sinal"): aqui a causa é a pessoa ter saído do app.
+    assert.doesNotMatch(um + varios, /sinal|signal|señal|réseau|rede\b/i, `${lang}: a frase culpa a rede`);
+  }
+  assert.match(D.pt['toast.loteNaoSaiu'], /do app\./, 'pt: "app" é masculino');
+  assert.match(D.pt['toast.loteNaoSaiuPlural'], /do app\./, 'pt: "app" é masculino');
+});

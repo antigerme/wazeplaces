@@ -13897,6 +13897,81 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(com.erros.length === 0 && sem.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0]);
 }
 
+// ── "REJEITAR OS N" CANCELADO PELO SEGUNDO PLANO AVISA NA VOLTA (R19-2-03) ──
+//
+// Trocar de app na janela do Desfazer do "Rejeitar os N" CANCELA o lote (de
+// propósito: meio lote enviado não tem sintoma): a fila voltava de 8 pra 12, o
+// placar zerava, 0 requisições e nenhuma palavra. Hoje a volta diz. O segundo
+// plano é simulado pelo `visibilityState` + `visibilitychange` (o mesmo que o
+// navegador entrega). CONTROLES: sem esconder a página, os N pedidos SAEM (e
+// nenhum aviso de "não foram rejeitados"); o aviso não sai com a página ainda
+// escondida.
+{
+  const loteNoSegundoPlano = async (esconder) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const envios = [];
+    const resolvidos = new Set();
+    const pedidos = Array.from({ length: 12 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vLT' + i, updateRequestID: 'uLT' + i,
+      creatorId: 9000 + (i % 3), createdBy: 'autor' + (i % 3), imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'validar-place') { envios.push(corpo.updateRequestID); resolvidos.add(corpo.updateRequestID); }
+      else if (nome === 'perfil') resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(() => {
+      try {
+        localStorage.setItem('waze_session_token', 'token-do-smoke-do-lote');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, consequenciaVista: { reject: true, read: true } }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    });
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
+    await assentar(page, 150);
+    await page.evaluate(() => rejeitarLoteDoAutor(AppState.currentPlace));
+    await esperarOuExplodir(page, () => !!AppState.pendingAction && AppState.queue.length === 8, 'a janela do Desfazer do lote abrir');
+    const avisos = () => page.evaluate(() => [...document.querySelectorAll('#toastContainer > *')].map((x) => (x.textContent || '').trim().replace(/\s+/g, ' ')));
+    let comEscondida = [];
+    if (esconder) {
+      await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+      await esperarOuExplodir(page, () => AppState.pendingAction === null, 'a janela do lote ser cancelada');
+      comEscondida = await avisos();
+      await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
+    } else {
+      await esperarOuExplodir(page, () => AppState.pendingAction === null && !AppState.inFlightActions, 'o lote sair');
+    }
+    await page.waitForTimeout(200);
+    const depois = await avisos();
+    const estado = await page.evaluate(() => ({ fila: AppState.queue.length, rejeitados: AppState.stats.rejected }));
+    await ctx.close();
+    return { envios, comEscondida, depois, estado, erros };
+  };
+  const escondido = await loteNoSegundoPlano(true);
+  checa(escondido.envios.length === 0, 'lote/segundo plano: o lote cancelado mandou pedidos ao Waze', JSON.stringify(escondido.envios));
+  checa(escondido.estado.fila === 12 && escondido.estado.rejeitados === 0, 'lote/segundo plano: o lote cancelado não devolveu a fila e o placar', JSON.stringify(escondido.estado));
+  checa(escondido.comEscondida.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: o aviso saiu com a página ainda ESCONDIDA', JSON.stringify(escondido.comEscondida));
+  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque você saiu do app\. Toque de novo\./.test(x)),
+    'lote/segundo plano: a volta à página não disse que o lote não saiu', JSON.stringify(escondido.depois));
+  const seguiu = await loteNoSegundoPlano(false);
+  checa(seguiu.envios.length === 4, 'lote/segundo plano: CONTROLE — sem esconder a página os 4 pedidos não saíram (o instrumento não vê o lote)', JSON.stringify(seguiu.envios));
+  checa(seguiu.depois.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: CONTROLE — o aviso saiu sem a página ter ido pro fundo', JSON.stringify(seguiu.depois));
+  checa(escondido.erros.length === 0 && seguiu.erros.length === 0, 'lote/segundo plano: erro de JS', escondido.erros[0] || seguiu.erros[0]);
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13988,6 +14063,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
   + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez (servidor de 150 ms por requisição, com o CONTROLE da página sem navigator.locks, em que as duas mandam)`
+  + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
