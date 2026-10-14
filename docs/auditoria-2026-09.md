@@ -16,28 +16,28 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-14 ~05:00 UTC)
+## 0. Estado agora (2026-10-14 ~12:30 UTC)
 
-- **Lote 21 em produção** (PR #268, 315946a, v2026.10.14-01): os 13 arquivos que o app carrega iguais, byte a byte, aos
-  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **164 ✓ · 0 ✗** (seção 24 incluída). Nenhum defeito
-  do app.
-- **Rodada 18** (`scratchpad/r18-<n>/relatorio.md`): oito auditores, ~25 achados, nenhum alto. Os mais sérios: o treino
-  abrindo com um "Marcar todos" de antes da renovação ainda no ar (os lidos voltavam como cards, R18-1-01); a fila da
-  conta nova vazia quando o lote da anterior seguia no ar (R18-2-01); no offline, o relatório de diagnóstico que perdia
-  a comparação com o servidor quando uma leitura local pendurava (R18-4-01/03), a fila que não gravava e mesmo assim
-  dava "Pronto" (R18-4-05) e o mapa recusado em todos os tiles com "Pronto" (R18-4-06); na presença, a mensagem nova que
-  marcava como lida a anterior nunca vista (R18-5); no servidor, o `buscar-places` aceitando `types`/booleanos mal
-  formados e o `excluir-foto` sem coordenada.
-- **Lote 22 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-02): quatro
-  agentes (fila/avisos/contas/telas, offline e diagnóstico, presença, servidor). `npm test` 3165/3165, também com o
-  relógio grosso. Relatórios em `scratchpad/relatorio-l22-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 22"). Abertas:
-  o "Marcar todos" não travar o mesmo pedido na outra aba (R18-2-02, precisa de tipo novo no canal), os Filtros no Fold
-  deitado com o "Permitir desfazer ações" sob o rodapé (R18-8-02, visual), a hipótese do `keyCode 229` no Android, o
-  "Pronto" quando todo tile dá 503 (R5-4-1), e a frase do parcial para 4xx em todos.
+- **Lote 22 em produção** (PR #269, 5b9c373, v2026.10.14-02): os 13 arquivos que o app carrega iguais, byte a byte, aos
+  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **168 ✓ · 0 ✗** (seção 25 incluída; a 1ª volta teve
+  1 ✗ do ROTEIRO: a checagem exige o desvio do relógio ≠ 0 e deu exatamente 0 ms; não reproduziu). Nenhum defeito do app.
+- **Rodada 19** (`scratchpad/r19-<n>/relatorio.md`): oito auditores, ~20 achados, nenhum alto. Os mais sérios: a tecla de
+  seta segurada decidindo pedidos em série (R19-2-01); a conexão do IndexedDB que ficava presa depois de uma gravação do
+  offline que falhou, deixando a fila de terceiros no disco depois do "Sair" (R19-4-01); os botões ✕ ↑ ✓ fora da tela com
+  o texto do sistema em 1,3× ou mais (R19-8-01). O resto: a resposta da sessão que saiu mexendo na sessão nova, o QR de
+  pareamento que sobrava depois de recarregar, a recusa automática dobrada com duas abas, o duplo toque que ampliava a foto
+  num arraste rápido, a lixeira oferecida sem geometria, o país gigante no `localStorage`, o hebraico/árabe em parágrafo da
+  esquerda, o aviso do Desfazer no idioma antigo.
+- **Lote 23 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-03): cinco agentes
+  (fila/contas/telas, offline e diagnóstico, presença, servidor e foto ampliada, texto grande e RTL). Na junção: conflitos
+  só em arquivos gerados (regenerados) e um guard de CSS que lia a primeira ocorrência do `@media` de paisagem (o override
+  do `card-aperta` passou a morar no degrau que já existia). `npm test` 3247/3247, também com o relógio grosso.
+  Relatórios em `scratchpad/relatorio-l23-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 23", com as
+  capturas antes/depois do texto grande e do RTL).
 - **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 25) — e a
-  rodada 19.
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 26) — e a
+  rodada 20.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -89,6 +89,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #266 | 2026101301 | rodada 15: a fila e o refazer adiado, os avisos da sessão que sobreviviam à queda, o "Enviando N…", o "Sair" com o lote e a foto na vez, a outra conta entrando noutra aba, o offline em duas abas, a conversa reaberta e a rolagem do pedido anexado | **155 ✓ · 0 ✗** no app em produção (a 1ª volta teve 3 ✗ do roteiro, corrigidos), com a seção 22 (23 ✓); os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #267 | 2026101302 | rodada 16: a conversa que não carrega (regressão do lote 19), o "Sair" com o lote e a decisão no recuo, o "Treino concluído" com o ✓, o offline em duas abas e a hipótese do tile, os avisos da renovação, o `openModal` abrindo no topo | **160 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro, corrigido), com a seção 23 (21 ✓); os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #268 | 2026101401 | rodada 17: o card alvo do lote após a queda, o "Sair" com as escritas de foto, o Enter do IME, o 429 do mapa e a cota cheia no offline, a conversa aberta-fechada-aberta, o `buscar-places` e o `listaDoWaze` | **164 ✓ · 0 ✗** no app em produção, com a seção 24; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
+| #269 | 2026101402 | rodada 18: o treino com o lote da queda, a troca de conta com o lote no ar, a gravação da fila do offline que falha, o mapa recusado em todo tile, o `diagCorpo` com leitura pendurada, `buscar-places` estrito | **168 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro: desvio do relógio exatamente 0 ms), com a seção 25; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
