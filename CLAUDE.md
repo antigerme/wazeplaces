@@ -146,6 +146,8 @@ wazeplaces/
 ├── icons/
 │   ├── icon-192.svg
 │   ├── icon-512.svg
+│   ├── icon-maskable.svg    # Versão "maskable": fundo até a borda e o pino na zona segura, pro launcher do Android
+│   │                        #   recortar pela máscara dele (`purpose: maskable` no manifest e no cache do service worker)
 │   ├── splash/              # GERADO por `node tools/gerar-splash.mjs` — 17 tamanhos × claro/escuro
 │   └── screenshots/         # Capturas do prompt de instalação (ver **PWA: splash e capturas**)
 ├── css/
@@ -234,6 +236,9 @@ wazeplaces/
 │   ├── smoke-fluxo.mjs      # Smoke de fluxo (npm run test:fluxo): os estados do app, as ações de escrita e a rede, com controle
 │   ├── smoke-diag-tela.mjs  # Smoke do diag-tela (npm run test:diag-tela): a tela remontada a partir do diagnóstico
 │   ├── gerar-html.mjs       # Gera o index.html (minificado) a partir do index.src.html (npm run html)
+│   ├── gerar-css.mjs        # Gera o css/app.css (npm run css): tailwind + styles.css, nessa ORDEM (é o contrato), os dois minificados
+│   ├── gerar-js.mjs         # Gera o js/min/*.js (npm run js), o que o index.html e o service worker carregam: um arquivo por
+│   │                        #   fonte, minificado por um esbuild de versão FIXA; o fonte comentado segue sendo o que se edita
 │   ├── smoke-offline.mjs    # Smoke do offline (npm run test:offline): o service worker no comando, a estrada, o deploy, a base que não grava
 │   ├── cf-injecao.mjs       # Mede a injeção do Cloudflare no index.html (com controle: menção × tag)
 │   ├── csp-img.mjs          # FONTE ÚNICA do casamento do curinga `https://*.waze.com` na `img-src` (teste e waze-probe)
@@ -241,15 +246,15 @@ wazeplaces/
 │   ├── smoke-presenca.mjs   # Smoke da presença (npm run test:presenca): DOIS navegadores conversando
 │   │                        #   por um chat do WME de mentira (mesmos bytes e filtros do servidor), com
 │   │                        #   o tempo real no host de VERDADE do Google (roteado) e a CSP de verdade
-│   ├── rodar-longo.mjs     # FONTE ÚNICA de rodar comando LONGO em segundo plano (o smoke).
-│   ├── servidor-local.mjs  # FONTE ÚNICA de subir o server/node.mjs numa ferramenta (os smokes, o
-│   │                        #   diag-replay, o gerar-splash): porta LIVRE antes e "pronto" = o PRÓPRIO
-│   │                        #   processo dizer "rodando em …:<porta>". Estava copiado em 3 e faltava em
-│   │                        #   4: com a porta tomada, o smoke media o servidor de OUTRO processo.
+│   ├── rodar-longo.mjs      # FONTE ÚNICA de rodar comando LONGO em segundo plano (o smoke).
 │   │                        #   Existe pra não deixar VIGIA ZUMBI: o estado vai num arquivo
 │   │                        #   IRMÃO (`<log>.estado`), escrito no fim NORMAL, no com ERRO e
 │   │                        #   ao ser MORTO. `--esperar` ainda confere se o PID existe e tem
 │   │                        #   TETO — três saídas independentes, nenhuma esperando pra sempre.
+│   ├── servidor-local.mjs   # FONTE ÚNICA de subir o server/node.mjs numa ferramenta (os smokes, o
+│   │                        #   diag-replay, o gerar-splash): porta LIVRE antes e "pronto" = o PRÓPRIO
+│   │                        #   processo dizer "rodando em …:<porta>". Estava copiado em 3 e faltava em
+│   │                        #   4: com a porta tomada, o smoke media o servidor de OUTRO processo.
 │   ├── esperar-saida.mjs    # FONTE ÚNICA de ESPERAR num smoke SEM injetar nada na página, e
 │   │                        #   são TRÊS: `esperarFimDaSaida` (o esvaziamento da fila de saída,
 │   │                        #   por sinal POSITIVO e dizendo por que terminou), `esperarNaPagina`
@@ -280,13 +285,16 @@ wazeplaces/
 │   ├── diag-replay.mjs      # Reconstrói a TELA do editor a partir do diagnóstico, VIVA: sobe a
 │   │                        #   app, injeta fila/filtros/perfil/tema/idioma no viewport dele e
 │   │                        #   para pra você medir. NÃO fala com a rede. `--tela` salva PNG.
+│   ├── diag-tela.mjs        # Remonta a TELA a partir de um diagnóstico (o DOM, o CSS e o viewport que ele traz), sem
+│   │                        #   JavaScript e sem rede; o que não sai fiel (foto de outra origem, canvas, fonte) vem dito
+│   │                        #   no rodapé da imagem. `--cru` tira as marcas da ferramenta.
 │   ├── diag-api.mjs         # Pergunta à API de PRODUÇÃO com o token que o diagnóstico já traz.
 │   │                        #   RECUSA por construção toda rota que escreve ou desloga.
 │   └── waze-probe.mjs       # Fala com o Waze REAL, só leitura (ver seção 🔑). Valida cookies,
 │                            #   lista países/estados, sonda se Accept-Language é honrado.
 │                            #   RECUSA /Features e /Issues/Read por construção e tem jitter
-│                            #   aleatório (700–2200ms): as duas regras que protegem a conta do
-│                            #   owner não dependem de eu lembrar delas.
+│                            #   aleatório (1500–4000ms, a faixa do waze-jitter.mjs): as duas
+│                            #   regras que protegem a conta do owner não dependem de eu lembrar delas.
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
@@ -304,6 +312,8 @@ wazeplaces/
 │   └── scripts/md2pdf.py    # Conversor markdown → PDF estilizado (paleta cyan do app)
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
+├── .github/                 # O CI (workflows/ci.yml: sintaxe, testes, smokes, guard do CACHE_NAME e um job paralelo no WebKit)
+│                            #   e os modelos de issue (ISSUE_TEMPLATE/: bug_report, feature_request e o config com o contato de segurança)
 └── .gitignore
 ```
 
@@ -697,10 +707,11 @@ Volta `{ success, places[], hasMore, page, total, totalAll, blocked, sessaoExpir
                               #   vértices não é enfeite**: sem ela, polígono alterado nos vértices
                               #   seguintes formata IGUAL ao anterior e a tela afirma que nada mudou
                               #   — pior que ser feio. Apareceu no 1º teste com dado real (11→12 pts).
-                              #   **Aberto**: `changedVenue` não é diff e o app não filtra linha com
-                              #   `from === to` — 15 de 140 pedidos mostram "X → X" (12 geometria).
-                              #   Filtrar é decisão de produto; se for, compare o valor CRU, porque
-                              #   polígono diferente pode formatar igual.
+                              #   **Resolvido em v2026.07.30-11** (gotcha #37): o core compara o valor CRU
+                              #   (`mesmoValor`) e a linha igual NÃO existe — `camposSemMudanca` conta o que
+                              #   foi comparado, e o card diz «Nada a alterar». Era "X → X" em 15 de 140
+                              #   pedidos (12 de geometria). Comparar o valor CRU, e não o texto formatado,
+                              #   é a regra: polígono diferente pode formatar igual.
                               //   `ur.changedVenue` NÃO é um diff: é um venue com os
                               //   valores propostos, então vem com escrituração junto.
                               //   `CAMPOS_ESCRITURACAO` (core.mjs) tira id/updatedOn/
