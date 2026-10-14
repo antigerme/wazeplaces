@@ -1247,6 +1247,401 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
   }
 }
 
+// ── TEXTO DO SISTEMA MAIOR: DIÁLOGOS, ABAS, PLACAR, PÍLULA, ↑ E PAISAGEM BAIXA ──
+// (lote 24; R20-7-01, R20-8-01 a -05, R20-3-01)
+//
+// O bloco de cima mede a barra ✕ ↑ ✓; aqui é o resto da tela que o texto maior
+// (`html { font-size }`, como a auditoria o emulou) tirava do lugar:
+//  - os botões de TODO diálogo, as três abas e o ✕ do título dos Filtros saíam
+//    da caixa do cartão (a 360 px a 1,5×, o "Se déconnecter" 78 px pra fora), e
+//    "Cancelar" quebrava no MEIO da palavra no Galaxy Fold a 1,3×;
+//  - os rótulos do placar se sobrepunham (REJEITADOS|PULADOS a 1,3×);
+//  - a pílula da foto ampliada cobria o ✕ de fechar;
+//  - o ↑ encolhia pra 40 px no Fold;
+//  - o card novo esperava o quadro seguinte pra ligar o `card-aperta` (WebKit).
+// (O 568×320 deitado com o aviso "de N na região" NÃO está aqui: não foi
+// consertado, e o relatório do lote descreve as duas saídas pro owner.)
+// Tudo MEDIDO no que o dedo alcança (`elementFromPoint`) ou na caixa de cada
+// elemento contra a do cartão, nos nomes de idioma que a auditoria usou, e com
+// CONTROLE em cada ponta: a 1× nenhuma falha e nenhum pixel de aperto (nada
+// empilha, o placar segue em 4 colunas, o card-aperta-extrema não existe), e,
+// pra cada medida, a MESMA tela com a regra neutralizada TEM que falhar — senão
+// a medida está cega (gotcha #28).
+{
+  const MODAIS_L24 = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'filtersModal',
+    'pairEnterModal', 'batchReadModal', 'resumoModal'];
+  const SVG_FOTO_L24 = 'data:image/svg+xml;base64,' + Buffer.from(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='#475569'/></svg>").toString('base64');
+  const novaPagina = async (viewport, escala, estilo) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await ctx.route('**/*-tiles/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    if (escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * escala}px !important; }` });
+    if (estilo) await page.addStyleTag({ content: estilo });
+    return { ctx, page, erros };
+  };
+  const montarTela = async (page, { lang, places, bloqueados = 0 }) => {
+    await page.evaluate(({ lang, places, bloqueados }) => {
+      setLang(lang); applyI18n();
+      AppState.authenticated = true;
+      AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.preferences.comoFuncionaVisto = true;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      // O que o `showMainScreen` e o `aplicarIdioma` fazem com o texto novo na
+      // tela (o rótulo do placar mudou de comprimento e nenhuma caixa mudou de
+      // tamanho pra o observer avisar).
+      if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      AppState.serverTotal = places.length; AppState.serverBlocked = bloqueados;
+      updateStats(); updatePendingTotalHint();
+      AppState.queue = places; AppState.currentPlace = places[0];
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, { lang, places, bloqueados });
+    await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
+  };
+  const fecharTudo = async (page) => {
+    await page.evaluate(() => {
+      document.querySelectorAll('.modal-root:not(.hidden)').forEach((m) => closeModal(m.id));
+      if (Lightbox.isOpen()) Lightbox.close();
+    });
+    const r = await esperarNaPagina(page, () => !CamadaVoltar.consumindo
+      && !document.querySelector('.modal-root:not(.hidden)'), 5000, 50);
+    checa(r.ok, 'diálogos do texto grande: o fechar não terminou', JSON.stringify(r));
+  };
+  // Um diálogo aberto: cada botão e aba contra o CARTÃO e a janela, a palavra
+  // curta partida no meio (as de 10 letras ou mais podem hifenizar: é o que o
+  // compacto de 320 px já fazia), e se a linha de botões empilhou.
+  const medirDialogo = (id) => {
+    openModal(id);
+    if (id === 'filtersModal') switchFilterTab('filtersTabFilters');
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById(id);
+      const card = m.querySelector(':scope > div');
+      const cr = card.getBoundingClientRect();
+      const alvos = [...m.querySelectorAll('.dialogo-acoes > button, [role=tab], #closeFilters')]
+        .filter((el) => el.offsetParent !== null);
+      const fora = [], quebradas = [];
+      for (const el of alvos) {
+        const r = el.getBoundingClientRect();
+        if (r.right > cr.right + 0.5 || r.left < cr.left - 0.5 || r.right > innerWidth + 0.5) {
+          fora.push(`${el.id || el.textContent.trim()}+${Math.round(Math.max(r.right - cr.right, cr.left - r.left))}`);
+        }
+        const tn = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+        if (!tn) continue;
+        const re = /\S+/g; let mm;
+        while ((mm = re.exec(tn.textContent))) {
+          const rg = document.createRange();
+          rg.setStart(tn, mm.index); rg.setEnd(tn, mm.index + mm[0].length);
+          const linhas = new Set([...rg.getClientRects()].map((q) => Math.round(q.top)));
+          if (linhas.size > 1 && mm[0].replace(/[^\p{L}]/gu, '').length < 10) quebradas.push(`${el.id}:${mm[0]}`);
+        }
+      }
+      const linhas = [...m.querySelectorAll('.dialogo-acoes')].filter((el) => el.offsetParent !== null).map((el) => {
+        const bs = [...el.children].filter((c) => c.offsetParent !== null);
+        if (bs.length < 2) return 'um';
+        const a = bs[0].getBoundingClientRect(), b = bs[1].getBoundingClientRect();
+        // A ORDEM é a do HTML em qualquer das formas: dismissiva à esquerda (em
+        // linha) ou em cima (empilhada), afirmativa à direita / embaixo.
+        const empilhou = Math.abs(a.top - b.top) > 4;
+        // Empilhados, os dois ocupam a MESMA coluna (o `space-x-3` de três das
+        // linhas recuava o 2º pela margem: a especificidade perdia pro Tailwind).
+        if (empilhou) return a.top < b.top ? (Math.abs(a.left - b.left) < 0.5 && Math.abs(a.right - b.right) < 0.5 ? 'empilha' : 'EMPILHA-DESALINHADA') : 'EMPILHA-INVERTIDA';
+        return a.left < b.left ? 'linha' : 'LINHA-INVERTIDA';
+      });
+      ok({ fora, quebradas, linhas, rolaH: card.scrollWidth > card.clientWidth + 1 });
+    }, 80));
+  };
+  const places1 = [pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE'), pesadosPorTipo.find((p) => p.purType === 'NEW_PHOTO')];
+  // O MAIS pesado de cada tipo (os 3 de cima são o custo da barra do bloco anterior).
+  const seisPesados = pesadosPorTipo.filter((p, i, a) => a.findIndex((q) => q.purType === p.purType) === i);
+
+  // ── 1. Os diálogos, as abas e o ✕ do título ────────────────────────────────
+  const CASOS_DLG = [
+    ['360×740 ×1,5', { width: 360, height: 740 }, 1.5, ['pt', 'es', 'fr']],
+    ['393×852 ×1,5', { width: 393, height: 852 }, 1.5, ['pt', 'es', 'fr']],
+    ['375×667 ×1,5', { width: 375, height: 667 }, 1.5, ['pt', 'fr']],
+    ['360×740 ×1,8', { width: 360, height: 740 }, 1.8, ['fr']],
+    ['Fold 280×653 ×1,3', { width: 280, height: 653 }, 1.3, ['pt', 'en', 'es', 'fr']],
+    ['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5, ['pt', 'en', 'es', 'fr']],
+  ];
+  for (const [rot, viewport, escala, langs] of CASOS_DLG) {
+    const { ctx, page, erros } = await novaPagina(viewport, escala);
+    let empilhou = 0;
+    for (const lang of langs) {
+      await montarTela(page, { lang, places: places1 });
+      for (const id of MODAIS_L24) {
+        const r = await page.evaluate(medirDialogo, id);
+        checa(r.fora.length === 0, `texto ${rot} · ${lang} · ${id}: botão/aba fora do cartão`, r.fora.join(', '));
+        checa(r.quebradas.length === 0, `texto ${rot} · ${lang} · ${id}: palavra partida no meio`, r.quebradas.join(', '));
+        checa(!r.linhas.some((l) => /INVERTIDA/.test(l)), `texto ${rot} · ${lang} · ${id}: a ordem dismissiva→afirmativa se inverteu`, r.linhas.join(','));
+        checa(!r.linhas.includes('EMPILHA-DESALINHADA'), `texto ${rot} · ${lang} · ${id}: os botões empilhados não ocupam a mesma coluna (margem do space-x-3)`, r.linhas.join(','));
+        empilhou += r.linhas.filter((l) => l === 'empilha').length;
+        await fecharTudo(page);
+      }
+    }
+    // Abas e rodapé das outras duas abas dos Filtros (o "Fechar" sozinho, o ✕).
+    for (const aba of ['filtersTabPrefs', 'filtersTabHistory']) {
+      await page.evaluate((aba) => { openModal('filtersModal'); switchFilterTab(aba); }, aba);
+      await doisQuadros(page);
+      const r = await page.evaluate(() => {
+        const cr = document.querySelector('#filtersModal > div').getBoundingClientRect();
+        return [...document.querySelectorAll('#filtersModal [role=tab], #filtersModal .dialogo-acoes > button, #closeFilters')]
+          .filter((el) => el.offsetParent !== null).map((el) => [el.id, el.getBoundingClientRect()])
+          .filter(([, q]) => q.right > cr.right + 0.5 || q.left < cr.left - 0.5).map(([id, q]) => `${id}+${Math.round(q.right - cr.right)}`);
+      });
+      checa(r.length === 0, `texto ${rot} · ${aba}: aba/botão fora do cartão`, r.join(', '));
+      await fecharTudo(page);
+    }
+    // O Fold a 1,3× e 1,5× é onde a linha é mais estreita que a do Fold a 1×:
+    // tem que EMPILHAR (e a 360 px a 1,5× o Logout/colar etc. empilham também).
+    if (viewport.width === 280) checa(empilhou > 0, `texto ${rot}: nenhuma linha empilhou, com a linha mais estreita que a do Fold a 1×`);
+    checa(erros.length === 0, `texto ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE de escala 1: nenhum aperto novo — nada falha, NADA empilha, e o
+  // compacto continua sendo só o do Galaxy Fold (<320 px), como sempre foi.
+  for (const [rot, viewport] of [['Fold 280×653', { width: 280, height: 653 }], ['SE 1ª geração 320×568', { width: 320, height: 568 }],
+    ['360×740', { width: 360, height: 740 }], ['393×852', { width: 393, height: 852 }], ['412×915', { width: 412, height: 915 }]]) {
+    const { ctx, page, erros } = await novaPagina(viewport, 1);
+    for (const lang of ['pt', 'fr']) {
+      await montarTela(page, { lang, places: places1 });
+      for (const id of MODAIS_L24) {
+        const r = await page.evaluate(medirDialogo, id);
+        checa(r.fora.length === 0 && r.quebradas.length === 0, `texto 1× · ${rot} · ${lang} · ${id}: falha a 1×`, JSON.stringify(r));
+        checa(!r.linhas.includes('empilha'), `texto 1× · ${rot} · ${lang} · ${id}: empilhou a 1× — mudaria o diálogo de hoje`);
+        await fecharTudo(page);
+      }
+    }
+    checa(erros.length === 0, `texto 1× · ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE do instrumento: neutralizadas as regras novas, a MESMA tela (360 px,
+  // 1,5×, francês) perde o botão afirmativo do "Sair" e a aba "Histórico".
+  {
+    const { ctx, page } = await novaPagina({ width: 360, height: 740 }, 1.5,
+      '.dialogo-acoes { flex-wrap: nowrap !important; }'
+      + ' .dialogo-acoes > button { flex: 1 1 0% !important; min-width: auto !important; padding-left: 1rem !important;'
+      + ' padding-right: 1rem !important; hyphens: manual !important; overflow-wrap: normal !important; }'
+      + ' .seg-tab { font-size: 0.8125rem !important; }');
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const sair = await page.evaluate(medirDialogo, 'logoutModal');
+    checa(sair.fora.length > 0, 'texto 1,5×: CONTROLE — com as regras neutralizadas o "Sair" cabe; a medida dos diálogos está cega');
+    await fecharTudo(page);
+    const filtros = await page.evaluate(medirDialogo, 'filtersModal');
+    checa(filtros.fora.length > 0, 'texto 1,5×: CONTROLE — com as regras neutralizadas os Filtros cabem; a medida das abas está cega');
+    await ctx.close();
+  }
+
+  // ── 2. O placar ────────────────────────────────────────────────────────────
+  const medirPlacar = () => {
+    const labs = [...document.querySelectorAll('#placar [data-i18n^="stats."]')].filter((el) => el.getClientRects().length && !el.id);
+    const rr = labs.map((el) => { const rg = document.createRange(); rg.selectNodeContents(el);
+      const r = rg.getBoundingClientRect(); return { t: el.textContent.trim(), l: r.left, r: r.right, top: r.top, bot: r.bottom }; });
+    const sobre = [];
+    for (let i = 0; i < rr.length; i++) for (let j = i + 1; j < rr.length; j++) {
+      const a = rr[i], c = rr[j];
+      if (a.l < c.r - 0.5 && c.l < a.r - 0.5 && a.top < c.bot - 0.5 && c.top < a.bot - 0.5) sobre.push(`${a.t}|${c.t}`);
+    }
+    const sai = [];
+    labs.forEach((el, i) => {
+      const c = el.closest('#placarGrid > *').getBoundingClientRect();
+      // 1 px de cada lado: a vigia liga o 2×2 com 0,5 px de excesso NO TOTAL (0,25 de
+      // cada lado), e meio pixel de tinta fora da célula não se vê — o WebKit mede
+      // "Rejected" a 1,3× com 73,49 contra 73 e o smoke acusava a diferença.
+      if (rr[i].r > c.right + 1 || rr[i].l < c.left - 1) sai.push(rr[i].t);
+    });
+    return { sobre, sai, colunas: getComputedStyle(document.getElementById('placarGrid')).gridTemplateColumns.split(' ').length };
+  };
+  // (360×740 a 1,5× FICA DE FORA, e por medida: ali o 2×2 passa da janela — o piso
+  // do card, 60dvh, não cede — e a vigia o desfaz, como tem que fazer; é o que o
+  // relatório do lote descreve pro owner decidir.)
+  const CASOS_PLACAR = [[360, 740, 1.3], [375, 667, 1.3], [393, 852, 1.3], [375, 667, 1.5], [393, 852, 1.5], [412, 915, 1.3], [412, 915, 1.5], [375, 667, 1.15]];
+  for (const [w, h, escala] of CASOS_PLACAR) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+    for (const lang of ['pt', 'es', 'fr', 'en']) {
+      await montarTela(page, { lang, places: places1, bloqueados: 2 });
+      const r = await page.evaluate(medirPlacar);
+      checa(r.sobre.length === 0 && r.sai.length === 0, `placar ${w}×${h} ×${escala} · ${lang}: rótulos se sobrepõem ou saem da célula`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  // CONTROLE a 1×: o placar segue em 4 colunas onde sempre esteve (360 px e
+  // mais) e em 2×2 só abaixo de 360 px, sem sobreposição em nenhum.
+  for (const [w, h, colunas] of [[360, 740, 4], [375, 667, 4], [393, 852, 4], [412, 915, 4], [320, 568, 2], [280, 653, 2]]) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, 1);
+    for (const lang of ['pt', 'es', 'fr', 'en']) {
+      await montarTela(page, { lang, places: places1, bloqueados: 2 });
+      const r = await page.evaluate(medirPlacar);
+      checa(r.colunas === colunas, `placar 1× ${w}×${h} · ${lang}: ${r.colunas} colunas (eram ${colunas} — mudaria o placar de hoje)`);
+      checa(r.sobre.length === 0 && r.sai.length === 0, `placar 1× ${w}×${h} · ${lang}: defeito a 1×`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com o 2×2 por medida desfeito (a classe NÃO muda as
+    // colunas), a MESMA tela (375 px, 1,3×, espanhol) volta a sobrepor rótulos.
+    const { ctx, page } = await novaPagina({ width: 375, height: 667 }, 1.3,
+      '#placarGrid.placar-2x2 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 0 !important; }');
+    await montarTela(page, { lang: 'es', places: places1, bloqueados: 2 });
+    const r = await page.evaluate(medirPlacar);
+    checa(r.sobre.length > 0 || r.sai.length > 0, 'placar: CONTROLE — sem o 2×2 por escala os rótulos seguem limpos; a medida do placar está cega');
+    await ctx.close();
+  }
+
+  // O 2×2 por medida NUNCA tira a barra ✕ ↑ ✓ do alcance: onde ela cabia em 4
+  // colunas (MEDIDO na base: 360×740 a 1,65×, 375×667 e 393×852 a 1,8×, 412×915
+  // a 2×, com o pedido sem foto, o mais baixo), ela continua cabendo. É o que o `@container` em `rem`
+  // não sabia: o 2×2 custa uma fileira, e ali o card não tinha folga.
+  {
+    const semFoto = pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE');
+    for (const [w, h, escala] of [[360, 740, 1.65], [375, 667, 1.8], [393, 852, 1.8], [412, 915, 2]]) {
+      const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+      await montarTela(page, { lang: 'fr', places: [semFoto, { ...semFoto, venueID: 'q2', updateRequestID: 'q2' }], bloqueados: 2 });
+      const r = await page.evaluate(() => {
+        const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        const cb = c.getBoundingClientRect();
+        return ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].every((s) => {
+          const q = c.querySelector(s).getBoundingClientRect();
+          return q.bottom <= Math.min(cb.bottom, innerHeight) + 0.5 && q.right <= innerWidth + 0.5; });
+      });
+      checa(r, `placar por medida ${w}×${h} ×${escala}: a barra ✕ ↑ ✓ saiu da janela — o 2×2 custou a fileira que o card não tinha`);
+      await ctx.close();
+    }
+  }
+
+  // ── 3. A pílula da foto ampliada e o ✕ ─────────────────────────────────────
+  const foto = pesadosPorTipo.find((p) => p.purType === 'NEW_PHOTO');
+  const placeFoto = { ...foto, imageUrls: [SVG_FOTO_L24, SVG_FOTO_L24, SVG_FOTO_L24] };
+  const abrirFoto = async (page) => {
+    await montarTela(page, { lang: 'pt', places: [placeFoto, { ...placeFoto, venueID: 'q2', updateRequestID: 'q2' }] });
+    await page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click());
+    const r = await esperarNaPagina(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 8000, 50);
+    checa(r.ok, 'pílula: a foto ampliada não abriu', JSON.stringify(r));
+  };
+  const medirPilula = ({ autor, idade }) => {
+    window.idadeDaFoto = () => idade; Lightbox.autorDaFotoAtual = () => autor; Lightbox.idx = 1; Lightbox._render();
+    const c = document.getElementById('lightboxClose'), b = c.getBoundingClientRect();
+    let ok = 0;
+    for (const fx of [0.25, 0.5, 0.75]) for (const fy of [0.25, 0.5, 0.75]) {
+      const el = document.elementFromPoint(b.left + b.width * fx, b.top + b.height * fy);
+      if (el === c || c.contains(el)) ok++;
+    }
+    const cnt = document.getElementById('lightboxCount'), cb = cnt.getBoundingClientRect();
+    return { ok, largura: Math.round(cb.width), texto: cnt.textContent };
+  };
+  const CASOS_PILULA = [[280, 653, 1.3], [280, 653, 1.5], [320, 568, 1.5], [360, 740, 1.8], [375, 667, 2], [412, 860, 1.8]];
+  for (const [w, h, escala] of CASOS_PILULA) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+    await abrirFoto(page);
+    for (const autor of ['world_onm8fgfi', 'Fulano da Silva Sauro']) {
+      const r = await page.evaluate(medirPilula, { autor, idade: 'há 2 meses' });
+      checa(r.ok === 9, `pílula ${w}×${h} ×${escala} · ${autor}: o ✕ só recebe ${r.ok}/9 pontos do dedo (a pílula o cobre)`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  // CONTROLE a 1×: o ✕ livre e a largura da pílula IGUAL à de sempre — o nome
+  // truncado do Galaxy Fold (o caso em que a pílula toca no teto) é o que o
+  // conserto não pode mexer: a largura sai do mesmo teto de hoje.
+  for (const [w, h] of [[280, 653], [375, 667], [412, 915]]) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, 1);
+    await abrirFoto(page);
+    const r = await page.evaluate(medirPilula, { autor: 'world_onm8fgfi', idade: 'há 2 meses' });
+    checa(r.ok === 9, `pílula 1× ${w}×${h}: o ✕ só recebe ${r.ok}/9 pontos do dedo`, JSON.stringify(r));
+    const teto = await page.evaluate(() => Math.round(window.innerWidth - 4.75 * parseFloat(getComputedStyle(document.documentElement).fontSize)));
+    checa(r.largura <= teto, `pílula 1× ${w}×${h}: ${r.largura}px passa do teto de ${teto}px`);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com os pedaços fixos como eram (`flex: none`) e o
+    // nome com o piso de antes, a MESMA tela (Fold, 1,3×) tem o ✕ coberto.
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, 1.3,
+      '.lb-pill-fixo { flex: none !important; overflow: visible !important; }'
+      + ' .lb-pill-nome { min-width: 2.5rem !important; flex-shrink: 1 !important; }');
+    await abrirFoto(page);
+    const r = await page.evaluate(medirPilula, { autor: 'world_onm8fgfi', idade: 'há 2 meses' });
+    checa(r.ok < 9, 'pílula: CONTROLE — com a regra de antes o ✕ segue alcançável; a medida da pílula está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+
+  // ── 4. O ↑ de 44 px ─────────────────────────────────────────────────────────
+  for (const [escala, minimo] of [[1, 44], [1.3, 44], [1.5, 44]]) {
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, escala);
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const larg = await page.evaluate(() => ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']
+      .map((s) => document.querySelector('#cardStack .place-card:not(.card-fundo) ' + s).getBoundingClientRect().width));
+    checa(Math.min(...larg) >= minimo - 0.01, `↑ no Fold a ${escala}×: o menor botão tem ${Math.min(...larg).toFixed(1)}px, abaixo de ${minimo}px`, larg.map((x) => x.toFixed(1)).join('/'));
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: sem o piso, o ↑ do Fold a 1,3× volta aos 40 px.
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, 1.3, '.place-card .card-actions > button { min-width: 0 !important; }');
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const larg = await page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-skip').getBoundingClientRect().width);
+    checa(larg < 44, `↑: CONTROLE — sem o piso o ↑ do Fold a 1,3× tem ${larg.toFixed(1)}px; a medida está cega`);
+    await ctx.close();
+  }
+
+  // ── 5. O card novo já nasce apertado (a medida síncrona) ───────────────────
+  // Lida NA MESMA TAREFA em que o card é montado: um `requestAnimationFrame` no
+  // meio (o defeito) deixaria a classe pra depois, e é a diferença que o WebKit
+  // mostrava em 60–90 ms — sem depender da velocidade do motor.
+  {
+    const { ctx, page } = await novaPagina({ width: 360, height: 740 }, 1.3);
+    const lerNaMesmaTarefa = ({ pl, anular }) => {
+      AppState.authenticated = true; AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      setLang('fr'); applyI18n();
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      showLoading(false);
+      const original = window.vigiarBarraDeAcoes;
+      // O DEFEITO: sem a medida síncrona da barra (o `return null`) e sem o gancho
+      // do placar, que também mede o card da frente quando o texto é grande.
+      const gancho = typeof medirOPlacarComOCardNovo === 'function' ? medirOPlacarComOCardNovo : null;
+      if (anular) {
+        window.vigiarBarraDeAcoes = (c) => { original(c); return null; };
+        if (gancho) medirOPlacarComOCardNovo = () => {};
+      }
+      AppState.queue = [pl]; AppState.currentPlace = pl;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const r = { aperta: c.classList.contains('card-aperta') };
+      window.vigiarBarraDeAcoes = original;
+      if (gancho) medirOPlacarComOCardNovo = gancho;
+      return r;
+    };
+    // O pedido mais pesado de cada tipo: ao menos UM tem que apertar (senão a
+    // medida não prova nada), e todos os que apertam já nascem assim.
+    let apertado = null;
+    for (const pl of seisPesados) {
+      const r = await page.evaluate(lerNaMesmaTarefa, { pl, anular: false });
+      const depois = await page.evaluate(async () => {
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        return document.querySelector('#cardStack .place-card:not(.card-fundo)').classList.contains('card-aperta');
+      });
+      checa(r.aperta === depois, `card novo ${pl.purType}/${pl._pais} (360×740 ×1,3): nasceu ${r.aperta ? 'apertado' : 'sem o card-aperta'} e assentou ${depois ? 'apertado' : 'sem ele'} — a medida só chegou no quadro seguinte`);
+      if (depois && !apertado) apertado = pl;
+    }
+    checa(apertado, 'card novo: nenhum dos pedidos pesados apertou a 360×740 ×1,3 — a medida síncrona não foi provada');
+    // CONTROLE do instrumento (OBRIGATÓRIO): com a vigia sem a medida síncrona (o
+    // `return null` do defeito) o MESMO pedido, que aperta, nasce sem a classe e a
+    // leitura na mesma tarefa o PEGA.
+    if (apertado) {
+      const sem = await page.evaluate(lerNaMesmaTarefa, { pl: apertado, anular: true });
+      checa(!sem.aperta, 'card novo: CONTROLE — sem a medida síncrona o card já nascia apertado; a leitura na mesma tarefa está cega');
+    }
+    await ctx.close();
+  }
+}
+
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
 //
 // O mapa entrou por cima de tiles que mudam de cor conforme a região — parque
@@ -14615,4 +15010,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o aviso dourado do Desfazer LEVANDO até a chave (rolada para a vista em 5 aparelhos — deitados, o SE com o modo dev e o Fold em francês —, com o CONTROLE da rolagem zerada deixando a linha fora da vista)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`
-  + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`);
+  + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`
+  + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`);
