@@ -14675,6 +14675,131 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── Resumo do mês: o `alt` da imagem não sobra no DOM (R21-7-03, lote 25) ───────────
+//
+// O `alt` da folha do Resumo traz o NOME da pessoa e os números do mês ("EditorSecreto limpou 25 pedidos do
+// mapa. 5 rejeitados, 20 lidos…"). A limpeza do fechamento soltava o blob e o `src`, mas não o `alt` (nem o
+// título): ele ficava no DOM da folha FECHADA e depois do "Sair" — e o relatório do modo dev leva o DOM
+// inteiro, então a próxima conta que o ligasse na mesma página o levava junto (a mesma classe do R8-7-06, o
+// painel do Histórico). O bloco GERA o Resumo de verdade, pelo botão, e varre o DOM por uma marca no NOME
+// (texto e atributos). CONTROLE: com a folha ABERTA a marca está no `alt` — sem isso "nada achado" passaria
+// com a varredura cega. Depois, cada caminho de fechar (Esc, o fundo, o ✕ e trocar de modal) e o "Sair" com
+// a folha aberta — pela Ajuda, como a pessoa faz, e pela outra aba — deixam o DOM sem a marca.
+{
+  const onde = 'resumo/alt depois de fechar e do "Sair"';
+  const MARCA = 'EditorMarcaR21';
+  const PERFIL_R21 = { id: 4243, userName: MARCA, rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] };
+  const PEDIDO_R21 = { venueID: 'vr21', updateRequestID: 'ur21', name: 'Padaria Neutra', categories: ['BAKERY'], address: 'Rua Neutra 1',
+    updateType: 'Novo Local', updateTypeKey: 'NEW', reqType: 'VENUE', purType: 'NEW_PLACE', createdBy: 'autor_neutro', creatorId: 5151,
+    imageUrls: [], localAprovado: true, brand: null, changes: [], mapa: null, lat: -23.5, lon: -46.6 };
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  await ctx.route('**/api/**', async (r) => {
+    const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
+    const json = (o, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'perfil') return json({ success: true, profile: PERFIL_R21, visivelNoWme: true });
+    if (rota === 'buscar-places') return json({ success: true, places: [PEDIDO_R21], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 });
+    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
+    if (rota === 'presenca-app') return json({ success: true, online: [], conversas: [] });
+    return json({ success: true });
+  });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  // Entra como a pessoa: a sessão e o histórico do mês no aparelho, e o app abre com a fila.
+  const entrar = async () => {
+    await page.evaluate(() => {
+      const d = new Date(), p = (n) => String(n).padStart(2, '0');
+      const hoje = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      localStorage.setItem('waze_session_token', 'tok-r21');
+      localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: 20, rejected: 5 }, [hoje]: { read: 20, rejected: 5 } }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a conta da marca');
+  };
+  const varrer = () => page.evaluate((marca) => {
+    const achou = new Set();
+    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    for (let n = tw.currentNode; n; n = tw.nextNode()) {
+      let txt = '';
+      if (n.nodeType === 3) txt = n.nodeValue;
+      else for (const a of n.attributes || []) txt += ' ' + a.value;
+      if (!txt.includes(marca)) continue;
+      for (let e = n.nodeType === 3 ? n.parentElement : n; e; e = e.parentElement) if (e.id) { achou.add(e.id); break; }
+    }
+    return [...achou].sort();
+  }, MARCA);
+  const abrirResumo = async () => {
+    await page.evaluate(() => { void openFiltersModal(); });
+    await esperarOuExplodir(page, () => !document.getElementById('filtersModal').classList.contains('hidden'), 'os Filtros abrirem');
+    await page.evaluate(() => switchFilterTab('filtersTabHistory'));
+    await esperarOuExplodir(page, () => !!document.getElementById('resumoBotao'), 'o botão do Resumo aparecer');
+    await page.evaluate(() => document.getElementById('resumoBotao').click());
+    await esperarOuExplodir(page, () => { const i = document.getElementById('resumoImg'); return !document.getElementById('resumoModal').classList.contains('hidden') && i.complete && i.naturalWidth > 0; },
+      'o Resumo abrir com a imagem');
+  };
+  const folhaFechada = (motivo) => esperarOuExplodir(page, () => document.getElementById('resumoModal').classList.contains('hidden'), motivo);
+  await entrar();
+
+  // 1. A folha ABERTA: a marca está no `alt` (o CONTROLE) e o `alt` diz o que a imagem diz.
+  await abrirResumo();
+  const aberta = await varrer();
+  const altAberto = await page.evaluate(() => document.getElementById('resumoImg').getAttribute('alt'));
+  checa(aberta.includes('resumoImg'), `${onde}: CONTROLE — com a folha aberta a varredura não achou o nome no \`alt\` (ela está cega)`, JSON.stringify(aberta));
+  checa(aberta.includes('userName'), `${onde}: CONTROLE — a varredura não achou o nome no cabeçalho (ela está cega)`, JSON.stringify(aberta));
+  checa(altAberto.includes(MARCA) && /20/.test(altAberto), `${onde}: CONTROLE — o \`alt\` da folha aberta não diz o nome e os números`, altAberto);
+
+  // 2. Cada caminho de FECHAR deixa a folha como o HTML a entrega: `alt` e título vazios.
+  const fechamentos = [
+    ['o Esc', () => page.keyboard.press('Escape')],
+    ['o fundo', () => page.evaluate(() => document.getElementById('resumoModal').dispatchEvent(new MouseEvent('click', { bubbles: true })))],
+    ['o ✕', () => page.evaluate(() => document.getElementById('resumoClose').click())],
+    ['trocar de modal (a Ajuda abrindo por cima)', () => page.evaluate(() => document.getElementById('helpBtn').click())],
+  ];
+  for (let i = 0; i < fechamentos.length; i++) {
+    const [nome, fechar] = fechamentos[i];
+    if (i > 0) await abrirResumo();
+    await fechar();
+    await folhaFechada(`${nome} fechar a folha`);
+    const f = await page.evaluate(() => ({ alt: document.getElementById('resumoImg').getAttribute('alt'), src: document.getElementById('resumoImg').getAttribute('src'),
+      titulo: document.getElementById('resumoTitle').textContent }));
+    const achou = (await varrer()).filter((id) => id === 'resumoImg' || id === 'resumoTitle');
+    checa(achou.length === 0, `${onde}: depois de fechar por ${nome} o nome seguiu no DOM da folha`, JSON.stringify(achou));
+    checa(f.alt === '' && f.titulo === '' && f.src === null, `${onde}: depois de fechar por ${nome} a folha não voltou ao que o HTML entrega`, JSON.stringify(f));
+    if (i === fechamentos.length - 1) {   // a Ajuda que abriu por cima: fecha pelo Esc
+      await page.keyboard.press('Escape');
+      await esperarOuExplodir(page, () => document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda fechar');
+    }
+  }
+
+  // 3. A folha reabre e traz o nome DE NOVO (a limpeza não a deixou sem o texto).
+  await abrirResumo();
+  const reaberta = await page.evaluate(() => document.getElementById('resumoImg').getAttribute('alt'));
+  checa(reaberta.includes(MARCA), `${onde}: CONTROLE — a folha reaberta não escreveu o \`alt\` de novo`, reaberta);
+
+  // 4. O "Sair" pela AJUDA, com a folha aberta: nada da conta no DOM.
+  await page.evaluate(() => document.getElementById('helpBtn').click());
+  await esperarOuExplodir(page, () => !document.getElementById('helpModal').classList.contains('hidden'), 'a Ajuda abrir');
+  await page.evaluate(() => document.getElementById('logoutBtn').click());
+  await esperarOuExplodir(page, () => !document.getElementById('logoutModal').classList.contains('hidden'), 'o diálogo do "Sair" abrir');
+  await page.evaluate(() => document.getElementById('confirmLogout').click());
+  await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois do "Sair"');
+  const depoisDoSair = await varrer();
+  checa(depoisDoSair.length === 0, `${onde}: depois do "Sair" o DOM guarda o nome da conta que saiu`, JSON.stringify(depoisDoSair));
+
+  // 5. O "Sair" que chega de OUTRA aba, com a folha aberta.
+  await entrar();
+  await abrirResumo();
+  checa((await varrer()).includes('resumoImg'), `${onde}: CONTROLE — a folha aberta de novo não trouxe o nome (a outra aba)`);
+  await page.evaluate(() => { void handleLogout({ porOutraAba: true }); });
+  await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois do "Sair" de outra aba');
+  const outraAba = await varrer();
+  checa(outraAba.length === 0, `${onde}: depois do "Sair" de outra aba o DOM guarda o nome da conta que saiu`, JSON.stringify(outraAba));
+  checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 // ── TECLA SEGURADA NÃO DECIDE EM SÉRIE (R19-2-01, lote 23) ──────────────────
 //
 // O sistema repete o `keydown` (com `repeat` verdadeiro) a ~30 Hz enquanto a

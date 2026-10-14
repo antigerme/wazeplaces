@@ -210,3 +210,56 @@ test('R21-7-02 (estrutura): o desenho segue sem `t()` e sem `toLocale`, e a dire
   assert.equal((texto.match(/ctx\.direction\s*=[^=]/g) || []).length, 2, 'a direção é escrita fora do `texto()`');
   assert.match(texto, /ctx\.direction = direcaoAntes/, 'o `texto()` não devolve a direção que encontrou');
 });
+
+// ═══ R21-7-03 · o `alt` e o título da folha do Resumo depois de fechar ═════════════════════════════
+//
+// O `alt` da imagem traz o NOME da pessoa e os números do mês; a limpeza do fechamento soltava o blob
+// e o `src` e deixava o resto. Ele ficava no DOM da folha fechada e depois do "Sair", e o relatório do
+// modo dev leva o DOM inteiro. O que o navegador responde (os quatro caminhos de fechar e o "Sair" de
+// verdade) está no bloco "o `alt` da imagem não sobra" do smoke de layout.
+function limpezaDoResumo() {
+  const objeto = (/const LIMPEZA_AO_FECHAR = \{([\s\S]*?)\n\};/.exec(SEM) || [])[1];
+  assert.ok(objeto, 'LIMPEZA_AO_FECHAR sumiu do app.js');
+  const corpo = (/\n    resumoModal\(\) \{([\s\S]*?)\n    \},/.exec(objeto) || [])[1];
+  assert.ok(corpo && corpo.length > 40, 'resumoModal não tem limpeza em LIMPEZA_AO_FECHAR');
+  return corpo;
+}
+function folhaDeMentira({ comTitulo = true, comImagem = true } = {}) {
+  const ids = [], soltos = [];
+  const img = { _attrs: { alt: 'EditorSecreto limpou 25 pedidos do mapa. 5 rejeitados, 20 lidos.', src: 'blob:http://x/1' },
+    get src() { return this._attrs.src || ''; },
+    removeAttribute(a) { delete this._attrs[a]; }, setAttribute(a, v) { this._attrs[a] = String(v); } };
+  const titulo = { textContent: 'Seu resumo de outubro' };
+  const document = { getElementById: (id) => { ids.push(id); return id === 'resumoImg' && comImagem ? img : id === 'resumoTitle' && comTitulo ? titulo : null; } };
+  const URLFalsa = { revokeObjectURL: (u) => soltos.push(u) };
+  const resumoAtualDepois = new Function('document', 'URL', 'let resumoAtual = { blob: {}, nome: "x.png", mesNome: "outubro" };\n'
+    + '(function () {' + limpezaDoResumo() + '\n})();\nreturn resumoAtual;')(document, URLFalsa);
+  return { img, titulo, ids, soltos, resumoAtualDepois };
+}
+
+test('R21-7-03 · fechar a folha do Resumo devolve o `alt` e o título ao que o HTML entrega, e solta o blob', () => {
+  const f = folhaDeMentira();
+  assert.equal(f.img._attrs.alt, '', 'DEFEITO: o `alt` — o nome da pessoa e os números do mês — ficou no DOM da folha fechada');
+  assert.equal(f.titulo.textContent, '', 'o título da folha (o mês) ficou depois de fechar');
+  assert.equal('src' in f.img._attrs, false, 'o `src` (o object URL) ficou');
+  assert.deepEqual(f.soltos, ['blob:http://x/1'], 'o object URL não foi solto');
+  assert.equal(f.resumoAtualDepois, null, 'o blob da imagem seguiu na memória');
+  // A limpeza só mexe nos DOIS elementos da folha.
+  assert.deepEqual([...new Set(f.ids)].sort(), ['resumoImg', 'resumoTitle']);
+});
+
+test('R21-7-03 · CONTROLE: sem a imagem ou sem o título na página a limpeza não lança', () => {
+  assert.doesNotThrow(() => folhaDeMentira({ comImagem: false }));
+  assert.doesNotThrow(() => folhaDeMentira({ comTitulo: false }));
+  assert.doesNotThrow(() => folhaDeMentira({ comImagem: false, comTitulo: false }));
+});
+
+test('R21-7-03 (estrutura): limpar não deixa a folha ABERTA sem texto — a abertura reescreve o `alt` e o título', () => {
+  const abrir = fatiar('abrirResumoDoMes');
+  assert.match(abrir, /img\.alt = r\.alt \|\|/, 'a abertura não escreve o `alt` com os números');
+  assert.match(abrir, /getElementById\('resumoTitle'\)\.textContent = t\('resumo\.modal\.title'/, 'a abertura não escreve o título');
+  // E o HTML entrega os dois vazios (é a ele que a limpeza devolve a folha).
+  const html = ler('index.src.html');
+  assert.match(html, /<img id="resumoImg" alt=""/, 'o HTML deixou de entregar o `alt` vazio');
+  assert.match(html, /<h3 id="resumoTitle"[^>]*><\/h3>/, 'o HTML deixou de entregar o título vazio');
+});

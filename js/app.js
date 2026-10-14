@@ -1385,6 +1385,14 @@ const LIMPEZA_AO_FECHAR = {
         resumoAtual = null;
         const img = document.getElementById('resumoImg');
         if (img && img.src) { try { URL.revokeObjectURL(img.src); } catch (e) {} img.removeAttribute('src'); }
+        // O `alt` traz o NOME da pessoa e os números do mês ("EditorSecreto limpou 25 pedidos do mapa…"), e
+        // o título o mês: a folha fechada volta ao que o HTML entrega (os dois vazios). Sem isso o nome
+        // ficava no DOM depois de fechar e depois do "Sair" — e o relatório do modo dev, que leva o DOM
+        // inteiro, o levaria junto da próxima conta que o ligasse na mesma página (R21-7-03, a mesma
+        // classe do painel do Histórico, R8-7-06). A folha reescreve os dois ao abrir.
+        if (img) img.setAttribute('alt', '');
+        const titulo = document.getElementById('resumoTitle');
+        if (titulo) titulo.textContent = '';
     },
     // O padrão da lista de autores é a forma CURTA. Amarrar isto ao botão de
     // fechar deixaria os outros dois caminhos (Esc e scrim) vazando o estado
