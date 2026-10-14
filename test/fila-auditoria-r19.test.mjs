@@ -66,7 +66,7 @@ function teclado({ camada = null, travado = false } = {}) {
     prometerFocoDaSeta: () => log.push('prometeu-foco'),
   };
   const fonte = [constante('TECLAS_DE_CURSOR'), fatiar('focoEmCampoDeTexto'), constante('AREAS_DO_CARD_QUE_ROLAM'),
-    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'),
+    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'), fatiar('teclaDoDesfazer'),
     constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'), constante('SETAS_QUE_ANDAM'), fatiar('handleKeyDown'),
     'return handleKeyDown;'].join('\n');
   const handle = new Function(...Object.keys(deps), fonte)(...Object.values(deps));

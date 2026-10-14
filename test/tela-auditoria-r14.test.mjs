@@ -91,7 +91,7 @@ function montarSeta() {
     avisarTravaAoTocar() {}, cardDaFrente: () => estado.card,
   };
   const fonte = [constante('TECLAS_DE_CURSOR'), fatiar('focoEmCampoDeTexto'), constante('AREAS_DO_CARD_QUE_ROLAM'),
-    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'), constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),
+    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'), fatiar('teclaDoDesfazer'), constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),
     constante('BOTAO_DA_ACAO'), 'let focoDoTeclado = null;', fatiar('focavelNaTela'), fatiar('direcaoTravada'),
     fatiar('prometerFocoDaSeta'), fatiar('aplicarFocoDoTeclado'), fatiar('handleKeyDown'),
     'return { handleKeyDown, aplicarFocoDoTeclado, pendente: () => focoDoTeclado };'].join('\n');

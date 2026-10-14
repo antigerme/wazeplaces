@@ -411,7 +411,7 @@ function montarTela({ filaReal = 2, hasMore = false } = {}) {
     declaracao('TECLAS_DE_CURSOR'), declaracao('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'), declaracao('Treino'),
     ...['openModal', 'closeModal', 'topOpenModal', 'devolverFoco', 'focavelNaTela', 'dentroDeCamada', 'veioDoTeclado',
       'prometerFocoAoCardQueVem', 'aplicarFocoDoTeclado', 'avisoDaTrava', 'recusarTreino', 'handleKeyDown',
-      'atalhoDoNavegador', 'teclaDeComposicao', 'focoEmCampoDeTexto'].map(fatiar),
+      'atalhoDoNavegador', 'teclaDeComposicao', 'teclaDoDesfazer', 'focoEmCampoDeTexto'].map(fatiar),
     ...['abrirTreino', 'comoFuncionaTreinar', 'comoFuncionaOk', 'treinoFimOk'].map(ouvinte),
   ], ['Treino', 'openModal', 'closeModal', 'handleKeyDown', 'aplicarFocoDoTeclado']);
   // O clique no botão: pelo teclado (Enter/Espaço no botão FOCADO, `detail` 0)

@@ -6683,6 +6683,39 @@ function teclaDeComposicao(e) {
     return !!(e && (e.isComposing === true || e.keyCode === 229));
 }
 
+// A tecla do DESFAZER (o z). FONTE ÚNICA dos três lugares onde o teclado
+// desfaz: o mapa ampliado, a foto ampliada e a tela do card (R21-6-05).
+//
+// Comparar `e.key` com "z" só funciona no layout LATINO: com o teclado hebraico
+// ou o russo ativo, a tecla física do Z entrega `key` "ז" ou "я" (e `code`
+// "KeyZ"), e o "z desfaz" que a Ajuda promete não acontecia — nem o Ctrl+Z. O
+// servidor `il` existe, e esses editores usam o teclado do idioma deles. Medido
+// com o `keydown` despachado e a janela do Desfazer aberta.
+//
+// Desfaz:
+//  1. o `key` "z" ou "Z", como sempre foi: o z IMPRESSO na tecla, onde ela
+//     estiver (no QWERTZ é a tecla física do Y, no AZERTY a do W);
+//  2. a tecla FÍSICA do Z (`code` "KeyZ") quando o `key` é UMA letra de outro
+//     alfabeto — hebraico, cirílico, grego, árabe, hangul. "Uma letra" é a conta
+//     toda, e é de propósito estreita: o `key` de uma tecla morta ("Dead"), do
+//     IME ("Process"), sem valor ("Unidentified") ou vazio não é letra; no
+//     Dvorak a tecla física do Z imprime ";" (pontuação), e no AZERTY imprime o
+//     "w" (letra LATINA: quem quer o z aperta a tecla que diz "z"). As letras
+//     latinas com acento ("ż" do AltGr+Z no polonês) também ficam de fora.
+//
+// A tecla do IME e a composição nunca desfazem (`teclaDeComposicao`), com ou sem
+// campo de texto: o `handleKeyDown` já as corta antes, e a função não depende
+// disso. Não lê Ctrl, ⌘ nem Alt: o modificador é da `atalhoDoNavegador`, e o
+// Ctrl/⌘+Z segue sendo o Desfazer do app. Quem decide se há o que desfazer é o
+// `desfazerPeloTeclado`; e o campo de texto focado (onde o z é uma LETRA) é
+// guarda de quem chama.
+function teclaDoDesfazer(e) {
+    if (!e || teclaDeComposicao(e)) return false;
+    const tecla = e.key;
+    if (tecla === 'z' || tecla === 'Z') return true;
+    return e.code === 'KeyZ' && /^(?!\p{Script=Latin})\p{L}$/u.test(tecla);
+}
+
 // As teclas que, com Ctrl, ⌘ ou Alt, são do NAVEGADOR: as setas — Alt+← e ⌘+←
 // são o Voltar, Alt+→ e ⌘+→ o Avançar, ⌘+↑ e ⌘+↓ o topo e o fim da página — e
 // + − = (o zoom da página). O z fica de fora: Ctrl/⌘+Z é o Desfazer DO APP.
@@ -6743,7 +6776,7 @@ function handleKeyDown(e) {
         // renomear e fechar a foto pra ver o mapa é o caminho natural): o banner
         // aparece por cima do mapa também, e aqui a tecla não chegava a ele — na
         // foto chegava (auditoria de 2026-09-29, L29). O mesmo caminho da foto.
-        else if ((e.key === 'z' || e.key === 'Z') && !focoEmCampoDeTexto()) {
+        else if (teclaDoDesfazer(e) && !focoEmCampoDeTexto()) {
             if (desfazerPeloTeclado()) e.preventDefault();
         }
         // As camadas são `aria-modal`: o Tab não pode sair delas pro card de
@@ -6787,7 +6820,7 @@ function handleKeyDown(e) {
         // daqui — o banner delas mora FORA do lightbox, e a tecla não chegava a
         // ele (auditoria de 2026-09-26). Nunca com o campo do nome focado: ali
         // o z é uma LETRA do nome.
-        else if ((e.key === 'z' || e.key === 'Z') && !focoEmCampoDeTexto()) {
+        else if (teclaDoDesfazer(e) && !focoEmCampoDeTexto()) {
             if (desfazerPeloTeclado()) e.preventDefault();
         }
         // O Desfazer entra na volta do Tab: ele aparece POR CIMA do lightbox
@@ -6824,7 +6857,7 @@ function handleKeyDown(e) {
     // Desfazer via teclado (power-user opera por teclas): z (ou Ctrl/Cmd+Z) —
     // o do card E o das ações de foto, que seguem com a janela aberta depois
     // de o lightbox fechar (ver `desfazerPeloTeclado`).
-    if ((e.key === 'z' || e.key === 'Z') && desfazerPeloTeclado()) {
+    if (teclaDoDesfazer(e) && desfazerPeloTeclado()) {
         e.preventDefault();
         return;
     }

@@ -11786,6 +11786,41 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.fechar();
   }
   {
+    // R21-6-05: a tecla do Desfazer no teclado de OUTRO alfabeto. O Playwright digita
+    // no layout americano, então a tecla do hebraico ou do russo é o `keydown`
+    // despachado com o `code` da tecla FÍSICA do Z e o `key` que o layout imprime
+    // nela — o mesmo evento que o navegador entrega ao app. Cada caso abre a janela
+    // do Desfazer com o ✕ (de dois pedidos, pro ✕ não esvaziar a fila) e despacha a
+    // tecla: o pedido volta (o kA na frente, sem janela) ou a janela segue de pé.
+    // Os CONTROLES são do outro lado: o z latino despachado do mesmo jeito desfaz
+    // (senão "não desfez" passaria com o despacho quebrado), e o w do AZERTY — letra
+    // latina na tecla física do Z — e a tecla morta não desfazem.
+    for (const [nome, ev, desfaz] of [
+      ['CONTROLE — o z latino despachado', { key: 'z', code: 'KeyZ' }, true],
+      ['o hebraico (ז na tecla do Z)', { key: 'ז', code: 'KeyZ' }, true],
+      ['o russo (я na tecla do Z)', { key: 'я', code: 'KeyZ' }, true],
+      ['Ctrl+Z no hebraico', { key: 'ז', code: 'KeyZ', ctrlKey: true }, true],
+      ['CONTROLE — o w do AZERTY na tecla do Z', { key: 'w', code: 'KeyZ' }, false],
+      ['CONTROLE — a tecla morta na tecla do Z', { key: 'Dead', code: 'KeyZ' }, false],
+    ]) {
+      const id = `card/teclado ${MOTOR}: ${nome}`;
+      const g = await cardPagina([cardPedido('kA'), cardPedido('kB')]);
+      await g.page.focus('#cardStack .place-card:not(.card-fundo) .card-btn-reject');
+      await g.page.keyboard.press('Enter');
+      await esperarOuExplodir(g.page, () => !!document.getElementById('undoBtn'), 'o banner do Desfazer');
+      const estado = () => g.page.evaluate(() => ({ frente: AppState.currentPlace && AppState.currentPlace.updateRequestID, janela: !!AppState.pendingAction }));
+      const antes = await estado();
+      checa(antes.frente === 'kB' && antes.janela, `${id}: PRÉ-CONDIÇÃO — o ✕ não abriu a janela do Desfazer`, JSON.stringify(antes));
+      await g.page.evaluate((e) => window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...e })), ev);
+      await doisQuadros(g.page);
+      const depois = await estado();
+      checa(desfaz ? (depois.frente === 'kA' && !depois.janela) : (depois.frente === 'kB' && depois.janela),
+        `${id}: DEFEITO — a tecla ${desfaz ? 'não desfez' : 'desfez'}`, JSON.stringify({ antes, depois }));
+      checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+      await g.fechar();
+    }
+  }
+  {
     // CONTROLE: pelo MOUSE o foco não pula pro painel — e o fim é dito do mesmo
     // jeito (o anúncio é de quem usa leitor de tela, com o dedo também).
     const id = `card/teclado ${MOTOR}: CONTROLE — o ✕ do ÚLTIMO pelo mouse`;
