@@ -438,6 +438,10 @@ test('R18-4-06: CONTROLES — 404 em ALGUNS tiles segue definitivo e "pronto"; a
   const noCache = varredura({ itens: itensDe(5), rede: () => ({ status: 403 }), noCacheInicial: [TILE('t2')] });
   await noCache.app.varrer();
   assert.equal(noCache.app.estado().resultado, 'pronto', 'CONTROLE: com um tile de janela anterior no cache, os 4xx de hoje não anulam o que já está no aparelho');
+  // Um tile negado (403) e o resto com 5xx: o 5xx segue como estava, e UM 4xx entre eles não faz "todos negados".
+  const misto = varredura({ itens: itensDe(5), rede: (u) => (u === TILE('t0') ? { status: 403 } : { status: 503 }) });
+  await misto.app.varrer();
+  assert.equal(misto.app.estado().resultado, 'pronto', 'CONTROLE: um 403 entre 503s virou "todos negados"');
   const c503 = varredura({ itens: itensDe(5), rede: () => ({ status: 503 }) });
   await c503.app.varrer();
   assert.equal(c503.app.estado().resultado, 'pronto', 'o 5xx mudou (decisão do owner, R5-4-1)');
