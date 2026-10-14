@@ -189,7 +189,8 @@ test('R19-4-01: as LEITURAS (a fila e o registro da janela) fecham a conexão ta
   await a.gravarJanela(1492385, null);
   a.st.comportamento = 'get-erro';
   assert.equal(await a.lerFila(), undefined);
-  assert.equal(await a.lerJanela(), null);
+  // R20, A2: o registro da janela segue a MESMA convenção da fila — a leitura que falhou é `undefined`.
+  assert.equal(await a.lerJanela(), undefined);
   assert.equal(a.st.abertas, 0, 'DEFEITO: uma leitura que falhou deixou a conexão aberta');
   // CONTROLE: a leitura que dá certo devolve e fecha.
   a.st.comportamento = 'ok';
@@ -248,13 +249,16 @@ test('R19-4-03: todo chamador de `offlineLerFila` trata `undefined` como "sem fi
   assert.equal(chamadas.length, 3, `os chamadores de offlineLerFila mudaram (${chamadas.length}) — confira o retorno novo em cada um:\n${chamadas.join('\n')}`);
   // A poda do fim da varredura: `naBase` é usada só com `naBase &&` / `naBase.t`.
   const varrer = fatiar('offlineVarrer');
-  assert.match(varrer, /const naBase = Number\.isFinite\(filaCoberta\) \? await offlineLerFila\(\) : null;/);
+  // R20, A3: a leitura saiu pra ANTES do ramo, e o `undefined` (a que falhou) é decidido ali:
+  // `leituraFalhou` tira a cobertura. Os outros usos de `naBase` seguem sendo "tem fila?".
+  assert.match(varrer, /naBase = await offlineLerFila\(\);\s*leituraFalhou = naBase === undefined;/);
   for (const uso of varrer.match(/naBase[^;\n]*/g).slice(1)) {
-    assert.ok(/^naBase\s*(&&|\.)/.test(uso) || /^naBase\.t/.test(uso) || /naBase\)/.test(uso) || /^naBase = /.test(uso),
+    assert.ok(/^naBase\s*(&&|\.)/.test(uso) || /^naBase\.t/.test(uso) || /naBase\)/.test(uso) || /^naBase = /.test(uso) || /^naBase === undefined/.test(uso),
       `uso de naBase que não é "tem fila?": ${uso}`);
   }
-  // A reabertura sem rede: `if (!guardada) return false;` logo depois da leitura.
-  assert.match(fatiar('offlineTentarAbrirSemRede'), /const guardada = await offlineLerFila\(\);\s*\n\s*if \(!guardada\) return false;/,
+  // A reabertura sem rede: `if (!guardada) { …; return false; }` logo depois da leitura — e, desde o
+  // R20 (A4), a leitura que FALHOU (`undefined`) deixa linha no diário antes de sair.
+  assert.match(fatiar('offlineTentarAbrirSemRede'), /const guardada = await offlineLerFila\(\);\s*\n\s*if \(!guardada\) \{[\s\S]*?return false;\s*\}/,
     'a reabertura sem rede não trata a leitura que falhou como sem fila');
   // O relatório é quem distingue.
   assert.match(fatiar('diagOffline'), /f === undefined\) throw/, 'o `diagOffline` não usa o ramo da leitura que falhou');
@@ -324,8 +328,11 @@ test('R19-4-02: a falha permanente de gravação entra 3 vezes, de novo quando a
   // Troca de causa: entra na hora, mesmo dentro da janela de 10 min (o IndexedDB passa a estar indisponível).
   a.st.comportamento = 'open-lanca';
   assert.equal(await a.gravarFila(), 'falhou');
-  assert.equal(gravacoes().length, 5, 'DEFEITO: a troca de causa (cota → IndexedDB indisponível) não entrou no diário');
-  assert.equal(gravacoes()[4].cota, undefined);
+  // R20, A1: a repetição da causa ANTERIOR que o limitador deixou de fora (a 14ª passada) sai numa linha
+  // própria antes da causa nova, em vez de se perder; a linha da causa nova é a última.
+  assert.equal(gravacoes().length, 6, 'DEFEITO: a troca de causa (cota → IndexedDB indisponível) não entrou no diário');
+  assert.equal(gravacoes()[4].cota, true, 'a repetição suprimida da causa anterior não foi escrita na troca de causa');
+  assert.equal(gravacoes()[5].cota, undefined);
   // CONTROLE: a primeira falha de uma série NOVA, de um aparelho NOVO, é anotada — o limitador não engole o que ainda não viu.
   const b = aparelho('aborto');
   await b.gravarFila();

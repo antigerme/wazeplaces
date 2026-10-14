@@ -7958,15 +7958,28 @@ function dfato(k, d, limite) {
             const causa = String(limite.causa);
             const agora = Date.now();
             const x = dfatoLimite.get(k) || { causa: null, n: 0, em: -Infinity, juntas: 0 };
-            if (x.causa !== causa) { x.causa = causa; x.n = 0; x.juntas = 0; x.em = -Infinity; }
+            if (x.causa !== causa) {
+                // A troca de causa NÃO apaga as repetições que a série anterior deixou de fora
+                // (R20, A1): A×5, B, A somava 5 no leitor, e eram 7. Elas saem numa linha com os
+                // dados da ÚLTIMA repetição suprimida e a hora dela (a linha é ela mesma, então
+                // `juntas` leva as outras: `x.juntas - 1`), logo antes da linha da causa nova — o
+                // leitor soma `1 + juntas` por linha e o total fecha.
+                if (x.juntas > 0) {
+                    const outras = x.juntas - 1;
+                    dfatoAnel.push({ t: x.ultimaEm, k, ...(x.ultimoD || {}), ...(outras ? { juntas: outras } : {}) });
+                    if (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
+                }
+                x.causa = causa; x.n = 0; x.juntas = 0; x.em = -Infinity; x.ultimoD = null; x.ultimaEm = null;
+            }
             x.n += 1;
             if (x.n > DFATO_LIMITE_SERIE && agora - x.em < DFATO_LIMITE_MS) {
                 x.juntas += 1;
+                x.ultimoD = d || null; x.ultimaEm = agora;
                 dfatoLimite.set(k, x);
                 return;
             }
             juntas = x.juntas;
-            x.juntas = 0;
+            x.juntas = 0; x.ultimoD = null; x.ultimaEm = null;
             x.em = agora;
             dfatoLimite.set(k, x);
         }
@@ -10839,6 +10852,11 @@ function ligarFabDev() {
     // nunca `pointerup` — o botão existia pro Tab e não fazia nada (auditoria de
     // 2026-09-25). O clique do dedo tem `detail` ≥ 1 e já passou pelo `soltar`.
     btn.addEventListener('click', (e) => { if (e.detail === 0) capturar(); });
+    // Enter SEGURADO repete o `keydown` e o navegador faz um `click` por repetição: 15 repetições
+    // eram 12 capturas idênticas (o DOM de ~150 KB e a base do diagnóstico, cada uma) que expulsavam
+    // do anel a automática — a que o modo dev existe pra guardar (R20, C1). A MESMA linha dos botões
+    // do card; o Espaço só clica ao soltar, mas o par fica igual.
+    btn.addEventListener('keydown', (e) => { if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault(); });
     function capturar() {
         const m = dlogCapturar('manual');
         atualizarFabDev();
@@ -11279,6 +11297,11 @@ function diagResumoDaSaida() {
 async function diagOffline() {
     const o = { ...diagOfflineAgora() };
     if (!o.ligado) return o;
+    // As DUAS leituras da base saem juntas (R20, A5): cada uma tem o teto dela (`OFFLINE_DB_TETO_MS`,
+    // 5 s) e em série, com o IndexedDB pendurado, somavam os 10 s do orçamento do relatório — a seção
+    // inteira se perdia (`semResposta`) e a falha de leitura, que já tinha resposta, ia junto. Nenhuma
+    // das duas rejeita (devolvem `undefined` quando a leitura falha).
+    const lendoOReg = offlineLerRegistroDaJanela();
     try {
         const f = await offlineLerFila();
         // A leitura que FALHOU (`undefined`) não é a base vazia (`null`) — R19-4-03.
@@ -11315,9 +11338,16 @@ async function diagOffline() {
     // (`filaCoberta`): é por ele que a reabertura — e a gravação de qualquer aba
     // — sabe se a fila guardada está coberta (R14-4-01, R14-4-06).
     try {
-        const reg = await offlineLerRegistroDaJanela();
-        o.janelaGuardada = reg ? reg.janela : null;
-        o.filaCobertaGuardada = reg && Number.isFinite(reg.filaCoberta) ? reg.filaCoberta : null;
+        const reg = await lendoOReg;
+        if (reg === undefined) {
+            // A leitura FALHOU (R20, A2): `{ erro }` como na fila — `undefined` some no JSON e o leitor
+            // imprimiria "—", indistinguível de "nunca preparou".
+            o.janelaGuardada = { erro: 'a leitura do registro da janela falhou' };
+            o.filaCobertaGuardada = { erro: 'a leitura do registro da janela falhou' };
+        } else {
+            o.janelaGuardada = reg ? reg.janela : null;
+            o.filaCobertaGuardada = reg && Number.isFinite(reg.filaCoberta) ? reg.filaCoberta : null;
+        }
     } catch (e) {}
     try {
         if (window.caches && await caches.has(OFFLINE_TILES_CACHE)) {
@@ -24072,7 +24102,11 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
     }
 }
 
-// O registro inteiro: `{ janela, t, filaCoberta }`.
+// O registro inteiro: `{ janela, t, filaCoberta }`. A MESMA convenção da fila (R20, A2): `null` é a
+// base lida sem registro (ou sem base); `undefined` é a leitura que FALHOU (o `timeout`, o
+// `blocked`, o `indexedDB.open` que lança) — o relatório diz "não deu pra ler" e não "nunca
+// preparou". Quem só pergunta "tem registro?" (`offlineLerJanela`, `offlineRecuperarJanela`) trata
+// os dois como sem registro, como sempre.
 async function offlineLerRegistroDaJanela() {
     let db = null;
     try {
@@ -24083,7 +24117,7 @@ async function offlineLerRegistroDaJanela() {
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
         return v && Number.isFinite(v.janela) ? v : null;
-    } catch (e) { return null; }
+    } catch (e) { return e && e.semBase ? null : undefined; }
     finally { if (db) { try { db.close(); } catch (e2) {} } }
 }
 
@@ -24321,6 +24355,11 @@ function offlineBaixar(u, tile, info = null) {
         // `AbortSignal.timeout`, pra valer também no iPhone antes do iOS 16.
         const ctrl = new AbortController();
         let estourou = false;
+        // Onde a falha aconteceu (R20, B1): 'rede' (o `fetch`), 'open' ou 'put' (o cache); `c` é o cache
+        // aberto e `meu` a geração da gravação.
+        let fase = 'rede';
+        let c = null;
+        let meu = 0;
         const teto = setTimeout(() => { estourou = true; ctrl.abort(); }, OFFLINE_ITEM_TETO_MS);
         try {
             // `no-cache`: cópia CONFERIDA com o servidor (condicional — o de tile
@@ -24349,7 +24388,8 @@ function offlineBaixar(u, tile, info = null) {
             // Última trava antes de ESCREVER: se esqueceram durante o download,
             // gravar aqui recria o cache que o "Sair" acabou de apagar.
             if (epoca !== offlineEpoca) return false;
-            const c = await caches.open(OFFLINE_TILES_CACHE);
+            fase = 'open';
+            c = await caches.open(OFFLINE_TILES_CACHE);
             // O "Sair" de OUTRA aba apaga o cache do mapa, e o aviso dele chega
             // numa tarefa à parte (R15-4-02): o `open` que já estava a caminho o
             // RECRIA, e o `put` grava nele o endereço de um pedido de terceiro
@@ -24359,21 +24399,53 @@ function offlineBaixar(u, tile, info = null) {
             if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, false); return false; }
             // Esta gravação põe o tile: quem o desfaz só o tira se NINGUÉM gravou o
             // mesmo endereço depois (R16-8-05, ver `offlineDesfazerTile`).
-            const meu = ++offlineGeracaoDeTile;
+            meu = ++offlineGeracaoDeTile;
             offlineGravandoTile.set(u, meu);
+            fase = 'put';
             await c.put(u, resp);
             if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, true, meu); return false; }
             if (offlineGravandoTile.get(u) === meu) offlineGravandoTile.delete(u);
             return true;
         } catch (e) {
+            // A entrada de "gravando" que o `put` que lançou deixou (não há `await c.put` que a tire).
+            if (meu && offlineGravandoTile.get(u) === meu) offlineGravandoTile.delete(u);
             if (estourou) return 'teto';
             // A cota estourada (no `open` ou no `put`) não é rede: repetir dá o mesmo erro, e a
             // sonda diria "a rede anda" e daria o tile por feito, sem ele estar no cache
             // (R17-4-02: "Pronto" com 0 tiles).
-            return offlineErroDeCota(e) ? 'cota' : false;
+            if (offlineErroDeCota(e)) return 'cota';
+            // O `fetch` e a leitura do corpo são REDE (a queda no meio do corpo faz o `put` rejeitar com
+            // `TypeError` também): só a falha de GRAVAÇÃO no cache é do aparelho (R20, B1). O `open` que
+            // rejeita já diz isso; a do `put` se separa da rede com uma gravação mínima no MESMO cache —
+            // se ELA também falha, o cache não grava (`'cache'`, ou `'cota'` se for espaço); se dá certo,
+            // o que falhou foi o corpo ou o item, que seguem o caminho de sempre (`false`: as tentativas
+            // e a sonda de rede).
+            if (fase === 'open') { if (info) info.erro = String((e && e.name) || e).slice(0, 40); return 'cache'; }
+            if (fase === 'put') {
+                if (epoca !== offlineEpoca) return false;
+                const erroDaSonda = await offlineCacheGrava(c);
+                if (epoca !== offlineEpoca) return false;
+                if (erroDaSonda) {
+                    if (offlineErroDeCota(erroDaSonda)) return 'cota';
+                    if (info) info.erro = String((erroDaSonda && erroDaSonda.name) || erroDaSonda).slice(0, 40);
+                    return 'cache';
+                }
+            }
+            return false;
         }
         finally { clearTimeout(teto); }
     })();
+}
+
+// O cache do mapa GRAVA? Uma entrada mínima numa chave que nenhum tile usa, apagada em seguida
+// (R20, B1). `null` quando gravou; o erro quando não. Nunca lança.
+const OFFLINE_SONDA_URL = 'https://sonda.invalid/offline';
+async function offlineCacheGrava(c) {
+    try {
+        await c.put(OFFLINE_SONDA_URL, new Response('', { status: 200 }));
+        try { await c.delete(OFFLINE_SONDA_URL); } catch (e) { /* a sobra é uma chave sem tile: inofensiva */ }
+        return null;
+    } catch (e) { return e || new Error('cache'); }
 }
 
 // O tile que uma gravação pôs (ou o cache que o `open` dela recriou) depois de a
@@ -24585,6 +24657,10 @@ async function offlineVarrer() {
         // (500 itens × 3 tentativas × 30 s era "varrendo" por mais de uma hora).
         let penduradasSeguidas = 0;
         let limitado = false;
+        // O aparelho recusou a GRAVAÇÃO no cache por outro motivo que não o espaço (R20, B1): erro do
+        // `caches.open` (`SecurityError`, janela privativa do Firefox) ou do `put` com o cache indisponível.
+        let cacheFalhou = false;
+        let erroDeCache = '';
         let semEspaco = gravacao === 'cota';
         // Os TILES que o servidor negou com 4xx (401/403/404/451), por endereço, e que seguem na janela
         // (R18-4-06): "todos negados e nenhum no cache" não é "Pronto" — é uma borda barrando o aparelho
@@ -24628,6 +24704,17 @@ async function offlineVarrer() {
                     // espera uma pausa longa (a mesma porta do 429): o espaço não volta em
                     // um minuto, e a prova de rede vem a cada swipe.
                     semEspaco = true;
+                    penduradasSeguidas = 0;
+                    offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
+                    desistidosPorRede.push(it);
+                } else if (ok === 'cache') {
+                    // O aparelho não deixa GRAVAR no cache do mapa (R20, B1) — sem ser por espaço. Repetir
+                    // o tile dá o mesmo erro, e a sonda diria "a rede anda" e o daria por feito, com ZERO
+                    // tiles no cache e a linha em "Pronto" (MEDIDO). A varredura PARA, termina parcial —
+                    // nunca "pronto", nunca `definitivo`, sem gastar a sonda — e espera a pausa longa da
+                    // cota: o cache não volta em um minuto, e a prova de rede vem a cada swipe.
+                    cacheFalhou = true;
+                    if (!erroDeCache && info.erro) erroDeCache = info.erro;
                     penduradasSeguidas = 0;
                     offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
                     desistidosPorRede.push(it);
@@ -24702,7 +24789,19 @@ async function offlineVarrer() {
                 offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
             }
         }
-        if (!pend.length && !desistidosPorRede.length && !gravacaoFalhou && !tilesNegadosEmTodos) {
+        // Só chega a "pronto" quem não tem pendência. A fila guardada é relida ANTES de decidir o ramo
+        // (R20, A3): a leitura que FALHOU (`undefined`) não conferiu nada — não é "a base não tem
+        // pedido faltando" —, então não dá a cobertura nem poda, e a varredura termina PARCIAL, com a
+        // pausa curta, como a gravação que falhou.
+        let naBase = null;
+        let leituraFalhou = false;
+        if (!pend.length && !desistidosPorRede.length && !gravacaoFalhou && !tilesNegadosEmTodos && Number.isFinite(filaCoberta)) {
+            naBase = await offlineLerFila();
+            leituraFalhou = naBase === undefined;
+            // A época conferida DEPOIS do `await`: o que vem em seguida é SÍNCRONO.
+            if (epoca !== offlineEpoca) return;
+        }
+        if (!pend.length && !desistidosPorRede.length && !gravacaoFalhou && !tilesNegadosEmTodos && !leituraFalhou) {
             // A fila guardada AGORA, relida ANTES de dar a cobertura (R16-4-01): a
             // outra aba pode tê-la regravado com PARTE dos pedidos — mesmo carimbo —
             // enquanto esta baixava, e a poda de lá tira do cache o mapa do pedido
@@ -24713,10 +24812,7 @@ async function offlineVarrer() {
             // pela BASE, e não por um aviso que pode não ter vindo (iOS < 15.4 não
             // tem o canal): todo pedido que a gravação gravaria está nela? O mesmo
             // "fora" dela decide (`pedidoForaDaFilaGuardada`). A mesma leitura serve à
-            // poda, logo abaixo.
-            const naBase = Number.isFinite(filaCoberta) ? await offlineLerFila() : null;
-            // A época conferida DEPOIS do `await`: o que vem em seguida é SÍNCRONO.
-            if (epoca !== offlineEpoca) return;
+            // poda, logo abaixo (lida acima, antes do ramo).
             // A base já está na mão: se a fila guardada é OUTRA (o carimbo não é o que esta
             // varredura cobriu), a aba que a gravou avisaria por aqui — mas o aviso depende do
             // `BroadcastChannel`, que o iOS < 15.4 não tem (R17-4-06). O mesmo caminho do aviso
@@ -24789,7 +24885,7 @@ async function offlineVarrer() {
             offlineSemEspaco = semEspaco;
             // A gravação da fila falhou por outro motivo que não o espaço: tenta de novo no gatilho
             // seguinte DEPOIS de uma pausa curta, e não a cada swipe (R18-4-05).
-            if (gravacaoFalhou && !semEspaco) offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_LIMITE_PAUSA_MS);
+            if ((gravacaoFalhou && !semEspaco) || leituraFalhou) offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_LIMITE_PAUSA_MS);
             // Com LIMITADOR (R19-4-02): a causa que se repete a cada passada depois da pausa
             // (a gravação que falha, a cota, os tiles negados) entra 3 vezes, de novo quando a
             // causa muda e uma a cada 10 min, com `juntas` — o anel de 120 é de todo o diário.
@@ -24797,9 +24893,12 @@ async function offlineVarrer() {
                                        ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
                                        ...(semEspaco ? { cota: true } : {}),
                                        ...(gravacaoFalhou ? { semFila: true } : {}),
+                                       ...(leituraFalhou ? { leitura: true } : {}),
+                                       ...(cacheFalhou ? { cache: true, ...(erroDeCache ? { e: erroDeCache } : {}) } : {}),
                                        ...(tilesNegadosEmTodos ? { tilesNegados: tilesDaFila.size } : {}),
                                        ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) },
-                  { causa: [semEspaco ? 'cota' : '', gravacaoFalhou ? 'semFila' : '', tilesNegadosEmTodos ? 'tilesNegados' : '', limitado ? 'limite' : ''].join('|') });
+                  { causa: [semEspaco ? 'cota' : '', gravacaoFalhou ? 'semFila' : '', tilesNegadosEmTodos ? 'tilesNegados' : '', limitado ? 'limite' : ''].join('|')
+                           + (leituraFalhou ? '|leitura' : '') + (cacheFalhou ? '|cache' : '') });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';
@@ -25018,7 +25117,13 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     // A fila desta abertura é a da tela no COMEÇO da leitura (ver o treino, abaixo).
     const epocaDaLeitura = AppState.fetchEpoch;
     const guardada = await offlineLerFila();
-    if (!guardada) return false;
+    if (!guardada) {
+        // `undefined` é a leitura da base que FALHOU (R20, A4), e as outras recusas deixam linha no
+        // diário: sem esta, o relato "reabri e não carrega nada" era `busca.semRede` → `tela.vazia`,
+        // igual ao de quem nunca ligou o offline. Com limitador: a falha permanente repete a cada busca.
+        if (guardada === undefined) dfato('offline.leituraFalhou', null, { causa: 'leitura' });
+        return false;
+    }
     // A fila de OUTRO lugar (a região, o país ou o FILTRO mudou depois dela) não
     // entra: seria a fila da região velha sob o filtro novo, e a decisão sairia
     // pro servidor errado (ver `filaDeOnde`) — ou a fila do Brasil inteiro sob

@@ -67,6 +67,8 @@ const pausaDoOffline = (o) => {
     : parcial.limite !== undefined ? 'o servidor de tile pediu calma (408/425/429)'
     : parcial.tilesNegados ? 'o servidor de tile negou todos os tiles (4xx)'
     : parcial.semFila ? 'a gravação da fila na base falhou'
+    : parcial.leitura ? 'a leitura da fila na base falhou'
+    : parcial.cache ? `o aparelho não deixou gravar no cache do mapa${parcial.e ? ` (${parcial.e})` : ''}`
     : 'motivo não registrado no diário';
   out(`em pausa até ${horaLocal(o.segurarAteEm)} (${motivo}) — a varredura não pede nada ao servidor de tile antes disso, mesmo que o próximo gatilho "prepare".`);
 };
@@ -167,7 +169,9 @@ else if (off.semResposta === true) {
 else if (off.ligado === false) {
   out(`desligado — nada guardado no aparelho (a fila, a janela e os tiles só existem com o "Disponível offline" ligado) · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? '—'}`);
 } else {
-  out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
+  // `{ erro }` é a leitura do registro da janela que FALHOU (R20, A2): não é "nunca preparou" (`null`).
+  const janelaNaoLida = !!(off.janelaGuardada && typeof off.janelaGuardada === 'object' && off.janelaGuardada.erro);
+  out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${janelaNaoLida ? 'NÃO LIDA (não deu pra ler o registro da janela)' : off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
   if (off.ligado) pausaDoOffline(off);
@@ -175,7 +179,12 @@ else if (off.ligado === false) {
     const falhouGravar = (Array.isArray(d.diario) ? d.diario : []).filter((e) => e && e.k === 'offline.gravacaoFalhou');
     if (off.ligado && falhouGravar.length) {
       const ult = falhouGravar[falhouGravar.length - 1];
-      out(`ATENÇÃO: a gravação da fila na base falhou ${falhouGravar.length} vez(es) no diário (a última às ${hora(ult.t)}${ult.cota ? ', por FALTA DE ESPAÇO' : ult.e ? `, ${ult.e}` : ''}) — sem a fila na base não há cobertura, e a varredura termina "parcial".`);
+      // O limitador do app (R19-4-02) junta as repetições numa linha só (`juntas`): contar as
+      // LINHAS dizia "3 vez(es)" pra uma hora de falha (R20, A1). Cada linha vale ela e as que juntou.
+      const suprimidas = falhouGravar.reduce((n, e) => n + (Number.isFinite(e.juntas) && e.juntas > 0 ? e.juntas : 0), 0);
+      const total = falhouGravar.length + suprimidas;
+      const registro = suprimidas ? ` (${falhouGravar.length} registrada(s), +${suprimidas} que o app juntou pra não encher o diário)` : '';
+      out(`ATENÇÃO: a gravação da fila na base falhou ${total} vez(es) no diário${registro} (a última às ${hora(ult.t)}${ult.cota ? ', por FALTA DE ESPAÇO' : ult.e ? `, ${ult.e}` : ''}) — sem a fila na base não há cobertura, e a varredura termina "parcial".`);
     }
   }
   // O que decide a LINHA das Preferências (R14-4-06): ela diz "Pronto" sobre a
@@ -183,14 +192,15 @@ else if (off.ligado === false) {
   // sozinho dizia "pronto" com a linha em "Ainda não preparado" (a fila guardada
   // era outra). Carimbos são a hora de gravação: o que importa é se são IGUAIS.
   if (off.ligado) {
-    const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : String(x));
+    // `{ erro }`: o registro da janela que não deu pra ler (R20, A2), distinto de `null` (nunca preparou).
+    const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : (typeof x === 'object' && x.erro) ? 'NÃO LIDO' : String(x));
     // `filaGuardada: null` é a base LIDA e vazia (R18-4-05): "—", não "ausente nesta versão".
     // `{ erro }` é a leitura que FALHOU (R19-4-03): não é a base vazia nem "ausente nesta versão".
     const naoLeu = !!(off.filaGuardada && typeof off.filaGuardada === 'object' && off.filaGuardada.erro);
     const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' && !naoLeu ? off.filaGuardada.t : (off.filaGuardada === null ? null : undefined);
     if (naoLeu) {
       // A leitura da base FALHOU (R19-4-03): não dá pra dizer que a fila está vazia, ausente nem que é de OUTRA aba.
-      out(`ATENÇÃO: a leitura da fila guardada FALHOU (${off.filaGuardada.erro}) — não deu pra ler a base, então não dá pra dizer se a fila está lá, vazia ou é de OUTRA aba (conexão do IndexedDB presa, ou o IndexedDB indisponível; veja o diário: \`offline.gravacaoFalhou\`).`);
+      out(`ATENÇÃO: a leitura da fila guardada FALHOU (${off.filaGuardada.erro}) — não deu pra ler a base, então não dá pra dizer se a fila está lá, vazia ou é de OUTRA aba (conexão do IndexedDB presa, ou o IndexedDB indisponível; a reabertura sem rede que falhou por isso deixa \`offline.leituraFalhou\` no diário).`);
     }
     if (off.cobreAFila === undefined) out(`a última preparação cobre a fila guardada: ${AUSENTE}`);
     else {
