@@ -1035,8 +1035,15 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             // renovação da QUEDA (`manterFila`): ali a pessoa estava no meio da
             // triagem e a fila tem que continuar na tela — até o perfil dizer
             // de quem é a sessão nova (ver `filaAtravessouSessao`).
-            if (manterFila) filaAtravessouSessao = true;
-            else resetQueue();
+            if (manterFila) {
+                filaAtravessouSessao = true;
+                // O "Restam" também: o fim de um "Marcar todos" cortado pela queda desenha o
+                // contador com a sessão ainda caída ("—"), e nada o repunha — a fila ficava na
+                // tela com "—" até a próxima decisão (R18-8-01). A fila que atravessou a queda
+                // tem o `serverTotal` certo; o `showMainScreen` acima já pôs `authenticated`.
+                // Sem animar: é troca de contexto, não contagem.
+                updatePendingCount(true);
+            } else resetQueue();
             // O perfil da sessão nova é pedido ANTES de a conta ser conhecida: com
             // OUTRA conta, a troca (`esquecerOutraConta`) refaz JÁ a fila que
             // atravessou a sessão, e a busca de "Minha área" espera o perfil

@@ -398,3 +398,54 @@ test('R18-1-04 (estrutura): o ouvinte nasce no `initApp` ANTES do ramo do link d
   assert.ok(ouve > 0 && ramo > 0 && ouve < ramo, 'o ouvinte de `hashchange` sumiu, ou nasce depois do `return` do link da carga');
   assert.doesNotMatch(fatiar('aoMudarOFragmentoDaURL'), /API\.|fetch\(|sendBeacon/, 'a função do fragmento fala com a rede: o segredo nunca vai ao servidor');
 });
+
+// ═══ R18-8-01 · o "Restam" depois da renovação da queda no meio de um "Marcar todos" ═══
+// O fim do lote desenha o contador com a sessão ainda caída ("—", `authenticated` falso); a
+// renovação pela extensão com `manterFila` mantém a fila na tela e não o repunha.
+function renovacaoDaQueda({ treino = false } = {}) {
+  const el = { textContent: '—' };
+  let ouvir = null;
+  const AppState = { authenticated: false, serverTotal: 15, hasMore: false, loadError: false, fetching: false, queue: new Array(15).fill(0) };
+  const janela = {
+    location: { origin: 'http://app' }, removeEventListener() {}, postMessage() {},
+    addEventListener(tipo, fn) { if (tipo === 'message') ouvir = fn; },
+  };
+  janela.window = janela;
+  const deps = {
+    window: janela, AppState, navigator: {}, extPerguntando: false, extRenovando: false, extNegado: null, extNegadoNestaPagina: false,
+    safeLS: { get: () => null }, setTimeout: () => 1, clearTimeout() {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
+    API: { temSessaoNaMemoria: () => false, sessionToken: null, setSession() {} }, authInFlight: false, resgateEmVoo: false,
+    textoDigitadoNaEntrada: () => false, aoEntrarNestaPagina() {}, focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {},
+    showMainScreen: () => { AppState.authenticated = true; }, filaAtravessouSessao: false, resetQueue() {}, loadProfileAndAuxData: () => Promise.resolve(),
+    conhecerContaDoLogin() {}, startFetching() {}, esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, segurarTravaDaPergunta: () => () => {},
+    Treino: { ativo: treino, restam: 3 }, buscaEsperaOPerfil: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: 'x' },
+    document: { getElementById: (id) => (id === 'pendingCount' ? el : null) },
+    atualizarPontoNoIcone() {}, atualizarAvisoDeSessao() {}, pararContagemEmCurso() {}, updatePendingTotalHint() {},
+    setCount: (e, n, suf) => { e.textContent = String(n) + suf; },
+  };
+  const h = montar(['entrarPelaExtensao', 'updatePendingCount'], deps);
+  const renovar = async () => {
+    const p = h.entrarPelaExtensao({ silencioso: true, manterFila: true });
+    ouvir({ source: janela, origin: 'http://app', data: { source: 'wazeplaces-ext', action: 'sessao', token: 'T2', conta: '1' } });
+    return p;
+  };
+  return { h, el, AppState, renovar };
+}
+
+test('R18-8-01: a renovação da queda (a fila fica) repõe o "Restam" — o "—" que o fim do lote escreveu com a sessão caída não fica na tela', async () => {
+  const m = renovacaoDaQueda();
+  assert.equal(await m.renovar(), true, 'PRÉ-CONDIÇÃO: a renovação não entrou');
+  assert.equal(m.el.textContent, '15',
+    'DEFEITO: a fila voltou com o "Restam" em «' + m.el.textContent + '» — só a próxima decisão o corrigia');
+  // CONTROLES: sem sessão o contador segue "—" (onde a sessão realmente acabou); o treino mantém o dele.
+  const sem = renovacaoDaQueda();
+  sem.h.updatePendingCount();
+  assert.equal(sem.el.textContent, '—', 'CONTROLE: sem sessão o "Restam" tem que ser "—"');
+  const t = renovacaoDaQueda({ treino: true });
+  t.AppState.authenticated = true;
+  t.h.updatePendingCount();
+  const antes = t.el.textContent;
+  t.AppState.authenticated = false;
+  await t.renovar();
+  assert.deepEqual([antes, t.el.textContent], ['3', '3'], 'o "Restam" do treino mudou com a renovação');
+});
