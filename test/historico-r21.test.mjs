@@ -263,3 +263,84 @@ test('R21-7-03 (estrutura): limpar não deixa a folha ABERTA sem texto — a abe
   assert.match(html, /<img id="resumoImg" alt=""/, 'o HTML deixou de entregar o `alt` vazio');
   assert.match(html, /<h3 id="resumoTitle"[^>]*><\/h3>/, 'o HTML deixou de entregar o título vazio');
 });
+
+// ═══ R21-7-04 · os números do Histórico dizem a quem pertencem ═══════════════════════════════════
+//
+// Cada linha da tabela (Hoje, Semana, Mês, Total) era `<span>12</span> · <span>3</span>`: sem rótulo, e só
+// a cor (verde e rosa) separava lidos de rejeitados — o cabeçalho "Lidos Rejeitados" mora ANTES da patente,
+// longe da tabela, e o leitor de tela ouvia "Hoje 12 · 3". Agora uma frase `sr-only` fala por eles
+// ("12 lidos, 3 rejeitados") e os números da tela saem da árvore de acessibilidade (`aria-hidden`).
+// `aria-label` num `<span>` não resolveria: o papel genérico não tem nome. O visual é o mesmo, pixel por
+// pixel (medido: bloco "os números do Histórico dizem a quem pertencem" do smoke de layout).
+const FRASES = {
+  pt: { '12,3': '12 lidos, 3 rejeitados', '1,3': '1 lido, 3 rejeitados', '12,1': '12 lidos, 1 rejeitado', '1,1': '1 lido, 1 rejeitado', '0,0': '0 lidos, 0 rejeitados' },
+  en: { '12,3': '12 read, 3 rejected', '1,3': '1 read, 3 rejected', '12,1': '12 read, 1 rejected', '1,1': '1 read, 1 rejected', '0,0': '0 read, 0 rejected' },
+  es: { '12,3': '12 leídas, 3 rechazadas', '1,3': '1 leída, 3 rechazadas', '12,1': '12 leídas, 1 rechazada', '1,1': '1 leída, 1 rechazada', '0,0': '0 leídas, 0 rechazadas' },
+  fr: { '12,3': '12 lues, 3 rejetées', '1,3': '1 lue, 3 rejetées', '12,1': '12 lues, 1 rejetée', '1,1': '1 lue, 1 rejetée', '0,0': '0 lues, 0 rejetées' },
+};
+const fraseDoPar = new Function('t', fatiar('fraseDosLidosERejeitados') + '\nreturn fraseDosLidosERejeitados;')(I18N.t);
+
+test('R21-7-04 · a frase dos dois números: plural POR CHAVE (1 é o caso comum) nos 4 idiomas', () => {
+  for (const [lang, casos] of Object.entries(FRASES)) {
+    I18N.setLang(lang);
+    try {
+      for (const [par, esperado] of Object.entries(casos)) {
+        const [lidos, rejeitados] = par.split(',').map(Number);
+        assert.equal(fraseDoPar(lidos, rejeitados), esperado, `${lang}: ${par}`);
+      }
+      // Um conceito, um nome: as palavras são as dos rótulos do placar ("Lidos Rejeitados", "Leídas Rechazadas"…).
+      const lidos = I18N.t('stats.read').toLowerCase(), rejeitados = I18N.t('stats.rejected').toLowerCase();
+      assert.ok(fraseDoPar(2, 2).includes(` ${lidos},`) && fraseDoPar(2, 2).endsWith(` ${rejeitados}`),
+        `${lang}: a frase não usa as palavras do placar ("${lidos}", "${rejeitados}")`);
+    } finally { I18N.setLang('pt'); }
+  }
+});
+
+// `renderHistory` DE VERDADE, com o DOM de mentira de uma raiz só (a tabela é o que interessa).
+function linhasDoHistorico({ lang = 'pt', stats }) {
+  const el = { innerHTML: '', dataset: { conqLigado: '1' }, appendChild() {}, insertAdjacentHTML() {}, contains: () => false };
+  const document = { getElementById: (id) => (id === 'historyBody' ? el : null), activeElement: null };
+  const deps = { document, getHistoryStats: () => stats, renderAutores() {}, chaveDoFoco: () => null, devolverFocoAoPainel() {},
+    htmlPatente: () => '', htmlConquistas: () => '', dadosDoResumo: () => ({ total: 0 }), loadHistory: () => ({}), i18nLocale: () => 'pt-BR',
+    ligarConquistas() {}, abrirResumoDoMes() {}, t: I18N.t, escapeHtml: new Function(fatiar('escapeHtml') + '\nreturn escapeHtml;')() };
+  const chaves = Object.keys(deps);
+  const roda = new Function(...chaves, fatiar('fraseDosLidosERejeitados') + '\n' + fatiar('renderHistory') + '\nreturn renderHistory;')(...chaves.map((k) => deps[k]));
+  I18N.setLang(lang);
+  try { roda(); } finally { I18N.setLang('pt'); }
+  return el.innerHTML;
+}
+const LINHA = /<div class="flex justify-between items-baseline text-sm py-0\.5"><span class="text-slate-600 dark:text-slate-300">([^<]*)<\/span><span class="tnum font-medium"><span class="sr-only">([^<]*)<\/span><span aria-hidden="true"><span class="text-emerald-700 dark:text-emerald-400">(\d+)<\/span> · <span class="text-rose-600 dark:text-rose-400">(\d+)<\/span><\/span><\/span><\/div>/g;
+const ESTATISTICAS = { today: { read: 12, rejected: 1 }, week: { read: 17, rejected: 4 }, month: { read: 1, rejected: 4 }, total: { read: 12345, rejected: 9 } };
+
+test('R21-7-04 · cada linha do Histórico: a frase `sr-only` antes, os números da tela `aria-hidden` — e a frase diz os MESMOS números', () => {
+  for (const lang of ['pt', 'en', 'es', 'fr']) {
+    const html = linhasDoHistorico({ lang, stats: ESTATISTICAS });
+    const linhas = [...html.matchAll(LINHA)];
+    assert.equal(linhas.length, 4, `${lang}: esperava as 4 linhas (Hoje, Semana, Mês, Total) no formato novo, achei ${linhas.length}`);
+    I18N.setLang(lang);
+    try {
+      ['today', 'week', 'month', 'total'].forEach((k, i) => {
+        const [, rotulo, frase, lidos, rejeitados] = linhas[i];
+        assert.equal(rotulo, I18N.t('stats.history.' + k), `${lang}: o rótulo da linha ${k}`);
+        const s = ESTATISTICAS[k];
+        assert.equal(Number(lidos), s.read, `${lang}/${k}: o número verde da tela mudou`);
+        assert.equal(Number(rejeitados), s.rejected, `${lang}/${k}: o número rosa da tela mudou`);
+        assert.equal(frase, fraseDoPar(s.read, s.rejected), `${lang}/${k}: a frase não diz os números da tela`);
+      });
+    } finally { I18N.setLang('pt'); }
+    // A contagem sai CRUA, a mesma da tela: 12345, sem separador de milhar em NENHUM idioma.
+    assert.ok(linhas[3][2].startsWith('12345 '), `${lang}: a frase formatou a contagem (a tela a mostra crua): ${linhas[3][2]}`);
+  }
+});
+
+test('R21-7-04 · histórico vazio: nenhuma linha, nenhuma frase solta; e o painel NUNCA lê o par sem o `aria-hidden`', () => {
+  const zero = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
+  const html = linhasDoHistorico({ stats: zero });
+  assert.equal([...html.matchAll(LINHA)].length, 0);
+  assert.equal(html.includes('sr-only'), false, 'histórico vazio com frase `sr-only` solta');
+  // Estrutura: todo `<span class="text-emerald-700…">` / `text-rose-600…` das linhas mora DENTRO do `aria-hidden`.
+  const corpo = fatiar('renderHistory');
+  assert.ok(corpo.indexOf('<span aria-hidden="true"><span class="text-emerald-700') > corpo.indexOf('class="sr-only"'),
+    'os números da tela não estão atrás do `aria-hidden`, depois da frase');
+  assert.doesNotMatch(corpo, /toLocaleString/, 'as linhas do Histórico passaram a formatar a contagem');
+});

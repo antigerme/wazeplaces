@@ -162,6 +162,10 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Sua sessão vence em {n} dias · renove num computador',
     'stats.history.title': 'Histórico', 'stats.history.today': 'Hoje', 'stats.history.week': 'Semana',
     'stats.history.month': 'Mês', 'stats.history.total': 'Total', 'stats.history.empty': 'Sem histórico ainda.',
+    // o que os dois números de cada linha do Histórico dizem (lidos, rejeitados), pra quem não vê a cor
+    'stats.history.lidos': '{n} lidos', 'stats.history.lidosUm': '{n} lido',
+    'stats.history.rejeitados': '{n} rejeitados', 'stats.history.rejeitadosUm': '{n} rejeitado',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // resumo do mês (a imagem compartilhável)
     'resumo.botao': 'Compartilhar meu resumo de {mes}', 'resumo.modal.title': 'Seu resumo de {mes}',
     'resumo.compartilhar': 'Compartilhar', 'resumo.baixar': 'Baixar imagem', 'resumo.img.alt': 'Resumo do mês',
@@ -876,6 +880,10 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Your session expires in {n} days · renew it on a computer',
     'stats.history.title': 'History', 'stats.history.today': 'Today', 'stats.history.week': 'Week',
     'stats.history.month': 'Month', 'stats.history.total': 'Total', 'stats.history.empty': 'No history yet.',
+    // what the two numbers on each History row say (read, rejected), for whoever can't see the color
+    'stats.history.lidos': '{n} read', 'stats.history.lidosUm': '{n} read',
+    'stats.history.rejeitados': '{n} rejected', 'stats.history.rejeitadosUm': '{n} rejected',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // monthly recap (the shareable image)
     'resumo.botao': 'Share my {mes} recap', 'resumo.modal.title': 'Your {mes} recap',
     'resumo.compartilhar': 'Share', 'resumo.baixar': 'Download image', 'resumo.img.alt': 'Monthly recap',
@@ -1515,6 +1523,10 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Tu sesión vence en {n} días · renuévala en una computadora',
     'stats.history.title': 'Historial', 'stats.history.today': 'Hoy', 'stats.history.week': 'Semana',
     'stats.history.month': 'Mes', 'stats.history.total': 'Total', 'stats.history.empty': 'Sin historial aún.',
+    // lo que dicen los dos números de cada fila del Historial (leídas, rechazadas), para quien no ve el color
+    'stats.history.lidos': '{n} leídas', 'stats.history.lidosUm': '{n} leída',
+    'stats.history.rejeitados': '{n} rechazadas', 'stats.history.rejeitadosUm': '{n} rechazada',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // resumen del mes (la imagen para compartir)
     'resumo.botao': 'Compartir mi resumen de {mes}', 'resumo.modal.title': 'Tu resumen de {mes}',
     'resumo.compartilhar': 'Compartir', 'resumo.baixar': 'Descargar imagen', 'resumo.img.alt': 'Resumen del mes',
@@ -2155,6 +2167,10 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Votre session expire dans {n} jours · renouvelez-la sur un ordinateur',
     'stats.history.title': 'Historique', 'stats.history.today': 'Aujourd’hui', 'stats.history.week': 'Semaine',
     'stats.history.month': 'Mois', 'stats.history.total': 'Total', 'stats.history.empty': 'Pas encore d’historique.',
+    // ce que disent les deux nombres de chaque ligne de l'Historique (lues, rejetées), pour qui ne voit pas la couleur
+    'stats.history.lidos': '{n} lues', 'stats.history.lidosUm': '{n} lue',
+    'stats.history.rejeitados': '{n} rejetées', 'stats.history.rejeitadosUm': '{n} rejetée',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // bilan du mois (l'image à partager)
     'resumo.botao': 'Partager mon bilan : {mes}', 'resumo.modal.title': 'Votre bilan : {mes}',
     'resumo.compartilhar': 'Partager', 'resumo.baixar': 'Télécharger l’image', 'resumo.img.alt': 'Bilan du mois',

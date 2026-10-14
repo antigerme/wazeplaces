@@ -8723,6 +8723,77 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── Histórico: os números das linhas dizem a quem pertencem (R21-7-04, lote 25) ──────
+//
+// Cada linha da tabela (Hoje, Semana, Mês, Total) era `<span>12</span> · <span>3</span>`: sem rótulo, só a
+// cor separava lidos de rejeitados, e o cabeçalho "Lidos Rejeitados" mora ANTES da patente, longe da tabela
+// — o leitor de tela ouvia "Hoje 12 · 3". O bloco lê a árvore de acessibilidade DE VERDADE
+// (`locator.ariaSnapshot()`), nos quatro idiomas, e mede o que não pode mudar: o visual. CONTROLE: o
+// instrumento enxerga o defeito — o texto de antes ("12 · 1") NÃO pode estar na árvore, e a frase está.
+// 0 pixel: a frase `sr-only` não tem caixa — tirá-la do DOM não muda a geometria de nenhuma linha.
+{
+  const onde = `histórico/números das linhas (${MOTOR})`;
+  const FRASES = {
+    pt: ['Hoje 12 lidos, 1 rejeitado', 'Semana 17 lidos, 4 rejeitados', 'Mês 17 lidos, 4 rejeitados', 'Total 40 lidos, 9 rejeitados'],
+    en: ['Today 12 read, 1 rejected', 'Week 17 read, 4 rejected', 'Month 17 read, 4 rejected', 'Total 40 read, 9 rejected'],
+    es: ['Hoy 12 leídas, 1 rechazada', 'Semana 17 leídas, 4 rechazadas', 'Mes 17 leídas, 4 rechazadas', 'Total 40 leídas, 9 rechazadas'],
+    fr: ['Aujourd’hui 12 lues, 1 rejetée', 'Semaine 17 lues, 4 rejetées', 'Mois 17 lues, 4 rejetées', 'Total 40 lues, 9 rejetées'],
+  };
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  await page.addInitScript(() => {
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    const k = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+    const ontem = new Date(d); ontem.setDate(d.getDate() - 1);
+    // Hoje 12 · 1, ontem 5 · 3 (a semana e o mês somam 17 · 4) e o total 40 · 9: o 1 cai nos DOIS plurais.
+    const h = { _total: { read: 40, rejected: 9 } }; h[k(d)] = { read: 12, rejected: 1 }; h[k(ontem)] = { read: 5, rejected: 3 };
+    localStorage.setItem('waze_places_history', JSON.stringify(h));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+  });
+  await page.goto(BASE, { waitUntil: 'load' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+  for (const lang of LINGUAS) {
+    await page.evaluate((lg) => {
+      aplicarIdioma(lg);
+      document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.history = null;
+      openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+    }, lang);
+    await esperarOuExplodir(page, () => document.querySelectorAll('#historyBody > div.flex.justify-between').length === 4, `as 4 linhas do Histórico (${lang})`);
+    const snap = await page.locator('#filtersPanelHistory').ariaSnapshot();
+    const id = `${onde}/${lang}`;
+    for (const frase of FRASES[lang]) checa(snap.includes(frase), `${id}: a árvore de acessibilidade não diz "${frase}"`, snap.split('\n').filter((l) => /\d/.test(l)).join(' | ').slice(0, 260));
+    // CONTROLE: o defeito de antes — "12 · 1" sem rótulo — não pode estar na árvore (se estivesse, a frase não escondeu os números).
+    checa(!/\d+ · \d+/.test(snap), `${id}: os números sem rótulo ("12 · 1") seguem na árvore de acessibilidade`, snap.split('\n').filter((l) => / · /.test(l)).join(' | ').slice(0, 200));
+    // A TELA segue com os números e o ponto médio: eles só saíram da árvore (`aria-hidden`).
+    const tela = await page.evaluate(() => [...document.querySelectorAll('#historyBody > div.flex.justify-between')].map((l) => ({
+      visivel: [...l.querySelectorAll('[aria-hidden="true"]')].map((e) => e.textContent).join('|'),
+      sr: (l.querySelector('.sr-only') || {}).textContent || null,
+      pos: l.querySelector('.sr-only') ? getComputedStyle(l.querySelector('.sr-only')).position : null })));
+    checa(JSON.stringify(tela.map((l) => l.visivel)) === JSON.stringify(['12 · 1', '17 · 4', '17 · 4', '40 · 9']), `${id}: os números da tela mudaram`, JSON.stringify(tela.map((l) => l.visivel)));
+    checa(tela.every((l) => l.sr && l.pos === 'absolute'), `${id}: a frase não é \`sr-only\` (sem caixa)`, JSON.stringify(tela));
+    // 0 pixel: a geometria de cada linha com a frase é a MESMA de cada linha sem ela.
+    const geo = await page.evaluate(() => {
+      const medir = () => [...document.querySelectorAll('#historyBody > div.flex.justify-between')].map((l) => [...l.querySelectorAll(':scope > span, span.text-emerald-700, span.text-rose-600')]
+        .filter((e) => !e.classList.contains('sr-only')).map((e) => { const q = e.getBoundingClientRect(); return [q.left, q.top, q.width, q.height].map((v) => Math.round(v * 100) / 100); }));
+      const com = JSON.stringify(medir());
+      const tirados = [...document.querySelectorAll('#historyBody > div.flex.justify-between .sr-only')].map((e) => [e, e.parentNode, e.nextSibling]);
+      tirados.forEach(([e]) => e.remove());
+      const sem = JSON.stringify(medir());
+      tirados.forEach(([e, pai, irmao]) => pai.insertBefore(e, irmao));
+      return { igual: com === sem, n: tirados.length };
+    });
+    checa(geo.n === 4 && geo.igual, `${id}: a frase \`sr-only\` mexeu na geometria das linhas (o visual não é o mesmo)`, JSON.stringify(geo));
+    await page.evaluate(() => closeModal('filtersModal'));
+  }
+  checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 // ── Foto de perfil: quando ela falha, some — nunca vira ícone de quebrado ──
 //
 // O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a

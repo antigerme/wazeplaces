@@ -455,7 +455,7 @@ function montarPainelComFoco({ autores }) {
     esquecerAutor() {}, alternarAutoDoAutor() {},
     esquecerAutorDaLista: (id) => { estado.esquecidos.push(id); },
   };
-  const api = montar(['chaveDoFoco', 'devolverFocoAoPainel', 'renderAutores', 'renderHistory'], deps,
+  const api = montar(['chaveDoFoco', 'devolverFocoAoPainel', 'renderAutores', 'fraseDosLidosERejeitados', 'renderHistory'], deps,
     ['renderAutores', 'renderHistory'], 'let autoresExpandido = false;');
   const achar = (raizId, pred) => dom.document.getElementById(raizId).filhos.find(pred);
   return { ...api, dom, estado, achar };

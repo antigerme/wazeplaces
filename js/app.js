@@ -21819,6 +21819,17 @@ function devolverFocoAoPainel(raiz, chave) {
     if (alvo) alvo.focus({ preventScroll: true });
 }
 
+// O que os dois números de uma linha do Histórico DIZEM — "12 lidos, 3 rejeitados" —, pra quem não vê
+// a cor: o verde e o rosa eram tudo que separava um do outro, e o cabeçalho "Lidos Rejeitados" mora
+// longe da tabela, antes da patente (R21-7-04). Os números são os da tela, crus; o plural é por chave
+// (1 é o caso comum no começo da semana e do mês, e "1 lidos" é o app errando em voz alta).
+function fraseDosLidosERejeitados(lidos, rejeitados) {
+    return t('stats.history.par', {
+        lidos: t(lidos === 1 ? 'stats.history.lidosUm' : 'stats.history.lidos', { n: lidos }),
+        rejeitados: t(rejeitados === 1 ? 'stats.history.rejeitadosUm' : 'stats.history.rejeitados', { n: rejeitados }),
+    });
+}
+
 function renderHistory() {
     const el = document.getElementById('historyBody');
     if (!el) return;
@@ -21831,13 +21842,16 @@ function renderHistory() {
     // Medido no mockup: como as trancadas mostram nome e ícone, "0 de 16" lê como
     // "eis o que dá pra ganhar", não como parede de cadeados. É a tela que um
     // editor novo vê no primeiro minuto, e ela não pode ser um vazio.
+    // Os números da tela ficam ESCONDIDOS do leitor de tela (`aria-hidden`) e a frase `sr-only` fala por
+    // eles: "12 · 3" sem rótulo não diz qual é qual. `sr-only` não tem caixa: o visual não muda (R21-7-04).
     el.innerHTML = htmlPatente() + (vazio
         ? `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`
         : rows.map(([k, v]) =>
             `<div class="flex justify-between items-baseline text-sm py-0.5">` +
             `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
-            `<span class="tnum font-medium"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
-            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></div>`
+            `<span class="tnum font-medium"><span class="sr-only">${escapeHtml(fraseDosLidosERejeitados(v.read, v.rejected))}</span>` +
+            `<span aria-hidden="true"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
+            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></span></div>`
         ).join(''));
     // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
     // convite pra uma imagem em branco.
