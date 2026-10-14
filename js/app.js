@@ -12102,8 +12102,14 @@ function derrubarSessao(errorKey, { depois } = {}) {
             ]);
             if (epoca !== epocaDaSessao) return;
             // Os avisos de uma vez que a queda tirou da tela voltam, se a conta é a mesma
-            // (R16-8-04): com OUTRA, a troca de conta esvaziou a guarda.
-            restaurarAvisosDeUmaVezDaQueda();
+            // (R16-8-04): com OUTRA, a troca de conta esvaziou a guarda. Mas só quando a conta
+            // de quem entrou é CONHECIDA (o login a disse, ou o perfil chegou): com o perfil
+            // acima do teto de espera e a extensão que não repassa a `conta`, a troca ainda não
+            // tinha esvaziado a guarda, e a "Rejeição enviada ao Waze em seu nome…" da conta
+            // anterior saía por ~2,6 s sobre a fila da nova (R17-1-03, MEDIDO). Sem conta nem
+            // perfil, não volta: a marca de visto já foi desfeita e o próximo ✕/✓ mostra.
+            if (contaDestaSessaoConhecida()) restaurarAvisosDeUmaVezDaQueda();
+            else avisosDaQueda = null;
             if (haviaFilaNaQueda && filaDaQueda !== null && epocaDaFilaReal() === filaDaQueda) showToast(t('toast.sessionRenewed'), 'info');
             return;
         }
@@ -21649,6 +21655,16 @@ function contaConfirmada() {
         const aqui = contaConfirmadaNestaAba;
         return c.s === s || !!(aqui && aqui.id === String(vivo) && aqui.s === s);
     } catch (e) { return false; }
+}
+
+// A conta da sessão que esta aba tem AGORA é conhecida? O login a disse
+// (`conhecerContaDoLogin`) ou o perfil chegou (`aoConhecerConta`), e ambos gravam a conta
+// com a marca da sessão de agora. A confirmada da queda leva a marca da sessão que CAIU, então
+// só vale depois da conta da sessão renovada (R17-1-03).
+function contaDestaSessaoConhecida() {
+    const c = contaConfirmadaNestaAba;
+    const s = marcaDestaAba();
+    return !!(c && s && c.s === s);
 }
 
 // O login disse de quem é a sessão (o `testar-cookies`, o resgate do

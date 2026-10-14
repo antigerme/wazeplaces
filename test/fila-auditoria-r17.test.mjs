@@ -568,3 +568,64 @@ test('R17-7-03 (estrutura): a rolagem vem depois do `abrirModalNaAba` e antes de
   assert.ok(iAba > 0 && iRola > iAba, 'a rolagem não vem depois da troca de aba');
   assert.ok(!/\bawait\b/.test(corpo.slice(iAba, iRola)), 'um `await` entre a troca de aba e a rolagem faz a pessoa ver a aba errada');
 });
+
+// ═══ R17-1-03 · os avisos de uma vez devolvidos × a conta de quem entrou ═══════
+// A renovação espera o perfil até `AVISO_RENOVADA_ESPERA_PERFIL_MS` e então restaurava os avisos
+// devolvidos na queda. Com a extensão que não repassa a `conta` e o perfil acima desse teto, a troca de
+// conta ainda não tinha esvaziado a guarda: a "Rejeição enviada ao Waze em seu nome…" da conta
+// anterior saía sobre a fila da nova. Agora só restaura com a conta da sessão de agora CONHECIDA.
+const TOKEN = 'waze_session_token';
+const CONTA_KEY = new Function(`return ${/^const CONTA_KEY = ([^;]+);/m.exec(APP)[1]};`)();
+const marcaDe = new Function(fatiar('marcaDaSessao') + '\nreturn marcaDaSessao;')();
+function renovacao({ contaConhecida }) {
+  const dados = new Map([[TOKEN, 'TOK-A'], [CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('TOK-A') })]]);
+  const safeLS = { get: (k) => (dados.has(k) ? dados.get(k) : null), set: (k, v) => dados.set(k, String(v)), remove: (k) => dados.delete(k) };
+  const tela = dialogoDoSair();
+  const chamou = [];
+  const API = { sessionToken: 'TOK-A', temSessaoNaMemoria() { return !!this.sessionToken; },
+    setSession(t) { this.sessionToken = t; if (t) safeLS.set(TOKEN, t); else safeLS.remove(TOKEN); }, soltarSessao() { this.sessionToken = null; } };
+  const deps = {
+    safeLS, CONTA_KEY, API, document: { ...tela.document, querySelector: () => null },
+    AppState: { authenticated: true, profile: { id: 111 }, pendingAction: null, fetchEpoch: 1, queue: [P(1)], currentPlace: P(1), _profilePromise: null,
+      preferences: { consequenciaVista: { reject: true }, undoGateSeen: true, dicaDesfazerVista: true } },
+    epocaDaSessao: 1, quedaAnunciada: false, Treino: { ativo: false }, sessaoCaiuNestaPagina: false, extPerguntando: false,
+    contaConfirmadaNestaAba: null, AVISO_RENOVADA_ESPERA_PERFIL_MS: 5,
+    pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),
+    carregarFilaDeSaida: () => [], reivindicadoPorOutraAba: () => false, t: (k) => k, avisarOutrasAbasDaQueda: () => {},
+    filaRealComDevolvidos: () => [P(1)],
+    avisosDeUmaVezNaTela: [], avisosAdiados: null, avisosDaQueda: null, avisosAdiadosPedido: false,
+    savePreferences() {}, pedirAvisosAdiados() { chamou.push('pediu'); }, showToast() { chamou.push('toast'); }, rebuscarDepoisDeFalha() {},
+    // A renovação deu certo: o token novo entra, e a conta só é "conhecida" se o teste a diz (o login ou o perfil).
+    entrarPelaExtensao: async () => {
+      API.setSession('TOK-B');
+      deps.AppState.authenticated = true;   // a renovação religa a sessão (o `showMainScreen`)
+      if (contaConhecida) deps.contaConfirmadaNestaAba = { id: '111', s: marcaDe('TOK-B') };
+      return true;
+    },
+  };
+  const h = montar(['derrubarSessao', 'lembrarAContaDaQueda', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao',
+    'soltarOsLotesDaSessaoQueAcabou', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido', 'lembrarAContaDoAparelho',
+    'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho', 'devolverAvisosDeUmaVezDaTela', 'adiarAvisoDeUmaVez', 'guardarAvisoDaQueda',
+    'guardarAvisosDeUmaVezDaQueda', 'restaurarAvisosDeUmaVezDaQueda', 'contaDestaSessaoConhecida', 'dispensarAvisosDaSessao'], deps);
+  deps.avisosDeUmaVezNaTela = [{ qual: 'consequencia', tipo: 'reject', punho: { naTela: () => true, remover() {} }, epoca: 1 }];
+  return { h, deps, chamou };
+}
+
+test('R17-1-03: a renovação com a conta de quem entrou DESCONHECIDA (sem `conta` na ponte e o perfil acima do teto) NÃO devolve os avisos — a marca de visto já foi desfeita', async () => {
+  const m = renovacao({ contaConhecida: false });
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  await ateQue(() => m.deps.API.sessionToken === 'TOK-B', 'a renovação não entrou');
+  await new Promise((ok) => setTimeout(ok, 40));                    // passa o teto de espera do perfil (5 ms aqui)
+  assert.equal(m.deps.avisosAdiados, null,
+    'DEFEITO: os avisos da conta anterior foram devolvidos à sessão renovada antes de se saber de quem ela é (R17-1-03)');
+  assert.ok(!m.chamou.includes('pediu'), 'os avisos pendentes foram pedidos com a conta desconhecida');
+  assert.equal(m.deps.avisosDaQueda, null, 'a guarda ficou na memória, inerte, em vez de ser descartada');
+  assert.equal(m.deps.AppState.preferences.consequenciaVista.reject, undefined, 'PRÉ-CONDIÇÃO: a marca de visto devia estar desfeita (o próximo ✕ mostra)');
+});
+
+test('R17-1-03: CONTROLE — com a conta conhecida (a ponte a repassou, ou o perfil chegou) a renovação devolve os avisos, uma vez', async () => {
+  const m = renovacao({ contaConhecida: true });
+  m.h.derrubarSessao('srv.err.sessionExpired');
+  await ateQue(() => m.chamou.includes('pediu'), 'os avisos não foram devolvidos com a conta conhecida');
+  assert.ok(m.deps.avisosAdiados && m.deps.avisosAdiados.consequencia.has('reject'), 'CONTROLE: o aviso da consequência não voltou a pendente');
+});

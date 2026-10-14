@@ -637,7 +637,7 @@ test('R16-8-04: a pendência do treino (`avisosAdiados` da época que caiu) atra
   const q = fatiar('derrubarSessao');
   assert.match(q, /if \(typeof depois !== 'function'\) guardarAvisosDeUmaVezDaQueda\(epocaDaSessao - 1\);\s*else avisosDaQueda = null;\s*dispensarAvisosDaSessao\(\);/,
     'a queda não guarda os avisos antes de dispensá-los (ou guarda na recusa do portão, que é terminal)');
-  assert.match(q, /restaurarAvisosDeUmaVezDaQueda\(\);\s*if \(haviaFilaNaQueda/, 'a renovação com sucesso não restaura os avisos');
+  assert.match(q, /if \(contaDestaSessaoConhecida\(\)\) restaurarAvisosDeUmaVezDaQueda\(\);\s*else avisosDaQueda = null;\s*if \(haviaFilaNaQueda/, 'a renovação com sucesso não restaura os avisos (só com a conta de quem entrou conhecida, R17-1-03)');
   assert.match(fatiar('esquecerOutraConta'), /avisosDaQueda = null;/, 'a troca de conta não esvazia a guarda dos avisos da conta anterior');
 });
 
