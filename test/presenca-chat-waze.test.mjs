@@ -77,7 +77,7 @@ test('presenca-waze: só a lista → UMA chamada ao listOnlineEditors, do servid
 });
 
 test('presenca-waze: a região escolhe o servidor (a presença é separada por servidor)', async () => {
-  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], ['xx', 'row-Descartes'], ['constructor', 'row-Descartes']]) {
+  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], [undefined, 'row-Descartes']]) {
     const { pedidos } = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
       () => dispatch('presenca-waze', { ...S.dados, region, caixa: [-1, -1, 1, 1] }, S.ctx));
     assert.equal(pedidos[0].url, `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/listOnlineEditors`, region);

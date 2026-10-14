@@ -1181,12 +1181,16 @@ export function makeSessions({ store, keyBytes }) {
 // ─────────────────────────────────────────────────────────────────────────
 
 function requireRegion(data) {
+  // Ausente (ou vazia) segue sendo `row`, como sempre foi. Região que VEIO e não
+  // é nenhuma das três é 400: cair em `row` calado mandava a decisão (rejeitar,
+  // marcar lido, excluir foto) ao servidor errado — que responde "não encontrado",
+  // e o app lê isso como "já tratado" e conta como feito (R17-6-A2).
   let region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
   // MIGRACAO: regiao-world — `world` era a 4ª opção do filtro e sempre foi o
   // servidor da América do Norte com outro nome (ver `WAZE_REGIONS`).
   if (region === 'world') region = 'na';
   // `hasOwn`: `constructor` e cia. são "verdadeiros" num objeto comum.
-  if (!Object.hasOwn(WAZE_REGIONS, region)) region = 'row';
+  if (!Object.hasOwn(WAZE_REGIONS, region)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
   return region;
 }
 
@@ -1362,9 +1366,16 @@ export const pontoDeGeometria = (geom) => {
 // Vem null quando não há coordenada nenhuma: o card então não monta o slide,
 // em vez de desenhar um mapa do oceano no ponto (0, 0).
 export const montarMapa = (venue, changes) => {
+  // O ponto de entrada/saída: `[lat, lon]`, ou `null` quando o item não traz
+  // ponto nenhum (acontece, e o card só não desenha esse marcador). Ponto que
+  // VEIO mas não é um par de números (`[5]`, `[5, null]`, texto) é a forma
+  // quebrada do Waze: resposta inesperada, não um marcador em `undefined`
+  // (antes: `toFixed` de `undefined`, "Erro interno"; R17-6-A1).
   const pontoDoEEP = (item) => {
     const c = item && item.point && item.point.coordinates;
-    return Array.isArray(c) && typeof c[0] === 'number' ? [c[1], c[0]] : null;
+    if (c === undefined || c === null) return null;
+    if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) respostaInesperadaDoWaze();
+    return [c[1], c[0]];
   };
   const centro = pontoDeGeometria(venue && venue.geometry);
   const geo = (changes || []).find((c) => c.field === 'geometry');
@@ -1390,9 +1401,11 @@ export const montarMapa = (venue, changes) => {
   };
   // Os que já existem no mapa hoje. Se o pedido mexe neles, o delta abaixo
   // repõe os mesmos como "saindo" — e é justamente o par que conta a história.
-  if (!eep) for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'atual');
+  // `listaDoWaze`: `entryExitPoints` que veio como número/objeto não é iterável.
+  const eepsDoLocal = listaDoWaze(venue && venue.entryExitPoints, { objetos: false });
+  if (!eep) for (const it of eepsDoLocal) pushEntrada(it, 'atual');
   else {
-    for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'saindo');
+    for (const it of eepsDoLocal) pushEntrada(it, 'saindo');
     for (const it of (eep.delta && eep.delta.add) || []) pushEntrada(it, 'nova');
   }
 
@@ -1888,12 +1901,57 @@ function inteiroDoPais(bruto) {
     : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
 }
 
+// Os outros campos da busca, na mesma régua do país (R17-6-A2). Todos seguem
+// opcionais: AUSENTE (`undefined`/`null`) é "sem filtro", como sempre foi — e o
+// `''` também, nos dois ids, porque é o que o select "todos" do app carrega. O que
+// VEIO e não presta é 400 (`srv.err.badRequest`), antes do Waze: ler 'abc' como
+// "sem estado" entregava a fila do PAÍS inteiro sem aviso, e `page: 1e12` ia ao
+// Waze como veio.
+const PAGINA_MAX = 1000;          // 500 pedidos por página: meio milhão, muito além de qualquer fila
+const CATEGORIAS_MAX = 200;       // o Waze tem pouco mais de uma centena de categorias
+const CATEGORIA_TAM_MAX = 80;     // o enum mais longo tem ~40 caracteres
+
+// `stateId` / `managedAreaId`: inteiro positivo (número ou texto só de dígitos) ou `null`.
+function idOpcionalDaBusca(bruto) {
+  if (bruto === undefined || bruto === null || bruto === '') return null;
+  const n = inteiroDoPais(bruto);
+  if (!(Number.isSafeInteger(n) && n > 0)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return n;
+}
+
+function paginaDaBusca(bruto) {
+  if (bruto === undefined || bruto === null || bruto === '') return 1;
+  const n = inteiroDoPais(bruto);
+  if (!(Number.isSafeInteger(n) && n >= 1 && n <= PAGINA_MAX)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return n;
+}
+
+// `bbox` = [lonMin, latMin, lonMax, latMax]: quatro números finitos, lat ±90 e lon ±180.
+function caixaDaBusca(bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  const ok = Array.isArray(bruto) && bruto.length === 4
+    && bruto.every((v) => typeof v === 'number' && Number.isFinite(v))
+    && Math.abs(bruto[0]) <= 180 && Math.abs(bruto[2]) <= 180
+    && Math.abs(bruto[1]) <= 90 && Math.abs(bruto[3]) <= 90;
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto;
+}
+
+// `categories`: lista de textos (lista vazia = sem filtro, como sempre), com teto.
+function categoriasDaBusca(bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  const ok = Array.isArray(bruto) && bruto.length <= CATEGORIAS_MAX
+    && bruto.every((c) => typeof c === 'string' && c.length > 0 && c.length <= CATEGORIA_TAM_MAX);
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto.length > 0 ? bruto : null;
+}
+
 async function handleBuscarPlaces(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  const page = data.page ? Math.max(1, parseInt(data.page, 10) || 1) : 1;
+  const page = paginaDaBusca(data.page);
   // O país, quando vem, é um inteiro positivo (a mesma régua do `lista-estados`):
   // o `parseInt(...) || 30` lia 'abc', 0, '30abc', `true` e `[]` como o Brasil e
   // '1e400' como 1, e o -5 seguia pro Waze — a fila do Brasil entregue por um
@@ -1904,11 +1962,11 @@ async function handleBuscarPlaces(data, { sessions }) {
     countryId = inteiroDoPais(data.countryId);
     if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   }
-  const stateId = data.stateId !== undefined && data.stateId !== '' && data.stateId !== null ? parseInt(data.stateId, 10) : null;
-  const managedAreaId = data.managedAreaId !== undefined && data.managedAreaId !== '' && data.managedAreaId !== null ? parseInt(data.managedAreaId, 10) : null;
-  const bbox = Array.isArray(data.bbox) && data.bbox.length === 4 ? data.bbox : null;
+  const stateId = idOpcionalDaBusca(data.stateId);
+  const managedAreaId = idOpcionalDaBusca(data.managedAreaId);
+  const bbox = caixaDaBusca(data.bbox);
   const filterTypes = Array.isArray(data.types) && data.types.length > 0 ? data.types : null;
-  const filterCategories = Array.isArray(data.categories) && data.categories.length > 0 ? data.categories : null;
+  const filterCategories = categoriasDaBusca(data.categories);
   const residential = data.residential !== undefined ? !!data.residential : null;
   const unreadOnly = data.unreadOnly !== undefined ? !!data.unreadOnly : true;
   const orderBy = ORDENS_DA_BUSCA.has(data.orderBy) ? data.orderBy : 'SORTING_UPDATE_TIME_DESC';
@@ -2059,7 +2117,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   const brandLookup = Object.create(null);
   const categoryBrands = rd?.venues?.categoryBrands || {};
   for (const cat of Object.keys(categoryBrands)) {
-    for (const b of categoryBrands[cat] || []) {
+    for (const b of listaDoWaze(categoryBrands[cat], { objetos: false })) {
       const k = String(b).trim().toLowerCase();
       if (k) brandLookup[k] = true;
     }
@@ -2096,11 +2154,17 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   let blocked = 0;
   for (const venue of listaDoWaze(rd?.venues?.objects)) {
     if (!Array.isArray(venue.venueUpdateRequests) || venue.venueUpdateRequests.length === 0) continue;
+    // Um `null` (ou número) no meio da lista de pedidos estourava `ur.isRead` /
+    // `ur.createdBy` e derrubava a fila INTEIRA do país com "Erro interno" — o
+    // mesmo defeito do `venues.objects: [null]` uma lista acima (R17-6-A1).
+    listaDoWaze(venue.venueUpdateRequests);
     // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = sem permissão.
     // Antes descartávamos o venue aqui. Agora seguimos o laço só pra CONTAR
     // (blocked) os PURs que passariam nos demais filtros — é o que alimenta o
     // "de N na região" (D13). Nenhum card é emitido pra venue não-editável.
-    const editable = !(venue.permissions !== undefined && venue.permissions >= 0);
+    // Só um NÚMERO não-negativo bloqueia: campo ausente (ou `null`, que em JS
+    // `null >= 0` lê como 0) entra, como diz o contrato do filtro (R17-6-A3).
+    const editable = !(typeof venue.permissions === 'number' && venue.permissions >= 0);
     if (!editable) {
       // Só contagem: aplica os MESMOS filtros de leitura/tipo pra que o número
       // seja comparável com places.length, e pula o trabalho caro (endereço,
@@ -2179,7 +2243,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // `creatorName`). Conta apagada vem do Waze como "Inactive User", e sai
     // assim mesmo: é o que o WME mostra, e traduzir seria inventar identidade.
     const imageAuthors = {};
-    for (const img of venue.images || []) {
+    for (const img of listaDoWaze(venue.images, { objetos: false })) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
       if (img.approved === true) approvedImageIds.push(img.id);
@@ -2720,8 +2784,15 @@ async function lerLocalNoWaze(data, cookieHeader, csrf, region, sessions) {
   let atual;
   try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
   if (!atual || typeof atual !== 'object') return { erroParse: true };
-  const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
+  // Lista que veio como número/objeto (ou `images` do local assim) é a mesma
+  // forma quebrada do JSON ilegível — `erroParse`, que o `excluir-foto` devolve
+  // como `respostaInesperadaDoWaze()` e o `preparar` como "sem lista pronta".
+  // Antes estourava no `.find`/`.filter` e saía como "Erro interno" (R17-3-03).
+  const objetos = atual.venues && atual.venues.objects;
+  if (objetos && !Array.isArray(objetos)) return { erroParse: true };
+  const venue = (objetos || []).find((v) => v && v.id === venueID);
   if (!venue) return { semLocal: true };
+  if (venue.images && !Array.isArray(venue.images)) return { erroParse: true };
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
   return { venue: { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) }, lidoEm };

@@ -94,3 +94,148 @@ test('R16-6-08: lista quebrada por dentro em 200 do Waze é "resposta inesperada
     }
   }
 });
+
+// ═══ R17-6-A1 / R17-3-03 · o RESTO do `buildPlacesFromSearch` e a releitura do local ═══
+// O lote 20 cobriu as 9 listas do `listaDoWaze`; ficaram de fora as de dentro do
+// local — os pedidos (um `null` no meio derrubava a fila INTEIRA do país), as marcas
+// da categoria, as fotos e os pontos de entrada —, e a releitura do `excluir-foto`.
+const MAIS = {
+  'buscar-places': () => {
+    const c = BASES['buscar-places']();
+    const v = c.venues.objects[0];
+    v.entryExitPoints = [{ name: 'e', point: { type: 'Point', coordinates: [1.0001, 2.0001] } }];
+    v.venueUpdateRequests.push({ id: 'u2', type: 'REQUEST', subType: 'UPDATE', isRead: false,
+      changedVenue: { entryExitPoints: [{ name: 'e2', point: { type: 'Point', coordinates: [1.002, 2.002] } }] } });
+    c.venues.categoryBrands = { GAS_STATION: ['Shell'] };
+    return c;
+  },
+};
+const mudarMais = (caminho, valor, base = MAIS['buscar-places']) => {
+  const c = base();
+  let alvo = c;
+  for (const k of caminho.slice(0, -1)) alvo = alvo[k];
+  alvo[caminho[caminho.length - 1]] = valor;
+  return c;
+};
+
+test('R17-6-A1: CONTROLE — a resposta boa com pontos de entrada, marcas e fotos continua 200 e desenha o mapa', async () => {
+  const r = await rodar('buscar-places', MAIS['buscar-places']());
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.places.length, 2);
+  assert.equal(r.body.places[0].mapa.entradas.length, 1, 'o ponto de entrada sumiu do mapa');
+  // Ausente, `null`, `0`, `''` e `[]` seguem sendo "sem nada" nas listas de dentro do local.
+  for (const v of [undefined, null, 0, '', false, []]) {
+    for (const caminho of [['venues', 'objects', 0, 'images'], ['venues', 'objects', 0, 'entryExitPoints'], ['venues', 'categoryBrands', 'GAS_STATION']]) {
+      const q = await rodar('buscar-places', mudarMais(caminho, v));
+      assert.equal(q.status, 200, `${caminho.join('.')} = ${JSON.stringify(v)}: ${JSON.stringify(q.body)}`);
+    }
+  }
+  // Um item de lista que não é objeto, onde o laço já o tolerava, segue tolerado (foto/ponto vazio).
+  for (const caminho of [['venues', 'objects', 0, 'images'], ['venues', 'objects', 0, 'entryExitPoints']]) {
+    assert.equal((await rodar('buscar-places', mudarMais(caminho, [null]))).status, 200, caminho.join('.'));
+  }
+  // Local SEM ponto nenhum na entrada (`point` ausente) não é forma quebrada: só não desenha o marcador.
+  const semPonto = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], [{ name: 'sem ponto' }]));
+  assert.equal(semPonto.status, 200);
+  assert.equal(semPonto.body.places[0].mapa.entradas.length, 0);
+});
+
+const QUEBRADAS_DE_DENTRO = [
+  [['venues', 'objects', 0, 'venueUpdateRequests'], [[null], [5], ['x'], [{ id: 'u1', type: 'VENUE' }, null]]],
+  [['venues', 'categoryBrands'], [{ GAS_STATION: 5 }, { GAS_STATION: true }, { GAS_STATION: {} }, { GAS_STATION: 'x' }, [1]]],
+  [['venues', 'objects', 0, 'images'], [5, true, {}, 'x']],
+  [['venues', 'objects', 0, 'entryExitPoints'], [5, true, {}, 'x']],
+  [['venues', 'objects', 0, 'entryExitPoints'], [[{ point: { coordinates: [5] } }], [{ point: { coordinates: [5, null] } }],
+    [{ point: { coordinates: ['a', 'b'] } }], [{ point: { coordinates: 7 } }], [{ point: { coordinates: {} } }]]],
+  [['venues', 'objects', 0, 'venueUpdateRequests', 1, 'changedVenue', 'entryExitPoints'], [[{ point: { coordinates: [5] } }]]],
+];
+
+test('R17-6-A1: forma quebrada POR DENTRO do local é "resposta inesperada" (500 unknown), não "Erro interno"', async () => {
+  for (const [caminho, valores] of QUEBRADAS_DE_DENTRO) {
+    for (const v of valores) {
+      const r = await rodar('buscar-places', mudarMais(caminho, v));
+      const quem = `${caminho.join('.')} = ${JSON.stringify(v)}`;
+      assert.equal(r.status, 500, `${quem}: ${r.status}`);
+      assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `DEFEITO: ${quem} saiu como ${JSON.stringify(r.body)}`);
+      assert.equal(r.body.errorCategory, 'unknown', quem);
+    }
+  }
+});
+
+test('R17-6-A1: o local SEM permissão também passa pela conferência dos pedidos (a contagem do "de N na região")', async () => {
+  const c = mudarMais(['venues', 'objects', 0, 'permissions'], 0);
+  const ok = await rodar('buscar-places', c);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.blocked, 2, 'CONTROLE: os 2 pedidos do local bloqueado contam');
+  const ruim = mudarMais(['venues', 'objects', 0, 'venueUpdateRequests'], [null], () => c);
+  const r = await rodar('buscar-places', ruim);
+  assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', JSON.stringify(r.body));
+});
+
+// ─── A releitura do local (`excluir-foto`): `venues.objects` e `images` como o resto ───
+async function excluir(corpoDoWaze, extra = {}) {
+  const s = await sessaoDeTeste(COOKIES);
+  const antes = new Set(s.store.mem.keys()); // a sessão; o resto que aparecer é lista do local
+  const original = globalThis.fetch;
+  const chamadas = [];
+  globalThis.fetch = async (url, init = {}) => {
+    chamadas.push({ url: String(url), method: init.method || 'GET' });
+    return new Response(JSON.stringify(init.method === 'POST' ? { status: 0 } : corpoDoWaze), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const r = await dispatch('excluir-foto', { ...s.dados, region: 'row', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6, ...extra }, s.ctx);
+    return { r, chamadas, puts: [...s.store.mem.keys()].filter((k) => !antes.has(k)) };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('R17-3-03: `excluir-foto` — leitura do local com a forma quebrada é "resposta inesperada", e nada é escrito', async () => {
+  const boa = await excluir({ venues: { objects: [{ id: 'v1', images: [{ id: 'i1', approved: true }, { id: 'i2', approved: true }] }] } });
+  assert.equal(boa.r.status, 200, `CONTROLE: ${JSON.stringify(boa.r.body)}`);
+  assert.ok(boa.chamadas.some((c) => c.method === 'POST'), 'CONTROLE: a foto boa devia ser escrita');
+  const tolera = await excluir({ venues: { objects: [{ id: 'v1', images: [null, { id: 'i1', approved: true }] }] } });
+  assert.equal(tolera.r.status, 200, 'CONTROLE: elemento vazio dentro de images segue tolerado');
+  for (const [nome, corpo] of [
+    ['venues.objects = 5', { venues: { objects: 5 } }],
+    ['venues.objects = {}', { venues: { objects: {} } }],
+    ['venues.objects = "x"', { venues: { objects: 'x' } }],
+    ['images = 5', { venues: { objects: [{ id: 'v1', images: 5 }] } }],
+    ['images = {}', { venues: { objects: [{ id: 'v1', images: {} }] } }],
+    ['images = true', { venues: { objects: [{ id: 'v1', images: true }] } }],
+  ]) {
+    const { r, chamadas, puts } = await excluir(corpo);
+    assert.equal(r.status, 500, nome);
+    assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `DEFEITO: ${nome} saiu como ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.errorCategory, 'unknown', nome);
+    assert.ok(chamadas.every((c) => c.method === 'GET'), `${nome}: escreveu no Waze`);
+    assert.deepEqual(puts, [], `${nome}: gravou no KV`);
+  }
+  // Local que não aparece na lista (ou lista vazia/ausente) segue sendo 404 "o local sumiu".
+  for (const corpo of [{ venues: { objects: [] } }, { venues: {} }, {}]) {
+    const g = await excluir(corpo);
+    assert.equal(g.r.status, 404, JSON.stringify(corpo));
+    assert.equal(g.r.body.errorKey, 'srv.err.venueGone');
+  }
+});
+
+test('R17-3-03: `excluir-foto` preparar — a mesma forma quebrada não grava lista nenhuma e a rota não vira 500', async () => {
+  const rodarPreparar = async (corpo) => {
+    const s = await sessaoDeTeste(COOKIES);
+    const antes = new Set(s.store.mem.keys());
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify(corpo), { status: 200 });
+    try {
+      const r = await dispatch('excluir-foto', { ...s.dados, region: 'row', action: 'preparar', venueID: 'v1', imageID: 'i1', lat: -23.5, lon: -46.6, aquecimento: 'gesto-lote21-01' }, s.ctx);
+      return { r, puts: [...s.store.mem.keys()].filter((k) => !antes.has(k)) };
+    } finally { globalThis.fetch = original; }
+  };
+  const boa = await rodarPreparar({ venues: { objects: [{ id: 'v1', images: [{ id: 'i1', approved: true }] }] } });
+  assert.equal(boa.r.status, 200, `CONTROLE: ${JSON.stringify(boa.r.body)}`);
+  assert.equal(boa.puts.length, 1, 'CONTROLE: a lista do toque devia ser gravada');
+  for (const corpo of [{ venues: { objects: 5 } }, { venues: { objects: [{ id: 'v1', images: 5 }] } }]) {
+    const { r, puts } = await rodarPreparar(corpo);
+    assert.notEqual(r.body.errorKey, 'srv.err.internal', JSON.stringify(r.body));
+    assert.deepEqual(puts, [], 'gravou lista de uma leitura quebrada');
+  }
+});
