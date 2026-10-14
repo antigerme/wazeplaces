@@ -15560,8 +15560,18 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const aposBfcache = await page.evaluate(() => ({ auth: AppState.authenticated === true, card: !!document.querySelector('#cardStack .place-card'),
       entrada: !document.getElementById('authScreen').classList.contains('hidden'), pularGuarda: AppState.preferences.pularGuarda }));
     const destruiu = rede.slice(antes).filter((x) => x.nome === 'sessao' && x.acao === 'destroy').length;
+    // (d) o aviso `storage` do token saindo — o que o "Sair" de OUTRA aba faz chegar —, entregue ao ouvinte REAL da janela. Com o
+    // aparelho ilegível ele também não é "Sair" (o `aoSairEmOutraAba` lê duas chaves vazias e conclui que saiu); com o token ainda
+    // no aparelho (o contexto normal) não é, por definição. Um aviso que a página bloqueada nunca recebe de verdade (o `storage`
+    // não chega a quem não lê), mas que o guard do `aoSairEmOutraAba` existe pra aguentar.
+    const antesAviso = rede.length;
+    await page.evaluate(() => window.dispatchEvent(new StorageEvent('storage', { key: 'waze_session_token', oldValue: 'token-do-smoke-do-armazenamento', newValue: null })));
+    await dormir(600);
+    const aposAviso = await page.evaluate(() => ({ auth: AppState.authenticated === true, card: !!document.querySelector('#cardStack .place-card'),
+      entrada: !document.getElementById('authScreen').classList.contains('hidden') }));
+    const destruiuAviso = rede.slice(antesAviso).filter((x) => x.nome === 'sessao' && x.acao === 'destroy').length;
     await ctx.close();
-    return { acesso, aposBfcache, destruiu, listas, erros };
+    return { acesso, aposBfcache, destruiu, aposAviso, destruiuAviso, listas, erros };
   };
   const normal = await rodar(false);
   const bloq = await rodar(true);
@@ -15575,6 +15585,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(bloq.destruiu === 0, 'armazenamento/bfcache: o pageshow persistido mandou `sessao:destroy` com a sessão viva', String(bloq.destruiu));
   checa(bloq.aposBfcache.pularGuarda === true, 'armazenamento/bfcache: a releitura devolveu à fábrica a preferência desta sessão (o aparelho nem lê)', JSON.stringify(bloq.aposBfcache));
   checa(bloq.listas >= 1, 'armazenamento/presença: a volta do fundo com o armazenamento ILEGÍVEL nunca mais pede a lista', JSON.stringify(bloq));
+  checa(normal.aposAviso.auth && normal.aposAviso.card && normal.destruiuAviso === 0,
+    'armazenamento/CONTROLE: o aviso storage do token saindo, com o token AINDA no aparelho, não encerra a aba', JSON.stringify({ aposAviso: normal.aposAviso, destruiuAviso: normal.destruiuAviso }));
+  checa(bloq.aposAviso.auth && bloq.aposAviso.card && !bloq.aposAviso.entrada && bloq.destruiuAviso === 0,
+    'armazenamento/storage: o aviso do token saindo, com o armazenamento ILEGÍVEL, encerrou a sessão viva (o "Sair" de outra aba que não existe)', JSON.stringify({ aposAviso: bloq.aposAviso, destruiuAviso: bloq.destruiuAviso }));
   checa(normal.erros.length === 0 && bloq.erros.length === 0, 'armazenamento: erro de JS', normal.erros[0] || bloq.erros[0]);
 }
 
@@ -15631,6 +15645,10 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const comHost = await colar('Código: KMQ-XRT https://places.wazebrasil.com');
   checa(comHost.campo === 'KMQ-XRT' && comHost.impedido === true && claims.length === 0,
     'colar/CONTROLE: o código colado junto do host do link tem de entrar no campo como a tela o mostra, sem resgatar sozinho', JSON.stringify({ ...comHost, claims: claims.length }));
+  // E o formato em que o host de seis letras GANHAVA do código: sem hífen e sem algarismo (uns 18% dos códigos).
+  const semHifen = await colar('Código KMQXRT https://places.wazebrasil.com');
+  checa(semHifen.campo === 'KMQ-XRT' && semHifen.impedido === true && claims.length === 0,
+    'colar/host: o código SEM hífen e sem algarismo, colado junto do host do link, perdeu pro "PLA-CES" do host', JSON.stringify({ ...semHifen, claims: claims.length }));
   const aberto = await colar('olá');
   checa(aberto.impedido === false && claims.length === 0, 'colar/CONTROLE: o texto que não é código nem link foi impedido (ou resgatou)', JSON.stringify({ ...aberto, claims: claims.length }));
   await page.evaluate(() => { document.getElementById('pairCodeInput').value = ''; });
@@ -15657,7 +15675,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 {
   const FILA_CONT = [{ ...CARDS.FLAG, venueID: 'vCT1', updateRequestID: 'uCT1', imageUrls: [] }, { ...CARDS.FLAG, venueID: 'vCT2', updateRequestID: 'uCT2', imageUrls: [] }];
   const dia = (n) => { const d = new Date(Date.now() - n * 86400000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-  const caso = async (historia, placar, { decidir = false } = {}) => {
+  const caso = async (historia, placar, { decidir = false, stats = null } = {}) => {
     const marcados = [];
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
@@ -15697,7 +15715,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     }
     // O contador conta (|Δ| ≥ 2) ou pula: o texto só vale depois de ASSENTAR no número que o placar tem.
     await esperarNaPagina(page, () => document.getElementById('readCount').textContent.trim() === String(AppState.stats.read), 4000);
-    const tela = await page.evaluate(() => {
+    const tela = await page.evaluate((stub) => {
+      // `stats`: a 2ª camada — o que a LEITURA (`getHistoryStats`) deixasse passar chegando direto ao desenho do painel.
+      if (stub) getHistoryStats = () => stub;
       openFiltersModal();
       switchFilterTab('filtersTabHistory');
       const el = document.getElementById('historyBody');
@@ -15706,8 +15726,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         linhas: [...el.querySelectorAll('.tnum')].map((n) => n.textContent.replace(/\s+/g, ' ').trim()),
         elemento: !!el.querySelector('img, script, svg[onload]'),
         gravado: localStorage.getItem('waze_places_stats'),
+        historico: localStorage.getItem('waze_places_history'),
       };
-    });
+    }, stats);
     await ctx.close();
     return { ...tela, erros };
   };
@@ -15723,12 +15744,30 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(texto.lidos === '0', 'contagem/placar: o placar guardado com texto mostrou "Lidos ' + texto.lidos + '"');
   const html = await caso({ [dia(1)]: { read: 1, rejected: 1 }, _total: { read: '<img src=x alt=bad>', rejected: 2 } }, { read: 1, rejected: 1, skipped: 0 });
   checa(html.elemento === false && soNumeros(html), 'contagem/Histórico: um campo com HTML virou elemento do painel', JSON.stringify({ elemento: html.elemento, linhas: nm(html) }));
+  // A 2ª camada: o painel escreve ESCAPADO o que a leitura deixar passar (o stub entrega o HTML direto ao desenho). O CONTROLE é uma
+  // linha com números que só o stub tem ("41 · 42"): se ela não está na tela, o stub não chegou e nada aqui foi medido.
+  const escapado = await caso({ [dia(1)]: { read: 1, rejected: 1 } }, { read: 1, rejected: 1, skipped: 0 },
+    { stats: { today: { read: '<img src=x alt=bad>', rejected: 0 }, week: { read: 41, rejected: 42 }, month: { read: 43, rejected: 44 }, total: { read: 45, rejected: 46 } } });
+  checa(escapado.linhas.includes('41 · 42'), 'contagem/CONTROLE: o stub da leitura não chegou ao painel (a linha "41 · 42" não está na tela)', JSON.stringify(escapado.linhas));
+  checa(escapado.elemento === false, 'contagem/Histórico: o painel escreveu o número SEM escapar (o HTML que a leitura deixou passar virou elemento)', JSON.stringify(escapado.linhas));
+  // O contador por lugar (`onde`, que alimenta Viajante e Andarilho): texto vira 1 depois de um ✓ (não NaN/null); número segue somando.
+  const dOnde = async (inicial) => {
+    const c = await caso({ [dia(0)]: { read: 0, rejected: 0, onde: { 30: inicial } }, _total: { read: 0, rejected: 0 } }, { read: 0, rejected: 0, skipped: 0 }, { decidir: true });
+    let onde = null;
+    try { onde = JSON.parse(c.historico)[dia(0)].onde; } catch (e) { /* sem histórico */ }
+    return { c, onde };
+  };
+  const ondeNum = await dOnde(3);
+  checa(ondeNum.onde && ondeNum.onde['30'] === 4, 'contagem/onde: CONTROLE — o contador por lugar numérico (3) tem de somar o ✓ (4)', JSON.stringify(ondeNum.onde));
+  const ondeTxt = await dOnde('x');
+  checa(ondeTxt.onde && ondeTxt.onde['30'] === 1, 'contagem/onde: o ✓ sobre o contador por lugar com texto tem de dar 1 (não NaN, não null)', JSON.stringify(ondeTxt.onde));
   // O ✓ sobre o placar com texto de dígitos: 7 + 1 = 8 (e o lixo + 1 = 1, gravado como número).
   const dig = await caso({ _total: { read: 0, rejected: 0 } }, { read: '7', rejected: null }, { decidir: true });
   checa(dig.lidos === '8', 'contagem/CONTROLE: o texto de dígitos do placar ("7") tem de valer 8 depois de um ✓', JSON.stringify({ lidos: dig.lidos, gravado: dig.gravado }));
   const sujo = await caso({ _total: { read: 0, rejected: 0 } }, { read: 'x', rejected: [], skipped: {} }, { decidir: true });
   checa(sujo.lidos === '1' && !/null/.test(sujo.gravado || ''), 'contagem/placar: o ✓ sobre o placar com texto tem de dar 1 e gravar número (não NaN, não null)', JSON.stringify({ lidos: sujo.lidos, gravado: sujo.gravado }));
-  checa([limpo, texto, html, dig, sujo].every((c) => c.erros.length === 0), 'contagem: erro de JS', [limpo, texto, html, dig, sujo].map((c) => c.erros[0]).find(Boolean));
+  const todosCont = [limpo, texto, html, escapado, dig, sujo, ondeNum.c, ondeTxt.c];
+  checa(todosCont.every((c) => c.erros.length === 0), 'contagem: erro de JS', todosCont.map((c) => c.erros[0]).find(Boolean));
 }
 
 // ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
@@ -15977,6 +16016,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(sair.contagem.size === 0, 'recusa/espera/Sair: depois do "Sair" a recusa mandou rejeição ao Waze com a sessão de quem saiu', JSON.stringify([...sair.contagem]));
   checa(sair.fim.fila.length === 0 && sair.fim.telaDeEntrada && sair.fim.auth === false,
     'recusa/espera/Sair: os alvos voltaram à fila da tela de entrada (dado de terceiro depois do "Sair")', JSON.stringify(sair.fim));
+  // R21-2-02: o "Sair" TIRA a recusa da fila da trava — antes de a outra página soltá-la, a recusa de quem saiu já não está rodando
+  // (presa, ela segurava a passada de quem entrasse depois). O CONTROLE é o cenário de cima: lá, com a trava na mão da outra página,
+  // a recusa ESTÁ rodando (o `durante` do controle) — então "não rodando" aqui é a saída, não um instrumento que não vê a espera.
+  checa(ctl.durante.andamento >= 3 && sair.aposAcao.rodando === false && sair.aposAcao.auth === false,
+    'recusa/espera/Sair: com a trava AINDA na mão da outra página, a recusa de quem saiu seguiu esperando — o "Sair" não a tirou da fila da trava', JSON.stringify({ aposAcao: sair.aposAcao, controle: ctl.durante }));
   const ref = await naEspera('refresh');
   checa(ref.terminou, 'recusa/espera/↻: a recusa não terminou depois de a trava soltar');
   checa(ALVOS_ESPERA.every((id) => !ref.aposAcao.fila.includes(id)),
