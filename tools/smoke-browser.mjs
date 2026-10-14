@@ -15578,6 +15578,73 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(normal.erros.length === 0 && bloq.erros.length === 0, 'armazenamento: erro de JS', normal.erros[0] || bloq.erros[0]);
 }
 
+// ── O LINK DO "COPIAR LINK" COLADO NO CAMPO DO CÓDIGO ENTRA (R21-1-03, lote 25) ─
+//
+// O 2º critério da extração do código ("seis símbolos soltos do alfabeto") casava o "places" do host de
+// produção (`places.wazebrasil.com`), e o colar TROCAVA o campo por ele ("PLA-CES"): a recusa dizia
+// "Código inválido ou expirado" com o segredo de 20 símbolos do link ainda valendo. Agora o link colado é
+// resgatado (o "Copiar link" é o que o app mostra pra levar a sessão ao outro aparelho) e o código de dentro
+// de uma frase com o host junto entra no campo. O `paste` é entregue pelo ouvinte REAL do campo, com o
+// `clipboardData` posto no evento (o `ClipboardEvent` do WebKit ignora o dicionário). CONTROLES: o código
+// com o host entra no campo no formato da tela e NÃO resgata sozinho; e o texto que não é nenhum dos dois
+// segue o colar do navegador.
+{
+  const SEGREDO = 'U5P25D77X9W2BGW78UPR';
+  const FILA_COLAR = [{ ...CARDS.FLAG, venueID: 'vCL1', updateRequestID: 'uCL1', imageUrls: [] }];
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const claims = [];
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route('**/api/**', async (r) => {
+    const nome = r.request().url().split('/api/')[1].split('?')[0];
+    let corpo = {};
+    try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+    let resp = { success: true };
+    if (nome === 'parear') {
+      claims.push(corpo.code);
+      resp = corpo.code === SEGREDO ? { success: true, sessionToken: 'token-do-smoke-do-link', conta: 77 }
+        : { success: false, error: 'Código inválido', errorKey: 'srv.err.pairCodeInvalid', errorCategory: 'unknown' };
+    } else if (nome === 'perfil') resp = { success: true, profile: { id: 77, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+    else if (nome === 'buscar-places') resp = { success: true, places: FILA_COLAR, hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+    else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+    else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+    else if (nome === 'lista-estados') resp = { success: true, states: [] };
+    await r.fulfill({ status: nome === 'parear' && !resp.success ? 400 : 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+  });
+  const erros = [];
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => erros.push(String(e.message || e)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+  await page.evaluate(() => document.getElementById('pairEnterBtn').click());
+  await esperarOuExplodir(page, () => !document.getElementById('pairEnterModal').classList.contains('hidden'), 'o diálogo do código');
+  const colar = (texto) => page.evaluate((t) => {
+    const campo = document.getElementById('pairCodeInput');
+    campo.focus();
+    const ev = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'clipboardData', { value: { getData: () => t } });
+    campo.dispatchEvent(ev);
+    return { campo: campo.value, impedido: ev.defaultPrevented };
+  }, texto);
+  // CONTROLES: o código no meio de uma frase com o host (o que "Copiar" de uma mensagem traz) entra no campo
+  // e não resgata sozinho; o texto que não é código nem link segue o colar do navegador.
+  const comHost = await colar('Código: KMQ-XRT https://places.wazebrasil.com');
+  checa(comHost.campo === 'KMQ-XRT' && comHost.impedido === true && claims.length === 0,
+    'colar/CONTROLE: o código colado junto do host do link tem de entrar no campo como a tela o mostra, sem resgatar sozinho', JSON.stringify({ ...comHost, claims: claims.length }));
+  const aberto = await colar('olá');
+  checa(aberto.impedido === false && claims.length === 0, 'colar/CONTROLE: o texto que não é código nem link foi impedido (ou resgatou)', JSON.stringify({ ...aberto, claims: claims.length }));
+  await page.evaluate(() => { document.getElementById('pairCodeInput').value = ''; });
+  // O LINK que o "Copiar link" copia EM PRODUÇÃO (o domínio do wrangler.jsonc: `places` tem seis letras do alfabeto).
+  const colado = await colar('https://places.wazebrasil.com/#pair=' + SEGREDO);
+  checa(colado.campo === '' && colado.impedido === true,
+    'colar/link: o link colado trocou o campo por um lixo que parece código (o "PLA-CES" do host), ou o colar do navegador entrou', JSON.stringify(colado));
+  const entrou = await esperarNaPagina(page, () => AppState.authenticated === true && !!AppState.profile, 6000);
+  checa(entrou.ok, 'colar/link: o link colado no campo do código não entrou (o resgate não saiu, ou saiu com outro código)', JSON.stringify({ claims: claims.length }));
+  checa(claims.length === 1 && claims[0] === SEGREDO, 'colar/link: o resgate tem de sair UMA vez, com o segredo de 20 símbolos do link', JSON.stringify(claims.map((c) => c && c.length)));
+  checa(erros.length === 0, 'colar/link: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
 //
 // Duas abas abrindo juntas (a janela restaurada, o app instalado e o navegador)

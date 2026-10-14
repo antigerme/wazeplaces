@@ -126,9 +126,22 @@ function formatarCodigoPareamento(bruto) {
 //      costuma vir depois do rótulo.
 // Sem nenhum dos dois, `null`: o navegador cola, e o `input` formata o que
 // entrou (que é o caso de "ABC 123" e dos seis juntos).
+//
+// E o LINK não é texto de código (R21-1-03): as URLs saem do texto ANTES de
+// procurar. O host de produção (`places.wazebrasil.com`) tem seis letras, todas do
+// alfabeto, e o 2º critério o escolhia — "Código: KMQXRT https://places.wazebrasil.com"
+// virava "PLACES" (só os códigos SEM algarismo, uns 18%, perdiam pro host). Saem as URLs
+// com esquema (`https://…`), as de `www.` e o host com caminho (`host.com/…`, `host.com#…`):
+// o host NU, sem nada que o marque como link, é palavra como outra qualquer — e um código
+// colado numa frase sem espaço depois do ponto ("ABC-234.Vale por 5 min") não pode sumir
+// junto com ele.
 const PAIR_ALFABETO = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 function extrairCodigoPareamento(texto) {
-    const s = String(texto || '').toUpperCase();
+    const s = String(texto || '')
+        .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
+        .replace(/\bwww\.\S+/gi, ' ')
+        .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}[/?#]\S*/gi, ' ')
+        .toUpperCase();
     const m = /(?:^|[^0-9A-Z])([0-9A-Z]{3})\s*[-‐‑‒–—−]\s*([0-9A-Z]{3})(?![0-9A-Z])/.exec(s);
     if (m) return m[1] + m[2];
     const validos = (s.match(/[0-9A-Z]+/g) || [])
@@ -137,11 +150,36 @@ function extrairCodigoPareamento(texto) {
     return (comAlgarismo.length ? comAlgarismo : validos).pop() || null;
 }
 
+// O segredo de 20 símbolos do LINK que o "Copiar link" copia (`https://…/#pair=SEGREDO`; a
+// query `?pair=` é a forma antiga, que o `initApp` ainda lê). É o do servidor
+// (`PAIR_SECRET_LEN`, conferido em `test/contas-auditoria-r21.test.mjs`) — o campo do código é de
+// SEIS, e o formatador o cortaria. Independe do host: serve o link de produção, o de
+// desenvolvimento e o de um aplicativo que trocou o domínio.
+const PAIR_SEGREDO_LEN = 20;
+function extrairSegredoDoLinkDePareamento(texto) {
+    const m = new RegExp('[#?&]pair=([0-9A-Za-z]{' + PAIR_SEGREDO_LEN + '})(?![0-9A-Za-z])').exec(String(texto || ''));
+    return m ? m[1].toUpperCase() : null;
+}
+
 // O colar do campo do código: achou o código no texto, ele ENTRA no campo no
 // formato da tela, no lugar do que houvesse lá; senão, o colar segue normal.
+//
+// O LINK colado aqui ENTRA (R21-1-03). O "Copiar link" é o que o app MOSTRA pra levar a sessão ao
+// outro aparelho, e quem o cola no campo do código está fazendo o que a tela lhe deu: o campo o
+// trocava por um lixo que parece código ("PLA-CES", as seis primeiras letras do host) e a recusa
+// dizia "Código inválido ou expirado" com o segredo ainda valendo. O segredo não cabe no campo
+// (seis símbolos) e o link nunca foi pra ser lido nele: o paste é o gesto, e o resgate sai na hora,
+// pelo mesmo caminho do "Entrar" — o erro, se vier, fica no diálogo. O campo não muda.
 function colarCodigoPareamento(e) {
     const dados = e.clipboardData || window.clipboardData;
-    const codigo = extrairCodigoPareamento(dados ? dados.getData('text') : '');
+    const texto = dados ? dados.getData('text') : '';
+    const segredo = extrairSegredoDoLinkDePareamento(texto);
+    if (segredo) {
+        e.preventDefault();
+        resgatarPareamento(segredo);
+        return;
+    }
+    const codigo = extrairCodigoPareamento(texto);
     if (!codigo) return;
     e.preventDefault();
     const campo = e.target;

@@ -213,3 +213,143 @@ test('R21-5-04: o escritor da chave do chat com o aparelho ilegível não lança
   assert.doesNotThrow(() => c.P.chatInstalacao());
   assert.equal(c.armazenado.has('waze_places_chat'), false, 'o aparelho não grava (o armazenamento é de mentira e bloqueado)');
 });
+
+// ═══ R21-1-03 · o link do "Copiar link" colado no campo do código ═══════════════════════════════════════
+// O 2º critério da extração ("seis símbolos soltos do alfabeto") casava o "places" do host de produção
+// (`places.wazebrasil.com`: seis letras, todas do alfabeto), e o colar TROCAVA o campo por ele ("PLA-CES"):
+// a recusa dizia "Código inválido ou expirado" com o segredo de 20 símbolos do link ainda valendo. O que o
+// app MOSTRA (o link que o "Copiar link" copia) e o que o campo ACEITA têm que ser a mesma coisa.
+const NET = (d, n, v) => `${d}\tTRUE\t/\tTRUE\t0\t${n}\t${v}`;
+const COOKIES_WAZE = [NET('.waze.com', '_csrf_token', 'abc'), NET('.waze.com', '_web_session', 'sessao')].join('\n');
+const CONSTANTES_DO_PAREAMENTO = {
+  PAIR_CODE_LEN: constante('PAIR_CODE_LEN'), PAIR_CODE_GRUPO: constante('PAIR_CODE_GRUPO'),
+  PAIR_ALFABETO: constante('PAIR_ALFABETO'), PAIR_SEGREDO_LEN: constante('PAIR_SEGREDO_LEN'),
+};
+const PRODUCAO = 'https://places.wazebrasil.com';
+const montarColar = (extra = {}) => montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'colarCodigoPareamento'],
+  { ...CONSTANTES_DO_PAREAMENTO, window: {}, ...extra });
+// O que o campo mostra depois de colar `texto`: o nosso colar e, se ele deixar passar, o do navegador seguido do `input`.
+function colando(m, texto, antes = '') {
+  let impedido = false;
+  const campo = { value: antes, setSelectionRange() {} };
+  m.colarCodigoPareamento({ clipboardData: { getData: () => texto }, preventDefault: () => { impedido = true; }, target: campo });
+  return { impedido, campo: impedido ? campo.value : m.formatarCodigoPareamento(antes + texto) };
+}
+
+test('R21-1-03: `PAIR_SEGREDO_LEN` do app é o `PAIR_SECRET_LEN` do servidor', () => {
+  const doServidor = Number(/^const PAIR_SECRET_LEN = (\d+);/m.exec(ler('server/core.mjs'))[1]);
+  assert.equal(CONSTANTES_DO_PAREAMENTO.PAIR_SEGREDO_LEN, doServidor, 'o app procura um segredo de tamanho diferente do que o servidor emite');
+});
+
+test('R21-1-03: o código NÃO perde pro host do link — nem o código sem algarismo (uns 18% deles)', () => {
+  const { extrairCodigoPareamento } = montarColar();
+  // Códigos só de letras do alfabeto: o 2º critério os tratava como palavra e o último ganhava.
+  const codigos = ['KMQXRT', 'HXKTPW', 'BCDFGH', 'WXYZKM'];
+  const em = (codigo) => [
+    `Código: ${codigo} ${PRODUCAO}`,
+    `${PRODUCAO} Código: ${codigo}`,
+    `Código: ${codigo}\n${PRODUCAO}/#pair=U5P25D77X9W2BGW78UPR`,
+    `Entrar: ${codigo} (http://localhost:8080/)`,
+    `${codigo} www.places.wazebrasil.com`,
+    `places.wazebrasil.com/#x Código ${codigo}`,
+    `Código ${codigo} places.wazebrasil.com/#x`,    // o host DEPOIS do código: o "último ganha" não salva
+    `Seu código é ${codigo}. Abra ${PRODUCAO}.`,
+  ];
+  const errados = [];
+  for (const c of codigos) for (const texto of em(c)) if (extrairCodigoPareamento(texto) !== c) errados.push(`${JSON.stringify(texto)} → ${extrairCodigoPareamento(texto)}`);
+  assert.deepEqual(errados, [], 'DEFEITO: o host do link ganhou do código colado junto');
+  // O formato da tela (XXX-XXX) também não é lido DENTRO de uma URL.
+  assert.equal(extrairCodigoPareamento('https://exemplo.com/ABC-999 Código: KMQ-XRT'), 'KMQXRT');
+  assert.equal(extrairCodigoPareamento('https://exemplo.com/ABC-999'), null, 'um traço dentro da URL virou código');
+});
+
+test('R21-1-03: o LINK sozinho não vira código (o campo não é trocado por "PLACES")', () => {
+  const { extrairCodigoPareamento } = montarColar();
+  for (const link of [`${PRODUCAO}/#pair=U5P25D77X9W2BGW78UPR`, `${PRODUCAO}`, 'places.wazebrasil.com/#pair=U5P25D77X9W2BGW78UPR', `${PRODUCAO}/?pair=U5P25D77X9W2BGW78UPR`]) {
+    assert.equal(extrairCodigoPareamento(link), null, `${link} virou "${extrairCodigoPareamento(link)}"`);
+  }
+});
+
+test('R21-1-03: CONTROLES — os formatos de sempre seguem entrando (a tela, o rótulo, o traço de aplicativo, frase sem espaço depois do ponto)', () => {
+  const m = montarColar();
+  const casos = [
+    ['ABC-234', 'ABC-234'], ['ABC234', 'ABC-234'], [' ABC-234', 'ABC-234'], ['Código: ABC-234', 'ABC-234'], ['Código: 6C4–97S', '6C4-97S'],
+    ['Seu codigo: 6C497S', '6C4-97S'], ['Entrar HXKTPW', 'HXK-TPW'], ['HXKTPW expira em 4:59', 'HXK-TPW'],
+    ['ABC-234.Vale por 5 min', 'ABC-234'], ['Código:6C497S.Expira', '6C4-97S'], ['ABC 234', 'ABC-234'],
+  ];
+  const errados = casos.filter(([t, e]) => colando(m, t).campo !== e).map(([t, e]) => `${JSON.stringify(t)} → ${JSON.stringify(colando(m, t).campo)} (esperado ${e})`);
+  assert.deepEqual(errados, [], 'um formato que já entrava deixou de entrar');
+});
+
+test('R21-1-03: `extrairSegredoDoLinkDePareamento` — o segredo do link (#pair= ou a ?pair= antiga), maiúsculo, só com 20 símbolos', () => {
+  const { extrairSegredoDoLinkDePareamento: extrai } = montarColar();
+  const S = 'U5P25D77X9W2BGW78UPR';
+  assert.equal(extrai(`${PRODUCAO}/#pair=${S}`), S);
+  assert.equal(extrai(`http://localhost:8080/#pair=${S}`), S, 'o host não importa');
+  assert.equal(extrai(`${PRODUCAO}/?pair=${S}`), S, 'a query antiga (link que ficou no histórico)');
+  assert.equal(extrai(`${PRODUCAO}/?x=1&pair=${S}&y=2`), S);
+  assert.equal(extrai(`veja (${PRODUCAO}/#pair=${S}), obrigado`), S, 'pontuação em volta');
+  assert.equal(extrai(`${PRODUCAO}/#pair=${S.toLowerCase()}`), S, 'um aplicativo que baixou a caixa do link');
+  assert.equal(extrai(`${PRODUCAO}/#pair=${S}\n`), S);
+  // O que NÃO é o segredo:
+  assert.equal(extrai(`${PRODUCAO}/#pair=${S}X`), null, '21 símbolos');
+  assert.equal(extrai(`${PRODUCAO}/#pair=${S.slice(1)}`), null, '19 símbolos');
+  assert.equal(extrai(S), null, 'o segredo sem o link não é rótulo nenhum');
+  assert.equal(extrai(`${PRODUCAO}/#repair=${S}`), null, 'outro parâmetro que termina em "pair"');
+  assert.equal(extrai('Código: ABC-234'), null);
+  assert.equal(extrai(''), null);
+  assert.equal(extrai(undefined), null);
+});
+
+test('R21-1-03: o link colado ENTRA — o resgate sai com o segredo, o campo fica como estava e o colar do navegador é impedido', () => {
+  const resgates = [];
+  const m = montarColar({ resgatarPareamento: (c) => { resgates.push(c); return Promise.resolve(true); } });
+  const S = 'U5P25D77X9W2BGW78UPR';
+  for (const antes of ['', 'XY']) {
+    resgates.length = 0;
+    const r = colando(m, `${PRODUCAO}/#pair=${S}`, antes);
+    assert.deepEqual(resgates, [S], `DEFEITO: o link colado não foi resgatado (campo "${r.campo}")`);
+    assert.equal(r.impedido, true, 'o colar do navegador não foi impedido: o link entraria no campo');
+    assert.equal(r.campo, antes, `DEFEITO: o campo virou "${r.campo}" (o lixo que parece código)`);
+  }
+  // CONTROLES: o código curto, de dentro de uma mensagem com link, ENTRA NO CAMPO e não resgata sozinho.
+  resgates.length = 0;
+  const c = colando(m, `Código: KMQ-XRT ${PRODUCAO}`);
+  assert.deepEqual([c.campo, resgates.length], ['KMQ-XRT', 0], 'o código com o host junto não entrou no campo (ou resgatou sozinho)');
+  // E o texto que não é nenhum dos dois segue o colar do navegador.
+  const outro = colando(m, 'olá');
+  assert.deepEqual([outro.impedido, resgates.length], [false, 0]);
+});
+
+test('R21-1-03: o que o app MOSTRA e o que o campo ACEITA — o link que o "Copiar link" copia, colado no campo, resgata no servidor', async () => {
+  const { dispatch } = await import('../server/core.mjs');
+  const { sessaoDeTeste } = await import('./_sessao.mjs');
+  const s = await sessaoDeTeste(COOKIES_WAZE);
+  const criado = await dispatch('parear', { action: 'create', ...s.dados }, s.ctx);
+  assert.equal(criado.status, 200);
+  // O texto que o app põe na área de transferência: a função DE VERDADE.
+  let copiado = null;
+  const copiar = montar(['copiarLinkPareamento'], {
+    document: { getElementById: () => ({ dataset: { raw: criado.body.code } }) }, pairQrVenceEm: Infinity, aoVencerQrPareamento() {},
+    location: { origin: PRODUCAO }, navigator: { clipboard: { writeText: async (u) => { copiado = u; } } }, showToast() {}, t: (k) => k, TOAST_COPIAVEL_MS: 1,
+  });
+  await copiar.copiarLinkPareamento();
+  assert.ok(copiado && copiado.startsWith(PRODUCAO), 'CONTROLE: o "Copiar link" não copiou o link');
+  // Colado no campo do código: o segredo chega ao resgate...
+  const resgates = [];
+  const m = montarColar({ resgatarPareamento: (c) => { resgates.push(c); return Promise.resolve(true); } });
+  const r = colando(m, copiado);
+  assert.equal(r.campo, '', `DEFEITO: o link copiado virou "${r.campo}" no campo do código`);
+  assert.equal(resgates.length, 1, 'o link copiado não foi resgatado');
+  // ... e é o que o servidor ACEITA.
+  const claim = await dispatch('parear', { action: 'claim', code: resgates[0] }, s.ctx);
+  assert.equal(claim.status, 200, 'o segredo tirado do link copiado não resgata no servidor: ' + JSON.stringify(claim.body));
+  assert.equal(claim.body.success, true);
+  // O código curto (6 símbolos, "Sem câmera?") faz o mesmo caminho pelo que a TELA mostra.
+  const curto = await dispatch('parear', { action: 'create', ...s.dados, comCodigo: true }, s.ctx);
+  const mostrado = m.formatarCodigoPareamento(curto.body.code);
+  const colado = colando(m, `Código: ${mostrado} ${PRODUCAO}`);
+  assert.equal(colado.campo, mostrado, 'o código que a tela mostra, colado com o host, não entrou como a tela o mostra');
+  const claimCurto = await dispatch('parear', { action: 'claim', code: colado.campo }, s.ctx);
+  assert.equal(claimCurto.body.success, true, 'o código do campo (com o hífen) não resgata no servidor');
+});
