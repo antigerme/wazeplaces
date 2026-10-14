@@ -19510,8 +19510,11 @@ function carregarConquistas() {
     let g = null;
     try { g = JSON.parse(texto || 'null'); } catch (e) { g = null; }
     if (!g || typeof g !== 'object') g = {};
+    // `c` e `n` são OBJETOS (id → dia, contador → número): uma LISTA passa por `typeof 'object'`, e as
+    // conquistas que se guardam nela (`c.coruja = '2026-10-14'`) somem no `JSON.stringify` — voltavam a
+    // "novas" a cada carga. Só armazenamento editado à mão chega aqui assim; vira `{}` como qualquer outro lixo.
     AppState.conquistas = {
-        c: (g.c && typeof g.c === 'object') ? g.c : {},   // id → 'YYYY-MM-DD'
+        c: (g.c && typeof g.c === 'object' && !Array.isArray(g.c)) ? g.c : {},   // id → 'YYYY-MM-DD'
         // Seguidas sem desfazer. Contador PRÓPRIO, e não o `semUndoSeguidas` das
         // preferências: aquele só conta janela do Desfazer que expirou
         // NATURALMENTE, ou seja só com o Desfazer LIGADO — quem o desligou
@@ -19520,7 +19523,7 @@ function carregarConquistas() {
         // funcionando dos dois jeitos.
         seq: Number.isFinite(g.seq) ? g.seq : 0,
         patente: Number.isFinite(g.patente) ? g.patente : null,
-        n: (g.n && typeof g.n === 'object') ? g.n : {},   // contadores acumulados
+        n: (g.n && typeof g.n === 'object' && !Array.isArray(g.n)) ? g.n : {},   // contadores acumulados
         langs: Array.isArray(g.langs) ? g.langs.slice(0, 8) : [],
         base: g.base === true,
         // O que destravou e a pessoa ainda NÃO viu. É isto que acende o selo no

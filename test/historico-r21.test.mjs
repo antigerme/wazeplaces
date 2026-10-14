@@ -482,3 +482,44 @@ test('texto do botão · a chave nova nos 4 idiomas: leva o mês, não promete c
     } finally { I18N.setLang('pt'); }
   }
 });
+
+// ═══ carregarConquistas: `c` e `n` guardados como LISTA (irmão do R20-7-02, lote 24) ═══════════════
+//
+// `typeof [] === 'object'`: uma lista passava por objeto, as conquistas que se guardam nela (`c.coruja = …`)
+// somem no `JSON.stringify` e voltavam a "novas" a cada carga. Só armazenamento editado à mão chega assim.
+function conquistasGuardadas(texto) {
+  const guardado = new Map(texto === undefined ? [] : [['waze_places_conquistas', texto]]);
+  const AppState = { conquistas: null };
+  const deps = { AppState, CONQUISTAS_KEY: 'waze_places_conquistas',
+    localStorage: { getItem: (k) => (guardado.has(k) ? guardado.get(k) : null), setItem: (k, v) => guardado.set(k, v) },
+    copiaEmDia: () => false, lembrarTextoDaCopia() {} };
+  const chaves = Object.keys(deps);
+  const carregar = new Function(...chaves, fatiar('carregarConquistas') + '\nreturn carregarConquistas;')(...chaves.map((k) => deps[k]));
+  return { carregar, AppState };
+}
+
+test('carregarConquistas · `c` e `n` em LISTA viram objeto: a conquista nova SOBREVIVE ao `JSON.stringify` (a ida e volta que salvarConquistas faz)', () => {
+  for (const texto of ['{"c":["coruja"],"n":[1,2]}', '{"c":[],"n":[]}', '{"c":{"coruja":"2026-10-01"},"n":[3]}', '{"c":["x"],"n":{"rejeitados":7}}']) {
+    const m = conquistasGuardadas(texto);
+    const g = m.carregar();
+    assert.equal(Array.isArray(g.c), false, `${texto}: \`c\` seguiu lista`);
+    assert.equal(Array.isArray(g.n), false, `${texto}: \`n\` seguiu lista`);
+    g.c.primeiraFaxina = '2026-10-14';
+    g.n.rejeitados = 5;
+    const volta = JSON.parse(JSON.stringify(g));
+    assert.equal(volta.c.primeiraFaxina, '2026-10-14', `DEFEITO: ${texto} — a conquista guardada em \`c\` sumiu no JSON (volta a "nova" a cada carga)`);
+    assert.equal(volta.n.rejeitados, 5, `${texto}: o contador guardado em \`n\` sumiu no JSON`);
+  }
+});
+
+test('carregarConquistas · CONTROLES: o armazenamento de sempre segue igual, e o lixo de outro tipo continua virando `{}`', () => {
+  const bom = { c: { coruja: '2026-10-01' }, seq: 4, patente: 2, n: { rejeitados: 7 }, langs: ['pt'], base: true, novas: ['coruja'], patenteNova: true };
+  const g = conquistasGuardadas(JSON.stringify(bom)).carregar();
+  assert.deepEqual(g, bom, 'o armazenamento válido mudou ao ser lido');
+  for (const lixo of ['"x"', '5', 'null', 'true']) {
+    const r = conquistasGuardadas(`{"c":${lixo},"n":${lixo}}`).carregar();
+    assert.deepEqual([r.c, r.n], [{}, {}], `${lixo}: \`c\`/\`n\` que não são objeto viraram outra coisa`);
+  }
+  assert.deepEqual(conquistasGuardadas(undefined).carregar().c, {}, 'o aparelho novo');
+  assert.deepEqual(conquistasGuardadas('[1,2,3]').carregar().c, {}, 'a raiz em lista (sem `c`)');
+});
