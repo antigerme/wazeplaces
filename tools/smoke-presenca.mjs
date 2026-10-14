@@ -650,6 +650,506 @@ try {
   else anota(`a última mensagem ficou ${tecladoSobe.noFim.aoFim} px abaixo do que se vê depois de o teclado subir`);
   if (tecladoSobe.noComeco.moveu === 0) ok('controle: quem lia o começo da conversa não é arrancado pro fim quando o teclado sobe');
   else anota(`quem lia o começo foi movido ${tecladoSobe.noComeco.moveu} px quando o teclado subiu`);
+  // ── 6c. JANELA BAIXA E TEXTO DO SISTEMA MAIOR: a conversa, o selo e o pedido ──
+  // (auditoria da rodada 21, R21-5-02, R21-5-03 e R21-5-07; lote 25.) Três coisas que
+  // só se veem na TELA, e que a 1× em retrato (o aparelho de quem testa) não mostra:
+  //  · a conversa em janela baixa: o campo e o Enviar pendiam pra fora da folha com o
+  //    teclado aberto (Chrome do Android: o teclado ENCOLHE a janela, e o 70dvh junto),
+  //    deitado ou com o texto maior;
+  //  · o selo numérico da pílula cobrindo 57–68% do balão de conversa a 1,5×–2×;
+  //  · a folha do pedido recebido abrindo só com o cabeçalho e a foto em janela baixa.
+  // O teclado EMULADO aqui é a janela redimensionada (o que o Chrome do Android faz) e o
+  // `--kb-inset` (o que o iOS exige): não é teclado de aparelho, e o campo do iPhone de
+  // verdade não se mede neste smoke. Cada medida tem o seu CONTROLE: a mesma tela com a
+  // regra de antes TEM que falhar (senão o instrumento não enxerga o defeito), o teclado
+  // emulado TEM que ter encolhido a janela, e o caso que já cabia TEM que seguir igual.
+  console.log('\n6c. janela baixa e texto do sistema maior: o campo da conversa, o selo da pílula e a folha do pedido');
+  {
+    const ctx6 = await browser.newContext({ viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+    try {
+      const GIF6 = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64');
+      // Fotos de proporção CONHECIDA (16:9 e 9:16): só o recorte do `object-fit: cover`
+      // as separa, e a 1×1 do resto do smoke não mostra recorte nenhum.
+      const svg6 = (w, h) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#0ea5e9"/><rect width="${w / 2}" height="${h / 2}" fill="#f43f5e"/><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 5}" fill="#fff"/></svg>`;
+      // `thumb700_l`: a foto que DEMORA — o pedido abre com ela ainda sem carregar, e ela só chega quando o
+      // teste a solta (por sinal, não por prazo: num runner lento um prazo fixo a deixava chegar antes da medida).
+      let soltarFotoLenta;
+      const fotoLenta = new Promise((chegou) => { soltarFotoLenta = chegou; });
+      await ctx6.route('**/venue-image.waze.com/**', async (r) => {
+        const u = r.request().url();
+        if (/thumb700_l/.test(u)) await fotoLenta;
+        if (/thumb700_[xl]/.test(u)) return r.fulfill({ status: 200, contentType: 'image/svg+xml', body: svg6(800, 450) }).catch(() => {});
+        if (/thumb700_v/.test(u)) return r.fulfill({ status: 200, contentType: 'image/svg+xml', body: svg6(450, 800) }).catch(() => {});
+        return r.fulfill({ status: 200, contentType: 'image/gif', body: GIF6 }).catch(() => {});
+      });
+      await ctx6.route(/^https:\/\/[a-z0-9-]*\.waze\.com\/.*tiles/, (r) => r.fulfill({ status: 200, contentType: 'image/gif', body: GIF6 }));
+      await ctx6.route(GOOGLE + '**', async (route) => {
+        const req = route.request();
+        const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST' };
+        if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors }).catch(() => {});
+        await dormir(25_000);
+        await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: '[{"startOfBatch":{}},{"endOfBatch":{}}]' }).catch(() => {});
+      });
+      const euId = '12444348', ela = '183164343';
+      await ctx6.route('**/api/**', async (route) => {
+        const rota = new URL(route.request().url()).pathname.split('/').pop();
+        let c = {};
+        try { c = JSON.parse(route.request().postData() || '{}'); } catch { /* vazio */ }
+        let corpo = { success: false };
+        if (rota === 'perfil') corpo = { success: true, visivelNoWme: true, referencias: { casa: null, trabalho: null }, profile: { id: Number(euId), userName: 'antigerme', rank: 5, isStaff: false, isAreaManager: true, isEditor: true, editableCountryIDs: [BRASIL], areas: [], managedAreas: [] } };
+        else if (rota === 'lista-paises') corpo = { success: true, countries: [{ id: BRASIL, name: 'Brazil', abbr: 'BR' }] };
+        else if (rota === 'lista-estados') corpo = { success: true, states: [] };
+        else if (rota === 'buscar-places') corpo = { success: true, places: [pedido(-23.5613, -46.6565)], hasMore: false, page: 1, total: 1 };
+        else if (rota === 'presenca-app') {
+          corpo = { success: true, online: [{ id: ela, nome: 'cafanha', rank: 3, lat: -23.5329, lon: -46.6395 }], conversas: [],
+            ...(c.token ? { chat: { token: 'token-6c', base: GOOGLE, chave: CHAVE_API, expiraEm: Date.now() + 86_000_000 } } : {}) };
+        } else if (rota === 'chat') {
+          const m = (n, de, texto) => ({ id: `c0000000-0000-1000-8000-00000000000${n}`, ts: Date.now() - 600_000 + n * 60_000, de: { tipo: 1, id: de }, para: { tipo: 1, id: de === ela ? euId : ela }, classe: 'texto', texto, recibo: null, contexto: { app: 'wazeplaces' } });
+          corpo = c.acao === 'abrir'
+            ? { success: true, mensagens: [m(2, euId, 'Vi sim, a foto é de outra rua.'), m(1, ela, 'Oi! Você viu aquele pedido da padaria?')], maisAntigas: false, recibos: [], lida: true }
+            : { success: true };
+        }
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(corpo) }).catch(() => {});
+      });
+      const p6 = await ctx6.newPage();
+      p6.on('pageerror', (e) => anota(`[6c] erro de página: ${e.message}`));
+      await p6.addInitScript(() => {
+        try {
+          localStorage.setItem('waze_places_lang', 'pt');
+          localStorage.setItem('waze_session_token', 'token-da-sessao-6c');
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+        } catch (e) {}
+      });
+      await p6.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
+      for (let i = 0; i < 150; i++) {
+        if (await p6.evaluate(() => !!(window.AppState && AppState.profile && AppState.currentPlace && document.querySelector('#cardStack .place-card'))).catch(() => false)) break;
+        await dormir(100);
+      }
+      const e6 = { page: p6 };
+      await esperar(e6, () => Presenca.online.some((p) => p.nome === 'cafanha'), 'a lista não chegou na 6c');
+      const quadros6 = () => p6.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const janela6 = async (w, h, esc) => {
+        await p6.setViewportSize({ width: w, height: h });
+        await p6.evaluate((e) => { document.documentElement.style.fontSize = (16 * e) + 'px'; }, esc);
+        await quadros6(); await quadros6();
+      };
+      const fim6 = () => esperar(e6, () => !CamadaVoltar.consumindo, 'o voltar da 6c não assentou');
+      const f1 = (x) => (Math.round(x * 10) / 10);
+
+      // ── R21-5-03 · o selo da pílula sobre o balão ─────────────────────────
+      // A tinta do traço do balão que o selo (com o anel de 2px) cobre, pela geometria
+      // do próprio SVG (`isPointInStroke` no `<path>`, do ponto da tela de volta ao
+      // espaço dele): confere com o pixel (±2,5 pontos nas 6 medidas da auditoria) e não
+      // precisa de captura.
+      const medirSelo = () => {
+        const btn = document.getElementById('presencaPill');
+        const svg = btn.querySelector('svg:not(.hidden)');
+        const path = svg.querySelector('path');
+        const selo = document.getElementById('presencaCount');
+        const sr = selo.getBoundingClientRect(), br = btn.getBoundingClientRect();
+        const R = sr.height / 2 + 2, cy = (sr.top + sr.bottom) / 2, x0 = sr.left + sr.height / 2, x1 = sr.right - sr.height / 2;
+        const dentro = (x, y) => { const dx = x < x0 ? x0 - x : x > x1 ? x - x1 : 0; return dx * dx + (y - cy) * (y - cy) <= R * R; };
+        const m = path.getScreenCTM();
+        let tinta = 0, coberta = 0;
+        for (let u = 0; u <= 24.0001; u += 0.25) {
+          for (let v = 0; v <= 24.0001; v += 0.25) {
+            const p = new DOMPoint(u, v);
+            if (!path.isPointInStroke(p)) continue;
+            tinta++;
+            const q = p.matrixTransform(m);
+            if (dentro(q.x, q.y)) coberta++;
+          }
+        }
+        const rg = document.createRange(); rg.selectNodeContents(selo);
+        const tr = rg.getBoundingClientRect();
+        const lum = (rgb) => { const [r, g, b] = rgb.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+        const rgbDe = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+        const estilo = getComputedStyle(selo);
+        const L1 = lum(rgbDe(estilo.color)), L2 = lum(rgbDe(estilo.backgroundColor));
+        const recebe = (id) => { const e = document.getElementById(id); const r = e.getBoundingClientRect(); const q = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!q && (q === e || e.contains(q)); };
+        return {
+          texto: selo.textContent, icone: svg.id, tinta, pct: tinta ? Math.round(1000 * coberta / tinta) / 10 : 0,
+          doTopo: sr.top - br.top, daDireita: br.right - sr.right,
+          praDireitaDoBotao: sr.right - br.right, noTopoDaTela: sr.top, rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+          digitoDentro: tr.left >= sr.left - 0.5 && tr.right <= sr.right + 0.5 && tr.top >= sr.top - 0.5 && tr.bottom <= sr.bottom + 0.5,
+          contraste: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05),
+          vizinhoRecebe: recebe('themeBtn'), pilulaRecebe: recebe('presencaPill'),
+        };
+      };
+      const preparaSelo = (a) => p6.evaluate((a) => {
+        if (!window.__orig6c) window.__orig6c = { online: Presenca.online, conversas: Presenca.conversas };
+        Presenca.online = a.gente ? Array.from({ length: a.gente }, (_, i) => ({ id: String(900 + i), nome: 'p' + i, rank: 1, lat: -23.5, lon: -46.6 })) : window.__orig6c.online;
+        Presenca.conversas = a.msgs ? [{ id: '999', nome: 'X', naoLidas: a.msgs, atividade: Date.now(), ultima: { deMim: false, ts: Date.now(), recibo: false, texto: 'oi', card: null } }] : [];
+        presencaRenderPilula();
+      }, a);
+      const SELO_ESTADOS = [{ n: 'balão "12"', msgs: 12 }, { n: 'balão "99+"', msgs: 150 }, { n: 'gente "3"', gente: 3 }];
+      const selos = {};
+      for (const esc of [1, 1.5, 2]) {
+        await janela6(393, 851, esc);
+        for (const est of SELO_ESTADOS) {
+          await preparaSelo(est);
+          await quadros6();
+          selos[`${est.n}@${esc}`] = await p6.evaluate(medirSelo);
+        }
+      }
+      // CONTROLE do instrumento: com `top`/`right` de antes (2px do botão) o balão a 1,5× e
+      // a 2× TEM que dar mais da metade coberta — senão a medida não enxerga o defeito.
+      const velhoSelo = await p6.addStyleTag({ content: '.presenca-selo { top: 2px !important; right: 2px !important; }' });
+      const comRegraVelha = {};
+      for (const esc of [1, 1.5, 2]) {
+        await janela6(393, 851, esc);
+        await preparaSelo(SELO_ESTADOS[0]);
+        await quadros6();
+        comRegraVelha[esc] = await p6.evaluate(medirSelo);
+      }
+      await p6.evaluate((el) => el.remove(), velhoSelo);
+      if (comRegraVelha[1.5].pct > 50 && comRegraVelha[2].pct > 50) ok(`controle: com a posição de antes o balão "12" fica ${comRegraVelha[1.5].pct}% coberto a 1,5× e ${comRegraVelha[2].pct}% a 2× — a medida enxerga o defeito`);
+      else anota(`controle: com a posição de antes o balão não ficou coberto (${comRegraVelha[1.5].pct}% a 1,5×, ${comRegraVelha[2].pct}% a 2×) — a medida não distinguiria nada`);
+      if (Math.abs(comRegraVelha[1].pct - selos['balão "12"@1'].pct) < 0.05 && Math.abs(comRegraVelha[1].doTopo - selos['balão "12"@1'].doTopo) < 0.01) ok(`a 1× a posição é a MESMA de antes: ${f1(selos['balão "12"@1'].doTopo)}px do topo, ${f1(selos['balão "12"@1'].daDireita)}px da direita, ${selos['balão "12"@1'].pct}% da tinta`);
+      else anota(`a 1× o selo saiu do lugar: ${JSON.stringify({ agora: selos['balão "12"@1'], antes: comRegraVelha[1] })}`);
+      // A conferência de um lote de medidas do selo: 1× no lugar de sempre; com o texto maior o balão
+      // aparece (≤ 25% da tinta coberta); o selo não passa da borda do botão, o botão do vizinho recebe o
+      // toque, o dígito cabe dentro dele e o contraste passa de 4,5:1.
+      const conferirSelos = (entradas, rotulo) => {
+        const falhasAntes = falhas.length;
+        for (const [chave, s] of Object.entries(entradas)) {
+          const [, esc] = chave.split('@');
+          if (Number(esc) === 1) {
+            if (Math.abs(s.doTopo - 2) < 0.01 && Math.abs(s.daDireita - 2) < 0.01) ok(`${chave} a 1×: ${s.pct}% da tinta coberta, a 2px do topo e a 2px da direita, como sempre`);
+            else anota(`${chave} a 1×: o selo não está a 2px/2px (${f1(s.doTopo)} do topo, ${f1(s.daDireita)} da direita)`);
+          } else if (s.icone === 'presencaIconMsg') {
+            const antes = s.texto === '12' ? ` (antes ${comRegraVelha[esc].pct}%)` : '';
+            if (s.pct <= 25) ok(`${chave} a ${esc}×: o selo cobre ${s.pct}% da tinta do balão${antes} — o balão se reconhece`);
+            else anota(`${chave} a ${esc}×: o selo ainda cobre ${s.pct}% da tinta do balão (o teto é 25%)`);
+          } else if (s.pct > 25) anota(`${chave} a ${esc}×: o selo cobre ${s.pct}% da tinta do ícone de gente`);
+          if (s.praDireitaDoBotao > 0.5) anota(`${chave} a ${esc}×: o selo passa ${f1(s.praDireitaDoBotao)}px da borda direita do botão — pairaria sobre o vizinho`);
+          if (!s.vizinhoRecebe) anota(`${chave} a ${esc}×: o botão do vizinho não recebe o toque no centro`);
+          if (!s.digitoDentro) anota(`${chave} a ${esc}×: o dígito não cabe dentro do selo`);
+          if (s.contraste < 4.5) anota(`${chave} a ${esc}×: o contraste do número é ${f1(s.contraste)}:1 (mínimo 4,5)`);
+          if (s.noTopoDaTela < 0) anota(`${chave} a ${esc}×: o selo saiu pela borda de cima da tela (${f1(s.noTopoDaTela)}px)`);
+        }
+        if (falhas.length === falhasAntes) ok(`o selo ${rotulo}: dentro do botão à direita, o botão do vizinho recebe o toque, o dígito cabe dentro dele e o contraste passa de 4,5:1`);
+      };
+      conferirSelos(selos, 'em 393px a 1×, 1,5× e 2×');
+      await preparaSelo({ msgs: 0 });   // volta ao que o app tinha (gente "1")
+      await p6.evaluate(() => { Presenca.conversas = []; presencaRenderPilula(); delete window.__orig6c; });
+
+      // ── R21-5-02 · a conversa em janela baixa ─────────────────────────────
+      await janela6(393, 851, 1);
+      await p6.tap('#presencaPill');
+      await esperar(e6, () => !document.getElementById('presencaModal').classList.contains('hidden') && !!document.querySelector('#presencaLista .presenca-linha'), 'a lista da 6c não abriu');
+      await p6.tap(`#presencaLista .presenca-linha[data-pessoa="${ela}"]`);
+      await esperar(e6, () => !document.getElementById('conversaModal').classList.contains('hidden') && !!document.querySelector('#conversaMsgs .conversa-aviso'), 'a conversa da 6c não abriu');
+      const medirConversa = () => {
+        const el = (id) => document.getElementById(id);
+        const folhaEl = document.querySelector('#conversaModal .conversa-folha');
+        const fr = folhaEl.getBoundingClientRect();
+        // O teclado do iOS NÃO encolhe a janela: ele cobre o que fica abaixo de `innerHeight − --kb-inset`, e é
+        // até aí que o campo tem que chegar (um hit-test sozinho não vê o teclado, que não é elemento nenhum).
+        const kb = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--kb-inset')) || 0;
+        const visivelAte = innerHeight - kb;
+        const alvo = (id) => {
+          const e = el(id); const r = e.getBoundingClientRect();
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const naTela = cx >= 0 && cx <= innerWidth && cy >= 0 && cy <= visivelAte && r.top >= -0.5 && r.bottom <= visivelAte + 0.5;
+          const q = naTela ? document.elementFromPoint(cx, cy) : null;
+          return { topo: Math.round(r.top), base: Math.round(r.bottom), naTela, tocavel: !!q && (q === e || e.contains(q)) };
+        };
+        const cs = (e) => getComputedStyle(e);
+        const rem = parseFloat(cs(document.documentElement).fontSize);
+        const est = el('conversaEstado'), msgs = el('conversaMsgs'), formEl = el('conversaForm'), cab = folhaEl.firstElementChild;
+        // O que NÃO encolhe, medido no DOM, até a base do campo (sem o respiro de baixo do formulário).
+        const precisa = cab.offsetHeight + (est.classList.contains('hidden') ? 0 : est.offsetHeight) + parseFloat(cs(msgs).paddingTop) + parseFloat(cs(msgs).paddingBottom)
+          + (formEl.offsetHeight - parseFloat(cs(formEl).paddingBottom));
+        // O piso que o CSS calcula, lido do próprio navegador (a variável é da folha).
+        const sonda = document.createElement('div');
+        sonda.style.cssText = 'position:absolute;visibility:hidden;width:0;height:var(--conversa-piso)';
+        folhaEl.appendChild(sonda);
+        const piso = sonda.getBoundingClientRect().height;
+        sonda.remove();
+        return {
+          vp: [innerWidth, innerHeight], rem, folhaH: fr.height, folhaTopo: fr.top, folhaBase: fr.bottom, piso, precisa,
+          linhasDoEstado: Math.round(est.offsetHeight / rem - 1),
+          campo: alvo('conversaInput'), enviar: alvo('conversaEnviar'), fechar: alvo('conversaClose'),
+          campoNaFolha: el('conversaInput').getBoundingClientRect().bottom <= fr.bottom + 0.5,
+          focoNoCampo: !!document.activeElement && document.activeElement.id === 'conversaInput',
+        };
+      };
+      const tudoAVista = (m) => m.campo.naTela && m.campo.tocavel && m.enviar.tocavel && m.fechar.tocavel && m.campoNaFolha;
+      // A folha PAROU: o mesmo retângulo em dois quadros seguidos (e não um prazo fixo, que mede a
+      // velocidade do runner). Com teto: o último retângulo vale se nunca assentar.
+      const assentada6 = () => p6.evaluate(async () => {
+        const folha = () => document.querySelector('#conversaModal .conversa-folha').getBoundingClientRect();
+        let a = folha();
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const b = folha();
+          if (b.top === a.top && b.height === a.height) return true;
+          a = b;
+        }
+        return false;
+      });
+      const celulaConversa = async (c) => {
+        // Volta ao teclado FECHADO: o `visualViewport` verdadeiro (a `height` emulada sai) e o foco fora do campo.
+        await p6.evaluate(() => { delete window.visualViewport.height; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+        await janela6(c.w, c.h, c.esc);
+        // A altura que o navegador DEU antes do teclado: com o texto a 2× numa tela de 280px o
+        // cabeçalho passa da largura e o Chrome do celular encolhe a página pra caber (a janela em px
+        // de CSS vira ~8% maior), então "a janela" é o que ele mediu, nunca a conta do teste.
+        const alturaAntes = await p6.evaluate(() => innerHeight);
+        if (c.kb && c.kb.modo === 'janela') {
+          await p6.focus('#conversaInput');   // o toque no campo vem ANTES de o teclado abrir
+          await p6.setViewportSize({ width: c.w, height: c.h - c.kb.px });
+        } else if (c.kb) {
+          // O iOS: a janela NÃO encolhe, o `visualViewport` sim — e quem põe o `--kb-inset` é o app (com o
+          // campo focado, de `setupKeyboardInset`), não o teste. Emulado pela `height` do `visualViewport`.
+          // CONTROLE: o `visualViewport` TEM que estar sem zoom nem rolagem (a 2× numa tela de 280px o
+          // Chrome do celular encolhe a página, e ele fica assim depois: o `coberto` sairia errado).
+          const vv0 = await p6.evaluate(() => ({ escala: visualViewport.scale, topo: visualViewport.offsetTop, esq: visualViewport.offsetLeft }));
+          if (vv0.escala !== 1 || vv0.topo !== 0 || vv0.esq !== 0) { anota(`controle: ${c.id}: o visualViewport chegou com zoom ou rolagem (${JSON.stringify(vv0)}) — a medida do teclado do iOS seria outra`); return null; }
+          await p6.focus('#conversaInput');
+          await p6.evaluate((k) => {
+            const vv = window.visualViewport;
+            Object.defineProperty(vv, 'height', { configurable: true, get: () => innerHeight - k });
+            vv.dispatchEvent(new Event('resize'));
+          }, c.kb.px);
+          await esperar(e6, (k) => getComputedStyle(document.documentElement).getPropertyValue('--kb-inset').trim() === k + 'px', `o app não pôs o --kb-inset de ${c.kb.px}px da 6c`, 5000, c.kb.px);
+        }
+        await assentada6();
+        const m = await p6.evaluate(medirConversa);
+        m.alturaAntes = alturaAntes;
+        return m;
+      };
+      const CONVERSA_CELULAS = [
+        // O que CABE hoje: a regra não pode mexer na altura (70dvh), e tudo segue à vista.
+        { id: '393×851 a 1×', w: 393, h: 851, esc: 1, cabe: true },
+        { id: '360×740 a 1,5×', w: 360, h: 740, esc: 1.5, cabe: true },
+        { id: '568×320 deitado a 1× (sem teclado)', w: 568, h: 320, esc: 1, cabe: true },
+        { id: '568×320 deitado a 1,5× (sem teclado)', w: 568, h: 320, esc: 1.5, cabe: true },
+        { id: '393×851 a 1× com o teclado de 300', w: 393, h: 851, esc: 1, kb: { modo: 'janela', px: 300 }, cabe: true },
+        { id: '667×375 deitado a 1×, teclado do iOS (--kb-inset 180)', w: 667, h: 375, esc: 1, kb: { modo: 'inset', px: 180 }, cabe: true },
+        { id: '640×360 deitado a 1×, teclado do iOS (--kb-inset 180)', w: 640, h: 360, esc: 1, kb: { modo: 'inset', px: 180 }, cabe: true },
+        // O que NÃO cabia e a regra resolve: a folha toma a janela inteira, e o campo fica nela.
+        { id: '732×412 deitado a 1×, teclado de 180', w: 732, h: 412, esc: 1, kb: { modo: 'janela', px: 180 }, resolve: true },
+        { id: '640×360 deitado a 1×, teclado de 180', w: 640, h: 360, esc: 1, kb: { modo: 'janela', px: 180 }, resolve: true },
+        { id: '320×568 a 2×, teclado de 250', w: 320, h: 568, esc: 2, kb: { modo: 'janela', px: 250 }, resolve: true },
+        { id: '568×320 deitado a 2× (sem teclado)', w: 568, h: 320, esc: 2, resolve: true },
+        { id: '320×568 a 1,5×, teclado de 250 (a linha de estado quebra)', w: 320, h: 568, esc: 1.5, kb: { modo: 'janela', px: 250 }, resolve: true },
+      ];
+      const conv = {};
+      // Uma célula da conversa: mede, confere o controle do teclado emulado e diz se cabe.
+      const conferirCelula = async (c) => {
+        const m = conv[c.id] = await celulaConversa(c);
+        if (!m) return null;
+        // CONTROLE do instrumento: o teclado emulado TEM que ter encolhido a janela (em ~kb px; um
+        // pouco mais onde o Chrome encolheu a página).
+        if (c.kb && c.kb.modo === 'janela') {
+          const encolheu = m.alturaAntes - m.vp[1];
+          if (encolheu < 0.9 * c.kb.px || encolheu > 1.2 * c.kb.px) { anota(`controle: ${c.id}: o teclado emulado de ${c.kb.px}px encolheu a janela em ${encolheu}px (${m.alturaAntes} → ${m.vp[1]})`); return m; }
+        }
+        // E o foco está NO CAMPO (o teclado só abre com campo focado): a medida é a do teclado aberto.
+        if (c.kb && !m.focoNoCampo) { anota(`controle: ${c.id}: com o teclado emulado o foco não está no campo da conversa — a medida seria a do teclado fechado`); return m; }
+        const raiz = c.kb && c.kb.modo === 'inset' ? m.vp[1] - c.kb.px : m.vp[1];
+        if (c.cabe) {
+          const esperada = Math.min(0.7 * m.vp[1], raiz);
+          if (Math.abs(m.folhaH - esperada) < 1 && tudoAVista(m)) ok(`${c.id}: a folha segue com ${f1(m.folhaH)}px (70% da janela, como hoje) e o campo, o Enviar e o ✕ recebem o dedo`);
+          else anota(`${c.id}: cabia e mudou — folha ${f1(m.folhaH)}px (esperava ${f1(esperada)}) · ${JSON.stringify({ campo: m.campo, enviar: m.enviar.tocavel, fechar: m.fechar.tocavel, naFolha: m.campoNaFolha })}`);
+        } else if (c.resolve) {
+          const tomouAJanela = Math.abs(m.folhaH - m.vp[1]) < 1;
+          if (tomouAJanela && tudoAVista(m)) ok(`${c.id}: a folha tomou a janela (${f1(m.folhaH)} de ${m.vp[1]}px) e o campo (${m.campo.topo}–${m.campo.base}), o Enviar e o ✕ recebem o dedo`);
+          else anota(`${c.id}: ${tomouAJanela ? 'o campo não cabe' : 'a folha não tomou a janela'} — folha ${f1(m.folhaH)}px numa janela de ${m.vp[1]}px · ${JSON.stringify({ campo: m.campo, enviar: m.enviar.tocavel, fechar: m.fechar.tocavel, naFolha: m.campoNaFolha, piso: f1(m.piso), precisa: f1(m.precisa) })}`);
+        }
+        // O piso do CSS é o que o DOM de fato precisa (uma linha de estado, sem tirinha) onde a
+        // linha não quebra e a janela é larga (acima de 19,8rem); onde pode quebrar, ele só SOBE
+        // (1rem por degrau, até 3rem) e cobre o que o DOM precisa.
+        if (m.linhasDoEstado === 1 && m.vp[0] >= 19.8 * m.rem) {
+          if (Math.abs(m.piso - m.precisa) <= 1.5) ok(`${c.id}: o piso do CSS (${f1(m.piso)}px) é o que o DOM precisa (${f1(m.precisa)}px)`);
+          else anota(`${c.id}: o piso do CSS (${f1(m.piso)}px) não é o que o DOM precisa (${f1(m.precisa)}px) — o HTML mudou e a conta ficou pra trás`);
+        } else if (m.piso < m.precisa - 1.5 || m.piso > m.precisa + 3 * m.rem + 1.5) anota(`${c.id}: com a linha de estado em ${m.linhasDoEstado} linha(s) o piso (${f1(m.piso)}px) não cobre o DOM (${f1(m.precisa)}px, tolerância de 3rem pra cima)`);
+        return m;
+      };
+      for (const c of CONVERSA_CELULAS) await conferirCelula(c);
+      // CONTROLES: a mesma tela com a ALTURA DE ANTES TEM que deixar o campo fora nos casos
+      // que a regra resolve — senão a medida não enxerga o defeito — e o caso que a regra NÃO
+      // resolve (a janela de 160px, menor que o piso de 178) TEM que seguir sendo visto como fora.
+      const velhaConversa = await p6.addStyleTag({ content: '.conversa-folha { height: min(70dvh, 100%) !important; }' });
+      for (const c of CONVERSA_CELULAS.filter((x) => x.resolve)) {
+        const m = await celulaConversa(c);
+        if (!tudoAVista(m)) ok(`controle: ${c.id} com a altura de antes: folha ${f1(m.folhaH)}px, campo em ${m.campo.topo}–${m.campo.base} numa janela de ${m.vp[1]}px — fora, como a auditoria mediu`);
+        else anota(`controle: ${c.id} com a altura de antes o campo CABE — a medida não enxerga o defeito`);
+      }
+      await p6.evaluate((el) => el.remove(), velhaConversa);
+      const mAperto = await celulaConversa({ id: '568×320 com o teclado de 160', w: 568, h: 320, esc: 1, kb: { modo: 'janela', px: 160 } });
+      if (mAperto.vp[1] === 160 && !tudoAVista(mAperto) && Math.abs(mAperto.folhaH - 160) < 1) ok(`568×320 deitado com o teclado de 160px: a folha toma os 160px da janela e o campo continua fora (${mAperto.campo.topo}–${mAperto.campo.base}) — é o caso de COMPACTAR a folha (o piso é ${f1(mAperto.piso)}px), fora desta regra; a medida o enxerga`);
+      else anota(`568×320 com o teclado de 160px: ${JSON.stringify({ folha: f1(mAperto.folhaH), janela: mAperto.vp[1], campo: mAperto.campo, naFolha: mAperto.campoNaFolha })} — o caso que a regra não resolve mudou (tire a nota do relatório do lote 25)`);
+      // O MESMO caso no caminho do iOS (`--kb-inset`, a janela não encolhe): a raiz tem 160px, a folha toma
+      // os 160px e o campo (que termina em 178) fica 18px sob o teclado — a medida desconta o teclado.
+      const mAbaixoDoTeclado = await celulaConversa({ id: '568×320 com o teclado do iOS de 160', w: 568, h: 320, esc: 1, kb: { modo: 'inset', px: 160 } });
+      if (!tudoAVista(mAbaixoDoTeclado) && Math.abs(mAbaixoDoTeclado.folhaH - 160) < 1) ok(`568×320 deitado com o teclado do iOS de 160px (--kb-inset): a folha toma os 160px que sobram e o campo (${mAbaixoDoTeclado.campo.topo}–${mAbaixoDoTeclado.campo.base}) passa ${mAbaixoDoTeclado.campo.base - 160}px por baixo do teclado — o mesmo caso de COMPACTAR; a medida enxerga o teclado`);
+      else anota(`568×320 com o teclado do iOS de 160px: ${JSON.stringify({ folha: f1(mAbaixoDoTeclado.folhaH), campo: mAbaixoDoTeclado.campo, naFolha: mAbaixoDoTeclado.campoNaFolha })} — o caso que a regra não resolve mudou, ou a medida não vê o teclado`);
+      // O Galaxy Fold a 2× e a varredura das linhas de estado ficam por ÚLTIMO: numa tela de 280px a 2× o
+      // cabeçalho passa da largura, o Chrome do celular encolhe a página pra ele caber (a janela vira ~8%
+      // maior em px de CSS) e o `visualViewport` fica com zoom depois — as células do teclado do iOS, que
+      // vivem do `visualViewport`, medem outra coisa (o controle delas acusa).
+      const CELULA_DO_FOLD = { id: '280×653 (Fold) a 2×, teclado de 300', w: 280, h: 653, esc: 2, kb: { modo: 'janela', px: 300 }, resolve: true };
+      await conferirCelula(CELULA_DO_FOLD);
+      const velhaDoFold = await p6.addStyleTag({ content: '.conversa-folha { height: min(70dvh, 100%) !important; }' });
+      const mFoldVelho = await celulaConversa(CELULA_DO_FOLD);
+      if (!tudoAVista(mFoldVelho)) ok(`controle: ${CELULA_DO_FOLD.id} com a altura de antes: folha ${f1(mFoldVelho.folhaH)}px, campo em ${mFoldVelho.campo.topo}–${mFoldVelho.campo.base} numa janela de ${mFoldVelho.vp[1]}px — fora, como a auditoria mediu`);
+      else anota(`controle: ${CELULA_DO_FOLD.id} com a altura de antes o campo CABE — a medida não enxerga o defeito`);
+      await p6.evaluate((el) => el.remove(), velhaDoFold);
+      // A linha de estado QUEBRA, e cada linha a mais é 1rem que o piso do CSS tem que ter somado: em
+      // pt/en/es/fr, com a pessoa PERTO (a frase mais longa: "a menos de 1 km") e longe, em 5 larguras
+      // de 280 a 568px e a 1×, 1,5× e 2×. O piso TEM que cobrir o que o DOM precisa em todas — frase
+      // mais longa que apareça um dia (um idioma novo) reprova aqui em vez de tirar o campo da folha.
+      let coberturas = 0, maisLinhas = 0;
+      for (const lang of ['pt', 'en', 'es', 'fr']) {
+        for (const perto of [true, false]) {
+          await p6.evaluate(([l, perto]) => {
+            setLang(l);
+            const centro = AppState.currentPlace.mapa.centro;
+            const pessoa = Presenca.online.find((x) => x.id === '183164343');
+            pessoa.lat = perto ? centro[0] + 0.0001 : centro[0] + 80;
+            pessoa.lon = perto ? centro[1] : centro[1] + 120;
+            presencaRenderConversa();
+          }, [lang, perto]);
+          for (const w of [280, 320, 360, 412, 568]) {
+            for (const esc of [1, 1.5, 2]) {
+              await janela6(w, 900, esc);
+              const m = await p6.evaluate(medirConversa);
+              coberturas++;
+              maisLinhas = Math.max(maisLinhas, m.linhasDoEstado);
+              if (m.piso < m.precisa - 1.5) anota(`${lang}, ${perto ? 'perto' : 'longe'}, ${w}px a ${esc}×: o piso do CSS (${f1(m.piso)}px) não cobre o DOM (${f1(m.precisa)}px) com a linha de estado em ${m.linhasDoEstado} linhas — a frase quebrou além dos degraus do CSS`);
+            }
+          }
+        }
+      }
+      await p6.evaluate(() => {
+        setLang('pt');
+        const centro = AppState.currentPlace.mapa.centro;
+        const pessoa = Presenca.online.find((x) => x.id === '183164343');
+        pessoa.lat = -23.5329; pessoa.lon = -46.6395;
+        presencaRenderConversa();
+      });
+      if (maisLinhas >= 3) ok(`o piso cobre a linha de estado quebrada em ${coberturas} combinações (pt/en/es/fr, perto e longe, 280–568px, 1×–2×); chegou a ${maisLinhas} linhas (controle: a medida VÊ a quebra)`);
+      else anota(`controle: a linha de estado nunca passou de ${maisLinhas} linha(s) em ${coberturas} combinações — o texto não quebrou e a medida não distinguiria nada`);
+      // O teclado emulado TEM que ter encolhido a janela (controle do instrumento): nas
+      // células com `janela`, `innerHeight` é a altura de tela menos o teclado.
+      await p6.evaluate(() => { delete window.visualViewport.height; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+      await janela6(393, 851, 1);
+      await p6.evaluate(() => closeModal('conversaModal'));
+      await fim6();
+
+      // ── R21-5-07 · a folha do pedido recebido em janela baixa ─────────────
+      const dadosDoPedido = (foto) => ({ venueID: '205522459.2055159053.3242788', name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — Centro, São Paulo', categories: ['BAKERY', 'COFFEE_SHOP'], updateTypeKey: 'IMAGE', imageUrl: foto ? 'https://venue-image.waze.com/thumbs/thumb700_' + foto : null, lat: -23.5, lon: -46.6, region: 'row' });
+      const medirPedido = () => {
+        const f = document.getElementById('pedidoModal').firstElementChild;
+        const fr = f.getBoundingClientRect();
+        const el = (id) => document.getElementById(id);
+        const aVista = (id) => {
+          const e = el(id); const r = e.getBoundingClientRect();
+          if (!r.width || !r.height) return null;
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const noVisor = cy >= 0 && cy <= innerHeight && cy >= fr.top && cy <= fr.bottom;
+          const q = noVisor ? document.elementFromPoint(cx, cy) : null;
+          return noVisor && !!q && (q === e || e.contains(q));
+        };
+        const foto = el('pedidoFoto'), img = el('pedidoFotoImg');
+        const escondida = foto.classList.contains('hidden');
+        const wr = foto.getBoundingClientRect(), ir = img.getBoundingClientRect();
+        return {
+          vp: [innerWidth, innerHeight], folhaH: fr.height, rola: f.scrollHeight > f.clientHeight + 1,
+          fotoH: escondida ? null : wr.height, carregada: img.complete && img.naturalWidth > 1, natural: [img.naturalWidth, img.naturalHeight],
+          imgIgualAoItem: escondida || (Math.abs(ir.height - wr.height) < 0.5 && Math.abs(ir.width - wr.width) < 0.5),
+          objectFit: getComputedStyle(img).objectFit, nome: aVista('pedidoNome'), wme: aVista('pedidoWme'), end: aVista('pedidoEnd'),
+        };
+      };
+      const celulaPedido = async (c, foto, { esperaFoto = true } = {}) => {
+        await janela6(c.w, c.h, c.esc);
+        await p6.evaluate((d) => abrirPedidoRecebido(d, 'cafanha'), dadosDoPedido(foto));
+        await esperar(e6, () => !document.getElementById('pedidoModal').classList.contains('hidden'), 'o pedido da 6c não abriu');
+        if (foto && esperaFoto) await esperar(e6, () => { const i = document.getElementById('pedidoFotoImg'); return i.complete && i.naturalWidth > 1; }, `a foto ${foto} do pedido da 6c não carregou`);
+        await quadros6(); await quadros6();
+        return p6.evaluate(medirPedido);
+      };
+      const fechaPedido = async () => { await p6.evaluate(() => closeModal('pedidoModal')); await fim6(); };
+      const PEDIDO_CELULAS = [
+        // O que CABE hoje: a foto segue com os 150px e a folha não rola.
+        { id: '393×851 a 1×', w: 393, h: 851, esc: 1, cabe: true },
+        { id: '360×640 a 1×', w: 360, h: 640, esc: 1, cabe: true },
+        // O que NÃO cabia: nome e ↗ (a única ação) passam a aparecer sem rolar.
+        { id: '568×320 deitado a 1×', w: 568, h: 320, esc: 1, cede: true },
+        { id: '667×375 deitado a 1,5×', w: 667, h: 375, esc: 1.5, cede: true },
+        { id: '844×390 deitado a 1×', w: 844, h: 390, esc: 1, cede: true },
+        { id: '732×412 deitado a 1×', w: 732, h: 412, esc: 1, cede: true },
+      ];
+      for (const c of PEDIDO_CELULAS) {
+        for (const foto of ['x', 'v']) {
+          const m = await celulaPedido(c, foto);
+          const rotulo = `${c.id}, foto ${foto === 'x' ? '16:9' : '9:16'}`;
+          if (!m.carregada || m.objectFit !== 'cover' || !m.imgIgualAoItem) anota(`${rotulo}: a foto não está enquadrada (${JSON.stringify({ carregada: m.carregada, objectFit: m.objectFit, igual: m.imgIgualAoItem })})`);
+          if (c.cabe) {
+            if (m.fotoH === 150 && !m.rola && m.nome && m.wme && m.end) ok(`${rotulo}: a foto segue com 150px, a folha não rola e o nome, o ↗ e o endereço aparecem`);
+            else anota(`${rotulo}: cabia e mudou — ${JSON.stringify(m)}`);
+          } else if (c.cede) {
+            if (m.nome && m.wme && m.fotoH >= 71.5 && m.fotoH < 150) ok(`${rotulo}: a foto cedeu pra ${f1(m.fotoH)}px (folha de ${f1(m.folhaH)}px) e o nome e o ↗ aparecem sem rolar`);
+            else anota(`${rotulo}: o nome e o ↗ não aparecem sem rolar — ${JSON.stringify(m)}`);
+          }
+          await fechaPedido();
+        }
+      }
+      // SEM foto o corpo já aparecia (a foto some e não pesa); COM a foto ainda SEM carregar (a
+      // rede lenta) a caixa já tem a mesma altura que terá depois — a foto não "pula" ao chegar.
+      const cSem = PEDIDO_CELULAS[2];
+      const mSem = await celulaPedido(cSem, null);
+      if (mSem.fotoH === null && mSem.nome && mSem.wme) ok('sem foto, a folha do pedido em 568×320 mostra o nome e o ↗ (a foto escondida não pesa)');
+      else anota(`sem foto, a folha do pedido em 568×320: ${JSON.stringify(mSem)}`);
+      await fechaPedido();
+      const mLenta = await celulaPedido(cSem, 'l', { esperaFoto: false });
+      if (!mLenta.carregada && mLenta.fotoH >= 71.5 && mLenta.fotoH < 150) ok(`com a foto ainda SEM carregar a caixa já tem ${f1(mLenta.fotoH)}px (a mesma de depois) e o nome e o ↗ aparecem`);
+      else anota(`foto lenta em 568×320: ${JSON.stringify(mLenta)} (esperava a foto sem carregar e a caixa em 72–150px)`);
+      soltarFotoLenta();
+      await esperar(e6, () => { const i = document.getElementById('pedidoFotoImg'); return i.complete && i.naturalWidth > 1; }, 'a foto lenta da 6c não chegou');
+      const mDepois = await p6.evaluate(medirPedido);
+      if (Math.abs(mDepois.fotoH - mLenta.fotoH) < 0.5) ok('a foto lenta chega e a caixa não muda de altura');
+      else anota(`a caixa da foto lenta mudou de ${f1(mLenta.fotoH)} pra ${f1(mDepois.fotoH)}px ao carregar`);
+      await fechaPedido();
+      // CONTROLE: com a foto fixa de antes (150px, sem encolher) o nome e o ↗ ficam FORA em 568×320
+      // — a medida enxerga o defeito — e em 393×851 seguem à vista (o caso que cabia).
+      const velhaFoto = await p6.addStyleTag({ content: '.pedido-foto { flex-shrink: 0 !important; min-height: 0 !important; }' });
+      const mVelha = await celulaPedido(PEDIDO_CELULAS[2], 'x');
+      if (!mVelha.nome && !mVelha.wme && mVelha.fotoH === 150) ok('controle: com a foto fixa de antes, em 568×320 o nome e o ↗ ficam FORA da folha sem rolar — a medida enxerga o defeito');
+      else anota(`controle: com a foto fixa de antes, 568×320 mostra ${JSON.stringify(mVelha)} — a medida não distinguiria nada`);
+      await fechaPedido();
+      const mVelhaRetrato = await celulaPedido(PEDIDO_CELULAS[0], 'x');
+      if (mVelhaRetrato.nome && mVelhaRetrato.wme && mVelhaRetrato.fotoH === 150) ok('controle: com a foto fixa de antes, o retrato 393×851 é igual (o que cabia já era assim)');
+      else anota(`controle: o retrato com a foto fixa de antes: ${JSON.stringify(mVelhaRetrato)}`);
+      await fechaPedido();
+      await p6.evaluate((el) => el.remove(), velhaFoto);
+      // ── o selo nas telas MAIS estreitas ───────────────────────────────────
+      // O Galaxy Fold (280px) e o iPhone SE de 1ª geração (320px): o cabeçalho é o mais apertado que
+      // existe, e o selo não pode passar da borda do botão nem tirar o toque do vizinho — nem a 2×. Aqui
+      // no FIM do bloco, depois de todo toque: a 2× o Chrome do celular encolhe a página pra o cabeçalho
+      // caber (a janela vira ~8% maior em px de CSS), e o toque seguinte, com a janela de volta, errava
+      // o alvo (a lista abria e a linha de quem está online ficava sob o título da seção).
+      const selosEstreitos = {};
+      for (const [w, h] of [[280, 653], [320, 568]]) {
+        for (const esc of [1, 1.5, 2]) {
+          await janela6(w, h, esc);
+          for (const est of SELO_ESTADOS.slice(0, 2)) {
+            await preparaSelo(est);
+            await quadros6();
+            selosEstreitos[`${est.n}@${esc}@${w}px`] = await p6.evaluate(medirSelo);
+          }
+        }
+      }
+      conferirSelos(selosEstreitos, 'nas telas de 280px (o Galaxy Fold) e 320px (o iPhone SE de 1ª geração), a 1×, 1,5× e 2×');
+      await janela6(393, 851, 1);
+    } finally {
+      try { soltarFotoLenta(); } catch (e) { /* a rota não chegou a existir */ }
+      await ctx6.close();
+    }
+  }
   await ana.page.fill('#conversaInput', 'isso é fachada ou é a sala?');
   await ana.page.tap('#conversaEnviar');
   await esperar(ana, () => document.querySelectorAll('#conversaMsgs .conversa-pedido').length === 1, 'o cartão não ficou na conversa da ana');
