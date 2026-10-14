@@ -17598,6 +17598,13 @@ function vigiarPlacar() {
         // O texto cresce sem a célula mudar de largura: a ALTURA do rótulo
         // denuncia (a fonte maior), como os filhos do corpo na irmã.
         for (const celula of grade.children) for (const p of celula.children) obs.observe(p);
+        // O PLACAR inteiro também (D2, R15-8-03): o aviso "Sua sessão vence em N dias" mora dentro dele e
+        // FORA da grade, então quando ele aparecia (ou saía) o placar mudava de altura, a pilha do card
+        // com ele, e ninguém refazia a conta — o 2×2 seguia ligado e a barra ✕ ↑ ✓ passava da janela até
+        // o próximo card (MEDIDO: 360×740 a 1,5×, barra de 712 a 762 numa janela de 740). Em regime custa
+        // zero: o observer só dispara quando o tamanho MUDA, e o callback segue só agendando (gotcha #35).
+        const placar = document.getElementById('placar');
+        if (placar) obs.observe(placar);
     }
     window.addEventListener('resize', agendar);
 }

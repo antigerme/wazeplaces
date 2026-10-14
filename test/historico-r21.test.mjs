@@ -344,3 +344,63 @@ test('R21-7-04 · histórico vazio: nenhuma linha, nenhuma frase solta; e o pain
     'os números da tela não estão atrás do `aria-hidden`, depois da frase');
   assert.doesNotMatch(corpo, /toLocaleString/, 'as linhas do Histórico passaram a formatar a contagem');
 });
+
+// ═══ D2 · o aviso de sessão que aparece (ou some) refaz a medida do placar ════════════════════════
+//
+// A vigia do placar (`vigiarPlacar`) observava a grade e os `<p>` das células. O aviso "Sua sessão vence em
+// N dias" (`#avisoSessao`) mora DENTRO do `#placar`, FORA da grade: ao aparecer o placar crescia, a pilha do
+// card com ele, o 2×2 seguia ligado e a barra ✕ ↑ ✓ passava da janela até o próximo card. O smoke de layout
+// mede isso no navegador de verdade (bloco "o aviso de sessão que aparece ou some REFAZ a medida do 2×2").
+// Aqui: o `#placar` está entre os alvos do observer, e a decisão acompanha a altura nos DOIS sentidos.
+function placarDeMentira({ comPlacar = true } = {}) {
+  const classes = new Set();
+  const quadros = [];
+  const estado = { aviso: false };
+  const celulas = [{ children: [{}, { getClientRects: () => [1], clientWidth: 77 }] }];   // rótulo de 90 px numa célula de 77: sobra
+  const grade = { isConnected: true, children: celulas, getClientRects: () => [1],
+    classList: { contains: (c) => classes.has(c), add: (c) => classes.add(c), remove: (c) => classes.delete(c) } };
+  // A pilha do card com o 2×2 ligado: 731 sem o aviso, 781 com ele (a janela tem 740); sem o 2×2, 716.
+  const pilha = { getBoundingClientRect: () => ({ bottom: classes.has('placar-2x2') ? (estado.aviso ? 781 : 731) : 716 }) };
+  const placar = { id: 'placar' };
+  const card = {};
+  const medidasDaBarra = new WeakMap([[card, { medir() {}, cabe: () => true }]]);
+  const document = { getElementById: (id) => ({ placarGrid: grade, cardStack: pilha, placar: comPlacar ? placar : null })[id] || null,
+    querySelector: () => card, createRange: () => ({ selectNodeContents() {}, getBoundingClientRect: () => ({ width: 90 }) }) };
+  class RO { constructor(cb) { this.cb = cb; RO.ultimo = this; this.alvos = []; } observe(a) { this.alvos.push(a); } }
+  new Function('document', 'TOLERANCIA_ARREDONDAMENTO_PX', 'requestAnimationFrame', 'ResizeObserver', 'innerHeight', 'window', 'medidasDaBarra',
+    'let medirOPlacarDeNovo = () => {};\nlet medirOPlacarComOCardNovo = () => {};\n' + fatiar('vigiarPlacar') + '\nvigiarPlacar();')(
+    document, 2, (f) => quadros.push(f), RO, 740, { addEventListener() {} }, medidasDaBarra);
+  const rodar = () => { while (quadros.length) quadros.shift()(); };
+  return { classes, estado, placar, RO, rodar };
+}
+
+test('D2 · a vigia do placar observa o `#placar` inteiro (o aviso de sessão mora nele, fora da grade)', () => {
+  const m = placarDeMentira();
+  assert.ok(m.RO.ultimo.alvos.includes(m.placar), 'o `#placar` não está entre os alvos do ResizeObserver: o aviso muda a altura e ninguém refaz a conta');
+  // CONTROLE: a grade e a célula seguem observadas (o conserto soma, não troca).
+  assert.ok(m.RO.ultimo.alvos.length >= 3, `o observer perdeu os alvos de antes (a grade e as células): ${m.RO.ultimo.alvos.length}`);
+  // Sem o `#placar` na página (a tela de entrada antes de montar), a vigia liga do mesmo jeito.
+  assert.doesNotThrow(() => placarDeMentira({ comPlacar: false }), 'a vigia lançou sem o `#placar` no DOM');
+});
+
+test('D2 · o aviso aparece: o 2×2 que deixaria a barra fora da janela DESLIGA; o aviso some: volta — pelo callback do observer', () => {
+  const m = placarDeMentira();
+  m.rodar();
+  assert.ok(m.classes.has('placar-2x2'), 'CONTROLE: sem o aviso a pilha cabe (731 de 740) e o 2×2 devia estar ligado');
+  m.estado.aviso = true;      // `atualizarAvisoDeSessao` mostrou o aviso: o `#placar` cresceu
+  m.RO.ultimo.cb();           // o que o ResizeObserver do `#placar` faz
+  m.rodar();
+  assert.equal(m.classes.has('placar-2x2'), false, 'com o aviso a pilha passa da janela (781 de 740) e o 2×2 seguiu ligado');
+  m.estado.aviso = false;     // `esquecerPrazoDaSessao`/`guardarPrazoDaSessao` o esconderam
+  m.RO.ultimo.cb();
+  m.rodar();
+  assert.ok(m.classes.has('placar-2x2'), 'o aviso saiu e o 2×2 não voltou sozinho');
+});
+
+test('D2 (estrutura): o callback do observer segue só AGENDANDO — o placar inteiro não ganhou escrita síncrona (gotcha #35)', () => {
+  const vigia = fatiar('vigiarPlacar');
+  const obs = vigia.slice(vigia.indexOf('const obs = new ResizeObserver('), vigia.indexOf("window.addEventListener('resize'"));
+  assert.match(obs, /new ResizeObserver\(agendar\)/, 'o observer deixou de chamar só o `agendar`');
+  assert.match(obs, /obs\.observe\(placar\)/);
+  assert.equal((vigia.match(/new ResizeObserver\(/g) || []).length, 1, 'a vigia ganhou um segundo observer (um só, com todos os alvos)');
+});

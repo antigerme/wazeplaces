@@ -8794,6 +8794,127 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+// ── Placar: o aviso de sessão que aparece ou some REFAZ a medida do 2×2 (D2 / R15-8-03, lote 25) ──
+//
+// O placar em 2×2 só liga se a pilha do card CABE na janela (`vigiarPlacar`). A vigia observava a grade e os
+// `<p>` das células, mas o aviso "Sua sessão vence em N dias" mora DENTRO do `#placar`, FORA da grade: quando
+// ele aparecia, o placar crescia ~20 px, o 2×2 seguia ligado, a pilha passava da janela e a barra ✕ ↑ ✓ saía
+// do alcance do dedo — até o próximo card (MEDIDO: 360×740 a 1,5×, barra de 712 a 762 numa janela de 740). A
+// mesma mudança de altura vinda de dentro da grade (a 3ª linha "de N na região") sempre foi tratada sozinha.
+// O bloco chama só `atualizarAvisoDeSessao()` — NUNCA `medirOPlacarDeNovo()` — e espera o app se acertar:
+//   · PRÉ-CONDIÇÃO, no mesmo tique em que o aviso aparece: o 2×2 ainda ligado e a barra fora da janela (sem
+//     ela o cenário não exercita o defeito, e "corrigido" seria só um card que cabia de qualquer jeito);
+//   · depois de assentar: o 2×2 desligou, a barra voltou à janela e o estado é o MESMO que a medida feita à
+//     mão dá (o defeito era exatamente "a mão acerta e o app sozinho não");
+//   · o aviso some: o estado volta ao de antes (o 2×2 liga de novo sozinho). Os dois sentidos, nos dois motores;
+//   · CONTROLES: onde o aviso não precisa mudar nada (412×915 a 1,5×, 360×740 a 1×) o app não muda nada.
+{
+  const onde = `placar/aviso de sessão (${MOTOR})`;
+  const FX = JSON.parse(readFileSync(new URL('./fixtures-paises.json', import.meta.url), 'utf8'))
+    .map((f) => ({ ...f, imageUrls: (f.imageUrls || []).map(() => foto) }));
+  // Os pedidos mais PESADOS de cada tipo (a pilha mais alta é a que expõe o defeito).
+  const candidatos = (() => {
+    const porTipo = {};
+    for (const f of FX) { const w = JSON.stringify(f).length; if (!porTipo[f.purType] || w > porTipo[f.purType].w) porTipo[f.purType] = { w, f }; }
+    return Object.values(porTipo).map((x) => x.f);
+  })();
+  const INSTALAR = () => {
+    window.__lerPlacar = () => {
+      const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const botoes = ['reject', 'skip', 'read'].map((c) => card.querySelector('.card-btn-' + c));
+      const alcancados = botoes.map((b) => {
+        const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        if (x < 0 || x > innerWidth || y < 0 || y > innerHeight) return false;
+        const el = document.elementFromPoint(x, y);
+        return !!el && (el === b || b.contains(el));
+      });
+      return { p2x2: document.getElementById('placarGrid').classList.contains('placar-2x2'), aperta: card.classList.contains('card-aperta'),
+        barra: Math.round(botoes[2].getBoundingClientRect().bottom), janela: innerHeight, alcancados,
+        aviso: !document.getElementById('avisoSessao').classList.contains('hidden') };
+    };
+  };
+  // O app se ACERTA sozinho: lê o estado a cada par de quadros até ele ficar parado 3 leituras seguidas.
+  const assentarPlacar = async (page) => {
+    let ultimo = null, iguais = 0;
+    for (let i = 0; i < 80 && iguais < 3; i++) {
+      await doisQuadros(page);
+      const e = JSON.stringify(await page.evaluate(() => window.__lerPlacar()));
+      iguais = e === ultimo ? iguais + 1 : 0; ultimo = e;
+    }
+    return JSON.parse(ultimo);
+  };
+  const igual = (a, b) => a.p2x2 === b.p2x2 && a.aperta === b.aperta && a.barra === b.barra;
+  const cenarios = [
+    { nome: '360×740 a 1,5×', vp: { width: 360, height: 740 }, escala: 1.5, exigeDefeito: true },
+    { nome: '412×915 a 1,5×', vp: { width: 412, height: 915 }, escala: 1.5, exigeDefeito: false },
+    { nome: '360×740 a 1×', vp: { width: 360, height: 740 }, escala: 1, exigeDefeito: false },
+  ];
+  for (const cen of cenarios) {
+    const ctx = await browser.newContext({ viewport: cen.vp, serviceWorkers: 'block', locale: 'pt-BR' });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && typeof atualizarAvisoDeSessao === 'function', 'o app carregar');
+    if (cen.escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * cen.escala}px !important; }` });
+    await page.evaluate(INSTALAR);
+    let exercitaram = 0, semMudanca = 0;
+    for (const pedido of candidatos) {
+      const id = `${onde}: ${cen.nome} · ${pedido.purType}`;
+      await page.evaluate(({ pl }) => {
+        setLang('pt'); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.stats = { read: 12, rejected: 3, skipped: 1 }; AppState.serverTotal = 40;
+        AppState.sessaoExpiraEm = null; atualizarAvisoDeSessao();
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+      }, { pl: pedido });
+      const antes = await assentarPlacar(page);
+      checa(antes.aviso === false, `${id}: o aviso de sessão estava na tela antes de o teste o pedir`, JSON.stringify(antes));
+      // O aviso APARECE (só `atualizarAvisoDeSessao`, como o `updatePendingCount` e o `guardarPrazoDaSessao`
+      // fazem). `logo` é o MESMO tique, antes do observer e do quadro: como estava o app de antes de D2.
+      const logo = await page.evaluate(() => {
+        AppState.sessaoExpiraEm = Math.floor(Date.now() / 1000) + 2 * 86400; atualizarAvisoDeSessao();
+        return window.__lerPlacar();
+      });
+      const exercita = logo.aviso && antes.p2x2 && logo.p2x2 && (logo.barra > logo.janela || !logo.alcancados.every(Boolean));
+      const com = await assentarPlacar(page);
+      // A medida feita À MÃO, depois de o app já ter assentado sozinho: não pode mudar mais nada.
+      await page.evaluate(() => medirOPlacarDeNovo());
+      const mao = await assentarPlacar(page);
+      checa(igual(com, mao), `${id}: o app sozinho NÃO chegou ao estado que a medida à mão dá (o aviso de sessão não refez a medida do placar)`,
+        JSON.stringify({ sozinho: com, aMao: mao }));
+      checa(com.aviso && com.alcancados.every(Boolean) && com.barra <= com.janela,
+        `${id}: com o aviso na tela a barra ✕ ↑ ✓ não está ao alcance do dedo (barra em ${com.barra} numa janela de ${com.janela})`, JSON.stringify(com));
+      // O aviso SOME: o estado volta ao de antes (a vigia reavalia no outro sentido).
+      await page.evaluate(() => { AppState.sessaoExpiraEm = null; atualizarAvisoDeSessao(); });
+      const depois = await assentarPlacar(page);
+      checa(depois.aviso === false && igual(depois, antes), `${id}: o aviso saiu e o placar/a barra não voltaram ao de antes`,
+        JSON.stringify({ antes, depois }));
+      checa(depois.alcancados.every(Boolean) && depois.barra <= depois.janela, `${id}: depois de o aviso sair a barra não está ao alcance`, JSON.stringify(depois));
+      if (exercita) {
+        exercitaram++;
+        checa(com.p2x2 === false, `${id}: com o aviso o 2×2 seguiu ligado e a barra fora da janela (${logo.barra} > ${logo.janela}): a vigia não reavaliou`,
+          JSON.stringify({ logo, com }));
+      }
+      if (igual(mao, antes)) semMudanca++;
+    }
+    // O cenário do defeito TEM que ter exercitado o defeito em algum card; os de controle, ter exercitado o
+    // "nada a mudar" — senão a ausência de achado é a ausência do caso (gotcha #28).
+    if (cen.exigeDefeito) checa(exercitaram >= 1, `${onde}: ${cen.nome}: CONTROLE — nenhum dos ${candidatos.length} cards exercitou o defeito (2×2 ligado e a barra fora da janela no mesmo tique em que o aviso aparece)`);
+    else checa(semMudanca >= 1, `${onde}: ${cen.nome}: CONTROLE — nenhum card ficou igual com o aviso (o caso "nada a mudar" não foi exercitado)`);
+    checa(erros.length === 0, `${onde}: ${cen.nome}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 // ── Foto de perfil: quando ela falha, some — nunca vira ícone de quebrado ──
 //
 // O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a
