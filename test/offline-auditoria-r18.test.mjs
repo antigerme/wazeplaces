@@ -234,6 +234,7 @@ test('R18-4-05: a triagem diz "a fila NUNCA foi gravada" — não "preparação 
   assert.match(s, /a fila NUNCA foi gravada na base/, `DEFEITO: a causa não é dita:\n${s}`);
   assert.doesNotMatch(s, /preparação de OUTRA fila/, 'DEFEITO: a triagem aponta a causa errada (outra fila)');
   assert.match(s, /a gravação da fila na base falhou 1 vez\(es\) no diário .*FALTA DE ESPAÇO/, 'a falha do diário não é dita');
+  assert.doesNotMatch(s, /carimbo da fila guardada \(ausente nesta versão\)/, 'a base lida e vazia saiu como "ausente nesta versão"');
   // CONTROLE: com fila na base e sem a falha, a frase de sempre fica.
   const outra = secaoOffline(triagem({ offline: { ...OFFLINE_BASE(), resultado: 'pronto', precisaVarrer: false } }));
   assert.match(outra, /preparação de OUTRA fila/);

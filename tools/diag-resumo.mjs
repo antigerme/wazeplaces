@@ -184,7 +184,8 @@ else if (off.ligado === false) {
   // era outra). Carimbos são a hora de gravação: o que importa é se são IGUAIS.
   if (off.ligado) {
     const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : String(x));
-    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : undefined;
+    // `filaGuardada: null` é a base LIDA e vazia (R18-4-05): "—", não "ausente nesta versão".
+    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : (off.filaGuardada === null ? null : undefined);
     if (off.cobreAFila === undefined) out(`a última preparação cobre a fila guardada: ${AUSENTE}`);
     else {
       out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? (Number.isFinite(off.segurarAteEm) ? 'só depois da pausa' : 'sim') : 'não'}`);
