@@ -169,7 +169,7 @@ function montarMarcarTodos({ fila, pedaco = 2, placar = 40, serverTotal = null, 
     aoMudarAFilaPorBaixo: () => { refeitas.push(AppState.queue.map((p) => p.updateRequestID)); if (aoMudar) aoMudar(); },
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats'], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats'], deps);
   const gravado = () => JSON.parse(guardado.get(STATS_KEY) || 'null');
   const soltar = (resp) => portoes.shift()(resp);
   const fila_ = () => AppState.queue.map((p) => p.updateRequestID);

@@ -1140,7 +1140,7 @@ function abaSemPerfil(comp, { token = 'tok-x' } = {}) {
   const nomes = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'aoEntrarOutraContaEmOutraAba',
     'outraContaTomouOAparelhoDaQueCaiu',
     'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'contaDestaAbaEmDuvida', 'conferirContaDestaAba', 'marcaDaSessao', 'marcaDestaAba',
-    'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
+    'acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'relerPlacarDeOutraAba', 'placarGuardado', 'refazerPerfilSeFaltar'];
   Object.assign(aba, montar(nomes, deps), { AppState, deps, soltarPerfil: (perfil) => {
     if (perfil) AppState.profile = perfil;
     soltarPerfil();

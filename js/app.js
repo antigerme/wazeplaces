@@ -12595,6 +12595,7 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // e as fotos que as exclusões de quem saiu tiraram do mapa (R12-3-02).
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
+    alvosDoLoteDeLidosNoAr.clear();
     pedidosDoLoteSemEnviar.clear();
     escritasEsperandoAVez.clear();
     idasSemRespostaGuardadas.clear();
@@ -16429,8 +16430,11 @@ function acoesTravadas() {
     // E a conta DESTA aba sendo conferida, com o aparelho tomado por outra
     // sessão (`contaDestaAbaEmDuvida`, R6-1-04) — só depois de o aviso de outra
     // aba a acender (`AppState.contaEmDuvida`); a dúvida mesma é lida na hora.
+    // E o card que é ALVO de um "Marcar todos" ainda no ar, mesmo depois de a
+    // queda ou a conta em dúvida desligarem o `loteDeLidosEmVoo` (R17-2-05).
     return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
         || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0 || aprovacaoDaTelaNoAr()
+        || loteDeLidosDaTelaNoAr()
         || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()));
 }
 
@@ -16466,6 +16470,23 @@ function aprovacaoDaTelaNoAr() {
     return aprovacoesNoAr.has(chave) || (aprovacoesDaQueda.has(chave) && aprovacoesDaQueda.get(chave) === AppState.fetchEpoch);
 }
 
+// O card da tela é ALVO de um "Marcar todos" que ainda está no ar (R17-2-05).
+// Os pedidos do lote seguem NA FILA (e em `pedidosEmAndamento`) até a resposta, e
+// o `loteDeLidosEmVoo` os trava — mas a queda com renovação e a conta em dúvida
+// resolvida como a mesma o desligam de propósito ("o lote morto não trava a sessão
+// que vem"), e o pedaço continua no ar no Waze. O lote não usa a fila de saída,
+// então nada dizia ao ✕ que aquele pedido já tinha uma decisão: o Waze recebia o
+// "lido" do lote e a rejeição do card (MEDIDO: o mesmo pedido lido e rejeitado em
+// nome da pessoa; ou um "lido" repetido e o "Já tratado por outro editor" sobre a
+// própria decisão). É o `aprovacoesDaQueda` para o lote: o card dele fica travado
+// até o fim do lote, em qualquer sessão — só ele, não a fila (os outros alvos nem
+// chegam à tela enquanto este espera).
+function loteDeLidosDaTelaNoAr() {
+    const p = AppState.currentPlace;
+    if (!p || p._treino) return false;
+    return alvosDoLoteDeLidosNoAr.has(chaveDoPedido(p));
+}
+
 // O que dizer a quem tocou com as ações travadas: cada trava pede uma espera, e
 // "espere o Desfazer" com nenhum Desfazer na tela manda a pessoa procurar um
 // botão que não existe. Sem sessão, a espera é a da sessão (a renovação pela
@@ -16481,7 +16502,7 @@ function avisoDaTrava() {
     // esperar também onde não há extensão nenhuma, logo antes do "a sessão não
     // vale mais" (R6-1-03).
     if (!AppState.authenticated) return extRenovando ? 'toast.esperaSessao' : 'api.error.noSession';
-    if (loteDeLidosEmVoo) return 'toast.esperaLote';
+    if (loteDeLidosEmVoo || loteDeLidosDaTelaNoAr()) return 'toast.esperaLote';
     if (escritasConferindo > 0) return 'toast.esperaSessao';
     // A conta desta aba sendo conferida (R6-1-04): também é esperar a sessão.
     if (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()) return 'toast.esperaSessao';
@@ -17897,6 +17918,13 @@ async function callWithRetry(fn, epoca = epocaDaSessao, aoEsperar = null) {
     while (result && !result.success && result.errorCategory === 'transient'
            && !semRede() && attempt < TRANSIENT_RETRY_ATTEMPTS) {
         const delay = TRANSIENT_RETRY_DELAYS_MS[attempt] || 5000;
+        // A sessão pode ter acabado ENQUANTO a ida estava no ar (a queda, o "Sair",
+        // a conta em dúvida): quem trocou a época já esvaziou o conjunto do "Sair",
+        // e marcar a espera agora o recolocaria com um pedido que não espera
+        // nada — o aviso nunca vem (a espera abaixo sai sem `aoEsperar(false)`) e
+        // o diálogo da sessão renovada dizia "1 pedido esperando envio será
+        // descartado" sem nada esperando (R17-1-05 = R17-2-02, MEDIDO).
+        if (outraSessao()) return sessaoTrocou();
         if (typeof aoEsperar === 'function') aoEsperar(true);
         await new Promise(r => setTimeout(r, delay));
         if (outraSessao()) return sessaoTrocou();
@@ -26571,6 +26599,13 @@ let loteDeLidosContado = null;
 // eles seria a segunda (MEDIDO: 8 lidos + 1 rejeitado pra 8 pedidos; e o lote
 // repetido contava o placar em dobro).
 let loteDeLidosEmVoo = false;
+// Os ALVOS do "Marcar todos" no ar, com a época da sessão que o começou. Ao
+// contrário do `loteDeLidosEmVoo`, a queda e a conta em dúvida NÃO o soltam: o
+// pedaço segue no ar no Waze, e o card de um alvo não pode receber outra decisão
+// até o lote acabar (`loteDeLidosDaTelaNoAr`, R17-2-05). Cada lote tira os seus no
+// `finally` — e só se a entrada ainda é a dele (a época bate): o "Sair" a esvazia,
+// e um lote da sessão nova pode já ter posto a sua para o mesmo pedido.
+const alvosDoLoteDeLidosNoAr = new Map();   // chave do pedido → época da sessão do lote
 // Quantos pedidos do lote no ar ainda não tiveram resposta. O indicador
 // "Enviando N…" conta DECISÕES, e o lote é UMA ação no `inFlightActions`: ele
 // dizia "Enviando 1…" com 5 pedidos no ar (auditoria da rodada 14, R14-8-10,
@@ -26696,6 +26731,7 @@ async function handleBatchMarkRead() {
     // no meio (`semOsJaDecididos`) — o ↻ trazia de volta, como card, o que o
     // lote já tinha marcado. Sai no `finally`, em QUALQUER desfecho.
     loteDeLidosEmVoo = true;
+    for (const p of alvos) alvosDoLoteDeLidosNoAr.set(chaveDoPedido(p), epoca);
     // O indicador conta os pedidos do lote no ar (ver `lidosDoLoteNoAr`).
     lidosDoLoteNoAr = alvos.length;
     marcarEmAndamento(alvos, true);
@@ -26897,6 +26933,10 @@ async function handleBatchMarkRead() {
         // soltar o que um lote da sessão nova travou. O mesmo com a contagem do
         // indicador (`lidosDoLoteNoAr`).
         if (epoca === epocaDaSessao) { loteDeLidosEmVoo = false; lidosDoLoteNoAr = 0; }
+        for (const p of alvos) {
+            const k = chaveDoPedido(p);
+            if (alvosDoLoteDeLidosNoAr.get(k) === epoca) alvosDoLoteDeLidosNoAr.delete(k);
+        }
         marcarEmAndamento(alvos, false);
         marcarLoteSemEnviar(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);

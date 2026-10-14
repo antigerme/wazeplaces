@@ -182,7 +182,7 @@ function montarMarcarTodos({ fila, decididos = new WeakSet(), resolvidos = [], p
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
   const h = montar(['chaveDoPedido', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'aprovacaoDelaJaPousou',
-    'desfechoDaAprovacaoDela', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'avisoDaTrava',
+    'desfechoDaAprovacaoDela', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava',
     'marcarEmAndamento', 'marcaDaSessao', 'marcaDestaAba', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
     'handleUnauthorized', 'refazerDepoisDo401', 'openBatchReadConfirm', 'handleBatchMarkRead'], deps);
   // O lote, e a conferência que ele abriu.

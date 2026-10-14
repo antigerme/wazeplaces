@@ -79,6 +79,9 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).
   if (nomes.includes('acoesTravadas') && !nomes.includes('aprovacaoDaTelaNoAr')) nomes = [...nomes, 'aprovacaoDaTelaNoAr'];
+  // E os ALVOS do "Marcar todos" no ar (`loteDeLidosDaTelaNoAr`, R17-2-05): função de verdade, mapa de verdade.
+  if (nomes.includes('acoesTravadas') && !nomes.includes('loteDeLidosDaTelaNoAr')) nomes = [...nomes, 'loteDeLidosDaTelaNoAr'];
+  if (nomes.includes('loteDeLidosDaTelaNoAr') && !('alvosDoLoteDeLidosNoAr' in deps)) deps.alvosDoLoteDeLidosNoAr = new Map();
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesNoAr' in deps)) deps.aprovacoesNoAr = new Set();
   if (nomes.includes('aprovacaoDaTelaNoAr') && !('aprovacoesDaQueda' in deps)) deps.aprovacoesDaQueda = new Map();
   // O refazer da fila sem gesto pergunta pela JANELA do Desfazer aberta, e o fim
@@ -686,6 +689,7 @@ function montarLoteNaTrocaDeSessao() {
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
     LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    alvosDoLoteDeLidosNoAr: new Map(),
     API: { getRegion: () => 'row', getSession: () => token, get sessionToken() { return token; }, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), destroySession: async () => ({ success: true }) },
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
@@ -704,7 +708,16 @@ test('V6: "Marcar todos" pendurado e a sessão cai — a sessão que VOLTA não 
   assert.equal(m.h.avisoDaTrava(), 'toast.esperaLote', 'PRÉ-CONDIÇÃO: o lote está no ar e trava o card');
   m.h.derrubarSessao('srv.err.cookiesExpired');
   m.AppState.authenticated = true;                  // a renovação pela extensão
+  // O card que NÃO é alvo do lote velho (um pedido que chegou depois) não nasce
+  // travado por ele (até 45 s). O card que É alvo segue travado até a resposta:
+  // o pedaço ainda está no ar no Waze, e outra decisão sobre ele seria a segunda
+  // (R17-2-05, a regra do `aprovacoesDaQueda` para o lote).
+  const alvoNaTela = m.AppState.currentPlace;
+  m.AppState.currentPlace = { venueID: 'v9', updateRequestID: 'u9' };
   assert.equal(m.h.acoesTravadas(), false, 'a sessão nova nasceu travada pelo lote da que caiu (até 45 s)');
+  m.AppState.currentPlace = alvoNaTela;
+  assert.equal(m.h.acoesTravadas(), true, 'R17-2-05: o card alvo do lote que segue no ar ficou decidível depois da queda');
+  m.AppState.currentPlace = { venueID: 'v9', updateRequestID: 'u9' };
   // Um lote NOVO, e o velho voltando no meio dele: o velho não solta a trava do
   // novo. (O novo leva só o que NÃO está em andamento — os do lote velho seguem
   // no ar; é a régua do V7 —, então um pedido que chegou depois.)
@@ -718,6 +731,8 @@ test('V6: "Marcar todos" pendurado e a sessão cai — a sessão que VOLTA não 
   m.portoes[1]({ success: true });
   await novo;
   assert.equal(m.h.acoesTravadas(), false, 'o lote novo terminou e a trava ficou');
+  // E os alvos de cada lote saem da trava quando o lote DELE acaba.
+  assert.equal(m.deps.alvosDoLoteDeLidosNoAr.size, 0, 'os alvos dos lotes ficaram no mapa depois do fim');
 });
 
 test('V6: o "Sair" com o lote no ar — quem entra não herda a trava', async () => {

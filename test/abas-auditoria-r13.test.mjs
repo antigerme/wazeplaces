@@ -352,7 +352,7 @@ async function marcarTodosComQueda(entrouDeNovo) {
     document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', ...NOMES_POUSO], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', ...NOMES_POUSO], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');

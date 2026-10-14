@@ -335,7 +335,7 @@ function abaEmDuvida() {
     // O ponto do botão de Filtros que o perfil atualiza (R13-7-02, da área do treino).
     atualizarSeloDeConquista() {},
     // O que a trava de verdade toca fora do card: nada travando, nada aberto.
-    aprovacaoDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
+    aprovacaoDaTelaNoAr: () => false, loteDeLidosDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
     dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, aplicarFocoDoTeclado() {},
     cancelarPendenciasDoLightbox() {}, aprovacoesAtravessamAQueda() {},
     // O lote da sessão que acabou deixa de contar no "Sair" (R16-1-03).

@@ -243,7 +243,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     // A volta do pedido numa fila refeita (V9) é medida em test/lote-autor.test.mjs.
     voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     // O foco que fica no card trocado debaixo dele (R5-3-07) é medido à parte,
     // em test/lightbox-foco-card.test.mjs: aqui só redesenha.
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
@@ -498,7 +498,7 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
     marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     Treino: { ativo: false, _salvo: null },   // o treino fechado (R7-3-05)
     ...r6Deps(log),
@@ -694,11 +694,11 @@ test('V5 401 com a conferência de OUTRA chamada em curso: espera o desfecho del
 
 test('L1 a conferência do 401 TRAVA as ações, como a janela do Desfazer', () => {
   const trava = new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente', 'escritasConferindo',
-    'loteDeLidosEmVoo', 'aprovacaoDaTelaNoAr', fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
+    'loteDeLidosEmVoo', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', fatiar('acoesTravadas') + '\nreturn acoesTravadas;');
   const AppState = { pendingAction: null, authenticated: true };
   const parado = () => false;   // nenhuma aprovação no ar (medido em test/lote-autor.test.mjs, A1)
-  assert.equal(trava(AppState, null, null, null, 0, false, parado)(), false, 'CONTROLE: sem nada pendente, nada trava');
-  assert.equal(trava(AppState, null, null, null, 1, false, parado)(), true,
+  assert.equal(trava(AppState, null, null, null, 0, false, parado, parado)(), false, 'CONTROLE: sem nada pendente, nada trava');
+  assert.equal(trava(AppState, null, null, null, 1, false, parado, parado)(), true,
     'com a escrita esperando a conferência, dava pra decidir de novo sobre o mesmo local');
 });
 
@@ -1020,7 +1020,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     carregarFilaDeSaida: () => [], pousosDaPagina: new Map(), offlineLigado: () => false, offlineLerPousos: () => [],
     voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
     // A aprovação no ar trava o card do pedido (A1, medido em test/lote-autor.test.mjs).
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     aplicarNosIrmaos: () => {},   // os irmãos (R12-3-03) são medidos à parte
     ...r6Deps(),
@@ -1454,7 +1454,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
   const respostas = [];
   let app = null;
   const deps = {
-    AppState, Lightbox: L, Treino: { ativo: false }, pedidosEmAndamento: new Set(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    AppState, Lightbox: L, Treino: { ativo: false }, pedidosEmAndamento: new Set(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(),
     canDisableUndo: () => true, estadoAprovando: () => {}, fotoDoLightboxNaTela: () => true, manterFocoNoLightbox: () => {},
     API: { aprovarPedido: () => new Promise((ok) => { respostas.push(() => ok(resposta)); }),
       getRegion: () => 'row', getCountry: () => 30 },
@@ -1480,7 +1480,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     paisDaFila: () => 30,         // o país do gesto, pra marca da presença (R7-6-05)
   };
   const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
-    'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
+    'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
     'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'esperarAVezContandoNoSair', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
@@ -1741,7 +1741,7 @@ function montarAprovacaoNaQueda() {
     stats: { read: 0, rejected: 0, skipped: 0 } };
   const respostas = [];
   const deps = {
-    AppState, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    AppState, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     callWithRetry: (fn) => fn(), API: { aprovarPedido: () => new Promise((ok) => respostas.push(ok)) },
     refazerDepoisDo401: async () => null, marcarEmAndamento: () => {}, refazerSelosSeOutroNaTela: () => {},
     aplicarTravaDeAcao: () => {}, contarConquista: () => log.push('conquista'), showToast: (m) => log.push('toast:' + m),
@@ -2799,7 +2799,7 @@ function edicaoQueOuve({ travado }) {
     document: { getElementById: (id) => els[id] || null }, atualizarAcoesDeFoto: () => {},
     acoesTravadas: () => travado, AppState: { authenticated: true, contaEmDuvida: false }, extRenovando: false,
     loteDeLidosEmVoo: null, escritasConferindo: travado ? 1 : 0, contaDestaAbaEmDuvida: () => false,
-    aprovacaoDaTelaNoAr: () => false, t: (k) => k,
+    aprovacaoDaTelaNoAr: () => false, loteDeLidosDaTelaNoAr: () => false, t: (k) => k,
     showToast: (msg) => { toasts.push(msg); return { dispensar() {} }; },
   };
   const intervalo = /^const AVISO_DA_TRAVA_INTERVALO_MS = \d+;$/m.exec(APP_SEM);
@@ -3455,7 +3455,7 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
     sessaoTrocou: () => ({ success: false, errorCategory: 'session_changed' }), navigator: { onLine: true },
     TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [],
     // A aprovação: o pouso e a trava do card são medidos noutros testes.
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), marcarEmAndamento: () => {}, refazerSelosSeOutroNaTela: () => {},
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), marcarEmAndamento: () => {}, refazerSelosSeOutroNaTela: () => {},
     voltarDaAprovacaoRecusada: () => {}, registrarPouso: () => log.push('pouso'), updateStats: () => {},
     contarConquista: () => {}, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {}, advanceQueue: () => {},
     aprovacaoPousouDepoisDaQueda: () => {}, decididosPorOutraAbaComCardAqui: decididos,

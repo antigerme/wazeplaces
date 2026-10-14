@@ -603,7 +603,7 @@ test('R12-2-04: o "Marcar todos" cujo pedaço pousa no meio da renovação avisa
     document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats', ...NOMES_AVISO], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats', ...NOMES_AVISO], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
