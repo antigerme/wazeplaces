@@ -736,7 +736,24 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
         const olhando = Presenca.aberta && presencaOlhando(Presenca.aberta) ? Presenca.aberta : null;
         if (olhando) {
             const c = Presenca.conversas.find((x) => x.id === olhando);
-            if (c) c.naoLidas = 0;
+            if (c) {
+                // A lista que chega DEPOIS de a conversa abrir, com a primeira
+                // página falhada ou parada, pode contar a mensagem que a tela
+                // não tem — o toque na pílula pede a lista e o toque na linha
+                // abre a conversa com ela ainda no ar, então o
+                // `presencaGuardarNaoVistoAoAbrir` leu a lista VELHA. Zerar sem
+                // registrar apagava a evidência, e o próximo "lida" (a mensagem
+                // vista ao vivo, a dívida paga no fechamento) cobria a conversa
+                // inteira: "Lida" antes da hora pra quem mandou (R19-5-F1). Vale
+                // o maior valor, como na abertura; com a página BOA na tela
+                // ("olhando é lida") nada muda, e se a conta sobrar o erro cai
+                // pro lado seguro (um "lida" a menos).
+                const hO = Presenca.historico.get(olhando);
+                if (hO && presencaPrimeiraPaginaAdiada(hO)) {
+                    hO.naoVistoAoAbrir = Math.max(hO.naoVistoAoAbrir || 0, (c.naoLidas || 0) - presencaVistaDe(olhando).n);
+                }
+                c.naoLidas = 0;
+            }
             Presenca.vivas.delete(olhando);
         }
         // A dívida que a página anterior deixou GUARDADA entra com a primeira
@@ -3569,6 +3586,11 @@ function presencaDiag() {
         lidaDevendo: Presenca.lidaDevendo.size,
         // E quantas têm o "lida" no ar agora (ver `presencaMarcarLida`).
         lidaNoAr: presencaComLidaNoAr().length,
+        // Quantas conversas abriram com mensagem que a pílula contava e a tela
+        // não mostrou, e a primeira página não chegou (`naoVistoAoAbrir`): é o
+        // porquê de um "lida" que deixou de sair (R19-5-F1). Só a contagem, sem
+        // ids.
+        semVerAoAbrir: [...Presenca.historico.keys()].filter((id) => presencaSemVerAoAbrir(id)).length,
         // O porquê da lista, como o servidor contou na última (ver o core).
         contagem: Presenca.contagem,
     };

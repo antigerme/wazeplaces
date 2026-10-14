@@ -308,6 +308,9 @@ else {
   if (Number(pa.lidaDevendo) > 0) {
     out(`nota: ${pa.lidaDevendo} ${Number(pa.lidaDevendo) === 1 ? 'conversa deve' : 'conversas devem'} o "lida" ao Waze — a "mensagem nova" de uma conversa já vista é isto, não mensagem que chegou.`);
   }
+  if (Number(pa.semVerAoAbrir) > 0) {
+    out(`nota: ${pa.semVerAoAbrir} ${Number(pa.semVerAoAbrir) === 1 ? 'conversa abriu' : 'conversas abriram'} com mensagem que a pílula contava e a tela não mostrou (a primeira página não chegou) — o "lida" fica retido até ela chegar; a mensagem segue não lida, não é falha de envio.`);
+  }
   if (Number(pa.lidaNoAr) > 0) {
     out(`nota: ${pa.lidaNoAr} ${Number(pa.lidaNoAr) === 1 ? 'conversa tem' : 'conversas têm'} o "lida" no ar — pra lista que chega agora, a conversa vale como lida (o que ele cobre); se ele falhar, ela volta a dever.`);
   }
