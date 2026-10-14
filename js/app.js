@@ -27997,6 +27997,25 @@ function saveFilters() {
     } catch (e) {}
 }
 
+// O que o armazenamento devolve de um filtro de ID (estado, área gerenciada): o que um
+// filtro LEGÍTIMO grava é vazio (`''`, `null`) ou um inteiro positivo (número ou os
+// dígitos que o seletor escreve). O resto — texto, objeto, `'0'`, `'-3'`, `'1e3'` —
+// só vem de um `localStorage` mexido à mão, e o servidor o recusa com 400 (`buscar-places`):
+// sem esta conferência a abertura caía em "Falha ao carregar" a cada reabertura, sem a
+// pessoa saber por quê. Volta ao valor de fábrica (R17, pedido do lote do servidor).
+function idSalvoValido(v) {
+    if (typeof v === 'number') return Number.isSafeInteger(v) && v > 0 ? v : '';
+    if (typeof v === 'string' && /^[0-9]{1,15}$/.test(v) && Number(v) > 0) return v;
+    return '';
+}
+// As categorias do filtro: lista de textos, no teto do servidor (`CATEGORIAS_MAX`, 200). Qualquer
+// outra coisa volta à lista vazia — o filtro legítimo nunca grava outra forma.
+const CATEGORIAS_SALVAS_MAX = 200;
+function categoriasSalvasValidas(v) {
+    if (!Array.isArray(v) || v.length > CATEGORIAS_SALVAS_MAX) return [];
+    return v.every((c) => typeof c === 'string') ? v : [];
+}
+
 function loadFilters() {
     try {
         const raw = localStorage.getItem(FILTERS_KEY);
@@ -28004,11 +28023,11 @@ function loadFilters() {
             const parsed = JSON.parse(raw);
             AppState.filters.types = sanearTiposSalvos(parsed.types);
             AppState.filters.residential = parsed.residential || '';
-            AppState.filters.stateId = parsed.stateId || '';
-            AppState.filters.managedAreaId = parsed.managedAreaId || '';
+            AppState.filters.stateId = idSalvoValido(parsed.stateId);
+            AppState.filters.managedAreaId = idSalvoValido(parsed.managedAreaId);
             AppState.filters.myArea = !!parsed.myArea;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
-            AppState.filters.categories = Array.isArray(parsed.categories) ? parsed.categories : [];
+            AppState.filters.categories = categoriasSalvasValidas(parsed.categories);
             // O GPS NUNCA volta de uma sessão anterior: posição é um momento e
             // amanhã a pessoa está em outro lugar — restaurá-la ordenaria a fila
             // por onde ela esteve ontem. Casa e trabalho voltam (saem do perfil

@@ -321,3 +321,50 @@ test('R17-2-04: a decisão que já voltou da ida com a rede fora e ESPERA envio 
   // CONTROLE: decisão sem marca que NÃO é do lote velho segue contando.
   assert.equal(indicador({ noAr: 0, lotes: [], epoca: 1, fila: [item(9, false)] }).texto(), 'indicator.waiting:1');
 });
+
+// ═══ loadFilters · o filtro salvo que o servidor recusaria ═══════════════════
+// O `buscar-places` passou a responder 400 a `stateId`/`managedAreaId` que não sejam inteiros
+// positivos e a `categories` que não seja lista de textos (até 200). Um `localStorage` mexido à
+// mão derrubava a abertura em "Falha ao carregar" a cada reabertura: o cliente descarta o que o
+// filtro legítimo nunca grava, e mantém tudo que ele grava (vazio, número, dígitos, lista vazia).
+function carregarFiltros(salvo) {
+  const filtros = { types: [], residential: '', stateId: '', managedAreaId: '', myArea: false, unreadOnly: true, categories: [], sortOrder: 'newest' };
+  const deps = { AppState: { filters: filtros }, FILTERS_KEY: 'f', ORDEM_PADRAO: 'newest', sanearTiposSalvos: (x) => (Array.isArray(x) ? x : []),
+    localStorage: { getItem: () => (salvo === undefined ? null : typeof salvo === 'string' ? salvo : JSON.stringify(salvo)) } };
+  const chaves = Object.keys(deps);
+  new Function(...chaves, fatiar('idSalvoValido') + '\n' + `const CATEGORIAS_SALVAS_MAX = ${/const CATEGORIAS_SALVAS_MAX = (\d+);/.exec(APP_SEM)[1]};\n`
+    + fatiar('categoriasSalvasValidas') + '\n' + fatiar('loadFilters') + '\nloadFilters();')(...chaves.map((k) => deps[k]));
+  return filtros;
+}
+
+test('loadFilters: stateId e managedAreaId só voltam se forem inteiros positivos — o resto volta ao valor de fábrica', () => {
+  const ruins = ['null', 'Minas', 'abc', '0', '-3', '1e3', '12.5', ' 7', '7 ', '', {}, [], [7], true, 0, -3, 1.5, NaN, null, '99999999999999999999'];
+  for (const v of ruins) {
+    const f = carregarFiltros({ stateId: v, managedAreaId: v });
+    assert.deepEqual([f.stateId, f.managedAreaId], ['', ''], `DEFEITO: ${JSON.stringify(v)} voltou como filtro e o servidor o recusa (400)`);
+  }
+  // CONTROLES: o que o filtro legítimo grava volta como estava (o instrumento não descarta tudo).
+  for (const v of ['27', '1', 27, 3095]) {
+    const f = carregarFiltros({ stateId: v, managedAreaId: v });
+    assert.deepEqual([f.stateId, f.managedAreaId], [v, v], `CONTROLE: o legítimo ${JSON.stringify(v)} foi descartado`);
+  }
+  const vazio = carregarFiltros({ stateId: '', managedAreaId: null });
+  assert.deepEqual([vazio.stateId, vazio.managedAreaId], ['', '']);
+});
+
+test('loadFilters: categories só volta se for lista de textos até o teto do servidor (200) — a lista vazia e a boa seguem', () => {
+  const ruins = ['BAKERY', { 0: 'BAKERY' }, [1, 2], ['A', null], ['A', { x: 1 }], [['A']], Array.from({ length: 201 }, (_, i) => 'C' + i), null, 5];
+  for (const v of ruins) {
+    assert.deepEqual(carregarFiltros({ categories: v }).categories, [], `DEFEITO: ${JSON.stringify(v).slice(0, 40)} voltou como filtro de categoria`);
+  }
+  assert.deepEqual(carregarFiltros({ categories: [] }).categories, [], 'CONTROLE: a lista vazia');
+  assert.deepEqual(carregarFiltros({ categories: ['BAKERY', 'PARK'] }).categories, ['BAKERY', 'PARK'], 'CONTROLE: a lista boa foi descartada');
+  const duzentas = Array.from({ length: 200 }, (_, i) => 'C' + i);
+  assert.equal(carregarFiltros({ categories: duzentas }).categories.length, 200, 'CONTROLE: o teto é inclusivo (200 passa)');
+});
+
+test('loadFilters: o resto do filtro salvo segue como estava (tipos, país/estado em branco, "Minha área", só não lidos, ordem)', () => {
+  const f = carregarFiltros({ types: ['NEW_PLACE'], residential: 'x', myArea: true, unreadOnly: false, sortOrder: 'oldest', stateId: '5', managedAreaId: '9', categories: ['A'] });
+  assert.deepEqual([f.types, f.residential, f.myArea, f.unreadOnly, f.sortOrder, f.stateId, f.managedAreaId, f.categories],
+    [['NEW_PLACE'], 'x', true, false, 'oldest', '5', '9', ['A']]);
+});
