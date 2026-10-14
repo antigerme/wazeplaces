@@ -15850,6 +15850,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const contagem = new Map();
     const resolvidos = new Set();
+    let quedaDeA = false;   // a sessão de A cai: o `perfil` dela passa a dar 401
     // O 1º da fila NÃO é alvo: é o card da tela (que a recusa deixa de fora de propósito). Alvos: 1, 4 e 7.
     const pedidos = Array.from({ length: 9 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRB' + i, updateRequestID: 'uRB' + i,
       creatorId: i % 3 === 1 ? 9000 : 9100 + i, createdBy: i % 3 === 1 ? 'repetente' : 'autor' + i, imageUrls: [] }));
@@ -15867,6 +15868,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       } else if (nome === 'perfil') {
         // A conta B (o login do cenário "conta") tem outro id: é a troca de conta que o `esquecerOutraConta` trata.
         const id = corpo.sessionToken === 'token-da-conta-b-da-espera' ? 8 : 7;
+        if (quedaDeA && id === 7) { await r.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'x', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }) }).catch(() => {}); return; }
         resp = { success: true, profile: { id, userName: 'editor' + id, rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
       } else if (nome === 'testar-cookies') {
         resp = { success: true, sessionToken: 'token-da-conta-b-da-espera', conta: '8' };
@@ -15880,6 +15882,20 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     });
     // O teto da espera é de 3 MINUTOS: o relógio da página é do Playwright (corre sozinho, e o cenário "teto" o avança).
     if (cenario === 'teto') await ctx.clock.install();
+    // A extensão de mentira (a ponte do navegador): quando o app pergunta, entrega a sessão da conta B — a renovação da
+    // queda como OUTRA conta, o caso do relato.
+    if (cenario === 'contaPelaExtensao') {
+      await ctx.addInitScript(() => {
+        window.__ext = { ligada: false, token: null, conta: null, atrasoMs: 150 };
+        window.addEventListener('message', (ev) => {
+          if (ev.source !== window) return;
+          const d = ev.data;
+          if (!d || d.source !== 'wazeplaces' || d.action !== 'precisa-de-sessao' || !window.__ext.ligada) return;
+          window.postMessage({ source: 'wazeplaces-ext', action: 'aguarde' }, location.origin);
+          setTimeout(() => window.postMessage({ source: 'wazeplaces-ext', action: 'sessao', token: window.__ext.token, conta: window.__ext.conta }, location.origin), window.__ext.atrasoMs);
+        });
+      });
+    }
     await ctx.addInitScript(() => {
       try {
         if (localStorage.getItem('__seed')) return;
@@ -15924,6 +15940,12 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       page.evaluate(() => authenticateWithCookies('# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-b\n')).catch(() => {});
       await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 8 && !AppState.fetching && !!AppState.currentPlace,
         'a conta B entrar e a fila dela chegar');
+    } else if (cenario === 'contaPelaExtensao') {
+      // O caso do relato: a sessão de A cai (401 na conferência) e a extensão a renova como a conta B, com a fila de A na tela.
+      quedaDeA = true;
+      await page.evaluate(() => { window.__ext.ligada = true; window.__ext.token = 'token-da-conta-b-da-espera'; window.__ext.conta = '8'; void handleUnauthorized(); });
+      await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 8 && !AppState.fetching && !!AppState.currentPlace,
+        'a extensão renovar como a conta B e a fila dela chegar');
     } else if (cenario === 'teto') {
       // A outra página NUNCA solta a trava. O relógio da página anda além do teto (3 min), e a recusa tem de desistir.
       await page.clock.fastForward('03:05');
@@ -15962,13 +15984,18 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(ALVOS_ESPERA.every((id) => ref.contagem.get(id) === 1) && ref.contagem.size === ALVOS_ESPERA.length,
     'recusa/espera/↻: cada alvo tem de ir ao Waze UMA vez (o ↻ na aba que espera os mandava em dobro)', JSON.stringify([...ref.contagem]));
   // R21-2-02: a troca de conta na espera. Os alvos eram de A; B os vê pela busca dela SEM esperar a trava, e nada sai no nome dela.
-  const conta = await naEspera('conta');
-  checa(ALVOS_ESPERA.every((id) => conta.aposAcao.fila.includes(id)) && conta.aposAcao.conta === 8 && conta.aposAcao.andamento === 0 && conta.aposAcao.rodando === false,
-    'recusa/espera/conta: com a trava AINDA na mão da outra página, a conta que entrou não tem os pedidos dela na fila (a recusa de A os escondia)', JSON.stringify(conta.aposAcao));
-  checa(conta.enviosAntesDeSoltar === 0 && conta.contagem.size === 0,
-    'recusa/espera/conta: a recusa de A rejeitou pedido no nome da conta que entrou', JSON.stringify([...conta.contagem]));
-  checa(conta.terminou && ALVOS_ESPERA.every((id) => conta.fim.fila.includes(id)),
-    'recusa/espera/conta: depois de a trava soltar os pedidos de B sumiram da fila (ou a recusa de A ficou presa)', JSON.stringify(conta.fim));
+  // Os dois jeitos de B entrar: os cookies colados na tela de entrada, e a renovação da queda pela extensão (o relato).
+  const contas = [];
+  for (const cenario of ['conta', 'contaPelaExtensao']) {
+    const conta = await naEspera(cenario);
+    contas.push(conta);
+    checa(ALVOS_ESPERA.every((id) => conta.aposAcao.fila.includes(id)) && conta.aposAcao.conta === 8 && conta.aposAcao.andamento === 0 && conta.aposAcao.rodando === false,
+      `recusa/espera/${cenario}: com a trava AINDA na mão da outra página, a conta que entrou não tem os pedidos dela na fila (a recusa de A os escondia)`, JSON.stringify(conta.aposAcao));
+    checa(conta.enviosAntesDeSoltar === 0 && conta.contagem.size === 0,
+      `recusa/espera/${cenario}: a recusa de A rejeitou pedido no nome da conta que entrou`, JSON.stringify([...conta.contagem]));
+    checa(conta.terminou && ALVOS_ESPERA.every((id) => conta.fim.fila.includes(id)),
+      `recusa/espera/${cenario}: depois de a trava soltar os pedidos de B sumiram da fila (ou a recusa de A ficou presa)`, JSON.stringify(conta.fim));
+  }
   // R21-2-05: a trava que NUNCA solta. Passado o teto, a recusa desiste sem enviar e os alvos voltam como card.
   const teto = await naEspera('teto');
   checa(teto.desistiu === true, 'recusa/espera/teto: passado o teto (3 min no relógio da página) a recusa seguiu esperando a trava da outra página — a espera não tem teto');
@@ -15976,8 +16003,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'recusa/espera/teto: passado o teto da espera os alvos seguem escondidos (em andamento) e a recusa segue esperando a trava', JSON.stringify(teto.aposAcao));
   checa(teto.enviosAntesDeSoltar === 0 && teto.contagem.size === 0 && teto.aposAcao.auth === true,
     'recusa/espera/teto: a recusa que desistiu mandou rejeição ao Waze', JSON.stringify([...teto.contagem]));
-  checa(ctl.erros.length === 0 && sair.erros.length === 0 && ref.erros.length === 0 && conta.erros.length === 0 && teto.erros.length === 0,
-    'recusa/espera: erro de JS', ctl.erros[0] || sair.erros[0] || ref.erros[0] || conta.erros[0] || teto.erros[0]);
+  const todas = [ctl, sair, ref, ...contas, teto];
+  checa(todas.every((c) => c.erros.length === 0), 'recusa/espera: erro de JS', todas.map((c) => c.erros[0]).find(Boolean));
 }
 
 // ── ENTER SEGURADO NÃO REPETE A AÇÃO DE NENHUM BOTÃO (R20-1-02, lote 24) ────
