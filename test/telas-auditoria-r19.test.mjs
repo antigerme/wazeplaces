@@ -199,9 +199,13 @@ test('R19-8-01 · o CSS: a foto cede até 5.5rem, o piso do texto sai, e só den
   // Deitado o card é GRADE (a foto na coluna ao lado, piso 0): o `card-aperta`
   // não pode LEVANTAR o piso da foto ali — o override vem DEPOIS da regra geral.
   const geral = CSS_SEM.indexOf('.place-card.card-aperta .card-photo {');
-  const deitado = CSS_SEM.indexOf('@media (max-height: 480px) and (min-width: 600px) {\n  .place-card.card-aperta .card-photo {');
+  // O override mora DENTRO do degrau de paisagem que já existia (os guards do
+  // degrau leem a PRIMEIRA ocorrência do @media: uma duplicata acima os desviava).
+  const deitado = CSS_SEM.indexOf('.place-card.card-aperta .card-photo {', geral + 10);
   assert.ok(geral > 0 && deitado > geral, 'o card-aperta levanta o piso da foto também deitado (grade)');
-  assert.match(CSS_SEM.slice(deitado, deitado + 200), /min-height:\s*0/);
+  assert.ok(CSS_SEM.slice(CSS_SEM.lastIndexOf('@media', deitado)).startsWith('@media (max-height: 480px) and (min-width: 600px) {'),
+    'o override do deitado não está no degrau de paisagem');
+  assert.match(CSS_SEM.slice(deitado, deitado + 120), /min-height:\s*0/);
   // 1× nada muda: nenhuma regra solta (sem o `card-aperta`) pode ter sido mexida
   // pra esta correção. O piso da foto de fábrica segue no HTML e os degraus por
   // altura seguem como estavam.
