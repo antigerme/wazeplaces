@@ -14953,6 +14953,155 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── A TROCA DE IDIOMA com a tela PREENCHIDA (auditoria da rodada 21, R21-6) ──
+//
+// Nenhum smoke cobria a troca de idioma com estado nas telas. O texto que o JS
+// escreve com `t()` fora de `data-i18n` o `applyI18n` NÃO alcança: o
+// `aplicarIdioma` tem que redesenhar cada um, e esquecer UM deixa um pedaço da
+// tela no idioma de antes até a pessoa reabrir o app (a auditoria de 2026-09-25
+// achou dois, o aviso do Desfazer e o nome da pílula). A medição é por
+// DIFERENÇA, o que dispensa saber de antemão o que cada tela diz: a MESMA tela
+// aberta já em francês (A) e a aberta em português e trocada pelo seletor (B)
+// têm o mesmo texto — o que sobrar numa delas é resto do idioma de antes. A
+// tela é a PREENCHIDA, onde o texto é montado em JS: foco no autor, "de N na
+// região", Histórico, lista de autores, conquistas e o "Disponível offline"
+// ligado. Fora da conta ficam os avisos (o "Langue changée" só existe em B) e a
+// região viva do card (esvaziada na troca, por desenho). CONTROLE: um texto fixo
+// em português escrito num lugar que o `aplicarIdioma` repinta TEM que aparecer
+// na diferença — sem ele, "zero resto" passaria com o comparador cego (gotcha #28).
+{
+  const dia = (d) => {
+    const x = new Date(Date.now() - d * 86400000);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  };
+  const hoje = Math.floor(Date.now() / 86400000);
+  const historico = { _total: { read: 400, rejected: 300 } };
+  for (let i = 0; i < 40; i++) historico[dia(i)] = { read: 5 + (i % 7), rejected: 3 + (i % 5), onde: { '30': 8 } };
+  const SEMENTES = {
+    waze_places_history: JSON.stringify(historico),
+    waze_places_autores: JSON.stringify({ v: [], r: { '1000': [3, 'editor0', hoje - 1], '1001': [2, 'editor1', hoje - 2] } }),
+    waze_places_conquistas: JSON.stringify({ c: { primeiraFaxina: dia(3) }, seq: 12, patente: 1, n: {}, langs: ['pt'], base: true, novas: ['primeiraFaxina'], patenteNova: false }),
+    // Lidos + rejeitados abaixo da cota do Desfazer do L6 (10): a mensagem "faltam N" da cota é montada em JS, e só
+    // existe com o Desfazer ainda travado.
+    waze_places_stats: JSON.stringify({ read: 2, rejected: 1, skipped: 2 }),
+    waze_places_preferences: JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, offlineDisponivel: true }),
+    // "Perto de casa": a dica sob a ordem é texto montado em JS (`atualizarDicaDeOrdem`), e só existe com ela escolhida.
+    waze_places_filters: JSON.stringify({ sortOrder: 'casa' }),
+    waze_session_token: 'token-do-smoke-da-troca-de-idioma',
+  };
+  const PEDIDOS = FIXTURES_PAISES.slice(0, 8).map((f, i) => ({ ...JSON.parse(JSON.stringify(f)),
+    venueID: 'vTI' + i, updateRequestID: 'uTI' + i, creatorId: 1000 + (i % 5), createdBy: 'editor' + (i % 5) }));
+  // Tudo que a pessoa LÊ na página: os textos e os atributos que viram fala. Sai o que não é tela (script,
+  // estilo, o <template> do card) e o que a troca de idioma cala ou cria de propósito.
+  const ler = (page) => page.evaluate(() => {
+    const fora = (el) => !el || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName) || !!el.closest('template, #toastContainer, #cardLiveRegion');
+    const rotulo = (el) => (el.id ? '#' + el.id : el.className && typeof el.className === 'string' ? '.' + el.className.split(/\s+/)[0] : el.tagName);
+    const saida = [];
+    const andador = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = andador.nextNode(); n; n = andador.nextNode()) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t && !fora(n.parentElement)) saida.push(rotulo(n.parentElement) + ' :: ' + t);
+    }
+    for (const el of document.querySelectorAll('[aria-label],[title],[placeholder],[alt]')) {
+      if (fora(el)) continue;
+      for (const a of ['aria-label', 'title', 'placeholder', 'alt']) { const v = el.getAttribute(a); if (v && v.trim()) saida.push(`${rotulo(el)}[${a}] :: ${v.trim()}`); }
+    }
+    return saida;
+  });
+  const abrirTela = async (lang, { trocarPara = null } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', locale: lang === 'pt' ? 'pt-BR' : lang });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      const resp = {
+        perfil: { success: true, referencias: { casa: [-23.5, -46.6], trabalho: null }, visivelNoWme: true, sessaoExpiraEm: Math.floor(Date.now() / 1000) + 20 * 86400,
+          profile: { id: 183164343, userName: 'tester', rank: 5, isStaff: false, isAreaManager: true, editableCountryIDs: [30], areas: [], managedAreas: [],
+          totalPoints: 12345, totalEdits: 678 } },
+        'buscar-places': { success: true, places: PEDIDOS, hasMore: false, page: 1, total: PEDIDOS.length, totalAll: PEDIDOS.length, blocked: 0 },
+        'presenca-app': { success: true, agora: Math.floor(Date.now() / 1000), online: [], conversas: [], contagem: {} },
+        'lista-paises': { success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR', env: 'row' }] },
+        'lista-estados': { success: true, states: [] },
+      }[nome] || { success: true };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(({ sementes, lang }) => {
+      try {
+        if (localStorage.getItem('__seed')) return;
+        localStorage.setItem('__seed', '1');
+        localStorage.setItem('waze_places_lang', lang);
+        for (const [k, v] of Object.entries(sementes)) localStorage.setItem(k, v);
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, { sementes: SEMENTES, lang });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !AppState.fetching && !!AppState.currentPlace, 'o app abrir com a fila');
+    // O "Disponível offline" ligado só assenta quando a preparação acaba (senão o "Preparando… N de M" anda sozinho).
+    await esperarOuExplodir(page, () => typeof offlineUltimoResultado !== 'undefined' && offlineUltimoResultado !== null && !offlineVarrendo && !offlinePedidaDeNovo,
+      'a preparação do "Disponível offline" assentar', 30000);
+    await page.evaluate(() => {
+      AppState.serverBlocked = 7; AppState.blockedPartial = false; updatePendingCount();
+      focarAutor(AppState.currentPlace.creatorId);
+    });
+    await doisQuadros(page);
+    // O MESMO ritual nas duas telas. O seletor de idioma mora na aba Preferências, então a troca é feita com ela na tela
+    // e os Filtros fechados em seguida; o Histórico, os autores e as conquistas só se desenham com os Filtros ABERTOS na
+    // aba deles — por isso a leitura é com eles reabertos, depois da troca.
+    await page.click('#filtersBtn');
+    await page.evaluate(() => document.getElementById('filtersTabPrefs').click());
+    if (trocarPara) await page.selectOption('#langSelect', trocarPara);
+    await page.keyboard.press('Escape');
+    await doisQuadros(page);
+    return { ctx, page, erros };
+  };
+  const A = await abrirTela('fr');
+  const B = await abrirTela('pt', { trocarPara: 'fr' });
+  const id = `troca de idioma/${MOTOR}`;
+  // DUAS leituras por tela. A 1ª é logo depois da troca (os Filtros acabaram de fechar): o que a pessoa viu mudar sem
+  // ninguém repintar por ela — o card, o placar, o cabeçalho, o "de N na região", a linha do offline, as ordens da
+  // lista. A 2ª é com os Filtros REABERTOS na aba Histórico: o Histórico, os autores e as conquistas só se desenham
+  // ali, com o idioma de agora (um formatador de data que guardasse o idioma de antes aparece aqui). A abertura dos
+  // Filtros repinta o resto do modal, então só a 1ª leitura acusa um `aplicarIdioma` que esqueceu de algo dele.
+  const lerComOHistorico = async (page) => {
+    await page.click('#filtersBtn');
+    await page.evaluate(() => document.getElementById('filtersTabHistory').click());
+    await esperarOuExplodir(page, () => document.getElementById('historyBody').children.length > 0 && document.getElementById('autoresBody').children.length > 0, 'o Histórico e os autores desenharem');
+    return ler(page);
+  };
+  const diferenca = (a, b) => ({ soNoTrocado: [...b].filter((x) => !a.has(x)), soNoAberto: [...a].filter((x) => !b.has(x)) });
+  const depoisDaTroca = { A: new Set(await ler(A.page)), B: new Set(await ler(B.page)) };
+  const comOHistorico = { A: new Set(await lerComOHistorico(A.page)), B: new Set(await lerComOHistorico(B.page)) };
+  // PRÉ-CONDIÇÕES: o instrumento viu a página inteira, e a tela É a preenchida (senão "sem resto" não diz nada).
+  const tem = (conj, prefixo) => [...conj].some((x) => x.startsWith(prefixo));
+  checa(depoisDaTroca.A.size > 400 && depoisDaTroca.B.size > 400 && comOHistorico.A.size > 400 && comOHistorico.B.size > 400,
+    `${id}: PRÉ-CONDIÇÃO — o leitor viu só ${depoisDaTroca.A.size}/${depoisDaTroca.B.size}/${comOHistorico.A.size}/${comOHistorico.B.size} textos`);
+  for (const lado of ['A', 'B']) {
+    checa([...comOHistorico[lado]].some((x) => x.includes('editor0')), `${id}: PRÉ-CONDIÇÃO — a lista de autores não foi desenhada em ${lado} (a tela não está preenchida)`);
+    checa(tem(depoisDaTroca[lado], '#focoAutorTexto'), `${id}: PRÉ-CONDIÇÃO — o foco no autor não está na tela em ${lado}`);
+    checa(tem(depoisDaTroca[lado], '#pendingTotalHint ::'), `${id}: PRÉ-CONDIÇÃO — o "de N na região" não está na tela em ${lado}`);
+    checa(tem(depoisDaTroca[lado], '#prefUndoGateMsg ::'), `${id}: PRÉ-CONDIÇÃO — a mensagem da cota do Desfazer não está na tela em ${lado} (o Desfazer destravou?)`);
+    checa(tem(depoisDaTroca[lado], '#prefOfflineDesc ::'), `${id}: PRÉ-CONDIÇÃO — a linha do "Disponível offline" não está na tela em ${lado}`);
+    checa(tem(depoisDaTroca[lado], '#filterSortHint ::'), `${id}: PRÉ-CONDIÇÃO — a dica da ordem por casa não está na tela em ${lado}`);
+    checa(tem(depoisDaTroca[lado], '#userProfileBadge[title] ::'), `${id}: PRÉ-CONDIÇÃO — os pontos e as edições do perfil (o título do cabeçalho) não estão na tela em ${lado}`);
+  }
+  checa(await B.page.evaluate(() => document.getElementById('langSelect').value) === 'fr', `${id}: PRÉ-CONDIÇÃO — o seletor não ficou em francês`);
+  for (const [quando, conj] of [['logo depois da troca', depoisDaTroca], ['com o Histórico reaberto', comOHistorico]]) {
+    const d = diferenca(conj.A, conj.B);
+    checa(d.soNoTrocado.length === 0 && d.soNoAberto.length === 0,
+      `${id}: DEFEITO — a tela trocada pelo seletor difere da aberta já em francês, ${quando} (resto do idioma de antes)`,
+      JSON.stringify({ soNoTrocado: d.soNoTrocado.slice(0, 8), soNoAberto: d.soNoAberto.slice(0, 8) }));
+  }
+  checa(A.erros.length === 0 && B.erros.length === 0, `${id}: erro de JS`, A.erros[0] || B.erros[0]);
+  // CONTROLE: o "de N na região" volta ao português — o comparador tem que ACUSAR.
+  await B.page.evaluate(() => { document.getElementById('pendingTotalHint').textContent = 'de 7 na região'; });
+  const acusou = diferenca(comOHistorico.A, new Set(await ler(B.page))).soNoTrocado;
+  checa(acusou.some((x) => x.includes('de 7 na região')), `${id}: CONTROLE — o texto em português escrito à mão não apareceu na diferença (o comparador está cego)`, JSON.stringify(acusou.slice(0, 4)));
+  await A.ctx.close();
+  await B.ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -15059,4 +15208,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`
   + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`
-  + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`);
+  + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`
+  + `, + a tecla z do Desfazer no teclado de OUTRO alfabeto (o keydown hebraico, russo e Ctrl+hebraico despachado com a janela do Desfazer aberta, com o z latino despachado como CONTROLE do instrumento e o w do AZERTY e a tecla morta como CONTROLE do outro lado)`
+  + `, + a troca de idioma com a tela PREENCHIDA (a trocada pelo seletor igual à aberta já em francês, logo depois da troca e com o Histórico reaberto: foco no autor, "de N na região", cota do Desfazer, linha do offline, ordem por casa, autores e conquistas — com o CONTROLE do texto em português escrito à mão acusado pelo comparador)`);
