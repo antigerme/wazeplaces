@@ -2956,6 +2956,7 @@ for (const status of [404, 403]) {
   const cru = FIXTURES_PAISES.find((p) => (p.imageUrls || []).length && p.name) || FIXTURES_PAISES[0];
   for (const [nome, viewport] of [['iPhone SE deitado', { width: 667, height: 375 }], ['Pixel 7 deitado', { width: 851, height: 393 }]]) {
     const ctx = await browser.newContext({ viewport, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true, isMobile: true, hasTouch: true });
+    await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
     const page = await ctx.newPage();
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(400);
@@ -3026,6 +3027,7 @@ for (const status of [404, 403]) {
   ];
   for (const [nome, viewport, lang, dev, controleForaDaVista] of casos) {
     const ctx = await browser.newContext({ viewport, locale: lang === 'fr' ? 'fr-FR' : 'pt-BR', serviceWorkers: 'block', isMobile: true, hasTouch: true });
+    await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
     await ctx.addInitScript((l) => { try { localStorage.setItem('waze_places_lang', l); } catch (e) { /* segue */ } }, lang);
     const page = await ctx.newPage();
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
