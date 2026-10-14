@@ -20453,10 +20453,15 @@ async function abrirResumoDoMes() {
 // O aparelho compartilha ARQUIVO? UMA pergunta só, e a fazem o botão do Histórico (o rótulo) e a folha do
 // Resumo (o botão "Compartilhar"): quando só a folha a fazia, o botão dizia "Compartilhar meu resumo" num
 // computador e a folha oferecia só o "Baixar" — o texto mentia (R21-7, MEDIDO no Chromium e no WebKit do
-// Linux: `canShare` falso). O `canShare` olha o tipo e o nome do arquivo, não os bytes: um PNG vazio basta.
+// Linux: `canShare` falso). A pergunta leva um PNG de VERDADE (1×1, 70 bytes) e não um arquivo vazio: a
+// folha perguntava com a imagem real, e um celular que recusasse arquivo de 0 byte tiraria o "Compartilhar"
+// justamente de onde ele funcionava. HIPÓTESE, não medida: que o `canShare` confere o tipo e o nome, e não os
+// bytes — nenhum celular que compartilha arquivo foi medido aqui (só o `canShare` simulado e o falso do
+// computador); o PNG válido é a aposta mais próxima do que a folha perguntava.
 function aparelhoCompartilhaArquivo() {
     try {
-        const arquivo = new File([], 'wazeplaces.png', { type: 'image/png' });
+        const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+        const arquivo = new File([bytes], 'wazeplaces.png', { type: 'image/png' });
         return !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
     } catch (e) { return false; }
 }

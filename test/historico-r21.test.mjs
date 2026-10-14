@@ -416,11 +416,17 @@ const compartilha = (navigator, ClasseFile = File) => new Function('navigator', 
 
 test('texto do botão · `aparelhoCompartilhaArquivo`: só com `canShare({ files })` verdadeiro; qualquer falha é "não compartilha"', () => {
   const chamadas = [];
-  assert.equal(compartilha({ canShare: (d) => { chamadas.push(d); return true; } })(), true);
+  // O arquivo da pergunta é um PNG de VERDADE (não vazio): a folha perguntava com a imagem real, e um celular que
+  // recusasse arquivo de 0 byte tiraria o "Compartilhar" de onde ele funcionava.
+  class FileEspiao { constructor(partes, nome, opcoes) { this.partes = partes; this.name = nome; this.type = opcoes && opcoes.type; } }
+  assert.equal(compartilha({ canShare: (d) => { chamadas.push(d); return true; } }, FileEspiao)(), true);
   assert.equal(chamadas.length, 1);
   assert.equal(chamadas[0].files.length, 1, 'o canShare não recebeu um arquivo');
   assert.equal(chamadas[0].files[0].type, 'image/png', 'o arquivo da pergunta não é PNG (o tipo é o que o canShare confere)');
   assert.match(chamadas[0].files[0].name, /\.png$/);
+  const bytes = chamadas[0].files[0].partes[0];
+  assert.ok(bytes instanceof Uint8Array && bytes.length > 8, 'o arquivo da pergunta é vazio (ou não são bytes)');
+  assert.deepEqual([...bytes.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'os bytes da pergunta não são de um PNG (a assinatura)');
   assert.equal(compartilha({ canShare: () => 1 })(), true, 'um valor verdadeiro qualquer é "compartilha"');
   assert.equal(compartilha({ canShare: () => false })(), false, 'canShare falso (o computador)');
   assert.equal(compartilha({})(), false, 'sem `canShare` (o WebKit do Linux, navegador velho)');
