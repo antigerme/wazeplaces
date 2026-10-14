@@ -14048,6 +14048,331 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(com.erros.length === 0 && sem.erros.length === 0 && uma.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0] || uma.erros[0]);
 }
 
+// ── RECUSA AUTOMÁTICA NA ESPERA DA TRAVA × "SAIR" E ↻ (R20-2-01, lote 24) ───
+//
+// A recusa tira os alvos da fila e ESPERA a trava entre abas, mas a marca de "em
+// andamento", a sessão, a geração do "Sair" e a fila só eram tiradas quando a
+// trava era concedida: na espera nada segurava os alvos nem conferia a sessão.
+// O "Sair" os devolvia à fila da tela de entrada (dado de terceiro) e, com o
+// login de outra conta, saíam com a sessão dela; o ↻ os trazia de volta como
+// card e eles saíam duas vezes. Aqui a trava é de VERDADE: uma 2ª página do mesmo
+// contexto a segura (`navigator.locks`), a recusa da página do app espera.
+// CONTROLE: soltando a trava sem mexer em nada, cada alvo sai UMA vez (o
+// instrumento enxerga a espera e o envio); e durante a espera os alvos estão "em
+// andamento" (a pré-condição que o defeito não tinha).
+{
+  const ALVOS_ESPERA = ['uRB1', 'uRB4', 'uRB7'];
+  const naEspera = async (cenario) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const contagem = new Map();
+    const resolvidos = new Set();
+    // O 1º da fila NÃO é alvo: é o card da tela (que a recusa deixa de fora de propósito). Alvos: 1, 4 e 7.
+    const pedidos = Array.from({ length: 9 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRB' + i, updateRequestID: 'uRB' + i,
+      creatorId: i % 3 === 1 ? 9000 : 9100 + i, createdBy: i % 3 === 1 ? 'repetente' : 'autor' + i, imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'validar-place' || nome === 'marcar-lido') {
+        contagem.set(corpo.updateRequestID, (contagem.get(corpo.updateRequestID) || 0) + 1);
+        await dormir(80);
+        resolvidos.add(corpo.updateRequestID);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(() => {
+      try {
+        if (localStorage.getItem('__seed')) return;
+        localStorage.setItem('__seed', '1');
+        localStorage.setItem('waze_session_token', 'token-do-smoke-da-espera');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        const d = new Date();
+        const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+        localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 100, skipped: 0 }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    });
+    const erros = [];
+    // A "outra página" segura a trava (mesma origem, sem carregar o app).
+    const outra = await ctx.newPage();
+    outra.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await outra.goto(BASE + '/manifest.json', { waitUntil: 'domcontentloaded' });
+    await outra.evaluate(() => new Promise((ok) => { navigator.locks.request('wp-recusa-automatica', () => new Promise((fim) => { window.__soltar = fim; ok(true); })); }));
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // A recusa está ESPERANDO a trava: rodando, com os alvos fora da fila e já "em andamento".
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.currentPlace && recusaAutomaticaRodando
+      && !AppState.fetching && !AppState.queue.some((p) => p.creatorId === 9000), 'a recusa esperar a trava (os alvos fora da fila)');
+    const durante = await page.evaluate(() => ({ andamento: pedidosEmAndamento.size, fila: AppState.queue.map((p) => p.updateRequestID) }));
+    const enviosNaEspera = contagem.size;
+    if (cenario === 'sair') {
+      await page.evaluate(() => document.getElementById('helpBtn').click());
+      await assentar(page, 150);
+      await page.evaluate(() => document.getElementById('logoutBtn').click());
+      await assentar(page, 150);
+      await page.evaluate(() => document.getElementById('confirmLogout').click());
+      await esperarOuExplodir(page, () => !AppState.authenticated, 'o "Sair" terminar');
+    } else if (cenario === 'refresh') {
+      await page.evaluate(() => document.getElementById('refreshBtn').click());
+      await esperarOuExplodir(page, () => !AppState.fetching && AppState.queue.length > 0, 'o ↻ refazer a fila');
+    }
+    const aposAcao = await page.evaluate(() => ({ fila: AppState.queue.map((p) => p.updateRequestID), auth: AppState.authenticated }));
+    await outra.evaluate(() => window.__soltar());
+    // (Sem explodir: com o defeito a recusa de quem saiu fica presa, e isso tem de sair como ✗ com o motivo.)
+    const terminou = await esperarNaPagina(page, () => !recusaAutomaticaRodando && !AppState.inFlightActions, 8000);
+    await page.waitForTimeout(500);   // cobre uma 2ª passada que viesse atrasada
+    const fim = await page.evaluate(() => ({ fila: AppState.queue.map((p) => p.updateRequestID), auth: AppState.authenticated,
+      telaDeEntrada: !document.getElementById('authScreen').classList.contains('hidden') }));
+    await ctx.close();
+    return { contagem, durante, enviosNaEspera, aposAcao, fim, erros, terminou: terminou.ok };
+  };
+  const ctl = await naEspera('controle');
+  checa(ctl.terminou, 'recusa/espera: CONTROLE — a recusa não terminou depois de a trava soltar');
+  checa(ctl.enviosNaEspera === 0, 'recusa/espera: CONTROLE — algo saiu com a trava na mão da outra página (o instrumento não vê a espera)', String(ctl.enviosNaEspera));
+  checa(ctl.durante.andamento >= 3 && ALVOS_ESPERA.every((id) => !ctl.durante.fila.includes(id)),
+    'recusa/espera: durante a espera os alvos têm de estar fora da fila e "em andamento"', JSON.stringify(ctl.durante));
+  checa(ALVOS_ESPERA.every((id) => ctl.contagem.get(id) === 1) && ctl.contagem.size === ALVOS_ESPERA.length,
+    'recusa/espera: CONTROLE — soltando a trava, cada alvo tem de sair UMA vez', JSON.stringify([...ctl.contagem]));
+  const sair = await naEspera('sair');
+  checa(sair.terminou, 'recusa/espera/Sair: a recusa de quem saiu ficou presa (o contador de envios no ar da sessão nova nunca desceu) depois de a trava soltar');
+  checa(sair.contagem.size === 0, 'recusa/espera/Sair: depois do "Sair" a recusa mandou rejeição ao Waze com a sessão de quem saiu', JSON.stringify([...sair.contagem]));
+  checa(sair.fim.fila.length === 0 && sair.fim.telaDeEntrada && sair.fim.auth === false,
+    'recusa/espera/Sair: os alvos voltaram à fila da tela de entrada (dado de terceiro depois do "Sair")', JSON.stringify(sair.fim));
+  const ref = await naEspera('refresh');
+  checa(ref.terminou, 'recusa/espera/↻: a recusa não terminou depois de a trava soltar');
+  checa(ALVOS_ESPERA.every((id) => !ref.aposAcao.fila.includes(id)),
+    'recusa/espera/↻: os alvos reapareceram como card depois do ↻ (a busca os trazia de volta)', JSON.stringify(ref.aposAcao.fila));
+  checa(ALVOS_ESPERA.every((id) => ref.contagem.get(id) === 1) && ref.contagem.size === ALVOS_ESPERA.length,
+    'recusa/espera/↻: cada alvo tem de ir ao Waze UMA vez (o ↻ na aba que espera os mandava em dobro)', JSON.stringify([...ref.contagem]));
+  checa(ctl.erros.length === 0 && sair.erros.length === 0 && ref.erros.length === 0, 'recusa/espera: erro de JS', ctl.erros[0] || sair.erros[0] || ref.erros[0]);
+}
+
+// ── ENTER SEGURADO NÃO REPETE A AÇÃO DE NENHUM BOTÃO (R20-1-02, lote 24) ────
+//
+// O lote 23 cancelou o `keydown` repetido só nos três botões ✕ ↑ ✓ e nas setas.
+// O resto seguia gerando um `click` por repetição (~30 Hz): 16 `parear:claim` em
+// 3 s no "Entrar" do código, 14 `buscar-places` no ↻, no "Verificar novamente" e
+// no "Tentar de novo" (free tier), o ⓘ e os Filtros abrindo e fechando em laço
+// (o foco vai ao ✕ do diálogo e a repetição o aciona), e o "Aprovar" da foto
+// ampliada despachando a aprovação sem a janela do Desfazer (84 ms em vez de 3
+// s). Agora UMA guarda em captura no `document` cancela o `click` do Enter
+// repetido em botões e links — menos onde segurar é andar (aproximar/afastar o
+// mapa, passar as fotos).
+// `keyboard.down` repetido É a tecla segurada (o Playwright marca `repeat` a
+// partir do segundo). CONTROLES: o Enter único dá o efeito UMA vez; o ouvinte da
+// página confirma que a repetição chegou; e o zoom do mapa (que repete de
+// propósito) anda mais de um passo.
+{
+  const SEGURADO_MS = 1500;
+  const montarPagina = async ({ vazio = false, falha = false, semSessao = false } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const reqs = { buscas: 0, claims: 0, aprovacoes: [], t0: 0 };
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      let status = 200;
+      if (nome === 'buscar-places') {
+        reqs.buscas++;
+        if (falha) { status = 200; resp = { success: false, error: 'x', errorCategory: 'unknown' }; }
+        else resp = vazio
+          ? { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 }
+          : { success: true, places: [{ ...CARDS.FLAG, venueID: 'vEN1', updateRequestID: 'uEN1', purType: 'NEW_PHOTO', updateTypeKey: 'IMAGE', reqType: 'IMAGE',
+            imageUrls: [foto + '#uEN1', foto + '#aprovada'], imageUrl: foto + '#uEN1', approvedImageIds: ['aprovada'], lat: -20.8, lon: -49.4,
+            mapa: { centro: [-20.8, -49.4], proposto: null, movidoM: null, entradas: [] } }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      } else if (nome === 'parear') {
+        if (corpo.action === 'claim') { reqs.claims++; resp = { success: false, error: 'Código inválido', errorKey: 'srv.err.pairInvalid', errorCategory: 'unknown' }; status = 400; }
+      } else if (nome === 'validar-place') {
+        reqs.aprovacoes.push(Date.now() - reqs.t0);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    if (!semSessao) {
+      await ctx.addInitScript(() => {
+        try {
+          if (localStorage.getItem('__seed')) return;
+          localStorage.setItem('__seed', '1');
+          localStorage.setItem('waze_session_token', 'token-do-smoke-do-enter');
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+          localStorage.setItem('waze_places_stats', JSON.stringify({ read: 500, rejected: 500, skipped: 0 }));
+        } catch (e) { /* armazenamento bloqueado */ }
+      });
+    }
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    if (!semSessao) {
+      await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !AppState.fetching, 'o app abrir com a sessão salva');
+    }
+    await page.evaluate(() => {
+      window.__repeticoes = 0;
+      window.addEventListener('keydown', (e) => { if (e.repeat && e.key === 'Enter') window.__repeticoes++; }, true);
+      window.__aberturas = {};
+      for (const id of ['helpModal', 'filtersModal', 'pairEnterModal']) {
+        const el = document.getElementById(id);
+        window.__aberturas[id] = 0;
+        let aberto = !el.classList.contains('hidden');
+        new MutationObserver(() => {
+          const agora = !el.classList.contains('hidden');
+          if (agora && !aberto) window.__aberturas[id]++;
+          aberto = agora;
+        }).observe(el, { attributes: true, attributeFilter: ['class'] });
+      }
+    });
+    await assentar(page, 200);
+    return { ctx, page, reqs, erros };
+  };
+  const segurar = async (page, { repetir }) => {
+    await page.keyboard.down('Enter');                          // o keydown de verdade, sem repeat
+    if (repetir) {
+      const ate = Date.now() + SEGURADO_MS;
+      while (Date.now() < ate) { await page.keyboard.down('Enter'); await page.waitForTimeout(33); }   // repeat = true
+    }
+    await page.keyboard.up('Enter');
+    await page.waitForTimeout(500);
+  };
+  const repeticoes = (page) => page.evaluate(() => window.__repeticoes);
+
+  // ↻, "Verificar novamente" e "Tentar de novo": o efeito é UMA busca por Enter (a segurada = a única).
+  for (const [rotulo, id, opcoes] of [
+    ['↻', '#refreshBtn', {}],
+    ['Verificar novamente', '#reloadBtn', { vazio: true }],
+    ['Tentar de novo', '#retryLoadBtn', { falha: true }],
+  ]) {
+    const efeito = async (repetir) => {
+      const m = await montarPagina(opcoes);
+      if (id === '#reloadBtn') await esperarOuExplodir(m.page, () => !document.getElementById('noMoreCards').classList.contains('hidden'), 'o "Tudo limpo!" aparecer');
+      if (id === '#retryLoadBtn') await esperarOuExplodir(m.page, () => !document.getElementById('loadErrorState').classList.contains('hidden'), 'o estado de falha aparecer');
+      await m.page.waitForTimeout(300);
+      const antes = m.reqs.buscas;
+      await m.page.focus(id);
+      await segurar(m.page, { repetir });
+      const delta = m.reqs.buscas - antes;
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { delta, rep, erros: m.erros };
+    };
+    const um = await efeito(false);
+    checa(um.delta >= 1, `Enter segurado/${rotulo}: CONTROLE — o Enter único não buscou (o botão está morto ou o instrumento errou)`, JSON.stringify(um));
+    const seg = await efeito(true);
+    checa(seg.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${seg.rep} repetições (o instrumento não segurou a tecla)`);
+    checa(seg.delta === um.delta, `Enter segurado/${rotulo}: ${SEGURADO_MS} ms de Enter fizeram ${seg.delta} buscas (o Enter único faz ${um.delta}) — cada repetição é um pedido ao servidor`, JSON.stringify({ um, seg }));
+    checa(um.erros.length === 0 && seg.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, um.erros[0] || seg.erros[0]);
+  }
+
+  // ⓘ e Filtros: o diálogo abre UMA vez e fica aberto (a repetição o fechava e abria em laço).
+  for (const [rotulo, id, modal] of [['ⓘ', '#helpBtn', 'helpModal'], ['Filtros', '#filtersBtn', 'filtersModal']]) {
+    const m = await montarPagina();
+    await m.page.focus(id);
+    await segurar(m.page, { repetir: true });
+    const r = await m.page.evaluate((modal) => ({ aberturas: window.__aberturas[modal], aberto: !document.getElementById(modal).classList.contains('hidden'), rep: window.__repeticoes }), modal);
+    checa(r.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${r.rep} repetições`);
+    checa(r.aberturas === 1 && r.aberto, `Enter segurado/${rotulo}: o diálogo abriu ${r.aberturas}× e terminou ${r.aberto ? 'aberto' : 'FECHADO'} (a repetição o acionava em laço)`, JSON.stringify(r));
+    // CONTROLE: o Enter único abre uma vez.
+    const u = await montarPagina();
+    await u.page.focus(id);
+    await segurar(u.page, { repetir: false });
+    const ru = await u.page.evaluate((modal) => ({ aberturas: window.__aberturas[modal], aberto: !document.getElementById(modal).classList.contains('hidden') }), modal);
+    checa(ru.aberturas === 1 && ru.aberto, `Enter segurado/${rotulo}: CONTROLE — o Enter único não abriu o diálogo`, JSON.stringify(ru));
+    checa(m.erros.length === 0 && u.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, m.erros[0] || u.erros[0]);
+    await m.ctx.close(); await u.ctx.close();
+  }
+
+  // O código de pareamento: o campo (Enter) e o "Entrar" (botão) resgatam UMA vez.
+  for (const [rotulo, focar] of [['campo do código', '#pairCodeInput'], ['"Entrar" do código', '#pairEnterConfirm']]) {
+    const claims = async (repetir) => {
+      const m = await montarPagina({ semSessao: true });
+      await m.page.evaluate(() => document.getElementById('pairEnterBtn').click());
+      await esperarOuExplodir(m.page, () => !document.getElementById('pairEnterModal').classList.contains('hidden'), 'o diálogo do código abrir');
+      await m.page.fill('#pairCodeInput', 'ABC-234');
+      await m.page.focus(focar);
+      await segurar(m.page, { repetir });
+      const n = m.reqs.claims;
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { n, rep, erros: m.erros };
+    };
+    const um = await claims(false);
+    checa(um.n === 1, `Enter segurado/${rotulo}: CONTROLE — o Enter único não resgatou UMA vez`, JSON.stringify(um));
+    const seg = await claims(true);
+    checa(seg.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${seg.rep} repetições`);
+    checa(seg.n === 1, `Enter segurado/${rotulo}: ${seg.n} resgates (parear:claim) em ${SEGURADO_MS} ms — era UM por repetição`, JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, um.erros[0] || seg.erros[0]);
+  }
+
+  // A foto ampliada: o Aprovar com o Desfazer ligado sai DEPOIS da janela (3 s), segurado ou não.
+  {
+    const aprovacao = async (repetir) => {
+      const m = await montarPagina();
+      await m.page.evaluate(() => { AppState.devMode = { unlocked: true, active: false }; });
+      await esperarOuExplodir(m.page, () => { const i = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image'); return !!(i && i.complete && i.naturalWidth > 0); }, 'a foto do card carregar');
+      await m.page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click());
+      await esperarOuExplodir(m.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada abrir');
+      await m.page.evaluate(() => { if (Lightbox.newIdx >= 0) { Lightbox.idx = Lightbox.newIdx; Lightbox._render(); } });
+      await esperarOuExplodir(m.page, () => !document.getElementById('lightboxApprove').classList.contains('hidden') && fotoDoLightboxNaTela(), 'o Aprovar aparecer');
+      await m.page.focus('#lightboxApprove');
+      m.reqs.t0 = Date.now();
+      await segurar(m.page, { repetir });
+      // O FIM: a aprovação chegou ao servidor de mentira (ou o teto de 8 s estourou: aí `primeira` fica nulo).
+      const ate = Date.now() + 8000;
+      while (!m.reqs.aprovacoes.length && Date.now() < ate) await m.page.waitForTimeout(50);
+      await m.page.waitForTimeout(300);
+      const r = { primeira: m.reqs.aprovacoes[0] ?? null, n: m.reqs.aprovacoes.length, camada: await m.page.evaluate(() => Lightbox.isOpen()), erros: m.erros };
+      await m.ctx.close();
+      return r;
+    };
+    const um = await aprovacao(false);
+    checa(um.n >= 1 && um.primeira >= 2500, 'Enter segurado/Aprovar: CONTROLE — o Enter único não aprovou depois da janela do Desfazer', JSON.stringify(um));
+    const seg = await aprovacao(true);
+    checa(seg.n >= 1 && seg.primeira >= 2500, `Enter segurado/Aprovar: a aprovação saiu ${seg.primeira} ms depois do Enter, sem a janela do Desfazer (3 s) — a repetição fechava a camada e a despachava`, JSON.stringify(seg));
+    checa(seg.camada === true, 'Enter segurado/Aprovar: a repetição fechou a foto ampliada', JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, 'Enter segurado/Aprovar: erro de JS', um.erros[0] || seg.erros[0]);
+  }
+
+  // EXCEÇÃO: segurar o + do mapa ampliado aproxima mais de um passo (é de propósito).
+  {
+    const passos = async (repetir) => {
+      const m = await montarPagina();
+      await esperarOuExplodir(m.page, () => !!AppState.currentPlace, 'o card aparecer');
+      await m.page.evaluate(() => MapaLightbox.open(AppState.currentPlace));
+      await esperarOuExplodir(m.page, () => MapaLightbox.isOpen(), 'o mapa ampliado abrir');
+      await m.page.evaluate(() => { MapaLightbox.zoom(-3); });
+      await assentar(m.page, 150);
+      const z0 = await m.page.evaluate(() => MapaLightbox.z);
+      await m.page.focus('#mapaLbMais');
+      await segurar(m.page, { repetir });
+      const z1 = await m.page.evaluate(() => MapaLightbox.z);
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { passos: z1 - z0, rep, erros: m.erros };
+    };
+    const um = await passos(false);
+    checa(um.passos === 1, 'Enter segurado/mapa +: CONTROLE — o Enter único não aproximou UM passo', JSON.stringify(um));
+    const seg = await passos(true);
+    checa(seg.rep >= 20 && seg.passos >= 2, `Enter segurado/mapa +: a repetição foi cancelada (${seg.passos} passos): segurar o + é aproximar`, JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, 'Enter segurado/mapa +: erro de JS', um.erros[0] || seg.erros[0]);
+  }
+}
+
 // ── "REJEITAR OS N" CANCELADO PELO SEGUNDO PLANO AVISA NA VOLTA (R19-2-03) ──
 //
 // Trocar de app na janela do Desfazer do "Rejeitar os N" CANCELA o lote (de
@@ -14276,6 +14601,8 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
   + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez — TODOS os alvos, o 1º da fila inclusive, que a espera pela trava antes de os alvos saírem da fila deixava escapar (servidor de 150 ms por requisição, com os CONTROLES da página sem navigator.locks, em que as duas mandam, e de UMA aba só, em que a trava não custa nenhum alvo)`
+  + `, + a recusa automática ESPERANDO a trava de outra página (os alvos já "em andamento", e o "Sair" e o ↻ nessa espera não devolvem nem mandam nada em dobro — com o CONTROLE da trava solta sem mexer em nada, cada alvo uma vez)`
+  + `, + o Enter SEGURADO não repetindo a ação de botão nenhum (↻, "Verificar novamente", "Tentar de novo", ⓘ, Filtros, o código de pareamento e seu "Entrar", e o Aprovar da foto ampliada saindo só depois da janela do Desfazer — com o CONTROLE do Enter único e o do + do mapa, que repete de propósito)`
   + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
   + `, + o Resumo do mês com o qr.js pendurado (a folha abre sem o QR depois do teto e os toques com uma geração no ar não empilham outra, com o aria-busy no botão e o CONTROLE do qr.js pedido e preso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
