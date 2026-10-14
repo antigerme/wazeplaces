@@ -1131,8 +1131,10 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
 // com os pedidos REAIS dos 6 países, os 3 mais pesados de cada tipo, em francês
 // (a frase mais larga, gotcha #25).
 //
-// CONTROLE de escala 1 (nada muda: a rede nunca liga, o `card-aperta` nunca
-// aparece) e CONTROLE do instrumento (com a regra do `card-aperta` neutralizada a
+// CONTROLE de escala 1 NESTES cinco aparelhos, todos de altura normal (nada muda: a
+// rede nunca liga, o `card-aperta` nunca aparece — em janela BAIXA ele liga a 1×,
+// e o bloco «REDUZIR MOVIMENTO» mede isso) e CONTROLE do instrumento (com a regra
+// do `card-aperta` neutralizada a
 // mesma tela PERDE a barra — senão "alcançável" passaria com a medida cega,
 // gotcha #28).
 const pesadosPorTipo = [];
@@ -10601,6 +10603,186 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── «REDUZIR MOVIMENTO»: O `card-aperta` NÃO PISCA COM O CARD PARADO (R21-8-01, lote 25) ──
+//
+// Com `prefers-reduced-motion: reduce` o `card-aperta` ligava e desligava a cada
+// quadro, sem parar, com o card PARADO: a foto e o texto saltavam 7–13 px, a barra
+// ✕ ↑ ✓ ficava fora da janela em metade dos quadros e o navegador refazia mais de
+// 100 layouts por segundo. A causa era UMA linha do styles.css: `transition-duration:
+// 0.01ms` no bloco de reduced-motion. 0.01ms não é «sem transição» — a propriedade
+// que muda segue valendo o valor de ANTES até o quadro seguinte —, e a
+// `vigiarBarraDeAcoes` (tira a classe, MEDE a barra e a repõe no mesmo quadro) lia o
+// `min-height` ANTIGO da foto: a barra «cabia», a classe saía, no quadro seguinte a
+// barra saía da janela e a classe voltava. Só no Chromium (o WebKit 27.2 não
+// reproduz: 0 trocas), e justo pra quem pediu menos movimento.
+//
+// O QUE SE MEDE, por 2 s com o card PARADO e `reducedMotion: 'reduce'`:
+//  · as ESCRITAS de classe nos dois cards, em tudo que há dentro da pilha e no
+//    placar — a contagem BRUTA dos registros do MutationObserver, e não o estado ao
+//    fim de cada entrega: «tira e repõe no mesmo quadro» deixa o estado igual, e é
+//    justo o laço (a 1ª versão desta medida contava o estado e o deixou passar: 0
+//    trocas, 800 escritas, a barra fora em 40 de 81 quadros);
+//  · em quantos quadros a barra ✕ ↑ ✓ esteve FORA da janela;
+//  · layouts por segundo (CDP): é a CPU e a bateria de quem pediu menos movimento.
+// Com a PRÉ-CONDIÇÃO de que o `card-aperta` está ligado de verdade em cada caso: um
+// card que não precisa dele nunca oscilaria, e «quieto» nele não provaria nada.
+//
+// Os CASOS são os que oscilavam sem o conserto (medidos na base, Chromium 156): o
+// iPhone 15 a 1,3× em francês (a barra fora em 45 de 90 quadros), o Z Fold a 1,3×, as
+// janelas baixas a 1× (390×520: a barra fora; 390×500 e a janela de computador de 500
+// px: o card de FUNDO) e o iPhone a 1,8×, onde o placar também entra no laço — mais
+// dois com o texto grande ligado que já eram quietos.
+//
+// CONTROLES (gotcha #28), um por onde o laço aparecia: a MESMA tela com a regra
+// antiga de volta TEM que oscilar nesse lugar — senão a medida está cega e o
+// «quieto» de cima não vale nada —, e, sem Reduzir movimento, tem que ficar quieta.
+if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card parado, a barra fora da janela e os layouts por segundo',
+  'o laço é do Blink: o WebKit 27.2 mede 0 trocas com a regra antiga, então o CONTROLE nunca reprovaria e o bloco mediria o instrumento; e as métricas de layout vêm do CDP, que só o Chromium tem')) {
+  const pedidoRM = (tipo, pais, chave) => FIXTURES_PAISES
+    .filter((f) => f.purType === tipo && f._pais === pais).sort((a, b) => chave(b) - chave(a))[0];
+  // A fila: o 1º é o card medido (o nome mais longo dos NEW_PHOTO da França), o 2º é
+  // o card de FUNDO (o FLAGGED_PHOTO com mais fotos) e o 3º só impede o 2º de ser o
+  // último da fila — no último pedido o app não monta pilha.
+  const FILA_RM = [
+    pedidoRM('NEW_PHOTO', 'França', (f) => (f.name || '').length),
+    pedidoRM('FLAGGED_PHOTO', 'França', (f) => (f.imageUrls || []).length),
+    pedidoRM('NEW_PLACE', 'Reino Unido', (f) => (f.name || '').length),
+  ];
+  checa(FILA_RM.every(Boolean), 'reduzir movimento: faltou um dos 3 pedidos da fixture dos 6 países — o bloco mediria outro cenário');
+  if (FILA_RM.every(Boolean)) {
+    const JANELA_RM = 2000;
+    const REGRA_ANTIGA = '*, *::before, *::after { transition-duration: 0.01ms !important; }';
+    const LOCALE_RM = { pt: 'pt-BR', fr: 'fr-FR' };
+    // `laco`: onde a escrita da classe aparecia sem o conserto — o card da frente, o de
+    // FUNDO ou o placar. `fora`: a barra também saía da janela naquele caso.
+    const CASOS_RM = [
+      { id: 'iPhone 15 · 393×852 a 1,3× · fr', viewport: { width: 393, height: 852 }, escala: 1.3, lang: 'fr', laco: 'frente', fora: true },
+      { id: 'Z Fold · 344×882 a 1,3× · pt', viewport: { width: 344, height: 882 }, escala: 1.3, lang: 'pt', laco: 'frente' },
+      { id: 'janela baixa · 390×520 a 1× · pt', viewport: { width: 390, height: 520 }, escala: 1, lang: 'pt', laco: 'frente', fora: true },
+      { id: 'janela baixa · 390×500 a 1× · pt', viewport: { width: 390, height: 500 }, escala: 1, lang: 'pt', laco: 'fundo' },
+      { id: 'janela de computador · 1280×500 a 1× · pt', viewport: { width: 1280, height: 500 }, escala: 1, lang: 'pt', laco: 'fundo' },
+      { id: 'iPhone 15 · 393×852 a 1,8× · pt', viewport: { width: 393, height: 852 }, escala: 1.8, lang: 'pt', laco: 'placar', fora: true },
+      { id: 'S8 · 360×740 a 1,3× · pt', viewport: { width: 360, height: 740 }, escala: 1.3, lang: 'pt', laco: null },
+      { id: 'SE · 375×667 a 1,5× · pt', viewport: { width: 375, height: 667 }, escala: 1.5, lang: 'pt', laco: null },
+    ];
+    // Roda no navegador: conta as escritas de classe (registros BRUTOS) e os quadros com
+    // a barra fora da janela durante `janelaMs`, e devolve o estado em que o card parou.
+    const MEDIR_RM = ({ janelaMs }) => new Promise((ok) => {
+      const frente = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const fundo = document.querySelector('#cardStack .card-fundo');
+      const grade = document.getElementById('placarGrid');
+      const barra = frente.querySelector('.card-actions');
+      const reg = { frente: 0, fundo: 0, placar: 0, dentro: 0 };
+      const contar = (lista) => {
+        for (const m of lista) {
+          if (m.attributeName !== 'class') continue;
+          if (m.target === frente) reg.frente++;
+          else if (m.target === fundo) reg.fundo++;
+          else if (m.target === grade) reg.placar++;
+          else reg.dentro++;
+        }
+      };
+      const mo = new MutationObserver(contar);
+      mo.observe(document.getElementById('cardStack'), { attributes: true, attributeFilter: ['class'], subtree: true });
+      mo.observe(grade, { attributes: true, attributeFilter: ['class'] });
+      let quadros = 0; let fora = 0;
+      const t0 = performance.now();
+      const passo = () => {
+        quadros++;
+        if (barra.getBoundingClientRect().bottom > innerHeight + 0.5) fora++;
+        if (performance.now() - t0 < janelaMs) { requestAnimationFrame(passo); return; }
+        contar(mo.takeRecords()); mo.disconnect();
+        ok({ ...reg, bruto: reg.frente + reg.fundo + reg.placar + reg.dentro, quadros, fora,
+          ms: performance.now() - t0,
+          aperta: frente.classList.contains('card-aperta'),
+          apertaFundo: !!fundo && fundo.classList.contains('card-aperta'),
+          placar2x2: grade.classList.contains('placar-2x2'),
+          // a regra de transição que de fato vale na foto do card (1e-05s = os 0.01ms antigos)
+          transicaoS: parseFloat(getComputedStyle(frente.querySelector('.card-photo')).transitionDuration) });
+      };
+      requestAnimationFrame(passo);
+    });
+    const metricasRM = async (cdp) => {
+      const { metrics } = await cdp.send('Performance.getMetrics');
+      const valor = (n) => (metrics.find((x) => x.name === n) || {}).value || 0;
+      return { layouts: valor('LayoutCount'), estilos: valor('RecalcStyleCount') };
+    };
+    const rodarRM = async (caso, { antiga = false, reduzir = true } = {}) => {
+      const ctx = await browser.newContext({ viewport: caso.viewport, serviceWorkers: 'block',
+        locale: LOCALE_RM[caso.lang], reducedMotion: reduzir ? 'reduce' : 'no-preference' });
+      await ctx.route('**/*-tiles/**', (r) =>
+        r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+      const page = await ctx.newPage();
+      const erros = [];
+      page.on('pageerror', (e) => erros.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(250);
+      if (caso.escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * caso.escala}px !important; }` });
+      // A regra antiga volta ANTES de o card entrar: o laço começa na montagem.
+      if (antiga) await page.addStyleTag({ content: REGRA_ANTIGA });
+      await page.evaluate(({ fila, lang }) => {
+        setLang(lang); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.preferences.comoFuncionaVisto = true;
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false);
+        AppState.serverTotal = fila.length; updateStats();
+        AppState.queue = fila; AppState.currentPlace = fila[0];
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+      }, { fila: FILA_RM, lang: caso.lang });
+      // O card ASSENTOU (a entrada, a 1ª medida e a confirmação dela já rodaram): a
+      // janela de 2 s é só do card PARADO. 300 ms de folga depois dos quadros, porque o
+      // laço — se existir — não deixa o card assentar nunca e nada se perde esperando.
+      await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
+      await page.waitForTimeout(300);
+      const cdp = await ctx.newCDPSession(page);
+      await cdp.send('Performance.enable');
+      const antes = await metricasRM(cdp);
+      const m = await page.evaluate(MEDIR_RM, { janelaMs: JANELA_RM });
+      const depois = await metricasRM(cdp);
+      m.layoutsPorS = Math.round((depois.layouts - antes.layouts) / (m.ms / 1000));
+      await ctx.close();
+      return { m, erros };
+    };
+    const resumoRM = (m) => `escritas: frente ${m.frente}, fundo ${m.fundo}, placar ${m.placar}, dentro ${m.dentro}; barra fora em ${m.fora}/${m.quadros} quadros; ${m.layoutsPorS} layouts/s; card-aperta ${m.aperta ? 'ligado' : 'DESLIGADO'}`;
+
+    // 1. O app de hoje: quieto, nos 8 casos.
+    for (const caso of CASOS_RM) {
+      const id = `reduzir movimento/${caso.id}`;
+      const { m, erros } = await rodarRM(caso);
+      checa(m.quadros >= 20, `${id}: CONTROLE falhou — só ${m.quadros} quadros medidos em 2 s, a medida não viu nada`);
+      checa(m.transicaoS === 0, `${id}: a transição da foto do card vale ${m.transicaoS}s com Reduzir movimento — a regra do styles.css não chegou (ou voltou o 0.01ms)`);
+      checa(m.aperta, `${id}: PRÉ-CONDIÇÃO falhou — o card-aperta não está ligado neste caso, então «quieto» não prova nada`, resumoRM(m));
+      checa(m.bruto === 0, `${id}: a classe foi ESCRITA ${m.bruto}× em 2 s com o card parado (frente ${m.frente}, fundo ${m.fundo}, placar ${m.placar}, dentro ${m.dentro}) — é o laço do Reduzir movimento`, resumoRM(m));
+      checa(m.fora === 0, `${id}: a barra ✕ ↑ ✓ ficou FORA da janela em ${m.fora} de ${m.quadros} quadros com o card parado`, resumoRM(m));
+      checa(m.layoutsPorS <= 10, `${id}: ${m.layoutsPorS} layouts por segundo com o card parado — a CPU de quem pediu menos movimento`, resumoRM(m));
+      checa(erros.length === 0, `${id}: erro de JS`, erros[0]);
+    }
+
+    // 2. CONTROLE do instrumento: a regra antiga de volta TEM que oscilar onde ela oscilava.
+    for (const caso of CASOS_RM.filter((c) => c.laco && ['iPhone 15 · 393×852 a 1,3× · fr', 'janela baixa · 390×500 a 1× · pt', 'iPhone 15 · 393×852 a 1,8× · pt'].includes(c.id))) {
+      const id = `reduzir movimento/CONTROLE regra antiga/${caso.id}`;
+      const { m } = await rodarRM(caso, { antiga: true });
+      checa(m.transicaoS > 0 && m.transicaoS < 0.001, `${id}: CONTROLE falhou — a regra antiga não chegou à foto (transição de ${m.transicaoS}s)`);
+      checa(m[caso.laco] >= 20, `${id}: CONTROLE falhou — com o 0.01ms de volta o ${caso.laco} foi escrito só ${m[caso.laco]}× em 2 s, então o «quieto» de cima não estava medindo nada`, resumoRM(m));
+      checa(m.layoutsPorS >= 40, `${id}: CONTROLE falhou — com o 0.01ms de volta foram só ${m.layoutsPorS} layouts por segundo`, resumoRM(m));
+      if (caso.fora) checa(m.fora >= 10, `${id}: CONTROLE falhou — com o 0.01ms de volta a barra ficou fora da janela em só ${m.fora} de ${m.quadros} quadros`, resumoRM(m));
+    }
+
+    // 3. CONTROLE do movimento normal: sem Reduzir movimento a mesma tela já era quieta.
+    for (const caso of CASOS_RM.filter((c) => c.laco === 'frente' && c.fora || c.laco === 'placar')) {
+      const id = `reduzir movimento/CONTROLE sem Reduzir movimento/${caso.id}`;
+      const { m } = await rodarRM(caso, { reduzir: false });
+      checa(m.aperta && m.bruto === 0 && m.fora === 0, `${id}: sem Reduzir movimento a tela já devia estar quieta e com o card-aperta ligado`, resumoRM(m));
+    }
+  }
+}
+
 // ── O PONTO LEVA AO QUE DESTRAVOU ──────────────────────────────────────────
 //
 // O owner apontou a incoerência olhando o app: o aviso do Desfazer te leva ao
@@ -16636,6 +16818,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto; o que o TREINO segurou sai no "Sair" da faixa e no ↻, o que estava na tela quando ele abriu sai dele e volta no fim, com o CONTROLE do dispensado que não volta; e o interruptor do Desfazer travando com as Preferências abertas quando o "Desfazer" devolve o placar abaixo da cota)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
+  + `, + «Reduzir movimento» sem laço no Chromium (o card-aperta e o placar com o card PARADO por 2 s em 8 casos — iPhone a 1,3× e 1,8×, Z Fold, janelas baixas a 1× e a de computador de 500 px, S8 e SE —: zero escritas de classe contadas uma a uma nos dois cards e no placar, zero quadros com a barra ✕/↑/✓ fora da janela e zero layouts por segundo, com o card-aperta ligado de verdade em cada caso; CONTROLES com a regra antiga de 0.01ms de volta, que TEM que oscilar no card da frente, no de fundo e no placar, e sem Reduzir movimento, quieto)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`

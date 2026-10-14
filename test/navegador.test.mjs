@@ -182,6 +182,11 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // E os controles da foto e do mapa ampliados COM o recorte lateral do aparelho (lote 25, R21-3-05): o override de
   // `env(safe-area-inset-*)` é do protocolo do Chromium (`Emulation.setSafeAreaInsetsOverride`); o WebKit mede, no mesmo
   // bloco, só o recorte zerado.
+  // E o bloco «REDUZIR MOVIMENTO» (lote 25, R21-8-01): o laço do `card-aperta`
+  // com a transição de 0.01ms é do Blink — o WebKit 27.2 mede 0 trocas com a
+  // regra antiga —, então lá o CONTROLE (a regra antiga de volta TEM que
+  // oscilar) nunca reprovaria e o bloco mediria o instrumento; e os layouts por
+  // segundo vêm do CDP, que só o Chromium tem.
   // smoke-offline (lote 18): os CINCO blocos de seções que rodam com o service
   // worker no comando — no WebKit 27.2 a rota do Playwright (do contexto e da
   // página) não vê nenhum pedido dessa página, e o tile, a foto e a API iriam à
