@@ -629,3 +629,31 @@ test('R17-1-03: CONTROLE — com a conta conhecida (a ponte a repassou, ou o per
   await ateQue(() => m.chamou.includes('pediu'), 'os avisos não foram devolvidos com a conta conhecida');
   assert.ok(m.deps.avisosAdiados && m.deps.avisosAdiados.consequencia.has('reject'), 'CONTROLE: o aviso da consequência não voltou a pendente');
 });
+
+// ═══ R17-1-04 · o seletor de categoria dos Filtros × o "Sair" ═════════════════
+// O R16-6-04 zerou o ESTADO (`seenCategories`), mas as <option> da conta que saiu seguiam no DOM do
+// seletor até a próxima abertura dos Filtros (o relatório do modo dev leva o DOM). O irmão do
+// `esvaziarSeletorDeAreas`, chamado nos mesmos lugares e no fechamento dos Filtros.
+test('R17-1-04: `esvaziarSeletorDeCategorias` deixa só "Todas as categorias" — e é o que o `populateCategorySelect` repovoa na abertura seguinte', () => {
+  const select = { innerHTML: '<option value="">Todas</option><option value="CATX">CATX</option>', value: 'CATX' };
+  const deps = { document: { getElementById: (id) => (id === 'filterCategory' ? select : null) }, t: (k) => 'T:' + k, escapeHtml: (x) => String(x) };
+  const h = montar(['esvaziarSeletorDeCategorias'], deps);
+  h.esvaziarSeletorDeCategorias();
+  assert.equal(select.innerHTML, '<option value="" data-i18n="filters.category.all">T:filters.category.all</option>',
+    'DEFEITO: o seletor guardou categorias da conta que saiu: ' + select.innerHTML);
+  assert.equal(select.value, '');
+  // CONTROLE: sem o seletor na página (as telas sem os Filtros) nada quebra.
+  const sem = montar(['esvaziarSeletorDeCategorias'], { document: { getElementById: () => null }, t: (k) => k, escapeHtml: (x) => x });
+  assert.doesNotThrow(() => sem.esvaziarSeletorDeCategorias());
+});
+
+test('R17-1-04 (estrutura): o "Sair"/a recusa do portão (`showAuthScreen`), a troca de conta e o fechamento dos Filtros esvaziam o seletor — junto das áreas', () => {
+  assert.match(fatiar('showAuthScreen'), /esvaziarSeletorDeAreas\(\);\s*esvaziarSeletorDeCategorias\(\);/, 'a tela de entrada não esvazia o seletor de categoria');
+  assert.match(fatiar('esquecerOutraConta'), /esvaziarSeletorDeAreas\(\);\s*esvaziarSeletorDeCategorias\(\);/, 'a troca de conta não esvazia o seletor de categoria');
+  assert.match(APP_SEM, /filtersModal\(\) \{[\s\S]*?esvaziarSeletorDeAreas\(\);\s*esvaziarSeletorDeCategorias\(\);\s*\},/, 'o fechamento dos Filtros não esvazia o seletor de categoria');
+  // O varredor dos sítios das ÁREAS: todo lugar que esvazia as áreas esvazia as categorias (o par não se separa).
+  const sitiosAreas = (APP_SEM.match(/^\s+esvaziarSeletorDeAreas\(\);$/gm) || []).length;
+  const sitiosCats = (APP_SEM.match(/^\s+esvaziarSeletorDeCategorias\(\);$/gm) || []).length;
+  assert.equal(sitiosCats, sitiosAreas, `as categorias são esvaziadas em ${sitiosCats} lugares e as áreas em ${sitiosAreas} — o par se separou`);
+  assert.ok(sitiosAreas >= 3, 'CONTROLE: o varredor não achou os sítios das áreas (instrumento cego)');
+});

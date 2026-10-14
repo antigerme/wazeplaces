@@ -13263,7 +13263,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     editableCountryIDs: [30], areas: [], managedAreas: [] };
   // Pedidos de FOTO NOVA do MESMO autor: dois ✕ o promovem à lista de autores.
   const FILA_SAIR = Array.from({ length: 5 }, (_, i) => ({
-    venueID: `vsair${i}`, updateRequestID: `usair${i}`, name: `Padaria${MARCA}${i}`, categories: ['BAKERY'],
+    venueID: `vsair${i}`, updateRequestID: `usair${i}`, name: `Padaria${MARCA}${i}`,
+    // Uma categoria com a MARCA (R17-1-04): ela entra no seletor dos Filtros e não pode ficar no DOM depois.
+    categories: [i === 1 ? `CAT${MARCA}` : 'BAKERY'],
     address: `Rua${MARCA} ${i}, 10`, updateType: 'Nova foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO',
     createdBy: `autor${MARCA}`, creatorId: 7777, imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_usair${i}.png`],
     newImageIdx: 0, approvedImageIds: [], localAprovado: true, brand: null, changes: [],
@@ -13338,6 +13340,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#filtersTabHistory');
   await assentarCamada();
   const comHistorico = await varrer();
+  // O seletor de CATEGORIA dos Filtros (R17-1-04): com os Filtros abertos ele oferece a categoria
+  // com a MARCA da fila (CONTROLE), e fechados não oferece nada — nem depois do "Sair".
+  const comCategoria = await varrer();
+  checa(comCategoria.includes('filterCategory'),
+    'sair/categorias: CONTROLE — o seletor dos Filtros aberto não ofereceu a categoria com a marca (a varredura não enxerga o caso)', JSON.stringify(comCategoria));
   // O RESTO do painel do Histórico (R8-7-06, auditoria de 2026-10-03): a patente,
   // os totais e o botão do Resumo são o trabalho de quem estava — números, sem a
   // marca, então medidos pelo tamanho do texto. Ficavam no DOM do painel fechado.
@@ -13345,6 +13352,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await page.evaluate(() => document.getElementById('filtersModal').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await esperarOuExplodir(page, () => document.getElementById('filtersModal').classList.contains('hidden'), 'o fundo fechar os Filtros');
   const historicoFechado = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(!(await varrer()).includes('filterCategory'),
+    'sair/categorias: o seletor de categoria dos Filtros FECHADOS seguiu com a categoria da fila no DOM (R17-1-04)');
   checa(historicoAberto > 0, 'sair/DOM: CONTROLE — o painel do Histórico aberto não tinha texto (a medida não enxerga o painel)',
     String(historicoAberto));
   checa(historicoFechado === 0, 'sair/DOM: o painel do Histórico FECHADO seguiu com a patente e os totais no DOM', String(historicoFechado));
@@ -13429,6 +13438,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'sair/categorias: depois do "Sair" o seletor dos Filtros de quem entrar ainda oferece as categorias da fila de quem saiu', JSON.stringify(categoriasDepois));
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
+  const opcoesDeCategoria = await page.evaluate(() => [...document.getElementById('filterCategory').options].map((o) => o.value));
+  checa(opcoesDeCategoria.length === 1 && opcoesDeCategoria[0] === '',
+    'sair/categorias: depois do "Sair" o seletor de categoria dos Filtros ainda lista categorias da conta que saiu (R17-1-04)', JSON.stringify(opcoesDeCategoria));
   const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
   checa(historicoDepoisDoSair === 0,
     'sair/DOM: depois do "Sair", o painel do Histórico (redesenhado com os Filtros fechados) seguiu no DOM', String(historicoDepoisDoSair));

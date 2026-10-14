@@ -1296,8 +1296,10 @@ const LIMPEZA_AO_FECHAR = {
         // Nem o resto do painel do Histórico: a patente, os totais e o Resumo do
         // mês de quem estava (R8-7-06).
         esvaziarPainelDoHistorico();
-        // Nem as áreas gerenciadas da conta, no seletor da aba Filtros (R11-1-05).
+        // Nem as áreas gerenciadas da conta, no seletor da aba Filtros (R11-1-05),
+        // nem as categorias que a fila dela mostrou (R17-1-04).
         esvaziarSeletorDeAreas();
+        esvaziarSeletorDeCategorias();
     },
     // A folha do autor: o nome dele e as linhas com a contagem (R6-1-05).
     autorModal() {
@@ -6036,6 +6038,18 @@ function esvaziarSeletorDeAreas() {
     if (select) select.innerHTML = '<option value="" data-i18n="filters.managedArea.none">' + escapeHtml(t('filters.managedArea.none')) + '</option>';
 }
 
+// O seletor de categoria sem as da conta que saiu (R17-1-04), o irmão do `esvaziarSeletorDeAreas`:
+// o "Sair", a recusa do portão e a troca de conta zeravam o ESTADO (`seenCategories`, R16-6-04),
+// mas as <option> da conta anterior seguiam no DOM até a próxima abertura dos Filtros as
+// redesenhar — e o relatório do modo dev leva o DOM. Só a opção "Todas", como na carga da página;
+// a abertura seguinte o repovoa (`populateCategorySelect`).
+function esvaziarSeletorDeCategorias() {
+    const select = document.getElementById('filterCategory');
+    if (!select) return;
+    select.innerHTML = '<option value="" data-i18n="filters.category.all">' + escapeHtml(t('filters.category.all')) + '</option>';
+    select.value = '';
+}
+
 // Preenche o select de categoria a partir das categorias vistas (B5).
 function populateCategorySelect() {
     const sel = document.getElementById('filterCategory');
@@ -6698,6 +6712,7 @@ function showAuthScreen() {
     // gerenciadas no seletor dos Filtros (R11-1-05).
     esvaziarPainelDoHistorico();
     esvaziarSeletorDeAreas();
+    esvaziarSeletorDeCategorias();
     const brandTitle = document.getElementById('brandTitle');
     if (brandTitle) brandTitle.classList.remove('sr-only'); // volta visível ao deslogar
     AppState.authenticated = false;
@@ -21881,8 +21896,10 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
         AppState.filters.managedAreaId = '';
         if (!soMemoria) saveFilters();
     }
-    // E o seletor delas nos Filtros, com o NOME das áreas dela (R11-1-05).
+    // E o seletor delas nos Filtros, com o NOME das áreas dela (R11-1-05), e o das categorias
+    // que a fila dela mostrou (R17-1-04).
     esvaziarSeletorDeAreas();
+    esvaziarSeletorDeCategorias();
     // Casa, trabalho e a posição do GPS também eram dela: a fila de quem entrou
     // saía ordenada pela casa da anterior (R4-5 A4). As de quem entrou chegam
     // com o perfil dele.
