@@ -754,7 +754,10 @@ body > main {
    `card-aperta` é ligada pela `vigiarBarraDeAcoes` (js/app.js) quando a barra de
    ações estoura o corpo do card — fonte do sistema em 1,3× ou mais nas alturas
    de 667 a 860 px, onde a regra compacta por ALTURA (px) não alcança. Com escala
-   1 ela nunca liga, e este bloco não existe pra a tela: nenhum pixel muda.
+   1 e uma janela de altura normal ela nunca liga, e este bloco não existe pra a
+   tela: nenhum pixel muda. Em janela BAIXA ela liga mesmo a 1× (MEDIDO: 390×500,
+   390×520, 375×520, 412×520 e janelas de computador de uns 500 px de altura): o
+   que decide é a barra contra o corpo do card, e não a escala.
 
    Quem cede é a FOTO, até um piso que ainda mostra a evidência (5.5rem: em
    `rem`, proporcional ao texto, nunca um número de pixels que a escala deixaria
@@ -1617,12 +1620,25 @@ button:active {
 }
 
 /* Respeita a preferência de movimento reduzido do sistema (M3/HIG a11y).
-   A barra de undo fica estática (cheia) — a janela continua funcionando. */
+   A barra de undo fica estática (cheia) — a janela continua funcionando.
+
+   As ANIMAÇÕES ficam em 0.01ms, e não em `none`: o app espera o `animationend`
+   pra tirar a classe do contador (`count-pop`), da linha destacada
+   (`pref-highlight`) e do alvo da conquista (`conq-alvo`), e com `animation: none`
+   ele nunca dispara. As TRANSIÇÕES ficam em 0s (R21-8-01): o app não escuta
+   nenhum `transitionend` — as saídas do swipe terminam por timer —, e 0.01ms NÃO
+   é "sem transição": a propriedade que muda continua valendo o valor de ANTES
+   até o quadro seguinte. A `vigiarBarraDeAcoes` tira o `card-aperta`, MEDE a
+   barra e a repõe no mesmo quadro; com 0.01ms ela lia o `min-height` da foto
+   ainda no valor de antes, achava que a barra cabia, e no quadro seguinte o valor
+   novo chegava, a barra saía da janela e a classe voltava: um laço sem fim com o
+   card PARADO (a foto e o texto saltando 7–13 px, mais de 100 layouts por
+   segundo), só no Chromium e justo pra quem pediu menos movimento. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
   }
   .undo-progress {
     animation: none;

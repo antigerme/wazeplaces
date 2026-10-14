@@ -5,7 +5,8 @@
 //             a barra ✕ ↑ ✓ saía do card nas alturas de 667 a 860 px, e a página
 //             não rolava. A regra compacta por ALTURA é em px e não enxerga a
 //             escala; o conserto é uma segunda rede de segurança, MEDIDA e viva
-//             (`vigiarBarraDeAcoes` → `card-aperta`), que com escala 1 nunca liga.
+//             (`vigiarBarraDeAcoes` → `card-aperta`), que com escala 1 e altura de
+//             janela normal nunca liga (em janela baixa ela liga a 1×: R21-8-01).
 //  R19-8-02 · texto do Waze em hebraico/árabe saía num parágrafo da esquerda pra
 //             direita: `dir="auto"` em todo elemento que recebe texto do Waze, e
 //             isolamento do nome quando ele vai no meio de uma frase nossa.
