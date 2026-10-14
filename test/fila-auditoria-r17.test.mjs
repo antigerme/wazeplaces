@@ -657,3 +657,49 @@ test('R17-1-04 (estrutura): o "Sair"/a recusa do portão (`showAuthScreen`), a t
   assert.equal(sitiosCats, sitiosAreas, `as categorias são esvaziadas em ${sitiosCats} lugares e as áreas em ${sitiosAreas} — o par se separou`);
   assert.ok(sitiosAreas >= 3, 'CONTROLE: o varredor não achou os sítios das áreas (instrumento cego)');
 });
+
+// ═══ R17-3-02 · o Enter/Esc do IME (japonês, chinês, coreano) não é do app ═════
+// O Enter que CONFIRMA a composição salvava o nome da fachada pela metade (a renomeação entrava na
+// janela do Desfazer com "にほん"), e o Esc que a CANCELA jogava fora o campo — MEDIDO no Chromium por
+// CDP (`isComposing` verdadeiro no mesmo `keydown`). O Chrome do Windows manda `keyCode` 229 e o
+// Safari manda o `keydown` depois do `compositionend` com 229 e `isComposing` falso: os dois sinais.
+test('R17-3-02: `teclaDeComposicao` — `isComposing` (Chrome do macOS) OU `keyCode` 229 (Windows e Safari); a tecla comum não', () => {
+  const f = new Function(fatiar('teclaDeComposicao') + '\nreturn teclaDeComposicao;')();
+  assert.equal(f({ key: 'Enter', isComposing: true, keyCode: 13 }), true, 'Chrome do macOS: Enter com isComposing');
+  assert.equal(f({ key: 'Process', isComposing: false, keyCode: 229 }), true, 'Chrome do Windows: 229');
+  assert.equal(f({ key: 'Enter', isComposing: false, keyCode: 229 }), true, 'Safari: Enter depois do compositionend, 229');
+  assert.equal(f({ key: 'Enter', isComposing: false, keyCode: 13 }), false, 'CONTROLE: o Enter comum é do app');
+  assert.equal(f({ key: 'Escape', keyCode: 27 }), false, 'CONTROLE: o Esc comum é do app');
+  assert.equal(f(null), false);
+});
+
+test('R17-3-02: o campo do nome da fachada e o código de pareamento ignoram a tecla da composição — o Enter e o Esc comuns seguem valendo', () => {
+  const ouvintes = fatiar('setupModalListeners');
+  const nome = /\$\('lightboxNomeInput'\)\?\.addEventListener\('keydown', \(ev\) => \{\s*if \(teclaDeComposicao\(ev\)\) return;\s*if \(ev\.key === 'Enter'\) \{ ev\.preventDefault\(\); confirmarRenomear\(\); \}\s*else if \(ev\.key === 'Escape'\)/;
+  assert.match(ouvintes, nome, 'DEFEITO: o Enter/Esc do campo do nome não olham a composição do IME (R17-3-02)');
+  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;/,
+    'o Enter do código de pareamento não olha a composição');
+});
+
+test('R17-3-02: o teclado global não fecha o diálogo com o Esc da composição — e o Esc comum fecha', () => {
+  const fechou = [];
+  const deps = {
+    atalhoDoNavegador: () => false, TECLAS_DOS_ATALHOS_DO_NAVEGADOR: [], teclaDeComposicao: null,
+    Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
+    topOpenModal: () => ({ id: 'pairEnterModal' }), closeModal: (id) => fechou.push(id),
+    focoEmCampoDeTexto: () => true, TECLAS_DE_CURSOR: [],
+  };
+  const h = montar(['teclaDeComposicao', 'handleKeyDown'], deps);
+  const tecla = (extra) => ({ key: 'Escape', keyCode: 27, preventDefault() {}, stopPropagation() {}, ...extra });
+  h.handleKeyDown(tecla({ isComposing: true }));
+  h.handleKeyDown(tecla({ keyCode: 229 }));
+  assert.deepEqual(fechou, [], 'DEFEITO: o Esc que cancela a composição fechou o diálogo (R17-3-02)');
+  h.handleKeyDown(tecla({}));
+  assert.deepEqual(fechou, ['pairEnterModal'], 'CONTROLE: o Esc comum não fechou o diálogo (o instrumento não enxerga o fechamento)');
+});
+
+test('R17-3-02 (estrutura): a guarda da composição vem logo DEPOIS da dos atalhos do navegador, que segue a primeira instrução', () => {
+  const corpo = fatiar('handleKeyDown').split('\n').slice(1).map((l) => l.trim()).filter(Boolean);
+  assert.equal(corpo[0], 'if (atalhoDoNavegador(e) && TECLAS_DOS_ATALHOS_DO_NAVEGADOR.includes(e.key)) return;');
+  assert.equal(corpo[1], 'if (teclaDeComposicao(e)) return;');
+});

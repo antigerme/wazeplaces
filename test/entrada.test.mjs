@@ -1952,7 +1952,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   // O código: o Enter no campo e o "Entrar" passam o teclado adiante (a estrutura
   // do ouvinte, que mora no `setupModalListeners`).
   const ouvintes = fatiar('setupModalListeners');
-  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
+  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;[^\n]*\n\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
     'o Enter no campo do código não diz que veio do teclado');
   assert.match(ouvintes, /\$\('pairEnterConfirm'\)\?\.addEventListener\('click', \(ev\) => resgatarPareamento\(\$\('pairCodeInput'\)\.value,\s*\{ peloTeclado: veioDoTeclado\(ev\) \}\)\);/,
     'o "Entrar" do código não diz se veio do teclado');

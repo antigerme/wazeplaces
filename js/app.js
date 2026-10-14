@@ -2441,6 +2441,10 @@ function setupModalListeners() {
     $('lightboxNomeCancel')?.addEventListener('click', sairDaEdicaoNome);
     $('lightboxNomeInput')?.addEventListener('input', atualizarBotaoSalvarNome);
     $('lightboxNomeInput')?.addEventListener('keydown', (ev) => {
+        // O Enter que CONFIRMA a composição do IME (japonês, chinês, coreano) e o Esc que a
+        // CANCELA são do teclado de entrada, não do app: salvavam o nome pela metade e jogavam
+        // fora o campo (R17-3-02, o `isComposing` MEDIDO no Chromium por CDP).
+        if (teclaDeComposicao(ev)) return;
         // Enter confirma, Esc cancela — e o Esc PARA aqui (`stopPropagation`),
         // senão ele fecha o lightbox inteiro e a pessoa perde a foto que estava
         // usando de prova só por desistir de um caractere.
@@ -2463,6 +2467,7 @@ function setupModalListeners() {
     $('pairEnterConfirm')?.addEventListener('click', (ev) => resgatarPareamento($('pairCodeInput').value,
         { peloTeclado: veioDoTeclado(ev) }));
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
+        if (teclaDeComposicao(e)) return;   // o Enter que confirma a composição do IME não resgata (R17-3-02)
         if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value, { peloTeclado: true }); }
     });
     // Colado de dentro de uma mensagem, com espaço ou quebra de linha: o código
@@ -6463,6 +6468,16 @@ function atalhoDoNavegador(e) {
     return !!(e && (e.ctrlKey || e.metaKey || e.altKey));
 }
 
+// A tecla é do TECLADO DE ENTRADA (IME: japonês, chinês, coreano), não do app: o Enter que
+// confirma a composição e o Esc que a cancela chegam como `keydown`. O Chrome do Windows manda
+// `keyCode` 229 (`key` "Process"); o do macOS manda `key` "Enter" com `isComposing` verdadeiro; o
+// Safari manda o `keydown` DEPOIS do `compositionend`, com `keyCode` 229 e `isComposing` falso. Os
+// dois sinais juntos cobrem as três (R17-3-02). Fonte única: o campo do nome da fachada, o
+// código de pareamento e o teclado global (o Esc que fecharia o diálogo no meio da composição).
+function teclaDeComposicao(e) {
+    return !!(e && (e.isComposing === true || e.keyCode === 229));
+}
+
 // As teclas que, com Ctrl, ⌘ ou Alt, são do NAVEGADOR: as setas — Alt+← e ⌘+←
 // são o Voltar, Alt+→ e ⌘+→ o Avançar, ⌘+↑ e ⌘+↓ o topo e o fim da página — e
 // + − = (o zoom da página). O z fica de fora: Ctrl/⌘+Z é o Desfazer DO APP.
@@ -6484,6 +6499,11 @@ function handleKeyDown(e) {
     // aberta o Voltar a fecha (`CamadaVoltar`). O Shift sozinho segue do app, e o
     // z fica de fora: Ctrl/⌘+Z é o Desfazer do app.
     if (atalhoDoNavegador(e) && TECLAS_DOS_ATALHOS_DO_NAVEGADOR.includes(e.key)) return;
+
+    // Tecla da composição do IME: nada daqui decide, anda ou fecha. O Esc que cancela a composição
+    // num campo de um diálogo (a conversa, o código de pareamento, os cookies) fechava o diálogo
+    // inteiro (R17-3-02).
+    if (teclaDeComposicao(e)) return;
 
     // Foco num campo de texto: as setas são do CURSOR, não do app.
     //
