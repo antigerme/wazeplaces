@@ -11266,7 +11266,8 @@ async function gestosPagina(opcoes, fila, { lang = 'pt' } = {}) {
     const nome = r.request().url().split('/api/')[1].split('?')[0];
     let corpo = {};
     try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
-    saiu.push({ nome, aprovar: corpo.approve === true, acao: corpo.action || null, pedido: corpo.updateRequestID || null });
+    saiu.push({ nome, aprovar: corpo.approve === true, acao: corpo.action || null, pedido: corpo.updateRequestID || null,
+      novoNome: nome === 'renomear-local' ? (corpo.nome == null ? null : corpo.nome) : undefined });
     if (nome === 'validar-place' && corpo.approve === true) await aprovacaoPresa;
     // Cada rota com a FORMA que o app lê: `{ success: true }` cru em
     // `lista-paises` faz o modal de Filtros iterar `undefined`.
@@ -12778,6 +12779,443 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     });
     checa(m.editando && m.largura > m.tela - 24, `${id}: PRÉ-CONDIÇÃO — não entrou em edição ou o nome não é longo o bastante pra medir`, JSON.stringify(m));
     checa(m.esq >= 0 && m.dir <= m.tela, `${id}: a pílula do nome estourou a tela`, JSON.stringify(m));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+}
+
+// ── A FOTO AMPLIADA E A SESSÃO QUE ACABOU (lote 25, rodada 21 da auditoria) ─────
+//
+// Os testes de unidade (`test/fotos-auditoria-r21`, `lightbox-auditoria-r21`, `telas-auditoria-r21`)
+// rodam as peças contra um navegador de mentira; aqui é o NAVEGADOR, com a rede de mentira por rota e o
+// log do que SAIU pelo fio:
+//
+//  R21-3-02 (= R21-1-01 = R21-2-01) · a pílula do nome do local nascia TRAVADA, calada, na sessão nova,
+//       esperando a resposta da exclusão de foto de quem saiu (até 45 s). A ORDEM das escritas segue: a
+//       escrita de foto de quem entrou espera a resposta da de quem saiu (o Waze substitui a lista).
+//  R21-3-01 · a queda SEM renovação seguida de um login novo (cookies) deixava o "Aprovar", a lixeira e a
+//       pílula travados, calados, até a resposta da escrita da sessão que caiu.
+//  R21-3-03 · o arrasto com o MOUSE na tarja preta da foto ampliada gerava um `click` no fundo e FECHAVA a camada.
+//  R21-3-04 · tirar o espaço sobrando no começo ou no fim do nome era um no-op calado (o ✓ não habilitava).
+//  R21-3-05 · a foto e o mapa ampliados ignoravam as margens LATERAIS de segurança (iPhone deitado).
+//
+// CADA UM com o CONTROLE ao lado: o mesmo percurso sem a escrita no ar (a pílula e os botões vivos), com a escrita
+// no ar e a MESMA sessão (a pílula travada: a medida enxerga a trava), o clique parado fechando, o arrasto sobre a
+// foto trocando, o nome igual sem escrever, e o recorte zerado deixando cada controle onde sempre esteve.
+{
+  const PERFIL_L6 = { id: 4242, userName: 'editor_foto', rank: 5, isAreaManager: true, isStaff: false,
+    editableCountryIDs: [30], areas: [], managedAreas: [] };
+  const COOKIES = '.waze.com\tTRUE\t/\tTRUE\t9999999999\t_web_session\tZ';
+  // Fechar uma camada e abrir outra no MESMO quadro dessincroniza o voltar (o `close` agenda um `history.back()` e o `open`
+  // seguinte empilha: o fechamento depois sai do app — gotcha #65 (a), que já mordeu script de teste cinco vezes).
+  const voltarAssentado = (page) => esperarNaPagina(page, () => !CamadaVoltar.consumindo, 4000);
+
+  // A página COM sessão de verdade: a busca traz a fila pela rota, o "Sair" sai pela Ajuda e o login é o dos cookies.
+  // `semJanela`: o caminho sem o Desfazer (a cota cumprida e o interruptor desligado), em que a escrita SAI na hora e
+  // o botão vira giro. `presas`: a PRIMEIRA ida da rota fica no ar até o teste soltar (`presas[rota].soltar()`).
+  const abrirComSessao = async ({ fila, semJanela = false, viewport = { width: 1280, height: 800 } }) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+    const rede = [];
+    const mortos = new Set();
+    const presas = {};
+    let logins = 0;
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const rota = new URL(r.request().url()).pathname.replace(/^\/api\//, '');
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { corpo = {}; }
+      rede.push({ rota, token: corpo.sessionToken || null, acao: corpo.action || null, aprovar: corpo.approve === true, foto: corpo.imageID || null, novoNome: corpo.nome == null ? null : corpo.nome });
+      const json = (o, status = 200) => r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(o) }).catch(() => {});
+      if (presas[rota] && !presas[rota].usada && presas[rota].filtro(corpo)) { presas[rota].usada = true; await presas[rota].promessa; }
+      if (mortos.has(corpo.sessionToken) && !/^(presenca-app|chat)$/.test(rota)) {
+        return json({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }, 401);
+      }
+      if (rota === 'testar-cookies') return json({ success: true, sessionToken: `tok-b${++logins}`, conta: '4242' });
+      if (rota === 'perfil') return json({ success: true, profile: PERFIL_L6, visivelNoWme: true });
+      if (rota === 'buscar-places') return json({ success: true, places: fila(), hasMore: false, page: 1, total: fila().length, totalAll: fila().length, blocked: 0 });
+      if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil', abbr: 'BR' }] });
+      if (rota === 'lista-estados') return json({ success: true, states: [] });
+      if (rota === 'presenca-app') return json({ success: true, online: [], conversas: [] });
+      if (rota === 'excluir-foto') return json({ success: true, restantes: [] });
+      return json({ success: true });
+    });
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 140)));
+    await page.addInitScript((sem) => {
+      try {
+        localStorage.setItem('waze_session_token', 'tok-a0');
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: sem ? 20 : 0, skipped: 0 }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: !sem, presenca: false, undoGateSeen: true,
+          dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, semJanela);
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
+      && !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image'), 'a fila abrir pela rota');
+    // `filtro`: qual ida fica presa (a 1ª que casar). O "preparar" da lixeira (o aquecimento, uma LEITURA) usa a mesma rota da
+    // exclusão e sai no toque — presa a 1ª ida da rota, o teste seguraria o aquecimento, não a exclusão.
+    const prender = (rota, filtro = () => true) => {
+      let soltar;
+      presas[rota] = { usada: false, filtro, promessa: new Promise((ok) => { soltar = ok; }), soltar: () => soltar() };
+      return presas[rota];
+    };
+    const soltarTudo = () => { for (const p of Object.values(presas)) p.soltar(); };
+    // A foto do pedido da frente aberta no lightbox, na foto que o teste quer ('aprovar' = a proposta, 'excluir' = a de `id`).
+    const abrirFoto = async (qual) => {
+      await page.evaluate(() => { if (!Lightbox.isOpen()) document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click(); });
+      await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto abrir');
+      await page.evaluate((q) => {
+        const i = q === 'aprovar' ? Lightbox.newIdx : Lightbox.urls.findIndex((u) => u.includes(q));
+        if (i >= 0 && Lightbox.idx !== i) { Lightbox.idx = i; Lightbox._render(); }
+      }, qual);
+      await esperarOuExplodir(page, () => fotoDoLightboxNaTela(), 'a foto da vez aparecer');
+      // O aviso de boas-vindas e os toasts não cobrem o que se mede.
+      await esperarNaPagina(page, () => document.querySelectorAll('#toastContainer > *').length === 0, 8000);
+    };
+    const fecharFoto = async () => {
+      await page.evaluate(() => { if (editandoNome()) sairDaEdicaoNome(); if (Lightbox.isOpen()) Lightbox.close(); });
+      await voltarAssentado(page);
+    };
+    const sairPelaAjuda = async () => {
+      await page.evaluate(async () => {
+        document.getElementById('helpBtn').click();
+        await new Promise((ok) => setTimeout(ok, 150));
+        document.getElementById('logoutBtn').click();
+        await new Promise((ok) => setTimeout(ok, 150));
+        document.getElementById('confirmLogout').click();
+      });
+      await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois do "Sair"');
+    };
+    const entrarPorCookies = async () => {
+      await page.evaluate((c) => { authenticateWithCookies(c); }, COOKIES);
+      await esperarOuExplodir(page, () => AppState.authenticated === true && !!AppState.profile && AppState.queue.length > 0 && !AppState.fetching, 'o login por cookies chegar à fila');
+    };
+    const estado = () => page.evaluate(() => {
+      const b = (id) => { const e = document.getElementById(id); return e ? { desab: e.disabled, oculto: e.classList.contains('hidden') } : null; };
+      const p = Lightbox.place;
+      return {
+        pilula: b('lightboxNomeBtn'), aprovar: b('lightboxApprove'), lixeira: b('lightboxDelete'),
+        giro: !document.getElementById('lightboxApproveSpinner').classList.contains('hidden'),
+        lixeiraOcupada: document.getElementById('lightboxDelete').classList.contains('lixeira-ocupada'),
+        excluindo: !!p && exclusaoDoLocalNoAr(p), travado: acoesTravadas(), local: p && p.venueID,
+      };
+    });
+    const esperarRede = async (cond, descricao, teto = 9000) => {
+      const fim = Date.now() + teto;
+      while (Date.now() < fim) { if (rede.some(cond)) return true; await dormir(60); }
+      checa(false, `${descricao}: a rede não viu a ida a tempo`);
+      return false;
+    };
+    return { ctx, page, rede, mortos, erros, prender, soltarTudo, abrirFoto, fecharFoto, sairPelaAjuda, entrarPorCookies, estado, esperarRede };
+  };
+  const pedidoDaFila = (id, aprovadas) => gestosPedidoDeFoto(id, aprovadas);
+
+  // ── R21-3-02 · a pílula do nome, o "Sair" e a vez do local ──────────────────────────────────────
+  for (const [rotulo, comEscritaNoAr] of [['com a exclusão de quem saiu NO AR', true], ['CONTROLE: sem exclusão no ar', false]]) {
+    const id = `foto/vez-do-local (${rotulo})`;
+    const m = await abrirComSessao({ fila: () => [pedidoDaFila('uV', ['fv1', 'fv2'])] });
+    if (comEscritaNoAr) m.prender('excluir-foto', (corpo) => corpo.action !== 'preparar');
+    if (comEscritaNoAr) {
+      // A sessão A exclui a foto fv1 e deixa a janela do Desfazer VENCER (3 s): a escrita sai e fica no ar.
+      await m.abrirFoto('fv1');
+      await m.page.evaluate(() => document.getElementById('lightboxDelete').click());
+      await m.esperarRede((x) => x.rota === 'excluir-foto' && x.acao !== 'preparar', id);
+      await dormir(150);
+      const antes = await m.estado();
+      checa(antes.excluindo && antes.pilula && antes.pilula.desab, `${id}: PRÉ-CONDIÇÃO — com a exclusão no ar na MESMA sessão a pílula devia estar travada (a medida não enxergaria a trava)`, JSON.stringify(antes));
+      await m.fecharFoto();
+    }
+    await m.sairPelaAjuda();
+    await m.entrarPorCookies();
+    await m.abrirFoto('aprovar');
+    const dep = await m.estado();
+    checa(dep.pilula && dep.pilula.oculto === false, `${id}: PRÉ-CONDIÇÃO — a pílula do nome (L6+AM) não está na tela da sessão nova`, JSON.stringify(dep));
+    checa(dep.pilula && dep.pilula.desab === false,
+      `${id}: a pílula do nome do MESMO local nasceu travada na sessão nova, esperando a resposta da exclusão de quem saiu`, JSON.stringify(dep));
+    checa(dep.excluindo === false && dep.travado === false, `${id}: a exclusão de quem saiu conta na sessão nova (a pílula travada, calada: acoesTravadas() falso)`, JSON.stringify(dep));
+    // A ORDEM das escritas no Waze atravessa a sessão: a aprovação de quem entrou só sai depois da resposta da exclusão de quem saiu.
+    await m.page.evaluate(() => document.getElementById('lightboxApprove').click());
+    await dormir(3700);                                               // a janela do Desfazer (3 s) vence
+    const aprovacoes = () => m.rede.filter((x) => x.rota === 'validar-place' && x.aprovar).length;
+    if (comEscritaNoAr) {
+      checa(aprovacoes() === 0, `${id}: a aprovação de quem entrou foi ao Waze com a exclusão de quem saiu ainda no ar — o Waze substitui a lista de fotos do local`);
+      m.soltarTudo();                                                 // a resposta da exclusão de quem saiu chega
+      checa(await m.esperarRede((x) => x.rota === 'validar-place' && x.aprovar, `${id}: a aprovação de quem entrou`), `${id}: a aprovação nunca saiu depois da resposta da exclusão`);
+    } else {
+      checa(aprovacoes() === 1, `${id}: CONTROLE — sem exclusão no ar a aprovação devia sair ao fim da janela`, String(aprovacoes()));
+    }
+    checa(m.erros.length === 0, `${id}: erro de JS`, m.erros[0]);
+    m.soltarTudo();
+    await m.ctx.close();
+  }
+
+  // ── R21-3-01 · a queda SEM renovação seguida de login por cookies, sem a janela do Desfazer ───────
+  for (const [rotulo, comAprovacaoNoAr] of [['com a aprovação de quem caiu NO AR', true], ['CONTROLE: sem escrita no ar', false]]) {
+    const id = `foto/queda-sem-renovacao (${rotulo})`;
+    const m = await abrirComSessao({ semJanela: true, fila: () => [pedidoDaFila('uQ1', ['fq1']), pedidoDaFila('uQ2', ['fq2'])] });
+    if (comAprovacaoNoAr) m.prender('validar-place');
+    if (comAprovacaoNoAr) {
+      await m.abrirFoto('aprovar');
+      await m.page.evaluate(() => document.getElementById('lightboxApprove').click());
+      await m.esperarRede((x) => x.rota === 'validar-place' && x.aprovar, id);
+      const antes = await m.estado();
+      checa(antes.aprovar && antes.aprovar.desab && antes.giro, `${id}: PRÉ-CONDIÇÃO — com a aprovação no ar o "Aprovar" devia estar travado e girando`, JSON.stringify(antes));
+      await m.fecharFoto();
+    }
+    // A QUEDA: a sessão morreu no servidor, e não há extensão pra renovar (o app volta à tela de entrada).
+    await m.page.evaluate(() => { window.__tokenQueCaiu = API.sessionToken; });
+    m.mortos.add('tok-a0');
+    await m.page.evaluate(() => handleUnauthorized());
+    await esperarOuExplodir(m.page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois da queda sem renovação');
+    await m.entrarPorCookies();
+    // O OUTRO pedido da fila refeita (o da aprovação segue "em andamento" até a resposta de quem caiu).
+    await m.page.evaluate(() => { const c = cardDaFrente(); if (AppState.currentPlace && AppState.currentPlace.updateRequestID === 'uQ1') c.querySelector('.card-btn-skip').click(); });
+    await esperarOuExplodir(m.page, () => AppState.currentPlace && AppState.currentPlace.updateRequestID === 'uQ2' && !acoesTravadas(), 'o outro pedido ficar na frente');
+    await m.abrirFoto('aprovar');
+    const dep = await m.estado();
+    checa(dep.aprovar && dep.aprovar.oculto === false, `${id}: PRÉ-CONDIÇÃO — o "Aprovar" do outro pedido não está na tela`, JSON.stringify(dep));
+    checa(dep.aprovar && dep.aprovar.desab === false && !dep.giro,
+      `${id}: o "Aprovar" do pedido de quem entrou nasceu travado (e girando), calado, esperando a resposta da sessão que caiu`, JSON.stringify(dep));
+    checa(dep.lixeiraOcupada === false && dep.travado === false, `${id}: a lixeira ou o card seguem travados por uma escrita da sessão que caiu`, JSON.stringify(dep));
+    checa(dep.pilula && dep.pilula.desab === false, `${id}: a pílula do nome nasceu travada`, JSON.stringify(dep));
+    m.soltarTudo();
+    checa(m.erros.length === 0, `${id}: erro de JS`, m.erros[0]);
+    await m.ctx.close();
+  }
+
+  // ── R21-3-03 · o arrasto no fundo da foto ampliada, com o MOUSE ────────────────────────────────
+  {
+    const id = 'foto/arrasto-no-fundo';
+    const g = await gestosPagina({ viewport: { width: 1280, height: 800 } }, [gestosPedidoDeFoto('uF', ['ff1', 'ff2'])]);
+    // Devolve se a foto abriu: com o defeito de volta o clique do arrasto já fechou a camada, e o card pode ter andado.
+    const abrir = async () => {
+      await voltarAssentado(g.page);
+      const ok = await g.page.evaluate(() => {
+        const p = AppState.currentPlace || AppState.queue[0];
+        if (!p) return false;
+        if (!Lightbox.isOpen()) openLightbox(p.imageUrls, 1, -1, p.name, false, p);
+        Lightbox.idx = 1; Lightbox._render(); Lightbox.resetZoom();
+        return true;
+      });
+      if (!ok) return false;
+      await esperarOuExplodir(g.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto abrir');
+      await esperarNaPagina(g.page, () => document.querySelectorAll('#toastContainer > *').length === 0, 6000);
+      await doisQuadros(g.page);
+      return true;
+    };
+    checa(await abrir(), `${id}: PRÉ-CONDIÇÃO — a foto não abriu`);
+    // Um ponto na TARJA (a própria camada recebe o ponteiro) à esquerda da foto, longe dos botões.
+    const tarja = await g.page.evaluate(() => {
+      const r = document.getElementById('lightboxImage').getBoundingClientRect();
+      const lb = document.getElementById('imageLightbox');
+      for (const y of [250, 200, 300, 150]) for (const x of [300, 330, 360, 250]) {
+        if (x < r.left - 40 && document.elementFromPoint(x, y) === lb) return { x, y, foto: { l: r.left, t: r.top, w: r.width, h: r.height } };
+      }
+      return null;
+    });
+    checa(!!tarja, `${id}: PRÉ-CONDIÇÃO — não há tarja preta livre à esquerda da foto pra o teste arrastar`);
+    if (tarja) {
+      const estado = () => g.page.evaluate(() => ({ idx: Lightbox.idx, aberta: Lightbox.isOpen() }));
+      const arrastar = async ([x0, y0], [x1, y1]) => {
+        await g.page.mouse.move(x0, y0); await g.page.mouse.down();
+        for (let i = 1; i <= 6; i++) { await g.page.mouse.move(x0 + (x1 - x0) * i / 6, y0 + (y1 - y0) * i / 6); await dormir(10); }
+        await g.page.mouse.up();
+        await dormir(150);
+      };
+      const { x, y, foto: f } = tarja;
+      await arrastar([x, y], [x - 220, y]);
+      let s = await estado();
+      checa(s.aberta && s.idx === 1, `${id}: o arrasto pro lado na tarja FECHOU a foto (ou a trocou) pelo clique que o mouse gera`, JSON.stringify(s));
+      await arrastar([x, y], [x, y + 160]);
+      s = await estado();
+      checa(s.aberta, `${id}: o arrasto pra baixo na tarja FECHOU a foto pelo clique do fundo`, JSON.stringify(s));
+      // CONTROLE: o mesmo arrasto SOBRE a foto troca (o instrumento arrasta de verdade).
+      const cy = f.t + f.h / 2, cx = f.l + f.w * 0.8;
+      await arrastar([cx, cy], [cx - 220, cy]);
+      s = await estado();
+      checa(s.aberta && s.idx === 2, `${id}: CONTROLE — o arrasto sobre a foto deixou de trocar a foto (o mouse não arrasta)`, JSON.stringify(s));
+      // CONTROLE: o clique parado na tarja é um passo pra trás.
+      if (!(await abrir())) { checa(false, `${id}: PRÉ-CONDIÇÃO — a foto não reabriu pro clique parado`); } else {
+        await g.page.mouse.click(x, y);
+        await dormir(150);
+        s = await estado();
+        checa(!s.aberta, `${id}: CONTROLE — o clique parado na tarja deixou de fechar a foto`, JSON.stringify(s));
+      }
+      // CONTROLE: o tremor da mão (3 px) ainda é clique.
+      await abrir();
+      await g.page.mouse.move(x, y); await g.page.mouse.down(); await g.page.mouse.move(x + 3, y + 2); await g.page.mouse.up();
+      await dormir(150);
+      s = await estado();
+      checa(!s.aberta, `${id}: CONTROLE — o tremor de 3 px deixou de ser clique`, JSON.stringify(s));
+      // E o gesto acaba: depois de um arrasto engolido, o clique SEGUINTE fecha.
+      await abrir();
+      await arrastar([x, y], [x - 220, y]);
+      await g.page.mouse.click(x, y);
+      await dormir(150);
+      s = await estado();
+      checa(!s.aberta, `${id}: o arrasto engolido ficou preso e o clique seguinte não fechou`, JSON.stringify(s));
+    }
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── R21-3-04 · tirar o espaço sobrando nas pontas do nome ────────────────────────────────────────
+  {
+    const id = 'foto/nome-com-espaco';
+    const g = await gestosPagina({ viewport: { width: 1280, height: 800 } }, [{ ...gestosPedidoDeFoto('uN', ['fn1']), name: 'Padaria Teste ' }]);
+    const abrirEdicao = async () => {
+      await voltarAssentado(g.page);
+      await g.page.evaluate(() => { const p = AppState.currentPlace; if (!Lightbox.isOpen()) openLightbox(p.imageUrls, 0, -1, p.name, false, p); });
+      await esperarOuExplodir(g.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela() && !document.getElementById('lightboxNome').classList.contains('hidden'), 'a pílula do nome na tela');
+      await esperarNaPagina(g.page, () => document.querySelectorAll('#toastContainer > *').length === 0, 6000);
+      await g.page.evaluate(() => abrirEdicaoNome());
+      await esperarOuExplodir(g.page, () => editandoNome(), 'a edição do nome abrir');
+    };
+    const okVivo = () => g.page.evaluate(() => !document.getElementById('lightboxNomeOk').disabled);
+    const nomes = () => g.saiu.filter((x) => x.nome === 'renomear-local').map((x) => x.novoNome);
+    const aposAJanela = () => dormir(3700);
+    // O campo abre com o nome CRU, e INTOCADO não escreve nada (o ✓ desabilitado, o Enter só sai da edição).
+    await abrirEdicao();
+    const aberto = await g.page.evaluate(() => document.getElementById('lightboxNomeInput').value);
+    checa(aberto === 'Padaria Teste ', `${id}: PRÉ-CONDIÇÃO — o campo não abriu com o nome cru do Waze`, JSON.stringify(aberto));
+    checa(!(await okVivo()), `${id}: o ✓ está vivo com o campo INTOCADO (o Enter gravaria o nome aparado sem a pessoa pedir)`);
+    await g.page.keyboard.press('Enter');
+    await aposAJanela();
+    checa(nomes().length === 0, `${id}: o Enter com o campo intocado escreveu no Waze`, JSON.stringify(nomes()));
+    checa(!(await g.page.evaluate(() => editandoNome())), `${id}: o Enter com o campo intocado não saiu da edição`);
+    // O espaço do FIM tirado: habilita e escreve o nome aparado.
+    await abrirEdicao();
+    await g.page.fill('#lightboxNomeInput', 'Padaria Teste');
+    checa(await okVivo(), `${id}: tirar o espaço sobrando no fim não habilita o ✓ (no-op calado)`);
+    await g.page.keyboard.press('Enter');
+    await aposAJanela();
+    checa(JSON.stringify(nomes()) === JSON.stringify(['Padaria Teste']), `${id}: tirar o espaço do fim não escreveu o nome aparado`, JSON.stringify(nomes()));
+    await g.page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    // CONTROLE: o nome SEM espaço sobrando e um espaço digitado no fim: o servidor apara, é o mesmo nome — não escreve.
+    await g.page.evaluate(() => { AppState.currentPlace.name = 'Padaria Teste'; });
+    await abrirEdicao();
+    await g.page.fill('#lightboxNomeInput', 'Padaria Teste ');
+    checa(!(await okVivo()), `${id}: CONTROLE — um espaço digitado no fim de um nome sem espaço habilitou o ✓`);
+    await g.page.evaluate(() => { sairDaEdicaoNome(); Lightbox.close(); });
+    // O Desfazer devolve o nome CRU (o que o Waze tem), não o aparado.
+    await g.page.evaluate(() => { AppState.currentPlace.name = 'Padaria Teste '; });
+    await abrirEdicao();
+    await g.page.fill('#lightboxNomeInput', 'Padaria Teste');
+    await g.page.keyboard.press('Enter');
+    const novoNaTela = await g.page.evaluate(() => AppState.currentPlace.name);
+    checa(novoNaTela === 'Padaria Teste', `${id}: PRÉ-CONDIÇÃO — o nome novo não foi pra tela`, JSON.stringify(novoNaTela));
+    const clicou = await g.page.evaluate(() => { const b = document.getElementById('undoBtn'); if (b) b.click(); return !!b; });
+    checa(clicou, `${id}: PRÉ-CONDIÇÃO — o banner do Desfazer não apareceu depois do nome`);
+    const volta = await g.page.evaluate(() => AppState.currentPlace.name);
+    checa(volta === 'Padaria Teste ', `${id}: o Desfazer devolveu um nome que o Waze nunca teve`, JSON.stringify(volta));
+    await aposAJanela();
+    checa(nomes().length === 1, `${id}: o nome desfeito foi mesmo assim ao Waze`, JSON.stringify(nomes()));
+    checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
+    await g.fechar();
+  }
+
+  // ── R21-3-05 · as margens laterais de segurança da foto e do mapa ampliados ─────────────────────
+  //
+  // O iPhone deitado tem 44–59 px de recorte de cada lado. Sem recorte (o caso de todo aparelho de hoje, nos dois motores)
+  // cada controle fica onde SEMPRE ficou; com ele (o override do CDP, só no Chromium) cada um vai pra borda da área segura,
+  // recebe o toque, e a dica e a legenda param antes do botão do canto. Nos dois estados o MESMO conjunto de controles.
+  {
+    const id = 'foto/recorte-lateral';
+    const W = 844, H = 390;
+    // O mapa ampliado abre só com a evidência espacial do pedido (`mapa`, que o core calcula): sem ela o card nem monta o slide.
+    const g = await gestosPagina({ viewport: { width: W, height: H } }, [{ ...gestosPedidoDeFoto('uR', ['fr1', 'fr2']),
+      mapa: { centro: [-20.8, -49.4], proposto: null, movidoM: null, entradas: [] } }]);
+    const L6 = () => g.page.evaluate(() => {
+      const p = AppState.currentPlace;
+      if (!Lightbox.isOpen()) openLightbox(p.imageUrls, 2, 2, p.name, false, p);
+      Lightbox.idx = Lightbox.newIdx >= 0 ? Lightbox.newIdx : Lightbox.idx; Lightbox._render();
+      // A dica de zoom só convive com a ação do canto à força (ela some pra quem tem a pílula).
+      clearTimeout(Lightbox._hintTimer);
+      document.getElementById('lightboxZoomHint').classList.remove('hidden');
+    });
+    const caixas = (ids) => g.page.evaluate((lista) => {
+      const o = {};
+      for (const id of lista) {
+        const e = document.getElementById(id);
+        if (!e || e.classList.contains('hidden')) { o[id] = null; continue; }
+        const r = e.getBoundingClientRect();
+        const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        o[id] = { esq: Math.round(r.left), dir: Math.round(r.right), topo: Math.round(r.top), base: Math.round(r.bottom), recebe: !!(el && (el === e || e.contains(el))) };
+      }
+      return o;
+    }, ids);
+    const FOTO_IDS = ['lightboxClose', 'lightboxCount', 'lightboxPrev', 'lightboxNext', 'lightboxApprove', 'lightboxNomeBtn', 'lightboxZoomHint'];
+    const MAPA_IDS = ['mapaLbClose', 'mapaLbMais', 'mapaLbMenos', 'mapaLbCentrar', 'mapaLbEscala', 'mapaLbLegenda', 'mapaLbStreetView'];
+    await L6();
+    await esperarOuExplodir(g.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto abrir');
+    await esperarNaPagina(g.page, () => document.querySelectorAll('#toastContainer > *').length === 0, 6000);
+    await doisQuadros(g.page);
+    // O recorte zerado: cada controle onde SEMPRE ficou (a base de cada um, não 0,75 rem pra todos).
+    const f0 = await caixas(FOTO_IDS);
+    const esperado0 = { lightboxClose: { dir: W - 12 }, lightboxPrev: { esq: 8 }, lightboxNext: { dir: W - 8 }, lightboxCount: { esq: 12 },
+      lightboxApprove: { dir: W - 12 }, lightboxZoomHint: { esq: 16, dir: W - 80 } };
+    for (const [cid, cond] of Object.entries(esperado0)) {
+      const c = f0[cid];
+      checa(!!c, `${id}: PRÉ-CONDIÇÃO — #${cid} não está na tela (sem recorte)`);
+      if (!c) continue;
+      for (const [lado, v] of Object.entries(cond)) checa(c[lado] === v, `${id}: sem recorte #${cid} ${lado} = ${c[lado]} (era ${v}): o recorte zerado mexeu num pixel`, JSON.stringify(c));
+      if (cid !== 'lightboxZoomHint') checa(c.recebe, `${id}: sem recorte #${cid} não recebe o toque`);
+    }
+    await g.page.evaluate(() => { Lightbox.close(); });
+    await voltarAssentado(g.page);
+    await g.page.evaluate(() => { MapaLightbox.open(AppState.currentPlace); });
+    await esperarOuExplodir(g.page, () => MapaLightbox.isOpen(), 'o mapa abrir');
+    await doisQuadros(g.page);
+    const m0 = await caixas(MAPA_IDS);
+    const mapaEsperado0 = { mapaLbClose: { dir: W - 12 }, mapaLbMais: { esq: 12 }, mapaLbEscala: { esq: 16 }, mapaLbLegenda: { esq: 16, dir: W - 64 }, mapaLbStreetView: { dir: W - 12 } };
+    for (const [cid, cond] of Object.entries(mapaEsperado0)) {
+      const c = m0[cid];
+      checa(!!c, `${id}: PRÉ-CONDIÇÃO — #${cid} não está na tela (sem recorte)`);
+      if (!c) continue;
+      for (const [lado, v] of Object.entries(cond)) checa(c[lado] === v, `${id}: sem recorte #${cid} ${lado} = ${c[lado]} (era ${v}): o recorte zerado mexeu num pixel`, JSON.stringify(c));
+    }
+    // O recorte (59 px, o do iPhone com a ilha): só o Chromium sintetiza.
+    if (!pularForaDoChromium(MOTOR, 'foto/recorte-lateral: os controles com o recorte de 59 px de cada lado',
+      'o override de recorte (Emulation.setSafeAreaInsetsOverride) é do protocolo do Chromium; o WebKit mede só o recorte zerado, acima')) {
+      const cdp = await g.ctx.newCDPSession(g.page);
+      const INS = 59;
+      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: INS, bottom: 21, right: INS } });
+      await doisQuadros(g.page);
+      const lido = await g.page.evaluate(() => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:env(safe-area-inset-left);right:env(safe-area-inset-right);visibility:hidden'; document.body.appendChild(d); const r = d.getBoundingClientRect(); d.remove(); return { esq: r.left, dir: innerWidth - r.right }; });
+      checa(lido.esq === INS && lido.dir === INS, `${id}: CONTROLE — o override não chegou à página (env() leu ${JSON.stringify(lido)})`);
+      const m1 = await caixas(MAPA_IDS);
+      const dentro = (c) => c && c.esq >= INS && c.dir <= W - INS;
+      for (const cid of MAPA_IDS) {
+        checa(m1[cid] && dentro(m1[cid]), `${id}: com recorte #${cid} ficou no vão do notch`, JSON.stringify(m1[cid]));
+        if (cid !== 'mapaLbLegenda') checa(m1[cid] && m1[cid].recebe, `${id}: com recorte #${cid} não recebe o toque`, JSON.stringify(m1[cid]));
+      }
+      checa(m1.mapaLbLegenda && m1.mapaLbStreetView && m1.mapaLbLegenda.dir + 8 <= m1.mapaLbStreetView.esq,
+        `${id}: com recorte a legenda do mapa cobre o Street View`, JSON.stringify([m1.mapaLbLegenda, m1.mapaLbStreetView]));
+      checa(m1.mapaLbEscala && m1.mapaLbEscala.esq === INS && m1.mapaLbMais && m1.mapaLbMais.esq === INS, `${id}: com recorte a escala e o zoom não estão na borda da área segura`, JSON.stringify([m1.mapaLbEscala, m1.mapaLbMais]));
+      await g.page.evaluate(() => { MapaLightbox.close(); });
+      await voltarAssentado(g.page);
+      await L6();
+      await esperarOuExplodir(g.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto abrir com recorte');
+      await esperarNaPagina(g.page, () => document.querySelectorAll('#toastContainer > *').length === 0, 6000);
+      await doisQuadros(g.page);
+      const f1 = await caixas(FOTO_IDS);
+      for (const cid of FOTO_IDS) {
+        checa(f1[cid] && dentro(f1[cid]), `${id}: com recorte #${cid} ficou no vão do notch`, JSON.stringify(f1[cid]));
+        if (cid !== 'lightboxZoomHint') checa(f1[cid] && f1[cid].recebe, `${id}: com recorte #${cid} não recebe o toque`, JSON.stringify(f1[cid]));
+      }
+      checa(f1.lightboxZoomHint && f1.lightboxApprove && f1.lightboxZoomHint.dir + 20 <= f1.lightboxApprove.esq,
+        `${id}: com recorte a dica de zoom passa do vão de 20 px antes do botão de ação (ela cobriria o botão deslocado)`, JSON.stringify([f1.lightboxZoomHint, f1.lightboxApprove]));
+      checa(f1.lightboxCount && f1.lightboxClose && f1.lightboxCount.dir + 8 <= f1.lightboxClose.esq, `${id}: com recorte o contador cobre o ✕`, JSON.stringify([f1.lightboxCount, f1.lightboxClose]));
+      checa(f1.lightboxNomeBtn && f1.lightboxNomeBtn.esq === INS, `${id}: com recorte a pílula do nome não está na borda da área segura`, JSON.stringify(f1.lightboxNomeBtn));
+      // CONTROLE: a medida enxerga o recorte — tirado o override, os controles voltam pra onde estavam.
+      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 0, bottom: 0, right: 0 } });
+      await doisQuadros(g.page);
+      const f2 = await caixas(['lightboxPrev', 'lightboxClose']);
+      checa(f2.lightboxPrev && f2.lightboxPrev.esq === 8 && f2.lightboxClose && f2.lightboxClose.dir === W - 12,
+        `${id}: CONTROLE — sem o override os controles não voltaram à base (a medida não depende do recorte?)`, JSON.stringify(f2));
+    }
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
   }
@@ -15208,6 +15646,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`
   + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`
+  + `, + a foto ampliada e a sessão que acabou (lote 25): a pílula do nome do MESMO local livre depois do "Sair" com a exclusão de quem saiu no ar — e a aprovação de quem entrou ESPERANDO a resposta dela (a ordem no Waze), com o CONTROLE da pílula travada na mesma sessão —; a queda SEM renovação seguida de login por cookies com o "Aprovar" vivo; o arrasto com o mouse na tarja não fechando a foto (com os CONTROLES do clique parado, do tremor e do arrasto sobre a foto); tirar o espaço do nome habilitando o ✓ e escrevendo o aparado (com o campo intocado, o espaço a mais e o Desfazer devolvendo o nome CRU); e as margens laterais de segurança (cada controle onde sempre esteve com o recorte zerado, nos dois motores, e na borda da área segura com 59 px, no Chromium, com a dica e a legenda guardando o vão do botão do canto e o CONTROLE do override tirado)`
   + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`
   + `, + a tecla z do Desfazer no teclado de OUTRO alfabeto (o keydown hebraico, russo e Ctrl+hebraico despachado com a janela do Desfazer aberta, com o z latino despachado como CONTROLE do instrumento e o w do AZERTY e a tecla morta como CONTROLE do outro lado)`
   + `, + a troca de idioma com a tela PREENCHIDA (a trocada pelo seletor igual à aberta já em francês, logo depois da troca e com o Histórico reaberto: foco no autor, "de N na região", cota do Desfazer, linha do offline, ordem por casa, autores e conquistas — com o CONTROLE do texto em português escrito à mão acusado pelo comparador)`);
