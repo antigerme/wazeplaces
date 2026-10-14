@@ -331,13 +331,13 @@ test('H13: renomear em voo durante o "Sair" não conta o "Corretor" nem mexe no 
     handleUnauthorized: () => efeitos.push('401'), showToast: () => efeitos.push('toast'),
     msgDoServidor: () => '', t: (k) => k,
     // A renomeação no ar trava a pílula (L23); a tela é a de mentira.
-    renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, AppState, Lightbox: { isOpen: () => false, place: null },
+    renomeacoesNoAr: new Set(), escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, aplicarTravaDeAcao: () => {}, AppState, Lightbox: { isOpen: () => false, place: null },
   };
   // `epocaDaSessao` é variável solta no app: passa por um getter no escopo.
   const chaves = Object.keys(deps);
   // `pedidoAindaNaTela`: a régua de "quem ainda vê o pedido", das duas pontas
   // (o que não pousou volta, o que pousou vai aos irmãos — R6-3-01).
-  const corpo = ['enviarRenomeacao', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos'].map(fatiar).join('\n')
+  const corpo = ['enviarRenomeacao', 'esperaDaEscritaNoSair', 'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos'].map(fatiar).join('\n')
     .replace(/epocaDaSessao/g, '__estado.epoca');
   const enviar = new Function(...chaves, '__estado', corpo + '\nreturn enviarRenomeacao;')(...chaves.map((k) => deps[k]), estado);
   // O nome NA TELA é o desta escrita quando ela sai (o `confirmarRenomear` o

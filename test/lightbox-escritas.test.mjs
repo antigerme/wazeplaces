@@ -260,7 +260,7 @@ function montarEscritas({ resposta, preferencias = { undoEnabled: false }, fotoN
     ...extra,
   };
   let placeResolvido = null;
-  const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'pedirExclusaoDaFoto',
+  const nomes = ['enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao', 'aprovarFotoAtual', 'enviarExclusao', 'esperaDaEscritaNoSair', 'pedirExclusaoDaFoto',
     'anuncioDoCardAoFechar', 'anunciarDesfechoDaFoto', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao',
     'contarIdasSemResposta', ...R6_NOMES];
   const chaves = Object.keys(deps);
@@ -387,11 +387,11 @@ test('aprovar e excluir foto passam pela MESMA retentativa do resto (o renomear 
   // As idas são CONTADAS (`contarIdasSemResposta`): o "já feito" depois de uma
   // ida sem resposta é desta pessoa (R5-3-04, medido no fim deste arquivo).
   // E a aprovação também (R11-3-01): ela espera a vez das fotos do local.
-  assert.match(fatiar('enviarAprovacao'), /const enviar = contarIdasSemResposta\(\(\) => API\.aprovarPedido\([^\n]*\n\s+let r = await callWithRetry\(enviar, epoca\)/);
+  assert.match(fatiar('enviarAprovacao'), /const enviar = contarIdasSemResposta\(\(\) => API\.aprovarPedido\([^\n]*\n\s+let r = await callWithRetry\(enviar, epoca, espera\)/);
   // A exclusão passa a época do GESTO: ela pode esperar a vez do local, e a ida
   // não sai com a sessão de quem entrou nesse meio (R10-3-03).
-  assert.match(fatiar('enviarExclusao'), /const enviar = contarIdasSemResposta\(\(\) => API\.excluirFoto\([^\n]*\n\s+let r = await callWithRetry\(enviar, epoca\)/);
-  assert.match(fatiar('refazerDepoisDo401'), /await callWithRetry\(enviar\)/,
+  assert.match(fatiar('enviarExclusao'), /const enviar = contarIdasSemResposta\(\(\) => API\.excluirFoto\([^\n]*\n\s+let r = await callWithRetry\(enviar, epoca, espera\)/);
+  assert.match(fatiar('refazerDepoisDo401'), /await callWithRetry\(enviar, undefined, aoEsperar\)/,
     'a segunda ida depois do 401 saiu da retentativa do resto');
 });
 
@@ -412,14 +412,14 @@ function montarIrmaos(resposta, { treino = null } = {}) {
     devolverFoto: () => log.push('devolveu'), showCurrentPlace: () => {}, contarConquista: () => {},
     montarCardDeFundo: () => log.push('fundo'), cardDaFrente: () => null, document: { getElementById: () => null },
     // A renomeação no ar trava a pílula do local (L23).
-    renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {},
+    renomeacoesNoAr: new Set(), escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, aplicarTravaDeAcao: () => {},
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     // O treino (R7-3-05): fechado, salvo o teste que o abre.
     Treino: treino || { ativo: false, _salvo: null },
     ...r6Deps(),
   };
   const chaves = Object.keys(deps);
-  const nomes = ['aplicarNosIrmaos', 'enviarExclusao', 'enviarRenomeacao', 'aplicarNomeNaTela',
+  const nomes = ['aplicarNosIrmaos', 'enviarExclusao', 'esperaDaEscritaNoSair', 'enviarRenomeacao', 'esperaDaEscritaNoSair', 'aplicarNomeNaTela',
     'nomeDestaEscrita', 'devolverNome', 'escritaDoLightboxSemSessao', 'contarIdasSemResposta', ...R6_NOMES];
   const app = new Function(...chaves, nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...chaves.map((k) => deps[k]));
   return { app, A, B, C, log, AppState };
@@ -497,15 +497,15 @@ function montarL1({ respostas, viva, caiNaSonda = false, saiNaSonda = false, que
     montarCardDeFundo: () => {}, cardDaFrente: () => null, document: { getElementById: () => null },
     registrarPouso: () => log.push('pouso'), updateStats: () => {}, advanceQueue: () => log.push('avancou'),
     marcarEmAndamento: () => {}, voltarDaAprovacaoRecusada: () => {}, refazerSelosSeOutroNaTela: () => {},
-    renomeacoesNoAr: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
+    renomeacoesNoAr: new Set(), escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     Treino: { ativo: false, _salvo: null },   // o treino fechado (R7-3-05)
     ...r6Deps(log),
     ...extra,
   };
-  const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'enviarAprovacao', 'concluirAprovacao',
-    'enviarRenomeacao', 'aplicarNosIrmaos', 'aplicarNomeNaTela', 'nomeDestaEscrita', 'devolverNome',
+  const nomes = ['refazerDepoisDo401', 'enviarExclusao', 'esperaDaEscritaNoSair', 'enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao',
+    'enviarRenomeacao', 'esperaDaEscritaNoSair', 'aplicarNosIrmaos', 'aplicarNomeNaTela', 'nomeDestaEscrita', 'devolverNome',
     'escritaDoLightboxSemSessao', 'tirarAprovadoDaFila', 'pousouNoWaze', 'contarIdasSemResposta',
     'aprovacaoPousouDepoisDaQueda', ...R6_NOMES];
   const chaves = Object.keys(deps);
@@ -1025,7 +1025,7 @@ function montarAprovacao({ semJanela = false, resposta = { success: true } } = {
     aplicarNosIrmaos: () => {},   // os irmãos (R12-3-03) são medidos à parte
     ...r6Deps(),
   };
-  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'concluirAprovacao',
+  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'semOsJaDecididos', 'enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao',
     'aprovarFotoAtual', 'refazerDepoisDo401', 'tirarAprovadoDaFila', 'pousouNoWaze', 'escritaDoLightboxSemSessao',
     'contarIdasSemResposta', ...R6_NOMES];
   const chaves = Object.keys(deps);
@@ -1200,12 +1200,12 @@ function montarRenomeio({ API }) {
       if (r && r.errorCategory === 'transient') { log.push('retentativa'); return fn(); }
       return r;
     },
-    renomeacoesNoAr: noAr, aplicarTravaDeAcao: () => log.push('trava'), handleUnauthorized: () => {},
+    renomeacoesNoAr: noAr, escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, aplicarTravaDeAcao: () => log.push('trava'), handleUnauthorized: () => {},
     sessaoVivaDepoisDe: () => false, showToast: (m, tipo) => log.push(`toast:${tipo}:${m}`), msgDoServidor: () => '',
     t: (k) => k, contarConquista: () => {}, montarCardDeFundo: () => {}, cardDaFrente: () => null,
     document: { getElementById: () => null }, Treino: { ativo: false, _salvo: null },   // o treino fechado (R7-3-05)
   };
-  const nomes = ['enviarRenomeacao', 'renomeacaoNoAr', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela',
+  const nomes = ['enviarRenomeacao', 'esperaDaEscritaNoSair', 'renomeacaoNoAr', 'nomeDestaEscrita', 'devolverNome', 'aplicarNomeNaTela',
     'aplicarNosIrmaos', 'escritaDoLightboxSemSessao', 'refazerDepoisDo401', 'pedidoAindaNaTela', 'filaReal', 'filaRealComDevolvidos'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;\n'
@@ -1479,7 +1479,7 @@ function montarAprovacaoNoCard({ semJanela = true, resposta = { success: true } 
     carimboDoGesto: () => null,   // o momento do gesto (R6-7-4); aqui se mede a trava
     paisDaFila: () => 30,         // o país do gesto, pra marca da presença (R7-6-05)
   };
-  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'concluirAprovacao', 'aprovarFotoAtual',
+  const nomes = ['chaveDoPedido', 'marcarEmAndamento', 'enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao', 'aprovarFotoAtual',
     'refazerDepoisDo401', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'handleReject', 'handleMarkAsRead',
     'agirNoPedidoDoGesto', 'contarIdasSemResposta', 'aprovacoesAtravessamAQueda', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta',
     'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'esperarAVezContandoNoSair', 'atenderOFimDaJanela'];
@@ -1759,7 +1759,7 @@ function montarAprovacaoNaQueda() {
     ...r6Deps(),
   };
   // `contarIdasSemResposta` é o da foto ampliada (R5-3-04): o `enviarAprovacao` o chama.
-  const nomes = ['enviarAprovacao', 'concluirAprovacao', 'aprovacaoPousouDepoisDaQueda', 'tirarAprovadoDaFila',
+  const nomes = ['enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao', 'aprovacaoPousouDepoisDaQueda', 'tirarAprovadoDaFila',
     'contarIdasSemResposta', ...R6_NOMES];
   const chaves = Object.keys(deps);
   const corpo = nomes.map(fatiar).join('\n')
@@ -3195,7 +3195,7 @@ function exclusoesNoMesmoLocal({ devolverDeVerdade = false } = {}) {
     TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [],
     ...r6Deps(log),
   };
-  const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'aplicarNosIrmaos', 'escritaDoLightboxSemSessao',
+  const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'esperaDaEscritaNoSair', 'aplicarNosIrmaos', 'escritaDoLightboxSemSessao',
     'contarIdasSemResposta', 'callWithRetry', ...R6_NOMES];
   if (devolverDeVerdade) { delete deps.devolverFoto; nomes.push('devolverFoto'); }
   const chaves = Object.keys(deps);
@@ -3461,7 +3461,7 @@ function fotosNoMesmoLocal({ aquecimentoNoAr = false, quedaDeVerdade = false } =
     aprovacaoPousouDepoisDaQueda: () => {}, decididosPorOutraAbaComCardAqui: decididos,
     ...r6Deps(log),
   };
-  const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'aprovarFotoAtual', 'enviarAprovacao', 'concluirAprovacao',
+  const nomes = ['pedirExclusaoDaFoto', 'enviarExclusao', 'esperaDaEscritaNoSair', 'aprovarFotoAtual', 'enviarAprovacao', 'esperaDaEscritaNoSair', 'concluirAprovacao',
     'tirarAprovadoDaFila', 'pousouNoWaze', 'chaveDoPedido', 'aplicarNosIrmaos', 'escritaDoLightboxSemSessao',
     'contarIdasSemResposta', 'callWithRetry', 'descarregarAcaoPendente', ...R6_NOMES];
   if (quedaDeVerdade) { delete deps.aprovacaoPousouDepoisDaQueda; nomes.push('aprovacaoPousouDepoisDaQueda'); }

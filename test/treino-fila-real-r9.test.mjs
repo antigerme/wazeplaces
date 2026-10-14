@@ -462,7 +462,7 @@ function montarDevolvido() {
     sessaoVivaDepoisDe: () => false,
     showToast: (m, tipo) => toasts.push(tipo + ':' + m), msgDoServidor: () => '',
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
-    renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
+    renomeacoesNoAr: new Set(), escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
     escritasDeFotoNoLocal: new Map(),   // a vez do local nas escritas da lista de fotos (R10-3-03, R11-3-01)
     fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,   // as fotos que saíram do mapa (R12-3-02)
     // O `devolverPedidoRecusado` de VERDADE: é ele que guarda o recusado no treino.
@@ -470,7 +470,7 @@ function montarDevolvido() {
   });
   delete deps.devolverPedidoRecusado;
   app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela',
-    'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401',
+    'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'esperaDaEscritaNoSair', 'enviarRenomeacao', 'esperaDaEscritaNoSair', 'refazerDepoisDo401',
     'contarIdasSemResposta', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome',
     'aplicarNomeNaTela', 'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',

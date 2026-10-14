@@ -332,8 +332,7 @@ function carregarFiltros(salvo) {
   const deps = { AppState: { filters: filtros }, FILTERS_KEY: 'f', ORDEM_PADRAO: 'newest', sanearTiposSalvos: (x) => (Array.isArray(x) ? x : []),
     localStorage: { getItem: () => (salvo === undefined ? null : typeof salvo === 'string' ? salvo : JSON.stringify(salvo)) } };
   const chaves = Object.keys(deps);
-  new Function(...chaves, fatiar('idSalvoValido') + '\n' + `const CATEGORIAS_SALVAS_MAX = ${/const CATEGORIAS_SALVAS_MAX = (\d+);/.exec(APP_SEM)[1]};\n`
-    + fatiar('categoriasSalvasValidas') + '\n' + fatiar('loadFilters') + '\nloadFilters();')(...chaves.map((k) => deps[k]));
+  new Function(...chaves, fatiar('idSalvoValido') + '\n' + fatiar('categoriasSalvasValidas') + '\n' + fatiar('loadFilters') + '\nloadFilters();')(...chaves.map((k) => deps[k]));
   return filtros;
 }
 
@@ -367,4 +366,126 @@ test('loadFilters: o resto do filtro salvo segue como estava (tipos, país/estad
   const f = carregarFiltros({ types: ['NEW_PLACE'], residential: 'x', myArea: true, unreadOnly: false, sortOrder: 'oldest', stateId: '5', managedAreaId: '9', categories: ['A'] });
   assert.deepEqual([f.types, f.residential, f.myArea, f.unreadOnly, f.sortOrder, f.stateId, f.managedAreaId, f.categories],
     [['NEW_PLACE'], 'x', true, false, 'oldest', '5', '9', ['A']]);
+});
+
+// ═══ R17-2-01 + R17-3-01 · a espera que o "Sair" descarta sem aviso ═══════════
+// (a) o pedaço do "Marcar todos" que levou 401 e espera a sonda da sessão (e a retentativa de
+//     depois dela) não estava na conta do diálogo do "Sair";
+// (b) a exclusão, a aprovação e a correção do nome de FOTO (e a estrela do ↑) esperando a
+//     retentativa de 1,5 s e 3,5 s também não — e confirmar o "Sair" as descartava calado.
+test('R17-2-01: `refazerDepoisDo401` avisa a espera — a sonda conta enquanto dura, sai da conta quando a ida volta ao ar, e a retentativa avisa a dela', async () => {
+  const eventos = [];
+  let sonda = null;
+  const relogio = [];
+  const deps = {
+    epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
+    handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => true,
+    navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5],
+    setTimeout: (fn) => { relogio.push(fn); return relogio.length; },
+  };
+  const h = montar(['refazerDepoisDo401', 'callWithRetry', 'sessaoTrocou'], deps);
+  let n = 0;
+  const enviar = async () => { eventos.push('ida'); return ++n === 1 ? { success: false, errorCategory: 'transient' } : { success: true }; };
+  const andando = h.refazerDepoisDo401(0, enviar, (sim) => eventos.push(sim ? 'espera' : 'fim'));
+  await ateQue(() => !!sonda, 'a conferência não começou');
+  assert.deepEqual(eventos, ['espera'], 'DEFEITO: a sonda do 401 não conta como espera (R17-2-01): ' + JSON.stringify(eventos));
+  sonda();
+  await ateQue(() => relogio.length === 1, 'a retentativa não entrou no recuo');
+  assert.deepEqual(eventos, ['espera', 'fim', 'ida', 'espera'], 'a ordem da espera mudou: ' + JSON.stringify(eventos));
+  relogio.shift()();
+  const r = await andando;
+  assert.equal(r.success, true);
+  // (o último `fim` é o do `finally` da conferência: inofensivo, a marca já estava fora)
+  assert.deepEqual(eventos, ['espera', 'fim', 'ida', 'espera', 'fim', 'ida', 'fim'], 'a espera ficou aberta no fim: ' + JSON.stringify(eventos));
+  assert.equal(deps.escritasConferindo, 0);
+});
+
+test('R17-2-01: a sonda cortada pela troca de época NÃO avisa o fim (apagaria a conta da sessão que veio) — e sem `aoEsperar` nada muda', async () => {
+  const eventos = [];
+  let sonda = null;
+  const deps = { epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
+    handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => true, navigator: { onLine: true } };
+  const h = montar(['refazerDepoisDo401', 'callWithRetry', 'sessaoTrocou'], deps);
+  const andando = h.refazerDepoisDo401(0, async () => ({ success: true }), (sim) => eventos.push(sim));
+  await ateQue(() => !!sonda, 'a conferência não começou');
+  deps.epocaDaSessao++;                               // o "Sair"/a queda no meio da sonda
+  sonda();
+  assert.equal(await andando, null);
+  assert.deepEqual(eventos, [true], 'o fim da espera foi avisado depois da troca de época: ' + JSON.stringify(eventos));
+  // CONTROLE: a chamada de sempre (sem `aoEsperar`) segue funcionando.
+  sonda = null; deps.epocaDaSessao = 0;
+  const sem = h.refazerDepoisDo401(0, async () => ({ success: true }));
+  await ateQue(() => !!sonda, 'a conferência não começou (sem aoEsperar)');
+  sonda();
+  assert.equal((await sem).success, true);
+});
+
+test('R17-2-01: o pedaço do "Marcar todos" que levou 401 conta no diálogo do "Sair" durante a sonda — e o "Sair" no meio não recoloca nada', async () => {
+  let sonda = null;
+  const tela = dialogoDoSair();
+  const deps2 = { document: tela.document, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null,
+    handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => true, navigator: { onLine: true },
+    TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5], setTimeout: (fn) => { setImmediate(fn); return 1; } };
+  const n = { v: 0 };            // a 1ª ida do pedaço leva 401; a de depois da sonda passa
+  const m2 = loteNoAr();
+  Object.assign(m2.deps, deps2);
+  m2.deps.document = tela.document;
+  m2.deps.API.markAsReadBatch = () => Promise.resolve(n.v++ === 0 ? { success: false, errorCategory: 'unauthorized' } : { success: true });
+  const h = montar(['acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'openBatchReadConfirm', 'handleBatchMarkRead',
+    'marcarEmAndamento', 'marcarLoteSemEnviar', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido', 'acoesTravadasForaDaJanela',
+    'refazerDepoisDo401', 'callWithRetry', 'sessaoTrocou'], m2.deps);
+  tela.modal.classList.remove('hidden');
+  h.openBatchReadConfirm();
+  const lote = h.handleBatchMarkRead();
+  await ateQue(() => !!sonda, 'o pedaço com 401 não chegou à sonda');
+  h.desenharAvisoDoSair();
+  assert.equal(tela.texto(), 'modal.logout.saidaPlural:4',
+    'DEFEITO: o diálogo do "Sair" não conta o pedaço que espera a sonda do 401 — confirmar o descartaria sem aviso (R17-2-01): «' + tela.texto() + '»');
+  sonda();
+  await lote;
+  assert.equal(m2.deps.pedidosDoLoteSemEnviar.size, 0, 'o conjunto vazou depois do fim do lote');
+});
+
+test('R17-3-01: a retentativa da renomeação de FOTO conta no diálogo do "Sair" (frase da foto) — e sai da conta no fim, por qualquer caminho', async () => {
+  const tela = dialogoDoSair();
+  const place = P(1, { name: 'Antigo' });
+  const recuos = [];
+  const ida = [];
+  const deps = {
+    document: tela.document, epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1500, 3500],
+    setTimeout: (fn) => { recuos.push(fn); return recuos.length; }, escritasEsperandoAVez: new Set(), pedidosDoLoteSemEnviar: new Set(), pedidosEmAndamento: new Set(),
+    renomeacoesNoAr: new Set(), aplicarTravaDeAcao() {}, carregarFilaDeSaida: () => [], reivindicadoPorOutraAba: () => false,
+    API: { renomearLocal: () => new Promise((ok) => ida.push(ok)) }, t: (k, v) => k + ':' + (v && v.n),
+    msgDoServidor: () => null, aplicarNosIrmaos() {}, contarConquista() {}, showToast() {}, devolverNome: () => false,
+  };
+  const h = montar(['enviarRenomeacao', 'nomeDestaEscrita', 'callWithRetry', 'sessaoTrocou', 'esperaDaEscritaNoSair', 'redesenharAvisoDoSairSeAberto', 'desenharAvisoDoSair', 'chaveDoPedido'], deps);
+  const alvo = { place, novo: 'Antigo', antigo: 'X', regiao: 'row' };
+  const andando = h.enviarRenomeacao(alvo);
+  await ateQue(() => ida.length === 1, 'a 1ª ida não saiu');
+  ida.shift()({ success: false, errorCategory: 'transient', httpCode: 503 });
+  await ateQue(() => recuos.length === 1, 'a escrita não entrou no recuo');
+  h.desenharAvisoDoSair();
+  assert.equal(tela.texto(), 'modal.logout.foto:1',
+    'DEFEITO: a correção de nome esperando a retentativa não conta no diálogo do "Sair" (R17-3-01): «' + tela.texto() + '»');
+  // O "Sair" confirmado troca a época: a espera sai, a escrita para e a marca NÃO fica.
+  deps.epocaDaSessao++;
+  recuos.shift()();
+  await andando;
+  assert.equal(deps.escritasEsperandoAVez.size, 0, 'a marca da escrita cancelada ficou no conjunto (a queda não o esvazia)');
+  assert.equal(ida.length, 0, 'a retentativa saiu com a sessão trocada');
+});
+
+test('R17-3-01 (estrutura): as três escritas de foto e a estrela do ↑ passam a espera ao `callWithRetry` E ao `refazerDepoisDo401`', () => {
+  for (const [nome, ref] of [['enviarExclusao', /callWithRetry\(enviar, epoca, espera\)[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/],
+    ['enviarAprovacao', /callWithRetry\(enviar, epoca, espera\)[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/],
+    ['enviarRenomeacao', /callWithRetry\(enviar, undefined, espera\)[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/]]) {
+    const corpo = fatiar(nome);
+    assert.match(corpo, /const espera = esperaDaEscritaNoSair\(\);/, `${nome}: sem a marca da escrita`);
+    assert.match(corpo, ref, `${nome}: a espera não chega ao recuo e à conferência do 401`);
+    assert.match(corpo, /finally \{[\s\S]*espera\(false\);/, `${nome}: o \`finally\` não tira a marca (a queda não esvazia o conjunto)`);
+  }
+  const skip = fatiar('handleSkip');
+  assert.match(skip, /const espera = \(sim\) => marcarLoteSemEnviar\(place, sim\);\s*let r = await callWithRetry\(enviar, epoca, espera\);/);
+  assert.match(skip, /refazerDepoisDo401\(epoca, enviar, espera\)/);
+  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\);[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/);
 });

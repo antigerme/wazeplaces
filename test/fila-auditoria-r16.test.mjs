@@ -324,7 +324,7 @@ test('R16-2-03 (estrutura): os quatro caminhos que esperam a retentativa avisam 
   assert.match(fatiar('handleMarkAsRead'), /callWithRetry\(\(\) => API\.markAsRead\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim\)\)/);
   assert.match(fatiar('enviarLote'), /undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim\)\)/,
     'o "Rejeitar os N" da pessoa não avisa o recuo (e a recusa automática, que é o app agindo, não pode)');
-  assert.match(fatiar('handleBatchMarkRead'), /callWithRetry\(enviar, undefined, \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\)\)/);
+  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\)/);
 });
 
 // ═══ R16-1-03 · o lote da sessão que ACABOU não conta mais ═══════════════════

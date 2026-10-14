@@ -526,9 +526,10 @@ function montarAprovacaoRecusada({ resposta = RECUSA } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card'); },
     startFetching: () => log.push('busca'),
     aprovacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, refazerSelosSeOutroNaTela: () => {},
+    escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {},
   };
   const chaves = Object.keys(deps);
-  const enviar = new Function(...chaves, fatiar('enviarAprovacao') + '\n' + fatiar('voltarDaAprovacaoRecusada') + '\n'
+  const enviar = new Function(...chaves, fatiar('enviarAprovacao') + '\n' + fatiar('esperaDaEscritaNoSair') + '\n' + fatiar('voltarDaAprovacaoRecusada') + '\n'
     + fatiar('devolverPedidoRecusado') + '\nreturn enviarAprovacao;')(...chaves.map((k) => deps[k]));
   return { enviar: () => enviar({ id: P.updateRequestID, place: P, idx: 0, epocaFila: 0 }), AppState, log, deps, P };
 }

@@ -102,7 +102,7 @@ function montarAprovacao({ authenticated = true } = {}) {
     quemDecideAgora: () => null, decididosPorOutraAbaComCardAqui: new WeakSet(),
     console: { error: () => {} },
   };
-  const h = montar(['enviarAprovacao', 'voltarDaAprovacaoRecusada'], deps);
+  const h = montar(['enviarAprovacao', 'esperaDaEscritaNoSair', 'voltarDaAprovacaoRecusada'], deps);
   // Aprova (a resposta presa), a sessão cai e a fila é refeita; depois a resposta chega.
   const aprovarECair = async (resposta, { epocaFila = 0 } = {}) => {
     const place = P(1);

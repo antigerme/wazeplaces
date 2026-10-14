@@ -4141,6 +4141,23 @@ async function esperarAVezContandoNoSair(vez) {
     }
 }
 
+// A escrita de FOTO (excluir, aprovar, corrigir o nome) que ESPERA a retentativa do
+// `callWithRetry` (1,5 s e 3,5 s depois de um `transient`) ou a conferência de um 401
+// (`refazerDepoisDo401`): sem requisição no ar, fora da janela do Desfazer e fora da fila
+// de saída — o "Sair" confirmado a cancela pela época, e o diálogo não a contava, então
+// ela se perdia sem aviso (R17-3-01 = R17-2-01, MEDIDO nos três). Devolve o `aoEsperar` DESTA
+// escrita: uma marca avulsa em `escritasEsperandoAVez` (a frase `modal.logout.foto`), que a
+// escrita tira no `finally` — a queda não esvazia o conjunto, e a espera que sai pela época
+// trocada não avisa o fim dela.
+function esperaDaEscritaNoSair() {
+    const marca = {};
+    return (sim) => {
+        if (sim) escritasEsperandoAVez.add(marca);
+        else escritasEsperandoAVez.delete(marca);
+        redesenharAvisoDoSairSeAberto();
+    };
+}
+
 // A página está saindo (`descarregarAcaoPendente`): solta as escritas que
 // esperam só um aquecimento — com o transporte já no modo "saindo", pra elas
 // saírem com `keepalive`. O envio de cada uma corre nas microtarefas logo depois,
@@ -4262,10 +4279,16 @@ function lixeiraOcupada(ligado) {
 // aprovada, excluir outra foto do local — cruzaria com ela.
 let escritasConferindo = 0;
 
-async function refazerDepoisDo401(epoca, enviar) {
+//
+// `aoEsperar(sim)`: a conferência e a retentativa de depois dela também são espera sem
+// nada no ar, e o "Sair" a descarta (R17-2-01): a conferência conta enquanto dura, e a
+// retentativa avisa pela mesma função (`callWithRetry`). Só desfaz a conta se a sessão é a
+// do gesto: quem trocou a época já esvaziou o conjunto do "Sair".
+async function refazerDepoisDo401(epoca, enviar, aoEsperar = null) {
     const levou = Date.now();
     escritasConferindo++;
     aplicarTravaDeAcao();
+    if (typeof aoEsperar === 'function') aoEsperar(true);
     try {
         // Outra chamada JÁ abriu a conferência (o WAF e o KV devolvem 401 a
         // várias de uma vez): o `handleUnauthorized` volta na hora, sem
@@ -4274,9 +4297,11 @@ async function refazerDepoisDo401(epoca, enviar) {
         // 2026-09-29, V5). Espera o desfecho DELA, que é o mesmo pra todo 401.
         await (verificandoSessao && conferenciaDaSessao ? conferenciaDaSessao : handleUnauthorized());
         if (epoca !== epocaDaSessao || !sessaoVivaDepoisDe(levou)) return null;
-        const r = await callWithRetry(enviar);
+        if (typeof aoEsperar === 'function') aoEsperar(false);   // a ida volta ao ar; a retentativa avisa a dela
+        const r = await callWithRetry(enviar, undefined, aoEsperar);
         return r && r.errorCategory === 'unauthorized' ? null : r;
     } finally {
+        if (typeof aoEsperar === 'function' && epoca === epocaDaSessao) aoEsperar(false);
         escritasConferindo = Math.max(0, escritasConferindo - 1);
         aplicarTravaDeAcao();
     }
@@ -4400,6 +4425,7 @@ async function enviarExclusao(alvo) {
     // reaplicada quando ela entra na vez e quando sai. O GESTO do toque
     // (`alvo.aquecimento`) vai junto: a lista que ele leu é desta exclusão.
     const vez = vezDasFotosNoLocal(alvo, 'excluir');
+    const espera = esperaDaEscritaNoSair();   // a retentativa e a conferência do 401 contam no "Sair" (R17-3-01)
     aplicarTravaDeAcao();
     try {
         if (esperaAVezDoLocal(vez)) await esperarAVezContandoNoSair(vez);
@@ -4418,9 +4444,9 @@ async function enviarExclusao(alvo) {
         // queda, e a ida não sai com a sessão de quem entrou depois (o
         // `callWithRetry` a confere antes de CADA tentativa).
         const enviar = contarIdasSemResposta(() => API.excluirFoto(alvo.place.venueID, alvo.id, alvo.place.lat, alvo.place.lon, alvo.regiao, alvo.aquecimento), idasSemRespostaDeAntes(alvoDasIdas));
-        let r = await callWithRetry(enviar, epoca);
+        let r = await callWithRetry(enviar, epoca, espera);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
-            r = await refazerDepoisDo401(epoca, enviar);
+            r = await refazerDepoisDo401(epoca, enviar, espera);
         }
         lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, !!(r && r.success), epoca);
         // A sessão acabou no meio (ver `epocaDaSessao`): nada grava — e a foto
@@ -4471,6 +4497,7 @@ async function enviarExclusao(alvo) {
     } finally {
         // A vez do local passa pra próxima, dê certo ou não (R10-3-03) — e a
         // pílula do nome do local destrava (R11-3-06).
+        espera(false);
         vez.soltar();
         aplicarTravaDeAcao();
     }
@@ -4764,6 +4791,7 @@ async function enviarAprovacao(alvo) {
     aplicarTravaDeAcao();
     // O pedido aprovado é o alvo das idas sem resposta (R6-3-04).
     const alvoDasIdas = 'aprovar|' + chave;
+    const espera = esperaDaEscritaNoSair();   // a retentativa e a conferência do 401 contam no "Sair" (R17-3-01)
     let vez = null;
     try {
         // A vez do LOCAL nas escritas da lista de fotos (R11-3-01, ver
@@ -4796,9 +4824,9 @@ async function enviarAprovacao(alvo) {
         // como na exclusão: a espera pela vez pode atravessar a queda, e a ida
         // não sai com a sessão de quem entrou nesse meio.
         const enviar = contarIdasSemResposta(() => API.aprovarPedido(alvo.place.venueID, alvo.place.updateRequestID, alvo.regiao), idasSemRespostaDeAntes(alvoDasIdas));
-        let r = await callWithRetry(enviar, epoca);
+        let r = await callWithRetry(enviar, epoca, espera);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
-            r = await refazerDepoisDo401(epoca, enviar);
+            r = await refazerDepoisDo401(epoca, enviar, espera);
         }
         lembrarIdasSemResposta(alvoDasIdas, enviar.semResposta, pousouNoWaze(r), epoca);
         const jaFeito = !!(r && (r.errorCategory === 'already_processed' || r.errorCategory === 'not_found'));
@@ -4881,6 +4909,7 @@ async function enviarAprovacao(alvo) {
         return false;
     } finally {
         // A vez do local passa pra próxima escrita da lista (R11-3-01).
+        espera(false);
         if (vez) vez.soltar();
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
@@ -5452,6 +5481,7 @@ async function enviarRenomeacao(alvo) {
     const local = alvo.place.venueID;
     // No ar até a resposta FINAL: a pílula deste local fica travada (L23).
     renomeacoesNoAr.add(local);
+    const espera = esperaDaEscritaNoSair();   // a retentativa e a conferência do 401 contam no "Sair" (R17-3-01)
     aplicarTravaDeAcao();
     try {
         // Escrita SUPERADA não sai de novo: sem nome desta escrita na tela, a
@@ -5459,9 +5489,9 @@ async function enviarRenomeacao(alvo) {
         const enviar = () => (nomeDestaEscrita(alvo)
             ? API.renomearLocal(local, alvo.novo, alvo.regiao)
             : Promise.resolve(null));
-        let r = await callWithRetry(enviar);
+        let r = await callWithRetry(enviar, undefined, espera);
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
-            r = await refazerDepoisDo401(epoca, enviar);
+            r = await refazerDepoisDo401(epoca, enviar, espera);
         }
         // A sessão ACABOU com o nome no ar (ver `epocaDaSessao`): nada GRAVA. A
         // resposta que chegava depois do "Sair" contava o "Corretor" e recriava
@@ -5497,6 +5527,7 @@ async function enviarRenomeacao(alvo) {
         if (devolverNome(alvo)) showToast(t('toast.renameFailed'), 'error');
         return false;
     } finally {
+        espera(false);
         renomeacoesNoAr.delete(local);
         aplicarTravaDeAcao();
     }
@@ -26542,7 +26573,11 @@ function handleSkip() {
         // pousar durante a janela, e o anel só cresce até lá.
         if (estreladoPeloApp(place) === true) return;
         const enviar = () => API.guardarPedido(place.venueID, place.updateRequestID, true, regiao);
-        let r = await callWithRetry(enviar, epoca);
+        // A estrela esperando a retentativa (ou a conferência de um 401) conta no diálogo do
+        // "Sair" como o ✕/✓ (R17-3-01): a escrita fica fora da fila de saída, e o "Sair" a descartava
+        // sem aviso. É decisão da pessoa sobre o pedido (guardá-lo), e a frase serve.
+        const espera = (sim) => marcarLoteSemEnviar(place, sim);
+        let r = await callWithRetry(enviar, epoca, espera);
         // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
         // "Sessão expirada" sem conferir nada — o ✕ com o mesmo 401 confere a
         // sessão e manda de novo (auditoria do card, 2026-09-29, C7). A estrela
@@ -26550,7 +26585,7 @@ function handleSkip() {
         // moram fora dela (`refazerDepoisDo401`): com a sessão confirmada viva,
         // ela sai de novo UMA vez.
         if (epoca === epocaDaSessao && r && r.errorCategory === 'unauthorized') {
-            r = await refazerDepoisDo401(epoca, enviar);
+            r = await refazerDepoisDo401(epoca, enviar, espera);
         }
         // A sessão ACABOU com a estrela no ar (ver `epocaDaSessao`): nada grava.
         // Mas a estrela que não chegou se perdia CALADA — "quem avisa é a queda",
@@ -26793,10 +26828,12 @@ async function handleBatchMarkRead() {
     // `quais`: os pedidos desta ida, pro "Sair" contar o que espera a retentativa
     // (R16-2-03). Uma função: o pedaço é remontado a cada ida.
     const mandar = async (enviar, quais) => {
-        const r = await callWithRetry(enviar, undefined, (sim) => marcarLoteSemEnviar(quais(), sim));
+        const espera = (sim) => marcarLoteSemEnviar(quais(), sim);
+        const r = await callWithRetry(enviar, undefined, espera);
         if (refez || epoca !== epocaDaSessao || !(r && r.errorCategory === 'unauthorized')) return r;
         refez = true;
-        return (await refazerDepoisDo401(epoca, enviar)) || r;
+        // A sonda do 401 e a retentativa de depois dela também contam no "Sair" (R17-2-01).
+        return (await refazerDepoisDo401(epoca, enviar, espera)) || r;
     };
     // O que o Waze marcou CONTA NA HORA, a cada pedaço (e a cada pedido do um a
     // um) que pousa: placar, Histórico e conquistas, como o ✓ de um card conta.
@@ -28008,11 +28045,11 @@ function idSalvoValido(v) {
     if (typeof v === 'string' && /^[0-9]{1,15}$/.test(v) && Number(v) > 0) return v;
     return '';
 }
-// As categorias do filtro: lista de textos, no teto do servidor (`CATEGORIAS_MAX`, 200). Qualquer
+// As categorias do filtro: lista de textos, no teto do servidor (200). Qualquer
 // outra coisa volta à lista vazia — o filtro legítimo nunca grava outra forma.
-const CATEGORIAS_SALVAS_MAX = 200;
 function categoriasSalvasValidas(v) {
-    if (!Array.isArray(v) || v.length > CATEGORIAS_SALVAS_MAX) return [];
+    const teto = 200;   // o do servidor (`buscar-places`)
+    if (!Array.isArray(v) || v.length > teto) return [];
     return v.every((c) => typeof c === 'string') ? v : [];
 }
 

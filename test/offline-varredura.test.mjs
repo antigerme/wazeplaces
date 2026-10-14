@@ -712,7 +712,7 @@ function aparelhoO8() {
       enviarPendenciasDoLightbox: () => {}, removeUndoBanner: () => {}, bloqueadosPorPagina: new Map(),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'saveFilters', 'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'resetQueue',
+      'saveFilters', 'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'resetQueue',
       'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
@@ -991,7 +991,7 @@ function aparelhoO1({ filtros = null } = {}) {
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'loadFilters', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'filaGuardadaDestaConta',
+      'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'filaGuardadaDestaConta',
       'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha',
       // "Minha área": a carga do perfil, a caixa por servidor e a pergunta ao servidor da busca.
