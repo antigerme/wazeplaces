@@ -8074,7 +8074,17 @@ function diagOfflineAgora() {
                  resultado: offlineUltimoResultado, varrendo: offlineVarrendo,
                  filaGravadaEm: gravadaEm, filaPreparada: offlineFilaPreparada, filaVarrida: offlineFilaVarrida,
                  cobreAFila: offlineFilaPreparada !== null && offlineFilaPreparada === gravadaEm,
-                 precisaVarrer: offlinePrecisaVarrer() };
+                 precisaVarrer: offlinePrecisaVarrer(),
+                 // A PAUSA da varredura (R18-4-04): o servidor pediu calma (408/425/429), o aparelho
+                 // não tem espaço, ou o servidor de tile negou todos (4xx). Sem ela o resumo dizia
+                 // "prepara no próximo gatilho: sim" com a varredura parada. O instante (ms, relógio
+                 // do aparelho) só vale enquanto não passou — `null` é "sem pausa".
+                 segurarAteEm: offlineSegurarAte > Date.now() ? offlineSegurarAte : null,
+                 semEspaco: offlineSemEspaco,
+                 // Os tiles guardados que falharam, também aqui (R18-4-02c): a linha do resumo lê
+                 // este campo, e o retrato da captura e o do relatório que estourou o prazo
+                 // (`semResposta`) saíam sem ele — "undefined".
+                 tilesGuardadosQueFalharam: diagTilesGuardadosQueFalharam.length };
     } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }
 
@@ -10577,6 +10587,10 @@ function ligarFabDev() {
     };
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
     btn.addEventListener('pointerdown', (e) => {
+        // Só o botão PRINCIPAL (R18-4-07): o direito e o do meio do mouse registravam uma captura
+        // (contavam no selo) e o direito segurado por 200 ms "pegava" o botão. No toque e na caneta o
+        // `button` é 0. O gesto do lightbox já conferia (`e.button`).
+        if (e.button > 0) return;
         // O gesto é DESTE ponteiro: `mover` e `fim` só atendem a ele. (Travar um
         // segundo `pointerdown` foi descartado: um `pointerup` perdido — soltar
         // fora da janela — deixaria o botão surdo pra sempre.)
@@ -10635,6 +10649,7 @@ function ligarFabDev() {
     // `pointerup` e não `click` porque, com captura implícita, o clique nem
     // sempre chega quando o dedo saiu do botão.
     const soltar = (ev) => {
+        if (ev && ev.button > 0) return;   // o direito e o do meio não são o toque (R18-4-07)
         if (arrastou) return;   // arrastar não é tocar
         if (ev && devFabDedo !== null && ev.pointerId !== devFabDedo) return;
         capturar();
@@ -11082,7 +11097,7 @@ function diagResumoDaSaida() {
 // IDADE — o conteúdo é pedido de terceiro e já está inteiro no `appState`.
 // Quem nunca ligou o offline sai sem abrir a base: abrir CRIA a base.
 async function diagOffline() {
-    const o = { ...diagOfflineAgora(), tilesGuardadosQueFalharam: diagTilesGuardadosQueFalharam.length };
+    const o = { ...diagOfflineAgora() };
     if (!o.ligado) return o;
     try {
         const f = await offlineLerFila();
@@ -11302,8 +11317,12 @@ async function diagCorpo() {
     // As leituras LOCAIS que podem nunca resolver (R17-4-03) começam AGORA, em paralelo com as de
     // rede, e cada uma corre contra o prazo (ver `comPrazo`). `semRespostaLocal`: o que não chegou.
     const semRespostaLocal = [];
+    // O prazo das leituras locais nunca é menor que o PISO (`DIAG_PISO_LOCAL_MS`): como todas
+    // começam AGORA, junto das de rede, o piso e o orçamento correm JUNTOS (R18-4-03) — antes cada
+    // leitura tardia pedia o seu piso depois do orçamento, em série, e o pior caso era 18 s.
+    const prazoLocal = Math.max(prazo, inicioDaColeta + DIAG_PISO_LOCAL_MS);
     const lerLocal = (rotulo, fazer) => {
-        const p = comPrazo(Promise.resolve().then(fazer), prazo, rotulo, semRespostaLocal);
+        const p = comPrazo(Promise.resolve().then(fazer), prazoLocal, rotulo, semRespostaLocal);
         p.catch(() => {});   // quem espera é mais abaixo; sem isto, a rejeição antes dele seria "não tratada"
         return p;
     };
@@ -11319,29 +11338,6 @@ async function diagCorpo() {
     const estimativaPromessa = lerLocal('armazenamento (estimate)', () => navigator.storage.estimate());
     const persistentePromessa = lerLocal('armazenamento (persisted)', () => navigator.storage.persisted());
 
-    const ls = {}, ss = {};
-    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
-    catch (e) { ls._erro = String(e); }
-    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
-    catch (e) { ss._erro = String(e); }
-
-    const sw = { suportado: 'serviceWorker' in navigator,
-                 controlando: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
-                 registros: [] };
-    try {
-        for (const r of await registrosPromessa) {
-            sw.registros.push({ escopo: r.scope,
-                ativo: r.active && r.active.scriptURL, estadoAtivo: r.active && r.active.state,
-                esperando: r.waiting && r.waiting.scriptURL,
-                instalando: r.installing && r.installing.scriptURL });
-        }
-    } catch (e) { sw.erro = String(e); }
-    sw.proprio = await diagServiceWorker();
-
-    const cachesDoAparelho = {};
-    try { Object.assign(cachesDoAparelho, await cachesPromessa); }
-    catch (e) { cachesDoAparelho._erro = String(e); }
-
     // O CÓDIGO que está rodando: tamanho, hash e versão de cada arquivo (o corpo,
     // só do CSS — ver abaixo). É isto que responde "o PWA está com a versão
     // velha?" — pergunta que o serial sozinho não responde, porque ele só diz o
@@ -11356,8 +11352,6 @@ async function diagCorpo() {
     // EM PARALELO (ver `DIAG_ORCAMENTO_MS`), e na ordem da lista.
     const codigo = {};
     const urlsDoCodigo = diagUrlsDoCodigo([...diagUrlsDoDocumento(), ...recursos.map((r) => r.url)], meu, location.href);
-    const lidos = await Promise.all(urlsDoCodigo.map((u) => texto(u)));
-    urlsDoCodigo.forEach((u, i) => { codigo[u] = lidos[i]; });
 
     // ── O que o aparelho tem × o que o servidor tem AGORA ──────────────────
     // Responde de vez a pergunta que sozinha custou horas: "o PWA está rodando
@@ -11418,10 +11412,50 @@ async function diagCorpo() {
             return c;
         } catch (e) { return diagFalhaDaLeitura(e); }
     };
-    const urlsComparadas = Object.keys(codigo);
-    const comparados = await Promise.all(urlsComparadas.map(comparar));
-    urlsComparadas.forEach((u, i) => { cacheVsRede[u] = comparados[i]; });
-    await diagCodigoEnxuto(codigo, hash);
+    // A leitura do código, a comparação com o servidor e o enxugamento correm numa promessa
+    // LANÇADA AGORA (R18-4-01): quem espera é mais abaixo, depois das leituras locais. Aguardá-las
+    // antes (o `registrosPromessa`, o `caches.keys`) deixava uma só leitura local pendurada comer os
+    // 10 s do orçamento, e a rede SAUDÁVEL saía "sem resposta" em tudo — inclusive a comparação "o
+    // aparelho roda o código do servidor?", que é a razão de existir da seção.
+    const redePromessa = (async () => {
+        const lidos = await Promise.all(urlsDoCodigo.map((u) => texto(u)));
+        urlsDoCodigo.forEach((u, i) => { codigo[u] = lidos[i]; });
+        const urlsComparadas = Object.keys(codigo);
+        const comparados = await Promise.all(urlsComparadas.map(comparar));
+        urlsComparadas.forEach((u, i) => { cacheVsRede[u] = comparados[i]; });
+        await diagCodigoEnxuto(codigo, hash);
+    })();
+    redePromessa.catch(() => {});   // quem espera é mais abaixo; sem isto a rejeição antes dele seria "não tratada"
+    // E as três leituras que ficavam DEPOIS das esperas locais: o worker pela boca dele (teto próprio),
+    // as bases do IndexedDB e a seção do offline (R18-4-03: o piso e o orçamento correm juntos).
+    const swProprioPromessa = diagServiceWorker();
+    const idbPromessa = lerLocal('indexedDB.databases', () => indexedDB.databases());
+    const offlinePromessa = lerLocal('offline (base e cache do mapa)', () => diagOffline());
+
+    const ls = {}, ss = {};
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
+    catch (e) { ls._erro = String(e); }
+    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
+    catch (e) { ss._erro = String(e); }
+
+    const sw = { suportado: 'serviceWorker' in navigator,
+                 controlando: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
+                 registros: [] };
+    try {
+        for (const r of await registrosPromessa) {
+            sw.registros.push({ escopo: r.scope,
+                ativo: r.active && r.active.scriptURL, estadoAtivo: r.active && r.active.state,
+                esperando: r.waiting && r.waiting.scriptURL,
+                instalando: r.installing && r.installing.scriptURL });
+        }
+    } catch (e) { sw.erro = String(e); }
+    sw.proprio = await swProprioPromessa;
+
+    const cachesDoAparelho = {};
+    try { Object.assign(cachesDoAparelho, await cachesPromessa); }
+    catch (e) { cachesDoAparelho._erro = String(e); }
+
+    await redePromessa;
 
     // ── O armazenamento local funciona mesmo? ──────────────────────────────
     // O `safeLS` engole exceção DE PROPÓSITO, então armazenamento cheio ou
@@ -11450,8 +11484,7 @@ async function diagCorpo() {
 
     const idb = {};
     try {
-        for (const d of await comPrazo(Promise.resolve().then(() => indexedDB.databases()), Math.max(prazo, Date.now() + DIAG_PISO_LOCAL_MS),
-            'indexedDB.databases', semRespostaLocal)) idb[d.name] = d.version;
+        for (const d of await idbPromessa) idb[d.name] = d.version;
     } catch (e) { idb._erro = String(e); }
 
     const c = navigator.connection || {};
@@ -11595,8 +11628,7 @@ async function diagCorpo() {
         serviceWorker: sw,
         // A seção do offline lê a base (IndexedDB) e o cache do mapa: também corre contra o
         // prazo (com o piso), e se estourar sai o que se sabe sem abrir nada (R17-4-03).
-        offline: await comPrazo(diagOffline(), Math.max(prazo, Date.now() + 3 * DIAG_PISO_LOCAL_MS), 'offline (base e cache do mapa)', semRespostaLocal)
-            .catch(() => ({ ...diagOfflineAgora(), semResposta: true })),
+        offline: await offlinePromessa.catch(() => ({ ...diagOfflineAgora(), semResposta: true })),
         caches: cachesDoAparelho,
         // CÓPIA no retrato, como o diário: a chamada que chegar depois dele fica
         // pra cópia guardada (ver `retratoEm`), em vez de ir nos dois lugares.
@@ -23395,6 +23427,7 @@ async function offlineGravarFila(desde) {
             return false;
         }
         let gravou = false;
+        let erroDoPut = null;
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
             const loja = tx.objectStore(OFFLINE_STORE);
@@ -23416,6 +23449,10 @@ async function offlineGravarFila(desde) {
                 mesmaFila = mesmaFilaGuardada(lerResumo.result, lerJanela.result, chaves);
                 gravadaEm = mesmaFila ? lerResumo.result.t : Date.now();
                 parteDosPedidos = mesmaFila && new Set(chaves).size < lerResumo.result.chaves.length;
+                // O `put` pode LANÇAR na hora (cota estourada em alguns navegadores): a exceção de
+                // dentro do `onsuccess` abortava a transação como um `Error('abort')` qualquer, e a
+                // cota virava "falha de gravação" sem nome (R18-4-05). Guardada aqui, é ela que sai.
+                try {
                 loja.put({
                     t: gravadaEm,
                     // A HORA em que esta gravação aconteceu, à parte do carimbo `t`:
@@ -23436,12 +23473,13 @@ async function offlineGravarFila(desde) {
                 // E os pedidos dela, com o MESMO carimbo, na mesma transação.
                 loja.put({ t: gravadaEm, chaves: [...new Set(chaves)].sort() }, 'filaChaves');
                 gravou = true;
+                } catch (er) { erroDoPut = er; try { tx.abort(); } catch (e2) {} }
             };
             tx.oncomplete = ok; tx.onerror = () => erro(tx.error);
             // `onabort` também: a cota estourada ABORTA a transação sem sempre
             // passar pelo `onerror`, e a promessa pendurada prendia a varredura
             // (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
-            tx.onabort = () => erro(tx.error || new Error('abort'));
+            tx.onabort = () => erro(erroDoPut || tx.error || new Error('abort'));
         });
         db.close();
         // Esqueceram com a transação no ar: o que ela gravou sai (e a memória, o
@@ -23470,7 +23508,16 @@ async function offlineGravarFila(desde) {
         offlinePodarPousos(valeDesde);
         dfato('offline.gravou', { n: fila.length, ...(mesmaFila ? { mesma: true } : {}) });
         return true;
-    } catch (e) { return false; }
+    } catch (e) {
+        // A GRAVAÇÃO da fila falhou (R18-4-05): antes não ficava rastro nenhum, a varredura seguia e
+        // fechava "pronto" sem a fila na base — a linha dizia "Ainda não preparado" e nada tentava
+        // de novo até a janela virar. Aqui o fato entra no diário (a cota à parte, que é a causa
+        // que se resolve liberando espaço) e quem chamou fica sabendo: `'cota'` ou `'falhou'`, nunca
+        // o `false` de "nada a gravar" (sem sessão, fila vazia, esqueceram no meio).
+        const cota = offlineErroDeCota(e);
+        try { dfato('offline.gravacaoFalhou', { ...(cota ? { cota: true } : {}), e: String((e && e.name) || e).slice(0, 40) }); } catch (e2) {}
+        return cota ? 'cota' : 'falhou';
+    }
 }
 
 // ── Duas abas, UMA fila guardada (R13-4-03) ──────────────────────────────
@@ -24030,8 +24077,15 @@ async function offlineVarrer() {
         // A fila que ESTA varredura cobre é a que ela grava agora; a que uma
         // busca gravar depois — ou durante — não é (ver `offlineFilaPreparada`).
         // A gravação que falhou não diz qual fila está na base: aí nenhuma.
-        const filaGravada = await offlineGravarFila();
+        const gravacao = await offlineGravarFila();
+        // `'cota'` e `'falhou'` são a gravação que NÃO deu (R18-4-05), distinta do `false` de "nada a
+        // gravar": com a fila fora da base não há cobertura a dar, e a varredura não fecha "pronto".
+        const gravacaoFalhou = gravacao === 'cota' || gravacao === 'falhou';
+        const filaGravada = !!gravacao && !gravacaoFalhou;
         const filaCoberta = filaGravada ? offlineFilaGravadaEm : null;
+        // O aparelho recusou por falta de ESPAÇO: baixar tile só gastaria rede pra jogar fora (o
+        // `put` do tile dá o mesmo erro), então a varredura pausa já, como na cota do tile.
+        if (gravacao === 'cota') offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
         // Cobrindo ou não, esta é a fila guardada sobre a qual ela trabalha: o
         // gatilho da fila não coberta não a traz de volta (ver `offlinePrecisaVarrer`).
         offlineFilaVarrida = offlineFilaGravadaEm;
@@ -24118,7 +24172,12 @@ async function offlineVarrer() {
         // (500 itens × 3 tentativas × 30 s era "varrendo" por mais de uma hora).
         let penduradasSeguidas = 0;
         let limitado = false;
-        let semEspaco = false;
+        let semEspaco = gravacao === 'cota';
+        // Os TILES que o servidor negou com 4xx (401/403/404/451), por endereço, e que seguem na janela
+        // (R18-4-06): "todos negados e nenhum no cache" não é "Pronto" — é uma borda barrando o aparelho
+        // ou um endereço de tile que mudou. Mora junto do "feito" da janela, porque a retomada depois da
+        // pausa não pede de novo o que já deu 4xx e precisa lembrar disso.
+        const negados = offlineFeitosNaJanela.negados || (offlineFeitosNaJanela.negados = new Set());
         const trabalhar = async () => {
             while (pend.length) {
                 if (epoca !== offlineEpoca) return;   // esqueceram no meio
@@ -24147,6 +24206,7 @@ async function offlineVarrer() {
                 } else if (ok === 'definitivo') {
                     definitivos++;
                     feitos.add(it.u);
+                    if (it.tile) negados.add(it.u);   // 'definitivo' do tile é sempre o 4xx
                     penduradasSeguidas = 0;   // o servidor respondeu: a rede anda
                 } else if (ok === 'cota') {
                     // O aparelho recusou a gravação por falta de ESPAÇO (R17-4-02): mais
@@ -24208,7 +24268,28 @@ async function offlineVarrer() {
         // Só AGORA a janela vira: enquanto a varredura não terminou, o card
         // segue pedindo o sufixo anterior, cuja cópia está viva no cache.
         if (epoca !== offlineEpoca) return;   // esqueceram: não grava resultado
-        if (!pend.length && !desistidosPorRede.length) {
+        // R18-4-06: TODOS os tiles da fila voltaram 4xx e NENHUM está no cache (nem desta janela nem
+        // de uma anterior) — o servidor de tile barrou o aparelho (a borda devolve 403 a cliente
+        // barrado) ou o endereço do tile mudou (404 em tudo). Não é "Pronto — N pedidos no aparelho"
+        // com o mapa vazio: termina PARCIAL, com a pausa longa da cota, e a retomada depois dela
+        // pede os tiles de novo. 404 em ALGUNS tiles segue definitivo (tile que não existe); o 5xx
+        // segue como estava (decisão do owner, R5-4-1).
+        let tilesNegadosEmTodos = false;
+        if (!pend.length && !desistidosPorRede.length && tilesDaFila.size && !guardados.size
+            && [...tilesDaFila].every((u) => negados.has(u))) {
+            let algumNoCache = true;   // sem como ler o cache: fica como estava
+            try {
+                algumNoCache = (await caches.has(OFFLINE_TILES_CACHE))
+                    && (await (await caches.open(OFFLINE_TILES_CACHE)).keys()).some((r) => tilesDaFila.has(r.url));
+            } catch (e) { algumNoCache = true; }
+            if (epoca !== offlineEpoca) return;
+            if (!algumNoCache) {
+                tilesNegadosEmTodos = true;
+                for (const u of tilesDaFila) { feitos.delete(u); negados.delete(u); }
+                offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
+            }
+        }
+        if (!pend.length && !desistidosPorRede.length && !gravacaoFalhou && !tilesNegadosEmTodos) {
             // A fila guardada AGORA, relida ANTES de dar a cobertura (R16-4-01): a
             // outra aba pode tê-la regravado com PARTE dos pedidos — mesmo carimbo —
             // enquanto esta baixava, e a poda de lá tira do cache o mapa do pedido
@@ -24293,9 +24374,14 @@ async function offlineVarrer() {
         } else {
             offlineUltimoResultado = 'parcial';
             offlineSemEspaco = semEspaco;
+            // A gravação da fila falhou por outro motivo que não o espaço: tenta de novo no gatilho
+            // seguinte DEPOIS de uma pausa curta, e não a cada swipe (R18-4-05).
+            if (gravacaoFalhou && !semEspaco) offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_LIMITE_PAUSA_MS);
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
                                        ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
                                        ...(semEspaco ? { cota: true } : {}),
+                                       ...(gravacaoFalhou ? { semFila: true } : {}),
+                                       ...(tilesNegadosEmTodos ? { tilesNegados: tilesDaFila.size } : {}),
                                        ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) });
         }
     } catch (e) {

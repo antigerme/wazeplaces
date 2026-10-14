@@ -775,7 +775,8 @@ function linhaEDiag({ gravada, preparada, varrida = null, treinoEsperando = null
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, [
     `let offlineJanelaServida = ${JANELA_AGORA}, offlineUltimoResultado = 'pronto', offlineVarrendo = false,`,
-    `    offlineFilaGravadaEm = ${gravada}, offlineFilaPreparada = ${preparada}, offlineFilaVarrida = ${varrida};`,
+    `    offlineFilaGravadaEm = ${gravada}, offlineFilaPreparada = ${preparada}, offlineFilaVarrida = ${varrida},`,
+    '    offlineSegurarAte = 0, offlineSemEspaco = false, diagTilesGuardadosQueFalharam = [];',
     ...['filaReal', 'filaGuardadaEsperandoOTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'diagOfflineAgora'].map(fatiar),
     "return { diag: diagOfflineAgora, linha: () => { atualizarLinhaDoOffline(0, 0); const e = document.getElementById('prefOfflineDesc'); return e.innerHTML || e.textContent; } };",
   ].join('\n'))(...chaves.map((k) => deps[k]));

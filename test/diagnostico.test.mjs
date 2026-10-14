@@ -977,8 +977,11 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
 test('o relatório traz o offline, o service worker pela boca dele e o teto dos recursos', () => {
   const corpo = fatiarFn(semCom, 'diagCorpo');
   // (R17-4-03) a leitura da seção corre contra o prazo do relatório, mas a seção segue no arquivo.
-  assert.match(corpo, /offline: await comPrazo\(diagOffline\(\),/, 'a seção `offline` saiu do relatório');
-  assert.match(corpo, /sw\.proprio = await diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado');
+  assert.match(corpo, /offline: await offlinePromessa\.catch\(/, 'a seção `offline` saiu do relatório');
+  assert.match(corpo, /const offlinePromessa = lerLocal\('offline \(base e cache do mapa\)', \(\) => diagOffline\(\)\);/,
+    'a leitura da seção `offline` deixou de correr contra o prazo do relatório (R17-4-03)');
+  assert.match(corpo, /const swProprioPromessa = diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado (ou voltou a ser perguntado DEPOIS das esperas locais, R18-4-01)');
+  assert.match(corpo, /sw\.proprio = await swProprioPromessa;/, 'a resposta do worker não entra no arquivo');
   assert.match(corpo, /recursosInfo: \{ n: recursos\.length, encheu: diagRecursosCheio,/,
     'o relatório deixou de dizer se a lista de recursos bateu no teto');
   // Quem nunca ligou o offline: nada de abrir a base (abrir CRIA a base).
