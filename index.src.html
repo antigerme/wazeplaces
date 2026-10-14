@@ -241,7 +241,7 @@
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
                 <span id="devModeBadge" class="hidden text-[0.6875rem] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas" data-i18n-title="header.devBadge.title">DEV</span>
                 <div class="leading-tight text-right min-w-0">
-                    <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200"></p>
+                    <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200" dir="auto"></p>
                     <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
                 </div>
                 <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA do app e a
@@ -577,7 +577,7 @@
         <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[calc(85dvh-var(--kb-inset,0px))] dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
-                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
+                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 min-w-0 break-words dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
                     <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>

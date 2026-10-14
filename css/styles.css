@@ -560,6 +560,28 @@ body > main {
      e está no degrau `max-height: 700px`. */
 }
 
+/* O MESMO 2×2, ligado por MEDIDA (R20-8-01). O `@media` acima é em px e a 1×:
+   com a fonte do sistema maior os rótulos crescem (`0.6875rem`) e a coluna, que
+   é fração da tela, não — "REJEITADOS|PULADOS" e "RECHAZADAS|SALTADAS" se
+   sobrepunham num aparelho de 360–393 px a 1,3×, e a 1,5× três rótulos saíam
+   colados. A `vigiarPlacar` (js/app.js) mede o rótulo contra a célula e, quando
+   não cabe, liga `placar-2x2` — as mesmas três regras do `@media`, um 2×2 só com
+   dois gatilhos. Ela é VIVA e não um `@container` em `rem` porque o 2×2 custa uma
+   fileira de altura (~50 px a 1,8×) e, onde o card já não tinha folga (360×740 a
+   1,65×, 393/412 a 2×), essa fileira empurrava a barra ✕ ↑ ✓ pra fora da janela:
+   rótulos que se encostam são feios, barra que não se alcança é o pior defeito do
+   card, e só a medida sabe qual dos dois está em jogo. A 1× a classe nunca liga
+   (os rótulos cabem), então nenhum pixel muda. O respiro entre as fileiras é
+   MENOR que o do Galaxy Fold a 1× (2 px e 4 px, contra 4 e 6): é a escala maior
+   que está pagando a altura, e 1 px a mais fazia o card do S8 (360×740) a 1,5×
+   passar da janela. (1,1,0) vence o `grid-cols-4` do Tailwind. */
+#placarGrid.placar-2x2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 0.125rem;
+}
+#placarGrid.placar-2x2 > :nth-child(odd)    { border-left-width: 0; }
+#placarGrid.placar-2x2 > :nth-child(n + 3)  { border-top-width: 1px; padding-top: 0.25rem; }
+
 /* ── Os dois botões de um diálogo na tela estreita (R14-8-03) ─────────────
    As linhas de dois botões dos diálogos (`.dialogo-acoes`: Sair, Colar cookies,
    Entrar com código, "Como funciona", "Marcar todos", o rodapé dos Filtros e o
@@ -599,6 +621,56 @@ body > main {
     -webkit-hyphens: auto;
     hyphens: auto;
     hyphenate-limit-chars: 10 4 4;
+  }
+}
+
+/* ── O MESMO, na ESCALA DO TEXTO (R20-7-01, R20-8-03) ─────────────────────
+   O `@media` acima mede a TELA, em px, a 1×. Com a fonte do sistema em 1,3× ou
+   mais o texto cresce e a linha, que é fração da tela, não: a 360 px a 1,5× o
+   "Se déconnecter" saía 78 px do cartão, o "Aplicar" dos Filtros 25–43 px, e no
+   Galaxy Fold a 1,3× "Cancelar" quebrava no MEIO da palavra. A pergunta é a
+   mesma — "cabem os dois lado a lado?" — e ela depende só da largura da linha EM
+   `rem` (o texto e o respiro dos botões são `rem`), então a resposta é um
+   `@container` na própria linha, onde o `rem` é o da raiz, o do texto maior:
+   - até 14,9rem a linha usa o compacto de cima. A 1× isso é a tela de menos de
+     320 px, onde o `@media` já valia: o iPhone SE de 1ª geração (320 px, linha
+     de 15rem) e tudo acima ficam como sempre foram, pixel por pixel.
+   - abaixo da linha do Galaxy Fold a 1× (12,5rem) nem o compacto cabe — o Fold é
+     a referência porque é a linha mais estreita em que o app já mostra os
+     rótulos lado a lado, e cada rótulo cabe nela em todos os idiomas —, e os
+     botões EMPILHAM: dismissiva em cima, afirmativa embaixo (a ordem das duas no
+     HTML, M3/HIG), cada uma na largura toda. É o que se faz com o texto grande:
+     dá pra tocar e ler, em vez de cortar a palavra.
+   O contêiner é a linha (`container-type: inline-size`: a largura dela já vem
+   do cartão, não do texto). `flex-wrap` é o que faz o botão de 100% ir pra
+   linha de baixo; com os botões de sempre (`flex-1`, base 0) nada quebra de
+   linha, então ele fica inerte. Sem suporte a `@container` fica o que havia. */
+.dialogo-acoes {
+  container-type: inline-size;
+  flex-wrap: wrap;
+  row-gap: 0.75rem;
+}
+@container (max-width: 14.9rem) {
+  .dialogo-acoes > button {
+    min-width: 0;
+    padding-left: 0.375rem;
+    padding-right: 0.375rem;
+    overflow-wrap: break-word;
+    -webkit-hyphens: auto;
+    hyphens: auto;
+    hyphenate-limit-chars: 10 4 4;
+  }
+}
+/* (0,3,1) vence o `space-x-3` (0,3,0: a margem à esquerda do 2º botão, nas três
+   linhas que o usam — repetir a classe é o que sobe a especificidade) e o
+   `flex-1` do HTML. Empilhado o botão segue com o padding do
+   compacto: a palavra tem que caber na largura toda MENOS o respiro, e a 1,5× no
+   Fold o respiro de 1rem (24 px de cada lado) partia "Confirmer" no meio. */
+@container (max-width: 12.4rem) {
+  .dialogo-acoes.dialogo-acoes > button:not([hidden]) {
+    flex: 1 1 100%;
+    margin-left: 0;
+    margin-right: 0;
   }
 }
 
@@ -749,6 +821,16 @@ body > main {
   opacity: 1;
 }
 
+/* O alvo de toque de 44 px vale SEMPRE (R20-8-04). Os três botões são `w-14`/
+   `w-12` (em `rem`) e, num flex que não cabe, ENCOLHEM: no Galaxy Fold a 1,3× e
+   1,5× o ↑ ficava com 40 px, abaixo da régua do projeto. O piso é em px e não em
+   `rem`: é o dedo que não cresce com o texto. A 1× o menor botão tem 48 px (o
+   próprio Fold, já encolhido), então o piso não toca em nada; com ele, quem
+   cede é o respiro (o `gap` e o padding da barra) e os outros dois botões. */
+.place-card .card-actions > button {
+  min-width: 44px;
+}
+
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
    Botão que não responde e parece normal lê como app quebrado — o M3 pede que
    estado desabilitado seja visível. A contagem regressiva do próprio banner diz
@@ -883,7 +965,17 @@ input.ui-switch:disabled {
    Estilizado aqui (e não via Tailwind no HTML) de propósito: os overrides
    legados `.dark .bg-white { !important }` repintariam a aba selecionada.
    Aqui controlamos os dois temas explicitamente, sem briga de especificidade. */
+/* O título dos Filtros (R20-8-03): com o texto grande "préférences" é mais larga
+   que a caixa, empurrava o ✕ pra fora do cartão e, depois de `min-w-0`, quebrava
+   na letra ("préférence/s"). Com o dicionário do idioma o motor quebra na sílaba
+   ("préfé-/rences"); só age quando a palavra não cabe, então a 1× não muda nada. */
+#filtersModalTitle {
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
+
 .seg-tabs {
+  container-type: inline-size;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 4px;
@@ -895,7 +987,15 @@ input.ui-switch:disabled {
 .seg-tab {
   min-height: 44px; /* régua de toque M3/HIG do projeto */
   border-radius: 9px;
+  /* `min(…, 6.25cqw)` (R20-8-03): o rótulo é `rem` e a faixa, fração da tela;
+     com o texto do sistema maior as três abas passavam do diálogo ("Histórico"
+     8–19 px fora no Fold a 1,3×). 6,25% da faixa são 12 px na faixa do Galaxy
+     Fold (192 px), a MENOR a 1× — onde os três rótulos cabem em todos os
+     idiomas, e é o tamanho que o degrau de baixo já usa ali —, então o corte só
+     alcança a faixa mais estreita que o Fold (texto maior) e o tamanho de hoje,
+     em qualquer tela de verdade, fica exatamente como era. */
   font-size: 0.8125rem;
+  font-size: min(0.8125rem, 6.3cqw);
   font-weight: 600;
   color: #475569; /* slate-600 — slate-500 dava 4.3:1 sobre o trilho */
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
@@ -911,6 +1011,7 @@ input.ui-switch:disabled {
 @media (max-width: 320px) {
   .seg-tab {
     font-size: 0.75rem;
+    font-size: min(0.75rem, 6.3cqw);
     letter-spacing: -0.01em;
   }
 }
@@ -2709,6 +2810,27 @@ html.tem-sessao #authScreen { display: none; }
    passa: só o pixel denuncia (gotcha #58). */
 .lb-pill-fixo { flex: none; white-space: pre; }
 .lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
+
+/* …"nunca encolhem" vale quando CABE (R20-3-01). Com o texto do sistema maior o
+   `max-width` acima (que tem `rem`) encolhe e o texto (também `rem`) cresce: o
+   contador, os "·" e a idade, todos `flex: none`, passavam do teto e cobriam o
+   ✕ — o toque caía na pílula (Galaxy Fold a 1,3×, SE de 320 px a 1,5×, 360 px a
+   1,8×; MEDIDO por hit-test nos dois motores). O fechar tem que ser alcançável
+   em qualquer escala, então os pedaços fixos cedem — mas SÓ depois do nome, que
+   continua sendo quem cede primeiro: o nome agora vai a 0 (`min-width: 0`) e o
+   fator de encolhimento dele é um milhão de vezes o dos outros, de modo que, com
+   o texto normal (o nome truncado de hoje, ou a pílula inteira), os outros
+   perdem uma fração de pixel que o layout nem representa e NENHUM pixel muda.
+   Só quando o nome já zerou e ainda sobra é que a idade e os "·" encolhem, com
+   reticências: dizem que foram cortados, em vez de uma idade pela metade. O
+   contador (o primeiro filho) segue inteiro. */
+.lb-pill-nome { min-width: 0; flex-shrink: 1000000; }
+.lb-pill-fixo:not(:first-child) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ── Patentes e Conquistas ─────────────────────────────────────────────────
    Tudo desenhado a partir de MEDIÇÃO no app real (2026-09-14, Pixel 411 e

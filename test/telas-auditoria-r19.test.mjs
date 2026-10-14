@@ -101,9 +101,10 @@ function montarVigia({ comResizeObserver = true } = {}) {
   }
   const TOLERANCIA_ARREDONDAMENTO_PX = 2;
   const fonte = fatiar('vigiarBarraDeAcoes');
-  const vigiar = new Function('TOLERANCIA_ARREDONDAMENTO_PX', 'requestAnimationFrame', 'ResizeObserver',
+  // (`medidasDaBarra`, R20-8-01: o registro que o placar consulta; o harness a declara.)
+  const vigiar = new Function('TOLERANCIA_ARREDONDAMENTO_PX', 'requestAnimationFrame', 'ResizeObserver', 'medidasDaBarra',
     fonte + '\nreturn vigiarBarraDeAcoes;')(TOLERANCIA_ARREDONDAMENTO_PX, (f) => quadros.push(f),
-    comResizeObserver ? RO : undefined);
+    comResizeObserver ? RO : undefined, new WeakMap());
   const rodarQuadros = () => { while (quadros.length) quadros.shift()(); };
   return { card, classes, escritas, estado, vigiar, quadros, observadores, rodarQuadros };
 }
@@ -182,9 +183,10 @@ test('R19-8-01 · card fora do documento não é mexido, e sem ResizeObserver a 
 
 test('R19-8-01 · quem desenha o card liga a vigia, no da frente e no de fundo', () => {
   const frente = fatiar('renderCurrentCard');
-  assert.match(frente, /^\s*vigiarBarraDeAcoes\(card\);/m, 'o card da frente não ganha a vigia da barra');
+  // (R20-8-02: a vigia devolve a medida síncrona, e o card da frente a guarda.)
+  assert.match(frente, /^\s*(const \w+ = )?vigiarBarraDeAcoes\(card\);/m, 'o card da frente não ganha a vigia da barra');
   const fundo = fatiar('montarCardDeFundo');
-  assert.match(fundo, /^\s*vigiarBarraDeAcoes\(fundo\);/m,
+  assert.match(fundo, /^\s*(const \w+ = )?vigiarBarraDeAcoes\(fundo\);/m,
     'o card de fundo não ganha o mesmo aperto — a promessa do que vem mudaria de forma ao virar o card real');
   assert.ok(fundo.indexOf('stack.appendChild(fundo)') < fundo.indexOf('vigiarBarraDeAcoes(fundo)'),
     'a vigia do card de fundo roda ANTES de ele estar no documento: a medida sairia zero');

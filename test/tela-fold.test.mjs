@@ -89,7 +89,12 @@ test('R14-8-03: abaixo de 320px o botão da linha encolhe, perde padding e quebr
       `${lado} = ${decl[lado]}: com mais de 6px, "Cancelar" (pt/es) quebra no meio da palavra no Fold (R14-8-03)`);
   }
   // Escopo: a regra NÃO vale em 320px e acima — lá a linha cabe e nada pode mudar.
-  assert.doesNotMatch(CSS_SEM.replace(bloco[0], ''), /\.dialogo-acoes\s*>\s*button/,
+  // (R20-7-01: com o texto do sistema maior ela vale TAMBÉM numa linha mais
+  // estreita que a do SE de 320 px — `@container` em `rem`, nos dois blocos que
+  // `test/telas-auditoria-r20.test.mjs` confere —, e em nenhum outro lugar.)
+  const semOsBlocos = CSS_SEM.replace(bloco[0], '')
+    .replace(/@container \(max-width: [\d.]+rem\) \{\s*(?:\.dialogo-acoes\.dialogo-acoes|\.dialogo-acoes) > button(:not\(\[hidden\]\))? \{[^}]*\}\s*\}/g, '');
+  assert.doesNotMatch(semOsBlocos, /\.dialogo-acoes\s*>\s*button/,
     'a regra dos botões do diálogo vazou pra fora da tela estreita (muda o SE e o Pixel, que não tinham defeito)');
   // E vence o padding do Tailwind: o styles.css vem DEPOIS no app.css gerado, e o
   // seletor `.dialogo-acoes > button` (0,1,1) passa do `.px-4` (0,1,0).

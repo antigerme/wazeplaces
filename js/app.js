@@ -530,6 +530,7 @@ function initApp() {
     setupMapaLightbox();
     setupKeyboardInset();
     setupAlturaDoHeader();
+    vigiarPlacar();
     setupDescargaAoSair();
     // DEPOIS do de cima, e a ordem importa: os dois ouvem o ir-pro-fundo, e a
     // ação que estava na janela do Desfazer tem que ir pra fila de saída antes
@@ -1893,6 +1894,9 @@ function aplicarIdioma(valor) {
     if (AppState.currentPlace) showCurrentPlace();
     updateStats();
     updatePendingCount();
+    // O rótulo do placar ficou noutro comprimento (R20-8-01): "Rechazadas" não
+    // mede o que "Rejeitados" media, e a célula é a mesma.
+    if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
     // A frase do indicador "esperando envio"/"Enviando N…" (o `title` e o que o
     // leitor de tela anuncia) também é do JS: ficava no idioma de antes (R6-7-10).
     updateInFlightIndicator();
@@ -6955,6 +6959,8 @@ function showMainScreen() {
     mostrarControlesDeSessao(true);
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
+    // O placar acabou de aparecer: a medida dos rótulos no mesmo quadro (R20-8-01).
+    if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
     document.getElementById('filtersBtn').classList.remove('hidden');
     document.getElementById('refreshBtn').classList.remove('hidden');
     AppState.authenticated = true;   // o selo lê isto; o resto da função repete abaixo
@@ -14945,13 +14951,18 @@ function renderCurrentCard() {
     // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
     marcarBordaRolagem(card.querySelector('.card-content'));
     vigiarEstouroDoConteudo(card.querySelector('.card-content'));
-    vigiarBarraDeAcoes(card);
+    const medirABarra = vigiarBarraDeAcoes(card);
 
     // O card novo nasce SEM EFEITO NENHUM — decisão do owner, e o porquê de
     // cada coisa que já esteve aqui (mola, escala, fade) está medido no
     // styles.css, junto com o que o fade arrastava atrás de si.
     removeCurrentCardEl();
     document.getElementById('cardStack').appendChild(card);
+    // Agora que o card tem caixa: a medida da barra, no mesmo quadro do
+    // `appendChild` (R20-8-02). Ver `vigiarBarraDeAcoes`.
+    if (medirABarra) medirABarra();
+    // E o placar confere a barra DESTE card (R20-8-01): ver `vigiarPlacar`.
+    if (typeof medirOPlacarComOCardNovo === 'function') medirOPlacarComOCardNovo();
     // Agora que a caixa existe. Sem isto o card da frente também guarda o
     // enquadramento do fallback — o observer só o corrige quando a caixa
     // CRESCE, e num card com diff ela encolhe. Ver `desenharMapaComCaixa`.
@@ -15312,7 +15323,8 @@ function montarCardDeFundo() {
     stack.appendChild(fundo);
     // O mesmo aperto do card da frente (`card-aperta`): a promessa do que vem
     // não pode mudar de forma ao virar o card real.
-    vigiarBarraDeAcoes(fundo);
+    const medirABarraDoFundo = vigiarBarraDeAcoes(fundo);
+    if (medirABarraDoFundo) medirABarraDoFundo();
 
     // E SÓ AGORA o mapa, porque só agora a caixa tem tamanho.
     //
@@ -17261,22 +17273,29 @@ function vigiarEstouroDoConteudo(el) {
 // SEM ela caberia, a escrita tira a classe, mede (a leitura força o layout) e
 // põe de volta no MESMO quadro — nada é pintado no meio. O estado só muda se a
 // decisão muda, e só quando algo do card mudou de tamanho: em regime, custo zero.
+// A medida de cada card, pra quem mexe no que está em volta dele (o placar, que
+// muda de altura) conferir DE VERDADE se a barra ainda cabe: `medir` roda a
+// decisão de agora (a classe fica certa) e `cabe` diz se, decidido, a barra está
+// dentro do corpo — com o `card-aperta` ligado e ainda fora, não cabe.
+const medidasDaBarra = new WeakMap();
+
 function vigiarBarraDeAcoes(card) {
     const corpo = card && card.querySelector('.card-body');
     const barra = corpo && corpo.querySelector('.card-actions');
-    if (!corpo || !barra) return;
+    if (!corpo || !barra) return null;
     let ligado = card.classList.contains('card-aperta');
     let agendado = false;
+    // A BARRA, e não o `scrollHeight` do corpo: deitado o card é uma grade e a
+    // coluna do texto pode passar do corpo sem que a barra (coluna da foto)
+    // saia de lugar nenhum — medir o corpo ligava o aperto onde nada faltava.
+    // `offsetTop` é de layout, e não muda com o `transform` do arraste.
+    const barraFora = () => barra.offsetTop + barra.offsetHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
 
     const escrever = () => {
         agendado = false;
         if (!card.isConnected) return;
         if (ligado) card.classList.remove('card-aperta');
-        // A BARRA, e não o `scrollHeight` do corpo: deitado o card é uma grade e a
-        // coluna do texto pode passar do corpo sem que a barra (coluna da foto)
-        // saia de lugar nenhum — medir o corpo ligava o aperto onde nada faltava.
-        // `offsetTop` é de layout, e não muda com o `transform` do arraste.
-        const fora = barra.offsetTop + barra.offsetHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
+        const fora = barraFora();
         if (fora || ligado) card.classList.toggle('card-aperta', fora);
         ligado = fora;
     };
@@ -17286,6 +17305,7 @@ function vigiarBarraDeAcoes(card) {
         requestAnimationFrame(escrever);
     };
 
+    medidasDaBarra.set(card, { medir: escrever, cabe: () => !barraFora() });
     agendar();
     if (typeof ResizeObserver === 'function') {
         const obs = new ResizeObserver(agendar);
@@ -17295,6 +17315,109 @@ function vigiarBarraDeAcoes(card) {
         obs.observe(card);
         for (const filho of corpo.children) obs.observe(filho);
     }
+    // A PRIMEIRA medida, síncrona (R20-8-02): quem chama a faz logo depois do
+    // `appendChild`, FORA do callback do observer — que continua só agendando
+    // (gotcha #35) —, em vez de esperar o quadro seguinte com a barra possivelmente
+    // fora da tela (a auditoria viu 60–90 ms no WebKit, a cada troca de card, com
+    // o texto grande). Tira a classe, mede e põe de volta no MESMO quadro, então
+    // nada é pintado no meio; um card que já cabe não escreve nada.
+    return escrever;
+}
+
+// O placar em 4 colunas cede ao 2×2 quando os RÓTULOS não cabem (R20-8-01). O
+// `@media (max-width: 359.98px)` do styles.css é em px e a 1×; com o texto do
+// sistema maior (a escala da fonte raiz) o rótulo cresce e a coluna não —
+// "REJEITADOS|PULADOS" se sobrepunha a 1,3× no SE, no S8 e no iPhone 15, e a
+// 1,5× três rótulos saíam colados. MEDIDO: a largura do TEXTO do rótulo (um
+// `Range`, que mede a tinta e não a caixa de bloco) contra a da célula. Com a
+// escala 1 todo rótulo cabe (o mais justo, "RECHAZADAS" a 360 px, sobra 1 px) e a
+// classe nunca liga: nenhum pixel muda.
+//
+// O 2×2 custa uma fileira inteira de altura, e a barra ✕ ↑ ✓ é mais importante
+// que o rótulo: se com ele a pilha do card passa da janela (360×740 a 1,5×, onde
+// o piso do card de 60dvh não cede) ou a barra do card da frente deixa de caber
+// (375×667 a 1,8×, 393/412 a 2×: o card encolhe e a barra sai) — decidida de
+// verdade, pela medida do próprio card (`medidasDaBarra`) —, a classe volta atrás:
+// o placar fica como estava, sem lugar onde piore. Mesmas regras da irmã de
+// baixo: o callback do observer só AGENDA (gotchas #34/#35), a escrita tira a
+// classe, mede e põe de volta no MESMO quadro, e só escreve quando a decisão
+// muda. A medida síncrona (`medirOPlacarDeNovo`) é pra quem acabou de mudar o
+// texto (o idioma, a tela que aparece) não deixar um quadro com os rótulos colados.
+let medirOPlacarDeNovo = () => {};
+// A mesma medida, quando um card NOVO entra: o 2×2 conferiu a barra do card que
+// estava na frente, e o do próximo pode ser mais alto — ou o placar ter ligado o
+// 2×2 antes de haver card nenhum (a tela que acaba de aparecer). Só faz algo onde
+// o placar tem rótulo que não cabe (texto grande); com o texto normal, em regime,
+// é uma comparação de booleano — nada no ritmo do swipe.
+let medirOPlacarComOCardNovo = () => {};
+function vigiarPlacar() {
+    const grade = document.getElementById('placarGrid');
+    const pilha = document.getElementById('cardStack');
+    if (!grade || !pilha) return;
+    let ligado = grade.classList.contains('placar-2x2');
+    let agendado = false;
+    let rotuloSobrando = false;
+    const rotulosCabem = () => {
+        for (const celula of grade.children) {
+            // O 2º <p> da célula é o rótulo (o 1º é o número); a 3ª linha do
+            // "Restam" (o "de N na região") quebra e não entra na conta.
+            const rotulo = celula.children[1];
+            if (!rotulo || !rotulo.getClientRects().length) continue;
+            const r = document.createRange();
+            r.selectNodeContents(rotulo);
+            if (r.getBoundingClientRect().width > rotulo.clientWidth + 0.5) return false;
+        }
+        return true;
+    };
+    // O card da frente refaz a decisão dele com a altura de agora (as classes
+    // `card-aperta` ficam certas no mesmo quadro) e diz se a barra cabe. Sem card
+    // na tela (carregando, "Tudo limpo!") não há barra a perder.
+    const barraDaFrente = () => {
+        const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        return card ? medidasDaBarra.get(card) || null : null;
+    };
+    const escrever = () => {
+        agendado = false;
+        // Escondido (a tela de entrada) não tem medida: o observer chama de novo
+        // quando o placar aparece.
+        if (!grade.isConnected || !grade.getClientRects().length) return;
+        if (ligado) grade.classList.remove('placar-2x2');
+        const barra = barraDaFrente();
+        let novo = false;
+        let mexeuNoCard = false;
+        rotuloSobrando = !rotulosCabem();
+        if (rotuloSobrando) {
+            grade.classList.add('placar-2x2');
+            novo = true;
+            if (barra) { barra.medir(); mexeuNoCard = true; }
+            // (0,5 px: o arredondamento do subpixel; 1 px a mais já é card fora.)
+            if (pilha.getBoundingClientRect().bottom > innerHeight + 0.5 || (barra && !barra.cabe())) {
+                grade.classList.remove('placar-2x2');
+                novo = false;
+            }
+        }
+        // O card decidiu com a altura de um instante atrás: refaz com a de agora.
+        // Só quando ela mudou (ligou, desligou, ou foi e voltou); em regime — o
+        // placar de 4 colunas a 1× — não toca no card.
+        if (barra && (mexeuNoCard || novo !== ligado)) barra.medir();
+        ligado = novo;
+    };
+    const agendar = () => {
+        if (agendado) return;
+        agendado = true;
+        requestAnimationFrame(escrever);
+    };
+    medirOPlacarDeNovo = escrever;
+    medirOPlacarComOCardNovo = () => { if (rotuloSobrando || ligado) escrever(); };
+    agendar();
+    if (typeof ResizeObserver === 'function') {
+        const obs = new ResizeObserver(agendar);
+        obs.observe(grade);
+        // O texto cresce sem a célula mudar de largura: a ALTURA do rótulo
+        // denuncia (a fonte maior), como os filhos do corpo na irmã.
+        for (const celula of grade.children) for (const p of celula.children) obs.observe(p);
+    }
+    window.addEventListener('resize', agendar);
 }
 
 // Scroll edge effect (M3): esmaece a borda de baixo enquanto sobra conteúdo.
@@ -21322,7 +21445,7 @@ function renderAutores() {
             // pedaços. Medido: a largura do nome é a MESMA nos dois arranjos,
             // então isto não tira nada dele.
             `<div class="autor-lin flex flex-wrap items-center gap-x-2 min-h-[44px] border-b border-slate-100 dark:border-slate-700 last:border-0">`
-            + `<span class="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate dark:text-slate-200">${escapeHtml(a.nome)}</span>`
+            + `<span class="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate dark:text-slate-200" dir="auto">${escapeHtml(a.nome)}</span>`
             + `<span class="selo-proc ${a.n >= AUTOR_LIMIAR_DESTAQUE ? 'selo-reinc' : 'selo-src'} flex-shrink-0">`
             + `✕ ${a.n}</span>`
             // O interruptor da recusa automática só EXISTE pra quem passa no
