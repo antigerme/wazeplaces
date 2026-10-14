@@ -7839,9 +7839,39 @@ function dlog(k, d) {
 const DFATO_TETO = 120;
 let dfatoAnel = [];
 
-function dfato(k, d) {
+// LIMITADOR opcional (R19-4-02), para o evento que uma falha PERMANENTE repete a cada
+// gatilho: sem ele a gravação da fila que falha sempre (a cota, o IndexedDB indisponível)
+// escrevia duas linhas por passada da varredura e tomava o anel de 120 em ~1 h de triagem,
+// levando embora o resto do diário — justo o que o relatório existe pra mostrar. A regra é a
+// da presença (`presencaWme.falhou`): as `DFATO_LIMITE_SERIE` primeiras de cada CAUSA, toda
+// troca de causa, e uma a cada `DFATO_LIMITE_MS`; `juntas` diz quantas ficaram de fora desde
+// a linha anterior. Zerar no sucesso NÃO serve (o Waze falhando uma sim, outra não, voltava a
+// escrever tudo). Um terceiro argumento, e não outra função: o `dfato` dos harnesses dos
+// testes é um dublê de dois argumentos e segue valendo.
+const DFATO_LIMITE_SERIE = 3;
+const DFATO_LIMITE_MS = 10 * 60000;
+const dfatoLimite = new Map();
+
+function dfato(k, d, limite) {
     try {
-        dfatoAnel.push({ t: Date.now(), k, ...(d || {}) });
+        let juntas = 0;
+        if (limite && limite.causa !== undefined) {
+            const causa = String(limite.causa);
+            const agora = Date.now();
+            const x = dfatoLimite.get(k) || { causa: null, n: 0, em: -Infinity, juntas: 0 };
+            if (x.causa !== causa) { x.causa = causa; x.n = 0; x.juntas = 0; x.em = -Infinity; }
+            x.n += 1;
+            if (x.n > DFATO_LIMITE_SERIE && agora - x.em < DFATO_LIMITE_MS) {
+                x.juntas += 1;
+                dfatoLimite.set(k, x);
+                return;
+            }
+            juntas = x.juntas;
+            x.juntas = 0;
+            x.em = agora;
+            dfatoLimite.set(k, x);
+        }
+        dfatoAnel.push({ t: Date.now(), k, ...(d || {}), ...(juntas ? { juntas } : {}) });
         if (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
     } catch (e) {}
 }
@@ -11152,6 +11182,8 @@ async function diagOffline() {
     if (!o.ligado) return o;
     try {
         const f = await offlineLerFila();
+        // A leitura que FALHOU (`undefined`) não é a base vazia (`null`) — R19-4-03.
+        if (f === undefined) throw new Error('a leitura da fila guardada falhou');
         // `desdeMin`: de quando é a LISTA (o começo da busca que a trouxe). É
         // contra ele que os pousos filtram a reabertura sem rede. `t`: o CARIMBO
         // dela, o que a linha compara com o que a preparação cobriu (R14-4-06).
@@ -23312,9 +23344,10 @@ function offlineDB({ soLer = false } = {}) {
         let req;
         try { req = indexedDB.open(OFFLINE_DB, 1); } catch (e) { return erro(e); }
         let estourou = false;
+        let semBase = false;
         const teto = setTimeout(() => { estourou = true; erro(new Error('timeout')); }, OFFLINE_DB_TETO_MS);
         req.onupgradeneeded = () => {
-            if (soLer) { try { req.transaction.abort(); } catch (e) { /* o `onerror` abaixo responde */ } return; }
+            if (soLer) { semBase = true; try { req.transaction.abort(); } catch (e) { /* o `onerror` abaixo responde */ } return; }
             const db = req.result;
             if (!db.objectStoreNames.contains(OFFLINE_STORE)) db.createObjectStore(OFFLINE_STORE);
         };
@@ -23323,9 +23356,15 @@ function offlineDB({ soLer = false } = {}) {
             // Abriu DEPOIS do teto: ninguém mais espera por ela — fecha, senão a
             // conexão esquecida seguraria as próximas aberturas.
             if (estourou) { try { req.result.close(); } catch (e) {} return; }
+            // Nenhuma conexão esquecida pode segurar o `deleteDatabase` do "Sair" (R19-4-01): o
+            // pedido de apagar chega aqui como `versionchange`, e a conexão que ninguém fechou
+            // (a de uma transação que falhou, a de uma leitura que lançou) se fecha sozinha.
+            try { req.result.onversionchange = () => { try { req.result.close(); } catch (e) {} }; } catch (e) {}
             ok(req.result);
         };
-        req.onerror = () => { clearTimeout(teto); erro(req.error); };
+        // `semBase`: a leitura que só LÊ abortou a criação — a base não existe, e isso é "vazia",
+        // não "ilegível" (R19-4-03). O resto (timeout, `blocked`, erro de abrir) é falha.
+        req.onerror = () => { clearTimeout(teto); erro(semBase ? Object.assign(new Error('sem base'), { semBase: true }) : req.error); };
         req.onblocked = () => { clearTimeout(teto); erro(new Error('blocked')); };
     });
 }
@@ -23501,8 +23540,13 @@ async function offlineGravarFila(desde) {
     // A fila regravada manteve o carimbo com PARTE ESTRITA dos pedidos (R15-4-01):
     // as outras abas ficam sabendo quais pedidos a base tem agora.
     let parteDosPedidos = false;
+    // A conexão é fechada num `finally` (R19-4-01): a transação que ABORTA (a cota, um `DataError`)
+    // rejeitava a promessa, o `db.close()` do caminho feliz era pulado e a conexão ficava aberta —
+    // o `deleteDatabase` do "Sair" esperava o coletor de lixo (a fila de pedidos de terceiros
+    // ficava no disco) e a abertura seguinte dava `timeout`.
+    let db = null;
     try {
-        const db = await offlineDB();
+        db = await offlineDB();
         // Esqueceram enquanto a base abria: nada é gravado, e a base que esta
         // abertura recriou vazia sai.
         if (epoca !== offlineEpoca) {
@@ -23599,8 +23643,12 @@ async function offlineGravarFila(desde) {
         // que se resolve liberando espaço) e quem chamou fica sabendo: `'cota'` ou `'falhou'`, nunca
         // o `false` de "nada a gravar" (sem sessão, fila vazia, esqueceram no meio).
         const cota = offlineErroDeCota(e);
-        try { dfato('offline.gravacaoFalhou', { ...(cota ? { cota: true } : {}), e: String((e && e.name) || e).slice(0, 40) }); } catch (e2) {}
+        // Com LIMITADOR (R19-4-02): a falha permanente repete a cada passada da varredura.
+        const nome = String((e && e.name) || e).slice(0, 40);
+        try { dfato('offline.gravacaoFalhou', { ...(cota ? { cota: true } : {}), e: nome }, { causa: (cota ? 'cota:' : 'falhou:') + nome }); } catch (e2) {}
         return cota ? 'cota' : 'falhou';
+    } finally {
+        if (db) { try { db.close(); } catch (e2) {} }
     }
 }
 
@@ -23721,8 +23769,9 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
     // seguinte restaurava, `offlineRecuperarJanela`).
     const epoca = offlineEpoca;
     const desfazer = () => { try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {} };
+    let db = null;
     try {
-        const db = await offlineDB();
+        db = await offlineDB();
         if (epoca !== offlineEpoca) { try { db.close(); } catch (e) {} desfazer(); return; }
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
@@ -23746,21 +23795,26 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
         db.close();
         // Esqueceram com a transação no ar: o que ela gravou sai.
         if (epoca !== offlineEpoca) desfazer();
-    } catch (e) {}
+    } catch (e) {
+    } finally {
+        // Fecha também quando a transação abortou (R19-4-01, ver `offlineGravarFila`).
+        if (db) { try { db.close(); } catch (e2) {} }
+    }
 }
 
 // O registro inteiro: `{ janela, t, filaCoberta }`.
 async function offlineLerRegistroDaJanela() {
+    let db = null;
     try {
-        const db = await offlineDB({ soLer: true });
+        db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('janela');
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
-        db.close();
         return v && Number.isFinite(v.janela) ? v : null;
     } catch (e) { return null; }
+    finally { if (db) { try { db.close(); } catch (e2) {} } }
 }
 
 async function offlineLerJanela() {
@@ -23778,17 +23832,22 @@ async function offlineRecuperarJanela() {
     offlineFilaPreparada = Number.isFinite(r.filaCoberta) ? r.filaCoberta : null;
 }
 
+// A fila guardada. `null` é a base LIDA e sem fila (ou sem base); `undefined` é a leitura que
+// FALHOU (o `timeout`, o `blocked`, o `indexedDB.open` que lança): o relatório diz "não deu pra
+// ler" e não "vazia" (R19-4-03). Os dois são falsos pra quem só pergunta "tem fila?" — a
+// reabertura sem rede, a poda e a gravação tratam as duas como sem fila, como sempre.
 async function offlineLerFila() {
+    let db = null;
     try {
-        const db = await offlineDB({ soLer: true });
+        db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('fila');
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
-        db.close();
         return v && Array.isArray(v.places) && v.places.length ? v : null;
-    } catch (e) { return null; }
+    } catch (e) { return e && e.semBase ? null : undefined; }
+    finally { if (db) { try { db.close(); } catch (e2) {} } }
 }
 
 // `soMemoria`: o "Sair" (ou o desligar do offline) foi em OUTRA aba, que já
@@ -24461,12 +24520,16 @@ async function offlineVarrer() {
             // A gravação da fila falhou por outro motivo que não o espaço: tenta de novo no gatilho
             // seguinte DEPOIS de uma pausa curta, e não a cada swipe (R18-4-05).
             if (gravacaoFalhou && !semEspaco) offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_LIMITE_PAUSA_MS);
+            // Com LIMITADOR (R19-4-02): a causa que se repete a cada passada depois da pausa
+            // (a gravação que falha, a cota, os tiles negados) entra 3 vezes, de novo quando a
+            // causa muda e uma a cada 10 min, com `juntas` — o anel de 120 é de todo o diário.
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
                                        ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
                                        ...(semEspaco ? { cota: true } : {}),
                                        ...(gravacaoFalhou ? { semFila: true } : {}),
                                        ...(tilesNegadosEmTodos ? { tilesNegados: tilesDaFila.size } : {}),
-                                       ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) });
+                                       ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) },
+                  { causa: [semEspaco ? 'cota' : '', gravacaoFalhou ? 'semFila' : '', tilesNegadosEmTodos ? 'tilesNegados' : '', limitado ? 'limite' : ''].join('|') });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';

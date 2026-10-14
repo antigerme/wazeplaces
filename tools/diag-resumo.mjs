@@ -185,10 +185,16 @@ else if (off.ligado === false) {
   if (off.ligado) {
     const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : String(x));
     // `filaGuardada: null` é a base LIDA e vazia (R18-4-05): "—", não "ausente nesta versão".
-    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : (off.filaGuardada === null ? null : undefined);
+    // `{ erro }` é a leitura que FALHOU (R19-4-03): não é a base vazia nem "ausente nesta versão".
+    const naoLeu = !!(off.filaGuardada && typeof off.filaGuardada === 'object' && off.filaGuardada.erro);
+    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' && !naoLeu ? off.filaGuardada.t : (off.filaGuardada === null ? null : undefined);
+    if (naoLeu) {
+      // A leitura da base FALHOU (R19-4-03): não dá pra dizer que a fila está vazia, ausente nem que é de OUTRA aba.
+      out(`ATENÇÃO: a leitura da fila guardada FALHOU (${off.filaGuardada.erro}) — não deu pra ler a base, então não dá pra dizer se a fila está lá, vazia ou é de OUTRA aba (conexão do IndexedDB presa, ou o IndexedDB indisponível; veja o diário: \`offline.gravacaoFalhou\`).`);
+    }
     if (off.cobreAFila === undefined) out(`a última preparação cobre a fila guardada: ${AUSENTE}`);
     else {
-      out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? (Number.isFinite(off.segurarAteEm) ? 'só depois da pausa' : 'sim') : 'não'}`);
+      out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${naoLeu ? 'não lida' : c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? (Number.isFinite(off.segurarAteEm) ? 'só depois da pausa' : 'sim') : 'não'}`);
       if (!off.cobreAFila && off.resultado === 'pronto') {
         // Dois motivos diferentes pro mesmo "pronto" sem cobertura (R17-4-07): a preparação
         // é de OUTRA fila (a de antes de outra aba gravar), ou é desta fila e terminou com
@@ -200,6 +206,8 @@ else if (off.ligado === false) {
           // A base foi LIDA e não tem fila nenhuma (R18-4-05): nenhuma outra aba gravou nada, e a
           // frase "de OUTRA fila" apontaria uma causa que não existe — a gravação é que falhou.
           out('ATENÇÃO: o resultado é "pronto", mas a fila NUNCA foi gravada na base (ela está vazia) — a gravação da fila falhou (veja o diário: `offline.gravacaoFalhou`) e a varredura de antes do lote 22 fechava "pronto" mesmo assim; a linha diz "Ainda não preparado" e nada tentava de novo até a janela virar.');
+        } else if (naoLeu) {
+          // Dito na linha ATENÇÃO da leitura, logo acima: nem "vazia" nem "de OUTRA fila" (R19-4-03).
         } else if (semNaBase) {
           out(`ATENÇÃO: o resultado é "pronto", mas a preparação terminou com ${semNaBase} pedido(s) DESTA aba que a fila guardada não tinha (outra aba a regravou durante a varredura, sem esses pedidos) — a cobertura não foi dada e a linha diz "Ainda não preparado"; o próximo gatilho prepara a fila desta aba.`);
         } else {
@@ -405,9 +413,13 @@ secao('CÓDIGO NO APARELHO');
   // diz quais) e o arquivo cuja cópia do aparelho não foi lida.
   const semRede = (d.resumo || {}).rede === false || (d.ambiente || {}).online === false;
   const porMotivo = new Map();
-  for (const [, v] of erros) {
+  // O arquivo cuja leitura de REDE ficou pendurada (está na `coleta.semResposta`) também não tem corpo
+  // local pra comparar, e o `cacheVsRede` o marca `erro: 'sem corpo local'`: a causa é a mesma
+  // "sem resposta no orçamento", não "a cópia do aparelho não foi lida" (R19-4-03, cosmético).
+  const penduradas = new Set(d.coleta && Array.isArray(d.coleta.semResposta) ? d.coleta.semResposta : []);
+  for (const [u, v] of erros) {
     if (semServidor(v)) continue;
-    const motivo = v.semResposta ? 'sem resposta no orçamento do relatório'
+    const motivo = v.semResposta || (v.erro === 'sem corpo local' && penduradas.has(u)) ? 'sem resposta no orçamento do relatório'
       : v.erro === 'sem corpo local' ? 'a cópia do aparelho não foi lida'
       : semRede ? `sem rede na hora do relatório (${v.erro})` : `a leitura do servidor falhou (${v.erro})`;
     porMotivo.set(motivo, (porMotivo.get(motivo) || 0) + 1);
