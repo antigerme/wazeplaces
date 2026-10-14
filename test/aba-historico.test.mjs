@@ -561,6 +561,8 @@ async function rodarRecusa(alvos) {
     autoLigado: (id) => id !== 1, updatePendingCount() {}, aoMudarAFilaPorBaixo() {},
     // Pedido EM ANDAMENTO (o lote de lidos no ar) não é alvo — ver o F1.
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    // A sessão e a marca de "em andamento" dos alvos saem ANTES da espera pela trava (R20-2-01).
+    epocaDaSessao: 1, marcarEmAndamento() {},
     // A região dos pedidos vai junto com o lote (F7), e o dia e o lugar (R6-7-4).
     API: { getRegion: () => 'row' }, carimboDoGesto: () => null,
     t: (k, v) => k + ' ' + JSON.stringify(v),

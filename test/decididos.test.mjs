@@ -391,10 +391,11 @@ test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por to
   // Fim do envio, Desfazer, cancelar (logout/pagehide do lote), enfileirar ao
   // fechar sem rede e a descarga que acha a decisão REPETIDA na fila (ela não
   // envia nada). Um que falte deixa o pedido de fora da fila pra sempre.
-  assert.equal((s.match(/marcarEmAndamento\(places, false(, geracao)?\);/g) || []).length, 5,
+  assert.equal((s.match(/marcarEmAndamento\((?:places|doEnvio), false(, geracao)?\);/g) || []).length, 5,
     'algum caminho de saída da janela deixou de desmarcar o pedido');
   const iFinally = s.indexOf('} finally {');
-  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(places, false, geracao);', iFinally) > iFinally,
+  // (O ✓ e o ↑ soltam só a marca que ainda é do envio — `doEnvio`, R20-1-03; o ✕, todos os `places`.)
+  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(doEnvio, false, geracao);', iFinally) > iFinally,
     'o fim do envio tem que desmarcar no `finally` — exceção no executor não pode prender o pedido');
 });
 

@@ -139,7 +139,7 @@ function loteComTreinoAberto({ treino = true, n = 4 } = {}) {
   const deps = {
     AppState, document: dialogoDoSair().document, epocaDaSessao: 0, Treino: { ativo: false }, LOTE_LIDOS_PEDACO: 25,
     pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),
-    alvosDoLoteDeLidosNoAr: new Map(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), rejeicoesDeLoteNoAr: new Set(),
+    alvosDoLoteDeLidosNoAr: new Map(), decisoesPorContaNoAr: new Map(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), rejeicoesDeLoteNoAr: new Set(),
     loteDeLidosContado: new Set(places.map(chaveDe)), loteDeLidosEmVoo: false, lidosDoLoteNoAr: 0, escritasConferindo: 0,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, extRenovando: false,
     contaDestaAbaEmDuvida: () => false,
@@ -225,6 +225,7 @@ test('R18-1-01 (estrutura): o `entrar` do treino pergunta à conferência única
 function trocaDeConta() {
   const deps = {
     epocaDaSessao: 1, pedidosEmAndamento: new Set(['v1|u1', 'v2|u2', 'v7|u7']),
+    decisoesPorContaNoAr: new Map(),
     alvosDoLoteDeLidosNoAr: new Map([['v1|u1', 0], ['v2|u2', 0], ['v3|u3', 1]]),
   };
   deps.pedidosEmAndamento.add('v3|u3');

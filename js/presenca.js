@@ -296,9 +296,22 @@ function chatGuardado() {
 // `presencaEsquecer` tinha acabado de apagar — com a instalação, as conversas
 // conhecidas e os ids a confirmar de quem saiu. MEDIDO em produção
 // (2026-09-25): conversar, sair, e a chave estava de volta no aparelho.
+//
+// E só se o aparelho não foi encerrado por OUTRA aba: o "Sair" lá tira o token
+// E a conta, mas esta aba, congelada (bfcache), ainda está `authenticated` até
+// o app.js conferir o aparelho — e a instalação do chat recriava a chave
+// (R20-5-04).
 function chatGuardar(o) {
-    if (!AppState.authenticated) return;
+    if (!AppState.authenticated || presencaAparelhoSaiu()) return;
     safeLS.set(CHAT_KEY, JSON.stringify(o));
+}
+
+// O aparelho diz que alguém deu "Sair": nem token nem conta guardados. É a MESMA
+// régua do `aoSairEmOutraAba` (app.js): a QUEDA da sessão tira só o token e
+// deixa a conta (a mesma pessoa volta, e a aba viva ainda guarda a sua por
+// meio segundo, R14-1-03), então só o token faltando NÃO é o "Sair".
+function presencaAparelhoSaiu() {
+    return !safeLS.get('waze_session_token') && !safeLS.get(CONTA_KEY);
 }
 
 function presencaUuid() {
@@ -745,12 +758,15 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
                 // registrar apagava a evidência, e o próximo "lida" (a mensagem
                 // vista ao vivo, a dívida paga no fechamento) cobria a conversa
                 // inteira: "Lida" antes da hora pra quem mandou (R19-5-F1). Vale
-                // o maior valor, como na abertura; com a página BOA na tela
-                // ("olhando é lida") nada muda, e se a conta sobrar o erro cai
-                // pro lado seguro (um "lida" a menos).
+                // o maior valor, como na abertura, e também com a página AINDA NO
+                // AR: se ela falhar depois, o `presencaSemVerAoAbrir` precisa
+                // achar a marca (R20-5-01). Com a página BOA na tela ("olhando é
+                // lida") nada muda. Se a conta sobrar, o erro cai pro lado
+                // seguro (um "lida" a menos); se FALTAR — as vistas lidas em
+                // outro aparelho —, `presencaNaoVistaDaLista` cobre (R20-5-09).
                 const hO = Presenca.historico.get(olhando);
-                if (hO && presencaPrimeiraPaginaAdiada(hO)) {
-                    hO.naoVistoAoAbrir = Math.max(hO.naoVistoAoAbrir || 0, (c.naoLidas || 0) - presencaVistaDe(olhando).n);
+                if (hO && (presencaPrimeiraPaginaAdiada(hO) || presencaPrimeiraPaginaNoAr(hO))) {
+                    hO.naoVistoAoAbrir = Math.max(hO.naoVistoAoAbrir || 0, presencaNaoVistaDaLista(olhando, c.naoLidas || 0, c.ateDaLista));
                 }
                 c.naoLidas = 0;
             }
@@ -2077,10 +2093,55 @@ function presencaAnotarLidaPulada() {
 function presencaGuardarNaoVistoAoAbrir(id) {
     const h = Presenca.historico.get(id);
     if (!h) return;
-    // `presencaVistaDe(id).n`: as dela que o histórico daqui já tem (a reabertura
-    // as mostra) e as da dívida guardada, que o Waze ainda conta como não lidas.
-    const falta = Math.max(0, presencaNaoLidasDe(id) - presencaVistaDe(id).n);
-    h.naoVistoAoAbrir = Math.max(h.naoVistoAoAbrir || 0, falta);
+    h.naoVistoAoAbrir = Math.max(h.naoVistoAoAbrir || 0, presencaNaoVistaDaLista(id, presencaNaoLidasDe(id)));
+}
+
+// Das não lidas que o Waze conta (`conta`: a da lista, mais as vivas quando é a
+// abertura), quantas a conversa NÃO tem na tela. Dois testes, vale o maior:
+//
+// 1. A SUBTRAÇÃO: `conta - presencaVistaDe(id).n`, as dela que o histórico daqui
+//    já tem (a reabertura as mostra) e as da dívida guardada, que o Waze ainda
+//    conta como não lidas. Se a conta sobrar, o erro cai pro lado seguro (um
+//    "lida" a menos). Mas ela FALTA quando as vistas foram lidas em outro
+//    aparelho (o WME): a lista conta menos, a subtração dá zero e a não vista
+//    some — o "lida" da mensagem seguinte a cobria (R20-5-09, herdado do
+//    R16-5-01).
+// 2. A ÚLTIMA da lista: a lista conta não lida (`naoLidas > 0`; sem isso a
+//    mensagem lida no WME reteria o "lida" da próxima vista), a última dela é
+//    DELA e é mais nova que a mais nova vista daqui — há mensagem que a tela
+//    não tem, qualquer que seja a conta. Vale 1 (é o que se sabe: quantas, não).
+//
+// A hora da lista e a da tela são as do Waze, e o resto do arquivo as compara
+// por IGUALDADE (`presencaNaoLidasDepoisDoLida`). A mais nova vista só "não
+// alcança" a da lista com uma margem (`PRESENCA_RECARIMBO_MS`): é DEFENSIVA, não
+// medida pra mensagem recebida — o +335 ms do re-carimbo está medido nas
+// MINHAS mensagens ao guardar (ver o CLAUDE.md), e se valer também pra recebida
+// a mensagem que a tela JÁ tem virava "não vista" e o "lida" da próxima deixava
+// de sair. Custa pouco (uma mensagem nova a menos de 500 ms da vista deixa de
+// contar como a que falta, e a subtração acima ainda a vê). PERGUNTA EM ABERTO:
+// se o re-carimbo valer pra mensagem recebida, a igualdade exata do
+// `presencaNaoLidasDepoisDoLida` é um defeito latente.
+const PRESENCA_RECARIMBO_MS = 500;
+
+// `ateDaLista` (só no ramo "olhando" da lista que chega): a conta é SÓ da lista, e
+// só as vistas até a régua dela entram — a mensagem que chegou DEPOIS da lista,
+// com a conversa na tela, a lista nunca contou, e subtraí-la comia a não vista
+// que a lista conta (a lista velha, a 1 só dela, mais três mensagens vistas ao
+// vivo: a subtração dava zero; achado pelo fuzz do auditor). Na abertura a conta
+// inclui as vivas e a subtração é a do histórico inteiro; na volta do fundo a
+// lista que sobra depois de uma ida pro fundo já é zero ou tem dívida (o "lida"
+// da ida pro fundo a vale), e nem 60 mil sequências do fuzz nem os cenários
+// montados à mão acharam caminho que chegasse lá com vistas depois da régua —
+// por isso a volta não leva a régua (e não há teste que a distinga).
+function presencaNaoVistaDaLista(id, conta, ateDaLista) {
+    const limite = Number.isFinite(ateDaLista) && ateDaLista > 0 ? ateDaLista : Infinity;
+    const vista = presencaVistaDe(id, limite);
+    const porConta = Math.max(0, (conta || 0) - vista.n);
+    const c = Presenca.conversas.find((x) => x.id === id);
+    const u = c && c.ultima;
+    const aUltimaFalta = !!c && (c.naoLidas || 0) > 0 && !!u && !u.deMim && !u.recibo
+        && Number.isFinite(u.ts) && u.ts > vista.ate + PRESENCA_RECARIMBO_MS;
+    return Math.max(porConta, aUltimaFalta ? 1 : 0);
 }
 
 // A hora da mensagem MAIS NOVA dela na conversa daqui (`historico`). Pra
@@ -3051,15 +3112,40 @@ function presencaHoraCurta(ts) {
     return d.toLocaleDateString(i18nLocale(), { day: 'numeric', month: 'short' });
 }
 
-function presencaPrevia(u) {
+// Texto do Waze (o nome de um local, de outro aparelho) no meio de uma frase do
+// app: U+2068/U+2069 (isolado de direção automática) o fazem ser lido na direção
+// DELE sem tocar na da frase. Só quando ele TEM letra da direita pra esquerda:
+// texto da esquerda pra direita sai idêntico, byte a byte. É a MESMA regra do
+// `isolarTextoDoWaze` do app.js, copiada de propósito (a presença roda sem o
+// app.js nos testes, e uma dependência nova no harness não vale uma função de
+// três linhas); `test/presenca-auditoria-r20.test.mjs` compara as duas na mesma
+// lista de textos.
+const PRESENCA_LETRA_RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+function presencaIsolarTextoDoWaze(texto) {
+    const s = String(texto == null ? '' : texto);
+    return PRESENCA_LETRA_RTL.test(s) ? '\u2068' + s + '\u2069' : s;
+}
+
+// `isolar`: pra TELA, o nome do local vai isolado dentro da frase do app. O texto
+// acessível e o diário usam a frase crua.
+function presencaPrevia(u, { isolar = false } = {}) {
     if (!u) return '';
     if (u.card) {
         if (u.texto) return '📍 ' + u.texto;
         const nome = (u.card.name || '').trim() || t('card.noName');
         const tipo = presencaTipo(u.card.updateTypeKey);
-        return '📍 ' + nome + (tipo ? ' · ' + tipo : '');
+        return '📍 ' + (isolar ? presencaIsolarTextoDoWaze(nome) : nome) + (tipo ? ' · ' + tipo : '');
     }
     return u.texto || '';
+}
+
+// A prévia MONTADA pelo app (📍 + nome + tipo) é frase do app com um nome do
+// Waze no meio: o parágrafo fica na direção do app e o nome é isolado. Com
+// `dir="auto"` ela seguia a primeira letra forte, que era a do nome RTL, e a
+// frase saía invertida (R20-5-06). A prévia que é TEXTO de gente (a mensagem, a
+// pergunta que veio com o pedido) segue com `dir="auto"`.
+function presencaPreviaMontada(u) {
+    return !!u && !!u.card && !u.texto;
 }
 
 function presencaBadge(n) {
@@ -3124,12 +3210,13 @@ function presencaRenderLista() {
         const hora = presencaHoraCurta(c.ultima ? c.ultima.ts : c.atividade);
         const nome = c.nome || t('presenca.anon');
         const previa = presencaPrevia(c.ultima);
+        const montada = presencaPreviaMontada(c.ultima);
         const rotulo = [nome, previa, hora, presencaRotuloNaoLidas(n)].filter(Boolean).join(', ');
         return `<li>
             <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
                     <span class="presenca-l1"><span dir="auto" class="presenca-nome">${escapeHtml(nome)}</span></span>
-                    <span dir="auto" class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(previa)}</span>
+                    <span${montada ? '' : ' dir="auto"'} class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(montada ? presencaPrevia(c.ultima, { isolar: true }) : previa)}</span>
                 </span>
                 <span class="presenca-dir">${hora ? `<span class="presenca-hora">${escapeHtml(hora)}</span>` : ''}${presencaBadge(n)}</span>
             </button>
@@ -3339,6 +3426,13 @@ function presencaRenderConversa({ rolarAoFim = false, manterTopo = false } = {})
 // ── ligações com o app ──────────────────────────────────────────────────────
 
 function presencaAoVoltar() {
+    // A página congelada que volta (bfcache, ou a aba escondida que acorda)
+    // depois do "Sair" dado noutra aba: a volta da presença roda ANTES de o
+    // app.js conferir o aparelho e encerrar esta aba (o `pageshow` dele é
+    // registrado depois). Sem isto saía um pedido com a sessão que já se foi e a
+    // instalação do chat RECRIAVA `waze_places_chat` — o "Sair é limpar de tudo"
+    // desfeito depois de cumprido (R20-5-04).
+    if (presencaAparelhoSaiu()) return;
     if (!presencaPodeConectar()) return;
     // O fluxo pode ter morrido com a tela apagada (os timers congelam): se não
     // chegou nada no prazo do silêncio, descarta e religa já.
@@ -3378,6 +3472,13 @@ function presencaVistasNaVolta(id) {
     const chegaram = v ? v.n : 0;
     const daLista = c ? c.naoLidas || 0 : 0;
     if (!chegaram && !daLista) return;
+    // A lista que chegou com a página ESCONDIDA pode contar mensagem que a tela
+    // não tem — a primeira página falhou ou está parada. Zerar a conta sem
+    // registrar apagava a evidência, e o "lida" da mensagem vista depois cobria
+    // a conversa inteira (R20-5-02, irmão do R19-5-F1). Registra ANTES de zerar.
+    if (h && daLista && (presencaPrimeiraPaginaAdiada(h) || presencaPrimeiraPaginaNoAr(h))) {
+        h.naoVistoAoAbrir = Math.max(h.naoVistoAoAbrir || 0, presencaNaoVistaDaLista(id, daLista));
+    }
     if (h && Number.isFinite(h.tetoVistas)) h.tetoVistas = chegaram + Math.max(h.tetoVistas, daLista);
     if (c) c.naoLidas = 0;
     Presenca.vivas.delete(id);
@@ -3401,8 +3502,16 @@ function presencaVistasNaVolta(id) {
 // E o que a conversa NA TELA mostrou e a primeira página adiada (ou no ar) ia
 // marcar também: o app encerrado no fundo não a pede mais (ver
 // `presencaDeverOQueFoiVisto`, R14-5-01).
-function presencaPagarAoSair() {
-    if (Presenca.aberta && presencaConversaNaTela()) presencaDeverOQueFoiVisto(Presenca.aberta);
+//
+// O `pagehide` com a página já ESCONDIDA (fechar a aba do fundo) NÃO refaz a
+// dívida: foi o `visibilitychange` oculto que a criou, com o que estava visto,
+// e o histórico daqui tem também o que chegou com a tela apagada, que ninguém
+// viu — refeita, a dívida paga "lida" dessa também (R20-5-03). Vale nas duas
+// ordens dos eventos: com o `pagehide` primeiro (a página ainda visível) a dívida
+// nasce aqui, e o `visibilitychange` seguinte só a repete.
+function presencaPagarAoSair({ pagehide = false } = {}) {
+    const jaEscondida = pagehide && document.visibilityState === 'hidden';
+    if (Presenca.aberta && presencaConversaNaTela() && !jaEscondida) presencaDeverOQueFoiVisto(Presenca.aberta);
     if (!Presenca.lidaPendente && !Presenca.lidaDevendo.size) return;
     const antes = API.saindo;
     const trocar = typeof API.setSaindo === 'function';
@@ -3461,7 +3570,7 @@ function presencaMontar() {
     // Sair da página paga o "lida" que esperava (ver `presencaPagarAoSair`) e
     // fecha a conexão com o Google na hora. Voltar pelo bfcache religa pelo
     // `pageshow`.
-    window.addEventListener('pagehide', () => { presencaPagarAoSair(); presencaFluxoFechar(); });
+    window.addEventListener('pagehide', () => { presencaPagarAoSair({ pagehide: true }); presencaFluxoFechar(); });
 
     const pill = document.getElementById('presencaPill');
     if (pill) pill.addEventListener('click', () => {

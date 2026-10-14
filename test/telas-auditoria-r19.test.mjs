@@ -101,9 +101,10 @@ function montarVigia({ comResizeObserver = true } = {}) {
   }
   const TOLERANCIA_ARREDONDAMENTO_PX = 2;
   const fonte = fatiar('vigiarBarraDeAcoes');
-  const vigiar = new Function('TOLERANCIA_ARREDONDAMENTO_PX', 'requestAnimationFrame', 'ResizeObserver',
+  // (`medidasDaBarra`, R20-8-01: o registro que o placar consulta; o harness a declara.)
+  const vigiar = new Function('TOLERANCIA_ARREDONDAMENTO_PX', 'requestAnimationFrame', 'ResizeObserver', 'medidasDaBarra',
     fonte + '\nreturn vigiarBarraDeAcoes;')(TOLERANCIA_ARREDONDAMENTO_PX, (f) => quadros.push(f),
-    comResizeObserver ? RO : undefined);
+    comResizeObserver ? RO : undefined, new WeakMap());
   const rodarQuadros = () => { while (quadros.length) quadros.shift()(); };
   return { card, classes, escritas, estado, vigiar, quadros, observadores, rodarQuadros };
 }
@@ -182,9 +183,10 @@ test('R19-8-01 · card fora do documento não é mexido, e sem ResizeObserver a 
 
 test('R19-8-01 · quem desenha o card liga a vigia, no da frente e no de fundo', () => {
   const frente = fatiar('renderCurrentCard');
-  assert.match(frente, /^\s*vigiarBarraDeAcoes\(card\);/m, 'o card da frente não ganha a vigia da barra');
+  // (R20-8-02: a vigia devolve a medida síncrona, e o card da frente a guarda.)
+  assert.match(frente, /^\s*(const \w+ = )?vigiarBarraDeAcoes\(card\);/m, 'o card da frente não ganha a vigia da barra');
   const fundo = fatiar('montarCardDeFundo');
-  assert.match(fundo, /^\s*vigiarBarraDeAcoes\(fundo\);/m,
+  assert.match(fundo, /^\s*(const \w+ = )?vigiarBarraDeAcoes\(fundo\);/m,
     'o card de fundo não ganha o mesmo aperto — a promessa do que vem mudaria de forma ao virar o card real');
   assert.ok(fundo.indexOf('stack.appendChild(fundo)') < fundo.indexOf('vigiarBarraDeAcoes(fundo)'),
     'a vigia do card de fundo roda ANTES de ele estar no documento: a medida sairia zero');
@@ -265,7 +267,9 @@ test('R19-8-02 · o JS que monta HTML com texto do Waze leva dir="auto" (diff e 
   // A conversa (presenca.js).
   for (const [re, quem] of [
     [/<span dir="auto" class="presenca-nome">/g, 'o nome na lista'],
-    [/<span dir="auto" class="presenca-l2\$\{n \? ' forte' : ''\}">/g, 'a prévia da conversa'],
+    // A prévia de TEXTO de gente leva `dir="auto"`; a MONTADA pelo app (📍 nome · tipo) fica na direção do app
+    // com o nome isolado (R20-5-06, `presenca-auditoria-r20.test.mjs`).
+    [/<span\$\{montada \? '' : ' dir="auto"'\} class="presenca-l2\$\{n \? ' forte' : ''\}">/g, 'a prévia da conversa'],
     [/<div dir="auto" class="conversa-bolha \$\{m\.meu/g, 'a bolha'],
     [/<span dir="auto" class="cp-nome">/g, 'o nome do pedido mandado'],
     [/<span id="\$\{desc\}" dir="auto" class="cp-legenda">/g, 'a pergunta do pedido mandado'],

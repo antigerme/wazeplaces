@@ -241,7 +241,7 @@
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
                 <span id="devModeBadge" class="hidden text-[0.6875rem] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas" data-i18n-title="header.devBadge.title">DEV</span>
                 <div class="leading-tight text-right min-w-0">
-                    <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200"></p>
+                    <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200" dir="auto"></p>
                     <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
                 </div>
                 <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA do app e a
@@ -577,7 +577,7 @@
         <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[calc(85dvh-var(--kb-inset,0px))] dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
-                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
+                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 min-w-0 break-words dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
                     <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
@@ -1040,7 +1040,7 @@
                 <div id="pedidoFoto" class="pedido-foto hidden flex-shrink-0"><img id="pedidoFotoImg" alt="" class="w-full h-full object-cover"></div>
                 <div class="p-5 pb-4 flex flex-col gap-3">
                     <div class="flex items-start justify-between gap-2">
-                        <h3 id="pedidoNome" class="text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0 dark:text-slate-100"></h3>
+                        <h3 id="pedidoNome" dir="auto" class="text-2xl font-bold text-slate-800 leading-tight flex-1 line-clamp-2 break-words min-w-0 dark:text-slate-100"></h3>
                         <a id="pedidoWme" class="min-w-[44px] min-h-[44px] flex items-center justify-center bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 dark:hover:bg-cyan-600/[0.28] transition-colors flex-shrink-0 dark:bg-cyan-600/20" target="_blank" rel="noopener noreferrer" title="Abrir no WME" data-i18n-title="card.wmeLink.aria" aria-label="Abrir no WME" data-i18n-aria="card.wmeLink.aria">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                         </a>
@@ -1051,11 +1051,11 @@
                     </div>
                     <div id="pedidoCatRow" class="hidden flex items-baseline gap-2 min-w-0">
                         <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.categories">Categorias:</span>
-                        <span id="pedidoCat" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
+                        <span id="pedidoCat" dir="auto" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
                     </div>
                     <div id="pedidoEndRow" class="hidden flex items-baseline gap-2 min-w-0">
                         <span class="text-[0.6875rem] font-semibold text-slate-500 uppercase tracking-wider flex-shrink-0 dark:text-slate-400" data-i18n="card.address">Endereço:</span>
-                        <span id="pedidoEnd" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
+                        <span id="pedidoEnd" dir="auto" class="text-sm text-slate-700 break-words min-w-0 dark:text-slate-200"></span>
                     </div>
                 </div>
             </div>

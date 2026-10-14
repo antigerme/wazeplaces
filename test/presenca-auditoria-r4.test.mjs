@@ -208,10 +208,13 @@ test('P1 a folha do pedido recebido: tudo o que a abertura escreve, o fechamento
     const fim = APP.slice(ini + 1).search(/\n(?:function |async function |const |let )/);
     return APP.slice(ini, ini + 1 + fim);
   };
-  const abrir = new Function('document', 'identidadeDoPlace', 't', 'rotuloDeEnum', 'linkWmeDoPedido', 'API', 'openModal',
+  // `isolarTextoDoWaze` (R20-5-06) é do app.js, com a regex dela: fatiada, não reescrita.
+  const isolar = new Function(APP.slice(APP.indexOf('const LETRA_DA_DIREITA_PRA_ESQUERDA'), APP.indexOf(';\n', APP.indexOf('const LETRA_DA_DIREITA_PRA_ESQUERDA')) + 2)
+    + '\n' + fatiar('isolarTextoDoWaze') + '\nreturn isolarTextoDoWaze;')();
+  const abrir = new Function('document', 'identidadeDoPlace', 't', 'rotuloDeEnum', 'linkWmeDoPedido', 'API', 'openModal', 'isolarTextoDoWaze',
     fatiar('abrirPedidoRecebido') + '\nreturn abrirPedidoRecebido;')(
     document, (d) => ({ titulo: d.name, tituloEhEndereco: false }), (k, v) => (v ? `${k}${JSON.stringify(v)}` : k), (p, k) => k,
-    () => 'https://www.waze.com/editor?env=row&venues=9.9.9', { getRegion: () => 'row' }, () => {});
+    () => 'https://www.waze.com/editor?env=row&venues=9.9.9', { getRegion: () => 'row' }, () => {}, isolar);
   const ini = APP.indexOf('const LIMPEZA_AO_FECHAR = {');
   const LIMPEZA = new Function('document', 'window', 'URL', APP.slice(ini, APP.indexOf('\n};', ini) + 3) + '\nreturn LIMPEZA_AO_FECHAR;')(document, {}, URL);
   abrir(CARD_PRESO, 'cafanha');

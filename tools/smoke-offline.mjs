@@ -1799,6 +1799,135 @@ const reabre8e = await page.evaluate(async () => {
 });
 diz('e "Disponível offline" segue abrindo a base logo depois (sem o `timeout` de 5 s da conexão esquecida)', !reabre8e.erro && reabre8e.ms < 2000, JSON.stringify(reabre8e));
 
+secao('8f. A LEITURA DA BASE QUE FALHA, E O CACHE QUE NÃO GRAVA, NÃO VIRAM "PRONTO" NEM SILÊNCIO (R20: A2–A5, B1)');
+// A rodada 20 mediu no navegador (t4–t19): (A3) a releitura da fila no fim da varredura que FALHA dava a
+// cobertura mesmo assim; (A4) a reabertura sem rede cuja leitura falhou não deixava linha no diário;
+// (A2/A5) o relatório imprimia "gravada null" numa leitura que falhou, e com o IndexedDB PENDURADO a seção
+// inteira se perdia no orçamento; (B1) `caches.open`/`put` que rejeita (não é cota) terminava "Pronto" com
+// ZERO tiles. Cada uma tem o CONTROLE com o caminho feliz — o mesmo roteiro, sem a falha — e roda com o
+// worker BLOQUEADO (a rota do Playwright vê o tile nos dois motores).
+const pagina8f = async (opcoes = {}) => {
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR', acceptDownloads: true });
+  await c.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }));
+  await c.route('**/api/*', (r) => r.abort('failed'));
+  const pg = await c.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+  if (opcoes.antes) await pg.addInitScript(opcoes.antes, opcoes.argumento);
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(pg, () => typeof offlineVarrer === 'function', 20000, 100);
+  return { c, pg };
+};
+const montar8f = (pg, n = 3) => pg.evaluate(async (n) => {
+  const P = (i) => ({ venueID: 'v8f' + i, updateRequestID: 'u8f' + i, name: 'L' + i, categories: ['PARK'], updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE',
+    reqType: 'VENUE', createdBy: 'e' + i, creatorId: 100 + i, imageUrls: [], mapa: { centro: [-22.9 + i * 0.01, -43.2], entradas: [] },
+    dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 });
+  API.sessionToken = 'tok-8f'; AppState.authenticated = true; AppState.preferences.offlineDisponivel = true;
+  AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
+  await offlineEsquecer(); await new Promise((r) => setTimeout(r, 200));
+  offlineSegurarAte = 0; offlineUltimoResultado = null;
+  AppState.queue = Array.from({ length: n }, (_, i) => P(i + 1)); AppState.currentPlace = AppState.queue[0];
+  offlineMarcarGesto();
+}, n);
+const varrer8f = (pg, modo) => pg.evaluate(async (modo) => {
+  const origOpen = caches.open.bind(caches);
+  const origLer = window.offlineLerFila;
+  const origPut = Cache.prototype.put;
+  if (modo === 'caches-seguranca') caches.open = async () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
+  if (modo === 'put-erro') Cache.prototype.put = async function () { throw new TypeError('put falhou'); };
+  if (modo === 'leitura-falha') window.offlineLerFila = async () => undefined;
+  try {
+    await offlineVarrer();
+    for (let i = 0; i < 200 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
+  } finally { caches.open = origOpen; window.offlineLerFila = origLer; Cache.prototype.put = origPut; }
+  const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial|erro)$/.test(e.k)).at(-1);
+  let tiles = 0; try { tiles = (await (await origOpen('waze-places-tiles')).keys()).length; } catch (e) { tiles = -1; }
+  return { res: offlineUltimoResultado, k: ev && ev.k, leitura: !!(ev && ev.leitura), cache: !!(ev && ev.cache), erro: ev && ev.e, tiles,
+           cobre: offlineFilaPreparada !== null, pausaMin: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 60000),
+           sondas: (ev && ev.sondas) || 0, definitivos: (ev && ev.definitivos) || 0 };
+}, modo);
+const cena8f = {};
+for (const modo of ['boa', 'leitura-falha', 'caches-seguranca', 'put-erro']) {
+  const { c, pg } = await pagina8f();
+  try {
+    await montar8f(pg);
+    if (modo === 'leitura-falha') await pg.evaluate(async () => { await offlineGravarFila(); });
+    cena8f[modo] = await varrer8f(pg, modo);
+  } finally { await c.close(); }
+}
+diz('CONTROLE: sem falha nenhuma a varredura fecha "pronto", com os tiles no cache e a cobertura dada',
+  cena8f.boa.res === 'pronto' && cena8f.boa.tiles > 0 && cena8f.boa.cobre, JSON.stringify(cena8f.boa));
+diz('A3: a releitura da fila que FALHOU no fim da varredura não dá a cobertura — "parcial", `leitura` no diário, pausa curta (antes: "pronto" sem ter lido nada)',
+  cena8f['leitura-falha'].res === 'parcial' && cena8f['leitura-falha'].leitura && !cena8f['leitura-falha'].cobre && cena8f['leitura-falha'].k === 'offline.parcial'
+  && cena8f['leitura-falha'].pausaMin <= 1, JSON.stringify(cena8f['leitura-falha']));
+for (const modo of ['caches-seguranca', 'put-erro']) {
+  diz(`B1: com ${modo === 'caches-seguranca' ? '`caches.open` rejeitando SecurityError' : '`Cache.put` lançando TypeError'} a varredura termina "parcial" (cache:true no diário, pausa longa, sem a sonda) — nunca "pronto" com ZERO tiles`,
+    cena8f[modo].res === 'parcial' && cena8f[modo].cache && cena8f[modo].tiles <= 0 && !cena8f[modo].cobre && cena8f[modo].sondas === 0
+    && cena8f[modo].definitivos === 0 && cena8f[modo].pausaMin >= 9, JSON.stringify(cena8f[modo]));
+}
+
+// A4: a reabertura sem rede cuja leitura da base falhou deixa linha no diário (o relato "reabri e não carrega nada").
+const reabertura8f = {};
+{
+  const { c, pg } = await pagina8f();
+  try {
+    await montar8f(pg);
+    // A sessão vai pro aparelho (a página fria abre com ela): a reabertura sem rede só entra com sessão (R13-4-04).
+    await pg.evaluate(async () => { AppState.preferences.offlineDisponivel = true; savePreferences(); API.setSession('tok-8f-a4'); await offlineGravarFila(); });
+    await pg.close();
+    for (const modo of ['controle', 'idb-lanca']) {
+      const fria = await c.newPage();
+      await fria.addInitScript((m) => {
+        Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true });
+        if (m === 'idb-lanca') { const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') throw new DOMException('indisponivel', 'InvalidStateError'); return o.apply(this, arguments); }; }
+      }, modo);
+      await fria.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await esperarNaPagina(fria, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => /^(tela\.vazia|tela\.primeiroCard|offline\.abriu)$/.test(e.k)), 15000, 100);
+      reabertura8f[modo] = await fria.evaluate(() => ({ fila: AppState.queue.length, diario: dfatoAnel.filter((e) => /^offline\./.test(e.k)).map((e) => e.k) }));
+      await fria.close();
+    }
+  } finally { await c.close(); }
+}
+diz('CONTROLE: a reabertura sem rede com a base lendo abre a fila guardada (`offline.abriu`)',
+  reabertura8f.controle.fila === 3 && reabertura8f.controle.diario.includes('offline.abriu'), JSON.stringify(reabertura8f.controle));
+diz('A4: com o `indexedDB.open` lançando, a reabertura sem rede deixa `offline.leituraFalhou` no diário (antes: nenhuma linha, igual a quem nunca ligou o offline)',
+  reabertura8f['idb-lanca'].fila === 0 && reabertura8f['idb-lanca'].diario.includes('offline.leituraFalhou'), JSON.stringify(reabertura8f['idb-lanca']));
+
+// A2 + A5: o RELATÓRIO de verdade (o botão → o zip → o leitor do repo), com o IndexedDB lançando e PENDURADO.
+const relatorio8f = async (modo) => {
+  const { c, pg } = await pagina8f();
+  const dir = mkdtempSync(join(tmpdir(), 'diag-8f-'));
+  try {
+    await montar8f(pg);
+    await pg.evaluate(async () => { await offlineGravarFila(); await offlineGravarJanela(Math.floor(Date.now() / OFFLINE_CICLO_MS), null); });
+    await pg.evaluate((m) => {
+      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
+      const o = IDBFactory.prototype.open;
+      if (m === 'lanca') IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') throw new DOMException('indisponivel', 'InvalidStateError'); return o.apply(this, arguments); };
+      if (m === 'pendurado') IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') return {}; return o.apply(this, arguments); };
+    }, modo);
+    const t0 = Date.now();
+    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
+    const arq = join(dir, modo + '.zip');
+    await dl.saveAs(arq);
+    const { dados } = lerDiagnostico(arq);
+    const resumo = execFileSync(process.execPath, [join(ROOT, 'tools', 'diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 30000 });
+    const i = resumo.indexOf('── OFFLINE');
+    return { s: Math.round((Date.now() - t0) / 100) / 10, off: dados.offline, semResposta: dados.offline && dados.offline.semResposta === true,
+             secao: resumo.slice(i, resumo.indexOf('\n──', i + 5)) };
+  } finally { rmSync(dir, { recursive: true, force: true }); await c.close(); }
+};
+const rel8fBom = await relatorio8f('boa');
+diz('CONTROLE: com a base respondendo, o relatório traz a fila (`n`) e a janela (número) — nenhum `{ erro }`',
+  typeof rel8fBom.off?.filaGuardada?.n === 'number' && typeof rel8fBom.off?.janelaGuardada === 'number', JSON.stringify(rel8fBom.off).slice(0, 300));
+for (const modo of ['lanca', 'pendurado']) {
+  const r = await relatorio8f(modo);
+  diz(`A2/A5: com o IndexedDB ${modo === 'lanca' ? 'lançando' : 'PENDURADO'} a seção offline chega ao arquivo com \`{ erro }\` na fila E no registro da janela (não "gravada null"), sem estourar o orçamento`,
+    !r.semResposta && !!r.off?.filaGuardada?.erro && !!r.off?.janelaGuardada?.erro && !!r.off?.filaCobertaGuardada?.erro && r.s <= 9, `${r.s} s ${JSON.stringify(r.off).slice(0, 300)}`);
+  diz(`A2: o leitor diz "NÃO LIDA" / "não deu pra ler", e não "gravada null" (${modo})`,
+    /gravada NÃO LIDA/.test(r.secao) && /FALHOU/.test(r.secao) && !/gravada null/.test(r.secao) && !/offline\.gravacaoFalhou/.test(r.secao), r.secao.slice(0, 400));
+}
+
 // SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
 // código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
 // for declarado aqui não existe depois dele.
@@ -3830,6 +3959,28 @@ const forcado9l = await F9l.evaluate(() => {
 const cima9l = await tinta9l();
 diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa a tinta coberta e o dedo no FAB — ela enxerga o defeito',
   forcado9l && cima9l.cobre > 0 && cima9l.noPonto === 'FAB', JSON.stringify(cima9l));
+
+// R20, C1. Enter SEGURADO no botão do FAB: o navegador repete o `keydown` e faz um `click` por repetição.
+// MEDIDO antes do conserto (t22, os dois motores): 15 repetições = 12 capturas manuais idênticas, o selo "12" e a
+// captura AUTOMÁTICA expulsa do anel (o teste de unidade e o roteiro do auditor medem a expulsão; aqui, a contagem, que
+// é o que o selo mostra). O Enter simples (o CONTROLE) é UMA captura; a PRÉ-CONDIÇÃO é que o teclado repetiu de
+// verdade (`repeat: true` contado por um ouvinte).
+await F9l.evaluate(() => {
+  const btn = document.getElementById('devFabBtn');
+  window.__kd9l = { total: 0, repetidos: 0 };
+  btn.addEventListener('keydown', (e) => { window.__kd9l.total++; if (e.repeat) window.__kd9l.repetidos++; }, true);
+  window.__antes9l = { manuais: dlogCapturasDoEditor().length };
+  btn.focus();
+});
+for (let i = 0; i < 15; i++) await F9l.keyboard.down('Enter');
+await F9l.keyboard.up('Enter');
+const segurado9l = await F9l.evaluate(() => ({ ...window.__kd9l, manuais: dlogCapturasDoEditor().length - window.__antes9l.manuais }));
+await F9l.keyboard.press('Enter');
+const simples9l = await F9l.evaluate(() => dlogCapturasDoEditor().length - window.__antes9l.manuais);
+diz('PRÉ-CONDIÇÃO: o teclado repetiu o `keydown` de verdade (15 `down` seguidos, com `repeat: true`)', segurado9l.total >= 15 && segurado9l.repetidos >= 5, JSON.stringify(segurado9l));
+diz('Enter SEGURADO no botão do FAB registra UMA captura (antes: 12, e o selo dizia "12")',
+  segurado9l.manuais === 1, JSON.stringify(segurado9l));
+diz('CONTROLE: mais um Enter simples soma exatamente UMA captura (o botão continua funcionando pelo teclado)', simples9l === 2, `capturas desde o início: ${simples9l}`);
 await ctx9l.close();
 
 secao('9m. O RELATÓRIO: a aba mais VELHA que fechou antes dele, e o relatório feito DENTRO do treino');

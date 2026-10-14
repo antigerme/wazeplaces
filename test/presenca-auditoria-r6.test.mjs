@@ -532,6 +532,7 @@ function montarAgenda({ folha }) {
     setTimeout: () => { log.push('janela'); return 1; }, clearTimeout: () => {}, UNDO_WINDOW_MS: 3000,
     console: { error: () => {} }, reivindicacaoDestaAba: () => null,
     presencaFolhaAberta: () => folha,
+    epocaDaSessao: 0, decisoesPorContaNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,   // R20-1-03
   };
   const { scheduleAction } = montar(['scheduleAction', 'atenderOFimDaJanela'], deps);
   return { scheduleAction, AppState, log };

@@ -1247,6 +1247,410 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
   }
 }
 
+// ── TEXTO DO SISTEMA MAIOR: DIÁLOGOS, ABAS, PLACAR, PÍLULA, ↑ E PAISAGEM BAIXA ──
+// (lote 24; R20-7-01, R20-8-01 a -05, R20-3-01)
+//
+// O bloco de cima mede a barra ✕ ↑ ✓; aqui é o resto da tela que o texto maior
+// (`html { font-size }`, como a auditoria o emulou) tirava do lugar:
+//  - os botões de TODO diálogo, as três abas e o ✕ do título dos Filtros saíam
+//    da caixa do cartão (a 360 px a 1,5×, o "Se déconnecter" 78 px pra fora), e
+//    "Cancelar" quebrava no MEIO da palavra no Galaxy Fold a 1,3×;
+//  - os rótulos do placar se sobrepunham (REJEITADOS|PULADOS a 1,3×);
+//  - a pílula da foto ampliada cobria o ✕ de fechar;
+//  - o ↑ encolhia pra 40 px no Fold;
+//  - o card novo esperava o quadro seguinte pra ligar o `card-aperta` (WebKit).
+// (O 568×320 deitado com o aviso "de N na região" NÃO está aqui: não foi
+// consertado, e o relatório do lote descreve as duas saídas pro owner.)
+// Tudo MEDIDO no que o dedo alcança (`elementFromPoint`) ou na caixa de cada
+// elemento contra a do cartão, nos nomes de idioma que a auditoria usou, e com
+// CONTROLE em cada ponta: a 1× nenhuma falha e nenhum pixel de aperto (nada
+// empilha, o placar segue em 4 colunas, o card-aperta-extrema não existe), e,
+// pra cada medida, a MESMA tela com a regra neutralizada TEM que falhar — senão
+// a medida está cega (gotcha #28).
+{
+  const MODAIS_L24 = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'filtersModal',
+    'pairEnterModal', 'batchReadModal', 'resumoModal'];
+  // Os outros `.modal-root` não têm linha de dois botões, mas varrem-se do mesmo
+  // jeito: nenhum botão, aba ou link além da caixa do cartão (o pedido da auditoria
+  // era "todos os `.modal-root`").
+  const MODAIS_SEM_LINHA_L24 = ['treinoFimModal', 'helpModal', 'accessDeniedModal', 'pairShowModal',
+    'autorModal', 'presencaModal', 'conversaModal', 'pedidoModal'];
+  const SVG_FOTO_L24 = 'data:image/svg+xml;base64,' + Buffer.from(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='#475569'/></svg>").toString('base64');
+  const novaPagina = async (viewport, escala, estilo) => {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await ctx.route('**/*-tiles/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    if (escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * escala}px !important; }` });
+    if (estilo) await page.addStyleTag({ content: estilo });
+    return { ctx, page, erros };
+  };
+  const montarTela = async (page, { lang, places, bloqueados = 0 }) => {
+    await page.evaluate(({ lang, places, bloqueados }) => {
+      setLang(lang); applyI18n();
+      AppState.authenticated = true;
+      AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.preferences.comoFuncionaVisto = true;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      // O que o `showMainScreen` e o `aplicarIdioma` fazem com o texto novo na
+      // tela (o rótulo do placar mudou de comprimento e nenhuma caixa mudou de
+      // tamanho pra o observer avisar).
+      if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showLoading(false);
+      AppState.serverTotal = places.length; AppState.serverBlocked = bloqueados;
+      updateStats(); updatePendingTotalHint();
+      AppState.queue = places; AppState.currentPlace = places[0];
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, { lang, places, bloqueados });
+    await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
+  };
+  const fecharTudo = async (page) => {
+    await page.evaluate(() => {
+      document.querySelectorAll('.modal-root:not(.hidden)').forEach((m) => closeModal(m.id));
+      if (Lightbox.isOpen()) Lightbox.close();
+    });
+    const r = await esperarNaPagina(page, () => !CamadaVoltar.consumindo
+      && !document.querySelector('.modal-root:not(.hidden)'), 5000, 50);
+    checa(r.ok, 'diálogos do texto grande: o fechar não terminou', JSON.stringify(r));
+  };
+  // Um diálogo aberto: cada botão e aba contra o CARTÃO e a janela, a palavra
+  // curta partida no meio (as de 10 letras ou mais podem hifenizar: é o que o
+  // compacto de 320 px já fazia), e se a linha de botões empilhou.
+  const medirDialogo = (id) => {
+    openModal(id);
+    if (id === 'filtersModal') switchFilterTab('filtersTabFilters');
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById(id);
+      const card = m.querySelector(':scope > div');
+      const cr = card.getBoundingClientRect();
+      const alvos = [...m.querySelectorAll('.dialogo-acoes > button, [role=tab], #closeFilters')]
+        .filter((el) => el.offsetParent !== null);
+      const fora = [], quebradas = [];
+      // Fora da caixa: TODO botão, aba e link do diálogo; palavra partida: só os rótulos
+      // das linhas de botões e das abas (um link no meio de um parágrafo quebra de linha).
+      for (const el of [...m.querySelectorAll('button, [role=tab], a')].filter((e) => e.offsetParent !== null)) {
+        const r = el.getBoundingClientRect();
+        if (r.width && (r.right > cr.right + 0.5 || r.left < cr.left - 0.5 || r.right > innerWidth + 0.5)) {
+          fora.push(`${el.id || el.textContent.trim().slice(0, 14)}+${Math.round(Math.max(r.right - cr.right, cr.left - r.left))}`);
+        }
+      }
+      for (const el of alvos) {
+        const tn = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+        if (!tn) continue;
+        const re = /\S+/g; let mm;
+        while ((mm = re.exec(tn.textContent))) {
+          const rg = document.createRange();
+          rg.setStart(tn, mm.index); rg.setEnd(tn, mm.index + mm[0].length);
+          const linhas = new Set([...rg.getClientRects()].map((q) => Math.round(q.top)));
+          if (linhas.size > 1 && mm[0].replace(/[^\p{L}]/gu, '').length < 10) quebradas.push(`${el.id}:${mm[0]}`);
+        }
+      }
+      const linhas = [...m.querySelectorAll('.dialogo-acoes')].filter((el) => el.offsetParent !== null).map((el) => {
+        const bs = [...el.children].filter((c) => c.offsetParent !== null);
+        if (bs.length < 2) return 'um';
+        const a = bs[0].getBoundingClientRect(), b = bs[1].getBoundingClientRect();
+        // A ORDEM é a do HTML em qualquer das formas: dismissiva à esquerda (em
+        // linha) ou em cima (empilhada), afirmativa à direita / embaixo.
+        const empilhou = Math.abs(a.top - b.top) > 4;
+        // Empilhados, os dois ocupam a MESMA coluna (o `space-x-3` de três das
+        // linhas recuava o 2º pela margem: a especificidade perdia pro Tailwind).
+        if (empilhou) return a.top < b.top ? (Math.abs(a.left - b.left) < 0.5 && Math.abs(a.right - b.right) < 0.5 ? 'empilha' : 'EMPILHA-DESALINHADA') : 'EMPILHA-INVERTIDA';
+        return a.left < b.left ? 'linha' : 'LINHA-INVERTIDA';
+      });
+      ok({ fora, quebradas, linhas, rolaH: card.scrollWidth > card.clientWidth + 1 });
+    }, 80));
+  };
+  const places1 = [pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE'), pesadosPorTipo.find((p) => p.purType === 'NEW_PHOTO')];
+  // O MAIS pesado de cada tipo (os 3 de cima são o custo da barra do bloco anterior).
+  const seisPesados = pesadosPorTipo.filter((p, i, a) => a.findIndex((q) => q.purType === p.purType) === i);
+
+  // ── 1. Os diálogos, as abas e o ✕ do título ────────────────────────────────
+  const CASOS_DLG = [
+    ['360×740 ×1,5', { width: 360, height: 740 }, 1.5, ['pt', 'es', 'fr']],
+    ['393×852 ×1,5', { width: 393, height: 852 }, 1.5, ['pt', 'es', 'fr']],
+    ['375×667 ×1,5', { width: 375, height: 667 }, 1.5, ['pt', 'fr']],
+    ['360×740 ×1,8', { width: 360, height: 740 }, 1.8, ['fr']],
+    ['Fold 280×653 ×1,3', { width: 280, height: 653 }, 1.3, ['pt', 'en', 'es', 'fr']],
+    ['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5, ['pt', 'en', 'es', 'fr']],
+  ];
+  for (const [rot, viewport, escala, langs] of CASOS_DLG) {
+    const { ctx, page, erros } = await novaPagina(viewport, escala);
+    let empilhou = 0;
+    for (const lang of langs) {
+      await montarTela(page, { lang, places: places1 });
+      for (const id of [...MODAIS_L24, ...MODAIS_SEM_LINHA_L24]) {
+        const r = await page.evaluate(medirDialogo, id);
+        checa(r.fora.length === 0, `texto ${rot} · ${lang} · ${id}: botão/aba fora do cartão`, r.fora.join(', '));
+        checa(r.quebradas.length === 0, `texto ${rot} · ${lang} · ${id}: palavra partida no meio`, r.quebradas.join(', '));
+        checa(!r.linhas.some((l) => /INVERTIDA/.test(l)), `texto ${rot} · ${lang} · ${id}: a ordem dismissiva→afirmativa se inverteu`, r.linhas.join(','));
+        checa(!r.linhas.includes('EMPILHA-DESALINHADA'), `texto ${rot} · ${lang} · ${id}: os botões empilhados não ocupam a mesma coluna (margem do space-x-3)`, r.linhas.join(','));
+        empilhou += r.linhas.filter((l) => l === 'empilha').length;
+        await fecharTudo(page);
+      }
+    }
+    // Abas e rodapé das outras duas abas dos Filtros (o "Fechar" sozinho, o ✕).
+    for (const aba of ['filtersTabPrefs', 'filtersTabHistory']) {
+      await page.evaluate((aba) => { openModal('filtersModal'); switchFilterTab(aba); }, aba);
+      await doisQuadros(page);
+      const r = await page.evaluate(() => {
+        const cr = document.querySelector('#filtersModal > div').getBoundingClientRect();
+        return [...document.querySelectorAll('#filtersModal [role=tab], #filtersModal .dialogo-acoes > button, #closeFilters')]
+          .filter((el) => el.offsetParent !== null).map((el) => [el.id, el.getBoundingClientRect()])
+          .filter(([, q]) => q.right > cr.right + 0.5 || q.left < cr.left - 0.5).map(([id, q]) => `${id}+${Math.round(q.right - cr.right)}`);
+      });
+      checa(r.length === 0, `texto ${rot} · ${aba}: aba/botão fora do cartão`, r.join(', '));
+      await fecharTudo(page);
+    }
+    // O Fold a 1,3× e 1,5× é onde a linha é mais estreita que a do Fold a 1×:
+    // tem que EMPILHAR (e a 360 px a 1,5× o Logout/colar etc. empilham também).
+    if (viewport.width === 280) checa(empilhou > 0, `texto ${rot}: nenhuma linha empilhou, com a linha mais estreita que a do Fold a 1×`);
+    checa(erros.length === 0, `texto ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE de escala 1: nenhum aperto novo — nada falha, NADA empilha, e o
+  // compacto continua sendo só o do Galaxy Fold (<320 px), como sempre foi.
+  for (const [rot, viewport] of [['Fold 280×653', { width: 280, height: 653 }], ['SE 1ª geração 320×568', { width: 320, height: 568 }],
+    ['360×740', { width: 360, height: 740 }], ['393×852', { width: 393, height: 852 }], ['412×915', { width: 412, height: 915 }]]) {
+    const { ctx, page, erros } = await novaPagina(viewport, 1);
+    for (const lang of ['pt', 'fr']) {
+      await montarTela(page, { lang, places: places1 });
+      for (const id of MODAIS_L24) {
+        const r = await page.evaluate(medirDialogo, id);
+        checa(r.fora.length === 0 && r.quebradas.length === 0, `texto 1× · ${rot} · ${lang} · ${id}: falha a 1×`, JSON.stringify(r));
+        checa(!r.linhas.includes('empilha'), `texto 1× · ${rot} · ${lang} · ${id}: empilhou a 1× — mudaria o diálogo de hoje`);
+        await fecharTudo(page);
+      }
+    }
+    checa(erros.length === 0, `texto 1× · ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // CONTROLE do instrumento: neutralizadas as regras novas, a MESMA tela (360 px,
+  // 1,5×, francês) perde o botão afirmativo do "Sair" e a aba "Histórico".
+  {
+    const { ctx, page } = await novaPagina({ width: 360, height: 740 }, 1.5,
+      '.dialogo-acoes { flex-wrap: nowrap !important; }'
+      + ' .dialogo-acoes > button { flex: 1 1 0% !important; min-width: auto !important; padding-left: 1rem !important;'
+      + ' padding-right: 1rem !important; hyphens: manual !important; overflow-wrap: normal !important; }'
+      + ' .seg-tab { font-size: 0.8125rem !important; }');
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const sair = await page.evaluate(medirDialogo, 'logoutModal');
+    checa(sair.fora.length > 0, 'texto 1,5×: CONTROLE — com as regras neutralizadas o "Sair" cabe; a medida dos diálogos está cega');
+    await fecharTudo(page);
+    const filtros = await page.evaluate(medirDialogo, 'filtersModal');
+    checa(filtros.fora.length > 0, 'texto 1,5×: CONTROLE — com as regras neutralizadas os Filtros cabem; a medida das abas está cega');
+    await ctx.close();
+  }
+
+  // ── 2. O placar ────────────────────────────────────────────────────────────
+  const medirPlacar = () => {
+    const labs = [...document.querySelectorAll('#placar [data-i18n^="stats."]')].filter((el) => el.getClientRects().length && !el.id);
+    const rr = labs.map((el) => { const rg = document.createRange(); rg.selectNodeContents(el);
+      const r = rg.getBoundingClientRect(); return { t: el.textContent.trim(), l: r.left, r: r.right, top: r.top, bot: r.bottom }; });
+    const sobre = [];
+    for (let i = 0; i < rr.length; i++) for (let j = i + 1; j < rr.length; j++) {
+      const a = rr[i], c = rr[j];
+      if (a.l < c.r - 0.5 && c.l < a.r - 0.5 && a.top < c.bot - 0.5 && c.top < a.bot - 0.5) sobre.push(`${a.t}|${c.t}`);
+    }
+    const sai = [];
+    labs.forEach((el, i) => {
+      const c = el.closest('#placarGrid > *').getBoundingClientRect();
+      // 1 px de cada lado: a vigia liga o 2×2 com 0,5 px de excesso NO TOTAL (0,25 de
+      // cada lado), e meio pixel de tinta fora da célula não se vê — o WebKit mede
+      // "Rejected" a 1,3× com 73,49 contra 73 e o smoke acusava a diferença.
+      if (rr[i].r > c.right + 1 || rr[i].l < c.left - 1) sai.push(rr[i].t);
+    });
+    return { sobre, sai, colunas: getComputedStyle(document.getElementById('placarGrid')).gridTemplateColumns.split(' ').length };
+  };
+  // (360×740 a 1,5× FICA DE FORA, e por medida: ali o 2×2 passa da janela — o piso
+  // do card, 60dvh, não cede — e a vigia o desfaz, como tem que fazer; é o que o
+  // relatório do lote descreve pro owner decidir.)
+  const CASOS_PLACAR = [[360, 740, 1.3], [375, 667, 1.3], [393, 852, 1.3], [375, 667, 1.5], [393, 852, 1.5], [412, 915, 1.3], [412, 915, 1.5], [375, 667, 1.15]];
+  for (const [w, h, escala] of CASOS_PLACAR) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+    for (const lang of ['pt', 'es', 'fr', 'en']) {
+      await montarTela(page, { lang, places: places1, bloqueados: 2 });
+      const r = await page.evaluate(medirPlacar);
+      checa(r.sobre.length === 0 && r.sai.length === 0, `placar ${w}×${h} ×${escala} · ${lang}: rótulos se sobrepõem ou saem da célula`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  // CONTROLE a 1×: o placar segue em 4 colunas onde sempre esteve (360 px e
+  // mais) e em 2×2 só abaixo de 360 px, sem sobreposição em nenhum.
+  for (const [w, h, colunas] of [[360, 740, 4], [375, 667, 4], [393, 852, 4], [412, 915, 4], [320, 568, 2], [280, 653, 2]]) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, 1);
+    for (const lang of ['pt', 'es', 'fr', 'en']) {
+      await montarTela(page, { lang, places: places1, bloqueados: 2 });
+      const r = await page.evaluate(medirPlacar);
+      checa(r.colunas === colunas, `placar 1× ${w}×${h} · ${lang}: ${r.colunas} colunas (eram ${colunas} — mudaria o placar de hoje)`);
+      checa(r.sobre.length === 0 && r.sai.length === 0, `placar 1× ${w}×${h} · ${lang}: defeito a 1×`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com o 2×2 por medida desfeito (a classe NÃO muda as
+    // colunas), a MESMA tela (375 px, 1,3×, espanhol) volta a sobrepor rótulos.
+    const { ctx, page } = await novaPagina({ width: 375, height: 667 }, 1.3,
+      '#placarGrid.placar-2x2 { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; row-gap: 0 !important; }');
+    await montarTela(page, { lang: 'es', places: places1, bloqueados: 2 });
+    const r = await page.evaluate(medirPlacar);
+    checa(r.sobre.length > 0 || r.sai.length > 0, 'placar: CONTROLE — sem o 2×2 por escala os rótulos seguem limpos; a medida do placar está cega');
+    await ctx.close();
+  }
+
+  // O 2×2 por medida NUNCA tira a barra ✕ ↑ ✓ do alcance: onde ela cabia em 4
+  // colunas (MEDIDO na base: 360×740 a 1,65×, 375×667 e 393×852 a 1,8×, 412×915
+  // a 2×, com o pedido sem foto, o mais baixo), ela continua cabendo. É o que o `@container` em `rem`
+  // não sabia: o 2×2 custa uma fileira, e ali o card não tinha folga.
+  {
+    const semFoto = pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE');
+    for (const [w, h, escala] of [[360, 740, 1.65], [375, 667, 1.8], [393, 852, 1.8], [412, 915, 2]]) {
+      const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+      await montarTela(page, { lang: 'fr', places: [semFoto, { ...semFoto, venueID: 'q2', updateRequestID: 'q2' }], bloqueados: 2 });
+      const r = await page.evaluate(() => {
+        const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+        const cb = c.getBoundingClientRect();
+        return ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].every((s) => {
+          const q = c.querySelector(s).getBoundingClientRect();
+          return q.bottom <= Math.min(cb.bottom, innerHeight) + 0.5 && q.right <= innerWidth + 0.5; });
+      });
+      checa(r, `placar por medida ${w}×${h} ×${escala}: a barra ✕ ↑ ✓ saiu da janela — o 2×2 custou a fileira que o card não tinha`);
+      await ctx.close();
+    }
+  }
+
+  // ── 3. A pílula da foto ampliada e o ✕ ─────────────────────────────────────
+  const foto = pesadosPorTipo.find((p) => p.purType === 'NEW_PHOTO');
+  const placeFoto = { ...foto, imageUrls: [SVG_FOTO_L24, SVG_FOTO_L24, SVG_FOTO_L24] };
+  const abrirFoto = async (page) => {
+    await montarTela(page, { lang: 'pt', places: [placeFoto, { ...placeFoto, venueID: 'q2', updateRequestID: 'q2' }] });
+    await page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click());
+    const r = await esperarNaPagina(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 8000, 50);
+    checa(r.ok, 'pílula: a foto ampliada não abriu', JSON.stringify(r));
+  };
+  const medirPilula = ({ autor, idade }) => {
+    window.idadeDaFoto = () => idade; Lightbox.autorDaFotoAtual = () => autor; Lightbox.idx = 1; Lightbox._render();
+    const c = document.getElementById('lightboxClose'), b = c.getBoundingClientRect();
+    let ok = 0;
+    for (const fx of [0.25, 0.5, 0.75]) for (const fy of [0.25, 0.5, 0.75]) {
+      const el = document.elementFromPoint(b.left + b.width * fx, b.top + b.height * fy);
+      if (el === c || c.contains(el)) ok++;
+    }
+    const cnt = document.getElementById('lightboxCount'), cb = cnt.getBoundingClientRect();
+    return { ok, largura: Math.round(cb.width), texto: cnt.textContent };
+  };
+  const CASOS_PILULA = [[280, 653, 1.3], [280, 653, 1.5], [320, 568, 1.5], [360, 740, 1.8], [375, 667, 2], [412, 860, 1.8]];
+  for (const [w, h, escala] of CASOS_PILULA) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, escala);
+    await abrirFoto(page);
+    for (const autor of ['world_onm8fgfi', 'Fulano da Silva Sauro']) {
+      const r = await page.evaluate(medirPilula, { autor, idade: 'há 2 meses' });
+      checa(r.ok === 9, `pílula ${w}×${h} ×${escala} · ${autor}: o ✕ só recebe ${r.ok}/9 pontos do dedo (a pílula o cobre)`, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  // CONTROLE a 1×: o ✕ livre e a largura da pílula IGUAL à de sempre — o nome
+  // truncado do Galaxy Fold (o caso em que a pílula toca no teto) é o que o
+  // conserto não pode mexer: a largura sai do mesmo teto de hoje.
+  for (const [w, h] of [[280, 653], [375, 667], [412, 915]]) {
+    const { ctx, page } = await novaPagina({ width: w, height: h }, 1);
+    await abrirFoto(page);
+    const r = await page.evaluate(medirPilula, { autor: 'world_onm8fgfi', idade: 'há 2 meses' });
+    checa(r.ok === 9, `pílula 1× ${w}×${h}: o ✕ só recebe ${r.ok}/9 pontos do dedo`, JSON.stringify(r));
+    const teto = await page.evaluate(() => Math.round(window.innerWidth - 4.75 * parseFloat(getComputedStyle(document.documentElement).fontSize)));
+    checa(r.largura <= teto, `pílula 1× ${w}×${h}: ${r.largura}px passa do teto de ${teto}px`);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com os pedaços fixos como eram (`flex: none`) e o
+    // nome com o piso de antes, a MESMA tela (Fold, 1,3×) tem o ✕ coberto.
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, 1.3,
+      '.lb-pill-fixo { flex: none !important; overflow: visible !important; }'
+      + ' .lb-pill-nome { min-width: 2.5rem !important; flex-shrink: 1 !important; }');
+    await abrirFoto(page);
+    const r = await page.evaluate(medirPilula, { autor: 'world_onm8fgfi', idade: 'há 2 meses' });
+    checa(r.ok < 9, 'pílula: CONTROLE — com a regra de antes o ✕ segue alcançável; a medida da pílula está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+
+  // ── 4. O ↑ de 44 px ─────────────────────────────────────────────────────────
+  for (const [escala, minimo] of [[1, 44], [1.3, 44], [1.5, 44]]) {
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, escala);
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const larg = await page.evaluate(() => ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']
+      .map((s) => document.querySelector('#cardStack .place-card:not(.card-fundo) ' + s).getBoundingClientRect().width));
+    checa(Math.min(...larg) >= minimo - 0.01, `↑ no Fold a ${escala}×: o menor botão tem ${Math.min(...larg).toFixed(1)}px, abaixo de ${minimo}px`, larg.map((x) => x.toFixed(1)).join('/'));
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: sem o piso, o ↑ do Fold a 1,3× volta aos 40 px.
+    const { ctx, page } = await novaPagina({ width: 280, height: 653 }, 1.3, '.place-card .card-actions > button { min-width: 0 !important; }');
+    await montarTela(page, { lang: 'fr', places: places1 });
+    const larg = await page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-skip').getBoundingClientRect().width);
+    checa(larg < 44, `↑: CONTROLE — sem o piso o ↑ do Fold a 1,3× tem ${larg.toFixed(1)}px; a medida está cega`);
+    await ctx.close();
+  }
+
+  // ── 5. O card novo já nasce apertado (a medida síncrona) ───────────────────
+  // Lida NA MESMA TAREFA em que o card é montado: um `requestAnimationFrame` no
+  // meio (o defeito) deixaria a classe pra depois, e é a diferença que o WebKit
+  // mostrava em 60–90 ms — sem depender da velocidade do motor.
+  {
+    const { ctx, page } = await novaPagina({ width: 360, height: 740 }, 1.3);
+    const lerNaMesmaTarefa = ({ pl, anular }) => {
+      AppState.authenticated = true; AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      setLang('fr'); applyI18n();
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      showLoading(false);
+      const original = window.vigiarBarraDeAcoes;
+      // O DEFEITO: sem a medida síncrona da barra (o `return null`) e sem o gancho
+      // do placar, que também mede o card da frente quando o texto é grande.
+      const gancho = typeof medirOPlacarComOCardNovo === 'function' ? medirOPlacarComOCardNovo : null;
+      if (anular) {
+        window.vigiarBarraDeAcoes = (c) => { original(c); return null; };
+        if (gancho) medirOPlacarComOCardNovo = () => {};
+      }
+      AppState.queue = [pl]; AppState.currentPlace = pl;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+      const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const r = { aperta: c.classList.contains('card-aperta') };
+      window.vigiarBarraDeAcoes = original;
+      if (gancho) medirOPlacarComOCardNovo = gancho;
+      return r;
+    };
+    // O pedido mais pesado de cada tipo: ao menos UM tem que apertar (senão a
+    // medida não prova nada), e todos os que apertam já nascem assim.
+    let apertado = null;
+    for (const pl of seisPesados) {
+      const r = await page.evaluate(lerNaMesmaTarefa, { pl, anular: false });
+      const depois = await page.evaluate(async () => {
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        return document.querySelector('#cardStack .place-card:not(.card-fundo)').classList.contains('card-aperta');
+      });
+      checa(r.aperta === depois, `card novo ${pl.purType}/${pl._pais} (360×740 ×1,3): nasceu ${r.aperta ? 'apertado' : 'sem o card-aperta'} e assentou ${depois ? 'apertado' : 'sem ele'} — a medida só chegou no quadro seguinte`);
+      if (depois && !apertado) apertado = pl;
+    }
+    checa(apertado, 'card novo: nenhum dos pedidos pesados apertou a 360×740 ×1,3 — a medida síncrona não foi provada');
+    // CONTROLE do instrumento (OBRIGATÓRIO): com a vigia sem a medida síncrona (o
+    // `return null` do defeito) o MESMO pedido, que aperta, nasce sem a classe e a
+    // leitura na mesma tarefa o PEGA.
+    if (apertado) {
+      const sem = await page.evaluate(lerNaMesmaTarefa, { pl: apertado, anular: true });
+      checa(!sem.aperta, 'card novo: CONTROLE — sem a medida síncrona o card já nascia apertado; a leitura na mesma tarefa está cega');
+    }
+    await ctx.close();
+  }
+}
+
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
 //
 // O mapa entrou por cima de tiles que mudam de cor conforme a região — parque
@@ -7075,8 +7479,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const s = document.createElement('style');
       // A regra da tela estreita desligada — a hifenização junto: ela sozinha
       // já encolhe a palavra mínima do botão (o pedaço "décon-") —, e o ícone
-      // encolhendo de novo.
-      s.textContent = '.dialogo-acoes > button { min-width: auto !important; padding-left: 1rem !important; padding-right: 1rem !important;'
+      // encolhendo de novo. E, desde o lote 24, a QUEBRA DE LINHA da linha
+      // (`flex-wrap`, o que empilha os botões no texto grande): com ela o botão
+      // que não cabe vai pra linha de baixo em vez de sair da caixa, e a medida
+      // não teria defeito nenhum pra ver.
+      s.textContent = '.dialogo-acoes { flex-wrap: nowrap !important; }'
+        + ' .dialogo-acoes > button { min-width: auto !important; padding-left: 1rem !important; padding-right: 1rem !important;'
         + ' -webkit-hyphens: manual !important; hyphens: manual !important; overflow-wrap: normal !important; }'
         + ' #pairCopyLinkBtn svg { flex-shrink: 1 !important; }';
       document.head.appendChild(s);
@@ -14048,6 +14456,331 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(com.erros.length === 0 && sem.erros.length === 0 && uma.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0] || uma.erros[0]);
 }
 
+// ── RECUSA AUTOMÁTICA NA ESPERA DA TRAVA × "SAIR" E ↻ (R20-2-01, lote 24) ───
+//
+// A recusa tira os alvos da fila e ESPERA a trava entre abas, mas a marca de "em
+// andamento", a sessão, a geração do "Sair" e a fila só eram tiradas quando a
+// trava era concedida: na espera nada segurava os alvos nem conferia a sessão.
+// O "Sair" os devolvia à fila da tela de entrada (dado de terceiro) e, com o
+// login de outra conta, saíam com a sessão dela; o ↻ os trazia de volta como
+// card e eles saíam duas vezes. Aqui a trava é de VERDADE: uma 2ª página do mesmo
+// contexto a segura (`navigator.locks`), a recusa da página do app espera.
+// CONTROLE: soltando a trava sem mexer em nada, cada alvo sai UMA vez (o
+// instrumento enxerga a espera e o envio); e durante a espera os alvos estão "em
+// andamento" (a pré-condição que o defeito não tinha).
+{
+  const ALVOS_ESPERA = ['uRB1', 'uRB4', 'uRB7'];
+  const naEspera = async (cenario) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const contagem = new Map();
+    const resolvidos = new Set();
+    // O 1º da fila NÃO é alvo: é o card da tela (que a recusa deixa de fora de propósito). Alvos: 1, 4 e 7.
+    const pedidos = Array.from({ length: 9 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRB' + i, updateRequestID: 'uRB' + i,
+      creatorId: i % 3 === 1 ? 9000 : 9100 + i, createdBy: i % 3 === 1 ? 'repetente' : 'autor' + i, imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'validar-place' || nome === 'marcar-lido') {
+        contagem.set(corpo.updateRequestID, (contagem.get(corpo.updateRequestID) || 0) + 1);
+        await dormir(80);
+        resolvidos.add(corpo.updateRequestID);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(() => {
+      try {
+        if (localStorage.getItem('__seed')) return;
+        localStorage.setItem('__seed', '1');
+        localStorage.setItem('waze_session_token', 'token-do-smoke-da-espera');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        const d = new Date();
+        const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+        localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 100, skipped: 0 }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    });
+    const erros = [];
+    // A "outra página" segura a trava (mesma origem, sem carregar o app).
+    const outra = await ctx.newPage();
+    outra.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await outra.goto(BASE + '/manifest.json', { waitUntil: 'domcontentloaded' });
+    await outra.evaluate(() => new Promise((ok) => { navigator.locks.request('wp-recusa-automatica', () => new Promise((fim) => { window.__soltar = fim; ok(true); })); }));
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // A recusa está ESPERANDO a trava: rodando, com os alvos fora da fila e já "em andamento".
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.currentPlace && recusaAutomaticaRodando
+      && !AppState.fetching && !AppState.queue.some((p) => p.creatorId === 9000), 'a recusa esperar a trava (os alvos fora da fila)');
+    const durante = await page.evaluate(() => ({ andamento: pedidosEmAndamento.size, fila: AppState.queue.map((p) => p.updateRequestID) }));
+    const enviosNaEspera = contagem.size;
+    if (cenario === 'sair') {
+      await page.evaluate(() => document.getElementById('helpBtn').click());
+      await assentar(page, 150);
+      await page.evaluate(() => document.getElementById('logoutBtn').click());
+      await assentar(page, 150);
+      await page.evaluate(() => document.getElementById('confirmLogout').click());
+      await esperarOuExplodir(page, () => !AppState.authenticated, 'o "Sair" terminar');
+    } else if (cenario === 'refresh') {
+      await page.evaluate(() => document.getElementById('refreshBtn').click());
+      await esperarOuExplodir(page, () => !AppState.fetching && AppState.queue.length > 0, 'o ↻ refazer a fila');
+    }
+    const aposAcao = await page.evaluate(() => ({ fila: AppState.queue.map((p) => p.updateRequestID), auth: AppState.authenticated }));
+    await outra.evaluate(() => window.__soltar());
+    // (Sem explodir: com o defeito a recusa de quem saiu fica presa, e isso tem de sair como ✗ com o motivo.)
+    const terminou = await esperarNaPagina(page, () => !recusaAutomaticaRodando && !AppState.inFlightActions, 8000);
+    await page.waitForTimeout(500);   // cobre uma 2ª passada que viesse atrasada
+    const fim = await page.evaluate(() => ({ fila: AppState.queue.map((p) => p.updateRequestID), auth: AppState.authenticated,
+      telaDeEntrada: !document.getElementById('authScreen').classList.contains('hidden') }));
+    await ctx.close();
+    return { contagem, durante, enviosNaEspera, aposAcao, fim, erros, terminou: terminou.ok };
+  };
+  const ctl = await naEspera('controle');
+  checa(ctl.terminou, 'recusa/espera: CONTROLE — a recusa não terminou depois de a trava soltar');
+  checa(ctl.enviosNaEspera === 0, 'recusa/espera: CONTROLE — algo saiu com a trava na mão da outra página (o instrumento não vê a espera)', String(ctl.enviosNaEspera));
+  checa(ctl.durante.andamento >= 3 && ALVOS_ESPERA.every((id) => !ctl.durante.fila.includes(id)),
+    'recusa/espera: durante a espera os alvos têm de estar fora da fila e "em andamento"', JSON.stringify(ctl.durante));
+  checa(ALVOS_ESPERA.every((id) => ctl.contagem.get(id) === 1) && ctl.contagem.size === ALVOS_ESPERA.length,
+    'recusa/espera: CONTROLE — soltando a trava, cada alvo tem de sair UMA vez', JSON.stringify([...ctl.contagem]));
+  const sair = await naEspera('sair');
+  checa(sair.terminou, 'recusa/espera/Sair: a recusa de quem saiu ficou presa (o contador de envios no ar da sessão nova nunca desceu) depois de a trava soltar');
+  checa(sair.contagem.size === 0, 'recusa/espera/Sair: depois do "Sair" a recusa mandou rejeição ao Waze com a sessão de quem saiu', JSON.stringify([...sair.contagem]));
+  checa(sair.fim.fila.length === 0 && sair.fim.telaDeEntrada && sair.fim.auth === false,
+    'recusa/espera/Sair: os alvos voltaram à fila da tela de entrada (dado de terceiro depois do "Sair")', JSON.stringify(sair.fim));
+  const ref = await naEspera('refresh');
+  checa(ref.terminou, 'recusa/espera/↻: a recusa não terminou depois de a trava soltar');
+  checa(ALVOS_ESPERA.every((id) => !ref.aposAcao.fila.includes(id)),
+    'recusa/espera/↻: os alvos reapareceram como card depois do ↻ (a busca os trazia de volta)', JSON.stringify(ref.aposAcao.fila));
+  checa(ALVOS_ESPERA.every((id) => ref.contagem.get(id) === 1) && ref.contagem.size === ALVOS_ESPERA.length,
+    'recusa/espera/↻: cada alvo tem de ir ao Waze UMA vez (o ↻ na aba que espera os mandava em dobro)', JSON.stringify([...ref.contagem]));
+  checa(ctl.erros.length === 0 && sair.erros.length === 0 && ref.erros.length === 0, 'recusa/espera: erro de JS', ctl.erros[0] || sair.erros[0] || ref.erros[0]);
+}
+
+// ── ENTER SEGURADO NÃO REPETE A AÇÃO DE NENHUM BOTÃO (R20-1-02, lote 24) ────
+//
+// O lote 23 cancelou o `keydown` repetido só nos três botões ✕ ↑ ✓ e nas setas.
+// O resto seguia gerando um `click` por repetição (~30 Hz): 16 `parear:claim` em
+// 3 s no "Entrar" do código, 14 `buscar-places` no ↻, no "Verificar novamente" e
+// no "Tentar de novo" (free tier), o ⓘ e os Filtros abrindo e fechando em laço
+// (o foco vai ao ✕ do diálogo e a repetição o aciona), e o "Aprovar" da foto
+// ampliada despachando a aprovação sem a janela do Desfazer (84 ms em vez de 3
+// s). Agora UMA guarda em captura no `document` cancela o `click` do Enter
+// repetido em botões e links — menos onde segurar é andar (aproximar/afastar o
+// mapa, passar as fotos).
+// `keyboard.down` repetido É a tecla segurada (o Playwright marca `repeat` a
+// partir do segundo). CONTROLES: o Enter único dá o efeito UMA vez; o ouvinte da
+// página confirma que a repetição chegou; e o zoom do mapa (que repete de
+// propósito) anda mais de um passo.
+{
+  const SEGURADO_MS = 1500;
+  const montarPagina = async ({ vazio = false, falha = false, semSessao = false } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const reqs = { buscas: 0, claims: 0, aprovacoes: [], t0: 0 };
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      let status = 200;
+      if (nome === 'buscar-places') {
+        reqs.buscas++;
+        if (falha) { status = 200; resp = { success: false, error: 'x', errorCategory: 'unknown' }; }
+        else resp = vazio
+          ? { success: true, places: [], hasMore: false, page: 1, total: 0, totalAll: 0, blocked: 0 }
+          : { success: true, places: [{ ...CARDS.FLAG, venueID: 'vEN1', updateRequestID: 'uEN1', purType: 'NEW_PHOTO', updateTypeKey: 'IMAGE', reqType: 'IMAGE',
+            imageUrls: [foto + '#uEN1', foto + '#aprovada'], imageUrl: foto + '#uEN1', approvedImageIds: ['aprovada'], lat: -20.8, lon: -49.4,
+            mapa: { centro: [-20.8, -49.4], proposto: null, movidoM: null, entradas: [] } }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      } else if (nome === 'parear') {
+        if (corpo.action === 'claim') { reqs.claims++; resp = { success: false, error: 'Código inválido', errorKey: 'srv.err.pairInvalid', errorCategory: 'unknown' }; status = 400; }
+      } else if (nome === 'validar-place') {
+        reqs.aprovacoes.push(Date.now() - reqs.t0);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    if (!semSessao) {
+      await ctx.addInitScript(() => {
+        try {
+          if (localStorage.getItem('__seed')) return;
+          localStorage.setItem('__seed', '1');
+          localStorage.setItem('waze_session_token', 'token-do-smoke-do-enter');
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+          localStorage.setItem('waze_places_stats', JSON.stringify({ read: 500, rejected: 500, skipped: 0 }));
+        } catch (e) { /* armazenamento bloqueado */ }
+      });
+    }
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    if (!semSessao) {
+      await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !AppState.fetching, 'o app abrir com a sessão salva');
+    }
+    await page.evaluate(() => {
+      window.__repeticoes = 0;
+      window.addEventListener('keydown', (e) => { if (e.repeat && e.key === 'Enter') window.__repeticoes++; }, true);
+      window.__aberturas = {};
+      for (const id of ['helpModal', 'filtersModal', 'pairEnterModal']) {
+        const el = document.getElementById(id);
+        window.__aberturas[id] = 0;
+        let aberto = !el.classList.contains('hidden');
+        new MutationObserver(() => {
+          const agora = !el.classList.contains('hidden');
+          if (agora && !aberto) window.__aberturas[id]++;
+          aberto = agora;
+        }).observe(el, { attributes: true, attributeFilter: ['class'] });
+      }
+    });
+    await assentar(page, 200);
+    return { ctx, page, reqs, erros };
+  };
+  const segurar = async (page, { repetir }) => {
+    await page.keyboard.down('Enter');                          // o keydown de verdade, sem repeat
+    if (repetir) {
+      const ate = Date.now() + SEGURADO_MS;
+      while (Date.now() < ate) { await page.keyboard.down('Enter'); await page.waitForTimeout(33); }   // repeat = true
+    }
+    await page.keyboard.up('Enter');
+    await page.waitForTimeout(500);
+  };
+  const repeticoes = (page) => page.evaluate(() => window.__repeticoes);
+
+  // ↻, "Verificar novamente" e "Tentar de novo": o efeito é UMA busca por Enter (a segurada = a única).
+  for (const [rotulo, id, opcoes] of [
+    ['↻', '#refreshBtn', {}],
+    ['Verificar novamente', '#reloadBtn', { vazio: true }],
+    ['Tentar de novo', '#retryLoadBtn', { falha: true }],
+  ]) {
+    const efeito = async (repetir) => {
+      const m = await montarPagina(opcoes);
+      if (id === '#reloadBtn') await esperarOuExplodir(m.page, () => !document.getElementById('noMoreCards').classList.contains('hidden'), 'o "Tudo limpo!" aparecer');
+      if (id === '#retryLoadBtn') await esperarOuExplodir(m.page, () => !document.getElementById('loadErrorState').classList.contains('hidden'), 'o estado de falha aparecer');
+      await m.page.waitForTimeout(300);
+      const antes = m.reqs.buscas;
+      await m.page.focus(id);
+      await segurar(m.page, { repetir });
+      const delta = m.reqs.buscas - antes;
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { delta, rep, erros: m.erros };
+    };
+    const um = await efeito(false);
+    checa(um.delta >= 1, `Enter segurado/${rotulo}: CONTROLE — o Enter único não buscou (o botão está morto ou o instrumento errou)`, JSON.stringify(um));
+    const seg = await efeito(true);
+    checa(seg.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${seg.rep} repetições (o instrumento não segurou a tecla)`);
+    checa(seg.delta === um.delta, `Enter segurado/${rotulo}: ${SEGURADO_MS} ms de Enter fizeram ${seg.delta} buscas (o Enter único faz ${um.delta}) — cada repetição é um pedido ao servidor`, JSON.stringify({ um, seg }));
+    checa(um.erros.length === 0 && seg.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, um.erros[0] || seg.erros[0]);
+  }
+
+  // ⓘ e Filtros: o diálogo abre UMA vez e fica aberto (a repetição o fechava e abria em laço).
+  for (const [rotulo, id, modal] of [['ⓘ', '#helpBtn', 'helpModal'], ['Filtros', '#filtersBtn', 'filtersModal']]) {
+    const m = await montarPagina();
+    await m.page.focus(id);
+    await segurar(m.page, { repetir: true });
+    const r = await m.page.evaluate((modal) => ({ aberturas: window.__aberturas[modal], aberto: !document.getElementById(modal).classList.contains('hidden'), rep: window.__repeticoes }), modal);
+    checa(r.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${r.rep} repetições`);
+    checa(r.aberturas === 1 && r.aberto, `Enter segurado/${rotulo}: o diálogo abriu ${r.aberturas}× e terminou ${r.aberto ? 'aberto' : 'FECHADO'} (a repetição o acionava em laço)`, JSON.stringify(r));
+    // CONTROLE: o Enter único abre uma vez.
+    const u = await montarPagina();
+    await u.page.focus(id);
+    await segurar(u.page, { repetir: false });
+    const ru = await u.page.evaluate((modal) => ({ aberturas: window.__aberturas[modal], aberto: !document.getElementById(modal).classList.contains('hidden') }), modal);
+    checa(ru.aberturas === 1 && ru.aberto, `Enter segurado/${rotulo}: CONTROLE — o Enter único não abriu o diálogo`, JSON.stringify(ru));
+    checa(m.erros.length === 0 && u.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, m.erros[0] || u.erros[0]);
+    await m.ctx.close(); await u.ctx.close();
+  }
+
+  // O código de pareamento: o campo (Enter) e o "Entrar" (botão) resgatam UMA vez.
+  for (const [rotulo, focar] of [['campo do código', '#pairCodeInput'], ['"Entrar" do código', '#pairEnterConfirm']]) {
+    const claims = async (repetir) => {
+      const m = await montarPagina({ semSessao: true });
+      await m.page.evaluate(() => document.getElementById('pairEnterBtn').click());
+      await esperarOuExplodir(m.page, () => !document.getElementById('pairEnterModal').classList.contains('hidden'), 'o diálogo do código abrir');
+      await m.page.fill('#pairCodeInput', 'ABC-234');
+      await m.page.focus(focar);
+      await segurar(m.page, { repetir });
+      const n = m.reqs.claims;
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { n, rep, erros: m.erros };
+    };
+    const um = await claims(false);
+    checa(um.n === 1, `Enter segurado/${rotulo}: CONTROLE — o Enter único não resgatou UMA vez`, JSON.stringify(um));
+    const seg = await claims(true);
+    checa(seg.rep >= 20, `Enter segurado/${rotulo}: CONTROLE — a página viu só ${seg.rep} repetições`);
+    checa(seg.n === 1, `Enter segurado/${rotulo}: ${seg.n} resgates (parear:claim) em ${SEGURADO_MS} ms — era UM por repetição`, JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, `Enter segurado/${rotulo}: erro de JS`, um.erros[0] || seg.erros[0]);
+  }
+
+  // A foto ampliada: o Aprovar com o Desfazer ligado sai DEPOIS da janela (3 s), segurado ou não.
+  {
+    const aprovacao = async (repetir) => {
+      const m = await montarPagina();
+      await m.page.evaluate(() => { AppState.devMode = { unlocked: true, active: false }; });
+      await esperarOuExplodir(m.page, () => { const i = document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image'); return !!(i && i.complete && i.naturalWidth > 0); }, 'a foto do card carregar');
+      await m.page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-image').click());
+      await esperarOuExplodir(m.page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'a foto ampliada abrir');
+      await m.page.evaluate(() => { if (Lightbox.newIdx >= 0) { Lightbox.idx = Lightbox.newIdx; Lightbox._render(); } });
+      await esperarOuExplodir(m.page, () => !document.getElementById('lightboxApprove').classList.contains('hidden') && fotoDoLightboxNaTela(), 'o Aprovar aparecer');
+      await m.page.focus('#lightboxApprove');
+      m.reqs.t0 = Date.now();
+      await segurar(m.page, { repetir });
+      // O FIM: a aprovação chegou ao servidor de mentira (ou o teto de 8 s estourou: aí `primeira` fica nulo).
+      const ate = Date.now() + 8000;
+      while (!m.reqs.aprovacoes.length && Date.now() < ate) await m.page.waitForTimeout(50);
+      await m.page.waitForTimeout(300);
+      const r = { primeira: m.reqs.aprovacoes[0] ?? null, n: m.reqs.aprovacoes.length, camada: await m.page.evaluate(() => Lightbox.isOpen()), erros: m.erros };
+      await m.ctx.close();
+      return r;
+    };
+    const um = await aprovacao(false);
+    checa(um.n >= 1 && um.primeira >= 2500, 'Enter segurado/Aprovar: CONTROLE — o Enter único não aprovou depois da janela do Desfazer', JSON.stringify(um));
+    const seg = await aprovacao(true);
+    checa(seg.n >= 1 && seg.primeira >= 2500, `Enter segurado/Aprovar: a aprovação saiu ${seg.primeira} ms depois do Enter, sem a janela do Desfazer (3 s) — a repetição fechava a camada e a despachava`, JSON.stringify(seg));
+    checa(seg.camada === true, 'Enter segurado/Aprovar: a repetição fechou a foto ampliada', JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, 'Enter segurado/Aprovar: erro de JS', um.erros[0] || seg.erros[0]);
+  }
+
+  // EXCEÇÃO: segurar o + do mapa ampliado aproxima mais de um passo (é de propósito).
+  {
+    const passos = async (repetir) => {
+      const m = await montarPagina();
+      await esperarOuExplodir(m.page, () => !!AppState.currentPlace, 'o card aparecer');
+      await m.page.evaluate(() => MapaLightbox.open(AppState.currentPlace));
+      await esperarOuExplodir(m.page, () => MapaLightbox.isOpen(), 'o mapa ampliado abrir');
+      await m.page.evaluate(() => { MapaLightbox.zoom(-3); });
+      await assentar(m.page, 150);
+      const z0 = await m.page.evaluate(() => MapaLightbox.z);
+      await m.page.focus('#mapaLbMais');
+      await segurar(m.page, { repetir });
+      const z1 = await m.page.evaluate(() => MapaLightbox.z);
+      const rep = await repeticoes(m.page);
+      await m.ctx.close();
+      return { passos: z1 - z0, rep, erros: m.erros };
+    };
+    const um = await passos(false);
+    checa(um.passos === 1, 'Enter segurado/mapa +: CONTROLE — o Enter único não aproximou UM passo', JSON.stringify(um));
+    const seg = await passos(true);
+    checa(seg.rep >= 20 && seg.passos >= 2, `Enter segurado/mapa +: a repetição foi cancelada (${seg.passos} passos): segurar o + é aproximar`, JSON.stringify(seg));
+    checa(um.erros.length === 0 && seg.erros.length === 0, 'Enter segurado/mapa +: erro de JS', um.erros[0] || seg.erros[0]);
+  }
+}
+
 // ── "REJEITAR OS N" CANCELADO PELO SEGUNDO PLANO AVISA NA VOLTA (R19-2-03) ──
 //
 // Trocar de app na janela do Desfazer do "Rejeitar os N" CANCELA o lote (de
@@ -14115,7 +14848,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(escondido.envios.length === 0, 'lote/segundo plano: o lote cancelado mandou pedidos ao Waze', JSON.stringify(escondido.envios));
   checa(escondido.estado.fila === 12 && escondido.estado.rejeitados === 0, 'lote/segundo plano: o lote cancelado não devolveu a fila e o placar', JSON.stringify(escondido.estado));
   checa(escondido.comEscondida.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: o aviso saiu com a página ainda ESCONDIDA', JSON.stringify(escondido.comEscondida));
-  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque você saiu do app\. Toque de novo\./.test(x)),
+  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque o app foi para o segundo plano\. Toque de novo\./.test(x)),
     'lote/segundo plano: a volta à página não disse que o lote não saiu', JSON.stringify(escondido.depois));
   const seguiu = await loteNoSegundoPlano(false);
   checa(seguiu.envios.length === 4, 'lote/segundo plano: CONTROLE — sem esconder a página os 4 pedidos não saíram (o instrumento não vê o lote)', JSON.stringify(seguiu.envios));
@@ -14276,6 +15009,8 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
   + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez — TODOS os alvos, o 1º da fila inclusive, que a espera pela trava antes de os alvos saírem da fila deixava escapar (servidor de 150 ms por requisição, com os CONTROLES da página sem navigator.locks, em que as duas mandam, e de UMA aba só, em que a trava não custa nenhum alvo)`
+  + `, + a recusa automática ESPERANDO a trava de outra página (os alvos já "em andamento", e o "Sair" e o ↻ nessa espera não devolvem nem mandam nada em dobro — com o CONTROLE da trava solta sem mexer em nada, cada alvo uma vez)`
+  + `, + o Enter SEGURADO não repetindo a ação de botão nenhum (↻, "Verificar novamente", "Tentar de novo", ⓘ, Filtros, o código de pareamento e seu "Entrar", e o Aprovar da foto ampliada saindo só depois da janela do Desfazer — com o CONTROLE do Enter único e o do + do mapa, que repete de propósito)`
   + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
   + `, + o Resumo do mês com o qr.js pendurado (a folha abre sem o QR depois do teto e os toques com uma geração no ar não empilham outra, com o aria-busy no botão e o CONTROLE do qr.js pedido e preso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
@@ -14288,4 +15023,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o aviso dourado do Desfazer LEVANDO até a chave (rolada para a vista em 5 aparelhos — deitados, o SE com o modo dev e o Fold em francês —, com o CONTROLE da rolagem zerada deixando a linha fora da vista)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`
-  + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`);
+  + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`
+  + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`);

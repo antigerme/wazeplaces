@@ -1113,14 +1113,15 @@ export function makeSessions({ store, keyBytes }) {
     // o que resgata saber na hora do login (K8). Vai CIFRADA com a mesma chave
     // dos cookies, num terceiro campo: `exp|cookies|conta`.
     async createPairing(cookiesContent, { comCodigo = false, conta = null } = {}) {
-      const segredo = randomPairCode(comCodigo ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
+      const curto = comCodigo === true; // booleano ESTRITO: qualquer outra coisa é o segredo FORTE
+      const segredo = randomPairCode(curto ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
       const hash = 'pair_' + await sha256hex('pair:' + segredo);
       const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
       const chave = await derivarChave(keyBytes, segredo);
       const blob = await encryptCookies(cookiesContent, chave);
       const contaBlob = conta ? '|' + await encryptCookies(String(conta), chave) : '';
       await store.put(hash, exp + '|' + blob + contaBlob, PAIR_TTL);
-      return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
+      return { code: segredo, curto, expiresIn: PAIR_TTL };
     },
 
     // Lê antes de apagar, pelo mesmo motivo do `destroySession`: a rota não
@@ -1652,7 +1653,7 @@ async function handleParear(data, { sessions }) {
     // vale pros dados locais do aparelho que resgatar, e o perfil que chegar lá
     // confere de novo. Fora do formato, não vai.
     const conta = data && /^\d{1,19}$/.test(String(data.conta ?? '')) ? String(data.conta) : null;
-    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo), conta });
+    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!data && data.comCodigo === true, conta });
     return { status: 200, body: { success: true, code, curto, expiresIn } };
   }
 
@@ -2294,7 +2295,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     for (const ur of venue.venueUpdateRequests) {
       const creatorId = ur.createdBy ?? null;
       const creatorObj = creatorId ? usersDict[creatorId] : null;
-      const creatorName = creatorObj ? creatorObj.userName : creatorId;
+      const creatorName = creatorObj && typeof creatorObj.userName === 'string' && creatorObj.userName ? creatorObj.userName : creatorId;
       // Rank CRU do Waze (0-indexed). Quem soma 1 pra exibir é o frontend —
       // regra sagrada do projeto, ver gotcha #15.
       const creatorRank = creatorObj && Number.isInteger(creatorObj.rank) ? creatorObj.rank : null;

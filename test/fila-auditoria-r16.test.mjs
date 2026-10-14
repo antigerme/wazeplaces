@@ -322,7 +322,7 @@ test('R16-2-03: CONTROLE — sem recuo (a 1ª ida pousa) nada entra no conjunto;
 test('R16-2-03 (estrutura): os quatro caminhos que esperam a retentativa avisam o "Sair" — ✕, ✓, o "Rejeitar os N" da pessoa e o "Marcar todos"', () => {
   assert.match(fatiar('handleReject'), /callWithRetry\(\(\) => API\.rejectPlace\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim(, geracao)?\)\)/);
   assert.match(fatiar('handleMarkAsRead'), /callWithRetry\(\(\) => API\.markAsRead\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim(, geracao)?\)\)/);
-  assert.match(fatiar('enviarLote'), /undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim(, geracao)?\)\)/,
+  assert.match(fatiar('enviarLote'), /epoca,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim(, geracao)?\)\)/,
     'o "Rejeitar os N" da pessoa não avisa o recuo (e a recusa automática, que é o app agindo, não pode)');
   assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim(, geracao)?\);\s*const r = await callWithRetry\(enviar, undefined, espera\)/);
 });

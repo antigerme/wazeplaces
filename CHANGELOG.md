@@ -8,6 +8,49 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.14-04
+
+Vigésima terceira rodada da auditoria. Depois da v2026.10.14-03, conferida em produção com duas contas (171 verificações; as duas falhas foram do roteiro, uma corrida do próprio Waze), oito auditores revisaram o app de novo, cada um numa área. Nenhum achado era grave no uso normal. Os mais sérios eram do próprio lote anterior: a recusa automática de autor que, na espera entre abas, atravessava o "Sair" e a troca de conta, e os botões dos diálogos que saíam da caixa com o texto do sistema aumentado.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila, as contas e o teclado**
+- **Segurar o Enter num botão agora faz a ação uma vez só, em qualquer botão do app.** Antes, só os botões ✕ ↑ ✓ do card eram protegidos: segurar o Enter no ↻, no "Verificar novamente", no "Tentar de novo" ou no "Entrar" do código de pareamento mandava dezenas de pedidos ao servidor em poucos segundos; no ⓘ e nos Filtros o diálogo abria e fechava sem parar; e, na foto ampliada, segurar o Enter no "Aprovar" mandava a aprovação na hora, sem a janela do Desfazer. Onde segurar é andar (aproximar e afastar o mapa, passar as fotos) continua repetindo.
+- **Com o app aberto em duas abas, sair ou trocar de conta enquanto uma delas espera a vez da recusa automática de autor não rejeita mais, nem devolve à tela, os pedidos da conta anterior.** Antes, os pedidos de quem saiu voltavam para a tela de entrada ou eram rejeitados com a conta de quem entrou; e atualizar a fila (↻) nessa espera fazia os mesmos pedidos serem rejeitados duas vezes. Se a sessão só for renovada com a mesma conta, a rejeição segue normalmente.
+- **Depois de sair, o "Aprovar", a lixeira e o nome do local, na foto ampliada, não ficam mais travados** esperando a resposta de quem tinha saído (até 45 segundos).
+- **Um pedido que uma conta marcou como lido (ou guardou com a ⭐) não some mais da fila de outra conta quando o app é renovado entrando com ela.** O pedido segue pendente para quem entrou.
+- **Se o histórico guardado no aparelho estiver estragado (por exemplo, editado à mão), o app o ignora** em vez de parar de registrar os pedidos tratados, a reincidência dos autores e as conquistas.
+- **O aviso "Os N pedidos não foram rejeitados" agora diz o motivo certo:** "porque o app foi para o segundo plano". Antes dizia "porque você saiu do app", que se confundia com o botão Sair.
+
+**As telas com o texto do celular aumentado**
+- **Os botões dos diálogos deixam de sair da caixa.** Antes, a partir de 1,5× num celular de 360 a 393 px, o "Sair" (em francês o "Se déconnecter" quase sumia), o "Confirmar" do colar cookies, o "Aplicar" dos Filtros e o "Compartilhar" do resumo ficavam cortados ou fora da tela, e no Galaxy Fold a 1,3× o "Cancelar" quebrava no meio da palavra. Agora, quando os dois botões não cabem lado a lado, eles ficam um embaixo do outro (o de cancelar em cima, o da ação embaixo). Com o texto normal nada mudou (conferido pixel a pixel em 1.096 capturas no Chromium e 114 no WebKit).
+- **As abas dos Filtros (Filtros, Preferências, Histórico) e o ✕ do título cabem na caixa.** A aba "Histórico" e o ✕ saíam até 64 px da caixa no Galaxy Fold; o título dos Filtros agora quebra em sílabas em vez de empurrar o ✕.
+- **Os nomes do placar (Lidos, Rejeitados, Pulados, Restam) não se sobrepõem mais.** Quando não cabem em quatro colunas, o placar passa para duas fileiras, mas só se os botões ✕ ↑ ✓ continuarem ao alcance. Em celulares de 360×740 com o texto em 1,5× ainda ficam apertados.
+- **O nome, a posição e a idade da foto ampliada ("2 / 3 · nome · há 2 meses") não cobrem mais o ✕ de fechar.** Se faltar espaço, primeiro o nome encurta, depois a idade.
+- **O botão ↑ (pular) tem sempre 44 px de largura,** mesmo no Galaxy Fold com o texto aumentado (antes ficava com 40).
+- **Nomes de autor em hebraico ou árabe na lista do Histórico, e o seu próprio nome no cabeçalho, aparecem alinhados e na ordem certa.**
+
+**A conversa**
+- **"Lida" só para o que você viu.** Em alguns casos raros (a conversa abre sem carregar o histórico e chega uma mensagem enquanto isso), o app podia marcar como lida uma mensagem que você ainda não tinha visto, e quem a mandou via "Lida" antes da hora. Agora a mensagem que não apareceu na tela fica como não lida até você abri-la. (A frase da versão anterior, "ainda não carregou", prometia só o caso em que a primeira página já tinha falhado; agora vale também enquanto ela ainda está chegando.)
+- **"Sair" em outra aba.** Se você saía do app numa aba e voltava a outra que estava parada, o app ainda pedia a lista de quem está online e guardava no aparelho dados da conversa que você mandou apagar. Agora, depois do "Sair", nada disso volta.
+- **Nomes em hebraico ou árabe na conversa.** O nome do local que um colega manda no pedido, e o nome de quem mandou, agora aparecem na direção certa, com a frase do app em volta intacta; em português, inglês, espanhol e francês nada muda.
+
+**Disponível offline e diagnóstico**
+- **Se o aparelho não deixar o app gravar o mapa no "Disponível offline" (por exemplo, no modo de navegação privativa de alguns navegadores), o app não diz mais "Pronto".** Antes, ele tentava, achava que era o sinal fraco, dava o mapa por guardado e dizia "Pronto — N pedidos no aparelho" com nenhum mapa guardado; sem internet, o mapa abria vazio. Agora ele para, mostra que faltou parte e tenta de novo mais tarde, sem gastar sua internet à toa. (O texto da linha ainda diz "continua sozinho quando houver sinal", que nesse caso é impreciso; uma frase nova é decisão do owner.)
+- **Se a leitura dos pedidos guardados falhar no meio da preparação, o app não diz mais que ficou pronto sem ter conferido.** Ele tenta de novo na próxima vez que você usar o app, depois de um minuto.
+- **Se você reabrir o app sem internet e o aparelho não conseguir ler os pedidos guardados, isso agora aparece no relatório de diagnóstico** (antes era igual a nunca ter ligado o "Disponível offline").
+- **O relatório de diagnóstico diz a verdade em mais três casos:** quando não deu pra ler a janela da última preparação (em vez de "nunca preparou"), quantas vezes a mesma falha de gravação se repetiu (em vez de contar só as linhas que cabem no diário), e a seção do "Disponível offline" chega ao arquivo mesmo com o armazenamento do navegador travado (antes ela se perdia).
+- **Segurar o Enter no botão do modo dev registra uma captura só.** Antes, cada repetição da tecla gravava outra captura idêntica e empurrava para fora a captura automática de erro.
+
+**O servidor e os filtros**
+- **Ao conectar outro aparelho, o código curto de 6 caracteres só é criado quando o app pede mesmo por ele;** qualquer outro pedido recebe o código longo, mais seguro.
+- **Filtros salvos com valores estranhos (residenciais ou "Minha área") não ligam mais sozinhos nem deixam a tela dizendo uma coisa e a busca fazendo outra.**
+- **Quando o Waze manda o autor do pedido sem nome, o card mostra o número dele em vez de "(desconhecido)".**
+
+---
+
 ## v2026.10.14-03
 
 Vigésima segunda rodada da auditoria. Depois da v2026.10.14-02, conferida em produção com duas contas (168 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. Nenhum achado era grave no uso normal; os mais sérios eram a seta do teclado segurada decidindo pedidos em série, a base do "Disponível offline" que ficava presa depois de uma gravação que falhou, e os botões ✕ ↑ ✓ que saíam da tela com o texto do sistema aumentado.

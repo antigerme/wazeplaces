@@ -204,7 +204,7 @@ test('autores: o core manda o id numérico junto com o nome', () => {
 test('lote: o Desfazer devolve os N na ORDEM, num unshift só', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function scheduleAction');
-  const bloco = semComentarios.slice(i, i + 4200);
+  const bloco = semComentarios.slice(i, i + 5400);
   assert.match(bloco, /AppState\.queue\.unshift\(\.\.\.places\)/,
     'um laço de unshift INVERTE a ordem: a fila voltaria embaralhada, sem erro visível');
   assert.doesNotMatch(bloco, /for\s*\([^)]*\)\s*AppState\.queue\.unshift/,
@@ -214,7 +214,7 @@ test('lote: o Desfazer devolve os N na ORDEM, num unshift só', () => {
 test('lote: o placar volta de N em N, não de 1 em 1', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('function scheduleAction');
-  const bloco = semComentarios.slice(i, i + 4200);
+  const bloco = semComentarios.slice(i, i + 5400);
   assert.match(bloco, /AppState\.stats\.rejected - n\b/, 'o reverter precisa usar n, não 1');
   assert.match(bloco, /AppState\.serverTotal \+= n\b/, 'o serverTotal precisa voltar de N');
 });
@@ -722,6 +722,7 @@ test('auto: o card NA TELA fica de fora — o interruptor diz "os próximos", e 
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},   // acerta o "Ver +N" e o fundo — não troca o card
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    epocaDaSessao: 1, marcarEmAndamento() {},   // as capturas e a marca dos alvos, antes da trava (R20-2-01)
     API: { getRegion: () => 'row' },   // a região dos pedidos vai junto com o lote (F7)
     carimboDoGesto: () => null,        // e o dia e o lugar (R6-7-4)
   };
@@ -755,6 +756,7 @@ test('auto (F1): pedido EM ANDAMENTO — o lote de lidos no ar — não é alvo 
     enviarLote: async (alvos) => { enviados.push(...alvos.map((x) => x.venueID)); },
     aoMudarAFilaPorBaixo: () => {},
     pedidosEmAndamento: new Set(['a1|a1']), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,
+    epocaDaSessao: 1, marcarEmAndamento() {},   // as capturas e a marca dos alvos, antes da trava (R20-2-01)
     API: { getRegion: () => 'row' }, carimboDoGesto: () => null,
   };
   const chaves = Object.keys(deps);
