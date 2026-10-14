@@ -109,7 +109,8 @@ test('o lightbox do mapa tem UM ocupante no canto de baixo à direita', () => {
   assert.ok(ini > 0);
   const bloco = HTML.slice(ini, HTML.indexOf('id="imageLightbox"'));
   // Conta elementos ancorados em bottom+right dentro do lightbox do mapa.
-  const noCanto = (bloco.match(/right:\s*0\.75rem;\s*bottom:/g) || []).length;
+  // (o `right` tem a reserva do recorte lateral logo depois do `0.75rem`: `max(0.75rem, env(…))`, R21-3-05)
+  const noCanto = (bloco.match(/right:\s*0\.75rem;[^"]*?\bbottom:/g) || []).length;
   assert.equal(noCanto, 1,
     'segundo candidato divide o slot por exclusão mútua, não ganha um canto novo');
 });

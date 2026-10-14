@@ -1476,20 +1476,20 @@
     <div id="mapaLightbox" role="dialog" aria-modal="true" aria-label="Mapa do local" data-i18n-aria="card.map.slide" class="hidden fixed inset-0 bg-slate-200 dark:bg-slate-800 z-[65] select-none overflow-hidden touch-none">
         <div id="mapaLbTiles" class="absolute inset-0"></div>
         <div id="mapaLbMarks" class="absolute inset-0 pointer-events-none"></div>
-        <button id="mapaLbClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+        <button id="mapaLbClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
         <!-- Botões de zoom além do gesto: pinch não existe em desktop com mouse
              sem roda, e alvo de 44px é a régua do projeto pra qualquer toque. -->
-        <div class="absolute z-20 flex flex-col gap-2" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem">
+        <div id="mapaLbZoom" class="absolute z-20 flex flex-col gap-2" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem; left: max(0.75rem, env(safe-area-inset-left, 0px))">
             <button id="mapaLbMais" type="button" aria-label="Aproximar" data-i18n-aria="card.map.zoomIn" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">+</button>
             <button id="mapaLbMenos" type="button" aria-label="Afastar" data-i18n-aria="card.map.zoomOut" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">−</button>
             <button id="mapaLbCentrar" type="button" aria-label="Voltar ao pedido" data-i18n-aria="card.map.recentrar" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </button>
         </div>
-        <span id="mapaLbEscala" class="absolute bottom-4 left-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala"></span>
-        <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1 left-4 right-16" style="bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
+        <span id="mapaLbEscala" class="absolute bottom-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala" style="left: 1rem; left: max(1rem, env(safe-area-inset-left, 0px))"></span>
+        <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1" style="left: 1rem; right: 4rem; left: max(1rem, env(safe-area-inset-left, 0px)); right: calc(max(0.75rem, env(safe-area-inset-right, 0px)) + 3.25rem); bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
         <!-- O SLOT DE AÇÃO deste lightbox, no rodapé do lado oposto ao ✕ do
              topo — a mesma geometria que o lightbox da foto usa pro aprovar/
              excluir. É o primeiro e único ocupante: segundo candidato divide
@@ -1499,23 +1499,23 @@
              O `href` é reescrito no `desenhar()`, que é por onde passam os
              QUATRO caminhos que mexem no centro: abrir, arrastar, zoom e
              recentrar. -->
-        <a id="mapaLbStreetView" target="_blank" rel="noopener noreferrer" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors" style="right: 0.75rem; bottom: calc(0.75rem + env(safe-area-inset-bottom))" title="Ver a rua aqui no Street View" data-i18n-title="card.map.streetView" aria-label="Ver a rua aqui no Street View" data-i18n-aria="card.map.streetView">
+        <a id="mapaLbStreetView" target="_blank" rel="noopener noreferrer" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom))" title="Ver a rua aqui no Street View" data-i18n-title="card.map.streetView" aria-label="Ver a rua aqui no Street View" data-i18n-aria="card.map.streetView">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
         </a>
     </div>
 
     <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[65] flex items-center justify-center select-none overflow-hidden">
-        <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+        <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
-        <button id="lightboxPrev" type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="hidden absolute left-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">‹</button>
-        <button id="lightboxNext" type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="hidden absolute right-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">›</button>
-        <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem"></span>
+        <button id="lightboxPrev" type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="hidden absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors" style="left: 0.5rem; left: max(0.5rem, env(safe-area-inset-left, 0px))">‹</button>
+        <button id="lightboxNext" type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="hidden absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors" style="right: 0.5rem; right: max(0.5rem, env(safe-area-inset-right, 0px))">›</button>
+        <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem; left: max(0.75rem, env(safe-area-inset-left, 0px))"></span>
         <span id="lightboxNewBadge" class="hidden absolute left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="top: calc(0.75rem + env(safe-area-inset-top)); filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title" role="img" aria-label="Foto nova proposta neste pedido" data-i18n-aria="card.newPhoto.title">✨</span>
         <!-- A dica reserva o canto direito (`right-20`): o botão de ação mora
              lá, e centralizada de ponta a ponta ela ficava CORTADA por ele em
              tela estreita — já era assim com a lixeira sozinha. -->
-        <p id="lightboxZoomHint" class="lb-baixo absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate"  data-i18n="lightbox.zoomHint">Toque duplo amplia · arraste pro lado pra trocar · pra baixo pra fechar</p>
+        <p id="lightboxZoomHint" class="lb-baixo absolute z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate" style="left: 1rem; right: 5rem; left: max(1rem, env(safe-area-inset-left, 0px)); right: calc(max(0.75rem, env(safe-area-inset-right, 0px)) + 4.25rem)" data-i18n="lightbox.zoomHint">Toque duplo amplia · arraste pro lado pra trocar · pra baixo pra fechar</p>
         <!-- UM slot de ação, no canto de BAIXO, do lado oposto ao ✕ do topo.
              Os dois botões abaixo são mutuamente exclusivos e ocupam o MESMO
              lugar: foto pendente se aprova, foto já no mapa se exclui.
@@ -1529,10 +1529,10 @@
              `.lb-acao` põe a borda de DOIS TONS (anel branco + sombra escura).
              Um tom só não basta: pra toda cor sólida existe uma foto da mesma
              luminância, e aí a borda some. O par branco/escuro é 21:1 sempre. -->
-        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
+        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>
-        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
+        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <span id="lightboxApproveSpinner" class="hidden w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden="true"></span>
             <svg id="lightboxApproveIcon" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
         </button>
