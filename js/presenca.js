@@ -1731,7 +1731,7 @@ function presencaDever(id) {
     // Mensagem que a pílula contava e a tela não mostrou: o "lida" a marcaria
     // (o Waze marca a conversa INTEIRA), então a dívida não nasce por nenhum
     // caminho — também o do fechamento sem perfil (R17-5-02).
-    if (presencaPularLidaPorNaoVista(id)) return;
+    if (presencaSemVerAoAbrir(id)) { presencaAnotarLidaPulada(); return; }
     Presenca.lidaDevendo.add(id);
     const vista = presencaVistaDe(id);
     if (vista.ate <= 0) return;
@@ -1956,11 +1956,13 @@ function presencaPrimeiraPaginaAdiada(h) {
 function presencaDeverOQueFoiVisto(id) {
     const h = id ? Presenca.historico.get(id) : null;
     if (!h || !(presencaPrimeiraPaginaNoAr(h) || presencaPrimeiraPaginaAdiada(h))) return;
-    // Mensagem que a pílula contava e a tela não mostrou: o "lida" a marcaria.
-    if (presencaPularLidaPorNaoVista(id)) return;
     const visto = presencaUltimaDela(h);
     const voo = presencaLidaNoAr(id);
     if (!(visto > Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0))) return;
+    // Só aqui há mesmo um "lida" a mandar: a mensagem que a pílula contava e a
+    // tela não mostrou faz o `presencaDever` recusar a dívida (e anotar). A
+    // pergunta antes da conta anotava "o lida deixou de sair" quando nenhum
+    // estava devido (R18-5-03).
     presencaDever(id);
 }
 
@@ -2028,17 +2030,23 @@ function presencaConferirAbaPagando(aba, chave) {
 // a marca (o `abrir` marcou tudo e a tela mostra tudo).
 function presencaSemVerAoAbrir(id) {
     const h = id ? Presenca.historico.get(id) : null;
-    return !!h && !!h.primeiraFalhou && h.naoVistoAoAbrir > 0;
+    // `presencaPrimeiraPaginaAdiada` já inclui `primeiraFalhou`: a página que
+    // não falhou mas está PARADA (a espera do perfil, a página antiga no ar)
+    // também não mostrou a mensagem, e o perfil que voltasse pagaria a dívida
+    // marcando-a (R18-5-02). A página NO AR fica de fora: o `abrir` dela marca
+    // tudo na chegada, e a dívida que nasce então é a do R16-5-01.
+    return !!h && h.naoVistoAoAbrir > 0 && presencaPrimeiraPaginaAdiada(h);
 }
 
-// `presencaSemVerAoAbrir` por onde o "lida" DEIXA de sair ou a dívida não nasce:
+// Onde havia MESMO um "lida" a mandar e `presencaSemVerAoAbrir` o impediu:
 // uma linha no diário (`chat.lida` com `pulou`), no máximo uma por minuto e sem
 // texto nem id, pra o relatório explicar "a mensagem voltou como nova" (R17-5,
 // observação 3). Chave própria no limitador: não engole a linha da falha.
-function presencaPularLidaPorNaoVista(id) {
-    if (!presencaSemVerAoAbrir(id)) return false;
+// Quem chama decide se havia o que mandar: perguntada à toa (a lista conta 1,
+// o `abrir` falha, nada visto) a linha dizia "deixou de sair" sem nada devido
+// (R18-5-03).
+function presencaAnotarLidaPulada() {
     presencaAnotarMsg('chat.lida', { pulou: 'naoVista' }, 'chat.lida.pulou');
-    return true;
 }
 
 // Tirado quando a conversa ABRE, antes de a contagem ser zerada: quantas das
@@ -2164,6 +2172,27 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
     // Se ele falhar, a conversa volta a DEVER (abaixo).
     const noAr = presencaLidaNoAr(id);
     if (noAr && noAr.ate >= ultimaDela) return;
+    // A conversa abriu com mensagem que a pílula contava e a tela não mostrou, e
+    // a primeira página (o `abrir`, que marcaria tudo) falhou ou espera: este
+    // "lida" marcaria a conversa INTEIRA, também essa. Vale com o histórico VELHO
+    // já na tela (`carregada`) e uma mensagem que chega ao vivo — a rajada, o
+    // fechamento e a volta do fundo —, e não só com a dívida (R18-5-01). A
+    // mensagem segue não lida; a primeira página boa marca tudo. Não deixa
+    // dívida: ela pagaria o mesmo pedido depois.
+    if (h && h.naoVistoAoAbrir > 0 && presencaPrimeiraPaginaAdiada(h)) {
+        presencaAnotarLidaPulada();
+        presencaQuitarDivida(id);
+        return;
+    }
+    // Com a página NO AR o `abrir` vai marcar na chegada, mas só o que já estava
+    // guardado quando ele saiu: a mensagem que a tela mostrou depois fica DEVENDO
+    // o "lida" (pago na chegada, ou tirado se a página trouxe mensagem dela que
+    // ninguém viu, `presencaPagarNaChegada`) — nunca um "lida" agora, que
+    // marcaria a não vista também (R18-5-01).
+    if (h && h.naoVistoAoAbrir > 0 && presencaPrimeiraPaginaNoAr(h)) {
+        presencaDever(id);
+        return;
+    }
     const voo = { ate: ultimaDela, em: Date.now() };
     Presenca.lidaNoAr.set(id, voo);
     // A dívida GRAVADA desta conversa (desta aba ou de outra) está sendo paga:
@@ -2480,7 +2509,10 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
             // mensagem que a pílula contava e a tela nunca mostrou: sai agora,
             // da memória e do aparelho — onde a próxima página a adotaria e
             // pagaria sem saber disso (R16-5-01).
-            if (presencaPularLidaPorNaoVista(id)) presencaQuitarDivida(id);
+            if (presencaSemVerAoAbrir(id)) {
+                if (Presenca.lidaDevendo.has(id)) presencaAnotarLidaPulada();
+                presencaQuitarDivida(id);
+            }
         }
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         presencaConferirSessao(r, sessao);
