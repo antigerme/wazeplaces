@@ -15645,6 +15645,92 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── CONTAGEM GUARDADA QUE NÃO É NÚMERO (R21-1-04 e R21-2-06, lote 25) ───────
+//
+// O lote 24 pôs o `numero()` no `read`/`rejected`/`_total` do `recordHistory`; o placar guardado, o que o
+// `getHistoryStats` lê e o contador por lugar (`onde`) ficaram de fora: texto no contador mostrava "Lidos NaN"
+// (e gravava `null` depois de um ✓), a aba Histórico mostrava "0x · 07", "a · 2" e "faltam NaN pra …", e um
+// `<img>` no campo virava elemento do painel. Só por armazenamento editado à mão — a mesma classe do R20-7-02.
+// Aqui o armazenamento é semeado COM o lixo e a tela de verdade desenha. CONTROLE: o histórico e o placar
+// limpos mostram "3 · 2", "10 · 4" e os números de sempre (o instrumento enxerga uma linha numérica), e o
+// texto de DÍGITOS do placar ("7") segue valendo 8 depois de um ✓.
+{
+  const FILA_CONT = [{ ...CARDS.FLAG, venueID: 'vCT1', updateRequestID: 'uCT1', imageUrls: [] }, { ...CARDS.FLAG, venueID: 'vCT2', updateRequestID: 'uCT2', imageUrls: [] }];
+  const dia = (n) => { const d = new Date(Date.now() - n * 86400000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const caso = async (historia, placar, { decidir = false } = {}) => {
+    const marcados = [];
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let resp = { success: true };
+      if (nome === 'marcar-lido') marcados.push(1);
+      if (nome === 'perfil') resp = { success: true, profile: { id: 77, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') resp = { success: true, places: FILA_CONT, hasMore: false, page: 1, total: 2, totalAll: 2, blocked: 0 };
+      else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(([h, p]) => {
+      try {
+        if (localStorage.getItem('__seed')) return;
+        localStorage.setItem('__seed', '1');
+        localStorage.setItem('waze_session_token', 'token-do-smoke-da-contagem');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        localStorage.setItem('waze_places_history', JSON.stringify(h));
+        localStorage.setItem('waze_places_stats', JSON.stringify(p));
+      } catch (e) { /* armazenamento bloqueado */ }
+    }, [historia, placar]);
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
+    if (decidir) {
+      await page.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-read').click());
+      // "Nada no ar" logo depois do toque é verdade ANTES de a janela do Desfazer abrir (a saída do card leva 350 ms):
+      // o sinal POSITIVO é o envio CHEGAR à API (contado aqui), e só então o estado da página.
+      for (let i = 0; i < 100 && marcados.length === 0; i++) await dormir(100);
+      await esperarOuExplodir(page, () => !acoesTravadas() && AppState.inFlightActions === 0, 'o ✓ pousar');
+    }
+    // O contador conta (|Δ| ≥ 2) ou pula: o texto só vale depois de ASSENTAR no número que o placar tem.
+    await esperarNaPagina(page, () => document.getElementById('readCount').textContent.trim() === String(AppState.stats.read), 4000);
+    const tela = await page.evaluate(() => {
+      openFiltersModal();
+      switchFilterTab('filtersTabHistory');
+      const el = document.getElementById('historyBody');
+      return {
+        lidos: document.getElementById('readCount').textContent.trim(),
+        linhas: [...el.querySelectorAll('.tnum')].map((n) => n.textContent.replace(/\s+/g, ' ').trim()),
+        elemento: !!el.querySelector('img, script, svg[onload]'),
+        gravado: localStorage.getItem('waze_places_stats'),
+      };
+    });
+    await ctx.close();
+    return { ...tela, erros };
+  };
+  // As linhas "N · M" (hoje, semana, mês, total) — os rótulos da patente ("tratados", "faltam") ficam de fora da conta.
+  const nm = (t) => t.linhas.filter((l) => / · /.test(l) && !/tratados|faltam|de 16/.test(l));
+  const soNumeros = (t) => nm(t).length >= 3 && nm(t).every((l) => /^\d+ · \d+$/.test(l));
+  const limpo = await caso({ [dia(1)]: { read: 3, rejected: 2 }, _total: { read: 10, rejected: 4 } }, { read: 5, rejected: 4, skipped: 0 });
+  checa(soNumeros(limpo) && nm(limpo).includes('3 · 2') && nm(limpo).includes('10 · 4') && limpo.lidos === '5',
+    'contagem/CONTROLE: o histórico e o placar limpos têm de mostrar "3 · 2", "10 · 4" e "Lidos 5"', JSON.stringify(limpo));
+  const texto = await caso({ [dia(1)]: { read: 'x', rejected: '7' }, _total: { read: 'a', rejected: 2 } }, { read: 'x', rejected: [], skipped: {} });
+  checa(soNumeros(texto), 'contagem/Histórico: campo com texto mostrou linha que não é "N · M" numérica', JSON.stringify(nm(texto)));
+  checa(!texto.linhas.some((l) => /NaN/.test(l)), 'contagem/Histórico: a patente mostra NaN', JSON.stringify(texto.linhas));
+  checa(texto.lidos === '0', 'contagem/placar: o placar guardado com texto mostrou "Lidos ' + texto.lidos + '"');
+  const html = await caso({ [dia(1)]: { read: 1, rejected: 1 }, _total: { read: '<img src=x alt=bad>', rejected: 2 } }, { read: 1, rejected: 1, skipped: 0 });
+  checa(html.elemento === false && soNumeros(html), 'contagem/Histórico: um campo com HTML virou elemento do painel', JSON.stringify({ elemento: html.elemento, linhas: nm(html) }));
+  // O ✓ sobre o placar com texto de dígitos: 7 + 1 = 8 (e o lixo + 1 = 1, gravado como número).
+  const dig = await caso({ _total: { read: 0, rejected: 0 } }, { read: '7', rejected: null }, { decidir: true });
+  checa(dig.lidos === '8', 'contagem/CONTROLE: o texto de dígitos do placar ("7") tem de valer 8 depois de um ✓', JSON.stringify({ lidos: dig.lidos, gravado: dig.gravado }));
+  const sujo = await caso({ _total: { read: 0, rejected: 0 } }, { read: 'x', rejected: [], skipped: {} }, { decidir: true });
+  checa(sujo.lidos === '1' && !/null/.test(sujo.gravado || ''), 'contagem/placar: o ✓ sobre o placar com texto tem de dar 1 e gravar número (não NaN, não null)', JSON.stringify({ lidos: sujo.lidos, gravado: sujo.gravado }));
+  checa([limpo, texto, html, dig, sujo].every((c) => c.erros.length === 0), 'contagem: erro de JS', [limpo, texto, html, dig, sujo].map((c) => c.erros[0]).find(Boolean));
+}
+
 // ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
 //
 // Duas abas abrindo juntas (a janela restaurada, o app instalado e o navegador)

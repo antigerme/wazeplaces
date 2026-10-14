@@ -353,3 +353,96 @@ test('R21-1-03: o que o app MOSTRA e o que o campo ACEITA — o link que o "Copi
   const claimCurto = await dispatch('parear', { action: 'claim', code: colado.campo }, s.ctx);
   assert.equal(claimCurto.body.success, true, 'o código do campo (com o hífen) não resgata no servidor');
 });
+
+// ═══ R21-1-04 / R21-2-06 · contagem guardada que não é número ═══════════════════════════════════════════
+// O lote 24 pôs o `numero()` no `read`/`rejected`/`_total` do `recordHistory`, mas o contador por lugar
+// (`onde`), o placar guardado e o que o `getHistoryStats` lê ficaram de fora: texto no contador virava NaN
+// (e gravava `null`), `[1]` somava como "11", e a aba Histórico mostrava "0x · 07", "a · 2" e "faltam NaN pra …".
+// Só por armazenamento editado à mão — a mesma classe do R20-7-02.
+const HOJE = '2026-10-14';
+function historicoDe(texto) {
+  const guardado = new Map(texto === undefined ? [] : [['waze_places_history', texto]]);
+  const AppState = { history: null };
+  const deps = {
+    AppState, HISTORY_KEY: 'waze_places_history', HISTORY_MAX_DIAS: 400,
+    localStorage: { getItem: (k) => (guardado.has(k) ? guardado.get(k) : null), setItem: (k, v) => guardado.set(k, v) },
+    historyTodayKey: () => HOJE, ondeAgora: () => '30', contaAgora: () => null, agendarRedesenhoDoHistorico() {},
+    garantirLinhaDeBaseDasConquistas() {}, textoDaCopia: new WeakMap(),
+  };
+  const h = montar(['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'podarHistorico', 'salvarHistorico', 'recordHistory', 'getHistoryStats',
+    'diasEntreChaves'], deps);
+  return { h, deps, AppState, guardado, salvo: () => JSON.parse(guardado.get('waze_places_history')) };
+}
+const diaAtras = (n) => { const [a, m, d] = HOJE.split('-').map(Number); return new Date(Date.UTC(a, m - 1, d - n)).toISOString().slice(0, 10); };
+
+test('R21-1-04: o contador por lugar (`onde`) com texto, objeto ou lista não vira NaN nem concatena — e o número de verdade segue somando', () => {
+  const casos = [['texto', 'texto', 1], ['objeto', { a: 1 }, 1], ['"NaN"', 'NaN', 1], ['lista [1]', [1], 1], ['null', null, 1],
+    ['CONTROLE número 3', 3, 4], ['CONTROLE zero', 0, 1]];
+  for (const [nome, valor, esperado] of casos) {
+    const m = historicoDe(JSON.stringify({ _total: { read: 0, rejected: 0 }, [HOJE]: { read: 0, rejected: 0, onde: { 30: valor, 73: 5 } } }));
+    assert.doesNotThrow(() => m.h.recordHistory('read', 1, undefined, '30'), `${nome}: lançou`);
+    const emMemoria = m.AppState.history[HOJE].onde['30'];
+    assert.ok(Number.isFinite(emMemoria), `DEFEITO (${nome}): o contador por lugar virou ${emMemoria} em memória`);
+    assert.equal(m.salvo()[HOJE].onde['30'], esperado, `DEFEITO (${nome}): gravou ${JSON.stringify(m.salvo()[HOJE].onde['30'])}`);
+    assert.equal(m.salvo()[HOJE].onde['73'], 5, `${nome}: o contador de OUTRO lugar mudou`);
+  }
+});
+
+function placarDe(texto) {
+  const dados = new Map(texto === undefined ? [] : [['waze_places_stats', texto]]);
+  return montar(['placarGuardado'], { STATS_KEY: 'waze_places_stats',
+    localStorage: { getItem: (k) => (dados.has(k) ? dados.get(k) : null) } }).placarGuardado;
+}
+
+test('R21-2-06: o placar guardado com texto, lista ou objeto no contador vale 0 (não "Lidos NaN"), e o texto de DÍGITOS segue sendo número', () => {
+  const casos = [
+    ['{"read":"x","rejected":[],"skipped":{}}', { read: 0, rejected: 0, skipped: 0 }],
+    ['{"read":"7","rejected":null}', { read: 7, rejected: 0, skipped: 0 }],
+    ['{"read":-5,"rejected":2,"skipped":"12"}', { read: 0, rejected: 2, skipped: 12 }],
+    ['{"read":"1e3","rejected":"0x10","skipped":"  4"}', { read: 0, rejected: 0, skipped: 0 }],
+    ['{"read":3,"rejected":2,"skipped":1}', { read: 3, rejected: 2, skipped: 1 }],       // CONTROLE
+    ['{"read":"007","rejected":"","skipped":true}', { read: 7, rejected: 0, skipped: 0 }],
+  ];
+  for (const [texto, esperado] of casos) assert.deepEqual(placarDe(texto)(), esperado, `DEFEITO: ${texto}`);
+  assert.equal(placarDe(undefined)(), null, 'CONTROLE: aparelho sem placar devolve null');
+  assert.equal(placarDe('não é json')(), null, 'CONTROLE: JSON quebrado devolve null');
+  // O ✓ seguinte soma em cima de um NÚMERO: "7" + um ✓ são 8 (e o lixo + um ✓ é 1, não NaN).
+  const lixo = placarDe('{"read":"x"}')(); lixo.read++;
+  assert.equal(lixo.read, 1, 'o ✓ sobre o contador com texto deu NaN');
+  const digitos = placarDe('{"read":"7"}')(); digitos.read++;
+  assert.equal(digitos.read, 8, 'CONTROLE: o texto de dígitos deixou de valer como número');
+});
+
+test('R21-2-06: as estatísticas do Histórico leem só número — texto, HTML e objeto valem 0 (não "0x · 07", não "faltam NaN")', () => {
+  const lixo = historicoDe(JSON.stringify({ [diaAtras(1)]: { read: 'x', rejected: '7' }, _total: { read: 'a', rejected: 2 } }));
+  const s = lixo.h.getHistoryStats();
+  assert.deepEqual(s.total, { read: 0, rejected: 2 }, 'DEFEITO: o total somou texto');
+  assert.deepEqual([s.week, s.month], [{ read: 0, rejected: 0 }, { read: 0, rejected: 0 }], 'DEFEITO: o balde com texto somou como texto');
+  const html = historicoDe(JSON.stringify({ [diaAtras(1)]: { read: 1, rejected: 1 }, _total: { read: '<img src=x alt=bad>', rejected: { a: 1 } } }));
+  assert.deepEqual(html.h.getHistoryStats().total, { read: 0, rejected: 0 }, 'DEFEITO: o HTML do campo chegou ao painel');
+  const tudo = JSON.stringify(html.h.getHistoryStats());
+  assert.ok(!/NaN|<img|\[object/.test(tudo), 'sobrou NaN, HTML ou objeto nas estatísticas: ' + tudo);
+  // CONTROLE: o histórico limpo (o da conta que só usa o app) mostra "3 · 2" e "10 · 4".
+  const limpo = historicoDe(JSON.stringify({ [diaAtras(1)]: { read: 3, rejected: 2 }, _total: { read: 10, rejected: 4 } }));
+  const c = limpo.h.getHistoryStats();
+  assert.deepEqual([c.week, c.month, c.total], [{ read: 3, rejected: 2 }, { read: 3, rejected: 2 }, { read: 10, rejected: 4 }], 'CONTROLE: o histórico limpo mudou');
+});
+
+test('R21-2-06: o painel do Histórico escreve os números ESCAPADOS (um campo com HTML não vira elemento), e o limpo sai igual', () => {
+  const escrever = (stats) => {
+    const el = { innerHTML: '', dataset: {}, insertAdjacentHTML() {}, appendChild() {}, contains: () => false };
+    const m = montar(['renderHistory', 'escapeHtml'], {
+      document: { getElementById: (id) => (id === 'historyBody' ? el : null), activeElement: null, body: {} },
+      getHistoryStats: () => stats, chaveDoFoco: () => null, renderAutores() {}, devolverFocoAoPainel() {}, htmlPatente: () => '', htmlConquistas: () => '',
+      dadosDoResumo: () => ({ total: 0 }), loadHistory: () => ({}), ligarConquistas() {}, i18nLocale: () => 'pt-BR', t: (k) => k });
+    m.renderHistory();
+    return el.innerHTML;
+  };
+  const par = (r, j) => ({ read: r, rejected: j });
+  const sujo = escrever({ today: par('<img src=x onerror=alert(1)>', '<b>x</b>'), week: par(1, 1), month: par(1, 1), total: par(2, 2) });
+  assert.ok(!/<img|<b>/.test(sujo), 'DEFEITO: o campo do Histórico virou elemento no painel: ' + sujo.slice(0, 200));
+  assert.ok(sujo.includes('&lt;img'), 'o campo não saiu escapado');
+  const limpo = escrever({ today: par(0, 0), week: par(3, 2), month: par(3, 2), total: par(10, 4) });
+  assert.match(limpo, /<span class="text-emerald-700 dark:text-emerald-400">3<\/span> · <span class="text-rose-600 dark:text-rose-400">2<\/span>/, 'CONTROLE: a linha "3 · 2" mudou');
+  assert.match(limpo, /<span class="text-emerald-700 dark:text-emerald-400">10<\/span> · <span class="text-rose-600 dark:text-rose-400">4<\/span>/, 'CONTROLE: a linha "10 · 4" mudou');
+});

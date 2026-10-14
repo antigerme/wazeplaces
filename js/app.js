@@ -19085,7 +19085,9 @@ function recordHistory(type, delta, dia, onde) {
     const lugar = onde !== undefined ? onde : ondeAgora();
     if (lugar && (delta || 0) > 0) {
         if (!h[k].onde || typeof h[k].onde !== 'object' || Array.isArray(h[k].onde)) h[k].onde = {};
-        h[k].onde[lugar] = Math.max(0, (h[k].onde[lugar] || 0) + delta);
+        // O contador por lugar passa pelo MESMO `numero` (R21-1-04): com `'texto'`, `{a:1}` ou `'NaN'` ele virava NaN
+        // (e gravava `null`), e com `[1]` somava como texto ("11"). Só por armazenamento editado à mão.
+        h[k].onde[lugar] = Math.max(0, numero(h[k].onde[lugar]) + delta);
     }
     salvarHistorico(h);
     // Todo pouso passa por aqui (card, lote, fila de saída, recusa automática):
@@ -19109,13 +19111,17 @@ function getHistoryStats() {
     const h = loadHistory();
     const tk = historyTodayKey();
     const acc = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
+    // Contador que veio do aparelho: número ≥ 0, ou 0 (R21-2-06). Texto, lista, objeto e NaN somavam como TEXTO
+    // ("0x · 07", "a2 tratados") ou davam NaN ("faltam NaN pra …") na aba Histórico — só por armazenamento editado
+    // à mão. O mesmo critério do `numero` do `recordHistory`.
+    const n = (x) => (Number.isFinite(x) && x >= 0 ? x : 0);
     // "Total" sai do acumulador, não da soma dos baldes: os antigos foram
     // podados, e somar só o que sobrou faria o número encolher sozinho.
-    acc.total.read = (h._total && h._total.read) || 0;
-    acc.total.rejected = (h._total && h._total.rejected) || 0;
+    acc.total.read = n(h._total && h._total.read);
+    acc.total.rejected = n(h._total && h._total.rejected);
     for (const [k, v] of Object.entries(h)) {
         if (k === '_total' || !v) continue;
-        const r = v.read || 0, j = v.rejected || 0;
+        const r = n(v.read), j = n(v.rejected);
         if (k === tk) { acc.today.read += r; acc.today.rejected += j; }
         const ageDays = diasEntreChaves(k, tk);
         if (ageDays >= 0 && ageDays < 7) { acc.week.read += r; acc.week.rejected += j; }
@@ -22142,8 +22148,8 @@ function renderHistory() {
             `<div class="flex justify-between items-baseline text-sm py-0.5">` +
             `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
             `<span class="tnum font-medium"><span class="sr-only">${escapeHtml(fraseDosLidosERejeitados(v.read, v.rejected))}</span>` +
-            `<span aria-hidden="true"><span class="text-emerald-700 dark:text-emerald-400">${v.read}</span>` +
-            ` · <span class="text-rose-600 dark:text-rose-400">${v.rejected}</span></span></span></div>`
+            `<span aria-hidden="true"><span class="text-emerald-700 dark:text-emerald-400">${escapeHtml(String(v.read))}</span>` +
+            ` · <span class="text-rose-600 dark:text-rose-400">${escapeHtml(String(v.rejected))}</span></span></span></div>`
         ).join(''));
     // O Resumo do mês só se oferece quando há mês: botão pra um mês vazio é
     // convite pra uma imagem em branco.
@@ -29734,10 +29740,16 @@ function placarGuardado() {
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') return null;
+        // Contador que veio do aparelho: número ≥ 0, ou o texto de dígitos (`"7"`, que o `++` sempre aceitou); o resto —
+        // texto, lista, objeto — vale 0 (R21-2-06). `read: "x"` mostrava "Lidos NaN" e gravava `null` depois de um ✓.
+        const contagem = (x) => {
+            const v = typeof x === 'string' && /^\d{1,15}$/.test(x) ? Number(x) : x;
+            return Number.isFinite(v) && v >= 0 ? v : 0;
+        };
         return {
-            read: parsed.read || 0,
-            rejected: parsed.rejected || 0,
-            skipped: parsed.skipped || 0
+            read: contagem(parsed.read),
+            rejected: contagem(parsed.rejected),
+            skipped: contagem(parsed.skipped)
         };
     } catch (e) { return null; }
 }
