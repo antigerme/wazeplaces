@@ -127,7 +127,7 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // `registrarPousoDepoisDaQueda`, que não grava depois do "Sair"; medido em
     // test/abas-auditoria-r13.test.mjs). (A ida passa antes pelo `desistir` da
     // recusa automática, a cada tentativa — R10-2-01.)
-    enviarLote: /await callWithRetry\(\(\) => \(desistir\(p\)\s*\? naoVale\s*: API\.rejectPlace\([^)]*\)\), undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim, geracao\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
+    enviarLote: /await callWithRetry\(\(\) => \(desistir\(p\)\s*\? naoVale\s*: API\.rejectPlace\([^)]*\)\), epoca,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim, geracao\)\);\s*if \(epoca !== epocaDaSessao\) \{[^{}]*if \(!aoLandar\) descontarGestoSemSessao\([^;]*;[^{}]*return;\s*\}/,
     // A lista de países é a ida que os Filtros dividem (`pedirListaDePaises`, R8-6-04).
     loadProfileAndAuxData: /pedirListaDePaises\(regiaoPedida\)\s*\]\);\s*if \(epoca !== epocaDaSessao\) return;/,
     // A época do GESTO vai junto pro `callWithRetry` (ver test/costura-sessao),
@@ -161,6 +161,7 @@ function montarAgenda() {
     setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {},
     UNDO_WINDOW_MS: 3000,
     console: { error: () => {} },
+    epocaDaSessao: 0, decisoesPorContaNoAr: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID,   // R20-1-03
   };
   // O fim da janela, que atende o refazer da fila adiado pra ele (`atenderOFimDaJanela`).
   const { scheduleAction } = montar(['scheduleAction', 'atenderOFimDaJanela'], deps, ['scheduleAction']);

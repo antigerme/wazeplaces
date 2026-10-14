@@ -307,6 +307,9 @@ const AppState = {
     inFlightActions: 0,
     // Sobe a cada "Sair" (R19-1-01): quem entra no ar guarda a geração e só solta, no fim, o que ainda é da dele.
     geracaoDoSair: 0,
+    // Sobe no "Sair" e na troca de conta: as marcas de "no ar" das escritas da foto são da geração em que o
+    // gesto começou (R20-3-02, ver `soltarAsEscritasDeFotoDaSessaoQueAcabou`).
+    geracaoDasEscritasDeFoto: 0,
     fetchEpoch: 0,
     _fetchPromise: null,
     _profilePromise: null,
@@ -1771,6 +1774,8 @@ function setupAppListeners() {
         if (m) m.addEventListener('click', (e) => { if (e.target === m) closeModal(id); });
     });
 
+    // Antes do `handleKeyDown` e de todo ouvinte de botão: a guarda do Enter segurado (R20-1-02).
+    document.addEventListener('keydown', guardaDoEnterSegurado, true);
     window.addEventListener('keydown', handleKeyDown);
     // Quem pegou o mouse ou o dedo deixou de operar pelo teclado: o foco
     // prometido ao teclado (`focoDoTeclado`, C10) não vale mais.
@@ -2553,7 +2558,8 @@ function setupModalListeners() {
         // Enter confirma, Esc cancela — e o Esc PARA aqui (`stopPropagation`),
         // senão ele fecha o lightbox inteiro e a pessoa perde a foto que estava
         // usando de prova só por desistir de um caractere.
-        if (ev.key === 'Enter') { ev.preventDefault(); confirmarRenomear(); }
+        // Enter SEGURADO confirma uma vez só (R20-2-02): a repetição era outro `confirmarRenomear`.
+        if (ev.key === 'Enter') { ev.preventDefault(); if (!ev.repeat) confirmarRenomear(); }
         else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); sairDaEdicaoNome(); }
     });
 
@@ -2573,7 +2579,8 @@ function setupModalListeners() {
         { peloTeclado: veioDoTeclado(ev) }));
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
         if (teclaDeComposicao(e)) return;   // o Enter que confirma a composição do IME não resgata (R17-3-02)
-        if (e.key === 'Enter') { e.preventDefault(); resgatarPareamento(e.target.value, { peloTeclado: true }); }
+        // Enter SEGURADO resgata uma vez só (R20-1-02): cada repetição era um `parear:claim`.
+        if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) resgatarPareamento(e.target.value, { peloTeclado: true }); }
     });
     // Colado de dentro de uma mensagem, com espaço ou quebra de linha: o código
     // é achado no texto (ver `extrairCodigoPareamento`).
@@ -4390,6 +4397,22 @@ function lixeiraOcupada(ligado) {
     aplicarTravaDeAcao();   // o `disabled` é dela (ver acima)
 }
 
+// A geração das marcas de "no ar" das escritas da FOTO (aprovar, excluir, renomear, e a conferência de
+// um 401 delas). O "Sair" e a troca de conta as soltam e sobem este número; quem sai pra escrever
+// captura o número no GESTO e só solta, quando a resposta chega, se ele ainda é o mesmo (R20-3-02 =
+// R20-2-03, incompleto do R19-1-01). Sem isto a resposta da sessão que saiu (teto de 45 s do `_post`)
+// travava, calada, o "Aprovar", a lixeira e a pílula do nome de quem entrou depois — e, chegando, soltava
+// o spinner de uma escrita DELE. A queda com a MESMA conta não passa por aqui: a escrita segue no ar e
+// pousa depois (`aprovacaoPousouDepoisDaQueda`), e soltá-la reabriria a 2ª aprovação que o L24 fechou.
+function soltarAsEscritasDeFotoDaSessaoQueAcabou() {
+    AppState.geracaoDasEscritasDeFoto = (AppState.geracaoDasEscritasDeFoto || 0) + 1;
+    escritasConferindo = 0;
+    renomeacoesNoAr.clear();
+    if (aprovandoAgora) estadoAprovando(false);
+    if (excluindoAgora) lixeiraOcupada(false);
+    aplicarTravaDeAcao();
+}
+
 // 401 numa escrita do lightbox — aprovar, excluir ou renomear (auditoria de
 // 2026-09-26). O 401 muitas vezes é ALARME FALSO (WAF, blip do KV: gotcha
 // #42), e a tela já mostra a escrita feita: a foto sumiu, o ✨ saiu, o nome é o
@@ -4421,6 +4444,8 @@ let escritasConferindo = 0;
 // do gesto: quem trocou a época já esvaziou o conjunto do "Sair".
 async function refazerDepoisDo401(epoca, enviar, aoEsperar = null) {
     const levou = Date.now();
+    // O "Sair" e a troca de conta zeram a conta das conferências: a deste gesto só desce o que é dela.
+    const geracaoDaFoto = AppState.geracaoDasEscritasDeFoto;
     escritasConferindo++;
     aplicarTravaDeAcao();
     if (typeof aoEsperar === 'function') aoEsperar(true);
@@ -4437,7 +4462,7 @@ async function refazerDepoisDo401(epoca, enviar, aoEsperar = null) {
         return r && r.errorCategory === 'unauthorized' ? null : r;
     } finally {
         if (typeof aoEsperar === 'function' && epoca === epocaDaSessao) aoEsperar(false);
-        escritasConferindo = Math.max(0, escritasConferindo - 1);
+        if (geracaoDaFoto === AppState.geracaoDasEscritasDeFoto) escritasConferindo = Math.max(0, escritasConferindo - 1);
         aplicarTravaDeAcao();
     }
 }
@@ -4735,9 +4760,10 @@ function pedirExclusaoDaFoto() {
     if (semJanela) {
         // Espera REAL: a chamada sai agora. Spinner no lugar da lixeira e a
         // foto só sai da tela quando o Waze confirmar.
+        const geracaoDaFoto = AppState.geracaoDasEscritasDeFoto;
         lixeiraOcupada(true);
         enviarExclusao(alvo).then((saiuDoMapa) => {
-            lixeiraOcupada(false);
+            if (geracaoDaFoto === AppState.geracaoDasEscritasDeFoto) lixeiraOcupada(false);
             if (!saiuDoMapa) return;
             // A foto DESTE pedido estava aberta? Lido antes do `removerFoto`: a
             // última foto do local fecha a camada (R7-3-04). E o que a região do
@@ -5251,13 +5277,14 @@ function aprovarFotoAtual() {
 
     const semJanela = AppState.preferences.undoEnabled === false && canDisableUndo();
     if (semJanela) {
+        const geracaoDaFoto = AppState.geracaoDasEscritasDeFoto;
         estadoAprovando(true);
         // Só marca com a aprovação VALENDO: o `.finally` de antes marcava
         // também na falha, e a foto pendente virava "aprovada" na tela — com a
         // lixeira no lugar, que então apagava a foto e deixava o pedido órfão.
         // Quem marca é o próprio envio, no sucesso (`enviarAprovacao`, R10-3-04).
         enviarAprovacao(alvo).then((valeu) => {
-            estadoAprovando(false);
+            if (geracaoDaFoto === AppState.geracaoDasEscritasDeFoto) estadoAprovando(false);
             if (!valeu) return;
             // Sem o banner do Desfazer, nada dizia ao leitor de tela que valeu (R6-3-08).
             anunciarNoLightbox(t('undo.photoApproved'), place);
@@ -5623,6 +5650,7 @@ function devolverNome(alvo) {
 async function enviarRenomeacao(alvo) {
     const epoca = epocaDaSessao;
     const local = alvo.place.venueID;
+    const geracaoDaFoto = AppState.geracaoDasEscritasDeFoto;
     // No ar até a resposta FINAL: a pílula deste local fica travada (L23).
     renomeacoesNoAr.add(local);
     const espera = esperaDaEscritaNoSair();   // a retentativa e a conferência do 401 contam no "Sair" (R17-3-01)
@@ -5672,7 +5700,9 @@ async function enviarRenomeacao(alvo) {
         return false;
     } finally {
         espera(false);
-        renomeacoesNoAr.delete(local);
+        // Só a marca DESTA sessão: a do "Sair" já foi solta, e o mesmo local pode estar sendo renomeado
+        // por quem entrou depois (R20-3-02).
+        if (geracaoDaFoto === AppState.geracaoDasEscritasDeFoto) renomeacoesNoAr.delete(local);
         aplicarTravaDeAcao();
     }
 }
@@ -6604,6 +6634,25 @@ function focoEmAreaQueRola() {
 // digita o "+" em vários teclados.
 function atalhoDoNavegador(e) {
     return !!(e && (e.ctrlKey || e.metaKey || e.altKey));
+}
+
+// Enter (ou Espaço) SEGURADO num botão não repete a ação (R20-1-02, R20-2-02, R20-3-03). O sistema
+// repete o `keydown` com `repeat` verdadeiro a ~30 Hz e o navegador gera um `click` por repetição: o
+// lote 23 cancelou isso só nos três botões do card (✕ ↑ ✓), e o resto seguia repetindo — o "Entrar" do
+// código de pareamento (16 `parear:claim` em 3 s), o "Verificar novamente", o "Tentar de novo" e o ↻
+// (14 `buscar-places` em 3 s, no free tier), o ⓘ e os Filtros (o diálogo abria e fechava em laço, porque
+// o foco vai ao ✕ do diálogo e a repetição o aciona) e, na foto ampliada, o Aprovar (o foco ia ao ✕, a
+// repetição fechava a camada e a aprovação saía sem a janela do Desfazer). UMA guarda em CAPTURA no
+// `document`, antes de qualquer ouvinte: `preventDefault()` no `keydown` repetido cancela o `click`.
+// Fica de fora o que segurar é ANDAR: aproximar e afastar o mapa e passar as fotos (aqui e no card).
+// Os campos de texto não são botão — o Enter do código de pareamento e o do nome tratam a repetição
+// no ouvinte deles. O Espaço não repete o `click` (sai no `keyup`), e cobrir não custa nada.
+const CONTROLES_QUE_REPETEM = '#mapaLbMais, #mapaLbMenos, #lightboxPrev, #lightboxNext, .card-image-prev, .card-image-next';
+function guardaDoEnterSegurado(e) {
+    if (!e || e.repeat !== true || (e.key !== 'Enter' && e.key !== ' ')) return;
+    const alvo = e.target && typeof e.target.closest === 'function' ? e.target.closest('button, a, [role="button"]') : null;
+    if (!alvo || alvo.matches(CONTROLES_QUE_REPETEM)) return;
+    e.preventDefault();
 }
 
 // A tecla é do TECLADO DE ENTRADA (IME: japonês, chinês, coreano), não do app: o Enter que
@@ -12920,7 +12969,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     pousosDaPagina.clear();
     pedidosEmAndamento.clear();
     alvosDoLoteDeLidosNoAr.clear();
+    decisoesPorContaNoAr.clear();
     pedidosDoLoteSemEnviar.clear();
+    soltarAsEscritasDeFotoDaSessaoQueAcabou();
     escritasEsperandoAVez.clear();
     idasSemRespostaGuardadas.clear();
     fotosQueSairamDoMapa.clear();
@@ -18411,9 +18462,14 @@ function loadHistory() {
     try { texto = localStorage.getItem(HISTORY_KEY); } catch (e) { texto = null; }
     let h = {};
     try { h = JSON.parse(texto || '{}') || {}; } catch (e) { h = {}; }
+    // O que está guardado pode não ser um objeto (o armazenamento editado à mão, ou escrito por outro
+    // programa): `'"x"'`, `'5'`, `'[]'`. Um primitivo não recebe o `_total`, e a exceção do
+    // `recordHistory` morria calada na cadeia assíncrona — o app ficava sem a reincidência, o aviso de
+    // consequência e as conquistas até limpar o armazenamento (R20-7-02). Vira um histórico vazio.
+    if (!h || typeof h !== 'object' || Array.isArray(h)) h = {};
     // Acumulador que sobrevive à poda dos baldes diários. Só inicializa — a
     // soma retroativa do formato antigo saiu junto com os outros resíduos.
-    if (!h._total) h._total = { read: 0, rejected: 0 };
+    if (!h._total || typeof h._total !== 'object' || Array.isArray(h._total)) h._total = { read: 0, rejected: 0 };
     AppState.history = h;
     lembrarTextoDaCopia(h, HISTORY_KEY, texto);
     if (podarHistorico(h)) salvarHistorico(h);
@@ -18458,10 +18514,13 @@ function recordHistory(type, delta, dia, onde) {
     if ((delta || 0) > 0) garantirLinhaDeBaseDasConquistas();
     const h = loadHistory();
     const k = dia || historyTodayKey();
-    if (!h[k]) h[k] = { read: 0, rejected: 0 };
+    // (Defesa em camadas, R20-7-02: o `loadHistory` já limpa o que veio do aparelho; isto cobre o balde
+    // estragado na própria memória, e o número que não é número.)
+    if (!h[k] || typeof h[k] !== 'object' || Array.isArray(h[k])) h[k] = { read: 0, rejected: 0 };
     const field = type === 'read' ? 'read' : 'rejected';
-    h[k][field] = Math.max(0, (h[k][field] || 0) + (delta || 0));
-    h._total[field] = Math.max(0, (h._total[field] || 0) + (delta || 0));
+    const numero = (x) => (Number.isFinite(x) ? x : 0);
+    h[k][field] = Math.max(0, numero(h[k][field]) + (delta || 0));
+    h._total[field] = Math.max(0, numero(h._total[field]) + (delta || 0));
     // ONDE o trabalho foi feito. É o dado que faltava pra "Andarilho"/"Viajante"
     // — e o MESMO que tirou o "onde" do Resumo do mês, que agora pode voltar.
     // É dado SEU (onde você trabalhou), não de terceiro: pode persistir, e sai
@@ -18471,7 +18530,7 @@ function recordHistory(type, delta, dia, onde) {
     // novo no pouso valeria o filtro de DEPOIS do gesto (R6-7-4).
     const lugar = onde !== undefined ? onde : ondeAgora();
     if (lugar && (delta || 0) > 0) {
-        if (!h[k].onde) h[k].onde = {};
+        if (!h[k].onde || typeof h[k].onde !== 'object' || Array.isArray(h[k].onde)) h[k].onde = {};
         h[k].onde[lugar] = Math.max(0, (h[k].onde[lugar] || 0) + delta);
     }
     salvarHistorico(h);
@@ -20224,6 +20283,20 @@ async function aplicarRecusaAutomatica() {
     };
     const aviso = showToast(andando(n), 'hint', 600000);
     avisoDaRecusaAutomatica = aviso;
+    // Tudo o que o `enviarLote` tira no COMEÇO dele — a sessão, a geração do "Sair", a fila e QUEM
+    // decide, e a marca de "em andamento" dos alvos — é tirado AGORA, ainda síncrono, e entregue a ele
+    // (`opts.naSessao`). Com a espera pela trava no meio (R19-2-02) o `enviarLote` só começa quando a
+    // outra aba solta: os alvos já saíram da fila e nada os marcava nem conferia a sessão — o "Sair"
+    // na espera os devolvia à fila da tela de entrada, o login de OUTRA conta os rejeitava com a
+    // sessão dela, e o ↻ os trazia de volta como card e eram rejeitados 2× (R20-2-01 = R20-1-01,
+    // MEDIDO). Tudo antes do envio é síncrono, e isso inclui estas capturas.
+    const naSessao = {
+        epoca: epocaDaSessao,
+        epocaFila: AppState.fetchEpoch,
+        geracao: AppState.geracaoDoSair,
+        quem: typeof quemDecideAgora === 'function' ? quemDecideAgora() : null,
+    };
+    marcarEmAndamento(alvos, true, naSessao.geracao);
     // UMA aba por vez no envio (R19-2-02): com duas abas abrindo juntas (a janela restaurada, o app
     // instalado e o navegador), cada uma achava os mesmos alvos na fila e mandava cada rejeição ao
     // Waze — o dobro das chamadas (MEDIDO: 4 pedidos com 2 requisições cada, e 3 de 4 com 500 ms de
@@ -20233,7 +20306,13 @@ async function aplicarRecusaAutomatica() {
     // A espera pela trava vem só aqui: a aba que chega depois manda o que sobrou depois que a outra
     // pousou (o `aindaVale` abaixo pergunta a cada ida). Sem `navigator.locks`, segue como sempre.
     const mandar = async () => {
+        // O "Sair" na espera (a geração mudou): o conjunto já foi esvaziado por ele e os alvos eram de
+        // quem saiu — nada se envia nem se devolve (R20-2-01). A troca de sessão sem "Sair" (a queda, a
+        // renovação) segue pro `enviarLote`, que NÃO envia com a época velha (`callWithRetry` com a
+        // época do lote) e trata os alvos como trata o laço no ar quando a época muda.
+        if (naSessao.geracao !== AppState.geracaoDoSair) return;
         await enviarLote(alvos, {
+            naSessao,
             silencioso: true,
             contarAoLandar: true,
             regiao,
@@ -20599,15 +20678,20 @@ async function enviarLote(places, opts = {}) {
     // `naoVale` = o `aindaVale` disse não antes de ele sair (R10-2-01): não foi ao
     // Waze e voltou pra fila — nem rejeitado, nem falha.
     const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0, naoVale: 0 };
-    const epoca = epocaDaSessao;
+    // `opts.naSessao`: a recusa automática, que espera a trava entre abas antes de chegar aqui, tira
+    // estas quatro coisas ANTES da espera (R20-2-01) — o que vale é a sessão e a fila em que ela
+    // decidiu mandar, não as de quando a trava foi concedida.
+    const naSessao = opts.naSessao || null;
+    const epoca = naSessao ? naSessao.epoca : epocaDaSessao;
     // A geração do "Sair" em que o lote começou: o `finally` e o laço só soltam o que ainda é
     // DELE (R19-1-01, ver `marcarEmAndamento`).
-    const geracao = AppState.geracaoDoSair;
+    const geracao = naSessao ? naSessao.geracao : AppState.geracaoDoSair;
     // E QUEM decide — a sessão e a conta desta mesma hora —, pro pouso que chegar
     // depois de uma queda no meio do laço (R13-2-01, ver o ramo da época abaixo).
     // Aqui e não no gesto, como a época: a janela do Desfazer do "Rejeitar os N"
-    // não atravessa uma queda (ela a cancela), e a recusa automática não tem janela.
-    const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
+    // não atravessa uma queda (ela a cancela), e a recusa automática não tem janela
+    // (e, quando espera a trava, tira a marca antes de esperar: `naSessao.quem`).
+    const quem = naSessao ? naSessao.quem : (typeof quemDecideAgora === 'function' ? quemDecideAgora() : null);
     // A FILA em que o lote começou. O ↻ e a troca de filtro no meio do laço a
     // refazem (`resetQueue`): a nova já vem sem os pedidos que faltam (estão em
     // andamento), então nem o "Restam" dela desce pelos pousos daqui, nem o que
@@ -20620,7 +20704,7 @@ async function enviarLote(places, opts = {}) {
     // da fila do lote": o "Restam" não descia pelos pousos do treino, e a fila
     // real voltava com "Restam 6" sobre 3 cards — "Tudo limpo!" com "Restam 3"
     // no fim (R7-2-03, MEDIDO no navegador; auditoria de 2026-10-02).
-    const epocaFila = AppState.fetchEpoch;
+    const epocaFila = naSessao ? naSessao.epocaFila : AppState.fetchEpoch;
     const filaDoLote = () => {
         if (typeof Treino !== 'undefined' && Treino.ativo === true) return Treino.filaGuardada(epocaFila);
         return AppState.fetchEpoch === epocaFila ? AppState.queue : null;
@@ -20723,9 +20807,13 @@ async function enviarLote(places, opts = {}) {
             if (!aoLandar) marcarLoteSemEnviar(p, false, geracao);   // entra no ar: já não é o que o "Sair" descarta
             // O lote da PESSOA esperando a retentativa também conta no "Sair" (R16-2-03);
             // a recusa automática é o app agindo, e fica de fora.
+            // A época do LOTE, não a de agora: com a época velha (a sessão trocou durante a espera pela
+            // trava) a ida nem sai — o `callWithRetry` devolve `session_changed` — e o ramo da época
+            // abaixo trata o lote inteiro. Dentro do laço é a mesma coisa de antes (a troca no meio
+            // já parava o lote depois da resposta).
             const r = await callWithRetry(() => (desistir(p)
                 ? naoVale
-                : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)), undefined,
+                : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)), epoca,
                 aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim, geracao));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
@@ -22276,6 +22364,9 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // que ele marca continua pendente para quem entrou. Os alvos dele saem do "em andamento"
     // ANTES de a fila de quem entrou ser refeita (R18-1-02).
     soltarOLoteDeLidosDaContaAnterior();
+    // E as marcas de "no ar" das escritas da foto dela (aprovar, excluir, renomear): a pílula do nome, o
+    // "Aprovar" e a lixeira de quem entrou não esperam a resposta da anterior (R20-3-02).
+    soltarAsEscritasDeFotoDaSessaoQueAcabou();
     if (soMemoria) AppState.autores = null;
     else esquecerAutores();
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
@@ -23062,6 +23153,12 @@ function soltarOLoteDeLidosDaContaAnterior() {
     for (const [k, epoca] of [...alvosDoLoteDeLidosNoAr]) {
         if (epoca === epocaDaSessao) continue;
         alvosDoLoteDeLidosNoAr.delete(k);
+        pedidosEmAndamento.delete(k);
+    }
+    // E o ✓ único (e a estrela) da conta anterior ainda no ar (R20-1-03).
+    for (const [k, epoca] of [...decisoesPorContaNoAr]) {
+        if (epoca === epocaDaSessao) continue;
+        decisoesPorContaNoAr.delete(k);
         pedidosEmAndamento.delete(k);
     }
 }
@@ -27318,6 +27415,12 @@ let loteDeLidosEmVoo = false;
 // `finally` — e só se a entrada ainda é a dele (a época bate): o "Sair" a esvazia,
 // e um lote da sessão nova pode já ter posto a sua para o mesmo pedido.
 const alvosDoLoteDeLidosNoAr = new Map();   // chave do pedido → época da sessão do lote
+// O ✓ ÚNICO (e o ↑ que guarda a ⭐) no ar, com a época da sessão que o mandou (R20-1-03, o irmão do
+// R18-1-02): "lido" e a estrela são de CADA conta, e o pedido que a A marca continua pendente para a B.
+// Sem esta marca, a queda com a renovação entrando como OUTRA conta deixava o pedido em
+// `pedidosEmAndamento` até a resposta da A, a busca da B o deixava de fora e depois dela ele não voltava
+// (só o ↻). O ✕ não entra: rejeitar é global no Waze, e a B não deve ver o que a A rejeitou.
+const decisoesPorContaNoAr = new Map();   // chave do pedido → época da sessão do envio
 // Quantos pedidos do lote no ar ainda não tiveram resposta. O indicador
 // "Enviando N…" conta DECISÕES, e o lote é UMA ação no `inFlightActions`: ele
 // dizia "Enviando 1…" com 5 pedidos no ar (auditoria da rodada 14, R14-8-10,
@@ -27937,6 +28040,11 @@ function scheduleAction(type, place, executor, opts = {}) {
         // A ação saiu: a janela do Desfazer acabou e os botões voltam.
         AppState.pendingAction = null;
         aplicarTravaDeAcao();
+        // O ✓ e o ↑ com a ⭐ são decisões de CADA conta: a marca de "em andamento" deles leva a época do
+        // envio, e a troca de conta no meio a solta (`soltarOLoteDeLidosDaContaAnterior`, R20-1-03).
+        const porConta = type === 'read' || type === 'skip';
+        const epocaDoEnvio = epocaDaSessao;
+        if (porConta) for (const p of places) { const k = chaveDoPedido(p); if (k) decisoesPorContaNoAr.set(k, epocaDoEnvio); }
         // A geração do "Sair" em que esta ação entrou no ar: o `finally` só solta o que ainda é
         // DELA — o "Sair" zerou o contador e o conjunto, e o que está no ar agora é da sessão
         // nova (R19-1-01).
@@ -27954,7 +28062,15 @@ function scheduleAction(type, place, executor, opts = {}) {
             // saída (rede, sessão) só conta como ESPERANDO envio depois de sair
             // daqui — redesenhado antes, o "1 esperando" nascia sem o
             // `nao-cobrir` (ver `updateInFlightIndicator`, R10-4-05).
-            marcarEmAndamento(places, false, geracao);
+            // Só a marca que ainda é DESTE envio: a troca de conta no meio a soltou, e o mesmo pedido pode
+            // estar com a decisão da conta nova (R20-1-03).
+            const doEnvio = !porConta ? places : places.filter((p) => {
+                const k = chaveDoPedido(p);
+                if (decisoesPorContaNoAr.get(k) !== epocaDoEnvio) return false;
+                decisoesPorContaNoAr.delete(k);
+                return true;
+            });
+            marcarEmAndamento(doEnvio, false, geracao);
             if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
             updateInFlightIndicator();
         }

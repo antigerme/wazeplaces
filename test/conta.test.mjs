@@ -73,6 +73,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
     esvaziarSeletorDeAreas: () => log.push('seletorDeAreas'),   // as áreas gerenciadas dela nos Filtros (R11-1-05)
     esquecerListasDePaises: () => log.push('paises'),       // as listas de países guardadas por região (R9-6-01)
     soltarOLoteDeLidosDaContaAnterior: () => {},   // R18-1-02
+    soltarAsEscritasDeFotoDaSessaoQueAcabou: () => {},   // R20-3-02
   };
   const registrosFica = [];
   // `marcaDestaAba`: a sessão desta aba é a da MEMÓRIA (R12-1-03); e o "invisível"
@@ -397,6 +398,7 @@ function alarmeFalso({ sonda, contaGuardada, tokenAgora = 'tok-B', perfilAntes =
     esvaziarSeletorDeAreas: () => {},   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     esquecerListasDePaises: () => {},   // as listas de países por região (R9-6-01)
     soltarOLoteDeLidosDaContaAnterior: () => {},   // R18-1-02
+    soltarAsEscritasDeFotoDaSessaoQueAcabou: () => {},   // R20-3-02
   };
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'aoConhecerConta', 'esquecerOutraConta', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
     'salvarFilaDeSaida', 'definirPerfil', 'marcarSessaoViva', 'handleUnauthorized', 'sessaoDestaAbaEhAGuardada',

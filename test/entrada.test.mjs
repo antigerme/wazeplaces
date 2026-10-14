@@ -417,6 +417,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
     soltarOLoteDeLidosDaContaAnterior: () => {},   // R18-1-02
+    soltarAsEscritasDeFotoDaSessaoQueAcabou: () => {},   // R20-3-02
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),
@@ -1953,7 +1954,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   // O código: o Enter no campo e o "Entrar" passam o teclado adiante (a estrutura
   // do ouvinte, que mora no `setupModalListeners`).
   const ouvintes = fatiar('setupModalListeners');
-  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;[^\n]*\n\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
+  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;[^\n]*\n\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); if \(!e\.repeat\) resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
     'o Enter no campo do código não diz que veio do teclado');
   assert.match(ouvintes, /\$\('pairEnterConfirm'\)\?\.addEventListener\('click', \(ev\) => resgatarPareamento\(\$\('pairCodeInput'\)\.value,\s*\{ peloTeclado: veioDoTeclado\(ev\) \}\)\);/,
     'o "Entrar" do código não diz se veio do teclado');

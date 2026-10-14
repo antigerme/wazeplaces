@@ -378,7 +378,7 @@ test('R17-2-01: `refazerDepoisDo401` avisa a espera — a sonda conta enquanto d
   let sonda = null;
   const relogio = [];
   const deps = {
-    epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
+    AppState: {}, epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
     handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => true,
     navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [5, 5],
     setTimeout: (fn) => { relogio.push(fn); return relogio.length; },
@@ -403,7 +403,7 @@ test('R17-2-01: `refazerDepoisDo401` avisa a espera — a sonda conta enquanto d
 test('R17-2-01: a sonda cortada pela troca de época NÃO avisa o fim (apagaria a conta da sessão que veio) — e sem `aoEsperar` nada muda', async () => {
   const eventos = [];
   let sonda = null;
-  const deps = { epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
+  const deps = { AppState: {}, epocaDaSessao: 0, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
     handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => true, navigator: { onLine: true } };
   const h = montar(['refazerDepoisDo401', 'callWithRetry', 'sessaoTrocou'], deps);
   const andando = h.refazerDepoisDo401(0, async () => ({ success: true }), (sim) => eventos.push(sim));
@@ -675,7 +675,7 @@ test('R17-3-02: `teclaDeComposicao` — `isComposing` (Chrome do macOS) OU `keyC
 
 test('R17-3-02: o campo do nome da fachada e o código de pareamento ignoram a tecla da composição — o Enter e o Esc comuns seguem valendo', () => {
   const ouvintes = fatiar('setupModalListeners');
-  const nome = /\$\('lightboxNomeInput'\)\?\.addEventListener\('keydown', \(ev\) => \{\s*if \(teclaDeComposicao\(ev\)\) return;\s*if \(ev\.key === 'Enter'\) \{ ev\.preventDefault\(\); confirmarRenomear\(\); \}\s*else if \(ev\.key === 'Escape'\)/;
+  const nome = /\$\('lightboxNomeInput'\)\?\.addEventListener\('keydown', \(ev\) => \{\s*if \(teclaDeComposicao\(ev\)\) return;\s*if \(ev\.key === 'Enter'\) \{ ev\.preventDefault\(\); if \(!ev\.repeat\) confirmarRenomear\(\); \}\s*else if \(ev\.key === 'Escape'\)/;
   assert.match(ouvintes, nome, 'DEFEITO: o Enter/Esc do campo do nome não olham a composição do IME (R17-3-02)');
   assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;/,
     'o Enter do código de pareamento não olha a composição');

@@ -505,7 +505,7 @@ test('R11-4-03: a marca da outra aba VENCE (a aba morreu no meio do envio) — o
 test('R10-4-05: o fim do envio solta o "em andamento" ANTES de redesenhar o indicador', () => {
   const m = /const runExecutor = async \(\) => \{[\s\S]*?\} finally \{([\s\S]*?)\n {8}\}/.exec(fatiar('scheduleAction'));
   assert.ok(m, 'o `finally` do executor sumiu do scheduleAction');
-  const iSolta = m[1].indexOf('marcarEmAndamento(places, false, geracao);');
+  const iSolta = m[1].indexOf('marcarEmAndamento(doEnvio, false, geracao);');
   const iDesenha = m[1].indexOf('updateInFlightIndicator();');
   assert.ok(iSolta >= 0 && iDesenha > iSolta,
     'o executor redesenha o indicador com a decisão ainda "em andamento" — o "1 esperando" nasce sem o `nao-cobrir`');

@@ -280,13 +280,17 @@ test('R19-1-01: o "Sair" sobe a geração, e todo `finally` que solta estado com
     'o "Sair" deixou de subir a geração: nenhuma resposta velha se distingue da nova');
   for (const nome of ['enviarLote', 'handleBatchMarkRead']) {
     const corpo = fatiar(nome);
-    assert.match(corpo, /^\s+const geracao = AppState\.geracaoDoSair;/m, `${nome} não captura a geração do "Sair"`);
+    // O `enviarLote` da recusa automática recebe a geração tirada ANTES da espera pela trava (R20-2-01).
+    const captura = nome === 'enviarLote'
+      ? /^\s+const geracao = naSessao \? naSessao\.geracao : AppState\.geracaoDoSair;/m
+      : /^\s+const geracao = AppState\.geracaoDoSair;/m;
+    assert.match(corpo, captura, `${nome} não captura a geração do "Sair"`);
     assert.match(corpo, /if \(geracao === AppState\.geracaoDoSair\) AppState\.inFlightActions = Math\.max\(0, AppState\.inFlightActions - 1\);/,
       `${nome} decrementa o contador da sessão nova`);
   }
   const sched = fatiar('scheduleAction');
   assert.match(sched, /const geracao = AppState\.geracaoDoSair;\s*AppState\.inFlightActions\+\+;/, 'o executor não captura a geração junto do incremento');
-  assert.match(sched, /marcarEmAndamento\(places, false, geracao\);\s*if \(geracao === AppState\.geracaoDoSair\) AppState\.inFlightActions = Math\.max/,
+  assert.match(sched, /marcarEmAndamento\((?:places|doEnvio), false, geracao\);\s*if \(geracao === AppState\.geracaoDoSair\) AppState\.inFlightActions = Math\.max/,
     'o `finally` do executor solta o que é da sessão nova');
   assert.match(fatiar('enviarAprovacao'), /marcarEmAndamento\(alvo\.place, false, geracao\);/, 'a aprovação solta o "em andamento" da sessão nova');
   // As funções de marcar ignoram a geração velha nos dois sentidos.
@@ -707,8 +711,13 @@ test('R19-2-03: a frase existe nos 4 idiomas, no singular e no plural, sem culpa
     // A falta de rede tem palavra própria ("sinal"): aqui a causa é a pessoa ter saído do app.
     assert.doesNotMatch(um + varios, /sinal|signal|señal|réseau|rede\b/i, `${lang}: a frase culpa a rede`);
   }
-  assert.match(D.pt['toast.loteNaoSaiu'], /do app\./, 'pt: "app" é masculino');
-  assert.match(D.pt['toast.loteNaoSaiuPlural'], /do app\./, 'pt: "app" é masculino');
+  // (R20-6, nota) "Sair" é o logout: a frase não diz "você saiu do app" — diz o que aconteceu, o app ir pro segundo plano.
+  assert.match(D.pt['toast.loteNaoSaiu'], /porque o app foi para o segundo plano\./, 'pt: "app" é masculino e a causa é o segundo plano');
+  assert.match(D.pt['toast.loteNaoSaiuPlural'], /porque o app foi para o segundo plano\./, 'pt: "app" é masculino e a causa é o segundo plano');
+  for (const lang of Object.keys(D)) {
+    assert.doesNotMatch(D[lang]['toast.loteNaoSaiu'] + D[lang]['toast.loteNaoSaiuPlural'], /você saiu|you left|saliste|vous avez quitté/i,
+      `${lang}: a frase volta a dizer que a pessoa "saiu" (o "Sair" é o logout)`);
+  }
 });
 
 // ───────────────────── R19-7-02: o QR do Resumo do mês tem teto, e a geração não empilha ─────────────────────
