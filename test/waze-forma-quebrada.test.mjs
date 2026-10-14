@@ -135,9 +135,11 @@ test('R17-6-A1: CONTROLE — a resposta boa com pontos de entrada, marcas e foto
     assert.equal((await rodar('buscar-places', mudarMais(caminho, [null]))).status, 200, caminho.join('.'));
   }
   // Local SEM ponto nenhum na entrada (`point` ausente) não é forma quebrada: só não desenha o marcador.
-  const semPonto = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], [{ name: 'sem ponto' }]));
-  assert.equal(semPonto.status, 200);
-  assert.equal(semPonto.body.places[0].mapa.entradas.length, 0);
+  for (const item of [{ name: 'sem ponto' }, { point: null }, { point: {} }, { point: { coordinates: null } }, { point: { coordinates: [] } }]) {
+    const semPonto = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], [item]));
+    assert.equal(semPonto.status, 200, JSON.stringify(item));
+    assert.equal(semPonto.body.places[0].mapa.entradas.length, 0, JSON.stringify(item));
+  }
 });
 
 const QUEBRADAS_DE_DENTRO = [

@@ -1367,13 +1367,14 @@ export const pontoDeGeometria = (geom) => {
 // em vez de desenhar um mapa do oceano no ponto (0, 0).
 export const montarMapa = (venue, changes) => {
   // O ponto de entrada/saída: `[lat, lon]`, ou `null` quando o item não traz
-  // ponto nenhum (acontece, e o card só não desenha esse marcador). Ponto que
+  // ponto nenhum (ausente, `null` ou `[]`: acontece, e o card só não desenha esse
+  // marcador). Ponto que
   // VEIO mas não é um par de números (`[5]`, `[5, null]`, texto) é a forma
   // quebrada do Waze: resposta inesperada, não um marcador em `undefined`
   // (antes: `toFixed` de `undefined`, "Erro interno"; R17-6-A1).
   const pontoDoEEP = (item) => {
     const c = item && item.point && item.point.coordinates;
-    if (c === undefined || c === null) return null;
+    if (c === undefined || c === null || (Array.isArray(c) && c.length === 0)) return null;
     if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) respostaInesperadaDoWaze();
     return [c[1], c[0]];
   };
