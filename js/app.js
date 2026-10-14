@@ -22945,6 +22945,10 @@ let offlineUltimoResultado = null;
 // comparado quando um gatilho que já existe chega (`offlineVarrer`); depois do instante,
 // o próximo gatilho retoma sozinho. Só em memória; o "esquecer" zera.
 let offlineSegurarAte = 0;
+// A última preparação ficou "parcial" porque o aparelho não tem mais ESPAÇO pra guardar os
+// tiles (R17-4-02): é o que a linha das Preferências lê pra dizer isso, em vez do "Faltou
+// parte. Continua sozinho quando houver sinal" — que seria mentira, porque sinal não resolve.
+let offlineSemEspaco = false;
 // ÉPOCA do offline, no mesmo espírito do `fetchEpoch` da fila. `offlineEsquecer`
 // a incrementa, e a varredura desiste se ela mudou DURANTE um `await`.
 //
@@ -23498,6 +23502,7 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
     offlineSegurarAte = 0;
+    offlineSemEspaco = false;
     offlineFilaGravadaEm = null;
     offlineFilaGravadaChaves = null;
     offlineFilaPreparada = null;
@@ -23647,6 +23652,16 @@ function offlineRecuoDoLimite(resp) {
     return Math.min(ms, OFFLINE_LIMITE_PAUSA_MAX_MS);
 }
 
+// Quanto a varredura espera depois de o aparelho dizer que não cabe mais (R17-4-02): espaço
+// não volta sozinho em um minuto, e cada tentativa baixa tile pra jogar fora. O próximo
+// gatilho depois disso tenta de novo — a pessoa que liberou espaço não precisa fazer nada.
+const OFFLINE_COTA_PAUSA_MS = 10 * 60 * 1000;
+// A gravação recusada por falta de ESPAÇO. O nome varia por navegador (Firefox antigo:
+// NS_ERROR_DOM_QUOTA_REACHED; o código legado 22 vale nos outros).
+function offlineErroDeCota(e) {
+    return !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
+}
+
 function offlineBaixar(u, tile, info = null) {
     // Tile vai pro NOSSO cache (tem CORS, então a resposta é transparente e
     // custa 1,01× de orçamento). Foto vai pro cache do navegador via <img>, que
@@ -23724,7 +23739,13 @@ function offlineBaixar(u, tile, info = null) {
             if (epoca !== offlineEpoca) { await offlineDesfazerTile(c, u, true, meu); return false; }
             if (offlineGravandoTile.get(u) === meu) offlineGravandoTile.delete(u);
             return true;
-        } catch (e) { return estourou ? 'teto' : false; }
+        } catch (e) {
+            if (estourou) return 'teto';
+            // A cota estourada (no `open` ou no `put`) não é rede: repetir dá o mesmo erro, e a
+            // sonda diria "a rede anda" e daria o tile por feito, sem ele estar no cache
+            // (R17-4-02: "Pronto" com 0 tiles).
+            return offlineErroDeCota(e) ? 'cota' : false;
+        }
         finally { clearTimeout(teto); }
     })();
 }
@@ -23931,6 +23952,7 @@ async function offlineVarrer() {
         // (500 itens × 3 tentativas × 30 s era "varrendo" por mais de uma hora).
         let penduradasSeguidas = 0;
         let limitado = false;
+        let semEspaco = false;
         const trabalhar = async () => {
             while (pend.length) {
                 if (epoca !== offlineEpoca) return;   // esqueceram no meio
@@ -23960,6 +23982,16 @@ async function offlineVarrer() {
                     definitivos++;
                     feitos.add(it.u);
                     penduradasSeguidas = 0;   // o servidor respondeu: a rede anda
+                } else if (ok === 'cota') {
+                    // O aparelho recusou a gravação por falta de ESPAÇO (R17-4-02): mais
+                    // downloads não têm onde ficar, e tentar de novo dá o mesmo erro. A
+                    // varredura PARA, termina parcial — nunca "pronto", nunca `definitivo` — e
+                    // espera uma pausa longa (a mesma porta do 429): o espaço não volta em
+                    // um minuto, e a prova de rede vem a cada swipe.
+                    semEspaco = true;
+                    penduradasSeguidas = 0;
+                    offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_COTA_PAUSA_MS);
+                    desistidosPorRede.push(it);
                 } else if (ok === 'limite') {
                     // 408/425/429 (R17-4-01): o servidor respondeu pedindo calma. Nem o
                     // item é defeituoso (não vira `definitivo`, que o tiraria da janela
@@ -24048,6 +24080,7 @@ async function offlineVarrer() {
             // seguida entra na fila do IndexedDB DEPOIS dele e apaga tudo.
             const gravandoAJanela = offlineGravarJanela(janela, cobertaDeFato);
             offlineUltimoResultado = 'pronto';
+            offlineSemEspaco = false;
             dfato('offline.pronto', { n: filaReal().length, itens: total, ...(definitivos ? { definitivos } : {}),
                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
                                       ...(semPedidos ? { semNaBase: semPedidos } : {}) });
@@ -24082,12 +24115,15 @@ async function offlineVarrer() {
             await gravandoAJanela;
         } else {
             offlineUltimoResultado = 'parcial';
+            offlineSemEspaco = semEspaco;
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
                                        ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
+                                       ...(semEspaco ? { cota: true } : {}),
                                        ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';
+        offlineSemEspaco = false;
         dfato('offline.erro', { e: String((e && e.message) || e).slice(0, 60) });
     } finally {
         // O aviso ao worker sai em TODO fim — pronto, parcial ou erro —, e não
@@ -24171,8 +24207,13 @@ function atualizarLinhaDoOffline(feitos, total) {
     if (offlineUltimoResultado === 'parcial') {
         // Nem "Pronto" (seria mentira) nem "Preparando…" (já acabou). O próximo
         // gatilho retoma sozinho — a janela servida não avançou.
-        el.innerHTML = `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
-            t('prefs.offline.parcialA'))}</span> ` + escapeHtml(t('prefs.offline.parcialB'));
+        // Faltou ESPAÇO no aparelho (R17-4-02): "quando houver sinal" seria mentira, o
+        // sinal não resolve. O app tenta de novo depois de uma pausa, sem a pessoa fazer nada.
+        el.innerHTML = offlineSemEspaco
+            ? `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+                t('prefs.offline.semEspacoA'))}</span> ` + escapeHtml(t('prefs.offline.semEspacoB'))
+            : `<span class="text-amber-800 dark:text-amber-300 font-semibold">${escapeHtml(
+                t('prefs.offline.parcialA'))}</span> ` + escapeHtml(t('prefs.offline.parcialB'));
         return;
     }
     // Nada varrido ainda nesta janela: "Pronto" aqui era a linha caindo no

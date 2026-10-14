@@ -53,7 +53,7 @@ const CICLO = constanteBruta('OFFLINE_CICLO_MS');
 // `fetch` de mentira que o teste escreve: `rede(u, n, quem)` devolve o que o servidor responde
 // à n-ésima chamada daquele endereço (`quem`: 'baixar' | 'sonda'). Os 400 ms entre tentativas
 // viram imediatos (e são anotados em `esperas`); o teto de 30 s do download segue o de verdade.
-function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null }) {
+function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null, put = null, abrirCache = null }) {
   const relogio = { agora: JANELA * CICLO + 1000 };
   const chamadas = new Map();
   const log = { baixar: 0, sonda: 0, esperas: [] };
@@ -76,8 +76,9 @@ function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null }) {
     OFFLINE_4XX_PASSAGEIRO: new Function('return ' + /^const OFFLINE_4XX_PASSAGEIRO = (new Set\(\[[^\]]*\]\));/m.exec(APP_SEM)[1])(),
     OFFLINE_LIMITE_PAUSA_MS: constanteBruta('OFFLINE_LIMITE_PAUSA_MS'),
     OFFLINE_LIMITE_PAUSA_MAX_MS: constanteBruta('OFFLINE_LIMITE_PAUSA_MAX_MS'),
+    OFFLINE_COTA_PAUSA_MS: constanteBruta('OFFLINE_COTA_PAUSA_MS'),
     offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0, Image: class {},
-    caches: { open: async () => ({ put: async (u) => { noCache.set(u, true); }, delete: async (u) => noCache.delete(u), keys: async () => [...noCache.keys()].map((url) => ({ url })) }),
+    caches: { open: async () => { if (abrirCache) await abrirCache(); return ({ put: async (u) => { if (put) await put(u); noCache.set(u, true); }, delete: async (u) => noCache.delete(u), keys: async () => [...noCache.keys()].map((url) => ({ url })) }); },
               has: async () => noCache.size > 0, delete: async () => true },
     offlineItensDaFila: async () => itens.map((u) => ({ u, tile: true })),
     offlineGravarJanela: () => {}, offlinePodarTiles: async () => 0, offlineAnunciarTiles: () => {},
@@ -99,17 +100,17 @@ function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null }) {
   const chaves = Object.keys(deps).filter((k) => k !== 'fetch');
   const corpo = [
     'let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,',
-    '    offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null, offlineFilaPreparada = null,',
+    '    offlineUltimoResultado = null, offlineSegurarAte = 0, offlineSemEspaco = false, offlineEpoca = 0, offlineFilaGravadaEm = null, offlineFilaPreparada = null,',
     '    offlineFilaVarrida = null, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
     'async function offlineGravarFila() { contar("gravou"); offlineFilaGravadaEm = 5; return true; }',
     'async function offlineLerFila() { return { t: 5, places: [{ venueID: "v", updateRequestID: "u" }] }; }',
-    ...['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineDesfazerTile', 'offlineRecuoDoLimite'].map(fatiar),
+    ...['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineDesfazerTile', 'offlineRecuoDoLimite', 'offlineErroDeCota'].map(fatiar),
     // O download e a sonda têm `fetch` próprio (o que marca QUEM perguntou).
     fatiar('offlineBaixar').replace(/\bfetch\(/g, 'fetchBaixar('),
     fatiar('offlineSondarRede').replace(/\bfetch\(/g, 'fetchSonda('),
     fatiar('offlineVarrer'),
     `return { varrer: offlineVarrer, estado: () => ({ resultado: offlineUltimoResultado, janela: offlineJanelaServida, segurarAte: offlineSegurarAte,
-      feitos: [...offlineFeitosNaJanela.us], guardados: [...offlineFeitosNaJanela.guardados] }), sondar: offlineSondarRede, baixar: offlineBaixar,
+      semEspaco: offlineSemEspaco, feitos: [...offlineFeitosNaJanela.us], guardados: [...offlineFeitosNaJanela.guardados] }), sondar: offlineSondarRede, baixar: offlineBaixar,
       esquecer: () => { offlineEpoca++; offlineSegurarAte = 0; }, gesto: () => { offlineUltimoGesto = Date.now(); } };`,
   ].join('\n');
   const app = new Function(...chaves, 'fetchBaixar', 'fetchSonda', corpo)(
@@ -270,8 +271,96 @@ test('R17-4-05: o item que o teto de falhas (`falhas > total * 2`) larga NÃO so
   assert.equal(x.app.estado().feitos.includes(TILE('B')), false);
 });
 
+// ═══ R17-4-02 · a cota de armazenamento estourada não é "Pronto" ═════════════════════════
+const cotaEstourada = (nome = 'QuotaExceededError', extra = {}) => Object.assign(new Error('full'), { name: nome }, extra);
+test('R17-4-02: o `put` recusado por falta de ESPAÇO termina PARCIAL e com o motivo — não "Pronto" com 0 tiles — e a varredura para na primeira recusa', async () => {
+  const x = varredura({ itens: itensDe(7), rede: () => ok200, put: async () => { throw cotaEstourada(); } });
+  await x.app.varrer();
+  const e = x.app.estado();
+  assert.equal(e.resultado, 'parcial', 'DEFEITO: a cota estourada terminou em "pronto" com 0 tiles no aparelho');
+  assert.equal(e.semEspaco, true, 'a linha não sabe que faltou espaço (diria "quando houver sinal")');
+  assert.equal(e.janela, null);
+  assert.equal(x.noCache.size, 0);
+  assert.ok(x.log.baixar <= 3, `DEFEITO: ${x.log.baixar} downloads depois de o aparelho dizer que não cabe (no máximo um por trabalhador)`);
+  assert.equal(x.log.sonda, 0, 'a sonda perguntou à rede por um erro que a rede não causou');
+  assert.equal(e.feitos.length, 0, 'o tile que não coube foi dado por feito');
+  assert.equal(e.segurarAte - x.relogio.agora, constanteBruta('OFFLINE_COTA_PAUSA_MS'), 'a pausa da cota não é a longa');
+  assert.ok(x.diario.some(([k, o]) => k === 'offline.parcial' && o && o.cota === true), 'o diário não diz que foi a cota');
+});
+
+test('R17-4-02: a cota estourada já no `caches.open` vale o mesmo; e outros nomes do erro (Firefox antigo, código 22) também', async () => {
+  for (const [nome, extra] of [['NS_ERROR_DOM_QUOTA_REACHED', {}], ['Erro qualquer', { code: 22 }]]) {
+    const x = varredura({ itens: itensDe(3), rede: () => ok200, put: async () => { throw cotaEstourada(nome, extra); } });
+    await x.app.varrer();
+    assert.equal(x.app.estado().semEspaco, true, `${nome}/${extra.code}: não foi reconhecido como falta de espaço`);
+  }
+  const noOpen = varredura({ itens: itensDe(3), rede: () => ok200, abrirCache: async () => { throw cotaEstourada(); } });
+  await noOpen.app.varrer();
+  assert.equal(noOpen.app.estado().resultado, 'parcial', 'a cota estourada no `open` terminou "pronto"');
+  assert.equal(noOpen.app.estado().semEspaco, true);
+});
+
+test('R17-4-02: CONTROLE — um erro de gravação que NÃO é cota segue como antes (falha de rede, 3 tentativas), e sem erro nenhum não há pausa nem "sem espaço"', async () => {
+  const x = varredura({ itens: itensDe(2), rede: () => ok200, put: async () => { throw new Error('outra coisa'); } });
+  await x.app.varrer();
+  assert.equal(x.app.estado().semEspaco, false, 'CONTROLE: um erro qualquer foi tomado por falta de espaço');
+  assert.equal(x.app.estado().segurarAte, 0, 'CONTROLE: um erro qualquer marcou a pausa longa');
+  const bom = varredura({ itens: itensDe(5), rede: () => ok200 });
+  await bom.app.varrer();
+  assert.equal(bom.app.estado().semEspaco, false);
+  assert.equal(bom.app.estado().resultado, 'pronto');
+  assert.equal(bom.noCache.size, 5);
+});
+
+test('R17-4-02: durante a pausa ninguém pede nada; com o espaço liberado, o primeiro gatilho depois dela prepara tudo e a linha deixa de falar em espaço', async () => {
+  let cheio = true;
+  const x = varredura({ itens: itensDe(7), rede: () => ok200, put: async () => { if (cheio) throw cotaEstourada(); } });
+  await x.app.varrer();
+  const depois = x.log.baixar;
+  for (let i = 0; i < 10; i++) { x.relogio.agora += 20000; x.app.gesto(); await x.app.varrer(); }
+  assert.equal(x.log.baixar, depois, 'DEFEITO: cada gatilho da pausa baixou tile pra não guardar');
+  cheio = false;
+  x.relogio.agora = x.app.estado().segurarAte + 1;
+  x.app.gesto();
+  await x.app.varrer();
+  assert.equal(x.app.estado().resultado, 'pronto');
+  assert.equal(x.app.estado().semEspaco, false, 'o motivo antigo ficou depois do "pronto"');
+  assert.equal(x.noCache.size, 7);
+});
+
+test('R17-4-02: a linha das Preferências diz que faltou ESPAÇO (e não promete sinal) nos 4 idiomas; sem o motivo, a de sempre', () => {
+  const dicionario = ler('js/i18n.js');
+  const langs = { pt: /espaço/i, en: /space/i, es: /espacio/i, fr: /espace/i };
+  const blocos = dicionario.split(/^\s{2}(?:'?)(pt|en|es|fr)(?:'?):\s*\{/m);
+  const porLang = {};
+  for (let i = 1; i < blocos.length; i += 2) porLang[blocos[i]] = blocos[i + 1];
+  for (const [lang, termo] of Object.entries(langs)) {
+    assert.ok(porLang[lang], `bloco ${lang} do dicionário não achado`);
+    for (const chave of ['semEspacoA', 'semEspacoB']) {
+      const m = new RegExp(`'prefs\\.offline\\.${chave}':\\s*'([^']*)'`).exec(porLang[lang]);
+      assert.ok(m, `${lang}: falta prefs.offline.${chave}`);
+      assert.doesNotMatch(m[1], /sinal|signal|señal|réseau/i, `${lang}.${chave}: fala de rede, e o problema é espaço`);
+      if (chave === 'semEspacoA') assert.match(m[1], termo, `${lang}.${chave}: não fala em espaço`);
+    }
+  }
+  // A linha de verdade, fatiada.
+  const el = { innerHTML: '', textContent: '' };
+  const linha = (semEspaco) => {
+    const deps = { navigator: { onLine: true }, document: { getElementById: () => el }, t: (k) => k, escapeHtml: (x) => x,
+      offlineLigado: () => true, filaReal: () => [{}], filaGuardadaEsperandoOTreino: () => null, Date, OFFLINE_CICLO_MS: CICLO };
+    const chaves = Object.keys(deps);
+    return new Function(...chaves, `let offlineUltimoResultado = 'parcial', offlineSemEspaco = ${semEspaco}, offlineVarrendo = false, offlineJanelaServida = null,
+      offlineFilaPreparada = null, offlineFilaGravadaEm = 1; function offlinePrecisaVarrer() { return true; }
+      ${fatiar('atualizarLinhaDoOffline')}
+      atualizarLinhaDoOffline(0, 0); return document.getElementById('x').innerHTML;`)(...chaves.map((k) => deps[k]));
+  };
+  assert.match(linha(true), /prefs\.offline\.semEspacoA[\s\S]*prefs\.offline\.semEspacoB/, 'DEFEITO: com a cota estourada a linha não diz que faltou espaço');
+  assert.doesNotMatch(linha(true), /parcialA|parcialB/);
+  assert.match(linha(false), /parcialA[\s\S]*parcialB/, 'CONTROLE: sem o motivo a linha deixou de ser a de sempre');
+});
+
 test('o bundle GERADO tem os consertos do lote 21 (senão nada disso está no ar)', () => {
-  for (const nome of ['offlineSegurarAte', 'offlineRecuoDoLimite']) {
+  for (const nome of ['offlineSegurarAte', 'offlineRecuoDoLimite', 'offlineErroDeCota', 'offlineSemEspaco', 'semEspacoA']) {
     assert.ok(MIN.includes(nome), `js/min/app.js não tem ${nome} — rode \`npm run js\``);
   }
 });

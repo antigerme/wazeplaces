@@ -166,7 +166,7 @@ test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de R
     Image: class {}, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
   };
   const chaves = Object.keys(deps);
-  const baixarCom = (resposta) => new Function(...chaves, 'fetch', fatiar('offlineBaixar') + '\nreturn offlineBaixar;')(
+  const baixarCom = (resposta) => new Function(...chaves, 'fetch', fatiar('offlineErroDeCota') + '\n' + fatiar('offlineBaixar') + '\nreturn offlineBaixar;')(
     ...chaves.map((k) => deps[k]), async () => { if (resposta === 'rede') throw new TypeError('Failed to fetch'); return { ok: resposta < 300, status: resposta }; });
   assert.equal(await baixarCom(404)('https://www.waze.com/row-tiles/live/base/1', true), 'definitivo');
   assert.equal(await baixarCom(410)('https://www.waze.com/row-tiles/live/base/2', true), 'definitivo');
