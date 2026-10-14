@@ -1270,6 +1270,11 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
 {
   const MODAIS_L24 = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'filtersModal',
     'pairEnterModal', 'batchReadModal', 'resumoModal'];
+  // Os outros `.modal-root` não têm linha de dois botões, mas varrem-se do mesmo
+  // jeito: nenhum botão, aba ou link além da caixa do cartão (o pedido da auditoria
+  // era "todos os `.modal-root`").
+  const MODAIS_SEM_LINHA_L24 = ['treinoFimModal', 'helpModal', 'accessDeniedModal', 'pairShowModal',
+    'autorModal', 'presencaModal', 'conversaModal', 'pedidoModal'];
   const SVG_FOTO_L24 = 'data:image/svg+xml;base64,' + Buffer.from(
     "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='#475569'/></svg>").toString('base64');
   const novaPagina = async (viewport, escala, estilo) => {
@@ -1329,11 +1334,15 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       const alvos = [...m.querySelectorAll('.dialogo-acoes > button, [role=tab], #closeFilters')]
         .filter((el) => el.offsetParent !== null);
       const fora = [], quebradas = [];
-      for (const el of alvos) {
+      // Fora da caixa: TODO botão, aba e link do diálogo; palavra partida: só os rótulos
+      // das linhas de botões e das abas (um link no meio de um parágrafo quebra de linha).
+      for (const el of [...m.querySelectorAll('button, [role=tab], a')].filter((e) => e.offsetParent !== null)) {
         const r = el.getBoundingClientRect();
-        if (r.right > cr.right + 0.5 || r.left < cr.left - 0.5 || r.right > innerWidth + 0.5) {
-          fora.push(`${el.id || el.textContent.trim()}+${Math.round(Math.max(r.right - cr.right, cr.left - r.left))}`);
+        if (r.width && (r.right > cr.right + 0.5 || r.left < cr.left - 0.5 || r.right > innerWidth + 0.5)) {
+          fora.push(`${el.id || el.textContent.trim().slice(0, 14)}+${Math.round(Math.max(r.right - cr.right, cr.left - r.left))}`);
         }
+      }
+      for (const el of alvos) {
         const tn = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
         if (!tn) continue;
         const re = /\S+/g; let mm;
@@ -1377,7 +1386,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     let empilhou = 0;
     for (const lang of langs) {
       await montarTela(page, { lang, places: places1 });
-      for (const id of MODAIS_L24) {
+      for (const id of [...MODAIS_L24, ...MODAIS_SEM_LINHA_L24]) {
         const r = await page.evaluate(medirDialogo, id);
         checa(r.fora.length === 0, `texto ${rot} · ${lang} · ${id}: botão/aba fora do cartão`, r.fora.join(', '));
         checa(r.quebradas.length === 0, `texto ${rot} · ${lang} · ${id}: palavra partida no meio`, r.quebradas.join(', '));
@@ -7470,8 +7479,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const s = document.createElement('style');
       // A regra da tela estreita desligada — a hifenização junto: ela sozinha
       // já encolhe a palavra mínima do botão (o pedaço "décon-") —, e o ícone
-      // encolhendo de novo.
-      s.textContent = '.dialogo-acoes > button { min-width: auto !important; padding-left: 1rem !important; padding-right: 1rem !important;'
+      // encolhendo de novo. E, desde o lote 24, a QUEBRA DE LINHA da linha
+      // (`flex-wrap`, o que empilha os botões no texto grande): com ela o botão
+      // que não cabe vai pra linha de baixo em vez de sair da caixa, e a medida
+      // não teria defeito nenhum pra ver.
+      s.textContent = '.dialogo-acoes { flex-wrap: nowrap !important; }'
+        + ' .dialogo-acoes > button { min-width: auto !important; padding-left: 1rem !important; padding-right: 1rem !important;'
         + ' -webkit-hyphens: manual !important; hyphens: manual !important; overflow-wrap: normal !important; }'
         + ' #pairCopyLinkBtn svg { flex-shrink: 1 !important; }';
       document.head.appendChild(s);
