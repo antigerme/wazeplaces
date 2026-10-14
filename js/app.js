@@ -3956,9 +3956,31 @@ function setupLightbox() {
     document.getElementById('lightboxClose').addEventListener('click', () => Lightbox.close());
     document.getElementById('lightboxPrev').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.prev(); });
     document.getElementById('lightboxNext').addEventListener('click', (e) => { e.stopPropagation(); Lightbox.next(); });
-    // O fundo é um passo pra trás — editando o nome, só sai da edição.
+    // O fundo é um passo pra trás — editando o nome, só sai da edição. Mas só o TOQUE no
+    // fundo, e não o ARRASTO que acaba nele (R21-3-03): com o mouse, descer o botão na tarja
+    // preta, mover e soltar gera um `click` na camada (os dois alvos são ela), e a foto
+    // FECHAVA — também no arrasto pro lado, que na foto troca. O movimento é medido na
+    // camada inteira e por QUALQUER gesto (o `pointerdown` da <img> sobe até aqui), da
+    // descida do ponteiro principal até o `click`: passou de `TOQUE_FOLGA_PX`, é arraste,
+    // e o clique que vem depois dele não fecha nada. O clique parado segue fechando. O
+    // toque do dedo não gera `click` depois de arrastar, então o dedo não muda; o arraste
+    // do dedo na tarja (que também não faz nada) é o `touch-action` da camada, e esse o
+    // "zoom nunca bloqueado" não deixa mexer.
+    let gestoNaCamada = null;   // { x, y, arrastou } do gesto em curso; apagado pelo `click` que o encerra
+    lb.addEventListener('pointerdown', (e) => {
+        if (e.isPrimary === false) return;
+        gestoNaCamada = { x: e.clientX, y: e.clientY, arrastou: false };
+    });
+    lb.addEventListener('pointermove', (e) => {
+        if (!gestoNaCamada || gestoNaCamada.arrastou) return;
+        if (Math.hypot(e.clientX - gestoNaCamada.x, e.clientY - gestoNaCamada.y) > TOQUE_FOLGA_PX) gestoNaCamada.arrastou = true;
+    });
+    // O cancelamento do sistema (a palma, a ligação) não termina em `click`.
+    lb.addEventListener('pointercancel', () => { gestoNaCamada = null; });
     lb.addEventListener('click', (e) => {
-        if (e.target === lb) recuarNaFoto();
+        const arrastou = !!(gestoNaCamada && gestoNaCamada.arrastou);
+        gestoNaCamada = null;
+        if (e.target === lb && !arrastou) recuarNaFoto();
     });
     // O toque nas ações TRAVADAS da foto (o "Aprovar", a lixeira, a pílula do
     // nome) responde com o porquê, como o ✕ ↑ ✓ do card (C14, ver
@@ -5555,16 +5577,33 @@ function recuarNaFoto() {
     Lightbox.close();
 }
 
+// O que a correção do nome ESCREVERIA, ou `null` quando não há o que escrever — a pergunta é UMA, e o ✓
+// (`atualizarBotaoSalvarNome`) e o Enter (`confirmarRenomear`) a fazem pela mesma função: o que o app
+// mostra e o que ele aceita são a mesma coisa (R21-3-04).
+//
+// O nome vai aparado, como o servidor o grava (`handleRenomearLocal` faz `trim()`), e a comparação é com o
+// nome COMO O WAZE O TEM — o campo abre com ele cru (`abrirEdicaoNome`). Comparar com o nome aparado
+// fazia de "tirar o espaço sobrando no começo ou no fim" um no-op calado: o ✓ não habilitava e o Enter
+// saía da edição sem escrever (R21-3-04, MEDIDO). Duas coisas não escrevem: o campo INTOCADO (nome igual
+// ao cru, com ou sem espaço nas pontas — abrir a edição e apertar o Enter nunca grava nada) e o aparado
+// que dá o que o Waze já tem (digitar um espaço no fim de "Padaria").
+function nomeParaGravar(place, digitado) {
+    const cru = String((place && place.name) || '');
+    const bruto = String(digitado == null ? '' : digitado);
+    const novo = bruto.trim();
+    if (!novo || bruto === cru || novo === cru) return null;
+    return novo;
+}
+
 function atualizarBotaoSalvarNome() {
     const inp = document.getElementById('lightboxNomeInput');
     const ok = document.getElementById('lightboxNomeOk');
     if (!inp || !ok) return;
-    const v = inp.value.trim();
     // Vazio ou igual ao atual não é renomeação. Botão morto com cara de vivo lê
     // como app quebrado, então ele fica `disabled` E esmaecido. Com as ações
     // travadas (a conferência de um 401, a sessão caindo) ele também não salva
     // — o `confirmarRenomear` confere a MESMA trava (a hipótese do L23).
-    ok.disabled = acoesTravadas() || !v || v === String(Lightbox.place && Lightbox.place.name || '').trim();
+    ok.disabled = acoesTravadas() || nomeParaGravar(Lightbox.place, inp.value) === null;
 }
 
 function confirmarRenomear() {
@@ -5582,10 +5621,12 @@ function confirmarRenomear() {
     }
     if (!podeRenomearAqui()) return;
     const inp = document.getElementById('lightboxNomeInput');
-    const novo = inp ? inp.value.trim() : '';
     const place = Lightbox.place;
-    const antigo = String(place.name || '').trim();
-    if (!novo || novo === antigo) { sairDaEdicaoNome(); return; }
+    // O nome de ANTES é o cru, como o Waze o tem: é a ele que o Desfazer e a falha devolvem a tela
+    // (R21-3-04; aparado, devolviam outro nome que o Waze nunca teve).
+    const antigo = String(place.name || '');
+    const novo = nomeParaGravar(place, inp ? inp.value : '');
+    if (!novo) { sairDaEdicaoNome(); return; }
     // A MESMA trava dos outros botões (a hipótese do L23, confirmada): com a
     // edição aberta, o Enter renomeava DURANTE a conferência de um 401 de outra
     // escrita do lightbox — a que ainda pode sair de novo, e com a qual nada

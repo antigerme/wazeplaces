@@ -846,7 +846,7 @@ test('L4 o passo pra trás: editando, sai da edição e a foto fica; sem ediçã
   }
   // Os caminhos que eram `Lightbox.close()` direto passam por ele.
   const setup = fatiar('setupLightbox');
-  assert.match(setup, /if \(e\.target === lb\) recuarNaFoto\(\);/, 'o toque no FUNDO voltou a fechar direto');
+  assert.match(setup, /if \(e\.target === lb && !arrastou\) recuarNaFoto\(\);/, 'o toque no FUNDO voltou a fechar direto');
   assert.match(setup, /dy > 80 && Math\.abs\(dy\) > Math\.abs\(dx\)\) \{\s*recuarNaFoto\(\);/,
     'o arraste pra BAIXO voltou a fechar direto');
 });
@@ -1278,7 +1278,7 @@ test('L23 (hipótese) o Enter com as ações travadas não renomeia: avisa, e a 
       registrarDesfazer() {}, mostrarDesfazer: () => log.push('banner'), manterFocoNoLightbox() {},
     };
     const chaves = Object.keys(deps);
-    const confirmar = new Function(...chaves, fatiar('confirmarRenomear') + '\nreturn confirmarRenomear;')(...chaves.map((k) => deps[k]));
+    const confirmar = new Function(...chaves, fatiar('nomeParaGravar') + '\n' + fatiar('confirmarRenomear') + '\nreturn confirmarRenomear;')(...chaves.map((k) => deps[k]));
     confirmar();
     if (travado) {
       assert.ok(!log.includes('banner') && !log.some((l) => l.startsWith('nome:')),
@@ -2230,7 +2230,7 @@ function confirmarComCampo({ autenticado = true, editando = true, travado = fals
     semCamadaAberta: () => !Lightbox.isOpen() && !camada,
   };
   const confirmar = new Function(...Object.keys(deps),
-    fatiar('confirmarRenomear') + '\n' + fatiar('anunciarDesfechoDaFoto') + '\nreturn confirmarRenomear;')(...Object.values(deps));
+    fatiar('nomeParaGravar') + '\n' + fatiar('confirmarRenomear') + '\n' + fatiar('anunciarDesfechoDaFoto') + '\nreturn confirmarRenomear;')(...Object.values(deps));
   return { confirmar, log, Lightbox };
 }
 
@@ -2868,7 +2868,7 @@ function edicaoComFoco() {
     aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {},
   };
   const app = new Function(...Object.keys(deps), 'let aprovandoAgora = false, excluindoAgora = false;\n'
-    + ['focavelNaTela', 'manterFocoNoLightbox', 'atualizarBotaoSalvarNome', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
+    + ['focavelNaTela', 'manterFocoNoLightbox', 'nomeParaGravar', 'atualizarBotaoSalvarNome', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
     + '\nreturn { aplicarTravaDeAcao };')(...Object.values(deps));
   const onde = () => doc.activeElement && doc.activeElement.nome;
   return { app, doc, els, estado, onde };
@@ -3765,7 +3765,7 @@ test('R11-3-05 com o Desfazer, o nome que o Waze grava é dito pelo IRMÃO (o `a
       // Nenhum refazer da fila adiado pro fim desta janela (medido em test/busca-auditoria-r14.test.mjs).
       atenderOFimDaJanela: () => {},
     };
-    const corpo = fatiar('confirmarRenomear').replace(/renomeacaoPendente/g, '__pend.r');
+    const corpo = (fatiar('nomeParaGravar') + '\n' + fatiar('confirmarRenomear')).replace(/renomeacaoPendente/g, '__pend.r');
     const confirmar = new Function(...Object.keys(deps), '__pend', corpo + '\nreturn confirmarRenomear;')(...Object.values(deps), { r: null });
     confirmar();
     assert.equal(timers.length, 1, 'PRÉ-CONDIÇÃO: a janela do nome não abriu');

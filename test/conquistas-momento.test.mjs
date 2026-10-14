@@ -397,7 +397,7 @@ function montarLightboxComJanela() {
   };
   // O fim da janela, que atende o refazer da fila adiado pra ele (o irmão do
   // R14-2-05 na foto ampliada, pedido extra do lote 18): de verdade.
-  const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear', 'atenderOFimDaJanela'];
+  const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear', 'nomeParaGravar', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   // As pendentes são `let` de MÓDULO no app: aqui, um objeto no escopo.
   const corpo = nomes.map(fatiar).join('\n')
