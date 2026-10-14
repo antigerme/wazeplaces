@@ -325,3 +325,125 @@ test('R19-1-01 (1, 2 e 3): o "Rejeitar os N" de A que responde depois do "Sair" 
   assert.ok(deps.pedidosEmAndamento.has(chaveDe(lote[1])), 'DEFEITO: o lote de A tirou o pedido de B do "em andamento"');
   assert.ok(deps.pedidosDoLoteSemEnviar.has(chaveDe(lote[1])), 'DEFEITO: o lote de A tirou o pedido de B dos "esperando envio"');
 });
+
+// ───────────────────── R19-1-02: os códigos de pareamento sobrevivem à recarga ─────────────────────
+// A lista dos códigos emitidos era um `Set` em memória: emitir o QR, recarregar e dar "Sair" mandava
+// ZERO `parear/cancel`, e o código seguia valendo no servidor por até 5 min numa conta que já saiu.
+// Agora a lista grava no `sessionStorage` da aba (nunca no `localStorage`: o diagnóstico o leva
+// inteiro) com a hora em que cada código vence, e a "recarga" a devolve.
+function trechoDaClasse() {
+  const ini = SEM.indexOf('class PareamentosEmitidos extends Set {');
+  assert.ok(ini > 0, 'a classe da lista de códigos emitidos sumiu do app.js');
+  let prof = 0;
+  for (let j = SEM.indexOf('{', ini); j < SEM.length; j++) {
+    if (SEM[j] === '{') prof++;
+    else if (SEM[j] === '}' && --prof === 0) return SEM.slice(ini, j + 1);
+  }
+  throw new Error('não fechou a classe');
+}
+function abaDeMentira({ guardado = null, quebrado = false } = {}) {
+  const dados = new Map(guardado ? [[CHAVE_PAREAMENTOS, guardado]] : []);
+  const sessionStorage = quebrado
+    ? { getItem() { throw new Error('bloqueado'); }, setItem() { throw new Error('bloqueado'); }, removeItem() { throw new Error('bloqueado'); } }
+    : { getItem: (k) => (dados.has(k) ? dados.get(k) : null), setItem: (k, v) => dados.set(k, String(v)), removeItem: (k) => dados.delete(k) };
+  return { dados, sessionStorage };
+}
+const CHAVE_PAREAMENTOS = (/^const PAREAMENTOS_CHAVE = '([^']+)';/m.exec(SEM) || [])[1];
+const relogio = { agora: 1_000_000 };
+function listaDaAba(aba) {
+  const fonte = `const PAREAMENTO_VALE_MS = ${(/^const PAREAMENTO_VALE_MS = ([^;]+);/m.exec(SEM) || [])[1]};\n`
+    + `const PAREAMENTOS_CHAVE = '${CHAVE_PAREAMENTOS}';\n${trechoDaClasse()}\nreturn new PareamentosEmitidos().reler();`;
+  const DateFalso = { now: () => relogio.agora };
+  return new Function('sessionStorage', 'Date', fonte)(aba.sessionStorage, DateFalso);
+}
+
+test('R19-1-02: o código emitido sobrevive à "recarga" da aba — o "Sair" depois dela tem o que cancelar', () => {
+  assert.ok(CHAVE_PAREAMENTOS, 'a chave da lista guardada sumiu do app.js');
+  const aba = abaDeMentira();
+  const antes = listaDaAba(aba);
+  antes.add('QRQRQRQRQRQRQRQRQRQR');
+  antes.add('ABC234');
+  assert.equal(antes.size, 2);
+  // A "recarga": uma lista nova, com o mesmo armazenamento da aba.
+  const depois = listaDaAba(aba);
+  assert.deepEqual([...depois].sort(), ['ABC234', 'QRQRQRQRQRQRQRQRQRQR'],
+    'DEFEITO: a recarga esqueceu os códigos emitidos — o "Sair" mandaria 0 cancelamentos');
+  // O "Sair" percorre a lista e a esvazia (o mesmo laço do `handleLogout`): nada fica guardado.
+  const cancelados = [];
+  for (const code of depois) cancelados.push(code);
+  depois.clear();
+  assert.equal(cancelados.length, 2);
+  assert.equal(listaDaAba(aba).size, 0, 'o "Sair" cancelou os códigos, mas eles voltam na recarga seguinte');
+  assert.equal(aba.dados.size, 0, 'a lista esvaziada deixou a chave no armazenamento da aba');
+  // CONTROLE: sem a persistência (aba nova, sem nada guardado) a lista nasce vazia.
+  assert.equal(listaDaAba(abaDeMentira()).size, 0, 'CONTROLE: aba nova com código guardado');
+});
+
+test('R19-1-02: o código que JÁ venceu não volta (o servidor o recusa), e o que vale ainda volta', () => {
+  const aba = abaDeMentira();
+  const l = listaDaAba(aba);
+  l.add('VELHO2');
+  relogio.agora += 4 * 60 * 1000;           // 4 min depois, o segundo código
+  l.add('NOVO234');
+  relogio.agora += 90 * 1000;                // +1,5 min: o 1º tem 5,5 min (venceu), o 2º tem 1,5
+  const depois = listaDaAba(aba);
+  assert.deepEqual([...depois], ['NOVO234'], 'DEFEITO: o código vencido voltou à lista (ou o válido se perdeu)');
+  relogio.agora += 10 * 60 * 1000;
+  assert.equal(listaDaAba(aba).size, 0, 'CONTROLE: o último também vence');
+});
+
+test('R19-1-02: tirar um código (delete) tira também do armazenamento; sem armazenamento da aba a lista segue em memória', () => {
+  const aba = abaDeMentira();
+  const l = listaDaAba(aba);
+  l.add('AAAAAA'); l.add('BBBBBB');
+  l.delete('AAAAAA');
+  assert.deepEqual([...listaDaAba(aba)], ['BBBBBB'], 'o código tirado voltou na recarga');
+  // A aba sem `sessionStorage` utilizável (janela privada, bloqueado): nada lança, vale em memória.
+  const quebrada = listaDaAba(abaDeMentira({ quebrado: true }));
+  quebrada.add('CCCCCC');
+  assert.deepEqual([...quebrada], ['CCCCCC']);
+  quebrada.clear();
+  assert.equal(quebrada.size, 0);
+  // Lixo guardado não derruba a abertura.
+  for (const lixo of ['{', 'null', '"x"', '[[1,2],["",5],["ok"]]']) {
+    assert.equal(listaDaAba(abaDeMentira({ guardado: lixo })).size, 0, `lixo guardado (${lixo}) virou código`);
+  }
+});
+
+test('R19-1-02 (estrutura): a lista vive no `sessionStorage` (nunca no `localStorage`) e o relatório do modo dev não leva os códigos', () => {
+  const classe = trechoDaClasse();
+  assert.doesNotMatch(classe, /localStorage|safeLS/, 'o segredo do pareamento foi pro armazenamento do aparelho (o diagnóstico leva o localStorage inteiro)');
+  assert.match(classe, /sessionStorage\.setItem\(PAREAMENTOS_CHAVE/, 'a lista deixou de gravar na aba');
+  assert.match(SEM, /^const pareamentosEmitidos = new PareamentosEmitidos\(\)\.reler\(\);/m, 'a lista não relê a aba ao nascer');
+  // O despejo do `sessionStorage` do relatório diz QUANTOS códigos há, nunca quais.
+  const corpo = fatiar('diagCorpo');
+  assert.match(corpo, /ss\[k\] = k === PAREAMENTOS_CHAVE \? '\[códigos de pareamento omitidos: ' \+ pareamentosEmitidos\.size \+ '\]' : sessionStorage\.getItem\(k\);/,
+    'DEFEITO: o relatório do modo dev leva o segredo do pareamento guardado na aba');
+  // O "Sair" e a troca de conta seguem cancelando e esvaziando a MESMA lista.
+  for (const nome of ['handleLogout', 'fecharOQueEraDaContaAnterior']) {
+    assert.match(fatiar(nome), /for \(const code of pareamentosEmitidos\) API\.cancelarPareamento\(code\)\.catch\(\(\) => \{\}\);\s*pareamentosEmitidos\.clear\(\);/,
+      `${nome} deixou de cancelar e esvaziar os códigos emitidos`);
+  }
+});
+
+test('R19-1-02: a Privacidade conta o código de pareamento guardado na aba — nos 4 idiomas, com o prazo da constante', async () => {
+  const vm = await import('node:vm');
+  const ctx = { window: {}, document: undefined, navigator: { language: 'pt' }, localStorage: { getItem: () => null, setItem() {} } };
+  vm.createContext(ctx);
+  vm.runInContext(I18N + '\nthis.__DICT = I18N_DICT;', ctx);
+  const frases = { pt: /o código de pareamento que você mostrou, só nesta aba e por \{parearMin\} minutos/,
+    en: /the pairing code you showed, only in this tab and for \{parearMin\} minutes/,
+    es: /el código de emparejamiento que mostraste, solo en esta pestaña y por \{parearMin\} minutos/,
+    fr: /le code d’appairage que vous avez affiché, dans cet onglet seulement et pendant \{parearMin\} minutes/ };
+  assert.deepEqual(Object.keys(ctx.__DICT).sort(), Object.keys(frases).sort(), 'CONTROLE: o teste não cobre todas as línguas');
+  for (const [lang, re] of Object.entries(frases)) {
+    assert.match(ctx.__DICT[lang]['help.privacy.device'], re, `${lang}: a Privacidade não conta o código de pareamento guardado na aba`);
+  }
+  // O prazo que a tela cita é o que a lista guarda (e o do servidor: test/consistencia).
+  const exibido = Number((/^const PAREAR_MIN_EXIBIDO = (\d+);/m.exec(SEM) || [])[1]);
+  const guarda = (/^const PAREAMENTO_VALE_MS = (\d+) \* 60 \* 1000;/m.exec(SEM) || [])[1];
+  assert.ok(exibido > 1 && Number(guarda) === exibido, `a lista guarda o código por ${guarda} min e a Ajuda diz ${exibido}`);
+  // A reserva do HTML (o que se vê antes do JS) é a mesma frase.
+  const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  assert.match(html, /data-i18n="help\.privacy\.device">[^<]*o código de pareamento que você mostrou, só nesta aba e por 5 minutos/);
+});

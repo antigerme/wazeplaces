@@ -13661,6 +13661,92 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(pulo.estado.pul === 1, '↑ segurada pulou em série', JSON.stringify(pulo.estado));
 }
 
+// ── O QR EMITIDO SOBREVIVE À RECARGA: o "Sair" depois dela o cancela (R19-1-02) ─
+//
+// A lista dos códigos de pareamento emitidos era memória da página: emitir o QR,
+// recarregar (o `hashchange` de um link `#pair=` é mais um caminho que recarrega)
+// e dar "Sair" mandava ZERO `parear/cancel`, e o código seguia valendo no servidor
+// por até 5 min numa conta que acabou de sair. Hoje ela mora no `sessionStorage`
+// da aba. O navegador DE VERDADE é o que responde se a gravação sobrevive a uma
+// recarga, e o servidor de mentira conta o que chegou.
+// CONTROLES: o mesmo percurso SEM recarga manda 1 (o instrumento enxerga o cancelamento);
+// o relatório do modo dev gerado DEPOIS da recarga não leva o código.
+{
+  const CODIGO_DO_QR = 'QRQRQRQRQRQRQRQRQRQR';
+  const percurso = async (recarregar) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const cancelamentos = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'parear') {
+        if (corpo.action === 'cancel') cancelamentos.push(corpo.code);
+        if (corpo.action === 'create') resp = { success: true, code: CODIGO_DO_QR, curto: false, expiresIn: 300 };
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        resp = { success: true, places: [{ ...CARDS.FLAG, venueID: 'vPQ1', updateRequestID: 'uPQ1', imageUrls: [] }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('waze_session_token', 'token-do-smoke-do-qr');
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+    });
+    const aberta = () => esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await aberta();
+    await page.evaluate(() => document.getElementById('helpBtn').click());
+    await assentar(page, 150);
+    await page.evaluate(() => document.getElementById('pairCreateBtn').click());
+    await esperarOuExplodir(page, () => pareamentosEmitidos.size === 1, 'o QR ser emitido');
+    let depoisDaRecarga = null;
+    let noRelatorio = null;
+    if (recarregar) {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await aberta();
+      depoisDaRecarga = await page.evaluate(() => pareamentosEmitidos.size);
+      // O relatório do modo dev, gerado COM o código guardado na aba, não o leva.
+      noRelatorio = await page.evaluate(async (codigo) => {
+        AppState.devMode = { unlocked: true, active: true };
+        try { return JSON.stringify(await diagCorpo()).includes(codigo); } finally { AppState.devMode = { unlocked: false, active: false }; }
+      }, CODIGO_DO_QR);
+      await page.evaluate(() => document.getElementById('helpBtn').click());
+      await assentar(page, 150);
+    }
+    await page.evaluate(() => document.getElementById('logoutBtn').click());
+    await assentar(page, 150);
+    await page.evaluate(() => document.getElementById('confirmLogout').click());
+    await esperarOuExplodir(page, () => !AppState.authenticated, 'o "Sair" terminar');
+    const sobrou = await page.evaluate(() => sessionStorage.getItem('__pareamentosEmitidos'));
+    // O cancelamento sai sem esperar rede, mas a rota é assíncrona: espere ele CHEGAR (com teto).
+    const ate = Date.now() + 3000;
+    while (!cancelamentos.length && Date.now() < ate) await page.waitForTimeout(50);
+    await ctx.close();
+    return { cancelamentos, depoisDaRecarga, noRelatorio, sobrou, erros };
+  };
+  const sem = await percurso(false);
+  checa(sem.cancelamentos.length === 1 && sem.cancelamentos[0] === CODIGO_DO_QR,
+    'pareamento/recarga: CONTROLE — o "Sair" sem recarga não cancelou o QR emitido (o instrumento não vê o cancelamento)', JSON.stringify(sem.cancelamentos.length));
+  const com = await percurso(true);
+  checa(com.depoisDaRecarga === 1, 'pareamento/recarga: a recarga esqueceu o QR emitido', String(com.depoisDaRecarga));
+  checa(com.cancelamentos.length === 1 && com.cancelamentos[0] === CODIGO_DO_QR,
+    'pareamento/recarga: o "Sair" depois da recarga NÃO cancelou o QR emitido — ele segue valendo no servidor por até 5 min', JSON.stringify(com.cancelamentos.length));
+  checa(com.noRelatorio === false, 'pareamento/recarga: o relatório do modo dev levou o código de pareamento guardado na aba', String(com.noRelatorio));
+  checa(com.sobrou === null && sem.sobrou === null, 'pareamento/recarga: o "Sair" deixou o código guardado na aba', String(com.sobrou));
+  checa(com.erros.length === 0 && sem.erros.length === 0, 'pareamento/recarga: erro de JS', com.erros[0] || sem.erros[0]);
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13749,6 +13835,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
+  + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`

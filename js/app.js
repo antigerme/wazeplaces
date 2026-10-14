@@ -348,7 +348,62 @@ let desligarDevVez = 0;
 // Os códigos de pareamento que ESTE aparelho emitiu nesta página: o "Sair" os
 // cancela no servidor, senão o QR mostrado antes seguia valendo 5 min e entrava
 // numa conta que acabou de sair (auditoria de 2026-09-25).
-const pareamentosEmitidos = new Set();
+//
+// Sobrevive à RECARGA da página (R19-1-02): com a lista só em memória, emitir o QR, recarregar
+// (o `hashchange` de um link `#pair=` é mais um caminho que recarrega) e dar "Sair" mandava ZERO
+// cancelamentos, e o código seguia valendo no servidor por até 5 min numa conta que já saiu.
+// Mora no `sessionStorage` (é da ABA, e morre com ela — nunca no `localStorage`, que o
+// diagnóstico do modo dev leva inteiro e que o "Sair" teria de varrer) com a hora em que cada um
+// vence; os que já venceram não voltam. É o SEGREDO do pareamento: o diagnóstico não leva a
+// chave (`diagSemSegredoDePareamento` troca o texto, e o despejo do `sessionStorage` a omite).
+// Uma subclasse do `Set` de propósito: todo ponto que já usa a lista (o "Sair", a troca de conta,
+// a limpeza do relatório, os testes) segue valendo sem saber que ela grava.
+const PAREAMENTOS_CHAVE = '__pareamentosEmitidos';
+const PAREAMENTO_VALE_MS = 5 * 60 * 1000;   // o `PAIR_TTL` do core
+class PareamentosEmitidos extends Set {
+    vencem = new Map();   // código → quando vence (ms), o que vai pro `sessionStorage`
+    // Relê os da aba que ainda valem. Fora do construtor: `super()` não é uma chamada que a
+    // varredura de funções órfãs (test/chamadas-orfas) saiba reconhecer.
+    reler() {
+        try {
+            const guardados = JSON.parse(sessionStorage.getItem(PAREAMENTOS_CHAVE) || '[]');
+            const agora = Date.now();
+            for (const e of Array.isArray(guardados) ? guardados : []) {
+                if (Array.isArray(e) && typeof e[0] === 'string' && e[0] && Number(e[1]) > agora) {
+                    super.add(e[0]);
+                    this.vencem.set(e[0], Number(e[1]));
+                }
+            }
+        } catch (e) { /* sem armazenamento da aba (janela privada, bloqueado): fica só em memória */ }
+        return this;
+    }
+    add(code) {
+        super.add(code);
+        this.vencem.set(code, Date.now() + PAREAMENTO_VALE_MS);
+        this.gravar();
+        return this;
+    }
+    delete(code) {
+        const tinha = super.delete(code);
+        this.vencem.delete(code);
+        this.gravar();
+        return tinha;
+    }
+    clear() {
+        super.clear();
+        this.vencem.clear();
+        this.gravar();
+    }
+    gravar() {
+        try {
+            const agora = Date.now();
+            const vivos = [...this.vencem].filter(([, ate]) => ate > agora);
+            if (vivos.length) sessionStorage.setItem(PAREAMENTOS_CHAVE, JSON.stringify(vivos));
+            else sessionStorage.removeItem(PAREAMENTOS_CHAVE);
+        } catch (e) { /* o código ainda vale em memória; o "Sair" desta página o cancela */ }
+    }
+}
+const pareamentosEmitidos = new PareamentosEmitidos().reler();
 
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
@@ -11558,7 +11613,14 @@ async function diagCorpo() {
     const ls = {}, ss = {};
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
     catch (e) { ls._erro = String(e); }
-    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
+    try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const k = sessionStorage.key(i);
+            // Os códigos de pareamento que esta aba emitiu são SEGREDO (valem uma sessão nova por 5 min):
+            // o relatório diz quantos há, nunca quais (R19-1-02).
+            ss[k] = k === PAREAMENTOS_CHAVE ? '[códigos de pareamento omitidos: ' + pareamentosEmitidos.size + ']' : sessionStorage.getItem(k);
+        }
+    }
     catch (e) { ss._erro = String(e); }
 
     const sw = { suportado: 'serviceWorker' in navigator,
