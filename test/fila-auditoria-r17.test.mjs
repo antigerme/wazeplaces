@@ -363,9 +363,9 @@ test('loadFilters: categories só volta se for lista de textos até o teto do se
 });
 
 test('loadFilters: o resto do filtro salvo segue como estava (tipos, país/estado em branco, "Minha área", só não lidos, ordem)', () => {
-  const f = carregarFiltros({ types: ['NEW_PLACE'], residential: 'x', myArea: true, unreadOnly: false, sortOrder: 'oldest', stateId: '5', managedAreaId: '9', categories: ['A'] });
+  const f = carregarFiltros({ types: ['NEW_PLACE'], residential: 'true', myArea: true, unreadOnly: false, sortOrder: 'oldest', stateId: '5', managedAreaId: '9', categories: ['A'] });
   assert.deepEqual([f.types, f.residential, f.myArea, f.unreadOnly, f.sortOrder, f.stateId, f.managedAreaId, f.categories],
-    [['NEW_PLACE'], 'x', true, false, 'oldest', '5', '9', ['A']]);
+    [['NEW_PLACE'], 'true', true, false, 'oldest', '5', '9', ['A']]);
 });
 
 // ═══ R17-2-01 + R17-3-01 · a espera que o "Sair" descarta sem aviso ═══════════

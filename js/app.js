@@ -28694,10 +28694,10 @@ function loadFilters() {
         if (raw) {
             const parsed = JSON.parse(raw);
             AppState.filters.types = sanearTiposSalvos(parsed.types);
-            AppState.filters.residential = parsed.residential || '';
+            AppState.filters.residential = ['true', 'false'].includes(parsed.residential) ? parsed.residential : '';
             AppState.filters.stateId = idSalvoValido(parsed.stateId);
             AppState.filters.managedAreaId = idSalvoValido(parsed.managedAreaId);
-            AppState.filters.myArea = !!parsed.myArea;
+            AppState.filters.myArea = parsed.myArea === true;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
             AppState.filters.categories = categoriasSalvasValidas(parsed.categories);
             // O GPS NUNCA volta de uma sessão anterior: posição é um momento e
