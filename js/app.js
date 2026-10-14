@@ -16399,6 +16399,21 @@ function isolarTextoDoWaze(texto) {
     return LETRA_DA_DIREITA_PRA_ESQUERDA.test(s) ? '\u2068' + s + '\u2069' : s;
 }
 
+// A dire\u00e7\u00e3o em que um texto do Waze SE L\u00ca, pela regra do `dir="auto"` (e do U+2068 acima): a da
+// primeira letra FORTE. N\u00famero, pontua\u00e7\u00e3o, colchete e acento n\u00e3o decidem \u2014 "(2) \u05e9\u05e8\u05d4" \u00e9 da direita
+// pra esquerda, e "moshe \u05de\u05e9\u05d4" \u00e9 da esquerda pra direita, com hebraico dentro. O DOM responde isso
+// sozinho; o canvas n\u00e3o: ali a dire\u00e7\u00e3o se PEDE (`ctx.direction`), e pedir `rtl` a todo nome que TEM
+// uma letra hebraica viraria "\u05de\u05e9\u05d4 moshe" o que o cabe\u00e7alho mostra como "moshe \u05de\u05e9\u05d4" \u2014 o mesmo nome,
+// em duas ordens, na tela e na imagem que a pessoa compartilha (R21-7-02).
+const LETRA_DE_QUALQUER_ALFABETO = /\p{L}/u;
+function direcaoDoTextoDoWaze(texto) {
+    for (const c of String(texto == null ? '' : texto)) {
+        if (!LETRA_DE_QUALQUER_ALFABETO.test(c)) continue;
+        return LETRA_DA_DIREITA_PRA_ESQUERDA.test(c) ? 'rtl' : 'ltr';
+    }
+    return 'ltr';
+}
+
 function itemDeListaAusente(v) {
     return v === null || v === undefined || v === '';
 }
@@ -20127,12 +20142,19 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
         ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
         ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
     };
-    const texto = (s, x, y, peso, tam, cor, alinhar = 'left', espaco = 0) => {
+    const texto = (s, x, y, peso, tam, cor, alinhar = 'left', espaco = 0, direcao = null) => {
         ctx.font = fonte(peso, tam); ctx.fillStyle = cor; ctx.textAlign = alinhar; ctx.textBaseline = 'alphabetic';
+        // A direção só muda pra quem a PEDE (o nome da pessoa, R21-7-02) e VOLTA ao que era antes de o
+        // próximo texto ser desenhado: ela vale pro contexto inteiro, e o resto da imagem herdaria `rtl`.
+        // Sem a propriedade (motor velho), o texto sai como sempre saiu.
+        const direcaoAntes = direcao && 'direction' in ctx ? ctx.direction : null;
+        if (direcaoAntes !== null) ctx.direction = direcao;
         if ('letterSpacing' in ctx) ctx.letterSpacing = espaco + 'px';
         ctx.fillText(s, x, y);
         if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
-        return ctx.measureText(s).width;
+        const largura = ctx.measureText(s).width;
+        if (direcaoAntes !== null) ctx.direction = direcaoAntes;
+        return largura;
     };
     const cartao = (x, y, w, h) => {
         rr(x, y, w, h, 22);
@@ -20155,7 +20177,17 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
     texto(tx.periodo, W - PAD, 104, 600, 22, '#67e8f9', 'right', 2);
 
     // O número
-    texto(tx.limpou, PAD, 232, 500, 28, '#a5f3fc');
+    // O nome da pessoa, quando ele se lê da direita pra esquerda (hebraico, árabe), é desenhado À PARTE,
+    // com `direction = 'rtl'`, e a frase em volta segue na direção do app: numa linha só, a pontuação e
+    // os números do nome saíam da ordem ("(IL) مرحبا" saía "مرحبا (IL)" — R21-7-02). `textAlign` segue
+    // 'left' (físico): a direção não muda de onde o texto começa. Nome da esquerda pra direita, que é a
+    // imensa maioria, não traz os pedaços: a linha é uma chamada só, como sempre foi.
+    if (tx.limpouPartes) {
+        let x = PAD;
+        for (const [pedaco, direcao] of tx.limpouPartes) x += texto(pedaco, x, 232, 500, 28, '#a5f3fc', 'left', 0, direcao);
+    } else {
+        texto(tx.limpou, PAD, 232, 500, 28, '#a5f3fc');
+    }
     texto(tx.total, PAD, 380, 700, 168, '#ffffff', 'left', -6);
     texto(tx.pedidos, PAD, 445, 600, 34, '#e2e8f0');
 
@@ -20228,11 +20260,33 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
     }
 }
 
+// A frase "{nome} limpou" em pedaços [texto, direção], pro desenho montar o nome da direita pra
+// esquerda À PARTE (R21-7-02); `null` quando a linha se desenha inteira, de uma chamada só — o nome
+// da esquerda pra direita, que é a imensa maioria, sai como sempre saiu, pixel por pixel. O corte
+// é pela posição do `{nome}` no dicionário de quem gera, e não por "o nome vem primeiro" (vem, nas
+// quatro línguas de hoje): a ordem das palavras é da tradução.
+//
+// Um caso fica de fora de propósito: nome da direita pra esquerda que MISTURA alfabetos E tem
+// colchete ("דני [IL] 12"). O canvas do WebKit não pareia colchetes (é a regra N0 do algoritmo de
+// direção do Unicode; o DOM e o canvas do Chromium a seguem): com `rtl` forçado o par sai partido
+// ("IL] 12 [ דני", MEDIDO no WebKit do Linux). Ali o nome só vai ISOLADO, na frase inteira — o
+// Chromium respeita o isolamento e acerta, o WebKit o ignora e sai como já saía, sem piorar.
+const LETRA_DA_ESQUERDA_PRA_DIREITA = /(?![֐-ࣿיִ-﷿ﹰ-﻿])\p{L}/u;
+const MARCA_DO_NOME_NA_FRASE = '\u0000';
+function partesDoNomeNaFrase(nome) {
+    if (direcaoDoTextoDoWaze(nome) !== 'rtl') return null;
+    if (LETRA_DA_ESQUERDA_PRA_DIREITA.test(nome) && /[()\[\]{}]/.test(nome)) return null;
+    const corte = t('resumo.img.limpou', { nome: MARCA_DO_NOME_NA_FRASE }).split(MARCA_DO_NOME_NA_FRASE);
+    if (corte.length !== 2) return null;
+    return [[corte[0], null], [nome, 'rtl'], [corte[1], null]].filter(([pedaco]) => pedaco !== '');
+}
+
 // Os TEXTOS da imagem, prontos no idioma de quem gera (é aqui que o i18n
 // entra), e o `alt` dela. Separado do desenho e da espera pela fonte e pelo QR
 // pra o teste conferir o que a imagem DIZ sem canvas nenhum.
 function textosDoResumo(d, perfil, loc) {
     const p = perfil || {};
+    const nome = p.userName ? String(p.userName) : '';
     // SEM PERFIL (a abertura com sinal ruim, antes de o /Session responder) não
     // há nome nem nível pra afirmar: a imagem saía " limpou" sem nome e "Editor
     // L1" — um nível FALSO, que a entrada (L2+AM) nem admite. As duas linhas
@@ -20257,7 +20311,12 @@ function textosDoResumo(d, perfil, loc) {
     const tx = {
         marca: 'WazePlaces',
         periodo: (mesNome + ' · ' + d.ano).toLocaleUpperCase(loc),
-        limpou: p.userName ? t('resumo.img.limpou', { nome: p.userName }) : '',
+        // O nome da direita pra esquerda vai ISOLADO na frase (como no DOM): é o que o `alt` diz e, no
+        // desenho de uma chamada só, o que o Chromium lê na direção do nome. O da esquerda pra direita
+        // — mesmo com uma letra hebraica no meio — não é tocado: o isolamento não lhe dá nada, e no
+        // WebKit mexia meio pixel. Os pedaços (`limpouPartes`) são do desenho à parte.
+        limpou: nome ? t('resumo.img.limpou', { nome: direcaoDoTextoDoWaze(nome) === 'rtl' ? isolarTextoDoWaze(nome) : nome }) : '',
+        limpouPartes: nome ? partesDoNomeNaFrase(nome) : null,
         total: String(d.total),
         pedidos,
         tiles: [

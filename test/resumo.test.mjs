@@ -270,7 +270,17 @@ test('a <img> recebe object URL, e as TRÊS cópias da CSP liberam blob: em img-
 const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn { t, setLang };')(
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
-const textosDoResumo = new Function('t', fatiarFuncao('textosDoResumo') + '\nreturn textosDoResumo;')(I18N.t);
+// `textosDoResumo` isola o nome da pessoa e o corta em pedaços quando ele se lê da direita pra esquerda
+// (R21-7-02): leva junto as constantes e as funções que ele usa (os testes do nome estão em
+// test/historico-r21.test.mjs).
+const constanteDoApp = (nome) => {
+  const m = new RegExp('^const ' + nome + ' = [^\\n]*;\\n', 'm').exec(APP);
+  assert.ok(m, `a constante ${nome} sumiu do app.js`);
+  return m[0];
+};
+const AJUDANTES_DO_NOME = ['LETRA_DA_DIREITA_PRA_ESQUERDA', 'LETRA_DE_QUALQUER_ALFABETO', 'LETRA_DA_ESQUERDA_PRA_DIREITA', 'MARCA_DO_NOME_NA_FRASE']
+  .map(constanteDoApp).join('') + ['isolarTextoDoWaze', 'direcaoDoTextoDoWaze', 'partesDoNomeNaFrase'].map(fatiarFuncao).join('\n') + '\n';
+const textosDoResumo = new Function('t', AJUDANTES_DO_NOME + fatiarFuncao('textosDoResumo') + '\nreturn textosDoResumo;')(I18N.t);
 const LOCALE = { pt: 'pt-BR', en: 'en', es: 'es', fr: 'fr' };
 function textos(lang, d, perfil) {
   I18N.setLang(lang);

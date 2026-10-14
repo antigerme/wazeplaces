@@ -8640,6 +8640,89 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Resumo do mês: o NOME da direita pra esquerda se lê na ordem dele (R21-7-02, lote 25) ──
+//
+// O nome ia na mesma chamada de `fillText` da frase ("{nome} limpou"), na direção do app: em hebraico ou
+// árabe, com pontuação ou número, saía na ordem errada NA IMAGEM QUE A PESSOA COMPARTILHA — enquanto o mesmo
+// nome no DOM (`dir="auto"`) já saía certo. Quem decide a ordem é o MOTOR, e a resposta é diferente por motor
+// (o canvas do WebKit não pareia colchetes), então só o navegador responde: o bloco desenha a imagem de
+// VERDADE (`textosDoResumo` + `desenharResumo`) e a compara, pixel a pixel na faixa do nome, com um ORÁCULO
+// que não depende do algoritmo de direção — o mesmo texto em PEDAÇOS de uma direção só, já na ordem visual
+// certa. Três perguntas: o app de hoje acerta? (no Chromium, tudo; o controle é o desenho de ANTES, que erra);
+// no WebKit, nenhum nome piora (ou sai certo, ou sai como já saía); e nome da esquerda pra direita sai idêntico.
+{
+  const onde = `resumo/nome da direita pra esquerda (${MOTOR})`;
+  const ctx = await browser.newContext({ viewport: { width: 800, height: 600 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && typeof desenharResumo === 'function', 'o app carregar');
+  // [nome, pedaços na ORDEM VISUAL certa, esquerda pra direita]. Os cinco primeiros são os da auditoria.
+  const CASOS = [
+    ['משה (2)', ['(2)', ' ', 'משה'], false], ['שרה', ['שרה'], false], ['مرحبا (IL)', ['(IL)', ' ', 'مرحبا'], false],
+    ['Avi_Cohen', ['Avi_Cohen'], true], ['דני [IL] 12', ['12', ' ', '[IL]', ' ', 'דני'], false],
+    ['דני_dan12', ['dan12', '_', 'דני'], false], ['ירון-IL', ['IL', '-', 'ירון'], false], ['moshe משה', ['moshe', ' ', 'משה'], true],
+    ['דני (Dan) 3', ['3', ' ', '(Dan)', ' ', 'דני'], false], ['(דני) Dan 3', ['Dan 3', ' ', '(דני)'], false],
+    ['José Álvarez', ['José Álvarez'], true], ['Ahmed أحمد (IL)', ['Ahmed', ' ', 'أحمد', ' ', '(IL)'], true],
+  ];
+  const r = await page.evaluate(async (casos) => {
+    await Promise.all([400, 500, 600, 700].map((w) => document.fonts.load(`${w} 24px Inter`)));
+    const d = dadosDoResumo({ '2026-10-05': { read: 40, rejected: 9 } }, 2026, 9);
+    const Y = 232, A = 70;
+    const nova = () => { const c = document.createElement('canvas'); c.width = RESUMO_LARGURA; c.height = RESUMO_ALTURA; return c; };
+    const faixa = (cv, y0, alto) => cv.getContext('2d').getImageData(60, y0, 700, alto).data;
+    const dif = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 60) n++; return n; };
+    const tinta = (a) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (a[i + 1] > 150) n++; return n; };
+    const res = [];
+    for (const [nome, pedacos, ltr] of casos) {
+      const { tx } = textosDoResumo(d, { userName: nome, rank: 5, isAreaManager: true }, i18nLocale());
+      const novo = nova(); desenharResumo(novo.getContext('2d'), d, tx, { hoje: null });
+      // O desenho de ANTES: a frase inteira, sem isolar e sem pedaços.
+      const antes = nova(); desenharResumo(antes.getContext('2d'), d, { ...tx, limpou: t('resumo.img.limpou', { nome }), limpouPartes: null }, { hoje: null });
+      // O oráculo: o desenho sem a linha do nome, mais a linha em pedaços já na ordem visual.
+      const ora = nova(); const g = ora.getContext('2d');
+      desenharResumo(g, d, { ...tx, limpou: '', limpouPartes: null }, { hoje: null });
+      g.font = '500 28px Inter, system-ui, -apple-system, sans-serif'; g.fillStyle = '#a5f3fc'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+      if ('letterSpacing' in g) g.letterSpacing = '0px';
+      let x = 80;
+      for (const p of [...pedacos, ' limpou']) { g.fillText(p, x, Y); x += g.measureText(p).width; }
+      const fNovo = faixa(novo, Y - 45, A), fAntes = faixa(antes, Y - 45, A), fOra = faixa(ora, Y - 45, A);
+      res.push({ nome, ltr, partes: !!tx.limpouPartes, tinta: tinta(fOra), novoOra: dif(fNovo, fOra), antesOra: dif(fAntes, fOra), novoAntes: dif(fNovo, fAntes),
+        // o resto da imagem (tudo abaixo da linha do nome) é o mesmo: a direção não vazou
+        resto: dif(faixa(novo, 262, 1000), faixa(antes, 262, 1000)), inteiraIgual: novo.toDataURL() === antes.toDataURL() });
+    }
+    return res;
+  }, CASOS);
+  const certo = (c, campo) => c[campo] <= 0.25 * c.tinta;
+  let errados = 0;
+  for (const c of r) {
+    const id = `${onde}: "${c.nome}"`;
+    checa(c.tinta > 500, `${id}: o oráculo não desenhou a faixa (a medida está cega)`, String(c.tinta));
+    if (!certo(c, 'antesOra')) errados++;
+    // Em NENHUM motor o nome piora: ou sai certo, ou sai como já saía.
+    checa(certo(c, 'novoOra') || c.novoAntes <= 0.10 * c.tinta,
+      `${id}: o nome saiu numa ordem DIFERENTE da de antes e que não é a certa`, JSON.stringify({ novoOra: c.novoOra, novoAntes: c.novoAntes, tinta: c.tinta }));
+    // O caminho dos pedaços acerta nos dois motores; no Chromium, TODOS os nomes (o isolamento cobre os que o WebKit não pareia).
+    if (c.partes) checa(certo(c, 'novoOra'), `${id}: o nome desenhado à parte com \`rtl\` saiu na ordem errada`, JSON.stringify(c));
+    if (MOTOR === 'chromium') checa(certo(c, 'novoOra'), `${id}: no Chromium o nome saiu na ordem errada`, JSON.stringify(c));
+    // O nome da esquerda pra direita: a imagem INTEIRA é a mesma de antes, pixel por pixel.
+    if (c.ltr) checa(c.inteiraIgual, `${id}: nome da esquerda pra direita mudou a imagem`, JSON.stringify(c));
+    // A direção do contexto voltou: nada abaixo da linha do nome mudou.
+    checa(c.resto === 0, `${id}: o resto da imagem mudou (a direção \`rtl\` ficou no contexto?)`, String(c.resto));
+  }
+  // CONTROLE: o instrumento ENXERGA a ordem errada — o desenho de antes erra em vários (no Chromium, nos dois
+  // que a auditoria mediu; no WebKit, no `משה (2)` do parêntese trocado).
+  checa(errados >= 3, `${onde}: CONTROLE — o desenho de ANTES só saiu errado em ${errados} nome(s): a medida não enxerga o defeito`);
+  const por = (n) => r.find((c) => c.nome === n);
+  if (MOTOR === 'chromium') {
+    checa(!certo(por('مرحبا (IL)'), 'antesOra') && !certo(por('דני [IL] 12'), 'antesOra'),
+      `${onde}: CONTROLE — no Chromium o desenho de antes devia errar "مرحبا (IL)" e "דני [IL] 12" (a auditoria os mediu errados)`);
+  }
+  checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
+  await ctx.close();
+}
+
 // ── Foto de perfil: quando ela falha, some — nunca vira ícone de quebrado ──
 //
 // O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a
