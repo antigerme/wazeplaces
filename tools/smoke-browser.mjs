@@ -14440,7 +14440,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(escondido.envios.length === 0, 'lote/segundo plano: o lote cancelado mandou pedidos ao Waze', JSON.stringify(escondido.envios));
   checa(escondido.estado.fila === 12 && escondido.estado.rejeitados === 0, 'lote/segundo plano: o lote cancelado não devolveu a fila e o placar', JSON.stringify(escondido.estado));
   checa(escondido.comEscondida.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: o aviso saiu com a página ainda ESCONDIDA', JSON.stringify(escondido.comEscondida));
-  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque você saiu do app\. Toque de novo\./.test(x)),
+  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque o app foi para o segundo plano\. Toque de novo\./.test(x)),
     'lote/segundo plano: a volta à página não disse que o lote não saiu', JSON.stringify(escondido.depois));
   const seguiu = await loteNoSegundoPlano(false);
   checa(seguiu.envios.length === 4, 'lote/segundo plano: CONTROLE — sem esconder a página os 4 pedidos não saíram (o instrumento não vê o lote)', JSON.stringify(seguiu.envios));

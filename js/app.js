@@ -20307,10 +20307,19 @@ async function aplicarRecusaAutomatica() {
     // pousou (o `aindaVale` abaixo pergunta a cada ida). Sem `navigator.locks`, segue como sempre.
     const mandar = async () => {
         // O "Sair" na espera (a geração mudou): o conjunto já foi esvaziado por ele e os alvos eram de
-        // quem saiu — nada se envia nem se devolve (R20-2-01). A troca de sessão sem "Sair" (a queda, a
-        // renovação) segue pro `enviarLote`, que NÃO envia com a época velha (`callWithRetry` com a
-        // época do lote) e trata os alvos como trata o laço no ar quando a época muda.
+        // quem saiu — nada se envia nem se devolve (R20-2-01).
         if (naSessao.geracao !== AppState.geracaoDoSair) return;
+        // A QUEDA na espera com a renovação da MESMA conta: a fila ficou (nenhum `resetQueue` desde a captura)
+        // e há sessão de pé — a rejeição é decisão desta pessoa e segue, como seguia quando o lote só
+        // começava depois da trava. A sessão e o "quem" passam a ser os de agora; a conta é conferida a
+        // cada ida (`aindaVale`, `contaConfirmada` leva a marca da sessão: a renovada como OUTRA conta só
+        // passa depois de confirmada, e aí a fila já foi refeita). Fila refeita, ou sem sessão ainda: o
+        // `enviarLote` NÃO envia com a época velha (`callWithRetry` com a época do lote) e o ramo da época
+        // trata os alvos — voltam como card na fila que ficou, ou pela busca numa fila refeita.
+        if (naSessao.epoca !== epocaDaSessao && naSessao.epocaFila === AppState.fetchEpoch && AppState.authenticated === true) {
+            naSessao.epoca = epocaDaSessao;
+            naSessao.quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
+        }
         await enviarLote(alvos, {
             naSessao,
             silencioso: true,

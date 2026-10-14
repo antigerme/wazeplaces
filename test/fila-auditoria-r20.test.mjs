@@ -219,17 +219,56 @@ test('R20-2-01: o ↻ na aba que espera — os alvos não reaparecem como card, 
   assert.equal(m.AppState.stats.rejected, 3);
 });
 
-test('R20-2-01: a QUEDA na espera (a mesma conta renovada) — nada sai com a época velha, e os alvos voltam como card na fila que ficou', async () => {
+test('R20-2-01: a QUEDA na espera com a renovação da MESMA conta — o envio SEGUE com a sessão de agora, cada alvo uma vez, e nada volta como card', async () => {
   const m = recusaComTrava();
   const fim = m.h.aplicarRecusaAutomatica();
   await tique(); await tique();
-  m.deps.epocaDaSessao++;          // a queda: a época sobe, o "Sair" não passou (mesma geração), a fila ficou
+  m.deps.epocaDaSessao++;          // a queda e a renovação: a época sobe; o "Sair" não passou, a fila ficou, há sessão de pé
   m.trava.soltar();
   await fim;
-  assert.deepEqual(m.enviados, [], 'DEFEITO: o lote saiu com a época velha — com a sessão renovada, que pode ser de OUTRA conta');
-  assert.deepEqual(m.AppState.queue.map((p) => p.updateRequestID).sort(), ['u1', 'u2', 'u3'],
-    'os alvos que não saíram não voltaram como card na fila que atravessou a queda (nem chegam a rejeitados, nem somem)');
+  assert.deepEqual(m.enviados, ['u1', 'u2', 'u3'],
+    'DEFEITO: a rejeição que a pessoa armou parou na queda com a MESMA conta (os alvos viravam card e ninguém os rejeitava): ' + JSON.stringify(m.enviados));
+  assert.deepEqual(m.AppState.queue, [], 'os alvos voltaram como card mesmo tendo sido rejeitados');
+  assert.equal(m.AppState.stats.rejected, 3, 'o placar conta ao pousar, na sessão renovada');
   assert.equal(m.deps.pedidosEmAndamento.size, 0, 'as marcas ficaram presas');
+});
+
+test('R20-2-01: a queda na espera com a fila REFEITA (a renovação entrou como OUTRA conta) — nada sai e os alvos voltam pela busca', async () => {
+  const m = recusaComTrava();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  m.deps.epocaDaSessao++;
+  m.AppState.fetchEpoch++;         // o `esquecerOutraConta` refez a fila
+  m.AppState.queue = [P(50, { creatorId: 1 })].map((p) => ({ ...p }));
+  m.trava.soltar();
+  await fim;
+  assert.deepEqual(m.enviados, [], 'DEFEITO: os pedidos da fila da conta anterior foram rejeitados com a sessão da conta nova');
+  assert.deepEqual(m.devolvidos.sort(), ['u1', 'u2', 'u3'], 'os alvos não foram devolvidos à busca da sessão de agora (o objeto velho nunca entra na fila nova)');
+  assert.deepEqual(m.AppState.queue.map((p) => p.updateRequestID), ['u50'], 'o objeto velho entrou na fila nova');
+});
+
+test('R20-2-01: a queda na espera SEM sessão ainda (a renovação não respondeu) — nada sai e os alvos voltam como card na fila que ficou', async () => {
+  const m = recusaComTrava();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  m.deps.epocaDaSessao++;
+  m.AppState.authenticated = false;
+  m.trava.soltar();
+  await fim;
+  assert.deepEqual(m.enviados, [], 'DEFEITO: o lote saiu sem sessão (ou com a época velha)');
+  assert.deepEqual(m.AppState.queue.map((p) => p.updateRequestID).sort(), ['u1', 'u2', 'u3'], 'os alvos que não saíram não voltaram como card');
+});
+
+test('R20-2-01: a renovação como OUTRA conta que ainda NÃO se confirmou — o `aindaVale` a cada ida segura: nada sai e os alvos voltam', async () => {
+  const m = recusaComTrava();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  m.deps.epocaDaSessao++;           // a sessão renovada (a fila ainda é a velha: o perfil dela não chegou)
+  m.deps.contaConfirmada = () => false;
+  m.trava.soltar();
+  await fim;
+  assert.deepEqual(m.enviados, [], 'DEFEITO: a sessão da conta ainda não confirmada rejeitou os pedidos da lista de autores da anterior');
+  assert.deepEqual(m.AppState.queue.map((p) => p.updateRequestID).sort(), ['u1', 'u2', 'u3'], 'os alvos não voltaram como card');
 });
 
 test('R20-2-01: CONTROLE — sem `navigator.locks` nada muda: os alvos saem uma vez cada, na hora', async () => {
@@ -247,8 +286,10 @@ test('R20-2-01 (estrutura): `marcarEmAndamento` e as capturas (época, fila, ger
   for (const campo of ['epoca: epocaDaSessao', 'epocaFila: AppState.fetchEpoch', 'geracao: AppState.geracaoDoSair']) {
     assert.ok(corpo.includes(campo), `a captura de "${campo}" sumiu`);
   }
-  assert.match(corpo, /if \(naSessao\.geracao !== AppState\.geracaoDoSair\) return;\s*await enviarLote\(alvos, \{\s*naSessao,/,
-    'o envio sob a trava deixou de conferir o "Sair" e de entregar as capturas ao lote');
+  assert.match(corpo, /if \(naSessao\.geracao !== AppState\.geracaoDoSair\) return;/, 'o envio sob a trava deixou de conferir o "Sair"');
+  assert.match(corpo, /if \(naSessao\.epoca !== epocaDaSessao && naSessao\.epocaFila === AppState\.fetchEpoch && AppState\.authenticated === true\) \{\s*naSessao\.epoca = epocaDaSessao;/,
+    'a queda com a MESMA conta (fila ficou, sessão de pé) deixou de renovar a sessão do lote — a rejeição armada pararia na queda');
+  assert.match(corpo, /await enviarLote\(alvos, \{\s*naSessao,/, 'o lote deixou de receber as capturas');
   const lote = fatiar('enviarLote');
   assert.match(lote, /const epoca = naSessao \? naSessao\.epoca : epocaDaSessao;/, 'o lote recaptura a época de depois da espera');
   assert.match(lote, /const epocaFila = naSessao \? naSessao\.epocaFila : AppState\.fetchEpoch;/);
