@@ -16,28 +16,31 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-14 ~12:30 UTC)
+## 0. Estado agora (2026-10-14 ~20:00 UTC)
 
-- **Lote 22 em produção** (PR #269, 5b9c373, v2026.10.14-02): os 13 arquivos que o app carrega iguais, byte a byte, aos
-  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **168 ✓ · 0 ✗** (seção 25 incluída; a 1ª volta teve
-  1 ✗ do ROTEIRO: a checagem exige o desvio do relógio ≠ 0 e deu exatamente 0 ms; não reproduziu). Nenhum defeito do app.
-- **Rodada 19** (`scratchpad/r19-<n>/relatorio.md`): oito auditores, ~20 achados, nenhum alto. Os mais sérios: a tecla de
-  seta segurada decidindo pedidos em série (R19-2-01); a conexão do IndexedDB que ficava presa depois de uma gravação do
-  offline que falhou, deixando a fila de terceiros no disco depois do "Sair" (R19-4-01); os botões ✕ ↑ ✓ fora da tela com
-  o texto do sistema em 1,3× ou mais (R19-8-01). O resto: a resposta da sessão que saiu mexendo na sessão nova, o QR de
-  pareamento que sobrava depois de recarregar, a recusa automática dobrada com duas abas, o duplo toque que ampliava a foto
-  num arraste rápido, a lixeira oferecida sem geometria, o país gigante no `localStorage`, o hebraico/árabe em parágrafo da
-  esquerda, o aviso do Desfazer no idioma antigo.
-- **Lote 23 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-03): cinco agentes
-  (fila/contas/telas, offline e diagnóstico, presença, servidor e foto ampliada, texto grande e RTL). Na junção: conflitos
-  só em arquivos gerados (regenerados) e um guard de CSS que lia a primeira ocorrência do `@media` de paisagem (o override
-  do `card-aperta` passou a morar no degrau que já existia). `npm test` 3247/3247, também com o relógio grosso.
-  Relatórios em `scratchpad/relatorio-l23-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 23", com as
-  capturas antes/depois do texto grande e do RTL).
+- **Lote 23 em produção** (PR #270, 57625f2, v2026.10.14-03): os 13 arquivos que o app carrega iguais, byte a byte, aos
+  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **169 ✓ · 2 ✗** (seção 26 incluída). Os 2 ✗ foram do
+  ROTEIRO: o ✓ de teste que não voltava a "não lido" (HTTP 500 mesmo após 3 tentativas), a corrida conhecida do Waze
+  (outro editor resolveu o pedido no meio do teste); o roteiro agora imprime o id do pedido. Nenhum defeito do app.
+- **Rodada 20** (`scratchpad/r20-<n>/relatorio.md`): oito auditores, ~35 achados, nenhum alto. Os mais sérios: a recusa
+  automática que, na espera pela trava entre abas, atravessava o "Sair", a troca de conta e o ↻ (R20-1-01/R20-2-01,
+  regressão do lote 23); o texto do sistema a partir de 1,5× tirando os botões dos diálogos e o "Aplicar" dos Filtros da
+  caixa (R20-7-01); o Enter segurado repetindo outros botões além dos três do card (R20-1-02 e vizinhos); o "Pronto" do
+  offline com zero mapas quando o Cache API falha (R20-4-B1); o "lida" cobrindo mensagem nunca vista em mais três
+  caminhos (R20-5). O resto: marcas das escritas de foto atravessando o "Sair", rótulos do placar e pílula do lightbox
+  com texto grande, hebraico/árabe no pedido mandado, `comCodigo` coagido no pareamento.
+- **Lote 24 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-04): cinco
+  agentes (fila/contas/teclado, offline e diagnóstico, presença, servidor e filtros, telas com texto grande). Na junção:
+  conflitos só em arquivos gerados (regenerados). `npm test` 3346/3346, também com o relógio grosso. Relatórios em
+  `scratchpad/relatorio-l24-<área>.md`.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 24", com as
+  capturas). Abertas: a paisagem muito baixa (568×320 com o aviso "de N na região": esconder o aviso ou encolher a foto),
+  o placar a 360×740 em 1,5×, o Fold a 2×, o alinhamento misto em RTL na lista da presença, a frase da linha do
+  "Disponível offline" quando o cache não grava, o texto do "Como funciona" (a frase não cita o ↑), e o "Marcar todos"
+  entre abas (R18-2-02).
 - **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 26) — e a
-  rodada 20.
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 27) — e a
+  rodada 21.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -90,6 +93,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #267 | 2026101302 | rodada 16: a conversa que não carrega (regressão do lote 19), o "Sair" com o lote e a decisão no recuo, o "Treino concluído" com o ✓, o offline em duas abas e a hipótese do tile, os avisos da renovação, o `openModal` abrindo no topo | **160 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro, corrigido), com a seção 23 (21 ✓); os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #268 | 2026101401 | rodada 17: o card alvo do lote após a queda, o "Sair" com as escritas de foto, o Enter do IME, o 429 do mapa e a cota cheia no offline, a conversa aberta-fechada-aberta, o `buscar-places` e o `listaDoWaze` | **164 ✓ · 0 ✗** no app em produção, com a seção 24; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #269 | 2026101402 | rodada 18: o treino com o lote da queda, a troca de conta com o lote no ar, a gravação da fila do offline que falha, o mapa recusado em todo tile, o `diagCorpo` com leitura pendurada, `buscar-places` estrito | **168 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro: desvio do relógio exatamente 0 ms), com a seção 25; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
+| #270 | 2026101403 | rodada 19: o Enter/seta segurado, a geração do "Sair", o QR de pareamento na aba, a recusa automática entre abas, o texto grande no card (`card-aperta`), o hebraico/árabe (`dir="auto"`), a conexão do IndexedDB, o "lida" com a lista chegando | **169 ✓ · 2 ✗** no app em produção (os 2 ✗ do roteiro: corrida do Waze na restauração do lido), com a seção 26; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
