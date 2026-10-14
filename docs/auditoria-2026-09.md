@@ -16,28 +16,27 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-13 ~22:00 UTC)
+## 0. Estado agora (2026-10-14 ~03:00 UTC)
 
-- **Lote 19 em produção** (PR #266, 6429f33, v2026.10.13-01): os 13 arquivos que o app carrega iguais, byte a byte, aos
-  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **152 ✓ · 3 ✗**; os 3 ✗ eram do ROTEIRO (a versão
-  esperada passada em outro formato, o indicador que é REMOVIDO e não escondido sem sessão, e um `Set` lido como função);
-  refeita a seção 22, **23 ✓ · 0 ✗**. Nenhum defeito do app. Os 2 cabeçalhos que a borda troca seguem decididos.
-- **Rodada 16** completa (`scratchpad/r16-<n>/relatorio.md`): oito auditores, ~35 achados, nenhum alto. Uma regressão
-  média do próprio lote 19 (a conversa que não carrega marcava como lida a mensagem nunca vista, R16-5-01), um defeito
-  de tela médio antigo (o "Treino concluído" fora da tela quando a última ação é ✓, R16-7-01) e, no resto, consertos do
-  lote 19 que ficaram incompletos: a guarda do "Sair" na volta da página (achada por três auditores), o diálogo do "Sair"
-  sem o pedaço do "Marcar todos" que cai no um a um e sem a decisão no recuo, a aba parada lembrando a conta, a
-  preparação do offline desfeita pelo fim da varredura da própria aba, o `pointercancel` na foto ampliada.
-- **Lote 20 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.13-02): cinco
-  agentes (presença, fila, offline, servidor e documentos, treino), mais dois pedidos extras (fila: os avisos de uma
-  vez devolvidos na renovação da mesma conta e o foco do pareamento deitado; offline: a hipótese do desfazer do tile,
-  que reproduziu). Na junção: conflitos só em arquivos gerados (regenerados). `npm test` 3036/3036, também com o relógio
-  grosso. O smoke do diag-tela achou, na junção, um defeito do próprio lote: o `preventScroll` do `openModal` deixou os diálogos reabrirem onde estavam (a Ajuda reabria no fim depois do gesto do modo dev); o `openModal` passou a zerar a rolagem na abertura. Os nove smokes, nos dois motores, saíram com 0 ✗. Relatórios em `scratchpad/relatorio-l20-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 20": a Ajuda a
-  280 px, a legenda do mini-mapa, a extensão 0.3.5, a rajada de "lida").
+- **Lote 20 em produção** (PR #267, 102a6fa, v2026.10.13-02): os 13 arquivos que o app carrega iguais, byte a byte, aos
+  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **159 ✓ · 1 ✗**; o ✗ era do ROTEIRO (o treino real
+  tem 30 exemplos e o laço parava em 20); refeita a seção 23, **21 ✓ · 0 ✗**. Nenhum defeito do app.
+- **Rodada 17** (`scratchpad/r17-<n>/relatorio.md`): oito auditores, ~30 achados, nenhum alto. O mais sério: depois de
+  uma queda com renovação o card alvo de um "Marcar todos" ainda no ar voltava a ser decidível (o ✕ mandava uma decisão
+  diferente da do lote, R17-2-05); duas medianas no offline (o 429 que ainda terminava em "Pronto" com o mapa vazio e a
+  cota de armazenamento estourada que virava "Pronto", R17-4-01/02) e uma na presença (o "abrir, fechar, abrir" que ainda
+  marcava como lida a mensagem nunca vista, R17-5-01). O resto: pontas soltas do R16-2-03 no diálogo do "Sair" (escritas
+  de foto, sonda do 401), o "Como funciona" rolado no celular deitado, o Enter do IME, o servidor sem `listaDoWaze` dentro
+  do local e sem validar os outros campos do `buscar-places`.
+- **Lote 21 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-01): quatro
+  agentes (fila/avisos/contas/telas, offline e diagnóstico, presença, servidor e documentos). Na junção: conflitos só em
+  arquivos gerados (regenerados). `npm test` 3113/3113, também com o relógio grosso. Relatórios em
+  `scratchpad/relatorio-l21-<área>.md`. A junção do lote 20 tinha achado um defeito do próprio lote (o `openModal` com
+  `preventScroll` deixava os diálogos reabrirem onde estavam), conserto já na produção.
+- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 21").
 - **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 23) — e a
-  rodada 17.
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 24) — e a
+  rodada 18.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -87,6 +86,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #264 | 2026100705 | rodada 16: a decisão que pousa depois da queda, o aviso do pouso na renovação, o link de pareamento com um login no ar, "Minha área" com a fila guardada sem rede, o laço de pedidos do 401 de outro servidor, a lixeira e o toque, presença e treino | **142 ✓** em produção, com as seções 19 e 20; o 1 ✗ era do roteiro (o recibo chegou "Lida", e não "Enviada": a outra conta estava com a conversa aberta), refeito: **31 ✓ · 0 ✗**; nenhum defeito do app |
 | #265 | 2026100801 | rodada 17: a renovação pela extensão que terminava em "Tudo limpo!", duas abas (a sessão guardada, a preparação do offline, o pouso sem a conta), o "Sair" com a janela do Desfazer, a conversa reaberta, o teclado e as telas estreitas (o pulo do placar), o convite fora do Safari e o offline no WebKit | **150 ✓ · 0 ✗** em produção, com a seção 21 (7 ✓); os 13 arquivos byte a byte iguais ao merge e os cabeçalhos conferidos (2 trocados pela borda, decisão do owner); nenhum defeito do app |
 | #266 | 2026101301 | rodada 15: a fila e o refazer adiado, os avisos da sessão que sobreviviam à queda, o "Enviando N…", o "Sair" com o lote e a foto na vez, a outra conta entrando noutra aba, o offline em duas abas, a conversa reaberta e a rolagem do pedido anexado | **155 ✓ · 0 ✗** no app em produção (a 1ª volta teve 3 ✗ do roteiro, corrigidos), com a seção 22 (23 ✓); os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
+| #267 | 2026101302 | rodada 16: a conversa que não carrega (regressão do lote 19), o "Sair" com o lote e a decisão no recuo, o "Treino concluído" com o ✓, o offline em duas abas e a hipótese do tile, os avisos da renovação, o `openModal` abrindo no topo | **160 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro, corrigido), com a seção 23 (21 ✓); os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere
