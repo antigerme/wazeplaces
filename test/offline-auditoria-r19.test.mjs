@@ -21,6 +21,11 @@ const MIN = ler('js/min/app.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
   assert.ok(m, `${nome} sumiu do app.js`);
@@ -121,6 +126,7 @@ function aparelho(comportamento = 'ok', { tetoMs = 60, relogio = null } = {}) {
   const deps = {
     indexedDB, AppState, Treino: { ativo: false, esquecerFilaGuardada() {} }, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila',
     OFFLINE_DB_TETO_MS: tetoMs, OFFLINE_POUSOS_KEY: 'p', safeLS: { remove() {} }, window: {},
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
     offlineLigado: () => true, offlinePodarPousos: () => {}, offlineAnunciarTiles: () => {},
     lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111', marcaDestaAba: () => 'm-tok', chaveDoPedido,
     avisarOutrasAbasDaFilaGuardada: () => {}, chavesQueEsperamAConta: () => new Set(),
@@ -129,12 +135,12 @@ function aparelho(comportamento = 'ok', { tetoMs = 60, relogio = null } = {}) {
   };
   const nomes = Object.keys(deps);
   const corpo = [
-    'let offlineEpoca = 0, offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineSemEspaco = false,',
+    'let offlineEpoca = 0, offlineJanelaServida = null, offlineLendoAJanela = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineSemEspaco = false,',
     '    offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineFilaVarrida = null, filaDeOnde = null,',
     '    diagTilesGuardadosQueFalharam = [], offlineFeitosNaJanela = null;',
     'const DFATO_TETO = 120, DFATO_LIMITE_SERIE = 3, DFATO_LIMITE_MS = 10 * 60000; const dfatoLimite = new Map();',
     ...['dfato', 'filaReal', 'pedidoForaDaFilaGuardada', 'offlineErroDeCota', 'offlineDB', 'offlineGravarFila', 'offlineGravarJanela',
-      'offlineLerRegistroDaJanela', 'offlineLerFila', 'offlineEsquecer'].map(fatiar),
+      'offlineLerChave', 'offlineLerRegistroDaJanela', 'offlineLerFila', 'offlineEsquecer'].map(fatiar),
     'return { gravarFila: offlineGravarFila, gravarJanela: offlineGravarJanela, lerFila: offlineLerFila, lerJanela: offlineLerRegistroDaJanela,',
     '         esquecer: offlineEsquecer, abrir: offlineDB, dfato };',
   ].join('\n');
@@ -215,7 +221,9 @@ test('R19-4-01: nenhuma conexão esquecida bloqueia o "Sair" — o `offlineDB` f
 });
 
 test('R19-4-01 (fonte): as transações do offline fecham num `finally`, e o `offlineDB` registra o `onversionchange`', () => {
-  for (const nome of ['offlineGravarFila', 'offlineGravarJanela', 'offlineLerFila', 'offlineLerRegistroDaJanela']) {
+  // (Desde o R21-4-01 as duas leituras — a fila e o registro da janela — passam por UM leitor, `offlineLerChave`, que
+  // é quem abre a conexão e a fecha.)
+  for (const nome of ['offlineGravarFila', 'offlineGravarJanela', 'offlineLerChave']) {
     const corpo = fatiar(nome);
     assert.match(corpo, /\bfinally\s*\{[^}]*\.close\(\)/, `${nome} não fecha a conexão num \`finally\``);
   }

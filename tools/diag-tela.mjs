@@ -193,6 +193,22 @@ const { css, fontes } = embutirFontes(cssDoAparelho, (nome) => {
   return existsSync(local) ? readFileSync(local).toString('base64') : null;
 });
 
+// A ESCALA do texto do aparelho (relatório com `computado.escala`, R21-4-03): a raiz em px. A remontagem
+// saía SEMPRE com a raiz de 16 px — a letra e as caixas de 1× —, mesmo quando a pessoa usava o texto do
+// sistema aumentado (com a raiz a 24 px só na CSSOM, o `outerHTML` não tem rastro dela, e a remontagem
+// ganhava as linhas Tipo/Criador que na tela real ficavam cortadas). O da CAPTURA vale (é o instante dela); o
+// do relatório é o da hora de baixar. Número inteiro-ou-fração entre 8 e 96, nada mais entra num estilo.
+// Relatório de antes do campo: `null`, e a remontagem é a de sempre. PURA, conferida sem navegador.
+function escalaDaTela(d, m) {
+  const de = (x) => {
+    const e = x && x.computado && x.computado.escala;
+    const px = e && e.raizPx;
+    return typeof px === 'number' && Number.isFinite(px) && px >= 8 && px <= 96 ? px : null;
+  };
+  const px = de(m) ?? de(d);
+  return px;
+}
+
 const janela = (d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844';
 const [W, H] = janela.split('x').map((n) => parseInt(n, 10) || 0);
 const dpr = (d.ambiente && d.ambiente.tela && d.ambiente.tela.dpr) || 2;
@@ -236,8 +252,11 @@ function preparar(m) {
     animation-fill-mode: forwards !important; animation-iteration-count: 1 !important;
     transition-duration: 0s !important; transition-delay: 0s !important;
   }`;
+  // A raiz do aparelho, depois do CSS do app (o mesmo seletor, o último ganha): sem ela a remontagem é a de 16 px.
+  const raizPx = escalaDaTela(d, m);
+  const escala = raizPx !== null && raizPx !== 16 ? `<style>html{font-size:${raizPx}px}</style>` : '';
   html = html.replace(/<\/head>/i,
-    `<style>${css}</style><style>${semAnimacao}</style><style>${marca}</style></head>`);
+    `<style>${css}</style>${escala}<style>${semAnimacao}</style><style>${marca}</style></head>`);
   for (const src of quebradas) {
     html = html.split(src).join(src + '" data-diag-quebrada="1');
   }
@@ -323,6 +342,8 @@ for (let i = 0; i < momentos.length; i++) {
     toasts: (m.toastsNaTela || []).length,
     imagensQuebradas: (m.imagens || []).filter((x) => x.quebrada).length,
     fonte: fonte && fonte.familia ? `${fonte.familia}${fonte.carregou ? '' : ' (NÃO carregou)'}` : '?',
+    // A raiz com que ESTE momento foi remontado (null: a de 16 px, por falta de dado ou por ser a normal).
+    textoPx: (() => { const px = escalaDaTela(d, m); return px !== null && px !== 16 ? px : null; })(),
     // As sentinelas DESTA captura, no instante dela (ver `sentinelasDaTela`).
     alertas: sentinelas.porMomento[i],
   });
@@ -363,5 +384,6 @@ console.log(`${linhas.length} momento(s) remontado(s) em ${saida}   (lido de ${_
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
     + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}  fonte=${l.fonte}`
+    + (l.textoPx ? `  texto×${Math.round(l.textoPx / 16 * 100) / 100}` : '')
     + (l.alertas.length ? `  alertas=${l.alertas.join(',')}` : ''));
 }

@@ -23,6 +23,11 @@ const MIN = ler('js/min/app.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
   assert.ok(m, `${nome} sumiu do app.js`);
@@ -72,7 +77,9 @@ function diagCorpoAteARede({ pendurar = [], redePendurada = false, orcamentoMs =
   const deps = {
     location: { origin: URL_BASE, href: URL_BASE + '/' },
     DIAG_ORCAMENTO_MS: orcamentoMs, DIAG_PISO_LOCAL_MS: 20, DIAG_FETCH_TETO_MS: 4000,
-    diagAtualizarAnteriores: async () => false, diagAberturasVivas: async () => [],
+    // A releitura da base do diagnóstico passa pelo `lerLocal` (R21-4-01): aqui, a base LIDA (`true`) — `false` seria
+    // "não deu pra ler" e ela entraria na lista das sem resposta.
+    diagAtualizarAnteriores: async () => true, dlogLigado: () => true, diagAberturasVivas: async () => [],
     diagRecursosDaSessao: () => [], diagUrlsDoDocumento: () => [],
     diagUrlsDoCodigo: () => [URL_BASE + '/', URL_BASE + '/js/min/app.js', URL_BASE + '/css/app.css'],
     diagSemInjecaoDaBorda: (t) => t,
@@ -272,11 +279,11 @@ function varredura({ itens, rede, gravacao = true, noCacheInicial = [] }) {
   const log = { baixar: 0, sonda: 0 };
   const noCache = new Map(noCacheInicial.map((u) => [u, true]));
   const diario = [];
-  const resposta = (r) => ({ ok: r.status >= 200 && r.status < 300, status: r.status, body: null,
+  const resposta = (r) => ({ ok: r.status >= 200 && r.status < 300, status: r.status, body: null, arrayBuffer: async () => new ArrayBuffer(0),
     headers: { get: (h) => (r.headers && r.headers[h.toLowerCase()]) ?? null } });
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v', updateRequestID: 'u' }] },
-    Treino: { ativo: false }, navigator: { onLine: true },
+    Treino: { ativo: false }, navigator: { onLine: true }, esperarComTeto, OFFLINE_ABORTO_GRACA_MS: 1000,
     Date: { now: () => relogio.agora, parse: Date.parse }, offlineLigado: () => true,
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: CICLO, OFFLINE_CONCORRENCIA: 3, OFFLINE_ANUNCIAR_A_CADA: 50,
     OFFLINE_TENTATIVAS_POR_ITEM: constanteBruta('OFFLINE_TENTATIVAS_POR_ITEM'),
@@ -371,6 +378,7 @@ function gravarComBase({ falha, putLanca = null }) {
     offlinePodarPousos: () => {}, dfato: (k, o) => eventos.push([k, o]),
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     contaAgora: () => '111', marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' }, offlineEpoca: 0,
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
   };
   deps.offlineErroDeCota = (e) => !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
   const chaves = Object.keys(deps);
@@ -464,7 +472,7 @@ function fabDeMentira() {
   const doc = { getElementById: (id) => (id === 'devFabBtn' ? btn : id === 'devFab' ? fab : null) };
   const deps = {
     document: doc, MODAL_IDS: [], MutationObserver: class { observe() {} }, requestAnimationFrame: (f) => { f(); return 1; }, cancelAnimationFrame: () => {},
-    posicionarFabDev: () => {}, addEventListener: (t, f) => { ouvintes.janela[t] = f; }, removeEventListener: () => {},
+    posicionarFabDev: () => {}, acompanharAReservaDoFab: () => {}, addEventListener: (t, f) => { ouvintes.janela[t] = f; }, removeEventListener: () => {},
     sessionStorage: { getItem: () => null, setItem: () => {} }, innerWidth: 400, innerHeight: 800,
     atualizarFabDev: () => {}, dlogCapturar: (m) => { capturas.push(m); return {}; },
     DEV_FAB_PEGAR_MS: 15, navigator: {}, setTimeout, clearTimeout, Math, Number,

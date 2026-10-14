@@ -57,6 +57,9 @@ function fatiar(nome) {
   assert.ok(corpo.length > 60, `fatiar('${nome}') devolveu ${corpo.length} chars — o instrumento quebrou`);
   return corpo;
 }
+// A espera do armazenamento com TETO (R21-4-01), a de verdade: o buraco negro devolveria algo que nunca executa a
+// operação (a gravação da fila "voltava" sem gravar).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
 // A declaração `const Treino = {…};` INTEIRA.
 function treinoDeVerdade() {
   const m = /^const Treino = /m.exec(APP_SEM);
@@ -401,6 +404,7 @@ function montarInterruptor({ comTreino }) {
     document: { getElementById: (id) => (els[id] = els[id] || elemento()) },
     OFFLINE_CICLO_MS: 1200000, OFFLINE_STORE: 'fila', OFFLINE_DB: 'waze_places_offline',
     OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_POUSOS_KEY: 'waze_places_offline_pousos',
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, offlineLendoAJanela: null,
     lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }), contaAgora: () => '111',
     marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     safeLS: { get: () => null, set() {}, remove() {} },

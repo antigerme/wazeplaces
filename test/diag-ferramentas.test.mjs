@@ -490,7 +490,7 @@ test('diag-replay: o placar vem do relatório — Lidos, Rejeitados, Pulados e o
     { stats: { read: 12, rejected: 0, skipped: 0 }, serverTotal: 1, hasMore: false });
   // E ele é o que entra na página: nada de recontar pelo recorte.
   const codigo = REPLAY.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.match(codigo, /placarDoRelatorio\(st, recorte\.length\)\]\);/, 'o placar do relatório não é passado pra página');
+  assert.match(codigo, /placarDoRelatorio\(st, recorte\.length\)(?:, textoPx)?\]\);/, 'o placar do relatório não é passado pra página');
   assert.match(codigo, /AppState\.stats = placar\.stats;\s*\n\s*AppState\.serverTotal = placar\.serverTotal;\s*\n\s*AppState\.hasMore = placar\.hasMore;/,
     'a página não recebe o placar do relatório');
   assert.doesNotMatch(codigo, /AppState\.serverTotal = places\.length;/, 'o "Restam" voltou a ser o tamanho do recorte');

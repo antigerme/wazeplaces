@@ -42,6 +42,8 @@ function montar({ guardado = null, largura = 390, altura = 844 } = {}) {
     sessionStorage: { getItem: (k) => sessao.get(k) ?? null, setItem: (k, v) => sessao.set(k, v) },
     navigator: {}, innerWidth: largura, innerHeight: altura, DEV_FAB_PEGAR_MS: PEGAR_MS,
     dlogCapturar: (motivo) => { capturas.push(motivo); return {}; }, atualizarFabDev() {}, posicionarFabDev() {},
+    // A pilha de avisos que reposiciona o FAB de baixo (R21-4-06) tem teste próprio, mais abaixo: o gesto não a usa.
+    acompanharAReservaDoFab() {},
   };
   const chaves = Object.keys(deps);
   const api = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n' + fatiar('ligarFabDev')
@@ -220,13 +222,14 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
   const deps = { document, innerWidth: LARGURA, innerHeight: ALTURA,
     DEV_FAB_CANTOS: constanteDoApp('DEV_FAB_CANTOS'), DEV_FAB_AMOSTRAS: constanteDoApp('DEV_FAB_AMOSTRAS'),
     DEV_FAB_MARGEM: constanteDoApp('DEV_FAB_MARGEM'), DEV_FAB_RESERVA_TOAST: constanteDoApp('DEV_FAB_RESERVA_TOAST'),
+    DEV_FAB_FOLGA_TOAST: constanteDoApp('DEV_FAB_FOLGA_TOAST'),
     DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }), DEV_FAB_LEITURA,
     DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS'),
     cardDaFrente: () => cardDaFrente, cardSobGesto: (c) => estado.gesto && c === cardDaFrente,
     redesenharCardAdiado: () => {} };
   const chaves = Object.keys(deps);
   const { posicionar, aoFimDoGesto } = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null, fabEsperaOGesto = false;\n'
-    + ['devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'aoFimDoGesto'].map(fatiar).join('\n')
+    + ['devFabReservaDeBaixo', 'devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'aoFimDoGesto'].map(fatiar).join('\n')
     + '\nreturn { posicionar: posicionarFabDev, aoFimDoGesto };')(...chaves.map((k) => deps[k]));
   posicionar();
   // O fim do gesto, como o swipe.js o avisa.

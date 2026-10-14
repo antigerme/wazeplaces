@@ -109,6 +109,17 @@ function filaQueVoltaDoTreino(d) {
     : `${quantos} abre(m) no "Sair" do treino — a fila real estava vazia, e o relatório leva só a contagem da guardada: a remontagem não tem esses pedidos.`];
 }
 
+// A ESCALA do texto do aparelho (relatório com `computado.escala`, R21-4-03): a raiz em px, que a remontagem
+// aplica na página (`html{font-size}`). Sem isto ela subia sempre com a raiz de 16 px e a tela de quem usa o
+// texto do sistema aumentado saía com a letra e as caixas de 1× — a barra ✕ ↑ ✓ cabia na remontagem onde na
+// tela dele não cabia. Entre 8 e 96 px; relatório de antes do campo (ou a escala normal): `null`. PURA,
+// conferida sem navegador (test/diag-ferramentas).
+function escalaDoRelatorio(d) {
+  const e = d && d.computado && d.computado.escala;
+  const px = e && e.raizPx;
+  return typeof px === 'number' && Number.isFinite(px) && px >= 8 && px <= 96 && px !== 16 ? px : null;
+}
+
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -140,7 +151,8 @@ const PORTA = parseInt(opt('porta', '8123'), 10);
 
 console.log(`de:      ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`app:     ${(d.app && d.app.rotulo) || '?'}   formato ${d._formato || '?'}`);
-console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} (${tema.origem}) · idioma ${lang}`);
+const textoPx = escalaDoRelatorio(d);
+console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} (${tema.origem}) · idioma ${lang}${textoPx ? ` · texto ×${Math.round(textoPx / 16 * 100) / 100} (raiz em ${textoPx} px)` : ''}`);
 if (doTreino) {
   console.log(`AVISO:   relatório gerado DENTRO do treino — a tela tinha ${exemplos} EXEMPLO(S) na fila; a remontagem usa a fila REAL que o treino guardava, sem a faixa do treino.`);
 }
@@ -196,10 +208,12 @@ await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'load' });
 // intermitente que custou rodadas de CI (ver `tools/esperar-saida.mjs`).
 await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'o app carregar', 30000);
 
-await page.evaluate(([places, filtros, perfil, devMode, placar]) => {
+await page.evaluate(([places, filtros, perfil, devMode, placar, raizPx]) => {
   for (const id of ['authScreen', 'loadingCard', 'comoFuncionaModal']) {
     document.getElementById(id)?.classList.add('hidden');
   }
+  // A letra do aparelho dele, ANTES de qualquer desenho (R21-4-03): o `rem` do app inteiro anda com a raiz.
+  if (raizPx) document.documentElement.style.fontSize = raizPx + 'px';
   // A sessão é FICTÍCIA, e está no armazenamento como estaria no aparelho: sem
   // token, a sentinela `tokenNaoPersiste` acusava um defeito que o aparelho não
   // tinha (a tela logada sem token é artefato do replay). Gravado DEPOIS da
@@ -220,7 +234,7 @@ await page.evaluate(([places, filtros, perfil, devMode, placar]) => {
   showCurrentPlace();
   updateStats(true);
   if (typeof atualizarFabDev === 'function') atualizarFabDev();
-}, [recorte, st.filters || null, st.profile || null, st.devMode || null, placarDoRelatorio(st, recorte.length)]);
+}, [recorte, st.filters || null, st.profile || null, st.devMode || null, placarDoRelatorio(st, recorte.length), textoPx]);
 
 await page.waitForTimeout(500);
 

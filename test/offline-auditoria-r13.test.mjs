@@ -35,6 +35,11 @@ const API_JS = ler('js/api.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 // Pula a ASSINATURA antes de casar chaves (parâmetro padrão com `{}`).
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
@@ -143,7 +148,7 @@ function baseDeMentira() {
 // aparelho e a base são das duas abas.
 const NOMES = ['chaveDoPedido', 'filaReal', 'marcarEmAndamento', 'registrarPouso', 'carregarFilaDeSaida',
   'offlineLerPousos', 'offlinePodarPousos', 'semOsJaDecididos', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
-  'mesmoLugar', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
+  'mesmoLugar', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlineLerChave', 'filaGuardadaDestaConta', 'offlineTentarAbrirSemRede'];
 function aba({ aparelho, base, fila = [], memoria = null, perfil = null, autenticada = true, onLine = true,
   recuperarJanela = async () => {} } = {}) {
   const { API, safeLS } = apiSobre(aparelho);
@@ -159,6 +164,7 @@ function aba({ aparelho, base, fila = [], memoria = null, perfil = null, autenti
     offlineDB: base.offlineDB, dfato: (k, o) => diario.push([k, o || {}]),
     lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }),
     offlineRecuperarJanela: () => recuperarJanela({ AppState, API }),
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
     pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
     updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => diario.push(['card', {}]),
   };
@@ -352,7 +358,7 @@ function navegador() {
 }
 const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
-const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlinePodarTiles',
+const NOMES_VARREDURA = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlineLerChave', 'offlinePodarTiles',
   'offlineVarrer', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'filaGuardadaEsperandoOTreino', 'atualizarLinhaDoOffline',
   'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba', 'aoManterOCarimboComPartes'];
 function aparelhoDeDuasAbas({ canal = true } = {}) {
@@ -387,6 +393,7 @@ function aparelhoDeDuasAbas({ canal = true } = {}) {
       offlineBaixar: async (u) => { baixados.push(u); if (/404/.test(u)) return 'definitivo'; cache.set(u, true); return true; },
       offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, offlineGravarJanela: () => {},
       setTimeout: (fn) => { fn(); return 0; },
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
       document: { getElementById: () => el }, t: (k) => k, escapeHtml: (s) => s,
     };
     const chaves = Object.keys(deps);

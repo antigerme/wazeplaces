@@ -68,6 +68,7 @@ const pausaDoOffline = (o) => {
     : parcial.tilesNegados ? 'o servidor de tile negou todos os tiles (4xx)'
     : parcial.semFila ? 'a gravação da fila na base falhou'
     : parcial.leitura ? 'a leitura da fila na base falhou'
+    : parcial.cacheMudo ? 'o cache do mapa não respondeu (a Cache API ficou sem resposta; não é recusa do aparelho nem falta de rede)'
     : parcial.cache ? `o aparelho não deixou gravar no cache do mapa${parcial.e ? ` (${parcial.e})` : ''}`
     : 'motivo não registrado no diário';
   out(`em pausa até ${horaLocal(o.segurarAteEm)} (${motivo}) — a varredura não pede nada ao servidor de tile antes disso, mesmo que o próximo gatilho "prepare".`);
@@ -94,6 +95,26 @@ const outraAbaPorId = new Set((Array.isArray(d.aberturasAnteriores) ? d.abertura
 out(`arquivo: ${origem}, ${Math.round(bytes / 1024)} KB · relatório v${d._versaoDoDiag ?? '?'} · app ${d.app?.rotulo ?? d.app?.versao ?? '?'} · gerado ${d._gerado ?? '?'}`);
 const amb = d.ambiente || {};
 out(`aparelho: ${(amb.ua || '?').replace(/^Mozilla\/5\.0 /, '').slice(0, 90)} · tela ${amb.tela?.w}×${amb.tela?.h}@${amb.tela?.dpr} · janela ${amb.tela?.janela} · instalada: ${amb.standalone} · online: ${amb.online}`);
+// A ESCALA do texto (relatório com `computado.escala`, R21-4-03): a letra grande decide onde a barra ✕ ↑ ✓ cabe,
+// e antes o arquivo não trazia número nenhum dela. N = a raiz em px ÷ 16; só se diz quando ele não é 1, e a
+// caixa RENDERIZADA de `1rem` (÷ a de `16px`) confere: se a raiz diz uma escala e a caixa outra, o layout não a
+// recebeu como a raiz afirma — e isso também se diz. O relatório de antes do campo não ganha linha nenhuma.
+{
+  const e = d.computado && d.computado.escala;
+  const num = (x) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
+  const raiz = num(e && e.raizPx), caixaRem = num(e && e.caixaRem), caixaPx = num(e && e.caixaPx);
+  const nf = (x) => String(Math.round(x * 100) / 100).replace('.', ',');
+  if (raiz !== null) {
+    const fator = raiz / 16;
+    const vistoPelaCaixa = caixaRem !== null && caixaPx !== null ? caixaRem / caixaPx : null;
+    const confere = vistoPelaCaixa !== null && Math.abs(vistoPelaCaixa - fator) <= 0.02 * fator;
+    const ajuste = e.ajuste ? ` · text-size-adjust ${String(e.ajuste).slice(0, 20)}` : '';
+    if (Math.abs(fator - 1) > 0.01 || (vistoPelaCaixa !== null && Math.abs(vistoPelaCaixa - 1) > 0.01)) {
+      if (confere) out(`texto ×${nf(fator)}: a raiz está em ${nf(raiz)} px (a normal é 16) e a caixa de 1rem mediu ${nf(caixaRem)} px contra ${nf(caixaPx)} px da de 16px${ajuste} — o layout rodou com a letra assim, e a barra ✕ ↑ ✓ cabe (ou não) por causa dela.`);
+      else out(`ATENÇÃO: texto ×${nf(fator)} pela raiz (${nf(raiz)} px), mas ${vistoPelaCaixa === null ? 'a caixa de 1rem não foi medida' : `a caixa de 1rem mediu ×${nf(vistoPelaCaixa)} (${nf(caixaRem)} px contra ${nf(caixaPx)} px)`}${ajuste} — a escala que o layout viu não é a que a raiz diz.`);
+    }
+  }
+}
 
 secao('ALERTAS (a primeira coisa a ler)');
 const alertas = Array.isArray(r.alertas) ? r.alertas : null;
@@ -187,6 +208,20 @@ else if (off.ligado === false) {
       out(`ATENÇÃO: a gravação da fila na base falhou ${total} vez(es) no diário${registro} (a última às ${hora(ult.t)}${ult.cota ? ', por FALTA DE ESPAÇO' : ult.e ? `, ${ult.e}` : ''}) — sem a fila na base não há cobertura, e a varredura termina "parcial".`);
     }
   }
+  // A REABERTURA sem rede que não conseguiu ler a base (`offline.leituraFalhou`, R20 A4): o evento só
+  // aparecia na linha do tempo, e a seção dizia OUTRA coisa — "a fila guardada é OUTRA", que manda procurar
+  // uma segunda aba — sobre uma aba que nem chegou a abrir a fila guardada (R21-4-09). Cada linha vale ela e as
+  // que o limitador juntou (`juntas`), como o `offline.gravacaoFalhou` acima.
+  {
+    const lidas = (Array.isArray(d.diario) ? d.diario : []).filter((e) => e && e.k === 'offline.leituraFalhou');
+    if (off.ligado && lidas.length) {
+      const ult = lidas[lidas.length - 1];
+      const juntas = lidas.reduce((n, e) => n + (Number.isFinite(e.juntas) && e.juntas > 0 ? e.juntas : 0), 0);
+      const total = lidas.length + juntas;
+      const registro = juntas ? ` (${lidas.length} registrada(s), +${juntas} que o app juntou)` : '';
+      out(`ATENÇÃO: a leitura da fila guardada FALHOU ${total} vez(es) na reabertura sem rede${registro} (a última às ${hora(ult.t)}; \`offline.leituraFalhou\` no diário) — esta aba pode não ter aberto a fila guardada, e a causa é a leitura da base, não outra aba.`);
+    }
+  }
   // O que decide a LINHA das Preferências (R14-4-06): ela diz "Pronto" sobre a
   // fila guardada que a última preparação completa COBRIU, e o `resultado`
   // sozinho dizia "pronto" com a linha em "Ainda não preparado" (a fila guardada
@@ -239,7 +274,13 @@ else if (off.ligado === false) {
       if (off.cobreAFila && typeof fgd.soNestaAba === 'number' && fgd.soNestaAba > 0) {
         out(`ATENÇÃO: a preparação "cobre" a fila guardada, mas esta aba tem ${fgd.soNestaAba} pedido(s) que a fila guardada não tem — outra aba a regravou com PARTE dos pedidos e manteve o carimbo; o mapa desses pedidos pode ter saído do aparelho na poda de lá, e a linha das Preferências (sem sinal) diria "Pronto" sobre eles.`);
       }
-      if (!off.cobreAFila && typeof fgd.soNestaAba === 'number' && !mesmos) {
+      // Só se esta aba CHEGOU A LER (ou gravar) a base: sem o carimbo dela (`filaGravadaEm: null`, o "—" acima),
+      // "esta aba tem 0 pedido(s) que ela não tem" é a fila vazia de quem não abriu a guardada, e a nota
+      // mandaria procurar uma segunda aba que pode nem existir (R21-4-09). O campo AUSENTE (relatório de antes
+      // dele) não é "desconhecido": segue a nota de sempre.
+      if (!off.cobreAFila && typeof fgd.soNestaAba === 'number' && !mesmos && off.filaGravadaEm === null) {
+        out('nota: esta aba não conhece o carimbo da fila guardada (não leu a base nem gravou nela) — não dá pra dizer que a fila guardada é de OUTRA aba; veja a leitura que falhou, acima, quando houver.');
+      } else if (!off.cobreAFila && typeof fgd.soNestaAba === 'number' && !mesmos) {
         out(`nota: a fila guardada é OUTRA — esta aba tem ${fgd.soNestaAba} pedido(s) que ela não tem, e ela tem ${fgd.soNaGuardada} que esta aba não tem: o próximo gatilho desta aba prepara a fila DESTA aba e a grava por cima, baixando de novo o mapa dos pedidos que só esta aba tem (o custo de uma fila guardada por aparelho).`);
       } else if (!off.cobreAFila && typeof naBase === 'number' && off.filaCobertaGuardada === naBase) {
         out('nota: a fila guardada tem os MESMOS pedidos desta aba e o registro do aparelho diz que ela está coberta (outra aba, ou uma abertura anterior, a preparou) — o próximo gatilho desta aba confere sem baixar de novo e volta a dizer "Pronto".');
@@ -457,7 +498,7 @@ secao('CÓDIGO NO APARELHO');
     // armazenamento, bases do IndexedDB, a seção do offline) entram na mesma lista das de rede, e a
     // frase dizia sempre "rede pendurada" — mesmo quando só o navegador não respondeu e a rede estava boa.
     const rotulosLocais = new Set(['service worker (registros)', 'caches', 'armazenamento (estimate)',
-      'armazenamento (persisted)', 'indexedDB.databases', 'offline (base e cache do mapa)']);
+      'armazenamento (persisted)', 'indexedDB.databases', 'offline (base e cache do mapa)', 'base do diagnóstico']);
     const locais = co.semResposta.filter((x) => rotulosLocais.has(x));
     const deRede = co.semResposta.filter((x) => !rotulosLocais.has(x));
     const lista = (l) => `${l.map(nome).slice(0, 8).join(', ')}${l.length > 8 ? '…' : ''}`;
