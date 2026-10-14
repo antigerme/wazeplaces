@@ -13642,6 +13642,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     ['ArrowLeft', '← segurada', 'validar-place:uTS0', null],
     ['ArrowRight', '→ segurada', 'marcar-lido:uTS0', null],
     ['Enter', 'Enter segurado no ✕', 'validar-place:uTS0', '.card-btn-reject'],
+    // O Espaço ativa o botão ao SOLTAR (keyup): segurado, decide UMA vez — a repetição cancelada no keydown
+    // não pode custar a ativação única.
+    ['Space', 'Espaço segurado no ✕', 'validar-place:uTS0', '.card-btn-reject'],
   ]) {
     // CONTROLE: UM keydown, sem repetir, decide UM pedido.
     const um = await teclaSegurada(tecla, { foco, segurar: false });
@@ -13825,7 +13828,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 // duas mandam — o instrumento enxerga a duplicata. O servidor de mentira atrasa
 // 150 ms por requisição pra a janela da corrida existir de verdade.
 {
-  const recusaDeDuasAbas = async (semTrava) => {
+  const recusaDeDuasAbas = async (semTrava, qtdAbas = 2) => {
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const contagem = new Map();
     const resolvidos = new Set();
@@ -13872,29 +13875,47 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       return page;
     };
-    const abas = await Promise.all([abrir(), abrir()]);
-    // O FIM: as duas abas com a fila aberta, a recusa parada e nada no ar.
+    const abas = await Promise.all(Array.from({ length: qtdAbas }, () => abrir()));
+    // O FIM: as abas com a fila aberta, a recusa parada e nada no ar.
     for (const a of abas) {
       await esperarOuExplodir(a, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
-        && !recusaAutomaticaRodando && !recusaAutomaticaEsperandoOutraAba && !AppState.inFlightActions,
+        && !recusaAutomaticaRodando && !AppState.inFlightActions,
       'a recusa automática terminar');
     }
-    await esperarOuExplodir(abas[0], () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'a aba 0 sem alvos na fila');
-    await esperarOuExplodir(abas[1], () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'a aba 1 sem alvos na fila');
+    for (const a of abas) {
+      await esperarOuExplodir(a, () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'uma aba sem alvos na fila');
+    }
     await abas[0].waitForTimeout(400);   // cobre uma 2ª passada que viesse atrasada
-    const fila = await Promise.all(abas.map((a) => a.evaluate(() => AppState.queue.map((p) => p.updateRequestID))));
+    const fila = await Promise.all(abas.map((a) => a.evaluate(() => ({ card: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      fila: AppState.queue.map((p) => p.updateRequestID) }))));
     await ctx.close();
     return { contagem, erros, fila };
   };
+  // Os alvos: os 4 pedidos do autor marcado (uRA0, uRA3, uRA6, uRA9) — TODOS têm de ir ao Waze, e UMA vez
+  // cada. O 1º é o card que ainda não está na tela quando a recusa roda (a busca acabou de chegar): a espera
+  // pela trava antes de os alvos saírem da fila o deixava virar o card da frente e escapar da recusa.
+  const ALVOS = ['uRA0', 'uRA3', 'uRA6', 'uRA9'];
+  const resumo = (c) => JSON.stringify([...c].sort());
   const sem = await recusaDeDuasAbas(true);
   const repetidosSem = [...sem.contagem].filter(([, n]) => n > 1);
-  checa(sem.contagem.size >= 1, 'recusa/duas abas: CONTROLE — nenhuma rejeição saiu (a recusa automática não rodou)', JSON.stringify([...sem.contagem]));
-  checa(repetidosSem.length >= 1, 'recusa/duas abas: CONTROLE — sem a trava nenhum pedido saiu em dobro (o instrumento não vê a corrida)', JSON.stringify([...sem.contagem]));
+  checa(sem.contagem.size >= ALVOS.length - 1 && [...sem.contagem.keys()].every((id) => ALVOS.includes(id)),
+    'recusa/duas abas: CONTROLE — sem a trava a recusa automática não rodou nos alvos (o card da tela pode ficar de fora, só ele)', resumo(sem.contagem));
+  checa(repetidosSem.length >= 1, 'recusa/duas abas: CONTROLE — sem a trava nenhum pedido saiu em dobro (o instrumento não vê a corrida)', resumo(sem.contagem));
   const com = await recusaDeDuasAbas(false);
   const repetidos = [...com.contagem].filter(([, n]) => n > 1);
-  checa(com.contagem.size >= 1, 'recusa/duas abas: nenhuma rejeição saiu (a recusa automática não rodou)', JSON.stringify([...com.contagem]));
+  // O card que JÁ está na tela quando a recusa roda fica de fora, de propósito (o dedo pode estar nele): com
+  // duas abas a ordem dos eventos varia (a recusa roda antes ou depois do `showCurrentPlace`), então um alvo
+  // sem rejeição só vale se for o card da tela das DUAS abas. O resto tem de ir ao Waze, UMA vez.
+  const semRejeicao = ALVOS.filter((id) => !com.contagem.has(id));
+  checa(ALVOS.every((id) => (com.contagem.get(id) || 0) <= 1) && semRejeicao.every((id) => com.fila.every((f) => f.card === id)) && semRejeicao.length <= 1,
+    'recusa/duas abas: com a trava, cada alvo tem de ir ao Waze UMA vez (nenhum pulado que não seja o card da tela, nenhum em dobro)',
+    resumo(com.contagem) + ' · cards ' + JSON.stringify(com.fila.map((f) => f.card)));
   checa(repetidos.length === 0, 'recusa/duas abas: a mesma rejeição foi ao Waze pelas duas abas', JSON.stringify(repetidos));
-  checa(com.erros.length === 0 && sem.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0]);
+  // CONTROLE de UMA aba só: a trava não pode custar nenhum alvo a quem abre o app sozinho (o 1º da fila inclusive).
+  const uma = await recusaDeDuasAbas(false, 1);
+  checa(ALVOS.every((id) => uma.contagem.get(id) === 1) && uma.contagem.size === ALVOS.length,
+    'recusa/uma aba: a trava deixou um alvo sem rejeição (ou o mandou em dobro)', resumo(uma.contagem));
+  checa(com.erros.length === 0 && sem.erros.length === 0 && uma.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0] || uma.erros[0]);
 }
 
 // ── "REJEITAR OS N" CANCELADO PELO SEGUNDO PLANO AVISA NA VOLTA (R19-2-03) ──
@@ -14124,7 +14145,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
-  + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez (servidor de 150 ms por requisição, com o CONTROLE da página sem navigator.locks, em que as duas mandam)`
+  + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez — TODOS os alvos, o 1º da fila inclusive, que a espera pela trava antes de os alvos saírem da fila deixava escapar (servidor de 150 ms por requisição, com os CONTROLES da página sem navigator.locks, em que as duas mandam, e de UMA aba só, em que a trava não custa nenhum alvo)`
   + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
   + `, + o Resumo do mês com o qr.js pendurado (a folha abre sem o QR depois do teto e os toques com uma geração no ar não empilham outra, com o aria-busy no botão e o CONTROLE do qr.js pedido e preso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
