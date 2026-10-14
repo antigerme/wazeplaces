@@ -41,7 +41,7 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
   let gravou = 0;
   const podas = [];
   const relogio = agora === null ? Date : { now: () => agora };
-  const st = estado || { varrendo: false, pedida: false, janela: null, resultado: null, gesto: relogio.now(), epoca: 0,
+  const st = estado || { varrendo: false, pedida: false, janela: null, resultado: null, gesto: relogio.now(), epoca: 0, segurarAte: 0,
     feitos: { janela: null, epoca: -1, us: new Set() } };
   st.gesto = relogio.now();
   const deps = {
@@ -69,7 +69,7 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineEpoca/g, '__st.epoca').replace(/offlineSegurarAte/g, '__st.segurarAte')
     .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada')
     .replace(/offlineFilaVarrida/g, '__st.varrida');
   const chaves = Object.keys(deps);
@@ -309,7 +309,7 @@ function aparelhoComCache() {
   const baixados = [];
   const fila = { itens: [] };
   let segurarPoda = null;              // com uma promessa aqui, cada apagar da poda espera por ela
-  const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: 0, epoca: 0,
+  const st = { varrendo: false, pedida: false, janela: null, resultado: null, gesto: 0, epoca: 0, segurarAte: 0,
     feitos: { janela: null, epoca: -1, us: new Set() }, preparada: null, gravada: null, varrida: null };
   const agora = 1492385 * 1200000 + 1000;   // uma janela só, do começo ao fim
   st.gesto = agora;
@@ -339,7 +339,7 @@ function aparelhoComCache() {
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineEpoca/g, '__st.epoca').replace(/offlineSegurarAte/g, '__st.segurarAte')
     .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada')
     .replace(/offlineFilaVarrida/g, '__st.varrida');
   const chaves = Object.keys(deps);
@@ -543,7 +543,7 @@ function gatilhosDaVarredura(janela) {
   const AGORA = janela * 1200000 + 1000;
   const tentativas = new Map();
   const rede = { ok: false };
-  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0,
+  const st = { varrendo: false, pedida: false, janela, resultado: 'pronto', gesto: AGORA, epoca: 0, segurarAte: 0,
     feitos: { janela: null, epoca: -1, us: new Set() } };
   const deps = {
     AppState: { authenticated: true, queue: [{ venueID: 'v' }] }, Treino: { ativo: false },
@@ -560,7 +560,7 @@ function gatilhosDaVarredura(janela) {
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineEpoca/g, '__st.epoca').replace(/offlineSegurarAte/g, '__st.segurarAte')
     .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada')
     .replace(/offlineFilaVarrida/g, '__st.varrida');
   const chaves = Object.keys(deps);
@@ -619,7 +619,7 @@ function interruptor(onLine) {
   const gravacoes = [];
   const log = [];
   const AppState = { authenticated: true, queue: [{ venueID: 'v1' }, { venueID: 'v2' }, { venueID: 'v3' }], preferences: {} };
-  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0,
+  const st = { varrendo: false, pedida: false, janela: null, resultado: 'parcial', gesto: 0, epoca: 0, segurarAte: 0,
     feitos: { janela: null, epoca: -1, us: new Set() } };
   const deps = {
     AppState, Treino: { ativo: false }, navigator: { onLine },
@@ -637,7 +637,7 @@ function interruptor(onLine) {
     .replace(/offlineVarrendo/g, '__st.varrendo').replace(/offlinePedidaDeNovo/g, '__st.pedida')
     .replace(/offlineJanelaServida/g, '__st.janela').replace(/offlineUltimoResultado/g, '__st.resultado')
     .replace(/offlineUltimoGesto/g, '__st.gesto').replace(/offlineFeitosNaJanela/g, '__st.feitos')
-    .replace(/offlineEpoca/g, '__st.epoca')
+    .replace(/offlineEpoca/g, '__st.epoca').replace(/offlineSegurarAte/g, '__st.segurarAte')
     .replace(/offlineFilaPreparada/g, '__st.preparada').replace(/offlineFilaGravadaEm/g, '__st.gravada')
     .replace(/offlineFilaVarrida/g, '__st.varrida');
   const chaves = Object.keys(deps);
@@ -1511,7 +1511,7 @@ function aparelhoDaLinha() {
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
       'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
-    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null,
+    const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,
         offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
         offlineFilaGravadaChaves = null,
@@ -1957,7 +1957,7 @@ function duasAbasComCache() {
     const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let offlineVarrendo = false, offlinePedidaDeNovo = false,
-        offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,
+        offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0,
         offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null,
         offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null;
       ${nomes.map(fatiar).join('\n')}

@@ -580,7 +580,7 @@ function montarVarredura() {
   });
   const app = montar(deps, ['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineItensDaFila', 'offlineVarrer'],
   `let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,
-     offlineUltimoResultado = null, offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
+     offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
      offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaVarrida = null;
    async function offlineGravarFila() {
      __gravadas.push(filaReal().length);
@@ -654,7 +654,7 @@ function montarInterruptor() {
   const app = montar(deps, ['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineMarcarGesto',
     'offlineVarrer', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'offlineAoMudarInterruptor'],
   `let filaDeOnde = { regiao: 'row', pais: '30', busca: 'b' }, offlineVarrendo = false, offlinePedidaDeNovo = false,
-     offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,
+     offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0,
      offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineFilaVarrida = null;`);
   return { app, AppState, base, linha: () => (els.prefOfflineDesc || {}).innerHTML || '' };
 }
@@ -720,7 +720,7 @@ function montarReabertura() {
   const app = montar(deps, ['mesmoLugar', 'chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineRecuperarJanela',
     'offlineTentarAbrirSemRede', 'abrirGuardadaDepoisDoTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline'],
   `let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, ultimaBuscaFalhouPorRede = false,
-     offlineJanelaServida = null, offlineFilaPreparada = null, offlineUltimoResultado = null, offlineVarrendo = false,
+     offlineJanelaServida = null, offlineFilaPreparada = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineVarrendo = false,
      offlineFilaVarrida = null;`);
   const linha = () => {
     app.atualizarLinhaDoOffline(0, 0);

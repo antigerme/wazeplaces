@@ -224,7 +224,7 @@ function aparelhoDeDuasAbas() {
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, [
       'let filaDeOnde = null, offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),',
-      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0, offlineFilaGravadaEm = null,',
+      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null,',
       '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
       'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet();',

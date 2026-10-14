@@ -219,7 +219,7 @@ function aparelhoDeDuasAbas() {
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, [
       'let filaDeOnde = null, offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),',
-      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0, offlineFilaGravadaEm = null,',
+      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null,',
       '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
       'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet(), avisosDePousoSemConta = [];',
@@ -417,7 +417,7 @@ test('R16-4-01: a leitura da fila guardada vem ANTES da cobertura, a época é c
 });
 
 // ═══ R16-4-02 · 408, 425 e 429 não são "o tile não existe" ═══════════════════════
-test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (tenta de novo); os outros 4xx seguem definitivos', async () => {
+test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (volta na retomada); os outros 4xx seguem definitivos', async () => {
   const guardados = [];
   const deps = {
     offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
@@ -430,7 +430,9 @@ test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (tenta de
     ...chaves.map((k) => deps[k]), async () => ({ ok: status < 300, status }));
   const url = (i) => 'https://www.waze.com/row-tiles/live/base/' + i;
   for (const status of [408, 425, 429]) {
-    assert.equal(await baixarCom(status)(url(status), true), false,
+    // Desde o lote 21 (R17-4-01) a falha passageira tem nome próprio, 'limite': o que importa aqui
+    // segue sendo que NÃO é 'definitivo' (nem sucesso) — o tile volta na retomada.
+    assert.equal(await baixarCom(status)(url(status), true), 'limite',
       `DEFEITO: o ${status} é "definitivo" — o tile entra em \`feitos\` sem ir ao cache e não é tentado de novo na janela`);
   }
   // CONTROLE: o que é "não existe" segue definitivo; 5xx e 200 como sempre.

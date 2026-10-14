@@ -22938,6 +22938,13 @@ function registrarFalhaDeTile(box, url) {
 // mentia era a tela, porque o único redesenho acontecia com `offlineVarrendo`
 // ainda true e nada redesenhava depois que ele virava false.
 let offlineUltimoResultado = null;
+// Até quando a varredura NÃO pede mais nada ao servidor de tile (R17-4-01): o 408/425/429
+// é o servidor pedindo pra ir mais devagar, e a preparação "parcial" é retomada a cada
+// prova de rede — ou seja, a cada resposta da API, a cada swipe. Sem esta marca, um
+// limite que persiste virava 3 tentativas × N tiles por swipe. Não é timer: é o relógio
+// comparado quando um gatilho que já existe chega (`offlineVarrer`); depois do instante,
+// o próximo gatilho retoma sozinho. Só em memória; o "esquecer" zera.
+let offlineSegurarAte = 0;
 // ÉPOCA do offline, no mesmo espírito do `fetchEpoch` da fila. `offlineEsquecer`
 // a incrementa, e a varredura desiste se ela mudou DURANTE um `await`.
 //
@@ -23490,6 +23497,7 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
     offlineEpoca++;                 // invalida qualquer varredura em voo
     offlineJanelaServida = null;
     offlineUltimoResultado = null;
+    offlineSegurarAte = 0;
     offlineFilaGravadaEm = null;
     offlineFilaGravadaChaves = null;
     offlineFilaPreparada = null;
@@ -23617,7 +23625,29 @@ let offlineGeracaoDeTile = 0;
 // dos 4xx segue definitivo.
 const OFFLINE_4XX_PASSAGEIRO = new Set([408, 425, 429]);
 
-function offlineBaixar(u, tile) {
+// O que a varredura faz com eles (R17-4-01): PARA e espera. Tentar o mesmo tile de novo
+// no mesmo minuto não muda a resposta, e 3 trabalhadores × 3 tentativas × N tiles era o
+// triplo do tráfego pra terminar do mesmo jeito. O pedido que sobrou fica pra
+// retomada ("parcial"), depois da pausa: o `Retry-After` quando o navegador o deixa
+// ler (ele só aparece em resposta cross-origin se o servidor de tile o expõe —
+// MEDIDO nos dois motores: sem `Access-Control-Expose-Headers` é `null`), senão
+// 1 min, com teto de 5.
+const OFFLINE_LIMITE_PAUSA_MS = 60 * 1000;
+const OFFLINE_LIMITE_PAUSA_MAX_MS = 5 * 60 * 1000;
+function offlineRecuoDoLimite(resp) {
+    let ms = OFFLINE_LIMITE_PAUSA_MS;
+    try {
+        const h = resp && resp.headers && resp.headers.get('retry-after');
+        if (h) {
+            // Segundos, ou uma data HTTP.
+            const seg = /^\s*\d+\s*$/.test(h) ? Number(h) * 1000 : Date.parse(h) - Date.now();
+            if (Number.isFinite(seg) && seg > 0) ms = seg;
+        }
+    } catch (e) { /* cabeçalho que não se lê: fica o padrão */ }
+    return Math.min(ms, OFFLINE_LIMITE_PAUSA_MAX_MS);
+}
+
+function offlineBaixar(u, tile, info = null) {
     // Tile vai pro NOSSO cache (tem CORS, então a resposta é transparente e
     // custa 1,01× de orçamento). Foto vai pro cache do navegador via <img>, que
     // é o MESMO caminho que o card usa — `fetch` popula outra entrada, e a
@@ -23666,7 +23696,14 @@ function offlineBaixar(u, tile) {
             // pode provocar). Como definitivos, o tile entrava em `feitos` sem ir ao
             // cache e não era pedido de novo na janela, com a linha em "Pronto"
             // (R16-4-02): voltam como falha, e a sonda decide se é a rede.
-            if (resp.status >= 400 && resp.status < 500 && !OFFLINE_4XX_PASSAGEIRO.has(resp.status)) return 'definitivo';
+            if (resp.status >= 400 && resp.status < 500) {
+                if (!OFFLINE_4XX_PASSAGEIRO.has(resp.status)) return 'definitivo';
+                // O servidor pediu pra ir mais devagar: nem "não existe" nem rede parada.
+                // `info.recuoMs`: por quanto tempo a varredura segura os pedidos (R17-4-01).
+                if (info) info.recuoMs = offlineRecuoDoLimite(resp);
+                try { if (resp.body) resp.body.cancel().catch(() => {}); } catch (e) {}
+                return 'limite';
+            }
             if (!resp.ok) return false;
             // Última trava antes de ESCREVER: se esqueceram durante o download,
             // gravar aqui recria o cache que o "Sair" acabou de apagar.
@@ -23714,14 +23751,18 @@ async function offlineDesfazerTile(c, u, gravou, meu) {
 // A rede ANDA? Um pedido de um tile DESTA fila, conferido com o servidor
 // (`no-cache`: o de tile responde 304 quando nada mudou, é barato). Qualquer
 // resposta é rede de pé — até um erro do servidor, que respondeu; falha de rede
-// ou o teto, não. Não grava nada: é só a pergunta (ver `offlineVarrer`).
+// ou o teto, não. Não grava nada: é só a pergunta (ver `offlineVarrer`). A exceção
+// é o 408/425/429 (R17-4-01): o servidor respondeu, mas pedindo pra ir mais
+// devagar — a pergunta volta 'limite', que NÃO é "a rede anda" (o item não é
+// defeituoso, e a preparação fica pra depois da pausa).
 const OFFLINE_SONDA_TETO_MS = 10 * 1000;
-async function offlineSondarRede(u) {
+async function offlineSondarRede(u, info = null) {
     const ctrl = new AbortController();
     const teto = setTimeout(() => ctrl.abort(), OFFLINE_SONDA_TETO_MS);
     try {
         const r = await fetch(u, { mode: 'cors', cache: 'no-cache', signal: ctrl.signal });
         if (r.body) r.body.cancel().catch(() => {});
+        if (OFFLINE_4XX_PASSAGEIRO.has(r.status)) { if (info) info.recuoMs = offlineRecuoDoLimite(r); return 'limite'; }
         return true;
     } catch (e) { return false; }
     finally { clearTimeout(teto); }
@@ -23778,6 +23819,10 @@ function offlineAnunciarTiles() {
 async function offlineVarrer() {
     if (!offlineLigado()) return;
     if (offlineVarrendo) { offlinePedidaDeNovo = true; return; }
+    // O servidor de tile pediu pra ir mais devagar (R17-4-01): não pede nada até o
+    // instante marcado. É a MESMA porta de todos os gatilhos, então a busca, a prova
+    // de rede e o interruptor respeitam a pausa sem cada um saber dela.
+    if (Date.now() < offlineSegurarAte) return;
     if (!AppState.authenticated || !AppState.queue.length) return;
     // No treino nenhuma varredura COMEÇA: a próxima prova de rede depois do "Sair"
     // a dispara. A que já estava no ar quando ele abriu segue sobre a fila REAL
@@ -23855,15 +23900,19 @@ async function offlineVarrer() {
         let sondas = 0;
         let sondaNegativaEm = -1;
         let sondaNoAr = null;
+        // A resposta é `true` (a rede anda), `false` (parada) ou 'limite' (o servidor
+        // respondeu pedindo calma, R17-4-01): os dois últimos NÃO inocentam o item.
         const redeAnda = () => {
             if (sondaNegativaEm === sucessos) return Promise.resolve(false);
             if (sondaNoAr) return sondaNoAr;
             const u = [...tilesDaFila].find((x) => feitos.has(x)) || tilesDaFila.values().next().value;
             if (!u) return Promise.resolve(false);
             sondas++;
-            sondaNoAr = offlineSondarRede(u).then((anda) => {
+            const infoDaSonda = {};
+            sondaNoAr = offlineSondarRede(u, infoDaSonda).then((anda) => {
                 sondaNoAr = null;
-                if (!anda) sondaNegativaEm = sucessos;
+                if (anda === 'limite') offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + (infoDaSonda.recuoMs || OFFLINE_LIMITE_PAUSA_MS));
+                if (!anda || anda === 'limite') sondaNegativaEm = sucessos;
                 return anda;
             });
             return sondaNoAr;
@@ -23881,13 +23930,18 @@ async function offlineVarrer() {
         // varredura para, "parcial", em vez de gastar o teto em cada item da fila
         // (500 itens × 3 tentativas × 30 s era "varrendo" por mais de uma hora).
         let penduradasSeguidas = 0;
+        let limitado = false;
         const trabalhar = async () => {
             while (pend.length) {
                 if (epoca !== offlineEpoca) return;   // esqueceram no meio
                 if (!offlineLigado() || navigator.onLine === false) return;
                 if (penduradasSeguidas >= OFFLINE_CONCORRENCIA) return;
+                // O servidor pediu calma (um trabalhador recebeu o 408/425/429): os
+                // outros param também, sem gastar o pedido que já estava a caminho.
+                if (Date.now() < offlineSegurarAte) return;
                 const it = pend.shift();
-                const ok = await offlineBaixar(it.u, it.tile);
+                const info = {};
+                const ok = await offlineBaixar(it.u, it.tile, info);
                 // DEPOIS do await também: é aqui que a corrida mora — o
                 // download pousa e o `cache.put` recriaria o que foi apagado.
                 if (epoca !== offlineEpoca) return;
@@ -23906,6 +23960,17 @@ async function offlineVarrer() {
                     definitivos++;
                     feitos.add(it.u);
                     penduradasSeguidas = 0;   // o servidor respondeu: a rede anda
+                } else if (ok === 'limite') {
+                    // 408/425/429 (R17-4-01): o servidor respondeu pedindo calma. Nem o
+                    // item é defeituoso (não vira `definitivo`, que o tiraria da janela
+                    // com o mapa vazio) nem a rede está parada. A varredura PARA, e este
+                    // pedido fica pra retomada depois da pausa — a retomada baixa só o
+                    // que faltou. Repetir o tile no mesmo minuto gastava 3× o tráfego
+                    // pra terminar do mesmo jeito (33 pedidos contra 12, MEDIDO).
+                    limitado = true;
+                    penduradasSeguidas = 0;
+                    offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + (info.recuoMs || OFFLINE_LIMITE_PAUSA_MS));
+                    desistidosPorRede.push(it);
                 } else {
                     falhas++;
                     if (ok === 'teto') penduradasSeguidas++;
@@ -23915,12 +23980,24 @@ async function offlineVarrer() {
                         // Esgotou. Se o RESTO andou nesse meio, a rede está de
                         // pé e o defeito é o item; se nada andou, a SONDA diz
                         // se é a rede (ver `redeAnda`).
-                        if (sucessos > it.sucessosAntes || await redeAnda()) {
+                        const anda = sucessos > it.sucessosAntes ? true : await redeAnda();
+                        if (anda === 'limite') {
+                            // A sonda foi respondida com 408/425/429 (R17-4-01): não é
+                            // "a rede anda" — o item volta na retomada, depois da pausa.
+                            limitado = true;
+                            desistidosPorRede.push(it);
+                        } else if (anda) {
                             definitivos++;
                             feitos.add(it.u);
                         } else desistidosPorRede.push(it);
                     } else {
-                        if (falhas > total * 2) return;   // teto: rede morta, para
+                        if (falhas > total * 2) {
+                            // teto: rede morta, para. O item que acabou de falhar não está
+                            // em `pend` nem em `desistidosPorRede`: sem isto, sendo o último,
+                            // a preparação terminava "Pronto" sem ele (R17-4-05).
+                            desistidosPorRede.push(it);
+                            return;
+                        }
                         // volta pro FIM: buraco de sinal não pode perder o item
                         pend.push(it);
                         await new Promise((r) => setTimeout(r, 400));
@@ -24006,7 +24083,8 @@ async function offlineVarrer() {
         } else {
             offlineUltimoResultado = 'parcial';
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
-                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}) });
+                                       ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
+                                       ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';
