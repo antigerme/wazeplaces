@@ -1117,6 +1117,136 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
   }
 }
 
+// ── O TEXTO DO SISTEMA MAIOR: a barra ✕ ↑ ✓ continua ao alcance (R19-8-01) ──
+//
+// Fonte do sistema em 1,3× ou mais empurrava a barra pra FORA do card nas alturas
+// de 667 a 860 px (o `.place-card` corta com `overflow:hidden` e a página não
+// rola): MEDIDO, +79 px num Android 360×800 a 1,3×, +237 a 1,5×, +66 no SE a
+// 1,3×. A regra compacta por ALTURA é em px e não enxerga a escala; a segunda
+// rede de segurança (`vigiarBarraDeAcoes` → `card-aperta`) é MEDIDA e viva.
+//
+// A escala é emulada como a auditoria a emulou: `html { font-size }` (rem e o
+// texto crescem, o viewport não). O que se mede é o que o DEDO alcança — o
+// `elementFromPoint` no centro dos três botões, dentro da janela (gotcha #26) —,
+// com os pedidos REAIS dos 6 países, os 3 mais pesados de cada tipo, em francês
+// (a frase mais larga, gotcha #25).
+//
+// CONTROLE de escala 1 (nada muda: a rede nunca liga, o `card-aperta` nunca
+// aparece) e CONTROLE do instrumento (com a regra do `card-aperta` neutralizada a
+// mesma tela PERDE a barra — senão "alcançável" passaria com a medida cega,
+// gotcha #28).
+const pesadosPorTipo = [];
+{
+  const porTipo = {};
+  for (const f of FIXTURES_PAISES) (porTipo[f.purType] ||= []).push(f);
+  for (const lista of Object.values(porTipo)) {
+    pesadosPorTipo.push(...[...lista].sort((a, b) => JSON.stringify(b).length - JSON.stringify(a).length).slice(0, 3));
+  }
+}
+const APARELHOS_FONTE = [
+  ['Android 360x800', { width: 360, height: 800 }], ['iPhone 393x852', { width: 393, height: 852 }],
+  ['Galaxy S8 360x740', { width: 360, height: 740 }], ['iPhone SE 375x667', { width: 375, height: 667 }],
+  ['Pixel 412x915', { width: 412, height: 915 }],
+];
+const MEDIDA_DA_BARRA = () => {
+  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  if (!c) return { semCard: true };
+  const botoes = ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].map((s) => c.querySelector(s));
+  const alcancados = botoes.map((b) => {
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (x < 0 || x > innerWidth || y < 0 || y > innerHeight) return false;
+    const el = document.elementFromPoint(x, y);
+    return !!el && (el === b || b.contains(el));
+  });
+  // Rolagem DUPLA: mais de uma área do card que de fato rola (a regra do gotcha
+  // #29 — o conteúdo OU a caixa longa, nunca as duas).
+  const rola = [c.querySelector('.card-content'), c.querySelector('.card-changes-list'),
+    c.querySelector('.card-flag-comment-text')].filter((e) => e && e.offsetParent
+    && /auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 1).length;
+  const foto = c.querySelector('.card-photo').getBoundingClientRect();
+  const doc = document.scrollingElement;
+  return {
+    alcancados, aperta: c.classList.contains('card-aperta'),
+    rede: c.querySelector('.card-content').classList.contains('card-content-rola'),
+    rola, fotoH: Math.round(foto.height), docRola: doc.scrollHeight > doc.clientHeight + 1,
+    estouroH: doc.scrollWidth - doc.clientWidth,
+    stackH: Math.round(document.getElementById('cardStack').getBoundingClientRect().height),
+    stackBottom: Math.round(document.getElementById('cardStack').getBoundingClientRect().bottom),
+    rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+  };
+};
+for (const [nomeA, viewport] of APARELHOS_FONTE) {
+  for (const escala of [1, 1.3, 1.5]) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await ctx.route('**/*-tiles/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    if (escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * escala}px !important; }` });
+    for (const place of pesadosPorTipo) {
+      await page.evaluate(async ({ pl }) => {
+        setLang('fr'); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false);
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+      }, { pl: place });
+      // O fim do que a vigia faz é o QUADRO, não um relógio (gotcha #28): dois
+      // quadros pro observer e a escrita agendada, e as animações terminadas.
+      await doisQuadros(page);
+      await assentar(page, 0);
+      await doisQuadros(page);
+      const m = await page.evaluate(MEDIDA_DA_BARRA);
+      const rot = `texto ${escala}× · ${nomeA} · ${place._pais} · ${place.purType}`;
+      checa(!m.semCard, `${rot}: não renderizou`);
+      if (m.semCard) continue;
+      checa(m.alcancados.every(Boolean),
+        `${rot}: a barra ✕/↑/✓ não é alcançada pelo dedo (${m.alcancados.map((a) => (a ? '✓' : '✗')).join('')})`);
+      checa(m.rola <= 1, `${rot}: ${m.rola} áreas rolam no card — rolagem dupla (gotcha #29)`);
+      checa(m.estouroH <= 0, `${rot}: estouro horizontal`, `${m.estouroH}px`);
+      // A foto não some de vez: o piso é 5,5rem (o do degrau estreito).
+      checa(m.fotoH >= Math.round(5.5 * m.rem) - 2, `${rot}: a foto ficou com ${m.fotoH}px, abaixo do piso de 5,5rem`);
+      if (escala === 1) {
+        // CONTROLE: com o texto normal nada muda — a segunda rede nunca liga.
+        checa(!m.aperta, `${rot}: o card-aperta ligou com a escala 1 — mudaria o card de hoje`);
+        // O piso do #cardStack segue os 416px (26rem) onde ele vale.
+        checa(viewport.height < 700 || m.stackH >= 415,
+          `${rot}: o #cardStack ficou com ${m.stackH}px, abaixo do piso de 26rem de sempre`);
+      } else {
+        // Com a escala maior o card CABE na janela: o piso (26rem × escala) não
+        // empurra mais o fim do card pra baixo da dobra (o teto de 60dvh).
+        checa(m.stackBottom <= viewport.height,
+          `${rot}: o fim do card (${m.stackBottom}px) passa da janela de ${viewport.height}px`);
+      }
+    }
+    // CONTROLE do instrumento: neutralizada a regra do `card-aperta`, a MESMA tela
+    // perde a barra no pior aparelho/escala. Sem isto a medida poderia estar cega.
+    if (escala === 1.5 && nomeA === 'Galaxy S8 360x740') {
+      await page.addStyleTag({ content: '.place-card.card-aperta .card-photo { min-height: 9rem !important; }'
+        + ' .place-card.card-aperta .card-content { min-height: min-content !important; }'
+        + ' #cardStack { min-height: 26rem !important; }' });
+      const ctrl = pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE');
+      await page.evaluate(({ pl }) => { AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove()); showCurrentPlace(); }, { pl: ctrl });
+      await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
+      const c = await page.evaluate(MEDIDA_DA_BARRA);
+      checa(!c.alcancados.every(Boolean),
+        'texto 1,5×: CONTROLE — com a regra do card-aperta neutralizada a barra seguiu alcançável; a medida está cega');
+    }
+    checa(erros.length === 0, `texto ${escala}× · ${nomeA}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
 //
 // O mapa entrou por cima de tiles que mudam de cor conforme a região — parque

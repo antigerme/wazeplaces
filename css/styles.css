@@ -701,6 +701,13 @@ body > main {
 .place-card.card-aperta .card-content:not(:has(.card-changes:not(.hidden), .card-flag-comment:not(.hidden))) {
   min-height: 0;
 }
+/* Deitado o card é GRADE e a foto mora na coluna ao lado, com piso 0: lá o
+   `card-aperta` só solta o piso do texto, nunca LEVANTA o da foto. */
+@media (max-height: 480px) and (min-width: 600px) {
+  .place-card.card-aperta .card-photo {
+    min-height: 0;
+  }
+}
 
 /* Scroll edge effect (M3): a borda de baixo esmaece enquanto sobra conteúdo, e
    volta ao normal ao chegar no fim. Máscara em vez de gradiente colorido de

@@ -17168,7 +17168,7 @@ function vigiarEstouroDoConteudo(el) {
 // tamanho inicial do navegador, não o do `html`); a condição pro conserto era
 // não mudar NADA com a escala 1 — a SE 667 tem 8 px de folga hoje.
 //
-// Por isso é MEDIDA, e VIVA: o card ainda estoura? Estourou, a classe
+// Por isso é MEDIDA, e VIVA: a barra de ações passou do corpo do card? Passou, a classe
 // `card-aperta` baixa o piso da foto e solta o piso do texto (ver o
 // styles.css), e a rede de cima (`card-content-rola`) assume o que sobrar. Quem
 // cede é a FOTO primeiro (gotcha #36), por ser a que encolhe 30× mais rápido.
@@ -17182,7 +17182,8 @@ function vigiarEstouroDoConteudo(el) {
 // decisão muda, e só quando algo do card mudou de tamanho: em regime, custo zero.
 function vigiarBarraDeAcoes(card) {
     const corpo = card && card.querySelector('.card-body');
-    if (!corpo) return;
+    const barra = corpo && corpo.querySelector('.card-actions');
+    if (!corpo || !barra) return;
     let ligado = card.classList.contains('card-aperta');
     let agendado = false;
 
@@ -17190,7 +17191,11 @@ function vigiarBarraDeAcoes(card) {
         agendado = false;
         if (!card.isConnected) return;
         if (ligado) card.classList.remove('card-aperta');
-        const fora = corpo.scrollHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
+        // A BARRA, e não o `scrollHeight` do corpo: deitado o card é uma grade e a
+        // coluna do texto pode passar do corpo sem que a barra (coluna da foto)
+        // saia de lugar nenhum — medir o corpo ligava o aperto onde nada faltava.
+        // `offsetTop` é de layout, e não muda com o `transform` do arraste.
+        const fora = barra.offsetTop + barra.offsetHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
         if (fora || ligado) card.classList.toggle('card-aperta', fora);
         ligado = fora;
     };

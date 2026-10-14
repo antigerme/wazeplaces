@@ -79,12 +79,19 @@ function montarVigia({ comResizeObserver = true } = {}) {
   // `quantoSobra(classes)`: o que o layout daria COM as classes que estão ligadas
   // naquele instante (com `card-aperta` o card cabe; sem ela, estoura).
   const estado = { semAperta: 88, comAperta: 0, clientHeight: 459 };
+  // A barra de ações: o fim dela (offsetTop + offsetHeight) passa do corpo em
+  // `semAperta` px sem a classe e `comAperta` px com ela.
+  const barra = {
+    offsetHeight: 95,
+    get offsetTop() { return estado.clientHeight + (classes.has('card-aperta') ? estado.comAperta : estado.semAperta) - 95; },
+  };
   const corpo = {
-    children: [{ n: 'foto' }, { n: 'texto' }, { n: 'acoes' }],
+    children: [{ n: 'foto' }, { n: 'texto' }, barra],
     get clientHeight() { return estado.clientHeight; },
-    get scrollHeight() {
-      return estado.clientHeight + (classes.has('card-aperta') ? estado.comAperta : estado.semAperta);
-    },
+    querySelector: (s) => (s === '.card-actions' ? barra : null),
+    // O `scrollHeight` do corpo NÃO é o sinal: deitado a coluna do texto o passa
+    // com a barra no lugar. Se a vigia voltar a lê-lo, este número a engana.
+    scrollHeight: 99999,
   };
   const quadros = [];
   const observadores = [];
@@ -127,6 +134,12 @@ test('R19-8-01 · LIGADO, ele mede SEM a classe: a escala que volta a 1 desliga 
   m.vigiar(m.card);
   m.rodarQuadros();
   assert.ok(m.classes.has('card-aperta'));
+  // Com a escala AINDA grande, uma nova notificação (o card girou, a fonte
+  // carregou) não pode desligar a classe: medindo COM ela o card sempre cabe, e a
+  // vigia piscaria entre ligado e desligado.
+  m.observadores[0].cb();
+  m.rodarQuadros();
+  assert.ok(m.classes.has('card-aperta'), 'a vigia mediu com a classe ligada e a desligou com o card ainda estourando');
   // A pessoa volta o texto do sistema ao normal: sem a classe o card CABE. Com
   // ela ligada o corpo sempre cabe por construção — se a vigia só medisse
   // assim, jamais desligaria.
@@ -183,6 +196,12 @@ test('R19-8-01 · o CSS: a foto cede até 5.5rem, o piso do texto sai, e só den
     'o piso da foto no card-aperta não é 5.5rem');
   assert.match(bloco(/\.place-card\.card-aperta \.card-content:not\(:has\(\.card-changes:not\(\.hidden\), \.card-flag-comment:not\(\.hidden\)\)\) \{[^}]*\}/),
     /min-height:\s*0/);
+  // Deitado o card é GRADE (a foto na coluna ao lado, piso 0): o `card-aperta`
+  // não pode LEVANTAR o piso da foto ali — o override vem DEPOIS da regra geral.
+  const geral = CSS_SEM.indexOf('.place-card.card-aperta .card-photo {');
+  const deitado = CSS_SEM.indexOf('@media (max-height: 480px) and (min-width: 600px) {\n  .place-card.card-aperta .card-photo {');
+  assert.ok(geral > 0 && deitado > geral, 'o card-aperta levanta o piso da foto também deitado (grade)');
+  assert.match(CSS_SEM.slice(deitado, deitado + 200), /min-height:\s*0/);
   // 1× nada muda: nenhuma regra solta (sem o `card-aperta`) pode ter sido mexida
   // pra esta correção. O piso da foto de fábrica segue no HTML e os degraus por
   // altura seguem como estavam.
