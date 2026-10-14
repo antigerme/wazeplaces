@@ -341,7 +341,7 @@ test('R8-7-04: o Resumo do mês só abre pra MESMA sessão e conta, com o Histó
       resumoCompartilhar: { classList: { toggle() {} } } };
     const estado = { conta: '111', naTela: true };
     // (o `fatiarFuncao` corta a partir de `function`: o `async` volta aqui)
-    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null;\nasync ' + fatiarFuncao('abrirResumoDoMes')
+    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null; let resumoGerando = false;\nasync ' + fatiarFuncao('abrirResumoDoMes')
       + '\nreturn { abrirResumoDoMes, mudarSessao: () => { epocaDaSessao++; }, resumo: () => resumoAtual };';
     const fns = new Function('gerarResumoDoMes', 'contaAgora', 'historicoNaTela', 'document', 'URL', 'File', 'navigator',
       'openModal', 'showToast', 't', corpo)(

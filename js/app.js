@@ -19629,6 +19629,9 @@ function ligarConquistas(el) {
 // css/styles.css). Pedir 800/900 aqui não dá erro: o browser SINTETIZA o
 // negrito ou cai no fallback, em silêncio. `test/resumo.test.mjs` reprova
 // qualquer peso acima de 700 nesta seção.
+// Quanto a imagem do Resumo espera o `qr.js` antes de sair sem o QR (R19-7-02). Folga sobre os ~12 KB
+// numa rede normal, e curto o bastante pra o toque não parecer morto.
+const RESUMO_QR_TETO_MS = 3500;
 const RESUMO_LARGURA = 1080;
 const RESUMO_ALTURA = 1350;
 
@@ -19842,7 +19845,15 @@ async function gerarResumoDoMes() {
         }
     } catch (e) {}
     let qr = null;
-    try { if (await carregarQr()) qr = gerarQR(location.origin); } catch (e) { qr = null; }
+    // O QR é opcional na imagem (o código segue sem ele), mas pendurar não é falhar: com o `qr.js` preso
+    // (sinal que conecta e não responde, e o service worker serve JS pela rede primeiro e sem teto) a
+    // geração inteira esperava, sem sinal nenhum, e cada toque empilhava outra (R19-7-02, MEDIDO). Passado
+    // o teto a imagem sai SEM o QR, que o `desenharResumo` já trata. O pareamento NÃO usa este teto: o QR é
+    // o caminho dele, e o script que chega depois ainda é desenhado quando chegar.
+    try {
+        const chegou = await Promise.race([carregarQr(), new Promise((fim) => setTimeout(() => fim(false), RESUMO_QR_TETO_MS))]);
+        if (chegou) qr = gerarQR(location.origin);
+    } catch (e) { qr = null; }
     let logo = null;
     try {
         const img = new Image();
@@ -19860,6 +19871,8 @@ async function gerarResumoDoMes() {
 // O que está na folha agora: o blob e o nome. Limpo em LIMPEZA_AO_FECHAR —
 // modal fecha por três caminhos, e amarrar a limpeza a um deixa os outros vazando.
 let resumoAtual = null;
+// Uma geração do Resumo no ar (R19-7-02): o toque seguinte não empilha outra.
+let resumoGerando = false;
 
 async function abrirResumoDoMes() {
     // DE QUEM é o resumo. A geração espera a fonte, o QR (o `qr.js` vem pela
@@ -19874,9 +19887,23 @@ async function abrirResumoDoMes() {
     // não espera aviso dela, e quem fechou o Histórico desistiu.
     const epoca = epocaDaSessao;
     const conta = contaAgora();
+    // UMA geração por vez (R19-7-02): enquanto uma roda, o toque seguinte não empilha outra (cada uma
+    // era um canvas de 1080×1350). O botão diz que está ocupado (`aria-busy`), sem elemento novo.
+    if (resumoGerando) return;
+    resumoGerando = true;
+    const botao = document.getElementById('resumoBotao');
+    if (botao && botao.setAttribute) botao.setAttribute('aria-busy', 'true');
     let r = null;
-    try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
-    const blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    let blob = null;
+    try {
+        try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
+        blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    } finally {
+        resumoGerando = false;
+        // O botão que existe AGORA (o painel do Histórico é redesenhado por `innerHTML`).
+        const agora = document.getElementById('resumoBotao');
+        if (agora && agora.removeAttribute) agora.removeAttribute('aria-busy');
+    }
     if (epoca !== epocaDaSessao || conta !== contaAgora() || !historicoNaTela()) return;
     if (!blob) { showToast(t('toast.resumoFalhou'), 'error'); return; }
     resumoAtual = { blob, nome: r.nomeArquivo, mesNome: r.mesNome };

@@ -13972,6 +13972,68 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(escondido.erros.length === 0 && seguiu.erros.length === 0, 'lote/segundo plano: erro de JS', escondido.erros[0] || seguiu.erros[0]);
 }
 
+// ── O RESUMO DO MÊS COM O `qr.js` PENDURADO: sai sem o QR, sem empilhar (R19-7-02) ─
+//
+// O QR é opcional na imagem, mas o `qr.js` vem pela rede na 1ª vez e o service
+// worker o serve pela rede primeiro e sem teto: com sinal que conecta e não
+// responde, "Compartilhar meu resumo do mês" ficava sem resposta nenhuma e cada
+// toque empilhava outra geração de canvas (1080×1350). Hoje a imagem espera o QR
+// até um teto e sai sem ele, e o toque seguinte, com uma geração no ar, não
+// empilha outra (o botão diz `aria-busy`). O `qr.js` fica segurado no servidor de
+// mentira até o FIM do bloco. CONTROLE: o contador de gerações enxerga as que
+// o app inicia (a primeira conta 1), e o `qr.js` foi mesmo pedido e segurado.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e)));
+  let pedidosDoQr = 0;
+  let soltou = false;
+  let soltar;
+  const portao = new Promise((r) => { soltar = r; });
+  await ctx.route('**/js/min/qr.js', async (route) => { pedidosDoQr++; await portao; await route.continue().catch(() => {}); });
+  await page.addInitScript(() => {
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    const k = (dia) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(dia)}`;
+    const h = { _total: { read: 50, rejected: 35 } };
+    const soma = (dia, r, j) => { const kk = k(dia); h[kk] = h[kk] || { read: 0, rejected: 0 }; h[kk].read += r; h[kk].rejected += j; };
+    soma(1, 10, 5); soma(d.getDate(), 40, 30);
+    localStorage.setItem('waze_places_history', JSON.stringify(h));
+  });
+  await page.goto(BASE, { waitUntil: 'load' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+  await assentar(page, 200);
+  await page.evaluate(() => {
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.history = null;
+    openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+    window.__geracoes = 0;
+    const original = gerarResumoDoMes;
+    gerarResumoDoMes = (...args) => { window.__geracoes++; return original(...args); };
+  });
+  await page.evaluate(() => document.getElementById('resumoBotao').click());
+  checa(await page.evaluate(() => document.getElementById('resumoBotao').getAttribute('aria-busy') === 'true'),
+    'resumo/qr: o botão não diz que está gerando (aria-busy) logo depois do toque');
+  // Os toques seguintes, com a geração no ar, não empilham outra.
+  await page.evaluate(() => document.getElementById('resumoBotao') && document.getElementById('resumoBotao').click());
+  await page.evaluate(() => document.getElementById('resumoBotao') && document.getElementById('resumoBotao').click());
+  // O FIM: a folha abre COM o `qr.js` ainda preso (o teto), não depois de solto.
+  const abriu = await esperarNaPagina(page, () => !document.getElementById('resumoModal').classList.contains('hidden'), 20000);
+  checa(abriu.ok, 'resumo/qr: com o `qr.js` pendurado o Resumo nunca abriu (sem teto no QR)');
+  checa(pedidosDoQr === 1, 'resumo/qr: CONTROLE — o `qr.js` não foi pedido uma vez só (o instrumento não segurou o QR)', String(pedidosDoQr));
+  checa(!soltou, 'resumo/qr: CONTROLE — o portão do `qr.js` já tinha sido solto');
+  const est = await page.evaluate(() => ({ geracoes: window.__geracoes, busy: document.getElementById('resumoBotao') ? document.getElementById('resumoBotao').getAttribute('aria-busy') : null,
+    imagem: (document.getElementById('resumoImg').src || '').startsWith('blob:') }));
+  checa(est.geracoes === 1, 'resumo/qr: os toques com uma geração no ar empilharam outra', JSON.stringify(est));
+  checa(est.imagem, 'resumo/qr: a folha abriu sem a imagem', JSON.stringify(est));
+  checa(est.busy === null, 'resumo/qr: o botão seguiu ocupado depois da imagem pronta', JSON.stringify(est));
+  checa(erros.length === 0, 'resumo/qr: erro de JS', erros[0]);
+  soltou = true; soltar();
+  await ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -14064,6 +14126,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
   + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez (servidor de 150 ms por requisição, com o CONTROLE da página sem navigator.locks, em que as duas mandam)`
   + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
+  + `, + o Resumo do mês com o qr.js pendurado (a folha abre sem o QR depois do teto e os toques com uma geração no ar não empilham outra, com o aria-busy no botão e o CONTROLE do qr.js pedido e preso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`

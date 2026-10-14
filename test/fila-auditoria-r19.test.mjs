@@ -684,3 +684,69 @@ test('R19-2-03: a frase existe nos 4 idiomas, no singular e no plural, sem culpa
   assert.match(D.pt['toast.loteNaoSaiu'], /do app\./, 'pt: "app" é masculino');
   assert.match(D.pt['toast.loteNaoSaiuPlural'], /do app\./, 'pt: "app" é masculino');
 });
+
+// ───────────────────── R19-7-02: o QR do Resumo do mês tem teto, e a geração não empilha ─────────────────────
+// Com o `qr.js` pendurado (lie-fi: o service worker serve JS pela rede primeiro e sem teto) o "Compartilhar
+// meu resumo do mês" ficava sem resposta nenhuma, e cada toque empilhava outra geração de canvas.
+function geracaoDoResumo({ qrChega }) {
+  const desenhos = [];
+  const deps = {
+    RESUMO_QR_TETO_MS: 25, RESUMO_LARGURA: 1080, RESUMO_ALTURA: 1350, AppState: { profile: { userName: 'x' } },
+    loadHistory: () => ({}), dadosDoResumo: () => ({ total: 7, ano: 2026, mesIdx: 9 }), i18nLocale: () => 'pt-BR',
+    textosDoResumo: () => ({ tx: {}, mesNome: 'outubro', alt: 'alt' }), location: { origin: 'https://exemplo.test' },
+    document: { createElement: () => ({ getContext: () => ({}) }) }, // sem `fonts`: a espera da fonte é pulada
+    Image: class { decode() { return Promise.reject(new Error('sem logo')); } },
+    carregarQr: () => (qrChega ? Promise.resolve(true) : new Promise(() => {})),   // o `qr.js` que nunca chega
+    gerarQR: () => ({ tamanho: 21 }),
+    desenharResumo: (ctx, d, tx, extra) => desenhos.push(extra),
+  };
+  const h = montar(['gerarResumoDoMes'], deps);
+  return { h, desenhos };
+}
+
+test('R19-7-02: com o `qr.js` pendurado a imagem do Resumo sai SEM o QR depois do teto (e não fica esperando pra sempre)', async () => {
+  const m = geracaoDoResumo({ qrChega: false });
+  const r = await Promise.race([m.h.gerarResumoDoMes(), new Promise((ok) => setTimeout(() => ok('pendurou'), 2000))]);
+  assert.notEqual(r, 'pendurou', 'DEFEITO: a geração do Resumo ficou esperando o `qr.js` pendurado (sem teto)');
+  assert.equal(m.desenhos.length, 1, 'PRÉ-CONDIÇÃO: a imagem deveria ter sido desenhada uma vez');
+  assert.equal(m.desenhos[0].qr, null, 'a imagem saiu com QR mesmo sem o `qr.js` ter chegado');
+  assert.ok(r && r.canvas && r.nomeArquivo, 'a geração não devolveu a imagem');
+  // CONTROLE: com o `qr.js` chegando, o QR entra na imagem — o teto não o tira de quem tem rede.
+  const c = geracaoDoResumo({ qrChega: true });
+  await c.h.gerarResumoDoMes();
+  assert.deepEqual(c.desenhos[0].qr, { tamanho: 21 }, 'CONTROLE: com o `qr.js` à mão o QR sumiu da imagem');
+});
+
+test('R19-7-02: o toque seguinte, com uma geração do Resumo no ar, não empilha outra — o botão diz `aria-busy`', async () => {
+  let soltar;
+  const geracoes = [];
+  const botao = { atributos: {}, setAttribute(k, v) { this.atributos[k] = v; }, removeAttribute(k) { delete this.atributos[k]; } };
+  const deps = {
+    epocaDaSessao: 0, resumoAtual: null, resumoGerando: false, contaAgora: () => 'c', historicoNaTela: () => true,
+    gerarResumoDoMes: () => { geracoes.push(1); return new Promise((ok) => { soltar = () => ok(null); }); },   // devolve `null`: a geração falhou (não abre a folha)
+    document: { getElementById: (id) => (id === 'resumoBotao' ? botao : null) },
+    showToast() {}, t: (k) => k, openModal() {},
+  };
+  const h = montar(['abrirResumoDoMes'], deps);
+  const primeiro = h.abrirResumoDoMes();
+  assert.equal(botao.atributos['aria-busy'], 'true', 'o botão não diz que está gerando');
+  await h.abrirResumoDoMes();                                  // o 2º toque
+  await h.abrirResumoDoMes();                                  // o 3º
+  assert.equal(geracoes.length, 1, 'DEFEITO: o toque com uma geração no ar empilhou outra');
+  soltar();
+  await primeiro;
+  assert.equal(botao.atributos['aria-busy'], undefined, 'o botão seguiu ocupado depois do fim');
+  assert.equal(deps.resumoGerando, false, 'a trava da geração não foi solta');
+  // CONTROLE: depois do fim, o toque seguinte gera de novo.
+  const outro = h.abrirResumoDoMes();
+  assert.equal(geracoes.length, 2, 'CONTROLE: depois do fim o toque não gera de novo');
+  soltar(); await outro;
+});
+
+test('R19-7-02 (estrutura): o teto é do Resumo — o pareamento chama o `carregarQr` sem ele', () => {
+  assert.match(fatiar('gerarResumoDoMes'), /Promise\.race\(\[carregarQr\(\), new Promise\(\(fim\) => setTimeout\(\(\) => fim\(false\), RESUMO_QR_TETO_MS\)\)\]\)/);
+  assert.match(fatiar('desenharQrPareamento'), /if \(!\(await carregarQr\(\)\)\) \{ canvas\.classList\.add\('hidden'\); return; \}/,
+    'o pareamento passou a ter teto: o QR que chegasse depois nunca seria desenhado');
+  const teto = Number((/^const RESUMO_QR_TETO_MS = (\d+);/m.exec(SEM) || [])[1]);
+  assert.ok(teto >= 3000 && teto <= 4000, `o teto do QR do Resumo é ${teto} ms (3 a 4 s: folga pra rede normal, curto pro toque não parecer morto)`);
+});
