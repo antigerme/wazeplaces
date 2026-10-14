@@ -498,7 +498,9 @@ test('R19-1-03: a aba que volta do bfcache depois de um "Sair" dado noutra aba s
 test('R19-1-03 (estrutura): o `pageshow` do bfcache está ligado junto do `storage`', () => {
   assert.match(fatiar('setupSincroniaEntreAbas'), /window\.addEventListener\('storage', aoGravarEmOutraAba\);\s*window\.addEventListener\('pageshow', aoVoltarDoBfcache\);/,
     'a volta do bfcache deixou de reler o aparelho');
-  assert.match(fatiar('aoVoltarDoBfcache'), /ev\.persisted !== true\) return;\s*aoGravarEmOutraAba\(\{ key: null, newValue: null, oldValue: null \}\);/);
+  // (R21-5-08, lote 25: entre o `persisted` e a releitura, a pergunta "o aparelho lê?" — com o
+  // `localStorage` lançando não há o que reler, e a releitura encerrava a sessão viva.)
+  assert.match(fatiar('aoVoltarDoBfcache'), /ev\.persisted !== true\) return;\s*if \(!armazenamentoLegivel\(\)\) return;\s*aoGravarEmOutraAba\(\{ key: null, newValue: null, oldValue: null \}\);/);
 });
 
 // ───────────────────── R19-2-02: a recusa automática de duas abas manda UMA vez ─────────────────────

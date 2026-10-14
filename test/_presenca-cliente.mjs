@@ -12,6 +12,11 @@ import { webcrypto } from 'node:crypto';
 
 const FONTE = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+// O `safeLS` de VERDADE (api.js), sobre o armazenamento de mentira: o que ele faz com um
+// `localStorage` que lança ("bloquear todos os cookies") é justamente o que a presença lê
+// — `null`, igual a "a chave não existe" (R21-5-04). Reescrevê-lo aqui seria um dublê mais
+// generoso que o original.
+const SAFELS_FONTE = /^const safeLS = \{[\s\S]*?^\};/m.exec(readFileSync(new URL('../js/api.js', import.meta.url), 'utf8'))[0];
 
 function fatiarDoApp(nome) {
   const i = APP.search(new RegExp(`^(?:const|function) ${nome}\\b`, 'm'));
@@ -35,8 +40,10 @@ const TRADUZIDAS = /^card\.updateType\./;
 
 // `marcaDestaAba`: a sessão da MEMÓRIA (`API.sessionToken`), que a presença
 // guarda na saída de cada pedido — o 401 tardio é da sessão que já se foi.
+// `armazenamentoLegivel`: a sonda de leitura que o `presencaAparelhoSaiu` compartilha com o
+// `aoSairEmOutraAba` (o aparelho que nem lê não diz "Sair").
 const DO_APP = ['CONTA_KEY', 'WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
-  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba']
+  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba', 'armazenamentoLegivel']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -75,12 +82,22 @@ function elemento(id) {
 // Cria um cliente novo. `api` responde por rota: `presencaApp(campos)` e
 // `chat(campos)` devolvem a resposta (ou uma promessa dela). `aba` é a marca
 // da aba (`ABA_DESTA_PAGINA`, do app.js); sem ela, a página não tem marca.
-export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined } = {}) {
+// `armazenamentoBloqueado`: o `localStorage` LANÇA em todo acesso (o navegador com
+// "bloquear todos os cookies"): a sessão só existe na memória, e o `safeLS` devolve
+// `null` pra tudo.
+export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined,
+  armazenamentoBloqueado = false } = {}) {
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
   // Uma sessão guardada no aparelho (a presença confere que nenhuma OUTRA aba
   // deu "Sair": ver `presencaAparelhoSaiu`); o teste do "Sair" a tira.
   const armazenado = new Map([['waze_session_token', 'token-de-teste']]);
+  const negado = () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
+  const localStorageFalso = armazenamentoBloqueado
+    ? { getItem: negado, setItem: negado, removeItem: negado }
+    : { getItem: (k) => (armazenado.has(k) ? armazenado.get(k) : null), setItem: (k, v) => armazenado.set(k, String(v)),
+        removeItem: (k) => armazenado.delete(k) };
+  const safeLS = new Function('localStorage', SAFELS_FONTE + '\nreturn safeLS;')(localStorageFalso);
   // `saindoNoChat[i]` é o modo "saindo" do api.js (o `keepalive`) na hora da
   // chamada `chat[i]`: é ele que diz se o pedido sobrevive à página que morre.
   const chamadas = { presencaApp: [], chat: [], saindoNoChat: [], setSaindo: [], openModal: [], closeModal: [], unauthorized: 0,
@@ -140,11 +157,8 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     navigator: { onLine: true },
     AppState,
     API,
-    safeLS: {
-      get: (k) => (armazenado.has(k) ? armazenado.get(k) : null),
-      set: (k, v) => armazenado.set(k, String(v)),
-      remove: (k) => armazenado.delete(k),
-    },
+    safeLS,
+    localStorage: localStorageFalso,
     t: (k, v) => (TRADUZIDAS.test(k) && I18N.pt[k] ? I18N.pt[k] : v ? `${k}${JSON.stringify(v)}` : k),
     i18nLocale: () => 'pt-BR',
     openModal: (id) => { chamadas.openModal.push(id); $(id).classList.remove('hidden'); },

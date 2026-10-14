@@ -314,11 +314,16 @@ function chatGuardar(o) {
 }
 
 // O aparelho diz que alguém deu "Sair": nem token nem conta guardados. É a MESMA
-// régua do `aoSairEmOutraAba` (app.js): a QUEDA da sessão tira só o token e
-// deixa a conta (a mesma pessoa volta, e a aba viva ainda guarda a sua por
-// meio segundo, R14-1-03), então só o token faltando NÃO é o "Sair".
+// régua do `aoSairEmOutraAba` (app.js): a QUEDA da sessão tira só o token e deixa a
+// conta (a mesma pessoa volta, e a aba viva ainda guarda a sua por meio segundo,
+// R14-1-03), então só o token faltando NÃO é o "Sair". E o aparelho que nem LÊ (o
+// `localStorage` lançando, "bloquear todos os cookies") não diz "Sair" nenhum: "sem
+// token e sem conta" era verdade com a sessão viva na memória, e a volta do segundo
+// plano nunca mais pedia a lista nem religava o tempo real (R21-5-04). Quem diz se o
+// aparelho lê é uma função só, `armazenamentoLegivel` (app.js), a mesma do
+// `aoSairEmOutraAba`.
 function presencaAparelhoSaiu() {
-    return !safeLS.get('waze_session_token') && !safeLS.get(CONTA_KEY);
+    return !safeLS.get('waze_session_token') && !safeLS.get(CONTA_KEY) && armazenamentoLegivel();
 }
 
 function presencaUuid() {

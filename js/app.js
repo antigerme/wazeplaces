@@ -19324,14 +19324,35 @@ function conferirContaDestaAba() {
     });
 }
 
+// O armazenamento do aparelho LÊ? O `safeLS.get` devolve `null` tanto pra "a chave
+// não existe" quanto pra "não consegui ler" — e o `localStorage` LANÇA no navegador
+// com "bloquear todos os cookies" (o motivo de o `safeLS` existir, ver o api.js).
+// Quem decide pelo que NÃO ENCONTROU tem que separar os dois: "nem token nem conta"
+// é o "Sair" de outra aba quando o aparelho lê e está vazio, e NÃO é nada quando ele
+// nem lê — a sessão desta aba só existe na memória, desde o login. A volta do bfcache
+// (`aoVoltarDoBfcache`) encerrava a sessão viva e mandava `sessao:destroy`, e a volta
+// do segundo plano da presença nunca mais pedia a lista (R21-1-02, R21-5-04 e
+// R21-5-08; o lote 24 copiou a régua pra presença sem a distinção). É a régua do
+// `devModeDoArmazenamento`: "null quando não dá pra ler: aí ninguém decide nada por
+// ele". SÓ LÊ: a resposta a um aviso do navegador (o `storage`, o `pageshow`) não
+// grava nada (ver `aoGravarEmOutraAba`) — por isso a prova é uma leitura que lança ou
+// não, e não um escreve-lê-apaga como o `diagSondaDeEscrita`. FONTE ÚNICA do "lê?":
+// o `aoSairEmOutraAba` e a presença (`presencaAparelhoSaiu`) perguntam por aqui, e só
+// depois de as duas chaves virem vazias — o caso raro, nunca o de todo gesto.
+function armazenamentoLegivel() {
+    try { localStorage.getItem('waze_session_token'); return true; } catch (e) { return false; }
+}
+
 // O "Sair" foi numa OUTRA aba? O que o separa da QUEDA da sessão lá é a CONTA:
 // a queda tira o token e deixa a conta (a mesma pessoa volta, e os dados são
 // dela); o "Sair" tira os dois. Os avisos chegam um por chave, na ordem em que
 // a outra gravou — o do token antes do da conta —, e a decisão lê o aparelho
 // como ele está: sem conta guardada, decide o aviso do token; com ela, o da
-// conta, que chega logo depois.
+// conta, que chega logo depois. Com o aparelho ILEGÍVEL não há "Sair" a ver
+// (`armazenamentoLegivel`).
 function aoSairEmOutraAba() {
     if (safeLS.get('waze_session_token') || safeLS.get(CONTA_KEY)) return false;
+    if (!armazenamentoLegivel()) return false;
     // Esta aba está na TELA DE ENTRADA: nenhuma sessão na memória e o app fora da
     // tela. (A renovação da queda pergunta à extensão com o app AINDA na tela: é
     // aba com sessão a encerrar, e sai pelo caminho de baixo.)
@@ -19577,8 +19598,15 @@ function desenharChavesDePreferencia() {
 // preferências, e `sincronizarComOutraAba` confere o token e a conta (o "Sair" de lá encerra esta
 // aba, a outra conta a tira). Só com `persisted`: a primeira carga e a recarga leem o aparelho do
 // zero. Nada grava: quem responde ao aviso não grava.
+//
+// E só se o aparelho LÊ (`armazenamentoLegivel`, R21-5-08): com o `localStorage` lançando ("bloquear todos
+// os cookies") não há o que reler — o "armazenamento limpo inteiro" que isto simula seria o aparelho
+// inteiro vazio, e a releitura soltava a cópia do Histórico, das conquistas e dos autores, devolvia as
+// preferências desta sessão à fábrica (o "Ver quem está no app" desligado voltava a LIGAR, e a pessoa
+// reaparecia no mapa do WME na ação seguinte) e encerrava a sessão viva (`aoSairEmOutraAba`). MEDIDO.
 function aoVoltarDoBfcache(ev) {
     if (!ev || ev.persisted !== true) return;
+    if (!armazenamentoLegivel()) return;
     aoGravarEmOutraAba({ key: null, newValue: null, oldValue: null });
 }
 

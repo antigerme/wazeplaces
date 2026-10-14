@@ -429,16 +429,19 @@ test('R20-5-04 nenhum caminho da presença recria `waze_places_chat` com o apare
   assert.equal(c.armazenado.has('waze_places_chat'), true, 'CONTROLE: o instrumento não vê o escritor gravar');
 });
 
-test('R20-5-04 a régua do aparelho é a MESMA do `aoSairEmOutraAba` do app.js (token E conta)', () => {
+test('R20-5-04 a régua do aparelho é a MESMA do `aoSairEmOutraAba` do app.js (token E conta, e o aparelho LÊ)', () => {
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const pres = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
   const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const a = app.indexOf('function aoSairEmOutraAba()');
   assert.ok(a > 0);
-  assert.match(semComentario(app.slice(a, a + 400)), /if \(safeLS\.get\('waze_session_token'\) \|\| safeLS\.get\(CONTA_KEY\)\) return false;/);
+  // Lote 25 (R21-1-02): a régua ganhou a pergunta "o aparelho lê?" — a mesma função nos dois lados.
+  assert.match(semComentario(app.slice(a, a + 400)),
+    /^function aoSairEmOutraAba\(\) \{\s*if \(safeLS\.get\('waze_session_token'\) \|\| safeLS\.get\(CONTA_KEY\)\) return false;\s*if \(!armazenamentoLegivel\(\)\) return false;/);
   const p = pres.indexOf('function presencaAparelhoSaiu()');
   assert.ok(p > 0);
-  assert.match(semComentario(pres.slice(p, p + 200)), /return !safeLS\.get\('waze_session_token'\) && !safeLS\.get\(CONTA_KEY\);/);
+  assert.match(semComentario(pres.slice(p, p + 400)),
+    /^function presencaAparelhoSaiu\(\) \{\s*return !safeLS\.get\('waze_session_token'\) && !safeLS\.get\(CONTA_KEY\) && armazenamentoLegivel\(\);\s*\}/);
   // E a guarda está na ENTRADA da volta, antes de qualquer pedido.
   const v = pres.indexOf('function presencaAoVoltar()');
   assert.match(semComentario(pres.slice(v, v + 1200)), /^function presencaAoVoltar\(\) \{\s*if \(presencaAparelhoSaiu\(\)\) return;/);

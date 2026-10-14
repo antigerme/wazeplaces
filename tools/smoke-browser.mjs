@@ -15483,6 +15483,101 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── O ARMAZENAMENTO ILEGÍVEL NÃO É O "SAIR" DE OUTRA ABA (R21-1-02, lote 25) ─
+//
+// `safeLS.get` devolve `null` tanto pra "a chave não existe" quanto pra "não consegui ler". Com o
+// `localStorage` LANÇANDO (o navegador com "bloquear todos os cookies", o motivo de o `safeLS` existir)
+// a sessão só existe na memória, e "sem token E sem conta no aparelho" — a régua do "Sair" de outra aba —
+// ficava verdadeiro com ela VIVA: (a) o retorno do bfcache encerrava a sessão e mandava
+// `sessao:destroy`; (b) a volta do fundo da presença sofria a mesma régua e nunca mais pedia a lista; e
+// (c) a releitura do bfcache devolvia as preferências desta sessão à fábrica. O acesso que lança é o
+// `Object.defineProperty(window, 'localStorage', { get })` — é assim que o Chromium e o WebKit o fazem.
+// CONTROLES: a PRÉ-CONDIÇÃO de que a página está mesmo bloqueada (o acesso lança `SecurityError`); o mesmo
+// percurso com o armazenamento NORMAL (segue logada, sem `sessao:destroy`, e a volta pede a lista — o
+// instrumento enxerga os dois pedidos); e o "Sair" de verdade noutra aba, no bloco de cima, que segue
+// encerrando.
+{
+  const FILA_ARM = [{ ...CARDS.FLAG, venueID: 'vAR1', updateRequestID: 'uAR1', imageUrls: [] }];
+  const rodar = async (bloqueado) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const rede = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      rede.push({ nome, acao: corpo.action || null });
+      let resp = { success: true };
+      if (nome === 'testar-cookies') resp = { success: true, sessionToken: 'token-do-smoke-do-armazenamento', conta: 77 };
+      else if (nome === 'perfil') resp = { success: true, profile: { id: 77, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') resp = { success: true, places: FILA_ARM, hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript((bloquear) => {
+      if (bloquear) {
+        Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
+        return;
+      }
+      try {
+        if (localStorage.getItem('__seed')) return;
+        localStorage.setItem('__seed', '1');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoGateSeen: true }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    }, bloqueado);
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+    const acesso = await page.evaluate(() => { try { localStorage.getItem('x'); return 'lê'; } catch (e) { return e.name; } });
+    page.evaluate(() => authenticateWithCookies('# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-77\n')).catch(() => {});
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o login');
+    // (b) a volta do fundo ANTES do bfcache: as duas sofrem a mesma régua, e a segunda medida não pode herdar o
+    // "Sair" que a primeira causaria. A presença pede a lista (o teto de 60 s da volta zerado à mão).
+    const listas0 = rede.filter((x) => x.nome === 'presenca-app').length;
+    await page.evaluate(() => {
+      window.presencaUltimaTentativa = () => 0;
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await dormir(150);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    // Sinal POSITIVO (o pedido chegar), com teto: a falta dele é o defeito.
+    let listas = 0;
+    for (let i = 0; i < 50 && listas === 0; i++) { await dormir(100); listas = rede.filter((x) => x.nome === 'presenca-app').length - listas0; }
+    // (c) a escolha DESTA sessão, só na memória quando o aparelho não guarda: o bfcache não a devolve à fábrica.
+    await page.evaluate(() => { AppState.preferences.pularGuarda = true; });
+    const antes = rede.length;
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await dormir(600);   // a releitura é síncrona: o prazo só cobre o `sessao:destroy` que a saída mandaria
+    const aposBfcache = await page.evaluate(() => ({ auth: AppState.authenticated === true, card: !!document.querySelector('#cardStack .place-card'),
+      entrada: !document.getElementById('authScreen').classList.contains('hidden'), pularGuarda: AppState.preferences.pularGuarda }));
+    const destruiu = rede.slice(antes).filter((x) => x.nome === 'sessao' && x.acao === 'destroy').length;
+    await ctx.close();
+    return { acesso, aposBfcache, destruiu, listas, erros };
+  };
+  const normal = await rodar(false);
+  const bloq = await rodar(true);
+  checa(normal.acesso === 'lê', 'armazenamento/CONTROLE: o contexto normal não lê o armazenamento', normal.acesso);
+  checa(bloq.acesso === 'SecurityError', 'armazenamento/PRÉ-CONDIÇÃO: a página bloqueada tem de LANÇAR ao acessar o localStorage (senão nada aqui mede o defeito)', bloq.acesso);
+  checa(normal.aposBfcache.auth && normal.aposBfcache.card && normal.destruiu === 0,
+    'armazenamento/CONTROLE: com o aparelho guardando a sessão o pageshow persistido não encerra a aba', JSON.stringify(normal));
+  checa(normal.listas >= 1, 'armazenamento/CONTROLE: a volta do fundo com o aparelho normal TEM de pedir a lista (o instrumento não vê o pedido)', JSON.stringify(normal));
+  checa(bloq.aposBfcache.auth && bloq.aposBfcache.card && !bloq.aposBfcache.entrada,
+    'armazenamento/bfcache: com o armazenamento ILEGÍVEL o pageshow persistido encerrou a sessão viva (a tela de entrada, sem card)', JSON.stringify(bloq.aposBfcache));
+  checa(bloq.destruiu === 0, 'armazenamento/bfcache: o pageshow persistido mandou `sessao:destroy` com a sessão viva', String(bloq.destruiu));
+  checa(bloq.aposBfcache.pularGuarda === true, 'armazenamento/bfcache: a releitura devolveu à fábrica a preferência desta sessão (o aparelho nem lê)', JSON.stringify(bloq.aposBfcache));
+  checa(bloq.listas >= 1, 'armazenamento/presença: a volta do fundo com o armazenamento ILEGÍVEL nunca mais pede a lista', JSON.stringify(bloq));
+  checa(normal.erros.length === 0 && bloq.erros.length === 0, 'armazenamento: erro de JS', normal.erros[0] || bloq.erros[0]);
+}
+
 // ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
 //
 // Duas abas abrindo juntas (a janela restaurada, o app instalado e o navegador)
