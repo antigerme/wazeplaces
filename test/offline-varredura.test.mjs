@@ -395,13 +395,16 @@ test('R6-4-1: a varredura seguinte não começa com a poda da anterior ainda apa
 // (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
 test('offlineGravarFila: transação ABORTADA (cota) devolve \'falhou\' em vez de pendurar (R18-4-05: era false, igual a "nada a gravar")', async () => {
   const AppState = { queue: [{ venueID: 'r1' }], filters: {} };
+  // A conexão aberta é CONTADA (R19-4-01): o `close() {}` de antes deixava a gravação que aborta
+  // vazar a conexão sem teste nenhum reprovar — e o "Sair" ficava com o apagamento bloqueado.
+  let abertas = 0;
   const deps = {
     AppState, Treino: { ativo: false }, offlineLigado: () => true, OFFLINE_STORE: 'fila',
-    offlineDB: async () => ({ close() {}, transaction: () => {
+    offlineDB: async () => { abertas++; let aberta = true; return ({ close() { if (aberta) { aberta = false; abertas--; } }, transaction: () => {
       const tx = { objectStore: () => ({ put: () => { setTimeout(() => tx.onabort && tx.onabort()); },
         get: () => { const r = {}; setTimeout(() => { if (r.onsuccess) r.onsuccess(); }); return r; } }) };
       return tx;
-    } }),
+    } }); },
     offlinePodarPousos: () => {}, dfato: () => {},
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
@@ -413,6 +416,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve \'falhou\' em vez d
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('pedidoForaDaFilaGuardada') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   const r = await Promise.race([gravar(), new Promise((ok) => setTimeout(() => ok('PENDUROU'), 500))]);
   assert.equal(r, 'falhou', 'a gravação abortada pendurou (a varredura ficaria presa) ou voltou a se confundir com "nada a gravar"');
+  assert.equal(abertas, 0, 'DEFEITO (R19-4-01): a gravação abortada deixou a conexão do IndexedDB aberta — o "Sair" não apaga a base');
 });
 
 test('offlineDB: abrir a base tem teto (o IndexedDB do WebKit às vezes não responde)', async () => {

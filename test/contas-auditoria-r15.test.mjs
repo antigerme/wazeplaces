@@ -370,7 +370,7 @@ test('R15-2-F4: o "Sair" tira o conjunto (junto do `pedidosEmAndamento`) — e o
   for (const nome of ['enviarLote', 'handleBatchMarkRead']) {
     const corpo = fatiarDe(APP_SEM, nome);
     assert.match(corpo, /marcarLoteSemEnviar\(/, `${nome} não registra o que ainda não saiu`);
-    assert.match(corpo, /marcarLoteSemEnviar\([^)]*,\s*false\)/, `${nome} não solta o que saiu`);
+    assert.match(corpo, /marcarLoteSemEnviar\([^)]*,\s*false(, geracao)?\)/, `${nome} não solta o que saiu`);
   }
 });
 

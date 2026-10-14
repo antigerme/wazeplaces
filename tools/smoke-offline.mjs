@@ -1750,6 +1750,55 @@ diz('e diz, no arquivo, quais leituras não chegaram',
   ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases']
     .every((r) => rel8dPendurada.semResposta?.includes(r)), JSON.stringify(rel8dPendurada.semResposta));
 
+secao('8e. A GRAVAÇÃO QUE FALHA NÃO DEIXA A CONEXÃO PRESA — o "Sair" apaga a base na hora (R19-4-01)');
+// A rodada 19 mediu no navegador: a cota na gravação da fila (o `put` que lança, ou o aborto
+// assíncrono da transação) pulava o `db.close()`, e o `offlineEsquecer` (o "Sair", o interruptor
+// desligado) ficava com o `deleteDatabase` BLOQUEADO até o coletor de lixo — a fila de pedidos de
+// terceiros seguia no disco, e a próxima abertura da base dava `timeout`. O IndexedDB de mentira
+// dos testes de unidade não enxerga isso (o `deleteDatabase` de verdade espera as conexões): só
+// aqui. CONTROLE: o mesmo roteiro sem a falha, que apaga na hora — se a medida estivesse cega, os
+// dois modos "passariam".
+const presa8e = {};
+for (const modo of ['ok', 'put-lanca', 'aborto']) {
+  presa8e[modo] = await page.evaluate(async (m) => {
+    // O estado da página é de quem vem depois (a seção 9 varre a fila dela): guarda e devolve.
+    window.__estado8e = window.__estado8e || { queue: AppState.queue, authenticated: AppState.authenticated, token: API.sessionToken, off: AppState.preferences.offlineDisponivel };
+    AppState.authenticated = true; API.sessionToken = 'tok'; AppState.preferences.offlineDisponivel = true;
+    AppState.queue = [{ venueID: 'v8e', updateRequestID: 'u8e', name: 'Local 8e', categories: ['PARK'], updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE', reqType: 'VENUE',
+      createdBy: 'ed8e', creatorId: 8001, imageUrls: [], mapa: null, dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 }];
+    await offlineEsquecer();
+    await new Promise((r) => setTimeout(r, 300));
+    const primeira = await offlineGravarFila();                   // a base nasce e recebe a fila de terceiros
+    const orig = IDBObjectStore.prototype.put;
+    if (m === 'put-lanca') IDBObjectStore.prototype.put = function (v, k) { if (k === 'fila') throw new DOMException('cota', 'QuotaExceededError'); return orig.apply(this, arguments); };
+    if (m === 'aborto') IDBObjectStore.prototype.put = function (v, k) { const r = orig.apply(this, arguments); if (k === 'fila') setTimeout(() => { try { this.transaction.abort(); } catch (e) {} }, 0); return r; };
+    let segunda;
+    try { segunda = await offlineGravarFila(); } finally { IDBObjectStore.prototype.put = orig; }
+    await offlineEsquecer();                                       // o "Sair"
+    await new Promise((r) => setTimeout(r, 1500));
+    // Só a base do OFFLINE (a do diagnóstico, `waze_places_diag`, é de outra funcionalidade).
+    const bases = (await indexedDB.databases()).map((d) => d.name).filter((n) => n === OFFLINE_DB);
+    return { primeira, segunda, bases };
+  }, modo);
+}
+diz('PRÉ-CONDIÇÃO: a 1ª gravação deu certo nos três roteiros (a base nasceu com a fila de terceiros)',
+  ['ok', 'put-lanca', 'aborto'].every((m) => presa8e[m].primeira === true), JSON.stringify(presa8e));
+diz('PRÉ-CONDIÇÃO: a falha é de verdade (cota no `put`, aborto da transação) e o controle grava',
+  presa8e['ok'].segunda === true && presa8e['put-lanca'].segunda === 'cota' && ['cota', 'falhou'].includes(presa8e['aborto'].segunda), JSON.stringify(presa8e));
+diz('CONTROLE: sem a falha, o "Sair" apaga a base na hora (a medida enxerga o caminho feliz)', presa8e['ok'].bases.length === 0, JSON.stringify(presa8e['ok']));
+diz('com o `put` que lança a cota, o "Sair" apaga a base na hora — a conexão não ficou presa', presa8e['put-lanca'].bases.length === 0, JSON.stringify(presa8e['put-lanca']));
+diz('com o aborto da transação (a cota no WebKit/iOS), o "Sair" apaga a base na hora', presa8e['aborto'].bases.length === 0, JSON.stringify(presa8e['aborto']));
+const reabre8e = await page.evaluate(async () => {
+  const t0 = Date.now();
+  try { const db = await offlineDB(); db.close(); await offlineEsquecer(); return { ms: Date.now() - t0 }; }
+  catch (e) { return { erro: String((e && e.message) || e), ms: Date.now() - t0 }; }
+  finally {
+    const e = window.__estado8e; delete window.__estado8e;
+    AppState.queue = e.queue; AppState.authenticated = e.authenticated; API.sessionToken = e.token; AppState.preferences.offlineDisponivel = e.off;
+  }
+});
+diz('e "Disponível offline" segue abrindo a base logo depois (sem o `timeout` de 5 s da conexão esquecida)', !reabre8e.erro && reabre8e.ms < 2000, JSON.stringify(reabre8e));
+
 // SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
 // código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
 // for declarado aqui não existe depois dele.

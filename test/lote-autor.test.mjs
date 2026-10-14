@@ -725,7 +725,7 @@ test('R5-2-02: o selo do card da frente é refeito quando OUTRO pedido entra ou 
     'o gesto da aprovação deixou de refazer o selo do card da frente');
   assert.match(ap, /marcarEmAndamento\(place, false\);\s*refazerSelosSeOutroNaTela\(place\);/,
     'o Desfazer da aprovação deixou de refazer o selo do card da frente');
-  assert.match(fatiar('enviarAprovacao'), /marcarEmAndamento\(alvo\.place, false\);\s*refazerSelosSeOutroNaTela\(alvo\.place\);/,
+  assert.match(fatiar('enviarAprovacao'), /marcarEmAndamento\(alvo\.place, false(, geracao)?\);\s*refazerSelosSeOutroNaTela\(alvo\.place\);/,
     'o fim do envio da aprovação deixou de refazer o selo do card da frente');
 });
 

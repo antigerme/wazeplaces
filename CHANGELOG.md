@@ -8,6 +8,41 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.14-03
+
+Vigésima segunda rodada da auditoria. Depois da v2026.10.14-02, conferida em produção com duas contas (168 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. Nenhum achado era grave no uso normal; os mais sérios eram a seta do teclado segurada decidindo pedidos em série, a base do "Disponível offline" que ficava presa depois de uma gravação que falhou, e os botões ✕ ↑ ✓ que saíam da tela com o texto do sistema aumentado.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila, as contas e as telas**
+- **Segurar a seta (← → ↑) ou o Enter num dos botões ✕ ↑ ✓ agora decide um pedido só.** Antes, com o Desfazer desligado, segurar a seta por três segundos rejeitava uns nove pedidos que você nem chegou a ver, e rejeitar não volta. As setas que rolam a lista do card, o mapa e a foto ampliados continuam repetindo, porque ali segurar é rolar.
+- **Com o texto do celular aumentado (1,3× ou mais), os botões ✕ ↑ ✓ deixam de sair da tela.** Antes, em celulares de 667 a 860 px de altura (o iPhone SE, o Galaxy S8, o iPhone 15, vários Android), a barra ficava cortada embaixo do cartão e não havia como alcançá-la. Agora a foto encolhe (até uma faixa mínima) e, se ainda faltar espaço, o texto do cartão rola por dentro. Com o texto normal nada mudou (conferido pixel a pixel em 480 capturas). Com o texto em 2× no Galaxy Fold ainda sobra um pedaço da barra fora do cartão.
+- **Texto em hebraico ou árabe (nome do local, endereço, autor, motivo, comentário, mudanças propostas e conversa) agora aparece alinhado à direita e na ordem certa de leitura**, inclusive com números e parênteses no meio. Antes, "(סניף 2)" saía com os pedaços trocados e tudo ficava alinhado à esquerda.
+- **Se você troca o idioma enquanto o aviso "Desfazer" está na tela, ele passa para o idioma novo na hora.** A contagem e o Desfazer seguem funcionando.
+- **Depois de você sair, a resposta atrasada de uma decisão da conta anterior não mexe mais no que a conta nova está fazendo.** Antes ela podia apagar o aviso "Enviando 1…" de uma decisão ainda em andamento, deixar o ↻ trazer de volta como card o pedido que você acabara de decidir, ou apagar do diálogo do "Sair" a contagem das decisões esperando envio.
+- **O QR de pareamento que você mostrou continua sendo cancelado se você recarregar o app e depois tocar em "Sair".** Antes, depois de recarregar, o código seguia valendo por até 5 minutos numa conta que já tinha saído. O código fica guardado só nesta aba, por 5 minutos, e a Ajuda (Privacidade) diz isso; ele nunca vai para o relatório do modo dev.
+- **Quando o app volta do cache de voltar/avançar do navegador (Safari e Chrome do celular), ele confere o aparelho:** se você saiu em outra aba nesse meio, esta sai também, em vez de continuar mostrando a fila de quem saiu.
+- **Com o app aberto em duas abas, a recusa automática de autor não manda mais cada rejeição duas vezes ao Waze.** Antes as duas abas rejeitavam os mesmos pedidos (o placar saía certo, mas as chamadas eram o dobro). Agora uma aba de cada vez cuida disso, e a outra confere só o que sobrou.
+- **Se você trocar de app com um "Rejeitar os N" ainda na janela do Desfazer, o app agora avisa quando você volta** que os pedidos não foram rejeitados e que é só tocar de novo. Antes os pedidos voltavam para a fila em silêncio, com o placar zerado.
+- **O "Compartilhar meu resumo do mês" não fica mais parado quando a internet conecta mas não responde.** A imagem sai sem o QR depois de uns 3 segundos, e tocar de novo enquanto ela é gerada não faz outra imagem.
+
+**A foto ampliada e a busca**
+- **Passar as fotos com o dedo (ou o mouse) duas vezes seguidas, bem rápido, não amplia mais a foto sem querer:** o segundo gesto troca de foto como o primeiro. O duplo toque de verdade continua ampliando e voltando. Clicar duas vezes com o botão direito do mouse também não amplia mais.
+- **Um pedido sem localização no mapa deixa de mostrar a lixeira na foto ampliada;** antes ela aparecia e dava erro três segundos depois de tocar.
+- **Se o país guardado no aparelho for um valor inválido (por exemplo um número gigante), o app volta ao Brasil** em vez de ficar em "Falha ao carregar" a cada abertura.
+
+**A conversa**
+- **Se você abre uma conversa e a mensagem anterior ainda não carregou, uma lista que chega logo depois não faz mais o app marcar como "Lida", sem ninguém ter visto, uma mensagem que só a lista conhecia.** Ela continua não lida até a conversa carregar.
+- **O relatório de diagnóstico diz quantas conversas abriram sem mostrar uma mensagem que o app contava.**
+
+**Disponível offline e diagnóstico**
+- **Sair do app agora apaga na hora a fila guardada do "Disponível offline", mesmo depois de uma gravação que falhou por falta de espaço.** Antes, com o aparelho sem espaço, a base ficava "presa" até o Android ou o navegador limpar a memória: os pedidos guardados continuavam no aparelho depois do "Sair", e ligar o "Disponível offline" de novo ficava em "Faltou parte" por alguns segundos.
+- **O relatório de diagnóstico não enche mais com a mesma falha de gravação repetida,** e passa a dizer "não deu pra ler a base" quando a leitura falhou, em vez de afirmar que a fila nunca foi gravada.
+
+---
+
 ## v2026.10.14-02
 
 Vigésima primeira rodada da auditoria. Depois da v2026.10.14-01, conferida em produção com duas contas (164 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. Quase tudo o que acharam eram pontas soltas dos consertos da rodada anterior; nenhum achado era grave.

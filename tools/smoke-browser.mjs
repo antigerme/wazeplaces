@@ -1117,6 +1117,136 @@ for (const [nomeF, fw, fh] of FORMATOS_FOTO) {
   }
 }
 
+// ── O TEXTO DO SISTEMA MAIOR: a barra ✕ ↑ ✓ continua ao alcance (R19-8-01) ──
+//
+// Fonte do sistema em 1,3× ou mais empurrava a barra pra FORA do card nas alturas
+// de 667 a 860 px (o `.place-card` corta com `overflow:hidden` e a página não
+// rola): MEDIDO, +79 px num Android 360×800 a 1,3×, +237 a 1,5×, +66 no SE a
+// 1,3×. A regra compacta por ALTURA é em px e não enxerga a escala; a segunda
+// rede de segurança (`vigiarBarraDeAcoes` → `card-aperta`) é MEDIDA e viva.
+//
+// A escala é emulada como a auditoria a emulou: `html { font-size }` (rem e o
+// texto crescem, o viewport não). O que se mede é o que o DEDO alcança — o
+// `elementFromPoint` no centro dos três botões, dentro da janela (gotcha #26) —,
+// com os pedidos REAIS dos 6 países, os 3 mais pesados de cada tipo, em francês
+// (a frase mais larga, gotcha #25).
+//
+// CONTROLE de escala 1 (nada muda: a rede nunca liga, o `card-aperta` nunca
+// aparece) e CONTROLE do instrumento (com a regra do `card-aperta` neutralizada a
+// mesma tela PERDE a barra — senão "alcançável" passaria com a medida cega,
+// gotcha #28).
+const pesadosPorTipo = [];
+{
+  const porTipo = {};
+  for (const f of FIXTURES_PAISES) (porTipo[f.purType] ||= []).push(f);
+  for (const lista of Object.values(porTipo)) {
+    pesadosPorTipo.push(...[...lista].sort((a, b) => JSON.stringify(b).length - JSON.stringify(a).length).slice(0, 3));
+  }
+}
+const APARELHOS_FONTE = [
+  ['Android 360x800', { width: 360, height: 800 }], ['iPhone 393x852', { width: 393, height: 852 }],
+  ['Galaxy S8 360x740', { width: 360, height: 740 }], ['iPhone SE 375x667', { width: 375, height: 667 }],
+  ['Pixel 412x915', { width: 412, height: 915 }],
+];
+const MEDIDA_DA_BARRA = () => {
+  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+  if (!c) return { semCard: true };
+  const botoes = ['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].map((s) => c.querySelector(s));
+  const alcancados = botoes.map((b) => {
+    const r = b.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (x < 0 || x > innerWidth || y < 0 || y > innerHeight) return false;
+    const el = document.elementFromPoint(x, y);
+    return !!el && (el === b || b.contains(el));
+  });
+  // Rolagem DUPLA: mais de uma área do card que de fato rola (a regra do gotcha
+  // #29 — o conteúdo OU a caixa longa, nunca as duas).
+  const rola = [c.querySelector('.card-content'), c.querySelector('.card-changes-list'),
+    c.querySelector('.card-flag-comment-text')].filter((e) => e && e.offsetParent
+    && /auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 1).length;
+  const foto = c.querySelector('.card-photo').getBoundingClientRect();
+  const doc = document.scrollingElement;
+  return {
+    alcancados, aperta: c.classList.contains('card-aperta'),
+    rede: c.querySelector('.card-content').classList.contains('card-content-rola'),
+    rola, fotoH: Math.round(foto.height), docRola: doc.scrollHeight > doc.clientHeight + 1,
+    estouroH: doc.scrollWidth - doc.clientWidth,
+    stackH: Math.round(document.getElementById('cardStack').getBoundingClientRect().height),
+    stackBottom: Math.round(document.getElementById('cardStack').getBoundingClientRect().bottom),
+    rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+  };
+};
+for (const [nomeA, viewport] of APARELHOS_FONTE) {
+  for (const escala of [1, 1.3, 1.5]) {
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await ctx.route('**/*-tiles/**', (r) =>
+      r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    if (escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * escala}px !important; }` });
+    for (const place of pesadosPorTipo) {
+      await page.evaluate(async ({ pl }) => {
+        setLang('fr'); applyI18n();
+        AppState.authenticated = true;
+        AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+        document.getElementById('authScreen').classList.add('hidden');
+        document.getElementById('appScreen').classList.remove('hidden');
+        document.getElementById('noMoreCards').classList.add('hidden');
+        showLoading(false);
+        AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove());
+        showCurrentPlace();
+      }, { pl: place });
+      // O fim do que a vigia faz é o QUADRO, não um relógio (gotcha #28): dois
+      // quadros pro observer e a escrita agendada, e as animações terminadas.
+      await doisQuadros(page);
+      await assentar(page, 0);
+      await doisQuadros(page);
+      const m = await page.evaluate(MEDIDA_DA_BARRA);
+      const rot = `texto ${escala}× · ${nomeA} · ${place._pais} · ${place.purType}`;
+      checa(!m.semCard, `${rot}: não renderizou`);
+      if (m.semCard) continue;
+      checa(m.alcancados.every(Boolean),
+        `${rot}: a barra ✕/↑/✓ não é alcançada pelo dedo (${m.alcancados.map((a) => (a ? '✓' : '✗')).join('')})`);
+      checa(m.rola <= 1, `${rot}: ${m.rola} áreas rolam no card — rolagem dupla (gotcha #29)`);
+      checa(m.estouroH <= 0, `${rot}: estouro horizontal`, `${m.estouroH}px`);
+      // A foto não some de vez: o piso é 5,5rem (o do degrau estreito).
+      checa(m.fotoH >= Math.round(5.5 * m.rem) - 2, `${rot}: a foto ficou com ${m.fotoH}px, abaixo do piso de 5,5rem`);
+      if (escala === 1) {
+        // CONTROLE: com o texto normal nada muda — a segunda rede nunca liga.
+        checa(!m.aperta, `${rot}: o card-aperta ligou com a escala 1 — mudaria o card de hoje`);
+        // O piso do #cardStack segue os 416px (26rem) onde ele vale.
+        checa(viewport.height < 700 || m.stackH >= 415,
+          `${rot}: o #cardStack ficou com ${m.stackH}px, abaixo do piso de 26rem de sempre`);
+      } else {
+        // Com a escala maior o card CABE na janela: o piso (26rem × escala) não
+        // empurra mais o fim do card pra baixo da dobra (o teto de 60dvh).
+        checa(m.stackBottom <= viewport.height,
+          `${rot}: o fim do card (${m.stackBottom}px) passa da janela de ${viewport.height}px`);
+      }
+    }
+    // CONTROLE do instrumento: neutralizada a regra do `card-aperta`, a MESMA tela
+    // perde a barra no pior aparelho/escala. Sem isto a medida poderia estar cega.
+    if (escala === 1.5 && nomeA === 'Galaxy S8 360x740') {
+      await page.addStyleTag({ content: '.place-card.card-aperta .card-photo { min-height: 9rem !important; }'
+        + ' .place-card.card-aperta .card-content { min-height: min-content !important; }'
+        + ' #cardStack { min-height: 26rem !important; }' });
+      const ctrl = pesadosPorTipo.find((p) => p.purType === 'NEW_PLACE');
+      await page.evaluate(({ pl }) => { AppState.queue = [pl]; AppState.currentPlace = pl;
+        document.querySelectorAll('.place-card').forEach((e) => e.remove()); showCurrentPlace(); }, { pl: ctrl });
+      await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
+      const c = await page.evaluate(MEDIDA_DA_BARRA);
+      checa(!c.alcancados.every(Boolean),
+        'texto 1,5×: CONTROLE — com a regra do card-aperta neutralizada a barra seguiu alcançável; a medida está cega');
+    }
+    checa(erros.length === 0, `texto ${escala}× · ${nomeA}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
 //
 // O mapa entrou por cima de tiles que mudam de cor conforme a região — parque
@@ -6610,6 +6740,102 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   await ctx.close();
 }
 
+
+// ── Passar as fotos com o polegar: o 2º arraste seguido TROCA a foto (R19-3-02) ─
+//
+// O duplo toque da foto era decidido no `pointerdown` contra o `pointerdown`
+// ANTERIOR, sem saber se aquele fora toque ou arraste: o 2º arraste de um passar
+// de fotos, a < 300 ms e < 40 px do começo do 1º, AMPLIAVA 2,5× em vez de trocar
+// de foto (MEDIDO nos dois motores, com mouse e com toque). O botão direito, que
+// não arrasta nem toca, também contava. O mapa ampliado já decidia certo.
+// CONTROLES: o intervalo de 500 ms (fora da janela) troca a foto, e o duplo toque
+// de verdade (dois cliques a 100 ms) AMPLIA — sem eles "a foto não ampliou" passaria
+// também com a foto que não responde a gesto nenhum. O toque de verdade (CDP) não
+// entra: só o Chromium o sintetiza, e o `pointerdown` é o mesmo evento; ele está
+// medido à parte no relatório da rodada.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.route('**/api/**', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
+  await presencaViva(page);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  await page.evaluate((url) => {
+    setLang('pt'); applyI18n();
+    API.setSession('tok-smoke');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 1, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    const p = { venueID: 'v-flick', updateRequestID: 'pend-01', name: 'Padaria', categories: ['BAKERY'], address: 'Rua X, 1',
+      updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', lat: -12.9, lon: -38.3, changes: [],
+      imageUrls: [1, 2, 3, 4, 5].map((n) => `${url}#flick-${n}`), approvedImageIds: [],
+      mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
+    AppState.queue = [p]; AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  }, foto);
+  await assentar(page);
+  const abrirFotos = async () => {
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
+    await page.evaluate(() => { const p = AppState.currentPlace; Lightbox.open(p.imageUrls, 0, -1, p.name, false, p); });
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'flick/foto: a foto não abriu');
+    await page.waitForTimeout(300);
+  };
+  const estado = () => page.evaluate(() => ({ idx: Lightbox.idx, escala: +Lightbox.scale.toFixed(2) }));
+  const ponto = await (async () => { await abrirFotos(); return page.evaluate(() => { const r = document.getElementById('lightboxImage').getBoundingClientRect(); return { x: r.x + r.width * 0.8, y: r.y + r.height / 2 }; }); })();
+  // Um passar de foto com o polegar: ~100 ms, 150 px pra esquerda.
+  const flick = async () => {
+    await page.mouse.move(ponto.x, ponto.y); await page.mouse.down();
+    for (let i = 1; i <= 4; i++) { await page.mouse.move(ponto.x - 150 * i / 4, ponto.y); await page.waitForTimeout(15); }
+    await page.mouse.up();
+  };
+  for (const intervalo of [500, 150, 60]) {
+    await abrirFotos();
+    const antes = await estado();
+    checa(antes.idx === 0 && antes.escala === 1, `flick/foto ${intervalo} ms: PRÉ-CONDIÇÃO — a foto não abriu na 1ª em 1×`, JSON.stringify(antes));
+    await flick();
+    await page.waitForTimeout(intervalo);
+    await flick();
+    await page.waitForTimeout(150);
+    const dep = await estado();
+    checa(dep.idx === 2 && dep.escala === 1,
+      `flick/foto: dois arrastes seguidos com ${intervalo} ms entre eles deram ${JSON.stringify(dep)} — tinham que trocar de foto duas vezes (idx 2, 1×)${intervalo === 500 ? ' [CONTROLE: fora da janela do duplo toque]' : ''}`);
+  }
+  // CONTROLE do instrumento: o duplo toque de verdade AMPLIA 2,5× e o 3º toque não mexe.
+  await abrirFotos();
+  const toque = async (opts = {}) => { await page.mouse.click(ponto.x, ponto.y, opts); };
+  await toque(); await page.waitForTimeout(100); await toque();
+  await page.waitForTimeout(150);
+  const dt = await estado();
+  checa(dt.escala === 2.5 && dt.idx === 0, `flick/foto: CONTROLE — o duplo toque (2 cliques a 100 ms) deu ${JSON.stringify(dt)}, tinha que AMPLIAR 2,5× na mesma foto`);
+  await toque(); await page.waitForTimeout(100); await toque();
+  await page.waitForTimeout(150);
+  const dv = await estado();
+  checa(dv.escala === 1, `flick/foto: CONTROLE — o 2º duplo toque deu ${JSON.stringify(dv)}, tinha que VOLTAR a 1×`);
+  // O botão direito não age na foto: dois cliques a 100 ms não ampliam (e o arraste com ele não troca).
+  await abrirFotos();
+  await toque({ button: 'right' }); await page.waitForTimeout(100); await toque({ button: 'right' });
+  await page.waitForTimeout(150);
+  const bd = await estado();
+  checa(bd.escala === 1 && bd.idx === 0, `flick/foto: dois cliques com o botão DIREITO a 100 ms deram ${JSON.stringify(bd)} — não amplia`);
+  await abrirFotos();
+  await page.mouse.move(ponto.x, ponto.y); await page.mouse.down({ button: 'right' });
+  for (let i = 1; i <= 4; i++) { await page.mouse.move(ponto.x - 150 * i / 4, ponto.y); await page.waitForTimeout(15); }
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(150);
+  const ba = await estado();
+  checa(ba.idx === 0, `flick/foto: o arraste com o botão DIREITO trocou de foto (${JSON.stringify(ba)})`);
+  await page.evaluate(() => Lightbox.close());
+  checa(erros.length === 0, 'flick/foto: erro de JS', erros[0]);
+  await ctx.close();
+}
 
 // ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
 // Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
@@ -13475,6 +13701,490 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── TECLA SEGURADA NÃO DECIDE EM SÉRIE (R19-2-01, lote 23) ──────────────────
+//
+// O sistema repete o `keydown` (com `repeat` verdadeiro) a ~30 Hz enquanto a
+// tecla fica apertada. O `triggerSwipe` só ignorava a repetição durante a
+// animação de 350 ms e a janela do Desfazer: SEM o Desfazer, três segundos de
+// ← rejeitavam 9 pedidos que ninguém chegou a ver — e rejeitar não volta. O
+// Enter segurado num ✕ focado fazia o mesmo (o `click` sintético de cada
+// repetição, com o foco passando ao ✕ do card seguinte).
+//
+// `keyboard.down` repetido É a tecla segurada: o Playwright marca `repeat` a
+// partir do segundo. CONTROLES: um `keydown` simples decide UM (senão "não
+// decidiu" passaria com o teclado morto), e o ouvinte da página confirma que a
+// repetição chegou de verdade (senão passaria com o instrumento sem repetir).
+{
+  const SEGURADA_MS = 2000;
+  const teclaSegurada = async (teclaPedida, { foco = null, segurar = true } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const enviados = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      if (nome === 'validar-place' || nome === 'marcar-lido') enviados.push(nome + ':' + (corpo.updateRequestID || ''));
+      const resp = { 'presenca-app': { success: true, online: [], conversas: [] },
+        'lista-paises': { success: true, countries: [] }, 'lista-estados': { success: true, states: [] } }[nome] || { success: true };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+    const fila = Array.from({ length: 14 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vTS' + i, updateRequestID: 'uTS' + i, imageUrls: [foto] }));
+    await page.evaluate((fila) => {
+      API.setSession('token-do-smoke-da-tecla-segurada');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      // Sem a janela do Desfazer: é onde a série não tinha freio nenhum.
+      AppState.devMode = { unlocked: true, active: true };
+      AppState.preferences.undoEnabled = false;
+      AppState.stats = { read: 200, rejected: 0, skipped: 0 };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+      window.__repeticoes = 0;
+      window.addEventListener('keydown', (e) => { if (e.repeat) window.__repeticoes++; }, true);
+    }, fila);
+    await assentar(page, 250);
+    if (foco) await page.focus(foco);
+    await page.keyboard.down(teclaPedida);                       // o keydown de verdade, sem repeat
+    if (segurar) {
+      const ate = Date.now() + SEGURADA_MS;
+      while (Date.now() < ate) { await page.keyboard.down(teclaPedida); await page.waitForTimeout(33); }   // repeat = true
+    }
+    await page.keyboard.up(teclaPedida);
+    // O FIM: nada no ar e a página quieta (não um relógio).
+    await esperarOuExplodir(page, () => !AppState.inFlightActions && !acoesTravadas(), 'as decisões saírem');
+    await page.waitForTimeout(700);                              // cobre um 2º envio que viesse atrasado
+    const estado = await page.evaluate(() => ({ rep: window.__repeticoes, rej: AppState.stats.rejected, lid: AppState.stats.read - 200, pul: AppState.stats.skipped, fila: AppState.queue.length }));
+    await ctx.close();
+    return { enviados, estado, erros };
+  };
+  for (const [tecla, rotulo, esperado, foco] of [
+    ['ArrowLeft', '← segurada', 'validar-place:uTS0', null],
+    ['ArrowRight', '→ segurada', 'marcar-lido:uTS0', null],
+    ['Enter', 'Enter segurado no ✕', 'validar-place:uTS0', '.card-btn-reject'],
+    // O Espaço ativa o botão ao SOLTAR (keyup): segurado, decide UMA vez — a repetição cancelada no keydown
+    // não pode custar a ativação única.
+    ['Space', 'Espaço segurado no ✕', 'validar-place:uTS0', '.card-btn-reject'],
+  ]) {
+    // CONTROLE: UM keydown, sem repetir, decide UM pedido.
+    const um = await teclaSegurada(tecla, { foco, segurar: false });
+    checa(um.enviados.length === 1 && um.enviados[0] === esperado,
+      `tecla segurada/CONTROLE: ${rotulo} — um keydown simples não decidiu UM pedido (o teclado está morto?)`, JSON.stringify(um.enviados));
+    const r = await teclaSegurada(tecla, { foco });
+    checa(r.estado.rep >= 20,
+      `tecla segurada/CONTROLE: ${rotulo} — a página viu só ${r.estado.rep} repetições (o instrumento não segurou a tecla)`);
+    checa(r.enviados.length === 1 && r.enviados[0] === esperado,
+      `tecla segurada: ${rotulo} por ${SEGURADA_MS} ms decidiu em série`, JSON.stringify(r.enviados));
+    checa(r.estado.rej + r.estado.lid <= 1, `tecla segurada: ${rotulo} moveu o placar mais de uma vez`, JSON.stringify(r.estado));
+    checa(r.erros.length === 0, `tecla segurada: ${rotulo} erro de JS`, r.erros[0]);
+  }
+  // ↑ pula: não vai ao Waze, então o placar de pulados é quem conta.
+  const pulo = await teclaSegurada('ArrowUp');
+  checa(pulo.estado.rep >= 20, 'tecla segurada/CONTROLE: ↑ — o instrumento não segurou a tecla', String(pulo.estado.rep));
+  checa(pulo.estado.pul === 1, '↑ segurada pulou em série', JSON.stringify(pulo.estado));
+}
+
+// ── O QR EMITIDO SOBREVIVE À RECARGA: o "Sair" depois dela o cancela (R19-1-02) ─
+//
+// A lista dos códigos de pareamento emitidos era memória da página: emitir o QR,
+// recarregar (o `hashchange` de um link `#pair=` é mais um caminho que recarrega)
+// e dar "Sair" mandava ZERO `parear/cancel`, e o código seguia valendo no servidor
+// por até 5 min numa conta que acabou de sair. Hoje ela mora no `sessionStorage`
+// da aba. O navegador DE VERDADE é o que responde se a gravação sobrevive a uma
+// recarga, e o servidor de mentira conta o que chegou.
+// CONTROLES: o mesmo percurso SEM recarga manda 1 (o instrumento enxerga o cancelamento);
+// o relatório do modo dev gerado DEPOIS da recarga não leva o código.
+{
+  const CODIGO_DO_QR = 'QRQRQRQRQRQRQRQRQRQR';
+  const percurso = async (recarregar) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const cancelamentos = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'parear') {
+        if (corpo.action === 'cancel') cancelamentos.push(corpo.code);
+        if (corpo.action === 'create') resp = { success: true, code: CODIGO_DO_QR, curto: false, expiresIn: 300 };
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        resp = { success: true, places: [{ ...CARDS.FLAG, venueID: 'vPQ1', updateRequestID: 'uPQ1', imageUrls: [] }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.setItem('waze_session_token', 'token-do-smoke-do-qr');
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+    });
+    const aberta = () => esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await aberta();
+    await page.evaluate(() => document.getElementById('helpBtn').click());
+    await assentar(page, 150);
+    await page.evaluate(() => document.getElementById('pairCreateBtn').click());
+    await esperarOuExplodir(page, () => pareamentosEmitidos.size === 1, 'o QR ser emitido');
+    let depoisDaRecarga = null;
+    let noRelatorio = null;
+    if (recarregar) {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await aberta();
+      depoisDaRecarga = await page.evaluate(() => pareamentosEmitidos.size);
+      // O relatório do modo dev, gerado COM o código guardado na aba, não o leva.
+      noRelatorio = await page.evaluate(async (codigo) => {
+        AppState.devMode = { unlocked: true, active: true };
+        try { return JSON.stringify(await diagCorpo()).includes(codigo); } finally { AppState.devMode = { unlocked: false, active: false }; }
+      }, CODIGO_DO_QR);
+      await page.evaluate(() => document.getElementById('helpBtn').click());
+      await assentar(page, 150);
+    }
+    await page.evaluate(() => document.getElementById('logoutBtn').click());
+    await assentar(page, 150);
+    await page.evaluate(() => document.getElementById('confirmLogout').click());
+    await esperarOuExplodir(page, () => !AppState.authenticated, 'o "Sair" terminar');
+    const sobrou = await page.evaluate(() => sessionStorage.getItem('__pareamentosEmitidos'));
+    // O cancelamento sai sem esperar rede, mas a rota é assíncrona: espere ele CHEGAR (com teto).
+    const ate = Date.now() + 3000;
+    while (!cancelamentos.length && Date.now() < ate) await page.waitForTimeout(50);
+    await ctx.close();
+    return { cancelamentos, depoisDaRecarga, noRelatorio, sobrou, erros };
+  };
+  const sem = await percurso(false);
+  checa(sem.cancelamentos.length === 1 && sem.cancelamentos[0] === CODIGO_DO_QR,
+    'pareamento/recarga: CONTROLE — o "Sair" sem recarga não cancelou o QR emitido (o instrumento não vê o cancelamento)', JSON.stringify(sem.cancelamentos.length));
+  const com = await percurso(true);
+  checa(com.depoisDaRecarga === 1, 'pareamento/recarga: a recarga esqueceu o QR emitido', String(com.depoisDaRecarga));
+  checa(com.cancelamentos.length === 1 && com.cancelamentos[0] === CODIGO_DO_QR,
+    'pareamento/recarga: o "Sair" depois da recarga NÃO cancelou o QR emitido — ele segue valendo no servidor por até 5 min', JSON.stringify(com.cancelamentos.length));
+  checa(com.noRelatorio === false, 'pareamento/recarga: o relatório do modo dev levou o código de pareamento guardado na aba', String(com.noRelatorio));
+  checa(com.sobrou === null && sem.sobrou === null, 'pareamento/recarga: o "Sair" deixou o código guardado na aba', String(com.sobrou));
+  checa(com.erros.length === 0 && sem.erros.length === 0, 'pareamento/recarga: erro de JS', com.erros[0] || sem.erros[0]);
+}
+
+// ── A PÁGINA QUE VOLTA DO bfcache RELÊ O APARELHO (R19-1-03) ─────────────────
+//
+// Congelada no cache de voltar/avançar, a página não recebe o aviso `storage`: o
+// "Sair" dado noutra aba nesse meio não a alcançava, e ela voltava logada, com a
+// fila (dado de terceiro) na tela de uma sessão que já saiu. O Playwright desliga
+// o bfcache, então o congelamento é SIMULADO: o ouvinte do `storage` sai da aba A
+// (ela não ouviu o "Sair"), a aba B limpa o aparelho como o "Sair" faz, e o
+// `pageshow` com `persisted` é entregue à A. CONTROLES: o `pageshow` SEM
+// `persisted` não faz nada (a aba segue logada, o instrumento não derruba a toa), e
+// o `pageshow` persistido com a sessão ainda no aparelho também não.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route('**/api/**', async (r) => {
+    const nome = r.request().url().split('/api/')[1].split('?')[0];
+    let resp = { success: true };
+    if (nome === 'perfil') resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+    else if (nome === 'buscar-places') resp = { success: true, places: [{ ...CARDS.FLAG, venueID: 'vBF1', updateRequestID: 'uBF1', imageUrls: [] }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+    else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+    else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+    else if (nome === 'lista-estados') resp = { success: true, states: [] };
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+  });
+  const erros = [];
+  const abrir = async () => {
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    return page;
+  };
+  const A = await abrir();
+  await A.evaluate(() => {
+    localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache');
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+  });
+  await A.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(A, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba A abrir com a sessão salva');
+  const B = await abrir();
+  // A "congela": não ouve mais o aviso do armazenamento.
+  await A.evaluate(() => window.removeEventListener('storage', aoGravarEmOutraAba));
+  // CONTROLE 1: pageshow SEM persisted (a carga normal) — nada.
+  await A.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false })));
+  await A.waitForTimeout(150);
+  checa(await A.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — o pageshow sem persisted derrubou a aba logada');
+  // O "Sair" da outra aba: o aparelho fica sem token e sem conta.
+  await B.evaluate(() => { localStorage.removeItem('waze_session_token'); localStorage.removeItem('waze_places_conta'); });
+  checa(await A.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — a aba congelada saiu antes do pageshow (o ouvinte do storage ainda estava ligado?)');
+  await A.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  const saiu = await esperarNaPagina(A, () => AppState.authenticated === false
+    && !document.getElementById('authScreen').classList.contains('hidden'), 5000);
+  checa(saiu.ok, 'bfcache: a página restaurada do cache seguiu logada com o aparelho já limpo pelo "Sair" de outra aba');
+  checa(await A.evaluate(() => !document.querySelector('#cardStack .place-card')),
+    'bfcache: o card (dado de terceiro) seguiu no DOM da aba que saiu');
+  // CONTROLE 2: com a sessão ainda no aparelho, o pageshow persistido não derruba.
+  await B.evaluate(() => localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache'));
+  const C = await abrir();
+  await C.evaluate(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true })));
+  await C.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba C abrir com a sessão salva');
+  await C.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await C.waitForTimeout(300);
+  checa(await C.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — o pageshow persistido derrubou a aba cujo aparelho segue com a sessão');
+  checa(erros.length === 0, 'bfcache: erro de JS', erros[0]);
+  await ctx.close();
+}
+
+// ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
+//
+// Duas abas abrindo juntas (a janela restaurada, o app instalado e o navegador)
+// achavam os mesmos alvos na fila e mandavam cada rejeição ao Waze: o dobro das
+// chamadas — no free tier —, com o placar e o Histórico certos (a 2ª resposta é
+// "já tratado"). Hoje uma trava entre abas (`navigator.locks`) deixa uma por
+// vez, e a que esperou confere o que sobrou.
+// CONTROLE: com `navigator.locks` tirado da página (o navegador sem a trava) as
+// duas mandam — o instrumento enxerga a duplicata. O servidor de mentira atrasa
+// 150 ms por requisição pra a janela da corrida existir de verdade.
+{
+  const recusaDeDuasAbas = async (semTrava, qtdAbas = 2) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const contagem = new Map();
+    const resolvidos = new Set();
+    const pedidos = Array.from({ length: 10 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRA' + i, updateRequestID: 'uRA' + i,
+      creatorId: i % 3 === 0 ? 9000 : 9100 + i, createdBy: i % 3 === 0 ? 'repetente' : 'autor' + i, imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      let status = 200;
+      if (nome === 'validar-place' || nome === 'marcar-lido') {
+        contagem.set(corpo.updateRequestID, (contagem.get(corpo.updateRequestID) || 0) + 1);
+        await dormir(150);
+        if (resolvidos.has(corpo.updateRequestID)) { status = 404; resp = { success: false, errorCategory: 'already_processed', error: 'x', errorList: [{ code: 702 }] }; }
+        else resolvidos.add(corpo.updateRequestID);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(([sem]) => {
+      try {
+        if (sem) Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true });
+        localStorage.setItem('waze_session_token', 'token-do-smoke-da-recusa');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        const d = new Date();
+        const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+        localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 100, skipped: 0 }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    }, [semTrava]);
+    const erros = [];
+    const abrir = async () => {
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => erros.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      return page;
+    };
+    const abas = await Promise.all(Array.from({ length: qtdAbas }, () => abrir()));
+    // O FIM: as abas com a fila aberta, a recusa parada e nada no ar.
+    for (const a of abas) {
+      await esperarOuExplodir(a, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
+        && !recusaAutomaticaRodando && !AppState.inFlightActions,
+      'a recusa automática terminar');
+    }
+    for (const a of abas) {
+      await esperarOuExplodir(a, () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'uma aba sem alvos na fila');
+    }
+    await abas[0].waitForTimeout(400);   // cobre uma 2ª passada que viesse atrasada
+    const fila = await Promise.all(abas.map((a) => a.evaluate(() => ({ card: AppState.currentPlace && AppState.currentPlace.updateRequestID,
+      fila: AppState.queue.map((p) => p.updateRequestID) }))));
+    await ctx.close();
+    return { contagem, erros, fila };
+  };
+  // Os alvos: os 4 pedidos do autor marcado (uRA0, uRA3, uRA6, uRA9) — TODOS têm de ir ao Waze, e UMA vez
+  // cada. O 1º é o card que ainda não está na tela quando a recusa roda (a busca acabou de chegar): a espera
+  // pela trava antes de os alvos saírem da fila o deixava virar o card da frente e escapar da recusa.
+  const ALVOS = ['uRA0', 'uRA3', 'uRA6', 'uRA9'];
+  const resumo = (c) => JSON.stringify([...c].sort());
+  const sem = await recusaDeDuasAbas(true);
+  const repetidosSem = [...sem.contagem].filter(([, n]) => n > 1);
+  checa(sem.contagem.size >= ALVOS.length - 1 && [...sem.contagem.keys()].every((id) => ALVOS.includes(id)),
+    'recusa/duas abas: CONTROLE — sem a trava a recusa automática não rodou nos alvos (o card da tela pode ficar de fora, só ele)', resumo(sem.contagem));
+  checa(repetidosSem.length >= 1, 'recusa/duas abas: CONTROLE — sem a trava nenhum pedido saiu em dobro (o instrumento não vê a corrida)', resumo(sem.contagem));
+  const com = await recusaDeDuasAbas(false);
+  const repetidos = [...com.contagem].filter(([, n]) => n > 1);
+  // O card que JÁ está na tela quando a recusa roda fica de fora, de propósito (o dedo pode estar nele): com
+  // duas abas a ordem dos eventos varia (a recusa roda antes ou depois do `showCurrentPlace`), então um alvo
+  // sem rejeição só vale se for o card da tela das DUAS abas. O resto tem de ir ao Waze, UMA vez.
+  const semRejeicao = ALVOS.filter((id) => !com.contagem.has(id));
+  checa(ALVOS.every((id) => (com.contagem.get(id) || 0) <= 1) && semRejeicao.every((id) => com.fila.every((f) => f.card === id)) && semRejeicao.length <= 1,
+    'recusa/duas abas: com a trava, cada alvo tem de ir ao Waze UMA vez (nenhum pulado que não seja o card da tela, nenhum em dobro)',
+    resumo(com.contagem) + ' · cards ' + JSON.stringify(com.fila.map((f) => f.card)));
+  checa(repetidos.length === 0, 'recusa/duas abas: a mesma rejeição foi ao Waze pelas duas abas', JSON.stringify(repetidos));
+  // CONTROLE de UMA aba só: a trava não pode custar nenhum alvo a quem abre o app sozinho (o 1º da fila inclusive).
+  const uma = await recusaDeDuasAbas(false, 1);
+  checa(ALVOS.every((id) => uma.contagem.get(id) === 1) && uma.contagem.size === ALVOS.length,
+    'recusa/uma aba: a trava deixou um alvo sem rejeição (ou o mandou em dobro)', resumo(uma.contagem));
+  checa(com.erros.length === 0 && sem.erros.length === 0 && uma.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0] || uma.erros[0]);
+}
+
+// ── "REJEITAR OS N" CANCELADO PELO SEGUNDO PLANO AVISA NA VOLTA (R19-2-03) ──
+//
+// Trocar de app na janela do Desfazer do "Rejeitar os N" CANCELA o lote (de
+// propósito: meio lote enviado não tem sintoma): a fila voltava de 8 pra 12, o
+// placar zerava, 0 requisições e nenhuma palavra. Hoje a volta diz. O segundo
+// plano é simulado pelo `visibilityState` + `visibilitychange` (o mesmo que o
+// navegador entrega). CONTROLES: sem esconder a página, os N pedidos SAEM (e
+// nenhum aviso de "não foram rejeitados"); o aviso não sai com a página ainda
+// escondida.
+{
+  const loteNoSegundoPlano = async (esconder) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const envios = [];
+    const resolvidos = new Set();
+    const pedidos = Array.from({ length: 12 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vLT' + i, updateRequestID: 'uLT' + i,
+      creatorId: 9000 + (i % 3), createdBy: 'autor' + (i % 3), imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'validar-place') { envios.push(corpo.updateRequestID); resolvidos.add(corpo.updateRequestID); }
+      else if (nome === 'perfil') resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(() => {
+      try {
+        localStorage.setItem('waze_session_token', 'token-do-smoke-do-lote');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, consequenciaVista: { reject: true, read: true } }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    });
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
+    await assentar(page, 150);
+    await page.evaluate(() => rejeitarLoteDoAutor(AppState.currentPlace));
+    await esperarOuExplodir(page, () => !!AppState.pendingAction && AppState.queue.length === 8, 'a janela do Desfazer do lote abrir');
+    const avisos = () => page.evaluate(() => [...document.querySelectorAll('#toastContainer > *')].map((x) => (x.textContent || '').trim().replace(/\s+/g, ' ')));
+    let comEscondida = [];
+    if (esconder) {
+      await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+      await esperarOuExplodir(page, () => AppState.pendingAction === null, 'a janela do lote ser cancelada');
+      comEscondida = await avisos();
+      await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
+    } else {
+      await esperarOuExplodir(page, () => AppState.pendingAction === null && !AppState.inFlightActions, 'o lote sair');
+    }
+    await page.waitForTimeout(200);
+    const depois = await avisos();
+    const estado = await page.evaluate(() => ({ fila: AppState.queue.length, rejeitados: AppState.stats.rejected }));
+    await ctx.close();
+    return { envios, comEscondida, depois, estado, erros };
+  };
+  const escondido = await loteNoSegundoPlano(true);
+  checa(escondido.envios.length === 0, 'lote/segundo plano: o lote cancelado mandou pedidos ao Waze', JSON.stringify(escondido.envios));
+  checa(escondido.estado.fila === 12 && escondido.estado.rejeitados === 0, 'lote/segundo plano: o lote cancelado não devolveu a fila e o placar', JSON.stringify(escondido.estado));
+  checa(escondido.comEscondida.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: o aviso saiu com a página ainda ESCONDIDA', JSON.stringify(escondido.comEscondida));
+  checa(escondido.depois.some((x) => /Os 4 pedidos não foram rejeitados porque você saiu do app\. Toque de novo\./.test(x)),
+    'lote/segundo plano: a volta à página não disse que o lote não saiu', JSON.stringify(escondido.depois));
+  const seguiu = await loteNoSegundoPlano(false);
+  checa(seguiu.envios.length === 4, 'lote/segundo plano: CONTROLE — sem esconder a página os 4 pedidos não saíram (o instrumento não vê o lote)', JSON.stringify(seguiu.envios));
+  checa(seguiu.depois.every((x) => !/não foram rejeitados/.test(x)), 'lote/segundo plano: CONTROLE — o aviso saiu sem a página ter ido pro fundo', JSON.stringify(seguiu.depois));
+  checa(escondido.erros.length === 0 && seguiu.erros.length === 0, 'lote/segundo plano: erro de JS', escondido.erros[0] || seguiu.erros[0]);
+}
+
+// ── O RESUMO DO MÊS COM O `qr.js` PENDURADO: sai sem o QR, sem empilhar (R19-7-02) ─
+//
+// O QR é opcional na imagem, mas o `qr.js` vem pela rede na 1ª vez e o service
+// worker o serve pela rede primeiro e sem teto: com sinal que conecta e não
+// responde, "Compartilhar meu resumo do mês" ficava sem resposta nenhuma e cada
+// toque empilhava outra geração de canvas (1080×1350). Hoje a imagem espera o QR
+// até um teto e sai sem ele, e o toque seguinte, com uma geração no ar, não
+// empilha outra (o botão diz `aria-busy`). O `qr.js` fica segurado no servidor de
+// mentira até o FIM do bloco. CONTROLE: o contador de gerações enxerga as que
+// o app inicia (a primeira conta 1), e o `qr.js` foi mesmo pedido e segurado.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e)));
+  let pedidosDoQr = 0;
+  let soltou = false;
+  let soltar;
+  const portao = new Promise((r) => { soltar = r; });
+  await ctx.route('**/js/min/qr.js', async (route) => { pedidosDoQr++; await portao; await route.continue().catch(() => {}); });
+  await page.addInitScript(() => {
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    const k = (dia) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(dia)}`;
+    const h = { _total: { read: 50, rejected: 35 } };
+    const soma = (dia, r, j) => { const kk = k(dia); h[kk] = h[kk] || { read: 0, rejected: 0 }; h[kk].read += r; h[kk].rejected += j; };
+    soma(1, 10, 5); soma(d.getDate(), 40, 30);
+    localStorage.setItem('waze_places_history', JSON.stringify(h));
+  });
+  await page.goto(BASE, { waitUntil: 'load' });
+  await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+  await assentar(page, 200);
+  await page.evaluate(() => {
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.history = null;
+    openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+    window.__geracoes = 0;
+    const original = gerarResumoDoMes;
+    gerarResumoDoMes = (...args) => { window.__geracoes++; return original(...args); };
+  });
+  await page.evaluate(() => document.getElementById('resumoBotao').click());
+  checa(await page.evaluate(() => document.getElementById('resumoBotao').getAttribute('aria-busy') === 'true'),
+    'resumo/qr: o botão não diz que está gerando (aria-busy) logo depois do toque');
+  // Os toques seguintes, com a geração no ar, não empilham outra.
+  await page.evaluate(() => document.getElementById('resumoBotao') && document.getElementById('resumoBotao').click());
+  await page.evaluate(() => document.getElementById('resumoBotao') && document.getElementById('resumoBotao').click());
+  // O FIM: a folha abre COM o `qr.js` ainda preso (o teto), não depois de solto.
+  const abriu = await esperarNaPagina(page, () => !document.getElementById('resumoModal').classList.contains('hidden'), 20000);
+  checa(abriu.ok, 'resumo/qr: com o `qr.js` pendurado o Resumo nunca abriu (sem teto no QR)');
+  checa(pedidosDoQr === 1, 'resumo/qr: CONTROLE — o `qr.js` não foi pedido uma vez só (o instrumento não segurou o QR)', String(pedidosDoQr));
+  checa(!soltou, 'resumo/qr: CONTROLE — o portão do `qr.js` já tinha sido solto');
+  const est = await page.evaluate(() => ({ geracoes: window.__geracoes, busy: document.getElementById('resumoBotao') ? document.getElementById('resumoBotao').getAttribute('aria-busy') : null,
+    imagem: (document.getElementById('resumoImg').src || '').startsWith('blob:') }));
+  checa(est.geracoes === 1, 'resumo/qr: os toques com uma geração no ar empilharam outra', JSON.stringify(est));
+  checa(est.imagem, 'resumo/qr: a folha abriu sem a imagem', JSON.stringify(est));
+  checa(est.busy === null, 'resumo/qr: o botão seguiu ocupado depois da imagem pronta', JSON.stringify(est));
+  checa(erros.length === 0, 'resumo/qr: erro de JS', erros[0]);
+  soltou = true; soltar();
+  await ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13540,6 +14250,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
   + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente) e o duplo toque do mapa com tremor (com o CONTROLE do arraste)`
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
+  + `, + passar as fotos com o polegar (dois arrastes seguidos a 500, 150 e 60 ms trocam a foto duas vezes sem ampliar; o duplo toque de verdade AMPLIA e volta, com o botão direito sem agir na foto)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
@@ -13561,6 +14272,12 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
+  + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
+  + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
+  + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
+  + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez — TODOS os alvos, o 1º da fila inclusive, que a espera pela trava antes de os alvos saírem da fila deixava escapar (servidor de 150 ms por requisição, com os CONTROLES da página sem navigator.locks, em que as duas mandam, e de UMA aba só, em que a trava não custa nenhum alvo)`
+  + `, + o "Rejeitar os N" cancelado pelo segundo plano AVISANDO na volta (a fila e o placar voltam, zero requisições, o aviso só com a página à vista — com o CONTROLE da página que fica e os 4 pedidos saindo, sem o aviso)`
+  + `, + o Resumo do mês com o qr.js pendurado (a folha abre sem o QR depois do teto e os toques com uma geração no ar não empilham outra, com o aria-busy no botão e o CONTROLE do qr.js pedido e preso)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
@@ -13570,4 +14287,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o "Como funciona" aberto SOZINHO no TOPO no celular deitado (scrollTop 0 e título na tela em 667×375 e 851×393, com o CONTROLE da caixa rolada à força e, no Chromium, o do foco antigo rolando)`
   + `, + o aviso dourado do Desfazer LEVANDO até a chave (rolada para a vista em 5 aparelhos — deitados, o SE com o modo dev e o Fold em francês —, com o CONTROLE da rolagem zerada deixando a linha fora da vista)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
-  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);
+  + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`
+  + `, + o texto do sistema maior em 5 aparelhos × 1×/1,3×/1,5× (a barra ✕/↑/✓ ao alcance do dedo por hit-test com os pedidos reais dos 6 países em francês, sem rolagem dupla, foto no piso de 5,5rem, e a 1× o card-aperta nunca ligando nem o piso do #cardStack mudando — com o CONTROLE da regra neutralizada perdendo a barra)`);

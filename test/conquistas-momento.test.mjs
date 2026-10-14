@@ -51,7 +51,7 @@ function depsDoIdioma(extra = {}) {
     renderProfileHeader: () => {}, showCurrentPlace: () => {}, updateStats: () => {}, updatePendingCount: () => {},
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},
     historicoNaTela: () => false, renderHistory: () => {},
-    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {},
+    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {}, retraduzirAvisoDoDesfazer: () => {},
     window: {}, showToast: () => {}, t: (k) => k, ...extra,
   };
   return { deps, idiomas };

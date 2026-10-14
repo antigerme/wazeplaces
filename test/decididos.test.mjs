@@ -391,10 +391,10 @@ test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por to
   // Fim do envio, Desfazer, cancelar (logout/pagehide do lote), enfileirar ao
   // fechar sem rede e a descarga que acha a decisão REPETIDA na fila (ela não
   // envia nada). Um que falte deixa o pedido de fora da fila pra sempre.
-  assert.equal((s.match(/marcarEmAndamento\(places, false\);/g) || []).length, 5,
+  assert.equal((s.match(/marcarEmAndamento\(places, false(, geracao)?\);/g) || []).length, 5,
     'algum caminho de saída da janela deixou de desmarcar o pedido');
   const iFinally = s.indexOf('} finally {');
-  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(places, false);', iFinally) > iFinally,
+  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(places, false, geracao);', iFinally) > iFinally,
     'o fim do envio tem que desmarcar no `finally` — exceção no executor não pode prender o pedido');
 });
 
@@ -403,10 +403,10 @@ test('o LOTE marca os pedidos em andamento — a recusa automática não passa p
   const iMarca = l.indexOf('marcarEmAndamento(places, true);');
   const iLaco = l.indexOf('for (const p of places)');
   assert.ok(iMarca > 0 && iMarca < iLaco, 'o lote tem que marcar os pedidos ANTES do primeiro envio');
-  assert.match(l, /marcarEmAndamento\(p, false\);\s*progresso\(\);/,
+  assert.match(l, /marcarEmAndamento\(p, false(, geracao)?\);\s*progresso\(\);/,
     'cada pedido tem que sair do "em andamento" quando resolve — senão ele fica fora da fila até a página morrer');
   const iFinally = l.indexOf('} finally {');
-  assert.ok(iFinally > 0 && l.indexOf('marcarEmAndamento(places, false);', iFinally) > iFinally,
+  assert.ok(iFinally > 0 && l.indexOf('marcarEmAndamento(places, false, geracao);', iFinally) > iFinally,
     'o `finally` tem que desmarcar todos — a sessão morta no meio (`return`) deixaria os outros presos');
 });
 

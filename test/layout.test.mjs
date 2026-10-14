@@ -1314,7 +1314,7 @@ test('o app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
   // tem 852px de largura com 393px de altura, e um piso de 26rem ali fica maior
   // que a tela — a rolagem PIORAVA (177 → 259px, medido).
   const piso = CSS.match(/@media \(min-height: 700px\) \{[\s\S]*?\n\}/);
-  assert.ok(piso && /min-height:\s*26rem/.test(piso[0]),
+  assert.ok(piso && /min-height:\s*26rem/.test(piso[0]) && /min-height:\s*min\(26rem,\s*60dvh\)/.test(piso[0]),
     'o piso de 26rem saiu do degrau de altura (ou virou incondicional)');
   assert.doesNotMatch(
     CSS_SEM_COMENTARIO,

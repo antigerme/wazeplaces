@@ -305,6 +305,8 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
+    // Sobe a cada "Sair" (R19-1-01): quem entra no ar guarda a geração e só solta, no fim, o que ainda é da dele.
+    geracaoDoSair: 0,
     fetchEpoch: 0,
     _fetchPromise: null,
     _profilePromise: null,
@@ -346,7 +348,62 @@ let desligarDevVez = 0;
 // Os códigos de pareamento que ESTE aparelho emitiu nesta página: o "Sair" os
 // cancela no servidor, senão o QR mostrado antes seguia valendo 5 min e entrava
 // numa conta que acabou de sair (auditoria de 2026-09-25).
-const pareamentosEmitidos = new Set();
+//
+// Sobrevive à RECARGA da página (R19-1-02): com a lista só em memória, emitir o QR, recarregar
+// (o `hashchange` de um link `#pair=` é mais um caminho que recarrega) e dar "Sair" mandava ZERO
+// cancelamentos, e o código seguia valendo no servidor por até 5 min numa conta que já saiu.
+// Mora no `sessionStorage` (é da ABA, e morre com ela — nunca no `localStorage`, que o
+// diagnóstico do modo dev leva inteiro e que o "Sair" teria de varrer) com a hora em que cada um
+// vence; os que já venceram não voltam. É o SEGREDO do pareamento: o diagnóstico não leva a
+// chave (`diagSemSegredoDePareamento` troca o texto, e o despejo do `sessionStorage` a omite).
+// Uma subclasse do `Set` de propósito: todo ponto que já usa a lista (o "Sair", a troca de conta,
+// a limpeza do relatório, os testes) segue valendo sem saber que ela grava.
+const PAREAMENTOS_CHAVE = '__pareamentosEmitidos';
+const PAREAMENTO_VALE_MS = 5 * 60 * 1000;   // o `PAIR_TTL` do core
+class PareamentosEmitidos extends Set {
+    vencem = new Map();   // código → quando vence (ms), o que vai pro `sessionStorage`
+    // Relê os da aba que ainda valem. Fora do construtor: `super()` não é uma chamada que a
+    // varredura de funções órfãs (test/chamadas-orfas) saiba reconhecer.
+    reler() {
+        try {
+            const guardados = JSON.parse(sessionStorage.getItem(PAREAMENTOS_CHAVE) || '[]');
+            const agora = Date.now();
+            for (const e of Array.isArray(guardados) ? guardados : []) {
+                if (Array.isArray(e) && typeof e[0] === 'string' && e[0] && Number(e[1]) > agora) {
+                    super.add(e[0]);
+                    this.vencem.set(e[0], Number(e[1]));
+                }
+            }
+        } catch (e) { /* sem armazenamento da aba (janela privada, bloqueado): fica só em memória */ }
+        return this;
+    }
+    add(code) {
+        super.add(code);
+        this.vencem.set(code, Date.now() + PAREAMENTO_VALE_MS);
+        this.gravar();
+        return this;
+    }
+    delete(code) {
+        const tinha = super.delete(code);
+        this.vencem.delete(code);
+        this.gravar();
+        return tinha;
+    }
+    clear() {
+        super.clear();
+        this.vencem.clear();
+        this.gravar();
+    }
+    gravar() {
+        try {
+            const agora = Date.now();
+            const vivos = [...this.vencem].filter(([, ate]) => ate > agora);
+            if (vivos.length) sessionStorage.setItem(PAREAMENTOS_CHAVE, JSON.stringify(vivos));
+            else sessionStorage.removeItem(PAREAMENTOS_CHAVE);
+        } catch (e) { /* o código ainda vale em memória; o "Sair" desta página o cancela */ }
+    }
+}
+const pareamentosEmitidos = new PareamentosEmitidos().reler();
 
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
@@ -1840,6 +1897,9 @@ function aplicarIdioma(valor) {
     // da pílula da presença também (auditoria de 2026-09-25). Junto, a linha do
     // offline (também das Preferências) e o nome do botão de Filtros, que o
     // `applyI18n` devolve ao padrão tirando o aviso da conquista nova.
+    // O aviso do Desfazer na janela de 3 s (R19-8-03): só os textos, a janela e a
+    // barra de contagem seguem correndo.
+    retraduzirAvisoDoDesfazer();
     if (AppState.authenticated) {
         renderUndoGateUI();
         atualizarLinhaDoOffline(0, 0);
@@ -3570,7 +3630,13 @@ const Lightbox = {
     },
     idFotoAtual() {
         const p = this.place;
-        if (!p || !p.venueID || !Number.isFinite(Number(p.lat)) || !Number.isFinite(Number(p.lon))) return null;
+        // Sem geometria (`lat`/`lon` nulos) não há lixeira: o servidor recusa o
+        // corpo com 400 `incompleteParams` depois dos 3 s do Desfazer. A régua é a
+        // do `coordenadaDoCorpo` do servidor — SÓ número, finito, lat ±90, lon ±180.
+        // `Number.isFinite` não coage (sem o `Number()` que lia `null` como 0 e
+        // mostrava a lixeira, R19-6-02).
+        if (!p || !p.venueID) return null;
+        if (!(Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180)) return null;
         if (!podeExcluirFotoAqui()) return null;
         // A régua de "aprovada" é UMA, e o "Aprovar" pergunta o contrário dela
         // (R10-3-04, ver `podeAprovarAtual`).
@@ -3908,16 +3974,28 @@ function setupLightbox() {
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
+    // O toque que COMEÇOU e ainda pode ser um toque (R19-3-02): só vira o "último
+    // toque" quando o gesto TERMINA sem passar de `TOQUE_FOLGA_PX`, com o botão
+    // principal e sem um segundo dedo — como o `tocou` do mapa. Gravar no
+    // `pointerdown` fazia do 1º arraste de um passar de fotos o "primeiro toque"
+    // do duplo toque: o 2º arraste, < 300 ms e < 40 px depois, ampliava 2,5× em
+    // vez de trocar de foto (MEDIDO nos dois motores, mouse e toque).
+    let toqueEmCurso = null;
     let dragStartX = 0;
     let dragStartY = 0;
     let dragging = false;
 
     img.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        // Só o botão principal (ou o dedo) age na foto: o direito e o do meio não
+        // arrastam, não trocam de foto e não contam como toque — dois cliques com
+        // o direito em menos de 300 ms ampliavam (R19-3-02). O mapa já faz assim.
+        if (e.button > 0) return;
         img.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
         if (pointers.size === 2) {
+            toqueEmCurso = null;   // dois dedos não são toque
             const [a, b] = [...pointers.values()];
             pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y);
             pinchStartScale = Lightbox.scale;
@@ -3936,9 +4014,7 @@ function setupLightbox() {
             else Lightbox.zoomTo(2.5, e.clientX, e.clientY);
             return;
         }
-        lastTapTime = now;
-        lastTapX = e.clientX;
-        lastTapY = e.clientY;
+        toqueEmCurso = { t: now, x: e.clientX, y: e.clientY };
 
         dragging = true;
         dragStartX = e.clientX;
@@ -3949,6 +4025,7 @@ function setupLightbox() {
         if (!pointers.has(e.pointerId)) return;
         const prev = pointers.get(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (toqueEmCurso && Math.hypot(e.clientX - toqueEmCurso.x, e.clientY - toqueEmCurso.y) > TOQUE_FOLGA_PX) toqueEmCurso = null;
 
         if (pointers.size === 2) {
             const [a, b] = [...pointers.values()];
@@ -3970,6 +4047,12 @@ function setupLightbox() {
         if (!pointers.has(e.pointerId)) return;
         pointers.delete(e.pointerId);
         if (pointers.size < 2) pinchStartDist = 0;
+        // O gesto terminou como TOQUE: é agora que ele vira o "último toque". O
+        // cancelamento do sistema não é toque.
+        if (pointers.size === 0 && toqueEmCurso && e.type !== 'pointercancel') {
+            lastTapTime = toqueEmCurso.t; lastTapX = toqueEmCurso.x; lastTapY = toqueEmCurso.y;
+        }
+        if (pointers.size === 0) toqueEmCurso = null;
 
         // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
         // (editando o nome, sai só da edição — ver `recuarNaFoto`). "Sem zoom"
@@ -4774,7 +4857,7 @@ function pedirExclusaoDaFoto() {
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
     janela = exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
+    mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer(), 'undo.photoDeleted');
     // A lixeira com o foco travou (ou sumiu com a foto): o foco fica na camada.
     manterFocoNoLightbox();
 }
@@ -4835,6 +4918,9 @@ function estadoAprovando(ligado) {
 // o `aprovacaoPousouDepoisDaQueda`, e aqui sai `false`: nada mais a fazer.
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
+    // A geração do "Sair": a resposta que chega depois dele não solta o "em andamento" do mesmo
+    // pedido na sessão nova (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     // QUEM decide, pro aviso às outras abas se ela pousar depois da queda (R12-2-04).
     const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     // No ar: o card do pedido trava até a resposta (ver `aprovacaoDaTelaNoAr`).
@@ -4965,7 +5051,7 @@ async function enviarAprovacao(alvo) {
         if (vez) vez.soltar();
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
-        marcarEmAndamento(alvo.place, false);
+        marcarEmAndamento(alvo.place, false, geracao);
         // A aprovação que FALHOU devolve o pedido à série do autor: o "Ver +N" do
         // card da frente volta a contá-lo (R5-2-02).
         refazerSelosSeOutroNaTela(alvo.place);
@@ -5231,7 +5317,7 @@ function aprovarFotoAtual() {
     const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
     janela = aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
+    mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer(), 'undo.photoApproved');
     // O "Aprovar" com o foco virou lixeira travada: o foco fica na camada.
     manterFocoNoLightbox();
 }
@@ -5482,7 +5568,7 @@ function confirmarRenomear() {
     const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
     janela = renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
+    mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer(), 'undo.renamed', { nome: novo });
     manterFocoNoLightbox();
 }
 
@@ -5672,12 +5758,13 @@ function enviarPendenciasDoLightbox({ semORefazerAdiado = false } = {}) {
 // Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
 // é a mesma ideia, e duas gramáticas pro mesmo conceito é como o editor
 // descobre que o app se contradiz.
-function mostrarDesfazer(mensagem, aoDesfazer) {
+function mostrarDesfazer(mensagem, aoDesfazer, chave, vars) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
     if (!container) return;
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
+    marcarFraseDoDesfazer(banner, chave, vars);
     banner.innerHTML = `
         <span>${escapeHtml(mensagem)}</span>
         <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
@@ -6676,6 +6763,18 @@ function handleKeyDown(e) {
     }
 
     if (!AppState.currentPlace) return;
+    // Tecla SEGURADA não decide em série (R19-2-01). O sistema repete o `keydown`
+    // com `repeat` verdadeiro a ~30 Hz, e `triggerSwipe` só ignora a repetição
+    // durante a animação de 350 ms e a janela do Desfazer: sem o Desfazer, três
+    // segundos de ← rejeitavam 9 pedidos que ninguém chegou a ver, e rejeitar não
+    // volta. Vale SÓ aqui, onde a seta DECIDIRIA: nas áreas que rolam, nos campos,
+    // nos diálogos e nas ampliações (onde segurar é rolar ou andar) ela já saiu
+    // acima. Fica antes da trava de propósito: a repetição também não repete o
+    // aviso dela.
+    if (e.repeat && ['ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        return;
+    }
     // As setas também respeitam a trava — senão o teclado seria um atalho pra
     // furar a janela do Desfazer que o dedo respeita. E respondem com o porquê
     // quando a trava não tem banner na tela (ver `avisarTravaAoTocar`).
@@ -7839,9 +7938,39 @@ function dlog(k, d) {
 const DFATO_TETO = 120;
 let dfatoAnel = [];
 
-function dfato(k, d) {
+// LIMITADOR opcional (R19-4-02), para o evento que uma falha PERMANENTE repete a cada
+// gatilho: sem ele a gravação da fila que falha sempre (a cota, o IndexedDB indisponível)
+// escrevia duas linhas por passada da varredura e tomava o anel de 120 em ~1 h de triagem,
+// levando embora o resto do diário — justo o que o relatório existe pra mostrar. A regra é a
+// da presença (`presencaWme.falhou`): as `DFATO_LIMITE_SERIE` primeiras de cada CAUSA, toda
+// troca de causa, e uma a cada `DFATO_LIMITE_MS`; `juntas` diz quantas ficaram de fora desde
+// a linha anterior. Zerar no sucesso NÃO serve (o Waze falhando uma sim, outra não, voltava a
+// escrever tudo). Um terceiro argumento, e não outra função: o `dfato` dos harnesses dos
+// testes é um dublê de dois argumentos e segue valendo.
+const DFATO_LIMITE_SERIE = 3;
+const DFATO_LIMITE_MS = 10 * 60000;
+const dfatoLimite = new Map();
+
+function dfato(k, d, limite) {
     try {
-        dfatoAnel.push({ t: Date.now(), k, ...(d || {}) });
+        let juntas = 0;
+        if (limite && limite.causa !== undefined) {
+            const causa = String(limite.causa);
+            const agora = Date.now();
+            const x = dfatoLimite.get(k) || { causa: null, n: 0, em: -Infinity, juntas: 0 };
+            if (x.causa !== causa) { x.causa = causa; x.n = 0; x.juntas = 0; x.em = -Infinity; }
+            x.n += 1;
+            if (x.n > DFATO_LIMITE_SERIE && agora - x.em < DFATO_LIMITE_MS) {
+                x.juntas += 1;
+                dfatoLimite.set(k, x);
+                return;
+            }
+            juntas = x.juntas;
+            x.juntas = 0;
+            x.em = agora;
+            dfatoLimite.set(k, x);
+        }
+        dfatoAnel.push({ t: Date.now(), k, ...(d || {}), ...(juntas ? { juntas } : {}) });
         if (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
     } catch (e) {}
 }
@@ -11152,6 +11281,8 @@ async function diagOffline() {
     if (!o.ligado) return o;
     try {
         const f = await offlineLerFila();
+        // A leitura que FALHOU (`undefined`) não é a base vazia (`null`) — R19-4-03.
+        if (f === undefined) throw new Error('a leitura da fila guardada falhou');
         // `desdeMin`: de quando é a LISTA (o começo da busca que a trouxe). É
         // contra ele que os pousos filtram a reabertura sem rede. `t`: o CARIMBO
         // dela, o que a linha compara com o que a preparação cobriu (R14-4-06).
@@ -11486,7 +11617,14 @@ async function diagCorpo() {
     const ls = {}, ss = {};
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
     catch (e) { ls._erro = String(e); }
-    try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); ss[k] = sessionStorage.getItem(k); } }
+    try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const k = sessionStorage.key(i);
+            // Os códigos de pareamento que esta aba emitiu são SEGREDO (valem uma sessão nova por 5 min):
+            // o relatório diz quantos há, nunca quais (R19-1-02).
+            ss[k] = k === PAREAMENTOS_CHAVE ? '[códigos de pareamento omitidos: ' + pareamentosEmitidos.size + ']' : sessionStorage.getItem(k);
+        }
+    }
     catch (e) { ss._erro = String(e); }
 
     const sw = { suportado: 'serviceWorker' in navigator,
@@ -12577,6 +12715,7 @@ function abrirDialogoDoSair() {
 // não muda, e a sessão desta aba já tinha saído.
 async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false, naEntrada = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
+    AppState.geracaoDoSair = (AppState.geracaoDoSair || 0) + 1;   // o que está no ar é de OUTRA geração (R19-1-01)
     saiuNestaPagina = true;
     sessaoCaiuNestaPagina = false;   // o que ela guardava da sessão que caiu sai agora
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
@@ -14657,6 +14796,14 @@ function renderCurrentCard() {
         if (window.triggerSwipe) window.triggerSwipe(direction, () => agirNoPedidoDoGesto(place, handler));
         else handler();
     };
+    // Enter SEGURADO num dos três: o navegador gera um `click` por repetição, e o
+    // foco passa ao botão do card seguinte — que recebia o próximo e o próximo
+    // (R19-2-01). `preventDefault()` no `keydown` repetido cancela o `click`.
+    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+        card.querySelector(cls).addEventListener('keydown', (ev) => {
+            if (ev.repeat && (ev.key === 'Enter' || ev.key === ' ')) ev.preventDefault();
+        });
+    }
     card.querySelector('.card-btn-reject').addEventListener('click', (ev) => fireAction('left', handleReject, ev));
     card.querySelector('.card-btn-skip').addEventListener('click', (ev) => fireAction('up', handleSkip, ev));
     card.querySelector('.card-btn-read').addEventListener('click', (ev) => fireAction('right', handleMarkAsRead, ev));
@@ -14717,6 +14864,7 @@ function renderCurrentCard() {
     // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
     marcarBordaRolagem(card.querySelector('.card-content'));
     vigiarEstouroDoConteudo(card.querySelector('.card-content'));
+    vigiarBarraDeAcoes(card);
 
     // O card novo nasce SEM EFEITO NENHUM — decisão do owner, e o porquê de
     // cada coisa que já esteve aqui (mola, escala, fade) está medido no
@@ -14867,7 +15015,7 @@ function montarCard(place) {
         // empilhadas dizendo a mesma ausência. Nesse caso o texto volta a ser o
         // de hoje e quem responde "onde" é o marcador no mapa, que continua lá.
         if (place.flagType === 'DUPLICATE' && place.duplicado && place.duplicado.nome) {
-            motivo = t('card.flagDuplicateOf', { alvo: place.duplicado.nome });
+            motivo = t('card.flagDuplicateOf', { alvo: isolarTextoDoWaze(place.duplicado.nome) });
         }
         // A distância vai no TEXTO e não só no mapa porque o mapa nem sempre é
         // o primeiro slide (`mapaVemPrimeiro()`): num pedido com foto o editor
@@ -15081,6 +15229,9 @@ function montarCardDeFundo() {
     // card da FRENTE. É a diferença entre uma linha que todo mundo precisa
     // lembrar e uma que já nasce certa.
     stack.appendChild(fundo);
+    // O mesmo aperto do card da frente (`card-aperta`): a promessa do que vem
+    // não pode mudar de forma ao virar o card real.
+    vigiarBarraDeAcoes(fundo);
 
     // E SÓ AGORA o mapa, porque só agora a caixa tem tamanho.
     //
@@ -15983,6 +16134,19 @@ function nomeDoDia(d) {
 // real, um pedido do "Posto Equador" propunha `services: [""]` — um array com
 // uma string vazia. O card mostrava `Serviços: +` e mais nada, que lê como app
 // quebrada, não como "estão adicionando um item vazio".
+// Texto do Waze no meio de uma FRASE nossa (o nome do local duplicado): a frase é do app, que é da esquerda pra direita, e o nome pode ser
+// hebraico ou árabe (a região `il` existe). Sem isolar, a pontuação e os números
+// em volta do nome se reordenam com a direção da frase ("(סניף 2)" saía com os
+// trechos trocados — R19-8-02). U+2068/U+2069 (isolado de direção automática)
+// fazem o nome ser lido na direção DELE sem tocar na da frase. Só quando o nome
+// TEM letra da direita pra esquerda: texto da esquerda pra direita sai idêntico,
+// byte a byte (o `title` e os testes que comparam a frase não mudam).
+const LETRA_DA_DIREITA_PRA_ESQUERDA = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+function isolarTextoDoWaze(texto) {
+    const s = String(texto == null ? '' : texto);
+    return LETRA_DA_DIREITA_PRA_ESQUERDA.test(s) ? '\u2068' + s + '\u2069' : s;
+}
+
 function itemDeListaAusente(v) {
     return v === null || v === undefined || v === '';
 }
@@ -15995,7 +16159,7 @@ function itemDeListaAusente(v) {
 function itemDeLista(v, cls, sinal, campo, centro) {
     const txt = escapeHtml(valorDeLista(v, campo, centro));
     const corpo = itemDeListaAusente(v) ? `<span class="valor-ausente">${txt}</span>` : txt;
-    return `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
+    return `<span class="${cls}" dir="auto"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
 }
 
 // `centro` é o do local DESTE card ([lat, lon], `place.mapa.centro`). Era lido
@@ -16509,8 +16673,8 @@ function renderCardChanges(card, place) {
                         + `<span class="diff-delta">${add}${del}</span></span>`;
                 }
                 return `<span class="diff-obj-linha">${caminho}`
-                    + `<span class="diff-from">${escapeHtml(val(l.de))}</span>`
-                    + `<span class="diff-to">${escapeHtml(val(l.para))}</span></span>`;
+                    + `<span class="diff-from" dir="auto">${escapeHtml(val(l.de))}</span>`
+                    + `<span class="diff-to" dir="auto">${escapeHtml(val(l.para))}</span></span>`;
             }).join('');
             return `<div class="diff-row diff-row-obj">${rotulo}<span class="diff-obj">${linhas}</span></div>`;
         }
@@ -16546,12 +16710,12 @@ function renderCardChanges(card, place) {
             // quem quiser o resto tem onde ver sem abrir o WME.
             const tDe = escapeHtml(String(c.from)), tPara = escapeHtml(String(c.to));
             return `<div class="diff-row">${rotulo}`
-                + `<span class="diff-from" title="${tDe}">${ladoRealcado(realce, 'de', 'diff-mark diff-mark-del')}</span>`
-                + `<span class="diff-to" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
+                + `<span class="diff-from" dir="auto" title="${tDe}">${ladoRealcado(realce, 'de', 'diff-mark diff-mark-del')}</span>`
+                + `<span class="diff-to" dir="auto" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
         }
         return `<div class="diff-row">${rotulo}`
-            + `<span class="diff-from">${escapeHtml(valorDoDiffDoCampo(c.field, c.from))}</span>`
-            + `<span class="diff-to">${escapeHtml(valorDoDiffDoCampo(c.field, c.to))}</span></div>`;
+            + `<span class="diff-from" dir="auto">${escapeHtml(valorDoDiffDoCampo(c.field, c.from))}</span>`
+            + `<span class="diff-to" dir="auto">${escapeHtml(valorDoDiffDoCampo(c.field, c.to))}</span></div>`;
     }).join('');
     changesBox.classList.remove('hidden');
 }
@@ -16989,6 +17153,66 @@ function vigiarEstouroDoConteudo(el) {
         // liga. Quem denuncia esse caso são os filhos.
         obs.observe(el);
         for (const filho of el.children) obs.observe(filho);
+    }
+}
+
+// SEGUNDA rede de segurança, a da BARRA de ações (R19-8-01): com o texto do
+// sistema maior (a escala da fonte raiz em 1,3 ou mais, nas alturas de 667 a
+// 860 px) os botões ✕ ↑ ✓ saíam do card — o `.place-card` tem `overflow:hidden`,
+// então a barra ficava cortada e SEM caminho até ela: o card tem
+// `touch-action: none` (arrastar pra cima é "pular") e a página não rola.
+// MEDIDO, o excesso da barra abaixo da tela: Android 360×800 x1,3 → +79 e x1,5
+// → +237; iPhone 393×852 x1,3 → +27; Galaxy S8 360×740 x1,3 → +139; SE 375×667
+// x1,3 → +66. A regra compacta por ALTURA (`@media (max-height: 700px)`) é em
+// px e não enxerga a escala da fonte, e o `rem` num `@media` não serve (é o
+// tamanho inicial do navegador, não o do `html`); a condição pro conserto era
+// não mudar NADA com a escala 1 — a SE 667 tem 8 px de folga hoje.
+//
+// Por isso é MEDIDA, e VIVA: a barra de ações passou do corpo do card? Passou, a classe
+// `card-aperta` baixa o piso da foto e solta o piso do texto (ver o
+// styles.css), e a rede de cima (`card-content-rola`) assume o que sobrar. Quem
+// cede é a FOTO primeiro (gotcha #36), por ser a que encolhe 30× mais rápido.
+// Mesmas regras da irmã: o callback do observer só AGENDA (gotchas #34/#35) e
+// a tolerância é a do arredondamento.
+//
+// A saída tem uma sutileza que a irmã não tem: com a classe LIGADA o card cabe
+// por construção, então a medição nunca diria "voltou a caber". Para saber se
+// SEM ela caberia, a escrita tira a classe, mede (a leitura força o layout) e
+// põe de volta no MESMO quadro — nada é pintado no meio. O estado só muda se a
+// decisão muda, e só quando algo do card mudou de tamanho: em regime, custo zero.
+function vigiarBarraDeAcoes(card) {
+    const corpo = card && card.querySelector('.card-body');
+    const barra = corpo && corpo.querySelector('.card-actions');
+    if (!corpo || !barra) return;
+    let ligado = card.classList.contains('card-aperta');
+    let agendado = false;
+
+    const escrever = () => {
+        agendado = false;
+        if (!card.isConnected) return;
+        if (ligado) card.classList.remove('card-aperta');
+        // A BARRA, e não o `scrollHeight` do corpo: deitado o card é uma grade e a
+        // coluna do texto pode passar do corpo sem que a barra (coluna da foto)
+        // saia de lugar nenhum — medir o corpo ligava o aperto onde nada faltava.
+        // `offsetTop` é de layout, e não muda com o `transform` do arraste.
+        const fora = barra.offsetTop + barra.offsetHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
+        if (fora || ligado) card.classList.toggle('card-aperta', fora);
+        ligado = fora;
+    };
+    const agendar = () => {
+        if (agendado) return;
+        agendado = true;
+        requestAnimationFrame(escrever);
+    };
+
+    agendar();
+    if (typeof ResizeObserver === 'function') {
+        const obs = new ResizeObserver(agendar);
+        // O card muda de tamanho com a janela e com a escala da fonte; os filhos
+        // do corpo (foto, texto, barra) denunciam o texto que cresce sem o card
+        // mudar — mesma razão da irmã.
+        obs.observe(card);
+        for (const filho of corpo.children) obs.observe(filho);
     }
 }
 
@@ -18736,8 +18960,24 @@ function desenharChavesDePreferencia() {
     marcar('prefOfflineDisponivel', p.offlineDisponivel === true);
 }
 
+// A página VOLTOU do cache de voltar/avançar (bfcache: Safari e Chrome do Android, ao voltar a
+// ela pelo botão Voltar ou pela troca de abas), R19-1-03. Congelada, ela NÃO recebe o aviso
+// `storage`: o "Sair" dado noutra aba nesse meio, a outra conta que entrou, o placar e as
+// preferências que mudaram — tudo isso se perdia, e a aba voltava "logada" e com a fila na tela
+// (dado de terceiro) de uma sessão que já saiu, até o primeiro ✕ falhar. O que o aviso teria dito
+// o aparelho diz: a releitura é a do "armazenamento limpo inteiro" (`key` nulo), que o
+// `aoGravarEmOutraAba` já sabe tratar — solta as cópias em memória, relê o modo dev, o placar e as
+// preferências, e `sincronizarComOutraAba` confere o token e a conta (o "Sair" de lá encerra esta
+// aba, a outra conta a tira). Só com `persisted`: a primeira carga e a recarga leem o aparelho do
+// zero. Nada grava: quem responde ao aviso não grava.
+function aoVoltarDoBfcache(ev) {
+    if (!ev || ev.persisted !== true) return;
+    aoGravarEmOutraAba({ key: null, newValue: null, oldValue: null });
+}
+
 function setupSincroniaEntreAbas() {
     window.addEventListener('storage', aoGravarEmOutraAba);
+    window.addEventListener('pageshow', aoVoltarDoBfcache);
     // O que POUSA numa aba sai da fila das outras (R11-2-01, ver
     // `avisarOutrasAbasDoPouso`): o canal é aberto aqui, uma vez por página.
     abrirCanalDosPousos();
@@ -19470,6 +19710,9 @@ function ligarConquistas(el) {
 // css/styles.css). Pedir 800/900 aqui não dá erro: o browser SINTETIZA o
 // negrito ou cai no fallback, em silêncio. `test/resumo.test.mjs` reprova
 // qualquer peso acima de 700 nesta seção.
+// Quanto a imagem do Resumo espera o `qr.js` antes de sair sem o QR (R19-7-02). Folga sobre os ~12 KB
+// numa rede normal, e curto o bastante pra o toque não parecer morto.
+const RESUMO_QR_TETO_MS = 3500;
 const RESUMO_LARGURA = 1080;
 const RESUMO_ALTURA = 1350;
 
@@ -19683,7 +19926,15 @@ async function gerarResumoDoMes() {
         }
     } catch (e) {}
     let qr = null;
-    try { if (await carregarQr()) qr = gerarQR(location.origin); } catch (e) { qr = null; }
+    // O QR é opcional na imagem (o código segue sem ele), mas pendurar não é falhar: com o `qr.js` preso
+    // (sinal que conecta e não responde, e o service worker serve JS pela rede primeiro e sem teto) a
+    // geração inteira esperava, sem sinal nenhum, e cada toque empilhava outra (R19-7-02, MEDIDO). Passado
+    // o teto a imagem sai SEM o QR, que o `desenharResumo` já trata. O pareamento NÃO usa este teto: o QR é
+    // o caminho dele, e o script que chega depois ainda é desenhado quando chegar.
+    try {
+        const chegou = await Promise.race([carregarQr(), new Promise((fim) => setTimeout(() => fim(false), RESUMO_QR_TETO_MS))]);
+        if (chegou) qr = gerarQR(location.origin);
+    } catch (e) { qr = null; }
     let logo = null;
     try {
         const img = new Image();
@@ -19701,6 +19952,8 @@ async function gerarResumoDoMes() {
 // O que está na folha agora: o blob e o nome. Limpo em LIMPEZA_AO_FECHAR —
 // modal fecha por três caminhos, e amarrar a limpeza a um deixa os outros vazando.
 let resumoAtual = null;
+// Uma geração do Resumo no ar (R19-7-02): o toque seguinte não empilha outra.
+let resumoGerando = false;
 
 async function abrirResumoDoMes() {
     // DE QUEM é o resumo. A geração espera a fonte, o QR (o `qr.js` vem pela
@@ -19715,9 +19968,23 @@ async function abrirResumoDoMes() {
     // não espera aviso dela, e quem fechou o Histórico desistiu.
     const epoca = epocaDaSessao;
     const conta = contaAgora();
+    // UMA geração por vez (R19-7-02): enquanto uma roda, o toque seguinte não empilha outra (cada uma
+    // era um canvas de 1080×1350). O botão diz que está ocupado (`aria-busy`), sem elemento novo.
+    if (resumoGerando) return;
+    resumoGerando = true;
+    const botao = document.getElementById('resumoBotao');
+    if (botao && botao.setAttribute) botao.setAttribute('aria-busy', 'true');
     let r = null;
-    try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
-    const blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    let blob = null;
+    try {
+        try { r = await gerarResumoDoMes(); } catch (e) { r = null; }
+        blob = r ? await new Promise((res) => { try { r.canvas.toBlob(res, 'image/png'); } catch (e) { res(null); } }) : null;
+    } finally {
+        resumoGerando = false;
+        // O botão que existe AGORA (o painel do Histórico é redesenhado por `innerHTML`).
+        const agora = document.getElementById('resumoBotao');
+        if (agora && agora.removeAttribute) agora.removeAttribute('aria-busy');
+    }
     if (epoca !== epocaDaSessao || conta !== contaAgora() || !historicoNaTela()) return;
     if (!blob) { showToast(t('toast.resumoFalhou'), 'error'); return; }
     resumoAtual = { blob, nome: r.nomeArquivo, mesNome: r.mesNome };
@@ -19822,6 +20089,9 @@ let recusaAutomaticaRodando = false;
 // alguém pedir DURANTE esta.
 let recusaAutomaticaPedidaDeNovo = false;
 
+// O nome da trava ENTRE ABAS da recusa automática (R19-2-02, ver o envio em `aplicarRecusaAutomatica`).
+const RECUSA_AUTOMATICA_TRAVA = 'wp-recusa-automatica';
+
 // Chamado depois de a fila crescer. Tira os pedidos dos autores marcados e
 // rejeita na hora, um a um, com o aviso contando quantos faltam.
 async function aplicarRecusaAutomatica() {
@@ -19922,7 +20192,15 @@ async function aplicarRecusaAutomatica() {
     };
     const aviso = showToast(andando(n), 'hint', 600000);
     avisoDaRecusaAutomatica = aviso;
-    try {
+    // UMA aba por vez no envio (R19-2-02): com duas abas abrindo juntas (a janela restaurada, o app
+    // instalado e o navegador), cada uma achava os mesmos alvos na fila e mandava cada rejeição ao
+    // Waze — o dobro das chamadas (MEDIDO: 4 pedidos com 2 requisições cada, e 3 de 4 com 500 ms de
+    // latência), no free tier. A conferência `decididoNaOutraAbaDepoisDe` só vê o que a outra aba JÁ
+    // pousou. Tudo acima continua SÍNCRONO, como sempre: os alvos saem da fila e o `desde` é tirado
+    // antes de qualquer espera (senão o primeiro alvo virava o card da frente e escapava da recusa).
+    // A espera pela trava vem só aqui: a aba que chega depois manda o que sobrou depois que a outra
+    // pousou (o `aindaVale` abaixo pergunta a cada ida). Sem `navigator.locks`, segue como sempre.
+    const mandar = async () => {
         await enviarLote(alvos, {
             silencioso: true,
             contarAoLandar: true,
@@ -19945,6 +20223,18 @@ async function aplicarRecusaAutomatica() {
                 if (faltam > 0) aviso.texto(andando(faltam));
             },
         });
+    };
+    try {
+        let locks = null;
+        try { locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null; } catch (e) { locks = null; }
+        if (locks) {
+            // Roda `mandar` com a trava na mão; quem chega com ela ocupada ESPERA (não é polling: a espera
+            // acaba quando a outra termina, e a página que morre solta a trava — é do navegador). Se o
+            // navegador nem chegar a pedi-la, o envio roda mesmo assim: a recusa não morre por causa dela.
+            let comecou = false;
+            await locks.request(RECUSA_AUTOMATICA_TRAVA, () => { comecou = true; return mandar(); })
+                .catch((e) => { if (!comecou) return mandar(); throw e; });
+        } else await mandar();
     } finally {
         recusaAutomaticaRodando = false;
         // Acabou: o aviso sai. Desligar o automático de alguém continua onde
@@ -20278,6 +20568,9 @@ async function enviarLote(places, opts = {}) {
     // Waze e voltou pra fila — nem rejeitado, nem falha.
     const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0, naoVale: 0 };
     const epoca = epocaDaSessao;
+    // A geração do "Sair" em que o lote começou: o `finally` e o laço só soltam o que ainda é
+    // DELE (R19-1-01, ver `marcarEmAndamento`).
+    const geracao = AppState.geracaoDoSair;
     // E QUEM decide — a sessão e a conta desta mesma hora —, pro pouso que chegar
     // depois de uma queda no meio do laço (R13-2-01, ver o ramo da época abaixo).
     // Aqui e não no gesto, como a época: a janela do Desfazer do "Rejeitar os N"
@@ -20395,13 +20688,13 @@ async function enviarLote(places, opts = {}) {
     try {
         for (const p of places) {
             if (repetidos.has(p)) continue;
-            if (!aoLandar) marcarLoteSemEnviar(p, false);   // entra no ar: já não é o que o "Sair" descarta
+            if (!aoLandar) marcarLoteSemEnviar(p, false, geracao);   // entra no ar: já não é o que o "Sair" descarta
             // O lote da PESSOA esperando a retentativa também conta no "Sair" (R16-2-03);
             // a recusa automática é o app agindo, e fica de fora.
             const r = await callWithRetry(() => (desistir(p)
                 ? naoVale
                 : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)), undefined,
-                aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim));
+                aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim, geracao));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
             // os que nem saíram) volta (K7). Contando ao pousar não há o que
@@ -20506,7 +20799,7 @@ async function enviarLote(places, opts = {}) {
                 soltarMarcaDosItens('reject', [...anotados]);
                 for (const q of places.slice(places.indexOf(p))) {
                     if (repetidos.has(q)) continue;
-                    marcarEmAndamento(q, false);
+                    marcarEmAndamento(q, false, geracao);
                     if (!aoLandar && (anotados.has(q) || enfileirarSaida('reject', q, opts.regiao, opts.gesto))) continue;
                     if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                     voltarPraFila(q);
@@ -20547,15 +20840,17 @@ async function enviarLote(places, opts = {}) {
                 voltarPraFila(p);
             }
             // Resolvido: pousou, está na fila de saída, ou voltou pra fila.
-            marcarEmAndamento(p, false);
+            marcarEmAndamento(p, false, geracao);
             progresso();
         }
     } finally {
         // Todos, inclusive os que não chegaram a sair (sessão morta no meio).
-        marcarEmAndamento(places, false);
+        marcarEmAndamento(places, false, geracao);
         rejeicoesDeLoteNoAr.delete(noAr);
-        if (!aoLandar) marcarLoteSemEnviar(places, false);
-        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        if (!aoLandar) marcarLoteSemEnviar(places, false, geracao);
+        // Só a ação DESTA geração do "Sair": ele zerou o contador, e o que está no ar agora é da
+        // sessão nova (R19-1-01).
+        if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         updateStats();
         saveStats();
@@ -22662,7 +22957,12 @@ const POUSO_NA_MEMORIA_MS = 10 * 60 * 1000;
 // card legítimo.
 const pedidosQuePousaram = new WeakSet();
 
-function marcarEmAndamento(places, sim) {
+function marcarEmAndamento(places, sim, geracao) {
+    // `geracao`: a do "Sair" em que quem chama começou (`AppState.geracaoDoSair`). O "Sair" esvazia o
+    // conjunto e uma resposta em voo da sessão que saiu ainda chega: sem isto o `finally` dela tirava a
+    // marca do MESMO pedido da sessão nova, e o ↻ o devolvia como card com a decisão ainda no ar
+    // (R19-1-01). Sem o argumento (todo chamador síncrono do gesto), vale como sempre.
+    if (geracao !== undefined && geracao !== AppState.geracaoDoSair) return;
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
         if (!k) continue;
@@ -22685,7 +22985,9 @@ function marcarEmAndamento(places, sim) {
 // pelo `aoEsperar` do `callWithRetry` e sai quando a ida seguinte vai ao ar — a
 // decisão com a requisição NO AR segue de fora da conta (o Waze a recebe).
 const pedidosDoLoteSemEnviar = new Set();
-function marcarLoteSemEnviar(places, sim) {
+function marcarLoteSemEnviar(places, sim, geracao) {
+    // Mesma regra do `marcarEmAndamento`: a resposta da sessão que saiu não mexe no que é da nova (R19-1-01).
+    if (geracao !== undefined && geracao !== AppState.geracaoDoSair) return;
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
         if (!k) continue;
@@ -23312,9 +23614,10 @@ function offlineDB({ soLer = false } = {}) {
         let req;
         try { req = indexedDB.open(OFFLINE_DB, 1); } catch (e) { return erro(e); }
         let estourou = false;
+        let semBase = false;
         const teto = setTimeout(() => { estourou = true; erro(new Error('timeout')); }, OFFLINE_DB_TETO_MS);
         req.onupgradeneeded = () => {
-            if (soLer) { try { req.transaction.abort(); } catch (e) { /* o `onerror` abaixo responde */ } return; }
+            if (soLer) { semBase = true; try { req.transaction.abort(); } catch (e) { /* o `onerror` abaixo responde */ } return; }
             const db = req.result;
             if (!db.objectStoreNames.contains(OFFLINE_STORE)) db.createObjectStore(OFFLINE_STORE);
         };
@@ -23323,9 +23626,15 @@ function offlineDB({ soLer = false } = {}) {
             // Abriu DEPOIS do teto: ninguém mais espera por ela — fecha, senão a
             // conexão esquecida seguraria as próximas aberturas.
             if (estourou) { try { req.result.close(); } catch (e) {} return; }
+            // Nenhuma conexão esquecida pode segurar o `deleteDatabase` do "Sair" (R19-4-01): o
+            // pedido de apagar chega aqui como `versionchange`, e a conexão que ninguém fechou
+            // (a de uma transação que falhou, a de uma leitura que lançou) se fecha sozinha.
+            try { req.result.onversionchange = () => { try { req.result.close(); } catch (e) {} }; } catch (e) {}
             ok(req.result);
         };
-        req.onerror = () => { clearTimeout(teto); erro(req.error); };
+        // `semBase`: a leitura que só LÊ abortou a criação — a base não existe, e isso é "vazia",
+        // não "ilegível" (R19-4-03). O resto (timeout, `blocked`, erro de abrir) é falha.
+        req.onerror = () => { clearTimeout(teto); erro(semBase ? Object.assign(new Error('sem base'), { semBase: true }) : req.error); };
         req.onblocked = () => { clearTimeout(teto); erro(new Error('blocked')); };
     });
 }
@@ -23501,8 +23810,13 @@ async function offlineGravarFila(desde) {
     // A fila regravada manteve o carimbo com PARTE ESTRITA dos pedidos (R15-4-01):
     // as outras abas ficam sabendo quais pedidos a base tem agora.
     let parteDosPedidos = false;
+    // A conexão é fechada num `finally` (R19-4-01): a transação que ABORTA (a cota, um `DataError`)
+    // rejeitava a promessa, o `db.close()` do caminho feliz era pulado e a conexão ficava aberta —
+    // o `deleteDatabase` do "Sair" esperava o coletor de lixo (a fila de pedidos de terceiros
+    // ficava no disco) e a abertura seguinte dava `timeout`.
+    let db = null;
     try {
-        const db = await offlineDB();
+        db = await offlineDB();
         // Esqueceram enquanto a base abria: nada é gravado, e a base que esta
         // abertura recriou vazia sai.
         if (epoca !== offlineEpoca) {
@@ -23599,8 +23913,12 @@ async function offlineGravarFila(desde) {
         // que se resolve liberando espaço) e quem chamou fica sabendo: `'cota'` ou `'falhou'`, nunca
         // o `false` de "nada a gravar" (sem sessão, fila vazia, esqueceram no meio).
         const cota = offlineErroDeCota(e);
-        try { dfato('offline.gravacaoFalhou', { ...(cota ? { cota: true } : {}), e: String((e && e.name) || e).slice(0, 40) }); } catch (e2) {}
+        // Com LIMITADOR (R19-4-02): a falha permanente repete a cada passada da varredura.
+        const nome = String((e && e.name) || e).slice(0, 40);
+        try { dfato('offline.gravacaoFalhou', { ...(cota ? { cota: true } : {}), e: nome }, { causa: (cota ? 'cota:' : 'falhou:') + nome }); } catch (e2) {}
         return cota ? 'cota' : 'falhou';
+    } finally {
+        if (db) { try { db.close(); } catch (e2) {} }
     }
 }
 
@@ -23721,8 +24039,9 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
     // seguinte restaurava, `offlineRecuperarJanela`).
     const epoca = offlineEpoca;
     const desfazer = () => { try { indexedDB.deleteDatabase(OFFLINE_DB); } catch (e) {} };
+    let db = null;
     try {
-        const db = await offlineDB();
+        db = await offlineDB();
         if (epoca !== offlineEpoca) { try { db.close(); } catch (e) {} desfazer(); return; }
         await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readwrite');
@@ -23746,21 +24065,26 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
         db.close();
         // Esqueceram com a transação no ar: o que ela gravou sai.
         if (epoca !== offlineEpoca) desfazer();
-    } catch (e) {}
+    } catch (e) {
+    } finally {
+        // Fecha também quando a transação abortou (R19-4-01, ver `offlineGravarFila`).
+        if (db) { try { db.close(); } catch (e2) {} }
+    }
 }
 
 // O registro inteiro: `{ janela, t, filaCoberta }`.
 async function offlineLerRegistroDaJanela() {
+    let db = null;
     try {
-        const db = await offlineDB({ soLer: true });
+        db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('janela');
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
-        db.close();
         return v && Number.isFinite(v.janela) ? v : null;
     } catch (e) { return null; }
+    finally { if (db) { try { db.close(); } catch (e2) {} } }
 }
 
 async function offlineLerJanela() {
@@ -23778,17 +24102,22 @@ async function offlineRecuperarJanela() {
     offlineFilaPreparada = Number.isFinite(r.filaCoberta) ? r.filaCoberta : null;
 }
 
+// A fila guardada. `null` é a base LIDA e sem fila (ou sem base); `undefined` é a leitura que
+// FALHOU (o `timeout`, o `blocked`, o `indexedDB.open` que lança): o relatório diz "não deu pra
+// ler" e não "vazia" (R19-4-03). Os dois são falsos pra quem só pergunta "tem fila?" — a
+// reabertura sem rede, a poda e a gravação tratam as duas como sem fila, como sempre.
 async function offlineLerFila() {
+    let db = null;
     try {
-        const db = await offlineDB({ soLer: true });
+        db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('fila');
             r.onsuccess = () => ok(r.result); r.onerror = () => erro(r.error);
         });
-        db.close();
         return v && Array.isArray(v.places) && v.places.length ? v : null;
-    } catch (e) { return null; }
+    } catch (e) { return e && e.semBase ? null : undefined; }
+    finally { if (db) { try { db.close(); } catch (e2) {} } }
 }
 
 // `soMemoria`: o "Sair" (ou o desligar do offline) foi em OUTRA aba, que já
@@ -24461,12 +24790,16 @@ async function offlineVarrer() {
             // A gravação da fila falhou por outro motivo que não o espaço: tenta de novo no gatilho
             // seguinte DEPOIS de uma pausa curta, e não a cada swipe (R18-4-05).
             if (gravacaoFalhou && !semEspaco) offlineSegurarAte = Math.max(offlineSegurarAte, Date.now() + OFFLINE_LIMITE_PAUSA_MS);
+            // Com LIMITADOR (R19-4-02): a causa que se repete a cada passada depois da pausa
+            // (a gravação que falha, a cota, os tiles negados) entra 3 vezes, de novo quando a
+            // causa muda e uma a cada 10 min, com `juntas` — o anel de 120 é de todo o diário.
             dfato('offline.parcial', { feitos: total - pend.length - desistidosPorRede.length, total, falhas, definitivos,
                                        ...(jaFeitos ? { jaFeitos } : {}), ...(sondas ? { sondas } : {}),
                                        ...(semEspaco ? { cota: true } : {}),
                                        ...(gravacaoFalhou ? { semFila: true } : {}),
                                        ...(tilesNegadosEmTodos ? { tilesNegados: tilesDaFila.size } : {}),
-                                       ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) });
+                                       ...(limitado ? { limite: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000) } : {}) },
+                  { causa: [semEspaco ? 'cota' : '', gravacaoFalhou ? 'semFila' : '', tilesNegadosEmTodos ? 'tilesNegados' : '', limitado ? 'limite' : ''].join('|') });
         }
     } catch (e) {
         offlineUltimoResultado = 'parcial';
@@ -26624,6 +26957,8 @@ function handleMarkAsRead() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
@@ -26646,7 +26981,7 @@ function handleMarkAsRead() {
         const presenca = presencaWmeDaAcao(place, pais);
         // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca,
-            (sim) => marcarLoteSemEnviar(place, sim));
+            (sim) => marcarLoteSemEnviar(place, sim, geracao));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26675,6 +27010,8 @@ function handleReject() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
@@ -26697,7 +27034,7 @@ function handleReject() {
         const presenca = presencaWmeDaAcao(place, pais);
         // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca,
-            (sim) => marcarLoteSemEnviar(place, sim));
+            (sim) => marcarLoteSemEnviar(place, sim, geracao));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26792,6 +27129,8 @@ function handleSkip() {
     // passa a guardar o pedido na estrela do editor, e o Desfazer segue valendo
     // de graça: desfazer é não rodar o executor.
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver a queda, abaixo
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     scheduleAction('skip', place, async () => {
@@ -26807,7 +27146,7 @@ function handleSkip() {
         // A estrela esperando a retentativa (ou a conferência de um 401) conta no diálogo do
         // "Sair" como o ✕/✓ (R17-3-01): a escrita fica fora da fila de saída, e o "Sair" a descartava
         // sem aviso. É decisão da pessoa sobre o pedido (guardá-lo), e a frase serve.
-        const espera = (sim) => marcarLoteSemEnviar(place, sim);
+        const espera = (sim) => marcarLoteSemEnviar(place, sim, geracao);
         let r = await callWithRetry(enviar, epoca, espera);
         // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
         // "Sessão expirada" sem conferir nada — o ✕ com o mesmo 401 confere a
@@ -26985,6 +27324,8 @@ async function handleBatchMarkRead() {
     if (renomeacaoPendente) renomeacaoPendente.enviar();
     removeUndoBanner();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do lote: o `finally` só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver o fim (V9)
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     // O dia e o lugar do GESTO (`carimboDoGesto`): o lote anda em pedaços, e os
@@ -27009,7 +27350,7 @@ async function handleBatchMarkRead() {
     marcarEmAndamento(alvos, true);
     // E o diálogo do "Sair" conta os que ainda não saíram (R15-2-F4): o laço para
     // depois do pedaço que está no ar, e os seguintes não vão ao Waze.
-    marcarLoteSemEnviar(alvos, true);
+    marcarLoteSemEnviar(alvos, true, geracao);
     aplicarTravaDeAcao();
     AppState.inFlightActions++;
     updateInFlightIndicator();
@@ -27059,7 +27400,7 @@ async function handleBatchMarkRead() {
     // `quais`: os pedidos desta ida, pro "Sair" contar o que espera a retentativa
     // (R16-2-03). Uma função: o pedaço é remontado a cada ida.
     const mandar = async (enviar, quais) => {
-        const espera = (sim) => marcarLoteSemEnviar(quais(), sim);
+        const espera = (sim) => marcarLoteSemEnviar(quais(), sim, geracao);
         const r = await callWithRetry(enviar, undefined, espera);
         if (refez || epoca !== epocaDaSessao || !(r && r.errorCategory === 'unauthorized')) return r;
         refez = true;
@@ -27128,7 +27469,7 @@ async function handleBatchMarkRead() {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const doPedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
             noAr(i);
-            marcarLoteSemEnviar(doPedaco, false);   // o pedaço entra no ar
+            marcarLoteSemEnviar(doPedaco, false, geracao);   // o pedaço entra no ar
             let pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
             if (!pedaco.length) continue;
             const r = await mandar(() => {
@@ -27159,13 +27500,13 @@ async function handleBatchMarkRead() {
             // verdade quando ENTRA no ar, sozinho. Sem isto, o "Sair" no meio do um a um
             // não contava os que faltavam e os descartava sem aviso. Cada um deixa a
             // conta ao entrar no ar (logo abaixo), e o `finally` tira o que sobrar.
-            marcarLoteSemEnviar(pedaco, true);
+            marcarLoteSemEnviar(pedaco, true, geracao);
             for (const p of pedaco) {
                 // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02): essa
                 // decisão não é do "Sair" descartar.
-                if (decididoNaOutraAba(p)) { marcarLoteSemEnviar(p, false); continue; }
+                if (decididoNaOutraAba(p)) { marcarLoteSemEnviar(p, false, geracao); continue; }
                 // Entra no ar: já não é o que o "Sair" descarta.
-                marcarLoteSemEnviar(p, false);
+                marcarLoteSemEnviar(p, false, geracao);
                 noAr(alvos.indexOf(p));
                 // E a cada ida deste pedido, como a do pedaço (R12-2-03): `saiu`
                 // diz se a que valeu foi mesmo ao Waze.
@@ -27217,8 +27558,8 @@ async function handleBatchMarkRead() {
             if (alvosDoLoteDeLidosNoAr.get(k) === epoca) { alvosDoLoteDeLidosNoAr.delete(k); sobraramDoLote.push(p); }
         }
         marcarEmAndamento(sobraramDoLote, false);
-        marcarLoteSemEnviar(alvos, false);
-        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        marcarLoteSemEnviar(alvos, false, geracao);
+        if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         aplicarTravaDeAcao();
         // O lote acabou: o "Marcando N…" sai ANTES do desfecho ("N marcados", o
@@ -27489,6 +27830,10 @@ function scheduleAction(type, place, executor, opts = {}) {
         // A ação saiu: a janela do Desfazer acabou e os botões voltam.
         AppState.pendingAction = null;
         aplicarTravaDeAcao();
+        // A geração do "Sair" em que esta ação entrou no ar: o `finally` só solta o que ainda é
+        // DELA — o "Sair" zerou o contador e o conjunto, e o que está no ar agora é da sessão
+        // nova (R19-1-01).
+        const geracao = AppState.geracaoDoSair;
         AppState.inFlightActions++;
         updateInFlightIndicator();
         atenderOFimDaJanela(janela);
@@ -27502,8 +27847,8 @@ function scheduleAction(type, place, executor, opts = {}) {
             // saída (rede, sessão) só conta como ESPERANDO envio depois de sair
             // daqui — redesenhado antes, o "1 esperando" nascia sem o
             // `nao-cobrir` (ver `updateInFlightIndicator`, R10-4-05).
-            marcarEmAndamento(places, false);
-            AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+            marcarEmAndamento(places, false, geracao);
+            if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
             updateInFlightIndicator();
         }
     };
@@ -27543,6 +27888,8 @@ function scheduleAction(type, place, executor, opts = {}) {
     janela = AppState.pendingAction = {
         type,
         place,
+        // Quantos pedidos a janela guarda: o aviso do lote que a página saindo cancelou (R19-2-03).
+        quantos: n,
         execute: () => {
             if (!executed) {
                 executed = true;
@@ -27678,18 +28025,44 @@ function scheduleAction(type, place, executor, opts = {}) {
         }
     };
 
-    const undoMsg = n > 1
-        ? t('undo.lote', { n })
-        : type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
-    showUndoBanner(undoMsg);
+    const undoChave = n > 1 ? 'undo.lote'
+        : type === 'reject' ? 'undo.reject' : type === 'skip' ? 'undo.skip' : 'undo.read';
+    const undoVars = n > 1 ? { n } : null;
+    showUndoBanner(t(undoChave, undoVars || undefined), undoChave, undoVars);
     aplicarTravaDeAcao();
 }
 
-function showUndoBanner(message) {
+// O aviso do Desfazer é texto do JS (`t()` escrito na hora), e o `applyI18n` não
+// o alcança: trocar o idioma DENTRO da janela de 3 s o deixava no idioma de
+// antes (R19-8-03). O aviso lembra QUAL frase é (`data-chave`/`data-vars`) e
+// `retraduzirAvisoDoDesfazer` reescreve só os DOIS textos — a frase e o botão —,
+// sem refazer o banner: refazê-lo reiniciaria a barra de contagem (`.undo-
+// progress`) e a janela deixaria de bater com ela. A ação pendente, o `id` do
+// botão e o ouvinte dele ficam como estão.
+function marcarFraseDoDesfazer(banner, chave, vars) {
+    if (!banner || !chave) return;
+    banner.dataset.chave = chave;
+    if (vars) banner.dataset.vars = JSON.stringify(vars);
+}
+
+function retraduzirAvisoDoDesfazer() {
+    const container = document.getElementById('undoContainer');
+    const banner = container && container.querySelector('.undo-banner');
+    if (!banner || !banner.dataset.chave) return;
+    let vars;
+    try { vars = banner.dataset.vars ? JSON.parse(banner.dataset.vars) : undefined; } catch (e) { vars = undefined; }
+    const frase = banner.firstElementChild;
+    if (frase) frase.textContent = t(banner.dataset.chave, vars);
+    const botao = banner.querySelector('#undoBtn');
+    if (botao) botao.textContent = t('undo.button');
+}
+
+function showUndoBanner(message, chave, vars) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
+    marcarFraseDoDesfazer(banner, chave, vars);
     banner.innerHTML = `
         <span>${escapeHtml(message)}</span>
         <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
@@ -28596,6 +28969,9 @@ function descarregarAcaoPendente() {
         if (janelaDaAcao.aoSair === 'cancel') {
             janelaDaAcao.cancel(true);
             atenderOFimDaJanela(janelaDaAcao);
+            // O lote que sumiu: a fila voltou, o placar zerou e NADA foi ao Waze — a pessoa tocou,
+            // esperou e saiu achando que foi (R19-2-03). Diz quando ela voltar.
+            lembrarDoLoteQueNaoSaiu(janelaDaAcao.quantos);
         } else AppState.pendingAction.descarregar();
     } catch (e) {
         console.error('Falha ao descarregar a ação pendente:', e);
@@ -28639,10 +29015,29 @@ function setupDescargaAoSair() {
 // E o refazer da fila que a janela adiou e a descarga segurou (R15-3-02,
 // R15-6-01, ver `atenderOFimDaJanela`) roda AQUI, já com o modo desligado: é uma
 // busca como as outras, com o teto de 45 s, e só se ainda for a fila dele.
+// O "Rejeitar os N" que a página indo pro fundo CANCELOU na janela do Desfazer (`aoSair: 'cancel'`,
+// de propósito: meio lote enviado não tem sintoma) sumia calado: a fila voltava de 8 pra 12, o
+// placar zerava, 0 requisições e nenhum aviso (R19-2-03, MEDIDO). O comportamento segue; o que
+// faltava era DIZER. A página está escondida na hora do cancelamento, então o aviso espera a
+// volta (`dizerOLoteQueNaoSaiu`, no fim do modo "saindo"): um toast de 4 s dito no escuro
+// vencia antes de alguém ver. Só vale na sessão em que foi cancelado.
+let loteQueNaoSaiu = null;
+function lembrarDoLoteQueNaoSaiu(quantos) {
+    const n = Number(quantos);
+    loteQueNaoSaiu = n >= 1 ? { n, epoca: epocaDaSessao } : null;
+}
+function dizerOLoteQueNaoSaiu() {
+    const l = loteQueNaoSaiu;
+    loteQueNaoSaiu = null;
+    if (!l || l.epoca !== epocaDaSessao || AppState.authenticated !== true) return;
+    showToast(t(l.n === 1 ? 'toast.loteNaoSaiu' : 'toast.loteNaoSaiuPlural', { n: l.n }), 'info');
+}
+
 function setupFimDoModoSaindo() {
     const acabou = () => {
         if (typeof API !== 'undefined' && API.setSaindo) API.setSaindo(false);
         atenderORefazerAdiadoDaDescarga();
+        if (typeof dizerOLoteQueNaoSaiu === 'function') dizerOLoteQueNaoSaiu();
     };
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') acabou();
