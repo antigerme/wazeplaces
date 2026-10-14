@@ -691,6 +691,9 @@ function adotarSessaoDoAparelho() {
     aoEntrarNestaPagina();
     fecharModaisDaEntrada({ focoComDestino: focoNaEntrada });
     resetQueue();
+    // A fila é refeita: a escrita de foto que a sessão que caiu deixou no ar não trava a de agora
+    // (R21-3-01, ver `soltarAsEscritasDeFotoDaSessaoQueAcabou`).
+    soltarAsEscritasDeFotoDaSessaoQueAcabou();
     abrirComSessaoSalva();
     if (focoNaEntrada) focoDoTeclado = BOTAO_DA_ACAO.left;
     return true;
@@ -1104,7 +1107,13 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
                 // tem o `serverTotal` certo; o `showMainScreen` acima já pôs `authenticated`.
                 // Sem animar: é troca de contexto, não contagem.
                 updatePendingCount(true);
-            } else resetQueue();
+            } else {
+                resetQueue();
+                // Só a fila REFEITA solta as escritas de foto da sessão que caiu (R21-3-01): na renovação
+                // com a fila que atravessa (o ramo de cima) a escrita segue no ar e pousa nela, e soltá-la
+                // reabriria a 2ª aprovação do mesmo pedido.
+                soltarAsEscritasDeFotoDaSessaoQueAcabou();
+            }
             // O perfil da sessão nova é pedido ANTES de a conta ser conhecida: com
             // OUTRA conta, a troca (`esquecerOutraConta`) refaz JÁ a fila que
             // atravessou a sessão, e a busca de "Minha área" espera o perfil
@@ -2521,6 +2530,7 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
         showToast(t('toast.pairSuccess'), 'success');
         showMainScreen();
         resetQueue();   // fila NOVA, como no login por cookies
+        soltarAsEscritasDeFotoDaSessaoQueAcabou();   // e as marcas da foto da sessão que caiu (R21-3-01)
         conhecerContaDoLogin(r.conta);   // a conta, na hora (ver `authenticateWithCookies`)
         AppState._profilePromise = loadProfileAndAuxData();
         if (focoNoCard) focoDoTeclado = BOTAO_DA_ACAO.left;
@@ -4191,15 +4201,31 @@ let exclusaoPendente = null;   // { id, place, timer, enviar, desfazer }
 // esperando a lista dele, como acima.
 //
 // `tipo`: 'excluir', 'aprovar' ou 'aquecer'. `exclusoes`: quantas escritas da
-// vez são exclusões — com uma no ar, a pílula do nome do local trava
-// (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada. `escritas`:
-// quantas não são aquecimento.
-const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, n, exclusoes, escritas }
+// vez são exclusões DA SESSÃO DE AGORA — com uma no ar, a pílula do nome do
+// local trava (`exclusaoDoLocalNoAr`, R11-3-06); o aquecimento não trava nada.
+// `escritas`: quantas não são aquecimento.
+//
+// A ORDEM e a PÍLULA são coisas diferentes, e a vez as guardava juntas (auditoria
+// da rodada 21, R21-3-02 = R21-1-01 = R21-2-01). A ordem — `ultima`, `n`,
+// `escritas` — atravessa o "Sair" e a troca de conta de propósito: a lista de
+// fotos do local é substituída no Waze (gotcha #57), e a escrita de quem entrou
+// espera a resposta da de quem saiu. Já a conta de `exclusoes` é só da PÍLULA, e
+// a razão da trava dela (a exclusão que pousa tira a última foto e fecha a
+// camada, perdendo o nome em edição) não existe entre sessões: a resposta de
+// quem saiu não mexe na tela de quem entrou (`enviarExclusao` termina em
+// `pedidoAindaNaTela`). Com a exclusão da sessão que saiu ainda na vez (até os
+// 45 s do `_post`), a pílula do mesmo local nascia travada, calada
+// (`acoesTravadas()` falso), na sessão nova — contra o que o lote 24 prometia.
+// Hoje a conta tem GERAÇÃO (`geracao`, DO PRÓPRIO `vez`, e não do `AppState`: o
+// harness que fatia isto não precisa dele): o `soltarAsEscritasDeFotoDaSessaoQueAcabou`
+// zera `exclusoes` e sobe a geração, e a exclusão que entrou antes só desconta
+// a conta que ainda é dela — a resposta de A não zera a exclusão de B.
+const escritasDeFotoNoLocal = new Map();   // venueID → { ultima, n, exclusoes, escritas, geracao }
 
 function vezDasFotosNoLocal(alvo, tipo) {
     const local = alvo.place.venueID;
     let vez = escritasDeFotoNoLocal.get(local);
-    if (!vez) { vez = { ultima: null, n: 0, exclusoes: 0, escritas: 0 }; escritasDeFotoNoLocal.set(local, vez); }
+    if (!vez) { vez = { ultima: null, n: 0, exclusoes: 0, escritas: 0, geracao: 0 }; escritasDeFotoNoLocal.set(local, vez); }
     const anterior = vez.ultima;
     const soAquecimentoNaFrente = vez.escritas === 0;
     let soltar;
@@ -4210,6 +4236,8 @@ function vezDasFotosNoLocal(alvo, tipo) {
     if (excluir) vez.exclusoes++;
     if (escrita) vez.escritas++;
     const v = vez;
+    // A geração da conta de exclusões em que ESTA entrou (R21-3-02).
+    const geracao = vez.geracao;
     let solta = false;
     return {
         anterior,                                   // nula: a vez já é desta
@@ -4222,7 +4250,10 @@ function vezDasFotosNoLocal(alvo, tipo) {
             if (solta) return;
             solta = true;
             soltar();
-            if (excluir) v.exclusoes--;
+            // Só desconta a conta da SUA geração, e nunca abaixo de zero: depois do
+            // "Sair" a conta recomeçou, e a resposta de quem saiu não pode zerar a
+            // exclusão de quem entrou (R21-3-02).
+            if (excluir && v.geracao === geracao) v.exclusoes = Math.max(0, v.exclusoes - 1);
             if (escrita) v.escritas--;
             if (--v.n === 0 && escritasDeFotoNoLocal.get(local) === v) escritasDeFotoNoLocal.delete(local);
         },
@@ -4364,7 +4395,8 @@ function anotarFotoQueSaiuDoMapa(place, id) {
 }
 
 // Uma EXCLUSÃO de foto do local deste pedido está no ar — saiu pro Waze, ou
-// espera a vez do local pra sair (`vezDasFotosNoLocal`). A pílula do nome desse
+// espera a vez do local pra sair (`vezDasFotosNoLocal`) — nesta sessão: a de
+// quem já saiu não conta (R21-3-02, ver a vez). A pílula do nome desse
 // local fica travada até a resposta (auditoria da rodada 11, R11-3-06): a
 // exclusão que tira a ÚLTIMA foto da camada a FECHA quando pousa
 // (`removerFoto`), e com ela a correção do nome que estivesse aberta — o nome
@@ -4408,10 +4440,28 @@ function lixeiraOcupada(ligado) {
 // travava, calada, o "Aprovar", a lixeira e a pílula do nome de quem entrou depois — e, chegando, soltava
 // o spinner de uma escrita DELE. A queda com a MESMA conta não passa por aqui: a escrita segue no ar e
 // pousa depois (`aprovacaoPousouDepoisDaQueda`), e soltá-la reabriria a 2ª aprovação que o L24 fechou.
+//
+// Quem chama: o "Sair", a troca de conta e todo LOGIN que refaz a fila (cookies, código, adoção da sessão
+// do aparelho e a extensão FORA da renovação da queda). A queda SEM renovação seguida de um login novo
+// (a extensão que não renova, ou a pessoa que não a tem) era o buraco: a fila é REFEITA, a escrita da
+// sessão que caiu segue no ar por até 45 s, e as marcas — globais — nasciam ligadas na sessão nova
+// (R21-3-01). Só a renovação da queda com a fila que ATRAVESSA (`manterFila`) não solta. Soltar no login
+// é seguro: o pedido que a aprovação de A estava decidindo segue em `pedidosEmAndamento` (a
+// `geracaoDoSair` não sobe na queda) e a fila de quem entrou nasce sem ele; na exclusão e no nome o
+// pedido volta na fila, e a vez do local e a memória das fotos que saíram do mapa seguem serializando a
+// ESCRITA. O nome NÃO tem vez: a renomeação de quem entrou pode cruzar com a de quem saiu, no mesmo
+// local — o mesmo que o "Sair" já aceitava.
+//
+// A vez do local (`escritasDeFotoNoLocal`) fica: a ordem das escritas no Waze atravessa a sessão
+// (gotcha #57). Só a conta de EXCLUSÕES dela, que é da pílula, recomeça (R21-3-02).
 function soltarAsEscritasDeFotoDaSessaoQueAcabou() {
     AppState.geracaoDasEscritasDeFoto = (AppState.geracaoDasEscritasDeFoto || 0) + 1;
     escritasConferindo = 0;
     renomeacoesNoAr.clear();
+    for (const vez of escritasDeFotoNoLocal.values()) {
+        vez.geracao = (vez.geracao || 0) + 1;
+        vez.exclusoes = 0;
+    }
     if (aprovandoAgora) estadoAprovando(false);
     if (excluindoAgora) lixeiraOcupada(false);
     aplicarTravaDeAcao();
@@ -7116,6 +7166,9 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
             fecharModaisDaEntrada({ focoComDestino: peloTeclado || focoNaEntrada });
             showMainScreen();
             resetQueue();
+            // A escrita de foto que a sessão que caiu deixou no ar não trava a de agora: o "Aprovar", a
+            // lixeira e a pílula do nome nasciam travados, calados, até a resposta dela (R21-3-01).
+            soltarAsEscritasDeFotoDaSessaoQueAcabou();
             // DE QUEM é a sessão, NA HORA — o portão já leu o perfil (ver o
             // `testar-cookies`). Antes, a conta só se sabia com o `/perfil`: o
             // que a pessoa fazia antes dele chegar (placar, Histórico, autores)
