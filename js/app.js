@@ -1897,6 +1897,9 @@ function aplicarIdioma(valor) {
     // da pílula da presença também (auditoria de 2026-09-25). Junto, a linha do
     // offline (também das Preferências) e o nome do botão de Filtros, que o
     // `applyI18n` devolve ao padrão tirando o aviso da conquista nova.
+    // O aviso do Desfazer na janela de 3 s (R19-8-03): só os textos, a janela e a
+    // barra de contagem seguem correndo.
+    retraduzirAvisoDoDesfazer();
     if (AppState.authenticated) {
         renderUndoGateUI();
         atualizarLinhaDoOffline(0, 0);
@@ -4854,7 +4857,7 @@ function pedirExclusaoDaFoto() {
     const timer = setTimeout(enviar, UNDO_WINDOW_MS);
     janela = exclusaoPendente = { id: alvo.id, place, timer, enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer());
+    mostrarDesfazer(t('undo.photoDeleted'), () => exclusaoPendente && exclusaoPendente.desfazer(), 'undo.photoDeleted');
     // A lixeira com o foco travou (ou sumiu com a foto): o foco fica na camada.
     manterFocoNoLightbox();
 }
@@ -5314,7 +5317,7 @@ function aprovarFotoAtual() {
     const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
     janela = aprovacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer());
+    mostrarDesfazer(t('undo.photoApproved'), () => aprovacaoPendente && aprovacaoPendente.desfazer(), 'undo.photoApproved');
     // O "Aprovar" com o foco virou lixeira travada: o foco fica na camada.
     manterFocoNoLightbox();
 }
@@ -5565,7 +5568,7 @@ function confirmarRenomear() {
     const desfazer = () => { if (cancelar()) { registrarDesfazer(); atenderOFimDaJanela(janela); } };
     janela = renomeacaoPendente = { timer: setTimeout(enviar, UNDO_WINDOW_MS), enviar, desfazer, cancelar };
     aplicarTravaDeAcao();
-    mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer());
+    mostrarDesfazer(t('undo.renamed', { nome: novo }), () => renomeacaoPendente && renomeacaoPendente.desfazer(), 'undo.renamed', { nome: novo });
     manterFocoNoLightbox();
 }
 
@@ -5755,12 +5758,13 @@ function enviarPendenciasDoLightbox({ semORefazerAdiado = false } = {}) {
 // Banner próprio, com a MESMA aparência e o mesmo tempo do Desfazer do card —
 // é a mesma ideia, e duas gramáticas pro mesmo conceito é como o editor
 // descobre que o app se contradiz.
-function mostrarDesfazer(mensagem, aoDesfazer) {
+function mostrarDesfazer(mensagem, aoDesfazer, chave, vars) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
     if (!container) return;
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
+    marcarFraseDoDesfazer(banner, chave, vars);
     banner.innerHTML = `
         <span>${escapeHtml(mensagem)}</span>
         <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>
@@ -14860,6 +14864,7 @@ function renderCurrentCard() {
     // pular (o botão ↑ nunca some) — e o esmaecido avisa que ainda tem coisa.
     marcarBordaRolagem(card.querySelector('.card-content'));
     vigiarEstouroDoConteudo(card.querySelector('.card-content'));
+    vigiarBarraDeAcoes(card);
 
     // O card novo nasce SEM EFEITO NENHUM — decisão do owner, e o porquê de
     // cada coisa que já esteve aqui (mola, escala, fade) está medido no
@@ -15010,7 +15015,7 @@ function montarCard(place) {
         // empilhadas dizendo a mesma ausência. Nesse caso o texto volta a ser o
         // de hoje e quem responde "onde" é o marcador no mapa, que continua lá.
         if (place.flagType === 'DUPLICATE' && place.duplicado && place.duplicado.nome) {
-            motivo = t('card.flagDuplicateOf', { alvo: place.duplicado.nome });
+            motivo = t('card.flagDuplicateOf', { alvo: isolarTextoDoWaze(place.duplicado.nome) });
         }
         // A distância vai no TEXTO e não só no mapa porque o mapa nem sempre é
         // o primeiro slide (`mapaVemPrimeiro()`): num pedido com foto o editor
@@ -15224,6 +15229,9 @@ function montarCardDeFundo() {
     // card da FRENTE. É a diferença entre uma linha que todo mundo precisa
     // lembrar e uma que já nasce certa.
     stack.appendChild(fundo);
+    // O mesmo aperto do card da frente (`card-aperta`): a promessa do que vem
+    // não pode mudar de forma ao virar o card real.
+    vigiarBarraDeAcoes(fundo);
 
     // E SÓ AGORA o mapa, porque só agora a caixa tem tamanho.
     //
@@ -16126,6 +16134,19 @@ function nomeDoDia(d) {
 // real, um pedido do "Posto Equador" propunha `services: [""]` — um array com
 // uma string vazia. O card mostrava `Serviços: +` e mais nada, que lê como app
 // quebrada, não como "estão adicionando um item vazio".
+// Texto do Waze no meio de uma FRASE nossa (o nome do local duplicado): a frase é do app, que é da esquerda pra direita, e o nome pode ser
+// hebraico ou árabe (a região `il` existe). Sem isolar, a pontuação e os números
+// em volta do nome se reordenam com a direção da frase ("(סניף 2)" saía com os
+// trechos trocados — R19-8-02). U+2068/U+2069 (isolado de direção automática)
+// fazem o nome ser lido na direção DELE sem tocar na da frase. Só quando o nome
+// TEM letra da direita pra esquerda: texto da esquerda pra direita sai idêntico,
+// byte a byte (o `title` e os testes que comparam a frase não mudam).
+const LETRA_DA_DIREITA_PRA_ESQUERDA = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+function isolarTextoDoWaze(texto) {
+    const s = String(texto == null ? '' : texto);
+    return LETRA_DA_DIREITA_PRA_ESQUERDA.test(s) ? '\u2068' + s + '\u2069' : s;
+}
+
 function itemDeListaAusente(v) {
     return v === null || v === undefined || v === '';
 }
@@ -16138,7 +16159,7 @@ function itemDeListaAusente(v) {
 function itemDeLista(v, cls, sinal, campo, centro) {
     const txt = escapeHtml(valorDeLista(v, campo, centro));
     const corpo = itemDeListaAusente(v) ? `<span class="valor-ausente">${txt}</span>` : txt;
-    return `<span class="${cls}"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
+    return `<span class="${cls}" dir="auto"><span aria-hidden="true">${sinal}</span> ${corpo}</span>`;
 }
 
 // `centro` é o do local DESTE card ([lat, lon], `place.mapa.centro`). Era lido
@@ -16652,8 +16673,8 @@ function renderCardChanges(card, place) {
                         + `<span class="diff-delta">${add}${del}</span></span>`;
                 }
                 return `<span class="diff-obj-linha">${caminho}`
-                    + `<span class="diff-from">${escapeHtml(val(l.de))}</span>`
-                    + `<span class="diff-to">${escapeHtml(val(l.para))}</span></span>`;
+                    + `<span class="diff-from" dir="auto">${escapeHtml(val(l.de))}</span>`
+                    + `<span class="diff-to" dir="auto">${escapeHtml(val(l.para))}</span></span>`;
             }).join('');
             return `<div class="diff-row diff-row-obj">${rotulo}<span class="diff-obj">${linhas}</span></div>`;
         }
@@ -16689,12 +16710,12 @@ function renderCardChanges(card, place) {
             // quem quiser o resto tem onde ver sem abrir o WME.
             const tDe = escapeHtml(String(c.from)), tPara = escapeHtml(String(c.to));
             return `<div class="diff-row">${rotulo}`
-                + `<span class="diff-from" title="${tDe}">${ladoRealcado(realce, 'de', 'diff-mark diff-mark-del')}</span>`
-                + `<span class="diff-to" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
+                + `<span class="diff-from" dir="auto" title="${tDe}">${ladoRealcado(realce, 'de', 'diff-mark diff-mark-del')}</span>`
+                + `<span class="diff-to" dir="auto" title="${tPara}">${ladoRealcado(realce, 'para', 'diff-mark diff-mark-add')}</span></div>`;
         }
         return `<div class="diff-row">${rotulo}`
-            + `<span class="diff-from">${escapeHtml(valorDoDiffDoCampo(c.field, c.from))}</span>`
-            + `<span class="diff-to">${escapeHtml(valorDoDiffDoCampo(c.field, c.to))}</span></div>`;
+            + `<span class="diff-from" dir="auto">${escapeHtml(valorDoDiffDoCampo(c.field, c.from))}</span>`
+            + `<span class="diff-to" dir="auto">${escapeHtml(valorDoDiffDoCampo(c.field, c.to))}</span></div>`;
     }).join('');
     changesBox.classList.remove('hidden');
 }
@@ -17132,6 +17153,61 @@ function vigiarEstouroDoConteudo(el) {
         // liga. Quem denuncia esse caso são os filhos.
         obs.observe(el);
         for (const filho of el.children) obs.observe(filho);
+    }
+}
+
+// SEGUNDA rede de segurança, a da BARRA de ações (R19-8-01): com o texto do
+// sistema maior (a escala da fonte raiz em 1,3 ou mais, nas alturas de 667 a
+// 860 px) os botões ✕ ↑ ✓ saíam do card — o `.place-card` tem `overflow:hidden`,
+// então a barra ficava cortada e SEM caminho até ela: o card tem
+// `touch-action: none` (arrastar pra cima é "pular") e a página não rola.
+// MEDIDO, o excesso da barra abaixo da tela: Android 360×800 x1,3 → +79 e x1,5
+// → +237; iPhone 393×852 x1,3 → +27; Galaxy S8 360×740 x1,3 → +139; SE 375×667
+// x1,3 → +66. A regra compacta por ALTURA (`@media (max-height: 700px)`) é em
+// px e não enxerga a escala da fonte, e o `rem` num `@media` não serve (é o
+// tamanho inicial do navegador, não o do `html`); a condição pro conserto era
+// não mudar NADA com a escala 1 — a SE 667 tem 8 px de folga hoje.
+//
+// Por isso é MEDIDA, e VIVA: o card ainda estoura? Estourou, a classe
+// `card-aperta` baixa o piso da foto e solta o piso do texto (ver o
+// styles.css), e a rede de cima (`card-content-rola`) assume o que sobrar. Quem
+// cede é a FOTO primeiro (gotcha #36), por ser a que encolhe 30× mais rápido.
+// Mesmas regras da irmã: o callback do observer só AGENDA (gotchas #34/#35) e
+// a tolerância é a do arredondamento.
+//
+// A saída tem uma sutileza que a irmã não tem: com a classe LIGADA o card cabe
+// por construção, então a medição nunca diria "voltou a caber". Para saber se
+// SEM ela caberia, a escrita tira a classe, mede (a leitura força o layout) e
+// põe de volta no MESMO quadro — nada é pintado no meio. O estado só muda se a
+// decisão muda, e só quando algo do card mudou de tamanho: em regime, custo zero.
+function vigiarBarraDeAcoes(card) {
+    const corpo = card && card.querySelector('.card-body');
+    if (!corpo) return;
+    let ligado = card.classList.contains('card-aperta');
+    let agendado = false;
+
+    const escrever = () => {
+        agendado = false;
+        if (!card.isConnected) return;
+        if (ligado) card.classList.remove('card-aperta');
+        const fora = corpo.scrollHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
+        if (fora || ligado) card.classList.toggle('card-aperta', fora);
+        ligado = fora;
+    };
+    const agendar = () => {
+        if (agendado) return;
+        agendado = true;
+        requestAnimationFrame(escrever);
+    };
+
+    agendar();
+    if (typeof ResizeObserver === 'function') {
+        const obs = new ResizeObserver(agendar);
+        // O card muda de tamanho com a janela e com a escala da fonte; os filhos
+        // do corpo (foto, texto, barra) denunciam o texto que cresce sem o card
+        // mudar — mesma razão da irmã.
+        obs.observe(card);
+        for (const filho of corpo.children) obs.observe(filho);
     }
 }
 
@@ -27944,18 +28020,44 @@ function scheduleAction(type, place, executor, opts = {}) {
         }
     };
 
-    const undoMsg = n > 1
-        ? t('undo.lote', { n })
-        : type === 'reject' ? t('undo.reject') : type === 'skip' ? t('undo.skip') : t('undo.read');
-    showUndoBanner(undoMsg);
+    const undoChave = n > 1 ? 'undo.lote'
+        : type === 'reject' ? 'undo.reject' : type === 'skip' ? 'undo.skip' : 'undo.read';
+    const undoVars = n > 1 ? { n } : null;
+    showUndoBanner(t(undoChave, undoVars || undefined), undoChave, undoVars);
     aplicarTravaDeAcao();
 }
 
-function showUndoBanner(message) {
+// O aviso do Desfazer é texto do JS (`t()` escrito na hora), e o `applyI18n` não
+// o alcança: trocar o idioma DENTRO da janela de 3 s o deixava no idioma de
+// antes (R19-8-03). O aviso lembra QUAL frase é (`data-chave`/`data-vars`) e
+// `retraduzirAvisoDoDesfazer` reescreve só os DOIS textos — a frase e o botão —,
+// sem refazer o banner: refazê-lo reiniciaria a barra de contagem (`.undo-
+// progress`) e a janela deixaria de bater com ela. A ação pendente, o `id` do
+// botão e o ouvinte dele ficam como estão.
+function marcarFraseDoDesfazer(banner, chave, vars) {
+    if (!banner || !chave) return;
+    banner.dataset.chave = chave;
+    if (vars) banner.dataset.vars = JSON.stringify(vars);
+}
+
+function retraduzirAvisoDoDesfazer() {
+    const container = document.getElementById('undoContainer');
+    const banner = container && container.querySelector('.undo-banner');
+    if (!banner || !banner.dataset.chave) return;
+    let vars;
+    try { vars = banner.dataset.vars ? JSON.parse(banner.dataset.vars) : undefined; } catch (e) { vars = undefined; }
+    const frase = banner.firstElementChild;
+    if (frase) frase.textContent = t(banner.dataset.chave, vars);
+    const botao = banner.querySelector('#undoBtn');
+    if (botao) botao.textContent = t('undo.button');
+}
+
+function showUndoBanner(message, chave, vars) {
     removeUndoBanner();
     const container = document.getElementById('undoContainer');
     const banner = document.createElement('div');
     banner.className = 'undo-banner';
+    marcarFraseDoDesfazer(banner, chave, vars);
     banner.innerHTML = `
         <span>${escapeHtml(message)}</span>
         <button type="button" id="undoBtn">${escapeHtml(t('undo.button'))}</button>

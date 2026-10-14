@@ -3105,7 +3105,7 @@ function presencaRenderLista() {
         return `<li>
             <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(p.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span><span class="presenca-selos">${escapeHtml(nivel)}</span></span>
+                    <span class="presenca-l1"><span dir="auto" class="presenca-nome">${escapeHtml(nome)}</span><span class="presenca-selos">${escapeHtml(nivel)}</span></span>
                     ${d ? `<span class="presenca-l2">${escapeHtml(d.texto)}</span>` : ''}
                 </span>
                 ${presencaBadge(n)}
@@ -3128,8 +3128,8 @@ function presencaRenderLista() {
         return `<li>
             <button type="button" class="presenca-linha" data-pessoa="${escapeHtml(c.id)}" aria-label="${escapeHtml(rotulo)}">
                 <span class="presenca-txt">
-                    <span class="presenca-l1"><span class="presenca-nome">${escapeHtml(nome)}</span></span>
-                    <span class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(previa)}</span>
+                    <span class="presenca-l1"><span dir="auto" class="presenca-nome">${escapeHtml(nome)}</span></span>
+                    <span dir="auto" class="presenca-l2${n ? ' forte' : ''}">${escapeHtml(previa)}</span>
                 </span>
                 <span class="presenca-dir">${hora ? `<span class="presenca-hora">${escapeHtml(hora)}</span>` : ''}${presencaBadge(n)}</span>
             </button>
@@ -3201,7 +3201,7 @@ function presencaHtmlDasMsgs(id, h) {
         const recibo = m.meu ? presencaRecibo(estados[i], m.card && !m.legenda ? presencaIdDaDescricao(i) : '') : '';
         html += m.card
             ? presencaHtmlDoPedido(m, i, recibo)
-            : `<div class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
+            : `<div dir="auto" class="conversa-bolha ${m.meu ? 'minha' : 'dela'}${recibo ? ' com-recibo' : ''}">${escapeHtml(m.texto)}${recibo}</div>`;
         if (i === ultimaFalha) {
             // A frase vem da mesma função que a diz ao leitor de tela
             // (`presencaAnunciarFalhaDoEnvio`, R11-5-03).
@@ -3227,7 +3227,7 @@ function presencaHtmlDoPedido(m, i, recibo) {
         ? `<span class="cp-foto"><img src="${escapeHtml(card.imageUrl)}" alt="" width="62" height="62"></span>`
         : '';
     const topo = `<span class="cp-topo">${foto}<span class="cp-txt">`
-        + `<span class="cp-nome">${escapeHtml(nome)}</span>`
+        + `<span dir="auto" class="cp-nome">${escapeHtml(nome)}</span>`
         + (meta ? `<span class="cp-meta">${escapeHtml(meta)}</span>` : '')
         + '</span></span>';
     // A pergunta e o recibo moram DENTRO do botão, e botão não expõe o que tem
@@ -3237,7 +3237,7 @@ function presencaHtmlDoPedido(m, i, recibo) {
     // na tela: com pergunta, a linha dela (que leva o recibo); sem, o recibo.
     const desc = presencaIdDaDescricao(i);
     const legenda = m.legenda
-        ? `<span id="${desc}" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
+        ? `<span id="${desc}" dir="auto" class="cp-legenda">${escapeHtml(m.legenda)}${recibo}</span>`
         : '';
     const descrito = legenda || recibo.includes(`id="${desc}"`);
     // `data-id` é QUAL mensagem: o `data-msg` é a posição, que anda quando a

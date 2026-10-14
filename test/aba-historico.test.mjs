@@ -122,7 +122,7 @@ test('H1: trocar de idioma com o painel NA TELA o redesenha', () => {
     renderUndoGateUI: () => {}, atualizarLinhaDoOffline: () => {}, atualizarSeloDeConquista: () => {},
     registrarIdiomaUsado: () => {}, window: {}, showToast: () => {}, t: (k) => k,
     historicoNaTela: () => true, renderHistory: () => desenhos.push('en'),
-    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {},
+    Treino: { retraduzirExemplos() {} }, updateInFlightIndicator: () => {}, retraduzirAvisoDoDesfazer: () => {},
   };
   const { aplicarIdioma } = montar(['aplicarIdioma'], deps, ['aplicarIdioma']);
   aplicarIdioma('en');

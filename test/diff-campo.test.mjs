@@ -34,7 +34,7 @@ function linhas(changes) {
     ['valorDoDiff', 'valorDoDiffDoCampo', 'renderCardChanges'].map(fatiar).join('\n') + '\nreturn renderCardChanges;')(
     ...Object.values(deps));
   render(card, { changes });
-  return [...lista.innerHTML.matchAll(/<span class="diff-from">([^<]*)<\/span><span class="diff-to">([^<]*)<\/span>/g)]
+  return [...lista.innerHTML.matchAll(/<span class="diff-from"[^>]*>([^<]*)<\/span><span class="diff-to"[^>]*>([^<]*)<\/span>/g)]
     .map((m) => [m[1], m[2]]);
 }
 

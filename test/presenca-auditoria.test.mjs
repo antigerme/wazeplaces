@@ -591,7 +591,7 @@ test('P9 o cartão do pedido: a pergunta e o recibo DESCREVEM o botão (`aria-de
   // Com pergunta: a linha da pergunta (que leva o recibo) é a descrição.
   const d0 = descDe(botoes[0]);
   assert.ok(d0, 'o botão com pergunta não tem descrição: o leitor de tela nunca ouve a pergunta');
-  const alvo0 = html.match(new RegExp(`<span id="${d0}" class="cp-legenda">([^]*?)</span></span>`));
+  const alvo0 = html.match(new RegExp(`<span id="${d0}" dir="auto" class="cp-legenda">([^]*?)</span></span>`));
   // (as duas minhas vêm antes de uma dela: o recibo é "Lida" — quem respondeu depois leu)
   assert.ok(alvo0 && /PERGUNTA: isso é fachada\?/.test(alvo0[1]) && /presenca-recibo lida/.test(alvo0[1]), 'a descrição não é a pergunta com o recibo');
   // Sem pergunta: o recibo é a descrição.

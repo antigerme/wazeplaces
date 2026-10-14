@@ -110,7 +110,7 @@ function tela({ comFoto = true } = {}) {
   // fechar de uma ampliação PROMETE quando não há card nem painel (R9-3-02).
   const nomes = ['dentroDeCamada', 'focavelNaTela', 'devolverFoco', 'topOpenModal', 'cardDaFrente',
     'devolverFocoDaAmpliacao', 'botaoDoPainelDoFim', 'focoPerdido', 'semCamadaAberta', 'mantendoFocoNoCard',
-    'veioDoTeclado', 'mostrarDesfazer', 'aplicarFocoDoTeclado'];
+    'veioDoTeclado', 'marcarFraseDoDesfazer', 'mostrarDesfazer', 'aplicarFocoDoTeclado'];
   const app = new Function(...Object.keys(deps), 'let ultimoFocoForaDasCamadas = null;\nlet focoDoTeclado = null;\n'
     + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')}, promessa: () => focoDoTeclado };`)(...Object.values(deps));
   // O clique no "Desfazer" como o navegador o entrega: o Enter no botão focado
