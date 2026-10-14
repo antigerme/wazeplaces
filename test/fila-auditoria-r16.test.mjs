@@ -194,11 +194,11 @@ test('R16-2-02 (estrutura): o um a um devolve o pedaço ao conjunto ANTES do la�
   const i = corpo.indexOf('for (const p of pedaco) {');
   assert.ok(i > 0, 'o laço individual mudou: reescreva este guard');
   const antes = corpo.slice(Math.max(0, i - 200), i);
-  assert.match(antes, /marcarLoteSemEnviar\(pedaco, true\);\s*$/, 'o pedaço não volta ao conjunto antes do laço individual');
+  assert.match(antes, /marcarLoteSemEnviar\(pedaco, true(, geracao)?\);\s*$/, 'o pedaço não volta ao conjunto antes do laço individual');
   const dentro = corpo.slice(i);
   const k = dentro.indexOf('API.markAsRead(');
   assert.ok(k > 0, 'o laço individual não manda mais pelo markAsRead');
-  assert.match(dentro.slice(0, k), /marcarLoteSemEnviar\(p, false\);\s*noAr\(/, 'cada pedido não sai do conjunto ao entrar no ar');
+  assert.match(dentro.slice(0, k), /marcarLoteSemEnviar\(p, false(, geracao)?\);\s*noAr\(/, 'cada pedido não sai do conjunto ao entrar no ar');
 });
 
 // ═══ R16-2-03 · a decisão que ESPERA A RETENTATIVA conta no "Sair" ════════════
@@ -320,11 +320,11 @@ test('R16-2-03: CONTROLE — sem recuo (a 1ª ida pousa) nada entra no conjunto;
 });
 
 test('R16-2-03 (estrutura): os quatro caminhos que esperam a retentativa avisam o "Sair" — ✕, ✓, o "Rejeitar os N" da pessoa e o "Marcar todos"', () => {
-  assert.match(fatiar('handleReject'), /callWithRetry\(\(\) => API\.rejectPlace\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim\)\)/);
-  assert.match(fatiar('handleMarkAsRead'), /callWithRetry\(\(\) => API\.markAsRead\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim\)\)/);
-  assert.match(fatiar('enviarLote'), /undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim\)\)/,
+  assert.match(fatiar('handleReject'), /callWithRetry\(\(\) => API\.rejectPlace\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim(, geracao)?\)\)/);
+  assert.match(fatiar('handleMarkAsRead'), /callWithRetry\(\(\) => API\.markAsRead\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim(, geracao)?\)\)/);
+  assert.match(fatiar('enviarLote'), /undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim(, geracao)?\)\)/,
     'o "Rejeitar os N" da pessoa não avisa o recuo (e a recusa automática, que é o app agindo, não pode)');
-  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\)/);
+  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim(, geracao)?\);\s*const r = await callWithRetry\(enviar, undefined, espera\)/);
 });
 
 // ═══ R16-1-03 · o lote da sessão que ACABOU não conta mais ═══════════════════

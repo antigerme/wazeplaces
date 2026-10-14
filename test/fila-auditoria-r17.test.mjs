@@ -485,9 +485,9 @@ test('R17-3-01 (estrutura): as três escritas de foto e a estrela do ↑ passam 
     assert.match(corpo, /finally \{[\s\S]*espera\(false\);/, `${nome}: o \`finally\` não tira a marca (a queda não esvazia o conjunto)`);
   }
   const skip = fatiar('handleSkip');
-  assert.match(skip, /const espera = \(sim\) => marcarLoteSemEnviar\(place, sim\);\s*let r = await callWithRetry\(enviar, epoca, espera\);/);
+  assert.match(skip, /const espera = \(sim\) => marcarLoteSemEnviar\(place, sim, geracao\);\s*let r = await callWithRetry\(enviar, epoca, espera\);/);
   assert.match(skip, /refazerDepoisDo401\(epoca, enviar, espera\)/);
-  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\);[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/);
+  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim, geracao\);\s*const r = await callWithRetry\(enviar, undefined, espera\);[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/);
 });
 
 // ═══ R17-1-01 = R17-2-03 = R17-7-01 · o "Como funciona" aberto sozinho abre ROLADO ═══

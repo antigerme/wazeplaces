@@ -305,6 +305,8 @@ const AppState = {
     stats: { read: 0, rejected: 0, skipped: 0 },
     pendingAction: null,
     inFlightActions: 0,
+    // Sobe a cada "Sair" (R19-1-01): quem entra no ar guarda a geração e só solta, no fim, o que ainda é da dele.
+    geracaoDoSair: 0,
     fetchEpoch: 0,
     _fetchPromise: null,
     _profilePromise: null,
@@ -4858,6 +4860,9 @@ function estadoAprovando(ligado) {
 // o `aprovacaoPousouDepoisDaQueda`, e aqui sai `false`: nada mais a fazer.
 async function enviarAprovacao(alvo) {
     const epoca = epocaDaSessao;
+    // A geração do "Sair": a resposta que chega depois dele não solta o "em andamento" do mesmo
+    // pedido na sessão nova (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     // QUEM decide, pro aviso às outras abas se ela pousar depois da queda (R12-2-04).
     const quem = typeof quemDecideAgora === 'function' ? quemDecideAgora() : null;
     // No ar: o card do pedido trava até a resposta (ver `aprovacaoDaTelaNoAr`).
@@ -4988,7 +4993,7 @@ async function enviarAprovacao(alvo) {
         if (vez) vez.soltar();
         // O envio acabou: pousou (o `registrarPouso` passa a segurar o pedido
         // fora da fila) ou falhou (ele volta a ser um pedido como outro).
-        marcarEmAndamento(alvo.place, false);
+        marcarEmAndamento(alvo.place, false, geracao);
         // A aprovação que FALHOU devolve o pedido à série do autor: o "Ver +N" do
         // card da frente volta a contá-lo (R5-2-02).
         refazerSelosSeOutroNaTela(alvo.place);
@@ -12644,6 +12649,7 @@ function abrirDialogoDoSair() {
 // não muda, e a sessão desta aba já tinha saído.
 async function handleLogout({ porOutraAba = false, outraConta = false, recusado = false, naEntrada = false } = {}) {
     epocaDaSessao++;   // antes de tudo: nenhuma resposta em voo grava daqui pra frente
+    AppState.geracaoDoSair = (AppState.geracaoDoSair || 0) + 1;   // o que está no ar é de OUTRA geração (R19-1-01)
     saiuNestaPagina = true;
     sessaoCaiuNestaPagina = false;   // o que ela guardava da sessão que caiu sai agora
     // Aqui o diálogo do "Sair" é o que está aberto. Na outra aba pode ser
@@ -20353,6 +20359,9 @@ async function enviarLote(places, opts = {}) {
     // Waze e voltou pra fila — nem rejeitado, nem falha.
     const conta = { ok: 0, fila: 0, ja: 0, erro: 0, aprovada: 0, naoVale: 0 };
     const epoca = epocaDaSessao;
+    // A geração do "Sair" em que o lote começou: o `finally` e o laço só soltam o que ainda é
+    // DELE (R19-1-01, ver `marcarEmAndamento`).
+    const geracao = AppState.geracaoDoSair;
     // E QUEM decide — a sessão e a conta desta mesma hora —, pro pouso que chegar
     // depois de uma queda no meio do laço (R13-2-01, ver o ramo da época abaixo).
     // Aqui e não no gesto, como a época: a janela do Desfazer do "Rejeitar os N"
@@ -20470,13 +20479,13 @@ async function enviarLote(places, opts = {}) {
     try {
         for (const p of places) {
             if (repetidos.has(p)) continue;
-            if (!aoLandar) marcarLoteSemEnviar(p, false);   // entra no ar: já não é o que o "Sair" descarta
+            if (!aoLandar) marcarLoteSemEnviar(p, false, geracao);   // entra no ar: já não é o que o "Sair" descarta
             // O lote da PESSOA esperando a retentativa também conta no "Sair" (R16-2-03);
             // a recusa automática é o app agindo, e fica de fora.
             const r = await callWithRetry(() => (desistir(p)
                 ? naoVale
                 : API.rejectPlace(p.venueID, p.updateRequestID, null, opts.regiao)), undefined,
-                aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim));
+                aoLandar ? null : (sim) => marcarLoteSemEnviar(p, sim, geracao));
             // Saiu no meio (ver `epocaDaSessao`): nada grava — e, no placar
             // OTIMISTA do lote manual, o que não pousou (este, se não pousou, e
             // os que nem saíram) volta (K7). Contando ao pousar não há o que
@@ -20581,7 +20590,7 @@ async function enviarLote(places, opts = {}) {
                 soltarMarcaDosItens('reject', [...anotados]);
                 for (const q of places.slice(places.indexOf(p))) {
                     if (repetidos.has(q)) continue;
-                    marcarEmAndamento(q, false);
+                    marcarEmAndamento(q, false, geracao);
                     if (!aoLandar && (anotados.has(q) || enfileirarSaida('reject', q, opts.regiao, opts.gesto))) continue;
                     if (!aoLandar) AppState.stats.rejected = Math.max(0, AppState.stats.rejected - 1);
                     voltarPraFila(q);
@@ -20622,15 +20631,17 @@ async function enviarLote(places, opts = {}) {
                 voltarPraFila(p);
             }
             // Resolvido: pousou, está na fila de saída, ou voltou pra fila.
-            marcarEmAndamento(p, false);
+            marcarEmAndamento(p, false, geracao);
             progresso();
         }
     } finally {
         // Todos, inclusive os que não chegaram a sair (sessão morta no meio).
-        marcarEmAndamento(places, false);
+        marcarEmAndamento(places, false, geracao);
         rejeicoesDeLoteNoAr.delete(noAr);
-        if (!aoLandar) marcarLoteSemEnviar(places, false);
-        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        if (!aoLandar) marcarLoteSemEnviar(places, false, geracao);
+        // Só a ação DESTA geração do "Sair": ele zerou o contador, e o que está no ar agora é da
+        // sessão nova (R19-1-01).
+        if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         updateStats();
         saveStats();
@@ -22737,7 +22748,12 @@ const POUSO_NA_MEMORIA_MS = 10 * 60 * 1000;
 // card legítimo.
 const pedidosQuePousaram = new WeakSet();
 
-function marcarEmAndamento(places, sim) {
+function marcarEmAndamento(places, sim, geracao) {
+    // `geracao`: a do "Sair" em que quem chama começou (`AppState.geracaoDoSair`). O "Sair" esvazia o
+    // conjunto e uma resposta em voo da sessão que saiu ainda chega: sem isto o `finally` dela tirava a
+    // marca do MESMO pedido da sessão nova, e o ↻ o devolvia como card com a decisão ainda no ar
+    // (R19-1-01). Sem o argumento (todo chamador síncrono do gesto), vale como sempre.
+    if (geracao !== undefined && geracao !== AppState.geracaoDoSair) return;
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
         if (!k) continue;
@@ -22760,7 +22776,9 @@ function marcarEmAndamento(places, sim) {
 // pelo `aoEsperar` do `callWithRetry` e sai quando a ida seguinte vai ao ar — a
 // decisão com a requisição NO AR segue de fora da conta (o Waze a recebe).
 const pedidosDoLoteSemEnviar = new Set();
-function marcarLoteSemEnviar(places, sim) {
+function marcarLoteSemEnviar(places, sim, geracao) {
+    // Mesma regra do `marcarEmAndamento`: a resposta da sessão que saiu não mexe no que é da nova (R19-1-01).
+    if (geracao !== undefined && geracao !== AppState.geracaoDoSair) return;
     for (const p of (Array.isArray(places) ? places : [places])) {
         const k = chaveDoPedido(p);
         if (!k) continue;
@@ -26730,6 +26748,8 @@ function handleMarkAsRead() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
@@ -26752,7 +26772,7 @@ function handleMarkAsRead() {
         const presenca = presencaWmeDaAcao(place, pais);
         // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
         const result = await callWithRetry(() => API.markAsRead(place.venueID, place.updateRequestID, presenca, regiao), epoca,
-            (sim) => marcarLoteSemEnviar(place, sim));
+            (sim) => marcarLoteSemEnviar(place, sim, geracao));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26781,6 +26801,8 @@ function handleReject() {
     saveStats();
     advanceQueue();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const placar = AppState.stats;    // o do GESTO: ver `descontarGestoSemSessao`
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     const pais = paisDaFila();        // o do GESTO: a carona leva o país em que o card estava (R7-6-05)
@@ -26803,7 +26825,7 @@ function handleReject() {
         const presenca = presencaWmeDaAcao(place, pais);
         // Esperando a retentativa, a decisão conta no diálogo do "Sair" (R16-2-03).
         const result = await callWithRetry(() => API.rejectPlace(place.venueID, place.updateRequestID, presenca, regiao), epoca,
-            (sim) => marcarLoteSemEnviar(place, sim));
+            (sim) => marcarLoteSemEnviar(place, sim, geracao));
         // Saiu no meio (ver `epocaDaSessao`): nada grava; o placar do gesto
         // volta se a decisão não pousou (K7), e o pedido volta pra fila que
         // atravessou a queda (V1).
@@ -26898,6 +26920,8 @@ function handleSkip() {
     // passa a guardar o pedido na estrela do editor, e o Desfazer segue valendo
     // de graça: desfazer é não rodar o executor.
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do gesto: a espera da retentativa só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver a queda, abaixo
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     scheduleAction('skip', place, async () => {
@@ -26913,7 +26937,7 @@ function handleSkip() {
         // A estrela esperando a retentativa (ou a conferência de um 401) conta no diálogo do
         // "Sair" como o ✕/✓ (R17-3-01): a escrita fica fora da fila de saída, e o "Sair" a descartava
         // sem aviso. É decisão da pessoa sobre o pedido (guardá-lo), e a frase serve.
-        const espera = (sim) => marcarLoteSemEnviar(place, sim);
+        const espera = (sim) => marcarLoteSemEnviar(place, sim, geracao);
         let r = await callWithRetry(enviar, epoca, espera);
         // Um 401 NÃO é prova de sessão morta (gotcha #42), e aqui ele virava
         // "Sessão expirada" sem conferir nada — o ✕ com o mesmo 401 confere a
@@ -27091,6 +27115,8 @@ async function handleBatchMarkRead() {
     if (renomeacaoPendente) renomeacaoPendente.enviar();
     removeUndoBanner();
     const epoca = epocaDaSessao;
+    // A geração do "Sair" do lote: o `finally` só solta o que ainda é dele (R19-1-01).
+    const geracao = AppState.geracaoDoSair;
     const epocaFila = AppState.fetchEpoch;   // a FILA do gesto: ver o fim (V9)
     const regiao = API.getRegion();   // a do GESTO: ver `API.markAsRead`
     // O dia e o lugar do GESTO (`carimboDoGesto`): o lote anda em pedaços, e os
@@ -27115,7 +27141,7 @@ async function handleBatchMarkRead() {
     marcarEmAndamento(alvos, true);
     // E o diálogo do "Sair" conta os que ainda não saíram (R15-2-F4): o laço para
     // depois do pedaço que está no ar, e os seguintes não vão ao Waze.
-    marcarLoteSemEnviar(alvos, true);
+    marcarLoteSemEnviar(alvos, true, geracao);
     aplicarTravaDeAcao();
     AppState.inFlightActions++;
     updateInFlightIndicator();
@@ -27165,7 +27191,7 @@ async function handleBatchMarkRead() {
     // `quais`: os pedidos desta ida, pro "Sair" contar o que espera a retentativa
     // (R16-2-03). Uma função: o pedaço é remontado a cada ida.
     const mandar = async (enviar, quais) => {
-        const espera = (sim) => marcarLoteSemEnviar(quais(), sim);
+        const espera = (sim) => marcarLoteSemEnviar(quais(), sim, geracao);
         const r = await callWithRetry(enviar, undefined, espera);
         if (refez || epoca !== epocaDaSessao || !(r && r.errorCategory === 'unauthorized')) return r;
         refez = true;
@@ -27234,7 +27260,7 @@ async function handleBatchMarkRead() {
         for (let i = 0; i < alvos.length && !falhou && !sessaoTrocou; i += LOTE_LIDOS_PEDACO) {
             const doPedaco = alvos.slice(i, i + LOTE_LIDOS_PEDACO);
             noAr(i);
-            marcarLoteSemEnviar(doPedaco, false);   // o pedaço entra no ar
+            marcarLoteSemEnviar(doPedaco, false, geracao);   // o pedaço entra no ar
             let pedaco = doPedaco.filter((p) => !decididoNaOutraAba(p));
             if (!pedaco.length) continue;
             const r = await mandar(() => {
@@ -27265,13 +27291,13 @@ async function handleBatchMarkRead() {
             // verdade quando ENTRA no ar, sozinho. Sem isto, o "Sair" no meio do um a um
             // não contava os que faltavam e os descartava sem aviso. Cada um deixa a
             // conta ao entrar no ar (logo abaixo), e o `finally` tira o que sobrar.
-            marcarLoteSemEnviar(pedaco, true);
+            marcarLoteSemEnviar(pedaco, true, geracao);
             for (const p of pedaco) {
                 // A outra aba pode ter decidido enquanto o pedaço ia (R11-2-02): essa
                 // decisão não é do "Sair" descartar.
-                if (decididoNaOutraAba(p)) { marcarLoteSemEnviar(p, false); continue; }
+                if (decididoNaOutraAba(p)) { marcarLoteSemEnviar(p, false, geracao); continue; }
                 // Entra no ar: já não é o que o "Sair" descarta.
-                marcarLoteSemEnviar(p, false);
+                marcarLoteSemEnviar(p, false, geracao);
                 noAr(alvos.indexOf(p));
                 // E a cada ida deste pedido, como a do pedaço (R12-2-03): `saiu`
                 // diz se a que valeu foi mesmo ao Waze.
@@ -27323,8 +27349,8 @@ async function handleBatchMarkRead() {
             if (alvosDoLoteDeLidosNoAr.get(k) === epoca) { alvosDoLoteDeLidosNoAr.delete(k); sobraramDoLote.push(p); }
         }
         marcarEmAndamento(sobraramDoLote, false);
-        marcarLoteSemEnviar(alvos, false);
-        AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+        marcarLoteSemEnviar(alvos, false, geracao);
+        if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
         aplicarTravaDeAcao();
         // O lote acabou: o "Marcando N…" sai ANTES do desfecho ("N marcados", o
@@ -27595,6 +27621,10 @@ function scheduleAction(type, place, executor, opts = {}) {
         // A ação saiu: a janela do Desfazer acabou e os botões voltam.
         AppState.pendingAction = null;
         aplicarTravaDeAcao();
+        // A geração do "Sair" em que esta ação entrou no ar: o `finally` só solta o que ainda é
+        // DELA — o "Sair" zerou o contador e o conjunto, e o que está no ar agora é da sessão
+        // nova (R19-1-01).
+        const geracao = AppState.geracaoDoSair;
         AppState.inFlightActions++;
         updateInFlightIndicator();
         atenderOFimDaJanela(janela);
@@ -27608,8 +27638,8 @@ function scheduleAction(type, place, executor, opts = {}) {
             // saída (rede, sessão) só conta como ESPERANDO envio depois de sair
             // daqui — redesenhado antes, o "1 esperando" nascia sem o
             // `nao-cobrir` (ver `updateInFlightIndicator`, R10-4-05).
-            marcarEmAndamento(places, false);
-            AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
+            marcarEmAndamento(places, false, geracao);
+            if (geracao === AppState.geracaoDoSair) AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
             updateInFlightIndicator();
         }
     };
