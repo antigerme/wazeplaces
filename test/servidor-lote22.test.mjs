@@ -94,7 +94,7 @@ const recusada = (x, quem) => {
   assert.equal(x.chamadas.length, 0, `${quem}: foi ao Waze`);
 };
 
-test('R18-6-03: CONTROLE — o que o app manda em `types` segue valendo (ausente, null, [], um tipo, os 7) e filtra', async () => {
+test('R18-6-03: CONTROLE — o que o app manda em `types` segue valendo (ausente, null, [], um tipo, os 7, e o que não é lista) e filtra', async () => {
   const cards = async (extra) => {
     const x = await buscar(extra);
     assert.equal(x.r.status, 200, JSON.stringify(extra) + ' ' + JSON.stringify(x.r.body).slice(0, 100));
@@ -104,14 +104,16 @@ test('R18-6-03: CONTROLE — o que o app manda em `types` segue valendo (ausente
   assert.equal(await cards({ types: undefined }), 2);
   assert.equal(await cards({ types: null }), 2);
   assert.equal(await cards({ types: [] }), 2, 'lista vazia segue valendo "todos"');
+  // O que não é lista segue sem filtro de tipo, como sempre foi (o app só manda lista).
+  for (const naoLista of ['NEW_PLACE', 5, true, {}]) assert.equal(await cards({ types: naoLista }), 2, `types ${JSON.stringify(naoLista)}`);
   assert.equal(await cards({ types: ['NEW_PLACE'] }), 1);
   assert.equal(await cards({ types: ['NEW_PLACE', 'NEW_PHOTO'] }), 2);
   assert.equal(await cards({ types: Object.keys(PUR_TIPOS) }), 2, 'os 7 tipos do WME');
 });
 
-test('R18-6-03: `types` com tipo desconhecido, número, caixa baixa, texto solto ou objeto é 400 — não "zero cards" com 200', async () => {
+test('R18-6-03: `types` (lista) com tipo desconhecido, número, caixa baixa ou objeto dentro é 400 — não "zero cards" com 200', async () => {
   const ruins = [[1, 5], ['new_place'], ['FOO'], ['NEW_PLACE', 'FOO'], [''], [null], [['NEW_PLACE']], [{ a: 1 }],
-    ['constructor'], ['__proto__'], ['toString'], 'NEW_PLACE', 5, true, {}];
+    ['constructor'], ['__proto__'], ['toString']];
   for (const v of ruins) recusada(await buscar({ types: v }), `types ${JSON.stringify(v)}`);
 });
 

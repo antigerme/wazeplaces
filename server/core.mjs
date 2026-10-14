@@ -1960,14 +1960,14 @@ function categoriasDaBusca(bruto) {
 }
 
 // `types`: lista de NOMES dos 7 tipos do WME (as chaves do `PUR_TIPOS`; é o que o
-// app manda, `TYPES_ALL`). Lista vazia e ausente valem "todos", como sempre. O que
-// VEIO e não presta é 400 — antes o filtro lia `[1, 5]` (os números do fio do
-// Waze), `['new_place']` e `['FOO']` como "nenhum tipo serve": 200 com zero cards,
-// que a tela lê como "Tudo limpo!" (R18-6-03). Texto solto também é 400: não é lista.
+// app manda, `TYPES_ALL`). Lista vazia e ausente valem "todos", como sempre. Numa
+// LISTA, o que não é um desses nomes é 400 — antes o filtro lia `[1, 5]` (os números
+// do fio do Waze), `['new_place']` e `['FOO']` como "nenhum tipo serve": 200 com zero
+// cards, que a tela lê como "Tudo limpo!" (R18-6-03). O que NÃO é lista (texto solto,
+// número) segue como sempre foi: sem filtro de tipo — o app só manda lista.
 function tiposDaBusca(bruto) {
-  if (bruto === undefined || bruto === null) return null;
-  const ok = Array.isArray(bruto)
-    && bruto.every((t) => typeof t === 'string' && Object.hasOwn(PUR_TIPOS, t));
+  if (!Array.isArray(bruto)) return null;
+  const ok = bruto.every((t) => typeof t === 'string' && Object.hasOwn(PUR_TIPOS, t));
   if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
   return bruto.length > 0 ? bruto : null;
 }
