@@ -1717,7 +1717,10 @@ const gerar8d = async (nome, penduradas) => {
     const { dados } = lerDiagnostico(arq);
     return { s: Math.round((Date.now() - t0) / 100) / 10, semResposta: dados.coleta?.semResposta || [],
              caches: dados.caches, armazenamento: dados.armazenamento, indexedDB: dados.indexedDB, offline: dados.offline?.ligado,
-             temResumo: !!dados.resumo };
+             temResumo: !!dados.resumo,
+             // A comparação "o aparelho roda o código do servidor?" (R18-4-01): quantos arquivos saíram iguais ao servidor.
+             cvr: Object.values(dados.cacheVsRede || {}).map((v) => (v && v.igual === true ? 'igual' : v && v.semResposta ? 'semResposta' : (v && v.erro) || 'outro')),
+             relogioOk: !!dados.relogio?.servidor };
   } catch (e) {
     return { erro: String((e && e.message) || e).slice(0, 200) };
   } finally {
@@ -1731,6 +1734,18 @@ diz('CONTROLE: com as leituras locais respondendo, o arquivo sai em poucos segun
 const rel8dPendurada = await gerar8d('pendurada', true);
 diz('com as quatro leituras locais PENDURADAS o arquivo sai mesmo assim, dentro do orçamento (antes: nunca saía)',
   rel8dPendurada.temResumo === true && rel8dPendurada.s <= 20, JSON.stringify(rel8dPendurada).slice(0, 300));
+// R18-4-01: a leitura local pendurada comia o orçamento ANTES de o código ser lido, e a rede SAUDÁVEL saía
+// "sem resposta" em tudo. Aqui a comparação com o servidor tem que sair inteira (e igual), como no controle.
+diz('CONTROLE: sem nada pendurado, todo arquivo do código sai IGUAL ao servidor e o relógio do servidor chega',
+  rel8dBom.cvr?.length >= 5 && rel8dBom.cvr.every((x) => x === 'igual') && rel8dBom.relogioOk, JSON.stringify(rel8dBom.cvr));
+diz('com as leituras locais penduradas a REDE saudável sai inteira: todo arquivo IGUAL ao servidor, nenhum "sem resposta", o relógio chega (R18-4-01)',
+  rel8dPendurada.cvr?.length === rel8dBom.cvr?.length && rel8dPendurada.cvr.every((x) => x === 'igual') && rel8dPendurada.relogioOk,
+  JSON.stringify(rel8dPendurada.cvr));
+diz('e a coleta só acusa as leituras LOCAIS (nenhuma de rede)',
+  (rel8dPendurada.semResposta || []).every((r) => ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases'].includes(r)),
+  JSON.stringify(rel8dPendurada.semResposta));
+diz('com as leituras locais penduradas o arquivo sai dentro do orçamento (10 s + folga), não 18 s (R18-4-03)',
+  rel8dPendurada.s <= 13, `${rel8dPendurada.s} s`);
 diz('e diz, no arquivo, quais leituras não chegaram',
   ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases']
     .every((r) => rel8dPendurada.semResposta?.includes(r)), JSON.stringify(rel8dPendurada.semResposta));
