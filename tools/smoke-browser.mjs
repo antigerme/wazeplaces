@@ -3010,6 +3010,68 @@ for (const status of [404, 403]) {
   }
 }
 
+// ── O aviso dourado "Toque pra assumir o volante" LEVA ATÉ a chave do Desfazer ──
+// (R17-7-03). `abrirPreferenciaDoUndo` trocava de aba e pulsava a `#prefUndoRow`, mas não rolava
+// até ela: fora da vista no celular deitado (667×375: linha em 277–410, área visível 161–266), no
+// SE em pé com o modo dev desbloqueado (a seção Avançado empurra a linha) e cortada em 8 px no
+// Fold em francês. O CONTROLE refaz a abertura sem a rolagem (zera o scroll depois e mede de
+// novo) e exige a linha FORA da vista nos casos que o auditor mediu — a medição enxerga o defeito.
+{
+  const casos = [
+    ['SE deitado', { width: 667, height: 375 }, 'pt', false, true],
+    ['Pixel 7 deitado', { width: 851, height: 393 }, 'pt', false, true],
+    ['SE em pé com o modo dev', { width: 375, height: 667 }, 'pt', true, true],
+    ['Fold em francês', { width: 280, height: 653 }, 'fr', false, false],
+    ['iPhone 14 em pé (CONTROLE: já cabia)', { width: 393, height: 851 }, 'pt', false, false],
+  ];
+  for (const [nome, viewport, lang, dev, controleForaDaVista] of casos) {
+    const ctx = await browser.newContext({ viewport, locale: lang === 'fr' ? 'fr-FR' : 'pt-BR', serviceWorkers: 'block', isMobile: true, hasTouch: true });
+    await ctx.addInitScript((l) => { try { localStorage.setItem('waze_places_lang', l); } catch (e) { /* segue */ } }, lang);
+    const page = await ctx.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    await page.evaluate(async (d) => {
+      API.setSession('tok'); AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 1, isAreaManager: true, isStaff: false };
+      AppState.preferences.comoFuncionaVisto = true;
+      AppState.devMode = { unlocked: d, active: d };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      abrirPreferenciaDoUndo().catch(() => {});
+    }, dev);
+    await esperarNaPagina(page, () => !document.getElementById('filtersModal').classList.contains('hidden'), 4000, 50);
+    await page.waitForTimeout(250);
+    const medir = () => page.evaluate(() => {
+      const l = document.getElementById('prefUndoRow').getBoundingClientRect();
+      const painel = document.getElementById('filtersPanelPrefs');
+      // A área que rola é a ancestral com overflow; a visível é a interseção dela com a janela.
+      let rolavel = painel;
+      while (rolavel && rolavel !== document.body && !/(auto|scroll)/.test(getComputedStyle(rolavel).overflowY)) rolavel = rolavel.parentElement;
+      const a = (rolavel || painel).getBoundingClientRect();
+      const topo = Math.max(a.top, 0), base = Math.min(a.bottom, innerHeight);
+      // O que a pessoa precisa VER é a chave (e o rótulo, que está na mesma linha): a linha inteira
+      // pode ser mais alta que a área visível deitado (133 px contra 105), e aí o certo é o TOPO dela
+      // colado no topo da vista, com a chave dentro.
+      const sw = document.getElementById('prefUndoEnabled').getBoundingClientRect();
+      return { linha: [Math.round(l.top), Math.round(l.bottom)], chave: [Math.round(sw.top), Math.round(sw.bottom)], visivel: [Math.round(topo), Math.round(base)],
+        inteira: l.top >= topo - 1 && sw.top >= topo - 1 && sw.bottom <= base + 1 };
+    });
+    const real = await medir();
+    checa(real.inteira, `chave do Desfazer (${nome}, ${lang}): o aviso dourado não rolou até a linha`, JSON.stringify(real));
+    // CONTROLE: sem a rolagem a linha fica FORA da vista onde o auditor a mediu (a medição não é cega).
+    if (controleForaDaVista) {
+      await page.evaluate(() => {
+        const painel = document.getElementById('filtersPanelPrefs');
+        let e = painel; while (e && e !== document.body) { e.scrollTop = 0; e = e.parentElement; }
+      });
+      const sem = await medir();
+      checa(!sem.inteira, `chave do Desfazer (${nome}): CONTROLE cego — sem a rolagem a linha já cabia na vista`, JSON.stringify(sem));
+    }
+    await ctx.close();
+  }
+}
+
 // ── O "Como funciona" ADIADO: nunca debaixo do banner do Desfazer, nunca no
 // tique do voltar (auditoria de 2026-10-02: R7-7-01, R7-7-02 e R7-3-01) ──────
 // O adiado (a Ajuda aberta quando o 1º card montou) abria no 1º GESTO: o card
@@ -13492,5 +13554,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + o "Treino concluído" cabendo na tela em 2 aparelhos com isMobile quando o ÚLTIMO exemplo é o ✓ (botão e seta) — a página não alarga e o "Ir para a fila" fica dentro da vista —, com ✕ e ↑ de CONTROLE e o card de volta à conta de layout alargando a página`
   + `, + o "Como funciona" aberto SOZINHO no TOPO no celular deitado (scrollTop 0 e título na tela em 667×375 e 851×393, com o CONTROLE da caixa rolada à força e, no Chromium, o do foco antigo rolando)`
+  + `, + o aviso dourado do Desfazer LEVANDO até a chave (rolada para a vista em 5 aparelhos — deitados, o SE com o modo dev e o Fold em francês —, com o CONTROLE da rolagem zerada deixando a linha fora da vista)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

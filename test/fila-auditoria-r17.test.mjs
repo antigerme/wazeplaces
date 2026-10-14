@@ -527,3 +527,44 @@ test('R17-1-01 (estrutura): nenhum `.focus()` logo depois de um `openModal(` em 
   assert.deepEqual(vistos, [], '`.focus()` solto logo depois de `openModal(` — rola o diálogo até o controle (use `{ preventScroll: true }`): ' + vistos.join(', '));
   assert.ok(achados >= 1, 'CONTROLE: o varredor não enxergou o `.focus({ preventScroll: true })` do "Entendi" — o instrumento está cego');
 });
+
+// ═══ R17-7-03 · o aviso dourado do Desfazer LEVA ATÉ a chave ═════════════════
+// `abrirPreferenciaDoUndo` trocava de aba e pulsava a linha, mas não rolava até ela: fora da
+// vista no celular deitado e no SE com o modo dev (MEDIDO no smoke de layout, que fica com a
+// medida em pixels). Aqui, a ORDEM e o portão: rola DEPOIS de a aba trocar, sem `await` novo
+// antes, e a rolagem não entra no `reduced-motion` (o pulso, sim).
+function abrirDoUndo({ semMovimento = false } = {}) {
+  const log = [];
+  const linha = { classList: { remove: () => log.push('limpa-pulso'), add: () => log.push('pulso') }, offsetWidth: 0,
+    scrollIntoView: (op) => log.push('rola:' + JSON.stringify(op)), addEventListener() {} };
+  const deps = { AppState: { authenticated: true }, abrirModalNaAba: (aba) => { log.push('aba:' + aba); return Promise.resolve(); },
+    document: { getElementById: (id) => (id === 'prefUndoRow' ? linha : null) }, prefersReducedMotion: () => semMovimento };
+  const h = montar(['abrirPreferenciaDoUndo'], deps);
+  return { h, log };
+}
+
+test('R17-7-03: o aviso dourado rola até a linha DEPOIS de trocar a aba — `nearest`, e o pulso vem depois da rolagem', async () => {
+  const m = abrirDoUndo();
+  await m.h.abrirPreferenciaDoUndo();
+  assert.deepEqual(m.log.slice(0, 2), ['aba:filtersTabPrefs', 'rola:{"block":"nearest"}'],
+    'DEFEITO: a linha não é rolada para a vista depois da troca de aba (R17-7-03): ' + m.log.join(' > '));
+  assert.ok(m.log.indexOf('pulso') > m.log.indexOf('rola:{"block":"nearest"}'), 'o pulso saiu antes da rolagem (piscava fora da tela)');
+});
+
+test('R17-7-03: com movimento reduzido a rolagem fica (é o que aponta) e o pulso sai — e sem sessão nada abre nem rola', async () => {
+  const m = abrirDoUndo({ semMovimento: true });
+  await m.h.abrirPreferenciaDoUndo();
+  assert.deepEqual(m.log, ['aba:filtersTabPrefs', 'rola:{"block":"nearest"}'], 'a rolagem entrou no portão do reduced-motion, ou o pulso saiu: ' + m.log.join(' > '));
+  const sem = abrirDoUndo();
+  sem.h.deps.AppState.authenticated = false;
+  await sem.h.abrirPreferenciaDoUndo();
+  assert.deepEqual(sem.log, [], 'CONTROLE: sem sessão o aviso que sobrou abriu os Filtros (R15-7-F1)');
+});
+
+test('R17-7-03 (estrutura): a rolagem vem depois do `abrirModalNaAba` e antes de qualquer `await` (a ordem do renderHistory)', () => {
+  const corpo = fatiar('abrirPreferenciaDoUndo');
+  const iAba = corpo.indexOf("abrirModalNaAba('filtersTabPrefs')");
+  const iRola = corpo.indexOf("linha.scrollIntoView({ block: 'nearest' })");
+  assert.ok(iAba > 0 && iRola > iAba, 'a rolagem não vem depois da troca de aba');
+  assert.ok(!/\bawait\b/.test(corpo.slice(iAba, iRola)), 'um `await` entre a troca de aba e a rolagem faz a pessoa ver a aba errada');
+});

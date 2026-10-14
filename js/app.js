@@ -29054,6 +29054,14 @@ async function abrirPreferenciaDoUndo() {
     if (AppState.authenticated !== true) return;
     const pendente = abrirModalNaAba('filtersTabPrefs');
     const linha = document.getElementById('prefUndoRow');
+    // "Leva direto": a aba trocou (síncrono, acima) e a linha tem que estar NA TELA. Fora da vista
+    // no celular deitado (SE 667×375: a linha em 277–410 para uma área visível de 161–266), no SE
+    // em pé com o modo dev desbloqueado e cortada em 8 px no Fold em francês — o pulso piscava
+    // fora da tela (R17-7-03, MEDIDO). `nearest`, como a dica da conquista: o gesto é da pessoa e
+    // rolar o mínimo não mexe a tela sob o dedo (o `center` é do ponto de conquista, onde o app é
+    // quem aponta). A ROLAGEM não entra no portão do `reduced-motion` (é o que aponta, e a rolagem
+    // é instantânea); o pulso, sim. Depois do `abrirModalNaAba` e sem `await` novo antes dele.
+    if (linha) linha.scrollIntoView({ block: 'nearest' });
     if (linha && !prefersReducedMotion()) {
         linha.classList.remove('pref-highlight');
         void linha.offsetWidth;   // reflow: sem isso a animação não reinicia
