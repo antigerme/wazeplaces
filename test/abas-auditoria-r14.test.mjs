@@ -407,7 +407,7 @@ async function marcarTodosComQueda(entre) {
     startFetching: () => buscas.push(AppState.fetchEpoch), showNoPlaces() {},
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'devolverPedidoRecusado', ...NOMES_POUSO], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'devolverPedidoRecusado', ...NOMES_POUSO], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
@@ -756,7 +756,7 @@ function marcarTodosComAvisos({ fila = [1, 2, 3].map((i) => P(i)) } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'chaveDoPedido', 'pousouNoWaze'], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'chaveDoPedido', 'pousouNoWaze'], deps);
   const marcar = () => { h.openBatchReadConfirm(); return h.handleBatchMarkRead(); };
   const avisos = () => diario.filter((x) => x[0] !== 'indicador');
   return { h, deps, AppState, portoes, diario, avisos, marcar, duracoes };

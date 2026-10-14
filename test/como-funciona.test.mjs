@@ -98,7 +98,7 @@ function montar({ visto = false, consumindo = false, treino = false } = {}) {
     topOpenModal: () => camada.modal, Lightbox: { isOpen: () => camada.foto }, MapaLightbox: { isOpen: () => camada.mapa },
     // As outras travas do card: nenhuma aqui (a janela do Desfazer é o `pendingAction`).
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, loteDeLidosEmVoo: false,
-    escritasConferindo: 0, aprovacaoDaTelaNoAr: () => false, contaDestaAbaEmDuvida: () => false,
+    escritasConferindo: 0, aprovacaoDaTelaNoAr: () => false, loteDeLidosDaTelaNoAr: () => false, contaDestaAbaEmDuvida: () => false,
     savePreferences: () => salvas.push({ ...AppState.preferences }),
     history: { back: () => ops.push('back'), pushState: () => ops.push('push') },
     closeModal: () => {},

@@ -73,7 +73,7 @@ function buracoNegro(nome, chamou) {
 function montar(nomes, deps) {
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0, aprovandoAgora: false,
     excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map() })) if (!(k in deps)) deps[k] = v;
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map() })) if (!(k in deps)) deps[k] = v;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
@@ -280,7 +280,7 @@ function montarMarcarTodos({ fila, resolvidos = [], pedaco = constante('LOTE_LID
     document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
-  const h = montar([...MEMORIA, 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'avisoDaTrava',
+  const h = montar([...MEMORIA, 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava',
     'marcarEmAndamento', 'marcaDaSessao', 'marcaDestaAba', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'sessaoTrocou', 'callWithRetry',
     'handleUnauthorized', 'refazerDepoisDo401', 'openBatchReadConfirm', 'handleBatchMarkRead'], deps);
   // O lote, e a conferência que ele (ou o código de antes, sem esperá-la) abriu.
@@ -464,7 +464,7 @@ function montarPassada({ saida, fila = [] }) {
       getProfile: () => new Promise((ok) => { sonda = ok; }),
     },
   };
-  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
+  const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
     'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
     'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',

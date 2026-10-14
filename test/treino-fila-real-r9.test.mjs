@@ -462,7 +462,7 @@ function montarDevolvido() {
     sessaoVivaDepoisDe: () => false,
     showToast: (m, tipo) => toasts.push(tipo + ':' + m), msgDoServidor: () => '',
     montarCardDeFundo: () => {}, cardDaFrente: () => null, mantendoFocoNoCard: (f) => f(), contarConquista: () => {},
-    renomeacoesNoAr: new Set(), aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
+    renomeacoesNoAr: new Set(), escritasEsperandoAVez: new Set(), redesenharAvisoDoSairSeAberto: () => {}, aplicarTravaDeAcao: () => {}, idasSemRespostaGuardadas: new Map(), IDAS_SEM_RESPOSTA_TETO: 50,
     escritasDeFotoNoLocal: new Map(),   // a vez do local nas escritas da lista de fotos (R10-3-03, R11-3-01)
     fotosQueSairamDoMapa: new Map(), FOTOS_QUE_SAIRAM_TETO: 50,   // as fotos que saíram do mapa (R12-3-02)
     // O `devolverPedidoRecusado` de VERDADE: é ele que guarda o recusado no treino.
@@ -470,7 +470,7 @@ function montarDevolvido() {
   });
   delete deps.devolverPedidoRecusado;
   app = montar(deps, ['chaveDoPedido', 'devolverPedidoRecusado', 'filaReal', 'filaRealComDevolvidos', 'pedidoAindaNaTela',
-    'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'enviarRenomeacao', 'refazerDepoisDo401',
+    'escritaDoLightboxSemSessao', 'aplicarNosIrmaos', 'devolverFoto', 'enviarExclusao', 'esperaDaEscritaNoSair', 'enviarRenomeacao', 'esperaDaEscritaNoSair', 'refazerDepoisDo401',
     'contarIdasSemResposta', 'idasSemRespostaDeAntes', 'lembrarIdasSemResposta', 'nomeDestaEscrita', 'devolverNome',
     'aplicarNomeNaTela', 'vezDasFotosNoLocal', 'esperaAVezDoLocal', 'fotoSaiuDoMapa', 'anotarFotoQueSaiuDoMapa'],
   'let epocaDaSessao = 0, escritasConferindo = 0, verificandoSessao = false, conferenciaDaSessao = null;',
@@ -580,7 +580,7 @@ function montarVarredura() {
   });
   const app = montar(deps, ['filaReal', 'chaveDoPedido', 'pedidoForaDaFilaGuardada', 'offlineItensDaFila', 'offlineVarrer'],
   `let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,
-     offlineUltimoResultado = null, offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
+     offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
      offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaVarrida = null;
    async function offlineGravarFila() {
      __gravadas.push(filaReal().length);
@@ -654,7 +654,7 @@ function montarInterruptor() {
   const app = montar(deps, ['chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineMarcarGesto',
     'offlineVarrer', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline', 'offlineAoMudarInterruptor'],
   `let filaDeOnde = { regiao: 'row', pais: '30', busca: 'b' }, offlineVarrendo = false, offlinePedidaDeNovo = false,
-     offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0,
+     offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0,
      offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineFilaVarrida = null;`);
   return { app, AppState, base, linha: () => (els.prefOfflineDesc || {}).innerHTML || '' };
 }
@@ -720,7 +720,7 @@ function montarReabertura() {
   const app = montar(deps, ['mesmoLugar', 'chaveDoPedido', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineRecuperarJanela',
     'offlineTentarAbrirSemRede', 'abrirGuardadaDepoisDoTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline'],
   `let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, ultimaBuscaFalhouPorRede = false,
-     offlineJanelaServida = null, offlineFilaPreparada = null, offlineUltimoResultado = null, offlineVarrendo = false,
+     offlineJanelaServida = null, offlineFilaPreparada = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineVarrendo = false,
      offlineFilaVarrida = null;`);
   const linha = () => {
     app.atualizarLinhaDoOffline(0, 0);

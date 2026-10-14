@@ -549,7 +549,7 @@ test('R15-2-F2: o "Marcar todos" GUARDA o punho do "Marcando N…" enquanto o lo
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'dispensarAvisosDaSessao', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'chaveDoPedido', 'pousouNoWaze'], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'chaveDoPedido', 'pousouNoWaze'], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');

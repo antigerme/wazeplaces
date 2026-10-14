@@ -8,6 +8,50 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.14-01
+
+Vigésima rodada da auditoria. Depois da v2026.10.13-02, conferida em produção com duas contas (160 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. O que eles acharam foram, na maior parte, pontas soltas dos consertos da rodada anterior. Nenhum achado era grave.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila, o "Sair" e os avisos**
+- **Depois que seu acesso é renovado no meio de um "Marcar todos", o pedido que ainda está sendo marcado não aceita mais outra decisão.** Antes, enquanto o Waze ainda recebia o lote, o ✕ no card da frente (um dos pedidos do lote) mandava uma rejeição para um pedido que o lote estava marcando como lido, e o ✓ mandava um segundo "lido" seguido de "Já tratado por outro editor". Agora o card espera o fim do lote e diz isso ao toque.
+- **O canto da tela não diz mais "Enviando 1…" por um "Marcar todos" de antes de o acesso ser renovado.** E a decisão que já voltou da tentativa sem sinal e está esperando a rede continua aparecendo como "esperando envio", em vez de sumir do canto até o lote velho responder.
+- **O diálogo do "Sair" não diz mais "1 pedido esperando envio" quando nada espera.** Antes, se o seu acesso era renovado enquanto uma decisão ainda estava a caminho e a primeira tentativa falhava, o diálogo da sessão renovada contava um pedido que já tinha voltado para a fila.
+- **O diálogo do "Sair" também avisa do que ainda estava esperando:** o pedaço do "Marcar todos" que o Waze recusou por sessão e espera a confirmação do acesso; a exclusão, a aprovação e a correção de nome de foto que esperam uma nova tentativa depois de uma falha; e a estrela do "Pular e guardar". Antes, confirmar o "Sair" nessa hora descartava tudo isso sem aviso e nada chegava ao Waze.
+- **Os avisos de primeira vez que o acesso renovado devolve só voltam quando o app sabe de quem é o novo acesso.** Antes, se outra conta entrava e o perfil dela demorava mais de 4 segundos, a "Rejeição enviada ao Waze em seu nome…" da conta anterior aparecia por alguns segundos para a conta nova.
+- **O "Sair", a recusa do acesso e a troca de conta também limpam a lista de categorias do filtro.** Antes elas ficavam na tela, escondidas, até você abrir os Filtros de novo (e iam no relatório do modo dev).
+- **Se algum filtro salvo no aparelho foi alterado à mão (estado, área gerenciada ou categorias fora do formato), o app volta ao padrão** em vez de mostrar "Falha ao carregar" a cada abertura.
+
+**As telas e o teclado**
+- **O "Como funciona" que abre sozinho na primeira vez agora começa pelo título no celular deitado.** Antes ele abria rolado até o botão "Entendi", com o título e os primeiros passos fora da tela.
+- **O aviso dourado "Toque pra assumir o volante" agora leva até a chave do Desfazer.** Antes, no celular deitado e no SE com o modo dev ligado, ele abria a aba certa mas a chave ficava fora da tela, e o destaque piscava onde ninguém via.
+- **Quem digita com teclado de entrada em japonês, chinês ou coreano não salva mais o nome do local pela metade.** O Enter que confirma o que você está compondo (e o Esc que o cancela) agora é do teclado, não do app; antes o Enter salvava o nome incompleto e o Esc descartava o que você tinha digitado. Vale também para o código de pareamento e para fechar diálogos.
+
+**A conversa**
+- **Se a conversa demora a carregar e você fecha e abre de novo, o app não marca mais como lida uma mensagem que você ainda não viu.** Isso também vale quando o app estava renovando a sessão na hora de fechar a conversa.
+
+**Disponível offline**
+- **Se o servidor do mapa pede calma (erro 408, 425 ou 429), o app agora para e espera um pouco, em vez de dizer "Pronto" com o mapa vazio.** Antes, a preparação insistia três vezes em cada pedaço do mapa, dava tudo como "pronto" e, sem sinal, os mapas dos pedidos abriam vazios (e gastava o triplo de pedidos ao servidor). Agora a linha das Preferências diz "Faltou parte", o app espera cerca de um minuto (ou o que o servidor pedir) e continua sozinho no próximo uso.
+- **Se o celular está sem espaço para guardar o mapa, a linha das Preferências diz isso:** "Faltou espaço. Libere espaço no aparelho; o app tenta de novo mais tarde." Antes ela dizia "Pronto" mesmo sem nenhum mapa guardado. (Nos quatro idiomas.)
+- **O último pedaço da preparação que falhava junto com os outros não some mais.** Antes, em casos raros de muitas falhas seguidas, a preparação terminava "Pronto" sem esse pedaço.
+- **Dar "Sair" noutra aba enquanto uma preparação termina não deixa mais uma base vazia do "Disponível offline" para trás** (só o nome da base ficava no aparelho; não havia dado de ninguém).
+- **Em navegadores sem aviso entre abas (iPhone antigo, iOS anterior ao 15.4), a aba que termina de preparar depois de outra aba ter guardado uma fila diferente deixa de dizer "Pronto" por engano** e passa a dizer "Ainda não preparado", preparando a própria fila no próximo uso.
+
+**O relatório do modo dev**
+- **O relatório sai mesmo se o navegador não responde a uma leitura local** (serviços do app, armazenamento, bases ou caches). Antes, nesse caso o botão ficava em "Juntando tudo…" sem fim e sem aviso. Agora o arquivo sai em até uns 12 segundos e diz quais leituras não chegaram.
+- **A leitura do relatório sobre o "Disponível offline" aponta a causa certa** quando a preparação terminou sem cobrir a fila desta aba (a frase falava de "outra fila" mesmo quando era a fila desta aba).
+
+**Bastidores**
+- Uma resposta do Waze com a forma quebrada por dentro de um local (um pedido vazio no meio da lista, as fotos, as marcas da categoria ou os pontos de entrada em formato errado) agora aparece como "resposta inesperada do Waze", em vez do "Erro interno" genérico. Vale também para a lixeira de fotos.
+- A busca agora recusa, com "Pedido inválido", um estado, uma área gerenciada, uma página, uma caixa de mapa ou uma região que não façam sentido, em vez de buscar a fila do país inteiro (ou de mandar a decisão para o servidor errado do Waze) sem avisar.
+- Um local cujo campo de permissão vem vazio no Waze agora entra na fila, como quando o campo não vem.
+- O link "Dúvida sobre edição no Waze" do formulário de issues do GitHub abre o WME sem idioma, como o resto do app.
+
+---
+
 ## v2026.10.13-02
 
 Décima nona rodada da auditoria. Depois da v2026.10.13-01, conferida em produção com duas contas (155 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área; um deles usou o app de ponta a ponta, nos dois motores e em três tamanhos de tela. A maior parte dos achados foi de consertos da rodada anterior que ficaram incompletos. Nenhum era grave.

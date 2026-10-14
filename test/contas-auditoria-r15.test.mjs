@@ -397,7 +397,7 @@ function escritaDeFotoEsperandoOToque({ tipo = 'excluir', dialogoAberto = true }
     Lightbox: { marcarComoAprovada() {}, desmarcarAprovada() {}, removerFoto() {} },
   };
   const h = montar(['vezDasFotosNoLocal', 'esperaAVezDoLocal', 'vezLiberada', 'esperarAVezContandoNoSair', 'redesenharAvisoDoSairSeAberto',
-    'desenharAvisoDoSair', 'chaveDoPedido', 'enviarExclusao', 'enviarAprovacao'], deps);
+    'desenharAvisoDoSair', 'chaveDoPedido', 'enviarExclusao', 'esperaDaEscritaNoSair', 'enviarAprovacao'], deps);
   // O toque na lixeira: a leitura do local, presa no Waze lento.
   const toque = h.vezDasFotosNoLocal(alvo, 'aquecer');
   const envio = tipo === 'excluir' ? h.enviarExclusao(alvo) : h.enviarAprovacao(alvo);

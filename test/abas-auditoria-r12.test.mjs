@@ -603,7 +603,7 @@ test('R12-2-04: o "Marcar todos" cujo pedaço pousa no meio da renovação avisa
     document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats', ...NOMES_AVISO], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', 'saveStats', ...NOMES_AVISO], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
@@ -632,7 +632,7 @@ test('R12-2-04: a aprovação de foto que pousa no meio da renovação avisa a o
     Lightbox: { marcarComoAprovada() {}, esquecerProposta() {}, desmarcarAprovada() {}, isOpen: () => false, place: null },
     showToast: () => {}, t: (k) => k,
   };
-  const h = montar(['enviarAprovacao', 'aprovacaoPousouDepoisDaQueda', 'pousouNoWaze', 'contarIdasSemResposta', ...NOMES_AVISO], deps);
+  const h = montar(['enviarAprovacao', 'esperaDaEscritaNoSair', 'aprovacaoPousouDepoisDaQueda', 'pousouNoWaze', 'contarIdasSemResposta', ...NOMES_AVISO], deps);
   const envio = h.enviarAprovacao({ id: 'u9', place, idx: 0, regiao: 'row', epocaFila: 0 });
   await ateQue(() => typeof soltar === 'function', 'PRÉ-CONDIÇÃO: a aprovação saiu');
   cair(h);

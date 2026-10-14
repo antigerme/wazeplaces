@@ -302,7 +302,7 @@ async function pularCom401(respostas, { sonda = 'viva' } = {}) {
     contarConquista: (k) => conquistas.push(k),
     scheduleAction: (tipo, place, ex) => executores.push(ex),
     API: { getRegion: () => 'row', guardarPedido: async () => { chamadas++; return respostas.shift() || { success: true }; } },
-    callWithRetry: (fn) => fn(),
+    callWithRetry: (fn) => fn(), marcarLoteSemEnviar: () => {},
     // A sonda do `handleUnauthorized`: viva (confirma), morta (a sessão cai e
     // a época muda; a fila na tela fica — a renovação pela extensão), `sair` (a
     // época muda e a fila vai embora, como no "Sair") ou sem resposta (não

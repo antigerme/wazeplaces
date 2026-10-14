@@ -219,7 +219,7 @@ function aparelhoDeDuasAbas() {
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, [
       'let filaDeOnde = null, offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),',
-      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineEpoca = 0, offlineFilaGravadaEm = null,',
+      '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null,',
       '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
       'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet(), avisosDePousoSemConta = [];',
@@ -417,7 +417,7 @@ test('R16-4-01: a leitura da fila guardada vem ANTES da cobertura, a época é c
 });
 
 // ═══ R16-4-02 · 408, 425 e 429 não são "o tile não existe" ═══════════════════════
-test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (tenta de novo); os outros 4xx seguem definitivos', async () => {
+test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (volta na retomada); os outros 4xx seguem definitivos', async () => {
   const guardados = [];
   const deps = {
     offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
@@ -430,7 +430,9 @@ test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (tenta de
     ...chaves.map((k) => deps[k]), async () => ({ ok: status < 300, status }));
   const url = (i) => 'https://www.waze.com/row-tiles/live/base/' + i;
   for (const status of [408, 425, 429]) {
-    assert.equal(await baixarCom(status)(url(status), true), false,
+    // Desde o lote 21 (R17-4-01) a falha passageira tem nome próprio, 'limite': o que importa aqui
+    // segue sendo que NÃO é 'definitivo' (nem sucesso) — o tile volta na retomada.
+    assert.equal(await baixarCom(status)(url(status), true), 'limite',
       `DEFEITO: o ${status} é "definitivo" — o tile entra em \`feitos\` sem ir ao cache e não é tentado de novo na janela`);
   }
   // CONTROLE: o que é "não existe" segue definitivo; 5xx e 200 como sempre.
@@ -535,4 +537,43 @@ test('R16-8-05: CONTROLE — sem gravação nova para o endereço, o desfazer da
   x.soltar();
   assert.equal(await velha, false);
   assert.deepEqual([...x.guardado.keys()], ['https://tile/17/9/9.png'], 'CONTROLE: o tile da época velha ficou, ou o de outro endereço saiu');
+});
+
+// ═══ R17-4-06 (lote 21) · o carimbo NOVO sem o `BroadcastChannel` ════════════════════════════
+// O R16-4-01 fechou o caso de PARTE dos pedidos sem canal (a base diz que falta pedido). O de
+// carimbo NOVO — B grava OUTROS pedidos — seguia aberto no iOS < 15.4: o fim da varredura já
+// tem a base na mão (`naBase.t !== filaCoberta`) e não a usava, então A terminava "Pronto"
+// cobrindo uma fila que não era mais a guardada (MEDIDO no navegador, s5 do auditor: "Pronto"
+// com 3 mapas fora; com o canal, "Ainda não preparado").
+test('R17-4-06: B grava pedidos NOVOS (carimbo novo) e prepara, A SEM canal termina a varredura — A passa a saber que a fila guardada é outra, a linha não diz "Pronto" e o gatilho seguinte prepara', async () => {
+  const { ap, A, B } = await prontas({ semCanalA: true });
+  const { varreA } = await aVarreComAJanelaNova(ap, A, B);
+  const tAntes = ap.base.guardado.get('fila').t;
+  await B.buscar([P(7), P(8)]);
+  await entregue();
+  assert.notEqual(ap.base.guardado.get('fila').t, tAntes, 'PRÉ-CONDIÇÃO: a fila de B (com pedidos novos) não ganhou carimbo novo');
+  assert.ok(!A.diario.includes('offline.outraAba'), 'PRÉ-CONDIÇÃO: A recebeu o aviso, sem canal');
+  A.soltar();
+  await varreA;
+  await entregue();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de A não terminou');
+  assert.equal(A.estado().gravada, ap.base.guardado.get('fila').t, 'DEFEITO: A não ficou sabendo qual fila está guardada (a de B)');
+  assert.notEqual(A.estado().preparada, A.estado().gravada,
+    'DEFEITO: A terminou "cobrindo" a fila guardada de B — com os mapas dos pedidos de B fora do aparelho');
+  assert.doesNotMatch(A.naTela(), PRONTO, `DEFEITO: A termina dizendo "Pronto" sobre a fila de B: ${A.naTela()}`);
+  assert.equal(A.precisaVarrer(), true, 'DEFEITO: o gatilho seguinte de A não prepara');
+  assert.ok(A.diario.includes('offline.outraAba'), 'o diário de A não anotou que a fila guardada é de outra aba');
+});
+
+test('R17-4-06: CONTROLE — sem canal, a MESMA fila nas duas abas (B só prepara) e a busca da PRÓPRIA aba durante a varredura não tiram a cobertura de A', async () => {
+  const a = await prontas({ semCanalA: true });
+  const { varreA } = await aVarreComAJanelaNova(a.ap, a.A, a.B);
+  await a.B.varrer();
+  await entregue();
+  a.A.soltar();
+  await varreA;
+  await entregue();
+  assert.equal(a.A.estado().preparada, a.A.estado().gravada, 'CONTROLE: a MESMA fila tirou a cobertura de A');
+  assert.match(a.A.naTela(), PRONTO);
+  assert.ok(!a.A.diario.includes('offline.outraAba'), 'CONTROLE: A anotou "outra aba" sem outra aba ter gravado nada');
 });

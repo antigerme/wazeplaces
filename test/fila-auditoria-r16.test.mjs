@@ -324,7 +324,7 @@ test('R16-2-03 (estrutura): os quatro caminhos que esperam a retentativa avisam 
   assert.match(fatiar('handleMarkAsRead'), /callWithRetry\(\(\) => API\.markAsRead\([^)]*\), epoca,\s*\(sim\) => marcarLoteSemEnviar\(place, sim\)\)/);
   assert.match(fatiar('enviarLote'), /undefined,\s*aoLandar \? null : \(sim\) => marcarLoteSemEnviar\(p, sim\)\)/,
     'o "Rejeitar os N" da pessoa não avisa o recuo (e a recusa automática, que é o app agindo, não pode)');
-  assert.match(fatiar('handleBatchMarkRead'), /callWithRetry\(enviar, undefined, \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\)\)/);
+  assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\)/);
 });
 
 // ═══ R16-1-03 · o lote da sessão que ACABOU não conta mais ═══════════════════
@@ -369,7 +369,9 @@ test('R16-1-03: o lote de uma sessão que acabou não diz "Enviando N…" — ne
 
 test('R16-1-03: as anotações do lote velho na fila de saída (até a ida em voo responder) não viram "N esperando envio"', () => {
   const pedidos = [P(1), P(2), P(3)];
-  const fila = pedidos.map((p) => ({ tipo: 'reject', venueID: p.venueID, updateRequestID: p.updateRequestID }));
+  // As anotações do lote levam a marca de envio da aba (`rv`, `reivindicacaoDestaAba`) até a ida
+  // responder; a que já voltou da ida com a rede fora a perde e ESPERA de verdade (R17-2-04).
+  const fila = pedidos.map((p) => ({ tipo: 'reject', venueID: p.venueID, updateRequestID: p.updateRequestID, rv: 'aba-1', rvEm: 1 }));
   const velho = { epoca: 3, restam: 3, acoes: 2, pedidos };
   assert.equal(indicadorDeMentira({ noAr: 2, lotes: [velho], epoca: 4, fila }).texto(), null,
     'DEFEITO: o canto da sessão renovada diz "3 esperando envio" por anotações de um lote que voltou à fila (R16-1-03)');
@@ -635,7 +637,7 @@ test('R16-8-04: a pendência do treino (`avisosAdiados` da época que caiu) atra
   const q = fatiar('derrubarSessao');
   assert.match(q, /if \(typeof depois !== 'function'\) guardarAvisosDeUmaVezDaQueda\(epocaDaSessao - 1\);\s*else avisosDaQueda = null;\s*dispensarAvisosDaSessao\(\);/,
     'a queda não guarda os avisos antes de dispensá-los (ou guarda na recusa do portão, que é terminal)');
-  assert.match(q, /restaurarAvisosDeUmaVezDaQueda\(\);\s*if \(haviaFilaNaQueda/, 'a renovação com sucesso não restaura os avisos');
+  assert.match(q, /if \(contaDestaSessaoConhecida\(\)\) restaurarAvisosDeUmaVezDaQueda\(\);\s*else avisosDaQueda = null;\s*if \(haviaFilaNaQueda/, 'a renovação com sucesso não restaura os avisos (só com a conta de quem entrou conhecida, R17-1-03)');
   assert.match(fatiar('esquecerOutraConta'), /avisosDaQueda = null;/, 'a troca de conta não esvazia a guarda dos avisos da conta anterior');
 });
 

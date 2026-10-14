@@ -412,6 +412,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     showToast: nada, t: (k) => k, filaAtravessouSessao: false, presencaWmeZerar: nada,
     esquecerEscolhasDaContaAnterior: nada,   // (test/contas-abas, A3)
     esquecerRegistrosDaPagina: nada, esvaziarPainelDoHistorico: nada,   // (R8-1-05, R8-7-06)
+    esvaziarSeletorDeCategorias: nada,   // R17-1-04
     esvaziarSeletorDeAreas: nada,   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
@@ -1951,7 +1952,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   // O código: o Enter no campo e o "Entrar" passam o teclado adiante (a estrutura
   // do ouvinte, que mora no `setupModalListeners`).
   const ouvintes = fatiar('setupModalListeners');
-  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
+  assert.match(ouvintes, /\$\('pairCodeInput'\)\?\.addEventListener\('keydown', \(e\) => \{\s*if \(teclaDeComposicao\(e\)\) return;[^\n]*\n\s*if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); resgatarPareamento\(e\.target\.value, \{ peloTeclado: true \}\); \}/,
     'o Enter no campo do código não diz que veio do teclado');
   assert.match(ouvintes, /\$\('pairEnterConfirm'\)\?\.addEventListener\('click', \(ev\) => resgatarPareamento\(\$\('pairCodeInput'\)\.value,\s*\{ peloTeclado: veioDoTeclado\(ev\) \}\)\);/,
     'o "Entrar" do código não diz se veio do teclado');

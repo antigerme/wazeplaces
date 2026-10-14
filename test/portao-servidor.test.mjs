@@ -400,7 +400,7 @@ test('região NA: toda chamada vai pro servidor SEM prefixo (`/Descartes/`), e `
   }
   // CONTROLE: as outras regiões seguem com prefixo.
   const s = await sessaoDeTeste(COOKIES);
-  for (const [region, prefixo] of [['row', 'row-Descartes'], ['il', 'il-Descartes'], ['xx', 'row-Descartes']]) {
+  for (const [region, prefixo] of [['row', 'row-Descartes'], ['il', 'il-Descartes'], [undefined, 'row-Descartes']]) {
     const { chamadas } = await comWaze(() => json({}), () => dispatch('perfil', { ...s.dados, region }, s.ctx));
     assert.ok(chamadas[0].url.startsWith(`https://www.waze.com/${prefixo}/`), `${region}: ${chamadas[0].url}`);
   }

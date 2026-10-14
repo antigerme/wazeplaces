@@ -352,7 +352,7 @@ async function marcarTodosComQueda(entrouDeNovo) {
     document: { getElementById: () => ({ textContent: '' }) }, openModal: () => {}, closeModal: () => {},
   };
   const h = montar(['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela',
-    'aprovacaoDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', ...NOMES_POUSO], deps);
+    'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'avisoDaTrava', 'marcarEmAndamento', ...NOMES_POUSO], deps);
   h.openBatchReadConfirm();
   const lote = h.handleBatchMarkRead();
   await ateQue(() => portoes.length === 1, 'PRÉ-CONDIÇÃO: o 1º pedaço saiu');
@@ -391,7 +391,7 @@ async function aprovacaoComQueda(entrouDeNovo) {
     Lightbox: { marcarComoAprovada() {}, esquecerProposta() {}, desmarcarAprovada() {}, isOpen: () => false, place: null },
     pedidoAindaNaTela: () => false, showToast: () => {}, t: (k) => k,
   };
-  const h = montar(['enviarAprovacao', 'aprovacaoPousouDepoisDaQueda', 'contarIdasSemResposta', ...NOMES_POUSO], deps);
+  const h = montar(['enviarAprovacao', 'esperaDaEscritaNoSair', 'aprovacaoPousouDepoisDaQueda', 'contarIdasSemResposta', ...NOMES_POUSO], deps);
   const envio = h.enviarAprovacao({ id: 'u9', place, idx: 0, regiao: 'row', epocaFila: 0 });
   await ateQue(() => typeof soltar === 'function', 'PRÉ-CONDIÇÃO: a aprovação saiu');
   cair(h);

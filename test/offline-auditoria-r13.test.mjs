@@ -392,7 +392,7 @@ function aparelhoDeDuasAbas({ canal = true } = {}) {
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, [
       'let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineJanelaServida = null,',
-      '    offlineUltimoResultado = null, offlineEpoca = 0, offlineFilaGravadaEm = null, offlineFilaPreparada = null,',
+      '    offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null, offlineFilaPreparada = null,',
       '    offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() };',
       ...DECLARACOES.filter((d) => /CANAL_DO_OFFLINE|canalDoOffline/.test(d)),

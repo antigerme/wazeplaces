@@ -976,7 +976,8 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
 
 test('o relatório traz o offline, o service worker pela boca dele e o teto dos recursos', () => {
   const corpo = fatiarFn(semCom, 'diagCorpo');
-  assert.match(corpo, /offline: await diagOffline\(\),/, 'a seção `offline` saiu do relatório');
+  // (R17-4-03) a leitura da seção corre contra o prazo do relatório, mas a seção segue no arquivo.
+  assert.match(corpo, /offline: await comPrazo\(diagOffline\(\),/, 'a seção `offline` saiu do relatório');
   assert.match(corpo, /sw\.proprio = await diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado');
   assert.match(corpo, /recursosInfo: \{ n: recursos\.length, encheu: diagRecursosCheio,/,
     'o relatório deixou de dizer se a lista de recursos bateu no teto');

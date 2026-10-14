@@ -795,7 +795,7 @@ function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
     let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),
       offlineJanelaServida = Math.floor(Date.now() / OFFLINE_CICLO_MS) - 1, offlineUltimoResultado = 'pronto',
       offlineEpoca = 0, offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() },
-      offlineFilaPreparada = null, offlineFilaGravadaEm = null, offlineFilaVarrida = null;
+      offlineFilaPreparada = null, offlineFilaGravadaEm = null, offlineFilaVarrida = null, offlineSegurarAte = 0;
     const enviados = [];
     const responder = async (v) => {
       enviados.push(v);

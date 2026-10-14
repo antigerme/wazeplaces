@@ -2944,6 +2944,136 @@ for (const status of [404, 403]) {
   await ctx2.close();
 }
 
+// ── O "Como funciona" aberto SOZINHO abre no TOPO no celular deitado ───────────
+// (R17-1-01 = R17-2-03 = R17-7-01). O `openModal` abre no topo (zera a rolagem e foca o 1º
+// controle sem rolar), mas o `.focus()` do "Entendi" — o ÚLTIMO controle do diálogo, que o
+// R16-7-06 põe só no automático — rolava a caixa até ele: no celular deitado (667×375) o
+// `scrollTop` ia a ~100 e o título ficava a −53 px, fora da tela, na primeira coisa que a
+// pessoa nova vê. Mede o `scrollTop` de TUDO que rola dentro do diálogo e o topo do título.
+// O CONTROLE refaz o foco do "Entendi" SEM `preventScroll`, como era: o instrumento tem que
+// ver a caixa rolando (senão "scrollTop 0" passaria com a medição cega, gotcha #28).
+{
+  const cru = FIXTURES_PAISES.find((p) => (p.imageUrls || []).length && p.name) || FIXTURES_PAISES[0];
+  for (const [nome, viewport] of [['iPhone SE deitado', { width: 667, height: 375 }], ['Pixel 7 deitado', { width: 851, height: 393 }]]) {
+    const ctx = await browser.newContext({ viewport, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true, isMobile: true, hasTouch: true });
+    await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
+    const page = await ctx.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    // O primeiro card chega e o diálogo abre SOZINHO (o caminho do primeiro login).
+    await page.evaluate((p) => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 5; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      mostrarControlesDeSessao(true);
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
+      AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, cru);
+    const aberto = await esperarNaPagina(page, () => !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 4000, 50);
+    checa(aberto.ok, `como funciona automático (${nome}): o diálogo não abriu sozinho`);
+    await page.waitForTimeout(300);
+    const medir = () => page.evaluate(() => {
+      const modal = document.getElementById('comoFuncionaModal');
+      const rolagens = [modal, ...modal.querySelectorAll('*')].map((e) => e.scrollTop).filter((n) => n > 0);
+      const titulo = document.getElementById('comoFuncionaTitle').getBoundingClientRect();
+      return { rolagem: Math.max(0, ...rolagens), tituloTopo: Math.round(titulo.top), foco: document.activeElement && document.activeElement.id };
+    });
+    const real = await medir();
+    checa(real.foco === 'comoFuncionaOk', `como funciona automático (${nome}): o foco não terminou no "Entendi"`, JSON.stringify(real));
+    checa(real.rolagem === 0, `como funciona automático (${nome}): o diálogo abriu ROLADO (scrollTop ${real.rolagem}) — o foco do "Entendi" rolou a caixa`, JSON.stringify(real));
+    checa(real.tituloTopo >= 0, `como funciona automático (${nome}): o título ficou fora da tela (topo em ${real.tituloTopo} px)`, JSON.stringify(real));
+    // CONTROLE 1 (nos dois motores): a MEDIÇÃO enxerga a caixa rolada — rola de propósito e lê de novo.
+    // Sem ele, "scrollTop 0" passaria com a medição olhando o elemento errado.
+    await page.evaluate(() => { document.querySelector('#comoFuncionaModal > div').scrollTop = 60; });
+    const rolado = await medir();
+    checa(rolado.rolagem > 0 && rolado.tituloTopo < real.tituloTopo,
+      `como funciona automático (${nome}): CONTROLE cego — a caixa rolada à força não apareceu na medição`, JSON.stringify(rolado));
+    // CONTROLE 2 (Chromium, onde o foco programático rola): o foco antigo, sem `preventScroll`,
+    // reproduz o defeito. No WebKit do Linux o `.focus()` programático não rola a caixa (medido), então
+    // lá o defeito só se vê no aparelho; o controle 1 segue valendo.
+    if (MOTOR === 'chromium') {
+      const antigo = await page.evaluate(() => {
+        const modal = document.getElementById('comoFuncionaModal');
+        [modal, ...modal.querySelectorAll('*')].forEach((e) => { e.scrollTop = 0; });
+        document.getElementById('comoFuncionaTreinar').focus({ preventScroll: true });
+        document.getElementById('comoFuncionaOk').focus();
+        return Math.max(0, ...[modal, ...modal.querySelectorAll('*')].map((e) => e.scrollTop));
+      });
+      checa(antigo > 0, `como funciona automático (${nome}): CONTROLE cego — o foco sem preventScroll não rolou a caixa`, String(antigo));
+    }
+    await ctx.close();
+  }
+}
+
+// ── O aviso dourado "Toque pra assumir o volante" LEVA ATÉ a chave do Desfazer ──
+// (R17-7-03). `abrirPreferenciaDoUndo` trocava de aba e pulsava a `#prefUndoRow`, mas não rolava
+// até ela: fora da vista no celular deitado (667×375: linha em 277–410, área visível 161–266), no
+// SE em pé com o modo dev desbloqueado (a seção Avançado empurra a linha) e cortada em 8 px no
+// Fold em francês. O CONTROLE refaz a abertura sem a rolagem (zera o scroll depois e mede de
+// novo) e exige a linha FORA da vista nos casos que o auditor mediu — a medição enxerga o defeito.
+{
+  const casos = [
+    ['SE deitado', { width: 667, height: 375 }, 'pt', false, true],
+    ['Pixel 7 deitado', { width: 851, height: 393 }, 'pt', false, true],
+    ['SE em pé com o modo dev', { width: 375, height: 667 }, 'pt', true, true],
+    ['Fold em francês', { width: 280, height: 653 }, 'fr', false, false],
+    ['iPhone 14 em pé (CONTROLE: já cabia)', { width: 393, height: 851 }, 'pt', false, false],
+  ];
+  for (const [nome, viewport, lang, dev, controleForaDaVista] of casos) {
+    const ctx = await browser.newContext({ viewport, locale: lang === 'fr' ? 'fr-FR' : 'pt-BR', serviceWorkers: 'block', isMobile: true, hasTouch: true });
+    await presencaViva(ctx);   // a lista da presença sai no showMainScreen (ver o `presencaViva`)
+    await ctx.addInitScript((l) => { try { localStorage.setItem('waze_places_lang', l); } catch (e) { /* segue */ } }, lang);
+    const page = await ctx.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    await page.evaluate(async (d) => {
+      API.setSession('tok'); AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 1, isAreaManager: true, isStaff: false };
+      AppState.preferences.comoFuncionaVisto = true;
+      AppState.devMode = { unlocked: d, active: d };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(); updateStats(); showLoading(false);
+      abrirPreferenciaDoUndo().catch(() => {});
+    }, dev);
+    await esperarNaPagina(page, () => !document.getElementById('filtersModal').classList.contains('hidden'), 4000, 50);
+    await page.waitForTimeout(250);
+    const medir = () => page.evaluate(() => {
+      const l = document.getElementById('prefUndoRow').getBoundingClientRect();
+      const painel = document.getElementById('filtersPanelPrefs');
+      // A área que rola é a ancestral com overflow; a visível é a interseção dela com a janela.
+      let rolavel = painel;
+      while (rolavel && rolavel !== document.body && !/(auto|scroll)/.test(getComputedStyle(rolavel).overflowY)) rolavel = rolavel.parentElement;
+      const a = (rolavel || painel).getBoundingClientRect();
+      const topo = Math.max(a.top, 0), base = Math.min(a.bottom, innerHeight);
+      // O que a pessoa precisa VER é a chave (e o rótulo, que está na mesma linha): a linha inteira
+      // pode ser mais alta que a área visível deitado (133 px contra 105), e aí o certo é o TOPO dela
+      // colado no topo da vista, com a chave dentro.
+      const sw = document.getElementById('prefUndoEnabled').getBoundingClientRect();
+      return { linha: [Math.round(l.top), Math.round(l.bottom)], chave: [Math.round(sw.top), Math.round(sw.bottom)], visivel: [Math.round(topo), Math.round(base)],
+        inteira: l.top >= topo - 1 && sw.top >= topo - 1 && sw.bottom <= base + 1 };
+    });
+    const real = await medir();
+    checa(real.inteira, `chave do Desfazer (${nome}, ${lang}): o aviso dourado não rolou até a linha`, JSON.stringify(real));
+    // CONTROLE: sem a rolagem a linha fica FORA da vista onde o auditor a mediu (a medição não é cega).
+    if (controleForaDaVista) {
+      await page.evaluate(() => {
+        const painel = document.getElementById('filtersPanelPrefs');
+        let e = painel; while (e && e !== document.body) { e.scrollTop = 0; e = e.parentElement; }
+      });
+      const sem = await medir();
+      checa(!sem.inteira, `chave do Desfazer (${nome}): CONTROLE cego — sem a rolagem a linha já cabia na vista`, JSON.stringify(sem));
+    }
+    await ctx.close();
+  }
+}
+
 // ── O "Como funciona" ADIADO: nunca debaixo do banner do Desfazer, nunca no
 // tique do voltar (auditoria de 2026-10-02: R7-7-01, R7-7-02 e R7-3-01) ──────
 // O adiado (a Ajuda aberta quando o 1º card montou) abria no 1º GESTO: o card
@@ -13135,7 +13265,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     editableCountryIDs: [30], areas: [], managedAreas: [] };
   // Pedidos de FOTO NOVA do MESMO autor: dois ✕ o promovem à lista de autores.
   const FILA_SAIR = Array.from({ length: 5 }, (_, i) => ({
-    venueID: `vsair${i}`, updateRequestID: `usair${i}`, name: `Padaria${MARCA}${i}`, categories: ['BAKERY'],
+    venueID: `vsair${i}`, updateRequestID: `usair${i}`, name: `Padaria${MARCA}${i}`,
+    // Uma categoria com a MARCA (R17-1-04): ela entra no seletor dos Filtros e não pode ficar no DOM depois.
+    categories: [i === 1 ? `CAT${MARCA}` : 'BAKERY'],
     address: `Rua${MARCA} ${i}, 10`, updateType: 'Nova foto', updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO',
     createdBy: `autor${MARCA}`, creatorId: 7777, imageUrls: [`https://venue-image.waze.com/thumbs/thumb700_usair${i}.png`],
     newImageIdx: 0, approvedImageIds: [], localAprovado: true, brand: null, changes: [],
@@ -13210,6 +13342,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await tocar('#filtersTabHistory');
   await assentarCamada();
   const comHistorico = await varrer();
+  // O seletor de CATEGORIA dos Filtros (R17-1-04): com os Filtros abertos ele oferece a categoria
+  // com a MARCA da fila (CONTROLE), e fechados não oferece nada — nem depois do "Sair".
+  const comCategoria = await varrer();
+  checa(comCategoria.includes('filterCategory'),
+    'sair/categorias: CONTROLE — o seletor dos Filtros aberto não ofereceu a categoria com a marca (a varredura não enxerga o caso)', JSON.stringify(comCategoria));
   // O RESTO do painel do Histórico (R8-7-06, auditoria de 2026-10-03): a patente,
   // os totais e o botão do Resumo são o trabalho de quem estava — números, sem a
   // marca, então medidos pelo tamanho do texto. Ficavam no DOM do painel fechado.
@@ -13217,6 +13354,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await page.evaluate(() => document.getElementById('filtersModal').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await esperarOuExplodir(page, () => document.getElementById('filtersModal').classList.contains('hidden'), 'o fundo fechar os Filtros');
   const historicoFechado = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
+  checa(!(await varrer()).includes('filterCategory'),
+    'sair/categorias: o seletor de categoria dos Filtros FECHADOS seguiu com a categoria da fila no DOM (R17-1-04)');
   checa(historicoAberto > 0, 'sair/DOM: CONTROLE — o painel do Histórico aberto não tinha texto (a medida não enxerga o painel)',
     String(historicoAberto));
   checa(historicoFechado === 0, 'sair/DOM: o painel do Histórico FECHADO seguiu com a patente e os totais no DOM', String(historicoFechado));
@@ -13301,6 +13440,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'sair/categorias: depois do "Sair" o seletor dos Filtros de quem entrar ainda oferece as categorias da fila de quem saiu', JSON.stringify(categoriasDepois));
   const depoisDoSair = await varrer();
   checa(depoisDoSair.length === 0, 'sair/DOM: depois do "Sair", o DOM da tela de entrada guarda dado de terceiro', JSON.stringify(depoisDoSair));
+  const opcoesDeCategoria = await page.evaluate(() => [...document.getElementById('filterCategory').options].map((o) => o.value));
+  checa(opcoesDeCategoria.length === 1 && opcoesDeCategoria[0] === '',
+    'sair/categorias: depois do "Sair" o seletor de categoria dos Filtros ainda lista categorias da conta que saiu (R17-1-04)', JSON.stringify(opcoesDeCategoria));
   const historicoDepoisDoSair = await page.evaluate(() => document.getElementById('historyBody').innerHTML.length);
   checa(historicoDepoisDoSair === 0,
     'sair/DOM: depois do "Sair", o painel do Histórico (redesenhado com os Filtros fechados) seguiu no DOM', String(historicoDepoisDoSair));
@@ -13425,5 +13567,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo — e a aba que cai ANTES do perfil sendo alcançada quando OUTRA conta entra noutra aba (sem fila, card nem chamadas da anterior), com o CONTROLE da MESMA conta que não a encerra — e o diálogo do "Sair" contando os pedidos do "Rejeitar os N" que ainda não saíram, com só a ida no ar chegando ao Waze e o CONTROLE do ✕ isolado, que não entra na conta)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + o "Treino concluído" cabendo na tela em 2 aparelhos com isMobile quando o ÚLTIMO exemplo é o ✓ (botão e seta) — a página não alarga e o "Ir para a fila" fica dentro da vista —, com ✕ e ↑ de CONTROLE e o card de volta à conta de layout alargando a página`
+  + `, + o "Como funciona" aberto SOZINHO no TOPO no celular deitado (scrollTop 0 e título na tela em 667×375 e 851×393, com o CONTROLE da caixa rolada à força e, no Chromium, o do foco antigo rolando)`
+  + `, + o aviso dourado do Desfazer LEVANDO até a chave (rolada para a vista em 5 aparelhos — deitados, o SE com o modo dev e o Fold em francês —, com o CONTROLE da rolagem zerada deixando a linha fora da vista)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

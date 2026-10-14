@@ -1728,6 +1728,10 @@ function presencaCalarFalhaDoHistoricoQueSumiu(id) {
 // A conversa passa a DEVER um "lida" — na memória e no aparelho, com o que a
 // pessoa viu nela (`presencaVistaDe`). Sem mensagem dela vista, nada a guardar.
 function presencaDever(id) {
+    // Mensagem que a pílula contava e a tela não mostrou: o "lida" a marcaria
+    // (o Waze marca a conversa INTEIRA), então a dívida não nasce por nenhum
+    // caminho — também o do fechamento sem perfil (R17-5-02).
+    if (presencaPularLidaPorNaoVista(id)) return;
     Presenca.lidaDevendo.add(id);
     const vista = presencaVistaDe(id);
     if (vista.ate <= 0) return;
@@ -1953,7 +1957,7 @@ function presencaDeverOQueFoiVisto(id) {
     const h = id ? Presenca.historico.get(id) : null;
     if (!h || !(presencaPrimeiraPaginaNoAr(h) || presencaPrimeiraPaginaAdiada(h))) return;
     // Mensagem que a pílula contava e a tela não mostrou: o "lida" a marcaria.
-    if (presencaSemVerAoAbrir(id)) return;
+    if (presencaPularLidaPorNaoVista(id)) return;
     const visto = presencaUltimaDela(h);
     const voo = presencaLidaNoAr(id);
     if (!(visto > Math.max(Presenca.lidaEnviadaAte.get(id) || 0, voo ? voo.ate : 0))) return;
@@ -2027,18 +2031,31 @@ function presencaSemVerAoAbrir(id) {
     return !!h && !!h.primeiraFalhou && h.naoVistoAoAbrir > 0;
 }
 
+// `presencaSemVerAoAbrir` por onde o "lida" DEIXA de sair ou a dívida não nasce:
+// uma linha no diário (`chat.lida` com `pulou`), no máximo uma por minuto e sem
+// texto nem id, pra o relatório explicar "a mensagem voltou como nova" (R17-5,
+// observação 3). Chave própria no limitador: não engole a linha da falha.
+function presencaPularLidaPorNaoVista(id) {
+    if (!presencaSemVerAoAbrir(id)) return false;
+    presencaAnotarMsg('chat.lida', { pulou: 'naoVista' }, 'chat.lida.pulou');
+    return true;
+}
+
 // Tirado quando a conversa ABRE, antes de a contagem ser zerada: quantas das
 // não lidas que a pílula contava não estão no histórico daqui (o que está, a
-// reabertura mostra). Enquanto a primeira página seguir falhando vale o MAIOR
-// valor: a segunda abertura já não sabe delas (a contagem foi zerada na
-// primeira), e abrir de novo não pode apagar o que a primeira viu faltar.
+// reabertura mostra). Vale sempre o MAIOR valor, também com a primeira página
+// ainda NO AR ou esperando o perfil (`primeiraFalhou` ainda falso): a segunda
+// abertura já não sabe delas (a contagem foi zerada na primeira), e abrir de
+// novo não pode apagar o que a primeira viu faltar (R17-5-01; o R16-5-01 só
+// guardava o maior com a falha já posta). Não sobra valor velho: a primeira
+// página boa zera a marca (`presencaCarregarConversa`).
 function presencaGuardarNaoVistoAoAbrir(id) {
     const h = Presenca.historico.get(id);
     if (!h) return;
     // `presencaVistaDe(id).n`: as dela que o histórico daqui já tem (a reabertura
     // as mostra) e as da dívida guardada, que o Waze ainda conta como não lidas.
     const falta = Math.max(0, presencaNaoLidasDe(id) - presencaVistaDe(id).n);
-    h.naoVistoAoAbrir = h.primeiraFalhou ? Math.max(h.naoVistoAoAbrir || 0, falta) : falta;
+    h.naoVistoAoAbrir = Math.max(h.naoVistoAoAbrir || 0, falta);
 }
 
 // A hora da mensagem MAIS NOVA dela na conversa daqui (`historico`). Pra
@@ -2463,7 +2480,7 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
             // mensagem que a pílula contava e a tela nunca mostrou: sai agora,
             // da memória e do aparelho — onde a próxima página a adotaria e
             // pagaria sem saber disso (R16-5-01).
-            if (presencaSemVerAoAbrir(id)) presencaQuitarDivida(id);
+            if (presencaPularLidaPorNaoVista(id)) presencaQuitarDivida(id);
         }
         presencaAnotar('chat.abrir', { ok: false, categoria: (r && r.errorCategory) || 'sem resposta', pagina: antes ? 'antiga' : 'primeira' });
         presencaConferirSessao(r, sessao);

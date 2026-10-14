@@ -166,6 +166,8 @@ function montar() {
     // O seletor de áreas volta a "Nenhuma" (R11-1-05). Só se existir: no código de
     // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
     ...(/^function esvaziarSeletorDeAreas\(/m.test(APP_SEM) ? [fatiar('esvaziarSeletorDeAreas')] : []),
+    // E o de categorias (R17-1-04): o mesmo molde.
+    ...(/^function esvaziarSeletorDeCategorias\(/m.test(APP_SEM) ? [fatiar('esvaziarSeletorDeCategorias')] : []),
     // A região viva da foto ampliada (lote 10, R6-3-08): o `close` a esvazia, e
     // ela pode dizer o nome do local ("Renomeado para …"). Quem escreve nela é o
     // `dizerNaRegiao` (R14-3-01), com o atraso e a frase a caminho dele.

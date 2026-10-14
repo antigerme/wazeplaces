@@ -77,10 +77,22 @@ test('presenca-waze: só a lista → UMA chamada ao listOnlineEditors, do servid
 });
 
 test('presenca-waze: a região escolhe o servidor (a presença é separada por servidor)', async () => {
-  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], ['xx', 'row-Descartes'], ['constructor', 'row-Descartes']]) {
+  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes'], [undefined, 'row-Descartes']]) {
     const { pedidos } = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
       () => dispatch('presenca-waze', { ...S.dados, region, caixa: [-1, -1, 1, 1] }, S.ctx));
     assert.equal(pedidos[0].url, `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/listOnlineEditors`, region);
+  }
+});
+
+test('presenca-waze: região que não existe é 400 e NÃO vai ao Waze — nem `constructor` vira região (o `hasOwn` do #249)', async () => {
+  // Era `row-Descartes` calado (R17-6-A2). O que o `hasOwn` guarda segue valendo: o nome de uma
+  // propriedade do protótipo não é região — agora é recusado em vez de cair em `row`.
+  for (const region of ['xx', 'constructor', '__proto__', 'toString']) {
+    const { resultado, pedidos } = await comWaze(() => respostaGrpc({ dados: new Uint8Array() }),
+      () => dispatch('presenca-waze', { ...S.dados, region, caixa: [-1, -1, 1, 1] }, S.ctx));
+    assert.equal(resultado.status, 400, region);
+    assert.equal(resultado.body.errorKey, 'srv.err.badRequest', region);
+    assert.equal(pedidos.length, 0, `${region}: foi ao Waze`);
   }
 });
 

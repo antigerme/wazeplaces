@@ -139,7 +139,7 @@ test('época da sessão: fila de saída, lote e perfil conferem a época DEPOIS 
     // auditoria do card, 2026-09-29). A conferência só começa na MESMA época, e
     // depois das duas a época mudada sai sem gravar nada — só o aviso da estrela
     // que não foi guardada, com a fila do gesto na tela (R6-2-08).
-    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*let r = await callWithRetry\(enviar, epoca\);\s*if \(epoca === epocaDaSessao && r && r\.errorCategory === 'unauthorized'\) \{\s*r = await refazerDepoisDo401\(epoca, enviar\);\s*\}\s*if \(epoca !== epocaDaSessao\) \{\s*if \([^{}]*\) showToast\(t\('toast\.guardarFalhou'\), 'error'\);\s*return;\s*\}/,
+    handleSkip: /const enviar = \(\) => API\.guardarPedido\([^)]*\);\s*const espera = \(sim\) => marcarLoteSemEnviar\(place, sim\);\s*let r = await callWithRetry\(enviar, epoca, espera\);\s*if \(epoca === epocaDaSessao && r && r\.errorCategory === 'unauthorized'\) \{\s*r = await refazerDepoisDo401\(epoca, enviar, espera\);\s*\}\s*if \(epoca !== epocaDaSessao\) \{\s*if \([^{}]*\) showToast\(t\('toast\.guardarFalhou'\), 'error'\);\s*return;\s*\}/,
   };
   for (const [nome, re] of Object.entries(casos)) assert.match(fatiar(nome), re, `${nome} grava depois do "Sair"`);
 });

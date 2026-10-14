@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/antigerme/wazeplaces/security/advisories/new
     about: Não abra issue pública. Reporte em privado por aqui (o app lida com credenciais do Waze).
   - name: 🗺️ Dúvida sobre edição no Waze
-    url: https://www.waze.com/pt-BR/editor
+    url: https://www.waze.com/editor
     about: Dúvidas sobre como editar o mapa são do WME, não deste app.

@@ -95,7 +95,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: entraram,
     // O texto do diálogo ("Marcar os N"): é o que a pessoa lê antes de confirmar.
     document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
-    pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), rejeicoesDeLoteNoAr: new Set(),
     aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
     aprovacaoPendente: pendente('aprovacao'), exclusaoPendente: pendente('exclusao'), renomeacaoPendente: pendente('renomeacao'),
     // O aviso de quem toca sem sessão (R6-2-01): o do `avisoDaTrava` de verdade,
@@ -108,7 +108,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
   // O momento do gesto (R6-7-4): o de verdade, ou um neutro.
   if (!carimboReal) deps.carimboDoGesto = () => ({ dia: null, onde: null });
   const chaves = Object.keys(deps);
-  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr',
+  const corpo = ['openBatchReadConfirm', 'handleBatchMarkRead', 'acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr',
     'marcarEmAndamento', 'devolverPedidoRecusado', 'avisoDaTrava', ...(carimboReal ? ['ondeAgora', 'carimboDoGesto'] : [])]
     .map(fatiar).join('\n');
   app = new Function(...chaves, 'let loteDeLidosContado = null; let tratouNestaFila = false; let loteDeLidosEmVoo = false; let escritasConferindo = 0;\n' + corpo
@@ -424,14 +424,14 @@ test('R7-2-02: a dúvida acende com o diálogo ABERTO — o confirmar não manda
 // Uma função só pra cada uma, e esta confere que elas não se descolam — o que
 // trava o lote trava o card.
 test('R7-2-02: a trava do lote é a do card sem a janela do Desfazer — o que trava um trava o outro', () => {
-  const corpo = ['acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr'].map(fatiar).join('\n');
+  const corpo = ['acoesTravadas', 'acoesTravadasForaDaJanela', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr'].map(fatiar).join('\n');
   const avaliar = (estado) => new Function('AppState', 'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente',
     'loteDeLidosEmVoo', 'escritasConferindo', 'contaDestaAbaEmDuvida', 'aprovacoesNoAr', 'aprovacoesDaQueda', 'chaveDoPedido',
-    corpo + '\nreturn [acoesTravadas(), acoesTravadasForaDaJanela()];')(
+    'alvosDoLoteDeLidosNoAr', corpo + '\nreturn [acoesTravadas(), acoesTravadasForaDaJanela()];')(
     { authenticated: estado.sessao !== false, pendingAction: estado.janela ? {} : null, currentPlace: pedido(1),
       contaEmDuvida: !!estado.duvida, fetchEpoch: 0 },
     estado.aprovacao ? {} : null, null, null, !!estado.lote, estado.conferindo ? 1 : 0, () => !!estado.duvida,
-    new Set(estado.noAr ? ['v1|u1'] : []), new Map(), (p) => p.venueID + '|' + p.updateRequestID);
+    new Set(estado.noAr ? ['v1|u1'] : []), new Map(), (p) => p.venueID + '|' + p.updateRequestID, new Map());
   for (const [caso, estado, lote] of [
     ['sem sessão', { sessao: false }, true],
     ['o lote no ar', { lote: true }, true],
