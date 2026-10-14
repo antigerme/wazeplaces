@@ -3962,25 +3962,24 @@ diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa a tinta cob
 
 // R20, C1. Enter SEGURADO no botão do FAB: o navegador repete o `keydown` e faz um `click` por repetição.
 // MEDIDO antes do conserto (t22, os dois motores): 15 repetições = 12 capturas manuais idênticas, o selo "12" e a
-// captura AUTOMÁTICA expulsa do anel. O Enter simples (o CONTROLE) é UMA captura; a PRÉ-CONDIÇÃO é que o teclado
-// repetiu de verdade (`repeat: true` contado por um ouvinte).
+// captura AUTOMÁTICA expulsa do anel (o teste de unidade e o roteiro do auditor medem a expulsão; aqui, a contagem, que
+// é o que o selo mostra). O Enter simples (o CONTROLE) é UMA captura; a PRÉ-CONDIÇÃO é que o teclado repetiu de
+// verdade (`repeat: true` contado por um ouvinte).
 await F9l.evaluate(() => {
   const btn = document.getElementById('devFabBtn');
   window.__kd9l = { total: 0, repetidos: 0 };
   btn.addEventListener('keydown', (e) => { window.__kd9l.total++; if (e.repeat) window.__kd9l.repetidos++; }, true);
-  dlogCapturar('auto:erroDeJs');
-  window.__antes9l = { manuais: dlogCapturasDoEditor().length, auto: dlogMomentos.filter((m) => m.motivo === 'auto:erroDeJs').length };
+  window.__antes9l = { manuais: dlogCapturasDoEditor().length };
   btn.focus();
 });
 for (let i = 0; i < 15; i++) await F9l.keyboard.down('Enter');
 await F9l.keyboard.up('Enter');
-const segurado9l = await F9l.evaluate(() => ({ ...window.__kd9l, manuais: dlogCapturasDoEditor().length - window.__antes9l.manuais,
-  auto: dlogMomentos.filter((m) => m.motivo === 'auto:erroDeJs').length, autoAntes: window.__antes9l.auto }));
+const segurado9l = await F9l.evaluate(() => ({ ...window.__kd9l, manuais: dlogCapturasDoEditor().length - window.__antes9l.manuais }));
 await F9l.keyboard.press('Enter');
 const simples9l = await F9l.evaluate(() => dlogCapturasDoEditor().length - window.__antes9l.manuais);
 diz('PRÉ-CONDIÇÃO: o teclado repetiu o `keydown` de verdade (15 `down` seguidos, com `repeat: true`)', segurado9l.total >= 15 && segurado9l.repetidos >= 5, JSON.stringify(segurado9l));
-diz('Enter SEGURADO no botão do FAB registra UMA captura — e a automática do anel sobrevive (antes: 12 capturas, a automática expulsa)',
-  segurado9l.manuais === 1 && segurado9l.auto === segurado9l.autoAntes && segurado9l.autoAntes === 1, JSON.stringify(segurado9l));
+diz('Enter SEGURADO no botão do FAB registra UMA captura (antes: 12, e o selo dizia "12")',
+  segurado9l.manuais === 1, JSON.stringify(segurado9l));
 diz('CONTROLE: mais um Enter simples soma exatamente UMA captura (o botão continua funcionando pelo teclado)', simples9l === 2, `capturas desde o início: ${simples9l}`);
 await ctx9l.close();
 
