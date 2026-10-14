@@ -2111,11 +2111,16 @@ function presencaGuardarNaoVistoAoAbrir(id) {
 //    DELA e é mais nova que a mais nova vista daqui — há mensagem que a tela
 //    não tem, qualquer que seja a conta. Vale 1 (é o que se sabe: quantas, não).
 //
-// A hora da lista e a da tela são do Waze, mas a mensagem que chegou pelo tempo
-// real pode trazer a hora de ANTES de ele a guardar (ele re-carimba ao guardar,
-// ~335 ms medidos). Por isso a mais nova vista só "não alcança" a da lista com
-// folga (`PRESENCA_RECARIMBO_MS`): sem ela, a mensagem que a tela JÁ tem virava
-// "não vista" e o "lida" da próxima deixava de sair.
+// A hora da lista e a da tela são as do Waze, e o resto do arquivo as compara
+// por IGUALDADE (`presencaNaoLidasDepoisDoLida`). A mais nova vista só "não
+// alcança" a da lista com uma margem (`PRESENCA_RECARIMBO_MS`): é DEFENSIVA, não
+// medida pra mensagem recebida — o +335 ms do re-carimbo está medido nas
+// MINHAS mensagens ao guardar (ver o CLAUDE.md), e se valer também pra recebida
+// a mensagem que a tela JÁ tem virava "não vista" e o "lida" da próxima deixava
+// de sair. Custa pouco (uma mensagem nova a menos de 500 ms da vista deixa de
+// contar como a que falta, e a subtração acima ainda a vê). PERGUNTA EM ABERTO:
+// se o re-carimbo valer pra mensagem recebida, a igualdade exata do
+// `presencaNaoLidasDepoisDoLida` é um defeito latente.
 const PRESENCA_RECARIMBO_MS = 500;
 
 // `ateDaLista` (só no ramo "olhando" da lista que chega): a conta é SÓ da lista, e
@@ -3107,9 +3112,21 @@ function presencaHoraCurta(ts) {
     return d.toLocaleDateString(i18nLocale(), { day: 'numeric', month: 'short' });
 }
 
-// `isolar`: pra TELA, o nome do local (texto do Waze, de outro aparelho) vai
-// isolado dentro da frase do app (`isolarTextoDoWaze`, do app.js: só mexe se o
-// nome tem letra da direita pra esquerda; o resto sai idêntico). O texto
+// Texto do Waze (o nome de um local, de outro aparelho) no meio de uma frase do
+// app: U+2068/U+2069 (isolado de direção automática) o fazem ser lido na direção
+// DELE sem tocar na da frase. Só quando ele TEM letra da direita pra esquerda:
+// texto da esquerda pra direita sai idêntico, byte a byte. É a MESMA regra do
+// `isolarTextoDoWaze` do app.js, copiada de propósito (a presença roda sem o
+// app.js nos testes, e uma dependência nova no harness não vale uma função de
+// três linhas); `test/presenca-auditoria-r20.test.mjs` compara as duas na mesma
+// lista de textos.
+const PRESENCA_LETRA_RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+function presencaIsolarTextoDoWaze(texto) {
+    const s = String(texto == null ? '' : texto);
+    return PRESENCA_LETRA_RTL.test(s) ? '\u2068' + s + '\u2069' : s;
+}
+
+// `isolar`: pra TELA, o nome do local vai isolado dentro da frase do app. O texto
 // acessível e o diário usam a frase crua.
 function presencaPrevia(u, { isolar = false } = {}) {
     if (!u) return '';
@@ -3117,7 +3134,7 @@ function presencaPrevia(u, { isolar = false } = {}) {
         if (u.texto) return '📍 ' + u.texto;
         const nome = (u.card.name || '').trim() || t('card.noName');
         const tipo = presencaTipo(u.card.updateTypeKey);
-        return '📍 ' + (isolar ? isolarTextoDoWaze(nome) : nome) + (tipo ? ' · ' + tipo : '');
+        return '📍 ' + (isolar ? presencaIsolarTextoDoWaze(nome) : nome) + (tipo ? ' · ' + tipo : '');
     }
     return u.texto || '';
 }

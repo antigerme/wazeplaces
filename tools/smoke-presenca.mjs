@@ -1488,13 +1488,15 @@ try {
   await esperar(bia, () => !CamadaVoltar.consumindo, 'o voltar do fechamento não assentou');
   const direcoes = await bia.page.evaluate(() => {
     const dir = (id) => getComputedStyle(document.getElementById(id)).direction;
+    // Abre os dois SEM fechar entre eles (o `openModal` do modal já aberto não
+    // empilha): fechar e abrir no mesmo quadro desalinha o voltar (gotcha #65).
     const pedido = (nome) => {
       abrirPedidoRecebido({ venueID: '1.2.3', name: nome, address: nome, categories: ['BAKERY'], updateTypeKey: 'IMAGE', imageUrl: null, lat: 1, lon: 2, region: 'row' }, 'cafanha');
-      const r = { nome: dir('pedidoNome'), end: dir('pedidoEnd') };
-      closeModal('pedidoModal');
-      return r;
+      return { nome: dir('pedidoNome'), end: dir('pedidoEnd') };
     };
-    return { hebraico: pedido('מסעדה הרצל (סניף 2)'), latino: pedido('Padaria Estrela (filial 2)') };
+    const r = { hebraico: pedido('מסעדה הרצל (סניף 2)'), latino: pedido('Padaria Estrela (filial 2)') };
+    closeModal('pedidoModal');
+    return r;
   });
   if (direcoes.hebraico.nome === 'rtl' && direcoes.hebraico.end === 'rtl') ok('o nome e o endereço do pedido em hebraico ficam da direita pra esquerda');
   else anota(`a folha do pedido em hebraico: ${JSON.stringify(direcoes.hebraico)}`);

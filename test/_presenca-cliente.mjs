@@ -36,7 +36,7 @@ const TRADUZIDAS = /^card\.updateType\./;
 // `marcaDestaAba`: a sessão da MEMÓRIA (`API.sessionToken`), que a presença
 // guarda na saída de cada pedido — o 401 tardio é da sessão que já se foi.
 const DO_APP = ['CONTA_KEY', 'WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
-  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba', 'LETRA_DA_DIREITA_PRA_ESQUERDA', 'isolarTextoDoWaze']
+  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba']
   .map(fatiarDoApp).join('\n');
 
 class Classes {

@@ -514,6 +514,21 @@ test('R20-5-06 a prévia do pedido com nome RTL: o nome é isolado e o parágraf
   assert.doesNotMatch(r.attrs, /dir=/, 'o `dir="auto"` voltaria a seguir o nome e inverter a frase do app');
 });
 
+test('R20-5-06 a função local de isolar é a MESMA do app.js na mesma lista de textos (duas cópias não divergem)', () => {
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = APP.indexOf('const LETRA_DA_DIREITA_PRA_ESQUERDA');
+  const doApp = new Function(APP.slice(i, APP.indexOf(';\n', i) + 2)
+    + APP.slice(APP.indexOf('function isolarTextoDoWaze('), APP.indexOf('\n}\n', APP.indexOf('function isolarTextoDoWaze(')) + 3)
+    + '\nreturn isolarTextoDoWaze;')();
+  const c = novoCliente({ agora: T + 10 });
+  const lista = ['Padaria Pão Quente', 'Zé (filial 2)', '', null, undefined, 'Café 24h – Centro', '東京タワー',
+    'מסעדת השף – הנמל 12 (סניף 2)', 'مطعم الأصالة (فرع 2)', 'Café שלום', 'ܐܒܓ', 'ހަތް', '\u0590', '\u08FF', '\uFB1D', '\uFDFF', '\uFE70', '\uFEFF'];
+  for (const x of lista) assert.equal(c.P.presencaIsolarTextoDoWaze(x), doApp(x), `divergem em ${JSON.stringify(x)}`);
+  // CONTROLE: o instrumento enxerga o isolamento (hebraico isolado, latim idêntico).
+  assert.equal(doApp('שלום'), '\u2068שלום\u2069');
+  assert.equal(doApp('Padaria'), 'Padaria');
+});
+
 test('R20-5-06 a prévia do pedido com nome LTR sai idêntica byte a byte (e sem isolar)', () => {
   const ultima = { deMim: false, ts: T, recibo: false, texto: '', card: { name: 'Padaria Estrela (filial 2)', updateTypeKey: 'IMAGE' } };
   const c = novoCliente({ agora: T + 10 });
