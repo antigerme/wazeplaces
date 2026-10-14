@@ -538,3 +538,42 @@ test('R16-8-05: CONTROLE — sem gravação nova para o endereço, o desfazer da
   assert.equal(await velha, false);
   assert.deepEqual([...x.guardado.keys()], ['https://tile/17/9/9.png'], 'CONTROLE: o tile da época velha ficou, ou o de outro endereço saiu');
 });
+
+// ═══ R17-4-06 (lote 21) · o carimbo NOVO sem o `BroadcastChannel` ════════════════════════════
+// O R16-4-01 fechou o caso de PARTE dos pedidos sem canal (a base diz que falta pedido). O de
+// carimbo NOVO — B grava OUTROS pedidos — seguia aberto no iOS < 15.4: o fim da varredura já
+// tem a base na mão (`naBase.t !== filaCoberta`) e não a usava, então A terminava "Pronto"
+// cobrindo uma fila que não era mais a guardada (MEDIDO no navegador, s5 do auditor: "Pronto"
+// com 3 mapas fora; com o canal, "Ainda não preparado").
+test('R17-4-06: B grava pedidos NOVOS (carimbo novo) e prepara, A SEM canal termina a varredura — A passa a saber que a fila guardada é outra, a linha não diz "Pronto" e o gatilho seguinte prepara', async () => {
+  const { ap, A, B } = await prontas({ semCanalA: true });
+  const { varreA } = await aVarreComAJanelaNova(ap, A, B);
+  const tAntes = ap.base.guardado.get('fila').t;
+  await B.buscar([P(7), P(8)]);
+  await entregue();
+  assert.notEqual(ap.base.guardado.get('fila').t, tAntes, 'PRÉ-CONDIÇÃO: a fila de B (com pedidos novos) não ganhou carimbo novo');
+  assert.ok(!A.diario.includes('offline.outraAba'), 'PRÉ-CONDIÇÃO: A recebeu o aviso, sem canal');
+  A.soltar();
+  await varreA;
+  await entregue();
+  assert.equal(A.estado().resultado, 'pronto', 'PRÉ-CONDIÇÃO: a varredura de A não terminou');
+  assert.equal(A.estado().gravada, ap.base.guardado.get('fila').t, 'DEFEITO: A não ficou sabendo qual fila está guardada (a de B)');
+  assert.notEqual(A.estado().preparada, A.estado().gravada,
+    'DEFEITO: A terminou "cobrindo" a fila guardada de B — com os mapas dos pedidos de B fora do aparelho');
+  assert.doesNotMatch(A.naTela(), PRONTO, `DEFEITO: A termina dizendo "Pronto" sobre a fila de B: ${A.naTela()}`);
+  assert.equal(A.precisaVarrer(), true, 'DEFEITO: o gatilho seguinte de A não prepara');
+  assert.ok(A.diario.includes('offline.outraAba'), 'o diário de A não anotou que a fila guardada é de outra aba');
+});
+
+test('R17-4-06: CONTROLE — sem canal, a MESMA fila nas duas abas (B só prepara) e a busca da PRÓPRIA aba durante a varredura não tiram a cobertura de A', async () => {
+  const a = await prontas({ semCanalA: true });
+  const { varreA } = await aVarreComAJanelaNova(a.ap, a.A, a.B);
+  await a.B.varrer();
+  await entregue();
+  a.A.soltar();
+  await varreA;
+  await entregue();
+  assert.equal(a.A.estado().preparada, a.A.estado().gravada, 'CONTROLE: a MESMA fila tirou a cobertura de A');
+  assert.match(a.A.naTela(), PRONTO);
+  assert.ok(!a.A.diario.includes('offline.outraAba'), 'CONTROLE: A anotou "outra aba" sem outra aba ter gravado nada');
+});

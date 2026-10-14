@@ -11096,6 +11096,27 @@ function diagServiceWorker() {
 // `prazo` do relatório; o que não chegou até ali sai marcado `semResposta`.
 const DIAG_FETCH_TETO_MS = 4000;
 const DIAG_ORCAMENTO_MS = 10000;
+// As leituras LOCAIS do navegador (registros do service worker, CacheStorage, `storage.estimate`,
+// `indexedDB.databases`, a fila guardada do offline) também podem NUNCA resolver — o orçamento só
+// cobria os `fetch` —, e então o relatório não saía e o botão ficava em "Juntando tudo…" sem
+// aviso (R17-4-03). `comPrazo` corre a leitura contra o prazo do relatório: estourado, REJEITA
+// com `TimeoutError` (os `catch` que já existem a registram) e o rótulo vai pra `semResposta`
+// (a seção `coleta`), como os `fetch` já faziam. A leitura local que o orçamento já gastou
+// ainda tem um PISO (`DIAG_PISO_LOCAL_MS`): ela resolve em milissegundos quando o navegador
+// responde, e um relatório lento na rede não pode perder por isso o que o aparelho diz na hora.
+const DIAG_PISO_LOCAL_MS = 2000;
+function comPrazo(promessa, prazo, rotulo, semResposta = null) {
+    const resta = Math.max(0, prazo - Date.now());
+    return new Promise((ok, erro) => {
+        const teto = setTimeout(() => {
+            if (Array.isArray(semResposta)) semResposta.push(rotulo);
+            const e = new Error('sem resposta no orçamento do diagnóstico: ' + rotulo);
+            e.name = 'TimeoutError';
+            erro(e);
+        }, resta);
+        Promise.resolve(promessa).then((v) => { clearTimeout(teto); ok(v); }, (e) => { clearTimeout(teto); erro(e); });
+    });
+}
 function diagFetch(url, opts = {}, prazo = Infinity) {
     const resta = Math.min(DIAG_FETCH_TETO_MS, prazo - Date.now());
     if (!(resta > 0)) {
@@ -11212,6 +11233,26 @@ async function diagCorpo() {
         } catch (e) { return diagFalhaDaLeitura(e); }
     };
 
+    // As leituras LOCAIS que podem nunca resolver (R17-4-03) começam AGORA, em paralelo com as de
+    // rede, e cada uma corre contra o prazo (ver `comPrazo`). `semRespostaLocal`: o que não chegou.
+    const semRespostaLocal = [];
+    const lerLocal = (rotulo, fazer) => {
+        const p = comPrazo(Promise.resolve().then(fazer), prazo, rotulo, semRespostaLocal);
+        p.catch(() => {});   // quem espera é mais abaixo; sem isto, a rejeição antes dele seria "não tratada"
+        return p;
+    };
+    const registrosPromessa = lerLocal('service worker (registros)', () => navigator.serviceWorker.getRegistrations());
+    const cachesPromessa = lerLocal('caches', async () => {
+        const o = {};
+        for (const nome of await caches.keys()) {
+            const c = await caches.open(nome);
+            o[nome] = (await c.keys()).map((r) => r.url);
+        }
+        return o;
+    });
+    const estimativaPromessa = lerLocal('armazenamento (estimate)', () => navigator.storage.estimate());
+    const persistentePromessa = lerLocal('armazenamento (persisted)', () => navigator.storage.persisted());
+
     const ls = {}, ss = {};
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
     catch (e) { ls._erro = String(e); }
@@ -11222,7 +11263,7 @@ async function diagCorpo() {
                  controlando: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
                  registros: [] };
     try {
-        for (const r of await navigator.serviceWorker.getRegistrations()) {
+        for (const r of await registrosPromessa) {
             sw.registros.push({ escopo: r.scope,
                 ativo: r.active && r.active.scriptURL, estadoAtivo: r.active && r.active.state,
                 esperando: r.waiting && r.waiting.scriptURL,
@@ -11232,12 +11273,8 @@ async function diagCorpo() {
     sw.proprio = await diagServiceWorker();
 
     const cachesDoAparelho = {};
-    try {
-        for (const nome of await caches.keys()) {
-            const c = await caches.open(nome);
-            cachesDoAparelho[nome] = (await c.keys()).map((r) => r.url);
-        }
-    } catch (e) { cachesDoAparelho._erro = String(e); }
+    try { Object.assign(cachesDoAparelho, await cachesPromessa); }
+    catch (e) { cachesDoAparelho._erro = String(e); }
 
     // O CÓDIGO que está rodando: tamanho, hash e versão de cada arquivo (o corpo,
     // só do CSS — ver abaixo). É isto que responde "o PWA está com a versão
@@ -11327,7 +11364,7 @@ async function diagCorpo() {
     // outro campo deste arquivo revelaria — só a sonda escreve-lê-apaga.
     const armazenamento = { quota: null, uso: null, escreve: null, erroEscrita: null };
     try {
-        const e = await navigator.storage.estimate();
+        const e = await estimativaPromessa;
         armazenamento.quota = e.quota; armazenamento.uso = e.usage;
         armazenamento.sobraPct = e.quota ? +(100 - (e.usage / e.quota) * 100).toFixed(2) : null;
     } catch (e) { armazenamento.erroQuota = String(e); }
@@ -11336,7 +11373,7 @@ async function diagCorpo() {
         armazenamento.escreve = sonda.escreve;
         if (sonda.erroEscrita) armazenamento.erroEscrita = sonda.erroEscrita;
     }
-    try { armazenamento.persistente = await navigator.storage.persisted(); } catch (e) {}
+    try { armazenamento.persistente = await persistentePromessa; } catch (e) {}
 
     // ── Relógio do aparelho × do servidor ──────────────────────────────────
     // Data errada no celular faz o aviso de sessão vencendo mentir e toda
@@ -11346,8 +11383,10 @@ async function diagCorpo() {
     const vivas = await vivasPromessa;
 
     const idb = {};
-    try { for (const d of await indexedDB.databases()) idb[d.name] = d.version; }
-    catch (e) { idb._erro = String(e); }
+    try {
+        for (const d of await comPrazo(Promise.resolve().then(() => indexedDB.databases()), Math.max(prazo, Date.now() + DIAG_PISO_LOCAL_MS),
+            'indexedDB.databases', semRespostaLocal)) idb[d.name] = d.version;
+    } catch (e) { idb._erro = String(e); }
 
     const c = navigator.connection || {};
     // Computado UMA vez: as sentinelas leem dele, e medir duas vezes daria duas
@@ -11488,7 +11527,10 @@ async function diagCorpo() {
         sessionStorage: ss,
         indexedDB: idb,
         serviceWorker: sw,
-        offline: await diagOffline(),
+        // A seção do offline lê a base (IndexedDB) e o cache do mapa: também corre contra o
+        // prazo (com o piso), e se estourar sai o que se sabe sem abrir nada (R17-4-03).
+        offline: await comPrazo(diagOffline(), Math.max(prazo, Date.now() + 3 * DIAG_PISO_LOCAL_MS), 'offline (base e cache do mapa)', semRespostaLocal)
+            .catch(() => ({ ...diagOfflineAgora(), semResposta: true })),
         caches: cachesDoAparelho,
         // CÓPIA no retrato, como o diário: a chamada que chegar depois dele fica
         // pra cópia guardada (ver `retratoEm`), em vez de ir nos dois lugares.
@@ -11531,7 +11573,8 @@ async function diagCorpo() {
             ms: Date.now() - inicioDaColeta, orcamentoMs: DIAG_ORCAMENTO_MS,
             semResposta: [...Object.entries(codigo).filter(([, v]) => v && v.semResposta).map(([u]) => u),
                           ...Object.entries(cacheVsRede).filter(([, v]) => v && v.semResposta).map(([u]) => u + ' (servidor)'),
-                          ...(relogio.semResposta ? ['relógio do servidor'] : [])],
+                          ...(relogio.semResposta ? ['relógio do servidor'] : []),
+                          ...semRespostaLocal],
         },
     };
     // Fora do JSON (não enumerável): o que o `baixarDiagnostico` marca como
@@ -23026,13 +23069,20 @@ function urlDaFoto(u) {
 // (auditoria de 2026-09-25). Estourado, é "sem base" — o app segue como sem
 // fila guardada.
 const OFFLINE_DB_TETO_MS = 5000;
-function offlineDB() {
+// `soLer`: quem só LÊ não cria a base (R17-4-04). Abrir uma base que não existe a CRIA, vazia, e a
+// leitura que já estava a caminho quando o "Sair" de OUTRA aba apagou tudo (a do fim da
+// varredura, a do relatório, a da reabertura) deixava `waze_places_offline` de volta no
+// aparelho, sem dado mas com o nome — MEDIDO com `indexedDB.databases()` nos dois motores. Com
+// `soLer` o `onupgradeneeded` (o que só roda quando a base NÃO existe) aborta a abertura: a
+// base nova é descartada e a leitura devolve "sem base". Quem grava abre sem isso.
+function offlineDB({ soLer = false } = {}) {
     return new Promise((ok, erro) => {
         let req;
         try { req = indexedDB.open(OFFLINE_DB, 1); } catch (e) { return erro(e); }
         let estourou = false;
         const teto = setTimeout(() => { estourou = true; erro(new Error('timeout')); }, OFFLINE_DB_TETO_MS);
         req.onupgradeneeded = () => {
+            if (soLer) { try { req.transaction.abort(); } catch (e) { /* o `onerror` abaixo responde */ } return; }
             const db = req.result;
             if (!db.objectStoreNames.contains(OFFLINE_STORE)) db.createObjectStore(OFFLINE_STORE);
         };
@@ -23455,7 +23505,7 @@ async function offlineGravarJanela(janela, filaCoberta = null) {
 // O registro inteiro: `{ janela, t, filaCoberta }`.
 async function offlineLerRegistroDaJanela() {
     try {
-        const db = await offlineDB();
+        const db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('janela');
@@ -23483,7 +23533,7 @@ async function offlineRecuperarJanela() {
 
 async function offlineLerFila() {
     try {
-        const db = await offlineDB();
+        const db = await offlineDB({ soLer: true });
         const v = await new Promise((ok, erro) => {
             const tx = db.transaction(OFFLINE_STORE, 'readonly');
             const r = tx.objectStore(OFFLINE_STORE).get('fila');
@@ -24057,6 +24107,17 @@ async function offlineVarrer() {
             const naBase = Number.isFinite(filaCoberta) ? await offlineLerFila() : null;
             // A época conferida DEPOIS do `await`: o que vem em seguida é SÍNCRONO.
             if (epoca !== offlineEpoca) return;
+            // A base já está na mão: se a fila guardada é OUTRA (o carimbo não é o que esta
+            // varredura cobriu), a aba que a gravou avisaria por aqui — mas o aviso depende do
+            // `BroadcastChannel`, que o iOS < 15.4 não tem (R17-4-06). O mesmo caminho do aviso
+            // (`aoGravarFilaGuardadaEmOutraAba`, que não faz nada quando é a MESMA fila que esta
+            // aba conhece, como a que a busca desta aba gravou durante a varredura): a aba passa
+            // a saber qual fila está guardada, a cobertura que vai ser dada não é dela, e o
+            // gatilho seguinte prepara a fila desta aba. Sem isto o "Pronto" saía com o mapa dos
+            // pedidos da outra aba fora do aparelho.
+            if (naBase && Number.isFinite(naBase.t) && naBase.t !== filaCoberta && typeof aoGravarFilaGuardadaEmOutraAba === 'function') {
+                aoGravarFilaGuardadaEmOutraAba({ v: 1, filaGuardada: naBase.t });
+            }
             let semPedidos = 0;
             if (naBase && naBase.t === filaCoberta) {
                 const nela = new Set(naBase.places.map(chaveDoPedido));

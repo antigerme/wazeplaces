@@ -153,7 +153,17 @@ else if (off.ligado === false) {
     else {
       out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? 'sim' : 'não'}`);
       if (!off.cobreAFila && off.resultado === 'pronto') {
-        out('ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila — a linha diz "Ainda não preparado" (sem rede: que o mapa e as fotos chegam quando houver sinal).');
+        // Dois motivos diferentes pro mesmo "pronto" sem cobertura (R17-4-07): a preparação
+        // é de OUTRA fila (a de antes de outra aba gravar), ou é desta fila e terminou com
+        // pedidos que a base não tinha (`semNaBase` no `offline.pronto` do diário, R16-4-01) — aí
+        // a causa certa está no diário, e a frase "de OUTRA fila" apontaria a errada.
+        const ultimoPronto = [...(Array.isArray(d.diario) ? d.diario : [])].reverse().find((e) => e && e.k === 'offline.pronto');
+        const semNaBase = ultimoPronto && Number(ultimoPronto.semNaBase) > 0 ? Number(ultimoPronto.semNaBase) : 0;
+        if (semNaBase) {
+          out(`ATENÇÃO: o resultado é "pronto", mas a preparação terminou com ${semNaBase} pedido(s) DESTA aba que a fila guardada não tinha (outra aba a regravou durante a varredura, sem esses pedidos) — a cobertura não foi dada e a linha diz "Ainda não preparado"; o próximo gatilho prepara a fila desta aba.`);
+        } else {
+          out('ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila — a linha diz "Ainda não preparado" (sem rede: que o mapa e as fotos chegam quando houver sinal).');
+        }
       }
       if (typeof naBase === 'number' && typeof off.filaGravadaEm === 'number' && naBase !== off.filaGravadaEm) {
         out('ATENÇÃO: a fila guardada na base não é a que esta aba conhece — outra aba a gravou e o aviso não chegou aqui (ou este navegador não tem o canal entre abas).');

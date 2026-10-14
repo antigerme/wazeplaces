@@ -10,7 +10,10 @@
 // desfeito (sabotagem no relatório do lote 21).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const APP = ler('js/app.js');
@@ -359,8 +362,173 @@ test('R17-4-02: a linha das Preferências diz que faltou ESPAÇO (e não promete
   assert.match(linha(false), /parcialA[\s\S]*parcialB/, 'CONTROLE: sem o motivo a linha deixou de ser a de sempre');
 });
 
+// ═══ R17-4-04 · quem só LÊ não cria a base ═══════════════════════════════════════════════
+// Um IndexedDB de mentira com a regra que importa: abrir uma base que NÃO existe roda o
+// `onupgradeneeded`; se ele aborta a transação, a base nova é descartada e o `open` falha com
+// AbortError (é o que o navegador faz — o smoke 9q mede nos dois motores com o de verdade).
+function idbDeMentira(dados = null) {
+  const bases = new Set(dados ? ['waze_places_offline'] : []);
+  const indexedDB = {
+    open(nome) {
+      const req = { result: null, error: null, transaction: null };
+      setTimeout(() => {
+        const nova = !bases.has(nome);
+        const db = {
+          objectStoreNames: { contains: () => !nova }, createObjectStore() {}, close() {},
+          transaction: () => ({ objectStore: () => ({ get: (k) => {
+            const r = {}; setTimeout(() => { r.result = dados ? dados[k] : undefined; if (r.onsuccess) r.onsuccess(); }); return r;
+          } }) }),
+        };
+        req.result = db;
+        if (nova) {
+          let abortou = false;
+          req.transaction = { abort() { abortou = true; } };
+          if (req.onupgradeneeded) req.onupgradeneeded();
+          if (abortou) { req.error = Object.assign(new Error('abortou'), { name: 'AbortError' }); if (req.onerror) req.onerror(); return; }
+          bases.add(nome);
+        }
+        if (req.onsuccess) req.onsuccess();
+      });
+      return req;
+    },
+  };
+  return { indexedDB, bases };
+}
+function leitoresSobre(idb) {
+  const deps = { indexedDB: idb.indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'estado', OFFLINE_DB_TETO_MS: 5000 };
+  const chaves = Object.keys(deps);
+  return new Function(...chaves, [fatiar('offlineDB'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'),
+    'return { db: offlineDB, fila: offlineLerFila, janela: offlineLerRegistroDaJanela };'].join('\n'))(...chaves.map((k) => deps[k]));
+}
+
+test('R17-4-04: ler a fila guardada ou a janela de uma base que NÃO existe devolve "nada" e NÃO cria a base (o "Sair" de outra aba a tinha apagado)', async () => {
+  const idb = idbDeMentira();
+  const l = leitoresSobre(idb);
+  assert.equal(await l.fila(), null);
+  assert.equal(await l.janela(), null);
+  assert.equal(idb.bases.size, 0, 'DEFEITO: a leitura CRIOU a base apagada pelo "Sair" (waze_places_offline de volta, vazia)');
+});
+
+test('R17-4-04: CONTROLE — quem GRAVA abre a base e a cria; e a leitura de uma base que existe devolve o que está nela', async () => {
+  const idb = idbDeMentira();
+  const l = leitoresSobre(idb);
+  const db = await l.db();
+  assert.ok(db, 'a abertura de quem grava falhou');
+  assert.equal(idb.bases.has('waze_places_offline'), true, 'CONTROLE: a gravação deixou de criar a base');
+  const existente = idbDeMentira({ fila: { t: 7, places: [{ venueID: 'v1' }] }, janela: { janela: 3, t: 1, filaCoberta: 7 } });
+  const l2 = leitoresSobre(existente);
+  assert.equal((await l2.fila()).t, 7, 'CONTROLE: a leitura não devolveu a fila de uma base que existe');
+  assert.equal((await l2.janela()).janela, 3);
+});
+
+test('R17-4-04: os quatro abridores da base estão classificados — os dois que só leem pedem `soLer`, os dois que gravam não', () => {
+  const chamadores = [...APP_SEM.matchAll(/await offlineDB\(([^)]*)\)/g)].length;
+  assert.equal(chamadores, 4, `há ${chamadores} chamadas de offlineDB(): abridor novo precisa ser classificado em leitor (soLer) ou gravador`);
+  for (const nome of ['offlineLerFila', 'offlineLerRegistroDaJanela']) {
+    assert.match(fatiar(nome), /await offlineDB\(\{ soLer: true \}\)/, `${nome} só lê e abre a base CRIANDO-a`);
+  }
+  for (const nome of ['offlineGravarFila', 'offlineGravarJanela']) {
+    assert.match(fatiar(nome), /await offlineDB\(\)/, `${nome} grava: não pode abrir com soLer`);
+  }
+});
+
+// ═══ R17-4-03 · o orçamento do relatório cobre as leituras LOCAIS do navegador ═══════════════
+const comPrazo = new Function('return (' + fatiar('comPrazo').replace(/^function comPrazo/, 'function') + ')')();
+const nunca = () => new Promise(() => {});
+
+test('R17-4-03: `comPrazo` — resolve o que chega a tempo, REJEITA com TimeoutError o que não chega (e anota o rótulo), e não segura o relógio depois de resolver', async () => {
+  const faltou = [];
+  assert.equal(await comPrazo(Promise.resolve(7), Date.now() + 1000, 'rápida', faltou), 7);
+  assert.deepEqual(faltou, [], 'CONTROLE: a leitura que chegou foi marcada sem resposta');
+  await assert.rejects(comPrazo(nunca(), Date.now() + 30, 'pendurada', faltou), (e) => e.name === 'TimeoutError' && /pendurada/.test(e.message));
+  assert.deepEqual(faltou, ['pendurada'], 'DEFEITO: a leitura que não chegou não foi anotada na seção `coleta`');
+  // Já passou do prazo: não espera nada (e uma leitura que resolve em seguida perde).
+  await assert.rejects(comPrazo(nunca(), Date.now() - 5, 'tarde', faltou), (e) => e.name === 'TimeoutError');
+  // O erro da própria leitura passa como está (não vira "sem resposta").
+  const erro = new Error('quebrou');
+  await assert.rejects(comPrazo(Promise.reject(erro), Date.now() + 1000, 'quebra', faltou), (e) => e === erro);
+  assert.equal(faltou.includes('quebra'), false, 'o erro da leitura foi anotado como "sem resposta"');
+  // Resolvida a tempo, o temporizador sai: o processo de teste não fica preso por ele.
+  await comPrazo(Promise.resolve(1), Date.now() + 60 * 60 * 1000, 'longa', faltou);
+});
+
+// A leitura está DENTRO de uma chamada `lerLocal(`/`comPrazo(`? Sobe pelos parênteses ainda abertos
+// (os literais de texto viram espaços antes: "(registros)" num rótulo não pode contar).
+function dentroDe(corpo, idx, nomes) {
+  const limpo = corpo.replace(/'(?:[^'\\\n]|\\.)*'/g, (m) => ' '.repeat(m.length));
+  let fundo = 0;
+  for (let j = idx - 1; j >= 0; j--) {
+    const c = limpo[j];
+    if (c === ')') fundo++;
+    else if (c === '(') {
+      if (fundo > 0) { fundo--; continue; }
+      const nome = /([A-Za-z_$][\w$]*)\s*$/.exec(limpo.slice(Math.max(0, j - 40), j));
+      if (nome && nomes.includes(nome[1])) return true;
+    }
+  }
+  return false;
+}
+test('R17-4-03: toda leitura local do `diagCorpo` (registros do worker, CacheStorage, estimate, persisted, IndexedDB, a seção do offline) passa pelo prazo — nenhuma corre solta', () => {
+  const corpo = fatiar('diagCorpo');
+  for (const [rotulo, padrao] of [
+    ['navigator.serviceWorker.getRegistrations', /navigator\.serviceWorker\.getRegistrations\(/g],
+    ['caches.keys', /\bcaches\.keys\(/g],
+    ['caches.open', /\bcaches\.open\(/g],
+    ['navigator.storage.estimate', /navigator\.storage\.estimate\(/g],
+    ['navigator.storage.persisted', /navigator\.storage\.persisted\(/g],
+    ['indexedDB.databases', /\bindexedDB\.databases\(/g],
+    ['diagOffline', /\bdiagOffline\(/g],
+  ]) {
+    const achados = [...corpo.matchAll(padrao)];
+    assert.ok(achados.length, `${rotulo} sumiu do diagCorpo (o guard ficou cego)`);
+    for (const m of achados) {
+      assert.ok(dentroDe(corpo, m.index, ['lerLocal', 'comPrazo']),
+        `DEFEITO: ${rotulo} corre solto no relatório — se nunca resolver, o botão fica em "Juntando tudo…" sem aviso`);
+    }
+  }
+  // O que não chegou vai pra seção `coleta`.
+  assert.match(corpo, /\.\.\.semRespostaLocal\]/, 'DEFEITO: as leituras locais sem resposta não entram em `coleta.semResposta`');
+  // CONTROLE do instrumento: o `dentroDe` enxerga a diferença (uma leitura fora e uma dentro).
+  assert.equal(dentroDe('lerLocal(\'r (x)\', () => a.b())', 'lerLocal(\'r (x)\', () => a.b'.length - 3, ['lerLocal']), true);
+  assert.equal(dentroDe('await a.b(); lerLocal(\'r\', () => c())', 'await a.b'.length - 1, ['lerLocal']), false, 'CONTROLE: o guard acha "dentro" onde não está');
+});
+
+// ═══ R17-4-07 · a triagem aponta a causa certa do "pronto" sem cobertura ═══════════════════
+// A frase "da preparação de OUTRA fila" também saía quando a preparação era da fila DESTA aba e
+// terminou com pedidos que a base não tinha (`semNaBase`, R16-4-01).
+function triagemOffline(offline, diario = []) {
+  const rel = { _versaoDoDiag: 11, _gerado: '2026-10-14T23:00:00.000Z', app: { versao: '2026101401', rotulo: '2026.10.14-01' },
+    ambiente: { ua: 'x', online: true, tela: { w: 390, h: 844, dpr: 3, janela: '390x844' } },
+    resumo: { momentos: 0, chamadas: 0, falhas: 0, errosDeJs: 0, rede: true, offline: 'pronto',
+      telaAgora: { tela: 'app', painel: 'card', cardMontado: true, modais: [], lightbox: false }, alertas: [] },
+    offline, diario, chamadas: [], momentos: [], erros: [], localStorage: {} };
+  const dir = mkdtempSync(join(tmpdir(), 'diag-r17-'));
+  const arq = join(dir, 'd.json');
+  writeFileSync(arq, JSON.stringify(rel));
+  const saida = execFileSync(process.execPath, [new URL('../tools/diag-resumo.mjs', import.meta.url).pathname, arq], { encoding: 'utf8', timeout: 20000 });
+  const i = saida.indexOf('── OFFLINE');
+  return saida.slice(i, saida.indexOf('\n──', i + 5));
+}
+const OFFLINE_SEM_COBERTURA = () => ({ ligado: true, janelaServida: 1492385, janelaAtual: 1492385, resultado: 'pronto', varrendo: false,
+  filaGravadaEm: 2000, filaPreparada: null, filaVarrida: 2000, cobreAFila: false, precisaVarrer: true,
+  filaGuardada: { n: 12, idadeMin: 0, desdeMin: 0, t: 2000, soNestaAba: 1, soNaGuardada: 0 }, filaCobertaGuardada: null,
+  janelaGuardada: 1492385, tilesNoCache: 12, tilesGuardadosQueFalharam: 0, pousosGravados: 0 });
+test('R17-4-07: o "pronto" sem cobertura por pedidos que a base não tinha (`semNaBase`) NÃO diz "de OUTRA fila" — diz a causa; sem o `semNaBase`, a frase de sempre', () => {
+  const comSemNaBase = triagemOffline(OFFLINE_SEM_COBERTURA(), [{ t: 1, k: 'offline.pronto', n: 12, itens: 30, semNaBase: 2 }]);
+  assert.doesNotMatch(comSemNaBase, /preparação de OUTRA fila/, `DEFEITO: a triagem aponta a causa errada (outra fila) num caso do semNaBase:\n${comSemNaBase}`);
+  assert.match(comSemNaBase, /ATENÇÃO: o resultado é "pronto", mas a preparação terminou com 2 pedido\(s\) DESTA aba que a fila guardada não tinha/,
+    `a triagem não diz a causa certa:\n${comSemNaBase}`);
+  // CONTROLE: o diário sem o `semNaBase` (ou com um `offline.pronto` mais novo sem ele) segue com a frase de sempre.
+  const outra = triagemOffline(OFFLINE_SEM_COBERTURA(), [{ t: 1, k: 'offline.pronto', n: 12, itens: 30 }]);
+  assert.match(outra, /ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila/, `CONTROLE: a frase de sempre sumiu:\n${outra}`);
+  const maisNovo = triagemOffline(OFFLINE_SEM_COBERTURA(), [{ t: 1, k: 'offline.pronto', semNaBase: 2 }, { t: 2, k: 'offline.pronto', n: 12 }]);
+  assert.match(maisNovo, /preparação de OUTRA fila/, 'CONTROLE: o `semNaBase` de uma preparação ANTERIOR explicou a de agora');
+  const semDiario = triagemOffline(OFFLINE_SEM_COBERTURA());
+  assert.match(semDiario, /preparação de OUTRA fila/, 'CONTROLE: sem diário a frase de sempre sumiu');
+});
+
 test('o bundle GERADO tem os consertos do lote 21 (senão nada disso está no ar)', () => {
-  for (const nome of ['offlineSegurarAte', 'offlineRecuoDoLimite', 'offlineErroDeCota', 'offlineSemEspaco', 'semEspacoA']) {
+  for (const nome of ['offlineSegurarAte', 'offlineRecuoDoLimite', 'offlineErroDeCota', 'offlineSemEspaco', 'semEspacoA', 'soLer', 'DIAG_PISO_LOCAL_MS']) {
     assert.ok(MIN.includes(nome), `js/min/app.js não tem ${nome} — rode \`npm run js\``);
   }
 });

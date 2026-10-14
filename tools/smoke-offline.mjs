@@ -1687,6 +1687,54 @@ diz('e diz, no arquivo, o que não chegou',
   && relPendurado.coleta.orcamentoMs > 0, String(JSON.stringify(relPendurado?.coleta ?? relPendurado)).slice(0, 300));
 await ctxL.close();
 
+secao('8d. O DIAGNÓSTICO COM AS LEITURAS LOCAIS PENDURADAS (cache, storage, IndexedDB, service worker) sai no orçamento — e diz quais');
+// Auditoria da rodada 17 (R17-4-03). O orçamento de 10 s cobria os `fetch`, o relógio e as travas,
+// mas não as leituras LOCAIS do navegador: se uma delas nunca resolvesse, o relatório não saía e o
+// botão ficava em "Juntando tudo…" sem aviso. Aqui as quatro APIs são trocadas por promessas que
+// NUNCA resolvem (`addInitScript`, antes de o app carregar) e o arquivo de verdade é gerado pelo
+// botão. O CONTROLE é a mesma geração sem o defeito: sai em poucos segundos e não marca nada
+// (senão "diz quais" passaria marcando tudo, sempre — gotcha #28).
+const gerar8d = async (nome, penduradas) => {
+  const c = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: true });
+  if (penduradas) await c.addInitScript(() => {
+    const nunca = () => new Promise(() => {});
+    try { CacheStorage.prototype.keys = nunca; } catch (e) {}
+    try { StorageManager.prototype.estimate = nunca; } catch (e) {}
+    try { StorageManager.prototype.persisted = nunca; } catch (e) {}
+    try { IDBFactory.prototype.databases = nunca; } catch (e) {}
+    try { ServiceWorkerContainer.prototype.getRegistrations = nunca; } catch (e) {}
+  });
+  const pg = await c.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
+  const dir = mkdtempSync(join(tmpdir(), 'diag-8d-'));
+  try {
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    await esperarNaPagina(pg, () => typeof baixarDiagnostico === 'function', 20000, 100);
+    const t0 = Date.now();
+    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
+    const arq = join(dir, nome + '.zip');
+    await dl.saveAs(arq);
+    const { dados } = lerDiagnostico(arq);
+    return { s: Math.round((Date.now() - t0) / 100) / 10, semResposta: dados.coleta?.semResposta || [],
+             caches: dados.caches, armazenamento: dados.armazenamento, indexedDB: dados.indexedDB, offline: dados.offline?.ligado,
+             temResumo: !!dados.resumo };
+  } catch (e) {
+    return { erro: String((e && e.message) || e).slice(0, 200) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await c.close();
+  }
+};
+const rel8dBom = await gerar8d('boa', false);
+diz('CONTROLE: com as leituras locais respondendo, o arquivo sai em poucos segundos e não marca nada sem resposta',
+  rel8dBom.s <= 8 && rel8dBom.semResposta?.length === 0 && rel8dBom.temResumo, JSON.stringify(rel8dBom).slice(0, 300));
+const rel8dPendurada = await gerar8d('pendurada', true);
+diz('com as quatro leituras locais PENDURADAS o arquivo sai mesmo assim, dentro do orçamento (antes: nunca saía)',
+  rel8dPendurada.temResumo === true && rel8dPendurada.s <= 20, JSON.stringify(rel8dPendurada).slice(0, 300));
+diz('e diz, no arquivo, quais leituras não chegaram',
+  ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases']
+    .every((r) => rel8dPendurada.semResposta?.includes(r)), JSON.stringify(rel8dPendurada.semResposta));
+
 // SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
 // código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
 // for declarado aqui não existe depois dele.
@@ -4430,7 +4478,7 @@ secao('9q. O "SAIR" DE OUTRA ABA COM O DOWNLOAD NO AR: o cache e a base não vol
 // com o CacheStorage e o IndexedDB de verdade, e a ordem forçada pelo portão em DUAS
 // posições (o `open` resolve depois do apagamento — recria — ou antes — órfão). O
 // CONTROLE é o mesmo roteiro SEM o "Sair": o tile fica e a base fica.
-const cenario9q = async (nome, { abrirAntes, sair }) => {
+const cenario9q = async (nome, { abrirAntes, sair, segurarLeitura = false }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
   await ctx.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } }));
   const rota = (r) => {
@@ -4466,7 +4514,7 @@ const cenario9q = async (nome, { abrirAntes, sair }) => {
   const A = await abrir('A');
   const B = await abrir('B');
   // A: nova varredura, com o `caches.open` do mapa SEGURADO pelo portão do teste.
-  await A.pg.evaluate((antes) => {
+  await A.pg.evaluate(({ antes, segurarLeitura }) => {
     const real = caches.open.bind(caches);
     // Quantos `put` o cache do mapa recebeu depois do portão: com a época trocada, NENHUM
     // (gravar e desfazer deixaria o tile no aparelho por um instante, e a página que
@@ -4477,15 +4525,27 @@ const cenario9q = async (nome, { abrirAntes, sair }) => {
     window.__seguros = 0; window.__sol = [];
     window.__soltar = () => { window.__passou = true; window.__sol.splice(0).forEach((f) => f()); };
     caches.open = async (nome) => {
-      if (nome !== 'waze-places-tiles' || window.__passou) return real(nome);
+      if (segurarLeitura || nome !== 'waze-places-tiles' || window.__passou) return real(nome);
       window.__seguros++;
       if (antes) { const c = await real(nome); await new Promise((ok) => window.__sol.push(ok)); return c; }
       await new Promise((ok) => window.__sol.push(ok));
       return real(nome);
     };
+    // R17-4-04: em vez do cache, o que fica preso é a LEITURA da fila guardada que fecha a
+    // varredura (a que abria a base e, com o "Sair" de B no meio, a deixava de volta,
+    // vazia). O download termina antes, e o portão solta depois do apagamento de B.
+    if (segurarLeitura) {
+      const lerReal = offlineLerFila;
+      offlineLerFila = async function () {
+        if (window.__passou) return lerReal();
+        window.__seguros++;
+        await new Promise((ok) => window.__sol.push(ok));
+        return lerReal();
+      };
+    }
     offlineJanelaServida -= 1; offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
     offlineMarcarGesto(); offlineTalvezVarrer();
-  }, abrirAntes);
+  }, { antes: abrirAntes, segurarLeitura });
   const preso = await esperarNaPagina(A.pg, () => window.__seguros > 0, 15000, 50);
   const out = { preso: preso.ok };
   if (sair) {
@@ -4509,6 +4569,15 @@ for (const [rot, antes] of [['o `open` resolve DEPOIS do apagamento (recria o ca
   diz(`depois do "Sair" de B, com ${rot}: o cache do mapa e a base de A não voltam (R15-4-02)`,
     r.preso && r.avisou && r.fim && r.cache === false && r.tiles === 0 && r.dbs.length === 0 && r.puts === 0, JSON.stringify(r));
 }
+// R17-4-04: a LEITURA da fila guardada que fecha a varredura (e as demais — a do relatório, a
+// da reabertura) abria a base e, com o "Sair" de B no meio, a deixava de volta: vazia, mas
+// com o nome. Quem só lê não cria. Medido com o IndexedDB de verdade, nos dois motores.
+const ler9q = await cenario9q('a LEITURA da fila guardada presa', { abrirAntes: false, sair: true, segurarLeitura: true });
+diz('depois do "Sair" de B, com a leitura da fila guardada que fecha a varredura de A presa: a base não volta (R17-4-04)',
+  ler9q.preso && ler9q.avisou && ler9q.fim && ler9q.cache === false && ler9q.dbs.length === 0, JSON.stringify(ler9q));
+const lerSem9q = await cenario9q('a LEITURA da fila guardada presa, sem Sair', { abrirAntes: false, sair: false, segurarLeitura: true });
+diz('CONTROLE: o mesmo roteiro SEM o "Sair" — a base existe (a gravação a cria; só a LEITURA deixou de criar) e o cache tem os tiles',
+  lerSem9q.preso && lerSem9q.fim && lerSem9q.dbs.length > 0 && lerSem9q.cache === true && lerSem9q.tiles > 0, JSON.stringify(lerSem9q));
 const sem9q = await cenario9q('sem Sair', { abrirAntes: false, sair: false });
 diz('CONTROLE: o mesmo roteiro SEM o "Sair" — o cache do mapa tem os tiles e a base existe (o instrumento enxerga os dois lados)',
   sem9q.preso && sem9q.fim && sem9q.cache === true && sem9q.puts > 0 && sem9q.tiles > 0 && sem9q.dbs.length > 0, JSON.stringify(sem9q));
