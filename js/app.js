@@ -26629,7 +26629,7 @@ let avisoDaRecusaAutomatica = null;
 // recusa automática (R15-2-F3, MEDIDO). `acoes` é quantas unidades do
 // `inFlightActions` o lote ocupa, e o indicador as troca pelos pedidos dele. Cada
 // registro leva a época da sessão: o de uma sessão que acabou não conta na seguinte.
-const rejeicoesDeLoteNoAr = new Set();   // { epoca, restam, acoes }
+const rejeicoesDeLoteNoAr = new Set();   // { epoca, restam, acoes, pedidos[, lidos] }
 // Pedidos por requisição. O Waze processa o lote EM ORDEM e PARA no primeiro
 // pedido que outro editor já resolveu — MEDIDO em 2026-09-25 com a conta L2:
 // [real, inexistente, real] → HTTP 500, código 300, com o PRIMEIRO marcado e o
@@ -26734,6 +26734,12 @@ async function handleBatchMarkRead() {
     for (const p of alvos) alvosDoLoteDeLidosNoAr.set(chaveDoPedido(p), epoca);
     // O indicador conta os pedidos do lote no ar (ver `lidosDoLoteNoAr`).
     lidosDoLoteNoAr = alvos.length;
+    // E o lote de uma sessão que ACABOU (a queda com renovação) segue com a ida em voo:
+    // o indicador o conhece como conhece os de rejeição, e não diz "Enviando 1…" por
+    // uma ida que a sessão de agora não está esperando (R17-1-02, MEDIDO). O da sessão
+    // de agora segue com a conta de cima (`lidosDoLoteNoAr`).
+    const registroNoIndicador = { epoca, restam: alvos.length, acoes: 1, pedidos: alvos, lidos: true };
+    rejeicoesDeLoteNoAr.add(registroNoIndicador);
     marcarEmAndamento(alvos, true);
     // E o diálogo do "Sair" conta os que ainda não saíram (R15-2-F4): o laço para
     // depois do pedaço que está no ar, e os seguintes não vão ao Waze.
@@ -26933,6 +26939,7 @@ async function handleBatchMarkRead() {
         // soltar o que um lote da sessão nova travou. O mesmo com a contagem do
         // indicador (`lidosDoLoteNoAr`).
         if (epoca === epocaDaSessao) { loteDeLidosEmVoo = false; lidosDoLoteNoAr = 0; }
+        rejeicoesDeLoteNoAr.delete(registroNoIndicador);
         for (const p of alvos) {
             const k = chaveDoPedido(p);
             if (alvosDoLoteDeLidosNoAr.get(k) === epoca) alvosDoLoteDeLidosNoAr.delete(k);
@@ -27540,6 +27547,10 @@ function updateInFlightIndicator() {
     const doLoteVelho = new Set();   // as chaves dos pedidos dos lotes de sessões que acabaram
     if (typeof rejeicoesDeLoteNoAr !== 'undefined') {
         for (const l of rejeicoesDeLoteNoAr) {
+            // O "Marcar todos" DESTA sessão tem a conta própria (`doLote`, acima): só o
+            // de uma sessão que acabou entra aqui, pela unidade que ocupa no
+            // `inFlightActions` e pelos pedidos que voltam à fila (R17-1-02).
+            if (l.lidos === true && l.epoca === epocaDaSessao) continue;
             // As unidades que o lote ocupa no `inFlightActions` saem da conta em
             // qualquer época, mas os pedidos dele só contam na sessão dele: o lote
             // de uma sessão que acabou (a queda com renovação) segue com a ida em
@@ -27556,8 +27567,14 @@ function updateInFlightIndicator() {
     // E as anotações que esse lote deixou na fila de saída até a ida em voo
     // responder (é ela que as tira): os pedidos VOLTAM à fila, e "6 esperando
     // envio" seria o mesmo engano com outro número.
+    //
+    // SÓ as que ainda levam a marca de envio do lote (`rv`): a que já voltou da ida com
+    // rede fora perdeu a marca (`soltarMarcaDosItens`) e ESPERA a rede de verdade — a
+    // sessão renovada a manda (`esvaziarFilaDeSaida`), e o diálogo do "Sair" a conta.
+    // Filtrar todas escondia do canto uma decisão legítima "esperando envio" até a ida
+    // seguinte do lote velho responder, até 45 s (R17-2-04, MEDIDO).
     if (doLoteVelho.size) {
-        fila = fila.filter((x) => !doLoteVelho.has(chaveDoPedido(x)));
+        fila = fila.filter((x) => !(x && x.rv && doLoteVelho.has(chaveDoPedido(x))));
         esperando = fila.length;
     }
     const saindo = Math.max(0, Math.max(0, AppState.inFlightActions) - acoesDeLote) + pedidosDeLote + pelaOutraAba + doLote;

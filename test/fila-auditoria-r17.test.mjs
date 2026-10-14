@@ -174,7 +174,7 @@ function loteNoAr({ n = 4 } = {}) {
   const deps = {
     AppState, document: dialogoDoSair().document, epocaDaSessao: 0, Treino: { ativo: false }, LOTE_LIDOS_PEDACO: 25,
     pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(),
-    alvosDoLoteDeLidosNoAr: new Map(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    alvosDoLoteDeLidosNoAr: new Map(), aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), rejeicoesDeLoteNoAr: new Set(),
     loteDeLidosContado: new Set(places.map(chaveDe)), loteDeLidosEmVoo: false, lidosDoLoteNoAr: 0, escritasConferindo: 0,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, extRenovando: false,
     contaDestaAbaEmDuvida: () => false,
@@ -251,4 +251,73 @@ test('R17-2-05: o lote que acaba tira SÓ os alvos dele — um lote da sessão n
 test('R17-2-05 (estrutura): a trava do card olha o lote da tela dentro do `acoesTravadas` (botão, gesto e tecla passam por ele) e o aviso diz o porquê', () => {
   assert.match(fatiar('acoesTravadas'), /\|\| loteDeLidosDaTelaNoAr\(\)/);
   assert.match(fatiar('avisoDaTrava'), /if \(loteDeLidosEmVoo \|\| loteDeLidosDaTelaNoAr\(\)\) return 'toast\.esperaLote';/);
+});
+
+// ═══ R17-1-02 + R17-2-04 · o canto "Enviando N…" × o lote de lidos e a fila de saída ═══
+// (a) o "Marcar todos" no ar na queda com renovação deixava o "Enviando 1…" no canto até a
+//     ida responder (o indicador só conhecia lote de OUTRA sessão nos de rejeição);
+// (b) o filtro do lote velho escondia do canto também a decisão que já voltou da ida com a
+//     rede fora e ESPERA envio (a sessão renovada a manda).
+function indicador({ noAr = 1, lotes = [], epoca = 1, fila = [], loteNoAr = false, lidosNoAr = 0 } = {}) {
+  const els = new Map();
+  const document = {
+    getElementById: (id) => (id === 'logoutModal' ? { classList: { contains: () => true } } : els.get(id) || null),
+    createElement: () => ({ className: '', title: '', innerHTML: '', style: {}, remove() { els.delete(this.id); } }),
+    body: { appendChild: (el) => { els.set(el.id, el); } },
+  };
+  const deps = { document, AppState: { authenticated: true, inFlightActions: noAr }, carregarFilaDeSaida: () => fila,
+    t: (k, v) => `${k}:${v.n}`, escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => {},
+    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID, reivindicadoPorOutraAba: () => false,
+    SAIDA_REIVINDICACAO_MS: 60000, setTimeout: () => 0, clearTimeout: () => {},
+    loteDeLidosEmVoo: loteNoAr, lidosDoLoteNoAr: lidosNoAr, epocaDaSessao: epoca, rejeicoesDeLoteNoAr: new Set(lotes) };
+  const chaves = Object.keys(deps);
+  const atualizar = new Function(...chaves, 'let indicadorMarcaVence = null;\n' + fatiar('saindoPelaOutraAba') + '\n'
+    + fatiar('updateInFlightIndicator') + '\nreturn updateInFlightIndicator;')(...chaves.map((k) => deps[k]));
+  const texto = () => {
+    const el = els.get('inFlightIndicator');
+    return el ? (/<span class="sr-only">([^<]*)</.exec(el.innerHTML) || [])[1] : null;
+  };
+  atualizar();
+  return { texto };
+}
+const item = (i, rv) => ({ tipo: 'reject', venueID: 'v' + i, updateRequestID: 'u' + i, ...(rv ? { rv: 'aba-1', rvEm: 1 } : {}) });
+
+test('R17-1-02: o "Marcar todos" de uma sessão que acabou não diz "Enviando 1…" — o lote de lidos entra no indicador como os de rejeição', () => {
+  const pedidos = [P(1), P(2), P(3)];
+  const lote = { epoca: 0, restam: 3, acoes: 1, pedidos, lidos: true };
+  // A sessão agora é a 1; o lote é da 0. Só a unidade dele ocupa o `inFlightActions`.
+  assert.equal(indicador({ noAr: 1, lotes: [lote], epoca: 1 }).texto(), null,
+    'DEFEITO: o canto diz que algo está saindo por um lote de lidos de uma sessão que acabou (R17-1-02)');
+  // CONTROLE: sem o registro do lote o canto diz "Enviando 1…" (o instrumento enxerga o defeito).
+  assert.equal(indicador({ noAr: 1, lotes: [], epoca: 1 }).texto(), 'indicator.sending:1', 'CONTROLE: sem o registro do lote o canto devia mostrar a unidade');
+  // CONTROLE: o lote da sessão de AGORA segue com a conta própria (pedidos no ar), sem contar em dobro.
+  assert.equal(indicador({ noAr: 1, lotes: [{ ...lote, epoca: 1 }], epoca: 1, loteNoAr: true, lidosNoAr: 3 }).texto(), 'indicator.sending:3',
+    'o lote de lidos da sessão de agora contou em dobro (ou deixou de contar)');
+});
+
+test('R17-1-02: o lote de lidos de verdade se registra no indicador ao começar e sai dele ao acabar — em qualquer desfecho', async () => {
+  const m = loteNoAr();
+  m.h.openBatchReadConfirm();
+  const lote = m.h.handleBatchMarkRead();
+  await tiques();
+  const regs = [...m.deps.rejeicoesDeLoteNoAr];
+  assert.equal(regs.length, 1, 'PRÉ-CONDIÇÃO: o lote no ar tem que estar no registro do indicador');
+  assert.deepEqual([regs[0].epoca, regs[0].acoes, regs[0].lidos, regs[0].pedidos.length], [0, 1, true, 4]);
+  m.portoesLote.shift()({ success: false, errorCategory: 'unknown' });   // falha de verdade: o `finally` roda do mesmo jeito
+  await lote;
+  assert.equal(m.deps.rejeicoesDeLoteNoAr.size, 0, 'o lote acabou e o registro ficou no indicador (o canto contaria uma unidade para sempre)');
+});
+
+test('R17-2-04: a decisão que já voltou da ida com a rede fora e ESPERA envio segue no canto depois da queda — só as que ainda levam a marca de envio do lote velho saem', () => {
+  const pedidos = [P(1), P(2), P(3), P(4)];
+  const lote = { epoca: 0, restam: 3, acoes: 1, pedidos };
+  // a (fila, sem marca): esperando de verdade; b (no ar) e c, d (não saíram): marcadas, voltam à fila.
+  const fila = [item(1, false), item(2, true), item(3, true), item(4, true)];
+  assert.equal(indicador({ noAr: 1, lotes: [lote], epoca: 1, fila }).texto(), 'indicator.waiting:1',
+    'DEFEITO: o canto sumiu com a decisão que espera envio (o diálogo do "Sair" conta 1) — R17-2-04');
+  // CONTROLE: todas marcadas (nenhuma voltou da ida) — nada espera, o canto some (a regra do R16-1-03 segue).
+  assert.equal(indicador({ noAr: 1, lotes: [lote], epoca: 1, fila: fila.map((x) => ({ ...x, rv: 'aba-1', rvEm: 1 })) }).texto(), null,
+    'as anotações do lote velho com marca viraram "esperando envio" (R16-1-03 desfeito)');
+  // CONTROLE: decisão sem marca que NÃO é do lote velho segue contando.
+  assert.equal(indicador({ noAr: 0, lotes: [], epoca: 1, fila: [item(9, false)] }).texto(), 'indicator.waiting:1');
 });

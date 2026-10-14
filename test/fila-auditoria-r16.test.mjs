@@ -369,7 +369,9 @@ test('R16-1-03: o lote de uma sessão que acabou não diz "Enviando N…" — ne
 
 test('R16-1-03: as anotações do lote velho na fila de saída (até a ida em voo responder) não viram "N esperando envio"', () => {
   const pedidos = [P(1), P(2), P(3)];
-  const fila = pedidos.map((p) => ({ tipo: 'reject', venueID: p.venueID, updateRequestID: p.updateRequestID }));
+  // As anotações do lote levam a marca de envio da aba (`rv`, `reivindicacaoDestaAba`) até a ida
+  // responder; a que já voltou da ida com a rede fora a perde e ESPERA de verdade (R17-2-04).
+  const fila = pedidos.map((p) => ({ tipo: 'reject', venueID: p.venueID, updateRequestID: p.updateRequestID, rv: 'aba-1', rvEm: 1 }));
   const velho = { epoca: 3, restam: 3, acoes: 2, pedidos };
   assert.equal(indicadorDeMentira({ noAr: 2, lotes: [velho], epoca: 4, fila }).texto(), null,
     'DEFEITO: o canto da sessão renovada diz "3 esperando envio" por anotações de um lote que voltou à fila (R16-1-03)');

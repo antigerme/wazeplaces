@@ -95,7 +95,7 @@ function montar(fila, { resolvidos = [], segurar = false, seguraDepois = 0, pend
     aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: entraram,
     // O texto do diálogo ("Marcar os N"): é o que a pessoa lê antes de confirmar.
     document: { getElementById: (id) => (id === 'batchReadMessage' ? mensagem : null) },
-    pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(),
+    pedidosEmAndamento: emAndamento, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(), rejeicoesDeLoteNoAr: new Set(),
     aplicarTravaDeAcao: () => log.push('trava:' + app.acoesTravadas()),
     aprovacaoPendente: pendente('aprovacao'), exclusaoPendente: pendente('exclusao'), renomeacaoPendente: pendente('renomeacao'),
     // O aviso de quem toca sem sessão (R6-2-01): o do `avisoDaTrava` de verdade,
