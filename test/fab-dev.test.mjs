@@ -146,7 +146,10 @@ const constanteDoApp = (nome, ctx = {}) => {
 };
 // `gesto`: há um GESTO no card da frente (o dedo nele, a volta pro lugar, a
 // saída) quando o canto é pedido — o que o swipe.js responde (R10-4-05).
-function telaDoFab({ banner = false, desfazer = false, modal = false, larga = false, indicador = null, gesto = false } = {}) {
+// `pilhaAlta`: a pilha de avisos do rodapé (`#notifyStack`) com 3 toasts — a ALTURA medida (R21-4-06), com o botão "›" da foto
+// (`card-image-next`, na borda direita, a meia altura) bem onde o canto de baixo LEVANTADO por ela cairia: é o que faz a
+// escolha do canto, se a pilha entrasse nela, ir parar no placar (o defeito do R7-4-01, ao pé da letra).
+function telaDoFab({ banner = false, desfazer = false, modal = false, larga = false, indicador = null, gesto = false, pilhaAlta = false, escolhaComAPilha = false } = {}) {
   // `larga`: a tela do computador (1280×800), medida no navegador — ver abaixo.
   const LARGURA = larga ? 1280 : 390, ALTURA = larga ? 800 : 844;
   // Um nó: id, tag, classes, pai e a caixa. O `closest` casa seletor simples
@@ -182,6 +185,13 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
   const barra = no({ tag: 'div', pai: corpo, caixa: larga ? [440, 730, 840, 784] : [16, 760, 374, ALTURA] });
   const botao = no({ tag: 'button', pai: barra, caixa: larga ? [440, 730, 840, 784] : [16, 760, 374, ALTURA] });
   const camadas = [];   // de CIMA pra baixo
+  // A pilha de avisos ALTA: o `#notifyStack` medido pelo `devFabReservaDeBaixo`, e o "›" da foto no lugar que o canto
+  // de baixo levantado por ela ocuparia (o hit-test dele é o da tela de mentira, como o do resto).
+  let pilhaDeAvisos = null;
+  if (pilhaAlta) {
+    pilhaDeAvisos = no({ tag: 'div', id: 'notifyStack', pai: corpo, caixa: [16, 560, 374, ALTURA] });
+    no({ tag: 'button', id: 'imgNext', classes: ['card-image-next'], pai: corpo, caixa: [334, 500, 378, 560] });
+  }
   if (banner) {
     const stack = no({ tag: 'div', id: 'bannerStack', pai: corpo, caixa: [0, 0, 0, 0] });
     const cont = no({ tag: 'div', id: 'bannerContainer', pai: stack, caixa: [16, 68, 374, 140] });
@@ -201,6 +211,7 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
     camadas.push(no({ tag: 'div', id: 'inFlightIndicator', classes: indicador, pai: corpo,
       caixa: larga ? [1241, 80, 1264, 97] : [351, 80, 374, 97] }));
   }
+  if (pilhaAlta) camadas.push(todos.find((n) => n.id === 'imgNext'));
   camadas.push(restam, lidos, placar, foto, botao, barra, corpo);
   const dentro = (n, x, y) => x >= n.caixa[0] && x < n.caixa[2] && y >= n.caixa[1] && y < n.caixa[3];
   const pilha = (x, y) => camadas.filter((n) => dentro(n, x, y));
@@ -209,7 +220,7 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
     getBoundingClientRect: () => ({ width: 44, height: 44 }), contains: (n) => n === fab || n === btn };
   const btn = { style: {} };
   const document = {
-    getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : null),
+    getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : id === 'notifyStack' ? pilhaDeAvisos : null),
     querySelector: (s) => (s === 'header' ? { getBoundingClientRect: () => ({ bottom: larga ? 69 : 60 }) } : null),
     querySelectorAll: (sel) => todos.filter((n) => n.closest(sel) === n),
     elementsFromPoint: pilha,
@@ -228,13 +239,17 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
     cardDaFrente: () => cardDaFrente, cardSobGesto: (c) => estado.gesto && c === cardDaFrente,
     redesenharCardAdiado: () => {} };
   const chaves = Object.keys(deps);
-  const { posicionar, aoFimDoGesto } = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null, fabEsperaOGesto = false;\n'
-    + ['devFabReservaDeBaixo', 'devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'aoFimDoGesto'].map(fatiar).join('\n')
-    + '\nreturn { posicionar: posicionarFabDev, aoFimDoGesto };')(...chaves.map((k) => deps[k]));
+  const { posicionar, levantar, aoFimDoGesto } = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null, fabEsperaOGesto = false;\n'
+    + ['devFabReservaDeBaixo', 'devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'levantarOFabComAPilha', 'aoFimDoGesto'].map(fatiar)
+      // O CONTROLE (o desenho do e28ecb5, que o R7-4-01 reprova): a pilha MEDIDA entra na escolha do canto.
+      .map((src) => (escolhaComAPilha ? src.replace('devFabCoords(canto, w, h);', 'devFabCoords(canto, w, h, devFabReservaDeBaixo());') : src)).join('\n')
+    + '\nreturn { posicionar: posicionarFabDev, levantar: levantarOFabComAPilha, aoFimDoGesto };')(...chaves.map((k) => deps[k]));
   posicionar();
   // O fim do gesto, como o swipe.js o avisa.
   const fimDoGesto = () => { estado.gesto = false; aoFimDoGesto(); return fab.dataset.canto; };
-  return { canto: fab.dataset.canto, fab, btn, fimDoGesto, posicionar, estado };
+  // A pilha encolhe (os toasts saem): tira o nó dela da tela e do `getElementById`, como o DOM de verdade.
+  const tirarAPilha = () => { if (pilhaDeAvisos) { const i = todos.indexOf(pilhaDeAvisos); if (i >= 0) todos.splice(i, 1); pilhaDeAvisos = null; } };
+  return { canto: fab.dataset.canto, fab, btn, fimDoGesto, posicionar, levantar, tirarAPilha, classes, estado };
 }
 
 test('R7-4-01: com o banner do topo na tela, o FAB NÃO vai pra cima do placar (mede o que fica por baixo do banner)', () => {
@@ -258,6 +273,56 @@ test('R7-4-01: CONTROLE — camada que NÃO é aviso passageiro (um modal) segue
   // medida ignorasse qualquer camada, ele fugiria do placar que ninguém vê — e
   // este caso é também a prova de que a tela de mentira empilha de verdade.
   assert.equal(telaDoFab({ modal: true }).canto, 'cima-dir');
+});
+
+// ── R21-4-06 × R7-4-01: a pilha de avisos ALTA levanta o FAB de baixo, mas NÃO decide o canto ─────────
+// O canto de baixo reserva a altura MEDIDA do `#notifyStack` (3 toasts passavam por cima do FAB e engoliam o toque). Mas os
+// avisos são passageiros e não escolhem canto: se a pilha entrasse na ESCOLHA, o canto de baixo levantado cairia em cima do
+// "›" da foto, o FAB fugiria pro `cima-dir` (o "Restam") e FICARIA lá quando os avisos saíssem — o R7-4-01 ao pé da letra.
+test('R7-4-01 × R21-4-06: com 3 toasts o FAB fica no baixo-dir e só LEVANTA — e DESCE de volta, no mesmo canto, quando a pilha sai', () => {
+  const sem = telaDoFab();
+  assert.equal(sem.canto, 'baixo-dir', 'PRÉ-CONDIÇÃO: sem a pilha o canto livre é o baixo-dir');
+  const alturaBase = sem.fab.style.top;
+  assert.equal(alturaBase, `${844 - 44 - constanteDoApp('DEV_FAB_RESERVA_TOAST')}px`, 'PRÉ-CONDIÇÃO: sem a pilha o FAB fica onde sempre ficou (o piso)');
+  const t = telaDoFab({ pilhaAlta: true });
+  assert.equal(t.canto, 'baixo-dir',
+    `DEFEITO: com a pilha de avisos na tela o FAB foi pro ${t.canto} — a pilha entrou na escolha do canto e o FAB FICA lá (em cima do "Restam") quando os avisos saem (R7-4-01)`);
+  const reserva = (844 - 560) + constanteDoApp('DEV_FAB_FOLGA_TOAST');
+  assert.equal(t.fab.style.top, `${844 - 44 - reserva}px`, 'o canto de baixo não foi LEVANTADO pela pilha (o toast engole o toque no FAB)');
+  assert.ok(parseFloat(t.fab.style.top) + 44 + constanteDoApp('DEV_FAB_FOLGA_TOAST') <= 560, 'o FAB invade a pilha de avisos');
+  assert.equal(t.fab.style.pointerEvents, undefined);
+  // A pilha sai: o observador a acompanha (só `levantar`, sem escolher canto) e o FAB DESCE de volta, no mesmo canto.
+  t.tirarAPilha();
+  t.levantar();
+  assert.equal(t.fab.dataset.canto, 'baixo-dir');
+  assert.equal(t.fab.style.top, alturaBase, 'a pilha saiu e o FAB ficou levantado — o levante não foi desfeito');
+  // E a reavaliação do canto, sem a pilha, dá o mesmo canto: a escolha nunca dependeu dela.
+  t.posicionar();
+  assert.equal(t.fab.dataset.canto, 'baixo-dir');
+  assert.equal(t.fab.style.top, alturaBase);
+  // CONTROLE do instrumento: com a pilha medida DENTRO da escolha (o desenho do e28ecb5), esta mesma tela MUDA o canto — o
+  // canto de baixo levantado cai no "›" e o FAB foge. No aparelho (360×740 a 1,5×, 3 toasts) ele foi parar no `cima-dir`.
+  assert.notEqual(telaDoFab({ pilhaAlta: true, escolhaComAPilha: true }).canto, 'baixo-dir',
+    'CONTROLE: a tela de mentira não reproduz o defeito (o "›" não está onde o canto levantado cairia) — o teste acima não mede nada');
+});
+
+test('R21-4-06: o levante só mexe no FAB de BAIXO, visível e solto — não no de cima, no escondido, no que está pego nem no fixado pelo editor', () => {
+  for (const [rotulo, preparar] of [['de cima', (t) => { t.fab.dataset.canto = 'cima-dir'; }], ['do meio', (t) => { t.fab.dataset.canto = 'meio-esq'; }],
+    ['escondido', (t) => t.classes.add('hidden')], ['pego', (t) => t.classes.add('fab-pego')]]) {
+    const t = telaDoFab({ pilhaAlta: true });
+    t.fab.style.top = '123px'; preparar(t); t.levantar();
+    assert.equal(t.fab.style.top, '123px', `o levante mexeu no FAB ${rotulo}`);
+  }
+  // O fixado (arrastado pelo editor) é a variável do módulo `devFabFixado`: a função a confere antes de qualquer coisa.
+  assert.match(fatiar('levantarOFabComAPilha'), /if \(!fab \|\| devFabFixado \|\| fab\.classList\.contains\('hidden'\) \|\| fab\.classList\.contains\('fab-pego'\)\) return;/,
+    'o levante deixou de respeitar o FAB fixado, escondido ou pego');
+  // CONTROLE: o de baixo, visível e solto, é levantado (e só o `top`: o canto e o `left` ficam).
+  const c = telaDoFab({ pilhaAlta: true });
+  const left = c.fab.style.left;
+  c.fab.style.top = '704px'; c.levantar();
+  assert.equal(c.fab.style.top, `${844 - 44 - ((844 - 560) + constanteDoApp('DEV_FAB_FOLGA_TOAST'))}px`, 'CONTROLE: o FAB de baixo não foi levantado');
+  assert.equal(c.fab.style.left, left);
+  assert.equal(c.fab.dataset.canto, 'baixo-dir');
 });
 
 // ── R9-4-05: o FAB × o "N esperando envio" (deitado, tablet, computador) ─────

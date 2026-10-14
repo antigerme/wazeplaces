@@ -10914,21 +10914,26 @@ function devFabReservaDeBaixo() {
     return Math.max(DEV_FAB_RESERVA_TOAST, medida);
 }
 
-function devFabCoords(canto, w, h) {
+// `reserva`: a faixa de baixo que o canto de BAIXO deixa livre. O padrão é o PISO, e é ele que decide o CANTO
+// (`devFabVitimas`): os avisos são passageiros e não escolhem canto (R7-4-01), e a pilha medida entrando na
+// escolha empurrava o canto de baixo pra cima do conteúdo — o FAB fugia pra um canto de cima (o "Restam") e
+// FICAVA lá quando os avisos saíam, o defeito do R7-4-01 ao pé da letra. A pilha só LEVANTA o canto de baixo
+// que já foi escolhido (`devFabReservaDeBaixo`, aplicada em `posicionarFabDev` e em `levantarOFabComAPilha`).
+function devFabCoords(canto, w, h, reserva = DEV_FAB_RESERVA_TOAST) {
     const cab = document.querySelector('header');
     const topo = (cab ? cab.getBoundingClientRect().bottom : 0) + 8;
     const x = canto.endsWith('dir') ? innerWidth - w - DEV_FAB_MARGEM : DEV_FAB_MARGEM;
     const y = canto.startsWith('cima') ? topo
             : canto.startsWith('meio') ? Math.round((innerHeight - h) / 2)
-            : innerHeight - h - devFabReservaDeBaixo();
+            : innerHeight - h - reserva;
     return { x, y: Math.max(topo, Math.min(innerHeight - h - DEV_FAB_MARGEM, y)) };
 }
 
 // A pilha de avisos cresce e encolhe sozinha (um toast entra, outro sai, o Desfazer abre): o FAB de BAIXO
-// acompanha a altura MEDIDA (R21-4-06). O callback só AGENDA (gotcha #35: escrever no DOM de dentro dele
-// re-entra no mesmo quadro); o reposicionamento é o de sempre (`posicionarFabDev`), com as guardas dele: o
-// FAB que o editor arrastou (`devFabFixado`), o que está pego, e o card sob um gesto não se mexem. Os
-// cantos de cima e do meio não são alcançados pela pilha.
+// acompanha a altura MEDIDA (R21-4-06) — só LEVANTA (e desfaz o levante quando a pilha encolhe) o canto em que
+// já está, sem escolher canto de novo (a escolha é de `posicionarFabDev`, e é independente da pilha). O
+// callback só AGENDA (gotcha #35: escrever no DOM de dentro dele re-entra no mesmo quadro). Os cantos de cima
+// e do meio não são alcançados pela pilha.
 function acompanharAReservaDoFab() {
     const pilha = document.getElementById('notifyStack');
     if (!pilha || typeof ResizeObserver !== 'function') return;
@@ -10938,11 +10943,21 @@ function acompanharAReservaDoFab() {
         agendado = true;
         requestAnimationFrame(() => {
             agendado = false;
-            const fab = document.getElementById('devFab');
-            if (!fab || fab.classList.contains('hidden') || !/^baixo/.test(fab.dataset.canto || '')) return;
-            posicionarFabDev();
+            levantarOFabComAPilha();
         });
     }).observe(pilha);
+}
+
+// O FAB de baixo na altura que a pilha de avisos de AGORA deixa. Não mexe no que o editor fixou (arrastou), no
+// que está pego sob um dedo, nem no que está escondido; e só o `top` muda (o canto e o `left` são os de antes).
+function levantarOFabComAPilha() {
+    const fab = document.getElementById('devFab');
+    if (!fab || devFabFixado || fab.classList.contains('hidden') || fab.classList.contains('fab-pego')) return;
+    const canto = fab.dataset.canto || '';
+    if (!/^baixo/.test(canto)) return;
+    const r = fab.getBoundingClientRect();
+    const { y } = devFabCoords(canto, r.width || 44, r.height || 44, devFabReservaDeBaixo());
+    fab.style.top = y + 'px';
 }
 
 // Quantas vítimas passariam por baixo do FAB neste canto — controle acionável
@@ -11067,7 +11082,8 @@ function posicionarFabDev() {
         fab.style.pointerEvents = antes;
         if (btn) btn.style.pointerEvents = antesBtn;
     }
-    const { x, y } = devFabCoords(melhor, w, h);
+    // O canto saiu da escolha SEM a pilha (o padrão de `devFabCoords`); aqui ele é aplicado já levantado por ela.
+    const { x, y } = devFabCoords(melhor, w, h, devFabReservaDeBaixo());
     fab.style.left = x + 'px'; fab.style.top = y + 'px';
     fab.style.right = 'auto'; fab.style.bottom = 'auto';
     fab.dataset.canto = melhor;

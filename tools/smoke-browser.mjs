@@ -8430,9 +8430,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       AppState.devMode = { unlocked: true, active: true };
       AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
-      AppState.queue = [local];
+      // DOIS pedidos: o ✕ do Desfazer (abaixo) decide o primeiro e o segundo segue na tela.
+      AppState.queue = [local, { ...local, venueID: 'v202', updateRequestID: 'u202', name: 'Local 202' }];
       AppState.currentPlace = AppState.queue[0];
-      AppState.serverTotal = 1; AppState.hasMore = false;
+      AppState.serverTotal = 2; AppState.hasMore = false;
       showMainScreen(); updateStats(); showLoading(false);
       document.getElementById('noMoreCards').classList.add('hidden');
       showCurrentPlace();
@@ -8443,23 +8444,31 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     return { ctx, page, erros };
   };
 
-  // ── 1. O FAB de baixo acompanha a pilha de avisos (R21-4-06) ───────────
+  // ── 1. O FAB de baixo acompanha a pilha de avisos (R21-4-06) — sem decidir o canto (R7-4-01) ───────────
+  // A pilha LEVANTA o canto de baixo em que o FAB já está e o devolve quando ela some; a ESCOLHA do canto não depende dela
+  // (os avisos são passageiros): se dependesse, o canto de baixo levantado cairia em cima do conteúdo, o FAB fugiria pro
+  // `cima-dir` (o "Restam") e FICARIA lá quando os avisos saíssem — o defeito do R7-4-01, MEDIDO neste desenho a 1,5× com 3 toasts.
   const AVISO_CURTO = 'Atualizando…';
   const AVISO_LONGO = 'Sua sessão continua ativa: renovei os cookies do Waze em segundo plano e não há nada a fazer agora.';
   const CASOS_AVISO = [['1 toast curto', [AVISO_CURTO]], ['1 toast de 2 linhas', [AVISO_LONGO]],
     ['2 toasts', [AVISO_LONGO, AVISO_CURTO]], ['3 toasts', [AVISO_LONGO, AVISO_CURTO, 'Pronto']]];
   const cobriu = { fixo: [], medido: [] };
+  const fugiu = [];
   for (const escala of [1, 1.5]) {
     const { ctx, page, erros } = await montarTela({ width: 360, height: 740 }, escala);
     const medir = (textos) => page.evaluate(async (txs) => {
       document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove());
       for (const tx of txs) showToast(tx, 'info', 60000);
       await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(ok, 350))));
+      // Uma REAVALIAÇÃO do canto com os avisos na tela — o que o card seguinte, uma camada que abre ou fecha, o "Aplicar"
+      // fazem o tempo todo. É ela que mostra se a pilha entrou na ESCOLHA do canto (o R7-4-01): o observador da pilha só levanta.
+      posicionarFabDev();
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(ok, 120))));
       const fab = document.getElementById('devFabBtn').getBoundingClientRect();
       const toasts = [...document.querySelectorAll('#toastContainer > *')].map((e) => e.getBoundingClientRect());
       const cobre = toasts.some((b) => !(b.right <= fab.left || b.left >= fab.right || b.bottom <= fab.top || b.top >= fab.bottom));
       const el = document.elementFromPoint(fab.left + fab.width / 2, fab.top + fab.height / 2);
-      return { canto: document.getElementById('devFab').dataset.canto, fabY: [Math.round(fab.top), Math.round(fab.bottom)],
+      return { canto: document.getElementById('devFab').dataset.canto, y: Math.round(fab.top), fabY: [Math.round(fab.top), Math.round(fab.bottom)],
                toastsY: toasts.map((b) => [Math.round(b.top), Math.round(b.bottom)]), cobre,
                recebe: el ? (el.closest('#devFab') ? 'FAB' : el.closest('#toastContainer') ? 'TOAST' : el.tagName) : null };
     }, textos);
@@ -8471,10 +8480,29 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.toastsY.length === textos.length, `R21-4-06/texto ×${escala}: ${nome} — os avisos não chegaram à tela`, JSON.stringify(r));
       checa(r.recebe === 'FAB' && !r.cobre,
         `R21-4-06/texto ×${escala}: ${nome} — o toast cobre o FAB (o dedo cai no aviso; a reserva de baixo não acompanha a pilha)`, JSON.stringify(r));
+      checa(r.canto === base.canto,
+        `R7-4-01/texto ×${escala}: ${nome} — a pilha de avisos DECIDIU o canto (${base.canto} → ${r.canto}): o FAB foge e fica onde parou quando os avisos saem`, JSON.stringify(r));
       cobriu.medido.push([escala, nome, r.cobre || r.recebe !== 'FAB']);
+      // Os avisos saem: o FAB DESCE de volta ao lugar de antes, no mesmo canto — e não cobre nada que se toque nem o placar.
+      const depois = await medir([]);
+      checa(depois.canto === base.canto && depois.y === base.y,
+        `R21-4-06/texto ×${escala}: ${nome} — os avisos saíram e o FAB não voltou (${base.canto}@${base.y} → ${depois.canto}@${depois.y})`, JSON.stringify(depois));
     }
-    // CONTROLE: com a reserva FIXA de antes (emulada: a função que o `devFabCoords` consulta devolve o piso) a mesma
-    // tela COBRE o FAB em algum caso — a medida enxerga o defeito, e a reserva medida é o que o tira.
+    // O Desfazer de um ✕ de VERDADE mora no mesmo `#notifyStack`: o FAB sobe junto e desce quando a janela acaba.
+    await page.evaluate(() => { document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click(); });
+    await page.waitForTimeout(500);
+    const duranteDesfazer = await medir([]);
+    // (O card seguinte reavalia o canto — é o comportamento de sempre —, então a comparação é entre "durante" e "depois" da
+    // MESMA janela, e o "depois" volta ao piso: nem o canto muda nem o levante fica.)
+    checa(duranteDesfazer.recebe === 'FAB' && /^baixo/.test(duranteDesfazer.canto),
+      `R21-4-06/texto ×${escala}: com o Desfazer do ✕ na tela o FAB recebe o toque e segue num canto de baixo`, JSON.stringify(duranteDesfazer));
+    await esperarOuExplodir(page, () => !AppState.pendingAction, 'a janela do Desfazer acabar', 15000);
+    const depoisDesfazer = await medir([]);
+    const piso = await page.evaluate(() => innerHeight - 44 - DEV_FAB_RESERVA_TOAST);
+    checa(depoisDesfazer.canto === duranteDesfazer.canto && depoisDesfazer.y === piso,
+      `R21-4-06/texto ×${escala}: a janela do Desfazer acabou e o FAB não voltou ao piso do mesmo canto (${duranteDesfazer.canto} → ${depoisDesfazer.canto}@${depoisDesfazer.y}, o piso é ${piso})`, JSON.stringify(depoisDesfazer));
+    // CONTROLE 1: com a reserva FIXA de antes (emulada: a função que o `devFabCoords` consulta devolve o piso) a mesma tela
+    // COBRE o FAB em algum caso — a medida enxerga o defeito, e a reserva medida é o que o tira.
     await page.evaluate(() => { window.__reservaMedida = window.devFabReservaDeBaixo; window.devFabReservaDeBaixo = () => DEV_FAB_RESERVA_TOAST; });
     for (const [nome, textos] of CASOS_AVISO) {
       await page.evaluate(() => posicionarFabDev());
@@ -8488,12 +8516,27 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       cobriu.fixo.push([escala, nome, r.cobre || r.recebe !== 'FAB' || r2 === 'TOAST']);
     }
     await page.evaluate(() => { window.devFabReservaDeBaixo = window.__reservaMedida; });
+    // CONTROLE 2 (o R7-4-01): a pilha medida DENTRO da escolha do canto (o desenho do e28ecb5, emulado: o `devFabCoords`
+    // consultado pela medição das vítimas usa a reserva medida). Com 3 toasts o canto de baixo levantado cai no conteúdo, o FAB
+    // foge pra outro canto e — o que o R7-4-01 proíbe — FICA lá depois que os avisos saem.
+    await page.evaluate(() => { window.__coordsDeVerdade = window.devFabCoords; window.devFabCoords = function (c, w, h, r) { return window.__coordsDeVerdade(c, w, h, r === undefined ? devFabReservaDeBaixo() : r); }; });
+    await page.evaluate(() => { document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove()); posicionarFabDev(); });
+    await medir([]);
+    const comPilha = await medir(CASOS_AVISO[3][1]);
+    await page.evaluate(() => posicionarFabDev());   // um redesenho qualquer com os avisos na tela (o card troca, o FAB é reavaliado)
+    const fugido = await medir(CASOS_AVISO[3][1]);
+    await page.evaluate(() => { document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove()); });
+    const aposAvisos = await medir([]);
+    await page.evaluate(() => { window.devFabCoords = window.__coordsDeVerdade; document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove()); posicionarFabDev(); });
+    fugiu.push([escala, base.canto, comPilha.canto, fugido.canto, aposAvisos.canto]);
     checa(erros.length === 0, `R21-4-06/texto ×${escala}: erro de JS`, erros[0]);
     await ctx.close();
   }
   checa(cobriu.fixo.some(([, , c]) => c),
     'R21-4-06: CONTROLE — com a reserva fixa de antes nenhum caso cobriu o FAB; a medida não enxerga o defeito', JSON.stringify(cobriu.fixo));
   checa(cobriu.medido.every(([, , c]) => !c), 'R21-4-06: com a reserva medida algum caso ainda cobre o FAB', JSON.stringify(cobriu.medido));
+  checa(fugiu.some(([, base, , fugido, apos]) => fugido !== base && apos !== base),
+    'R7-4-01: CONTROLE — com a pilha medida dentro da ESCOLHA do canto o FAB não fugiu e ficou fora do lugar depois dos avisos; a medida não enxerga o defeito', JSON.stringify(fugiu));
 
   // ── 2. A barra ✕ ↑ ✓ fora da janela alerta; a sã, não (R21-4-04); e a escala vem no arquivo (R21-4-03) ──
   const CASOS_BARRA = [

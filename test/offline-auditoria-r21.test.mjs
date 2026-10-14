@@ -209,9 +209,11 @@ test('R21-4-01: o `open` que responde DEPOIS do teto não deixa a conexão abert
   const r = await comSentinela(a.lerFila());
   assert.equal(r, undefined, 'a leitura cujo `open` estourou o teto não falhou');
   assert.equal(a.st.opens, 1);
-  await tique(260);
-  assert.equal(a.st.abertas, 0, 'DEFEITO: a conexão que chegou depois do teto ficou aberta (ninguém mais a espera)');
+  // Espera pela CONDIÇÃO (a conexão tardia chegar), com teto: um relógio fixo mediria a velocidade da máquina.
+  for (let i = 0; i < 300 && a.st.conexoes.length === 0; i++) await tique(10);
+  await tique(20);
   assert.equal(a.st.conexoes.length, 1, 'PRÉ-CONDIÇÃO: a conexão tardia nem chegou a abrir — o teste não exercita o caminho');
+  assert.equal(a.st.abertas, 0, 'DEFEITO: a conexão que chegou depois do teto ficou aberta (ninguém mais a espera)');
   assert.equal(a.st.conexoes[0].fechada, true);
 });
 
@@ -657,7 +659,9 @@ function reabrirDeVerdade({ modo = 'ok', tetoDb = 80, janelaGravada = true } = {
 }
 
 test('R21-4-02: a reabertura sem rede começa a leitura da JANELA junto com a da FILA (uma abertura cada, ao mesmo tempo) — com a base lenta o painel de falha não leva o dobro do teto', async () => {
-  const x = reabrirDeVerdade({ modo: 'open-mudo', tetoDb: 80 });
+  // Os tempos de parede ficam em ESCALA (um orçamento de 500 ms contra 1000 ms de duas esperas em série, o limite no meio, 250 ms de
+  // cada lado): o paralelismo em si se prova pelas duas aberturas saindo juntas (`opens === 2`), e o relógio só confirma.
+  const x = reabrirDeVerdade({ modo: 'open-mudo', tetoDb: 500 });
   const t0 = Date.now();
   const p = x.app.abrir();
   await tique(10);
@@ -669,8 +673,8 @@ test('R21-4-02: a reabertura sem rede começa a leitura da JANELA junto com a da
   // A leitura que FALHOU deixa a linha no diário (R20, A4) — e a fila não abre.
   assert.deepEqual(x.log.map(([k]) => k), ['offline.leituraFalhou']);
   assert.equal(x.AppState.queue.length, 0);
-  // Um orçamento só: o tempo total é o de UMA espera do teto (80 ms), não o de duas em série (160+).
-  assert.ok(Date.now() - t0 < 150, `a reabertura levou ${Date.now() - t0} ms com o teto de 80 ms: as leituras voltaram a ser em série`);
+  // Um orçamento só: o tempo total é o de UMA espera do teto (500 ms), não o de duas em série (1000 ms).
+  assert.ok(Date.now() - t0 < 750, `a reabertura levou ${Date.now() - t0} ms com o teto de 500 ms: as leituras voltaram a ser em série`);
   // CONTROLE: com a base respondendo, a fila abre e a janela entra na memória.
   const boa = reabrirDeVerdade({ modo: 'ok' });
   const fila = { t: Date.now(), desde: Date.now(), conta: '111', regiao: 'row', pais: '30', busca: 'b', places: [{ venueID: 'v1', updateRequestID: 'u1' }] };
@@ -755,17 +759,18 @@ test('R21-4-01: o `getAll` da base do diagnóstico que NUNCA responde estoura o 
 });
 
 test('R21-4-01: o `open` e o `getAll` dividem UM orçamento — a releitura cujo `open` consome quase todo o teto não ganha outro pro `getAll`', async () => {
-  // O `open` demora ~83% do teto (lento, mas responde); o `getAll` não responde. Com dois tetos em série o interruptor
-  // do modo dev esperava o dobro (10 s com o teto de 5 s); com UM orçamento, o total fica perto do teto.
-  const d = diagAparelho('open-tarde', { tetoDb: 300, dados: [abertura('outra')] });
-  d.st.atrasoOpen = 250;
+  // O `open` demora ~83% do teto (lento, mas responde); o `getAll` não responde. Com dois tetos em série o interruptor do modo dev
+  // esperava o dobro (10 s com o teto de 5 s); com UM orçamento, o total fica perto do teto. Em ESCALA (600 ms de orçamento, o
+  // `open` gasta 500; um orçamento só dá ~600 ms e dois em série ~1100 ms; o limite no meio, 850 ms, com 250 ms de cada lado).
+  const d = diagAparelho('open-tarde', { tetoDb: 600, dados: [abertura('outra')] });
+  d.st.atrasoOpen = 500;
   d.st.getAllMudo = true;
   const t0 = Date.now();
-  const r = await comSentinela(d.atualizar(), 3000);
+  const r = await comSentinela(d.atualizar(), 4000);
   const gasto = Date.now() - t0;
   assert.equal(r, false, 'PRÉ-CONDIÇÃO: a releitura não falhou — o `getAll` pendurado não foi exercitado');
-  assert.ok(gasto >= 250, `PRÉ-CONDIÇÃO: o \`open\` lento nem demorou (${gasto} ms)`);
-  assert.ok(gasto < 450, `DEFEITO: a releitura levou ${gasto} ms com o orçamento de 300 ms: o \`open\` e o \`getAll\` voltaram a ter um teto cada (o dobro em série)`);
+  assert.ok(gasto >= 500, `PRÉ-CONDIÇÃO: o \`open\` lento nem demorou (${gasto} ms)`);
+  assert.ok(gasto < 850, `DEFEITO: a releitura levou ${gasto} ms com o orçamento de 600 ms: o \`open\` e o \`getAll\` voltaram a ter um teto cada (o dobro em série)`);
   assert.equal(d.st.abertas, 0);
 });
 
@@ -964,6 +969,8 @@ test('R21-4-05 (fonte): o diário do RELATÓRIO e o da cópia guardada (o retrat
 });
 
 // ═══ R21-4-06 · o FAB de baixo acompanha a altura MEDIDA da pilha de avisos ═════════════════════════
+// (O desenho tem DUAS metades, e a segunda é o que o R7-4-01 cobra: a pilha LEVANTA o canto de baixo que já foi escolhido, mas
+// NÃO entra na escolha do canto — o teste do canto, com a tela em camadas, mora em `test/fab-dev.test.mjs`.)
 const FAB = 44;
 function telaDoFab({ pilhaTop = null, altura = 740, largura = 360 } = {}) {
   const pilha = pilhaTop === null ? null : { getBoundingClientRect: () => ({ top: pilhaTop, height: altura - pilhaTop }) };
@@ -983,39 +990,39 @@ test('R21-4-06: a reserva de baixo é a altura MEDIDA da pilha de avisos (+ o v�
   assert.equal(telaDoFab({ pilhaTop: 740 }).reserva(), piso, 'a pilha vazia (altura 0) mudou a reserva');
   const umCurto = telaDoFab({ pilhaTop: 676 });
   assert.equal(umCurto.reserva(), piso, 'DEFEITO: um toast curto mexeu o FAB de onde ele sempre ficou');
-  assert.equal(umCurto.coords('baixo-dir', FAB, FAB).y, 740 - FAB - piso);
+  assert.equal(umCurto.coords('baixo-dir', FAB, FAB, umCurto.reserva()).y, 740 - FAB - piso);
   // Os casos MEDIDOS (360×740): 2 toasts → pilha em 600; 1,5× com um toast de 2 linhas → 584; 3 toasts → 544.
   for (const [rotulo, topo] of [['2 toasts', 600], ['1 toast de 2 linhas a 1,5×', 584], ['3 toasts', 544]]) {
     const t = telaDoFab({ pilhaTop: topo });
-    const y = t.coords('baixo-dir', FAB, FAB).y;
+    const y = t.coords('baixo-dir', FAB, FAB, t.reserva()).y;
     assert.equal(t.reserva(), 740 - topo + folga, `${rotulo}: a reserva não é a altura da pilha + o vão`);
     assert.ok(y + FAB + folga <= topo, `DEFEITO (${rotulo}): o FAB (${y}–${y + FAB}) invade a pilha de avisos (começa em ${topo}) e o toast engole o toque`);
+    // O PADRÃO de `devFabCoords` é o piso: o canto se ESCOLHE sem a pilha (ela é passageira e não decide canto — R7-4-01).
+    assert.equal(t.coords('baixo-dir', FAB, FAB).y, 740 - FAB - piso, `${rotulo}: o canto escolhido passou a depender da pilha (a escolha usa o piso)`);
   }
   // CONTROLE do instrumento: com a reserva FIXA (o código de antes) os casos acima se cobrem — a medida enxerga o defeito.
-  const velho = telaDoFab({ pilhaTop: 600 });
   const yVelho = 740 - FAB - piso;
   assert.ok(yVelho + FAB > 600, 'CONTROLE: a reserva fixa já não cobre o FAB nos 360×740 com 2 toasts — o cenário não exercita o defeito');
-  assert.ok(velho.coords('baixo-dir', FAB, FAB).y < yVelho);
+  const velho = telaDoFab({ pilhaTop: 600 });
+  assert.ok(velho.coords('baixo-dir', FAB, FAB, velho.reserva()).y < yVelho);
   // Os cantos de cima e do meio não dependem da pilha.
-  const cima = telaDoFab({ pilhaTop: 544 }).coords('cima-dir', FAB, FAB).y;
-  assert.equal(cima, telaDoFab().coords('cima-dir', FAB, FAB).y);
+  const cima = telaDoFab({ pilhaTop: 544 });
+  assert.equal(cima.coords('cima-dir', FAB, FAB, cima.reserva()).y, telaDoFab().coords('cima-dir', FAB, FAB).y);
   // Nunca sobe acima do topo (uma pilha altíssima): o limite é o cabeçalho.
-  assert.equal(telaDoFab({ pilhaTop: 40 }).coords('baixo-dir', FAB, FAB).y, 69 + 8);
+  const alta = telaDoFab({ pilhaTop: 40 });
+  assert.equal(alta.coords('baixo-dir', FAB, FAB, alta.reserva()).y, 69 + 8);
   // Pilha que falha ao medir: vale o piso, sem lançar.
-  const quebrada = telaDoFab({ pilhaTop: 600 });
   const deps = { document: { getElementById: () => ({ getBoundingClientRect: () => { throw new Error('x'); } }) }, innerHeight: 740, DEV_FAB_RESERVA_TOAST: piso, DEV_FAB_FOLGA_TOAST: folga };
   const n = Object.keys(deps);
   assert.equal(new Function(...n, fatiar('devFabReservaDeBaixo') + '\nreturn devFabReservaDeBaixo;')(...n.map((k) => deps[k]))(), piso);
-  assert.ok(quebrada);
 });
 
-test('R21-4-06: a pilha de avisos é OBSERVADA, e o callback só AGENDA (gotcha #35) — o reposicionamento é um por quadro, só do FAB de baixo, visível e fora de gesto', () => {
-  const montar = ({ canto = 'baixo-dir', escondido = false, comPilha = true, comObserver = true } = {}) => {
-    const log = { posicionou: 0, quadros: [], observadores: [] };
+test('R21-4-06: a pilha de avisos é OBSERVADA, e o callback só AGENDA (gotcha #35) — um levante por quadro, sem escolher canto', () => {
+  const montar = ({ comPilha = true, comObserver = true } = {}) => {
+    const log = { levantou: 0, quadros: [], observadores: [] };
     class RO { constructor(cb) { this.cb = cb; log.observadores.push(this); } observe(e) { this.alvo = e; } }
-    const fab = { classList: { contains: (c) => c === 'hidden' && escondido }, dataset: { canto } };
-    const deps = { document: { getElementById: (id) => (id === 'notifyStack' ? (comPilha ? {} : null) : id === 'devFab' ? fab : null) },
-      ResizeObserver: comObserver ? RO : undefined, requestAnimationFrame: (f) => { log.quadros.push(f); }, posicionarFabDev: () => { log.posicionou++; } };
+    const deps = { document: { getElementById: (id) => (id === 'notifyStack' ? (comPilha ? {} : null) : null) },
+      ResizeObserver: comObserver ? RO : undefined, requestAnimationFrame: (f) => { log.quadros.push(f); }, levantarOFabComAPilha: () => { log.levantou++; } };
     const n = Object.keys(deps);
     const fn = new Function(...n, fatiar('acompanharAReservaDoFab') + '\nreturn acompanharAReservaDoFab;')(...n.map((k) => deps[k]));
     return { fn, log };
@@ -1025,20 +1032,19 @@ test('R21-4-06: a pilha de avisos é OBSERVADA, e o callback só AGENDA (gotcha 
   assert.ok(a.log.observadores[0].alvo, 'o observador não observa nada');
   // Três avisos no mesmo quadro: UM agendamento, e NADA escrito dentro do callback.
   a.log.observadores[0].cb(); a.log.observadores[0].cb(); a.log.observadores[0].cb();
-  assert.equal(a.log.posicionou, 0, 'DEFEITO: o callback do ResizeObserver reposiciona na hora (re-entra no mesmo quadro, o aviso vira toast vermelho — gotcha #35)');
-  assert.equal(a.log.quadros.length, 1, 'três mudanças no mesmo quadro agendaram mais de um reposicionamento');
+  assert.equal(a.log.levantou, 0, 'DEFEITO: o callback do ResizeObserver mexe no FAB na hora (re-entra no mesmo quadro, o aviso vira toast vermelho — gotcha #35)');
+  assert.equal(a.log.quadros.length, 1, 'três mudanças no mesmo quadro agendaram mais de um levante');
   a.log.quadros[0]();
-  assert.equal(a.log.posicionou, 1, 'o quadro seguinte não reposicionou o FAB de baixo');
+  assert.equal(a.log.levantou, 1, 'o quadro seguinte não levantou o FAB');
   a.log.observadores[0].cb(); a.log.quadros[1]();
-  assert.equal(a.log.posicionou, 2, 'o agendamento ficou travado depois do primeiro (o próximo aviso não reposiciona)');
-  // Os outros estados NÃO reposicionam.
-  for (const [rotulo, opt] of [['FAB no canto de cima', { canto: 'cima-dir' }], ['FAB no meio', { canto: 'meio-esq' }], ['FAB escondido', { escondido: true }]]) {
-    const o = montar(opt); o.fn(); o.log.observadores[0].cb(); o.log.quadros[0]();
-    assert.equal(o.log.posicionou, 0, `CONTROLE: reposicionou com o ${rotulo}`);
-  }
+  assert.equal(a.log.levantou, 2, 'o agendamento ficou travado depois do primeiro (o próximo aviso não levanta)');
   // Sem a pilha ou sem ResizeObserver: nada observado e nada lançado.
   assert.equal(montar({ comPilha: false }).log.observadores.length, 0);
   const sem = montar({ comObserver: false }); assert.doesNotThrow(() => sem.fn());
+  // O observador NÃO escolhe canto: a escolha é de `posicionarFabDev` e é independente da pilha (R7-4-01).
+  assert.doesNotMatch(fatiar('acompanharAReservaDoFab'), /posicionarFabDev|devFabVitimas/, 'DEFEITO: o observador da pilha voltou a re-escolher o canto (o FAB foge pro "Restam" e fica lá)');
+  assert.doesNotMatch(fatiar('devFabVitimas'), /devFabReservaDeBaixo/, 'DEFEITO: a pilha medida entrou na escolha do canto (R7-4-01)');
+  assert.match(fatiar('posicionarFabDev'), /devFabCoords\(melhor, w, h, devFabReservaDeBaixo\(\)\)/, 'o canto escolhido não é aplicado levantado pela pilha');
   // E o botão liga a observação uma vez, ao nascer.
   assert.match(fatiar('ligarFabDev'), /\bacompanharAReservaDoFab\(\);/, 'DEFEITO: o FAB nasce sem acompanhar a pilha de avisos');
 });

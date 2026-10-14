@@ -1967,7 +1967,7 @@ const contexto8g = async () => {
     await offlineGravarFila();
     await offlineGravarJanela(Math.floor(Date.now() / OFFLINE_CICLO_MS), null);
   }, PLACES8G);
-  await prep.close({ runBeforeUnload: true }).catch(() => {});
+  await fecharComoOUsuario(prep).catch(() => {});
   return c;
 };
 const PENDURA8G = {
