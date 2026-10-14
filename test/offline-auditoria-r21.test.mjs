@@ -101,32 +101,42 @@ function idbDeMentira(modo = 'ok', { existe = true } = {}) {
           fechada: false, onversionchange: null,
           close() { if (!this.fechada) { this.fechada = true; st.abertas--; } },
           transaction(loja, modoTx) {
-            const tx = { abortado: false, error: null, modo: modoTx, pend: [] };
+            const tx = { abortado: false, error: null, modo: modoTx, pend: [], emVoo: 0, concluida: false };
             st.txs.push(tx);
             tx.abort = () => { tx.abortado = true; st.abortos++; };
+            // Como no navegador, a transação COMPLETA quando o ÚLTIMO pedido dela responde (os `put`/`delete` valem aqui) — não
+            // "5 ms depois de criada": com o laço de eventos atrasado (CPU disputada) o prazo fixo pode ganhar dos `get` e a fila nem
+            // ser gravada — a corrida do dublê do r19 (MEDIDA lá: 7 de 40 rodadas no commit-base); aqui o teste do instrumento
+            // reprovou uma rodada com `gravarFila()` devolvendo `false`, compatível com ela, e o desenho novo não depende do relógio.
+            // O pedido que NUNCA responde (`get-mudo`, `getall-mudo`) mantém a transação aberta pra sempre, como no navegador que trava.
+            const concluir = () => setTimeout(() => {
+              if (tx.abortado || tx.concluida || tx.emVoo > 0 || st.modo === 'tx-mudo') return;
+              tx.concluida = true;
+              for (const [op, k, v] of tx.pend) { if (op === 'put') st.dados.set(k, v); else st.dados.delete(k); }
+              if (tx.oncomplete) tx.oncomplete();
+            });
+            const responder = (r, atraso, preencher) => {
+              tx.emVoo++;
+              setTimeout(() => {
+                try { preencher(r); if (r.onsuccess) r.onsuccess(); } finally { tx.emVoo--; concluir(); }
+              }, atraso);
+              return r;
+            };
             tx.objectStore = () => ({
               get(chave) {
                 const r = {};
-                if (st.modo === 'get-mudo') return r;
-                setTimeout(() => { r.result = st.dados.get(chave); if (r.onsuccess) r.onsuccess(); }, st.modo === 'get-lento' ? st.atrasoGet : 0);
-                return r;
+                if (st.modo === 'get-mudo') { tx.emVoo++; return r; }
+                return responder(r, st.modo === 'get-lento' ? st.atrasoGet : 0, (x) => { x.result = st.dados.get(chave); });
               },
               getAll() {
                 const r = {};
-                if (st.modo === 'getall-mudo' || st.getAllMudo) return r;
-                setTimeout(() => { r.result = [...st.dados.values()]; if (r.onsuccess) r.onsuccess(); });
-                return r;
+                if (st.modo === 'getall-mudo' || st.getAllMudo) { tx.emVoo++; return r; }
+                return responder(r, 0, (x) => { x.result = [...st.dados.values()]; });
               },
               put(valor, chave) { tx.pend.push(['put', chave === undefined ? valor.id : chave, valor]); },
               delete(chave) { tx.pend.push(['delete', chave]); },
             });
-            if (st.modo !== 'tx-mudo') {
-              setTimeout(() => {
-                if (tx.abortado) return;
-                for (const [op, k, v] of tx.pend) { if (op === 'put') st.dados.set(k, v); else st.dados.delete(k); }
-                if (tx.oncomplete) tx.oncomplete();
-              }, 5);
-            }
+            concluir();
             return tx;
           },
         };
@@ -142,7 +152,11 @@ function idbDeMentira(modo = 'ok', { existe = true } = {}) {
 }
 
 // As funções DE VERDADE do offline contra a base de mentira, com os tetos pequenos (a espera é a do relógio).
-function aparelho(modo = 'ok', { tetoDb = 60, tetoItem = 80, existe = true, caches = null } = {}) {
+// Os tetos pequenos são só dos testes que ESPERAM o estouro (a base que não responde): passam o seu, curto. Os de SUCESSO ficam
+// com o do app (5 s) — o teto da leitura conta de quando ela começa (`offlineLerChave`, `diagAtualizarAnteriores`), e uma pausa
+// do processo (CPU disputada) estourava a que daria certo (MEDIDO com 6 queimadores de CPU: o CONTROLE da reabertura e o da
+// leitura da fila reprovaram em 2 de 13 rodadas).
+function aparelho(modo = 'ok', { tetoDb = 5000, tetoItem = 5000, existe = true, caches = null } = {}) {
   const { st, indexedDB } = idbDeMentira(modo, { existe });
   const anel = [];
   const log = { anunciou: 0 };
@@ -165,7 +179,8 @@ function aparelho(modo = 'ok', { tetoDb = 60, tetoItem = 80, existe = true, cach
       'offlineLerChave', 'offlineLerRegistroDaJanela', 'offlineLerFila', 'offlineRecuperarJanela', 'offlineEsquecer'].map((n) => fatiar(n)),
     'return { gravarFila: offlineGravarFila, gravarJanela: offlineGravarJanela, lerFila: offlineLerFila, lerJanela: offlineLerRegistroDaJanela,',
     '         lerChave: offlineLerChave, recuperar: offlineRecuperarJanela, esquecer: offlineEsquecer, abrir: offlineDB,',
-    '         janela: () => offlineJanelaServida, lendo: () => offlineLendoAJanela, epoca: () => offlineEpoca };',
+    '         janela: () => offlineJanelaServida, lendo: () => offlineLendoAJanela, epoca: () => offlineEpoca,',
+    '         teto: (ms) => { OFFLINE_DB_TETO_MS = ms; } };',
   ].join('\n');
   const fn = new Function(...nomes, corpo)(...nomes.map((k) => deps[k]));
   return { ...fn, st, anel, log, AppState };
@@ -176,13 +191,16 @@ test('R21-4-01: a leitura da fila cujo `get` NUNCA responde é abandonada no tet
   const a = aparelho('ok');
   assert.equal(await a.gravarFila(), true, 'PRÉ-CONDIÇÃO: a fila não foi pra base de mentira');
   a.st.modo = 'get-mudo';
+  a.teto(60);                                    // só quem ESPERA o estouro pede o teto curto (os de sucesso ficam com o do app)
   const r = await comSentinela(a.lerFila());
   assert.notEqual(r, PENDURADO, 'DEFEITO: a leitura da fila ficou pendurada pra sempre — o teto de 5 s cobria só o `open`');
   assert.equal(r, undefined, 'a leitura que estourou o teto saiu como base VAZIA (`null`), não como falha (`undefined`)');
   assert.equal(a.st.abertas, 0, 'DEFEITO: a conexão da leitura pendurada ficou aberta (segura o `deleteDatabase` do "Sair")');
   assert.ok(a.st.abortos >= 1, 'a transação pendurada não foi abortada');
-  // CONTROLE: a mesma leitura, com a base respondendo, devolve a fila e fecha.
+  // CONTROLE: a mesma leitura, com a base respondendo, devolve a fila e fecha — com o teto do app: o curto de cima estouraria a
+  // leitura que DARIA CERTO numa pausa do processo (CPU disputada; o teste do instrumento mostra).
   a.st.modo = 'ok';
+  a.teto(5000);
   assert.equal((await comSentinela(a.lerFila())).places.length, 2, 'CONTROLE: a leitura boa deixou de devolver a fila');
   assert.equal(a.st.abertas, 0);
 });
@@ -192,12 +210,13 @@ test('R21-4-01: o registro da janela cujo `get` NUNCA responde também falha no 
   await a.gravarJanela(1492385, 5);
   assert.equal((await a.lerJanela()).janela, 1492385, 'PRÉ-CONDIÇÃO: a janela não foi pra base de mentira');
   a.st.modo = 'get-mudo';
+  a.teto(60);                                    // só quem ESPERA o estouro pede o teto curto
   const r = await comSentinela(a.lerJanela());
   assert.notEqual(r, PENDURADO, 'DEFEITO: a leitura do registro da janela ficou pendurada — a abertura do app esperava por ela');
   assert.equal(r, undefined);
   assert.equal(a.st.abertas, 0, 'DEFEITO: a conexão ficou aberta');
   // O que só pergunta "tem registro?" trata a falha como sem registro (como sempre): `offlineRecuperarJanela` não lança.
-  const b = aparelho('get-mudo');
+  const b = aparelho('get-mudo', { tetoDb: 60 });
   const rec = await comSentinela(b.recuperar());
   assert.notEqual(rec, PENDURADO, 'DEFEITO: a recuperação da janela ficou pendurada');
   assert.equal(b.janela(), null, 'a janela foi dada sem ter sido lida');
@@ -636,7 +655,7 @@ test('R21-4-02: `offlineRecuperarJanela` DIVIDE a leitura em voo (uma abertura d
 });
 
 // A reabertura sem rede de verdade (as leituras REAIS sobre a base de mentira): a janela e a fila saem JUNTAS.
-function reabrirDeVerdade({ modo = 'ok', tetoDb = 80, janelaGravada = true } = {}) {
+function reabrirDeVerdade({ modo = 'ok', tetoDb = 5000, janelaGravada = true } = {}) {
   const { st, indexedDB } = idbDeMentira(modo);
   const log = [];
   const AppState = { authenticated: true, queue: [], hasMore: false, loadError: true, serverTotal: 0, fetchEpoch: 0 };
@@ -657,6 +676,31 @@ function reabrirDeVerdade({ modo = 'ok', tetoDb = 80, janelaGravada = true } = {
   if (janelaGravada) st.dados.set('janela', { janela: 1492385, t: 1, filaCoberta: 5 });
   return { app, st, log, AppState };
 }
+
+test('INSTRUMENTO (R21-4-01): os harnesses de SUCESSO do r21 usam o teto do app — uma pausa de 80 ms do processo não faz falhar a leitura que DARIA CERTO', async () => {
+  const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
+  const a = aparelho('ok');
+  assert.equal(await a.gravarFila(), true);
+  const lendo = a.lerFila();
+  parar(80);
+  const r = await lendo;
+  assert.ok(r && r.places && r.places.length === 2, `DEFEITO DO INSTRUMENTO: a leitura do \`aparelho\` estourou (${r === undefined ? 'undefined' : 'registro errado'}) numa pausa de 80 ms`);
+  const boa = reabrirDeVerdade({ modo: 'ok' });
+  boa.st.dados.set('fila', { t: Date.now(), desde: Date.now(), conta: '111', regiao: 'row', pais: '30', busca: 'b', places: [{ venueID: 'v1', updateRequestID: 'u1' }] });
+  const abrindo = boa.app.abrir();
+  parar(80);
+  assert.equal(await abrindo, true, 'DEFEITO DO INSTRUMENTO: a reabertura do `reabrirDeVerdade` estourou numa pausa de 80 ms');
+  const d = diagAparelho('ok', { dados: [abertura('outra')] });
+  const atualizando = d.atualizar();
+  parar(80);
+  assert.equal(await atualizando, true, 'DEFEITO DO INSTRUMENTO: a releitura do `diagAparelho` estourou numa pausa de 80 ms');
+  // CONTROLE: com o teto curto (o dos testes que esperam o estouro) a MESMA pausa estoura a leitura — a pausa pega.
+  const curto = aparelho('ok', { tetoDb: 60 });
+  assert.equal(await curto.gravarFila(), true);
+  const lendoCurto = curto.lerFila();
+  parar(80);
+  assert.equal(await lendoCurto, undefined, 'CONTROLE: a pausa de 80 ms não estourou o teto de 60 ms — o instrumento não pega a pausa');
+});
 
 test('R21-4-02: a reabertura sem rede começa a leitura da JANELA junto com a da FILA (uma abertura cada, ao mesmo tempo) — com a base lenta o painel de falha não leva o dobro do teto', async () => {
   // Os tempos de parede ficam em ESCALA (um orçamento de 500 ms contra 1000 ms de duas esperas em série, o limite no meio, 250 ms de
@@ -718,7 +762,7 @@ test('R21-4-02 (fonte): a abertura com rede passa pela espera LIMITADA — nunca
 });
 
 // ═══ R21-4-01 (diagnóstico) e R21-4-07 · a base do diagnóstico: tetos, e quem só LÊ não a recria ═══
-function diagAparelho(modo = 'ok', { existe = true, tetoDb = 60, dados = [], ligado = true } = {}) {
+function diagAparelho(modo = 'ok', { existe = true, tetoDb = 5000, dados = [], ligado = true } = {}) {
   const { st, indexedDB } = idbDeMentira(modo, { existe });
   for (const a of dados) st.dados.set(a.id, a);
   const log = { fab: 0, entregues: 0 };
@@ -738,14 +782,14 @@ function diagAparelho(modo = 'ok', { existe = true, tetoDb = 60, dados = [], lig
 const abertura = (id, extra = {}) => ({ id, inicio: 1, salvoEm: Date.now(), salvoPor: 'pagehide', diario: [], chamadas: [], erros: [], momentos: [], ...extra });
 
 test('R21-4-01: o `getAll` da base do diagnóstico que NUNCA responde estoura o teto (`TimeoutError`), é abortado — e a releitura devolve `false` em vez de pendurar o relatório e o interruptor do modo dev', async () => {
-  const d = diagAparelho('getall-mudo', { dados: [abertura('outra')] });
+  const d = diagAparelho('getall-mudo', { tetoDb: 60, dados: [abertura('outra')] });
   const db = await d.db();
   await assert.rejects(comSentinela(d.ler(db, 50)).then((r) => { if (r === PENDURADO) throw new Error('PENDURADO'); return r; }), (e) => e.name === 'TimeoutError',
     'DEFEITO: o `getAll` pendurado não estoura o teto (o relatório ficava em "Juntando tudo…" por mais de 75 s)');
   assert.ok(d.st.abortos >= 1, 'a transação pendurada não foi abortada');
   db.close();
   // A releitura inteira: não lança, não pendura, devolve `false` (o relatório anota `coleta.semResposta`) e FECHA a conexão.
-  const e = diagAparelho('getall-mudo', { dados: [abertura('outra')] });
+  const e = diagAparelho('getall-mudo', { tetoDb: 60, dados: [abertura('outra')] });
   const r = await comSentinela(e.atualizar(), 1500);
   assert.notEqual(r, PENDURADO, 'DEFEITO: `diagAtualizarAnteriores` ficou pendurada — o interruptor do modo dev (a caixa desmarcava e o modo seguia ligado) e o relatório esperam por ela');
   assert.equal(r, false);
@@ -775,7 +819,7 @@ test('R21-4-01: o `open` e o `getAll` dividem UM orçamento — a releitura cujo
 });
 
 test('R21-4-01: a gravação (poda) da base do diagnóstico cuja transação NUNCA completa estoura o teto, é ABORTADA e rejeita — a fila `diagGuardando` não fica presa', async () => {
-  const d = diagAparelho('tx-mudo');
+  const d = diagAparelho('tx-mudo', { tetoDb: 60 });
   const db = await d.db();
   const poda = { sair: ['velha'], manter: [abertura('esta-aba')], cortadas: [] };
   const r = await comSentinela(d.aplicar(db, poda, new Set(['esta-aba'])).then(() => 'ok', (e) => e.name), 1500);
@@ -813,7 +857,7 @@ test('R21-4-07: a abertura do app só LÊ a base quando não há retrato do fech
     const { st, indexedDB } = idbDeMentira('ok', { existe: false });
     const log = { aplicou: 0, fato: [] };
     const DIAG_ABERTURA = { id: 'esta-aba' };
-    const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 60, DIAG_GUARDA_MS: 24 * 3600e3, esperarComTeto,
+    const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, DIAG_GUARDA_MS: 24 * 3600e3, esperarComTeto,
       dlogLigado: () => true, diagPodarEntregas: () => {}, diagAberturasVivas: async () => null, diagLerRetratos: () => retratos,
       diagJuntarRetrato: (guardada, r) => ({ ...(guardada || {}), id: r.id, salvoEm: Date.now(), momentos: [] }),
       diagPodarAberturas: (lista) => ({ manter: lista, sair: [], cortadas: [] }),

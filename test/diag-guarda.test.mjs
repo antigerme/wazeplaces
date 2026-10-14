@@ -598,7 +598,10 @@ function baseDoDiag({ abrir }) {
     open: () => abrir(gravados),
     deleteDatabase: () => { apagou++; const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; },
   };
-  const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30, esperarComTeto,
+  // O teto da base cobre o `open`, a leitura e a gravação (R21-4-01), cada passo com o seu. Com 30 ms uma pausa do processo
+  // (CPU disputada) estourava o passo que DEVIA dar certo — e a gravação "que não prende as seguintes" não gravava. 200 ms
+  // ainda deixa o teste rápido (quem pendura espera os 200) e o atraso só faz o teto estourar de um lado que o teste já espera.
+  const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200, esperarComTeto,
     DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => false,
     diagSegurarAbertura: () => {},
     diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
@@ -680,6 +683,30 @@ test('O10: uma gravação com a abertura PENDURADA não prende as seguintes (o t
   const segunda = b.app.diagGuardarAbertura('saida');
   assert.equal(await comTetoDe(1000, segunda), 'terminou', 'a gravação seguinte ficou presa atrás da abertura pendurada');
   assert.deepEqual(b.gravados, ['esta'], 'a gravação seguinte não gravou');
+});
+
+test('INSTRUMENTO (R21-4-01): uma pausa de 80 ms do processo no meio da gravação não derruba a que DARIA CERTO — o teto do harness é folgado', async () => {
+  // O teto da base cobre o `open`, a leitura e a gravação, cada passo com o seu (R21-4-01): com 30 ms uma pausa do processo
+  // (CPU disputada) estourava o passo, e a gravação "que não prende as seguintes" não gravava (o teste ficou rápido e frágil).
+  const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
+  let pausar = false;
+  const b = baseDoDiag({ abrir: (gravados) => {
+    const req = {};
+    const db = { close() {}, transaction: () => {
+      const tx = { objectStore: () => ({
+        getAll: () => { const r = {}; setTimeout(() => { r.result = []; r.onsuccess(); }, 0); return r; },
+        delete: () => {}, put: (a) => gravados.push(a.id) }) };
+      setTimeout(() => tx.oncomplete && tx.oncomplete(), 5);
+      if (pausar) parar(80);
+      return tx;
+    } };
+    setTimeout(() => { req.result = db; req.onsuccess(); }, 0);
+    return req;
+  } });
+  pausar = true;
+  assert.equal(await comTetoDe(2000, b.app.diagGuardarAbertura('saida')), 'terminou', 'a gravação não terminou');
+  assert.deepEqual(b.gravados, ['esta'],
+    'DEFEITO DO INSTRUMENTO: a gravação que daria certo não gravou numa pausa de 80 ms — o teto da base do harness é curto demais');
 });
 
 // ── D2 (auditoria de 2026-09-26): DUAS ABAS, e o que sobra sem o modo dev ─────
@@ -955,7 +982,7 @@ function baseNaMemoria(registros = [], { segurarAbertura = null } = {}) {
 // `navigator`: o das travas (R8-4-07); sem `locks`, a pergunta diz "não se sabe".
 function carregador({ ls, base, ligado = () => true, navigator = {} }) {
   const deps = { localStorage: ls, indexedDB: base.indexedDB, dlogLigado: ligado, dfato: () => {}, atualizarFabDev: () => {},
-    DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200, esperarComTeto,
+    DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, esperarComTeto,
     DIAG_RETRATO_KEY, DIAG_ENTREGUE_KEY, DIAG_ABERTURA_TRAVA: /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1], navigator, ...DIAG };
   const chaves = Object.keys(deps);
   return new Function(...chaves, `let diagAberturasAnteriores = [], diagEpoca = 0, diagOutrasVivasAoAbrir = null;
@@ -1149,7 +1176,7 @@ function abaDoDiag({ base, anteriores = [], minhas = [], ligadoLa = true }) {
   let apagou = 0;
   const AppState = { devMode: { unlocked: true, active: true }, preferences: { undoEnabled: true } };
   const deps = {
-    indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS, esperarComTeto, dfatoPendentes: () => [],
+    indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS, esperarComTeto, dfatoPendentes: () => [],
     // O aviso do que outra aba entregou (R9-4-10) mora no localStorage: aqui, vazio.
     localStorage: armazenamento(), DIAG_ENTREGUE_KEY,
     DIAG_ABERTURA: { id: ID_ESTA, inicio: AGORA - HORA }, AppState, API: { chamadas: [] },
@@ -1314,7 +1341,7 @@ function abaDoAparelho(ap, id, { minhas = [], diario = [] } = {}) {
   const deps = {
     indexedDB: ap.indexedDB, localStorage, document,
     window: { addEventListener: (tipo, fn) => { (ouvintes[tipo] ||= []).push(fn); } },
-    DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, ...DIAG, esperarComTeto, dfatoPendentes: () => [],
+    DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, ...DIAG, esperarComTeto, dfatoPendentes: () => [],
     DIAG_ABERTURA: { id, inicio: AGORA - HORA }, DIAG_ENTREGUE_KEY, DIAG_ENTREGAS_MAX: constante('DIAG_ENTREGAS_MAX'),
     AppState: { devMode: { unlocked: true, active: true } }, API: { chamadas: [] },
     dlogLigado: () => true, modoDevDesligadoNoArmazenamento: () => false, diagSegurarAbertura: () => {},

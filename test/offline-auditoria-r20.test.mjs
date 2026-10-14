@@ -188,7 +188,10 @@ function idbDeMentira(comportamento = 'ok') {
 }
 
 // ═══ A2 · o registro da janela: `null` = lido e sem registro, `undefined` = a leitura FALHOU ══════
-function leitoresDaBase(comportamento = 'ok', { tetoMs = 60 } = {}) {
+// `tetoMs`: o teto da base (`OFFLINE_DB_TETO_MS`) — desde o R21-4-01 cobre o `open` E a leitura, UM prazo. Com 60 ms uma
+// pausa do processo (CPU disputada) estourava a leitura que DEVIA dar certo (MEDIDO no r19, que tinha o mesmo desenho):
+// os testes de sucesso ficam com o do app (5 s) e só quem espera o estouro (o `open` que não responde) pede um curto.
+function leitoresDaBase(comportamento = 'ok', { tetoMs = 5000 } = {}) {
   const { st, indexedDB } = idbDeMentira(comportamento);
   const deps = { indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: tetoMs, esperarComTeto };
   const nomes = Object.keys(deps);
@@ -211,11 +214,27 @@ test('A2: `offlineLerRegistroDaJanela` — `null` na base lida sem registro (ou 
   assert.equal(await vazia.registro(), null, 'a base lida sem registro deixou de ser `null`');
   // As FALHAS: nenhuma pode ser confundida com "nunca preparou".
   for (const modo of ['open-lanca', 'mudo', 'get-erro']) {
-    const f = leitoresDaBase('ok');
+    const f = leitoresDaBase('ok', { tetoMs: 250 });     // o `mudo` espera o teto estourar: curto, e o atraso só ajuda
     f.st.criada = true; f.st.dados.set('janela', { janela: 1492385, t: 5, filaCoberta: 4 });
     f.st.comportamento = modo;
     assert.equal(await f.registro(), undefined, `DEFEITO: a leitura do registro que falhou (${modo}) saiu como "sem registro" (null)`);
   }
+});
+
+test('INSTRUMENTO (R21-4-01): o harness dos leitores usa o teto do app — uma pausa de 80 ms do processo não faz falhar a leitura que DARIA CERTO', async () => {
+  const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
+  const monta = (opcoes) => { const l = leitoresDaBase('ok', opcoes); l.st.criada = true; l.st.dados.set('janela', { janela: 1492385, t: 5, filaCoberta: 4 }); return l; };
+  const a = monta();
+  const lendo = a.registro();
+  parar(80);
+  const r = await lendo;
+  assert.ok(r && r.janela === 1492385,
+    `DEFEITO DO INSTRUMENTO: a leitura do harness estourou (${r === undefined ? 'undefined' : JSON.stringify(r)}) numa pausa de 80 ms — o teto dele é curto demais pra um teste de SUCESSO`);
+  // CONTROLE: com o teto curto (o dos testes que esperam o estouro) a mesma pausa estoura a leitura.
+  const curto = monta({ tetoMs: 60 });
+  const lendoCurto = curto.registro();
+  parar(80);
+  assert.equal(await lendoCurto, undefined, 'CONTROLE: a pausa de 80 ms não estourou o teto de 60 ms — o instrumento não pega a pausa');
 });
 
 test('A2: os chamadores que só perguntam "tem registro?" tratam `undefined` como `null` — nada muda no comportamento', async () => {
@@ -287,13 +306,16 @@ test('A5: com o IndexedDB PENDURADO as duas leituras do `diagOffline` começam j
   const o = await pronto;
   assert.ok(o.filaGuardada && o.filaGuardada.erro, `a falha da fila não chegou ao relatório: ${JSON.stringify(o.filaGuardada)}`);
   assert.ok(o.janelaGuardada && o.janelaGuardada.erro, `a falha do registro não chegou ao relatório: ${JSON.stringify(o.janelaGuardada)}`);
-  assert.ok(Date.now() - t0 < TETO * 3, `levou ${Date.now() - t0} ms (teto de uma leitura: ${TETO})`);
+  // O limite de tempo é só a rede de segurança contra o relatório PENDURAR (o app tem 5 s por leitura, 10 s em série): a prova de
+  // que as leituras começam juntas é a de cima (`pedidos === 2`, que não depende do relógio). Com `TETO * 3` uma pausa de 100 ms
+  // do processo (CPU disputada) reprovava o teste (MEDIDO: "levou 320 ms" com teto de 80, em 1 de 25 rodadas).
+  assert.ok(Date.now() - t0 < TETO * 12, `levou ${Date.now() - t0} ms (teto de uma leitura: ${TETO})`);
   // CONTROLE: a base que responde devolve os dois sem erro.
   const boa = idbDeMentira('ok');
   boa.st.criada = true;
   boa.st.dados.set('fila', { places: [{ venueID: 'v1', updateRequestID: 'u1' }], t: 9, desde: 8, gravadoEm: 9 });
   boa.st.dados.set('janela', { janela: 3, t: 4, filaCoberta: 9 });
-  const dep2 = { ...deps, indexedDB: boa.indexedDB };
+  const dep2 = { ...deps, indexedDB: boa.indexedDB, OFFLINE_DB_TETO_MS: 5000 };   // o CONTROLE que dá certo não pode depender de o processo não parar
   const nomes2 = Object.keys(dep2);
   const d2 = new Function(...nomes2, [fatiar('offlineDB'), fatiar('offlineLerChave'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('diagOffline'),
     'return diagOffline;'].join('\n'))(...nomes2.map((k) => dep2[k]));

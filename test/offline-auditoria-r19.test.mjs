@@ -46,6 +46,8 @@ function fatiar(nome) {
   throw new Error('não fechou: ' + nome);
 }
 const tique = (ms = 1) => new Promise((ok) => setTimeout(ok, ms));
+// Para o PROCESSO (síncrono) por `ms` — o que a CPU disputada faz sem pedir: o laço de eventos volta com todos os timers vencidos.
+const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
 const chaveDoPedido = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
 
 // ═══ O IndexedDB de mentira, que CONTA as conexões ═════════════════════════════════════════════
@@ -82,28 +84,44 @@ function idbDeMentira(comportamento = 'ok') {
           fechada: false, onversionchange: null,
           close() { if (!this.fechada) { this.fechada = true; st.abertas--; } },
           transaction() {
-            const tx = { abortado: false, error: null };
+            const tx = { abortado: false, error: null, pend: 0, vaiAbortar: false };
             tx.abort = () => { tx.abortado = true; setTimeout(() => tx.onabort && tx.onabort()); };
+            // Como no navegador: a transação COMPLETA quando o ÚLTIMO pedido dela responde — não "15 ms depois de criada".
+            // O prazo fixo perdia a corrida pros `get` (1 ms) quando o laço de eventos atrasava (CPU disputada): o
+            // `oncomplete` de uma passada ANTERIOR, na mesma lista de timers de 15 ms, levava junto o desta, a fila nem
+            // chegava a ser gravada e a gravação "que falha" voltava `true`/`false` (MEDIDO com 6 queimadores de CPU: 7 de
+            // 40 rodadas reprovaram no commit de ANTES do lote 25, 9 de 40 antes deste conserto). E a transação que vai
+            // ABORTAR (a cota) nunca completa.
+            const concluir = () => setTimeout(() => {
+              if (tx.abortado || tx.vaiAbortar || tx.pend > 0 || !tx.oncomplete) return;
+              const f = tx.oncomplete; tx.oncomplete = null; f();
+            });
             tx.objectStore = () => ({
               get(chave) {
                 const r = {};
+                tx.pend++;
                 setTimeout(() => {
-                  if (st.comportamento === 'get-erro') { r.error = { name: 'UnknownError' }; if (r.onerror) r.onerror(); return; }
-                  r.result = st.dados.get(chave);
-                  if (r.onsuccess) r.onsuccess();
+                  try {
+                    if (st.comportamento === 'get-erro') { r.error = { name: 'UnknownError' }; if (r.onerror) r.onerror(); return; }
+                    r.result = st.dados.get(chave);
+                    if (r.onsuccess) r.onsuccess();
+                  } finally { tx.pend--; concluir(); }
                 });
                 return r;
               },
               put(valor, chave) {
                 if (st.comportamento === 'put-lanca' && chave === 'fila') { const e = new Error('cota'); e.name = 'QuotaExceededError'; throw e; }
                 if (st.comportamento === 'aborto') {
+                  tx.vaiAbortar = true;
                   setTimeout(() => { tx.abortado = true; tx.error = { name: 'QuotaExceededError' }; if (tx.onabort) tx.onabort(); }, 2);
                   return;
                 }
                 st.dados.set(chave, valor);
               },
             });
-            setTimeout(() => { if (!tx.abortado && tx.oncomplete) tx.oncomplete(); }, 15);
+            concluir();
+            // Uma PAUSA do processo (CPU disputada) depois de a transação nascer, forçada pelo teste: `st.pausaDepoisDaTransacao`.
+            if (st.pausaDepoisDaTransacao) parar(st.pausaDepoisDaTransacao);
             return tx;
           },
         };
@@ -119,7 +137,12 @@ function idbDeMentira(comportamento = 'ok') {
 }
 
 // As funções DE VERDADE do offline contra a base de mentira.
-function aparelho(comportamento = 'ok', { tetoMs = 60, relogio = null } = {}) {
+// `tetoMs`: o teto da base (`OFFLINE_DB_TETO_MS`). Desde o R21-4-01 ele cobre o `open` E a leitura (UM prazo, contado de
+// quando a leitura começou): com o 60 ms de antes, uma pausa de 60 ms do processo (CPU disputada — a suíte roda os arquivos
+// em paralelo) estourava o prazo da leitura que DEVIA dar certo (MEDIDO: R19-4-03 reprovou em 1 de 40 rodadas com 6
+// queimadores de CPU). Os testes de sucesso ficam com o do app (5 s); só quem espera o estouro (o `open` que não responde)
+// pede um teto curto, e esse não tem como errar pro lado de lá: o atraso só faz o teto estourar.
+function aparelho(comportamento = 'ok', { tetoMs = 5000, relogio = null } = {}) {
   const { st, indexedDB, apagarAgora } = idbDeMentira(comportamento);
   const anel = [];
   const AppState = { queue: [{ venueID: 'v1', updateRequestID: 'u1', name: 'Terceiro' }, { venueID: 'v2', updateRequestID: 'u2', name: 'Outro' }], filters: {}, preferences: {} };
@@ -148,6 +171,47 @@ function aparelho(comportamento = 'ok', { tetoMs = 60, relogio = null } = {}) {
   return { ...fn, st, anel, AppState, apagarAgora, tique };
 }
 const aposOSair = async (a) => { await a.esquecer(); await tique(25); };
+
+// ═══ O INSTRUMENTO resiste a uma pausa do processo ═══════════════════════════════════════════════
+// Com a CPU disputada (a suíte roda os arquivos em paralelo; a máquina compartilhada também) o laço de eventos volta de
+// uma pausa com VÁRIOS timers vencidos, e a ordem em que eles rodam não é a do desenho do teste. O IndexedDB de mentira
+// completava a transação "15 ms depois de criada" — e a transação que ia ABORTAR (a cota) completava antes do `onabort`,
+// a gravação "que falha" voltava `true`/`false` (MEDIDO: 7 reprovações em 40 rodadas com 6 queimadores de CPU, no commit
+// de ANTES do lote 25). E o teto da base de 60 ms estourava a leitura que daria certo (o R21-4-01 estendeu o teto até o
+// `get`; no commit de antes a leitura que dava certo não tinha como estourar). Aqui a pausa é FORÇADA, sem esperar a
+// máquina errar.
+test('INSTRUMENTO (R19-4-01/02): a transação de mentira que vai ABORTAR nunca completa — nem com o processo parado depois de criá-la', async () => {
+  for (const modo of ['aborto', 'put-lanca']) {
+    const a = aparelho(modo);
+    a.st.pausaDepoisDaTransacao = 40;
+    const r = await a.gravarFila();
+    assert.ok(r === 'cota' || r === 'falhou',
+      `DEFEITO DO INSTRUMENTO (${modo}): a transação que aborta COMPLETOU com o processo parado (${r}) — o teste de "falha" mede a corrida, não o app`);
+    assert.equal(a.anel.filter((e) => e.k === 'offline.gravacaoFalhou').length, 1, `a falha (${modo}) não chegou ao diário`);
+  }
+  // CONTROLE: a que dá certo completa, parada ou não — o instrumento não passou a recusar tudo.
+  const ok = aparelho('ok');
+  ok.st.pausaDepoisDaTransacao = 40;
+  assert.equal(await ok.gravarFila(), true, 'CONTROLE: a gravação que dá certo não completou com o processo parado');
+  assert.ok(ok.st.dados.has('fila'));
+});
+
+test('INSTRUMENTO (R21-4-01): o harness lê com o teto do app — uma pausa de 80 ms do processo não faz falhar a leitura que DARIA CERTO', async () => {
+  const a = aparelho('ok');
+  assert.equal(await a.gravarFila(), true);
+  const lendo = a.lerFila();
+  parar(80);
+  const r = await lendo;
+  assert.ok(r && r.places && r.places.length === 2,
+    `DEFEITO DO INSTRUMENTO: a leitura do harness estourou (${r === undefined ? 'undefined' : JSON.stringify(r)}) numa pausa de 80 ms — o teto dele é curto demais pra um teste de SUCESSO`);
+  // CONTROLE: com o teto curto, o dos testes que ESPERAM o estouro, a MESMA pausa estoura a leitura — a pausa pega, e é por isso
+  // que os testes de sucesso não podem usá-lo.
+  const curto = aparelho('ok', { tetoMs: 60 });
+  assert.equal(await curto.gravarFila(), true);
+  const lendoCurto = curto.lerFila();
+  parar(80);
+  assert.equal(await lendoCurto, undefined, 'CONTROLE: a pausa de 80 ms não estourou o teto de 60 ms — o instrumento não pega a pausa');
+});
 
 // ═══ R19-4-01 · a conexão é fechada também quando a transação FALHA ════════════════════════════
 for (const [modo, rotulo] of [['put-lanca', "o `put` que lança a cota (Chromium)"], ['aborto', 'o aborto assíncrono da cota (WebKit/iOS)']]) {
@@ -245,7 +309,7 @@ test('R19-4-03: `offlineLerFila` — `null` é a base vazia (ou sem base), `unde
   assert.equal((await cheia.lerFila()).places.length, 2);
   // As FALHAS: nenhuma pode ser confundida com a vazia.
   for (const modo of ['open-lanca', 'mudo', 'get-erro']) {
-    const f = aparelho('ok');
+    const f = aparelho('ok', { tetoMs: 250 });     // o `mudo` espera o teto estourar: curto, e o atraso só ajuda
     assert.equal(await f.gravarFila(), true);
     f.st.comportamento = modo;
     assert.equal(await f.lerFila(), undefined, `DEFEITO: a leitura que falhou (${modo}) saiu como base vazia (null)`);
