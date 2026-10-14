@@ -404,3 +404,81 @@ test('D2 (estrutura): o callback do observer segue só AGENDANDO — o placar in
   assert.match(obs, /obs\.observe\(placar\)/);
   assert.equal((vigia.match(/new ResizeObserver\(/g) || []).length, 1, 'a vigia ganhou um segundo observer (um só, com todos os alvos)');
 });
+
+// ═══ O rótulo do botão do Histórico diz o que a folha oferece ══════════════════════════════════════
+//
+// O botão dizia "Compartilhar meu resumo de outubro" onde `navigator.canShare({ files })` é falso (um
+// computador; o Chromium e o WebKit do Linux), mas a folha só oferecia o "Baixar" — o texto prometia o que
+// a tela seguinte não tinha. Agora o botão e a folha fazem a MESMA pergunta (`aparelhoCompartilhaArquivo`),
+// e onde o aparelho não compartilha o botão diz "Ver meu resumo de outubro".
+const compartilha = (navigator, ClasseFile = File) => new Function('navigator', 'File',
+  fatiar('aparelhoCompartilhaArquivo') + '\nreturn aparelhoCompartilhaArquivo;')(navigator, ClasseFile);
+
+test('texto do botão · `aparelhoCompartilhaArquivo`: só com `canShare({ files })` verdadeiro; qualquer falha é "não compartilha"', () => {
+  const chamadas = [];
+  assert.equal(compartilha({ canShare: (d) => { chamadas.push(d); return true; } })(), true);
+  assert.equal(chamadas.length, 1);
+  assert.equal(chamadas[0].files.length, 1, 'o canShare não recebeu um arquivo');
+  assert.equal(chamadas[0].files[0].type, 'image/png', 'o arquivo da pergunta não é PNG (o tipo é o que o canShare confere)');
+  assert.match(chamadas[0].files[0].name, /\.png$/);
+  assert.equal(compartilha({ canShare: () => 1 })(), true, 'um valor verdadeiro qualquer é "compartilha"');
+  assert.equal(compartilha({ canShare: () => false })(), false, 'canShare falso (o computador)');
+  assert.equal(compartilha({})(), false, 'sem `canShare` (o WebKit do Linux, navegador velho)');
+  assert.equal(compartilha({ canShare: () => { throw new Error('boom'); } })(), false, 'canShare que lança');
+  assert.equal(compartilha({ canShare: () => true }, class { constructor() { throw new Error('sem File'); } })(), false, 'sem `File`');
+});
+
+// `renderHistory` DE VERDADE com um mês cheio: devolve o texto do botão do Resumo.
+function rotuloDoBotaoDoResumo(lang, compartilhaArquivo) {
+  const locale = { pt: 'pt-BR', en: 'en', es: 'es', fr: 'fr' }[lang];
+  const el = { innerHTML: '', dataset: { conqLigado: '1' }, botao: null, appendChild(b) { this.botao = b; }, insertAdjacentHTML() {}, contains: () => false };
+  const document = { getElementById: (id) => (id === 'historyBody' ? el : null), activeElement: null,
+    createElement: () => ({ addEventListener() {}, setAttribute() {} }) };
+  const deps = { document, getHistoryStats: () => ({ today: { read: 1, rejected: 0 }, week: { read: 1, rejected: 0 }, month: { read: 1, rejected: 0 }, total: { read: 1, rejected: 0 } }),
+    renderAutores() {}, chaveDoFoco: () => null, devolverFocoAoPainel() {}, htmlPatente: () => '', htmlConquistas: () => '',
+    dadosDoResumo: () => ({ total: 5, ano: 2026, mesIdx: 9 }), loadHistory: () => ({}), i18nLocale: () => locale, ligarConquistas() {}, abrirResumoDoMes() {},
+    aparelhoCompartilhaArquivo: () => compartilhaArquivo, t: I18N.t, escapeHtml: (s) => String(s),
+    fraseDosLidosERejeitados: () => '' };
+  const chaves = Object.keys(deps);
+  const roda = new Function(...chaves, fatiar('renderHistory') + '\nreturn renderHistory;')(...chaves.map((k) => deps[k]));
+  I18N.setLang(lang);
+  try { roda(); } finally { I18N.setLang('pt'); }
+  assert.ok(el.botao, 'o botão do Resumo não foi criado com o mês cheio');
+  return el.botao.textContent;
+}
+
+test('texto do botão · o rótulo segue o aparelho: "Compartilhar…" só onde a folha compartilha, "Ver…" onde ela só baixa — nos 4 idiomas', () => {
+  const esperado = {
+    pt: ['Compartilhar meu resumo de outubro', 'Ver meu resumo de outubro'],
+    en: ['Share my October recap', 'See my October recap'],
+    es: ['Compartir mi resumen de octubre', 'Ver mi resumen de octubre'],
+    fr: ['Partager mon bilan : octobre', 'Voir mon bilan : octobre'],
+  };
+  for (const [lang, [comPartilhar, semPartilhar]] of Object.entries(esperado)) {
+    assert.equal(rotuloDoBotaoDoResumo(lang, true), comPartilhar, `${lang}: o aparelho compartilha`);
+    assert.equal(rotuloDoBotaoDoResumo(lang, false), semPartilhar, `${lang}: o aparelho só baixa (o rótulo prometia compartilhar)`);
+  }
+});
+
+test('texto do botão · a promessa e a oferta fazem a MESMA pergunta: uma função, e ninguém mais chama `canShare`', () => {
+  assert.match(fatiar('renderHistory'), /t\(aparelhoCompartilhaArquivo\(\) \? 'resumo\.botao' : 'resumo\.botaoVer'/, 'o rótulo não depende de `aparelhoCompartilhaArquivo`');
+  assert.match(fatiar('abrirResumoDoMes'), /const podeCompartilhar = aparelhoCompartilhaArquivo\(\);/, 'a folha não faz a mesma pergunta');
+  // `canShare` só aparece DENTRO da função: duas condições copiadas são como o botão e a folha voltam a discordar.
+  const fora = SEM.replace(fatiar('aparelhoCompartilhaArquivo'), '');
+  assert.doesNotMatch(fora, /\bcanShare\b/, 'algum outro lugar do app.js pergunta `canShare` por conta própria');
+});
+
+test('texto do botão · a chave nova nos 4 idiomas: leva o mês, não promete compartilhar e usa o nome do conceito (resumo/recap/resumen/bilan)', () => {
+  const substantivo = { pt: 'resumo', en: 'recap', es: 'resumen', fr: 'bilan' };
+  const verboDeCompartilhar = /compartilh|share|compart|partag/i;
+  for (const [lang, nome] of Object.entries(substantivo)) {
+    I18N.setLang(lang);
+    try {
+      const ver = I18N.t('resumo.botaoVer', { mes: 'MES' }), comp = I18N.t('resumo.botao', { mes: 'MES' });
+      assert.ok(ver.includes('MES'), `${lang}: a chave nova perdeu o {mes}`);
+      assert.doesNotMatch(ver, verboDeCompartilhar, `${lang}: "${ver}" ainda promete compartilhar`);
+      assert.ok(ver.includes(nome) && comp.includes(nome), `${lang}: o conceito mudou de nome entre o rótulo antigo e o novo ("${comp}" × "${ver}")`);
+      assert.match(comp, verboDeCompartilhar, `CONTROLE: o rótulo de antes devia prometer compartilhar (${lang})`);
+    } finally { I18N.setLang('pt'); }
+  }
+});

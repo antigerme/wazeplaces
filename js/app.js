@@ -20442,13 +20442,20 @@ async function abrirResumoDoMes() {
     document.getElementById('resumoTitle').textContent = t('resumo.modal.title', { mes: r.mesNome });
     // Compartilhar só onde o aparelho compartilha ARQUIVO (Android, iOS 15+).
     // No desktop o botão some e fica o Baixar — nunca um botão que não faz nada.
-    let podeCompartilhar = false;
-    try {
-        const arquivo = new File([blob], r.nomeArquivo, { type: 'image/png' });
-        podeCompartilhar = !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
-    } catch (e) { podeCompartilhar = false; }
+    const podeCompartilhar = aparelhoCompartilhaArquivo();
     document.getElementById('resumoCompartilhar').classList.toggle('hidden', !podeCompartilhar);
     openModal('resumoModal');
+}
+
+// O aparelho compartilha ARQUIVO? UMA pergunta só, e a fazem o botão do Histórico (o rótulo) e a folha do
+// Resumo (o botão "Compartilhar"): quando só a folha a fazia, o botão dizia "Compartilhar meu resumo" num
+// computador e a folha oferecia só o "Baixar" — o texto mentia (R21-7, MEDIDO no Chromium e no WebKit do
+// Linux: `canShare` falso). O `canShare` olha o tipo e o nome do arquivo, não os bytes: um PNG vazio basta.
+function aparelhoCompartilhaArquivo() {
+    try {
+        const arquivo = new File([], 'wazeplaces.png', { type: 'image/png' });
+        return !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
+    } catch (e) { return false; }
 }
 
 async function compartilharResumo() {
@@ -21870,7 +21877,9 @@ function renderHistory() {
         btn.type = 'button';
         btn.id = 'resumoBotao';
         btn.className = 'mt-3 w-full min-h-[44px] rounded-xl bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold text-sm px-4 transition';
-        btn.textContent = t('resumo.botao', { mes: mesNome });
+        // O rótulo promete o que a folha OFERECE: "Compartilhar" só onde ela tem o botão (a mesma pergunta,
+        // `aparelhoCompartilhaArquivo`); no computador o botão diz que abre o resumo, e a folha oferece o Baixar.
+        btn.textContent = t(aparelhoCompartilhaArquivo() ? 'resumo.botao' : 'resumo.botaoVer', { mes: mesNome });
         btn.addEventListener('click', abrirResumoDoMes);
         el.appendChild(btn);
     }

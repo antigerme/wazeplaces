@@ -8915,6 +8915,67 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
+// ── Histórico: o rótulo do botão do Resumo diz o que a folha oferece (lote 25) ──────────
+//
+// O botão dizia "Compartilhar meu resumo de outubro" onde `navigator.canShare({ files })` é falso (um
+// computador; o Chromium e o WebKit do Linux), mas a folha só oferecia o "Baixar" — o texto prometia o que a
+// tela seguinte não tinha. O botão e a folha agora fazem a MESMA pergunta (`aparelhoCompartilhaArquivo`).
+// Três aparelhos, nos 4 idiomas: sem `canShare` (o WebKit do Linux), com `canShare` falso (o computador) e um
+// que COMPARTILHA — o CONTROLE: sem ele, o rótulo "Ver…" passaria por "sempre Ver". O texto se compara com a
+// CHAVE (`t(chave)`), nunca com as palavras; a folha, pela visibilidade do botão "Compartilhar".
+{
+  const onde = `histórico/rótulo do Resumo (${MOTOR})`;
+  const APARELHOS = [['sem canShare', undefined, false], ['canShare falso', () => false, false], ['compartilha arquivo', () => true, true]];
+  for (const [nomeAp, canShare, compartilha] of APARELHOS) {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, locale: 'pt-BR', serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+    // O `canShare` do aparelho: definido ANTES da página (a função o lê a cada pergunta).
+    await page.addInitScript((tipo) => {
+      Object.defineProperty(navigator, 'canShare', { value: tipo === 'sem' ? undefined : (() => tipo === 'sim'), configurable: true });
+      const d = new Date(), p = (n) => String(n).padStart(2, '0');
+      const h = { _total: { read: 20, rejected: 5 } }; h[`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`] = { read: 20, rejected: 5 };
+      localStorage.setItem('waze_places_history', JSON.stringify(h));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    }, nomeAp === 'sem canShare' ? 'sem' : (compartilha ? 'sim' : 'nao'));
+    await page.goto(BASE, { waitUntil: 'load' });
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+    for (const lang of LINGUAS) {
+      const id = `${onde}: ${nomeAp}/${lang}`;
+      const m = await page.evaluate((lg) => {
+        aplicarIdioma(lg);
+        document.querySelectorAll('#toastContainer > *').forEach((el) => el.remove());
+        AppState.authenticated = true;
+        AppState.profile = { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false };
+        AppState.history = null;
+        openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+        const mes = new Date().toLocaleDateString(i18nLocale(), { month: 'long' });
+        const btn = document.getElementById('resumoBotao');
+        return { texto: btn ? btn.textContent : null, compartilhar: t('resumo.botao', { mes }), ver: t('resumo.botaoVer', { mes }), canShareReal: typeof navigator.canShare };
+      }, lang);
+      checa(m.texto !== null, `${id}: o botão do Resumo não apareceu`);
+      if (m.texto === null) continue;
+      checa(m.compartilhar !== m.ver, `${id}: CONTROLE — as duas chaves dizem o mesmo texto (a comparação não distingue os rótulos)`, m.ver);
+      checa(m.texto === (compartilha ? m.compartilhar : m.ver),
+        `${id}: o botão diz "${m.texto}" onde ${compartilha ? 'o aparelho compartilha arquivo (devia prometer compartilhar)' : 'a folha só oferece o Baixar (não devia prometer compartilhar)'}`,
+        JSON.stringify(m));
+      // A folha: o "Compartilhar" só onde o aparelho compartilha; o "Baixar" sempre.
+      await page.evaluate(() => document.getElementById('resumoBotao').click());
+      await esperarOuExplodir(page, () => { const i = document.getElementById('resumoImg'); return !document.getElementById('resumoModal').classList.contains('hidden') && i.complete && i.naturalWidth > 0; },
+        `a folha do Resumo abrir (${id})`);
+      const f = await page.evaluate(() => ({ compartilhar: !document.getElementById('resumoCompartilhar').classList.contains('hidden'),
+        baixar: !document.getElementById('resumoBaixar').classList.contains('hidden') }));
+      checa(f.compartilhar === compartilha, `${id}: a folha ${f.compartilhar ? 'oferece' : 'não oferece'} o "Compartilhar" e o botão do Histórico prometeu o contrário`, JSON.stringify(f));
+      checa(f.baixar, `${id}: a folha ficou sem o "Baixar"`);
+      await page.keyboard.press('Escape');
+      await esperarOuExplodir(page, () => document.getElementById('resumoModal').classList.contains('hidden'), 'a folha fechar');
+    }
+    checa(erros.length === 0, `${onde}: ${nomeAp}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+}
+
 // ── Foto de perfil: quando ela falha, some — nunca vira ícone de quebrado ──
 //
 // O caso real (v2026.09.14-01): o Waze trocou o host da foto e a CSP bloqueou a

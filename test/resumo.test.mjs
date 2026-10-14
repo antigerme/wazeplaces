@@ -214,9 +214,12 @@ test('gerarResumoDoMes devolve null pra mês vazio; o desenho não traduz nada',
   const desenho = fatiarFuncao('desenharResumo');
   assert.doesNotMatch(desenho, /\bt\(/, 'desenharResumo chama t() — o texto tem que chegar pronto, no idioma da pessoa');
   assert.doesNotMatch(desenho, /toLocale/, 'desenharResumo formata número/data — isso é de quem monta os textos');
-  // Compartilhar só onde o aparelho compartilha ARQUIVO; senão o botão some.
+  // Compartilhar só onde o aparelho compartilha ARQUIVO; senão o botão some. A pergunta é UMA função, que o
+  // rótulo do botão do Histórico também faz (R21-7, test/historico-r21.test.mjs): a conferência do
+  // `canShare({ files })` mora nela.
   const abrir = fatiarFuncao('abrirResumoDoMes');
-  assert.match(abrir, /navigator\.canShare\s*&&\s*navigator\.canShare\(\{\s*files:/, 'o Compartilhar deixou de conferir canShare({files})');
+  assert.match(fatiarFuncao('aparelhoCompartilhaArquivo'), /navigator\.canShare\s*&&\s*navigator\.canShare\(\{\s*files:/, 'o Compartilhar deixou de conferir canShare({files})');
+  assert.match(abrir, /const podeCompartilhar = aparelhoCompartilhaArquivo\(\);/, 'a folha do Resumo não faz a pergunta única do compartilhamento');
   assert.match(abrir, /resumoCompartilhar'\)\.classList\.toggle\('hidden', !podeCompartilhar\)/,
     'o botão de compartilhar não some onde o aparelho não compartilha arquivo');
 });
@@ -351,7 +354,7 @@ test('R8-7-04: o Resumo do mês só abre pra MESMA sessão e conta, com o Histó
       resumoCompartilhar: { classList: { toggle() {} } } };
     const estado = { conta: '111', naTela: true };
     // (o `fatiarFuncao` corta a partir de `function`: o `async` volta aqui)
-    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null; let resumoGerando = false;\nasync ' + fatiarFuncao('abrirResumoDoMes')
+    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null; let resumoGerando = false;\n' + fatiarFuncao('aparelhoCompartilhaArquivo') + '\nasync ' + fatiarFuncao('abrirResumoDoMes')
       + '\nreturn { abrirResumoDoMes, mudarSessao: () => { epocaDaSessao++; }, resumo: () => resumoAtual };';
     const fns = new Function('gerarResumoDoMes', 'contaAgora', 'historicoNaTela', 'document', 'URL', 'File', 'navigator',
       'openModal', 'showToast', 't', corpo)(
