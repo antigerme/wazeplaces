@@ -2600,11 +2600,15 @@ button:active {
    (568×320 a 1,5×: 70dvh = 224 ≥ 222, e o respiro de baixo já pende 10px sem que
    nada esteja fora).
    A LINHA DE ESTADO quebra quando o texto cresce e a folha é estreita, e cada
-   linha a mais é 1rem. Medido nos 4 idiomas, com a pessoa perto ("a menos de 1 km
-   de aquí", a frase mais longa) e longe, no Chromium e no WebKit: duas linhas até
-   19,8rem de largura (393px a 1,3×; o Galaxy Fold, 280px, já a 1×), três até 11,7rem
-   (o francês no WebKit, 360px a 2×), quatro até 9,5rem (o Fold a 2× em francês no
-   WebKit). São três degraus de 1rem na largura da janela (`100vw` em rem):
+   linha a mais é 1rem. Medido nos 4 idiomas, com a pessoa perto, longe e FORA do
+   app, no Chromium e no WebKit, varrendo a largura de 2 em 2px a 1×: a frase mais
+   larga é a do francês com a pessoa perto ("Sur l’app maintenant · L4 · à moins de
+   1 km d’ici") e, em inglês, a de FORA do app ("Not on the app right now · they’ll
+   get it later"). Ainda quebram em duas linhas a 19,625rem de largura (393px a 1,3×
+   são 18,9rem; o Galaxy Fold, 280px, já a 1×), em três a 11,625rem (o francês no
+   WebKit; 360px a 2× são 11,25rem) e em quatro a 9,625rem (o Fold a 2× em francês
+   no WebKit, 8,75rem). Os degraus ficam um passo (2px) acima do medido: 19,8, 11,8 e
+   9,8rem. São três degraus de 1rem na largura da janela (`100vw` em rem):
    `clamp(0px, (limite − 100vw)·100, 1rem)` vale 0 acima do limite e 1rem abaixo
    dele. Vale até 2× (o teto do Android); a 2,5× o Fold quebra em cinco linhas. Acima de 19,8rem nada some nem entra — 393px a 1× é
    24,6rem, 568px a 1,5× é 23,7rem —; abaixo, o piso só SOBE, e uma folha que passa a
@@ -2622,7 +2626,7 @@ button:active {
    compactar a folha (esconder a linha de estado, apertar o cabeçalho), que é
    desenho. */
 .conversa-folha {
-  --conversa-piso: calc(5.5rem + 2px + max(44px, 1.5rem) + max(44px, 1.25rem + 2px) + clamp(0px, calc((19.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((11.7rem - 100vw) * 100), 1rem) + clamp(0px, calc((9.5rem - 100vw) * 100), 1rem));
+  --conversa-piso: calc(5.5rem + 2px + max(44px, 1.5rem) + max(44px, 1.25rem + 2px) + clamp(0px, calc((19.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((11.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((9.8rem - 100vw) * 100), 1rem));
   max-height: 100%;
   height: max(70dvh, calc(var(--conversa-piso) * 101 - 70dvh * 100));
 }

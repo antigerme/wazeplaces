@@ -1001,27 +1001,34 @@ try {
       else anota(`controle: ${CELULA_DO_FOLD.id} com a altura de antes o campo CABE — a medida não enxerga o defeito`);
       await p6.evaluate((el) => el.remove(), velhaDoFold);
       // A linha de estado QUEBRA, e cada linha a mais é 1rem que o piso do CSS tem que ter somado: em
-      // pt/en/es/fr, com a pessoa PERTO (a frase mais longa: "a menos de 1 km") e longe, em 5 larguras
-      // de 280 a 568px e a 1×, 1,5× e 2×. O piso TEM que cobrir o que o DOM precisa em todas — frase
-      // mais longa que apareça um dia (um idioma novo) reprova aqui em vez de tirar o campo da folha.
+      // pt/en/es/fr, com a pessoa PERTO ("a menos de 1 km"), longe e FORA do app ("Not on the app right
+      // now · they'll get it later": em inglês é a frase mais longa das três, e a medida só olhava as
+      // duas de dentro do app), em 5 larguras de 280 a 568px e a 1×, 1,5× e 2×. O piso TEM que cobrir
+      // o que o DOM precisa em todas — frase mais longa que apareça um dia (um idioma novo) reprova aqui
+      // em vez de tirar o campo da folha.
       let coberturas = 0, maisLinhas = 0;
       for (const lang of ['pt', 'en', 'es', 'fr']) {
-        for (const perto of [true, false]) {
-          await p6.evaluate(([l, perto]) => {
+        for (const onde of ['perto', 'longe', 'fora']) {
+          await p6.evaluate(([l, onde]) => {
             setLang(l);
             const centro = AppState.currentPlace.mapa.centro;
-            const pessoa = Presenca.online.find((x) => x.id === '183164343');
-            pessoa.lat = perto ? centro[0] + 0.0001 : centro[0] + 80;
-            pessoa.lon = perto ? centro[1] : centro[1] + 120;
+            if (!window.__pessoa6) window.__pessoa6 = Presenca.online.find((x) => x.id === '183164343');
+            const pessoa = window.__pessoa6;
+            Presenca.online = Presenca.online.filter((x) => x.id !== '183164343');
+            if (onde !== 'fora') {
+              Presenca.online.push(pessoa);
+              pessoa.lat = onde === 'perto' ? centro[0] + 0.0001 : centro[0] + 80;
+              pessoa.lon = onde === 'perto' ? centro[1] : centro[1] + 120;
+            }
             presencaRenderConversa();
-          }, [lang, perto]);
+          }, [lang, onde]);
           for (const w of [280, 320, 360, 412, 568]) {
             for (const esc of [1, 1.5, 2]) {
               await janela6(w, 900, esc);
               const m = await p6.evaluate(medirConversa);
               coberturas++;
               maisLinhas = Math.max(maisLinhas, m.linhasDoEstado);
-              if (m.piso < m.precisa - 1.5) anota(`${lang}, ${perto ? 'perto' : 'longe'}, ${w}px a ${esc}×: o piso do CSS (${f1(m.piso)}px) não cobre o DOM (${f1(m.precisa)}px) com a linha de estado em ${m.linhasDoEstado} linhas — a frase quebrou além dos degraus do CSS`);
+              if (m.piso < m.precisa - 1.5) anota(`${lang}, ${onde}, ${w}px a ${esc}×: o piso do CSS (${f1(m.piso)}px) não cobre o DOM (${f1(m.precisa)}px) com a linha de estado em ${m.linhasDoEstado} linhas — a frase quebrou além dos degraus do CSS`);
             }
           }
         }
@@ -1029,11 +1036,12 @@ try {
       await p6.evaluate(() => {
         setLang('pt');
         const centro = AppState.currentPlace.mapa.centro;
-        const pessoa = Presenca.online.find((x) => x.id === '183164343');
+        let pessoa = Presenca.online.find((x) => x.id === '183164343');
+        if (!pessoa) { pessoa = window.__pessoa6; Presenca.online.push(pessoa); }
         pessoa.lat = -23.5329; pessoa.lon = -46.6395;
         presencaRenderConversa();
       });
-      if (maisLinhas >= 3) ok(`o piso cobre a linha de estado quebrada em ${coberturas} combinações (pt/en/es/fr, perto e longe, 280–568px, 1×–2×); chegou a ${maisLinhas} linhas (controle: a medida VÊ a quebra)`);
+      if (maisLinhas >= 3) ok(`o piso cobre a linha de estado quebrada em ${coberturas} combinações (pt/en/es/fr, perto, longe e fora do app, 280–568px, 1×–2×); chegou a ${maisLinhas} linhas (controle: a medida VÊ a quebra)`);
       else anota(`controle: a linha de estado nunca passou de ${maisLinhas} linha(s) em ${coberturas} combinações — o texto não quebrou e a medida não distinguiria nada`);
       // O teclado emulado TEM que ter encolhido a janela (controle do instrumento): nas
       // células com `janela`, `innerHeight` é a altura de tela menos o teclado.

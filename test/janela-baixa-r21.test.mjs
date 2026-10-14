@@ -178,12 +178,13 @@ test('R21-5-02 · o piso é a altura em que o campo e o Enviar ficam DENTRO da f
   assert.equal(p(40, 900), 5.5 * 40 + 2 + 60 + 52);
 });
 
-// A linha de estado que QUEBRA (MEDIDA nos 4 idiomas, pessoa perto e longe, Chromium e
-// WebKit, até 2×, lote 25): duas linhas até 19,8rem de largura, três até 11,7rem, quatro
-// até 9,5rem. Cada linha a mais é 1rem; o piso soma os três degraus.
+// A linha de estado que QUEBRA (MEDIDA nos 4 idiomas, pessoa perto, longe e FORA do app,
+// Chromium e WebKit, varrendo a largura de 2 em 2px a 1×, lote 25): ainda quebra em duas
+// linhas a 19,625rem, em três a 11,625rem, em quatro a 9,625rem; os degraus ficam um
+// passo (2px) acima: 19,8, 11,8 e 9,8rem. Cada linha a mais é 1rem; o piso soma os três.
 const LIMITE_DE_DUAS_LINHAS_REM = 19.8;
-const LIMITE_DE_TRES_LINHAS_REM = 11.7;
-const LIMITE_DE_QUATRO_LINHAS_REM = 9.5;
+const LIMITE_DE_TRES_LINHAS_REM = 11.8;
+const LIMITE_DE_QUATRO_LINHAS_REM = 9.8;
 
 test('R21-5-02 · a linha de estado que quebra soma 1rem por degrau, na largura da janela em rem (e só abaixo do limite)', () => {
   const p = (rem, vw) => alturaDaConversa({ rem, vw, H: 1000, raiz: 1000 }).piso;
@@ -197,7 +198,7 @@ test('R21-5-02 · a linha de estado que quebra soma 1rem por degrau, na largura 
   assert.equal(p(32, 412), base(32) + 32);
   assert.equal(p(16, 280), base(16) + 16, 'o Fold a 1× quebra a linha quando a pessoa está a menos de 1 km (medido nos 4 idiomas)');
   assert.equal(p(32, 568), base(32) + 32, '568 px a 2× são 17,75rem: duas linhas');
-  // Abaixo de 11,7rem, duas: 360 px e 320 px a 2×; abaixo de 9,5rem, três: o Fold a 2×.
+  // Abaixo de 11,8rem, duas: 360 px e 320 px a 2×; abaixo de 9,8rem, três: o Fold a 2×.
   assert.equal(p(32, 360), base(32) + 64);
   assert.equal(p(32, 320), base(32) + 64);
   assert.equal(p(32, 280), base(32) + 96);
