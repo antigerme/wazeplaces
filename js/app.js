@@ -6699,6 +6699,18 @@ function handleKeyDown(e) {
     }
 
     if (!AppState.currentPlace) return;
+    // Tecla SEGURADA não decide em série (R19-2-01). O sistema repete o `keydown`
+    // com `repeat` verdadeiro a ~30 Hz, e `triggerSwipe` só ignora a repetição
+    // durante a animação de 350 ms e a janela do Desfazer: sem o Desfazer, três
+    // segundos de ← rejeitavam 9 pedidos que ninguém chegou a ver, e rejeitar não
+    // volta. Vale SÓ aqui, onde a seta DECIDIRIA: nas áreas que rolam, nos campos,
+    // nos diálogos e nas ampliações (onde segurar é rolar ou andar) ela já saiu
+    // acima. Fica antes da trava de propósito: a repetição também não repete o
+    // aviso dela.
+    if (e.repeat && ['ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        return;
+    }
     // As setas também respeitam a trava — senão o teclado seria um atalho pra
     // furar a janela do Desfazer que o dedo respeita. E respondem com o porquê
     // quando a trava não tem banner na tela (ver `avisarTravaAoTocar`).
@@ -14712,6 +14724,14 @@ function renderCurrentCard() {
         if (window.triggerSwipe) window.triggerSwipe(direction, () => agirNoPedidoDoGesto(place, handler));
         else handler();
     };
+    // Enter SEGURADO num dos três: o navegador gera um `click` por repetição, e o
+    // foco passa ao botão do card seguinte — que recebia o próximo e o próximo
+    // (R19-2-01). `preventDefault()` no `keydown` repetido cancela o `click`.
+    for (const cls of ['.card-btn-reject', '.card-btn-skip', '.card-btn-read']) {
+        card.querySelector(cls).addEventListener('keydown', (ev) => {
+            if (ev.repeat && (ev.key === 'Enter' || ev.key === ' ')) ev.preventDefault();
+        });
+    }
     card.querySelector('.card-btn-reject').addEventListener('click', (ev) => fireAction('left', handleReject, ev));
     card.querySelector('.card-btn-skip').addEventListener('click', (ev) => fireAction('up', handleSkip, ev));
     card.querySelector('.card-btn-read').addEventListener('click', (ev) => fireAction('right', handleMarkAsRead, ev));

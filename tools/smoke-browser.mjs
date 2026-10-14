@@ -13571,6 +13571,96 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── TECLA SEGURADA NÃO DECIDE EM SÉRIE (R19-2-01, lote 23) ──────────────────
+//
+// O sistema repete o `keydown` (com `repeat` verdadeiro) a ~30 Hz enquanto a
+// tecla fica apertada. O `triggerSwipe` só ignorava a repetição durante a
+// animação de 350 ms e a janela do Desfazer: SEM o Desfazer, três segundos de
+// ← rejeitavam 9 pedidos que ninguém chegou a ver — e rejeitar não volta. O
+// Enter segurado num ✕ focado fazia o mesmo (o `click` sintético de cada
+// repetição, com o foco passando ao ✕ do card seguinte).
+//
+// `keyboard.down` repetido É a tecla segurada: o Playwright marca `repeat` a
+// partir do segundo. CONTROLES: um `keydown` simples decide UM (senão "não
+// decidiu" passaria com o teclado morto), e o ouvinte da página confirma que a
+// repetição chegou de verdade (senão passaria com o instrumento sem repetir).
+{
+  const SEGURADA_MS = 2000;
+  const teclaSegurada = async (teclaPedida, { foco = null, segurar = true } = {}) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const enviados = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      if (nome === 'validar-place' || nome === 'marcar-lido') enviados.push(nome + ':' + (corpo.updateRequestID || ''));
+      const resp = { 'presenca-app': { success: true, online: [], conversas: [] },
+        'lista-paises': { success: true, countries: [] }, 'lista-estados': { success: true, states: [] } }[nome] || { success: true };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+    const fila = Array.from({ length: 14 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vTS' + i, updateRequestID: 'uTS' + i, imageUrls: [foto] }));
+    await page.evaluate((fila) => {
+      API.setSession('token-do-smoke-da-tecla-segurada');
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
+      // Sem a janela do Desfazer: é onde a série não tinha freio nenhum.
+      AppState.devMode = { unlocked: true, active: true };
+      AppState.preferences.undoEnabled = false;
+      AppState.stats = { read: 200, rejected: 0, skipped: 0 };
+      AppState.serverTotal = fila.length; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      renderProfileHeader(AppState.profile); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      AppState.queue = fila.slice(); AppState.currentPlace = null; showCurrentPlace();
+      window.__repeticoes = 0;
+      window.addEventListener('keydown', (e) => { if (e.repeat) window.__repeticoes++; }, true);
+    }, fila);
+    await assentar(page, 250);
+    if (foco) await page.focus(foco);
+    await page.keyboard.down(teclaPedida);                       // o keydown de verdade, sem repeat
+    if (segurar) {
+      const ate = Date.now() + SEGURADA_MS;
+      while (Date.now() < ate) { await page.keyboard.down(teclaPedida); await page.waitForTimeout(33); }   // repeat = true
+    }
+    await page.keyboard.up(teclaPedida);
+    // O FIM: nada no ar e a página quieta (não um relógio).
+    await esperarOuExplodir(page, () => !AppState.inFlightActions && !acoesTravadas(), 'as decisões saírem');
+    await page.waitForTimeout(700);                              // cobre um 2º envio que viesse atrasado
+    const estado = await page.evaluate(() => ({ rep: window.__repeticoes, rej: AppState.stats.rejected, lid: AppState.stats.read - 200, pul: AppState.stats.skipped, fila: AppState.queue.length }));
+    await ctx.close();
+    return { enviados, estado, erros };
+  };
+  for (const [tecla, rotulo, esperado, foco] of [
+    ['ArrowLeft', '← segurada', 'validar-place:uTS0', null],
+    ['ArrowRight', '→ segurada', 'marcar-lido:uTS0', null],
+    ['Enter', 'Enter segurado no ✕', 'validar-place:uTS0', '.card-btn-reject'],
+  ]) {
+    // CONTROLE: UM keydown, sem repetir, decide UM pedido.
+    const um = await teclaSegurada(tecla, { foco, segurar: false });
+    checa(um.enviados.length === 1 && um.enviados[0] === esperado,
+      `tecla segurada/CONTROLE: ${rotulo} — um keydown simples não decidiu UM pedido (o teclado está morto?)`, JSON.stringify(um.enviados));
+    const r = await teclaSegurada(tecla, { foco });
+    checa(r.estado.rep >= 20,
+      `tecla segurada/CONTROLE: ${rotulo} — a página viu só ${r.estado.rep} repetições (o instrumento não segurou a tecla)`);
+    checa(r.enviados.length === 1 && r.enviados[0] === esperado,
+      `tecla segurada: ${rotulo} por ${SEGURADA_MS} ms decidiu em série`, JSON.stringify(r.enviados));
+    checa(r.estado.rej + r.estado.lid <= 1, `tecla segurada: ${rotulo} moveu o placar mais de uma vez`, JSON.stringify(r.estado));
+    checa(r.erros.length === 0, `tecla segurada: ${rotulo} erro de JS`, r.erros[0]);
+  }
+  // ↑ pula: não vai ao Waze, então o placar de pulados é quem conta.
+  const pulo = await teclaSegurada('ArrowUp');
+  checa(pulo.estado.rep >= 20, 'tecla segurada/CONTROLE: ↑ — o instrumento não segurou a tecla', String(pulo.estado.rep));
+  checa(pulo.estado.pul === 1, '↑ segurada pulou em série', JSON.stringify(pulo.estado));
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13658,6 +13748,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
+  + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
