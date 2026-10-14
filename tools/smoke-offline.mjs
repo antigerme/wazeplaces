@@ -134,12 +134,17 @@ let aviao = false;   // modo avião DE VERDADE é abort + setOffline (gotcha #28
 // `atrasoTile` deixa a varredura LENTA de propósito (seção 7d): sem ele ela
 // termina em menos de um segundo e não há "meio" em que o sinal possa cair.
 // Número (ms pra todo tile) ou função `(url) => ms`, quando a seção precisa
-// que uns cheguem e outros não.
+// que uns cheguem e outros não. A função pode devolver uma PROMESSA em vez de ms:
+// é um PORTÃO que o teste abre quando quer (a seção 9 segura a varredura em voo
+// até esquecer — um prazo fixo mediria a velocidade da máquina).
 let atrasoTile = 0;
 const servirTile = async (r) => {
   if (aviao) return r.abort('internetdisconnected');
   const espera = typeof atrasoTile === 'function' ? atrasoTile(r.request().url()) : atrasoTile;
-  if (espera) { await dormir(espera); if (aviao) return r.abort('internetdisconnected'); }
+  if (espera) {
+    if (typeof espera.then === 'function') await espera; else await dormir(espera);
+    if (aviao) return r.abort('internetdisconnected');
+  }
   rotaTile++;
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
@@ -2184,17 +2189,79 @@ if (!pularForaDoChromium(MOTOR, '9 e 9b — esquecer com a varredura em voo, e o
   'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
+//
+// ESTA SEÇÃO ESPERAVA POR PRAZO (`dormir(60)` depois de iniciar a varredura) e DEPENDIA de sobra de outra seção: o
+// worker só conhece os tiles quando a varredura o AVISA (`offlineAnunciarTiles`: a cada 50 tiles novos e no fim), então
+// com a máquina disputada o "antes" vinha 0 e o "0 → 0" não provava nada — reprovou 1 de 2 rodadas com a máquina
+// carregada, e numa página nova (sem o que as seções anteriores deixam no cache) reprova SEMPRE (MEDIDO, 3 de 3). É a
+// família "teste de browser não espera por prazo, espera pelo FIM" (gotcha do CLAUDE.md). Hoje cada passo espera um
+// SINAL POSITIVO, com teto e dizendo por que terminou:
+//  · os tiles do ALVO (o 1º da fila) estão no cache e um tile do RESTO está PRESO na rota (um portão que o teste abre):
+//    a varredura está em voo DE VERDADE, com um download a caminho — era só suposto;
+//  · o worker CONHECE tiles (o teste manda o mesmo aviso que a varredura mandaria, e espera a lista dele ficar > 0);
+//  · esquece; solta os presos; a varredura ACABA (`!offlineVarrendo`: nenhum `put` pendente) e o worker zera a lista.
+// O CONTROLE é o mesmo roteiro SEM esquecer: os presos, soltos, POUSAM — sem ele, "o cache ficou vazio" também seria o
+// que um instrumento que nunca deixa nada pousar mediria.
+const ALVO_9 = { ...SO_MAPA(70), mapa: { centro: [-12.5, -41.5], entradas: [] } };
+const RESTO_9 = Array.from({ length: 6 }, (_, k) =>
+  ({ ...SO_MAPA(71 + k), mapa: { centro: [-12.5 + (k + 1) * 0.7, -41.5], entradas: [] } }));
+await montar([ALVO_9, ...RESTO_9]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
-  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); offlineVarrer(); });
-await dormir(60);
+  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); });
+const urlsDoAlvo9 = new Set(await page.evaluate(() => [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())]));
+// Espera uma promessa com TETO e diz QUAL terminou (a espera por um sinal do lado do Node).
+const sinalOuTeto9 = async (promessa, tetoMs) => {
+  let relogio;
+  try { return await Promise.race([promessa.then(() => 'chegou'), new Promise((ok) => { relogio = setTimeout(() => ok('TETO'), tetoMs); })]); }
+  finally { clearTimeout(relogio); }
+};
+const alvoNoCache9 = () => esperarNaPagina(page, async () => {
+  const urls = [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())];
+  if (!urls.length) return false;
+  for (const u of urls) if (!(await caches.match(u, { cacheName: 'waze-places-tiles' }))) return false;
+  return true;
+}, 30000, 100);
+const workerSabeTiles9 = () => esperarNaPagina(page, async () => {
+  const d = await diagServiceWorker();
+  return !!d && d.listaPronta === true && d.tilesNaLista > 0;
+}, 15000, 200);
+const workerZerou9 = () => esperarNaPagina(page, async () => {
+  const d = await diagServiceWorker();
+  return !!d && d.listaPronta === true && d.tilesNaLista === 0;
+}, 15000, 200);
+// Uma varredura EM VOO: o alvo chega logo e o resto fica PRESO no portão até o teste soltá-lo.
+const emVoo9 = async () => {
+  let soltar; const portao = new Promise((ok) => { soltar = ok; });
+  let chegouUm; const umChegou = new Promise((ok) => { chegouUm = ok; });
+  atrasoTile = (url) => { if (urlsDoAlvo9.has(url)) return 0; chegouUm(); return portao; };
+  await page.evaluate(() => { offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer(); });   // sem esperar: é a varredura EM VOO
+  const alvo = await alvoNoCache9();
+  const preso = await sinalOuTeto9(umChegou, 30000);
+  const estado = await page.evaluate(async () => ({ varrendo: offlineVarrendo,
+    cache: (await (await caches.open('waze-places-tiles')).keys()).length }));
+  return { soltar: () => { atrasoTile = 0; soltar(); }, alvo, preso, estado };
+};
+const voo9 = await emVoo9();
+diz('PRÉ-CONDIÇÃO: a varredura está EM VOO — os tiles do alvo estão no cache e um tile do resto ficou preso a caminho',
+  voo9.alvo.ok && voo9.preso === 'chegou' && voo9.estado.varrendo === true && voo9.estado.cache >= urlsDoAlvo9.size && urlsDoAlvo9.size > 0,
+  JSON.stringify({ alvo: voo9.alvo, preso: voo9.preso, ...voo9.estado, tilesDoAlvo: urlsDoAlvo9.size }));
 // Uma entrada no anel ANTES de esquecer: sem ela, "o anel ficou vazio" passaria
 // por vácuo — ele já está vazio a esta altura.
 await page.evaluate(() => { diagTilesGuardadosQueFalharam.push({ t: Date.now(), url: 'https://www.waze.com/row-tiles/live/base/3/1/1/tile.png' }); });
 // Idem a lista do WORKER: ela tem de estar CHEIA antes, senão "esqueceu" passa
-// por vácuo.
+// por vácuo. Ele só fica sabendo pelo aviso da varredura (a cada 50 tiles e no fim): o teste manda o MESMO aviso e
+// espera o SINAL — a lista dele > 0 —, em vez de torcer pra o `dormir` bastar.
+await page.evaluate(() => offlineAnunciarTiles());
+const listaCheia9 = await workerSabeTiles9();
 const swAntes9 = await page.evaluate(() => diagServiceWorker());
+diz('PRÉ-CONDIÇÃO: o worker CONHECE tiles antes de esquecer (a lista dele > 0; sem isso o "esqueceu" passaria por vácuo)',
+  listaCheia9.ok && swAntes9?.tilesNaLista > 0, JSON.stringify({ espera: listaCheia9, lista: swAntes9?.tilesNaLista }));
 await page.evaluate(() => offlineEsquecer());
-await dormir(900);
+// Os downloads PRESOS chegam DEPOIS de esquecer: a varredura (época velha) não pode gravá-los. E a espera é pelo FIM da
+// varredura em voo — nenhum `put` pendente —, nunca por um prazo.
+voo9.soltar();
+const fimDaVarredura9 = await esperarNaPagina(page, () => !offlineVarrendo, 20000, 100);
+const swEsqueceu9 = await workerZerou9();
 const swDepois9 = await page.evaluate(() => diagServiceWorker());
 const depois = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
@@ -2202,13 +2269,30 @@ const depois = await page.evaluate(async () => {
     janela: offlineJanelaServida, res: offlineUltimoResultado,
     janelaGuardada: await offlineLerJanela(), anel: diagTilesGuardadosQueFalharam.length };
 });
+diz('a varredura em voo ACABOU depois de esquecer (e nenhum download que estava a caminho pousou no cache)',
+  fimDaVarredura9.ok && depois.cache === 0, JSON.stringify({ fim: fimDaVarredura9, ...depois }));
 diz('depois de esquecer, o cache de tiles fica VAZIO', depois.cache === 0, JSON.stringify(depois));
 diz('a fila guardada some e a janela zera', depois.fila === false && depois.janela === null, JSON.stringify(depois));
 diz('e a janela GRAVADA e o anel de tiles que falharam somem junto (dizem onde ficam pedidos de terceiros)',
   depois.janelaGuardada === null && depois.anel === 0, JSON.stringify(depois));
 diz('e o worker esquece a LISTA dele (o mesmo dado, em memória)',
-  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0,
-  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista}`);
+  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0 && swEsqueceu9.ok,
+  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista} (${JSON.stringify(swEsqueceu9)})`);
+// CONTROLE: o MESMO roteiro SEM esquecer — os tiles presos, soltos, POUSAM no cache. É o que faz o "nada pousou" de cima
+// medir o esquecer, e não um instrumento que nunca deixa nada pousar.
+const controle9 = await emVoo9();
+controle9.soltar();
+const fimDoControle9 = await esperarNaPagina(page, preparacaoAssentada, 60000, 200);
+const noCacheControle9 = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
+diz('CONTROLE: sem esquecer, os tiles presos, soltos, POUSAM — a varredura termina e o cache passa dos tiles do alvo',
+  controle9.alvo.ok && controle9.preso === 'chegou' && fimDoControle9.ok && noCacheControle9 > urlsDoAlvo9.size,
+  JSON.stringify({ alvo: controle9.alvo, preso: controle9.preso, fim: fimDoControle9, noCache: noCacheControle9, tilesDoAlvo: urlsDoAlvo9.size }));
+// O estado que as seções seguintes esperam (o que o roteiro deixava): esquecido, o cache vazio e o worker sem lista.
+await page.evaluate(() => offlineEsquecer());
+const workerZerouDeNovo9 = await workerZerou9();
+diz('o estado fica como as seções seguintes esperam: esquecido, o cache vazio e o worker sem a lista',
+  workerZerouDeNovo9.ok && (await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length)) === 0 && !(await page.evaluate(() => offlineVarrendo)),
+  JSON.stringify(workerZerouDeNovo9));
 
 secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e sem rede');
 // O relato de 2026-09-22 (o terceiro do dia): preparou o offline, fechou, entrou
