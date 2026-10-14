@@ -13747,6 +13747,73 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   checa(com.erros.length === 0 && sem.erros.length === 0, 'pareamento/recarga: erro de JS', com.erros[0] || sem.erros[0]);
 }
 
+// ── A PÁGINA QUE VOLTA DO bfcache RELÊ O APARELHO (R19-1-03) ─────────────────
+//
+// Congelada no cache de voltar/avançar, a página não recebe o aviso `storage`: o
+// "Sair" dado noutra aba nesse meio não a alcançava, e ela voltava logada, com a
+// fila (dado de terceiro) na tela de uma sessão que já saiu. O Playwright desliga
+// o bfcache, então o congelamento é SIMULADO: o ouvinte do `storage` sai da aba A
+// (ela não ouviu o "Sair"), a aba B limpa o aparelho como o "Sair" faz, e o
+// `pageshow` com `persisted` é entregue à A. CONTROLES: o `pageshow` SEM
+// `persisted` não faz nada (a aba segue logada, o instrumento não derruba a toa), e
+// o `pageshow` persistido com a sessão ainda no aparelho também não.
+{
+  const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+  await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+  await ctx.route('**/api/**', async (r) => {
+    const nome = r.request().url().split('/api/')[1].split('?')[0];
+    let resp = { success: true };
+    if (nome === 'perfil') resp = { success: true, profile: { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+    else if (nome === 'buscar-places') resp = { success: true, places: [{ ...CARDS.FLAG, venueID: 'vBF1', updateRequestID: 'uBF1', imageUrls: [] }], hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+    else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+    else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+    else if (nome === 'lista-estados') resp = { success: true, states: [] };
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+  });
+  const erros = [];
+  const abrir = async () => {
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    return page;
+  };
+  const A = await abrir();
+  await A.evaluate(() => {
+    localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache');
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+  });
+  await A.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(A, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba A abrir com a sessão salva');
+  const B = await abrir();
+  // A "congela": não ouve mais o aviso do armazenamento.
+  await A.evaluate(() => window.removeEventListener('storage', aoGravarEmOutraAba));
+  // CONTROLE 1: pageshow SEM persisted (a carga normal) — nada.
+  await A.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false })));
+  await A.waitForTimeout(150);
+  checa(await A.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — o pageshow sem persisted derrubou a aba logada');
+  // O "Sair" da outra aba: o aparelho fica sem token e sem conta.
+  await B.evaluate(() => { localStorage.removeItem('waze_session_token'); localStorage.removeItem('waze_places_conta'); });
+  checa(await A.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — a aba congelada saiu antes do pageshow (o ouvinte do storage ainda estava ligado?)');
+  await A.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  const saiu = await esperarNaPagina(A, () => AppState.authenticated === false
+    && !document.getElementById('authScreen').classList.contains('hidden'), 5000);
+  checa(saiu.ok, 'bfcache: a página restaurada do cache seguiu logada com o aparelho já limpo pelo "Sair" de outra aba');
+  checa(await A.evaluate(() => !document.querySelector('#cardStack .place-card')),
+    'bfcache: o card (dado de terceiro) seguiu no DOM da aba que saiu');
+  // CONTROLE 2: com a sessão ainda no aparelho, o pageshow persistido não derruba.
+  await B.evaluate(() => localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache'));
+  const C = await abrir();
+  await C.evaluate(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true })));
+  await C.reload({ waitUntil: 'domcontentloaded' });
+  await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba C abrir com a sessão salva');
+  await C.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await C.waitForTimeout(300);
+  checa(await C.evaluate(() => AppState.authenticated === true), 'bfcache: CONTROLE — o pageshow persistido derrubou a aba cujo aparelho segue com a sessão');
+  checa(erros.length === 0, 'bfcache: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13836,6 +13903,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`
   + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
+  + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`

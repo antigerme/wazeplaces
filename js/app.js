@@ -18879,8 +18879,24 @@ function desenharChavesDePreferencia() {
     marcar('prefOfflineDisponivel', p.offlineDisponivel === true);
 }
 
+// A página VOLTOU do cache de voltar/avançar (bfcache: Safari e Chrome do Android, ao voltar a
+// ela pelo botão Voltar ou pela troca de abas), R19-1-03. Congelada, ela NÃO recebe o aviso
+// `storage`: o "Sair" dado noutra aba nesse meio, a outra conta que entrou, o placar e as
+// preferências que mudaram — tudo isso se perdia, e a aba voltava "logada" e com a fila na tela
+// (dado de terceiro) de uma sessão que já saiu, até o primeiro ✕ falhar. O que o aviso teria dito
+// o aparelho diz: a releitura é a do "armazenamento limpo inteiro" (`key` nulo), que o
+// `aoGravarEmOutraAba` já sabe tratar — solta as cópias em memória, relê o modo dev, o placar e as
+// preferências, e `sincronizarComOutraAba` confere o token e a conta (o "Sair" de lá encerra esta
+// aba, a outra conta a tira). Só com `persisted`: a primeira carga e a recarga leem o aparelho do
+// zero. Nada grava: quem responde ao aviso não grava.
+function aoVoltarDoBfcache(ev) {
+    if (!ev || ev.persisted !== true) return;
+    aoGravarEmOutraAba({ key: null, newValue: null, oldValue: null });
+}
+
 function setupSincroniaEntreAbas() {
     window.addEventListener('storage', aoGravarEmOutraAba);
+    window.addEventListener('pageshow', aoVoltarDoBfcache);
     // O que POUSA numa aba sai da fila das outras (R11-2-01, ver
     // `avisarOutrasAbasDoPouso`): o canal é aberto aqui, uma vez por página.
     abrirCanalDosPousos();

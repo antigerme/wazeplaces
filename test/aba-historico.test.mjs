@@ -367,6 +367,7 @@ test('H3: a outra aba limpando tudo solta as três cópias; chave alheia não me
 test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
   const ouvintes = [];
   const aoGravarEmOutraAba = () => {};
+  const aoVoltarDoBfcache = () => {};   // a volta do bfcache relê o aparelho (R19-1-03)
   // O canal do POUSO entre abas (R11-2-01) é aberto no mesmo lugar: é ele que
   // leva às outras abas o que não passa pela fila de saída.
   // E o canal da fila guardada do offline (R13-4-03), também uma vez por página.
@@ -375,11 +376,11 @@ test('H3: o app escuta o aviso — o ouvinte é ligado na abertura', () => {
   let canaisDoOffline = 0;
   let canaisDaSessao = 0;
   const { setupSincroniaEntreAbas } = montar(['setupSincroniaEntreAbas'],
-    { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba,
+    { window: { addEventListener: (tipo, fn) => ouvintes.push([tipo, fn]) }, aoGravarEmOutraAba, aoVoltarDoBfcache,
       abrirCanalDosPousos: () => { canais++; }, abrirCanalDoOffline: () => { canaisDoOffline++; },
       abrirCanalDaSessao: () => { canaisDaSessao++; } }, ['setupSincroniaEntreAbas']);
   setupSincroniaEntreAbas();
-  assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba]], 'ninguém escuta o evento storage');
+  assert.deepEqual(ouvintes, [['storage', aoGravarEmOutraAba], ['pageshow', aoVoltarDoBfcache]], 'ninguém escuta o evento storage (nem a volta do bfcache)');
   assert.equal(canais, 1, 'a abertura do app não abre o canal que avisa as outras abas do que pousou');
   assert.equal(canaisDoOffline, 1, 'a abertura do app não abre o canal que avisa as outras abas da fila guardada do offline (R13-4-03)');
   assert.equal(canaisDaSessao, 1, 'a abertura do app não abre o canal que avisa as outras abas da queda da sessão guardada (R14-1-03)');

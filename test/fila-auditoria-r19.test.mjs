@@ -447,3 +447,52 @@ test('R19-1-02: a Privacidade conta o código de pareamento guardado na aba — 
   const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
   assert.match(html, /data-i18n="help\.privacy\.device">[^<]*o código de pareamento que você mostrou, só nesta aba e por 5 minutos/);
 });
+
+// ───────────────────── R19-1-03: a página que volta do bfcache relê o aparelho ─────────────────────
+// Congelada no cache de voltar/avançar a página não recebe o aviso `storage`: o "Sair" dado noutra
+// aba nesse meio não a alcançava. O `pageshow` com `persisted` simula o "armazenamento limpo
+// inteiro" (`key` nulo), que o `aoGravarEmOutraAba` já trata. (O Playwright desliga o bfcache: o
+// que o navegador responde — a página voltando mesmo — não se mede aqui; o `pageshow` é simulado.)
+function abaQueVoltaDoBfcache({ token = null, conta = null, logada = true } = {}) {
+  const chamadas = [];
+  const guardado = { waze_session_token: token, waze_places_conta: conta };
+  const deps = {
+    document: { getElementById: (id) => (id === 'appScreen' ? { classList: { contains: () => !logada } } : null) },
+    safeLS: { get: (k) => (k === 'waze_session_token' ? guardado.waze_session_token : guardado.waze_places_conta) },
+    CONTA_KEY: 'waze_places_conta', HISTORY_KEY: 'h', CONQUISTAS_KEY: 'c', AUTORES_KEY: 'a', DEVMODE_KEY: 'd', STATS_KEY: 's',
+    PREFERENCES_KEY: 'p', SAIDA_KEY: 'sa', tokenTiradoPorOutraAba: 'velho',
+    AppState: { authenticated: logada, queue: [P(1)], currentPlace: P(1), history: { x: 1 }, conquistas: {}, autores: {}, profile: { id: 1 } },
+    API: { temSessaoNaMemoria: () => logada }, extPerguntando: false, sessaoCaiuNestaPagina: false, contaConfirmadaNestaAba: null,
+    aoEntrarOutraContaEmOutraAba: () => false, aoMudarModoDevEmOutraAba() {}, guardarDeVoltaASessaoDestaAba() {},
+    relerPlacarDeOutraAba: () => chamadas.push('placar'), relerPreferenciasDeOutraAba: () => chamadas.push('prefs'),
+    updateInFlightIndicator() {}, atualizarSeloDeConquista() {}, agendarRedesenhoDoHistorico() {},
+    handleLogout: (opts) => chamadas.push('sair:' + JSON.stringify(opts)),
+  };
+  const h = montar(['aoVoltarDoBfcache', 'aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairEmOutraAba', 'guardaASessaoQueCaiu'], deps);
+  return { h, chamadas, deps };
+}
+
+test('R19-1-03: a aba que volta do bfcache depois de um "Sair" dado noutra aba sai também', () => {
+  const m = abaQueVoltaDoBfcache({ token: null, conta: null });
+  m.h.aoVoltarDoBfcache({ persisted: true });
+  assert.deepEqual(m.chamadas.filter((c) => c.startsWith('sair:')), ['sair:{"porOutraAba":true}'],
+    'DEFEITO: a página restaurada do bfcache seguiu logada com o aparelho já limpo pelo "Sair" de outra aba');
+  assert.equal(m.deps.AppState.history, null, 'a cópia do Histórico em memória não foi solta');
+  // CONTROLES: a carga normal (sem `persisted`) não sai, e a aba cujo aparelho segue com a sessão também não.
+  const normal = abaQueVoltaDoBfcache({ token: null, conta: null });
+  normal.h.aoVoltarDoBfcache({ persisted: false });
+  normal.h.aoVoltarDoBfcache({});
+  normal.h.aoVoltarDoBfcache(undefined);
+  assert.deepEqual(normal.chamadas, [], 'CONTROLE: o pageshow sem `persisted` mexeu na aba');
+  const viva = abaQueVoltaDoBfcache({ token: 'tok', conta: '{"id":1}' });
+  viva.h.aoVoltarDoBfcache({ persisted: true });
+  assert.deepEqual(viva.chamadas.filter((c) => c.startsWith('sair:')), [], 'CONTROLE: a aba com a sessão no aparelho foi encerrada');
+  // E ela relê o que o aviso `storage` teria dito: o placar e as preferências do aparelho.
+  assert.ok(viva.chamadas.includes('placar') && viva.chamadas.includes('prefs'), 'a volta não releu o placar e as preferências do aparelho');
+});
+
+test('R19-1-03 (estrutura): o `pageshow` do bfcache está ligado junto do `storage`', () => {
+  assert.match(fatiar('setupSincroniaEntreAbas'), /window\.addEventListener\('storage', aoGravarEmOutraAba\);\s*window\.addEventListener\('pageshow', aoVoltarDoBfcache\);/,
+    'a volta do bfcache deixou de reler o aparelho');
+  assert.match(fatiar('aoVoltarDoBfcache'), /ev\.persisted !== true\) return;\s*aoGravarEmOutraAba\(\{ key: null, newValue: null, oldValue: null \}\);/);
+});
