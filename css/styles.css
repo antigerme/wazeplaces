@@ -2413,11 +2413,34 @@ button:active {
 
 /* Selo SOBRE o ícone (M3 "badged icon button"): o número não pode custar
    largura própria num cabeçalho que já não tinha folga. `min-width` igual à
-   altura mantém o círculo redondo em 1 dígito e vira cápsula em 2. */
+   altura mantém o círculo redondo em 1 dígito e vira cápsula em 2.
+
+   ONDE ELE FICA (R21-5-03, lote 25). A 1× são 2px do topo e da direita do botão:
+   num botão de 44px com o ícone de 24px no centro, é o selo quase centrado no
+   canto do ÍCONE — o fundo dele fica 8,8px abaixo da borda de cima do ícone — e
+   cobre 22% da tinta do balão ("12"; "99+", 31%). O botão tem mínimo de 44px (px) e o
+   ícone e o selo são `rem`: com o texto do sistema maior o ícone ocupa o botão
+   inteiro e o selo, preso ao canto do BOTÃO, cai em cima dele (1,5×: 57%; 2×: 68%;
+   "99+" a 1,5×: 68%). O balão é a pista de que há mensagem que não é só cor
+   (WCAG 1.4.1), e a forma sumia.
+   Agora o selo se prende à borda de cima do ÍCONE, que fica em `50% − 0,75rem` do
+   topo do botão: o fundo dele continua 8,8px abaixo dela, e o selo SOBE tanto
+   quanto cresce (1,05rem − 16,8px). O `top` ainda sobe um décimo a mais (1,1×):
+   o selo também alarga ("99+" é mais largo que "12") e essa folga põe o "99+" de
+   1,5× abaixo de um quarto da tinta. Medido (traço do SVG sob o selo + anel de
+   2px; confere com o pixel, ±2,5 pontos): "12" 22% a 1× (igual a antes), 55% →
+   18% a 1,5× e 70% → 9% a 2×; "99+" 31% a 1×, 66% → 23% a 1,5× e 75% → 10% a 2×.
+   NA HORIZONTAL o selo não passa da borda do botão (`right` ≥ 0): o vizinho do
+   cabeçalho é um botão de 44px sem vão, e o selo pairando sobre o alvo dele
+   roubaria toque.
+   A 1× NENHUM pixel muda, por construção, e sem depender de arredondamento:
+   com `rem` = 16px os termos de `min()` valem exatamente 0 (22 − 12 − 10 − 1,1 × 0
+   no `top`, 22 − 12 − 8 = 2 no `right`) e `top`/`right` ficam em 2px; com texto
+   MENOR que 1× o `min()` devolve os 2px de antes. */
 .presenca-selo {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: calc(2px + min(0px, 50% - 0.75rem - 10px - 1.1 * (1.05rem - 16.8px)));
+  right: max(0px, min(2px, 50% - 0.75rem - 8px));
   min-width: 1.05rem;
   height: 1.05rem;
   padding: 0 0.25rem;
@@ -2548,9 +2571,55 @@ button:active {
    (+12px de folga). */
 .folha-modal { bottom: var(--kb-inset, 0px); }
 
+/* A ALTURA da conversa em janela baixa (R21-5-02, lote 25). Ela era
+   `min(70dvh, 100%)`: 70% da janela, e a folha toda é uma coluna cujo cabeçalho,
+   linha de estado, respiro da lista e formulário NÃO encolhem — só a lista de
+   mensagens cede. Em janela baixa os 70% ficam menores que essas partes e o
+   formulário (o campo e o Enviar) pende pra fora do fundo da folha, e da tela:
+   640×360 com o teclado de 180px aberto (a janela fica em 180) dava folha de
+   126px e campo em 161–205; 320×568 a 2× com o teclado de 250px, folha de 223 e
+   campo em 353–397 numa janela de 318. O `interactive-widget=resizes-content`
+   faz o teclado encolher a janela e o `70dvh` junto, então o teclado piora.
+   Agora, quando 70dvh NÃO comporta o que não encolhe, a folha toma a janela
+   inteira (o teto de 100% que ela já tinha); quando comporta, é 70dvh, como era.
+   `--conversa-piso` é a altura em que o campo e o Enviar ficam DENTRO da folha:
+     cabeçalho  1,5rem (py-3) + max(44px, 1,5rem) (o ✕ é px; a linha do título,
+                rem) + 1px (a borda)
+     estado     2rem (py-2 + uma linha de 1rem)
+     lista      1,5rem (py-3: o piso da caixa que rola é o respiro dela)
+     formulário 1px (a borda) + 0,5rem + max(44px, 1,25rem + 2px) (o campo e o
+                Enviar são de 44px)
+   = 5,5rem + 2px + max(44px, 1,5rem) + max(44px, 1,25rem + 2px): 178px a 1×,
+   222 a 1,5×, 270 a 2× — o `padding-bottom` do formulário (0,5rem) fica de fora
+   DE PROPÓSITO: é o que deixa a conta igual à de hoje onde o campo já cabe
+   (568×320 a 1,5×: 70dvh = 224 ≥ 222, e o respiro de baixo já pende 10px sem que
+   nada esteja fora).
+   A LINHA DE ESTADO quebra quando o texto cresce e a folha é estreita, e cada
+   linha a mais é 1rem. Medido nos 4 idiomas, com a pessoa perto ("a menos de 1 km
+   de aquí", a frase mais longa) e longe, no Chromium e no WebKit: duas linhas até
+   19,8rem de largura (393px a 1,3×; o Galaxy Fold, 280px, já a 1×), três até 11,7rem
+   (o francês no WebKit, 360px a 2×), quatro até 9,5rem (o Fold a 2× em francês no
+   WebKit). São três degraus de 1rem na largura da janela (`100vw` em rem):
+   `clamp(0px, (limite − 100vw)·100, 1rem)` vale 0 acima do limite e 1rem abaixo
+   dele. Vale até 2× (o teto do Android); a 2,5× o Fold quebra em cinco linhas. Acima de 19,8rem nada some nem entra — 393px a 1× é
+   24,6rem, 568px a 1,5× é 23,7rem —; abaixo, o piso só SOBE, e uma folha que passa a
+   tomar a janela um pouco antes do necessário é inofensiva (a janela é pequena).
+   A CONTA que mantém tudo igual: `max(70dvh, piso·101 − 70dvh·100)` é 70dvh
+   enquanto 70dvh ≥ piso (o segundo termo é menor) — a mesma altura de hoje,
+   byte a byte — e, abaixo do piso, passa de 100% com ~1px de falta (inclinação
+   100), onde o `max-height: 100%` corta. A caixa continua com a largura de
+   sempre (`sm:max-w-sm`): só a altura vira a da janela. `70dvh > 100%` (o teclado do
+   iOS, em que a raiz encolhe e a viewport não) segue dando 100%, como era. Por
+   que não `@media (max-height: …)` em px: ele pegaria TODA janela baixa, inclusive
+   568×320 a 1×, onde o formulário cabe (e tem que ficar como está), e a conta
+   precisa ser em `rem` pra acompanhar o texto. Fica de fora, e é conhecido: a
+   janela MENOR que o piso (568×320 com o teclado de 160px: 160 < 178) — ali falta
+   compactar a folha (esconder a linha de estado, apertar o cabeçalho), que é
+   desenho. */
 .conversa-folha {
+  --conversa-piso: calc(5.5rem + 2px + max(44px, 1.5rem) + max(44px, 1.25rem + 2px) + clamp(0px, calc((19.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((11.7rem - 100vw) * 100), 1rem) + clamp(0px, calc((9.5rem - 100vw) * 100), 1rem));
   max-height: 100%;
-  height: min(70dvh, 100%);
+  height: max(70dvh, calc(var(--conversa-piso) * 101 - 70dvh * 100));
 }
 
 .conversa-msgs { font-size: 0.875rem; }
@@ -2740,8 +2809,22 @@ button:active {
 .dark .conversa-pedido.dela.com-legenda .cp-legenda { color: rgb(226 232 240); }
 
 /* A foto da folha de leitura. Altura fixa: o que decide ali é o dado, e foto
-   alta demais empurraria nome e endereço pra fora numa tela apertada. */
-.pedido-foto { height: 150px; overflow: hidden; background: rgb(241 245 249); }
+   alta demais empurraria nome e endereço pra fora numa tela apertada.
+   Em px a altura não sabia de janela: em 568×320 a folha tem 224px, o cabeçalho
+   69 e a foto 150, e ela abria mostrando só os dois, com o nome, o ↗ (a ÚNICA ação
+   da folha) e o endereço abaixo da dobra e nenhuma pista de rolagem (R21-5-07,
+   lote 25; o mesmo em 667×375 a 1,5×; em 844×390 e 732×412 o nome e o ↗ já
+   apareciam, e o tipo, as categorias e o endereço não). Agora a foto CEDE: é um
+   item flex que encolhe (o `flex-shrink-0` saiu do HTML) até 72px. O flex só
+   encolhe o que passa do teto da folha (70dvh): onde o conteúdo cabe nada passa,
+   e a foto segue com os 150px de hoje (393×851, 412×915, 360×740…, pixel a pixel);
+   onde não cabe, a foto dá o que falta e o resto da folha — que não encolhe —
+   fica. Os 72px são escolha de desenho: o menor que ainda deixa reconhecer a
+   foto (sem piso ela chegava a 8px em 844×390, e a folha sem foto nenhuma não diz
+   o que o colega perguntou). Abaixo disso a folha rola como sempre rolou. O
+   enquadramento é do `object-cover` da <img> (altura 100% do item, que o flex já
+   definiu): a 16:9 e a 9:16 continuam cortando o meio, na altura que a folha deu. */
+.pedido-foto { height: 150px; flex-shrink: 1; min-height: 72px; overflow: hidden; background: rgb(241 245 249); }
 .dark .pedido-foto { background: rgb(51 65 85); }
 
 #conversaForm { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }
