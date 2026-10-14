@@ -83,8 +83,8 @@ function elemento(id) {
 // `chat(campos)` devolvem a resposta (ou uma promessa dela). `aba` é a marca
 // da aba (`ABA_DESTA_PAGINA`, do app.js); sem ela, a página não tem marca.
 // `armazenamentoBloqueado`: o `localStorage` LANÇA em todo acesso (o navegador com
-// "bloquear todos os cookies"): a sessão só existe na memória, e o `safeLS` devolve
-// `null` pra tudo.
+// "bloquear todos os cookies"): a sessão só existe na memória, e o `safeLS` (aqui o de
+// VERDADE, do api.js) devolve `null` pra tudo. Sem a opção, o dublê de sempre.
 export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined,
   armazenamentoBloqueado = false } = {}) {
   const els = new Map();
@@ -97,7 +97,6 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     ? { getItem: negado, setItem: negado, removeItem: negado }
     : { getItem: (k) => (armazenado.has(k) ? armazenado.get(k) : null), setItem: (k, v) => armazenado.set(k, String(v)),
         removeItem: (k) => armazenado.delete(k) };
-  const safeLS = new Function('localStorage', SAFELS_FONTE + '\nreturn safeLS;')(localStorageFalso);
   // `saindoNoChat[i]` é o modo "saindo" do api.js (o `keepalive`) na hora da
   // chamada `chat[i]`: é ele que diz se o pedido sobrevive à página que morre.
   const chamadas = { presencaApp: [], chat: [], saindoNoChat: [], setSaindo: [], openModal: [], closeModal: [], unauthorized: 0,
@@ -157,7 +156,11 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     navigator: { onLine: true },
     AppState,
     API,
-    safeLS,
+    safeLS: {
+      get: (k) => (armazenado.has(k) ? armazenado.get(k) : null),
+      set: (k, v) => armazenado.set(k, String(v)),
+      remove: (k) => armazenado.delete(k),
+    },
     localStorage: localStorageFalso,
     t: (k, v) => (TRADUZIDAS.test(k) && I18N.pt[k] ? I18N.pt[k] : v ? `${k}${JSON.stringify(v)}` : k),
     i18nLocale: () => 'pt-BR',
@@ -187,6 +190,10 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     ABA_DESTA_PAGINA: aba,
     ResizeObserver: ResizeObserverFalso,
   };
+  // Só com o armazenamento BLOQUEADO o `safeLS` é o de VERDADE (api.js) sobre o `localStorage`
+  // que lança. No padrão fica o dublê de sempre (o dos testes escritos antes do R21-5-04): um
+  // `safeLS` novo pra todos os testes mexeria no que eles já provam.
+  if (armazenamentoBloqueado) escopo.safeLS = new Function('localStorage', SAFELS_FONTE + '\nreturn safeLS;')(localStorageFalso);
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);
   const corpo = `${DO_APP}\n${FONTE}\nreturn { ${nomes.join(', ')} };`;
