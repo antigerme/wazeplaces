@@ -76,6 +76,27 @@ function bloco(cabeca, fonte = CSS_SEM) {
   throw new Error('não fechou: ' + cabeca);
 }
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
+// O que VALE de uma regra de seletor EXATO, em todo o arquivo: junta as regras `seletor { … }` na ordem e deixa a
+// ÚLTIMA declaração de cada propriedade (o empate de especificidade é da ordem, gotcha #27). Só regra no topo (depois
+// de `}` ou do começo do arquivo): `.x .lb-pill-nome {` e `.lb-pill-nome:hover {` não são esta.
+function declaracoesQueValem(seletor, fonte = CSS_SEM) {
+  const escapado = seletor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(?<=^|\\})\\s*' + escapado + '\\s*\\{([^}]*)\\}', 'g');
+  const valem = {};
+  let achou = 0;
+  for (const m of fonte.matchAll(re)) {
+    achou++;
+    for (const d of m[1].split(';')) {
+      const k = d.indexOf(':');
+      if (k < 0) continue;
+      const valor = d.slice(k + 1).trim();
+      assert.doesNotMatch(valor, /!important/, `${seletor}: !important muda quem vale — o teste não o modela`);
+      valem[d.slice(0, k).trim()] = valor;
+    }
+  }
+  assert.ok(achou > 0, `regra sumiu: ${seletor}`);
+  return valem;
+}
 
 // ═══ R20-7-01 · os dois botões de um diálogo na escala do texto ═══════════════
 
@@ -315,9 +336,15 @@ test('R20-3-01 · a pílula: o nome cede primeiro (a 1× nenhum pixel muda), dep
   assert.match(regra('.lb-pill-fixo'), /flex: none/);
   // O nome vai a zero e encolhe 1.000.000× mais que os outros: a 1× eles perdem
   // uma fração de pixel que o layout (1/64 px) nem representa.
-  const nome = norm(CSS_SEM.split('.lb-pill-nome {').slice(1).join('{'));
-  assert.match(nome, /min-width: 0/);
-  assert.match(nome, /flex-shrink: 1000000/);
+  //
+  // O valor que VALE, não o texto depois do seletor (R21-3-07): há DUAS regras `.lb-pill-nome {` (a de
+  // cima, com o `min-width: 2.5rem` de antes, e a que o R20-3-01 pôs depois), e fatiar o arquivo a partir
+  // da primeira devolvia o resto inteiro do CSS — o `min-width: 0` casava com o da regra
+  // `.lb-pill-fixo:not(:first-child)` que vem logo abaixo, e o nome voltar ao piso de 2.5rem não
+  // reprovava nada (gotcha #67: a asserção era decoração, e a sabotagem a denunciou).
+  const nome = declaracoesQueValem('.lb-pill-nome');
+  assert.equal(nome['min-width'], '0', 'o nome da pílula voltou a ter piso: ele não cede até zero antes da idade (a última declaração vale)');
+  assert.equal(nome['flex-shrink'], '1000000', 'o nome da pílula deixou de encolher 1.000.000× mais que os outros');
   const fixo = norm(regra('.lb-pill-fixo:not(:first-child)'));
   for (const decl of ['flex: 0 1 auto', 'min-width: 0', 'overflow: hidden', 'text-overflow: ellipsis']) {
     assert.ok(fixo.includes(decl), `os pedaços fixos perderam \`${decl}\``);
