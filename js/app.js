@@ -6041,8 +6041,22 @@ async function loadStatesIntoSelect(countryId, regiao) {
     // países diferentes (ver o histórico, que chaveia por `pais:estado`), e
     // trocar de país no modal pré-selecionava um estado alheio — o 2 da Bahia
     // abria a França na Bretanha, e o "Aplicar" o gravava.
-    if (AppState.filters.stateId && String(countryId) === String(API.getCountry())) {
-        select.value = AppState.filters.stateId;
+    //
+    // E o estado salvo que a lista deste país NÃO tem não é filtro que a tela
+    // consiga mostrar: o seletor ficava em "Todos os estados" e a busca seguia
+    // saindo com ele (R21-6-03). Só nasce de armazenamento mexido à mão — a lista
+    // só chega aqui, com os Filtros abertos, e é a partir dela que se sabe. Sai
+    // do filtro e a fila que saiu com ele é refeita (`esquecerEstadoForaDaLista`).
+    // Só vale pra lista do país e da região APLICADOS (a escolhida no modal é
+    // outro lugar, e o salvo continua sendo o do aplicado), e só com a lista
+    // CHEIA: a vazia não prova nada — o servidor também a devolve quando o Waze
+    // muda a forma da resposta, e apagar a escolha da pessoa por isso é pior.
+    // A carga que perdeu a vez (`cargaDeEstados`) nunca chega aqui: ela sai logo
+    // depois da ida.
+    const salvo = AppState.filters.stateId;
+    if (salvo && String(countryId) === String(API.getCountry())) {
+        if (states.some((s) => String(s.id) === String(salvo))) select.value = salvo;
+        else if (states.length > 0 && (regiao === undefined || regiao === API.getRegion())) esquecerEstadoForaDaLista();
     }
 }
 
@@ -13841,6 +13855,24 @@ function esquecerAreaForaDoPerfil(perfil) {
     AppState.filters.managedAreaId = '';
     saveFilters();
     return !AppState.filters.myArea;
+}
+
+// O irmão da de cima, pro ESTADO: o salvo que a lista de estados do país não tem
+// (ver `loadStatesIntoSelect`, R21-6-03). A área gerenciada tem o perfil pra
+// conferir já na abertura; o estado só tem a lista, e ela só chega com os
+// Filtros abertos — então a primeira busca da sessão já saiu com ele (a fila
+// vem vazia: "Tudo limpo!", por um filtro que a tela não mostra). Sai do filtro,
+// é gravado, e a fila que saiu com ele é refeita pelo caminho do perfil que
+// chega (`refazerFilaReal`: com o treino aberto só anota, e com a janela do
+// Desfazer aberta espera o fim dela). "Minha área" busca pela caixa, sem o
+// estado: aí sai do filtro e nada é refeito. Calado, como a área: o filtro
+// que a pessoa nunca escolheu não é aviso pra ela.
+function esquecerEstadoForaDaLista() {
+    const saiuComEle = !AppState.filters.myArea;
+    AppState.filters.stateId = '';
+    saveFilters();
+    dfato('filtros.estadoForaDaLista', { refez: saiuComEle });
+    if (saiuComEle) refazerFilaReal();
 }
 
 // "Minha área" num perfil SEM caixa: buscar o país com o filtro marcado é filtro
@@ -29054,7 +29086,15 @@ function loadFilters() {
             AppState.filters.managedAreaId = idSalvoValido(parsed.managedAreaId);
             AppState.filters.myArea = parsed.myArea === true;
             AppState.filters.unreadOnly = parsed.unreadOnly !== false;
-            AppState.filters.categories = categoriasSalvasValidas(parsed.categories);
+            // UMA categoria, no máximo: é o que o seletor dos Filtros mostra
+            // (`populateCategorySelect` lê a primeira) e o que o "Aplicar" grava
+            // (`catVal ? [catVal] : []`). Lista com mais de uma só nasce de
+            // armazenamento mexido à mão, e a busca saía com todas enquanto a tela
+            // mostrava só a primeira — o próximo "Aplicar" a reduzia sem avisar
+            // (R21-6-03). Fica a que a tela mostra: a tela é o que a pessoa vê.
+            // Fora da `categoriasSalvasValidas` de propósito: ela é a conferência
+            // dos tetos do SERVIDOR (200 itens, 80 caracteres), e o servidor aceita lista.
+            AppState.filters.categories = categoriasSalvasValidas(parsed.categories).slice(0, 1);
             // O GPS NUNCA volta de uma sessão anterior: posição é um momento e
             // amanhã a pessoa está em outro lugar — restaurá-la ordenaria a fila
             // por onde ela esteve ontem. Casa e trabalho voltam (saem do perfil

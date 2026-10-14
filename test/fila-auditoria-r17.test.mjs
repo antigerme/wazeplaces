@@ -351,15 +351,20 @@ test('loadFilters: stateId e managedAreaId só voltam se forem inteiros positivo
   assert.deepEqual([vazio.stateId, vazio.managedAreaId], ['', '']);
 });
 
-test('loadFilters: categories só volta se for lista de textos até o teto do servidor (200) — a lista vazia e a boa seguem', () => {
+test('loadFilters: categories só volta se for lista de textos até o teto do servidor (200) — a lista vazia e a boa seguem (a boa, só com a 1ª)', () => {
   const ruins = ['BAKERY', { 0: 'BAKERY' }, [1, 2], ['A', null], ['A', { x: 1 }], [['A']], Array.from({ length: 201 }, (_, i) => 'C' + i), null, 5];
   for (const v of ruins) {
     assert.deepEqual(carregarFiltros({ categories: v }).categories, [], `DEFEITO: ${JSON.stringify(v).slice(0, 40)} voltou como filtro de categoria`);
   }
   assert.deepEqual(carregarFiltros({ categories: [] }).categories, [], 'CONTROLE: a lista vazia');
-  assert.deepEqual(carregarFiltros({ categories: ['BAKERY', 'PARK'] }).categories, ['BAKERY', 'PARK'], 'CONTROLE: a lista boa foi descartada');
+  assert.deepEqual(carregarFiltros({ categories: ['BAKERY'] }).categories, ['BAKERY'], 'CONTROLE: a categoria boa foi descartada');
+  // A lista boa de MAIS de uma volta só com a PRIMEIRA (R21-6-03): é a que o seletor dos Filtros mostra e a
+  // única que o "Aplicar" grava — o servidor aceita a lista inteira, a tela não. O teto de 200 continua sendo
+  // a conferência do SERVIDOR (`categoriasSalvasValidas`, test/fila-auditoria-r18): a lista de 200 passa por
+  // ela e sai com a 1ª, e a de 201 é a recusada em `ruins` acima.
+  assert.deepEqual(carregarFiltros({ categories: ['BAKERY', 'PARK'] }).categories, ['BAKERY'], 'CONTROLE: a lista boa não ficou com a 1ª categoria');
   const duzentas = Array.from({ length: 200 }, (_, i) => 'C' + i);
-  assert.equal(carregarFiltros({ categories: duzentas }).categories.length, 200, 'CONTROLE: o teto é inclusivo (200 passa)');
+  assert.deepEqual(carregarFiltros({ categories: duzentas }).categories, ['C0'], 'CONTROLE: o teto é inclusivo (200 passa, e sai com a 1ª)');
 });
 
 test('loadFilters: o resto do filtro salvo segue como estava (tipos, país/estado em branco, "Minha área", só não lidos, ordem)', () => {
