@@ -248,7 +248,7 @@ test('R21-1-03: o código NÃO perde pro host do link — nem o código sem alga
   const em = (codigo) => [
     `Código: ${codigo} ${PRODUCAO}`,
     `${PRODUCAO} Código: ${codigo}`,
-    `Código: ${codigo}\n${PRODUCAO}/#pair=U5P25D77X9W2BGW78UPR`,
+    `Código: ${codigo}\n${PRODUCAO}/#pair=K7Q9ZXM2P4R6T8VBWCDE`,
     `Entrar: ${codigo} (http://localhost:8080/)`,
     `${codigo} www.places.wazebrasil.com`,
     `places.wazebrasil.com/#x Código ${codigo}`,
@@ -265,7 +265,7 @@ test('R21-1-03: o código NÃO perde pro host do link — nem o código sem alga
 
 test('R21-1-03: o LINK sozinho não vira código (o campo não é trocado por "PLACES")', () => {
   const { extrairCodigoPareamento } = montarColar();
-  for (const link of [`${PRODUCAO}/#pair=U5P25D77X9W2BGW78UPR`, `${PRODUCAO}`, 'places.wazebrasil.com/#pair=U5P25D77X9W2BGW78UPR', `${PRODUCAO}/?pair=U5P25D77X9W2BGW78UPR`]) {
+  for (const link of [`${PRODUCAO}/#pair=K7Q9ZXM2P4R6T8VBWCDE`, `${PRODUCAO}`, 'places.wazebrasil.com/#pair=K7Q9ZXM2P4R6T8VBWCDE', `${PRODUCAO}/?pair=K7Q9ZXM2P4R6T8VBWCDE`]) {
     assert.equal(extrairCodigoPareamento(link), null, `${link} virou "${extrairCodigoPareamento(link)}"`);
   }
 });
@@ -283,7 +283,7 @@ test('R21-1-03: CONTROLES — os formatos de sempre seguem entrando (a tela, o r
 
 test('R21-1-03: `extrairSegredoDoLinkDePareamento` — o segredo do link (#pair= ou a ?pair= antiga), maiúsculo, só com 20 símbolos', () => {
   const { extrairSegredoDoLinkDePareamento: extrai } = montarColar();
-  const S = 'U5P25D77X9W2BGW78UPR';
+  const S = 'K7Q9ZXM2P4R6T8VBWCDE';
   assert.equal(extrai(`${PRODUCAO}/#pair=${S}`), S);
   assert.equal(extrai(`http://localhost:8080/#pair=${S}`), S, 'o host não importa');
   assert.equal(extrai(`${PRODUCAO}/?pair=${S}`), S, 'a query antiga (link que ficou no histórico)');
@@ -304,7 +304,7 @@ test('R21-1-03: `extrairSegredoDoLinkDePareamento` — o segredo do link (#pair=
 test('R21-1-03: o link colado ENTRA — o resgate sai com o segredo, o campo fica como estava e o colar do navegador é impedido', () => {
   const resgates = [];
   const m = montarColar({ resgatarPareamento: (c) => { resgates.push(c); return Promise.resolve(true); } });
-  const S = 'U5P25D77X9W2BGW78UPR';
+  const S = 'K7Q9ZXM2P4R6T8VBWCDE';
   for (const antes of ['', 'XY']) {
     resgates.length = 0;
     const r = colando(m, `${PRODUCAO}/#pair=${S}`, antes);

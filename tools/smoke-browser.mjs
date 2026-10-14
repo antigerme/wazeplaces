@@ -15589,7 +15589,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 // com o host entra no campo no formato da tela e NÃO resgata sozinho; e o texto que não é nenhum dos dois
 // segue o colar do navegador.
 {
-  const SEGREDO = 'U5P25D77X9W2BGW78UPR';
+  const SEGREDO = 'K7Q9ZXM2P4R6T8VBWCDE';
   const FILA_COLAR = [{ ...CARDS.FLAG, venueID: 'vCL1', updateRequestID: 'uCL1', imageUrls: [] }];
   const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
   const claims = [];
