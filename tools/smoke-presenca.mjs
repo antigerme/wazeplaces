@@ -658,7 +658,7 @@ try {
   //    deitado ou com o texto maior;
   //  · o selo numérico da pílula cobrindo 57–68% do balão de conversa a 1,5×–2×;
   //  · a folha do pedido recebido abrindo só com o cabeçalho e a foto em janela baixa (a foto
-  //    cede só até 420px de altura; fora dali, e onde cabia, nada muda — inclusive onde só o
+  //    cede só até 414px de altura; fora dali, e onde cabia, nada muda — inclusive onde só o
   //    respiro de baixo do corpo passa do teto).
   // O teclado EMULADO aqui é a janela redimensionada (o que o Chrome do Android faz) e o
   // `--kb-inset` (o que o iOS exige): não é teclado de aparelho, e o campo do iPhone de
@@ -1095,7 +1095,7 @@ try {
         // TODA janela mudava estas duas — tirava 13px da foto só pra acabar com essa rolagem.
         { id: '393×851 a 1,5×', w: 393, h: 851, esc: 1.5, respiro: true },
         { id: '280×653 (Galaxy Fold) a 1×', w: 280, h: 653, esc: 1, respiro: true },
-        // O que NÃO cabia, em janela baixa (até 420px): nome e ↗ (a única ação) passam a aparecer sem rolar.
+        // O que NÃO cabia, em janela baixa (até 414px): nome e ↗ (a única ação) passam a aparecer sem rolar.
         { id: '568×320 deitado a 1×', w: 568, h: 320, esc: 1, cede: true },
         { id: '667×375 deitado a 1,5×', w: 667, h: 375, esc: 1.5, cede: true },
         { id: '844×390 deitado a 1×', w: 844, h: 390, esc: 1, cede: true },
@@ -1155,7 +1155,7 @@ try {
       // flex não sabe distinguir o texto do respiro): a foto não mexe.
       for (const c of [{ id: '320×568 a 1× (o iPhone SE de 1ª geração)', w: 320, h: 568, esc: 1 }, { id: '360×740 a 1,5×', w: 360, h: 740, esc: 1.5 }]) {
         const m = await celulaPedido(c, 'x');
-        if (m.fotoH === 150 && m.rola) ok(`${c.id}: acima de 420px de altura a foto segue com 150px (o conteúdo de ${m.conteudo}px numa folha de ${f1(m.folhaH)}px rola, como hoje)`);
+        if (m.fotoH === 150 && m.rola) ok(`${c.id}: acima de 414px de altura a foto segue com 150px (o conteúdo de ${m.conteudo}px numa folha de ${f1(m.folhaH)}px rola, como hoje)`);
         else anota(`${c.id}: fora da janela baixa a foto mexeu — ${JSON.stringify(m)}`);
         await fechaPedido();
       }
@@ -1169,8 +1169,10 @@ try {
         await fechaPedido();
       }
       await p6.evaluate((el) => el.remove(), sempreCede);
-      // O LIMITE do @media (o que está no CSS que a página carregou): nenhum pedido com foto cabe em 70% dele,
-      // nem o mais curto que o app consegue abrir (só o nome), no menor texto do Android (0,85×) e nos maiores.
+      // O LIMITE do @media (o que está no CSS que a página carregou): o TEXTO de nenhum pedido com foto cabe em 70%
+      // dele, nem o do mais curto que o app consegue abrir (só o nome), no menor texto do Android (0,85×) e nos
+      // maiores. Texto = o conteúdo menos o respiro de baixo do corpo (`pb-4`, 1rem): passar do teto com SÓ o respiro
+      // não esconde nada — foi o que o primeiro desenho da foto errou, e é o que um limite de 420px errava de novo.
       const limiteDoMedia = await p6.evaluate(() => {
         for (const folha of [...document.styleSheets]) {
           let regras = [];
@@ -1188,19 +1190,19 @@ try {
       else {
         const minimo = {};
         // Medido numa janela ALTA (900px), onde o @media não vale e a foto tem os 150px: a altura da janela não
-        // muda o conteúdo, e numa janela de 420px o próprio @media o encolheria e a medida mentiria.
+        // muda o conteúdo, e numa janela do @media a própria regra o encolheria e a medida mentiria.
         for (const esc of [0.85, 1, 1.5, 2]) {
           const m = await celulaPedido({ w: 900, h: 900, esc }, 'x', { soONome: true });
           if (m.fotoH !== 150) anota(`o pedido mais curto em 900×900 a ${esc}× tem a foto em ${m.fotoH}px, não 150: a medida do conteúdo mínimo não vale`);
-          minimo[esc] = m.conteudo;
+          minimo[esc] = { conteudo: m.conteudo, texto: m.conteudo - m.rem };
           await fechaPedido();
         }
-        const cabe = Object.entries(minimo).filter(([, v]) => v <= 0.7 * limiteDoMedia + 0.5);
-        if (cabe.length === 0) ok(`o pedido com foto MAIS CURTO (só o nome) pede ${minimo[0.85]}px a 0,85×, ${minimo[1]}px a 1×, ${minimo[1.5]}px a 1,5× e ${minimo[2]}px a 2×, e 70% de ${limiteDoMedia}px são ${f1(0.7 * limiteDoMedia)}px: nenhum cabe nas janelas do @media`);
-        else anota(`nas janelas de ${limiteDoMedia}px o pedido mais curto CABE (${JSON.stringify(Object.fromEntries(cabe))} ≤ ${f1(0.7 * limiteDoMedia)}px): a foto cederia onde cabia — baixe o limite do @media`);
+        const cabe = Object.entries(minimo).filter(([, v]) => v.texto <= 0.7 * limiteDoMedia + 0.5);
+        if (cabe.length === 0) ok(`o pedido com foto MAIS CURTO (só o nome) tem ${minimo[0.85].conteudo}px de conteúdo a 0,85×, ${minimo[1].conteudo}px a 1×, ${minimo[1.5].conteudo}px a 1,5× e ${minimo[2].conteudo}px a 2× — o TEXTO (sem o respiro de 1rem) é ${f1(minimo[0.85].texto)}, ${f1(minimo[1].texto)}, ${f1(minimo[1.5].texto)} e ${f1(minimo[2].texto)}px —, e 70% de ${limiteDoMedia}px são ${f1(0.7 * limiteDoMedia)}px: o texto de nenhum cabe nas janelas do @media`);
+        else anota(`nas janelas de ${limiteDoMedia}px o TEXTO do pedido mais curto CABE (${JSON.stringify(Object.fromEntries(cabe))} ≤ ${f1(0.7 * limiteDoMedia)}px, só o respiro passa do teto): a foto cederia onde cabia — baixe o limite do @media`);
         // CONTROLE: a mesma medida numa janela alta TEM que dar "cabe" (senão ela não distingue nada).
         const alto = await celulaPedido({ w: 900, h: 800, esc: 1 }, 'x', { soONome: true });
-        if (alto.conteudo <= 0.7 * 800 + 0.5 && !alto.rola) ok(`controle: o mesmo pedido em 900×800 cabe (${alto.conteudo}px em ${f1(alto.folhaH)}px) — a medida distingue`);
+        if (alto.conteudo - alto.rem <= 0.7 * 800 + 0.5 && !alto.rola) ok(`controle: o mesmo pedido em 900×800 cabe (${alto.conteudo}px em ${f1(alto.folhaH)}px) — a medida distingue`);
         else anota(`controle: o pedido mais curto não cabe nem em 900×800 — ${JSON.stringify(alto)}`);
         await fechaPedido();
       }

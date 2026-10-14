@@ -12,9 +12,10 @@
 //             (preso ao canto do botão, que é px, com ícone e selo em rem). Agora ele
 //             se prende ao ícone e SOBE quanto cresce; a 1× fica EXATAMENTE em 2px/2px.
 //  R21-5-07 · a foto da folha do pedido recebido era 150px fixos e, em janela baixa, a
-//             folha abria mostrando só o cabeçalho e a foto. Agora, até 420px de altura
-//             (onde nenhum pedido com foto cabe), ela é um item flex que encolhe até
-//             72px; fora disso é a de sempre — 150px, sem encolher, pixel a pixel.
+//             folha abria mostrando só o cabeçalho e a foto. Agora, até 414px de altura
+//             (onde o texto de nenhum pedido com foto cabe), ela é um item flex que
+//             encolhe até 72px; fora disso é a de sempre — 150px, sem encolher, pixel a
+//             pixel.
 //
 // A medida na tela (hit-test dos controles, tinta do selo, nome e ↗ da folha do pedido,
 // a 1× sem diferença) está na seção 6c de `tools/smoke-presenca.mjs`, com os controles.
@@ -351,12 +352,15 @@ test('R21-5-03 · o selo ainda cresce com o texto (o dígito inteiro dentro dele
 
 // ═══ R21-5-07 · a foto da folha do pedido recebido cede em JANELA BAIXA ═══════
 
-const MEDIA_FOTO = '@media (max-height: 420px)';
-const LIMITE_JANELA_BAIXA = 420;
+const MEDIA_FOTO = '@media (max-height: 414px)';
+const LIMITE_JANELA_BAIXA = 414;
 // O pedido com foto MAIS CURTO que o app consegue abrir (só o nome: sem tipo, categoria
-// nem endereço), medido no navegador a 0,85× (o menor texto do Android): 307px (319 a 1×,
-// 360 a 1,5×, 420 a 2×). A seção 6c do smoke da presença mede de novo a cada rodada.
+// nem endereço), medido no navegador a 0,85× (o menor texto do Android): 307px de conteúdo
+// (319 a 1×, 360 a 1,5×, 420 a 2×). Desses, 1rem (13,6px a 0,85×) é o RESPIRO de baixo do
+// corpo (`pb-4`), que passar do teto não esconde nada: o que se compara com a folha é o TEXTO.
+// A seção 6c do smoke da presença mede de novo a cada rodada.
 const CONTEUDO_MINIMO_COM_FOTO_A_085 = 307;
+const RESPIRO_DE_BAIXO_A_085 = 0.85 * 16;
 
 // O corpo de um `@media (...) { … }` (com as chaves aninhadas), exigindo UMA ocorrência:
 // guard que lê a primeira de um texto repetido lê a errada (o duplicado do lote 23).
@@ -387,7 +391,7 @@ test('R21-5-07 · FORA da janela baixa a foto do pedido recebido segue com 150px
   assert.match(tag, /\bflex-shrink-0\b/, 'o #pedidoFoto perdeu o `flex-shrink-0`: fora da janela baixa ele passaria a encolher');
 });
 
-test('R21-5-07 · só até 420px de altura a foto cede, de 150px até 72px (um item flex que encolhe)', () => {
+test('R21-5-07 · só até 414px de altura a foto cede, de 150px até 72px (um item flex que encolhe)', () => {
   const bloco = blocoDoMedia(MEDIA_FOTO);
   const m = bloco.match(/^\s*\.pedido-foto \{([^}]*)\}\s*$/);
   assert.ok(m, `o @media da foto não tem só a regra da foto: ${JSON.stringify(bloco)}`);
@@ -408,12 +412,14 @@ test('R21-5-07 · só até 420px de altura a foto cede, de 150px até 72px (um i
   assert.ok(util >= 0 && regraBaixa > util, 'o @media da foto precisa vir DEPOIS do `.flex-shrink-0` do Tailwind em css/app.css (npm run css)');
 });
 
-test('R21-5-07 · nenhum pedido com foto cabe nas janelas do @media: o que a foto cede ali não tira nada de quem cabia', () => {
+test('R21-5-07 · o TEXTO de nenhum pedido com foto cabe nas janelas do @media: o que a foto cede ali não tira nada de quem cabia', () => {
   // O desenho anterior encolhia em toda janela e mudava 393×851 a 1,5× e o Galaxy Fold a 1×
   // (o texto à vista, só o respiro de 1rem do corpo passando do teto). Abaixo do limite a
-  // folha tem 70% dele; o pedido mais curto que há tem de passar disso, no menor texto.
-  assert.ok(0.7 * LIMITE_JANELA_BAIXA < CONTEUDO_MINIMO_COM_FOTO_A_085,
-    `70% de ${LIMITE_JANELA_BAIXA}px (${0.7 * LIMITE_JANELA_BAIXA}) comporta o pedido mais curto (${CONTEUDO_MINIMO_COM_FOTO_A_085}px): a foto passaria a ceder onde cabia`);
+  // folha tem 70% dele; o TEXTO do pedido mais curto que há (o conteúdo menos o respiro de
+  // baixo, que passar do teto não esconde nada) tem de passar disso, no menor texto.
+  const textoMinimo = CONTEUDO_MINIMO_COM_FOTO_A_085 - RESPIRO_DE_BAIXO_A_085;
+  assert.ok(0.7 * LIMITE_JANELA_BAIXA < textoMinimo,
+    `70% de ${LIMITE_JANELA_BAIXA}px (${0.7 * LIMITE_JANELA_BAIXA}) comporta o texto do pedido mais curto (${textoMinimo}px): a foto passaria a ceder onde o texto cabia`);
   assert.ok(LIMITE_JANELA_BAIXA >= 412, 'o limite não alcança mais o Android deitado (412px de altura): a foto volta a empurrar o nome e o ↗');
   assert.ok(CSS_SEM.includes(`${MEDIA_FOTO} {`), 'o limite do teste e o do CSS divergem');
 });

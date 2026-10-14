@@ -2824,7 +2824,7 @@ button:active {
    da folha) e o endereço abaixo da dobra e nenhuma pista de rolagem (R21-5-07,
    lote 25; o mesmo em 667×375 a 1,5×; em 844×390 e 732×412 o nome e o ↗ já
    apareciam, e o tipo, as categorias e o endereço não).
-   Em JANELA BAIXA (até 420px de altura) a foto CEDE: vira um item flex que encolhe
+   Em JANELA BAIXA (até 414px de altura) a foto CEDE: vira um item flex que encolhe
    (o `flex-shrink: 1` do `@media` vence o `flex-shrink-0` do HTML pela ORDEM: o
    styles.css vem depois do Tailwind) até 72px. O flex só encolhe o que passa do
    teto da folha (70dvh): a foto dá o que falta e o resto da folha — que não
@@ -2834,25 +2834,27 @@ button:active {
    rolou. O enquadramento é do `object-cover` da <img> (altura 100% do item, que o
    flex já definiu): a 16:9 e a 9:16 continuam cortando o meio, na altura que a
    folha deu.
-   POR QUE SÓ ATÉ 420px — o primeiro desenho encolhia em toda janela e mudava o que
+   POR QUE SÓ ATÉ 414px — o primeiro desenho encolhia em toda janela e mudava o que
    cabia: o flex não distingue "o texto passou" de "só o respiro de baixo passou",
    e o corpo termina em `pb-4` (1rem). Em 393×851 a 1,5× a folha tem 595,7px e o
    conteúdo 609: o endereço está inteiro à vista e só 13px do respiro passam (no
    Galaxy Fold a 1× são 14px), e o flex tirava esses 13 e 14px da foto só pra
-   acabar com a rolagem. Abaixo de 420px de altura isso não existe: o pedido com
-   foto MAIS CURTO que o app consegue abrir (só o nome, sem tipo, categoria nem
-   endereço) pede 307px a 0,85× (o menor texto do Android), 319 a 1×, 360 a 1,5× e
-   420 a 2×, e 70% de 420 são 294px — nenhum pedido com foto cabe nessas janelas, e
-   o que a foto cede ali não tira nada de quem cabia. O limite não pode passar de
-   438px (307 ÷ 0,7: dali o pedido mais curto, no menor texto, passa a caber): a
-   maioria dos Android deitados tem até 412px de altura, e o iPhone Max (430) e o
-   Pixel Pro (448) ficam como hoje. Fora do `@media` a regra é a de sempre — 150px e
-   o `flex-shrink-0` do HTML —, pixel a pixel. Seguem como hoje, de propósito,
-   porque falham FORA da janela baixa e pedem outra conta: 320×568 a 1× (conteúdo
-   451 numa folha de 398) e 360×740 a 1,5× (609 numa de 518). */
+   acabar com a rolagem. Abaixo de 414px de altura isso não existe: o TEXTO de
+   nenhum pedido com foto cabe. O mais curto que o app consegue abrir (só o nome,
+   sem tipo, categoria nem endereço) tem 307px de conteúdo a 0,85× (o menor texto
+   do Android), 319 a 1×, 360 a 1,5× e 420 a 2×; tirado o respiro de baixo (1rem:
+   13,6, 16, 24 e 32px) o texto são 293, 303, 336 e 388px, e 70% de 414 são
+   289,8px. O limite não pode passar de 419px ((307 − 13,6) ÷ 0,7): a 420 o pedido
+   mais curto, no menor texto, caberia com só o respiro passando — o caso de cima.
+   A maioria dos Android deitados tem até 412px de altura e os iPhone de 414px
+   entram; o iPhone Max (430) e o Pixel Pro (448) ficam como hoje. Fora do `@media`
+   a regra é a de sempre — 150px e o `flex-shrink-0` do HTML —, pixel a pixel. Seguem
+   como hoje, de propósito, porque falham FORA da janela baixa e pedem outra conta:
+   320×568 a 1× (conteúdo 451 numa folha de 398) e 360×740 a 1,5× (609 numa de
+   518). */
 .pedido-foto { height: 150px; overflow: hidden; background: rgb(241 245 249); }
 .dark .pedido-foto { background: rgb(51 65 85); }
-@media (max-height: 420px) {
+@media (max-height: 414px) {
   .pedido-foto { flex-shrink: 1; min-height: 72px; }
 }
 
