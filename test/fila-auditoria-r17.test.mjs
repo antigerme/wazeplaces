@@ -242,7 +242,7 @@ test('R17-2-05: o lote que acaba tira SÓ os alvos dele — um lote da sessão n
   const corpo = fatiar('handleBatchMarkRead');
   assert.match(corpo, /for \(const p of alvos\) alvosDoLoteDeLidosNoAr\.set\(chaveDoPedido\(p\), epoca\);/,
     'o lote não registra os alvos dele com a época');
-  assert.match(corpo, /if \(alvosDoLoteDeLidosNoAr\.get\(k\) === epoca\) alvosDoLoteDeLidosNoAr\.delete\(k\);/,
+  assert.match(corpo, /if \(alvosDoLoteDeLidosNoAr\.get\(k\) === epoca\) \{ alvosDoLoteDeLidosNoAr\.delete\(k\);/,
     'o `finally` tira os alvos sem conferir a época do lote');
   assert.match(fatiar('handleLogout'), /pedidosEmAndamento\.clear\(\);\s*alvosDoLoteDeLidosNoAr\.clear\(\);/,
     'o "Sair" não esvazia os alvos do lote (dado de terceiro e trava de quem sai)');

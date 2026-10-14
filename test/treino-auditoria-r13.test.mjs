@@ -370,7 +370,7 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
     filtersBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; } },
   };
   // As abas e os botões do rodapé do modal (o `switchFilterTab` os troca): genéricos.
-  const generico = () => ({ classList: classes(), setAttribute() {}, tabIndex: 0 });
+  const generico = () => ({ classList: classes(), setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; }, parentElement: { scrollTop: 0 }, tabIndex: 0 });
   const doc = { visibilityState: visivel ? 'visible' : 'hidden', getElementById: (id) => els[id] || (els[id] = generico()),
     querySelectorAll: () => [] };
   const AppState = { authenticated: true, profile: perfil, conquistas: null, history: null, autores: null };

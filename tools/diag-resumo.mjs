@@ -50,6 +50,26 @@ const hora = (t) => {
   return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().slice(11, 23);
 };
 const secao = (titulo) => { out(); out('── ' + titulo + ' ' + '─'.repeat(Math.max(3, 60 - titulo.length))); };
+// A PAUSA da varredura do offline (R18-4-04): `segurarAteEm` é o instante (ms, relógio do aparelho) até
+// quando ela não pede mais nada ao servidor de tile, e só vem preenchido enquanto vale. O motivo sai
+// do que o relatório sabe: `semEspaco` (cota), ou o último `offline.parcial` do diário
+// (`limite` = o servidor pediu calma, `tilesNegados` = o servidor negou todos os tiles com 4xx,
+// `semFila` = a gravação da fila na base falhou).
+const horaLocal = (ms) => {
+  const fuso = d.ambiente && d.ambiente.fuso;
+  const f = (tz) => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false, ...(tz ? { timeZone: tz } : {}) }).format(new Date(ms));
+  try { return f(fuso); } catch (e) { return f('UTC') + ' UTC'; }
+};
+const pausaDoOffline = (o) => {
+  if (!o || !Number.isFinite(o.segurarAteEm)) return;
+  const parcial = [...(Array.isArray(d.diario) ? d.diario : [])].reverse().find((e) => e && e.k === 'offline.parcial') || {};
+  const motivo = o.semEspaco ? 'sem espaço no aparelho'
+    : parcial.limite !== undefined ? 'o servidor de tile pediu calma (408/425/429)'
+    : parcial.tilesNegados ? 'o servidor de tile negou todos os tiles (4xx)'
+    : parcial.semFila ? 'a gravação da fila na base falhou'
+    : 'motivo não registrado no diário';
+  out(`em pausa até ${horaLocal(o.segurarAteEm)} (${motivo}) — a varredura não pede nada ao servidor de tile antes disso, mesmo que o próximo gatilho "prepare".`);
+};
 // O MESMO painel diz coisas diferentes (auditoria de 2026-09-26): "tudoLimpo" era
 // também o "Fim da fila" (pulados pendentes) e o "nada tratado nesta fila", e a
 // falha podia ser "sem conexão". A `variante` entrou no relatório v11.
@@ -132,6 +152,14 @@ if ((ta.modais || []).length) {
 secao('OFFLINE');
 const off = d.offline;
 if (off === undefined) out(AUSENTE);
+// A seção estourou o orçamento (R18-4-02b): o app grava o retrato síncrono (`diagOfflineAgora`) e
+// `semResposta: true`. Não é "ausente nesta versão": a leitura da base e do cache do mapa é que não
+// chegou — fila guardada, janela gravada e tiles no cache ficam de fora, o resto vale.
+else if (off.semResposta === true) {
+  out('a leitura da base e do cache do mapa NÃO chegou no orçamento do relatório (o navegador não respondeu) — só o estado da memória da página vale:');
+  out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? AUSENTE}`);
+  pausaDoOffline(off);
+}
 // DESLIGADO não é "ausente nesta versão": o app sai cedo da seção e não guarda
 // fila, janela nem tile de quem não ligou o recurso (é a regra "quem não marca
 // não paga nada"), então esses campos não EXISTEM — e o leitor atribuía à
@@ -142,16 +170,25 @@ else if (off.ligado === false) {
   out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
   out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
+  if (off.ligado) pausaDoOffline(off);
+  {
+    const falhouGravar = (Array.isArray(d.diario) ? d.diario : []).filter((e) => e && e.k === 'offline.gravacaoFalhou');
+    if (off.ligado && falhouGravar.length) {
+      const ult = falhouGravar[falhouGravar.length - 1];
+      out(`ATENÇÃO: a gravação da fila na base falhou ${falhouGravar.length} vez(es) no diário (a última às ${hora(ult.t)}${ult.cota ? ', por FALTA DE ESPAÇO' : ult.e ? `, ${ult.e}` : ''}) — sem a fila na base não há cobertura, e a varredura termina "parcial".`);
+    }
+  }
   // O que decide a LINHA das Preferências (R14-4-06): ela diz "Pronto" sobre a
   // fila guardada que a última preparação completa COBRIU, e o `resultado`
   // sozinho dizia "pronto" com a linha em "Ainda não preparado" (a fila guardada
   // era outra). Carimbos são a hora de gravação: o que importa é se são IGUAIS.
   if (off.ligado) {
     const c = (x) => (x === undefined ? AUSENTE : x === null ? '—' : String(x));
-    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : undefined;
+    // `filaGuardada: null` é a base LIDA e vazia (R18-4-05): "—", não "ausente nesta versão".
+    const naBase = off.filaGuardada && typeof off.filaGuardada === 'object' ? off.filaGuardada.t : (off.filaGuardada === null ? null : undefined);
     if (off.cobreAFila === undefined) out(`a última preparação cobre a fila guardada: ${AUSENTE}`);
     else {
-      out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? 'sim' : 'não'}`);
+      out(`a última preparação cobre a fila guardada: ${off.cobreAFila ? 'sim' : 'NÃO'} · carimbo da fila guardada ${c(naBase)} (esta aba conhece ${c(off.filaGravadaEm)}) · coberto pela preparação desta aba ${c(off.filaPreparada)} · pelo registro do aparelho ${c(off.filaCobertaGuardada)} · prepara no próximo gatilho: ${off.precisaVarrer ? (Number.isFinite(off.segurarAteEm) ? 'só depois da pausa' : 'sim') : 'não'}`);
       if (!off.cobreAFila && off.resultado === 'pronto') {
         // Dois motivos diferentes pro mesmo "pronto" sem cobertura (R17-4-07): a preparação
         // é de OUTRA fila (a de antes de outra aba gravar), ou é desta fila e terminou com
@@ -159,7 +196,11 @@ else if (off.ligado === false) {
         // a causa certa está no diário, e a frase "de OUTRA fila" apontaria a errada.
         const ultimoPronto = [...(Array.isArray(d.diario) ? d.diario : [])].reverse().find((e) => e && e.k === 'offline.pronto');
         const semNaBase = ultimoPronto && Number(ultimoPronto.semNaBase) > 0 ? Number(ultimoPronto.semNaBase) : 0;
-        if (semNaBase) {
+        if (off.filaGuardada === null) {
+          // A base foi LIDA e não tem fila nenhuma (R18-4-05): nenhuma outra aba gravou nada, e a
+          // frase "de OUTRA fila" apontaria uma causa que não existe — a gravação é que falhou.
+          out('ATENÇÃO: o resultado é "pronto", mas a fila NUNCA foi gravada na base (ela está vazia) — a gravação da fila falhou (veja o diário: `offline.gravacaoFalhou`) e a varredura de antes do lote 22 fechava "pronto" mesmo assim; a linha diz "Ainda não preparado" e nada tentava de novo até a janela virar.');
+        } else if (semNaBase) {
           out(`ATENÇÃO: o resultado é "pronto", mas a preparação terminou com ${semNaBase} pedido(s) DESTA aba que a fila guardada não tinha (outra aba a regravou durante a varredura, sem esses pedidos) — a cobertura não foi dada e a linha diz "Ainda não preparado"; o próximo gatilho prepara a fila desta aba.`);
         } else {
           out('ATENÇÃO: o resultado é "pronto", mas da preparação de OUTRA fila — a linha diz "Ainda não preparado" (sem rede: que o mapa e as fotos chegam quando houver sinal).');
@@ -379,7 +420,19 @@ secao('CÓDIGO NO APARELHO');
   const co = d.coleta;
   if (co && Array.isArray(co.semResposta)) {
     out(`coleta: ${co.ms} ms (orçamento ${co.orcamentoMs} ms) · sem resposta: ${co.semResposta.length}`);
-    if (co.semResposta.length) out(`ATENÇÃO: ${co.semResposta.length} leitura(s) sem resposta no orçamento — rede pendurada na hora do relatório: ${co.semResposta.map(nome).slice(0, 8).join(', ')}${co.semResposta.length > 8 ? '…' : ''}`);
+    // LOCAL × REDE (R18-4-02a): as leituras do próprio navegador (registros do service worker, caches,
+    // armazenamento, bases do IndexedDB, a seção do offline) entram na mesma lista das de rede, e a
+    // frase dizia sempre "rede pendurada" — mesmo quando só o navegador não respondeu e a rede estava boa.
+    const rotulosLocais = new Set(['service worker (registros)', 'caches', 'armazenamento (estimate)',
+      'armazenamento (persisted)', 'indexedDB.databases', 'offline (base e cache do mapa)']);
+    const locais = co.semResposta.filter((x) => rotulosLocais.has(x));
+    const deRede = co.semResposta.filter((x) => !rotulosLocais.has(x));
+    const lista = (l) => `${l.map(nome).slice(0, 8).join(', ')}${l.length > 8 ? '…' : ''}`;
+    if (deRede.length) out(`ATENÇÃO: ${deRede.length} leitura(s) sem resposta no orçamento — rede pendurada na hora do relatório: ${lista(deRede)}`);
+    if (locais.length) out(`ATENÇÃO: ${locais.length} leitura(s) LOCAL(IS) do navegador sem resposta no orçamento — o navegador não respondeu (não é a rede): ${lista(locais)}`);
+    if (locais.length && deRede.length >= 5 && !(d.relogio && d.relogio.servidor)) {
+      out('nota: com leitura local pendurada, um relatório de antes do lote 22 perdia junto as leituras de rede (o código esperava as locais) — a "rede pendurada" acima pode ser consequência, não causa.');
+    }
   }
 }
 

@@ -416,6 +416,7 @@ test('outra conta entrando: o autor que a anterior focou sai — a fila dela nã
     esvaziarSeletorDeAreas: nada,   // as áreas gerenciadas da anterior nos Filtros (R11-1-05)
     deixarSoAsChamadasDaSessao: nada, API: {},   // o anel de chamadas da sessão anterior (R10-1-02)
     esquecerListasDePaises: nada,   // as listas de países por região (R9-6-01)
+    soltarOLoteDeLidosDaContaAnterior: () => {},   // R18-1-02
     fecharOQueEraDaContaAnterior: nada,   // o que ela tinha aberto (test/costura-sessao, R7-1-01)
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
     pedidosEmAndamento: new Set(), chaveDoPedido: (p) => (p ? p.venueID + '|' + p.updateRequestID : null),

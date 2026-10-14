@@ -374,7 +374,8 @@ test('TODO pouso passa pela fonte única — um caminho de fora deixaria o pedid
   // que o Waze já tinha marcado quando o app fechava no meio (medido em
   // test/lote-lidos.test.mjs). E o terceiro é o do que pousou DEPOIS de a
   // sessão cair, na fila que atravessou a queda (V6b, test/costura-sessao).
-  assert.equal(conta('handleBatchMarkRead'), 3, 'o lote de lidos não registra o pouso por pedaço, por pedido e o de depois da queda');
+  // (O quarto é o do treino aberto com o lote no ar: a fila guardada nele, R18-1-01.)
+  assert.equal(conta('handleBatchMarkRead'), 4, 'o lote de lidos não registra o pouso por pedaço, por pedido, o de depois da queda e o da fila guardada pelo treino');
   // E o pouso vem ANTES do que pode lançar (histórico, conquistas): se algo ali
   // quebrar, o pedido não pode voltar por causa disso.
   const h = fatiar('handleActionResult');

@@ -144,7 +144,9 @@ test('a janela servida só avança quando a varredura TERMINA', () => {
   // DENTRO desse bloco — a condição abre um `{` que ainda não fechou até ela. (Era
   // "colada" por distância; o R16-4-01 pôs a leitura da fila guardada no meio, e
   // distância é o jeito errado de amarrar o guard, gotcha #67.)
-  const cond = /if \(!pend\.length && !desistidosPorRede\.length\) \{/.exec(corpo);
+  // (R18-4-05/06: a condição ganhou `!gravacaoFalhou && !tilesNegadosEmTodos`; a que guarda a atribuição é a ÚLTIMA antes dela.)
+  const conds = [...corpo.matchAll(/if \(!pend\.length && !desistidosPorRede\.length[^{]*\{/g)].filter((m) => m.index < i);
+  const cond = conds[conds.length - 1];
   assert.ok(cond && cond.index < i, 'a atribuição tem que vir depois da condição de fila vazia');
   let prof = 1;
   for (const c of corpo.slice(cond.index + cond[0].length, i)) {

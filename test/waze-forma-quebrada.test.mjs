@@ -147,9 +147,7 @@ const QUEBRADAS_DE_DENTRO = [
   [['venues', 'categoryBrands'], [{ GAS_STATION: 5 }, { GAS_STATION: true }, { GAS_STATION: {} }, { GAS_STATION: 'x' }, [1]]],
   [['venues', 'objects', 0, 'images'], [5, true, {}, 'x']],
   [['venues', 'objects', 0, 'entryExitPoints'], [5, true, {}, 'x']],
-  [['venues', 'objects', 0, 'entryExitPoints'], [[{ point: { coordinates: [5] } }], [{ point: { coordinates: [5, null] } }],
-    [{ point: { coordinates: ['a', 'b'] } }], [{ point: { coordinates: 7 } }], [{ point: { coordinates: {} } }]]],
-  [['venues', 'objects', 0, 'venueUpdateRequests', 1, 'changedVenue', 'entryExitPoints'], [[{ point: { coordinates: [5] } }]]],
+  // (Ponto de entrada com coordenada quebrada NÃO está aqui: desde o lote 22 ele é ignorado — ver o teste abaixo.)
 ];
 
 test('R17-6-A1: forma quebrada POR DENTRO do local é "resposta inesperada" (500 unknown), não "Erro interno"', async () => {
@@ -161,6 +159,33 @@ test('R17-6-A1: forma quebrada POR DENTRO do local é "resposta inesperada" (500
       assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `DEFEITO: ${quem} saiu como ${JSON.stringify(r.body)}`);
       assert.equal(r.body.errorCategory, 'unknown', quem);
     }
+  }
+});
+
+test('Lote 22 (R18-8): um ponto de entrada/saída com coordenada quebrada é IGNORADO — o card sai com o ponto bom, sem derrubar a fila', async () => {
+  const bom = { name: 'bom', point: { type: 'Point', coordinates: [1.0003, 2.0003] } };
+  const quebrados = [{ point: { coordinates: [5] } }, { point: { coordinates: [5, null] } }, { point: { coordinates: [null, 5] } },
+    { point: { coordinates: ['a', 'b'] } }, { point: { coordinates: [NaN, 1] } }, { point: { coordinates: 7 } }, { point: { coordinates: {} } }];
+  // CONTROLE: só o bom desenha 1 entrada em cada local (o atual do local; o do pedido de mudança).
+  const ctrl = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], [bom]));
+  assert.equal(ctrl.status, 200, JSON.stringify(ctrl.body));
+  assert.ok(ctrl.body.places[0].mapa.entradas.some((e) => e.nome === 'bom'), 'o ponto bom sumiu do mapa');
+  for (const q of quebrados) {
+    // Quebrado no local (junto de um bom) e no delta do pedido de mudança (junto do bom do delta).
+    const noLocal = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], [q, bom]));
+    const quem = JSON.stringify(q);
+    assert.equal(noLocal.status, 200, `DEFEITO: ${quem} derrubou a fila: ${JSON.stringify(noLocal.body)}`);
+    assert.equal(noLocal.body.places.length, 2, `${quem}: os cards do local sumiram`);
+    for (const p of noLocal.body.places) assert.ok(p.mapa, `${quem}: o card ficou sem mapa`);
+    assert.deepEqual(noLocal.body.places[0].mapa.entradas.map((e) => e.nome), ['bom'], `${quem}: o quebrado entrou no mapa ou o bom saiu`);
+    const noDelta = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'venueUpdateRequests', 1, 'changedVenue', 'entryExitPoints'], [q, { ...bom, name: 'bom2' }]));
+    assert.equal(noDelta.status, 200, `DEFEITO (no pedido de mudança): ${quem}: ${JSON.stringify(noDelta.body)}`);
+    assert.equal(noDelta.body.places.length, 2, quem);
+  }
+  // A posição do LOCAL quebrada e o CAMPO que não é lista seguem sendo "resposta inesperada" (outra forma quebrada).
+  for (const v of [5, true, {}, 'x']) {
+    const r = await rodar('buscar-places', mudarMais(['venues', 'objects', 0, 'entryExitPoints'], v));
+    assert.equal(r.body.errorKey, 'srv.err.badWazeResponse', `entryExitPoints = ${JSON.stringify(v)}`);
   }
 });
 

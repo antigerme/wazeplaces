@@ -235,7 +235,12 @@ test('R17-4-01: CONTROLE — 503 em todo tile segue como o R5-4-1 decidiu ("qual
   const c404 = varredura({ itens: itensDe(5), rede: () => ({ status: 404 }) });
   await c404.app.varrer();
   assert.equal(c404.log.baixar, 5, 'CONTROLE: o 404 foi repetido');
-  assert.equal(c404.app.estado().resultado, 'pronto');
+  // (R18-4-06: o 4xx em TODOS os tiles, com nenhum no cache, deixou de ser "pronto" — ver o teste do lote 22.)
+  assert.equal(c404.app.estado().resultado, 'parcial');
+  // 404 em ALGUNS tiles segue definitivo e "pronto": tile que não existe.
+  const alguns = varredura({ itens: itensDe(5), rede: (u) => (u === TILE('t0') ? { status: 404 } : ok200) });
+  await alguns.app.varrer();
+  assert.equal(alguns.app.estado().resultado, 'pronto', 'CONTROLE: o 404 de UM tile virou "parcial"');
   const bom = varredura({ itens: itensDe(12), rede: () => ok200 });
   await bom.app.varrer();
   assert.equal(bom.log.baixar, 12);

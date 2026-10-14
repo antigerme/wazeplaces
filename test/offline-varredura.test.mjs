@@ -393,7 +393,7 @@ test('R6-4-1: a varredura seguinte não começa com a poda da anterior ainda apa
 // A cota estourada ABORTA a transação do IndexedDB sem sempre passar pelo
 // `onerror`: sem `onabort`, a promessa ficava pendurada e a varredura presa
 // (`offlineVarrendo`) pra sempre (auditoria de 2026-09-25).
-test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pendurar', async () => {
+test('offlineGravarFila: transação ABORTADA (cota) devolve \'falhou\' em vez de pendurar (R18-4-05: era false, igual a "nada a gravar")', async () => {
   const AppState = { queue: [{ venueID: 'r1' }], filters: {} };
   const deps = {
     AppState, Treino: { ativo: false }, offlineLigado: () => true, OFFLINE_STORE: 'fila',
@@ -408,10 +408,11 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve false em vez de pen
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
     offlineEpoca: 0, chaveDoPedido,
   };
+  deps.offlineErroDeCota = (e) => !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('pedidoForaDaFilaGuardada') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
   const r = await Promise.race([gravar(), new Promise((ok) => setTimeout(() => ok('PENDUROU'), 500))]);
-  assert.equal(r, false, 'a gravação abortada pendurou (a varredura ficaria presa)');
+  assert.equal(r, 'falhou', 'a gravação abortada pendurou (a varredura ficaria presa) ou voltou a se confundir com "nada a gravar"');
 });
 
 test('offlineDB: abrir a base tem teto (o IndexedDB do WebKit às vezes não responde)', async () => {
@@ -1493,6 +1494,7 @@ function aparelhoDaLinha() {
       updatePendingCount: () => {}, sortQueue: () => {}, showCurrentPlace: () => {},
       OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
       OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
+      OFFLINE_LIMITE_PAUSA_MS: 60 * 1000, OFFLINE_COTA_PAUSA_MS: 10 * 60 * 1000,
       // Um tile e uma foto por pedido da fila.
       offlineItensDaFila: async () => {
         rede.varreduras++;
@@ -1509,7 +1511,7 @@ function aparelhoDaLinha() {
     };
     const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
       'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
-      'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido'];
+      'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido', 'offlineErroDeCota'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,
@@ -1525,7 +1527,7 @@ function aparelhoDaLinha() {
         // usar o app é o offlineMarcarGesto.
         gatilho: offlineTalvezVarrer, voltar: offlineMarcarGesto,
         parar: () => { offlineUltimoGesto = -1e15; },          // mais de 3 min sem gesto
-        estado: () => ({ resultado: offlineUltimoResultado, varrendo: offlineVarrendo, janela: offlineJanelaServida,
+        estado: () => ({ segurarAte: offlineSegurarAte, resultado: offlineUltimoResultado, varrendo: offlineVarrendo, janela: offlineJanelaServida,
           preparada: offlineFilaPreparada, gravada: offlineFilaGravadaEm, varrida: offlineFilaVarrida }) };`)(
       ...chaves.map((k) => deps[k]));
     // A busca que traz pedido novo, como o `fetchNextPage`: põe na fila, grava
@@ -1862,7 +1864,8 @@ test('gatilho: sem laço — a fila que não dá pra cobrir (a gravação dela f
   p1.voltar();
   p1.gatilho();
   await assentarBase();
-  assert.equal(p1.estado().resultado, 'pronto');
+  // R18-4-05: a gravação que falhou deixa a preparação PARCIAL (era "pronto" sem a fila na base).
+  assert.equal(p1.estado().resultado, 'parcial');
   const v = p1.rede.varreduras;
   assert.equal(v, 2, 'PRÉ-CONDIÇÃO: o gatilho não varreu a fila não coberta');
   assert.doesNotMatch(p1.linha(), PRONTO, 'sem a fila gravada, a linha passou a dizer "Pronto"');
@@ -1873,6 +1876,7 @@ test('gatilho: sem laço — a fila que não dá pra cobrir (a gravação dela f
   ap.fila.falhar = false;
   assert.equal(await p1.gravarFila(), true);
   await assentarBase();
+  ap.relogio.agora += 61 * 1000;                   // a pausa curta de depois da falha (R18-4-05) já passou
   p1.gatilho();
   await assentarBase();
   assert.equal(p1.rede.varreduras, v + 1, 'a fila gravada depois da falha não voltou pro gatilho');

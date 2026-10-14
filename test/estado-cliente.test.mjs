@@ -222,7 +222,7 @@ function montarTreino(estado = {}, { loteNoAr = false, aprovacaoNoAr = false, ap
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => log.push('prefetch'),
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
     t: (k) => k, showToast: (m) => log.push('toast:' + m), openModal: () => {},
-    loteDeLidosEmVoo: loteNoAr,
+    loteDeLidosEmVoo: loteNoAr, alvosDoLoteDeLidosNoAr: new Map(),
     // As escritas do lightbox na janela do Desfazer saem ao entrar (L25).
     enviarPendenciasDoLightbox: () => { log.push('lightbox:enviou'); if (aprovacaoNaJanela) aprovacoes.add('vF|uF'); },
     aprovacoesNoAr: aprovacoes, aprovacoesDaQueda: daQueda,
