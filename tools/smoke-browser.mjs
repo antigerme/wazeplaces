@@ -2944,6 +2944,72 @@ for (const status of [404, 403]) {
   await ctx2.close();
 }
 
+// ── O "Como funciona" aberto SOZINHO abre no TOPO no celular deitado ───────────
+// (R17-1-01 = R17-2-03 = R17-7-01). O `openModal` abre no topo (zera a rolagem e foca o 1º
+// controle sem rolar), mas o `.focus()` do "Entendi" — o ÚLTIMO controle do diálogo, que o
+// R16-7-06 põe só no automático — rolava a caixa até ele: no celular deitado (667×375) o
+// `scrollTop` ia a ~100 e o título ficava a −53 px, fora da tela, na primeira coisa que a
+// pessoa nova vê. Mede o `scrollTop` de TUDO que rola dentro do diálogo e o topo do título.
+// O CONTROLE refaz o foco do "Entendi" SEM `preventScroll`, como era: o instrumento tem que
+// ver a caixa rolando (senão "scrollTop 0" passaria com a medição cega, gotcha #28).
+{
+  const cru = FIXTURES_PAISES.find((p) => (p.imageUrls || []).length && p.name) || FIXTURES_PAISES[0];
+  for (const [nome, viewport] of [['iPhone SE deitado', { width: 667, height: 375 }], ['Pixel 7 deitado', { width: 851, height: 393 }]]) {
+    const ctx = await browser.newContext({ viewport, locale: 'pt-BR', serviceWorkers: 'block', primeiraVez: true, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(400);
+    // O primeiro card chega e o diálogo abre SOZINHO (o caminho do primeiro login).
+    await page.evaluate((p) => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.serverTotal = 5; AppState.hasMore = false;
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      mostrarControlesDeSessao(true);
+      renderProfileHeader(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      AppState.queue = [p, { ...p, venueID: 'v2', updateRequestID: 'u2' }];
+      AppState.currentPlace = p;
+      document.querySelectorAll('.place-card').forEach((e) => e.remove());
+      showCurrentPlace();
+    }, cru);
+    const aberto = await esperarNaPagina(page, () => !document.getElementById('comoFuncionaModal').classList.contains('hidden'), 4000, 50);
+    checa(aberto.ok, `como funciona automático (${nome}): o diálogo não abriu sozinho`);
+    await page.waitForTimeout(300);
+    const medir = () => page.evaluate(() => {
+      const modal = document.getElementById('comoFuncionaModal');
+      const rolagens = [modal, ...modal.querySelectorAll('*')].map((e) => e.scrollTop).filter((n) => n > 0);
+      const titulo = document.getElementById('comoFuncionaTitle').getBoundingClientRect();
+      return { rolagem: Math.max(0, ...rolagens), tituloTopo: Math.round(titulo.top), foco: document.activeElement && document.activeElement.id };
+    });
+    const real = await medir();
+    checa(real.foco === 'comoFuncionaOk', `como funciona automático (${nome}): o foco não terminou no "Entendi"`, JSON.stringify(real));
+    checa(real.rolagem === 0, `como funciona automático (${nome}): o diálogo abriu ROLADO (scrollTop ${real.rolagem}) — o foco do "Entendi" rolou a caixa`, JSON.stringify(real));
+    checa(real.tituloTopo >= 0, `como funciona automático (${nome}): o título ficou fora da tela (topo em ${real.tituloTopo} px)`, JSON.stringify(real));
+    // CONTROLE 1 (nos dois motores): a MEDIÇÃO enxerga a caixa rolada — rola de propósito e lê de novo.
+    // Sem ele, "scrollTop 0" passaria com a medição olhando o elemento errado.
+    await page.evaluate(() => { document.querySelector('#comoFuncionaModal > div').scrollTop = 60; });
+    const rolado = await medir();
+    checa(rolado.rolagem > 0 && rolado.tituloTopo < real.tituloTopo,
+      `como funciona automático (${nome}): CONTROLE cego — a caixa rolada à força não apareceu na medição`, JSON.stringify(rolado));
+    // CONTROLE 2 (Chromium, onde o foco programático rola): o foco antigo, sem `preventScroll`,
+    // reproduz o defeito. No WebKit do Linux o `.focus()` programático não rola a caixa (medido), então
+    // lá o defeito só se vê no aparelho; o controle 1 segue valendo.
+    if (MOTOR === 'chromium') {
+      const antigo = await page.evaluate(() => {
+        const modal = document.getElementById('comoFuncionaModal');
+        [modal, ...modal.querySelectorAll('*')].forEach((e) => { e.scrollTop = 0; });
+        document.getElementById('comoFuncionaTreinar').focus({ preventScroll: true });
+        document.getElementById('comoFuncionaOk').focus();
+        return Math.max(0, ...[modal, ...modal.querySelectorAll('*')].map((e) => e.scrollTop));
+      });
+      checa(antigo > 0, `como funciona automático (${nome}): CONTROLE cego — o foco sem preventScroll não rolou a caixa`, String(antigo));
+    }
+    await ctx.close();
+  }
+}
+
 // ── O "Como funciona" ADIADO: nunca debaixo do banner do Desfazer, nunca no
 // tique do voltar (auditoria de 2026-10-02: R7-7-01, R7-7-02 e R7-3-01) ──────
 // O adiado (a Ajuda aberta quando o 1º card montou) abria no 1º GESTO: o card
@@ -13425,5 +13491,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + duas abas no MESMO navegador (placar e preferências relidos do aparelho, o selo do ↑ e a estrela seguindo a outra aba, a queda NÃO encerrando a outra, o "Sair" encerrando a outra com a camada aberta fechada, o aviso dizendo por quê e ZERO escrita no aparelho — com o CONTROLE da aba surda reprovando como o app de antes — e a queda com o token VELHO numa aba sem apagar o NOVO da outra, que recarrega logada, com o CONTROLE da sessão guardada caindo como sempre — e OUTRA conta entrando numa aba tirando a da conta anterior, sem tocar no aparelho e destruindo a sessão dela no servidor, com o CONTROLE da MESMA conta entrando de novo — e a decisão NO AR numa aba não saindo de novo pela outra, nem contando duas vezes no Histórico, com o CONTROLE da marca da aba tirada mandando de novo — e o que uma aba DECIDIU saindo da fila da outra, com o "Restam" e o card de fundo, e o ✕ no card da tela que ela já decidiu sem sair pro Waze nem contar de novo, dizendo por quê, com o CONTROLE do app de antes mandando de novo — e o que POUSA fora da fila de saída (o "Marcar todos", a recusa automática e a aprovação de foto) chegando à outra aba pelo canal do pouso, com o CONTROLE do canal fechado mandando de novo — e a aba que cai ANTES do perfil sendo alcançada quando OUTRA conta entra noutra aba (sem fila, card nem chamadas da anterior), com o CONTROLE da MESMA conta que não a encerra — e o diálogo do "Sair" contando os pedidos do "Rejeitar os N" que ainda não saíram, com só a ida no ar chegando ao Waze e o CONTROLE do ✕ isolado, que não entra na conta)`
   + `, + o "Sair" sem dado de TERCEIRO no DOM (a lista de autores, a folha do autor, a foto ampliada e o "Acesso restrito", fechados pelo Esc, pelo fundo, pelo ✕ e pelo voltar, varridos por uma marca em texto e atributos — com o CONTROLE da varredura vendo cada um aberto —, o painel do Histórico fechado e o redesenhado pela folha do autor, e a foto que ainda chegava fora do relatório do modo dev, com o CONTROLE dela voltando à lista crua)`
   + `, + o "Treino concluído" cabendo na tela em 2 aparelhos com isMobile quando o ÚLTIMO exemplo é o ✓ (botão e seta) — a página não alarga e o "Ir para a fila" fica dentro da vista —, com ✕ e ↑ de CONTROLE e o card de volta à conta de layout alargando a página`
+  + `, + o "Como funciona" aberto SOZINHO no TOPO no celular deitado (scrollTop 0 e título na tela em 667×375 e 851×393, com o CONTROLE da caixa rolada à força e, no Chromium, o do foco antigo rolando)`
   + `, + (o mapa com service worker mora em npm run test:offline — este arquivo é de layout e bloqueia SW de propósito)`
   + `, + Patentes e Conquistas em 3 aparelhos × 2 temas × ${LINGUAS.length} idiomas (o aviso NÃO cobre o placar nem solta confete, o selo acende e apaga ao abrir a aba, contagem CRUA no placar e no cartão em 4 idiomas, colunas iguais, palavra partida por Range, sobreposição por hit-test, contraste do trancado nos dois temas, portão 16×14 com contraprova, e a primeira passada SILENCIOSA)`);

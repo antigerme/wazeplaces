@@ -489,3 +489,41 @@ test('R17-3-01 (estrutura): as três escritas de foto e a estrela do ↑ passam 
   assert.match(skip, /refazerDepoisDo401\(epoca, enviar, espera\)/);
   assert.match(fatiar('handleBatchMarkRead'), /const espera = \(sim\) => marcarLoteSemEnviar\(quais\(\), sim\);\s*const r = await callWithRetry\(enviar, undefined, espera\);[\s\S]*refazerDepoisDo401\(epoca, enviar, espera\)/);
 });
+
+// ═══ R17-1-01 = R17-2-03 = R17-7-01 · o "Como funciona" aberto sozinho abre ROLADO ═══
+// O `openModal` abre no topo (zera a rolagem e foca o 1º controle com `preventScroll`), mas o
+// `.focus()` explícito do "Entendi" — o ÚLTIMO controle do diálogo — rolava a caixa até ele no
+// celular deitado (667×375: `scrollTop` 105, o título a −53 px). A medida do `scrollTop` mora no
+// smoke de layout (precisa de navegador); aqui, o foco sem rolar e a varredura dos irmãos.
+test('R17-1-01: o foco do "Entendi" no diálogo aberto sozinho não rola a caixa (`preventScroll`)', () => {
+  const chamadas = [];
+  const entendi = { focus: (...args) => chamadas.push(['Entendi', ...args]) };
+  const deps = { AppState: { preferences: { comoFuncionaVisto: false } }, savePreferences() {}, openModal: () => chamadas.push(['abre']),
+    document: { getElementById: (id) => (id === 'comoFuncionaOk' ? entendi : null) } };
+  const h = montar(['abrirComoFunciona'], deps);
+  h.abrirComoFunciona(true);
+  assert.deepEqual(chamadas[0], ['abre']);
+  assert.deepEqual(chamadas[1], ['Entendi', { preventScroll: true }],
+    'DEFEITO: o foco do "Entendi" rola o diálogo até o botão — título e passos saem da tela no celular deitado (R17-1-01): ' + JSON.stringify(chamadas[1]));
+  // CONTROLE: aberto à mão ("Ver de novo") ninguém mexe no foco: o do `openModal` vale.
+  chamadas.length = 0;
+  h.abrirComoFunciona(false);
+  assert.deepEqual(chamadas, [['abre']], 'CONTROLE: o aberto à mão mexeu no foco');
+});
+
+test('R17-1-01 (estrutura): nenhum `.focus()` logo depois de um `openModal(` em app.js e presenca.js rola o diálogo — todo vai com `preventScroll`', () => {
+  let achados = 0;
+  const vistos = [];
+  for (const [arq, texto] of [['js/app.js', APP_SEM], ['js/presenca.js', semComentario(ler('js/presenca.js'))]]) {
+    const linhas = texto.split('\n');
+    linhas.forEach((l, i) => {
+      if (!/\bopenModal\(/.test(l) || /^\s*(async )?function openModal\(/.test(l)) return;
+      for (let j = i + 1; j <= Math.min(linhas.length - 1, i + 6); j++) {
+        if (/\.focus\(\s*\)/.test(linhas[j])) vistos.push(`${arq}:${j + 1}`);
+        if (/\.focus\(\{\s*preventScroll: true\s*\}\)/.test(linhas[j])) achados++;
+      }
+    });
+  }
+  assert.deepEqual(vistos, [], '`.focus()` solto logo depois de `openModal(` — rola o diálogo até o controle (use `{ preventScroll: true }`): ' + vistos.join(', '));
+  assert.ok(achados >= 1, 'CONTROLE: o varredor não enxergou o `.focus({ preventScroll: true })` do "Entendi" — o instrumento está cego');
+});

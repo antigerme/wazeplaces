@@ -14399,8 +14399,12 @@ function abrirComoFunciona(automatico = false) {
     }
     openModal('comoFuncionaModal');
     // O `openModal` pôs o foco no 1º controle; aqui, só no automático, ele vai pro
-    // "Entendi" no mesmo tique (nada se desenha no meio).
-    if (automatico) document.getElementById('comoFuncionaOk')?.focus();
+    // "Entendi" no mesmo tique (nada se desenha no meio). SEM rolar (`preventScroll`):
+    // o "Entendi" é o último controle do diálogo, e o foco sem a opção rolava a caixa
+    // até ele no celular deitado (667×375: `scrollTop` 105, o título a −53 px, fora da
+    // tela) — a primeira coisa que a pessoa nova via, e o `openModal` abre no topo de
+    // propósito (R17-1-01 = R17-2-03 = R17-7-01, MEDIDO nos dois motores).
+    if (automatico) document.getElementById('comoFuncionaOk')?.focus({ preventScroll: true });
 }
 
 // O "Ver de novo" da Ajuda é um GESTO, e ele chega também logo depois de um ✕
