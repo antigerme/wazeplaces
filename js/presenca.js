@@ -68,8 +68,15 @@ const PRESENCA_FLUXO_SILENCIO_MS = 35_000;
 // esse fim é normal e religa em 1 s. Erro de verdade usa o recuo, com jitter —
 // reconectar em rajada é o que faz um WAF marcar o cliente.
 const PRESENCA_FLUXO_RELIGAR_MS = 1000;
-// Quanto uma conexão sem nenhum fim de lote precisa ter durado pra o fim dela
-// contar como NORMAL (ver `presencaFluxoAbrir`). Bem abaixo dos ~6 min medidos.
+// O PISO de uma conexão: quanto ela precisa ter durado pra o fim dela contar
+// como NORMAL (religa em 1 s) e pra PROVAR que serve (zera o recuo e a série de
+// quedas do diário) — ver `presencaFluxoViveu` e `presencaFluxoProvarVida`. Bem
+// abaixo dos ~6 min medidos, e acima de qualquer fim que pareça "fechou logo
+// depois de abrir". O lote sozinho não prova nada: MEDIDO em produção, toda
+// conexão abre com `startOfBatch` e `endOfBatch` no 1º milissegundo, então quem
+// fecha logo depois dele (R21-5-05: um intermediário, um limite do servidor)
+// religava a cada 1 s, sem recuo, pra sempre — uma ida por segundo ao Google.
+// Com ou sem lote, é a duração que diz.
 const PRESENCA_FLUXO_VIVEU_MS = 60 * 1000;
 const PRESENCA_FLUXO_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
 
@@ -1148,12 +1155,19 @@ async function presencaFluxoAbrir() {
             fluxo.vivoEm = Date.now();
             presencaVigiarSilencio(fluxo);
             for (const quadro of ler(dec.decode(value, { stream: true }))) presencaQuadro(fluxo, quadro);
+            // A cada pedaço (o Google manda um sinal de vida a cada 10 s): é aqui
+            // que a conexão que já viveu o piso prova que serve.
+            presencaFluxoProvarVida(fluxo);
         }
         // Normal é o fim de uma conexão que VIVEU: o Google fecha a cada ~6
-        // min, depois de lotes. Uma que termina sem lote nenhum e logo (proxy
-        // cortando, corpo vazio) religava a cada 1 s pra sempre, sem recuo.
-        fimNormal = !!fluxo.teveLote || Date.now() - fluxo.desde > PRESENCA_FLUXO_VIVEU_MS;
-        if (!fimNormal) Presenca.fluxoDiag.ultimoErro = 'fim sem lote';
+        // min. Uma que termina logo (um intermediário cortando, o corpo vazio)
+        // religava a cada 1 s pra sempre, sem recuo — e o lote não a separava do
+        // fim normal, porque toda conexão abre com ele (R21-5-05). Só a duração.
+        fimNormal = presencaFluxoViveu(fluxo);
+        if (!fimNormal) Presenca.fluxoDiag.ultimoErro = fluxo.teveLote ? 'fim curto' : 'fim sem lote';
+        // O fim normal de quem entregou o lote também prova (o pedaço depois do
+        // piso pode não ter vindo): o recuo e a série de quedas fecham.
+        else presencaFluxoProvarVida(fluxo);
     } catch (e) {
         if (Presenca.fluxo === fluxo && Presenca.fluxoDiag.ultimoErro !== 'silencio') {
             Presenca.fluxoDiag.ultimoErro = String((e && e.name) || e).slice(0, 40);
@@ -1167,6 +1181,30 @@ async function presencaFluxoAbrir() {
             presencaFluxoReagendar(fimNormal);
         }
     }
+}
+
+// A conexão viveu o piso (`PRESENCA_FLUXO_VIVEU_MS`)? É a ÚNICA régua do fim
+// normal: com ou sem lote, o que separa a conexão que o Google fecha a cada ~6
+// min do corte que religava a cada 1 s é quanto ela durou.
+function presencaFluxoViveu(fluxo) {
+    return Date.now() - fluxo.desde >= PRESENCA_FLUXO_VIVEU_MS;
+}
+
+// A conexão PROVA que serve quando entregou o lote E viveu o piso — o que o
+// `endOfBatch` sozinho não prova (R21-5-05). Uma vez por conexão, no primeiro
+// pedaço que chega depois do piso (o sinal de vida de 10 s do Google): zera o
+// recuo (a que cai com erro depois disso recomeça de 2 s, e não do degrau em que
+// as falhas de antes a deixaram) e fecha a série de quedas do diário ("voltou").
+// Zerar ao ABRIR a conexão, ou no lote dela, é o que fazia toda falha virar uma
+// tentativa nova a cada poucos segundos, pra sempre (o guard de
+// test/presenca.test.mjs cobra os dois).
+function presencaFluxoProvarVida(fluxo) {
+    if (fluxo.provou || !fluxo.teveLote || !presencaFluxoViveu(fluxo)) return;
+    fluxo.provou = true;
+    Presenca.fluxoTentativa = 0;
+    const d = Presenca.fluxoDiag;
+    if (d.quedasSeguidas) presencaAnotar('presenca.fluxo', { ev: 'voltou', depoisDe: d.quedasSeguidas });
+    d.quedasSeguidas = 0;
 }
 
 // A queda vira linha no diário, mas não TODA: numa rede fora por uma hora o
@@ -1252,14 +1290,14 @@ function presencaQuadro(fluxo, o) {
     if (o.endOfBatch) {
         fluxo.emLote = false;
         fluxo.teveLote = true;
-        Presenca.fluxoTentativa = 0;
-        // O fim do primeiro lote é a prova de que a conexão está VIVA (é aqui que
-        // o recuo zera). Entra no diário a primeira da página e a volta depois
-        // de queda; as religadas normais, a cada ~6 min, não.
+        // O fim do primeiro lote é a prova de que a conexão ABRIU e responde — não
+        // de que ela SERVE: toda conexão abre com ele, e a que fecha logo depois
+        // também (R21-5-05). Quem zera o recuo e a série de quedas é a prova da
+        // duração (`presencaFluxoProvarVida`). Entra no diário a primeira da
+        // página; a volta depois de queda entra na prova, e as religadas normais,
+        // a cada ~6 min, não.
         const d = Presenca.fluxoDiag;
-        if (!d.conectou || d.quedasSeguidas) {
-            presencaAnotar('presenca.fluxo', d.conectou ? { ev: 'voltou', depoisDe: d.quedasSeguidas } : { ev: 'conectou' });
-        }
+        if (!d.conectou) presencaAnotar('presenca.fluxo', { ev: 'conectou' });
         // O episódio de tempo real PARADO terminou: a conexão está viva de novo.
         if (Presenca.paradoDesde) {
             presencaAnotarParado('religou', { via: Presenca.paradoVia || 'outro', durouS: Math.round((Date.now() - Presenca.paradoDesde) / 1000) });
@@ -1268,7 +1306,6 @@ function presencaQuadro(fluxo, o) {
         }
         if (d.loteMensagens) presencaAnotar('chat.chegou', { lote: d.loteMensagens });
         d.conectou = true;
-        d.quedasSeguidas = 0;
         d.loteMensagens = 0;
         return;
     }

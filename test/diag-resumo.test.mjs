@@ -285,6 +285,26 @@ test('diag-resumo: "o token venceu" só quando ele NÃO abre mais o tempo real �
   assert.match(antigo, /este relatório não diz se ele ainda abre o tempo real/);
 });
 
+// R21-5-05: a conexão do tempo real que fecha logo depois do lote é "fim curto",
+// com recuo. A nota diz o que é, pra não ler como o app tropeçando.
+test('diag-resumo: "fim curto" em quedas seguidas ganha a nota do Google que corta a conexão — outro erro, ou uma queda só, não', () => {
+  const com = (fluxo) => {
+    const d = relatorioV4();
+    d._versaoDoDiag = 11;
+    d.resumo.presencaApp = { ligada: true, online: 0, conversas: 0, naoLidas: 0, atualizadaHaS: 30, conversaAberta: false,
+      token: { valido: true, abre: true, expiraEmH: 20 },
+      fluxo: { aberto: false, tentativa: 3, aberturas: 5, quadros: 10, mensagens: 0, recibos: 0, ...fluxo }, conhecidos: 0, aConfirmar: 0 };
+    return rodar(d);
+  };
+  const NOTA = /nota: 4 quedas seguidas por "fim curto" — a conexão do tempo real abre, recebe o lote e fecha antes de 1 min/;
+  assert.match(com({ ultimoErro: 'fim curto', quedasSeguidas: 4 }), NOTA, 'a nota do fim curto não saiu');
+  // CONTROLES: outro erro, ou uma queda só, não é o laço.
+  assert.doesNotMatch(com({ ultimoErro: 'TypeError', quedasSeguidas: 4 }), /fim curto/, 'a nota saiu pra outro erro');
+  assert.doesNotMatch(com({ ultimoErro: 'fim curto', quedasSeguidas: 1 }), /quedas seguidas por/, 'uma queda só virou nota');
+  // E o relatório de antes do `fim curto` (o erro era "fim sem lote") não ganha a nota.
+  assert.doesNotMatch(com({ ultimoErro: 'fim sem lote', quedasSeguidas: 4 }), /fim curto/);
+});
+
 // ── v8 (v2026.09.24-02): o relatório pra entender os relatos da fase 3 ──────
 // Com o modo dev, o anel de chamadas passou a guardar a conversa (o texto que
 // sai e a resposta do chat). O LEITOR segue imprimindo só a triagem: quem

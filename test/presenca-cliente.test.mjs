@@ -21,6 +21,12 @@ const uuid = (n) => `a0000000-0000-1000-8000-${String(n).padStart(12, '0')}`;
 // Um quadro do fluxo, como o Google manda.
 const inbox = (bytes, n = 1) => ({ inboxMessage: { messageId: uuid(900 + n), messageType: 'USERDATA_MESSAGE_TYPE_X', message: b64(bytes) } });
 const fluxoDe = (c) => ({ ctl: new AbortController(), emLote: false, epoca: c.P.Presenca.epoca, desde: 0, vivoEm: 0 });
+// Uma conexão do Google que VIVEU `ms` antes de entregar o corpo. O relógio do
+// cliente é manual, e o `new Response('...')` de uma tacada só termina no mesmo
+// milissegundo em que abre: os controles "o fim NORMAL" que o usavam mediam o
+// lote + fechar na hora, que é justamente o fim CURTO do R21-5-05.
+const comVida = (c, ms, corpo) => { c.relogio.agora += ms; return new Response(corpo); };
+const LOTE = '[{"startOfBatch":{}},{"endOfBatch":{}}]';
 
 // ── o protobuf ───────────────────────────────────────────────────────────────
 
@@ -647,8 +653,9 @@ test('diário: o TOKEN do tempo real — veio ou não, e quando vence; nunca o t
   for (const s of ['TOKEN_UNICO', 'CHAVE_UNICA']) assert.ok(!JSON.stringify(c.chamadas.dfato).includes(s), `o diário levou ${s}`);
 });
 
-test('diário: o tempo real — conectou uma vez; a religada normal não entra; a VOLTA depois de queda entra', () => {
-  const c = novoCliente();
+test('diário: o tempo real — conectou uma vez; a religada normal não entra; a VOLTA depois de queda entra quando a conexão VIVEU', async () => {
+  const chat = { token: 'T', base: 'https://x/', chave: 'K', expiraEm: Date.now() + 86e6 };
+  const c = novoCliente({ api: { fetch: () => comVida(c, 61_000, LOTE) } });
   const f = fluxoDe(c);
   c.P.presencaQuadro(f, { startOfBatch: {} });
   c.P.presencaQuadro(f, { endOfBatch: {} });
@@ -656,11 +663,18 @@ test('diário: o tempo real — conectou uma vez; a religada normal não entra; 
   // O Google fecha a cada ~6 min e o app religa: não é notícia.
   c.P.presencaQuadro(fluxoDe(c), { endOfBatch: {} });
   assert.equal(anotados(c, 'presenca.fluxo').length, 1, 'a religada normal virou linha');
-  // Duas quedas e a volta.
+  // Duas quedas…
   c.P.Presenca.fluxoDiag.ultimoErro = 'TypeError';
   c.P.presencaAnotarQueda(fluxoDe(c));
   c.P.presencaAnotarQueda(fluxoDe(c));
+  // …e o lote da conexão que volta NÃO fecha a série: toda conexão abre com ele,
+  // e a que fecha logo depois seria "voltou" a cada volta do laço (R21-5-05).
   c.P.presencaQuadro(fluxoDe(c), { endOfBatch: {} });
+  assert.ok(!anotados(c, 'presenca.fluxo').some((a) => a.ev === 'voltou'), 'o lote sozinho já anotou a volta');
+  assert.equal(c.P.Presenca.fluxoDiag.quedasSeguidas, 2, 'o lote sozinho fechou a série de quedas');
+  // A conexão que VIVEU o piso, sim: a volta entra e a série fecha.
+  c.P.Presenca.chat = chat;
+  await c.P.presencaFluxoAbrir();
   assert.deepEqual(anotados(c, 'presenca.fluxo').at(-1), { ev: 'voltou', depoisDe: 2 });
   assert.equal(c.P.Presenca.fluxoDiag.quedasSeguidas, 0, 'a volta não zerou a série');
 });
@@ -689,8 +703,10 @@ test('diário: a queda chega pelo caminho de verdade — fetch que falha, token 
   d.P.Presenca.chat = { ...chat };
   await d.P.presencaFluxoAbrir();
   assert.equal(anotados(d, 'presenca.fluxo')[0].erro, 'token 401');
-  // Controle: o fim normal (o Google fechou o array) não é queda.
-  const e = novoCliente({ api: { fetch: () => new Response('[{"endOfBatch":{}}]') } });
+  // Controle: o fim normal (o Google fechou o array de uma conexão que VIVEU) não
+  // é queda. Com o lote e o corpo fechando na hora ele seria um fim CURTO e entraria
+  // como queda (R21-5-05): o controle de antes media esse caso, o defeito.
+  const e = novoCliente({ api: { fetch: () => comVida(e, 61_000, '[{"endOfBatch":{}}]') } });
   e.P.Presenca.chat = { ...chat };
   await e.P.presencaFluxoAbrir();
   assert.deepEqual(anotados(e, 'presenca.fluxo'), [{ ev: 'conectou' }], 'o fim normal virou queda (ou o fluxo nem leu o quadro)');
@@ -817,8 +833,10 @@ test('fluxo: fim SEM lote e logo não é "normal" — não religa a cada 1 s pra
   const religa = c.timers.filter((x) => x.fn === c.P.presencaFluxoGarantir || /Garantir/.test(String(x.fn)));
   assert.ok(c.timers.every((x) => x.ms !== 1000), 'religou em 1 s depois de uma conexão que não viveu');
   assert.ok(anotados(c, 'presenca.fluxo').some((a) => a.ev === 'caiu' && a.erro === 'fim sem lote'), 'a queda sem lote não foi anotada');
-  // CONTROLE: com um fim de lote, o fim é normal (religa em 1 s).
-  const d = novoCliente({ api: { fetch: () => new Response('[{"endOfBatch":{}}]') } });
+  // CONTROLE: a conexão que VIVEU, com o seu lote, tem fim normal (religa em 1 s).
+  // O de antes (`[{"endOfBatch":{}}]` fechando no mesmo milissegundo) media o fim
+  // CURTO, que o R21-5-05 tirou do fim normal: lote não prova que a conexão serve.
+  const d = novoCliente({ api: { fetch: () => comVida(d, 61_000, LOTE) } });
   d.P.Presenca.chat = { ...chat };
   await d.P.presencaFluxoAbrir();
   assert.ok(d.timers.some((x) => x.ms === 1000), 'o fim normal deixou de religar rápido');

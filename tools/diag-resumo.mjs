@@ -317,6 +317,14 @@ else {
   if (f.parado === true && !f.aberto) {
     out('ATENÇÃO: o tempo real está PARADO pela falta de rede — mensagem nova só aparece quando ele religar: com o `online` do navegador, com a próxima resposta da API, no foco do app, num toque na conversa ou no recuo do próprio tempo real, de 2 s até 1 min (os três últimos só nas versões depois da v2026.10.06-01).');
   }
+  // A conexão que abre, recebe o lote e FECHA antes do piso de 1 min (R21-5-05):
+  // o app recua (2 s até 1 min), e sem esta nota "recuo 3 · último erro: fim
+  // curto" lê como o app tropeçando, quando é o Google — ou algo no caminho —
+  // cortando a conexão. Antes dessa correção o app religava a cada 1 s e o
+  // relatório não mostrava nada.
+  if (f.ultimoErro === 'fim curto' && Number(f.quedasSeguidas) >= 2) {
+    out(`nota: ${f.quedasSeguidas} quedas seguidas por "fim curto" — a conexão do tempo real abre, recebe o lote e fecha antes de 1 min (um intermediário? um limite do servidor?). O app recua (de 2 s até 1 min) em vez de religar a cada segundo; a mensagem nova chega quando ele religar, ou na próxima ação.`);
+  }
   out(`conhecidas no aparelho ${pa.conhecidos} · a confirmar ${pa.aConfirmar}${f.ignoradas !== undefined ? ` · mensagens só do WME (ignoradas de propósito) ${f.ignoradas}` : ''}${f.quedasSeguidas ? ` · quedas seguidas do tempo real ${f.quedasSeguidas}` : ''}`);
   // As conversas que DEVEM um "lida" (lote 10): com ela acima de zero, a
   // "mensagem nova" de uma conversa já vista é isto (R7-4-07 = R7-5-06). E as

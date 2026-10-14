@@ -199,3 +199,240 @@ test('R21-5-01 as duas respostas do "lida" passam por `presencaTemMaisNovaQue` �
   assert.doesNotMatch(falha, /presencaQuitarDivida\(/, 'a falha voltou a quitar a dívida — a velha apaga a da mais nova');
   assert.match(falha, /if \(!presencaTemMaisNovaQue\(id, ultimaDela\)\) presencaDever\(id\);/);
 });
+
+// ── R21-5-05: o tempo real religava a 1 Hz, SEM recuo, se a conexão fechava logo
+// depois do primeiro lote. `fimNormal = teveLote || vida > 60 s`, e o
+// `endOfBatch` zerava o recuo: contra o Google de verdade, que abre TODA conexão
+// com o lote no 1º milissegundo (MEDIDO em produção), `teveLote` é sempre
+// verdadeiro — quem fechava logo depois (um intermediário, um limite do
+// servidor) era "fim normal" a cada volta, no degrau 0. O auditor mediu 25 idas
+// ao Google em 25 s. Agora só a DURAÇÃO diz (o piso de 60 s), e quem zera o recuo
+// e a série de quedas é a conexão que entregou o lote E viveu o piso.
+//
+// O Google de mentira CONDUZ a conexão: o `fetch` devolve um corpo que só
+// termina quando o teste manda, e o relógio manual anda entre os pedaços — o
+// `new Response('...')` de uma tacada só termina no milissegundo em que abre e
+// só media o fim imediato (o `desde: 0` do `fluxoDe` ainda lê "viveu pra
+// sempre": estes testes passam pelo `presencaFluxoAbrir` de verdade).
+const GOOGLE = 'https://instantmessaging-pa.googleapis.com/';
+const enc = new TextEncoder();
+const LOTE = '[{"startOfBatch":{}},{"endOfBatch":{}}';          // sem o `]`: a conexão segue aberta
+const PONG = ',{"pong":{}}';                                     // o sinal de vida de 10 s do Google
+function google() {
+  const g = { idas: 0, abertas: [] };
+  g.fetch = async () => {
+    g.idas += 1;
+    let controle;
+    const corpo = new ReadableStream({ start(ctl) { controle = ctl; } });
+    g.abertas.push({
+      escrever: (txt) => controle.enqueue(enc.encode(txt)),
+      fechar: () => { controle.enqueue(enc.encode(']')); controle.close(); },
+      encerrar: () => controle.close(),                // fecha SEM pedaço nenhum: o último foi antes
+      cair: (e = new TypeError('Failed to fetch')) => controle.error(e),
+    });
+    return new Response(corpo, { status: 200 });
+  };
+  return g;
+}
+function clienteDoFluxo({ tentativa = 0 } = {}) {
+  const g = google();
+  const c = novoCliente({ agora: T, api: { fetch: g.fetch } });
+  c.P.presencaMontar();
+  Object.assign(c.P.Presenca, { chat: { token: 'T', base: GOOGLE, chave: 'K', expiraEm: T + 20 * 3600e3 },
+    pais: 30, atualizadaEm: T, tentadaEm: T, tokenPedidoEm: T, fluxoTentativa: tentativa });
+  return { c, g };
+}
+// Espera a conexão que estava de pé terminar (o `finally` do `presencaFluxoAbrir`).
+async function fim(c) {
+  for (let i = 0; i < 50 && c.P.Presenca.fluxo; i++) await tick();
+  assert.equal(c.P.Presenca.fluxo, null, 'a conexão não terminou');
+}
+// Abre a conexão que o garantir abre (o recuo, o primeiro) e devolve o controle dela.
+async function abrir(c, g) {
+  const n = g.abertas.length;
+  if (c.timers.length) await c.rodarTimers(); else c.P.presencaFluxoAbrir();
+  await tick(4);
+  assert.equal(g.abertas.length, n + 1, 'a conexão não abriu');
+  return g.abertas[n];
+}
+// A espera do religamento que ficou agendado (só ele deve sobrar).
+function religa(c) {
+  assert.equal(c.timers.length, 1, `esperava UM timer de religar: ${JSON.stringify(c.timers.map((x) => x.ms))}`);
+  return c.timers[0].ms;
+}
+const diario = (c) => c.chamadas.dfato.filter(([k]) => k === 'presenca.fluxo').map(([, o]) => o);
+// O recuo tem jitter de ±25%: confere-se a FAIXA do degrau, nunca o milissegundo.
+const faixa = (base) => [Math.round(base * 0.75), Math.round(base * 1.25)];
+const noDegrau = (ms, base) => ms >= faixa(base)[0] && ms <= faixa(base)[1];
+// Um ciclo de conexão curta: abre, o lote, vive `ms`, fecha.
+async function cicloCurto(c, g, ms = 1000) {
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += ms;
+  con.fechar(); await fim(c);
+}
+
+test('R21-5-05 a conexão que entrega o lote e FECHA em 3 s é fim CURTO: recuo de 2 s (±25%), não os 1 s do fim normal', async () => {
+  const { c, g } = clienteDoFluxo();
+  await cicloCurto(c, g, 3000);
+  const ms = religa(c);
+  assert.ok(noDegrau(ms, 2000), `DEFEITO: religou em ${ms} ms — o lote (que toda conexão traz) a deixava passar por fim normal`);
+  assert.equal(c.P.Presenca.fluxoTentativa, 1, 'o recuo não subiu um degrau');
+  assert.equal(c.P.Presenca.fluxoDiag.ultimoErro, 'fim curto');
+  assert.deepEqual(diario(c).map((o) => o.ev + (o.erro ? ':' + o.erro : '')), ['conectou', 'caiu:fim curto']);
+  assert.equal(diario(c).at(-1).durouS, 3);
+});
+
+test('R21-5-05 CONTROLE: a que VIVEU 6 min e o Google fecha tem fim normal — religa em 1 s e o recuo fica zerado', async () => {
+  const { c, g } = clienteDoFluxo({ tentativa: 3 });
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += 6 * 60e3;
+  con.escrever(PONG); await tick(4);
+  con.fechar(); await fim(c);
+  assert.equal(religa(c), 1000, 'o fim normal deixou de religar em 1 s');
+  assert.equal(c.P.Presenca.fluxoTentativa, 0, 'a conexão que viveu e entregou o lote não zerou o recuo');
+  assert.equal(c.P.Presenca.fluxoDiag.ultimoErro, null);
+  assert.deepEqual(diario(c), [{ ev: 'conectou' }], 'o fim normal virou queda no diário');
+});
+
+test('R21-5-05 o fim normal prova mesmo sem um pedaço depois do piso: viveu 6 min, o Google fechou — o recuo de antes zera', async () => {
+  // O sinal de vida de 10 s faz a prova durante a vida; se o último pedaço veio
+  // antes do piso, o fim normal da conexão que entregou o lote a faz.
+  const { c, g } = clienteDoFluxo({ tentativa: 3 });
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += 6 * 60e3;
+  con.encerrar(); await fim(c);                       // fecha sem pedaço depois do piso: o último foi o lote
+  assert.equal(religa(c), 1000);
+  assert.equal(c.P.Presenca.fluxoTentativa, 0, 'o fim normal da conexão que entregou o lote e viveu não provou');
+  assert.deepEqual(diario(c), [{ ev: 'conectou' }]);
+});
+
+test('R21-5-05 a conexão que fecha logo, em CICLO: o recuo SOBE (2, 5, 15, 30, 60 s) e o diário não enche', async () => {
+  const { c, g } = clienteDoFluxo();
+  const bases = [2000, 5000, 15_000, 30_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000];
+  for (let i = 0; i < bases.length; i++) {
+    await cicloCurto(c, g, 1000);
+    const ms = religa(c);
+    assert.ok(noDegrau(ms, bases[i]), `ciclo ${i + 1}: religou em ${ms} ms (esperava ~${bases[i]} ms) — o laço de 1 s/2 s voltou`);
+    c.relogio.agora += ms;
+  }
+  // Doze quedas seguidas, e a série segue aberta: nenhuma volta no meio.
+  assert.equal(c.P.Presenca.fluxoDiag.quedasSeguidas, 12);
+  assert.ok(!diario(c).some((o) => o.ev === 'voltou'), 'o lote de cada conexão curta anotou uma "volta"');
+  assert.deepEqual(diario(c).map((o) => o.quedas ?? o.ev), ['conectou', 1, 2, 3, 10],
+    'o diário do laço: as 3 primeiras quedas e uma a cada 10 — 2 linhas por volta encheriam o anel de 120');
+  // Quando uma conexão VIVE o piso, a volta entra e a série fecha.
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += 61_000;
+  con.escrever(PONG); await tick(4);
+  assert.deepEqual(diario(c).at(-1), { ev: 'voltou', depoisDe: 12 });
+  assert.equal(c.P.Presenca.fluxoDiag.quedasSeguidas, 0);
+  assert.equal(c.P.Presenca.fluxoTentativa, 0, 'a prova não zerou o recuo com a conexão aberta');
+  con.fechar(); await fim(c);
+  assert.equal(religa(c), 1000);
+});
+
+test('R21-5-05 em 25 s de relógio o laço do lote faz as mesmas idas do corpo vazio (o CONTROLE do auditor): 4 ou menos, não 25', async () => {
+  const idasEm25s = async (corpo) => {
+    const { c, g } = clienteDoFluxo();
+    let t = 0;
+    const idas = [];
+    while (t <= 25_000) {
+      idas.push(t);
+      const con = await abrir(c, g);
+      if (corpo === 'lote') { con.escrever(LOTE); await tick(4); }
+      con.fechar(); await fim(c);                    // fecha logo, no mesmo milissegundo
+      const ms = religa(c);
+      t += ms; c.relogio.agora += ms;
+    }
+    return idas;
+  };
+  const lote = await idasEm25s('lote');
+  const vazio = await idasEm25s('vazio');
+  assert.ok(lote.length <= 4, `DEFEITO: ${lote.length} idas ao Google em 25 s com o lote (o auditor mediu 25)`);
+  assert.deepEqual([vazio.length >= 3, vazio.length <= 4], [true, true], `CONTROLE: o corpo vazio já ia pelo recuo (${vazio.length} idas)`);
+  assert.ok(lote.slice(1).every((t, i) => t - lote[i] >= 1500), `intervalos de 1 s: ${JSON.stringify(lote)}`);
+});
+
+test('R21-5-05 viveu 6 min e caiu com ERRO: recomeça do 1º degrau (2 s), não do que as falhas de antes deixaram', async () => {
+  const { c, g } = clienteDoFluxo({ tentativa: 3 });
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += 6 * 60e3;
+  con.escrever(PONG); await tick(4);                  // o sinal de vida depois do piso: a prova
+  assert.equal(c.P.Presenca.fluxoTentativa, 0, 'a conexão aberta que viveu o piso não provou');
+  assert.ok(c.P.Presenca.fluxo, 'CONTROLE: a conexão segue aberta');
+  con.cair(); await fim(c);
+  const ms = religa(c);
+  assert.ok(noDegrau(ms, 2000), `religou em ${ms} ms: o degrau velho (30 s) valeu, e hoje a conexão que viveu recomeça de 2 s`);
+  assert.equal(c.P.Presenca.fluxoTentativa, 1);
+  // CONTROLE: a que cai com erro ANTES do piso herda o degrau (nada provou).
+  const k = clienteDoFluxo({ tentativa: 3 });
+  const kc = await abrir(k.c, k.g);
+  kc.escrever(LOTE); await tick(4);
+  k.c.relogio.agora += 30_000;
+  kc.escrever(PONG); await tick(4);
+  assert.equal(k.c.P.Presenca.fluxoTentativa, 3, 'CONTROLE: antes do piso nada pode zerar o recuo');
+  kc.cair(); await fim(k.c);
+  const km = religa(k.c);
+  assert.ok(noDegrau(km, 30_000), `CONTROLE: caiu antes do piso e religou em ${km} ms (esperava ~30 s: o degrau em que estava)`);
+  assert.equal(k.c.P.Presenca.fluxoTentativa, 4);
+});
+
+test('R21-5-05 sem lote: a que viveu o piso tem fim normal mas NÃO zera o recuo (só o lote prova); a que fecha logo é "fim sem lote"', async () => {
+  const { c, g } = clienteDoFluxo({ tentativa: 3 });
+  const con = await abrir(c, g);
+  con.escrever('['); await tick(4);                   // nenhum lote
+  c.relogio.agora += 61_000;
+  con.escrever(PONG.slice(1)); await tick(4);
+  con.fechar(); await fim(c);
+  assert.equal(religa(c), 1000, 'viveu 61 s sem lote: o fim normal (o que valia antes) continua');
+  assert.equal(c.P.Presenca.fluxoTentativa, 3, 'sem o lote a conexão não provou nada: o recuo não zera');
+  // E a que fecha logo, sem lote, segue sendo erro — com o nome de sempre.
+  const k = clienteDoFluxo();
+  const kc = await abrir(k.c, k.g);
+  kc.fechar(); await fim(k.c);
+  assert.equal(k.c.P.Presenca.fluxoDiag.ultimoErro, 'fim sem lote');
+  assert.ok(noDegrau(religa(k.c), 2000));
+});
+
+test('R21-5-05 o piso é de 60 s, medido de ponta a ponta: 59,999 s é fim curto, 60 s é fim normal', async () => {
+  const vida = async (ms) => {
+    const { c, g } = clienteDoFluxo();
+    const con = await abrir(c, g);
+    con.escrever(LOTE); await tick(4);
+    c.relogio.agora += ms;
+    con.fechar(); await fim(c);
+    return { espera: religa(c), erro: c.P.Presenca.fluxoDiag.ultimoErro };
+  };
+  const curta = await vida(59_999);
+  assert.ok(noDegrau(curta.espera, 2000), `59,999 s religou em ${curta.espera} ms`);
+  assert.equal(curta.erro, 'fim curto');
+  const normal = await vida(60_000);
+  assert.equal(normal.espera, 1000, `60 s religou em ${normal.espera} ms`);
+  assert.equal(normal.erro, null);
+});
+
+test('R21-5-05 o smoke da presença segura a conexão do Google ABERTA e mede o Google que fecha logo, com os dois controles', () => {
+  // O Google de mentira do smoke era uma conexão que terminava a cada entrega
+  // (`route.fulfill` não faz stream) e que o app religava em 1 s. Com o fim CURTO
+  // do R21-5-05 isso escala o recuo pelo smoke inteiro (16 falhas na primeira
+  // rodada). Hoje quem segura a conexão é o `fetch` da página — que ainda faz a
+  // ida de verdade pela rede roteada —, e a seção 15 mede o Google que fecha
+  // logo. O guard cobra que isso não volte a ser a conexão que termina.
+  const fonte = readFileSync(new URL('../tools/smoke-presenca.mjs', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(fonte, /ctx\.addInitScript\(googleDeMentiraNaPagina, GOOGLE\)/, 'a página deixou de segurar a conexão do Google');
+  assert.doesNotMatch(fonte, /\bacordar\b|dormir\(25_000\)/, 'a conexão do Google de mentira voltou a ficar presa até a entrega (e terminar com ela)');
+  // O sinal de vida da conexão aberta fica abaixo do vigia de silêncio do app.
+  const silencio = Number((CODIGO.match(/PRESENCA_FLUXO_SILENCIO_MS = ([\d_]+)/) || [])[1]?.replace(/_/g, ''));
+  const pulso = Number((fonte.match(/setInterval\(\(\) => conexao\.escrever\([^)]*\), ([\d_]+)\)/) || [])[1]?.replace(/_/g, ''));
+  assert.ok(silencio > 0 && pulso > 0 && pulso * 2 < silencio, `o sinal de vida (${pulso} ms) tem que caber duas vezes no vigia de silêncio do app (${silencio} ms)`);
+  // A seção 15: o lote que fecha logo, o corpo vazio (o controle do auditor) e o Google saudável.
+  assert.match(fonte, /console\.log\('\\n15\. o Google que fecha logo depois do lote/);
+  for (const modo of ["'lote'", "'vazio'", 'null']) assert.ok(fonte.includes(`medir(caio, ${modo})`), `a seção 15 deixou de medir ${modo}`);
+  assert.match(fonte, /saudavel\.idas\.length === 1 && saudavel\.estado\.aberto/, 'o controle do Google saudável sumiu');
+  assert.match(fonte, /lote\.idas\.length <= 4\b/, 'o teto de idas do Google que fecha logo sumiu');
+});

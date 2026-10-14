@@ -12,8 +12,15 @@
 //   · o tempo real é o host de verdade do Google (roteado pelo Playwright), o
 //     que prova de quebra que a CSP do app deixa ele passar — o host novo do
 //     `connect-src` é o tipo de coisa que some calada (o mapa já sumiu assim);
-//   · a conexão do tempo real fica PRESA até haver o que entregar, como a do
-//     Google, e religa sozinha quando termina.
+//   · a conexão do tempo real fica ABERTA, como a do Google: a mensagem entra
+//     nela AO VIVO, e ela só fecha quando o app a fecha. Era uma conexão que
+//     ficava presa até haver o que entregar e terminava com a entrega
+//     (`route.fulfill` não faz stream) — e o app religava em 1 s. Desde o
+//     R21-5-05 a conexão que fecha logo é fim CURTO, com recuo: a mesma fake
+//     passaria a escalar o recuo a cada entrega. Quem segura a conexão aberta é
+//     o `fetch` da própria página (`googleDeMentiraNaPagina`), que ainda faz a
+//     ida de verdade pela rede roteada — a CSP, o CORS e os cabeçalhos seguem
+//     provados.
 //
 // O que o smoke NÃO prova é que o Waze de verdade responde assim: isso é a
 // validação ao vivo com as duas contas, que não mora no repositório.
@@ -53,6 +60,10 @@ const PESSOAS = {
   '12444348': { nome: 'antigerme', rank: 5, pos: { lat: -23.5613, lon: -46.6565 } },
   '183164343': { nome: 'cafanha', rank: 3, pos: { lat: -23.5329, lon: -46.6395 } },
   '555': { nome: 'so_no_wme', rank: 2, pos: { lat: -23.54, lon: -46.64 } },
+  // Quem abre o app só na seção 15 (o Google que fecha logo). Pessoa PRÓPRIA: o
+  // '555' é "quem só usa o WME" (a seção 8), e abri-lo como app trocaria o que
+  // ele é pra qualquer seção depois da dele.
+  '777': { nome: 'caio', rank: 3, pos: { lat: -23.55, lon: -46.65 } },
 };
 // A distância que a tela TEM que mostrar, calculada aqui pela mesma fórmula
 // (Haversine) — cravar "3 km" no teste mediria o meu chute das posições.
@@ -64,7 +75,13 @@ const kmEntre = (a, b) => {
 const KM = Math.round(kmEntre(PESSOAS['12444348'].pos, PESSOAS['183164343'].pos));
 const naApp = new Set();          // quem está com o app aberto (e aparece na lista)
 const mensagens = [];             // { id, ts, de, para, texto, ctx, lida }
-const filas = new Map();          // id -> { itens: [{ inbox, bytes }], acordar }
+const filas = new Map();          // id -> { itens: [{ inbox, bytes }] }
+// As páginas de cada pessoa: o tempo real chega a elas AO VIVO (`empurrarAoVivo`).
+const paginasDe = new Map();      // id -> Set<Page>
+// Quem tem o Google que FECHA LOGO depois de abrir (a seção 15): 'lote' é o que
+// ele manda ao abrir (`startOfBatch` e `endOfBatch`) e fecha; 'vazio' é o corpo
+// sem nenhum marcador, o CONTROLE que já ia pelo recuo.
+const googleCurto = new Map();    // id -> 'lote' | 'vazio'
 // O envio que falha: 'waze' é o Waze fora (gRPC 14) com a rede boa — o
 // servidor RESPONDE, com 500; 'borda' é a borda respondendo HTML (a nossa
 // origem fora, a cota do plano grátis) — CHEGA, mas não é JSON; 'rede' é a
@@ -91,13 +108,76 @@ const ABORTAR = Symbol('abortar');
 const token = (id) => `token-do-smoke-${id}`;
 
 function fila(id) {
-  if (!filas.has(id)) filas.set(id, { itens: [], acordar: null });
+  if (!filas.has(id)) filas.set(id, { itens: [] });
   return filas.get(id);
 }
+const quadroDe = (item) => ({ inboxMessage: { messageId: item.inbox, messageType: 'MESSAGE', message: Buffer.from(item.bytes).toString('base64') } });
 function entregar(id, bytes) {
-  const f = fila(id);
-  f.itens.push({ inbox: randomUUID(), bytes });
-  if (f.acordar) { const a = f.acordar; f.acordar = null; a(); }
+  const item = { inbox: randomUUID(), bytes };
+  fila(id).itens.push(item);
+  empurrarAoVivo(id, item);
+}
+// A mensagem entra na conexão que já está aberta (a do Google fica aberta e a
+// entrega ao vivo). Sem conexão aberta (o app ainda abrindo, ou caída), ela
+// espera na fila e sai no lote da próxima, como o Google reentrega o que não foi
+// confirmado.
+function empurrarAoVivo(id, item) {
+  const quadro = JSON.stringify(quadroDe(item));
+  for (const pg of paginasDe.get(id) || []) {
+    pg.evaluate((q) => { if (window.__googleDeMentira) window.__googleDeMentira.empurrar(q); }, quadro).catch(() => { /* a página fechou ou navega */ });
+  }
+}
+// Roda DENTRO de cada página (`addInitScript`), antes do app: o `fetch` ao
+// Google faz a ida de verdade — roteada, então a CSP e o CORS são os de
+// verdade — e devolve ao app um corpo que SEGUE ABERTO. Ele recebe o que a ida
+// trouxe (o lote e o que não foi confirmado), mais o que `empurrar` entregar, e
+// um sinal de vida a cada 10 s como o do Google (sem ele o app derrubaria a
+// conexão por silêncio aos 35 s). Fecha quando o app a aborta. O Google de
+// mentira que quer fechar logo depois de abrir (seção 15) manda o cabeçalho
+// `x-smoke-fecha`, e a resposta passa como veio.
+function googleDeMentiraNaPagina(GOOGLE) {
+  const original = window.fetch.bind(window);
+  const abertas = new Set();
+  const enc = new TextEncoder();
+  window.__googleDeMentira = {
+    empurrar(quadro) { for (const a of abertas) a.escrever(',' + quadro); },
+  };
+  window.fetch = async function (entrada, opcoes) {
+    const url = typeof entrada === 'string' ? entrada : (entrada && entrada.url) || String(entrada);
+    if (!url.startsWith(GOOGLE)) return original(entrada, opcoes);
+    // Registrada ANTES da ida: o que for empurrado enquanto ela não volta espera aqui.
+    let controle = null, pulso = null, pronto = false, acabou = false;
+    const espera = [];
+    const conexao = {
+      escrever(txt) {
+        if (acabou) return;
+        if (!pronto) { espera.push(txt); return; }
+        try { controle.enqueue(enc.encode(txt)); } catch (e) { /* já fechada */ }
+      },
+    };
+    const acabar = () => { acabou = true; clearInterval(pulso); abertas.delete(conexao); };
+    abertas.add(conexao);
+    let resposta;
+    try { resposta = await original(entrada, opcoes); } catch (e) { acabar(); throw e; }
+    if (!resposta.ok || resposta.headers.get('x-smoke-fecha')) { acabar(); return resposta; }
+    const inicio = (await resposta.text()).replace(/\s*\]\s*$/, '');
+    const corpo = new ReadableStream({
+      start(c) {
+        controle = c;
+        c.enqueue(enc.encode(inicio));
+        for (const txt of espera.splice(0)) c.enqueue(enc.encode(txt));
+        pronto = true;
+      },
+      cancel() { acabar(); },
+    });
+    pulso = setInterval(() => conexao.escrever(',{"pong":{}}'), 10_000);
+    const sinal = opcoes && opcoes.signal;
+    if (sinal) {
+      const abortar = () => { acabar(); try { controle.error(new DOMException('The operation was aborted.', 'AbortError')); } catch (e) { /* já fechada */ } };
+      if (sinal.aborted) abortar(); else sinal.addEventListener('abort', abortar, { once: true });
+    }
+    return new Response(corpo, { status: 200, headers: { 'content-type': 'application/json' } });
+  };
 }
 const bytesMsg = (m) => g.lerCampos(g.corpoEnviarTexto({ cabecalho: null, ts: m.ts, id: m.id, para: m.para, de: m.de, texto: m.texto, ctx: m.ctx })).find((c) => c.n === 2).v;
 const bytesRecibo = ({ de, para, ids }) => g.lerCampos(g.corpoRecibo({ cabecalho: null, ts: Date.now(), id: randomUUID(), para, de, tipo: 2, ids })).find((c) => c.n === 2).v;
@@ -253,27 +333,34 @@ async function editor(id, { lang = 'pt' } = {}) {
   // Tile do mapa: servido aqui também (e o que vale aqui é a presença, não o mapa).
   await ctx.route(/^https:\/\/[a-z0-9-]*\.waze\.com\/.*tiles/, (r) => r.fulfill({ status: 200, contentType: 'image/gif',
     body: Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64') }));
-  // O tempo real: preso até haver o que entregar, como o do Google.
+  // O tempo real: a ida de verdade devolve o lote e o que não foi confirmado, e a
+  // página segura a conexão ABERTA (`googleDeMentiraNaPagina`), como a do Google.
+  await ctx.addInitScript(googleDeMentiraNaPagina, GOOGLE);
   await ctx.route(GOOGLE + '**', async (route) => {
     const req = route.request();
-    const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST' };
+    const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST',
+      'access-control-expose-headers': 'x-smoke-fecha' };
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors }).catch(() => {});
     if (semRede.has(id)) return route.abort('internetdisconnected').catch(() => {});
     let corpo = null;
     try { corpo = JSON.parse(req.postData() || 'null'); } catch { /* registrado como null */ }
-    reg(id).fluxo.push({ url: req.url(), chave: req.headers()['x-goog-api-key'], corpo, cookie: req.headers().cookie || null });
+    reg(id).fluxo.push({ url: req.url(), chave: req.headers()['x-goog-api-key'], corpo, cookie: req.headers().cookie || null, em: Date.now() });
     if (!corpo || !corpo.header || corpo.header.auth_token_payload !== token(id)) {
       return route.fulfill({ status: 401, headers: cors, body: '' }).catch(() => {});
     }
-    const f = fila(id);
-    if (!f.itens.length) await Promise.race([new Promise((ok) => { f.acordar = ok; }), dormir(25_000)]);
+    // O Google que fecha logo depois de abrir (a seção 15): a resposta termina
+    // aqui, e a página a entrega como veio.
+    const curto = googleCurto.get(id);
+    if (curto) {
+      return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json', 'x-smoke-fecha': '1' },
+        body: curto === 'lote' ? '[{"startOfBatch":{}},{"endOfBatch":{}}]' : '[]' }).catch(() => {});
+    }
     // Entrega TUDO o que não foi confirmado, AO VIVO — mas depois do lote que
     // abre TODA conexão. MEDIDO em 2026-09-25 no app de produção: o Google manda
     // `startOfBatch` e `endOfBatch` no 1º milissegundo, VAZIO quando não há nada
     // na fila, e só então as mensagens ao vivo. Sem o lote o fake era uma
     // conexão que "nunca abriu" — e o app (certo) a trata como queda, com recuo.
-    const quadros = [{ startOfBatch: {} }, { endOfBatch: {} },
-      ...f.itens.map((x) => ({ inboxMessage: { messageId: x.inbox, messageType: 'MESSAGE', message: Buffer.from(x.bytes).toString('base64') } }))];
+    const quadros = [{ startOfBatch: {} }, { endOfBatch: {} }, ...fila(id).itens.map(quadroDe)];
     await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' },
       body: '[' + quadros.map((q) => JSON.stringify(q)).join(',\n') + ']' }).catch(() => {});
   });
@@ -289,6 +376,8 @@ async function editor(id, { lang = 'pt' } = {}) {
     await route.fulfill({ status: __status || 200, contentType: 'application/json', body: JSON.stringify(resto) }).catch(() => {});
   });
   const page = await ctx.newPage();
+  if (!paginasDe.has(id)) paginasDe.set(id, new Set());
+  paginasDe.get(id).add(page);
   const pedidos = [];
   page.on('request', (r) => pedidos.push(r.url()));
   page.on('websocket', (w) => pedidos.push('ws:' + w.url()));
@@ -1548,6 +1637,61 @@ try {
   const chave = await bia.page.evaluate(() => localStorage.getItem('waze_places_chat'));
   if (apiDe(bia, 'presenca-app').length === depois14 && chave === null) ok('o "Sair" de outra aba: o `pageshow` não pede a lista com a sessão que já se foi, e `waze_places_chat` não volta');
   else anota(`o pageshow depois do "Sair" de outra aba: ${apiDe(bia, 'presenca-app').length - depois14} pedido(s), waze_places_chat ${chave === null ? 'ausente' : 'RECRIADO'}`);
+
+  // ── 15. O GOOGLE QUE FECHA LOGO DEPOIS DO LOTE: o app recua (R21-5-05) ─────
+  // Toda conexão do Google abre com o lote (`startOfBatch` e `endOfBatch` no 1º
+  // milissegundo — MEDIDO em produção), e o app a tratava como "fim normal" se
+  // ela terminasse depois dele: religava em 1 s, sem recuo, pra sempre — uma ida
+  // por segundo ao Google com a página à vista (o auditor mediu 25 idas em 25 s;
+  // custa ao aparelho e ao Google, nada ao nosso `/api`). Quem fecha logo (um
+  // intermediário, um limite do servidor) é fim CURTO: o recuo de 2 s, 5 s, 15 s…
+  // Mede o que o NAVEGADOR faz, com dois controles que reprovam se o instrumento
+  // estiver errado: o corpo VAZIO (sem nenhum marcador), que já ia pelo recuo, tem
+  // que dar as mesmas idas; e o Google SAUDÁVEL — a conexão que fica aberta —,
+  // UMA só (se desse mais, quem estaria errada era a página que segura a conexão).
+  console.log('\n15. o Google que fecha logo depois do lote: o app recua, não religa a cada 1 s');
+  const JANELA = 10_000;
+  const medir = async (e, modo) => {
+    if (modo) googleCurto.set(e.id, modo); else googleCurto.delete(e.id);
+    // Carga NOVA a cada fase: o recuo recomeça do 1º degrau, e a janela mede a
+    // escada inteira (a página que abriu antes já estaria no meio dela). Passa
+    // por `about:blank` pra a carga anterior — e o religar dela — acabar ANTES de
+    // a janela começar: uma ida dela depois do `desde` abriria a janela no meio.
+    await e.page.goto('about:blank');
+    const desde = Date.now();
+    await e.page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });
+    // A janela conta da PRIMEIRA ida ao Google desta carga, pelo registro do servidor.
+    const primeira = async () => reg(e.id).fluxo.find((x) => x.em >= desde);
+    for (let i = 0; i < 150 && !(await primeira()); i++) await dormir(100);
+    const ini = await primeira();
+    if (!ini) return null;
+    await dormir(JANELA + 300);
+    const idas = reg(e.id).fluxo.filter((x) => x.em >= ini.em && x.em <= ini.em + JANELA).map((x) => x.em - ini.em);
+    const estado = await e.page.evaluate(() => ({ erro: Presenca.fluxoDiag.ultimoErro, quedas: Presenca.fluxoDiag.quedasSeguidas,
+      tentativa: Presenca.fluxoTentativa, aberto: !!Presenca.fluxo }));
+    return { idas, estado };
+  };
+  // A ÚLTIMA seção: a pessoa nova entra na lista de quem está no app, e uma seção
+  // depois desta veria o `caio` onde não o espera.
+  const caio = await editor('777');
+  const lote = await medir(caio, 'lote');
+  const vazio = await medir(caio, 'vazio');
+  const saudavel = await medir(caio, null);
+  const gaps = (r) => r.idas.slice(1).map((t, i) => t - r.idas[i]);
+  if (!lote || !vazio || !saudavel) anota(`a seção 15 não mediu: ${JSON.stringify({ lote, vazio, saudavel })}`);
+  else {
+    // O CONTROLE do instrumento: o Google saudável é UMA conexão que fica aberta.
+    if (saudavel.idas.length === 1 && saudavel.estado.aberto && saudavel.estado.erro === null) ok(`controle: o Google saudável é UMA conexão aberta por ${JANELA / 1000} s — a página segura o stream`);
+    else anota(`controle: o Google saudável deu ${saudavel.idas.length} ida(s) em ${JANELA / 1000} s (esperava 1, aberta): ${JSON.stringify(saudavel)}`);
+    // O CONTROLE do auditor: o corpo vazio já ia pelo recuo.
+    if (vazio.idas.length >= 2 && vazio.idas.length <= 4 && gaps(vazio).every((g) => g >= 1300) && vazio.estado.erro === 'fim sem lote') {
+      ok(`controle: o corpo sem lote já ia pelo recuo — ${vazio.idas.length} idas em ${JANELA / 1000} s (intervalos ${gaps(vazio).map((g) => (g / 1000).toFixed(1)).join(' / ')} s)`);
+    } else anota(`controle: o corpo sem lote não foi pelo recuo: ${JSON.stringify(vazio)}`);
+    // O defeito: o lote e fecha. Eram ~10 idas (1 por segundo); agora o recuo.
+    if (lote.idas.length >= 2 && lote.idas.length <= 4 && gaps(lote).every((g) => g >= 1300) && lote.estado.erro === 'fim curto' && lote.estado.quedas >= 2) {
+      ok(`o Google que fecha logo depois do lote vai pelo recuo — ${lote.idas.length} idas em ${JANELA / 1000} s (intervalos ${gaps(lote).map((g) => (g / 1000).toFixed(1)).join(' / ')} s), a queda anotada como "fim curto"`);
+    } else anota(`o Google que fecha logo depois do lote religou a cada ~1 s: ${lote.idas.length} idas em ${JANELA / 1000} s, ${JSON.stringify(lote)}`);
+  }
 } finally {
   await browser.close();
   srv.kill('SIGKILL');
