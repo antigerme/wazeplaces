@@ -8,6 +8,46 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.14-02
+
+Vigésima primeira rodada da auditoria. Depois da v2026.10.14-01, conferida em produção com duas contas (164 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. Quase tudo o que acharam eram pontas soltas dos consertos da rodada anterior; nenhum achado era grave.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila, as contas e as telas**
+- **O treino não abre mais enquanto um "Marcar todos" ainda está sendo enviado, mesmo depois de o seu acesso ser renovado.** Antes, o treino abria nessa hora e, ao sair dele, os pedidos que o lote tinha marcado como lidos voltavam como cards, com o "Restam" errado, e o ✕ rejeitava um pedido que já estava lido.
+- **Se outra conta entra no aparelho com um "Marcar todos" da conta anterior ainda no ar, a fila da conta nova vem completa.** Antes ela aparecia vazia ("Tudo limpo!") com os pedidos pendentes dela, e só o ↻ os trazia de volta.
+- **O canto da tela não fica mais em "Enviando N…" quando o app passa a duvidar de qual conta está em uso nesta aba.**
+- **O diálogo do "Sair" não conta mais uma alteração de foto que já foi cancelada pela renovação do acesso.** Antes ele dizia "1 alteração de foto esperando envio será descartada" por alguns segundos, sem nada esperando.
+- **Aprovar uma foto depois de um "Marcar todos" não desce mais o "Restam" duas vezes** pelo mesmo pedido.
+- **Depois que seu acesso é renovado no meio de um "Marcar todos", o contador "Restam" volta a mostrar o número da fila.** Antes ele ficava em "—" até a próxima decisão.
+- **Ao trocar de aba nos Filtros (Filtros, Preferências, Histórico), a aba nova abre no topo.** Antes ela herdava a rolagem da aba anterior e abria no meio.
+- **Uma categoria salva com texto vazio ou com mais de 80 caracteres deixou de travar a abertura em "Falha ao carregar".** O filtro volta ao padrão.
+- **Colar um link de pareamento na barra de endereço do app já aberto agora funciona:** o app recarrega, conecta a conta do link e tira o código da barra. Antes nada acontecia e o código ficava na barra.
+
+**A conversa**
+- **Quando o histórico não carrega ao reabrir a conversa (ou o app espera o perfil voltar), uma mensagem nova que chega com a conversa aberta já não faz o app marcar como "Lida" também a mensagem anterior que você nunca viu.** Ela continua como não lida até a conversa carregar.
+- **O relatório de diagnóstico só registra "o lida deixou de sair" quando havia mesmo uma marcação a enviar.**
+
+**Disponível offline e diagnóstico**
+- **O relatório de diagnóstico não perde mais a comparação com o servidor quando o navegador não responde a uma leitura local.** Antes, se o navegador demorava a responder sobre os serviços do app ou o armazenamento, o relatório saía dizendo que não conseguiu conferir nenhum arquivo, mesmo com a internet boa. Agora a conferência acontece em paralelo e o relatório sai em até 10 segundos.
+- **O relatório de diagnóstico diz melhor o que aconteceu com o "Disponível offline".** Ele separa o que o navegador não respondeu do que a internet não entregou, avisa quando a leitura do offline não chegou a tempo, e mostra até que horas a preparação está em pausa e por quê (servidor pediu calma, sem espaço no aparelho).
+- **"Disponível offline" não diz mais "Pronto" quando a lista não foi guardada.** Se o aparelho não consegue gravar a lista de pedidos (por exemplo, por falta de espaço), a preparação termina como "Faltou parte" ou "Faltou espaço" e tenta de novo depois de uma pausa, em vez de aparecer como pronta sem estar.
+- **"Disponível offline" não diz mais "Pronto" quando o servidor de mapas recusa todos os mapas.** Se todos vierem recusados (acesso negado ou endereço não encontrado) e nenhum estiver guardado, a preparação termina como "Faltou parte" e tenta de novo depois de dez minutos.
+- **Sobre o servidor do mapa pedindo calma (408, 425, 429), a entrada anterior prometia mais do que o app faz:** ele não consegue ler o prazo que o servidor pede, então espera cerca de um minuto e continua sozinho no próximo uso.
+- **No computador, só o botão esquerdo do mouse usa o botão de diagnóstico do modo dev.** Os botões direito e do meio deixaram de registrar uma captura e de "pegar" o botão.
+
+**O servidor**
+- **O app agora recusa, em vez de errar calado, pedidos de busca mal formados.** Um tipo de pedido desconhecido na lista de tipos, ou um "sim/não" que não seja sim/não de verdade, antes dava uma fila vazia ("Tudo limpo!") ou o filtro oposto ao escolhido; agora o servidor responde que o pedido é inválido. O que o app manda no uso normal não muda.
+- **Excluir uma foto de um local sem ponto no mapa agora diz "Parâmetros incompletos"** em vez de "Não achamos este local no Waze agora", e nem chega a consultar o Waze. A foto continua voltando para a tela.
+- **O país guardado no aparelho com valor inválido (negativo, zero ou texto) volta para o Brasil**, em vez de deixar a busca falhar toda vez que o app abre.
+- **A área de "Minha área" que passa dos limites do globo (por exemplo, perto da linha de data) não trava mais a busca:** a caixa é limitada a ±180° de longitude e ±90° de latitude.
+- **Um ponto de entrada ou saída com coordenada quebrada no pedido é ignorado,** em vez de derrubar o mapa do card.
+
+---
+
 ## v2026.10.14-01
 
 Vigésima rodada da auditoria. Depois da v2026.10.13-02, conferida em produção com duas contas (160 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área. O que eles acharam foram, na maior parte, pontas soltas dos consertos da rodada anterior. Nenhum achado era grave.
