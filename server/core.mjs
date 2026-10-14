@@ -1366,16 +1366,17 @@ export const pontoDeGeometria = (geom) => {
 // Vem null quando não há coordenada nenhuma: o card então não monta o slide,
 // em vez de desenhar um mapa do oceano no ponto (0, 0).
 export const montarMapa = (venue, changes) => {
-  // O ponto de entrada/saída: `[lat, lon]`, ou `null` quando o item não traz
-  // ponto nenhum (ausente, `null` ou `[]`: acontece, e o card só não desenha esse
-  // marcador). Ponto que
-  // VEIO mas não é um par de números (`[5]`, `[5, null]`, texto) é a forma
-  // quebrada do Waze: resposta inesperada, não um marcador em `undefined`
-  // (antes: `toFixed` de `undefined`, "Erro interno"; R17-6-A1).
+  // O ponto de entrada/saída: `[lat, lon]`, ou `null` quando o item não traz um
+  // ponto utilizável: ausente, `null`, `[]`, ou que VEIO e não é um par de números
+  // finitos (`[5]`, `[5, null]`, texto). É evidência ACESSÓRIA do mapa do card — o
+  // local e o pedido seguem corretos sem ele —, então um ponto quebrado é IGNORADO
+  // (não entra em `mapa.entradas`) e não derruba a fila do país inteira (R18-8,
+  // revisão do coordenador no lote 22 da decisão do lote 21, que o tratava como
+  // "resposta inesperada"). O que segue sendo forma quebrada é o CAMPO inteiro
+  // (`entryExitPoints` que não é lista: `listaDoWaze`) e a posição do LOCAL.
   const pontoDoEEP = (item) => {
     const c = item && item.point && item.point.coordinates;
-    if (c === undefined || c === null || (Array.isArray(c) && c.length === 0)) return null;
-    if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) respostaInesperadaDoWaze();
+    if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
     return [c[1], c[0]];
   };
   const centro = pontoDeGeometria(venue && venue.geometry);
