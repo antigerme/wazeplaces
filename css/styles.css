@@ -2418,21 +2418,26 @@ button:active {
    ONDE ELE FICA (R21-5-03, lote 25). A 1× são 2px do topo e da direita do botão:
    num botão de 44px com o ícone de 24px no centro, é o selo quase centrado no
    canto do ÍCONE — o fundo dele fica 8,8px abaixo da borda de cima do ícone — e
-   cobre 22% da tinta do balão ("12"; "99+", 31%). O botão tem mínimo de 44px (px) e o
+   cobre 22% da tinta do balão ("12"; "99+", 30%). O botão tem mínimo de 44px (px) e o
    ícone e o selo são `rem`: com o texto do sistema maior o ícone ocupa o botão
-   inteiro e o selo, preso ao canto do BOTÃO, cai em cima dele (1,5×: 57%; 2×: 68%;
-   "99+" a 1,5×: 68%). O balão é a pista de que há mensagem que não é só cor
+   inteiro e o selo, preso ao canto do BOTÃO, cai em cima dele (1,5×: 56%; 2×: 70%;
+   "99+" a 1,5×: 66%). O balão é a pista de que há mensagem que não é só cor
    (WCAG 1.4.1), e a forma sumia.
    Agora o selo se prende à borda de cima do ÍCONE, que fica em `50% − 0,75rem` do
    topo do botão: o fundo dele continua 8,8px abaixo dela, e o selo SOBE tanto
    quanto cresce (1,05rem − 16,8px). O `top` ainda sobe um décimo a mais (1,1×):
    o selo também alarga ("99+" é mais largo que "12") e essa folga põe o "99+" de
    1,5× abaixo de um quarto da tinta. Medido (traço do SVG sob o selo + anel de
-   2px; confere com o pixel, ±2,5 pontos): "12" 22% a 1× (igual a antes), 55% →
-   18% a 1,5× e 70% → 9% a 2×; "99+" 31% a 1×, 66% → 23% a 1,5× e 75% → 10% a 2×.
+   2px; nos balões confere com o pixel, ±2,5 pontos): "12" 22% a 1× (igual a antes),
+   56% → 18% a 1,5× e 70% → 8% a 2×; "99+" 30% a 1×, 66% → 23% a 1,5× e 75% → 9% a
+   2×; o ícone de gente ("3") 7% a 1×, 45% → 4% a 1,5× e 55% → 2% a 2× — nele o selo
+   cinza tem a MESMA cor do traço, e aí o pixel não vê o que fica debaixo do selo
+   (dava 15% a 2×): só a geometria conta. A 2× o selo fica 26,5px acima da borda de
+   cima do botão e a 3,3px do topo da tela (o cabeçalho dá a folga).
    NA HORIZONTAL o selo não passa da borda do botão (`right` ≥ 0): o vizinho do
    cabeçalho é um botão de 44px sem vão, e o selo pairando sobre o alvo dele
-   roubaria toque.
+   roubaria toque. Pra esquerda ele passa até 7px a 2× ("99+"; eram 9px), sobre o
+   nome do perfil, que não é alvo de toque.
    A 1× NENHUM pixel muda, por construção, e sem depender de arredondamento:
    com `rem` = 16px os termos de `min()` valem exatamente 0 (22 − 12 − 10 − 1,1 × 0
    no `top`, 22 − 12 − 8 = 2 no `right`) e `top`/`right` ficam em 2px; com texto
