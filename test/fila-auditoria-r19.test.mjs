@@ -552,6 +552,7 @@ function abasDaRecusa({ locks = true, qtd = 2, extraDaB = [], cardNaTela = false
     AppState.currentPlace = cardNaTela ? AppState.queue[0] : null;
     const deps = {
       AppState, Treino: { ativo: false }, navigator: travas ? { locks: travas } : {}, RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica',
+      RECUSA_AUTOMATICA_ESPERA_MAX_MS: 180000, recusasEsperandoATrava: new Set(),
       podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (c) => c === 9,
       pedidosEmAndamento: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
       decididoNaOutraAbaDepoisDe: (p) => pousadoPor.has(p.updateRequestID) && pousadoPor.get(p.updateRequestID) !== i,
@@ -624,8 +625,10 @@ test('R19-2-02 (estrutura): a trava é pedida SÓ no envio, depois de os alvos s
   assert.match(SEM, /^const RECUSA_AUTOMATICA_TRAVA = 'wp-recusa-automatica';/m, 'o nome da trava sumiu');
   assert.match(corpo, /locks = navigator\.locks && typeof navigator\.locks\.request === 'function' \? navigator\.locks : null;/, 'a trava deixou de depender do `navigator.locks` existir');
   assert.match(corpo, /\} else await mandar\(\);/, 'sem `navigator.locks` o envio deixou de ser o de sempre');
-  assert.match(corpo, /await locks\.request\(RECUSA_AUTOMATICA_TRAVA, \(\) => \{ comecou = true; return mandar\(\); \}\)/, 'o envio deixou de rodar sob a trava');
-  assert.match(corpo, /\.catch\(\(e\) => \{ if \(!comecou\) return mandar\(\); throw e; \}\)/, 'a trava recusada pelo navegador mata a recusa automática');
+  // (Lote 25, R21-2-02/R21-2-05: o pedido da trava leva o `signal` da espera — que a tira da fila, pelo teto ou pela
+  // troca de conta/"Sair" — e o `comecou` solta o teto e a marca de "esperando" quando a trava é concedida.)
+  assert.match(corpo, /await locks\.request\(RECUSA_AUTOMATICA_TRAVA, espera \? \{ signal: espera\.signal \} : \{\}, \(\) => \{\s*comecou = true;[^}]*return mandar\(\);\s*\}\)/, 'o envio deixou de rodar sob a trava');
+  assert.match(corpo, /if \(comecou\) throw e;[\s\S]*return mandar\(\);\s*\}\);/, 'a trava recusada pelo navegador mata a recusa automática');
   const iFila = corpo.indexOf('AppState.queue = AppState.queue.filter((x) => !fora.has(x));');
   const iDesde = corpo.indexOf('const desde = Date.now();');
   const iTrava = corpo.indexOf('locks.request(RECUSA_AUTOMATICA_TRAVA');

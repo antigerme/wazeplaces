@@ -446,3 +446,252 @@ test('R21-2-06: o painel do Histórico escreve os números ESCAPADOS (um campo c
   assert.match(limpo, /<span class="text-emerald-700 dark:text-emerald-400">3<\/span> · <span class="text-rose-600 dark:text-rose-400">2<\/span>/, 'CONTROLE: a linha "3 · 2" mudou');
   assert.match(limpo, /<span class="text-emerald-700 dark:text-emerald-400">10<\/span> · <span class="text-rose-600 dark:text-rose-400">4<\/span>/, 'CONTROLE: a linha "10 · 4" mudou');
 });
+
+// ═══ R21-2-02 / R21-2-05 · a recusa automática ESPERANDO a trava entre abas ═══════════════════════════════
+// Os alvos saem da fila e ficam "em andamento" ANTES da espera (R20-2-01). Com a conta mudando no meio da espera
+// (a renovação da queda como OUTRA conta, o login de outra), eles seguiam assim até a trava soltar: a busca de
+// quem entrou os deixava de fora, e se eram os únicos pendentes dela a tela dizia "Tudo limpo!" (R21-2-02). E a
+// espera não tinha teto: uma página que pendura com a trava deixava os alvos invisíveis para sempre (R21-2-05).
+//
+// Aqui a recusa, o lote e o `callWithRetry` rodam DE VERDADE contra uma trava de mentira FIEL ao navegador:
+// `request(nome, [opcoes,] cb)`, o `signal` tira o pedido da FILA (AbortError) enquanto ele espera — depois de
+// concedida, abortar não faz nada —, e a trava solta ANTES de a promessa resolver (gotcha #19: nada em laço).
+function travaDeMentira() {
+  const filas = [];
+  let tomada = false;
+  const liberar = () => { tomada = false; const prox = filas.shift(); if (prox) prox(); };
+  const locks = {
+    request(nome, opcoes, cb) {
+      if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+      const signal = opcoes && opcoes.signal;
+      return new Promise((resolve, reject) => {
+        const tenta = () => {
+          tomada = true;
+          Promise.resolve().then(() => cb({ name: nome })).then((v) => { liberar(); resolve(v); }, (e) => { liberar(); reject(e); });
+        };
+        if (signal && signal.aborted) { reject(new DOMException('The operation was aborted.', 'AbortError')); return; }
+        if (!tomada) { tenta(); return; }
+        filas.push(tenta);
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            const i = filas.indexOf(tenta);
+            if (i >= 0) { filas.splice(i, 1); reject(new DOMException('The operation was aborted.', 'AbortError')); }
+          }, { once: true });
+        }
+      });
+    },
+  };
+  // A "outra página" pega a trava e a segura até o teste soltar.
+  let soltarDela;
+  const dela = new Promise((ok) => { soltarDela = ok; });
+  locks.request('wp-recusa-automatica', () => dela);
+  return { locks, soltar: () => soltarDela(), esperando: () => filas.length };
+}
+const P = (i, extra = {}) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, creatorId: 77, createdBy: 'spam', ...extra });
+const chaveDe = (p) => `${p.venueID}|${p.updateRequestID}`;
+const ids = (lista) => lista.map((p) => p.updateRequestID).sort();
+// Espera o fim da recusa COM TETO e sem a trava ter soltado: no defeito ela nunca acaba, e o teste tem de REPROVAR, não pendurar.
+const terminouSemTrava = (fim, ms = 250) => Promise.race([fim.then(() => true), new Promise((ok) => setTimeout(() => ok(false), ms))]);
+
+function recusaNaEspera({ alvos = [P(1), P(2), P(3)], comTrava = true, abrir = false } = {}) {
+  const t = comTrava ? travaDeMentira() : null;
+  const enviados = [], devolvidos = [], dfatos = [], timers = [];
+  const AppState = {
+    queue: alvos.map((p) => ({ ...p })), currentPlace: null, fetchEpoch: 0, geracaoDoSair: 0, authenticated: true, inFlightActions: 0,
+    stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: 10, pendingAction: null, hasMore: true,
+  };
+  const deps = {
+    AppState, Treino: { ativo: false }, navigator: { locks: t ? t.locks : undefined, onLine: true },
+    RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica', RECUSA_AUTOMATICA_ESPERA_MAX_MS: constante('RECUSA_AUTOMATICA_ESPERA_MAX_MS'),
+    recusasEsperandoATrava: new Set(), pedidosQueEntraramNaFila: new Set(alvos.map(chaveDe)), epocaDaSessao: 1,
+    // O relógio da página, de mentira: o teto é um `setTimeout` que o teste dispara (ou não).
+    setTimeout: (fn, ms) => { const id = timers.length + 1; timers.push({ id, fn, ms, ativo: true }); return id; },
+    clearTimeout: (id) => { const x = timers.find((y) => y.id === id); if (x) x.ativo = false; },
+    podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (c) => c === 77,
+    pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), rejeicoesDeLoteNoAr: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    decididoNaOutraAbaDepoisDe: () => false,
+    recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false, recusaAutomaticaNestaFila: false, avisoDaRecusaAutomatica: null,
+    updatePendingCount() {}, aoMudarAFilaPorBaixo() {}, updateInFlightIndicator() {}, updateStats() {}, saveStats() {},
+    API: { getRegion: () => 'row', rejectPlace: async (v, u) => { enviados.push(u); return { success: true }; } },
+    carimboDoGesto: () => ({ dia: 'x', onde: '30' }), quemDecideAgora: () => ({ s: 'a', conta: '1' }),
+    showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k, dfato: (k, o) => dfatos.push([k, o]), filaReal: () => AppState.queue,
+    registrarPouso() {}, recordHistory() {}, registrarRejeicaoDeAutor() {}, registrarAcaoConfirmada() {}, tirarDaFilaDeSaida() {},
+    registrarPousoDepoisDaQueda() {}, descontarGestoSemSessao() {}, showCurrentPlace() {},
+    devolverPedidoRecusado: (lista) => { devolvidos.push(...[].concat(lista).map((p) => p.updateRequestID)); },
+    mostrarResultadoDoLote() {}, pousouPorOutraAba() {}, aprovacaoDelaJaPousou: () => false, handleUnauthorized() {},
+  };
+  const h = montar(['aplicarRecusaAutomatica', 'cancelarAsRecusasQueEsperamATrava', 'enviarLote', 'marcarEmAndamento', 'marcarLoteSemEnviar',
+    'callWithRetry', 'sessaoTrocou', 'chaveDoPedido', 'pousouNoWaze'], deps);
+  return { h, deps, AppState, enviados, devolvidos, dfatos, timers, trava: t };
+}
+// O que o "Sair" faz com o que importa aqui (o `handleLogout`): a época e a geração sobem, a fila é refeita e o conjunto esvazia.
+function sairDeVerdade(m) {
+  m.deps.epocaDaSessao++; m.AppState.geracaoDoSair++; m.AppState.fetchEpoch++; m.AppState.authenticated = false;
+  m.AppState.queue = []; m.deps.pedidosEmAndamento.clear(); m.AppState.inFlightActions = 0;
+}
+// A troca de conta (`esquecerOutraConta`): a fila de quem entrou é REFEITA (outra época) e a sessão é outra.
+function trocarDeConta(m) { m.deps.epocaDaSessao++; m.AppState.fetchEpoch++; m.AppState.queue = []; }
+
+test('R21-2-02: a troca de conta na espera — os alvos ficam ao alcance da busca de quem entrou SEM esperar a trava, e nada sai no nome dela', async () => {
+  const m = recusaNaEspera();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  // PRÉ-CONDIÇÕES (o instrumento enxerga a espera): alvos fora da fila, em andamento, um pedido na fila da trava.
+  assert.deepEqual(m.AppState.queue, [], 'PRÉ-CONDIÇÃO: os alvos saem da fila antes da espera');
+  assert.deepEqual([...m.deps.pedidosEmAndamento].sort(), ['v1|u1', 'v2|u2', 'v3|u3'], 'PRÉ-CONDIÇÃO: os alvos já estão em andamento');
+  assert.equal(m.trava.esperando(), 1, 'PRÉ-CONDIÇÃO: a recusa está na fila da trava');
+  assert.equal(m.deps.recusaAutomaticaRodando, true);
+  // A conta B entra (a fila dela é refeita) e a troca cancela a espera.
+  trocarDeConta(m);
+  m.h.cancelarAsRecusasQueEsperamATrava();
+  try {
+    // A busca de B (`semOsJaDecididos`): o Waze devolve os pedidos dela, menos o que está "em andamento" ou "já passou pela fila".
+    const doWaze = [P(1), P(2), P(3), P(9, { creatorId: 1 })];
+    const busca = doWaze.filter((p) => !m.deps.pedidosEmAndamento.has(chaveDe(p)) && !m.deps.pedidosQueEntraramNaFila.has(chaveDe(p)));
+    assert.deepEqual(ids(busca), ['u1', 'u2', 'u3', 'u9'],
+      'DEFEITO: os pedidos de B ficaram escondidos pela recusa de A (a tela diria "Tudo limpo!" até a outra página soltar a trava)');
+    assert.equal(await terminouSemTrava(fim), true, 'DEFEITO: a recusa de A seguiu presa na fila da trava depois da troca de conta (e travava a passada de B)');
+    assert.equal(m.deps.recusaAutomaticaRodando, false, 'a recusa ficou "rodando" depois de cancelada');
+    assert.equal(m.trava.esperando(), 0, 'o pedido da recusa seguiu na fila da trava');
+  } finally { m.trava.soltar(); await tique(); await tique(); }
+  assert.deepEqual(m.enviados, [], 'DEFEITO: a recusa de A rejeitou pedido no nome de B quando a trava soltou');
+  assert.deepEqual(m.devolvidos, [], 'os alvos de A foram "devolvidos" à fila de B (a busca de B é que os traz)');
+  assert.equal(m.deps.pedidosEmAndamento.size, 0, 'sobrou marca de "em andamento"');
+  assert.equal(m.AppState.inFlightActions, 0);
+});
+
+test('R21-2-02: o "Sair" na espera tira a recusa da fila da trava na hora (a trava não precisa soltar), e nada sai nem volta', async () => {
+  const m = recusaNaEspera();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  sairDeVerdade(m);
+  m.h.cancelarAsRecusasQueEsperamATrava();
+  try {
+    assert.equal(await terminouSemTrava(fim), true, 'DEFEITO: depois do "Sair" a recusa seguiu presa na trava — e o `recusaAutomaticaRodando` segurava a passada de quem entrar');
+    assert.equal(m.trava.esperando(), 0);
+    assert.equal(m.deps.recusaAutomaticaRodando, false);
+  } finally { m.trava.soltar(); await tique(); await tique(); }
+  assert.deepEqual(m.enviados, [], 'a recusa de quem saiu rejeitou depois do "Sair"');
+  assert.deepEqual(m.AppState.queue, [], 'os alvos de quem saiu voltaram à fila da tela de entrada');
+  assert.deepEqual(m.devolvidos, []);
+  assert.equal(m.AppState.inFlightActions, 0);
+});
+
+test('R21-2-02: CONTROLES — a MESMA conta renovando (nada cancela) segue rejeitando, cada alvo uma vez; e cancelar sem recusa esperando não faz nada', async () => {
+  const m = recusaNaEspera();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  m.deps.epocaDaSessao++;                         // a queda e a renovação da MESMA conta: a época sobe, a fila fica
+  m.trava.soltar();
+  await fim;
+  assert.deepEqual(m.enviados, ['u1', 'u2', 'u3'], 'CONTROLE: a rejeição que a pessoa armou parou na renovação da mesma conta: ' + JSON.stringify(m.enviados));
+  assert.equal(m.AppState.stats.rejected, 3);
+  assert.equal(m.deps.pedidosEmAndamento.size, 0);
+  assert.doesNotThrow(() => m.h.cancelarAsRecusasQueEsperamATrava(), 'cancelar sem nenhuma recusa esperando lançou');
+  // Quem JÁ pegou a trava (o lote está no ar) não é cancelado pela troca: o lote segue as regras de sempre (época, geração, `aindaVale`).
+  const noAr = recusaNaEspera();
+  noAr.trava.soltar(); await tique();
+  let abrir;
+  const portao = new Promise((ok) => { abrir = ok; });
+  noAr.deps.API.rejectPlace = async (v, u) => { await portao; noAr.enviados.push(u); return { success: true }; };
+  const fim2 = noAr.h.aplicarRecusaAutomatica();
+  await tique(); await tique(); await tique();
+  assert.equal(noAr.deps.recusasEsperandoATrava.size, 0, 'PRÉ-CONDIÇÃO: a recusa que pegou a trava ainda está registrada como esperando');
+  noAr.h.cancelarAsRecusasQueEsperamATrava();
+  abrir();
+  await fim2;
+  assert.deepEqual(noAr.enviados, ['u1', 'u2', 'u3'], 'cancelar mexeu na recusa que já estava enviando');
+});
+
+test('R21-2-05: a espera pela trava tem TETO — a trava que nunca solta: a recusa DESISTE sem enviar, e os alvos voltam como card', async () => {
+  const m = recusaNaEspera();
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  const teto = m.timers.find((x) => x.ms === constante('RECUSA_AUTOMATICA_ESPERA_MAX_MS'));
+  assert.ok(teto, 'DEFEITO: a espera pela trava não tem teto (nenhum relógio foi armado)');
+  assert.ok(teto.ms >= 2 * 60000 && teto.ms <= 5 * 60000, `o teto (${teto.ms} ms) fora da faixa de 2 a 5 minutos`);
+  assert.equal(m.trava.esperando(), 1, 'PRÉ-CONDIÇÃO: a recusa espera, com a trava na mão da outra página');
+  assert.equal(m.enviados.length, 0);
+  teto.fn();                                        // o relógio chega ao teto
+  try {
+    assert.equal(await terminouSemTrava(fim), true, 'DEFEITO: passado o teto a recusa seguiu esperando a trava');
+    assert.equal(m.trava.esperando(), 0, 'o pedido seguiu na fila da trava depois de desistir');
+  } finally { m.trava.soltar(); await tique(); await tique(); }
+  assert.deepEqual(m.enviados, [], 'DEFEITO: a recusa que desistiu mandou rejeição ao Waze');
+  assert.deepEqual(ids(m.AppState.queue), ['u1', 'u2', 'u3'], 'DEFEITO: os alvos não voltaram como card');
+  assert.equal(m.deps.pedidosEmAndamento.size, 0, 'os alvos seguem "em andamento" (invisíveis para a busca)');
+  assert.equal(m.deps.recusaAutomaticaRodando, false);
+  assert.equal(m.AppState.serverTotal, 10, 'o "Restam" mudou: ele nunca desceu por estes alvos');
+  assert.equal(m.AppState.stats.rejected, 0, 'o placar contou rejeição que não saiu');
+  assert.ok(m.dfatos.some(([k]) => k === 'recusa.desistiuDaTrava'), 'a desistência não ficou no diário (o relato "os pedidos sumiram por 3 minutos" não teria rastro)');
+  assert.equal(m.AppState.inFlightActions, 0);
+});
+
+test('R21-2-05: CONTROLE — a trava concedida ANTES do teto desarma o relógio NA HORA (um teto atrasado desistiria do lote em curso) e cada alvo sai uma vez', async () => {
+  const m = recusaNaEspera();
+  // O 1º envio fica NO AR até o teste abrir o portão: o lote está em curso, com a trava na mão.
+  let abrir;
+  const portao = new Promise((ok) => { abrir = ok; });
+  m.deps.API.rejectPlace = async (v, u) => { await portao; m.enviados.push(u); return { success: true }; };
+  const fim = m.h.aplicarRecusaAutomatica();
+  await tique(); await tique();
+  const teto = m.timers.find((x) => x.ms === constante('RECUSA_AUTOMATICA_ESPERA_MAX_MS'));
+  assert.ok(teto && teto.ativo, 'PRÉ-CONDIÇÃO: o teto está armado enquanto a recusa espera');
+  m.trava.soltar();
+  await tique(); await tique(); await tique();
+  assert.equal(m.deps.recusasEsperandoATrava.size, 0, 'PRÉ-CONDIÇÃO: a trava foi concedida (a recusa deixou de esperar)');
+  assert.equal(teto.ativo, false, 'DEFEITO: o relógio do teto seguiu armado com o lote EM CURSO — um lote que começa perto do teto seria cortado no meio, e o resto voltaria como card');
+  abrir();
+  await fim;
+  assert.deepEqual(m.enviados, ['u1', 'u2', 'u3'], 'CONTROLE: soltando a trava antes do teto, cada alvo sai uma vez');
+  assert.equal(m.dfatos.filter(([k]) => k === 'recusa.desistiuDaTrava').length, 0);
+});
+
+test('R21-2-05: CONTROLE — sem `navigator.locks` nada muda (sem trava, sem teto): os alvos saem uma vez, na hora', async () => {
+  const m = recusaNaEspera({ comTrava: false });
+  await m.h.aplicarRecusaAutomatica();
+  assert.deepEqual(m.enviados, ['u1', 'u2', 'u3']);
+  assert.equal(m.timers.length, 0, 'sem trava não há o que esperar, e o relógio foi armado à toa');
+});
+
+test('R21-2-05: o teto é de 2 a 5 minutos e está escrito uma vez só (a constante)', () => {
+  const ms = constante('RECUSA_AUTOMATICA_ESPERA_MAX_MS');
+  assert.ok(Number.isFinite(ms) && ms >= 2 * 60000 && ms <= 5 * 60000, `teto de ${ms} ms`);
+  assert.equal((APP_SEM.match(/RECUSA_AUTOMATICA_ESPERA_MAX_MS/g) || []).length, 3, 'a constante deveria ser declarada, armada no relógio e citada no diário uma vez cada');
+});
+
+// ── quem cancela: a troca de conta e o "Sair" chamam o cancelamento ANTES de a fila ser refeita ──
+test('R21-2-02: a troca de conta cancela as recusas que esperam ANTES de refazer a fila de quem entrou', () => {
+  const log = [];
+  const deps = {
+    AppState: { stats: {}, preferences: {}, filters: { managedAreaId: '9001' }, pendingAction: null, queue: [{ venueID: 'v1' }], fetching: false, seenCategories: [] },
+    safeLS: safeLSSobre(aparelho().localStorage), filaAtravessouSessao: true, saveFilters() {}, Treino: { ativo: false },
+    soltarOLoteDeLidosDaContaAnterior: () => log.push('solta o lote de lidos'),
+    cancelarAsRecusasQueEsperamATrava: () => log.push('cancela as recusas'),
+    resetQueue: () => log.push('fila nova'), startFetching: () => log.push('busca'),
+  };
+  const h = montar(['esquecerOutraConta'], deps);
+  h.esquecerOutraConta('222');
+  const i = log.indexOf('cancela as recusas'), j = log.indexOf('fila nova');
+  assert.ok(i >= 0, 'DEFEITO: a troca de conta não cancelou a recusa que esperava a trava');
+  assert.ok(j > i, 'a fila de quem entrou foi refeita ANTES de os alvos serem soltos: a busca os deixava de fora');
+});
+
+test('R21-2-02: o "Sair" cancela as recusas que esperam', async () => {
+  const log = [];
+  const AppState = { authenticated: true, profile: { id: 1 }, stats: { read: 0, rejected: 0, skipped: 0 }, filters: {}, preferences: {}, devMode: {}, history: {},
+    conquistas: {}, autores: {}, pendingAction: null, inFlightActions: 0, queue: [], seenCategories: [], countries: [], statesByCountry: {} };
+  const deps = {
+    AppState, API: { sessionToken: 'tok', getSession: () => 'tok', setSession() {}, soltarSessao() {}, destroySession: async () => ({ success: true }),
+      cancelarPareamento: async () => {}, setRegion() {}, setCountry() {}, esquecerLugar() {}, chamadas: [] },
+    safeLS: safeLSSobre(aparelho().localStorage), epocaDaSessao: 1, pareamentosEmitidos: new Set(), tokenTiradoPorOutraAba: null, window: {},
+    callWithRetry: (fn) => fn(), preferenciasDeFabrica: () => ({}), filtrosDeFabrica: () => ({}),
+    cancelarAsRecusasQueEsperamATrava: () => log.push('cancela as recusas'), resetQueue: () => log.push('fila nova'),
+    pedidosEmAndamento: new Set(), pousosDaPagina: new Set(), alvosDoLoteDeLidosNoAr: new Map(), decisoesPorContaNoAr: new Map(),
+    pedidosDoLoteSemEnviar: new Set(), escritasEsperandoAVez: new Set(), idasSemRespostaGuardadas: new Map(), fotosQueSairamDoMapa: new Set(),
+  };
+  const h = montar(['handleLogout', 'sessaoDestaAbaEhAGuardada'], deps);
+  await h.handleLogout();
+  assert.ok(log.includes('cancela as recusas'), 'DEFEITO: o "Sair" não cancelou a recusa que esperava a trava');
+  assert.ok(log.indexOf('cancela as recusas') < log.indexOf('fila nova'), 'o "Sair" refez a fila antes de cancelar a espera');
+});

@@ -99,13 +99,25 @@ function travaSegurada() {
     if (prox) prox();
   };
   const trava = {
-    request(nome, cb) {
+    // Como o navegador: `request(nome, [opcoes,] cb)`, e o `signal` tira o pedido da FILA (rejeita com AbortError)
+    // enquanto ele espera — depois de concedida, abortar não faz nada (lote 25, R21-2-02/05).
+    request(nome, opcoes, cb) {
+      if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+      const signal = opcoes && opcoes.signal;
       return new Promise((resolve, reject) => {
         const tenta = () => {
           tomada = true;
           Promise.resolve().then(() => cb({ name: nome })).then((v) => { liberar(); resolve(v); }, (e) => { liberar(); reject(e); });
         };
-        if (!tomada) tenta(); else filas.push(tenta);
+        if (signal && signal.aborted) { reject(new DOMException('The operation was aborted.', 'AbortError')); return; }
+        if (!tomada) { tenta(); return; }
+        filas.push(tenta);
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            const i = filas.indexOf(tenta);
+            if (i >= 0) { filas.splice(i, 1); reject(new DOMException('The operation was aborted.', 'AbortError')); }
+          }, { once: true });
+        }
       });
     },
   };
@@ -126,7 +138,7 @@ function recusaComTrava({ alvos = [P(1), P(2), P(3)], comTrava = true } = {}) {
   };
   const deps = {
     AppState, Treino: { ativo: false }, navigator: { locks: t ? t.trava : undefined, onLine: true },
-    RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica', epocaDaSessao: 1,
+    RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica', RECUSA_AUTOMATICA_ESPERA_MAX_MS: 180000, recusasEsperandoATrava: new Set(), epocaDaSessao: 1,
     podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (c) => c === 77,
     pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), rejeicoesDeLoteNoAr: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
     decididoNaOutraAbaDepoisDe: () => false,

@@ -13209,6 +13209,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // As do lightbox também: a janela delas correria invisível e sairia com o
     // token de quem entrasse depois (ver a função).
     cancelarPendenciasDoLightbox();
+    // A recusa automática que ESPERA a trava entre abas sai da fila dela (R21-2-02): ficava presa até a outra
+    // página soltar, e o `recusaAutomaticaRodando` segurava a passada de quem entrasse depois. Os alvos já
+    // eram de quem saiu (o `mandar` confere a geração), e o conjunto "em andamento" é esvaziado mais abaixo.
+    if (typeof cancelarAsRecusasQueEsperamATrava === 'function') cancelarAsRecusasQueEsperamATrava();
     // O "Marcar todos" que ficou no ar é de quem saiu: ele não trava quem
     // entrar (ver `loteDeLidosEmVoo`). Nem a aprovação no ar, desta sessão ou
     // de uma que caiu antes (ver `aprovacoesDaQueda`).
@@ -20830,6 +20834,45 @@ let recusaAutomaticaPedidaDeNovo = false;
 // O nome da trava ENTRE ABAS da recusa automática (R19-2-02, ver o envio em `aplicarRecusaAutomatica`).
 const RECUSA_AUTOMATICA_TRAVA = 'wp-recusa-automatica';
 
+// A espera pela trava tem TETO (R21-2-05). Quem a segura é outra página mandando o lote DELA, um pedido
+// por vez (~0,4 s cada, MEDIDO), e a trava só solta quando ela termina — ou morre. Uma página que
+// pendura (a rede sem resposta, a aba congelada com o lote no meio) deixava os alvos desta fora da fila,
+// "em andamento" e invisíveis, sem fim: "Tudo limpo!" com pedidos pendentes. 3 minutos cobrem um lote
+// legítimo de 450 pedidos (quase uma página inteira do Waze, 500, TODA de autores marcados — o caso real é
+// dezenas) e custam, no pior caso, 3 minutos de pedidos escondidos; 2 cortariam um lote grande em rede
+// lenta, e 5 deixariam a pessoa olhando uma fila vazia por tempo demais. Passado o teto a recusa DESISTE sem
+// enviar: os alvos voltam como card pelo mesmo caminho do `aindaVale` que diz não (ver `enviarLote`), e
+// quem os rejeitar rejeita — a recusa automática é conveniência, e o aviso de pouso da outra aba
+// (`decididoNaOutraAbaDepoisDe`) e a fila de saída seguem deduplicando. O `AbortSignal.timeout` não existe
+// no iOS < 16: o teto é um `AbortController` com `setTimeout`, como o resto do app.
+const RECUSA_AUTOMATICA_ESPERA_MAX_MS = 3 * 60 * 1000;
+
+// As recusas automáticas que ESPERAM a trava (R21-2-02): cada uma é a `naSessao` dela, com os alvos e o
+// `AbortController` que a tira da fila da trava. Os alvos saem da fila e ficam "em andamento" ANTES da espera
+// (R20-2-01), e a troca de conta no meio da espera os deixava assim até a trava soltar: a busca de quem
+// entrou os deixava de fora, e se eram os únicos pendentes dela a tela dizia "Tudo limpo!" (MEDIDO) — o ↻
+// não adiantava. O "Sair" e a troca de conta CANCELAM essas esperas (`cancelarAsRecusasQueEsperamATrava`).
+// Quem já pegou a trava não está aqui: o lote em curso segue as regras de sempre (época, geração, `aindaVale`).
+const recusasEsperandoATrava = new Set();
+
+// A troca de conta (`esquecerOutraConta`) e o "Sair" (`handleLogout`): os alvos eram da conta que saiu, e a que
+// entrou os vê pela busca dela SEM esperar a trava — e sem que nada seja decidido no nome dela. Solta a marca
+// de "em andamento" e o "já passou pela fila" (a busca de quem entrou os traz, se forem dela), e tira a
+// espera da fila da trava: sem isso a recusa ficava presa até a outra página soltar (e o `recusaAutomaticaRodando`
+// segurava a passada seguinte). Não chama o `devolverPedidoRecusado`: com a fila refeita ele manda buscar na
+// hora (`startFetching`), e nos caminhos de login a busca de quem entrou já vem logo depois — antes do
+// `_profilePromise` dela, que "Minha área" espera. A busca que vem depois é sempre a de quem entrou: o login
+// refaz a fila antes de conhecer a conta, e a renovação da queda a refaz no fim do `esquecerOutraConta`.
+function cancelarAsRecusasQueEsperamATrava() {
+    for (const naSessao of [...recusasEsperandoATrava]) {
+        recusasEsperandoATrava.delete(naSessao);
+        naSessao.cancelada = true;
+        marcarEmAndamento(naSessao.alvos, false);
+        for (const p of naSessao.alvos) pedidosQueEntraramNaFila.delete(chaveDoPedido(p));
+        try { if (naSessao.espera) naSessao.espera.abort(); } catch (e) { /* já abortada */ }
+    }
+}
+
 // Chamado depois de a fila crescer. Tira os pedidos dos autores marcados e
 // rejeita na hora, um a um, com o aviso contando quantos faltam.
 async function aplicarRecusaAutomatica() {
@@ -20937,11 +20980,18 @@ async function aplicarRecusaAutomatica() {
     // na espera os devolvia à fila da tela de entrada, o login de OUTRA conta os rejeitava com a
     // sessão dela, e o ↻ os trazia de volta como card e eram rejeitados 2× (R20-2-01 = R20-1-01,
     // MEDIDO). Tudo antes do envio é síncrono, e isso inclui estas capturas.
+    //
+    // `alvos`, `cancelada`, `desistiu` e `espera` são da ESPERA pela trava (R21-2-02, R21-2-05): quem a cancela
+    // (a troca de conta, o "Sair") precisa dos alvos pra soltá-los, e o teto marca que desistiu.
     const naSessao = {
         epoca: epocaDaSessao,
         epocaFila: AppState.fetchEpoch,
         geracao: AppState.geracaoDoSair,
         quem: typeof quemDecideAgora === 'function' ? quemDecideAgora() : null,
+        alvos,
+        cancelada: false,
+        desistiu: false,
+        espera: null,
     };
     marcarEmAndamento(alvos, true, naSessao.geracao);
     // UMA aba por vez no envio (R19-2-02): com duas abas abrindo juntas (a janela restaurada, o app
@@ -20982,7 +21032,8 @@ async function aplicarRecusaAutomatica() {
             // auditoria de 2026-10-07, R10-2-01). O portão e a conta também. E o
             // que a OUTRA aba decidiu com a recusa no ar (R12-2-01): o pedido que a
             // pessoa marcou como lido lá saía daqui rejeitado, segundos depois.
-            aindaVale: (p) => podeRecusarAutomaticoAqui() && contaConfirmada() && autoLigado(p.creatorId) && !decididoNaOutraAba(p),
+            // E o teto da espera pela trava (R21-2-05): desistiu, nenhum alvo vai ao Waze — todos voltam como card.
+            aindaVale: (p) => naSessao.desistiu !== true && podeRecusarAutomaticoAqui() && contaConfirmada() && autoLigado(p.creatorId) && !decididoNaOutraAba(p),
             // Esse está DECIDIDO: não volta pra fila como card (seria decidido de
             // novo aqui) — sai, e o "Restam" desce, como no aviso de lá.
             decididoNaOutraAba,
@@ -20998,9 +21049,33 @@ async function aplicarRecusaAutomatica() {
             // Roda `mandar` com a trava na mão; quem chega com ela ocupada ESPERA (não é polling: a espera
             // acaba quando a outra termina, e a página que morre solta a trava — é do navegador). Se o
             // navegador nem chegar a pedi-la, o envio roda mesmo assim: a recusa não morre por causa dela.
+            //
+            // A espera tem TETO e tem SAÍDA (R21-2-05, R21-2-02): o `signal` tira o pedido da fila da trava. O teto
+            // marca `desistiu` e o `mandar` roda SEM enviar (o `aindaVale` diz não pra todos: os alvos voltam como
+            // card); a troca de conta e o "Sair" marcam `cancelada` e a espera simplesmente acaba — os alvos já
+            // foram soltos (`cancelarAsRecusasQueEsperamATrava`). A rejeição que o abort causa não é "o navegador
+            // nem chegou a pedir a trava": não roda o envio de sempre.
             let comecou = false;
-            await locks.request(RECUSA_AUTOMATICA_TRAVA, () => { comecou = true; return mandar(); })
-                .catch((e) => { if (!comecou) return mandar(); throw e; });
+            const espera = typeof AbortController === 'function' ? new AbortController() : null;
+            naSessao.espera = espera;
+            recusasEsperandoATrava.add(naSessao);
+            const teto = espera ? setTimeout(() => { naSessao.desistiu = true; espera.abort(); }, RECUSA_AUTOMATICA_ESPERA_MAX_MS) : null;
+            try {
+                await locks.request(RECUSA_AUTOMATICA_TRAVA, espera ? { signal: espera.signal } : {}, () => {
+                    comecou = true;
+                    clearTimeout(teto);
+                    recusasEsperandoATrava.delete(naSessao);
+                    return mandar();
+                }).catch((e) => {
+                    if (comecou) throw e;
+                    if (naSessao.cancelada === true) return;
+                    if (naSessao.desistiu === true) dfato('recusa.desistiuDaTrava', { alvos: alvos.length, segundos: Math.round(RECUSA_AUTOMATICA_ESPERA_MAX_MS / 1000) });
+                    return mandar();
+                });
+            } finally {
+                clearTimeout(teto);
+                recusasEsperandoATrava.delete(naSessao);
+            }
         } else await mandar();
     } finally {
         recusaAutomaticaRodando = false;
@@ -23036,6 +23111,10 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     // que ele marca continua pendente para quem entrou. Os alvos dele saem do "em andamento"
     // ANTES de a fila de quem entrou ser refeita (R18-1-02).
     soltarOLoteDeLidosDaContaAnterior();
+    // E a recusa automática dela que ESPERA a trava entre abas (R21-2-02): os alvos, "em andamento" e fora da
+    // fila, ficavam assim até a trava soltar — e a busca de quem entrou os deixava de fora ("Tudo limpo!" com
+    // os pedidos dela pendentes). Soltos ANTES de a fila de quem entrou ser refeita.
+    if (typeof cancelarAsRecusasQueEsperamATrava === 'function') cancelarAsRecusasQueEsperamATrava();
     // E as marcas de "no ar" das escritas da foto dela (aprovar, excluir, renomear): a pílula do nome, o
     // "Aprovar" e a lixeira de quem entrou não esperam a resposta da anterior (R20-3-02).
     soltarAsEscritasDeFotoDaSessaoQueAcabou();
