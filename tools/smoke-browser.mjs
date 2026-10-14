@@ -8400,6 +8400,147 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     'FAB: CONTROLE — em nenhum aparelho o toast cobriu um botão do card; a medida do D3 não mede nada');
 }
 
+// ── O FAB de baixo × a PILHA DE AVISOS, e a barra ✕ ↑ ✓ no texto grande (R21-4-06, R21-4-04, R21-4-03) ──
+//
+// A rodada 21 mediu três coisas que só o motor mostra (o hit-test, a caixa renderizada, o texto do sistema):
+//  · o FAB de baixo reservava um número FIXO (96 px) pros avisos; com 2 toasts — ou um de duas linhas com o
+//    texto maior — o toast (z-70, acima do FAB) engolia o toque no botão (MEDIDO, 360×740: `elementFromPoint` no
+//    centro do FAB devolvia o TOAST). Agora ele reserva a altura MEDIDA da pilha;
+//  · a barra ✕ ↑ ✓ saía da janela (e do cartão) no Galaxy Fold com o texto a 2×, e o relatório dizia `alertas: []`:
+//    a sentinela `barraDeAcoesForaDaTela` olha o que a geometria já mede;
+//  · o texto do sistema aumentado não deixava rastro no arquivo: `computado.escala` guarda a raiz e a prova da
+//    caixa renderizada de 1rem × 16px.
+// Cada linha tem o CONTROLE que reprova se a medida estiver cega: a reserva fixa de antes (emulada) cobre o FAB, o
+// aparelho sem o defeito não alerta, e o gesto no card cala a sentinela.
+{
+  const LOCAL = { venueID: 'v201', updateRequestID: 'u201', name: 'Local 201', categories: ['PARK'], address: 'Rua 201',
+    updateType: 'Novo local', updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'ed201', creatorId: 301,
+    imageUrls: [], imageUrl: null, mapa: { centro: [-22.89, -43.2], entradas: [] }, dateAdded: '2026-09-20T10:00:00Z', lat: -22.89, lon: -43.2 };
+  const montarTela = async (vp, escala) => {
+    const ctx = await browser.newContext({ viewport: vp, locale: 'pt-BR', hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(e.message));
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForTimeout(600);
+    await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
+    await assentar(page, 200);
+    await page.evaluate(([e, local]) => {
+      if (e !== 1) { const f = new CSSStyleSheet(); f.replaceSync(`html{font-size:${16 * e}px}`); document.adoptedStyleSheets = [...document.adoptedStyleSheets, f]; }
+      AppState.devMode = { unlocked: true, active: true };
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+      AppState.queue = [local];
+      AppState.currentPlace = AppState.queue[0];
+      AppState.serverTotal = 1; AppState.hasMore = false;
+      showMainScreen(); updateStats(); showLoading(false);
+      document.getElementById('noMoreCards').classList.add('hidden');
+      showCurrentPlace();
+      atualizarFabDev();
+    }, [escala, LOCAL]);
+    await assentar(page, 400);
+    await doisQuadros(page);
+    return { ctx, page, erros };
+  };
+
+  // ── 1. O FAB de baixo acompanha a pilha de avisos (R21-4-06) ───────────
+  const AVISO_CURTO = 'Atualizando…';
+  const AVISO_LONGO = 'Sua sessão continua ativa: renovei os cookies do Waze em segundo plano e não há nada a fazer agora.';
+  const CASOS_AVISO = [['1 toast curto', [AVISO_CURTO]], ['1 toast de 2 linhas', [AVISO_LONGO]],
+    ['2 toasts', [AVISO_LONGO, AVISO_CURTO]], ['3 toasts', [AVISO_LONGO, AVISO_CURTO, 'Pronto']]];
+  const cobriu = { fixo: [], medido: [] };
+  for (const escala of [1, 1.5]) {
+    const { ctx, page, erros } = await montarTela({ width: 360, height: 740 }, escala);
+    const medir = (textos) => page.evaluate(async (txs) => {
+      document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove());
+      for (const tx of txs) showToast(tx, 'info', 60000);
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(ok, 350))));
+      const fab = document.getElementById('devFabBtn').getBoundingClientRect();
+      const toasts = [...document.querySelectorAll('#toastContainer > *')].map((e) => e.getBoundingClientRect());
+      const cobre = toasts.some((b) => !(b.right <= fab.left || b.left >= fab.right || b.bottom <= fab.top || b.top >= fab.bottom));
+      const el = document.elementFromPoint(fab.left + fab.width / 2, fab.top + fab.height / 2);
+      return { canto: document.getElementById('devFab').dataset.canto, fabY: [Math.round(fab.top), Math.round(fab.bottom)],
+               toastsY: toasts.map((b) => [Math.round(b.top), Math.round(b.bottom)]), cobre,
+               recebe: el ? (el.closest('#devFab') ? 'FAB' : el.closest('#toastContainer') ? 'TOAST' : el.tagName) : null };
+    }, textos);
+    // PRÉ-CONDIÇÃO: sem aviso nenhum o FAB nasce num canto de BAIXO (senão a linha mede o canto de cima e passa vazia).
+    const base = await medir([]);
+    checa(/^baixo/.test(base.canto), `R21-4-06/texto ×${escala}: PRÉ-CONDIÇÃO — o FAB não nasceu num canto de baixo (a medida seria vazia)`, JSON.stringify(base));
+    for (const [nome, textos] of CASOS_AVISO) {
+      const r = await medir(textos);
+      checa(r.toastsY.length === textos.length, `R21-4-06/texto ×${escala}: ${nome} — os avisos não chegaram à tela`, JSON.stringify(r));
+      checa(r.recebe === 'FAB' && !r.cobre,
+        `R21-4-06/texto ×${escala}: ${nome} — o toast cobre o FAB (o dedo cai no aviso; a reserva de baixo não acompanha a pilha)`, JSON.stringify(r));
+      cobriu.medido.push([escala, nome, r.cobre || r.recebe !== 'FAB']);
+    }
+    // CONTROLE: com a reserva FIXA de antes (emulada: a função que o `devFabCoords` consulta devolve o piso) a mesma
+    // tela COBRE o FAB em algum caso — a medida enxerga o defeito, e a reserva medida é o que o tira.
+    await page.evaluate(() => { window.__reservaMedida = window.devFabReservaDeBaixo; window.devFabReservaDeBaixo = () => DEV_FAB_RESERVA_TOAST; });
+    for (const [nome, textos] of CASOS_AVISO) {
+      await page.evaluate(() => posicionarFabDev());
+      const r = await medir(textos);
+      await page.evaluate(() => posicionarFabDev());
+      const r2 = await page.evaluate(() => {
+        const fab = document.getElementById('devFabBtn').getBoundingClientRect();
+        const el = document.elementFromPoint(fab.left + fab.width / 2, fab.top + fab.height / 2);
+        return el && el.closest('#toastContainer') ? 'TOAST' : 'FAB';
+      });
+      cobriu.fixo.push([escala, nome, r.cobre || r.recebe !== 'FAB' || r2 === 'TOAST']);
+    }
+    await page.evaluate(() => { window.devFabReservaDeBaixo = window.__reservaMedida; });
+    checa(erros.length === 0, `R21-4-06/texto ×${escala}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  checa(cobriu.fixo.some(([, , c]) => c),
+    'R21-4-06: CONTROLE — com a reserva fixa de antes nenhum caso cobriu o FAB; a medida não enxerga o defeito', JSON.stringify(cobriu.fixo));
+  checa(cobriu.medido.every(([, , c]) => !c), 'R21-4-06: com a reserva medida algum caso ainda cobre o FAB', JSON.stringify(cobriu.medido));
+
+  // ── 2. A barra ✕ ↑ ✓ fora da janela alerta; a sã, não (R21-4-04); e a escala vem no arquivo (R21-4-03) ──
+  const CASOS_BARRA = [
+    ['Galaxy Fold 280×653 · texto ×2', { width: 280, height: 653 }, 2, true],
+    ['Galaxy Fold 280×653 · texto ×1,3', { width: 280, height: 653 }, 1.3, false],
+    ['360×740 · texto ×1,5', { width: 360, height: 740 }, 1.5, false],
+    ['iPhone SE 375×667 · texto ×1,5', { width: 375, height: 667 }, 1.5, false],
+    ['390×844 · texto ×1', { width: 390, height: 844 }, 1, false],
+  ];
+  const nBarra = { alertou: 0, calou: 0 };
+  for (const [nome, vp, escala, esperaAlerta] of CASOS_BARRA) {
+    const { ctx, page, erros } = await montarTela(vp, escala);
+    const r = await page.evaluate(() => {
+      const comp = diagComputado();
+      const alertas = diagSentinelas(comp).filter((a) => a.chave === 'barraDeAcoesForaDaTela');
+      const card = cardDaFrente();
+      const c = card.getBoundingClientRect();
+      const fim = Math.max(...['.card-btn-reject', '.card-btn-skip', '.card-btn-read'].map((s) => card.querySelector(s).getBoundingClientRect().bottom));
+      // O mesmo cenário com um GESTO no card (o `swipe.js` diz que há um): a sentinela cala. Sinal positivo, nunca o `transform`.
+      const orig = window.gestoNoCard;
+      window.gestoNoCard = () => true;
+      const sobGesto = diagSentinelas(diagComputado()).filter((a) => a.chave === 'barraDeAcoesForaDaTela');
+      window.gestoNoCard = orig;
+      return { alertas, sobGestoAlertas: sobGesto.length, innerH: innerHeight, cartaoAte: Math.round(c.bottom), botoesAte: Math.round(fim),
+               htmlStyle: document.documentElement.getAttribute('style') || '', escala: comp.escala };
+    });
+    // O defeito medido NO DOM, sem a sentinela: é o que diz se o cenário exercita o que promete.
+    const cortada = r.botoesAte > r.innerH + 2 || r.botoesAte > r.cartaoAte + 2;
+    checa(cortada === esperaAlerta, `R21-4-04/${nome}: PRÉ-CONDIÇÃO — a barra ${cortada ? 'está' : 'não está'} cortada no DOM, e o cenário esperava ${esperaAlerta ? 'o defeito' : 'a tela sã'}`, JSON.stringify(r));
+    checa((r.alertas.length > 0) === esperaAlerta,
+      `R21-4-04/${nome}: ${esperaAlerta ? 'a barra fora da janela não alertou' : 'a tela sã alertou (falso positivo)'}`, JSON.stringify(r.alertas));
+    if (esperaAlerta) {
+      checa(r.alertas[0] && r.alertas[0].cortadaPor && r.alertas[0].cortadaPor.length > 0 && r.alertas[0].botoesAte === r.botoesAte,
+        `R21-4-04/${nome}: o alerta não diz até onde a barra vai nem o que a corta`, JSON.stringify(r.alertas[0]));
+      checa(r.sobGestoAlertas === 0, `R21-4-04/${nome}: CONTROLE — com um gesto no card a sentinela seguiu alertando (os retângulos são os do card deslocado)`, String(r.sobGestoAlertas));
+      nBarra.alertou++;
+    } else nBarra.calou++;
+    // R21-4-03: a escala chega ao `computado`, mesmo sem rastro no DOM (o `style` da raiz não tem o `font-size`).
+    checa(!/font-size/.test(r.htmlStyle), `R21-4-03/${nome}: PRÉ-CONDIÇÃO — a escala foi escrita no DOM (o cenário deixava de ser "só na CSSOM")`, r.htmlStyle);
+    checa(r.escala && Math.abs(r.escala.raizPx - 16 * escala) < 0.1 && Math.abs(r.escala.caixaRem - 16 * escala) <= 0.5 && Math.abs(r.escala.caixaPx - 16) <= 0.1,
+      `R21-4-03/${nome}: o relatório não traz a escala do texto (raiz ${16 * escala} px, caixa de 1rem ${16 * escala}, de 16px 16)`, JSON.stringify(r.escala));
+    checa(erros.length === 0, `R21-4-04/${nome}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  checa(nBarra.alertou >= 1 && nBarra.calou >= 4, 'R21-4-04: CONTROLE — o conjunto de aparelhos não teve os dois lados (alertar e calar)', JSON.stringify(nBarra));
+}
+
 // ── O teclado virtual não pode achatar os modais sem teclado ──────────────
 //
 // Veio do PWA instalado de um editor L2+AM: `--kb-inset` cravado em 388px com
@@ -16120,4 +16261,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + a foto ampliada e a sessão que acabou (lote 25): a pílula do nome do MESMO local livre depois do "Sair" com a exclusão de quem saiu no ar — e a aprovação de quem entrou ESPERANDO a resposta dela (a ordem no Waze), com o CONTROLE da pílula travada na mesma sessão —; a queda SEM renovação seguida de login por cookies com o "Aprovar" vivo; o arrasto com o mouse na tarja não fechando a foto (com os CONTROLES do clique parado, do tremor e do arrasto sobre a foto); tirar o espaço do nome habilitando o ✓ e escrevendo o aparado (com o campo intocado, o espaço a mais e o Desfazer devolvendo o nome CRU); e as margens laterais de segurança (cada controle onde sempre esteve com o recorte zerado, nos dois motores, e na borda da área segura com 59 px, no Chromium, com a dica e a legenda guardando o vão do botão do canto e o CONTROLE do override tirado)`
   + `, + o texto do sistema maior além da barra (lote 24): os 7 diálogos e as 3 abas dos Filtros a 1,3×/1,5×/1,8× em 360/375/393 px e no Galaxy Fold, em pt/en/es/fr (nada fora do cartão, nenhuma palavra curta partida, empilhados na ordem do HTML e na mesma coluna), a 1× nada empilha; o placar sem rótulo sobreposto sem nunca tirar a barra; a pílula da foto ampliada sem cobrir o ✕; o ↑ com 44 px; o card novo já apertado na mesma tarefa — cada medida com o seu CONTROLE`
   + `, + a tecla z do Desfazer no teclado de OUTRO alfabeto (o keydown hebraico, russo e Ctrl+hebraico despachado com a janela do Desfazer aberta, com o z latino despachado como CONTROLE do instrumento e o w do AZERTY e a tecla morta como CONTROLE do outro lado)`
-  + `, + a troca de idioma com a tela PREENCHIDA (a trocada pelo seletor igual à aberta já em francês, logo depois da troca e com o Histórico reaberto: foco no autor, "de N na região", cota do Desfazer, linha do offline, ordem por casa, autores e conquistas — com o CONTROLE do texto em português escrito à mão acusado pelo comparador)`);
+  + `, + a troca de idioma com a tela PREENCHIDA (a trocada pelo seletor igual à aberta já em francês, logo depois da troca e com o Histórico reaberto: foco no autor, "de N na região", cota do Desfazer, linha do offline, ordem por casa, autores e conquistas — com o CONTROLE do texto em português escrito à mão acusado pelo comparador)`
+  + `, + o FAB de baixo × a pilha de avisos (360×740 a 1× e 1,5×: 1 toast, 1 de 2 linhas, 2 e 3 toasts nunca recebem o toque do FAB — a reserva é a altura MEDIDA da pilha —, com o CONTROLE da reserva fixa de antes cobrindo o FAB) e a barra ✕ ↑ ✓ fora da janela (o Fold a 2× alerta barraDeAcoesForaDaTela e cala com um gesto no card; 4 aparelhos sãos não alertam), com a escala do texto no computado mesmo escrita só na CSSOM`);

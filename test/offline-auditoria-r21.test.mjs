@@ -1271,3 +1271,26 @@ test('R21-4-01/09: a base do diagnóstico que não respondeu entra na lista das 
   assert.match(s, /ATENÇÃO: 1 leitura\(s\) LOCAL\(IS\) do navegador sem resposta no orçamento — o navegador não respondeu \(não é a rede\): .*base do diagnóstico/, s);
   assert.doesNotMatch(s, /rede pendurada na hora do relatório/, 'a base do diagnóstico foi dita como REDE pendurada');
 });
+
+// ═══ O sobrevivente da auditoria: a época conferida DEPOIS da gravação mínima do cache ═══════════════════
+test('R21 (sobrevivente): o "Sair" que chega durante a gravação MÍNIMA do cache faz o download devolver `false` — nunca `cache`/`cota`/`mudo` de uma varredura que já não existe', async () => {
+  // O `put` do tile rejeita por REDE (a gravação mínima decide se foi o cache); a mínima FICA no ar, o "Sair" de outra aba
+  // sobe a época, e só então ela rejeita (o cache "não grava"). O chamador (`trabalhar`) confere a época de novo, mas o valor
+  // devolvido é interface: dizer `cache` (ou `cota`) de uma varredura esquecida seria afirmar uma causa que ninguém mais lê.
+  const x = varredura({ itens: [], cache: 'sonda-mudo' });
+  let falharSonda;
+  x.cacheDeMentira.put = (u) => {
+    if (/sonda\.invalid/.test(u)) return new Promise((_, no) => { falharSonda = () => no(erroDe('InvalidStateError')); });
+    return Promise.reject(new TypeError('network error'));
+  };
+  const p = x.app.baixar(TILE('esquecido'), true, {});
+  await tique(15);
+  assert.equal(typeof falharSonda, 'function', 'PRÉ-CONDIÇÃO: a gravação mínima não ficou no ar — o cenário não exercita o caminho');
+  x.app.esquecer();                 // o "Sair" de outra aba (a época sobe)
+  falharSonda();                    // a gravação mínima rejeita: o cache "não grava"
+  assert.equal(await comSentinela(p), false, 'DEFEITO: o download de uma varredura ESQUECIDA devolveu uma causa de cache (a época não foi conferida depois da gravação mínima)');
+  // CONTROLE: sem o "Sair", a mesma gravação mínima que rejeita diz `cache`.
+  const y = varredura({ itens: [], cache: 'sonda-mudo' });
+  y.cacheDeMentira.put = (u) => (/sonda\.invalid/.test(u) ? Promise.reject(erroDe('InvalidStateError')) : Promise.reject(new TypeError('network error')));
+  assert.equal(await comSentinela(y.app.baixar(TILE('vivo'), true, {})), 'cache', 'CONTROLE: a gravação mínima que rejeita deixou de dizer `cache`');
+});
