@@ -328,7 +328,7 @@ function montarAbas({ tratados = 9, limiar = 10 } = {}) {
   const els = new Map();
   const classes = () => { const s = new Set(); return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c),
     toggle: (c, f) => { const ter = f === undefined ? !s.has(c) : !!f; if (ter) s.add(c); else s.delete(c); return ter; } }; };
-  const el = (id) => { if (!els.has(id)) els.set(id, { id, classList: classes(), setAttribute() {}, tabIndex: 0, textContent: '', disabled: false, checked: true }); return els.get(id); };
+  const el = (id) => { if (!els.has(id)) els.set(id, { id, classList: classes(), setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; }, parentElement: { scrollTop: 0 }, tabIndex: 0, textContent: '', disabled: false, checked: true }); return els.get(id); };
   const placar = { n: tratados };
   const deps = {
     document: { getElementById: el },
