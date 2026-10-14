@@ -1578,6 +1578,15 @@ const contarVertices = (geom) => {
 // anel grande estoura a pilha (medido: com 200 mil vértices o `perfil` caía em
 // 500 — auditoria de 2026-09-26). A recursão só desce no aninhamento (≤ 4
 // níveis no GeoJSON), não nos vértices. `null` sem vértice nenhum.
+//
+// A caixa sai LIMITADA a lon ±180 e lat ±90 (R18-6-04): é o que a busca por área
+// aceita (`caixaDaBusca`) e o que o globo tem. Um vértice além disso — polígono
+// que cruza a linha de data desenhado com longitude contínua (170 → 190), ou erro
+// de ponto flutuante em 180,0000001 — deixaria o "Minha área" em 400 permanente,
+// sem volta. Limitado, a busca funciona; num polígono contínuo a parte além de
+// 180 fica de fora da caixa, que é o menor dos males (a área que cruza a linha de
+// data na representação NORMAL, de -180 a 180, é a questão A4, à parte). Área
+// dentro dos limites sai exatamente como sempre saiu.
 const caixaDaGeometria = (geom) => {
   let lonMin = Infinity, latMin = Infinity, lonMax = -Infinity, latMax = -Infinity;
   const desce = (c) => {
@@ -1593,7 +1602,10 @@ const caixaDaGeometria = (geom) => {
     for (const item of c) desce(item);
   };
   desce(geom && geom.coordinates);
-  return lonMin <= lonMax ? [lonMin, latMin, lonMax, latMax] : null;
+  if (!(lonMin <= lonMax)) return null;
+  const lon = (v) => Math.max(-180, Math.min(180, v));
+  const lat = (v) => Math.max(-90, Math.min(90, v));
+  return [lon(lonMin), lat(latMin), lon(lonMax), lat(latMax)];
 };
 
 // Mesmo desce-recursivo do buildPlacesFromSearch, mas no escopo do módulo pra
@@ -1947,6 +1959,29 @@ function categoriasDaBusca(bruto) {
   return bruto.length > 0 ? bruto : null;
 }
 
+// `types`: lista de NOMES dos 7 tipos do WME (as chaves do `PUR_TIPOS`; é o que o
+// app manda, `TYPES_ALL`). Lista vazia e ausente valem "todos", como sempre. O que
+// VEIO e não presta é 400 — antes o filtro lia `[1, 5]` (os números do fio do
+// Waze), `['new_place']` e `['FOO']` como "nenhum tipo serve": 200 com zero cards,
+// que a tela lê como "Tudo limpo!" (R18-6-03). Texto solto também é 400: não é lista.
+function tiposDaBusca(bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  const ok = Array.isArray(bruto)
+    && bruto.every((t) => typeof t === 'string' && Object.hasOwn(PUR_TIPOS, t));
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto.length > 0 ? bruto : null;
+}
+
+// `residential` e `unreadOnly`: booleano ESTRITO, como o `value` do `guardar-pedido`.
+// `!!'false'` é `true` — o OPOSTO de "excluir os residenciais" —, e `!!0` é `false`.
+// AUSENTE (`undefined`/`null`) é o `padrao` de sempre: sem filtro de residencial
+// (o app padrão não manda a chave: mandar `true` anonimiza a fila) e só não lidos.
+function booleanoDaBusca(bruto, padrao) {
+  if (bruto === undefined || bruto === null) return padrao;
+  if (typeof bruto !== 'boolean') apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto;
+}
+
 async function handleBuscarPlaces(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -1966,10 +2001,10 @@ async function handleBuscarPlaces(data, { sessions }) {
   const stateId = idOpcionalDaBusca(data.stateId);
   const managedAreaId = idOpcionalDaBusca(data.managedAreaId);
   const bbox = caixaDaBusca(data.bbox);
-  const filterTypes = Array.isArray(data.types) && data.types.length > 0 ? data.types : null;
+  const filterTypes = tiposDaBusca(data.types);
   const filterCategories = categoriasDaBusca(data.categories);
-  const residential = data.residential !== undefined ? !!data.residential : null;
-  const unreadOnly = data.unreadOnly !== undefined ? !!data.unreadOnly : true;
+  const residential = booleanoDaBusca(data.residential, null);
+  const unreadOnly = booleanoDaBusca(data.unreadOnly, true);
   const orderBy = ORDENS_DA_BUSCA.has(data.orderBy) ? data.orderBy : 'SORTING_UPDATE_TIME_DESC';
 
   const payload = {
@@ -2763,12 +2798,26 @@ function listaQueVale(bruto) {
   return { lidoEm: ts, dado: JSON.parse(bruto.slice(corte + 1)) };
 }
 
+// O ponto onde o local está, como o app o manda (`place.lat` / `place.lon`): dois
+// NÚMEROS finitos, lat ±90 e lon ±180. `Number()` lia `null`, `''`, `true` e `[]`
+// como 0 e a releitura ia ao Waze em (0°, 0°), voltando "local não encontrado" em
+// vez de "parâmetros incompletos" (R18-6-02) — a mesma classe do `countryId`.
+// Ausente ou fora disso é 400, antes do Waze. FONTE ÚNICA das duas leituras.
+function coordenadaDoCorpo(data) {
+  const { lat, lon } = data;
+  const ok = typeof lat === 'number' && typeof lon === 'number'
+    && Number.isFinite(lat) && Number.isFinite(lon)
+    && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+  if (!ok) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  return { lat, lon };
+}
+
 // Lê o local no Waze, pela caixa mínima: `{ venue, lidoEm }` (só o que a escrita
 // precisa), ou o erro.
 async function lerLocalNoWaze(data, cookieHeader, csrf, region, sessions) {
   const venueID = data.venueID;
   const d = RELEITURA_BBOX_GRAUS;
-  const lat = Number(data.lat), lon = Number(data.lon);
+  const { lat, lon } = coordenadaDoCorpo(data);
   const q = new URLSearchParams({
     bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
     v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
@@ -2884,11 +2933,7 @@ async function handleExcluirFoto(data, { sessions }) {
   const venueID = data.venueID;
   const imageID = data.imageID;
   if (!idValido(venueID) || !idValido(imageID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
-  const lat = Number(data.lat);
-  const lon = Number(data.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
-  }
+  coordenadaDoCorpo(data);
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
 

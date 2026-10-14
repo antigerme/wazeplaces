@@ -108,9 +108,18 @@ const API = {
         const regiao = safeLS.get('waze_region');
         if (regiao) this.region = regiao;
         const pais = safeLS.get('waze_country');
-        if (pais) this.countryId = parseInt(pais, 10) || 30;
+        if (pais) this.countryId = this.paisOuPadrao(pais);
     },
     esquecerLugar() { this.lugarLido = false; },
+
+    // O país é um inteiro POSITIVO (a régua do `inteiroDoPais` do servidor); o
+    // resto — 'abc', 0, e o '-5' de um `localStorage` mexido à mão — é o Brasil
+    // (30). O `|| 30` deixava passar o negativo, e a busca voltava 400
+    // `countryRequired` a cada abertura (R18-6-05).
+    paisOuPadrao(bruto) {
+        const n = parseInt(bruto, 10);
+        return n > 0 ? n : 30;
+    },
 
     setRegion(region) {
         this.lerLugar();   // senão a 1ª leitura do país traria de volta a região do aparelho
@@ -129,7 +138,7 @@ const API = {
 
     setCountry(id) {
         this.lerLugar();
-        this.countryId = parseInt(id, 10) || 30;
+        this.countryId = this.paisOuPadrao(id);
         safeLS.set('waze_country', this.countryId);
     },
 
