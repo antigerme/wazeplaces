@@ -112,13 +112,17 @@ const API = {
     },
     esquecerLugar() { this.lugarLido = false; },
 
-    // O país é um inteiro POSITIVO (a régua do `inteiroDoPais` do servidor); o
-    // resto — 'abc', 0, e o '-5' de um `localStorage` mexido à mão — é o Brasil
-    // (30). O `|| 30` deixava passar o negativo, e a busca voltava 400
-    // `countryRequired` a cada abertura (R18-6-05).
+    // O país é um inteiro POSITIVO e SEGURO, na régua do `inteiroDoPais` do
+    // servidor: um número, ou um texto só de dígitos (o `waze_country` guardado
+    // é texto). O resto — 'abc', 0, o '-5' de um `localStorage` mexido à mão,
+    // '1e3', '30abc' e o '99999999999999999999' além de 2^53, que o servidor
+    // recusa com `Number.isSafeInteger` — é o Brasil (30). O `|| 30` deixava
+    // passar o negativo e o `parseInt` lia '1e3' como 1 e '30abc' como 30: a busca
+    // voltava 400 `countryRequired` a cada abertura (R18-6-05, R19-6-01).
     paisOuPadrao(bruto) {
-        const n = parseInt(bruto, 10);
-        return n > 0 ? n : 30;
+        const n = typeof bruto === 'number' ? bruto
+            : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+        return Number.isSafeInteger(n) && n > 0 ? n : 30;
     },
 
     setRegion(region) {

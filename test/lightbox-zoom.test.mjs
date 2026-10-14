@@ -372,7 +372,7 @@ function gestosDaFoto(escala, tamanho) {
   const no = () => ({ h: {}, addEventListener(tipo, fn) { this.h[tipo] = fn; }, setPointerCapture() {} });
   const els = { imageLightbox: no(), lightboxImage: no(), lightboxClose: no(), lightboxPrev: no(), lightboxNext: no() };
   let T = 1000;
-  const constantes = ['DUPLO_TOQUE_MS', 'DUPLO_TOQUE_RAIO_PX'].map((c) => {
+  const constantes = ['DUPLO_TOQUE_MS', 'DUPLO_TOQUE_RAIO_PX', 'TOQUE_FOLGA_PX'].map((c) => {
     const m = new RegExp('^const ' + c + ' = (\\d+);', 'm').exec(APP);
     assert.ok(m, `${c} sumiu`);
     return `const ${c} = ${m[1]};`;
@@ -384,7 +384,7 @@ function gestosDaFoto(escala, tamanho) {
   };
   new Function(...Object.keys(deps), constantes + '\n' + fatiarFuncao('setupLightbox') + '\nsetupLightbox();')(...Object.values(deps));
   const img = els.lightboxImage;
-  const ev = (x, y) => ({ pointerId: 1, clientX: x, clientY: y, preventDefault() {} });
+  const ev = (x, y, extra = {}) => ({ pointerId: 1, clientX: x, clientY: y, preventDefault() {}, ...extra });
   const arrastar = ([x0, y0], [x1, y1]) => {
     img.h.pointerdown(ev(x0, y0));
     img.h.pointermove(ev((x0 + x1) / 2, (y0 + y1) / 2));
@@ -398,7 +398,8 @@ function gestosDaFoto(escala, tamanho) {
     img.h.pointerdown(ev(x, y)); img.h.pointerup(ev(x, y));
     T += 400;
   };
-  return { L, log, arrastar, toqueDuplo, img };
+  const passar = (ms) => { T += ms; };
+  return { L, log, arrastar, toqueDuplo, img, ev, passar };
 }
 
 test('R8-3-01 os GESTOS num fio de zoom invisível: o arraste troca de foto e fecha, e o duplo toque AMPLIA — ampliada de verdade, o arraste anda', () => {
@@ -563,4 +564,78 @@ test('R16-3-02 (estrutura): o `endPointer` só decide quando o evento NÃO é `p
     'o `endPointer` decide mesmo com o evento cancelado');
   assert.match(corpo, /img\.addEventListener\('pointerup', endPointer\);\s*img\.addEventListener\('pointercancel', endPointer\);/,
     'o cancelamento não passa mais pelo `endPointer`: o ponteiro ficaria na conta');
+});
+
+// ── R19-3-02: o 2º ARRASTE seguido não é duplo toque ───────────────────────────
+// (auditoria da rodada 19, MEDIDO nos dois motores, mouse e toque). O duplo toque
+// da foto era decidido no `pointerdown` contra o `pointerdown` ANTERIOR, sem saber
+// se aquele tinha sido toque ou arraste: passar duas fotos seguidas com o polegar
+// (o 2º arraste a < 300 ms e < 40 px do começo do 1º) AMPLIAVA 2,5× em vez de
+// trocar de foto. E o botão direito, que não arrasta nem toca, também contava.
+// O mapa ampliado já decidia certo (`tocou`).
+test('R19-3-02 dois ARRASTES seguidos na foto trocam de foto duas vezes — não viram duplo toque', () => {
+  for (const intervalo of [500, 150, 60]) {
+    const g = gestosDaFoto(1);
+    const flick = () => { g.img.h.pointerdown(g.ev(300, 400)); g.img.h.pointermove(g.ev(250, 400)); g.img.h.pointermove(g.ev(150, 400)); g.img.h.pointerup(g.ev(150, 400)); };
+    flick(); g.passar(intervalo); flick();
+    assert.deepEqual(g.log, ['next', 'next'], `DEFEITO (${intervalo} ms): o 2º arraste não trocou de foto (${JSON.stringify(g.log)})`);
+    assert.equal(g.L.scale, 1, `DEFEITO (${intervalo} ms): o 2º arraste AMPLIOU a foto para ${g.L.scale}×`);
+  }
+});
+
+test('R19-3-02 o duplo toque legítimo segue ampliando 2,5× e voltando a 1× (e o 3º toque não amplia de novo)', () => {
+  const g = gestosDaFoto(1);
+  g.toqueDuplo(260, 380);
+  assert.equal(g.L.scale, 2.5, 'CONTROLE: o duplo toque não ampliou');
+  g.toqueDuplo(260, 380);
+  assert.equal(g.L.scale, 1, 'CONTROLE: o 2º duplo toque não voltou a 1×');
+  // Um toque que tremeu 5 px (< TOQUE_FOLGA_PX) ainda é toque.
+  g.img.h.pointerdown(g.ev(260, 380)); g.img.h.pointermove(g.ev(265, 380)); g.img.h.pointerup(g.ev(265, 380));
+  g.passar(100);
+  g.img.h.pointerdown(g.ev(262, 381)); g.img.h.pointerup(g.ev(262, 381));
+  assert.equal(g.L.scale, 2.5, 'CONTROLE: o duplo toque com tremor de 5 px não ampliou');
+  // O 3º toque, logo depois do par, não amplia (nem volta) de novo.
+  g.passar(50);
+  g.img.h.pointerdown(g.ev(262, 381)); g.img.h.pointerup(g.ev(262, 381));
+  assert.equal(g.L.scale, 2.5, 'o 3º toque do trio mexeu no zoom');
+});
+
+test('R19-3-02 um toque, depois um arraste que troca de foto: o toque só conta se TERMINOU como toque', () => {
+  const g = gestosDaFoto(1);
+  // Um arraste e, 120 ms depois, um TOQUE no mesmo lugar: não é duplo toque.
+  g.img.h.pointerdown(g.ev(300, 400)); g.img.h.pointermove(g.ev(200, 400)); g.img.h.pointerup(g.ev(200, 400));
+  g.passar(120);
+  g.img.h.pointerdown(g.ev(300, 400)); g.img.h.pointerup(g.ev(300, 400));
+  assert.equal(g.L.scale, 1, 'DEFEITO: arraste + toque virou duplo toque');
+});
+
+test('R19-3-02 o botão direito (e o do meio) não age na foto: dois cliques < 300 ms não ampliam, nem arrastam', () => {
+  for (const button of [2, 1]) {
+    const g = gestosDaFoto(1);
+    for (let i = 0; i < 2; i++) {
+      g.img.h.pointerdown(g.ev(260, 380, { button })); g.img.h.pointerup(g.ev(260, 380, { button }));
+      g.passar(100);
+    }
+    assert.equal(g.L.scale, 1, `DEFEITO: dois cliques com o botão ${button} ampliaram a foto`);
+    g.img.h.pointerdown(g.ev(300, 400, { button })); g.img.h.pointermove(g.ev(100, 400, { button })); g.img.h.pointerup(g.ev(100, 400, { button }));
+    assert.deepEqual(g.log, [], `DEFEITO: o arraste com o botão ${button} trocou de foto`);
+    // CONTROLE: com o principal, o mesmo arraste troca.
+    g.img.h.pointerdown(g.ev(300, 400, { button: 0 })); g.img.h.pointermove(g.ev(100, 400, { button: 0 })); g.img.h.pointerup(g.ev(100, 400, { button: 0 }));
+    assert.deepEqual(g.log, ['next'], 'CONTROLE: o arraste com o botão principal não trocou de foto');
+  }
+});
+
+test('R19-3-02 a pinça (dois dedos) e o cancelamento do sistema não viram "último toque"', () => {
+  const g = gestosDaFoto(1);
+  const d1 = (t, x, y) => g.img.h[t]({ pointerId: 1, clientX: x, clientY: y, preventDefault() {} });
+  const d2 = (t, x, y) => g.img.h[t]({ pointerId: 2, clientX: x, clientY: y, preventDefault() {} });
+  d1('pointerdown', 250, 400); d2('pointerdown', 270, 400); d2('pointerup', 270, 400); d1('pointerup', 250, 400);
+  g.passar(100);
+  g.img.h.pointerdown(g.ev(260, 400)); g.img.h.pointerup(g.ev(260, 400));
+  assert.equal(g.L.scale, 1, 'DEFEITO: a pinça contou como o 1º toque do duplo toque');
+  g.passar(500);
+  g.img.h.pointerdown(g.ev(260, 400)); g.img.h.pointercancel(g.ev(260, 400, { type: 'pointercancel' }));
+  g.passar(100);
+  g.img.h.pointerdown(g.ev(260, 400)); g.img.h.pointerup(g.ev(260, 400));
+  assert.equal(g.L.scale, 1, 'DEFEITO: o toque cancelado pelo sistema contou como o 1º toque');
 });

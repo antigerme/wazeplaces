@@ -3570,7 +3570,13 @@ const Lightbox = {
     },
     idFotoAtual() {
         const p = this.place;
-        if (!p || !p.venueID || !Number.isFinite(Number(p.lat)) || !Number.isFinite(Number(p.lon))) return null;
+        // Sem geometria (`lat`/`lon` nulos) não há lixeira: o servidor recusa o
+        // corpo com 400 `incompleteParams` depois dos 3 s do Desfazer. A régua é a
+        // do `coordenadaDoCorpo` do servidor — SÓ número, finito, lat ±90, lon ±180.
+        // `Number.isFinite` não coage (sem o `Number()` que lia `null` como 0 e
+        // mostrava a lixeira, R19-6-02).
+        if (!p || !p.venueID) return null;
+        if (!(Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180)) return null;
         if (!podeExcluirFotoAqui()) return null;
         // A régua de "aprovada" é UMA, e o "Aprovar" pergunta o contrário dela
         // (R10-3-04, ver `podeAprovarAtual`).
@@ -3908,16 +3914,28 @@ function setupLightbox() {
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
+    // O toque que COMEÇOU e ainda pode ser um toque (R19-3-02): só vira o "último
+    // toque" quando o gesto TERMINA sem passar de `TOQUE_FOLGA_PX`, com o botão
+    // principal e sem um segundo dedo — como o `tocou` do mapa. Gravar no
+    // `pointerdown` fazia do 1º arraste de um passar de fotos o "primeiro toque"
+    // do duplo toque: o 2º arraste, < 300 ms e < 40 px depois, ampliava 2,5× em
+    // vez de trocar de foto (MEDIDO nos dois motores, mouse e toque).
+    let toqueEmCurso = null;
     let dragStartX = 0;
     let dragStartY = 0;
     let dragging = false;
 
     img.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        // Só o botão principal (ou o dedo) age na foto: o direito e o do meio não
+        // arrastam, não trocam de foto e não contam como toque — dois cliques com
+        // o direito em menos de 300 ms ampliavam (R19-3-02). O mapa já faz assim.
+        if (e.button > 0) return;
         img.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
         if (pointers.size === 2) {
+            toqueEmCurso = null;   // dois dedos não são toque
             const [a, b] = [...pointers.values()];
             pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y);
             pinchStartScale = Lightbox.scale;
@@ -3936,9 +3954,7 @@ function setupLightbox() {
             else Lightbox.zoomTo(2.5, e.clientX, e.clientY);
             return;
         }
-        lastTapTime = now;
-        lastTapX = e.clientX;
-        lastTapY = e.clientY;
+        toqueEmCurso = { t: now, x: e.clientX, y: e.clientY };
 
         dragging = true;
         dragStartX = e.clientX;
@@ -3949,6 +3965,7 @@ function setupLightbox() {
         if (!pointers.has(e.pointerId)) return;
         const prev = pointers.get(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (toqueEmCurso && Math.hypot(e.clientX - toqueEmCurso.x, e.clientY - toqueEmCurso.y) > TOQUE_FOLGA_PX) toqueEmCurso = null;
 
         if (pointers.size === 2) {
             const [a, b] = [...pointers.values()];
@@ -3970,6 +3987,12 @@ function setupLightbox() {
         if (!pointers.has(e.pointerId)) return;
         pointers.delete(e.pointerId);
         if (pointers.size < 2) pinchStartDist = 0;
+        // O gesto terminou como TOQUE: é agora que ele vira o "último toque". O
+        // cancelamento do sistema não é toque.
+        if (pointers.size === 0 && toqueEmCurso && e.type !== 'pointercancel') {
+            lastTapTime = toqueEmCurso.t; lastTapX = toqueEmCurso.x; lastTapY = toqueEmCurso.y;
+        }
+        if (pointers.size === 0) toqueEmCurso = null;
 
         // Sem zoom: swipe horizontal troca foto, vertical pra baixo fecha
         // (editando o nome, sai só da edição — ver `recuarNaFoto`). "Sem zoom"

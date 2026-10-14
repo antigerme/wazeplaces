@@ -6611,6 +6611,102 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 }
 
 
+// ── Passar as fotos com o polegar: o 2º arraste seguido TROCA a foto (R19-3-02) ─
+//
+// O duplo toque da foto era decidido no `pointerdown` contra o `pointerdown`
+// ANTERIOR, sem saber se aquele fora toque ou arraste: o 2º arraste de um passar
+// de fotos, a < 300 ms e < 40 px do começo do 1º, AMPLIAVA 2,5× em vez de trocar
+// de foto (MEDIDO nos dois motores, com mouse e com toque). O botão direito, que
+// não arrasta nem toca, também contava. O mapa ampliado já decidia certo.
+// CONTROLES: o intervalo de 500 ms (fora da janela) troca a foto, e o duplo toque
+// de verdade (dois cliques a 100 ms) AMPLIA — sem eles "a foto não ampliou" passaria
+// também com a foto que não responde a gesto nenhum. O toque de verdade (CDP) não
+// entra: só o Chromium o sintetiza, e o `pointerdown` é o mesmo evento; ele está
+// medido à parte no relatório da rodada.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' });
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 80)));
+  await page.route('**/api/**', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
+  await presencaViva(page);
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(250);
+  await page.evaluate((url) => {
+    setLang('pt'); applyI18n();
+    API.setSession('tok-smoke');
+    AppState.authenticated = true;
+    AppState.profile = { id: 1, userName: 'editor', rank: 1, isAreaManager: true, isStaff: false };
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('noMoreCards').classList.add('hidden');
+    showLoading(false);
+    const p = { venueID: 'v-flick', updateRequestID: 'pend-01', name: 'Padaria', categories: ['BAKERY'], address: 'Rua X, 1',
+      updateTypeKey: 'IMAGE', reqType: 'IMAGE', purType: 'NEW_PHOTO', createdBy: 'wazer', lat: -12.9, lon: -38.3, changes: [],
+      imageUrls: [1, 2, 3, 4, 5].map((n) => `${url}#flick-${n}`), approvedImageIds: [],
+      mapa: { centro: [-12.9, -38.3], proposto: null, movidoM: null, entradas: [] } };
+    AppState.queue = [p]; AppState.currentPlace = p;
+    document.querySelectorAll('.place-card').forEach((e) => e.remove());
+    showCurrentPlace();
+  }, foto);
+  await assentar(page);
+  const abrirFotos = async () => {
+    await page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
+    await page.waitForTimeout(250);   // fechar e abrir no mesmo tique é o gotcha #65
+    await page.evaluate(() => { const p = AppState.currentPlace; Lightbox.open(p.imageUrls, 0, -1, p.name, false, p); });
+    await esperarOuExplodir(page, () => Lightbox.isOpen() && fotoDoLightboxNaTela(), 'flick/foto: a foto não abriu');
+    await page.waitForTimeout(300);
+  };
+  const estado = () => page.evaluate(() => ({ idx: Lightbox.idx, escala: +Lightbox.scale.toFixed(2) }));
+  const ponto = await (async () => { await abrirFotos(); return page.evaluate(() => { const r = document.getElementById('lightboxImage').getBoundingClientRect(); return { x: r.x + r.width * 0.8, y: r.y + r.height / 2 }; }); })();
+  // Um passar de foto com o polegar: ~100 ms, 150 px pra esquerda.
+  const flick = async () => {
+    await page.mouse.move(ponto.x, ponto.y); await page.mouse.down();
+    for (let i = 1; i <= 4; i++) { await page.mouse.move(ponto.x - 150 * i / 4, ponto.y); await page.waitForTimeout(15); }
+    await page.mouse.up();
+  };
+  for (const intervalo of [500, 150, 60]) {
+    await abrirFotos();
+    const antes = await estado();
+    checa(antes.idx === 0 && antes.escala === 1, `flick/foto ${intervalo} ms: PRÉ-CONDIÇÃO — a foto não abriu na 1ª em 1×`, JSON.stringify(antes));
+    await flick();
+    await page.waitForTimeout(intervalo);
+    await flick();
+    await page.waitForTimeout(150);
+    const dep = await estado();
+    checa(dep.idx === 2 && dep.escala === 1,
+      `flick/foto: dois arrastes seguidos com ${intervalo} ms entre eles deram ${JSON.stringify(dep)} — tinham que trocar de foto duas vezes (idx 2, 1×)${intervalo === 500 ? ' [CONTROLE: fora da janela do duplo toque]' : ''}`);
+  }
+  // CONTROLE do instrumento: o duplo toque de verdade AMPLIA 2,5× e o 3º toque não mexe.
+  await abrirFotos();
+  const toque = async (opts = {}) => { await page.mouse.click(ponto.x, ponto.y, opts); };
+  await toque(); await page.waitForTimeout(100); await toque();
+  await page.waitForTimeout(150);
+  const dt = await estado();
+  checa(dt.escala === 2.5 && dt.idx === 0, `flick/foto: CONTROLE — o duplo toque (2 cliques a 100 ms) deu ${JSON.stringify(dt)}, tinha que AMPLIAR 2,5× na mesma foto`);
+  await toque(); await page.waitForTimeout(100); await toque();
+  await page.waitForTimeout(150);
+  const dv = await estado();
+  checa(dv.escala === 1, `flick/foto: CONTROLE — o 2º duplo toque deu ${JSON.stringify(dv)}, tinha que VOLTAR a 1×`);
+  // O botão direito não age na foto: dois cliques a 100 ms não ampliam (e o arraste com ele não troca).
+  await abrirFotos();
+  await toque({ button: 'right' }); await page.waitForTimeout(100); await toque({ button: 'right' });
+  await page.waitForTimeout(150);
+  const bd = await estado();
+  checa(bd.escala === 1 && bd.idx === 0, `flick/foto: dois cliques com o botão DIREITO a 100 ms deram ${JSON.stringify(bd)} — não amplia`);
+  await abrirFotos();
+  await page.mouse.move(ponto.x, ponto.y); await page.mouse.down({ button: 'right' });
+  for (let i = 1; i <= 4; i++) { await page.mouse.move(ponto.x - 150 * i / 4, ponto.y); await page.waitForTimeout(15); }
+  await page.mouse.up({ button: 'right' });
+  await page.waitForTimeout(150);
+  const ba = await estado();
+  checa(ba.idx === 0, `flick/foto: o arraste com o botão DIREITO trocou de foto (${JSON.stringify(ba)})`);
+  await page.evaluate(() => Lightbox.close());
+  checa(erros.length === 0, 'flick/foto: erro de JS', erros[0]);
+  await ctx.close();
+}
+
 // ── A faixa do carrossel não pode roubar o toque do slide atrás ─────────────
 // Terceira reincidência do gotcha #26. A faixa `.card-image-nav` tem largura
 // cheia e 44px de altura; num aparelho ESTREITO o mini-mapa fica com ~100px, a
@@ -13540,6 +13636,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + renomeando: o passo pra trás (fundo, arraste pra baixo, Esc e ↓ fora do campo) só sai da edição, com o CONTROLE sem edição fechando a foto`
   + `, + a roda do mouse e o trackpad (no mapa um nível por DENTE acumulado, na foto proporcional ao delta, e a rolagem horizontal fora do zoom, com o CONTROLE do dente) e o duplo toque do mapa com tremor (com o CONTROLE do arraste)`
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
+  + `, + passar as fotos com o polegar (dois arrastes seguidos a 500, 150 e 60 ms trocam a foto duas vezes sem ampliar; o duplo toque de verdade AMPLIA e volta, com o botão direito sem agir na foto)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
   + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
