@@ -17408,7 +17408,9 @@ function abrirPedidoRecebido(dados, deQuem) {
     const $ = (id) => document.getElementById(id);
     const ident = identidadeDoPlace(dados);
     $('pedidoNome').textContent = ident.titulo;
-    $('pedidoDe').textContent = t('presenca.pedido.de', { nome: deQuem || t('presenca.anon') });
+    // O nome de quem mandou (usuário do Waze) vai ISOLADO dentro da frase do app: em hebraico ou árabe ele
+    // reordenava a pontuação em volta (R20-5-06, o mesmo defeito da prévia da lista).
+    $('pedidoDe').textContent = t('presenca.pedido.de', { nome: isolarTextoDoWaze(deQuem || t('presenca.anon')) });
 
     const foto = $('pedidoFoto');
     if (dados.imageUrl) {

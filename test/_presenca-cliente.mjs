@@ -35,8 +35,8 @@ const TRADUZIDAS = /^card\.updateType\./;
 
 // `marcaDestaAba`: a sessão da MEMÓRIA (`API.sessionToken`), que a presença
 // guarda na saída de cada pedido — o 401 tardio é da sessão que já se foi.
-const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
-  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba']
+const DO_APP = ['CONTA_KEY', 'WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
+  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba', 'LETRA_DA_DIREITA_PRA_ESQUERDA', 'isolarTextoDoWaze']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -78,7 +78,9 @@ function elemento(id) {
 export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined } = {}) {
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
-  const armazenado = new Map();
+  // Uma sessão guardada no aparelho (a presença confere que nenhuma OUTRA aba
+  // deu "Sair": ver `presencaAparelhoSaiu`); o teste do "Sair" a tira.
+  const armazenado = new Map([['waze_session_token', 'token-de-teste']]);
   // `saindoNoChat[i]` é o modo "saindo" do api.js (o `keepalive`) na hora da
   // chamada `chat[i]`: é ele que diz se o pedido sobrevive à página que morre.
   const chamadas = { presencaApp: [], chat: [], saindoNoChat: [], setSaindo: [], openModal: [], closeModal: [], unauthorized: 0,

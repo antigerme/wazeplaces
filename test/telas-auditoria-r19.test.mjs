@@ -265,7 +265,9 @@ test('R19-8-02 · o JS que monta HTML com texto do Waze leva dir="auto" (diff e 
   // A conversa (presenca.js).
   for (const [re, quem] of [
     [/<span dir="auto" class="presenca-nome">/g, 'o nome na lista'],
-    [/<span dir="auto" class="presenca-l2\$\{n \? ' forte' : ''\}">/g, 'a prévia da conversa'],
+    // A prévia de TEXTO de gente leva `dir="auto"`; a MONTADA pelo app (📍 nome · tipo) fica na direção do app
+    // com o nome isolado (R20-5-06, `presenca-auditoria-r20.test.mjs`).
+    [/<span\$\{montada \? '' : ' dir="auto"'\} class="presenca-l2\$\{n \? ' forte' : ''\}">/g, 'a prévia da conversa'],
     [/<div dir="auto" class="conversa-bolha \$\{m\.meu/g, 'a bolha'],
     [/<span dir="auto" class="cp-nome">/g, 'o nome do pedido mandado'],
     [/<span id="\$\{desc\}" dir="auto" class="cp-legenda">/g, 'a pergunta do pedido mandado'],
