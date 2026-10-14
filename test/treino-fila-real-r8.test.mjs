@@ -97,7 +97,7 @@ function depsDoTreino(AppState, log, els, extra = {}) {
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => {},
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
     t: (k, v) => (v ? k + JSON.stringify(v) : k), openModal: () => {}, trocarTextoI18n: () => {}, semJanelaDeDesfazer: () => false,
-    loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(), aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {},
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
     devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},

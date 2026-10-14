@@ -117,7 +117,7 @@ const lugares = (fila) => (fila || []).map((p) => p.venueID);
 const soSinteticos = (fila) => (fila || []).length > 0 && fila.every((p) => !!p._exemplo);
 // O que trava a ENTRADA no treino (`Treino.motivoDeRecusa`): sem isto o buraco
 // negro — que é verdadeiro — a recusaria.
-const LIVRE = () => ({ loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+const LIVRE = () => ({ loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(), aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
   // As outras janelas da foto, que o refazer sem gesto espera (`janelaDoDesfazerAberta`).
   exclusaoPendente: null, renomeacaoPendente: null });
 // A janela do Desfazer aberta, de VERDADE (o irmão do R14-2-05 na foto, pedido

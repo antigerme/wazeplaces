@@ -116,7 +116,7 @@ function montarApp(estado = {}, { wazeNaHora = false } = {}) {
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'), aoMudarAFilaPorBaixo: () => {},
     t: (k) => k, showToast: () => ({ texto() {}, dispensar() {} }), openModal: () => {},
     // o que seguraria o treino: nada, aqui
-    loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(), aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {},
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
     devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
@@ -358,7 +358,7 @@ function montarBusca() {
     removeUndoBanner: () => {}, savePreferences: () => {}, showLoading: () => {}, updateStats: () => {},
     showCurrentPlace: () => {}, fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {},
     maybePrefetch: () => log.push('prefetch'), startFetching: () => log.push('busca'), showNoPlaces: () => {},
-    openModal: () => {}, loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(),
+    openModal: () => {}, loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(), aprovacaoPendente: null, aprovacoesNoAr: new Set(),
     aprovacoesDaQueda: new Map(), enviarPendenciasDoLightbox: () => {}, devolverPedidoRecusado: () => {},
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14
     devolverAvisosDeUmaVezDaTela: () => {}, pedirAvisosAdiados: () => {},
@@ -470,7 +470,7 @@ function montarSairPeloTeclado() {
     showCurrentPlace: () => { naTela = AppState.queue[0] && AppState.queue[0]._treino ? null : card; if (focoDoTecladoPendente()) queueMicrotask(() => app.aplicarFocoDoTeclado()); },
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => { naTela = null; }, maybePrefetch: () => {}, startFetching: () => {},
     showNoPlaces: () => {}, t: (k) => k, showToast: () => {}, openModal: () => {},
-    loteDeLidosEmVoo: false, aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
+    loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(), aprovacaoPendente: null, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(),
     enviarPendenciasDoLightbox: () => {}, acoesTravadas: () => false, cardDaFrente: () => naTela, topOpenModal: () => null,
     Lightbox: { isOpen: () => false }, MapaLightbox: { isOpen: () => false },
     // os avisos de UMA vez que o treino tira da tela e solta no fim (R14-7-A5/A1), em test/treino-auditoria-r14

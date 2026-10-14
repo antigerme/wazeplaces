@@ -141,7 +141,8 @@ test('F4: CONTROLE — sem ↻, cada pouso desconta e quem falha volta pra fila,
 function montarAprovacao({ epocaDoGesto = 0 } = {}) {
   const log = [];
   const place = pedido(1);
-  const AppState = { serverTotal: 5, fetchEpoch: 0, currentPlace: null, queue: [pedido(9)] };
+  // O pedido aprovado ESTÁ na fila (R18-3-02: o "Restam" só desce por quem ainda está nela).
+  const AppState = { serverTotal: 5, fetchEpoch: 0, currentPlace: null, queue: [place, pedido(9)] };
   const deps = {
     AppState, registrarPouso: () => log.push('pouso'), updateStats: () => {},
     Lightbox: { isOpen: () => false, place: null }, advanceQueue: () => log.push('avanca'),

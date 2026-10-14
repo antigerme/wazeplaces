@@ -497,6 +497,10 @@ function initApp() {
             return frag.get('pair') || new URLSearchParams(window.location.search).get('pair');
         } catch (e) { return null; }
     })();
+    // E o link colado na barra de endereço da aba que JÁ está no app (só o fragmento muda): a
+    // página não recarrega, e sem este ouvinte nada acontecia e o segredo ficava na barra
+    // (R18-1-04). Registrado antes do `return` do link da carga: vale pros dois caminhos.
+    window.addEventListener('hashchange', aoMudarOFragmentoDaURL);
     if (codigoNaURL) {
         try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
         abrirPeloCodigoDaURL(codigoNaURL);
@@ -655,6 +659,27 @@ function focoNaTelaDeEntrada() {
     if (!ativo || ativo === document.body || ativo === document.documentElement) return false;
     if (document.getElementById('authScreen')?.contains(ativo)) return true;
     return MODAIS_DA_ENTRADA.some((id) => !!document.getElementById(id)?.contains(ativo));
+}
+
+// O link de pareamento (`/#pair=SEGREDO`) colado na barra de endereço da aba que JÁ está
+// aberta no app: a navegação muda só o fragmento, a página não recarrega, e o `initApp` —
+// que lê o fragmento uma vez, na carga — não via nada: nenhum resgate, e o segredo (que
+// vale 5 min e decifra o registro de pareamento) ficava na barra e no histórico sem ter
+// sido usado (R18-1-04, MEDIDO no navegador). Recarrega: a carga lê o fragmento e o tira da
+// barra (`replaceState`), e o link vence a sessão do aparelho como vence numa aba nova — é o
+// pedido explícito de agora, e o resgate troca de conta (`esquecerOutraConta`) com a
+// limpeza de sempre. Reaproveitar o caminho da carga em vez de refazê-lo com o app na tela
+// (fila, diálogos, janela do Desfazer, lote no ar) é o que mexe menos: o `pagehide` já
+// descarrega a decisão da janela, e a fila de saída fica no aparelho. O fragmento nunca vai
+// ao servidor (`reload` não o manda). Outro fragmento (sem `pair`) não faz nada, e o
+// `replaceState` da carga não dispara o evento: não há laço.
+function aoMudarOFragmentoDaURL() {
+    let codigo = null;
+    try {
+        codigo = new URLSearchParams(String(window.location.hash || '').replace(/^#/, '')).get('pair');
+    } catch (e) { return; }
+    if (!codigo) return;
+    window.location.reload();
 }
 
 // O link de pareamento aberto neste aparelho. Num aparelho JÁ logado, o link
@@ -4154,8 +4179,8 @@ async function esperarAVezContandoNoSair(vez) {
 // de saída — o "Sair" confirmado a cancela pela época, e o diálogo não a contava, então
 // ela se perdia sem aviso (R17-3-01 = R17-2-01, MEDIDO nos três). Devolve o `aoEsperar` DESTA
 // escrita: uma marca avulsa em `escritasEsperandoAVez` (a frase `modal.logout.foto`), que a
-// escrita tira no `finally` — a queda não esvazia o conjunto, e a espera que sai pela época
-// trocada não avisa o fim dela.
+// escrita tira no `finally` — a queda o esvazia (`soltarOsLotesDaSessaoQueAcabou`, R18-3-01),
+// e a espera que sai pela época trocada não avisa o fim dela.
 function esperaDaEscritaNoSair() {
     const marca = {};
     return (sim) => {
@@ -4950,7 +4975,13 @@ function concluirAprovacao(alvo) {
     // Só na fila do GESTO: o ↻ e a troca de filtro durante a janela ou o envio
     // refazem a fila (`fetchEpoch`), e descontar o "Restam" da fila nova deixava
     // o número abaixo dela (auditoria da fila, 2026-09-26).
-    if (alvo.epocaFila === AppState.fetchEpoch) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+    //
+    // E só se o pedido AINDA ESTÁ nela (R18-3-02): o "Marcar todos" que termina com a foto
+    // ampliada aberta já tirou o pedido da fila e já desceu o "Restam" por ele, e aprovar
+    // depois (decisão explícita da pessoa, que segue valendo) descia o número de novo.
+    if (alvo.epocaFila === AppState.fetchEpoch && AppState.queue.includes(alvo.place)) {
+        AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+    }
     updateStats();
     if (Lightbox.isOpen() && Lightbox.place === alvo.place) { placeResolvidoPorAprovacao = alvo.place; return; }
     tirarAprovadoDaFila(alvo.place);
@@ -18423,6 +18454,11 @@ function conferirContaDestaAba() {
         cancelarPendenciasDoLightbox();
         loteDeLidosEmVoo = false;
         aprovacoesAtravessamAQueda();
+        // O canto também: a época trocou, e o lote de lidos de ANTES não é mais o da sessão
+        // de agora — o "Enviando N…" seguia lá até o próximo redesenho, que podia ser o fim
+        // do lote (até 45 s). A queda já o redesenha (`derrubarSessao`); a dúvida é o irmão
+        // (R18-2-03). Só quando a época trocou: é o que muda a conta do indicador.
+        updateInFlightIndicator();
     }
     AppState.contaEmDuvida = true;
     aplicarTravaDeAcao();
@@ -21889,6 +21925,10 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
         const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
         if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
     }
+    // O "Marcar todos" da conta anterior que ainda está no ar: "lido" é de CADA conta, e o
+    // que ele marca continua pendente para quem entrou. Os alvos dele saem do "em andamento"
+    // ANTES de a fila de quem entrou ser refeita (R18-1-02).
+    soltarOLoteDeLidosDaContaAnterior();
     if (soMemoria) AppState.autores = null;
     else esquecerAutores();
     // O foco da anterior sai ANTES da reordenação que o perfil agenda logo
@@ -22645,7 +22685,31 @@ function marcarLoteSemEnviar(places, sim) {
 // Chamada logo depois de `epocaDaSessao++`.
 function soltarOsLotesDaSessaoQueAcabou() {
     pedidosDoLoteSemEnviar.clear();
+    // E as escritas de FOTO que esperavam a retentativa, a conferência de um 401 ou a vez do
+    // local (R18-3-01): estão condenadas — o `callWithRetry` devolve `session_changed` ao
+    // acordar e nenhuma sai —, e o diálogo do "Sair" da sessão que vem seguia dizendo "1
+    // alteração de foto esperando envio será descartada" até o fim da espera. As marcas
+    // avulsas tiram a si mesmas no `finally` (`delete` é idempotente), e a escrita da sessão
+    // NOVA põe a dela depois.
+    escritasEsperandoAVez.clear();
     redesenharAvisoDoSairSeAberto();
+}
+
+// O perfil de quem entrou revelou OUTRA conta (`esquecerOutraConta`) com o "Marcar todos"
+// da anterior ainda no ar (a queda com renovação o deixa seguir, R17-2-05): a resposta dele
+// já não grava nada em quem entrou (a época trocou), mas os pedidos dele seguiam em
+// `pedidosEmAndamento` e a busca da conta nova (`semOsJaDecididos`) os deixava de fora — a
+// fila saía vazia, "Tudo limpo!", com os pedidos pendentes dela e nada que os trouxesse
+// (R18-1-02, MEDIDO no navegador). "Lido" é por conta: o que o lote da A marca continua
+// pendente para a B. Só o lote de lidos precisa disso; o de REJEIÇÃO é global no Waze.
+// Só os alvos de OUTRA época: o lote que esta mesma sessão começou (antes de a conta dela
+// ser conhecida) é dela. O `finally` do lote velho só solta o que ainda é dele.
+function soltarOLoteDeLidosDaContaAnterior() {
+    for (const [k, epoca] of [...alvosDoLoteDeLidosNoAr]) {
+        if (epoca === epocaDaSessao) continue;
+        alvosDoLoteDeLidosNoAr.delete(k);
+        pedidosEmAndamento.delete(k);
+    }
 }
 
 function offlineLerPousos() {
@@ -25298,7 +25362,11 @@ const Treino = {
         if (!AppState.authenticated) return avisoDaTrava();
         // O lote de lidos no ar termina sobre a fila REAL: trocada pela de
         // treino, os pedidos que ele marcou voltavam no `sair()` como card.
-        if (loteDeLidosEmVoo) return 'toast.esperaLote';
+        // E o lote de uma sessão que ACABOU (a queda com renovação, a conta em dúvida):
+        // `loteDeLidosEmVoo` é solto de propósito, mas o lote segue no ar e os alvos dele
+        // estão em `alvosDoLoteDeLidosNoAr` (R18-1-01) — o treino aberto nesse meio
+        // devolvia no `sair()` a fila real com os pedidos que o lote marcou como lidos.
+        if (loteDeLidosEmVoo || alvosDoLoteDeLidosNoAr.size > 0) return 'toast.esperaLote';
         // A aprovação de foto NO AR pousa sobre a fila REAL, como o lote: trocada
         // pela de treino, o pedido aprovado não saía dela (o `tirarAprovadoDaFila`
         // procura na fila de treino) e voltava no `sair()` como card, destravado —
@@ -27120,11 +27188,15 @@ async function handleBatchMarkRead() {
         // indicador (`lidosDoLoteNoAr`).
         if (epoca === epocaDaSessao) { loteDeLidosEmVoo = false; lidosDoLoteNoAr = 0; }
         rejeicoesDeLoteNoAr.delete(registroNoIndicador);
+        // Só solta o "em andamento" do que ainda é DELE: a troca de conta (R18-1-02) e o "Sair"
+        // tiram os alvos do conjunto, e a marca que um pedido tem agora é de quem decidiu
+        // depois (a conta nova, a sessão nova).
+        const sobraramDoLote = [];
         for (const p of alvos) {
             const k = chaveDoPedido(p);
-            if (alvosDoLoteDeLidosNoAr.get(k) === epoca) alvosDoLoteDeLidosNoAr.delete(k);
+            if (alvosDoLoteDeLidosNoAr.get(k) === epoca) { alvosDoLoteDeLidosNoAr.delete(k); sobraramDoLote.push(p); }
         }
-        marcarEmAndamento(alvos, false);
+        marcarEmAndamento(sobraramDoLote, false);
         marcarLoteSemEnviar(alvos, false);
         AppState.inFlightActions = Math.max(0, AppState.inFlightActions - 1);
         updateInFlightIndicator();
@@ -27180,6 +27252,28 @@ async function handleBatchMarkRead() {
     // renovação, ou a queda antes da tela de entrada), como a estrela do "Pular
     // guarda" que a queda pega no ar (R6-2-08). Nada mais é dito nem contado.
     let naoSaiuNaQueda = false;
+    // O TREINO aberto com o lote no ar (o `motivoDeRecusa` já o recusa; este é o cinto, R18-1-01):
+    // a fila do gesto está GUARDADA nele e volta no `sair()`. A época do treino subiu a
+    // `fetchEpoch`, então o ramo da fila "refeita" logo abaixo a daria por perdida e os pedidos
+    // que o lote marcou como lidos voltariam como card — o ✕ seguinte os rejeitaria. Tira da
+    // fila guardada o que pousou (e o que a outra aba decidiu), desce o "Restam" dela pelo que
+    // saiu e não toca na tela, que é a dos exemplos.
+    const guardadaNoTreino = (sessaoTrocou && typeof Treino !== 'undefined' && Treino.ativo === true)
+        ? Treino.filaGuardada(epocaFila) : null;
+    if (guardadaNoTreino) {
+        if (posQueda.length) registrarPouso(posQueda, quem, epocaFila);
+        const resolvidos = new Set([...feitos, ...aprovadas, ...posQueda, ...daOutraAba].map(chaveDoPedido));
+        for (let i = guardadaNoTreino.length - 1; i >= 0; i--) {
+            const k = chaveDoPedido(guardadaNoTreino[i]);
+            if (!resolvidos.has(k)) continue;
+            const [p] = guardadaNoTreino.splice(i, 1);
+            if (Treino._salvo.currentPlace === p) Treino._salvo.currentPlace = null;
+            if (!descontados.has(k)) AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
+        }
+        if (alvos.some((p) => !resolvidos.has(chaveDoPedido(p)))) showToast(t('toast.batchError'), 'error');
+        updatePendingCount();
+        return;
+    }
     if (sessaoTrocou) {
         // A fila REFEITA (a pessoa entrou de novo, ou outra conta entrou): nada
         // dela é deste lote — mas o pouso do que pousou depois da queda vale,
@@ -28188,12 +28282,17 @@ function idSalvoValido(v) {
     if (typeof v === 'string' && /^[0-9]{1,15}$/.test(v) && Number(v) > 0) return v;
     return '';
 }
-// As categorias do filtro: lista de textos, no teto do servidor (200). Qualquer
-// outra coisa volta à lista vazia — o filtro legítimo nunca grava outra forma.
+// As categorias do filtro: lista de textos NÃO VAZIOS, no teto do servidor (200 itens, 80
+// caracteres cada: `CATEGORIAS_MAX` e `CATEGORIA_TAM_MAX` do `server/core.mjs`, que
+// `test/consistencia.test.mjs` confere). Qualquer outra coisa volta à lista vazia — o filtro
+// legítimo nunca grava outra forma, e o servidor recusa a que não cabe com 400 (R18-1-03: a
+// conferência só olhava "texto", e `['']` ou um texto de 300 caracteres seguiam dando "Falha
+// ao carregar" a cada abertura).
 function categoriasSalvasValidas(v) {
-    const teto = 200;   // o do servidor (`buscar-places`)
+    const teto = 200;      // o do servidor (`buscar-places`)
+    const tamMax = 80;     // idem, por categoria
     if (!Array.isArray(v) || v.length > teto) return [];
-    return v.every((c) => typeof c === 'string') ? v : [];
+    return v.every((c) => typeof c === 'string' && c.length > 0 && c.length <= tamMax) ? v : [];
 }
 
 function loadFilters() {

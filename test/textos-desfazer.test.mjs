@@ -103,7 +103,7 @@ function montarTreino({ undoEnabled = true, cotaPassada = true } = {}) {
     fecharCamadasDeFoto: () => {}, removeCurrentCardEl: () => {}, maybePrefetch: () => {},
     startFetching: () => log.push('busca'), showNoPlaces: () => log.push('vazio'),
     showToast: () => {}, t: (k) => 'T:' + k,
-    loteDeLidosEmVoo: false,
+    loteDeLidosEmVoo: false, alvosDoLoteDeLidosNoAr: new Map(),
     canDisableUndo: () => cotaPassada,
     // Entrar no treino despacha as escritas do lightbox que estavam na janela
     // do Desfazer (lote 8 do lightbox, L25): aqui não há nenhuma.
