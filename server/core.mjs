@@ -2134,6 +2134,27 @@ function purFiltrado(ur, filterTypes) {
   return t !== 'UNKNOWN' && !filterTypes.includes(t);
 }
 
+// O NOME de quem mandou o pedido ou a foto, como o `users` do Waze o traz — ou
+// `quandoSemNome` quando o usuário não tem um nome que se possa LER. FONTE ÚNICA
+// dos dois lugares que resolvem autor (o `creatorName` do pedido e o
+// `imageAuthors` das fotos): cada um tinha a regra sua, e a das fotos aceitava
+// qualquer valor "verdadeiro" — um `userName` `123`, `{}`, `true` ou `["a"]`
+// chegava ao lightbox, que faz `String(…)`, como "[object Object]" (auditoria da
+// rodada 21, R21-6-04). Nome é TEXTO, e com ao menos UM caractere que se veja:
+// só espaços, ou só caracteres de largura zero, de marca ou de controle (e o
+// quadro em branco do braile, "\u2800"), não é nome — o card mostrava
+// "(desconhecido)" com o id conhecido, e a reincidência gravava o autor com o
+// nome em branco. O `.trim()` sozinho não basta: o espaço de largura zero
+// ("\u200b") e a marca de direção ("\u200e") não são espaço, são caracteres de
+// formato, e passam por ele. O texto devolvido é o ORIGINAL, sem aparar: quem
+// tem nome de verdade o vê como veio. O Waze não manda nada disso (nome de
+// usuário é texto não vazio); é a regra dizendo o que o app aceita como nome.
+const TEM_CARACTERE_VISIVEL = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\u2800]/u;
+export function nomeDoUsuario(u, quandoSemNome = null) {
+  const nome = u ? u.userName : undefined;
+  return typeof nome === 'string' && TEM_CARACTERE_VISIVEL.test(nome) ? nome : quandoSemNome;
+}
+
 // Expansão pura da resposta do Issues/Search/List em cards (um por PUR).
 // Devolve { places, blocked }: `blocked` são PURs que passariam nos filtros de
 // tipo/leitura mas cujo venue o usuário não tem permissão de editar.
@@ -2287,15 +2308,14 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
       if (img.approved === true) approvedImageIds.push(img.id);
       if (Number.isFinite(img.date) && img.date > 0) imageDates[img.id] = img.date;
       if (img.creatorUserId != null) {
-        const dono = usersDict[img.creatorUserId];
-        imageAuthors[img.id] = dono && dono.userName ? dono.userName : String(img.creatorUserId);
+        imageAuthors[img.id] = nomeDoUsuario(usersDict[img.creatorUserId], String(img.creatorUserId));
       }
     }
 
     for (const ur of venue.venueUpdateRequests) {
       const creatorId = ur.createdBy ?? null;
       const creatorObj = creatorId ? usersDict[creatorId] : null;
-      const creatorName = creatorObj && typeof creatorObj.userName === 'string' && creatorObj.userName ? creatorObj.userName : creatorId;
+      const creatorName = nomeDoUsuario(creatorObj, creatorId);
       // Rank CRU do Waze (0-indexed). Quem soma 1 pra exibir é o frontend —
       // regra sagrada do projeto, ver gotcha #15.
       const creatorRank = creatorObj && Number.isInteger(creatorObj.rank) ? creatorObj.rank : null;
