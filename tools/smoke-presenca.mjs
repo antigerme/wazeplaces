@@ -685,11 +685,16 @@ try {
         return r.fulfill({ status: 200, contentType: 'image/gif', body: GIF6 }).catch(() => {});
       });
       await ctx6.route(/^https:\/\/[a-z0-9-]*\.waze\.com\/.*tiles/, (r) => r.fulfill({ status: 200, contentType: 'image/gif', body: GIF6 }));
+      // O tempo real do contexto da 6c: a ida de verdade devolve o lote e a PÁGINA segura a conexão ABERTA
+      // (`googleDeMentiraNaPagina`, como nos outros contextos). O Google de mentira que dormia 25 s e então
+      // terminava era a conexão que o app religa a cada volta — com o fim CURTO do R21-5-05 isso escala o recuo
+      // (e o guard de `test/presenca-auditoria-r21.test.mjs` proíbe a conexão que termina com a entrega).
+      await ctx6.addInitScript(googleDeMentiraNaPagina, GOOGLE);
       await ctx6.route(GOOGLE + '**', async (route) => {
         const req = route.request();
-        const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST' };
+        const cors = { 'access-control-allow-origin': req.headers().origin || '*', 'access-control-allow-headers': 'content-type,x-goog-api-key', 'access-control-allow-methods': 'POST',
+          'access-control-expose-headers': 'x-smoke-fecha' };
         if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors }).catch(() => {});
-        await dormir(25_000);
         await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: '[{"startOfBatch":{}},{"endOfBatch":{}}]' }).catch(() => {});
       });
       const euId = '12444348', ela = '183164343';
