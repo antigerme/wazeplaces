@@ -12937,14 +12937,17 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(dep.excluindo === false && dep.travado === false, `${id}: a exclusão de quem saiu conta na sessão nova (a pílula travada, calada: acoesTravadas() falso)`, JSON.stringify(dep));
     // A ORDEM das escritas no Waze atravessa a sessão: a aprovação de quem entrou só sai depois da resposta da exclusão de quem saiu.
     await m.page.evaluate(() => document.getElementById('lightboxApprove').click());
-    await dormir(3700);                                               // a janela do Desfazer (3 s) vence
     const aprovacoes = () => m.rede.filter((x) => x.rota === 'validar-place' && x.aprovar).length;
     if (comEscritaNoAr) {
+      // A janela do Desfazer (3 s) venceu e a aprovação ESPERA a vez: é o sinal da página (a conta que o diálogo do "Sair"
+      // mostra), e não um relógio, que diz que ela saiu da janela.
+      await esperarOuExplodir(m.page, () => escritasEsperandoAVez.size >= 1 && !aprovacaoPendente, 'a aprovação sair da janela e esperar a vez do local');
       checa(aprovacoes() === 0, `${id}: a aprovação de quem entrou foi ao Waze com a exclusão de quem saiu ainda no ar — o Waze substitui a lista de fotos do local`);
       m.soltarTudo();                                                 // a resposta da exclusão de quem saiu chega
       checa(await m.esperarRede((x) => x.rota === 'validar-place' && x.aprovar, `${id}: a aprovação de quem entrou`), `${id}: a aprovação nunca saiu depois da resposta da exclusão`);
     } else {
-      checa(aprovacoes() === 1, `${id}: CONTROLE — sem exclusão no ar a aprovação devia sair ao fim da janela`, String(aprovacoes()));
+      await m.esperarRede((x) => x.rota === 'validar-place' && x.aprovar, `${id}: CONTROLE — sem exclusão no ar a aprovação`);
+      checa(aprovacoes() === 1, `${id}: CONTROLE — sem exclusão no ar a aprovação devia sair UMA vez ao fim da janela`, String(aprovacoes()));
     }
     checa(m.erros.length === 0, `${id}: erro de JS`, m.erros[0]);
     m.soltarTudo();
@@ -13075,14 +13078,20 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     };
     const okVivo = () => g.page.evaluate(() => !document.getElementById('lightboxNomeOk').disabled);
     const nomes = () => g.saiu.filter((x) => x.nome === 'renomear-local').map((x) => x.novoNome);
-    const aposAJanela = () => dormir(3700);
+    // Quem DEVE escrever espera a ida na rede (até 9 s); quem não deve, confere que nenhuma janela do Desfazer abriu — sem
+    // janela nenhuma escrita sai, e isso não depende de relógio.
+    const esperarNome = async (n) => {
+      const fim = Date.now() + 9000;
+      while (Date.now() < fim && nomes().length < n) await dormir(60);
+    };
+    const semJanela = () => g.page.evaluate(() => renomeacaoPendente === null && !AppState.pendingAction);
     // O campo abre com o nome CRU, e INTOCADO não escreve nada (o ✓ desabilitado, o Enter só sai da edição).
     await abrirEdicao();
     const aberto = await g.page.evaluate(() => document.getElementById('lightboxNomeInput').value);
     checa(aberto === 'Padaria Teste ', `${id}: PRÉ-CONDIÇÃO — o campo não abriu com o nome cru do Waze`, JSON.stringify(aberto));
     checa(!(await okVivo()), `${id}: o ✓ está vivo com o campo INTOCADO (o Enter gravaria o nome aparado sem a pessoa pedir)`);
     await g.page.keyboard.press('Enter');
-    await aposAJanela();
+    checa(await semJanela(), `${id}: o Enter com o campo intocado abriu a janela do Desfazer de uma escrita`);
     checa(nomes().length === 0, `${id}: o Enter com o campo intocado escreveu no Waze`, JSON.stringify(nomes()));
     checa(!(await g.page.evaluate(() => editandoNome())), `${id}: o Enter com o campo intocado não saiu da edição`);
     // O espaço do FIM tirado: habilita e escreve o nome aparado.
@@ -13090,7 +13099,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await g.page.fill('#lightboxNomeInput', 'Padaria Teste');
     checa(await okVivo(), `${id}: tirar o espaço sobrando no fim não habilita o ✓ (no-op calado)`);
     await g.page.keyboard.press('Enter');
-    await aposAJanela();
+    await esperarNome(1);
     checa(JSON.stringify(nomes()) === JSON.stringify(['Padaria Teste']), `${id}: tirar o espaço do fim não escreveu o nome aparado`, JSON.stringify(nomes()));
     await g.page.evaluate(() => { if (Lightbox.isOpen()) Lightbox.close(); });
     // CONTROLE: o nome SEM espaço sobrando e um espaço digitado no fim: o servidor apara, é o mesmo nome — não escreve.
@@ -13110,7 +13119,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     checa(clicou, `${id}: PRÉ-CONDIÇÃO — o banner do Desfazer não apareceu depois do nome`);
     const volta = await g.page.evaluate(() => AppState.currentPlace.name);
     checa(volta === 'Padaria Teste ', `${id}: o Desfazer devolveu um nome que o Waze nunca teve`, JSON.stringify(volta));
-    await aposAJanela();
+    checa(await semJanela(), `${id}: depois do Desfazer a janela do nome seguiu aberta`);
+    await dormir(3600);                                               // o que a janela mandaria, se o Desfazer não a tivesse cancelado
     checa(nomes().length === 1, `${id}: o nome desfeito foi mesmo assim ao Waze`, JSON.stringify(nomes()));
     checa(g.erros.length === 0, `${id}: erro de JS`, g.erros[0]);
     await g.fechar();
