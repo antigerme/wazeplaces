@@ -2154,6 +2154,16 @@ function presencaUltimaDela(h) {
     return ate;
 }
 
+// Há mensagem DELA nesta página mais nova que `ate`, a que um "lida" cobre? A
+// resposta de um "lida" só fala do que ele cobre: o que chegou depois é de
+// outro (o da rajada seguinte, o do fechamento) ou ninguém viu. Por isso nem o
+// sucesso quita, nem a falha cria ou tira a dívida de mensagem mais nova que
+// ele — as duas respostas passam por aqui, pra nenhuma das duas poder ser a
+// velha que apaga o que a nova deixou devendo (R21-5-01).
+function presencaTemMaisNovaQue(id, ate) {
+    return presencaUltimaDela(Presenca.historico.get(id)) > ate;
+}
+
 // A conversa que DEVE um "lida" tem mensagem DELA que a pessoa não viu, e que
 // só a LISTA conhece? O Waze marca a conversa INTEIRA: pagar a dívida assim
 // marcava como lida também essa — "Lida" pra quem mandou, e a não lida sumindo
@@ -2295,8 +2305,15 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
         Presenca.lidaVoltouEm.set(id, Math.max(Presenca.lidaVoltouEm.get(id) || 0, Date.now()));
         // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga
-        // — inclusive a guardada no aparelho.
-        presencaQuitarDivida(id);
+        // — inclusive a guardada no aparelho. Só a que ESTE "lida" cobre, porém
+        // (R21-5-01): a resposta dele pode voltar depois de a pessoa ver uma
+        // mensagem MAIS NOVA e o "lida" dessa falhar — a dívida que nasceu aí é
+        // dela, e o Waze processou este antes de ela existir. Quitada por esta
+        // resposta velha, a mensagem vista seguia não lida no Waze sem nada que
+        // a pagasse, e a pílula voltava a dizer "1 mensagem nova". Havendo
+        // mensagem dela mais nova que a que este cobre, a dívida fica; se o Waze
+        // o processou DEPOIS dela, o pagamento custa um "lida" a mais, e só.
+        if (!presencaTemMaisNovaQue(id, ultimaDela)) presencaQuitarDivida(id);
         presencaZerarNaoLidas(id, enviadoEm, { recontar: true });
     } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
@@ -2323,8 +2340,14 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
         // O histórico de AGORA, não o de quando ele saiu: a conversa sem
         // histórico ganha um com a mensagem que chega com ele no ar (ver
         // `presencaMensagemDoFluxo`, R14-5-03).
-        if (presencaUltimaDela(Presenca.historico.get(id)) > ultimaDela) presencaQuitarDivida(id);
-        else presencaDever(id);
+        //
+        // Com mensagem mais nova no histórico, a dívida não nasce aqui — e a que
+        // já EXISTE não é desta resposta mexer (R21-5-01). Ela é de um "lida" mais
+        // novo (a falha dele a criou antes desta resposta chegar: quitá-la
+        // deixava a mensagem vista não lida no Waze, sem nada que a pagasse) ou
+        // já foi tirada pela chegada da mensagem que ninguém viu
+        // (`presencaMensagemDoFluxo`), e então não há o que quitar.
+        if (!presencaTemMaisNovaQue(id, ultimaDela)) presencaDever(id);
         // No diário, que não mostrava falha nenhuma do "lida": uma linha por
         // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
         // por conversa devendo a cada fechamento (`presencaAnotarMsg`).
