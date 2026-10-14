@@ -496,3 +496,107 @@ test('R19-1-03 (estrutura): o `pageshow` do bfcache está ligado junto do `stora
     'a volta do bfcache deixou de reler o aparelho');
   assert.match(fatiar('aoVoltarDoBfcache'), /ev\.persisted !== true\) return;\s*aoGravarEmOutraAba\(\{ key: null, newValue: null, oldValue: null \}\);/);
 });
+
+// ───────────────────── R19-2-02: a recusa automática de duas abas manda UMA vez ─────────────────────
+// Duas abas abrindo juntas achavam os mesmos alvos na fila e mandavam cada rejeição ao Waze (o dobro
+// das chamadas no free tier). Agora uma trava entre abas (`navigator.locks`, no molde da
+// `travaDaSaida`): a aba que não a pega espera a outra soltar e confere o que sobrou.
+function gerenciadorDeTravas() {
+  const tomadas = new Set();
+  const filas = new Map();
+  return {
+    request(nome, opcoes, cb) {
+      if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+      return new Promise((resolve, reject) => {
+        const tenta = () => {
+          if (tomadas.has(nome)) return false;
+          tomadas.add(nome);
+          // Como no navegador: a trava é SOLTA antes de a promessa do `request` resolver.
+          const soltar = () => {
+            tomadas.delete(nome);
+            const prox = (filas.get(nome) || []).shift();
+            if (prox) prox();
+          };
+          Promise.resolve().then(() => cb({ name: nome })).then((v) => { soltar(); resolve(v); }, (e) => { soltar(); reject(e); });
+          return true;
+        };
+        if (tenta()) return;
+        if (opcoes && opcoes.ifAvailable) { Promise.resolve().then(() => cb(null)).then(resolve, reject); return; }
+        if (!filas.has(nome)) filas.set(nome, []);
+        filas.get(nome).push(tenta);
+      });
+    },
+  };
+}
+
+// As abas de mentira compartilham o "servidor" (cada pedido que chega) e a trava; o canal do pouso é
+// simulado: o que uma aba pousa sai da fila das outras.
+function abasDaRecusa({ locks = true, qtd = 2, extraDaB = [] } = {}) {
+  const travas = locks ? gerenciadorDeTravas() : null;
+  const recebidos = [];
+  const abas = [];
+  const alvos = [P(1, { creatorId: 9 }), P(2, { creatorId: 9 }), P(3, { creatorId: 9 })];
+  for (let i = 0; i < qtd; i++) {
+    const AppState = { queue: [P(100 + i, { creatorId: 1 }), ...alvos.map((p) => ({ ...p })), ...(i === 1 ? extraDaB : [])], currentPlace: null };
+    AppState.currentPlace = AppState.queue[0];
+    const deps = {
+      AppState, Treino: { ativo: false }, navigator: travas ? { locks: travas } : {}, RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica',
+      podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (c) => c === 9,
+      pedidosEmAndamento: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(), decididoNaOutraAbaDepoisDe: () => false,
+      recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false, recusaAutomaticaNestaFila: false, avisoDaRecusaAutomatica: null,
+      recusaAutomaticaEsperandoOutraAba: false,
+      updatePendingCount() {}, aoMudarAFilaPorBaixo() {}, API: { getRegion: () => 'row' }, carimboDoGesto: () => ({ dia: 'x', onde: '30' }),
+      showToast: () => ({ texto() {}, dispensar() {} }), t: (k) => k, dfato() {}, filaReal: () => AppState.queue,
+      enviarLote: async (lote) => {
+        for (const p of lote) {
+          await tique();
+          recebidos.push(i + ':' + p.updateRequestID);
+          // O pouso chega às OUTRAS abas pelo canal e tira o pedido da fila delas.
+          for (const outra of abas) if (outra !== a) outra.deps.AppState.queue = outra.deps.AppState.queue.filter((x) => x.updateRequestID !== p.updateRequestID);
+        }
+      },
+    };
+    const a = { deps, h: montar(['aplicarRecusaAutomatica', 'travaDaRecusaAutomatica', 'esperarOutraAbaNaRecusaAutomatica', 'chaveDoPedido'], deps) };
+    abas.push(a);
+  }
+  return { abas, recebidos };
+}
+const quiescente = async () => { for (let i = 0; i < 60; i++) await tique(); };
+
+test('R19-2-02: duas abas abrindo juntas mandam cada rejeição UMA vez — a que não pega a trava espera e confere o que sobrou', async () => {
+  const m = abasDaRecusa({ locks: true });
+  await Promise.all(m.abas.map((a) => a.h.aplicarRecusaAutomatica()));
+  await quiescente();
+  const porPedido = {};
+  for (const r of m.recebidos) { const id = r.split(':')[1]; porPedido[id] = (porPedido[id] || 0) + 1; }
+  assert.deepEqual(porPedido, { u1: 1, u2: 1, u3: 1 }, `DEFEITO: o Waze recebeu ${JSON.stringify(m.recebidos)} — a mesma rejeição pelas duas abas`);
+  // As duas filas terminam sem os alvos, e a trava ficou livre (a espera da aba B acabou).
+  for (const a of m.abas) assert.deepEqual(a.deps.AppState.queue.filter((p) => p.creatorId === 9), [], 'sobrou alvo na fila de uma aba');
+  assert.ok(m.abas.every((a) => a.deps.recusaAutomaticaRodando === false && a.deps.recusaAutomaticaEsperandoOutraAba === false), 'uma aba ficou presa na recusa ou na espera');
+});
+
+test('R19-2-02: CONTROLE — sem `navigator.locks` o comportamento é o de sempre (as duas abas mandam), e o instrumento enxerga a duplicata', async () => {
+  const m = abasDaRecusa({ locks: false });
+  await Promise.all(m.abas.map((a) => a.h.aplicarRecusaAutomatica()));
+  await quiescente();
+  assert.ok(m.recebidos.length > 3, `CONTROLE: sem a trava só ${m.recebidos.length} requisições — a medida não enxerga a duplicata`);
+});
+
+test('R19-2-02: o que SÓ a aba que esperou tem (outro filtro, outro país) ela manda depois, uma vez', async () => {
+  const soDaB = P(50, { creatorId: 9 });
+  const m = abasDaRecusa({ locks: true, extraDaB: [soDaB] });
+  await Promise.all(m.abas.map((a) => a.h.aplicarRecusaAutomatica()));
+  await quiescente();
+  const porPedido = {};
+  for (const r of m.recebidos) { const id = r.split(':')[1]; porPedido[id] = (porPedido[id] || 0) + 1; }
+  assert.deepEqual(porPedido, { u1: 1, u2: 1, u3: 1, u50: 1 }, `o pedido que só a aba B tem ficou sem recusa, ou saiu em dobro: ${JSON.stringify(m.recebidos)}`);
+});
+
+test('R19-2-02 (estrutura): a trava é do molde da `travaDaSaida` e é solta no `finally` do laço', () => {
+  const trava = fatiar('travaDaRecusaAutomatica');
+  assert.match(trava, /locks\.request\(RECUSA_AUTOMATICA_TRAVA, \{ ifAvailable: true \}/, 'a trava deixou de ser `ifAvailable`');
+  assert.match(trava, /if \(!locks\) return null;/, 'sem `navigator.locks` o comportamento de sempre deixou de valer');
+  const corpo = fatiar('aplicarRecusaAutomatica');
+  assert.match(corpo, /\} finally \{\s*recusaAutomaticaRodando = false;\s*if \(trava\) trava\.soltar\(\);/, 'a trava entre abas não é solta no `finally` do laço');
+  assert.match(corpo, /if \(trava === null\) \{ esperarOutraAbaNaRecusaAutomatica\(\); return; \}/, 'a aba que não pega a trava não espera a outra');
+});

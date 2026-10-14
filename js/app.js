@@ -19981,6 +19981,41 @@ let recusaAutomaticaRodando = false;
 // alguém pedir DURANTE esta.
 let recusaAutomaticaPedidaDeNovo = false;
 
+// A trava ENTRE ABAS da recusa automática (R19-2-02): `null` quando outra aba a tem, ou quando o
+// navegador não tem `navigator.locks` (aí vale o comportamento de sempre, sem esperar); senão uma
+// PROMESSA de `{ soltar }`. No molde da `travaDaSaida`: `ifAvailable`, presa pela vida do laço, e a
+// página que morre a solta sozinha — é do navegador.
+const RECUSA_AUTOMATICA_TRAVA = 'wp-recusa-automatica';
+function travaDaRecusaAutomatica() {
+    let locks = null;
+    try { locks = navigator.locks && typeof navigator.locks.request === 'function' ? navigator.locks : null; } catch (e) { locks = null; }
+    if (!locks) return null;
+    return new Promise((pronto) => {
+        let decidiu = false;
+        locks.request(RECUSA_AUTOMATICA_TRAVA, { ifAvailable: true }, (lock) => {
+            decidiu = true;
+            if (!lock) { pronto(null); return undefined; }
+            return new Promise((soltar) => pronto({ soltar }));
+        }).catch(() => { if (!decidiu) pronto({ soltar() {} }); });
+    });
+}
+
+// Outra aba está recusando: espera ela SOLTAR a trava e tenta uma vez de novo. Uma espera por aba;
+// pega e solta na hora (é só pra saber QUANDO a outra terminou), e quem recusa é a chamada de
+// sempre, que confere o que sobrou. Não é polling: a espera acaba sozinha quando a outra termina
+// ou morre.
+let recusaAutomaticaEsperandoOutraAba = false;
+function esperarOutraAbaNaRecusaAutomatica() {
+    let locks = null;
+    try { locks = navigator.locks; } catch (e) { locks = null; }
+    if (!locks || recusaAutomaticaEsperandoOutraAba) return;
+    recusaAutomaticaEsperandoOutraAba = true;
+    dfato('recusa.outraAba');
+    locks.request(RECUSA_AUTOMATICA_TRAVA, () => undefined).then(
+        () => { recusaAutomaticaEsperandoOutraAba = false; aplicarRecusaAutomatica(); },
+        () => { recusaAutomaticaEsperandoOutraAba = false; });
+}
+
 // Chamado depois de a fila crescer. Tira os pedidos dos autores marcados e
 // rejeita na hora, um a um, com o aviso contando quantos faltam.
 async function aplicarRecusaAutomatica() {
@@ -20019,8 +20054,34 @@ async function aplicarRecusaAutomatica() {
         return;
     }
     if (recusaAutomaticaRodando) { recusaAutomaticaPedidaDeNovo = true; return; }
+    if (!(AppState.queue || []).some(alvoFora(AppState.currentPlace))) return;
+
+    // UMA aba por vez (R19-2-02): com duas abas abrindo juntas (a janela restaurada, o app
+    // instalado e o navegador), cada uma achava os mesmos alvos na fila dela e mandava cada
+    // rejeição ao Waze — o dobro das chamadas (MEDIDO: 8 pedidos pra 4, e 4 repetidos por
+    // pedido com 500 ms de latência), no free tier, para o autor com mais pedidos. A conferência
+    // `decididoNaOutraAbaDepoisDe` só vê o que a outra aba JÁ pousou. A aba que não pega a trava
+    // espera a outra soltá-la e tenta uma vez de novo (`esperarOutraAbaNaRecusaAutomatica`): os
+    // pousos da outra já chegaram pelo canal e saíram da fila dela, e o que sobrar — o que só
+    // esta aba tem, de outro país ou outro filtro — ela manda. Sem `navigator.locks`
+    // (`travaDaRecusaAutomatica` devolve `null`), segue como sempre.
+    let trava = null;
+    const pedidoDaTrava = typeof travaDaRecusaAutomatica === 'function' ? travaDaRecusaAutomatica() : null;
+    if (pedidoDaTrava) {
+        // Ocupa já: a trava é assíncrona, e uma 2ª passada desta aba não passa na frente
+        // (ela anota o pedido de novo e é atendida no fim).
+        recusaAutomaticaRodando = true;
+        try { trava = await pedidoDaTrava; } finally { recusaAutomaticaRodando = false; }
+        if (trava === null) { esperarOutraAbaNaRecusaAutomatica(); return; }
+        // A espera pode ter durado: o treino, o portão, a conta ou o "Sair" mudaram. Solta e deixa
+        // as guardas do topo decidirem (o treino anota, o resto sai na primeira linha).
+        if (Treino.ativo || !podeRecusarAutomaticoAqui() || !contaConfirmada()) {
+            trava.soltar();
+            return aplicarRecusaAutomatica();
+        }
+    }
     const alvos = (AppState.queue || []).filter(alvoFora(AppState.currentPlace));
-    if (alvos.length === 0) return;
+    if (alvos.length === 0) { if (trava) trava.soltar(); return; }
 
     recusaAutomaticaRodando = true;
     // Zera ao ENTRAR, não ao sair: o que interessa é o pedido que chegar DAQUI
@@ -20106,6 +20167,8 @@ async function aplicarRecusaAutomatica() {
         });
     } finally {
         recusaAutomaticaRodando = false;
+        // A trava entre abas sai com o fim do laço (R19-2-02).
+        if (trava) trava.soltar();
         // Acabou: o aviso sai. Desligar o automático de alguém continua onde
         // sempre esteve — o interruptor da lista, na aba Histórico.
         aviso.dispensar();

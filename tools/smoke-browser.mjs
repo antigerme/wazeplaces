@@ -13814,6 +13814,89 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── RECUSA AUTOMÁTICA COM DUAS ABAS: cada rejeição sai UMA vez (R19-2-02) ────
+//
+// Duas abas abrindo juntas (a janela restaurada, o app instalado e o navegador)
+// achavam os mesmos alvos na fila e mandavam cada rejeição ao Waze: o dobro das
+// chamadas — no free tier —, com o placar e o Histórico certos (a 2ª resposta é
+// "já tratado"). Hoje uma trava entre abas (`navigator.locks`) deixa uma por
+// vez, e a que esperou confere o que sobrou.
+// CONTROLE: com `navigator.locks` tirado da página (o navegador sem a trava) as
+// duas mandam — o instrumento enxerga a duplicata. O servidor de mentira atrasa
+// 150 ms por requisição pra a janela da corrida existir de verdade.
+{
+  const recusaDeDuasAbas = async (semTrava) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const contagem = new Map();
+    const resolvidos = new Set();
+    const pedidos = Array.from({ length: 10 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRA' + i, updateRequestID: 'uRA' + i,
+      creatorId: i % 3 === 0 ? 9000 : 9100 + i, createdBy: i % 3 === 0 ? 'repetente' : 'autor' + i, imageUrls: [] }));
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      let status = 200;
+      if (nome === 'validar-place' || nome === 'marcar-lido') {
+        contagem.set(corpo.updateRequestID, (contagem.get(corpo.updateRequestID) || 0) + 1);
+        await dormir(150);
+        if (resolvidos.has(corpo.updateRequestID)) { status = 404; resp = { success: false, errorCategory: 'already_processed', error: 'x', errorList: [{ code: 702 }] }; }
+        else resolvidos.add(corpo.updateRequestID);
+      } else if (nome === 'perfil') {
+        resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      } else if (nome === 'buscar-places') {
+        const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
+        resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
+      } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript(([sem]) => {
+      try {
+        if (sem) Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true });
+        localStorage.setItem('waze_session_token', 'token-do-smoke-da-recusa');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        const d = new Date();
+        const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+        localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
+        localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 100, skipped: 0 }));
+      } catch (e) { /* armazenamento bloqueado */ }
+    }, [semTrava]);
+    const erros = [];
+    const abrir = async () => {
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => erros.push(String(e.message || e)));
+      await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+      return page;
+    };
+    const abas = await Promise.all([abrir(), abrir()]);
+    // O FIM: as duas abas com a fila aberta, a recusa parada e nada no ar.
+    for (const a of abas) {
+      await esperarOuExplodir(a, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
+        && !recusaAutomaticaRodando && !recusaAutomaticaEsperandoOutraAba && !AppState.inFlightActions,
+      'a recusa automática terminar');
+    }
+    await esperarOuExplodir(abas[0], () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'a aba 0 sem alvos na fila');
+    await esperarOuExplodir(abas[1], () => !AppState.queue.some((p) => p.creatorId === 9000 && p !== AppState.currentPlace), 'a aba 1 sem alvos na fila');
+    await abas[0].waitForTimeout(400);   // cobre uma 2ª passada que viesse atrasada
+    const fila = await Promise.all(abas.map((a) => a.evaluate(() => AppState.queue.map((p) => p.updateRequestID))));
+    await ctx.close();
+    return { contagem, erros, fila };
+  };
+  const sem = await recusaDeDuasAbas(true);
+  const repetidosSem = [...sem.contagem].filter(([, n]) => n > 1);
+  checa(sem.contagem.size >= 1, 'recusa/duas abas: CONTROLE — nenhuma rejeição saiu (a recusa automática não rodou)', JSON.stringify([...sem.contagem]));
+  checa(repetidosSem.length >= 1, 'recusa/duas abas: CONTROLE — sem a trava nenhum pedido saiu em dobro (o instrumento não vê a corrida)', JSON.stringify([...sem.contagem]));
+  const com = await recusaDeDuasAbas(false);
+  const repetidos = [...com.contagem].filter(([, n]) => n > 1);
+  checa(com.contagem.size >= 1, 'recusa/duas abas: nenhuma rejeição saiu (a recusa automática não rodou)', JSON.stringify([...com.contagem]));
+  checa(repetidos.length === 0, 'recusa/duas abas: a mesma rejeição foi ao Waze pelas duas abas', JSON.stringify(repetidos));
+  checa(com.erros.length === 0 && sem.erros.length === 0, 'recusa/duas abas: erro de JS', com.erros[0] || sem.erros[0]);
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
@@ -13904,6 +13987,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + a tecla SEGURADA decide uma vez só (← → ↑ e o Enter no ✕ focado, a 30 Hz por 2 s, sem o Desfazer: um pedido só — com o CONTROLE do keydown simples decidindo UM e o da página contando as repetições que chegaram)`
   + `, + o QR emitido SOBREVIVENDO à recarga (o "Sair" depois dela cancela o código, com o CONTROLE do "Sair" sem recarga, o relatório do modo dev sem o código e a aba sem sobra depois do "Sair")`
   + `, + a página que volta do bfcache relendo o aparelho (o pageshow persistido, com a aba sem ouvir o "Sair" de outra, sai e tira o card do DOM; com os CONTROLES do pageshow sem persisted e do persistido com a sessão ainda no aparelho)`
+  + `, + a recusa automática com DUAS abas abrindo juntas mandando cada rejeição UMA vez (servidor de 150 ms por requisição, com o CONTROLE da página sem navigator.locks, em que as duas mandam)`
   + `, + o card da auditoria de 2026-09-29 (a foto em decisão falhando no meio da saída pelo ✕ e o card VOLTANDO com o aviso, com o CONTROLE da foto que chega; Enter no ✕ ↑ ✓ e no Desfazer levando o foco ao botão equivalente, com e sem a janela, e o CONTROLE do mouse que não move foco; Enter no "Ver +N" e na barra do foco sem largar o foco no <body>; a foto que falha depois de o foco pousar no ✕ levando o foco ao ↑, com o CONTROLE da foto que chega; a barra do foco no autor voltando à ordem normal sem trocar o card; a barra SUMINDO quando a outra aba decide a série inteira, com o foco do teclado indo ao ✕ do card, com os CONTROLES da série que segue viva e do mouse; a seta e o gesto decidindo o último pedido do autor com o foco na barra, e o foco indo ao "Ver +N" do card novo — ou, no fim da fila, a barra saindo de cima do "Tudo limpo!" com o foco no "Verificar novamente", e o Desfazer do último devolvendo a barra com o foco no ✕ —, com os CONTROLES da série que segue e do mouse; e o card travado pelo lote respondendo ao toque no botão disabled, à seta e ao arraste, um aviso por vez, saindo quando a trava acaba, com o CONTROLE da janela do Desfazer calada)`
   + `, + a página que chega com o card do Desfazer na tela (sem redesenhá-lo: mesmo nó, foco no ✕, card de fundo acertado, com o CONTROLE do redesenho de verdade) e o refazer adiado pra janela do Desfazer com a página indo pro fundo (✕ do último e "Rejeitar os N": espera a volta e sai como busca normal, com o CONTROLE da janela que vence com a página à vista)`
   + `, + mapa e pílula que não saem da caixa (girar o aparelho, o ponto longe que não derruba os que cabem, o ampliado de 82 km com os dois pontos na tela, o de 2.510 km AVISANDO como o card e sem prometer na legenda o marcador fora da tela, e a pílula do nome em edição no Fold)`
