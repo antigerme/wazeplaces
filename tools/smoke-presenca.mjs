@@ -1475,6 +1475,77 @@ try {
       }
     } else if (falhou) anota('controle: o Waze de mentira não guardou a mensagem da bia');
   }
+
+  // ── 14. TEXTO DO WAZE da direita pra esquerda, e o "Sair" de outra aba (R20-5) ──
+  // O nome de um local em hebraico ou árabe vem de OUTRO aparelho e é texto do
+  // Waze: a folha do pedido o mostra na direção dele (`dir="auto"`), e a prévia da
+  // lista (📍 nome · tipo) é frase do APP com o nome no meio — o parágrafo fica na
+  // direção do app e o nome é isolado. Medido pelo navegador (`direction`), com
+  // controle: o nome latino dá `ltr` nos dois, e o texto de GENTE em hebraico
+  // (a mensagem) dá `rtl` na mesma lista — o instrumento enxerga o `rtl`.
+  console.log('\n14. texto do Waze em hebraico: a folha do pedido na direção dele, a prévia na do app; e o "Sair" de outra aba não recria o chat');
+  await bia.page.evaluate(() => { for (const id of ['presencaModal', 'conversaModal', 'pedidoModal']) if (!document.getElementById(id).classList.contains('hidden')) closeModal(id); });
+  await esperar(bia, () => !CamadaVoltar.consumindo, 'o voltar do fechamento não assentou');
+  const direcoes = await bia.page.evaluate(() => {
+    const dir = (id) => getComputedStyle(document.getElementById(id)).direction;
+    const pedido = (nome) => {
+      abrirPedidoRecebido({ venueID: '1.2.3', name: nome, address: nome, categories: ['BAKERY'], updateTypeKey: 'IMAGE', imageUrl: null, lat: 1, lon: 2, region: 'row' }, 'cafanha');
+      const r = { nome: dir('pedidoNome'), end: dir('pedidoEnd') };
+      closeModal('pedidoModal');
+      return r;
+    };
+    return { hebraico: pedido('מסעדה הרצל (סניף 2)'), latino: pedido('Padaria Estrela (filial 2)') };
+  });
+  if (direcoes.hebraico.nome === 'rtl' && direcoes.hebraico.end === 'rtl') ok('o nome e o endereço do pedido em hebraico ficam da direita pra esquerda');
+  else anota(`a folha do pedido em hebraico: ${JSON.stringify(direcoes.hebraico)}`);
+  if (direcoes.latino.nome === 'ltr' && direcoes.latino.end === 'ltr') ok('controle: o nome latino segue da esquerda pra direita');
+  else anota(`controle: a folha do pedido em latim: ${JSON.stringify(direcoes.latino)}`);
+  await esperar(bia, () => !CamadaVoltar.consumindo, 'o voltar do fechamento do pedido não assentou');
+  const previas = await bia.page.evaluate(() => {
+    const ultima = (texto, card) => ({ deMim: false, ts: Date.now(), recibo: false, texto, card });
+    Presenca.online = [];
+    Presenca.conversas = [
+      { id: '901', nome: 'Hebraico', naoLidas: 0, atividade: 3, ultima: ultima('', { name: 'מסעדה הרצל (סניף 2)', updateTypeKey: 'IMAGE' }) },
+      { id: '902', nome: 'Latino', naoLidas: 0, atividade: 2, ultima: ultima('', { name: 'Padaria Estrela', updateTypeKey: 'IMAGE' }) },
+      { id: '903', nome: 'Gente', naoLidas: 0, atividade: 1, ultima: ultima('שלום מה שלומך היום', null) },
+    ];
+    openModal('presencaModal');
+    presencaRenderLista();
+    const l2 = [...document.querySelectorAll('#presencaLista .presenca-l2')].map((e) => ({ direction: getComputedStyle(e).direction, texto: e.textContent }));
+    closeModal('presencaModal');
+    return l2;
+  });
+  const [pHeb, pLat, pGente] = previas;
+  if (pHeb && pHeb.direction === 'ltr' && pHeb.texto.startsWith('📍 ⁨מסעדה')) ok('a prévia do pedido com nome em hebraico fica na direção do app, com o nome isolado');
+  else anota(`a prévia do pedido em hebraico: ${JSON.stringify(pHeb)}`);
+  if (pLat && pLat.direction === 'ltr' && !/[⁦-⁩]/.test(pLat.texto)) ok('controle: a prévia com nome latino sai sem marca de isolamento');
+  else anota(`controle: a prévia do pedido em latim: ${JSON.stringify(pLat)}`);
+  if (pGente && pGente.direction === 'rtl') ok('controle: a mensagem de gente em hebraico segue da direita pra esquerda na mesma lista');
+  else anota(`controle: a mensagem em hebraico na lista: ${JSON.stringify(pGente)}`);
+  await esperar(bia, () => !CamadaVoltar.consumindo, 'o voltar do fechamento da lista não assentou');
+
+  // O "Sair" dado noutra aba chega à página CONGELADA (bfcache) pelo `pageshow`, e
+  // a volta da presença rodava antes de o app conferir o aparelho (R20-5-04).
+  const voltaDoBfcache = (sair) => bia.page.evaluate((sair) => {
+    Presenca.tentadaEm = 0; Presenca.atualizadaEm = 0;
+    if (sair) { for (const k of ['waze_session_token', 'waze_places_conta', 'waze_places_chat']) localStorage.removeItem(k); }
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  }, sair);
+  const antes14 = apiDe(bia, 'presenca-app').length;
+  await voltaDoBfcache(false);
+  let pediu = false;
+  for (let i = 0; i < 40 && !pediu; i++) { pediu = apiDe(bia, 'presenca-app').length > antes14; if (!pediu) await dormir(100); }
+  if (pediu) ok('controle: o `pageshow` com o token no aparelho pede a lista');
+  else anota('controle: o `pageshow` com o token no aparelho não pediu a lista — o instrumento não enxerga o pedido');
+  // O pedido do controle TERMINA antes: com ele no ar, um segundo pedido da
+  // presença é o mesmo (`Presenca.pedindo`) e a medição mediria o prazo.
+  await esperar(bia, () => !Presenca.pedindo, 'o pedido do controle não terminou');
+  const depois14 = apiDe(bia, 'presenca-app').length;
+  await voltaDoBfcache(true);
+  await dormir(1200);
+  const chave = await bia.page.evaluate(() => localStorage.getItem('waze_places_chat'));
+  if (apiDe(bia, 'presenca-app').length === depois14 && chave === null) ok('o "Sair" de outra aba: o `pageshow` não pede a lista com a sessão que já se foi, e `waze_places_chat` não volta');
+  else anota(`o pageshow depois do "Sair" de outra aba: ${apiDe(bia, 'presenca-app').length - depois14} pedido(s), waze_places_chat ${chave === null ? 'ausente' : 'RECRIADO'}`);
 } finally {
   await browser.close();
   srv.kill('SIGKILL');
