@@ -12,8 +12,9 @@
 //             (preso ao canto do botão, que é px, com ícone e selo em rem). Agora ele
 //             se prende ao ícone e SOBE quanto cresce; a 1× fica EXATAMENTE em 2px/2px.
 //  R21-5-07 · a foto da folha do pedido recebido era 150px fixos e, em janela baixa, a
-//             folha abria mostrando só o cabeçalho e a foto. Agora ela é um item flex
-//             que encolhe até 72px: onde o conteúdo cabe, nada encolhe.
+//             folha abria mostrando só o cabeçalho e a foto. Agora, até 420px de altura
+//             (onde nenhum pedido com foto cabe), ela é um item flex que encolhe até
+//             72px; fora disso é a de sempre — 150px, sem encolher, pixel a pixel.
 //
 // A medida na tela (hit-test dos controles, tinta do selo, nome e ↗ da folha do pedido,
 // a 1× sem diferença) está na seção 6c de `tools/smoke-presenca.mjs`, com os controles.
@@ -347,26 +348,73 @@ test('R21-5-03 · o selo ainda cresce com o texto (o dígito inteiro dentro dele
   assert.match(pilula, /id="presencaIconGente" class="w-6 h-6"/);
 });
 
-// ═══ R21-5-07 · a foto da folha do pedido recebido cede ══════════════════════
+// ═══ R21-5-07 · a foto da folha do pedido recebido cede em JANELA BAIXA ═══════
 
-const FOTO = declaracoes(regra('.pedido-foto'));
+const MEDIA_FOTO = '@media (max-height: 420px)';
+const LIMITE_JANELA_BAIXA = 420;
+// O pedido com foto MAIS CURTO que o app consegue abrir (só o nome: sem tipo, categoria
+// nem endereço), medido no navegador a 0,85× (o menor texto do Android): 307px (319 a 1×,
+// 360 a 1,5×, 420 a 2×). A seção 6c do smoke da presença mede de novo a cada rodada.
+const CONTEUDO_MINIMO_COM_FOTO_A_085 = 307;
 
-test('R21-5-07 · a foto do pedido recebido é um item flex que ENCOLHE, de 150px até 72px (e só quando falta lugar)', () => {
+// O corpo de um `@media (...) { … }` (com as chaves aninhadas), exigindo UMA ocorrência:
+// guard que lê a primeira de um texto repetido lê a errada (o duplicado do lote 23).
+function blocoDoMedia(texto) {
+  const i = CSS_SEM.indexOf(texto + ' {');
+  assert.ok(i >= 0, `sumiu o ${texto}`);
+  assert.equal(CSS_SEM.indexOf(texto + ' {', i + 1), -1, `${texto} aparece mais de uma vez`);
+  let prof = 0;
+  let j = CSS_SEM.indexOf('{', i);
+  const ini = j + 1;
+  for (; j < CSS_SEM.length; j++) {
+    if (CSS_SEM[j] === '{') prof++;
+    else if (CSS_SEM[j] === '}' && --prof === 0) break;
+  }
+  return CSS_SEM.slice(ini, j);
+}
+
+test('R21-5-07 · FORA da janela baixa a foto do pedido recebido segue com 150px e não encolhe (o que cabia fica igual)', () => {
+  const FOTO = declaracoes(regra('.pedido-foto'));
   assert.equal(FOTO.height, '150px', 'sem a altura de hoje, o caso que cabe muda');
-  assert.equal(FOTO['flex-shrink'], '1');
-  assert.match(FOTO['min-height'], /^\d+px$/, 'o piso da foto é em px (a foto não cresce com o texto)');
-  const piso = parseInt(FOTO['min-height'], 10);
-  assert.ok(piso >= 48 && piso <= 96, `o piso da foto (${piso}px) não é uma faixa que mostre o que a foto é`);
   assert.match(FOTO.overflow, /hidden/);
-  // O elemento NÃO leva o `flex-shrink-0` do Tailwind nem outro que o desfaça: a
-  // classe vive no HTML, e o styles.css só ganha o empate por ORDEM (gotcha #22).
+  // A regra base não encolhe nem tem piso: quem a impede de encolher é o `flex-shrink-0`
+  // do HTML, e o `@media` o vence pela ORDEM (o styles.css vem depois do Tailwind).
+  assert.equal(FOTO['flex-shrink'], undefined, 'a regra base não pode permitir o encolhimento: ele mudaria 393×851 a 1,5× e o Galaxy Fold a 1×');
+  assert.equal(FOTO['min-height'], undefined);
   const tag = (HTML.match(/<div id="pedidoFoto"[^>]*>/) || [])[0];
   assert.ok(tag, 'sumiu o #pedidoFoto');
-  assert.doesNotMatch(tag, /flex-shrink-0|\bshrink-0\b/, 'o #pedidoFoto voltou a não encolher');
-  // E o que faz ela encolher: a folha é coluna flex e tem teto (70dvh/100%) com rolagem.
+  assert.match(tag, /\bflex-shrink-0\b/, 'o #pedidoFoto perdeu o `flex-shrink-0`: fora da janela baixa ele passaria a encolher');
+});
+
+test('R21-5-07 · só até 420px de altura a foto cede, de 150px até 72px (um item flex que encolhe)', () => {
+  const bloco = blocoDoMedia(MEDIA_FOTO);
+  const m = bloco.match(/^\s*\.pedido-foto \{([^}]*)\}\s*$/);
+  assert.ok(m, `o @media da foto não tem só a regra da foto: ${JSON.stringify(bloco)}`);
+  const d = declaracoes(m[1]);
+  assert.deepEqual(Object.keys(d).sort(), ['flex-shrink', 'min-height'], 'a altura de 150px não pode mudar dentro do @media (é a base do flex)');
+  assert.equal(d['flex-shrink'], '1');
+  assert.match(d['min-height'], /^\d+px$/, 'o piso da foto é em px (a foto não cresce com o texto)');
+  const piso = parseInt(d['min-height'], 10);
+  assert.ok(piso >= 48 && piso <= 96, `o piso da foto (${piso}px) não é uma faixa que mostre o que a foto é`);
+  // E o que faz ela ceder: a folha é coluna flex e tem teto (70dvh/100%) com rolagem.
   const folha = HTML.slice(HTML.indexOf('id="pedidoModal"'), HTML.indexOf('id="pedidoFoto"'));
   assert.match(folha, /<div class="folha [^"]*flex flex-col overflow-y-auto/, 'a folha do pedido deixou de ser coluna flex com rolagem: a foto não tem de quem ceder');
   assert.match(CSS_SEM, /\.folha \{ max-height: min\(70dvh, 100%\);/, 'o teto da folha mudou: refaça a conta da foto');
+  // O empate com o `flex-shrink-0` do Tailwind se decide pela ORDEM no arquivo gerado.
+  const APP = ler('css/app.css');
+  const util = APP.indexOf('.flex-shrink-0{');
+  const regraBaixa = APP.indexOf(`@media (max-height:${LIMITE_JANELA_BAIXA}px){.pedido-foto{`);
+  assert.ok(util >= 0 && regraBaixa > util, 'o @media da foto precisa vir DEPOIS do `.flex-shrink-0` do Tailwind em css/app.css (npm run css)');
+});
+
+test('R21-5-07 · nenhum pedido com foto cabe nas janelas do @media: o que a foto cede ali não tira nada de quem cabia', () => {
+  // O desenho anterior encolhia em toda janela e mudava 393×851 a 1,5× e o Galaxy Fold a 1×
+  // (o texto à vista, só o respiro de 1rem do corpo passando do teto). Abaixo do limite a
+  // folha tem 70% dele; o pedido mais curto que há tem de passar disso, no menor texto.
+  assert.ok(0.7 * LIMITE_JANELA_BAIXA < CONTEUDO_MINIMO_COM_FOTO_A_085,
+    `70% de ${LIMITE_JANELA_BAIXA}px (${0.7 * LIMITE_JANELA_BAIXA}) comporta o pedido mais curto (${CONTEUDO_MINIMO_COM_FOTO_A_085}px): a foto passaria a ceder onde cabia`);
+  assert.ok(LIMITE_JANELA_BAIXA >= 412, 'o limite não alcança mais o Android deitado (412px de altura): a foto volta a empurrar o nome e o ↗');
+  assert.ok(CSS_SEM.includes(`${MEDIA_FOTO} {`), 'o limite do teste e o do CSS divergem');
 });
 
 test('R21-5-07 · o cabeçalho e o corpo da folha do pedido NÃO encolhem antes da foto', () => {

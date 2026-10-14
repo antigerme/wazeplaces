@@ -2819,18 +2819,38 @@ button:active {
    69 e a foto 150, e ela abria mostrando só os dois, com o nome, o ↗ (a ÚNICA ação
    da folha) e o endereço abaixo da dobra e nenhuma pista de rolagem (R21-5-07,
    lote 25; o mesmo em 667×375 a 1,5×; em 844×390 e 732×412 o nome e o ↗ já
-   apareciam, e o tipo, as categorias e o endereço não). Agora a foto CEDE: é um
-   item flex que encolhe (o `flex-shrink-0` saiu do HTML) até 72px. O flex só
-   encolhe o que passa do teto da folha (70dvh): onde o conteúdo cabe nada passa,
-   e a foto segue com os 150px de hoje (393×851, 412×915, 360×740…, pixel a pixel);
-   onde não cabe, a foto dá o que falta e o resto da folha — que não encolhe —
-   fica. Os 72px são escolha de desenho: o menor que ainda deixa reconhecer a
-   foto (sem piso ela chegava a 8px em 844×390, e a folha sem foto nenhuma não diz
-   o que o colega perguntou). Abaixo disso a folha rola como sempre rolou. O
-   enquadramento é do `object-cover` da <img> (altura 100% do item, que o flex já
-   definiu): a 16:9 e a 9:16 continuam cortando o meio, na altura que a folha deu. */
-.pedido-foto { height: 150px; flex-shrink: 1; min-height: 72px; overflow: hidden; background: rgb(241 245 249); }
+   apareciam, e o tipo, as categorias e o endereço não).
+   Em JANELA BAIXA (até 420px de altura) a foto CEDE: vira um item flex que encolhe
+   (o `flex-shrink: 1` do `@media` vence o `flex-shrink-0` do HTML pela ORDEM: o
+   styles.css vem depois do Tailwind) até 72px. O flex só encolhe o que passa do
+   teto da folha (70dvh): a foto dá o que falta e o resto da folha — que não
+   encolhe — fica. Os 72px são escolha de desenho: o menor que ainda deixa
+   reconhecer a foto (sem piso ela chegava a 8px em 844×390, e a folha sem foto
+   nenhuma não diz o que o colega perguntou). Abaixo disso a folha rola como sempre
+   rolou. O enquadramento é do `object-cover` da <img> (altura 100% do item, que o
+   flex já definiu): a 16:9 e a 9:16 continuam cortando o meio, na altura que a
+   folha deu.
+   POR QUE SÓ ATÉ 420px — o primeiro desenho encolhia em toda janela e mudava o que
+   cabia: o flex não distingue "o texto passou" de "só o respiro de baixo passou",
+   e o corpo termina em `pb-4` (1rem). Em 393×851 a 1,5× a folha tem 595,7px e o
+   conteúdo 609: o endereço está inteiro à vista e só 13px do respiro passam (no
+   Galaxy Fold a 1× são 14px), e o flex tirava esses 13 e 14px da foto só pra
+   acabar com a rolagem. Abaixo de 420px de altura isso não existe: o pedido com
+   foto MAIS CURTO que o app consegue abrir (só o nome, sem tipo, categoria nem
+   endereço) pede 307px a 0,85× (o menor texto do Android), 319 a 1×, 360 a 1,5× e
+   420 a 2×, e 70% de 420 são 294px — nenhum pedido com foto cabe nessas janelas, e
+   o que a foto cede ali não tira nada de quem cabia. O limite não pode passar de
+   438px (307 ÷ 0,7: dali o pedido mais curto, no menor texto, passa a caber): a
+   maioria dos Android deitados tem até 412px de altura, e o iPhone Max (430) e o
+   Pixel Pro (448) ficam como hoje. Fora do `@media` a regra é a de sempre — 150px e
+   o `flex-shrink-0` do HTML —, pixel a pixel. Seguem como hoje, de propósito,
+   porque falham FORA da janela baixa e pedem outra conta: 320×568 a 1× (conteúdo
+   451 numa folha de 398) e 360×740 a 1,5× (609 numa de 518). */
+.pedido-foto { height: 150px; overflow: hidden; background: rgb(241 245 249); }
 .dark .pedido-foto { background: rgb(51 65 85); }
+@media (max-height: 420px) {
+  .pedido-foto { flex-shrink: 1; min-height: 72px; }
+}
 
 #conversaForm { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }
 

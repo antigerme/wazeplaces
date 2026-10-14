@@ -657,7 +657,9 @@ try {
   //    teclado aberto (Chrome do Android: o teclado ENCOLHE a janela, e o 70dvh junto),
   //    deitado ou com o texto maior;
   //  · o selo numérico da pílula cobrindo 57–68% do balão de conversa a 1,5×–2×;
-  //  · a folha do pedido recebido abrindo só com o cabeçalho e a foto em janela baixa.
+  //  · a folha do pedido recebido abrindo só com o cabeçalho e a foto em janela baixa (a foto
+  //    cede só até 420px de altura; fora dali, e onde cabia, nada muda — inclusive onde só o
+  //    respiro de baixo do corpo passa do teto).
   // O teclado EMULADO aqui é a janela redimensionada (o que o Chrome do Android faz) e o
   // `--kb-inset` (o que o iOS exige): não é teclado de aparelho, e o campo do iPhone de
   // verdade não se mede neste smoke. Cada medida tem o seu CONTROLE: a mesma tela com a
@@ -1041,7 +1043,7 @@ try {
       await fim6();
 
       // ── R21-5-07 · a folha do pedido recebido em janela baixa ─────────────
-      const dadosDoPedido = (foto) => ({ venueID: '205522459.2055159053.3242788', name: 'Padaria Estrela do Norte', address: 'R. Aurora, 412 — Centro, São Paulo', categories: ['BAKERY', 'COFFEE_SHOP'], updateTypeKey: 'IMAGE', imageUrl: foto ? 'https://venue-image.waze.com/thumbs/thumb700_' + foto : null, lat: -23.5, lon: -46.6, region: 'row' });
+      const dadosDoPedido = (foto, soONome = false) => ({ venueID: '205522459.2055159053.3242788', name: soONome ? 'A' : 'Padaria Estrela do Norte', address: soONome ? '' : 'R. Aurora, 412 — Centro, São Paulo', categories: soONome ? [] : ['BAKERY', 'COFFEE_SHOP'], ...(soONome ? {} : { updateTypeKey: 'IMAGE' }), imageUrl: foto ? 'https://venue-image.waze.com/thumbs/thumb700_' + foto : null, lat: -23.5, lon: -46.6, region: 'row' });
       const medirPedido = () => {
         const f = document.getElementById('pedidoModal').firstElementChild;
         const fr = f.getBoundingClientRect();
@@ -1057,16 +1059,19 @@ try {
         const foto = el('pedidoFoto'), img = el('pedidoFotoImg');
         const escondida = foto.classList.contains('hidden');
         const wr = foto.getBoundingClientRect(), ir = img.getBoundingClientRect();
+        const er = el('pedidoEnd').getBoundingClientRect();
         return {
           vp: [innerWidth, innerHeight], folhaH: fr.height, rola: f.scrollHeight > f.clientHeight + 1,
+          conteudo: f.scrollHeight, rolaPx: f.scrollHeight - f.clientHeight, rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+          endInteiro: er.height > 0 && er.top >= fr.top - 0.5 && er.bottom <= fr.bottom + 0.5,
           fotoH: escondida ? null : wr.height, carregada: img.complete && img.naturalWidth > 1, natural: [img.naturalWidth, img.naturalHeight],
           imgIgualAoItem: escondida || (Math.abs(ir.height - wr.height) < 0.5 && Math.abs(ir.width - wr.width) < 0.5),
           objectFit: getComputedStyle(img).objectFit, nome: aVista('pedidoNome'), wme: aVista('pedidoWme'), end: aVista('pedidoEnd'),
         };
       };
-      const celulaPedido = async (c, foto, { esperaFoto = true } = {}) => {
+      const celulaPedido = async (c, foto, { esperaFoto = true, soONome = false } = {}) => {
         await janela6(c.w, c.h, c.esc);
-        await p6.evaluate((d) => abrirPedidoRecebido(d, 'cafanha'), dadosDoPedido(foto));
+        await p6.evaluate((d) => abrirPedidoRecebido(d, 'cafanha'), dadosDoPedido(foto, soONome));
         await esperar(e6, () => !document.getElementById('pedidoModal').classList.contains('hidden'), 'o pedido da 6c não abriu');
         if (foto && esperaFoto) await esperar(e6, () => { const i = document.getElementById('pedidoFotoImg'); return i.complete && i.naturalWidth > 1; }, `a foto ${foto} do pedido da 6c não carregou`);
         await quadros6(); await quadros6();
@@ -1077,7 +1082,12 @@ try {
         // O que CABE hoje: a foto segue com os 150px e a folha não rola.
         { id: '393×851 a 1×', w: 393, h: 851, esc: 1, cabe: true },
         { id: '360×640 a 1×', w: 360, h: 640, esc: 1, cabe: true },
-        // O que NÃO cabia: nome e ↗ (a única ação) passam a aparecer sem rolar.
+        // O que cabe SE NÃO SE CONTAR o respiro de baixo do corpo (`pb-4`, 1rem): o texto todo à vista, e
+        // só uns px de padding passam do teto (a folha rola 13px e 14px). O desenho que encolhia a foto em
+        // TODA janela mudava estas duas — tirava 13px da foto só pra acabar com essa rolagem.
+        { id: '393×851 a 1,5×', w: 393, h: 851, esc: 1.5, respiro: true },
+        { id: '280×653 (Galaxy Fold) a 1×', w: 280, h: 653, esc: 1, respiro: true },
+        // O que NÃO cabia, em janela baixa (até 420px): nome e ↗ (a única ação) passam a aparecer sem rolar.
         { id: '568×320 deitado a 1×', w: 568, h: 320, esc: 1, cede: true },
         { id: '667×375 deitado a 1,5×', w: 667, h: 375, esc: 1.5, cede: true },
         { id: '844×390 deitado a 1×', w: 844, h: 390, esc: 1, cede: true },
@@ -1091,6 +1101,11 @@ try {
           if (c.cabe) {
             if (m.fotoH === 150 && !m.rola && m.nome && m.wme && m.end) ok(`${rotulo}: a foto segue com 150px, a folha não rola e o nome, o ↗ e o endereço aparecem`);
             else anota(`${rotulo}: cabia e mudou — ${JSON.stringify(m)}`);
+          } else if (c.respiro) {
+            if (m.fotoH !== 150) anota(`${rotulo}: cabia (só o respiro passava do teto) e a foto mudou pra ${f1(m.fotoH)}px — ${JSON.stringify(m)}`);
+            else if (!m.rola) anota(`${rotulo}: a célula já não passa do teto — não exercita mais o respiro de baixo; ajuste-a (${JSON.stringify(m)})`);
+            else if (m.nome && m.wme && m.end && m.endInteiro && m.rolaPx <= m.rem + 0.5) ok(`${rotulo}: o texto todo à vista e a foto segue com 150px — só ${f1(m.rolaPx)}px do respiro de baixo passam do teto (como hoje)`);
+            else anota(`${rotulo}: cabia (só o respiro passava do teto) e mudou — ${JSON.stringify(m)}`);
           } else if (c.cede) {
             if (m.nome && m.wme && m.fotoH >= 71.5 && m.fotoH < 150) ok(`${rotulo}: a foto cedeu pra ${f1(m.fotoH)}px (folha de ${f1(m.folhaH)}px) e o nome e o ↗ aparecem sem rolar`);
             else anota(`${rotulo}: o nome e o ↗ não aparecem sem rolar — ${JSON.stringify(m)}`);
@@ -1100,7 +1115,9 @@ try {
       }
       // SEM foto o corpo já aparecia (a foto some e não pesa); COM a foto ainda SEM carregar (a
       // rede lenta) a caixa já tem a mesma altura que terá depois — a foto não "pula" ao chegar.
-      const cSem = PEDIDO_CELULAS[2];
+      const celulaDe = (id) => PEDIDO_CELULAS.find((c) => c.id === id);
+      const C_RETRATO = celulaDe('393×851 a 1×'), C_568 = celulaDe('568×320 deitado a 1×');
+      const cSem = C_568;
       const mSem = await celulaPedido(cSem, null);
       if (mSem.fotoH === null && mSem.nome && mSem.wme) ok('sem foto, a folha do pedido em 568×320 mostra o nome e o ↗ (a foto escondida não pesa)');
       else anota(`sem foto, a folha do pedido em 568×320: ${JSON.stringify(mSem)}`);
@@ -1117,15 +1134,68 @@ try {
       // CONTROLE: com a foto fixa de antes (150px, sem encolher) o nome e o ↗ ficam FORA em 568×320
       // — a medida enxerga o defeito — e em 393×851 seguem à vista (o caso que cabia).
       const velhaFoto = await p6.addStyleTag({ content: '.pedido-foto { flex-shrink: 0 !important; min-height: 0 !important; }' });
-      const mVelha = await celulaPedido(PEDIDO_CELULAS[2], 'x');
+      const mVelha = await celulaPedido(C_568, 'x');
       if (!mVelha.nome && !mVelha.wme && mVelha.fotoH === 150) ok('controle: com a foto fixa de antes, em 568×320 o nome e o ↗ ficam FORA da folha sem rolar — a medida enxerga o defeito');
       else anota(`controle: com a foto fixa de antes, 568×320 mostra ${JSON.stringify(mVelha)} — a medida não distinguiria nada`);
       await fechaPedido();
-      const mVelhaRetrato = await celulaPedido(PEDIDO_CELULAS[0], 'x');
+      const mVelhaRetrato = await celulaPedido(C_RETRATO, 'x');
       if (mVelhaRetrato.nome && mVelhaRetrato.wme && mVelhaRetrato.fotoH === 150) ok('controle: com a foto fixa de antes, o retrato 393×851 é igual (o que cabia já era assim)');
       else anota(`controle: o retrato com a foto fixa de antes: ${JSON.stringify(mVelhaRetrato)}`);
       await fechaPedido();
       await p6.evaluate((el) => el.remove(), velhaFoto);
+      // FORA da janela baixa e sem caber (falham hoje e seguem assim, de propósito: pedem outra conta, e o
+      // flex não sabe distinguir o texto do respiro): a foto não mexe.
+      for (const c of [{ id: '320×568 a 1× (o iPhone SE de 1ª geração)', w: 320, h: 568, esc: 1 }, { id: '360×740 a 1,5×', w: 360, h: 740, esc: 1.5 }]) {
+        const m = await celulaPedido(c, 'x');
+        if (m.fotoH === 150 && m.rola) ok(`${c.id}: acima de 420px de altura a foto segue com 150px (o conteúdo de ${m.conteudo}px numa folha de ${f1(m.folhaH)}px rola, como hoje)`);
+        else anota(`${c.id}: fora da janela baixa a foto mexeu — ${JSON.stringify(m)}`);
+        await fechaPedido();
+      }
+      // CONTROLE do que o @media evita: com a foto cedendo em TODA janela (o primeiro desenho) as duas células
+      // do respiro encolhem a foto onde o texto já estava à vista — a medida enxerga a mudança.
+      const sempreCede = await p6.addStyleTag({ content: '.pedido-foto { flex-shrink: 1 !important; min-height: 72px !important; }' });
+      for (const id of ['393×851 a 1,5×', '280×653 (Galaxy Fold) a 1×']) {
+        const m = await celulaPedido(celulaDe(id), 'x');
+        if (m.fotoH < 149 && !m.rola) ok(`controle: com a foto cedendo em TODA janela, a de ${id} encolhe pra ${f1(m.fotoH)}px onde o texto já estava à vista — a medida enxerga o que o @media evita`);
+        else anota(`controle: com a foto cedendo em toda janela, ${id} mostra ${JSON.stringify(m)} — a medida não distinguiria o desenho antigo`);
+        await fechaPedido();
+      }
+      await p6.evaluate((el) => el.remove(), sempreCede);
+      // O LIMITE do @media (o que está no CSS que a página carregou): nenhum pedido com foto cabe em 70% dele,
+      // nem o mais curto que o app consegue abrir (só o nome), no menor texto do Android (0,85×) e nos maiores.
+      const limiteDoMedia = await p6.evaluate(() => {
+        for (const folha of [...document.styleSheets]) {
+          let regras = [];
+          try { regras = [...folha.cssRules]; } catch (e) { continue; }
+          for (const r of regras) {
+            if (r instanceof CSSMediaRule && [...r.cssRules].some((x) => x.selectorText === '.pedido-foto')) {
+              const m = /max-height:\s*(\d+)px/.exec(r.conditionText || r.media.mediaText);
+              if (m) return Number(m[1]);
+            }
+          }
+        }
+        return null;
+      });
+      if (limiteDoMedia === null) anota('o @media da foto do pedido não está no CSS carregado');
+      else {
+        const minimo = {};
+        // Medido numa janela ALTA (900px), onde o @media não vale e a foto tem os 150px: a altura da janela não
+        // muda o conteúdo, e numa janela de 420px o próprio @media o encolheria e a medida mentiria.
+        for (const esc of [0.85, 1, 1.5, 2]) {
+          const m = await celulaPedido({ w: 900, h: 900, esc }, 'x', { soONome: true });
+          if (m.fotoH !== 150) anota(`o pedido mais curto em 900×900 a ${esc}× tem a foto em ${m.fotoH}px, não 150: a medida do conteúdo mínimo não vale`);
+          minimo[esc] = m.conteudo;
+          await fechaPedido();
+        }
+        const cabe = Object.entries(minimo).filter(([, v]) => v <= 0.7 * limiteDoMedia + 0.5);
+        if (cabe.length === 0) ok(`o pedido com foto MAIS CURTO (só o nome) pede ${minimo[0.85]}px a 0,85×, ${minimo[1]}px a 1×, ${minimo[1.5]}px a 1,5× e ${minimo[2]}px a 2×, e 70% de ${limiteDoMedia}px são ${f1(0.7 * limiteDoMedia)}px: nenhum cabe nas janelas do @media`);
+        else anota(`nas janelas de ${limiteDoMedia}px o pedido mais curto CABE (${JSON.stringify(Object.fromEntries(cabe))} ≤ ${f1(0.7 * limiteDoMedia)}px): a foto cederia onde cabia — baixe o limite do @media`);
+        // CONTROLE: a mesma medida numa janela alta TEM que dar "cabe" (senão ela não distingue nada).
+        const alto = await celulaPedido({ w: 900, h: 800, esc: 1 }, 'x', { soONome: true });
+        if (alto.conteudo <= 0.7 * 800 + 0.5 && !alto.rola) ok(`controle: o mesmo pedido em 900×800 cabe (${alto.conteudo}px em ${f1(alto.folhaH)}px) — a medida distingue`);
+        else anota(`controle: o pedido mais curto não cabe nem em 900×800 — ${JSON.stringify(alto)}`);
+        await fechaPedido();
+      }
       // ── o selo nas telas MAIS estreitas ───────────────────────────────────
       // O Galaxy Fold (280px) e o iPhone SE de 1ª geração (320px): o cabeçalho é o mais apertado que
       // existe, e o selo não pode passar da borda do botão nem tirar o toque do vizinho — nem a 2×. Aqui
