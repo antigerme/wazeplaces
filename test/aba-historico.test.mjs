@@ -51,7 +51,7 @@ const fimDaTarefa = () => new Promise((ok) => setTimeout(ok, 0));
 test('H1: entrar na aba Histórico DESENHA o painel, e antes de marcar as novas como vistas', () => {
   const ordem = [];
   const els = new Map();
-  const el = (id) => { if (!els.has(id)) els.set(id, { id, classList: classes(), setAttribute() {}, tabIndex: 0 }); return els.get(id); };
+  const el = (id) => { if (!els.has(id)) els.set(id, { id, classList: classes(), setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; }, parentElement: { scrollTop: 0 }, tabIndex: 0 }); return els.get(id); };
   const deps = {
     document: { getElementById: el },
     FILTER_TABS: [{ tab: 'filtersTabFilters', panel: 'filtersPanelFilters' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },

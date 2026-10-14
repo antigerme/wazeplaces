@@ -1896,6 +1896,15 @@ const FILTER_TABS = [
 
 function switchFilterTab(tabId) {
     const $ = id => document.getElementById(id);
+    // A aba MUDA? As três dividem a mesma caixa rolável, e a troca só alterna `hidden`: a
+    // aba nova herdava a rolagem da anterior (Preferências rolada até o fim, tocar em
+    // Histórico — abria no meio, com a patente e os primeiros totais cortados; R18-7-02,
+    // MEDIDO nos dois motores). Aba que muda abre no topo; a MESMA aba tocada de novo (ou
+    // redesenhada, como no idioma) fica onde a pessoa está. O `openModal` já zera a
+    // rolagem ao abrir, e quem rola DEPOIS da troca (`abrirPreferenciaDoUndo`,
+    // `abrirConquistaNova`) não é afetado: a troca vem antes, no mesmo tique.
+    const atual = FILTER_TABS.find(({ tab }) => $(tab)?.getAttribute('aria-selected') === 'true');
+    const mudou = !atual || atual.tab !== tabId;
     FILTER_TABS.forEach(({ tab, panel }) => {
         const selected = tab === tabId;
         const btn = $(tab);
@@ -1903,6 +1912,10 @@ function switchFilterTab(tabId) {
         btn.setAttribute('aria-selected', selected ? 'true' : 'false');
         btn.tabIndex = selected ? 0 : -1;
         $(panel).classList.toggle('hidden', !selected);
+        if (selected && mudou) {
+            const caixa = $(panel).parentElement;
+            if (caixa) caixa.scrollTop = 0;
+        }
     });
     // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
     // handler do botão porque a aba também se alcança pelo teclado (setas, Home,

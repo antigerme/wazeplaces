@@ -449,3 +449,46 @@ test('R18-8-01: a renovação da queda (a fila fica) repõe o "Restam" — o "�
   await t.renovar();
   assert.deepEqual([antes, t.el.textContent], ['3', '3'], 'o "Restam" do treino mudou com a renovação');
 });
+
+// ═══ R18-7-02 · a aba dos Filtros que muda abre no TOPO ═══════════════════════
+// As três abas dividem a mesma caixa rolável e a troca só alterna `hidden`: a aba nova
+// herdava a rolagem da anterior.
+function filtrosComCaixa() {
+  const caixa = { scrollTop: 0 };
+  const els = new Map();
+  const novo = (id, extra = {}) => { const e = { id, attrs: {}, tabIndex: 0, scrollTop: 0, classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k] ?? null; }, ...extra }; els.set(id, e); return e; };
+  const abas = ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'];
+  const paineis = ['filtersPanelFilters', 'filtersPanelPrefs', 'filtersPanelHistory'];
+  abas.forEach((a) => novo(a));
+  paineis.forEach((p) => novo(p, { parentElement: caixa }));
+  els.get('filtersTabFilters').attrs['aria-selected'] = 'true';
+  const log = [];
+  const deps = {
+    document: { getElementById: (id) => els.get(id) || novo(id) },
+    FILTER_TABS: abas.map((tab, i) => ({ tab, panel: paineis[i] })),
+    renderHistory: () => log.push(['historia', caixa.scrollTop]), marcarConquistasVistas() {}, renderUndoGateUI() {},
+  };
+  const h = montar(['switchFilterTab'], deps);
+  return { h, caixa, log };
+}
+
+test('R18-7-02: trocar de aba abre a nova no TOPO da caixa rolável — antes de a Histórico desenhar —, e a MESMA aba tocada de novo fica onde está', () => {
+  const m = filtrosComCaixa();
+  m.h.switchFilterTab('filtersTabPrefs');
+  m.caixa.scrollTop = 319;                      // a pessoa rolou as Preferências até o fim
+  m.h.switchFilterTab('filtersTabHistory');
+  assert.equal(m.caixa.scrollTop, 0,
+    'DEFEITO: a aba Histórico abriu no meio (a rolagem das Preferências ficou) — patente e primeiros totais cortados');
+  assert.deepEqual(m.log.at(-1), ['historia', 0], 'a rolagem tem que zerar ANTES do desenho da aba (a ordem do renderHistory)');
+  // CONTROLE: a mesma aba tocada de novo (ou redesenhada pelo idioma) não tira a pessoa de onde está.
+  m.caixa.scrollTop = 200;
+  m.h.switchFilterTab('filtersTabHistory');
+  assert.equal(m.caixa.scrollTop, 200, 'CONTROLE: a mesma aba tocada de novo perdeu a rolagem');
+  // Pra Filtros e pra Preferências também.
+  m.h.switchFilterTab('filtersTabFilters');
+  assert.equal(m.caixa.scrollTop, 0, 'a aba Filtros herdou a rolagem');
+  m.caixa.scrollTop = 150;
+  m.h.switchFilterTab('filtersTabPrefs');
+  assert.equal(m.caixa.scrollTop, 0, 'a aba Preferências herdou a rolagem');
+});
