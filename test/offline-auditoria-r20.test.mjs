@@ -593,7 +593,7 @@ function fabDeMentira() {
   const doc = { getElementById: (id) => (id === 'devFabBtn' ? btn : id === 'devFab' ? fab : null) };
   const deps = {
     document: doc, MODAL_IDS: [], MutationObserver: class { observe() {} }, requestAnimationFrame: (f) => { f(); return 1; }, cancelAnimationFrame: () => {},
-    posicionarFabDev: () => {}, acompanharAReservaDoFab: () => {}, addEventListener: () => {}, removeEventListener: () => {},
+    posicionarFabDev: () => {}, acompanharAReservaDoFab: () => {}, levantarOFabComAPilha: () => {}, addEventListener: () => {}, removeEventListener: () => {},
     sessionStorage: { getItem: () => null, setItem: () => {} }, innerWidth: 400, innerHeight: 800,
     atualizarFabDev: () => {}, dlogCapturar: (m) => { capturas.push(m); return {}; },
     DEV_FAB_PEGAR_MS: 15, navigator: {}, setTimeout, clearTimeout, Math, Number,

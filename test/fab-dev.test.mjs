@@ -32,6 +32,9 @@ function montar({ guardado = null, largura = 390, altura = 844 } = {}) {
   let relogios = [];
   const sessao = new Map(guardado ? [['__devFabPos', guardado]] : []);
   const capturas = [];
+  // O levante pela pilha de avisos (R22-4-02): o gesto o pede ao soltar; o que importa é QUANDO (com o botão já solto,
+  // porque a função sai cedo se ele ainda está `fab-pego`).
+  const levantes = [];
   const deps = {
     document: { getElementById: (id) => (id === 'devFabBtn' ? btn : id === 'devFab' ? fab : null) },
     MODAL_IDS: [], MutationObserver: class { observe() {} },
@@ -44,6 +47,7 @@ function montar({ guardado = null, largura = 390, altura = 844 } = {}) {
     dlogCapturar: (motivo) => { capturas.push(motivo); return {}; }, atualizarFabDev() {}, posicionarFabDev() {},
     // A pilha de avisos que reposiciona o FAB de baixo (R21-4-06) tem teste próprio, mais abaixo: o gesto não a usa.
     acompanharAReservaDoFab() {},
+    levantarOFabComAPilha() { levantes.push({ pego: classes.has('fab-pego') }); },
   };
   const chaves = Object.keys(deps);
   const api = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null;\n' + fatiar('ligarFabDev')
@@ -54,7 +58,7 @@ function montar({ guardado = null, largura = 390, altura = 844 } = {}) {
     if (t !== 'pointerdown') disparar(ouvintesJanela, t, { pointerId: id, clientX: x, clientY: y });
   };
   const passarOTempo = () => { const r = relogios; relogios = []; for (const fn of r) if (fn) fn(); };
-  return { api, fab, classes, ponteiro, passarOTempo, capturas, sessao, clique: (detail) => disparar(ouvintesBtn, 'click', { detail }) };
+  return { api, fab, classes, ponteiro, passarOTempo, capturas, sessao, levantes, clique: (detail) => disparar(ouvintesBtn, 'click', { detail }) };
 }
 
 test('FAB: toque DEVAGAR (segura e solta sem andar) é toque — captura e NÃO fixa o botão', () => {
@@ -71,6 +75,30 @@ test('FAB: toque DEVAGAR (segura e solta sem andar) é toque — captura e NÃO 
   assert.equal(m.api.fixado(), true, 'CONTROLE: arrastar deixou de fixar');
   assert.ok(m.sessao.get('__devFabPos'), 'o arraste não gravou a posição');
   assert.deepEqual(m.capturas, ['manual'], 'arrastar não é tocar');
+});
+
+// R22-4-02: os avisos saíam ENQUANTO o botão estava na mão (`fab-pego`, o levante sai cedo) e, solto sem andar, o FAB ficava no
+// alto sem aviso nenhum na tela — até um card novo reavaliar o canto. Soltar sem andar reavalia o levante, com o botão já solto.
+test('FAB: segurou e soltou SEM andar → a pilha de avisos é reavaliada com o botão já solto (R22-4-02)', () => {
+  const m = montar();
+  m.ponteiro('pointerdown', 1, 310, 710, true);
+  m.passarOTempo();                              // pegou (fab-pego)
+  assert.ok(m.classes.has('fab-pego'), 'PRÉ-CONDIÇÃO: o botão não foi pego');
+  assert.equal(m.levantes.length, 0, 'PRÉ-CONDIÇÃO: o levante rodou antes de soltar');
+  m.ponteiro('pointerup', 1, 310, 710, true);
+  assert.deepEqual(m.levantes, [{ pego: false }],
+    'soltar sem andar não reavaliou o levante (ou o fez com o botão ainda pego, quando ele sai cedo)');
+  // Toque rápido (nem chegou a pegar) também reavalia: é inofensivo e a pilha pode ter mudado debaixo do dedo.
+  m.ponteiro('pointerdown', 2, 310, 710, true);
+  m.ponteiro('pointerup', 2, 310, 710, true);
+  assert.equal(m.levantes.length, 2);
+  // CONTROLE: ARRASTAR fixa o botão e o levante não deve mexer no que o editor posicionou (a função recusa o fixado; aqui
+  // basta que o gesto não a chame, o arraste já grava a posição).
+  m.ponteiro('pointerdown', 3, 310, 710, true);
+  m.ponteiro('pointermove', 3, 250, 600);
+  m.ponteiro('pointerup', 3, 250, 600, true);
+  assert.equal(m.api.fixado(), true, 'CONTROLE: arrastar deixou de fixar');
+  assert.equal(m.levantes.length, 2, 'arrastar não deveria pedir o levante: o botão é do editor agora');
 });
 
 test('FAB: OUTRO dedo na tela não move o botão nem encerra o gesto de quem o pegou', () => {

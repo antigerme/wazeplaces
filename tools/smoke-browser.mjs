@@ -9437,6 +9437,64 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   checa(fugiu.some(([, base, , fugido, apos]) => fugido !== base && apos !== base),
     'R7-4-01: CONTROLE — com a pilha medida dentro da ESCOLHA do canto o FAB não fugiu e ficou fora do lugar depois dos avisos; a medida não enxerga o defeito', JSON.stringify(fugiu));
 
+  // ── 1b. O FAB PEGO (segurado) quando os avisos saem: ao soltar ele volta ao lugar (R22-4-02) ───────────
+  // O levante sai cedo com o botão `fab-pego` (não se mexe debaixo do dedo). Os avisos que saíam ENQUANTO ele estava na mão
+  // não eram acompanhados, e solto sem andar o FAB ficava no alto, sem aviso nenhum na tela, até um card novo reavaliar o
+  // canto (MEDIDO a 360×740: 108 px acima do lugar). O gesto agora reavalia o levante ao soltar.
+  // CONTROLE: com o levante NEUTRALIZADO só no instante de soltar (o desenho de antes, emulado) o mesmo percurso termina com o
+  // FAB no alto — a medida enxerga o defeito; sem ele, o FAB desce ao piso de antes.
+  {
+    const { ctx, page, erros } = await montarTela({ width: 360, height: 740 }, 1);
+    const estado = () => page.evaluate(() => { const f = document.getElementById('devFabBtn').getBoundingClientRect();
+      const d = document.getElementById('devFab');
+      return { canto: d.dataset.canto, y: Math.round(f.top), pego: d.classList.contains('fab-pego'), avisos: document.querySelectorAll('#toastContainer > *').length }; });
+    const percurso = async (rotulo, neutralizarAoSoltar) => {
+      await page.evaluate(() => { document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove()); posicionarFabDev(); });
+      await assentar(page, 300);
+      const base = await estado();
+      checa(/^baixo/.test(base.canto) && !base.pego && base.avisos === 0,
+        `R22-4-02/${rotulo}: PRÉ-CONDIÇÃO — o FAB não está solto num canto de baixo, sem avisos`, JSON.stringify(base));
+      await page.evaluate(() => { window.__baseDoFab = Math.round(document.getElementById('devFabBtn').getBoundingClientRect().top);
+        for (const tx of ['Sua sessão continua ativa: renovei os cookies do Waze em segundo plano e não há nada a fazer agora.', 'dois', 'três']) showToast(tx, 'info', 60000); });
+      // ... e ASSENTOU: o toast entra animado e a reserva é a altura MEDIDA da pilha; o FAB só está livre quando o dedo cai nele.
+      const subiu = await esperarNaPagina(page, () => { const r = document.getElementById('devFabBtn').getBoundingClientRect();
+        const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return Math.round(r.top) < window.__baseDoFab - 20 && !!el && !!el.closest('#devFab'); }, 8000, 100);
+      await assentar(page, 300);
+      checa(subiu.ok, `R22-4-02/${rotulo}: PRÉ-CONDIÇÃO — com 3 avisos o FAB não subiu (a medida seria vazia)`, JSON.stringify(await estado()));
+      // Segura o FAB (o mouse, sem andar) até ele ser PEGO — o `pegar` é um relógio de 200 ms.
+      const c = await page.evaluate(() => { const r = document.getElementById('devFabBtn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await page.mouse.move(c.x, c.y); await page.mouse.down();
+      const pegou = await esperarNaPagina(page, () => document.getElementById('devFab').classList.contains('fab-pego'), 5000, 50);
+      checa(pegou.ok, `R22-4-02/${rotulo}: PRÉ-CONDIÇÃO — segurar o FAB não o pegou`, JSON.stringify(await estado()));
+      // Os avisos saem COM ele na mão: o levante sai cedo (pego), então o FAB segue no alto — e é isso que ficava depois de soltar.
+      await page.evaluate(() => { document.querySelectorAll('#toastContainer > *').forEach((e) => e.remove()); });
+      const semAvisos = await esperarNaPagina(page, () => document.querySelectorAll('#toastContainer > *').length === 0
+        && document.getElementById('notifyStack').getBoundingClientRect().height < 4, 8000, 100);
+      await doisQuadros(page);
+      const segurando = await estado();
+      checa(semAvisos.ok && segurando.pego && segurando.y < base.y - 20,
+        `R22-4-02/${rotulo}: PRÉ-CONDIÇÃO — com os avisos fora e o FAB na mão ele devia seguir no alto e pego (senão o caso não existe)`, JSON.stringify({ base, segurando }));
+      if (neutralizarAoSoltar) await page.evaluate(() => { window.__levantarDeVerdade = window.levantarOFabComAPilha; window.levantarOFabComAPilha = () => {}; });
+      await page.mouse.up();
+      // O fim é o FAB PARAR no lugar: solto (sem `fab-pego`) e sem animação no `top` (a transição de 0,2 s volta ao normal).
+      await esperarNaPagina(page, () => !document.getElementById('devFab').classList.contains('fab-pego'), 5000, 50);
+      await assentar(page, 400);
+      await doisQuadros(page);
+      const solto = await estado();
+      if (neutralizarAoSoltar) await page.evaluate(() => { window.levantarOFabComAPilha = window.__levantarDeVerdade; });
+      return { base, segurando, solto };
+    };
+    const certo = await percurso('FAB pego', false);
+    checa(!certo.solto.pego && certo.solto.avisos === 0 && certo.solto.canto === certo.base.canto && certo.solto.y === certo.base.y,
+      `R22-4-02: soltou o FAB sem andar com os avisos já fora e ele ficou no alto (${certo.base.canto}@${certo.base.y} → ${certo.solto.canto}@${certo.solto.y})`, JSON.stringify(certo));
+    const sem = await percurso('CONTROLE sem o levante ao soltar', true);
+    checa(sem.solto.avisos === 0 && sem.solto.y < sem.base.y - 20,
+      'R22-4-02: CONTROLE — sem o levante ao soltar o FAB já voltava ao lugar; a medida não enxerga o defeito', JSON.stringify(sem));
+    checa(erros.length === 0, 'R22-4-02: erro de JS', erros[0]);
+    await ctx.close();
+  }
+
   // ── 2. A barra ✕ ↑ ✓ fora da janela alerta; a sã, não (R21-4-04); e a escala vem no arquivo (R21-4-03) ──
   const CASOS_BARRA = [
     ['Galaxy Fold 280×653 · texto ×2', { width: 280, height: 653 }, 2, true],

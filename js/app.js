@@ -11299,6 +11299,11 @@ function ligarFabDev() {
             soltarPega();
             if (arrastou) {
                 try { sessionStorage.setItem('__devFabPos', fab.style.left + '|' + fab.style.top); } catch (er) {}
+            } else {
+                // Segurou e soltou sem andar: o `levantarOFabComAPilha` sai cedo com o botão pego, então a
+                // pilha que mudou ENQUANTO ele estava na mão (os avisos saíram) não foi acompanhada, e o FAB
+                // ficava no alto, sem aviso nenhum na tela, até um card novo reavaliar o canto (R22-4-02).
+                levantarOFabComAPilha();
             }
             alvo = null;
         };
