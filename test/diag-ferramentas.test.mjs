@@ -75,11 +75,46 @@ const PROBE = readFileSync(join(ROOT, 'tools/waze-probe.mjs'), 'utf8');
 const HELPERS_QUE_SO_LEEM = new Set(['wazeIssuesEndpoint', 'wazeSessionEndpoint', 'wazeCountriesEndpoint', 'wazeStatesEndpoint']);
 const HELPERS_QUE_ESCREVEM = new Set(['wazeMarkReadEndpoint', 'wazeStarEndpoint', 'wazeFeaturesEndpoint']);
 
+// A recusa do probe, extraída do FONTE e rodada de verdade: o probe é um script de linha de comando (lê
+// argv e cookies ao importar), então não se importa — e um arquivo de apoio novo em tools/ teria de entrar
+// na árvore do CLAUDE.md. A lista e a função moram juntas no probe, e é a função que `get()` chama.
+function recusaDoProbe() {
+  const lista = PROBE.split('\n').find((l) => /^const ESCRITA = \[/.test(l));
+  const i = PROBE.indexOf('function caminhoDeEscrita(url) {');
+  assert.ok(lista && i > 0, 'a recusa do probe (ESCRITA + caminhoDeEscrita) sumiu');
+  const fim = PROBE.indexOf('\n}\n', i);
+  const fonte = `${lista}\n${PROBE.slice(i, fim + 2)}\nreturn caminhoDeEscrita;`;
+  return new Function(fonte)();
+}
+
+// R23-4-03: a regra rodava sobre o TEXTO da URL, antes de o `fetch` a normalizar. Cada variante abaixo é o mesmo
+// caminho de escrita depois da normalização (ponto, barra dupla, escape, `..`) e passava. Os GETs que o probe
+// de fato usa, e os que merecem passar, seguem passando (CONTROLE: sem ele, "recusa tudo" também passaria).
+test('waze-probe: a recusa lê o caminho NORMALIZADO — ponto, barra dupla, escape e `..` não a driblam', () => {
+  const recusa = recusaDoProbe();
+  const B = 'https://www.waze.com/row-Descartes/app';
+  const escrevem = [
+    '/Issues/Read', '/Issues/./Read', '/Issues//Read', '/%49ssues/Read', '/Issues%2FRead', '/Issues/%52ead',
+    '/x/../Issues/Read', '/Issues/Read/', '/Issues/Read?x=1', '/Issues/Star', '/Issues/./Star', '/Issues/%2e/Star',
+    '/Issues/%252e/Star', '/%2549ssues/Read', '/Features', '/./Features', '//Features', '/%46eatures', '/Features/..;/Features',
+    '/Issues/Resolve', '/issues/read', '/Issues;a=b/Read', '/Issues/Read;x', '/Issues/%2e%2e/Issues/Read',
+  ];
+  for (const c of escrevem) assert.equal(recusa(B + c), true, `o probe deixaria passar ${c}`);
+  assert.equal(recusa(B + '/Issues/%'), true, 'escape quebrado tem que ser recusado (falha fechada)');
+  assert.equal(recusa('nao é url'), true, 'URL ilegível tem que ser recusada (falha fechada)');
+  const leem = [
+    '/Session?language=pt-BR', '/LocationSearch/Countries', '/LocationSearch/States?countryId=30', '/Issues/Search/List',
+    '/Issues/Search/List?x=/Issues/Read', '/Session', '/Issues/Reader', '/Issues/./Search/List', '/Issues//Search/List',
+  ];
+  for (const c of leem) assert.equal(recusa(B + c), false, `o probe recusaria um GET legítimo: ${c}`);
+});
+
 test('waze-probe: todo caminho REST do core que escreve casa com a recusa mecânica — e os que só leem passam', () => {
   const linhaDaLista = PROBE.split('\n').find((l) => /^const ESCRITA = \[/.test(l));
   assert.ok(linhaDaLista, 'a lista ESCRITA sumiu do waze-probe');
   const regras = new Function(`return ${linhaDaLista.replace(/^const ESCRITA = /, '').replace(/;\s*$/, '')}`)();
   assert.ok(Array.isArray(regras) && regras.length >= 3 && regras.every((r) => r instanceof RegExp), 'o extrator não leu as regras do probe');
+  const recusa = recusaDoProbe();
 
   const helpers = [...CORE.matchAll(/^const (waze\w*Endpoint) = [^\n]*/gm)].map((m) => ({ nome: m[1], corpo: m[0] }));
   assert.ok(helpers.length >= 7, `só ${helpers.length} helpers de endpoint achados no core — o padrão mudou`);
@@ -92,7 +127,7 @@ test('waze-probe: todo caminho REST do core que escreve casa com a recusa mecân
       : [...h.corpo.matchAll(/'(\/[A-Za-z/]+)(?:\?[^']*)?'/g)].map((m) => m[1]).pop();
     assert.ok(caminho, `${h.nome}: não achei o caminho dele`);
     const url = `https://www.waze.com/row-Descartes/app${caminho}`;
-    const casa = regras.some((r) => r.test(url));
+    const casa = recusa(url);
     if (HELPERS_QUE_ESCREVEM.has(h.nome)) {
       assert.ok(casa, `${h.nome} (${caminho}) ESCREVE no Waze e o waze-probe não o recusa — ele agiria na conta do owner`);
     } else {
