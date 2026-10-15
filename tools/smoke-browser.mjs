@@ -2793,6 +2793,120 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     checa(r.aplicar.inicial !== 'ok' || r.cancelar.inicial !== 'ok' || r.aplicar.depois !== 'ok', 'Filtros no zoom 400%: CONTROLE — sem a escada o "Aplicar" segue ao alcance; a medida está cega', JSON.stringify(r));
     await ctx.close();
   }
+
+  // ── 14. LOTE 27 (R23) · o QR do pareamento, o fieldset dos tipos, os marcadores do mapa no contraste alto e a escala do mapa ──────────────────────────
+  {
+    // R23-7-04: o canvas do QR nasce 300×150 + moldura (326 px): a 280–360 px passava do cartão antes do 1º desenho. Com o `max-w-full` cabe, e DEPOIS do desenho
+    // o QR é quadrado e do tamanho de sempre (o JS tira o teto): com o teto ele encolheria na largura e ficaria amassado.
+    for (const w of [280, 320, 360]) {
+      const { ctx, page, erros } = await novaPaginaL25({ width: w, height: 653 }, 1);
+      await entrarL25(page, 'pt');
+      const medir = () => page.evaluate(() => { const c = document.getElementById('pairQr'); const r = c.getBoundingClientRect(); const k = document.querySelector('#pairShowModal > div').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), foraEsq: Math.round(k.left - r.left), foraDir: Math.round(r.right - k.right) }; });
+      await page.evaluate(() => { openModal('pairShowModal'); document.getElementById('pairQr').classList.remove('hidden'); });
+      const antes = await medir();
+      checa(antes.foraEsq <= 0 && antes.foraDir <= 0, `QR ${w} px: o canvas ANTES do desenho passa do cartão (${JSON.stringify(antes)})`);
+      await page.evaluate(async () => { await carregarQr(); await desenharQrPareamento('https://wazeplaces.example/#pair=ABCDEFGHIJKLMNOPQRST'); });
+      const depois = await medir();
+      checa(depois.w === depois.h, `QR ${w} px: o QR DESENHADO não é quadrado (${depois.w}×${depois.h}): o teto o amassou`, JSON.stringify(depois));
+      checa(depois.w >= 180, `QR ${w} px: o QR desenhado encolheu para ${depois.w} px (o de sempre tem 205)`, JSON.stringify(depois));
+      checa(depois.foraEsq <= 0 && depois.foraDir <= 0, `QR ${w} px: o QR desenhado passa do cartão (${JSON.stringify(depois)})`);
+      // CONTROLE: sem o teto o canvas de antes passa do cartão (a medida enxerga o defeito).
+      await page.evaluate(() => { const c = document.getElementById('pairQr'); c.removeAttribute('style'); c.width = 300; c.height = 150; c.style.maxWidth = 'none'; });
+      const ctrl = await medir();
+      checa(ctrl.foraEsq > 0 || ctrl.foraDir > 0 || w >= 360, `QR ${w} px: CONTROLE — sem o teto o canvas de 300×150 não passa do cartão; a medida está cega`, JSON.stringify(ctrl));
+      checa(erros.length === 0, `QR ${w} px: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+  }
+  {
+    // R23-8-04: o fieldset dos tipos de pedido (UA: `min-inline-size: min-content`) passava do cartão com o texto grande no Fold e no SE de 320 px.
+    for (const [rot, w, esc] of [['Fold', 280, 1.8], ['Fold', 280, 2], ['SE 320', 320, 2]]) {
+      const { ctx, page, erros } = await novaPaginaL25({ width: w, height: 653 }, esc);
+      for (const lang of LINGUAS) {
+        await entrarL25(page, lang);
+        const medir = () => page.evaluate(() => { openModal('filtersModal'); switchFilterTab('filtersTabFilters');
+          const k = document.querySelector('#filtersModal > div').getBoundingClientRect(); let pior = 0;
+          for (const e of document.querySelectorAll('#filtersPanelFilters fieldset, #filtersPanelFilters fieldset legend, #filtersPanelFilters fieldset span')) { const r = e.getBoundingClientRect(); pior = Math.max(pior, Math.round(r.right - k.right + 24)); }
+          return pior; });
+        const pior = await medir();
+        checa(pior <= 0, `fieldset dos tipos · ${rot} a ${esc}× · ${lang}: passa ${pior} px da borda de dentro do cartão`);
+        await fecharL25(page);
+      }
+      checa(erros.length === 0, `fieldset dos tipos · ${rot} a ${esc}×: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+    {
+      // CONTROLE: sem as classes (o defeito) a MESMA tela passa do cartão em algum idioma.
+      const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 2);
+      let maior = 0;
+      for (const lang of LINGUAS) {
+        await entrarL25(page, lang);
+        maior = Math.max(maior, await page.evaluate(() => { openModal('filtersModal'); switchFilterTab('filtersTabFilters');
+          const f = document.querySelector('#filtersPanelFilters fieldset'); f.className = ''; f.querySelectorAll('legend, span').forEach((e) => { e.className = e.tagName === 'LEGEND' ? 'text-sm font-semibold block mb-2' : ''; });
+          const k = document.querySelector('#filtersModal > div').getBoundingClientRect(); let pior = 0;
+          for (const e of f.querySelectorAll('legend, span')) pior = Math.max(pior, Math.round(e.getBoundingClientRect().right - k.right + 24));
+          const r = f.getBoundingClientRect(); return Math.max(pior, Math.round(r.right - k.right + 24)); }));
+        await fecharL25(page);
+      }
+      checa(maior > 0, 'fieldset dos tipos: CONTROLE — sem min-w-0/break-words o fieldset não passa do cartão no Fold a 2×; a medida está cega', String(maior));
+      await ctx.close();
+    }
+  }
+  if (!pularForaDoChromium(MOTOR, 'contraste alto: os marcadores do mapa se distinguem dentro da forma (R23-3-01)',
+    'o WebKit do Playwright não emula forced-colors: a medida só existe no Chromium')) {
+    // R23-3-01: no contraste alto os marcadores do mapa se distinguem DENTRO da forma (círculo: atual × proposto; quadrado: nova × saindo × atual).
+    const assinatura = (page) => page.evaluate(() => {
+      const caixa = document.createElement('div'); caixa.style.cssText = 'position:fixed;left:20px;top:20px;width:200px;height:60px;z-index:99999';
+      document.body.appendChild(caixa);   // NO documento antes de ler o estilo: um elemento solto devolve `computed` vazio (a medida leria "tudo igual")
+      const ler = {};
+      for (const cls of ['mapa-atual', 'mapa-proposto', 'mapa-entrada mapa-e-nova', 'mapa-entrada mapa-e-saindo', 'mapa-entrada mapa-e-atual', 'mapa-duplicado']) {
+        const e = document.createElement('span'); e.className = 'mapa-marca ' + cls; e.style.position = 'relative'; e.style.display = 'inline-block'; caixa.appendChild(e);
+        const cs = getComputedStyle(e);
+        ler[cls] = [cs.backgroundColor, cs.backgroundImage === 'none' ? '' : 'degradê', cs.borderTopStyle, cs.borderRadius, cs.width].join('|');
+      }
+      caixa.remove(); return ler;
+    });
+    for (const tema of ['light', 'dark']) {
+      const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: tema, forcedColors: 'active' });
+      await entrarL25(page, 'pt');
+      const a = await assinatura(page);
+      const k = Object.keys(a);
+      checa(new Set(Object.values(a)).size === k.length, `contraste alto ${tema}: dois marcadores do mapa ficaram IGUAIS (cor, preenchimento, traço e forma)`, JSON.stringify(a));
+      checa(a['mapa-atual'].split('|')[0] !== a['mapa-proposto'].split('|')[0], `contraste alto ${tema}: a posição de hoje e a proposta têm o mesmo preenchimento`, JSON.stringify(a));
+      await ctx.close();
+    }
+    {
+      // CONTROLE: sem a regra (as cores do autor de volta) todos os marcadores da mesma forma se igualam, e a medida vê.
+      const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: 'light', forcedColors: 'active',
+        estilo: '.mapa-marca.mapa-marca { forced-color-adjust: auto !important; background: Canvas !important; } .mapa-marca.mapa-proposto, .mapa-marca.mapa-e-nova, .mapa-marca.mapa-e-saindo { forced-color-adjust: auto !important; background: Canvas !important; }' });
+      await entrarL25(page, 'pt');
+      const a = await assinatura(page);
+      checa(new Set(Object.values(a)).size < Object.keys(a).length, 'contraste alto: CONTROLE — com o defeito de volta os marcadores seguem distintos; a medida está cega', JSON.stringify(a));
+      await ctx.close();
+    }
+    {
+      // E FORA do contraste alto a cor de cada marcador é a de sempre (o `@media` não vaza).
+      const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: 'light' });
+      await entrarL25(page, 'pt');
+      const a = await assinatura(page);
+      checa(a['mapa-proposto'].startsWith('rgb(22, 163, 74)') && a['mapa-entrada mapa-e-saindo'].startsWith('rgb(225, 29, 72)') && a['mapa-atual'].startsWith('rgb(71, 85, 105)'),
+        'fora do contraste alto a cor dos marcadores mudou', JSON.stringify(a));
+      await ctx.close();
+    }
+  }
+  if (!pularForaDoChromium(MOTOR, 'mapa/recorte-de-baixo: a escala do mapa ampliado com o recorte de 21 px', 'o override de recorte (Emulation.setSafeAreaInsetsOverride) é do protocolo do Chromium')) {
+    // R23-3-01 (cosmético): a escala sobe com o recorte de baixo; sem recorte fica a 1 rem, como sempre.
+    const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1);
+    await entrarL25(page, 'pt');
+    const cdp = await ctx.newCDPSession(page);
+    const lerBottom = () => page.evaluate(() => getComputedStyle(document.getElementById('mapaLbEscala')).bottom);
+    checa(await lerBottom() === '16px', `escala do mapa sem recorte: bottom ${await lerBottom()} (era 16px)`);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 0, bottom: 21, right: 0 } });
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    checa(await lerBottom() === '37px', `escala do mapa com o recorte de 21 px: bottom ${await lerBottom()} (esperado 37px)`);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 0, bottom: 0, right: 0 } });
+    await ctx.close();
+  }
 }
 
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────

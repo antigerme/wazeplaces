@@ -196,7 +196,9 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // item manda o mesmo item duas vezes no WebKit, onde as abas ficam em
   // processos diferentes (MEDIDO: 1 de 6 no smoke inteiro, 9 de 12 com a espera
   // zerada, 0 no Chromium) — defeito do app que ficou pra decisão.
-  const ESPERADOS = { 'smoke-browser.mjs': 7, 'smoke-offline.mjs': 9 };
+  // E os dois do lote 27 (R23): os marcadores do mapa em `forcedColors: 'active'` (o WebKit não emula) e a escala do mapa ampliado com o recorte de baixo
+  // (o override de `env(safe-area-inset-*)` é do protocolo do Chromium).
+  const ESPERADOS = { 'smoke-browser.mjs': 9, 'smoke-offline.mjs': 9 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));
