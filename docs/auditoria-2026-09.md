@@ -35,7 +35,10 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   (presença, servidor/filtros/teclado/documentos, foto ampliada, histórico/Resumo/placar, offline/diagnóstico, telas,
   telas 2, contas/recusa automática, "Reduzir movimento"). Conflitos de fonte só nas listas do resumo do smoke de layout
   (e nos comentários/contagem de pulos do `test/navegador.test.mjs`, hoje 7 só do Chromium) e no `renderHistory`
-  (os números escapados + a frase `sr-only`): resolvidos à mão, mantendo os dois lados. `npm test` 3575/3575. Relatórios em
+  (os números escapados + a frase `sr-only`): resolvidos à mão, mantendo os dois lados. As telas 2 refizeram o conserto das ações presas
+  dos diálogos com o portão de rolagem (`scroll-state`), aplicado por cima como diferença entre os dois commits do agente. O fonte
+  também ganhou o guard `test/sem-invisiveis.test.mjs` (12 linhas com caractere invisível cru viraram escapes). `npm test` 3578/3578,
+  também com o relógio grosso. Relatórios em
   `scratchpad/relatorio-l25-<área>.md`.
 - **Decisões pro dono**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 25", com as
   capturas). Abertas: o placar no treino a partir de 1,3× e a 2× (D1), o treino a 320×568/280×653 a 1,5× (D5), a conversa
