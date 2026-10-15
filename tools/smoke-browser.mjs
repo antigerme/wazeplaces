@@ -16866,7 +16866,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       const el = document.getElementById('historyBody');
       return {
         lidos: document.getElementById('readCount').textContent.trim(),
-        linhas: [...el.querySelectorAll('.tnum')].map((n) => n.textContent.replace(/\s+/g, ' ').trim()),
+        // O texto VISÍVEL da linha: a frase `sr-only` ("3 lidos, 2 rejeitados", R21-7-04) é só pro leitor de tela e vem no
+        // `textContent` junto do "3 · 2" que a tela desenha — sem tirá-la, o instrumento lê duas coisas coladas.
+        linhas: [...el.querySelectorAll('.tnum')].map((n) => { const c = n.cloneNode(true); c.querySelectorAll('.sr-only').forEach((x) => x.remove()); return c.textContent.replace(/\s+/g, ' ').trim(); }),
         elemento: !!el.querySelector('img, script, svg[onload]'),
         gravado: localStorage.getItem('waze_places_stats'),
         historico: localStorage.getItem('waze_places_history'),
