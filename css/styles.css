@@ -1658,7 +1658,8 @@ button:active {
    ainda no valor de antes, achava que a barra cabia, e no quadro seguinte o valor
    novo chegava, a barra saía da janela e a classe voltava: um laço sem fim com o
    card PARADO (a foto e o texto saltando 7–13 px, mais de 100 layouts por
-   segundo), só no Chromium e justo pra quem pediu menos movimento. */
+   segundo), no Chromium e no WebKit (medido nos dois, no Linux) e justo pra quem
+   pediu menos movimento. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
