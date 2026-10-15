@@ -4952,9 +4952,16 @@ const cenario9p = async (nome, { modo }) => {
   const tilesDoAlvo = await A.pg.evaluate((p) => { const f = offlineFaixaDeCaixas(); const pl = AppState.queue.find((x) => x.venueID === p);
     return [...tilesDaFaixa(pl, f)]; }, alvo);
   out.tilesDoAlvo = tilesDoAlvo.length;
+  // O PORTÃO de A (R22-4-01): A só varre ATÉ o fim do passo de B se os tiles que NÃO são do alvo ficam presos num portão
+  // que o teste abre depois do `fimB` — como a seção 9 faz com o `atrasoTile`. Antes cada tile dormia 250 ms: depois que o
+  // alvo chegava sobravam ~500 ms de varredura, e com o lado Node/driver atrasado (máquina disputada) a varredura já tinha
+  // acabado quando o teste a conferia — a PRÉ-CONDIÇÃO "A varre quando B poda" não era verdade (MEDIDO: 4 de 6 rodadas com
+  // 300 ms de atraso em cada `evaluate`). O prazo media a velocidade do runner; o teste quer a ORDEM dos fatos.
+  let abrirPortao = () => {};
   if (modo === 'varrendo') {
-    // A fica LENTA (250 ms por tile) e começa a varrer; espera guardar o mapa do alvo.
-    await A.pg.route('**/*-tiles/live/base/**', async (r) => { await dormir(250); return resp(r); });
+    const portao = new Promise((ok) => { abrirPortao = ok; });
+    const doAlvo = new Set(tilesDoAlvo);
+    await A.pg.route('**/*-tiles/live/base/**', async (r) => { if (!doAlvo.has(r.request().url())) await portao; return resp(r); });
     await A.pg.evaluate((t) => { window.__tilesAlvo = t; offlineTalvezVarrer(); }, tilesDoAlvo);
     const baixou = await esperarNaPagina(A.pg, () => window.__tilesAlvo.every((u) => offlineFeitosNaJanela.us.has(u)), 20000, 50);
     out.baixouOAlvo = baixou.ok;
@@ -4967,6 +4974,7 @@ const cenario9p = async (nome, { modo }) => {
     await B.pg.evaluate(() => { offlineTalvezVarrer(); });
   }
   out.fimB = (await fimDaPreparacao(B.pg)).ok;
+  abrirPortao();   // B já avisou a PARTE; só agora A pode terminar a varredura dela
   if (modo === 'varrendo') out.fimA = (await fimDaPreparacao(A.pg)).ok;
   if (modo === 'varrendo' || modo === 'parada') await esperarNaPagina(A.pg, () => !offlineVarrendo && !offlinePedidaDeNovo, 20000, 50);
   const medir = (pg) => pg.evaluate(async (p) => {
@@ -4985,14 +4993,20 @@ const cenario9p = async (nome, { modo }) => {
   out.A = await medir(A.pg);
   // Sem rede, a linha de A: a que mentia ("Pronto — … você segue com o que está guardado").
   await ctx.setOffline(true);
+  // O `onLine` falso é o que a linha lê: espera-se o FATO (o navegador o aplicou), não um prazo (R22-4-01).
+  await esperarNaPagina(A.pg, () => navigator.onLine === false, 10000, 50);
   out.semRede = await A.pg.evaluate(() => { atualizarLinhaDoOffline(0, 0); const el = document.getElementById('prefOfflineDesc');
+    // A conta de preparações CONCLUÍDAS fica anotada AQUI, antes de a rede voltar: o `online` que o `setOffline(false)`
+    // dispara já inicia uma varredura sozinha (falta só o tile do alvo e ela acaba em milissegundos), e ler o `offlineVarrendo`
+    // depois do gatilho do teste tomava "a varredura do `online` já acabou" por "o gatilho não varreu".
+    window.__prontasAntesDaRede = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
     return { dizTudoGuardado: el.textContent.includes(t('prefs.offline.prontoSemRedeB')) }; });
   await ctx.setOffline(false);
   if (modo !== 'mesma') {
-    // O gatilho seguinte de A prepara a fila DELA e baixa o mapa que a poda levou.
-    out.A.gatilhoVarre = await A.pg.evaluate(() => { window.__prontas = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
-      offlineMarcarGesto(); offlineTalvezVarrer(); return offlineVarrendo; });
-    out.fimDoGatilho = out.A.gatilhoVarre && (await fimDaPreparacao(A.pg)).ok;
+    // O gatilho seguinte de A prepara a fila DELA e baixa o mapa que a poda levou — seja a varredura do `online` ou a do gatilho,
+    // o que vale é uma preparação CONCLUIR depois da volta da rede (o incremento de `offline.pronto`), com o mapa no cache.
+    await A.pg.evaluate(() => { window.__prontas = window.__prontasAntesDaRede; offlineMarcarGesto(); offlineTalvezVarrer(); });
+    out.fimDoGatilho = (await fimDaPreparacao(A.pg)).ok;
     out.depoisDoGatilho = await medir(A.pg);
   }
   await ctx.close();
@@ -5006,7 +5020,7 @@ diz('A varrendo: A termina SEM cobertura — a linha não diz "Pronto", nem sem 
   varr9p.A.cobre === false && varr9p.A.pronto === false && varr9p.semRede?.dizTudoGuardado === false && varr9p.A.precisaVarrer === true,
   JSON.stringify({ A: varr9p.A, semRede: varr9p.semRede }));
 diz('o gatilho de A baixa o mapa que a poda levou, e a linha volta a dizer "Pronto"',
-  varr9p.A.gatilhoVarre && varr9p.fimDoGatilho && varr9p.depoisDoGatilho.semMapaDoAlvo === 0 && varr9p.depoisDoGatilho.pronto === true,
+  varr9p.fimDoGatilho && varr9p.depoisDoGatilho.semMapaDoAlvo === 0 && varr9p.depoisDoGatilho.pronto === true,
   JSON.stringify(varr9p.depoisDoGatilho));
 const par9p = await cenario9p('A parada', { modo: 'parada' });
 diz('CONTROLE: a aba PARADA perde a cobertura do mesmo jeito (R15-4-01) — o instrumento enxerga os dois lados',
