@@ -10107,6 +10107,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     fr: ['Aujourd’hui 12 lues, 1 rejetée', 'Semaine 17 lues, 4 rejetées', 'Mois 17 lues, 4 rejetées', 'Total 40 lues, 9 rejetées'],
   };
   const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, locale: 'pt-BR', serviceWorkers: 'block' });
+  // A página forçada a "logada" não tem sessão de verdade: qualquer pedido à API que o app faça sozinho (o perfil, a lista) voltaria 401 do
+  // servidor local e a queda da sessão apagaria o Histórico no meio da espera. Resposta NEUTRA e igual para tudo, como os outros blocos.
+  await ctx.route('**/api/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, profile: { id: 1, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false }, visivelNoWme: true, referencias: null, places: [], hasMore: false, online: [], conversas: [], countries: [], states: [] }) }).catch(() => {}));
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
@@ -10130,7 +10133,16 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       AppState.history = null;
       openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
     }, lang);
-    await esperarOuExplodir(page, () => document.querySelectorAll('#historyBody > div.flex.justify-between').length === 4, `as 4 linhas do Histórico (${lang})`);
+    try {
+      await esperarOuExplodir(page, () => document.querySelectorAll('#historyBody > div.flex.justify-between').length === 4, `as 4 linhas do Histórico (${lang})`);
+    } catch (e) {
+      // O que a página TINHA quando a espera estourou (o runner do CI reprovou aqui uma vez, sem nada que a máquina local reproduza).
+      const estado = await page.evaluate(() => ({ linhas: document.querySelectorAll('#historyBody > div.flex.justify-between').length, corpo: (document.getElementById('historyBody') || {}).childElementCount,
+        logado: AppState.authenticated, perfil: !!AppState.profile, filtrosAbertos: !document.getElementById('filtersModal').classList.contains('hidden'),
+        aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
+        gravado: !!localStorage.getItem('waze_places_history'), url: location.href.slice(0, 60), idioma: getLang() })).catch((x) => ({ erroAoLer: String(x).slice(0, 80) }));
+      throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+    }
     const snap = await page.locator('#filtersPanelHistory').ariaSnapshot();
     const id = `${onde}/${lang}`;
     for (const frase of FRASES[lang]) checa(snap.includes(frase), `${id}: a árvore de acessibilidade não diz "${frase}"`, snap.split('\n').filter((l) => /\d/.test(l)).join(' | ').slice(0, 260));
