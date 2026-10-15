@@ -1653,6 +1653,885 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
   }
 }
 
+// ── TEXTO GRANDE, 2ª PARTE: OS FILTROS NUMA JANELA PEQUENA, O RECUO SEM @container, O FOCO DA ──
+// ── CÉLULA, A VITRINE EM TEXTO GRANDE, O CONTRASTE ALTO, A AJUDA E O PAREAMENTO ────────────────
+// (lote 25; R21-7-01, -05, -06, -07, -08, D3, D4)
+//
+// O bloco de cima (lote 24) mede o que o texto do sistema maior tirava do lugar nos diálogos, nas abas, no
+// placar, na pílula e no ↑. A rodada 21 achou o que ele deixou:
+//  - o "Aplicar" e o "Cancelar" dos Filtros FORA da janela no Galaxy Fold a partir de 1,8× (e no de 320 px a
+//    partir de 1,8–1,9×), com nada que rolasse — o cartão passa a rolar, numa escada de janelas em `rem` que
+//    cobre o defeito medido e nenhum celular a 1×: onde já se alcançava (o rodapé pendurado fora do cartão,
+//    "feio e tocável", no Fold a 1,7×) NADA muda em repouso;
+//  - o 2º botão dos diálogos de duas linhas recuado 12 px × a escala quando o navegador não tem `@container`;
+//  - a célula de conquista "nova" ou "selecionada" focada pelo teclado IGUAL à sem foco (o contorno do estado
+//    vencia o anel de foco);
+//  - a vitrine de patente e conquistas toda em `px`: o texto maior não a alcançava, e o cartão "Sua patente"
+//    empilhava por `@media` em px (o nome por cima do total numa janela de 412–430 px);
+//  - o contraste alto do sistema (`forced-colors: active`): interruptores sem trilho nem botão, barra de
+//    progresso, aba selecionada e célula "ganha" × "trancada" indistinguíveis, botões sem contorno;
+//  - a tabela de gestos da Ajuda e os botões do pareamento / "Acesso restrito" com o texto passando da caixa;
+//  - as ações dos diálogos que EMPILHAM (o botão afirmativo caía uma fileira abaixo do corte do cartão, sem pista de rolagem).
+// Tudo MEDIDO no que o dedo alcança (`elementFromPoint`), na caixa de cada elemento ou na tinta (captura), nos
+// quatro idiomas, com o CONTROLE de cada medida: a MESMA tela com a regra neutralizada TEM que falhar — senão
+// a medida está cega (gotcha #28). E a 1× nada muda (geometria igual com e sem a regra, de 280 a 1280 px).
+{
+  const novaPaginaL25 = async (viewport, escala, { estilo = '', colorScheme, forcedColors } = {}) => {
+    // `reducedMotion`: o bloco mede geometria e tinta parada; sem movimento a GPU de software do runner não fica rodando o esqueleto e as transições
+    // do `html { font-size }` (a medida espera todas terminarem).
+    const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR', reducedMotion: 'reduce',
+      ...(colorScheme ? { colorScheme } : {}), ...(forcedColors ? { forcedColors } : {}) });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(250);
+    const css = (escala !== 1 ? `html { font-size: ${16 * escala}px !important; }` : '') + estilo;
+    if (css) await page.addStyleTag({ content: css });
+    // Trocar o `font-size` da raiz dispara transições (centenas): a medida espera TODAS terminarem.
+    await assentar(page, 0);
+    return { ctx, page, erros };
+  };
+  const entrarL25 = (page, lang) => page.evaluate((lang) => {
+    setLang(lang); applyI18n();
+    AppState.authenticated = true;
+    AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
+    AppState.preferences.comoFuncionaVisto = true;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+  }, lang);
+  const fecharL25 = async (page) => {
+    await page.evaluate(() => document.querySelectorAll('.modal-root:not(.hidden)').forEach((m) => closeModal(m.id)));
+    const r = await esperarNaPagina(page, () => !CamadaVoltar.consumindo
+      && !document.querySelector('.modal-root:not(.hidden)'), 5000, 50);
+    checa(r.ok, 'texto grande 2: o fechar não terminou', JSON.stringify(r));
+  };
+
+  // ── 1. R21-7-07 · o "Aplicar" e o "Cancelar" dos Filtros ao alcance ────────────────────────────────
+  // Ao alcance = o centro do botão recebe o dedo (`elementFromPoint`) depois de rolar até ele, e o foco do
+  // teclado o traz à vista. "Inicial" é o repouso, antes de rolar: é ele que não pode mudar onde já se alcançava.
+  const medirAlcanceFiltros = async () => {
+    openModal('filtersModal'); switchFilterTab('filtersTabFilters');
+    await new Promise((ok) => setTimeout(ok, 200));
+    const modal = document.getElementById('filtersModal');
+    const hit = (b) => {
+      const r = b.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      if (y < 0 || y > innerHeight || x < 0 || x > innerWidth) return 'fora';
+      const n = document.elementFromPoint(x, y);
+      return n && (n === b || b.contains(n)) ? 'ok' : 'coberto';
+    };
+    const out = { sobra: modal.scrollHeight - modal.clientHeight, overflowY: getComputedStyle(modal).overflowY,
+      cartaoOverflowY: getComputedStyle(modal.firstElementChild).overflowY,
+      cartaoSobra: modal.firstElementChild.scrollHeight - modal.firstElementChild.clientHeight };
+    for (const [nome, id] of [['aplicar', 'applyFilters'], ['cancelar', 'cancelFilters']]) {
+      const b = document.getElementById(id);
+      modal.scrollTop = 0; modal.firstElementChild.scrollTop = 0;
+      const inicial = hit(b);
+      b.scrollIntoView({ block: 'nearest' });
+      await new Promise((ok) => requestAnimationFrame(ok));
+      out[nome] = { inicial, depois: hit(b) };
+      modal.scrollTop = 0; modal.firstElementChild.scrollTop = 0;
+    }
+    // O Tab até o "Aplicar": o foco o traz à vista. `focus()` num elemento que JÁ está focado não rola nada
+    // (a armadilha do instrumento: o 1º ciclo deixava o foco lá e o seguinte "não rolava").
+    if (document.activeElement) document.activeElement.blur();
+    modal.scrollTop = 0; modal.firstElementChild.scrollTop = 0;
+    document.getElementById('applyFilters').focus();
+    await new Promise((ok) => requestAnimationFrame(ok));
+    out.comFoco = hit(document.getElementById('applyFilters'));
+    return out;
+  };
+  const CASOS_FILTROS = [
+    ['Fold 280×653', { width: 280, height: 653 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
+    ['SE 320×568', { width: 320, height: 568 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
+    ['360×740', { width: 360, height: 740 }, [1, 2]],
+  ];
+  for (const [rot, viewport, escalas] of CASOS_FILTROS) for (const escala of escalas) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const r = await page.evaluate(medirAlcanceFiltros);
+      // À VISTA no repouso (sem rolar): onde o rodapé saía da janela ele agora fica preso no fim do cartão; onde já cabia, ou
+      // pendia fora do cartão mas dentro da janela, ele estava e segue à vista. E rolando até eles, também chega.
+      checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok',
+        `Filtros ${rot} ×${escala} · ${lang}: o "Aplicar"/"Cancelar" não recebe o dedo SEM rolar`, JSON.stringify(r));
+      checa(r.aplicar.depois === 'ok' && r.cancelar.depois === 'ok',
+        `Filtros ${rot} ×${escala} · ${lang}: o "Aplicar"/"Cancelar" não chega ao dedo nem rolando até eles`, JSON.stringify(r));
+      checa(r.comFoco === 'ok', `Filtros ${rot} ×${escala} · ${lang}: o foco do teclado não traz o "Aplicar" à vista`, JSON.stringify(r));
+      // O outro lado da escada: o cartão só rola ONDE ALGO ESTOURA. Onde o diálogo cabe (nada passa do cartão) ele segue
+      // `overflow: visible` — rolar ali mudaria 1–2 níveis de cor nos cantos do cartão, e o pedido é 0 pixel.
+      checa(r.cartaoOverflowY !== 'auto' || r.cartaoSobra > 0,
+        `Filtros ${rot} ×${escala} · ${lang}: o cartão rola onde nada estoura (o diálogo cabe)`, JSON.stringify(r));
+      if (escala === 1) {
+        // A 1× nada mexe: o cartão segue `overflow: visible` (a escada não alcança nenhum celular a 1×) e os dois
+        // botões já estavam à vista.
+        checa(r.cartaoOverflowY === 'visible' && r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok',
+          `Filtros ${rot} 1× · ${lang}: mudou a 1× (o cartão rola ou um botão saiu do repouso)`, JSON.stringify(r));
+      }
+      // O caso de FOLGA: no Fold a 1,7× o rodapé pende 56–63 px do cartão, dentro da janela. Já se alcançava
+      // SEM rolar, e tem que continuar assim (`overflow-y: auto` NO CARTÃO o cortava pela metade).
+      if (rot === 'Fold 280×653' && escala === 1.7 && (lang === 'pt' || lang === 'fr')) {
+        checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok',
+          `Filtros Fold ×1,7 · ${lang}: o rodapé que já se alcançava em repouso passou a ficar cortado`, JSON.stringify(r));
+      }
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `Filtros ${rot} ×${escala}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: sem a rolagem do cartão nem o rodapé preso (o defeito) o MESMO Fold a 2× perde o "Aplicar".
+    // (Sem rolagem o `sticky` prenderia no viewport: o rodapé volta ao fluxo também.)
+    const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 2, { estilo: '#filtersModal > div { overflow: visible !important; } #filtersModal > div > .dialogo-acoes:last-child { position: static !important; }' });
+    await entrarL25(page, 'pt');
+    const r = await page.evaluate(medirAlcanceFiltros);
+    checa(r.aplicar.depois !== 'ok' || r.cancelar.depois !== 'ok',
+      'Filtros ×2: CONTROLE — sem a rolagem do cartão o "Aplicar" segue alcançável; a medida está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+
+  // ── 2. R21-7-06 · o 2º botão dos diálogos de duas linhas sem recuo, sem @container ────────────────
+  // `container-type: normal` nas duas classes é "não ter @container": o `flex-wrap` (incondicional) empilha, e
+  // a margem do `space-x-3` recuava o 2º botão 12 px × a escala.
+  const medirRecuo = (id) => {
+    openModal(id);
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById(id);
+      const linha = [...m.querySelectorAll('.dialogo-acoes')].find((el) => el.offsetParent !== null);
+      const [a, b] = [...linha.children].filter((c) => c.offsetParent !== null);
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      ok({ id, empilhado: rb.top >= ra.bottom - 1, recuo: Math.round((rb.left - ra.left) * 100) / 100,
+        vao: Math.round((rb.left - ra.right) * 100) / 100, margem: getComputedStyle(b).marginLeft });
+    }, 120));
+  };
+  // (O cartão do diálogo também é contêiner, desde o R21-8-02: sem ele as consultas dos botões cairiam nele — a largura dele é a da fileira.)
+  const SEM_CONTAINER = '.dialogo-acoes, .dialogo-cartao, .seg-tabs { container-type: normal !important; }';
+  for (const [rot, viewport, escala] of [['360×740 ×2', { width: 360, height: 740 }, 2], ['320×568 ×1,5', { width: 320, height: 568 }, 1.5],
+    ['412×915 ×2', { width: 412, height: 915 }, 2]]) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala, { estilo: SEM_CONTAINER });
+    await entrarL25(page, 'pt');
+    let empilhados = 0;
+    for (const id of ['pasteModal', 'logoutModal', 'batchReadModal']) {
+      const r = await page.evaluate(medirRecuo, id);
+      if (r.empilhado) { empilhados++; checa(r.recuo === 0, `recuo sem @container ${rot} · ${id}: o 2º botão empilhado está recuado ${r.recuo}px (margem ${r.margem})`, JSON.stringify(r)); }
+      await fecharL25(page);
+    }
+    checa(empilhados >= 2, `recuo sem @container ${rot}: só ${empilhados} diálogo(s) empilharam — a medida não provou nada (o flex-wrap devia empilhar)`);
+    checa(erros.length === 0, `recuo sem @container ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com as três linhas de volta ao `space-x-3` (o defeito), o MESMO diálogo empilhado
+    // sem @container volta a ficar recuado — a medida enxerga o recuo.
+    const { ctx, page } = await novaPaginaL25({ width: 360, height: 740 }, 2, { estilo: SEM_CONTAINER });
+    await entrarL25(page, 'pt');
+    await page.evaluate(() => document.querySelectorAll('.dialogo-acoes.gap-3').forEach((l) => { l.classList.remove('gap-3'); l.classList.add('space-x-3'); }));
+    let recuado = 0;
+    for (const id of ['pasteModal', 'logoutModal', 'batchReadModal']) {
+      const r = await page.evaluate(medirRecuo, id);
+      if (r.empilhado && r.recuo > 0) recuado++;
+      await fecharL25(page);
+    }
+    checa(recuado > 0, 'recuo sem @container: CONTROLE — com o space-x-3 de volta nenhum diálogo ficou recuado; a medida está cega');
+    await ctx.close();
+  }
+  {
+    // A 1× lado a lado: o vão entre os dois botões é 0,75rem = 12 px, o MESMO que a margem do `space-x-3` dava.
+    const { ctx, page } = await novaPaginaL25({ width: 360, height: 740 }, 1);
+    await entrarL25(page, 'pt');
+    for (const id of ['pasteModal', 'logoutModal', 'batchReadModal']) {
+      const r = await page.evaluate(medirRecuo, id);
+      checa(!r.empilhado && r.vao === 12 && r.margem === '0px', `recuo 1× ${id}: lado a lado com vão ${r.vao}px e margem ${r.margem} (eram 12px e a margem do space-x-3)`, JSON.stringify(r));
+      await fecharL25(page);
+    }
+    await ctx.close();
+  }
+
+  // ── 3. R21-7-05 · o anel de foco das células "nova" e "selecionada" ─────────────────────────────────
+  // O que o dedo/teclado vê é a TINTA: a captura do entorno da célula com e sem foco. "Distinto" é o computado
+  // (cor, espessura, afastamento) E a tinta mudar; "sem foco" tem que voltar IGUAL (nenhum pixel do estado muda).
+  const CONQUISTAS_L25 = { c: { primeiraFaxina: '2026-10-01', centuriao: '2026-10-01', coruja: '2026-10-02', detetive: '2026-10-02', colecionador: '2026-10-01' },
+    seq: 3, patente: 1, n: {}, langs: ['pt'], base: true, novas: ['coruja', 'detetive'], patenteNova: false };
+  const abrirHistoricoL25 = (page, { escada = false, tocada = null, total = 1800 } = {}) => page.evaluate(async ({ conq, escada, tocada, total }) => {
+    localStorage.setItem('waze_places_conquistas', JSON.stringify(conq)); AppState.conquistas = null;
+    const h = { _total: { read: total, rejected: 0 } }; localStorage.setItem('waze_places_history', JSON.stringify(h)); AppState.history = null;
+    escadaAberta = escada; conquistaTocada = tocada;
+    openModal('filtersModal'); switchFilterTab('filtersTabHistory');
+    await new Promise((ok) => setTimeout(ok, 150));
+  }, { conq: CONQUISTAS_L25, escada, tocada, total });
+  // Duas capturas do MESMO recorte: quantos pixels diferem e o maior desvio de um canal. A comparação byte a byte reprovava o que o
+  // NAVEGADOR faz sozinho: repintar o anel (qualquer mudança de afastamento e a volta) deixa de 3 a 17 pixels da borda arredondada
+  // diferentes (até 38 níveis num pixel) — MEDIDO na BASE, sem nenhuma regra nossa (afastamento inline de 3px e de volta: 4 de 4
+  // células com 3/4/14/17 pixels, e a mesma conta na árvore consertada depois do ciclo de foco real, pixel por pixel). O anel de
+  // foco, esse, muda de 1.145 a 1.330 pixels: o ruído (≤ 37) e o anel (≥ 1.145) ficam a 30× um do outro, e a tolerância (48) e o
+  // piso do anel (400) cabem no meio — o CONTROLE abaixo cobra os dois lados.
+  const { decodificar: decodificarPng } = await import('./png-palette.mjs');
+  const diferencaDeTinta = (a, b) => {
+    const A = decodificarPng(a), B = decodificarPng(b);
+    if (A.largura !== B.largura || A.altura !== B.altura || A.canais !== B.canais) return { pixels: Infinity, maximo: 255 };
+    let pixels = 0, maximo = 0;
+    for (let i = 0; i < A.pixels.length; i += A.canais) {
+      let d = 0;
+      for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(A.pixels[i + c] - B.pixels[i + c]));
+      if (d) { pixels++; if (d > maximo) maximo = d; }
+    }
+    return { pixels, maximo };
+  };
+  const RUIDO_DE_REPINTAR_PX = 48, ANEL_DE_FOCO_PX = 400;
+  const soRuido = (d) => d.pixels <= RUIDO_DE_REPINTAR_PX;
+  const medirFocoDaCelula = async (page, id) => {
+    const alvo = () => page.locator(`.conq-cel[data-conq="${id}"]`);
+    await alvo().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await assentar(page, 30);
+    const caixa = await alvo().boundingBox();
+    const clip = { x: Math.max(0, caixa.x - 12), y: Math.max(0, caixa.y - 12), width: caixa.width + 24, height: caixa.height + 24 };
+    const lerEstilo = () => alvo().evaluate((el) => { const c = getComputedStyle(el); return { cor: c.outlineColor, larg: c.outlineWidth, estilo: c.outlineStyle, afasta: c.outlineOffset, focoVisivel: el.matches(':focus-visible') }; });
+    // Cada mudança de estado espera as TRANSIÇÕES terminarem (`assentar`): o computado e a tinta logo depois do `focus()` são os do começo
+    // da transição — o `getComputedStyle` devolvia o contorno de antes, e a foto, o meio do caminho.
+    await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
+    await assentar(page, 30);
+    const semFoco = await lerEstilo();
+    const fotoSem = await page.screenshot({ clip });
+    await page.keyboard.press('Shift');      // o teclado foi o último a falar: o foco programático vira :focus-visible
+    await alvo().evaluate((el) => el.focus());
+    await assentar(page, 30);
+    const comFoco = await lerEstilo();
+    const fotoCom = await page.screenshot({ clip });
+    await page.evaluate(() => document.activeElement.blur());
+    await assentar(page, 30);
+    const fotoDepois = await page.screenshot({ clip });
+    const focar = diferencaDeTinta(fotoSem, fotoCom), voltar = diferencaDeTinta(fotoSem, fotoDepois);
+    return { semFoco, comFoco, tintaMuda: !fotoSem.equals(fotoCom), focar, voltar, voltouIgual: soRuido(voltar) };
+  };
+  for (const tema of ['light', 'dark']) {
+    const { ctx, page, erros } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: tema });
+    await entrarL25(page, 'pt');
+    // nova (coruja), selecionada (centuriao: ganha, não nova), nova+selecionada (coruja tocada) e a comum (maoFirme, trancada)
+    for (const [rot, id, tocada] of [['nova', 'coruja', null], ['selecionada', 'centuriao', 'centuriao'], ['nova+selecionada', 'detetive', 'detetive'], ['comum', 'maoFirme', null]]) {
+      await abrirHistoricoL25(page, { tocada });
+      const r = await medirFocoDaCelula(page, id);
+      const nome = `foco da célula ${rot} · ${tema}`;
+      checa(r.comFoco.focoVisivel, `${nome}: o foco programático não virou :focus-visible — a medida não vale`, JSON.stringify(r.comFoco));
+      const distinto = r.comFoco.cor !== r.semFoco.cor || r.comFoco.afasta !== r.semFoco.afasta || r.comFoco.larg !== r.semFoco.larg || r.comFoco.estilo !== r.semFoco.estilo;
+      checa(distinto, `${nome}: o anel de foco é IGUAL ao estado sem foco (computado)`, JSON.stringify({ sem: r.semFoco, com: r.comFoco }));
+      checa(r.tintaMuda, `${nome}: a tinta não muda ao focar — o foco do teclado não aparece`);
+      // CONTROLE da tolerância: o anel de foco muda MUITO MAIS que o ruído do repintar — senão "voltou igual" estaria cega ao anel.
+      checa(r.focar.pixels >= ANEL_DE_FOCO_PX, `${nome}: CONTROLE — focar muda só ${r.focar.pixels} pixels (o anel muda ≥ ${ANEL_DE_FOCO_PX}): a tolerância de repintar esconderia o anel`, JSON.stringify(r.focar));
+      checa(r.voltouIgual, `${nome}: sem o foco a tinta voltou DIFERENTE da de antes (${r.voltar.pixels} pixels, até ${r.voltar.maximo} níveis)`, JSON.stringify(r.voltar));
+      if (rot === 'comum') checa(r.semFoco.estilo === 'none', `${nome}: a célula comum tem contorno sem foco (${r.semFoco.estilo})`);
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `foco da célula · ${tema}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: com o contorno do estado de volta (o defeito: o foco perde pro `.conq-cel.nova`), a
+    // MESMA célula nova focada fica igual à sem foco — a medida a vê, na cor e na tinta.
+    const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: 'light',
+      estilo: '.conq-cel.nova:focus-visible, .conq-cel.sel:focus-visible { outline: 2px solid #d97706 !important; outline-offset: 1px !important; }' });
+    await entrarL25(page, 'pt');
+    await abrirHistoricoL25(page);
+    const r = await medirFocoDaCelula(page, 'coruja');
+    await fecharL25(page);
+    checa(r.comFoco.cor === r.semFoco.cor && r.comFoco.afasta === r.semFoco.afasta && !r.tintaMuda,
+      'foco da célula: CONTROLE — com o contorno do estado vencendo o foco a célula nova ainda parece focada; a medida está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+
+  // ── 4. R21-7-08 · a vitrine de patente e conquistas com o texto do sistema maior ────────────────────
+  // (a) O tamanho: a 1× os px de antes, 2× o dobro, e com o texto MENOR que o de fábrica o piso (não encolhe).
+  const TAMANHOS_VITRINE = [['.conq-emoji', 32], ['.conq-eyebrow', 10.5], ['.conq-nome', 18], ['.conq-num', 15], ['.conq-sub', 11],
+    ['.conq-link', 11], ['.conq-deg', 13], ['.conq-deg .e', 17], ['.conq-deg .a', 11.5], ['.conq-h h4', 11], ['.conq-h span', 11],
+    ['.conq-cel .e', 22], ['.conq-cel .n', 10.5], ['.conq-dica', 12], ['.conq-tag', 9]];
+  const tamanhosDaVitrine = (lista) => Object.fromEntries(lista.map(([sel]) => {
+    const el = document.querySelector('#historyBody ' + sel);
+    return [sel, el ? parseFloat(getComputedStyle(el).fontSize) : null];
+  }));
+  for (const escala of [1, 2, 0.85]) {
+    const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, escala);
+    await entrarL25(page, 'pt');
+    await abrirHistoricoL25(page, { escada: true, tocada: 'coruja' });
+    const t = await page.evaluate(tamanhosDaVitrine, TAMANHOS_VITRINE);
+    // A 2× a vitrine de 412 px tem 6,4rem: abaixo de 10,5rem o nome da patente do cartão é 16 px × a escala (e não 18), pra caber na linha
+    // inteira (R21-8-03) — o único tamanho que o corte estreito troca.
+    const estreito = escala === 2;
+    for (const [sel, n] of TAMANHOS_VITRINE) {
+      const esperado = sel === '.conq-nome' && estreito ? 16 * escala : escala >= 1 ? n * escala : n;
+      checa(t[sel] !== null && Math.abs(t[sel] - esperado) < 0.01,
+        `vitrine ×${escala}: ${sel} mede ${t[sel]}px (esperado ${esperado}px: ${escala >= 1 ? 'os px de antes × a escala' : 'o piso, que o texto menor não encolhe'})`);
+    }
+    await fecharL25(page);
+    await ctx.close();
+  }
+
+  // (b) A estrutura: nenhum texto do cartão por cima de outro, nenhuma palavra partida, colunas iguais, nada
+  // passando do painel, alvo de 44 px — nas larguras que a rodada 21 achou (412–430 px a partir de 1,8×).
+  const medirVitrine = () => {
+    const corpo = document.getElementById('historyBody');
+    const painel = document.getElementById('filtersPanelHistory');
+    const vis = (sel) => [...corpo.querySelectorAll(sel)].filter((e) => e.getClientRects().length);
+    const caixa = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+    const cruza = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+    const textos = ['.conq-eyebrow', '.conq-nome', '.conq-num', '.conq-tot .conq-sub', '.conq-rodape > span', '.conq-link']
+      .flatMap((s) => vis(s).map((e) => [s, caixa(e)]));
+    const sobre = [];
+    for (let i = 0; i < textos.length; i++) for (let j = i + 1; j < textos.length; j++) {
+      if (cruza(textos[i][1], textos[j][1])) sobre.push(`${textos[i][0]}×${textos[j][0]}`);
+    }
+    const partidas = [];
+    for (const el of vis('.conq-cel .n, .conq-deg .n, .conq-nome')) {
+      const tn = [...el.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+      if (!tn) continue;
+      const re = /\S{4,}/g; let m;
+      while ((m = re.exec(tn.textContent))) {
+        const rg = document.createRange(); rg.setStart(tn, m.index); rg.setEnd(tn, m.index + m[0].length);
+        if (new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size > 1) partidas.push(m[0]);
+      }
+    }
+    // o nome da célula tem que ficar DENTRO da célula (o texto que passa da caixa é o defeito que o `overflow-wrap` esconde)
+    const foraDaCelula = vis('.conq-cel').filter((c) => { const n = c.querySelector('.n'); const q = caixa(n), r = c.getBoundingClientRect();
+      return q.left < r.left - 0.5 || q.right > r.right + 0.5; }).map((c) => c.getAttribute('data-conq'));
+    // QUALQUER texto da vitrine tem que ficar dentro da caixa do corpo (o título "CONQUISTAS 6 de 16", a escada, o rodapé do
+    // cartão): palavra que não quebra e não cabe passa pro lado sem partir, e nem a sobreposição nem a "partida" a pegam.
+    const cx = corpo.getBoundingClientRect();
+    const foraDoCorpo = [...corpo.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent.trim() && !e.closest('.conq-tag, .sr-only') && e.getClientRects().length)
+      .filter((e) => { const q = caixa(e); return q.right > cx.right + 0.5 || q.left < cx.left - 0.5; }).map((e) => (e.textContent || '').trim().slice(0, 16));
+    // e dois textos da MESMA linha de grade (a escada: nome × a pontuação; o título × a contagem) nunca se tocam
+    const linhasColadas = [];
+    for (const par of corpo.querySelectorAll('.conq-deg, .conq-h')) {
+      const fs = [...par.children].filter((f) => f.getClientRects().length && f.textContent.trim());
+      for (let i = 0; i < fs.length; i++) for (let j = i + 1; j < fs.length; j++) if (cruza(caixa(fs[i]), caixa(fs[j]))) linhasColadas.push(`${par.className}:${(fs[i].textContent || '').trim().slice(0, 10)}×${(fs[j].textContent || '').trim().slice(0, 10)}`);
+    }
+    const grade = corpo.querySelector('.conq-grade');
+    const colunas = grade ? getComputedStyle(grade).gridTemplateColumns.split(' ').map((x) => Math.round(parseFloat(x))) : [];
+    const pequenos = [...corpo.querySelectorAll('.conq-cel, .conq-link, .conq-deg')]
+      .filter((e) => { const q = e.getBoundingClientRect(); return q.height < 43.5 || q.width < 43.5; }).map((e) => e.className);
+    return { sobre: [...new Set(sobre)], partidas: [...new Set(partidas)], foraDaCelula, foraDoCorpo: [...new Set(foraDoCorpo)], linhasColadas: [...new Set(linhasColadas)], colunas,
+      pequenos, estouroH: Math.max(0, painel.scrollWidth - painel.clientWidth), cartaoEmpilhado: getComputedStyle(corpo.querySelector('.conq-topo')).display === 'grid',
+      corpoRem: Math.round(cx.width / parseFloat(getComputedStyle(document.documentElement).fontSize) * 100) / 100 };
+  };
+  const CASOS_VITRINE = [['430×932', { width: 430, height: 932 }], ['412×915', { width: 412, height: 915 }], ['393×852', { width: 393, height: 852 }],
+    ['360×740', { width: 360, height: 740 }], ['320×568', { width: 320, height: 568 }], ['Fold 280×653', { width: 280, height: 653 }]];
+  // Os totais 0 e 1600 trocam o NOME da patente (o mais curto e o mais comprido do começo); as escalas 1,15 e 1,5 são as que o
+  // auditor da rodada 21 achou com o px escalado junto (o Fold a 1,3× e o Pixel a 1,5×).
+  //
+  // O QUE CABE E O QUE NÃO. MEDIDO na matriz inteira (6 aparelhos × 5 escalas × 4 idiomas × 3 totais, com o px escalado junto na base e só o
+  // `rem` na árvore): a vitrine é limpa em 430 e 412 px até 2×, em 393 até 1,8×, em 360 até 1,5×, em 320 de 1,3 a 1,5× e no Fold a 1,15 e 1,3×
+  // (o 1,15× do 320 só em francês não: «Inspecteur» a ≤ 4 px de «4000» — o corpo de 10,78rem, e a escada em duas linhas só vale abaixo de
+  // 10,5rem; a 1× o Fold (10,875rem) já tem o mesmo encosto em en/es/fr, e a 1× nada muda). Nas combinações abaixo o corpo é estreito demais
+  // pro nome mais comprido (o do Fold a 1,5× tem 5,1rem = 122 px; «Collectionneur», «Inspecteur», «Conserje» passam dele): ali o texto por cima
+  // de texto, a coluna desigual e o alvo < 44 px seguem proibidos, e a palavra que não coube QUEBRA (o `overflow-wrap` do corte) em vez de
+  // passar por cima do vizinho — mas palavra partida, texto fora do corpo e estouro lateral não são cobrados, e a tabela confere que ela não
+  // ficou velha (combinação que passa a caber sai da lista).
+  const VITRINE_NAO_CABE = new Set(['393×852|2', '360×740|1.8', '360×740|2', '320×568|1.8', '320×568|2', 'Fold 280×653|1.5', 'Fold 280×653|1.8', 'Fold 280×653|2']);
+  const falhouNaoCabe = new Map([...VITRINE_NAO_CABE].map((k) => [k, false]));
+  for (const [rot, viewport] of CASOS_VITRINE) for (const escala of [1.15, 1.3, 1.5, 1.8, 2]) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    const naoCabe = VITRINE_NAO_CABE.has(`${rot}|${escala}`);
+    for (const lang of LINGUAS) for (const total of [0, 1600]) {
+      await entrarL25(page, lang);
+      await abrirHistoricoL25(page, { escada: true, tocada: 'coruja', total });
+      const r = await page.evaluate(medirVitrine);
+      await fecharL25(page);
+      const nome = `vitrine ${rot} ×${escala} · ${lang} · total ${total}`;
+      checa(r.sobre.length === 0, `${nome}: texto do cartão por cima de outro`, r.sobre.join(', '));
+      // O encosto do 320×568 a 1,15× em francês é o que a tabela de cima diz (≤ 4 px, fora do corte de 10,5rem).
+      if (!(rot === '320×568' && escala === 1.15 && lang === 'fr')) checa(r.linhasColadas.length === 0, `${nome}: dois textos da mesma linha (escada, título) se tocam`, r.linhasColadas.join(', '));
+      checa(new Set(r.colunas).size <= 1, `${nome}: colunas desiguais`, r.colunas.join('/'));
+      checa(r.pequenos.length === 0, `${nome}: alvo de toque < 44px`, r.pequenos.join(' | '));
+      const apertado = r.partidas.length || r.foraDaCelula.length || r.foraDoCorpo.length || r.estouroH;
+      if (naoCabe) { if (apertado) falhouNaoCabe.set(`${rot}|${escala}`, true); continue; }
+      checa(r.partidas.length === 0, `${nome}: palavra partida no meio`, r.partidas.join(', '));
+      checa(r.foraDaCelula.length === 0, `${nome}: o nome passa da caixa da célula`, r.foraDaCelula.join(', '));
+      checa(r.foraDoCorpo.length === 0, `${nome}: texto passa da caixa do corpo da vitrine`, r.foraDoCorpo.join(', '));
+      checa(r.estouroH === 0, `${nome}: estouro horizontal`, r.estouroH + 'px');
+    }
+    checa(erros.length === 0, `vitrine ${rot} ×${escala}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  for (const [k, falhou] of falhouNaoCabe) checa(falhou, `vitrine ${k}: CONTROLE — a combinação da lista do que NÃO cabe passou a caber (nada partido, fora do corpo nem estourando): tire-a de VITRINE_NAO_CABE`);
+  {
+    // CONTROLE do instrumento: sem as consultas de contêiner (o cartão e a grade como o `@media` de px os deixava),
+    // a MESMA vitrine a 412×915 ×2 volta a ter texto por cima de texto ou palavra partida em algum idioma.
+    const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 2, { estilo: '#historyBody { container-type: normal !important; }' });
+    let achou = 0;
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      await abrirHistoricoL25(page, { escada: true, tocada: 'coruja' });
+      const r = await page.evaluate(medirVitrine);
+      if (r.sobre.length || r.partidas.length || r.foraDaCelula.length || r.foraDoCorpo.length || r.linhasColadas.length) achou++;
+      await fecharL25(page);
+    }
+    checa(achou > 0, 'vitrine ×2: CONTROLE — sem as consultas de contêiner nenhum idioma sobrepõe nem parte palavra; a medida está cega');
+    await ctx.close();
+  }
+
+  // (c) A 1× NADA muda, em largura nenhuma: a geometria de TODO elemento da vitrine é a mesma com as consultas de
+  // contêiner e sem elas (`container-type: normal` as desliga) — o ponto em que o cartão empilha a 1× é o do `@media`
+  // de 400 px, centímetro por centímetro. Largura de 280 a 1280 px, e as de volta em torno dos 400.
+  const geometriaDaVitrine = () => [...document.getElementById('historyBody').querySelectorAll('*')].map((e) => {
+    const r = e.getBoundingClientRect();
+    return [String(e.className).slice(0, 24), Math.round(r.left * 100) / 100, Math.round(r.top * 100) / 100, Math.round(r.width * 100) / 100, Math.round(r.height * 100) / 100].join(',');
+  }).join('|');
+  const LARGURAS_1X = [...new Set([...Array.from({ length: 26 }, (_, i) => 280 + i * 40), 399, 400, 401, 402, 412, 430, 479, 480, 481])].sort((a, b) => a - b);
+  const compararA1x = async (estiloExtra) => {
+    const { ctx, page } = await novaPaginaL25({ width: 1280, height: 800 }, 1, { estilo: estiloExtra || '' });
+    await entrarL25(page, 'fr');
+    await abrirHistoricoL25(page, { escada: true, tocada: 'coruja' });
+    const diverge = [];
+    for (const w of LARGURAS_1X) {
+      await page.setViewportSize({ width: w, height: 800 });
+      await doisQuadros(page);
+      const com = await page.evaluate(geometriaDaVitrine);
+      const folha = await page.addStyleTag({ content: '#historyBody { container-type: normal !important; }' });
+      await doisQuadros(page);
+      const sem = await page.evaluate(geometriaDaVitrine);
+      await folha.evaluate((el) => el.remove());
+      if (com !== sem) diverge.push(w);
+    }
+    await ctx.close();
+    return diverge;
+  };
+  {
+    const diverge = await compararA1x('');
+    checa(diverge.length === 0, `vitrine 1×: a geometria muda com a consulta de contêiner em ${diverge.length} larguras (mudaria o que cabe hoje)`, diverge.join(', '));
+    // CONTROLE do instrumento: com um corte ERRADO (20rem em vez de 18,375rem) a comparação enxerga a diferença.
+    const errado = await compararA1x('@container historico (max-width: 20rem) { .conq-grade { grid-template-columns: 1fr !important; } }');
+    checa(errado.length > 0, 'vitrine 1×: CONTROLE — com o corte da consulta errado a geometria seguiu igual em todas as larguras; a comparação está cega');
+  }
+
+  // ── 5. R21-7-01 · o contraste alto do sistema ───────────────────────────────────────────────────────
+  // O WebKit do Playwright não emula `forced-colors`: fica no Chromium (e o pulo é NOMEADO, na lista do navegador.test).
+  if (!pularForaDoChromium(MOTOR, 'contraste alto: os interruptores, a aba selecionada, a barra, as células e os botões em forced-colors',
+    'o WebKit do Playwright não emula forced-colors: a medida só existe no Chromium')) {
+    const medirContrasteAlto = async () => {
+      const q = (s) => document.querySelector(s);
+      const c = (el, p, pseudo) => getComputedStyle(el, pseudo || null)[p];
+      const out = { interruptores: [], botoes: [] };
+      // Preferências: cada interruptor tem trilho (borda) e botão, e ligado ≠ desligado no trilho e no botão.
+      openModal('filtersModal'); switchFilterTab('filtersTabPrefs');
+      await new Promise((ok) => setTimeout(ok, 150));
+      for (const el of document.querySelectorAll('#filtersPanelPrefs input.ui-switch')) {
+        // Cada troca espera as TRANSIÇÕES terminarem: o computado logo depois de mudar o `checked` é o do começo da transição.
+        const esperar = () => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))).then(() => new Promise((ok) => setTimeout(ok, 30)));
+        const antes = el.checked;
+        el.checked = false; await esperar(); const off = { fundo: c(el, 'backgroundColor'), polegar: c(el, 'backgroundColor', '::after') };
+        el.checked = true; await esperar(); const on = { fundo: c(el, 'backgroundColor'), polegar: c(el, 'backgroundColor', '::after') };
+        el.checked = antes; await esperar();
+        out.interruptores.push({ id: el.id, borda: c(el, 'borderTopWidth'), estilo: c(el, 'borderTopStyle'),
+          trilhoMuda: off.fundo !== on.fundo, polegarMuda: off.polegar !== on.polegar, desabilitado: el.disabled, ajuste: c(el, 'forcedColorAdjust') });
+      }
+      for (const id of ['cancelFilters', 'applyFilters', 'closeFilters']) {
+        const el = document.getElementById(id);
+        if (el) out.botoes.push({ id, borda: c(el, 'borderTopWidth'), estilo: c(el, 'borderTopStyle'), visivel: el.getClientRects().length > 0 });
+      }
+      // Histórico: a aba selecionada ≠ as outras, a barra tem borda e preenchimento, "ganha" × "trancada".
+      switchFilterTab('filtersTabHistory');
+      await new Promise((ok) => setTimeout(ok, 150));
+      // Transparente e o Canvas da página PARECEM iguais: a aba selecionada só se distingue se o fundo dela é opaco e
+      // diferente do da página (o `#fff` do defeito vira Canvas opaco, e a outra aba segue transparente: as duas
+      // strings diferem e a tela não).
+      const sel = q('.seg-tab[aria-selected="true"]'), outra = q('.seg-tab[aria-selected="false"]');
+      const canvas = c(document.body, 'backgroundColor');
+      const igualAoFundo = (cor) => cor === 'rgba(0, 0, 0, 0)' || cor === canvas;
+      out.aba = { selecionada: c(sel, 'backgroundColor'), outra: c(outra, 'backgroundColor'), canvas, textoSel: c(sel, 'color'),
+        selecionadaSeDistingue: !igualAoFundo(c(sel, 'backgroundColor')) };
+      const barra = q('.conq-barra'), enche = q('.conq-barra > i');
+      out.barra = { borda: c(barra, 'borderTopWidth'), fundo: c(barra, 'backgroundColor'), enche: c(enche, 'backgroundColor') };
+      const on = q('.conq-cel.on'), off = q('.conq-cel.off');
+      out.celulas = { onEstilo: c(on, 'borderTopStyle'), offEstilo: c(off, 'borderTopStyle'), onLargura: c(on, 'borderTopWidth'), offLargura: c(off, 'borderTopWidth') };
+      const tag = q('.conq-tag'); out.tag = tag ? c(tag, 'borderTopWidth') : null;
+      // O cartão do diálogo tem borda (a sombra some) e o aviso passageiro, fundo opaco e borda (senão o texto fica por cima do card).
+      const cartao = q('#filtersModal > div'); out.cartao = { borda: c(cartao, 'borderTopWidth'), estilo: c(cartao, 'borderTopStyle') };
+      showToast('contraste alto', 'info', 60000); await new Promise((ok) => setTimeout(ok, 120));
+      const aviso = q('.toast'); out.aviso = { borda: c(aviso, 'borderTopWidth'), fundo: c(aviso, 'backgroundColor') }; aviso.click();
+      const selo = document.getElementById('conqSelo');
+      out.selo = selo ? { borda: c(selo, 'borderTopWidth'), fundo: c(selo, 'backgroundColor') } : null;
+      return out;
+    };
+    const maiorTrechoDoRotulo = async (page) => {
+      const { decodificar } = await import('./png-palette.mjs');
+      const corTexto = await page.evaluate(() => getComputedStyle(document.querySelector('.seg-tab[aria-selected="true"]')).color);
+      const [R, G, B] = corTexto.match(/\d+/g).map(Number);
+      const caixa = await page.locator('.seg-tab[aria-selected="true"]').boundingBox();
+      const png = decodificar(await page.screenshot({ clip: { x: caixa.x + 4, y: caixa.y + 4, width: Math.max(1, caixa.width - 8), height: Math.max(1, caixa.height - 8) } }));
+      let maior = 0;
+      for (let y = 0; y < png.altura; y++) {
+        let corrida = 0;
+        for (let x = 0; x < png.largura; x++) {
+          const k = (y * png.largura + x) * png.canais;
+          if (Math.abs(png.pixels[k] - R) <= 3 && Math.abs(png.pixels[k + 1] - G) <= 3 && Math.abs(png.pixels[k + 2] - B) <= 3) { corrida++; if (corrida > maior) maior = corrida; } else corrida = 0;
+        }
+      }
+      return maior;
+    };
+    for (const tema of ['light', 'dark']) {
+      const { ctx, page, erros } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: tema, forcedColors: 'active' });
+      await entrarL25(page, 'pt');
+      await page.evaluate((conq) => { localStorage.setItem('waze_places_conquistas', JSON.stringify(conq)); AppState.conquistas = null;
+        localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: 1500, rejected: 300 } })); AppState.history = null; escadaAberta = false; conquistaTocada = null;
+      }, CONQUISTAS_L25);
+      const forcado = await page.evaluate(() => matchMedia('(forced-colors: active)').matches);
+      checa(forcado, `contraste alto ${tema}: o navegador não está em forced-colors — a medida não vale`);
+      const r = await page.evaluate(medirContrasteAlto);
+      const nome = `contraste alto · ${tema}`;
+      checa(r.interruptores.length >= 3, `${nome}: só ${r.interruptores.length} interruptores nas Preferências — a medida não prova nada`);
+      for (const i of r.interruptores) {
+        checa(parseFloat(i.borda) >= 2 && i.estilo === 'solid', `${nome}: o interruptor ${i.id} não tem trilho (borda ${i.borda} ${i.estilo})`);
+        // O botão desabilitado (o Desfazer de quem ainda não bateu a cota) é GrayText ligado e desligado — o que diz o estado é o trilho (e o lado
+        // em que o botão está); nos habilitados o trilho E o botão trocam de cor.
+        checa(i.trilhoMuda && (i.polegarMuda || i.desabilitado), `${nome}: o interruptor ${i.id} ligado e desligado são iguais (trilho ${i.trilhoMuda}, botão ${i.polegarMuda}, desabilitado ${i.desabilitado})`);
+        checa(i.ajuste === 'none', `${nome}: o interruptor ${i.id} não usa só cores do sistema (forced-color-adjust ${i.ajuste})`);
+      }
+      for (const b of r.botoes.filter((x) => x.visivel)) checa(parseFloat(b.borda) >= 1 && b.estilo !== 'none', `${nome}: o botão ${b.id} é texto solto (borda ${b.borda} ${b.estilo})`);
+      checa(r.aba.selecionadaSeDistingue, `${nome}: a aba selecionada não se distingue da página (fundo ${r.aba.selecionada}, Canvas ${r.aba.canvas})`, JSON.stringify(r.aba));
+      checa(parseFloat(r.barra.borda) >= 1 && r.barra.enche !== r.barra.fundo, `${nome}: a barra de progresso da patente some (borda ${r.barra.borda}, enchimento ${r.barra.enche} × fundo ${r.barra.fundo})`);
+      checa(r.celulas.onEstilo !== r.celulas.offEstilo || r.celulas.onLargura !== r.celulas.offLargura, `${nome}: "ganha" e "trancada" são iguais (${JSON.stringify(r.celulas)})`);
+      checa(r.tag === null || parseFloat(r.tag) >= 1, `${nome}: a etiqueta "nova" é só fundo (borda ${r.tag})`);
+      checa(r.selo === null || (parseFloat(r.selo.borda) >= 1), `${nome}: o pontinho de conquista nova é só fundo (${JSON.stringify(r.selo)})`);
+      checa(parseFloat(r.cartao.borda) >= 1 && r.cartao.estilo !== 'none', `${nome}: o cartão do diálogo não tem borda (a sombra some no contraste alto)`, JSON.stringify(r.cartao));
+      checa(parseFloat(r.aviso.borda) >= 1 && !/^rgba\(.*, 0\)$/.test(r.aviso.fundo) && r.aviso.fundo !== 'transparent', `${nome}: o aviso passageiro não tem borda e fundo opaco`, JSON.stringify(r.aviso));
+      // O BACKPLATE: o texto da aba selecionada tem que SER texto. Uma placa de Canvas atrás do `HighlightText` (branco) vira uma barra branca do tamanho
+      // do rótulo — medido na tinta: o maior trecho contínuo da cor do texto numa linha do rótulo (letra: até ~8 px; placa: a largura do rótulo, 60 px ou mais).
+      const maior = await maiorTrechoDoRotulo(page);
+      checa(maior < 24, `${nome}: o rótulo da aba selecionada é uma barra sólida de ${maior} px na cor do texto (o backplate do navegador) — o texto sumiu`);
+      checa(erros.length === 0, `${nome}: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+    {
+      // CONTROLE do instrumento: com as regras do contraste alto desfeitas (o defeito: o interruptor `appearance: none`
+      // com só fundo), a MESMA tela perde o trilho e a aba selecionada — a medida vê.
+      const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: 'light', forcedColors: 'active',
+        estilo: 'input.ui-switch.ui-switch { forced-color-adjust: auto !important; border: 0 !important; background: #cbd5e1 !important; } '
+          + '.seg-tab.seg-tab[aria-selected="true"] { background: #fff !important; color: #0e7490 !important; } '
+          + '.conq-barra { border: 0 !important; }' });
+      await entrarL25(page, 'pt');
+      await page.evaluate((conq) => { localStorage.setItem('waze_places_conquistas', JSON.stringify(conq)); AppState.conquistas = null; }, CONQUISTAS_L25);
+      const r = await page.evaluate(medirContrasteAlto);
+      checa(r.interruptores.some((i) => parseFloat(i.borda) < 2 || !i.trilhoMuda), 'contraste alto: CONTROLE — com o defeito de volta os interruptores seguem com trilho; a medida está cega', JSON.stringify(r.interruptores[0]));
+      checa(!r.aba.selecionadaSeDistingue, 'contraste alto: CONTROLE — com o defeito de volta a aba selecionada se distingue; a medida está cega', JSON.stringify(r.aba));
+      checa(parseFloat(r.barra.borda) < 1, 'contraste alto: CONTROLE — com o defeito de volta a barra tem borda; a medida está cega', JSON.stringify(r.barra));
+      await ctx.close();
+    }
+    {
+      // CONTROLE do backplate: com o ajuste automático de volta na aba selecionada (o defeito), o rótulo vira a barra sólida e a medida a vê.
+      for (const tema of ['light', 'dark']) {
+        const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: tema, forcedColors: 'active',
+          estilo: '.seg-tab.seg-tab[aria-selected="true"] { forced-color-adjust: auto !important; }' });
+        await entrarL25(page, 'pt');
+        await page.evaluate(async () => { openModal('filtersModal'); switchFilterTab('filtersTabHistory'); await new Promise((ok) => setTimeout(ok, 300)); });
+        const maior = await maiorTrechoDoRotulo(page);
+        checa(maior >= 24, `contraste alto ${tema}: CONTROLE — com o backplate de volta o rótulo da aba segue legível (maior trecho ${maior} px); a medida está cega`);
+        await ctx.close();
+      }
+    }
+    {
+      // E FORA do contraste alto o bloco não existe: a mesma tela, sem `forcedColors`, segue como era (sem borda no
+      // interruptor nem nos botões) — o `@media` não vaza.
+      const { ctx, page } = await novaPaginaL25({ width: 412, height: 915 }, 1, { colorScheme: 'light' });
+      await entrarL25(page, 'pt');
+      await page.evaluate((conq) => { localStorage.setItem('waze_places_conquistas', JSON.stringify(conq)); AppState.conquistas = null; }, CONQUISTAS_L25);
+      const r = await page.evaluate(medirContrasteAlto);
+      checa(r.interruptores.every((i) => parseFloat(i.borda) === 0), 'contraste alto: com o modo desligado o interruptor ganhou borda — o @media vazou', JSON.stringify(r.interruptores[0]));
+      checa(r.botoes.every((b) => parseFloat(b.borda) === 0), 'contraste alto: com o modo desligado um botão ganhou borda — o @media vazou', JSON.stringify(r.botoes));
+      checa(parseFloat(r.barra.borda) === 0, 'contraste alto: com o modo desligado a barra ganhou borda — o @media vazou');
+      await ctx.close();
+    }
+  } // fim do bloco do contraste alto (só do Chromium)
+
+  // ── 6. D3 e D4 · a tabela de gestos da Ajuda e os botões do pareamento / "Acesso restrito" ──────────
+  const medirGestosDaAjuda = () => {
+    openModal('helpModal');
+    return new Promise((ok) => setTimeout(() => {
+      // Pelo CONTEÚDO, e não pela classe nova: assim a medida roda (e reprova com nome) na árvore de antes.
+      const grade = document.querySelector('#helpModal [data-i18n="help.action.reject.hint"]').closest('.grid');
+      const cartao = document.querySelector('#helpModal > div').getBoundingClientRect();
+      const fora = [], partidas = [];
+      for (const ladrilho of grade.children) {
+        const rt = ladrilho.getBoundingClientRect();
+        for (const d of ladrilho.querySelectorAll('div')) {
+          const rg = document.createRange(); rg.selectNodeContents(d); const rr = rg.getBoundingClientRect();
+          if (rr.right > rt.right + 0.5 || rr.left < rt.left - 0.5) fora.push((d.textContent || '').trim().slice(0, 18));
+          const tn = [...d.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+          if (tn) { const re = /\S{4,}/g; let m; while ((m = re.exec(tn.textContent))) { const w = document.createRange(); w.setStart(tn, m.index); w.setEnd(tn, m.index + m[0].length);
+            if (new Set([...w.getClientRects()].map((x) => Math.round(x.top))).size > 1) partidas.push(m[0]); } }
+        }
+      }
+      const sel = document.getElementById('langSelectHelp').getBoundingClientRect();
+      ok({ fora: [...new Set(fora)], partidas: [...new Set(partidas)], seletorFora: Math.round(sel.right - cartao.right) });
+    }, 150));
+  };
+  for (const [rot, viewport, escala] of [['Fold 280×653 ×1,1', { width: 280, height: 653 }, 1.1], ['360×740 ×1,5', { width: 360, height: 740 }, 1.5],
+    ['393×852 ×1,5', { width: 393, height: 852 }, 1.5], ['Fold 280×653 ×2', { width: 280, height: 653 }, 2], ['360×740 ×2', { width: 360, height: 740 }, 2]]) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const r = await page.evaluate(medirGestosDaAjuda);
+      // A 2× os três ladrilhos têm de 12 a 39 px de largura: nem a seta (←, ↑, →) cabe, e quebrar PALAVRA não resolve (fica de fora, com a
+      // medida no relatório). O que a quebra conserta é o texto dos ladrilhos até ~1,5×; a 2× o que se cobra é o seletor de idioma.
+      if (escala <= 1.5) checa(r.fora.length === 0, `Ajuda ${rot} · ${lang}: texto passa da borda do ladrilho de gesto`, r.fora.join(', '));
+      checa(r.seletorFora <= 0, `Ajuda ${rot} · ${lang}: o seletor de idioma sai ${r.seletorFora}px pela direita do cartão`);
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `Ajuda ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // A 1× nada quebra (as palavras cabem): zero palavra partida nos ladrilhos — o `overflow-wrap` só age quando precisa.
+    for (const [w, h] of [[412, 915], [360, 740], [393, 852]]) {
+      const { ctx, page } = await novaPaginaL25({ width: w, height: h }, 1);
+      for (const lang of ['pt', 'fr']) {
+        await entrarL25(page, lang);
+        const r = await page.evaluate(medirGestosDaAjuda);
+        checa(r.partidas.length === 0 && r.fora.length === 0, `Ajuda 1× ${w}×${h} · ${lang}: palavra partida ou texto fora do ladrilho a 1×`, JSON.stringify(r));
+        await fecharL25(page);
+      }
+      await ctx.close();
+    }
+    // CONTROLE do instrumento: sem a quebra (o defeito) o MESMO Fold a 1,1× passa da borda do ladrilho em algum idioma (a partir de 1,5× nem a
+    // seta — ←, ↑, → — cabe no ladrilho, com ou sem a quebra: o controle ali não distinguiria nada).
+    const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 1.1, { estilo: '.ajuda-gestos > div { overflow-wrap: normal !important; } #langSelectHelp { min-width: auto !important; }' });
+    let passou = 0;
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const r = await page.evaluate(medirGestosDaAjuda);
+      if (r.fora.length) passou++;
+      await fecharL25(page);
+    }
+    checa(passou > 0, 'Ajuda ×1,1: CONTROLE — sem a quebra nenhum ladrilho passa da borda; a medida está cega');
+    await ctx.close();
+  }
+  const medirRotulosDoPareamento = (id) => {
+    openModal(id);
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById(id);
+      const cartao = m.querySelector(':scope > div').getBoundingClientRect();
+      const fora = [];
+      for (const b of m.querySelectorAll('button')) {
+        if (!b.getClientRects().length) continue;
+        const rb = b.getBoundingClientRect();
+        const alvo = b.querySelector('span') || b;
+        const rg = document.createRange(); rg.selectNodeContents(alvo); const rr = rg.getBoundingClientRect();
+        if (rr.left < rb.left - 0.5 || rr.right > rb.right + 0.5) fora.push(`${b.id}:${Math.round(Math.max(rb.left - rr.left, rr.right - rb.right))}`);
+        if (rb.right > cartao.right + 0.5 || rb.left < cartao.left - 0.5) fora.push(`${b.id}:caixa`);
+      }
+      ok(fora);
+    }, 120));
+  };
+  const abrirAcessoRestrito = (page) => page.evaluate(() => {
+    try { showAccessDenied({ error: 'x', reasonKey: 'srv.err.accessDenied' }, { rank: 0, userName: 'novato', isAreaManager: false }); } catch (e) { openModal('accessDeniedModal'); }
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById('accessDeniedModal'); const cartao = m.querySelector(':scope > div').getBoundingClientRect();
+      const b = document.getElementById('closeAccessDenied'); const rb = b.getBoundingClientRect();
+      const rg = document.createRange(); rg.selectNodeContents(b); const rr = rg.getBoundingClientRect();
+      const fora = [];
+      if (rr.left < rb.left - 0.5 || rr.right > rb.right + 0.5) fora.push(`closeAccessDenied:${Math.round(Math.max(rb.left - rr.left, rr.right - rb.right))}`);
+      if (rb.right > cartao.right + 0.5 || rb.left < cartao.left - 0.5) fora.push('closeAccessDenied:caixa');
+      ok(fora);
+    }, 150));
+  });
+  for (const [rot, viewport, escala] of [['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5], ['Fold 280×653 ×2', { width: 280, height: 653 }, 2],
+    ['360×740 ×2', { width: 360, height: 740 }, 2], ['320×568 ×2', { width: 320, height: 568 }, 2]]) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const f1 = await page.evaluate(medirRotulosDoPareamento, 'pairShowModal');
+      checa(f1.length === 0, `pareamento ${rot} · ${lang}: o rótulo passa da caixa do botão`, f1.join(', '));
+      await fecharL25(page);
+      const f2 = await abrirAcessoRestrito(page);
+      checa(f2.length === 0, `Acesso restrito ${rot} · ${lang}: o rótulo passa da caixa do botão`, f2.join(', '));
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `pareamento ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: sem o `min-w-0` e a quebra (o defeito) o Fold a 2× em francês passa da caixa.
+    const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 2, { estilo: '#pairShowModal span, #pairShowClose, #closeAccessDenied { min-width: auto !important; overflow-wrap: normal !important; word-break: normal !important; }' });
+    let passou = 0;
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const f1 = await page.evaluate(medirRotulosDoPareamento, 'pairShowModal'); if (f1.length) passou++;
+      await fecharL25(page);
+      const f2 = await abrirAcessoRestrito(page); if (f2.length) passou++;
+      await fecharL25(page);
+    }
+    checa(passou > 0, 'pareamento ×2: CONTROLE — sem a quebra nenhum rótulo passa da caixa; a medida está cega');
+    await ctx.close();
+  }
+
+  // ── 7. R21-8-04 · o título, a 1ª frase e o nome do perfil do "Acesso restrito" dentro do cartão (Fold a 1,5×) ──────────
+  // A coluna do texto, ao lado do ícone, era item de um `flex` sem `min-w-0`: «Restricted»/«Acceso» não quebravam e saíam do cartão
+  // pela direita (en 34 px, es 42, fr 6; o nome do perfil 27 em todos). Mede a TINTA de cada texto contra a borda do cartão.
+  const medirAcessoRestrito = () => {
+    try { showAccessDenied({ error: 'x', reasonKey: 'srv.err.accessDenied' }, { rank: 0, userName: 'world_novato12345', isAreaManager: false }); } catch (e) { openModal('accessDeniedModal'); }
+    return new Promise((ok) => setTimeout(() => {
+      const m = document.getElementById('accessDeniedModal'); const cartao = m.querySelector(':scope > div').getBoundingClientRect();
+      const tinta = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+      const fora = [];
+      for (const [nome, el] of [['título', document.getElementById('accessDeniedTitle')], ['1ª frase', document.getElementById('accessDeniedTitle').nextElementSibling],
+        ['nome do perfil', document.querySelector('#accessDeniedProfile strong')]]) {
+        if (!el || !el.getClientRects().length) continue;
+        const r = tinta(el); const p = Math.round(Math.max(0, r.right - cartao.right, cartao.left - r.left));
+        if (p > 0) fora.push(`${nome}:${p}`);
+      }
+      ok(fora);
+    }, 160));
+  };
+  for (const [rot, viewport, escala] of [['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5], ['Fold 280×653 ×2', { width: 280, height: 653 }, 2]]) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const f = await page.evaluate(medirAcessoRestrito);
+      checa(f.length === 0, `Acesso restrito ${rot} · ${lang}: texto passa do cartão pela direita`, f.join(', '));
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `Acesso restrito ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  {
+    // A 1× o texto cabe e nada quebra: nenhuma palavra do título, da frase ou do nome sai do lugar (a regra só age quando não cabe).
+    for (const [w, h] of [[412, 915], [360, 740], [280, 653]]) {
+      const { ctx, page } = await novaPaginaL25({ width: w, height: h }, 1);
+      for (const lang of ['pt', 'fr']) {
+        await entrarL25(page, lang);
+        const f = await page.evaluate(medirAcessoRestrito);
+        checa(f.length === 0, `Acesso restrito 1× ${w}×${h} · ${lang}: texto passa do cartão`, f.join(', '));
+        await fecharL25(page);
+      }
+      await ctx.close();
+    }
+    // CONTROLE do instrumento: sem o `min-w-0` da coluna e sem a quebra (o defeito) o Fold a 1,5× passa do cartão em algum idioma.
+    const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 1.5, { estilo: '#accessDeniedModal .min-w-0 { min-width: auto !important; overflow-wrap: normal !important; } #accessDeniedProfile { overflow-wrap: normal !important; }' });
+    let passou = 0;
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const f = await page.evaluate(medirAcessoRestrito); if (f.length) passou++;
+      await fecharL25(page);
+    }
+    checa(passou > 0, 'Acesso restrito ×1,5: CONTROLE — sem a coluna encolhível nenhum texto passa do cartão; a medida está cega');
+    await ctx.close();
+  }
+
+  // ── 8. R21-8-02 · a ação AFIRMATIVA dos diálogos fica à vista quando as ações empilham ──────────────────────────────
+  // O centro do botão afirmativo recebe o dedo SEM rolar o cartão? Antes do conserto, empilhar somava uma fileira de altura e o botão
+  // de baixo caía uma fileira abaixo do corte do cartão, sem pista de rolagem: «Como funciona» (o diálogo do PRIMEIRO login de todo
+  // aparelho) no S8 360×740 a 1,3× em pt e no Pixel 412×915 a 1,5× em fr, «Colar cookies» no SE 375×667 a 1,5× em pt e fr.
+  const medirAfirmativa = ([nome, id, ok]) => {
+    if (nome === 'sair') abrirDialogoDoSair(); else if (nome === 'comofunciona') abrirComoFunciona(false); else openModal(id);
+    return new Promise((fim) => setTimeout(() => {
+      const m = document.getElementById(id); const cartao = m.firstElementChild; cartao.scrollTop = 0;
+      const b = document.getElementById(ok); const r = b.getBoundingClientRect(); const cb = cartao.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const dentro = cy >= cb.top && cy <= Math.min(cb.bottom, innerHeight) && cx >= 0 && cx <= innerWidth;
+      const hit = dentro ? document.elementFromPoint(cx, cy) : null;
+      const linha = b.closest('.dialogo-acoes'); const bs = linha ? [...linha.children].filter((c) => c.getClientRects().length) : [];
+      const empilhado = bs.length > 1 && bs[1].getBoundingClientRect().top >= bs[0].getBoundingClientRect().bottom - 1;
+      fim({ nome, ok: hit === b || !!(hit && b.contains(hit)), empilhado, sobra: cartao.scrollHeight - cartao.clientHeight });
+    }, 160));
+  };
+  const DIALOGOS_DA_FILEIRA = [['sair', 'logoutModal', 'confirmLogout'], ['colar', 'pasteModal', 'confirmPaste'], ['codigo', 'pairEnterModal', 'pairEnterConfirm'],
+    ['comofunciona', 'comoFuncionaModal', 'comoFuncionaOk'], ['lote', 'batchReadModal', 'confirmBatchRead']];
+  const CASOS_FILEIRA = [['S8 360×740 ×1,3', { width: 360, height: 740 }, 1.3], ['Pixel 412×915 ×1,5', { width: 412, height: 915 }, 1.5], ['SE 375×667 ×1,5', { width: 375, height: 667 }, 1.5],
+    ['SE 375×667 ×2', { width: 375, height: 667 }, 2], ['393×852 ×1,5', { width: 393, height: 852 }, 1.5], ['320×568 ×1,5', { width: 320, height: 568 }, 1.5], ['320×568 ×2', { width: 320, height: 568 }, 2],
+    ['Fold 280×653 ×1,3', { width: 280, height: 653 }, 1.3], ['Fold 280×653 ×2', { width: 280, height: 653 }, 2]];
+  // A 1× nenhum celular entra no estado empilhado (a fileira do Galaxy Fold tem 12,5rem, e o corte é 12,4rem): a fileira
+  // segue no fluxo (`position: static`, sem o ::after) em TODOS os diálogos, nas telas que existem, inclusive deitadas.
+  const medirPosicaoDasAcoes = (id) => {
+    const abrir = { logoutModal: () => abrirDialogoDoSair(), pasteModal: () => openModal('pasteModal'), pairEnterModal: () => openModal('pairEnterModal'),
+      comoFuncionaModal: () => abrirComoFunciona(false), batchReadModal: () => openModal('batchReadModal'), treinoFimModal: () => openModal('treinoFimModal'),
+      accessDeniedModal: () => openModal('accessDeniedModal') };
+    abrir[id]();
+    return [...document.querySelectorAll(`#${id} .acoes-presas`)].map((el) => `${id}:${getComputedStyle(el).position}:${getComputedStyle(el, '::after').content}`);
+  };
+  {
+    const IDS = ['logoutModal', 'pasteModal', 'pairEnterModal', 'comoFuncionaModal', 'batchReadModal', 'treinoFimModal', 'accessDeniedModal'];
+    for (const [w, h] of [[280, 653], [653, 280], [320, 568], [360, 740], [568, 320], [412, 915]]) {
+      const { ctx, page } = await novaPaginaL25({ width: w, height: h }, 1);
+      await entrarL25(page, 'fr');
+      const posicoes = [];
+      for (const id of IDS) { posicoes.push(...await page.evaluate(medirPosicaoDasAcoes, id)); await fecharL25(page); }
+      checa(posicoes.length === 7 && posicoes.every((p) => /:static:(none|normal)$/.test(p)),
+        `diálogos ${w}×${h} a 1×: a fileira de ações saiu do fluxo (position/::after) — mudaria o desenho de hoje`, posicoes.join(' | '));
+      await ctx.close();
+    }
+  }
+  let empilhadosVistos = 0;
+  for (const [rot, viewport, escala] of CASOS_FILEIRA) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      for (const d of DIALOGOS_DA_FILEIRA) {
+        const r = await page.evaluate(medirAfirmativa, d);
+        await fecharL25(page);
+        // A regra é do estado EMPILHADO (é onde a fileira ganha uma linha); lado a lado o desenho é o de sempre.
+        if (r.empilhado) { empilhadosVistos++; checa(r.ok, `diálogo ${d[0]} ${rot} · ${lang}: o botão afirmativo (empilhado) não recebe o dedo sem rolar`, JSON.stringify(r)); }
+      }
+    }
+    checa(erros.length === 0, `diálogos ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  checa(empilhadosVistos >= 40, `diálogos empilhados: só ${empilhadosVistos} combinações empilharam — a medida não provou nada`);
+  {
+    // CONTROLE do instrumento: com a fileira de volta ao fluxo (o defeito) o MESMO S8 a 1,3× e o SE a 1,5× têm o afirmativo cortado em algum diálogo.
+    let cortados = 0;
+    for (const [viewport, escala] of [[{ width: 360, height: 740 }, 1.3], [{ width: 375, height: 667 }, 1.5], [{ width: 412, height: 915 }, 1.5]]) {
+      const { ctx, page } = await novaPaginaL25(viewport, escala, { estilo: '.acoes-presas { position: static !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }' });
+      for (const lang of LINGUAS) {
+        await entrarL25(page, lang);
+        for (const d of DIALOGOS_DA_FILEIRA) { const r = await page.evaluate(medirAfirmativa, d); await fecharL25(page); if (r.empilhado && !r.ok) cortados++; }
+      }
+      await ctx.close();
+    }
+    checa(cortados > 0, 'diálogos empilhados: CONTROLE — sem a fileira presa o afirmativo nunca fica cortado; a medida está cega');
+  }
+  {
+    // O estado empilhado que CABE não muda UM pixel: a tinta do cartão com a fileira presa é byte a byte a MESMA da tela com a regra desfeita, nos dois temas (a 99% o escuro mudava 1 nível por arredondamento).
+    // É o motivo do fundo a 99,6% (e não `inherit`): MEDIDO, com a cor do cartão OPACA na fileira o Chromium rasteriza o texto dela com
+    // antisserrilhado de subpixel, e os 336 estados empilhados que cabem (aparelhos × escalas × idiomas × temas) mudavam de 1.000 a 2.000
+    // pixels com a geometria IGUAL. O CONTROLE reproduz o defeito (o fundo opaco de volta): a tinta tem que mudar. Se não muda, este Chromium
+    // não faz subpixel e a medida não enxerga — aí o bloco AVISA e pula só esta igualdade, em vez de reprovar por causa do ambiente.
+    const DESFEITA = '.acoes-presas { position: static !important; background: none !important; } .acoes-presas::after { display: none !important; }';
+    const OPACA = '.acoes-presas, .dark .acoes-presas { background: inherit !important; }';
+    const abrirParaFoto = ([nome, id]) => {
+      if (nome === 'sair') abrirDialogoDoSair(); else if (nome === 'comofunciona') abrirComoFunciona(false); else openModal(id);
+      return new Promise((fim) => setTimeout(() => {
+        if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+        const m = document.getElementById(id); const cartao = m.firstElementChild;
+        const linha = cartao.querySelector('.dialogo-acoes'); const bs = linha ? [...linha.children].filter((c) => c.getClientRects().length) : [];
+        fim({ empilhado: bs.length > 1 && bs[1].getBoundingClientRect().top >= bs[0].getBoundingClientRect().bottom - 1, sobra: cartao.scrollHeight - cartao.clientHeight });
+      }, 200));
+    };
+    const fotoDe = async (tema, estilo, d) => {
+      const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 1.15, { colorScheme: tema, estilo });
+      await entrarL25(page, 'pt');
+      const pre = await page.evaluate(abrirParaFoto, d);
+      await assentar(page, 30);
+      const caixa = await page.locator(`#${d[1]} > div`).boundingBox();
+      const foto = await page.screenshot({ clip: { x: Math.max(0, caixa.x - 4), y: Math.max(0, caixa.y - 4), width: caixa.width + 8, height: caixa.height + 8 } });
+      await ctx.close();
+      return { pre, foto };
+    };
+    let controleVe = 0, medidos = 0;
+    for (const tema of ['light', 'dark']) for (const d of [['colar', 'pasteModal'], ['codigo', 'pairEnterModal'], ['lote', 'batchReadModal']]) {
+      const normal = await fotoDe(tema, '', d), desfeita = await fotoDe(tema, DESFEITA, d), opaca = await fotoDe(tema, OPACA, d);
+      checa(normal.pre.empilhado && normal.pre.sobra <= 0, `fileira presa ${d[0]} · ${tema}: o diálogo não está empilhado e cabendo (empilhado ${normal.pre.empilhado}, sobra ${normal.pre.sobra}) — a medida não vale`, JSON.stringify(normal.pre));
+      medidos++;
+      if (!opaca.foto.equals(normal.foto)) controleVe++;
+      // o que se cobra: com a regra (99%) a tinta é a de sem ela
+      normal.cobra = normal.foto.equals(desfeita.foto);
+      normal.nome = `fileira presa ${d[0]} · ${tema}`;
+      (globalThis.__fotosDaFileira ||= []).push(normal);
+    }
+    if (controleVe === 0) console.log('  (pulado: este navegador não rasteriza o texto da fileira opaca com subpixel — a tinta saiu igual com o fundo opaco, então a igualdade dos diálogos empilhados que cabem não se mede aqui; é o caso do WebKit)');
+    else {
+      for (const n of globalThis.__fotosDaFileira) checa(n.cobra, `${n.nome}: a tinta do diálogo empilhado que CABE mudou com a fileira presa (o fundo da fileira liga o antisserrilhado de subpixel)`);
+      checa(controleVe === medidos, `fileira presa: CONTROLE — com o fundo opaco de volta só ${controleVe} de ${medidos} diálogos mudaram de tinta; a medida está cega para parte deles`);
+    }
+    delete globalThis.__fotosDaFileira;
+  }
+}
+
 // ── O mapa é legível? (contraste e alvo de toque) ─────────────────────────
 //
 // O mapa entrou por cima de tiles que mudam de cor conforme a região — parque
@@ -16914,4 +17793,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o FAB de baixo × a pilha de avisos (360×740 a 1× e 1,5×: 1 toast, 1 de 2 linhas, 2 e 3 toasts nunca recebem o toque do FAB — a reserva é a altura MEDIDA da pilha —, com o CONTROLE da reserva fixa de antes cobrindo o FAB) e a barra ✕ ↑ ✓ fora da janela (o Fold a 2× alerta barraDeAcoesForaDaTela e cala com um gesto no card; 4 aparelhos sãos não alertam), com a escala do texto no computado mesmo escrita só na CSSOM`
   + `, + o armazenamento ILEGÍVEL não sendo o "Sair" de outra aba (lote 25: o localStorage lançando SecurityError — o pageshow persistido NÃO encerra a sessão viva, não manda sessao:destroy e não devolve à fábrica a preferência desta sessão, e a volta do fundo da presença PEDE a lista —, com a pré-condição de que a página bloqueada lança e o CONTROLE do armazenamento normal)`
   + `, + o link do "Copiar link" colado no campo do código (lote 25: o ouvinte de paste do campo resgata o segredo de 20 símbolos e o campo não vira "PLA-CES"; o código colado junto do host entra no formato da tela sem resgatar sozinho; o texto que não é nenhum dos dois segue o colar do navegador)`
-  + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`);
+  + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`
+  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem, a 1× nada muda) — cada medida com o seu CONTROLE`);
