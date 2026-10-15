@@ -66,7 +66,7 @@ function montar(nomes, deps, extra = '') {
     },
     set: (t, k, v) => { t[k] = v; return true; },
   });
-  const corpo = nomes.map((n) => fatiar(n)).join('\n');
+  const corpo = ['contagemDoHistorico', ...nomes].map((n) => fatiar(n)).join('\n');
   const fns = new Function('__escopo', `with (__escopo) {\n${extra}\n${corpo}\nreturn { ${nomes.join(', ')} };\n}`)(escopo);
   return { ...fns, deps, chamou };
 }

@@ -2178,9 +2178,9 @@ const I18N_DICT = {
     'stats.history.rejeitados': '{n} rejetées', 'stats.history.rejeitadosUm': '{n} rejetée',
     'stats.history.par': '{lidos}, {rejeitados}',
     // bilan du mois (l'image à partager)
-    'resumo.botao': 'Partager mon bilan : {mes}', 'resumo.modal.title': 'Votre bilan : {mes}',
+    'resumo.botao': 'Partager mon bilan : {mes}', 'resumo.modal.title': 'Votre bilan : {mes}',
     // le même bouton là où l'appareil ne partage PAS de fichier (ordinateur) : la feuille propose seulement « Télécharger »
-    'resumo.botaoVer': 'Voir mon bilan : {mes}',
+    'resumo.botaoVer': 'Voir mon bilan : {mes}',
     'resumo.compartilhar': 'Partager', 'resumo.baixar': 'Télécharger l’image', 'resumo.img.alt': 'Bilan du mois',
     'resumo.img.limpou': '{nome} a nettoyé', 'resumo.img.pedidos': 'demandes de la carte',
     'resumo.img.rejeitados': 'rejetées', 'resumo.img.lidos': 'lues',
@@ -2189,7 +2189,7 @@ const I18N_DICT = {
     'resumo.img.diaForte': 'Jour le plus fort', 'resumo.img.diasAtivos': 'Jours actifs', 'resumo.img.diasDe': '{n} sur {de}',
     'resumo.img.diaADia': '{mes}, jour après jour', 'resumo.img.editor': 'Éditeur {selos}',
     'resumo.img.tagline': 'Trie les demandes de lieux dans le creux de la main, un swipe à la fois.',
-    'resumo.share.text': 'Mon bilan sur WazePlaces : {mes}', 'toast.resumoFalhou': 'Impossible de générer le bilan',
+    'resumo.share.text': 'Mon bilan sur WazePlaces : {mes}', 'toast.resumoFalhou': 'Impossible de générer le bilan',
     'app.queueHeading': 'File des demandes de lieux',
     'states.loading.sr': 'Recherche de lieux…',
     'states.empty.title': 'Tout est réglé !', 'states.empty.titlePulados': 'Fin de la file',

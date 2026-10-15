@@ -32,8 +32,9 @@ segue outra tabela (`row` → `row`, `na` → `usa`, `il` → `il`). O gRPC pend
 
 ## 2. REST — a tabela `paths` COMPLETA do WME
 
-São **42 caminhos**, extraídos da constante `Config.paths` do bundle. O app
-usa **7**. Os outros 35 não são segredo nem novidade: são simplesmente o resto
+São **44 caminhos** na tabela abaixo (os dois da última linha ficam fora do
+prefixo `Descartes`), extraídos da constante `Config.paths` do bundle. O app
+usa **7**. Os outros 37 não são segredo nem novidade: são simplesmente o resto
 do editor (segmentos, fechamentos, eventos de trânsito, camadas de imagem).
 
 | caminho | nome interno no WME | nós |

@@ -36,7 +36,7 @@ function fatiar(nome, tipo = 'function') {
 // UM escopo só: `patenteDe` lê `PATENTES`, `avaliarConquistas` lê `CONQUISTAS`
 // e `maiorSequenciaDeDias` lê `chaveMaisDias`. Fatiar cada uma isolada dava
 // "is not defined" — e é o tipo de erro que some se o teste só checar o retorno.
-const NOMES = [['PATENTES', 'const'], ['CONQUISTAS', 'const'], ['chaveMaisDias', 'function'],
+const NOMES = [['PATENTES', 'const'], ['CONQUISTAS', 'const'], ['contagemDoHistorico', 'function'], ['chaveMaisDias', 'function'],
                ['patenteDe', 'function'], ['avaliarConquistas', 'function'],
                ['maiorSequenciaDeDias', 'function'], ['geografiaDoHistorico', 'function']];
 const EXPORTA = NOMES.map(([n]) => n).join(', ');

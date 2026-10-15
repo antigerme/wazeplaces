@@ -37,7 +37,7 @@ const RECUSA = { success: false, errorCategory: 'unknown', httpCode: 500 };
 // teste encena o ↻ no meio do laço.
 // A fila de SAÍDA é de mentira, mas com a regra de verdade (o mesmo pedido
 // duas vezes é "repetida"), e a devolução é a do app (`devolverPedidoRecusado`).
-function montarLote({ fila = [], naTela = null, resposta = () => ({ success: true }), antes = () => {}, entraram = [], saida = [] } = {}) {
+function montarLote({ fila = [], naTela = null, resposta = () => ({ success: true }), antes = () => {}, entraram = [], saida = [], gravacaoRecusada = false } = {}) {
   const log = [];
   const regioes = [];
   const AppState = { stats: { read: 0, rejected: 0, skipped: 0 }, serverTotal: fila.length, queue: fila.slice(),
@@ -61,14 +61,20 @@ function montarLote({ fila = [], naTela = null, resposta = () => ({ success: tru
     enfileirarSaida: (tipo, p, regiao, extra, calado, lista) => {
       const f = lista || naSaida;
       if (f.some((x) => chave(x) === chave(p))) return 'repetida';
+      if (!lista && gravacaoRecusada) return false;   // a de verdade devolve `false` quando a gravação não pega (R22-1-A2)
       f.push({ tipo, venueID: p.venueID, updateRequestID: p.updateRequestID });
       if (!lista) gravacoes++;
       return true;
     },
-    salvarFilaDeSaida: (f) => { gravacoes++; naSaida.splice(0, naSaida.length, ...f); },
+    // `gravacaoRecusada`: o aparelho ilegível ou com a cota cheia (R22-1-A2) — a gravação não pega e diz que não pegou.
+    salvarFilaDeSaida: (f) => { if (gravacaoRecusada) return false; gravacoes++; naSaida.splice(0, naSaida.length, ...f); return true; },
     reivindicacaoDestaAba: () => ({}),   // a marca da aba (test/contas-abas, F1)
     soltarMarcaDosItens: () => {},
-    tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.findIndex((x) => chave(x) === chave(p)); if (i >= 0) naSaida.splice(i, 1); },
+    tirarDaFilaDeSaida: (tipo, p) => {
+      const i = naSaida.findIndex((x) => chave(x) === chave(p));
+      if (i >= 0) naSaida.splice(i, 1);
+      if (gravacaoRecusada) return i >= 0;   // a de verdade devolve `false` quando o item não está lá
+    },
     carregarFilaDeSaida: () => naSaida.slice(), dfato: (k) => log.push('diario:' + k),
     pousouNoWaze: (r) => !!(r && (r.success || r.errorCategory === 'already_processed')),
     descontarGestoSemSessao: (k, placar, q) => { placar[k] = Math.max(0, placar[k] - q); },
@@ -439,6 +445,25 @@ test('O2: o lote da pessoa é anotado INTEIRO na fila de saída antes do 1º env
   assert.equal(gravouAntes, 1, `a anotação do lote gravou a fila de saída ${gravouAntes}× antes do 1º envio (uma por pedido)`);
   assert.deepEqual(m.naSaida, [], 'o que pousou ficou anotado pra sair de novo');
   assert.ok(!m.log.includes('diario:saida.abriu'), 'a anotação de antes do envio virou "a fila abriu" no diário');
+});
+
+test('R22-1-A2: o lote cuja anotação a gravação RECUSOU conta no pouso (não é "outra aba") e não esconde a falha de rede', async () => {
+  // Aparelho ilegível ou cota cheia: a fila de saída não grava. Os pedidos não estão nela, então a resposta de
+  // cada um conta normalmente — e `pousouPorOutraAba` (que pula Histórico, reincidência e conquistas) não roda.
+  const alvos = [pedido(1), pedido(2)];
+  const m = montarLote({ gravacaoRecusada: true });
+  const outraAba = [];
+  // O pouso "por outra aba" do app é o `pousouNaOutra()`; aqui ele chama `pousouPorOutraAba` (buraco negro do harness: anota).
+  m.deps.pousouPorOutraAba = (p) => outraAba.push(p.venueID);
+  await m.enviarLote(alvos, {});
+  assert.deepEqual(m.historicoCompleto.length, 2, 'DEFEITO: o lote cujos pedidos não couberam na fila não entrou no Histórico');
+  assert.equal(m.gestosConfirmados.length, 2, 'DEFEITO: as conquistas não contaram o lote');
+  // A falha de rede com a fila que não grava: o pedido volta pra fila de pedidos (não é "guardado" onde não há fila).
+  const f = montarLote({ gravacaoRecusada: true, fila: [], resposta: () => ({ success: false, errorCategory: 'transient' }) });
+  f.AppState.stats.rejected = 2;
+  await f.enviarLote([pedido(1), pedido(2)], {});
+  assert.deepEqual(f.naSaida, [], 'o harness gravou a fila que a gravação recusou');
+  assert.equal(f.AppState.stats.rejected, 0, 'DEFEITO: o placar contou o trabalho que não saiu nem ficou guardado');
 });
 
 test('O2: sem rede, os do lote FICAM na fila de saída (a abertura vai pro diário uma vez) e contam como "esperando envio"', async () => {

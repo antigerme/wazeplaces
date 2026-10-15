@@ -173,18 +173,37 @@ function extrairSegredoDoLinkDePareamento(texto) {
 function colarCodigoPareamento(e) {
     const dados = e.clipboardData || window.clipboardData;
     const texto = dados ? dados.getData('text') : '';
+    if (aplicarTextoNoCampoDoCodigo(e.target, texto)) e.preventDefault();
+}
+
+// UMA função interpreta o texto que ENTRA no campo do código, seja qual for o caminho por onde ele
+// chegou (R22-1-A1 = R22-8-01): o link vira resgate, um código dentro de uma frase vira o código, e
+// o resto não é com ela. O colar era o único caminho tratado; o texto que entra SEM `paste` — o
+// `insertText` do IME, a sugestão da área de transferência do teclado do celular, o arrastar-e-soltar
+// — passava só pelo `input`, que formata os seis primeiros alfanuméricos: o link virava "HTT-PSP" e a
+// recusa dizia "Código inválido ou expirado" com o segredo ainda valendo. "O que a tela mostra e o
+// que o campo aceita" são a mesma coisa nos três caminhos, ou um deles é o defeito do R21-1-03.
+// Devolve se o texto foi tratado (quem chama impede a inserção; o campo não muda no link).
+function aplicarTextoNoCampoDoCodigo(campo, texto) {
     const segredo = extrairSegredoDoLinkDePareamento(texto);
     if (segredo) {
-        e.preventDefault();
         resgatarPareamento(segredo);
-        return;
+        return true;
     }
     const codigo = extrairCodigoPareamento(texto);
-    if (!codigo) return;
-    e.preventDefault();
-    const campo = e.target;
+    if (!codigo) return false;
     campo.value = formatarCodigoPareamento(codigo);
     try { campo.setSelectionRange(campo.value.length, campo.value.length); } catch (err) { /* tipo sem seleção */ }
+    return true;
+}
+
+// O texto entrou de uma vez só (mais de um caractere), por um caminho que não é o `paste`? A
+// composição do IME fica de fora: ela reescreve o campo a cada tecla, e interpretá-la ali tiraria o
+// texto de debaixo de quem digita.
+function textoEntrouDeUmaVezNoCampo(e) {
+    if (e.isComposing) return false;
+    if (typeof e.data === 'string' && e.data.length > 1) return true;
+    return e.inputType === 'insertFromDrop' || e.inputType === 'insertReplacementText';
 }
 const PREFETCH_THRESHOLD = 3;
 
@@ -2649,11 +2668,25 @@ function setupModalListeners() {
     // Colado de dentro de uma mensagem, com espaço ou quebra de linha: o código
     // é achado no texto (ver `extrairCodigoPareamento`).
     $('pairCodeInput')?.addEventListener('paste', colarCodigoPareamento);
+    // O mesmo texto por OUTRO caminho (R22-1-A1): o `beforeinput` o pega antes de entrar no campo, que
+    // então não muda (como no colar); o `input` abaixo é a rede dos navegadores em que ele não se cancela.
+    $('pairCodeInput')?.addEventListener('beforeinput', (e) => {
+        if (!e.cancelable || e.inputType === 'insertFromPaste' || !/^insert/.test(e.inputType || '')) return;
+        const texto = typeof e.data === 'string' ? e.data
+            : (e.dataTransfer ? e.dataTransfer.getData('text/plain') : '');
+        if (texto.length > 1 && !e.isComposing && aplicarTextoNoCampoDoCodigo(e.target, texto)) e.preventDefault();
+    });
     // O campo assume o MESMO formato da tela que mostra o código: digitou 3
     // caracteres, o hífen entra sozinho. Assim tanto faz o editor digitar o
     // separador ou não — o resultado na tela é o mesmo que ele está copiando.
     $('pairCodeInput')?.addEventListener('input', (e) => {
         const el = e.target;
+        // O texto que entrou inteiro e o `beforeinput` não pegou (R22-1-A1): se é o link, o campo não
+        // guarda o link (o colar o deixa como estava); se é um código dentro de uma frase, vira o código.
+        if (textoEntrouDeUmaVezNoCampo(e) && aplicarTextoNoCampoDoCodigo(el, el.value)) {
+            if (extrairSegredoDoLinkDePareamento(el.value)) el.value = '';
+            return;
+        }
         // Reformatar e jogar o cursor pro fim atrapalha quem corrige no meio;
         // conta quantos caracteres ÚTEIS havia antes do cursor e recoloca ali.
         const uteisAntes = el.value.slice(0, el.selectionStart).replace(/[^0-9A-Za-z]/g, '').length;
@@ -8254,6 +8287,27 @@ function dfatoPendentes() {
     return linhas;
 }
 
+// O que o RELATÓRIO entrega das pendentes (R22-4-03). `dfatoPendentes` não mexe no estado, e isso deixava a conta
+// dobrar: o relatório 1 levava, digamos, 7 repetições suprimidas numa linha pendente; a próxima repetição (T2, depois do
+// retrato) fazia a pendente virar `t = T2` com as 8 — e o filtro `depois` da cópia guardada, que vai por `t`, a mantinha
+// INTEIRA: as 7 já entregues voltavam como se fossem do que veio depois. Aqui as pendentes que foram no arquivo viram
+// linhas do anel (as mesmas que a troca de causa escreveria, com a hora da última suprimida, que é anterior ao retrato) e
+// o limitador recomeça a contar `juntas` do zero — a série segue (`n` e `em` ficam), só as repetições entregues saem da
+// conta. O diário completo não muda (anel + pendentes = o mesmo total antes e depois), então um relatório que não chega
+// a ser baixado não perde nada. Devolve as linhas pra quem monta o arquivo (o anel foi copiado antes, por quem chama).
+function dfatoEntregarPendentes() {
+    const linhas = dfatoPendentes();
+    try {
+        for (const x of dfatoLimite.values()) {
+            if (!x || !(x.juntas > 0)) continue;
+            x.juntas = 0; x.ultimoD = null; x.ultimaEm = null;
+        }
+        for (const l of linhas) dfatoAnel.push(l);
+        while (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
+    } catch (e) { /* o diagnóstico nunca derruba o app */ }
+    return linhas;
+}
+
 // ── DIÁRIO DE SESSÕES: o que sobrevive ao tombo ──────────────────────────
 //
 // O `dfato` já é o anel sem portão, mas ele vive em MEMÓRIA — e a sessão cair
@@ -11266,6 +11320,11 @@ function ligarFabDev() {
             soltarPega();
             if (arrastou) {
                 try { sessionStorage.setItem('__devFabPos', fab.style.left + '|' + fab.style.top); } catch (er) {}
+            } else {
+                // Segurou e soltou sem andar: o `levantarOFabComAPilha` sai cedo com o botão pego, então a
+                // pilha que mudou ENQUANTO ele estava na mão (os avisos saíram) não foi acompanhada, e o FAB
+                // ficava no alto, sem aviso nenhum na tela, até um card novo reavaliar o canto (R22-4-02).
+                levantarOFabComAPilha();
             }
             alvo = null;
         };
@@ -12255,7 +12314,7 @@ async function diagCorpo() {
         // modo dev (`dlog`). Cada call site escolhe UM dos dois, então não há
         // duplicata — e o `diario` deixa de nascer vazio, que era o buraco que
         // custou a investigação dos modais achatados.
-        diario: [...dfatoAnel, ...dfatoPendentes(), ...dlogAnel].sort((a, b) => a.t - b.t),
+        diario: [...dfatoAnel, ...dfatoEntregarPendentes(), ...dlogAnel].sort((a, b) => a.t - b.t),
         momentos: momentosNoArquivo,
         // O que as aberturas ANTERIORES deixaram guardado no aparelho (só com o
         // modo dev ligado nelas): diário, chamadas sem corpo, erros e as
@@ -19154,14 +19213,17 @@ function chaveMaisDias(k, n) {
     return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
+// Contador do Histórico que veio do aparelho: número ≥ 0, ou 0 (R21-2-06, R22-7-02). Texto, lista, objeto e NaN
+// somavam como TEXTO ("0x · 07", "072", "[object Object]") ou davam NaN na aba Histórico, na imagem do Resumo do
+// mês, no aviso do Desfazer e no "Centurião" — só por armazenamento editado à mão. É UMA função para todos os
+// leitores do histórico: o conserto que valia só para a aba Histórico deixou três leitores no texto (R22-7-02).
+function contagemDoHistorico(x) { return Number.isFinite(x) && x >= 0 ? x : 0; }
+
 function getHistoryStats() {
     const h = loadHistory();
     const tk = historyTodayKey();
     const acc = { today: { read: 0, rejected: 0 }, week: { read: 0, rejected: 0 }, month: { read: 0, rejected: 0 }, total: { read: 0, rejected: 0 } };
-    // Contador que veio do aparelho: número ≥ 0, ou 0 (R21-2-06). Texto, lista, objeto e NaN somavam como TEXTO
-    // ("0x · 07", "a2 tratados") ou davam NaN ("faltam NaN pra …") na aba Histórico — só por armazenamento editado
-    // à mão. O mesmo critério do `numero` do `recordHistory`.
-    const n = (x) => (Number.isFinite(x) && x >= 0 ? x : 0);
+    const n = contagemDoHistorico;
     // "Total" sai do acumulador, não da soma dos baldes: os antigos foram
     // podados, e somar só o que sobrou faria o número encolher sozinho.
     acc.total.read = n(h._total && h._total.read);
@@ -19905,7 +19967,7 @@ function registrarAcaoConfirmada(actionType, place, gesto) {
     // somou a ação nele. Sem `gesto.dia`, o `checarConquistas` usa o de hoje.
     const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
     checarConquistas({
-        ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
+        ...(balde ? { hoje: contagemDoHistorico(balde.read) + contagemDoHistorico(balde.rejected) } : {}),
         // "Rejeitar um duplicado" é pelo MOTIVO do reporte, o mesmo que faz o
         // card dizer "Duplicado". O `place.duplicado` é outra coisa — o alvo que
         // o servidor conseguiu RESOLVER, e ele nem sempre consegue: o card dizia
@@ -19945,7 +20007,7 @@ function registrarLoteConfirmado(n, gesto) {
     // 2026-10-07, R11-7-06). Depois da virada, nada mais avalia aquele dia.
     const balde = gesto && gesto.dia ? loadHistory()[gesto.dia] : null;
     checarConquistas({
-        ...(balde ? { hoje: (balde.read || 0) + (balde.rejected || 0) } : {}),
+        ...(balde ? { hoje: contagemDoHistorico(balde.read) + contagemDoHistorico(balde.rejected) } : {}),
         madrugada: hora >= 0 && hora < 5,
     });
     checkUndoGateUnlock();   // ver `updateStats`
@@ -20065,7 +20127,7 @@ function geografiaDoHistorico(h) {
 // dia tem 25 h, a soma caía no MESMO dia e a sequência de 6 contava 7.
 function maiorSequenciaDeDias(h) {
     const dias = new Set(Object.keys(h || {})
-        .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k) && h[k] && ((h[k].read || 0) + (h[k].rejected || 0)) > 0));
+        .filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k) && h[k] && (contagemDoHistorico(h[k].read) + contagemDoHistorico(h[k].rejected)) > 0));
     let melhor = 0;
     for (const d of dias) {
         if (dias.has(chaveMaisDias(d, -1))) continue;
@@ -20461,7 +20523,7 @@ function dadosDoResumo(h, ano, mesIdx) {
         if (k === '_total' || !v || typeof v !== 'object' || !k.startsWith(prefixo)) continue;
         const dia = parseInt(k.slice(prefixo.length), 10);
         if (!(dia >= 1 && dia <= diasNoMes)) continue;
-        const r = v.read || 0, j = v.rejected || 0, n = r + j;
+        const r = contagemDoHistorico(v.read), j = contagemDoHistorico(v.rejected), n = r + j;
         lidos += r; rejeitados += j;
         serie[dia - 1] = n;
         if (n > 0) diasAtivos++;
@@ -21540,8 +21602,10 @@ async function enviarLote(places, opts = {}) {
             else if (r === 'repetida') repetidos.add(p);
         }
         if (anotados.size) {
-            salvarFilaDeSaida(lista);
-            updateInFlightIndicator();
+            // A escrita não pegou: nenhum deles está na fila, e o lote segue como se não os
+            // tivesse anotado (R22-1-A2) — o pouso conta, e a falha de rede reverte e avisa.
+            if (salvarFilaDeSaida(lista) === false) anotados.clear();
+            else updateInFlightIndicator();
         }
         if (repetidos.size) {
             marcarEmAndamento([...repetidos], false);
@@ -23029,7 +23093,13 @@ function aoConhecerConta(perfil) {
     // (auditoria da rodada 11, R11-1-01, MEDIDO). A conta que ESTA aba confirmou
     // por último diz: sendo outra, sai só o que a memória guarda — o aparelho a
     // outra aba já limpou.
-    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: true });
+    // Mas só quando o aparelho LÊ e não mostra a conta anterior: aí o que falta lá foi a outra aba que
+    // limpou. Com o aparelho ILEGÍVEL (`armazenamentoLegivel`) a conta guardada vem nula por não dar pra
+    // ler, não por ninguém ter limpado — e a versão "só memória" não zera o placar nem as escolhas que
+    // ESCREVEM no Waze (o ↑ que guarda o pedido, o Desfazer desligado): a conta que entrava as herdava
+    // da anterior (R22-1-A3, MEDIDO). Ilegível, roda a troca completa — em memória, já que lá não há o
+    // que gravar nem apagar.
+    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: armazenamentoLegivel() });
     carimbarContaNoInvisivel(id, invisivel);
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
@@ -23374,8 +23444,14 @@ function carregarFilaDeSaida() {
     } catch (e) { return []; }
 }
 
+// Devolve se a fila GRAVOU. O aparelho ilegível e a cota cheia recusam a escrita, e quem
+// "anota" uma decisão ali precisa saber que não anotou nada (R22-1-A2): o pouso lia o item
+// que nunca esteve na fila como "outra aba o tirou" e pulava o Histórico, a reincidência, as
+// conquistas e o aviso, e a falha de rede "guardava" a decisão numa fila que não existe.
+// `!== false` e não `=== true`, e quem chama confere `=== false`: só o `false` explícito da recusa vale como
+// "não gravou" (a função devolve boolean estrito; quem não diz nada não é recusa).
 function salvarFilaDeSaida(f) {
-    try { safeLS.set(SAIDA_KEY, JSON.stringify(f)); } catch (e) {}
+    try { return safeLS.set(SAIDA_KEY, JSON.stringify(f)) !== false; } catch (e) { return false; }
 }
 
 // Guarda o MÍNIMO que permite reenviar E prestar contas direito no pouso:
@@ -23456,7 +23532,10 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
              // O que quem enfileira já sabe do item (o 401 do gesto: `u401`).
              ...(extra && typeof extra === 'object' ? extra : {}) });
     if (lista) return true;
-    salvarFilaDeSaida(f);
+    // A escrita não pegou (aparelho ilegível, cota cheia): a decisão NÃO está na fila, e quem
+    // chama segue o caminho de "fila cheia" — o pouso conta normalmente, e a falha de rede
+    // reverte o placar e avisa, em vez de guardar a decisão onde ela não está (R22-1-A2).
+    if (salvarFilaDeSaida(f) === false) return false;
     updateInFlightIndicator();
     // Só a ABERTURA da fila entra no diário, nunca cada item: `dfato` é anel de
     // 120 e a regra da casa é "nada por swipe" — 200 pedidos numa sombra de
@@ -23840,7 +23919,8 @@ const anotadoAntesDoEnvio = new WeakSet();
 // manda — at-least-once: se o envio tinha chegado, volta "já tratado" e conta
 // UMA vez. Enquanto voa ele está em andamento (`pedidosEmAndamento`), e o
 // esvaziamento não o manda de novo. Fila cheia: segue sem anotar (o caminho de
-// antes, que avisa na falha). A descarga já anotou: nada a fazer.
+// antes, que avisa na falha) e a escrita que não pegou (aparelho ilegível, cota cheia; R22-1-A2) também.
+// A descarga já anotou: nada a fazer.
 // `gesto`: o dia e o lugar do GESTO (`carimboDoGesto`) — a anotação sai no fim
 // da janela do Desfazer, e lidos aqui eles seriam os de depois dela (R6-7-4).
 function anotarAntesDoEnvio(tipo, place, regiao, gesto) {
@@ -30823,7 +30903,7 @@ function pedidosNaJanelaDoDesfazer() {
 // fila de saída.
 function pedidosConfirmados() {
     const total = (loadHistory() || {})._total || {};
-    return (total.read || 0) + (total.rejected || 0);
+    return contagemDoHistorico(total.read) + contagemDoHistorico(total.rejected);
 }
 
 // Chamado na CONFIRMAÇÃO de uma decisão (ver `updateStats`), e conta só o que

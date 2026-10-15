@@ -98,7 +98,7 @@ function classes(...iniciais) {
 // (`semCamadaAberta`). L6 (cota 10); cada pouso conta no Histórico ANTES de
 // confirmar, como o `recordHistory` do app.
 const FUNCOES_DOS_AVISOS = ['handleActionResult', 'avisarConsequencia', 'registrarAcaoConfirmada', 'checkUndoGateUnlock',
-  'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'undoGateAtingido',
+  'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'contagemDoHistorico', 'pedidosConfirmados', 'undoGateAtingido',
   'canDisableUndo', 'checkDicaDesfazer', 'registrarJanelaSemUndo', 'semCamadaAberta', 'aoFecharCamada',
   // as do conserto (e a pendência como fonte única, do lote 18: `adiarAvisoDeUmaVez`)
   'avisoDeUmaVezSaiAgora', 'adiarAvisoDeUmaVez', 'pedirAvisosAdiados', 'atenderAvisosAdiados', 'avisosAdiadosAoVoltar'];

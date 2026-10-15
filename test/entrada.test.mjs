@@ -1061,7 +1061,7 @@ test('no tema escuro nenhum botão de diálogo tem o fundo do próprio diálogo 
 
 // ── A17: o código COLADO ────────────────────────────────────────────────────
 test('código colado com espaço, quebra de linha ou rótulo entra inteiro, no formato que a tela mostra', () => {
-  const { colar, formatar } = montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'colarCodigoPareamento'],
+  const { colar, formatar } = montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'aplicarTextoNoCampoDoCodigo', 'colarCodigoPareamento'],
     { window: {} }, ['colar: colarCodigoPareamento', 'formatar: formatarCodigoPareamento'],
     [constante('PAIR_CODE_LEN'), constante('PAIR_CODE_GRUPO'), constante('PAIR_ALFABETO'), constante('PAIR_SEGREDO_LEN')].join('\n'));
   // O que o campo mostra depois de colar `texto` num campo com `antes`: o nosso

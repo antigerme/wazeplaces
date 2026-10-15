@@ -76,7 +76,8 @@ function montar(nomes, deps, fonte = APP_SEM) {
     },
     set: (t, k, v) => { t[k] = v; return true; },
   });
-  const corpo = nomes.map((n) => fatiarDe(fonte, n)).join('\n');
+  // `contagemDoHistorico` é o contador que todo leitor do histórico usa (R22-7-02): a função que a usa passa a precisar dele.
+  const corpo = [...(fonte === APP_SEM ? [fatiarDe(fonte, 'contagemDoHistorico')] : []), ...nomes.map((n) => fatiarDe(fonte, n))].join('\n');
   const fns = new Function('__escopo', `with (__escopo) {\n${corpo}\nreturn { ${nomes.join(', ')} };\n}`)(escopo);
   return { ...fns, deps, chamou };
 }
@@ -226,7 +227,7 @@ const CONSTANTES_DO_PAREAMENTO = {
   PAIR_ALFABETO: constante('PAIR_ALFABETO'), PAIR_SEGREDO_LEN: constante('PAIR_SEGREDO_LEN'),
 };
 const PRODUCAO = 'https://places.wazebrasil.com';
-const montarColar = (extra = {}) => montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'colarCodigoPareamento'],
+const montarColar = (extra = {}) => montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'aplicarTextoNoCampoDoCodigo', 'colarCodigoPareamento'],
   { ...CONSTANTES_DO_PAREAMENTO, window: {}, ...extra });
 // O que o campo mostra depois de colar `texto`: o nosso colar e, se ele deixar passar, o do navegador seguido do `input`.
 function colando(m, texto, antes = '') {

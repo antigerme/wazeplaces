@@ -518,7 +518,7 @@
         <div id="treinoFimModal" role="dialog" aria-modal="true" aria-labelledby="treinoFimTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
                 <div class="text-4xl mb-3" aria-hidden="true">🎓</div>
-                <h3 id="treinoFimTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="treino.fim.title">Treino concluído</h3>
+                <h3 id="treinoFimTitle" class="text-xl font-bold text-slate-800 mb-2 break-words dark:text-slate-100" data-i18n="treino.fim.title">Treino concluído</h3>
                 <!-- O efeito da ÚLTIMA ação entra aqui, no modal, em vez de sair num
                      aviso flutuante. Antes ele era um toast e o modal só abria 2,2s
                      depois pra dar tempo de ler — e nesses 2,2s a área do card ficava
@@ -534,7 +534,7 @@
 
         <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
-                <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
+                <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 break-words dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-3 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>os dados do app neste aparelho</strong> (placar, histórico, conquistas, filtros e preferências) serão apagados — ficam só o idioma e o tema. Esta ação não pode ser desfeita.</p>
                 <!-- As decisões que ainda esperam envio (a fila de saída) saem com o
                      "Sair" e NÃO chegam ao Waze: com a fila cheia, esta frase diz
@@ -601,7 +601,7 @@
                     <div id="filtersPanelFilters" role="tabpanel" aria-labelledby="filtersTabFilters" class="space-y-4">
                         <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 dark:bg-cyan-600/20">
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
+                                <span class="min-w-0 break-words">
                                     <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="filters.unreadOnly.label">Apenas pedidos não lidos</span>
                                     <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="filters.unreadOnly.desc">Padrão. Desmarque para incluir pedidos já marcados como lidos.</span>
                                 </span>
@@ -691,7 +691,7 @@
 
                                 <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 dark:bg-cyan-600/20">
                                     <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                        <span>
+                                        <span class="min-w-0 break-words">
                                             <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="filters.myArea.label">Filtrar pela minha área de edição</span>
                                             <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="filters.myArea.desc">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
                                         </span>
@@ -724,7 +724,7 @@
                             <h4 class="text-xs font-bold text-purple-500 dark:text-purple-300 uppercase tracking-wider mb-2" data-i18n="filters.section.advanced">Avançado</h4>
                             <div class="bg-purple-50 dark:bg-purple-400/10 border border-purple-100 dark:border-purple-400/30 rounded-xl p-3">
                                 <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                    <span>
+                                    <span class="min-w-0 break-words">
                                         <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.devMode.label">Modo Desenvolvedor 🛠️</span>
                                     </span>
                                     <input id="prefDevModeActive" type="checkbox" class="ui-switch">
@@ -748,7 +748,7 @@
 
                         <div id="prefUndoRow" class="bg-amber-50 dark:bg-amber-400/10 border border-amber-100 dark:border-amber-400/30 rounded-xl p-3">
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
+                                <span class="min-w-0 break-words">
                                     <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.undo.label">Permitir desfazer ações</span>
                                     <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.undo.desc">Mostra um aviso por 3 segundos pra você desfazer cada ação antes do envio.</span>
                                 </span>
@@ -766,7 +766,7 @@
                              ícone (regra de consistência). -->
                         <div>
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
+                                <span class="min-w-0 break-words">
                                     <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.pularGuarda.label">Pular guarda o pedido</span>
                                     <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.pularGuarda.desc">O pedido ganha ⭐ no WME e volta marcado da próxima vez.</span>
                                 </span>
@@ -780,7 +780,7 @@
                              procurava não é convidado a pensar no assunto. -->
                         <div>
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.presenca.label">Ver quem está no app</span>
+                                <span class="min-w-0 break-words font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.presenca.label">Ver quem está no app</span>
                                 <input id="prefPresenca" type="checkbox" class="ui-switch" checked>
                             </label>
                         </div>
@@ -798,7 +798,7 @@
                              antes do JS rodar. -->
                         <div>
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
-                                <span>
+                                <span class="min-w-0 break-words">
                                     <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.offline.label">Disponível offline</span>
                                     <span id="prefOfflineDesc" class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.offline.desc">Guarda os pedidos e o mapa no aparelho para você seguir sem sinal.</span>
                                 </span>
@@ -811,9 +811,9 @@
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
                     <div id="filtersPanelHistory" role="tabpanel" aria-labelledby="filtersTabHistory" class="hidden">
                         <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 dark:bg-slate-900 dark:border-slate-700">
-                            <div class="flex justify-end gap-3 text-[0.6875rem] uppercase tracking-wider mb-1.5">
-                                <span class="text-emerald-700 dark:text-emerald-400" data-i18n="stats.read">Lidos</span>
-                                <span class="text-rose-700 dark:text-rose-400" data-i18n="stats.rejected">Rejeitados</span>
+                            <div class="flex flex-wrap justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] uppercase tracking-wider mb-1.5">
+                                <span class="min-w-0 break-words text-emerald-700 dark:text-emerald-400" data-i18n="stats.read">Lidos</span>
+                                <span class="min-w-0 break-words text-rose-700 dark:text-rose-400" data-i18n="stats.rejected">Rejeitados</span>
                             </div>
                             <div id="historyBody"></div>
                         </div>

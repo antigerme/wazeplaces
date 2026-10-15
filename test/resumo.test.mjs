@@ -45,7 +45,7 @@ function secaoDoResumo() {
   return APP.slice(ini, fim);
 }
 
-const dadosDoResumo = new Function(fatiarFuncao('dadosDoResumo') + '\nreturn dadosDoResumo;')();
+const dadosDoResumo = new Function(fatiarFuncao('contagemDoHistorico') + '\n' + fatiarFuncao('dadosDoResumo') + '\nreturn dadosDoResumo;')();
 
 // ── 1. A LEITURA DO MÊS ────────────────────────────────────────────────────
 test('dadosDoResumo soma SÓ o mês-calendário pedido, ignorando _total e vizinhos', () => {

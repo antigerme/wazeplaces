@@ -283,6 +283,46 @@ test('R21-5-05 a conexão que entrega o lote e FECHA em 3 s é fim CURTO: recuo 
   assert.equal(diario(c).at(-1).durouS, 3);
 });
 
+// R22-5 A3: o episódio de tempo real PARADO termina na PROVA de vida, não no lote. O `endOfBatch` anotava "religou" 60 s antes
+// de a conexão provar que serve — e uma que o Google fecha logo depois (fim curto) deixava "religou" ao lado de "caiu".
+async function clienteParado() {
+  const { c, g } = clienteDoFluxo();
+  c.escopo.navigator.onLine = false;
+  c.P.presencaFluxoGarantir();                       // sem rede e sem fluxo: PARA (o recuo fica de pé), episódio aberto
+  assert.equal(c.P.Presenca.fluxoParado, true, 'PRÉ-CONDIÇÃO: o tempo real não parou');
+  c.escopo.navigator.onLine = true;                  // a rede volta; o recuo religa
+  return { c, g };
+}
+test('R22-5 A3: o episódio parado só fecha ("religou") quando a conexão PROVA a vida — o lote sozinho não', async () => {
+  const { c, g } = await clienteParado();
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  assert.deepEqual(diario(c).map((o) => o.ev), ['parou', 'conectou'], 'DEFEITO: o "religou" saiu no fim do lote, 60 s antes da prova');
+  assert.ok(c.P.Presenca.paradoDesde, 'o episódio fechou sem prova (paradoDesde zerado)');
+  c.relogio.agora += 61_000;
+  con.escrever(PONG); await tick(4);
+  const linhas = diario(c);
+  assert.deepEqual(linhas.map((o) => o.ev), ['parou', 'conectou', 'religou']);
+  assert.equal(linhas[2].via, 'recuo', 'o diário não diz quem religou');
+  assert.ok(linhas[2].durouS >= 61, `durouS ${linhas[2].durouS}: o parado deve contar até a PROVA`);
+  assert.equal(c.P.Presenca.paradoDesde, 0);
+});
+test('R22-5 A3: fim curto depois do lote NÃO diz "religou" (o episódio segue aberto), e o ciclo de fins curtos não enche o diário de "religou"', async () => {
+  const { c, g } = await clienteParado();
+  await cicloCurto(c, g, 3000);                      // abre, o lote, 3 s, fecha
+  const evs = diario(c).map((o) => o.ev + (o.erro ? ':' + o.erro : ''));
+  assert.deepEqual(evs, ['parou', 'conectou', 'caiu:fim curto'], 'DEFEITO: "religou" de uma conexão que fechou logo');
+  assert.ok(c.P.Presenca.paradoDesde, 'o fim curto fechou o episódio');
+  // CONTROLE: a próxima conexão que VIVE o piso o fecha — uma vez.
+  const con = await abrir(c, g);
+  con.escrever(LOTE); await tick(4);
+  c.relogio.agora += 61_000;
+  con.escrever(PONG); await tick(4);
+  const fim = diario(c).map((o) => o.ev);
+  assert.equal(fim.filter((e) => e === 'religou').length, 1, `CONTROLE: o episódio devia fechar uma vez na conexão que provou (${fim})`);
+  assert.deepEqual(fim.slice(-2), ['religou', 'voltou'], 'a prova fecha o episódio parado e a série de quedas, nessa ordem');
+});
+
 test('R21-5-05 CONTROLE: a que VIVEU 6 min e o Google fecha tem fim normal — religa em 1 s e o recuo fica zerado', async () => {
   const { c, g } = clienteDoFluxo({ tentativa: 3 });
   const con = await abrir(c, g);

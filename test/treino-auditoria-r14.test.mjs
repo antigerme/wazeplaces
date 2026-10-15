@@ -116,7 +116,7 @@ function dicionario() {
 // verdade, e os três avisos com a régua da tela de verdade. L6 (cota 10).
 NO_BUNDLE.push(/devolverAvisosDeUmaVezDaTela\(/g, /anotarAvisoDeUmaVezNaTela\(/g, /adiarAvisoDeUmaVez\(/g);
 const FUNCOES_DOS_AVISOS = ['avisarConsequencia', 'checkUndoGateUnlock', 'checkDicaDesfazer', 'getUndoTreatedCount',
-  'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados', 'undoGateAtingido', 'canDisableUndo',
+  'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'contagemDoHistorico', 'pedidosConfirmados', 'undoGateAtingido', 'canDisableUndo',
   'semCamadaAberta', 'aoFecharCamada', 'avisoDeUmaVezSaiAgora', 'pedirAvisosAdiados', 'atenderAvisosAdiados',
   'avisosAdiadosAoVoltar', 'dispararConfeteNaFila', 'showToast',
   // as do conserto

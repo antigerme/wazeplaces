@@ -51,11 +51,10 @@ test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', 
     'o segredo do QR não é pra ser digitado — formatá-lo convida a isso');
 
   // Entrada: o campo aplica a mesma função enquanto se digita.
-  assert.match(
-    APP,
-    /pairCodeInput'\)\?\.addEventListener\('input'[\s\S]{0,600}formatarCodigoPareamento\(/,
-    'o campo do código parou de assumir o formato que a tela mostra'
-  );
+  // (O bloco do `input` vai até o `setupFilterTabs()` que o segue: ancorado na estrutura, não numa distância.)
+  const blocoInput = /pairCodeInput'\)\?\.addEventListener\('input'[\s\S]*?setupFilterTabs\(\);/.exec(APP);
+  assert.ok(blocoInput, 'sumiu o ouvinte do `input` do campo do código');
+  assert.match(blocoInput[0], /formatarCodigoPareamento\(/, 'o campo do código parou de assumir o formato que a tela mostra');
 });
 
 test('código de pareamento: o placeholder mostra o mesmo formato que a tela', () => {
