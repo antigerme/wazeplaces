@@ -234,7 +234,7 @@ test('as 13 chaves novas existem nas QUATRO línguas', () => {
 
 test('o plural tem chave própria: "1 pedidos" não sai em língua nenhuma', () => {
   const corpo = fatiar('atualizarLinhaDoOffline');
-  assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : 'prefs\.offline\.prontoAPlural'/);
+  assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : n === 0 \? 'prefs\.offline\.prontoAZero' : 'prefs\.offline\.prontoAPlural'/);
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.esperaA' : 'prefs\.offline\.esperaAPlural'/);
 });
 

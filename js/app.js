@@ -26086,11 +26086,13 @@ function atualizarLinhaDoOffline(feitos, total) {
     // (auditoria de 2026-10-01, R6-4-2).
     const completa = offlineJanelaServida !== null && cobreAFila;
     const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
+    // `prontoAZero`: a fila vazia é um caso à parte do plural — em francês o zero
+    // é SINGULAR ("0 demande"), em pt/en/es é plural (R23-6 F3). Não há ICU.
     if (semRede && fotosValem && n) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
         // quando houver rede" era mentir sobre o que já está guardado.
         el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
-            t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+            t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
             + escapeHtml(t('prefs.offline.prontoSemRedeB'));
         return;
     }
@@ -26130,7 +26132,7 @@ function atualizarLinhaDoOffline(feitos, total) {
         return;
     }
     el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
-        t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+        t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
         + escapeHtml(t('prefs.offline.prontoB'));
 }
 
