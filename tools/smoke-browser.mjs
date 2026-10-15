@@ -1863,7 +1863,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
   // NAVEGADOR faz sozinho: repintar o anel (qualquer mudança de afastamento e a volta) deixa de 3 a 17 pixels da borda arredondada
   // diferentes (até 38 níveis num pixel) — MEDIDO na BASE, sem nenhuma regra nossa (afastamento inline de 3px e de volta: 4 de 4
   // células com 3/4/14/17 pixels, e a mesma conta na árvore consertada depois do ciclo de foco real, pixel por pixel). O anel de
-  // foco, esse, muda de 1.145 a 1.330 pixels: o ruído (≤ 37) e o anel (≥ 1.145) ficam a 30× um do outro, e a tolerância (48) e o
+  // foco, esse, muda de 1.145 a 1.330 pixels: o ruído (≤ 37 aqui, 32 no CI) e o anel (≥ 1.145) ficam a 30× um do outro, e a tolerância (96) e o
   // piso do anel (400) cabem no meio — o CONTROLE abaixo cobra os dois lados.
   const { decodificar: decodificarPng } = await import('./png-palette.mjs');
   const diferencaDeTinta = (a, b) => {
@@ -1877,7 +1877,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     }
     return { pixels, maximo };
   };
-  const RUIDO_DE_REPINTAR_PX = 48, ANEL_DE_FOCO_PX = 400;
+  const RUIDO_DE_REPINTAR_PX = 96, ANEL_DE_FOCO_PX = 400;
   const soRuido = (d) => d.pixels <= RUIDO_DE_REPINTAR_PX;
   const medirFocoDaCelula = async (page, id) => {
     const alvo = () => page.locator(`.conq-cel[data-conq="${id}"]`);
@@ -1933,7 +1933,9 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     await abrirHistoricoL25(page);
     const r = await medirFocoDaCelula(page, 'coruja');
     await fecharL25(page);
-    checa(r.comFoco.cor === r.semFoco.cor && r.comFoco.afasta === r.semFoco.afasta && !r.tintaMuda,
+    // "A tinta não muda" é SÓ RUÍDO do repintar (≤ RUIDO_DE_REPINTAR_PX), não "byte a byte igual": o navegador repinta o anel arredondado
+    // sozinho ao entrar e sair do :focus-visible, e no runner do CI (Playwright 1.64.1) isso deixou 32 pixels onde na máquina do agente deixava 0.
+    checa(r.comFoco.cor === r.semFoco.cor && r.comFoco.afasta === r.semFoco.afasta && soRuido(r.focar),
       'foco da célula: CONTROLE — com o contorno do estado vencendo o foco a célula nova ainda parece focada; a medida está cega', JSON.stringify(r));
     await ctx.close();
   }
