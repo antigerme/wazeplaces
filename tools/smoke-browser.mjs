@@ -1804,8 +1804,10 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
         vao: Math.round((rb.left - ra.right) * 100) / 100, margem: getComputedStyle(b).marginLeft });
     }, 120));
   };
-  // (O cartão do diálogo também é contêiner, desde o R21-8-02: sem ele as consultas dos botões cairiam nele — a largura dele é a da fileira.)
-  const SEM_CONTAINER = '.dialogo-acoes, .dialogo-cartao, .seg-tabs { container-type: normal !important; }';
+  // (O cartão do diálogo também é contêiner, desde o R21-8-02: sem ele as consultas dos botões cairiam nele — a largura dele é a da fileira.
+  // E o OVERLAY do cartão, desde o lote 26 (`dialogo-raiz`): a consulta sem nome responde ao contêiner MAIS PRÓXIMO, qualquer que seja o nome, então
+  // com os dois de baixo desligados ela cairia na largura do overlay e a emulação deixaria de ser «sem @container» — o CONTROLE abaixo reprovou assim.)
+  const SEM_CONTAINER = '.dialogo-acoes, .dialogo-cartao, .modal-root, .seg-tabs { container-type: normal !important; }';
   for (const [rot, viewport, escala] of [['360×740 ×2', { width: 360, height: 740 }, 2], ['320×568 ×1,5', { width: 320, height: 568 }, 1.5],
     ['412×915 ×2', { width: 412, height: 915 }, 2]]) {
     const { ctx, page, erros } = await novaPaginaL25(viewport, escala, { estilo: SEM_CONTAINER });
@@ -2547,6 +2549,230 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       checa(controleVe === sensiveis, `fileira presa: CONTROLE — com a regra antiga (sem o portão) só ${controleVe} de ${sensiveis} diálogos mudaram de tinta; a medida está cega para parte deles`);
       checa(comPortao > 0, 'fileira presa: este navegador mudou a tinta com a regra antiga mas não diz que tem scroll-state — o portão não foi exercitado');
     }
+  }
+
+  // ══ LOTE 26 (telas) ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ── 9. R22-7-01 / R22-8-02 · o foco do teclado para ACIMA da fileira presa ───────────────────────────────────────────────
+  // O campo do «Entrar com um código», o textarea do «Colar cookies» e o link «Waze Map Editor» do «Sair» paravam INTEIROS sob os botões
+  // quando recebiam o foco (WCAG 2.4.11): o cartão não tinha `scroll-padding-bottom`, e o navegador não sabe da fileira presa. Mede cada controle
+  // do corpo de cada diálogo depois de `focus()` (sem `preventScroll`: o navegador rola o que precisar), com a janela encolhida pelo teclado.
+  const medirFocoAcima = (id) => {
+    if (id === 'logoutModal') abrirDialogoDoSair(); else if (id === 'comoFuncionaModal') abrirComoFunciona(false);
+    else if (id === 'accessDeniedModal') showAccessDenied({ error: 'x', reasonKey: 'srv.err.accessDenied' }, { rank: 0, userName: 'world_novato12345', isAreaManager: false });
+    else openModal(id);
+    return new Promise((fim) => setTimeout(async () => {
+      const cartao = document.getElementById(id).firstElementChild; const linha = cartao.querySelector('.acoes-presas');
+      const alvos = [...cartao.querySelectorAll('a[href],input,textarea,select,button,[tabindex]')].filter((e) => !linha.contains(e) && e.getClientRects().length
+        && getComputedStyle(e).visibility !== 'hidden' && !e.disabled);
+      const saida = [];
+      for (const el of alvos) {
+        cartao.scrollTop = 0; if (document.activeElement) document.activeElement.blur();
+        el.focus();
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        const r = el.getBoundingClientRect(); const c = cartao.getBoundingClientRect(); const l = linha.getBoundingClientRect();
+        const topo = Math.max(r.top, c.top, 0), fundo = Math.min(r.bottom, l.top, innerHeight);
+        const disp = Math.max(0, l.top - Math.max(c.top, 0));
+        saida.push({ id, el: el.id || el.tagName.toLowerCase(), h: r.height, vis: Math.max(0, fundo - topo), disp, rola: cartao.scrollHeight - cartao.clientHeight });
+      }
+      fim(saida);
+    }, 220));
+  };
+  const IDS_DO_FOCO = ['logoutModal', 'pasteModal', 'pairEnterModal', 'comoFuncionaModal', 'batchReadModal', 'treinoFimModal', 'accessDeniedModal'];
+  // O controle fica TODO acima da fileira quando cabe; o textarea (mais alto que o espaço acima da fileira em várias janelas) fica com a metade
+  // do que cabe — o resto ele rola por dentro.
+  const focoAcima = (x) => x.vis >= (x.el === 'cookiesTextarea' ? 0.5 : 1) * Math.min(x.h, x.disp) - 1;
+  const CASOS_DO_FOCO = [['SE 375×667 ×1,5', { width: 375, height: 667 }, 1.5, 0], ['360×740 ×1,5 teclado 300', { width: 360, height: 740 }, 1.5, 300],
+    ['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5, 0], ['390×844 ×2 teclado 320', { width: 390, height: 844 }, 2, 320],
+    ['412×915 ×1,3 teclado 340', { width: 412, height: 915 }, 1.3, 340], ['568×320 ×1', { width: 568, height: 320 }, 1, 0]];
+  let alvosDoFoco = 0, comScroll = 0;
+  for (const [rot, vp, escala, teclado] of CASOS_DO_FOCO) {
+    const { ctx, page, erros } = await novaPaginaL25({ width: vp.width, height: vp.height - teclado }, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      for (const id of IDS_DO_FOCO) {
+        const rs = await page.evaluate(medirFocoAcima, id);
+        await fecharL25(page);
+        for (const x of rs) {
+          alvosDoFoco++; if (x.rola >= 1) comScroll++;
+          checa(focoAcima(x), `foco ${rot} · ${lang} · ${x.id} › ${x.el}: o controle focado ficou sob a fileira de ações (visível ${Math.round(x.vis)} de ${Math.round(x.h)} px, cabiam ${Math.round(x.disp)})`, JSON.stringify(x));
+        }
+      }
+    }
+    checa(erros.length === 0, `foco ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  checa(alvosDoFoco >= 60 && comScroll >= 30, `foco acima da fileira: só ${alvosDoFoco} controles medidos (${comScroll} com o cartão rolando) — a medida não provou nada`);
+  {
+    // CONTROLE do instrumento: sem o `scroll-padding-bottom` (o defeito) o MESMO teclado de 300 px no 360×740 ×1,5 e o de 320 px a 2× deixam controle sob a fileira.
+    let sob = 0;
+    for (const [vp, escala, teclado] of [[{ width: 360, height: 740 }, 1.5, 300], [{ width: 390, height: 844 }, 2, 320]]) {
+      const { ctx, page } = await novaPaginaL25({ width: vp.width, height: vp.height - teclado }, escala, { estilo: '.dialogo-cartao { scroll-padding-bottom: 0 !important; }' });
+      for (const lang of ['pt', 'fr']) {
+        await entrarL25(page, lang);
+        for (const id of IDS_DO_FOCO) { const rs = await page.evaluate(medirFocoAcima, id); await fecharL25(page); sob += rs.filter((x) => !focoAcima(x)).length; }
+      }
+      await ctx.close();
+    }
+    checa(sob >= 4, `foco acima da fileira: CONTROLE — sem o scroll-padding só ${sob} controles ficaram sob a fileira; a medida está cega`);
+  }
+
+  // ── 11. R22-7-05 · o texto grande não recorta: o cabeçalho «Lidos / Rejeitados» do Histórico, o título do fim do treino e o do «Sair», e os interruptores ───
+  // Medido na rodada 22: o cabeçalho do Histórico saía pela ESQUERDA da caixa que o recorta («Lidos» virava «idos»: 3,4 px no Fold a 1,5×, 17,8 px no de 320
+  // px a 1,8×, 42,8 px em es), «Entraînement terminé» passava 16 px do cartão em 320 px a 1,8×, e os interruptores dos Filtros e das Preferências saíam 4–14 px
+  // do cartão (o texto ao lado não encolhia). A posição do cabeçalho segue com o dono; o que se mede é só o recorte.
+  const medirRecorte = (estado) => {
+    const dentro = (r, caixa) => Math.max(0, Math.round((caixa.left - r.left) * 10) / 10, Math.round((r.right - caixa.right) * 10) / 10);
+    const tinta = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+    const fora = [];
+    const nome = (el) => el.id || `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')}`;
+    if (estado === 'hist') {
+      openModal('filtersModal'); switchFilterTab('filtersTabHistory');
+      const cab = document.querySelector('#filtersPanelHistory .justify-end');
+      const clip = cab.closest('.overflow-y-auto') || cab.closest('.dialogo-cartao') || document.getElementById('filtersModal').firstElementChild;
+      const cr = clip.getBoundingClientRect(); const caixa = { left: cr.left + clip.clientLeft, right: cr.left + clip.clientLeft + clip.clientWidth };
+      for (const sp of cab.children) { const p = dentro(tinta(sp), caixa); if (p > 0.5) fora.push(`${nome(sp)}:${p}`); }
+    } else if (estado === 'treino' || estado === 'logout') {
+      if (estado === 'treino') openModal('treinoFimModal'); else abrirDialogoDoSair();
+      const id = estado === 'treino' ? 'treinoFimTitle' : 'logoutModalTitle';
+      const cartao = document.getElementById(id).closest('.dialogo-cartao').getBoundingClientRect();
+      const p = dentro(tinta(document.getElementById(id)), cartao); if (p > 0.5) fora.push(`${id}:${p}`);
+    } else {
+      openModal('filtersModal'); switchFilterTab(estado === 'filtros' ? 'filtersTabFilters' : 'filtersTabPrefs');
+      const cartao = document.getElementById('filtersModal').firstElementChild.getBoundingClientRect();
+      const ids = estado === 'filtros' ? ['filterUnreadOnly', 'filterMyArea'] : ['prefUndoEnabled', 'prefPularGuarda', 'prefPresenca', 'prefOfflineDisponivel'];
+      for (const id of ids) {
+        const el = document.getElementById(id); if (!el || !el.getClientRects().length) continue;
+        const r = el.getBoundingClientRect(); const p = dentro(r, cartao); if (p > 0.5) fora.push(`${id}:${p}`);
+      }
+    }
+    return new Promise((ok) => setTimeout(() => ok(fora), 0));
+  };
+  const CASOS_DO_RECORTE = [['Fold 280×653 ×1,5', { width: 280, height: 653 }, 1.5], ['320×568 ×1,8', { width: 320, height: 568 }, 1.8],
+    ['360×740 ×1,8', { width: 360, height: 740 }, 1.8], ['SE 375×667 ×1,8', { width: 375, height: 667 }, 1.8]];
+  let recorteMedidos = 0;
+  for (const [rot, vp, escala] of CASOS_DO_RECORTE) {
+    const { ctx, page, erros } = await novaPaginaL25(vp, escala);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      for (const estado of ['hist', 'treino', 'logout', 'filtros', 'prefs']) {
+        await fecharL25(page);
+        const f = await page.evaluate(medirRecorte, estado);
+        await assentar(page, 30);
+        recorteMedidos++;
+        checa(f.length === 0, `recorte ${rot} · ${lang} · ${estado}: texto ou controle fora da caixa (${f.join(', ')})`);
+      }
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `recorte ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  checa(recorteMedidos === CASOS_DO_RECORTE.length * LINGUAS.length * 5, `recorte: só ${recorteMedidos} medidas`);
+  {
+    // CONTROLE do instrumento: sem a quebra (nowrap + palavra inteira, o defeito) a mesma tela recorta algum desses.
+    const DESFEITO = '#filtersPanelHistory .justify-end { flex-wrap: nowrap !important; } .min-w-0, .break-words { min-width: auto !important; overflow-wrap: normal !important; word-break: normal !important; }';
+    let recortados = 0;
+    for (const [vp, escala] of [[{ width: 280, height: 653 }, 1.5], [{ width: 320, height: 568 }, 1.8], [{ width: 375, height: 667 }, 1.8]]) {
+      const { ctx, page } = await novaPaginaL25(vp, escala, { estilo: DESFEITO });
+      for (const lang of LINGUAS) {
+        await entrarL25(page, lang);
+        for (const estado of ['hist', 'treino', 'logout', 'filtros', 'prefs']) { await fecharL25(page); const f = await page.evaluate(medirRecorte, estado); await assentar(page, 30); if (f.length) recortados++; }
+        await fecharL25(page);
+      }
+      await ctx.close();
+    }
+    checa(recortados >= 8, `recorte: CONTROLE — sem a quebra só ${recortados} medidas recortaram; a medida está cega`);
+  }
+
+  // ── 12. R22-7-07 · em francês o «:» não começa linha no botão do Resumo (o espaço antes dele é inquebrável) ─────────────────────
+  // «Voir mon bilan : octobre» a 1,5× em 360 px quebrava deixando «: octobre» no começo da linha. Varre a largura da janela (a quebra depende
+  // dela) e confere a PRIMEIRA letra de cada linha do rótulo, uma a uma pelo Range.
+  const medirDoisPontosNoInicio = ({ semNbsp }) => {
+    const h = {}; const d = new Date(); const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    h[dia] = { read: 5, rejected: 2 };
+    localStorage.setItem('waze_places_history', JSON.stringify(h)); AppState.history = null;
+    openModal('filtersModal'); switchFilterTab('filtersTabHistory'); renderHistory();
+    const btn = document.getElementById('resumoBotao'); if (!btn) return { semBotao: true };
+    if (semNbsp) btn.textContent = btn.textContent.split(String.fromCodePoint(0xA0)).join(' ');
+    const no = btn.firstChild; const texto = no.textContent; let topoAnterior = null; const inicios = [];
+    for (let i = 0; i < texto.length; i++) {
+      const rg = document.createRange(); rg.setStart(no, i); rg.setEnd(no, i + 1);
+      const rs = rg.getClientRects(); if (!rs.length) continue;
+      const topo = Math.round(rs[0].top);
+      if (topoAnterior === null || Math.abs(topo - topoAnterior) > 3) inicios.push(texto[i]);
+      topoAnterior = topo;
+    }
+    return { texto, linhas: inicios.length, comecaComDoisPontos: inicios.slice(1).includes(':') };
+  };
+  {
+    let linhasVistas = 0, quebrou = 0, semBotao = 0;
+    for (const escala of [1.3, 1.5]) {
+      const { ctx, page, erros } = await novaPaginaL25({ width: 360, height: 800 }, escala);
+      await entrarL25(page, 'fr');
+      for (let w = 300; w <= 480; w += 4) {
+        await page.setViewportSize({ width: w, height: 800 });
+        const r = await page.evaluate(medirDoisPontosNoInicio, { semNbsp: false });
+        await fecharL25(page);
+        if (r.semBotao) { semBotao++; continue; }
+        linhasVistas += r.linhas; if (r.linhas > 1) quebrou++;
+        checa(!r.comecaComDoisPontos, `Resumo fr ×${escala} em ${w} px: a linha começa com «:» (${JSON.stringify(r.texto)})`);
+      }
+      checa(erros.length === 0, `Resumo fr ×${escala}: erro de JS`, erros[0]);
+      await ctx.close();
+    }
+    checa(semBotao === 0 && quebrou >= 8, `Resumo fr: só ${quebrou} larguras quebraram o rótulo (${semBotao} sem o botão) — a medida não provou nada`);
+    // CONTROLE: com o espaço COMUM de antes o mesmo rótulo começa linha com «:» em alguma largura.
+    let defeito = 0;
+    const { ctx, page } = await novaPaginaL25({ width: 360, height: 800 }, 1.5);
+    await entrarL25(page, 'fr');
+    for (let w = 300; w <= 480; w += 4) {
+      await page.setViewportSize({ width: w, height: 800 });
+      const r = await page.evaluate(medirDoisPontosNoInicio, { semNbsp: true });
+      await fecharL25(page);
+      if (r.comecaComDoisPontos) defeito++;
+    }
+    await ctx.close();
+    checa(defeito >= 1, 'Resumo fr: CONTROLE — com o espaço comum nenhuma largura começou linha com «:»; a medida está cega');
+  }
+
+  // ── 13. R22-7-04 · o ZOOM DO NAVEGADOR a 400–500%: o «Aplicar» e o «Cancelar» dos Filtros ao alcance (WCAG 1.4.10, reflow) ─────────────────
+  // Com o zoom a janela CSS encolhe e o rem NÃO muda: 400% de 1280×800 são 320×200 px (18×10,5rem de conteúdo), 500% de 1920×1080 são 384×216
+  // (22×11,5rem). Eixo curto de 200 px, abaixo dos 280 do modelo da escada: os dois botões saíam da janela e nada rolava. O último degrau da escada
+  // (31 × 12rem) os alcança. Texto 1× (o zoom não muda a raiz), 4 idiomas, e as janelas vizinhas em que o rodapé JÁ se alcançava seguem sem rolar.
+  const JANELAS_DO_ZOOM = [['400% de 1280×800', 320, 200], ['500% de 1920×1080', 384, 216], ['400% de 1366×768', 341, 192], ['400% de 1440×900', 360, 222],
+    ['500% de 1280×800', 256, 160], ['a mais larga que a proporção 2,4 deixa', 528, 216]];
+  const JANELAS_FORA_DA_ESCADA = [['400% de 1280×1024', 320, 256], ['300% de 1280×800', 427, 267], ['200% de 1280×800', 640, 400], ['400% de 1920×1080', 480, 270]];
+  for (const [rot, w, h] of JANELAS_DO_ZOOM) {
+    const { ctx, page, erros } = await novaPaginaL25({ width: w, height: h }, 1);
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      const r = await page.evaluate(medirAlcanceFiltros);
+      checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o "Aplicar"/"Cancelar" não recebe o dedo SEM rolar`, JSON.stringify(r));
+      checa(r.comFoco === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o foco do teclado não traz o "Aplicar" à vista`, JSON.stringify(r));
+      checa(r.cartaoOverflowY === 'auto', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o cartão não rola (a janela ficou fora da escada)`, JSON.stringify(r));
+      await fecharL25(page);
+    }
+    checa(erros.length === 0, `Filtros no zoom ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  for (const [rot, w, h] of JANELAS_FORA_DA_ESCADA) {
+    // Onde o rodapé já se alcançava (pendurado fora do cartão, mas tocável) NADA muda: o cartão segue `overflow: visible`.
+    const { ctx, page } = await novaPaginaL25({ width: w, height: h }, 1);
+    for (const lang of ['pt', 'fr']) {
+      await entrarL25(page, lang);
+      const r = await page.evaluate(medirAlcanceFiltros);
+      checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok' && r.cartaoOverflowY === 'visible',
+        `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: a janela em que o rodapé já se alcançava mudou (overflow ${r.cartaoOverflowY})`, JSON.stringify(r));
+      await fecharL25(page);
+    }
+    await ctx.close();
+  }
+  {
+    // CONTROLE do instrumento: sem a rolagem do cartão nem o rodapé preso (o defeito) o MESMO 320×200 perde o "Aplicar".
+    const { ctx, page } = await novaPaginaL25({ width: 320, height: 200 }, 1, { estilo: '#filtersModal > div { overflow: visible !important; } #filtersModal > div > .dialogo-acoes:last-child { position: static !important; }' });
+    await entrarL25(page, 'pt');
+    const r = await page.evaluate(medirAlcanceFiltros);
+    checa(r.aplicar.inicial !== 'ok' || r.cancelar.inicial !== 'ok' || r.aplicar.depois !== 'ok', 'Filtros no zoom 400%: CONTROLE — sem a escada o "Aplicar" segue ao alcance; a medida está cega', JSON.stringify(r));
+    await ctx.close();
   }
 }
 
@@ -18141,4 +18367,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o link do "Copiar link" colado no campo do código (lote 25: o ouvinte de paste do campo resgata o segredo de 20 símbolos e o campo não vira "PLA-CES"; o código colado junto do host entra no formato da tela sem resgatar sozinho; o texto que não é nenhum dos dois segue o colar do navegador)`
   + `, + o texto que entra no campo do código SEM colar (lote 26: o insertText do link resgata com o segredo e o campo não vira "HTT-PSP", a rede do input quando o beforeinput não se cancela, a frase com o código entrando no formato da tela, com os CONTROLES de digitar, do colar de verdade e do link já usado), + a fila de saída que NÃO gravou (aparelho ilegível e cota cheia: o ✓ ✕ ✓ entra no Histórico e o ✕ sem sinal reverte e avisa, com o CONTROLE do aparelho normal guardando na fila), + a troca de conta com o aparelho ilegível sem herdar o placar nem o ↑ que guarda o pedido nem o Desfazer desligado (com o CONTROLE do aparelho que lê)`
   + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`
-  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem e só com o cartão rolando; a 1× nada muda, e o diálogo que empilha mas cabe também não) — cada medida com o seu CONTROLE`);
+  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem e só com o cartão rolando; a 1× nada muda, e o diálogo que empilha mas cabe também não) — cada medida com o seu CONTROLE`
+  + `, + o texto grande, lote 26 (telas): o foco do teclado SEMPRE acima da fileira presa (6 janelas × ${LINGUAS.length} idiomas × 7 diálogos, o CONTROLE sem o scroll-padding), o zoom do navegador a 400–500% nos Filtros (6 janelas, e as vizinhas em que o rodapé já se alcançava seguem sem rolar), o recorte do cabeçalho do Histórico, dos títulos e dos interruptores (4 janelas × ${LINGUAS.length} idiomas × 5 telas, o CONTROLE reproduzindo os números do auditor) e o «:» do Resumo em francês sem começar linha (varrendo a largura, com o CONTROLE do espaço comum)`);
