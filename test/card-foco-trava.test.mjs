@@ -471,7 +471,7 @@ function montarTrava() {
     dispensarAvisoDaTrava: () => {},
     // O "Como funciona" adiado que espera o card destravar (R7-7-01): não é o
     // assunto aqui (test/como-funciona).
-    pedirComoFuncionaAdiado: () => {},
+    pedirComoFuncionaAdiado: () => {}, atenderReordenacaoAdiada: () => {},
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, [

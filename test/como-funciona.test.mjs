@@ -188,6 +188,7 @@ test('R7-7-01: a aplicarTravaDeAcao de verdade pede o "Como funciona" quando a t
     // o foco da foto ampliada na trava (R7-3-06, do lote da foto): aqui não é o assunto
     manterFocoNoLightbox: () => {},
     pedirComoFuncionaAdiado: () => pedidos.push(estado.travado ? 'travado' : 'livre'),
+    atenderReordenacaoAdiada: () => {},
   };
   const chaves = Object.keys(deps);
   const trava = new Function(...chaves, 'let aprovandoAgora = false, excluindoAgora = false;\n'

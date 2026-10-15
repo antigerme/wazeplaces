@@ -86,7 +86,7 @@ function wazeVivo(itens, { porPagina = 500 } = {}) {
 
 function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], hasMore = true } = {}) {
   const log = [];
-  const tela = { gesto: false, camada: false };
+  const tela = { gesto: false, camada: false, travada: false };
   const AppState = {
     authenticated: true, hasMore, fetching: false, fetchEpoch: 0, queue: queue.slice(), currentPlace: null,
     serverTotal: queue.length, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
@@ -112,7 +112,7 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
     limparFocoAutor: () => {}, removeCurrentCardEl: () => {},
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace && AppState.currentPlace.venueID)); },
     // A tela, que o teste controla: o gesto no card e a camada por cima (R24-6-A7).
-    tela, cardDaFrente: () => ({ id: 'card' }), cardSobGesto: () => tela.gesto, semCamadaAberta: () => !tela.camada,
+    tela, cardDaFrente: () => ({ id: 'card' }), cardSobGesto: () => tela.gesto, semCamadaAberta: () => !tela.camada, acoesTravadas: () => tela.travada,
     mantendoFocoNoCard: (redesenhar) => redesenhar(),
     // A sessão da busca (a que cai no meio é descartada, R14-1-02).
     epocaDaSessao: 0,
@@ -333,6 +333,28 @@ test('R24-6-A7: o card na MÃO da pessoa (o gesto) não é arrancado — a troca
   // E atendida uma vez: o próximo aviso de fim de gesto não redesenha.
   m.app.atender();
   assert.equal(m.log.length, 1);
+});
+
+test('R24-6-A7: a janela do Desfazer / aprovação / lote no ar (a trava do card) segura a troca — e quando solta, troca UMA vez', async () => {
+  const { soltar, m, frente } = await abrirEAplicar();
+  m.tela.travada = true;
+  soltar();
+  await assentar(m);
+  assert.equal(m.AppState.currentPlace, frente, 'o card foi trocado por baixo de uma decisão em curso (acoesTravadas)');
+  assert.deepEqual(m.log, []);
+  // Outro aviso (o fim de um gesto) com a trava ainda de pé: segue esperando.
+  m.app.atender();
+  assert.deepEqual(m.log, [], 'o fim de um gesto trocou o card com a trava ainda de pé');
+  m.tela.travada = false;   // a trava solta: o `aplicarTravaDeAcao` avisa
+  m.app.atender();
+  assert.deepEqual(m.log, ['card:V540'], 'a trava soltou e a troca não saiu (ou saiu mais de uma vez)');
+  m.app.atender();
+  assert.equal(m.log.length, 1);
+});
+
+test('R24-6-A7: a trava que solta (aplicarTravaDeAcao) e o fim do gesto/da camada atendem a troca pendente', () => {
+  assert.match(fatiar('aplicarTravaDeAcao'), /if \(!travado\) atenderReordenacaoAdiada\(\);/,
+    'a trava do card que solta não atende a troca de card pendente: ela ficaria pendente até o próximo gesto');
 });
 
 test('R24-6-A7: uma camada por cima (a foto, um modal) segura a troca até fechar', async () => {

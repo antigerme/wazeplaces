@@ -6799,8 +6799,9 @@ function reordenarFilaNaTela() {
 // mesmas que a busca nova leria, uma vez), o resto já passa à ordem nova, e a
 // troca do card sai no fim — a não ser que a pessoa já tenha tratado aquele
 // card (a fila andou, o resto está ordenado), ou esteja com ele na mão (o
-// gesto, uma camada por cima): aí a troca ESPERA, e sai quando o gesto acaba ou
-// a camada fecha, se o card ainda for o mesmo (`atenderReordenacaoAdiada`).
+// gesto, uma camada por cima, uma janela do Desfazer ou uma aprovação/lote no
+// ar): aí a troca ESPERA, e sai quando o gesto acaba, a camada fecha ou a trava
+// do card solta, se o card ainda for o mesmo (`atenderReordenacaoAdiada`).
 //
 // Devolve `false` quando não é o caso (sem card na tela, treino, sem rede): quem
 // chamou segue a troca imediata. Sem páginas a buscar nem chega aqui.
@@ -6835,14 +6836,14 @@ function reordenarEsperandoAsPaginas() {
 
 // A troca do card da `reordenarEsperandoAsPaginas`, quando as páginas chegaram:
 // agora, se o card da tela ainda é o mesmo e está livre; mais tarde, se ele está
-// na mão da pessoa (`aoFimDoGesto`, `aoFecharCamada`); nunca, se a pessoa já o
-// tratou ou outra ordem veio depois.
+// na mão da pessoa (`aoFimDoGesto`, `aoFecharCamada`, `aplicarTravaDeAcao`);
+// nunca, se a pessoa já o tratou ou outra ordem veio depois.
 function atenderReordenacaoAdiada() {
     const a = reordenacaoAdiada;
     if (!a) return;
     if (a.vez !== reordenacaoVez || Treino.ativo || !AppState.authenticated
         || AppState.currentPlace !== a.naTela || AppState.queue[0] !== a.naTela) { reordenacaoAdiada = null; return; }
-    if (cardSobGesto(cardDaFrente()) || !semCamadaAberta()) return;
+    if (cardSobGesto(cardDaFrente()) || !semCamadaAberta() || acoesTravadas()) return;
     reordenacaoAdiada = null;
     sortQueue();
     // O mais perto de tudo já era o card da tela: nada a redesenhar.
@@ -17635,6 +17636,11 @@ function aplicarTravaDeAcao() {
     // da última linha: fechado, ele o devolve ao ✕ que o teclado acabou de
     // ganhar (R7-7-01); e o foco prometido ao teclado pode pousar agora (C10).
     if (!travado) dispensarAvisoDaTrava();
+    // A troca de card da ordem nova que esperava a trava acabar (R24-6-A7): a
+    // janela do Desfazer, a aprovação ou o lote no ar são decisão em curso naquele
+    // card, e ele não sai debaixo delas. ANTES do foco: o foco prometido ao
+    // teclado pousa no card que fica.
+    if (!travado) atenderReordenacaoAdiada();
     if (!travado) pedirComoFuncionaAdiado();
     aplicarFocoDoTeclado();
 }

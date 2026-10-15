@@ -79,24 +79,34 @@ for (const [nome, fonte] of [['js/swipe.js', SWIPE], ['js/min/swipe.js (o que o 
     assert.equal(t350(g).length, 1);
   });
 
-  test(`${nome}: com Reduzir movimento o card conclui no MESMO quadro — nenhum temporizador de 350 ms, o callback uma vez só`, async () => {
+  test(`${nome}: com Reduzir movimento o card conclui no MESMO quadro — o callback uma vez só, e a ENTRADA só volta aos 350 ms de sempre`, async () => {
     const g = montar({ reduzir: true, fonte });
     g.ctx.triggerSwipe('left', (c) => g.decidiu.push(['left', c]));
     // Fora da pilha de quem chamou: o callback decide pedido e o botão/a tecla
     // ainda estão no meio do tratamento do evento deles.
     assert.equal(g.decidiu.length, 0, 'o callback rodou DENTRO da chamada do gesto (reentrância)');
     assert.equal(g.estado().animating, true, 'a guarda de reentrada abriu antes de o callback rodar');
-    // Um segundo gesto nesse meio-tempo não decide de novo.
-    g.ctx.triggerSwipe('left', (c) => g.decidiu.push(['left2', c]));
     await microtarefas();
-    assert.equal(t350(g).length, 0, 'ficou um temporizador de 350 ms: o próximo card ainda espera sem animação');
-    assert.equal(g.timers.length, 0, 'sobrou temporizador na saída com Reduzir movimento');
-    assert.deepEqual(g.decidiu.map((d) => d[0]), ['left'], 'a ação não rodou exatamente uma vez');
+    assert.deepEqual(g.decidiu.map((d) => d[0]), ['left'], 'a ação não rodou na microtarefa seguinte: o próximo card ainda espera sem animação');
     assert.equal(g.decidiu[0][1], g.card);
     assert.equal(g.fins.length, 1, 'o fim do gesto (o que espera o card parar) não foi avisado');
-    assert.equal(g.estado().animating, false);
     assert.equal(g.estado().cardSaindo, null, 'o card seguiu como "saindo"');
     assert.ok(g.consultas.some((q) => /prefers-reduced-motion: reduce/.test(q)));
+    // O FREIO DO TOQUE DUPLO: o card novo já está na frente, mas um segundo
+    // gesto antes dos 350 ms é ignorado — como era (MEDIDO sem isto: 2 pedidos
+    // rejeitados por um duplo-clique, com o Desfazer desligado).
+    assert.equal(g.estado().animating, true, 'a entrada voltou a valer cedo demais: o segundo toque do duplo-clique cai no card novo');
+    g.ctx.triggerSwipe('left', (c) => g.decidiu.push(['left2', c]));
+    await microtarefas();
+    assert.deepEqual(g.decidiu.map((d) => d[0]), ['left'], 'um segundo gesto dentro dos 350 ms decidiu outro pedido');
+    // Exatamente UM temporizador, o da entrada, de 350 ms.
+    assert.deepEqual(g.timers.map((t) => t.ms), [350], 'o freio da entrada deve ser um temporizador só, de 350 ms');
+    g.timers.shift().fn();
+    assert.equal(g.estado().animating, false, 'a entrada não voltou aos 350 ms');
+    g.ctx.triggerSwipe('left', (c) => g.decidiu.push(['left3', c]));
+    await microtarefas();
+    assert.equal(g.timers.length, 1, 'depois dos 350 ms o gesto seguinte deve sair normalmente');
+    assert.deepEqual(g.decidiu.map((d) => d[0]), ['left', 'left3']);
   });
 
   test(`${nome}: a preferência é lida A CADA saída (muda com o app aberto)`, async () => {
@@ -107,7 +117,6 @@ for (const [nome, fonte] of [['js/swipe.js', SWIPE], ['js/min/swipe.js (o que o 
     g.ctx.triggerSwipe('left', (c) => g.decidiu.push(['left', c]));
     await microtarefas();
     assert.equal(g.decidiu.length, 1, 'a preferência foi lida uma vez só, na carga');
-    assert.equal(g.timers.length, 0);
   });
 
   test(`${nome}: matchMedia que LANÇA não derruba o gesto`, async () => {
