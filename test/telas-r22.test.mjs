@@ -37,6 +37,18 @@ test('R22-7-05 · o título do fim do treino e o do «Sair» partem a palavra qu
   }
 });
 
+// R24-7-04 (lote 28): os outros três títulos de diálogo (eram 2 de 6) — «Cole o conteúdo dos cookies», «Conectar outro aparelho» e «Entrar com um código» passavam
+// da borda do cartão com o texto grande (+20/+14/+9 px no Fold a 2×). `break-words` não muda nada a 1× (a palavra cabe). O `#resumoTitle` fica `truncate` de propósito:
+// trocar por quebra mudaria, a 1×, três títulos do Galaxy Fold (pt «novembro», es «septiembre» e «noviembre» hoje terminam em reticências).
+test('R24-7-04 · os títulos «Cole os cookies», «Conectar outro aparelho» e «Entrar com um código» partem a palavra que não cabe no cartão', () => {
+  const ids = ['pasteModalTitle', 'pairShowTitle', 'pairEnterTitle'];
+  for (const id of ids) {
+    const tag = new RegExp(`<h3 id="${id}"[^>]*>`).exec(HTML);
+    assert.ok(tag, `${id}: sumiu o título`);
+    assert.ok(classes(tag[0]).includes('break-words'), `${id}: o título perdeu o break-words (passava do cartão a 280 px com o texto a 2×)`);
+  }
+});
+
 test('R22-7-05 · o texto ao lado de CADA interruptor encolhe (min-w-0) e parte a palavra longa (break-words)', () => {
   const linhas = [...HTML.matchAll(/<label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-\[44px\]">\s*<span( class="[^"]*")?[^>]*>/g)];
   // São sete: Filtros (2), Preferências (Desfazer, Pular, Presença, Offline) e o Modo Desenvolvedor.
