@@ -3,6 +3,13 @@
 // escreve o escape (barra, `u` e quatro algarismos) e o código fica legível, revisável e imune ao que um editor,
 // um diff ou uma ferramenta faz com o que não aparece.
 //
+// O ESPAÇO que não é o comum entra na mesma lista (R23-6 F2): o NBSP (U+00A0), o estreito (U+202F) e os demais
+// separadores de espaço (categoria Zs) parecem um espaço e não são. Os dois-pontos e as aspas do francês pedem o
+// NBSP de propósito (a linha não quebra antes do «:»), e é aí que ele importa — mas ele entra como ESCAPE
+// (barra, `u` e quatro algarismos), nunca cru: cru, o diff mostrava uma linha "igual" e quem revisava não sabia se
+// havia espaço comum ou inquebrável. O guard antigo era de \p{Cf}, que não pega Zs, e deixou cinco linhas de
+// `js/i18n.js` e duas de teste com o NBSP cru (e um comentário afirmando o contrário).
+//
 // Três motivos, os três já vistos aqui:
 //   1. É o ataque "Trojan Source" (CVE-2021-42574): controles bidi (U+202A–U+202E, U+2066–U+2069) numa linha de
 //      código invertem a ordem em que ela É LIDA sem mudar o que ela FAZ. O app lida com nome em hebraico e árabe
@@ -33,7 +40,8 @@ const GERADO = /^js\/min\//;
 // extras são os separadores e os "brancos" que nenhuma categoria cobre. Montado por código: o arquivo que
 // proíbe o caractere não pode carregar o caractere.
 const EXTRAS = [0x2028, 0x2029, 0x2800, 0x3164, 0xffa0, 0x115f, 0x1160, 0x034f];
-const INVISIVEL = new RegExp('[\\p{Cf}' + EXTRAS.map((c) => String.fromCodePoint(c)).join('') + ']', 'u');
+// `(?! )\p{Zs}`: todo separador de espaço MENOS o espaço comum (U+0020).
+const INVISIVEL = new RegExp('[\\p{Cf}' + EXTRAS.map((c) => String.fromCodePoint(c)).join('') + ']|(?! )\\p{Zs}', 'u');
 
 function codigo(c) {
   return 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
@@ -73,6 +81,10 @@ test('CONTROLE: o varredor enxerga cada família de caractere invisível e deixa
     'separador de linha': 0x2028,
     'Braille em branco': 0x2800,
     'caractere de etiqueta': 0xe0041,
+    'espaço inquebrável (NBSP)': 0x00a0,
+    'espaço estreito inquebrável': 0x202f,
+    'espaço ideográfico': 0x3000,
+    'espaço de figura': 0x2007,
   };
   for (const [nome, cp] of Object.entries(invisiveis)) {
     const linha = 'const x = "a' + String.fromCodePoint(cp) + 'b";';
@@ -87,6 +99,7 @@ test('CONTROLE: o varredor enxerga cada família de caractere invisível e deixa
     'דני כהן · مرحبا · 日本語',
     String.fromCodePoint(0x1f4cd) + ' ' + String.fromCodePoint(0x2764, 0xfe0f) + ' ok',
     '"aspas" \'simples\' – – … ·',
+    'espaço comum entre palavras e depois do ponto. Fim',
   ];
   for (const t of comum) assert.deepEqual(invisiveisEm(t), [], `texto comum acusado: ${t}`);
   // A linha certa é a acusada, e a contagem vale por LINHA (não por caractere).

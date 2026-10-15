@@ -87,13 +87,13 @@ function montar({ fila = [], naTela = true, pendentesNoWaze = [], painel = false
     guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {}, sortQueue: () => {},
     aplicarRecusaAutomatica: () => {}, offlineVarrer: () => {}, offlineLigado: () => false, offlineLerPousos: () => [],
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(fila.map(chave)), pousosDaPagina: new Map(),
-    pedidosEmAndamento: new Set(), console: { error: () => {} }, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), console: { error: () => {} }, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     document: { getElementById: (id) => (id === 'noMoreCards' ? { classList: { contains: (c) => painelClasses.has(c) } } : null) },
     ORDEM_PADRAO: 'newest', refazerPerfilSeFaltar: () => {},
     // A sessão da busca (a que cai no meio é descartada, R14-1-02).
     epocaDaSessao: 0,
   };
-  const nomes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'tirarDaFilaDeSaida',
+  const nomes = ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'tirarDaFilaDeSaida',
     'marcarNaSaida', 'handleActionResult', 'registrarPousoDeSaida', 'semOsJaDecididos', 'registrarEntradaNaFila',
     'semOsQueJaPassaramPelaFila', 'fetchNextPage', 'puladosNestaFila', 'filaZeradaConfirmada', 'ordemDoWaze', 'ordemPrecisaDaFilaInteira'];
   // O conserto mora numa função nova: no código de antes ela não existe, e o
@@ -293,7 +293,7 @@ function montarDevolucaoComFoco({ foco = 'X' } = {}) {
     AppState, chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID, updatePendingCount: () => {},
     aoMudarAFilaPorBaixo: () => {}, pedidosQueEntraramNaFila: new Set(), showCurrentPlace: () => {}, startFetching: () => {},
     // A série do foco é a da régua única (`serieDoAutor`, R6-2-02).
-    pedidosEmAndamento: new Set(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(),
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, fatiar('devolverPedidoRecusado') + '\n' + fatiar('manterFocoNaFrente')

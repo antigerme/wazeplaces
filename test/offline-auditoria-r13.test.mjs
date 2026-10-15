@@ -68,6 +68,7 @@ const constante = (nome) => {
 };
 // As declarações de MÓDULO, tiradas do fonte (um nome trocado lá reprova aqui).
 const DECLARACOES = [
+  linhaDoFonte(/^const saidaTiradosSemGravar = new Map\(\);$/m, 'os itens que saíram sem a remoção gravar'),
   linhaDoFonte(/^const pousosDaPagina = new Map\(\);$/m, 'os pousos da página'),
   linhaDoFonte(/^const pedidosEmAndamento = new Set\(\);$/m, 'os pedidos em andamento'),
   linhaDoFonte(/^const pedidosQuePousaram = new WeakSet\(\);$/m, 'os pedidos (objetos) que pousaram'),

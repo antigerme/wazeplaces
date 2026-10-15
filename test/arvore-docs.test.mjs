@@ -171,6 +171,14 @@ test('os caminhos REST do Waze que o app usa: o core, o diagrama do README e o d
     .flatMap((l) => [...l.split('|')[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
   assert.ok(caminhosDaTabela.includes('Session') && caminhosDaTabela.includes('ErrorReport'), 'PRÉ-CONDIÇÃO: o extrator não leu a tabela do §2');
   assert.equal(total, caminhosDaTabela.length, `docs/waze-api.md: a frase diz ${total} caminhos e a tabela do §2 lista ${caminhosDaTabela.length}`);
+  // Os outros documentos que CITAM o total (`docs/README.md`, o índice, dizia "42 caminhos REST" com 44 na tabela;
+  // R23-6 F1): a frase "N caminhos REST" — com a quebra de linha no meio — tem que ser a da tabela.
+  for (const doc of ['docs/README.md', 'CLAUDE.md']) {
+    const citados = [...ler(doc).matchAll(/(\d+)\s+caminhos\s+REST/g)].map((m) => Number(m[1]));
+    assert.ok(citados.length >= 1, `${doc}: a frase "N caminhos REST" sumiu (ou o extrator quebrou)`);
+    assert.deepEqual(citados.filter((n) => n !== caminhosDaTabela.length), [],
+      `${doc}: diz ${citados.join(', ')} caminhos REST; a tabela do docs/waze-api.md lista ${caminhosDaTabela.length}`);
+  }
   const linhasUsamos = secao2.split('\n').filter((l) => /^\| `[^`]+` \| `[^`]+` \| \*\*usamos\*\*/.test(l));
   assert.equal(linhasUsamos.length, N, `docs/waze-api.md: ${linhasUsamos.length} linhas "**usamos**" na tabela, e o app usa ${N}`);
   for (const f of folhas) {
@@ -192,7 +200,7 @@ test('os caminhos REST do Waze que o app usa: o core, o diagrama do README e o d
 test('CLAUDE.md: o diff não filtra linha igual? Filtra — o "Aberto" que o gotcha #37 já fechou não volta', () => {
   const core = ler('server/core.mjs');
   // O fato: o core compara o valor CRU e conta o que comparou.
-  assert.match(core, /if \(mesmoValor\(venue\[k\] \?\? null, newValue \?\? null\)\) \{\s*camposSemMudanca\+\+;/,
+  assert.match(core, /if \(mesmoValor\(valorAtual \?\? null, newValue \?\? null\)\) \{\s*camposSemMudanca\+\+;/,
     'PRÉ-CONDIÇÃO: o core deixou de comparar o valor cru (o documento mudou de verdade?)');
   const claude = ler('CLAUDE.md');
   assert.doesNotMatch(claude, /\*\*Aberto\*\*: `changedVenue` não é diff e o app não filtra linha com/,

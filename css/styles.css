@@ -857,6 +857,15 @@ body > main {
   }
 }
 
+/* O CANVAS DO QR DO PAREAMENTO (R23-7-04, lote 27). Ele nasce 300×150 + a moldura (p-3 e a borda) = 326 px e fica assim até o primeiro desenho (o `qr.js` sob demanda
+   e a resposta do `parear`). Num cartão estreito essa moldura em branco passava da BORDA do cartão e da janela: a 280 px (o Galaxy Fold) de −23 a 303 num cartão de
+   16 a 264, e a 320 px uns 19 px de cada lado. O teto é a largura do CARTÃO e não a da caixa de conteúdo (`100%`): o canvas já usa o respiro do `p-6` (1,5rem de cada lado),
+   e a 360 e 393 px a moldura de antes cabe dentro do cartão, nesse respiro — com `max-width: 100%` ela encolhia ali também, e o pixel de um estado que estava certo mudava.
+   Depois do desenho o JS põe `max-width: none` inline (o QR quadrado de 205 px segue como sempre, sem amassar no Fold). */
+#pairQr {
+  max-width: calc(100% + 3rem);
+}
+
 /* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
    "Tudo limpo!", mas anima sozinho — sem depender de um `.celebrate` no pai,
    porque este é criado e removido em runtime pelo JS. */
@@ -1252,10 +1261,23 @@ input.ui-switch:disabled {
    dos dois de antes (17,49 × 11,9 e 25,39 × 9,7), que ele contém. MEDIDO em grade (largura 15,5 a 31rem × altura 9 a 15rem × texto 1× a 2× × pt e
    fr, SEM a escada): a 1× TODA janela de até 11,9rem de altura é defeito («nem rolando»), e o diálogo só passa a CABER a partir de 12,3rem (a 2×),
    12,8 (a 1,7×), 13,5 (a 1,5×) e 14 (a 1,3×) — por isso o corte em 12rem, com 0,3rem de folga das janelas de 1,9–2× em que ele cabe e 0,1rem
-   acima da última janela de 1× que quebra a 11,9. Fica de fora, de propósito, a faixa de 17 a 18,3rem × 12,1 a 12,6rem (janelas de 1× com ~230 px
-   de altura): coincide com janelas de 1,9–2× em que o diálogo CABE, e cobri-las mudaria esse diálogo. Pede decisão do dono. Onde o texto é maior
-   (1,3× em diante) as mesmas janelas em rem não existem em celular (o eixo curto ficaria abaixo de 280 px) e, se existirem pelo zoom, o rodapé
-   já se alcançava: ganha o rodapé preso, e o diálogo que cabe segue como está. */
+   acima da última janela de 1× que quebra a 11,9.
+   O DEGRAU EM PX (R23-7-01, lote 27). O degrau em rem acima parava em 12rem de altura e em 31rem de largura, e a conta «a janela de 1,9–2× em que o diálogo cabe
+   coincide com a de 1× de ~230 px» só vale em REM: em px as duas populações não se cruzam (celular com texto 2× tem janela de 280 px ou mais; a janela de zoom tem
+   200 a 270). MEDIDO em grade (janela de 190 a 320 px × larguras de 280 a 1024 × texto de 0,5× a 2× × pt e fr, 2.176 estados, antes e depois): a 1× o diálogo só
+   CABE (rodapé dentro do cartão) a partir de 290 px de janela; de 273 a 289 o rodapé pende 0–13 px fora do cartão (alcançável: fica como está), e abaixo disso
+   (a) em toda janela mais larga que 33rem e de até ~212 px de altura «Aplicar» e «Cancelar» saíam da janela SEM nada que os trouxesse (653×200, 568×200…1024×200) e
+   (b) de 224 a 272 px o rodapé saía do cartão e do corpo sobrava uma linha (1440×900 a 400% = 360×225, 1280×720 a 300% = 427×240, 1920×1200 a 500% = 384×240,
+   1280×1024 a 400% = 320×256, 1280×800 a 300% = 427×267, 1920×1080 a 400% = 480×270). O último termo da escada é por isso `(max-height: 240px) and
+   (max-height: 15rem)`, SEM limite de largura: 240 px de altura do overlay são a janela de 272 px a 1× (a janela menos o respiro de 1rem de cada lado) e o
+   `15rem` é o teto que só aparece com texto PEQUENO — a 0,85× (o «pequeno» do Android) o diálogo já CABE a partir de 270 px, a 0,75× a partir de 260 e a 0,5× a
+   partir de 230, e sem o teto em rem o degrau mudaria esses. Com texto ≥ 1× quem manda é o px (a 1,3× são 240 de conteúdo = 281 px de janela; o diálogo cabe só a
+   partir de 14rem = 291 px de conteúdo). A+B nos mesmos 2.176 estados: dos que o degrau muda, 0 são de diálogo que CABIA (o comparador aponta 3 estados de 5 a
+   22 pixels, e neles a escada nem casou — o cartão segue `overflow: visible` e o rodapé estático nas duas árvores —; renderizados um a um, em contexto novo, 3 vezes, a árvore de
+   antes e a nova dão o MESMO PNG: é o raster de uma página reaproveitada entre alturas) e os estados com o «Aplicar» INALCANÇÁVEL vão de 72 a 0 (a 0,85× e a 1×) e de 52 a 0 (a 1,3×). Fica de fora, com o
+   dono: o diálogo a 273–289 px (rodapé pendurado, alcançável), o texto ≥ 1,15× em janelas de 280 px ou mais que a escada em rem não alcança, e o texto de 2× em
+   janelas pequenas (o título em 5 a 8 linhas e o corpo no piso: o assunto do texto grande). O scroll-padding do degrau acompanha a linha de baixo (5,5rem, rodapé
+   lado a lado); as janelas estreitas (≤ 15,4rem) já têm o degrau estreito em rem (15,4 × 17rem, que contém as dele) e o 11rem. */
 #filtersModal {
   container: filtros / size;
 }
@@ -1265,7 +1287,8 @@ input.ui-switch:disabled {
     ((max-width: 9.69rem) and (max-height: 18.8rem)) or
     ((max-width: 12.59rem) and (max-height: 17.8rem)) or
     ((max-width: 15.4rem) and (max-height: 17rem)) or
-    ((max-width: 31rem) and (max-height: 12rem)) {
+    ((max-width: 31rem) and (max-height: 12rem)) or
+    ((max-height: 240px) and (max-height: 15rem)) {
   #filtersModal > div {
     overflow-x: hidden;
     overflow-y: auto;
@@ -1285,7 +1308,8 @@ input.ui-switch:disabled {
    10,8rem de altura) e 5,5rem onde fica lado a lado (4,5 a 5,1rem). Só dentro da
    escada (as condições são as mesmas linhas dela, o teste confere). */
 /* (lado a lado primeiro: na sobreposição das janelas estreitas o rodapé é o EMPILHADO, e o bloco de 11rem, depois, vence o empate) */
-@container filtros (max-width: 31rem) and (max-height: 12rem) {
+@container filtros ((max-width: 31rem) and (max-height: 12rem)) or
+    ((max-height: 240px) and (max-height: 15rem)) {
   #filtersModal > div {
     scroll-padding-bottom: 5.5rem;
   }
@@ -3646,6 +3670,35 @@ html.tem-sessao #authScreen { display: none; }
     forced-color-adjust: none;
     background: Highlight;
   }
+
+  /* LOTE 27 (R23-3-01) — OS MARCADORES DO MAPA (o mapa ampliado e o mapinha do card, e a legenda dos dois). O modo joga fora o `background` do autor e
+     todo marcador virava o MESMO ponto branco de borda preta: a FORMA separa três grupos (círculo = o local e a posição proposta, quadrado = as
+     entradas, losango = o duplicado), mas dentro do círculo e dentro do quadrado a COR era o único canal — num pedido que MOVE o local, quem usa o modo
+     não sabia qual círculo era a posição de hoje e qual a proposta (a pergunta do pedido), nem qual entrada sai e qual entra. A regra do modo é a de cima:
+     o estado se diz por FORMA, preenchimento e traço, nunca por cor do autor, e com as cores do SISTEMA (`forced-color-adjust: none` só aqui, porque é ele que
+     deixa o preenchimento e o hachurado existirem). Atual = vazado (Canvas) · proposto e entrada NOVA = cheio (Highlight) · entrada que SAI = hachurado (o
+     traço diagonal é CanvasText sobre Canvas) · entrada atual = vazada · duplicado = vazado, e o losango já o separa. Os pares da legenda usam as mesmas
+     classes, então a legenda acompanha. Seletores com a classe repetida: empatam com os de cor lá de cima, e a ordem decide. */
+  .mapa-marca.mapa-marca {
+    forced-color-adjust: none;
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+  .mapa-marca.mapa-proposto,
+  .mapa-marca.mapa-e-nova { background: Highlight; }
+  .mapa-marca.mapa-e-saindo {
+    background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px);
+  }
+
+  /* LOTE 27 (R23-5-02) — a bolha da conversa não tem borda: sem o `background` a «minha» e a «dela» só se distinguiam pelo lado em que encostam. A «minha» ganha o
+     traço mais grosso, como a célula de conquista «ganha» (2 px cheio × 1 px). */
+  .conversa-bolha.conversa-bolha { border: 1px solid CanvasText; }
+  .conversa-bolha.minha.minha { border-width: 2px; }
+
+  /* LOTE 27 (R23-8-06) — o fundo da foto e do mapa ampliados (`bg-black bg-opacity-90`) virava Canvas a ~90%, e o placar e o cabeçalho de trás apareciam por baixo da
+     camada, competindo com a pílula do nome e os botões. Opaco, como o cartão de cada diálogo. */
+  #imageLightbox, #mapaLightbox { background: Canvas; }
 }
 
 /* ── "A foto precisa de sinal" ────────────────────────────────────────────

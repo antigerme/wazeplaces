@@ -128,10 +128,10 @@ const ids = (fila) => (fila || []).map((p) => p.updateRequestID);
 // `token`: a sessão na MEMÓRIA desta aba (`null`: sem sessão).
 const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
-  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'offlineLerPousos', 'registrarPouso',
+  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'offlineLerPousos', 'registrarPouso',
   'semOsJaDecididos', 'abrirCanalDosPousos', 'quemDecideAgora', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba',
   'aplicarPousoDeOutraAba', 'guardarAvisoSemConta', 'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
-  'aoConhecerConta', 'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada',
+  'aoConhecerConta', 'gravarContaNoAparelho', 'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada',
   // O "invisível" pedido antes do perfil, que o `aoConhecerConta` carimba (R12-5-05, a junção do lote 16).
   'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
   // O aviso que chega à aba SEM sessão na memória (R13-2-03, test/abas-auditoria-r13.test.mjs).
@@ -164,8 +164,8 @@ function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, abri
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, filaAtravessouSessao = false, saidaEsperandoConta = false;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
+    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, contaVistaNoAparelho = false, filaAtravessouSessao = false, saidaEsperandoConta = false;',
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_ABA.map(fatiar),
     `return { ${NOMES_ABA.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p), pousosDaPagina,
@@ -338,7 +338,7 @@ function abaComBusca(nav, { aparelho, token = 'tok-x' }) {
     rebuscasAuto: 0, guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {},
     sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => {},
     offlineVarrer: () => {}, bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(),
-    pedidosEmAndamento: new Set(), pousosDaPagina: new Map(), offlineLigado: () => false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pousosDaPagina: new Map(), offlineLigado: () => false,
     offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
     Treino: { ativo: false }, console: { error: () => {} },
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), ORDEM_PADRAO: 'newest', filaEsperaPerfil: false,
@@ -484,7 +484,7 @@ function montarRecusa() {
     AUTORES_KEY, AUTORES_MAX_VISTOS: constante('AUTORES_MAX_VISTOS'),
     AUTORES_MAX_REINCIDENTES: constante('AUTORES_MAX_REINCIDENTES'), AUTORES_MAX_DIAS: constante('AUTORES_MAX_DIAS'),
     podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true,
-    pedidosEmAndamento: new Set(), recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false,
     recusaAutomaticaNestaFila: false,
     navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [40, 40],
     API: { getRegion: () => 'row', rejectPlace: (v, u) => new Promise((ok) => { enviados.push(u); portoes.push(ok); }) },
@@ -595,7 +595,7 @@ test('R12-2-04: o "Marcar todos" cujo pedaço pousa no meio da renovação avisa
   const deps = {
     AppState, API, ...depsDoAviso(espiao.canal), LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
     STATS_KEY: constante('STATS_KEY'), localStorage: lsFalso().localStorage,
-    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, contaDestaAbaEmDuvida: () => false,
     aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
     carimboDoGesto: () => GESTO, chaveDoPedido: chave, decididosPorOutraAbaComCardAqui: new WeakSet(),
@@ -683,7 +683,7 @@ function abaOffline({ aparelho, base, fila }) {
   const chaves = Object.keys(deps);
   const fonte = [
     'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null, offlineEpoca = 0;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_OFFLINE.map(fatiar),
     `return { ${NOMES_OFFLINE.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p) };`,

@@ -8,6 +8,41 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.15-03
+
+Vigésima terceira rodada da auditoria. A v2026.10.15-02 foi conferida em produção com as duas contas (os 13 arquivos que o app carrega iguais, byte a byte, aos mesclados; 189 verificações, nenhuma falha) e oito auditores revisaram o app de novo. Nenhum achado era grave no uso normal. Os mais sérios só aparecem quando o aparelho recusa guardar dados: nesse caso o app podia reenviar a mesma decisão ao Waze em laço, ou travar a aba ao abrir. E, em janelas de zoom muito baixas do navegador (400% num computador), os Filtros ficavam sem "Aplicar" e "Cancelar".
+
+Cada conserto tem um teste que reprova quando ele é desfeito. Nada muda de aparência no uso normal.
+
+### Corrigido
+
+**A fila, as contas e o aparelho que não guarda dados**
+- **Se o aparelho deixa de guardar dados com decisões já esperando envio, o app não reenvia mais a mesma decisão ao Waze nem soma de novo no Histórico.** Antes, a decisão que já tinha saído era relida da fila e mandada outra vez, sem parar (dezenas de envios em meio minuto para três pedidos) enquanto o aparelho recusasse a gravação.
+- **E a aba não trava mais ao abrir** quando a fila guardada tem decisões de outra conta ou sem dono e o aparelho não deixa limpá-las.
+- **Ao trocar de conta num aparelho que lê mas não guarda, a conta nova começa do zero** (antes herdava o placar, o "↑ guarda o pedido" e o Desfazer desligado da anterior).
+- **Contadores guardados como texto (um "9" virando "91")** não estragam mais as conquistas nem a contagem de reincidência do autor.
+
+**O zoom do navegador e o contraste alto**
+- **Os Filtros mostram "Aplicar" e "Cancelar" também com o navegador a 300%, 400% ou 500% de zoom em telas largas** (1440×900 a 400%, 1280×720 a 300%, e as janelas bem baixas e largas). A versão anterior prometia isso e ainda deixava essas janelas sem os botões.
+- **A moldura do QR do pareamento não passa mais da borda do cartão** nas telas estreitas, antes de o QR aparecer.
+- **Os tipos de pedido dos Filtros quebram de linha com texto grande** em vez de passar da borda do cartão.
+- **No modo de contraste alto do sistema,** os marcadores do mapa se distinguem por forma e preenchimento (e não só por cor), as mensagens da conversa ganham borda, e a foto e o mapa ampliados têm fundo opaco.
+- **A escala do mapa ampliado respeita a área segura do iPhone.**
+- **Leitores de tela passam a ouvir a condição da conquista** que você selecionou.
+
+**A conversa e a presença**
+- **O "Hoje/Ontem" da conversa e a hora das mensagens usam a hora do Waze corrigida pelo relógio do aparelho,** então um relógio adiantado ou atrasado não troca mais o separador do dia.
+- **Duas mensagens iguais seguidas ("ok", "ok") voltam a ser anunciadas pelo leitor de tela.**
+
+**O offline e o service worker**
+- **Girar o aparelho com sinal e perder o sinal depois não deixa mais o mapa de alguns pedidos sem tiles:** a preparação guarda os tiles para a faixa de larguras do card, não só para a de agora (cerca de 2% a mais de tiles em retrato e 9% em paisagem).
+- **Se o armazenamento do navegador deixar de responder, o service worker não prende mais o mapa nem a ativação:** toda espera dele tem teto de 1,5 s e o navegador vai à rede.
+- **A linha "Pronto" do offline em francês diz "0 demande" (e não "0 demandes").**
+
+**Dentro de casa** (não muda o que você vê): os espaços de largura fixa do dicionário viraram escapes legíveis e o teste que vigia caracteres invisíveis passou a cobri-los; o servidor trata ids com nome de protótipo como dado comum; `docs/README.md` diz 44 caminhos; o `waze-probe` recusa caminhos de escrita escritos de forma disfarçada (`/Issues/./Read`).
+
+---
+
 ## v2026.10.15-02
 
 Vigésima quinta rodada da auditoria. A v2026.10.15-01 foi conferida em produção com as duas contas (os 13 arquivos que o app carrega iguais, byte a byte, aos mesclados; as verificações novas do lote passaram) e oito auditores revisaram o app de novo, cada um numa área. Nenhum achado era grave no uso normal. Os mais sérios: uma decisão confirmada não contava no Histórico quando o aparelho não conseguia guardar a fila de saída; os botões dos diálogos de texto grande cobriam o campo que você estava preenchendo; e o campo do código de pareamento não entendia o link quando ele entrava por outro caminho que não o colar. O resto são pontas soltas dos consertos anteriores.

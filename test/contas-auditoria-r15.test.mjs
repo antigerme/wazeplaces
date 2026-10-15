@@ -119,7 +119,7 @@ function quedaSemPerfil({ aparelhoInicial, confirmada = null, perfil = null, tok
     },
     document: { getElementById: (id) => (id === 'appScreen' ? appScreen : null), querySelector: () => null },
     epocaDaSessao: 0, quedaAnunciada: false, Treino: { ativo: false }, sessaoCaiuNestaPagina: false,
-    extPerguntando: false, contaConfirmadaNestaAba: confirmada,
+    extPerguntando: false, contaConfirmadaNestaAba: confirmada, contaVistaNoAparelho: !!confirmada,
     entrarPelaExtensao: () => new Promise(() => {}),   // a renovação, no ar
     avisarOutrasAbasDaQueda: () => {},
   };

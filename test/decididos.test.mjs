@@ -67,7 +67,7 @@ function montar({ offline = true } = {}) {
   const diario = [];
   const estado = { offline };
   const fontes = ['chaveDoPedido', 'marcarEmAndamento', 'offlineLerPousos', 'registrarPouso',
-    'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
+    'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida',
     'enfileirarSaida', 'diagResumoDaSaida', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila'].map(fatiar).join('\n');
   const deps = {
     safeLS,
@@ -76,7 +76,7 @@ function montar({ offline = true } = {}) {
     OFFLINE_POUSOS_KEY: constante('OFFLINE_POUSOS_KEY'),
     OFFLINE_POUSOS_MAX: constante('OFFLINE_POUSOS_MAX'),
     POUSO_NA_MEMORIA_MS: constante('POUSO_NA_MEMORIA_MS'),
-    pedidosEmAndamento: new Set(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(),
     pousosDaPagina: new Map(),
     offlineLigado: () => estado.offline,
     dfato: (k, o) => diario.push([k, o]),

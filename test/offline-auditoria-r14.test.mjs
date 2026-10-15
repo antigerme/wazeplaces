@@ -175,7 +175,7 @@ function aba({ base, fila = [], sessao = 'tok-a' } = {}) {
     '    offlineFilaVarrida = null, offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0,',
     '    offlineLendoAJanela = null,',
     '    diagTilesGuardadosQueFalharam = [], offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet();',
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet();',
     ...NOMES.map(fatiar),
     `return { ${NOMES.join(', ')}, estado: () => ({ gravada: offlineFilaGravadaEm, epoca: offlineEpoca }) };`,
   ].join('\n');
@@ -341,7 +341,7 @@ function aparelhoDeDuasAbas() {
       '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null,',
       '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null, offlineLendoAJanela = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
-      'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet();',
+      'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet();',
       ...DECL_CANAL,
       ...NOMES_ABA.map(fatiar),
       'abrirCanalDoOffline();',
@@ -605,6 +605,7 @@ function abaDaConta({ aparelho, base, fila = [], sessao, perfil = null, onLine =
   const app = new Function(...chaves, [
     'let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, offlineFilaPreparada = null,',
     '    offlineJanelaServida = null, ultimaEscritaOkEm = 0, offlineEpoca = 0, contaConfirmadaNestaAba = null;',
+    'const saidaTiradosSemGravar = new Map();',
     ...DECL_AVISOS,
     ...NOMES_AVISO.map(fatiar),
     `return { ${NOMES_AVISO.join(', ')}, esperando: () => avisosDePousoSemConta.length };`,

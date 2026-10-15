@@ -2160,15 +2160,19 @@ export function nomeDoUsuario(u, quandoSemNome = null) {
 // tipo/leitura mas cujo venue o usuário não tem permissão de editar.
 // Exportada pra suite testar com fixtures de HAR real, sem rede.
 export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = true } = {}) {
-  const usersDict = {};
+  // Os quatro dicionários e o `brandLookup` são SEM protótipo: um id (ou uma
+  // marca) chamado "constructor" ou "toString" achava a função do protótipo e
+  // saía como "Object, 10" no endereço (R23-6 F5; os ids do Waze são números, é
+  // endurecimento).
+  const usersDict = Object.create(null);
   // Guarda o objeto inteiro, não só o nome: o rank de quem PEDIU é sinal de
   // triagem (L1 anônimo × L5 editor) e vinha sendo jogado fora aqui.
   for (const u of listaDoWaze(rd?.users?.objects)) usersDict[u.id] = u;
-  const streetsDict = {};
+  const streetsDict = Object.create(null);
   for (const s of listaDoWaze(rd?.streets?.objects)) streetsDict[s.id] = s;
-  const citiesDict = {};
+  const citiesDict = Object.create(null);
   for (const c of listaDoWaze(rd?.cities?.objects)) citiesDict[c.id] = c;
-  const statesDict = {};
+  const statesDict = Object.create(null);
   for (const st of listaDoWaze(rd?.states?.objects)) statesDict[st.id] = st.name;
 
   // Sem protótipo: uma marca chamada "constructor" ou "toString" daria
@@ -2404,15 +2408,19 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
           for (const k of Object.keys(ur.changedVenue)) {
             if (CAMPOS_ESCRITURACAO.has(k)) continue;
             const newValue = ur.changedVenue[k];
+            // O valor de HOJE do campo: só o que o venue TEM (R23-6 F5). `venue[k]`
+            // com `k` = "constructor" lia a função do protótipo como se fosse o
+            // valor antigo.
+            const valorAtual = Object.hasOwn(venue, k) ? venue[k] : null;
             // Campo que veio no pacote mas não mudou não vira linha. Conta,
             // porém: é a diferença entre "comparamos e nada muda" e "não veio
             // nada pra comparar", e as duas dizem coisas diferentes pro editor.
-            if (mesmoValor(venue[k] ?? null, newValue ?? null)) {
+            if (mesmoValor(valorAtual ?? null, newValue ?? null)) {
               camposSemMudanca++;
               continue;
             }
-            const label = fieldLabels[k] || (k.charAt(0).toUpperCase() + k.slice(1));
-            const resolvedFrom = resolveIdField(k, venue[k] ?? null);
+            const label = (Object.hasOwn(fieldLabels, k) && fieldLabels[k]) || (k.charAt(0).toUpperCase() + k.slice(1));
+            const resolvedFrom = resolveIdField(k, valorAtual ?? null);
             const resolvedTo = resolveIdField(k, newValue);
             // Geometria primeiro: é o campo que chegava como "[object Object]".
             const fmt = k === 'geometry'
@@ -2421,18 +2429,18 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             const mudanca = {
               field: k,
               label,
-              from: resolvedFrom !== null ? resolvedFrom : fmt(venue[k] ?? null),
+              from: resolvedFrom !== null ? resolvedFrom : fmt(valorAtual ?? null),
               to: resolvedTo !== null ? resolvedTo : fmt(newValue),
             };
             // Quanto andou. O frontend formata o número no locale do editor —
             // aqui vai cru, em metros, porque o core não sabe o idioma dele.
             if (k === 'geometry') {
-              const d = distanciaEntreGeometrias(venue[k] ?? null, newValue);
+              const d = distanciaEntreGeometrias(valorAtual ?? null, newValue);
               if (d !== null && Number.isFinite(d)) mudanca.movedM = d;
               // Vértices como NÚMERO, não sufixo de texto: o card precisa saber
               // "ganhou um vértice" pra não anunciar "moveu 0 m" numa forma que
               // mudou. Quem escolhe a frase é o frontend.
-              const vA = contarVertices(venue[k] ?? null);
+              const vA = contarVertices(valorAtual ?? null);
               const vB = contarVertices(newValue);
               if (vA || vB) { mudanca.vertsFrom = vA; mudanca.vertsTo = vB; }
               // As duas posições, pro card poder DESENHAR em vez de só narrar.
@@ -2442,13 +2450,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
               // pedido (27 de 83) e o segundo é ponto de entrada (21) — juntos,
               // a maioria do que a caixa de mudanças mostra hoje em coordenada
               // crua. O texto FICA: é o que sobra quando o mapa não carrega.
-              const pDe = pontoDeGeometria(venue[k] ?? null);
+              const pDe = pontoDeGeometria(valorAtual ?? null);
               const pPara = pontoDeGeometria(newValue);
               if (pDe || pPara) mudanca.pontos = { de: pDe, para: pPara };
             }
             // Campo de lista: o que entrou e o que saiu, em vez de duas listas
             // inteiras pro editor comparar de olho.
-            const delta = diffDeLista(venue[k] ?? null, newValue);
+            const delta = diffDeLista(valorAtual ?? null, newValue);
             if (delta) mudanca.delta = delta;
             // Objeto simples (não lista): mostra as folhas que mudaram em vez do
             // JSON inteiro. Se não der, o `from`/`to` do fallback continua lá —
@@ -2458,7 +2466,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             // devolvendo o editor às coordenadas cruas que o gotcha do
             // `[object Object]` já tinha resolvido. Medido ao introduzir isto.
             else if (k !== 'geometry') {
-              const objDelta = diffDeObjeto(venue[k] ?? null, newValue);
+              const objDelta = diffDeObjeto(valorAtual ?? null, newValue);
               if (objDelta) mudanca.objDelta = objDelta;
             }
             changes.push(mudanca);

@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026101502';
+const CACHE_NAME = 'waze-places-2026101503';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -28,7 +28,29 @@ let hidratacao = null;
 // pequeno, e isso já é a resposta.
 const swIniciadoEm = Date.now();
 let swHidratadoEm = null;
-const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista: 0 };
+const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista: 0, cacheVencido: 0 };
+
+// TODA espera da Cache API do worker tem teto (auditoria R23-4-02). O app já
+// trata a Cache API muda com `esperarComTeto` (R21-4-01); o worker tem a mesma
+// exposição e não tinha: com `has`/`keys`/`match` sem responder, o tile do mapa
+// ficava pendurado para TODO editor (inclusive quem nunca ligou o offline: o
+// ramo roda para todo tile do Waze) e a ativação não terminava. O worker é
+// ESTRITAMENTE ADITIVO: vencido o teto, o que não deu pra ler vale como "não
+// está guardado" e o pedido vai à rede, como iria sem worker. 1,5 s é folga
+// larga pro cache que responde (milissegundos) e curta pro que não responde.
+const SW_CACHE_TETO_MS = 1500;
+// O que o `comTeto` devolve quando QUER distinguir "não deu pra ler" de "leu e não tem".
+const VENCIDO = Symbol('vencido');
+// Resolve com `vencido` se a promessa passa do teto OU rejeita. Nunca rejeita.
+function comTeto(promessa, vencido) {
+  return new Promise((resolve) => {
+    const relogio = setTimeout(() => { swConta.cacheVencido++; resolve(vencido); }, SW_CACHE_TETO_MS);
+    Promise.resolve(promessa).then(
+      (v) => { clearTimeout(relogio); resolve(v); },
+      () => { clearTimeout(relogio); resolve(vencido); },
+    );
+  });
+}
 
 // As páginas que ABRIRAM DA CÓPIA GUARDADA porque a origem respondeu 5xx à
 // navegação (o `clientId` delas): o código delas também sai da cópia guardada
@@ -48,7 +70,7 @@ let hidratacaoGeracao = 0;
 function hidratarTiles() {
   const geracao = ++hidratacaoGeracao;
   tilesHidratados = false;
-  hidratacao = (async () => {
+  const leitura = (async () => {
     let lista = new Set();
     try {
       // `caches.has` antes de `open`: `open` CRIA o cache, e quem nunca ligou o
@@ -63,6 +85,13 @@ function hidratarTiles() {
     swHidratadoEm = Date.now();
     tilesHidratados = true;
   })();
+  // Com TETO: a leitura que não termina não pode segurar o tile nem a ativação.
+  // Vencido, a lista que já se tinha (vazia, se o worker acabou de acordar)
+  // passa a valer — o tile que ela não conhece vai à rede —, e a leitura tardia,
+  // se um dia terminar, ainda a atualiza (a geração é a mesma).
+  hidratacao = comTeto(leitura, undefined).then(() => {
+    if (geracao === hidratacaoGeracao) tilesHidratados = true;
+  });
   return hidratacao;
 }
 // Espera a leitura MAIS NOVA da lista. Esperar só a promessa capturada no
@@ -75,6 +104,9 @@ function hidratarTiles() {
 function esperarListaMaisNova(voltas = 0) {
   return hidratacao.then(() => (tilesHidratados || voltas >= 5 ? undefined : esperarListaMaisNova(voltas + 1)));
 }
+// A espera do tile no ramo "lista ainda sendo lida", com teto próprio: cada
+// leitura já é limitada, mas as voltas acima encadeiam várias.
+function esperarListaComTeto() { return comTeto(esperarListaMaisNova(), undefined); }
 // EM TODA PARTIDA do worker — não só no `activate`. Service worker é EFÊMERO:
 // o Chrome o encerra depois de ~30s ocioso e o recria no próximo evento, com
 // as variáveis globais ZERADAS. Até v2026.09.22-01 a lista só era lida no
@@ -128,8 +160,13 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
+  // O `claim` NÃO espera a leitura da lista de tiles (R23-4-02): o `fetch` do tile
+  // espera por ela, com teto, quando precisa. Esperá-la aqui deixava a ativação — e
+  // a navegação que depende do `claim` — presa a uma Cache API que não responde. A própria
+  // faxina tem teto pelo mesmo motivo; vencido, os caches antigos ficam e o
+  // próximo `activate` os leva (apaga tudo que não é o desta versão).
   event.waitUntil(
-    caches.keys().then(cacheNames => {
+    comTeto(caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           // O cache dos tiles do offline NÃO entra na faxina. Ele é da FILA,
@@ -140,7 +177,14 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    }).then(() => hidratarTiles()).then(() => self.clients.claim())
+    }), undefined).then(() => {
+      // Relê a lista a cada ativação, SEM esperá-la: o worker novo nasce (e lê a lista, no
+      // topo) enquanto o antigo ainda comanda, e o aviso `TILES_GUARDADOS` da varredura vai
+      // pro controlador de ANTES — sem esta releitura, o tile guardado nessa janela ficava
+      // fora da lista dele. `hidratarTiles()` segura os tiles (com teto) e não segura o claim.
+      hidratarTiles();
+      return self.clients.claim();
+    })
   );
 });
 
@@ -218,9 +262,11 @@ self.addEventListener('fetch', event => {
       if (event.request.destination !== 'image') return;
       // `caches.match` com o nome, e não `open` + `match`: o `open` CRIARIA o
       // cache que o "Sair" ou o desligar acabou de apagar.
-      const doCache = () => caches.match(event.request, { cacheName: TILES_CACHE })
-        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
-        .then((hit) => { swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
+      // Com TETO (R23-4-02): o cache que não responde vale como "sem entrada".
+      const doCache = () => comTeto(caches.match(event.request, { cacheName: TILES_CACHE }), VENCIDO)
+        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar. O vencido já foi
+        // contado em `cacheVencido`: não conta de novo como "sem entrada".
+        .then((hit) => { if (hit === VENCIDO) return fetch(event.request); swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
         .catch(() => fetch(event.request));
       if (tilesHidratados) {
         // O caminho de sempre, ESTRITAMENTE ADITIVO: sem entrada, não responde.
@@ -237,7 +283,7 @@ self.addEventListener('fetch', event => {
         // guardado, o worker busca por conta própria — o que a CSP do script
         // dele permite (`connect-src` com o host do tile, cobrado em
         // `test/csp-vm.test.mjs`) e dá o mesmo que o navegador daria.
-        event.respondWith(esperarListaMaisNova().then(() =>
+        event.respondWith(esperarListaComTeto().then(() =>
           (tilesGuardados.has(url.href) ? doCache() : fetch(event.request))));
       }
     }
@@ -284,14 +330,16 @@ self.addEventListener('fetch', event => {
     // o servidor mandar `no-cache` nesses tipos, e mandar ETag. Sem ETag não há
     // o que revalidar e a revalidação vira download inteiro — era o caso da VM.
     // A cópia GUARDADA deste pedido (ou `undefined`).
-    const daCopiaGuardada = () => caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
+    // Com TETO (R23-4-02): sem rede e com a Cache API muda, `Response.error()`
+    // ao fim do teto é melhor que pendurar a navegação.
+    const daCopiaGuardada = () => comTeto(caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined), undefined).then(cached => {
       if (cached) return cached;
       // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
       // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
       // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
       // `/?action=filters`, que nunca foi guardado com essa query — e o
       // `/index.html` de antes era uma resposta redirecionada, recusada.
-      if (isHTML) return caches.match('/');
+      if (isHTML) return comTeto(caches.match('/'), undefined);
       return undefined;
     });
     const navegacao = event.request.mode === 'navigate';
@@ -317,7 +365,7 @@ self.addEventListener('fetch', event => {
           }
           if (response && response.status === 200 && response.type === 'basic') {
             const responseClone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone));
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseClone)).catch(() => {});
           }
           return response;
         })
@@ -327,14 +375,15 @@ self.addEventListener('fetch', event => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
+    // Com TETO (R23-4-02): vencido, vale como "não guardado" e vai à rede.
+    comTeto(caches.match(event.request), undefined).then(cached => {
       if (cached) return cached;
       return fetch(event.request).then(response => {
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
         const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseToCache));
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseToCache)).catch(() => {});
         return response;
       });
     })

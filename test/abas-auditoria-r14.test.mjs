@@ -187,7 +187,7 @@ function montarLote({ auto = true } = {}) {
     pedidosDoAutorNaFila: () => AppState.queue.filter((p) => p.creatorId === AUTOR),
     callWithRetry: (fn) => fn(), carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }),
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: () => {}, enfileirarSaida: () => true, tirarDaFilaDeSaida: () => true,
-    reivindicacaoDestaAba: () => ({}), pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(),
+    reivindicacaoDestaAba: () => ({}), pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pedidosQueEntraramNaFila: new Set(),
     // A recusa automática: L6+AM, a conta dona do aparelho, o 777 marcado com o interruptor LIGADO.
     podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (id) => id === AUTOR,
     recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false, recusaAutomaticaNestaFila: false,
@@ -396,7 +396,7 @@ async function marcarTodosComQueda(entre) {
     markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoes.push(ok)) };
   const deps = {
     AppState, API, ...depsDoPouso(espiao.canal, safeLS), LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
-    pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pedidosQueEntraramNaFila: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false,
     escritasConferindo: 0, aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     contaDestaAbaEmDuvida: () => false, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
     carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }), decididosPorOutraAbaComCardAqui: new WeakSet(),
@@ -521,10 +521,10 @@ const DECLARACOES = [
 ];
 const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
-  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'offlineLerPousos', 'registrarPouso',
+  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'offlineLerPousos', 'registrarPouso',
   'registrarPousoDepoisDaQueda', 'semOsJaDecididos', 'abrirCanalDosPousos', 'quemDecideAgora', 'avisarOutrasAbasDoPouso',
   'aoPousarEmOutraAba', 'aoPousarSemSessaoNaMemoria', 'guardaASessaoQueCaiu', 'aplicarPousoDeOutraAba', 'guardarAvisoSemConta',
-  'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta',
+  'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'gravarContaNoAparelho',
   'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
   // R14-2-03
   'contaDoGestoEhADeAgora', 'filaDoGestoSegueAqui', 'epocaDaFilaRealAgora', 'lembrarMarcaQueAvisouSemConta',
@@ -560,9 +560,9 @@ function aba(nav, { fila, ap, token, perfil = { ...PERFIL } }) {
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, filaAtravessouSessao = false, saidaEsperandoConta = false;',
+    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, contaVistaNoAparelho = false, filaAtravessouSessao = false, saidaEsperandoConta = false;',
     'let saiuNestaPagina = false;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_ABA.map(fatiar),
     `return { ${NOMES_ABA.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p), pousosDaPagina,
@@ -736,7 +736,7 @@ function marcarTodosComAvisos({ fila = [1, 2, 3].map((i) => P(i)) } = {}) {
     markAsRead: () => new Promise((ok) => portoes.push({ ok, n: 1 })) };
   const deps = {
     AppState, API, LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
-    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, lidosDoLoteNoAr: 0,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), loteDeLidosContado: null, loteDeLidosEmVoo: false, lidosDoLoteNoAr: 0,
     escritasConferindo: 0, aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     contaDestaAbaEmDuvida: () => false, aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
     carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }), decididosPorOutraAbaComCardAqui: new WeakSet(),
@@ -824,7 +824,7 @@ function indicador({ noAr = 1, loteNoAr = false, lidosNoAr = 0 } = {}) {
   };
   const deps = { document, AppState: { authenticated: true, inFlightActions: noAr }, carregarFilaDeSaida: () => [],
     t: (k, v) => `${k}:${v.n}`, escapeHtml: (x) => String(x), desenharAvisoDoSair: () => {}, atualizarFabDev: () => {},
-    pedidosEmAndamento: new Set(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID, reivindicadoPorOutraAba: () => false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), chaveDoPedido: (p) => p.venueID + '|' + p.updateRequestID, reivindicadoPorOutraAba: () => false,
     SAIDA_REIVINDICACAO_MS: 60000, setTimeout: () => 0, clearTimeout: () => {},
     loteDeLidosEmVoo: loteNoAr, lidosDoLoteNoAr: lidosNoAr };
   const chaves = Object.keys(deps);
@@ -877,7 +877,7 @@ function serieComDesfazer(fila, { foco = 7 } = {}) {
   let h = null;
   const deps = {
     AppState, document, API: { getRegion: () => 'row' }, UNDO_WINDOW_MS: 60_000, epocaDaSessao: 0, Treino: { ativo: false },
-    pedidosEmAndamento: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), decididosPorOutraAbaComCardAqui: new WeakSet(),
     acoesTravadas: () => false, direcaoTravada: () => false, canDisableUndo: () => false, presencaFolhaAberta: () => false,
     t: (k, v) => (k === 'card.focoAutor.contagem' ? `${v.n} de ${v.total}` : k),
     // O `advanceQueue` + `showCurrentPlace` de um gesto: a fila anda e o card novo

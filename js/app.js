@@ -2240,6 +2240,10 @@ async function desenharQrPareamento(url) {
     canvas.height = canvas.width;
     canvas.style.width = px + 'px';
     canvas.style.height = px + 'px';
+    // O `max-w-full` do HTML só vale ANTES do desenho (o canvas nasce 300×150 + moldura = 326 px e passava do cartão a 280 px, R23-7-04). Depois dele o tamanho é o
+    // do QR, quadrado: com o teto, no Fold (cartão de 200 px de conteúdo) o canvas encolheria na largura e ficaria 160×205, QR amassado (e pior de ler). Sem teto
+    // ele fica exatamente como sempre (205 px passando 5 px do respiro do cartão, dentro dele).
+    canvas.style.maxWidth = 'none';
     const ctx = canvas.getContext('2d');
     ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
     // Fundo claro SEMPRE, inclusive no tema escuro: leitor de QR espera
@@ -8293,8 +8297,13 @@ function dfatoPendentes() {
 // INTEIRA: as 7 já entregues voltavam como se fossem do que veio depois. Aqui as pendentes que foram no arquivo viram
 // linhas do anel (as mesmas que a troca de causa escreveria, com a hora da última suprimida, que é anterior ao retrato) e
 // o limitador recomeça a contar `juntas` do zero — a série segue (`n` e `em` ficam), só as repetições entregues saem da
-// conta. O diário completo não muda (anel + pendentes = o mesmo total antes e depois), então um relatório que não chega
-// a ser baixado não perde nada. Devolve as linhas pra quem monta o arquivo (o anel foi copiado antes, por quem chama).
+// conta. O TOTAL de cada chave pendente não muda (a soma de `1 + juntas` das linhas dela, antes no limitador e depois no
+// anel), então um relatório que não chega a ser baixado não perde a conta da falha que o conserto protege. O que NÃO é
+// verdade é "anel + pendentes = o mesmo total": com o anel cheio (DFATO_TETO) as linhas entregues ocupam vagas do anel e
+// empurram para fora as linhas MAIS ANTIGAS de OUTRAS chaves — uma por chave pendente a cada relatório (MEDIDO: 120 + 2
+// pendentes → o anel segue em 120 e 2 linhas antigas de outras chaves saem; o 2º relatório e a cópia guardada têm 2 linhas
+// a menos que o 1º). É o limite do anel mordendo o que já estava velho, não perda das pendentes. Devolve as linhas pra
+// quem monta o arquivo (o anel foi copiado antes, por quem chama).
 function dfatoEntregarPendentes() {
     const linhas = dfatoPendentes();
     try {
@@ -12711,7 +12720,8 @@ function sessaoDestaAbaEhAGuardada() {
 function lembrarAContaDaQueda(tokenQueCaiu) {
     if (contaConfirmadaNestaAba || !tokenQueCaiu) return;
     const id = contaAgora();
-    if (id) contaConfirmadaNestaAba = { id, s: marcaDaSessao(tokenQueCaiu) };
+    // A conta veio do APARELHO (`contaAgora` lê a `CONTA_KEY`): ele a guardava (R23-8-01).
+    if (id) { contaConfirmadaNestaAba = { id, s: marcaDaSessao(tokenQueCaiu) }; contaVistaNoAparelho = true; }
 }
 
 // A abertura (e a adoção) com a sessão GUARDADA no aparelho: se o aparelho diz de
@@ -12730,7 +12740,7 @@ function lembrarAContaDoAparelho() {
     if (contaConfirmadaNestaAba) return;
     const id = contaAgora();
     const s = marcaDestaAba();
-    if (id && s) contaConfirmadaNestaAba = { id, s };
+    if (id && s) { contaConfirmadaNestaAba = { id, s }; contaVistaNoAparelho = true; }   // idem: veio do aparelho
 }
 
 function derrubarSessao(errorKey, { depois } = {}) {
@@ -13369,6 +13379,7 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // dela já saiu da memória aqui, e quem entrar depois não é uma troca de conta
     // NESTA aba (ver `aoConhecerConta`, R11-1-01).
     contaConfirmadaNestaAba = null;
+    contaVistaNoAparelho = false;
     presencaWmeZerar();              // o freio e os contadores eram de quem saiu
     AppState.authenticated = false;
     AppState.pendingAction = null;
@@ -13427,6 +13438,7 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // que a outra aba decidiu, com os avisos que esperavam a conta (R12-2-01/05),
     // e as fotos que as exclusões de quem saiu tiraram do mapa (R12-3-02).
     pousosDaPagina.clear();
+    saidaTiradosSemGravar.clear();
     pedidosEmAndamento.clear();
     alvosDoLoteDeLidosNoAr.clear();
     decisoesPorContaNoAr.clear();
@@ -19217,7 +19229,11 @@ function chaveMaisDias(k, n) {
 // somavam como TEXTO ("0x · 07", "072", "[object Object]") ou davam NaN na aba Histórico, na imagem do Resumo do
 // mês, no aviso do Desfazer e no "Centurião" — só por armazenamento editado à mão. É UMA função para todos os
 // leitores do histórico: o conserto que valia só para a aba Histórico deixou três leitores no texto (R22-7-02).
-function contagemDoHistorico(x) { return Number.isFinite(x) && x >= 0 ? x : 0; }
+//
+// INTEIRO, e não só finito (R23-1-02): é uma CONTAGEM, e o fracionário (1.5) que um armazenamento editado à mão
+// trouxesse somaria 2.5 e apareceria na tela. Os contadores das conquistas e a reincidência por autor leem
+// por aqui antes de somar: "9" + 1 virava "91" e o objeto virava NaN, gravados de volta.
+function contagemDoHistorico(x) { return Number.isInteger(x) && x >= 0 ? x : 0; }
 
 function getHistoryStats() {
     const h = loadHistory();
@@ -19652,7 +19668,7 @@ function guardarDeVoltaASessaoDestaAba() {
         const id = contaQuePodeGuardarDeVolta(q);
         if (!id) return;
         API.setSession(minha);
-        safeLS.set(CONTA_KEY, JSON.stringify({ id, s: marcaDaSessao(minha) }));
+        gravarContaNoAparelho(JSON.stringify({ id, s: marcaDaSessao(minha) }));
         // A sessão guardada agora já estava ativa: o diário do aparelho ganha o
         // início dela, como na abertura com sessão salva (ver a função).
         marcarSessaoJaAtiva();
@@ -20026,7 +20042,8 @@ function registrarDesfazer() {
 // Contador acumulado (guardados, fotos aprovadas, nomes corrigidos).
 function contarConquista(chave, delta) {
     const g = carregarConquistas();
-    g.n[chave] = Math.max(0, (g.n[chave] || 0) + (delta || 1));
+    // Lido por `contagemDoHistorico`: o contador guardado como texto ("9") somava como texto (R23-1-02).
+    g.n[chave] = Math.max(0, contagemDoHistorico(g.n[chave]) + (delta || 1));
     salvarConquistas();
     checarConquistas();
 }
@@ -20164,9 +20181,9 @@ function checarConquistas(extra) {
         tratados,
         hoje: s.today.read + s.today.rejected,
         seq: g.seq || 0,
-        guardados: g.n.guardados || 0,
-        fotos: g.n.fotos || 0,
-        nomes: g.n.nomes || 0,
+        guardados: contagemDoHistorico(g.n.guardados),
+        fotos: contagemDoHistorico(g.n.fotos),
+        nomes: contagemDoHistorico(g.n.nomes),
         idiomas: g.langs.length,
         estados: geo.estados.size,
         paises: geo.paises.size,
@@ -20442,7 +20459,7 @@ function htmlConquistas() {
         // 2026-09-25).
         const estado = t(on ? 'conq.estado.ganha' : 'conq.estado.trancada');
         return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}${nova ? ' nova' : ''}"
-            data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
+            data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}"${sel ? ' aria-describedby="conqDica"' : ''}>
             <span class="e" aria-hidden="true">${x.emoji}</span>
             <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span>` +
             `<span class="sr-only">, ${escapeHtml(estado)}</span>` +
@@ -20452,7 +20469,11 @@ function htmlConquistas() {
     const tocada = conquistaTocada && lista.find((x) => x.id === conquistaTocada);
     // A condição mora AQUI e não dentro da célula: na largura da grade ela
     // esticaria a coluna pelo mesmo motivo acima, e a frase é bem mais longa
-    // que o nome.
+    // que o nome. O leitor de tela não a ouvia (R23-7-03): a célula tocada só trocava o
+    // `aria-pressed`, e a condição nascia num parágrafo solto. A célula `sel` a aponta por
+    // `aria-describedby` (a `tocada` e a `sel` são a mesma célula, e o `conqDica` existe
+    // junto); nada muda na tela. Não é `role="status"` no <p>: ele é recriado pelo
+    // `innerHTML`, e região viva inserida já com texto não é anunciada de forma confiável.
     const dica = tocada
         ? `<p class="conq-dica" id="conqDica"><span><b>${tocada.emoji} ${escapeHtml(t('conq.' + tocada.id + '.nome'))}</b>`
           + ` — ${g.c[tocada.id] ? '✓ ' : ''}${escapeHtml(t('conq.' + tocada.id + '.como'))}</span></p>`
@@ -21767,7 +21788,9 @@ async function enviarLote(places, opts = {}) {
                 // fila de pedidos —, e o diário dizia "saida.abriu" com ela vazia
                 // (MEDIDO: `["saida.abriu","sessao.alarmeFalso"]` e a fila de
                 // saída `[]`; auditoria de 2026-10-07, R10-2-07).
-                if (!aoLandar) ficouNaSaida();
+                // E nem no placar otimista, se o aparelho recusou a anotação (`anotados.clear()`) e
+                // nada entrou na fila: só diz que abriu se ficou item (R23-1-03).
+                if (!aoLandar && carregarFilaDeSaida().length) ficouNaSaida();
                 handleUnauthorized();
                 return;
             } else if (r && r.errorCategory === 'transient' && !aoLandar && (anotados.has(p) || enfileirarSaida('reject', p, opts.regiao, opts.gesto))) {
@@ -22057,7 +22080,7 @@ function registrarRejeicaoDeAutor(place) {
     const hoje = diaDeHoje();
     if (a.r[chave]) {
         const e = a.r[chave];
-        e[0] = (e[0] || 1) + 1;
+        e[0] = (contagemDoHistorico(e[0]) || 1) + 1;   // texto/objeto guardado não soma como texto (R23-1-02)
         e[1] = nome;   // o nome de EXIBIÇÃO acompanha: se a pessoa escolheu um, mostra o novo
         e[2] = hoje;
     } else {
@@ -22080,7 +22103,7 @@ function contagemDoAutor(place) {
     const id = place && place.creatorId;
     if (id === null || id === undefined || id === '') return 0;
     const e = loadAutores().r[String(id)];
-    return Array.isArray(e) ? (e[0] || 0) : 0;
+    return Array.isArray(e) ? contagemDoHistorico(e[0]) : 0;
 }
 
 function esquecerAutor(chave) {
@@ -22095,7 +22118,7 @@ function esquecerAutor(chave) {
 function listaDeAutores() {
     const a = loadAutores();
     return Object.entries(a.r)
-        .map(([id, e]) => ({ id, n: e[0] || 0, nome: e[1] || id, dia: e[2] || 0 }))
+        .map(([id, e]) => ({ id, n: contagemDoHistorico(e[0]), nome: e[1] || id, dia: e[2] || 0 }))
         .sort((x, y) => (y.n - x.n) || (y.dia - x.dia));
 }
 
@@ -22965,8 +22988,8 @@ function tirarDaFilaDeSaida(tipo, place) {
     const i = f.findIndex((x) => x && x.tipo === tipo && x.venueID === place.venueID
         && x.updateRequestID === place.updateRequestID);
     if (i < 0) return false;
-    f.splice(i, 1);
-    salvarFilaDeSaida(f);
+    const [tirado] = f.splice(i, 1);
+    salvarFilaSemOs(f, [tirado]);
     updateInFlightIndicator();
     return true;
 }
@@ -23035,6 +23058,17 @@ function contaAgora() {
 // automática, calada, até recarregar (auditoria de 2026-10-02, R7-2-05). O dono
 // do aparelho continua tendo que ser o perfil vivo: a lista de autores é dele.
 let contaConfirmadaNestaAba = null;   // { id, s }: a conta e a marca da sessão desta aba
+// O aparelho GUARDOU a conta: esta aba a gravou com sucesso, ou a leu lá. É a prova de que uma conta
+// guardada que SUMIU foi tirada por outra aba (o "Sair" ou a troca de conta dela) — com o aparelho que
+// LÊ e não GRAVA (a cota cheia, o disco, uma política do navegador) a leitura vem nula desde sempre,
+// e tratar isso como "a outra aba já limpou" herdava o placar e as escolhas da conta anterior
+// (R23-8-01/R23-2-F3). Sai com o "Sair" desta aba, junto de `contaConfirmadaNestaAba`.
+let contaVistaNoAparelho = false;
+function gravarContaNoAparelho(json) {
+    const gravou = safeLS.set(CONTA_KEY, json);
+    if (gravou) contaVistaNoAparelho = true;
+    return gravou;
+}
 function contaConfirmada() {
     const vivo = AppState.profile && AppState.profile.id;
     if (vivo === undefined || vivo === null || vivo === '') return false;
@@ -23082,6 +23116,7 @@ function aoConhecerConta(perfil) {
     const invisivel = invisivelPedidoAntesDoPerfil();
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
+    if (antes && antes.id) contaVistaNoAparelho = true;
     if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
     // A troca que OUTRA aba já fez no aparelho: ela entrou com esta conta (ou deu
     // "Sair") e tirou de lá o que era da anterior — mas esta aba seguia com a
@@ -23098,8 +23133,9 @@ function aoConhecerConta(perfil) {
     // ler, não por ninguém ter limpado — e a versão "só memória" não zera o placar nem as escolhas que
     // ESCREVEM no Waze (o ↑ que guarda o pedido, o Desfazer desligado): a conta que entrava as herdava
     // da anterior (R22-1-A3, MEDIDO). Ilegível, roda a troca completa — em memória, já que lá não há o
-    // que gravar nem apagar.
-    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: armazenamentoLegivel() });
+    // que gravar nem apagar. O mesmo vale pro aparelho que LÊ e não GRAVA (a cota, o disco): a conta guardada
+    // nunca esteve lá, então nenhuma outra aba a "limpou" — `contaVistaNoAparelho` (R23-8-01).
+    else if (contaConfirmadaNestaAba && contaConfirmadaNestaAba.id !== id) esquecerOutraConta(id, { soMemoria: armazenamentoLegivel() && contaVistaNoAparelho });
     carimbarContaNoInvisivel(id, invisivel);
     // A fila que atravessou a sessão é desta conta — ou já saiu com a outra.
     filaAtravessouSessao = false;
@@ -23115,7 +23151,7 @@ function aoConhecerConta(perfil) {
     // `contaConfirmada` virava falsa, e a recusa automática parava calada
     // (auditoria de 2026-10-02, R7-1-03). A desta aba fica na memória.
     if (!antes || String(antes.id) !== id || sessaoDestaAbaEhAGuardada()) {
-        safeLS.set(CONTA_KEY, JSON.stringify({ id, s }));
+        gravarContaNoAparelho(JSON.stringify({ id, s }));
     }
     // Os avisos de pouso da outra aba que chegaram sem dar pra saber de quem eram
     // (a conta desta ainda desconhecida): os DESTA conta valem agora, os de outra
@@ -23218,7 +23254,12 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     if (!soMemoria) {
         const f = carregarFilaDeSaida();
         const desta = f.filter((it) => it && it.conta && String(it.conta) === id);
-        if (desta.length !== f.length) { salvarFilaDeSaida(desta); updateInFlightIndicator(); }
+        if (desta.length !== f.length) {
+            // Os que saem lembrados se o aparelho recusar a gravação (R23-2-F2): o esvaziamento os
+            // mandaria pro tirarSemEnviar, e a aba girava neles sem await.
+            salvarFilaSemOs(desta, f.filter((it) => !desta.includes(it)));
+            updateInFlightIndicator();
+        }
     }
     // O "Marcar todos" da conta anterior que ainda está no ar: "lido" é de CADA conta, e o
     // que ele marca continua pendente para quem entrou. Os alvos dele saem do "em andamento"
@@ -23437,11 +23478,49 @@ function esquecerEscolhasDaContaAnterior() {
     desenharChavesDePreferencia();
 }
 
+// Os itens da fila de saída que JÁ SAÍRAM (ou foram tirados sem ir ao Waze) e cuja REMOÇÃO o
+// aparelho recusou gravar (R23-1-01/R23-2-F1/F2). O aparelho que LÊ e não GRAVA devolvia o item
+// que acabou de ser enviado na leitura seguinte, e o esvaziamento o mandava DE NOVO — sem teto
+// (77 envios em 30 s com 3 itens, e o Histórico subindo a cada volta); os de outra conta, tirados
+// sem enviar, viravam um laço síncrono sem `await` (gotcha #19) que congelava a aba. A leitura
+// (`carregarFilaDeSaida`) passa a deixar de fora o que está aqui, então o laço, o indicador e
+// quem de-duplica enxergam a fila como ela deveria ter ficado. A chave leva o `t` do item: o
+// MESMO pedido que entra de novo mais tarde é outro item e não é escondido. Só em memória, e
+// sai quando uma gravação da fila pega (o que ela grava já não os tem) e no "Sair". Entre abas
+// a entrega segue at-least-once: a outra aba lê o aparelho cru.
+const saidaTiradosSemGravar = new Map();
+
+function chaveDoItemDaSaida(x) {
+    return x && x.venueID != null && x.updateRequestID != null
+        ? String(x.tipo) + '|' + String(x.venueID) + '|' + String(x.updateRequestID)
+        : null;
+}
+
 function carregarFilaDeSaida() {
+    let v;
     try {
-        const v = JSON.parse(safeLS.get(SAIDA_KEY) || '[]');
-        return Array.isArray(v) ? v : [];
+        v = JSON.parse(safeLS.get(SAIDA_KEY) || '[]');
+        if (!Array.isArray(v)) return [];
     } catch (e) { return []; }
+    if (!saidaTiradosSemGravar.size) return v;
+    return v.filter((x) => {
+        const k = chaveDoItemDaSaida(x);
+        return !(k !== null && saidaTiradosSemGravar.has(k) && saidaTiradosSemGravar.get(k) === x.t);
+    });
+}
+
+// Grava a fila DEPOIS de tirar `removidos` dela. Se o aparelho recusar, lembra os itens em memória
+// (acima): a remoção que não persistiu vale nesta página, que é o que impede o reenvio. Devolve
+// se gravou; quem chama nunca devolve "tirei" sem ter gravado nem lembrado.
+function salvarFilaSemOs(f, removidos) {
+    const gravou = salvarFilaDeSaida(f);
+    if (!gravou) {
+        for (const r of removidos) {
+            const k = chaveDoItemDaSaida(r);
+            if (k !== null) saidaTiradosSemGravar.set(k, r.t);
+        }
+    }
+    return gravou;
 }
 
 // Devolve se a fila GRAVOU. O aparelho ilegível e a cota cheia recusam a escrita, e quem
@@ -23451,7 +23530,11 @@ function carregarFilaDeSaida() {
 // `!== false` e não `=== true`, e quem chama confere `=== false`: só o `false` explícito da recusa vale como
 // "não gravou" (a função devolve boolean estrito; quem não diz nada não é recusa).
 function salvarFilaDeSaida(f) {
-    try { return safeLS.set(SAIDA_KEY, JSON.stringify(f)) !== false; } catch (e) { return false; }
+    let gravou = false;
+    try { gravou = safeLS.set(SAIDA_KEY, JSON.stringify(f)) !== false; } catch (e) { gravou = false; }
+    // O que a gravação levou já não está no aparelho: a lembrança em memória cumpriu o papel.
+    if (gravou) saidaTiradosSemGravar.clear();
+    return gravou;
 }
 
 // Guarda o MÍNIMO que permite reenviar E prestar contas direito no pouso:
@@ -23607,8 +23690,10 @@ async function esvaziarFilaDeSaida() {
         const g = carregarFilaDeSaida();
         const i = g.findIndex((x) => x && x.tipo === it.tipo && x.venueID === it.venueID
             && x.updateRequestID === it.updateRequestID);
-        if (i >= 0) g.splice(i, 1);
-        salvarFilaDeSaida(g);
+        const tirados = i >= 0 ? g.splice(i, 1) : [];
+        // Recusada a gravação, o item fica lembrado em memória (R23-2-F2): sem isto o laço do
+        // esvaziamento o relia e o tirava de novo, sem `await`, e a aba congelava.
+        salvarFilaSemOs(g, tirados.length ? tirados : [it]);
         const statKey = it.tipo === 'read' ? 'read' : 'rejected';
         AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
         updateStats();
@@ -23770,8 +23855,10 @@ async function esvaziarFilaDeSaida() {
             f = carregarFilaDeSaida();
             const saiu = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
                 && x.updateRequestID === item.updateRequestID);
-            if (saiu >= 0) f.splice(saiu, 1);
-            salvarFilaDeSaida(f);
+            // Se o aparelho recusar a gravação, o item que acabou de sair fica lembrado em memória e
+            // o laço não o manda de novo (R23-1-01); o pouso acima já o contou uma vez.
+            const tirados = saiu >= 0 ? f.splice(saiu, 1) : [];
+            salvarFilaSemOs(f, tirados);
             updateInFlightIndicator();
             // Só conta o que POUSOU (inclusive "já tratado"): a recusa de verdade
             // já avisou com toast de erro, e entrava no "N enviados" de sucesso
@@ -25263,6 +25350,23 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
 // MESMOS 313 tiles que passos de 4, 8, 16, 32 e até 64px. 16 fica com folga.
 const OFFLINE_CAIXA_MIN_REM = 5.5;
 const OFFLINE_CAIXA_PASSO_PX = 16;
+// A LARGURA entra na conta como a altura (R23-4-01). O zoom e o encaixe nos tiles
+// dependem de (largura, altura) da caixa, e a largura do `.card-photo` MUDA com o
+// aparelho: MEDIDAS 230, 246 (Fold fechado), 267 (celular deitado), 326, 356
+// (retrato), 398 (tablet/desktop). Preparada só pra largura do card de AGORA, a
+// fila deixava o mapa de 2–4% dos pedidos sem tile depois de girar o aparelho com
+// rede (nada re-prepara: o `resize` não é gatilho e a janela de 20 min segue
+// valendo) — e a linha seguia "Pronto". O TETO é o `max-w-[400px]` do #cardStack
+// (a foto dentro dele tem 398; `test/offline.test.mjs` amarra o número ao HTML);
+// o PISO é a menor largura medida, arredondada pra baixo. O PASSO de 48px é
+// exato como o de 16 nas alturas: MEDIDO em 300 pedidos sintéticos de 2–4 pontos
+// contra TODA largura de 224 a 400 (de 3 em 3) e toda altura de 88 a 504 (de 8 em
+// 8), os passos de 16 a 88 dão ZERO tile faltando, e só a largura de agora deixava
+// 33 de 300 pedidos com falta. Custo MEDIDO nas 51 fixtures reais dos 6 países:
+// 98 → 100 tiles (+2%).
+const OFFLINE_CAIXA_LARGURA_MIN_PX = 224;
+const OFFLINE_CAIXA_LARGURA_MAX_PX = 400;
+const OFFLINE_CAIXA_PASSO_LARGURA_PX = 48;
 
 function offlineFaixaDeCaixas() {
     const frente = cardDaFrente();
@@ -25273,18 +25377,30 @@ function offlineFaixaDeCaixas() {
     const hPilha = (pilha && pilha.clientHeight) || hFrente;
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const hMin = Math.round(OFFLINE_CAIXA_MIN_REM * rem);
-    const hMax = Math.max(hFrente, Math.min(hPilha, MAPA_TILE - 8));
-    return { w, hMin: Math.min(hMin, hMax), hMax };
+    // A ALTURA da orientação MAIOR (R23-4-01): deitado, a pilha tem ~265px, mas girar
+    // pro retrato devolve a dimensão longa da janela à altura. Soma à pilha de agora o
+    // que a dimensão longa tem a mais que a altura — em retrato é 0 (nada muda).
+    const longa = Math.max(window.innerWidth || 0, window.innerHeight || 0);
+    const hPilhaMaior = hPilha + Math.max(0, longa - (window.innerHeight || longa));
+    const hMax = Math.max(hFrente, Math.min(hPilhaMaior, MAPA_TILE - 8));
+    // As larguras: a de AGORA mais a grade de piso a teto (que cobre a da outra orientação).
+    const ws = new Set([w]);
+    for (let x = OFFLINE_CAIXA_LARGURA_MIN_PX; x < OFFLINE_CAIXA_LARGURA_MAX_PX; x += OFFLINE_CAIXA_PASSO_LARGURA_PX) ws.add(x);
+    ws.add(Math.max(OFFLINE_CAIXA_LARGURA_MAX_PX, w));
+    return { w, ws: [...ws].sort((a, b) => a - b), hMin: Math.min(hMin, hMax), hMax };
 }
 
-// Os tiles de TODAS as alturas da faixa. Mesmo zoom em caixa menor pede um
-// subconjunto; o que a faixa acrescenta é o zoom que muda quando a caixa encolhe.
+// Os tiles de TODAS as alturas da faixa, em TODAS as larguras dela. Mesmo zoom em
+// caixa menor pede um subconjunto; o que a faixa acrescenta é o zoom que muda
+// quando a caixa encolhe — ou o encaixe que muda quando ela alarga.
 function tilesDaFaixa(place, faixa) {
     const s = new Set();
-    for (let h = faixa.hMax; h >= faixa.hMin; h -= OFFLINE_CAIXA_PASSO_PX) {
-        for (const u of tilesDoCard(place, faixa.w, h)) s.add(u);
+    for (const w of (faixa.ws || [faixa.w])) {
+        for (let h = faixa.hMax; h >= faixa.hMin; h -= OFFLINE_CAIXA_PASSO_PX) {
+            for (const u of tilesDoCard(place, w, h)) s.add(u);
+        }
+        for (const u of tilesDoCard(place, w, faixa.hMin)) s.add(u);
     }
-    for (const u of tilesDoCard(place, faixa.w, faixa.hMin)) s.add(u);
     return s;
 }
 
@@ -25301,6 +25417,7 @@ async function offlineItensDaFila(janela) {
     // pedidos sem nenhum tile; auditoria de 2026-10-06).
     const fila = filaReal().slice();
     let i = 0;
+    let ultimaCessao = performance.now();
     for (const p of fila) {
         for (const u of tilesDaFaixa(p, faixa)) {
             if (vistos.has(u)) continue;
@@ -25312,9 +25429,14 @@ async function offlineItensDaFila(janela) {
         const fotos = fotosDoCard(p);
         const f = fotos.urls[fotos.inicial];
         if (f) itens.push({ u: f + (f.indexOf('?') === -1 ? '?' : '&') + 'w=' + janela, tile: false });
-        // ~16 ms num desktop pra fila inteira, e 4–6× isso num celular: sem
-        // ceder a thread vira tarefa longa no meio do arraste de quem tria.
-        if (++i % 20 === 0) await new Promise((r) => setTimeout(r, 0));
+        // ~16 ms num desktop pra fila inteira (antes da faixa de larguras; hoje ~6×
+        // isso), e 4–6× num celular: sem ceder a thread vira tarefa longa no meio do
+        // arraste de quem tria. Cede por TEMPO (8 ms de trabalho), não por contagem:
+        // o custo por pedido depende da faixa e do aparelho.
+        if (++i % 4 === 0 && performance.now() - ultimaCessao > 8) {
+            await new Promise((r) => setTimeout(r, 0));
+            ultimaCessao = performance.now();
+        }
     }
     return itens;
 }
@@ -26086,11 +26208,13 @@ function atualizarLinhaDoOffline(feitos, total) {
     // (auditoria de 2026-10-01, R6-4-2).
     const completa = offlineJanelaServida !== null && cobreAFila;
     const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
+    // `prontoAZero`: a fila vazia é um caso à parte do plural — em francês o zero
+    // é SINGULAR ("0 demande"), em pt/en/es é plural (R23-6 F3). Não há ICU.
     if (semRede && fotosValem && n) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
         // quando houver rede" era mentir sobre o que já está guardado.
         el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
-            t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+            t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
             + escapeHtml(t('prefs.offline.prontoSemRedeB'));
         return;
     }
@@ -26130,7 +26254,7 @@ function atualizarLinhaDoOffline(feitos, total) {
         return;
     }
     el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
-        t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+        t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
         + escapeHtml(t('prefs.offline.prontoB'));
 }
 

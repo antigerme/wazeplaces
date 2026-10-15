@@ -180,7 +180,7 @@ test('o esvaziamento RELÊ antes de gravar — senão perde o que chegou no meio
   assert.ok(iPouso > 0, 'não achei o pouso');
   const iRele = f.indexOf('f = carregarFilaDeSaida()', iPouso);
   const iShift = f.indexOf('f.splice(saiu, 1)', iPouso);
-  const iSalva = f.indexOf('salvarFilaDeSaida(f)', iPouso);
+  const iSalva = f.indexOf('salvarFilaSemOs(f', iPouso);
   assert.ok(iRele > 0, 'o esvaziamento parou de reler a fila antes de gravar');
   assert.ok(iShift > 0 && iSalva > 0, 'não achei o tirar/gravar depois do pouso');
   assert.ok(iRele < iShift && iShift < iSalva,
@@ -512,7 +512,7 @@ function montarResultado() {
   const deps = {
     AppState,
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null), set: (k, v) => guardado.set(k, String(v)), remove: (k) => guardado.delete(k) },
-    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000,
+    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 1000, saidaTiradosSemGravar: new Map(),
     // O pedido recusado volta a ser card (F3).
     pedidosQueEntraramNaFila: new Set(), updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     showCurrentPlace: () => chamadas.push('card'), startFetching: () => chamadas.push('busca'),
@@ -527,7 +527,7 @@ function montarResultado() {
     historyTodayKey: () => '2026-09-25', ondeAgora: () => '30', contaAgora: () => null,
     marcaDaSessao: () => 'marca', marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
-  const fontes = 'const descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();\n' + ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
+  const fontes = 'const descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();\n' + ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'devolverPedidoRecusado', 'handleActionResult'].map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { handleActionResult, carregarFilaDeSaida };')(...nomes.map((n) => deps[n]));
@@ -623,7 +623,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
-  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo',
     'devolverPedidoRecusado', 'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'pousouPorOutraAba', 'esvaziarFilaDeSaida',
     'handleActionResult', 'handleUnauthorized'];
@@ -631,7 +631,7 @@ function ciclo401({ sonda, escrita, relogio = { t: 1000 } }) {
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
     // O _post: a resposta leva uma volta de rede (outra tarefa, com o relógio
     // andando), e toda resposta que CHEGA chama a prova de rede ANTES de voltar.
     const aoProvarRede = () => { if (!esvaziandoSaida) esvaziarFilaDeSaida(); };
@@ -753,7 +753,7 @@ function aparelhoO5(guardado = new Map()) {
       atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
       soltarEsperasDoAquecimento: () => false,   // as escritas da foto que esperam o toque (R13-3-01): aqui, nenhuma
     };
-    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido',
       'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
       'saidaEmRecuo', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'pousouPorOutraAba',
       'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction', 'atenderOFimDaJanela',
@@ -762,7 +762,7 @@ function aparelhoO5(guardado = new Map()) {
     const app = new Function(...chaves, `
       let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false, verificandoSessao = false;
       let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-      const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+      const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
       // O _post: toda resposta que CHEGA chama a prova de rede, ANTES de voltar.
       const aoProvarRede = () => { if (!esvaziandoSaida) esvaziarFilaDeSaida(); };
       const rede = async (quem, v) => {
@@ -919,14 +919,14 @@ test('O2: com a `lista` de quem chama, o enfileirar não grava nem escreve no di
   const deps = {
     safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null),
       set: (k, v) => { gravacoes++; guardado.set(k, String(v)); }, remove: (k) => guardado.delete(k) },
-    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 3,
+    SAIDA_KEY: 'waze_places_saida', SAIDA_MAX: 3, saidaTiradosSemGravar: new Map(),
     API: { getRegion: () => 'row', getSession: () => 'tok', get sessionToken() { return 'tok'; } },
     dfato: (k) => diario.push(k), updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-29', ondeAgora: () => '30', contaAgora: () => null, marcaDaSessao: () => 'marca',
     marcaDestaAba: () => 'marca',   // a sessão do gesto, a da memória (R13-1-04)
   };
   const nomes = Object.keys(deps);
-  const app = new Function(...nomes, ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida'].map(fatiar).join('\n')
+  const app = new Function(...nomes, ['chaveDoPedido', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida'].map(fatiar).join('\n')
     + '\nreturn { enfileirarSaida, carregarFilaDeSaida, salvarFilaDeSaida };')(...nomes.map((n) => deps[n]));
   const p = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i });
   const lista = app.carregarFilaDeSaida();
@@ -987,14 +987,14 @@ function drenarO8(itens, resposta) {
     ABA_DESTA_PAGINA: 'aba-teste', SAIDA_REIVINDICACAO_MS: 60000,   // R5-1 F1: uma aba só
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
   };
-  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'registrarPouso', 'devolverPedidoRecusado',
     'registrarPousoDeSaida', 'reivindicadoPorOutraAba', 'esvaziarFilaDeSaida'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0, verificandoSessao = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    const pedidosEmAndamento = new Set(), pousosDaPagina = new Map();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();
     ${nomes.map(fatiarComAsync).join('\n')}
     return { esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, medidas, entraram };
@@ -1096,7 +1096,7 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
       // é ali que outra aba "grava por cima" no mesmo instante.
       setTimeout: (fn, ms) => { if (ms === 10 && aparelho.aoAssentar) aparelho.aoAssentar(nome); return setTimeout(fn, ms); },
     };
-    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+    const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
       'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'travaDaSaida', 'esperarOutraAbaEsvaziar',
       'reivindicadoPorOutraAba', 'reivindicarNaSaida', 'soltarReivindicacoes', 'esvaziarFilaDeSaida'];
     const chaves = Object.keys(deps);
@@ -1104,7 +1104,7 @@ function aparelhoO6({ itens, comTravas = true, rede }) {
       let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, ultimaEscritaOkEm = 0,
         verificandoSessao = false, saidaEsperandoOutraAba = false;
       let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-      const pedidosEmAndamento = new Set();
+      const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set();
       ${nomes.map(fatiarComAsync).join('\n')}
       return { esvaziarFilaDeSaida, carregarFilaDeSaida };`)(...chaves.map((k) => deps[k]));
     return { app, diario };
@@ -1275,13 +1275,13 @@ function aparelhoDoGesto({ resposta }) {
     console: { error: () => {} },
   };
   // O país da fila com "Minha área" sai dos editáveis por servidor (R7-6-05).
-  const nomes = ['carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarEmAndamento', 'enfileirarSaida',
+  const nomes = ['carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarEmAndamento', 'enfileirarSaida',
     'handleActionResult', 'scheduleAction', 'atenderOFimDaJanela', 'anotarAntesDoEnvio', 'handleReject', 'ondeAgora',
     'carimboDoGesto', 'anotarEditaveis', 'editaveisLidos', 'paisDaMinhaArea', 'paisDaFila'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `
     let tratouNestaFila = false;
-    const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
     let editaveisPorServidor = { conta: null, lidos: {} };
     ${nomes.map(fatiarComAsync).join('\n')}
     return { handleReject, carregarFilaDeSaida, ondeAgora, anotarEditaveis, paisDaFila };`)(...chaves.map((k) => deps[k]));

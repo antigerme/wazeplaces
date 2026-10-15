@@ -211,7 +211,9 @@ const Presenca = {
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
     // `anuncio`: a frase de falha a caminho da região viva da conversa (ver
     // `presencaAnunciarFalhaOutraVez`).
-    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null },
+    // `anuncioMsg`: a mensagem igual à que a região já diz, a caminho (ver
+    // `presencaAnunciar`).
+    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null, anuncioMsg: null },
 };
 
 // ── linha do tempo pro diagnóstico ──────────────────────────────────────────
@@ -1705,7 +1707,23 @@ function presencaAnunciar(msg) {
     // —, não o texto que vai pro WME: ele leva o link LONGO do ↗, e o leitor
     // de tela o soletrava inteiro (auditoria de 2026-09-26).
     const texto = msg.card ? [msg.legenda, presencaLinhaDoPedido(msg.card)].filter(Boolean).join('\n') : msg.texto;
-    el.textContent = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
+    const frase = t('presenca.conversa.anuncio', { nome, texto: String(texto || '').slice(0, 280) });
+    clearTimeout(Presenca.timers.anuncioMsg);
+    Presenca.timers.anuncioMsg = null;
+    // Duas mensagens IGUAIS seguidas ("ok", "ok"): região viva reescrita com o
+    // mesmo texto pode não ser lida de novo. É o caso da falha (R11-5-03,
+    // `presencaAnunciarFalhaOutraVez`) e a técnica é a mesma: limpa agora e diz
+    // de novo `PRESENCA_ANUNCIO_DE_NOVO_MS` depois, só com a região ainda limpa
+    // (outro anúncio no meio vale) e a conversa ainda a da tela. Texto diferente
+    // do que está lá escreve na hora, como sempre.
+    if (el.textContent !== frase) { el.textContent = frase; return; }
+    const com = Presenca.aberta;
+    el.textContent = '';
+    Presenca.timers.anuncioMsg = setTimeout(() => {
+        Presenca.timers.anuncioMsg = null;
+        const agora = document.getElementById('conversaAnuncio');
+        if (agora && !agora.textContent) presencaDizerNaConversa(com, frase);
+    }, PRESENCA_ANUNCIO_DE_NOVO_MS);
 }
 
 // O que DEU ERRADO na conversa — o envio que não saiu, o histórico que não
@@ -2777,6 +2795,8 @@ function presencaEsquecerAberta() {
     // zero, e a captura do diagnóstico (que leva o DOM inteiro) mostra o que
     // estava NA TELA, não a última conversa aberta escondida num modal.
     presencaDesenhar(document.getElementById('conversaMsgs'), '');
+    clearTimeout(Presenca.timers.anuncioMsg);
+    Presenca.timers.anuncioMsg = null;
     const anuncio = document.getElementById('conversaAnuncio');
     if (anuncio) anuncio.textContent = '';
     // O TOPO também: o nome de quem conversou e onde a pessoa está (nível e
@@ -3173,7 +3193,10 @@ function presencaNomeDoPais(id) {
 // disso a data. Sempre no locale de quem lê.
 function presencaHoraCurta(ts) {
     if (!Number.isFinite(ts)) return '';
-    const d = new Date(ts), hoje = new Date();
+    // A hora é a do Waze: comparada com o relógio DAQUI, vai pro relógio daqui
+    // (`desvio` = servidor − aparelho). Aparelho adiantado dizia "ontem" pra
+    // mensagem de agora (auditoria da rodada 23, R23-5-03).
+    const d = new Date(ts - Presenca.desvio), hoje = new Date();
     const dias = Math.round((new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate())
         - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86_400_000);
     if (dias <= 0) return d.toLocaleTimeString(i18nLocale(), { hour: '2-digit', minute: '2-digit' });
@@ -3331,7 +3354,8 @@ function presencaEstadoDaMinha(m, lidaAte, ultimaDela) {
 }
 
 function presencaRotuloDoDia(ts) {
-    const d = new Date(ts), hoje = new Date();
+    // Mesma conta da hora curta: `ts` é do Waze, `hoje` é daqui (R23-5-03).
+    const d = new Date(ts - Presenca.desvio), hoje = new Date();
     const dias = Math.round((new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate())
         - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86_400_000);
     if (dias <= 0) return t('presenca.dia.hoje');

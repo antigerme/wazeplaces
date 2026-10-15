@@ -465,7 +465,7 @@ function montarPassada({ saida, fila = [] }) {
     },
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'aprovacaoDaTelaNoAr', 'loteDeLidosDaTelaNoAr', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
-    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
     'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',
     'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'carimboDoGesto', 'handleReject'], deps);

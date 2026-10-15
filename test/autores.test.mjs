@@ -23,6 +23,9 @@ const COPIA_INI = 'const textoDaCopia = new WeakMap();';
 const COPIA_FIM = 'function loadHistory() {';
 assert.ok(fonte.includes(COPIA_INI) && fonte.includes(COPIA_FIM), 'a conferência da cópia em memória sumiu do app.js');
 const trechoDaCopia = fonte.slice(fonte.indexOf(COPIA_INI), fonte.indexOf(COPIA_FIM));
+// O contador do histórico (R23-1-02): a reincidência soma por ele, nunca cru.
+const CONTAGEM = /^function contagemDoHistorico\(x\) \{.*\}$/m.exec(fonte);
+assert.ok(CONTAGEM, 'a `contagemDoHistorico` sumiu do app.js');
 
 function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
   const guardado = new Map();
@@ -43,7 +46,7 @@ function montar(agoraMs = Date.UTC(2026, 7, 24, 12)) {
     },
   };
   const nomes = Object.keys(escopo);
-  const corpo = trechoDaCopia + trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
+  const corpo = CONTAGEM[0] + '\n' + trechoDaCopia + trecho + '\nreturn { registrarRejeicaoDeAutor, contagemDoAutor, listaDeAutores,'
     + ' esquecerAutor, esquecerAutores, loadAutores, podarAutores, AUTORES_KEY, AUTORES_VISIVEIS,'
     + ' AUTORES_MAX_REINCIDENTES, AUTORES_MAX_VISTOS, AUTORES_MAX_DIAS, AUTOR_LIMIAR_DESTAQUE };';
   const api = new Function(...nomes, corpo)(...nomes.map((n) => escopo[n]));
