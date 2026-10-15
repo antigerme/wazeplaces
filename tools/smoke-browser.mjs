@@ -17033,8 +17033,14 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
     });
     await ctx.addInitScript((bloquear) => {
-      if (bloquear) Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
-      else { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* bloqueado */ } }
+      if (bloquear) {
+        // "Bloquear todos os cookies" fecha TUDO que guarda no aparelho, não só o localStorage: a troca completa de conta
+        // também apaga a base do offline e o diagnóstico (IndexedDB) e o cache dos tiles (Cache API), e nenhum deles pode
+        // derrubar a troca no meio.
+        for (const nome of ['localStorage', 'indexedDB', 'caches']) {
+          Object.defineProperty(window, nome, { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
+        }
+      } else { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* bloqueado */ } }
     }, ilegivel);
     const erros = [];
     const page = await ctx.newPage();
@@ -17054,7 +17060,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     quem = 88;
     page.evaluate((c) => authenticateWithCookies(c), COOKIES(88)).catch(() => {});
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 88, 'o login da 88');
-    const r = await page.evaluate(() => ({ stats: { ...AppState.stats }, pularGuarda: AppState.preferences.pularGuarda === true, undoEnabled: AppState.preferences.undoEnabled !== false }));
+    const r = await page.evaluate(() => ({ stats: { ...AppState.stats }, pularGuarda: AppState.preferences.pularGuarda === true, undoEnabled: AppState.preferences.undoEnabled !== false,
+      contaDaAba: contaConfirmadaNestaAba && contaConfirmadaNestaAba.id }));
     await ctx.close();
     return { ...r, erros };
   };
@@ -17064,6 +17071,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     'troca-ilegivel/CONTROLE: com o aparelho que LÊ, a conta que entra começa com o placar zerado, o ↑ sem guardar e o Desfazer ligado', JSON.stringify(legivel));
   checa(ilegivel.stats.read === 0 && ilegivel.pularGuarda === false && ilegivel.undoEnabled === true,
     'troca-ilegivel/herança: com o aparelho ILEGÍVEL a conta que entra herdou o placar e as escolhas (↑ que guarda o pedido, Desfazer desligado) da anterior', JSON.stringify(ilegivel));
+  // A troca COMPLETA tocou o IndexedDB e a Cache API bloqueados e seguiu até o fim: a aba confirmou a conta nova.
+  checa(legivel.contaDaAba === '88' && ilegivel.contaDaAba === '88', 'troca-ilegivel: a troca não chegou ao fim (a aba não confirmou a conta 88) — algo do aparelho bloqueado a interrompeu', JSON.stringify({ legivel: legivel.contaDaAba, ilegivel: ilegivel.contaDaAba }));
   checa(legivel.erros.length === 0 && ilegivel.erros.length === 0, 'troca-ilegivel: erro de JS', legivel.erros[0] || ilegivel.erros[0]);
 }
 
