@@ -8293,8 +8293,13 @@ function dfatoPendentes() {
 // INTEIRA: as 7 já entregues voltavam como se fossem do que veio depois. Aqui as pendentes que foram no arquivo viram
 // linhas do anel (as mesmas que a troca de causa escreveria, com a hora da última suprimida, que é anterior ao retrato) e
 // o limitador recomeça a contar `juntas` do zero — a série segue (`n` e `em` ficam), só as repetições entregues saem da
-// conta. O diário completo não muda (anel + pendentes = o mesmo total antes e depois), então um relatório que não chega
-// a ser baixado não perde nada. Devolve as linhas pra quem monta o arquivo (o anel foi copiado antes, por quem chama).
+// conta. O TOTAL de cada chave pendente não muda (a soma de `1 + juntas` das linhas dela, antes no limitador e depois no
+// anel), então um relatório que não chega a ser baixado não perde a conta da falha que o conserto protege. O que NÃO é
+// verdade é "anel + pendentes = o mesmo total": com o anel cheio (DFATO_TETO) as linhas entregues ocupam vagas do anel e
+// empurram para fora as linhas MAIS ANTIGAS de OUTRAS chaves — uma por chave pendente a cada relatório (MEDIDO: 120 + 2
+// pendentes → o anel segue em 120 e 2 linhas antigas de outras chaves saem; o 2º relatório e a cópia guardada têm 2 linhas
+// a menos que o 1º). É o limite do anel mordendo o que já estava velho, não perda das pendentes. Devolve as linhas pra
+// quem monta o arquivo (o anel foi copiado antes, por quem chama).
 function dfatoEntregarPendentes() {
     const linhas = dfatoPendentes();
     try {
