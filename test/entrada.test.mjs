@@ -550,7 +550,7 @@ function montarExtensao(inicio = {}) {
     API: { setSession() {}, temSessaoNaMemoria: () => false, sessionToken: null }, authInFlight: false, resgateEmVoo: false,
     AppState: {}, EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, epocaDaSessao: 0,
     extPerguntando: false, extRenovando: false, extNegadoNestaPagina: false, extNegado: null, saiuNestaPagina: false,
-    closeModal() {}, showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {},
+    closeModal() {}, showMainScreen() {}, resetQueue() {}, soltarAsEscritasDeFotoDaSessaoQueAcabou() {}, loadProfileAndAuxData() {}, startFetching() {},
     esvaziarFilaDeSaida() {}, mostrarEntrandoPelaExtensao() {}, setTimeout: () => 1, clearTimeout() {},
     conhecerContaDoLogin() {},   // a conta que a ponte repassa (test/costura-sessao, K8)
     showAccessDenied: (r) => negados.push(r),
@@ -1061,9 +1061,9 @@ test('no tema escuro nenhum botão de diálogo tem o fundo do próprio diálogo 
 
 // ── A17: o código COLADO ────────────────────────────────────────────────────
 test('código colado com espaço, quebra de linha ou rótulo entra inteiro, no formato que a tela mostra', () => {
-  const { colar, formatar } = montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'colarCodigoPareamento'],
+  const { colar, formatar } = montar(['formatarCodigoPareamento', 'extrairCodigoPareamento', 'extrairSegredoDoLinkDePareamento', 'colarCodigoPareamento'],
     { window: {} }, ['colar: colarCodigoPareamento', 'formatar: formatarCodigoPareamento'],
-    [constante('PAIR_CODE_LEN'), constante('PAIR_CODE_GRUPO'), constante('PAIR_ALFABETO')].join('\n'));
+    [constante('PAIR_CODE_LEN'), constante('PAIR_CODE_GRUPO'), constante('PAIR_ALFABETO'), constante('PAIR_SEGREDO_LEN')].join('\n'));
   // O que o campo mostra depois de colar `texto` num campo com `antes`: o nosso
   // colar, e, se ele deixar passar, o do navegador seguido do `input` (que formata).
   const colado = (texto, antes = '') => {
@@ -1892,7 +1892,7 @@ function montarLogin(resposta, { peloTeclado = false } = {}) {
     API: { testCookies: async () => { log.push('validou'); if (resposta === 'lanca') throw new Error('rede'); return resposta; } },
     showToast: (msg, tipo) => { const i = toasts.push(msg) - 1; return { dispensar: () => dispensados.push(toasts[i]) }; },
     t: (k) => k, msgDoServidor: (r, d) => d, setAuthLoading: (v) => log.push('carregando:' + v),
-    guardarPrazoDaSessao() {}, aoEntrarNestaPagina() {}, showMainScreen() {}, resetQueue() {}, conhecerContaDoLogin() {},
+    guardarPrazoDaSessao() {}, aoEntrarNestaPagina() {}, showMainScreen() {}, resetQueue() {}, soltarAsEscritasDeFotoDaSessaoQueAcabou() {}, conhecerContaDoLogin() {},
     loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {},
     showAccessDenied: () => toasts.push('[Acesso restrito]'), AppState: {},
     authInFlight: false, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
@@ -1964,7 +1964,7 @@ test('R7-1-04: o "Confirmar" do colar e o "Entrar" do código dizem se vieram do
   const resgate = async (peloTeclado) => {
     const deps = { API: { resgatarPareamento: async () => ({ success: true, sessionToken: 'tok' }) },
       document: { getElementById: () => null }, resgateEmVoo: false, resgateNoAr: null, focoDoTeclado: null, BOTAO_DA_ACAO: { left: '.card-btn-reject' },
-      closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {},
+      closeModal() {}, aoEntrarNestaPagina() {}, showToast() {}, t: (k) => k, showMainScreen() {}, resetQueue() {}, soltarAsEscritasDeFotoDaSessaoQueAcabou() {},
       conhecerContaDoLogin() {}, loadProfileAndAuxData: () => null, startFetching() {}, esvaziarFilaDeSaida() {}, AppState: {},
       // O foco NA tela de entrada e os diálogos dela (R11-1-04): ninguém lá aqui.
       focoNaTelaDeEntrada: () => false, fecharModaisDaEntrada() {} };

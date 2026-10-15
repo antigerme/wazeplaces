@@ -43,6 +43,10 @@ const constante = (nome) => {
   return new Function(`return ${m[1]};`)();
 };
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade: o buraco negro devolveria um objeto que NUNCA
+// executa a operação — a gravação da fila "voltava" sem gravar nada. Os tetos, os do app.
+const ESPERAR_COM_TETO = new Function(fatiarDe(APP_SEM, 'esperarComTeto') + '\nreturn esperarComTeto;')();
+
 // Um "buraco negro": aceita qualquer propriedade e qualquer chamada, e anota as
 // chamadas pelo caminho (`safeLS.get`, `document.getElementById`…).
 function buracoNegro(nome, chamou) {
@@ -74,7 +78,8 @@ function montar(nomes, deps, fonte = APP_SEM) {
   // função de verdade, quando fatiada, vale por cima deste padrão.
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0,
     aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
-    authInFlight: false, resgateEmVoo: false, textoDigitadoNaEntrada: () => false })) if (!(k in deps)) deps[k] = v;
+    authInFlight: false, resgateEmVoo: false, textoDigitadoNaEntrada: () => false,
+    esperarComTeto: ESPERAR_COM_TETO, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000 })) if (!(k in deps)) deps[k] = v;
   // A trava também lê a APROVAÇÃO no ar do pedido da tela (`aprovacaoDaTelaNoAr`):
   // quem fatia a trava leva a função junto, e o conjunto é de verdade (o buraco
   // negro devolveria uma função — verdadeira — e travaria tudo).

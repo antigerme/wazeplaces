@@ -677,6 +677,8 @@ function abaOffline({ aparelho, base, fila }) {
     OFFLINE_STORE: constante('OFFLINE_STORE'), offlineDB: base.offlineDB, dfato: () => {},
     updatePendingCount: () => {}, aoMudarAFilaPorBaixo: () => {},
     lugarAgora: () => ({ regiao: 'row', pais: '30', busca: 'b' }),
+    // A espera da gravação com TETO (R21-4-01): a função de verdade, e o teto do app.
+    esperarComTeto: new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')(), OFFLINE_ITEM_TETO_MS: constante('OFFLINE_ITEM_TETO_MS'),
   };
   const chaves = Object.keys(deps);
   const fonte = [

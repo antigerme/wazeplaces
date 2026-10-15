@@ -615,11 +615,11 @@ test('R12-4-04: a marca do gesto é a ESPERA do FAB — vale enquanto o gesto du
                      elementFromPoint: () => sobOFab };
   let gesto = true;
   const h = new Function('document', 'cardSobGesto', 'cardDaFrente', 'devFabVitimas', 'devFabCoords', 'DEV_FAB_CANTOS',
-    'redesenharCardAdiado',
+    'redesenharCardAdiado', 'devFabReservaDeBaixo',
     `let devFabFixado = false, fabEsperaOGesto = false, devFabDedo = null;
     ${['posicionarFabDev', 'aoFimDoGesto', 'diagNumeroACobrir'].map(pega).join('\n')}
     return { posicionarFabDev, aoFimDoGesto, diagNumeroACobrir, espera: () => fabEsperaOGesto };`)(
-    document, () => gesto, () => ({}), () => 1, () => ({ x: 1220, y: 77 }), ['cima-dir', 'cima-esq'], () => {});
+    document, () => gesto, () => ({}), () => 1, () => ({ x: 1220, y: 77 }), ['cima-dir', 'cima-esq'], () => {}, () => 96);
   const r = { left: 1241, top: 80, width: 23, height: 17 };
   const geometria = (marca) => ({ ...sao(), geometria: [indicador({ noCentro: '#devFabBtn', ...marca })] });
   // O número nasce no meio do arraste: o app reavalia o canto e ADIA.

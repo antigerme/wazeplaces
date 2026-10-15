@@ -429,16 +429,19 @@ test('R20-5-04 nenhum caminho da presença recria `waze_places_chat` com o apare
   assert.equal(c.armazenado.has('waze_places_chat'), true, 'CONTROLE: o instrumento não vê o escritor gravar');
 });
 
-test('R20-5-04 a régua do aparelho é a MESMA do `aoSairEmOutraAba` do app.js (token E conta)', () => {
+test('R20-5-04 a régua do aparelho é a MESMA do `aoSairEmOutraAba` do app.js (token E conta, e o aparelho LÊ)', () => {
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const pres = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
   const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const a = app.indexOf('function aoSairEmOutraAba()');
   assert.ok(a > 0);
-  assert.match(semComentario(app.slice(a, a + 400)), /if \(safeLS\.get\('waze_session_token'\) \|\| safeLS\.get\(CONTA_KEY\)\) return false;/);
+  // Lote 25 (R21-1-02): a régua ganhou a pergunta "o aparelho lê?" — a mesma função nos dois lados.
+  assert.match(semComentario(app.slice(a, a + 400)),
+    /^function aoSairEmOutraAba\(\) \{\s*if \(safeLS\.get\('waze_session_token'\) \|\| safeLS\.get\(CONTA_KEY\)\) return false;\s*if \(!armazenamentoLegivel\(\)\) return false;/);
   const p = pres.indexOf('function presencaAparelhoSaiu()');
   assert.ok(p > 0);
-  assert.match(semComentario(pres.slice(p, p + 200)), /return !safeLS\.get\('waze_session_token'\) && !safeLS\.get\(CONTA_KEY\);/);
+  assert.match(semComentario(pres.slice(p, p + 400)),
+    /^function presencaAparelhoSaiu\(\) \{\s*return !safeLS\.get\('waze_session_token'\) && !safeLS\.get\(CONTA_KEY\) && armazenamentoLegivel\(\);\s*\}/);
   // E a guarda está na ENTRADA da volta, antes de qualquer pedido.
   const v = pres.indexOf('function presencaAoVoltar()');
   assert.match(semComentario(pres.slice(v, v + 1200)), /^function presencaAoVoltar\(\) \{\s*if \(presencaAparelhoSaiu\(\)\) return;/);
@@ -490,7 +493,7 @@ function abrirPedido(deQuem) {
 
 test('R20-5-05/06 "de {nome}" no cabeçalho do pedido: o nome RTL vai isolado dentro da frase do app; o LTR sai idêntico', () => {
   const rtl = abrirPedido('דני_כהן');
-  assert.equal(rtl, 'presenca.pedido.de{"nome":"⁨דני_כהן⁩"}', 'o nome do Waze não foi isolado na frase do app');
+  assert.equal(rtl, 'presenca.pedido.de{"nome":"\u2068דני_כהן\u2069"}', 'o nome do Waze não foi isolado na frase do app');
   assert.equal(abrirPedido('cafanha'), 'presenca.pedido.de{"nome":"cafanha"}', 'LTR: a frase tem que sair idêntica byte a byte');
   assert.equal(abrirPedido(''), 'presenca.pedido.de{"nome":"presenca.anon"}', 'sem nome, a palavra do app (CONTROLE de que o teste lê o texto)');
 });
@@ -510,7 +513,7 @@ function previaDaLista(ultima) {
 
 test('R20-5-06 a prévia do pedido com nome RTL: o nome é isolado e o parágrafo fica na direção do app (sem `dir="auto"`)', () => {
   const r = previaDaLista({ deMim: false, ts: T, recibo: false, texto: '', card: { name: 'מסעדה הרצל (סניף 2)', updateTypeKey: 'IMAGE' } });
-  assert.match(r.texto, /^📍 ⁨מסעדה הרצל \(סניף 2\)⁩ · /, 'o nome RTL não foi isolado: a primeira letra forte decidia o parágrafo');
+  assert.match(r.texto, /^📍 \u2068מסעדה הרצל \(סניף 2\)\u2069 · /, 'o nome RTL não foi isolado: a primeira letra forte decidia o parágrafo');
   assert.doesNotMatch(r.attrs, /dir=/, 'o `dir="auto"` voltaria a seguir o nome e inverter a frase do app');
 });
 
@@ -535,7 +538,7 @@ test('R20-5-06 a prévia do pedido com nome LTR sai idêntica byte a byte (e sem
   const crua = c.P.presencaPrevia(ultima);
   const r = previaDaLista(ultima);
   assert.equal(r.texto, crua.replace(/'/g, "'"), 'LTR: a frase mudou');
-  assert.doesNotMatch(r.texto, /[⁦-⁩]/, 'LTR não pode levar marca de isolamento');
+  assert.doesNotMatch(r.texto, /[\u2066-\u2069]/, 'LTR não pode levar marca de isolamento');
   assert.equal(c.P.presencaPrevia(ultima, { isolar: true }), crua, 'LTR: a versão isolada tem que ser a crua');
 });
 
@@ -554,5 +557,5 @@ test('R20-5-06 o texto acessível (aria-label) segue sem marca de isolamento', (
   c.$('presencaModal').classList.remove('hidden');
   c.P.presencaRenderLista();
   const aria = c.$('presencaLista').innerHTML.match(/aria-label="([^"]*)"/)[1];
-  assert.doesNotMatch(aria, /[⁦-⁩]/, 'o leitor de tela leria a marca');
+  assert.doesNotMatch(aria, /[\u2066-\u2069]/, 'o leitor de tela leria a marca');
 });

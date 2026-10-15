@@ -214,9 +214,12 @@ test('gerarResumoDoMes devolve null pra mês vazio; o desenho não traduz nada',
   const desenho = fatiarFuncao('desenharResumo');
   assert.doesNotMatch(desenho, /\bt\(/, 'desenharResumo chama t() — o texto tem que chegar pronto, no idioma da pessoa');
   assert.doesNotMatch(desenho, /toLocale/, 'desenharResumo formata número/data — isso é de quem monta os textos');
-  // Compartilhar só onde o aparelho compartilha ARQUIVO; senão o botão some.
+  // Compartilhar só onde o aparelho compartilha ARQUIVO; senão o botão some. A pergunta é UMA função, que o
+  // rótulo do botão do Histórico também faz (R21-7, test/historico-r21.test.mjs): a conferência do
+  // `canShare({ files })` mora nela.
   const abrir = fatiarFuncao('abrirResumoDoMes');
-  assert.match(abrir, /navigator\.canShare\s*&&\s*navigator\.canShare\(\{\s*files:/, 'o Compartilhar deixou de conferir canShare({files})');
+  assert.match(fatiarFuncao('aparelhoCompartilhaArquivo'), /navigator\.canShare\s*&&\s*navigator\.canShare\(\{\s*files:/, 'o Compartilhar deixou de conferir canShare({files})');
+  assert.match(abrir, /const podeCompartilhar = aparelhoCompartilhaArquivo\(\);/, 'a folha do Resumo não faz a pergunta única do compartilhamento');
   assert.match(abrir, /resumoCompartilhar'\)\.classList\.toggle\('hidden', !podeCompartilhar\)/,
     'o botão de compartilhar não some onde o aparelho não compartilha arquivo');
 });
@@ -270,7 +273,17 @@ test('a <img> recebe object URL, e as TRÊS cópias da CSP liberam blob: em img-
 const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn { t, setLang };')(
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
-const textosDoResumo = new Function('t', fatiarFuncao('textosDoResumo') + '\nreturn textosDoResumo;')(I18N.t);
+// `textosDoResumo` isola o nome da pessoa e o corta em pedaços quando ele se lê da direita pra esquerda
+// (R21-7-02): leva junto as constantes e as funções que ele usa (os testes do nome estão em
+// test/historico-r21.test.mjs).
+const constanteDoApp = (nome) => {
+  const m = new RegExp('^const ' + nome + ' = [^\\n]*;\\n', 'm').exec(APP);
+  assert.ok(m, `a constante ${nome} sumiu do app.js`);
+  return m[0];
+};
+const AJUDANTES_DO_NOME = ['LETRA_DA_DIREITA_PRA_ESQUERDA', 'LETRA_DE_QUALQUER_ALFABETO', 'LETRA_DA_ESQUERDA_PRA_DIREITA', 'MARCA_DO_NOME_NA_FRASE']
+  .map(constanteDoApp).join('') + ['isolarTextoDoWaze', 'direcaoDoTextoDoWaze', 'partesDoNomeNaFrase'].map(fatiarFuncao).join('\n') + '\n';
+const textosDoResumo = new Function('t', AJUDANTES_DO_NOME + fatiarFuncao('textosDoResumo') + '\nreturn textosDoResumo;')(I18N.t);
 const LOCALE = { pt: 'pt-BR', en: 'en', es: 'es', fr: 'fr' };
 function textos(lang, d, perfil) {
   I18N.setLang(lang);
@@ -341,7 +354,7 @@ test('R8-7-04: o Resumo do mês só abre pra MESMA sessão e conta, com o Histó
       resumoCompartilhar: { classList: { toggle() {} } } };
     const estado = { conta: '111', naTela: true };
     // (o `fatiarFuncao` corta a partir de `function`: o `async` volta aqui)
-    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null; let resumoGerando = false;\nasync ' + fatiarFuncao('abrirResumoDoMes')
+    const corpo = 'let epocaDaSessao = 0; let resumoAtual = null; let resumoGerando = false;\n' + fatiarFuncao('aparelhoCompartilhaArquivo') + '\nasync ' + fatiarFuncao('abrirResumoDoMes')
       + '\nreturn { abrirResumoDoMes, mudarSessao: () => { epocaDaSessao++; }, resumo: () => resumoAtual };';
     const fns = new Function('gerarResumoDoMes', 'contaAgora', 'historicoNaTela', 'document', 'URL', 'File', 'navigator',
       'openModal', 'showToast', 't', corpo)(

@@ -21,6 +21,11 @@ const MIN = ler('js/min/app.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 // Pula a ASSINATURA antes de casar chaves (parâmetro padrão com `{}`).
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
@@ -64,6 +69,8 @@ function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null, put = nu
   const diario = [];
   const resposta = (r) => ({
     ok: r.status >= 200 && r.status < 300, status: r.status, body: null,
+    // A sonda lê a resposta BOA até o fim (R21-4-08): o corpo de mentira chega inteiro.
+    arrayBuffer: async () => new ArrayBuffer(0),
     headers: { get: (h) => (r.headers && r.headers[h.toLowerCase()]) ?? null },
   });
   const deps = {
@@ -75,6 +82,7 @@ function varredura({ itens, rede, concorrencia = 3, sondaTetoMs = null, put = nu
     OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: CICLO, OFFLINE_CONCORRENCIA: concorrencia, OFFLINE_ANUNCIAR_A_CADA: 50,
     OFFLINE_TENTATIVAS_POR_ITEM: constanteBruta('OFFLINE_TENTATIVAS_POR_ITEM'),
     OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_SONDA_TETO_MS: sondaTetoMs ?? constanteBruta('OFFLINE_SONDA_TETO_MS'),
+    OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto,
     OFFLINE_TILES_CACHE: 'waze-places-tiles',
     OFFLINE_4XX_PASSAGEIRO: new Function('return ' + /^const OFFLINE_4XX_PASSAGEIRO = (new Set\(\[[^\]]*\]\));/m.exec(APP_SEM)[1])(),
     OFFLINE_LIMITE_PAUSA_MS: constanteBruta('OFFLINE_LIMITE_PAUSA_MS'),
@@ -400,9 +408,9 @@ function idbDeMentira(dados = null) {
   return { indexedDB, bases };
 }
 function leitoresSobre(idb) {
-  const deps = { indexedDB: idb.indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'estado', OFFLINE_DB_TETO_MS: 5000 };
+  const deps = { indexedDB: idb.indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'estado', OFFLINE_DB_TETO_MS: 5000, esperarComTeto };
   const chaves = Object.keys(deps);
-  return new Function(...chaves, [fatiar('offlineDB'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'),
+  return new Function(...chaves, [fatiar('offlineDB'), fatiar('offlineLerChave'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'),
     'return { db: offlineDB, fila: offlineLerFila, janela: offlineLerRegistroDaJanela };'].join('\n'))(...chaves.map((k) => deps[k]));
 }
 
@@ -426,11 +434,15 @@ test('R17-4-04: CONTROLE — quem GRAVA abre a base e a cria; e a leitura de uma
   assert.equal((await l2.janela()).janela, 3);
 });
 
-test('R17-4-04: os quatro abridores da base estão classificados — os dois que só leem pedem `soLer`, os dois que gravam não', () => {
+test('R17-4-04: os abridores da base estão classificados — o leitor (`offlineLerChave`) pede `soLer`, os dois que gravam não', () => {
+  // (Desde o R21-4-01 as duas leituras — a fila e o registro da janela — passam por UM leitor, `offlineLerChave`,
+  // que abre a base e espera o `get` sob um teto só: eram quatro abridores, são três.)
   const chamadores = [...APP_SEM.matchAll(/await offlineDB\(([^)]*)\)/g)].length;
-  assert.equal(chamadores, 4, `há ${chamadores} chamadas de offlineDB(): abridor novo precisa ser classificado em leitor (soLer) ou gravador`);
+  assert.equal(chamadores, 3, `há ${chamadores} chamadas de offlineDB(): abridor novo precisa ser classificado em leitor (soLer) ou gravador`);
+  assert.match(fatiar('offlineLerChave'), /await offlineDB\(\{ soLer: true \}\)/, 'o leitor só lê e abre a base CRIANDO-a');
   for (const nome of ['offlineLerFila', 'offlineLerRegistroDaJanela']) {
-    assert.match(fatiar(nome), /await offlineDB\(\{ soLer: true \}\)/, `${nome} só lê e abre a base CRIANDO-a`);
+    assert.doesNotMatch(fatiar(nome), /offlineDB\(/, `${nome} abre a base por conta própria — a leitura é UMA (offlineLerChave)`);
+    assert.match(fatiar(nome), /await offlineLerChave\('(fila|janela)'\)/, `${nome} não lê pelo leitor único`);
   }
   for (const nome of ['offlineGravarFila', 'offlineGravarJanela']) {
     assert.match(fatiar(nome), /await offlineDB\(\)/, `${nome} grava: não pode abrir com soLer`);
@@ -483,6 +495,10 @@ test('R17-4-03: toda leitura local do `diagCorpo` (registros do worker, CacheSto
     ['navigator.storage.persisted', /navigator\.storage\.persisted\(/g],
     ['indexedDB.databases', /\bindexedDB\.databases\(/g],
     ['diagOffline', /\bdiagOffline\(/g],
+    // A releitura das OUTRAS aberturas na base do diagnóstico (R21-4-01): o `getAll` que nunca chamava de volta deixava o
+    // botão em "Juntando tudo…" (a guarda não a via: a função que abre a base mora fora do `diagCorpo`). Passada como
+    // referência ou chamada, tem de estar dentro do `lerLocal`.
+    ['diagAtualizarAnteriores', /\bdiagAtualizarAnteriores\b/g],
   ]) {
     const achados = [...corpo.matchAll(padrao)];
     assert.ok(achados.length, `${rotulo} sumiu do diagCorpo (o guard ficou cego)`);

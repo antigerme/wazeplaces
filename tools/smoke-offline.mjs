@@ -134,12 +134,17 @@ let aviao = false;   // modo avião DE VERDADE é abort + setOffline (gotcha #28
 // `atrasoTile` deixa a varredura LENTA de propósito (seção 7d): sem ele ela
 // termina em menos de um segundo e não há "meio" em que o sinal possa cair.
 // Número (ms pra todo tile) ou função `(url) => ms`, quando a seção precisa
-// que uns cheguem e outros não.
+// que uns cheguem e outros não. A função pode devolver uma PROMESSA em vez de ms:
+// é um PORTÃO que o teste abre quando quer (a seção 9 segura a varredura em voo
+// até esquecer — um prazo fixo mediria a velocidade da máquina).
 let atrasoTile = 0;
 const servirTile = async (r) => {
   if (aviao) return r.abort('internetdisconnected');
   const espera = typeof atrasoTile === 'function' ? atrasoTile(r.request().url()) : atrasoTile;
-  if (espera) { await dormir(espera); if (aviao) return r.abort('internetdisconnected'); }
+  if (espera) {
+    if (typeof espera.then === 'function') await espera; else await dormir(espera);
+    if (aviao) return r.abort('internetdisconnected');
+  }
   rotaTile++;
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
@@ -1928,6 +1933,255 @@ for (const modo of ['lanca', 'pendurado']) {
     /gravada NÃO LIDA/.test(r.secao) && /FALHOU/.test(r.secao) && !/gravada null/.test(r.secao) && !/offline\.gravacaoFalhou/.test(r.secao), r.secao.slice(0, 400));
 }
 
+secao('8g. O ARMAZENAMENTO E O CACHE QUE NÃO RESPONDEM NÃO PRENDEM O APP, O RELATÓRIO NEM A VARREDURA (R21: 4-01, 4-02, 4-07, 4-08)');
+// A rodada 21 mediu no navegador (r21-4): o teto de 5 s do armazenamento cobria só o `open` — a leitura, a transação e a
+// Cache API que NUNCA chamavam de volta prendiam a abertura do app (sem primeiro card por 80 s, ou 5,2 s com a base
+// lenta), o relatório ("Juntando tudo…" por mais de 75 s), o interruptor do modo dev (a caixa desmarcava e o modo
+// seguia ligado) e a varredura (`offlineVarrendo` verdadeiro aos 35 s, e pra sempre). Aqui as mesmas chamadas viram
+// promessas que nunca chegam (`addInitScript` antes de o app carregar, ou o patch na página) e o app de verdade
+// decide. Cada cenário tem o CONTROLE: o mesmo roteiro sem o defeito, que prova que a medida enxerga o caminho feliz.
+const PLACES8G = [1, 2, 3].map((i) => ({ venueID: 'v8g' + i, updateRequestID: 'u8g' + i, name: 'L' + i, categories: ['PARK'], address: 'Rua ' + i,
+  updateType: 'Novo local', updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'e' + i, creatorId: 100 + i,
+  imageUrls: [], imageUrl: null, mapa: { centro: [-22.9 + i * 0.01, -43.2], entradas: [] }, dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 }));
+// O app COM sessão salva no aparelho, o "Disponível offline" ligado, e a fila e a janela GRAVADAS na base — a página
+// fria que se abre depois decide sozinha (o `initApp` de verdade), com a API de mentira respondendo.
+const contexto8g = async () => {
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR', acceptDownloads: true });
+  await c.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
+    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }));
+  await c.route('**/api/*', (r) => {
+    const rota = r.request().url().split('/api/')[1];
+    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (rota === 'buscar-places') return json({ success: true, places: PLACES8G, hasMore: false, page: 1, total: 3 });
+    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
+    if (rota === 'lista-estados') return json({ success: true, states: [] });
+    return json({ success: true });
+  });
+  const prep = await c.newPage();
+  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await esperarNaPagina(prep, () => typeof API !== 'undefined' && typeof offlineGravarFila === 'function', 20000, 100);
+  await prep.evaluate(async (ps) => {
+    API.setSession('tok-8g');
+    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-8g') }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false, offlineDisponivel: true }));
+    AppState.authenticated = true; AppState.preferences.offlineDisponivel = true;
+    AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
+    await offlineEsquecer(); await new Promise((r) => setTimeout(r, 200));
+    AppState.queue = ps; AppState.currentPlace = ps[0];
+    await offlineGravarFila();
+    await offlineGravarJanela(Math.floor(Date.now() / OFFLINE_CICLO_MS), null);
+  }, PLACES8G);
+  await fecharComoOUsuario(prep).catch(() => {});
+  return c;
+};
+const PENDURA8G = {
+  // Uma leitura (o `get` do registro da janela) que NUNCA chama de volta.
+  janela: () => { const o = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function (k) { if (k === 'janela') return {}; return o.apply(this, arguments); }; },
+  // O `indexedDB.open` da base do offline que nunca responde.
+  open: () => { const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') return {}; return o.apply(this, arguments); }; },
+};
+const abrir8g = async (c, antes) => {
+  const pg = await c.newPage();
+  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+  if (antes) await pg.addInitScript(antes);
+  const t0 = Date.now();
+  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  const r = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && typeof cardDaFrente === 'function' && !!cardDaFrente(), 25000, 50);
+  const ms = Date.now() - t0;
+  const est = await pg.evaluate(() => ({ card: typeof cardDaFrente === 'function' && !!cardDaFrente(), fila: AppState.queue.length })).catch(() => null);
+  await pg.close();
+  return { ok: !!(r && r.ok), ms, est };
+};
+
+// 4-02 + 4-01: o primeiro card com a base saudável, com a LEITURA da janela pendurada e com o `open` pendurado.
+const aberturas8g = {};
+for (const [nome, antes] of [['controle', null], ['janela pendurada', PENDURA8G.janela], ['open pendurado', PENDURA8G.open]]) {
+  const c = await contexto8g();
+  try { aberturas8g[nome] = await abrir8g(c, antes); } finally { await c.close(); }
+}
+diz('CONTROLE: com a base respondendo o primeiro card sai logo (a medida enxerga o caminho feliz)',
+  aberturas8g.controle.ok && aberturas8g.controle.est?.fila >= 1 && aberturas8g.controle.ms < 6000, JSON.stringify(aberturas8g.controle));
+for (const nome of ['janela pendurada', 'open pendurado']) {
+  const a = aberturas8g[nome];
+  diz(`R21-4-01/02: com a ${nome === 'janela pendurada' ? 'leitura da janela' : 'abertura da base'} PENDURADA o primeiro card sai no limite curto, não no teto de 5 s (antes: 5,2 s, ou nunca)`,
+    a.ok && a.est?.fila >= 1 && a.ms < Math.min(4500, aberturas8g.controle.ms + 2500), `${a.ms} ms (controle ${aberturas8g.controle.ms} ms) ${JSON.stringify(a.est)}`);
+}
+
+// 4-01 + 4-02: a REABERTURA sem rede (o `onLine` falso) com a leitura da fila pendurada — o app não fica no esqueleto pra
+// sempre: o painel de falha sai no teto de UMA leitura (as duas, a da janela e a da fila, correm juntas), e o diário diz
+// por quê. O CONTROLE é a mesma reabertura com a base respondendo: a fila guardada abre o card.
+const reabrirSemRede8g = async (antes) => {
+  const c = await contexto8g();
+  try {
+    const pg = await c.newPage();
+    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
+    await pg.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true }); });
+    if (antes) await pg.addInitScript(antes);
+    const t0 = Date.now();
+    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+    const r = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && typeof cardDaFrente === 'function'
+      && (!!cardDaFrente() || (!!document.getElementById('loadErrorState') && !document.getElementById('loadErrorState').classList.contains('hidden'))), 25000, 50);
+    const ms = Date.now() - t0;
+    const est = await pg.evaluate(() => ({ card: !!cardDaFrente(), fila: AppState.queue.length,
+      falha: !!document.getElementById('loadErrorState') && !document.getElementById('loadErrorState').classList.contains('hidden'),
+      esqueleto: !document.getElementById('loadingCard').classList.contains('hidden'),
+      diario: dfatoAnel.filter((e) => /^offline\./.test(e.k)).map((e) => e.k) })).catch(() => null);
+    await pg.close();
+    return { ok: !!(r && r.ok), ms, est };
+  } finally { await c.close(); }
+};
+PENDURA8G.get = () => { const o = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function () { return {}; }; };
+const sem8g = {};
+for (const [nome, antes] of [['controle', null], ['get pendurado', PENDURA8G.get], ['open pendurado', PENDURA8G.open]]) sem8g[nome] = await reabrirSemRede8g(antes);
+diz('CONTROLE: reaberta sem rede com a base respondendo, a fila guardada abre o card', sem8g.controle.ok && sem8g.controle.est?.card && sem8g.controle.est?.fila >= 1 && sem8g.controle.est?.diario.includes('offline.abriu'), JSON.stringify(sem8g.controle));
+for (const nome of ['get pendurado', 'open pendurado']) {
+  const a = sem8g[nome];
+  diz(`R21-4-01/02: reaberta sem rede com a leitura da base PENDURADA (${nome === 'get pendurado' ? 'o `get`' : 'o `open`'}) o painel de falha sai no teto de UMA leitura e o diário diz por quê (antes: ${nome === 'get pendurado' ? 'esqueleto pra sempre' : '10,2 s, o dobro'})`,
+    a.ok && a.est?.falha && !a.est?.card && !a.est?.esqueleto && a.est?.diario.includes('offline.leituraFalhou') && a.ms < 8500, JSON.stringify(a));
+}
+
+// 4-01: o relatório e o interruptor do modo dev com o `getAll` da base do diagnóstico PENDURADO.
+const relatorio8g = async (pendurar) => {
+  const { c, pg } = await pagina8f();
+  const dir = mkdtempSync(join(tmpdir(), 'diag-8g-'));
+  try {
+    await montar8f(pg);
+    await pg.evaluate(async () => {
+      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
+      await diagGuardarAbertura('smoke');   // a base do diagnóstico existe: o `getAll` tem o que ler
+    });
+    if (pendurar) await pg.evaluate(() => { IDBObjectStore.prototype.getAll = function () { return {}; }; });
+    const t0 = Date.now();
+    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
+    const arq = join(dir, 'r.zip');
+    await dl.saveAs(arq);
+    const s = Math.round((Date.now() - t0) / 100) / 10;
+    const { dados } = lerDiagnostico(arq);
+    const resumo = execFileSync(process.execPath, [join(ROOT, 'tools', 'diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 30000 });
+    // O interruptor: desmarcar o modo dev com a leitura (pendurada, ou não) das outras aberturas no caminho.
+    const sw = await pg.evaluate(async () => {
+      const t = Date.now();
+      const caixa = document.getElementById('prefDevModeActive');
+      caixa.checked = true;   // a tela diz o que o modo dev está (ligado): o toque a DESMARCA
+      caixa.click();
+      for (let i = 0; i < 200 && AppState.devMode.active; i++) await new Promise((r) => setTimeout(r, 100));
+      return { ativo: AppState.devMode.active, ms: Date.now() - t };
+    });
+    return { s, semResposta: (dados.coleta && dados.coleta.semResposta) || [], temResumo: !!dados.resumo, resumo, sw };
+  } finally { rmSync(dir, { recursive: true, force: true }); await c.close(); }
+};
+const rel8gBom = await relatorio8g(false);
+diz('CONTROLE: com a base do diagnóstico respondendo o relatório sai logo, sem leitura sem resposta, e o modo dev desliga na hora',
+  rel8gBom.temResumo && rel8gBom.s <= 8 && !rel8gBom.semResposta.includes('base do diagnóstico') && rel8gBom.sw.ativo === false && rel8gBom.sw.ms < 3000, JSON.stringify({ s: rel8gBom.s, sem: rel8gBom.semResposta, sw: rel8gBom.sw }));
+const rel8gPend = await relatorio8g(true);
+diz('R21-4-01: com o `getAll` da base do diagnóstico PENDURADO o relatório sai dentro do orçamento e diz que a base não respondeu (antes: "Juntando tudo…" por mais de 75 s)',
+  rel8gPend.temResumo && rel8gPend.s <= 14 && rel8gPend.semResposta.includes('base do diagnóstico'), JSON.stringify({ s: rel8gPend.s, sem: rel8gPend.semResposta }));
+diz('R21-4-01: e a triagem põe a base entre as leituras LOCAIS que o navegador não respondeu (não é a rede)',
+  /LOCAL\(IS\) do navegador sem resposta[^\n]*base do diagnóstico/.test(rel8gPend.resumo) && !/rede pendurada na hora do relatório[^\n]*base do diagnóstico/.test(rel8gPend.resumo), rel8gPend.resumo.split('\n').filter((l) => /sem resposta/.test(l)).join(' | '));
+diz('R21-4-01: com a leitura pendurada o interruptor do modo dev DESLIGA em segundos (antes: seguia ligado depois de 20 s)',
+  rel8gPend.sw.ativo === false && rel8gPend.sw.ms < 9000, JSON.stringify(rel8gPend.sw));
+
+// 4-07: a leitura da base do diagnóstico NÃO a recria depois do "Sair" (ou do desligar) de OUTRA aba.
+{
+  const { c, pg } = await pagina8f();
+  try {
+    await montar8f(pg);
+    const r = await pg.evaluate(async () => {
+      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
+      const bases = async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => n === 'waze_places_diag');
+      await diagGuardarAbertura('smoke');
+      const antes = await bases();
+      await new Promise((ok) => { const q = indexedDB.deleteDatabase('waze_places_diag'); q.onsuccess = q.onerror = q.onblocked = ok; });   // a OUTRA aba apaga
+      const apagada = await bases();
+      const leu = await diagAtualizarAnteriores();
+      const depois = await bases();
+      // CONTROLE: quem GRAVA abre sem `soLer` e cria — a medida enxerga a criação.
+      const db = await diagDB(); db.close();
+      const criada = await bases();
+      await diagEsquecerGuardado();
+      return { antes, apagada, leu, depois, criada };
+    });
+    diz('PRÉ-CONDIÇÃO: a base do diagnóstico existia e a "outra aba" a apagou', r.antes.length === 1 && r.apagada.length === 0, JSON.stringify(r));
+    diz('R21-4-07: a releitura do relatório/desligar NÃO recria a base apagada (antes: `waze_places_diag` de volta, sem dado e com o nome)',
+      r.leu === true && r.depois.length === 0, JSON.stringify(r));
+    diz('CONTROLE: o abridor de escrita cria a base — a medida de cima não está cega', r.criada.length === 1, JSON.stringify(r));
+  } finally { await c.close(); }
+}
+
+// 4-08: a rede que entrega o cabeçalho e CORTA o corpo não é "a rede anda" — a preparação não termina "Pronto" com zero tiles.
+const varrerCorpo8g = async (corta) => {
+  const { c, pg } = await pagina8f();
+  try {
+    await montar8f(pg);
+    return await pg.evaluate(async (corta) => {
+      const origFetch = window.fetch; let n = 0;
+      window.fetch = async function (u, o) {
+        if (/-tiles\/live\/base\//.test(String(u))) {
+          n++;
+          if (!corta) return origFetch.apply(this, arguments);
+          const corpo = new ReadableStream({ start(c) { c.enqueue(new Uint8Array([137, 80, 78, 71])); setTimeout(() => c.error(new TypeError('network error')), 5); } });
+          return new Response(corpo, { status: 200, headers: { 'content-type': 'image/png', 'access-control-allow-origin': '*' } });
+        }
+        return origFetch.apply(this, arguments);
+      };
+      try {
+        await offlineVarrer();
+        for (let i = 0; i < 300 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
+      } finally { window.fetch = origFetch; }
+      const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial)$/.test(e.k)).at(-1);
+      let tiles = 0; try { tiles = (await (await caches.open('waze-places-tiles')).keys()).length; } catch (e) { tiles = -1; }
+      return { res: offlineUltimoResultado, k: ev && ev.k, definitivos: (ev && ev.definitivos) || 0, sondas: (ev && ev.sondas) || 0, tiles, fetches: n };
+    }, corta);
+  } finally { await c.close(); }
+};
+const corpoBom8g = await varrerCorpo8g(false);
+const corpoCortado8g = await varrerCorpo8g(true);
+diz('CONTROLE: com a rede entregando o corpo inteiro a preparação fecha "pronto" com os tiles no cache', corpoBom8g.res === 'pronto' && corpoBom8g.tiles > 0, JSON.stringify(corpoBom8g));
+diz('R21-4-08: com o corpo CORTADO a sonda não diz "a rede anda": a preparação fica "parcial", nenhum item vira `definitivo` (antes: "pronto", 5 definitivos, ZERO tiles)',
+  corpoCortado8g.res === 'parcial' && corpoCortado8g.definitivos === 0 && corpoCortado8g.tiles <= 0 && corpoCortado8g.sondas >= 1, JSON.stringify(corpoCortado8g));
+
+// 4-01: a VARREDURA com o cache que não responde (`caches.open`) e com a transação de gravação que nunca completa termina
+// "parcial" no teto do item (30 s) — não fica "varrendo" pra sempre. Os três cenários correm JUNTOS (a espera é o teto).
+const varrerPendurada8g = async (modo) => {
+  const { c, pg } = await pagina8f();
+  try {
+    await montar8f(pg);
+    const t0 = Date.now();
+    const r = await pg.evaluate(async (modo) => {
+      if (modo === 'caches-open') CacheStorage.prototype.open = function () { return new Promise(() => {}); };
+      if (modo === 'tx-fila') {
+        const orig = IDBDatabase.prototype.transaction;
+        window.__abortos = 0;
+        IDBDatabase.prototype.transaction = function (s, m) {
+          if (m === 'readwrite') return { objectStore: () => ({ get: () => ({}), put: () => ({}) }), abort() { window.__abortos++; } };
+          return orig.apply(this, arguments);
+        };
+      }
+      await Promise.race([offlineVarrer(), new Promise((r) => setTimeout(r, 55000))]);
+      for (let i = 0; i < 200 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
+      const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial)$/.test(e.k)).at(-1);
+      const falha = dfatoAnel.filter((e) => e.k === 'offline.gravacaoFalhou').at(-1);
+      return { varrendo: offlineVarrendo, res: offlineUltimoResultado, k: ev && ev.k, cacheMudo: !!(ev && ev.cacheMudo), cache: !!(ev && ev.cache),
+        pausaS: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000), cobre: offlineFilaPreparada !== null,
+        gravacao: falha && falha.e, abortos: window.__abortos || 0 };
+    }, modo);
+    return { ...r, s: Math.round((Date.now() - t0) / 1000) };
+  } finally { await c.close(); }
+};
+const [pend8gBoa, pend8gCache, pend8gTx] = await Promise.all([varrerPendurada8g('boa'), varrerPendurada8g('caches-open'), varrerPendurada8g('tx-fila')]);
+diz('CONTROLE: sem nada pendurado a varredura fecha "pronto" em segundos', pend8gBoa.res === 'pronto' && !pend8gBoa.varrendo && pend8gBoa.s < 15, JSON.stringify(pend8gBoa));
+diz('R21-4-01: com o `caches.open` PENDURADO a varredura termina "parcial" (cacheMudo no diário, pausa CURTA, sem cobertura) — antes: "varrendo" aos 35 s e pra sempre',
+  pend8gCache.res === 'parcial' && !pend8gCache.varrendo && pend8gCache.cacheMudo && !pend8gCache.cache && pend8gCache.pausaS <= 60 && !pend8gCache.cobre && pend8gCache.s < 50, JSON.stringify(pend8gCache));
+diz('R21-4-01: com a transação de gravação da fila que NUNCA completa a varredura termina "parcial" (a gravação falhou por teto e foi ABORTADA), sem cobertura',
+  pend8gTx.res === 'parcial' && !pend8gTx.varrendo && pend8gTx.gravacao === 'TimeoutError' && pend8gTx.abortos >= 1 && !pend8gTx.cobre && pend8gTx.s < 50, JSON.stringify(pend8gTx));
+// O que foi MEDIDO fica no log (é o antes/depois que o relatório do lote cita): o número, não só o ✓.
+console.log(`  · medido (${MOTOR}): primeiro card ${aberturas8g.controle.ms} ms na base boa, ${aberturas8g['janela pendurada'].ms} ms com a janela pendurada, ${aberturas8g['open pendurado'].ms} ms com o open pendurado;`
+  + ` relatório ${rel8gBom.s} s (boa) × ${rel8gPend.s} s (getAll pendurado), modo dev desligou em ${rel8gBom.sw.ms} ms × ${rel8gPend.sw.ms} ms;`
+  + ` varredura com o cache pendurado terminou "${pend8gCache.res}" em ${pend8gCache.s} s, com a transação pendurada "${pend8gTx.res}" em ${pend8gTx.s} s;`
+  + ` corpo cortado: ${corpoCortado8g.res}, ${corpoCortado8g.definitivos} definitivos, ${corpoCortado8g.sondas} sonda(s);`
+  + ` reaberta sem rede: card ${sem8g.controle.ms} ms (boa), painel de falha ${sem8g['get pendurado'].ms} ms (get pendurado) e ${sem8g['open pendurado'].ms} ms (open pendurado)`);
+
 // SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
 // código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
 // for declarado aqui não existe depois dele.
@@ -1935,17 +2189,79 @@ if (!pularForaDoChromium(MOTOR, '9 e 9b — esquecer com a varredura em voo, e o
   'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
+//
+// ESTA SEÇÃO ESPERAVA POR PRAZO (`dormir(60)` depois de iniciar a varredura) e DEPENDIA de sobra de outra seção: o
+// worker só conhece os tiles quando a varredura o AVISA (`offlineAnunciarTiles`: a cada 50 tiles novos e no fim), então
+// com a máquina disputada o "antes" vinha 0 e o "0 → 0" não provava nada — reprovou 1 de 2 rodadas com a máquina
+// carregada, e numa página nova (sem o que as seções anteriores deixam no cache) reprova SEMPRE (MEDIDO, 3 de 3). É a
+// família "teste de browser não espera por prazo, espera pelo FIM" (gotcha do CLAUDE.md). Hoje cada passo espera um
+// SINAL POSITIVO, com teto e dizendo por que terminou:
+//  · os tiles do ALVO (o 1º da fila) estão no cache e um tile do RESTO está PRESO na rota (um portão que o teste abre):
+//    a varredura está em voo DE VERDADE, com um download a caminho — era só suposto;
+//  · o worker CONHECE tiles (o teste manda o mesmo aviso que a varredura mandaria, e espera a lista dele ficar > 0);
+//  · esquece; solta os presos; a varredura ACABA (`!offlineVarrendo`: nenhum `put` pendente) e o worker zera a lista.
+// O CONTROLE é o mesmo roteiro SEM esquecer: os presos, soltos, POUSAM — sem ele, "o cache ficou vazio" também seria o
+// que um instrumento que nunca deixa nada pousar mediria.
+const ALVO_9 = { ...SO_MAPA(70), mapa: { centro: [-12.5, -41.5], entradas: [] } };
+const RESTO_9 = Array.from({ length: 6 }, (_, k) =>
+  ({ ...SO_MAPA(71 + k), mapa: { centro: [-12.5 + (k + 1) * 0.7, -41.5], entradas: [] } }));
+await montar([ALVO_9, ...RESTO_9]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
-  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); offlineVarrer(); });
-await dormir(60);
+  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); });
+const urlsDoAlvo9 = new Set(await page.evaluate(() => [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())]));
+// Espera uma promessa com TETO e diz QUAL terminou (a espera por um sinal do lado do Node).
+const sinalOuTeto9 = async (promessa, tetoMs) => {
+  let relogio;
+  try { return await Promise.race([promessa.then(() => 'chegou'), new Promise((ok) => { relogio = setTimeout(() => ok('TETO'), tetoMs); })]); }
+  finally { clearTimeout(relogio); }
+};
+const alvoNoCache9 = () => esperarNaPagina(page, async () => {
+  const urls = [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())];
+  if (!urls.length) return false;
+  for (const u of urls) if (!(await caches.match(u, { cacheName: 'waze-places-tiles' }))) return false;
+  return true;
+}, 30000, 100);
+const workerSabeTiles9 = () => esperarNaPagina(page, async () => {
+  const d = await diagServiceWorker();
+  return !!d && d.listaPronta === true && d.tilesNaLista > 0;
+}, 15000, 200);
+const workerZerou9 = () => esperarNaPagina(page, async () => {
+  const d = await diagServiceWorker();
+  return !!d && d.listaPronta === true && d.tilesNaLista === 0;
+}, 15000, 200);
+// Uma varredura EM VOO: o alvo chega logo e o resto fica PRESO no portão até o teste soltá-lo.
+const emVoo9 = async () => {
+  let soltar; const portao = new Promise((ok) => { soltar = ok; });
+  let chegouUm; const umChegou = new Promise((ok) => { chegouUm = ok; });
+  atrasoTile = (url) => { if (urlsDoAlvo9.has(url)) return 0; chegouUm(); return portao; };
+  await page.evaluate(() => { offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer(); });   // sem esperar: é a varredura EM VOO
+  const alvo = await alvoNoCache9();
+  const preso = await sinalOuTeto9(umChegou, 30000);
+  const estado = await page.evaluate(async () => ({ varrendo: offlineVarrendo,
+    cache: (await (await caches.open('waze-places-tiles')).keys()).length }));
+  return { soltar: () => { atrasoTile = 0; soltar(); }, alvo, preso, estado };
+};
+const voo9 = await emVoo9();
+diz('PRÉ-CONDIÇÃO: a varredura está EM VOO — os tiles do alvo estão no cache e um tile do resto ficou preso a caminho',
+  voo9.alvo.ok && voo9.preso === 'chegou' && voo9.estado.varrendo === true && voo9.estado.cache >= urlsDoAlvo9.size && urlsDoAlvo9.size > 0,
+  JSON.stringify({ alvo: voo9.alvo, preso: voo9.preso, ...voo9.estado, tilesDoAlvo: urlsDoAlvo9.size }));
 // Uma entrada no anel ANTES de esquecer: sem ela, "o anel ficou vazio" passaria
 // por vácuo — ele já está vazio a esta altura.
 await page.evaluate(() => { diagTilesGuardadosQueFalharam.push({ t: Date.now(), url: 'https://www.waze.com/row-tiles/live/base/3/1/1/tile.png' }); });
 // Idem a lista do WORKER: ela tem de estar CHEIA antes, senão "esqueceu" passa
-// por vácuo.
+// por vácuo. Ele só fica sabendo pelo aviso da varredura (a cada 50 tiles e no fim): o teste manda o MESMO aviso e
+// espera o SINAL — a lista dele > 0 —, em vez de torcer pra o `dormir` bastar.
+await page.evaluate(() => offlineAnunciarTiles());
+const listaCheia9 = await workerSabeTiles9();
 const swAntes9 = await page.evaluate(() => diagServiceWorker());
+diz('PRÉ-CONDIÇÃO: o worker CONHECE tiles antes de esquecer (a lista dele > 0; sem isso o "esqueceu" passaria por vácuo)',
+  listaCheia9.ok && swAntes9?.tilesNaLista > 0, JSON.stringify({ espera: listaCheia9, lista: swAntes9?.tilesNaLista }));
 await page.evaluate(() => offlineEsquecer());
-await dormir(900);
+// Os downloads PRESOS chegam DEPOIS de esquecer: a varredura (época velha) não pode gravá-los. E a espera é pelo FIM da
+// varredura em voo — nenhum `put` pendente —, nunca por um prazo.
+voo9.soltar();
+const fimDaVarredura9 = await esperarNaPagina(page, () => !offlineVarrendo, 20000, 100);
+const swEsqueceu9 = await workerZerou9();
 const swDepois9 = await page.evaluate(() => diagServiceWorker());
 const depois = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
@@ -1953,13 +2269,30 @@ const depois = await page.evaluate(async () => {
     janela: offlineJanelaServida, res: offlineUltimoResultado,
     janelaGuardada: await offlineLerJanela(), anel: diagTilesGuardadosQueFalharam.length };
 });
+diz('a varredura em voo ACABOU depois de esquecer (e nenhum download que estava a caminho pousou no cache)',
+  fimDaVarredura9.ok && depois.cache === 0, JSON.stringify({ fim: fimDaVarredura9, ...depois }));
 diz('depois de esquecer, o cache de tiles fica VAZIO', depois.cache === 0, JSON.stringify(depois));
 diz('a fila guardada some e a janela zera', depois.fila === false && depois.janela === null, JSON.stringify(depois));
 diz('e a janela GRAVADA e o anel de tiles que falharam somem junto (dizem onde ficam pedidos de terceiros)',
   depois.janelaGuardada === null && depois.anel === 0, JSON.stringify(depois));
 diz('e o worker esquece a LISTA dele (o mesmo dado, em memória)',
-  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0,
-  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista}`);
+  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0 && swEsqueceu9.ok,
+  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista} (${JSON.stringify(swEsqueceu9)})`);
+// CONTROLE: o MESMO roteiro SEM esquecer — os tiles presos, soltos, POUSAM no cache. É o que faz o "nada pousou" de cima
+// medir o esquecer, e não um instrumento que nunca deixa nada pousar.
+const controle9 = await emVoo9();
+controle9.soltar();
+const fimDoControle9 = await esperarNaPagina(page, preparacaoAssentada, 60000, 200);
+const noCacheControle9 = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
+diz('CONTROLE: sem esquecer, os tiles presos, soltos, POUSAM — a varredura termina e o cache passa dos tiles do alvo',
+  controle9.alvo.ok && controle9.preso === 'chegou' && fimDoControle9.ok && noCacheControle9 > urlsDoAlvo9.size,
+  JSON.stringify({ alvo: controle9.alvo, preso: controle9.preso, fim: fimDoControle9, noCache: noCacheControle9, tilesDoAlvo: urlsDoAlvo9.size }));
+// O estado que as seções seguintes esperam (o que o roteiro deixava): esquecido, o cache vazio e o worker sem lista.
+await page.evaluate(() => offlineEsquecer());
+const workerZerouDeNovo9 = await workerZerou9();
+diz('o estado fica como as seções seguintes esperam: esquecido, o cache vazio e o worker sem a lista',
+  workerZerouDeNovo9.ok && (await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length)) === 0 && !(await page.evaluate(() => offlineVarrendo)),
+  JSON.stringify(workerZerouDeNovo9));
 
 secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e sem rede');
 // O relato de 2026-09-22 (o terceiro do dia): preparou o offline, fechou, entrou
@@ -4865,4 +5198,5 @@ console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO 
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta), e DUAS ABAS com filas diferentes e uma fila guardada só: a linha da aba que não gravou por último deixando de dizer "Pronto", e o mapa que a poda da outra levou voltando no gatilho dela (com o CONTROLE de uma aba só), e com a MESMA fila nas duas as duas linhas seguindo "Pronto" sem o gatilho preparar de novo');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta), e DUAS ABAS com filas diferentes e uma fila guardada só: a linha da aba que não gravou por último deixando de dizer "Pronto", e o mapa que a poda da outra levou voltando no gatilho dela (com o CONTROLE de uma aba só), e com a MESMA fila nas duas as duas linhas seguindo "Pronto" sem o gatilho preparar de novo'
+  + ', e o ARMAZENAMENTO E O CACHE QUE NÃO RESPONDEM (a leitura da janela, o open, o getAll do diagnóstico, o caches.open e a transação de gravação penduradas: o primeiro card sai no limite curto, o relatório sai dentro do orçamento e diz o que não chegou, o modo dev desliga e a varredura termina parcial — cada um com o CONTROLE saudável —, a base do diagnóstico NÃO recriada pela releitura e o corpo cortado na sonda sem dar os itens por definitivos)');

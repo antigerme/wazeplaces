@@ -54,6 +54,9 @@ const DIAG = {
   DIAG_CAPTURAS_GUARDADAS_MAX: constante('DIAG_CAPTURAS_GUARDADAS_MAX', { DLOG_MAX_MOMENTOS }),
 };
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade: a leitura e a transação da base do diagnóstico passam por ela.
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
 const podar = new Function(...Object.keys(DIAG), fatiar('diagPodarAberturas') + '\nreturn diagPodarAberturas;')(
   ...Object.values(DIAG));
 const HORA = 60 * 60 * 1000;
@@ -246,6 +249,8 @@ test('a abertura guarda só o que NÃO foi entregue: capturas não baixadas, e o
     dlogMomentos: [m1, m2],
     dlogJaBaixados: baixados,
     diagChamadaSemCorpo: new Function(fatiar('diagChamadaSemCorpo') + '\nreturn diagChamadaSemCorpo;')(),
+    // As repetições pendentes do limitador (R21-4-05) têm teste próprio: aqui, nenhuma.
+    dfatoPendentes: () => [],
     diagBaixadoEm: 0,
     // O que OUTRA aba entregou (R9-4-10) tem teste próprio, mais abaixo: aqui, nada.
     diagAplicarEntregues: () => false,
@@ -364,7 +369,7 @@ test('D11: o carimbo do "baixado" é o do RETRATO — o que chega durante o zip 
     Blob: class { constructor(p) { this.p = p; } },
     setTimeout: () => 0, t: (k) => k, APP_VERSION: '2026092601', CompressionStream: function () {},
     showToast: (msg, tipo) => { if (tipo === 'error') throw new Error('o download falhou: ' + msg); },
-    atualizarFabDev: () => {}, diagEsquecerEntregue: () => apagados.push(agora),
+    atualizarFabDev: () => {}, diagEsquecerEntregue: () => apagados.push(agora), dfatoPendentes: () => [],
     // O aviso às outras abas (R9-4-10) tem teste próprio, mais abaixo.
     diagAvisarEntregues: () => true, diagAplicarEntregues: () => false,
     Date: class extends Date { static now() { return agora; } },
@@ -523,7 +528,7 @@ test('R8-4-07: a ABERTURA pergunta quem está vivo — antes da base, sem contar
   assert.equal(consultas.length, antes, 'a abertura com o modo dev desligado perguntou as travas');
   // A pergunta sai ANTES de a base abrir (a base pode levar o teto dela inteiro).
   const c = fatiar('diagCarregarAberturas');
-  assert.ok(c.indexOf('diagAberturasVivas(') > 0 && c.indexOf('diagAberturasVivas(') < c.indexOf('await diagDB()'),
+  assert.ok(c.indexOf('diagAberturasVivas(') > 0 && c.indexOf('diagAberturasVivas(') < c.indexOf('await diagDB('),
     'as vivas da abertura são perguntadas DEPOIS de a base abrir — o instante deixa de ser o da abertura');
 });
 
@@ -593,7 +598,10 @@ function baseDoDiag({ abrir }) {
     open: () => abrir(gravados),
     deleteDatabase: () => { apagou++; const r = {}; setTimeout(() => r.onsuccess && r.onsuccess(), 0); return r; },
   };
-  const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30,
+  // O teto da base cobre o `open`, a leitura e a gravação (R21-4-01), cada passo com o seu. Com 30 ms uma pausa do processo
+  // (CPU disputada) estourava o passo que DEVIA dar certo — e a gravação "que não prende as seguintes" não gravava. 200 ms
+  // ainda deixa o teste rápido (quem pendura espera os 200) e o atraso só faz o teto estourar de um lado que o teste já espera.
+  const deps = { indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200, esperarComTeto,
     DIAG_ABERTURA: { id: 'esta' }, dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => false,
     diagSegurarAbertura: () => {},
     diagRegistroDaAbertura: () => ({ id: 'esta', salvoEm: Date.now(), inicio: Date.now(), momentos: [] }),
@@ -677,6 +685,30 @@ test('O10: uma gravação com a abertura PENDURADA não prende as seguintes (o t
   assert.deepEqual(b.gravados, ['esta'], 'a gravação seguinte não gravou');
 });
 
+test('INSTRUMENTO (R21-4-01): uma pausa de 80 ms do processo no meio da gravação não derruba a que DARIA CERTO — o teto do harness é folgado', async () => {
+  // O teto da base cobre o `open`, a leitura e a gravação, cada passo com o seu (R21-4-01): com 30 ms uma pausa do processo
+  // (CPU disputada) estourava o passo, e a gravação "que não prende as seguintes" não gravava (o teste ficou rápido e frágil).
+  const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
+  let pausar = false;
+  const b = baseDoDiag({ abrir: (gravados) => {
+    const req = {};
+    const db = { close() {}, transaction: () => {
+      const tx = { objectStore: () => ({
+        getAll: () => { const r = {}; setTimeout(() => { r.result = []; r.onsuccess(); }, 0); return r; },
+        delete: () => {}, put: (a) => gravados.push(a.id) }) };
+      setTimeout(() => tx.oncomplete && tx.oncomplete(), 5);
+      if (pausar) parar(80);
+      return tx;
+    } };
+    setTimeout(() => { req.result = db; req.onsuccess(); }, 0);
+    return req;
+  } });
+  pausar = true;
+  assert.equal(await comTetoDe(2000, b.app.diagGuardarAbertura('saida')), 'terminou', 'a gravação não terminou');
+  assert.deepEqual(b.gravados, ['esta'],
+    'DEFEITO DO INSTRUMENTO: a gravação que daria certo não gravou numa pausa de 80 ms — o teto da base do harness é curto demais');
+});
+
 // ── D2 (auditoria de 2026-09-26): DUAS ABAS, e o que sobra sem o modo dev ─────
 // Desligar o modo dev ou dar "Sair" numa aba não chegava à outra: ela seguia com
 // o FAB e o modo dev na memória, e a captura seguinte RECRIAVA a base com o DOM
@@ -743,7 +775,7 @@ test('D2: a gravação confere o modo dev no ARMAZENAMENTO — desligado lá, n�
   // chegou a esta: a memória diz ligado).
   const montar = (desligadoLa) => {
     const conta = { aberturas: 0 };
-    const deps = { indexedDB: { open: () => { conta.aberturas++; return {}; }, deleteDatabase: () => ({}) },
+    const deps = { indexedDB: { open: () => { conta.aberturas++; return {}; }, deleteDatabase: () => ({}) }, esperarComTeto,
       DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 30, DIAG_ABERTURA: { id: 'esta' },
       dlogLigado: () => true, dfato: () => {}, modoDevDesligadoNoArmazenamento: () => desligadoLa,
       diagSegurarAbertura: () => {},
@@ -950,7 +982,7 @@ function baseNaMemoria(registros = [], { segurarAbertura = null } = {}) {
 // `navigator`: o das travas (R8-4-07); sem `locks`, a pergunta diz "não se sabe".
 function carregador({ ls, base, ligado = () => true, navigator = {} }) {
   const deps = { localStorage: ls, indexedDB: base.indexedDB, dlogLigado: ligado, dfato: () => {}, atualizarFabDev: () => {},
-    DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 200,
+    DIAG_ABERTURA: { id: 'agora' }, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, esperarComTeto,
     DIAG_RETRATO_KEY, DIAG_ENTREGUE_KEY, DIAG_ABERTURA_TRAVA: /^const DIAG_ABERTURA_TRAVA = '([^']+)';/m.exec(APP_SEM)[1], navigator, ...DIAG };
   const chaves = Object.keys(deps);
   return new Function(...chaves, `let diagAberturasAnteriores = [], diagEpoca = 0, diagOutrasVivasAoAbrir = null;
@@ -1144,7 +1176,7 @@ function abaDoDiag({ base, anteriores = [], minhas = [], ligadoLa = true }) {
   let apagou = 0;
   const AppState = { devMode: { unlocked: true, active: true }, preferences: { undoEnabled: true } };
   const deps = {
-    indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS,
+    indexedDB, DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, DIAG_GUARDA_MS: DIAG.DIAG_GUARDA_MS, esperarComTeto, dfatoPendentes: () => [],
     // O aviso do que outra aba entregou (R9-4-10) mora no localStorage: aqui, vazio.
     localStorage: armazenamento(), DIAG_ENTREGUE_KEY,
     DIAG_ABERTURA: { id: ID_ESTA, inicio: AGORA - HORA }, AppState, API: { chamadas: [] },
@@ -1262,7 +1294,8 @@ test('R6-4-5: baixar numa aba apaga do aparelho SÓ o que foi no arquivo — o q
 
 test('R6-4-5: o relatório relê o aparelho ANTES do retrato, e o download apaga pela lista DO RETRATO', () => {
   const corpo = fatiar('diagCorpo');
-  const iInicio = corpo.indexOf('const anterioresDoAparelho = diagAtualizarAnteriores().catch(() => false);');
+  // (Desde o R21-4-01 a releitura passa pelo `lerLocal`, como as outras leituras locais do relatório.)
+  const iInicio = corpo.indexOf('const anterioresDoAparelho = lerLocal(rotuloDaBase, diagAtualizarAnteriores)');
   const iEspera = corpo.indexOf('await anterioresDoAparelho;');
   const iRetrato = corpo.indexOf('const retratoEm = Date.now();');
   assert.ok(iInicio > 0 && iEspera > iInicio && iRetrato > iEspera,
@@ -1308,7 +1341,7 @@ function abaDoAparelho(ap, id, { minhas = [], diario = [] } = {}) {
   const deps = {
     indexedDB: ap.indexedDB, localStorage, document,
     window: { addEventListener: (tipo, fn) => { (ouvintes[tipo] ||= []).push(fn); } },
-    DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 500, ...DIAG,
+    DIAG_DB: 'waze_places_diag', DIAG_STORE: 'aberturas', DIAG_DB_TETO_MS: 5000, ...DIAG, esperarComTeto, dfatoPendentes: () => [],
     DIAG_ABERTURA: { id, inicio: AGORA - HORA }, DIAG_ENTREGUE_KEY, DIAG_ENTREGAS_MAX: constante('DIAG_ENTREGAS_MAX'),
     AppState: { devMode: { unlocked: true, active: true } }, API: { chamadas: [] },
     dlogLigado: () => true, modoDevDesligadoNoArmazenamento: () => false, diagSegurarAbertura: () => {},

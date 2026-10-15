@@ -68,8 +68,15 @@ const PRESENCA_FLUXO_SILENCIO_MS = 35_000;
 // esse fim é normal e religa em 1 s. Erro de verdade usa o recuo, com jitter —
 // reconectar em rajada é o que faz um WAF marcar o cliente.
 const PRESENCA_FLUXO_RELIGAR_MS = 1000;
-// Quanto uma conexão sem nenhum fim de lote precisa ter durado pra o fim dela
-// contar como NORMAL (ver `presencaFluxoAbrir`). Bem abaixo dos ~6 min medidos.
+// O PISO de uma conexão: quanto ela precisa ter durado pra o fim dela contar
+// como NORMAL (religa em 1 s) e pra PROVAR que serve (zera o recuo e a série de
+// quedas do diário) — ver `presencaFluxoViveu` e `presencaFluxoProvarVida`. Bem
+// abaixo dos ~6 min medidos, e acima de qualquer fim que pareça "fechou logo
+// depois de abrir". O lote sozinho não prova nada: MEDIDO em produção, toda
+// conexão abre com `startOfBatch` e `endOfBatch` no 1º milissegundo, então quem
+// fecha logo depois dele (R21-5-05: um intermediário, um limite do servidor)
+// religava a cada 1 s, sem recuo, pra sempre — uma ida por segundo ao Google.
+// Com ou sem lote, é a duração que diz.
 const PRESENCA_FLUXO_VIVEU_MS = 60 * 1000;
 const PRESENCA_FLUXO_ESPERAS_MS = [2000, 5000, 15_000, 30_000, 60_000];
 
@@ -307,11 +314,16 @@ function chatGuardar(o) {
 }
 
 // O aparelho diz que alguém deu "Sair": nem token nem conta guardados. É a MESMA
-// régua do `aoSairEmOutraAba` (app.js): a QUEDA da sessão tira só o token e
-// deixa a conta (a mesma pessoa volta, e a aba viva ainda guarda a sua por
-// meio segundo, R14-1-03), então só o token faltando NÃO é o "Sair".
+// régua do `aoSairEmOutraAba` (app.js): a QUEDA da sessão tira só o token e deixa a
+// conta (a mesma pessoa volta, e a aba viva ainda guarda a sua por meio segundo,
+// R14-1-03), então só o token faltando NÃO é o "Sair". E o aparelho que nem LÊ (o
+// `localStorage` lançando, "bloquear todos os cookies") não diz "Sair" nenhum: "sem
+// token e sem conta" era verdade com a sessão viva na memória, e a volta do segundo
+// plano nunca mais pedia a lista nem religava o tempo real (R21-5-04). Quem diz se o
+// aparelho lê é uma função só, `armazenamentoLegivel` (app.js), a mesma do
+// `aoSairEmOutraAba`.
 function presencaAparelhoSaiu() {
-    return !safeLS.get('waze_session_token') && !safeLS.get(CONTA_KEY);
+    return !safeLS.get('waze_session_token') && !safeLS.get(CONTA_KEY) && armazenamentoLegivel();
 }
 
 function presencaUuid() {
@@ -1148,12 +1160,19 @@ async function presencaFluxoAbrir() {
             fluxo.vivoEm = Date.now();
             presencaVigiarSilencio(fluxo);
             for (const quadro of ler(dec.decode(value, { stream: true }))) presencaQuadro(fluxo, quadro);
+            // A cada pedaço (o Google manda um sinal de vida a cada 10 s): é aqui
+            // que a conexão que já viveu o piso prova que serve.
+            presencaFluxoProvarVida(fluxo);
         }
         // Normal é o fim de uma conexão que VIVEU: o Google fecha a cada ~6
-        // min, depois de lotes. Uma que termina sem lote nenhum e logo (proxy
-        // cortando, corpo vazio) religava a cada 1 s pra sempre, sem recuo.
-        fimNormal = !!fluxo.teveLote || Date.now() - fluxo.desde > PRESENCA_FLUXO_VIVEU_MS;
-        if (!fimNormal) Presenca.fluxoDiag.ultimoErro = 'fim sem lote';
+        // min. Uma que termina logo (um intermediário cortando, o corpo vazio)
+        // religava a cada 1 s pra sempre, sem recuo — e o lote não a separava do
+        // fim normal, porque toda conexão abre com ele (R21-5-05). Só a duração.
+        fimNormal = presencaFluxoViveu(fluxo);
+        if (!fimNormal) Presenca.fluxoDiag.ultimoErro = fluxo.teveLote ? 'fim curto' : 'fim sem lote';
+        // O fim normal de quem entregou o lote também prova (o pedaço depois do
+        // piso pode não ter vindo): o recuo e a série de quedas fecham.
+        else presencaFluxoProvarVida(fluxo);
     } catch (e) {
         if (Presenca.fluxo === fluxo && Presenca.fluxoDiag.ultimoErro !== 'silencio') {
             Presenca.fluxoDiag.ultimoErro = String((e && e.name) || e).slice(0, 40);
@@ -1167,6 +1186,30 @@ async function presencaFluxoAbrir() {
             presencaFluxoReagendar(fimNormal);
         }
     }
+}
+
+// A conexão viveu o piso (`PRESENCA_FLUXO_VIVEU_MS`)? É a ÚNICA régua do fim
+// normal: com ou sem lote, o que separa a conexão que o Google fecha a cada ~6
+// min do corte que religava a cada 1 s é quanto ela durou.
+function presencaFluxoViveu(fluxo) {
+    return Date.now() - fluxo.desde >= PRESENCA_FLUXO_VIVEU_MS;
+}
+
+// A conexão PROVA que serve quando entregou o lote E viveu o piso — o que o
+// `endOfBatch` sozinho não prova (R21-5-05). Uma vez por conexão, no primeiro
+// pedaço que chega depois do piso (o sinal de vida de 10 s do Google): zera o
+// recuo (a que cai com erro depois disso recomeça de 2 s, e não do degrau em que
+// as falhas de antes a deixaram) e fecha a série de quedas do diário ("voltou").
+// Zerar ao ABRIR a conexão, ou no lote dela, é o que fazia toda falha virar uma
+// tentativa nova a cada poucos segundos, pra sempre (o guard de
+// test/presenca.test.mjs cobra os dois).
+function presencaFluxoProvarVida(fluxo) {
+    if (fluxo.provou || !fluxo.teveLote || !presencaFluxoViveu(fluxo)) return;
+    fluxo.provou = true;
+    Presenca.fluxoTentativa = 0;
+    const d = Presenca.fluxoDiag;
+    if (d.quedasSeguidas) presencaAnotar('presenca.fluxo', { ev: 'voltou', depoisDe: d.quedasSeguidas });
+    d.quedasSeguidas = 0;
 }
 
 // A queda vira linha no diário, mas não TODA: numa rede fora por uma hora o
@@ -1252,14 +1295,14 @@ function presencaQuadro(fluxo, o) {
     if (o.endOfBatch) {
         fluxo.emLote = false;
         fluxo.teveLote = true;
-        Presenca.fluxoTentativa = 0;
-        // O fim do primeiro lote é a prova de que a conexão está VIVA (é aqui que
-        // o recuo zera). Entra no diário a primeira da página e a volta depois
-        // de queda; as religadas normais, a cada ~6 min, não.
+        // O fim do primeiro lote é a prova de que a conexão ABRIU e responde — não
+        // de que ela SERVE: toda conexão abre com ele, e a que fecha logo depois
+        // também (R21-5-05). Quem zera o recuo e a série de quedas é a prova da
+        // duração (`presencaFluxoProvarVida`). Entra no diário a primeira da
+        // página; a volta depois de queda entra na prova, e as religadas normais,
+        // a cada ~6 min, não.
         const d = Presenca.fluxoDiag;
-        if (!d.conectou || d.quedasSeguidas) {
-            presencaAnotar('presenca.fluxo', d.conectou ? { ev: 'voltou', depoisDe: d.quedasSeguidas } : { ev: 'conectou' });
-        }
+        if (!d.conectou) presencaAnotar('presenca.fluxo', { ev: 'conectou' });
         // O episódio de tempo real PARADO terminou: a conexão está viva de novo.
         if (Presenca.paradoDesde) {
             presencaAnotarParado('religou', { via: Presenca.paradoVia || 'outro', durouS: Math.round((Date.now() - Presenca.paradoDesde) / 1000) });
@@ -1268,7 +1311,6 @@ function presencaQuadro(fluxo, o) {
         }
         if (d.loteMensagens) presencaAnotar('chat.chegou', { lote: d.loteMensagens });
         d.conectou = true;
-        d.quedasSeguidas = 0;
         d.loteMensagens = 0;
         return;
     }
@@ -2154,6 +2196,16 @@ function presencaUltimaDela(h) {
     return ate;
 }
 
+// Há mensagem DELA nesta página mais nova que `ate`, a que um "lida" cobre? A
+// resposta de um "lida" só fala do que ele cobre: o que chegou depois é de
+// outro (o da rajada seguinte, o do fechamento) ou ninguém viu. Por isso nem o
+// sucesso quita, nem a falha cria ou tira a dívida de mensagem mais nova que
+// ele — as duas respostas passam por aqui, pra nenhuma das duas poder ser a
+// velha que apaga o que a nova deixou devendo (R21-5-01).
+function presencaTemMaisNovaQue(id, ate) {
+    return presencaUltimaDela(Presenca.historico.get(id)) > ate;
+}
+
 // A conversa que DEVE um "lida" tem mensagem DELA que a pessoa não viu, e que
 // só a LISTA conhece? O Waze marca a conversa INTEIRA: pagar a dívida assim
 // marcava como lida também essa — "Lida" pra quem mandou, e a não lida sumindo
@@ -2295,8 +2347,15 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
         Presenca.lidaSaiuEm.set(id, Math.max(Presenca.lidaSaiuEm.get(id) || 0, enviadoEm));
         Presenca.lidaVoltouEm.set(id, Math.max(Presenca.lidaVoltouEm.get(id) || 0, Date.now()));
         // O Waze marca a conversa INTEIRA: a dívida dela, se houver, está paga
-        // — inclusive a guardada no aparelho.
-        presencaQuitarDivida(id);
+        // — inclusive a guardada no aparelho. Só a que ESTE "lida" cobre, porém
+        // (R21-5-01): a resposta dele pode voltar depois de a pessoa ver uma
+        // mensagem MAIS NOVA e o "lida" dessa falhar — a dívida que nasceu aí é
+        // dela, e o Waze processou este antes de ela existir. Quitada por esta
+        // resposta velha, a mensagem vista seguia não lida no Waze sem nada que
+        // a pagasse, e a pílula voltava a dizer "1 mensagem nova". Havendo
+        // mensagem dela mais nova que a que este cobre, a dívida fica; se o Waze
+        // o processou DEPOIS dela, o pagamento custa um "lida" a mais, e só.
+        if (!presencaTemMaisNovaQue(id, ultimaDela)) presencaQuitarDivida(id);
         presencaZerarNaoLidas(id, enviadoEm, { recontar: true });
     } else {
         // Falhou (a rede, o Waze fora): a mensagem que a pessoa VIU seguia não
@@ -2323,8 +2382,14 @@ async function presencaMarcarLida(id, { fechando = false, devida = false } = {})
         // O histórico de AGORA, não o de quando ele saiu: a conversa sem
         // histórico ganha um com a mensagem que chega com ele no ar (ver
         // `presencaMensagemDoFluxo`, R14-5-03).
-        if (presencaUltimaDela(Presenca.historico.get(id)) > ultimaDela) presencaQuitarDivida(id);
-        else presencaDever(id);
+        //
+        // Com mensagem mais nova no histórico, a dívida não nasce aqui — e a que
+        // já EXISTE não é desta resposta mexer (R21-5-01). Ela é de um "lida" mais
+        // novo (a falha dele a criou antes desta resposta chegar: quitá-la
+        // deixava a mensagem vista não lida no Waze, sem nada que a pagasse) ou
+        // já foi tirada pela chegada da mensagem que ninguém viu
+        // (`presencaMensagemDoFluxo`), e então não há o que quitar.
+        if (!presencaTemMaisNovaQue(id, ultimaDela)) presencaDever(id);
         // No diário, que não mostrava falha nenhuma do "lida": uma linha por
         // minuto no máximo, com quantas vieram juntas — o Waze fora faria uma
         // por conversa devendo a cada fechamento (`presencaAnotarMsg`).

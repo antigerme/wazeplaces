@@ -73,6 +73,9 @@ function metodoDoLightbox(nome) {
   return APP_SEM.slice(i, fechar(APP_SEM, k)).trim();
 }
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (que trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
 const tique = () => new Promise((ok) => setImmediate(ok));
 const tiques = async (n) => { for (let i = 0; i < n; i++) await tique(); };
 const P = (id, autor = 1000) => ({ venueID: 'v' + id, updateRequestID: 'u' + id, name: 'Local ' + id,
@@ -110,6 +113,7 @@ function depsDoTreino(AppState, log, els, extra = {}) {
     limparFocoAutor: () => {}, sortQueue: () => {}, aplicarRecusaAutomatica: () => log.push('recusa'),
     devolverPedidoRecusado: (lista) => { AppState.queue.splice(1, 0, ...(Array.isArray(lista) ? lista : [lista])); },
     ordemPrecisaDaFilaInteira: () => false, buscarORestoDaFila: () => {}, abrirGuardadaDepoisDoTreino: () => log.push('guardada'),
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
     ...extra,
   };
 }
@@ -721,7 +725,7 @@ function montarReabertura() {
     'offlineTentarAbrirSemRede', 'abrirGuardadaDepoisDoTreino', 'offlinePrecisaVarrer', 'atualizarLinhaDoOffline'],
   `let filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaGravadaChaves = null, ultimaBuscaFalhouPorRede = false,
      offlineJanelaServida = null, offlineFilaPreparada = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineVarrendo = false,
-     offlineFilaVarrida = null;`);
+     offlineFilaVarrida = null, offlineEpoca = 0, offlineLendoAJanela = null;`);
   const linha = () => {
     app.atualizarLinhaDoOffline(0, 0);
     const html = (els.prefOfflineDesc || {}).innerHTML || '';

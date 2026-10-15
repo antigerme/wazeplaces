@@ -158,6 +158,7 @@ Backend (server/core.mjs, stateless por request)
 APIs internas do Waze
   - /Issues/Search/List      (buscar pedidos)
   - /Issues/Read             (marcar como lido)
+  - /Issues/Star             (guardar o pedido: o ↑ com "Pular guarda o pedido")
   - /Descartes/app/Features  (rejeitar)
   - /Session, /LocationSearch/{Countries,States}
 ```
@@ -170,11 +171,18 @@ wazeplaces/
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
-├── icons/                  # icon-192.svg, icon-512.svg, splash/ e screenshots/
+├── icons/
+│   ├── icon-192.svg
+│   ├── icon-512.svg
+│   ├── icon-maskable.svg   # A versão que o Android recorta pela máscara do launcher
+│   ├── splash/             # Telas de abertura do iPhone (claro e escuro)
+│   └── screenshots/        # Capturas do convite de instalar
 ├── css/
 │   ├── styles.css          # Estilos próprios (o FONTE)
-│   └── app.css             # GERADO por `npm run css`: Tailwind + styles.css, minificados
+│   ├── app.css             # GERADO por `npm run css`: Tailwind + styles.css, minificados
+│   └── tailwind.src.css    # Entrada do build do Tailwind
 ├── fonts/                  # Inter auto-hospedada (+ licença OFL)
+├── tailwind.config.js      # Config do build do CSS
 ├── js/
 │   ├── app.js              # Lógica principal, AppState, UI
 │   ├── api.js              # Wrapper do fetch() para /api/*
@@ -194,13 +202,20 @@ wazeplaces/
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/
 │   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
+├── extensao-chrome/        # A extensão "WazePlaces Rapid Access" (o README dela ensina a instalar)
 ├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
 ├── wrangler.jsonc          # Config Cloudflare (binding do KV)
 ├── .assetsignore           # Exclui server/docs/etc do publish estático
 ├── package.json            # Scripts (start / cf:dev / cf:deploy)
+├── tools/                  # Ferramentas de dev: os geradores (css, js, html), os smokes de navegador e a leitura de diagnósticos
+├── test/                   # A suíte (`npm test`, zero dependência)
 ├── docs/                   # Referência de dev (NÃO servido em runtime)
+├── CHANGELOG.md            # O que mudou, em linguagem de editor
+├── LICENSE                 # GPL-3.0
 ├── README.md
-└── CLAUDE.md
+├── CLAUDE.md
+├── .github/                # O CI e os modelos de issue
+└── .gitignore
 ```
 
 ### Rodar local

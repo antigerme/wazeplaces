@@ -179,6 +179,12 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // E a roda FINA da foto ampliada (auditoria de 2026-10-02, R7-3-03): o WebKit
   // do Playwright descarta o evento de roda com |delta| abaixo de 1 px (MEDIDO),
   // e o defeito mora abaixo de ~0,55 px; a conta é medida em test/lightbox-zoom.
+  // E os controles da foto e do mapa ampliados COM o recorte lateral do aparelho (lote 25, R21-3-05): o override de
+  // `env(safe-area-inset-*)` é do protocolo do Chromium (`Emulation.setSafeAreaInsetsOverride`); o WebKit mede, no mesmo
+  // bloco, só o recorte zerado.
+  // E o contraste alto do lote 25 (R21-7-01): o WebKit do Playwright não emula
+  // `forced-colors`, então os interruptores, a aba, a barra, as células e os botões só
+  // se medem com `forcedColors: 'active'`, que é do Chromium.
   // smoke-offline (lote 18): os CINCO blocos de seções que rodam com o service
   // worker no comando — no WebKit 27.2 a rota do Playwright (do contexto e da
   // página) não vê nenhum pedido dessa página, e o tile, a foto e a API iriam à
@@ -190,7 +196,7 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // item manda o mesmo item duas vezes no WebKit, onde as abas ficam em
   // processos diferentes (MEDIDO: 1 de 6 no smoke inteiro, 9 de 12 com a espera
   // zerada, 0 no Chromium) — defeito do app que ficou pra decisão.
-  const ESPERADOS = { 'smoke-browser.mjs': 5, 'smoke-offline.mjs': 9 };
+  const ESPERADOS = { 'smoke-browser.mjs': 7, 'smoke-offline.mjs': 9 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));

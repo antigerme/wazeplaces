@@ -349,7 +349,7 @@ test('a REABERTURA SEM REDE filtra a foto, e desiste se tudo foi decidido', () =
 test('a fila guardada leva o `desde`, e a poda só roda DEPOIS de a gravação fechar', () => {
   const f = fatiar('offlineGravarFila');
   assert.match(f, /desde: valeDesde,/, 'a fila guardada não leva mais o instante da lista');
-  const iGrava = f.indexOf('await new Promise(');
+  const iGrava = f.indexOf('await esperarComTeto(');   // a transação da gravação (com teto, R21-4-01)
   const iPoda = f.indexOf('offlinePodarPousos(valeDesde);');
   assert.ok(iGrava > 0 && iPoda > iGrava,
     'a poda veio antes da gravação fechar: se ela falhar, a foto velha fica sem os pousos que a corrigem');

@@ -99,13 +99,25 @@ function travaSegurada() {
     if (prox) prox();
   };
   const trava = {
-    request(nome, cb) {
+    // Como o navegador: `request(nome, [opcoes,] cb)`, e o `signal` tira o pedido da FILA (rejeita com AbortError)
+    // enquanto ele espera — depois de concedida, abortar não faz nada (lote 25, R21-2-02/05).
+    request(nome, opcoes, cb) {
+      if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+      const signal = opcoes && opcoes.signal;
       return new Promise((resolve, reject) => {
         const tenta = () => {
           tomada = true;
           Promise.resolve().then(() => cb({ name: nome })).then((v) => { liberar(); resolve(v); }, (e) => { liberar(); reject(e); });
         };
-        if (!tomada) tenta(); else filas.push(tenta);
+        if (signal && signal.aborted) { reject(new DOMException('The operation was aborted.', 'AbortError')); return; }
+        if (!tomada) { tenta(); return; }
+        filas.push(tenta);
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            const i = filas.indexOf(tenta);
+            if (i >= 0) { filas.splice(i, 1); reject(new DOMException('The operation was aborted.', 'AbortError')); }
+          }, { once: true });
+        }
       });
     },
   };
@@ -126,7 +138,7 @@ function recusaComTrava({ alvos = [P(1), P(2), P(3)], comTrava = true } = {}) {
   };
   const deps = {
     AppState, Treino: { ativo: false }, navigator: { locks: t ? t.trava : undefined, onLine: true },
-    RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica', epocaDaSessao: 1,
+    RECUSA_AUTOMATICA_TRAVA: 'wp-recusa-automatica', RECUSA_AUTOMATICA_ESPERA_MAX_MS: 180000, recusasEsperandoATrava: new Set(), epocaDaSessao: 1,
     podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (c) => c === 77,
     pedidosEmAndamento: new Set(), pedidosDoLoteSemEnviar: new Set(), rejeicoesDeLoteNoAr: new Set(), decididosPorOutraAbaComCardAqui: new WeakSet(),
     decididoNaOutraAbaDepoisDe: () => false,
@@ -363,7 +375,7 @@ function fotosDeMentira() {
   const place = { venueID: 'v1', updateRequestID: 'u1', name: 'Antes' };
   const deps = {
     AppState, Treino: { ativo: false }, aprovandoAgora: false, excluindoAgora: false, aprovacaoPendente: null, exclusaoPendente: null,
-    renomeacoesNoAr: new Set(), escritasConferindo: 0, canDisableUndo: () => true, fotoDoLightboxNaTela: () => true,
+    renomeacoesNoAr: new Set(), escritasDeFotoNoLocal: new Map(), escritasConferindo: 0, canDisableUndo: () => true, fotoDoLightboxNaTela: () => true,
     Lightbox: { podeAprovarAtual: () => true, place, idx: 0, isOpen: () => false, idFotoAtual: () => 'f1', urls: ['u'], newIdx: -1, eDenuncia: false, removerFoto() {} },
     decididosPorOutraAbaComCardAqui: new WeakSet(), API: { getRegion: () => 'row' },
     document: { getElementById: () => ({ classList: { toggle() {} } }) }, aplicarTravaDeAcao() {}, manterFocoNoLightbox() {},
@@ -421,7 +433,7 @@ test('R20-3-02: a pílula do nome — o "Sair" solta a renomeação no ar, e a r
   const portoes = [];
   const AppState = { geracaoDoSair: 0, geracaoDasEscritasDeFoto: 0, fetchEpoch: 0, authenticated: true };
   const deps = {
-    AppState, epocaDaSessao: 1, renomeacoesNoAr: new Set(), aprovandoAgora: false, excluindoAgora: false, escritasConferindo: 0,
+    AppState, epocaDaSessao: 1, renomeacoesNoAr: new Set(), escritasDeFotoNoLocal: new Map(), aprovandoAgora: false, excluindoAgora: false, escritasConferindo: 0,
     API: { renomearLocal: () => new Promise((ok) => portoes.push(ok)) },
     callWithRetry: (fn) => fn(), esperaDaEscritaNoSair: () => () => {}, aplicarTravaDeAcao() {}, nomeDestaEscrita: () => true,
     refazerDepoisDo401: async () => null, aplicarNosIrmaos() {}, contarConquista() {}, devolverNome: () => false,
@@ -451,7 +463,7 @@ test('R20-3-02: a conferência de um 401 da sessão que saiu não segura a sess�
   const deps = {
     AppState, epocaDaSessao: 1, escritasConferindo: 0, verificandoSessao: false, conferenciaDaSessao: null, aplicarTravaDeAcao() {},
     handleUnauthorized: () => new Promise((ok) => { sonda = ok; }), sessaoVivaDepoisDe: () => false, navigator: { onLine: true },
-    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), estadoAprovando() {}, lixeiraOcupada() {},
+    aprovandoAgora: false, excluindoAgora: false, renomeacoesNoAr: new Set(), escritasDeFotoNoLocal: new Map(), estadoAprovando() {}, lixeiraOcupada() {},
   };
   const h = montar(['refazerDepoisDo401', 'soltarAsEscritasDeFotoDaSessaoQueAcabou', 'callWithRetry', 'sessaoTrocou'], deps);
   const andando = h.refazerDepoisDo401(1, async () => ({ success: true }));
@@ -465,12 +477,25 @@ test('R20-3-02: a conferência de um 401 da sessão que saiu não segura a sess�
   assert.equal(deps.escritasConferindo, 1, 'DEFEITO: o fim da conferência velha desceu a conta da conferência da sessão nova');
 });
 
-test('R20-3-02 (estrutura): o "Sair" e a troca de conta soltam as escritas da foto; a QUEDA com a mesma conta não', () => {
+test('R20-3-02 (estrutura): o "Sair", a troca de conta e os LOGINS que refazem a fila soltam as escritas da foto; a QUEDA com a mesma conta não', () => {
   assert.match(fatiar('handleLogout'), /^\s+soltarAsEscritasDeFotoDaSessaoQueAcabou\(\);/m, 'o "Sair" não solta as escritas da foto');
   assert.match(fatiar('esquecerOutraConta'), /^\s+soltarAsEscritasDeFotoDaSessaoQueAcabou\(\);/m, 'a troca de conta não solta as escritas da foto');
-  // A queda com a MESMA conta: a escrita segue no ar e pousa depois — soltar reabriria a 2ª aprovação (L24).
+  // Os logins que REFAZEM a fila (R21-3-01): a queda SEM renovação seguida de um login novo — a extensão que não renova, ou a
+  // pessoa que não a tem — deixava as marcas, globais, ligadas até a resposta da sessão que caiu (até 45 s). O comportamento
+  // de cada um está em test/fotos-auditoria-r21.test.mjs; aqui, o encanamento.
+  for (const login of ['authenticateWithCookies', 'resgatarPareamento', 'adotarSessaoDoAparelho']) {
+    assert.match(fatiar(login), /^\s+soltarAsEscritasDeFotoDaSessaoQueAcabou\(\);/m, `${login} refaz a fila e não solta as escritas da foto da sessão que caiu`);
+  }
+  assert.match(fatiar('entrarPelaExtensao'), /\} else \{\s*resetQueue\(\);[\s\S]*?soltarAsEscritasDeFotoDaSessaoQueAcabou\(\);\s*\}/,
+    'a extensão que entra com a fila refeita não solta as escritas da foto');
+  // A queda com a MESMA conta: a escrita segue no ar e pousa depois — soltar reabriria a 2ª aprovação (L24). Vale também pro
+  // ramo `manterFila` da extensão, que é a renovação dela (a fila ATRAVESSA).
   assert.doesNotMatch(fatiar('derrubarSessao'), /soltarAsEscritasDeFotoDaSessaoQueAcabou/, 'a queda com a mesma conta soltou a escrita da foto no ar');
   assert.doesNotMatch(fatiar('soltarOsLotesDaSessaoQueAcabou'), /soltarAsEscritasDeFotoDaSessaoQueAcabou/);
+  const ext = fatiar('entrarPelaExtensao');
+  const manter = ext.slice(ext.indexOf('if (manterFila) {'), ext.indexOf('} else {', ext.indexOf('if (manterFila) {')));
+  assert.ok(manter.length > 40 && manter.includes('filaAtravessouSessao = true'), 'o ramo `manterFila` mudou de forma — o instrumento quebrou');
+  assert.doesNotMatch(manter, /soltarAsEscritasDeFotoDaSessaoQueAcabou/, 'a renovação da queda (a fila que atravessa) soltou as escritas da foto');
 });
 
 // ═══ R20-1-03 · o ✓ único da conta A no ar × a fila da B ═══════════════════════════════════════════════

@@ -457,10 +457,10 @@
              o meio do modal (quem vem depois no HTML ganha o empate), então
              abrir Filtros durante a busca mostrava um diálogo pela metade. -->
         <div id="pasteModal" role="dialog" aria-modal="true" aria-labelledby="pasteModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="pasteModalTitle" class="text-xl font-bold text-slate-800 mb-4 dark:text-slate-100" data-i18n="modal.paste.title">Cole o conteúdo dos cookies</h3>
                 <textarea id="cookiesTextarea" aria-label="Conteúdo do arquivo cookies.txt" data-i18n-aria="modal.paste.textarea.aria" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" class="w-full h-48 p-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-mono text-sm" placeholder="Cole aqui o conteúdo do arquivo cookies.txt…" data-i18n-ph="modal.paste.textarea.ph"></textarea>
-                <div class="dialogo-acoes flex space-x-3 mt-4">
+                <div class="dialogo-acoes acoes-presas flex gap-3 mt-4">
                     <button id="cancelPaste" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">
                         Cancelar
                     </button>
@@ -479,7 +479,7 @@
              três botões: aquilo custava 20px de FOTO em todo card, pra sempre,
              pra ensinar o que se aprende uma vez (medido: 329 → 309px no iPhone). -->
         <div id="comoFuncionaModal" role="dialog" aria-modal="true" aria-labelledby="comoFuncionaTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
                 <h3 id="comoFuncionaTitle" class="text-xl font-bold text-slate-800 mb-1 text-center dark:text-slate-100" data-i18n="modal.comoFunciona.title">Como funciona</h3>
                 <p class="text-sm text-slate-600 mb-5 text-center leading-relaxed dark:text-slate-300" data-i18n="modal.comoFunciona.body">Um pedido por vez. Use os três botões — ou arraste o card para o lado.</p>
 
@@ -508,7 +508,7 @@
 
                 <!-- Dismissiva à esquerda, afirmativa à direita (M3/HIG). "Treinar"
                      é a dismissiva aqui: quem clica NÃO está seguindo pro trabalho. -->
-                <div class="dialogo-acoes flex gap-3">
+                <div class="dialogo-acoes acoes-presas flex gap-3">
                     <button id="comoFuncionaTreinar" type="button" class="flex-1 min-h-[48px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-100 font-semibold py-2 px-3 rounded-lg transition text-sm" data-i18n="treino.experimentar">Quero treinar antes</button>
                     <button id="comoFuncionaOk" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.gotIt">Entendi</button>
                 </div>
@@ -516,7 +516,7 @@
         </div>
 
         <div id="treinoFimModal" role="dialog" aria-modal="true" aria-labelledby="treinoFimTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800">
                 <div class="text-4xl mb-3" aria-hidden="true">🎓</div>
                 <h3 id="treinoFimTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="treino.fim.title">Treino concluído</h3>
                 <!-- O efeito da ÚLTIMA ação entra aqui, no modal, em vez de sair num
@@ -526,12 +526,14 @@
                      Tela em branco lê como app quebrado. -->
                 <p id="treinoFimEfeito" class="hidden text-sm text-slate-700 bg-slate-100 border border-slate-200 rounded-xl p-3 mb-4 leading-relaxed text-left dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200"></p>
                 <p id="treinoFimCorpo" class="text-sm text-slate-600 mb-6 leading-relaxed dark:text-slate-300" data-i18n="treino.fim.body">Nada disso foi enviado ao Waze. Agora vale de verdade — e o Desfazer te dá 3s em cada ação.</p>
-                <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
+                <div class="acoes-presas">
+                    <button id="treinoFimOk" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="treino.fim.cta">Ir para a fila</button>
+                </div>
             </div>
         </div>
 
         <div id="logoutModal" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="logoutModalTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.logout.title">Sair?</h3>
                 <p class="text-sm text-slate-500 mb-3 dark:text-slate-400" data-i18n-html="modal.logout.body">Sua sessão será encerrada e <strong>os dados do app neste aparelho</strong> (placar, histórico, conquistas, filtros e preferências) serão apagados — ficam só o idioma e o tema. Esta ação não pode ser desfeita.</p>
                 <!-- As decisões que ainda esperam envio (a fila de saída) saem com o
@@ -543,7 +545,7 @@
                      Dizer isso aqui é o único momento em que a informação chega a
                      quem precisa dela. -->
                 <p class="text-sm text-slate-500 mb-6 dark:text-slate-400" data-i18n-html="modal.logout.waze">Isto apaga os dados daqui e do servidor, mas <strong>não desconecta você do Waze</strong> — os seus cookies continuam válidos. Para encerrar de verdade, saia também no <a href="https://www.waze.com/editor" target="_blank" rel="noopener noreferrer" class="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">Waze Map Editor</a>.</p>
-                <div class="dialogo-acoes flex space-x-3">
+                <div class="dialogo-acoes acoes-presas flex gap-3">
                     <button id="cancelLogout" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="confirmLogout" type="button" class="flex-1 min-h-[48px] bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.logout">Sair</button>
                 </div>
@@ -551,14 +553,14 @@
         </div>
 
         <div id="accessDeniedModal" role="dialog" aria-modal="true" aria-labelledby="accessDeniedTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain p-6 dark:bg-slate-800 dark:text-slate-200">
                 <div class="flex items-start gap-3 mb-4">
                     <div class="bg-rose-100 dark:bg-rose-500/20 p-2 rounded-full flex-shrink-0">
                         <svg class="w-6 h-6 text-rose-600 dark:text-rose-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                         </svg>
                     </div>
-                    <div>
+                    <div class="min-w-0 break-words">
                         <h3 id="accessDeniedTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.accessDenied.title">Acesso restrito</h3>
                         <p class="text-xs text-slate-500 mt-0.5 dark:text-slate-400" data-i18n="modal.accessDenied.subtitle">Exclusivo para editor nível 2+ que seja Area Manager, ou staff do Waze</p>
                     </div>
@@ -566,7 +568,9 @@
                 <p id="accessDeniedMessage" class="text-sm text-slate-600 mb-3 dark:text-slate-300"></p>
                 <div id="accessDeniedProfile" class="hidden text-sm bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 dark:bg-slate-900 dark:border-slate-700"></div>
                 <p class="text-xs text-slate-500 mb-5 dark:text-slate-400" data-i18n="modal.accessDenied.help">Se você acredita que deveria ter acesso, peça para verificar suas permissões no Waze Map Editor (nível e status de Area Manager).</p>
-                <button id="closeAccessDenied" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.accessDenied.dismiss">Entendi</button>
+                <div class="acoes-presas">
+                    <button id="closeAccessDenied" type="button" class="w-full min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.accessDenied.dismiss">Entendi</button>
+                </div>
             </div>
         </div>
 
@@ -866,7 +870,7 @@
                      dele, e por 5 minutos. -->
                 <button id="pairShowCodeBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/><path stroke-linecap="round" stroke-width="2" d="M3 3l18 18"/></svg>
-                    <span data-i18n="pair.show.noCamera">Sem câmera? Mostrar um código</span>
+                    <span class="min-w-0 break-words" data-i18n="pair.show.noCamera">Sem câmera? Mostrar um código</span>
                 </button>
                 <div id="pairCodeReveal" class="hidden">
                     <p id="pairOrType" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-1" data-i18n="pair.show.orType">Digite este código no outro aparelho:</p>
@@ -878,7 +882,7 @@
 
                 <button id="pairCopyLinkBtn" type="button" class="w-full min-h-[48px] mb-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition flex items-center justify-center gap-2">
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.328-6.328l1.5-1.5a4 4 0 015.656 5.656l-3 3a4 4 0 01-5.656 0"></path></svg>
-                    <span data-i18n="pair.copyLink">Copiar link (abre direto no outro aparelho)</span>
+                    <span class="min-w-0 break-words" data-i18n="pair.copyLink">Copiar link (abre direto no outro aparelho)</span>
                 </button>
                 <button id="pairShowClose" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
             </div>
@@ -886,7 +890,7 @@
 
         <!-- ── Pareamento: recebe o código (usado no CELULAR) ──────────────── -->
         <div id="pairEnterModal" role="dialog" aria-modal="true" aria-labelledby="pairEnterTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
+            <div class="dialogo-cartao bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
                 <h3 id="pairEnterTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2" data-i18n="pair.enter.title">Entrar com um código</h3>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-4" data-i18n="pair.enter.body">Digite o código que apareceu no outro aparelho:</p>
 
@@ -895,7 +899,7 @@
                        class="w-full min-h-[56px] text-center text-3xl font-black tracking-[0.2em] uppercase bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 mb-3 text-slate-800 dark:text-slate-100">
                 <p id="pairEnterError" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
 
-                <div class="dialogo-acoes flex gap-3">
+                <div class="dialogo-acoes acoes-presas flex gap-3">
                     <button id="pairEnterCancel" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.cancel">Cancelar</button>
                     <button id="pairEnterConfirm" type="button" class="flex-1 min-h-[48px] bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-400 dark:hover:bg-cyan-300 text-white dark:text-slate-900 font-semibold py-2 px-4 rounded-lg transition" data-i18n="pair.enter.confirm">Entrar</button>
                 </div>
@@ -903,10 +907,10 @@
         </div>
 
         <div id="batchReadModal" role="dialog" aria-modal="true" aria-labelledby="batchReadTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+            <div class="dialogo-cartao bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
                 <h3 id="batchReadTitle" class="text-xl font-bold text-slate-800 mb-2 dark:text-slate-100" data-i18n="modal.batchRead.title">Marcar em lote?</h3>
                 <p id="batchReadMessage" class="text-sm text-slate-500 mb-6 dark:text-slate-400">Marcar como lidos os pedidos da fila?</p>
-                <div class="dialogo-acoes flex space-x-3">
+                <div class="dialogo-acoes acoes-presas flex gap-3">
                     <button id="cancelBatchRead" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 font-semibold py-2 px-4 rounded-lg transition dark:text-slate-200" data-i18n="common.cancel">Cancelar</button>
                     <button id="confirmBatchRead" type="button" class="flex-1 min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="modal.batchRead.confirm">Marcar como lidos</button>
                 </div>
@@ -1476,46 +1480,48 @@
     <div id="mapaLightbox" role="dialog" aria-modal="true" aria-label="Mapa do local" data-i18n-aria="card.map.slide" class="hidden fixed inset-0 bg-slate-200 dark:bg-slate-800 z-[65] select-none overflow-hidden touch-none">
         <div id="mapaLbTiles" class="absolute inset-0"></div>
         <div id="mapaLbMarks" class="absolute inset-0 pointer-events-none"></div>
-        <button id="mapaLbClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+        <button id="mapaLbClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
         <!-- Botões de zoom além do gesto: pinch não existe em desktop com mouse
              sem roda, e alvo de 44px é a régua do projeto pra qualquer toque. -->
-        <div class="absolute z-20 flex flex-col gap-2" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem">
+        <div id="mapaLbZoom" class="absolute z-20 flex flex-col gap-2" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem; left: max(0.75rem, env(safe-area-inset-left, 0px))">
             <button id="mapaLbMais" type="button" aria-label="Aproximar" data-i18n-aria="card.map.zoomIn" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">+</button>
             <button id="mapaLbMenos" type="button" aria-label="Afastar" data-i18n-aria="card.map.zoomOut" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center text-2xl leading-none transition-colors">−</button>
             <button id="mapaLbCentrar" type="button" aria-label="Voltar ao pedido" data-i18n-aria="card.map.recentrar" class="text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </button>
         </div>
-        <span id="mapaLbEscala" class="absolute bottom-4 left-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala"></span>
-        <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1 left-4 right-16" style="bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
+        <span id="mapaLbEscala" class="absolute bottom-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala" style="left: 1rem; left: max(1rem, env(safe-area-inset-left, 0px))"></span>
+        <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1" style="left: 1rem; right: 4rem; left: max(1rem, env(safe-area-inset-left, 0px)); right: calc(max(0.75rem, env(safe-area-inset-right, 0px)) + 3.25rem); bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
         <!-- O SLOT DE AÇÃO deste lightbox, no rodapé do lado oposto ao ✕ do
              topo — a mesma geometria que o lightbox da foto usa pro aprovar/
              excluir. É o primeiro e único ocupante: segundo candidato divide
              este slot por exclusão mútua, não ganha um canto novo. A legenda
-             já para em `right-16`, então o canto estava livre (medido: 0 de 33
-             pontos dela cobertos, Pixel e Fold, nos dois temas).
+             já para antes dele (`calc(max(0.75rem, recorte lateral) + 3.25rem)`:
+             o botão de 2,75 rem mais o vão), então o canto estava livre
+             (medido: 0 de 33 pontos dela cobertos, Pixel e Fold, nos dois temas).
              O `href` é reescrito no `desenhar()`, que é por onde passam os
              QUATRO caminhos que mexem no centro: abrir, arrastar, zoom e
              recentrar. -->
-        <a id="mapaLbStreetView" target="_blank" rel="noopener noreferrer" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors" style="right: 0.75rem; bottom: calc(0.75rem + env(safe-area-inset-bottom))" title="Ver a rua aqui no Street View" data-i18n-title="card.map.streetView" aria-label="Ver a rua aqui no Street View" data-i18n-aria="card.map.streetView">
+        <a id="mapaLbStreetView" target="_blank" rel="noopener noreferrer" class="absolute z-20 text-white bg-black/50 hover:bg-black/75 rounded-full w-11 h-11 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom))" title="Ver a rua aqui no Street View" data-i18n-title="card.map.streetView" aria-label="Ver a rua aqui no Street View" data-i18n-aria="card.map.streetView">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
         </a>
     </div>
 
     <div id="imageLightbox" role="dialog" aria-modal="true" aria-label="Visualização de foto" data-i18n-aria="lightbox.aria" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[65] flex items-center justify-center select-none overflow-hidden">
-        <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem">
+        <button id="lightboxClose" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-11 h-11 flex items-center justify-center text-xl transition-colors" style="top: calc(0.75rem + env(safe-area-inset-top)); right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
-        <button id="lightboxPrev" type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="hidden absolute left-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">‹</button>
-        <button id="lightboxNext" type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="hidden absolute right-2 z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors">›</button>
-        <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem"></span>
+        <button id="lightboxPrev" type="button" aria-label="Foto anterior" data-i18n-aria="card.image.prev.aria" class="hidden absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors" style="left: 0.5rem; left: max(0.5rem, env(safe-area-inset-left, 0px))">‹</button>
+        <button id="lightboxNext" type="button" aria-label="Próxima foto" data-i18n-aria="card.image.next.aria" class="hidden absolute z-10 text-white bg-black/40 hover:bg-black/70 rounded-full w-12 h-12 flex items-center justify-center text-2xl transition-colors" style="right: 0.5rem; right: max(0.5rem, env(safe-area-inset-right, 0px))">›</button>
+        <span id="lightboxCount" class="hidden absolute z-10 text-white bg-black/40 text-sm font-medium px-3 py-1.5 rounded-full tnum" style="top: calc(0.75rem + env(safe-area-inset-top)); left: 0.75rem; left: max(0.75rem, env(safe-area-inset-left, 0px))"></span>
         <span id="lightboxNewBadge" class="hidden absolute left-1/2 -translate-x-1/2 z-10 text-3xl leading-none pointer-events-none" style="top: calc(0.75rem + env(safe-area-inset-top)); filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title" role="img" aria-label="Foto nova proposta neste pedido" data-i18n-aria="card.newPhoto.title">✨</span>
-        <!-- A dica reserva o canto direito (`right-20`): o botão de ação mora
-             lá, e centralizada de ponta a ponta ela ficava CORTADA por ele em
-             tela estreita — já era assim com a lixeira sozinha. -->
-        <p id="lightboxZoomHint" class="lb-baixo absolute left-4 right-20 z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate"  data-i18n="lightbox.zoomHint">Toque duplo amplia · arraste pro lado pra trocar · pra baixo pra fechar</p>
+        <!-- A dica reserva o canto direito (`calc(max(0.75rem, recorte lateral)
+             + 4.25rem)`: o botão de ação mais o vão): o botão mora lá, e
+             centralizada de ponta a ponta ela ficava CORTADA por ele em tela
+             estreita — já era assim com a lixeira sozinha. -->
+        <p id="lightboxZoomHint" class="lb-baixo absolute z-10 text-white/70 text-xs text-center bg-black/40 px-3 py-1.5 rounded-full pointer-events-none truncate" style="left: 1rem; right: 5rem; left: max(1rem, env(safe-area-inset-left, 0px)); right: calc(max(0.75rem, env(safe-area-inset-right, 0px)) + 4.25rem)" data-i18n="lightbox.zoomHint">Toque duplo amplia · arraste pro lado pra trocar · pra baixo pra fechar</p>
         <!-- UM slot de ação, no canto de BAIXO, do lado oposto ao ✕ do topo.
              Os dois botões abaixo são mutuamente exclusivos e ocupam o MESMO
              lugar: foto pendente se aprova, foto já no mapa se exclui.
@@ -1529,10 +1535,10 @@
              `.lb-acao` põe a borda de DOIS TONS (anel branco + sombra escura).
              Um tom só não basta: pra toda cor sólida existe uma foto da mesma
              luminância, e aí a borda some. O par branco/escuro é 21:1 sempre. -->
-        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
+        <button id="lightboxDelete" type="button" aria-label="Excluir foto" data-i18n-aria="lightbox.delete.aria" title="Excluir foto" data-i18n-title="lightbox.delete.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-red-600 hover:bg-red-500 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>
-        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem">
+        <button id="lightboxApprove" type="button" aria-label="Aprovar foto" data-i18n-aria="lightbox.approve.aria" title="Aprovar foto" data-i18n-title="lightbox.approve.aria" class="lb-baixo lb-acao hidden absolute z-10 text-white bg-emerald-700 hover:bg-emerald-600 disabled:opacity-70 rounded-full w-12 h-12 flex items-center justify-center transition-colors" style="right: 0.75rem; right: max(0.75rem, env(safe-area-inset-right, 0px))">
             <span id="lightboxApproveSpinner" class="hidden w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" aria-hidden="true"></span>
             <svg id="lightboxApproveIcon" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
         </button>
@@ -1611,7 +1617,7 @@
                 <div class="flex items-center gap-2">
                     <svg class="w-5 h-5 flex-shrink-0 text-slate-500 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18a15 15 0 010-18z"/></svg>
                     <label for="langSelectHelp" class="sr-only" data-i18n="filters.language.label">Idioma</label>
-                    <select id="langSelectHelp" class="flex-1 min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700"></select>
+                    <select id="langSelectHelp" class="flex-1 min-w-0 min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700"></select>
                 </div>
 
                 <button id="pairCreateBtn" data-so-com-sessao type="button" class="w-full min-h-[48px] bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-semibold text-sm py-3 rounded-xl transition-colors flex items-center justify-center gap-2 border border-cyan-100 dark:border-cyan-400/30">
@@ -1621,7 +1627,7 @@
 
                 <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 dark:bg-slate-900 dark:border-slate-700">
                     <h4 class="font-semibold text-slate-800 mb-2 text-sm uppercase tracking-wider dark:text-slate-100" data-i18n="help.howToProcess.title">Como processar</h4>
-                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div class="ajuda-gestos grid grid-cols-3 gap-2 text-center text-xs">
                         <div class="bg-white border border-rose-100 dark:border-rose-400/30 rounded-lg p-2 dark:bg-slate-800 dark:text-slate-200">
                             <div class="text-rose-600 dark:text-rose-400 font-bold text-lg leading-none mb-1">←</div>
 

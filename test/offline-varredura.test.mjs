@@ -27,6 +27,10 @@ function fatiar(nome) {
 const constante = (nome) => Number(new RegExp(`^const ${nome} = ([^;]+);`, 'm').exec(APP_SEM)[1]);
 // A chave de um pedido, a do app (a gravação da fila confere com ela se é a mesma fila).
 const chaveDoPedido = new Function(fatiar('chaveDoPedido') + '\nreturn chaveDoPedido;')();
+// A espera com TETO do armazenamento (R21-4-01), a de verdade, criada FORA do escopo dos harnesses: vários
+// trocam o `setTimeout` por um que roda na hora (pra pular o recuo de 400 ms), e o teto dela, no escopo
+// deles, estouraria sempre. Os harnesses que fatiam funções que esperam o armazenamento a recebem como dep.
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
 
 // Roda a varredura de VERDADE contra downloads de mentira. `baixar(u)` diz o que
 // cada URL devolve (true | false | 'definitivo'); conta as tentativas por URL.
@@ -63,6 +67,7 @@ async function varrer(itens, baixar, { treino = false, concorrencia = 1, st: est
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {},
     offlinePodarTiles: async (manter) => { podas.push([...manter].sort()); return 0; },
     dfato: (k, o) => diario.push([k, o]),
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
     setTimeout: (fn) => { fn(); return 0; },
   };
   const corpo = [fatiar('filaReal'), fatiar('chaveDoPedido'), fatiar('pedidoForaDaFilaGuardada'), fatiar('offlineVarrer')].join('\n')
@@ -160,7 +165,7 @@ test('R5-4-1: a RETOMADA do "parcial" baixa só o que FALTOU — e a janela nova
 test('offlineBaixar: tile 4xx é "definitivo", 5xx e rede caída são falha de REDE (tenta de novo)', async () => {
   const guardados = [];
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto,
     OFFLINE_4XX_PASSAGEIRO: new Function('return ' + /^const OFFLINE_4XX_PASSAGEIRO = (new Set\(\[[^\]]*\]\));/m.exec(APP_SEM)[1])(),
     caches: { open: async () => ({ put: async (u) => guardados.push(u) }) },
     Image: class {}, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
@@ -221,7 +226,7 @@ function gravarCom({ treinoAgora = false, treinoDuranteOAbrir = false, lugarDaFi
     // O carimbo da fila que está na base, e os pedidos dela (as variáveis do
     // módulo), e a cobertura (R6-4-2: a mesma fila regravada mantém o carimbo).
     offlineFilaGravadaEm: null, offlineFilaGravadaChaves: null, offlineFilaPreparada: null, chaveDoPedido,
-    offlineEpoca: 0,
+    offlineEpoca: 0, esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
   };
   const chaves = Object.keys(deps);
   const gravar = new Function(...chaves, fatiar('filaReal') + '\n' + fatiar('pedidoForaDaFilaGuardada') + '\n' + fatiar('offlineGravarFila') + '\nreturn offlineGravarFila;')(...chaves.map((k) => deps[k]));
@@ -272,7 +277,7 @@ test('offlinePodarTiles: apaga só o que não é da fila, e não cria o cache de
   // A lista do "já pronto" desta janela (R6-4-1): o que a poda apaga sai dela também.
   const feitos = { janela: 7, epoca: 0, us: new Set(['https://t/1', 'https://t/2', 'foto-1']) };
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', offlineFeitosNaJanela: feitos,
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', offlineFeitosNaJanela: feitos, esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
     caches: {
       has: async () => guardados.length > 0,
       open: async () => { criou = true; return { keys: async () => guardados.map((url) => ({ url })), delete: async (r) => { apagados.push(r.url); } }; },
@@ -326,6 +331,7 @@ function aparelhoComCache() {
     offlineBaixar: async (u) => { baixados.push(u); cache.set(u, true); return true; },
     offlineSondarRede: async () => true,
     offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {}, offlineGravarJanela: () => {}, dfato: () => {},
+    esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
     setTimeout: (fn) => { fn(); return 0; },
     caches: {
       has: async () => cache.size > 0,
@@ -409,7 +415,7 @@ test('offlineGravarFila: transação ABORTADA (cota) devolve \'falhou\' em vez d
     filaDeOnde: null, lugarAgora: () => ({ regiao: 'row', pais: '30' }),
     // A sessão DESTA aba, a da memória (R13-4-04: sem ela a fila não é gravada).
     contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', API: { getSession: () => 'tok' },
-    offlineEpoca: 0, chaveDoPedido,
+    offlineEpoca: 0, chaveDoPedido, esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000,
   };
   deps.offlineErroDeCota = (e) => !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
   const chaves = Object.keys(deps);
@@ -458,7 +464,7 @@ function reabrir({ guardada, agora }) {
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
-      offlineFilaGravadaChaves = null;
+      offlineFilaGravadaChaves = null, offlineEpoca = 0, offlineLendoAJanela = null;
     ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineRecuperarJanela')}\n${fatiar('offlineTentarAbrirSemRede')}
     return { abrir: offlineTentarAbrirSemRede, onde: () => filaDeOnde };`)(...chaves.map((k) => deps[k]));
   return { app, AppState, log };
@@ -508,7 +514,7 @@ test('O9: download PENDURADO estoura o teto — tile e foto — e conta como fal
   class ImagemPendurada {
     set src(v) { if (v === '') cancelouFoto = true; }
   }
-  const deps = { offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30,
+  const deps = { offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30, OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto,
     caches: { open: async () => ({ put: async () => {} }) }, Image: ImagemPendurada, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0 };
   const chaves = Object.keys(deps);
   // O `fetch` pendurado só termina se o pedido for ABORTADO — como na rede de verdade.
@@ -709,6 +715,7 @@ function aparelhoO8() {
       FILTERS_KEY: 'waze_places_filters', TYPES_ALL: TYPES_ALL_R, TYPES_PADRAO: TYPES_PADRAO_R, ORDEM_PADRAO: 'newest',
       API: { getRegion: () => 'row', getCountry: () => 30, getSession: () => 'tok' },
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
       contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', dfato: (k, o) => log.push([k, o || {}]),
       semOsJaDecididos: (places) => ({ places: places.slice(), excluidos: 0 }),
       pedidosQueEntraramNaFila: new Set(), registrarEntradaNaFila: () => {},
@@ -717,12 +724,13 @@ function aparelhoO8() {
       enviarPendenciasDoLightbox: () => {}, removeUndoBanner: () => {}, bloqueadosPorPagina: new Map(),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'saveFilters', 'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'resetQueue',
+      'saveFilters', 'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'offlineLerChave', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'resetQueue',
       'filaGuardadaDestaConta', 'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, tratouNestaFila = false,
         offlineFilaGravadaEm = null, offlineFilaPreparada = null, offlineFilaGravadaChaves = null,
-        filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0, offlineEpoca = 0;
+        filaAtravessouSessao = false, puladosNoInicioDaFila = 0, filaEsperaPerfil = false, rebuscasAuto = 0, offlineEpoca = 0,
+        offlineLendoAJanela = null;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
@@ -977,6 +985,7 @@ function aparelhoO1({ filtros = null } = {}) {
       completarPerfilChegado: async () => {}, conferirContaDestaAba: () => {}, PERFIL_REFAZER_MS: 60000,
       redesenharFiltrosComOPerfil: () => {}, saveFilters: () => {},
       offlineDB, OFFLINE_STORE: 'fila', offlinePodarPousos: () => {}, offlineLerRegistroDaJanela: async () => null,
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
       contaAgora: () => '111', marcaDaSessao: (t) => 'm-' + t, marcaDestaAba: () => 'm-tok', dfato: (k, o) => log.push([k, o || {}]),
       dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
       handleUnauthorized: () => log.push(['sessao', {}]), showToast: () => {}, msgDoServidor: (r, d) => d, t: (k) => k,
@@ -996,7 +1005,7 @@ function aparelhoO1({ filtros = null } = {}) {
       showNoPlaces: () => log.push([AppState.loadError ? 'falha' : 'tudoLimpo', {}]),
     };
     const nomes = ['ordemDoWaze', 'assinaturaDeBusca', 'lugarAgora', 'mesmoLugar', 'sanearTiposSalvos', 'filtrosDeFabrica',
-      'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'filaGuardadaDestaConta',
+      'loadFilters', 'idSalvoValido', 'categoriasSalvasValidas', 'offlineLerFila', 'offlineLerChave', 'filaReal', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'filaGuardadaDestaConta',
       'offlineRecuperarJanela', 'offlineTentarAbrirSemRede', 'chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
       'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'startFetching', 'abrirGuardadaDepoisDaFalha',
       // "Minha área": a carga do perfil, a caixa por servidor e a pergunta ao servidor da busca.
@@ -1015,7 +1024,7 @@ function aparelhoO1({ filtros = null } = {}) {
         decisaoDoLugarDe = null, leiturasDaMinhaArea = { epoca: null, noAr: new Map() },
         editaveisPorServidor = ${JSON.stringify(editaveis || { conta: null, lidos: {}, caixas: {}, gerenciadas: {} })},
         perfilFalhouPorRede = false, minhaAreaFalhouPorRede = { epoca: null, regioes: new Set() },
-        cargasDoPerfil = 0, offlineEpoca = 0;
+        cargasDoPerfil = 0, offlineEpoca = 0, offlineLendoAJanela = null;
       ${nomes.map(fatiar).join('\n')}
       AppState.filters = filtrosDeFabrica();
       loadFilters();
@@ -1499,6 +1508,7 @@ function aparelhoDaLinha() {
       OFFLINE_OCIOSO_MS: 180000, OFFLINE_CICLO_MS: 1200000, OFFLINE_CONCORRENCIA: 1,
       OFFLINE_ANUNCIAR_A_CADA: 50, OFFLINE_TENTATIVAS_POR_ITEM: constante('OFFLINE_TENTATIVAS_POR_ITEM'),
       OFFLINE_LIMITE_PAUSA_MS: 60 * 1000, OFFLINE_COTA_PAUSA_MS: 10 * 60 * 1000,
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
       // Um tile e uma foto por pedido da fila.
       offlineItensDaFila: async () => {
         rede.varreduras++;
@@ -1514,13 +1524,13 @@ function aparelhoDaLinha() {
       setTimeout: (fn) => { fn(); return 0; },
     };
     const nomes = ['mesmoLugar', 'filaGuardadaDestaConta', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineGravarJanela', 'offlineLerRegistroDaJanela',
-      'offlineRecuperarJanela', 'offlineLerFila', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
+      'offlineRecuperarJanela', 'offlineLerFila', 'offlineLerChave', 'offlineTentarAbrirSemRede', 'offlinePrecisaVarrer', 'offlineVarrer',
       'atualizarLinhaDoOffline', 'filaReal', 'filaGuardadaEsperandoOTreino', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'chaveDoPedido', 'offlineErroDeCota'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let filaDeOnde = null, offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0,
         offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(), offlineEpoca = 0,
         offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
-        offlineFilaGravadaChaves = null,
+        offlineFilaGravadaChaves = null, offlineLendoAJanela = null,
         offlineFilaVarrida = null;
       ${nomes.map(fatiar).join('\n')}
       return { varrer: offlineVarrer, gravarFila: offlineGravarFila, abrirSemRede: offlineTentarAbrirSemRede,
@@ -1665,8 +1675,12 @@ test('cobertura: registro da janela de versão anterior (sem `filaCoberta`) vale
 test('cobertura: a abertura COM rede traz a janela e a cobertura juntas — no lie-fi a guardada abre "Pronto"', async () => {
   // O `abrirComSessaoSalva` (com rede) lê a janela antes da busca; a busca falha
   // e a guardada abre pelo `abrirGuardadaDepoisDaFalha`, com a janela já na memória.
-  assert.match(fatiar('abrirComSessaoSalva'), /if \(offlineLigado\(\) && offlineJanelaServida === null\) await offlineRecuperarJanela\(\);/,
+  // (Desde o R21-4-02 a espera tem LIMITE — `offlineEsperarAJanelaNaAbertura` —, mas a leitura é a mesma
+  // `offlineRecuperarJanela`, que traz a janela E a fila que ela cobriu.)
+  assert.match(fatiar('abrirComSessaoSalva'), /if \(offlineLigado\(\) && offlineJanelaServida === null\) await offlineEsperarAJanelaNaAbertura\(\);/,
     'a abertura com rede voltou a ler só a janela, sem a fila que ela cobriu');
+  assert.match(fatiar('offlineEsperarAJanelaNaAbertura'), /const lendo = offlineRecuperarJanela\(\);/,
+    'a espera da abertura não lê a janela pela leitura que traz também a cobertura');
   const { ap } = await filaAPronta();
   const p2 = ap.pagina({ onLine: true });
   await p2.recuperarJanela();
@@ -1961,8 +1975,9 @@ function duasAbasComCache() {
       }),
       offlineSondarRede: async () => true, offlineAnunciarTiles: () => {}, atualizarLinhaDoOffline: () => {},
       offlineGravarJanela: () => {}, setTimeout: (fn) => { fn(); return 0; },
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
     };
-    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlinePodarTiles', 'offlineVarrer'];
+    const nomes = ['filaReal', 'chaveDoPedido', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlineLerChave', 'offlinePodarTiles', 'offlineVarrer'];
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, `let offlineVarrendo = false, offlinePedidaDeNovo = false,
         offlineUltimoGesto = Date.now(), offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0,

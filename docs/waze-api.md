@@ -33,7 +33,7 @@ segue outra tabela (`row` → `row`, `na` → `usa`, `il` → `il`). O gRPC pend
 ## 2. REST — a tabela `paths` COMPLETA do WME
 
 São **42 caminhos**, extraídos da constante `Config.paths` do bundle. O app
-usa **6**. Os outros 36 não são segredo nem novidade: são simplesmente o resto
+usa **7**. Os outros 35 não são segredo nem novidade: são simplesmente o resto
 do editor (segmentos, fechamentos, eventos de trânsito, camadas de imagem).
 
 | caminho | nome interno no WME | nós |
@@ -41,11 +41,11 @@ do editor (segmentos, fechamentos, eventos de trânsito, camadas de imagem).
 | `Session` | `auth` | **usamos** (perfil + gate) |
 | `v1/Issues/Search/List` | `issueTrackerSearchList` | **usamos** (a fila) |
 | `v1/Issues/Read` | `issueTrackerReadIssue` | **usamos** (marcar lido) |
+| `v1/Issues/Star` | `issueTrackerStarIssue` | **usamos** (o ↑ com "Pular guarda o pedido", §5.1) |
 | `Features` | `features` | **usamos** (rejeitar, excluir foto, renomear, duplicado) |
 | `LocationSearch/Countries` | `locationSearchCountries` | **usamos** |
 | `LocationSearch/States` | `locationSearchStates` | **usamos** |
 | `v1/Issues` | `issueTrackerIssues` | — GET de um pedido específico |
-| `v1/Issues/Star` | `issueTrackerStarIssue` | — ver §5 |
 | `v1/Issues/Search/Map` | `issueTrackerSearchMap` | — pinos do mapa (sem página, sem ordenação) |
 | `v1/Issues/Search/Save` | `issueTrackerSearchSave` | — POST cria, DELETE apaga |
 | `v1/Issues/Search/Save/Update` | `issueTrackerSearchSaveUpdate` | — |

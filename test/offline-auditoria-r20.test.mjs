@@ -25,6 +25,11 @@ const MIN = ler('js/min/app.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
   assert.ok(m, `${nome} sumiu do app.js`);
@@ -183,11 +188,14 @@ function idbDeMentira(comportamento = 'ok') {
 }
 
 // ═══ A2 · o registro da janela: `null` = lido e sem registro, `undefined` = a leitura FALHOU ══════
-function leitoresDaBase(comportamento = 'ok', { tetoMs = 60 } = {}) {
+// `tetoMs`: o teto da base (`OFFLINE_DB_TETO_MS`) — desde o R21-4-01 cobre o `open` E a leitura, UM prazo. Com 60 ms uma
+// pausa do processo (CPU disputada) estourava a leitura que DEVIA dar certo (MEDIDO no r19, que tinha o mesmo desenho):
+// os testes de sucesso ficam com o do app (5 s) e só quem espera o estouro (o `open` que não responde) pede um curto.
+function leitoresDaBase(comportamento = 'ok', { tetoMs = 5000 } = {}) {
   const { st, indexedDB } = idbDeMentira(comportamento);
-  const deps = { indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: tetoMs };
+  const deps = { indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: tetoMs, esperarComTeto };
   const nomes = Object.keys(deps);
-  const fn = new Function(...nomes, [fatiar('offlineDB'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('offlineLerJanela'),
+  const fn = new Function(...nomes, [fatiar('offlineDB'), fatiar('offlineLerChave'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('offlineLerJanela'),
     'return { fila: offlineLerFila, registro: offlineLerRegistroDaJanela, janela: offlineLerJanela };'].join('\n'))(...nomes.map((k) => deps[k]));
   return { ...fn, st };
 }
@@ -206,11 +214,27 @@ test('A2: `offlineLerRegistroDaJanela` — `null` na base lida sem registro (ou 
   assert.equal(await vazia.registro(), null, 'a base lida sem registro deixou de ser `null`');
   // As FALHAS: nenhuma pode ser confundida com "nunca preparou".
   for (const modo of ['open-lanca', 'mudo', 'get-erro']) {
-    const f = leitoresDaBase('ok');
+    const f = leitoresDaBase('ok', { tetoMs: 250 });     // o `mudo` espera o teto estourar: curto, e o atraso só ajuda
     f.st.criada = true; f.st.dados.set('janela', { janela: 1492385, t: 5, filaCoberta: 4 });
     f.st.comportamento = modo;
     assert.equal(await f.registro(), undefined, `DEFEITO: a leitura do registro que falhou (${modo}) saiu como "sem registro" (null)`);
   }
+});
+
+test('INSTRUMENTO (R21-4-01): o harness dos leitores usa o teto do app — uma pausa de 80 ms do processo não faz falhar a leitura que DARIA CERTO', async () => {
+  const parar = (ms) => { const t = performance.now(); while (performance.now() - t < ms); };
+  const monta = (opcoes) => { const l = leitoresDaBase('ok', opcoes); l.st.criada = true; l.st.dados.set('janela', { janela: 1492385, t: 5, filaCoberta: 4 }); return l; };
+  const a = monta();
+  const lendo = a.registro();
+  parar(80);
+  const r = await lendo;
+  assert.ok(r && r.janela === 1492385,
+    `DEFEITO DO INSTRUMENTO: a leitura do harness estourou (${r === undefined ? 'undefined' : JSON.stringify(r)}) numa pausa de 80 ms — o teto dele é curto demais pra um teste de SUCESSO`);
+  // CONTROLE: com o teto curto (o dos testes que esperam o estouro) a mesma pausa estoura a leitura.
+  const curto = monta({ tetoMs: 60 });
+  const lendoCurto = curto.registro();
+  parar(80);
+  assert.equal(await lendoCurto, undefined, 'CONTROLE: a pausa de 80 ms não estourou o teto de 60 ms — o instrumento não pega a pausa');
 });
 
 test('A2: os chamadores que só perguntam "tem registro?" tratam `undefined` como `null` — nada muda no comportamento', async () => {
@@ -224,7 +248,7 @@ test('A2: os chamadores que só perguntam "tem registro?" tratam `undefined` com
   assert.match(fatiar('offlineLerJanela'), /return v \? v\.janela : null;/);
   assert.match(fatiar('offlineRecuperarJanela'), /if \(!r \|\| offlineJanelaServida !== null\) return;/);
   // `offlineRecuperarJanela` com `undefined`: não toca em nada.
-  const rec = new Function('offlineLerRegistroDaJanela', 'let offlineJanelaServida = null, offlineFilaPreparada = null;\n' + fatiar('offlineRecuperarJanela')
+  const rec = new Function('offlineLerRegistroDaJanela', 'let offlineJanelaServida = null, offlineFilaPreparada = null, offlineEpoca = 0, offlineLendoAJanela = null;\n' + fatiar('offlineRecuperarJanela')
     + '\nreturn async () => { await offlineRecuperarJanela(); return [offlineJanelaServida, offlineFilaPreparada]; };')(async () => undefined);
   assert.deepEqual(await rec(), [null, null]);
 });
@@ -268,10 +292,10 @@ test('A2: a triagem diz "NÃO LIDA" / "NÃO LIDO" — e "nunca preparou" só qua
 test('A5: com o IndexedDB PENDURADO as duas leituras do `diagOffline` começam juntas — e a falha chega ao arquivo como `{ erro }`', async () => {
   const { st, indexedDB } = idbDeMentira('mudo');
   const TETO = 80;
-  const deps = { indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: TETO,
+  const deps = { indexedDB, OFFLINE_DB: 'waze_places_offline', OFFLINE_STORE: 'fila', OFFLINE_DB_TETO_MS: TETO, esperarComTeto,
     diagOfflineAgora: () => ({ ligado: true }), filaReal: () => [], chaveDoPedido, offlineLerPousos: () => [], window: {}, OFFLINE_TILES_CACHE: 'c' };
   const nomes = Object.keys(deps);
-  const diagOffline = new Function(...nomes, [fatiar('offlineDB'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('diagOffline'),
+  const diagOffline = new Function(...nomes, [fatiar('offlineDB'), fatiar('offlineLerChave'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('diagOffline'),
     'return diagOffline;'].join('\n'))(...nomes.map((k) => deps[k]));
   const t0 = Date.now();
   const pronto = diagOffline();
@@ -282,15 +306,18 @@ test('A5: com o IndexedDB PENDURADO as duas leituras do `diagOffline` começam j
   const o = await pronto;
   assert.ok(o.filaGuardada && o.filaGuardada.erro, `a falha da fila não chegou ao relatório: ${JSON.stringify(o.filaGuardada)}`);
   assert.ok(o.janelaGuardada && o.janelaGuardada.erro, `a falha do registro não chegou ao relatório: ${JSON.stringify(o.janelaGuardada)}`);
-  assert.ok(Date.now() - t0 < TETO * 3, `levou ${Date.now() - t0} ms (teto de uma leitura: ${TETO})`);
+  // O limite de tempo é só a rede de segurança contra o relatório PENDURAR (o app tem 5 s por leitura, 10 s em série): a prova de
+  // que as leituras começam juntas é a de cima (`pedidos === 2`, que não depende do relógio). Com `TETO * 3` uma pausa de 100 ms
+  // do processo (CPU disputada) reprovava o teste (MEDIDO: "levou 320 ms" com teto de 80, em 1 de 25 rodadas).
+  assert.ok(Date.now() - t0 < TETO * 12, `levou ${Date.now() - t0} ms (teto de uma leitura: ${TETO})`);
   // CONTROLE: a base que responde devolve os dois sem erro.
   const boa = idbDeMentira('ok');
   boa.st.criada = true;
   boa.st.dados.set('fila', { places: [{ venueID: 'v1', updateRequestID: 'u1' }], t: 9, desde: 8, gravadoEm: 9 });
   boa.st.dados.set('janela', { janela: 3, t: 4, filaCoberta: 9 });
-  const dep2 = { ...deps, indexedDB: boa.indexedDB };
+  const dep2 = { ...deps, indexedDB: boa.indexedDB, OFFLINE_DB_TETO_MS: 5000 };   // o CONTROLE que dá certo não pode depender de o processo não parar
   const nomes2 = Object.keys(dep2);
-  const d2 = new Function(...nomes2, [fatiar('offlineDB'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('diagOffline'),
+  const d2 = new Function(...nomes2, [fatiar('offlineDB'), fatiar('offlineLerChave'), fatiar('offlineLerFila'), fatiar('offlineLerRegistroDaJanela'), fatiar('diagOffline'),
     'return diagOffline;'].join('\n'))(...nomes2.map((k) => dep2[k]));
   const ok = await d2();
   assert.equal(ok.filaGuardada.n, 1);
@@ -317,7 +344,7 @@ function reabrir({ guardada }) {
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let offlineJanelaServida = null, filaDeOnde = null, offlineFilaGravadaEm = null, offlineFilaPreparada = null,
-      offlineFilaGravadaChaves = null;
+      offlineFilaGravadaChaves = null, offlineEpoca = 0, offlineLendoAJanela = null;
     ${fatiar('mesmoLugar')}\n${fatiar('filaGuardadaDestaConta')}\n${fatiar('offlineRecuperarJanela')}\n${fatiar('offlineTentarAbrirSemRede')}
     return { abrir: offlineTentarAbrirSemRede };`)(...chaves.map((k) => deps[k]));
   return { app, log, AppState };
@@ -356,7 +383,8 @@ function varredura({ itens, rede = () => ok200, lerFila = 'boa', cache = 'ok', g
   const gravando = new Map();
   const erroDe = (nome, msg = nome) => Object.assign(new Error(msg), { name: nome });
   const ehSonda = (u) => /sonda\.invalid/.test(u);
-  const resposta = (r) => ({ ok: r.status >= 200 && r.status < 300, status: r.status, body: null,
+  // A sonda lê a resposta BOA até o fim (R21-4-08): o corpo de mentira chega inteiro.
+  const resposta = (r) => ({ ok: r.status >= 200 && r.status < 300, status: r.status, body: null, arrayBuffer: async () => new ArrayBuffer(0),
     headers: { get: (h) => (r.headers && r.headers[h.toLowerCase()]) ?? null } });
   const cacheDeMentira = {
     put: async (u) => {
@@ -387,7 +415,7 @@ function varredura({ itens, rede = () => ok200, lerFila = 'boa', cache = 'ok', g
     OFFLINE_LIMITE_PAUSA_MS: constanteBruta('OFFLINE_LIMITE_PAUSA_MS'),
     OFFLINE_LIMITE_PAUSA_MAX_MS: constanteBruta('OFFLINE_LIMITE_PAUSA_MAX_MS'),
     OFFLINE_COTA_PAUSA_MS: constanteBruta('OFFLINE_COTA_PAUSA_MS'),
-    OFFLINE_SONDA_URL: constanteBruta('OFFLINE_SONDA_URL'),
+    OFFLINE_SONDA_URL: constanteBruta('OFFLINE_SONDA_URL'), OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto,
     offlineGravandoTile: gravando, offlineGeracaoDeTile: 0, Image: class {},
     caches: { open: async () => { if (cache === 'open-lanca') throw erroDe('SecurityError'); return cacheDeMentira; },
               has: async () => noCache.size > 0, delete: async () => true },
@@ -565,7 +593,7 @@ function fabDeMentira() {
   const doc = { getElementById: (id) => (id === 'devFabBtn' ? btn : id === 'devFab' ? fab : null) };
   const deps = {
     document: doc, MODAL_IDS: [], MutationObserver: class { observe() {} }, requestAnimationFrame: (f) => { f(); return 1; }, cancelAnimationFrame: () => {},
-    posicionarFabDev: () => {}, addEventListener: () => {}, removeEventListener: () => {},
+    posicionarFabDev: () => {}, acompanharAReservaDoFab: () => {}, addEventListener: () => {}, removeEventListener: () => {},
     sessionStorage: { getItem: () => null, setItem: () => {} }, innerWidth: 400, innerHeight: 800,
     atualizarFabDev: () => {}, dlogCapturar: (m) => { capturas.push(m); return {}; },
     DEV_FAB_PEGAR_MS: 15, navigator: {}, setTimeout, clearTimeout, Math, Number,

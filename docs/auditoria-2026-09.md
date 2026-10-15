@@ -16,31 +16,39 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-14 ~20:00 UTC)
+## 0. Estado agora (2026-10-15 ~02:30 UTC)
 
-- **Lote 23 em produção** (PR #270, 57625f2, v2026.10.14-03): os 13 arquivos que o app carrega iguais, byte a byte, aos
-  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **169 ✓ · 2 ✗** (seção 26 incluída). Os 2 ✗ foram do
-  ROTEIRO: o ✓ de teste que não voltava a "não lido" (HTTP 500 mesmo após 3 tentativas), a corrida conhecida do Waze
-  (outro editor resolveu o pedido no meio do teste); o roteiro agora imprime o id do pedido. Nenhum defeito do app.
-- **Rodada 20** (`scratchpad/r20-<n>/relatorio.md`): oito auditores, ~35 achados, nenhum alto. Os mais sérios: a recusa
-  automática que, na espera pela trava entre abas, atravessava o "Sair", a troca de conta e o ↻ (R20-1-01/R20-2-01,
-  regressão do lote 23); o texto do sistema a partir de 1,5× tirando os botões dos diálogos e o "Aplicar" dos Filtros da
-  caixa (R20-7-01); o Enter segurado repetindo outros botões além dos três do card (R20-1-02 e vizinhos); o "Pronto" do
-  offline com zero mapas quando o Cache API falha (R20-4-B1); o "lida" cobrindo mensagem nunca vista em mais três
-  caminhos (R20-5). O resto: marcas das escritas de foto atravessando o "Sair", rótulos do placar e pílula do lightbox
-  com texto grande, hebraico/árabe no pedido mandado, `comCodigo` coagido no pareamento.
-- **Lote 24 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.14-04): cinco
-  agentes (fila/contas/teclado, offline e diagnóstico, presença, servidor e filtros, telas com texto grande). Na junção:
-  conflitos só em arquivos gerados (regenerados). `npm test` 3346/3346, também com o relógio grosso. Relatórios em
-  `scratchpad/relatorio-l24-<área>.md`.
-- **Decisões pro owner**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 24", com as
-  capturas). Abertas: a paisagem muito baixa (568×320 com o aviso "de N na região": esconder o aviso ou encolher a foto),
-  o placar a 360×740 em 1,5×, o Fold a 2×, o alinhamento misto em RTL na lista da presença, a frase da linha do
-  "Disponível offline" quando o cache não grava, o texto do "Como funciona" (a frase não cita o ↑), e o "Marcar todos"
-  entre abas (R18-2-02).
-- **Cookies** (2026-10-13): `0f5dfdf6-antigerme_cookies.txt` (L6+AM) e `4db61ced-cafanha_cookies.txt` (L2+AM).
-- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 27) — e a
-  rodada 21.
+- **Lote 24 em produção** (PR #271, bac9dbc, v2026.10.14-04): os 13 arquivos que o app carrega iguais, byte a byte, aos
+  juntados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **175 ✓ · 0 ✗** (seção 27 incluída). Nenhum defeito
+  do app. Os dois cabeçalhos de borda que diferem do arquivo `_headers` (X-Frame-Options e Referrer-Policy) são decisão
+  do dono, como antes.
+- **Rodada 21** (`scratchpad/r21-<n>/relatorio.md`): oito auditores, ~50 achados, nenhum alto. Os mais sérios: o
+  `card-aperta` que oscilava a cada quadro com "Reduzir movimento" ligado (R21-8-01, que o lote 23 trouxe e o 24 herdou;
+  a medida contava o ESTADO da classe, não as ESCRITAS, e deu "WebKit não reproduz", que também era falso); o "Aplicar"
+  dos Filtros fora da janela no Galaxy Fold a partir de 1,8× (R21-7-07, regressão do lote 24); o modo de contraste alto
+  do sistema sem tratamento algum (R21-7-01); a recusa automática esperando a trava atravessando a troca de conta
+  (R21-2-02, o que faltou no lote 24); o armazenamento ilegível lido como "Sair" em outra aba (R21-1-02/5-04/5-08); o
+  tempo real religando a 1 Hz (R21-5-05); a vez do local atravessando o "Sair" (R21-3-02). O resto: documentação com
+  árvores desatualizadas, o `z` do Desfazer fora do teclado latino, o campo da conversa e a foto do pedido em janela
+  baixa, e os 9 itens do offline/diagnóstico.
+- **Lote 25 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC`, v2026.10.15-01): nove agentes
+  (presença, servidor/filtros/teclado/documentos, foto ampliada, histórico/Resumo/placar, offline/diagnóstico, telas,
+  telas 2, contas/recusa automática, "Reduzir movimento"). Conflitos de fonte só nas listas do resumo do smoke de layout
+  (e nos comentários/contagem de pulos do `test/navegador.test.mjs`, hoje 7 só do Chromium) e no `renderHistory`
+  (os números escapados + a frase `sr-only`): resolvidos à mão, mantendo os dois lados. As telas 2 refizeram o conserto das ações presas
+  dos diálogos com o portão de rolagem (`scroll-state`), aplicado por cima como diferença entre os dois commits do agente. O fonte
+  também ganhou o guard `test/sem-invisiveis.test.mjs` (12 linhas com caractere invisível cru viraram escapes). `npm test` 3578/3578,
+  também com o relógio grosso. Relatórios em
+  `scratchpad/relatorio-l25-<área>.md`.
+- **Decisões pro dono**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 25", com as
+  capturas). Abertas: o placar no treino a partir de 1,3× e a 2× (D1), o treino a 320×568/280×653 a 1,5× (D5), a conversa
+  em janela de 160 px (compactar), colar o link do "Copiar link" resgatar na hora (ou uma frase nova), a frase quando a
+  recusa automática desiste da trava, a decisão de `excluindoAgora` por pedido, o `touch-action` da foto ampliada, o
+  plural do francês com zero no Resumo, o piso de 72 px da foto do pedido, e as de sempre (Fold a 2×, paisagem
+  568×320, extensão 0.3.5, etc.).
+- **Cookies** (2026-10-14): `3537c350-antigerme_cookies.txt` (L6+AM) e `287d89e6-cafanha_cookies.txt` (L2+AM).
+- **Próxima volta**: PR, CI, merge, produção (`prod-bytes.mjs` e o `prod-auditoria.mjs` inteiro, com a seção 28) — e a
+  rodada 22.
 
 ## 1. O pedido (o que "pronto" quer dizer)
 
@@ -94,6 +102,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #268 | 2026101401 | rodada 17: o card alvo do lote após a queda, o "Sair" com as escritas de foto, o Enter do IME, o 429 do mapa e a cota cheia no offline, a conversa aberta-fechada-aberta, o `buscar-places` e o `listaDoWaze` | **164 ✓ · 0 ✗** no app em produção, com a seção 24; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #269 | 2026101402 | rodada 18: o treino com o lote da queda, a troca de conta com o lote no ar, a gravação da fila do offline que falha, o mapa recusado em todo tile, o `diagCorpo` com leitura pendurada, `buscar-places` estrito | **168 ✓ · 0 ✗** no app em produção (a 1ª volta teve 1 ✗ do roteiro: desvio do relógio exatamente 0 ms), com a seção 25; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #270 | 2026101403 | rodada 19: o Enter/seta segurado, a geração do "Sair", o QR de pareamento na aba, a recusa automática entre abas, o texto grande no card (`card-aperta`), o hebraico/árabe (`dir="auto"`), a conexão do IndexedDB, o "lida" com a lista chegando | **169 ✓ · 2 ✗** no app em produção (os 2 ✗ do roteiro: corrida do Waze na restauração do lido), com a seção 26; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
+| #271 | 2026101404 | rodada 20: a recusa automática sob a trava entre abas, o Enter segurado em qualquer botão, as marcas das escritas de foto por geração do "Sair", o ✓ e a ⭐ por conta, o histórico guardado estragado, o `parear` estrito, os filtros salvos, o texto do sistema maior nos diálogos, nas abas, no placar e na pílula da foto, o "lida" e o "Sair" em outra aba | **175 ✓ · 0 ✗** no app em produção, com a seção 27; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere

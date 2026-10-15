@@ -162,8 +162,14 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Sua sessão vence em {n} dias · renove num computador',
     'stats.history.title': 'Histórico', 'stats.history.today': 'Hoje', 'stats.history.week': 'Semana',
     'stats.history.month': 'Mês', 'stats.history.total': 'Total', 'stats.history.empty': 'Sem histórico ainda.',
+    // o que os dois números de cada linha do Histórico dizem (lidos, rejeitados), pra quem não vê a cor
+    'stats.history.lidos': '{n} lidos', 'stats.history.lidosUm': '{n} lido',
+    'stats.history.rejeitados': '{n} rejeitados', 'stats.history.rejeitadosUm': '{n} rejeitado',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // resumo do mês (a imagem compartilhável)
     'resumo.botao': 'Compartilhar meu resumo de {mes}', 'resumo.modal.title': 'Seu resumo de {mes}',
+    // o mesmo botão onde o aparelho NÃO compartilha arquivo (computador): a folha só oferece o "Baixar"
+    'resumo.botaoVer': 'Ver meu resumo de {mes}',
     'resumo.compartilhar': 'Compartilhar', 'resumo.baixar': 'Baixar imagem', 'resumo.img.alt': 'Resumo do mês',
     'resumo.img.limpou': '{nome} limpou', 'resumo.img.pedidos': 'pedidos do mapa',
     'resumo.img.rejeitados': 'rejeitados', 'resumo.img.lidos': 'lidos',
@@ -876,8 +882,14 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Your session expires in {n} days · renew it on a computer',
     'stats.history.title': 'History', 'stats.history.today': 'Today', 'stats.history.week': 'Week',
     'stats.history.month': 'Month', 'stats.history.total': 'Total', 'stats.history.empty': 'No history yet.',
+    // what the two numbers on each History row say (read, rejected), for whoever can't see the color
+    'stats.history.lidos': '{n} read', 'stats.history.lidosUm': '{n} read',
+    'stats.history.rejeitados': '{n} rejected', 'stats.history.rejeitadosUm': '{n} rejected',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // monthly recap (the shareable image)
     'resumo.botao': 'Share my {mes} recap', 'resumo.modal.title': 'Your {mes} recap',
+    // the same button where the device can't share a file (computer): the sheet only offers "Download"
+    'resumo.botaoVer': 'See my {mes} recap',
     'resumo.compartilhar': 'Share', 'resumo.baixar': 'Download image', 'resumo.img.alt': 'Monthly recap',
     'resumo.img.limpou': '{nome} cleaned up', 'resumo.img.pedidos': 'map requests',
     'resumo.img.rejeitados': 'rejected', 'resumo.img.lidos': 'read',
@@ -1515,8 +1527,14 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Tu sesión vence en {n} días · renuévala en una computadora',
     'stats.history.title': 'Historial', 'stats.history.today': 'Hoy', 'stats.history.week': 'Semana',
     'stats.history.month': 'Mes', 'stats.history.total': 'Total', 'stats.history.empty': 'Sin historial aún.',
+    // lo que dicen los dos números de cada fila del Historial (leídas, rechazadas), para quien no ve el color
+    'stats.history.lidos': '{n} leídas', 'stats.history.lidosUm': '{n} leída',
+    'stats.history.rejeitados': '{n} rechazadas', 'stats.history.rejeitadosUm': '{n} rechazada',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // resumen del mes (la imagen para compartir)
     'resumo.botao': 'Compartir mi resumen de {mes}', 'resumo.modal.title': 'Tu resumen de {mes}',
+    // el mismo botón donde el dispositivo NO comparte archivos (computadora): la hoja solo ofrece "Descargar"
+    'resumo.botaoVer': 'Ver mi resumen de {mes}',
     'resumo.compartilhar': 'Compartir', 'resumo.baixar': 'Descargar imagen', 'resumo.img.alt': 'Resumen del mes',
     'resumo.img.limpou': '{nome} limpió', 'resumo.img.pedidos': 'solicitudes del mapa',
     'resumo.img.rejeitados': 'rechazadas', 'resumo.img.lidos': 'leídas',
@@ -2155,8 +2173,14 @@ const I18N_DICT = {
     'sessao.vence.diasPlural': '⏳ Votre session expire dans {n} jours · renouvelez-la sur un ordinateur',
     'stats.history.title': 'Historique', 'stats.history.today': 'Aujourd’hui', 'stats.history.week': 'Semaine',
     'stats.history.month': 'Mois', 'stats.history.total': 'Total', 'stats.history.empty': 'Pas encore d’historique.',
+    // ce que disent les deux nombres de chaque ligne de l'Historique (lues, rejetées), pour qui ne voit pas la couleur
+    'stats.history.lidos': '{n} lues', 'stats.history.lidosUm': '{n} lue',
+    'stats.history.rejeitados': '{n} rejetées', 'stats.history.rejeitadosUm': '{n} rejetée',
+    'stats.history.par': '{lidos}, {rejeitados}',
     // bilan du mois (l'image à partager)
     'resumo.botao': 'Partager mon bilan : {mes}', 'resumo.modal.title': 'Votre bilan : {mes}',
+    // le même bouton là où l'appareil ne partage PAS de fichier (ordinateur) : la feuille propose seulement « Télécharger »
+    'resumo.botaoVer': 'Voir mon bilan : {mes}',
     'resumo.compartilhar': 'Partager', 'resumo.baixar': 'Télécharger l’image', 'resumo.img.alt': 'Bilan du mois',
     'resumo.img.limpou': '{nome} a nettoyé', 'resumo.img.pedidos': 'demandes de la carte',
     'resumo.img.rejeitados': 'rejetées', 'resumo.img.lidos': 'lues',

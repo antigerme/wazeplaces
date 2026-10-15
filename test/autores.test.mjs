@@ -406,7 +406,11 @@ test('auto: não existe ESPERA entre decidir e enviar', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   const i = semComentarios.indexOf('async function aplicarRecusaAutomatica');
   const bloco = semComentarios.slice(i, semComentarios.indexOf('\nfunction ', i));
-  assert.doesNotMatch(bloco, /setTimeout|AUTO_CANCELAR_MS/,
+  // O ÚNICO `setTimeout` é o TETO da espera pela trava entre abas (lote 25, R21-2-05): ele não atrasa o envio, ele
+  // DESISTE dele (os alvos voltam como card). Qualquer outro continua sendo a janela que saiu.
+  const semOTeto = bloco.replace(/setTimeout\(\(\) => \{ naSessao\.desistiu = true; espera\.abort\(\); \}, RECUSA_AUTOMATICA_ESPERA_MAX_MS\)/, '');
+  assert.notEqual(semOTeto, bloco, 'CONTROLE: o teto da espera pela trava sumiu (ou mudou de forma) — esta guarda precisa ser revista');
+  assert.doesNotMatch(semOTeto, /setTimeout|AUTO_CANCELAR_MS/,
     'voltou a esperar antes de enviar: a janela foi removida de propósito');
   assert.match(bloco, /await enviarLote\(/, 'o envio precisa ser direto');
 });

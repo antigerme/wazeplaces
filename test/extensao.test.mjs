@@ -899,7 +899,7 @@ function rodarApp(aba, { relogio = null, esperaMs = null, comoOAppDeAntes = fals
     window: aba.win, API, safeLS, AppState: {},
     epocaDaSessao: 0, extPerguntando: false, extNegadoNestaPagina: false, extNegado: null, filaAtravessouSessao: false,
     mostrarEntrandoPelaExtensao() {}, negadoDaExtensao: (n) => n, aoEntrarNestaPagina() {}, fecharModaisDaEntrada() {},
-    showMainScreen() {}, resetQueue() {}, loadProfileAndAuxData() {}, startFetching() {}, esvaziarFilaDeSaida() {},
+    showMainScreen() {}, resetQueue() {}, soltarAsEscritasDeFotoDaSessaoQueAcabou() {}, loadProfileAndAuxData() {}, startFetching() {}, esvaziarFilaDeSaida() {},
     conhecerContaDoLogin: (c) => contas.push(c),
     focoNaTelaDeEntrada: () => false,   // o foco da tela de entrada (R10-1-05) não é o assunto daqui
     authInFlight: false, resgateEmVoo: false,   // nenhum login desta aba no ar (R11-1-03)

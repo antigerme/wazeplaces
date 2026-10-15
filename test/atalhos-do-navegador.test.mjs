@@ -98,7 +98,7 @@ function montar({ camada = null, escala = 1, travado = false } = {}) {
     prometerFocoDaSeta: () => {},
   };
   const fonte = [constante('TECLAS_DE_CURSOR'), fatiar('focoEmCampoDeTexto'), constante('AREAS_DO_CARD_QUE_ROLAM'),
-    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'), constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),
+    fatiar('focoEmAreaQueRola'), fatiar('atalhoDoNavegador'), fatiar('teclaDeComposicao'), fatiar('teclaDoDesfazer'), constante('TECLAS_DOS_ATALHOS_DO_NAVEGADOR'),
     constante('SETAS_QUE_ANDAM'), fatiar('handleKeyDown'), 'return handleKeyDown;'].join('\n');
   const handle = new Function(...Object.keys(deps), fonte)(...Object.values(deps));
   // Um elemento com foco: `closest` responde como o do navegador pra lista de classes dele.

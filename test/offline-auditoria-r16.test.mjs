@@ -29,6 +29,11 @@ const API_JS = ler('js/api.js');
 // Guard lê CÓDIGO, nunca comentário (gotcha #67), e por LINHA.
 const APP_SEM = APP.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
+// A espera do armazenamento com TETO (R21-4-01), a de verdade, criada FORA do escopo dos harnesses (vários trocam o
+// `setTimeout` por um que roda na hora, e o teto dela, lá dentro, estouraria sempre).
+const esperarComTeto = new Function(fatiar('esperarComTeto') + '\nreturn esperarComTeto;')();
+
+
 // Pula a ASSINATURA antes de casar chaves (parâmetro padrão com `{}`).
 function fatiar(nome) {
   const m = new RegExp('^(async )?function ' + nome + '\\(', 'm').exec(APP_SEM);
@@ -169,7 +174,7 @@ function canaisDeMentira() {
 }
 const entregue = () => new Promise((ok) => setTimeout(ok, 5));
 
-const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'chavesQueEsperamAConta', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila',
+const NOMES_ABA = ['filaReal', 'chaveDoPedido', 'chavesQueEsperamAConta', 'marcaDaSessao', 'marcaDestaAba', 'offlineGravarFila', 'pedidoForaDaFilaGuardada', 'offlineLerFila', 'offlineLerChave',
   'offlineGravarJanela', 'offlineLerRegistroDaJanela', 'offlineRecuperarJanela', 'offlinePodarTiles', 'offlineVarrer',
   'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineMarcarGesto', 'filaGuardadaEsperandoOTreino',
   'atualizarLinhaDoOffline', 'abrirCanalDoOffline', 'avisarOutrasAbasDaFilaGuardada', 'aoGravarFilaGuardadaEmOutraAba',
@@ -214,13 +219,14 @@ function aparelhoDeDuasAbas() {
       offlineSondarRede: async () => true, offlineAnunciarTiles: () => {},
       // A espera entre tentativas da varredura (400 ms) não é o que se mede aqui.
       setTimeout: (fn) => { fn(); return 0; },
+      esperarComTeto, OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_DB_TETO_MS: 5000,
       document: { getElementById: () => el }, t: (k) => k, escapeHtml: (x) => x,
     };
     const chaves = Object.keys(deps);
     const app = new Function(...chaves, [
       'let filaDeOnde = null, offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),',
       '    offlineJanelaServida = null, offlineUltimoResultado = null, offlineSegurarAte = 0, offlineEpoca = 0, offlineFilaGravadaEm = null,',
-      '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null,',
+      '    offlineFilaPreparada = null, offlineFilaGravadaChaves = null, offlineFilaVarrida = null, offlineLendoAJanela = null,',
       '    offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };',
       'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pedidosQuePousaram = new WeakSet(), avisosDePousoSemConta = [];',
       ...DECL_CANAL,
@@ -420,7 +426,7 @@ test('R16-4-01: a leitura da fila guardada vem ANTES da cobertura, a época é c
 test('R16-4-02: offlineBaixar — 408, 425 e 429 são falha PASSAGEIRA (volta na retomada); os outros 4xx seguem definitivos', async () => {
   const guardados = [];
   const deps = {
-    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000,
+    offlineEpoca: 0, OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto,
     OFFLINE_4XX_PASSAGEIRO: new Function('return ' + /^const OFFLINE_4XX_PASSAGEIRO = (new Set\(\[[^\]]*\]\));/m.exec(APP_SEM)[1])(),
     caches: { open: async () => ({ put: async (u) => guardados.push(u) }) },
     Image: class {}, offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
@@ -502,7 +508,7 @@ function tileComPutPreso() {
   };
   const deps = {
     caches: { open: async () => { await tique(); return cacheObj; }, delete: async () => { guardado.clear(); return true; } },
-    OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000, AbortController,
+    OFFLINE_TILES_CACHE: 'waze-places-tiles', OFFLINE_ITEM_TETO_MS: 30000, OFFLINE_ABORTO_GRACA_MS: 1000, esperarComTeto, AbortController,
     fetch: async () => ({ ok: true, status: 200 }), Image: class {}, setTimeout, clearTimeout,
     offlineGravandoTile: new Map(), offlineGeracaoDeTile: 0,
   };

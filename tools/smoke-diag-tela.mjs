@@ -217,6 +217,17 @@ await page.evaluate(() => { setLang('fr'); applyI18n(); }); await page.waitForTi
 await capturar('interface em francês');
 await page.evaluate(() => { setLang('pt'); applyI18n(); }); await page.waitForTimeout(300);
 
+// o texto do sistema ×1,5 (R21-4-03): só na CSSOM, como o ajuste do SO — o DOM não deixa rastro (o `style` da raiz segue
+// vazio), então a remontagem só sabe a letra do aparelho pelo `computado.escala` que o relatório agora traz.
+await page.evaluate(() => {
+  const f = new CSSStyleSheet(); f.replaceSync('html{font-size:24px}');
+  window.__folhaDoTexto = f; document.adoptedStyleSheets = [...document.adoptedStyleSheets, f];
+});
+await page.waitForTimeout(500);
+await capturar('texto do sistema ×1,5');
+await page.evaluate(() => { document.adoptedStyleSheets = document.adoptedStyleSheets.filter((f) => f !== window.__folhaDoTexto); });
+await page.waitForTimeout(300);
+
 // fila vazia legítima
 await page.evaluate(() => {
   AppState.queue = []; AppState.hasMore = false; AppState.loadError = false;
@@ -278,6 +289,47 @@ for (let i = 0; i < Math.min(momentos.length, aoVivo.length); i++) {
   checa(r.pct <= 8, `${aoVivo[i].nome}: ${r.pct}% de pixels diferentes`,
     r.pct > 8 ? `${r.largura}x${r.altura}` : '');
 }
+
+// ── a ESCALA do texto (R21-4-03) ──────────────────────────────────────────
+// A remontagem do estado "texto do sistema ×1,5" bateu com a tela ao vivo no laço acima (≤ 8%): ela leva a letra do aparelho.
+// O CONTROLE é o mesmo relatório SEM o campo (a forma dos relatórios de antes): a remontagem sai a 16 px, e a MESMA comparação
+// acusa a diferença — se ela não acusasse, o "bateu" de cima não provaria nada (gotcha #28).
+console.log('\n── a escala do texto ──');
+const iEsc = aoVivo.findIndex((a) => a.nome === 'texto do sistema ×1,5');
+checa(iEsc >= 0 && todos[idx[iEsc]] && todos[idx[iEsc]].computado && todos[idx[iEsc]].computado.escala
+  && Math.abs(todos[idx[iEsc]].computado.escala.raizPx - 24) < 0.1 && Math.abs(todos[idx[iEsc]].computado.escala.caixaRem - 24) <= 0.5,
+  'PRÉ-CONDIÇÃO: a captura do texto ×1,5 traz a escala medida (raiz 24 px, a caixa de 1rem 24 px)',
+  JSON.stringify(todos[idx[iEsc]] && todos[idx[iEsc]].computado && todos[idx[iEsc]].computado.escala));
+const semEscala = JSON.parse(JSON.stringify(d));
+for (const m of semEscala.momentos || []) if (m.computado) delete m.computado.escala;
+if (semEscala.computado) delete semEscala.computado.escala;
+const arqSemEscala = join(SAIDA, 'sem-escala.json');
+writeFileSync(arqSemEscala, JSON.stringify(semEscala));
+execFileSync(process.execPath, ['tools/diag-tela.mjs', arqSemEscala, join(SAIDA, 'sem-escala'), '--cru'], { cwd: ROOT, stdio: 'pipe' });
+const rSemEsc = await diferenca(aoVivo[iEsc].arq, join(SAIDA, 'sem-escala', `momento-${String(idx[iEsc] + 1).padStart(2, '0')}.png`));
+checa(!rSemEsc.erro && rSemEsc.pct > 8, `CONTROLE: o relatório sem a escala remonta a letra de 16 px e a comparação acusa (${rSemEsc.pct}% de pixels diferentes, contra o limite de 8%)`, JSON.stringify(rSemEsc));
+const iNormal = aoVivo.findIndex((a) => a.nome === 'card com foto');
+const rEsc = await diferenca(aoVivo[iEsc].arq, join(SAIDA, 'remontado', `momento-${String(idx[iEsc] + 1).padStart(2, '0')}.png`));
+checa(!rEsc.erro && rEsc.pct <= 8, `R21-4-03: o texto ×1,5 remonta COM a letra do aparelho (${rEsc.pct}% de diferença, com o relatório de antes ele dava ${rSemEsc.pct}%)`, JSON.stringify(rEsc));
+checa(iNormal >= 0 && todos[idx[iNormal]].computado.escala && Math.abs(todos[idx[iNormal]].computado.escala.raizPx - 16) < 0.1,
+  'CONTROLE: o estado a 1× traz a raiz de 16 px (a escala normal não vira "texto ×N")');
+// A triagem diz "texto ×1,5" do relatório desta captura (o `computado` do relatório é o da hora de baixar: 1×).
+const triagemEsc = execFileSync(process.execPath, ['tools/diag-resumo.mjs', arqSemEscala], { cwd: ROOT, encoding: 'utf8', timeout: 30000 });
+checa(!/texto ×/.test(triagemEsc), 'CONTROLE: o relatório sem a escala não ganha a linha "texto ×N" na triagem');
+const comEscalaNoRelatorio = JSON.parse(JSON.stringify(d));
+comEscalaNoRelatorio.computado = { ...(comEscalaNoRelatorio.computado || {}), escala: todos[idx[iEsc]].computado.escala };
+const arqComEscala = join(SAIDA, 'com-escala.json');
+writeFileSync(arqComEscala, JSON.stringify(comEscalaNoRelatorio));
+const triagemEsc2 = execFileSync(process.execPath, ['tools/diag-resumo.mjs', arqComEscala], { cwd: ROOT, encoding: 'utf8', timeout: 30000 });
+checa(/texto ×1,5: a raiz está em 24 px/.test(triagemEsc2), 'a triagem diz "texto ×1,5" quando o relatório traz a escala medida', (triagemEsc2.match(/.*texto ×.*/) || [''])[0]);
+// O replay do MESMO relatório diz a escala e a aplica (a tela ao vivo dele é a do aparelho com a letra grande).
+let replayEsc = '';
+try {
+  const porta = await new Promise((ok) => { const sv = createServer(); sv.listen(0, '127.0.0.1', () => { const pp = sv.address().port; sv.close(() => ok(pp)); }); });
+  replayEsc = execFileSync(process.execPath, ['tools/diag-replay.mjs', arqComEscala, '--tela', '--porta', String(porta)],
+    { cwd: ROOT, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+} catch (e) { replayEsc = String(e.stdout || '') + '\nFALHOU: ' + String(e.message).slice(0, 200); }
+checa(/texto ×1\.5 \(raiz em 24 px\)/.test(replayEsc), 'o replay diz a escala do aparelho (texto ×1.5, raiz em 24 px)', (replayEsc.match(/^tela: .*/m) || [replayEsc.slice(-200)])[0]);
 
 // ── conferências que a imagem sozinha não dá ──────────────────────────────
 console.log('\n── o que a imagem não mostra ──');

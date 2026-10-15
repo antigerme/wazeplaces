@@ -76,6 +76,27 @@ function bloco(cabeca, fonte = CSS_SEM) {
   throw new Error('não fechou: ' + cabeca);
 }
 const norm = (s) => s.replace(/\s+/g, ' ').trim();
+// O que VALE de uma regra de seletor EXATO, em todo o arquivo: junta as regras `seletor { … }` na ordem e deixa a
+// ÚLTIMA declaração de cada propriedade (o empate de especificidade é da ordem, gotcha #27). Só regra no topo (depois
+// de `}` ou do começo do arquivo): `.x .lb-pill-nome {` e `.lb-pill-nome:hover {` não são esta.
+function declaracoesQueValem(seletor, fonte = CSS_SEM) {
+  const escapado = seletor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(?<=^|\\})\\s*' + escapado + '\\s*\\{([^}]*)\\}', 'g');
+  const valem = {};
+  let achou = 0;
+  for (const m of fonte.matchAll(re)) {
+    achou++;
+    for (const d of m[1].split(';')) {
+      const k = d.indexOf(':');
+      if (k < 0) continue;
+      const valor = d.slice(k + 1).trim();
+      assert.doesNotMatch(valor, /!important/, `${seletor}: !important muda quem vale — o teste não o modela`);
+      valem[d.slice(0, k).trim()] = valor;
+    }
+  }
+  assert.ok(achou > 0, `regra sumiu: ${seletor}`);
+  return valem;
+}
 
 // ═══ R20-7-01 · os dois botões de um diálogo na escala do texto ═══════════════
 
@@ -246,8 +267,10 @@ test('R20-8-01 · o 2×2 NUNCA piora a barra: se a pilha do card passa da janela
   estoura.rodar();
   assert.equal(estoura.classes.has('placar-2x2'), false,
     '2×2 deixou a pilha 26 px fora da janela (a barra ✕ ↑ ✓ sai do alcance) e a classe ficou ligada');
-  // O vaivém acontece no MESMO quadro (liga, mede, desliga): nada de piscar.
-  assert.deepEqual(estoura.escritas, ['+placar-2x2', '-placar-2x2']);
+  // O vaivém acontece no MESMO quadro (liga, mede, desliga): nada de piscar. (As
+  // escritas da proteção contra transição, `placar-medindo` — R21-8-01 —, não são
+  // do vaivém: `test/reduzir-movimento-r21.test.mjs` cobra essas.)
+  assert.deepEqual(estoura.escritas.filter((e) => !/medindo/.test(e)), ['+placar-2x2', '-placar-2x2']);
 });
 
 test('R20-8-01 · o 2×2 NUNCA tira a barra do CARD da frente (375×667 a 1,8×: a pilha cabe na janela, a barra não)', () => {
@@ -287,6 +310,7 @@ test('R20-8-01 · medido LIGADO sem a classe (o texto que volta ao normal deslig
   assert.ok(m.classes.has('placar-2x2'));
   m.sincrona();                                           // a medida síncrona (o idioma trocou)
   assert.equal(m.classes.has('placar-2x2'), false, 'a medida síncrona não desligou o 2×2 com o rótulo cabendo');
+  m.rodar();                                              // a proteção contra transição (R21-8-01) se solta nos quadros seguintes
   // O callback do observer só AGENDA (gotchas #34/#35).
   m.escritas.length = 0;
   m.RO.ultimo.cb();
@@ -315,9 +339,15 @@ test('R20-3-01 · a pílula: o nome cede primeiro (a 1× nenhum pixel muda), dep
   assert.match(regra('.lb-pill-fixo'), /flex: none/);
   // O nome vai a zero e encolhe 1.000.000× mais que os outros: a 1× eles perdem
   // uma fração de pixel que o layout (1/64 px) nem representa.
-  const nome = norm(CSS_SEM.split('.lb-pill-nome {').slice(1).join('{'));
-  assert.match(nome, /min-width: 0/);
-  assert.match(nome, /flex-shrink: 1000000/);
+  //
+  // O valor que VALE, não o texto depois do seletor (R21-3-07): há DUAS regras `.lb-pill-nome {` (a de
+  // cima, com o `min-width: 2.5rem` de antes, e a que o R20-3-01 pôs depois), e fatiar o arquivo a partir
+  // da primeira devolvia o resto inteiro do CSS — o `min-width: 0` casava com o da regra
+  // `.lb-pill-fixo:not(:first-child)` que vem logo abaixo, e o nome voltar ao piso de 2.5rem não
+  // reprovava nada (gotcha #67: a asserção era decoração, e a sabotagem a denunciou).
+  const nome = declaracoesQueValem('.lb-pill-nome');
+  assert.equal(nome['min-width'], '0', 'o nome da pílula voltou a ter piso: ele não cede até zero antes da idade (a última declaração vale)');
+  assert.equal(nome['flex-shrink'], '1000000', 'o nome da pílula deixou de encolher 1.000.000× mais que os outros');
   const fixo = norm(regra('.lb-pill-fixo:not(:first-child)'));
   for (const decl of ['flex: 0 1 auto', 'min-width: 0', 'overflow: hidden', 'text-overflow: ellipsis']) {
     assert.ok(fixo.includes(decl), `os pedaços fixos perderam \`${decl}\``);
