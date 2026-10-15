@@ -1768,7 +1768,9 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     for (const id of ['prefOfflineDisponivel', 'prefPresenca', 'prefPularGuarda', 'langSelect']) {
       document.getElementById('filtersTabPrefs').focus(); card.scrollTop = 0;
       document.getElementById(id).focus();
-      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      // O WebKit ANIMA a rolagem do foco (a 280×653 a 2× o cartão anda ~4.000 px) e a animação começa DEPOIS de uns quadros parada em 0: «parado» é o foco À VISTA e a rolagem
+      // sem mudar em 4 quadros seguidos (o elemento que passa pela faixa no meio da animação não conta), com teto de quadros — se o fim for coberto, o teto estoura e a falha sai.
+      for (let i = 0, igual = 0, ultimo = -1; i < 150 && !(igual >= 4 && recebe(document.getElementById(id))); i++) { await new Promise((ok) => requestAnimationFrame(ok)); igual = card.scrollTop === ultimo ? igual + 1 : 0; ultimo = card.scrollTop; }
       out.foco[id] = recebe(document.getElementById(id));
     }
     return out;
@@ -2842,7 +2844,9 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     await entrarL25(page, 'pt');
     const r = await page.evaluate(medirAlcanceFiltros);
     const c = await page.evaluate(medirCorpoFiltros);
-    checa(r.cartaoOverflowY === 'auto' && c.vistos < c.de && Object.values(c.foco).some((v) => !v), 'Filtros no zoom 400%: CONTROLE — com o corpo como 2º rolante os controles seguem à vista; a medida está cega', JSON.stringify({ r, c }));
+    // (O foco não entra no controle: com a rolagem do cartão zerada antes de cada `focus()` o Chromium o leva a um lugar à vista mesmo com o corpo de 32 px; só os
+    // controles que recebem o dedo e a altura do corpo distinguem as duas árvores nos dois motores — no WebKit o foco do Fold a 2× também reprova na de antes.)
+    checa(r.cartaoOverflowY === 'auto' && c.vistos < c.de && c.corpoPx < c.corpoSH / 4, 'Filtros no zoom 400%: CONTROLE — com o corpo como 2º rolante os controles seguem à vista; a medida está cega', JSON.stringify({ r, c }));
     await ctx.close();
   }
 
