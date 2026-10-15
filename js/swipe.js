@@ -45,52 +45,6 @@ let dragTouchId = null;
 // vezes e cada momento carrega um `outerHTML` inteiro.
 let capturouNesteGesto = false;
 
-// O card que está VOLTANDO pro lugar (o arraste solto sem decidir: 400 ms) e o
-// que está SAINDO (350 ms). Com o arraste em curso, são o gesto no card — ver
-// `gestoNoCard`. `voltaVez` diz qual volta é a mais nova.
-let cardVoltando = null;
-let voltaVez = 0;
-let cardSaindo = null;
-
-// Há um GESTO neste card agora? O dedo nele (o arraste), a volta pro lugar
-// depois de um arraste solto sem decidir, ou a saída. SINAL POSITIVO, e por
-// card, pra quem mexe no card de FORA do gesto (o redesenho do card de foto que
-// a rede devolveu e o canto do FAB do modo dev, no app.js). Eles perguntavam ao
-// `style.transform` — e a volta pro lugar deixa `translate(0, 0) rotate(0deg)`
-// ESCRITO: o card de foto travado que a pessoa tentou arrastar (a reação
-// natural a ✕ e ✓ apagados) parecia arrastado pra sempre, e nunca saía de "A
-// foto precisa de sinal" com o sinal de volta (auditoria da rodada 10,
-// R10-4-01, MEDIDO no modo avião e no lie-fi, nos dois motores). Por card, e
-// não "há arraste em algum lugar": o arraste ÓRFÃO (o card trocado no meio do
-// gesto, ver o `handleDragStart`) deixa o `isDragging` preso no card que saiu,
-// e não pode travar o que entrou.
-function gestoNoCard(card) {
-    return !!card && ((isDragging && currentCard === card) || cardVoltando === card || cardSaindo === card);
-}
-
-// O gesto ACABOU (a volta pro lugar, ou a saída): quem esperava por ele roda
-// agora (`aoFimDoGesto`, no app.js). Nunca derruba o gesto.
-function avisarFimDoGesto(card) {
-    try { if (window.aoFimDoGesto) window.aoFimDoGesto(card); } catch (e) { /* nunca derruba o gesto */ }
-}
-
-// O card volta pro lugar: o arraste solto sem decidir, ou cancelado. A volta é
-// parte do gesto até terminar; terminada, avisa. Só a volta MAIS NOVA avisa: a
-// pessoa pode pegar o card de novo no meio desta, e é a volta DAQUELE arraste
-// que encerra o gesto.
-function voltarProLugar(card) {
-    card.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-    card.style.transform = 'translate(0, 0) rotate(0deg)';
-    cardVoltando = card;
-    const vez = ++voltaVez;
-    setTimeout(() => {
-        card.style.transition = '';
-        if (vez !== voltaVez) return;
-        cardVoltando = null;
-        avisarFimDoGesto(card);
-    }, 400);
-}
-
 // Acha o toque do arraste numa TouchList. `identifier` pode ser 0, então a
 // comparação é contra `null` e nunca `!id` — o mesmo cuidado que o
 // `autorEmFoco` já exigiu com id 0 (falsy que mandava o foco embora calado).
@@ -100,150 +54,22 @@ function toqueDoArraste(lista) {
     return null;
 }
 
-// Até onde o mouse pode andar entre apertar e soltar e isso ainda ser CLIQUE
-// (abrir a foto, ampliar o mapa) e não arraste. Na faixa usual do "click
-// slop" dos sistemas; o arraste que decide começa em 25% da largura.
-const CLIQUE_TOLERANCIA_PX = 8;
-
 function enableSwipeOnCard(card) {
     card.addEventListener('mousedown', handleDragStart);
     card.addEventListener('touchstart', handleDragStart, { passive: false });
-    // REDE DE SEGURANÇA do arraste com o MOUSE. Imagem é arrastável por
-    // padrão, e o arrastar NATIVO (`dragstart`) sequestra o mouse: o `mouseup`
-    // nunca chega, o `isDragging` fica verdadeiro e o card segue o cursor SEM
-    // botão nenhum apertado. MEDIDO no computador (auditoria de 2026-09-26),
-    // arrastando pela foto e pelo mapa: o card parava a 40px, e o clique
-    // SEGUINTE em qualquer lugar — Filtros, o placar — cometia a ação que
-    // aquela posição indicava (Filtros abriu E o pedido foi pulado). A
-    // correção de verdade é `draggable="false"` na foto e nos tiles; isto
-    // aqui é pro próximo elemento arrastável que alguém puser no card.
-    card.addEventListener('dragstart', impedirArrasteNativo);
-}
-
-// Com o NOSSO arraste em curso, o nativo não começa — assim os eventos do
-// mouse seguem chegando e o gesto termina como qualquer outro.
-function impedirArrasteNativo(e) {
-    if (isDragging) e.preventDefault();
-}
-
-// Soltar o mouse sobre o MESMO elemento em que ele foi apertado gera um
-// `click` — e no arraste isso é a regra, não a exceção, porque o card anda
-// junto com o cursor. Sem isto, arrastar pela foto abria o lightbox ao soltar,
-// e pelo mapa abria o mapa ampliado, por cima do card que acabava de sair (e
-// de um pedido que acabava de ser decidido). Engole SÓ o clique que vem colado
-// ao `mouseup` deste arraste: o navegador o despacha na mesma volta, e o
-// `setTimeout` desarma a armadilha logo depois, pra o clique seguinte — o de
-// verdade — passar.
-function engolirCliqueDoArraste() {
-    const engolir = (ev) => {
-        ev.stopPropagation();
-        ev.preventDefault();
-        document.removeEventListener('click', engolir, true);
-    };
-    document.addEventListener('click', engolir, true);
-    setTimeout(() => document.removeEventListener('click', engolir, true), 0);
-}
-
-// Tentativa de ARRASTAR o card com as ações travadas (C14; ver o
-// `handleDragStart`). O card não sai do lugar — o gesto nem começa —, mas se o
-// dedo ANDAR como num arraste (mais que o mínimo do flick) o app diz por quê,
-// pelo `avisarTravaAoTocar` do app.js, que cala na janela do Desfazer (o banner
-// já explica) e tem o próprio intervalo entre avisos. Toque parado não conta:
-// tocar na foto pra ampliá-la com o lote no ar é legítimo, e responder "espere"
-// a quem não tentou decidir nada seria ruído. UMA vigília por vez: um toque que
-// começa encerra a anterior, mesmo que o fim dela tenha se perdido (o card
-// trocado no meio do gesto, como o arraste órfão).
-let pararTentativa = null;
-function vigiarTentativaTravada(e) {
-    if (pararTentativa) pararTentativa();
-    const mouse = e.type === 'mousedown';
-    const inicio = mouse ? e : (e.changedTouches && e.changedTouches[0]);
-    if (!inicio) return;
-    const id = mouse ? null : inicio.identifier;
-    const x0 = inicio.clientX, y0 = inicio.clientY;
-    const mover = (ev) => {
-        let p = null;
-        if (ev.type === 'mousemove') {
-            if (ev.buttons === 0) { parar(); return; }   // soltou fora da janela
-            p = ev;
-        } else {
-            for (const t of ev.touches || []) if (t.identifier === id) p = t;
-        }
-        if (!p || Math.hypot(p.clientX - x0, p.clientY - y0) < FLICK_MIN_DISTANCE) return;
-        parar();
-        if (window.avisarTravaAoTocar) window.avisarTravaAoTocar();
-    };
-    const parar = () => {
-        document.removeEventListener('mousemove', mover);
-        document.removeEventListener('touchmove', mover);
-        document.removeEventListener('mouseup', parar);
-        document.removeEventListener('touchend', parar);
-        document.removeEventListener('touchcancel', parar);
-        if (pararTentativa === parar) pararTentativa = null;
-    };
-    pararTentativa = parar;
-    document.addEventListener('mousemove', mover);
-    document.addEventListener('touchmove', mover, { passive: true });
-    document.addEventListener('mouseup', parar);
-    document.addEventListener('touchend', parar);
-    document.addEventListener('touchcancel', parar);
 }
 
 function handleDragStart(e) {
-    // DOIS DEDOS NO CARD NÃO SÃO ARRASTE: é a pinça de quem quer ver a foto de
-    // perto (ou a mão apoiada). Até a auditoria de 2026-09-26 o segundo
-    // `touchstart` entrava aqui de novo, sem olhar se já havia arraste nem
-    // quantos dedos havia: o gesto passava a seguir o SEGUNDO dedo e, ao
-    // soltar, cometia por distância ou por flick. MEDIDO com toque de verdade
-    // (CDP) na foto do card: pinça abrindo → 1 lido; fechando → 1 rejeitado;
-    // os dois dedos no mesmo evento → 1 lido. Um pedido decidido por quem só
-    // queria dar zoom — e calado.
-    //
-    // A regra é a de todo reconhecedor de gesto: um arraste de UM dedo não
-    // sobrevive a um segundo dedo. Ele é CANCELADO — o card volta pro lugar e
-    // nada é decidido —, e o gesto novo também não começa. Contar `e.touches`
-    // (a tela inteira) e não só os dedos sobre o card é deliberado, e é o lado
-    // seguro: a pinça com um dedo na foto e o outro fora dela também é pinça.
-    //
-    // O cancelamento vale também quando só há UM dedo agora: aí o arraste "em
-    // curso" é ÓRFÃO — o card foi trocado no meio do gesto (a aprovação da
-    // foto pousando, o fim do lote), o `touchend` morreu no elemento que saiu
-    // do DOM e nunca chegou ao `document`. Sem isto o `isDragging` ficava preso
-    // até alguém tocar de novo.
-    if (e.type === 'touchstart') {
-        if (isDragging) handleDragCancel();
-        if (e.touches && e.touches.length > 1) return;
-    }
     if (animating) return; // não inicia drag durante a animação de saída
-    // Controles interativos e áreas de scroll interno não iniciam drag —
-    // sem a exceção das listas, o touch-action:none do card mataria o
-    // scroll de "Mudanças propostas" e do reporte no mobile.
-    // `.card-content-rola` é a rede de segurança do card (fonte gigante, zoom
-    // de texto): com ela ligada o conteúdo ROLA, e sem estar aqui o arraste
-    // engolia a rolagem — e arrastar pra cima PULAVA o card no lugar de rolar
-    // o texto (auditoria de 2026-09-25; a regra do CLAUDE.md sobre área rolável).
-    if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text, .card-content-rola')) return;
-    // Só o botão PRINCIPAL do mouse arrasta. O direito abre o menu de contexto
-    // e o do meio rola; os dois começavam um arraste que COMETIA a ação ao
-    // soltar além do limiar — rejeitar com o botão direito, sem querer
-    // (auditoria de 2026-09-25).
-    if (e.type === 'mousedown' && e.button !== 0) return;
     // Janela do "Desfazer" correndo: o pedido ainda não foi pro Waze e dá pra
     // voltar atrás. Deixar arrastar despacharia o anterior sem aviso. Os botões
     // ficam visivelmente desabilitados no mesmo período, então o card parado é
     // coerente com o resto da tela — não é travamento sem explicação.
-    //
-    // Com as OUTRAS travas (o "Marcar todos" no ar, a conferência de um 401, a
-    // sessão renovando) não há banner nenhum explicando, e o card parado sob o
-    // dedo lia como app quebrado (auditoria do card, 2026-09-29, C14): quem
-    // TENTA arrastar recebe o porquê (ver `vigiarTentativaTravada`). Esta
-    // conferência vem DEPOIS das exceções de cima de propósito: tocar num
-    // botão ou rolar a lista com a trava ligada não é tentar decidir, e não
-    // merece "espere" — nem o toque parado (ampliar a foto): só o dedo que ANDA.
-    if (window.acoesTravadas && window.acoesTravadas()) {
-        vigiarTentativaTravada(e);
-        return;
-    }
+    if (window.acoesTravadas && window.acoesTravadas()) return;
+    // Controles interativos e áreas de scroll interno não iniciam drag —
+    // sem a exceção das listas, o touch-action:none do card mataria o
+    // scroll de "Mudanças propostas" e do reporte no mobile.
+    if (e.target.closest('button, a, input, select, textarea, .card-changes-list, .card-flag-comment-text')) return;
 
     isDragging = true;
     capturouNesteGesto = false;
@@ -295,18 +121,9 @@ function handleDragMove(e) {
     e.preventDefault();
 
     if (e.type === 'mousemove') {
-        // O botão já foi SOLTO e o `mouseup` não chegou (o arrastar nativo o
-        // engoliu, ou ele foi solto fora da janela): o cursor está andando
-        // SOLTO. Cancela sem decidir — decidir aqui seria cometer a ação no
-        // próximo clique, em qualquer lugar da tela (ver `enableSwipeOnCard`).
-        if (e.buttons === 0) { handleDragCancel(); return; }
         currentX = e.clientX;
         currentY = e.clientY;
     } else {
-        // Um segundo dedo encostou com o arraste em curso — inclusive fora do
-        // card, onde o `touchstart` dele não passa pelo `handleDragStart`. É
-        // pinça, não decisão: cancela sem cometer nada (ver o `handleDragStart`).
-        if (e.touches && e.touches.length > 1) { handleDragCancel(); return; }
         // O MESMO dedo, não o `[0]`: com dois na tela, se o primeiro sair o
         // `touches[0]` passa a ser o outro e o card SALTA pra onde ele estiver.
         const t = toqueDoArraste(e.touches);
@@ -355,21 +172,7 @@ function handleDragMove(e) {
     } else {
         const rotation = deltaX * 0.1;
         currentCard.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(${rotation}deg)`;
-        // O selo do lado só acende quando SOLTAR ali decidiria — a mesma
-        // dominância horizontal que o `commitX` exige (ver o `handleDragEnd`).
-        // Puxando o card pra BAIXO com desvio de lado, o "Rejeitar" acendia
-        // inteiro e prometia uma ação que o soltar não faz mais: o que o app
-        // MOSTRA e o que ele ACEITA têm que ser a mesma coisa.
-        //
-        // E a mesma TRAVA do lado que o soltar respeita (`direcaoTravada`, a do
-        // `handleDragEnd`): no card de foto sem a foto ("A foto precisa de
-        // sinal", ✕ e ✓ travados), o arraste pro lado acendia o "Lido" ou o
-        // "Rejeitar" inteiro e soltar não decidia — o card voltava. Arrastar é
-        // justamente a reação a ✕ e ✓ apagados (auditoria da rodada 11,
-        // R11-4-02, MEDIDO nos dois motores: o selo a 1 com 170 px, nada decidido).
-        const horizontal = Math.abs(deltaX) > Math.abs(deltaY);
-        const travado = horizontal && !!(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'));
-        const opacity = horizontal && !travado ? Math.min(Math.abs(deltaX) / 100, 1) : 0;
+        const opacity = Math.min(Math.abs(deltaX) / 100, 1);
         updateSwipeIndicator(deltaX, opacity);
     }
 }
@@ -399,7 +202,10 @@ function handleDragCancel() {
     }
     currentCard.classList.remove('dragging');
     updateSwipeIndicator(0, 0, 0);
-    voltarProLugar(currentCard);
+    currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+    currentCard.style.transform = 'translate(0, 0) rotate(0deg)';
+    const cardRef = currentCard;
+    setTimeout(() => { if (cardRef) cardRef.style.transition = ''; }, 400);
     currentCard = null;
 }
 
@@ -429,40 +235,30 @@ function handleDragEnd(e) {
         dragHandlers = null;
     }
 
-    // Arraste de MOUSE que andou não é clique — decida ou volte, o `click`
-    // colado a este `mouseup` não abre foto nem mapa (ver a função).
-    if (e && e.type === 'mouseup' && Math.hypot(deltaX, deltaY) > CLIQUE_TOLERANCIA_PX) engolirCliqueDoArraste();
-
     // Commit por distância OU por flick (velocidade alta com deslocamento mínimo)
     const commitUp = (Math.abs(deltaY) > thresholdY && deltaY < 0 && Math.abs(deltaY) > Math.abs(deltaX)) ||
         (vy < -FLICK_VELOCITY && deltaY < -FLICK_MIN_DISTANCE && Math.abs(deltaY) > Math.abs(deltaX));
-    // A DISTÂNCIA também exige que o gesto seja horizontal — como o flick e o
-    // ↑ já exigiam. Sem isso, puxar o card pra BAIXO (gesto que o card não tem)
-    // com um desvio de lado maior que 25% da largura REJEITAVA ou marcava lido:
-    // MEDIDO com toque de verdade, (−105, +300) num celular de 393px → 1
-    // rejeitado (auditoria de 2026-09-26).
-    const commitX = (Math.abs(deltaX) > thresholdX && Math.abs(deltaX) > Math.abs(deltaY)) ||
+    const commitX = Math.abs(deltaX) > thresholdX ||
         (Math.abs(vx) > FLICK_VELOCITY && Math.abs(deltaX) > FLICK_MIN_DISTANCE && Math.abs(deltaX) > Math.abs(deltaY));
 
-    // O CARD vai junto pro callback: é por ele que o app sabe QUAL pedido o
-    // gesto viu (ver `agirNoPedidoDoGesto` no app.js) — o `currentPlace` de
-    // 350 ms depois pode já ser outro.
     if (commitUp) {
-        animateSwipeOut('up', (card) => {
-            if (typeof onSwipeUp === 'function') onSwipeUp(card);
+        animateSwipeOut('up', () => {
+            if (typeof onSwipeUp === 'function') onSwipeUp();
         });
-    } else if (commitX && !(window.direcaoTravada && window.direcaoTravada(deltaX > 0 ? 'right' : 'left'))) {
-        // (Sem a guarda, o card de foto SEM FOTO saía pro lado com ✕ e ✓
-        // travados: o gesto decidia o que o botão recusava. Travado, ele volta
-        // pro lugar como um arraste curto.)
+    } else if (commitX) {
         const dir = deltaX > 0 ? 'right' : 'left';
-        animateSwipeOut(dir, (card) => {
-            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight(card);
-            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft(card);
+        animateSwipeOut(dir, () => {
+            if (dir === 'right' && typeof onSwipeRight === 'function') onSwipeRight();
+            if (dir === 'left' && typeof onSwipeLeft === 'function') onSwipeLeft();
         });
     } else {
+        currentCard.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+        currentCard.style.transform = 'translate(0, 0) rotate(0deg)';
         updateSwipeIndicator(0, 0);
-        voltarProLugar(currentCard);
+        const cardRef = currentCard;
+        setTimeout(() => {
+            if (cardRef) cardRef.style.transition = '';
+        }, 400);
         currentCard = null;
     }
 }
@@ -476,7 +272,6 @@ function animateSwipeOut(direction, callback) {
     const card = currentCard;
     currentCard = null;
     animating = true;
-    cardSaindo = card;
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)
     if (navigator.vibrate) navigator.vibrate(VIBRACAO_COMMIT_MS);
@@ -493,14 +288,10 @@ function animateSwipeOut(direction, callback) {
         card.style.opacity = '0';
     }
 
-    // O callback recebe o card que SAIU — o do gesto —, não o que estiver na
-    // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
     setTimeout(() => {
         animating = false;
-        if (cardSaindo === card) cardSaindo = null;
         updateSwipeIndicator(0, 0);
-        try { if (callback) callback(card); }
-        finally { avisarFimDoGesto(card); }
+        if (callback) callback();
     }, 350);
 }
 
@@ -524,14 +315,7 @@ function updateSwipeIndicator(deltaX, opacity, upOpacity = 0) {
 
 function triggerSwipe(direction, callback) {
     if (animating) return; // ignora enquanto uma animação de saída está em curso
-    // Travado: o botão e a tecla não decidem — e dizem por quê quando a trava
-    // não tem banner na tela (C14; ver `avisarTravaAoTocar` no app.js).
-    if (window.acoesTravadas && window.acoesTravadas()) {
-        if (window.avisarTravaAoTocar) window.avisarTravaAoTocar();
-        return;
-    }
-    // A seta ← → num card de foto sem foto (ver `direcaoTravada` no app.js).
-    if (window.direcaoTravada && window.direcaoTravada(direction)) return;
+    if (window.acoesTravadas && window.acoesTravadas()) return;
     // NUNCA `document.querySelector('.place-card')` aqui: desde a pilha existem
     // dois na tela, e o de fundo é só o próximo pedido espiando por baixo.
     // Pegando o errado, o botão ✕ e a seta do teclado mandariam SAIR o card de
@@ -554,4 +338,3 @@ function triggerSwipe(direction, callback) {
 window.enableSwipeOnCard = enableSwipeOnCard;
 window.triggerSwipe = triggerSwipe;
 window.isSwipeAnimating = () => animating;
-window.gestoNoCard = gestoNoCard;

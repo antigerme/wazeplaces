@@ -85,11 +85,9 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
   const AppState = {
     authenticated: true, hasMore: true, fetching: false, fetchEpoch: 0, queue: [], currentPlace: null,
     serverTotal: 0, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
-    filters: { unreadOnly, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '', categories: [],
-      sortOrder: 'newest' },
+    filters: { unreadOnly, types: TYPES_ALL.slice(), residential: '', myArea: false, stateId: '', managedAreaId: '', categories: [] },
     profile: null,
   };
-  const contadores = [];
   const deps = {
     AppState, TYPES_ALL, PREFETCH_THRESHOLD, MAX_EMPTY_PAGES, MAX_PAGINAS_POR_BUSCA,
     navigator: { onLine: online },
@@ -98,32 +96,18 @@ function montar(waze, { unreadOnly = true, online = true } = {}) {
     dlog: () => {}, dlogVigiar: () => {}, dlogVoltou: () => {}, dlogCapturarAuto: () => {},
     handleUnauthorized: () => {}, showToast: (m, tipo) => toasts.push(tipo), msgDoServidor: (r, d) => d, t: (k) => k,
     rebuscasAuto: 0, guardarPrazoDaSessao: () => {}, offlineGravarFila: () => {}, trackSeenCategories: () => {},
-    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, aoMudarAFilaPorBaixo: () => {}, updatePendingCount: () => contadores.push(AppState.loadError),
+    sortQueue: () => {}, aplicarRecusaAutomatica: () => {}, updatePendingCount: () => {},
     offlineVarrer: () => varreduras.push(Date.now()),
     bloqueadosPorPagina: new Map(), pedidosQueEntraramNaFila: new Set(),
     pedidosEmAndamento: new Set(), pousosDaPagina: new Map(), offlineLigado: () => false,
     offlineLerPousos: () => [], carregarFilaDeSaida: () => [],
-    // O treino tem fila de EXEMPLOS: a busca não roda com ele ativo.
-    Treino: { ativo: false },
     console: { error: () => {} },
-    // O LUGAR da busca (a fila guardada do offline diz de onde é — ver `filaDeOnde`).
-    lugarAgora: () => ({ regiao: 'row', pais: '30' }),
-    // A ordem da fila (F8): com a padrão, a busca é a de sempre — e a
-    // ordem-paginada.test.mjs mede as outras.
-    ORDEM_PADRAO: 'newest',
-    // A fila que espera o perfil ("Minha área"): aqui, nenhuma (R9-6-03 em
-    // test/filtros-aplicar.test.mjs).
-    filaEsperaPerfil: false,
-    // A sessão da busca: aqui, nenhuma queda (a que cai no meio é descartada,
-    // R14-1-02 em test/busca-auditoria-r14.test.mjs).
-    epocaDaSessao: 0,
   };
-  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
-    'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage']
+  const fontes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage']
     .map(fatiar).join('\n');
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage };')(...nomes.map((n) => deps[n]));
-  return { app, AppState, deps, diario, toasts, varreduras, contadores };
+  return { app, AppState, deps, diario, toasts, varreduras };
 }
 
 const chave = (p) => `${p.venueID}|${p.updateRequestID}`;
@@ -311,48 +295,25 @@ test('SEM REDE com a fila vazia: a tela é a de "sem sinal" (loadError), nunca o
   assert.equal(m.AppState.loadError, true, 'sem o loadError o showNoPlaces desenharia "Tudo limpo!"');
   assert.equal(m.AppState.hasMore, false, 'sem isto o laço do startFetching não termina (gotcha #19)');
   assert.ok(m.diario.some(([k]) => k === 'busca.semRede'), 'o diário não anotou a busca sem rede');
-  // E o "Restam" é redesenhado JÁ com o `loadError` ("—"), não fica no número velho.
-  assert.ok(m.contadores.includes(true), 'o contador não foi redesenhado com o "não sei" (—)');
 });
 
-test('uma página que falha POR REDE no meio da leitura guarda o que já veio e ESPERA calada', async () => {
-  // Com card na fila, a queda no meio da busca é o "sem rede com card" do topo
-  // (o `onLine` só não virou ainda): antes ela desistia da fila com toast
-  // vermelho e `hasMore = false` (auditoria 2026-09-25).
+test('uma página que falha no meio da leitura guarda o que já veio e marca a falha', async () => {
   const waze = wazeVivo(12, { porPagina: 2 });
   waze.semRespostaNa = 2;
   const m = montar(waze);
   await m.app.fetchNextPage();                       // página 1: 2 novos (≤ 3), anda pra 2, que falha
   assert.deepEqual(waze.pedidas, [1, 2]);
   assert.equal(m.AppState.queue.length, 2, 'perdeu o que a página 1 trouxe');
-  assert.equal(m.AppState.loadError, false, 'desistiu da fila com card na tela');
-  assert.equal(m.AppState.hasMore, true, 'a próxima ação não buscaria de novo');
-  assert.deepEqual(m.toasts, [], 'toast vermelho por uma queda de sinal com card na tela');
-  // A próxima ação busca de novo — e, com a rede de volta, acha o resto.
-  waze.semRespostaNa = null;
-  await m.app.fetchNextPage();
-  assert.ok(m.AppState.queue.length > 2, 'a busca seguinte não trouxe o que faltava');
-});
-
-test('falha de rede com a fila VAZIA: aí sim marca a falha (a tela é a de erro)', async () => {
-  const waze = wazeVivo(12);
-  waze.semRespostaNa = 1;
-  const m = montar(waze);
-  await m.app.fetchNextPage();
   assert.equal(m.AppState.loadError, true);
-  assert.equal(m.AppState.hasMore, false, 'sem isto o laço do `startFetching` giraria');
+  assert.equal(m.AppState.hasMore, false);
 });
 
 // ── o diário e a varredura do offline ─────────────────────────────────────
-test('a abertura não é reposição; TODA busca que traz pedido chama a varredura do offline', async () => {
-  // Até a auditoria de 2026-09-25 a abertura NÃO chamava, contando com "a
-  // próxima resposta que chegar" — e a primeira prova de rede (a própria busca)
-  // roda antes de a fila existir: quem abria o app em casa e não triava saía
-  // sem nada preparado, com as Preferências dizendo "Pronto".
+test('a abertura não é reposição; a reposição anota no diário e chama a varredura do offline', async () => {
   const waze = wazeVivo(12);
   const m = montar(waze);
   await m.app.fetchNextPage();
-  assert.equal(m.varreduras.length, 1, 'a abertura não preparou o offline');
+  assert.equal(m.varreduras.length, 0, 'a abertura chamou a varredura — quem cuida dela são os gatilhos de sempre');
   assert.ok(!m.diario.some(([k]) => k === 'busca.reposicao'), 'a abertura não é reposição');
   for (const p of m.AppState.queue.splice(0, 3)) waze.tratar(chave(p), 'rejeitar');
   await m.app.fetchNextPage();
@@ -360,141 +321,6 @@ test('a abertura não é reposição; TODA busca que traz pedido chama a varredu
   assert.ok(linha, 'a reposição não foi anotada');
   assert.deepEqual(Object.keys(linha[1]).sort(), ['hasMore', 'jaVistos', 'novos', 'paginas'],
     'o diário roda pra todo editor: só contagens');
-  assert.equal(m.varreduras.length, 2, 'o que entrou numa reposição não foi pra varredura');
+  assert.equal(m.varreduras.length, 1, 'o que entrou numa reposição não foi pra varredura');
   assert.equal(m.AppState.ultimaBusca.paginas, 1);
-});
-
-// ── o treino e a reentrância (auditoria de 2026-09-25) ────────────────────
-test('treino ativo: a busca NÃO roda — pedido real pousaria na fila de exemplos', async () => {
-  const waze = wazeVivo(12);
-  const m = montar(waze);
-  m.deps.Treino.ativo = true;
-  await m.app.fetchNextPage();
-  assert.deepEqual(waze.pedidas, [], 'buscou com o treino ativo');
-  assert.equal(m.AppState.queue.length, 0);
-  // CONTROLE: fora do treino a mesma chamada busca.
-  m.deps.Treino.ativo = false;
-  await m.app.fetchNextPage();
-  assert.deepEqual(waze.pedidas, [1]);
-});
-
-test('`fetching` preso SEM promessa não vira laço: a busca sai de novo', async () => {
-  // Era o estado que o treino deixava (restaurava `fetching = true` depois de a
-  // busca terminar), e o `startFetching` girava em microtarefa pra sempre
-  // porque a reentrância devolvia `Promise.resolve()` sem buscar nada.
-  const waze = wazeVivo(12);
-  const m = montar(waze);
-  m.AppState.fetching = true;
-  m.AppState._fetchPromise = null;
-  await m.app.fetchNextPage();
-  assert.deepEqual(waze.pedidas, [1], 'a busca não saiu com `fetching` preso');
-  assert.ok(m.AppState.queue.length > 0);
-  assert.equal(m.AppState.fetching, false);
-});
-
-test('a volta da rede e o "Tentar de novo": com a fila VAZIA é atualizar; com card na tela, só retoma', () => {
-  // Era `resetQueue()` + `startFetching()` SEMPRE: com card na tela o card era
-  // arrancado e a ação da janela do Desfazer saía antes da hora. A primeira
-  // correção (só retomar, sempre) errou do outro lado, e a auditoria EM PRODUÇÃO
-  // pegou: reaberto sem rede e tudo pulado (o card de foto sem a foto), a rede
-  // voltava e a fila terminava VAZIA, com os pedidos pendentes (2026-09-25).
-  const r = fatiar('retomarBusca');
-  const chamadas = [];
-  const AppState = { queue: [], loadError: true, hasMore: false, pendingAction: null };
-  // A fila vazia é a REAL (`filaReal`), e o atualizar passa pela função que
-  // respeita o treino aberto (`refazerFilaReal`; o treino em test/treino-fila-real-r9).
-  // Com card, a busca só RETOMA, pelo `maybePrefetch` (R14-6-01): o
-  // `startFetching` tirava o card da tela e o desenhava de novo, e o foco do
-  // teclado no ✕ dele caía no <body>.
-  // A janela do Desfazer que o refazer sem gesto espera (`janelaDoDesfazerAberta`):
-  // nenhuma aberta aqui (as janelas: test/busca-auditoria-r14.test.mjs).
-  const rodar = new Function('AppState', 'resetQueue', 'startFetching', 'maybePrefetch',
-    'aprovacaoPendente', 'exclusaoPendente', 'renomeacaoPendente',
-    [fatiar('filaReal'), fatiar('refazerFilaReal'), fatiar('janelaDoDesfazerAberta'), r].join('\n') + '\nreturn retomarBusca;')(
-    AppState, () => chamadas.push('reset'), () => chamadas.push('buscar'), () => chamadas.push('repor'), null, null, null);
-  rodar();
-  assert.deepEqual(chamadas, ['reset', 'buscar'], 'com a fila vazia, a volta não atualizou (os pulados sem sinal não voltam)');
-  chamadas.length = 0;
-  AppState.queue = [{ venueID: 'v' }];
-  rodar();
-  assert.ok(!chamadas.includes('reset'), 'com card na tela, a volta ZEROU a fila (arranca o card da mão)');
-  assert.deepEqual(chamadas, ['repor'],
-    'com card na tela, a volta não retomou pela reposição (o `startFetching` tira o card da tela e o desenha de novo: o foco do teclado cai no <body>, R14-6-01)');
-  assert.equal(AppState.loadError, false);
-  assert.equal(AppState.hasMore, true);
-  assert.match(APP_SEM, /if \(AppState\.authenticated && AppState\.loadError && !AppState\.fetching\) \{\s*retomarBusca\(\);\s*\}/,
-    'a volta da rede voltou a zerar a fila');
-  // A fila guardada entra também depois de uma busca que falhou por rede com o
-  // `onLine` verdadeiro (R4-O1, em test/offline-varredura.test.mjs).
-  // (O foco prometido ao card que vem, pelo teclado, sai antes do `await`: R6-2-13.)
-  // E ele é GESTO: com a janela do Desfazer aberta, despacha como o ↻ (R14-2-05).
-  assert.match(APP_SEM, /\$\('retryLoadBtn'\)\?\.addEventListener\('click', async \(ev\) => \{\s*prometerFocoAoCardQueVem\(ev\);\s*if \(await offlineTentarAbrirSemRede\(ultimaBuscaFalhouPorRede\)\) return;\s*retomarBusca\(\{ gesto: true \}\);/,
-    'o "Tentar de novo" voltou a zerar a fila (e a descartar a guardada do offline), ou deixou de ser gesto');
-  assert.match(APP_SEM, /\$\('refreshBtn'\)\.addEventListener\('click', \(\) => \{\s*if \(AppState\.fetching\) return;\s*if \(navigator\.onLine === false\) \{/,
-    'o ↻ sem rede joga fora a fila (inclusive a guardada)');
-});
-
-// ── O6: 401 passageiro NUMA REPOSIÇÃO (auditoria de 2026-09-26) ─────────────
-// A reposição (busca com card na fila) leva UM 401 e a sonda diz "viva" (o
-// alarme falso): o `rebuscarDepoisDeFalha` saía na primeira linha porque havia
-// card, e a busca que falhou tinha deixado `hasMore = false` e `loadError =
-// true` — a fila parava de se repor com a sessão viva, e ao fim dos cards a
-// pessoa via "Falha ao carregar" (medido no navegador, p7: 2 buscas, 5 de 10).
-// Aqui a busca, o `maybePrefetch` e o `rebuscarDepoisDeFalha` são os do app, e
-// o "alarme falso" chama a recomposição como o `handleUnauthorized` chama.
-function montarAlarmeFalso(waze, { um401NaBusca }) {
-  const m = montar(waze);
-  let buscas = 0;
-  const buscarDeVerdade = waze.buscar;
-  const ctl = { rebuscar: null };
-  const deps = { ...m.deps,
-    API: { fetchPlaces: (page, f) => (++buscas === um401NaBusca
-      ? Promise.resolve({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionMissing' })
-      : buscarDeVerdade(page, f)) },
-    handleUnauthorized: () => setImmediate(() => ctl.rebuscar()),
-    MAX_REBUSCAS_AUTO: constante('MAX_REBUSCAS_AUTO'), startFetching: () => {}, showCurrentPlace: () => {},
-  };
-  const fontes = 'let filaDeOnde = null;\n' + ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila',
-    'ordemDoWaze', 'ordemPrecisaDaFilaInteira', 'fetchNextPage', 'maybePrefetch', 'rebuscarDepoisDeFalha'].map(fatiar).join('\n');
-  const nomes = Object.keys(deps);
-  const app = new Function(...nomes, fontes + '\nreturn { fetchNextPage, maybePrefetch, rebuscarDepoisDeFalha };')(...nomes.map((n) => deps[n]));
-  ctl.rebuscar = app.rebuscarDepoisDeFalha;
-  return { app, AppState: m.AppState, buscas: () => buscas };
-}
-const aquietar = async () => { for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r)); };
-
-test('O6: 401 passageiro na REPOSIÇÃO com card na fila — o alarme falso repõe a busca e a fila segue', async () => {
-  const waze = wazeVivo(10);
-  const m = montarAlarmeFalso(waze, { um401NaBusca: 2 });
-  const { app, AppState } = m;
-  await app.fetchNextPage();
-  const vistos = [];
-  for (let passos = 0; passos < 50 && AppState.queue.length; passos++) {
-    vistos.push(chave(AppState.queue[0]));        // pula: o pedido segue pendente no Waze
-    AppState.queue.shift();
-    app.maybePrefetch();                           // o `advanceQueue` faz isto a cada card
-    await aquietar();
-  }
-  assert.equal(new Set(vistos).size, 10, `a fila parou de se repor depois do 401 — vistos ${vistos.length} de 10`);
-  assert.equal(AppState.loadError, false, 'sobrou a falha na tela com a sessão viva');
-});
-
-test('O6: o teto da recomposição vale também com card na fila — e 401 de AÇÃO (sem falha de busca) não mexe na busca', async () => {
-  const src = fatiar('rebuscarDepoisDeFalha');
-  const rodar = (estado, rebuscasAuto) => {
-    const AppState = { queue: [{}], fetching: false, hasMore: false, loadError: true, ...estado };
-    const chamadas = [];
-    const f = new Function('AppState', 'MAX_REBUSCAS_AUTO', 'maybePrefetch', 'startFetching', `let rebuscasAuto = ${rebuscasAuto};
-      let filaEsperaPerfil = false;\n${src}
-      rebuscarDepoisDeFalha(); return rebuscasAuto;`);
-    const depois = f(AppState, constante('MAX_REBUSCAS_AUTO'), () => chamadas.push('prefetch'), () => chamadas.push('start'));
-    return { AppState, chamadas, depois };
-  };
-  const teto = rodar({}, constante('MAX_REBUSCAS_AUTO'));
-  assert.deepEqual(teto.chamadas, [], 'estourado o teto, a recomposição seguiu — é o laço falha → confere → rebusca');
-  assert.equal(teto.AppState.loadError, true);
-  const acao = rodar({ loadError: false, hasMore: false }, 0);
-  assert.deepEqual(acao.chamadas, [], 'o 401 de uma AÇÃO (nenhuma busca falhou) mexeu na busca');
-  const ok = rodar({}, 0);
-  assert.deepEqual([ok.AppState.hasMore, ok.AppState.loadError, ok.depois, ok.chamadas], [true, false, 1, ['prefetch']]);
 });

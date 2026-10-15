@@ -1,5 +1,6 @@
 // Pergunta à API de PRODUÇÃO usando o token que já vem dentro do diagnóstico.
 //
+//   node tools/diag-api.mjs <arquivo.json> perfil
 //   node tools/diag-api.mjs <arquivo.json> buscar-places '{"page":2}'
 //   node tools/diag-api.mjs <arquivo.json> lista-estados '{"countryId":73}'
 //
@@ -16,8 +17,7 @@
 //  1. SÓ LEITURA, POR CONSTRUÇÃO. As rotas que ESCREVEM estão numa lista de
 //     recusa e o script sai com erro se alguém as pedir. `validar-place`,
 //     `marcar-lido`, `excluir-foto` e `renomear-local` alteram dado real NO NOME
-//     DELE; `sessao` com `action:destroy` DESLOGA ele, e `perfil` também, quando
-//     o portão recusa (ver a lista abaixo). É a mesma defesa que o
+//     DELE; `sessao` com `action:destroy` DESLOGA ele. É a mesma defesa que o
 //     `waze-probe.mjs` tem contra `/Features` e `/Issues/Read`.
 //  2. JITTER da fonte única (`waze-jitter.mjs`), como toda varredura deste repo.
 //  3. O TOKEN NUNCA É IMPRESSO nem passa por linha de comando — ele vai no CORPO
@@ -39,34 +39,19 @@ import { pausaComJitter } from './waze-jitter.mjs';
 // com gente de fora, e o token do fluxo de tempo real. `presenca-app` lê as
 // conversas também (a prévia da última mensagem) e devolve o mesmo token.
 // Nenhuma cabe numa ferramenta que age com o token de outra pessoa.
-//
-// `perfil` parece leitura e NÃO é: ele reconfere o portão (L2+AM) e, quando o
-// Waze diz que a conta não passa mais, APAGA a sessão no servidor (MEDIDO na
-// auditoria de 2026-09-26, com o core de verdade: 403 e o store de 1 sessão pra
-// 0). Perguntar o perfil de quem mudou de nível deslogaria a pessoa pela mão de
-// quem lia o relato dela. E o relatório já traz o perfil (`appState.profile`).
-// `testar-cookies` cria sessão a partir de cookies crus — nada disso é leitura.
-const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat', 'perfil', 'testar-cookies']);
-// E a decisão é por LISTA DE LEITURA PERMITIDA, não pela lista acima: a lista
-// negra deixava passar `x/../marcar-lido`, `./validar-place` e `marcar-lido?x=1`
-// (a URL normaliza DEPOIS da recusa e chega na rota de escrita), e rota nova
-// que escrevesse passaria sem ninguém lembrar de pô-la aqui. A de cima fica pra
-// explicar a recusa; quem decide é esta.
-const LEITURA = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
+const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
 const [ARQ, ROTA, EXTRA] = process.argv.slice(2);
 if (!ARQ || !ROTA) {
   console.error('uso: node tools/diag-api.mjs <arquivo.json> <rota> [json-extra]');
-  console.error(`rotas de LEITURA: ${[...LEITURA].join(', ')}`);
+  console.error(`rotas de LEITURA: perfil, buscar-places, lista-paises, lista-estados, presenca`);
   console.error(`RECUSADAS por construção: ${[...ESCRITA].join(', ')}`);
   process.exit(2);
 }
-if (!/^[a-z-]+$/.test(ROTA) || !LEITURA.has(ROTA)) {
-  console.error(ESCRITA.has(ROTA)
-    ? `RECUSADO: "${ROTA}" escreve (ou desloga) na conta de quem gerou o diagnóstico.`
-    : `RECUSADO: "${ROTA}" não é uma das rotas de LEITURA (${[...LEITURA].join(', ')}).`);
+if (ESCRITA.has(ROTA)) {
+  console.error(`RECUSADO: "${ROTA}" escreve (ou desloga) na conta de quem gerou o diagnóstico.`);
   console.error('Esta ferramenta é só de leitura, e a recusa é por construção — não por lembrança.');
   process.exit(3);
 }
@@ -76,25 +61,10 @@ if (!/^[a-z-]+$/.test(ROTA) || !LEITURA.has(ROTA)) {
 const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const token = (d.localStorage || {}).waze_session_token;
 if (!token) { console.error('o diagnóstico não traz waze_session_token'); process.exit(1); }
-// A ORIGEM da URL do app, não a URL inteira: com `?ref=…` ou um caminho, o
-// POST ia pra `/?ref=…/api/perfil`.
-let base = '';
-try { base = new URL(String((d.app && d.app.url) || '')).origin; } catch { base = ''; }
+const base = String((d.app && d.app.url) || '').replace(/\/+$/, '');
 if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https no diagnóstico'); process.exit(1); }
 
-// A REGIÃO e o PAÍS do relatório, e não os de fábrica: o corpo cravava
-// `region: 'row'` e nenhum país, então a fila de quem tria nos EUA (servidor
-// `na`) ou na França (73) era perguntada ao servidor do resto do mundo e no país
-// padrão do servidor — a resposta vinha "vazia" e parecia o defeito que se
-// investigava (auditoria de 2026-09-26). São as chaves que o `api.js` grava
-// (`waze_region`, `waze_country`); o `json-extra` continua podendo trocar os
-// dois, e o servidor valida a região (inclusive o `world` antigo, que vira `na`).
-const ls = d.localStorage || {};
-const regiaoDoRelatorio = typeof ls.waze_region === 'string' && /^[a-z]+$/.test(ls.waze_region) ? ls.waze_region : 'row';
-const paisDoRelatorio = parseInt(ls.waze_country, 10);
-const corpo = { sessionToken: token, region: regiaoDoRelatorio,
-  ...(Number.isInteger(paisDoRelatorio) && paisDoRelatorio > 0 ? { countryId: paisDoRelatorio } : {}),
-  ...(EXTRA ? JSON.parse(EXTRA) : {}) };
+const corpo = { sessionToken: token, region: 'row', ...(EXTRA ? JSON.parse(EXTRA) : {}) };
 const semSegredo = { ...corpo, sessionToken: '<TOKEN>' };
 console.log(`de:    ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`POST ${base}/api/${ROTA}`);
@@ -117,7 +87,7 @@ console.log(`HTTP ${r.status}`);
 let j = null;
 try { j = JSON.parse(txt); } catch (e) { console.log(txt.slice(0, 400)); process.exit(r.ok ? 0 : 1); }
 
-// Resumo útil pras rotas grandes (o resto sai cortado em 900 caracteres).
+// Resumo útil pras rotas grandes; o JSON inteiro sai com --cru.
 if (Array.isArray(j.places)) {
   const dia = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : '—');
   const datas = j.places.map((p) => p.dateAdded).filter(Boolean).sort((a, b) => a - b);

@@ -140,20 +140,9 @@ test('a janela servida só avança quando a varredura TERMINA', () => {
   const corpo = fatiar('offlineVarrer');
   const i = corpo.indexOf('offlineJanelaServida = janela');
   assert.ok(i > 0, 'a janela precisa ser atribuída na varredura');
-  // Fila vazia E nada desistido por rede (ver `offlineVarrer`): a atribuição mora
-  // DENTRO desse bloco — a condição abre um `{` que ainda não fechou até ela. (Era
-  // "colada" por distância; o R16-4-01 pôs a leitura da fila guardada no meio, e
-  // distância é o jeito errado de amarrar o guard, gotcha #67.)
-  // (R18-4-05/06: a condição ganhou `!gravacaoFalhou && !tilesNegadosEmTodos`; a que guarda a atribuição é a ÚLTIMA antes dela.)
-  const conds = [...corpo.matchAll(/if \(!pend\.length && !desistidosPorRede\.length[^{]*\{/g)].filter((m) => m.index < i);
-  const cond = conds[conds.length - 1];
-  assert.ok(cond && cond.index < i, 'a atribuição tem que vir depois da condição de fila vazia');
-  let prof = 1;
-  for (const c of corpo.slice(cond.index + cond[0].length, i)) {
-    if (c === '{') prof++;
-    else if (c === '}' && --prof === 0) break;
-  }
-  assert.ok(prof >= 1, 'a atribuição tem que estar DENTRO do bloco da condição de fila vazia');
+  const antes = corpo.slice(Math.max(0, i - 160), i);
+  assert.match(antes, /if \(!pend\.length\)/,
+    'a atribuição tem que estar COLADA na condição de fila vazia');
 });
 
 test('`onLine` é usado de UMA MÃO só: só o false muda comportamento', () => {
@@ -209,14 +198,7 @@ test('o card de FOTO sem foto trava ✕ e ✓ e deixa o ↑ vivo', () => {
   assert.match(corpo, /NEW_PHOTO|FLAGGED_PHOTO/, 'só vale pros dois tipos em que a foto decide');
   assert.match(corpo, /navigator\.onLine !== false/, 'com rede não há por que avisar nada');
   assert.match(corpo, /card-btn-reject/); assert.match(corpo, /card-btn-read/);
-  // O ↑ tem que continuar vivo: é a única ação verdadeira. Ele aparece no corpo
-  // só como o DESTINO do foco que o ✕/✓ travado perderia (a família do C10,
-  // test/card-foco-trava) — então a conferência é na lista do que TRAVA, e em
-  // nenhum `disabled` escrito no ↑.
-  const trava = corpo.match(/for \(const sel of \[([^\]]*)\]\) \{\s*const b = card\.querySelector\(sel\);\s*if \(b\) \{ b\.disabled = true;/);
-  assert.ok(trava, 'sumiu a trava de ✕ e ✓ no card sem foto');
-  assert.ok(!/card-btn-skip/.test(trava[1]), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
-  assert.ok(!/pular\.disabled|card-btn-skip'\)\.disabled/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
+  assert.ok(!/card-btn-skip/.test(corpo), 'o ↑ tem que continuar vivo: é a única ação verdadeira');
   assert.match(corpo, /disabled = true/); assert.match(corpo, /acoes-travadas/,
     'disabled sem esmaecer é botão morto com cara de vivo');
 });
@@ -234,7 +216,7 @@ test('as 13 chaves novas existem nas QUATRO línguas', () => {
 
 test('o plural tem chave própria: "1 pedidos" não sai em língua nenhuma', () => {
   const corpo = fatiar('atualizarLinhaDoOffline');
-  assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : n === 0 \? 'prefs\.offline\.prontoAZero' : 'prefs\.offline\.prontoAPlural'/);
+  assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : 'prefs\.offline\.prontoAPlural'/);
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.esperaA' : 'prefs\.offline\.esperaAPlural'/);
 });
 
@@ -311,15 +293,9 @@ test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
   }
   const corpo = fatiar('atualizarLinhaDoOffline');
   const iPar = corpo.indexOf("offlineUltimoResultado === 'parcial'");
-  // O ÚLTIMO "pronto" — o de exclusão, que vale com rede. (O primeiro é o do
-  // "pronto sem rede", que só vale com a janela ATUAL completa.)
-  const iPronto = corpo.lastIndexOf("prefs.offline.prontoA");
+  const iPronto = corpo.indexOf("prefs.offline.prontoA");
   assert.ok(iPar > 0 && iPronto > iPar,
     'o ramo do parcial tem que vir ANTES do de pronto, senão ele nunca é alcançado');
-  // E o "ainda não preparado" também vem antes dele: cair no "Pronto" por
-  // exclusão, sem varredura nenhuma, era a linha mentindo (auditoria 2026-09-25).
-  const iPend = corpo.indexOf('prefs.offline.pendenteA');
-  assert.ok(iPend > 0 && iPend < iPronto, 'o "Pronto" voltou a ser o ramo de quem nunca preparou nada');
 });
 
 // ── O DEFEITO QUE QUEBROU O MAPA DE TODO MUNDO ────────────────────────────
@@ -360,14 +336,8 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   // Dentro de listener ele só roda no evento — que é o defeito.
   assert.match(SW_SEM, /^hidratarTiles\(\);$/m,
     'hidratarTiles() saiu do topo do service-worker.js — o worker recriado pelo Android acorda sem saber de tile nenhum');
-  // R23-4-02: o `activate` RELÊ a lista sem esperá-la (o claim não depende dela, e o
-  // fetch espera, com teto, quando precisa) — esperá-la prendia a ativação a uma
-  // Cache API muda. Ver o teste de comportamento em sw-teto.
-  const ativ = SW_SEM.slice(SW_SEM.indexOf("addEventListener('activate'"), SW_SEM.indexOf("addEventListener('message'"));
-  assert.match(ativ, /hidratarTiles\(\);\s*return self\.clients\.claim\(\)/,
-    'o activate parou de RELER a lista (o aviso da varredura vai ao controlador antigo) ou o claim passou a esperar por ela');
-  assert.doesNotMatch(ativ, /hidratarTiles\(\)\s*\)\s*\.then|await hidratarTiles|return hidratarTiles/,
-    'o activate voltou a esperar a hidratação da lista: a ativação fica presa à Cache API');
+  assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
+    'tem que hidratar no activate também');
   assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
     'e re-hidratar quando o app avisa, senão só saberia na próxima partida');
   // A janela logo depois de acordar: a lista ainda está sendo lida e o
@@ -375,8 +345,7 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   // da recriação vai pra rede — e o card pede todos os tiles de uma vez.
   assert.match(SW_SEM, /if \(tilesHidratados\)/,
     'sumiu a distinção entre lista pronta e lista ainda sendo lida');
-  // E espera a leitura MAIS NOVA, não a capturada no pedido (O11, 2026-09-26).
-  assert.match(SW_SEM, /respondWith\(esperarListaComTeto\(\)\.then\(/,
+  assert.match(SW_SEM, /respondWith\(hidratacao\.then\(/,
     'na janela logo depois de acordar, o tile tem de ESPERAR a leitura da lista');
   assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
     'o app precisa avisar o SW depois de guardar');
@@ -410,15 +379,14 @@ test('a trava de ação respeita o card sem foto — terminar a ação anterior 
 // em segundo plano) nascia com a janela nula, pedia a foto CRUA — que a
 // varredura nunca guarda — e todo card de foto abria com "precisa de sinal".
 test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () => {
-  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*(?:const gravandoAJanela = )?offlineGravarJanela\(janela, cobertaDeFato\);/,
+  assert.match(fatiar('offlineVarrer'), /offlineJanelaServida = janela;\s*offlineGravarJanela\(janela\);/,
     'a janela tem de ser gravada no MESMO tique em que vira — sem await antes, um "Sair"'
     + ' logo depois entra na fila do IndexedDB atrás dela e apaga tudo');
   const abrir = fatiar('offlineTentarAbrirSemRede');
-  const iLer = abrir.indexOf('offlineRecuperarJanela()');
+  const iLer = abrir.indexOf('offlineLerJanela()');
   const iCard = abrir.indexOf('showCurrentPlace()');
   assert.ok(iLer > 0 && iCard > iLer, 'a janela tem de voltar ANTES do primeiro card nascer');
-  // A volta da janela mora numa função só (a reabertura e a abertura com rede).
-  assert.match(fatiar('offlineRecuperarJanela'), /if \(!r \|\| offlineJanelaServida !== null\) return;\s*offlineJanelaServida = r\.janela;/,
+  assert.match(abrir, /if \(offlineJanelaServida === null\) offlineJanelaServida = janelaGuardada;/,
     'com o app vivo a janela de memória é a mais nova — a guardada só entra quando não há outra');
   // Mesma base da fila, e é ela que o "Sair" e o desmarcar apagam.
   assert.match(fatiar('offlineGravarJanela'), /OFFLINE_STORE/, 'a janela saiu da base que o esquecer apaga');
@@ -430,10 +398,8 @@ test('a janela servida é GRAVADA quando vira e VOLTA na abertura sem rede', () 
 test('a varredura guarda os tiles da FAIXA de alturas, com piso amarrado ao CSS', () => {
   const itens = fatiar('offlineItensDaFila');
   assert.match(itens, /tilesDaFaixa\(/, 'a varredura voltou a usar UMA caixa só');
-  // A fila REAL (`filaReal`), e uma CÓPIA dela: o treino que abre durante a
-  // gravação (o `await` antes) trocava a da tela pelos EXEMPLOS (R9-4-01).
-  assert.match(itens, /filaReal\(\)\.slice\(\)/,
-    'o laço cede a thread: tem de iterar uma CÓPIA (da fila REAL), senão o avanço da fila pula um pedido calado');
+  assert.match(itens, /AppState\.queue\.slice\(\)/,
+    'o laço cede a thread: tem de iterar uma CÓPIA, senão o avanço da fila pula um pedido calado');
   assert.match(fatiar('offlineFaixaDeCaixas'), /MAPA_TILE - 8/,
     'o teto tem de ficar abaixo de um tile: acima de 504px o custo dobra (medido: 313 → 470 tiles)');
   // O piso NÃO pode ficar acima do menor `min-height` do `.card-photo`: se o
@@ -669,23 +635,9 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   const i9c = CODIGO.indexOf("secao('9c.");
   const bloco9c = CODIGO.slice(i9c, CODIGO.indexOf("secao('10.", i9c));
   assert.match(bloco9c, /hasTouch: true, isMobile: true/, 'a 9c tem que rodar num contexto com TOQUE — o botão responde a toque');
-  // O toque de verdade é o do MOTOR (lote 18): o do DevTools no Chromium, e o
-  // `touchscreen` do Playwright no WebKit — que não tem o protocolo do DevTools.
   assert.match(bloco9c, /Input\.dispatchTouchEvent/, 'a 9c tem que TOCAR o botão, não chamar a captura por fora');
-  assert.match(bloco9c, /await pg\.touchscreen\.tap\(c\.x, c\.y\);/, 'fora do Chromium, a 9c tem que TOCAR o botão (o `touchscreen`)');
-  // E o toque espera o botão NO LUGAR que o app pôs, não três amostras iguais:
-  // MEDIDO no WebKit (lote 18), a transição da troca de canto fica parada no
-  // ponto de partida por mais de 300 ms às vezes, e o toque caía no lugar velho
-  // (6 de 40 sem captura; 0 de 40 com a condição).
-  assert.match(bloco9c, /const noLugar = !f\.getAnimations\(\)\.some\(\(a\) => a\.playState === 'running'\)/,
-    'o toque da 9c voltou a esperar só três amostras iguais — a transição parada no começo engana');
-  assert.match(bloco9c, /parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo/,
-    'o toque da 9c conta como parado o FAB que ainda desliza');
   assert.doesNotMatch(bloco9c, /dlogCapturar\(/, 'a 9c chamou a captura por fora — o toque de verdade é o que se mede');
-  // Fechar como o usuário fecha é a porta única (lote 18): no WebKit 27.2 o
-  // `close({ runBeforeUnload: true })` nem fecha a página (MEDIDO); a porta usa o
-  // `close()` puro lá, e o `test/navegador.test.mjs` cobra a forma dela.
-  assert.match(bloco9c, /await fecharComoOUsuario\(p1d\);/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
+  assert.match(bloco9c, /\.close\(\{ runBeforeUnload: true \}\)/, 'a 9c tem que fechar como o usuário fecha (pagehide/visibilitychange)');
   // Ir pro FUNDO sem descarregar: descarregar aborta o IndexedDB em voo, e aí
   // "guarda a captura já baixada" e "grava sem o modo dev" passavam limpas
   // (medido: as duas sabotagens sobreviveram antes disto).
@@ -697,34 +649,12 @@ test('existe cobertura de service worker E ela roda no CI', () => {
     [/diz\('CONTROLE: nenhuma captura NESTA abertura/, 'sem ele, o número podia vir de uma captura nova'],
     [/diz\('o RELATÓRIO leva a abertura anterior inteira/, 'o arquivo de verdade, lido pela ferramenta'],
     [/diz\('o resumo e o leitor mostram o defeito capturado ANTES de fechar/, 'o motivo de guardar'],
-    // Só o que FOI no arquivo (R6-4-5): a base inteira levava o que a outra aba gravou depois.
-    [/diz\('BAIXADO, sai do aparelho o que FOI no arquivo/, 'o que foi entregue não fica — e o que não foi, fica'],
+    [/diz\('BAIXADO, o que estava guardado sai do aparelho/, 'o que foi entregue não fica'],
     [/diz\('o que foi BAIXADO não volta/, 'o que foi entregue não volta'],
     [/diz\('a abertura guardada há MAIS de 24 h sai do aparelho/, 'o prazo que a Ajuda promete'],
-    // Desde a auditoria de 2026-09-25 são DOIS toques com captura não baixada:
-    // o 1º só avisa (e o que existe fica), o 2º desliga e apaga.
-    [/diz\('com captura NÃO baixada, o 1º toque em desligar só AVISA/, 'o aviso vem ANTES de apagar, não junto'],
-    [/diz\('o 2º toque DESLIGA o modo dev e apaga o guardado/, 'desligado é desligado'],
+    [/diz\('DESLIGAR o modo dev avisa das capturas não baixadas e apaga/, 'desligado é desligado'],
     [/diz\('o SAIR apaga o que foi guardado/, 'sair é sair de tudo'],
   ]) assert.match(bloco9c, re, `a 9c perdeu uma medida — ${porque}`);
-
-  // FECHAR SEM IR PRO FUNDO (auditoria de 2026-09-29, D2). A 9c vai pro fundo
-  // antes de fechar, e aí a gravação da base sempre chega: recarregar perdia a
-  // abertura em 5 de 5 e nada reprovava. A 9f recarrega e fecha DIRETO.
-  exigir(/secao\('9f\. FECHAR SEM IR PRO FUNDO/,
-    'sumiu a seção do fechar direto — é onde o retrato síncrono do `pagehide` é o que salva a abertura');
-  const i9f = CODIGO.indexOf("secao('9f.");
-  const bloco9f = CODIGO.slice(i9f, CODIGO.indexOf("secao('10.", i9f));
-  assert.doesNotMatch(bloco9f, /irProFundo9c\(/,
-    'a 9f foi pro fundo antes de fechar — aí a gravação da base chega sozinha e o retrato não é medido');
-  assert.match(bloco9f, /await a9f\.reload\(/, 'a 9f tem que RECARREGAR a página de verdade');
-  for (const [re, porque] of [
-    [/diz\('RECARREGAR \(sem ir pro fundo antes\) não perde a abertura/, 'o defeito medido (5 de 5)'],
-    [/diz\('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato/, 'sem ele, "não escreveu nada" passa por vácuo'],
-    [/diz\('FECHAR a aba \(sem ir pro fundo antes\) não perde a abertura/, 'o outro caminho medido (2 de 5)'],
-    [/diz\('o SAIR apaga o retrato do fechar/, 'sair é sair de tudo'],
-    [/diz\('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho/, 'quem não liga o modo dev não paga nada'],
-  ]) assert.match(bloco9f, re, `a 9f perdeu uma medida — ${porque}`);
 
   // Cobertura que não roda é cobertura que não existe.
   assert.ok(PKG.scripts && PKG.scripts['test:offline'],
@@ -732,28 +662,6 @@ test('existe cobertura de service worker E ela roda no CI', () => {
   assert.match(CI, /npm run test:offline/,
     'o CI não roda o smoke do offline — sem isso ele vira arquivo morto no dia em'
     + ' que alguém esquecer de rodá-lo à mão, que é exatamente como o buraco nasceu');
-});
-
-// A ESPERA DO FIM DE UMA PREPARAÇÃO também é uma só (`preparacaoAssentada`, no
-// smoke do offline): a espera pelo resultado CRU (`offlineUltimoResultado !==
-// null`) acordava no "pronto" de uma preparação VELHA — a volta da rede dispara a
-// da fila de antes, e o pedido do teste vira `offlinePedidaDeNovo`. MEDIDO no
-// lote 18 (a 5b: 1 em ~7 rodadas, o cache com os tiles da fila anterior) e
-// reproduzido atrasando os tiles: o "pronto" chegava com `offlineVarrendo`
-// verdadeiro e a fila guardada não coberta. Sem comentário na conta (gotcha #67).
-test('o smoke do offline espera o FIM da preparação (`preparacaoAssentada`), nunca o resultado cru', () => {
-  const OFF = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8');
-  const codigo = OFF.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-  assert.match(codigo, /const preparacaoAssentada = \(\) =>[^;]*offlineUltimoResultado !== null[^;]*!offlineVarrendo[^;]*!offlinePedidaDeNovo/,
-    'sumiu a espera única do fim da preparação, ou ela deixou de exigir nada no ar e nada pedido pra depois');
-  assert.doesNotMatch(codigo, /esperarNaPagina\(\w+, \(\) => offlineUltimoResultado !== null,/,
-    'voltou a espera pelo resultado CRU da preparação — ela acorda no "pronto" de uma preparação velha; use preparacaoAssentada');
-  assert.ok((codigo.match(/esperarNaPagina\(\w+, preparacaoAssentada,/g) || []).length >= 10,
-    'as esperas do fim da preparação deixaram de passar pela preparacaoAssentada');
-  // E a 5b confere que o "pronto" é o da fila que vai ser reaberta — o controle
-  // que teria pegado a corrida.
-  assert.match(codigo, /cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm/,
-    'a PRÉ-CONDIÇÃO da 5b deixou de conferir que a preparação cobre a fila guardada');
 });
 
 // A ESPERA DO ESVAZIAMENTO É FONTE ÚNICA, e este guard existe porque a lição
@@ -828,8 +736,7 @@ test('o service worker responde ao DIAG e a releitura da lista SEGURA os tiles',
     'o worker parou de contar o que serviu do cache');
   // A releitura (aviso da varredura) também tem que SEGURAR o tile, senão o
   // tile guardado agora e pedido logo em seguida cai na lista velha.
-  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('const leitura = (async'));
-  assert.ok(hid.length > 20 && hid.length < 400, `o recorte de hidratarTiles saiu de lugar (${hid.length} caracteres): a âncora \`const leitura = (async\` mudou e o guard leria o arquivo todo`);
+  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('hidratacao = (async'));
   assert.match(hid, /tilesHidratados = false;/,
     'a releitura da lista deixou de segurar os tiles — o recém-guardado vai pra rede');
 });
@@ -855,29 +762,4 @@ test('a varredura avisa o worker em TODO fim, e no meio dela', () => {
   const iAviso = esq.search(/^\s+offlineAnunciarTiles\(\);/m);
   assert.ok(iDel > 0, 'o esquecer deixou de apagar o cache de tiles');
   assert.ok(iAviso > iDel, 'esquecer não avisa o worker DEPOIS de apagar — a lista dele fica com os endereços');
-});
-
-// ── o service worker abre o app SEM REDE (auditoria de 2026-09-25) ─────────
-test('SW: tudo que a página carrega está nos CRÍTICOS, e eles são atômicos', () => {
-  const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
-  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const bloco = /const CRITICOS = \[([\s\S]*?)\];/.exec(sw);
-  assert.ok(bloco, 'a lista CRITICOS sumiu do service worker');
-  const criticos = [...bloco[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  const daPagina = [...html.matchAll(/<(?:script[^>]*\bsrc|link[^>]*rel="stylesheet"[^>]*\bhref)="((?!https?:|\/\/)[^"]+)"/g)]
-    .map((m) => '/' + m[1].replace(/^\.?\//, ''));
-  assert.ok(daPagina.length >= 9, `achei ${daPagina.length} recursos na página — o extrator quebrou`);
-  const faltam = daPagina.filter((u) => !criticos.includes(u));
-  assert.deepEqual(faltam, [], 'a página carrega isto e o worker não guarda na instalação: sem rede, o app abre quebrado');
-  assert.ok(criticos.includes('/'), 'a própria página saiu dos críticos');
-  assert.ok(!criticos.includes('/index.html'), '`/index.html` é um 307 no Cloudflare: guardado, vira resposta redirecionada que o Chrome recusa');
-  assert.match(sw, /cache\.addAll\(CRITICOS\)/,
-    'os críticos voltaram a ser tolerantes: instalação pela metade apaga o cache bom no activate');
-});
-
-test('SW: a navegação sem rede cai na página guardada mesmo com query (atalho do manifest)', () => {
-  const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
-  assert.match(sw, /caches\.match\(event\.request, isHTML \? \{ ignoreSearch: true \} : undefined\)/);
-  assert.match(sw, /if \(isHTML\) return comTeto\(caches\.match\('\/'\), undefined\)/);
-  assert.doesNotMatch(sw, /caches\.match\('\/index\.html'\)/);
 });

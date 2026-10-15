@@ -25,69 +25,43 @@ if (!Number.isFinite(versaoAtual) || versaoAtual < MIN_NODE) {
 }
 
 import { createServer } from 'node:http';
-import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir } from 'node:fs/promises';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, chaveDoSecret, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
-import { readBody } from './corpo.mjs';
+import { dispatch, makeSessions, base64ToBytes, SESSION_TTL } from './core.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
 process.on('uncaughtException', (e) => console.error('uncaughtException', e));
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)); // raiz do repo
-// PORT=0 é "qualquer porta livre" (os testes pedem assim), e não "sem porta":
-// o `parseInt(…) || 8080` o trocava por 8080, e duas VMs de teste brigavam por ela.
-const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 8080;
+const PORT = parseInt(process.env.PORT, 10) || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const SESSION_DIR = process.env.SESSION_DIR || join(tmpdir(), 'waze_places_sessions');
 const SESSION_KEY_FILE = process.env.SESSION_KEY_FILE || join(tmpdir(), 'waze_places.key');
 
 // ── Chave de criptografia ────────────────────────────────────────────────
 // Prioridade: env ENCRYPTION_KEY > arquivo > auto-gera (conveniência dev/VM).
-// Devolve o TEXTO (base64) e de onde ele veio; quem decodifica e confere é o
-// `chaveDoSecret` do core, o mesmo do Worker.
-function textoDaChave() {
-  if (process.env.ENCRYPTION_KEY) return { b64: process.env.ENCRYPTION_KEY, origem: 'da variável ENCRYPTION_KEY' };
-  if (existsSync(SESSION_KEY_FILE)) return { b64: readFileSync(SESSION_KEY_FILE, 'utf8'), origem: 'do arquivo ' + SESSION_KEY_FILE };
+function loadOrCreateKey() {
+  if (process.env.ENCRYPTION_KEY) return base64ToBytes(process.env.ENCRYPTION_KEY.trim());
+  if (existsSync(SESSION_KEY_FILE)) return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
   const key = randomBytes(32);
   try {
     // 'wx' = criação exclusiva: se outro processo gravou a chave nesse meio-tempo,
     // lança EEXIST em vez de sobrescrever (evita race não-atômica no boot).
     writeFileSync(SESSION_KEY_FILE, key.toString('base64'), { flag: 'wx', mode: 0o600 });
-    return { b64: key.toString('base64'), origem: 'do arquivo ' + SESSION_KEY_FILE + ' (gerada agora)' };
+    return new Uint8Array(key);
   } catch (e) {
     if (e && e.code === 'EEXIST') {
-      return { b64: readFileSync(SESSION_KEY_FILE, 'utf8'), origem: 'do arquivo ' + SESSION_KEY_FILE };
+      return base64ToBytes(readFileSync(SESSION_KEY_FILE, 'utf8').trim());
     }
     throw e;
   }
 }
-// Chave que não serve é FATAL, com código de erro: curta demais, ou base64
-// quebrado. Curta, a VM subia calada (3 bytes funcionavam); quebrada, o erro do
-// `atob` caía no `uncaughtException` lá de cima, que só registra, e o processo
-// saía com código 0 — um supervisor que reinicia "se falhar" lia a queda como
-// sucesso (a mesma armadilha da porta ocupada, lá embaixo). Auditoria de
-// 2026-09-29. A mensagem diz de onde a chave veio, e nunca o valor dela.
-function chaveOuFim() {
-  let texto;
-  try {
-    texto = textoDaChave();
-  } catch (e) {
-    console.error('Waze Places não subiu: não deu pra ler nem criar a chave em ' + SESSION_KEY_FILE + ' (' + (e && e.code || 'erro') + ').');
-    process.exit(1);
-  }
-  const { keyBytes: chave, problema } = chaveDoSecret(texto.b64);
-  if (problema) {
-    console.error('Waze Places não subiu: ' + problema + ' — lida ' + texto.origem + '.');
-    process.exit(1);
-  }
-  return chave;
-}
-const keyBytes = chaveOuFim();
+const keyBytes = loadOrCreateKey();
 
 // ── Store de sessão em filesystem (TTL por mtime, touch a cada uso) ────────
 const fsStore = {
@@ -107,55 +81,14 @@ const fsStore = {
       return null;
     }
   },
-  // ATÔMICO: grava num arquivo temporário e troca pelo nome certo. Um processo
-  // derrubado NO MEIO da escrita deixava a sessão truncada — que não decifra, é
-  // apagada (`descartar`) e desloga a pessoa (auditoria de 2026-09-25). O
-  // `rename` no mesmo diretório troca o arquivo inteiro de uma vez.
-  async put(hash, blob, ttl) {
+  async put(hash, blob) {
     await mkdir(SESSION_DIR, { recursive: true, mode: 0o700 });
-    const final = join(SESSION_DIR, 'sess_' + hash);
-    const temp = join(SESSION_DIR, '.tmp_' + hash + '_' + process.pid + '_' + randomBytes(4).toString('hex'));
-    await writeFile(temp, blob, { mode: 0o600 });
-    try {
-      await rename(temp, final);
-    } catch (e) {
-      await unlink(temp).catch(() => {});
-      throw e;
-    }
-    if (Number(ttl) > 0 && Number(ttl) <= PRAZO_CURTO_MAX_S) apagarNoPrazo(final, Date.now() + Number(ttl) * 1000);
-    else prazosCurtos.delete(final);
+    await writeFile(join(SESSION_DIR, 'sess_' + hash), blob, { mode: 0o600 });
   },
   async delete(hash) {
-    const f = join(SESSION_DIR, 'sess_' + hash);
-    prazosCurtos.delete(f);
-    await unlink(f).catch(() => {});
+    await unlink(join(SESSION_DIR, 'sess_' + hash)).catch(() => {});
   },
 };
-
-// ── O prazo CURTO que o core pede no `put` ──────────────────────────────────
-// O KV do Cloudflare cumpre sozinho o prazo de cada gravação; este adaptador
-// de arquivo não tem nada parecido. Pra sessão (21 dias) quem cumpre é a
-// varredura de hora em hora, logo abaixo. Pro que vale MINUTOS — a lista de
-// fotos que o excluir-foto relê (1 min) e o pareamento (5 min) — a hora da
-// varredura ERA o prazo: a Ajuda promete que a lista de fotos da lixeira fica
-// no servidor por até 1 minuto, e aqui ela ficava até ~70 (auditoria de
-// 2026-09-26). Daí um relógio por gravação.
-//
-// O relógio confere o prazo REGISTRADO ao disparar, e não o mtime do arquivo:
-// o `get` renova o mtime (é a janela deslizante da sessão), e uma gravação
-// mais nova na mesma chave empurra o prazo — o relógio da anterior não pode
-// apagá-la antes da hora.
-const PRAZO_CURTO_MAX_S = 60 * 60;
-const prazosCurtos = new Map(); // arquivo → instante (ms) a partir do qual ele sai
-function apagarNoPrazo(arquivo, ateMs) {
-  prazosCurtos.set(arquivo, ateMs);
-  setTimeout(() => {
-    const prazo = prazosCurtos.get(arquivo);
-    if (prazo === undefined || prazo > Date.now()) return;
-    prazosCurtos.delete(arquivo);
-    unlink(arquivo).catch(() => {});
-  }, Math.max(0, ateMs - Date.now()) + 50).unref();
-}
 const sessions = makeSessions({ store: fsStore, keyBytes });
 
 // ── GC de sessões órfãs ─────────────────────────────────────────────────────
@@ -163,20 +96,11 @@ const sessions = makeSessions({ store: fsStore, keyBytes });
 // nunca mais volta deixa o blob no disco pra sempre → cresce sem limite. Varre
 // o SESSION_DIR periodicamente e remove arquivos com idade > SESSION_TTL.
 const GC_INTERVAL_MS = 60 * 60 * 1000; // 1h
-const TEMP_GC_MS = 10 * 60 * 1000;      // temporário de gravação: nenhuma dura 10 min
 async function gcSessions() {
   try {
     const files = await readdir(SESSION_DIR);
     const now = Date.now();
     for (const name of files) {
-      // Temporário da gravação atômica que ficou pra trás (o processo caiu entre
-      // o `writeFile` e o `rename`): ninguém o lê, e sai com folga.
-      if (name.startsWith('.tmp_')) {
-        const t = join(SESSION_DIR, name);
-        const st = await stat(t).catch(() => null);
-        if (st && now - st.mtimeMs > TEMP_GC_MS) await unlink(t).catch(() => {});
-        continue;
-      }
       if (!name.startsWith('sess_')) continue;
       const f = join(SESSION_DIR, name);
       try {
@@ -188,27 +112,9 @@ async function gcSessions() {
         // EXPIRAÇÃO (futuro), na sessão é o ÚLTIMO USO (sempre passado), então
         // "carimbo < agora" dava vencido pra tudo. Medido antes do conserto: a
         // sessão sumia no primeiro boot.
-        //
-        // O que ainda não venceu ganha o relógio do prazo curto (ver
-        // `apagarNoPrazo`): o da gravação morreu com o processo anterior, e
-        // sem isto o que sobra de um reinício esperaria a próxima varredura.
         if (name.startsWith('sess_pair_')) {
           const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
-          const ateMs = corte ? Number(corte[1]) * 1000 : 0;
-          if (ateMs < now || ateMs - now > PAIR_TTL * 1000) await unlink(f).catch(() => {});
-          else if (!prazosCurtos.has(f)) apagarNoPrazo(f, ateMs);
-          continue;
-        }
-
-        // A lista de fotos que o excluir-foto relê (`reler_…`): o carimbo do
-        // valor é a hora da LEITURA no Waze, e ela sai RELEITURA_TTL_STORE
-        // depois dele — o mesmo minuto que o KV cumpre no Cloudflare e que a
-        // Ajuda promete. O carimbo, e não o mtime: o `get` renova o mtime.
-        if (name.startsWith('sess_reler_')) {
-          const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
-          const ateMs = corte ? (Number(corte[1]) + RELEITURA_TTL_STORE) * 1000 : 0;
-          if (ateMs <= now || ateMs - now > RELEITURA_TTL_STORE * 1000) await unlink(f).catch(() => {});
-          else if (!prazosCurtos.has(f)) apagarNoPrazo(f, ateMs);
+          if (!corte || Number(corte[1]) * 1000 < now) await unlink(f).catch(() => {});
           continue;
         }
 
@@ -238,18 +144,7 @@ const MIME = {
   '.ico': 'image/x-icon',
   // Fonte Inter auto-hospedada. MIME errado aqui = browser recusa a fonte.
   '.woff2': 'font/woff2',
-  // As capturas do prompt de instalação (`icons/screenshots/*.jpg`) e a
-  // licença da fonte saíam como `application/octet-stream` — e com `nosniff`,
-  // que proíbe o navegador de adivinhar. O Cloudflare manda estes (MEDIDO no
-  // `wrangler dev`, auditoria de 2026-09-26).
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.txt': 'text/plain; charset=utf-8',
 };
-// Sem extensão, só o `LICENSE` é servido. O Cloudflare o manda SEM
-// Content-Type, e o navegador o mostra como texto; aqui vai o tipo dito, que dá
-// na mesma tela — `octet-stream` com `nosniff` virava download.
-const MIME_SEM_EXTENSAO = { '/LICENSE': 'text/plain; charset=utf-8' };
 // no-cache pra código (SW controla versão); cache longo pra imagens/fontes
 const noCache = new Set(['.js', '.mjs', '.css', '.json', '.html', '.webmanifest']);
 
@@ -309,11 +204,7 @@ const SECURITY_HEADERS = {
 // outra coisa (wrangler.jsonc, CLAUDE.md, README.md, package.json, _headers,
 // dotfiles, server/, docs/, worker/…) nunca é lida. Mais seguro que a blocklist
 // antiga, que servia com 200 os arquivos da raiz não listados.
-//
-// A extensão do Chrome e a licença do projeto são PUBLICADAS no Cloudflare (o
-// `test/vm-estaticos.test.mjs` as declara frontend: distribuição), e davam 404
-// aqui — o mesmo app com duas respostas (gotcha #14; auditoria de 2026-09-26).
-const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/', '/extensao-chrome/'];
+const ALLOWED_DIRS = ['/css/', '/js/', '/icons/', '/fonts/'];
 const ALLOWED_ROOT_FILES = new Set([
   // `/index.html` é o GERADO (minificado, `npm run html`) — é ele que a raiz
   // serve, aqui e no Cloudflare. O FONTE comentado é o `/index.src.html` e NÃO
@@ -325,12 +216,7 @@ const ALLOWED_ROOT_FILES = new Set([
   '/service-worker.js',
   '/favicon.ico',
   '/favicon.svg',
-  '/LICENSE',
 ]);
-// O `.assetsignore` tira `README.md` em QUALQUER nível, e um mora dentro de um
-// diretório servido: o da extensão (doc de quem desenvolve; 404 no Cloudflare,
-// MEDIDO no `wrangler dev`).
-const NUNCA_SERVIDOS = [/\/README\.md$/];
 // Os FONTES comentados moram DENTRO de `/js/` e `/css/`, então a allowlist de
 // diretório acima os deixava passar: `/js/app.js` respondia 200 com 622 KB ao
 // lado dos 201 KB do `/js/min/app.js` que o app carrega, e `/css/styles.css`
@@ -353,87 +239,47 @@ const FONTE_DE_BUILD = [
 function isAllowedAsset(path) {
   if (ALLOWED_ROOT_FILES.has(path)) return true;
   if (!ALLOWED_DIRS.some((d) => path.startsWith(d))) return false;
-  if (NUNCA_SERVIDOS.some((re) => re.test(path))) return false;
   for (const [dir, servivel] of FONTE_DE_BUILD) {
     if (dir.test(path) && !servivel.test(path)) return false;
   }
   return true;
 }
 
-// O que o Cloudflare faz com o NOME do índice — o `html_handling` padrão
-// ("auto-trailing-slash") sobre o `index.html` da raiz —, MEDIDO no `wrangler
-// dev`: `/index.html` e `/index` levam 307 pra `/`, e `/index/` pra `/index`
-// (que leva pra `/` no passo seguinte), com a query junto. Vale pro caminho
-// já decodificado e normalizado (`/./index.html` e `/%69ndex.html` também).
-// A VM servia o `/index.html` com 200 e dava 404 nos outros dois (auditoria de
-// 2026-09-29): o mesmo endereço com duas respostas (gotcha #14).
-const APELIDOS_DO_INDICE = new Map([['/index.html', '/'], ['/index', '/'], ['/index/', '/index']]);
-
-// Resolve o caminho pedido: `{ safe, file }` (o arquivo a servir),
-// `{ redirecionar }` (um apelido do índice) ou `null` (nada aqui). Fonte única
-// do GET e da decisão 405 × 404 dos outros métodos.
-function resolverEstatico(urlPath) {
+async function serveStatic(req, res, urlPath) {
   let rel;
   try {
     rel = decodeURIComponent(urlPath.split('?')[0]);
   } catch {
-    // URI malformada (ex.: '/%') — o `decodeURIComponent` lança. É 404, como no
-    // Cloudflare (MEDIDO no `wrangler dev`); aqui era 400.
-    return null;
+    // URI malformada (ex.: GET '/%') — decodeURIComponent lança URIError.
+    // Responde 400 sem derrubar o processo.
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+    res.end('Bad request');
+    return;
   }
 
-  // A raiz é a do caminho NORMALIZADO: `//` e `/./` também são ela (no
-  // Cloudflare, `//` redireciona pra `/` e `/./` serve o índice — medido no
-  // `wrangler dev`). O smoke do pareamento abre `BASE + '/#pair='`, que é `//`.
-  const normal = normalize(rel);
-  const isRoot = rel === '' || normal === '/';
-  if (!isRoot && APELIDOS_DO_INDICE.has(normal)) return { redirecionar: APELIDOS_DO_INDICE.get(normal) };
+  const accept = req.headers['accept'] || '';
+  const isRoot = rel === '/' || rel === '';
+  // Navegação = raiz ou request que aceita HTML → serve o shell da SPA no miss.
+  const isNavigation = isRoot || accept.includes('text/html');
   // A raiz resolve pro índice do diretório, como qualquer servidor estático.
   // NÃO há mais remapeamento: o `index.html` JÁ É o minificado (o fonte é o
-  // `index.src.html`), então a raiz serve o arquivo que o Cloudflare serve em
-  // `/` sem ninguém desviar rota. Era o remap que o Cloudflare ignorava — ver a
-  // nota no `tools/gerar-html.mjs`.
+  // `index.src.html`), então `/` e `/index.html` servem o mesmo arquivo sem
+  // ninguém desviar rota. Era o remap que o Cloudflare ignorava — ver a nota no
+  // `tools/gerar-html.mjs`.
   if (isRoot) rel = '/index.html';
 
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
 
-  // Path traversal + allowlist: fora do frontend conhecido → 404, SEMPRE.
-  // Aqui havia um "shell da SPA": pedido que aceitasse HTML e não casasse com
-  // arquivo nenhum recebia o index.html com 200. O Cloudflare NÃO faz isso —
-  // MEDIDO no `wrangler dev` (auditoria de 2026-09-26): `/qualquer-rota` dá
-  // 404 com e sem `Accept: text/html`, porque o `wrangler.jsonc` não liga o
-  // `not_found_handling`. O app não tem rota além da raiz (o pareamento é
-  // fragmento, `/#pair=`, e os atalhos do manifest são `/?action=`), então o
-  // shell só servia pra o mesmo endereço dar 200 num destino e 404 no outro — e
-  // pro service worker guardar uma página do app num caminho que não existe.
-  if (safe.includes('..') || !isAllowedAsset(safe)) return null;
-  return { safe, file: join(ROOT, safe) };
-}
-
-// Há um asset publicado (ou um apelido do índice) neste caminho? É o que
-// decide, fora do GET/HEAD, entre 405 e 404 — como o Cloudflare.
-async function haAssetEm(urlPath) {
-  const alvo = resolverEstatico(urlPath);
-  if (!alvo) return false;
-  if (alvo.redirecionar) return true;
-  try { return (await stat(alvo.file)).isFile(); } catch { return false; }
-}
-
-async function serveStatic(req, res, urlPath) {
-  const alvo = resolverEstatico(urlPath);
-  if (!alvo) return notFound(res);
-  if (alvo.redirecionar) {
-    let busca = '';
-    try { busca = new URL('http://local' + urlPath).search; } catch { /* sem query */ }
-    res.writeHead(307, { Location: alvo.redirecionar + busca, ...SECURITY_HEADERS });
-    res.end();
-    return;
+  // Path traversal + allowlist: fora do frontend conhecido → 404 (ou SPA se navegação).
+  if (safe.includes('..') || !isAllowedAsset(safe)) {
+    return notFound(res, isNavigation);
   }
-  const { safe, file } = alvo;
+
+  const file = join(ROOT, safe);
   try {
     const buf = await readFile(file);
     const ext = extname(file).toLowerCase();
-    const headers = { 'Content-Type': MIME[ext] || MIME_SEM_EXTENSAO[safe] || 'application/octet-stream', ...SECURITY_HEADERS };
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SECURITY_HEADERS };
     // O corte é por CAMINHO onde o `_headers` corta por caminho, não só por
     // extensão. Os ícones são o caso que divergia: `.svg` não está no `noCache`,
     // então caíam no `immutable` de um ANO — mas o NOME deles é fixo
@@ -445,12 +291,7 @@ async function serveStatic(req, res, urlPath) {
     if (file.endsWith('service-worker.js')) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
     else if (noCache.has(ext)) headers['Cache-Control'] = 'no-cache, must-revalidate';
     else if (safe.startsWith('/icons/')) headers['Cache-Control'] = 'public, max-age=86400';
-    else if (safe.startsWith('/fonts/')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-    // O que o `_headers` não cobre (a licença, a extensão) leva o PADRÃO do
-    // Cloudflare, MEDIDO no `wrangler dev`: `public, max-age=0, must-revalidate`.
-    // O `immutable` de um ano era o do `/fonts/*` caindo em tudo que sobrava: um
-    // ícone da extensão trocado ficaria um ano velho na VM.
-    else headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
+    else headers['Cache-Control'] = 'public, max-age=31536000, immutable';
     // ETag + 304. `no-cache` manda REVALIDAR, não rebaixar: sem ETag o
     // navegador não tem o que perguntar e a revalidação vira download inteiro.
     // O Cloudflare já fazia isto sozinho (medido em produção); a VM não fazia,
@@ -459,14 +300,7 @@ async function serveStatic(req, res, urlPath) {
     // rebaixaria tudo por causa de um deploy que não mudou nada.
     const etag = '"' + createHash('sha256').update(buf).digest('base64url').slice(0, 22) + '"';
     headers.ETag = etag;
-    // Comparação FRACA (RFC 9110 §13.1.2), que é a do If-None-Match: atrás do
-    // Cloudflare — o destino da VM é ser a ORIGEM com ele na frente — a borda
-    // comprime e rebaixa o ETag forte pra `W/"…"`, e é o fraco que o navegador
-    // devolve. Com a igualdade estrita a VM nunca respondia 304 e cada
-    // carregamento rebaixava o app inteiro, que é o que este ETag existe pra
-    // evitar (auditoria de 2026-09-25). Pode vir uma LISTA, e `*` vale qualquer.
-    const pedidas = String(req.headers['if-none-match'] || '').split(',').map((x) => x.trim().replace(/^W\//, ''));
-    if (pedidas.includes(etag) || pedidas.includes('*')) {
+    if (req.headers['if-none-match'] === etag) {
       res.writeHead(304, headers);
       res.end();
       return;
@@ -475,36 +309,61 @@ async function serveStatic(req, res, urlPath) {
     res.end(buf);
   } catch {
     // Consta na allowlist mas não existe no disco.
-    return notFound(res);
+    return notFound(res, isNavigation);
   }
 }
 
-function notFound(res) {
+function notFound(res, isNavigation) {
+  if (isNavigation) return serveIndexFallback(res);
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
   res.end('Not found');
 }
 
-// Cabeçalhos de TODA resposta de /api: `no-store` (ver o Worker) e os de
-// segurança — a VM respondia a API (e o 405/500 dos estáticos) SEM eles, e o app
-// deixava de ser o mesmo nos dois destinos (gotcha #14; auditoria de 2026-09-25).
-const API_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS };
+async function serveIndexFallback(res) {
+  try {
+    const buf = await readFile(join(ROOT, 'index.html'));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+    res.end(buf);
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+    res.end('Not found');
+  }
+}
+
+const MAX_BODY_BYTES = 5_000_000;
+function readBody(req, res) {
+  return new Promise((resolve) => {
+    let data = '';
+    let tooLarge = false;
+    req.on('data', (c) => {
+      if (tooLarge) return;
+      data += c;
+      if (data.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        // Responde 413 limpo antes de cortar a conexão (em vez de só req.destroy()).
+        if (!res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ success: false, error: 'Corpo da requisição muito grande' }));
+        }
+        req.destroy();
+        resolve(null); // sinaliza pro chamador que a resposta já foi enviada
+      }
+    });
+    req.on('end', () => { if (!tooLarge) resolve(data); });
+    req.on('error', () => { if (!tooLarge) resolve(''); });
+  });
+}
 
 const server = createServer(async (req, res) => {
   const url = req.url || '/';
-  // O caminho NORMALIZADO, como o Worker o vê (`new URL(request.url).pathname`):
-  // `/api/./sessao` é a rota `sessao` lá e era a rota `./sessao` aqui — o mesmo
-  // pedido com duas respostas (gotcha #14; auditoria de 2026-09-25). Prefixado
-  // com a origem pra `//x` não virar HOST.
-  let caminho;
-  try { caminho = new URL('http://local' + url).pathname; } catch { caminho = url.split('?')[0]; }
   try {
-    if (caminho.startsWith('/api/')) {
+    if (url.startsWith('/api/')) {
       if (req.method !== 'POST') {
-        res.writeHead(405, API_HEADERS);
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ success: false, error: 'Método não permitido' }));
         return;
       }
-      const route = caminho.slice(5);
+      const route = url.slice(5).split('?')[0];
       const raw = await readBody(req, res);
       if (raw === null) return; // body grande demais → 413 já respondido
       let data = {};
@@ -517,19 +376,13 @@ const server = createServer(async (req, res) => {
       // correndo termina sozinho. Só não pode virar rejeição sem dono.
       const aoFundo = (p) => { Promise.resolve(p).catch(() => {}); };
       const { status, body } = await dispatch(route, data, { sessions, aoFundo });
-      res.writeHead(status, API_HEADERS);
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
       return;
     }
 
-    // Fora do GET/HEAD, como o Cloudflare (MEDIDO no `wrangler dev`): 405 só
-    // onde há o que servir — um arquivo publicado, ou um apelido do índice —, e
-    // 404 no resto, como no GET. Aqui era 405 pra tudo, e `POST /api` (sem a
-    // barra) ou `POST /API/sessao` davam 405 aqui e 404 lá (auditoria de
-    // 2026-09-29).
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      if (!(await haAssetEm(url))) return notFound(res);
-      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+      res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Method not allowed');
       return;
     }
@@ -542,27 +395,17 @@ const server = createServer(async (req, res) => {
       res.end();
       return;
     }
-    if (caminho.startsWith('/api/')) {
-      res.writeHead(500, API_HEADERS);
+    if (url.startsWith('/api/')) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ success: false, error: 'Erro interno' }));
     } else {
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Erro interno');
     }
   }
 });
 
-// Porta ocupada (ou sem permissão) é FATAL. Sem isto o erro caía no
-// `uncaughtException` lá de cima, que só registra, e o processo saía com
-// código 0: um supervisor que reinicia "se falhar" lia a queda como sucesso.
-server.on('error', (e) => {
-  console.error('Waze Places não subiu:', e && e.message);
-  process.exit(1);
-});
-
 server.listen(PORT, HOST, () => {
-  // A porta que o SISTEMA deu: com PORT=0 (os testes pedem uma livre), o
-  // valor configurado é 0, e é esta linha que diz onde o servidor está.
-  console.log(`Waze Places rodando em http://${HOST}:${server.address().port}`);
+  console.log(`Waze Places rodando em http://${HOST}:${PORT}`);
   console.log(`Sessões: ${SESSION_DIR}`);
 });

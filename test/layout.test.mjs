@@ -454,11 +454,7 @@ test('o leitor de tela ouve o tipo do pedido no MESMO idioma da tela', () => {
   assert.match(APP, /function rotuloDoTipo\(place\)/,
     'sumiu o rotuloDoTipo — o rotulo do tipo voltou a ter duas implementacoes');
 
-  // Ancorado na ESTRUTURA (a regiao viva do card que nasce), nao na primeira
-  // mencao de `cardLiveRegion` no arquivo: o desfecho de uma escrita da foto
-  // que fecha a camada tambem fala por ela (`anunciarNoCard`, R7-3-04), e o
-  // guard passava a ler aquela funcao (gotcha #67, pela posicao).
-  const live = APP.match(/const liveRegion = document\.getElementById\('cardLiveRegion'\);[\s\S]{0,900}?\n    \}/);
+  const live = APP.match(/cardLiveRegion[\s\S]{0,900}?\n    \}/);
   assert.ok(live, 'sumiu o bloco da regiao viva');
   assert.match(live[0], /rotuloDoTipo\(place\)/,
     'a regiao viva nao passa mais pelo rotuloDoTipo — volta a anunciar portugues em qualquer idioma');
@@ -504,47 +500,11 @@ test('nenhum modal FECHA e outro ABRE no mesmo quadro', () => {
 
 test('não oferecemos ação impossível no aparelho', () => {
   const JS = read('js/app.js');
-  // Extensão da Chrome Web Store não instala em navegador de celular. Desde
-  // 2026-09-26 a regra é POSITIVA: o card nasce escondido e só aparece com a
-  // confirmação do JS (`com-extensao`) — antes do JS chegar, o celular o
-  // mostrava como "RECOMENDADO". O comportamento é medido em test/entrada.
-  assert.match(CSS_SEM_COMENTARIO, /(^|\n)\.auth-opt-ext\s*\{\s*display:\s*none;?\s*\}/,
-    'o card da extensão voltou a nascer visível — aparece no celular antes do JS decidir');
-  assert.match(CSS_SEM_COMENTARIO, /\.com-extensao \.auth-opt-ext\s*\{\s*display:\s*block;?\s*\}/,
-    'o card da extensão não aparece nem onde ela instala');
+  // Extensão da Chrome Web Store não instala em navegador de celular.
+  assert.match(CSS, /\.sem-extensao \.auth-opt-ext\s*\{[^}]*display:\s*none/, 'o card da extensão voltou a aparecer no celular');
   assert.match(JS, /function podeInstalarExtensao/, 'sumiu a detecção de suporte a extensão');
   // Por SO, não por ponteiro: notebook com tela de toque instala extensão.
   assert.match(JS, /userAgentData|Android\|iPhone/, 'a detecção deixou de olhar o sistema');
-  // E só onde a Chrome Web Store instala: Chromium de computador. Rodado de
-  // verdade contra os navegadores que importam (auditoria de 2026-09-25).
-  const fn = JS.match(/function podeInstalarExtensao\(\)[\s\S]*?\n\}/)[0];
-  const pode = (navigator) => new Function('navigator', fn + '\nreturn podeInstalarExtensao();')(navigator);
-  // `platform` é o que o Chrome manda de verdade (Windows, macOS, Linux, Chrome
-  // OS, Android) — o `mobile` sozinho não separa o tablet do computador.
-  const CH = (mobile, platform, ...marcas) =>
-    ({ userAgentData: { mobile, platform, brands: marcas.map((brand) => ({ brand, version: '153' })) } });
-  const UA = (userAgent) => ({ userAgent });
-  const casos = [
-    ['Chrome no computador', CH(false, 'Windows', 'Chromium', 'Google Chrome', 'Not.A/Brand'), true],
-    ['Chrome no Mac', CH(false, 'macOS', 'Chromium', 'Google Chrome'), true],
-    ['Chrome no Linux', CH(false, 'Linux', 'Chromium', 'Google Chrome'), true],
-    ['Chrome no Chromebook', CH(false, 'Chrome OS', 'Chromium', 'Google Chrome'), true],
-    ['Edge no computador', CH(false, 'Windows', 'Chromium', 'Microsoft Edge'), true],
-    ['Chrome no Android', CH(true, 'Android', 'Chromium', 'Google Chrome'), false],
-    // O tablet Android se anuncia `mobile: false` (a UA de tablet não tem
-    // "Mobile") e não instala extensão: quem separa é o sistema (auditoria de
-    // 2026-09-26). O mesmo vale pro nome em qualquer caixa.
-    ['Chrome em tablet Android', CH(false, 'Android', 'Chromium', 'Google Chrome'), false],
-    ['Edge em tablet Android', CH(false, 'android', 'Chromium', 'Microsoft Edge'), false],
-    // O dia em que um navegador que NÃO é Chromium mandar Client Hints: a marca decide.
-    ['Client Hints sem Chromium', CH(false, 'Windows', 'Firefox'), false],
-    ['Chrome antigo sem Client Hints', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0 Safari/537.36'), true],
-    ['Firefox no computador', UA('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0'), false],
-    ['Safari no Mac', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
-    ['Safari no iPad (se diz Mac)', UA('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'), false],
-    ['Chrome no iPhone', UA('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1'), false],
-  ];
-  for (const [nome, nav, esperado] of casos) assert.equal(pode(nav), esperado, `extensão oferecida errado: ${nome}`);
   assert.doesNotMatch(
     CSS.match(/@media \(pointer: coarse\)[\s\S]*?\n\}\n\}/m)?.[0] || '',
     /\.auth-opt-ext\s*\{[^}]*display:\s*none/,
@@ -1071,10 +1031,6 @@ test('o aviso de conquista é banner (topo), não snackbar (rodapé)', () => {
   const fn = APP_.match(/function setupAlturaDoHeader\([\s\S]*?\n\}/)[0];
   assert.match(fn, /--header-h/, 'a medida do header não é mais publicada');
   assert.match(fn, /ResizeObserver/, 'a altura do header virou medida única, não acompanha mudança');
-  // A caixa de BORDA (R11-4-06, junção do lote 15): a margem de segurança entra no
-  // cabeçalho como padding, e a caixa de conteúdo (a padrão) não vê padding mudar.
-  assert.match(fn, /\.observe\(header, \{ box: 'border-box' \}\)/,
-    'o observador do cabeçalho voltou à caixa de conteúdo: a margem que chega depois não atualiza o --header-h');
   assert.match(APP_, /setupAlturaDoHeader\(\);/, 'o setup não é chamado na inicialização');
 
   // Camada: acima do card (z-50), abaixo dos modais (z-[60]).
@@ -1314,7 +1270,7 @@ test('o app cabe na tela em QUALQUER aparelho, sem rolagem de página', () => {
   // tem 852px de largura com 393px de altura, e um piso de 26rem ali fica maior
   // que a tela — a rolagem PIORAVA (177 → 259px, medido).
   const piso = CSS.match(/@media \(min-height: 700px\) \{[\s\S]*?\n\}/);
-  assert.ok(piso && /min-height:\s*26rem/.test(piso[0]) && /min-height:\s*min\(26rem,\s*60dvh\)/.test(piso[0]),
+  assert.ok(piso && /min-height:\s*26rem/.test(piso[0]),
     'o piso de 26rem saiu do degrau de altura (ou virou incondicional)');
   assert.doesNotMatch(
     CSS_SEM_COMENTARIO,
@@ -1614,9 +1570,6 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // que o Waze respondeu — e existe pra que uma falha de rede não re-trave a
     // cota do Desfazer. Sai no logout como todo o resto: é dado de quem entrou.
     PERFIL_GATE_KEY: 'safeLS.remove(PERFIL_GATE_KEY)',
-    // DE QUEM são os dados do aparelho (o id do Waze e a marca da sessão em que
-    // foi visto). Sem dados, não há de quem — e o id é de quem entrou.
-    CONTA_KEY: 'safeLS.remove(CONTA_KEY)',
     // Contagem de rejeições por autor. É dado sobre TERCEIRO — a pessoa que
     // mandou o pedido, não quem usa o app —, então sair no logout não é
     // arrumação: é o mínimo que o contrato do "Sair" já promete.
@@ -1627,9 +1580,6 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // logout com o resto. O efeito assumido é que sair com a fila cheia
     // descarta o que não foi enviado: é o que "sair é sair de tudo" promete.
     SAIDA_KEY: 'safeLS.remove(SAIDA_KEY)',
-    // Os pedidos que o app estrelou com o "Pular guarda o pedido" (R10-2-05): ids
-    // de pedidos de TERCEIROS, e a estrela é estado de quem saiu.
-    ESTRELADOS_KEY: 'safeLS.remove(ESTRELADOS_KEY)',
     // As duas do offline saem juntas, por `offlineEsquecer()`: uma é banco
     // (IndexedDB, não passa por safeLS) e a outra é Cache API. A fila guardada
     // tem nome de quem enviou e a foto é de terceiro — "sair é sair de tudo".
@@ -1642,14 +1592,6 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // o DOM, ou seja nome e endereço de terceiros. Sai pelo mesmo apagar do
     // desligar do modo dev, que o logout chama.
     DIAG_DB: 'dlogApagar()',
-    // O RETRATO que o fechar deixa no localStorage (diário, chamadas sem corpo
-    // e erros da abertura), pra a seguinte levar pra base: é o mesmo registro,
-    // e sai pelo mesmo apagar — conferido abaixo que o `dlogApagar` o apaga.
-    DIAG_RETRATO_KEY: 'dlogApagar()',
-    // O aviso do que um download do diagnóstico entregou (as aberturas e a
-    // marca das capturas, pra outra aba não as guardar de novo, R9-4-10): é do
-    // modo dev, e sai pelo mesmo apagar — conferido abaixo.
-    DIAG_ENTREGUE_KEY: 'dlogApagar()',
     // Patente, conquistas e contadores. É dado de QUEM ENTROU (o trabalho
     // dele), então some junto — e some porque o contrato do "Sair" já
     // promete, não porque alguém lembrou.
@@ -1683,15 +1625,6 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   const NAO_SAO_CHAVES = {
     wazeplaces: 'marca do protocolo de postMessage com a extensão (source do pedido)',
     'wazeplaces-ext': 'idem, a marca das respostas DELA',
-    // R11-2-01: o aviso de POUSO entre as abas não grava nada no aparelho (é a
-    // razão de ele ser um canal, e não uma chave): não há o que apagar no "Sair".
-    'waze-places-pousos': 'nome do BroadcastChannel que avisa as outras abas do que pousou (CANAL_DOS_POUSOS)',
-    // R13-4-03: idem, o aviso da fila guardada do offline que outra aba gravou —
-    // leva só o carimbo da fila, e nada vai pro aparelho.
-    'waze-places-offline': 'nome do BroadcastChannel que avisa as outras abas da fila guardada do offline (CANAL_DO_OFFLINE)',
-    // R14-1-03: idem, o aviso da QUEDA da sessão guardada — leva só a marca da
-    // sessão que caiu (nunca o token), e nada vai pro aparelho.
-    'waze-places-sessao': 'nome do BroadcastChannel que avisa as outras abas da queda da sessão guardada (CANAL_DA_SESSAO)',
   };
 
   // Nome da constante quando existe; senão a própria chave literal.
@@ -1732,20 +1665,6 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
   const esquecer = presenca.slice(j, presenca.indexOf('\n}', j));
   assert.match(esquecer, /safeLS\.remove\(CHAT_KEY\)/, 'o esquecer da presença parou de apagar a chave do chat');
   assert.match(presenca, /esquecer: presencaEsquecer,/, 'o esquecer da presença não está exportado');
-  // Idem o retrato do fechar: o logout chama o `dlogApagar`, e ele tem que
-  // apagar o retrato (o `diagEsquecerRetratos` sem lista apaga TODOS — medido
-  // em test/diag-guarda.test.mjs).
-  const d = app.indexOf('function dlogApagar(');
-  assert.notEqual(d, -1, 'sumiu o dlogApagar');
-  const apagar = app.slice(d, app.indexOf('\n}', d)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.match(apagar, /^\s+diagEsquecerRetratos\(\);/m, 'o Sair (e o desligar do modo dev) deixou o retrato do fechar no aparelho');
-  // E o aviso das entregas do download (R9-4-10): o `dlogApagar` chama o
-  // esquecer, e o esquecer APAGA a chave.
-  assert.match(apagar, /^\s+diagEsquecerEntregas\(\);/m, 'o Sair (e o desligar do modo dev) deixou o aviso das entregas no aparelho');
-  const e = app.indexOf('function diagEsquecerEntregas(');
-  assert.notEqual(e, -1, 'sumiu o diagEsquecerEntregas');
-  assert.match(app.slice(e, app.indexOf('\n}', e)), /localStorage\.removeItem\(DIAG_ENTREGUE_KEY\)/,
-    'o esquecer das entregas não apaga a chave — a chamada no Sair seria decoração');
 });
 
 test('o logout não espera a rede pra limpar o aparelho, e não falha calado', () => {
@@ -1958,9 +1877,7 @@ test('foco num autor prioriza sem esconder ninguém', () => {
   assert.ok(f, 'sumiu o focarAutor');
   // Reordena a fila INTEIRA: os do autor na frente, o resto atrás. Trocar por
   // um filter() que descarta o resto reprova aqui.
-  // (O resto é tudo o que não está na SÉRIE — `serieDoAutor`, que deixa o pedido
-  // em andamento de fora: ele vai pro resto, não some, R6-2-02.)
-  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => !naSerie\.has\(x\)\)/,
+  assert.match(f[0], /\.\.\.daPessoa, \.\.\.AppState\.queue\.filter\(\(x\) => x\.creatorId !== id\)/,
     'o foco passou a DESCARTAR os outros pedidos — a fila esvaziaria e o app diria "Tudo limpo!" mentindo');
   // Chaveado por ID, nunca por nome: 69% dos autores têm nome GERADO, que muda
   // no dia em que a pessoa escolhe um. Medido: zero colisões nome→id numa fila,
@@ -2004,7 +1921,7 @@ test('linha "X → X" não chega na tela, e o aviso só afirma o que foi compara
   // imprimir IGUAL — medido, um deles andou 84 metros. Filtrar por texto
   // esconderia mudança de verdade.
   assert.match(CORE, /export const mesmoValor/, 'sumiu o comparador de valor cru');
-  assert.match(CORE, /if \(mesmoValor\(valorAtual \?\? null, newValue \?\? null\)\) \{/,
+  assert.match(CORE, /if \(mesmoValor\(venue\[k\] \?\? null, newValue \?\? null\)\) \{/,
     'o laço de changes parou de pular campo que não mudou — volta a linha "X → X"');
   assert.match(CORE, /camposSemMudanca\+\+/, 'ninguém mais conta os campos filtrados');
   assert.match(CORE, /camposSemMudanca,/, 'o place parou de expor camposSemMudanca pro card');
@@ -2071,7 +1988,7 @@ test('item de lista vazio aparece como placeholder, e o esmaecido não derruba o
 
   // UM renderizador só. Eram dois trechos idênticos copiados — é assim que duas
   // telas do mesmo conceito divergem sem ninguém notar.
-  assert.match(APP, /function itemDeLista\(v, cls, sinal, campo[,)]/,
+  assert.match(APP, /function itemDeLista\(v, cls, sinal, campo\)/,
     'o renderizador de item perdeu o campo — sem ele a tradução de serviço não tem como ser escopada');
   assert.equal((APP.match(/const item = \(v, cls, sinal\)/g) || []).length, 0,
     'voltou a existir renderizador de item duplicado');
@@ -2162,20 +2079,14 @@ test('a foto ampliada fecha pelos caminhos das DUAS plataformas', () => {
   assert.ok(iMapa >= 0, 'o mapa ampliado não trata teclado — Esc não fecharia ele');
   assert.ok(iMapa < iFoto, 'o bloco da foto vem antes do mapa: Esc fecharia a camada errada');
 
-  // Esc é a convenção de desktop e continua sendo o caminho principal. Os dois
-  // passam pelo `recuarNaFoto` (auditoria de 2026-09-26): editando o nome, o
-  // passo pra trás é sair da EDIÇÃO; sem edição, fechar a foto.
-  assert.match(teclas, /e\.key === 'Escape'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
+  // Esc é a convenção de desktop e continua sendo o caminho principal.
+  assert.match(teclas, /e\.key === 'Escape'[\s\S]{0,60}Lightbox\.close\(\)/,
     'Esc deixou de fechar a foto');
 
   // ↓ espelha o arraste pra baixo do toque. Relato do owner: aprendeu o gesto
   // no celular, sentou no laptop e a mão foi pro ↓.
-  assert.match(teclas, /e\.key === 'ArrowDown'\) \{ e\.preventDefault\(\); recuarNaFoto\(\); \}/,
+  assert.match(teclas, /e\.key === 'ArrowDown'[\s\S]{0,60}Lightbox\.close\(\)/,
     'a tecla ↓ parou de fechar a foto');
-  const recuar = APP.match(/function recuarNaFoto\(\) \{[\s\S]*?\n\}/);
-  assert.ok(recuar, 'sumiu o recuarNaFoto');
-  assert.match(recuar[0], /if \(editandoNome\(\)\) \{ sairDaEdicaoNome\(\); return; \}\n\s+Lightbox\.close\(\);/,
-    'o passo pra trás da foto deixou de ser: editando, sai da edição; senão, fecha');
 
   // Só BAIXO: o toque fecha com `dy > 80`, e só. Inventar ↑ criaria um gesto
   // que o celular não tem — o app ficaria ensinando duas coisas diferentes.
@@ -2362,18 +2273,9 @@ test('o pedido à extensão não atropela um login que aconteceu no meio', () =>
   // Apareceu no smoke como "card sem endereço / botões 0px", mudando de
   // aparelho a cada rodada porque atinge sempre o PRIMEIRO card medido — que é
   // o sintoma clássico de escrita atrasada, não de layout.
-  // Só CÓDIGO, por linha (gotcha #67): o comentário DENTRO do bloco é o que
-  // cresce, e empurrava o fim dele pra fora da janela — reprovando código certo
-  // quando o bloco ganhou uma linha (a recusa da extensão, 2026-09-26).
-  const soCodigo = app.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  assert.match(soCodigo, /^\s+entrarPelaExtensao\(\)\.then\(aoFimDaPerguntaDaAbertura\);/m, 'sumiu o handshake do boot');
-  const bloco = soCodigo.match(/^function aoFimDaPerguntaDaAbertura\(entrou\) \{[\s\S]*?\n\}/m);
-  assert.ok(bloco, 'sumiu o fim da pergunta à extensão na abertura');
-  // A guarda pergunta pela MEMÓRIA desta aba, onde o login dela entra (o
-  // `setSession`). Pelo `getSession` ela lia o aparelho e tomava a sessão de
-  // OUTRA aba pela desta: a abertura ficava em branco (R9-1-03; o
-  // comportamento é medido em test/contas-abas.test.mjs).
-  assert.match(bloco[0], /if \(API\.temSessaoNaMemoria\(\) \|\| AppState\.authenticated\) return;[\s\S]*showAuthScreen\(\);/,
+  const bloco = app.match(/entrarPelaExtensao\(\)\.then\([\s\S]{0,700}?\}\);/);
+  assert.ok(bloco, 'sumiu o handshake do boot');
+  assert.match(bloco[0], /API\.getSession\(\)\s*\|\|\s*AppState\.authenticated/,
     'a guarda contra login-no-meio sumiu — showAuthScreen volta a atropelar sessão nova');
 
   // E o prazo curto existe pra não punir quem NÃO tem a extensão: sem resposta
@@ -2819,8 +2721,7 @@ test('filtros: o modal abre antes de qualquer await de rede', () => {
   // Fatia SÓ o corpo da função: sem isto o `finally` de qualquer função
   // lá adiante no arquivo satisfazia o guard (pego na sabotagem).
   const pop = src.slice(jp, src.indexOf('\n}\n', jp));
-  // Pela ida que a carga da abertura divide com os Filtros (`pedirListaDePaises`, R8-6-04).
-  assert.match(pop, /pedirListaDePaises\(regiao\)/, 'a busca de países sumiu');
+  assert.match(pop, /API\.listCountries\(\)/, 'a busca de países sumiu');
   assert.match(pop, /loadStatesIntoSelect\(/, 'a busca de estados sumiu');
   // Falha de rede não pode deixar o seletor travado pra sempre.
   assert.match(pop, /finally\s*\{/, 'sem finally, uma falha deixa o seletor desabilitado');
@@ -2979,36 +2880,10 @@ test('contagem sai CRUA — e decimal e data seguem o locale', () => {
   // COLADA no que guarda, nunca por distância: `[^]{0,120}` alcançava outro
   // `toLocaleString` vizinho e passava com a distância já sabotada — gotcha #67,
   // e foi preciso sabotar pra descobrir que a asserção era decoração.
-  // A barra de escala do card e a do ampliado passaram a ser escritas por UMA
-  // função (`escreverEscala`, auditoria de 2026-09-26): o km no locale mora
-  // nela, e os DOIS lugares têm de passar por ela.
-  const iEsc = app.indexOf('function escreverEscala(');
-  assert.ok(iEsc > 0, 'sumiu o escreverEscala');
-  const rEsc = app.slice(iEsc + 1);
-  const corpoEsc = app.slice(iEsc, iEsc + 1 + rEsc.search(/\n(?:function |const |\/\/ ──)/));
-  assert.match(corpoEsc, /\(e\.metros \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/,
-    'a distância em km da barra de escala perdeu o locale — '
+  const emKm = [...app.matchAll(/\(bonito \/ 1000\)\.toLocaleString\(i18nLocale\(\)\)/g)].length;
+  assert.equal(emKm, 2,
+    `a distância em km perdeu o locale em ${2 - emKm} dos 2 lugares (card e mapa ampliado) — `
     + 'ali o separador é ARITMÉTICA: `1.2` lido por um brasileiro é mil e duzentos');
-  assert.match(app, /escreverEscala\(box\.querySelector\('\.card-map-scale'\)/,
-    'a escala do CARD deixou de passar pelo escreverEscala');
-  assert.match(app, /escreverEscala\(document\.getElementById\('mapaLbEscala'\)/,
-    'a escala do mapa AMPLIADO deixou de passar pelo escreverEscala');
   assert.match(app, /new Date\([^)]*\)\.toLocaleDateString\(i18nLocale\(\)/,
     'controle: sumiu a formatação de DATA, que deve continuar no locale');
-});
-
-test('C12 a pílula do nome no lightbox tem TETO também em edição (o nome longo não estoura a tela)', () => {
-  // MEDIDO: no Fold em francês, com um nome de 58 caracteres, a pílula em
-  // edição passava da tela; com 66, até no Pixel 7 (de 12 a 478 px em 412).
-  // O botão mede o CONTEÚDO, então sem teto ele cresce com o nome antigo.
-  // Ancorado na FORMA da regra (início de linha), não num removedor de
-  // comentário (gotcha #67.1).
-  const css = read('css/styles.css');
-  const regra = css.match(/^\.lb-nome\.editando \.lb-nome-btn \{([^}]*)\}/m);
-  assert.ok(regra, 'sumiu a regra da pílula em edição');
-  assert.match(regra[1], /max-width:\s*100%/, 'a pílula do nome em edição perdeu o teto: o nome longo estoura a tela');
-  // E o texto dentro dela corta em reticências — é o que o teto aproveita.
-  const txt = css.match(/^\.lb-nome-txt \{([^}]*)\}/m);
-  assert.ok(txt && /text-overflow:\s*ellipsis/.test(txt[1]) && /overflow:\s*hidden/.test(txt[1]),
-    'o nome da pílula deixou de cortar em reticências');
 });
