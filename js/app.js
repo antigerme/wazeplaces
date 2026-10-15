@@ -8287,6 +8287,27 @@ function dfatoPendentes() {
     return linhas;
 }
 
+// O que o RELATÓRIO entrega das pendentes (R22-4-03). `dfatoPendentes` não mexe no estado, e isso deixava a conta
+// dobrar: o relatório 1 levava, digamos, 7 repetições suprimidas numa linha pendente; a próxima repetição (T2, depois do
+// retrato) fazia a pendente virar `t = T2` com as 8 — e o filtro `depois` da cópia guardada, que vai por `t`, a mantinha
+// INTEIRA: as 7 já entregues voltavam como se fossem do que veio depois. Aqui as pendentes que foram no arquivo viram
+// linhas do anel (as mesmas que a troca de causa escreveria, com a hora da última suprimida, que é anterior ao retrato) e
+// o limitador recomeça a contar `juntas` do zero — a série segue (`n` e `em` ficam), só as repetições entregues saem da
+// conta. O diário completo não muda (anel + pendentes = o mesmo total antes e depois), então um relatório que não chega
+// a ser baixado não perde nada. Devolve as linhas pra quem monta o arquivo (o anel foi copiado antes, por quem chama).
+function dfatoEntregarPendentes() {
+    const linhas = dfatoPendentes();
+    try {
+        for (const x of dfatoLimite.values()) {
+            if (!x || !(x.juntas > 0)) continue;
+            x.juntas = 0; x.ultimoD = null; x.ultimaEm = null;
+        }
+        for (const l of linhas) dfatoAnel.push(l);
+        while (dfatoAnel.length > DFATO_TETO) dfatoAnel.shift();
+    } catch (e) { /* o diagnóstico nunca derruba o app */ }
+    return linhas;
+}
+
 // ── DIÁRIO DE SESSÕES: o que sobrevive ao tombo ──────────────────────────
 //
 // O `dfato` já é o anel sem portão, mas ele vive em MEMÓRIA — e a sessão cair
@@ -12293,7 +12314,7 @@ async function diagCorpo() {
         // modo dev (`dlog`). Cada call site escolhe UM dos dois, então não há
         // duplicata — e o `diario` deixa de nascer vazio, que era o buraco que
         // custou a investigação dos modais achatados.
-        diario: [...dfatoAnel, ...dfatoPendentes(), ...dlogAnel].sort((a, b) => a.t - b.t),
+        diario: [...dfatoAnel, ...dfatoEntregarPendentes(), ...dlogAnel].sort((a, b) => a.t - b.t),
         momentos: momentosNoArquivo,
         // O que as aberturas ANTERIORES deixaram guardado no aparelho (só com o
         // modo dev ligado nelas): diário, chamadas sem corpo, erros e as

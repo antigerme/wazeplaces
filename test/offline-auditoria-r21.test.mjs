@@ -952,8 +952,8 @@ function diarioDeMentira() {
   const n = Object.keys(deps);
   const corpo = [
     'let dfatoAnel = []; const DFATO_TETO = 120, DFATO_LIMITE_SERIE = 3, DFATO_LIMITE_MS = 10 * 60000; const dfatoLimite = new Map();',
-    fatiar('dfato'), fatiar('dfatoPendentes'),
-    'return { dfato, pendentes: dfatoPendentes, anel: () => dfatoAnel, limite: dfatoLimite };',
+    fatiar('dfato'), fatiar('dfatoPendentes'), fatiar('dfatoEntregarPendentes'),
+    'return { dfato, pendentes: dfatoPendentes, entregar: dfatoEntregarPendentes, anel: () => dfatoAnel, limite: dfatoLimite };',
   ].join('\n');
   const fn = new Function(...n, corpo)(...n.map((k) => deps[k]));
   return { ...fn, relogio };
@@ -1005,11 +1005,54 @@ test('R21-4-05 (fonte): o diário do RELATÓRIO e o da cópia guardada (o retrat
   const diario = /diario: \[\.\.\.dfatoAnel, \.\.\.dfatoPendentes\(\), \.\.\.dlogAnel\]/;
   assert.match(fatiar('diagRegistroDaAbertura'), diario, 'a cópia guardada (a abertura gravada na base) não leva as pendentes');
   // O relatório e o retrato do `pagehide` montam o diário no `diagCorpo` / no retrato: a fonte única é `dfatoPendentes()`.
-  const usos = [...APP_SEM.matchAll(/\.\.\.dfatoPendentes\(\)/g)].length;
+  // (O relatório as lê por `dfatoEntregarPendentes`, que as leva ao anel — R22-4-03 —; a cópia guardada, por `dfatoPendentes`.)
+  const usos = [...APP_SEM.matchAll(/\.\.\.dfato(?:Entregar)?Pendentes\(\)/g)].length;
   assert.ok(usos >= 2, `só ${usos} lugar(es) leem as pendentes: o relatório (diagCorpo) e a cópia guardada precisam das duas pontas`);
-  assert.match(fatiar('diagCorpo').replace(/\s+/g, ' ') + APP_SEM.slice(APP_SEM.indexOf('function diagRetratoAoSair')).slice(0, 3000), /dfatoPendentes\(\)/, 'o relatório não lê as pendentes');
+  assert.match(fatiar('diagCorpo').replace(/\s+/g, ' '), /\.\.\.dfatoEntregarPendentes\(\)/, 'o relatório não lê (e entrega) as pendentes');
   // O MIN (o que o navegador roda) tem a função.
   assert.match(MIN, /function dfatoPendentes\(/, 'js/min/app.js sem a função (rode `npm run js`)');
+  assert.match(MIN, /function dfatoEntregarPendentes\(/, 'js/min/app.js sem a função que entrega as pendentes (rode `npm run js`)');
+});
+
+// R22-4-03: o relatório ENTREGOU as pendentes; a cópia guardada (o que o retrato do `pagehide` e a gravação da abertura levam
+// "depois do último download", pela hora `t`) não podia contá-las de novo quando uma repetição nova chegasse.
+test('R22-4-03: as pendentes que foram no relatório saem da conta da próxima — só o que veio DEPOIS do retrato volta na cópia guardada', () => {
+  const d = diarioDeMentira();
+  for (let i = 0; i < 10; i++) { d.dfato('offline.parcial', { cache: true, i }, { causa: 'cache:SecurityError' }); d.relogio.agora += 1000; }
+  assert.equal(somaDeLinhas(d.anel(), 'offline.parcial'), 3, 'PRÉ-CONDIÇÃO: 3 escritas e 7 suprimidas');
+  assert.equal(d.pendentes()[0].juntas, 6, 'PRÉ-CONDIÇÃO: as 7 suprimidas são uma linha com juntas = 6');
+  // O relatório 1: o diário completo (o anel de antes + as pendentes) tem as 10; o retrato é ESTE instante.
+  const retratoEm = d.relogio.agora;
+  const noRelatorio1 = [...d.anel(), ...d.entregar()];
+  assert.equal(somaDeLinhas(noRelatorio1, 'offline.parcial'), 10, 'o relatório 1 não leva as 10 passadas');
+  // Um relatório que NÃO chega a ser baixado não perde nada: o diário completo segue com as 10.
+  assert.equal(somaDeLinhas([...d.anel(), ...d.pendentes()], 'offline.parcial'), 10, 'entregar mudou o total do diário completo');
+  assert.deepEqual(d.pendentes(), [], 'as pendentes entregues seguem pendentes (a próxima conta as repete)');
+  // A próxima repetição (depois do retrato) e a cópia guardada, que só leva t > retrato (`diagBaixadoEm`).
+  d.relogio.agora += 1000;
+  d.dfato('offline.parcial', { cache: true, i: 10 }, { causa: 'cache:SecurityError' });
+  const depois = (l) => !(l.t <= retratoEm);
+  const guardada = [...d.anel(), ...d.pendentes()].filter(depois);
+  assert.equal(somaDeLinhas(guardada, 'offline.parcial'), 1,
+    'DEFEITO: a cópia guardada conta de novo as repetições que o relatório 1 já entregou (esperado 1, a que veio depois)');
+  // O relatório 2 (diário completo da abertura) segue com as 11.
+  assert.equal(somaDeLinhas([...d.anel(), ...d.pendentes()], 'offline.parcial'), 11);
+  // A linha que o limitador escreve na 4ª+10 min carrega só as repetições NOVAS desde a entrega.
+  d.relogio.agora += 11 * 60000;
+  d.dfato('offline.parcial', { cache: true, i: 11 }, { causa: 'cache:SecurityError' });
+  const ultima = d.anel().at(-1);
+  assert.equal(ultima.i, 11);
+  assert.equal(ultima.juntas, 1, 'a linha dos 10 min carrega as repetições já entregues (esperado: só a 1 nova, 10)');
+  assert.equal(somaDeLinhas(d.anel(), 'offline.parcial'), 12);
+  // CONTROLE: sem ENTREGAR (só ler, como antes) a cópia guardada contava 1 + 7 + 1 — o instrumento enxerga o defeito.
+  const antes = diarioDeMentira();
+  for (let i = 0; i < 10; i++) { antes.dfato('offline.parcial', { cache: true, i }, { causa: 'cache:SecurityError' }); antes.relogio.agora += 1000; }
+  const retrato0 = antes.relogio.agora;
+  antes.pendentes();
+  antes.relogio.agora += 1000;
+  antes.dfato('offline.parcial', { cache: true, i: 10 }, { causa: 'cache:SecurityError' });
+  assert.equal(somaDeLinhas([...antes.anel(), ...antes.pendentes()].filter((l) => !(l.t <= retrato0)), 'offline.parcial'), 8,
+    'CONTROLE: sem entregar, a cópia guardada deixou de contar as entregues em dobro — o teste não enxerga o defeito');
 });
 
 // ═══ R21-4-06 · o FAB de baixo acompanha a altura MEDIDA da pilha de avisos ═════════════════════════

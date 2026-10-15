@@ -211,7 +211,7 @@ test('o anel SEM PORTÃO existe, e só leva o que é raro e sem dado de terceiro
   // E os dois anéis saem numa linha do tempo só, senão ler o arquivo vira
   // intercalar dois arrays à mão.
   // (Com as repetições que o limitador ainda não escreveu — `dfatoPendentes`, R21-4-05 —, entre os dois.)
-  assert.match(semCom, /diario: \[\.\.\.dfatoAnel, \.\.\.dfatoPendentes\(\), \.\.\.dlogAnel\]\.sort/,
+  assert.match(semCom, /diario: \[\.\.\.dfatoAnel, \.\.\.dfatoEntregarPendentes\(\), \.\.\.dlogAnel\]\.sort/,
     'o diário parou de juntar os dois anéis');
 });
 
