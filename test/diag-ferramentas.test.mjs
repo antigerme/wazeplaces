@@ -66,6 +66,42 @@ test('diag-api: TODA rota que não só LÊ está na lista de recusa — e a de l
     'a lista de LEITURA da ferramenta não é a das rotas que só leem — `perfil` desloga quando o portão recusa');
 });
 
+// O `waze-probe.mjs` fala com o Waze REAL com os cookies do owner e recusa os caminhos que ESCREVEM. A
+// lista dele é escrita à mão (a da `diag-api` já saía do ROUTES) e a estrela do editor (`Issues/Star`,
+// o "Pular guarda o pedido") ficou de fora quando o caminho nasceu: a garantia derivou calada. Agora ela
+// é derivada dos helpers de endpoint do core — helper novo sem classificação aqui reprova, e o que não
+// só LÊ tem que casar com uma regra do probe. CONTROLE: os que só leem NÃO podem casar (o probe os usa).
+const PROBE = readFileSync(join(ROOT, 'tools/waze-probe.mjs'), 'utf8');
+const HELPERS_QUE_SO_LEEM = new Set(['wazeIssuesEndpoint', 'wazeSessionEndpoint', 'wazeCountriesEndpoint', 'wazeStatesEndpoint']);
+const HELPERS_QUE_ESCREVEM = new Set(['wazeMarkReadEndpoint', 'wazeStarEndpoint', 'wazeFeaturesEndpoint']);
+
+test('waze-probe: todo caminho REST do core que escreve casa com a recusa mecânica — e os que só leem passam', () => {
+  const linhaDaLista = PROBE.split('\n').find((l) => /^const ESCRITA = \[/.test(l));
+  assert.ok(linhaDaLista, 'a lista ESCRITA sumiu do waze-probe');
+  const regras = new Function(`return ${linhaDaLista.replace(/^const ESCRITA = /, '').replace(/;\s*$/, '')}`)();
+  assert.ok(Array.isArray(regras) && regras.length >= 3 && regras.every((r) => r instanceof RegExp), 'o extrator não leu as regras do probe');
+
+  const helpers = [...CORE.matchAll(/^const (waze\w*Endpoint) = [^\n]*/gm)].map((m) => ({ nome: m[1], corpo: m[0] }));
+  assert.ok(helpers.length >= 7, `só ${helpers.length} helpers de endpoint achados no core — o padrão mudou`);
+  for (const h of helpers) {
+    assert.ok(HELPERS_QUE_SO_LEEM.has(h.nome) !== HELPERS_QUE_ESCREVEM.has(h.nome),
+      `o helper "${h.nome}" não está classificado (ou está nas duas listas): ele SÓ LÊ ou escreve no Waze?`);
+    // O caminho: o último literal '/Algo/Outro' do corpo; o de Features é uma constante à parte.
+    const caminho = h.nome === 'wazeFeaturesEndpoint'
+      ? '/Features'
+      : [...h.corpo.matchAll(/'(\/[A-Za-z/]+)(?:\?[^']*)?'/g)].map((m) => m[1]).pop();
+    assert.ok(caminho, `${h.nome}: não achei o caminho dele`);
+    const url = `https://www.waze.com/row-Descartes/app${caminho}`;
+    const casa = regras.some((r) => r.test(url));
+    if (HELPERS_QUE_ESCREVEM.has(h.nome)) {
+      assert.ok(casa, `${h.nome} (${caminho}) ESCREVE no Waze e o waze-probe não o recusa — ele agiria na conta do owner`);
+    } else {
+      assert.ok(!casa, `${h.nome} (${caminho}) só LÊ e o waze-probe o recusaria — o instrumento ficaria cego`);
+    }
+  }
+  assert.ok(helpers.some((h) => h.nome === 'wazeStarEndpoint'), 'PRÉ-CONDIÇÃO: o extrator não viu o helper da estrela');
+});
+
 // A CLASSIFICAÇÃO do `perfil` medida, não afirmada: com o core de verdade e um
 // Waze de mentira, a conta que o portão recusa perde a sessão no servidor.
 // CONTROLE: a conta que passa no portão continua com ela — sem isto, "a sessão

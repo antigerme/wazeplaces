@@ -24,7 +24,7 @@
 // SEGURANÇA — o cookies.txt do WME não tem versão "só leitura": vem com
 // _web_session + _csrf_token e permissions: -1 (todos os bits). É credencial de
 // ESCRITA na conta do owner. Por isso este script:
-//   · recusa /Features e /Issues/Read, os dois caminhos que alteram dado real;
+//   · recusa /Features, /Issues/Read e /Issues/Star, os caminhos que alteram dado real;
 //   · só faz GET (nunca manda corpo);
 //   · nunca imprime valor de cookie — só o nome e a contagem.
 // A recusa é mecânica de propósito: regra que depende de alguém lembrar não é
@@ -50,7 +50,10 @@ const ENV = { row: 'row', na: 'usa', il: 'il' };
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 // Paths que ALTERAM dado no Waze. Bloqueados, sem flag pra destravar.
-const ESCRITA = [/\/Features\b/i, /\/Issues\/Read\b/i, /\/Issues\/Resolve\b/i];
+// `/Issues/Star` é a estrela do editor (o "Pular guarda o pedido"): estado
+// COMPARTILHADO com o WME. A lista é escrita à mão, então `test/diag-ferramentas.test.mjs`
+// a deriva dos helpers de endpoint do core: caminho de escrita novo sem regra aqui reprova.
+const ESCRITA = [/\/Features\b/i, /\/Issues\/Read\b/i, /\/Issues\/Star\b/i, /\/Issues\/Resolve\b/i];
 
 const args = process.argv.slice(2);
 const arq = args[0];

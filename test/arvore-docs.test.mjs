@@ -164,6 +164,13 @@ test('os caminhos REST do Waze que o app usa: o core, o diagrama do README e o d
   assert.equal(Number(usa[1]), N, `docs/waze-api.md diz que o app usa ${usa[1]} caminhos REST; o core tem ${N} helpers (${folhas.join(', ')})`);
   assert.equal(Number(usa[2]), total - N, `docs/waze-api.md: "Os outros ${usa[2]}" deveria ser ${total} − ${N} = ${total - N}`);
   const secao2 = api.slice(api.indexOf('## 2. REST'), api.indexOf('## 3.'));
+  // O total da frase é o que a TABELA mostra: cada caminho é um token entre crases na 1ª coluna (a linha
+  // "A · B" tem dois). Estava "42" com 44 na tabela desde a criação do doc, e o teste só cruzava a frase com
+  // o core, não com a tabela.
+  const caminhosDaTabela = secao2.split('\n').filter((l) => /^\| `/.test(l))
+    .flatMap((l) => [...l.split('|')[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  assert.ok(caminhosDaTabela.includes('Session') && caminhosDaTabela.includes('ErrorReport'), 'PRÉ-CONDIÇÃO: o extrator não leu a tabela do §2');
+  assert.equal(total, caminhosDaTabela.length, `docs/waze-api.md: a frase diz ${total} caminhos e a tabela do §2 lista ${caminhosDaTabela.length}`);
   const linhasUsamos = secao2.split('\n').filter((l) => /^\| `[^`]+` \| `[^`]+` \| \*\*usamos\*\*/.test(l));
   assert.equal(linhasUsamos.length, N, `docs/waze-api.md: ${linhasUsamos.length} linhas "**usamos**" na tabela, e o app usa ${N}`);
   for (const f of folhas) {
