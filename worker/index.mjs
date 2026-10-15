@@ -14,7 +14,7 @@
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, chaveDoSecret, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
 
 // O corpo, lido com TETO — o mesmo da VM (`readBody`), e com a mesma resposta.
 // Era `request.json()`, que lê o que vier: o corpo de 5,5 MB (e o de 20) dava
@@ -60,7 +60,58 @@ const json = (body, status) =>
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
   });
 
+// O store das sessões sobre o KV. As chaves ganham o prefixo `sess_` aqui, como
+// sempre (a VM faz o mesmo em arquivo), e `list` devolve os nomes SEM ele — o
+// que o core usa em `get`/`delete`. `list` é a única operação nova, e só a
+// varredura do «Manter conectado» a usa: o KV pagina de 1.000 em 1.000 chaves, e
+// cada página é uma operação (teto de 5, ou seja 5.000 entradas, muito além do
+// que o plano grátis aguenta renovar).
+const PREFIXO_DO_STORE = 'sess_';
+const PAGINAS_DA_LISTA = 5;
+function storeDoKv(env) {
+  return {
+    get: (h) => env.SESSIONS.get(PREFIXO_DO_STORE + h),
+    put: (h, blob, ttl) => env.SESSIONS.put(PREFIXO_DO_STORE + h, blob, { expirationTtl: ttl || SESSION_TTL }),
+    delete: (h) => env.SESSIONS.delete(PREFIXO_DO_STORE + h),
+    async list(prefixo) {
+      const nomes = [];
+      let cursor;
+      for (let pagina = 0; pagina < PAGINAS_DA_LISTA; pagina++) {
+        const r = await env.SESSIONS.list({ prefix: PREFIXO_DO_STORE + prefixo, ...(cursor ? { cursor } : {}) });
+        for (const k of r.keys || []) nomes.push(String(k.name).slice(PREFIXO_DO_STORE.length));
+        if (r.list_complete !== false || !r.cursor) break;
+        cursor = r.cursor;
+      }
+      return nomes;
+    },
+  };
+}
+
 export default {
+  // O Cron Trigger do wrangler.jsonc (a cada 30 min): renova o cookie do Waze das
+  // sessões que ligaram «Manter conectado». O que fazer, em que ritmo e a conta
+  // das operações de KV estão em `server/manter-conectado.mjs`. Nunca lança — o
+  // cron que falha não pode virar alarme —, e o resumo (só contagens, nenhum dado
+  // de pessoa) vai pro log do Worker, o único lugar onde `console` é permitido.
+  async scheduled(event, env, ctx) {
+    const tarefa = (async () => {
+      if (!env || !env.ENCRYPTION_KEY || !env.SESSIONS) return null;
+      const { keyBytes, problema } = chaveDoSecret(env.ENCRYPTION_KEY);
+      if (problema) return null;
+      try {
+        const resumo = await varrerMantidosDoStore({ store: storeDoKv(env), keyBytes });
+        console.log('manter-conectado', JSON.stringify(resumo));
+        return resumo;
+      } catch (err) {
+        console.error('manter-conectado falhou:', err && err.message);
+        return null;
+      }
+    })();
+    // Sem o `waitUntil` o runtime corta a promessa quando o handler retorna.
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(tarefa);
+    return tarefa;
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
@@ -95,11 +146,7 @@ export default {
 
         // O try/catch em volta segue valendo pro resto: sem ele, uma exceção
         // aqui devolveria a página HTML 1101 do Cloudflare em vez de JSON.
-        const store = {
-          get: (h) => env.SESSIONS.get('sess_' + h),
-          put: (h, blob, ttl) => env.SESSIONS.put('sess_' + h, blob, { expirationTtl: ttl || SESSION_TTL }),
-          delete: (h) => env.SESSIONS.delete('sess_' + h),
-        };
+        const store = storeDoKv(env);
         const sessions = makeSessions({ store, keyBytes });
 
         // `aoFundo`: o que o handler deixa correndo DEPOIS da resposta (a escrita

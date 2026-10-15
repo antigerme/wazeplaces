@@ -31,7 +31,8 @@ import { randomBytes, createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, chaveDoSecret, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
+import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
+import { KA_TTL, MANTER_CRON_MIN, pausaPadrao } from './manter-conectado.mjs';
 import { readBody } from './corpo.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
@@ -130,6 +131,16 @@ const fsStore = {
     prazosCurtos.delete(f);
     await unlink(f).catch(() => {});
   },
+  // As chaves que começam por `prefixo` (sem o `sess_` do arquivo): a varredura do
+  // «Manter conectado» lista as `ka_…`. Ignora os temporários da gravação atômica.
+  async list(prefixo) {
+    try {
+      const nomes = await readdir(SESSION_DIR);
+      return nomes.filter((n) => n.startsWith('sess_' + prefixo)).map((n) => n.slice('sess_'.length));
+    } catch {
+      return []; // o diretório ainda não existe: ninguém ligou nada
+    }
+  },
 };
 
 // ── O prazo CURTO que o core pede no `put` ──────────────────────────────────
@@ -212,6 +223,16 @@ async function gcSessions() {
           continue;
         }
 
+        // A entrada do «Manter conectado» (`sess_ka_…`): vence 14 dias depois de a
+        // pessoa religar, e quem diz é o CARIMBO do valor. O mtime não serve: o
+        // `.get` o renova, e a varredura lê a entrada de cada sessão devida — com
+        // o mtime ela nunca venceria, e a promessa de 14 dias seria falsa na VM.
+        if (name.startsWith('sess_ka_')) {
+          const corte = /^(\d+)\|/.exec(await readFile(f, 'utf8').catch(() => ''));
+          if (!corte || now / 1000 - Number(corte[1]) > KA_TTL) await unlink(f).catch(() => {});
+          continue;
+        }
+
         // Sessão: quem manda é o mtime, que o `.get` renova a cada uso.
         if (now - st.mtimeMs > SESSION_TTL * 1000) await unlink(f).catch(() => {});
       } catch {
@@ -224,6 +245,42 @@ async function gcSessions() {
 }
 gcSessions(); // varredura no boot
 setInterval(gcSessions, GC_INTERVAL_MS).unref(); // não segura o event loop
+
+// ── «Manter conectado» ──────────────────────────────────────────────────────
+// O que o Cron Trigger faz no Cloudflare, o temporizador faz aqui: de 30 em 30
+// minutos (e uma vez 60 s depois do boot) renova o cookie do Waze das sessões que
+// ligaram isso. A lógica, o ritmo (pausa aleatória de 1,5–4 s entre sessões) e o
+// orçamento estão em `manter-conectado.mjs`; aqui só o relógio. Os três valores
+// por ambiente existem pros testes subirem a VM de verdade sem esperar 30 min, e
+// `MANTER_DESLIGADO=1` é o interruptor de quem opera a VM.
+const MANTER_PRIMEIRA_MS = /^\d+$/.test(process.env.MANTER_PRIMEIRA_MS || '') ? Number(process.env.MANTER_PRIMEIRA_MS) : 60 * 1000;
+const MANTER_INTERVALO_MS = /^\d+$/.test(process.env.MANTER_INTERVALO_MS || '') && Number(process.env.MANTER_INTERVALO_MS) > 0
+  ? Number(process.env.MANTER_INTERVALO_MS) : MANTER_CRON_MIN * 60 * 1000;
+const MANTER_PAUSA_FIXA_MS = /^\d+$/.test(process.env.MANTER_PAUSA_MS || '') ? Number(process.env.MANTER_PAUSA_MS) : null;
+let manterVarrendo = false;
+async function manterConectado() {
+  if (manterVarrendo) return null; // a anterior ainda não acabou: não empilha
+  manterVarrendo = true;
+  try {
+    const resumo = await varrerMantidosDoStore({
+      store: fsStore, keyBytes, sessions,
+      ...(MANTER_PAUSA_FIXA_MS !== null ? { pausa: () => new Promise((ok) => setTimeout(ok, MANTER_PAUSA_FIXA_MS)) } : { pausa: pausaPadrao }),
+    });
+    console.log('manter-conectado', JSON.stringify(resumo));
+    return resumo;
+  } catch (e) {
+    console.error('manter-conectado falhou:', e && e.message); // nunca derruba o processo
+    return null;
+  } finally {
+    manterVarrendo = false;
+  }
+}
+if (process.env.MANTER_DESLIGADO !== '1') {
+  // `unref`: os temporizadores não seguram o processo vivo — quando o servidor
+  // HTTP fecha (SIGTERM, SIGINT), eles vão junto, sem rotina de desligamento.
+  setTimeout(manterConectado, MANTER_PRIMEIRA_MS).unref();
+  setInterval(manterConectado, MANTER_INTERVALO_MS).unref();
+}
 
 // ── Estáticos ──────────────────────────────────────────────────────────────
 const MIME = {
