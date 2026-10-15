@@ -149,14 +149,25 @@ const CABE_MEDIDO = [
   [23.75, 55.188],    // 412×915 a 1×
   [22.563, 55.188],   // 393×915 a 1×
   // R22-7-04 (lote 26): as janelas de texto grande em que o diálogo CABE logo acima do degrau novo — medido SEM a escada, em grade, o diálogo passa a caber
-  // a partir de 12,3rem de altura (a 2×; larguras a partir de 17rem), 12,4 (1,9×), 12,8 (1,7×), 13,5 (1,5×) e 14 (1,3×).
-  [17, 12.3],         // 2× (608×464)
-  [18, 12.4],         // 1,9×
-  [17.5, 12.8],       // 1,7×
-  [17.5, 13.5],       // 1,5×
-  [20, 14],           // 1,3×
-  [18, 14],           // 320×256 a 1×: o controle do auditor que está OK (rodapé pendurado, alcançável)
-  [24.7, 14.7],       // 427×267 a 1×: idem
+  // a partir de 12,3rem de altura (a 2×; larguras a partir de 17rem), 12,4 (1,9×), 12,8 (1,7×), 13,5 (1,5×) e 14 (1,3×). O terceiro número é a ESCALA do
+  // texto: a mesma janela em rem não é a mesma tela em cada escala, e o degrau em px (R23-7-01) depende dela.
+  [17, 12.3, 2],      // 2× (608×464)
+  [18, 12.4, 1.9],    // 1,9×
+  [17.5, 12.8, 1.7],  // 1,7×
+  [17.5, 13.5, 1.5],  // 1,5×
+  [20, 14, 1.3],      // 1,3×
+  // R23-7-01 (lote 27), a 0,85× (o texto «pequeno» do Android): o diálogo CABE a partir de 270 px de janela (6 estados medidos em 4 idiomas×larguras).
+  [(653 - 27.2) / 13.6, (270 - 27.2) / 13.6, 0.85],  // 653×270 a 0,85×
+  [(360 - 27.2) / 13.6, (270 - 27.2) / 13.6, 0.85],  // 360×270 a 0,85×
+  // …a partir de 260 px a 0,75× e de 230 px a 0,5× (o rem menor encolhe o conteúdo, não os 32 px dos botões): o limite em rem do degrau é o que as deixa de fora.
+  [(653 - 24) / 12, (260 - 24) / 12, 0.75],          // 653×260 a 0,75×
+  [(653 - 16) / 8, (230 - 16) / 8, 0.5],             // 653×230 a 0,5×
+];
+// R23-7-01 (lote 27): janelas de 1× que ANTES ficavam fora da escada porque o rodapé «já se alcançava» (pendurado fora do cartão, mas tocável) e que o
+// degrau em px agora PRENDE (o cartão rola e o rodapé fica dentro dele): a janela é de zoom, não de celular. Medido SEM a escada, texto 1×.
+const PENDURADO_AGORA_PRESO = [
+  [18, 14],           // 320×256: 400% de 1280×1024 (rodapé 5 px fora do cartão)
+  [24.7, 14.7],       // 427×267: 300% de 1280×800
 ];
 // Aparelhos a 1× (a raiz tem 16 px): nenhum pode cair na escada — onde cabe hoje, nenhum pixel muda. São os 40 viewports
 // do `presets-1x` da rodada 21 (celulares, dobráveis, tablets e desktops) e cada um deitado, mais os 26 de antes.
@@ -178,7 +189,18 @@ function escadaDosFiltros() {
   assert.ok(pares.length >= 1, 'a escada dos Filtros não tem nenhum retângulo "largura E altura"');
   return { b, pares };
 }
-const naEscada = (pares, l, a) => pares.some(([w, h]) => l <= w && a <= h);
+// O degrau do zoom em PX (R23-7-01, lote 27): `(max-height: Npx) and (max-height: Rrem)` — a altura do overlay (a janela menos o respiro de 1rem de cada lado)
+// até N px E até R rem, qualquer largura. `escala` é a do texto (a raiz = 16 px × escala): é ela que separa a janela de zoom (1×) da de texto grande.
+function degrauEmPx() {
+  const b = TOPO.find((x) => /^@container filtros\b/.test(x.cabeca));
+  const m = /\(\(max-height:\s*(\d+)px\)\s*and\s*\(max-height:\s*([\d.]+)rem\)\)/.exec(b.cabeca);
+  assert.ok(m, 'a escada dos Filtros perdeu o degrau do zoom em px: ((max-height: Npx) and (max-height: Rrem))');
+  return { px: Number(m[1]), rem: Number(m[2]) };
+}
+const naEscada = (pares, l, a, escala = 1) => {
+  const z = degrauEmPx();
+  return pares.some(([w, h]) => l <= w && a <= h) || (a * 16 * escala <= z.px && a <= z.rem);
+};
 
 test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (contêiner = o overlay), que cobre o defeito medido', () => {
   const ov = regraDe('#filtersModal');
@@ -210,6 +232,10 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   const iLado = blocosDePadding.findIndex((b2) => valor(b2) === '5.5rem');
   const iEmp = blocosDePadding.findIndex((b2) => valor(b2) === '11rem');
   assert.ok(iLado >= 0 && iEmp >= 0 && iLado < iEmp, 'o scroll-padding do lado a lado (5.5rem) tem que vir ANTES do empilhado (11rem): na sobreposição das janelas estreitas vale o empilhado');
+  // O degrau em px (R23-7-01) é da escada E do scroll-padding do lado a lado (o rodapé preso cobre o fim da rolagem também nas janelas de zoom); o do empilhado
+  // (linha de até 15,4rem) não o repete: o degrau estreito em rem (15,4 × 17rem) já contém as janelas estreitas dele.
+  assert.ok(blocosDePadding[iLado].cabeca.includes(`((max-height: ${degrauEmPx().px}px) and (max-height: ${degrauEmPx().rem}rem))`), 'o scroll-padding do lado a lado não vale no degrau do zoom em px');
+  assert.ok(!/px/.test(blocosDePadding[iEmp].cabeca), 'o scroll-padding do rodapé empilhado ganhou um degrau em px: o empilhado é o de ≤ 15,4rem, que a escada em rem já cobre');
   const dosGrupos = [doGrupo(blocosDePadding[iLado]), doGrupo(blocosDePadding[iEmp])];
   const todasAsLinhas = [...dosGrupos[0], ...dosGrupos[1]];
   assert.equal(todasAsLinhas.length, pares.length, 'os grupos do scroll-padding não cobrem exatamente as linhas da escada');
@@ -220,7 +246,17 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   assert.ok(DEFEITOS_MEDIDOS.length >= 8, `a tabela dos defeitos medidos só tem ${DEFEITOS_MEDIDOS.length} estados: o guard perdeu o alcance`);
   for (const [l, a] of DEFEITOS_MEDIDOS) assert.ok(naEscada(pares, l, a), `o defeito medido ${l}rem × ${a}rem (o "Aplicar" fora da janela) não está na escada`);
   // …e deixa FORA cada diálogo que cabe: a escada não pode crescer sobre ele.
-  for (const [l, a] of CABE_MEDIDO) assert.ok(!naEscada(pares, l, a), `o diálogo que CABE em ${l}rem × ${a}rem está na escada: o cartão passaria a rolar onde nada estoura`);
+  for (const [l, a, esc = 1] of CABE_MEDIDO) assert.ok(!naEscada(pares, l, a, esc), `o diálogo que CABE em ${l}rem × ${a}rem (a ${esc}×) está na escada: o cartão passaria a rolar onde nada estoura`);
+  for (const [l, a] of PENDURADO_AGORA_PRESO) assert.ok(naEscada(pares, l, a), `a janela de zoom ${l}rem × ${a}rem (rodapé pendurado) não está na escada`);
+  // As janelas de ZOOM do navegador (texto 1×) e as de janela baixa do R23-7-01: CSS px da JANELA (o overlay é a janela menos 2rem de respiro). Todas dentro do
+  // degrau em px; a primeira acima dele (273 px: 241 de conteúdo) fica fora, e é o corte que o texto «1×» da lista de aparelhos não alcança (nenhum tem < 280 px).
+  const JANELAS_DE_ZOOM_PX = [[653, 200], [653, 212], [568, 200], [800, 200], [915, 200], [1024, 200], [653, 224], [653, 248], [360, 225], [400, 225], [427, 240],
+    [384, 240], [320, 256], [427, 267], [480, 270], [1024, 272], [320, 200], [384, 216], [256, 160], [528, 216]];
+  for (const [L, A] of JANELAS_DE_ZOOM_PX) { const [l, a] = janelaEmRem(L, A); assert.ok(naEscada(pares, l, a), `a janela de zoom ${L}×${A} (${l}rem × ${a}rem, 1×) não está na escada`); }
+  // Os DOIS números do degrau se travam, cada um onde manda: o px acima de 1× (a 1,3×, 240 px de conteúdo são 11,54rem) e o rem abaixo de 1× (a 0,85×, 15rem são 204 px).
+  assert.ok(naEscada(pares, 40, 239.4 / 20.8, 1.3) && !naEscada(pares, 40, 241.4 / 20.8, 1.3), 'o limite em px do degrau do zoom mudou (a 1,3× o corte é 240 px de conteúdo)');
+  assert.ok(naEscada(pares, 40, 204 / 13.6, 0.85) && !naEscada(pares, 40, 205 / 13.6, 0.85), 'o limite em rem do degrau do zoom mudou (a 0,85× o corte é 15rem)');
+  { const [l, a] = janelaEmRem(653, 273); assert.ok(!naEscada(pares, l, a), 'a janela 653×273 a 1× entrou na escada: o corte em px subiu e o diálogo que cabe a 0,85× (270 px) está logo ao lado'); }
   // A quebra exata do rodapé: ele empilha com a linha de até 12,4rem = a janela de até 15,4rem (a linha é a janela menos o px-6).
   // Um canto que atravessasse os 15,4rem misturaria o rodapé empilhado (3,2rem mais alto) com o lado a lado.
   assert.ok(pares.some(([w]) => w === 15.4), 'a escada não tem um canto em 15,4rem, a largura em que o rodapé deixa de empilhar');
@@ -707,7 +743,9 @@ test('R21-7-01 · dentro do contraste alto só entram cores DO SISTEMA (cor do a
   for (const r of REGRAS_FORCADO) {
     for (const [p, v] of Object.entries(r.decl)) {
       const cores = [];
-      if (props.includes(p)) cores.push(v);
+      // Um degradê (o hachurado do marcador da entrada que sai, R23-3-01) é cor do sistema se TODAS as paradas dele forem: o ângulo e os comprimentos não são cor.
+      if (props.includes(p) && /gradient\(/.test(v)) cores.push(...v.replace(/^[^(]*\(|\)\s*$/g, '').split(/[\s,]+/).filter((x) => x && !/^-?[\d.]+(px|deg|%|rem)?$/.test(x)));
+      else if (props.includes(p)) cores.push(v);
       if (p === 'border' || p === 'outline') cores.push(...v.split(/\s+/).filter((x) => !/^(\d|solid$|dashed$|dotted$|double$|none$)/.test(x)));
       for (const c of cores) { vistas++; assert.match(c, SISTEMA, `${r.sel} { ${p}: ${v} } usa uma cor que não é do sistema (${c})`); }
     }
@@ -747,4 +785,103 @@ test('R21-7-01 · o contraste alto não vaza: forced-color-adjust e as regras de
   // Fora do modo, a regra-base do interruptor e a da barra seguem sem borda (o app não muda um pixel).
   assert.ok(!('border' in regraDe('input.ui-switch').decl));
   assert.ok(!('border' in regraDe('.conq-barra').decl));
+});
+
+
+// ═══ R23-3-01 · os marcadores do mapa no contraste alto ═════════════════════════════════════════════
+// O modo troca o `background` do autor: todo marcador virava o MESMO ponto branco de borda preta, e dentro do círculo (o local de hoje × a posição proposta) e
+// do quadrado (a entrada que entra × a que sai × a atual) a COR era o único canal. A forma e o preenchimento do sistema (vazado × cheio × hachurado) dizem o estado.
+// O que só o navegador mede (os marcadores com `forcedColors: 'active'`, e que fora dele nada muda) está no bloco do `tools/smoke-browser.mjs` do lote 27.
+
+test('R23-3-01 · cada marcador do mapa tem um preenchimento próprio DENTRO da sua forma no contraste alto, só com cores do sistema', () => {
+  const base = forcada('.mapa-marca.mapa-marca');
+  assert.ok(base, 'sumiu a regra dos marcadores do mapa no contraste alto');
+  assert.equal(base.decl['forced-color-adjust'], 'none', 'sem forced-color-adjust: none o modo joga fora o preenchimento e todo marcador volta a ser igual');
+  assert.equal(base.decl.background, 'Canvas');
+  assert.equal(base.decl['border-color'], 'CanvasText');
+  assert.equal(base.decl['box-shadow'], 'none');
+  // O preenchimento de cada classe: o genérico (Canvas) e, DEPOIS dele, o das classes que o trocam (a ordem decide o empate (0,2,0)).
+  const posGen = CSS.indexOf('.mapa-marca.mapa-marca {');
+  const preenchimento = (cls) => {
+    let f = base.decl.background;
+    for (const r of REGRAS_FORCADO) {
+      const m = r.sel.match(/^\.mapa-marca\.(mapa-[\w-]+)$/);
+      if (m && m[1] === cls && 'background' in r.decl) f = r.decl.background;
+    }
+    return f;
+  };
+  // As classes de cada FORMA (a forma vem da regra-base: círculo = .mapa-atual/.mapa-proposto, quadrado = .mapa-entrada + .mapa-e-*, losango = .mapa-duplicado).
+  const circulo = ['mapa-atual', 'mapa-proposto'], quadrado = ['mapa-e-nova', 'mapa-e-saindo', 'mapa-e-atual'];
+  for (const grupo of [circulo, quadrado]) {
+    const fills = grupo.map(preenchimento);
+    assert.equal(new Set(fills).size, grupo.length, `dois marcadores da mesma forma ficaram iguais no contraste alto: ${grupo.map((c, i) => `${c}=${fills[i]}`).join(' · ')}`);
+  }
+  assert.equal(preenchimento('mapa-proposto'), 'Highlight');
+  assert.equal(preenchimento('mapa-e-nova'), 'Highlight', 'o que ENTRA é cheio nas duas formas (a posição proposta e a entrada nova)');
+  assert.equal(preenchimento('mapa-atual'), 'Canvas');
+  assert.match(preenchimento('mapa-e-saindo'), /^repeating-linear-gradient\([^)]*CanvasText[^)]*Canvas[^)]*\)$/, 'a entrada que SAI é hachurada (CanvasText sobre Canvas): vazado e cheio já são da atual e da nova');
+  assert.equal(preenchimento('mapa-e-atual'), 'Canvas');
+  // A forma segue sendo o outro canal: círculo e quadrado e losango continuam três formas no CSS de base.
+  assert.equal(regraDe('.mapa-marca').decl['border-radius'], '9999px');
+  assert.equal(regraDe('.mapa-marca.mapa-entrada').decl['border-radius'], '3px');
+  assert.match(regraDe('.mapa-marca.mapa-duplicado').decl.transform, /rotate\(45deg\)/);
+  // Ordem: o genérico vem ANTES das classes que o trocam, e todos DEPOIS das regras-base de cor lá de cima.
+  const posBaseCor = CSS.lastIndexOf('.mapa-marca.mapa-e-atual {');
+  assert.ok(posBaseCor > 0 && posGen > posBaseCor, 'a regra do contraste alto vem ANTES da cor-base dos marcadores e perde o empate');
+  assert.ok(CSS.indexOf('.mapa-marca.mapa-proposto,', posGen) > posGen && CSS.indexOf('.mapa-marca.mapa-e-saindo {', posGen) > posGen);
+  // Fora do contraste alto, a cor de cada marcador é a de sempre (o app não muda um pixel).
+  assert.equal(regraDe('.mapa-marca.mapa-proposto', '').decl.background, '#16a34a');
+  assert.equal(regraDe('.mapa-marca.mapa-e-saindo', '').decl.background, '#e11d48');
+});
+
+// ═══ R23-5-02 · a bolha da conversa no contraste alto · R23-8-06 · o fundo das ampliações ═══════════
+
+test('R23-5-02 · a bolha da conversa ganha borda no contraste alto (a «minha» mais grossa), e só nele', () => {
+  const b = forcada('.conversa-bolha.conversa-bolha');
+  assert.ok(b, 'sumiu a borda da bolha da conversa no contraste alto');
+  assert.equal(b.decl.border, '1px solid CanvasText');
+  assert.equal(forcada('.conversa-bolha.minha.minha').decl['border-width'], '2px', 'a «minha» tem o traço mais grosso: sem o fundo, é o que a separa da «dela»');
+  // Fora do contraste alto a bolha NÃO tem borda (nenhum pixel muda).
+  for (const r of REGRAS) if (r.condicao === '' && /^\.conversa-bolha\b/.test(r.sel)) assert.ok(!('border' in r.decl) && !('border-width' in r.decl), `${r.sel} tem borda fora do contraste alto`);
+});
+
+test('R23-8-06 · a foto e o mapa ampliados têm fundo OPACO (Canvas) no contraste alto', () => {
+  for (const id of ['#imageLightbox', '#mapaLightbox']) {
+    const r = forcada(id, 'background');
+    assert.ok(r, `${id} sem fundo no contraste alto`);
+    assert.equal(r.decl.background, 'Canvas');
+  }
+  // Os dois ids existem no HTML (gotcha #68) e o fundo translúcido de sempre continua nas classes (fora do modo nada muda).
+  assert.match(HTML, /<div id="imageLightbox"[^>]*\bbg-black bg-opacity-90\b/);
+  assert.match(HTML, /<div id="mapaLightbox"[^>]*\bbg-slate-200\b/);
+  assert.ok(!REGRAS.some((r) => r.condicao === '' && /^#(imageLightbox|mapaLightbox)$/.test(r.sel) && 'background' in r.decl), 'o fundo opaco da ampliação vale também fora do contraste alto');
+});
+
+// ═══ R23-7-04 · o canvas do QR · R23-8-04 · o fieldset dos tipos de pedido ═══════════════════════════
+// Só o HTML: o que o navegador mede (o canvas a 280/320/360 px antes e depois do desenho, o fieldset com texto grande, e que a 1× nada muda) está no bloco do lote 27
+// do `tools/smoke-browser.mjs`.
+
+test('R23-7-04 · o canvas do QR do pareamento nunca passa do CARTÃO (max-width: 100% + o p-6), antes e depois de desenhado', () => {
+  const tag = /<canvas id="pairQr" class="([^"]*)"/.exec(HTML);
+  assert.ok(tag, 'o canvas do QR (#pairQr) sumiu do HTML (gotcha #68)');
+  assert.ok(!tag[1].split(/\s+/).includes('max-w-full'), 'max-w-full (100% da caixa de conteúdo) encolhe a moldura que hoje cabe no respiro do cartão a 360–412 px: o teto é calc(100% + 3rem), no CSS');
+  const r = regraDe('#pairQr', '', 'max-width');
+  assert.ok(r, 'sumiu o teto do canvas do QR: ele nasce 300×150 + moldura (326 px) e passa do cartão a 280 e 320 px antes do primeiro desenho');
+  assert.equal(r.decl['max-width'], 'calc(100% + 3rem)', 'o teto é a largura do cartão: a caixa de conteúdo (100%) mais o p-6 de cada lado (3rem)');
+  // O `p-6` do cartão (1,5rem de cada lado = os 3rem do teto): é a conta que faz o canvas parar na BORDA do cartão.
+  assert.match(HTML, /<div id="pairShowModal"[^>]*>\s*<div class="[^"]*\bp-6\b/, 'o cartão do QR deixou de ter p-6: o teto de 3rem não é mais a borda dele');
+  // O tamanho DESENHADO continua sendo o do JS (px inline), e o JS TIRA o teto depois do desenho: com ele o QR quadrado de 205 px encolheria na largura (160×205 no Fold).
+  const js = ler('js/app.js').replace(/^\s*\/\/.*$/gm, '');
+  assert.match(js, /canvas\.style\.width = px \+ 'px';\s*canvas\.style\.height = px \+ 'px';\s*canvas\.style\.maxWidth = 'none';/, 'o QR DESENHADO tem que tirar o teto: com ele o QR encolheria na largura e ficaria rachado (não quadrado) no Fold, e o tamanho a 1× mudaria');
+});
+
+test('R23-8-04 · o fieldset dos tipos de pedido encolhe com o cartão e quebra a palavra que não cabe (min-w-0 + break-words)', () => {
+  const a = HTML.indexOf('<fieldset class="min-w-0">');
+  assert.ok(a > 0, 'o <fieldset> dos tipos de pedido perdeu o min-w-0: o padrão do navegador (`min-inline-size: min-content`) o deixa passar do cartão com texto grande');
+  const bloco = HTML.slice(a, HTML.indexOf('</fieldset>', a));
+  assert.match(bloco, /<legend class="[^"]*\bbreak-words\b/, 'a legenda «Tipos de Pedido» não quebra a palavra');
+  const spans = [...bloco.matchAll(/<span class="([^"]*)" data-i18n="filters\.types\.[A-Z_]+"/g)];
+  assert.equal(spans.length, 7, 'esperava os 7 tipos de pedido');
+  for (const m of spans) assert.ok(/\bmin-w-0\b/.test(m[1]) && /\bbreak-words\b/.test(m[1]), `o rótulo de um tipo de pedido não encolhe/quebra: ${m[0]}`);
+  assert.equal([...bloco.matchAll(/class="filter-type /g)].length, 7, 'os 7 checkboxes dos tipos continuam no fieldset');
 });

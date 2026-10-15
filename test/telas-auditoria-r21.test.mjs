@@ -105,6 +105,17 @@ test('R21-3-05: sem recorte nenhum controle mexe um pixel — cada um mantém a 
   }
 });
 
+// R23-3-01 (cosmético): a escala do mapa ampliado era o único controle de BAIXO sem a margem de segurança de baixo (a legenda e o Street View a
+// têm): com o recorte de 21 px do iPhone ela ficava 5 px além da área segura. Sem recorte vale o `bottom-4` de sempre (1 rem): 0 pixel.
+test('R23-3-01: a escala do mapa ampliado respeita o recorte de baixo — e sem recorte fica a 1 rem, como sempre', () => {
+  const { decl } = estiloDaTag('mapaLbEscala');
+  const b = vale(decl, 'bottom');
+  assert.ok(b, 'a escala do mapa ampliado não tem `bottom` inline (a margem de segurança de baixo)');
+  assert.equal(valorCss(b, {}), 16, 'sem recorte a escala tem que ficar a 1 rem da borda (o `bottom-4` de sempre)');
+  assert.equal(valorCss(b, { bottom: 21 }), 37, 'com o recorte de baixo de 21 px a escala tem que subir 21 px');
+  assert.match(estiloDaTag('mapaLbEscala').tag, /\bbottom-4\b/, 'o `bottom-4` é a reserva de quem não entende env(): ele fica na classe');
+});
+
 test('R21-3-05: com recorte o controle vai pra borda da área segura — e só nele (o lado sem recorte fica onde estava)', () => {
   for (const ins of RECORTES.slice(1)) {
     for (const [id, lado, base] of CONTROLES.filter(([i, l]) => !(i === 'lightboxZoomHint' && l === 'right') && !(i === 'mapaLbLegenda' && l === 'right'))) {
