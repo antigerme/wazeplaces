@@ -8,6 +8,42 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.15-02
+
+Vigésima quinta rodada da auditoria. A v2026.10.15-01 foi conferida em produção com as duas contas (os 13 arquivos que o app carrega iguais, byte a byte, aos mesclados; as verificações novas do lote passaram) e oito auditores revisaram o app de novo, cada um numa área. Nenhum achado era grave no uso normal. Os mais sérios: uma decisão confirmada não contava no Histórico quando o aparelho não conseguia guardar a fila de saída; os botões dos diálogos de texto grande cobriam o campo que você estava preenchendo; e o campo do código de pareamento não entendia o link quando ele entrava por outro caminho que não o colar. O resto são pontas soltas dos consertos anteriores.
+
+Cada conserto tem um teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila, as contas e o campo do código**
+- **Se o aparelho não deixa o app guardar dados (modo restrito do navegador ou armazenamento cheio), o que você decide continua entrando no Histórico, nas conquistas e na contagem de reincidência do autor.** Antes, a decisão confirmada pelo Waze era lida como "feita por outra aba": o placar subia, mas o Histórico ficava em 0, a "Mão firme" não andava e o aviso de consequência não aparecia. E se a decisão não podia sair por falta de sinal, o app a dava por guardada numa fila que não existia e ela se perdia sem aviso. Agora o pedido volta ao card e o app avisa.
+- **Ao trocar de conta no mesmo navegador restrito, a conta nova começa do zero.** Antes ela herdava o placar, o "↑ guarda o pedido" ligado e o Desfazer desligado da conta anterior.
+- **No campo do código de pareamento, o link do "Copiar link" funciona também quando entra por outros caminhos além do colar** (a sugestão do teclado do celular, arrastar e soltar, texto inserido), e uma frase com o código dentro vira o código. Antes, esses caminhos transformavam o link em um "código" errado (as primeiras letras do endereço) e diziam "Código inválido ou expirado" com o link ainda valendo.
+- **O Resumo do mês, o aviso do Desfazer e as conquistas não somam mais um contador estragado do Histórico como texto** (um "7" guardado como texto virava "072" na imagem do resumo).
+
+**Texto grande e telas pequenas**
+- **O campo do código, a caixa de "Colar cookies" e o link "Waze Map Editor" do "Sair" não ficam mais escondidos atrás dos botões.** Com o texto do sistema aumentado (ou o teclado aberto), esses itens podiam parar inteiros atrás de "Cancelar" e "Entrar"/"Confirmar". Agora o diálogo deixa folga embaixo, e o item focado fica visível.
+- **Os Filtros mostram "Aplicar" e "Cancelar" também com o zoom do navegador em 400% ou 500%.** Num computador com a janela em 1280×800 e o zoom em 400%, o rodapé dos Filtros saía da janela e nada rolava.
+- **O cabeçalho "Lidos / Rejeitados" do Histórico não é mais cortado com o texto grande** (virava "idos"): se não cabe numa linha, vai para duas, sempre à direita. Os títulos ("Treino concluído", "Sair?") e os textos ao lado dos interruptores também não passam mais do cartão.
+- **Em francês, o botão do resumo do mês não deixa mais ": octobre" sozinho no começo da linha.**
+
+**Modo dev, diagnóstico e tempo real**
+- **O botão flutuante do modo dev (a câmera), se você o segura sem arrastar enquanto os avisos somem, volta ao lugar de sempre quando solta** (ficava no alto).
+- **Um segundo arquivo de diagnóstico baixado na mesma abertura não conta de novo as repetições de falha que o primeiro já tinha levado.**
+- **No diário do tempo real, "religou" só aparece quando a conexão provou que serve** (antes aparecia junto de uma queda logo em seguida).
+
+### Documentação e ferramentas
+- **A ferramenta de sondagem do Waze (`waze-probe`) recusa também o caminho de "guardar o pedido" (a estrela)**, e um teste novo deriva a lista de caminhos que escrevem a partir dos que o servidor usa, para a garantia não se perder quando surgir um caminho novo.
+- **`docs/waze-api.md` conta os 44 caminhos da tabela** (dizia 42), e um teste confere a frase contra a tabela. O CLAUDE.md e a árvore do `index.src.html` também foram acertados (7 pulos só do Chromium no teste de layout; 41 testes e 3 ferramentas leem o HTML).
+- **O teste da seção "9p" do "Disponível offline" não oscila mais quando a máquina está carregada:** ele espera os fatos (a preparação terminar, a rede cair) em vez de prazos.
+
+### Correções ao que a versão anterior dizia
+- O nome em hebraico ou árabe na imagem do resumo do mês, quando mistura palavras com número ou colchete (por exemplo «مرحبا (IL)»), **continua na ordem antiga no motor do Safari (WebKit)**, que também é o dos navegadores do iPhone; no Chrome e no Edge está certo. A versão anterior dizia só que "alguns navegadores" mostravam como antes.
+- O Galaxy Fold a partir de 1,8× segue sem a fileira de botões dos diálogos inteira à vista, e o botão "Entendi" do "Como funciona" lado a lado, no SE com o texto 15% maior em espanhol e no celular deitado, ainda pode ficar abaixo do corte: isso depende de uma decisão do dono do projeto.
+
+---
+
 ## v2026.10.15-01
 
 Vigésima quarta rodada da auditoria. Depois da v2026.10.14-04, conferida em produção com duas contas (175 verificações, nenhuma falha do app), oito auditores revisaram o app de novo, cada um numa área; um deles usou o app de ponta a ponta, nos dois motores de navegador. Nenhum achado era grave no uso normal. Os mais sérios: com "Reduzir movimento" ligado o card parado ficava tremendo sem parar; no Galaxy Fold com o texto do celular a partir de 1,8× o "Aplicar" dos Filtros ficava fora da tela (um defeito que a versão anterior trouxe); no modo de contraste alto do Windows os interruptores sumiam; e o "Rejeitar sozinho" que esperava a vez de outra aba atravessava a troca de conta. O resto são pontas soltas dos consertos anteriores.
