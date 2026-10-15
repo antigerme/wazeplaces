@@ -2,7 +2,10 @@
 // deixar isso derrubar o initApp. Wrapper tolerante a falha.
 const safeLS = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    // Devolve se GRAVOU: o aparelho ilegível ou com a cota cheia recusa a escrita, e quem
+    // depende de a gravação ter pegado (a fila de saída, R22-1-A2) precisa saber. Quem não
+    // se importa ignora o retorno, como sempre.
+    set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
     remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 

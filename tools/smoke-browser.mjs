@@ -16808,6 +16808,265 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await ctx.close();
 }
 
+// ── O TEXTO QUE ENTRA NO CAMPO DO CÓDIGO SEM `PASTE` (R22-1-A1 = R22-8-01, lote 26) ─
+//
+// O colar (`paste`) era o único caminho em que o link do "Copiar link" virava resgate. O texto que entra de uma
+// vez por OUTRO caminho — o `insertText` do IME, a sugestão da área de transferência do teclado do celular, o
+// arrastar-e-soltar — passava só pelo `input`, que formata os seis primeiros alfanuméricos: o link virava
+// "HTT-PSP" e a recusa dizia "Código inválido ou expirado" com o segredo de 20 símbolos ainda valendo. Aqui o
+// texto entra pelo `keyboard.insertText` do navegador (o mesmo `beforeinput`/`input` do IME), nos dois motores.
+// CONTROLES: o colar de verdade continua resgatando; digitar tecla a tecla continua formatando; o código dentro
+// de uma frase entra no campo no formato da tela, sem resgatar; e o link JÁ USADO resgata do mesmo jeito e o
+// servidor recusa (o erro aparece no diálogo, com o campo como estava) — o instrumento enxerga o resgate.
+{
+  const SEGREDO = 'K7Q9ZXM2P4R6T8VBWCDE';
+  const FILA_SEMPASTE = [{ ...CARDS.FLAG, venueID: 'vSP1', updateRequestID: 'uSP1', imageUrls: [] }];
+  const abrir = async (usado = false) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    const claims = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      let resp = { success: true };
+      if (nome === 'parear') {
+        claims.push(corpo.code);
+        resp = !usado && corpo.code === SEGREDO ? { success: true, sessionToken: 'token-do-smoke-sem-paste', conta: 77 }
+          : { success: false, error: 'Código inválido', errorKey: 'srv.err.pairCodeInvalid', errorCategory: 'unknown' };
+      } else if (nome === 'perfil') resp = { success: true, profile: { id: 77, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') resp = { success: true, places: FILA_SEMPASTE, hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: nome === 'parear' && !resp.success ? 400 : 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+    await page.evaluate(() => document.getElementById('pairEnterBtn').click());
+    await esperarOuExplodir(page, () => !document.getElementById('pairEnterModal').classList.contains('hidden'), 'o diálogo do código');
+    await page.evaluate(() => document.getElementById('pairCodeInput').focus());
+    return { ctx, page, claims, erros };
+  };
+  const campo = (page) => page.evaluate(() => document.getElementById('pairCodeInput').value);
+  const zerar = (page) => page.evaluate(() => { document.getElementById('pairCodeInput').value = ''; });
+
+  // (1) o LINK por `insertText`: resgata com o segredo, o campo não guarda o link, e a pessoa entra.
+  const a = await abrir();
+  await a.page.keyboard.insertText('https://places.wazebrasil.com/#pair=' + SEGREDO);
+  const entrou = await esperarNaPagina(a.page, () => AppState.authenticated === true && !!AppState.profile, 6000);
+  checa(entrou.ok, 'sem-paste/link: o link inserido sem colar (insertText) não entrou — o campo virou "HTT-PSP" e o resgate não saiu', JSON.stringify({ claims: a.claims.map((c) => c && c.length), campo: await campo(a.page) }));
+  checa(a.claims.length === 1 && a.claims[0] === SEGREDO, 'sem-paste/link: o resgate tem de sair UMA vez, com o segredo de 20 símbolos do link', JSON.stringify(a.claims.map((c) => c && c.length)));
+  checa(a.erros.length === 0, 'sem-paste/link: erro de JS', a.erros[0]);
+  await a.ctx.close();
+
+  // (2) a REDE do `input` (o `beforeinput` que o motor não deixa cancelar): o link já dentro do campo é interpretado e tirado.
+  const b = await abrir();
+  await b.page.evaluate((link) => {
+    const el = document.getElementById('pairCodeInput');
+    el.addEventListener('beforeinput', (e) => { Object.defineProperty(e, 'cancelable', { value: false }); }, { capture: true });
+    el.value = link;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: link }));
+  }, 'https://places.wazebrasil.com/#pair=' + SEGREDO);
+  const entrouB = await esperarNaPagina(b.page, () => AppState.authenticated === true && !!AppState.profile, 6000);
+  checa(entrouB.ok && b.claims.length === 1 && b.claims[0] === SEGREDO, 'sem-paste/rede do input: o link que já estava no campo (sem o beforeinput cancelável) não resgatou', JSON.stringify({ claims: b.claims.length }));
+  await b.ctx.close();
+
+  // (3) CONTROLES no mesmo diálogo: a frase com o código entra no formato da tela, sem resgatar; digitar formata;
+  // o colar real (o `paste` do ouvinte) continua resgatando; e o link já usado resgata e o servidor recusa.
+  const c = await abrir();
+  await c.page.keyboard.insertText('Código: KMQ-XRT https://places.wazebrasil.com');
+  const frase = await campo(c.page);
+  checa(frase === 'KMQ-XRT' && c.claims.length === 0, 'sem-paste/CONTROLE: o código dentro de uma frase inserida sem colar tem de entrar no campo no formato da tela, sem resgatar', JSON.stringify({ frase, claims: c.claims.length }));
+  await zerar(c.page);
+  await c.page.keyboard.type('abc123');
+  const digitado = await campo(c.page);
+  checa(digitado === 'ABC-123' && c.claims.length === 0, 'sem-paste/CONTROLE: digitar tecla a tecla deixou de formatar o código (o instrumento não enxerga o formatador)', JSON.stringify({ digitado }));
+  await zerar(c.page);
+  const colado = await c.page.evaluate((link) => {
+    const el = document.getElementById('pairCodeInput');
+    el.focus();
+    const ev = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'clipboardData', { value: { getData: () => link } });
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, 'https://places.wazebrasil.com/#pair=' + SEGREDO);
+  const resgatouColado = await esperarNaPagina(c.page, () => AppState.authenticated === true, 6000);
+  checa(colado === true && resgatouColado.ok && c.claims.length === 1, 'sem-paste/CONTROLE: o colar de verdade deixou de resgatar o link', JSON.stringify({ colado, claims: c.claims.length }));
+  checa(c.erros.length === 0, 'sem-paste/CONTROLES: erro de JS', c.erros[0]);
+  await c.ctx.close();
+
+  const d = await abrir(true);
+  await d.page.keyboard.insertText('https://places.wazebrasil.com/#pair=' + SEGREDO);
+  const mostrou = await esperarNaPagina(d.page, () => !document.getElementById('pairEnterError').classList.contains('hidden'), 6000);
+  checa(d.claims.length === 1 && d.claims[0] === SEGREDO && mostrou.ok,
+    'sem-paste/CONTROLE: o link JÁ USADO tem de resgatar (UMA ida com o segredo) e o erro do servidor aparecer no diálogo', JSON.stringify({ claims: d.claims.length, erro: mostrou.ok }));
+  checa(!(await d.page.evaluate(() => AppState.authenticated)), 'sem-paste/CONTROLE: o link usado entrou na conta');
+  await d.ctx.close();
+}
+
+// ── A FILA DE SAÍDA QUE NÃO GRAVOU NÃO "GUARDA" NADA (R22-1-A2, lote 26) ─────
+//
+// `salvarFilaDeSaida` engolia o erro de gravação e o `enfileirarSaida` devolvia `true`: com o aparelho ilegível
+// (o localStorage lançando) ou com a cota cheia (ele lê, mas a escrita lança), a decisão "anotada" nunca esteve
+// no aparelho, o pouso não a achava na fila e concluía "outra aba a tirou" — o placar andava, mas o Histórico, a
+// reincidência, as conquistas e o aviso de consequência ficavam de fora. E a falha de REDE de uma decisão assim
+// "guardava" onde não há fila, sem aviso. Aqui o ✓ ✕ ✓ pelos botões do card, com o Desfazer desligado e o Waze
+// respondendo, mede o Histórico (que deve dizer 2/1 nos três aparelhos); e o ✕ sem sinal reverte o placar e avisa
+// quando não há fila onde guardar. CONTROLE: o aparelho NORMAL — mesmo percurso — guarda a decisão na fila (placar
+// mantido, um item na fila, nenhum aviso de erro).
+{
+  const FILA_A2 = Array.from({ length: 5 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vA2' + i, updateRequestID: 'uA2' + i, imageUrls: [], creatorId: 700 + i, createdBy: 'autor' + i }));
+  const rodar = async (modo) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    await presencaViva(ctx);
+    const envios = [];
+    let semRede = false;
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      if (semRede) return r.abort('internetdisconnected');
+      if (nome === 'validar-place' || nome === 'marcar-lido') envios.push(nome);
+      let resp = { success: true };
+      if (nome === 'testar-cookies') resp = { success: true, sessionToken: 'token-do-smoke-da-saida', conta: 77 };
+      else if (nome === 'perfil') resp = { success: true, profile: { id: 77, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') resp = { success: true, places: FILA_A2, hasMore: false, page: 1, total: 5, totalAll: 5, blocked: 0 };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript((m) => {
+      if (m === 'ilegivel') Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
+    }, modo);
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => { const t = String(e.message || e); if (!ruidoDoMotor(t)) erros.push(t); });
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+    page.evaluate(() => authenticateWithCookies('# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-77\n')).catch(() => {});
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o login');
+    // Desfazer desligado de verdade (a preferência sozinha não basta: a cota também) e o aviso de consequência já visto.
+    await page.evaluate(() => {
+      AppState.stats = { read: 500, rejected: 500, skipped: 0 };
+      AppState.preferences = Object.assign({}, AppState.preferences, { undoEnabled: false, undoGateSeen: true, dicaDesfazerVista: true, consequenciaVista: { read: true, reject: true } });
+      window.__aoGravar = null;
+    });
+    if (modo === 'cota') {
+      await page.evaluate(() => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; });
+    }
+    const historico = () => page.evaluate(() => { const t = getHistoryStats().total; return { read: t.read, rejected: t.rejected }; });
+    const base = await historico();
+    const decidir = async (tipo) => {
+      const antes = envios.length;
+      await page.evaluate((t) => cardDaFrente().querySelector(t === 'read' ? '.card-btn-read' : '.card-btn-reject').click(), tipo);
+      // Sinal POSITIVO: o envio CHEGOU ao servidor de mentira e nada mais está no ar.
+      for (let i = 0; i < 60 && envios.length === antes; i++) await dormir(100);
+      const calmo = await esperarNaPagina(page, () => AppState.inFlightActions === 0 && !AppState.pendingAction && !acoesTravadas(), 8000);
+      return calmo.ok && envios.length > antes;
+    };
+    const ok = [await decidir('read'), await decidir('reject'), await decidir('read')];
+    const depois = await historico();
+    const placar3 = await page.evaluate(() => ({ r: AppState.stats.read, j: AppState.stats.rejected }));
+    // Sem sinal: o ✕ não sai. Com fila onde guardar (aparelho normal) ele FICA (placar mantido, um item); sem ela, volta e avisa.
+    semRede = true;
+    await ctx.setOffline(true);
+    const idDoQuarto = await page.evaluate(() => AppState.currentPlace && AppState.currentPlace.venueID);
+    await page.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click());
+    await esperarNaPagina(page, () => AppState.inFlightActions === 0 && !AppState.pendingAction, 8000);
+    await dormir(500);
+    const sem = await page.evaluate((id) => ({
+      rejeitados: AppState.stats.rejected,
+      naFila: AppState.queue.some((q) => q.venueID === id) || (AppState.currentPlace && AppState.currentPlace.venueID === id),
+      aviso: [...document.querySelectorAll('#toastContainer > *')].map((e) => e.textContent).join(' | '),
+    }), idDoQuarto);
+    const guardados = modo === 'ilegivel' ? null : await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
+    await ctx.close();
+    return { ok, base, depois, placar3, sem, guardados, erros, idDoQuarto };
+  };
+  const normal = await rodar('normal');
+  const cota = await rodar('cota');
+  const ilegivel = await rodar('ilegivel');
+  checa(normal.ok.every(Boolean), 'fila-gravou/CONTROLE: as 3 decisões do aparelho normal chegaram ao servidor de mentira (o instrumento não vê o envio)', JSON.stringify(normal.ok));
+  checa(normal.depois.read - normal.base.read === 2 && normal.depois.rejected - normal.base.rejected === 1,
+    'fila-gravou/CONTROLE: o aparelho NORMAL tem de somar ✓ ✕ ✓ no Histórico (2 lidos, 1 rejeitado)', JSON.stringify({ base: normal.base, depois: normal.depois }));
+  for (const [nome, r] of [['cota cheia', cota], ['ilegível', ilegivel]]) {
+    checa(r.ok.every(Boolean), `fila-gravou/${nome}: as 3 decisões não chegaram ao servidor de mentira`, JSON.stringify(r.ok));
+    checa(r.depois.read - r.base.read === 2 && r.depois.rejected - r.base.rejected === 1,
+      `fila-gravou/${nome}: o pouso lido como "outra aba" pulou o Histórico (esperado +2 lidos e +1 rejeitado)`, JSON.stringify({ base: r.base, depois: r.depois }));
+    checa(r.sem.rejeitados === r.placar3.j && r.sem.naFila === true,
+      `fila-gravou/${nome}: o ✕ sem sinal, sem fila onde guardar, tem de reverter o placar e devolver o pedido ao card — não "guardá-lo" calado`, JSON.stringify({ sem: r.sem, placar3: r.placar3 }));
+    checa(/erro|não foi possível|rejeitar/i.test(r.sem.aviso), `fila-gravou/${nome}: a decisão que não saiu nem ficou guardada tem de AVISAR`, JSON.stringify(r.sem.aviso));
+  }
+  checa(normal.sem.rejeitados === normal.placar3.j + 1 && normal.guardados === 1,
+    'fila-gravou/CONTROLE: o ✕ sem sinal do aparelho normal tem de FICAR na fila de saída (um item) com o placar mantido', JSON.stringify({ sem: normal.sem, guardados: normal.guardados, placar3: normal.placar3 }));
+  const erradosJS = [...normal.erros, ...cota.erros.filter((e) => !/quota/i.test(e)), ...ilegivel.erros];
+  checa(erradosJS.length === 0, 'fila-gravou: erro de JS', erradosJS[0]);
+}
+
+// ── A TROCA DE CONTA COM O APARELHO ILEGÍVEL NÃO HERDA O QUE ESCREVE NO WAZE (R22-1-A3, lote 26) ─
+//
+// Com o `localStorage` lançando, a conta guardada no aparelho vem nula por NÃO DAR PRA LER, e a troca caía no
+// ramo "só memória", desenhado para "outra aba já limpou o aparelho": ele não zera o placar nem as escolhas que
+// ESCREVEM no Waze (o ↑ que guarda o pedido, o Desfazer desligado). A conta 88 herdava tudo da 77. CONTROLE: o
+// mesmo percurso com o aparelho que LÊ — a troca de sempre zera.
+{
+  const FILA_A3 = [{ ...CARDS.FLAG, venueID: 'vA3', updateRequestID: 'uA3', imageUrls: [] }];
+  const rodar = async (ilegivel) => {
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    await presencaViva(ctx);
+    let quem = 77;
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let resp = { success: true };
+      if (nome === 'testar-cookies') resp = { success: true, sessionToken: 'token-do-smoke-troca-' + quem, conta: quem };
+      else if (nome === 'perfil') resp = { success: true, profile: { id: quem, userName: 'editor' + quem, rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
+      else if (nome === 'buscar-places') resp = { success: true, places: FILA_A3, hasMore: false, page: 1, total: 1, totalAll: 1, blocked: 0 };
+      else if (nome === 'lista-paises') resp = { success: true, countries: [] };
+      else if (nome === 'lista-estados') resp = { success: true, states: [] };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    await ctx.addInitScript((bloquear) => {
+      if (bloquear) Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
+      else { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* bloqueado */ } }
+    }, ilegivel);
+    const erros = [];
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
+    const COOKIES = (n) => `# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-${n}\n`;
+    page.evaluate((c) => authenticateWithCookies(c), COOKIES(77)).catch(() => {});
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 77, 'o login da 77');
+    await page.evaluate(() => {
+      AppState.stats = { read: 3, rejected: 0, skipped: 0 };
+      AppState.preferences.pularGuarda = true;
+      AppState.preferences.undoEnabled = false;
+    });
+    // A sessão cai e OUTRA conta entra na mesma aba.
+    await page.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
+    quem = 88;
+    page.evaluate((c) => authenticateWithCookies(c), COOKIES(88)).catch(() => {});
+    await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 88, 'o login da 88');
+    const r = await page.evaluate(() => ({ stats: { ...AppState.stats }, pularGuarda: AppState.preferences.pularGuarda === true, undoEnabled: AppState.preferences.undoEnabled !== false }));
+    await ctx.close();
+    return { ...r, erros };
+  };
+  const legivel = await rodar(false);
+  const ilegivel = await rodar(true);
+  checa(legivel.stats.read === 0 && legivel.pularGuarda === false && legivel.undoEnabled === true,
+    'troca-ilegivel/CONTROLE: com o aparelho que LÊ, a conta que entra começa com o placar zerado, o ↑ sem guardar e o Desfazer ligado', JSON.stringify(legivel));
+  checa(ilegivel.stats.read === 0 && ilegivel.pularGuarda === false && ilegivel.undoEnabled === true,
+    'troca-ilegivel/herança: com o aparelho ILEGÍVEL a conta que entra herdou o placar e as escolhas (↑ que guarda o pedido, Desfazer desligado) da anterior', JSON.stringify(ilegivel));
+  checa(legivel.erros.length === 0 && ilegivel.erros.length === 0, 'troca-ilegivel: erro de JS', legivel.erros[0] || ilegivel.erros[0]);
+}
+
 // ── CONTAGEM GUARDADA QUE NÃO É NÚMERO (R21-1-04 e R21-2-06, lote 25) ───────
 //
 // O lote 24 pôs o `numero()` no `read`/`rejected`/`_total` do `recordHistory`; o placar guardado, o que o
@@ -17813,5 +18072,6 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o FAB de baixo × a pilha de avisos (360×740 a 1× e 1,5×: 1 toast, 1 de 2 linhas, 2 e 3 toasts nunca recebem o toque do FAB — a reserva é a altura MEDIDA da pilha —, com o CONTROLE da reserva fixa de antes cobrindo o FAB) e a barra ✕ ↑ ✓ fora da janela (o Fold a 2× alerta barraDeAcoesForaDaTela e cala com um gesto no card; 4 aparelhos sãos não alertam), com a escala do texto no computado mesmo escrita só na CSSOM`
   + `, + o armazenamento ILEGÍVEL não sendo o "Sair" de outra aba (lote 25: o localStorage lançando SecurityError — o pageshow persistido NÃO encerra a sessão viva, não manda sessao:destroy e não devolve à fábrica a preferência desta sessão, e a volta do fundo da presença PEDE a lista —, com a pré-condição de que a página bloqueada lança e o CONTROLE do armazenamento normal)`
   + `, + o link do "Copiar link" colado no campo do código (lote 25: o ouvinte de paste do campo resgata o segredo de 20 símbolos e o campo não vira "PLA-CES"; o código colado junto do host entra no formato da tela sem resgatar sozinho; o texto que não é nenhum dos dois segue o colar do navegador)`
+  + `, + o texto que entra no campo do código SEM colar (lote 26: o insertText do link resgata com o segredo e o campo não vira "HTT-PSP", a rede do input quando o beforeinput não se cancela, a frase com o código entrando no formato da tela, com os CONTROLES de digitar, do colar de verdade e do link já usado), + a fila de saída que NÃO gravou (aparelho ilegível e cota cheia: o ✓ ✕ ✓ entra no Histórico e o ✕ sem sinal reverte e avisa, com o CONTROLE do aparelho normal guardando na fila), + a troca de conta com o aparelho ilegível sem herdar o placar nem o ↑ que guarda o pedido nem o Desfazer desligado (com o CONTROLE do aparelho que lê)`
   + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`
   + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem e só com o cartão rolando; a 1× nada muda, e o diálogo que empilha mas cabe também não) — cada medida com o seu CONTROLE`);

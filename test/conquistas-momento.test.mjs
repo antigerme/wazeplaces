@@ -36,7 +36,7 @@ function fatiar(nome) {
 // `preludio` declara o estado de MÓDULO que as funções leem (os `let` do app).
 function montar(nomes, deps, devolve, preludio = '') {
   const chaves = Object.keys(deps);
-  return new Function(...chaves, preludio + '\n' + nomes.map(fatiar).join('\n') + `\nreturn { ${devolve.join(', ')} };`)(...chaves.map((k) => deps[k]));
+  return new Function(...chaves, preludio + '\n' + ['contagemDoHistorico', ...nomes].map(fatiar).join('\n') + `\nreturn { ${devolve.join(', ')} };`)(...chaves.map((k) => deps[k]));
 }
 
 // ── H2: trocar de idioma não é trabalhar em dois idiomas ────────────────────
@@ -400,7 +400,7 @@ function montarLightboxComJanela() {
   const nomes = ['aprovarFotoAtual', 'pedirExclusaoDaFoto', 'confirmarRenomear', 'nomeParaGravar', 'atenderOFimDaJanela'];
   const chaves = Object.keys(deps);
   // As pendentes são `let` de MÓDULO no app: aqui, um objeto no escopo.
-  const corpo = nomes.map(fatiar).join('\n')
+  const corpo = ['contagemDoHistorico', ...nomes].map(fatiar).join('\n')
     .replace(/aprovacaoPendente/g, '__pend.a').replace(/exclusaoPendente/g, '__pend.e')
     .replace(/renomeacaoPendente/g, '__pend.r');
   const app = new Function(...chaves, '__pend', corpo + `\nreturn { ${nomes.join(', ')} };`)(
@@ -551,7 +551,7 @@ function montarAparelhoNovo(historico = null) {
   const chaves = Object.keys(deps);
   const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), ...['copiaEmDia', 'lembrarTextoDaCopia', 'patenteDe', 'avaliarConquistas', 'carregarConquistas',
     'salvarConquistas', 'checarConquistas', 'garantirLinhaDeBaseDasConquistas', 'loadHistory', 'salvarHistorico', 'recordHistory',
-    'diasEntreChaves', 'chaveMaisDias', 'getHistoryStats', 'geografiaDoHistorico', 'maiorSequenciaDeDias'].map(fatiar)]
+    'contagemDoHistorico', 'diasEntreChaves', 'chaveMaisDias', 'getHistoryStats', 'geografiaDoHistorico', 'maiorSequenciaDeDias'].map(fatiar)]
     .join('\n') + '\nreturn { recordHistory, checarConquistas, AppState };';
   const api = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
   return { ...api, g: () => deps.AppState.conquistas, selo };

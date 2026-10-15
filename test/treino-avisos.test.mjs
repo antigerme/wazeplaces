@@ -126,7 +126,7 @@ function montarPouso({ treino = false, confirmados = 9, vistas = {} } = {}) {
   };
   const app = rodar(deps, [declaracao('UNDO_GATE_BASE'), declaracao('CONSEQUENCIA_AVISADA'),
     ...['handleActionResult', 'avisarConsequencia', 'registrarAcaoConfirmada', 'checkUndoGateUnlock',
-      'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'pedidosConfirmados'].map(fatiar)],
+      'getUndoTreatedCount', 'getUndoUnlockThreshold', 'pedidosNaJanelaDoDesfazer', 'contagemDoHistorico', 'pedidosConfirmados'].map(fatiar)],
   ['handleActionResult']);
   let n = 0;
   // A decisão: o placar anda no GESTO, e a resposta do Waze pousa.

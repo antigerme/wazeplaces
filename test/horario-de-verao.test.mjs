@@ -28,7 +28,7 @@ test('controle do instrumento: o fuso do teste é mesmo o de Paris, e o 25/10/20
 });
 
 test('a maior sequência atravessando o fim do horário de verão conta os dias de CALENDÁRIO', () => {
-  const M = new Function(fatiar('chaveMaisDias') + '\n' + fatiar('maiorSequenciaDeDias') + '\nreturn maiorSequenciaDeDias;')();
+  const M = new Function(fatiar('contagemDoHistorico') + '\n' + fatiar('chaveMaisDias') + '\n' + fatiar('maiorSequenciaDeDias') + '\nreturn maiorSequenciaDeDias;')();
   assert.equal(M(dias('2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27')), 6);
   // E a do início do horário de verão (29/03/2026, 23 h).
   assert.equal(M(dias('2026-03-27', '2026-03-28', '2026-03-29', '2026-03-30')), 4);
