@@ -16,28 +16,26 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-15 ~08:40 UTC)
+## 0. Estado agora (2026-10-15 ~14:20 UTC)
 
-- **Lote 25 em produção** (PR #272, 545b629, v2026.10.15-01): os 13 arquivos que o app carrega iguais, byte a byte, aos
-  mesclados, e o `prod-auditoria.mjs` inteiro com as duas contas deu 177 ✓ · 12 ✗ — os 12 eram do INSTRUMENTO (10
-  comparações de bytes contra o checkout PADRÃO antigo por falta de `REPO=`, o filtro de CSP da seção nova e a pré-condição
-  da aba dos Filtros); corrigidos, a seção 28 isolada deu 27 ✓ (as 2 restantes exigem histórico do mês, que a seção
-  isolada não tem e a completa tem). Nenhum defeito do app. Os dois cabeçalhos de borda que diferem do `_headers` são
-  decisão do dono, como antes. O CI do PR achou 1 controle do smoke (o foco da célula comparava a tinta byte a byte; o
-  runner repinta 32 pixels onde a máquina do agente repintava 0) e 4 asserções da junção do lote (a linha do Histórico
-  ganhou a frase `sr-only`): todos instrumento.
-- **Rodada 22** (`scratchpad/r22-<n>/relatorio.md`, consolidação em `scratchpad/r22-consolidado.md`): oito auditores,
-  nenhum achado alto. Os mais sérios: a fila de saída que não grava (aparelho ilegível ou cota cheia) fazendo toda
-  decisão confirmada ser lida como "pousou por outra aba" — placar certo, Histórico em 0 (R22-1 A2); a fileira presa
-  dos diálogos cobrindo o campo focado (R22-7-01 = R22-8-02, regressão do lote 25); o link do pareamento que só entrava
-  pelo `paste` (R22-1 A1 = R22-8-01); a troca de conta com o aparelho ilegível herdando as escolhas da anterior (A3); a
-  seção 9p do smoke do offline oscilando por duas janelas de tempo (R22-4-01). O resto: o zoom de 400–500% dos Filtros, o
-  recorte do texto grande, leitores do Histórico com texto, o FAB segurado, o diário do tempo real, documentos e a
-  ferramenta `waze-probe`.
-- **Lote 26 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC` reiniciada da main
-  545b629, v2026.10.15-02): três agentes (contas/Histórico, diag/FAB/documentos/instrumentos, telas). Conflitos só em
-  `js/min/app.js` (regerado). `npm test` 3607/3607, também com o relógio grosso. A fileira presa também lado a lado (R22-8-03)
-  ficou FORA: muda 6 de 240 telas a 1× sem defeito; o commit está pronto em `fix26-telas` (6e795e9).
+- **Lote 26 em produção** (PR #273, 94266c1, v2026.10.15-02): os 13 arquivos que o app carrega iguais, byte a byte, aos
+  mesclados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **189 ✓ · 0 ✗**. Os dois cabeçalhos de borda que
+  diferem do `_headers` (`x-frame-options`, `referrer-policy`) são decisão do dono, como antes. O CI achou 1 controle do
+  smoke (a tinta do foco da célula comparada byte a byte) e 1 bloco do Histórico no WebKit que não reproduzia: os dois
+  instrumento, endurecidos.
+- **Rodada 23** (`scratchpad/r23-<n>/relatorio.md`, consolidação em `scratchpad/r23-consolidado.md`): oito auditores,
+  nenhum achado grave e o lote 26 conferido em todas as áreas. Os mais sérios: a REMOÇÃO da fila de saída que o aparelho
+  recusa gravar relia e reenviava o item sem teto (89 envios para 3 pedidos em 30 s) e, com itens de outra conta, congelava a aba
+  (R23-1-01 = R23-2 F1/F2 = R23-8-02); a troca de conta no aparelho que lê e não grava herdando as escolhas (F3); os Filtros sem
+  «Aplicar»/«Cancelar» em janelas de zoom largas e baixas (R23-7-01 = R23-8-03, média); o service worker sem teto nas esperas da
+  Cache API (R23-4-02); os tiles do offline só para a largura do card de agora (R23-4-01); e o contraste alto sem forma nos
+  marcadores do mapa e nas bolhas. O resto: a hora do Waze sem o desvio do relógio, o anúncio repetido, o plural do zero em
+  francês, os NBSP crus, o `waze-probe` e os documentos.
+- **Lote 27 juntado** no `/home/user/wp-lote7` (branch `claude/peaceful-heisenberg-HaUuC` reiniciada da main 94266c1,
+  v2026.10.15-03): quatro agentes (fila/contas, telas, presença/i18n/documentos, offline/service worker). Conflitos só em
+  `js/min/app.js` (regerado). `npm test` 3667/3667. Ficaram FORA, com o dono: soltar a fileira presa com o campo focado
+  (R23-7-02), a altura do textarea de cookies (R23-8-05), a barra ✕ ↑ ✓ em zoom de 300–500%, a fonte de 16 px no campo da conversa
+  (R23-5-01) e o autocorrect do campo do nome.
 - **Decisões pro dono**: `scratchpad/mockups/decisoes-em-aberto.html` (seção "Decisões pequenas do lote 26", com as
   capturas). Abertas, além das de sempre: a fileira presa lado a lado (6 telas a 1×), o `.pedido-foto` com o corte em px
   (R22-5 A1), o plural do francês com zero também no leitor de tela do Histórico (R22-6-06), o piso de 60 s do tempo real
@@ -45,7 +43,7 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
   dos Filtros, e o `venue.categories`/`createdBy` do Waze fora de forma (R22-6-07, já decidido "não" na R21-6-07).
 - **Cookies** (2026-10-14): `3537c350-antigerme_cookies.txt` (L6+AM) e `287d89e6-cafanha_cookies.txt` (L2+AM).
 - **Próxima volta**: smokes, PR, CI, merge, produção (`prod-bytes.mjs` com `REPO=` e o `prod-auditoria.mjs` inteiro) — e a
-  rodada 23.
+  rodada 24.
 
 ---
 
@@ -103,7 +101,8 @@ retomou sozinha, com os agentes continuados por `SendMessage`.
 | #270 | 2026101403 | rodada 19: o Enter/seta segurado, a geração do "Sair", o QR de pareamento na aba, a recusa automática entre abas, o texto grande no card (`card-aperta`), o hebraico/árabe (`dir="auto"`), a conexão do IndexedDB, o "lida" com a lista chegando | **169 ✓ · 2 ✗** no app em produção (os 2 ✗ do roteiro: corrida do Waze na restauração do lido), com a seção 26; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #271 | 2026101404 | rodada 20: a recusa automática sob a trava entre abas, o Enter segurado em qualquer botão, as marcas das escritas de foto por geração do "Sair", o ✓ e a ⭐ por conta, o histórico guardado estragado, o `parear` estrito, os filtros salvos, o texto do sistema maior nos diálogos, nas abas, no placar e na pílula da foto, o "lida" e o "Sair" em outra aba | **175 ✓ · 0 ✗** no app em produção, com a seção 27; os 13 arquivos byte a byte iguais ao merge; nenhum defeito do app |
 | #272 | 2026101501 | rodada 21: o card parado com "Reduzir movimento", a fila e o teclado (z em outros alfabetos), o aparelho ilegível, o link do pareamento, a recusa na trava com teto, a foto ampliada e as escritas, a conversa em janela baixa, o Resumo e o Histórico, o texto grande e o contraste alto, o offline e o diagnóstico sem espera sem teto | **177 ✓ · 12 ✗** (os 12 de instrumento, corrigidos) | 13 arquivos iguais |
-| #273 | 2026101502 | rodada 22: a fila de saída que não grava, a troca de conta com o aparelho ilegível, o campo do código sem `paste`, os leitores do Histórico, o foco sob a fileira presa, o zoom dos Filtros, o FAB segurado, o diário do tempo real, a seção 9p, o `waze-probe` e os documentos | (a conferir em produção) | — |
+| #273 | 2026101502 | rodada 22: a fila de saída que não grava, a troca de conta com o aparelho ilegível, o campo do código sem `paste`, os leitores do Histórico, o foco sob a fileira presa, o zoom dos Filtros, o FAB segurado, o diário do tempo real, a seção 9p, o `waze-probe` e os documentos | **189 ✓ · 0 ✗** (duas contas, `REPO=` e `VERSAO=`) | 13 arquivos iguais |
+| #274 | 2026101503 | rodada 23: a fila de saída que não grava (remoção lembrada em memória, sem laço nem congelamento), a troca de conta no aparelho que lê e não grava, o zoom dos Filtros em px, o QR e o fieldset, o contraste alto (marcadores, bolhas, fundo da foto), o service worker com teto em toda espera da Cache API, as larguras do mapa offline, a hora do Waze na conversa, o NBSP escapado, o `waze-probe` normalizado | (a conferir em produção) | — |
 
 Achado da produção que virou regra: o Cloudflare injeta no HTML, a cada
 resposta, o script do Bot Fight Mode com token e hora próprios — o `/` difere

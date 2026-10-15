@@ -110,11 +110,13 @@ test('Cache API muda: a ATIVAÇÃO termina (faxina com teto, claim sem esperar a
 });
 
 test('ativação: a faxina continua apagando os caches antigos e poupa o dos tiles', async () => {
+  // o cache da versão em curso vem do próprio worker: cravar o serial aqui quebrava a cada bump
+  const CACHE_ATUAL = /const CACHE_NAME = '([^']+)'/.exec(SW)[1];
   const apagados = [];
   const ouvintes = {};
   const ctx = {
     self: { addEventListener: (t, fn) => { ouvintes[t] = fn; }, location: { origin: ORIGEM }, skipWaiting() {}, clients: { claim: async () => {} } },
-    caches: { has: async () => false, keys: async () => ['waze-places-2026010101', 'waze-places-tiles', 'waze-places-2026101502', 'outro'],
+    caches: { has: async () => false, keys: async () => ['waze-places-2026010101', 'waze-places-tiles', CACHE_ATUAL, 'outro'],
       delete: async (n) => { apagados.push(n); return true; } },
     fetch: async () => ({}), URL, console, Promise, Date, Set, Map, setTimeout, clearTimeout,
   };
