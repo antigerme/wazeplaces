@@ -19,6 +19,9 @@ import {
   lerEnvio, lerConversas, lerMensagens, lerNaoLidas, lerPerfis, lerMarcarLida, lerProvedor,
 } from './wme-grpc.mjs';
 import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-app.mjs';
+import {
+  KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_ESPERA_WAZE_MS, varrerMantidos,
+} from './manter-conectado.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
@@ -908,18 +911,38 @@ export function makeSessions({ store, keyBytes }) {
     const sep = String(raw).indexOf('|');
     return { sep, carimbo: sep > 0 ? parseInt(String(raw).slice(0, sep), 10) : NaN };
   };
+  // A chave da entrada do «Manter conectado»: derivada SÓ do Secret (o salt é
+  // constante), porque a varredura precisa abrir a entrada sem o token — o token
+  // é justamente o que ela guarda. `v1` é a versão do formato.
+  const MANTER_SALT = 'manter-conectado:v1';
+  const abrirKa = async (blob) => {
+    const texto = await decryptCookies(blob, await derivarChave(keyBytes, MANTER_SALT));
+    if (!texto) return null;
+    try {
+      const d = JSON.parse(texto);
+      return d && typeof d === 'object' ? d : null;
+    } catch { return null; }
+  };
   return {
     // Exposto pra quem precisa de cache curto próprio (a releitura do local
     // antes de excluir foto). Quem usar isto escolhe prefixo próprio na chave.
     store,
-    async createSession(cookiesContent) {
+    // `renovarJa`: a sessão nasce COM O CARIMBO DE UMA HORA ATRÁS, para o
+    // `refreshCookies` gravar o cookie rotacionado já na PRIMEIRA resposta. É o
+    // caso do resgate do pareamento: a cópia que o `claim` recebe é do
+    // aparelho de origem, pode ter horas de idade, e esperar 1 h pelo primeiro
+    // cookie novo deixava a sessão nova com o valor velho no primeiro dia. O
+    // limite é EXATO (`agora - SESSION_COOKIE_REFRESH`, e a trava do
+    // `refreshCookies` é `<` estrito): sem margem a mais nem a menos.
+    async createSession(cookiesContent, { renovarJa = false } = {}) {
       const token = randomToken();
       const hash = await sha256hex(token);
       const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, token));
       // Já nasce com carimbo: sem ele a PRIMEIRA leitura de toda sessão nova
       // dispararia uma renovação imediata — uma escrita a mais no KV por login,
       // à toa.
-      await store.put(hash, Math.floor(Date.now() / 1000) + '|' + blob, SESSION_TTL);
+      const agora = Math.floor(Date.now() / 1000);
+      await store.put(hash, (renovarJa === true ? agora - SESSION_COOKIE_REFRESH : agora) + '|' + blob, SESSION_TTL);
       return token;
     },
     // Lê e abre a sessão, e NÃO grava nada. O prazo é renovado pela própria
@@ -1045,8 +1068,82 @@ export function makeSessions({ store, keyBytes }) {
       if (typeof token !== 'string' || !token) return;
       const hash = await sha256hex(token);
       carimboLido.delete(hash);
+      // A entrada do «Manter conectado» sai JUNTO, com ou sem a sessão (a sessão
+      // pode ter vencido antes do «Sair»): deixá-la guardaria o token cifrado só
+      // com o Secret de quem pediu pra sair. Também lê antes de apagar.
+      const kaChave = KA_PREFIXO + hash;
+      if ((await store.get(kaChave)) != null) await store.delete(kaChave);
       if ((await store.get(hash)) == null) return;
       await store.delete(hash);
+    },
+
+    // ── «Manter conectado» (ver server/manter-conectado.mjs) ─────────────────
+    // A entrada `ka_<hash>` guarda o TOKEN cifrado com uma chave derivada SÓ do
+    // `ENCRYPTION_KEY` — a exceção, escolhida pela pessoa, à regra de que o
+    // Secret sozinho não abre nada. Formato `carimbo|blob` como a sessão; o
+    // carimbo é a hora em que a pessoa (re)ligou, e é ele que vence em 14 dias.
+    async manterEstado(token) {
+      if (typeof token !== 'string' || !token) return false;
+      const raw = await store.get(KA_PREFIXO + await sha256hex(token));
+      if (raw == null) return false;
+      const { carimbo } = carimboDoValor(raw);
+      // Vencida pelo carimbo (o arquivo da VM não vence pelo TTL do `put`).
+      return !(Number.isFinite(carimbo) && Math.floor(Date.now() / 1000) - carimbo > KA_TTL);
+    },
+    // Liga (ou reafirma). Só REGRAVA se a entrada falta, tem mais de um dia ou
+    // aponta pra outra região: a escrita do KV é escassa, e o app reafirma a cada
+    // abertura. Devolve se está ligada. O chamador já provou que a sessão é válida.
+    async manterLigar(token, region) {
+      if (typeof token !== 'string' || !token) return false;
+      const regiao = Object.hasOwn(WAZE_REGIONS, region) ? region : 'row';
+      const hash = await sha256hex(token);
+      const chave = KA_PREFIXO + hash;
+      const agora = Math.floor(Date.now() / 1000);
+      const raw = await store.get(chave);
+      if (raw != null) {
+        const { sep, carimbo } = carimboDoValor(raw);
+        if (Number.isFinite(carimbo) && agora - carimbo < KA_REGRAVA_APOS && agora - carimbo >= 0) {
+          const dados = await abrirKa(raw.slice(sep + 1));
+          if (dados && dados.token === token && dados.region === regiao) return true;
+        }
+      }
+      const blob = await encryptCookies(JSON.stringify({ token, region: regiao }), await derivarChave(keyBytes, MANTER_SALT));
+      await store.put(chave, agora + '|' + blob, KA_TTL);
+      return true;
+    },
+    // Lê antes de apagar (a cota de apagamento do KV é a curta). Devolve `false`.
+    async manterDesligar(token) {
+      if (typeof token !== 'string' || !token) return false;
+      const chave = KA_PREFIXO + await sha256hex(token);
+      if ((await store.get(chave)) != null) await store.delete(chave);
+      return false;
+    },
+    // Um passo da varredura, numa só leitura da sessão. A chave da sessão é o
+    // mesmo hash da entrada, então "está devida?" se responde pelo CARIMBO da
+    // sessão, sem decifrar nada; a entrada só é lida (e o token só aberto) para
+    // quem está devida. Estados: `semSessao` · `emDia` · `semEntrada` · `vencida`
+    // · `estragada` · `devida` (com `token`, `region`, `cookies`).
+    async manterExaminar(chaveKa, { agora, devidoApos }) {
+      const chave = String(chaveKa);
+      if (!chave.startsWith(KA_PREFIXO)) return { estado: 'estragada' };
+      const hash = chave.slice(KA_PREFIXO.length);
+      const rawSessao = await store.get(hash);
+      if (rawSessao == null) return { estado: 'semSessao' };
+      const { sep, carimbo } = carimboDoValor(rawSessao);
+      if (!Number.isFinite(carimbo)) return { estado: 'semSessao' };
+      if (agora - carimbo < devidoApos) return { estado: 'emDia' };
+
+      const rawKa = await store.get(chave);
+      if (rawKa == null) return { estado: 'semEntrada' };
+      const ka = carimboDoValor(rawKa);
+      if (!Number.isFinite(ka.carimbo)) return { estado: 'estragada' };
+      if (agora - ka.carimbo > KA_TTL) return { estado: 'vencida' };
+      const dados = await abrirKa(rawKa.slice(ka.sep + 1));
+      if (!dados || typeof dados.token !== 'string' || await sha256hex(dados.token) !== hash) return { estado: 'estragada' };
+      const cookies = await decryptCookies(rawSessao.slice(sep + 1), await derivarChave(keyBytes, dados.token));
+      if (!cookies) return { estado: 'estragada' };
+      lembrarCarimbo(hash, carimbo);
+      return { estado: 'devida', token: dados.token, region: Object.hasOwn(WAZE_REGIONS, dados.region) ? dados.region : 'row', cookies };
     },
 
     // Reescreve a sessão com os cookies que o Waze rotacionou.
@@ -1638,6 +1735,21 @@ async function handleSessao(data, { sessions }) {
     await sessions.destroySession(data && data.sessionToken);
     return { status: 200, body: { success: true } };
   }
+  // O interruptor «Manter conectado» das Preferências: liga/desliga NA HORA, sem
+  // esperar a próxima abertura do app (que o religaria pelo `perfil`). Sessão
+  // válida primeiro (401 como as outras rotas) — sem isso qualquer POST com
+  // token inventado gastaria escrita de KV —, e `on` é booleano ESTRITO: o
+  // texto "false" é verdadeiro pra quem coage, e ligar por engano guarda o
+  // token cifrado só com o Secret.
+  if (action === 'manter') {
+    await resolveCookies(data, sessions);
+    if (typeof data.on !== 'boolean') apiError('Pedido inválido', 400, 'srv.err.badRequest');
+    const region = requireRegion(data);
+    const manterConectado = data.on === true
+      ? await sessions.manterLigar(data.sessionToken, region)
+      : await sessions.manterDesligar(data.sessionToken);
+    return { status: 200, body: { success: true, manterConectado } };
+  }
   apiError('Ação inválida', 400, 'srv.err.badAction');
 }
 
@@ -1671,7 +1783,7 @@ async function handleParear(data, { sessions }) {
     // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
     // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
     if (!resgate) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
-    const token = await sessions.createSession(resgate.cookies);
+    const token = await sessions.createSession(resgate.cookies, { renovarJa: true });
     return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL, conta: resgate.conta } };
   }
 
@@ -1744,7 +1856,12 @@ async function handleTestarCookies(data, { sessions }) {
     };
   }
 
-  const token = await sessions.createSession(cookies);
+  // O `Session` que acabou de validar o login TROUXE um `_web_session` novo (o
+  // Waze rotaciona em toda resposta), e guardar o do arquivo jogava esse valor
+  // fora: a sessão nascia com a cópia que o editor exportou, possivelmente de
+  // horas atrás, e o relógio de ~24 h do Waze corria desde o export. Aplicar o
+  // da resposta é de graça (zero chamada nova ao Waze) e dá folga no 1º dia.
+  const token = await sessions.createSession(aplicarCookiesRotacionados(cookies, result.setCookie) || cookies);
   return {
     status: 200,
     body: {
@@ -3254,12 +3371,28 @@ async function handlePerfil(data, { sessions }) {
   const detalhes = rd.onlineEditorDetails || rd.user?.onlineEditorDetails;
   const visivelNoWme = typeof detalhes?.visible === 'boolean' ? detalhes.visible : null;
 
+  // «Manter conectado»: `manter === true` liga, `=== false` desliga, qualquer
+  // outra coisa (ausente, "true", 1) NÃO mexe — o app reafirma a cada abertura, e
+  // o texto "false" não pode ligar nem desligar nada. Só aqui, DEPOIS do 200 do
+  // Waze e do portão: sessão recusada já foi apagada (e a entrada junto). Nunca
+  // derruba o perfil: o app abre mesmo com o KV de mau humor. A resposta traz o
+  // estado REAL depois da mudança.
+  let manterConectado = false;
+  if (typeof sessions.manterEstado === 'function') {
+    try {
+      if (data.manter === true) manterConectado = await sessions.manterLigar(data.sessionToken, region);
+      else if (data.manter === false) manterConectado = await sessions.manterDesligar(data.sessionToken);
+      else manterConectado = await sessions.manterEstado(data.sessionToken);
+    } catch { manterConectado = false; }
+  }
+
   return {
     status: 200,
     body: {
       success: true,
       referencias,
       visivelNoWme,
+      manterConectado,
       profile: {
         id: rd.id ?? null,
         userName: rd.userName || '',
@@ -3972,6 +4105,35 @@ export const MAX_BODY_BYTES = 5_000_000;
 export const RESPOSTA_CORPO_GRANDE = Object.freeze({
   success: false, error: 'Corpo da requisição muito grande', errorKey: 'srv.err.bodyTooLarge',
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// «Manter conectado»: a varredura, ligada ao Waze e ao store (o cron do Worker e
+// o temporizador da VM chamam isto). A lógica é do módulo puro
+// `manter-conectado.mjs`; aqui fica o que é do core — o `callWaze`.
+// ─────────────────────────────────────────────────────────────────────────
+
+// UMA leitura barata ao Waze: o `Session` do `perfil`. Não lê o corpo como JSON
+// (só o status e o `Set-Cookie` importam, e CPU é a cota apertada do plano
+// grátis). O cookie novo é gravado pelo `refreshCookies`, via o contexto. 401/403
+// = sessão morta; qualquer outro erro é passageiro e fica pra próxima execução.
+async function renovarNoWaze({ token, region, cookies, sessions }) {
+  let auth;
+  try { auth = prepareAuth(cookies); } catch { return { resultado: 'morta' }; }
+  const r = await callWaze(wazeSessionEndpoint(region), auth.cookieHeader, auth.csrf, null, region,
+    { data: { sessionToken: token }, sessions, cookies }, { tetoMs: MANTER_ESPERA_WAZE_MS });
+  if (r.httpCode === 200) return { resultado: 'ok', rotacionou: aplicarCookiesRotacionados(cookies, r.setCookie) != null };
+  const cat = categorizeWazeError(r.httpCode, r.response, r.error);
+  return { resultado: cat.category === 'unauthorized' ? 'morta' : 'falhou' };
+}
+
+// `sessions`: a VM passa a instância do processo (a memória dos carimbos é dela);
+// o Worker deixa criar uma, como faz a cada requisição.
+export async function varrerMantidosDoStore({ store, keyBytes, sessions = null, ...opcoes }) {
+  return varrerMantidos({
+    store, sessions: sessions || makeSessions({ store, keyBytes }), chamarWaze: renovarNoWaze, ...opcoes,
+  });
+}
+export { varrerMantidos };
 
 const ROUTES = {
   sessao: handleSessao,

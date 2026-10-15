@@ -400,16 +400,18 @@ test('README: as leituras no KV são as que o servidor faz — 1 por ação, e a
   // E a exclusão, uma a mais quando a lista do toque já venceu (ela confere as
   // duas listas guardadas e a regravação): "N na exclusão (M quando a lista do
   // toque já venceu)" (R13-3-03).
-  const m = /Cada ação = (\d+) leitura, menos as da foto: a lixeira custa (\d+) leituras no toque(?: \((\d+) com a lista de fotos ainda valendo\))? e (\d+) na exclusão(?: \((\d+) quando a lista do toque já venceu\))?, e aprovar foto, (\d+)\./.exec(README);
+  const m = /Cada ação = (\d+) leitura(?: \(o perfil, (\d+)[^)]*\))?, menos as da foto: a lixeira custa (\d+) leituras no toque(?: \((\d+) com a lista de fotos ainda valendo\))? e (\d+) na exclusão(?: \((\d+) quando a lista do toque já venceu\))?, e aprovar foto, (\d+)\./.exec(README);
   assert.ok(m, 'CONTROLE: a conta das leituras no KV sumiu do README (ou mudou de forma)');
-  const [umaAcao, toque, toqueValendo, exclusao, exclusaoVencidaReadme, aprovar] = m.slice(1).map((x) => (x === undefined ? undefined : Number(x)));
+  const [umaAcao, doPerfil, toque, toqueValendo, exclusao, exclusaoVencidaReadme, aprovar] = m.slice(1).map((x) => (x === undefined ? undefined : Number(x)));
   const n = await leiturasNoKv();
   // CONTROLE: o instrumento separa os casos (senão "bate" por não medir nada):
   // as da foto leem mais que uma ação comum.
-  assert.ok(n.perfil >= 1 && n.toque > n.perfil && n.toqueDeNovo > n.perfil && n.exclusao > n.perfil && n.aprovarSemLixeira > n.perfil,
+  assert.ok(n.busca >= 1 && n.toque > n.busca && n.toqueDeNovo > n.busca && n.exclusao > n.busca && n.aprovarSemLixeira > n.busca,
     `CONTROLE: as leituras medidas não separam os casos: ${JSON.stringify(n)}`);
-  for (const acao of ['perfil', 'busca', 'rejeitar', 'lido', 'estrela', 'renomear'])
+  for (const acao of ['busca', 'rejeitar', 'lido', 'estrela', 'renomear'])
     assert.equal(n[acao], umaAcao, `${acao}: o servidor lê ${n[acao]} vez(es) no KV, e o README diz ${umaAcao} por ação`);
+  // O perfil confere também a entrada do «Manter conectado» (uma leitura a mais).
+  assert.equal(n.perfil, doPerfil === undefined ? umaAcao : doPerfil, `perfil: o servidor lê ${n.perfil} vez(es) no KV, e o README diz ${doPerfil === undefined ? umaAcao : doPerfil}`);
   assert.equal(n.toque, toque, `a lixeira (o toque que relê a lista do Waze): o servidor lê ${n.toque} vezes no KV, e o README diz ${toque} no toque`);
   const comALista = toqueValendo === undefined ? toque : toqueValendo;
   assert.equal(n.toqueDeNovo, comALista,
