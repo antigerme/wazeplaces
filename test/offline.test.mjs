@@ -360,8 +360,14 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   // Dentro de listener ele só roda no evento — que é o defeito.
   assert.match(SW_SEM, /^hidratarTiles\(\);$/m,
     'hidratarTiles() saiu do topo do service-worker.js — o worker recriado pelo Android acorda sem saber de tile nenhum');
-  assert.match(SW_SEM, /hidratarTiles\(\)[\s\S]{0,60}clients\.claim/,
-    'tem que hidratar no activate também');
+  // R23-4-02: o `activate` RELÊ a lista sem esperá-la (o claim não depende dela, e o
+  // fetch espera, com teto, quando precisa) — esperá-la prendia a ativação a uma
+  // Cache API muda. Ver o teste de comportamento em sw-teto.
+  const ativ = SW_SEM.slice(SW_SEM.indexOf("addEventListener('activate'"), SW_SEM.indexOf("addEventListener('message'"));
+  assert.match(ativ, /hidratarTiles\(\);\s*return self\.clients\.claim\(\)/,
+    'o activate parou de RELER a lista (o aviso da varredura vai ao controlador antigo) ou o claim passou a esperar por ela');
+  assert.doesNotMatch(ativ, /hidratarTiles\(\)\s*\)\s*\.then|await hidratarTiles|return hidratarTiles/,
+    'o activate voltou a esperar a hidratação da lista: a ativação fica presa à Cache API');
   assert.match(SW_SEM, /TILES_GUARDADOS[\s\S]{0,140}hidratarTiles\(\)/,
     'e re-hidratar quando o app avisa, senão só saberia na próxima partida');
   // A janela logo depois de acordar: a lista ainda está sendo lida e o
@@ -370,7 +376,7 @@ test('a lista de tiles guardados é lida em TODA partida do worker, não só no 
   assert.match(SW_SEM, /if \(tilesHidratados\)/,
     'sumiu a distinção entre lista pronta e lista ainda sendo lida');
   // E espera a leitura MAIS NOVA, não a capturada no pedido (O11, 2026-09-26).
-  assert.match(SW_SEM, /respondWith\(esperarListaMaisNova\(\)\.then\(/,
+  assert.match(SW_SEM, /respondWith\(esperarListaComTeto\(\)\.then\(/,
     'na janela logo depois de acordar, o tile tem de ESPERAR a leitura da lista');
   assert.match(APP_SEM, /postMessage\(\{ type: 'TILES_GUARDADOS' \}\)/,
     'o app precisa avisar o SW depois de guardar');
@@ -822,7 +828,8 @@ test('o service worker responde ao DIAG e a releitura da lista SEGURA os tiles',
     'o worker parou de contar o que serviu do cache');
   // A releitura (aviso da varredura) também tem que SEGURAR o tile, senão o
   // tile guardado agora e pedido logo em seguida cai na lista velha.
-  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('hidratacao = (async'));
+  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('const leitura = (async'));
+  assert.ok(hid.length > 20 && hid.length < 400, `o recorte de hidratarTiles saiu de lugar (${hid.length} caracteres): a âncora \`const leitura = (async\` mudou e o guard leria o arquivo todo`);
   assert.match(hid, /tilesHidratados = false;/,
     'a releitura da lista deixou de segurar os tiles — o recém-guardado vai pra rede');
 });
@@ -871,6 +878,6 @@ test('SW: tudo que a página carrega está nos CRÍTICOS, e eles são atômicos'
 test('SW: a navegação sem rede cai na página guardada mesmo com query (atalho do manifest)', () => {
   const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
   assert.match(sw, /caches\.match\(event\.request, isHTML \? \{ ignoreSearch: true \} : undefined\)/);
-  assert.match(sw, /if \(isHTML\) return caches\.match\('\/'\)/);
+  assert.match(sw, /if \(isHTML\) return comTeto\(caches\.match\('\/'\), undefined\)/);
   assert.doesNotMatch(sw, /caches\.match\('\/index\.html'\)/);
 });
