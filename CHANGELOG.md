@@ -77,6 +77,7 @@ Cada conserto tem um teste que reprova quando ele é desfeito.
 
 ### Documentação
 - **As árvores de arquivos do README e do CLAUDE.md, e a lista de caminhos da API do Waze que o app usa, voltaram a ser as do repositório.** Faltavam as ferramentas de diagnóstico e de geração dos arquivos, o ícone recortável e a pasta do CI (e, no README, a extensão, as pastas de ferramentas e de testes); o app usa 7 caminhos da API do Waze, e não 6. Um teste novo reprova quando elas divergem.
+- **O código-fonte não guarda mais caracteres invisíveis escritos crus** (marcas de direção do hebraico e do árabe, espaço de largura zero, hífen suave): 12 linhas do código e dos testes passaram a usar o escape visível, e um teste novo reprova quando um deles volta. Não muda nada na tela.
 
 ### Correções ao que a versão anterior dizia
 - A pílula da foto ampliada ("2 / 3 · nome · há 2 meses") encolhe um pouco **antes** quando o nome é curto ou o autor tem uma letra só (22–32 px mais estreita em 50 de 160 combinações medidas a 1×), em vez de "não mudar nada a 1×"; nenhum ✕ ficou coberto, a 1× ou com o texto aumentado.

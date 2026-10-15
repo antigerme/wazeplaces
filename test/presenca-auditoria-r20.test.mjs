@@ -493,7 +493,7 @@ function abrirPedido(deQuem) {
 
 test('R20-5-05/06 "de {nome}" no cabeçalho do pedido: o nome RTL vai isolado dentro da frase do app; o LTR sai idêntico', () => {
   const rtl = abrirPedido('דני_כהן');
-  assert.equal(rtl, 'presenca.pedido.de{"nome":"⁨דני_כהן⁩"}', 'o nome do Waze não foi isolado na frase do app');
+  assert.equal(rtl, 'presenca.pedido.de{"nome":"\u2068דני_כהן\u2069"}', 'o nome do Waze não foi isolado na frase do app');
   assert.equal(abrirPedido('cafanha'), 'presenca.pedido.de{"nome":"cafanha"}', 'LTR: a frase tem que sair idêntica byte a byte');
   assert.equal(abrirPedido(''), 'presenca.pedido.de{"nome":"presenca.anon"}', 'sem nome, a palavra do app (CONTROLE de que o teste lê o texto)');
 });
@@ -513,7 +513,7 @@ function previaDaLista(ultima) {
 
 test('R20-5-06 a prévia do pedido com nome RTL: o nome é isolado e o parágrafo fica na direção do app (sem `dir="auto"`)', () => {
   const r = previaDaLista({ deMim: false, ts: T, recibo: false, texto: '', card: { name: 'מסעדה הרצל (סניף 2)', updateTypeKey: 'IMAGE' } });
-  assert.match(r.texto, /^📍 ⁨מסעדה הרצל \(סניף 2\)⁩ · /, 'o nome RTL não foi isolado: a primeira letra forte decidia o parágrafo');
+  assert.match(r.texto, /^📍 \u2068מסעדה הרצל \(סניף 2\)\u2069 · /, 'o nome RTL não foi isolado: a primeira letra forte decidia o parágrafo');
   assert.doesNotMatch(r.attrs, /dir=/, 'o `dir="auto"` voltaria a seguir o nome e inverter a frase do app');
 });
 
@@ -538,7 +538,7 @@ test('R20-5-06 a prévia do pedido com nome LTR sai idêntica byte a byte (e sem
   const crua = c.P.presencaPrevia(ultima);
   const r = previaDaLista(ultima);
   assert.equal(r.texto, crua.replace(/'/g, "'"), 'LTR: a frase mudou');
-  assert.doesNotMatch(r.texto, /[⁦-⁩]/, 'LTR não pode levar marca de isolamento');
+  assert.doesNotMatch(r.texto, /[\u2066-\u2069]/, 'LTR não pode levar marca de isolamento');
   assert.equal(c.P.presencaPrevia(ultima, { isolar: true }), crua, 'LTR: a versão isolada tem que ser a crua');
 });
 
@@ -557,5 +557,5 @@ test('R20-5-06 o texto acessível (aria-label) segue sem marca de isolamento', (
   c.$('presencaModal').classList.remove('hidden');
   c.P.presencaRenderLista();
   const aria = c.$('presencaLista').innerHTML.match(/aria-label="([^"]*)"/)[1];
-  assert.doesNotMatch(aria, /[⁦-⁩]/, 'o leitor de tela leria a marca');
+  assert.doesNotMatch(aria, /[\u2066-\u2069]/, 'o leitor de tela leria a marca');
 });

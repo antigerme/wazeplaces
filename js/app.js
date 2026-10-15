@@ -20612,7 +20612,7 @@ function desenharResumo(ctx, d, tx, { qr = null, logo = null, hoje = null } = {}
 // direção do Unicode; o DOM e o canvas do Chromium a seguem): com `rtl` forçado o par sai partido
 // ("IL] 12 [ דני", MEDIDO no WebKit do Linux). Ali o nome só vai ISOLADO, na frase inteira — o
 // Chromium respeita o isolamento e acerta, o WebKit o ignora e sai como já saía, sem piorar.
-const LETRA_DA_ESQUERDA_PRA_DIREITA = /(?![֐-ࣿיִ-﷿ﹰ-﻿])\p{L}/u;
+const LETRA_DA_ESQUERDA_PRA_DIREITA = /(?![\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff])\p{L}/u;
 const MARCA_DO_NOME_NA_FRASE = '\u0000';
 function partesDoNomeNaFrase(nome) {
     if (direcaoDoTextoDoWaze(nome) !== 'rtl') return null;

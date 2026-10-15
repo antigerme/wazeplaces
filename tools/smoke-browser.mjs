@@ -10927,7 +10927,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         const partidas = (() => { const fora = [];
           const it = document.createTreeWalker(corpo, NodeFilter.SHOW_TEXT); let n;
           while ((n = it.nextNode())) { const t = n.nodeValue; if (!t || !t.trim()) continue;
-            const re = /[^\s­‐-―-]{4,}/g; let x;
+            const re = /[^\s\u00ad‐-―-]{4,}/g; let x;
             while ((x = re.exec(t))) { const rg = document.createRange();
               rg.setStart(n, x.index); rg.setEnd(n, x.index + x[0].length);
               if (new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size > 1) fora.push(x[0]); } }

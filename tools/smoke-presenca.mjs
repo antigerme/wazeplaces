@@ -2192,9 +2192,9 @@ try {
     return l2;
   });
   const [pHeb, pLat, pGente] = previas;
-  if (pHeb && pHeb.direction === 'ltr' && pHeb.texto.startsWith('📍 ⁨מסעדה')) ok('a prévia do pedido com nome em hebraico fica na direção do app, com o nome isolado');
+  if (pHeb && pHeb.direction === 'ltr' && pHeb.texto.startsWith('📍 \u2068מסעדה')) ok('a prévia do pedido com nome em hebraico fica na direção do app, com o nome isolado');
   else anota(`a prévia do pedido em hebraico: ${JSON.stringify(pHeb)}`);
-  if (pLat && pLat.direction === 'ltr' && !/[⁦-⁩]/.test(pLat.texto)) ok('controle: a prévia com nome latino sai sem marca de isolamento');
+  if (pLat && pLat.direction === 'ltr' && !/[\u2066-\u2069]/.test(pLat.texto)) ok('controle: a prévia com nome latino sai sem marca de isolamento');
   else anota(`controle: a prévia do pedido em latim: ${JSON.stringify(pLat)}`);
   if (pGente && pGente.direction === 'rtl') ok('controle: a mensagem de gente em hebraico segue da direita pra esquerda na mesma lista');
   else anota(`controle: a mensagem em hebraico na lista: ${JSON.stringify(pGente)}`);

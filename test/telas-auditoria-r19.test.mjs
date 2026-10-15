@@ -299,7 +299,7 @@ test('R19-8-02 · `isolarTextoDoWaze`: texto da esquerda pra direita sai idênti
   }
   for (const rtl of ['מסעדת השף – הנמל 12 (סניף 2)', 'مطعم الأصالة (فرع 2)', 'Café שלום', 'ܐܒܓ', 'ހަތް']) {
     const r = isolar(rtl);
-    assert.equal(r, '⁨' + rtl + '⁩', `o texto da direita pra esquerda não foi isolado: ${rtl}`);
+    assert.equal(r, '\u2068' + rtl + '\u2069', `o texto da direita pra esquerda não foi isolado: ${rtl}`);
   }
 });
 

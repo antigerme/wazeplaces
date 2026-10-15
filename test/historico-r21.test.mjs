@@ -171,7 +171,7 @@ test('R21-7-02 · o desenho: nome da esquerda pra direita é UMA chamada, sem `r
   // O nome do guard (mistura + colchete) vai numa chamada só, ISOLADO — e sem `rtl`.
   const g = desenhar(NOMES.hebraicoComTudo);
   assert.equal(g.linha.length, 1);
-  assert.equal(g.linha[0].s, '⁨דני [IL] 12⁩ limpou');
+  assert.equal(g.linha[0].s, '\u2068דני [IL] 12\u2069 limpou');
   assert.equal(g.linha[0].direction, 'inherit');
 });
 
@@ -190,8 +190,8 @@ test('R21-7-02 · o texto da imagem: LTR igual byte a byte; o da direita pra esq
   }
   for (const nome of [NOMES.hebraicoComNumero, NOMES.hebraico, NOMES.arabeComLatim, NOMES.hebraicoComTudo]) {
     const { tx, alt } = TEXTOS(MES, { userName: nome, rank: 5, isAreaManager: true }, 'pt-BR');
-    assert.equal(tx.limpou, `⁨${nome}⁩ limpou`, `"${nome}": o nome não foi isolado na frase`);
-    assert.ok(alt.includes(`⁨${nome}⁩ limpou 50 pedidos do mapa`), `"${nome}": o alt traz o nome sem isolar`);
+    assert.equal(tx.limpou, `\u2068${nome}\u2069 limpou`, `"${nome}": o nome não foi isolado na frase`);
+    assert.ok(alt.includes(`\u2068${nome}\u2069 limpou 50 pedidos do mapa`), `"${nome}": o alt traz o nome sem isolar`);
   }
   // Sem perfil (a abertura com sinal ruim): nenhuma das duas linhas, como antes.
   const sem = TEXTOS(MES, null, 'pt-BR').tx;
