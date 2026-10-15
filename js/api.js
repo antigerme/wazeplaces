@@ -653,7 +653,11 @@ const API = {
         // `undefined` antes de ler o aparelho) e como booleano ESTRITO.
         const manter = typeof manterConectadoParaOServidor === 'function' ? manterConectadoParaOServidor() : undefined;
         if (typeof manter === 'boolean') corpo.manter = manter;
-        return this._post('perfil', corpo);
+        const r = await this._post('perfil', corpo);
+        // O que ESTE pedido mandou, pra quem lê a resposta saber a que ela responde:
+        // se a pessoa trocou o interruptor depois, a resposta é velha.
+        if (typeof corpo.manter === 'boolean' && r && typeof r === 'object') r.manterEnviado = corpo.manter;
+        return r;
     },
 
     // O interruptor "Manter conectado", no GESTO: liga ou desliga a renovação

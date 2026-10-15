@@ -387,6 +387,8 @@ const AppState = {
     // "Manter conectado" (booleano; `null` = não se sabe). Só pro diagnóstico e
     // pro "volta ao estado real"; a preferência é a de cima.
     manterDoServidor: null,
+    // O que o `perfil` MANDOU na ida que trouxe esse estado (só a resposta ao que a pessoa tem hoje vale).
+    manterEnviado: null,
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -7534,7 +7536,10 @@ function definirPerfil(res) {
     // preferência (ela é da pessoa, e o `perfil` seguinte a repete); resposta sem
     // o campo (servidor sem o recurso) não apaga o que se sabia. O relatório
     // mostra os dois lado a lado e acusa a divergência.
-    if (typeof res.manterConectado === 'boolean') AppState.manterDoServidor = res.manterConectado;
+    if (typeof res.manterConectado === 'boolean') {
+        AppState.manterDoServidor = res.manterConectado;
+        AppState.manterEnviado = typeof res.manterEnviado === 'boolean' ? res.manterEnviado : null;
+    }
     guardarReferencias(res);
     guardarPerfilDoPortao(perfil);
     guardarPrazoDaSessao(res);
@@ -13409,6 +13414,7 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // O que o servidor disse do "Manter conectado" era da sessão que saiu (e a
     // `sessao destroy` apagou o keepalive lá); a resposta em voo não vale.
     AppState.manterDoServidor = null;
+    AppState.manterEnviado = null;
     // As categorias que a fila de quem saiu mostrou também: o seletor dos Filtros
     // de quem entrar na mesma página oferecia as da conta anterior (R16-6-04).
     AppState.seenCategories = [];
@@ -23514,6 +23520,7 @@ function esquecerEscolhasDaContaAnterior() {
     // privacidade (a mesma régua do "Ver quem está no app"). O que o servidor
     // disse, porém, era da sessão anterior.
     AppState.manterDoServidor = null;
+    AppState.manterEnviado = null;
     savePreferences();
     safeLS.remove(PERFIL_GATE_KEY);
     // O que MOSTRA as escolhas: o selo do ↑ do card na tela ("Pular ⭐" diria que
@@ -30254,6 +30261,8 @@ async function aoMudarManterConectado(ligar) {
     const epoca = epocaDaSessao;
     const vez = ++manterVez;
     AppState.preferences.manterConectado = ligar;
+    // A resposta de um `perfil` anterior a esta troca não vale mais.
+    AppState.manterEnviado = null;
     savePreferences();
     manterNoAr++;
     let r = null;
@@ -30280,6 +30289,24 @@ async function aoMudarManterConectado(ligar) {
     savePreferences();
     desenharChavesDePreferencia();
     showToast(t('toast.manterFalhou'), 'error');
+}
+
+// O interruptor NUNCA mostra um estado que o servidor não tem. O `perfil` manda a
+// preferência e o servidor responde o estado REAL dele; se divergem (ele não
+// conseguiu ligar, ou perdeu a chave), a chave mostra e grava o que o servidor
+// disse — a pessoa vê a verdade, e o `perfil` seguinte já repete o estado certo.
+// Só vale a resposta ao que a pessoa tem HOJE (`manterEnviado`): uma troca feita
+// depois do pedido, ou uma troca no ar, deixa a resposta velha de lado. Roda
+// quando as Preferências abrem (é lá que a chave aparece), sem pedido nenhum.
+function conciliarManterComOServidor() {
+    const servidor = AppState.manterDoServidor;
+    if (typeof servidor !== 'boolean' || manterNoAr !== 0) return;
+    const pref = AppState.preferences.manterConectado !== false;
+    if (servidor === pref || AppState.manterEnviado !== pref) return;
+    dfato('manter.divergiu', { preferencia: pref, servidor });
+    AppState.preferences.manterConectado = servidor;
+    AppState.manterEnviado = servidor;
+    savePreferences();
 }
 
 function loadPreferences() {
@@ -31421,6 +31448,7 @@ function renderPularGuardaPref() {
     if (off) off.checked = AppState.preferences.offlineDisponivel === true;
     // O "Manter conectado" não trava com a gente no meio de um pedido: se há uma
     // troca no ar, o que a chave mostra é a escolha dela, não a memória.
+    conciliarManterComOServidor();
     const manter = document.getElementById('prefManterConectado');
     if (manter && manterNoAr === 0) manter.checked = AppState.preferences.manterConectado !== false;
     offlineMarcarGesto();

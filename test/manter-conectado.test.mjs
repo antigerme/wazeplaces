@@ -109,6 +109,17 @@ function apiDeVerdade({ manter, sessao = 'tok-1' } = {}) {
   return { API: ctx.API, enviados };
 }
 
+test('a PREFERÊNCIA é lida antes do primeiro `perfil` da abertura — senão o `manter` nunca vai na ida que mais importa', () => {
+  // Do começo do `initApp` em diante (a função é longa e tem blocos próprios; o que se cobra é a ORDEM das duas chamadas).
+  const ini = APP_SEM.search(/^function initApp\(/m);
+  assert.ok(ini >= 0, 'sumiu o initApp');
+  const init = APP_SEM.slice(ini);
+  const iPref = init.indexOf('loadPreferences();');
+  const iPerfil = init.indexOf('loadProfileAndAuxData()');
+  assert.ok(iPref > 0 && iPerfil > 0, 'CONTROLE: o recorte do initApp não achou as duas chamadas');
+  assert.ok(iPref < iPerfil, 'o `perfil` da abertura sai antes de as preferências serem lidas: `manterConectadoParaOServidor` devolveria undefined');
+});
+
 test('perfil: manda `manter` BOOLEANO quando a preferência está definida — e NADA quando não está', async () => {
   for (const [valor, esperado] of [[true, true], [false, false]]) {
     const { API, enviados } = apiDeVerdade({ manter: valor });
@@ -283,10 +294,11 @@ test('a troca de conta: o interruptor FICA (escolha do aparelho), o que o servid
   const f = fatiarFuncao('esquecerEscolhasDaContaAnterior');
   assert.doesNotMatch(f, /prefs\.manterConectado\s*=/, 'a troca de conta passou a mexer na escolha do aparelho');
   assert.match(f, /AppState\.manterDoServidor = null;/);
+  assert.match(f, /AppState\.manterEnviado = null;/);
   // E o `perfil` da conta nova anota o que o servidor disse DEPOIS da troca.
   const def = fatiarFuncao('definirPerfil');
   const iConta = def.indexOf('aoConhecerConta(perfil);');
-  const iAnota = def.indexOf("if (typeof res.manterConectado === 'boolean') AppState.manterDoServidor = res.manterConectado;");
+  const iAnota = def.indexOf("AppState.manterDoServidor = res.manterConectado;");
   assert.ok(iConta > 0 && iAnota > iConta, 'o estado do servidor é anotado antes da troca de conta e a troca o apagaria');
 });
 
@@ -355,4 +367,60 @@ test('diag: o relatório diz se o interruptor está ligado e o que o servidor re
   assert.deepEqual(ent({ manterConectado: false }, true), { ligado: false, servidor: true, padrao: true });
   assert.deepEqual(ent({}, null), { ligado: true, servidor: null, padrao: true }, 'servidor desconhecido é null, não "desligado"');
   assert.match(APP_SEM, /^\s+manterConectado: diagManterConectado\(\),$/m, 'o relatório deixou de levar a seção');
+});
+
+// ── 7. O interruptor nunca mostra o que o servidor não tem ─────────────────
+test('perfil: a resposta volta com `manterEnviado` (o que ESTA ida mandou) — nada quando não mandou', async () => {
+  const a = apiDeVerdade({ manter: false });
+  const r = await a.API.getProfile();
+  assert.strictEqual(r.manterEnviado, false);
+  assert.strictEqual(r.manterConectado, true, 'a resposta do servidor segue como veio');
+  const b = apiDeVerdade({ manter: undefined });
+  assert.ok(!('manterEnviado' in (await b.API.getProfile())));
+});
+
+function conciliar({ pref, servidor, enviado, noAr = 0 }) {
+  const log = [];
+  const AppState = { preferences: { manterConectado: pref }, manterDoServidor: servidor, manterEnviado: enviado };
+  const fn = new Function('AppState', 'dfato', 'savePreferences', `let manterNoAr = ${noAr};\n${fatiarFuncao('conciliarManterComOServidor')}\nreturn conciliarManterComOServidor;`)(
+    AppState, (k) => log.push('dfato:' + k), () => log.push('salvou:' + AppState.preferences.manterConectado));
+  fn();
+  return { AppState, log };
+}
+
+test('conciliar: o servidor disse OUTRA coisa ao que a pessoa tem hoje → a chave mostra e grava a verdade', () => {
+  const m = conciliar({ pref: true, servidor: false, enviado: true });
+  assert.equal(m.AppState.preferences.manterConectado, false, 'a chave seguiu ligada sobre um servidor que está desligado');
+  assert.deepEqual(m.log, ['dfato:manter.divergiu', 'salvou:false']);
+  const n = conciliar({ pref: false, servidor: true, enviado: false });
+  assert.equal(n.AppState.preferences.manterConectado, true);
+});
+
+test('conciliar: não mexe quando concorda, quando a resposta é velha, quando há troca no ar ou o servidor não disse nada', () => {
+  for (const c of [
+    { pref: true, servidor: true, enviado: true },        // concordam
+    { pref: false, servidor: true, enviado: true },       // a pessoa trocou DEPOIS do pedido: a resposta é velha
+    { pref: true, servidor: false, enviado: null },       // sem saber a que a resposta responde
+    { pref: true, servidor: false, enviado: true, noAr: 1 }, // troca no ar
+    { pref: true, servidor: null, enviado: true },        // servidor sem o recurso / resposta sem o campo
+  ]) {
+    const m = conciliar(c);
+    assert.equal(m.AppState.preferences.manterConectado, c.pref, 'mexeu onde não devia: ' + JSON.stringify(c));
+    assert.deepEqual(m.log, [], 'gravou/anotou onde não devia: ' + JSON.stringify(c));
+  }
+});
+
+test('conciliar roda quando as Preferências abrem; `definirPerfil` guarda o `manterEnviado`; o gesto invalida a resposta velha', () => {
+  assert.match(fatiarFuncao('renderPularGuardaPref'), /conciliarManterComOServidor\(\);\s*const manter = document\.getElementById\('prefManterConectado'\);/);
+  assert.match(fatiarFuncao('definirPerfil'), /AppState\.manterEnviado = typeof res\.manterEnviado === 'boolean' \? res\.manterEnviado : null;/);
+  assert.match(fatiarFuncao('aoMudarManterConectado'), /AppState\.manterEnviado = null;/);
+});
+
+test('Ajuda: o que o app faz EM SEU NOME inclui a renovação da sessão pelo servidor (com o nome do interruptor)', () => {
+  const CITA = { pt: '“Manter conectado”', en: '“Stay logged in”', es: '«Mantener conectado»', fr: '« Rester connecté »' };
+  for (const l of LINGUAS) {
+    const c = D[l]['help.privacy.credentials'];
+    assert.ok(c.includes(CITA[l]), `${l}: as credenciais não dizem que o servidor renova a sessão com o interruptor ligado`);
+    assert.ok(c.indexOf(CITA[l]) > c.indexOf(';'), `${l}: a frase nova caiu dentro da enumeração de ações (o teste da conjunção a lê)`);
+  }
 });
