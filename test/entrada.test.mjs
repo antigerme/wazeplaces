@@ -838,7 +838,7 @@ function variaveisDaTela() {
 }
 function decodificarHtml(s) {
   return s.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, '\u00A0').replace(/&amp;/g, '&');
 }
 function comVariaveis(valor, vars, chave) {
   return valor.replace(/\{(\w+)\}/g, (_, v) => {

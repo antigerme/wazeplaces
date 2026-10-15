@@ -467,7 +467,7 @@ test('texto do botão · o rótulo segue o aparelho: "Compartilhar…" só onde 
 });
 
 // R22-7-07 · em francês o dois-pontos NÃO começa linha: com o texto a 1,5× em 360 px o botão quebrava em «Voir mon bilan» / «: octobre».
-// O espaço antes do «:» é o NBSP (U+00A0, gerado por código: o guard de invisíveis varre o fonte), nas quatro chaves do Resumo que o levam.
+// O espaço antes do «:» é o NBSP (U+00A0), nas quatro chaves do Resumo que o levam. No fonte de js/i18n.js ele é o ESCAPE (barra, u e 00A0), nunca cru: o guard de test/sem-invisiveis.test.mjs reprova o NBSP cru (R23-6 F2). Aqui o teste o gera por código, pelo mesmo motivo.
 const NBSP = String.fromCodePoint(0xA0);
 test('R22-7-07 · o espaço antes dos dois-pontos do Resumo em francês é inquebrável (botão, título da folha e texto do compartilhamento)', () => {
   const CHAVES = ['resumo.botao', 'resumo.botaoVer', 'resumo.modal.title', 'resumo.share.text'];

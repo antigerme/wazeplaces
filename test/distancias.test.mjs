@@ -104,7 +104,7 @@ test('R9-6-06: entre 999,5 e 1000 m a distância já é "1 km" — nunca "1.000 
   ctx.setLang('pt');
   for (let m = 990; m <= 1010; m += 0.05) {
     for (const s of [ctx.formatarMetros(m), ctx.formatarDistancia(m)]) {
-      assert.doesNotMatch(s, /1[.,\s  ]?000\s?m\b/, `${m.toFixed(2)} m saiu "${s}"`);
+      assert.doesNotMatch(s, /1[.,\s\u00A0\u202F]?000\s?m\b/, `${m.toFixed(2)} m saiu "${s}"`);
     }
   }
 });
