@@ -1208,6 +1208,15 @@ function presencaFluxoProvarVida(fluxo) {
     fluxo.provou = true;
     Presenca.fluxoTentativa = 0;
     const d = Presenca.fluxoDiag;
+    // O episódio de tempo real PARADO terminou: a conexão está viva E serve (R22-5 A3). Antes o "religou" saía no fim do
+    // primeiro lote, que toda conexão traz, e uma que o Google fecha logo depois (um intermediário cortando) dizia
+    // "religou" ao lado de "caiu: fim curto" — e a marca de parado já tinha sido solta. Se a conexão cai antes da prova, o
+    // episódio segue aberto (o `paradoDesde` fica) e a próxima que provar o fecha, com o `via` da última tentativa.
+    if (Presenca.paradoDesde) {
+        presencaAnotarParado('religou', { via: Presenca.paradoVia || 'outro', durouS: Math.round((Date.now() - Presenca.paradoDesde) / 1000) });
+        Presenca.paradoDesde = 0;
+        Presenca.paradoVia = null;
+    }
     if (d.quedasSeguidas) presencaAnotar('presenca.fluxo', { ev: 'voltou', depoisDe: d.quedasSeguidas });
     d.quedasSeguidas = 0;
 }
@@ -1303,12 +1312,8 @@ function presencaQuadro(fluxo, o) {
         // a cada ~6 min, não.
         const d = Presenca.fluxoDiag;
         if (!d.conectou) presencaAnotar('presenca.fluxo', { ev: 'conectou' });
-        // O episódio de tempo real PARADO terminou: a conexão está viva de novo.
-        if (Presenca.paradoDesde) {
-            presencaAnotarParado('religou', { via: Presenca.paradoVia || 'outro', durouS: Math.round((Date.now() - Presenca.paradoDesde) / 1000) });
-            Presenca.paradoDesde = 0;
-            Presenca.paradoVia = null;
-        }
+        // (O episódio de tempo real PARADO só termina na PROVA de vida, não aqui: o lote não prova que a conexão
+        // serve, e o "religou" daqui saía 60 s antes de um fim curto em laço dizer o contrário — R22-5 A3.)
         if (d.loteMensagens) presencaAnotar('chat.chegou', { lote: d.loteMensagens });
         d.conectou = true;
         d.loteMensagens = 0;

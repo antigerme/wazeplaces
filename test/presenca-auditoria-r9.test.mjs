@@ -303,6 +303,7 @@ function googleDeMentira(rede) {
     if (rede.fora) return Promise.reject(new TypeError('Failed to fetch'));
     return Promise.resolve(new Response(new ReadableStream({
       start(ctl) {
+        (rede.controles ||= []).push(ctl);   // pro teste dar o sinal de vida (R22-5 A3: o "religou" é da PROVA, não do lote)
         ctl.enqueue(LOTE);
         init.signal.addEventListener('abort', () => { try { ctl.error(new DOMException('aborted', 'AbortError')); } catch (e) { /* fechado */ } });
       },
@@ -437,6 +438,11 @@ test('R9-5-06 o diário conta o EPISÓDIO de tempo real parado: "parou" uma vez,
   p.c.escopo.navigator.onLine = true;
   p.c.relogio.agora += 10_000;
   p.c.P.presencaAoProvarRede();
+  for (let i = 0; i < 4; i++) await tick();
+  // A conexão abriu e entregou o lote — que toda conexão traz e NÃO prova que ela serve: o "religou" espera o piso (R22-5 A3).
+  assert.deepEqual(linhas().map((o) => o.ev), ['parou'], 'o "religou" saiu no fim do lote, antes de a conexão provar que serve');
+  p.c.relogio.agora += 60_000;
+  p.rede.controles.at(-1).enqueue(new TextEncoder().encode(',{"pong":{}}'));   // o sinal de vida de 10 s do Google, depois do piso
   for (let i = 0; i < 4; i++) await tick();
   const fim = linhas();
   assert.deepEqual(fim.map((o) => o.ev), ['parou', 'religou'], 'DEFEITO: a volta do tempo real parado não entrou no diário');
