@@ -791,8 +791,20 @@ body > main {
    - O `sticky` só age quando a fileira sairia do fim da janela do cartão; com o
      conteúdo cabendo, ela fica no lugar de sempre — e agora, nos navegadores com
      `scroll-state`, nem a camada própria dela existe. */
+/* LOTE 26 (R22-7-01 = R22-8-02) — O FOCO DO TECLADO PARA ACIMA DA FILEIRA PRESA. O navegador não sabe da fileira: o campo do «Entrar com um
+   código», o textarea do «Colar cookies» e o link «Waze Map Editor» do «Sair» paravam inteiros sob os botões quando focados (WCAG 2.4.11; 360×740
+   a 1,5× com teclado de 300 px: 0 px do campo visíveis, 82 na base). `scroll-padding-bottom` no CARTÃO diz onde a área visível acaba (a margem no
+   alvo, `scroll-margin`, foi testada e não serve: o WebKit a ignora e o Chromium não rola um alvo alto como o textarea). A fileira empilhada mede
+   até 10,75rem (MEDIDA em pt e fr, 1,15× a 2×, 6 janelas; 320×568 a 2× em fr) e o respiro de baixo do cartão é 1,5rem: 12,25rem, e 12,5rem com a
+   folga de meio rem. O Fold a 1,8× e 2× (a fileira empilhada chega a 14,75rem num cartão de 17rem) é o caso do dono: ali o foco ainda pode parar
+   parcialmente sob a fileira. O cartão é o contêiner de consulta e um contêiner não se estiliza por si, então o corte do empilhado vem do OVERLAY
+   (`dialogo-raiz`): a caixa de conteúdo dele é a largura do cartão, e 15,4rem = os 12,4rem da fileira + o px-6. A consulta SEM nome responde ao
+   contêiner mais próximo, qualquer que seja o nome: a emulação «sem @container» do smoke desliga também o overlay. */
 .dialogo-cartao {
   container: dialogo / inline-size;
+}
+.modal-root:has(> .dialogo-cartao) {
+  container: dialogo-raiz / inline-size;
 }
 @supports (container-type: scroll-state) {
   .dialogo-cartao {
@@ -837,6 +849,11 @@ body > main {
       height: calc(1.5rem - 1px);
       background: inherit;
     }
+  }
+}
+@container dialogo-raiz (max-width: 15.4rem) {
+  .dialogo-cartao {
+    scroll-padding-bottom: 12.5rem;
   }
 }
 
@@ -1228,7 +1245,17 @@ input.ui-switch:disabled {
    pedido é 0. O que fica de fora
    de propósito: o título em 5 a 8 linhas e o corpo no piso do padding (sem altura
    útil) nessa janela, que são o assunto do texto grande com o dono do projeto, com as
-   saídas e os números no relatório do lote. */
+   saídas e os números no relatório do lote.
+   O ZOOM DO NAVEGADOR (R22-7-04, lote 26) é a janela que o modelo acima não cobria: a 400% de um computador de 1280×800 a janela CSS fica
+   320×200 (18×10,5rem de conteúdo), a 500% de um de 1920×1080, 384×216 (22×11,5rem) — eixo curto de 200 px, abaixo dos 280 do modelo, e o
+   «Aplicar» e o «Cancelar» saíam da janela sem nada que rolasse (WCAG 1.4.10, reflow). O último degrau passou a ser UM só, 31 × 12rem, no lugar
+   dos dois de antes (17,49 × 11,9 e 25,39 × 9,7), que ele contém. MEDIDO em grade (largura 15,5 a 31rem × altura 9 a 15rem × texto 1× a 2× × pt e
+   fr, SEM a escada): a 1× TODA janela de até 11,9rem de altura é defeito («nem rolando»), e o diálogo só passa a CABER a partir de 12,3rem (a 2×),
+   12,8 (a 1,7×), 13,5 (a 1,5×) e 14 (a 1,3×) — por isso o corte em 12rem, com 0,3rem de folga das janelas de 1,9–2× em que ele cabe e 0,1rem
+   acima da última janela de 1× que quebra a 11,9. Fica de fora, de propósito, a faixa de 17 a 18,3rem × 12,1 a 12,6rem (janelas de 1× com ~230 px
+   de altura): coincide com janelas de 1,9–2× em que o diálogo CABE, e cobri-las mudaria esse diálogo. Pede decisão do dono. Onde o texto é maior
+   (1,3× em diante) as mesmas janelas em rem não existem em celular (o eixo curto ficaria abaixo de 280 px) e, se existirem pelo zoom, o rodapé
+   já se alcançava: ganha o rodapé preso, e o diálogo que cabe segue como está. */
 #filtersModal {
   container: filtros / size;
 }
@@ -1238,8 +1265,7 @@ input.ui-switch:disabled {
     ((max-width: 9.69rem) and (max-height: 18.8rem)) or
     ((max-width: 12.59rem) and (max-height: 17.8rem)) or
     ((max-width: 15.4rem) and (max-height: 17rem)) or
-    ((max-width: 17.49rem) and (max-height: 11.9rem)) or
-    ((max-width: 25.39rem) and (max-height: 9.7rem)) {
+    ((max-width: 31rem) and (max-height: 12rem)) {
   #filtersModal > div {
     overflow-x: hidden;
     overflow-y: auto;
@@ -1258,6 +1284,12 @@ input.ui-switch:disabled {
    cada grupo de janelas: 11rem onde ele empilha (a linha de até 15,4rem: 7,8 a
    10,8rem de altura) e 5,5rem onde fica lado a lado (4,5 a 5,1rem). Só dentro da
    escada (as condições são as mesmas linhas dela, o teste confere). */
+/* (lado a lado primeiro: na sobreposição das janelas estreitas o rodapé é o EMPILHADO, e o bloco de 11rem, depois, vence o empate) */
+@container filtros (max-width: 31rem) and (max-height: 12rem) {
+  #filtersModal > div {
+    scroll-padding-bottom: 5.5rem;
+  }
+}
 @container filtros ((max-width: 8.19rem) and (max-height: 22rem)) or
     ((max-width: 8.29rem) and (max-height: 21.2rem)) or
     ((max-width: 8.69rem) and (max-height: 20.4rem)) or
@@ -1266,12 +1298,6 @@ input.ui-switch:disabled {
     ((max-width: 15.4rem) and (max-height: 17rem)) {
   #filtersModal > div {
     scroll-padding-bottom: 11rem;
-  }
-}
-@container filtros ((max-width: 17.49rem) and (max-height: 11.9rem)) or
-    ((max-width: 25.39rem) and (max-height: 9.7rem)) {
-  #filtersModal > div {
-    scroll-padding-bottom: 5.5rem;
   }
 }
 

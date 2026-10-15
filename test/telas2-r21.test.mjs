@@ -21,6 +21,7 @@
 //             — `scroll-state(scrollable: block)`, com a regra sem o portão para o navegador que não o tem —: a 1× nada
 //             muda, e o diálogo que empilha mas CABE também não; o fundo da fileira é a cor do cartão a 99,6%, e NÃO
 //             opaca, que no Chromium liga o subpixel e muda o texto).
+//  R22-7-01 · (lote 26) o foco do teclado para ACIMA da fileira presa: `scroll-padding-bottom` no cartão do diálogo (12,5rem na fileira empilhada).
 //  R21-8-04 · o título, a 1ª frase e o nome do perfil do "Acesso restrito" quebram a palavra que não cabe.
 //  (comentário) · o `.seg-tab` dizia 6,25% onde o código usa `6.3cqw`.
 //
@@ -115,7 +116,7 @@ test('instrumento: o leitor de CSS e a especificidade enxergam o que dizem (cont
 // Estados MEDIDOS na base (rodada de conserto: a grade de 2.592 estados e 900 sorteados, em Chromium, nos 4 idiomas): [largura, altura]
 // da janela em rem (o overlay menos o respiro de 1rem de cada lado) dos que ficam mais perto da borda da escada, de cada lado dela.
 //  · DEFEITOS (o "Aplicar" ou o "Cancelar" fora da janela, nada que rolasse): têm que ficar DENTRO da escada — o menor folga é 0,44rem.
-//  · CABE (o diálogo cabe, nada fora do cartão): têm que ficar FORA — o mais perto está 0,94rem acima da escada.
+//  · CABE (o diálogo cabe, nada fora do cartão): têm que ficar FORA — o mais perto está 0,94rem acima da escada de antes e 0,3rem acima do degrau do zoom (12rem).
 // Os dois lados se travam: encolher a escada solta um defeito, e crescê-la muda um diálogo que hoje cabe.
 const DEFEITOS_MEDIDOS = [
   [8, 21.125],        // 320×740 a 2× (pt)
@@ -128,6 +129,13 @@ const DEFEITOS_MEDIDOS = [
   [19.48, 8.526],     // 653×320 a 1,9× (pt): o Fold deitado, mais alto
   [7.722, 20.674],    // 280×653 a 1,8×: o Galaxy Fold fechado (o caso do auditor)
   [6.75, 18.406],     // 280×653 a 2×
+  // R22-7-04 (lote 26): o ZOOM DO NAVEGADOR — a janela CSS fica pequena e o rem não muda (texto 1×). Medido SEM a escada, em grade (texto 1×, pt e fr):
+  [18, 10.5],         // 320×200: 400% de 1280×800 (o caso do auditor)
+  [22, 11.5],         // 384×216: 500% de 1920×1080 (idem; também 400% de 1536×864)
+  [19.31, 10],        // 341×192: 400% de 1366×768
+  [20.5, 11.9],       // 360×222: a última altura de 1× que quebra, na largura de 400% de 1440×900
+  [30.4, 11.9],       // a janela mais larga que a proporção 2,4 deixa (o degrau vai a 31rem)
+  [18.2, 11.9],       // a quina do degrau estreito de antes (17,49) que o novo degrau alcança
 ];
 const CABE_MEDIDO = [
   [11.932, 18.74],    // 399×594 a 1,79× (es)
@@ -140,6 +148,15 @@ const CABE_MEDIDO = [
   [15.042, 18.749],   // 469×571 a 1,72× (es)
   [23.75, 55.188],    // 412×915 a 1×
   [22.563, 55.188],   // 393×915 a 1×
+  // R22-7-04 (lote 26): as janelas de texto grande em que o diálogo CABE logo acima do degrau novo — medido SEM a escada, em grade, o diálogo passa a caber
+  // a partir de 12,3rem de altura (a 2×; larguras a partir de 17rem), 12,4 (1,9×), 12,8 (1,7×), 13,5 (1,5×) e 14 (1,3×).
+  [17, 12.3],         // 2× (608×464)
+  [18, 12.4],         // 1,9×
+  [17.5, 12.8],       // 1,7×
+  [17.5, 13.5],       // 1,5×
+  [20, 14],           // 1,3×
+  [18, 14],           // 320×256 a 1×: o controle do auditor que está OK (rodapé pendurado, alcançável)
+  [24.7, 14.7],       // 427×267 a 1×: idem
 ];
 // Aparelhos a 1× (a raiz tem 16 px): nenhum pode cair na escada — onde cabe hoje, nenhum pixel muda. São os 40 viewports
 // do `presets-1x` da rodada 21 (celulares, dobráveis, tablets e desktops) e cada um deitado, mais os 26 de antes.
@@ -184,15 +201,20 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   assert.ok(!REGRAS.some((x) => /#filtersModal\s*>\s*div\s*>\s*\.dialogo-acoes/.test(x.sel) && x.condicao === ''), 'o rodapé dos Filtros fica preso também fora da escada');
   // O rodapé preso cobre o fim da rolagem: o `scroll-padding-bottom` faz o foco do teclado parar ACIMA dele (17 de 17 controles ficavam
   // sob o rodapé no Fold a 2×). Dois grupos: o rodapé empilhado (linha de até 15,4rem) e o lado a lado. As condições são linhas DA escada.
+  // O lado a lado (o degrau largo) vem PRIMEIRO no arquivo: ele alcança também as janelas estreitas (até 15,4rem), onde o rodapé é o empilhado,
+  // e o empate de especificidade se decide pela ordem — o bloco do empilhado, depois, vence.
   const blocosDePadding = TOPO.filter((x) => /^@container filtros\b/.test(x.cabeca) && /scroll-padding-bottom/.test(x.corpo));
   assert.equal(blocosDePadding.length, 2, 'esperava dois grupos de scroll-padding-bottom (rodapé empilhado e lado a lado)');
-  const dosGrupos = blocosDePadding.map((x) => [...x.cabeca.matchAll(/\(max-width:\s*([\d.]+)rem\)\s*and\s*\(max-height:\s*([\d.]+)rem\)/g)].map((m) => [Number(m[1]), Number(m[2])]));
-  assert.equal(dosGrupos[0].length + dosGrupos[1].length, pares.length, 'os grupos do scroll-padding não cobrem exatamente as linhas da escada');
-  for (const [w, a] of dosGrupos.flat()) assert.ok(pares.some(([w2, a2]) => w2 === w && a2 === a), `o scroll-padding vale numa janela (${w} × ${a}rem) que não é linha da escada`);
+  const doGrupo = (b2) => [...b2.cabeca.matchAll(/\(max-width:\s*([\d.]+)rem\)\s*and\s*\(max-height:\s*([\d.]+)rem\)/g)].map((m) => [Number(m[1]), Number(m[2])]);
   const valor = (blk) => declaracoes(lerBlocos(blk.corpo)[0].corpo)['scroll-padding-bottom'];
-  assert.equal(valor(blocosDePadding[0]), '11rem');
-  assert.equal(valor(blocosDePadding[1]), '5.5rem');
-  assert.ok(dosGrupos[0].every(([w]) => w <= 15.4) && dosGrupos[1].every(([w]) => w > 15.4), 'o grupo do rodapé empilhado (≤ 15,4rem) e o do lado a lado (> 15,4rem) se misturaram');
+  const iLado = blocosDePadding.findIndex((b2) => valor(b2) === '5.5rem');
+  const iEmp = blocosDePadding.findIndex((b2) => valor(b2) === '11rem');
+  assert.ok(iLado >= 0 && iEmp >= 0 && iLado < iEmp, 'o scroll-padding do lado a lado (5.5rem) tem que vir ANTES do empilhado (11rem): na sobreposição das janelas estreitas vale o empilhado');
+  const dosGrupos = [doGrupo(blocosDePadding[iLado]), doGrupo(blocosDePadding[iEmp])];
+  const todasAsLinhas = [...dosGrupos[0], ...dosGrupos[1]];
+  assert.equal(todasAsLinhas.length, pares.length, 'os grupos do scroll-padding não cobrem exatamente as linhas da escada');
+  for (const [w, a2] of todasAsLinhas) assert.ok(pares.some(([w2, a3]) => w2 === w && a3 === a2), `o scroll-padding vale numa janela (${w} × ${a2}rem) que não é linha da escada`);
+  assert.ok(dosGrupos[1].every(([w]) => w <= 15.4) && dosGrupos[0].every(([w]) => w > 15.4), 'o grupo do rodapé empilhado (≤ 15,4rem) e o do lado a lado (> 15,4rem) se misturaram');
   assert.ok(!REGRAS.some((x) => x.condicao === '' && /#filtersModal\s*>\s*div/.test(x.sel) && 'scroll-padding-bottom' in x.decl), 'o scroll-padding-bottom vale também fora da escada');
   // Cobre cada defeito medido…
   assert.ok(DEFEITOS_MEDIDOS.length >= 8, `a tabela dos defeitos medidos só tem ${DEFEITOS_MEDIDOS.length} estados: o guard perdeu o alcance`);
@@ -464,7 +486,7 @@ test('R21-8-04 · o "Acesso restrito" quebra a palavra que não cabe no título,
 const CARTOES_COM_ACOES = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'pairEnterModal', 'batchReadModal'];
 const CARTOES_COM_BOTAO_UNICO = [['treinoFimModal', 'treinoFimOk'], ['accessDeniedModal', 'closeAccessDenied']];
 
-test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão do diálogo (sticky) só quando o cartão ROLA, e só no estado empilhado', () => {
+test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão do diálogo (sticky) só quando o cartão ROLA, e só no estado empilhado; o foco para acima dela', () => {
   const cartao = regraDe('.dialogo-cartao');
   assert.ok(cartao, 'sumiu a regra do cartão do diálogo');
   // O contêiner é o CARTÃO: a fileira é contêiner dos próprios botões, e um contêiner não se estiliza por si.
@@ -544,6 +566,44 @@ test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão 
   const comScroll = REGRAS.filter((x) => /scroll-state/.test(x.decl['container-type'] || ''));
   assert.deepEqual(comScroll.map((x) => `${x.sel} @ ${x.condicao}`), [`.dialogo-cartao @ @supports ${COND}`],
     'o container-type: scroll-state tem que aparecer uma vez só, no .dialogo-cartao dentro do @supports');
+
+  // ── R22-7-01 / R22-8-02 · o foco do teclado para ACIMA da fileira presa ──────────────────────────────────────────────────
+  // O foco (Tab, o `focus()` do campo, o «revelar o campo» do teclado) não sabe da fileira presa: o campo do código, o textarea do «Colar
+  // cookies» e o link «Waze Map Editor» do «Sair» paravam INTEIROS sob os botões (WCAG 2.4.11). O `scroll-padding-bottom` do CARTÃO diz ao
+  // navegador onde a área visível acaba: a fileira empilhada mede até 10,75rem em pt/fr, 1,15× a 2× (fora o Fold a 1,8× e 2×), mais o respiro de
+  // 1,5rem = 12,25rem; 12,5rem. O cartão é o contêiner de consulta, e um
+  // contêiner não se estiliza por si: o corte do empilhado vem do OVERLAY (`dialogo-raiz`), cuja caixa de conteúdo é a largura do cartão — o
+  // MESMO 15,4rem da escada dos Filtros (a linha de 12,4rem mais o px-6 do cartão).
+  const raiz = regraDe('.modal-root:has(> .dialogo-cartao)');
+  assert.ok(raiz, 'sumiu o contêiner do overlay dos diálogos (.modal-root:has(> .dialogo-cartao))');
+  assert.equal(raiz.decl.container, 'dialogo-raiz / inline-size');
+  const doRaiz = TOPO.filter((b) => /^@container dialogo-raiz\b/.test(b.cabeca));
+  assert.equal(doRaiz.length, 1, 'esperava UM @container dialogo-raiz (o do cartão com a fileira empilhada)');
+  const mRaiz = /^@container dialogo-raiz \(max-width: ([\d.]+)rem\)$/.exec(doRaiz[0].cabeca);
+  assert.ok(mRaiz, `o @container dialogo-raiz mudou de forma (${doRaiz[0].cabeca})`);
+  const CARTAO_PX = 3;          // o p-6 do cartão: 1,5rem de cada lado (conferido nos 7 cartões, logo abaixo)
+  assert.equal(Number(mRaiz[1]), Math.round((corteEmpilha + CARTAO_PX) * 10) / 10, 'o corte do overlay não é o da fileira empilhada + o px-6 do cartão: o scroll-padding grande valeria na fileira lado a lado (ou faltaria na empilhada)');
+  const pEmpilhada = regrasComuns(lerBlocos(doRaiz[0].corpo), doRaiz[0].cabeca).find((x) => x.sel === '.dialogo-cartao');
+  assert.ok(pEmpilhada && pEmpilhada.decl['scroll-padding-bottom'], 'a fileira empilhada ficou sem scroll-padding-bottom no cartão');
+  const rem = (v) => Number(/^([\d.]+)rem$/.exec(v)?.[1]);
+  assert.equal(rem(pEmpilhada.decl['scroll-padding-bottom']), 12.5, 'o scroll-padding da fileira empilhada mudou de 12,5rem: refaça a medida do foco acima da fileira (smoke, bloco R22-8-02)');
+  // O padding só existe no empilhado: lado a lado a fileira nem é presa, e padding a mais mudaria onde o foco para a 1× com o teclado aberto,
+  // sem fileira nenhuma por cima.
+  const comPadding = REGRAS.filter((x) => 'scroll-padding-bottom' in x.decl && /dialogo-cartao/.test(x.sel));
+  assert.deepEqual(comPadding.map((x) => `${x.sel} @ ${x.condicao}`), [`.dialogo-cartao @ ${doRaiz[0].cabeca}`],
+    'scroll-padding-bottom fora do empilhado do overlay');
+  assert.ok(!REGRAS.some((x) => x.condicao === '' && 'scroll-padding-bottom' in x.decl && /dialogo-cartao/.test(x.sel)), 'o scroll-padding-bottom do cartão vale também fora da consulta');
+  // A conta do overlay: ele tem p-4 (1rem de cada lado) e o cartão w-full, então a caixa de conteúdo do overlay É a largura do cartão
+  // (enquanto menor que o max-w, e todos os max-w passam de 15,4rem). Mexeu no padding do overlay ou na largura do cartão? O corte desmente.
+  for (const id of [...CARTOES_COM_ACOES.map((c) => c), ...CARTOES_COM_BOTAO_UNICO.map(([i]) => i)]) {
+    const m = new RegExp(`<div id="${id}"[^>]*class="([^"]*)">\\s*<div class="([^"]*)">`).exec(HTML);
+    assert.ok(m, `${id}: o overlay mudou de forma`);
+    assert.ok(m[1].split(/\s+/).includes('p-4'), `${id}: o overlay perdeu o p-4: a caixa de conteúdo dele deixou de ser a largura do cartão (o corte de ${mRaiz[1]}rem)`);
+    assert.ok(m[2].split(/\s+/).includes('w-full'), `${id}: o cartão perdeu o w-full`);
+    const mx = /max-w-(sm|md|lg)\b/.exec(m[2]);
+    assert.ok(mx, `${id}: o cartão perdeu o max-w`);
+    assert.ok({ sm: 24, md: 28, lg: 32 }[mx[1]] > Number(mRaiz[1]), `${id}: o max-w do cartão cabe abaixo do corte: ele nunca chegaria a ele`);
+  }
 });
 
 test('R21-8-02 · cada cartão com a fileira dentro da rolagem é contêiner, tem o p-6 e a fileira (ou o botão único) presa', () => {
