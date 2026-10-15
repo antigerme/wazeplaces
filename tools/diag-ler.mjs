@@ -59,5 +59,9 @@ export function lerDiagnostico(caminho) {
   if (buf.length > 4 && buf.readUInt32LE(0) === 0x04034b50) { texto = doZip(buf); origem = 'zip'; }
   else if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) { texto = gunzipSync(buf); origem = 'gzip'; }
   else { texto = buf; origem = 'json'; }
-  return { dados: JSON.parse(texto.toString('utf8')), origem, bytes: buf.length };
+  // O `.json` salvo por editor/PowerShell no Windows chega com BOM (U+FEFF) na frente, e o `JSON.parse` recusa
+  // (R24-4-08). Por código, e não pelo caractere digitado: a camada de ferramentas converte escapes.
+  let corpo = texto.toString('utf8');
+  if (corpo.charCodeAt(0) === 0xFEFF) corpo = corpo.slice(1);
+  return { dados: JSON.parse(corpo), origem, bytes: buf.length };
 }
