@@ -78,6 +78,12 @@ function buracoNegro(nome, chamou) {
 // leem e escrevem direto no objeto). O resto é buraco negro.
 function montar(nomes, deps) {
   const chamou = [];
+  // A fila de saída lê a lembrança do que o aparelho não gravou (`saidaTiradosSemGravar`, impressão digital
+  // `chaveDoItemDaSaida`): sem os dois declarados viram buraco negro e a fila lida some (lote 28).
+  if (nomes.includes('carregarFilaDeSaida')) {
+    if (!('saidaTiradosSemGravar' in deps)) deps.saidaTiradosSemGravar = new Map();
+    if (!nomes.includes('chaveDoItemDaSaida')) nomes = [...nomes, 'chaveDoItemDaSaida'];
+  }
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
     get: (t, k) => {

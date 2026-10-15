@@ -80,7 +80,7 @@ function montar({ perfil = null, token = 'tok-B' } = {}) {
   // pedido antes do perfil, carimbado com a conta dele (R12-5-05).
   const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'gravarContaNoAparelho', 'esquecerOutraConta', 'carimbarContaNaSaida',
     'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel',
-    'adotarSaidaSemMarca', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'enfileirarSaida',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'enfileirarSaida',
     'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao', 'dispensarAvisosDaSessao'];
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let saidaTiradosSemGravar = new Map(), contaVistaNoAparelho = false;\nlet saidaEsperandoConta = false, filaAtravessouSessao = false, contaConfirmadaNestaAba = null;\nlet avisosDeUmaVezNaTela = [], avisoDoLoteMarcando = null, avisoDaRecusaAutomatica = null;   // os avisos da sessão (R15-7-F1)\n${nomes.map(fatiar).join('\n')}
@@ -297,29 +297,18 @@ test('O3: a troca de conta leva o que é de dono desconhecido junto com o da con
     'a troca de conta deixou na fila o que não é de quem entrou');
 });
 
-test('O3 (MIGRACAO saida-sem-marca): o item de versão anterior é adotado pela sessão ABERTA, antes do esvaziamento', () => {
-  const m = montar({ perfil: null, token: 'tok-A' });
-  m.guardado.set('waze_places_saida', JSON.stringify([
-    { tipo: 'reject', venueID: 'v1', updateRequestID: 'u1', conta: null },           // versão anterior, sem conta
-    { tipo: 'reject', venueID: 'v2', updateRequestID: 'u2' },                        // anterior ao lote 5: sem nada
-    { tipo: 'read', venueID: 'v3', updateRequestID: 'u3', conta: 'A' },              // com conta: não precisa
-    { tipo: 'read', venueID: 'v4', updateRequestID: 'u4', conta: null, s: 'x' },     // já marcado: não mexe
-  ]));
-  m.app.adotarSaidaSemMarca();
-  const f = m.app.carregarFilaDeSaida();
-  assert.equal(f[0].s, marcaDe('tok-A'));
-  assert.equal(f[1].s, marcaDe('tok-A'));
-  assert.equal(f[2].s, undefined, 'item com conta ganhou marca à toa');
-  assert.equal(f[3].s, 'x', 'item já marcado foi remarcado — sairia no nome da sessão de agora');
-  // A abertura COM sessão salva mora no `abrirComSessaoSalva`, que o
-  // `initApp` só chama com token (o link de pareamento vencido também cai nela).
+test('O3 (a migração saida-sem-marca CUMPRIU o prazo e saiu): o item sem a marca da sessão não é adotado — dono desconhecido, não vai ao Waze', () => {
+  // Item gravado antes de a fila guardar a SESSÃO do gesto e sem conta não diz de quem é. A adoção calada
+  // (`adotarSaidaSemMarca`) saiu no lote 28 (todo testador abriu versões novas; o app não está em produção): sem ela o
+  // item cai no ramo «SEM conta e de OUTRA sessão» do esvaziamento — o lado seguro.
+  assert.ok(!/adotarSaidaSemMarca/.test(SEM), 'a adoção que vencia em 2026-10-26 voltou ao app.js');
+  const abre = fatiar('abrirComSessaoSalva');
+  assert.ok(abre.indexOf('esvaziarFilaDeSaida();') > 0, 'a abertura com sessão salva deixou de esvaziar a fila');
   const ini = fatiar('initApp');
   assert.match(ini, /if \(API\.getSession\(\)\) \{\s*abrirComSessaoSalva\(\);/,
-    'a adoção só vale COM a sessão aberta: a abertura com token saiu do initApp');
-  const abre = fatiar('abrirComSessaoSalva');
-  const iAdota = abre.indexOf('adotarSaidaSemMarca();');
-  const iEsvazia = abre.indexOf('esvaziarFilaDeSaida();');
-  assert.ok(iAdota > 0 && iEsvazia > iAdota, 'a adoção tem de vir ANTES do esvaziamento da abertura');
+    'a abertura com token saiu do initApp');
+  const esv = fatiar('esvaziarFilaDeSaida');
+  assert.match(esv, /item\.s !== marcaDaSessao\(API\.getSession\(\)\)[^]*?saida\.semDono/, 'o item sem conta e de OUTRA sessão deixou de sair como «sem dono»');
 });
 
 test('o "Sair" apaga de quem eram os dados, e o perfil chegando confere a conta ANTES do que depende dele', () => {
@@ -469,4 +458,30 @@ test('a recusa automática só age com a conta CONFIRMADA nesta sessão (`contaC
     'a confirmação de uma sessão que já não é a desta aba valeu');
   assert.equal(confirma({ id: 222 }, { id: '111', s: marca('tok-A') }, 'tok-B', { id: '222', s: marca('tok-B') }), false,
     'a confirmação desta aba valeu com o aparelho de OUTRA conta (a lista de autores é dela)');
+});
+
+// R24-2-02: com a conta guardada VELHA (de outra conta) e o aparelho que RECUSA a gravação, cada perfil que
+// chegava (a sonda do alarme falso, o perfil renovado) repetia a troca de conta COMPLETA — zerava o placar, o
+// Histórico e as conquistas de quem acabou de entrar e avisava «Outra conta entrou» de novo.
+test('R24-2-02: a troca de conta roda UMA vez por conta nesta aba, mesmo com a CONTA_KEY velha que o aparelho não deixa trocar', () => {
+  const trocas = (log) => log.filter((x) => x === 'dfato:conta.trocou').length;
+  for (const grava of [false, true]) {
+    const m = montar({ perfil: { id: 222 }, token: 'tok-B' });
+    m.guardado.set('waze_places_conta', JSON.stringify({ id: '111', s: 'x' }));      // a conta de ANTES
+    if (!grava) m.deps.safeLS.set = () => false;                                     // o aparelho LÊ e não GRAVA
+    m.app.aoConhecerConta({ id: 222 });
+    assert.equal(trocas(m.log), 1, `${grava ? 'grava' : 'recusa'}: a 1ª vez é a troca de verdade`);
+    m.AppState.stats.read = 7;                                                       // o trabalho de quem entrou, depois da troca
+    m.app.aoConhecerConta({ id: 222 });                                              // a sonda do alarme falso traz o perfil de novo
+    m.app.aoConhecerConta({ id: 222 });
+    assert.equal(trocas(m.log), 1, `DEFEITO (${grava ? 'grava' : 'recusa'}): cada perfil repetiu a troca de conta completa`);
+    assert.equal(m.AppState.stats.read, 7, 'o placar de quem entrou foi zerado pelo perfil seguinte');
+  }
+  // CONTROLE: OUTRA conta de verdade (a 3ª) ainda dispara a troca.
+  const m = montar({ perfil: { id: 222 }, token: 'tok-B' });
+  m.guardado.set('waze_places_conta', JSON.stringify({ id: '111', s: 'x' }));
+  m.deps.safeLS.set = () => false;
+  m.app.aoConhecerConta({ id: 222 });
+  m.app.aoConhecerConta({ id: 333 });
+  assert.equal(trocas(m.log), 2, 'CONTROLE: uma conta diferente tem que trocar');
 });

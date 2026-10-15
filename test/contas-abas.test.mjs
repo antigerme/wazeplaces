@@ -67,6 +67,12 @@ function buracoNegro(nome, chamou) {
 // leem e escrevem direto no objeto). O resto é buraco negro.
 function montar(nomes, deps, fonte = APP_SEM) {
   const chamou = [];
+  // A fila de saída lê a lembrança do que o aparelho não gravou (`saidaTiradosSemGravar`, impressão digital
+  // `chaveDoItemDaSaida`): sem os dois declarados viram buraco negro e a fila lida some (lote 28).
+  if (nomes.includes('carregarFilaDeSaida')) {
+    if (!('saidaTiradosSemGravar' in deps)) deps.saidaTiradosSemGravar = new Map();
+    if (!nomes.includes('chaveDoItemDaSaida')) nomes = [...nomes, 'chaveDoItemDaSaida'];
+  }
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),
     get: (t, k) => {
@@ -903,7 +909,7 @@ test('A3: a troca de conta passa pelo esquecer das escolhas (e a mesma conta vol
   const troca = fatiarDe(APP_SEM, 'esquecerOutraConta');
   assert.match(troca, /^\s+esquecerEscolhasDaContaAnterior\(\);/m, 'a troca de conta não esquece as escolhas de A');
   // Quem chama a troca é SÓ a conta diferente (conferido em test/conta).
-  assert.match(fatiarDe(APP_SEM, 'aoConhecerConta'), /if \(antes && antes\.id && String\(antes\.id\) !== id\) esquecerOutraConta\(id\);/);
+  assert.match(fatiarDe(APP_SEM, 'aoConhecerConta'), /if \(antes && antes\.id && String\(antes\.id\) !== id && !jaTrocouAqui\) esquecerOutraConta\(id\);/);
 });
 
 // O ↑ de verdade (`handleSkip`) depois da troca de conta, com o card na tela e a

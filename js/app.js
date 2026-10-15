@@ -858,9 +858,6 @@ function abrirComSessaoSalva() {
     marcarSessaoJaAtiva();
     // A conta que o aparelho confirmou pra esta sessão, antes de o perfil chegar (R16-1-01).
     lembrarAContaDoAparelho();
-    // O que a fila de saída guardou por versão anterior, sem a marca da
-    // sessão, é desta sessão aberta (ver a função). ANTES do esvaziamento.
-    adotarSaidaSemMarca();
     showMainScreen();
     // O que ficou esperando de uma sessão anterior aparece e sai agora.
     // É o segundo (e último) gatilho: o outro é o evento `online`. Nenhum
@@ -10576,12 +10573,15 @@ function diagEsquecerGuardado() {
     // apagar pra sempre (O10). Se ela acordar depois, a época a impede de gravar.
     diagEpoca++;
     const antes = Promise.race([diagGuardando, new Promise((ok) => setTimeout(ok, DIAG_DB_TETO_MS))]);
-    const esta = antes.then(() => new Promise((ok) => {
+    // O `deleteDatabase` também tem TETO (R24-4-06): com o IndexedDB morto nenhum dos três eventos chega, e a
+    // fila `diagGuardando` — onde toda gravação e todo apagar esperam — ficava pendurada pra sempre (só
+    // recarregando). Estourado, vale «não apagou» (`false`), como a exceção.
+    const esta = antes.then(() => esperarComTeto((ok) => {
         try {
             const r = indexedDB.deleteDatabase(DIAG_DB);
             r.onsuccess = r.onerror = r.onblocked = () => ok(true);
         } catch (e) { ok(false); }
-    }));
+    }, DIAG_DB_TETO_MS).catch(() => false));
     diagGuardando = esta.catch(() => false);
     return esta;
 }
@@ -11788,8 +11788,14 @@ function diagResumoDaSaida() {
         const tipos = {};
         for (const it of f) tipos[it.tipo] = (tipos[it.tipo] || 0) + 1;
         const ts = f.map((it) => it.t).filter(Number.isFinite);
+        // `lembradosSemGravar`: as decisões que JÁ SAÍRAM e que o aparelho não deixou tirar da fila (R24-4-08).
+        // Elas ficam escondidas de `carregarFilaDeSaida`, então sem este número o aparelho que LÊ e não GRAVA
+        // dizia «esperando envio 1» com 2 itens no localStorage cru, e ninguém sabia por quê.
+        let lembradosSemGravar = 0;
+        for (const e of saidaTiradosSemGravar.values()) if (e && e.tirado) lembradosSemGravar++;
         return { n: f.length, distintas, repetidas: chaves.length - distintas, tipos,
-                 maisAntigaMin: ts.length ? Math.round((Date.now() - Math.min(...ts)) / 60000) : null };
+                 maisAntigaMin: ts.length ? Math.round((Date.now() - Math.min(...ts)) / 60000) : null,
+                 lembradosSemGravar };
     } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; }
 }
 
@@ -19190,7 +19196,11 @@ function recordHistory(type, delta, dia, onde) {
     // estragado na própria memória, e o número que não é número.)
     if (!h[k] || typeof h[k] !== 'object' || Array.isArray(h[k])) h[k] = { read: 0, rejected: 0 };
     const field = type === 'read' ? 'read' : 'rejected';
-    const numero = (x) => (Number.isFinite(x) ? x : 0);
+    // O MESMO critério dos leitores (`contagemDoHistorico`, inteiro ≥ 0): o escritor aceitava fração e o leitor
+    // devolvia 0, então com `_total.read: 1.5` guardado o escritor somava (2.5, 3.5…) e o Total, a patente e o
+    // desbloqueio do Desfazer ficavam em 0 para sempre (R24-1-01 = R24-7-03). O `placarGuardado` e o `seq` das
+    // conquistas aceitam fração, mas escritor e leitor concordam neles (lido e somado de volta), sem o zero eterno.
+    const numero = contagemDoHistorico;
     h[k][field] = Math.max(0, numero(h[k][field]) + (delta || 0));
     h._total[field] = Math.max(0, numero(h._total[field]) + (delta || 0));
     // ONDE o trabalho foi feito. É o dado que faltava pra "Andarilho"/"Viajante"
@@ -22931,15 +22941,25 @@ let ultimaEscritaOkEm = 0;
 
 // Manda o item pro FIM da fila de saída (relida, achado pela chave), com os
 // campos novos.
+//
+// O aparelho que RECUSA a gravação (a cota cheia: aumentar o valor da chave também é recusado) lembra a
+// marca e a ordem em memória (`salvarFilaSemOs`, R24-2-01): sem isso o item envenenado nunca juntava as
+// 3 tentativas, ficava na cabeça e cada swipe o reenviava. O item é achado pela impressão digital, e
+// não por «tipo + ids»: id nulo ou objeto não casava.
 function moverProFimDaSaida(item, campos) {
     const f = carregarFilaDeSaida();
-    const i = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
-        && x.updateRequestID === item.updateRequestID);
-    if (i < 0) return f;
-    const [it] = f.splice(i, 1);
-    f.push(Object.assign(it, campos));
-    salvarFilaDeSaida(f);
-    return f;
+    const k = chaveDoItemDaSaida(item);
+    const mesmo = (x) => x && x.t === item.t && x.tipo === item.tipo && chaveDoItemDaSaida(x) === k;
+    // As cópias IDÊNTICAS (a mesma decisão gravada duas vezes, por duas abas) vão juntas e levam a mesma
+    // marca: a lembrança em memória as trata como UM item, e o aparelho que grava tem que concordar com ela.
+    const it = f.find(mesmo);
+    if (!it) return f;
+    const atras = f.filter(mesmo);
+    const resto = f.filter((x) => !mesmo(x));
+    for (const x of atras) Object.assign(x, campos);
+    resto.push(...atras);
+    salvarFilaSemOs(resto, [], [{ item: it, campos, fim: true }]);
+    return resto;
 }
 
 // A marca da sessão DESTA aba — a da MEMÓRIA —, ou `null` sem nenhuma. As
@@ -22998,11 +23018,11 @@ function tirarDaFilaDeSaida(tipo, place) {
 // é relida: outra aba ou o gesto podem ter mexido nela).
 function marcarNaSaida(item, campos) {
     const f = carregarFilaDeSaida();
-    const it = f.find((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
-        && x.updateRequestID === item.updateRequestID);
-    if (!it) return false;
-    Object.assign(it, campos);
-    salvarFilaDeSaida(f);
+    const k = chaveDoItemDaSaida(item);
+    const iguais = f.filter((x) => x && x.t === item.t && x.tipo === item.tipo && chaveDoItemDaSaida(x) === k);
+    if (!iguais.length) return false;
+    for (const it of iguais) Object.assign(it, campos);
+    salvarFilaSemOs(f, [], [{ item: iguais[0], campos }]);
     return true;
 }
 
@@ -23117,7 +23137,12 @@ function aoConhecerConta(perfil) {
     let antes = null;
     try { antes = JSON.parse(safeLS.get(CONTA_KEY) || 'null'); } catch (e) { antes = null; }
     if (antes && antes.id) contaVistaNoAparelho = true;
-    if (antes && antes.id && String(antes.id) !== id) esquecerOutraConta(id);
+    // Só se ESTA aba ainda não confirmou esta conta (R24-2-02): com o aparelho que LÊ e não GRAVA a conta
+    // guardada fica a VELHA pra sempre, e cada perfil que chegava (a sonda do alarme falso) repetia a troca
+    // COMPLETA — zerava o placar, o Histórico e as conquistas de quem acabou de entrar, e avisava «Outra
+    // conta entrou» de novo. A troca já foi feita aqui na memória; repetir só apaga o trabalho de agora.
+    const jaTrocouAqui = !!(contaConfirmadaNestaAba && contaConfirmadaNestaAba.id === id);
+    if (antes && antes.id && String(antes.id) !== id && !jaTrocouAqui) esquecerOutraConta(id);
     // A troca que OUTRA aba já fez no aparelho: ela entrou com esta conta (ou deu
     // "Sair") e tirou de lá o que era da anterior — mas esta aba seguia com a
     // MEMÓRIA dela. A aba cuja sessão caiu fica na tela de entrada com o que era
@@ -23212,23 +23237,6 @@ function carimbarContaNoInvisivel(id, invisivel) {
         delete p.presencaWmeDesligar;
     }
     savePreferences();
-}
-
-// MIGRACAO: saida-sem-marca
-// Item gravado antes de a fila de saída guardar a SESSÃO do gesto (até a
-// v2026.09.26-01) não diz de quem é quando vem sem conta. O que ainda espera
-// envio na abertura COM sessão foi feito nela: a fila sai a cada abertura com
-// sessão, e a entrada de outra pessoa (versão anterior) a esvaziava no nome de
-// quem entrou. Adota a marca da sessão aberta; sem sessão, fica sem marca — dono
-// desconhecido, e o esvaziamento não o manda.
-function adotarSaidaSemMarca() {
-    const s = marcaDaSessao(API.getSession());
-    const f = carregarFilaDeSaida();
-    let mudou = false;
-    for (const it of f) {
-        if (it && !it.conta && it.s === undefined) { it.s = s; mudou = true; }
-    }
-    if (mudou) salvarFilaDeSaida(f);
 }
 
 // O que o aparelho guardava da conta ANTERIOR e é DELA sai: o trabalho (placar,
@@ -23478,22 +23486,40 @@ function esquecerEscolhasDaContaAnterior() {
     desenharChavesDePreferencia();
 }
 
-// Os itens da fila de saída que JÁ SAÍRAM (ou foram tirados sem ir ao Waze) e cuja REMOÇÃO o
-// aparelho recusou gravar (R23-1-01/R23-2-F1/F2). O aparelho que LÊ e não GRAVA devolvia o item
-// que acabou de ser enviado na leitura seguinte, e o esvaziamento o mandava DE NOVO — sem teto
-// (77 envios em 30 s com 3 itens, e o Histórico subindo a cada volta); os de outra conta, tirados
-// sem enviar, viravam um laço síncrono sem `await` (gotcha #19) que congelava a aba. A leitura
-// (`carregarFilaDeSaida`) passa a deixar de fora o que está aqui, então o laço, o indicador e
-// quem de-duplica enxergam a fila como ela deveria ter ficado. A chave leva o `t` do item: o
-// MESMO pedido que entra de novo mais tarde é outro item e não é escondido. Só em memória, e
-// sai quando uma gravação da fila pega (o que ela grava já não os tem) e no "Sair". Entre abas
-// a entrega segue at-least-once: a outra aba lê o aparelho cru.
+// O QUE O APARELHO NÃO DEIXOU GRAVAR na fila de saída — UMA estrutura, em memória, para os três
+// remendos que a família «aparelho que LÊ e não GRAVA» pediu em três rodadas seguidas
+// (R22 → R23 → R24; cada remendo cobria um caso e o seguinte achava outro):
+//   · `{ tirado: true }`        o item que JÁ SAIU (ou foi tirado sem ir ao Waze) e cuja REMOÇÃO o aparelho
+//                               recusou: relido, o esvaziamento o mandaria DE NOVO, sem teto (77 envios em
+//                               30 s com 3 itens), e os de outra conta/sem dono, tirados sem enviar, viravam
+//                               um laço síncrono sem `await` (gotcha #19) que congelava a aba (R23-1-01/F2);
+//   · `{ campos, fim }`         o que o esvaziamento escreve EM um item que fica — as tentativas do 5xx
+//                               (`tt`/`tf`), o `u401` — e o «mover pro fim». Com a cota cheia, aumentar o
+//                               valor da chave é recusado como a remoção (R24-2-01): o envenenado (503/401)
+//                               nunca chegava a 3 tentativas nem saía como `unknown`, ficava na cabeça, os de
+//                               trás nunca saíam e cada swipe o reenviava (+1 requisição por swipe).
+// A CHAVE é a IMPRESSÃO DIGITAL COMPLETA do item (`chaveDoItemDaSaida`), e não «tipo|venue|pedido» com um `t`
+// por chave: aquilo devolvia `null` sem ids (laço), nunca casava com id objeto/lista (reenviado a cada 400 ms) e
+// guardava UM `t` por pedido (3 itens do mesmo pedido = laço; R24-1-02/03). Como o `t` entra na impressão, o MESMO
+// pedido que volta mais tarde é outro item e não fica escondido. A ordem de inserção do Map É a ordem do «pro
+// fim» (mover = apagar a chave e pôr de novo). `carregarFilaDeSaida` aplica tudo isto sobre o que o aparelho
+// devolve, então o laço, o indicador e quem de-duplica enxergam a fila como ela deveria ter ficado.
+// Sai quando uma gravação da fila pega (a fila efetiva, que já traz tudo isto, foi gravada) e no «Sair»; NÃO sai na
+// troca de conta (zerar traria de volta itens que já saíram). Entre abas a entrega segue at-least-once: a outra
+// aba lê o aparelho cru. O nome ficou (`saidaTiradosSemGravar`) porque 20 harnesses o declaram.
 const saidaTiradosSemGravar = new Map();
 
+// A impressão digital do item: o JSON dele SEM as marcas que o esvaziamento escreve depois
+// (`tt`/`tf`/`u401`) nem a reserva entre abas (`rv`/`rvEm`) — com elas a identidade mudaria a cada marca. Nunca
+// devolve `null` (item sem ids, ids nulos, objetos e listas têm impressão como os outros). A lista de marcas é
+// literal AQUI de propósito: 20 harnesses fatiam esta função e uma constante de módulo virava buraco negro.
 function chaveDoItemDaSaida(x) {
-    return x && x.venueID != null && x.updateRequestID != null
-        ? String(x.tipo) + '|' + String(x.venueID) + '|' + String(x.updateRequestID)
-        : null;
+    if (!x || typeof x !== 'object') return '#' + String(x);
+    const c = {};
+    for (const k of Object.keys(x)) {
+        if (k !== 'tt' && k !== 'tf' && k !== 'u401' && k !== 'rv' && k !== 'rvEm') c[k] = x[k];
+    }
+    try { return JSON.stringify(c); } catch (e) { return '#' + Object.keys(c).join(','); }
 }
 
 function carregarFilaDeSaida() {
@@ -23503,22 +23529,47 @@ function carregarFilaDeSaida() {
         if (!Array.isArray(v)) return [];
     } catch (e) { return []; }
     if (!saidaTiradosSemGravar.size) return v;
-    return v.filter((x) => {
+    const ficam = [], atras = [];
+    for (const x of v) {
         const k = chaveDoItemDaSaida(x);
-        return !(k !== null && saidaTiradosSemGravar.has(k) && saidaTiradosSemGravar.get(k) === x.t);
-    });
+        const e = saidaTiradosSemGravar.get(k);
+        if (!e) { ficam.push(x); continue; }
+        if (e.tirado) continue;
+        if (e.campos && x && typeof x === 'object') Object.assign(x, e.campos);
+        if (e.fim) atras.push({ k, x }); else ficam.push(x);
+    }
+    if (!atras.length) return ficam;
+    // Os «pro fim» saem depois de todos, na ordem em que foram mandados pro fim (a do Map).
+    const ordem = [...saidaTiradosSemGravar.keys()];
+    atras.sort((p, q) => ordem.indexOf(p.k) - ordem.indexOf(q.k));
+    for (const a of atras) ficam.push(a.x);
+    return ficam;
 }
 
-// Grava a fila DEPOIS de tirar `removidos` dela. Se o aparelho recusar, lembra os itens em memória
-// (acima): a remoção que não persistiu vale nesta página, que é o que impede o reenvio. Devolve
-// se gravou; quem chama nunca devolve "tirei" sem ter gravado nem lembrado.
-function salvarFilaSemOs(f, removidos) {
+// Grava a fila DEPOIS de tirar `removidos` dela e/ou de pôr `alterados` (`{ item, campos, fim }`) nos itens
+// que ficam. Se o aparelho recusar, lembra tudo em memória (acima): a remoção e a marca que não persistiram
+// valem nesta página, que é o que impede o reenvio e o laço. Devolve se gravou; quem chama nunca devolve
+// «tirei» sem ter gravado nem lembrado.
+function salvarFilaSemOs(f, removidos, alterados) {
     const gravou = salvarFilaDeSaida(f);
     if (!gravou) {
-        for (const r of removidos) {
+        const lembrar = saidaTiradosSemGravar;
+        for (const r of removidos || []) {
             const k = chaveDoItemDaSaida(r);
-            if (k !== null) saidaTiradosSemGravar.set(k, r.t);
+            lembrar.delete(k);
+            lembrar.set(k, { tirado: true });
         }
+        for (const a of alterados || []) {
+            const k = chaveDoItemDaSaida(a.item);
+            const antes = lembrar.get(k);
+            if (antes && antes.tirado) continue;
+            const e = { campos: Object.assign({}, antes && antes.campos, a.campos), fim: !!(a.fim || (antes && antes.fim)) };
+            if (a.fim) lembrar.delete(k);
+            lembrar.set(k, e);
+        }
+        // Teto por construção (a regra da casa para estrutura que cresce por item): 3 vezes a fila inteira. Passado
+        // dele (milhares de remoções sem uma gravação sequer), cai a lembrança mais VELHA.
+        while (lembrar.size > 3000) lembrar.delete(lembrar.keys().next().value);
     }
     return gravou;
 }
@@ -23688,20 +23739,28 @@ async function esvaziarFilaDeSaida() {
     // placar que subiu no gesto desce (o mesmo da falha de verdade).
     const tirarSemEnviar = (it, evento) => {
         const g = carregarFilaDeSaida();
-        const i = g.findIndex((x) => x && x.tipo === it.tipo && x.venueID === it.venueID
-            && x.updateRequestID === it.updateRequestID);
-        const tirados = i >= 0 ? g.splice(i, 1) : [];
+        // Pela IMPRESSÃO DIGITAL (R24-1-02): id nulo/objeto não casava por `===`, e as cópias idênticas
+        // do mesmo item (duas abas) saem juntas — é a mesma decisão.
+        const k = chaveDoItemDaSaida(it);
+        const mesmo = (x) => x && x.t === it.t && x.tipo === it.tipo && chaveDoItemDaSaida(x) === k;
+        const tirados = g.filter(mesmo);
+        const resto = g.filter((x) => !mesmo(x));
         // Recusada a gravação, o item fica lembrado em memória (R23-2-F2): sem isto o laço do
         // esvaziamento o relia e o tirava de novo, sem `await`, e a aba congelava.
-        salvarFilaSemOs(g, tirados.length ? tirados : [it]);
+        salvarFilaSemOs(resto, tirados.length ? tirados : [it]);
         const statKey = it.tipo === 'read' ? 'read' : 'rejected';
         AppState.stats[statKey] = Math.max(0, AppState.stats[statKey] - 1);
         updateStats();
         saveStats();
         updateInFlightIndicator();
         dfato(evento, { tipo: it.tipo });
-        return g;
+        return carregarFilaDeSaida();
     };
+    // O que esta passada já tratou (mandou, ou tirou sem mandar), pela impressão digital. Um item que
+    // VOLTA à fila depois de tratado é a remoção que não pegou: PARAR é a única saída que não manda a
+    // mesma decisão de novo nem gira sem `await` (gotcha #19) — a lembrança em memória (acima) impede que
+    // aconteça, e esta guarda faz o laço terminar MESMO se um caminho novo escapar dela (R24-2-01).
+    const jaTratados = new Set();
     try {
         while (f.length) {
             // Sair no meio do esvaziamento: PARA. Sem isto o item já em voo
@@ -23731,6 +23790,8 @@ async function esvaziarFilaDeSaida() {
             f = carregarFilaDeSaida();
             const item = f.find((x) => x && !pedidosEmAndamento.has(chaveDoPedido(x)) && !reivindicadoPorOutraAba(x));
             if (!item) break;
+            const impressao = chaveDoItemDaSaida(item);
+            if (jaTratados.has(impressao)) { dfato('saida.semProgresso', { tipo: item.tipo }); break; }
             // A conta do GESTO contra a de agora (ver `contaAgora`). Desconhecida
             // agora (sessão nova, perfil a caminho): espera — o perfil chegando
             // chama de novo. De OUTRA conta: sai da fila sem ir ao Waze, e o
@@ -23739,6 +23800,7 @@ async function esvaziarFilaDeSaida() {
                 const agora = contaAgora();
                 if (!agora) { saidaEsperandoConta = true; break; }
                 if (String(item.conta) !== agora) {
+                    jaTratados.add(impressao);
                     f = tirarSemEnviar(item, 'saida.outraConta');
                     continue;
                 }
@@ -23747,6 +23809,7 @@ async function esvaziarFilaDeSaida() {
                 // desconhecido — pode ser a conta de antes da queda, e o token de
                 // agora é de quem entrou. Nunca vai ao Waze. Sem conta e DESTA
                 // sessão sai normalmente: o token é o mesmo do gesto.
+                jaTratados.add(impressao);
                 f = tirarSemEnviar(item, 'saida.semDono');
                 continue;
             }
@@ -23769,6 +23832,7 @@ async function esvaziarFilaDeSaida() {
             // a rede voltando, a próxima resposta, a renovação.
             if (!AppState.authenticated || navigator.onLine === false || verificandoSessao || saidaEmRecuo()
                 || epoca !== epocaDaSessao) break;
+            jaTratados.add(impressao);
             const place = { venueID: item.venueID, updateRequestID: item.updateRequestID,
                             creatorId: item.creatorId, createdBy: item.nome || undefined,
                             flagType: item.dup ? 'DUPLICATE' : undefined };
@@ -23833,8 +23897,8 @@ async function esvaziarFilaDeSaida() {
             // de quem o levou. Contar aqui também punha o mesmo trabalho duas
             // vezes no Histórico (auditoria de 2026-09-29, O6). Nem pouso, nem
             // "enviado".
-            if (!carregarFilaDeSaida().some((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
-                && x.updateRequestID === item.updateRequestID)) {
+            const mesmoItem = (x) => x && x.t === item.t && x.tipo === item.tipo && chaveDoItemDaSaida(x) === impressao;
+            if (!carregarFilaDeSaida().some(mesmoItem)) {
                 dfato('saida.saiuPorOutro', { tipo: item.tipo });
                 r = null;
             }
@@ -23853,11 +23917,11 @@ async function esvaziarFilaDeSaida() {
             // cegas tiraria o item de outra pessoa — que então nunca sairia, com
             // o placar já contado.
             f = carregarFilaDeSaida();
-            const saiu = f.findIndex((x) => x && x.tipo === item.tipo && x.venueID === item.venueID
-                && x.updateRequestID === item.updateRequestID);
             // Se o aparelho recusar a gravação, o item que acabou de sair fica lembrado em memória e
-            // o laço não o manda de novo (R23-1-01); o pouso acima já o contou uma vez.
-            const tirados = saiu >= 0 ? f.splice(saiu, 1) : [];
+            // o laço não o manda de novo (R23-1-01); o pouso acima já o contou uma vez. Pela impressão
+            // digital e com as cópias idênticas juntas: é a mesma decisão, e já foi mandada.
+            const tirados = f.filter(mesmoItem);
+            f = f.filter((x) => !mesmoItem(x));
             salvarFilaSemOs(f, tirados);
             updateInFlightIndicator();
             // Só conta o que POUSOU (inclusive "já tratado"): a recusa de verdade
@@ -25416,7 +25480,6 @@ async function offlineItensDaFila(janela) {
     // reais que não viraram exemplo (R9-4-01, MEDIDO no navegador: 10 de 40
     // pedidos sem nenhum tile; auditoria de 2026-10-06).
     const fila = filaReal().slice();
-    let i = 0;
     let ultimaCessao = performance.now();
     for (const p of fila) {
         for (const u of tilesDaFaixa(p, faixa)) {
@@ -25432,8 +25495,9 @@ async function offlineItensDaFila(janela) {
         // ~16 ms num desktop pra fila inteira (antes da faixa de larguras; hoje ~6×
         // isso), e 4–6× num celular: sem ceder a thread vira tarefa longa no meio do
         // arraste de quem tria. Cede por TEMPO (8 ms de trabalho), não por contagem:
-        // o custo por pedido depende da faixa e do aparelho.
-        if (++i % 4 === 0 && performance.now() - ultimaCessao > 8) {
+        // o custo por pedido depende da faixa e do aparelho. O relógio é lido a CADA pedido (custa
+        // nada): com «a cada 4 pedidos» a maior tarefa a 6× de CPU era de 43–65 ms contra 22–25 ms (R24-4-04).
+        if (performance.now() - ultimaCessao > 8) {
             await new Promise((r) => setTimeout(r, 0));
             ultimaCessao = performance.now();
         }
@@ -26208,13 +26272,12 @@ function atualizarLinhaDoOffline(feitos, total) {
     // (auditoria de 2026-10-01, R6-4-2).
     const completa = offlineJanelaServida !== null && cobreAFila;
     const fotosValem = completa && Math.floor(Date.now() / OFFLINE_CICLO_MS) - offlineJanelaServida <= 2;
-    // `prontoAZero`: a fila vazia é um caso à parte do plural — em francês o zero
-    // é SINGULAR ("0 demande"), em pt/en/es é plural (R23-6 F3). Não há ICU.
     if (semRede && fotosValem && n) {
         // Sem sinal e com tudo no aparelho: dizer que "o mapa e as fotos chegam
-        // quando houver rede" era mentir sobre o que já está guardado.
+        // quando houver rede" era mentir sobre o que já está guardado. Aqui `n` é sempre ≥ 1 (a condição o
+        // exige): o zero não chega nesta linha — o `prontoAZero` mora no «Pronto» de baixo (R24-6).
         el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
-            t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
+            t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n }))}</span> `
             + escapeHtml(t('prefs.offline.prontoSemRedeB'));
         return;
     }
@@ -26253,6 +26316,8 @@ function atualizarLinhaDoOffline(feitos, total) {
             t('prefs.offline.pendenteA'))}</span> ` + escapeHtml(t('prefs.offline.pendenteB'));
         return;
     }
+    // `prontoAZero`: a fila vazia é um caso à parte do plural — em francês o zero é SINGULAR ("0 demande"),
+    // em pt/en/es é plural (R23-6 F3). Não há ICU.
     el.innerHTML = `<span class="text-emerald-700 dark:text-emerald-400 font-semibold">${escapeHtml(
         t(n === 1 ? 'prefs.offline.prontoA' : n === 0 ? 'prefs.offline.prontoAZero' : 'prefs.offline.prontoAPlural', { n }))}</span> `
         + escapeHtml(t('prefs.offline.prontoB'));
@@ -26448,11 +26513,9 @@ async function offlineTentarAbrirSemRede(aposFalha = false, epoca = null) {
     if (!AppState.authenticated) return false;
     // A fila guardada é uma FOTO: não sabe do que foi decidido depois dela — na
     // sombra (está na fila de saída) nem com rede (pousou depois da foto). Sem
-    // este filtro, tudo isso voltava como card (relato de 2026-09-22). Fila
-    // guardada por versão anterior não tem `desde`: vale a hora em que foi
-    // gravada, que é o mais perto que se sabe.
-    // MIGRACAO: fila-guardada-desde
-    const desde = Number.isFinite(guardada.desde) ? guardada.desde : guardada.t;
+    // este filtro, tudo isso voltava como card (relato de 2026-09-22). Sem `desde`
+    // o `semOsJaDecididos` usa 0, o lado seguro: deixa de fora tudo que pousou.
+    const desde = guardada.desde;
     const filtrada = semOsJaDecididos(guardada.places, desde);
     // Tudo decidido: não há o que mostrar, e a tela certa é a de sempre (a
     // falha de rede), não uma fila vazia que se passaria por "Tudo limpo!".

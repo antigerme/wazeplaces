@@ -298,7 +298,7 @@ test('R12-2-01/05: o "Sair" leva as chaves e os avisos; a troca de conta, as cha
     'a troca de conta deixou as chaves da conta anterior');
   const conhecer = fatiar('aoConhecerConta');
   const aplica = conhecer.search(/^\s+if \(typeof aplicarAvisosQueEsperavamAConta === 'function'\) aplicarAvisosQueEsperavamAConta\(id\);$/m);
-  const troca = conhecer.search(/^\s+if \(antes && antes\.id && String\(antes\.id\) !== id\) esquecerOutraConta\(id\);$/m);
+  const troca = conhecer.search(/^\s+if \(antes && antes\.id && String\(antes\.id\) !== id && !jaTrocouAqui\) esquecerOutraConta\(id\);$/m);
   assert.ok(aplica > 0 && troca > 0 && aplica > troca, 'os avisos que esperavam a conta não são aplicados DEPOIS da troca de conta');
 });
 

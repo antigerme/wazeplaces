@@ -239,7 +239,7 @@ test('o resumo da fila de saída conta distintos, repetidos, tipos e idade — s
     { tipo: 'reject', venueID: 'v2', updateRequestID: 2, t: t + 2000, nome: 'autor' },
   ]));
   const r = app.diagResumoDaSaida();
-  assert.deepEqual(r, { n: 3, distintas: 2, repetidas: 1, tipos: { reject: 2, read: 1 }, maisAntigaMin: 7 });
+  assert.deepEqual(r, { n: 3, distintas: 2, repetidas: 1, tipos: { reject: 2, read: 1 }, maisAntigaMin: 7, lembradosSemGravar: 0 });
   assert.ok(!JSON.stringify(r).includes('v1') && !JSON.stringify(r).includes('autor'), 'o resumo levou id ou autor');
 });
 
@@ -335,8 +335,10 @@ test('fila nova esquece o que passou, e a fila guardada reaberta começa uma fil
 
 test('a REABERTURA SEM REDE filtra a foto, e desiste se tudo foi decidido', () => {
   const f = fatiar('offlineTentarAbrirSemRede');
-  assert.match(f, /const desde = Number\.isFinite\(guardada\.desde\) \? guardada\.desde : guardada\.t;/,
-    'a fila guardada por versão anterior não tem `desde`: tem que cair na hora em que foi gravada');
+  // A migração `fila-guardada-desde` cumpriu o prazo e saiu (lote 28): sem `desde` o `semOsJaDecididos` usa 0
+  // (o lado seguro), e o `: guardada.t` não volta.
+  assert.match(f, /const desde = guardada\.desde;/, 'a fila guardada deixou de passar o `desde` dela ao filtro');
+  assert.doesNotMatch(f, /guardada\.desde : guardada\.t/, 'a migração `fila-guardada-desde` voltou');
   assert.match(f, /const filtrada = semOsJaDecididos\(guardada\.places, desde\);/,
     'a reabertura sem rede voltou a restaurar a foto INTEIRA — o relato de volta');
   assert.match(f, /AppState\.queue = filtrada\.places;/, 'a fila tem que ser a FILTRADA');
@@ -469,7 +471,8 @@ test('o esvaziamento manda cada item pela região DELE, e tira da fila pela CHAV
   const e = fatiar('esvaziarFilaDeSaida');
   assert.match(e, /API\.markAsRead\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
   assert.match(e, /API\.rejectPlace\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
-  assert.match(e, /f\.findIndex\(\(x\) => x && x\.tipo === item\.tipo && x\.venueID === item\.venueID\s*&& x\.updateRequestID === item\.updateRequestID\)/,
+  // Pela IMPRESSÃO DIGITAL do item (lote 28): `tipo + ids` com `===` não casava id nulo/objeto e escondia o laço.
+  assert.match(e, /const mesmoItem = \(x\) => x && x\.t === item\.t && x\.tipo === item\.tipo && chaveDoItemDaSaida\(x\) === impressao;/,
     'tirar pela posição (`shift`) leva o item errado quando outra aba mexe na fila');
   assert.doesNotMatch(e, /f\.shift\(\)/);
 });
