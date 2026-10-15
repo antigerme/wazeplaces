@@ -895,3 +895,21 @@ test('SW: a navegação sem rede cai na página guardada mesmo com query (atalho
   assert.match(sw, /if \(isHTML\) return caches\.match\('\/'\);/);
   assert.doesNotMatch(sw, /caches\.match\('\/index\.html'\)/);
 });
+
+// R24-4-01: na seção 9p, a volta da rede (`setOffline(false)`) dispara o `online` na aba B se ela ainda está aberta; B
+// regrava a fila (carimbo TB) depois de A gravar a dela (TA) e A termina `cobre:false · pronto:false` — 7 de 12 rodadas
+// reprovavam sob carga. O gesto que o cenário mede é o de A: nos modos em que B já fez o que tinha de fazer, ela é
+// FECHADA antes da volta da rede. `close()` simples, e NÃO `fecharComoOUsuario` (no Chromium devolve antes de a página
+// sumir e o `setOffline` seguinte falha com «Target … closed»); na «mesma» B fica (o controle quer as duas abas vivas).
+test('smoke do offline (9p): a aba B é fechada ANTES de a rede voltar, e só fora do controle «mesma»', () => {
+  const SMOKE = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8')
+    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = SMOKE.indexOf('const cenario9p = async');
+  assert.ok(i > 0, 'o cenário 9p sumiu');
+  const cenario = SMOKE.slice(i, SMOKE.indexOf('const varr9p = await cenario9p'));
+  const iFecha = cenario.indexOf("if (modo !== 'mesma') await B.pg.close();");
+  const iVolta = cenario.indexOf('await ctx.setOffline(false);');
+  assert.ok(iFecha > 0, 'a aba B deixou de ser fechada (close() simples) fora do controle «mesma»');
+  assert.ok(iVolta > iFecha, 'a aba B tem que ser fechada ANTES de a rede voltar (o `online` dela regrava a fila por cima da de A)');
+  assert.doesNotMatch(cenario.slice(iFecha, iFecha + 80), /fecharComoOUsuario/, 'fecharComoOUsuario(B.pg) devolve antes de a página sumir no Chromium');
+});
