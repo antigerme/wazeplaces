@@ -1,9 +1,10 @@
 // «REDUZIR MOVIMENTO» e o `card-aperta` que oscilava (R21-8-01, lote 25).
 //
 // Com `prefers-reduced-motion: reduce` o `card-aperta` ligava e desligava a cada
-// quadro, sem parar, com o card PARADO (a foto e o texto saltando 7–13 px, a barra
-// ✕ ↑ ✓ fora da janela em metade dos quadros, mais de 100 layouts por segundo),
-// no Chromium e no WebKit (medido nos dois). A causa estava numa linha do bloco de reduced-motion do CSS:
+// quadro, sem parar, com o card PARADO (a barra ✕ ↑ ✓ saltando de 5 a 53 px e, em
+// alguns cards, fora da janela em até metade dos quadros; mais de 100 layouts por
+// segundo), no Chromium e no WebKit (medido nos dois). A causa estava numa linha do
+// bloco de reduced-motion do CSS:
 // `transition-duration: 0.01ms` faz de TODA mudança de propriedade de TODO elemento
 // uma transição — e 0.01ms não é «sem transição»: a propriedade que muda continua
 // valendo o valor de ANTES até o quadro seguinte. A `vigiarBarraDeAcoes` tira o

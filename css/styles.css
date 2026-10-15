@@ -755,9 +755,10 @@ body > main {
    ações estoura o corpo do card — fonte do sistema em 1,3× ou mais nas alturas
    de 667 a 860 px, onde a regra compacta por ALTURA (px) não alcança. Com escala
    1 e uma janela de altura normal ela nunca liga, e este bloco não existe pra a
-   tela: nenhum pixel muda. Em janela BAIXA ela liga mesmo a 1× (MEDIDO: 390×500,
-   390×520, 375×520, 412×520 e janelas de computador de uns 500 px de altura): o
-   que decide é a barra contra o corpo do card, e não a escala.
+   tela: nenhum pixel muda. Em janela BAIXA ela liga mesmo a 1× (MEDIDO: 375×553,
+   390×500, 390×520, 375×520, 412×520 e janelas de computador de uns 500 px de
+   altura — conforme o card: o mesmo tamanho de janela liga em uns e não em
+   outros): o que decide é a barra contra o corpo do card, e não a escala.
 
    Quem cede é a FOTO, até um piso que ainda mostra a evidência (5.5rem: em
    `rem`, proporcional ao texto, nunca um número de pixels que a escala deixaria
@@ -790,8 +791,8 @@ body > main {
    novo de um `card-aperta`/`placar-2x2` que não entrar aqui. Alvos escolhidos, e não
    `*`: o `*` invalidava o estilo do card INTEIRO a cada escrita da vigia (MEDIDO
    no Chromium com a CPU 6× mais lenta: +20 a +35 ms de tarefa por card com o
-   `card-aperta` ligado) e estes bastam (28 casos quietos com a transição de 0.01ms
-   de volta).
+   `card-aperta` ligado) e estes bastam (quietos, com a transição de 0.01ms de volta,
+   os 26 cards das fixtures que oscilavam, em 3 tamanhos de tela, no Chromium).
    O card em si fica de fora: a saída do swipe é uma transição de `transform`
    escrita em estilo inline nele. `!important` pra nenhum `transition-*` de
    utility ou de estilo inline vencer. */
@@ -1657,7 +1658,7 @@ button:active {
    barra e a repõe no mesmo quadro; com 0.01ms ela lia o `min-height` da foto
    ainda no valor de antes, achava que a barra cabia, e no quadro seguinte o valor
    novo chegava, a barra saía da janela e a classe voltava: um laço sem fim com o
-   card PARADO (a foto e o texto saltando 7–13 px, mais de 100 layouts por
+   card PARADO (a barra ✕ ↑ ✓ saltando de 5 a 53 px, mais de 100 layouts por
    segundo), no Chromium e no WebKit (medido nos dois, no Linux) e justo pra quem
    pediu menos movimento. */
 @media (prefers-reduced-motion: reduce) {

@@ -10606,8 +10606,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // ── «REDUZIR MOVIMENTO»: O `card-aperta` NÃO PISCA COM O CARD PARADO (R21-8-01, lote 25) ──
 //
 // Com `prefers-reduced-motion: reduce` o `card-aperta` ligava e desligava a cada
-// quadro, sem parar, com o card PARADO: a foto e o texto saltavam 7–13 px, a barra
-// ✕ ↑ ✓ ficava fora da janela em metade dos quadros e o navegador refazia mais de
+// quadro, sem parar, com o card PARADO: a barra ✕ ↑ ✓ saltava de 5 a 53 px e, em alguns
+// cards, ficava fora da janela em até metade dos quadros, e o navegador refazia mais de
 // 100 layouts por segundo. A causa era UMA linha do styles.css: `transition-duration:
 // 0.01ms` no bloco de reduced-motion. 0.01ms não é «sem transição» — a propriedade
 // que muda segue valendo o valor de ANTES até o quadro seguinte —, e a
@@ -10630,11 +10630,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // card que não precisa dele nunca oscilaria, e «quieto» nele não provaria nada.
 //
 // Os CASOS são os que oscilavam sem o conserto (medidos na base, Chromium 156 e
-// WebKit 27.2: os MESMOS 12 de 28 nos dois): o
+// WebKit 27.2, os mesmos nos dois): o
 // iPhone 15 a 1,3× em francês (a barra fora em 45 de 90 quadros), o Z Fold a 1,3×, as
 // janelas baixas a 1× (390×520: a barra fora; 390×500 e a janela de computador de 500
 // px: o card de FUNDO) e o iPhone a 1,8×, onde o placar também entra no laço — mais
-// dois com o texto grande ligado que já eram quietos.
+// dois com o texto grande ligado que já eram quietos. O laço DEPENDE DO CARD: o mesmo
+// tamanho de tela oscila com uns e não com outros (o S8 a 1,15× e a janela de 375×553 só
+// oscilam com a fila B abaixo; com a fila A são quietos, e um bloco só com ela nunca os
+// pegaria).
 //
 // O CONSERTO tem duas camadas, e este bloco mede as duas: o 0s do reduced-motion
 // (a causa) e a DEFESA das vigias (`card-medindo`/`placar-medindo`, js/app.js e
@@ -10654,7 +10657,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 {
   const pedidoRM = (tipo, pais, chave) => FIXTURES_PAISES
     .filter((f) => f.purType === tipo && f._pais === pais).sort((a, b) => chave(b) - chave(a))[0];
-  // A fila: o 1º é o card medido (o nome mais longo dos NEW_PHOTO da França), o 2º é
+  // A fila A: o 1º é o card medido (o nome mais longo dos NEW_PHOTO da França), o 2º é
   // o card de FUNDO (o FLAGGED_PHOTO com mais fotos) e o 3º só impede o 2º de ser o
   // último da fila — no último pedido o app não monta pilha.
   const FILA_RM = [
@@ -10662,8 +10665,15 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     pedidoRM('FLAGGED_PHOTO', 'França', (f) => (f.imageUrls || []).length),
     pedidoRM('NEW_PLACE', 'Reino Unido', (f) => (f.name || '').length),
   ];
-  checa(FILA_RM.every(Boolean), 'reduzir movimento: faltou um dos 3 pedidos da fixture dos 6 países — o bloco mediria outro cenário');
-  if (FILA_RM.every(Boolean)) {
+  // A fila B: o FLAGGED_PLACE do Brasil na frente (o laço o pega a 1,15× e a 375×553, onde o
+  // da fila A é quieto), o NEW_PHOTO do Brasil no fundo e o NEW_PLACE do Brasil no fim.
+  const FILA_RM_B = [
+    pedidoRM('FLAGGED_PLACE', 'Brasil', () => 0),
+    pedidoRM('NEW_PHOTO', 'Brasil', () => 0),
+    pedidoRM('NEW_PLACE', 'Brasil', () => 0),
+  ];
+  checa(FILA_RM.every(Boolean) && FILA_RM_B.every(Boolean), 'reduzir movimento: faltou um dos pedidos das filas A e B da fixture dos 6 países — o bloco mediria outro cenário');
+  if (FILA_RM.every(Boolean) && FILA_RM_B.every(Boolean)) {
     const JANELA_RM = 2000;
     const REGRA_ANTIGA = '*, *::before, *::after { transition-duration: 0.01ms !important; }';
     // A defesa tem regras próprias (styles.css); pra o CONTROLE reproduzir o laço de antes, elas
@@ -10671,9 +10681,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const SEM_A_DEFESA = '.place-card.card-medindo .card-photo, .place-card.card-medindo .card-content,'
       + ' #placarGrid.placar-medindo, #placarGrid.placar-medindo > *'
       + ' { transition: all 0.01ms !important; }';
-    const LOCALE_RM = { pt: 'pt-BR', fr: 'fr-FR' };
+    const LOCALE_RM = { pt: 'pt-BR', fr: 'fr-FR', en: 'en-US' };
     // `laco`: onde a escrita da classe aparecia sem o conserto — o card da frente, o de
-    // FUNDO ou o placar. `fora`: a barra também saía da janela naquele caso.
+    // FUNDO ou o placar. `fora`: a barra também saía da janela naquele caso. `fila`: 'B'
+    // onde só o card da fila B oscilava.
     const CASOS_RM = [
       { id: 'iPhone 15 · 393×852 a 1,3× · fr', viewport: { width: 393, height: 852 }, escala: 1.3, lang: 'fr', laco: 'frente', fora: true },
       { id: 'Z Fold · 344×882 a 1,3× · pt', viewport: { width: 344, height: 882 }, escala: 1.3, lang: 'pt', laco: 'frente' },
@@ -10683,6 +10694,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       { id: 'iPhone 15 · 393×852 a 1,8× · pt', viewport: { width: 393, height: 852 }, escala: 1.8, lang: 'pt', laco: 'placar', fora: true },
       { id: 'S8 · 360×740 a 1,3× · pt', viewport: { width: 360, height: 740 }, escala: 1.3, lang: 'pt', laco: null },
       { id: 'SE · 375×667 a 1,5× · pt', viewport: { width: 375, height: 667 }, escala: 1.5, lang: 'pt', laco: null },
+      { id: 'S8 · 360×740 a 1,15× · en · fila B', viewport: { width: 360, height: 740 }, escala: 1.15, lang: 'en', laco: 'frente', fila: 'B' },
+      { id: 'janela baixa · 375×553 a 1× · pt · fila B', viewport: { width: 375, height: 553 }, escala: 1, lang: 'pt', laco: 'frente', fora: true, fila: 'B' },
     ];
     // Roda no navegador: conta as escritas de classe (registros BRUTOS) e os quadros com
     // a barra fora da janela durante `janelaMs`, e devolve o estado em que o card parou.
@@ -10753,7 +10766,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         AppState.queue = fila; AppState.currentPlace = fila[0];
         document.querySelectorAll('.place-card').forEach((e) => e.remove());
         showCurrentPlace();
-      }, { fila: FILA_RM, lang: caso.lang });
+      }, { fila: caso.fila === 'B' ? FILA_RM_B : FILA_RM, lang: caso.lang });
       // O card ASSENTOU (a entrada, a 1ª medida e a confirmação dela já rodaram): a
       // janela de 2 s é só do card PARADO. As imagens (a foto, os tiles do mapa) chegam
       // ANTES: uma delas chegando no meio da janela mexeria no tamanho do card e a vigia,
@@ -10784,7 +10797,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     };
     const resumoRM = (m) => `escritas: frente ${m.frente}, fundo ${m.fundo}, placar ${m.placar}, dentro ${m.dentro}; barra fora em ${m.fora}/${m.quadros} quadros; ${m.layoutsPorS === null ? 'layouts/s n/d (sem CDP)' : m.layoutsPorS + ' layouts/s'}; card-aperta ${m.aperta ? 'ligado' : 'DESLIGADO'}`;
 
-    // 1. O app de hoje: quieto, nos 8 casos.
+    // 1. O app de hoje: quieto, nos 10 casos.
     for (const caso of CASOS_RM) {
       const id = `reduzir movimento/${caso.id}`;
       const { m, erros } = await rodarRM(caso);
@@ -10797,9 +10810,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(erros.length === 0, `${id}: erro de JS`, erros[0]);
     }
 
-    // Um controle por onde o laço aparecia: o card da frente, o de FUNDO e o placar.
+    // Um controle por onde o laço aparecia: o card da frente, o de FUNDO e o placar — e os dois
+    // casos da fila B, que a fila A não faz oscilar.
     const COM_CONTROLE = CASOS_RM.filter((c) => c.laco
-      && ['iPhone 15 · 393×852 a 1,3× · fr', 'janela baixa · 390×500 a 1× · pt', 'iPhone 15 · 393×852 a 1,8× · pt'].includes(c.id));
+      && ['iPhone 15 · 393×852 a 1,3× · fr', 'janela baixa · 390×500 a 1× · pt', 'iPhone 15 · 393×852 a 1,8× · pt',
+        'S8 · 360×740 a 1,15× · en · fila B', 'janela baixa · 375×553 a 1× · pt · fila B'].includes(c.id));
 
     // 2. CONTROLE do instrumento: a regra antiga de volta, com a defesa da vigia DESLIGADA, TEM que
     //    oscilar onde ela oscilava. Sem isto o «quieto» de cima poderia ser uma medida cega.
