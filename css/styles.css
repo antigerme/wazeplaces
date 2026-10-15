@@ -857,6 +857,15 @@ body > main {
   }
 }
 
+/* O CANVAS DO QR DO PAREAMENTO (R23-7-04, lote 27). Ele nasce 300×150 + a moldura (p-3 e a borda) = 326 px e fica assim até o primeiro desenho (o `qr.js` sob demanda
+   e a resposta do `parear`). Num cartão estreito essa moldura em branco passava da BORDA do cartão e da janela: a 280 px (o Galaxy Fold) de −23 a 303 num cartão de
+   16 a 264, e a 320 px uns 19 px de cada lado. O teto é a largura do CARTÃO e não a da caixa de conteúdo (`100%`): o canvas já usa o respiro do `p-6` (1,5rem de cada lado),
+   e a 360 e 393 px a moldura de antes cabe dentro do cartão, nesse respiro — com `max-width: 100%` ela encolhia ali também, e o pixel de um estado que estava certo mudava.
+   Depois do desenho o JS põe `max-width: none` inline (o QR quadrado de 205 px segue como sempre, sem amassar no Fold). */
+#pairQr {
+  max-width: calc(100% + 3rem);
+}
+
 /* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
    "Tudo limpo!", mas anima sozinho — sem depender de um `.celebrate` no pai,
    porque este é criado e removido em runtime pelo JS. */
@@ -1263,8 +1272,9 @@ input.ui-switch:disabled {
    (max-height: 15rem)`, SEM limite de largura: 240 px de altura do overlay são a janela de 272 px a 1× (a janela menos o respiro de 1rem de cada lado) e o
    `15rem` é o teto que só aparece com texto PEQUENO — a 0,85× (o «pequeno» do Android) o diálogo já CABE a partir de 270 px, a 0,75× a partir de 260 e a 0,5× a
    partir de 230, e sem o teto em rem o degrau mudaria esses. Com texto ≥ 1× quem manda é o px (a 1,3× são 240 de conteúdo = 281 px de janela; o diálogo cabe só a
-   partir de 14rem = 291 px de conteúdo). A+B nos mesmos 2.176 estados: dos que o degrau muda, 0 são de diálogo que CABIA (os 3 que o comparador aponta mudam 5 a
-   22 pixels também entre DUAS rodadas da árvore de antes: ruído de raster) e os estados com o «Aplicar» INALCANÇÁVEL vão de 72 a 0 (a 0,85× e a 1×) e de 52 a 0 (a 1,3×). Fica de fora, com o
+   partir de 14rem = 291 px de conteúdo). A+B nos mesmos 2.176 estados: dos que o degrau muda, 0 são de diálogo que CABIA (o comparador aponta 3 estados de 5 a
+   22 pixels, e neles a escada nem casou — o cartão segue `overflow: visible` e o rodapé estático nas duas árvores —; renderizados um a um, em contexto novo, 3 vezes, a árvore de
+   antes e a nova dão o MESMO PNG: é o raster de uma página reaproveitada entre alturas) e os estados com o «Aplicar» INALCANÇÁVEL vão de 72 a 0 (a 0,85× e a 1×) e de 52 a 0 (a 1,3×). Fica de fora, com o
    dono: o diálogo a 273–289 px (rodapé pendurado, alcançável), o texto ≥ 1,15× em janelas de 280 px ou mais que a escada em rem não alcança, e o texto de 2× em
    janelas pequenas (o título em 5 a 8 linhas e o corpo no piso: o assunto do texto grande). O scroll-padding do degrau acompanha a linha de baixo (5,5rem, rodapé
    lado a lado); as janelas estreitas (≤ 15,4rem) já têm o degrau estreito em rem (15,4 × 17rem, que contém as dele) e o 11rem. */

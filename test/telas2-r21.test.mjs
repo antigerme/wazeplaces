@@ -861,13 +861,18 @@ test('R23-8-06 · a foto e o mapa ampliados têm fundo OPACO (Canvas) no contras
 // Só o HTML: o que o navegador mede (o canvas a 280/320/360 px antes e depois do desenho, o fieldset com texto grande, e que a 1× nada muda) está no bloco do lote 27
 // do `tools/smoke-browser.mjs`.
 
-test('R23-7-04 · o canvas do QR do pareamento nunca passa do cartão (max-w-full), antes e depois de desenhado', () => {
+test('R23-7-04 · o canvas do QR do pareamento nunca passa do CARTÃO (max-width: 100% + o p-6), antes e depois de desenhado', () => {
   const tag = /<canvas id="pairQr" class="([^"]*)"/.exec(HTML);
   assert.ok(tag, 'o canvas do QR (#pairQr) sumiu do HTML (gotcha #68)');
-  assert.ok(tag[1].split(/\s+/).includes('max-w-full'), 'o canvas nasce 300×150 + moldura (326 px) e passava do cartão a 280 px antes do primeiro desenho: max-w-full');
-  // O tamanho DESENHADO continua sendo o do JS (px inline): o max-w-full só age quando o cartão é mais estreito que ele.
+  assert.ok(!tag[1].split(/\s+/).includes('max-w-full'), 'max-w-full (100% da caixa de conteúdo) encolhe a moldura que hoje cabe no respiro do cartão a 360–412 px: o teto é calc(100% + 3rem), no CSS');
+  const r = regraDe('#pairQr', '', 'max-width');
+  assert.ok(r, 'sumiu o teto do canvas do QR: ele nasce 300×150 + moldura (326 px) e passa do cartão a 280 e 320 px antes do primeiro desenho');
+  assert.equal(r.decl['max-width'], 'calc(100% + 3rem)', 'o teto é a largura do cartão: a caixa de conteúdo (100%) mais o p-6 de cada lado (3rem)');
+  // O `p-6` do cartão (1,5rem de cada lado = os 3rem do teto): é a conta que faz o canvas parar na BORDA do cartão.
+  assert.match(HTML, /<div id="pairShowModal"[^>]*>\s*<div class="[^"]*\bp-6\b/, 'o cartão do QR deixou de ter p-6: o teto de 3rem não é mais a borda dele');
+  // O tamanho DESENHADO continua sendo o do JS (px inline), e o JS TIRA o teto depois do desenho: com ele o QR quadrado de 205 px encolheria na largura (160×205 no Fold).
   const js = ler('js/app.js').replace(/^\s*\/\/.*$/gm, '');
-  assert.match(js, /canvas\.style\.width = px \+ 'px';\s*canvas\.style\.height = px \+ 'px';\s*canvas\.style\.maxWidth = 'none';/, 'o QR DESENHADO tem que tirar o teto: com o max-w-full ele encolheria na largura e ficaria rachado (não quadrado) no Fold, e o tamanho a 1× mudaria');
+  assert.match(js, /canvas\.style\.width = px \+ 'px';\s*canvas\.style\.height = px \+ 'px';\s*canvas\.style\.maxWidth = 'none';/, 'o QR DESENHADO tem que tirar o teto: com ele o QR encolheria na largura e ficaria rachado (não quadrado) no Fold, e o tamanho a 1× mudaria');
 });
 
 test('R23-8-04 · o fieldset dos tipos de pedido encolhe com o cartão e quebra a palavra que não cabe (min-w-0 + break-words)', () => {
