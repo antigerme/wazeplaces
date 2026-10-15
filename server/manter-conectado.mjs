@@ -34,8 +34,9 @@
 //     `callWaze` COM contexto: o cookie novo da resposta é gravado pelo
 //     `refreshCookies` (que respeita a trava de 1 h; como a devida passa de 5 h,
 //     ela grava). Nenhuma gravação nossa além dessa.
-//   · 401/403 do Waze = sessão morta: apaga a entrada e deixa a sessão vencer.
-//     Rede/5xx: tenta na próxima execução, sem apagar. Sessão ausente: apaga a
+//   · 401/403 do Waze: CONFIRMA uma vez (outra pausa e outro `Session`); só a
+//     2ª negativa apaga a entrada e deixa a sessão vencer (gotcha #42: 401
+//     isolado pode ser alarme falso). Rede/5xx: tenta na próxima execução, sem apagar. Sessão ausente: apaga a
 //     entrada. Entrada com mais de 14 dias (`KA_TTL`) sem o editor reabrir o app
 //     também sai — e é conferida pelo CARIMBO do valor, não pelo TTL do store: o
 //     arquivo da VM renova o mtime a cada leitura, e a varredura lê.
@@ -46,7 +47,8 @@
 //                + até `examinar` (15) leituras de sessão, uma por entrada vista
 //                + por sessão RENOVADA (até `lote` = 6): 1 leitura da entrada,
 //                  1 `fetch` ao Waze, 1 leitura + 1 gravação do `refreshCookies`
-//                = 1 + 15 + 6×4 = 40 no pior caso — sob o teto de 50. Escrita:
+//                + 1 `fetch` de confirmação por sessão que levou 401/403
+//                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50. Escrita:
 //                no máximo 6 por execução (a da sessão).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
 //                Cada sessão mantida é renovada a cada ~5,5 h (5 h devida + até
@@ -113,7 +115,8 @@ function embaralharPadrao(lista) {
  * `vistas` = entradas examinadas · `renovadas` = Waze respondeu 200 ·
  * `mortas` = entrada apagada (sessão ausente/morta/estragada) · `adiadas` =
  * devidas que ficaram pra próxima (tempo esgotado, rede, 5xx) ·
- * `emDia` = ainda não devidas · `semRotacao` = 200 sem cookie novo (continua
+ * `confirmadas` = segundas idas depois de um 401/403 (só apaga se a 2ª também
+ * for 401/403) · `emDia` = ainda não devidas · `semRotacao` = 200 sem cookie novo (continua
  * devida) · `expiradas` = entrada com mais de 14 dias sem o app ser aberto.
  */
 export async function varrerMantidos({
@@ -127,7 +130,7 @@ export async function varrerMantidos({
   pausa = pausaPadrao,
   embaralhar = embaralharPadrao,
 } = {}) {
-  const resumo = { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0 };
+  const resumo = { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0, confirmadas: 0 };
   const lista = typeof listar === 'function' ? listar : (store && typeof store.list === 'function' ? (p) => store.list(p) : null);
   if (!lista || !sessions || typeof chamarWaze !== 'function') return resumo;
 
@@ -157,11 +160,20 @@ export async function varrerMantidos({
     if (renovando > 0) { try { await pausa(); } catch { /* a pausa nunca derruba a varredura */ } }
     renovando++;
 
-    let r;
-    try {
-      r = await chamarWaze({ token: ex.token, region: ex.region, cookies: ex.cookies, sessions });
-    } catch {
-      r = { resultado: 'falhou' };
+    const ir = async () => {
+      try { return await chamarWaze({ token: ex.token, region: ex.region, cookies: ex.cookies, sessions }); } catch { return { resultado: 'falhou' }; }
+    };
+    let r = await ir();
+    // Um 401/403 ISOLADO não prova sessão morta (gotcha #42: WAF, blip do Waze):
+    // confirma UMA vez, depois de outra pausa com jitter, e só apaga a entrada se
+    // a segunda também for 401/403. Sem tempo pra confirmar, fica pra próxima
+    // execução SEM apagar. Custa no máximo +1 `fetch` por sessão que falhou
+    // (1 + 15 + 6 × 5 = 46 operações no pior caso, ainda sob as 50).
+    if (r.resultado === 'morta') {
+      if (relogio() - inicio + PAUSA_MAX_MS > tetoMs) { resumo.adiadas++; continue; }
+      try { await pausa(); } catch { /* a pausa nunca derruba a varredura */ }
+      resumo.confirmadas++;
+      r = await ir();
     }
     if (r.resultado === 'ok') {
       resumo.renovadas++;

@@ -276,7 +276,7 @@ test('varredura: 403 do Waze apaga a entrada (a sessão vence sozinha); 500 e er
     c.amb.modo = (sessao) => ({ MORTA: '403', INSTAVEL: '500', SEMREDE: 'rede' }[sessao] || 'ok');
     c.amb.avancar(6 * HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
-    assert.deepEqual([r.vistas, r.renovadas, r.mortas, r.adiadas], [3, 0, 1, 2]);
+    assert.deepEqual([r.vistas, r.renovadas, r.mortas, r.adiadas, r.confirmadas], [3, 0, 1, 2, 1]);
     assert.equal(await c.sessions.manterEstado(morta), false, '403 não apagou a entrada');
     assert.equal(await c.sessions.manterEstado(instavel), true, '500 apagou a entrada');
     assert.equal(await c.sessions.manterEstado(sem_rede), true, 'erro de rede apagou a entrada');
@@ -287,6 +287,43 @@ test('varredura: 403 do Waze apaga a entrada (a sessão vence sozinha); 500 e er
     c.amb.modo = () => 'ok';
     const r2 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.equal(r2.renovadas, 2);
+  } finally { c.amb.restaurar(); }
+});
+
+test('varredura: um 401/403 ISOLADO não apaga a entrada — confirma uma vez, com pausa; só 403+403 apaga (gotcha #42)', async () => {
+  const casos = [
+    // [nome, 1ª ida, 2ª ida, entrada continua?, renovadas, mortas, adiadas]
+    ['403 e depois 200 (alarme falso)', '403', 'ok', true, 1, 0, 0],
+    ['403 e depois 403 (morta de verdade)', '403', '403', false, 0, 1, 0],
+    ['403 e depois 500', '403', '500', true, 0, 0, 1],
+    ['403 e depois erro de rede', '403', 'rede', true, 0, 0, 1],
+  ];
+  for (const [nome, primeira, segunda, ficou, renovadas, mortas, adiadas] of casos) {
+    const c = await cenario();
+    try {
+      const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
+      let idas = 0;
+      c.amb.modo = () => (++idas === 1 ? primeira : segunda);
+      c.amb.avancar(6 * HORA);
+      let pausas = 0;
+      const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: async () => { pausas++; }, embaralhar: ordemFixa });
+      assert.equal(idas, 2, `${nome}: o 403 não foi confirmado com uma segunda ida (${idas})`);
+      assert.equal(pausas, 1, `${nome}: a confirmação tem que esperar uma pausa com jitter`);
+      assert.equal(r.confirmadas, 1, nome);
+      assert.deepEqual([r.renovadas, r.mortas, r.adiadas], [renovadas, mortas, adiadas], nome);
+      assert.equal(await c.sessions.manterEstado(t), ficou, `${nome}: a entrada ${ficou ? 'foi apagada' : 'sobrou'}`);
+      if (segunda === 'ok') assert.match(await c.cookieGuardado(t), /^ROT/, 'a 2ª ida (200) não gravou o cookie novo');
+    } finally { c.amb.restaurar(); }
+  }
+  // Sem tempo pra confirmar: NÃO apaga, fica pra próxima.
+  const c = await cenario();
+  try {
+    const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
+    c.amb.modo = () => '403';
+    c.amb.avancar(6 * HORA);
+    const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, relogio: (() => { let n = 0; return () => (n++ === 0 ? 0 : 19000); })() });
+    assert.equal(r.mortas, 0);
+    assert.equal(await c.sessions.manterEstado(t), true, 'sem tempo pra confirmar, a entrada foi apagada');
   } finally { c.amb.restaurar(); }
 });
 
@@ -350,7 +387,7 @@ test('varredura: sem `list` no store não faz nada (e não lança); com `listar`
     const t = await c.novo(); await c.sessions.manterLigar(t, 'row');
     c.amb.avancar(6 * HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
-    assert.deepEqual(r, { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0 });
+    assert.deepEqual(r, { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0, confirmadas: 0 });
     assert.equal(c.amb.chamadas.length, 0);
     const r2 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, listar: async () => [...c.store.mem.keys()].filter((k) => k.startsWith('ka_')) });
     assert.equal(r2.renovadas, 1, 'o `listar` injetado não foi usado');
@@ -382,6 +419,21 @@ test('varredura: o orçamento de operações de KV cabe nas 50 do plano grátis 
     });
     assert.equal(r.vistas, MANTER_EXAMINAR, 'leu entradas demais numa execução');
     assert.equal(c.store.ops.get, MANTER_EXAMINAR);
+  } finally { c.amb.restaurar(); }
+});
+
+test('varredura: o orçamento de KV segue sob as 50 com TODAS as sessões levando 403 (+1 ida de confirmação cada)', async () => {
+  const c = await cenario();
+  try {
+    for (let i = 0; i < 40; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); }
+    c.amb.modo = () => '403';
+    c.amb.avancar(6 * HORA);
+    c.store.ops.get = c.store.ops.put = c.store.ops.delete = c.store.ops.list = 0;
+    const antes = c.amb.chamadas.length;
+    await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
+    const ops = c.store.ops.get + c.store.ops.put + c.store.ops.delete + c.store.ops.list + (c.amb.chamadas.length - antes);
+    assert.ok(ops <= 50, `${ops} operações numa execução com tudo falhando`);
+    assert.ok(c.amb.chamadas.length - antes <= 12, 'mais de 2 idas por sessão');
   } finally { c.amb.restaurar(); }
 });
 
