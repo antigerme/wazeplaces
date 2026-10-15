@@ -288,15 +288,29 @@ test('R24-4-03: COM rede e cache MUDO o tile vai à rede em ~1,5 s (cada etapa d
 });
 
 test('R24-4-03: cada etapa da hidratação (has, open, keys) tem teto próprio — 3 × 1,2 s NÃO viram lista vazia', async () => {
-  // Soma de 3,6 s > 1,5 s, cada etapa < 1,5 s: a lista tem que ser LIDA, e o tile sair do cache sem rede.
+  // Soma de 3,6 s > 1,5 s, cada etapa < 1,5 s, tile pedido na PARTIDA e sem rede: a lista tem
+  // que ser LIDA (um teto sobre a soma a daria por vazia aos 1,5 s e o tile iria a uma rede que não há).
   const w = mundo({ caches: (rel) => lentos(rel, 1200), fetchImpl: semRede });
-  await w.rel.avancar(4000);
-  const r = await w.terminou(w.pedir(tile), 5000);
-  assert.deepEqual(r.valor, { doCache: true }, 'a lista saiu vazia: um teto sobre a soma das etapas');
+  const r = await w.terminou(w.pedir(tile), 8000);
+  assert.deepEqual(r.valor, { doCache: true }, `a lista saiu vazia: um teto sobre a soma das etapas (${JSON.stringify(r)})`);
   let diag = null;
   w.ouvintes.message({ data: { type: 'DIAG' }, ports: [{ postMessage: (x) => { diag = x; } }], waitUntil() {} });
   assert.equal(diag.listaPronta, true);
   assert.equal(diag.tilesNaLista, 1, 'a leitura lenta devia ter chegado à lista');
+});
+
+test('R24-4-03: lista PRONTA, mas caches.match do tile a 2,5 s: sem rede espera o cache; com rede vai à rede aos 1,5 s', async () => {
+  const lista = (rel) => ({ has: async () => true, open: async () => ({ keys: async () => [{ url: TILE }] }), keys: async () => [], delete: async () => true,
+    match: async () => { await rel.dorme(2500); return { doCache: true }; } });
+  const sem = mundo({ caches: lista, fetchImpl: semRede });
+  await sem.rel.avancar(50);
+  const a = await sem.terminou(sem.pedir(tile), 12000);
+  assert.deepEqual(a.valor, { doCache: true }, `sem rede o tile guardado (match lento) virou falha: ${JSON.stringify(a)}`);
+  const com = mundo({ caches: lista });
+  await com.rel.avancar(50);
+  const b = await com.terminou(com.pedir(tile), 12000);
+  assert.deepEqual(b.valor, { daRede: true });
+  assert.ok(b.quando - 50 <= 1700, `com rede o tile esperou ${b.quando - 50} ms`);
 });
 
 test('R24-4-05: RAJADA de TILES_GUARDADOS com a Cache API muda — o tile não fica pendurado atrás das releituras', async () => {
