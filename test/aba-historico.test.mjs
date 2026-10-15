@@ -622,8 +622,8 @@ test('H20: o francês concorda com "distinction" (feminino) e diz a frase da fol
 const I18N_T = new Function('window', 'navigator', 'localStorage', 'document',
   readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8') + '\nreturn { t, setLang };')(
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
-const celulas = (html) => [...html.matchAll(/<button type="button" class="conq-cel ([^"]*)"\s+data-conq="(\w+)" aria-pressed="(\w+)">([\s\S]*?)<\/button>/g)]
-  .map((m) => ({ classes: m[1].split(/\s+/), id: m[2], pressed: m[3], dentro: m[4] }));
+const celulas = (html) => [...html.matchAll(/<button type="button" class="conq-cel ([^"]*)"\s+data-conq="(\w+)" aria-pressed="(\w+)"(?: aria-describedby="(\w+)")?>([\s\S]*?)<\/button>/g)]
+  .map((m) => ({ classes: m[1].split(/\s+/), id: m[2], pressed: m[3], descrita: m[4] || null, dentro: m[5] }));
 
 test('H19: a célula diz no NOME se a conquista é ganha ou trancada, e o aria-pressed é só a condição aberta', () => {
   const g = { c: { primeiraFaxina: '2026-09-25' }, novas: [], patenteNova: false };
@@ -641,7 +641,10 @@ test('H19: a célula diz no NOME se a conquista é ganha ou trancada, e o aria-p
     assert.match(c.dentro, new RegExp(`class="sr-only">, ${estado}<`),
       `${c.id}: o nome acessível não diz que ela está ${estado} — ganha e trancada só se distinguem pela cor`);
     assert.equal(c.pressed, String(c.classes.includes('sel')), `${c.id}: aria-pressed diferente da seleção na tela`);
+    // R23-7-03: a condição aberta é a descrição da célula selecionada (e só dela): o leitor de tela ouvia "pressionado" e mais nada.
+    assert.equal(c.descrita, c.classes.includes('sel') ? 'conqDica' : null, `${c.id}: aria-describedby="conqDica" só na célula selecionada`);
   }
+  assert.match(htmlConquistas(), /<p class="conq-dica" id="conqDica">/, 'o parágrafo que a célula descreve (#conqDica) sumiu');
 });
 
 test('H19: o degrau atual da escada é anunciado (aria-current), numa lista', () => {

@@ -20442,7 +20442,7 @@ function htmlConquistas() {
         // 2026-09-25).
         const estado = t(on ? 'conq.estado.ganha' : 'conq.estado.trancada');
         return `<button type="button" class="conq-cel ${on ? 'on' : 'off'}${sel ? ' sel' : ''}${nova ? ' nova' : ''}"
-            data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}">
+            data-conq="${escapeHtml(x.id)}" aria-pressed="${sel}"${sel ? ' aria-describedby="conqDica"' : ''}>
             <span class="e" aria-hidden="true">${x.emoji}</span>
             <span class="n">${escapeHtml(t('conq.' + x.id + '.nome'))}</span>` +
             `<span class="sr-only">, ${escapeHtml(estado)}</span>` +
@@ -20452,7 +20452,11 @@ function htmlConquistas() {
     const tocada = conquistaTocada && lista.find((x) => x.id === conquistaTocada);
     // A condição mora AQUI e não dentro da célula: na largura da grade ela
     // esticaria a coluna pelo mesmo motivo acima, e a frase é bem mais longa
-    // que o nome.
+    // que o nome. O leitor de tela não a ouvia (R23-7-03): a célula tocada só trocava o
+    // `aria-pressed`, e a condição nascia num parágrafo solto. A célula `sel` a aponta por
+    // `aria-describedby` (a `tocada` e a `sel` são a mesma célula, e o `conqDica` existe
+    // junto); nada muda na tela. Não é `role="status"` no <p>: ele é recriado pelo
+    // `innerHTML`, e região viva inserida já com texto não é anunciada de forma confiável.
     const dica = tocada
         ? `<p class="conq-dica" id="conqDica"><span><b>${tocada.emoji} ${escapeHtml(t('conq.' + tocada.id + '.nome'))}</b>`
           + ` — ${g.c[tocada.id] ? '✓ ' : ''}${escapeHtml(t('conq.' + tocada.id + '.como'))}</span></p>`
