@@ -95,7 +95,7 @@ const ids = (fila) => (fila || []).map((p) => p.updateRequestID);
 
 const NOMES = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'tirarDaFilaOQueAOutraAbaDecidiu', 'gestoNoDecididoPorOutraAba', 'avisarDecididoNaOutraAba',
-  'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
+  'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
   'handleReject', 'handleMarkAsRead', 'offlineLerPousos', 'registrarPouso',
   'abrirCanalDosPousos', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
   'aplicarPousoDeOutraAba', 'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
@@ -154,7 +154,7 @@ function aba(nav, { fila, aparelho, token = 'tok-x', perfil = { id: 4242 }, trei
   const chaves = Object.keys(deps);
   const fonte = [
     'let tratouNestaFila = false, epocaDaSessao = 0, ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
       + ' descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet(), pousosDaPagina = new Map();',
     CANAL, CANAL_VAR, ...DECIDIDAS,
     ...NOMES.map(fatiar),

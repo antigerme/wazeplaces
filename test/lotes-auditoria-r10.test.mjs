@@ -145,7 +145,7 @@ function montarRecusa({ portao = () => true, conta = () => true, auto = 1, decid
     AUTORES_KEY, AUTORES_MAX_VISTOS: constante('AUTORES_MAX_VISTOS'),
     AUTORES_MAX_REINCIDENTES: constante('AUTORES_MAX_REINCIDENTES'), AUTORES_MAX_DIAS: constante('AUTORES_MAX_DIAS'),
     podeRecusarAutomaticoAqui: () => portao(), contaConfirmada: () => conta(),
-    pedidosEmAndamento: new Set(), recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false,
     recusaAutomaticaNestaFila: false,
     // A retentativa de VERDADE (`callWithRetry`), com esperas curtas: a recusa
     // confere antes de CADA ida, a primeira e as retentativas.
@@ -173,7 +173,7 @@ function montarRecusa({ portao = () => true, conta = () => true, auto = 1, decid
   if (decididos) deps.decididosPorOutraAbaComCardAqui = decididos(fila);
   const h = montar(['aplicarRecusaAutomatica', 'enviarLote', 'callWithRetry', 'autoLigado', 'alternarAutoDoAutor', 'esquecerAutor',
     'esquecerAutorDaLista', 'loadAutores', 'salvarAutores', 'podarAutores', 'diaDeHoje', 'registrarRejeicaoDeAutor',
-    'listaDeAutores', 'copiaEmDia', 'lembrarTextoDaCopia'], deps);
+    'listaDeAutores', 'copiaEmDia', 'lembrarTextoDaCopia', 'contagemDoHistorico'], deps);
   const registro = () => JSON.parse(guardado.get(AUTORES_KEY));
   const fila_ = () => AppState.queue.map((p) => p.updateRequestID);
   // Solta a resposta da próxima ida no ar (a da vez), com `resp`.
@@ -353,6 +353,27 @@ test('R10-2-07: a recusa automática que leva 401 não anota "saida.abriu" — a
   assert.deepEqual(c.diario.filter((k) => k === 'saida.abriu'), ['saida.abriu'], 'CONTROLE: a fila de saída abriu e o diário não disse');
 });
 
+// R23-1-03: o "Rejeitar os N" com o aparelho que RECUSA a gravação da anotação (a cota, o disco). Nenhum item
+// ficou na fila de saída (`anotados.clear()`) e os pedidos voltam pra fila de pedidos; o 401 anunciava
+// "saida.abriu" assim mesmo, com a fila vazia.
+test('R23-1-03: o 401 do "Rejeitar os N" com a anotação recusada pelo aparelho NÃO anota "saida.abriu" (a fila está vazia)', async () => {
+  const m = montarRecusa();
+  m.deps.salvarFilaDeSaida = () => false;                                   // o aparelho recusa a gravação
+  m.deps.enfileirarSaida = (tipo, p, regiao, extra, calado, lista) => {     // a anotação é montada e a gravação falha
+    if (lista) { lista.push(chave(p)); return true; }
+    return false;
+  };
+  const alvos = m.AppState.queue.slice(1, 4);
+  const lote = m.h.enviarLote(alvos, { regiao: 'row', gesto: GESTO });
+  await ateQue(() => m.portoes.length === 1, 'PRÉ-CONDIÇÃO: o lote da pessoa saiu');
+  m.soltar(R401);
+  await lote;
+  assert.ok(m.log.includes('confere-sessao'), 'PRÉ-CONDIÇÃO: o 401 foi pra conferência da sessão');
+  assert.deepEqual(m.naSaida, [], 'PRÉ-CONDIÇÃO: a fila de saída está vazia (a gravação foi recusada)');
+  assert.ok(!m.diario.includes('saida.abriu'),
+    `DEFEITO: o diário diz que a fila de saída abriu, e ela está vazia: ${JSON.stringify(m.diario)}`);
+});
+
 // ═══ "Marcar todos" ═════════════════════════════════════════════════════════
 
 const lido = (i, extra = {}) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, ...extra });
@@ -375,7 +396,7 @@ function montarMarcarTodos({ fila, pedaco = 2, aprovadaDela = () => false, placa
   const modais = [];
   const deps = {
     AppState, localStorage, STATS_KEY, LOTE_LIDOS_PEDACO: pedaco, epocaDaSessao: 0, Treino: { ativo: false },
-    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0, tratouNestaFila: false,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0, tratouNestaFila: false,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, contaDestaAbaEmDuvida: () => false,
     aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
     API: {

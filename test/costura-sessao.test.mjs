@@ -388,14 +388,14 @@ function montarVoo({ janela = false, extras = [] } = {}) {
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; },
     saveStats: () => gravados.push({ ...AppState.stats }), msgDoServidor: (r, f) => f, t: (k) => k,
     historyTodayKey: () => '2026-09-26', ondeAgora: () => '30', getLang: () => 'pt',
-    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
     pedidosQueEntraramNaFila: new Set(),
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null,
     entrarPelaExtensao: () => new Promise(() => {}), console,
     aprovacaoDelaJaPousou: () => false,   // a aprovação de foto sem resposta (R7-3-08): aqui, nenhuma
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'pousouNoWaze', 'descontarGestoSemSessao',
-    'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida',
+    'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida',
     'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento', 'handleActionResult', 'scheduleAction',
     'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'decisaoDepoisDaQueda', 'devolverPedidoRecusado',
     'handleReject', 'handleMarkAsRead', 'derrubarSessao', ...extras], deps);
@@ -620,7 +620,7 @@ function montarLoteDaQueda() {
     AppState, epocaDaSessao: 0, navigator: { onLine: true }, TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1],
     API: { rejectPlace: () => new Promise((ok) => pendentes.push(ok)) },
     saveStats: () => {}, recordHistory: () => {}, registrarPouso: () => {}, registrarRejeicaoDeAutor: () => {},
-    registrarAcaoConfirmada: () => {}, pedidosEmAndamento: new Set(), pedidosQueEntraramNaFila: new Set(),
+    registrarAcaoConfirmada: () => {}, pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pedidosQueEntraramNaFila: new Set(),
     enfileirarSaida: (tipo, p) => { naSaida.push(ch(p)); return true; },
     tirarDaFilaDeSaida: (tipo, p) => { const i = naSaida.indexOf(ch(p)); if (i >= 0) naSaida.splice(i, 1); },
     carregarFilaDeSaida: () => naSaida.slice(),
@@ -693,7 +693,7 @@ function montarLoteNaTrocaDeSessao() {
   let token = 'tok-A';
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false },
-    LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    LOTE_LIDOS_PEDACO: constante('LOTE_LIDOS_PEDACO'), pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pareamentosEmitidos: new Set(),
     alvosDoLoteDeLidosNoAr: new Map(),
     API: { getRegion: () => 'row', getSession: () => token, get sessionToken() { return token; }, setSession: (t) => { token = t; }, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), destroySession: async () => ({ success: true }) },
@@ -769,7 +769,7 @@ function montarLoteComQueda({ pedaco = 1 } = {}) {
     pendingAction: null, inFlightActions: 0, preferences: {} };
   const deps = {
     AppState, safeLS, epocaDaSessao: 0, loteDeLidosContado: null, Treino: { ativo: false }, CONTA_KEY: constante('CONTA_KEY'),
-    LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), pareamentosEmitidos: new Set(),
+    LOTE_LIDOS_PEDACO: pedaco, pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), pareamentosEmitidos: new Set(),
     API: { getRegion: () => 'row', getSession: () => 'tok-A', get sessionToken() { return 'tok-A'; }, setSession() {}, setRegion() {}, setCountry() {},
       markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoesUm.push(ok)) },
     callWithRetry: (fn) => fn(), entrarPelaExtensao: () => new Promise(() => {}),
@@ -1098,7 +1098,7 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     extPerguntando: false, extNegado: null, extNegadoNestaPagina: false, filaAtravessouSessao: false,
     puladosNoInicioDaFila: 0, saidaEsperandoConta: false,
     // A conta que ESTA aba confirmou: A, que estava triando (ver `aoConhecerConta`, R11-1-01).
-    contaConfirmadaNestaAba: { id: '111', s: marcaDe('tokA') },
+    contaConfirmadaNestaAba: { id: '111', s: marcaDe('tokA') }, contaVistaNoAparelho: true,
     EXT_PRESENTE_MS: 350, EXT_ESPERA_MS: 8000, setTimeout, clearTimeout,
     // O teto da espera pelo perfil, curto aqui (o caso do perfil que nunca chega).
     AVISO_RENOVADA_ESPERA_PERFIL_MS: 30,
@@ -1114,7 +1114,7 @@ async function renovarNaQueda({ contaNaPonte, perfil, contaDoPerfil, sairNaEsper
     }),
   };
   // `filaRealComDevolvidos`/`filaReal`: "havia fila na queda?" (R15-6-02) lê a fila de verdade.
-  h = montar(['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta',
+  h = montar(['derrubarSessao', 'entrarPelaExtensao', 'conhecerContaDoLogin', 'aoConhecerConta', 'gravarContaNoAparelho',
     'esquecerOutraConta', 'marcaDaSessao', 'marcaDestaAba', 'filaRealComDevolvidos', 'filaReal'], deps);
   safeLS.set(CONTA_KEY, JSON.stringify({ id: '111', s: marcaDe('tokA') }));   // A estava triando
   h.derrubarSessao('srv.err.cookiesExpired');
@@ -1426,8 +1426,8 @@ function montarLoginDeB({ contaNoLogin }) {
     recordHistory: (tipo, n) => { AppState.history = AppState.history || { _total: { rejected: 0 } }; AppState.history._total.rejected += n; },
     registrarRejeicaoDeAutor: () => log.push('autor-de-B'),
   };
-  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'conhecerContaDoLogin', 'aoConhecerConta', 'esquecerOutraConta',
-    'carimbarContaNaSaida', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'authenticateWithCookies'], deps);
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'conhecerContaDoLogin', 'aoConhecerConta', 'gravarContaNoAparelho', 'esquecerOutraConta',
+    'carimbarContaNaSaida', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'authenticateWithCookies'], deps);
   return { h, AppState, log, guardado };
 }
 
@@ -1670,7 +1670,7 @@ function montarSaidaMorta() {
     AppState: { authenticated: true, profile: { id: 111 }, stats: { read: 0, rejected: 2, skipped: 0 } }, safeLS,
     navigator: { onLine: true }, epocaDaSessao: 0, esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false,
     verificandoSessao: false, sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
-    pedidosEmAndamento: new Set(), CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), CONTA_KEY: constante('CONTA_KEY'), SAIDA_KEY: constante('SAIDA_KEY'),
     SAIDA_RECUO_401_MS: constante('SAIDA_RECUO_401_MS'), SAIDA_TENTATIVAS_POR_ITEM: constante('SAIDA_TENTATIVAS_POR_ITEM'),
     SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0, setTimeout: (f) => { f(); return 1; },
     registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, derrubarSessao: () => { deps.AppState.authenticated = false; },
@@ -1692,7 +1692,7 @@ function montarSaidaMorta() {
       getProfile: () => new Promise((ok) => { sonda = ok; }),
     },
   };
-  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
     'marcarSessaoViva', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'reivindicadoPorOutraAba',
     'esvaziarFilaDeSaida', 'handleUnauthorized'], deps);
   return { h, deps, envios, responderSonda: (r) => sonda(r) };
@@ -1767,7 +1767,7 @@ function montarXQueLeva401() {
     TRANSIENT_RETRY_ATTEMPTS: 2, TRANSIENT_RETRY_DELAYS_MS: [1, 1], SAIDA_RITMO_MS: 0, VERIFICA_SESSAO_MS: 0,
     esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false, verificandoSessao: false,
     conferenciaDaSessao: null, sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
-    pedidosEmAndamento: new Set(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
     direcaoTravada: () => false, canDisableUndo: () => true, presencaWmeDaAcao: () => null,
     advanceQueue: () => { AppState.queue.shift(); AppState.currentPlace = AppState.queue[0] || null; },
     registrarPousoDeSaida: () => {}, rebuscarDepoisDeFalha: () => {}, definirPerfil: (r) => !!(r && r.success && r.profile),
@@ -1789,7 +1789,7 @@ function montarXQueLeva401() {
     },
   };
   const h = montar(['sessaoTrocou', 'callWithRetry', 'acoesTravadas', 'chaveDoPedido', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora',
-    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'marcarNaSaida', 'tirarDaFilaDeSaida', 'marcarEmAndamento',
     'reivindicacaoDestaAba', 'reivindicadoPorOutraAba', 'soltarMarcaDosItens', 'marcarSessaoViva', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'moverProFimDaSaida', 'travaDaSaida', 'esvaziarFilaDeSaida', 'handleUnauthorized',
     'handleActionResult', 'scheduleAction', 'anotarAntesDoEnvio', 'anotarSeAbriuASaida', 'carimboDoGesto', 'handleReject'], deps);

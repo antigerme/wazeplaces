@@ -56,7 +56,7 @@ const OUVINTE = (() => {
 
 const NOMES = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'tirarDaFilaOQueAOutraAbaDecidiu', 'gestoNoDecididoPorOutraAba', 'avisarDecididoNaOutraAba',
-  'carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
+  'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'anotarAntesDoEnvio',
   'handleReject', 'handleMarkAsRead', 'handleSkip'];
 
 const P = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i, creatorId: 700 + i, createdBy: 'autor' + i });
@@ -109,7 +109,7 @@ function abaB({ fila, treino = null } = {}) {
   const chaves = Object.keys(deps);
   const fonte = [
     'let tratouNestaFila = false, epocaDaSessao = 0;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(),'
       + ' descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();',
     ...NOMES.map(fatiar),
     `const aoAvisoDaSaida = ${OUVINTE};`,

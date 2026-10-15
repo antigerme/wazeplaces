@@ -113,7 +113,7 @@ function montarSaida(modo, extra = {}, nomesExtras = []) {
     descargaNaFila: new WeakSet(), anotadoAntesDoEnvio: new WeakSet(),
     ...extra,
   };
-  const h = montar(['carregarFilaDeSaida', 'salvarFilaDeSaida', 'enfileirarSaida', 'anotarAntesDoEnvio', 'tirarDaFilaDeSaida', ...nomesExtras], deps);
+  const h = montar(['carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'enfileirarSaida', 'anotarAntesDoEnvio', 'tirarDaFilaDeSaida', ...nomesExtras], deps);
   return { ...h, ap, eventos };
 }
 
@@ -225,7 +225,7 @@ function montarTroca(modo, { contaNoAparelho = null } = {}) {
   };
   const deps = {
     safeLS: ap.safeLS, localStorage: ap.localStorage, CONTA_KEY, AppState, window: {}, API: { sessionToken: null },
-    contaConfirmadaNestaAba: { id: '77', s: 'a' }, filaAtravessouSessao: true, saidaEsperandoConta: false,
+    contaConfirmadaNestaAba: { id: '77', s: 'a' }, contaVistaNoAparelho: true, filaAtravessouSessao: true, saidaEsperandoConta: false,
     puladosNoInicioDaFila: 4, referenciasDoPerfil: {}, posicaoGps: {}, avisosAdiados: [], avisosDaQueda: [],
     invisivelPedidoAntesDoPerfil: () => null, marcaDestaAba: () => 's2', sessaoDestaAbaEhAGuardada: () => true,
     carimbarContaNaSaida: () => {}, carimbarContaNoInvisivel: () => {}, carregarFilaDeSaida: () => [], salvarFilaDeSaida: () => true,
