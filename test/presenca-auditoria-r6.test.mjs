@@ -238,7 +238,7 @@ function aparelho() {
       const fatos = [];
       const deps = {
         AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'),
-        preferenciasCarregadas: true, CONTA_KEY: constante('CONTA_KEY'),
+        preferenciasCarregadas: true, CONTA_KEY: constante('CONTA_KEY'), MANTER_CONECTADO_PADRAO: constante('MANTER_CONECTADO_PADRAO'),
         PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) },
         dfato: (k, o) => fatos.push([k, o]),
@@ -336,7 +336,7 @@ test('R6-5-2 a ordem que protege a conta: o perfil confere a conta ANTES de refa
   // O "Sair" repõe as preferências de fábrica (sem o gravado) e grava.
   const sair = fatiar('handleLogout');
   assert.ok(sair.indexOf('AppState.preferences = preferenciasDeFabrica();') > 0 && /savePreferences\(\);/.test(sair));
-  assert.equal('presencaWmeDesligar' in new Function(fatiar('preferenciasDeFabrica') + '\nreturn preferenciasDeFabrica();')(), false);
+  assert.equal('presencaWmeDesligar' in new Function('MANTER_CONECTADO_PADRAO', fatiar('preferenciasDeFabrica') + '\nreturn preferenciasDeFabrica();')(true), false);
 });
 
 // ── R6-5-3: o desligar repetido no diário, com limitador ─────────────────────

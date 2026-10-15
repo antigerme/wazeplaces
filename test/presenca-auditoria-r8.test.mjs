@@ -622,7 +622,7 @@ function aparelho() {
         'relerPreferenciasDeOutraAba', 'presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado',
         'presencaWmeAnotarDesligar', 'presencaWmeRefazerDesligar', 'presencaWmeReligar', 'presencaWmeZerar',
         'presencaWmeSoltarAoSair'], {
-        AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true,
+        AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'), preferenciasCarregadas: true, MANTER_CONECTADO_PADRAO: constante('MANTER_CONECTADO_PADRAO'),
         CONTA_KEY: constante('CONTA_KEY'), PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) }, dfato: () => {}, Date: { now: () => relogio.agora },
         API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',

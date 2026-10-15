@@ -900,3 +900,22 @@ test('R12-4-06: o envio do beacon da borda (`/cdn-cgi/rum?`) fica fora da conta 
   delete sem.codigo['https://x.dev/cdn-cgi/rum?'];
   assert.doesNotMatch(rodar(sem), /fora da conta/);
 });
+
+// ── O "Manter conectado" (Preferências) ───────────────────────────────────
+// O app grava `manterConectado: { ligado, servidor, padrao }` no relatório (só
+// booleanos). Relatório de ANTES do recurso não traz a seção: o leitor diz que
+// é a versão ("ausente nesta versão"), nunca "desligado".
+test('diag-resumo: "Manter conectado: ligado/desligado (servidor: …)" — e a divergência é acusada', () => {
+  const com = (m) => { const d = relatorioV4(); d._versaoDoDiag = 11; if (m !== undefined) d.manterConectado = m; return rodar(d); };
+  assert.match(com({ ligado: true, servidor: true, padrao: true }), /^Manter conectado: ligado \(servidor: ligado\)$/m);
+  assert.match(com({ ligado: false, servidor: false, padrao: true }), /^Manter conectado: desligado \(servidor: desligado\)$/m);
+  assert.match(com({ ligado: true, servidor: null, padrao: true }), /^Manter conectado: ligado \(servidor: não se sabe\)$/m,
+    'servidor que ainda não respondeu não é "desligado"');
+  const diverge = com({ ligado: true, servidor: false, padrao: true });
+  assert.match(diverge, /^Manter conectado: ligado \(servidor: desligado\) · ATENÇÃO: o servidor não está como o interruptor/m);
+  assert.doesNotMatch(com({ ligado: true, servidor: true, padrao: true }), /Manter conectado:.*ATENÇÃO/);
+  // O relatório de antes do recurso, ou com a seção quebrada.
+  assert.match(com(undefined), /^Manter conectado: \(ausente nesta versão\)$/m);
+  assert.match(com({ erro: 'x' }), /^Manter conectado: \(ausente nesta versão\)$/m);
+  assert.ok(!com({ ligado: true, servidor: true }).includes('[object Object]'));
+});

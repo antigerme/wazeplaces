@@ -479,7 +479,7 @@ function aparelho() {
       const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0, desligarSessao: null, desligarVez: 0, desligarNoAr: 0 };
       const deps = {
         AppState, presencaWme, localStorage, PREFERENCES_KEY: constante('PREFERENCES_KEY'),
-        preferenciasCarregadas: true, CONTA_KEY: constante('CONTA_KEY'),
+        preferenciasCarregadas: true, CONTA_KEY: constante('CONTA_KEY'), MANTER_CONECTADO_PADRAO: constante('MANTER_CONECTADO_PADRAO'),
         PRESENCA_WME_DESLIGAR_REPETIR_MS: constante('PRESENCA_WME_DESLIGAR_REPETIR_MS'),
         safeLS: { get: (k) => localStorage.getItem(k) },
         dfato: () => {}, Date: { now: () => relogio.agora },

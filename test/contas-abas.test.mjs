@@ -219,7 +219,7 @@ function montarSair({ tokenNoAparelho = 'tok-A' } = {}) {
     epocaDaSessao: 5, saiuNestaPagina: false, pareamentosEmitidos: new Set(['ABC234']),
     HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: 'waze_places_conquistas', CHAVE_INSTALL_DISPENSADO: 'waze_places_install_dispensado',
     PERFIL_GATE_KEY: constante('PERFIL_GATE_KEY'), CONTA_KEY, SESSOES_KEY: 'waze_places_sessoes', NASCIMENTO_KEY: 'waze_places_nascimento',
-    SAIDA_KEY: 'waze_places_saida',
+    SAIDA_KEY: 'waze_places_saida', MANTER_CONECTADO_PADRAO: true,
     pousosDaPagina: new Set(['v9|u9']), pedidosEmAndamento: new Set(['v8|u8']),
     referenciasDoPerfil: { casa: [-23.5, -46.6], trabalho: null }, posicaoGps: { ll: [-23.5, -46.6] },
     avatarPendente: 'foto', avatarFalhou: null, telaPronta: true,
@@ -520,7 +520,7 @@ function armazenamentoCompartilhado(inicial = {}) {
   };
 }
 
-function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false },
+function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false, manterConectado: true },
   perfilId = 111, token = 'tok' } = {}) {
   const aba = { escreveuNoAviso: [], desenhou: 0, noAviso: false };
   const localStorage = comp.para(aba);
@@ -530,7 +530,7 @@ function abrirAba(comp, { preferencias = { undoEnabled: true, semUndoSeguidas: 0
   const deps = {
     AppState, localStorage, safeLS, STATS_KEY, PREFERENCES_KEY, CONTA_KEY, DEVMODE_KEY: 'waze_places_devmode',
     HISTORY_KEY: 'waze_places_history', CONQUISTAS_KEY: 'waze_places_conquistas', AUTORES_KEY: 'waze_places_autores',
-    preferenciasCarregadas: true, puladosNoInicioDaFila: 0,
+    preferenciasCarregadas: true, puladosNoInicioDaFila: 0, MANTER_CONECTADO_PADRAO: true,
     // Os dois com sessão: o token e a conta no aparelho (nenhum "Sair" aqui).
     API: { temSessaoNaMemoria: () => true, sessionToken: token }, extPerguntando: false,
     aoMudarModoDevEmOutraAba: () => {}, atualizarSeloDeConquista: () => {}, agendarRedesenhoDoHistorico: () => {},
@@ -1512,8 +1512,8 @@ test('A11: a frase mora no diálogo do "Sair", nas 4 línguas, com o número de 
 // ═══ as preferências de FÁBRICA são uma só ═══════════════════════════════════
 
 test('preferências de fábrica: o app recém-aberto, o "Sair" e a releitura usam a MESMA função', () => {
-  const { preferenciasDeFabrica } = montar(['preferenciasDeFabrica'], {});
-  assert.deepEqual(preferenciasDeFabrica(), { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false });
+  const { preferenciasDeFabrica } = montar(['preferenciasDeFabrica'], { MANTER_CONECTADO_PADRAO: true });
+  assert.deepEqual(preferenciasDeFabrica(), { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false, manterConectado: true });
   assert.notEqual(preferenciasDeFabrica(), preferenciasDeFabrica(), 'um objeto só pra todos: mexer num mexeria no outro');
   const estado = APP_SEM.slice(APP_SEM.indexOf('const AppState = {'), APP_SEM.indexOf('\n};', APP_SEM.indexOf('const AppState = {')));
   assert.match(estado, /^\s+preferences: preferenciasDeFabrica\(\),$/m, 'o app recém-aberto voltou a ter um literal próprio');

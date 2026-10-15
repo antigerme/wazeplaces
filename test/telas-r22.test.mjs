@@ -39,8 +39,8 @@ test('R22-7-05 · o título do fim do treino e o do «Sair» partem a palavra qu
 
 test('R22-7-05 · o texto ao lado de CADA interruptor encolhe (min-w-0) e parte a palavra longa (break-words)', () => {
   const linhas = [...HTML.matchAll(/<label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-\[44px\]">\s*<span( class="[^"]*")?[^>]*>/g)];
-  // São sete: Filtros (2), Preferências (Desfazer, Pular, Presença, Offline) e o Modo Desenvolvedor.
-  assert.equal(linhas.length, 7, `esperava 7 linhas de interruptor, achei ${linhas.length}: linha nova de interruptor entra aqui com o mesmo texto que encolhe`);
+  // São oito: Filtros (2), Preferências (Desfazer, Pular, Presença, Offline, Manter conectado) e o Modo Desenvolvedor.
+  assert.equal(linhas.length, 8, `esperava 8 linhas de interruptor, achei ${linhas.length}: linha nova de interruptor entra aqui com o mesmo texto que encolhe`);
   for (const l of linhas) {
     const cl = classes(l[0].slice(l[0].indexOf('<span')));
     assert.ok(cl.includes('min-w-0') && cl.includes('break-words'), `um interruptor tem o texto que não encolhe (${l[0].replace(/\s+/g, ' ').slice(-80)}): o interruptor sai do cartão com o texto grande`);

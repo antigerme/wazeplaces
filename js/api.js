@@ -643,9 +643,33 @@ const API = {
         if (!sessionToken) {
             return semSessao();
         }
-        return this._post('perfil', {
+        const corpo = {
             sessionToken,
             region: regiao || this.getRegion()
+        };
+        // O "Manter conectado": a preferência do aparelho, repetida a cada
+        // `perfil` pra o servidor alcançá-la sozinho se uma troca se perdeu.
+        // Só vai quando a preferência está DEFINIDA (o `app.js` devolve
+        // `undefined` antes de ler o aparelho) e como booleano ESTRITO.
+        const manter = typeof manterConectadoParaOServidor === 'function' ? manterConectadoParaOServidor() : undefined;
+        if (typeof manter === 'boolean') corpo.manter = manter;
+        return this._post('perfil', corpo);
+    },
+
+    // O interruptor "Manter conectado", no GESTO: liga ou desliga a renovação
+    // da sessão pelo servidor. `on` é booleano ESTRITO (o servidor recusa o que
+    // não for). Sem retentativa: é um gesto, e quem falha avisa e volta ao
+    // estado real (ver `aoMudarManterConectado`).
+    async manterConectado(on) {
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) {
+            return semSessao();
+        }
+        return this._post('sessao', {
+            action: 'manter',
+            sessionToken,
+            on: on === true,
+            region: this.getRegion()
         });
     },
 
