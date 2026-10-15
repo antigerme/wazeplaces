@@ -458,11 +458,32 @@ test('texto do botão · o rótulo segue o aparelho: "Compartilhar…" só onde 
     pt: ['Compartilhar meu resumo de outubro', 'Ver meu resumo de outubro'],
     en: ['Share my October recap', 'See my October recap'],
     es: ['Compartir mi resumen de octubre', 'Ver mi resumen de octubre'],
-    fr: ['Partager mon bilan : octobre', 'Voir mon bilan : octobre'],
+    fr: ['Partager mon bilan' + NBSP + ': octobre', 'Voir mon bilan' + NBSP + ': octobre'],
   };
   for (const [lang, [comPartilhar, semPartilhar]] of Object.entries(esperado)) {
     assert.equal(rotuloDoBotaoDoResumo(lang, true), comPartilhar, `${lang}: o aparelho compartilha`);
     assert.equal(rotuloDoBotaoDoResumo(lang, false), semPartilhar, `${lang}: o aparelho só baixa (o rótulo prometia compartilhar)`);
+  }
+});
+
+// R22-7-07 · em francês o dois-pontos NÃO começa linha: com o texto a 1,5× em 360 px o botão quebrava em «Voir mon bilan» / «: octobre».
+// O espaço antes do «:» é o NBSP (U+00A0, gerado por código: o guard de invisíveis varre o fonte), nas quatro chaves do Resumo que o levam.
+const NBSP = String.fromCodePoint(0xA0);
+test('R22-7-07 · o espaço antes dos dois-pontos do Resumo em francês é inquebrável (botão, título da folha e texto do compartilhamento)', () => {
+  const CHAVES = ['resumo.botao', 'resumo.botaoVer', 'resumo.modal.title', 'resumo.share.text'];
+  I18N.setLang('fr');
+  try {
+    for (const k of CHAVES) {
+      const v = I18N.t(k, { mes: 'octobre' });
+      assert.ok(v.includes(NBSP + ': octobre'), `fr ${k}: o espaço antes do «:» não é o NBSP (${JSON.stringify(v)})`);
+      assert.ok(!/\S :/.test(v), `fr ${k}: sobrou um espaço comum antes do «:» (${JSON.stringify(v)}): a linha pode quebrar deixando «: octobre» sozinho`);
+    }
+  } finally { I18N.setLang('pt'); }
+  // CONTROLE: o instrumento enxerga o defeito (o texto de antes) e as outras línguas seguem como eram (sem NBSP: não há dois-pontos pra proteger).
+  assert.ok(/\S :/.test('Voir mon bilan : octobre'), 'CONTROLE: o texto de antes (espaço comum) devia ser pego');
+  for (const lang of ['pt', 'en', 'es']) {
+    I18N.setLang(lang);
+    try { for (const k of CHAVES) assert.ok(!I18N.t(k, { mes: 'x' }).includes(NBSP), `${lang} ${k}: ganhou um NBSP sem motivo`); } finally { I18N.setLang('pt'); }
   }
 });
 
