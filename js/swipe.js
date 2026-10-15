@@ -495,13 +495,30 @@ function animateSwipeOut(direction, callback) {
 
     // O callback recebe o card que SAIU — o do gesto —, não o que estiver na
     // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
-    setTimeout(() => {
+    const concluir = () => {
         animating = false;
         if (cardSaindo === card) cardSaindo = null;
         updateSwipeIndicator(0, 0);
         try { if (callback) callback(card); }
         finally { avisarFimDoGesto(card); }
-    }, 350);
+    };
+    // Com "Reduzir movimento" o card SOME NA HORA (o CSS zera a duração), e os
+    // 350 ms que sobravam eram espera pura, sem animação nenhuma: o próximo
+    // pedido só assumia ~0,35 s depois — MEDIDO, 476 ms no Chromium e 511 ms no
+    // WebKit contra ~120 ms de quem não pediu (auditoria da rodada 24,
+    // R24-8-03), 200 pedidos × 0,35 s. A saída conclui no mesmo quadro, mas fora
+    // da pilha de quem chamou (uma microtarefa): o botão, a tecla e o arraste
+    // chamam isto no meio do tratamento do evento deles, e o callback decide
+    // pedido. Uma vez só, pelo mesmo caminho dos três.
+    if (movimentoReduzido()) Promise.resolve().then(concluir);
+    else setTimeout(concluir, 350);
+}
+
+// O sistema pede menos movimento? Lido a cada saída (a preferência muda com o
+// app aberto). Sem `matchMedia` (ou se ele lançar), movimento normal.
+function movimentoReduzido() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (e) { return false; }
 }
 
 // Acende o indicador do gesto em curso. `upOpacity` é opcional: as chamadas
