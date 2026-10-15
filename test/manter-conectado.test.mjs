@@ -330,6 +330,20 @@ test('varredura: só toca nas chaves ka_ — sessão comum, pareamento, releitur
   } finally { c.amb.restaurar(); }
 });
 
+test('varredura: um `listar` que devolve chaves que não são ka_ não faz a varredura mexer nelas', async () => {
+  const c = await cenario();
+  try {
+    const comum = await c.novo('COMUM');
+    c.amb.avancar(6 * HORA);
+    const chaves = ['kaboom', 'pair_abc', 'ka_', '', await c.hashDe(comum), 42, null];
+    const antes = new Map(c.store.mem);
+    const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, listar: async () => chaves });
+    assert.equal(r.vistas, 0, 'a varredura examinou chave que não é ka_<hash>');
+    assert.deepEqual([...c.store.mem], [...antes]);
+    assert.equal(c.amb.chamadas.length, 0);
+  } finally { c.amb.restaurar(); }
+});
+
 test('varredura: sem `list` no store não faz nada (e não lança); com `listar` injetado usa o dele', async () => {
   const c = await cenario({ semList: true });
   try {

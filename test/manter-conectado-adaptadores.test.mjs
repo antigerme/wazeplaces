@@ -145,6 +145,32 @@ test('VM: o temporizador do «Manter conectado» renova a sessão devida do disc
   }
 });
 
+test('VM: duas varreduras nunca correm juntas — uma lenta (pausa longa) não é alcançada pelo temporizador seguinte', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wp-manter-re-'));
+  const log = join(dir, 'waze.log');
+  writeFileSync(log, '');
+  const vm = await subirVM({
+    SESSION_DIR: join(dir, 'sessoes'), SESSION_KEY_FILE: join(dir, 'k'), WAZE_STUB_LOG: log, WAZE_STUB_SALTO: join(dir, 'salto'),
+    NODE_OPTIONS: `--import=${join(AQUI, 'manter-conectado-vm.mjs')}`,
+    MANTER_PRIMEIRA_MS: '60000', MANTER_INTERVALO_MS: '300', MANTER_PAUSA_MS: '1500',   // a 1ª e o 1º tique de um intervalo igual cairiam juntos
+  });
+  try {
+    for (const nome of ['A', 'B']) {
+      const login = await pedir(vm, 'testar-cookies', { cookies: cookiesCom('S-' + nome), region: 'row' });
+      await pedir(vm, 'perfil', { sessionToken: login.corpo.sessionToken, region: 'row', manter: true });
+    }
+    const idasAntes = readFileSync(log, 'utf8').trim().split('\n').length;
+    writeFileSync(join(dir, 'salto'), '');                      // as duas passam a estar devidas
+    await esperarAte(() => readFileSync(log, 'utf8').trim().split('\n').length > idasAntes, 'a varredura não começou');
+    await new Promise((ok) => setTimeout(ok, 3500));            // dá tempo da pausa de 1,5 s e de ~10 disparos do temporizador
+    const idas = readFileSync(log, 'utf8').trim().split('\n').length - idasAntes;
+    assert.equal(idas, 2, `${idas} idas ao Waze pra 2 sessões devidas: varreduras sobrepostas renovaram a mesma duas vezes`);
+  } finally {
+    vm.parar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('VM: a faxina apaga a entrada ka_ vencida pelo CARIMBO (o mtime é renovado a cada leitura e não serve) e mantém a viva', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'wp-manter-gc-'));
   const sessDir = join(dir, 'sessoes');
