@@ -609,16 +609,16 @@
                             </label>
                         </div>
 
-                        <fieldset>
-                            <legend class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.types.legend">Tipos de Pedido</legend>
+                        <fieldset class="min-w-0">
+                            <legend class="text-sm font-semibold text-slate-700 block mb-2 break-words dark:text-slate-200" data-i18n="filters.types.legend">Tipos de Pedido</legend>
                             <div class="space-y-1">
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PLACE" checked> <span data-i18n="filters.types.NEW_PLACE">Novo local</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DETAILS_UPDATE"> <span data-i18n="filters.types.DETAILS_UPDATE">Atualização de detalhes</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PLACE"> <span data-i18n="filters.types.FLAGGED_PLACE">Local marcado</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PLACE" checked> <span data-i18n="filters.types.DELETE_PLACE">Excluir local</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PHOTO" checked> <span data-i18n="filters.types.NEW_PHOTO">Nova foto</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PHOTO" checked> <span data-i18n="filters.types.FLAGGED_PHOTO">Foto sinalizada</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PHOTO" checked> <span data-i18n="filters.types.DELETE_PHOTO">Excluir foto</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PLACE" checked> <span class="min-w-0 break-words" data-i18n="filters.types.NEW_PLACE">Novo local</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DETAILS_UPDATE"> <span class="min-w-0 break-words" data-i18n="filters.types.DETAILS_UPDATE">Atualização de detalhes</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PLACE"> <span class="min-w-0 break-words" data-i18n="filters.types.FLAGGED_PLACE">Local marcado</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PLACE" checked> <span class="min-w-0 break-words" data-i18n="filters.types.DELETE_PLACE">Excluir local</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.NEW_PHOTO">Nova foto</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.FLAGGED_PHOTO">Foto sinalizada</span></label>
+                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.DELETE_PHOTO">Excluir foto</span></label>
                             </div>
                         </fieldset>
 
@@ -849,7 +849,7 @@
                      OUTRO aparelho, trocar de aparelho e transcrever. A hierarquia
                      estava invertida: o caminho difícil era o maior da tela. -->
                 <div class="flex justify-center mb-3">
-                    <canvas id="pairQr" class="rounded-xl bg-white p-3 shadow-sm border border-slate-200 dark:border-slate-700" role="img" aria-label="QR code para entrar no outro aparelho" data-i18n-aria="pair.qr.aria"></canvas>
+                    <canvas id="pairQr" class="max-w-full rounded-xl bg-white p-3 shadow-sm border border-slate-200 dark:border-slate-700" role="img" aria-label="QR code para entrar no outro aparelho" data-i18n-aria="pair.qr.aria"></canvas>
                 </div>
 
                 <p id="pairExpiry" class="text-xs text-center text-slate-500 dark:text-slate-400 mb-4"></p>
@@ -1492,7 +1492,7 @@
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </button>
         </div>
-        <span id="mapaLbEscala" class="absolute bottom-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala" style="left: 1rem; left: max(1rem, env(safe-area-inset-left, 0px))"></span>
+        <span id="mapaLbEscala" class="absolute bottom-4 z-20 bg-black/60 text-white text-xs font-medium px-2 py-0.5 rounded tnum mapa-escala" style="left: 1rem; left: max(1rem, env(safe-area-inset-left, 0px)); bottom: calc(1rem + env(safe-area-inset-bottom, 0px))"></span>
         <span id="mapaLbLegenda" class="absolute z-20 flex flex-wrap gap-1" style="left: 1rem; right: 4rem; left: max(1rem, env(safe-area-inset-left, 0px)); right: calc(max(0.75rem, env(safe-area-inset-right, 0px)) + 3.25rem); bottom: calc(2.75rem + env(safe-area-inset-bottom))"></span>
         <!-- O SLOT DE AÇÃO deste lightbox, no rodapé do lado oposto ao ✕ do
              topo — a mesma geometria que o lightbox da foto usa pro aprovar/

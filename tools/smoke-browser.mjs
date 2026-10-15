@@ -2738,9 +2738,15 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
   // Com o zoom a janela CSS encolhe e o rem NÃO muda: 400% de 1280×800 são 320×200 px (18×10,5rem de conteúdo), 500% de 1920×1080 são 384×216
   // (22×11,5rem). Eixo curto de 200 px, abaixo dos 280 do modelo da escada: os dois botões saíam da janela e nada rolava. O último degrau da escada
   // (31 × 12rem) os alcança. Texto 1× (o zoom não muda a raiz), 4 idiomas, e as janelas vizinhas em que o rodapé JÁ se alcançava seguem sem rolar.
+  // R23-7-01 (lote 27): o degrau em PX — `(max-height: 240px) and (max-height: 15rem)` no overlay (a janela de até 272 px a 1×), qualquer largura: o Fold
+  // deitado com a barra do navegador (653×200), as janelas largas e baixas (568–1024×200: «Aplicar»/«Cancelar» INALCANÇÁVEIS antes), e as de zoom de 224 a 272 px de
+  // altura em que o rodapé pendia fora do cartão (400% de 1440×900, 300% de 1280×720/1280×800, 400% de 1280×1024 e de 1920×1080).
   const JANELAS_DO_ZOOM = [['400% de 1280×800', 320, 200], ['500% de 1920×1080', 384, 216], ['400% de 1366×768', 341, 192], ['400% de 1440×900', 360, 222],
-    ['500% de 1280×800', 256, 160], ['a mais larga que a proporção 2,4 deixa', 528, 216]];
-  const JANELAS_FORA_DA_ESCADA = [['400% de 1280×1024', 320, 256], ['300% de 1280×800', 427, 267], ['200% de 1280×800', 640, 400], ['400% de 1920×1080', 480, 270]];
+    ['500% de 1280×800', 256, 160], ['a mais larga que a proporção 2,4 deixa', 528, 216],
+    ['Fold deitado com a barra', 653, 200], ['janela larga e baixa', 1024, 200], ['568 largo, 200 alto', 568, 200], ['400% de 1440×900', 360, 225],
+    ['300% de 1280×720', 427, 240], ['500% de 1920×1200', 384, 240], ['400% de 1280×1024', 320, 256], ['300% de 1280×800', 427, 267], ['400% de 1920×1080', 480, 270],
+    ['o limite do degrau (272 px)', 800, 272]];
+  const JANELAS_FORA_DA_ESCADA = [['200% de 1280×800', 640, 400], ['um pouco acima do degrau (273 px)', 653, 273], ['celular deitado de 320 px', 568, 320]];
   for (const [rot, w, h] of JANELAS_DO_ZOOM) {
     const { ctx, page, erros } = await novaPaginaL25({ width: w, height: h }, 1);
     for (const lang of LINGUAS) {
@@ -2765,6 +2771,19 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       await fecharL25(page);
     }
     await ctx.close();
+  }
+  {
+    // O texto PEQUENO (0,85× do Android, 0,75×) com a janela de até 270 px: o diálogo CABE ali (medido) e o degrau em px não o alcança — o limite em rem dele
+    // (15rem de conteúdo) o deixa de fora. Mudaria um diálogo que hoje está certo.
+    for (const [esc, w, h] of [[0.85, 653, 270], [0.85, 360, 270], [0.75, 653, 260]]) {
+      const { ctx, page } = await novaPaginaL25({ width: w, height: h }, esc);
+      await entrarL25(page, 'pt');
+      const r = await page.evaluate(medirAlcanceFiltros);
+      checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok' && r.cartaoOverflowY === 'visible',
+        `Filtros com o texto a ${esc}× em ${w}×${h}: o diálogo que cabe mudou (overflow ${r.cartaoOverflowY})`, JSON.stringify(r));
+      await fecharL25(page);
+      await ctx.close();
+    }
   }
   {
     // CONTROLE do instrumento: sem a rolagem do cartão nem o rodapé preso (o defeito) o MESMO 320×200 perde o "Aplicar".

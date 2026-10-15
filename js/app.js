@@ -2240,6 +2240,10 @@ async function desenharQrPareamento(url) {
     canvas.height = canvas.width;
     canvas.style.width = px + 'px';
     canvas.style.height = px + 'px';
+    // O `max-w-full` do HTML só vale ANTES do desenho (o canvas nasce 300×150 + moldura = 326 px e passava do cartão a 280 px, R23-7-04). Depois dele o tamanho é o
+    // do QR, quadrado: com o teto, no Fold (cartão de 200 px de conteúdo) o canvas encolheria na largura e ficaria 160×205, QR amassado (e pior de ler). Sem teto
+    // ele fica exatamente como sempre (205 px passando 5 px do respiro do cartão, dentro dele).
+    canvas.style.maxWidth = 'none';
     const ctx = canvas.getContext('2d');
     ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
     // Fundo claro SEMPRE, inclusive no tema escuro: leitor de QR espera
