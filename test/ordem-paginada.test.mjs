@@ -86,6 +86,7 @@ function wazeVivo(itens, { porPagina = 500 } = {}) {
 
 function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], hasMore = true } = {}) {
   const log = [];
+  const tela = { gesto: false, camada: false };
   const AppState = {
     authenticated: true, hasMore, fetching: false, fetchEpoch: 0, queue: queue.slice(), currentPlace: null,
     serverTotal: queue.length, serverBlocked: 0, blockedPartial: false, loadError: false, ultimaBusca: null,
@@ -110,11 +111,16 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
     lugarAgora: () => ({ regiao: 'row', pais: '30' }), refazerPerfilSeFaltar: () => {},
     limparFocoAutor: () => {}, removeCurrentCardEl: () => {},
     showCurrentPlace: () => { AppState.currentPlace = AppState.queue[0] || null; log.push('card:' + (AppState.currentPlace && AppState.currentPlace.venueID)); },
+    // A tela, que o teste controla: o gesto no card e a camada por cima (R24-6-A7).
+    tela, cardDaFrente: () => ({ id: 'card' }), cardSobGesto: () => tela.gesto, semCamadaAberta: () => !tela.camada,
+    mantendoFocoNoCard: (redesenhar) => redesenhar(),
     // A sessão da busca (a que cai no meio é descartada, R14-1-02).
     epocaDaSessao: 0,
   };
   const nomes = ['chaveDoPedido', 'semOsJaDecididos', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila', 'fetchNextPage',
     'referenciaDaOrdem', 'distanciaKm', 'pontoDoPlace', 'sortQueue', 'manterFocoNaFrente', 'assinaturaDeBusca', 'reordenarFilaNaTela'];
+  // A troca do card com as páginas por vir: no código de antes não existe.
+  for (const novo of ['reordenarEsperandoAsPaginas', 'atenderReordenacaoAdiada']) if (achar(novo)) nomes.push(novo);
   // As funções do conserto: no código de antes elas não existem, e o teste tem
   // de reprovar pelo COMPORTAMENTO, não por não achá-las.
   // `ordemValida` (e a espera do perfil): a fila inteira se decide pela ordem que
@@ -125,9 +131,10 @@ function montar(waze, { sortOrder = 'newest', referencias = null, queue = [], ha
   }
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, `let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;
+    let reordenacaoVez = 0; let reordenacaoAdiada = null;
     let referenciasDoPerfil = ${JSON.stringify(referencias)}; let posicaoGps = null;\n`
-    + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, sortQueue, assinaturaDeBusca, reordenarFilaNaTela };')(...chaves.map((k) => deps[k]));
-  return { app, AppState, log };
+    + nomes.map(fatiar).join('\n') + '\nreturn { fetchNextPage, sortQueue, assinaturaDeBusca, reordenarFilaNaTela, atender: typeof atenderReordenacaoAdiada === "function" ? atenderReordenacaoAdiada : () => {} };')(...chaves.map((k) => deps[k]));
+  return { app, AppState, log, tela };
 }
 
 // A abertura (o `startFetching`: busca com a fila vazia e mostra o topo) e,
@@ -227,23 +234,157 @@ test('F8: trocar SÓ entre "Mais recentes" e "Mais antigos" muda o que se pede a
   assert.equal(m.app.assinaturaDeBusca(), recentes, 'a ordem por distância não muda o pedido ao Waze e não precisa refazer a fila');
 });
 
-test('F8: trocar pra "Perto de casa" com a fila PELA METADE — o resto vem na hora, e entra na ordem a partir do próximo card', async () => {
+// Segura as páginas 2+ do Waze de mentira até o teste soltar (a fila grande
+// chegando devagar) — a abertura, que lê só a página 1, não é afetada.
+function segurarPaginas(waze) {
+  let soltar; const porta = new Promise((ok) => { soltar = ok; });
+  const orig = waze.buscar;
+  waze.buscar = async (page, f) => { if (page >= 2) await porta; return orig(page, f); };
+  return soltar;
+}
+const tique = () => new Promise((ok) => setTimeout(ok, 0));
+async function assentar(m) {
+  for (let i = 0; i < 40; i++) await tique();
+  for (let i = 0; i < 200 && m.AppState.fetching; i++) await tique();
+  for (let i = 0; i < 20; i++) await tique();
+}
+const CASA = { casa: [-23, -43], trabalho: null };
+// A pessoa abre com a fila pela metade (a página 1 pela ordem padrão), escolhe
+// "Perto de casa" e aplica: a assinatura não muda, então é o
+// `reordenarFilaNaTela`, com um card na tela.
+async function abrirEAplicar({ itens = ITENS, segurar = true } = {}) {
+  const waze = wazeVivo(itens);
+  const soltar = segurar ? segurarPaginas(waze) : () => {};
+  const m = montar(waze, { sortOrder: 'newest', referencias: CASA });
+  await abrir(m);
+  const frente = m.AppState.currentPlace;
+  m.AppState.filters.sortOrder = 'casa';
+  const antes = waze.pedidas.length;
+  m.app.reordenarFilaNaTela();
+  return { waze, soltar, m, frente, antes };
+}
+
+test('R24-6-A7: trocar pra "Perto de casa" com a fila em 2 páginas — o card FICA enquanto elas vêm, e o primeiro é o mais perto da fila INTEIRA', async () => {
+  const { waze, soltar, m, frente, antes } = await abrirEAplicar();
+  await assentar(m);
+  // Com a página 2 ainda no Waze: o card da tela não saiu de debaixo do dedo, e
+  // o RESTO já está na ordem nova (quem tratar o card agora segue por ela).
+  assert.equal(m.AppState.currentPlace, frente, 'o card da tela trocou ANTES das páginas chegarem');
+  assert.equal(m.AppState.queue[0], frente);
+  assert.deepEqual(m.log, [], 'o card foi redesenhado antes de as páginas chegarem');
+  soltar();
+  await assentar(m);
+  assert.equal(m.AppState.queue.length, 554, 'o resto da fila não veio');
+  // O primeiro da fila é o mais perto de casa da fila INTEIRA (V540, na página 2),
+  // e não o mais perto da página 1 com o resto atrás dele — MEDIDO no Brasil
+  // (500+199): o 1º a 55 km e um de 2 km em 2º.
+  assert.equal(m.AppState.currentPlace.venueID, 'V540', 'o primeiro card não é o mais perto de casa da fila inteira');
+  assert.equal(m.AppState.queue[0], m.AppState.currentPlace, 'o card da tela e o topo da fila divergiram');
+  assert.deepEqual(m.log, ['card:V540'], 'o card deve trocar UMA vez, quando as páginas chegaram');
+  const rad = (g) => g * Math.PI / 180;
+  const km = (p) => {   // haversine, como o app
+    const [la, lo] = p.mapa.centro, dla = rad(la + 23), dlo = rad(lo + 43);
+    const h = Math.sin(dla / 2) ** 2 + Math.cos(rad(-23)) * Math.cos(rad(la)) * Math.sin(dlo / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(h));
+  };
+  const q = m.AppState.queue;
+  for (let i = 1; i < q.length; i++) assert.ok(km(q[i - 1]) <= km(q[i]) + 1e-9, `fora de ordem no ${i}`);
+  // Custo: as MESMAS páginas que a busca nova leria (a abertura com essa ordem
+  // leu [1,2]), uma vez — nenhuma a mais.
+  assert.deepEqual(waze.pedidas.slice(antes).map((p) => p.page), [1, 2], 'a troca de ordem pediu páginas a mais (ou a menos)');
+});
+
+test('R24-6-A7: CONTROLE — a fila de UMA página troca o card na hora e não pede nada ao Waze', async () => {
+  const { waze, m, antes } = await abrirEAplicar({ itens: ITENS.slice(0, 300), segurar: false });
+  assert.equal(m.AppState.hasMore, false);
+  assert.equal(m.log.length, 1, 'com a fila inteira na mão a troca do card deve ser imediata (síncrona)');
+  assert.equal(m.AppState.queue[0], m.AppState.currentPlace);
+  await assentar(m);
+  assert.equal(waze.pedidas.length, antes, 'a fila de uma página gastou requisição na troca de ordem');
+  assert.equal(m.log.length, 1);
+});
+
+test('R24-6-A7: CONTROLE — a ordem padrão e "Mais antigos" não passam pela espera (a ordem do Waze já é a certa na página 1)', async () => {
+  for (const ordem of ['newest']) {
+    const waze = wazeVivo(ITENS);
+    const m = montar(waze, { sortOrder: 'oldest' });
+    await abrir(m);
+    m.AppState.filters.sortOrder = ordem;
+    const antes = waze.pedidas.length;
+    m.app.reordenarFilaNaTela();
+    assert.equal(m.log.length, 1, `a ordem ${ordem} deixou de trocar o card na hora`);
+    await assentar(m);
+    assert.equal(waze.pedidas.length, antes, 'a ordem padrão pediu páginas');
+  }
+});
+
+test('R24-6-A7: o card na MÃO da pessoa (o gesto) não é arrancado — a troca espera o fim do gesto, se o card ainda é o mesmo', async () => {
+  const { soltar, m, frente } = await abrirEAplicar();
+  m.tela.gesto = true;
+  soltar();
+  await assentar(m);
+  assert.equal(m.AppState.currentPlace, frente, 'o card foi trocado com o dedo nele');
+  assert.deepEqual(m.log, []);
+  // O arraste voltou ao lugar (sem decidir): o fim do gesto atende a troca.
+  m.tela.gesto = false;
+  m.app.atender();
+  assert.equal(m.AppState.currentPlace.venueID, 'V540', 'o fim do gesto não atendeu a troca do card');
+  assert.deepEqual(m.log, ['card:V540']);
+  // E atendida uma vez: o próximo aviso de fim de gesto não redesenha.
+  m.app.atender();
+  assert.equal(m.log.length, 1);
+});
+
+test('R24-6-A7: uma camada por cima (a foto, um modal) segura a troca até fechar', async () => {
+  const { soltar, m, frente } = await abrirEAplicar();
+  m.tela.camada = true;
+  soltar();
+  await assentar(m);
+  assert.equal(m.AppState.currentPlace, frente, 'o card foi trocado por baixo de uma camada aberta');
+  m.tela.camada = false;
+  m.app.atender();   // o `aoFecharCamada`
+  assert.equal(m.AppState.currentPlace.venueID, 'V540');
+});
+
+test('R24-6-A7: a pessoa JÁ tratou o card enquanto as páginas vinham — nada é trocado, e o resto segue ordenado (o próximo é o mais perto)', async () => {
+  const { soltar, m, frente } = await abrirEAplicar();
+  // O gesto decidiu o card: o `advanceQueue` o tira e o próximo assume.
+  m.AppState.queue.shift();
+  m.AppState.currentPlace = m.AppState.queue[0];
+  const novoNaTela = m.AppState.currentPlace;
+  assert.notEqual(novoNaTela, frente);
+  soltar();
+  await assentar(m);
+  assert.equal(m.AppState.currentPlace, novoNaTela, 'o card que a pessoa já tinha na tela foi arrancado');
+  assert.deepEqual(m.log, []);
+  m.tela.gesto = false; m.app.atender();
+  assert.deepEqual(m.log, [], 'o fim de um gesto posterior trocou um card que não era o do pedido');
+  // O card da tela segue na frente da fila e o resto está na ordem nova: o mais
+  // perto (da página 2) é o próximo.
+  assert.equal(m.AppState.queue[0], novoNaTela);
+  assert.equal(m.AppState.queue[1].venueID, 'V540');
+});
+
+test('R24-6-A7: a fila refeita no meio (↻, filtro, "Sair") descarta a troca — nada de card de uma fila que não existe mais', async () => {
+  const { soltar, m } = await abrirEAplicar();
+  m.AppState.fetchEpoch++;   // o `resetQueue`
+  soltar();
+  await assentar(m);
+  assert.deepEqual(m.log, [], 'a troca do card de uma fila antiga atravessou o ↻');
+});
+
+test('R24-6-A7: duas trocas de ordem seguidas — só a última troca o card, uma vez', async () => {
   const waze = wazeVivo(ITENS);
-  const m = montar(waze, { sortOrder: 'newest', referencias: { casa: [-23, -43], trabalho: null } });
-  await abrir(m);                                  // a página 1, pela ordem padrão
-  assert.equal(m.AppState.queue.length, 500);
-  // Filtros → "Perto de casa" → Aplicar: a assinatura não muda, então é o
-  // `reordenarFilaNaTela`, com um card na tela.
+  const soltar = segurarPaginas(waze);
+  const m = montar(waze, { sortOrder: 'newest', referencias: CASA });
+  await abrir(m);
   m.AppState.filters.sortOrder = 'casa';
   m.app.reordenarFilaNaTela();
-  for (let i = 0; i < 50 && m.AppState.fetching === false && m.AppState.queue.length === 500; i++) await new Promise((ok) => setTimeout(ok, 0));
-  for (let i = 0; i < 50 && m.AppState.fetching; i++) await new Promise((ok) => setTimeout(ok, 0));
-  assert.equal(m.AppState.queue.length, 554, 'o resto da fila não veio: a ordem por distância vale só pra página 1');
-  // O card da tela não troca debaixo do dedo; o próximo JÁ é o mais perto — é o
-  // que o card de fundo anuncia, e o que vem depois do gesto (R6-2-06: ele vinha
-  // pela ordem velha até o próximo card).
-  assert.equal(m.AppState.queue[0], m.AppState.currentPlace, 'o card da tela saiu da frente da fila');
-  assert.equal(m.AppState.queue[1].venueID, 'V540', 'o próximo card depois da troca não é o mais perto de casa');
+  m.AppState.filters.sortOrder = 'casa';
+  m.app.reordenarFilaNaTela();
+  soltar();
+  await assentar(m);
+  assert.deepEqual(m.log, ['card:V540'], 'as duas trocas redesenharam o card');
 });
 
 // ── R56-3: a fila inteira se decide pela ordem que VALE, não pela salva ─────────
@@ -276,4 +417,20 @@ test('R56-3: CONTROLES — com a referência, antes do perfil, e "Mais antigos" 
   assert.equal(precisaDaFilaInteira({ ordem: 'casa', perfil: null }), true, 'a ordem salva deixou de esperar o perfil');
   assert.equal(precisaDaFilaInteira({ ordem: 'oldest' }), true);
   assert.equal(precisaDaFilaInteira({ ordem: 'newest' }), false);
+});
+
+// ── A troca do card espera o gesto e a camada: quem atende ───────────────────
+test('R24-6-A7: o fim do gesto e o fechamento de TODA camada atendem a troca do card que esperava', () => {
+  assert.match(fatiar('aoFimDoGesto'), /^\s+atenderReordenacaoAdiada\(\);$/m,
+    'o fim do gesto não atende a troca do card — o card segurado pelo dedo ficaria fora da ordem nova');
+  assert.match(fatiar('aoFecharCamada'), /^\s+atenderReordenacaoAdiada\(\);$/m,
+    'o fechamento da camada não atende a troca do card');
+  // E o caminho imediato continua sendo o de sempre quando a ordem não precisa da fila inteira.
+  assert.match(fatiar('reordenarFilaNaTela'), /if \(ordemPrecisaDaFilaInteira\(\) && AppState\.hasMore && reordenarEsperandoAsPaginas\(\)\) return;/,
+    'o `reordenarFilaNaTela` deixou de esperar as páginas antes de trocar o card');
+});
+
+test('R24-6-A7: o "Sair" do treino, com a ordem trocada nos Filtros e páginas por vir, também espera elas antes de fixar o primeiro', () => {
+  assert.match(APP_SEM, /if \(s\.ordemMudou && ordemPrecisaDaFilaInteira\(\) && !\(AppState\.hasMore && reordenarEsperandoAsPaginas\(\)\)\) buscarORestoDaFila\(\);/,
+    'o `Treino.sair()` voltou a trazer o resto atrás do card, sem trocá-lo pelo mais perto da fila inteira');
 });

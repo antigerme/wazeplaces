@@ -265,7 +265,7 @@ function telaDoFab({ banner = false, desfazer = false, modal = false, larga = fa
     DEV_FAB_EVITAR: constanteDoApp('DEV_FAB_EVITAR', { DEV_FAB_ACIONAVEL, DEV_FAB_LEITURA }), DEV_FAB_LEITURA,
     DEV_FAB_PASSAGEIROS: constanteDoApp('DEV_FAB_PASSAGEIROS'),
     cardDaFrente: () => cardDaFrente, cardSobGesto: (c) => estado.gesto && c === cardDaFrente,
-    redesenharCardAdiado: () => {} };
+    redesenharCardAdiado: () => {}, atenderReordenacaoAdiada: () => {} };
   const chaves = Object.keys(deps);
   const { posicionar, levantar, aoFimDoGesto } = new Function(...chaves, 'let devFabFixado = false, devFabDedo = null, fabEsperaOGesto = false;\n'
     + ['devFabReservaDeBaixo', 'devFabCoords', 'devFabSob', 'devFabVitimas', 'posicionarFabDev', 'levantarOFabComAPilha', 'aoFimDoGesto'].map(fatiar)

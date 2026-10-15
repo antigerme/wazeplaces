@@ -105,6 +105,8 @@ function montar({ visto = false, consumindo = false, treino = false } = {}) {
     // Os avisos de UMA vez que esperavam a camada fechar (R13-7-01): têm teste
     // próprio (test/treino-auditoria-r13); aqui o fechamento só os pede.
     pedirAvisosAdiados: () => {},
+    // A troca de card que esperava a camada fechar (R24-6-A7): tem teste próprio (test/ordem-paginada).
+    atenderReordenacaoAdiada: () => {},
     console,
   };
   const chaves = Object.keys(deps);
