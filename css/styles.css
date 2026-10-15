@@ -753,58 +753,90 @@ body > main {
      cima mede. 12,4rem aqui é o mesmo 12,4rem de lá (o teste os amarra), e a 1× a
      fileira nunca é tão estreita (a do Galaxy Fold tem 12,5rem): nenhum celular, em
      nenhuma orientação, entra neste bloco sem o texto maior — a 1× nada muda.
+   - A fileira só fica presa ENQUANTO O CARTÃO ROLA (consulta de rolagem:
+     `scroll-state(scrollable: block)`). O 1º desenho prendia sempre que a linha tinha
+     ≤ 12,4rem, e isso MUDAVA o diálogo que empilha mas CABE: medido nos 336 estados
+     empilhados que cabem (aparelhos × escalas × idiomas × temas), o `sticky` sozinho faz
+     o Chromium promover a fileira a camada própria e rasterizar o texto dos botões com
+     subpixel — 76 estados diferentes com a geometria IGUAL (72 do «Marcar em lote», de
+     1.900 a 3.600 pixels) e 260 iguais. Com o portão o cartão vira contêiner
+     `inline-size scroll-state` e a fileira só prende quando há para onde rolar; onde o
+     cartão cabe ela segue no fluxo, como sempre: 329 dos 336 ficam IGUAIS. Os 7 que
+     sobram são o «código» (de 4 a 32 pixels de ±1 nível em volta do anel do campo que
+     ganha o foco ao abrir) e não são da regra: a MESMA árvore difere de si nesse diálogo
+     em 15% dos pares de capturas (20 de 132 na base, 19 de 132 hoje, 50 de 352 entre as
+     duas). A matriz do afirmativo ao alcance é a mesma de antes do portão (350 → 4).
+     Navegador SEM `scroll-state` (o WebKit 27.2 e, até onde se sabe, o Firefox: o `@supports not` abaixo)
+     fica com a regra sem o portão — presa sempre abaixo de 12,4rem; no WebKit, 328 dos
+     336 ficam iguais, e os 8 que mudam são um só estado (o «código» a 320×568 ×1,5, que
+     lá já rolava 1 px na base).
    - O FUNDO da fileira é a cor do cartão a 99,6% de opacidade (254 de 255) —
      `rgba(255, 255, 255, .996)` no claro e `rgba(30, 41, 59, .996)` no escuro, que são o
      `bg-white` e o `dark:bg-slate-800` dos sete cartões (o teste os confere no HTML) —,
-     pra o conteúdo não aparecer entre os botões. NÃO é `inherit`, e o motivo é MEDIDO:
-     com a cor OPACA o Chromium passa a rasterizar o texto da fileira com antisserrilhado
-     de subpixel (franjas coloridas de até 98 níveis nas bordas das letras) — nos 336
-     estados empilhados que CABEM (aparelhos × escalas × idiomas × temas) todos mudavam
-     de 1.000 a 2.000 pixels com a geometria IGUAL. Com translúcido o texto volta a ser
-     cinza — e a conta de cor tem que ser exata: a 99% o escuro (30, 41, 59 sobre 30, 41,
-     59) mudava 1 nível em 7.876 pixels por arredondamento da mistura, e a 99,6% (254) a
-     mistura dá a própria cor em toda parte. Resultado: 260 dos 336 ficam IGUAIS (colar
-     40 de 40, sair 22 de 22, código 128 de 132, lote 70 de 142). Os 76 que sobram
-     (72 do "Marcar em lote", com o rótulo mais longo — quebra em duas linhas: es 22 de
-     34, fr 26 de 34, pt 18 de 36, en 6 de 38 —, e 4 do código) têm a geometria igual e
-     mudam só o antisserrilhado do texto dos botões — o
-     `sticky` sozinho já os muda (sem fundo nenhum): o Chromium promove a fileira a
-     camada própria quando ela fica por cima de uma camada composta, e aí rasteriza o
-     texto com subpixel. Fica registrado, sem remédio de CSS (testados: `contain`,
-     `z-index`, `will-change`, `text-rendering`); o texto grande vive no Android, onde o
-     Chromium usa tons de cinza (conhecimento da plataforma, não medido aqui). O custo do
-     fundo é 0,4% do conteúdo que rola por baixo aparecer entre os botões: 1 nível de
-     cinza, invisível. O `sticky` prende a fileira na borda do
-     CONTEÚDO do cartão (medido: o `p-6` fica de fora), então embaixo sobra uma faixa
-     de 1,5rem — o respiro de sempre — por onde o conteúdo rolando apareceria. O
+     pra o conteúdo não aparecer entre os botões. NÃO é `inherit`: opaco, o Chromium
+     rasteriza o texto da fileira com subpixel (franjas de até 98 níveis) — com o portão
+     isso só aconteceria onde a fileira prende, mas a regra do `@supports not` prende
+     também onde o diálogo cabe, e lá ele mudaria. A conta de cor tem que ser exata: a 99%
+     o escuro (30, 41, 59 sobre 30, 41, 59) mudava 1 nível em 7.876 pixels por
+     arredondamento da mistura, e a 99,6% (254) a mistura dá a própria cor. O custo é 0,4% do conteúdo que rola por baixo
+     aparecer entre os botões: 1 nível de cinza, invisível. O `sticky` prende a fileira na
+     borda do CONTEÚDO do cartão (medido: o `p-6` fica de fora), então embaixo sobra uma
+     faixa de 1,5rem — o respiro de sempre — por onde o conteúdo rolando apareceria. O
      `::after` a pinta: uma caixa da largura da fileira (1,5rem de cada lado, longe dos
      cantos arredondados do cartão, onde pintar a cor do cartão em cima da cor do
      cartão não serrilha duas vezes) que cobre só esse respiro. Ela para 1 px antes da
      borda de baixo do cartão: com o texto fracionário essa borda cai no meio de um
      pixel, e pintar até ela duplicaria a cobertura da única linha que mistura a cor do
-     cartão com a do fundo — o estado empilhado que CABE tem que ficar igual.
-   - `sticky` só age quando a fileira sairia do fim da janela do cartão; com o
-     conteúdo cabendo, ela fica no lugar de sempre. */
+     cartão com a do fundo.
+   - O `sticky` só age quando a fileira sairia do fim da janela do cartão; com o
+     conteúdo cabendo, ela fica no lugar de sempre — e agora, nos navegadores com
+     `scroll-state`, nem a camada própria dela existe. */
 .dialogo-cartao {
   container: dialogo / inline-size;
 }
-@container dialogo (max-width: 12.4rem) {
-  .acoes-presas {
-    position: sticky;
-    bottom: 0;
-    background: rgba(255, 255, 255, 0.996);
+@supports (container-type: scroll-state) {
+  .dialogo-cartao {
+    container-type: inline-size scroll-state;
   }
-  .dark .acoes-presas {
-    background: rgba(30, 41, 59, 0.996);
+  @container dialogo (max-width: 12.4rem) and scroll-state(scrollable: block) {
+    .acoes-presas {
+      position: sticky;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.996);
+    }
+    .dark .acoes-presas {
+      background: rgba(30, 41, 59, 0.996);
+    }
+    .acoes-presas::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: calc(1.5rem - 1px);
+      background: inherit;
+    }
   }
-  .acoes-presas::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    height: calc(1.5rem - 1px);
-    background: inherit;
+}
+@supports not (container-type: scroll-state) {
+  @container dialogo (max-width: 12.4rem) {
+    .acoes-presas {
+      position: sticky;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.996);
+    }
+    .dark .acoes-presas {
+      background: rgba(30, 41, 59, 0.996);
+    }
+    .acoes-presas::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: calc(1.5rem - 1px);
+      background: inherit;
+    }
   }
 }
 

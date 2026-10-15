@@ -17,8 +17,10 @@
 //  R21-7-01 · contraste alto (`forced-colors: active`): interruptores, abas, barra, selos, células e botões.
 //  D3/D4    · a tabela de gestos da Ajuda e os botões do pareamento / "Acesso restrito" quebram o texto.
 //  R21-8-02 · as ações que EMPILHAM (texto grande) ficam presas no fim do cartão do diálogo: o botão afirmativo
-//             não cai abaixo do corte da rolagem (sticky, só com a fileira de até 12,4rem: a 1× nada muda; o fundo
-//             da fileira é a cor do cartão a 99,6%, e NÃO opaca, que no Chromium liga o subpixel e muda o texto).
+//             não cai abaixo do corte da rolagem (sticky, só com a fileira de até 12,4rem E o cartão rolando
+//             — `scroll-state(scrollable: block)`, com a regra sem o portão para o navegador que não o tem —: a 1× nada
+//             muda, e o diálogo que empilha mas CABE também não; o fundo da fileira é a cor do cartão a 99,6%, e NÃO
+//             opaca, que no Chromium liga o subpixel e muda o texto).
 //  R21-8-04 · o título, a 1ª frase e o nome do perfil do "Acesso restrito" quebram a palavra que não cabe.
 //  (comentário) · o `.seg-tab` dizia 6,25% onde o código usa `6.3cqw`.
 //
@@ -462,7 +464,7 @@ test('R21-8-04 · o "Acesso restrito" quebra a palavra que não cabe no título,
 const CARTOES_COM_ACOES = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'pairEnterModal', 'batchReadModal'];
 const CARTOES_COM_BOTAO_UNICO = [['treinoFimModal', 'treinoFimOk'], ['accessDeniedModal', 'closeAccessDenied']];
 
-test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão do diálogo (sticky), e só no estado empilhado', () => {
+test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão do diálogo (sticky) só quando o cartão ROLA, e só no estado empilhado', () => {
   const cartao = regraDe('.dialogo-cartao');
   assert.ok(cartao, 'sumiu a regra do cartão do diálogo');
   // O contêiner é o CARTÃO: a fileira é contêiner dos próprios botões, e um contêiner não se estiliza por si.
@@ -470,14 +472,40 @@ test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão 
   const empilha = TOPO.find((b) => /^@container \(max-width: [\d.]+rem\)$/.test(b.cabeca) && /flex:\s*1 1 100%/.test(b.corpo));
   assert.ok(empilha, 'sumiu o @container que empilha os botões');
   const corteEmpilha = Number(/max-width: ([\d.]+)rem/.exec(empilha.cabeca)[1]);
-  const presa = TOPO.find((b) => /^@container dialogo \(max-width: [\d.]+rem\)$/.test(b.cabeca));
-  assert.ok(presa, 'sumiu o @container do cartão que prende a fileira');
-  const corte = Number(/max-width: ([\d.]+)rem/.exec(presa.cabeca)[1]);
-  // A caixa de conteúdo do cartão (a que o contêiner mede) é a largura da fileira: o MESMO corte do empilhamento.
-  assert.equal(corte, corteEmpilha, 'a fileira prende num corte diferente do que ela empilha: ficaria presa lado a lado, ou empilhada solta');
   // E ele fica abaixo da fileira do Galaxy Fold a 1× (280 − p-4 − p-6 = 200 px = 12,5rem): a 1× nenhum celular entra.
-  assert.ok(corte < (280 - 32 - 48) / 16, `o corte (${corte}rem) alcança a fileira do Fold a 1× (12,5rem): mudaria os diálogos de hoje`);
-  const regrasPresas = regrasComuns(lerBlocos(presa.corpo), presa.cabeca);
+  assert.ok(corteEmpilha < (280 - 32 - 48) / 16, `o corte (${corteEmpilha}rem) alcança a fileira do Fold a 1× (12,5rem): mudaria os diálogos de hoje`);
+
+  // ── O PORTÃO: a fileira só prende quando o cartão tem para onde rolar (consulta de rolagem do contêiner) ────────────────────
+  // Presa SEMPRE (o 1º desenho), o `sticky` fazia o Chromium promover a fileira a camada própria e rasterizar o texto dos botões
+  // com subpixel: 76 dos 336 diálogos empilhados que CABEM mudavam, com a geometria igual. Com o portão, onde cabe a fileira fica
+  // no fluxo, como sempre. Navegador SEM `scroll-state` (o WebKit 27.2; o Firefox, até onde se sabe) fica com a regra sem o portão (`@supports not`).
+  const COND = '(container-type: scroll-state)';
+  const suporta = TOPO.filter((b) => b.cabeca === `@supports ${COND}`);
+  const semSuporte = TOPO.filter((b) => b.cabeca === `@supports not ${COND}`);
+  assert.equal(suporta.length, 1, `sumiu (ou duplicou) o @supports ${COND}`);
+  assert.equal(semSuporte.length, 1, `sumiu (ou duplicou) o @supports not ${COND}: o navegador sem scroll-state ficaria sem a fileira presa`);
+  const doSuporta = lerBlocos(suporta[0].corpo);
+  const doSem = lerBlocos(semSuporte[0].corpo);
+  // O cartão só vira contêiner de rolagem dentro do @supports; a regra de topo (`container: dialogo / inline-size`) segue valendo sozinha lá fora.
+  const tipo = doSuporta.find((b) => b.cabeca === '.dialogo-cartao');
+  assert.ok(tipo, 'o @supports não torna o cartão contêiner de rolagem (container-type: inline-size scroll-state)');
+  assert.deepEqual(declaracoes(tipo.corpo), { 'container-type': 'inline-size scroll-state' },
+    'o cartão tem que continuar `inline-size` (a largura da fileira) E ganhar `scroll-state`; mexer em outra coisa muda o contêiner nomeado');
+  const comPortao = doSuporta.filter((b) => b !== tipo);
+  assert.equal(comPortao.length, 1, 'o @supports (scroll-state) tem que ter só o contêiner do cartão e UM @container com o portão');
+  const mPortao = /^@container dialogo \(max-width: ([\d.]+)rem\) and scroll-state\(scrollable: block\)$/.exec(comPortao[0].cabeca);
+  assert.ok(mPortao, `o @container do portão mudou de forma (${comPortao[0].cabeca}): tem que ser a largura E o cartão rolando no eixo do bloco`);
+  assert.equal(doSem.length, 1, 'o @supports not tem que ter só o @container da fileira presa');
+  const mSem = /^@container dialogo \(max-width: ([\d.]+)rem\)$/.exec(doSem[0].cabeca);
+  assert.ok(mSem, `o @container do navegador sem scroll-state mudou de forma (${doSem[0].cabeca}): só a largura`);
+  // A caixa de conteúdo do cartão (a que o contêiner mede) é a largura da fileira: o MESMO corte do empilhamento, nos DOIS ramos.
+  assert.equal(Number(mPortao[1]), corteEmpilha, 'a fileira prende num corte diferente do que ela empilha: ficaria presa lado a lado, ou empilhada solta');
+  assert.equal(Number(mSem[1]), corteEmpilha, 'o ramo sem scroll-state prende num corte diferente do que a fileira empilha');
+  // Os dois ramos têm o MESMO corpo: o que muda de um para o outro é só o portão. Corpo diferente é o navegador sem scroll-state
+  // desenhando outra coisa (e o WebKit é onde o smoke mede).
+  assert.equal(norm(comPortao[0].corpo), norm(doSem[0].corpo), 'os dois ramos da fileira presa têm que dizer a mesma coisa');
+
+  const regrasPresas = regrasComuns(lerBlocos(comPortao[0].corpo), comPortao[0].cabeca);
   const r = regrasPresas.find((x) => x.sel === '.acoes-presas');
   assert.ok(r, 'a regra .acoes-presas sumiu do @container');
   assert.equal(r.decl.position, 'sticky');
@@ -503,8 +531,19 @@ test('R21-8-02 · a fileira de ações que EMPILHA fica presa no fim do cartão 
   // duplicaria a cobertura da única linha que mistura a cor do cartão com a do fundo (o estado empilhado que CABE ficaria diferente).
   assert.equal(depois.decl.height, 'calc(1.5rem - 1px)');
   assert.equal(depois.decl.background, 'inherit');
-  // Fora da consulta a classe não tem NENHUMA regra: onde cabe, nenhum pixel muda.
-  assert.ok(!REGRAS.some((x) => /\.acoes-presas\b/.test(x.sel) && x.condicao === ''), '.acoes-presas tem regra fora do @container: valeria também lado a lado');
+
+  // Fora dos dois @container a classe não tem NENHUMA regra: onde cabe, nenhum pixel muda. Cada ramo tem as três (a fileira, a do
+  // escuro e o ::after) e nenhuma mais — regra a mais, ou fora da consulta, valeria também lado a lado.
+  const dela = REGRAS.filter((x) => /\.acoes-presas\b/.test(x.sel));
+  assert.ok(!dela.some((x) => x.condicao === ''), '.acoes-presas tem regra fora do @container: valeria também lado a lado');
+  assert.deepEqual(dela.map((x) => x.condicao).sort(), [
+    comPortao[0].cabeca, comPortao[0].cabeca, comPortao[0].cabeca, doSem[0].cabeca, doSem[0].cabeca, doSem[0].cabeca,
+  ].sort(), '.acoes-presas tem regra fora dos dois @container da fileira presa (ou faltou uma das três em algum ramo)');
+  // E o `container-type` com `scroll-state` mora SÓ dentro do @supports: fora dele um navegador sem a palavra descartaria a
+  // declaração inteira, e o cartão perderia a largura que o corte de 12,4rem mede.
+  const comScroll = REGRAS.filter((x) => /scroll-state/.test(x.decl['container-type'] || ''));
+  assert.deepEqual(comScroll.map((x) => `${x.sel} @ ${x.condicao}`), [`.dialogo-cartao @ @supports ${COND}`],
+    'o container-type: scroll-state tem que aparecer uma vez só, no .dialogo-cartao dentro do @supports');
 });
 
 test('R21-8-02 · cada cartão com a fileira dentro da rolagem é contêiner, tem o p-6 e a fileira (ou o botão único) presa', () => {

@@ -2427,7 +2427,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       const hit = dentro ? document.elementFromPoint(cx, cy) : null;
       const linha = b.closest('.dialogo-acoes'); const bs = linha ? [...linha.children].filter((c) => c.getClientRects().length) : [];
       const empilhado = bs.length > 1 && bs[1].getBoundingClientRect().top >= bs[0].getBoundingClientRect().bottom - 1;
-      fim({ nome, ok: hit === b || !!(hit && b.contains(hit)), empilhado, sobra: cartao.scrollHeight - cartao.clientHeight });
+      fim({ nome, ok: hit === b || !!(hit && b.contains(hit)), empilhado, sobra: cartao.scrollHeight - cartao.clientHeight, pos: getComputedStyle(b.closest('.acoes-presas')).position });
     }, 160));
   };
   const DIALOGOS_DA_FILEIRA = [['sair', 'logoutModal', 'confirmLogout'], ['colar', 'pasteModal', 'confirmPaste'], ['codigo', 'pairEnterModal', 'pairEnterConfirm'],
@@ -2466,6 +2466,9 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
         await fecharL25(page);
         // A regra é do estado EMPILHADO (é onde a fileira ganha uma linha); lado a lado o desenho é o de sempre.
         if (r.empilhado) { empilhadosVistos++; checa(r.ok, `diálogo ${d[0]} ${rot} · ${lang}: o botão afirmativo (empilhado) não recebe o dedo sem rolar`, JSON.stringify(r)); }
+        // Cartão que ROLA (sobra ≥ 1 px: arredondado, 1 já é rolagem de verdade) com as ações empilhadas: a fileira está presa — com o portão de
+        // rolagem do Chromium e com a regra sem portão dos navegadores que não o têm. (O outro lado, o que CABE, é o bloco da tinta, logo abaixo.)
+        if (r.empilhado && r.sobra >= 1) checa(r.pos === 'sticky', `diálogo ${d[0]} ${rot} · ${lang}: o cartão rola e as ações empilharam, mas a fileira não está presa (position ${r.pos})`, JSON.stringify(r));
       }
     }
     checa(erros.length === 0, `diálogos ${rot}: erro de JS`, erros[0]);
@@ -2486,49 +2489,62 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     checa(cortados > 0, 'diálogos empilhados: CONTROLE — sem a fileira presa o afirmativo nunca fica cortado; a medida está cega');
   }
   {
-    // O estado empilhado que CABE não muda UM pixel: a tinta do cartão com a fileira presa é byte a byte a MESMA da tela com a regra desfeita, nos dois temas (a 99% o escuro mudava 1 nível por arredondamento).
-    // É o motivo do fundo a 99,6% (e não `inherit`): MEDIDO, com a cor do cartão OPACA na fileira o Chromium rasteriza o texto dela com
-    // antisserrilhado de subpixel, e os 336 estados empilhados que cabem (aparelhos × escalas × idiomas × temas) mudavam de 1.000 a 2.000
-    // pixels com a geometria IGUAL. O CONTROLE reproduz o defeito (o fundo opaco de volta): a tinta tem que mudar. Se não muda, este Chromium
-    // não faz subpixel e a medida não enxerga — aí o bloco AVISA e pula só esta igualdade, em vez de reprovar por causa do ambiente.
+    // O estado empilhado que CABE não muda UM pixel: a tinta do cartão com a regra de hoje é byte a byte a MESMA da tela com a regra desfeita,
+    // nos dois temas. Prender a fileira SEMPRE abaixo de 12,4rem (o 1º desenho) mudava justo esses diálogos: com `position: sticky` o Chromium
+    // promove a fileira a camada própria e rasteriza o texto dos botões com subpixel — MEDIDO nos 336 estados que empilham e cabem (aparelhos ×
+    // escalas × idiomas × temas), 76 mudavam (72 do «Marcar em lote») com a geometria IGUAL. Com o portão de rolagem (`scroll-state(scrollable:
+    // block)`) a fileira só prende quando o cartão rola, e onde cabe ela segue no fluxo, como sempre.
+    // (O «código» fica de fora de propósito: o campo ganha o foco ao abrir e repintar o anel arredondado deixa de 4 a 32 pixels de ±1 nível — MEDIDO,
+    // a MESMA árvore difere de si em 15% dos pares de capturas —, então a igualdade exata não se mede nele.)
+    // O CONTROLE é a regra ANTIGA de volta (sem o portão): a tinta TEM que mudar em cada caso «sensível» — senão a medida está cega. Se este
+    // navegador não faz subpixel (o WebKit) nenhum caso muda, e o bloco AVISA e pula só esta igualdade, em vez de reprovar por causa do ambiente.
     const DESFEITA = '.acoes-presas { position: static !important; background: none !important; } .acoes-presas::after { display: none !important; }';
-    const OPACA = '.acoes-presas, .dark .acoes-presas { background: inherit !important; }';
+    const ANTIGA = '@container dialogo (max-width: 12.4rem) { .acoes-presas { position: sticky; bottom: 0; background: rgba(255, 255, 255, 0.996); } .dark .acoes-presas { background: rgba(30, 41, 59, 0.996); } .acoes-presas::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: calc(1.5rem - 1px); background: inherit; } }';
+    // [rótulo, diálogo, id, idioma, escala, sensível: a regra ANTIGA muda a tinta neste caso (medido no Chromium 156, nos dois temas)]
+    const CASOS_DA_TINTA = [
+      ['lote fr ×1,15', 'lote', 'batchReadModal', 'fr', 1.15, true], ['lote es ×1,15', 'lote', 'batchReadModal', 'es', 1.15, true],
+      ['lote pt ×1,3', 'lote', 'batchReadModal', 'pt', 1.3, true], ['lote fr ×1,5', 'lote', 'batchReadModal', 'fr', 1.5, true],
+      ['colar pt ×1,15', 'colar', 'pasteModal', 'pt', 1.15, false], ['colar fr ×1,15', 'colar', 'pasteModal', 'fr', 1.15, false],
+    ];
     const abrirParaFoto = ([nome, id]) => {
       if (nome === 'sair') abrirDialogoDoSair(); else if (nome === 'comofunciona') abrirComoFunciona(false); else openModal(id);
       return new Promise((fim) => setTimeout(() => {
         if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
         const m = document.getElementById(id); const cartao = m.firstElementChild;
         const linha = cartao.querySelector('.dialogo-acoes'); const bs = linha ? [...linha.children].filter((c) => c.getClientRects().length) : [];
-        fim({ empilhado: bs.length > 1 && bs[1].getBoundingClientRect().top >= bs[0].getBoundingClientRect().bottom - 1, sobra: cartao.scrollHeight - cartao.clientHeight });
+        fim({ empilhado: bs.length > 1 && bs[1].getBoundingClientRect().top >= bs[0].getBoundingClientRect().bottom - 1, sobra: cartao.scrollHeight - cartao.clientHeight,
+          pos: getComputedStyle(cartao.querySelector('.acoes-presas')).position, suporta: CSS.supports('container-type', 'scroll-state') });
       }, 200));
     };
-    const fotoDe = async (tema, estilo, d) => {
-      const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, 1.15, { colorScheme: tema, estilo });
-      await entrarL25(page, 'pt');
-      const pre = await page.evaluate(abrirParaFoto, d);
+    const fotoDe = async (tema, estilo, c) => {
+      const { ctx, page } = await novaPaginaL25({ width: 280, height: 653 }, c[4], { colorScheme: tema, estilo });
+      await entrarL25(page, c[3]);
+      const pre = await page.evaluate(abrirParaFoto, [c[1], c[2]]);
       await assentar(page, 30);
-      const caixa = await page.locator(`#${d[1]} > div`).boundingBox();
+      const caixa = await page.locator(`#${c[2]} > div`).boundingBox();
       const foto = await page.screenshot({ clip: { x: Math.max(0, caixa.x - 4), y: Math.max(0, caixa.y - 4), width: caixa.width + 8, height: caixa.height + 8 } });
       await ctx.close();
       return { pre, foto };
     };
-    let controleVe = 0, medidos = 0;
-    for (const tema of ['light', 'dark']) for (const d of [['colar', 'pasteModal'], ['codigo', 'pairEnterModal'], ['lote', 'batchReadModal']]) {
-      const normal = await fotoDe(tema, '', d), desfeita = await fotoDe(tema, DESFEITA, d), opaca = await fotoDe(tema, OPACA, d);
-      checa(normal.pre.empilhado && normal.pre.sobra <= 0, `fileira presa ${d[0]} · ${tema}: o diálogo não está empilhado e cabendo (empilhado ${normal.pre.empilhado}, sobra ${normal.pre.sobra}) — a medida não vale`, JSON.stringify(normal.pre));
-      medidos++;
-      if (!opaca.foto.equals(normal.foto)) controleVe++;
-      // o que se cobra: com a regra (99%) a tinta é a de sem ela
-      normal.cobra = normal.foto.equals(desfeita.foto);
-      normal.nome = `fileira presa ${d[0]} · ${tema}`;
-      (globalThis.__fotosDaFileira ||= []).push(normal);
+    let controleVe = 0, sensiveis = 0, comPortao = 0;
+    const medidas = [];
+    for (const tema of ['light', 'dark']) for (const c of CASOS_DA_TINTA) {
+      const normal = await fotoDe(tema, '', c), desfeita = await fotoDe(tema, DESFEITA, c), antiga = await fotoDe(tema, ANTIGA, c);
+      const nome = `fileira presa ${c[0]} · ${tema}`;
+      checa(normal.pre.empilhado && normal.pre.sobra <= 0, `${nome}: o diálogo não está empilhado e cabendo (empilhado ${normal.pre.empilhado}, sobra ${normal.pre.sobra}) — a medida não vale`, JSON.stringify(normal.pre));
+      // Onde o navegador tem o portão de rolagem, o que CABE não prende; sem ele (o WebKit; o Firefox, até onde se sabe) a regra sem portão prende sempre abaixo do corte.
+      checa(normal.pre.pos === (normal.pre.suporta ? 'static' : 'sticky'),
+        `${nome}: a fileira do diálogo que cabe está ${normal.pre.pos} (${normal.pre.suporta ? 'com' : 'sem'} scroll-state; esperava ${normal.pre.suporta ? 'static' : 'sticky'})`, JSON.stringify(normal.pre));
+      if (normal.pre.suporta) comPortao++;
+      if (c[5]) { sensiveis++; if (!antiga.foto.equals(desfeita.foto)) controleVe++; }
+      medidas.push({ nome, cobra: normal.foto.equals(desfeita.foto) });
     }
-    if (controleVe === 0) console.log('  (pulado: este navegador não rasteriza o texto da fileira opaca com subpixel — a tinta saiu igual com o fundo opaco, então a igualdade dos diálogos empilhados que cabem não se mede aqui; é o caso do WebKit)');
+    if (controleVe === 0) console.log('  (pulado: este navegador não rasteriza o texto da fileira presa antiga com subpixel — a tinta saiu igual com a regra sem o portão, então a igualdade dos diálogos empilhados que cabem não se mede aqui; é o caso do WebKit)');
     else {
-      for (const n of globalThis.__fotosDaFileira) checa(n.cobra, `${n.nome}: a tinta do diálogo empilhado que CABE mudou com a fileira presa (o fundo da fileira liga o antisserrilhado de subpixel)`);
-      checa(controleVe === medidos, `fileira presa: CONTROLE — com o fundo opaco de volta só ${controleVe} de ${medidos} diálogos mudaram de tinta; a medida está cega para parte deles`);
+      for (const n of medidas) checa(n.cobra, `${n.nome}: a tinta do diálogo empilhado que CABE mudou (a fileira presa sem o portão de rolagem liga o antisserrilhado de subpixel)`);
+      checa(controleVe === sensiveis, `fileira presa: CONTROLE — com a regra antiga (sem o portão) só ${controleVe} de ${sensiveis} diálogos mudaram de tinta; a medida está cega para parte deles`);
+      checa(comPortao > 0, 'fileira presa: este navegador mudou a tinta com a regra antiga mas não diz que tem scroll-state — o portão não foi exercitado');
     }
-    delete globalThis.__fotosDaFileira;
   }
 }
 
@@ -17794,4 +17810,4 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o armazenamento ILEGÍVEL não sendo o "Sair" de outra aba (lote 25: o localStorage lançando SecurityError — o pageshow persistido NÃO encerra a sessão viva, não manda sessao:destroy e não devolve à fábrica a preferência desta sessão, e a volta do fundo da presença PEDE a lista —, com a pré-condição de que a página bloqueada lança e o CONTROLE do armazenamento normal)`
   + `, + o link do "Copiar link" colado no campo do código (lote 25: o ouvinte de paste do campo resgata o segredo de 20 símbolos e o campo não vira "PLA-CES"; o código colado junto do host entra no formato da tela sem resgatar sozinho; o texto que não é nenhum dos dois segue o colar do navegador)`
   + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`
-  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem, a 1× nada muda) — cada medida com o seu CONTROLE`);
+  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem e só com o cartão rolando; a 1× nada muda, e o diálogo que empilha mas cabe também não) — cada medida com o seu CONTROLE`);
