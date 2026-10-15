@@ -136,9 +136,6 @@ const API = {
 
     getRegion() {
         this.lerLugar();
-        // MIGRACAO: regiao-world — `world` era a América do Norte com outro
-        // nome (ver `WAZE_REGIONS` no core); quem a escolheu vai pra `na`.
-        if (this.region === 'world') { this.region = 'na'; safeLS.set('waze_region', 'na'); }
         if (!REGIOES_DO_WAZE.includes(this.region)) this.region = 'row';
         return this.region;
     },

@@ -95,6 +95,9 @@ test('pedido: tipo errado vira valor seguro, nunca vaza', () => {
   assert.equal(limpo.lat, null);
   assert.equal(limpo.lon, null);
   assert.equal(limpo.region, 'row', 'região desconhecida cai no padrão, não vaza');
+  // `world` (o apelido que saiu, de cartão de versão anterior) é desconhecida como qualquer outra.
+  assert.equal(m.presencaCardSeguro({ ...CARD, region: 'world' }).region, 'row');
+  assert.equal(m.presencaCardSeguro({ ...CARD, region: 'na' }).region, 'na', 'CONTROLE: a região válida passa');
   assert.equal(limpo.updateTypeKey, null);
 });
 

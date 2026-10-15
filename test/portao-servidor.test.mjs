@@ -386,8 +386,8 @@ test('login: o testar-cookies manda o arquivo FILTRADO, e sem linha do Waze nem 
 // `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200 em
 // `/Descartes/` (a fila dos EUA com 512 pedidos). Todo editor dos EUA e do
 // Canadá que escolhia "NA" ficava sem app.
-test('região NA: toda chamada vai pro servidor SEM prefixo (`/Descartes/`), e `world` é a mesma coisa', async () => {
-  for (const region of ['na', 'world', 'NA']) {
+test('região NA: toda chamada vai pro servidor SEM prefixo (`/Descartes/`), e `world` (o apelido que saiu) é recusado', async () => {
+  for (const region of ['na', 'NA']) {
     const s = await sessaoDeTeste(COOKIES);
     const rotas = [['buscar-places', { countryId: 235 }], ['perfil', {}], ['lista-paises', {}], ['marcar-lido', { venueID: 'v1', updateRequestID: 'u1' }]];
     for (const [rota, extra] of rotas) {
@@ -397,6 +397,14 @@ test('região NA: toda chamada vai pro servidor SEM prefixo (`/Descartes/`), e `
         assert.match(c.url, /^https:\/\/www\.waze\.com\/Descartes\//, `${region} ${rota}: ${c.url}`);
       }
     }
+  }
+  // `world` saiu: é região inválida (400, sem ir ao Waze), não um 500 nem um servidor.
+  {
+    const s = await sessaoDeTeste(COOKIES);
+    const { r, chamadas } = await comWaze(() => json({}), () => dispatch('perfil', { ...s.dados, region: 'world' }, s.ctx));
+    assert.equal(r.status, 400);
+    assert.equal(r.body.errorKey, 'srv.err.badRequest');
+    assert.equal(chamadas.length, 0);
   }
   // CONTROLE: as outras regiões seguem com prefixo.
   const s = await sessaoDeTeste(COOKIES);

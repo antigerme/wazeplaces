@@ -30,8 +30,8 @@ import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-a
 // `/Descartes/` (8 países, e a fila dos EUA com 512 pedidos). O app mandava
 // todo editor dos EUA e do Canadá pra um servidor inexistente — só a opção
 // "World" funcionava, por acaso, porque apontava pra `/Descartes/`. O WME tem
-// TRÊS servidores (NA, ROW, IL), e o app agora também: `world` virou sinônimo
-// de `na` (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
+// TRÊS servidores (NA, ROW, IL), e o app agora também: o apelido `world`
+// (sinônimo de `na`) saiu (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
 // o backend dele é outro (ver `WAZE_WMP`).
 export const WAZE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/v1',
@@ -1186,10 +1186,7 @@ function requireRegion(data) {
   // é nenhuma das três é 400: cair em `row` calado mandava a decisão (rejeitar,
   // marcar lido, excluir foto) ao servidor errado — que responde "não encontrado",
   // e o app lê isso como "já tratado" e conta como feito (R17-6-A2).
-  let region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
-  // MIGRACAO: regiao-world — `world` era a 4ª opção do filtro e sempre foi o
-  // servidor da América do Norte com outro nome (ver `WAZE_REGIONS`).
-  if (region === 'world') region = 'na';
+  const region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
   // `hasOwn`: `constructor` e cia. são "verdadeiros" num objeto comum.
   if (!Object.hasOwn(WAZE_REGIONS, region)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
   return region;

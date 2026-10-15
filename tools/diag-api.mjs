@@ -88,7 +88,7 @@ if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https
 // padrão do servidor — a resposta vinha "vazia" e parecia o defeito que se
 // investigava (auditoria de 2026-09-26). São as chaves que o `api.js` grava
 // (`waze_region`, `waze_country`); o `json-extra` continua podendo trocar os
-// dois, e o servidor valida a região (inclusive o `world` antigo, que vira `na`).
+// dois, e o servidor valida a região (o `world` antigo, de relatório velho, ele recusa com 400).
 const ls = d.localStorage || {};
 const regiaoDoRelatorio = typeof ls.waze_region === 'string' && /^[a-z]+$/.test(ls.waze_region) ? ls.waze_region : 'row';
 const paisDoRelatorio = parseInt(ls.waze_country, 10);
