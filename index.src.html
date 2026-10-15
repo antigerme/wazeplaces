@@ -1069,6 +1069,8 @@
 
             <h2 class="sr-only" data-i18n="app.queueHeading">Fila de pedidos de places</h2>
             <div id="cardLiveRegion" class="sr-only" role="status" aria-live="polite"></div>
+            <!-- Só pro leitor de tela: a mensagem que chega com a conversa FECHADA (a pílula só muda o aria-label). Fora de qualquer modal; a frase leva só a contagem. -->
+            <p id="presencaAnuncioPilula" class="sr-only" role="status" aria-live="polite"></p>
 
             <!-- Estado PERMANENTE fica no fluxo, não no #bannerStack. O stack é
                  `fixed` e existe pra aviso TRANSITÓRIO (Desfazer, conquista) — o que

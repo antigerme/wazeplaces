@@ -93,6 +93,12 @@ const PRESENCA_DIAG_MSG_MS = 60_000;
 // Entre limpar a região viva da conversa e dizer de novo a MESMA frase de
 // falha (ver `presencaAnunciarFalhaOutraVez`).
 const PRESENCA_ANUNCIO_DE_NOVO_MS = 100;
+// Mensagem que chega com a conversa FECHADA só mudava o ícone e o `aria-label` da
+// pílula — nenhuma região viva —, e o leitor de tela não sabia (WCAG 4.1.3,
+// R24-5-01). A frase da pílula vai a uma região PRÓPRIA (`#presencaAnuncioPilula`,
+// fora de qualquer modal), no máximo uma por este tempo: uma rajada vira UMA
+// frase, com o total de agora (ver `presencaAnunciarNaPilula`).
+const PRESENCA_PILULA_ANUNCIO_MS = 4000;
 
 const PRESENCA_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRESENCA_ID = /^\d{1,19}$/;
@@ -144,6 +150,9 @@ const Presenca = {
     // Mensagens que chegaram AO VIVO com a conversa fechada, por pessoa. Somam
     // às não lidas do servidor até a próxima lista, que já as conta.
     vivas: new Map(),
+    // As conversas com o "Tentar de novo" mandando as falhadas em série (ver
+    // `presencaTentarEmSerie`): uma série por vez.
+    emSerie: new Set(),
     vistas: new Set(),      // ids de mensagem já contados (o fluxo reentrega)
     historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
     aberta: null,           // id da pessoa da conversa aberta
@@ -209,11 +218,22 @@ const Presenca = {
     // rodada 10, R10-5-04; ver `presencaNaoLidasDepoisDoLida`).
     lidaVoltouEm: new Map(),
     epoca: 0,               // ++ a cada desligar: resposta velha não pousa
+    // O total de não lidas que a pílula mostrava no último desenho com a lista
+    // de pé (`null` = ainda sem base: a abertura e a sincronização inicial NÃO
+    // anunciam, só o que sobe DEPOIS delas) e o que a região viva da pílula
+    // disse por último (quando, e se há uma frase a caminho). Ver
+    // `presencaAnunciarNaPilula`.
+    pilulaBase: null,
+    pilulaDitaEm: 0,
+    pilulaPendente: false,
     // `anuncio`: a frase de falha a caminho da região viva da conversa (ver
     // `presencaAnunciarFalhaOutraVez`).
     // `anuncioMsg`: a mensagem igual à que a região já diz, a caminho (ver
     // `presencaAnunciar`).
-    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null, anuncioMsg: null },
+    // `pilula`/`pilulaDeNovo`: a frase da região viva da pílula a caminho (o
+    // teto de uma por `PRESENCA_PILULA_ANUNCIO_MS`) e a repetida igual à que lá
+    // está (ver `presencaAnunciarNaPilula`).
+    timers: { fluxo: null, silencio: null, lida: null, nome: null, anuncio: null, anuncioMsg: null, pilula: null, pilulaDeNovo: null },
 };
 
 // ── linha do tempo pro diagnóstico ──────────────────────────────────────────
@@ -913,6 +933,8 @@ function presencaDesligar() {
     Presenca.conversas = [];
     Presenca.conversasSaiuEm = 0;
     Presenca.vivas.clear();
+    Presenca.emSerie.clear();
+    presencaEsquecerAnuncioDaPilula();
     Presenca.vistas.clear();
     Presenca.historico.clear();
     Presenca.lidaEnviadaAte.clear();
@@ -2917,7 +2939,29 @@ function presencaTentarDeNovo() {
     // sair da espera sem a pessoa voltar pro card.
     if (!h) return;
     if (!presencaEu()) { presencaPedirPerfil(); return; }
-    for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) presencaMandar(id, m);
+    return presencaTentarEmSerie(id, h);
+}
+
+// As falhadas saem EM SÉRIE, na ordem em que a pessoa as escreveu: cada uma
+// depois de a anterior ter resposta. Mandadas no mesmo tique, as chegadas ao
+// Waze se cruzavam (a 1ª com a conexão fria, a 2ª na frente) e a conversa de
+// quem recebe lia "segunda → primeira" (R24-5-02). A primeira que falha de novo
+// PARA a série: as seguintes seguem "Não enviadas", com o MESMO id e o "Tentar
+// de novo" à mão — o mesmo número de pedidos, só que um de cada vez. Uma série
+// por conversa (o segundo toque no meio dela não manda a mesma fila de novo), e
+// ela acaba onde a sessão acaba (a época), onde o eco já tirou a falha ou a
+// mensagem saiu da conversa.
+async function presencaTentarEmSerie(id, h) {
+    if (Presenca.emSerie.has(id)) return;
+    const epoca = Presenca.epoca;
+    Presenca.emSerie.add(id);
+    try {
+        for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) {
+            if (Presenca.epoca !== epoca || m.estado !== 'falhou' || !h.msgs.includes(m)) continue;
+            await presencaMandar(id, m);
+            if (Presenca.epoca !== epoca || m.estado === 'falhou') break;
+        }
+    } finally { if (Presenca.epoca === epoca) Presenca.emSerie.delete(id); }
 }
 
 // Prende o pedido ABERTO à barra. Não manda ainda: a tirinha existe justamente
@@ -3122,6 +3166,7 @@ function presencaRenderPilula() {
     const ligado = presencaLigada() && AppState.authenticated;
     const n = Presenca.online.length;
     const naoLidas = presencaNaoLidasTotal();
+    presencaAnunciarNaPilula(ligado, naoLidas);
     // Sem ninguém e sem mensagem, a pílula SOME: ela não é botão de recurso, é
     // a notícia de que tem gente. Com mensagem NÃO LIDA ela fica, mesmo sem
     // ninguém no app — a mensagem pode vir de quem já saiu, e sem a pílula a
@@ -3147,6 +3192,75 @@ function presencaRenderPilula() {
         : t(n === 1 ? 'presenca.pill.aria' : 'presenca.pill.ariaPlural', { n });
     btn.setAttribute('aria-label', rotulo);
     btn.setAttribute('title', rotulo);
+}
+
+// A mensagem que chega com a conversa FECHADA fala ao leitor de tela pela região
+// viva `#presencaAnuncioPilula`, com a frase que a pílula já tem
+// (`presenca.pill.msg*`, a contagem de agora: nenhum nome nem texto, que são de
+// terceiro). Só quando o total SOBE — o que sobe DEPOIS da lista inicial; a
+// abertura com mensagens pendentes e a sincronização que as traz não anunciam
+// (`pilulaBase` nulo até a lista chegar) —, e no máximo uma a cada
+// `PRESENCA_PILULA_ANUNCIO_MS`: a que cai no meio espera o fim da janela e diz o
+// total de então. Com a conversa aberta quem fala é o `#conversaAnuncio`
+// (`presencaAnunciar`), e a região da pílula, que fica fora do modal, calaria
+// de qualquer jeito. Zero rede.
+function presencaAnunciarNaPilula(ligado, naoLidas) {
+    if (!ligado) { presencaEsquecerAnuncioDaPilula(); return; }
+    // Sem lista, sem base: o que vem com a primeira é a abertura, não novidade.
+    if (!(Presenca.conversasSaiuEm > 0)) return;
+    const base = Presenca.pilulaBase;
+    Presenca.pilulaBase = naoLidas;
+    if (base === null) return;
+    if (naoLidas < base || naoLidas === 0) {
+        // Leu, ou a lista trouxe menos: a frase a caminho já não vale.
+        if (naoLidas === 0) { Presenca.pilulaPendente = false; clearTimeout(Presenca.timers.pilula); Presenca.timers.pilula = null; }
+        return;
+    }
+    if (naoLidas === base) return;
+    Presenca.pilulaPendente = true;
+    presencaDizerNaPilula();
+}
+
+function presencaDizerNaPilula() {
+    if (!Presenca.pilulaPendente || Presenca.timers.pilula) return;
+    const espera = PRESENCA_PILULA_ANUNCIO_MS - (Date.now() - Presenca.pilulaDitaEm);
+    if (espera > 0) {
+        Presenca.timers.pilula = setTimeout(() => { Presenca.timers.pilula = null; presencaDizerNaPilula(); }, espera);
+        return;
+    }
+    Presenca.pilulaPendente = false;
+    const el = document.getElementById('presencaAnuncioPilula');
+    const n = presencaNaoLidasTotal();
+    // Conversa aberta: o `#conversaAnuncio` fala; fora da vista da pessoa, nada a dizer.
+    if (!el || n === 0 || Presenca.aberta || !presencaLigada() || !AppState.authenticated) return;
+    const frase = presencaRotuloNaoLidas(n);
+    Presenca.pilulaDitaEm = Date.now();
+    clearTimeout(Presenca.timers.pilulaDeNovo);
+    Presenca.timers.pilulaDeNovo = null;
+    // A mesma frase outra vez ("1 mensagem nova" depois de ler e chegar outra):
+    // região viva reescrita com o mesmo texto pode não ser lida de novo — limpa
+    // agora e diz `PRESENCA_ANUNCIO_DE_NOVO_MS` depois (a técnica da conversa).
+    if (el.textContent !== frase) { el.textContent = frase; return; }
+    el.textContent = '';
+    Presenca.timers.pilulaDeNovo = setTimeout(() => {
+        Presenca.timers.pilulaDeNovo = null;
+        const agora = document.getElementById('presencaAnuncioPilula');
+        if (agora && !agora.textContent) agora.textContent = frase;
+    }, PRESENCA_ANUNCIO_DE_NOVO_MS);
+}
+
+// "Sair", troca de conta, desligar: nada a caminho e nada dito (a frase leva só
+// a contagem, mas a região não guarda o que era de outra sessão).
+function presencaEsquecerAnuncioDaPilula() {
+    clearTimeout(Presenca.timers.pilula);
+    clearTimeout(Presenca.timers.pilulaDeNovo);
+    Presenca.timers.pilula = null;
+    Presenca.timers.pilulaDeNovo = null;
+    Presenca.pilulaBase = null;
+    Presenca.pilulaDitaEm = 0;
+    Presenca.pilulaPendente = false;
+    const el = document.getElementById('presencaAnuncioPilula');
+    if (el) el.textContent = '';
 }
 
 // A pílula some com o foco nela: fechar a lista devolve o foco à pílula, e a
