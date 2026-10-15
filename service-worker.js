@@ -39,6 +39,8 @@ const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista
 // está guardado" e o pedido vai à rede, como iria sem worker. 1,5 s é folga
 // larga pro cache que responde (milissegundos) e curta pro que não responde.
 const SW_CACHE_TETO_MS = 1500;
+// O que o `comTeto` devolve quando QUER distinguir "não deu pra ler" de "leu e não tem".
+const VENCIDO = Symbol('vencido');
 // Resolve com `vencido` se a promessa passa do teto OU rejeita. Nunca rejeita.
 function comTeto(promessa, vencido) {
   return new Promise((resolve) => {
@@ -158,10 +160,9 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  // A faxina e o `claim` NÃO esperam a leitura da lista de tiles (R23-4-02): ela
-  // já corre no topo do script, a cada partida, e o `fetch` do tile espera por
-  // ela quando precisa. Esperá-la aqui deixava a ativação — e a navegação que
-  // depende do `claim` — presa a uma Cache API que não responde. A própria
+  // O `claim` NÃO espera a leitura da lista de tiles (R23-4-02): o `fetch` do tile
+  // espera por ela, com teto, quando precisa. Esperá-la aqui deixava a ativação — e
+  // a navegação que depende do `claim` — presa a uma Cache API que não responde. A própria
   // faxina tem teto pelo mesmo motivo; vencido, os caches antigos ficam e o
   // próximo `activate` os leva (apaga tudo que não é o desta versão).
   event.waitUntil(
@@ -176,7 +177,14 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    }), undefined).then(() => self.clients.claim())
+    }), undefined).then(() => {
+      // Relê a lista a cada ativação, SEM esperá-la: o worker novo nasce (e lê a lista, no
+      // topo) enquanto o antigo ainda comanda, e o aviso `TILES_GUARDADOS` da varredura vai
+      // pro controlador de ANTES — sem esta releitura, o tile guardado nessa janela ficava
+      // fora da lista dele. `hidratarTiles()` segura os tiles (com teto) e não segura o claim.
+      hidratarTiles();
+      return self.clients.claim();
+    })
   );
 });
 
@@ -255,9 +263,10 @@ self.addEventListener('fetch', event => {
       // `caches.match` com o nome, e não `open` + `match`: o `open` CRIARIA o
       // cache que o "Sair" ou o desligar acabou de apagar.
       // Com TETO (R23-4-02): o cache que não responde vale como "sem entrada".
-      const doCache = () => comTeto(caches.match(event.request, { cacheName: TILES_CACHE }), undefined)
-        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar.
-        .then((hit) => { swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
+      const doCache = () => comTeto(caches.match(event.request, { cacheName: TILES_CACHE }), VENCIDO)
+        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar. O vencido já foi
+        // contado em `cacheVencido`: não conta de novo como "sem entrada".
+        .then((hit) => { if (hit === VENCIDO) return fetch(event.request); swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
         .catch(() => fetch(event.request));
       if (tilesHidratados) {
         // O caminho de sempre, ESTRITAMENTE ADITIVO: sem entrada, não responde.

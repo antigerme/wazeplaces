@@ -517,7 +517,7 @@ const sp = sw.proprio;
 if (sp === undefined) out('por ele mesmo: ' + AUSENTE);
 else if (!sp) out('por ele mesmo: sem controlador (nada a perguntar)');
 else if (sp.semResposta) out('por ele mesmo: NÃO respondeu (worker de versão antiga, ou travado)');
-else out(`por ele mesmo: ${sp.versao} · vivo há ${Math.round((sp.idadeMs || 0) / 1000)}s · lista pronta ${sp.listaPronta} com ${sp.tilesNaLista} tiles · do cache ${sp.doCache} · cache sem entrada ${sp.cacheSemEntrada} · esperou leitura ${sp.esperouLeitura} · fora da lista ${sp.foraDaLista}`);
+else out(`por ele mesmo: ${sp.versao} · vivo há ${Math.round((sp.idadeMs || 0) / 1000)}s · lista pronta ${sp.listaPronta} com ${sp.tilesNaLista} tiles · do cache ${sp.doCache} · cache sem entrada ${sp.cacheSemEntrada} · esperou leitura ${sp.esperouLeitura} · fora da lista ${sp.foraDaLista}` + (sp.cacheVencido ? ` · cache que não respondeu a tempo ${sp.cacheVencido}` : ''));
 
 // `sessaoDuracaoH` é um OBJETO desde que nasceu (`{menor, mediana, maior, n}`,
 // só dos ciclos com as duas pontas medidas), e esta linha o interpolava cru:

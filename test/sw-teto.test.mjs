@@ -140,3 +140,35 @@ test('Cache API muda + rede fora: a navegação termina com erro de rede, não p
   const x = await w.ate(r);
   assert.ok(x && x.erroDeRede, `a navegação sem rede pendurou na Cache API muda: ${JSON.stringify(x)}`);
 });
+
+test('ativação: RELÊ a lista de tiles (o aviso da varredura foi ao controlador antigo) sem o claim esperar por ela', async () => {
+  let has = 0;
+  const ouvintes = {};
+  let claims = 0;
+  const ctx = {
+    self: { addEventListener: (t, fn) => { ouvintes[t] = fn; }, location: { origin: ORIGEM }, skipWaiting() {}, clients: { claim: async () => { claims++; } } },
+    caches: { has: () => { has++; return has === 1 ? Promise.resolve(false) : MUDA(); }, keys: async () => [], delete: async () => true },
+    fetch: async () => ({}), URL, console, Promise, Date, Set, Map, clearTimeout,
+    setTimeout: (fn, ms, ...a) => setTimeout(fn, Math.ceil((ms || 0) / ESCALA), ...a),
+  };
+  vm.createContext(ctx);
+  vm.runInContext(SW, ctx);
+  for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(has, 1, 'PRÉ-CONDIÇÃO: a leitura da partida não aconteceu');
+  let espera; ouvintes.activate({ waitUntil: (p) => { espera = p; } });
+  const r = await Promise.race([espera.then(() => 'terminou'), new Promise((ok) => setTimeout(() => ok(PENDUROU), 400))]);
+  assert.equal(r, 'terminou', 'o claim esperou a releitura (muda) da lista');
+  assert.equal(claims, 1);
+  assert.equal(has, 2, 'o activate parou de reler a lista: o tile guardado enquanto o worker novo esperava ficaria fora dela');
+});
+
+test('o tile guardado cujo match não responde conta como VENCIDO, e uma vez só (não também como "sem entrada")', async () => {
+  const w = await carregarComListaPronta({ matchMudo: true });
+  const r = w.pedir(tile);
+  await w.ate(r);
+  let diag = null;
+  w.ouvintes.message({ data: { type: 'DIAG' }, ports: [{ postMessage: (x) => { diag = x; } }], waitUntil() {} });
+  assert.equal(diag.cacheVencido, 1, 'o teto vencido não foi contado');
+  assert.equal(diag.cacheSemEntrada, 0, 'o mesmo teto foi contado também como "cache sem entrada"');
+  assert.equal(diag.doCache, 0);
+});
