@@ -25263,6 +25263,23 @@ async function offlineEsquecer({ soMemoria = false } = {}) {
 // MESMOS 313 tiles que passos de 4, 8, 16, 32 e até 64px. 16 fica com folga.
 const OFFLINE_CAIXA_MIN_REM = 5.5;
 const OFFLINE_CAIXA_PASSO_PX = 16;
+// A LARGURA entra na conta como a altura (R23-4-01). O zoom e o encaixe nos tiles
+// dependem de (largura, altura) da caixa, e a largura do `.card-photo` MUDA com o
+// aparelho: MEDIDAS 230, 246 (Fold fechado), 267 (celular deitado), 326, 356
+// (retrato), 398 (tablet/desktop). Preparada só pra largura do card de AGORA, a
+// fila deixava o mapa de 2–4% dos pedidos sem tile depois de girar o aparelho com
+// rede (nada re-prepara: o `resize` não é gatilho e a janela de 20 min segue
+// valendo) — e a linha seguia "Pronto". O TETO é o `max-w-[400px]` do #cardStack
+// (a foto dentro dele tem 398; `test/offline.test.mjs` amarra o número ao HTML);
+// o PISO é a menor largura medida, arredondada pra baixo. O PASSO de 48px é
+// exato como o de 16 nas alturas: MEDIDO em 300 pedidos sintéticos de 2–4 pontos
+// contra TODA largura de 224 a 400 (de 3 em 3) e toda altura de 88 a 504 (de 8 em
+// 8), os passos de 16 a 88 dão ZERO tile faltando, e só a largura de agora deixava
+// 33 de 300 pedidos com falta. Custo MEDIDO nas 51 fixtures reais dos 6 países:
+// 98 → 100 tiles (+2%).
+const OFFLINE_CAIXA_LARGURA_MIN_PX = 224;
+const OFFLINE_CAIXA_LARGURA_MAX_PX = 400;
+const OFFLINE_CAIXA_PASSO_LARGURA_PX = 48;
 
 function offlineFaixaDeCaixas() {
     const frente = cardDaFrente();
@@ -25273,18 +25290,30 @@ function offlineFaixaDeCaixas() {
     const hPilha = (pilha && pilha.clientHeight) || hFrente;
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
     const hMin = Math.round(OFFLINE_CAIXA_MIN_REM * rem);
-    const hMax = Math.max(hFrente, Math.min(hPilha, MAPA_TILE - 8));
-    return { w, hMin: Math.min(hMin, hMax), hMax };
+    // A ALTURA da orientação MAIOR (R23-4-01): deitado, a pilha tem ~265px, mas girar
+    // pro retrato devolve a dimensão longa da janela à altura. Soma à pilha de agora o
+    // que a dimensão longa tem a mais que a altura — em retrato é 0 (nada muda).
+    const longa = Math.max(window.innerWidth || 0, window.innerHeight || 0);
+    const hPilhaMaior = hPilha + Math.max(0, longa - (window.innerHeight || longa));
+    const hMax = Math.max(hFrente, Math.min(hPilhaMaior, MAPA_TILE - 8));
+    // As larguras: a de AGORA mais a grade de piso a teto (que cobre a da outra orientação).
+    const ws = new Set([w]);
+    for (let x = OFFLINE_CAIXA_LARGURA_MIN_PX; x < OFFLINE_CAIXA_LARGURA_MAX_PX; x += OFFLINE_CAIXA_PASSO_LARGURA_PX) ws.add(x);
+    ws.add(Math.max(OFFLINE_CAIXA_LARGURA_MAX_PX, w));
+    return { w, ws: [...ws].sort((a, b) => a - b), hMin: Math.min(hMin, hMax), hMax };
 }
 
-// Os tiles de TODAS as alturas da faixa. Mesmo zoom em caixa menor pede um
-// subconjunto; o que a faixa acrescenta é o zoom que muda quando a caixa encolhe.
+// Os tiles de TODAS as alturas da faixa, em TODAS as larguras dela. Mesmo zoom em
+// caixa menor pede um subconjunto; o que a faixa acrescenta é o zoom que muda
+// quando a caixa encolhe — ou o encaixe que muda quando ela alarga.
 function tilesDaFaixa(place, faixa) {
     const s = new Set();
-    for (let h = faixa.hMax; h >= faixa.hMin; h -= OFFLINE_CAIXA_PASSO_PX) {
-        for (const u of tilesDoCard(place, faixa.w, h)) s.add(u);
+    for (const w of (faixa.ws || [faixa.w])) {
+        for (let h = faixa.hMax; h >= faixa.hMin; h -= OFFLINE_CAIXA_PASSO_PX) {
+            for (const u of tilesDoCard(place, w, h)) s.add(u);
+        }
+        for (const u of tilesDoCard(place, w, faixa.hMin)) s.add(u);
     }
-    for (const u of tilesDoCard(place, faixa.w, faixa.hMin)) s.add(u);
     return s;
 }
 
@@ -25301,6 +25330,7 @@ async function offlineItensDaFila(janela) {
     // pedidos sem nenhum tile; auditoria de 2026-10-06).
     const fila = filaReal().slice();
     let i = 0;
+    let ultimaCessao = performance.now();
     for (const p of fila) {
         for (const u of tilesDaFaixa(p, faixa)) {
             if (vistos.has(u)) continue;
@@ -25312,9 +25342,14 @@ async function offlineItensDaFila(janela) {
         const fotos = fotosDoCard(p);
         const f = fotos.urls[fotos.inicial];
         if (f) itens.push({ u: f + (f.indexOf('?') === -1 ? '?' : '&') + 'w=' + janela, tile: false });
-        // ~16 ms num desktop pra fila inteira, e 4–6× isso num celular: sem
-        // ceder a thread vira tarefa longa no meio do arraste de quem tria.
-        if (++i % 20 === 0) await new Promise((r) => setTimeout(r, 0));
+        // ~16 ms num desktop pra fila inteira (antes da faixa de larguras; hoje ~6×
+        // isso), e 4–6× num celular: sem ceder a thread vira tarefa longa no meio do
+        // arraste de quem tria. Cede por TEMPO (8 ms de trabalho), não por contagem:
+        // o custo por pedido depende da faixa e do aparelho.
+        if (++i % 4 === 0 && performance.now() - ultimaCessao > 8) {
+            await new Promise((r) => setTimeout(r, 0));
+            ultimaCessao = performance.now();
+        }
     }
     return itens;
 }
