@@ -2004,7 +2004,7 @@ test('linha "X → X" não chega na tela, e o aviso só afirma o que foi compara
   // imprimir IGUAL — medido, um deles andou 84 metros. Filtrar por texto
   // esconderia mudança de verdade.
   assert.match(CORE, /export const mesmoValor/, 'sumiu o comparador de valor cru');
-  assert.match(CORE, /if \(mesmoValor\(venue\[k\] \?\? null, newValue \?\? null\)\) \{/,
+  assert.match(CORE, /if \(mesmoValor\(valorAtual \?\? null, newValue \?\? null\)\) \{/,
     'o laço de changes parou de pular campo que não mudou — volta a linha "X → X"');
   assert.match(CORE, /camposSemMudanca\+\+/, 'ninguém mais conta os campos filtrados');
   assert.match(CORE, /camposSemMudanca,/, 'o place parou de expor camposSemMudanca pro card');

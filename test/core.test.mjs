@@ -1799,3 +1799,51 @@ test('marcar-lido: lote acima do teto é recusado ANTES do Waze, e id que não �
     globalThis.fetch = original;
   }
 });
+
+// ─── R23-6 F5: id e chave com nome de protótipo não viram dado ───────────────
+// Os ids do Waze são números e as chaves do `changedVenue` são campos do esquema,
+// então isto é endurecimento: os dicionários eram `{}` e `venue[k]` lia o
+// protótipo — "constructor" saía como "Object, 10" no endereço e como o valor
+// ANTERIOR do campo no diff.
+const harProtótipo = (ids, changedVenue = {}) => ({
+  users: { objects: [{ id: 7, userName: 'ana' }] },
+  streets: { objects: [{ id: 111, name: 'Rua A', cityID: 222 }] },
+  cities: { objects: [{ id: 222, name: 'Cidade', stateID: 333 }] },
+  states: { objects: [{ id: 333, name: 'Estado' }] },
+  venues: { objects: [{
+    id: 'v1', name: 'Loja', permissions: -1, houseNumber: '10', streetID: ids.streetID ?? 111,
+    images: [{ id: 'img1', creatorUserId: ids.imgAutor ?? 7 }],
+    venueUpdateRequests: [{ id: 'u1', venueID: 'v1', type: 'REQUEST', subType: 'UPDATE', createdBy: ids.criador ?? 7, isRead: false,
+      changedVenue }],
+  }] },
+});
+const cartao = (rd) => buildPlacesFromSearch(rd, { unreadOnly: false }).places[0];
+
+test('R23-6 F5: CONTROLE — com ids normais o endereço sai inteiro', () => {
+  assert.equal(cartao(harProtótipo({})).address, 'Rua A, 10, Cidade - Estado');
+});
+
+test('R23-6 F5: rua, cidade e estado com nome de protótipo não viram endereço', () => {
+  for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const p = cartao(harProtótipo({ streetID: id }));
+    assert.equal(p.address, '10', `DEFEITO: streetID "${id}" virou endereço: ${p.address}`);
+    const rd = harProtótipo({});
+    rd.streets.objects[0].cityID = id;
+    assert.equal(cartao(rd).address, 'Rua A, 10', `DEFEITO: cityID "${id}" virou cidade`);
+    const rd2 = harProtótipo({});
+    rd2.cities.objects[0].stateID = id;
+    assert.equal(cartao(rd2).address, 'Rua A, 10, Cidade', `DEFEITO: stateID "${id}" virou estado`);
+  }
+});
+
+test('R23-6 F5: o diff não lê o protótipo do venue como valor antigo, nem o rótulo', () => {
+  const p = cartao(harProtótipo({}, { constructor: 'x', toString: 'y', streetID: 'constructor' }));
+  const por = Object.fromEntries(p.changes.map((c) => [c.field, c]));
+  assert.ok(por.constructor && por.toString, 'CONTROLE: as duas chaves tinham que virar linha');
+  for (const k of ['constructor', 'toString']) {
+    assert.equal(por[k].from, null, `DEFEITO: o valor antigo de "${k}" veio do protótipo: ${String(por[k].from).slice(0, 40)}`);
+    assert.match(por[k].label, new RegExp('^' + k[0].toUpperCase()), `DEFEITO: o rótulo de "${k}" veio do protótipo`);
+    assert.equal(typeof por[k].label, 'string');
+  }
+  assert.notEqual(por.streetID.to, 'Object', 'DEFEITO: a rua nova "constructor" virou "Object"');
+});

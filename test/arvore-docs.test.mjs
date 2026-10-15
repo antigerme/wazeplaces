@@ -192,7 +192,7 @@ test('os caminhos REST do Waze que o app usa: o core, o diagrama do README e o d
 test('CLAUDE.md: o diff não filtra linha igual? Filtra — o "Aberto" que o gotcha #37 já fechou não volta', () => {
   const core = ler('server/core.mjs');
   // O fato: o core compara o valor CRU e conta o que comparou.
-  assert.match(core, /if \(mesmoValor\(venue\[k\] \?\? null, newValue \?\? null\)\) \{\s*camposSemMudanca\+\+;/,
+  assert.match(core, /if \(mesmoValor\(valorAtual \?\? null, newValue \?\? null\)\) \{\s*camposSemMudanca\+\+;/,
     'PRÉ-CONDIÇÃO: o core deixou de comparar o valor cru (o documento mudou de verdade?)');
   const claude = ler('CLAUDE.md');
   assert.doesNotMatch(claude, /\*\*Aberto\*\*: `changedVenue` não é diff e o app não filtra linha com/,
