@@ -147,7 +147,7 @@ function telaComIndicador({ autenticado = true, fila = ['v1'] } = {}) {
   const deps = {
     document, AppState, window: { Presenca: { desligar() {}, sincronizar() {} } },
     carregarFilaDeSaida: () => fila.map((v) => ({ tipo: 'reject', venueID: v, updateRequestID: 'u' + v })),
-    pedidosEmAndamento: new Set(), chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), chaveDoPedido: (x) => x.venueID + '|' + x.updateRequestID,
     reivindicadoPorOutraAba: () => false, indicadorMarcaVence: null, SAIDA_REIVINDICACAO_MS: 60000,
     t: (k, v) => k + (v ? ':' + JSON.stringify(v) : ''), escapeHtml: (s) => String(s),
     // O `derrubarSessao`: a sessão desta aba é a guardada, e a renovação fica no ar.
@@ -675,7 +675,7 @@ const NOMES_ABA_VIVA = ['aoGravarEmOutraAba', 'sincronizarComOutraAba', 'aoSairE
   'outraContaTomouOAparelhoDaQueCaiu', 'contaSegueNoAparelho', 'sessaoDestaAbaEhAGuardada', 'guardaASessaoQueCaiu',
   'contaDestaAbaEmDuvida', 'marcaDaSessao', 'marcaDestaAba', 'abrirCanalDaSessao', 'aoCairASessaoGuardadaEmOutraAba',
   'contaSabidaDestaAba', 'guardarDeVoltaASessaoDestaAba', 'contaQuePodeGuardarDeVolta', 'marcarSessaoJaAtiva',
-  'lerDiarioDeSessoes', 'registrarEventoDeSessao'];
+  'lerDiarioDeSessoes', 'registrarEventoDeSessao', 'gravarContaNoAparelho'];
 
 function abaViva(ap, rede, { token = 'TOK-A', perfil = { id: 111 }, confirmada = null, noAr = null, emDuvida = false } = {}) {
   const log = [];

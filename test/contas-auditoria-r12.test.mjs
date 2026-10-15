@@ -755,7 +755,7 @@ function gestoSemPerfil({ contaDoAparelho = { id: X, s: marcaDe('tok-de-OUTRA-se
   const h = montar(['presencaWmeDesligar', 'presencaWmeGravarPendente', 'presencaWmeEsquecerGravado', 'presencaWmeAnotarDesligar',
     'presencaWmeRefazerDesligar', 'presencaWmeZerar', 'savePreferences', 'aoConhecerConta', 'esquecerOutraConta',
     'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel', 'carimbarContaNaSaida', 'carregarFilaDeSaida',
-    'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
+    'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'sessaoDestaAbaEhAGuardada', 'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
   // O gesto: o interruptor desligado (o ouvinte grava a preferência e chama o desligar).
   const desligar = () => { AppState.preferences.presenca = false; h.presencaWmeDesligar(); };
   // O perfil da sessão chega, na ordem do `definirPerfil`: a conta, e o "invisível" que esperava por ele.

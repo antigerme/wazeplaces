@@ -347,7 +347,7 @@ const CURADOR_NOVO = () => ({ c: { primeiraFaxina: '2026-10-01', curador: '2026-
   langs: ['pt'], base: true, novas: ['curador'], patente: 1 });
 
 const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarConquistas', 'salvarConquistas', 'patenteDe',
-  'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'temConquistaNova',
+  'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'contagemDoHistorico', 'temConquistaNova',
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
   'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab'];

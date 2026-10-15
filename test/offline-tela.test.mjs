@@ -653,7 +653,7 @@ function esvaziamentoComProvas({ itens = ['v1', 'v2'], durante = null } = {}) {
   const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
   assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
   const prova = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
-  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba',
     'esvaziarFilaDeSaida', 'atenderProvaDoEsvaziamento'];
   const chaves = Object.keys(deps);
@@ -661,7 +661,7 @@ function esvaziamentoComProvas({ itens = ['v1', 'v2'], durante = null } = {}) {
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false,
       ultimaEscritaOkEm = 0, buscaSemResposta = false, provaNoEsvaziamento = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    const pedidosEmAndamento = new Set();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set();
     const enviados = [];
     // O _post: a resposta leva uma volta de rede, e a que CHEGA prova a rede
     // ANTES de voltar a quem a pediu.
@@ -781,7 +781,7 @@ function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
   const ini = APP_SEM.indexOf('API.aoProvarRede = () => {');
   assert.ok(ini >= 0, 'o gancho da prova de rede sumiu do app.js');
   const prova = APP_SEM.slice(ini, APP_SEM.indexOf('\n};', ini) + 3);
-  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
     'moverProFimDaSaida', 'sessaoVivaDepoisDe', 'recuarSaida', 'saidaEmRecuo', 'reivindicadoPorOutraAba',
     'esvaziarFilaDeSaida', 'atenderProvaDoEsvaziamento',
     'filaReal', 'offlinePrecisaVarrer', 'offlineTalvezVarrer', 'offlineVarrer'];
@@ -790,7 +790,7 @@ function onlineComVarredura({ itens = ['v1', 'v2'] } = {}) {
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, verificandoSessao = false,
       ultimaEscritaOkEm = 0, buscaSemResposta = false, provaNoEsvaziamento = false;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    const pedidosEmAndamento = new Set();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set();
     // A janela VENCIDA (20+ min sem rede): a varredura é devida, e a última foi pronta.
     let offlineVarrendo = false, offlinePedidaDeNovo = false, offlineUltimoGesto = Date.now(),
       offlineJanelaServida = Math.floor(Date.now() / OFFLINE_CICLO_MS) - 1, offlineUltimoResultado = 'pronto',

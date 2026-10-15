@@ -109,7 +109,7 @@ function aparelho({ fila = [], manuais = [] }) {
     atenderProvaDoEsvaziamento: () => {},   // a prova de rede engolida no esvaziamento (R11-4-01): aqui, nenhuma
     medidas, presos, manuais: new Set(manuais), setImmediate,
   };
-  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const nomes = ['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido',
     'marcarEmAndamento', 'enfileirarSaida', 'tirarDaFilaDeSaida', 'marcarNaSaida', 'sessaoVivaDepoisDe', 'recuarSaida',
     'saidaEmRecuo', 'moverProFimDaSaida', 'registrarPousoDeSaida', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
     'pousouPorOutraAba', 'soltarMarcaDosItens', 'esvaziarFilaDeSaida', 'handleActionResult', 'scheduleAction',
@@ -121,7 +121,7 @@ function aparelho({ fila = [], manuais = [] }) {
     let esvaziandoSaida = false, saidaPedidaDeNovo = false, saidaEsperandoConta = false, tratouNestaFila = false,
       verificandoSessao = false, ultimaEscritaOkEm = 0;
     let sessaoVivaEm = { s: null, em: 0 }, saidaRecuo = { s: null, n: 0, ate: 0 };
-    const pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
+    const saidaTiradosSemGravar = new Map(), pedidosEmAndamento = new Set(), descargaNaFila = new WeakSet(), anotadoAntesDoEnvio = new WeakSet();
     // O _post: toda resposta que CHEGA é prova de rede, e a prova chama o
     // esvaziamento ANTES de a resposta voltar a quem a pediu.
     const aoProvarRede = () => { esvaziarFilaDeSaida(); };

@@ -544,7 +544,7 @@ function contaSemSessaoNaMemoria({ memoria = null, fila = [] } = {}) {
     aplicarAvisosQueEsperavamAConta: () => {}, esquecerOutraConta: () => {},
   };
   const h = montar(['enfileirarSaida', 'carimbarContaNaSaida', 'aoConhecerConta', 'invisivelPedidoAntesDoPerfil',
-    'carimbarContaNoInvisivel', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'sessaoDestaAbaEhAGuardada',
+    'carimbarContaNoInvisivel', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'sessaoDestaAbaEhAGuardada',
     'contaAgora', 'marcaDestaAba', 'marcaDaSessao'], deps);
   const filaGuardada = () => JSON.parse(real.dados.get(SAIDA_KEY) || '[]');
   return { h, real, deps, filaGuardada };

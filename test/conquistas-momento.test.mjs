@@ -282,7 +282,7 @@ function montarChecagem({ g, tratados, treino = false }) {
     agendarRedesenhoDoHistorico: () => { selo.redesenho = (selo.redesenho || 0) + 1; },
   };
   const chaves = Object.keys(deps);
-  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), fatiar('patenteDe'),
+  const corpo = [fatiarConst('PATENTES'), fatiarConst('CONQUISTAS'), fatiar('patenteDe'), fatiar('contagemDoHistorico'),
     fatiar('avaliarConquistas'), fatiar('checarConquistas')].join('\n') + '\nreturn checarConquistas;';
   const checarConquistas = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
   return { checarConquistas, selo };

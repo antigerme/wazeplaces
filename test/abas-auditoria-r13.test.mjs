@@ -152,7 +152,7 @@ const cair = (m) => { m.deps.epocaDaSessao++; m.deps.API.sessionToken = null; m.
 function reabrirSemRede(safeLS, guardada, desde) {
   const r = montar(['semOsJaDecididos', 'chaveDoPedido', 'offlineLerPousos'], {
     safeLS, OFFLINE_POUSOS_KEY, offlineLigado: () => true, carregarFilaDeSaida: () => [],
-    pousosDaPagina: new Map(), pedidosEmAndamento: new Set(),
+    pousosDaPagina: new Map(), pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(),
   });
   return ids(r.semOsJaDecididos(guardada.map((p) => ({ ...p })), desde).places);
 }
@@ -276,7 +276,7 @@ function montarLote({ auto = false } = {}) {
     pedidosDoAutorNaFila: () => AppState.queue.filter((p) => p.creatorId === AUTOR),
     callWithRetry: (fn) => fn(), carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }),
     carregarFilaDeSaida: () => [], salvarFilaDeSaida: () => {}, enfileirarSaida: () => true, tirarDaFilaDeSaida: () => true,
-    reivindicacaoDestaAba: () => ({}), pedidosEmAndamento: new Set(), devolverPedidoRecusado: () => {},
+    reivindicacaoDestaAba: () => ({}), pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), devolverPedidoRecusado: () => {},
     // A recusa automática: L6+AM, a conta dona do aparelho, o 777 marcado com o interruptor LIGADO.
     podeRecusarAutomaticoAqui: () => true, contaConfirmada: () => true, autoLigado: (id) => id === AUTOR,
     recusaAutomaticaRodando: false, recusaAutomaticaPedidaDeNovo: false, recusaAutomaticaNestaFila: false,
@@ -344,7 +344,7 @@ async function marcarTodosComQueda(entrouDeNovo) {
     markAsReadBatch: () => new Promise((ok) => portoes.push(ok)), markAsRead: () => new Promise((ok) => portoes.push(ok)) };
   const deps = {
     AppState, API, ...depsDoPouso(espiao.canal, safeLS), LOTE_LIDOS_PEDACO: 2, epocaDaSessao: 0, Treino: { ativo: false },
-    pedidosEmAndamento: new Set(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), loteDeLidosContado: null, loteDeLidosEmVoo: false, escritasConferindo: 0,
     aprovacaoPendente: null, exclusaoPendente: null, renomeacaoPendente: null, contaDestaAbaEmDuvida: () => false,
     aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), callWithRetry: (fn) => fn(),
     carimboDoGesto: () => ({ dia: '2026-10-07', onde: '30', t: 1, lang: 'pt' }), decididosPorOutraAbaComCardAqui: new WeakSet(),
@@ -454,10 +454,10 @@ const DECLARACOES = [
 ];
 const NOMES_ABA = ['chaveDoPedido', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba',
   'lembrarDecididasPorOutraAba', 'decididoNaOutraAbaDepoisDe', 'esquecerDecididasPorOutraAba',
-  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'offlineLerPousos', 'registrarPouso',
+  'tirarDaFilaOQueAOutraAbaDecidiu', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'offlineLerPousos', 'registrarPouso',
   'semOsJaDecididos', 'abrirCanalDosPousos', 'quemDecideAgora', 'avisarOutrasAbasDoPouso', 'aoPousarEmOutraAba',
   'aoPousarSemSessaoNaMemoria', 'guardaASessaoQueCaiu', 'aplicarPousoDeOutraAba', 'guardarAvisoSemConta',
-  'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta',
+  'aplicarAvisosQueEsperavamAConta', 'marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'aoConhecerConta', 'gravarContaNoAparelho',
   'carimbarContaNaSaida', 'sessaoDestaAbaEhAGuardada', 'invisivelPedidoAntesDoPerfil', 'carimbarContaNoInvisivel'];
 
 // Uma ABA: a fila `fila` (o da frente na tela) num aparelho (`ap`, um Map) que as
@@ -489,8 +489,8 @@ function aba(nav, { fila, ap, token, perfil = { ...PERFIL } }) {
   };
   const chaves = Object.keys(deps);
   const fonte = [
-    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, filaAtravessouSessao = false, saidaEsperandoConta = false;',
-    'const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
+    'let ultimaEscritaOkEm = 0, contaConfirmadaNestaAba = null, contaVistaNoAparelho = false, filaAtravessouSessao = false, saidaEsperandoConta = false;',
+    'const saidaTiradosSemGravar = new Map(); const decididosPorOutraAbaComCardAqui = new WeakSet(), pedidosEmAndamento = new Set(), pousosDaPagina = new Map();',
     ...DECLARACOES,
     ...NOMES_ABA.map(fatiar),
     `return { ${NOMES_ABA.join(', ')}, marcado: (p) => decididosPorOutraAbaComCardAqui.has(p), pousosDaPagina,

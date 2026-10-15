@@ -1240,9 +1240,9 @@ function abaDaConta(comp, { token, perfilId = null }) {
   const safeLS = { get: (k) => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: (k) => localStorage.removeItem(k) };
   const AppState = { authenticated: true, profile: perfilId ? { id: perfilId } : null };
   const deps = { AppState, safeLS, localStorage, CONTA_KEY, API: { sessionToken: token, getSession: () => token },
-    contaConfirmadaNestaAba: null, saidaEsperandoConta: false, filaAtravessouSessao: false,
+    contaConfirmadaNestaAba: null, contaVistaNoAparelho: false, saidaEsperandoConta: false, filaAtravessouSessao: false,
     carimbarContaNaSaida: () => {}, esquecerOutraConta: (id) => { aba.trocou = id; }, esvaziarFilaDeSaida: () => {} };
-  Object.assign(aba, montar(['aoConhecerConta', 'contaConfirmada', 'sessaoDestaAbaEhAGuardada', 'marcaDaSessao', 'marcaDestaAba'], deps),
+  Object.assign(aba, montar(['aoConhecerConta', 'gravarContaNoAparelho', 'contaConfirmada', 'sessaoDestaAbaEhAGuardada', 'marcaDaSessao', 'marcaDestaAba'], deps),
     { AppState, deps });
   // O perfil chegou (o `definirPerfil`: o perfil na memória e a conta conferida).
   aba.perfilChegou = (id) => { AppState.profile = { id }; aba.aoConhecerConta({ id }); };
@@ -1542,7 +1542,7 @@ function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_00
     SAIDA_KEY: 'waze_places_saida', CONTA_KEY, SAIDA_MAX: 1000, SAIDA_RITMO_MS: 0, SAIDA_RECUO_401_MS: [0, 15000, 60000, 300000],
     SAIDA_TENTATIVAS_POR_ITEM: 3, SAIDA_REIVINDICACAO_MS: 60000, SAIDA_REIVINDICACAO_ASSENTA_MS: 0, ABA_DESTA_PAGINA: 'aba-' + nome,
     travaDaSaida: async () => (semTravas ? { reserva: true, soltar() {} } : { reserva: false, soltar() {} }),
-    pedidosEmAndamento: new Set(), anotadoAntesDoEnvio: new WeakSet(), descargaNaFila: new WeakSet(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(), anotadoAntesDoEnvio: new WeakSet(), descargaNaFila: new WeakSet(),
     esvaziandoSaida: false, saidaPedidaDeNovo: false, saidaEsperandoConta: false, verificandoSessao: false,
     sessaoVivaEm: { s: null, em: 0 }, saidaRecuo: { s: null, n: 0, ate: 0 }, ultimaEscritaOkEm: 0,
     setTimeout: (f) => { f(); return 1; }, dfato: (k) => diario.push(k), t: (k) => k,
@@ -1553,7 +1553,7 @@ function abaDaSaida(guardado, nome, { semTravas = false, relogio = { t: 1_000_00
     ondeAgora: () => '30', getLang: () => 'pt',
     registrarPousoDeSaida: (tipo, place, r) => { if (r && r.success) historico.push(tipo); },
   };
-  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido', 'marcarNaSaida',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido', 'marcarNaSaida',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'anotarAntesDoEnvio', 'reivindicacaoDestaAba', 'reivindicadoPorOutraAba',
     'reivindicarNaSaida', 'soltarReivindicacoes', 'pousouPorOutraAba', 'soltarMarcaDosItens', 'moverProFimDaSaida', 'sessaoVivaDepoisDe',
     'recuarSaida', 'saidaEmRecuo', 'esvaziarFilaDeSaida', 'handleActionResult'], deps);
@@ -1748,7 +1748,7 @@ async function loteDeDuas({ outraAbaPousaX1 = false, respostaX1, respostaX2 = { 
     saveStats: () => {}, updateInFlightIndicator: () => {}, updatePendingCount: () => {}, handleUnauthorized: () => {},
     historyTodayKey: () => '2026-10-01', ondeAgora: () => '30', getLang: () => 'pt',
   };
-  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'chaveDoPedido',
+  const h = montar(['marcaDaSessao', 'marcaDestaAba', 'contaAgora', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'chaveDoPedido',
     'enfileirarSaida', 'tirarDaFilaDeSaida', 'reivindicacaoDestaAba', 'pousouPorOutraAba', 'soltarMarcaDosItens',
     'pousouNoWaze', 'enviarLote'], deps);
   const envio = h.enviarLote([PEDIDO('x1'), PEDIDO('x2')], { regiao: 'row' });
@@ -2510,6 +2510,7 @@ function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242',
     SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
     contaConfirmadaNestaAba: estaAbaConfirmou ? { id: estaAbaConfirmou, s: marcaDe('tok-a') } : null,
+    contaVistaNoAparelho: !!estaAbaConfirmou,   // a aba que confirmou uma conta a viu (ou gravou) no aparelho (R23-8-01)
     saidaEsperandoConta: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,
     // Um "Conectar outro aparelho" que X abriu: o código vale uma sessão DELE por 5 min.
     pareamentosEmitidos: new Set(['PRV234']), placeResolvidoPorAprovacao: null,
@@ -2532,8 +2533,8 @@ function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242',
     atualizarSeloDeConquista: () => {}, esvaziarPainelDoHistorico: () => {}, updateStats: () => {},
     updateInFlightIndicator: () => {}, esvaziarFilaDeSaida: () => {},
   };
-  const h = montar(['aoConhecerConta', 'esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'carimbarContaNaSaida',
-    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao',
+  const h = montar(['aoConhecerConta', 'gravarContaNoAparelho', 'esquecerOutraConta', 'fecharOQueEraDaContaAnterior', 'carimbarContaNaSaida',
+    'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida', 'sessaoDestaAbaEhAGuardada', 'deixarSoAsChamadasDaSessao',
     'presencaWmeZerar', 'marcaDaSessao', 'marcaDestaAba'], deps);
   return { h, ap, log, AppState, API, presencaWme, deps };
 }
