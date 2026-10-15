@@ -365,7 +365,7 @@ test('buildPlacesFromSearch: a data de cada foto sai por ID, e o campo é `date`
   const { places } = buildPlacesFromSearch(har, { unreadOnly: false });
   const p = places[0];
   assert.ok(p, 'sumiu o card');
-  assert.deepEqual(p.imageDates, { 'img-velha': 1400000000000, 'img-nova': 1780000000000 },
+  assert.deepEqual({ ...p.imageDates }, { 'img-velha': 1400000000000, 'img-nova': 1780000000000 },
     'só as fotos com data válida entram, e a chave é o ID');
   // A URL carrega o id, que é como o frontend acha a data da foto aberta.
   const url = p.imageUrls.find((u) => u.includes('img-velha'));
@@ -1635,6 +1635,43 @@ test('renomear-local: o Waze dizer 200 e NÃO ter mudado vira erro, não sucesso
   assert.equal(r.status, 500);
   assert.equal(r.body.success, false);
   assert.equal(r.body.errorKey, 'srv.err.nameUnchanged');
+});
+
+test('R24-6 A3: renomear-local com venueID que é nome de propriedade herdada (constructor/toString) não vira nameUnchanged', async () => {
+  // O eco do Waze não traz o local: `eco.venues['constructor']` era a função Object (herança), cujo `name` é a
+  // string "Object" — a conferência lia isso como «o nome continua o mesmo» e devolvia 500. Só vale chave PRÓPRIA.
+  for (const VID of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const { r } = await renomearComStub({ venueID: VID, nome: 'Nome Novo' }, { venues: {}, status: 0, synced: true });
+    assert.equal(r.status, 200, `${VID}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.success, true);
+  }
+  // CONTROLE: a conferência segue pegando o eco que CONTRADIZ o pedido (chave própria).
+  const { r } = await renomearComStub({ venueID: 'constructor', nome: 'Nome Novo' },
+    { venues: JSON.parse('{"constructor":{"id":"constructor","name":"Nome Velho"}}'), status: 0, synced: true });
+  assert.equal(r.status, 500);
+  assert.equal(r.body.errorKey, 'srv.err.nameUnchanged');
+});
+
+test('R24-6 A3: foto com id __proto__/constructor/toString mantém data e autor (os mapas por id não têm protótipo)', () => {
+  const har = harBatalhao();
+  const ids = ['__proto__', 'constructor', 'toString'];
+  har.venues.objects[0].images = ids.map((id, i) => ({ id, approved: true, date: 1400000000000 + i, creatorUserId: 8 }));
+  har.users = { objects: [{ id: 8, userName: 'fulana' }] };
+  const p = buildPlacesFromSearch(har, { unreadOnly: false }).places[0];
+  assert.ok(p, 'sumiu o card');
+  for (const id of ids) {
+    assert.ok(Object.hasOwn(p.imageAuthors, id), `o autor da foto "${id}" se perdeu`);
+    assert.equal(p.imageAuthors[id], 'fulana');
+    assert.ok(Object.hasOwn(p.imageDates, id), `a data da foto "${id}" se perdeu`);
+  }
+  // E sai pela rede com as três chaves (o JSON.stringify de objeto sem protótipo funciona).
+  const volta = JSON.parse(JSON.stringify(p));
+  assert.deepEqual(Object.keys(volta.imageAuthors).sort(), [...ids].sort());
+  assert.deepEqual(Object.keys(volta.imageDates).sort(), [...ids].sort());
+  // CONTROLE: um id comum continua igual.
+  har.venues.objects[0].images = [{ id: 'img-comum', approved: true, date: 1400000000000, creatorUserId: 8 }];
+  const q = buildPlacesFromSearch(har, { unreadOnly: false }).places[0];
+  assert.deepEqual({ ...q.imageAuthors }, { 'img-comum': 'fulana' });
 });
 
 test('renomear-local: 403 do Waze vira unauthorized, não erro genérico', async () => {

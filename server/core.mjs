@@ -2285,7 +2285,9 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // Por ID e não por índice, pela mesma razão do `approvedImageIds`: o
     // carrossel reordena e o frontend remove foto excluída da lista, então
     // posição não identifica nada.
-    const imageDates = {};
+    // Sem protótipo (R24-6 A3): o id da foto vem do Waze e é CHAVE; num `{}` o id `__proto__` não
+    // gravava (perdia data e autor) e `constructor`/`toString` já existiam como herança.
+    const imageDates = Object.create(null);
     // QUEM mandou cada foto, por id. O campo é `creatorUserId` no objeto de
     // imagem, e o WME mostra exatamente isso ("Enviado 01/11/2014 por
     // Coskobeu") — foi o owner que apontou, com um local em que aparece.
@@ -2305,7 +2307,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // dicionário vira o próprio número — feio, nunca invisível (mesma regra do
     // `creatorName`). Conta apagada vem do Waze como "Inactive User", e sai
     // assim mesmo: é o que o WME mostra, e traduzir seria inventar identidade.
-    const imageAuthors = {};
+    const imageAuthors = Object.create(null);
     for (const img of listaDoWaze(venue.images, { objetos: false })) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
@@ -3104,7 +3106,7 @@ async function handleExcluirFoto(data, { sessions }) {
   let confirmado = null;
   try {
     const eco = JSON.parse(result.response);
-    const v = eco && eco.venues && eco.venues[venueID];
+    const v = eco && eco.venues && Object.hasOwn(eco.venues, venueID) ? eco.venues[venueID] : null;
     if (v && Array.isArray(v.images)) confirmado = !v.images.some((i) => i && i.id === imageID);
   } catch { /* sem eco legível: seguimos com o 200, que já é a resposta do Waze */ }
   if (confirmado === false) {
@@ -3173,7 +3175,7 @@ async function handleRenomearLocal(data, { sessions }) {
   let confirmado = null;
   try {
     const eco = JSON.parse(result.response);
-    const v = eco && eco.venues && eco.venues[venueID];
+    const v = eco && eco.venues && Object.hasOwn(eco.venues, venueID) ? eco.venues[venueID] : null;
     if (v && typeof v.name === 'string') confirmado = v.name === nome;
   } catch { /* sem eco legível: seguimos com o 200 do Waze */ }
   if (confirmado === false) {

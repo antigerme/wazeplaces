@@ -47,7 +47,7 @@ test('R21-6-04: userName que não é um nome legível cai no id — o do pedido 
     const p = busca(doisUsuarios(userName));
     assert.equal(p.creatorId, 7);
     assert.equal(p.createdBy, 7, `DEFEITO (${rotulo}): o card mostraria "(desconhecido)" com o id conhecido, e a reincidência gravaria o nome em branco`);
-    assert.deepEqual(p.imageAuthors, { img1: '8' }, `DEFEITO (${rotulo}): a foto saiu com ${JSON.stringify(p.imageAuthors.img1)} — o lightbox mostra String(isto)`);
+    assert.deepEqual({ ...p.imageAuthors }, { img1: '8' }, `DEFEITO (${rotulo}): a foto saiu com ${JSON.stringify(p.imageAuthors.img1)} — o lightbox mostra String(isto)`);
   }
 });
 
@@ -55,12 +55,12 @@ test('R21-6-04: CONTROLES — nome de verdade volta como veio (sem aparar), em q
   for (const nome of ['joao', ' joao ', 'world_12345', '李雷', 'ז', 'Яна', '😀', 'a\u200b', '\u200bA', 'Zoë', 'x']) {
     const p = busca(doisUsuarios(nome));
     assert.equal(p.createdBy, nome, `CONTROLE: o nome ${JSON.stringify(nome)} foi trocado no pedido`);
-    assert.deepEqual(p.imageAuthors, { img1: nome }, `CONTROLE: o nome ${JSON.stringify(nome)} foi trocado na foto`);
+    assert.deepEqual({ ...p.imageAuthors }, { img1: nome }, `CONTROLE: o nome ${JSON.stringify(nome)} foi trocado na foto`);
   }
   // Sem o usuário no dicionário, ou sem ninguém no pedido: o id (cru) e o texto do id; nulo sem id.
   const semDicionario = busca([]);
   assert.equal(semDicionario.createdBy, 7);
-  assert.deepEqual(semDicionario.imageAuthors, { img1: '8' });
+  assert.deepEqual({ ...semDicionario.imageAuthors }, { img1: '8' });
   assert.equal(busca([], { createdBy: null }).createdBy, null, 'CONTROLE: pedido sem autor tem que seguir sem autor (não "null")');
 });
 
