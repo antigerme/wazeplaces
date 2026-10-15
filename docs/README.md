@@ -111,7 +111,7 @@ Regenerar o PDF: `python3 docs/scripts/md2pdf.py docs/cloudflare-migration.md do
 
 ## `waze-api.md`
 
-Superfície **medida** da API que o WME usa: a tabela `paths` completa (42
+Superfície **medida** da API que o WME usa: a tabela `paths` completa (44
 caminhos REST), os 44 métodos gRPC-web, os limites e feature flags publicados
 em `info/config`, e o enquadramento do fio gRPC.
 
