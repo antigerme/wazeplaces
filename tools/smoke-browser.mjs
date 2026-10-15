@@ -10633,9 +10633,21 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 // px: o card de FUNDO) e o iPhone a 1,8×, onde o placar também entra no laço — mais
 // dois com o texto grande ligado que já eram quietos.
 //
-// CONTROLES (gotcha #28), um por onde o laço aparecia: a MESMA tela com a regra
-// antiga de volta TEM que oscilar nesse lugar — senão a medida está cega e o
-// «quieto» de cima não vale nada —, e, sem Reduzir movimento, tem que ficar quieta.
+// O CONSERTO tem duas camadas, e este bloco mede as duas: o 0s do reduced-motion
+// (a causa) e a DEFESA das vigias (`card-medindo`/`placar-medindo`, js/app.js e
+// styles.css), que desliga as transições de quem a classe muda enquanto a vigia
+// mede — pra medida não depender de transição nenhuma, nem a de amanhã. A defesa ficou com o
+// card e com o placar juntos porque o iPhone a 1,8× é o caso em que um sem o outro
+// segue oscilando (MEDIDO: só o card protegido, 1027 escritas em 1,5 s).
+//
+// CONTROLES (gotcha #28), um por onde o laço aparecia:
+//  1. a regra antiga de volta E a defesa da vigia (`card-medindo`/`placar-medindo`)
+//     desligada TEM que oscilar nesse lugar — senão a medida está cega e o «quieto»
+//     de cima não vale nada;
+//  2. a regra antiga de volta com a defesa LIGADA tem que ficar quieta: a vigia não
+//     pode depender de nenhuma transição (é o que a defesa promete, e o que impede o
+//     laço de voltar no dia em que alguém puser uma transição de layout no card);
+//  3. sem Reduzir movimento, quieto.
 if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card parado, a barra fora da janela e os layouts por segundo',
   'o laço é do Blink: o WebKit 27.2 mede 0 trocas com a regra antiga, então o CONTROLE nunca reprovaria e o bloco mediria o instrumento; e as métricas de layout vêm do CDP, que só o Chromium tem')) {
   const pedidoRM = (tipo, pais, chave) => FIXTURES_PAISES
@@ -10652,6 +10664,11 @@ if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card par
   if (FILA_RM.every(Boolean)) {
     const JANELA_RM = 2000;
     const REGRA_ANTIGA = '*, *::before, *::after { transition-duration: 0.01ms !important; }';
+    // A defesa tem regras próprias (styles.css); pra o CONTROLE reproduzir o laço de antes, elas
+    // precisam ser vencidas: mesma especificidade, mais tarde na cascata, e `!important`.
+    const SEM_A_DEFESA = '.place-card.card-medindo .card-photo, .place-card.card-medindo .card-content,'
+      + ' #placarGrid.placar-medindo, #placarGrid.placar-medindo > *'
+      + ' { transition: all 0.01ms !important; }';
     const LOCALE_RM = { pt: 'pt-BR', fr: 'fr-FR' };
     // `laco`: onde a escrita da classe aparecia sem o conserto — o card da frente, o de
     // FUNDO ou o placar. `fora`: a barra também saía da janela naquele caso.
@@ -10707,7 +10724,7 @@ if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card par
       const valor = (n) => (metrics.find((x) => x.name === n) || {}).value || 0;
       return { layouts: valor('LayoutCount'), estilos: valor('RecalcStyleCount') };
     };
-    const rodarRM = async (caso, { antiga = false, reduzir = true } = {}) => {
+    const rodarRM = async (caso, { antiga = false, semDefesa = false, reduzir = true } = {}) => {
       const ctx = await browser.newContext({ viewport: caso.viewport, serviceWorkers: 'block',
         locale: LOCALE_RM[caso.lang], reducedMotion: reduzir ? 'reduce' : 'no-preference' });
       await ctx.route('**/*-tiles/**', (r) =>
@@ -10719,7 +10736,7 @@ if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card par
       await page.waitForTimeout(250);
       if (caso.escala !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * caso.escala}px !important; }` });
       // A regra antiga volta ANTES de o card entrar: o laço começa na montagem.
-      if (antiga) await page.addStyleTag({ content: REGRA_ANTIGA });
+      if (antiga) await page.addStyleTag({ content: REGRA_ANTIGA + (semDefesa ? SEM_A_DEFESA : '') });
       await page.evaluate(({ fila, lang }) => {
         setLang(lang); applyI18n();
         AppState.authenticated = true;
@@ -10736,8 +10753,13 @@ if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card par
         showCurrentPlace();
       }, { fila: FILA_RM, lang: caso.lang });
       // O card ASSENTOU (a entrada, a 1ª medida e a confirmação dela já rodaram): a
-      // janela de 2 s é só do card PARADO. 300 ms de folga depois dos quadros, porque o
-      // laço — se existir — não deixa o card assentar nunca e nada se perde esperando.
+      // janela de 2 s é só do card PARADO. As imagens (a foto, os tiles do mapa) chegam
+      // ANTES: uma delas chegando no meio da janela mexeria no tamanho do card e a vigia,
+      // certa, escreveria a classe uma vez — o que não é o laço. 300 ms de folga depois
+      // dos quadros, porque o laço — se existir — não deixa o card assentar nunca e nada
+      // se perde esperando.
+      const imagens = await esperarNaPagina(page, () => [...document.querySelectorAll('#cardStack img')].every((i) => i.complete), 8000, 50);
+      checa(imagens.ok, `reduzir movimento/${caso.id}: as imagens do card não terminaram de carregar`, JSON.stringify(imagens));
       await doisQuadros(page); await assentar(page, 0); await doisQuadros(page);
       await page.waitForTimeout(300);
       const cdp = await ctx.newCDPSession(page);
@@ -10764,14 +10786,32 @@ if (!pularForaDoChromium(MOTOR, 'reduzir movimento: o card-aperta com o card par
       checa(erros.length === 0, `${id}: erro de JS`, erros[0]);
     }
 
-    // 2. CONTROLE do instrumento: a regra antiga de volta TEM que oscilar onde ela oscilava.
-    for (const caso of CASOS_RM.filter((c) => c.laco && ['iPhone 15 · 393×852 a 1,3× · fr', 'janela baixa · 390×500 a 1× · pt', 'iPhone 15 · 393×852 a 1,8× · pt'].includes(c.id))) {
-      const id = `reduzir movimento/CONTROLE regra antiga/${caso.id}`;
-      const { m } = await rodarRM(caso, { antiga: true });
+    // Um controle por onde o laço aparecia: o card da frente, o de FUNDO e o placar.
+    const COM_CONTROLE = CASOS_RM.filter((c) => c.laco
+      && ['iPhone 15 · 393×852 a 1,3× · fr', 'janela baixa · 390×500 a 1× · pt', 'iPhone 15 · 393×852 a 1,8× · pt'].includes(c.id));
+
+    // 2. CONTROLE do instrumento: a regra antiga de volta, com a defesa da vigia DESLIGADA, TEM que
+    //    oscilar onde ela oscilava. Sem isto o «quieto» de cima poderia ser uma medida cega.
+    for (const caso of COM_CONTROLE) {
+      const id = `reduzir movimento/CONTROLE regra antiga sem a defesa/${caso.id}`;
+      const { m } = await rodarRM(caso, { antiga: true, semDefesa: true });
       checa(m.transicaoS > 0 && m.transicaoS < 0.001, `${id}: CONTROLE falhou — a regra antiga não chegou à foto (transição de ${m.transicaoS}s)`);
       checa(m[caso.laco] >= 20, `${id}: CONTROLE falhou — com o 0.01ms de volta o ${caso.laco} foi escrito só ${m[caso.laco]}× em 2 s, então o «quieto» de cima não estava medindo nada`, resumoRM(m));
       checa(m.layoutsPorS >= 40, `${id}: CONTROLE falhou — com o 0.01ms de volta foram só ${m.layoutsPorS} layouts por segundo`, resumoRM(m));
       if (caso.fora) checa(m.fora >= 10, `${id}: CONTROLE falhou — com o 0.01ms de volta a barra ficou fora da janela em só ${m.fora} de ${m.quadros} quadros`, resumoRM(m));
+    }
+
+    // 2b. A DEFESA: a mesma regra antiga de volta, com a vigia protegida, fica quieta — a medida
+    //     não depende de transição nenhuma. É o que segura o laço no dia em que alguém puser uma
+    //     transição de layout no card ou no placar.
+    for (const caso of COM_CONTROLE) {
+      const id = `reduzir movimento/a defesa com a regra antiga de volta/${caso.id}`;
+      const { m } = await rodarRM(caso, { antiga: true });
+      checa(m.transicaoS > 0 && m.transicaoS < 0.001, `${id}: CONTROLE falhou — a regra antiga não chegou à foto (transição de ${m.transicaoS}s), então a defesa não foi posta à prova`);
+      checa(m.aperta, `${id}: PRÉ-CONDIÇÃO falhou — o card-aperta não está ligado neste caso`, resumoRM(m));
+      checa(m.bruto === 0, `${id}: com a transição de 0.01ms de volta a vigia escreveu a classe ${m.bruto}× em 2 s (frente ${m.frente}, fundo ${m.fundo}, placar ${m.placar}, dentro ${m.dentro}) — a defesa (card-medindo/placar-medindo) não segurou`, resumoRM(m));
+      checa(m.fora === 0, `${id}: com a transição de 0.01ms de volta a barra ficou FORA da janela em ${m.fora} de ${m.quadros} quadros`, resumoRM(m));
+      checa(m.layoutsPorS <= 10, `${id}: com a transição de 0.01ms de volta foram ${m.layoutsPorS} layouts por segundo`, resumoRM(m));
     }
 
     // 3. CONTROLE do movimento normal: sem Reduzir movimento a mesma tela já era quieta.
@@ -16818,7 +16858,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + os avisos de UMA vez só saem onde a pessoa os vê (a consequência do 1º ✕ com os Filtros abertos, o desbloqueio do Desfazer com a página no fundo e a dica com a Ajuda aberta no SE esperam, sem marcar, e saem inteiros no fechamento e na volta — grade 3×3 de hit-test, com o CONTROLE sem camada e o da grade vendo o banner coberto; o que o TREINO segurou sai no "Sair" da faixa e no ↻, o que estava na tela quando ele abriu sai dele e volta no fim, com o CONTROLE do dispensado que não volta; e o interruptor do Desfazer travando com as Preferências abertas quando o "Desfazer" devolve o placar abaixo da cota)`
   + `, + o ponto de conquista LEVA ao que destravou (clique REAL no botão, aba certa já no 1º quadro com rede de 1,4s, marcas vivas, pulso por alvo, alvo visível, patente sem célula, reduced-motion sem pulso, CONTROLE sem novidade e a 2ª abertura voltando a Filtros)`
   + `, + entrada do card SEM efeito (zero movimento, zero mudança de tamanho e opacidade cheia medidos no DOM, card de fundo visível o tempo todo, em movimento normal e reduced-motion, com CONTRAPROVA que injeta o fade e o esconderijo de volta)`
-  + `, + «Reduzir movimento» sem laço no Chromium (o card-aperta e o placar com o card PARADO por 2 s em 8 casos — iPhone a 1,3× e 1,8×, Z Fold, janelas baixas a 1× e a de computador de 500 px, S8 e SE —: zero escritas de classe contadas uma a uma nos dois cards e no placar, zero quadros com a barra ✕/↑/✓ fora da janela e zero layouts por segundo, com o card-aperta ligado de verdade em cada caso; CONTROLES com a regra antiga de 0.01ms de volta, que TEM que oscilar no card da frente, no de fundo e no placar, e sem Reduzir movimento, quieto)`
+  + `, + «Reduzir movimento» sem laço no Chromium (o card-aperta e o placar com o card PARADO por 2 s em 8 casos — iPhone a 1,3× e 1,8×, Z Fold, janelas baixas a 1× e a de computador de 500 px, S8 e SE —: zero escritas de classe contadas uma a uma nos dois cards e no placar, zero quadros com a barra ✕/↑/✓ fora da janela e zero layouts por segundo, com o card-aperta ligado de verdade em cada caso; CONTROLES: a regra antiga de 0.01ms de volta SEM a defesa das vigias, que TEM que oscilar no card da frente, no de fundo e no placar; a mesma regra antiga COM a defesa, que fica quieta (a medida não depende de transição); e sem Reduzir movimento, quieto)`
   + `, + Desfazer até o FIM (devolve o pedido, tira o banner e REABILITA os botões — o defeito de #215 que rodou em produção)`
   + `, + presença no WME de carona medida pela REDE (posição do card NA TELA em [lat,lon] com id e país, visibilidade ligando na 1ª ação, freio de 30 s, desligar escondendo no WME na hora, religar na ação seguinte, e o invisível do WME NÃO desligando o app: a ação seguinte religa de carona)`
   + `, + gestos e teclas que NÃO decidem (pinça e puxão pra baixo por toque de verdade; arraste de mouse pela foto e pelo mapa sem prender o card nem abrir camada; a aprovação pousando no meio da saída sem o ✓, a seta ou o arraste agirem no pedido seguinte; setas rolando a lista de mudanças; z e Tab desfazendo a exclusão de foto — cada um com o CONTROLE do gesto que decide)`

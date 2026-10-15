@@ -777,6 +777,31 @@ body > main {
   min-height: 0;
 }
 
+/* A MEDIDA DAS VIGIAS NÃO DEPENDE DE TRANSIÇÃO (R21-8-01). A `vigiarBarraDeAcoes`
+   e a `vigiarPlacar` (js/app.js) tiram uma classe, LEEM o layout e a repõem; a
+   leitura só vale se a troca valer na hora, e uma transição em qualquer propriedade
+   que a classe muda a faria ler o valor de ANTES (foi a transição de 0.01ms do
+   reduced-motion: o `card-aperta` oscilou a cada quadro com o card parado). Hoje o
+   app não tem transição de layout ali, mas a vigia não fica refém disso: enquanto
+   escreve, ela põe `card-medindo` no card (e `placar-medindo` no placar) e esta
+   regra desliga as transições de QUEM A CLASSE MUDA — a foto e o texto do card (o
+   `min-height` do `card-aperta`), o placar e as células dele (o `row-gap` e as
+   bordas do `placar-2x2`) —, e `test/reduzir-movimento-r21.test.mjs` reprova o alvo
+   novo de um `card-aperta`/`placar-2x2` que não entrar aqui. Alvos escolhidos, e não
+   `*`: o `*` invalidava o estilo do card INTEIRO a cada escrita da vigia (MEDIDO
+   no Chromium com a CPU 6× mais lenta: +20 a +35 ms de tarefa por card com o
+   `card-aperta` ligado) e estes bastam (28 casos quietos com a transição de 0.01ms
+   de volta).
+   O card em si fica de fora: a saída do swipe é uma transição de `transform`
+   escrita em estilo inline nele. `!important` pra nenhum `transition-*` de
+   utility ou de estilo inline vencer. */
+.place-card.card-medindo .card-photo,
+.place-card.card-medindo .card-content,
+#placarGrid.placar-medindo,
+#placarGrid.placar-medindo > * {
+  transition: none !important;
+}
+
 /* Scroll edge effect (M3): a borda de baixo esmaece enquanto sobra conteúdo, e
    volta ao normal ao chegar no fim. Máscara em vez de gradiente colorido de
    propósito — funciona sobre a caixa âmbar, a rosa, no claro e no escuro, sem

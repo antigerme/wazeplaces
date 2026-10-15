@@ -267,8 +267,10 @@ test('R20-8-01 · o 2×2 NUNCA piora a barra: se a pilha do card passa da janela
   estoura.rodar();
   assert.equal(estoura.classes.has('placar-2x2'), false,
     '2×2 deixou a pilha 26 px fora da janela (a barra ✕ ↑ ✓ sai do alcance) e a classe ficou ligada');
-  // O vaivém acontece no MESMO quadro (liga, mede, desliga): nada de piscar.
-  assert.deepEqual(estoura.escritas, ['+placar-2x2', '-placar-2x2']);
+  // O vaivém acontece no MESMO quadro (liga, mede, desliga): nada de piscar. (As
+  // escritas da proteção contra transição, `placar-medindo` — R21-8-01 —, não são
+  // do vaivém: `test/reduzir-movimento-r21.test.mjs` cobra essas.)
+  assert.deepEqual(estoura.escritas.filter((e) => !/medindo/.test(e)), ['+placar-2x2', '-placar-2x2']);
 });
 
 test('R20-8-01 · o 2×2 NUNCA tira a barra do CARD da frente (375×667 a 1,8×: a pilha cabe na janela, a barra não)', () => {
@@ -308,6 +310,7 @@ test('R20-8-01 · medido LIGADO sem a classe (o texto que volta ao normal deslig
   assert.ok(m.classes.has('placar-2x2'));
   m.sincrona();                                           // a medida síncrona (o idioma trocou)
   assert.equal(m.classes.has('placar-2x2'), false, 'a medida síncrona não desligou o 2×2 com o rótulo cabendo');
+  m.rodar();                                              // a proteção contra transição (R21-8-01) se solta nos quadros seguintes
   // O callback do observer só AGENDA (gotchas #34/#35).
   m.escritas.length = 0;
   m.RO.ultimo.cb();

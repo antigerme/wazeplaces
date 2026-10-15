@@ -17713,18 +17713,44 @@ function vigiarBarraDeAcoes(card) {
     if (!corpo || !barra) return null;
     let ligado = card.classList.contains('card-aperta');
     let agendado = false;
+    let protegido = false;
     // A BARRA, e não o `scrollHeight` do corpo: deitado o card é uma grade e a
     // coluna do texto pode passar do corpo sem que a barra (coluna da foto)
     // saia de lugar nenhum — medir o corpo ligava o aperto onde nada faltava.
     // `offsetTop` é de layout, e não muda com o `transform` do arraste.
     const barraFora = () => barra.offsetTop + barra.offsetHeight > corpo.clientHeight + TOLERANCIA_ARREDONDAMENTO_PX;
 
+    // A MEDIDA NÃO PODE DEPENDER DE TRANSIÇÃO (R21-8-01). Tirar o `card-aperta` e ler
+    // a posição da barra só dá a resposta certa se a troca de classe valer NA HORA; com
+    // uma transição em qualquer propriedade que a classe muda (o `min-height` da
+    // foto…) a leitura pega o valor de ANTES — foi assim que a transição de 0.01ms do
+    // reduced-motion fez a vigia ligar e desligar a classe a cada quadro, com o card
+    // parado. Hoje o CSS não tem nenhuma (o reduced-motion é 0s), mas a vigia não deve
+    // ficar refém disso: enquanto escreve, o card ganha `card-medindo`, e o styles.css
+    // desliga as transições dos elementos que o `card-aperta` muda (a foto e o texto;
+    // um teste cobra que um alvo novo entre na lista).
+    // A classe fica até DEPOIS do recálculo de estilo que aplica a decisão — o do fim
+    // do quadro —, senão a classe de volta começaria uma transição a partir do valor de
+    // antes e a barra apareceria fora por um quadro; e a medida síncrona do
+    // `appendChild` roda numa TAREFA, então o fim do quadro dela é o do quadro SEGUINTE:
+    // por isso são dois `requestAnimationFrame`. Só se protege quando a classe vai
+    // mudar — em regime (a barra cabe, a classe fora) nada é escrito.
+    const semTransicao = () => {
+        if (protegido) return;
+        protegido = true;
+        card.classList.add('card-medindo');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            protegido = false;
+            card.classList.remove('card-medindo');
+        }));
+    };
+
     const escrever = () => {
         agendado = false;
         if (!card.isConnected) return;
-        if (ligado) card.classList.remove('card-aperta');
+        if (ligado) { semTransicao(); card.classList.remove('card-aperta'); }
         const fora = barraFora();
-        if (fora || ligado) card.classList.toggle('card-aperta', fora);
+        if (fora || ligado) { semTransicao(); card.classList.toggle('card-aperta', fora); }
         ligado = fora;
     };
     const agendar = () => {
@@ -17804,17 +17830,34 @@ function vigiarPlacar() {
         const card = document.querySelector('#cardStack .place-card:not(.card-fundo)');
         return card ? medidasDaBarra.get(card) || null : null;
     };
+    // A medida do placar também não pode depender de transição (R21-8-01, a mesma
+    // razão e o mesmo desenho da `vigiarBarraDeAcoes`, lá explicados): o 2×2 muda o
+    // `row-gap`, as bordas e o respiro das células, e a altura da pilha lida logo
+    // depois pegaria o valor de ANTES — com a transição de 0.01ms do reduced-motion
+    // o iPhone 15 a 1,8× escrevia a classe 233 vezes em 2 s com o card parado. Só se
+    // protege quando a classe vai mudar: em regime nada é escrito.
+    let protegida = false;
+    const semTransicao = () => {
+        if (protegida) return;
+        protegida = true;
+        grade.classList.add('placar-medindo');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            protegida = false;
+            grade.classList.remove('placar-medindo');
+        }));
+    };
     const escrever = () => {
         agendado = false;
         // Escondido (a tela de entrada) não tem medida: o observer chama de novo
         // quando o placar aparece.
         if (!grade.isConnected || !grade.getClientRects().length) return;
-        if (ligado) grade.classList.remove('placar-2x2');
+        if (ligado) { semTransicao(); grade.classList.remove('placar-2x2'); }
         const barra = barraDaFrente();
         let novo = false;
         let mexeuNoCard = false;
         rotuloSobrando = !rotulosCabem();
         if (rotuloSobrando) {
+            semTransicao();
             grade.classList.add('placar-2x2');
             novo = true;
             if (barra) { barra.medir(); mexeuNoCard = true; }
