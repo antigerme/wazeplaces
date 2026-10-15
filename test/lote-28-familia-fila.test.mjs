@@ -72,7 +72,7 @@ test('R24-1-01: com contador FRACIONÁRIO guardado, o `recordHistory` não soma 
   assert.equal(JSON.parse(guardado.get('waze_places_history'))._total.read, 11);
 });
 
-test('R24-1-01: o escritor passa pelo leitor (guard na fonte) — e o placar/`seq` têm o motivo escrito', () => {
+test('R24-1-01: o escritor passa pelo leitor (guard na fonte)', () => {
   assert.match(fatiarDe(APP_SEM, 'recordHistory'), /const numero = contagemDoHistorico;/);
   assert.ok(!/Number\.isFinite\(x\) \? x : 0/.test(fatiarDe(APP_SEM, 'recordHistory')), 'o escritor voltou ao critério próprio');
 });

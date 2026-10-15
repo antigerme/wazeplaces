@@ -13097,9 +13097,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // esta feature existe pra acabar. O que NÃO pode acontecer é contar duas
     // vezes: a 1ª resposta nunca foi processada, então o Histórico ganha UM.
     await page.evaluate(() => {
+      // Com a marca da SESSÃO do gesto (`s`), como o app grava: o item sem conta e sem marca (de versão anterior à
+      // marca) deixou de ser adotado pela abertura — a migração `saida-sem-marca` cumpriu o prazo (lote 28) — e agora
+      // sairia como «sem dono», sem ir ao Waze.
       localStorage.setItem('waze_places_saida', JSON.stringify([{ tipo: 'reject',
         venueID: 'reenvio', updateRequestID: 77, creatorId: null, nome: null,
-        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30' }]));
+        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30', s: marcaDaSessao(API.getSession()) }]));
       const h = JSON.parse(localStorage.getItem('waze_places_history') || '{}');
       h._total = { read: 0, rejected: 0 }; h['2026-01-01'] = { read: 0, rejected: 0 };
       localStorage.setItem('waze_places_history', JSON.stringify(h));
