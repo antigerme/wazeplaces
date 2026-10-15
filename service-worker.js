@@ -398,12 +398,12 @@ self.addEventListener('fetch', event => {
     // A cópia GUARDADA deste pedido (ou `undefined`).
     // Com TETO (R23-4-02): sem rede e com a Cache API muda, `Response.error()`
     // ao fim do teto é melhor que pendurar a navegação. UM teto sobre a cadeia
-    // inteira (a página e, depois, o `/`), e o teto depende de a rede ter ou não
-    // respondido (R24-4-03): com a resposta 5xx da borda na mão, o teto curto —
-    // a resposta é o plano B; SEM rede (o `.catch`), o longo, porque o cache lento
-    // que responde é a única saída (dois tetos curtos em série davam
-    // `Response.error()` a um `caches.match` de 1,6 s, que antes do lote 27 esperava).
-    const daCopiaGuardada = (teto) => comTeto(
+    // inteira (a página e, depois, o `/`), e o teto é o LONGO (R24-4-03): este caminho só
+    // roda com a rede já falha (o `.catch`) ou com a borda respondendo 5xx (a origem fora
+    // do ar, que é a mesma coisa), e aí o cache lento que responde é a única saída — dois
+    // tetos curtos em série davam `Response.error()` a um `caches.match` de 1,6 s, que
+    // antes do lote 27 esperava. A resposta 5xx, se houver, segue como último recurso.
+    const daCopiaGuardada = () => comTeto(
       caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
         if (cached) return cached;
         // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
@@ -413,7 +413,7 @@ self.addEventListener('fetch', event => {
         // `/index.html` de antes era uma resposta redirecionada, recusada.
         if (isHTML) return caches.match('/');
         return undefined;
-      }), undefined, teto);
+      }), undefined, SW_CACHE_ESPERA_SEM_REDE_MS);
     const navegacao = event.request.mode === 'navigate';
     event.respondWith(
       fetch(event.request)
@@ -429,7 +429,7 @@ self.addEventListener('fetch', event => {
           // anti-skew protege (gotcha #18: HTML novo com JS velho). Sem cópia
           // guardada, a resposta da borda vai como veio.
           if (response && response.status >= 500 && (navegacao || paginasDoCache.has(event.clientId))) {
-            return daCopiaGuardada(SW_CACHE_TETO_MS).then((guardada) => {
+            return daCopiaGuardada().then((guardada) => {
               if (!guardada) return response;
               if (navegacao && event.resultingClientId) lembrarPaginaDoCache(event.resultingClientId);
               return guardada;
@@ -441,7 +441,7 @@ self.addEventListener('fetch', event => {
           }
           return response;
         })
-        .catch(() => daCopiaGuardada(SW_CACHE_ESPERA_SEM_REDE_MS).then((guardada) => guardada || Response.error()))
+        .catch(() => daCopiaGuardada().then((guardada) => guardada || Response.error()))
     );
     return;
   }

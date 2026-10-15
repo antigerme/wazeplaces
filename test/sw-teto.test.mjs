@@ -349,3 +349,17 @@ test('CONTROLE do relógio virtual: Cache API saudável, tile guardado sai do ca
   assert.deepEqual(r.valor, { doCache: true });
   assert.ok(r.quando <= 110);
 });
+
+test('R24-4-03: origem fora do ar (5xx na navegação) com caches.match a 1,6 s: a página guardada vence a resposta 5xx (O1)', async () => {
+  const w = mundo({
+    caches: (rel) => ({ ...lentos(rel, 1600), has: async () => false }),
+    fetchImpl: async () => ({ status: 502, type: 'basic', daBorda: true }),
+  });
+  const r = await w.terminou(w.pedir(navegar));
+  assert.deepEqual(r.valor, { doCache: true }, `a 502 da borda venceu a cópia guardada lenta: ${JSON.stringify(r)}`);
+  // CONTROLE: sem cópia guardada a resposta da borda vai como veio.
+  const sem = mundo({ caches: (rel) => ({ has: async () => false, keys: async () => [], delete: async () => true, match: async () => { await rel.dorme(100); return undefined; } }),
+    fetchImpl: async () => ({ status: 502, type: 'basic', daBorda: true }) });
+  const s = await sem.terminou(sem.pedir(navegar));
+  assert.equal(s.valor && s.valor.daBorda, true, 'sem cópia, a 502 da borda tem que sair como veio');
+});
