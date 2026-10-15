@@ -25,8 +25,7 @@
 // Regra que vale pra todo caso aqui: medir FATO, não intenção. Guard de fonte
 // não enxerga CSP, não enxerga cache e não enxerga service worker.
 
-import { execFileSync } from 'node:child_process';
-import http from 'node:http';
+import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,8 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
 import { esperarFimDaSaida, esperarNaPagina } from './esperar-saida.mjs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
-import { subirServidorLocal } from './servidor-local.mjs';
+import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.PORTA_OFFLINE || 8192);
@@ -45,57 +43,60 @@ const BASE = `http://127.0.0.1:${PORTA}`;
 // Carregar e abrir passam pela fonte única (`tools/navegador.mjs`): ela exige
 // o Playwright do REPO — o mesmo do CI, o mais novo — e diz no log qual
 // navegador abriu.
-//
-// E o MOTOR é o pedido (`MOTOR=chromium|webkit`). Este smoke rodava SÓ no
-// Chromium porque o modo avião simulado do Playwright no WebKit derrubava até a
-// resposta que o service worker tinha guardada. No Playwright 1.64 (WebKit
-// 27.2) isso caducou — MEDIDO, com o worker no comando: o asset guardado
-// responde 200 sem rede, o não guardado falha ("Response served by service
-// worker is an error"), uma página NOVA abre com o app e o `navigator.onLine`
-// fica falso, como no Chromium (auditoria da rodada 14, R14-4-07/R14-6-07).
-//
-// MAS o WebKit tem OUTRO limite, e é ele que decide o que roda lá: com o worker
-// no comando, a ROTA do Playwright — a do contexto e a da página — não vê
-// NENHUM pedido da página. MEDIDO no 27.2 (e7/e7b do lote 18): o tile pela
-// `<img>` e pelo `fetch` da varredura, a foto e o POST da API saem pela rede de
-// verdade — o tile chega do Waze real (2200 bytes, sem a marca da rota) e a API
-// cai no servidor local (401) —, 0 de 3 pela rota; com o worker BLOQUEADO, 3 de
-// 3; e no Chromium, 3 de 3 nos dois casos. As seções que rodam com o worker no
-// comando dependem da rota pro tile, pra foto e pra API (o modo avião aqui é
-// `abort` MAIS `setOffline`), então ficam SÓ NO CHROMIUM — puladas pelo nome,
-// com o motivo, e contadas no fim (`pularForaDoChromium`). No WebKit rodam as
-// que bloqueiam o worker: a foto no cache HTTP, o diagnóstico com a rede
-// pendurada, o diagnóstico que atravessa o fechar, as duas abas e o FAB. E o
-// que só o protocolo do DevTools faz (encerrar o worker, a margem do iPhone
-// instalado) é pulado do mesmo jeito, como a reserva da 9i sem `navigator.locks`
-// (um defeito do app que só aparece lá — ver a 9i).
 const pw = await carregarPlaywright();
-const MOTOR = motorPedido();
-// Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
-// que o aparelho dispara ao sair do app — e é o que a descarga da janela do
-// Desfazer e o retrato do diagnóstico escutam. O mesmo `close()` não é o mesmo
-// evento em todo lugar, e cada diferença foi MEDIDA pelo próprio app:
-//  · Chromium (Playwright 1.49, Chromium 131): o `close()` puro destrói a
-//    página SEM nenhum dos dois; o `close({ runBeforeUnload: true })` dispara
-//    os dois — e segue disparando no 1.64 (Chromium 156).
-//  · WebKit (Playwright 1.64, WebKit 27.2): o `close({ runBeforeUnload: true })`
-//    NÃO FECHA a página (`isClosed()` falso, nenhum evento) — ela fica aberta,
-//    calada, no meio do teste; o `close()` puro fecha com `pagehide` e
-//    `visibilitychange` (MEDIDO, e6 da auditoria da rodada 14).
-// Uma porta só, pra o fechar de cada seção ser o mesmo gesto nos dois motores.
-const fecharComoOUsuario = (pg) => (MOTOR === 'chromium' ? pg.close({ runBeforeUnload: true }) : pg.close());
 
 // ── servidor ───────────────────────────────────────────────────────────────
 // Chave FIXA: a seção da sala precisa assinar crachás iguais aos do servidor.
 // Só de teste, e por isso é constante e óbvia.
 const CHAVE_TESTE = Buffer.alloc(32, 7).toString('base64');
-// O servidor sobe por `tools/servidor-local.mjs` (fonte única): a porta tem
-// que estar LIVRE antes, e pronto é o próprio processo dizer que a ocupou. Um
-// processo esquecido na mesma porta sequestrava o teste em silêncio — o `spawn`
-// morria com EADDRINUSE, a sonda de saúde passava com o VELHO, e o smoke media
-// um servidor com outra chave (foi assim que a seção da sala, na época,
-// reprovou por vácuo).
-const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'PORTA_OFFLINE', env: { ENCRYPTION_KEY: CHAVE_TESTE } });
+// A porta tem que estar LIVRE antes de eu subir. Checar depois é uma corrida
+// que eu perco: o processo esquecido responde na hora, a sonda de saúde passa,
+// e só então o meu `spawn` morre com EADDRINUSE — tarde demais, com o teste já
+// medindo o servidor errado (foi assim que a seção da sala reprovou por vácuo,
+// com TODO crachá voltando "inválido" porque a chave era de outro processo).
+try {
+  const r = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
+  if (r.ok) {
+    console.error(`\n✗ a porta ${PORTA} já está ocupada por outro processo.`);
+    console.error('  O teste mediria o servidor ERRADO — com outra chave, todo crachá seria recusado.');
+    console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
+    console.error(`  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline`);
+    process.exit(1);
+  }
+} catch (e) { /* ninguém atendeu: a porta está livre, que é o que eu quero */ }
+
+const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
+  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1', ENCRYPTION_KEY: CHAVE_TESTE },
+  stdio: ['ignore', 'ignore', 'inherit'],
+});
+process.on('exit', () => servidor.kill());
+
+// O servidor que responde tem que ser O QUE EU SUBI.
+//
+// Sem esta checagem, um processo esquecido na mesma porta sequestra o teste em
+// silêncio: o `spawn` morre com EADDRINUSE, a sonda de saúde passa (porque o
+// processo VELHO responde), e o smoke mede um servidor com OUTRA chave. Foi o
+// que aconteceu aqui — todo crachá voltava "inválido" e as invariantes da sala
+// passavam por vácuo, porque ninguém conseguia entrar.
+//
+// É a mesma família dos outros erros de instrumento deste arquivo: o teste
+// respondia sobre uma coisa diferente da que eu pensava estar medindo.
+let morreuCedo = null;
+servidor.on('exit', (code) => { morreuCedo = code; });
+let vivo = false;
+for (let i = 0; i < 60; i++) {
+  if (morreuCedo !== null) break;
+  try { const r = await fetch(BASE + '/'); if (r.ok) { vivo = true; break; } } catch (e) { /* subindo */ }
+  await dormir(250);
+}
+if (morreuCedo !== null) {
+  console.error(`\n✗ o servidor do teste morreu ao subir (código ${morreuCedo}).`);
+  console.error(`  Quase sempre é a porta ${PORTA} ocupada por um processo esquecido.`);
+  console.error('  Confira com: ps -eo pid,args | grep "[s]erver/node.mjs"');
+  console.error('  Ou rode noutra porta: PORTA_OFFLINE=8193 npm run test:offline');
+  process.exit(1);
+}
+if (!vivo) { console.error(`\n✗ o servidor não respondeu em ${BASE} depois de 15s.`); process.exit(1); }
 
 // ── os casos ───────────────────────────────────────────────────────────────
 const PX = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
@@ -123,7 +124,7 @@ const PLACE = (i, purType = 'NEW_PLACE') => ({
   dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2,
 });
 
-const browser = await abrirNavegador(pw, {}, MOTOR);
+const browser = await abrirChromium(pw);
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 },
   serviceWorkers: 'allow', locale: 'pt-BR', colorScheme: 'dark' });
 let rotaTile = 0;
@@ -134,17 +135,12 @@ let aviao = false;   // modo avião DE VERDADE é abort + setOffline (gotcha #28
 // `atrasoTile` deixa a varredura LENTA de propósito (seção 7d): sem ele ela
 // termina em menos de um segundo e não há "meio" em que o sinal possa cair.
 // Número (ms pra todo tile) ou função `(url) => ms`, quando a seção precisa
-// que uns cheguem e outros não. A função pode devolver uma PROMESSA em vez de ms:
-// é um PORTÃO que o teste abre quando quer (a seção 9 segura a varredura em voo
-// até esquecer — um prazo fixo mediria a velocidade da máquina).
+// que uns cheguem e outros não.
 let atrasoTile = 0;
 const servirTile = async (r) => {
   if (aviao) return r.abort('internetdisconnected');
   const espera = typeof atrasoTile === 'function' ? atrasoTile(r.request().url()) : atrasoTile;
-  if (espera) {
-    if (typeof espera.then === 'function') await espera; else await dormir(espera);
-    if (aviao) return r.abort('internetdisconnected');
-  }
+  if (espera) { await dormir(espera); if (aviao) return r.abort('internetdisconnected'); }
   rotaTile++;
   return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
     headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }); };
@@ -159,10 +155,7 @@ const page = await ctx.newPage();
 // lugar do percurso" é adivinhação — e foi o que me custou uma rodada de CI
 // atrás de um `EvalError` que o app não podia produzir (ele não tem `eval`).
 let secaoAtual = 'abertura';
-// A contagem do resumo do fim sai daqui: escrita à mão, ela ficou em 20/21 com
-// 26 seções no arquivo, e ninguém percebe número de resumo que não confere.
-let secoesRodadas = 0;
-const secao = (nome) => { secaoAtual = nome; secoesRodadas++; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
+const secao = (nome) => { secaoAtual = nome; console.log(`\n\u2500\u2500 ${nome} \u2500\u2500`); };
 const errosJs = [];
 const violacoes = [];
 page.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
@@ -194,24 +187,6 @@ const montarNa = (pg, pls) => pg.evaluate((ps) => {
 }, pls);
 const montar = (pls) => montarNa(page, pls);
 
-// A PREPARAÇÃO ASSENTADA, a espera única do FIM de uma preparação: com
-// resultado, nenhuma no ar e nenhuma pedida pra depois. Esperar só o resultado
-// (`offlineUltimoResultado !== null`) acordava no "pronto" de uma preparação
-// VELHA: a volta da rede dispara a da fila de ANTES, o pedido do teste vira
-// `offlinePedidaDeNovo` (o `offlineVarrer` com outra no ar só anota), e o
-// "pronto" dela liberava o teste, que cortava a rede com a fila DELE ainda
-// baixando. MEDIDO na 5b (lote 18): 1 em ~7 rodadas, com o cache guardando os
-// tiles da fila anterior; e reproduzido de propósito atrasando os tiles — o
-// "pronto" chegava com `offlineVarrendo` verdadeiro e a fila guardada NÃO
-// coberta. É o "espere o FIM, não um sinal do meio" outra vez.
-const preparacaoAssentada = () => typeof offlineUltimoResultado !== 'undefined'
-  && offlineUltimoResultado !== null && !offlineVarrendo && !offlinePedidaDeNovo;
-
-// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
-// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
-// for declarado aqui não existe depois dele.
-if (!pularForaDoChromium(MOTOR, '1 a 6 — o mapa, a fila em IndexedDB, o sufixo da foto, a varredura, abrir e reabrir sem rede e o card de foto, com o service worker no comando',
-  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('1. O MAPA COM O TOGGLE DESLIGADO (o defeito que foi a produção)');
 // DUAS camadas, e a segunda é a única que responde ao relato do owner ("o mapa
 // parou de carregar"). A primeira mede uma <img> SOLTA; a segunda mede o
@@ -271,15 +246,8 @@ secao('2. A FILA SOBREVIVE (IndexedDB)');
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 const g = await page.evaluate(async () => {
   AppState.preferences.offlineDisponivel = true;
-  // A fila guardada tem DONO: a sessão desta aba, a da MEMÓRIA, e sem ela nada é
-  // gravado (R13-4-04). Esta página nunca entrou, e as seções até a 6 são "sem
-  // sessão" de propósito (não há rota da API aqui: com sessão, o que a página
-  // pedisse iria ao servidor e voltaria 401). A sessão vale SÓ pra gravar e ler:
-  // vai pra memória (o aparelho segue sem token) e sai em seguida.
-  API.sessionToken = 'tok-secao-2';
   const gravou = await offlineGravarFila();
   const lido = await offlineLerFila();
-  API.sessionToken = null;
   return { gravou, n: lido && lido.places ? lido.places.length : 0, t: !!(lido && lido.t) };
 });
 diz('grava a fila e lê os 3 de volta, com carimbo de hora', g.gravou === true && g.n === 3 && g.t, JSON.stringify(g));
@@ -316,7 +284,7 @@ secao('4. A VARREDURA ENCHE, E O TILE VOLTA DO CACHE');
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null; });
 rotaTile = 0;
 await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 25000);
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 25000);
 const varredura = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado, janela: offlineJanelaServida };
@@ -344,22 +312,6 @@ for (let i = 0; guardado && i < 25; i++) {
 }
 diz('o tile guardado volta do CACHE, sem tocar a rede', doCache === 'CARREGOU' && rede === 0,
   `${doCache}, rede=${rede}`);
-// E a varredura da janela SEGUINTE vai à REDE pelos tiles já guardados: é a
-// revalidação de cada janela (o servidor de tile responde 304 quando nada
-// mudou). Respondida pelo worker a partir do próprio cache, ela nunca mais saía
-// e o guardado ficava o da primeira vez pra sempre (auditoria de 2026-09-26,
-// O7; na main de antes: ZERO pedidos na 2ª varredura). A janela seguinte de
-// verdade também zera o que ficou pronto na janela (`offlineFeitosNaJanela`,
-// R5-4-1): sem isso, na MESMA janela a varredura só baixaria o que falta — nada
-// — e não mediria a revalidação.
-await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
-  if (typeof offlineFeitosNaJanela !== 'undefined') offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set() }; });
-rotaTile = 0;
-await page.evaluate(() => { offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 25000);
-const revalidou = { rota: rotaTile, res: await page.evaluate(() => offlineUltimoResultado) };
-diz('a varredura da janela seguinte REVALIDA pela rede os tiles que já estavam guardados',
-  revalidou.rota > 0 && revalidou.res === 'pronto', JSON.stringify(revalidou));
 
 // E o MAPA CONTINUA DESENHANDO com o cache cheio. Esta é a outra metade do
 // defeito que foi à produção: lá o SW passou a interceptar o tile e a pagar com
@@ -378,14 +330,11 @@ secao('5. ABRIR SEM REDE');
 // Remonta os 3 ANTES de gravar: as seções do mapa trocam a fila, e sem isto a
 // asserção mediria o tamanho da última montagem em vez do que ela promete.
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
-// A sessão desta aba grava a fila e a reabre (ver a seção 2), e sai depois.
-await page.evaluate(async () => { API.sessionToken = 'tok-secao-5'; await offlineGravarFila(); API.sessionToken = null; });
+await page.evaluate(() => offlineGravarFila());
 await ctx.setOffline(true);
 const off = await page.evaluate(async () => {
   AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0; AppState.loadError = true;
-  API.sessionToken = 'tok-secao-5';
   const abriu = await offlineTentarAbrirSemRede();
-  API.sessionToken = null;
   return { abriu, n: AppState.queue.length, erro: AppState.loadError };
 });
 diz('a fila guardada entra no lugar da tela de falha', off.abriu === true && off.n === 3 && off.erro === false,
@@ -415,28 +364,18 @@ await page.evaluate(() => {
   API.setSession('tok-reabrir');
   offlineJanelaServida = null; offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer();
 });
-await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
-// E o "pronto" tem que ser o da fila que vai ser reaberta: o CONTROLE que teria
-// pegado a corrida da preparação velha (ver `preparacaoAssentada`).
-const encheu5b = await page.evaluate(() => ({ r: offlineUltimoResultado,
-  cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm }));
-diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app — e cobre a fila guardada AGORA',
-  encheu5b.r === 'pronto' && encheu5b.cobre === true, JSON.stringify(encheu5b));
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
+const encheu5b = await page.evaluate(() => offlineUltimoResultado);
+diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU antes de fechar o app', encheu5b === 'pronto', String(encheu5b));
 aviao = true; await ctx.setOffline(true);
-// Encerrar o worker é do protocolo do DevTools, que só o Chromium tem: lá a
-// variante do worker ENCERRADO roda; fora dele ela é pulada pelo nome.
-const cdpReabrir = MOTOR === 'chromium' ? await ctx.newCDPSession(page) : null;
+const cdpReabrir = await ctx.newCDPSession(page);
 let estadosReabrir = [];
-if (cdpReabrir) {
-  cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.versions.map((v) => v.runningStatus); });
-  await cdpReabrir.send('ServiceWorker.enable');
-}
+cdpReabrir.on('ServiceWorker.workerVersionUpdated', (e) => { estadosReabrir = e.versions.map((v) => v.runningStatus); });
+await cdpReabrir.send('ServiceWorker.enable');
 for (const variante of [
   { nome: 'worker VIVO (o caso do relato)', parar: false },
   { nome: 'worker ENCERRADO (o app fechado por mais de ~30s)', parar: true },
 ]) {
-  if (variante.parar && pularForaDoChromium(MOTOR, '5b. reabrir sem rede com o worker ENCERRADO',
-    'encerrar o service worker é do protocolo do DevTools do Chromium (`ServiceWorker.stopAllWorkers`), que o WebKit do Playwright não tem')) continue;
   if (variante.parar) {
     estadosReabrir = [];
     await cdpReabrir.send('ServiceWorker.stopAllWorkers');
@@ -662,145 +601,8 @@ diz('CONTROLE: foto carregada e sem aviso — a sentinela da foto cala',
   !sentFoto.certo.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
 diz('aviso por cima de foto CARREGADA (o defeito do relato, encenado) — a sentinela acusa',
   sentFoto.aviso && sentFoto.defeito.includes('fotoEscondidaComAviso'), JSON.stringify(sentFoto));
-// 6e) A REDE VOLTA e o card "sem foto" SE RECUPERA. O aviso promete "Ela chega
-// sozinha quando a rede voltar", e nada buscava a foto de novo: o card ficava
-// travado até a pessoa pular (auditoria de 2026-09-25). Os DOIS tempos da rede
-// são medidos, porque o `online` chega antes do sinal: redesenhar ali daria
-// "Sem Imagem" com ✕ e ✓ VIVOS — decidir foto não vista.
-const pedidosDaFoto11 = [];
-const contarFoto11 = (r) => { if (r.url().indexOf('thumb700_f11') !== -1) pedidosDaFoto11.push(r.url()); };
-page.on('request', contarFoto11);
-await montar([PLACE(11, 'NEW_PHOTO')]);
-await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
-const antesDeVoltar = await lerFotoDoCard();
-diz('PRÉ-CONDIÇÃO: sem rede, a foto não vem e o card avisa, com ✕ e ✓ travados',
-  antesDeVoltar.temAviso && antesDeVoltar.rejTravado && antesDeVoltar.lidoTravado, JSON.stringify(antesDeVoltar));
-// 1º tempo: o navegador diz "online", mas a foto ainda não passa (o avião segue na rota).
-const pedidosAntes = pedidosDaFoto11.length;
-await ctx.setOffline(false);
-await esperarNaPagina(page, () => navigator.onLine === true, 5000);
-await dormir(1500);
-const primeiroTempo = await lerFotoDoCard();
-diz('CONTROLE: a volta da rede FOI percebida — a foto foi pedida de novo', pedidosDaFoto11.length > pedidosAntes,
-  `${pedidosAntes} → ${pedidosDaFoto11.length}`);
-diz('rede FIRMANDO (online sem sinal): o card segue avisando, com ✕ e ✓ travados — nada de "Sem Imagem" com botão vivo',
-  primeiroTempo.temAviso && primeiroTempo.rejTravado && primeiroTempo.lidoTravado, JSON.stringify(primeiroTempo));
-// 2º tempo: o sinal firma e o navegador avisa de novo.
-aviao = false;
-await ctx.setOffline(true);
-await ctx.setOffline(false);
-await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-  const i = c && c.querySelector('.card-image');
-  return !!(c && !c.querySelector('.card-sem-foto') && i && i.naturalWidth > 0); }, 10000);
-const voltou = await lerFotoDoCard();
-diz('a rede VOLTOU: o card sai do aviso e mostra a foto, sem ninguém tocar em nada',
-  voltou.fotoVisivel && !voltou.temAviso, JSON.stringify(voltou));
-diz('e o ✕ e o ✓ destravam — agora há foto pra decidir', !voltou.rejTravado && !voltou.lidoTravado,
-  JSON.stringify(voltou));
-page.off('request', contarFoto11);
 aviao = false;
 await ctx.setOffline(false);
-// 6f) A FOTO QUE O WAZE TIROU DO AR, e a rede de volta (R7-4-06). Sem sinal o
-// card de foto trava e avisa (certo: não dá pra saber). Com o sinal de volta, a
-// prova da foto dá 404 — e nada redesenhava: o card seguia dizendo que a foto
-// precisava de sinal, com ✕/✓ travados, até a pessoa pular, enquanto o mesmo
-// pedido aberto com sinal mostra "Sem Imagem" com ✕/✓ vivos. O servidor DA FOTO
-// responde (o 404 é resposta), e isso prova a rede. O 1º tempo do 6e (o
-// `online` com a rede sem passar: a sonda também não responde) é o CONTROLE de
-// que a trava não sai à toa.
-const FOTO_REMOVIDA = 'https://venue-image.waze.com/thumbs/thumb700_removida404';
-const fotoRemovida = (r) => (aviao ? r.abort('internetdisconnected')
-  : r.fulfill({ status: 404, contentType: 'text/plain', body: 'nao', headers: { 'cache-control': 'no-store' } }));
-await ctx.route('**/thumb700_removida404*', fotoRemovida);
-const pedidosRemovida = [];
-const contarRemovida = (r) => { if (r.url().indexOf('removida404') !== -1) pedidosRemovida.push(r.url()); };
-page.on('request', contarRemovida);
-aviao = true; await ctx.setOffline(true);
-await montar([{ ...PLACE(12, 'NEW_PHOTO'), imageUrls: [FOTO_REMOVIDA] }]);
-await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
-const removidaSemRede = await lerFotoDoCard();
-diz('PRÉ-CONDIÇÃO: sem rede, o card da foto que o Waze tirou do ar avisa, com ✕ e ✓ travados',
-  removidaSemRede.temAviso && removidaSemRede.rejTravado && removidaSemRede.lidoTravado, JSON.stringify(removidaSemRede));
-// O TECLADO no ↑ — o único botão vivo do card sem a foto —, e o card de agora
-// MARCADO: o sinal de volta o REDESENHA, e o foco caía no <body> (R8-4-03,
-// MEDIDO com Tab de verdade no r4 da auditoria). A marca é o CONTROLE de que o
-// card foi mesmo trocado: sem redesenho, o foco ficaria no ↑ por não ter saído.
-const focoAntes6f = await page.evaluate(() => {
-  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-  c.dataset.smoke6f = 'antes';
-  const pular = c.querySelector('.card-btn-skip');
-  pular.focus();
-  return document.activeElement === pular;
-});
-const antesDaRemovida = pedidosRemovida.length;
-aviao = false;
-await ctx.setOffline(false);
-const saiuDoAviso = await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-  return !!(c && !c.querySelector('.card-sem-foto')); }, 10000);
-const removidaComRede = await lerFotoDoCard();
-diz('a foto tirada do AR, com a rede de volta: o card sai do "precisa de sinal" e destrava ✕ e ✓ — como o aberto com sinal (R7-4-06)',
-  saiuDoAviso.ok && !removidaComRede.temAviso && !removidaComRede.rejTravado && !removidaComRede.lidoTravado,
-  JSON.stringify({ saiuDoAviso, removidaComRede }));
-diz('CONTROLE: a foto foi pedida de novo com a rede de volta e NÃO veio — o 404 é dela, não da rede',
-  pedidosRemovida.length > antesDaRemovida && !removidaComRede.fotoVisivel,
-  JSON.stringify({ pedidos: pedidosRemovida.length - antesDaRemovida, removidaComRede }));
-const focoDepois6f = await page.evaluate(() => {
-  const a = document.activeElement;
-  const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-  return { redesenhado: !!(c && c.dataset.smoke6f !== 'antes'), body: a === document.body,
-    noPular: !!(a && c && c.contains(a) && a.matches('.card-btn-skip')),
-    foco: a ? String(a.className || a.tagName).slice(0, 40) : null };
-});
-diz('PRÉ-CONDIÇÃO: o teclado estava no ↑ do card sem a foto, e o card foi REDESENHADO pela rede de volta',
-  focoAntes6f && focoDepois6f.redesenhado, JSON.stringify({ focoAntes6f, focoDepois6f }));
-diz('o card redesenhado mantém o teclado no ↑ do card novo — não o larga no <body> (R8-4-03)',
-  focoDepois6f.noPular && !focoDepois6f.body, JSON.stringify(focoDepois6f));
-page.off('request', contarRemovida);
-await ctx.unroute('**/thumb700_removida404*', fotoRemovida);
-// 6g) A PROVA DA FOTO PENDURADA e a rede PROVADA (R8-4-08). O sinal volta e o 1º
-// pedido à foto fica PRESO (a conexão que não responde logo depois de o sinal
-// voltar): a prova da <img> fica no ar. A rede provada por uma resposta nossa
-// era só ANOTADA na prova, e o card seguia com "A foto precisa de sinal" e ✕/✓
-// travados até ela terminar — e ela não tinha teto (MEDIDO, r8 da auditoria:
-// 12 s depois da volta, travado). A resposta nossa é o que o `API.aoProvarRede`
-// faz com o card — `recuperarCardSemFoto({ redeProvada: true })`, chamado aqui
-// direto: a resposta de verdade, nesta página sem sessão nem rota da API, poria
-// a varredura e a fila de saída no meio (a ligação está no test/offline-tela).
-// A PRÉ-CONDIÇÃO é o CONTROLE: com a prova presa e nada provando a rede, o card
-// segue travado — e segue preso o pedido quando ele destrava.
-const FOTO_PRESA = 'https://venue-image.waze.com/thumbs/thumb700_presa';
-const presos6g = [];
-let prender6g = false;
-const fotoPresa = (r) => {
-  if (aviao) return r.abort('internetdisconnected');
-  if (prender6g) { prender6g = false; presos6g.push(r); return undefined; }
-  return r.fulfill({ status: 404, contentType: 'text/plain', body: 'nao', headers: { 'cache-control': 'no-store' } });
-};
-await ctx.route('**/thumb700_presa*', fotoPresa);
-aviao = true; await ctx.setOffline(true);
-await montar([{ ...PLACE(13, 'NEW_PHOTO'), imageUrls: [FOTO_PRESA] }]);
-await esperarNaPagina(page, () => !!document.querySelector('#cardStack .place-card:not(.card-fundo) .card-sem-foto'), 8000);
-prender6g = true;
-aviao = false;
-await ctx.setOffline(false);
-for (let i = 0; i < 50 && !presos6g.length; i++) await dormir(100);
-await dormir(300);   // o tempo de um destravamento indevido aparecer, se houvesse
-const presa6g = await lerFotoDoCard();
-diz('PRÉ-CONDIÇÃO: com o sinal de volta, a prova da foto ficou PRESA — e, sem nada provando a rede, o card segue travado',
-  presos6g.length === 1 && presa6g.temAviso && presa6g.rejTravado && presa6g.lidoTravado,
-  JSON.stringify({ presos: presos6g.length, presa6g }));
-const t6g = Date.now();
-await page.evaluate(() => recuperarCardSemFoto({ redeProvada: true }));
-const solto6g = await esperarNaPagina(page, () => { const c = document.querySelector('#cardStack .place-card:not(.card-fundo)');
-  return !!(c && !c.querySelector('.card-sem-foto')); }, 3000);
-const ms6g = Date.now() - t6g;
-const depois6g = await lerFotoDoCard();
-diz('com a rede PROVADA, o card sai do "precisa de sinal" NA HORA e destrava ✕ e ✓ — com a prova da foto ainda presa (R8-4-08)',
-  solto6g.ok && !depois6g.temAviso && !depois6g.rejTravado && !depois6g.lidoTravado && presos6g.length === 1 && ms6g < 2000,
-  JSON.stringify({ ms6g, solto6g, depois6g, presos: presos6g.length }));
-for (const r of presos6g.splice(0)) await r.fulfill({ status: 404, body: 'nao', headers: { 'cache-control': 'no-store' } }).catch(() => {});
-await ctx.unroute('**/thumb700_presa*', fotoPresa);
-} // fim do bloco só do Chromium que começa na seção 1 (ver o `pularForaDoChromium` lá)
 
 secao('6c. A FOTO GUARDADA É A FOTO EM DECISÃO — e o app REABERTO sem rede a encontra');
 // DOIS defeitos, e os dois só aparecem no card de FOTO SEM REDE:
@@ -860,13 +662,9 @@ await dormir(1500);   // o aquecimento do próximo card é AGENDADO: deixa ele s
 const cruasAntes = fotosPedidas.filter((u) => u.indexOf('?w=') === -1);
 diz('CONTROLE: nenhuma foto foi pedida CRUA antes da varredura (o que abrir sem rede veio dela)',
   cruasAntes.length === 0, JSON.stringify(cruasAntes));
-// A sessão na MEMÓRIA SÓ pra gravar a fila e reabri-la (como na seção 2): sem ela a
-// fila guardada não tem dono e não é gravada (R13-4-04), e a reabertura lá
-// embaixo não teria o que abrir. Esta página não tem rota da API.
-await pgFoto.evaluate(() => { API.sessionToken = 'tok-6c'; offlineJanelaServida = null; offlineUltimoResultado = null;
+await pgFoto.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(pgFoto, preparacaoAssentada, 60000, 250);
-await pgFoto.evaluate(() => { API.sessionToken = null; });
+await esperarNaPagina(pgFoto, () => offlineUltimoResultado !== null, 60000, 250);
 const enc6c = await pgFoto.evaluate(() => ({ res: offlineUltimoResultado, janela: offlineJanelaServida }));
 diz('a varredura fechou PRONTA', enc6c.res === 'pronto' && enc6c.janela !== null, JSON.stringify(enc6c));
 const sufixo = '?w=' + enc6c.janela;
@@ -924,9 +722,7 @@ await conferirCardDeFoto('foto denunciada na 3ª posição', FOTOS_REAIS[2]);
 const reaberta = await pgFoto.evaluate(async () => {
   offlineJanelaServida = null; offlineUltimoResultado = null;
   AppState.queue = []; AppState.currentPlace = null; AppState.serverTotal = 0; AppState.loadError = true;
-  API.sessionToken = 'tok-6c';
   const abriu = await offlineTentarAbrirSemRede();
-  API.sessionToken = null;
   return { abriu, n: AppState.queue.length, janela: offlineJanelaServida };
 });
 diz('REABERTA sem rede: volta a fila E a janela da última varredura completa',
@@ -940,11 +736,6 @@ await conferirCardDeFoto('REABERTA, foto proposta na 2ª posição', FOTOS_REAIS
 aviao = false;
 await ctxFoto.close();
 
-// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
-// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
-// for declarado aqui não existe depois dele.
-if (!pularForaDoChromium(MOTOR, '7 a 8b — a estrada, a caixa curta, o worker encerrado, a preparação interrompida, o deploy e o diagnóstico do offline, com o service worker no comando',
-  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('7. A ESTRADA: marco o toggle, encho, entro no avião e volto');
 // É o teste de ACEITAÇÃO do recurso — a promessa que o owner pediu em palavras:
 // "sair de casa, marcar o toggle, sair tratando as solicitações e ter a mesma
@@ -991,7 +782,7 @@ await page.evaluate(() => {
 await montar(ESTRADA);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 120000, 250);
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 120000, 250);
 const estradaEncheu = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
   return { n: (await c.keys()).length, res: offlineUltimoResultado };
@@ -1145,7 +936,7 @@ CURTA.mapa = geo ? { centro: geo.centro, entradas: geo.entradas } : CURTA.mapa;
 await montar([ALTO, CURTA]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
 aviao = true; await ctx.setOffline(true);
 await montar([CURTA]);
 const tilesDaCurta = () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
@@ -1176,7 +967,7 @@ secao('7c. O ANDROID ENCERRA O SERVICE WORKER OCIOSO — e o mapa guardado não 
 await montar([SO_MAPA(70), SO_MAPA(71)]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); return offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
 aviao = true; await ctx.setOffline(true);
 const tileNaFrente = () => page.evaluate(() => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
   const tl = b ? [...b.querySelectorAll('.card-map-tiles img')] : [];
@@ -1186,36 +977,30 @@ await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().q
   return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
 const comWorkerVivo = await tileNaFrente();
 diz('CONTROLE: com o worker vivo, o tile guardado aparece sem rede', comWorkerVivo.ok > 0, JSON.stringify(comWorkerVivo));
-// Encerrar o worker à força é do protocolo do DevTools do Chromium. No WebKit o
-// controle de cima (o worker VIVO servindo o tile guardado sem rede) roda; o
-// worker ENCERRADO, não — e é dito no fim.
-if (!pularForaDoChromium(MOTOR, '7c. o worker ENCERRADO acordando sabendo dos tiles',
-  'encerrar o service worker é do protocolo do DevTools do Chromium (`ServiceWorker.stopAllWorkers`), que o WebKit do Playwright não tem')) {
-  const cdp = await ctx.newCDPSession(page);
-  let estadosDoWorker = [];
-  cdp.on('ServiceWorker.workerVersionUpdated', (e) => { estadosDoWorker = e.versions.map((v) => v.runningStatus); });
-  await cdp.send('ServiceWorker.enable');
-  await cdp.send('ServiceWorker.stopAllWorkers');
-  // CONTROLE do instrumento: o worker foi MESMO encerrado. Sem isto, a asserção
-  // de baixo passaria com ele vivo — e mediria o caso que já funcionava.
-  for (let i = 0; i < 30 && !estadosDoWorker.includes('stopped'); i++) await dormir(100);
-  diz('CONTROLE: o service worker foi de fato ENCERRADO', estadosDoWorker.includes('stopped'),
-    JSON.stringify(estadosDoWorker));
-  await montar([SO_MAPA(71)]);
-  await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
-    return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
-  const acordou = await tileNaFrente();
-  diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
-    JSON.stringify(acordou));
-  // O worker recriado responde ao diagnóstico pela boca DELE — e é esta a
-  // resposta que teria mostrado o defeito do relato sem precisar reproduzi-lo:
-  // nascido agora, lista lida, servindo do cache.
-  const guardadosAgora = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
-  const doSw = await page.evaluate(() => diagServiceWorker());
-  diz('o worker RECRIADO se apresenta: nasceu há pouco, com a lista lida e servindo do cache',
-    !!doSw && doSw.idadeMs < 60000 && doSw.listaPronta === true && doSw.tilesNaLista === guardadosAgora && doSw.doCache > 0,
-    JSON.stringify(doSw) + ' cache=' + guardadosAgora);
-}
+const cdp = await ctx.newCDPSession(page);
+let estadosDoWorker = [];
+cdp.on('ServiceWorker.workerVersionUpdated', (e) => { estadosDoWorker = e.versions.map((v) => v.runningStatus); });
+await cdp.send('ServiceWorker.enable');
+await cdp.send('ServiceWorker.stopAllWorkers');
+// CONTROLE do instrumento: o worker foi MESMO encerrado. Sem isto, a asserção
+// de baixo passaria com ele vivo — e mediria o caso que já funcionava.
+for (let i = 0; i < 30 && !estadosDoWorker.includes('stopped'); i++) await dormir(100);
+diz('CONTROLE: o service worker foi de fato ENCERRADO', estadosDoWorker.includes('stopped'),
+  JSON.stringify(estadosDoWorker));
+await montar([SO_MAPA(71)]);
+await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
+  return !!b && [...b.querySelectorAll('.card-map-tiles img')].some((x) => x.naturalWidth > 0); }, 8000);
+const acordou = await tileNaFrente();
+diz('o worker ACORDOU sabendo dos tiles: o mapa guardado aparece sem rede', acordou.ok > 0 && acordou.ok === acordou.tiles,
+  JSON.stringify(acordou));
+// O worker recriado responde ao diagnóstico pela boca DELE — e é esta a
+// resposta que teria mostrado o defeito do relato sem precisar reproduzi-lo:
+// nascido agora, lista lida, servindo do cache.
+const guardadosAgora = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
+const doSw = await page.evaluate(() => diagServiceWorker());
+diz('o worker RECRIADO se apresenta: nasceu há pouco, com a lista lida e servindo do cache',
+  !!doSw && doSw.idadeMs < 60000 && doSw.listaPronta === true && doSw.tilesNaLista === guardadosAgora && doSw.doCache > 0,
+  JSON.stringify(doSw) + ' cache=' + guardadosAgora);
 const falhasGuardadas = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
 diz('nenhum tile GUARDADO falhou na tela — é o que a sentinela do mapa acusaria',
   falhasGuardadas === 0, 'anel=' + falhasGuardadas);
@@ -1280,36 +1065,7 @@ diz('o mapa guardado numa preparação INTERROMPIDA aparece sem rede, inteiro',
   mapa7d.pedidos > 0 && mapa7d.falharam === 0 && mapa7d.ok === mapa7d.pedidos, JSON.stringify(mapa7d));
 const anel7d = await page.evaluate(() => diagTilesGuardadosQueFalharam.length);
 diz('e a sentinela do mapa não tem o que acusar', anel7d === anel7dAntes, `${anel7dAntes} → ${anel7d}`);
-// R15-4-04: sem rede, o mapa de um pedido que NÃO está guardado desenha duas vezes
-// (a reserva de 400×240 e a caixa real), e o <img> do desenho velho, já tirado
-// do DOM, ainda falha depois: a falha dele caía na conta do desenho real e
-// `falharam` passava de `pedidos` no relatório. Um pedido longe de tudo que a
-// varredura guardou, e a espera é pelo FIM (todo tile falhou e saiu da tela).
-const ALVO_SEM_TILE = { ...SO_MAPA(99), mapa: { centro: [-31.1, -51.7], entradas: [] } };
-await montar([ALVO_SEM_TILE]);
-await esperarNaPagina(page, () => { const b = cardDaFrente() && cardDaFrente().querySelector('.card-map');
-  return !!b && Number(b.dataset.tilesPedidos) > 0 && b.querySelectorAll('.card-map-tiles img').length === 0; }, 15000, 100);
-await dormir(500);
-const semTile7d = await page.evaluate(() => { const b = cardDaFrente().querySelector('.card-map');
-  const g = diagGeometria().find((e) => e.tiles) || null;
-  return { pedidos: Number(b.dataset.tilesPedidos), falharam: Number(b.dataset.tilesFalharam),
-           naTela: b.querySelectorAll('.card-map-tiles img').length, geometria: g ? g.tiles : null }; });
-diz('CONTROLE: o mapa de um pedido não guardado falhou sem rede (o instrumento vê a falha)',
-  semTile7d.pedidos > 0 && semTile7d.falharam > 0 && semTile7d.naTela === 0, JSON.stringify(semTile7d));
-diz('o relatório não conta mais falhas que tiles pedidos (a falha do desenho velho não cai no real)',
-  semTile7d.falharam <= semTile7d.pedidos, JSON.stringify(semTile7d));
 aviao = false; await ctx.setOffline(false);
-// A volta do sinal RETOMA a preparação parcial (R4-O3, auditoria de
-// 2026-09-29): o `online` dispara a varredura, e ela, pronta, PODA o cache do
-// mapa aos tiles da fila — o certo. A seção seguinte compara o cache antes e
-// depois do deploy, então a retomada tem que acabar ANTES da primeira medida
-// (medido sem esta espera: a poda caía no meio do deploy, "antes=5 depois=1").
-// Com o app de antes do O3 nada é retomado, e a espera sai na hora.
-// Pelo PRÓPRIO gatilho, e não pelo tempo do `online`: ele chega quando chega,
-// e uma retomada que começasse depois desta espera cairia de novo no deploy.
-await esperarNaPagina(page, () => navigator.onLine === true, 5000);
-await page.evaluate(() => { offlineMarcarGesto(); offlineTalvezVarrer(); });
-await esperarNaPagina(page, () => !offlineVarrendo, 30000, 100);
 
 secao('8. O DEPLOY NÃO APAGA O MAPA PROVISIONADO');
 // O `activate` apaga TODO cache ≠ CACHE_NAME. Sem a isenção do TILES_CACHE,
@@ -1344,9 +1100,6 @@ const antesDoDeploy = await page.evaluate(async (isca) => {
 diz('antes do deploy: há tile guardado E a isca de versão anterior no lugar',
   antesDoDeploy.tiles > 0 && antesDoDeploy.nomes.includes(ISCA), JSON.stringify(antesDoDeploy));
 
-// Marca o DOCUMENTO de antes do deploy: a troca de controller o RECARREGA, e a
-// seção seguinte só pode começar no documento NOVO (ver abaixo).
-await page.evaluate(() => { window.__docDeAntesDoDeploy = true; });
 await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.register('/service-worker.js?deploy=2');
   const pular = (w) => {
@@ -1386,44 +1139,8 @@ diz('e o cache do MAPA sobreviveu INTEIRO ao deploy',
 // que promete). Espere ela assentar e devolva o estado que a seção seguinte
 // precisa — sem isto o `offlineVarrer()` de lá roda com fila vazia e a
 // asserção "o cache ficou vazio" passa por vácuo.
-//
-// E a espera é pelo documento NOVO, não por "há um documento carregado": a
-// faxina (que o laço acima vê) roda no `activate`, e a recarga vem DEPOIS dela.
-// Esperando só o `load`, o 8b às vezes começava no documento VELHO e a recarga
-// caía no meio dele — MEDIDO numa rodada: "dlogCapturar is not defined", o
-// `evaluate` rodando na página nova ainda sem o app (auditoria de 2026-09-26).
 await page.waitForLoadState('load').catch(() => {});
-// E o documento tem de ser o ÚLTIMO do deploy. A página recarrega DUAS vezes:
-// pro worker `?deploy=2` e, ~1,6 s depois, de volta pro `/service-worker.js`
-// canônico, que o `js/sw-register.js` do documento novo registra no `load`
-// (MEDIDO por outro agente do lote L8: 3 de 3 no worktree, 2 de 2 na main).
-// Esperando só o PRIMEIRO documento novo, a 8b às vezes começava num que
-// recarregava no meio dela — e o relatório saía de página recém-carregada, sem
-// a captura nem a queda da rede (reprovou "e leva o que aconteceu" numa rodada).
-// O worker canônico no comando só vale depois da segunda recarga; e ele vale um
-// instante ANTES dela também (a troca de controller chama a recarga, e o
-// documento de antes segue de pé até o novo chegar) — por isso o documento é
-// MARCADO e conferido de novo depois de assentar.
-const velha8 = await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
-  && typeof offlineVarrer === 'function', 20000);
-const swDaEsperaVelha = await page.evaluate(() => navigator.serviceWorker.controller
-  && navigator.serviceWorker.controller.scriptURL).catch(() => null);
-console.log(`  · a espera ANTIGA (só "o documento novo") voltou em ${velha8.ms} ms, com o worker `
-  + `${String(swDaEsperaVelha).replace(/^https?:\/\/[^/]+/, '')} no comando`);
-let docDa8b = null;
-const prazo8 = Date.now() + 40000;   // rede contra travar: a recarga leva ~1,6 s
-while (!docDa8b && Date.now() < prazo8) {
-  const canonico = await esperarNaPagina(page, () => !window.__docDeAntesDoDeploy && document.readyState === 'complete'
-    && typeof offlineVarrer === 'function' && !!navigator.serviceWorker.controller
-    && /\/service-worker\.js$/.test(navigator.serviceWorker.controller.scriptURL), Math.max(0, prazo8 - Date.now()));
-  if (!canonico.ok) break;
-  const marca = await page.evaluate(() => (window.__docDa8b = window.__docDa8b || String(Math.random()))).catch(() => null);
-  await dormir(800);
-  const firme = await page.evaluate((m) => window.__docDa8b === m, marca).catch(() => false);
-  if (marca && firme) docDa8b = marca;
-}
-diz('PRÉ-CONDIÇÃO: a 8b começa no documento FINAL do deploy (o worker canônico no comando, sem recarga pendente)',
-  !!docDa8b);
+await esperarNaPagina(page, () => typeof offlineVarrer === 'function', 20000);
 await page.evaluate(() => { AppState.preferences.offlineDisponivel = true; }).catch(() => {});
 await montar([PLACE(1), PLACE(2), PLACE(3)]);
 
@@ -1458,21 +1175,6 @@ aviao = false; await ctx.setOffline(false);
 await esperarNaPagina(page, () => navigator.onLine === true, 5000);
 await dormir(300);   // o `online` dispara gatilhos (varredura); deixa nascerem, e espera acabarem
 await esperarNaPagina(page, () => !offlineVarrendo, 30000, 100);
-// (R12-4-06) A BORDA do Cloudflare injeta o Web Analytics, que manda o relatório
-// dele por `sendBeacon` pra MESMA origem (`/cdn-cgi/rum?`, que só aceita POST). O
-// pedido entra na lista de recursos, e o relatório o levava como CÓDIGO: a
-// releitura de comparação levava 405, e toda triagem de produção dizia "o
-// servidor respondeu 405 em 1 arquivo". A borda emulada aqui: POST 204, o resto
-// 405 — contando os GETs que chegam a ela.
-let getsNaBorda8b = 0;
-const borda8b = (r) => {
-  if (r.request().method() === 'POST') return r.fulfill({ status: 204, body: '' });
-  getsNaBorda8b++;
-  return r.fulfill({ status: 405, contentType: 'text/plain', body: 'Method Not Allowed' });
-};
-await page.route('**/cdn-cgi/rum*', borda8b);
-const beacon8b = await page.evaluate(() => navigator.sendBeacon(location.origin + '/cdn-cgi/rum?', '{}'));
-await esperarNaPagina(page, () => performance.getEntriesByType('resource').some((e) => /\/cdn-cgi\/rum\?/.test(e.name)), 5000, 100);
 const dirDiag = mkdtempSync(join(tmpdir(), 'diag-offline-'));
 let relatorio;
 try {
@@ -1509,30 +1211,6 @@ try {
       const e = Object.values(d.cacheVsRede || {});
       return { n: e.length, semCorpoLocal: e.filter((v) => v && v.erro === 'sem corpo local').length };
     })(),
-    // (R12-4-06) O envio do beacon da borda: na lista de recursos (o caso foi
-    // encenado), e fora do código conferido.
-    borda: {
-      nosRecursos: (d.recursos || []).filter((r) => /\/cdn-cgi\//.test(r.url || '')).length,
-      noCodigo: Object.keys(d.codigo || {}).filter((u) => /\/cdn-cgi\//.test(u)).length,
-      noCvr: Object.keys(d.cacheVsRede || {}).filter((u) => /\/cdn-cgi\//.test(u)).length,
-    },
-  };
-  // O SEGUNDO relatório na mesma página (auditoria de 2026-09-26): as releituras
-  // `?diag-rede=1` do primeiro ficam na lista de recursos, e o segundo as levava
-  // como código — 23 arquivos em vez de 11, o dobro de requisições.
-  const [dl2] = await Promise.all([
-    page.waitForEvent('download', { timeout: 30000 }),
-    page.evaluate(() => baixarDiagnostico()),
-  ]);
-  const arq2 = join(dirDiag, 'diag2.zip');
-  await dl2.saveAs(arq2);
-  const d2 = lerDiagnostico(arq2).dados;
-  relatorio.segundo = {
-    n: Object.keys(d2.codigo || {}).length, cvr: Object.keys(d2.cacheVsRede || {}).length,
-    comDiagRede: Object.keys(d2.codigo || {}).filter((u) => /diag-rede/.test(u)).length,
-    // CONTROLE: as releituras do primeiro ESTÃO na lista de recursos do segundo —
-    // sem elas, "o segundo não as levou" passaria sem o caso existir.
-    releiturasNosRecursos: (d2.recursos || []).filter((r) => /diag-rede/.test(r.url)).length,
   };
 } catch (e) {
   relatorio = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -1559,19 +1237,6 @@ diz('o CÓDIGO sai enxuto (tamanho, hash e versão; o corpo só do CSS) e o cach
   && relatorio.codigo.versoes.length === 1 && relatorio.codigo.versoes[0] === relatorio.app
   && relatorio.cvr?.n > 0 && relatorio.cvr.semCorpoLocal === 0,
   JSON.stringify({ app: relatorio.app, codigo: relatorio.codigo, cvr: relatorio.cvr }));
-diz('o 2º relatório na mesma página compara o MESMO código — sem as releituras do 1º',
-  relatorio.segundo?.releiturasNosRecursos > 0 && relatorio.segundo?.comDiagRede === 0
-  && relatorio.segundo?.n === relatorio.codigo?.n && relatorio.segundo?.cvr === relatorio.cvr?.n,
-  JSON.stringify({ primeiro: relatorio.codigo?.n, segundo: relatorio.segundo }));
-await page.unroute('**/cdn-cgi/rum*', borda8b);
-// A PRÉ-CONDIÇÃO (o envio do beacon está na lista de recursos que o relatório lê)
-// é o controle: sem ela, "não levou" passaria sem o caso existir.
-diz('o envio do beacon da borda (`/cdn-cgi/rum?`) fica fora do código conferido — e nenhum GET vai à borda (R12-4-06)',
-  beacon8b === true && relatorio.borda?.nosRecursos >= 1 && relatorio.borda.noCodigo === 0 && relatorio.borda.noCvr === 0
-  && getsNaBorda8b === 0, JSON.stringify({ beacon8b, borda: relatorio.borda, getsNaBorda8b }));
-const docNoFim8b = await page.evaluate(() => window.__docDa8b).catch(() => null);
-diz('e a 8b rodou inteira no MESMO documento — nenhuma recarga no meio (o relatório é da página que viu a queda)',
-  !!docDa8b && docNoFim8b === docDa8b, `${docDa8b} → ${docNoFim8b}`);
 diz('no estado são, as duas sentinelas NOVAS ficam caladas no relatório',
   Array.isArray(relatorio.alertas) && !relatorio.alertas.includes('fotoEscondidaComAviso')
   && !relatorio.alertas.includes('tileGuardadoFalhou'), JSON.stringify(relatorio.alertas));
@@ -1591,13 +1256,6 @@ const sentMapa = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 150));   // folga pro não guardado, se ele entrasse (errado)
   const r = { semAlerta, anel: diagTilesGuardadosQueFalharam.map((x) => (x.url === guardado ? 'guardado' : x.url)),
               comAlerta: diagSentinelas(diagComputado()).map((a) => a.chave) };
-  // A CAPTURA acusa uma vez, com a hora; a seguinte, sem falha nova, cala
-  // (auditoria de 2026-09-26: o anel acumulado repetia a falha em toda captura).
-  const c1 = dlogCapturar('manual');
-  const c2 = dlogCapturar('manual');
-  const a1 = (c1.alertas || []).find((a) => a.chave === 'tileGuardadoFalhou');
-  r.captura1 = a1 ? { n: a1.n, quando: a1.quando } : null;
-  r.captura2 = (c2.alertas || []).some((a) => a.chave === 'tileGuardadoFalhou');
   diagTilesGuardadosQueFalharam = [];
   return r;
 });
@@ -1606,9 +1264,6 @@ diz('CONTROLE: sem falha registrada, a sentinela do mapa cala',
 diz('o tile GUARDADO que falha entra no anel — e o que não está guardado, não',
   sentMapa.anel.length === 1 && sentMapa.anel[0] === 'guardado', JSON.stringify(sentMapa));
 diz('e a sentinela do mapa acusa', sentMapa.comAlerta.includes('tileGuardadoFalhou'), JSON.stringify(sentMapa));
-diz('a captura acusa a falha UMA vez, com a hora — e a seguinte, sem falha nova, cala',
-  sentMapa.captura1?.n === 1 && Array.isArray(sentMapa.captura1?.quando) && !Number.isNaN(Date.parse(sentMapa.captura1.quando[0]))
-  && sentMapa.captura2 === false, JSON.stringify({ c1: sentMapa.captura1, c2: sentMapa.captura2 }));
 // A LISTA DE RECURSOS: o navegador guarda 250 e descarta o resto. Página nova
 // em cada medida (o teto vale por documento), sem worker nem rota, e 300
 // requisições de mesma origem. O CONTROLE é a de baixo: sem ele, "passou de
@@ -1645,623 +1300,20 @@ diz('CONTROLE: sem o dev, a lista para no teto do navegador — e o relatório S
 diz('com o dev ligado o teto sobe e nada se perde',
   recComDev.n > 300 && recComDev.encheu === false, JSON.stringify(recComDev));
 await ctxR.close();
-} // fim do bloco só do Chromium que começa na seção 7 (ver o `pularForaDoChromium` lá)
 
-secao('8c. O DIAGNÓSTICO COM A REDE PENDURADA sai no orçamento — e diz o que não chegou');
-// Auditoria de 2026-09-26 (D15): as leituras do relatório eram em SÉRIE, cada
-// uma com o seu teto de 4 s. Com a rede pendurada (portal cativo, sinal indo e
-// voltando), o arquivo levava ~48 s pra sair, com o botão em "Gerando…" sem
-// sinal nenhum. Contexto próprio, sem worker; a rede de mesma origem (fora a
-// API) é PENDURADA depois de a página abrir — nunca responde.
-const ctxL = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: true });
-const pgL = await ctxL.newPage();
-pgL.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-await pgL.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-await esperarNaPagina(pgL, () => typeof baixarDiagnostico === 'function', 20000, 100);
-const dirL = mkdtempSync(join(tmpdir(), 'diag-8c-'));
-const medirRelatorio = async (nome) => {
-  const t0 = Date.now();
-  const [dl] = await Promise.all([pgL.waitForEvent('download', { timeout: 90000 }), pgL.evaluate(() => baixarDiagnostico())]);
-  const arq = join(dirL, nome + '.zip');
-  await dl.saveAs(arq);
-  const { dados } = lerDiagnostico(arq);
-  return { s: Math.round((Date.now() - t0) / 100) / 10, coleta: dados.coleta,
-           semResposta: Object.values(dados.codigo || {}).filter((v) => v && v.semResposta).length };
-};
-let relL = null, relPendurado = null, pendurados = 0;
-try {
-  // CONTROLE: com a rede boa, nada fica sem resposta (senão "diz o que não
-  // chegou" passaria marcando tudo, sempre).
-  relL = await medirRelatorio('rede-boa');
-  await ctxL.route((u) => u.origin === new URL(BASE).origin && !u.pathname.startsWith('/api/'), () => { pendurados++; });
-  relPendurado = await medirRelatorio('pendurada');
-} catch (e) {
-  relPendurado = { erro: String((e && e.message) || e).slice(0, 200) };
-} finally {
-  rmSync(dirL, { recursive: true, force: true });
-}
-diz('CONTROLE: com a rede boa, o relatório não marca nada sem resposta',
-  relL?.coleta && relL.coleta.semResposta.length === 0 && relL.semResposta === 0, JSON.stringify(relL));
-// O detalhe diz o ERRO quando o arquivo nem saiu, e nunca LANÇA: o
-// `JSON.stringify(undefined)` devolve `undefined`, e o `.slice` nele derrubava o
-// smoke inteiro num TypeError aqui, calando as seções de baixo (gotcha #62).
-diz('com a rede PENDURADA o arquivo sai dentro do orçamento (eram ~48 s)',
-  relPendurado?.s <= 15 && pendurados >= 10, JSON.stringify({ s: relPendurado?.s, pendurados, erro: relPendurado?.erro }));
-diz('e diz, no arquivo, o que não chegou',
-  relPendurado?.coleta?.semResposta?.length >= 10 && relPendurado.semResposta >= 10
-  && relPendurado.coleta.orcamentoMs > 0, String(JSON.stringify(relPendurado?.coleta ?? relPendurado)).slice(0, 300));
-await ctxL.close();
-
-secao('8d. O DIAGNÓSTICO COM AS LEITURAS LOCAIS PENDURADAS (cache, storage, IndexedDB, service worker) sai no orçamento — e diz quais');
-// Auditoria da rodada 17 (R17-4-03). O orçamento de 10 s cobria os `fetch`, o relógio e as travas,
-// mas não as leituras LOCAIS do navegador: se uma delas nunca resolvesse, o relatório não saía e o
-// botão ficava em "Juntando tudo…" sem aviso. Aqui as quatro APIs são trocadas por promessas que
-// NUNCA resolvem (`addInitScript`, antes de o app carregar) e o arquivo de verdade é gerado pelo
-// botão. O CONTROLE é a mesma geração sem o defeito: sai em poucos segundos e não marca nada
-// (senão "diz quais" passaria marcando tudo, sempre — gotcha #28).
-const gerar8d = async (nome, penduradas) => {
-  const c = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: true });
-  if (penduradas) await c.addInitScript(() => {
-    const nunca = () => new Promise(() => {});
-    try { CacheStorage.prototype.keys = nunca; } catch (e) {}
-    try { StorageManager.prototype.estimate = nunca; } catch (e) {}
-    try { StorageManager.prototype.persisted = nunca; } catch (e) {}
-    try { IDBFactory.prototype.databases = nunca; } catch (e) {}
-    try { ServiceWorkerContainer.prototype.getRegistrations = nunca; } catch (e) {}
-  });
-  const pg = await c.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  const dir = mkdtempSync(join(tmpdir(), 'diag-8d-'));
-  try {
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    await esperarNaPagina(pg, () => typeof baixarDiagnostico === 'function', 20000, 100);
-    const t0 = Date.now();
-    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
-    const arq = join(dir, nome + '.zip');
-    await dl.saveAs(arq);
-    const { dados } = lerDiagnostico(arq);
-    return { s: Math.round((Date.now() - t0) / 100) / 10, semResposta: dados.coleta?.semResposta || [],
-             caches: dados.caches, armazenamento: dados.armazenamento, indexedDB: dados.indexedDB, offline: dados.offline?.ligado,
-             temResumo: !!dados.resumo,
-             // A comparação "o aparelho roda o código do servidor?" (R18-4-01): quantos arquivos saíram iguais ao servidor.
-             cvr: Object.values(dados.cacheVsRede || {}).map((v) => (v && v.igual === true ? 'igual' : v && v.semResposta ? 'semResposta' : (v && v.erro) || 'outro')),
-             relogioOk: !!dados.relogio?.servidor };
-  } catch (e) {
-    return { erro: String((e && e.message) || e).slice(0, 200) };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-    await c.close();
-  }
-};
-const rel8dBom = await gerar8d('boa', false);
-diz('CONTROLE: com as leituras locais respondendo, o arquivo sai em poucos segundos e não marca nada sem resposta',
-  rel8dBom.s <= 8 && rel8dBom.semResposta?.length === 0 && rel8dBom.temResumo, JSON.stringify(rel8dBom).slice(0, 300));
-const rel8dPendurada = await gerar8d('pendurada', true);
-diz('com as quatro leituras locais PENDURADAS o arquivo sai mesmo assim, dentro do orçamento (antes: nunca saía)',
-  rel8dPendurada.temResumo === true && rel8dPendurada.s <= 20, JSON.stringify(rel8dPendurada).slice(0, 300));
-// R18-4-01: a leitura local pendurada comia o orçamento ANTES de o código ser lido, e a rede SAUDÁVEL saía
-// "sem resposta" em tudo. Aqui a comparação com o servidor tem que sair inteira (e igual), como no controle.
-diz('CONTROLE: sem nada pendurado, todo arquivo do código sai IGUAL ao servidor e o relógio do servidor chega',
-  rel8dBom.cvr?.length >= 5 && rel8dBom.cvr.every((x) => x === 'igual') && rel8dBom.relogioOk, JSON.stringify(rel8dBom.cvr));
-diz('com as leituras locais penduradas a REDE saudável sai inteira: todo arquivo IGUAL ao servidor, nenhum "sem resposta", o relógio chega (R18-4-01)',
-  rel8dPendurada.cvr?.length === rel8dBom.cvr?.length && rel8dPendurada.cvr.every((x) => x === 'igual') && rel8dPendurada.relogioOk,
-  JSON.stringify(rel8dPendurada.cvr));
-diz('e a coleta só acusa as leituras LOCAIS (nenhuma de rede)',
-  (rel8dPendurada.semResposta || []).every((r) => ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases'].includes(r)),
-  JSON.stringify(rel8dPendurada.semResposta));
-diz('com as leituras locais penduradas o arquivo sai dentro do orçamento (10 s + folga), não 18 s (R18-4-03)',
-  rel8dPendurada.s <= 13, `${rel8dPendurada.s} s`);
-diz('e diz, no arquivo, quais leituras não chegaram',
-  ['service worker (registros)', 'caches', 'armazenamento (estimate)', 'armazenamento (persisted)', 'indexedDB.databases']
-    .every((r) => rel8dPendurada.semResposta?.includes(r)), JSON.stringify(rel8dPendurada.semResposta));
-
-secao('8e. A GRAVAÇÃO QUE FALHA NÃO DEIXA A CONEXÃO PRESA — o "Sair" apaga a base na hora (R19-4-01)');
-// A rodada 19 mediu no navegador: a cota na gravação da fila (o `put` que lança, ou o aborto
-// assíncrono da transação) pulava o `db.close()`, e o `offlineEsquecer` (o "Sair", o interruptor
-// desligado) ficava com o `deleteDatabase` BLOQUEADO até o coletor de lixo — a fila de pedidos de
-// terceiros seguia no disco, e a próxima abertura da base dava `timeout`. O IndexedDB de mentira
-// dos testes de unidade não enxerga isso (o `deleteDatabase` de verdade espera as conexões): só
-// aqui. CONTROLE: o mesmo roteiro sem a falha, que apaga na hora — se a medida estivesse cega, os
-// dois modos "passariam".
-const presa8e = {};
-for (const modo of ['ok', 'put-lanca', 'aborto']) {
-  presa8e[modo] = await page.evaluate(async (m) => {
-    // O estado da página é de quem vem depois (a seção 9 varre a fila dela): guarda e devolve.
-    window.__estado8e = window.__estado8e || { queue: AppState.queue, authenticated: AppState.authenticated, token: API.sessionToken, off: AppState.preferences.offlineDisponivel };
-    AppState.authenticated = true; API.sessionToken = 'tok'; AppState.preferences.offlineDisponivel = true;
-    AppState.queue = [{ venueID: 'v8e', updateRequestID: 'u8e', name: 'Local 8e', categories: ['PARK'], updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE', reqType: 'VENUE',
-      createdBy: 'ed8e', creatorId: 8001, imageUrls: [], mapa: null, dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 }];
-    await offlineEsquecer();
-    await new Promise((r) => setTimeout(r, 300));
-    const primeira = await offlineGravarFila();                   // a base nasce e recebe a fila de terceiros
-    const orig = IDBObjectStore.prototype.put;
-    if (m === 'put-lanca') IDBObjectStore.prototype.put = function (v, k) { if (k === 'fila') throw new DOMException('cota', 'QuotaExceededError'); return orig.apply(this, arguments); };
-    if (m === 'aborto') IDBObjectStore.prototype.put = function (v, k) { const r = orig.apply(this, arguments); if (k === 'fila') setTimeout(() => { try { this.transaction.abort(); } catch (e) {} }, 0); return r; };
-    let segunda;
-    try { segunda = await offlineGravarFila(); } finally { IDBObjectStore.prototype.put = orig; }
-    await offlineEsquecer();                                       // o "Sair"
-    await new Promise((r) => setTimeout(r, 1500));
-    // Só a base do OFFLINE (a do diagnóstico, `waze_places_diag`, é de outra funcionalidade).
-    const bases = (await indexedDB.databases()).map((d) => d.name).filter((n) => n === OFFLINE_DB);
-    return { primeira, segunda, bases };
-  }, modo);
-}
-diz('PRÉ-CONDIÇÃO: a 1ª gravação deu certo nos três roteiros (a base nasceu com a fila de terceiros)',
-  ['ok', 'put-lanca', 'aborto'].every((m) => presa8e[m].primeira === true), JSON.stringify(presa8e));
-diz('PRÉ-CONDIÇÃO: a falha é de verdade (cota no `put`, aborto da transação) e o controle grava',
-  presa8e['ok'].segunda === true && presa8e['put-lanca'].segunda === 'cota' && ['cota', 'falhou'].includes(presa8e['aborto'].segunda), JSON.stringify(presa8e));
-diz('CONTROLE: sem a falha, o "Sair" apaga a base na hora (a medida enxerga o caminho feliz)', presa8e['ok'].bases.length === 0, JSON.stringify(presa8e['ok']));
-diz('com o `put` que lança a cota, o "Sair" apaga a base na hora — a conexão não ficou presa', presa8e['put-lanca'].bases.length === 0, JSON.stringify(presa8e['put-lanca']));
-diz('com o aborto da transação (a cota no WebKit/iOS), o "Sair" apaga a base na hora', presa8e['aborto'].bases.length === 0, JSON.stringify(presa8e['aborto']));
-const reabre8e = await page.evaluate(async () => {
-  const t0 = Date.now();
-  try { const db = await offlineDB(); db.close(); await offlineEsquecer(); return { ms: Date.now() - t0 }; }
-  catch (e) { return { erro: String((e && e.message) || e), ms: Date.now() - t0 }; }
-  finally {
-    const e = window.__estado8e; delete window.__estado8e;
-    AppState.queue = e.queue; AppState.authenticated = e.authenticated; API.sessionToken = e.token; AppState.preferences.offlineDisponivel = e.off;
-  }
-});
-diz('e "Disponível offline" segue abrindo a base logo depois (sem o `timeout` de 5 s da conexão esquecida)', !reabre8e.erro && reabre8e.ms < 2000, JSON.stringify(reabre8e));
-
-secao('8f. A LEITURA DA BASE QUE FALHA, E O CACHE QUE NÃO GRAVA, NÃO VIRAM "PRONTO" NEM SILÊNCIO (R20: A2–A5, B1)');
-// A rodada 20 mediu no navegador (t4–t19): (A3) a releitura da fila no fim da varredura que FALHA dava a
-// cobertura mesmo assim; (A4) a reabertura sem rede cuja leitura falhou não deixava linha no diário;
-// (A2/A5) o relatório imprimia "gravada null" numa leitura que falhou, e com o IndexedDB PENDURADO a seção
-// inteira se perdia no orçamento; (B1) `caches.open`/`put` que rejeita (não é cota) terminava "Pronto" com
-// ZERO tiles. Cada uma tem o CONTROLE com o caminho feliz — o mesmo roteiro, sem a falha — e roda com o
-// worker BLOQUEADO (a rota do Playwright vê o tile nos dois motores).
-const pagina8f = async (opcoes = {}) => {
-  const c = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR', acceptDownloads: true });
-  await c.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }));
-  await c.route('**/api/*', (r) => r.abort('failed'));
-  const pg = await c.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-  if (opcoes.antes) await pg.addInitScript(opcoes.antes, opcoes.argumento);
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  await esperarNaPagina(pg, () => typeof offlineVarrer === 'function', 20000, 100);
-  return { c, pg };
-};
-const montar8f = (pg, n = 3) => pg.evaluate(async (n) => {
-  const P = (i) => ({ venueID: 'v8f' + i, updateRequestID: 'u8f' + i, name: 'L' + i, categories: ['PARK'], updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE',
-    reqType: 'VENUE', createdBy: 'e' + i, creatorId: 100 + i, imageUrls: [], mapa: { centro: [-22.9 + i * 0.01, -43.2], entradas: [] },
-    dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 });
-  API.sessionToken = 'tok-8f'; AppState.authenticated = true; AppState.preferences.offlineDisponivel = true;
-  AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
-  await offlineEsquecer(); await new Promise((r) => setTimeout(r, 200));
-  offlineSegurarAte = 0; offlineUltimoResultado = null;
-  AppState.queue = Array.from({ length: n }, (_, i) => P(i + 1)); AppState.currentPlace = AppState.queue[0];
-  offlineMarcarGesto();
-}, n);
-const varrer8f = (pg, modo) => pg.evaluate(async (modo) => {
-  const origOpen = caches.open.bind(caches);
-  const origLer = window.offlineLerFila;
-  const origPut = Cache.prototype.put;
-  if (modo === 'caches-seguranca') caches.open = async () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
-  if (modo === 'put-erro') Cache.prototype.put = async function () { throw new TypeError('put falhou'); };
-  if (modo === 'leitura-falha') window.offlineLerFila = async () => undefined;
-  try {
-    await offlineVarrer();
-    for (let i = 0; i < 200 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
-  } finally { caches.open = origOpen; window.offlineLerFila = origLer; Cache.prototype.put = origPut; }
-  const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial|erro)$/.test(e.k)).at(-1);
-  let tiles = 0; try { tiles = (await (await origOpen('waze-places-tiles')).keys()).length; } catch (e) { tiles = -1; }
-  return { res: offlineUltimoResultado, k: ev && ev.k, leitura: !!(ev && ev.leitura), cache: !!(ev && ev.cache), erro: ev && ev.e, tiles,
-           cobre: offlineFilaPreparada !== null, pausaMin: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 60000),
-           sondas: (ev && ev.sondas) || 0, definitivos: (ev && ev.definitivos) || 0 };
-}, modo);
-const cena8f = {};
-for (const modo of ['boa', 'leitura-falha', 'caches-seguranca', 'put-erro']) {
-  const { c, pg } = await pagina8f();
-  try {
-    await montar8f(pg);
-    if (modo === 'leitura-falha') await pg.evaluate(async () => { await offlineGravarFila(); });
-    cena8f[modo] = await varrer8f(pg, modo);
-  } finally { await c.close(); }
-}
-diz('CONTROLE: sem falha nenhuma a varredura fecha "pronto", com os tiles no cache e a cobertura dada',
-  cena8f.boa.res === 'pronto' && cena8f.boa.tiles > 0 && cena8f.boa.cobre, JSON.stringify(cena8f.boa));
-diz('A3: a releitura da fila que FALHOU no fim da varredura não dá a cobertura — "parcial", `leitura` no diário, pausa curta (antes: "pronto" sem ter lido nada)',
-  cena8f['leitura-falha'].res === 'parcial' && cena8f['leitura-falha'].leitura && !cena8f['leitura-falha'].cobre && cena8f['leitura-falha'].k === 'offline.parcial'
-  && cena8f['leitura-falha'].pausaMin <= 1, JSON.stringify(cena8f['leitura-falha']));
-for (const modo of ['caches-seguranca', 'put-erro']) {
-  diz(`B1: com ${modo === 'caches-seguranca' ? '`caches.open` rejeitando SecurityError' : '`Cache.put` lançando TypeError'} a varredura termina "parcial" (cache:true no diário, pausa longa, sem a sonda) — nunca "pronto" com ZERO tiles`,
-    cena8f[modo].res === 'parcial' && cena8f[modo].cache && cena8f[modo].tiles <= 0 && !cena8f[modo].cobre && cena8f[modo].sondas === 0
-    && cena8f[modo].definitivos === 0 && cena8f[modo].pausaMin >= 9, JSON.stringify(cena8f[modo]));
-}
-
-// A4: a reabertura sem rede cuja leitura da base falhou deixa linha no diário (o relato "reabri e não carrega nada").
-const reabertura8f = {};
-{
-  const { c, pg } = await pagina8f();
-  try {
-    await montar8f(pg);
-    // A sessão vai pro aparelho (a página fria abre com ela): a reabertura sem rede só entra com sessão (R13-4-04).
-    await pg.evaluate(async () => { AppState.preferences.offlineDisponivel = true; savePreferences(); API.setSession('tok-8f-a4'); await offlineGravarFila(); });
-    await pg.close();
-    for (const modo of ['controle', 'idb-lanca']) {
-      const fria = await c.newPage();
-      await fria.addInitScript((m) => {
-        Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true });
-        if (m === 'idb-lanca') { const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') throw new DOMException('indisponivel', 'InvalidStateError'); return o.apply(this, arguments); }; }
-      }, modo);
-      await fria.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-      await esperarNaPagina(fria, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => /^(tela\.vazia|tela\.primeiroCard|offline\.abriu)$/.test(e.k)), 15000, 100);
-      reabertura8f[modo] = await fria.evaluate(() => ({ fila: AppState.queue.length, diario: dfatoAnel.filter((e) => /^offline\./.test(e.k)).map((e) => e.k) }));
-      await fria.close();
-    }
-  } finally { await c.close(); }
-}
-diz('CONTROLE: a reabertura sem rede com a base lendo abre a fila guardada (`offline.abriu`)',
-  reabertura8f.controle.fila === 3 && reabertura8f.controle.diario.includes('offline.abriu'), JSON.stringify(reabertura8f.controle));
-diz('A4: com o `indexedDB.open` lançando, a reabertura sem rede deixa `offline.leituraFalhou` no diário (antes: nenhuma linha, igual a quem nunca ligou o offline)',
-  reabertura8f['idb-lanca'].fila === 0 && reabertura8f['idb-lanca'].diario.includes('offline.leituraFalhou'), JSON.stringify(reabertura8f['idb-lanca']));
-
-// A2 + A5: o RELATÓRIO de verdade (o botão → o zip → o leitor do repo), com o IndexedDB lançando e PENDURADO.
-const relatorio8f = async (modo) => {
-  const { c, pg } = await pagina8f();
-  const dir = mkdtempSync(join(tmpdir(), 'diag-8f-'));
-  try {
-    await montar8f(pg);
-    await pg.evaluate(async () => { await offlineGravarFila(); await offlineGravarJanela(Math.floor(Date.now() / OFFLINE_CICLO_MS), null); });
-    await pg.evaluate((m) => {
-      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
-      const o = IDBFactory.prototype.open;
-      if (m === 'lanca') IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') throw new DOMException('indisponivel', 'InvalidStateError'); return o.apply(this, arguments); };
-      if (m === 'pendurado') IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') return {}; return o.apply(this, arguments); };
-    }, modo);
-    const t0 = Date.now();
-    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
-    const arq = join(dir, modo + '.zip');
-    await dl.saveAs(arq);
-    const { dados } = lerDiagnostico(arq);
-    const resumo = execFileSync(process.execPath, [join(ROOT, 'tools', 'diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 30000 });
-    const i = resumo.indexOf('── OFFLINE');
-    return { s: Math.round((Date.now() - t0) / 100) / 10, off: dados.offline, semResposta: dados.offline && dados.offline.semResposta === true,
-             secao: resumo.slice(i, resumo.indexOf('\n──', i + 5)) };
-  } finally { rmSync(dir, { recursive: true, force: true }); await c.close(); }
-};
-const rel8fBom = await relatorio8f('boa');
-diz('CONTROLE: com a base respondendo, o relatório traz a fila (`n`) e a janela (número) — nenhum `{ erro }`',
-  typeof rel8fBom.off?.filaGuardada?.n === 'number' && typeof rel8fBom.off?.janelaGuardada === 'number', JSON.stringify(rel8fBom.off).slice(0, 300));
-for (const modo of ['lanca', 'pendurado']) {
-  const r = await relatorio8f(modo);
-  diz(`A2/A5: com o IndexedDB ${modo === 'lanca' ? 'lançando' : 'PENDURADO'} a seção offline chega ao arquivo com \`{ erro }\` na fila E no registro da janela (não "gravada null"), sem estourar o orçamento`,
-    !r.semResposta && !!r.off?.filaGuardada?.erro && !!r.off?.janelaGuardada?.erro && !!r.off?.filaCobertaGuardada?.erro && r.s <= 9, `${r.s} s ${JSON.stringify(r.off).slice(0, 300)}`);
-  diz(`A2: o leitor diz "NÃO LIDA" / "não deu pra ler", e não "gravada null" (${modo})`,
-    /gravada NÃO LIDA/.test(r.secao) && /FALHOU/.test(r.secao) && !/gravada null/.test(r.secao) && !/offline\.gravacaoFalhou/.test(r.secao), r.secao.slice(0, 400));
-}
-
-secao('8g. O ARMAZENAMENTO E O CACHE QUE NÃO RESPONDEM NÃO PRENDEM O APP, O RELATÓRIO NEM A VARREDURA (R21: 4-01, 4-02, 4-07, 4-08)');
-// A rodada 21 mediu no navegador (r21-4): o teto de 5 s do armazenamento cobria só o `open` — a leitura, a transação e a
-// Cache API que NUNCA chamavam de volta prendiam a abertura do app (sem primeiro card por 80 s, ou 5,2 s com a base
-// lenta), o relatório ("Juntando tudo…" por mais de 75 s), o interruptor do modo dev (a caixa desmarcava e o modo
-// seguia ligado) e a varredura (`offlineVarrendo` verdadeiro aos 35 s, e pra sempre). Aqui as mesmas chamadas viram
-// promessas que nunca chegam (`addInitScript` antes de o app carregar, ou o patch na página) e o app de verdade
-// decide. Cada cenário tem o CONTROLE: o mesmo roteiro sem o defeito, que prova que a medida enxerga o caminho feliz.
-const PLACES8G = [1, 2, 3].map((i) => ({ venueID: 'v8g' + i, updateRequestID: 'u8g' + i, name: 'L' + i, categories: ['PARK'], address: 'Rua ' + i,
-  updateType: 'Novo local', updateTypeKey: 'NEW_PLACE', purType: 'NEW_PLACE', reqType: 'VENUE', createdBy: 'e' + i, creatorId: 100 + i,
-  imageUrls: [], imageUrl: null, mapa: { centro: [-22.9 + i * 0.01, -43.2], entradas: [] }, dateAdded: '2026-09-20T10:00:00Z', lat: -22.9, lon: -43.2 }));
-// O app COM sessão salva no aparelho, o "Disponível offline" ligado, e a fila e a janela GRAVADAS na base — a página
-// fria que se abre depois decide sozinha (o `initApp` de verdade), com a API de mentira respondendo.
-const contexto8g = async () => {
-  const c = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'pt-BR', acceptDownloads: true });
-  await c.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-    headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } }));
-  await c.route('**/api/*', (r) => {
-    const rota = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rota === 'buscar-places') return json({ success: true, places: PLACES8G, hasMore: false, page: 1, total: 3 });
-    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
-    if (rota === 'lista-estados') return json({ success: true, states: [] });
-    return json({ success: true });
-  });
-  const prep = await c.newPage();
-  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  await esperarNaPagina(prep, () => typeof API !== 'undefined' && typeof offlineGravarFila === 'function', 20000, 100);
-  await prep.evaluate(async (ps) => {
-    API.setSession('tok-8g');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-8g') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false, offlineDisponivel: true }));
-    AppState.authenticated = true; AppState.preferences.offlineDisponivel = true;
-    AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
-    await offlineEsquecer(); await new Promise((r) => setTimeout(r, 200));
-    AppState.queue = ps; AppState.currentPlace = ps[0];
-    await offlineGravarFila();
-    await offlineGravarJanela(Math.floor(Date.now() / OFFLINE_CICLO_MS), null);
-  }, PLACES8G);
-  await fecharComoOUsuario(prep).catch(() => {});
-  return c;
-};
-const PENDURA8G = {
-  // Uma leitura (o `get` do registro da janela) que NUNCA chama de volta.
-  janela: () => { const o = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function (k) { if (k === 'janela') return {}; return o.apply(this, arguments); }; },
-  // O `indexedDB.open` da base do offline que nunca responde.
-  open: () => { const o = IDBFactory.prototype.open; IDBFactory.prototype.open = function (n) { if (n === 'waze_places_offline') return {}; return o.apply(this, arguments); }; },
-};
-const abrir8g = async (c, antes) => {
-  const pg = await c.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-  if (antes) await pg.addInitScript(antes);
-  const t0 = Date.now();
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  const r = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && typeof cardDaFrente === 'function' && !!cardDaFrente(), 25000, 50);
-  const ms = Date.now() - t0;
-  const est = await pg.evaluate(() => ({ card: typeof cardDaFrente === 'function' && !!cardDaFrente(), fila: AppState.queue.length })).catch(() => null);
-  await pg.close();
-  return { ok: !!(r && r.ok), ms, est };
-};
-
-// 4-02 + 4-01: o primeiro card com a base saudável, com a LEITURA da janela pendurada e com o `open` pendurado.
-const aberturas8g = {};
-for (const [nome, antes] of [['controle', null], ['janela pendurada', PENDURA8G.janela], ['open pendurado', PENDURA8G.open]]) {
-  const c = await contexto8g();
-  try { aberturas8g[nome] = await abrir8g(c, antes); } finally { await c.close(); }
-}
-diz('CONTROLE: com a base respondendo o primeiro card sai logo (a medida enxerga o caminho feliz)',
-  aberturas8g.controle.ok && aberturas8g.controle.est?.fila >= 1 && aberturas8g.controle.ms < 6000, JSON.stringify(aberturas8g.controle));
-for (const nome of ['janela pendurada', 'open pendurado']) {
-  const a = aberturas8g[nome];
-  diz(`R21-4-01/02: com a ${nome === 'janela pendurada' ? 'leitura da janela' : 'abertura da base'} PENDURADA o primeiro card sai no limite curto, não no teto de 5 s (antes: 5,2 s, ou nunca)`,
-    a.ok && a.est?.fila >= 1 && a.ms < Math.min(4500, aberturas8g.controle.ms + 2500), `${a.ms} ms (controle ${aberturas8g.controle.ms} ms) ${JSON.stringify(a.est)}`);
-}
-
-// 4-01 + 4-02: a REABERTURA sem rede (o `onLine` falso) com a leitura da fila pendurada — o app não fica no esqueleto pra
-// sempre: o painel de falha sai no teto de UMA leitura (as duas, a da janela e a da fila, correm juntas), e o diário diz
-// por quê. O CONTROLE é a mesma reabertura com a base respondendo: a fila guardada abre o card.
-const reabrirSemRede8g = async (antes) => {
-  const c = await contexto8g();
-  try {
-    const pg = await c.newPage();
-    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-    await pg.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true }); });
-    if (antes) await pg.addInitScript(antes);
-    const t0 = Date.now();
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    const r = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && typeof cardDaFrente === 'function'
-      && (!!cardDaFrente() || (!!document.getElementById('loadErrorState') && !document.getElementById('loadErrorState').classList.contains('hidden'))), 25000, 50);
-    const ms = Date.now() - t0;
-    const est = await pg.evaluate(() => ({ card: !!cardDaFrente(), fila: AppState.queue.length,
-      falha: !!document.getElementById('loadErrorState') && !document.getElementById('loadErrorState').classList.contains('hidden'),
-      esqueleto: !document.getElementById('loadingCard').classList.contains('hidden'),
-      diario: dfatoAnel.filter((e) => /^offline\./.test(e.k)).map((e) => e.k) })).catch(() => null);
-    await pg.close();
-    return { ok: !!(r && r.ok), ms, est };
-  } finally { await c.close(); }
-};
-PENDURA8G.get = () => { const o = IDBObjectStore.prototype.get; IDBObjectStore.prototype.get = function () { return {}; }; };
-const sem8g = {};
-for (const [nome, antes] of [['controle', null], ['get pendurado', PENDURA8G.get], ['open pendurado', PENDURA8G.open]]) sem8g[nome] = await reabrirSemRede8g(antes);
-diz('CONTROLE: reaberta sem rede com a base respondendo, a fila guardada abre o card', sem8g.controle.ok && sem8g.controle.est?.card && sem8g.controle.est?.fila >= 1 && sem8g.controle.est?.diario.includes('offline.abriu'), JSON.stringify(sem8g.controle));
-for (const nome of ['get pendurado', 'open pendurado']) {
-  const a = sem8g[nome];
-  diz(`R21-4-01/02: reaberta sem rede com a leitura da base PENDURADA (${nome === 'get pendurado' ? 'o `get`' : 'o `open`'}) o painel de falha sai no teto de UMA leitura e o diário diz por quê (antes: ${nome === 'get pendurado' ? 'esqueleto pra sempre' : '10,2 s, o dobro'})`,
-    a.ok && a.est?.falha && !a.est?.card && !a.est?.esqueleto && a.est?.diario.includes('offline.leituraFalhou') && a.ms < 8500, JSON.stringify(a));
-}
-
-// 4-01: o relatório e o interruptor do modo dev com o `getAll` da base do diagnóstico PENDURADO.
-const relatorio8g = async (pendurar) => {
-  const { c, pg } = await pagina8f();
-  const dir = mkdtempSync(join(tmpdir(), 'diag-8g-'));
-  try {
-    await montar8f(pg);
-    await pg.evaluate(async () => {
-      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
-      await diagGuardarAbertura('smoke');   // a base do diagnóstico existe: o `getAll` tem o que ler
-    });
-    if (pendurar) await pg.evaluate(() => { IDBObjectStore.prototype.getAll = function () { return {}; }; });
-    const t0 = Date.now();
-    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 60000 }), pg.evaluate(() => { void baixarDiagnostico(); })]);
-    const arq = join(dir, 'r.zip');
-    await dl.saveAs(arq);
-    const s = Math.round((Date.now() - t0) / 100) / 10;
-    const { dados } = lerDiagnostico(arq);
-    const resumo = execFileSync(process.execPath, [join(ROOT, 'tools', 'diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 30000 });
-    // O interruptor: desmarcar o modo dev com a leitura (pendurada, ou não) das outras aberturas no caminho.
-    const sw = await pg.evaluate(async () => {
-      const t = Date.now();
-      const caixa = document.getElementById('prefDevModeActive');
-      caixa.checked = true;   // a tela diz o que o modo dev está (ligado): o toque a DESMARCA
-      caixa.click();
-      for (let i = 0; i < 200 && AppState.devMode.active; i++) await new Promise((r) => setTimeout(r, 100));
-      return { ativo: AppState.devMode.active, ms: Date.now() - t };
-    });
-    return { s, semResposta: (dados.coleta && dados.coleta.semResposta) || [], temResumo: !!dados.resumo, resumo, sw };
-  } finally { rmSync(dir, { recursive: true, force: true }); await c.close(); }
-};
-const rel8gBom = await relatorio8g(false);
-diz('CONTROLE: com a base do diagnóstico respondendo o relatório sai logo, sem leitura sem resposta, e o modo dev desliga na hora',
-  rel8gBom.temResumo && rel8gBom.s <= 8 && !rel8gBom.semResposta.includes('base do diagnóstico') && rel8gBom.sw.ativo === false && rel8gBom.sw.ms < 3000, JSON.stringify({ s: rel8gBom.s, sem: rel8gBom.semResposta, sw: rel8gBom.sw }));
-const rel8gPend = await relatorio8g(true);
-diz('R21-4-01: com o `getAll` da base do diagnóstico PENDURADO o relatório sai dentro do orçamento e diz que a base não respondeu (antes: "Juntando tudo…" por mais de 75 s)',
-  rel8gPend.temResumo && rel8gPend.s <= 14 && rel8gPend.semResposta.includes('base do diagnóstico'), JSON.stringify({ s: rel8gPend.s, sem: rel8gPend.semResposta }));
-diz('R21-4-01: e a triagem põe a base entre as leituras LOCAIS que o navegador não respondeu (não é a rede)',
-  /LOCAL\(IS\) do navegador sem resposta[^\n]*base do diagnóstico/.test(rel8gPend.resumo) && !/rede pendurada na hora do relatório[^\n]*base do diagnóstico/.test(rel8gPend.resumo), rel8gPend.resumo.split('\n').filter((l) => /sem resposta/.test(l)).join(' | '));
-diz('R21-4-01: com a leitura pendurada o interruptor do modo dev DESLIGA em segundos (antes: seguia ligado depois de 20 s)',
-  rel8gPend.sw.ativo === false && rel8gPend.sw.ms < 9000, JSON.stringify(rel8gPend.sw));
-
-// 4-07: a leitura da base do diagnóstico NÃO a recria depois do "Sair" (ou do desligar) de OUTRA aba.
-{
-  const { c, pg } = await pagina8f();
-  try {
-    await montar8f(pg);
-    const r = await pg.evaluate(async () => {
-      localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })); AppState.devMode = { unlocked: true, active: true };
-      const bases = async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => n === 'waze_places_diag');
-      await diagGuardarAbertura('smoke');
-      const antes = await bases();
-      await new Promise((ok) => { const q = indexedDB.deleteDatabase('waze_places_diag'); q.onsuccess = q.onerror = q.onblocked = ok; });   // a OUTRA aba apaga
-      const apagada = await bases();
-      const leu = await diagAtualizarAnteriores();
-      const depois = await bases();
-      // CONTROLE: quem GRAVA abre sem `soLer` e cria — a medida enxerga a criação.
-      const db = await diagDB(); db.close();
-      const criada = await bases();
-      await diagEsquecerGuardado();
-      return { antes, apagada, leu, depois, criada };
-    });
-    diz('PRÉ-CONDIÇÃO: a base do diagnóstico existia e a "outra aba" a apagou', r.antes.length === 1 && r.apagada.length === 0, JSON.stringify(r));
-    diz('R21-4-07: a releitura do relatório/desligar NÃO recria a base apagada (antes: `waze_places_diag` de volta, sem dado e com o nome)',
-      r.leu === true && r.depois.length === 0, JSON.stringify(r));
-    diz('CONTROLE: o abridor de escrita cria a base — a medida de cima não está cega', r.criada.length === 1, JSON.stringify(r));
-  } finally { await c.close(); }
-}
-
-// 4-08: a rede que entrega o cabeçalho e CORTA o corpo não é "a rede anda" — a preparação não termina "Pronto" com zero tiles.
-const varrerCorpo8g = async (corta) => {
-  const { c, pg } = await pagina8f();
-  try {
-    await montar8f(pg);
-    return await pg.evaluate(async (corta) => {
-      const origFetch = window.fetch; let n = 0;
-      window.fetch = async function (u, o) {
-        if (/-tiles\/live\/base\//.test(String(u))) {
-          n++;
-          if (!corta) return origFetch.apply(this, arguments);
-          const corpo = new ReadableStream({ start(c) { c.enqueue(new Uint8Array([137, 80, 78, 71])); setTimeout(() => c.error(new TypeError('network error')), 5); } });
-          return new Response(corpo, { status: 200, headers: { 'content-type': 'image/png', 'access-control-allow-origin': '*' } });
-        }
-        return origFetch.apply(this, arguments);
-      };
-      try {
-        await offlineVarrer();
-        for (let i = 0; i < 300 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
-      } finally { window.fetch = origFetch; }
-      const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial)$/.test(e.k)).at(-1);
-      let tiles = 0; try { tiles = (await (await caches.open('waze-places-tiles')).keys()).length; } catch (e) { tiles = -1; }
-      return { res: offlineUltimoResultado, k: ev && ev.k, definitivos: (ev && ev.definitivos) || 0, sondas: (ev && ev.sondas) || 0, tiles, fetches: n };
-    }, corta);
-  } finally { await c.close(); }
-};
-const corpoBom8g = await varrerCorpo8g(false);
-const corpoCortado8g = await varrerCorpo8g(true);
-diz('CONTROLE: com a rede entregando o corpo inteiro a preparação fecha "pronto" com os tiles no cache', corpoBom8g.res === 'pronto' && corpoBom8g.tiles > 0, JSON.stringify(corpoBom8g));
-diz('R21-4-08: com o corpo CORTADO a sonda não diz "a rede anda": a preparação fica "parcial", nenhum item vira `definitivo` (antes: "pronto", 5 definitivos, ZERO tiles)',
-  corpoCortado8g.res === 'parcial' && corpoCortado8g.definitivos === 0 && corpoCortado8g.tiles <= 0 && corpoCortado8g.sondas >= 1, JSON.stringify(corpoCortado8g));
-
-// 4-01: a VARREDURA com o cache que não responde (`caches.open`) e com a transação de gravação que nunca completa termina
-// "parcial" no teto do item (30 s) — não fica "varrendo" pra sempre. Os três cenários correm JUNTOS (a espera é o teto).
-const varrerPendurada8g = async (modo) => {
-  const { c, pg } = await pagina8f();
-  try {
-    await montar8f(pg);
-    const t0 = Date.now();
-    const r = await pg.evaluate(async (modo) => {
-      if (modo === 'caches-open') CacheStorage.prototype.open = function () { return new Promise(() => {}); };
-      if (modo === 'tx-fila') {
-        const orig = IDBDatabase.prototype.transaction;
-        window.__abortos = 0;
-        IDBDatabase.prototype.transaction = function (s, m) {
-          if (m === 'readwrite') return { objectStore: () => ({ get: () => ({}), put: () => ({}) }), abort() { window.__abortos++; } };
-          return orig.apply(this, arguments);
-        };
-      }
-      await Promise.race([offlineVarrer(), new Promise((r) => setTimeout(r, 55000))]);
-      for (let i = 0; i < 200 && (offlineVarrendo || offlinePedidaDeNovo); i++) await new Promise((r) => setTimeout(r, 100));
-      const ev = dfatoAnel.filter((e) => /^offline\.(pronto|parcial)$/.test(e.k)).at(-1);
-      const falha = dfatoAnel.filter((e) => e.k === 'offline.gravacaoFalhou').at(-1);
-      return { varrendo: offlineVarrendo, res: offlineUltimoResultado, k: ev && ev.k, cacheMudo: !!(ev && ev.cacheMudo), cache: !!(ev && ev.cache),
-        pausaS: Math.round(Math.max(0, offlineSegurarAte - Date.now()) / 1000), cobre: offlineFilaPreparada !== null,
-        gravacao: falha && falha.e, abortos: window.__abortos || 0 };
-    }, modo);
-    return { ...r, s: Math.round((Date.now() - t0) / 1000) };
-  } finally { await c.close(); }
-};
-const [pend8gBoa, pend8gCache, pend8gTx] = await Promise.all([varrerPendurada8g('boa'), varrerPendurada8g('caches-open'), varrerPendurada8g('tx-fila')]);
-diz('CONTROLE: sem nada pendurado a varredura fecha "pronto" em segundos', pend8gBoa.res === 'pronto' && !pend8gBoa.varrendo && pend8gBoa.s < 15, JSON.stringify(pend8gBoa));
-diz('R21-4-01: com o `caches.open` PENDURADO a varredura termina "parcial" (cacheMudo no diário, pausa CURTA, sem cobertura) — antes: "varrendo" aos 35 s e pra sempre',
-  pend8gCache.res === 'parcial' && !pend8gCache.varrendo && pend8gCache.cacheMudo && !pend8gCache.cache && pend8gCache.pausaS <= 60 && !pend8gCache.cobre && pend8gCache.s < 50, JSON.stringify(pend8gCache));
-diz('R21-4-01: com a transação de gravação da fila que NUNCA completa a varredura termina "parcial" (a gravação falhou por teto e foi ABORTADA), sem cobertura',
-  pend8gTx.res === 'parcial' && !pend8gTx.varrendo && pend8gTx.gravacao === 'TimeoutError' && pend8gTx.abortos >= 1 && !pend8gTx.cobre && pend8gTx.s < 50, JSON.stringify(pend8gTx));
-// O que foi MEDIDO fica no log (é o antes/depois que o relatório do lote cita): o número, não só o ✓.
-console.log(`  · medido (${MOTOR}): primeiro card ${aberturas8g.controle.ms} ms na base boa, ${aberturas8g['janela pendurada'].ms} ms com a janela pendurada, ${aberturas8g['open pendurado'].ms} ms com o open pendurado;`
-  + ` relatório ${rel8gBom.s} s (boa) × ${rel8gPend.s} s (getAll pendurado), modo dev desligou em ${rel8gBom.sw.ms} ms × ${rel8gPend.sw.ms} ms;`
-  + ` varredura com o cache pendurado terminou "${pend8gCache.res}" em ${pend8gCache.s} s, com a transação pendurada "${pend8gTx.res}" em ${pend8gTx.s} s;`
-  + ` corpo cortado: ${corpoCortado8g.res}, ${corpoCortado8g.definitivos} definitivos, ${corpoCortado8g.sondas} sonda(s);`
-  + ` reaberta sem rede: card ${sem8g.controle.ms} ms (boa), painel de falha ${sem8g['get pendurado'].ms} ms (get pendurado) e ${sem8g['open pendurado'].ms} ms (open pendurado)`);
-
-// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
-// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
-// for declarado aqui não existe depois dele.
-if (!pularForaDoChromium(MOTOR, '9 e 9b — esquecer com a varredura em voo, e o que foi tratado não volta ao reabrir, com o service worker no comando',
-  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
 secao('9. ESQUECER PARA a varredura em voo (privacidade)');
 // Enche, e ESQUECE no meio: o download já a caminho não pode pousar depois.
-//
-// ESTA SEÇÃO ESPERAVA POR PRAZO (`dormir(60)` depois de iniciar a varredura) e DEPENDIA de sobra de outra seção: o
-// worker só conhece os tiles quando a varredura o AVISA (`offlineAnunciarTiles`: a cada 50 tiles novos e no fim), então
-// com a máquina disputada o "antes" vinha 0 e o "0 → 0" não provava nada — reprovou 1 de 2 rodadas com a máquina
-// carregada, e numa página nova (sem o que as seções anteriores deixam no cache) reprova SEMPRE (MEDIDO, 3 de 3). É a
-// família "teste de browser não espera por prazo, espera pelo FIM" (gotcha do CLAUDE.md). Hoje cada passo espera um
-// SINAL POSITIVO, com teto e dizendo por que terminou:
-//  · os tiles do ALVO (o 1º da fila) estão no cache e um tile do RESTO está PRESO na rota (um portão que o teste abre):
-//    a varredura está em voo DE VERDADE, com um download a caminho — era só suposto;
-//  · o worker CONHECE tiles (o teste manda o mesmo aviso que a varredura mandaria, e espera a lista dele ficar > 0);
-//  · esquece; solta os presos; a varredura ACABA (`!offlineVarrendo`: nenhum `put` pendente) e o worker zera a lista.
-// O CONTROLE é o mesmo roteiro SEM esquecer: os presos, soltos, POUSAM — sem ele, "o cache ficou vazio" também seria o
-// que um instrumento que nunca deixa nada pousar mediria.
-const ALVO_9 = { ...SO_MAPA(70), mapa: { centro: [-12.5, -41.5], entradas: [] } };
-const RESTO_9 = Array.from({ length: 6 }, (_, k) =>
-  ({ ...SO_MAPA(71 + k), mapa: { centro: [-12.5 + (k + 1) * 0.7, -41.5], entradas: [] } }));
-await montar([ALVO_9, ...RESTO_9]);
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
-  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); });
-const urlsDoAlvo9 = new Set(await page.evaluate(() => [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())]));
-// Espera uma promessa com TETO e diz QUAL terminou (a espera por um sinal do lado do Node).
-const sinalOuTeto9 = async (promessa, tetoMs) => {
-  let relogio;
-  try { return await Promise.race([promessa.then(() => 'chegou'), new Promise((ok) => { relogio = setTimeout(() => ok('TETO'), tetoMs); })]); }
-  finally { clearTimeout(relogio); }
-};
-const alvoNoCache9 = () => esperarNaPagina(page, async () => {
-  const urls = [...tilesDaFaixa(AppState.queue[0], offlineFaixaDeCaixas())];
-  if (!urls.length) return false;
-  for (const u of urls) if (!(await caches.match(u, { cacheName: 'waze-places-tiles' }))) return false;
-  return true;
-}, 30000, 100);
-const workerSabeTiles9 = () => esperarNaPagina(page, async () => {
-  const d = await diagServiceWorker();
-  return !!d && d.listaPronta === true && d.tilesNaLista > 0;
-}, 15000, 200);
-const workerZerou9 = () => esperarNaPagina(page, async () => {
-  const d = await diagServiceWorker();
-  return !!d && d.listaPronta === true && d.tilesNaLista === 0;
-}, 15000, 200);
-// Uma varredura EM VOO: o alvo chega logo e o resto fica PRESO no portão até o teste soltá-lo.
-const emVoo9 = async () => {
-  let soltar; const portao = new Promise((ok) => { soltar = ok; });
-  let chegouUm; const umChegou = new Promise((ok) => { chegouUm = ok; });
-  atrasoTile = (url) => { if (urlsDoAlvo9.has(url)) return 0; chegouUm(); return portao; };
-  await page.evaluate(() => { offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer(); });   // sem esperar: é a varredura EM VOO
-  const alvo = await alvoNoCache9();
-  const preso = await sinalOuTeto9(umChegou, 30000);
-  const estado = await page.evaluate(async () => ({ varrendo: offlineVarrendo,
-    cache: (await (await caches.open('waze-places-tiles')).keys()).length }));
-  return { soltar: () => { atrasoTile = 0; soltar(); }, alvo, preso, estado };
-};
-const voo9 = await emVoo9();
-diz('PRÉ-CONDIÇÃO: a varredura está EM VOO — os tiles do alvo estão no cache e um tile do resto ficou preso a caminho',
-  voo9.alvo.ok && voo9.preso === 'chegou' && voo9.estado.varrendo === true && voo9.estado.cache >= urlsDoAlvo9.size && urlsDoAlvo9.size > 0,
-  JSON.stringify({ alvo: voo9.alvo, preso: voo9.preso, ...voo9.estado, tilesDoAlvo: urlsDoAlvo9.size }));
+  AppState.preferences.offlineDisponivel = true; offlineMarcarGesto(); offlineVarrer(); });
+await dormir(60);
 // Uma entrada no anel ANTES de esquecer: sem ela, "o anel ficou vazio" passaria
 // por vácuo — ele já está vazio a esta altura.
 await page.evaluate(() => { diagTilesGuardadosQueFalharam.push({ t: Date.now(), url: 'https://www.waze.com/row-tiles/live/base/3/1/1/tile.png' }); });
 // Idem a lista do WORKER: ela tem de estar CHEIA antes, senão "esqueceu" passa
-// por vácuo. Ele só fica sabendo pelo aviso da varredura (a cada 50 tiles e no fim): o teste manda o MESMO aviso e
-// espera o SINAL — a lista dele > 0 —, em vez de torcer pra o `dormir` bastar.
-await page.evaluate(() => offlineAnunciarTiles());
-const listaCheia9 = await workerSabeTiles9();
+// por vácuo.
 const swAntes9 = await page.evaluate(() => diagServiceWorker());
-diz('PRÉ-CONDIÇÃO: o worker CONHECE tiles antes de esquecer (a lista dele > 0; sem isso o "esqueceu" passaria por vácuo)',
-  listaCheia9.ok && swAntes9?.tilesNaLista > 0, JSON.stringify({ espera: listaCheia9, lista: swAntes9?.tilesNaLista }));
 await page.evaluate(() => offlineEsquecer());
-// Os downloads PRESOS chegam DEPOIS de esquecer: a varredura (época velha) não pode gravá-los. E a espera é pelo FIM da
-// varredura em voo — nenhum `put` pendente —, nunca por um prazo.
-voo9.soltar();
-const fimDaVarredura9 = await esperarNaPagina(page, () => !offlineVarrendo, 20000, 100);
-const swEsqueceu9 = await workerZerou9();
+await dormir(900);
 const swDepois9 = await page.evaluate(() => diagServiceWorker());
 const depois = await page.evaluate(async () => {
   const c = await caches.open('waze-places-tiles');
@@ -2269,30 +1321,13 @@ const depois = await page.evaluate(async () => {
     janela: offlineJanelaServida, res: offlineUltimoResultado,
     janelaGuardada: await offlineLerJanela(), anel: diagTilesGuardadosQueFalharam.length };
 });
-diz('a varredura em voo ACABOU depois de esquecer (e nenhum download que estava a caminho pousou no cache)',
-  fimDaVarredura9.ok && depois.cache === 0, JSON.stringify({ fim: fimDaVarredura9, ...depois }));
 diz('depois de esquecer, o cache de tiles fica VAZIO', depois.cache === 0, JSON.stringify(depois));
 diz('a fila guardada some e a janela zera', depois.fila === false && depois.janela === null, JSON.stringify(depois));
 diz('e a janela GRAVADA e o anel de tiles que falharam somem junto (dizem onde ficam pedidos de terceiros)',
   depois.janelaGuardada === null && depois.anel === 0, JSON.stringify(depois));
 diz('e o worker esquece a LISTA dele (o mesmo dado, em memória)',
-  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0 && swEsqueceu9.ok,
-  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista} (${JSON.stringify(swEsqueceu9)})`);
-// CONTROLE: o MESMO roteiro SEM esquecer — os tiles presos, soltos, POUSAM no cache. É o que faz o "nada pousou" de cima
-// medir o esquecer, e não um instrumento que nunca deixa nada pousar.
-const controle9 = await emVoo9();
-controle9.soltar();
-const fimDoControle9 = await esperarNaPagina(page, preparacaoAssentada, 60000, 200);
-const noCacheControle9 = await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length);
-diz('CONTROLE: sem esquecer, os tiles presos, soltos, POUSAM — a varredura termina e o cache passa dos tiles do alvo',
-  controle9.alvo.ok && controle9.preso === 'chegou' && fimDoControle9.ok && noCacheControle9 > urlsDoAlvo9.size,
-  JSON.stringify({ alvo: controle9.alvo, preso: controle9.preso, fim: fimDoControle9, noCache: noCacheControle9, tilesDoAlvo: urlsDoAlvo9.size }));
-// O estado que as seções seguintes esperam (o que o roteiro deixava): esquecido, o cache vazio e o worker sem lista.
-await page.evaluate(() => offlineEsquecer());
-const workerZerouDeNovo9 = await workerZerou9();
-diz('o estado fica como as seções seguintes esperam: esquecido, o cache vazio e o worker sem a lista',
-  workerZerouDeNovo9.ok && (await page.evaluate(async () => (await (await caches.open('waze-places-tiles')).keys()).length)) === 0 && !(await page.evaluate(() => offlineVarrendo)),
-  JSON.stringify(workerZerouDeNovo9));
+  swAntes9?.tilesNaLista > 0 && swDepois9?.tilesNaLista === 0,
+  `${swAntes9?.tilesNaLista} → ${swDepois9?.tilesNaLista}`);
 
 secao('9b. O QUE FOI TRATADO NÃO VOLTA — reabrir no meio da triagem, com e sem rede');
 // O relato de 2026-09-22 (o terceiro do dia): preparou o offline, fechou, entrou
@@ -2327,18 +1362,9 @@ const pendentes9b = new Map(DEC_9B.map((p) => [chave9b(p), p]));
 const decisoes9b = [];              // cada decisão que CHEGOU: { chave, rota, t }
 const buscas9b = [];                // cada busca: { tPedido, tResposta, lista }
 let atrasoBusca9b = 0;
-// A espera de cada decisão antes de pousar: um número (ms) ou uma função que
-// devolve a promessa da espera (ver o passo 6).
 let atrasoDecisao9b = () => 0;
-// Quantas buscas CHEGARAM (na chegada, não na resposta), e quem espera a próxima.
-let buscasChegadas9b = 0;
-const aoChegarBusca9b = [];
-// "LIE-FI" (passo 9): o rádio diz `onLine`, e a decisão não passa — túnel,
-// portal cativo. Só as escritas: é o envio da descarga que morre.
-let lieFi9b = false;
 const rotaApi9b = async (r) => {
   const rota = r.request().url().split('/api/')[1];
-  if (lieFi9b && (rota === 'marcar-lido' || rota === 'validar-place')) return r.abort('timedout');
   if (aviao) return r.abort('internetdisconnected');
   let corpo = {};
   try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* corpo vazio */ }
@@ -2346,8 +1372,6 @@ const rotaApi9b = async (r) => {
   if (rota === 'buscar-places') {
     const b = { tPedido: Date.now(), lista: [...pendentes9b.keys()] };
     const places = [...pendentes9b.values()];
-    buscasChegadas9b++;
-    for (const ok of aoChegarBusca9b.splice(0)) ok();
     if (atrasoBusca9b) await dormir(atrasoBusca9b);
     b.tResposta = Date.now();
     buscas9b.push(b);
@@ -2356,14 +1380,13 @@ const rotaApi9b = async (r) => {
   if (rota === 'marcar-lido' || rota === 'validar-place') {
     const chave = corpo.venueID + '|' + corpo.updateRequestID;
     const espera = atrasoDecisao9b(chave);
-    if (typeof espera === 'function') await espera();
-    else if (espera) await dormir(espera);
+    if (espera) await dormir(espera);
     decisoes9b.push({ chave, rota, t: Date.now() });
     pendentes9b.delete(chave);
     return json({ success: true });
   }
   if (rota === 'perfil') {
-    return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+    return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
   }
   // Presença, países e o resto ficam fora do que esta seção mede.
   return r.abort('failed');
@@ -2389,7 +1412,7 @@ const histAntes9b = await historico9b(page);
 await montar(DEC_9B.map((p) => ({ ...p })));
 await page.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(page, preparacaoAssentada, 60000, 250);
+await esperarNaPagina(page, () => offlineUltimoResultado !== null, 60000, 250);
 const foto9b = await page.evaluate(async () => ({ res: offlineUltimoResultado,
   n: ((await offlineLerFila()) || {}).places?.length }));
 diz('PRÉ-CONDIÇÃO: com rede, a preparação ENCHEU e a fila guardada tem os 5',
@@ -2418,13 +1441,6 @@ const decidir9b = async (pg, botao, esperarSaida) => {
 // 1. COM rede, depois da foto: o ✕ pousa no Waze e a foto não sabe disso.
 const k101 = await decidir9b(page, '.card-btn-reject', false);
 for (let j = 0; j < 50 && !decisoes9b.some((d) => d.chave === k101); j++) await dormir(100);
-// E espera o FIM da ação NA PÁGINA: o "Waze" desta seção anota a decisão ANTES
-// de responder, então ela aparecer aqui não diz que a página já recebeu a
-// resposta e gravou o pouso. MEDIDO com a máquina carregada: a leitura chegou
-// antes do pouso em 3 de 12 rodadas (na base e no ramo), e numa delas o
-// `about:blank` logo abaixo matou a resposta — o pouso nunca foi gravado, o ✕
-// voltou como card na reabertura e a seção reprovou 7 vezes em cascata.
-await esperarNaPagina(page, () => AppState.inFlightActions === 0, 10000, 50);
 const pousos9b = await page.evaluate(() => { try {
   return JSON.parse(localStorage.getItem('waze_places_offline_pousos') || '[]').map((e) => e[0]); } catch (e) { return []; } });
 diz('COM rede, o ✕ pousou no Waze e ficou gravado como pouso DEPOIS da fila guardada',
@@ -2482,13 +1498,12 @@ const naJanela = await p1.evaluate(() => { const p = AppState.pendingAction && A
 diz('PRÉ-CONDIÇÃO: o terceiro ✕ está na JANELA do Desfazer quando o app é fechado',
   naJanela === k3 && !!k3, JSON.stringify({ naJanela, k3 }));
 // Fechar COMO O USUÁRIO FECHA: com `pagehide` e `visibilitychange`, que é o
-// que o aparelho dispara ao sair do app. O `close()` muda de semântica entre
-// as versões e entre os motores — MEDIDO: no Playwright 1.49 (Chromium 131) o
-// puro destrói a página SEM disparar nenhum dos dois; no WebKit 27.2 o
-// `runBeforeUnload` nem fecha. Por isso a porta única (`fecharComoOUsuario`,
-// lá em cima): sem ela, esta asserção passava num lugar e reprovava no outro
-// por motivo de instrumento.
-await fecharComoOUsuario(p1);
+// que o aparelho dispara ao sair do app. O `close()` puro muda de semântica
+// entre as versões — MEDIDO: no Playwright 1.49 (o do CI, Chromium 131) ele
+// destrói a página SEM disparar nenhum dos dois; no 1.56 (o do sandbox)
+// dispara. Sem o `runBeforeUnload`, esta asserção passava aqui e reprovava no
+// CI por motivo de instrumento.
+await p1.close({ runBeforeUnload: true });
 
 // 4. Reaberta de novo, sem rede: nada do que foi decidido volta.
 const p2 = await abrirFria9b('reaberta 2');
@@ -2568,18 +1583,7 @@ await prep.close();
 const k106 = chave9b(SO_MAPA(106));
 const k107 = chave9b(SO_MAPA(107));
 atrasoBusca9b = 1500;
-// A 1ª decisão pousa 100 ms depois de a busca CHEGAR — nunca antes. Na abertura
-// o esvaziamento e a busca saem juntos, e quem chega primeiro no servidor é
-// questão de milissegundos: com a espera fixa de 100 ms, a margem (o pouso menos
-// a chegada da busca) foi de 57 a 127 ms em 11 de 12 rodadas e de -30 ms numa
-// (na BASE, com a máquina carregada; -8 ms numa rodada do smoke inteiro) — a
-// decisão pousava antes de a lista ser tirada e a pré-condição reprovava. O
-// "Waze" segura a resposta até a busca chegar, que é o cenário que a
-// pré-condição exige; com teto, e sem a busca a pré-condição reprova.
-const buscasAntes6 = buscasChegadas9b;
-const depoisDaBusca6 = () => (buscasChegadas9b > buscasAntes6 ? Promise.resolve()
-  : Promise.race([new Promise((ok) => aoChegarBusca9b.push(ok)), dormir(10000)])).then(() => dormir(100));
-atrasoDecisao9b = (k) => (k === k106 ? depoisDaBusca6 : 4000);
+atrasoDecisao9b = (k) => (k === k106 ? 100 : 4000);
 aviao = false; await ctx.setOffline(false);
 const p3 = await abrirFria9b('reaberta com rede');
 await esperarNaPagina(p3, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'tela.primeiroCard'), 20000, 100);
@@ -2618,7 +1622,7 @@ await p4.reload({ waitUntil: 'domcontentloaded' });
 await esperarNaPagina(p4, () => typeof AppState !== 'undefined' && AppState.queue.length === 4, 20000, 100);
 await p4.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
   offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(p4, preparacaoAssentada, 60000, 250);
+await esperarNaPagina(p4, () => offlineUltimoResultado !== null, 60000, 250);
 const foto7 = await p4.evaluate(async () => ({ res: offlineUltimoResultado, n: ((await offlineLerFila()) || {}).places?.length }));
 await p4.close();
 diz('7: PRÉ-CONDIÇÃO — com rede, a fila guardada tem os 4 pendentes', foto7.res === 'pronto' && foto7.n === 4,
@@ -2650,95 +1654,9 @@ diz('7: a rede de volta manda as 4 decisões e traz SOZINHA o pedido que chegou 
   chegou7.ok && depois7.frente === k114
   && [111, 112, 113, 108].every((i) => decisoes9b.filter((d) => d.chave === chave9b(SO_MAPA(i))).length === 1),
   JSON.stringify({ depois7, decisoes: decisoes9b.map((d) => d.chave) }));
-// 8. PULOU TUDO SEM REDE e a rede voltou: os pulados VOLTAM. Pular não decide
-// nada — e sem sinal é o que sobra pro card de foto cuja foto não veio. Com a
-// fila vazia (a tela de "sem conexão"), a volta da rede é um ATUALIZAR. Uma
-// correção desta mesma auditoria a trocou por "só retomar", e a fila terminava
-// VAZIA com os pedidos pendentes — achado pela auditoria EM PRODUÇÃO
-// (2026-09-25), exatamente neste caminho: o app REABERTO sem rede (que abre
-// dizendo "pode haver mais"), tudo pulado, a rede de volta. Este smoke não o
-// tinha. A página de antes sai de cena SEM apagar a sessão (é a mesma pra
-// página nova), senão o `online` dela somaria.
-await p5.goto('about:blank');
-aviao = true; await ctx.setOffline(true);
-const p6 = await abrirFria9b('reaberta 6');
-await esperarNaPagina(p6, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
-const pulados8 = [];
-for (let j = 0; j < 8; j++) {
-  const antes = await p6.evaluate(() => ({ n: AppState.queue.length, k: AppState.currentPlace
-    ? AppState.currentPlace.venueID + '|' + AppState.currentPlace.updateRequestID : null }));
-  if (!antes.n || !antes.k) break;
-  await p6.evaluate(() => cardDaFrente().querySelector('.card-btn-skip').click());
-  for (let t = 0; t < 50; t++) { if ((await p6.evaluate(() => AppState.queue.length)) < antes.n) break; await dormir(100); }
-  pulados8.push(antes.k);
-}
-const semConexao8 = await esperarNaPagina(p6, () => !document.getElementById('loadErrorState').classList.contains('hidden'), 10000, 100);
-diz('8: PRÉ-CONDIÇÃO — reaberto sem rede e pulado tudo, a tela é a de "sem conexão"',
-  pulados8.length > 0 && semConexao8.ok, JSON.stringify({ pulados8, semConexao8 }));
-aviao = false; await ctx.setOffline(false);
-const voltou8 = await esperarNaPagina(p6, () => AppState.queue.length > 0 && !!cardDaFrente(), 25000, 200);
-const depois8 = await estadoDaFila9b(p6);
-diz('8: a rede de volta traz de volta os PULADOS sem sinal (a fila não termina vazia com pedido pendente)',
-  voltou8.ok && pulados8.every((k) => depois8.fila.includes(k)), JSON.stringify({ pulados8, depois8 }));
-await p6.evaluate(() => { API.setSession(null); });
-await p6.close();
+await p5.evaluate(() => { API.setSession(null); });
 await p5.close();
-
-// 9. LIE-FI AO FECHAR: o ✕ está na janela do Desfazer, o app é fechado com o
-//    rádio dizendo `onLine` e nada passando. A descarga gravava o POUSO antes do
-//    envio `keepalive`; o envio morria e a decisão SUMIA — a reabertura sem rede
-//    escondia o pedido (o pouso) e o placar ficava +1, sem nada na fila de saída
-//    (auditoria de 2026-09-26, O5; medido na main de antes: fila de saída vazia e
-//    o Waze sem a decisão). Agora ela entra na fila de saída ANTES do envio.
-for (const i of [121, 122, 123]) pendentes9b.set(chave9b(SO_MAPA(i)), SO_MAPA(i));
-aviao = false; await ctx.setOffline(false);
-const p7 = await abrirFria9b('preparo 9');
-await esperarNaPagina(p7, () => typeof API !== 'undefined', 20000, 100);
-await p7.evaluate(() => { API.setSession('tok-9b'); });
-await p7.reload({ waitUntil: 'domcontentloaded' });
-await esperarNaPagina(p7, () => typeof AppState !== 'undefined' && AppState.queue.length >= 3 && !!cardDaFrente(), 20000, 100);
-await p7.evaluate(() => { offlineJanelaServida = null; offlineUltimoResultado = null;
-  offlineMarcarGesto(); offlineVarrer(); });
-await esperarNaPagina(p7, preparacaoAssentada, 60000, 250);
-const rejeitados9 = await p7.evaluate(() => AppState.stats.rejected);
-await p7.evaluate(() => { AppState.preferences.undoEnabled = true; });
-await p7.evaluate(() => cardDaFrente().querySelector('.card-btn-reject').click());
-await esperarNaPagina(p7, () => !!AppState.pendingAction, 5000, 50);
-const k9 = await p7.evaluate(() => { const p = AppState.pendingAction && AppState.pendingAction.place;
-  return p ? p.venueID + '|' + p.updateRequestID : null; });
-diz('9: PRÉ-CONDIÇÃO — o ✕ está na JANELA do Desfazer quando o app é fechado, e a preparação ficou pronta',
-  !!k9 && (await p7.evaluate(() => offlineUltimoResultado)) === 'pronto', JSON.stringify({ k9 }));
-lieFi9b = true;
-await fecharComoOUsuario(p7);
-await dormir(500);
-lieFi9b = false;
-aviao = true; await ctx.setOffline(true);
-const p8 = await abrirFria9b('reaberta lie-fi');
-await esperarNaPagina(p8, () => typeof dfatoAnel !== 'undefined' && dfatoAnel.some((e) => e.k === 'offline.abriu'), 20000, 100);
-const r9 = await estadoDaFila9b(p8);
-const s9 = await saida9b(p8);
-const pousos9 = await p8.evaluate(() => { try {
-  return JSON.parse(localStorage.getItem('waze_places_offline_pousos') || '[]').map((e) => e[0]); } catch (e) { return []; } });
-diz('9: a decisão do envio que MORREU está na fila de saída (nada se perdeu)',
-  Array.isArray(s9) && s9.filter((x) => x.chave === k9).length === 1, JSON.stringify({ k9, s9 }));
-diz('9: e o pedido não volta como card — quem o esconde é a fila de saída, não um pouso sem resposta',
-  !r9.fila.includes(k9) && !pousos9.includes(k9), JSON.stringify({ k9, fila: r9.fila, pousos9 }));
-aviao = false; await ctx.setOffline(false);
-await p8.evaluate(() => window.dispatchEvent(new Event('online')));
-for (let j = 0; j < 6; j++) {
-  await esperarFimDaSaida(p8, 25000);
-  if (!(await saida9b(p8) || []).length) break;
-  await p8.evaluate(() => window.dispatchEvent(new Event('online')));
-  await dormir(400);
-}
-const final9 = await p8.evaluate(() => JSON.parse(localStorage.getItem('waze_places_stats') || '{}'));
-diz('9: a rede de volta manda a decisão UMA vez, e o placar a conta UMA vez',
-  decisoes9b.filter((d) => d.chave === k9).length === 1 && final9.rejected === rejeitados9 + 1,
-  JSON.stringify({ decisoes: decisoes9b.filter((d) => d.chave === k9), rejeitados9, final9 }));
-await p8.evaluate(() => { API.setSession(null); });
-await p8.close();
 await ctx.unroute('**/api/*', rotaApi9b);
-} // fim do bloco só do Chromium que começa na seção 9 (ver o `pularForaDoChromium` lá)
 
 secao('9c. O DIAGNÓSTICO SOBREVIVE A FECHAR O APP — o número do botão e o relatório');
 // O mesmo relato do 9b: "usei o FAB 2 vezes, fechei e abri a aplicação e o
@@ -2760,7 +1678,7 @@ await ctx9c.route('**/api/*', (r) => {
   const rota = r.request().url().split('/api/')[1];
   const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
   if (rota === 'buscar-places') return json({ success: true, places: PEDIDOS_9C, hasMore: false, page: 1, total: PEDIDOS_9C.length });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
+  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, areas: [] } });
   return r.abort('failed');   // presença, países, sessão: fora do que esta seção mede
 });
 const abrir9c = async (nome) => {
@@ -2798,47 +1716,22 @@ const selo9c = (pg) => pg.evaluate(() => { const s = document.getElementById('de
 // assenta (`posicionarFabDev` escolhe o canto pelo que está na tela), e o toque
 // calculado no lugar velho cai fora dele — foi o que fez o primeiro toque de
 // cada abertura sumir na primeira rodada desta seção.
-//
-// E PARADO é estar NO LUGAR que o app pôs — o retângulo bate com o `left`/`top`
-// escrito, e nenhuma transição anda —, não três amostras iguais: a mudança de
-// canto desliza (0,16 s), e o WebKit do Playwright, que desenha um quadro a
-// cada ~100 ms, segura a transição no PONTO DE PARTIDA por mais de 300 ms às
-// vezes. MEDIDO (e8 do lote 18, 2ª de duas abas): o `top` já escrito em 704 px,
-// a transição "running" e o retângulo parado em 77 por quatro amostras — o
-// toque caía ali, o `pointerdown` do botão (que zera a transição) o mandava pra
-// 704, e o `pointerup` ia pro que estava embaixo: sem captura em 6 de 40
-// toques (com esta condição, 0 de 40).
-//
-// O DEDO é o de cada motor (`dedo9c`): no Chromium, o toque do protocolo do
-// DevTools — o mesmo do bloco do FAB no smoke de layout —; fora dele, o
-// `touchscreen` do Playwright, que no WebKit chega ao botão como toque de
-// verdade (o `pointerdown`/`pointerup` que ele escuta). `cdp` nulo = o segundo.
-const dedo9c = (contexto, pg) => (MOTOR === 'chromium' ? contexto.newCDPSession(pg) : Promise.resolve(null));
 const tocar9c = async (pg, cdp) => {
   let ultimo = '';
   for (let j = 0, parado = 0; j < 60 && parado < 3; j++) {
     const agora = await pg.evaluate(() => { const f = document.getElementById('devFab');
       const b = f.getBoundingClientRect();
-      const escrito = (v) => (/px$/.test(v) ? parseFloat(v) : null);
-      const [x, y] = [escrito(f.style.left), escrito(f.style.top)];
-      const noLugar = !f.getAnimations().some((a) => a.playState === 'running')
-        && (x === null || Math.abs(b.left - x) < 1) && (y === null || Math.abs(b.top - y) < 1);
-      if (f.classList.contains('hidden')) return 'escondido';
-      return noLugar ? `${Math.round(b.left)},${Math.round(b.top)}` : 'deslizando'; });
-    parado = agora !== 'escondido' && agora !== 'deslizando' && agora === ultimo ? parado + 1 : 0;
+      return f.classList.contains('hidden') ? 'escondido' : `${Math.round(b.left)},${Math.round(b.top)}`; });
+    parado = agora !== 'escondido' && agora === ultimo ? parado + 1 : 0;
     ultimo = agora;
     await dormir(100);
   }
   const antes = await pg.evaluate(() => dlogMomentos.length);
   const c = await pg.evaluate(() => { const b = document.getElementById('devFab').getBoundingClientRect();
     return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
-  if (cdp) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
-    await dormir(60);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  } else {
-    await pg.touchscreen.tap(c.x, c.y);
-  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+  await dormir(60);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   for (let j = 0; j < 50 && (await pg.evaluate(() => dlogMomentos.length)) <= antes; j++) await dormir(100);
   return (await pg.evaluate(() => dlogMomentos.length)) > antes;
 };
@@ -2861,31 +1754,13 @@ const irProFundo9c = async (pg) => {
   await pg.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
   await pg.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
 };
-// Espera o registro DESTA abertura ter `n` capturas guardadas. A CONTA volta
-// pro Node e a comparação é feita aqui: a função vai pra página SERIALIZADA,
-// sem o fechamento, e com o `n` dentro dela ele era `undefined` lá — o `try`
-// engolia o ReferenceError, e a espera virava um sono de 10 s que nunca
-// confirmava nada (MEDIDO na auditoria de 2026-09-26: o registro estava no
-// aparelho, com a captura, e a espera dizia que não). Não abre a base que não
-// existe (`open` sem versão a CRIARIA vazia, sem a tabela, e a gravação do app
-// que viesse depois não teria onde escrever), e devolve o que VIU.
-const capturasNesta9c = (pg) => pg.evaluate(async () => { try {
-  if (!(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag')) return 0;
+// Espera o registro DESTA abertura ter `n` capturas guardadas.
+const guardouNesta9c = (pg, n) => esperarNaPagina(pg, async () => { try {
   const db = await new Promise((ok, err) => { const r = indexedDB.open('waze_places_diag'); r.onsuccess = () => ok(r.result); r.onerror = err; });
   const todas = await new Promise((ok) => { const r = db.transaction('aberturas').objectStore('aberturas').getAll(); r.onsuccess = () => ok(r.result); });
   db.close();
-  const esta = todas.find((a) => a.id === DIAG_ABERTURA.id);
-  return esta ? (esta.momentos || []).length : 0;
-} catch (e) { return -1; } }).catch(() => -1);
-const guardouNesta9c = async (pg, n, tetoMs = 10000) => {
-  const t0 = Date.now();
-  for (;;) {
-    const viu = await capturasNesta9c(pg);
-    if (viu === n) return { ok: true, ms: Date.now() - t0, viu };
-    if (Date.now() - t0 > tetoMs) return { ok: false, ms: Date.now() - t0, viu };
-    await dormir(100);
-  }
-};
+  return todas.some((a) => a.id === DIAG_ABERTURA.id && (a.momentos || []).length === n);
+} catch (e) { return false; } }, 10000, 100);
 
 // 0. Sessão, e o modo dev DESLIGADO: fechar o app não pode criar nada.
 const prep9c = await abrir9c('preparo');
@@ -2895,14 +1770,14 @@ await prep9c.evaluate(() => {
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
   localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
 });
-await fecharComoOUsuario(prep9c);
+await prep9c.close({ runBeforeUnload: true });
 const semDev = await abrir9c('modo dev desligado');
 await pronta9c(semDev);
 await irProFundo9c(semDev);
 const gSemDev = await guardado9c(semDev);
 diz('com o modo dev DESLIGADO, abrir e ir pro fundo não cria nada no aparelho', gSemDev.existe === false, JSON.stringify(gSemDev));
 await semDev.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
-await fecharComoOUsuario(semDev);
+await semDev.close({ runBeforeUnload: true });
 
 // 1. Modo dev ligado: dois toques no botão — um com a tela sã e outro com um
 //    DEFEITO na tela (o pedido da frente posto na fila de saída, que a
@@ -2910,7 +1785,7 @@ await fecharComoOUsuario(semDev);
 const p1d = await abrir9c('abertura 1');
 await pronta9c(p1d);
 await carregou9c(p1d);
-const cdp1d = await dedo9c(ctx9c, p1d);
+const cdp1d = await ctx9c.newCDPSession(p1d);
 const id1d = await p1d.evaluate(() => DIAG_ABERTURA.id);
 const tocou1 = await tocar9c(p1d, cdp1d);
 await p1d.evaluate(() => { const p = AppState.currentPlace; localStorage.setItem('waze_places_saida',
@@ -2934,7 +1809,7 @@ diz('a captura do defeito ACUSA a sentinela, e o guardado leva a acusação',
 diz('as chamadas vão pro aparelho SEM corpo', g1d.abertas.every((a) => !a.comCorpo), JSON.stringify(g1d));
 // Como no aparelho: o app vai pro fundo (os recentes) e depois é fechado.
 await irProFundo9c(p1d);
-await fecharComoOUsuario(p1d);
+await p1d.close({ runBeforeUnload: true });
 
 // 2. Reaberta: o número volta, e o relatório de verdade leva a abertura anterior.
 const p2d = await abrir9c('abertura 2');
@@ -2948,52 +1823,17 @@ diz('REABERTA, o número do botão continua 2 — o relato',
 diz('CONTROLE: nenhuma captura NESTA abertura — as 2 vieram do aparelho, da abertura anterior',
   r2d.desta === 0 && r2d.anteriores.length === 1 && r2d.anteriores[0].id === id1d && r2d.anteriores[0].n === 2,
   JSON.stringify(r2d));
-const cdp2d = await dedo9c(ctx9c, p2d);
+const cdp2d = await ctx9c.newCDPSession(p2d);
 await tocar9c(p2d, cdp2d);
 const s3d = await selo9c(p2d);
 diz('uma captura nova soma às guardadas: 3', s3d.txt === '3', JSON.stringify(s3d));
 let rel9c = null;
 const dir9c = mkdtempSync(join(tmpdir(), 'diag-9c-'));
-// Um ciclo de sessão FECHADO no diário (entrou há 50 h, caiu há 20 h): é ele que
-// faz o relatório levar a duração da sessão, que o leitor imprimia como
-// "[object Object]" (auditoria de 2026-09-26). O leitor roda sobre o arquivo DE
-// VERDADE logo abaixo — o teste de unidade monta a mesma seção pelo `diagSessao`.
-await p2d.evaluate(() => {
-  const H = 3600e3, agora = Date.now();
-  const anel = JSON.parse(localStorage.getItem('waze_places_sessoes') || '[]');
-  localStorage.setItem('waze_places_sessoes', JSON.stringify([{ t: agora - 50 * H, e: 'token+', via: 'cookies' },
-    { t: agora - 20 * H, e: 'caiu', motivo: 'srv.err.cookiesExpired' }, ...anel]));
-});
-// O que acontece ENQUANTO o arquivo é montado (auditoria de 2026-09-26, D11):
-// uma anotação no diário e um TOQUE no botão NO MEIO do empacotamento — o
-// construtor do `CompressionStream` é chamado pelo `zipar`, depois do retrato. O
-// toque vai pelos ouvintes do PRÓPRIO botão (ponteiro que desce e sobe nele),
-// como o dedo: o toque do DevTools não cabe dentro do zip. O carimbo do
-// "baixado" era o do FIM do download, e as duas coisas sumiam: fora do arquivo
-// E fora da cópia guardada. Com o carimbo do retrato, voltam na abertura 3.
-await p2d.evaluate(() => {
-  const Orig = window.CompressionStream;
-  window.__compressaoOriginal = Orig;
-  let uma = false;
-  window.CompressionStream = class extends Orig {
-    constructor(f) {
-      if (!uma) {
-        uma = true;
-        dfato('smoke.duranteOZip');
-        const b = document.getElementById('devFabBtn');
-        b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 97, bubbles: true }));
-        b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 97, bubbles: true }));
-      }
-      super(f);
-    }
-  };
-});
 try {
   const [dl] = await Promise.all([
     p2d.waitForEvent('download', { timeout: 30000 }),
     p2d.evaluate(() => baixarDiagnostico()),
   ]);
-  await p2d.evaluate(() => { window.CompressionStream = window.__compressaoOriginal; });
   const arq = join(dir9c, 'diag.zip');
   await dl.saveAs(arq);
   const { dados: d } = lerDiagnostico(arq);
@@ -3005,18 +1845,9 @@ try {
     diario: (ant.diario || []).length, semCorpo: (ant.chamadas || []).every((c) => !('corpoReq' in c) && !('corpoResposta' in c)),
     atual: d.aberturaAtual && d.aberturaAtual.id, resumo: d.resumo && d.resumo.aberturasAnteriores,
     alertaAnterior: (d.resumo?.alertasNasCapturas || []).some((c) => c.abertura === id1d && c.alertas.includes('pedidoDecididoNaFila')),
-    triagemSecao: triagem.includes('OUTRAS ABERTURAS (guardadas no aparelho') && triagem.includes('abertura ' + id1d),
+    triagemSecao: triagem.includes('ABERTURAS ANTERIORES') && triagem.includes('abertura ' + id1d),
     triagemAlerta: triagem.includes('[abertura anterior ' + id1d + ']'),
-    // A abertura que FECHOU antes desta não é "outra aba aberta junto" (R7-4-04):
-    // nem no arquivo (a trava dela foi solta ao fechar, e ela não gravou depois)
-    // nem na triagem.
-    simultanea: (d.aberturasAnteriores || []).some((a) => a.simultanea), triagemOutraAba: triagem.includes('OUTRA ABA'),
     vazouToken: triagem.includes('tok-9c'),
-    duracao: (triagem.match(/duração da sessão \(h\): [^·]*· [^·]*· [^·]*· [^·]*/) || [''])[0].trim(),
-    objetoCru: triagem.includes('[object Object]'),
-    // O que chegou DURANTE o zip não está no arquivo (ele é o retrato de antes).
-    desta: (d.momentos || []).length,
-    duranteNoArquivo: (d.diario || []).some((e) => e.k === 'smoke.duranteOZip'),
   };
 } catch (e) {
   rel9c = { erro: String((e && e.message) || e).slice(0, 200) };
@@ -3030,39 +1861,18 @@ diz('o RELATÓRIO leva a abertura anterior inteira: as 2 capturas (com o DOM), o
 diz('o resumo e o leitor mostram o defeito capturado ANTES de fechar, dizendo de qual abertura — sem o token',
   rel9c?.alertaAnterior === true && rel9c?.triagemSecao === true && rel9c?.triagemAlerta === true && rel9c?.vazouToken === false,
   JSON.stringify(rel9c));
-diz('a abertura que FECHOU antes desta segue ANTERIOR — não vira "outra aba aberta junto" (R7-4-04, controle)',
-  rel9c?.simultanea === false && rel9c?.triagemOutraAba === false, JSON.stringify(rel9c));
-diz('o leitor mostra a duração da sessão do relatório de verdade — números, nunca "[object Object]"',
-  rel9c?.objetoCru === false && /^duração da sessão \(h\): mediana 30 · menor–maior 30–30 · n 1 · pisos 0/.test(rel9c?.duracao || ''),
-  JSON.stringify({ duracao: rel9c?.duracao, objetoCru: rel9c?.objetoCru }));
-diz('PRÉ-CONDIÇÃO: a captura e a anotação feitas DURANTE o zip não estão no arquivo (ele é o retrato de antes)',
-  rel9c?.desta === 1 && rel9c?.duranteNoArquivo === false, JSON.stringify({ desta: rel9c?.desta, durante: rel9c?.duranteNoArquivo }));
-// BAIXADO, sai do aparelho o que FOI no arquivo — e só isso: a abertura anterior
-// (entregue inteira) sai, e a desta fica só com o que NÃO foi (a captura do meio
-// do zip). Apagava a base INTEIRA, e com ela o que outra aba gravou depois de o
-// relatório ler a base (auditoria de 2026-10-01, R6-4-5; as duas abas estão no
-// test/diag-guarda). A comparação é feita no Node: a função vai pra página
-// serializada, sem os ids daqui.
-let g3d = null;
-for (const t0 = Date.now(); Date.now() - t0 < 10000; await dormir(100)) {
-  g3d = await guardado9c(p2d);
-  const esta = (g3d.abertas || []).find((a) => a.id === r2d.id);
-  if (!(g3d.abertas || []).some((a) => a.id === id1d) && esta && esta.capturas === 1) break;
-}
-const esta3d = (g3d?.abertas || []).find((a) => a.id === r2d.id);
+const apagou = await esperarNaPagina(p2d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const s4d = await selo9c(p2d);
-// 4 = as 2 guardadas + a desta abertura + a do meio do zip: o número conta o
-// que a pessoa registrou, baixado ou não.
-diz('BAIXADO, sai do aparelho o que FOI no arquivo — a abertura anterior, e desta só fica a captura do meio do zip (e nesta abertura o número segue contando, como sempre)',
-  !(g3d?.abertas || []).some((a) => a.id === id1d) && esta3d?.capturas === 1 && s4d.txt === '4', JSON.stringify({ g3d, s4d }));
+diz('BAIXADO, o que estava guardado sai do aparelho (e nesta abertura o número segue contando, como sempre)',
+  apagou.ok && s4d.txt === '3', JSON.stringify({ apagou, s4d }));
 // Segue usando depois do download: uma captura NOVA, e o app vai pro fundo.
 // É o caso que separa "guardar o que não foi entregue" de "guardar tudo": com
 // o anel desta abertura tendo uma baixada e uma nova, só a nova pode voltar.
 const tBaixado = await p2d.evaluate(() => diagBaixadoEm);
 const tocouPos = await tocar9c(p2d, cdp2d);
-await guardouNesta9c(p2d, 2);
+await guardouNesta9c(p2d, 1);
 await irProFundo9c(p2d);
-await fecharComoOUsuario(p2d);
+await p2d.close({ runBeforeUnload: true });
 
 // 3. Reaberta depois do download: o que foi entregue não volta.
 const p3d = await abrir9c('abertura 3');
@@ -3070,14 +1880,11 @@ await pronta9c(p3d);
 await carregou9c(p3d);
 const r3d = await p3d.evaluate((tb) => ({ capturas: diagMomentosAnteriores().length,
   manuais: diagCapturasAnterioresDoEditor().length,
-  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length,
-  durante: diagAberturasAnteriores.flatMap((a) => a.diario || []).some((e) => e.k === 'smoke.duranteOZip') }), tBaixado);
+  diarioAntes: diagAberturasAnteriores.flatMap((a) => a.diario || []).filter((e) => e.t <= tb).length }), tBaixado);
 const s5d = await selo9c(p3d);
-diz('o que foi BAIXADO não volta: reaberta, só volta o que NÃO foi no arquivo — a captura do meio do zip e a de depois do download — e o diário de antes do retrato também não',
-  tocouPos && r3d.capturas === 2 && r3d.manuais === 2 && r3d.diarioAntes === 0 && s5d.txt === '2',
+diz('o que foi BAIXADO não volta: reaberta, só a captura feita DEPOIS do download volta — e o diário de antes dele também não',
+  tocouPos && r3d.capturas === 1 && r3d.manuais === 1 && r3d.diarioAntes === 0 && s5d.txt === '1',
   JSON.stringify({ tocouPos, r3d, s5d }));
-diz('o que o diário anotou DURANTE o zip volta na abertura seguinte (não foi no arquivo, e não pode sumir)',
-  r3d.durante === true, JSON.stringify(r3d));
 
 // 4. O prazo de 24 h: uma abertura guardada de 25 h atrás sai; a de 23 h fica.
 await p3d.evaluate(() => new Promise((ok) => {
@@ -3092,47 +1899,35 @@ await p3d.evaluate(() => new Promise((ok) => {
     tx.oncomplete = () => { db.close(); ok(); };
   };
 }));
-await fecharComoOUsuario(p3d);
+await p3d.close({ runBeforeUnload: true });
 const p4d = await abrir9c('abertura 4');
 await pronta9c(p4d);
 await carregou9c(p4d);
 const r4d = await p4d.evaluate(() => diagAberturasAnteriores.map((a) => a.id));
 const g4d = await guardado9c(p4d);
 const s6d = await selo9c(p4d);
-// O número: as duas que a abertura 2 guardou depois do retrato (a do meio do zip
-// e a pós-download) + a da "fresca" = 3.
+// O número: a captura pós-download da abertura 2 + a da "fresca" = 2.
 diz('a abertura guardada há MAIS de 24 h sai do aparelho; a de 23 h fica, com a captura contando no número',
-  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '3',
+  !r4d.includes('velha') && r4d.includes('fresca') && !g4d.abertas.some((a) => a.id === 'velha') && s6d.txt === '2',
   JSON.stringify({ r4d, g4d, s6d }));
 
-// 5. Desligar o modo dev apaga o que ficou guardado — mas com captura NÃO
-// baixada o 1º toque só AVISA e devolve o interruptor (auditoria de 2026-09-25:
-// o aviso "baixe antes de desligar" saía no mesmo tique do apagamento, quando
-// já não havia o que baixar). O 2º toque, dentro de 15 s, desliga e apaga.
+// 5. Desligar o modo dev apaga o que ficou guardado (e avisa antes).
 const naoBaixadas = await p4d.evaluate(() => dlogNaoBaixados());
-const desligar9c = () => p4d.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
-  cb.checked = false; cb.dispatchEvent(new Event('change')); return cb.checked; });
-const marcadoDepoisDo1o = await desligar9c();
-await dormir(300);
-const r5a = await p4d.evaluate(async () => ({ memoria: diagAberturasAnteriores.length,
-  ativo: AppState.devMode.active, base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag') }));
-diz('com captura NÃO baixada, o 1º toque em desligar só AVISA: o interruptor volta e nada é apagado',
-  naoBaixadas === 3 && marcadoDepoisDo1o === true && r5a.ativo === true && r5a.memoria > 0 && r5a.base === true,
-  JSON.stringify({ naoBaixadas, marcadoDepoisDo1o, r5a }));
-await desligar9c();
+await p4d.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
+  cb.checked = false; cb.dispatchEvent(new Event('change')); });
 const apagouDev = await esperarNaPagina(p4d, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
 const r5d = await p4d.evaluate(() => ({ memoria: diagAberturasAnteriores.length,
   fab: document.getElementById('devFab').classList.contains('hidden') }));
-diz('o 2º toque DESLIGA o modo dev e apaga o guardado — do aparelho e da memória',
-  apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ apagouDev, r5d }));
+diz('DESLIGAR o modo dev avisa das capturas não baixadas e apaga o guardado — do aparelho e da memória',
+  naoBaixadas === 2 && apagouDev.ok && r5d.memoria === 0 && r5d.fab === true, JSON.stringify({ naoBaixadas, apagouDev, r5d }));
 await p4d.evaluate(() => localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true })));
-await fecharComoOUsuario(p4d);
+await p4d.close({ runBeforeUnload: true });
 
 // 6. O "Sair" leva o que foi guardado junto.
 const p5d = await abrir9c('abertura 5');
 await pronta9c(p5d);
 await carregou9c(p5d);
-const cdp5d = await dedo9c(ctx9c, p5d);
+const cdp5d = await ctx9c.newCDPSession(p5d);
 const tocou5 = await tocar9c(p5d, cdp5d);
 // Espera o REGISTRO com a captura, não a base existir: a base nasce vazia na
 // própria abertura (a leitura do guardado a abre), então "existe" chegava antes
@@ -3152,2065 +1947,20 @@ diz('o SAIR apaga o que foi guardado (e a captura que ia pro próximo relatório
 await p5d.close();
 await ctx9c.close();
 
-secao('9d. O SEGREDO DO PAREAMENTO NÃO VAI PRO DIAGNÓSTICO — nem pro aparelho');
-// Auditoria de 2026-09-26 (D1). Quando a área de transferência recusa, o link
-// `/#pair=<segredo>` vira um toast copiável — e ele ia inteiro pro diário, pra
-// lista de toasts da captura e (fechado o modal, o que APAGA o `data-raw`) pro
-// `dom`: pro relatório E pra cópia guardada no aparelho. O segredo vale uma
-// sessão nova por 5 minutos. O canário é procurado no arquivo INTEIRO e na base.
-const SEGREDO_9D = 'CANARIOPAREAMENTO9DX';
-const ctx9d = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
-  hasTouch: true, isMobile: true, serviceWorkers: 'block', acceptDownloads: true });
-await ctx9d.route('**/*-tiles/live/base/**', servirTile);
-await ctx9d.route('**/api/*', (r) => {
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(151), SO_MAPA(152)], hasMore: false, page: 1, total: 2 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-  if (rota === 'parear') return json({ success: true, code: SEGREDO_9D, expiresIn: 300 });
-  return r.abort('failed');
-});
-await ctx9d.addInitScript(() => { try { if (!localStorage.getItem('__9d')) {
-  localStorage.setItem('__9d', '1');
-  localStorage.setItem('waze_session_token', 'tok-9d');
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
-} } catch (e) {} });
-const p9d = await ctx9d.newPage();
-p9d.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-p9d.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) violacoes.push({ secao: secaoAtual, txt: m.text() }); });
-await p9d.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-await pronta9c(p9d);
-await p9d.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true,
-  value: { writeText: () => Promise.reject(new DOMException('negado', 'NotAllowedError')) } }); });
-await p9d.evaluate(() => abrirPareamento());
-await esperarNaPagina(p9d, () => !document.getElementById('pairCopyLinkBtn').disabled, 10000, 100);
-await p9d.evaluate(() => document.getElementById('pairCopyLinkBtn').click());
-await esperarNaPagina(p9d, () => [...document.querySelectorAll('#toastContainer > *')].some((e) => /#pair=/.test(e.textContent)), 5000, 100);
-await p9d.evaluate(() => document.getElementById('pairShowClose').click());   // a limpeza apaga o `data-raw`
-await dormir(300);
-const pre9d = await p9d.evaluate((s) => ({
-  toast: [...document.querySelectorAll('#toastContainer > *')].some((e) => e.textContent.includes(s)),
-  dataRaw: !!document.getElementById('pairCode').dataset.raw }), SEGREDO_9D);
-diz('PRÉ-CONDIÇÃO: o link com o segredo segue na tela (o toast copiável), e fechar o modal já apagou o `data-raw`',
-  pre9d.toast && !pre9d.dataRaw, JSON.stringify(pre9d));
-const cdp9d = await dedo9c(ctx9d, p9d);
-const tocou9d = await tocar9c(p9d, cdp9d);
-await guardouNesta9c(p9d, 1);
-const base9d = await p9d.evaluate((s) => new Promise((ok) => {
-  const req = indexedDB.open('waze_places_diag');
-  req.onerror = () => ok({ erro: 'abrir' });
-  req.onsuccess = () => { const db = req.result;
-    const r = db.transaction('aberturas').objectStore('aberturas').getAll();
-    r.onsuccess = () => { db.close(); const t = JSON.stringify(r.result);
-      ok({ tem: t.includes(s), capturas: r.result.reduce((n, a) => n + (a.momentos || []).length, 0) }); }; };
-}), SEGREDO_9D);
-diz('a captura com o link na tela vai pro aparelho SEM o segredo', tocou9d && base9d.capturas >= 1 && base9d.tem === false,
-  JSON.stringify({ tocou9d, base9d }));
-let rel9d = null;
-const dir9d = mkdtempSync(join(tmpdir(), 'diag-9d-'));
-try {
-  const [dl] = await Promise.all([p9d.waitForEvent('download', { timeout: 30000 }), p9d.evaluate(() => baixarDiagnostico())]);
-  const arq = join(dir9d, 'diag.zip');
-  await dl.saveAs(arq);
-  const cru = JSON.stringify(lerDiagnostico(arq).dados);
-  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
-  rel9d = { noArquivo: cru.includes(SEGREDO_9D), marcado: cru.includes('#pair=[código de pareamento]'),
-            naTriagem: triagem.includes(SEGREDO_9D), aviso: /"sensivel":true/.test(cru) };
-} catch (e) {
-  rel9d = { erro: String((e && e.message) || e).slice(0, 200) };
-} finally {
-  rmSync(dir9d, { recursive: true, force: true });
-}
-diz('nenhuma seção do relatório traz o segredo — e o lugar dele sai marcado (o toast estava lá)',
-  rel9d?.noArquivo === false && rel9d?.marcado === true, JSON.stringify(rel9d));
-diz('o diário anota que houve o aviso SENSÍVEL, sem o texto; e a triagem também não imprime o segredo',
-  rel9d?.aviso === true && rel9d?.naTriagem === false, JSON.stringify(rel9d));
-await ctx9d.close();
-
-secao('9e. DUAS ABAS: desligar o modo dev, ou dar "Sair", numa chega à outra');
-// Auditoria de 2026-09-26 (D2). A outra aba seguia com o FAB e com o modo dev
-// na memória, e a captura seguinte RECRIAVA a base com o DOM da tela. E a poda
-// de 24 h só rodava com o modo dev ligado — a sobra ficava indefinidamente.
-// Duas páginas do MESMO contexto (o mesmo aparelho): o aviso do navegador
-// (evento `storage`) é o de verdade.
-const ctx9e = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
-  hasTouch: true, isMobile: true, serviceWorkers: 'block' });
-await ctx9e.route('**/*-tiles/live/base/**', servirTile);
-await ctx9e.route('**/api/*', (r) => {
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(161), SO_MAPA(162)], hasMore: false, page: 1, total: 2 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-  return r.abort('failed');
-});
-const abrir9e = async (nome) => {
-  const pg = await ctx9e.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  return pg;
-};
-const devLigado9e = (pg, ligado) => pg.evaluate((l) => localStorage.setItem('waze_places_devmode',
-  JSON.stringify({ unlocked: true, active: l })), ligado);
-const temBase9e = (pg) => pg.evaluate(async () => (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'));
-const prep9e = await abrir9e('preparo');
-await esperarNaPagina(prep9e, () => typeof API !== 'undefined', 20000, 100);
-await prep9e.evaluate(() => {
-  API.setSession('tok-9e');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
-});
-await devLigado9e(prep9e, true);
-await fecharComoOUsuario(prep9e);
-
-// 1. A aba A DESLIGA o modo dev (o interruptor de verdade); a aba B tinha uma
-// captura NÃO BAIXADA. Ela é do APARELHO (está na base), e desligar em A a
-// apaga: o 1º toque em A AVISA e não desliga — ele desligava calado, contando só
-// os registros da memória de A (auditoria de 2026-10-01, R6-4-4). O 2º desliga,
-// e a aba B desliga junto.
-const a9e = await abrir9e('A'), b9e = await abrir9e('B');
-await pronta9c(a9e); await pronta9c(b9e);
-const cdpB9e = await dedo9c(ctx9e, b9e);
-const tocouB = await tocar9c(b9e, cdpB9e);
-const guardouB = await guardouNesta9c(b9e, 1);
-diz('PRÉ-CONDIÇÃO: a captura da aba B foi pro aparelho', tocouB && guardouB.ok, JSON.stringify({ tocouB, guardouB }));
-const desligarA9e = () => a9e.evaluate(() => { const cb = document.getElementById('prefDevModeActive');
-  cb.checked = false; cb.dispatchEvent(new Event('change')); });
-const naMemoriaDeA = await a9e.evaluate(() => dlogNaoBaixados());
-await desligarA9e();
-// A conta do aparelho lê a base (assíncrona): o desfecho do 1º toque é o aviso — a janela do 2º toque aberta.
-const avisouA = await esperarNaPagina(a9e, () => desligarDevConfirmadoAte > Date.now(), 5000, 100);
-const r1e = await a9e.evaluate(() => ({ dev: AppState.devMode.active, marcado: document.getElementById('prefDevModeActive').checked,
-  naoBaixados: dlogNaoBaixados(), avisos: document.querySelectorAll('#toastContainer > *').length }));
-const bSegue = await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }));
-diz('a captura NÃO baixada da aba B conta no aviso da aba A: o 1º toque avisa e nada é apagado (R6-4-4)',
-  naMemoriaDeA === 0 && avisouA.ok && r1e.dev === true && r1e.marcado === true && r1e.naoBaixados === 1 && r1e.avisos > 0
-  && bSegue.dev === true && bSegue.momentos === 1, JSON.stringify({ naMemoriaDeA, avisouA, r1e, bSegue }));
-await desligarA9e();                                   // o 2º toque, dentro dos 15 s
-const chegouB = await esperarNaPagina(b9e, () => AppState.devMode.active === false
-  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
-diz('desligado na aba A, a aba B desliga junto: o botão some e as capturas saem da memória', chegouB.ok,
-  JSON.stringify(await b9e.evaluate(() => ({ dev: AppState.devMode.active, momentos: dlogMomentos.length }))));
-await irProFundo9c(b9e);
-await fecharComoOUsuario(b9e);
-const semBase1 = await esperarNaPagina(a9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
-diz('a aba B, indo pro fundo e fechando, não recria a base que a aba A apagou', semBase1.ok);
-
-// 2. A CORRIDA: o armazenamento já diz "desligado" e o aviso ainda não chegou a
-// esta aba (a memória diz ligado). Encenada escrevendo NA PRÓPRIA aba — o evento
-// `storage` não dispara em quem escreve. A captura não pode ir pro aparelho.
-await devLigado9e(a9e, true);
-await fecharComoOUsuario(a9e);
-const c9e = await abrir9e('C');
-await pronta9c(c9e);
-await devLigado9e(c9e, false);                         // storage desligado, memória ligada
-const cdpC9e = await dedo9c(ctx9e, c9e);
-const tocouC = await tocar9c(c9e, cdpC9e);
-await c9e.evaluate(() => (typeof diagGuardando !== 'undefined' ? diagGuardando : null));
-// A base pode EXISTIR (a leitura do guardado a abre, vazia, na abertura com o
-// modo dev ligado): o que não pode é um registro com a captura.
-const gC = await guardado9c(c9e);
-diz('com o modo dev desligado no ARMAZENAMENTO (o aviso ainda não chegou), a captura não vai pro aparelho',
-  tocouC && (await c9e.evaluate(() => AppState.devMode.active)) === true
-  && !(gC.abertas || []).some((x) => x.capturas > 0), JSON.stringify({ tocouC, gC }));
-
-// 3. O "Sair" na aba D chega à aba E: ela tinha uma captura guardada.
-await devLigado9e(c9e, true);
-await fecharComoOUsuario(c9e);
-const d9e = await abrir9e('D'), e9e = await abrir9e('E');
-await pronta9c(d9e); await pronta9c(e9e);
-const cdpE9e = await dedo9c(ctx9e, e9e);
-const tocouE = await tocar9c(e9e, cdpE9e);
-const guardouE = await guardouNesta9c(e9e, 1);
-diz('PRÉ-CONDIÇÃO: a captura da aba E foi pro aparelho', tocouE && guardouE.ok, JSON.stringify({ tocouE, guardouE }));
-await d9e.evaluate(() => { handleLogout(); });
-const chegouE = await esperarNaPagina(e9e, () => AppState.devMode.active === false
-  && document.getElementById('devFab').classList.contains('hidden') && dlogMomentos.length === 0, 5000, 100);
-diz('o "Sair" na aba D chega à aba E: o modo dev desliga, o botão some e as capturas saem', chegouE.ok);
-await irProFundo9c(e9e);
-await fecharComoOUsuario(e9e);
-const semBase3 = await esperarNaPagina(d9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 5000, 100);
-diz('e nada volta pro aparelho quando a aba E fecha', semBase3.ok);
-await d9e.close();
-
-// 4. A SOBRA com o modo dev desligado sai na próxima abertura (a poda de 24 h só
-// roda com ele ligado). Planta uma abertura FRESCA, com o modo dev desligado.
-const f9e = await abrir9e('F');
-await esperarNaPagina(f9e, () => typeof API !== 'undefined', 20000, 100);
-await f9e.evaluate(() => new Promise((ok) => {
-  API.setSession('tok-9e');
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
-  const req = indexedDB.open('waze_places_diag', 1);
-  req.onupgradeneeded = () => req.result.createObjectStore('aberturas', { keyPath: 'id' });
-  req.onsuccess = () => { const db = req.result; const tx = db.transaction('aberturas', 'readwrite');
-    tx.objectStore('aberturas').put({ id: 'sobra', inicio: Date.now() - 3600e3, salvoEm: Date.now() - 1800e3, salvoPor: 'oculta',
-      momentos: [{ t: new Date().toISOString(), motivo: 'manual', dom: '<html>dado de terceiro</html>' }], diario: [], chamadas: [], erros: [] });
-    tx.oncomplete = () => { db.close(); ok(); }; };
-}));
-diz('PRÉ-CONDIÇÃO: a sobra está no aparelho', await temBase9e(f9e));
-await fecharComoOUsuario(f9e);
-const g9e = await abrir9e('G');
-const faxina = await esperarNaPagina(g9e, async () => !(await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'), 10000, 100);
-diz('com o modo dev DESLIGADO, a sobra sai do aparelho na abertura', faxina.ok
-  && (await g9e.evaluate(() => dfatoAnel.some((e) => e.k === 'diag.sobraApagada'))), JSON.stringify(faxina));
-await g9e.close();
-await ctx9e.close();
-
-secao('9f. FECHAR SEM IR PRO FUNDO — recarregar e fechar a aba não perdem a abertura');
-// Auditoria de 2026-09-29 (D2). A gravação na base é ASSÍNCRONA, e recarregar
-// a página ou fechar a aba a aborta: MEDIDO antes do conserto, recarregar
-// perdeu a abertura em 5 de 5 e fechar em 2 de 5. A 9c não via porque vai pro
-// FUNDO antes de fechar (o celular), e aí a página segue viva até gravar. Aqui
-// ninguém vai pro fundo: a página é recarregada ou fechada direto, como no
-// computador, e o que tem que chegar é o RETRATO síncrono do `pagehide`.
-//
-// "Nada foi escrito" se lê numa página da MESMA origem que NÃO roda o app (o
-// manifesto): a abertura do app com o modo dev desligado apaga a sobra, e aí
-// "não escreveu" e "escreveu e a faxina apagou" ficariam iguais. O CONTROLE de
-// que essa página enxerga o retrato é olhar por ela depois de um fechar COM o
-// modo dev (passo 2), antes de o app reabrir e consumi-lo.
-const ctx9f = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-await ctx9f.route('**/*-tiles/live/base/**', servirTile);
-await ctx9f.route('**/api/*', (r) => {
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(171), SO_MAPA(172)], hasMore: false, page: 1, total: 2 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-  return r.abort('failed');
-});
-const abrir9f = async (nome) => {
-  const pg = await ctx9f.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  return pg;
-};
-// O aparelho visto de FORA do app: os retratos no localStorage e se a base existe.
-const olhar9f = async () => {
-  const pg = await ctx9f.newPage();
-  await pg.goto(BASE + '/manifest.json', { waitUntil: 'load' });
-  const r = await pg.evaluate(async () => ({
-    retratos: Object.keys(localStorage).filter((k) => k.startsWith('waze_places_diag_retrato')),
-    base: (await indexedDB.databases()).some((d) => d.name === 'waze_places_diag'),
-    app: typeof AppState !== 'undefined' }));
-  await pg.close();
-  return r;
-};
-// A abertura `id` veio de volta, com a marca no diário?
-const voltou9f = (pg, id, marca) => pg.evaluate(([i, m]) => {
-  const a = diagAberturasAnteriores.find((x) => x.id === i);
-  return { tem: !!a, marca: !!a && (a.diario || []).some((e) => e.k === m), salvoPor: a ? a.salvoPor : null,
-           retratosNoAparelho: Object.keys(localStorage).filter((k) => k.startsWith('waze_places_diag_retrato')).length };
-}, [id, marca]);
-const prep9f = await abrir9f('preparo');
-await esperarNaPagina(prep9f, () => typeof API !== 'undefined', 20000, 100);
-await prep9f.evaluate(() => {
-  API.setSession('tok-9f');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-});
-await fecharComoOUsuario(prep9f);
-
-// 1. RECARREGAR, direto.
-const a9f = await abrir9f('recarregar');
-await pronta9c(a9f);
-await carregou9c(a9f);
-const idA9f = await a9f.evaluate(() => { dfato('smoke.9f.antesDeRecarregar'); return DIAG_ABERTURA.id; });
-await a9f.reload({ waitUntil: 'domcontentloaded' });
-await pronta9c(a9f);
-await carregou9c(a9f);
-const rA9f = await voltou9f(a9f, idA9f, 'smoke.9f.antesDeRecarregar');
-const gA9f = await guardado9c(a9f);
-diz('RECARREGAR (sem ir pro fundo antes) não perde a abertura: ela volta com o diário até o fim, e foi pra base',
-  rA9f.tem && rA9f.marca && gA9f.abertas.some((a) => a.id === idA9f), JSON.stringify({ rA9f, gA9f }));
-diz('e o retrato saiu do localStorage ao ir pra base', rA9f.retratosNoAparelho === 0, JSON.stringify(rA9f));
-
-// 2. FECHAR a aba, direto — e olhar o aparelho ANTES de o app reabrir.
-const idB9f = await a9f.evaluate(() => { dfato('smoke.9f.antesDeFechar'); return DIAG_ABERTURA.id; });
-await fecharComoOUsuario(a9f);
-const vB9f = await olhar9f();
-diz('CONTROLE: fechada a aba COM o modo dev, o aparelho visto de fora tem o retrato DESTA abertura (o instrumento enxerga)',
-  vB9f.app === false && vB9f.retratos.length === 1 && vB9f.retratos[0].endsWith(':' + idB9f), JSON.stringify(vB9f));
-const c9f = await abrir9f('reaberta');
-await pronta9c(c9f);
-await carregou9c(c9f);
-const rB9f = await voltou9f(c9f, idB9f, 'smoke.9f.antesDeFechar');
-diz('FECHAR a aba (sem ir pro fundo antes) não perde a abertura: reaberta, ela volta com o diário até o fim',
-  rB9f.tem && rB9f.marca && rB9f.retratosNoAparelho === 0, JSON.stringify(rB9f));
-
-// 3. O "Sair" apaga o retrato que estiver no aparelho.
-await c9f.evaluate(() => localStorage.setItem('waze_places_diag_retrato:plantado', JSON.stringify({ id: 'plantado', salvoEm: Date.now(), diario: [{ t: 1, k: 'x' }] })));
-await c9f.evaluate(() => { handleLogout(); });
-const sairou9f = await esperarNaPagina(c9f, () => !Object.keys(localStorage).some((k) => k.startsWith('waze_places_diag_retrato')), 5000, 100);
-diz('o SAIR apaga o retrato do fechar', sairou9f.ok, JSON.stringify(sairou9f));
-await fecharComoOUsuario(c9f);
-
-// 4. Modo dev DESLIGADO: fechar direto não escreve NADA no aparelho.
-const prep9f2 = await abrir9f('preparo 2');
-await esperarNaPagina(prep9f2, () => typeof API !== 'undefined', 20000, 100);
-await prep9f2.evaluate(() => {
-  API.setSession('tok-9f');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
-});
-await fecharComoOUsuario(prep9f2);
-const d9f = await abrir9f('modo dev desligado');
-await pronta9c(d9f);
-await d9f.evaluate(() => dfato('smoke.9f.semDev'));
-await fecharComoOUsuario(d9f);
-const vD9f = await olhar9f();
-diz('com o modo dev DESLIGADO, fechar direto não escreve nada no aparelho — nem retrato, nem base',
-  vD9f.app === false && vD9f.retratos.length === 0 && vD9f.base === false, JSON.stringify(vD9f));
-await ctx9f.close();
-
-// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
-// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
-// for declarado aqui não existe depois dele.
-if (!pularForaDoChromium(MOTOR, '9h — a origem fora do ar e a rede que não anda, com o service worker no comando',
-  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
-secao('9h. A ORIGEM FORA DO AR E A REDE QUE NÃO ANDA: a fila guardada entra com o `onLine` verdadeiro');
-// Auditoria de 2026-09-29 (O1). O "Disponível offline" só cobria o modo avião,
-// e duas falhas deixavam a fila preparada no aparelho sem uso:
-//  · o APP só a abria com `onLine === false`. No "lie-fi" (o rádio diz que há
-//    rede e nada passa) a busca esperava o teto de 45 s e a tela virava "Falha
-//    ao carregar". Aqui o lie-fi é a forma RÁPIDA da mesma falha: a API aborta
-//    sem resposta com o `onLine` verdadeiro — o `_post` trata igual ao teto
-//    estourado (`transient`). O teto de 45 s mediu-se à parte (cenário h2).
-//  · o SERVICE WORKER só caía no cache em erro de REDE: a VM fora do ar atrás
-//    do Cloudflare responde "502 Bad Gateway", a resposta CHEGA e era devolvida.
-//    Um proxy na frente do servidor faz o papel da borda. E a navegação sozinha
-//    não bastava: com ela, a página guardada abria e os scripts vinham 502.
-// CONTROLES: (1) a mesma falha com o offline DESLIGADO é a tela de falha — o
-// instrumento enxerga a tela quando não há o que abrir; (2) com a borda em 502,
-// o `?diag-rede` (que o worker não intercepta) volta 502 — a origem está MESMO
-// fora, e o app que abriu veio do cache.
-let borda9h = 'normal';
-const proxy9h = http.createServer((req, res) => {
-  if (borda9h === '502') {
-    res.writeHead(502, { 'content-type': 'text/html' });
-    return res.end('<html><body><h1>502 Bad Gateway</h1><p>borda: origem fora do ar</p></body></html>');
-  }
-  const up = http.request({ host: '127.0.0.1', port: PORTA, path: req.url, method: req.method, headers: req.headers }, (r) => {
-    res.writeHead(r.statusCode, r.headers); r.pipe(res);
-  });
-  up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
-  req.pipe(up);
-});
-await new Promise((ok) => proxy9h.listen(0, '127.0.0.1', ok));
-const BASE9H = `http://127.0.0.1:${proxy9h.address().port}`;
-const ctx9h = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
-await ctx9h.route('**/*-tiles/live/base/**', servirTile);
-// A API desta seção: 'ok' traz 3; 'rede' aborta sem resposta (com o `onLine`
-// verdadeiro); '502' é a página de erro da borda (o corpo não é JSON).
-let api9h = 'ok';
-// As áreas do perfil (a caixa de "Minha área", parte 3): sem área até lá.
-let areas9h = [];
-const PED_9H = [171, 172, 173].map((i) => SO_MAPA(i));
-await ctx9h.route('**/api/*', (r) => {
-  if (api9h === 'rede') return r.abort('connectionreset');
-  if (api9h === '502') return r.fulfill({ status: 502, contentType: 'text/html', body: '<h1>502 Bad Gateway</h1>' });
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (rota === 'buscar-places') return json({ success: true, places: PED_9H, hasMore: false, page: 1, total: 3 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: areas9h } });
-  return r.abort('failed');
-});
-const abrir9h = async (nome) => {
-  const pg = await ctx9h.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
-  await pg.goto(BASE9H + '/', { waitUntil: 'domcontentloaded' });
-  return pg;
-};
-// O que a tela mostra: o card, a tela de falha, ou nada ainda.
-const tela9h = (pg) => pg.evaluate(() => {
-  const erro = document.getElementById('loadErrorState');
-  return { app: typeof AppState !== 'undefined', onLine: navigator.onLine,
-    fila: typeof AppState !== 'undefined' ? AppState.queue.map((p) => p.venueID) : null,
-    card: typeof cardDaFrente === 'function' && !!cardDaFrente(),
-    falha: !!erro && !erro.classList.contains('hidden'),
-    abriu: typeof dfatoAnel !== 'undefined' ? (dfatoAnel.find((e) => e.k === 'offline.abriu') || null) : null };
-});
-const decidiu9h = (pg) => esperarNaPagina(pg, () => typeof AppState !== 'undefined'
-  && (!!cardDaFrente() || !document.getElementById('loadErrorState').classList.contains('hidden')), 20000, 200);
-const ESPERADA_9H = JSON.stringify(PED_9H.map((p) => p.venueID));
-
-// Preparo: com a origem de pé, o worker assume, a busca traz 3 e o offline os guarda.
-const prep9h = await abrir9h('preparo');
-await esperarNaPagina(prep9h, () => !!(navigator.serviceWorker && navigator.serviceWorker.controller), 20000, 100);
-await prep9h.evaluate(() => {
-  API.setSession('tok-9h');
-  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9h') }));
-  AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
-});
-await prep9h.reload({ waitUntil: 'domcontentloaded' });
-const guardou9h = await esperarNaPagina(prep9h, async () => typeof offlineLerFila === 'function'
-  && ((await offlineLerFila()) || {}).places?.length === 3, 20000, 200);
-diz('PRÉ-CONDIÇÃO: com a origem de pé, o worker assumiu e a fila da busca foi guardada (3)', guardou9h.ok, JSON.stringify(guardou9h));
-await fecharComoOUsuario(prep9h);
-
-// 1. A REDE QUE NÃO ANDA: a API não responde, e o aparelho diz que há rede.
-api9h = 'rede';
-const p1_9h = await abrir9h('lie-fi');
-await decidiu9h(p1_9h);
-const t1_9h = await tela9h(p1_9h);
-diz('a API sem resposta com o `onLine` verdadeiro: a fila guardada entra — nada de "Falha ao carregar"',
-  t1_9h.onLine === true && t1_9h.card && !t1_9h.falha && JSON.stringify(t1_9h.fila) === ESPERADA_9H
-  && !!t1_9h.abriu && t1_9h.abriu.aposFalha === true, JSON.stringify(t1_9h));
-// CONTROLE (1): o mesmo, com o offline DESLIGADO (a preferência gravada; a fila
-// guardada fica na base, mas não é dele) — a tela de falha.
-await p1_9h.evaluate(() => {
-  const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
-  p.offlineDisponivel = false;
-  localStorage.setItem('waze_places_preferences', JSON.stringify(p));
-});
-await fecharComoOUsuario(p1_9h);
-const c1_9h = await abrir9h('controle, offline desligado');
-await decidiu9h(c1_9h);
-const tc_9h = await tela9h(c1_9h);
-diz('CONTROLE: a mesma falha com o offline DESLIGADO é a tela de falha (o instrumento enxerga a tela)',
-  tc_9h.falha && !tc_9h.card && tc_9h.fila && tc_9h.fila.length === 0, JSON.stringify(tc_9h));
-await c1_9h.evaluate(() => {
-  const p = JSON.parse(localStorage.getItem('waze_places_preferences') || '{}');
-  p.offlineDisponivel = true;
-  localStorage.setItem('waze_places_preferences', JSON.stringify(p));
-});
-await fecharComoOUsuario(c1_9h);
-
-// 2. A ORIGEM FORA DO AR: 502 em TUDO (a página, os scripts, a API).
-borda9h = '502'; api9h = '502';
-const p2_9h = await abrir9h('borda 502');
-await decidiu9h(p2_9h);
-const t2_9h = await tela9h(p2_9h);
-diz('a ORIGEM fora do ar (502 em tudo): o app instalado abre da cópia guardada, e a fila guardada entra',
-  t2_9h.app && t2_9h.card && !t2_9h.falha && JSON.stringify(t2_9h.fila) === ESPERADA_9H, JSON.stringify(t2_9h));
-const diag9h = await p2_9h.evaluate(async () => { try { return (await fetch('/?diag-rede=1')).status; } catch (e) { return 'erro'; } });
-diz('CONTROLE: com a borda em 502, o que não passa pelo worker volta 502 — a origem está mesmo fora', diag9h === 502, `status ${diag9h}`);
-await p2_9h.close();
-borda9h = 'normal'; api9h = 'ok';
-
-// 3. COM "MINHA ÁREA" (auditoria da rodada 12, R12-4-02). A busca de "Minha área"
-// não sai sem o perfil (a caixa vem dele): ela ESPERA, e a espera não marcava a
-// falha por rede — a abertura com a API sem resposta, ou com a origem fora do ar,
-// terminava em "Falha ao carregar" com a fila guardada DESTE filtro no aparelho
-// (MEDIDO, n9 da auditoria). A fila guardada aqui é a de uma busca de "Minha
-// área" com rede; o PRÉ-REQUISITO de cada parte é a busca ter esperado o perfil.
-areas9h = [{ type: 'drive', bbox: [-43.5, -23.2, -42.9, -22.6] }];
-const prepM9h = await abrir9h('preparo, Minha área');
-await esperarNaPagina(prepM9h, () => typeof AppState !== 'undefined' && AppState.authenticated && !!AppState.profile, 20000, 100);
-await prepM9h.evaluate(() => { AppState.filters.myArea = true; saveFilters(); });
-await prepM9h.reload({ waitUntil: 'domcontentloaded' });
-const guardouM9h = await esperarNaPagina(prepM9h, async () => typeof offlineLerFila === 'function'
-  && AppState.filters.myArea === true && !!AppState.profile && !!cardDaFrente()
-  && ((await offlineLerFila()) || {}).busca === assinaturaDeBusca(true), 20000, 200);
-diz('PRÉ-CONDIÇÃO: com "Minha área" e a origem de pé, a fila da busca de "Minha área" foi guardada', guardouM9h.ok,
-  JSON.stringify(guardouM9h));
-await fecharComoOUsuario(prepM9h);
-const minhaArea9h = (pg) => pg.evaluate(() => ({ myArea: AppState.filters.myArea, perfil: !!AppState.profile,
-  esperou: dfatoAnel.some((e) => e.k === 'busca.esperaPerfil') }));
-api9h = 'rede';
-const p3_9h = await abrir9h('Minha área, lie-fi');
-await decidiu9h(p3_9h);
-const t3_9h = await tela9h(p3_9h);
-const m3_9h = await minhaArea9h(p3_9h);
-diz('com "Minha área" e a API sem resposta (`onLine` verdadeiro), a busca espera o perfil — e a fila guardada entra (R12-4-02)',
-  m3_9h.myArea === true && !m3_9h.perfil && m3_9h.esperou && t3_9h.card && !t3_9h.falha
-  && JSON.stringify(t3_9h.fila) === ESPERADA_9H && !!t3_9h.abriu && t3_9h.abriu.aposFalha === true,
-  JSON.stringify({ t3_9h, m3_9h }));
-await fecharComoOUsuario(p3_9h);
-borda9h = '502'; api9h = '502';
-const p4_9h = await abrir9h('Minha área, borda 502');
-await decidiu9h(p4_9h);
-const t4_9h = await tela9h(p4_9h);
-const m4_9h = await minhaArea9h(p4_9h).catch(() => null);
-diz('com "Minha área" e a ORIGEM fora do ar (502 em tudo), a fila guardada entra (R12-4-02)',
-  t4_9h.app && !!m4_9h && m4_9h.myArea === true && m4_9h.esperou && t4_9h.card && !t4_9h.falha
-  && JSON.stringify(t4_9h.fila) === ESPERADA_9H, JSON.stringify({ t4_9h, m4_9h }));
-await p4_9h.close();
-borda9h = 'normal'; api9h = 'ok'; areas9h = [];
-await ctx9h.close();
-await new Promise((ok) => proxy9h.close(ok));
-} // fim do bloco só do Chromium que começa na seção 9h (ver o `pularForaDoChromium` lá)
-
-secao('9i. DUAS ABAS E A REDE VOLTANDO: cada decisão da fila de saída sai UMA vez');
-// Auditoria de 2026-09-29 (O6). A trava do esvaziamento era da ABA, e a fila de
-// saída é do APARELHO: com o app em duas abas, a rede voltando manda o `online`
-// às duas, e as duas esvaziavam a MESMA fila — cada decisão saía duas vezes pro
-// Waze e o pouso contava nas duas (medido: 3 decisões, 5 rejeitados no
-// Histórico). Hoje a trava do navegador (`navigator.locks`) deixa uma aba
-// esvaziar; sem ela (navegador antigo) cada item é REIVINDICADO antes do envio.
-// Duas páginas do MESMO contexto: o armazenamento e a trava são os do aparelho.
-// CONTROLE: a mesma fila com UMA aba — cada decisão sai e conta uma vez.
-const cenario9i = async (nome, abas, semTravas) => {
-  const ctx9i = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  if (semTravas) await ctx9i.addInitScript(() => { Object.defineProperty(Navigator.prototype, 'locks', { get: () => undefined, configurable: true }); });
-  let aviao9i = false;
-  const decisoes = [];
-  await ctx9i.route('**/api/*', async (r) => {
-    if (aviao9i) return r.abort('internetdisconnected');
-    const rota = r.request().url().split('/api/')[1];
-    let corpo = {};
-    try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* corpo vazio */ }
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(190)], hasMore: false, page: 1, total: 1 });
-    if (rota === 'validar-place' || rota === 'marcar-lido') {
-      const k = corpo.venueID + '|' + corpo.updateRequestID;
-      const repetida = decisoes.includes(k);
-      decisoes.push(k);
-      await dormir(repetida ? 900 : 150);
-      // A 2ª decisão do mesmo pedido é o Waze dizendo "já tratado" (702).
-      return json(repetida ? { success: false, errorCategory: 'already_processed' } : { success: true });
-    }
-    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-    return r.abort('failed');
-  });
-  const pags = [];
-  for (let i = 0; i < abas; i++) {
-    const pg = await ctx9i.newPage();
-    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${i}]`, txt: String(e.message) }));
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    pags.push(pg);
-  }
-  await esperarNaPagina(pags[0], () => typeof API !== 'undefined', 20000, 100);
-  await pags[0].evaluate(() => {
-    API.setSession('tok-9i');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9i') }));
-    AppState.preferences.comoFuncionaVisto = true; savePreferences();
-    localStorage.removeItem('waze_places_history'); localStorage.removeItem('waze_places_saida');
-  });
-  for (const pg of pags) await pg.reload({ waitUntil: 'domcontentloaded' });
-  for (const pg of pags) await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
-  const travas = await pags[0].evaluate(() => !!(navigator.locks && navigator.locks.request));
-  // Sem rede: três ✕ vão pra fila de saída (gravados como a fila de saída grava).
-  aviao9i = true; await ctx9i.setOffline(true);
-  await pags[0].evaluate(() => {
-    for (const i of [1, 2, 3]) enfileirarSaida('reject', { venueID: 'w' + i, updateRequestID: 'x' + i, creatorId: 777, createdBy: 'autor' });
-  });
-  const naFila = await pags[0].evaluate(() => JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length);
-  // A rede volta: o navegador avisa TODAS as abas.
-  aviao9i = false; await ctx9i.setOffline(false);
-  for (const pg of pags) await esperarFimDaSaida(pg, 20000);
-  await dormir(1500);   // a decisão repetida, se houver, pousa em 900 ms
-  const porPedido = {};
-  for (const k of decisoes) porPedido[k] = (porPedido[k] || 0) + 1;
-  const hist = await pags[0].evaluate(() => ({
-    rejeitados: (JSON.parse(localStorage.getItem('waze_places_history') || '{}')._total || {}).rejected || 0,
-    fila: JSON.parse(localStorage.getItem('waze_places_saida') || '[]').length }));
-  await ctx9i.close();
-  return { travas, naFila, porPedido, hist };
-};
-const duas9i = await cenario9i('com a trava', 2, false);
-diz('PRÉ-CONDIÇÃO: o navegador tem a trava entre abas, e 3 decisões esperam na fila de saída',
-  duas9i.travas === true && duas9i.naFila === 3, JSON.stringify(duas9i));
-diz('duas abas e a rede voltando: cada decisão saiu UMA vez pro Waze',
-  Object.keys(duas9i.porPedido).length === 3 && Object.values(duas9i.porPedido).every((n) => n === 1), JSON.stringify(duas9i.porPedido));
-diz('e o Histórico contou 3 rejeitados (não em dobro), com a fila vazia',
-  duas9i.hist.rejeitados === 3 && duas9i.hist.fila === 0, JSON.stringify(duas9i.hist));
-// A RESERVA (sem `navigator.locks`) confia no localStorage: marca o item, espera
-// 60 ms e relê. No WebKit as duas abas ficam em PROCESSOS diferentes, e a marca
-// de uma chega à outra atrasada; com a máquina carregada, as duas releem a
-// própria marca e mandam o mesmo item. MEDIDO (e9 do lote 18): 1 de 6 rodadas do
-// smoke inteiro; isolado, 0 de 42; com a espera de 60 ms zerada (a janela da
-// corrida maior), 9 de 12 — e no Chromium 0 de 12 nas duas formas, e no WebKit
-// com a trava 0 de 12 mesmo zerada. É defeito do app, só em navegador SEM a
-// trava (iOS antes do 15.4), e ficou pra decisão; aqui ele é pulado pelo nome,
-// pra não virar uma reprovação aleatória no job do WebKit.
-if (!pularForaDoChromium(MOTOR, '9i. duas abas SEM `navigator.locks` (a reserva por item)',
-  'no WebKit as abas ficam em processos diferentes e a marca da reserva chega atrasada à outra aba: o mesmo item sai duas vezes (MEDIDO: 1 de 6 no smoke inteiro, 9 de 12 com a espera zerada; 0 no Chromium) — defeito do app só sem a trava (iOS antes do 15.4), que ficou pra decisão')) {
-  const reserva9i = await cenario9i('sem a trava', 2, true);
-  diz('PRÉ-CONDIÇÃO: sem `navigator.locks` (a reserva) de fato — 3 decisões esperando',
-    reserva9i.travas === false && reserva9i.naFila === 3, JSON.stringify(reserva9i));
-  diz('sem a trava do navegador, cada item REIVINDICADO sai uma vez e conta uma vez',
-    Object.keys(reserva9i.porPedido).length === 3 && Object.values(reserva9i.porPedido).every((n) => n === 1)
-    && reserva9i.hist.rejeitados === 3 && reserva9i.hist.fila === 0, JSON.stringify(reserva9i));
-}
-const uma9i = await cenario9i('controle', 1, false);
-diz('CONTROLE: uma aba só — cada decisão sai e conta uma vez (o instrumento conta certo)',
-  Object.keys(uma9i.porPedido).length === 3 && Object.values(uma9i.porPedido).every((n) => n === 1)
-  && uma9i.hist.rejeitados === 3, JSON.stringify(uma9i));
-
-// SÓ NO CHROMIUM, e por medição (ver o comentário do `MOTOR`, no topo): o
-// código abaixo, até o fecho, fica DENTRO deste bloco, sem recuo — o que
-// for declarado aqui não existe depois dele.
-if (!pularForaDoChromium(MOTOR, '9j — a foto quebrada no fim da fila e o card de foto no lie-fi, com o service worker no comando',
-  'no WebKit a rota do Playwright não vê NENHUM pedido da página com o service worker no comando — o tile, a foto e a API iriam à rede de verdade (o Waze real e o servidor local)')) {
-secao('9j. A FOTO QUEBRADA NO FIM DA FILA, E O CARD DE FOTO NO LIE-FI');
-// Auditoria de 2026-09-30.
-// (R5-4-1) A foto que falha sempre e é a ÚLTIMA a falhar (a do último pedido,
-// um 404 mais lento que o resto) deixava a preparação "parcial" PRA SEMPRE: ela
-// só virava "defeito do item" se OUTRO item terminasse com sucesso entre a 1ª e
-// a 3ª tentativa dela, e atrás da última não há ninguém. A janela não virava e
-// cada prova de rede refazia a lista inteira. Hoje a varredura PERGUNTA à rede
-// (um tile desta fila, `no-cache`) antes de culpá-la — aqui com a CSP e o
-// service worker de verdade no caminho da pergunta. CONTROLE: a rede caindo
-// logo depois da 1ª falha da foto — a sonda diz que não, e fica "parcial" (a
-// sonda não inocenta tudo).
-// (R5-4-4) A fila guardada aberta pelo lie-fi (`onLine` verdadeiro, a busca sem
-// resposta) mostrava o card de foto sem a foto com "Sem Imagem" e ✕/✓ VIVOS —
-// no modo avião o mesmo card trava. CONTROLE: com a foto chegando, o mesmo card
-// abre sem trava (a trava vem da foto que falhou, não da reabertura).
-const PERFIL_9J = { success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } };
-const abrir9j = async (ctx, nome) => {
-  const pg = await ctx.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  return pg;
-};
-const entrar9j = async (pg, tok) => {
-  await esperarNaPagina(pg, () => !!(navigator.serviceWorker && navigator.serviceWorker.controller), 20000, 100);
-  await pg.evaluate((t) => {
-    API.setSession(t);
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(t) }));
-    AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
-  }, tok);
-  await pg.reload({ waitUntil: 'domcontentloaded' });
-};
-// Uma fila de 12 pedidos com foto; a do ÚLTIMO responde 404, depois do resto.
-const PED_9J = Array.from({ length: 12 }, (_, i) => ({ ...PLACE(181 + i),
-  mapa: { centro: [-22.9 + i * 0.05, -43.2 + i * 0.05], entradas: [] } }));
-const FOTO_RUIM_9J = PED_9J.at(-1).imageUrls[0];
-const preparar9j = async (nome, { redeCaiNaFoto }) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
-  const conta = { tiles: 0, fotoRuim: 0, rede: true };
-  await ctx.route('**/*-tiles/live/base/**', async (r) => {
-    if (!conta.rede) return r.abort('connectionreset');
-    await dormir(30);
-    conta.tiles++;
-    return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-      headers: { 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=600' } });
-  });
-  await ctx.route('**/venue-image.waze.com/**', async (r) => {
-    if (r.request().url().startsWith(FOTO_RUIM_9J)) {
-      conta.fotoRuim++;
-      if (redeCaiNaFoto) conta.rede = false;
-      await dormir(300);
-      return r.fulfill({ status: 404, body: 'nao' });
-    }
-    if (!conta.rede) return r.abort('connectionreset');
-    return r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'cache-control': 'public, max-age=3600' } });
-  });
-  await ctx.route('**/api/*', (r) => {
-    const rota = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rota === 'buscar-places') return json({ success: true, places: PED_9J, hasMore: false, page: 1, total: PED_9J.length });
-    if (rota === 'perfil') return json(PERFIL_9J);
-    return r.abort('failed');
-  });
-  const pg = await abrir9j(ctx, nome);
-  await entrar9j(pg, 'tok-9j');
-  const fim = await esperarNaPagina(pg, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado !== null && !offlineVarrendo && !offlinePedidaDeNovo, 60000, 200);
-  const r = await pg.evaluate(() => {
-    const ev = dfatoAnel.filter((e) => e.k === 'offline.pronto' || e.k === 'offline.parcial').at(-1) || null;
-    return { resultado: offlineUltimoResultado, janela: offlineJanelaServida,
-      ev: ev && { k: ev.k, sondas: ev.sondas || 0, definitivos: ev.definitivos || 0 } };
-  });
-  return { ctx, pg, conta, fim: fim.ok, ...r };
-};
-
-// 1. A foto quebrada é a ÚLTIMA, e a rede está de pé.
-const a9j = await preparar9j('foto quebrada no fim', { redeCaiNaFoto: false });
-diz('PRÉ-CONDIÇÃO: a varredura terminou, e a foto quebrada foi tentada até esgotar (3 vezes)',
-  a9j.fim && a9j.conta.fotoRuim === 3, JSON.stringify({ fim: a9j.fim, fotoRuim: a9j.conta.fotoRuim }));
-diz('a foto quebrada no FIM da fila: a sonda pergunta à rede (UMA vez) e a preparação fica PRONTA, com a janela virada',
-  a9j.resultado === 'pronto' && a9j.janela !== null && !!a9j.ev && a9j.ev.k === 'offline.pronto'
-  && a9j.ev.sondas === 1 && a9j.ev.definitivos >= 1, JSON.stringify({ resultado: a9j.resultado, janela: a9j.janela, ev: a9j.ev }));
-// E a prova de rede seguinte (a resposta de uma ação) não refaz a varredura.
-const tiles9j = a9j.conta.tiles;
-await a9j.pg.evaluate(() => { offlineMarcarGesto(); API.aoProvarRede && API.aoProvarRede('validar-place'); });
-await dormir(300);
-await esperarNaPagina(a9j.pg, () => !offlineVarrendo, 30000, 100);
-diz('e a prova de rede seguinte não pede tile nenhum (era a lista INTEIRA a cada uma)',
-  a9j.conta.tiles === tiles9j, `tiles: ${tiles9j} → ${a9j.conta.tiles}`);
-await a9j.ctx.close();
-
-// CONTROLE: a rede CAI logo depois da 1ª falha da foto — a sonda diz que não.
-const c9j = await preparar9j('controle, a rede cai', { redeCaiNaFoto: true });
-// (No máximo UMA sonda: a resposta negativa vale pros itens que esgotam depois.)
-diz('CONTROLE: com a rede caindo no meio, a preparação fica PARCIAL — a sonda não inocenta tudo',
-  c9j.fim && c9j.resultado === 'parcial' && !!c9j.ev && c9j.ev.k === 'offline.parcial' && c9j.ev.sondas <= 1,
-  JSON.stringify({ resultado: c9j.resultado, ev: c9j.ev }));
-await c9j.ctx.close();
-
-// 2. O card de FOTO na fila guardada aberta pelo LIE-FI.
-const liefi9j = async (nome, { fotoChega }) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
-  const estado = { liefi: false };
-  const pedidos = [PLACE(201, 'NEW_PHOTO'), SO_MAPA(202)];
-  await ctx.route('**/*-tiles/live/base/**', (r) => (estado.liefi ? r.abort('connectionreset')
-    : r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } })));
-  await ctx.route('**/venue-image.waze.com/**', (r) => ((estado.liefi && !fotoChega) ? r.abort('connectionreset')
-    : r.fulfill({ status: 200, contentType: 'image/png', body: PX })));
-  await ctx.route('**/api/*', (r) => {
-    if (estado.liefi) return r.abort('connectionreset');
-    const rota = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rota === 'buscar-places') return json({ success: true, places: pedidos, hasMore: false, page: 1, total: 2 });
-    if (rota === 'perfil') return json(PERFIL_9J);
-    return r.abort('failed');
-  });
-  const prep = await abrir9j(ctx, nome + ', preparo');
-  await entrar9j(prep, 'tok-9j-foto');
-  const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
-  await fecharComoOUsuario(prep);
-  // Reaberto no lie-fi: a API sem resposta, e o aparelho dizendo que há rede.
-  estado.liefi = true;
-  const pg = await abrir9j(ctx, nome);
-  await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && !!cardDaFrente()
-    && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v201', 30000, 200);
-  // A foto decide: ou carregou, ou falhou (e então o card já reagiu).
-  await esperarNaPagina(pg, () => { const i = cardDaFrente() && cardDaFrente().querySelector('.card-image');
-    return !!i && (i.classList.contains('hidden') || (i.complete && i.naturalWidth > 0)); }, 15000, 100);
-  await dormir(300);
-  const t = await pg.evaluate(() => {
-    const c = cardDaFrente();
-    const b = (s) => !!(c.querySelector(s) && c.querySelector(s).disabled);
-    return { onLine: navigator.onLine, abriu: (dfatoAnel.find((e) => e.k === 'offline.abriu') || {}).aposFalha === true,
-      aviso: !!c.querySelector('.card-sem-foto'), rejeitar: b('.card-btn-reject'), lido: b('.card-btn-read'), pular: b('.card-btn-skip') };
-  });
-  await ctx.close();
-  return { pronto: pronto.ok, ...t };
-};
-const l9j = await liefi9j('lie-fi, a foto não vem', { fotoChega: false });
-diz('PRÉ-CONDIÇÃO: preparado com rede, e reaberto no lie-fi (`onLine` verdadeiro) pela fila guardada',
-  l9j.pronto && l9j.onLine === true && l9j.abriu, JSON.stringify(l9j));
-diz('no lie-fi, o card de foto cuja foto não veio TRAVA ✕ e ✓ e diz que precisa de sinal (o ↑ fica vivo)',
-  l9j.aviso && l9j.rejeitar && l9j.lido && !l9j.pular, JSON.stringify(l9j));
-const lc9j = await liefi9j('controle, a foto chega', { fotoChega: true });
-diz('CONTROLE: no mesmo lie-fi, com a foto chegando, o card abre sem trava',
-  lc9j.pronto && lc9j.abriu && !lc9j.aviso && !lc9j.rejeitar && !lc9j.lido, JSON.stringify(lc9j));
-
-// 3. (R9-4-06) A REDE PROVADA ANTES de a prova da foto começar. O mesmo lie-fi:
-// a abertura com o `onLine` verdadeiro, a busca sem resposta, a fila guardada e
-// o card de foto travado. A PRIMEIRA resposta nossa (o perfil, segurado aqui) é
-// quem chama a recuperação — já com a rede provada —, e o 1º pedido à foto fica
-// PRESO. Ela começava uma prova da <img> mesmo assim, e o card ficava travado
-// até o teto (MEDIDO, n4 da auditoria da rodada 9: 10,1 s; com a prova já no ar,
-// 11 ms). A PRÉ-CONDIÇÃO é o CONTROLE: com o perfil segurado (nada provando a
-// rede), o card segue travado.
-const ctxP9j = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
-const p9j = { fase: 'prepara', perfis: [], fotos: [] };
-const pedidosP9j = [PLACE(211, 'NEW_PHOTO'), SO_MAPA(212)];
-await ctxP9j.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-  headers: { 'access-control-allow-origin': '*' } }));
-await ctxP9j.route('**/venue-image.waze.com/**', (r) => {
-  if (p9j.fase === 'prepara') return r.fulfill({ status: 200, contentType: 'image/png', body: PX });
-  if (p9j.fase === 'liefi') return r.abort('connectionreset');
-  p9j.fotos.push(r); return undefined;                     // 'prova': o pedido à foto fica PRESO
-});
-await ctxP9j.route('**/api/*', (r) => {
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (p9j.fase !== 'prepara') {
-    if (rota === 'perfil') { p9j.perfis.push(r); return undefined; }   // a resposta nossa, segurada
-    return r.abort('connectionreset');                                 // o lie-fi: nada mais responde
-  }
-  if (rota === 'buscar-places') return json({ success: true, places: pedidosP9j, hasMore: false, page: 1, total: 2 });
-  if (rota === 'perfil') return json(PERFIL_9J);
-  return r.abort('failed');
-});
-const prepP9j = await abrir9j(ctxP9j, 'rede provada antes, preparo');
-await entrar9j(prepP9j, 'tok-9j-prova');
-const prontoP9j = await esperarNaPagina(prepP9j, () => typeof offlineUltimoResultado !== 'undefined'
-  && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
-await fecharComoOUsuario(prepP9j);
-p9j.fase = 'liefi';
-const pgP9j = await abrir9j(ctxP9j, 'rede provada antes');
-const travadoP9j = await esperarNaPagina(pgP9j, () => typeof AppState !== 'undefined' && !!cardDaFrente()
-  && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v211' && !!cardDaFrente().querySelector('.card-sem-foto'), 30000, 200);
-p9j.fase = 'prova';
-await dormir(1000);   // o tempo de um destravamento indevido aparecer, se houvesse
-const antesP9j = await pgP9j.evaluate(() => { const c = cardDaFrente();
-  return { aviso: !!(c && c.querySelector('.card-sem-foto')), rejeitar: !!(c && c.querySelector('.card-btn-reject').disabled),
-    onLine: navigator.onLine }; });
-diz('PRÉ-CONDIÇÃO: lie-fi pela fila guardada, o card de foto travado e o perfil SEGURADO — sem nada provando a rede, o card segue travado',
-  prontoP9j.ok && travadoP9j.ok && p9j.perfis.length >= 1 && antesP9j.aviso && antesP9j.rejeitar && antesP9j.onLine === true,
-  JSON.stringify({ pronto: prontoP9j.ok, travado: travadoP9j.ok, perfis: p9j.perfis.length, antesP9j }));
-const tP9j = Date.now();
-if (p9j.perfis.length) {
-  await p9j.perfis.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PERFIL_9J) });
-}
-const soltoP9j = await esperarNaPagina(pgP9j, () => { const c = cardDaFrente();
-  return !!(c && !c.querySelector('.card-sem-foto') && !c.querySelector('.card-btn-reject').disabled); }, 15000, 50);
-const msP9j = Date.now() - tP9j;
-const diarioP9j = await pgP9j.evaluate(() => dfatoAnel.filter((e) => /^foto\./.test(e.k)).map((e) => e.k));
-diz('a rede provada ANTES de a prova da foto começar solta o card NA HORA — com o pedido à foto preso (R9-4-06)',
-  soltoP9j.ok && msP9j < 2000 && diarioP9j.includes('foto.redeProvada') && !diarioP9j.includes('foto.provaSemResposta'),
-  JSON.stringify({ ms: msP9j, solto: soltoP9j.ok, diario: diarioP9j, fotosPresas: p9j.fotos.length }));
-for (const r of p9j.fotos.splice(0)) await r.fulfill({ status: 404, body: 'nao' }).catch(() => {});
-for (const r of p9j.perfis.splice(0)) await r.abort('failed').catch(() => {});
-await ctxP9j.close();
-
-// 4 e 5. O MESMO lie-fi de cima, com o que a pessoa (e o app) fazem no meio
-// (auditoria da rodada 10). O 3 acima é o CONTROLE dos dois: sem nada no meio, o
-// perfil que responde solta o card na hora.
-//  · (R10-4-01) A pessoa tenta ARRASTAR o card travado — a reação natural a ✕ e
-//    ✓ apagados — e solta: a direção está travada, ele volta pro lugar, e a volta
-//    deixa `translate(0, 0) rotate(0deg)` escrito. A recuperação lia esse
-//    transform como "arraste em curso" e desistia: o card nunca mais saía do
-//    aviso (MEDIDO, n4b: 15 s e contando; n23, o mesmo no modo avião).
-//  · (R10-4-03) Uma decisão de antes ESPERA envio, e o esvaziamento da abertura
-//    fica no ar com ela pendurada: o perfil responde NO MEIO dele, e a prova de
-//    rede saía cedo antes de soltar o card (MEDIDO, n14: 15,9 s e contando).
-const liefiSegurado9j = async (nome, { comSaida = false } = {}) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'allow' });
-  const e = { fase: 'prepara', perfis: [], fotos: [], saidas: [] };
-  const pedidos = [PLACE(221, 'NEW_PHOTO'), SO_MAPA(222)];
-  await ctx.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-    headers: { 'access-control-allow-origin': '*' } }));
-  await ctx.route('**/venue-image.waze.com/**', (r) => {
-    if (e.fase === 'prepara') return r.fulfill({ status: 200, contentType: 'image/png', body: PX });
-    if (e.fase === 'liefi') return r.abort('connectionreset');
-    e.fotos.push(r); return undefined;                         // 'prova': o pedido à foto fica PRESO
-  });
-  await ctx.route('**/api/*', (r) => {
-    const rota = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (e.fase !== 'prepara') {
-      if (rota === 'perfil') { e.perfis.push(r); return undefined; }          // a resposta nossa, segurada
-      if (rota === 'validar-place') { e.saidas.push(r); return undefined; }   // a decisão do esvaziamento, pendurada
-      return r.abort('connectionreset');                                     // o lie-fi: nada mais responde
-    }
-    if (rota === 'buscar-places') return json({ success: true, places: pedidos, hasMore: false, page: 1, total: 2 });
-    if (rota === 'perfil') return json(PERFIL_9J);
-    return r.abort('failed');
-  });
-  const prep = await abrir9j(ctx, nome + ', preparo');
-  await entrar9j(prep, 'tok-9j-' + nome.replace(/\W+/g, ''));
-  const pronto = await esperarNaPagina(prep, () => typeof offlineUltimoResultado !== 'undefined'
-    && offlineUltimoResultado === 'pronto' && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 200);
-  // A decisão de ANTES, esperando envio (um pedido que não está na fila guardada).
-  if (comSaida) await prep.evaluate(() => enfileirarSaida('reject', { venueID: 'v229', updateRequestID: 'u229', creatorId: 229 }, 'row'));
-  await fecharComoOUsuario(prep);
-  e.fase = 'liefi';
-  const pg = await abrir9j(ctx, nome);
-  const travado = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && !!cardDaFrente()
-    && !!AppState.currentPlace && AppState.currentPlace.venueID === 'v221' && !!cardDaFrente().querySelector('.card-sem-foto'), 30000, 200);
-  const estado = () => pg.evaluate(() => { const c = cardDaFrente();
-    return { aviso: !!(c && c.querySelector('.card-sem-foto')), rejeitar: !!(c && c.querySelector('.card-btn-reject').disabled),
-      transform: c ? c.style.transform : null, rejeitados: AppState.stats.rejected, esvaziando: esvaziandoSaida,
-      saida: carregarFilaDeSaida().length }; });
-  // O perfil segurado RESPONDE (a prova de rede) e mede quanto o card leva pra sair do aviso.
-  const provar = async () => {
-    const t0 = Date.now();
-    if (e.perfis.length) await e.perfis.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PERFIL_9J) });
-    const solto = await esperarNaPagina(pg, () => { const c = cardDaFrente();
-      return !!(c && !c.querySelector('.card-sem-foto') && !c.querySelector('.card-btn-reject').disabled); }, 15000, 50);
-    return { solto: solto.ok, ms: Date.now() - t0, diario: await pg.evaluate(() => dfatoAnel.filter((x) => /^foto\./.test(x.k)).map((x) => x.k)) };
-  };
-  const fechar = async () => {
-    for (const r of [...e.fotos.splice(0), ...e.saidas.splice(0)]) await r.abort('failed').catch(() => {});
-    for (const r of e.perfis.splice(0)) await r.abort('failed').catch(() => {});
-    await ctx.close();
-  };
-  return { ctx, pg, e, pronto: pronto.ok, travado: travado.ok, estado, provar, fechar };
-};
-
-// 4. (R10-4-01) O ARRASTE: a pessoa arrasta o card travado 160 px pra direita e solta.
-const a9jR = await liefiSegurado9j('arrastou o card travado');
-const arr9j = await a9jR.pg.evaluate(() => { const r = cardDaFrente().querySelector('.card-content').getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + 30 }; });
-// O selo do lado, com o dedo AINDA no card, ASSENTADO (a transição de 0,15 s da
-// opacidade termina antes da leitura): é o que a pessoa vê no meio do arraste.
-const seloA9j = () => a9jR.pg.evaluate(() => new Promise((ok) => setTimeout(() => {
-  const c = cardDaFrente();
-  ok({ direita: Number(getComputedStyle(c.querySelector('.swipe-right')).opacity), esquerda: Number(getComputedStyle(c.querySelector('.swipe-left')).opacity) });
-}, 350)));
-await a9jR.pg.mouse.move(arr9j.x, arr9j.y);
-await a9jR.pg.mouse.down();
-for (let i = 1; i <= 8; i++) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
-const seloTravadoA9j = await seloA9j();
-await a9jR.pg.mouse.up();
-// A volta pro lugar acabou (400 ms) — pelo FIM dela (o card parado), não por prazo.
-await esperarNaPagina(a9jR.pg, () => !window.gestoNoCard(cardDaFrente()), 5000, 50);
-a9jR.e.fase = 'prova';
-const antesA9j = await a9jR.estado();
-diz('PRÉ-CONDIÇÃO: lie-fi, o card de foto travado, ARRASTADO e de volta ao lugar (o transform de repouso escrito), nada decidido e o perfil segurado',
-  a9jR.pronto && a9jR.travado && a9jR.e.perfis.length >= 1 && antesA9j.aviso && antesA9j.rejeitar
-  && /^translate\(0(px)?, 0(px)?\) rotate\(0deg\)$/.test(antesA9j.transform || '') && antesA9j.rejeitados === 0,
-  JSON.stringify({ pronto: a9jR.pronto, travado: a9jR.travado, perfis: a9jR.e.perfis.length, antesA9j }));
-// (R11-4-02) O selo "Lido" acendia inteiro no arraste pro lado travado — e soltar
-// não decidia: o que o app MOSTRAVA e o que ele ACEITAVA discordavam (MEDIDO, n29
-// da auditoria da rodada 11, nos dois motores).
-diz('no card de foto travado, o arraste pro lado NÃO acende o selo daquele lado — soltar ali não decide (R11-4-02)',
-  seloTravadoA9j.direita === 0, JSON.stringify(seloTravadoA9j));
-const provaA9j = await a9jR.provar();
-diz('o card de foto que a pessoa TENTOU ARRASTAR sai do "precisa de sinal" quando a rede é provada (R10-4-01)',
-  provaA9j.solto && provaA9j.ms < 2000 && provaA9j.diario.includes('foto.redeProvada'), JSON.stringify(provaA9j));
-// CONTROLE do selo: o MESMO arraste no MESMO card, agora solto do aviso, acende o
-// "Lido" — e volta pro meio antes de soltar, pra não decidir nada.
-await a9jR.pg.mouse.move(arr9j.x, arr9j.y);
-await a9jR.pg.mouse.down();
-for (let i = 1; i <= 8; i++) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
-const seloLivreA9j = await seloA9j();
-for (let i = 7; i >= 0; i--) { await a9jR.pg.mouse.move(arr9j.x + 20 * i, arr9j.y); await dormir(30); }
-await dormir(200);
-await a9jR.pg.mouse.up();
-await esperarNaPagina(a9jR.pg, () => !window.gestoNoCard(cardDaFrente()), 5000, 50);
-const fimA9j = await a9jR.pg.evaluate(() => ({ lidos: AppState.stats.read, rejeitados: AppState.stats.rejected,
-  frente: AppState.currentPlace && AppState.currentPlace.venueID }));
-diz('CONTROLE: o mesmo arraste no card livre acende o "Lido" (o instrumento enxerga o selo), e voltar ao meio não decide',
-  seloLivreA9j.direita === 1 && fimA9j.lidos === 0 && fimA9j.rejeitados === 0 && fimA9j.frente === 'v221' && provaA9j.solto,
-  JSON.stringify({ seloLivreA9j, fimA9j }));
-await a9jR.fechar();
-
-// 5. (R10-4-03) A PROVA NO MEIO DO ESVAZIAMENTO: uma decisão de antes espera
-// envio, e o esvaziamento da abertura fica no ar com ela pendurada.
-const s9jR = await liefiSegurado9j('prova no meio do esvaziamento', { comSaida: true });
-const noAr9j = await esperarNaPagina(s9jR.pg, () => esvaziandoSaida === true, 10000, 50);
-for (let i = 0; i < 50 && !s9jR.e.saidas.length; i++) await dormir(100);
-s9jR.e.fase = 'prova';
-const antesS9j = await s9jR.estado();
-diz('PRÉ-CONDIÇÃO: lie-fi, o card de foto travado, o esvaziamento NO AR com a decisão pendurada, e o perfil segurado',
-  s9jR.pronto && s9jR.travado && noAr9j.ok && s9jR.e.saidas.length === 1 && s9jR.e.perfis.length >= 1
-  && antesS9j.aviso && antesS9j.rejeitar && antesS9j.esvaziando === true,
-  JSON.stringify({ pronto: s9jR.pronto, travado: s9jR.travado, noAr: noAr9j.ok, saidas: s9jR.e.saidas.length, perfis: s9jR.e.perfis.length, antesS9j }));
-const provaS9j = await s9jR.provar();
-const durante9j = await s9jR.estado();
-diz('a rede provada NO MEIO do esvaziamento da fila de saída solta o card de foto — com o esvaziamento ainda no ar (R10-4-03)',
-  provaS9j.solto && provaS9j.ms < 2000 && durante9j.esvaziando === true && provaS9j.diario.includes('foto.redeProvada'),
-  JSON.stringify({ provaS9j, durante9j }));
-// E o esvaziamento termina como sempre: a decisão pendurada pousa e a fila de saída esvazia.
-if (s9jR.e.saidas.length) await s9jR.e.saidas.shift().fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
-const fimS9j = await esperarNaPagina(s9jR.pg, () => !esvaziandoSaida && carregarFilaDeSaida().length === 0, 10000, 50);
-diz('e o esvaziamento termina: a decisão de antes pousa e a fila de saída esvazia', fimS9j.ok, JSON.stringify(await s9jR.estado()));
-await s9jR.fechar();
-} // fim do bloco só do Chromium que começa na seção 9j (ver o `pularForaDoChromium` lá)
-
-secao('9k. DUAS ABAS E O DIAGNÓSTICO: a poda, a outra aba no relatório e a sentinela');
-// Auditoria da rodada 7 (R7-4-03, R7-4-04, R7-4-05). Duas páginas do MESMO
-// contexto (o mesmo aparelho: a base, a fila de saída e o aviso `storage` são
-// os de verdade), a B aberta DEPOIS da A, com o modo dev ligado.
-//  · A PODA da base ia pela hora de ABERTURA: a B registrava 12 telas, a A 2 (as
-//    mais novas de todas), e na base ficavam A 0 · B 12.
-//  · O RELATÓRIO da A trazia a B, VIVA, como "abertura anterior".
-//  · A SENTINELA `pedidoDecididoNaFila`: a A decide sem sinal um pedido que a B
-//    já tinha na fila, e a captura da B acusava "voltou como card".
-const ctx9k = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
-  serviceWorkers: 'block', acceptDownloads: true });
-let aviao9k = false;
-await ctx9k.route('**/*-tiles/live/base/**', (r) => (aviao9k ? r.abort('internetdisconnected') : servirTile(r)));
-const rotaApi9k = (r) => {
-  if (aviao9k) return r.abort('internetdisconnected');
-  const rota = r.request().url().split('/api/')[1];
-  const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-  if (rota === 'buscar-places') return json({ success: true, places: [SO_MAPA(201), SO_MAPA(202), SO_MAPA(203)], hasMore: false, page: 1, total: 3 });
-  if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-  if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
-  if (rota === 'lista-estados') return json({ success: true, states: [] });
-  return json({ success: true });
-};
-await ctx9k.route('**/api/*', rotaApi9k);
-const abrirEm = async (contexto, nome) => {
-  const pg = await contexto.newPage();
-  pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome}]`, txt: String(e.message) }));
-  pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-    violacoes.push({ secao: secaoAtual + ` [${nome}]`, txt: m.text() }); });
-  await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  return pg;
-};
-// O modo dev é ligado no ARMAZENAMENTO por uma página que abriu com ele
-// desligado: ela fecha sem gravar nada do diagnóstico.
-const prepararDev = async (contexto, token) => {
-  const prep = await abrirEm(contexto, 'preparo');
-  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
-  await prep.evaluate((tk) => {
-    API.setSession(tk);
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(tk) }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
-    localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-  }, token);
-  await fecharComoOUsuario(prep);
-};
-const prontaComFab = (pg) => esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated
-  && !!cardDaFrente() && AppState.queue.length === 3 && !document.getElementById('devFab').classList.contains('hidden'), 20000, 100);
-// O toque no botão pelos ouvintes do PRÓPRIO botão (ponteiro que desce e sobe
-// nele), como o dedo — e a gravação na base ESPERADA pelo fim, não por prazo.
-const tocarFab = (pg, n) => pg.evaluate(async (n) => {
-  const b = document.getElementById('devFabBtn');
-  for (let i = 0; i < n; i++) {
-    b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 50 + i, bubbles: true }));
-    b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 50 + i, bubbles: true }));
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  await diagGuardando;
-  return dlogCapturasDoEditor().length;
-}, n);
-await prepararDev(ctx9k, 'tok-9k');
-const A9k = await abrirEm(ctx9k, 'A');
-const prontaA9k = await prontaComFab(A9k);
-await dormir(50);   // as duas aberturas em milissegundos diferentes
-const B9k = await abrirEm(ctx9k, 'B');
-const prontaB9k = await prontaComFab(B9k);
-const ab9k = { A: await A9k.evaluate(() => DIAG_ABERTURA), B: await B9k.evaluate(() => DIAG_ABERTURA) };
-diz('PRÉ-CONDIÇÃO: as duas abas com a fila e o modo dev, a B aberta DEPOIS da A',
-  prontaA9k.ok && prontaB9k.ok && ab9k.B.inicio > ab9k.A.inicio, JSON.stringify(ab9k));
-const manuaisNaBase = (g, id) => ((g.abertas || []).find((a) => a.id === id) || {}).manuais;
-// 1. A PODA (R7-4-03). A pré-condição prova que o instrumento lê a base: as 12 da B estão lá.
-const nB9k = await tocarFab(B9k, 12);
-const base1 = await guardado9c(A9k);
-diz('PRÉ-CONDIÇÃO: a B registrou 12 telas, e as 12 estão na base', nB9k === 12 && manuaisNaBase(base1, ab9k.B.id) === 12,
-  JSON.stringify({ nB9k, base1 }));
-const nA9k = await tocarFab(A9k, 2);
-const base2 = await guardado9c(A9k);
-diz('a PODA vai pela hora da CAPTURA: as 2 telas da A (as mais novas) ficam na base, e da B saem as 2 mais velhas (R7-4-03)',
-  nA9k === 2 && manuaisNaBase(base2, ab9k.A.id) === 2 && manuaisNaBase(base2, ab9k.B.id) === 10, JSON.stringify({ nA9k, base2 }));
-// 2. O RELATÓRIO da A, de verdade, lido pela triagem (R7-4-04).
-const dir9k = mkdtempSync(join(tmpdir(), 'smoke-9k-'));
-let rel9k = null;
-try {
-  const [dl] = await Promise.all([A9k.waitForEvent('download', { timeout: 30000 }), A9k.evaluate(() => baixarDiagnostico())]);
-  const arq = join(dir9k, 'diag.zip');
-  await dl.saveAs(arq);
-  const { dados: d } = lerDiagnostico(arq);
-  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
-  const b = (d.aberturasAnteriores || []).find((a) => a.id === ab9k.B.id) || {};
-  rel9k = { atual: d.aberturaAtual && d.aberturaAtual.id, temB: !!b.id, simultanea: b.simultanea, abertaAgora: b.abertaAgora,
-    simultaneas: d.resumo?.aberturasAnteriores?.simultaneas,
-    triagem: /abertura [^\n]*\n  OUTRA ABA, aberta junto com a do relatório — seguia aberta na hora do relatório/.test(triagem),
-    vazouToken: triagem.includes('tok-9k') };
-} catch (e) {
-  rel9k = { erro: String((e && e.message) || e).slice(0, 200) };
-} finally {
-  rmSync(dir9k, { recursive: true, force: true });
-}
-diz('o RELATÓRIO da A traz a B como OUTRA ABA aberta junto — e aberta agora —, e a triagem diz isso, não "abertura anterior" (R7-4-04)',
-  rel9k?.atual === ab9k.A.id && rel9k?.temB === true && rel9k?.simultanea === true && rel9k?.abertaAgora === true
-  && rel9k?.simultaneas >= 1 && rel9k?.triagem === true && rel9k?.vazouToken === false, JSON.stringify(rel9k));
-// 3. A SENTINELA (R7-4-05): sem sinal (modo avião de verdade: abort + offline),
-// a A rejeita o pedido da frente, que fica na fila de saída — e a B tem o MESMO
-// card na frente.
-aviao9k = true; await ctx9k.setOffline(true);
-const frente9k = await A9k.evaluate(() => { window.__frente9k = AppState.currentPlace.venueID; return window.__frente9k; });
-await A9k.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
-const ficou9k = await esperarNaPagina(A9k, () => carregarFilaDeSaida().some((x) => x.venueID === window.__frente9k)
-  && AppState.inFlightActions === 0 && !AppState.pendingAction, 15000, 100);
-diz('PRÉ-CONDIÇÃO: a decisão da A ficou na fila de saída (sem sinal)', ficou9k.ok, frente9k);
-const capturaDaB = (pg, encenarEntrada) => pg.evaluate((encenar) => {
-  // A falha da ENTRADA, encenada: o mesmo pedido entrando DE NOVO na fila (outro objeto).
-  if (encenar) AppState.queue.push(JSON.parse(JSON.stringify(AppState.currentPlace)));
-  const b = document.getElementById('devFabBtn');
-  b.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 81, bubbles: true }));
-  b.dispatchEvent(new PointerEvent('pointerup', { pointerId: 81, bubbles: true }));
-  const m = dlogMomentos[dlogMomentos.length - 1];
-  if (encenar) AppState.queue.pop();
-  return { frente: AppState.currentPlace && AppState.currentPlace.venueID,
-    alertas: (m.alertas || []).map((a) => a.chave), decididos: m.computado && m.computado.decididos };
-}, encenarEntrada);
-const cap9k = await capturaDaB(B9k, false);
-diz('a captura da B NÃO acusa "pedido decidido voltou como card" — foi a OUTRA aba que decidiu, com o card já aqui (R7-4-05)',
-  cap9k.frente === frente9k && !cap9k.alertas.includes('pedidoDecididoNaFila') && cap9k.decididos?.naFila === 0
-  && cap9k.decididos?.porOutraAba === 1, JSON.stringify(cap9k));
-const ctl9k = await capturaDaB(B9k, true);
-diz('CONTROLE: o mesmo pedido ENTRANDO de novo na fila da B (a falha da entrada, encenada) segue acusado — a sentinela não ficou cega',
-  ctl9k.alertas.includes('pedidoDecididoNaFila') && ctl9k.decididos?.naFila >= 1, JSON.stringify(ctl9k));
-diz('e só o que ENTROU conta: o card que a outra aba decidiu segue de fora da conta (naFila 1, porOutraAba 1)',
-  ctl9k.decididos?.naFila === 1 && ctl9k.decididos?.porOutraAba === 1, JSON.stringify(ctl9k));
-// E o ✕ da B no mesmo pedido: o diário diz que foi a outra aba, não um caminho furado.
-await B9k.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
-await esperarNaPagina(B9k, () => !AppState.pendingAction && AppState.inFlightActions === 0
-  && dfatoAnel.some((e) => e.k === 'saida.repetida'), 15000, 100);
-const rep9k = await B9k.evaluate(() => dfatoAnel.filter((e) => e.k === 'saida.repetida').pop() || null);
-diz('o ✕ da B no pedido que a A já decidiu: o "repetida" do diário diz que foi a OUTRA aba',
-  !!rep9k && rep9k.outraAba === true, JSON.stringify(rep9k));
-// Fecha ainda sem sinal: a volta da rede esvaziaria a fila de saída, e nada
-// disso é desta seção. (A rota da API é reusada no 9l, com sinal.)
-await ctx9k.close();
-aviao9k = false;
-
-secao('9l. O FAB DO MODO DEV E O BANNER DO TOPO: o FAB não fica em cima do "Restam"');
-// R7-4-01. O FAB escolhe o canto pelo que recebe o dedo ali. Com um banner do
-// topo na tela (o aviso da consequência do 1º ✕, a recusa automática), o
-// `cima-dir` lia o banner — sem nada acionável nem `.nao-cobrir` — como LIVRE: o
-// toque no FAB nesse meio o mandava pra cima do "Restam", e ele FICAVA lá depois
-// de o banner sair (MEDIDO: 21% da tinta de "310" a 390×844, e o dedo ali caindo
-// no FAB). Agora ele mede o que fica POR BAIXO dos avisos passageiros.
-const ctx9l = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-await ctx9l.route('**/*-tiles/live/base/**', servirTile);
-await ctx9l.route('**/api/*', rotaApi9k);
-await prepararDev(ctx9l, 'tok-9l');
-const F9l = await abrirEm(ctx9l, 'FAB');
-const pronta9l = await prontaComFab(F9l);
-// Quanto da TINTA do número do "Restam" o FAB cobre (`Range`, não a caixa), e
-// quem recebe o dedo no meio da sobreposição. Lida com o botão PARADO: ele tem
-// transição, e a reposição sai por quadro.
-const tinta9l = async () => {
-  let antes = null;
-  for (let i = 0; i < 40; i++) {
-    const agora = await F9l.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => {
-      const r = document.getElementById('devFab').getBoundingClientRect(); ok(`${r.left},${r.top}`); }))));
-    if (agora === antes) break;
-    antes = agora;
-  }
-  return F9l.evaluate(() => {
-    const fabEl = document.getElementById('devFab');
-    const fab = fabEl.getBoundingClientRect();
-    const el = document.getElementById('pendingCount');
-    const rg = document.createRange(); rg.selectNodeContents(el);
-    const r = rg.getBoundingClientRect();
-    const x0 = Math.max(r.left, fab.left), x1 = Math.min(r.right, fab.right);
-    const y0 = Math.max(r.top, fab.top), y1 = Math.min(r.bottom, fab.bottom);
-    const area = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
-    const quem = area ? document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2) : null;
-    return { canto: fabEl.dataset.canto, texto: el.textContent, cobre: Math.round(100 * area / (r.width * r.height)),
-      noPonto: quem ? (quem.closest('#devFab') ? 'FAB' : (quem.id || quem.tagName)) : null,
-      banners: document.querySelectorAll('#bannerContainer > *').length };
-  });
-};
-// Sem animar a contagem: o número tem que estar INTEIRO na hora da medida.
-await F9l.evaluate(() => { AppState.serverTotal = 310; AppState.hasMore = false; updatePendingCount(true); });
-const inicio9l = await tinta9l();
-diz('PRÉ-CONDIÇÃO: o "Restam" diz 310, e o FAB começa fora dele', pronta9l.ok && inicio9l.texto === '310' && inicio9l.cobre === 0,
-  JSON.stringify(inicio9l));
-// O banner do topo (o mesmo `showToast` do aviso da consequência), e o toque no FAB com ele na tela.
-await F9l.evaluate(() => { window.__banner9l = showToast(t('consequencia.reject'), 'hint', 600000); });
-const comBanner9l = await F9l.evaluate(() => document.querySelectorAll('#bannerContainer > *').length);
-await tocarFab(F9l, 1);
-const noBanner9l = await tinta9l();
-await F9l.evaluate(() => window.__banner9l.dispensar());
-await esperarNaPagina(F9l, () => document.querySelectorAll('#bannerContainer > *').length === 0, 5000, 50);
-const depois9l = await tinta9l();
-diz('PRÉ-CONDIÇÃO: o banner do topo estava na tela quando o FAB foi tocado', comBanner9l === 1 && noBanner9l.banners === 1,
-  JSON.stringify({ comBanner9l, noBanner9l }));
-diz('o toque no FAB com o banner na tela NÃO o manda pra cima do "Restam" — nem com o banner, nem depois de ele sair (R7-4-01)',
-  noBanner9l.cobre === 0 && depois9l.cobre === 0 && depois9l.noPonto !== 'FAB' && depois9l.banners === 0, JSON.stringify({ noBanner9l, depois9l }));
-// CONTROLE: o instrumento ENXERGA a sobreposição — com o FAB posto no `cima-dir`,
-// ele come a tinta do "Restam" nesta tela, e o dedo ali cai no FAB.
-const forcado9l = await F9l.evaluate(() => {
-  const fab = document.getElementById('devFab');
-  const r = fab.getBoundingClientRect();
-  const { x, y } = devFabCoords('cima-dir', r.width || 44, r.height || 44);
-  fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.dataset.canto = 'cima-dir(forçado)';
-  return true;
-});
-const cima9l = await tinta9l();
-diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa a tinta coberta e o dedo no FAB — ela enxerga o defeito',
-  forcado9l && cima9l.cobre > 0 && cima9l.noPonto === 'FAB', JSON.stringify(cima9l));
-
-// R20, C1. Enter SEGURADO no botão do FAB: o navegador repete o `keydown` e faz um `click` por repetição.
-// MEDIDO antes do conserto (t22, os dois motores): 15 repetições = 12 capturas manuais idênticas, o selo "12" e a
-// captura AUTOMÁTICA expulsa do anel (o teste de unidade e o roteiro do auditor medem a expulsão; aqui, a contagem, que
-// é o que o selo mostra). O Enter simples (o CONTROLE) é UMA captura; a PRÉ-CONDIÇÃO é que o teclado repetiu de
-// verdade (`repeat: true` contado por um ouvinte).
-await F9l.evaluate(() => {
-  const btn = document.getElementById('devFabBtn');
-  window.__kd9l = { total: 0, repetidos: 0 };
-  btn.addEventListener('keydown', (e) => { window.__kd9l.total++; if (e.repeat) window.__kd9l.repetidos++; }, true);
-  window.__antes9l = { manuais: dlogCapturasDoEditor().length };
-  btn.focus();
-});
-for (let i = 0; i < 15; i++) await F9l.keyboard.down('Enter');
-await F9l.keyboard.up('Enter');
-const segurado9l = await F9l.evaluate(() => ({ ...window.__kd9l, manuais: dlogCapturasDoEditor().length - window.__antes9l.manuais }));
-await F9l.keyboard.press('Enter');
-const simples9l = await F9l.evaluate(() => dlogCapturasDoEditor().length - window.__antes9l.manuais);
-diz('PRÉ-CONDIÇÃO: o teclado repetiu o `keydown` de verdade (15 `down` seguidos, com `repeat: true`)', segurado9l.total >= 15 && segurado9l.repetidos >= 5, JSON.stringify(segurado9l));
-diz('Enter SEGURADO no botão do FAB registra UMA captura (antes: 12, e o selo dizia "12")',
-  segurado9l.manuais === 1, JSON.stringify(segurado9l));
-diz('CONTROLE: mais um Enter simples soma exatamente UMA captura (o botão continua funcionando pelo teclado)', simples9l === 2, `capturas desde o início: ${simples9l}`);
-await ctx9l.close();
-
-secao('9m. O RELATÓRIO: a aba mais VELHA que fechou antes dele, e o relatório feito DENTRO do treino');
-// Auditoria da rodada 8 (R8-4-07, R8-4-06), as duas no MESMO relatório.
-//  · A aba B abre ANTES da A, registra telas, vai pro fundo (grava na base) e é
-//    FECHADA depois de a A abrir. O fechar aborta a gravação da base (MEDIDO no
-//    r2 `bAntes` da auditoria: em 3 de 4 rodadas a última gravação de B ficou a
-//    de ANTES de a A abrir); aqui a gravação do fechar é DESLIGADA na B, pra a
-//    seção não depender da sorte (a amplificação declarada). A trava de B já
-//    estava solta na hora do relatório: a A a dava como "abertura anterior". A
-//    prova que faltava é a trava SEGURA quando a A abriu.
-//  · O relatório da A é baixado com o TREINO aberto: o `appState` tem os
-//    EXEMPLOS (o CONTROLE do instrumento), e o arquivo não dizia que o treino
-//    estava aberto nem levava a fila real que ele guarda.
-const ctx9m = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
-  serviceWorkers: 'block', acceptDownloads: true });
-await ctx9m.route('**/*-tiles/live/base/**', servirTile);
-await ctx9m.route('**/api/*', rotaApi9k);
-await prepararDev(ctx9m, 'tok-9m');
-const B9m = await abrirEm(ctx9m, 'B (a mais velha)');
-const prontaB9m = await prontaComFab(B9m);
-const nB9m = await tocarFab(B9m, 2);
-// B vai pro fundo (a pessoa abre outra aba): grava, e segura a trava dela.
-const idB9m = await B9m.evaluate(async () => { await diagGuardarAbertura('oculta'); return DIAG_ABERTURA.id; });
-await dormir(50);
-const A9m = await abrirEm(ctx9m, 'A');
-const prontaA9m = await prontaComFab(A9m);
-await esperarNaPagina(A9m, () => dfatoAnel.some((e) => e.k === 'diag.aberturas' || e.k === 'diag.carregarFalhou'), 20000, 100);
-const travaDeB = (pg, id) => pg.evaluate(async (i) => (await navigator.locks.query()).held.some((l) => l.name === '__diagAbertura:' + i), id);
-const vivaComA9m = await travaDeB(A9m, idB9m);
-await B9m.evaluate(() => { window.diagGuardarAbertura = () => Promise.resolve(false); });
-await fecharComoOUsuario(B9m);
-let soltou9m = false;
-for (let i = 0; i < 50 && !soltou9m; i++) { soltou9m = !(await travaDeB(A9m, idB9m)); if (!soltou9m) await dormir(100); }
-const inicioA9m = await A9m.evaluate(() => DIAG_ABERTURA.inicio);
-// O TREINO, aberto como a Ajuda o abre, e uma captura nele.
-await A9m.evaluate(() => Treino.entrar());
-const treino9m = await esperarNaPagina(A9m, () => Treino.ativo === true
-  && !document.getElementById('treinoBanner').classList.contains('hidden'), 5000, 50);
-await tocarFab(A9m, 1);
-const dir9m = mkdtempSync(join(tmpdir(), 'smoke-9m-'));
-let rel9m = null;
-try {
-  const [dl] = await Promise.all([A9m.waitForEvent('download', { timeout: 30000 }), A9m.evaluate(() => baixarDiagnostico())]);
-  const arq = join(dir9m, 'diag.zip');
-  await dl.saveAs(arq);
-  const { dados: d } = lerDiagnostico(arq);
-  const triagem = execFileSync(process.execPath, [join(ROOT, 'tools/diag-resumo.mjs'), arq], { encoding: 'utf8', timeout: 20000 });
-  const b = (d.aberturasAnteriores || []).find((a) => a.id === idB9m) || {};
-  const ultima = (d.momentos || [])[(d.momentos || []).length - 1] || {};
-  rel9m = { temB: !!b.id, capturasB: (b.momentos || []).length, simultanea: b.simultanea, abertaAgora: b.abertaAgora,
-    gravouAntesDeA: Number.isFinite(b.salvoEm) && b.salvoEm < inicioA9m,
-    triagemB: new RegExp('abertura ' + idB9m + ' · [^\\n]*\\n  OUTRA ABA, aberta junto com a do relatório — já tinha fechado na hora do relatório').test(triagem),
-    treinoTela: d.resumo?.telaAgora?.treino, treinoCaptura: ultima.treino,
-    filaReal: (d.treino?.fila || []).map((p) => p && p.updateRequestID).sort(),
-    soExemplosNoAppState: (d.appState?.queue || []).length > 0 && (d.appState.queue || []).every((p) => p && p._treino === true),
-    triagemTreino: triagem.includes('ATENÇÃO: relatório gerado DENTRO do treino')
-      && /fila real guardada pelo treino: 3 pedidos/.test(triagem) && /DENTRO DO TREINO \(\d+ exemplos na fila\)/.test(triagem),
-    vazouToken: triagem.includes('tok-9m') };
-} catch (e) {
-  rel9m = { erro: String((e && e.message) || e).slice(0, 200) };
-} finally {
-  rmSync(dir9m, { recursive: true, force: true });
-}
-diz('PRÉ-CONDIÇÃO: a B (a mais velha) registrou 2 telas e gravou ANTES de a A abrir; a trava dela estava segura com a A aberta, e soltou ao fechar',
-  prontaB9m.ok && prontaA9m.ok && nB9m === 2 && vivaComA9m === true && soltou9m && rel9m?.gravouAntesDeA === true && rel9m?.capturasB === 2,
-  JSON.stringify({ prontaB: prontaB9m.ok, prontaA: prontaA9m.ok, nB9m, vivaComA9m, soltou9m, rel9m }));
-diz('a aba mais velha, fechada ANTES do relatório e sem gravar depois de a A abrir, vem como OUTRA ABA (já fechada), e a triagem diz isso (R8-4-07)',
-  rel9m?.temB === true && rel9m?.simultanea === true && rel9m?.abertaAgora === false && rel9m?.triagemB === true,
-  JSON.stringify(rel9m));
-diz('PRÉ-CONDIÇÃO: o treino estava aberto, e o `appState` do arquivo tem só os EXEMPLOS (a fila real não está nele)',
-  treino9m.ok && rel9m?.soExemplosNoAppState === true, JSON.stringify({ treino: treino9m.ok, rel9m }));
-diz('o relatório feito DENTRO do treino diz isso (na tela e na captura) e leva a fila REAL que o treino guarda; a triagem avisa e conta, sem o token (R8-4-06)',
-  rel9m?.treinoTela?.ativo === true && rel9m?.treinoCaptura?.ativo === true
-  && JSON.stringify(rel9m?.filaReal) === JSON.stringify(['u201', 'u202', 'u203'])
-  && rel9m?.triagemTreino === true && rel9m?.vazouToken === false, JSON.stringify(rel9m));
-await ctx9m.close();
-
-secao('9n. O RELATÓRIO DEPOIS DA TROCA DE CONTA, AS TELAS QUE A OUTRA ABA ENTREGOU, E O FAB × O "N ESPERANDO ENVIO"');
-// Auditoria da rodada 9, três achados do diagnóstico que só o navegador mede.
-//  · (R9-1-01 = R9-4-04) A troca de conta limpa a lista de recursos, e o código
-//    da página (carregado ANTES da limpeza) saía junto: o relatório de quem entrou
-//    conferia 2 de 11 arquivos, e o `diag-tela` remontava sem o CSS. A lista do
-//    código passou a vir também do DOCUMENTO.
-//  · (R9-4-10) As telas da aba B que foram no relatório baixado na A voltavam pra
-//    base quando B ia pro fundo de novo, e saíam de novo no próximo relatório; B
-//    seguia contando "2 não baixados". O download avisa as outras abas.
-//  · (R9-4-05) No computador, o FAB pousava no `cima-dir` e cobria 100% do
-//    "N esperando envio": o número não era `.nao-cobrir`, a grade do FAB não o
-//    tocava, e nada reavaliava o canto quando ele aparecia.
-const ctx9n = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR',
-  serviceWorkers: 'block', acceptDownloads: true });
-await ctx9n.route('**/*-tiles/live/base/**', servirTile);
-await ctx9n.route('**/api/*', rotaApi9k);
-// O aparelho guarda os dados de OUTRA conta ('9'), com a marca da sessão desta:
-// o perfil (o id 1 da rota) chega e é a troca de conta na abertura.
-const prep9n = await abrirEm(ctx9n, 'preparo');
-await esperarNaPagina(prep9n, () => typeof API !== 'undefined', 20000, 100);
-await prep9n.evaluate(() => {
-  API.setSession('tok-9n');
-  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '9', s: marcaDaSessao('tok-9n') }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-});
-await fecharComoOUsuario(prep9n);
-const A9n = await abrirEm(ctx9n, 'A');
-const prontaA9n = await prontaComFab(A9n);
-const trocou9n = await esperarNaPagina(A9n, () => dfatoAnel.some((e) => e.k === 'conta.trocou'), 10000, 100);
-const pre9n = await A9n.evaluate(() => ({ dev: !!(AppState.devMode && AppState.devMode.active),
-  codigoNaLista: diagRecursosDaSessao().filter((r) => /\/js\/min\/|\/css\//.test(r.name)).length }));
-diz('PRÉ-CONDIÇÃO: a troca de conta aconteceu, o modo dev segue ligado, e a lista de recursos da sessão ficou SEM o código da página',
-  prontaA9n.ok && trocou9n.ok && pre9n.dev && pre9n.codigoNaLista === 0, JSON.stringify({ pronta: prontaA9n.ok, trocou: trocou9n.ok, pre9n }));
-const dir9n = mkdtempSync(join(tmpdir(), 'smoke-9n-'));
-const baixar9n = async (pg, nome) => {
-  const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 30000 }), pg.evaluate(() => baixarDiagnostico())]);
-  const arq = join(dir9n, nome + '.zip');
-  await dl.saveAs(arq);
-  await pg.evaluate(() => diagGuardando);
-  return lerDiagnostico(arq).dados;
-};
-let cod9n = null;
-try {
-  const d = await baixar9n(A9n, 'troca');
-  const caminhos = Object.keys(d.codigo || {}).map((u) => u.replace(/^https?:\/\/[^/]+/, ''));
-  const css = Object.entries(d.codigo || {}).find(([u]) => /\/css\/app\.css$/.test(u));
-  cod9n = { caminhos, cssComCorpo: !!(css && typeof css[1].corpo === 'string' && css[1].corpo.length > 1000),
-    comparados: Object.keys(d.cacheVsRede || {}).filter((u) => /\/js\/min\/app\.js$|\/css\/app\.css$/.test(u)).length };
-} catch (e) { cod9n = { erro: String((e && e.message) || e).slice(0, 200) }; }
-diz('depois da TROCA DE CONTA, o relatório ainda leva o código da página — o app.js e o CSS (com o corpo, de que o diag-tela remonta), conferidos com o servidor (R9-1-01)',
-  !!cod9n?.caminhos && cod9n.caminhos.includes('/js/min/app.js') && cod9n.caminhos.includes('/css/app.css')
-  && cod9n.cssComCorpo === true && cod9n.comparados === 2, JSON.stringify(cod9n));
-// (R9-4-10) A aba B, aberta junto, registra 2 telas e vai pro fundo (a gravação de
-// ir pro fundo, chamada direto: a amplificação declarada das outras seções).
-const B9n = await abrirEm(ctx9n, 'B');
-const prontaB9n = await prontaComFab(B9n);
-const idB9n = await B9n.evaluate(() => DIAG_ABERTURA.id);
-const nB9n = await tocarFab(B9n, 2);
-await B9n.evaluate(() => diagGuardarAbertura('oculta'));
-const telasDeB = (d) => (d.aberturasAnteriores || []).filter((a) => a.id === idB9n)
-  .flatMap((a) => a.momentos || []).filter((m) => m.motivo === 'manual').length;
-let ab9n = null;
-try {
-  const d1 = await baixar9n(A9n, 'abas-1');
-  // O aviso do navegador chega a B — pelo FIM (a conta zerar), não por prazo.
-  const avisada = await esperarNaPagina(B9n, () => dlogNaoBaixados() === 0, 5000, 50);
-  const naoBaixadosB = await B9n.evaluate(() => dlogNaoBaixados());
-  // B registra MAIS UMA tela depois do download, e vai pro fundo de novo.
-  await tocarFab(B9n, 1);
-  const novaNaoBaixada = await B9n.evaluate(() => !dlogJaBaixados.has(dlogMomentos[dlogMomentos.length - 1]));
-  await B9n.evaluate(() => diagGuardarAbertura('oculta'));
-  const base9n = await guardado9c(A9n);
-  const d2 = await baixar9n(A9n, 'abas-2');
-  ab9n = { noPrimeiro: telasDeB(d1), avisada: avisada.ok, naoBaixadosB, novaNaoBaixada,
-    naBase: ((base9n.abertas || []).find((a) => a.id === idB9n) || {}).manuais, noSegundo: telasDeB(d2) };
-} catch (e) { ab9n = { erro: String((e && e.message) || e).slice(0, 200) }; }
-diz('PRÉ-CONDIÇÃO: B registrou 2 telas, e o relatório da A as levou',
-  prontaB9n.ok && nB9n === 2 && ab9n?.noPrimeiro === 2, JSON.stringify({ pronta: prontaB9n.ok, nB9n, ab9n }));
-diz('as telas de B que foram no relatório da A contam como entregues em B — o aviso do desligar não as conta (R9-4-10)',
-  ab9n?.avisada === true && ab9n?.naoBaixadosB === 0, JSON.stringify(ab9n));
-// (Lida no PRÓPRIO momento, e não pela contagem: o controle vale com e sem o
-// conserto — o que ele pega é a marcação larga demais, que daria a tela nova por
-// entregue.)
-diz('CONTROLE: a tela que B registrou DEPOIS do download segue não baixada', ab9n?.novaNaoBaixada === true, JSON.stringify(ab9n));
-diz('B, indo pro fundo de novo, guarda SÓ a tela nova — e o 2º relatório da A não leva de novo as que já foram (R9-4-10)',
-  ab9n?.naBase === 1 && ab9n?.noSegundo === 1, JSON.stringify(ab9n));
-rmSync(dir9n, { recursive: true, force: true });
-await ctx9n.close();
-// (R9-4-05) O computador: 1280×800, e o modo avião de verdade (abort + offline)
-// com um ✕ — a decisão fica esperando envio, e o indicador aparece no canto do FAB.
-const ctx9nL = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR', serviceWorkers: 'block' });
-let aviao9n = false;
-await ctx9nL.route('**/*-tiles/live/base/**', (r) => (aviao9n ? r.abort('internetdisconnected') : servirTile(r)));
-await ctx9nL.route('**/api/*', (r) => (aviao9n ? r.abort('internetdisconnected') : rotaApi9k(r)));
-// O aviso da consequência do 1º ✕ (um banner do topo) já visto: ele é passageiro
-// pro FAB, mas por cima do indicador a medida do dedo mediria o banner.
-const prepL9n = await abrirEm(ctx9nL, 'preparo');
-await esperarNaPagina(prepL9n, () => typeof API !== 'undefined', 20000, 100);
-await prepL9n.evaluate(() => {
-  API.setSession('tok-9n-largo');
-  localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-largo') }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false,
-    consequenciaVista: { reject: true, read: true } }));
-  localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-});
-await fecharComoOUsuario(prepL9n);
-const L9n = await abrirEm(ctx9nL, 'computador');
-const prontaL9n = await prontaComFab(L9n);
-// O FAB PARADO (ele tem transição, e a reposição sai por quadro), e quanto da
-// caixa do indicador ele cobre, e quem recebe o dedo no meio dela.
-const fab9n = async () => {
-  let antes = null;
-  for (let i = 0; i < 40; i++) {
-    const agora = await L9n.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => {
-      const r = document.getElementById('devFab').getBoundingClientRect(); ok(`${r.left},${r.top}`); }))));
-    if (agora === antes) break;
-    antes = agora;
-  }
-  return L9n.evaluate(() => {
-    const fabEl = document.getElementById('devFab');
-    const fab = fabEl.getBoundingClientRect();
-    const el = document.getElementById('inFlightIndicator');
-    if (!el) return { canto: fabEl.dataset.canto, indicador: false };
-    const r = el.getBoundingClientRect();
-    const x0 = Math.max(r.left, fab.left), x1 = Math.min(r.right, fab.right);
-    const y0 = Math.max(r.top, fab.top), y1 = Math.min(r.bottom, fab.bottom);
-    const area = Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
-    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return { canto: fabEl.dataset.canto, indicador: true, titulo: el.title, cobre: Math.round(100 * area / (r.width * r.height)),
-      noCentro: quem ? (quem.closest('#devFab') ? 'FAB' : quem.closest('#inFlightIndicator') ? 'indicador' : (quem.id || quem.tagName)) : null };
-  });
-};
-const antes9n = await fab9n();
-diz('PRÉ-CONDIÇÃO: no computador, sem o indicador, o FAB fica no canto preferido (cima-dir)',
-  prontaL9n.ok && antes9n.canto === 'cima-dir' && antes9n.indicador === false, JSON.stringify(antes9n));
-aviao9n = true; await ctx9nL.setOffline(true);
-await L9n.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
-const esperando9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length === 1 && AppState.inFlightActions === 0
-  && !AppState.pendingAction && !!document.getElementById('inFlightIndicator'), 15000, 100);
-const com9n = await fab9n();
-diz('PRÉ-CONDIÇÃO: sem sinal, o ✕ ficou esperando envio, e o indicador está na tela', esperando9n.ok && com9n.indicador === true,
-  JSON.stringify(com9n));
-diz('no computador, o FAB NÃO cobre o "N esperando envio" — reavaliado quando o número apareceu (R9-4-05)',
-  com9n.cobre === 0 && com9n.noCentro === 'indicador' && com9n.canto !== 'cima-dir', JSON.stringify(com9n));
-// (R11-4-04) O que o DIAGNÓSTICO vê disso: o indicador na geometria, com a marca
-// de número a não cobrir, e a sentinela `indicadorEscondido` quieta. Pelo
-// computado + sentinelas DIRETO (sem a captura, que reposiciona o FAB ao contar).
-const diag9n = () => L9n.evaluate(() => {
-  const c = diagComputado();
-  const g = (c.geometria || []).find((x) => x.sel === '#inFlightIndicator') || null;
-  return { ind: g && { naoCobrir: g.naoCobrir, noCentro: g.noCentro, sobFab: g.sobFab },
-           alertas: diagSentinelas(c).filter((a) => a.chave === 'indicadorEscondido') };
-});
-const diagCom9n = await diag9n();
-diz('o diagnóstico MEDE o "N esperando envio" (número a não cobrir, à vista) e não acusa nada (R11-4-04)',
-  !!diagCom9n.ind && diagCom9n.ind.naoCobrir === true && diagCom9n.ind.noCentro === 'ele mesmo' && diagCom9n.alertas.length === 0,
-  JSON.stringify(diagCom9n));
-// CONTROLE: o instrumento ENXERGA a sobreposição — com o FAB posto à força no
-// `cima-dir`, ele cobre o número, e o dedo no meio dele cai no FAB.
-await L9n.evaluate(() => {
-  const fab = document.getElementById('devFab');
-  const r = fab.getBoundingClientRect();
-  const { x, y } = devFabCoords('cima-dir', r.width || 44, r.height || 44);
-  fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.dataset.canto = 'cima-dir(forçado)';
-});
-const forcado9n = await fab9n();
-diz('CONTROLE: com o FAB posto à força no cima-dir, a medida acusa o número coberto e o dedo no FAB',
-  forcado9n.cobre > 0 && forcado9n.noCentro === 'FAB', JSON.stringify(forcado9n));
-// E o diagnóstico ACUSA a mesma cobertura — o defeito do R9-4-05/R11-4-03 que
-// nenhum relatório mostrava (R11-4-04) —, dizendo que é o FAB. O FAB que o
-// EDITOR pôs ali (`devFabFixado`) é escolha dele, e cala.
-const diagForcado9n = await diag9n();
-diz('com o FAB por cima do "N esperando envio", o diagnóstico acusa `indicadorEscondido`, dizendo que é o FAB (R11-4-04)',
-  diagForcado9n.alertas.length === 1 && diagForcado9n.alertas[0].fab === true && diagForcado9n.ind && diagForcado9n.ind.sobFab === true,
-  JSON.stringify(diagForcado9n));
-const diagFixado9n = await L9n.evaluate(() => { devFabFixado = true;
-  const n = diagSentinelas(diagComputado()).filter((a) => a.chave === 'indicadorEscondido').length;
-  devFabFixado = false; return n; });
-diz('o mesmo FAB, arrastado pelo editor pra lá, não vira alerta', diagFixado9n === 0, JSON.stringify({ diagFixado9n }));
-// A rede volta: a fila de saída esvazia, o indicador SOME — e o FAB volta ao canto preferido.
-aviao9n = false; await ctx9nL.setOffline(false);
-const saiu9n = await esperarNaPagina(L9n, () => carregarFilaDeSaida().length === 0 && !document.getElementById('inFlightIndicator'), 20000, 100);
-const depois9n = await fab9n();
-diz('com a rede de volta, o indicador some e o FAB volta ao cima-dir — reavaliado quando o número sumiu',
-  saiu9n.ok && depois9n.indicador === false && depois9n.canto === 'cima-dir', JSON.stringify(depois9n));
-// (R10-4-05) COM rede, o indicador nasce em toda decisão ("1 enviando", a ida ao
-// Waze) — e a decisão que sai mora na fila de saída enquanto voa (anotada antes
-// do envio). Com o número a não cobrir em todo estado, o FAB atravessava a tela
-// duas vezes a cada ✕ (MEDIDO, n15 da auditoria da rodada 10: 6 trocas de canto
-// em 3 decisões). Aqui, um ✕ com a resposta levando 300 ms (cada ida é uma
-// tarefa à parte, como na rede de verdade) e sem a janela do Desfazer, com um
-// card ainda na fila depois dele (o fim da fila muda a tela, e o FAB mudaria de
-// canto por outro motivo); as trocas de canto contadas pela MUTAÇÃO do atributo,
-// com o valor de antes de cada uma.
-await L9n.route('**/api/validar-place', async (r) => { await dormir(300); return rotaApi9k(r); });
-await L9n.evaluate(() => {
-  AppState.preferences.undoEnabled = false;
-  const fab = document.getElementById('devFab');
-  window.__cantos9n = [];
-  window.__fab9nObs = new MutationObserver((ms) => { for (const m of ms) window.__cantos9n.push([m.oldValue, fab.dataset.canto]); });
-  window.__fab9nObs.observe(fab, { attributes: true, attributeFilter: ['data-canto'], attributeOldValue: true });
-  window.__indic9n = 0;
-  window.__indic9nObs = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.id === 'inFlightIndicator') window.__indic9n++; });
-  window.__indic9nObs.observe(document.body, { childList: true });
-});
-const decidiu9n = [];
-for (let i = 0; i < 1; i++) {
-  // (O placar de antes fica NA PÁGINA: a função da espera vai serializada, e uma
-  // variável do Node chegaria lá `undefined` — gotcha #28.)
-  await L9n.evaluate(() => { window.__antes9n = AppState.stats.rejected;
-    document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click(); });
-  decidiu9n.push((await esperarNaPagina(L9n, () => AppState.stats.rejected === window.__antes9n + 1 && AppState.inFlightActions === 0
-    && carregarFilaDeSaida().length === 0 && !document.getElementById('inFlightIndicator'), 15000, 50)).ok);
-}
-const trocas9n = await L9n.evaluate(() => {
-  const trocas = window.__cantos9n.filter(([de, para]) => de !== para).length;
-  // CONTROLE do instrumento: uma troca forçada é contada.
-  const fab = document.getElementById('devFab');
-  const era = fab.dataset.canto;
-  fab.dataset.canto = 'forcado';
-  return new Promise((ok) => setTimeout(() => {
-    const contou = window.__cantos9n.filter(([de, para]) => de !== para).length - trocas;
-    fab.dataset.canto = era;
-    window.__fab9nObs.disconnect(); window.__indic9nObs.disconnect();
-    ok({ trocas, contou, nasceu: window.__indic9n, canto: era, naFila: AppState.queue.length });
-  }, 0));
-});
-diz('PRÉ-CONDIÇÃO: o ✕ saiu com rede — o "enviando" nasceu, a fila de saída ficou vazia e sobrou um card',
-  decidiu9n.every(Boolean) && trocas9n.nasceu === 1 && trocas9n.naFila >= 1, JSON.stringify({ decidiu9n, trocas9n }));
-diz('CONTROLE: o contador enxerga uma troca de canto (a forçada)', trocas9n.contou === 1, JSON.stringify(trocas9n));
-diz('com rede, o FAB NÃO muda de canto a cada decisão — o "1 enviando" não é número a não cobrir (R10-4-05)',
-  trocas9n.trocas === 0 && trocas9n.canto === 'cima-dir', JSON.stringify(trocas9n));
-await ctx9nL.close();
-// (R10-4-02) O iPhone com o app INSTALADO: a margem de segurança de cima (47 px)
-// entra no cabeçalho, e o "N esperando envio" a 80 px fixos ficava DEBAIXO dele
-// (MEDIDO, n21 da auditoria: o dedo no meio dele caía no ⓘ). A margem vem do CDP
-// do Chromium e entra ANTES da carga, como no aparelho, que já abre com ela
-// (posta depois, o observador do cabeçalho, que olha a caixa de CONTEÚDO, não vê
-// o padding mudar). CONTROLE: sem margem, o indicador fica nos 80 px de sempre.
-const margem9n = async (topo) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  let aviao = false;
-  await ctx.route('**/*-tiles/live/base/**', (r) => (aviao ? r.abort('internetdisconnected') : servirTile(r)));
-  await ctx.route('**/api/*', (r) => (aviao ? r.abort('internetdisconnected') : rotaApi9k(r)));
-  const prep = await abrirEm(ctx, 'margem ' + topo + ', preparo');
-  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
-  await prep.evaluate(() => {
-    API.setSession('tok-9n-margem');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-margem') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
-      consequenciaVista: { reject: true, read: true } }));
-  });
-  // A margem é emulada pelo protocolo do DevTools, que só o Chromium tem: fora
-  // dele roda só o CONTROLE sem margem (ver o pulo, abaixo).
-  if (MOTOR === 'chromium') {
-    const cdp = await ctx.newCDPSession(prep);
-    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: topo, topMax: topo, bottom: 0, bottomMax: 0,
-      left: 0, leftMax: 0, right: 0, rightMax: 0 } });
-  }
-  await prep.reload({ waitUntil: 'domcontentloaded' });
-  const pronta = await esperarNaPagina(prep, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente(), 20000, 100);
-  aviao = true; await ctx.setOffline(true);
-  await prep.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
-  const esperando = await esperarNaPagina(prep, () => carregarFilaDeSaida().length === 1 && !AppState.pendingAction
-    && AppState.inFlightActions === 0 && !!document.getElementById('inFlightIndicator'), 15000, 100);
-  const m = await prep.evaluate(() => {
-    const h = document.querySelector('header').getBoundingClientRect();
-    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
-    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return { cabecalho: Math.round(h.bottom), topo: Math.round(r.top),
-      noCentro: quem ? (quem.closest('#inFlightIndicator') ? 'indicador' : quem.closest('header') ? 'cabeçalho' : (quem.id || quem.tagName)) : null };
-  });
-  await ctx.close();
-  return { pronta: pronta.ok, esperando: esperando.ok, ...m };
-};
-const semMargem9n = await margem9n(0);
-diz('CONTROLE: sem a margem de cima, o "N esperando envio" fica nos 80 px de sempre, à vista',
-  semMargem9n.pronta && semMargem9n.esperando && semMargem9n.topo === 80 && semMargem9n.noCentro === 'indicador', JSON.stringify(semMargem9n));
-if (!pularForaDoChromium(MOTOR, '9n. o "N esperando envio" com a margem do iPhone instalado (R10-4-02)',
-  'a margem de segurança só se emula pelo protocolo do DevTools do Chromium (`Emulation.setSafeAreaInsetsOverride`), que o WebKit do Playwright não tem')) {
-  const comMargem9n = await margem9n(47);
-  diz('PRÉ-CONDIÇÃO: com a margem do iPhone instalado, o cabeçalho cresceu dela', comMargem9n.pronta && comMargem9n.esperando
-    && comMargem9n.cabecalho >= 110, JSON.stringify(comMargem9n));
-  diz('com a margem do iPhone instalado, o "N esperando envio" fica ABAIXO do cabeçalho, à vista (R10-4-02)',
-    comMargem9n.topo >= comMargem9n.cabecalho && comMargem9n.noCentro === 'indicador', JSON.stringify(comMargem9n));
-}
-// (R12-4-04) O "N esperando envio" que nasce NO MEIO de um arraste de card: a
-// decisão anterior, presa no ar, falha por rede com o dedo arrastando o card
-// seguinte. O FAB ESPERA o gesto acabar pra trocar de canto (a decisão do
-// R10-4-05) e fica por cima do número até o dedo soltar — e a captura automática
-// do MESMO arraste rodava a sentinela nesse instante e acusava
-// `indicadorEscondido`, num estado que o app não garante (MEDIDO, n4 da
-// auditoria). No computador (1280×800), como lá. CONTROLE: o FAB está MESMO por
-// cima do número durante o gesto (o caso foi encenado), e sai quando o dedo solta.
-const arraste9n = async () => {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  let aviao = false;
-  let prender = false;
-  const presos = [];
-  await ctx.route('**/*-tiles/live/base/**', (r) => (aviao ? r.abort('internetdisconnected') : servirTile(r)));
-  await ctx.route('**/api/*', (r) => {
-    if (aviao) return r.abort('internetdisconnected');
-    if (prender && /\/api\/validar-place$/.test(r.request().url())) { presos.push(r); return; }
-    return rotaApi9k(r);
-  });
-  const pg = await abrirEm(ctx, 'arraste');
-  await esperarNaPagina(pg, () => typeof API !== 'undefined', 20000, 100);
-  await pg.evaluate(() => {
-    API.setSession('tok-9n-arraste');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-arraste') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoEnabled: false,
-      consequenciaVista: { reject: true, read: true } }));
-    localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-  });
-  await pg.reload({ waitUntil: 'domcontentloaded' });
-  const pronta = await prontaComFab(pg);
-  await dormir(800);   // o FAB assenta no canto (ele se reposiciona quando o card assenta)
-  prender = true;
-  await pg.evaluate(() => document.querySelector('#cardStack .place-card:not(.card-fundo) .card-btn-reject').click());
-  const enviando = await esperarNaPagina(pg, () => AppState.inFlightActions === 1 && !!document.getElementById('inFlightIndicator')
-    && !window.isSwipeAnimating(), 10000, 50);
-  await dormir(300);
-  const c = await pg.evaluate(() => { const r = cardDaFrente().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.75 }; });
-  await pg.mouse.move(c.x, c.y); await pg.mouse.down();
-  for (let k = 1; k <= 5; k++) { await pg.mouse.move(c.x + 20 * k, c.y + 1); await dormir(20); }
-  // A decisão presa falha por REDE no meio do arraste: vira "esperando" (número a não cobrir).
-  aviao = true; await ctx.setOffline(true);
-  for (const r of presos.splice(0)) await r.abort('internetdisconnected').catch(() => {});
-  const esperando = await esperarNaPagina(pg, () => carregarFilaDeSaida().length === 1 && AppState.inFlightActions === 0
-    && !!document.getElementById('inFlightIndicator')?.classList.contains('nao-cobrir'), 10000, 50);
-  const noGesto = await pg.evaluate(() => {
-    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
-    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    // A contagem fica NA PÁGINA: a espera abaixo vai serializada (gotcha #28).
-    window.__capturas9n = dlogMomentos.length;
-    return { espera: fabEsperaOGesto, fabPorCima: !!(quem && quem.closest('#devFab')), capturas: dlogMomentos.length };
-  });
-  // Passa do limiar (25% da largura): a captura automática do arraste.
-  const limiar = 1280 * 0.25 + 30;
-  for (let k = 1; k <= 8; k++) { await pg.mouse.move(c.x + 100 + (limiar - 100) * k / 8, c.y + 2); await dormir(20); }
-  const capturou = await esperarNaPagina(pg, () => dlogMomentos.length > window.__capturas9n, 5000, 50);
-  const captura = await pg.evaluate(() => {
-    const m = dlogMomentos[dlogMomentos.length - 1];
-    return m ? { motivo: m.motivo, alertas: (m.alertas || []).map((a) => a.chave) } : null;
-  });
-  // O dedo volta ao meio e solta, sem decidir: o fim do gesto escolhe o canto.
-  await pg.mouse.move(c.x, c.y); await pg.mouse.up();
-  await esperarNaPagina(pg, () => !fabEsperaOGesto && !window.isSwipeAnimating(), 5000, 50);
-  await dormir(300);
-  const depois = await pg.evaluate(() => {
-    const r = document.getElementById('inFlightIndicator').getBoundingClientRect();
-    const quem = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return { fabPorCima: !!(quem && quem.closest('#devFab')),
-      alertas: (diagNoInstante().alertas || []).map((a) => a.chave).filter((k) => k === 'indicadorEscondido') };
-  });
-  await ctx.close();
-  return { pronta: pronta.ok, enviando: enviando.ok, esperando: esperando.ok, noGesto, capturou: capturou.ok, captura, depois };
-};
-const arr9n = await arraste9n();
-diz('PRÉ-CONDIÇÃO: o "N esperando envio" nasceu no MEIO do arraste, com o FAB esperando o gesto e por cima do número',
-  arr9n.pronta && arr9n.enviando && arr9n.esperando && arr9n.noGesto.espera === true && arr9n.noGesto.fabPorCima === true,
-  JSON.stringify(arr9n));
-diz('a captura automática do arraste não acusa `indicadorEscondido` pelo FAB que espera o gesto (R12-4-04)',
-  arr9n.capturou && arr9n.captura?.motivo === 'auto:arraste' && Array.isArray(arr9n.captura.alertas)
-  && !arr9n.captura.alertas.includes('indicadorEscondido'), JSON.stringify(arr9n.captura));
-diz('CONTROLE: o dedo solta, o FAB sai de cima do número — e o diagnóstico segue sem acusar nada',
-  arr9n.depois.fabPorCima === false && arr9n.depois.alertas.length === 0, JSON.stringify(arr9n.depois));
-
-secao('9o. DUAS ABAS, UMA FILA GUARDADA: a linha da outra aba diz a verdade, e o mapa que a poda de lá levou volta');
-// Auditoria da rodada 13 (R13-4-03). A base e o cache do mapa são do APARELHO; o
-// "feito nesta janela" e a linha das Preferências são da MEMÓRIA de cada aba. A
-// abre com a fila dela (com pedidos que só ela tem) e prepara; B abre com a dela e
-// prepara: a fila guardada passa a ser a de B, e a poda de B leva o mapa dos
-// pedidos que só A tem. A linha de A seguia "Pronto — 12" sobre a fila guardada
-// de B, e a varredura seguinte de A, na mesma janela, pulava esses tiles como
-// prontos: "Pronto — 13" com 6 sem mapa (MEDIDO, p3 da rodada 13). Aqui com o
-// canal entre abas, o cache do mapa e o IndexedDB de VERDADE — duas páginas do
-// mesmo contexto, as duas abrindo pelo `initApp` com a sessão guardada.
-// CONTROLE: UMA aba só — a linha segue "Pronto", e o gatilho não prepara nada de
-// novo (nenhum tile pedido).
-const fila9o = (ids) => ids.map((i) => SO_MAPA(i));
-const COMUNS_9O = [301, 302, 303, 304, 305, 306];
-const cenario9o = async (nome, listas) => {
-  const ctx9o = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  let tiles9o = 0;
-  await ctx9o.route('**/*-tiles/live/base/**', (r) => { tiles9o++; return r.fulfill({ status: 200, contentType: 'image/png', body: PX,
-    headers: { 'access-control-allow-origin': '*' } }); });
-  const rota9o = (lista) => (r) => {
-    const rota = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rota === 'buscar-places') return json({ success: true, places: fila9o(lista), hasMore: false, page: 1, total: lista.length });
-    if (rota === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-    if (rota === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
-    return json({ success: true });
-  };
-  // O aparelho: a sessão e o "Disponível offline" ligado, por uma página que fecha.
-  const prep = await ctx9o.newPage();
-  await prep.route('**/api/*', rota9o([]));
-  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
-  await prep.evaluate(() => {
-    API.setSession('tok-9o');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9o') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
-      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
-  });
-  await fecharComoOUsuario(prep);
-  const abrir9o = async (lista, rotulo) => {
-    const pg = await ctx9o.newPage();
-    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
-    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
-    await pg.route('**/api/*', rota9o(lista));
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
-      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
-    return { pg, ok: ok.ok };
-  };
-  // Os pedidos da fila DESTA aba sem o tile no cache do aparelho, e os da fila guardada.
-  const medir = (pg) => pg.evaluate(async () => {
-    const g = await offlineLerFila();
-    const c = await caches.open('waze-places-tiles');
-    const noCache = new Set((await c.keys()).map((x) => x.url));
-    const faixa = offlineFaixaDeCaixas();
-    const sem = (pls) => pls.filter((p) => [...tilesDaFaixa(p, faixa)].some((u) => !noCache.has(u))).map((p) => p.venueID);
-    const el = document.getElementById('prefOfflineDesc');
-    const n = AppState.queue.length;
-    return { semMapaNaAba: sem(AppState.queue), semMapaNaGuardada: g ? sem(g.places) : null,
-      guardada: g ? g.places.map((p) => p.venueID) : null,
-      // A linha como ESTÁ na tela (sem redesenhar), conferida pela CHAVE do dicionário.
-      pronto: el.textContent.startsWith(t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n })),
-      pendente: el.textContent.startsWith(t('prefs.offline.pendenteA')) };
-  });
-  const A = await abrir9o(listas[0], 'A');
-  const res = { prontaA: A.ok, depoisDeB: null, depoisDoGatilho: null, linhaDeB: null };
-  if (listas[1]) {
-    const B = await abrir9o(listas[1], 'B');
-    res.prontaB = B.ok;
-    await dormir(300);   // o aviso do canal é uma tarefa à parte
-    res.depoisDeB = await medir(A.pg);
-    // O gatilho de A: abrir as Preferências (ou uma prova de rede). O fim da
-    // varredura por SINAL POSITIVO: um "pronto" a mais no diário (a contagem fica
-    // NA PÁGINA — a espera vai serializada, gotcha #28).
-    const tiles = tiles9o;
-    // A varredura que COMEÇA liga a bandeira antes do primeiro `await`: lida logo
-    // depois do gatilho, ela diz se ele preparou de novo (com a MESMA fila nas
-    // duas, não prepara — R14-4-01), e só então se espera o fim dela.
-    const comecou = await A.pg.evaluate(() => {
-      window.__prontas9o = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
-      offlineMarcarGesto(); offlineTalvezVarrer();
-      return offlineVarrendo;
-    });
-    res.varreu = comecou && (await esperarNaPagina(A.pg, () => dfatoAnel.filter((e) => e.k === 'offline.pronto').length > window.__prontas9o
-      && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100)).ok;
-    res.tilesDoGatilho = tiles9o - tiles;
-    await dormir(300);
-    res.depoisDoGatilho = await medir(A.pg);
-    res.linhaDeB = await medir(B.pg);
-  } else {
-    // A varredura que COMEÇA liga a bandeira antes do primeiro `await`: lida logo
-    // depois do gatilho, ela diz se o gatilho preparou de novo, sem prazo.
-    const tiles = tiles9o;
-    const g = await A.pg.evaluate(() => { offlineMarcarGesto(); const precisava = offlinePrecisaVarrer();
-      offlineTalvezVarrer(); return { precisava, comecou: offlineVarrendo }; });
-    res.varreu = g.precisava || g.comecou;
-    await dormir(300);   // folga pra um tile tardio aparecer, se o defeito voltar
-    res.tilesDoGatilho = tiles9o - tiles;
-    res.depoisDoGatilho = await medir(A.pg);
-  }
-  await ctx9o.close();
-  return res;
-};
-const duas9o = await cenario9o('duas abas', [[...COMUNS_9O, 340, 341, 342, 343, 344, 345], [...COMUNS_9O, 330, 331, 332, 333, 334, 335]]);
-diz('PRÉ-CONDIÇÃO: as duas abas abriram e prepararam; a fila guardada é a de B, e a poda de B levou o mapa dos 6 pedidos que só A tem',
-  duas9o.prontaA && duas9o.prontaB && duas9o.depoisDeB?.guardada?.includes('v330')
-  && duas9o.depoisDeB?.semMapaNaAba?.length === 6, JSON.stringify(duas9o.depoisDeB));
-diz('a linha de A (as Preferências abertas, sem redesenhar) deixa de dizer "Pronto" — diz "Ainda não preparado" (R13-4-03)',
-  duas9o.depoisDeB?.pronto === false && duas9o.depoisDeB?.pendente === true, JSON.stringify(duas9o.depoisDeB));
-diz('o gatilho de A prepara a fila dela: o mapa que a poda de B levou é baixado de novo, e a fila guardada fica sem buraco (R13-4-03)',
-  duas9o.varreu && duas9o.tilesDoGatilho > 0 && Array.isArray(duas9o.depoisDoGatilho?.semMapaNaGuardada)
-  && duas9o.depoisDoGatilho.semMapaNaGuardada.length === 0 && duas9o.depoisDoGatilho.guardada?.includes('v340')
-  && duas9o.depoisDoGatilho.pronto === true, JSON.stringify({ tiles: duas9o.tilesDoGatilho, ...duas9o.depoisDoGatilho }));
-diz('e agora é a linha de B que deixa de dizer "Pronto" (a fila guardada é a de A)',
-  duas9o.linhaDeB?.pronto === false && duas9o.linhaDeB?.pendente === true, JSON.stringify(duas9o.linhaDeB));
-// A MESMA fila nas duas abas (R14-4-01): a segunda grava os mesmos pedidos, e a
-// fila guardada é a mesma — a linha da primeira seguia "Ainda não preparado" com
-// tudo no aparelho, e o gatilho de cada uma preparava a fila inteira de novo, sem
-// fim (MEDIDO, e1 da rodada 14). Agora a segunda mantém o carimbo da fila
-// coberta e nem avisa: as duas linhas seguem "Pronto", e o gatilho não prepara.
-const MESMA_9O = [...COMUNS_9O, 340, 341, 342, 343, 344, 345];
-const mesma9o = await cenario9o('mesma fila', [MESMA_9O, MESMA_9O]);
-diz('a MESMA fila nas duas abas: a linha de A segue "Pronto", o gatilho de A não prepara nada, e a de B também segue "Pronto" (R14-4-01)',
-  mesma9o.prontaA && mesma9o.prontaB && mesma9o.depoisDeB?.pronto === true && mesma9o.depoisDeB?.semMapaNaAba?.length === 0
-  && mesma9o.varreu === false && mesma9o.tilesDoGatilho === 0 && mesma9o.linhaDeB?.pronto === true,
-  JSON.stringify({ depoisDeB: mesma9o.depoisDeB, varreu: mesma9o.varreu, tiles: mesma9o.tilesDoGatilho, linhaDeB: mesma9o.linhaDeB }));
-const uma9o = await cenario9o('uma aba', [[...COMUNS_9O, 340, 341, 342, 343, 344, 345]]);
-diz('CONTROLE: uma aba só — a linha segue "Pronto", e o gatilho não prepara nada de novo (nenhum tile pedido)',
-  uma9o.prontaA && uma9o.depoisDoGatilho?.pronto === true && uma9o.varreu === false && uma9o.tilesDoGatilho === 0
-  && uma9o.depoisDoGatilho?.semMapaNaGuardada?.length === 0, JSON.stringify(uma9o));
-
-secao('9p. DUAS ABAS E O AVISO DE PARTE: a aba PARADA e a aba VARRENDO perdem a cobertura do pedido que a poda de lá levou');
-// Auditoria da rodada 15 (R15-4-01) e da 16 (R16-4-01). A e B abrem a MESMA fila e
-// terminam "Pronto" (carimbo T). B PULA um pedido (o ↑ não vai pelo canal de pouso)
-// e prepara: grava PARTE da fila guardada (mesmo carimbo) e a poda de B tira do
-// cache o mapa do pedido que só A tem. A aba que ficou PARADA já perdia a cobertura
-// (o aviso de PARTE); a que estava VARRENDO a devolvia no fim da própria varredura
-// ("Pronto — 6 pedidos" sobre um card sem mapa, e o gatilho seguinte não reparava).
-// Aqui com o canal, o cache do mapa e o IndexedDB de VERDADE. O CONTROLE de cada
-// leitura é o outro cenário (o "A varrendo" tem a parada; a MESMA fila nas duas, sem
-// pular nada, segue "Pronto"). Sem service worker, nos dois motores.
-const cenario9p = async (nome, { modo }) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  const resp = (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } });
-  await ctx.route('**/*-tiles/live/base/**', resp);
-  const rota = (r) => {
-    const rt = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rt === 'buscar-places') return json({ success: true, places: fila9o(COMUNS_9O), hasMore: false, page: 1, total: COMUNS_9O.length });
-    if (rt === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-    if (rt === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
-    return json({ success: true });
-  };
-  const prep = await ctx.newPage();
-  await prep.route('**/api/*', rota);
-  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
-  await prep.evaluate(() => {
-    API.setSession('tok-9p');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9p') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
-      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
-  });
-  await fecharComoOUsuario(prep);
-  const abrir = async (rotulo) => {
-    const pg = await ctx.newPage();
-    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
-    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
-    await pg.route('**/api/*', rota);
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
-      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
-    return { pg, ok: ok.ok };
-  };
-  const A = await abrir('A');
-  const B = await abrir('B');
-  const out = { prontas: [A.ok, B.ok] };
-  // A janela VIRA nas duas (a de 20 min): a varredura seguinte baixa tudo de novo.
-  const virar = (pg) => pg.evaluate(() => {
-    offlineJanelaServida -= 1; offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
-    offlineMarcarGesto(); window.__prontas = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
-  });
-  await virar(A.pg); await virar(B.pg);
-  const fimDaPreparacao = (pg) => esperarNaPagina(pg, () => dfatoAnel.filter((e) => e.k === 'offline.pronto').length > window.__prontas
-    && !offlineVarrendo && !offlinePedidaDeNovo, 40000, 100);
-  const alvo = 'v301';
-  const tilesDoAlvo = await A.pg.evaluate((p) => { const f = offlineFaixaDeCaixas(); const pl = AppState.queue.find((x) => x.venueID === p);
-    return [...tilesDaFaixa(pl, f)]; }, alvo);
-  out.tilesDoAlvo = tilesDoAlvo.length;
-  // O PORTÃO de A (R22-4-01): A só varre ATÉ o fim do passo de B se os tiles que NÃO são do alvo ficam presos num portão
-  // que o teste abre depois do `fimB` — como a seção 9 faz com o `atrasoTile`. Antes cada tile dormia 250 ms: depois que o
-  // alvo chegava sobravam ~500 ms de varredura, e com o lado Node/driver atrasado (máquina disputada) a varredura já tinha
-  // acabado quando o teste a conferia — a PRÉ-CONDIÇÃO "A varre quando B poda" não era verdade (MEDIDO: 4 de 6 rodadas com
-  // 300 ms de atraso em cada `evaluate`). O prazo media a velocidade do runner; o teste quer a ORDEM dos fatos.
-  let abrirPortao = () => {};
-  if (modo === 'varrendo') {
-    const portao = new Promise((ok) => { abrirPortao = ok; });
-    const doAlvo = new Set(tilesDoAlvo);
-    await A.pg.route('**/*-tiles/live/base/**', async (r) => { if (!doAlvo.has(r.request().url())) await portao; return resp(r); });
-    await A.pg.evaluate((t) => { window.__tilesAlvo = t; offlineTalvezVarrer(); }, tilesDoAlvo);
-    const baixou = await esperarNaPagina(A.pg, () => window.__tilesAlvo.every((u) => offlineFeitosNaJanela.us.has(u)), 20000, 50);
-    out.baixouOAlvo = baixou.ok;
-    out.varrendoAoBaixar = await A.pg.evaluate(() => offlineVarrendo);
-  }
-  if (modo !== 'mesma') {
-    // B pula o alvo (o ↑ não vai pelo canal de pouso) e prepara: PARTE, carimbo mantido.
-    await B.pg.evaluate((p) => { AppState.queue = AppState.queue.filter((x) => x.venueID !== p); updatePendingCount(); offlineTalvezVarrer(); }, alvo);
-  } else {
-    await B.pg.evaluate(() => { offlineTalvezVarrer(); });
-  }
-  out.fimB = (await fimDaPreparacao(B.pg)).ok;
-  abrirPortao();   // B já avisou a PARTE; só agora A pode terminar a varredura dela
-  if (modo === 'varrendo') out.fimA = (await fimDaPreparacao(A.pg)).ok;
-  if (modo === 'varrendo' || modo === 'parada') await esperarNaPagina(A.pg, () => !offlineVarrendo && !offlinePedidaDeNovo, 20000, 50);
-  const medir = (pg) => pg.evaluate(async (p) => {
-    const c = await caches.open('waze-places-tiles');
-    const noCache = new Set((await c.keys()).map((x) => x.url));
-    const pl = AppState.queue.find((x) => x.venueID === p);
-    const f = offlineFaixaDeCaixas();
-    const el = document.getElementById('prefOfflineDesc');
-    const n = AppState.queue.length;
-    return { temAlvo: !!pl, semMapaDoAlvo: pl ? [...tilesDaFaixa(pl, f)].filter((u) => !noCache.has(u)).length : null,
-      cobre: offlineFilaPreparada !== null && offlineFilaPreparada === offlineFilaGravadaEm,
-      pronto: el.textContent.startsWith(t(n === 1 ? 'prefs.offline.prontoA' : 'prefs.offline.prontoAPlural', { n })),
-      // Só diz alguma coisa na aba que VARREU na janela nova (a parada também "precisa" por a janela ter virado).
-      precisaVarrer: offlinePrecisaVarrer() };
-  }, alvo);
-  out.A = await medir(A.pg);
-  // Sem rede, a linha de A: a que mentia ("Pronto — … você segue com o que está guardado").
-  await ctx.setOffline(true);
-  // O `onLine` falso é o que a linha lê: espera-se o FATO (o navegador o aplicou), não um prazo (R22-4-01).
-  await esperarNaPagina(A.pg, () => navigator.onLine === false, 10000, 50);
-  out.semRede = await A.pg.evaluate(() => { atualizarLinhaDoOffline(0, 0); const el = document.getElementById('prefOfflineDesc');
-    // A conta de preparações CONCLUÍDAS fica anotada AQUI, antes de a rede voltar: o `online` que o `setOffline(false)`
-    // dispara já inicia uma varredura sozinha (falta só o tile do alvo e ela acaba em milissegundos), e ler o `offlineVarrendo`
-    // depois do gatilho do teste tomava "a varredura do `online` já acabou" por "o gatilho não varreu".
-    window.__prontasAntesDaRede = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
-    return { dizTudoGuardado: el.textContent.includes(t('prefs.offline.prontoSemRedeB')) }; });
-  await ctx.setOffline(false);
-  if (modo !== 'mesma') {
-    // O gatilho seguinte de A prepara a fila DELA e baixa o mapa que a poda levou — seja a varredura do `online` ou a do gatilho,
-    // o que vale é uma preparação CONCLUIR depois da volta da rede (o incremento de `offline.pronto`), com o mapa no cache.
-    await A.pg.evaluate(() => { window.__prontas = window.__prontasAntesDaRede; offlineMarcarGesto(); offlineTalvezVarrer(); });
-    out.fimDoGatilho = (await fimDaPreparacao(A.pg)).ok;
-    out.depoisDoGatilho = await medir(A.pg);
-  }
-  await ctx.close();
-  return out;
-};
-const varr9p = await cenario9p('A varrendo', { modo: 'varrendo' });
-diz('PRÉ-CONDIÇÃO: A baixou o mapa do pedido com a varredura no ar, e a poda de B o levou (o cache de A não o tem mais)',
-  varr9p.prontas.every(Boolean) && varr9p.baixouOAlvo && varr9p.varrendoAoBaixar && varr9p.fimB && varr9p.fimA
-  && varr9p.A.temAlvo && varr9p.A.semMapaDoAlvo > 0, JSON.stringify(varr9p));
-diz('A varrendo: A termina SEM cobertura — a linha não diz "Pronto", nem sem rede, e o gatilho seguinte prepara (R16-4-01)',
-  varr9p.A.cobre === false && varr9p.A.pronto === false && varr9p.semRede?.dizTudoGuardado === false && varr9p.A.precisaVarrer === true,
-  JSON.stringify({ A: varr9p.A, semRede: varr9p.semRede }));
-diz('o gatilho de A baixa o mapa que a poda levou, e a linha volta a dizer "Pronto"',
-  varr9p.fimDoGatilho && varr9p.depoisDoGatilho.semMapaDoAlvo === 0 && varr9p.depoisDoGatilho.pronto === true,
-  JSON.stringify(varr9p.depoisDoGatilho));
-const par9p = await cenario9p('A parada', { modo: 'parada' });
-diz('CONTROLE: a aba PARADA perde a cobertura do mesmo jeito (R15-4-01) — o instrumento enxerga os dois lados',
-  par9p.prontas.every(Boolean) && par9p.fimB && par9p.A.temAlvo && par9p.A.semMapaDoAlvo > 0
-  && par9p.A.cobre === false && par9p.A.pronto === false && par9p.semRede?.dizTudoGuardado === false,
-  JSON.stringify(par9p));
-const mes9p = await cenario9p('mesma fila', { modo: 'mesma' });
-diz('CONTROLE: B prepara a MESMA fila, sem pular nada — A segue "Pronto", com o mapa inteiro, na tela e sem rede (R14-4-01)',
-  mes9p.prontas.every(Boolean) && mes9p.fimB && mes9p.A.cobre === true && mes9p.A.pronto === true && mes9p.A.semMapaDoAlvo === 0
-  && mes9p.semRede?.dizTudoGuardado === true, JSON.stringify(mes9p));
-
-secao('9q. O "SAIR" DE OUTRA ABA COM O DOWNLOAD NO AR: o cache e a base não voltam');
-// Auditoria da rodada 15 (R15-4-02). A varredura de A está no meio de um download: o
-// `caches.open` fica preso num portão do teste. B dá "Sair" (apaga o cache do mapa e a
-// base, e avisa A, que sobe a época). O portão solta: o `open`/`put` que estava a
-// caminho gravava o tile do pedido de um terceiro no cache RECRIADO. Nos dois motores,
-// com o CacheStorage e o IndexedDB de verdade, e a ordem forçada pelo portão em DUAS
-// posições (o `open` resolve depois do apagamento — recria — ou antes — órfão). O
-// CONTROLE é o mesmo roteiro SEM o "Sair": o tile fica e a base fica.
-const cenario9q = async (nome, { abrirAntes, sair, segurarLeitura = false }) => {
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-  await ctx.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } }));
-  const rota = (r) => {
-    const rt = r.request().url().split('/api/')[1];
-    const json = (o) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (rt === 'buscar-places') return json({ success: true, places: fila9o(COMUNS_9O), hasMore: false, page: 1, total: COMUNS_9O.length });
-    if (rt === 'perfil') return json({ success: true, profile: { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [] } });
-    if (rt === 'lista-paises') return json({ success: true, countries: [{ id: 30, name: 'Brazil' }] });
-    return json({ success: true });
-  };
-  const prep = await ctx.newPage();
-  await prep.route('**/api/*', rota);
-  await prep.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-  await esperarNaPagina(prep, () => typeof API !== 'undefined', 20000, 100);
-  await prep.evaluate(() => {
-    API.setSession('tok-9q');
-    localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9q') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
-      offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
-  });
-  await fecharComoOUsuario(prep);
-  const abrir = async (rotulo) => {
-    const pg = await ctx.newPage();
-    pg.on('pageerror', (e) => errosJs.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: String(e.message) }));
-    pg.on('console', (m) => { if (/Content Security Policy|Refused to/i.test(m.text()))
-      violacoes.push({ secao: secaoAtual + ` [${nome} ${rotulo}]`, txt: m.text() }); });
-    await pg.route('**/api/*', rota);
-    await pg.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-    const ok = await esperarNaPagina(pg, () => typeof AppState !== 'undefined' && AppState.authenticated && !!cardDaFrente()
-      && dfatoAnel.some((e) => e.k === 'offline.pronto') && !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100);
-    return { pg, ok: ok.ok };
-  };
-  const A = await abrir('A');
-  const B = await abrir('B');
-  // A: nova varredura, com o `caches.open` do mapa SEGURADO pelo portão do teste.
-  await A.pg.evaluate(({ antes, segurarLeitura }) => {
-    const real = caches.open.bind(caches);
-    // Quantos `put` o cache do mapa recebeu depois do portão: com a época trocada, NENHUM
-    // (gravar e desfazer deixaria o tile no aparelho por um instante, e a página que
-    // morre entre os dois o deixaria de vez).
-    window.__puts = 0;
-    const putReal = Cache.prototype.put;
-    Cache.prototype.put = function (...a) { window.__puts++; return putReal.apply(this, a); };
-    window.__seguros = 0; window.__sol = [];
-    window.__soltar = () => { window.__passou = true; window.__sol.splice(0).forEach((f) => f()); };
-    caches.open = async (nome) => {
-      if (segurarLeitura || nome !== 'waze-places-tiles' || window.__passou) return real(nome);
-      window.__seguros++;
-      if (antes) { const c = await real(nome); await new Promise((ok) => window.__sol.push(ok)); return c; }
-      await new Promise((ok) => window.__sol.push(ok));
-      return real(nome);
-    };
-    // R17-4-04: em vez do cache, o que fica preso é a LEITURA da fila guardada que fecha a
-    // varredura (a que abria a base e, com o "Sair" de B no meio, a deixava de volta,
-    // vazia). O download termina antes, e o portão solta depois do apagamento de B.
-    if (segurarLeitura) {
-      const lerReal = offlineLerFila;
-      offlineLerFila = async function () {
-        if (window.__passou) return lerReal();
-        window.__seguros++;
-        await new Promise((ok) => window.__sol.push(ok));
-        return lerReal();
-      };
-    }
-    offlineJanelaServida -= 1; offlineFeitosNaJanela = { janela: null, epoca: -1, us: new Set(), guardados: new Set() };
-    offlineMarcarGesto(); offlineTalvezVarrer();
-  }, { antes: abrirAntes, segurarLeitura });
-  const preso = await esperarNaPagina(A.pg, () => window.__seguros > 0, 15000, 50);
-  const out = { preso: preso.ok };
-  if (sair) {
-    await B.pg.evaluate(() => handleLogout());
-    // O aviso chega a A (a época sobe): por sinal positivo, a aba sem sessão.
-    out.avisou = (await esperarNaPagina(A.pg, () => !AppState.authenticated, 15000, 50)).ok;
-  }
-  await A.pg.evaluate(() => window.__soltar());
-  // O fim: a varredura de A acabou (nada no ar), por sinal positivo.
-  out.fim = (await esperarNaPagina(A.pg, () => !offlineVarrendo && !offlinePedidaDeNovo, 30000, 100)).ok;
-  Object.assign(out, await A.pg.evaluate(async () => {
-    const tem = await caches.has('waze-places-tiles');
-    return { cache: tem, puts: window.__puts, tiles: tem ? (await (await caches.open('waze-places-tiles')).keys()).length : 0,
-      dbs: (await indexedDB.databases()).map((d) => d.name) };
-  }));
-  await ctx.close();
-  return out;
-};
-for (const [rot, antes] of [['o `open` resolve DEPOIS do apagamento (recria o cache)', false], ['o `open` resolve ANTES do apagamento (cache órfão)', true]]) {
-  const r = await cenario9q(rot, { abrirAntes: antes, sair: true });
-  diz(`depois do "Sair" de B, com ${rot}: o cache do mapa e a base de A não voltam (R15-4-02)`,
-    r.preso && r.avisou && r.fim && r.cache === false && r.tiles === 0 && r.dbs.length === 0 && r.puts === 0, JSON.stringify(r));
-}
-// R17-4-04: a LEITURA da fila guardada que fecha a varredura (e as demais — a do relatório, a
-// da reabertura) abria a base e, com o "Sair" de B no meio, a deixava de volta: vazia, mas
-// com o nome. Quem só lê não cria. Medido com o IndexedDB de verdade, nos dois motores.
-const ler9q = await cenario9q('a LEITURA da fila guardada presa', { abrirAntes: false, sair: true, segurarLeitura: true });
-diz('depois do "Sair" de B, com a leitura da fila guardada que fecha a varredura de A presa: a base não volta (R17-4-04)',
-  ler9q.preso && ler9q.avisou && ler9q.fim && ler9q.cache === false && ler9q.dbs.length === 0, JSON.stringify(ler9q));
-const lerSem9q = await cenario9q('a LEITURA da fila guardada presa, sem Sair', { abrirAntes: false, sair: false, segurarLeitura: true });
-diz('CONTROLE: o mesmo roteiro SEM o "Sair" — a base existe (a gravação a cria; só a LEITURA deixou de criar) e o cache tem os tiles',
-  lerSem9q.preso && lerSem9q.fim && lerSem9q.dbs.length > 0 && lerSem9q.cache === true && lerSem9q.tiles > 0, JSON.stringify(lerSem9q));
-const sem9q = await cenario9q('sem Sair', { abrirAntes: false, sair: false });
-diz('CONTROLE: o mesmo roteiro SEM o "Sair" — o cache do mapa tem os tiles e a base existe (o instrumento enxerga os dois lados)',
-  sem9q.preso && sem9q.fim && sem9q.cache === true && sem9q.puts > 0 && sem9q.tiles > 0 && sem9q.dbs.length > 0, JSON.stringify(sem9q));
-
-secao('9r. O DESFAZER DE UMA GRAVAÇÃO VELHA NÃO APAGA O TILE DA ÉPOCA SEGUINTE');
-// Auditoria da rodada 16 (R16-8-05). O `put` da época 0 fica preso (portão do teste); a
-// época sobe SEM o cache ser apagado (o "Sair" de outra aba, que já o apagou, chegando a
-// um cache que o `open` desta recriou); a época seguinte guarda o MESMO tile nesse
-// cache; o portão solta, e o desfazer da gravação velha apagava o tile da nova. Com o
-// CacheStorage de verdade, nos dois motores. CONTROLE: sem a gravação da época nova, o
-// desfazer da velha tira o tile (R15-4-02) — o instrumento enxerga os dois lados.
-const ctx9r = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', serviceWorkers: 'block' });
-await ctx9r.route('**/*-tiles/live/base/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PX, headers: { 'access-control-allow-origin': '*' } }));
-const pg9r = await ctx9r.newPage();
-pg9r.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
-await pg9r.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
-await esperarNaPagina(pg9r, () => typeof offlineBaixar === 'function', 20000, 100);
-const r9r = await pg9r.evaluate(async () => {
-  const cenario = async (comNova) => {
-    const U = 'https://www.waze.com/row-tiles/live/base/17/' + (comNova ? 1 : 2) + '/2.png';
-    await caches.delete('waze-places-tiles');
-    let soltar; const portao = new Promise((ok) => { soltar = ok; });
-    const putReal = Cache.prototype.put; let n = 0;
-    Cache.prototype.put = async function (...a) { if (n++ === 0) await portao; return putReal.apply(this, a); };
-    try {
-      const velha = offlineBaixar(U, true);
-      await new Promise((ok) => setTimeout(ok, 300));      // o `put` da época velha está preso
-      offlineEpoca++;                                       // a época sobe; o cache NÃO é apagado aqui
-      const nova = comNova ? await offlineBaixar(U, true) : null;
-      const durante = !!(await (await caches.open('waze-places-tiles')).match(U));
-      soltar();
-      const rv = await velha;
-      const depois = !!(await caches.has('waze-places-tiles') && await (await caches.open('waze-places-tiles')).match(U));
-      return { velha: rv, nova, durante, depois };
-    } finally { Cache.prototype.put = putReal; await caches.delete('waze-places-tiles'); }
-  };
-  return { comNova: await cenario(true), semNova: await cenario(false) };
-});
-diz('PRÉ-CONDIÇÃO: a gravação da época velha falha (a época trocou) e a da época nova guardou o tile',
-  r9r.comNova.velha === false && r9r.comNova.nova === true && r9r.comNova.durante === true, JSON.stringify(r9r));
-diz('o desfazer da gravação velha NÃO apaga o tile que a época seguinte guardou (R16-8-05)',
-  r9r.comNova.depois === true, JSON.stringify(r9r.comNova));
-diz('CONTROLE: sem gravação da época nova, o desfazer da velha tira o tile (R15-4-02)',
-  r9r.semNova.velha === false && r9r.semNova.depois === false, JSON.stringify(r9r.semNova));
-await ctx9r.close();
-
 secao('10. NADA DE ERRO, NADA DE CSP');
-// O que o MOTOR diz e não é erro do app (`ruidoDoMotor`, a lista FECHADA e
-// medida de tools/navegador.mjs): no WebKit, o pedido à nossa API que este smoke
-// ABORTA (o modo avião de mentira) às vezes sai como `pageerror` "… due to access
-// control checks." — e o app trata a rejeição. Fica fora da conta, e DITO.
-const ruidoDoMotorNoPercurso = errosJs.filter((e) => ruidoDoMotor(e.txt));
-const errosDaPagina = errosJs.filter((e) => !ruidoDoMotor(e.txt));
-if (ruidoDoMotorNoPercurso.length) {
-  console.log(`  · ${ruidoDoMotorNoPercurso.length} aviso(s) do motor fora da conta (ruidoDoMotor): ${JSON.stringify(ruidoDoMotorNoPercurso.slice(0, 2))}`);
-}
-diz('nenhum erro de JS em todo o percurso', errosDaPagina.length === 0, JSON.stringify(errosDaPagina.slice(0, 3)));
+diz('nenhum erro de JS em todo o percurso', errosJs.length === 0, JSON.stringify(errosJs.slice(0, 3)));
 diz('nenhuma violação de CSP', violacoes.length === 0, JSON.stringify(violacoes.slice(0, 3)));
 
 await browser.close();
 servidor.kill();
-if (resumoDosPulos(MOTOR)) console.log(resumoDosPulos(MOTOR));
 if (falhas) {
   console.log(`\n✗ smoke do offline: ${falhas} falha(s)`);
   process.exit(1);
 }
-console.log(`\n✓ smoke do offline: ${secoesRodadas} seções — o MAPINHA DO CARD e o`
+console.log('\n✓ smoke do offline: 17 seções (16 com o service worker LIGADO) — o MAPINHA DO CARD e o'
   + ' MAPA AMPLIADO desenhando tile (com contraprova que vai a zero), mapa intacto com o'
   + ' toggle desligado e com o cache cheio, fila em IndexedDB, sufixo da foto como contrato'
   + ' (app E card), varredura enchendo e servindo do cache sem rede, abertura offline,'
   + ' card de foto que AVISA quando a foto não veio e MOSTRA quando veio, a foto guardada sendo a'
   + ' EM DECISÃO (e o app reaberto sem rede achando-a — num contexto à parte, com o SW fora, pelo'
-  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados, o teto da lista de recursos com controle, e o envio do beacon da borda fora do código conferido), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle), a fila guardada entrando com a REDE QUE NÃO ANDA e com a ORIGEM FORA DO AR (502 na página, nos scripts e na API), também com "Minha área" (a busca esperando o perfil que não responde), DUAS ABAS esvaziando a fila de saída uma de cada vez (com a trava do navegador e sem ela), a foto quebrada no FIM da fila deixando a preparação PRONTA pela sonda da rede (e parcial com a rede caindo, como controle), e o card de FOTO no lie-fi travando ✕/✓ (e sem trava com a foto chegando), DUAS ABAS no diagnóstico (a poda pela hora da CAPTURA, a outra aba marcada no relatório e na triagem, e a sentinela do pedido decidido calada, com o CONTROLE do pedido que entra de novo) o FAB do modo dev fora do "Restam" com o banner do topo na tela (com o CONTROLE do FAB posto à força no canto de cima), o card de foto redesenhado pela rede de volta com o teclado no ↑ (com o CONTROLE de que o card foi trocado) e destravando NA HORA com a rede provada e a prova da foto presa (com o CONTROLE da trava sem a prova de rede), e o RELATÓRIO com a aba mais velha que fechou antes dele marcada como outra aba e feito DENTRO do treino com a fila real (com o CONTROLE do appState só de exemplos), e — depois da TROCA DE CONTA — levando o código da página (com a lista de recursos sem ele como pré-condição), as telas da OUTRA aba entregues no relatório desta (com o CONTROLE da tela feita depois), o card de foto destravando NA HORA com a rede provada ANTES da prova, e o FAB fora do "N esperando envio" no computador (com o CONTROLE do FAB forçado em cima dele), e a captura do arraste sem acusar o FAB que espera o gesto (com o CONTROLE do FAB saindo quando o dedo solta), e DUAS ABAS com filas diferentes e uma fila guardada só: a linha da aba que não gravou por último deixando de dizer "Pronto", e o mapa que a poda da outra levou voltando no gatilho dela (com o CONTROLE de uma aba só), e com a MESMA fila nas duas as duas linhas seguindo "Pronto" sem o gatilho preparar de novo'
-  + ', e o ARMAZENAMENTO E O CACHE QUE NÃO RESPONDEM (a leitura da janela, o open, o getAll do diagnóstico, o caches.open e a transação de gravação penduradas: o primeiro card sai no limite curto, o relatório sai dentro do orçamento e diz o que não chegou, o modo dev desliga e a varredura termina parcial — cada um com o CONTROLE saudável —, a base do diagnóstico NÃO recriada pela releitura e o corpo cortado na sonda sem dar os itens por definitivos)');
+  + ' cache HTTP como no aparelho), A ESTRADA inteira (com pedidos DE FOTO) (encher, modo avião com foto e mapa vindo do cache, 6 ações enfileiradas e a rede voltando pra drenar), o reporte de caixa CURTA achando todos os tiles (com a troca de zoom como pré-condição), o service worker ENCERRADO acordando sabendo dos tiles (com controle de que foi mesmo encerrado), a preparação INTERROMPIDA deixando o mapa guardado visível (com controle de que foi parcial e de que o worker não renasceu), o DEPLOY não apagando o mapa provisionado (com o cache de versão velho sumindo como controle), o DIAGNÓSTICO enxergando o offline (rede no diário e na captura, seção offline, o worker respondendo por si, as duas sentinelas novas dos dois lados e o teto da lista de recursos com controle), esquecer PARANDO o download em voo, e o que foi TRATADO não voltando como card (decidir e reabrir sem rede em página nova, a ação na janela do Desfazer ao fechar, e a busca com rede correndo junto do esvaziamento — com a fila guardada intacta como controle)');

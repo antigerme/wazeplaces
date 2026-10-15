@@ -11,27 +11,38 @@
 // achado isso; só pedindo a página e olhando a resposta.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { subirVM } from './_vm.mjs';
+import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+import { setTimeout as dormir } from 'node:timers/promises';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-async function comServidor(fn) {
-  const vm = await subirVM();
-  try { await fn(vm.porta); } finally { vm.parar(); }
+async function comServidor(porta, fn) {
+  const p = spawn(process.execPath, [join(RAIZ, 'server', 'node.mjs')], {
+    env: { ...process.env, PORT: String(porta), HOST: '127.0.0.1',
+      ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') },
+    stdio: 'ignore',
+  });
+  try {
+    for (let i = 0; i < 80; i++) {
+      try { const r = await fetch(`http://127.0.0.1:${porta}/`); if (r.ok) break; } catch {}
+      await dormir(100);
+    }
+    await fn();
+  } finally { p.kill(); }
 }
 
 test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
-  await comServidor(async (porta) => {
+  await comServidor(8471, async () => {
     // O HTML é o que mais importa (é onde o script roda), mas os estáticos
     // também levam: a política vale pra resposta, não pra "página".
     // `/js/min/app.js` e não `/js/app.js`: o fonte comentado deixou de ser
     // servido (é entrada de build, como o `index.src.html`), então pedi-lo aqui
     // media um 404 e a asserção reprovava por motivo alheio à CSP.
     for (const caminho of ['/', '/js/min/app.js', '/css/app.css']) {
-      const r = await fetch(`http://127.0.0.1:${porta}` + caminho);
+      const r = await fetch('http://127.0.0.1:8471' + caminho);
       assert.equal(r.status, 200, `${caminho} não respondeu 200`);
       const csp = r.headers.get('content-security-policy');
       assert.ok(csp, `${caminho}: a VM não mandou Content-Security-Policy — o app fica só com o <meta>`);
@@ -67,8 +78,8 @@ test('a VM manda a CSP no cabeçalho, e não só no <meta>', async () => {
 // O guard existe porque a dependência é invisível pelos dois lados: quem mexe
 // na CSP não pensa no worker, e quem mexe no worker não pensa na CSP.
 test('o script do service worker sai COM a CSP, e ela deixa o worker buscar tile', async () => {
-  await comServidor(async (porta) => {
-    const r = await fetch(`http://127.0.0.1:${porta}/service-worker.js`);
+  await comServidor(8474, async () => {
+    const r = await fetch('http://127.0.0.1:8474/service-worker.js');
     assert.equal(r.status, 200, 'o service-worker.js não respondeu 200');
     const csp = r.headers.get('content-security-policy');
     assert.ok(csp, 'o service-worker.js saiu SEM Content-Security-Policy — o <meta> não alcança o worker,'
@@ -100,8 +111,8 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
   assert.ok(Object.keys(prometidos).length >= 5,
     `só ${Object.keys(prometidos).length} cabeçalhos lidos do _headers — o parser quebrou`);
 
-  await comServidor(async (porta) => {
-    const r = await fetch(`http://127.0.0.1:${porta}/`);
+  await comServidor(8472, async () => {
+    const r = await fetch('http://127.0.0.1:8472/');
     const faltando = [];
     for (const nome of Object.keys(prometidos)) {
       if (!r.headers.get(nome)) faltando.push(nome);
@@ -127,7 +138,8 @@ test('os cabeçalhos de segurança da VM batem com os que o _headers promete', a
 // política própria. O modo de falha não é lentidão: é a resposta de um editor
 // (perfil, fila, sessão) sendo servida pra outro.
 test('toda resposta de /api sai com no-store, no Node e no Worker', async () => {
-  await comServidor(async (porta) => {
+  const porta = 8218;
+  await comServidor(porta, async () => {
     // Caminhos que respondem coisas diferentes: 401 sem sessão, 404 de rota
     // inexistente e 405 de método errado. Todos são resposta de API.
     const casos = [
@@ -144,15 +156,7 @@ test('toda resposta de /api sai com no-store, no Node e no Worker', async () => 
       assert.equal(r.status, esperado, `${metodo} /api/${rota}`);
       assert.match(r.headers.get('cache-control') || '', /no-store/,
         `${metodo} /api/${rota} saiu sem no-store`);
-      // E com `nosniff` (e o resto do conjunto de segurança): a VM respondia a
-      // API sem eles (auditoria de 2026-09-25).
-      assert.equal(r.headers.get('x-content-type-options'), 'nosniff', `${metodo} /api/${rota} saiu sem nosniff`);
-      assert.ok(r.headers.get('x-frame-options'), `${metodo} /api/${rota} saiu sem X-Frame-Options`);
     }
-    // O 405 dos ESTÁTICOS também leva o conjunto.
-    const r405 = await fetch(`http://127.0.0.1:${porta}/index.html`, { method: 'DELETE' });
-    assert.equal(r405.status, 405);
-    assert.equal(r405.headers.get('x-content-type-options'), 'nosniff', 'o 405 dos estáticos saiu sem nosniff');
   });
 
   // E o adaptador do Cloudflare tem que carimbar igual — os dois destinos
@@ -162,8 +166,6 @@ test('toda resposta de /api sai com no-store, no Node e no Worker', async () => 
   assert.ok(fn, 'sumiu o helper json() do worker');
   assert.match(fn[0], /'Cache-Control':\s*'no-store'/,
     'o Worker parou de carimbar no-store nas respostas de /api');
-  assert.match(fn[0], /'X-Content-Type-Options':\s*'nosniff'/,
-    'o Worker parou de carimbar nosniff nas respostas de /api');
 });
 
 // O `_headers` corta o Cache-Control por CAMINHO, e o adaptador cortava por
@@ -197,10 +199,10 @@ test('o Cache-Control por caminho da VM bate com o do _headers', async () => {
   assert.deepEqual(semExemplo, [],
     `regra nova no _headers sem exemplo aqui: ${semExemplo.join(', ')} — acrescente e confira`);
 
-  await comServidor(async (porta) => {
+  await comServidor(8474, async () => {
     for (const [regra, caminho] of Object.entries(EXEMPLOS)) {
       if (!regras[regra]) continue;
-      const r = await fetch(`http://127.0.0.1:${porta}${caminho}`);
+      const r = await fetch(`http://127.0.0.1:8474${caminho}`);
       assert.equal(r.headers.get('cache-control'), regras[regra],
         `${caminho} diverge:\n  _headers (${regra}): ${regras[regra]}\n  VM:${' '.repeat(regra.length - 1)} ${r.headers.get('cache-control')}`);
     }

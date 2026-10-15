@@ -22,16 +22,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const APP = readFileSync(join(ROOT, 'js/app.js'), 'utf8');
 
 // Fatia e AVALIA a função pura — nunca parseia a expressão (gotcha #49).
-// Com as duas comparações de TAMANHO que ela usa (caixa de layout, não o rect
-// transformado — ver `diagMapaForaDaCaixa`).
 function montar() {
-  const pega = (nome) => {
-    const i = APP.indexOf('function ' + nome + '(');
-    assert.ok(i > 0, `${nome} sumiu do app.js`);
-    return APP.slice(i, APP.indexOf('\n}', i) + 2);
-  };
-  return new Function(['diagMapaForaDaCaixa', 'diagAlvoPequeno', 'diagSentinelas'].map(pega).join('\n')
-    + '\nreturn diagSentinelas;')();
+  const i = APP.indexOf('function diagSentinelas(');
+  assert.ok(i > 0, 'diagSentinelas sumiu do app.js');
+  const fim = APP.indexOf('\n}', i);
+  return new Function(APP.slice(i, fim + 2) + '\nreturn diagSentinelas;')();
 }
 const chaves = (r) => r.map((a) => a.chave).sort();
 
@@ -80,56 +75,29 @@ test('sentinelas: foco DESCONHECIDO cai no lado que alerta, não no que cala', (
   assert.deepEqual(chaves(montar()(semFoco)), ['kbInsetSemFoco']);
 });
 
-// A régua mudou na auditoria de 2026-09-29 (A8), com a tela MEDIDA: a versão
-// anterior alertava `tema-claro` + `dark` juntos, que é INERTE (o `dark` do body
-// cobre o fundo), e calava o estado que o botão do tema deixava de verdade — o
-// app claro sem `tema-claro` num sistema escuro, com o fundo e a barra escuros.
-test('sentinelas: o tema — alerta o fundo e a barra que QUEBRAM, e cala o que é inerte', () => {
+test('sentinelas: `tema-claro` + `dark` só alerta onde tem consequência', () => {
   const escuro = () => {
     const c = sao();
     c.media = { '(prefers-color-scheme: dark)': true };
     return c;
   };
-  // O estado MEDIDO: sistema escuro, tocou pro claro — nem `dark` nem
-  // `tema-claro`, e a barra (a meta que vale) seguiu escura.
-  const quebrado = escuro();
-  quebrado.tema = { htmlClasse: 'com-extensao', guardado: 'light', barra: '#0f172a' };
-  const r = montar()(quebrado);
-  assert.deepEqual(chaves(r), ['temaContraditorio']);
-  assert.match(r[0].msg, /fundo/, 'o alerta não diz que o fundo sob o app ficou escuro');
-  assert.match(r[0].msg, /barra/, 'o alerta não diz que a barra não acompanhou');
-  assert.equal(r[0].barra, '#0f172a');
+  // Sistema ESCURO: a regra `html:not(.tema-claro)` que pinta o fundo vive
+  // dentro do `@media (prefers-color-scheme: dark)`, então aqui a contradição
+  // pesa — e alerta.
+  const c = escuro();
+  c.tema.htmlClasse = 'tema-claro sem-extensao dark';  // a classe REAL do diag dele
+  assert.deepEqual(chaves(montar()(c)), ['temaContraditorio']);
 
-  // Cada metade sozinha também quebra a tela.
-  const soFundo = escuro();
-  soFundo.tema = { htmlClasse: 'com-extensao', barra: '#f8fafc' };
-  assert.deepEqual(chaves(montar()(soFundo)), ['temaContraditorio'], 'o fundo escuro sob o app claro passou calado');
-  const soBarra = sao();
-  soBarra.tema = { htmlClasse: 'dark', barra: '#f8fafc' };
-  assert.deepEqual(chaves(montar()(soBarra)), ['temaContraditorio'], 'a barra clara sob o app escuro passou calada');
-
-  // INERTE: `tema-claro` + `dark` num sistema escuro (a classe REAL de um diag).
-  const inerte = escuro();
-  inerte.tema = { htmlClasse: 'tema-claro sem-extensao dark', barra: '#0f172a' };
-  assert.deepEqual(montar()(inerte), [], 'alertou o estado inerte — ruído que ensina a ignorar a seção');
-
-  // Sistema CLARO: a regra do fundo nem se aplica, então classe nenhuma é inerte.
+  // Sistema CLARO: a media query nem se aplica. Alertar aqui seria disparar em
+  // todo diagnóstico de quem trocou de tema — o ruído que mata a seção.
   const claro = sao();
-  claro.tema = { htmlClasse: 'com-extensao', barra: '#f8fafc' };
+  claro.tema.htmlClasse = 'tema-claro sem-extensao dark';
   assert.deepEqual(montar()(claro), []);
 
-  // `dark` é palavra inteira, nunca substring; e o relatório de antes (sem a
-  // barra) não tem o que julgar nela.
+  // E `dark` tem que ser palavra inteira, nunca substring.
   const outro = escuro();
-  outro.tema = { htmlClasse: 'tema-claro modo-darkroom' };
+  outro.tema.htmlClasse = 'tema-claro modo-darkroom';
   assert.deepEqual(montar()(outro), []);
-
-  // CONTROLE: os dois temas coerentes, no sistema escuro.
-  const escuroOk = escuro();
-  escuroOk.tema = { htmlClasse: 'dark', barra: '#0f172a' };
-  const claroOk = escuro();
-  claroOk.tema = { htmlClasse: 'tema-claro', barra: '#f8fafc' };
-  assert.deepEqual([...montar()(escuroOk), ...montar()(claroOk)], []);
 });
 
 test('sentinelas: modal aberto sobre os botões do card NÃO é alerta', () => {
@@ -171,25 +139,6 @@ test('sentinelas: algo por cima de um controle (gotcha #26, 3 reincidências)', 
   const normal = sao();
   normal.geometria = [{ sel: '#placar', x: 0, y: 0, w: 343, h: 67, noCentro: '#filtersModalTitle' }];
   assert.deepEqual(montar()(normal), []);
-});
-
-test('sentinelas: botão DESABILITADO de propósito coberto pelo banner do Desfazer NÃO é alerta', () => {
-  // Na janela do Desfazer os três botões ficam travados, e o banner os cobre em
-  // boa parte dos aparelhos: toda captura feita ali acusava "o dedo não chega
-  // nele" num botão que não é pra receber o dedo (auditoria de 2026-09-25).
-  const c = sao();
-  c.geometria = [
-    { sel: '.card-btn-reject', x: 20, y: 700, w: 56, h: 56, noCentro: '#undoContainer', desab: true },
-    { sel: '.card-btn-read', x: 160, y: 700, w: 56, h: 56, noCentro: 'DIV.undo-banner', desab: true },
-  ];
-  assert.deepEqual(montar()(c), []);
-  // Controle: o MESMO botão, habilitado e coberto, segue sendo defeito.
-  const vivo = sao();
-  vivo.geometria = [{ sel: '.card-btn-read', x: 160, y: 700, w: 56, h: 56, noCentro: 'DIV.undo-banner' }];
-  assert.deepEqual(chaves(montar()(vivo)), ['toqueInterceptado']);
-  // E o campo sai do DOM, não de constante.
-  assert.match(APP, /\.\.\.\(e\.disabled \? \{ desab: true \} : \{\}\),/,
-    'o coletor parou de medir se o controle está desabilitado');
 });
 
 test('sentinelas: alvo de toque abaixo de 44px', () => {
@@ -320,9 +269,7 @@ test('diagnóstico: as duas sentinelas novas leem o que o COLETOR mede de verdad
     'o coletor parou de medir se a foto CARREGOU (complete E naturalWidth)');
   assert.match(corpo, /const frente = cardDaFrente\(\);/,
     'a medição tem que ser do card da FRENTE — o de fundo é clone, sem ouvinte');
-  // Só as falhas desde a leitura anterior (auditoria de 2026-09-26, D9): o anel
-  // inteiro repetia a mesma falha em toda captura. Roda em test/diagnostico.
-  assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesParaAlerta\(\)/,
+  assert.match(corpo, /fora\.tilesGuardadosQueFalharam = diagTilesGuardadosQueFalharam\.slice\(-5\)/,
     'o coletor parou de levar o anel de tiles guardados que falharam');
 });
 
@@ -392,250 +339,20 @@ test('sentinelas: fila de saída cheia com a fila de pedidos limpa é o normal �
 });
 
 test('diagnóstico: a sentinela do pedido decidido lê o que o COLETOR mede (fila de saída × fila de pedidos)', () => {
-  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const i = APP.indexOf('function diagComputado(');
-  const corpo = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
-  // O coletor cruza a fila de saída do APARELHO com a fila de pedidos DESTA aba,
-  // e conhece o que a outra aba decidiu com o card já aqui (R7-4-05). A fila é a
-  // REAL (`filaReal()`): com o treino aberto, a da tela são os exemplos (junção
-  // do lote 12, o comportamento em test/treino-fila-real-r8.test.mjs).
-  assert.match(corpo, /fora\.decididos = diagDecididosAgora\(\);/,
-    'o coletor tem que cruzar a fila de saída com a fila de PEDIDOS, sabendo o que a outra aba decidiu');
-  const k = APP.indexOf('function diagDecididosAgora(');
-  assert.ok(k > 0, 'sumiu o `diagDecididosAgora`');
-  assert.match(semComentario(APP.slice(k, APP.indexOf('\n}', k))),
-    /return diagDecididos\(carregarFilaDeSaida\(\), filaReal\(\), decididosPorOutraAbaComCardAqui\);/,
-    'o coletor tem que cruzar a fila de saída com a fila de PEDIDOS, sabendo o que a outra aba decidiu');
+  const corpo = APP.slice(i, APP.indexOf('\n}', i)).split('\n')
+    .filter((l) => !/^\s*\/\//.test(l)).join('\n');
   // A MESMA chave dos dois lados, pela fonte única — é ela que o filtro usa.
-  const j = APP.indexOf('function diagDecididos(');
-  const dd = semComentario(APP.slice(j, APP.indexOf('\n}', j)));
-  assert.match(dd, /const naSaida = new Set\(\(Array\.isArray\(saida\) \? saida : \[\]\)\.map\(chaveDoPedido\)\.filter\(Boolean\)\);/,
+  assert.match(corpo, /const naSaida = new Set\(carregarFilaDeSaida\(\)\.map\(chaveDoPedido\)\.filter\(Boolean\)\);/,
     'o coletor tem que ler a fila de saída pela `chaveDoPedido`, a mesma do filtro');
-  assert.match(dd, /\.filter\(\(p\) => naSaida\.has\(chaveDoPedido\(p\)\)\)/, 'o coletor tem que cruzar com a fila de PEDIDOS pela mesma chave');
+  assert.match(corpo, /naFila: \(AppState\.queue \|\| \[\]\)\.filter\(\(p\) => naSaida\.has\(chaveDoPedido\(p\)\)\)\.length,/,
+    'o coletor tem que cruzar com a fila de PEDIDOS');
   // Só números: a chave é id de pedido de terceiro.
-  assert.ok(!/chaves/.test(dd), 'o coletor passou a levar as CHAVES — só a contagem vai');
+  assert.ok(!/decididos = \{[^}]*chaves/.test(corpo), 'o coletor passou a levar as CHAVES — só a contagem vai');
   // O NOME que o coletor grava é o que a sentinela lê. Sem esta amarra, renomear
   // um dos lados deixava os dois testes verdes e a sentinela muda pra sempre —
   // foi a sabotagem que sobreviveu na primeira rodada.
+  assert.match(corpo, /fora\.decididos = \{/, 'o coletor parou de gravar `decididos`');
   const s = APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas(')));
   assert.match(s, /const dc = comp\.decididos;/, 'a sentinela parou de ler `comp.decididos`');
-});
-
-// ── R7-4-05: com DUAS ABAS, o pedido que a OUTRA decidiu não é "voltou como card" ──
-// A fila de saída é do APARELHO e a fila de pedidos é de cada ABA: o pedido que
-// a aba A decide (sem sinal, esperando envio) segue como card na B, que o
-// carregou ANTES — nenhum caminho de entrada falhou, e a captura da B acusava
-// "pedido que já está esperando envio voltou como card" (MEDIDO no navegador,
-// x5 da auditoria). O aviso `storage` da outra aba diz o que APARECEU na fila de
-// saída; o que já estava lá quando o pedido ENTROU na fila desta segue contando.
-function decididos() {
-  const pega = (nome) => {
-    const i = APP.indexOf('function ' + nome + '(');
-    assert.ok(i > 0, `${nome} sumiu do app.js`);
-    return APP.slice(i, APP.indexOf('\n}', i) + 2);
-  };
-  const decl = /^const decididosPorOutraAbaComCardAqui = new WeakSet\(\);$/m.exec(APP);
-  assert.ok(decl, 'o conjunto do que a outra aba decidiu sumiu (ou deixou de ser por OBJETO)');
-  const AppState = { queue: [] };
-  const app = new Function('AppState', `${decl[0]}
-    ${['chaveDoPedido', 'diagDecididos', 'filaReal', 'filaRealComDevolvidos', 'anotarDecididosPorOutraAba'].map(pega).join('\n')}
-    return { anotar: anotarDecididosPorOutraAba, contar: (saida) => diagDecididos(saida, AppState.queue, decididosPorOutraAbaComCardAqui) };`)(AppState);
-  return { ...app, AppState };
-}
-const pedido = (i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'Local ' + i });
-const item = (i) => ({ tipo: 'reject', venueID: 'v' + i, updateRequestID: 'u' + i });
-const aviso = (antes, depois) => ({ key: 'waze_places_saida', oldValue: antes ? JSON.stringify(antes) : null, newValue: depois ? JSON.stringify(depois) : null });
-
-test('R7-4-05: a OUTRA aba decide o pedido que esta já tinha na fila — não conta como "voltou como card"', () => {
-  const b = decididos();
-  b.AppState.queue = [pedido(1), pedido(2), pedido(3)];      // a aba B já tem a fila
-  b.anotar(aviso([], [item(1)]));                              // a aba A decide o 1º, sem sinal
-  assert.deepEqual(b.contar([item(1)]), { naSaida: 1, naFila: 0, porOutraAba: 1 },
-    'a decisão da outra aba, com o card já aqui, virou "pedido decidido de volta na fila"');
-  // CONTROLE: sem o aviso da outra aba, é o defeito que a sentinela existe pra pegar.
-  const c = decididos();
-  c.AppState.queue = [pedido(1), pedido(2)];
-  assert.deepEqual(c.contar([item(1)]), { naSaida: 1, naFila: 1 }, 'CONTROLE: o pedido decidido na fila deixou de contar');
-});
-
-test('R7-4-05: o pedido que ENTRA na fila desta com a decisão JÁ na fila de saída segue contando — é a falha da entrada', () => {
-  // A decisão chegou ANTES (a outra aba, ou uma abertura de antes): o aviso veio
-  // com o pedido fora desta fila — e a busca (ou a fila guardada) o trouxe depois.
-  const b = decididos();
-  b.AppState.queue = [pedido(2)];
-  b.anotar(aviso([], [item(1)]));
-  b.AppState.queue = [pedido(2), pedido(1)];                   // o caminho de entrada falhou
-  assert.equal(b.contar([item(1)]).naFila, 1, 'o pedido decidido que ENTROU depois deixou de ser acusado');
-  // E o que já estava na fila de saída ANTES do aviso não vira "da outra aba".
-  const r = decididos();
-  r.AppState.queue = [pedido(1), pedido(5)];
-  r.anotar(aviso([item(1)], [item(1), item(9)]));              // a outra aba mexeu na fila (o 9), o 1 já estava
-  assert.equal(r.contar([item(1), item(9)]).naFila, 1, 'o que já estava na fila de saída foi tirado da conta por um aviso de outra decisão');
-});
-
-test('R7-4-05: o pedido que SAI e ENTRA de novo nesta fila volta a contar (é outro objeto)', () => {
-  const b = decididos();
-  const p1 = pedido(1);
-  b.AppState.queue = [p1];
-  b.anotar(aviso([], [item(1)]));
-  assert.equal(b.contar([item(1)]).naFila, 0);
-  b.AppState.queue = [pedido(1)];                              // a fila refeita trouxe o 1 de novo
-  assert.equal(b.contar([item(1)]).naFila, 1, 'o pedido que entrou DE NOVO ficou marcado como da outra aba');
-  // Aviso ilegível e o "Sair" (valor nulo) não quebram nem marcam nada.
-  b.anotar({ key: 'waze_places_saida', oldValue: '{', newValue: '[' });
-  b.anotar(aviso([item(1)], null));
-  assert.equal(b.contar([item(1)]).naFila, 1);
-});
-
-test('R7-4-05: o aviso da outra aba é ouvido, e o diário do repetido diz que foi ela', () => {
-  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const i = APP.indexOf('function setupGuardaDoDiagnostico(');
-  const setup = semComentario(APP.slice(i, APP.indexOf('\n}', i)));
-  // R10-2-02: no MESMO aviso, depois de anotar, sai da fila o que não está na tela.
-  assert.match(setup, /window\.addEventListener\('storage', \(ev\) => \{ if \(ev\.key === SAIDA_KEY\) \{ anotarDecididosPorOutraAba\(ev\); tirarDaFilaOQueAOutraAbaDecidiu\(\); \} \}\);/,
-    'ninguém ouve a outra aba gravando a fila de saída (ou o que ela decidiu não sai daqui depois de anotado)');
-  const j = APP.indexOf('function enfileirarSaida(');
-  const enf = semComentario(APP.slice(j, APP.indexOf('\n}', j)));
-  assert.match(enf, /dfato\('saida\.repetida', \{ tipo, \.\.\.\(daOutraAba \? \{ outraAba: true \} : \{\}\) \}\);/,
-    'o "repetida" do diário voltou a soar como caminho furado quando foi a outra aba que decidiu');
-});
-
-// ── R11-4-04: o "N esperando envio" ESCONDIDO ──────────────────────────────
-// O relatório e as capturas do modo dev não mediam o `#inFlightIndicator`: com
-// ele 100% debaixo do FAB (o R11-4-03, MEDIDO no n25b da auditoria da rodada
-// 11), a captura saía sem ele na geometria e com `alertas: []`. Os quatro
-// defeitos que o esconderam — o FAB em cima (R9-4-05), o cabeçalho do iPhone
-// instalado (R10-4-02), o FAB atravessando a tela (R10-4-05) e a outra aba
-// (R11-4-03) — foram achados por auditoria, nenhum por relato. O app GARANTE,
-// desde o R9-4-05 e o R10-4-02, que o número ESPERANDO envio (`.nao-cobrir`)
-// fica à vista: é invariante, e entra.
-const indicador = (extra) => ({ sel: '#inFlightIndicator', x: 351, y: 80, w: 23, h: 17, noCentro: 'ele mesmo',
-  naoCobrir: true, camadaAberta: false, naCamada: false, ...extra });
-const comIndicador = (extra) => { const c = sao(); c.geometria.push(indicador(extra)); return c; };
-
-test('R11-4-04: o "N esperando envio" debaixo do FAB ou do cabeçalho vira alerta', () => {
-  // O R11-4-03: o FAB que o app pôs no canto, por cima do número.
-  const fab = montar()(comIndicador({ noCentro: '#devFabBtn', sobFab: true }));
-  assert.deepEqual(chaves(fab), ['indicadorEscondido'], 'o indicador debaixo do FAB não gerou alerta');
-  assert.equal(fab[0].recebe, '#devFabBtn');
-  assert.equal(fab[0].fab, true, 'o alerta não diz que foi o FAB');
-  // O R10-4-02: o cabeçalho que cresceu com a margem do iPhone instalado.
-  assert.deepEqual(chaves(montar()(comIndicador({ noCentro: 'HEADER.bg-white/80' }))), ['indicadorEscondido'],
-    'o indicador debaixo do cabeçalho não gerou alerta');
-});
-
-test('R11-4-04 CONTROLE: à vista, "enviando", atrás de camada, sob aviso passageiro ou do FAB que o EDITOR arrastou — sem alerta', () => {
-  const s = montar();
-  assert.deepEqual(s(comIndicador({})), [], 'o indicador À VISTA gerou alerta');
-  // O "enviando" não é número a não cobrir (R10-4-05): o FAB pode passar por cima.
-  assert.deepEqual(s(comIndicador({ naoCobrir: undefined, noCentro: '#devFabBtn', sobFab: true })), [],
-    'o "enviando" debaixo do FAB gerou alerta — e ele é coberto por desenho');
-  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.modal-root', camadaAberta: true, naCamada: false })), [],
-    'a camada aberta por cima gerou alerta (ela cobre tudo, de propósito)');
-  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.toast', sobBanner: true })), [], 'o banner passageiro do topo gerou alerta');
-  assert.deepEqual(s(comIndicador({ noCentro: 'DIV.toast', sobAviso: true })), [], 'o aviso passageiro do rodapé gerou alerta');
-  assert.deepEqual(s(comIndicador({ noCentro: '#devFabBtn', sobFab: 'fixado' })), [],
-    'o FAB que o EDITOR arrastou pra cima do número gerou alerta — o canto é escolha dele');
-  // O placar também é `.nao-cobrir`, e não é desta sentinela (o canto do FAB o protege, e a do toque olha os botões).
-  const p = sao();
-  p.geometria.push({ sel: '#placar', noCentro: '#devFabBtn', naoCobrir: true, sobFab: true, camadaAberta: false, naCamada: false });
-  assert.deepEqual(s(p), []);
-});
-
-test('R11-4-04: a geometria MEDE o indicador, e o coletor diz do DOM quem está por cima do número', () => {
-  const semComentario = (s) => s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  const i = APP.indexOf('const DIAG_ALVOS');
-  const lista = semComentario(APP.slice(i, APP.indexOf('];', i)));
-  assert.match(lista, /'#inFlightIndicator'/, 'o `#inFlightIndicator` saiu do DIAG_ALVOS: o relatório volta a não medir o número');
-  const g = APP.indexOf('function diagGeometria(');
-  assert.match(semComentario(APP.slice(g, APP.indexOf('\n}', g))),
-    /\.\.\.\(e\.classList && e\.classList\.contains\('nao-cobrir'\) \? diagNumeroACobrir\(e, r\) : \{\}\),/,
-    'a geometria parou de marcar o número a não cobrir (a sentinela fica muda)');
-  // O coletor, EXECUTADO num documento de mentira: o centro do número cai num
-  // aviso do topo, no FAB do app, no FAB arrastado, ou nele mesmo.
-  const k = APP.indexOf('function diagNumeroACobrir(');
-  assert.ok(k > 0, 'o coletor do número a não cobrir sumiu');
-  const fonte = APP.slice(k, APP.indexOf('\n}', k) + 2);
-  const no = (ids) => ({ closest: (sel) => (ids.includes(sel) ? {} : null) });
-  const coletar = (alvo, fixado = false, gesto = false) => {
-    const el = { contains: (x) => x === el };
-    const document = { elementFromPoint: () => (alvo === 'ele' ? el : alvo) };
-    return new Function('document', 'devFabFixado', 'fabEsperaOGesto', fonte + '\nreturn diagNumeroACobrir;')(document, fixado, gesto)(
-      el, { left: 351, top: 80, width: 23, height: 17 });
-  };
-  assert.deepEqual(coletar(no(['#devFab'])), { naoCobrir: true, sobFab: true }, 'o FAB do app por cima do número não ficou anotado');
-  assert.deepEqual(coletar(no(['#devFab']), true), { naoCobrir: true, sobFab: 'fixado' }, 'o FAB arrastado pelo editor não se distingue do app');
-  // R12-4-04: o FAB que o app deixou onde estava até o fim de um gesto no card.
-  assert.deepEqual(coletar(no(['#devFab']), false, true), { naoCobrir: true, sobFab: 'gesto' },
-    'o FAB que espera o fim do gesto pra trocar de canto não se distingue do FAB parado em cima do número');
-  assert.deepEqual(coletar(no(['#devFab']), true, true), { naoCobrir: true, sobFab: 'fixado' },
-    'o FAB arrastado pelo editor deixou de valer como escolha dele durante um gesto');
-  assert.deepEqual(coletar(no(['#bannerStack'])), { naoCobrir: true, sobBanner: true }, 'o banner passageiro do topo não ficou anotado');
-  assert.deepEqual(coletar('ele'), { naoCobrir: true }, 'CONTROLE: o número à vista ganhou marca de coberto');
-  assert.deepEqual(coletar(no([])), { naoCobrir: true }, 'CONTROLE: outra coisa por cima (o cabeçalho) virou FAB ou aviso');
-  // E a sentinela é a do coletor: o nome que ela lê é o que ele grava.
-  const s = semComentario(APP.slice(APP.indexOf('function diagSentinelas('), APP.indexOf('\n}', APP.indexOf('function diagSentinelas('))));
-  assert.match(s, /g\.sel !== '#inFlightIndicator' \|\| !g\.naoCobrir/, 'a sentinela do indicador não lê o que o coletor grava');
-});
-
-// ── R12-4-04 (auditoria da rodada 12): o falso positivo da captura do ARRASTE ─
-// O "N esperando envio" que nasce NO MEIO de um arraste de card (a decisão
-// anterior falhando por rede, a marca da outra aba vencendo) fica debaixo do FAB
-// até o dedo soltar: o FAB ESPERA o fim do gesto pra trocar de canto
-// (`fabEsperaOGesto`, a decisão do R10-4-05). A captura automática do mesmo
-// arraste rodava a sentinela nesse instante e acusava `indicadorEscondido` num
-// estado que o app não garante — e a regra das sentinelas é "só invariante que o
-// app GARANTE" (MEDIDO no navegador, n4 da auditoria, nos dois motores: o alerta
-// na captura `auto:arraste`, e o FAB saindo de cima do número quando o gesto
-// acabou, sem alerta).
-test('R12-4-04: o FAB que espera o fim do gesto pra trocar de canto não vira `indicadorEscondido`', () => {
-  const s = montar();
-  assert.deepEqual(s(comIndicador({ noCentro: '#devFabBtn', sobFab: 'gesto' })), [],
-    'DEFEITO: o número debaixo do FAB que o app ADIOU até o fim do gesto virou alerta — o app não garante isso no meio do arraste');
-  // CONTROLE: o FAB parado em cima do número (sem gesto) segue acusado.
-  assert.deepEqual(chaves(s(comIndicador({ noCentro: '#devFabBtn', sobFab: true }))), ['indicadorEscondido']);
-});
-
-test('R12-4-04: a marca do gesto é a ESPERA do FAB — vale enquanto o gesto dura, e acaba com ele', () => {
-  // O `posicionarFabDev` (quem marca a espera), o `aoFimDoGesto` (quem a atende) e
-  // o coletor da geometria (quem a lê) no MESMO escopo: o nome que um grava é o que
-  // o outro lê. A tela é a do computador com o número no canto do FAB e nenhum
-  // canto livre (todo canto tem vítima): o FAB fica onde está, por cima dele.
-  const pega = (nome) => {
-    const i = APP.indexOf('function ' + nome + '(');
-    assert.ok(i > 0, `${nome} sumiu do app.js`);
-    return APP.slice(i, APP.indexOf('\n}', i) + 2);
-  };
-  const fab = { classList: { contains: () => false, remove() {} }, style: {}, dataset: {},
-                getBoundingClientRect: () => ({ width: 44, height: 44 }) };
-  const btn = { style: {} };
-  const numero = { contains: (x) => x === numero };
-  const sobOFab = { closest: (sel) => (sel === '#devFab' ? fab : null) };
-  const document = { getElementById: (id) => (id === 'devFab' ? fab : id === 'devFabBtn' ? btn : null),
-                     elementFromPoint: () => sobOFab };
-  let gesto = true;
-  const h = new Function('document', 'cardSobGesto', 'cardDaFrente', 'devFabVitimas', 'devFabCoords', 'DEV_FAB_CANTOS',
-    'redesenharCardAdiado', 'devFabReservaDeBaixo',
-    `let devFabFixado = false, fabEsperaOGesto = false, devFabDedo = null;
-    ${['posicionarFabDev', 'aoFimDoGesto', 'diagNumeroACobrir'].map(pega).join('\n')}
-    return { posicionarFabDev, aoFimDoGesto, diagNumeroACobrir, espera: () => fabEsperaOGesto };`)(
-    document, () => gesto, () => ({}), () => 1, () => ({ x: 1220, y: 77 }), ['cima-dir', 'cima-esq'], () => {}, () => 96);
-  const r = { left: 1241, top: 80, width: 23, height: 17 };
-  const geometria = (marca) => ({ ...sao(), geometria: [indicador({ noCentro: '#devFabBtn', ...marca })] });
-  // O número nasce no meio do arraste: o app reavalia o canto e ADIA.
-  h.posicionarFabDev();
-  assert.equal(h.espera(), true, 'PRÉ-CONDIÇÃO: com o gesto no card, o FAB não esperou o fim dele');
-  const noGesto = h.diagNumeroACobrir(numero, r);
-  assert.deepEqual(noGesto, { naoCobrir: true, sobFab: 'gesto' }, 'o coletor não leu a espera do FAB');
-  assert.deepEqual(montar()(geometria(noGesto)), [], 'a captura do arraste acusou o FAB que espera o gesto');
-  // O dedo solta: o fim do gesto escolhe o canto, e a espera acaba. Sem canto
-  // livre, o FAB segue por cima — e AGORA é defeito (CONTROLE: a marca não é
-  // eterna, e a sentinela volta a valer).
-  gesto = false;
-  h.aoFimDoGesto();
-  assert.equal(h.espera(), false, 'a espera do FAB não acabou com o gesto');
-  const depois = h.diagNumeroACobrir(numero, r);
-  assert.deepEqual(depois, { naoCobrir: true, sobFab: true });
-  assert.deepEqual(chaves(montar()(geometria(depois))), ['indicadorEscondido'],
-    'CONTROLE: o FAB parado em cima do número, sem gesto, deixou de ser acusado');
 });

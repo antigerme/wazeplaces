@@ -4,7 +4,7 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 > ⚠️ **Este app NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
 >
-> As exceções ficam na **foto ampliada**, e só para quem é **L6 + Area Manager** ou **staff** do Waze: **aprovar a foto nova** do pedido, **excluir uma foto** que já está no local e **corrigir o nome** do local. Nas três a decisão está inteira na tela — a foto ou a fachada ampliada é o dado completo.
+> A única exceção é **foto nova**: ampliando a foto no card dá pra **aprovar** ou **excluir** ali mesmo, porque essa decisão está inteira na tela — ou a foto serve, ou não serve. Só aparece para quem é **L6 + Area Manager** ou **staff** do Waze.
 
 ---
 
@@ -33,7 +33,7 @@ Este app mostra os pedidos em formato de **cards estilo Tinder**:
 
 - **Arraste para a esquerda (←)** → Rejeita o pedido (lixo)
 - **Arraste para a direita (→)** → Marca como lido (você decide depois no WME)
-- **Arraste para cima (↑)** → Pula (o pedido continua pendente no Waze e volta quando você atualizar a fila; com a preferência "Pular guarda o pedido" ligada, ele ganha a ⭐ no WME)
+- **Arraste para cima (↑)** → Pula (não chama nada, só avança)
 - **Botões ✕ / ↑ / ✓** no rodapé do card fazem o mesmo (o gesto é atalho)
 - **Botão ↗ no card** → Abre o local direto no WME para você ajustar e aprovar manualmente
 
@@ -47,10 +47,10 @@ Você **não precisa instalar nada** — o app roda hospedado. Basta acessar:
 
 Aí é só fazer login com seus cookies do Waze (veja abaixo). A forma mais cômoda no desktop é a extensão de login automático:
 
-- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, abra a aba dela no painel lateral do WME (o ícone do Waze Places) e clique em **ACESSAR**: o app abre já autenticado — sem copiar cookies.
+- **Login automático (recomendado, Chrome):** instale a extensão **WazePlaces Rapid Access** ([Chrome Web Store](https://chromewebstore.google.com/detail/dpinfpcoggnilplfgkpnkhbmfokhnhnn), feita por [@daflash](https://www.waze.com/pt-BR/user/editor/daflash) da comunidade WME). Estando logado no WME, clique nela e o app abre já autenticado — sem copiar cookies.
 - **Login manual:** exporte seu `cookies.txt` do Waze (instruções abaixo) e faça upload / cole na tela inicial.
 
-> 📱 **No celular** (onde não há extensões): entre primeiro no computador e use **Conectar outro aparelho** (na Ajuda ⓘ): aparece um **QR** — aponte a câmera do celular e pronto. Sem câmera, peça o código de 6 caracteres e digite em **Entrar com um código**. **No iPhone com o app instalado na tela de início, use o código**: a câmera abre o link no Safari, e a sessão entraria lá, não no app. O `cookies.txt` também funciona no celular, mas dá mais trabalho.
+> 📱 **No celular** (onde não há extensões): use o login manual com o `cookies.txt`.
 
 ### Como exportar seus cookies do Waze
 
@@ -75,14 +75,14 @@ O app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
 ### Usando o app
 
 1. Faça login (extensão de login automático ou upload/colar do `cookies.txt`).
-2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar, já no país onde o seu perfil do WME edita.
-3. Pra trocar o **país**, a **região** ou filtrar por **estado** / **área gerenciada**, toque no ícone de **filtros** (o funil) no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
+2. Aguarde alguns segundos. Se tudo der certo, aparece **"Autenticado com sucesso!"**, seu **avatar do Waze e nome** aparecem no topo, e os cards começam a carregar (Brasil é o padrão).
+3. Pra trocar o **país**, a **região** ou filtrar por **estado** / **área gerenciada**, clique no ícone de **filtros 📂** no topo. Os países/estados aparecem em listas com nomes (sem precisar saber ID).
 4. Processe os pedidos arrastando os cards, usando os **botões do card**, ou as setas do teclado:
    - **← (esquerda):** Rejeitar (lixo)
    - **→ (direita):** Marcar como lido
-   - **↑ (cima):** Pular (passa pro próximo sem decidir; com **“Pular guarda o pedido”** ligado nas Preferências, ele ganha a sua ⭐ no WME)
+   - **↑ (cima):** Pular (não chama API, só passa pro próximo)
 5. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
-6. O botão de **ajuda (ⓘ)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
+6. O botão de **ajuda (?)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
 
 **Coisas que aparecem no card:**
 - **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)
@@ -125,7 +125,7 @@ Editores nível 1, ou sem badge de Area Manager, recebem a mensagem **"Acesso re
 | **"Acesso restrito"** | Você precisa ser Staff do Waze ou Area Manager nível 2+. Verifique seu perfil no WME |
 | **"Cookies expirados ou inválidos"** | Faça logout do WME, faça login de novo, exporte os cookies novamente |
 | **"Token CSRF não encontrado"** | O arquivo `cookies.txt` está incompleto. Confirme que você fez login antes de exportar |
-| **"Tudo limpo!" sem você ter tratado nada** | Não há pedido que você possa tratar no país/região do filtro. O app já abre no país onde o seu perfil do WME edita; se você edita em outro, troque em Filtros |
+| **"Não há places para mostrar"** | Não tem nada na fila daquela região/país. Tente outro país no menu de filtros |
 | **O app não atualiza para a versão nova** | No navegador: `Ctrl+Shift+R`. No celular: geralmente atualiza sozinho; se não, feche e reabra o app |
 
 ---
@@ -158,7 +158,6 @@ Backend (server/core.mjs, stateless por request)
 APIs internas do Waze
   - /Issues/Search/List      (buscar pedidos)
   - /Issues/Read             (marcar como lido)
-  - /Issues/Star             (guardar o pedido: o ↑ com "Pular guarda o pedido")
   - /Descartes/app/Features  (rejeitar)
   - /Session, /LocationSearch/{Countries,States}
 ```
@@ -171,51 +170,25 @@ wazeplaces/
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
-├── icons/
-│   ├── icon-192.svg
-│   ├── icon-512.svg
-│   ├── icon-maskable.svg   # A versão que o Android recorta pela máscara do launcher
-│   ├── splash/             # Telas de abertura do iPhone (claro e escuro)
-│   └── screenshots/        # Capturas do convite de instalar
-├── css/
-│   ├── styles.css          # Estilos próprios (o FONTE)
-│   ├── app.css             # GERADO por `npm run css`: Tailwind + styles.css, minificados
-│   └── tailwind.src.css    # Entrada do build do Tailwind
-├── fonts/                  # Inter auto-hospedada (+ licença OFL)
-├── tailwind.config.js      # Config do build do CSS
+├── icons/                  # icon-192.svg, icon-512.svg
+├── css/styles.css
 ├── js/
 │   ├── app.js              # Lógica principal, AppState, UI
 │   ├── api.js              # Wrapper do fetch() para /api/*
-│   ├── i18n.js             # Dicionário pt/en/es/fr e t()
-│   ├── presenca.js         # Quem está no app e a conversa (pelo WME)
-│   ├── mapa.js             # Mini-mapa e mapa ampliado (tiles do Waze)
-│   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
 │   ├── swipe.js            # Gestos drag/swipe
-│   ├── version.js          # A versão (serial YYYYMMDDnn)
-│   ├── sw-register.js      # Registro e auto-update do service worker
-│   └── min/                # GERADO por `npm run js` — é o que o app carrega
+│   └── (Tailwind pré-compilado, junto com o styles.css, em css/app.css)
 ├── server/
 │   ├── core.mjs            # Lógica compartilhada (proxy Waze, sessões, cripto, gate)
-│   ├── wme-grpc.mjs        # O fio gRPC-web da presença e do chat do WME
-│   ├── marca-app.mjs       # A marca de quem usa o app, na posição da presença
-│   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/
 │   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
-├── extensao-chrome/        # A extensão "WazePlaces Rapid Access" (o README dela ensina a instalar)
 ├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
 ├── wrangler.jsonc          # Config Cloudflare (binding do KV)
 ├── .assetsignore           # Exclui server/docs/etc do publish estático
 ├── package.json            # Scripts (start / cf:dev / cf:deploy)
-├── tools/                  # Ferramentas de dev: os geradores (css, js, html), os smokes de navegador e a leitura de diagnósticos
-├── test/                   # A suíte (`npm test`, zero dependência)
 ├── docs/                   # Referência de dev (NÃO servido em runtime)
-├── CHANGELOG.md            # O que mudou, em linguagem de editor
-├── LICENSE                 # GPL-3.0
 ├── README.md
-├── CLAUDE.md
-├── .github/                # O CI e os modelos de issue
-└── .gitignore
+└── CLAUDE.md
 ```
 
 ### Rodar local
@@ -234,7 +207,7 @@ Variáveis de ambiente (todas opcionais):
 |---|---|---|
 | `PORT` | `8080` | Porta de escuta |
 | `HOST` | `0.0.0.0` | Host bind (`127.0.0.1` restringe ao localhost) |
-| `ENCRYPTION_KEY` | auto-gera | Chave base64 com no mínimo 32 bytes (`openssl rand -base64 32`); com menos, ou malformada, a VM não sobe e diz por quê. Sem ela, gera uma em `SESSION_KEY_FILE` |
+| `ENCRYPTION_KEY` | auto-gera | Chave AES base64 (32 bytes). Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
 
@@ -280,23 +253,18 @@ Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `
 **Conferir que a API subiu (uma linha):**
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
-  -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36' \
-  'https://places.seudominio.com/api/perfil'
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST 'https://places.seudominio.com/api/perfil'
 ```
-
-O `-A` (um User-Agent de navegador) não é enfeite: sem ele o Bot Fight Mode do Cloudflare barra o `curl` antes de a API ver o pedido.
 
 | Resposta | O que significa |
 |---|---|
 | **401** | Deu certo. A API respondeu "sessão inválida" (o pedido não levou sessão), o que só acontece com o KV `SESSIONS` e o `ENCRYPTION_KEY` no lugar |
-| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY`, ou a chave está malformada ou tem menos de 32 bytes (a resposta diz "Backend não configurado" e o motivo) |
-| **403** | Quem respondeu foi o Bot Fight Mode do Cloudflare, não a API: o `curl` saiu sem o `-A` com um User-Agent de navegador |
+| **500** | Falta o KV `SESSIONS` ou o Secret `ENCRYPTION_KEY` (a resposta diz "Backend não configurado"), ou a chave está malformada |
 | outra coisa | O domínio ainda não aponta pra este Worker, ou o deploy não saiu |
 
 > **Fork / instância própria:** o `wrangler.jsonc` fixa `routes` com o Custom Domain `places.wazebrasil.com` (domínio da instância oficial). Em outra conta esse `wrangler deploy` falha — ajuste o `pattern` pro seu próprio domínio ou remova o bloco `routes` inteiro (aí o Worker fica no subdomínio `*.workers.dev`).
 
-Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia e 1k apagamentos/dia. Cada ação = 1 leitura, menos as da foto: a lixeira custa 2 leituras no toque e 3 na exclusão (4 quando a lista do toque já venceu), e aprovar foto, 3. Escrevem no KV: o login (1 escrita), a regravação do cookie que o Waze rotaciona (no máximo 1 por hora por sessão ativa), a renovação da sessão (1 por dia de uso), a lixeira de foto (com o Desfazer ligado, 1 por exclusão — a lista de fotos do local que o toque na lixeira lê, que vale 15 s contados da leitura —, e mais 2 cada vez que a exclusão sai sem essa lista valendo e precisa reler o local no Waze — a lista nova e a regravação dela —, o que acontece com o app fechado ou trocado por outro antes da resposta do toque, ou com mais de 15 s entre o toque e o envio; com o Desfazer desligado, ou quando a exclusão espera outra escrita de foto do mesmo local, o toque não lê a lista, e são 2 por exclusão — a lista relida e a regravação —, ou 1 quando a lista relida por outra exclusão do mesmo local há menos de 15 s ainda vale) e o pareamento (1 por código mostrado, mais a sessão nova do aparelho que entra). Apagam: o "Sair", o resgate e o cancelamento do código, a aprovação de foto com a lista de fotos da lixeira guardada (até 2 por aprovação — a do toque e a regravada depois de uma exclusão —, só no minuto depois de você tocar numa lixeira daquele local; a lista guardada é da sua sessão), a sessão que a conferência do perfil recusa (o nível ou a área mudou no Waze) e a sessão que não abre mais — esta vira rajada no dia em que se troca o `ENCRYPTION_KEY`, porque cada sessão que volta é apagada uma vez. O core lê antes de apagar, porque essa é a cota curta. Passou disso, Workers Paid custa US$5/mês.
+Ganhos: sem servidor pra manter, escala automática, edge global, HTTPS automático. O `_headers` cuida da CSP e do cache. **Free tier:** 100k requests/dia, 100k leituras KV/dia, 1k escritas/dia (cada login = 1 escrita; cada ação = 1 leitura). Passou disso, Workers Paid custa US$5/mês.
 
 #### Opção B — VM Red Hat / RHEL / Rocky / Alma (Node + Apache)
 
@@ -313,10 +281,7 @@ proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) �
 sudo dnf module install -y nodejs:22/common
 sudo dnf install -y git
 sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
-# O diretório das sessões é do USUÁRIO DO SERVIÇO (o `User=nobody` da unidade
-# abaixo). Criado só com `mkdir`, ele fica do root, o `nobody` não grava nele,
-# e todo login e todo pareamento respondem "Erro interno".
-sudo install -d -o nobody -g nobody -m 700 /var/lib/wazeplaces/sessions
+sudo mkdir -p /var/lib/wazeplaces/sessions
 ```
 
 Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
@@ -326,8 +291,6 @@ Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
 User=nobody
 ExecStart=/usr/bin/node /opt/wazeplaces/server/node.mjs
 Environment=PORT=8080
-# O Apache é o único que fala com a internet; o Node escuta só aqui dentro.
-Environment=HOST=127.0.0.1
 Environment=ENCRYPTION_KEY=<gere com: openssl rand -base64 32>
 Environment=SESSION_DIR=/var/lib/wazeplaces/sessions
 Restart=on-failure
@@ -401,17 +364,11 @@ location / {
 | Região | Endpoint base | Uso típico |
 |---|---|---|
 | `row` | `www.waze.com/row-Descartes/...` | Brasil, Europa, outros |
-| `na` | `www.waze.com/Descartes/...` (sem prefixo) | EUA, Canadá |
+| `na` | `www.waze.com/na-Descartes/...` | EUA, Canadá |
 | `il` | `www.waze.com/il-Descartes/...` | Israel |
+| `world` | `www.waze.com/Descartes/...` | Fallback |
 
-São os TRÊS servidores do WME. A América do Norte é o servidor **sem prefixo**:
-`na-Descartes` não existe (medido em 2026-09-25: 404 em tudo). Havia uma 4ª
-opção, `world`, que era esse mesmo servidor com outro nome; quem a tinha
-escolhido passa pra `na` sozinho.
-
-Configure pelo modal de filtros (header). No primeiro login o app já vai pro
-país onde você edita (o `editableCountryIDs` do seu perfil no WME), inclusive
-trocando de servidor se for o caso.
+Configure pelo modal de filtros (header). Default `row`.
 
 ### Gate de acesso (quem pode usar)
 
@@ -423,7 +380,7 @@ isStaff === true                          → libera
 caso contrário                            → 403 access_denied
 ```
 
-`MIN_RANK_WAZE = 1` (Waze é 0-indexed; equivale a "display L2+", com área). Como a checagem é no servidor **antes** de criar a sessão, não dá pra burlar editando JS no DevTools. O `testar-cookies` é a ÚNICA porta que cria sessão (o pareamento só copia uma sessão que já passou por ela), toda rota exige o `sessionToken`, e o `perfil` reconfere o portão a cada abertura do app: quem perdeu nível ou área no Waze perde a sessão.
+`MIN_RANK_WAZE = 2` (Waze é 0-indexed; equivale a "display L3+"). Como a checagem é no servidor **antes** de criar a sessão, não dá pra burlar editando JS no DevTools.
 
 ### Resiliência a race conditions entre editores
 
@@ -437,8 +394,8 @@ Vários editores tratam o mesmo place ao mesmo tempo. `categorizeWazeError(httpC
 |---|---|---|
 | `already_processed` | code ∈ {702, 300+"failed to handle"}, HTTP 409, ou hint textual | Toast "Já tratado por outro editor 👍", **mantém** stats |
 | `not_found` | HTTP 404 puro | Idem |
-| `unauthorized` | HTTP 401/403 | A ação vai pra fila de saída e o app confere a sessão com uma segunda chamada: um 401 muitas vezes é alarme falso (WAF, oscilação do KV), e aí nada cai. Morta de verdade, a extensão renova em silêncio, com a fila na tela; sem ela, aviso e tela de login. A fila de saída sai quando a sessão volta |
-| `transient` | 5xx sem padrão de race, 408, 429, 0, erro de rede | `callWithRetry` 2x com backoff (1.5s, 3.5s); sem rede, a ação espera na fila de saída e sai sozinha quando a rede voltar |
+| `unauthorized` | HTTP 401/403 | Invalida sessão local, volta pra tela de login |
+| `transient` | 5xx sem padrão de race, 408, 429, 0, erro de rede | `callWithRetry` 2x com backoff (1.5s, 3.5s) |
 | `unknown` | Resto | Reverte stat, toast de erro |
 
 A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient`, pra uma race no `Issues/Read` (HTTP 500) não virar "instabilidade real".
@@ -447,40 +404,34 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 
 - **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
-- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. Cookies do Waze duram ~28 dias. Quando expiram de verdade, o backend devolve 401: o app confere (um 401 pode ser alarme falso), tenta renovar pela extensão e, sem ela, volta pra tela de login — a ação que levou o 401 espera na fila de saída.
+- **TTL de sessão:** 21 dias (`SESSION_TTL` em `server/core.mjs`). No KV expira sozinho (TTL nativo); na VM, por mtime + touch. Cookies do Waze duram ~28 dias — o TTL menor dá folga. Quando expiram de verdade, o backend devolve 401 e o frontend cai pra tela de login.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
-- **CSP** em TRÊS cópias que precisam bater: o `<meta>` do `index.src.html`, o `_headers` (Cloudflare) e o `server/node.mjs` (VM). Sem `unsafe-eval` e sem `unsafe-inline` em `script-src` — o único script inline (o do tema) entra por hash, e `test/layout.test.mjs` o recalcula.
+- **CSP** definida em `index.src.html` e no `_headers` (precisa `unsafe-eval` por causa do Tailwind via JS — remova ao pré-compilar).
 
 ### O que NÃO está implementado (decisão consciente)
 
 - Rate limiting no nível do app (Waze Staff pediu pra manter sem, por ora)
+- Tailwind pré-compilado (usa o bundle JS por enquanto)
 - iOS/desktop nativo (a PWA cobre; ver `docs/native-android-analysis.md`)
-
-(O Tailwind já é pré-compilado: `npm run css` gera o `css/app.css`, que é commitado.)
 
 ### Service Worker
 
-- **Estratégia:** network-first pra HTML/JS/CSS/JSON (sem opção de `cache`: quem garante o frescor é o `no-cache` + ETag do servidor, e assim a revalidação volta 304 em vez de baixar tudo); cache-first pra imagens/fontes. Cache é fallback offline, e o que a página carrega é instalado de forma atômica (sem rede, o app abre).
+- **Estratégia:** network-first pra HTML/JS/CSS/JSON (com `cache: 'reload'` pra bypassar o HTTP cache); cache-first pra imagens/fontes. Cache é fallback offline.
 - **Pra invalidar caches:** bump o serial de versão (formato `YYYYMMDDnn`) em `js/version.js` (`APP_VERSION`) **e** no `CACHE_NAME` do `service-worker.js`, juntos, em toda PR que toque em `index.src.html`/`js`/`css`/`icons`.
 
 ### Validação rápida antes de commitar
 
 ```bash
-npm run check          # node --check em js/, server/ e worker/
-npm test               # a suíte (node:test, zero dependência)
-npm run css            # se mexeu em classe do Tailwind ou no css/styles.css (o CI cobra)
-npm run js             # se mexeu em js/*.js — regenera js/min/, que é o que o app carrega
-npm run html           # se mexeu no index.src.html — regenera o index.html
-npm run test:browser   # smokes de navegador (precisam do Playwright; ver o CLAUDE.md)
-node server/node.mjs   # sobe, serve estáticos, /api/* responde
+for f in js/*.js server/*.mjs worker/*.mjs; do node --check "$f"; done
+node server/node.mjs   # smoke test: sobe, serve estáticos, /api/* responde
 ```
 
-O sandbox alcança o `waze.com`: com um `cookies.txt` de verdade dá pra validar contra o WME real (`node tools/waze-probe.mjs <cookies.txt>`, só leitura e com jitter).
+> ⚠️ O sandbox de CI e agentes tem allowlist que bloqueia `*.waze.com`. Não dá pra testar contra o Waze real automaticamente — valide com fixtures de HAR ou teste manual.
 
 ### Contribuindo
 
 1. Fork → branch a partir de `main`
-2. Mudanças + `npm run check` + `npm test` (e `npm run js`/`css`/`html` quando for o caso)
+2. Mudanças + `node --check`
 3. PR com descrição do **porquê** (não só o quê)
 
 ---

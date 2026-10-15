@@ -18,7 +18,6 @@ import { dispatch, filtrarOnlineDaApp, filtrarConversasDaApp, contarOnlineDaApp,
 import * as g from '../server/wme-grpc.mjs';
 import { marcarPosicao } from '../server/marca-app.mjs';
 import { readFileSync } from 'node:fs';
-import { sessaoDeTeste } from './_sessao.mjs';
 
 const F = JSON.parse(readFileSync(new URL('./wme-grpc.fixture.json', import.meta.url), 'utf8'));
 const deB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -29,8 +28,6 @@ const COOKIES = [
   '.waze.com\tTRUE\t/\tTRUE\t0\t_csrf_token\tcsrf-de-teste',
   '.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tsessao-de-teste',
 ].join('\n');
-// Toda rota exige sessão de verdade (ver test/_sessao.mjs e `resolveCookies`).
-const S = await sessaoDeTeste(COOKIES);
 
 const EU = '12444348';
 const BRASIL = 30;
@@ -210,7 +207,7 @@ test('conversas do app: prévia com teto e cartão que não se lê vira null —
 
 // ── rota presenca-app ────────────────────────────────────────────────────────
 
-const BASE = { ...S.dados, pais: BRASIL, userId: EU };
+const BASE = { cookies: COOKIES, pais: BRASIL, userId: EU };
 
 test('presenca-app: lista e conversas numa ida, em paralelo, no servidor da região — e SEM token sem instalação', { timeout: 5000 }, async () => {
   const soltar = {};
@@ -224,7 +221,7 @@ test('presenca-app: lista e conversas numa ida, em paralelo, no servidor da regi
   const { resultado, pedidos } = await comWaze({
     listOnlineEditors: esperaAsDuas('lista', () => respostaGrpc({ dados: lista(naApp(183164343, 'cafanha', BRASIL)) })),
     ListConversations: esperaAsDuas('conv', () => respostaGrpc({ dados: conversas({ com: 183164343, nome: 'cafanha', ultima: { id: 'a0000000-0000-1000-8000-000000000001', de: '183164343', para: EU, ctx: { app: APP_CONTEXTO } } }) })),
-  }, () => dispatch('presenca-app', { ...BASE, region: 'row' }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, region: 'row' }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.deepEqual(resultado.body.online.map((e) => e.nome), ['cafanha']);
   assert.deepEqual(resultado.body.conversas.map((c) => c.nome), ['cafanha']);
@@ -248,16 +245,12 @@ test('presenca-app: com `token` e a instalação do aparelho, o token do tempo r
     GetMessagingProvider: () => respostaGrpc({ dados: g.junta(g.campo.msg(1,
       g.campo.bytes(1, new Uint8Array([1, 2, 3])), g.campo.inteiro(2, 86_400_000_000),
       g.campo.texto(3, 'https://instantmessaging-pa.googleapis.com/'), g.campo.texto(4, 'chave-de-teste'))) }),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao, token: true }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao, token: true }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.equal(resultado.body.chat.token, 'AQID');
   assert.equal(resultado.body.chat.base, 'https://instantmessaging-pa.googleapis.com/');
   assert.equal(resultado.body.chat.chave, 'chave-de-teste');
   assert.ok(resultado.body.chat.expiraEm > Date.now() + 86_000_000);
-  // A hora do SERVIDOR vai junto: é com ela que o cliente leva o prazo pro
-  // relógio do aparelho (auditoria de 2026-09-25).
-  assert.ok(Number.isFinite(resultado.body.agora) && Math.abs(resultado.body.agora - Date.now()) < 5000,
-    'a resposta perdeu a hora do servidor');
   const cab = g.lerCampos(um(g.lerCampos(pedidos.find((p) => p.metodo === 'GetMessagingProvider').corpo), 1));
   assert.equal(new TextDecoder().decode(um(cab, 4)), instalacao, 'o token saiu para outra instalação — a do aparelho não recebe o fluxo');
   assert.deepEqual(resultado.body.online, []);
@@ -268,7 +261,7 @@ test('presenca-app: a instalação SEM `token` não busca token — ela vai só 
   const { resultado, pedidos } = await comWaze({
     listOnlineEditors: () => respostaGrpc({}),
     ListConversations: () => respostaGrpc({}),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao: '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e' }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: '0f2a8c1e-5b3d-11f1-9c4e-7d1a2b3c4d5e' }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.ok(!pedidos.some((p) => p.metodo === 'GetMessagingProvider'), 'buscou token que ninguém pediu');
   assert.ok(!('chat' in resultado.body));
@@ -282,7 +275,7 @@ test('presenca-app: validação ANTES de qualquer rede', async () => {
     { token: true },   // token é da instalação: sem ela não há o que pedir
   ];
   for (const extra of casos) {
-    const { resultado, pedidos } = await comWaze({}, () => dispatch('presenca-app', { ...BASE, ...extra }, S.ctx));
+    const { resultado, pedidos } = await comWaze({}, () => dispatch('presenca-app', { ...BASE, ...extra }, {}));
     assert.equal(resultado.status, 400, JSON.stringify(extra));
     assert.equal(pedidos.length, 0, JSON.stringify(extra));
   }
@@ -292,7 +285,7 @@ test('presenca-app: uma parte que falha fica null e a outra chega; sessão morta
   const parcial = await comWaze({
     listOnlineEditors: () => respostaGrpc({ dados: lista(naApp(183164343, 'cafanha', BRASIL)) }),
     ListConversations: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
-  }, () => dispatch('presenca-app', BASE, S.ctx));
+  }, () => dispatch('presenca-app', BASE, {}));
   assert.equal(parcial.resultado.status, 200);
   assert.deepEqual(parcial.resultado.body.online.map((e) => e.nome), ['cafanha']);
   assert.equal(parcial.resultado.body.conversas, null, 'falha passageira virou "nenhuma conversa"');
@@ -304,7 +297,7 @@ test('presenca-app: uma parte que falha fica null e a outra chega; sessão morta
   const ilegivel = await comWaze({
     listOnlineEditors: () => respostaGrpc({ dados: Uint8Array.of(0x0f) }),
     ListConversations: () => respostaGrpc({ dados: Uint8Array.of(0x0f) }),
-  }, () => dispatch('presenca-app', BASE, S.ctx));
+  }, () => dispatch('presenca-app', BASE, {}));
   assert.equal(ilegivel.resultado.body.online, null);
   assert.deepEqual(ilegivel.resultado.body.contagem, { online: { falhou: 'leitura' }, conversas: { falhou: 'leitura' } },
     'a resposta ilegível sumiu da contagem em vez de ser dita');
@@ -313,13 +306,13 @@ test('presenca-app: uma parte que falha fica null e a outra chega; sessão morta
   const morta = await comWaze({
     listOnlineEditors: () => respostaGrpc({ status: 7, mensagem: 'Operation not allowed by guest user' }),
     ListConversations: () => respostaGrpc({}),
-  }, () => dispatch('presenca-app', BASE, S.ctx));
+  }, () => dispatch('presenca-app', BASE, {}));
   assert.equal(morta.resultado.status, 401);
   assert.equal(morta.resultado.body.errorCategory, 'unauthorized');
   const mortaNoChat = await comWaze({
     listOnlineEditors: () => respostaGrpc({}),
     ListConversations: () => respostaJson(403, '{}'),
-  }, () => dispatch('presenca-app', BASE, S.ctx));
+  }, () => dispatch('presenca-app', BASE, {}));
   assert.equal(mortaNoChat.resultado.status, 401, 'o chat recusou a sessão e a rota respondeu como se nada fosse');
 });
 
@@ -329,7 +322,7 @@ test('presenca-app: os conhecidos do aparelho têm teto de 50 e só aceitam id d
   const { resultado } = await comWaze({
     listOnlineEditors: () => respostaGrpc({}),
     ListConversations: () => respostaGrpc({ dados: conversas(...ids.map((com) => ({ com, nome: 'p' + com, ultima: ultima(com) }))) }),
-  }, () => dispatch('presenca-app', { ...BASE, conhecidos: [...ids.map(String), 'fulano', null] }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, conhecidos: [...ids.map(String), 'fulano', null] }, {}));
   assert.equal(resultado.status, 200);
   const vistos = resultado.body.conversas.map((c) => Number(c.id));
   assert.equal(vistos.length, 50);
@@ -352,7 +345,7 @@ test('carona: a ação traz quem usa o app no país e as conversas do app, sem p
       { com: 601, nome: 'conhecida', ultima: { id: 'a0000000-0000-1000-8000-000000000003', de: '601', para: EU, texto: 'pelo WME' } },
       { com: 600, nome: 'so_wme', ultima: { id: 'a0000000-0000-1000-8000-000000000002', de: '600', para: EU, texto: 'oi' } },
     ) }),
-  }, () => dispatch('marcar-lido', { ...S.dados, venueID: '1', updateRequestID: '2', presenca: pres }, S.ctx));
+  }, () => dispatch('marcar-lido', { cookies: COOKIES, venueID: '1', updateRequestID: '2', presenca: pres }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.equal(resultado.body.success, true);
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
@@ -372,7 +365,7 @@ test('carona: a lista que falha some da resposta — a ação e a escrita seguem
     updateOnlineEditor: () => respostaGrpc({ dados: editor({ id: Number(EU), nome: 'antigerme', ...marcarPosicao({ lat: -23.5, lon: -46.6 }, BRASIL) }) }),
     listOnlineEditors: () => { throw new Error('rede caiu no meio'); },
     ListConversations: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
-  }, () => dispatch('marcar-lido', { ...S.dados, venueID: '1', updateRequestID: '2', presenca: pres }, S.ctx));
+  }, () => dispatch('marcar-lido', { cookies: COOKIES, venueID: '1', updateRequestID: '2', presenca: pres }, {}));
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.success, true);
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
@@ -381,21 +374,22 @@ test('carona: a lista que falha some da resposta — a ação e a escrita seguem
 
 // ── chat: abrir uma conversa ─────────────────────────────────────────────────
 
-test('chat abrir: o histórico e o "lida" numa ida ao nosso servidor — o "lida" só sai DEPOIS do histórico', { timeout: 5000 }, async () => {
-  // Em paralelo (como era até a rodada 16) o "lida" saía mesmo com o histórico
-  // falhando (R16-5-02); a ordem dos dois pedidos ao Waze é a do teste.
+test('chat abrir: o histórico e o "lida" numa ida, em paralelo', { timeout: 5000 }, async () => {
+  const soltar = [];
+  const esperaAsDuas = (resp) => () => new Promise((ok) => {
+    soltar.push(() => ok(resp()));
+    if (soltar.length === 2) soltar.forEach((f) => f());
+  });
   const hist = g.junta(g.campo.bytes(1, msg({ id: 'a0000000-0000-1000-8000-000000000009', de: '183164343', para: EU, texto: 'WP-TESTE oi', ctx: { app: APP_CONTEXTO } })));
   const { resultado, pedidos } = await comWaze({
-    ListMessages: () => respostaGrpc({ dados: hist }),
-    MarkConversationRead: () => respostaGrpc({ dados: deB64(F.marcarLida.res) }),
-  }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
+    ListMessages: esperaAsDuas(() => respostaGrpc({ dados: hist })),
+    MarkConversationRead: esperaAsDuas(() => respostaGrpc({ dados: deB64(F.marcarLida.res) })),
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   assert.equal(resultado.body.mensagens.length, 1);
   assert.equal(resultado.body.mensagens[0].texto, 'WP-TESTE oi');
   assert.deepEqual(resultado.body.mensagens[0].contexto, { app: APP_CONTEXTO });
   assert.equal(resultado.body.recibos.length, 2, 'os recibos que o Waze gerou ao marcar como lida sumiram');
-  assert.equal(resultado.body.lida, true, 'o "lida" deu certo e a resposta não diz');
-  assert.deepEqual(pedidos.map((p) => p.metodo), ['ListMessages', 'MarkConversationRead'], 'o "lida" não saiu depois do histórico');
   // As duas chamadas falam da MESMA conversa.
   const comDe = (p, n) => new TextDecoder().decode(um(g.lerCampos(um(g.lerCampos(p.corpo), n)), 2));
   assert.equal(comDe(pedidos.find((p) => p.metodo === 'ListMessages'), 2), '183164343');
@@ -404,40 +398,34 @@ test('chat abrir: o histórico e o "lida" numa ida ao nosso servidor — o "lida
 
 test('chat abrir: página ANTIGA não marca como lida; conversa nova (NO_EXISTING_CONVERSATION) não é erro', async () => {
   const antiga = await comWaze({ ListMessages: () => respostaGrpc({}) },
-    () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343', antesDe: 1790182220160 }, S.ctx));
+    () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343', antesDe: 1790182220160 }, {}));
   assert.equal(antiga.resultado.status, 200);
   assert.deepEqual(antiga.pedidos.map((p) => p.metodo), ['ListMessages'], 'rolar pra trás marcou a conversa como lida');
-  assert.equal('lida' in antiga.resultado.body, false, 'a página antiga não marca nada: não pode dizer que marcou (nem que falhou)');
 
   const nova = await comWaze({
     ListMessages: () => respostaGrpc({}),
     MarkConversationRead: () => respostaGrpc({ status: 7, mensagem: 'NO_EXISTING_CONVERSATION' }),
-  }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
   assert.equal(nova.resultado.status, 200, JSON.stringify(nova.resultado.body));
   assert.deepEqual(nova.resultado.body.mensagens, []);
   assert.deepEqual(nova.resultado.body.recibos, []);
-  assert.equal(nova.resultado.body.lida, true, 'conversa que ainda não existe não tinha o que marcar: está lida');
 });
 
 test('chat abrir: o "lida" que falha não derruba o histórico; o histórico que falha, sim', async () => {
   const semLida = await comWaze({
     ListMessages: () => respostaGrpc({}),
     MarkConversationRead: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
-  }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
   assert.equal(semLida.resultado.status, 200);
   assert.deepEqual(semLida.resultado.body.recibos, []);
-  // A falha do "lida" não derruba o histórico — mas o cliente PRECISA saber
-  // dela: com `recibos: []` e mais nada, ela era igual a "nada a marcar", e o
-  // app dava a conversa como lida (auditoria de 2026-09-26).
-  assert.equal(semLida.resultado.body.lida, false, 'o "lida" falhou e a resposta disse (ou calou) que deu certo');
 
   const morta = await comWaze({
     ListMessages: () => respostaGrpc({ status: 16, mensagem: '' }),
     MarkConversationRead: () => respostaGrpc({}),
-  }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343' }, S.ctx));
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343' }, {}));
   assert.equal(morta.resultado.status, 401);
 
-  const semCom = await comWaze({}, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: 'fulano' }, S.ctx));
+  const semCom = await comWaze({}, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: 'fulano' }, {}));
   assert.equal(semCom.resultado.status, 400);
   assert.equal(semCom.pedidos.length, 0);
 });
@@ -460,7 +448,7 @@ test('confirmação: vai JUNTO do presenca-app, com a instalação do aparelho, 
     ListConversations: () => respostaGrpc({}),
     GetMessagingProvider: () => respostaGrpc({}),
     AckMessages: () => respostaGrpc({}),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, token: true, confirmar: [...IDS, 'nao-e-uuid', 42] }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, token: true, confirmar: [...IDS, 'nao-e-uuid', 42] }, {}));
   assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
   const ack = pedidos.find((p) => p.metodo === 'AckMessages');
   assert.ok(ack, 'a confirmação não saiu');
@@ -475,7 +463,7 @@ test('confirmação: sem instalação, ou só com lixo, nada sai — e o pedido 
       listOnlineEditors: () => respostaGrpc({}),
       ListConversations: () => respostaGrpc({}),
       GetMessagingProvider: () => respostaGrpc({}),
-    }, () => dispatch('presenca-app', { ...BASE, ...extra }, S.ctx));
+    }, () => dispatch('presenca-app', { ...BASE, ...extra }, {}));
     assert.equal(resultado.status, 200, JSON.stringify(extra));
     assert.ok(!pedidos.some((p) => p.metodo === 'AckMessages'), JSON.stringify(extra));
     assert.ok(!('confirmados' in resultado.body), JSON.stringify(extra));
@@ -488,7 +476,7 @@ test('confirmação: a que falha não derruba o pedido e não é contada; o teto
     ListConversations: () => respostaGrpc({}),
     GetMessagingProvider: () => respostaGrpc({}),
     AckMessages: () => respostaGrpc({ status: 14, mensagem: 'unavailable' }),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: IDS }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: IDS }, {}));
   assert.equal(falha.resultado.status, 200);
   assert.ok(!('confirmados' in falha.resultado.body), 'confirmação que falhou foi contada: o cliente soltaria ids que seguem na fila');
 
@@ -498,7 +486,7 @@ test('confirmação: a que falha não derruba o pedido e não é contada; o teto
     ListConversations: () => respostaGrpc({}),
     GetMessagingProvider: () => respostaGrpc({}),
     AckMessages: () => respostaGrpc({}),
-  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: muitos }, S.ctx));
+  }, () => dispatch('presenca-app', { ...BASE, instalacao: INST, confirmar: muitos }, {}));
   assert.equal(idsDoAck(teto.pedidos.find((p) => p.metodo === 'AckMessages')).length, 100);
   assert.equal(teto.resultado.body.confirmados, 100);
 });
@@ -507,7 +495,7 @@ test('confirmação: vai junto de QUALQUER ação do chat — e pedido recusado 
   const envio = await comWaze({
     SendMessage: () => respostaGrpc({ dados: deB64(F.enviarTexto.res) }),
     AckMessages: () => respostaGrpc({}),
-  }, () => dispatch('chat', { ...S.dados, acao: 'enviar', para: '183164343', texto: 'oi', instalacao: INST, confirmar: IDS }, S.ctx));
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'enviar', para: '183164343', texto: 'oi', instalacao: INST, confirmar: IDS }, {}));
   assert.equal(envio.resultado.status, 200);
   assert.equal(envio.resultado.body.confirmados, 2);
 
@@ -515,7 +503,7 @@ test('confirmação: vai junto de QUALQUER ação do chat — e pedido recusado 
     ListMessages: () => respostaGrpc({}),
     MarkConversationRead: () => respostaGrpc({}),
     AckMessages: () => respostaGrpc({}),
-  }, () => dispatch('chat', { ...S.dados, acao: 'abrir', com: '183164343', instalacao: INST, confirmar: IDS }, S.ctx));
+  }, () => dispatch('chat', { cookies: COOKIES, acao: 'abrir', com: '183164343', instalacao: INST, confirmar: IDS }, {}));
   assert.equal(abrir.resultado.status, 200);
   assert.equal(abrir.resultado.body.confirmados, 2);
 
@@ -524,14 +512,14 @@ test('confirmação: vai junto de QUALQUER ação do chat — e pedido recusado 
     { acao: 'abrir', com: 'fulano' },
     { acao: 'lida', com: 'fulano' },
   ]) {
-    const r = await comWaze({}, () => dispatch('chat', { ...S.dados, instalacao: INST, confirmar: IDS, ...ruim }, S.ctx));
+    const r = await comWaze({}, () => dispatch('chat', { cookies: COOKIES, instalacao: INST, confirmar: IDS, ...ruim }, {}));
     assert.equal(r.resultado.status, 400, JSON.stringify(ruim));
     assert.equal(r.pedidos.length, 0, `pedido recusado confirmou: ${JSON.stringify(ruim)}`);
   }
 
   // A ação `confirmar` já É a confirmação: não sai uma segunda de carona.
   const explicita = await comWaze({ AckMessages: () => respostaGrpc({}) },
-    () => dispatch('chat', { ...S.dados, acao: 'confirmar', ids: IDS, instalacao: INST, confirmar: IDS }, S.ctx));
+    () => dispatch('chat', { cookies: COOKIES, acao: 'confirmar', ids: IDS, instalacao: INST, confirmar: IDS }, {}));
   assert.equal(explicita.resultado.status, 200);
   assert.equal(explicita.pedidos.length, 1);
 });

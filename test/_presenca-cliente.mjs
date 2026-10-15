@@ -12,11 +12,6 @@ import { webcrypto } from 'node:crypto';
 
 const FONTE = readFileSync(new URL('../js/presenca.js', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-// O `safeLS` de VERDADE (api.js), sobre o armazenamento de mentira: o que ele faz com um
-// `localStorage` que lança ("bloquear todos os cookies") é justamente o que a presença lê
-// — `null`, igual a "a chave não existe" (R21-5-04). Reescrevê-lo aqui seria um dublê mais
-// generoso que o original.
-const SAFELS_FONTE = /^const safeLS = \{[\s\S]*?^\};/m.exec(readFileSync(new URL('../js/api.js', import.meta.url), 'utf8'))[0];
 
 function fatiarDoApp(nome) {
   const i = APP.search(new RegExp(`^(?:const|function) ${nome}\\b`, 'm'));
@@ -38,12 +33,7 @@ const I18N = new Function('window', 'navigator', 'localStorage', 'document',
   {}, { language: 'pt-BR' }, { getItem: () => null, setItem() {} }, { documentElement: {}, querySelectorAll: () => [] });
 const TRADUZIDAS = /^card\.updateType\./;
 
-// `marcaDestaAba`: a sessão da MEMÓRIA (`API.sessionToken`), que a presença
-// guarda na saída de cada pedido — o 401 tardio é da sessão que já se foi.
-// `armazenamentoLegivel`: a sonda de leitura que o `presencaAparelhoSaiu` compartilha com o
-// `aoSairEmOutraAba` (o aparelho que nem lê não diz "Sair").
-const DO_APP = ['CONTA_KEY', 'WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum', 'MARCA_DA_ABA_TRAVA',
-  'focavelNaTela', 'marcaDaSessao', 'marcaDestaAba', 'armazenamentoLegivel']
+const DO_APP = ['WME_EDITOR_URL', 'COORD_CASAS', 'coordDoLink', 'linkWmeDoPedido', 'distanciaKm', 'escapeHtml', 'humanizarEnum', 'rotuloDeEnum']
   .map(fatiarDoApp).join('\n');
 
 class Classes {
@@ -64,10 +54,6 @@ function elemento(id) {
     id, innerHTML: '', textContent: '', value: '', disabled: false, dataset: {},
     scrollTop: 0, scrollHeight: 0, clientHeight: 0, childElementCount: 0,
     classList: new Classes(), atributos: {},
-    // Pro `focavelNaTela` do app.js (fatiado acima): está no documento, e só
-    // tem caixa na tela quando não está escondido — sem ancestrais aqui.
-    isConnected: true,
-    getClientRects() { return el.classList.contains('hidden') ? [] : [{ width: 44, height: 44 }]; },
     setAttribute(k, v) { this.atributos[k] = String(v); },
     getAttribute(k) { return this.atributos[k] ?? null; },
     removeAttribute(k) { delete this.atributos[k]; },
@@ -80,38 +66,14 @@ function elemento(id) {
 }
 
 // Cria um cliente novo. `api` responde por rota: `presencaApp(campos)` e
-// `chat(campos)` devolvem a resposta (ou uma promessa dela). `aba` é a marca
-// da aba (`ABA_DESTA_PAGINA`, do app.js); sem ela, a página não tem marca.
-// `armazenamentoBloqueado`: o `localStorage` LANÇA em todo acesso (o navegador com
-// "bloquear todos os cookies"): a sessão só existe na memória, e o `safeLS` (aqui o de
-// VERDADE, do api.js) devolve `null` pra tudo. Sem a opção, o dublê de sempre.
-export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null, paisDaFila = undefined, aba = undefined,
-  armazenamentoBloqueado = false } = {}) {
+// `chat(campos)` devolvem a resposta (ou uma promessa dela).
+export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel = 'visible', agora = null } = {}) {
   const els = new Map();
   const $ = (id) => { if (!els.has(id)) els.set(id, elemento(id)); return els.get(id); };
-  // Uma sessão guardada no aparelho (a presença confere que nenhuma OUTRA aba
-  // deu "Sair": ver `presencaAparelhoSaiu`); o teste do "Sair" a tira.
-  const armazenado = new Map([['waze_session_token', 'token-de-teste']]);
-  const negado = () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
-  const localStorageFalso = armazenamentoBloqueado
-    ? { getItem: negado, setItem: negado, removeItem: negado }
-    : { getItem: (k) => (armazenado.has(k) ? armazenado.get(k) : null), setItem: (k, v) => armazenado.set(k, String(v)),
-        removeItem: (k) => armazenado.delete(k) };
-  // `saindoNoChat[i]` é o modo "saindo" do api.js (o `keepalive`) na hora da
-  // chamada `chat[i]`: é ele que diz se o pedido sobrevive à página que morre.
-  const chamadas = { presencaApp: [], chat: [], saindoNoChat: [], setSaindo: [], openModal: [], closeModal: [], unauthorized: 0,
-    fetch: [], dfato: [], refazerPerfil: 0, despacharJanela: 0 };
+  const armazenado = new Map();
+  const chamadas = { presencaApp: [], chat: [], openModal: [], closeModal: [], unauthorized: 0, fetch: [], dfato: [] };
   const timers = [];
   let proximoTimer = 1;
-  // O `ResizeObserver` do navegador, de mentira: guarda quem observa o quê, e
-  // quem o quer (`redimensionar`) o dispara com a caixa já na altura nova.
-  const observadores = [];
-  class ResizeObserverFalso {
-    constructor(fn) { this.fn = fn; this.alvos = []; observadores.push(this); }
-    observe(el) { this.alvos.push(el); }
-    unobserve() {}
-    disconnect() { this.alvos = []; }
-  }
   const relogio = { agora: agora ?? Date.now() };
   const DateFalso = class extends Date {
     constructor(...a) { if (a.length) super(...a); else super(relogio.agora); }
@@ -138,17 +100,11 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     countries: [{ id: 30, name: 'Brazil' }, { id: 73, name: 'France' }],
   };
   const API = {
-    // A sessão da MEMÓRIA (a que as rotas levam): o teste a troca pra simular a
-    // renovação silenciosa (outra sessão, a mesma conta).
-    sessionToken: 'token-de-teste',
     getSession: () => 'token-de-teste',
     getCountry: () => pais,
     getRegion: () => 'row',
     async presencaApp(c) { chamadas.presencaApp.push(c); return api.presencaApp ? api.presencaApp(c) : { success: true, online: [], conversas: [] }; },
-    async chat(c) { chamadas.chat.push(c); chamadas.saindoNoChat.push(API.saindo === true); return api.chat ? api.chat(c) : { success: true }; },
-    // O modo "saindo" do api.js: com ele, o pedido vai com `keepalive`.
-    saindo: false,
-    setSaindo(v) { chamadas.setSaindo.push(!!v); API.saindo = !!v; },
+    async chat(c) { chamadas.chat.push(c); return api.chat ? api.chat(c) : { success: true }; },
   };
   const escopo = {
     document: doc,
@@ -161,16 +117,11 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
       set: (k, v) => armazenado.set(k, String(v)),
       remove: (k) => armazenado.delete(k),
     },
-    localStorage: localStorageFalso,
     t: (k, v) => (TRADUZIDAS.test(k) && I18N.pt[k] ? I18N.pt[k] : v ? `${k}${JSON.stringify(v)}` : k),
     i18nLocale: () => 'pt-BR',
     openModal: (id) => { chamadas.openModal.push(id); $(id).classList.remove('hidden'); },
     closeModal: (id) => { chamadas.closeModal.push(id); $(id).classList.add('hidden'); },
     handleUnauthorized: () => { chamadas.unauthorized += 1; },
-    // Do app.js: pedir de novo o perfil que falta (com o teto de 1/min dele) e
-    // despachar a janela do Desfazer. Aqui só CONTAM — quem faz é o app.
-    refazerPerfilSeFaltar: () => { chamadas.refazerPerfil += 1; },
-    despacharJanelaDoDesfazer: () => { chamadas.despacharJanela += 1; },
     // O diário sempre ligado do app.js (`dfato`). Aqui ele só GUARDA, pra o
     // teste ver a linha do tempo que a presença deixa pro diagnóstico.
     dfato: (k, o) => { chamadas.dfato.push([k, o]); },
@@ -180,30 +131,15 @@ export function novoCliente({ api = {}, perfilId = 12444348, pais = 30, visivel 
     crypto: webcrypto,
     atob, TextDecoder, Response,
     Date: DateFalso,
-    // Do api.js (carregado antes do presenca.js no app de verdade).
-    REGIOES_DO_WAZE: ['row', 'na', 'il'],
-    // Do app.js: o país da FILA (com "Minha área", o da área), que é o país da
-    // presença. Sem ele, a presença usa o do filtro (`API.getCountry`). O teste
-    // que o quer passa o de verdade, fatiado do app.js.
-    paisDaFila,
-    // Do app.js: a marca desta aba (a da fila de saída e do "invisível").
-    ABA_DESTA_PAGINA: aba,
-    ResizeObserver: ResizeObserverFalso,
   };
-  // Só com o armazenamento BLOQUEADO o `safeLS` é o de VERDADE (api.js) sobre o `localStorage`
-  // que lança. No padrão fica o dublê de sempre (o dos testes escritos antes do R21-5-04): um
-  // `safeLS` novo pra todos os testes mexeria no que eles já provam.
-  if (armazenamentoBloqueado) escopo.safeLS = new Function('localStorage', SAFELS_FONTE + '\nreturn safeLS;')(localStorageFalso);
   const nomes = [...new Set([...FONTE.matchAll(/^(?:async )?function (\w+)\(/gm), ...FONTE.matchAll(/^const (\w+)/gm)].map((m) => m[1]))];
   const globais = Object.keys(escopo);
   const corpo = `${DO_APP}\n${FONTE}\nreturn { ${nomes.join(', ')} };`;
   const P = new Function(...globais, corpo)(...globais.map((g) => escopo[g]));
   // Todos os elementos que a presença consulta nascem ESCONDIDOS, como no HTML.
-  for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'pedidoModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
+  for (const id of ['presencaPill', 'presencaModal', 'conversaModal', 'conversaAnexo', 'conversaCardBtn', 'presencaIconMsg', 'conversaEstado']) $(id).classList.add('hidden');
   return {
-    P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo, observadores,
-    // O navegador avisa que a caixa de `el` mudou de tamanho.
-    redimensionar(el) { for (const o of observadores) if (o.alvos.includes(el)) o.fn([{ target: el }]); },
+    P, $, els, armazenado, chamadas, timers, relogio, AppState, API, doc, win, escopo,
     // Roda os timers pendentes (os que existem AGORA), em ordem de prazo.
     async rodarTimers() {
       const agora = timers.splice(0).sort((a, b) => a.ms - b.ms);

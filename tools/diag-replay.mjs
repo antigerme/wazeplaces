@@ -20,106 +20,11 @@
 // `tools/diag-api.mjs`, que é outra ferramenta e tem outras regras.
 import { readFileSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { subirServidorLocal } from './servidor-local.mjs';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-// O TEMA que a pessoa via, e de onde ele vem. Só o GUARDADO era lido — e quem
-// segue o sistema (o padrão: nada guardado até tocar no botão) num celular
-// escuro remontava CLARO, com o init abaixo ainda gravando "light" por cima
-// (auditoria de 2026-09-26). A ordem: a escolha guardada; senão o que a TELA
-// mostrava (`computado.tema.htmlClasse`, relatório v3+); senão o sistema do
-// aparelho (`ambiente.escuro`). `sistema` é o esquema do APARELHO, que vai pro
-// contexto do navegador: sem escolha guardada, o app o segue sozinho.
-function temaDoRelatorio(d) {
-  const guardado = /^"?(dark|light)"?$/.exec(String(((d && d.localStorage) || {}).waze_places_theme || ''));
-  const classe = d && d.computado && d.computado.tema && d.computado.tema.htmlClasse;
-  const sistema = d && d.ambiente && typeof d.ambiente.escuro === 'boolean' ? d.ambiente.escuro : null;
-  if (guardado) return { escuro: guardado[1] === 'dark', guardado: guardado[1], sistema, origem: 'escolhido' };
-  if (typeof classe === 'string') return { escuro: /(^|\s)dark(\s|$)/.test(classe), guardado: null, sistema, origem: 'o da tela' };
-  return { escuro: sistema === true, guardado: null, sistema, origem: sistema === null ? 'padrão' : 'o do sistema' };
-}
-
-// O PLACAR que a pessoa via: Lidos, Rejeitados, Pulados e o "Restam" (com o
-// "+" quando havia mais). A remontagem mostrava 0 · 0 · 0 e o tamanho do
-// recorte injetado, onde o aparelho tinha 801 · 905 · 18 · 20+ (auditoria de
-// 2026-09-29, T3) — e o "Restam" é justamente o número que um relato de "a fila
-// acabou" discute. Relatório sem os campos (antigo, ou montado à mão) fica como
-// era: placar zerado, e o "Restam" no tamanho da fila injetada.
-function placarDoRelatorio(st, naFila) {
-  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
-  const s = (st && st.stats) || {};
-  return {
-    stats: { read: n(s.read), rejected: n(s.rejected), skipped: n(s.skipped) },
-    serverTotal: st && Number.isFinite(st.serverTotal) && st.serverTotal >= 0 ? st.serverTotal : naFila,
-    hasMore: !!(st && st.hasMore === true),
-  };
-}
-
-// A FILA que a remontagem injeta, e o pedido da frente. Com o TREINO aberto na
-// hora do relatório, o `appState.queue` são os EXEMPLOS (os clones inertes e os
-// sintéticos): a remontagem os punha como a fila, sem a faixa do treino e sem
-// dizer nada — com 40 pedidos reais, injetava 30 exemplos e mostrava "restam 40"
-// (auditoria da rodada 9, R9-4-08, MEDIDO). A fila REAL é a que o treino guarda,
-// e o relatório a leva desde o v11 (`treino.fila`, com o `currentPlaceIdx` dela,
-// R8-4-06): é ela que entra, e `doTreino` diz que foi assim. O placar e o
-// "Restam" do `appState` já são os da fila real (o treino tem placar próprio).
-function filaDoRelatorio(d) {
-  const st = (d && d.appState) || {};
-  const tr = d && d.treino && typeof d.treino === 'object' ? d.treino : null;
-  const doTreino = !!(tr && tr.ativo === true && Array.isArray(tr.fila));
-  if (doTreino) {
-    const fila = tr.fila.filter((x) => x && typeof x === 'object');
-    const i = tr.currentPlaceIdx;
-    return { fila, idx: Number.isInteger(i) && i >= 0 && i < fila.length ? i : 0, doTreino, exemplos: (st.queue || []).length };
-  }
-  // `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
-  // objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
-  // objeto serializado duas vezes. Os dois casos são remendados aqui.
-  // MIGRACAO: diag-formato-2 — ver tools/migracoes.mjs
-  const fila = (st.queue || []).map((x) => (x === '[circular]' ? st.currentPlace : x)).filter(Boolean);
-  const idx = Number.isInteger(st.currentPlaceIdx) && st.currentPlaceIdx >= 0 ? st.currentPlaceIdx : 0;
-  return { fila, idx, doTreino: false, exemplos: 0 };
-}
-
-// O que ESPERA o "Sair" do treino e muda a fila que volta (auditoria da rodada
-// 10, R10-4-08). A remontagem injeta a fila REAL que o treino guardava — e, com a
-// fila guardada do offline lida no treino (`abrirGuardada`), ela costuma estar
-// VAZIA: a remontagem mostrava "fila: 0" e o painel vazio, sem dizer que N
-// pedidos abrem no "Sair" (o `diag-resumo` do mesmo arquivo diz). E com a fila
-// que o perfil mandou refazer (`refazerFila`), a remontada não é a que volta. A
-// ordem é a do `Treino.sair()`: a refeita vence; a guardada só abre com a fila
-// real vazia. O relatório leva só a CONTAGEM da guardada (`filaGuardadaLida.n`),
-// e não os pedidos: a remontagem não tem como mostrá-los. PURA, conferida sem
-// navegador (test/diag-ferramentas).
-function filaQueVoltaDoTreino(d) {
-  const tr = d && d.treino && typeof d.treino === 'object' ? d.treino : null;
-  if (!tr || tr.ativo !== true || !Array.isArray(tr.fila)) return [];
-  const naFila = tr.fila.filter((x) => x && typeof x === 'object').length;
-  if (tr.refazerFila === true) {
-    return ['o perfil que chegou no treino mandou REFAZER a fila real: no "Sair" ela é buscada de novo — a fila remontada aqui não é a que volta.'];
-  }
-  if (tr.abrirGuardada !== true) return [];
-  const lida = tr.filaGuardadaLida && typeof tr.filaGuardadaLida === 'object' ? tr.filaGuardadaLida.n : null;
-  const quantos = Number.isInteger(lida) && lida >= 0 ? `${lida} pedido(s) da fila guardada do offline` : 'a fila guardada do offline';
-  return [naFila > 0
-    ? `${quantos} espera(m) o "Sair" do treino, mas só abre(m) com a fila real vazia — e ela tem ${naFila} pedido(s).`
-    : `${quantos} abre(m) no "Sair" do treino — a fila real estava vazia, e o relatório leva só a contagem da guardada: a remontagem não tem esses pedidos.`];
-}
-
-// A ESCALA do texto do aparelho (relatório com `computado.escala`, R21-4-03): a raiz em px, que a remontagem
-// aplica na página (`html{font-size}`). Sem isto ela subia sempre com a raiz de 16 px e a tela de quem usa o
-// texto do sistema aumentado saía com a letra e as caixas de 1× — a barra ✕ ↑ ✓ cabia na remontagem onde na
-// tela dele não cabia. Entre 8 e 96 px; relatório de antes do campo (ou a escala normal): `null`. PURA,
-// conferida sem navegador (test/diag-ferramentas).
-function escalaDoRelatorio(d) {
-  const e = d && d.computado && d.computado.escala;
-  const px = e && e.raizPx;
-  return typeof px === 'number' && Number.isFinite(px) && px >= 8 && px <= 96 && px !== 16 ? px : null;
-}
-
 const args = process.argv.slice(2);
 const ARQ = args.find((a) => !a.startsWith('--'));
 const opt = (nome, padrao) => {
@@ -137,54 +42,53 @@ if (!ARQ) {
 // navegador sem CompressionStream). Farejado pelos bytes, não pela extensão.
 const { dados: d, origem: _origemDoDiag } = lerDiagnostico(ARQ);
 const st = d.appState || {};
-const { fila, idx, doTreino, exemplos } = filaDoRelatorio(d);
+// `currentPlace` virou ÍNDICE no formato 3+. Nos formatos antigos ele é um
+// objeto e o `queue[0]` pode ter saído como a string "[circular]" — o mesmo
+// objeto serializado duas vezes. Os dois casos são remendados aqui.
+// MIGRACAO: diag-formato-2 — ver tools/migracoes.mjs
+const fila = (st.queue || []).map((x, i) => (x === '[circular]' ? st.currentPlace : x)).filter(Boolean);
+const idx = Number.isInteger(st.currentPlaceIdx) && st.currentPlaceIdx >= 0 ? st.currentPlaceIdx : 0;
 const LIMITE = args.includes('--tudo') ? fila.length : 30;
 const recorte = fila.slice(idx, idx + LIMITE);
 
 const [W, H] = String((d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844')
   .split('x').map((n) => parseInt(n, 10) || 0);
 const dpr = (d.ambiente && d.ambiente.tela && d.ambiente.tela.dpr) || 2;
-const tema = temaDoRelatorio(d);
-const escuro = tema.escuro;
+const escuro = /"?dark"?/.test(String((d.localStorage || {}).waze_places_theme || ''));
 const lang = (d.app && d.app.idioma) || 'pt';
 const PORTA = parseInt(opt('porta', '8123'), 10);
 
 console.log(`de:      ${ARQ.split('/').pop()}   (${_origemDoDiag})`);
 console.log(`app:     ${(d.app && d.app.rotulo) || '?'}   formato ${d._formato || '?'}`);
-const textoPx = escalaDoRelatorio(d);
-console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} (${tema.origem}) · idioma ${lang}${textoPx ? ` · texto ×${Math.round(textoPx / 16 * 100) / 100} (raiz em ${textoPx} px)` : ''}`);
-if (doTreino) {
-  console.log(`AVISO:   relatório gerado DENTRO do treino — a tela tinha ${exemplos} EXEMPLO(S) na fila; a remontagem usa a fila REAL que o treino guardava, sem a faixa do treino.`);
-}
-console.log(`fila:    ${fila.length} pedido(s)${doTreino ? ' (a fila real que o treino guardava)' : ''}, injetando ${recorte.length} a partir do índice ${idx}`);
-for (const linha of filaQueVoltaDoTreino(d)) console.log(`AVISO:   ${linha}`);
+console.log(`tela:    ${W}x${H} @${dpr}x · tema ${escuro ? 'escuro' : 'claro'} · idioma ${lang}`);
+console.log(`fila:    ${fila.length} pedido(s), injetando ${recorte.length} a partir do índice ${idx}`);
 console.log(`filtros: ${JSON.stringify(st.filters || {})}`);
 
 const { carregarPlaywright, abrirChromium } = await import('./navegador.mjs');
-const { esperarOuExplodir } = await import('./esperar-saida.mjs');
 const pw = await carregarPlaywright();
 
-// Sobe por `tools/servidor-local.mjs`: a porta tem que estar LIVRE (a padrão é
-// a mesma do smoke de layout, e com ele rodando a tela reconstruída seria a do
-// servidor dele), e pronto é o próprio processo dizer que a ocupou.
-const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: '--porta' });
+const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
+  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
+  stdio: ['ignore', 'ignore', 'inherit'],
+});
 const parar = () => { try { servidor.kill(); } catch (e) {} };
+process.on('exit', parar);
 process.on('SIGINT', () => { parar(); process.exit(130); });
+
+// Espera o servidor ATENDER, não um relógio: `sleep` fixo é palpite e falha na
+// máquina lenta justamente quando se está com pressa.
+for (let i = 0; i < 60; i++) {
+  try { await fetch(`http://127.0.0.1:${PORTA}/`); break; } catch (e) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 
 const browser = await abrirChromium(pw, { headless: !args.includes('--abrir') });
 const ctx = await browser.newContext({
   viewport: { width: W, height: H }, deviceScaleFactor: dpr,
   locale: lang, hasTouch: true, isMobile: true, serviceWorkers: 'block',
-  // O esquema do APARELHO quando o relatório o traz; sem escolha guardada é
-  // ele que o app segue — e aí `escuro` já veio dele (ou da tela).
-  colorScheme: (tema.guardado && tema.sistema !== null ? tema.sistema : escuro) ? 'dark' : 'light',
+  colorScheme: escuro ? 'dark' : 'light',
 });
-// NADA sai pra rede, POR CONSTRUÇÃO: o estado vem do arquivo, e a sessão aqui
-// é fictícia (ver abaixo). Antes isto valia só porque não havia token; com o
-// token fictício, uma ação no replay iria à API local e voltaria 401, e o 401
-// derrubaria a "sessão" da tela que se quer olhar. Abortada, a chamada é rede
-// fora — o app segue na tela.
-await ctx.route('**/api/**', (r) => r.abort('internetdisconnected'));
 const page = await ctx.newPage();
 const erros = [];
 page.on('pageerror', (e) => erros.push(e.message));
@@ -192,72 +96,43 @@ page.on('pageerror', (e) => erros.push(e.message));
 // As preferências e o idioma entram ANTES da carga: o "Como funciona" da
 // primeira execução cobre o card inteiro no Fold, e aí toda medição mede o
 // modal. Custou uma rodada de mockups descobrir isso.
-await page.addInitScript(([prefs, l, temaGuardado]) => {
+await page.addInitScript(([prefs, l, tema]) => {
   try {
     localStorage.setItem('waze_places_preferences', prefs);
     localStorage.setItem('waze_places_lang', l);
-    // Só a escolha que a pessoa FEZ: sem ela, gravar "light" aqui fazia o app
-    // parar de seguir o sistema — e o celular escuro remontava claro.
-    if (temaGuardado) localStorage.setItem('waze_places_theme', temaGuardado);
+    localStorage.setItem('waze_places_theme', tema);
   } catch (e) {}
-}, [JSON.stringify({ ...(st.preferences || {}), comoFuncionaVisto: true }), lang, tema.guardado]);
+}, [JSON.stringify({ ...(st.preferences || {}), comoFuncionaVisto: true }), lang, escuro ? 'dark' : 'light']);
 
 await page.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'load' });
-// Pelo lado do Node, não `waitForFunction`: o poller padrão dele avalia string
-// DENTRO da página, e a CSP do app (sem `unsafe-eval`) o barra — o EvalError
-// intermitente que custou rodadas de CI (ver `tools/esperar-saida.mjs`).
-await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'o app carregar', 30000);
+await page.waitForFunction(() => typeof AppState !== 'undefined', null, { timeout: 30000 });
 
-await page.evaluate(([places, filtros, perfil, devMode, placar, raizPx]) => {
+await page.evaluate(([places, filtros, perfil, devMode]) => {
   for (const id of ['authScreen', 'loadingCard', 'comoFuncionaModal']) {
     document.getElementById(id)?.classList.add('hidden');
   }
-  // A letra do aparelho dele, ANTES de qualquer desenho (R21-4-03): o `rem` do app inteiro anda com a raiz.
-  if (raizPx) document.documentElement.style.fontSize = raizPx + 'px';
-  // A sessão é FICTÍCIA, e está no armazenamento como estaria no aparelho: sem
-  // token, a sentinela `tokenNaoPersiste` acusava um defeito que o aparelho não
-  // tinha (a tela logada sem token é artefato do replay). Gravado DEPOIS da
-  // carga, pra o app não tentar entrar com ele.
-  try { localStorage.setItem('waze_session_token', 'replay-sessao-ficticia'); } catch (e) {}
+  document.getElementById('appScreen')?.classList.remove('hidden');
+  AppState.authenticated = true;
   AppState.profile = perfil || AppState.profile;
   if (filtros) AppState.filters = { ...AppState.filters, ...filtros };
-  if (devMode) AppState.devMode = devMode;
-  // O CABEÇALHO como o app o monta ao entrar — perfil, Filtros e Atualizar
-  // (sem isto a remontagem saía com o cabeçalho de quem não entrou).
-  showMainScreen();
-  renderProfileHeader();
   AppState.queue = places;
-  // O placar do APARELHO (ver `placarDoRelatorio`), não o do recorte injetado.
-  AppState.stats = placar.stats;
-  AppState.serverTotal = placar.serverTotal;
-  AppState.hasMore = placar.hasMore;
+  AppState.serverTotal = places.length;
+  AppState.hasMore = false;
+  if (devMode) AppState.devMode = devMode;
   showCurrentPlace();
-  updateStats(true);
+  updatePendingCount();
   if (typeof atualizarFabDev === 'function') atualizarFabDev();
-}, [recorte, st.filters || null, st.profile || null, st.devMode || null, placarDoRelatorio(st, recorte.length), textoPx]);
+}, [recorte, st.filters || null, st.profile || null, st.devMode || null]);
 
 await page.waitForTimeout(500);
 
-const visao = await page.evaluate(() => {
-  const naTela = (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains('hidden') && e.getBoundingClientRect().width > 0; };
-  return {
-    painel: document.querySelector('.place-card') ? 'card'
-      : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
-    titulo: document.querySelector('.card-name')?.textContent.trim() || null,
-    tema: document.documentElement.classList.contains('dark') ? 'escuro' : 'claro',
-    // O CABEÇALHO que ficou na tela — é a primeira coisa que difere quando a
-    // remontagem não entra "como o app entra".
-    cabecalho: { perfil: naTela('userProfileBadge') ? (document.getElementById('userName')?.textContent || '').trim() : null,
-                 filtros: naTela('filtersBtn'), atualizar: naTela('refreshBtn') },
-    // O PLACAR como a TELA o mostra (lido do DOM, não do AppState).
-    placar: ['readCount', 'rejectedCount', 'skippedCount', 'pendingCount']
-      .map((id) => (document.getElementById(id)?.textContent || '?').trim()),
-    alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
-  };
-});
-console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''} · tema na tela ${visao.tema}`);
-console.log(`cabeçalho: perfil ${visao.cabecalho.perfil ? `"${visao.cabecalho.perfil}"` : '—'} · Filtros ${visao.cabecalho.filtros ? 'sim' : 'NÃO'} · Atualizar ${visao.cabecalho.atualizar ? 'sim' : 'NÃO'}`);
-console.log(`placar:  lidos ${visao.placar[0]} · rejeitados ${visao.placar[1]} · pulados ${visao.placar[2]} · restam ${visao.placar[3]}`);
+const visao = await page.evaluate(() => ({
+  painel: document.querySelector('.place-card') ? 'card'
+    : (!document.getElementById('noMoreCards')?.classList.contains('hidden') ? 'tudoLimpo' : 'nada'),
+  titulo: document.querySelector('.card-name')?.textContent.trim() || null,
+  alertas: typeof diagSentinelas === 'function' ? diagSentinelas(diagComputado()) : null,
+}));
+console.log(`\npainel:  ${visao.painel}${visao.titulo ? ` · "${visao.titulo}"` : ''}`);
 if (visao.alertas) console.log(`alertas: ${visao.alertas.length ? JSON.stringify(visao.alertas) : 'nenhum'}`);
 if (erros.length) console.log(`ERROS DE JS: ${erros.join(' | ')}`);
 

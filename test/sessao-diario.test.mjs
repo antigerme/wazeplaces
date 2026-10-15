@@ -122,11 +122,9 @@ test('a QUEDA chega ao anel sem portão e ao diário', () => {
   // Ancorado na CHAMADA (início de linha), nunca na menção: o comentário logo
   // acima cita `esquecerPrazoDaSessao()` para explicar por que o prazo é lido
   // antes — e um `indexOf` do nome solto casa com o comentário e reprova código
-  // certo. Gotcha #14, acontecido na primeira escrita deste teste. A chamada
-  // leva argumento desde que a queda SÓ DESTA aba não mexe no prazo guardado
-  // (test/contas-abas).
+  // certo. Gotcha #14, acontecido na primeira escrita deste teste.
   const posLe = corpo.search(/^ {4}const prazoQueMorreu = /m);
-  const posEsquece = corpo.search(/^ {4}esquecerPrazoDaSessao\(/m);
+  const posEsquece = corpo.search(/^ {4}esquecerPrazoDaSessao\(\);/m);
   assert.ok(posLe !== -1 && posEsquece !== -1, 'sumiu a leitura do prazo ou o esquecimento');
   assert.ok(posLe < posEsquece, 'o prazo passou a ser lido depois de apagado — o registro vira null');
 });
@@ -165,10 +163,6 @@ test('a sentinela de queda exige PADRÃO, não um caso isolado', () => {
     'um ciclo curto sozinho é troca de aparelho ou logout no WME — exigir dois é o que faz padrão');
   assert.match(antes, /c\.fim === 'caiu'/,
     'passou a contar o "saiu" deliberado como queda');
-  // E o ciclo-PISO (a sessão que já existia quando o diário começou) fica de
-  // fora, como já fica da estatística: contá-lo acusava todo testador logado
-  // no dia do deploy (auditoria de 2026-09-25).
-  assert.match(antes, /c\.inicioConhecido !== false/, 'a sentinela conta o ciclo-piso como queda cedo');
 });
 
 test('o arquivo diz de que versão do diagnóstico ele é', () => {
@@ -199,12 +193,8 @@ test('a abertura com sessão já ativa carimba um marco próprio', () => {
   // ruído e quebraria a própria regra de entrada (raro, nunca por gesto).
   assert.match(corpo, /e === 'token\+' \|\| e === 'jaAtiva'\) return;/,
     'o marco deixou de checar se já há início em aberto — duplica a cada abertura');
-  // A carga com token salvo é o `abrirComSessaoSalva` (o `initApp` a chama com
-  // token, e o link de pareamento vencido num aparelho logado também cai nela):
-  // o marco é a PRIMEIRA coisa que ela faz, antes de qualquer caminho de tela.
-  assert.match(fatiar('initApp'), /if \(API\.getSession\(\)\) \{\s*abrirComSessaoSalva\(\);/,
-    'a abertura com token salvo deixou de passar pelo abrirComSessaoSalva');
-  assert.match(fatiar('abrirComSessaoSalva'), /^function abrirComSessaoSalva\(\) \{\s*(\/\/[^\n]*\s*)*marcarSessaoJaAtiva\(\);/,
+  const carga = APP.slice(APP.indexOf('const savedToken = API.getSession();'));
+  assert.match(carga.slice(0, 400), /marcarSessaoJaAtiva\(\);/,
     'a carga com token salvo parou de carimbar o marco');
 });
 

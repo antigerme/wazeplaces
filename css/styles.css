@@ -282,17 +282,10 @@ body.dark {
 
 /* Pulo do contador quando o número muda. É o que comunica "isso mexeu" no caso
    de +1 — onde contar não mostraria nada (não há inteiro entre 12 e 13).
-   `scale` não afeta layout, então nada empurra os vizinhos do grid — desde que
-   a regra NÃO troque o `display`. Os quatro números são `<p>`, caixa de BLOCO,
-   onde o `transform` já vale. Até o lote 18 havia aqui um `display:
-   inline-block` ("transform não se aplica a caixa inline pura"): ele trocava o
-   `<p>` de bloco pra linha, o alinhamento pela linha de base crescia a célula,
-   e abaixo de 360 px (o placar 2×2) o placar crescia 2 px e EMPURRAVA o card a
-   cada decisão (MEDIDO nos dois motores; o smoke de layout cobra). Elemento
-   novo que use o pulo tem de ser de BLOCO (ou já inline-block por conta
-   própria), nunca ganhar o `display` daqui. */
+   `scale` não afeta layout, então nada empurra os vizinhos do grid. */
 .count-pop {
   animation: countPop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: inline-block; /* transform não se aplica a caixa inline pura */
 }
 
 @keyframes countPop {
@@ -333,89 +326,8 @@ body.dark {
 /* Navegador de celular não instala extensão da Chrome Web Store. A classe vem
    do `marcarSuporteAExtensao()` (app.js) e olha o SO, não o ponteiro: notebook
    com tela sensível ao toque é `pointer: coarse` e instala extensão numa boa —
-   esconder por ponteiro tiraria uma opção que ali funciona.
-
-   E o card só aparece com a CONFIRMAÇÃO do JS (`com-extensao`), nunca antes
-   dele. A regra era a negativa (`.sem-extensao` esconde), e antes de o app.js
-   chegar — rede lenta — o celular mostrava a extensão como "RECOMENDADO", o
-   beco sem saída que a regra existe pra tirar da frente (auditoria de
-   2026-09-26). O estado final da tela não muda; muda o palpite de antes. */
-.auth-opt-ext { display: none; }
-.com-extensao .auth-opt-ext { display: block; }
-
-/* A MESMA regra no "Como usar" da Ajuda: o passo da extensão só onde ela
-   instala. No celular a Ajuda a recomendava como "Mais fácil" — sem citar o
-   código, que é o único caminho que funciona lá (auditoria de 2026-09-26). Sem
-   ele o passo do código vira o 1º: item escondido não conta na numeração.
-   `list-item`, e não `block`, pra não perder o número. */
-.ajuda-passo-ext { display: none; }
-.com-extensao .ajuda-passo-ext { display: list-item; }
-
-/* A tabela de gestos da Ajuda — Rejeitar | Pular | Lido (D3, rodada 21). Com o
-   texto do sistema um pouco maior as palavras passavam da borda do ladrilho: as
-   três colunas são `minmax(0, 1fr)` (a coluna não cresce com o texto) e nada
-   quebrava a palavra. MEDIDO a 1,1× no Galaxy Fold (em espanhol já a 1×), 1,2× a
-   1,5× nos celulares comuns, e a 2× os ladrilhos se sobrepunham.
-   `overflow-wrap: break-word` só age quando UMA palavra não cabe sozinha na linha
-   (a que cabe na linha de baixo vai pra lá, como sempre). Mas "cabe" é a caixa de
-   CONTEÚDO do ladrilho, e no Fold a 1× ("Rejeitar", "arrastar") o texto já passa
-   dela pro respiro de 8 px, sem tocar a borda: quebrar ali mudaria o ladrilho de
-   hoje, que é o que NÃO pode mudar (a 1× 0 pixel). Então a regra vale só quando o
-   ladrilho é mais estreito, em `rem`, do que o do Fold a 1× (a grade tem 174 px =
-   10,875rem lá, e é o menor a 1× de qualquer celular): o contêiner é a própria
-   grade, e o corte é 10,7rem — acima dos 10,58 em que o português cruza a borda (a
-   412 px a 1,5×) e abaixo dos 10,875. O espanhol é mais largo e cruza a borda até
-   ~12,3rem (inclusive no Fold a 1×, que é DEFEITO, e é o único idioma que muda a
-   1×): corte próprio em 12,5rem, por `:lang(es)` (o `<html lang>` segue o idioma).
-   Sem `hyphens: auto` de propósito: ele também parte palavra que CABERIA na linha
-   seguinte ("arras-/tar"), e isso mudaria o ladrilho que cabe. Quebra no meio da
-   palavra é feio, mas fica dentro da caixa. */
-.ajuda-gestos {
-  container: ajuda-gestos / inline-size;
-}
-@container ajuda-gestos (max-width: 10.7rem) {
-  .ajuda-gestos > div {
-    overflow-wrap: break-word;
-  }
-}
-@container ajuda-gestos (max-width: 12.5rem) {
-  :lang(es) .ajuda-gestos > div {
-    overflow-wrap: break-word;
-  }
-}
-
-/* Os botões do pareamento e o "Entendi" do "Acesso restrito" com o texto do sistema
-   maior (D4, rodada 21): o rótulo passava da caixa do botão — 17 px de cada lado no
-   Fold a 2× em francês, 7–8 px a 1,5×. Os dois rótulos com ícone (`<svg>` + `<span>`
-   num flex) ganham `min-w-0 break-words` no próprio `<span>`, no HTML: o item de flex
-   só encolhe abaixo da palavra mais longa com `min-width: 0`, e aí `break-word` parte a
-   que não cabe. Os dois botões de TEXTO SÓ ("Fechar" e "Entendi") quebram por aqui, por
-   id: a classe `break-words` no HTML os tiraria do molde dos botões dos outros
-   diálogos (`test/entrada.test.mjs` compara as classes do "Entendi" com as do
-   afirmativo dos outros, pra o fundo dele nunca sumir no escuro). `overflow-wrap` só
-   age quando a palavra NÃO CABE na linha: a 1× nenhum rótulo muda um pixel.
-
-   O "Acesso restrito" tem mais dois lugares onde a palavra não cabia (R21-8-04, o
-   Fold a 1,5×): a coluna do título e da 1ª frase, ao lado do ícone (um `flex` sem
-   `min-w-0`: «Restricted»/«Acceso» não encolhiam e saíam do cartão pela direita, 34 a
-   42 px; `min-w-0 break-words` está no HTML), e o nome de quem entrou, na caixa do
-   perfil (`#accessDeniedProfile`, montada pelo JS: 27 px pra fora em todos os
-   idiomas). Mesma regra: só age quando a palavra não cabe, e a 1× nada muda. */
-#pairShowClose,
-#closeAccessDenied,
-#accessDeniedProfile {
-  overflow-wrap: break-word;
-}
-
-/* O divisor "ou login manual" separa a extensão do resto. Sem ela, fora do
-   dedo, a lista COMEÇAVA por ele, sem nada antes (Firefox e Safari de
-   computador, onde a extensão some). No dedo ele fica: lá o "Entrar com um
-   código" vem antes dele (ver o `order` do `pointer: coarse` abaixo). */
-.auth-opt-div { display: none; }
-.com-extensao .auth-opt-div { display: block; }
-@media (pointer: coarse) {
-  .auth-opt-div { display: block; }
-}
+   esconder por ponteiro tiraria uma opção que ali funciona. */
+.sem-extensao .auth-opt-ext { display: none; }
 
 .auth-opt-ext    { order: 1; }
 .auth-opt-div    { order: 2; }
@@ -568,19 +480,10 @@ body > main {
    tem 852px de largura com 393px de altura, e um piso de 26rem (416px) ali fica
    maior que a tela inteira — a rolagem PIORAVA (177 → 259px, medido). Acima de
    700px de altura o piso cabe com folga em todo aparelho medido (o Fold, o mais
-   apertado, deixa 426px livres).
-
-   O `rem` do piso cresce com o texto do sistema, e a janela não: com a fonte
-   raiz em 1,5× o piso é 624px num Android de 800 (R19-8-01), maior que o que
-   sobra depois do cabeçalho e do placar, também maiores — o card nascia mais
-   alto que a tela e a barra ✕ ↑ ✓ ficava abaixo da dobra. `60dvh` é o teto: a
-   partir dos 700px do degrau ele vale 420px ou mais, então com a escala 1
-   (416px) o `min()` devolve SEMPRE o `26rem` de sempre e nada muda. A linha
-   de baixo é a reserva do navegador sem `dvh`. */
+   apertado, deixa 426px livres). */
 @media (min-height: 700px) {
   #cardStack {
     min-height: 26rem;
-    min-height: min(26rem, 60dvh);
   }
 }
 
@@ -614,256 +517,6 @@ body > main {
      comentário dizia recuperar 25. Escreveram-se quando o HTML era outro e
      ficaram pra trás. A compactação de verdade é por ALTURA, não por largura,
      e está no degrau `max-height: 700px`. */
-}
-
-/* O MESMO 2×2, ligado por MEDIDA (R20-8-01). O `@media` acima é em px e a 1×:
-   com a fonte do sistema maior os rótulos crescem (`0.6875rem`) e a coluna, que
-   é fração da tela, não — "REJEITADOS|PULADOS" e "RECHAZADAS|SALTADAS" se
-   sobrepunham num aparelho de 360–393 px a 1,3×, e a 1,5× três rótulos saíam
-   colados. A `vigiarPlacar` (js/app.js) mede o rótulo contra a célula e, quando
-   não cabe, liga `placar-2x2` — as mesmas três regras do `@media`, um 2×2 só com
-   dois gatilhos. Ela é VIVA e não um `@container` em `rem` porque o 2×2 custa uma
-   fileira de altura (~50 px a 1,8×) e, onde o card já não tinha folga (360×740 a
-   1,65×, 393/412 a 2×), essa fileira empurrava a barra ✕ ↑ ✓ pra fora da janela:
-   rótulos que se encostam são feios, barra que não se alcança é o pior defeito do
-   card, e só a medida sabe qual dos dois está em jogo. A 1× a classe nunca liga
-   (os rótulos cabem), então nenhum pixel muda. O respiro entre as fileiras é
-   MENOR que o do Galaxy Fold a 1× (2 px e 4 px, contra 4 e 6): é a escala maior
-   que está pagando a altura, e 1 px a mais fazia o card do S8 (360×740) a 1,5×
-   passar da janela. (1,1,0) vence o `grid-cols-4` do Tailwind. */
-#placarGrid.placar-2x2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  row-gap: 0.125rem;
-}
-#placarGrid.placar-2x2 > :nth-child(odd)    { border-left-width: 0; }
-#placarGrid.placar-2x2 > :nth-child(n + 3)  { border-top-width: 1px; padding-top: 0.25rem; }
-
-/* ── Os dois botões de um diálogo na tela estreita (R14-8-03) ─────────────
-   As linhas de dois botões dos diálogos (`.dialogo-acoes`: Sair, Colar cookies,
-   Entrar com código, "Como funciona", "Marcar todos", o rodapé dos Filtros e o
-   Resumo do mês) dividem a largura por `flex-1`, e um botão `flex` não encolhe
-   abaixo da PALAVRA mais longa do rótulo. No Galaxy Fold (280px) a soma passava
-   da linha: em francês o "Se déconnecter" saía da CAIXA do diálogo (cortado na
-   borda, sem o canto, e o diálogo ganhava rolagem horizontal: 258 > 248), e o
-   "Confirmar" do Colar cookies (pt/es), o "Se connecter", o "J'ai compris" e o
-   "Appliquer" comiam o padding (auditoria da rodada 14, MEDIDO nos dois
-   motores). A soma só passa da linha abaixo de ~314px; em 320 e acima, nada muda.
-
-   Três coisas, e o porquê de cada uma — MEDIDO num mockup no app de verdade, nos
-   4 idiomas e nos dois motores:
-   - `min-width: 0` + `overflow-wrap`: o botão encolhe até a metade da linha e o
-     rótulo quebra DENTRO dele, nunca passando da caixa.
-   - o padding lateral cai de 16 pra 6px: só isso, cada botão ganha 20px de texto
-     (62 → 82px). Sem ele, a metade da linha cortava "Cancelar" no meio da
-     palavra em português e espanhol, em TODO diálogo ("Cancela/r") — o idioma
-     principal piorando pra consertar o francês. Com ele, toda palavra de pt, en
-     e es cabe inteira (a mais longa, "Entendido", mede 79px). 8px não bastava: o
-     "Confirmar" do WebKit mede 78,3px, e a quebra voltava por 0,3px.
-   - `hyphens: auto`: o único que ainda não cabe é "déconnecter" (97px), e com o
-     dicionário do idioma o motor quebra na sílaba, com hífen ("Se décon-
-     necter"); MEDIDO no Chromium. Sem dicionário (o WebKit do Linux), quebra na
-     letra — feio, mas dentro do botão. O `hyphenate-limit-chars` deixa de fora a
-     palavra de menos de 10 letras: sem ele o motor hifeniza o que CABE na linha
-     seguinte, e "Quero treinar antes" virava "Quero trei-/nar antes" num diálogo
-     que não tinha defeito nenhum. Nenhum iPhone tem menos de 320px, então quem
-     vê esta regra é o Chrome do Android (o Fold), que a entende.
-   Empilhar os dois botões seria layout novo: fica com o owner. */
-@media (max-width: 319.98px) {
-  .dialogo-acoes > button {
-    min-width: 0;
-    padding-left: 0.375rem;
-    padding-right: 0.375rem;
-    overflow-wrap: break-word;
-    -webkit-hyphens: auto;
-    hyphens: auto;
-    hyphenate-limit-chars: 10 4 4;
-  }
-}
-
-/* ── O MESMO, na ESCALA DO TEXTO (R20-7-01, R20-8-03) ─────────────────────
-   O `@media` acima mede a TELA, em px, a 1×. Com a fonte do sistema em 1,3× ou
-   mais o texto cresce e a linha, que é fração da tela, não: a 360 px a 1,5× o
-   "Se déconnecter" saía 78 px do cartão, o "Aplicar" dos Filtros 25–43 px, e no
-   Galaxy Fold a 1,3× "Cancelar" quebrava no MEIO da palavra. A pergunta é a
-   mesma — "cabem os dois lado a lado?" — e ela depende só da largura da linha EM
-   `rem` (o texto e o respiro dos botões são `rem`), então a resposta é um
-   `@container` na própria linha, onde o `rem` é o da raiz, o do texto maior:
-   - até 14,9rem a linha usa o compacto de cima. A 1× isso é a tela de menos de
-     320 px, onde o `@media` já valia: o iPhone SE de 1ª geração (320 px, linha
-     de 15rem) e tudo acima ficam como sempre foram, pixel por pixel.
-   - abaixo da linha do Galaxy Fold a 1× (12,5rem) nem o compacto cabe — o Fold é
-     a referência porque é a linha mais estreita em que o app já mostra os
-     rótulos lado a lado, e cada rótulo cabe nela em todos os idiomas —, e os
-     botões EMPILHAM: dismissiva em cima, afirmativa embaixo (a ordem das duas no
-     HTML, M3/HIG), cada uma na largura toda. É o que se faz com o texto grande:
-     dá pra tocar e ler, em vez de cortar a palavra.
-   O contêiner é a linha (`container-type: inline-size`: a largura dela já vem
-   do cartão, não do texto). `flex-wrap` é o que faz o botão de 100% ir pra
-   linha de baixo; com os botões de sempre (`flex-1`, base 0) nada quebra de
-   linha, então ele fica inerte. Sem suporte a `@container` fica o que havia. */
-.dialogo-acoes {
-  container-type: inline-size;
-  flex-wrap: wrap;
-  row-gap: 0.75rem;
-}
-@container (max-width: 14.9rem) {
-  .dialogo-acoes > button {
-    min-width: 0;
-    padding-left: 0.375rem;
-    padding-right: 0.375rem;
-    overflow-wrap: break-word;
-    -webkit-hyphens: auto;
-    hyphens: auto;
-    hyphenate-limit-chars: 10 4 4;
-  }
-}
-/* R21-7-06: as três linhas que usavam `space-x-3` — colar cookies, "Sair" e
-   "Marcar em lote" — passaram a `gap-3`, como as outras quatro. O `flex-wrap`
-   acima é incondicional e empilha MESMO sem `@container`, e a zeragem da margem
-   daqui só valia dentro dele: sem suporte e com texto grande o 2º botão ficava
-   recuado 12 px × a escala. Sem margem a zerar o recuo não existe, e a 1× o vão
-   é o mesmo (0,75rem do `gap`, que era a margem do `space-x-3`). A regra daqui
-   fica por defesa, pra linha nova que volte ao `space-x-`.
-   (0,3,1) vence o `space-x-3` (0,3,0: a margem à esquerda do 2º botão — repetir a
-   classe é o que sobe a especificidade) e o `flex-1` do HTML. Empilhado o botão
-   segue com o padding do compacto: a palavra tem que caber na largura toda MENOS
-   o respiro, e a 1,5× no Fold o respiro de 1rem (24 px de cada lado) partia
-   "Confirmer" no meio. */
-@container (max-width: 12.4rem) {
-  .dialogo-acoes.dialogo-acoes > button:not([hidden]) {
-    flex: 1 1 100%;
-    margin-left: 0;
-    margin-right: 0;
-  }
-}
-
-/* AS AÇÕES EMPILHADAS FICAM À VISTA (R21-8-02, regressão do empilhamento acima).
-   Empilhar soma uma fileira de altura, e o cartão do diálogo tem altura máxima com a
-   rolagem DENTRO dele — as ações são o último filho da rolagem. Onde o conteúdo já
-   enchia o cartão, o botão afirmativo (o de baixo) caía uma fileira abaixo do corte,
-   sem máscara nem pista de que rola; antes, lado a lado, ele ficava à vista (cortado
-   na horizontal, mas tocável). O primeiro login de todo aparelho passa por um desses
-   («Como funciona»). Então, no estado em que elas EMPILHAM, a fileira fica presa no
-   fim do cartão (`position: sticky; bottom: 0`) e o conteúdo rola por cima — o mesmo
-   desenho do rodapé dos Filtros, que fica preso na janela do defeito deles.
-   - A fileira é `.dialogo-acoes`, e ela é o contêiner dos próprios botões: um
-     contêiner não se estiliza por si. Quem decide é o CARTÃO (`.dialogo-cartao`,
-     `inline-size`), e a conta é exata: a fileira ocupa a largura toda do cartão
-     menos o `p-6`, que é a caixa de conteúdo — a MESMA largura que a consulta de
-     cima mede. 12,4rem aqui é o mesmo 12,4rem de lá (o teste os amarra), e a 1× a
-     fileira nunca é tão estreita (a do Galaxy Fold tem 12,5rem): nenhum celular, em
-     nenhuma orientação, entra neste bloco sem o texto maior — a 1× nada muda.
-   - A fileira só fica presa ENQUANTO O CARTÃO ROLA (consulta de rolagem:
-     `scroll-state(scrollable: block)`). O 1º desenho prendia sempre que a linha tinha
-     ≤ 12,4rem, e isso MUDAVA o diálogo que empilha mas CABE: medido nos 336 estados
-     empilhados que cabem (aparelhos × escalas × idiomas × temas), o `sticky` sozinho faz
-     o Chromium promover a fileira a camada própria e rasterizar o texto dos botões com
-     subpixel — 76 estados diferentes com a geometria IGUAL (72 do «Marcar em lote», de
-     1.900 a 3.600 pixels) e 260 iguais. Com o portão o cartão vira contêiner
-     `inline-size scroll-state` e a fileira só prende quando há para onde rolar; onde o
-     cartão cabe ela segue no fluxo, como sempre: 329 dos 336 ficam IGUAIS. Os 7 que
-     sobram são o «código» (de 4 a 32 pixels de ±1 nível em volta do anel do campo que
-     ganha o foco ao abrir) e não são da regra: a MESMA árvore difere de si nesse diálogo
-     em 15% dos pares de capturas (20 de 132 na base, 19 de 132 hoje, 50 de 352 entre as
-     duas). A matriz do afirmativo ao alcance é a mesma de antes do portão (350 → 4).
-     Navegador SEM `scroll-state` (o WebKit 27.2 e, até onde se sabe, o Firefox: o `@supports not` abaixo)
-     fica com a regra sem o portão — presa sempre abaixo de 12,4rem; no WebKit, 328 dos
-     336 ficam iguais, e os 8 que mudam são um só estado (o «código» a 320×568 ×1,5, que
-     lá já rolava 1 px na base).
-   - O FUNDO da fileira é a cor do cartão a 99,6% de opacidade (254 de 255) —
-     `rgba(255, 255, 255, .996)` no claro e `rgba(30, 41, 59, .996)` no escuro, que são o
-     `bg-white` e o `dark:bg-slate-800` dos sete cartões (o teste os confere no HTML) —,
-     pra o conteúdo não aparecer entre os botões. NÃO é `inherit`: opaco, o Chromium
-     rasteriza o texto da fileira com subpixel (franjas de até 98 níveis) — com o portão
-     isso só aconteceria onde a fileira prende, mas a regra do `@supports not` prende
-     também onde o diálogo cabe, e lá ele mudaria. A conta de cor tem que ser exata: a 99%
-     o escuro (30, 41, 59 sobre 30, 41, 59) mudava 1 nível em 7.876 pixels por
-     arredondamento da mistura, e a 99,6% (254) a mistura dá a própria cor. O custo é 0,4% do conteúdo que rola por baixo
-     aparecer entre os botões: 1 nível de cinza, invisível. O `sticky` prende a fileira na
-     borda do CONTEÚDO do cartão (medido: o `p-6` fica de fora), então embaixo sobra uma
-     faixa de 1,5rem — o respiro de sempre — por onde o conteúdo rolando apareceria. O
-     `::after` a pinta: uma caixa da largura da fileira (1,5rem de cada lado, longe dos
-     cantos arredondados do cartão, onde pintar a cor do cartão em cima da cor do
-     cartão não serrilha duas vezes) que cobre só esse respiro. Ela para 1 px antes da
-     borda de baixo do cartão: com o texto fracionário essa borda cai no meio de um
-     pixel, e pintar até ela duplicaria a cobertura da única linha que mistura a cor do
-     cartão com a do fundo.
-   - O `sticky` só age quando a fileira sairia do fim da janela do cartão; com o
-     conteúdo cabendo, ela fica no lugar de sempre — e agora, nos navegadores com
-     `scroll-state`, nem a camada própria dela existe. */
-/* LOTE 26 (R22-7-01 = R22-8-02) — O FOCO DO TECLADO PARA ACIMA DA FILEIRA PRESA. O navegador não sabe da fileira: o campo do «Entrar com um
-   código», o textarea do «Colar cookies» e o link «Waze Map Editor» do «Sair» paravam inteiros sob os botões quando focados (WCAG 2.4.11; 360×740
-   a 1,5× com teclado de 300 px: 0 px do campo visíveis, 82 na base). `scroll-padding-bottom` no CARTÃO diz onde a área visível acaba (a margem no
-   alvo, `scroll-margin`, foi testada e não serve: o WebKit a ignora e o Chromium não rola um alvo alto como o textarea). A fileira empilhada mede
-   até 10,75rem (MEDIDA em pt e fr, 1,15× a 2×, 6 janelas; 320×568 a 2× em fr) e o respiro de baixo do cartão é 1,5rem: 12,25rem, e 12,5rem com a
-   folga de meio rem. O Fold a 1,8× e 2× (a fileira empilhada chega a 14,75rem num cartão de 17rem) é o caso do dono: ali o foco ainda pode parar
-   parcialmente sob a fileira. O cartão é o contêiner de consulta e um contêiner não se estiliza por si, então o corte do empilhado vem do OVERLAY
-   (`dialogo-raiz`): a caixa de conteúdo dele é a largura do cartão, e 15,4rem = os 12,4rem da fileira + o px-6. A consulta SEM nome responde ao
-   contêiner mais próximo, qualquer que seja o nome: a emulação «sem @container» do smoke desliga também o overlay. */
-.dialogo-cartao {
-  container: dialogo / inline-size;
-}
-.modal-root:has(> .dialogo-cartao) {
-  container: dialogo-raiz / inline-size;
-}
-@supports (container-type: scroll-state) {
-  .dialogo-cartao {
-    container-type: inline-size scroll-state;
-  }
-  @container dialogo (max-width: 12.4rem) and scroll-state(scrollable: block) {
-    .acoes-presas {
-      position: sticky;
-      bottom: 0;
-      background: rgba(255, 255, 255, 0.996);
-    }
-    .dark .acoes-presas {
-      background: rgba(30, 41, 59, 0.996);
-    }
-    .acoes-presas::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 100%;
-      height: calc(1.5rem - 1px);
-      background: inherit;
-    }
-  }
-}
-@supports not (container-type: scroll-state) {
-  @container dialogo (max-width: 12.4rem) {
-    .acoes-presas {
-      position: sticky;
-      bottom: 0;
-      background: rgba(255, 255, 255, 0.996);
-    }
-    .dark .acoes-presas {
-      background: rgba(30, 41, 59, 0.996);
-    }
-    .acoes-presas::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 100%;
-      height: calc(1.5rem - 1px);
-      background: inherit;
-    }
-  }
-}
-@container dialogo-raiz (max-width: 15.4rem) {
-  .dialogo-cartao {
-    scroll-padding-bottom: 12.5rem;
-  }
-}
-
-/* O CANVAS DO QR DO PAREAMENTO (R23-7-04, lote 27). Ele nasce 300×150 + a moldura (p-3 e a borda) = 326 px e fica assim até o primeiro desenho (o `qr.js` sob demanda
-   e a resposta do `parear`). Num cartão estreito essa moldura em branco passava da BORDA do cartão e da janela: a 280 px (o Galaxy Fold) de −23 a 303 num cartão de
-   16 a 264, e a 320 px uns 19 px de cada lado. O teto é a largura do CARTÃO e não a da caixa de conteúdo (`100%`): o canvas já usa o respiro do `p-6` (1,5rem de cada lado),
-   e a 360 e 393 px a moldura de antes cabe dentro do cartão, nesse respiro — com `max-width: 100%` ela encolhia ali também, e o pixel de um estado que estava certo mudava.
-   Depois do desenho o JS põe `max-width: none` inline (o QR quadrado de 205 px segue como sempre, sem amassar no Fold). */
-#pairQr {
-  max-width: calc(100% + 3rem);
 }
 
 /* Confete avulso (conquista do gate do undo). Mesmas peças e cores do
@@ -942,59 +595,6 @@ body > main {
   overscroll-behavior: contain;
 }
 
-/* ── A BARRA ✕ ↑ ✓ DENTRO DO CARD COM O TEXTO DO SISTEMA MAIOR (R19-8-01) ──
-   `card-aperta` é ligada pela `vigiarBarraDeAcoes` (js/app.js) quando a barra de
-   ações estoura o corpo do card — fonte do sistema em 1,3× ou mais nas alturas
-   de 667 a 860 px, onde a regra compacta por ALTURA (px) não alcança. Com escala
-   1 e uma janela de altura normal ela nunca liga, e este bloco não existe pra a
-   tela: nenhum pixel muda. Em janela BAIXA ela liga mesmo a 1× (MEDIDO: 375×553,
-   390×500, 390×520, 375×520, 412×520 e janelas de computador de uns 500 px de
-   altura — conforme o card: o mesmo tamanho de janela liga em uns e não em
-   outros): o que decide é a barra contra o corpo do card, e não a escala.
-
-   Quem cede é a FOTO, até um piso que ainda mostra a evidência (5.5rem: em
-   `rem`, proporcional ao texto, nunca um número de pixels que a escala deixaria
-   minúsculo ao lado da letra grande — e o MESMO piso mais baixo que o CSS já
-   tinha, o do degrau estreito com comentário, que é o que a varredura do
-   offline cobre: `OFFLINE_CAIXA_MIN_REM`); a foto encolhe 30× mais rápido que
-   o texto, então só depois dela é que o texto cede. O piso do texto
-   (`min-content`, o gotcha #36) sai pelo mesmo motivo e na mesma troca consciente
-   do degrau estreito acima: barra de ações fora do alcance é o pior defeito do
-   card, e a rede de rolagem (`card-content-rola`) segura o texto que sobrar.
-   (0,3,0) vence o `.place-card .card-photo` dos degraus por altura (0,2,0);
-   o `:has(...comentário)` do degrau estreito (0,4,0) segue valendo no seu card. */
-.place-card.card-aperta .card-photo {
-  min-height: 5.5rem;
-}
-.place-card.card-aperta .card-content:not(:has(.card-changes:not(.hidden), .card-flag-comment:not(.hidden))) {
-  min-height: 0;
-}
-
-/* A MEDIDA DAS VIGIAS NÃO DEPENDE DE TRANSIÇÃO (R21-8-01). A `vigiarBarraDeAcoes`
-   e a `vigiarPlacar` (js/app.js) tiram uma classe, LEEM o layout e a repõem; a
-   leitura só vale se a troca valer na hora, e uma transição em qualquer propriedade
-   que a classe muda a faria ler o valor de ANTES (foi a transição de 0.01ms do
-   reduced-motion: o `card-aperta` oscilou a cada quadro com o card parado). Hoje o
-   app não tem transição de layout ali, mas a vigia não fica refém disso: enquanto
-   escreve, ela põe `card-medindo` no card (e `placar-medindo` no placar) e esta
-   regra desliga as transições de QUEM A CLASSE MUDA — a foto e o texto do card (o
-   `min-height` do `card-aperta`), o placar e as células dele (o `row-gap` e as
-   bordas do `placar-2x2`) —, e `test/reduzir-movimento-r21.test.mjs` reprova o alvo
-   novo de um `card-aperta`/`placar-2x2` que não entrar aqui. Alvos escolhidos, e não
-   `*`: o `*` invalidava o estilo do card INTEIRO a cada escrita da vigia (MEDIDO
-   no Chromium com a CPU 6× mais lenta: +20 a +35 ms de tarefa por card com o
-   `card-aperta` ligado) e estes bastam (quietos, com a transição de 0.01ms de volta,
-   os 26 cards das fixtures que oscilavam, em 3 tamanhos de tela, no Chromium).
-   O card em si fica de fora: a saída do swipe é uma transição de `transform`
-   escrita em estilo inline nele. `!important` pra nenhum `transition-*` de
-   utility ou de estilo inline vencer. */
-.place-card.card-medindo .card-photo,
-.place-card.card-medindo .card-content,
-#placarGrid.placar-medindo,
-#placarGrid.placar-medindo > * {
-  transition: none !important;
-}
-
 /* Scroll edge effect (M3): a borda de baixo esmaece enquanto sobra conteúdo, e
    volta ao normal ao chegar no fim. Máscara em vez de gradiente colorido de
    propósito — funciona sobre a caixa âmbar, a rosa, no claro e no escuro, sem
@@ -1042,16 +642,6 @@ body > main {
   opacity: 1;
 }
 
-/* O alvo de toque de 44 px vale SEMPRE (R20-8-04). Os três botões são `w-14`/
-   `w-12` (em `rem`) e, num flex que não cabe, ENCOLHEM: no Galaxy Fold a 1,3× e
-   1,5× o ↑ ficava com 40 px, abaixo da régua do projeto. O piso é em px e não em
-   `rem`: é o dedo que não cresce com o texto. A 1× o menor botão tem 48 px (o
-   próprio Fold, já encolhido), então o piso não toca em nada; com ele, quem
-   cede é o respiro (o `gap` e o padding da barra) e os outros dois botões. */
-.place-card .card-actions > button {
-  min-width: 44px;
-}
-
 /* Janela do "Desfazer" correndo: os três botões ficam visivelmente travados.
    Botão que não responde e parece normal lê como app quebrado — o M3 pede que
    estado desabilitado seja visível. A contagem regressiva do próprio banner diz
@@ -1069,27 +659,6 @@ body > main {
    é (0,2,0) e vence a utility de cor do Tailwind sem `!important` — com uma
    classe só empataria e perderia por ordem de carga (gotcha #27). */
 .lb-acao:disabled {
-  opacity: 0.4;
-  filter: grayscale(1);
-  cursor: not-allowed;
-}
-
-/* E o "+" no zoom máximo e o "−" no mínimo do mapa ampliado: o toque não faz
-   nada (o zoom está no limite), e o botão PARECE travado — o mesmo visual. É
-   `aria-disabled`, e não `disabled`, que tiraria o foco de quem chegou ali pelo
-   teclado (R7-3-09). `#id[atributo]` (1,1,0) vence a utility de cor do
-   Tailwind (gotcha #27). */
-#mapaLbMais[aria-disabled="true"],
-#mapaLbMenos[aria-disabled="true"] {
-  opacity: 0.4;
-  filter: grayscale(1);
-  cursor: not-allowed;
-}
-
-/* O "Copiar link" do pareamento apagado: o QR venceu (ou ainda está chegando).
-   Sem isto ele seguia com cara de vivo e não respondia — o "botão morto" que o
-   M3 pede pra mostrar. `#id:disabled` vence a utility de cor (gotcha #27). */
-#pairCopyLinkBtn:disabled {
   opacity: 0.4;
   filter: grayscale(1);
   cursor: not-allowed;
@@ -1186,147 +755,7 @@ input.ui-switch:disabled {
    Estilizado aqui (e não via Tailwind no HTML) de propósito: os overrides
    legados `.dark .bg-white { !important }` repintariam a aba selecionada.
    Aqui controlamos os dois temas explicitamente, sem briga de especificidade. */
-/* O título dos Filtros (R20-8-03): com o texto grande "préférences" é mais larga
-   que a caixa, empurrava o ✕ pra fora do cartão e, depois de `min-w-0`, quebrava
-   na letra ("préférence/s"). Com o dicionário do idioma o motor quebra na sílaba
-   ("préfé-/rences"); só age quando a palavra não cabe, então a 1× não muda nada. */
-#filtersModalTitle {
-  -webkit-hyphens: auto;
-  hyphens: auto;
-}
-
-/* OS FILTROS NUMA JANELA PEQUENA COM O TEXTO GRANDE (R21-7-07, regressão do lote 24).
-   O cartão tem `max-height` (85dvh) e `overflow: visible`: só o CORPO rola, e é
-   ele que encolhe até o piso do próprio padding. Com o texto do sistema grande
-   numa janela pequena o que é FIXO — o cabeçalho (o título em 5 linhas ou mais), a
-   faixa das abas e o rodapé (os botões empilhados) — passa do `max-height` sozinho,
-   e a conta deixa de fechar: no Galaxy Fold a 1,8× o cabeçalho tinha 346 px, o
-   rodapé 267 e o cartão 555, e o "Aplicar" saía da janela SEM nada que rolasse (o
-   `scrollIntoView` não mexe em nada, o `focus()` chega ao botão e não o traz).
-   A regra do projeto é a do gotcha #29: o que passa da janela tem que ROLAR — e,
-   pedido do dono do projeto, onde cabe hoje NENHUM pixel muda. Então o CARTÃO rola e
-   o rodapé fica PRESO no fim dele (o mesmo desenho das ações empilhadas dos outros
-   diálogos, R21-8-02), mas só na janela em que o rodapé saía:
-   - O contêiner é o próprio overlay (`#filtersModal`, `container-type: size`): ele é
-     `fixed inset-0`, então o tamanho dele não depende do conteúdo (a única exigência
-     do `size`), e `size` é o que deixa perguntar a ALTURA também. A conta é da janela
-     MENOS o respiro, em `rem`, na escala do texto (a régua do lote 24 nos diálogos).
-     Em si o contêiner não muda um pixel (medido a 1× em 3 aparelhos × 2 temas: 0).
-   - A janela é uma ESCADA de retângulos "largura ≤ a E altura ≤ b", e ela sai de
-     CONTA, não de amostra. As partes fixas do cartão foram medidas em função da largura
-     da janela em rem — 196 larguras × 6 escalas (1× a 2×) × os 4 idiomas, numa janela
-     alta, onde nada é limitado pela altura — e o resto é aritmética do desenho: o
-     cartão tem 85% da janela e fica centrado; com F = cabeçalho + abas + rodapé + o
-     piso do corpo (tudo em rem), o diálogo CABE se F ≤ 0,85·H, e o "Aplicar" sai pelo
-     fundo (o defeito) se F − a > 0,925·H, onde `a` é a distância do centro dele ao fim
-     do rodapé. O modelo foi conferido contra 3.492 estados medidos na base (a grade de
-     2.592 e 900 sorteados) e a escada é o envelope dele nas combinações que existem:
-     o eixo curto da janela tem 280 px ou mais (o Galaxy Fold), o texto vai de 1× a 2×
-     e a proporção não passa de 2,4 (o Fold fechado tem 2,33). Sobra 0,3rem de margem
-     em cima de cada canto. A conta tem UMA quebra exata, e a escada a respeita: o
-     rodapé empilha com a linha de até 12,4rem, e a linha é a janela menos o `px-6`
-     (3rem) — então o canto da largura está em 15,4rem e não passa dali.
-   - O resultado, nos 3.492 estados da base: dos 730 em que o "Aplicar" ou o
-     "Cancelar" saía da janela, só 6 ficam fora da escada (janelas com proporção de
-     2,64 e 3,04, mais comprida que qualquer tela); dos 2.224 em que o diálogo
-     cabe, NENHUM fica nela; dos 538 em que o rodapé pendia fora do cartão mas
-     ainda se alcançava, 146 ficam nela (o rodapé passa a ficar preso
-     dentro do cartão) e o resto segue como está. A 1× nenhum celular entra: o menor
-     (o Galaxy Fold, 280 px, ou o mesmo deitado) dá 15,5rem no eixo curto e 38,8rem no
-     longo, e a escada só cobre janela com 9,7rem de altura ou menos de ponta a ponta,
-     ou estreita demais pra existir (`test/telas2-r21.test.mjs` cobra os cantos, os
-     limites do "cabe" e 68 janelas a 1×). Um segundo sorteio, de 1.500 estados
-     colados na borda da escada, fecha igual: os 191 defeitos ficam dentro, os 329
-     que cabem ficam fora.
-   - Dentro dela o cartão ganha `overflow-y: auto`. O corpo continua encolhendo
-     primeiro (o desenho só muda quando estoura), o `overflow-x: hidden` evita a
-     rolagem lateral que o `overflow-y: auto` sozinho traria, e `overscroll-behavior:
-     contain` segura a rolagem no cartão (o `body` já fica travado pela camada). O
-     rodapé é `position: sticky; bottom: 0` com a cor do cartão: o "Aplicar" e o
-     "Cancelar" ficam à vista SEM rolar, e o resto (título, abas, corpo) rola por cima.
-   A 1ª ideia era `overflow-y: auto` no OVERLAY, que só rola quando algo passa da
-   janela e não mexe em NENHUM estado (medido: a geometria igual nos 1.296 estados
-   de pt/fr). Ela sai: um `overflow` no overlay muda PIXELS a 1× — medido na base, em
-   12 capturas (6 aparelhos × 2 temas), `overflow-y: auto` (ou `overflow: auto`) muda
-   8 (de 3 a 36 pixels, de 1 a 30 níveis num pixel; só o de 320 e o de 430 px ficam
-   em 0) e, com o `overscroll-behavior: contain` junto, as 12 (de 2 a 43 pixels). É o
-   raster do canto arredondado e da sombra num elemento que passa a ser rolagem, e o
-   pedido é 0. O que fica de fora
-   de propósito: o título em 5 a 8 linhas e o corpo no piso do padding (sem altura
-   útil) nessa janela, que são o assunto do texto grande com o dono do projeto, com as
-   saídas e os números no relatório do lote.
-   O ZOOM DO NAVEGADOR (R22-7-04, lote 26) é a janela que o modelo acima não cobria: a 400% de um computador de 1280×800 a janela CSS fica
-   320×200 (18×10,5rem de conteúdo), a 500% de um de 1920×1080, 384×216 (22×11,5rem) — eixo curto de 200 px, abaixo dos 280 do modelo, e o
-   «Aplicar» e o «Cancelar» saíam da janela sem nada que rolasse (WCAG 1.4.10, reflow). O último degrau passou a ser UM só, 31 × 12rem, no lugar
-   dos dois de antes (17,49 × 11,9 e 25,39 × 9,7), que ele contém. MEDIDO em grade (largura 15,5 a 31rem × altura 9 a 15rem × texto 1× a 2× × pt e
-   fr, SEM a escada): a 1× TODA janela de até 11,9rem de altura é defeito («nem rolando»), e o diálogo só passa a CABER a partir de 12,3rem (a 2×),
-   12,8 (a 1,7×), 13,5 (a 1,5×) e 14 (a 1,3×) — por isso o corte em 12rem, com 0,3rem de folga das janelas de 1,9–2× em que ele cabe e 0,1rem
-   acima da última janela de 1× que quebra a 11,9.
-   O DEGRAU EM PX (R23-7-01, lote 27). O degrau em rem acima parava em 12rem de altura e em 31rem de largura, e a conta «a janela de 1,9–2× em que o diálogo cabe
-   coincide com a de 1× de ~230 px» só vale em REM: em px as duas populações não se cruzam (celular com texto 2× tem janela de 280 px ou mais; a janela de zoom tem
-   200 a 270). MEDIDO em grade (janela de 190 a 320 px × larguras de 280 a 1024 × texto de 0,5× a 2× × pt e fr, 2.176 estados, antes e depois): a 1× o diálogo só
-   CABE (rodapé dentro do cartão) a partir de 290 px de janela; de 273 a 289 o rodapé pende 0–13 px fora do cartão (alcançável: fica como está), e abaixo disso
-   (a) em toda janela mais larga que 33rem e de até ~212 px de altura «Aplicar» e «Cancelar» saíam da janela SEM nada que os trouxesse (653×200, 568×200…1024×200) e
-   (b) de 224 a 272 px o rodapé saía do cartão e do corpo sobrava uma linha (1440×900 a 400% = 360×225, 1280×720 a 300% = 427×240, 1920×1200 a 500% = 384×240,
-   1280×1024 a 400% = 320×256, 1280×800 a 300% = 427×267, 1920×1080 a 400% = 480×270). O último termo da escada é por isso `(max-height: 240px) and
-   (max-height: 15rem)`, SEM limite de largura: 240 px de altura do overlay são a janela de 272 px a 1× (a janela menos o respiro de 1rem de cada lado) e o
-   `15rem` é o teto que só aparece com texto PEQUENO — a 0,85× (o «pequeno» do Android) o diálogo já CABE a partir de 270 px, a 0,75× a partir de 260 e a 0,5× a
-   partir de 230, e sem o teto em rem o degrau mudaria esses. Com texto ≥ 1× quem manda é o px (a 1,3× são 240 de conteúdo = 281 px de janela; o diálogo cabe só a
-   partir de 14rem = 291 px de conteúdo). A+B nos mesmos 2.176 estados: dos que o degrau muda, 0 são de diálogo que CABIA (o comparador aponta 3 estados de 5 a
-   22 pixels, e neles a escada nem casou — o cartão segue `overflow: visible` e o rodapé estático nas duas árvores —; renderizados um a um, em contexto novo, 3 vezes, a árvore de
-   antes e a nova dão o MESMO PNG: é o raster de uma página reaproveitada entre alturas) e os estados com o «Aplicar» INALCANÇÁVEL vão de 72 a 0 (a 0,85× e a 1×) e de 52 a 0 (a 1,3×). Fica de fora, com o
-   dono: o diálogo a 273–289 px (rodapé pendurado, alcançável), o texto ≥ 1,15× em janelas de 280 px ou mais que a escada em rem não alcança, e o texto de 2× em
-   janelas pequenas (o título em 5 a 8 linhas e o corpo no piso: o assunto do texto grande). O scroll-padding do degrau acompanha a linha de baixo (5,5rem, rodapé
-   lado a lado); as janelas estreitas (≤ 15,4rem) já têm o degrau estreito em rem (15,4 × 17rem, que contém as dele) e o 11rem. */
-#filtersModal {
-  container: filtros / size;
-}
-@container filtros ((max-width: 8.19rem) and (max-height: 22rem)) or
-    ((max-width: 8.29rem) and (max-height: 21.2rem)) or
-    ((max-width: 8.69rem) and (max-height: 20.4rem)) or
-    ((max-width: 9.69rem) and (max-height: 18.8rem)) or
-    ((max-width: 12.59rem) and (max-height: 17.8rem)) or
-    ((max-width: 15.4rem) and (max-height: 17rem)) or
-    ((max-width: 31rem) and (max-height: 12rem)) or
-    ((max-height: 240px) and (max-height: 15rem)) {
-  #filtersModal > div {
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-  #filtersModal > div > .dialogo-acoes:last-child {
-    position: sticky;
-    bottom: 0;
-    background: inherit;
-  }
-}
-/* O rodapé preso cobre o fim da rolagem, e o foco do teclado não sabe disso: sem o
-   `scroll-padding-bottom` os 17 controles do corpo paravam SOB o rodapé quando
-   focados (medido no Fold a 2× em pt, a 1,8× em fr e no SE de 320 px a 2×: 17 de 17
-   cobertos em mais da metade); com ele, 0 de 17. O valor é a altura do rodapé de
-   cada grupo de janelas: 11rem onde ele empilha (a linha de até 15,4rem: 7,8 a
-   10,8rem de altura) e 5,5rem onde fica lado a lado (4,5 a 5,1rem). Só dentro da
-   escada (as condições são as mesmas linhas dela, o teste confere). */
-/* (lado a lado primeiro: na sobreposição das janelas estreitas o rodapé é o EMPILHADO, e o bloco de 11rem, depois, vence o empate) */
-@container filtros ((max-width: 31rem) and (max-height: 12rem)) or
-    ((max-height: 240px) and (max-height: 15rem)) {
-  #filtersModal > div {
-    scroll-padding-bottom: 5.5rem;
-  }
-}
-@container filtros ((max-width: 8.19rem) and (max-height: 22rem)) or
-    ((max-width: 8.29rem) and (max-height: 21.2rem)) or
-    ((max-width: 8.69rem) and (max-height: 20.4rem)) or
-    ((max-width: 9.69rem) and (max-height: 18.8rem)) or
-    ((max-width: 12.59rem) and (max-height: 17.8rem)) or
-    ((max-width: 15.4rem) and (max-height: 17rem)) {
-  #filtersModal > div {
-    scroll-padding-bottom: 11rem;
-  }
-}
-
 .seg-tabs {
-  container-type: inline-size;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 4px;
@@ -1338,18 +767,7 @@ input.ui-switch:disabled {
 .seg-tab {
   min-height: 44px; /* régua de toque M3/HIG do projeto */
   border-radius: 9px;
-  /* `min(…, 6.3cqw)` (R20-8-03): o rótulo é `rem` e a faixa, fração da tela;
-     com o texto do sistema maior as três abas passavam do diálogo ("Histórico"
-     8–19 px fora no Fold a 1,3×). 6,3% da faixa são 12,1 px na faixa do Galaxy
-     Fold (192 px), a MENOR a 1× — onde os três rótulos cabem em todos os
-     idiomas, e é um pouco acima dos 12 px que o degrau de baixo (≤ 320 px) já
-     usa ali —, então o corte só alcança a faixa mais estreita que o Fold (texto
-     maior) e o tamanho de hoje, em qualquer tela de verdade, fica exatamente
-     como era. (É 6,3 e não 6,25 porque 6,25% dariam exatamente 12 px no Fold:
-     12,1 px ficam acima dos 12 do degrau de baixo, e o `min` fecha nos 12 de
-     sempre, sem depender de o navegador arredondar a faixa pra menos.) */
   font-size: 0.8125rem;
-  font-size: min(0.8125rem, 6.3cqw);
   font-weight: 600;
   color: #475569; /* slate-600 — slate-500 dava 4.3:1 sobre o trilho */
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
@@ -1365,7 +783,6 @@ input.ui-switch:disabled {
 @media (max-width: 320px) {
   .seg-tab {
     font-size: 0.75rem;
-    font-size: min(0.75rem, 6.3cqw);
     letter-spacing: -0.01em;
   }
 }
@@ -1881,14 +1298,6 @@ button:active {
     grid-column: 1;
     grid-row: 2;
   }
-
-  /* Deitado o card é GRADE e a foto mora na coluna ao lado, com piso 0: lá o
-     `card-aperta` (R19-8-01) só solta o piso do texto, nunca LEVANTA o da foto.
-     Mora AQUI e não num bloco próprio: os guards deste degrau leem a PRIMEIRA
-     ocorrência do @media, e uma duplicata acima dela os desviava. */
-  .place-card.card-aperta .card-photo {
-    min-height: 0;
-  }
 }
 
 /* Snackbar de undo — vive dentro do #notifyStack (bottom-center, safe-area ok) */
@@ -1971,26 +1380,12 @@ button:active {
 }
 
 /* Respeita a preferência de movimento reduzido do sistema (M3/HIG a11y).
-   A barra de undo fica estática (cheia) — a janela continua funcionando.
-
-   As ANIMAÇÕES ficam em 0.01ms, e não em `none`: o app espera o `animationend`
-   pra tirar a classe do contador (`count-pop`), da linha destacada
-   (`pref-highlight`) e do alvo da conquista (`conq-alvo`), e com `animation: none`
-   ele nunca dispara. As TRANSIÇÕES ficam em 0s (R21-8-01): o app não escuta
-   nenhum `transitionend` — as saídas do swipe terminam por timer —, e 0.01ms NÃO
-   é "sem transição": a propriedade que muda continua valendo o valor de ANTES
-   até o quadro seguinte. A `vigiarBarraDeAcoes` tira o `card-aperta`, MEDE a
-   barra e a repõe no mesmo quadro; com 0.01ms ela lia o `min-height` da foto
-   ainda no valor de antes, achava que a barra cabia, e no quadro seguinte o valor
-   novo chegava, a barra saía da janela e a classe voltava: um laço sem fim com o
-   card PARADO (a barra ✕ ↑ ✓ saltando de 5 a 53 px, mais de 100 layouts por
-   segundo), no Chromium e no WebKit (medido nos dois, no Linux) e justo pra quem
-   pediu menos movimento. */
+   A barra de undo fica estática (cheia) — a janela continua funcionando. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0s !important;
+    transition-duration: 0.01ms !important;
   }
   .undo-progress {
     animation: none;
@@ -2380,17 +1775,10 @@ button:active {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 4px rgba(0, 0, 0, 0.45);
 }
 
-/* O traço da escala é a borda de baixo, e a borda cobre a caixa INTEIRA —
-   conteúdo e padding. Com `content-box` o `width` que a conta calcula era só o
-   do conteúdo, e o `px-2` somava 16 px ao traço: o "50 m" do card media 67 m
-   (auditoria de 2026-09-26). Com `border-box` a caixa É o traço, e o alvo da
-   conta (`ESCALA_ALVO_*` no app.js) já inclui o padding, então o tamanho na
-   tela é o de antes. Um bloco só pras duas classes: a regra estava repetida
-   no `.card-map-scale`, e cópia é como a correção chega numa e não na outra. */
 .mapa-escala,
 .card-map-scale {
   border-bottom: 3px solid currentColor;
-  box-sizing: border-box;
+  box-sizing: content-box;
   text-align: center;
   overflow: visible;
   white-space: nowrap;
@@ -2398,6 +1786,11 @@ button:active {
 
 .card-map-scale {
   bottom: 3.25rem;
+  border-bottom: 3px solid currentColor;
+  box-sizing: content-box;
+  text-align: center;
+  overflow: visible;
+  white-space: nowrap;
 }
 
 .mapa-leg {
@@ -2494,10 +1887,6 @@ button:active {
   justify-content: safe center;
   height: calc(var(--lb-tira) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
-  /* O `px-3` do markup (0,75 rem) é a reserva; com o recorte lateral do aparelho deitado
-     a miniatura do começo da rolagem não pode ficar sob ele (R21-3-05). Sem recorte, 0,75 rem. */
-  padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
-  padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
   scrollbar-width: none;
 }
 #lightboxStrip::-webkit-scrollbar { display: none; }
@@ -2542,13 +1931,6 @@ button:active {
 .lb-nome {
   left: 0.75rem;
   right: 0.75rem;
-  /* As laterais seguem as margens de segurança (R21-3-05): o iPhone deitado tem 44 a 59 px
-     de recorte de cada lado, e os controles de borda da foto e do mapa ampliados ficavam a
-     0,5–1 rem da borda física — dentro do vão do notch. `max()` e não soma: sem recorte o
-     valor é o de sempre (nenhum pixel muda), e com ele o controle vai pra borda da área
-     segura. A declaração de cima fica de reserva pra quem não entende `max()`. */
-  left: max(0.75rem, env(safe-area-inset-left, 0px));
-  right: max(0.75rem, env(safe-area-inset-right, 0px));
   bottom: calc(0.75rem + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
   /* O CONTÊINER é largura cheia e mora DEPOIS do botão de ação no DOM, então
      ele pintava por cima e ENGOLIA o toque — `elementFromPoint` no centro do
@@ -2586,24 +1968,8 @@ button:active {
    tela do owner. Aqui a pílula não precisa sumir, mas quem for esconder algo
    com `.hidden` neste arquivo precisa saber disso. */
 .lb-nome:not(.editando) .lb-nome-btn { max-width: calc(100% - 4.25rem); }
-/* Em edição a pílula também tem TETO — a largura da linha, já que o botão de
-   ação saiu. Sem ele o botão (que mede o conteúdo) crescia com o nome antigo e
-   estourava a tela: MEDIDO no Fold em francês com um nome de 58 caracteres, e
-   com 66 até no Pixel 7 (a pílula ia de 12 a 478 px numa tela de 412). Com o
-   teto o nome se corta em reticências, como no modo leitura (auditoria de
-   2026-09-26). */
-.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; max-width: 100%; }
+.lb-nome.editando .lb-nome-btn { margin-bottom: 0.4rem; }
 .lb-nome-btn:disabled { opacity: 1; }   /* rótulo, não botão apagado */
-/* FORA da edição, desabilitada é TRAVADA (a janela do Desfazer, a conferência
-   de um 401): o mesmo visual do `.lb-acao:disabled` e dos botões do card —
-   botão morto com cara de vivo lê como app quebrado (gotcha #63). Com o
-   `:not(.editando)` ela vale só pra trava; o rótulo da edição segue aceso.
-   Especificidade (0,4,0), acima do `:disabled` de cima. */
-.lb-nome:not(.editando) .lb-nome-btn:disabled {
-  opacity: 0.4;
-  filter: grayscale(1);
-  cursor: not-allowed;
-}
 .lb-nome-btn {
   display: flex;
   align-items: center;
@@ -2614,7 +1980,7 @@ button:active {
   border: 0;
   background: rgba(0, 0, 0, 0.58);
   color: #fff;
-  text-align: start;
+  text-align: left;
 }
 .lb-nome-lapis { width: 18px; height: 18px; flex: none; }
 .lb-nome-txt {
@@ -2672,14 +2038,6 @@ button:active {
 }
 #imageLightbox.editando-nome #lightboxImage {
   max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - env(safe-area-inset-bottom)));
-}
-/* Com 2+ fotos a TIRA entra no layout e a pílula sobe a altura dela
-   (`#imageLightbox.com-tira .lb-nome`), então a foto também tem que parar essa
-   altura antes. Sem isto ela corria 18px por baixo do CAMPO nos três aparelhos
-   medidos (com teclado; e sem teclado no SE e no Fold com foto em pé), onde a
-   mesma foto sozinha, sem tira, para antes dele (auditoria de 2026-09-26). */
-#imageLightbox.com-tira.editando-nome #lightboxImage {
-  max-height: max(4rem, calc(100dvh - var(--kb-inset, 0px) - 9.5rem - var(--lb-tira) - env(safe-area-inset-bottom)));
 }
 
 /* ── Comentário do reporte: ROLA dentro da própria caixa ───────────────────
@@ -2781,39 +2139,11 @@ button:active {
 
 /* Selo SOBRE o ícone (M3 "badged icon button"): o número não pode custar
    largura própria num cabeçalho que já não tinha folga. `min-width` igual à
-   altura mantém o círculo redondo em 1 dígito e vira cápsula em 2.
-
-   ONDE ELE FICA (R21-5-03, lote 25). A 1× são 2px do topo e da direita do botão:
-   num botão de 44px com o ícone de 24px no centro, é o selo quase centrado no
-   canto do ÍCONE — o fundo dele fica 8,8px abaixo da borda de cima do ícone — e
-   cobre 22% da tinta do balão ("12"; "99+", 30%). O botão tem mínimo de 44px (px) e o
-   ícone e o selo são `rem`: com o texto do sistema maior o ícone ocupa o botão
-   inteiro e o selo, preso ao canto do BOTÃO, cai em cima dele (1,5×: 56%; 2×: 70%;
-   "99+" a 1,5×: 66%). O balão é a pista de que há mensagem que não é só cor
-   (WCAG 1.4.1), e a forma sumia.
-   Agora o selo se prende à borda de cima do ÍCONE, que fica em `50% − 0,75rem` do
-   topo do botão: o fundo dele continua 8,8px abaixo dela, e o selo SOBE tanto
-   quanto cresce (1,05rem − 16,8px). O `top` ainda sobe um décimo a mais (1,1×):
-   o selo também alarga ("99+" é mais largo que "12") e essa folga põe o "99+" de
-   1,5× abaixo de um quarto da tinta. Medido (traço do SVG sob o selo + anel de
-   2px; nos balões confere com o pixel, ±2,5 pontos): "12" 22% a 1× (igual a antes),
-   56% → 18% a 1,5× e 70% → 8% a 2×; "99+" 30% a 1×, 66% → 23% a 1,5× e 75% → 9% a
-   2×; o ícone de gente ("3") 7% a 1×, 45% → 4% a 1,5× e 55% → 2% a 2× — nele o selo
-   cinza tem a MESMA cor do traço, e aí o pixel não vê o que fica debaixo do selo
-   (dava 15% a 2×): só a geometria conta. A 2× o selo fica 26,5px acima da borda de
-   cima do botão e a 3,3px do topo da tela (o cabeçalho dá a folga).
-   NA HORIZONTAL o selo não passa da borda do botão (`right` ≥ 0): o vizinho do
-   cabeçalho é um botão de 44px sem vão, e o selo pairando sobre o alvo dele
-   roubaria toque. Pra esquerda ele passa até 7px a 2× ("99+"; eram 9px), sobre o
-   nome do perfil, que não é alvo de toque.
-   A 1× NENHUM pixel muda, por construção, e sem depender de arredondamento:
-   com `rem` = 16px os termos de `min()` valem exatamente 0 (22 − 12 − 10 − 1,1 × 0
-   no `top`, 22 − 12 − 8 = 2 no `right`) e `top`/`right` ficam em 2px; com texto
-   MENOR que 1× o `min()` devolve os 2px de antes. */
+   altura mantém o círculo redondo em 1 dígito e vira cápsula em 2. */
 .presenca-selo {
   position: absolute;
-  top: calc(2px + min(0px, 50% - 0.75rem - 10px - 1.1 * (1.05rem - 16.8px)));
-  right: max(0px, min(2px, 50% - 0.75rem - 8px));
+  top: 2px;
+  right: 2px;
   min-width: 1.05rem;
   height: 1.05rem;
   padding: 0 0.25rem;
@@ -2851,7 +2181,7 @@ button:active {
   min-height: 56px;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
-  text-align: start;
+  text-align: left;
   transition: background-color 0.15s;
 }
 .presenca-linha:hover { background: rgb(236 254 255); }
@@ -2944,59 +2274,9 @@ button:active {
    (+12px de folga). */
 .folha-modal { bottom: var(--kb-inset, 0px); }
 
-/* A ALTURA da conversa em janela baixa (R21-5-02, lote 25). Ela era
-   `min(70dvh, 100%)`: 70% da janela, e a folha toda é uma coluna cujo cabeçalho,
-   linha de estado, respiro da lista e formulário NÃO encolhem — só a lista de
-   mensagens cede. Em janela baixa os 70% ficam menores que essas partes e o
-   formulário (o campo e o Enviar) pende pra fora do fundo da folha, e da tela:
-   640×360 com o teclado de 180px aberto (a janela fica em 180) dava folha de
-   126px e campo em 161–205; 320×568 a 2× com o teclado de 250px, folha de 223 e
-   campo em 353–397 numa janela de 318. O `interactive-widget=resizes-content`
-   faz o teclado encolher a janela e o `70dvh` junto, então o teclado piora.
-   Agora, quando 70dvh NÃO comporta o que não encolhe, a folha toma a janela
-   inteira (o teto de 100% que ela já tinha); quando comporta, é 70dvh, como era.
-   `--conversa-piso` é a altura em que o campo e o Enviar ficam DENTRO da folha:
-     cabeçalho  1,5rem (py-3) + max(44px, 1,5rem) (o ✕ é px; a linha do título,
-                rem) + 1px (a borda)
-     estado     2rem (py-2 + uma linha de 1rem)
-     lista      1,5rem (py-3: o piso da caixa que rola é o respiro dela)
-     formulário 1px (a borda) + 0,5rem + max(44px, 1,25rem + 2px) (o campo e o
-                Enviar são de 44px)
-   = 5,5rem + 2px + max(44px, 1,5rem) + max(44px, 1,25rem + 2px): 178px a 1×,
-   222 a 1,5×, 270 a 2× — o `padding-bottom` do formulário (0,5rem) fica de fora
-   DE PROPÓSITO: é o que deixa a conta igual à de hoje onde o campo já cabe
-   (568×320 a 1,5×: 70dvh = 224 ≥ 222, e o respiro de baixo já pende 10px sem que
-   nada esteja fora).
-   A LINHA DE ESTADO quebra quando o texto cresce e a folha é estreita, e cada
-   linha a mais é 1rem. Medido nos 4 idiomas, com a pessoa perto, longe e FORA do
-   app, no Chromium e no WebKit, varrendo a largura de 2 em 2px a 1×: a frase mais
-   larga é a do francês com a pessoa perto ("Sur l’app maintenant · L4 · à moins de
-   1 km d’ici") e, em inglês, a de FORA do app ("Not on the app right now · they’ll
-   get it later"). Ainda quebram em duas linhas a 19,625rem de largura (393px a 1,3×
-   são 18,9rem; o Galaxy Fold, 280px, já a 1×), em três a 11,625rem (o francês no
-   WebKit; 360px a 2× são 11,25rem) e em quatro a 9,625rem (o Fold a 2× em francês
-   no WebKit, 8,75rem). Os degraus ficam um passo (2px) acima do medido: 19,8, 11,8 e
-   9,8rem. São três degraus de 1rem na largura da janela (`100vw` em rem):
-   `clamp(0px, (limite − 100vw)·100, 1rem)` vale 0 acima do limite e 1rem abaixo
-   dele. Vale até 2× (o teto do Android); a 2,5× o Fold quebra em cinco linhas. Acima de 19,8rem nada some nem entra — 393px a 1× é
-   24,6rem, 568px a 1,5× é 23,7rem —; abaixo, o piso só SOBE, e uma folha que passa a
-   tomar a janela um pouco antes do necessário é inofensiva (a janela é pequena).
-   A CONTA que mantém tudo igual: `max(70dvh, piso·101 − 70dvh·100)` é 70dvh
-   enquanto 70dvh ≥ piso (o segundo termo é menor) — a mesma altura de hoje,
-   byte a byte — e, abaixo do piso, passa de 100% com ~1px de falta (inclinação
-   100), onde o `max-height: 100%` corta. A caixa continua com a largura de
-   sempre (`sm:max-w-sm`): só a altura vira a da janela. `70dvh > 100%` (o teclado do
-   iOS, em que a raiz encolhe e a viewport não) segue dando 100%, como era. Por
-   que não `@media (max-height: …)` em px: ele pegaria TODA janela baixa, inclusive
-   568×320 a 1×, onde o formulário cabe (e tem que ficar como está), e a conta
-   precisa ser em `rem` pra acompanhar o texto. Fica de fora, e é conhecido: a
-   janela MENOR que o piso (568×320 com o teclado de 160px: 160 < 178) — ali falta
-   compactar a folha (esconder a linha de estado, apertar o cabeçalho), que é
-   desenho. */
 .conversa-folha {
-  --conversa-piso: calc(5.5rem + 2px + max(44px, 1.5rem) + max(44px, 1.25rem + 2px) + clamp(0px, calc((19.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((11.8rem - 100vw) * 100), 1rem) + clamp(0px, calc((9.8rem - 100vw) * 100), 1rem));
   max-height: 100%;
-  height: max(70dvh, calc(var(--conversa-piso) * 101 - 70dvh * 100));
+  height: min(70dvh, 100%);
 }
 
 .conversa-msgs { font-size: 0.875rem; }
@@ -3152,7 +2432,7 @@ button:active {
    um recibo em vez de dois, e o "Lida" cobre o conjunto. */
 .conversa-pedido {
   max-width: 85%; width: fit-content; border-radius: 1rem; position: relative;
-  display: flex; padding: 4px; padding-right: 2.9rem; text-align: start;
+  display: flex; padding: 4px; padding-right: 2.9rem; text-align: left;
   background: rgb(14 116 144);
 }
 .conversa-pedido.minha { margin-left: auto; border-bottom-right-radius: 0.25rem; }
@@ -3186,45 +2466,9 @@ button:active {
 .dark .conversa-pedido.dela.com-legenda .cp-legenda { color: rgb(226 232 240); }
 
 /* A foto da folha de leitura. Altura fixa: o que decide ali é o dado, e foto
-   alta demais empurraria nome e endereço pra fora numa tela apertada.
-   Em px a altura não sabia de janela: em 568×320 a folha tem 224px, o cabeçalho
-   69 e a foto 150, e ela abria mostrando só os dois, com o nome, o ↗ (a ÚNICA ação
-   da folha) e o endereço abaixo da dobra e nenhuma pista de rolagem (R21-5-07,
-   lote 25; o mesmo em 667×375 a 1,5×; em 844×390 e 732×412 o nome e o ↗ já
-   apareciam, e o tipo, as categorias e o endereço não).
-   Em JANELA BAIXA (até 414px de altura) a foto CEDE: vira um item flex que encolhe
-   (o `flex-shrink: 1` do `@media` vence o `flex-shrink-0` do HTML pela ORDEM: o
-   styles.css vem depois do Tailwind) até 72px. O flex só encolhe o que passa do
-   teto da folha (70dvh): a foto dá o que falta e o resto da folha — que não
-   encolhe — fica. Os 72px são escolha de desenho: o menor que ainda deixa
-   reconhecer a foto (sem piso ela chegava a 8px em 844×390, e a folha sem foto
-   nenhuma não diz o que o colega perguntou). Abaixo disso a folha rola como sempre
-   rolou. O enquadramento é do `object-cover` da <img> (altura 100% do item, que o
-   flex já definiu): a 16:9 e a 9:16 continuam cortando o meio, na altura que a
-   folha deu.
-   POR QUE SÓ ATÉ 414px — o primeiro desenho encolhia em toda janela e mudava o que
-   cabia: o flex não distingue "o texto passou" de "só o respiro de baixo passou",
-   e o corpo termina em `pb-4` (1rem). Em 393×851 a 1,5× a folha tem 595,7px e o
-   conteúdo 609: o endereço está inteiro à vista e só 13px do respiro passam (no
-   Galaxy Fold a 1× são 14px), e o flex tirava esses 13 e 14px da foto só pra
-   acabar com a rolagem. Abaixo de 414px de altura isso não existe: o TEXTO de
-   nenhum pedido com foto cabe. O mais curto que o app consegue abrir (só o nome,
-   sem tipo, categoria nem endereço) tem 307px de conteúdo a 0,85× (o menor texto
-   do Android), 319 a 1×, 360 a 1,5× e 420 a 2×; tirado o respiro de baixo (1rem:
-   13,6, 16, 24 e 32px) o texto são 293, 303, 336 e 388px, e 70% de 414 são
-   289,8px. O limite não pode passar de 419px ((307 − 13,6) ÷ 0,7): a 420 o pedido
-   mais curto, no menor texto, caberia com só o respiro passando — o caso de cima.
-   A maioria dos Android deitados tem até 412px de altura e os iPhone de 414px
-   entram; o iPhone Max (430) e o Pixel Pro (448) ficam como hoje. Fora do `@media`
-   a regra é a de sempre — 150px e o `flex-shrink-0` do HTML —, pixel a pixel. Seguem
-   como hoje, de propósito, porque falham FORA da janela baixa e pedem outra conta:
-   320×568 a 1× (conteúdo 451 numa folha de 398) e 360×740 a 1,5× (609 numa de
-   518). */
+   alta demais empurraria nome e endereço pra fora numa tela apertada. */
 .pedido-foto { height: 150px; overflow: hidden; background: rgb(241 245 249); }
 .dark .pedido-foto { background: rgb(51 65 85); }
-@media (max-height: 414px) {
-  .pedido-foto { flex-shrink: 1; min-height: 72px; }
-}
 
 #conversaForm { padding-bottom: calc(0.5rem + env(safe-area-inset-bottom)); }
 
@@ -3304,27 +2548,6 @@ html.tem-sessao #authScreen { display: none; }
 .lb-pill-fixo { flex: none; white-space: pre; }
 .lb-pill-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2.5rem; }
 
-/* …"nunca encolhem" vale quando CABE (R20-3-01). Com o texto do sistema maior o
-   `max-width` acima (que tem `rem`) encolhe e o texto (também `rem`) cresce: o
-   contador, os "·" e a idade, todos `flex: none`, passavam do teto e cobriam o
-   ✕ — o toque caía na pílula (Galaxy Fold a 1,3×, SE de 320 px a 1,5×, 360 px a
-   1,8×; MEDIDO por hit-test nos dois motores). O fechar tem que ser alcançável
-   em qualquer escala, então os pedaços fixos cedem — mas SÓ depois do nome, que
-   continua sendo quem cede primeiro: o nome agora vai a 0 (`min-width: 0`) e o
-   fator de encolhimento dele é um milhão de vezes o dos outros, de modo que, com
-   o texto normal (o nome truncado de hoje, ou a pílula inteira), os outros
-   perdem uma fração de pixel que o layout nem representa e NENHUM pixel muda.
-   Só quando o nome já zerou e ainda sobra é que a idade e os "·" encolhem, com
-   reticências: dizem que foram cortados, em vez de uma idade pela metade. O
-   contador (o primeiro filho) segue inteiro. */
-.lb-pill-nome { min-width: 0; flex-shrink: 1000000; }
-.lb-pill-fixo:not(:first-child) {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* ── Patentes e Conquistas ─────────────────────────────────────────────────
    Tudo desenhado a partir de MEDIÇÃO no app real (2026-09-14, Pixel 411 e
    Galaxy Fold 280, dois temas, pt e fr). Três números decidiram:
@@ -3348,16 +2571,16 @@ html.tem-sessao #authScreen { display: none; }
   background: #ecfeff; border: 1px solid #a5f3fc; }
 .dark .conq-card { background: #0d3d47; border-color: #155e75; }
 .conq-topo { display: flex; align-items: center; gap: 10px; }
-.conq-emoji { font-size: calc(32 * var(--conq-px)); line-height: 1; flex-shrink: 0; }
+.conq-emoji { font-size: 32px; line-height: 1; flex-shrink: 0; }
 .conq-id { flex: 1; min-width: 0; }
-.conq-eyebrow { font-size: calc(10.5 * var(--conq-px)); font-weight: 700; letter-spacing: .06em;
+.conq-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: #0e7490; }
 .dark .conq-eyebrow { color: #67e8f9; }
-.conq-nome { font-size: calc(18 * var(--conq-px)); font-weight: 800; color: #0f172a; line-height: 1.15; }
+.conq-nome { font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.15; }
 .dark .conq-nome { color: #f1f5f9; }
-.conq-num { font-size: calc(15 * var(--conq-px)); font-weight: 700; color: #0f172a; }
+.conq-num { font-size: 15px; font-weight: 700; color: #0f172a; }
 .dark .conq-num { color: #f1f5f9; }
-.conq-sub { font-size: calc(11 * var(--conq-px)); color: #155e75; }
+.conq-sub { font-size: 11px; color: #155e75; }
 .dark .conq-sub { color: #a5f3fc; }
 .conq-tot { text-align: right; flex-shrink: 0; }
 .conq-barra { margin-top: 10px; height: 8px; border-radius: 9999px;
@@ -3370,7 +2593,7 @@ html.tem-sessao #authScreen { display: none; }
 /* `min-width` junto do `min-height`: só a altura deixava o link em 38×44 quando
    o texto é curto ("ver menos"), abaixo dos 44 de alvo de toque. */
 .conq-link { background: none; border: 0; padding: 0 8px; font: inherit;
-  font-size: calc(11 * var(--conq-px)); font-weight: 600; color: #0b5c72; text-decoration: underline;
+  font-size: 11px; font-weight: 600; color: #0b5c72; text-decoration: underline;
   cursor: pointer; min-height: 44px; min-width: 44px; flex-shrink: 0; }
 .dark .conq-link { color: #a5f3fc; }
 @media (max-width: 400px) {
@@ -3383,11 +2606,11 @@ html.tem-sessao #authScreen { display: none; }
   display: grid; gap: 1px; }
 .dark .conq-escada { border-color: #155e75; }
 .conq-deg { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center;
-  gap: 8px; min-height: 44px; padding: 0 4px; border-radius: 8px; font-size: calc(13 * var(--conq-px)); }
-.conq-deg .e { font-size: calc(17 * var(--conq-px)); line-height: 1; }
+  gap: 8px; min-height: 44px; padding: 0 4px; border-radius: 8px; font-size: 13px; }
+.conq-deg .e { font-size: 17px; line-height: 1; }
 .conq-deg .n { font-weight: 600; color: #334155; min-width: 0; }
 .dark .conq-deg .n { color: #cbd5e1; }
-.conq-deg .a { font-size: calc(11.5 * var(--conq-px)); color: #155e75; }
+.conq-deg .a { font-size: 11.5px; color: #155e75; }
 .dark .conq-deg .a { color: #67e8f9; }
 .conq-deg .m { width: 14px; text-align: center; color: #0e7490; font-weight: 700; }
 .dark .conq-deg .m { color: #22d3ee; }
@@ -3398,82 +2621,13 @@ html.tem-sessao #authScreen { display: none; }
 .conq-deg.aqui .n { color: #0f172a; font-weight: 700; }
 .dark .conq-deg.aqui .n { color: #f1f5f9; }
 .conq-h { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 8px; }
-.conq-h h4 { font-size: calc(11 * var(--conq-px)); font-weight: 700; letter-spacing: .08em;
+.conq-h h4 { font-size: 11px; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: #475569; margin: 0; }
 .dark .conq-h h4 { color: #94a3b8; }
-.conq-h span { font-size: calc(11 * var(--conq-px)); color: #475569; }
+.conq-h span { font-size: 11px; color: #475569; }
 .dark .conq-h span { color: #94a3b8; }
 .conq-grade { display: grid; gap: 6px; grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 400px) { .conq-grade { grid-template-columns: repeat(2, 1fr); } }
-/* O TEXTO DA VITRINE É `rem` (R21-7-08). As quinze `font-size` daqui eram `px`, e o
-   texto do sistema maior (emulado por `html { font-size }`, como o lote 24 faz)
-   nunca as alcançava; no Android real o navegador as escala (hipótese de
-   plataforma, não medida aqui), e o cartão "Sua patente" ficava em duas colunas
-   numa janela de 412–430 px com o nome da patente por cima do total (MEDIDO com
-   o px escalado junto: «Prefeito do Mapa» × «16666» 74% a 412×915 a 2×, e nos 4
-   idiomas, a partir de 1,8×). Agora a unidade é uma só: `--conq-px` é 1 px (a
-   1× a raiz tem 16 px, `0.0625rem` é exatamente 1 px) e CRESCE com o texto —
-   `max(1px, …)` porque o texto MENOR que o de fábrica não pode encolher os 9 e
-   os 10,5 px que a vitrine já tem (o piso da letra), só o maior a alcança. Cada
-   declaração é `calc(N * var(--conq-px))` com o MESMO N de antes: a 1× são os
-   mesmos px, e `test/telas2-r21.test.mjs` trava cada N.
-   O que cede com ele é a ESTRUTURA, pela medida do que escala (a régua do lote 24
-   nos diálogos): `#historyBody` é o contêiner (`inline-size`; a largura dele não
-   depende do conteúdo) e as consultas são em `rem`:
-   - até 18,375rem o cartão EMPILHA e a grade vai a 2 colunas, o mesmo que o
-     `@media (max-width: 400px)` acima faz por px. 18,375rem são 294 px a 1×, e a
-     conta é a do HTML: a janela de 400 px menos o `p-4` do overlay (32), o `px-6`
-     do corpo (48), o `p-3` da caixa (24) e a borda dela (2) = 294 — então a 1× o
-     ponto exato em que o cartão empilha NÃO muda, em nenhuma largura (o smoke mede
-     de 280 a 1280 px com e sem a consulta). Refez uma dessas larguras? Refaça a
-     conta (o teste a cobra). O `@media` FICA: é o que vale sem suporte a
-     `@container` e com o texto MENOR que o de fábrica (onde `rem` encolhe e o `px`
-     da janela segue sendo a medida que já valia).
-   - até 10,5rem a grade vai a UMA coluna: com o texto maior o nome mais comprido
-     ("Collectionneur", 76 px a 1×; mais 4 de padding e 2 de borda = 82) deixa de
-     caber em meia janela (2 colunas precisam de 2 × 82 × a escala + 6 de vão), e
-     a palavra partia no meio. 10,5rem ficam abaixo dos 174 px (10,875rem) da
-     vitrine no Galaxy Fold a 1×, que segue em duas colunas como sempre.
-   - nesse mesmo corte o RESTO da vitrine refluí (R21-8-03), e só aí: o cartão perde
-     4 px de respiro de cada lado (12 → 8 px); o topo vira UMA coluna (o emoji em
-     cima, o nome da patente embaixo, na linha inteira) com o nome em 16 px × a
-     escala em vez de 18; a escada põe o nome em cima, na linha inteira, e o ícone,
-     a pontuação e o marcador (✓ ●) na de baixo; o título "CONQUISTAS 5 de 16" quebra
-     a linha em vez de passar do corpo; e a palavra que MESMO ASSIM não coube quebra
-     (`overflow-wrap: break-word`) em vez de passar por cima do vizinho ou do cartão.
-     MEDIDO a 1,3× no Galaxy Fold (corpo de 6,9rem = 143 px, com o px escalado junto):
-     «Aprendiz» (23,4 px) ficava numa coluna de 67 px ao lado do emoji de 42 px e
-     passava 33 px da caixa, e as seis linhas da escada encostavam o nome na pontuação,
-     nos 4 idiomas (a 1,15×: 8,6rem, as seis linhas também). A 1× nenhuma janela de
-     280 px ou mais chega a 10,5rem (o Fold dá 10,875rem), então a 1× nada disso existe.
-     O `overflow-wrap` NÃO vale fora do corte, de propósito: no modo normal ele
-     transformava o nome que passa uns px pro vão de 8 px (sem encostar em nada) em
-     palavra partida — «Barrendero» e «Inspecteur» a 360×740 ×1,3: 0 problemas sem ele,
-     2 com. */
-#historyBody {
-  container: historico / inline-size;
-  --conq-px: max(1px, 0.0625rem);
-}
-@container historico (max-width: 18.375rem) {
-  .conq-topo { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; }
-  .conq-tot { grid-column: 1 / -1; text-align: left; display: flex; align-items: baseline; gap: 5px; }
-  .conq-tot br { display: none; }
-  .conq-rodape { display: grid; gap: 0; justify-items: start; }
-  .conq-grade { grid-template-columns: repeat(2, 1fr); }
-}
-@container historico (max-width: 10.5rem) {
-  .conq-grade { grid-template-columns: 1fr; }
-  .conq-card { padding: 8px; }
-  .conq-topo { grid-template-columns: 1fr; }
-  .conq-nome { font-size: calc(16 * var(--conq-px)); }
-  .conq-h { flex-wrap: wrap; column-gap: 8px; }
-  .conq-deg { grid-template-columns: auto 1fr auto; grid-template-areas: "n n n" "e a m"; row-gap: 2px; padding-block: 4px; }
-  .conq-deg .e { grid-area: e; }
-  .conq-deg .n { grid-area: n; }
-  .conq-deg .a { grid-area: a; }
-  .conq-deg .m { grid-area: m; }
-  .conq-nome, .conq-eyebrow, .conq-deg .n, .conq-h h4, .conq-h span { overflow-wrap: break-word; }
-}
 /* `min-width: 0` é o que mantém a grade SENDO uma grade. Sem ele, item de grid
    nasce com `min-width: auto` e a coluna cresce até caber o conteúdo: no Fold
    em francês, "Collectionneur" mede 76px, mais 8 de padding e 2 de borda dão
@@ -3486,8 +2640,8 @@ html.tem-sessao #authScreen { display: none; }
   text-align: center; gap: 3px; padding: 8px 2px; border-radius: 12px; min-height: 44px;
   min-width: 0; border: 1px solid transparent; font: inherit; cursor: pointer; }
 .conq-cel .n { overflow-wrap: break-word; }
-.conq-cel .e { font-size: calc(22 * var(--conq-px)); line-height: 1; }
-.conq-cel .n { font-size: calc(10.5 * var(--conq-px)); font-weight: 700; line-height: 1.2; }
+.conq-cel .e { font-size: 22px; line-height: 1; }
+.conq-cel .n { font-size: 10.5px; font-weight: 700; line-height: 1.2; }
 .conq-cel.on { background: #fffbeb; border-color: #fcd34d; }
 .dark .conq-cel.on { background: #3f2d0b; border-color: #a16207; }
 .conq-cel.on .n { color: #78350f; }
@@ -3504,7 +2658,7 @@ html.tem-sessao #authScreen { display: none; }
    16px na pílula do lightbox (ver `.lb-pill-fixo` acima). Aqui o sintoma era
    "Coruja— triar", sem o espaço antes do travessão, e o `textContent` continua
    com ele: só o pixel denuncia. */
-.conq-dica { margin-top: 8px; font-size: calc(12 * var(--conq-px)); line-height: 1.4; color: #334155;
+.conq-dica { margin-top: 8px; font-size: 12px; line-height: 1.4; color: #334155;
   background: #f1f5f9; border-radius: 10px; padding: 8px 10px; min-height: 44px;
   display: flex; align-items: center; }
 .dark .conq-dica { color: #cbd5e1; background: #1e293b; }
@@ -3529,20 +2683,6 @@ html.tem-sessao #authScreen { display: none; }
    nesta ela ainda precisa ver o que ganhou. */
 .conq-cel.nova { outline: 2px solid #d97706; outline-offset: 1px; position: relative; }
 .conq-card.nova { outline: 2px solid #d97706; outline-offset: 2px; }
-/* O ANEL DE FOCO dessas duas células (R21-7-05). O contorno do estado ("nova",
-   "selecionada") tem especificidade (0,2,0) e o `:focus-visible` geral (0,1,0):
-   o do estado vencia, e a célula focada pelo teclado ficava IGUAL à sem foco —
-   MEDIDO: a comum ganha `2px #0891b2` a 2 px, a nova e a selecionada seguiam em
-   `2px #d97706`/`#0e7490` a 1 px, com `:focus-visible` verdadeiro. O estado fica
-   (a cor diz o que a célula É); o foco chega por cima com a cor do anel do app e
-   3 px de afastamento — 2 a mais que o estado, o suficiente pra os dois se verem
-   ao mesmo tempo (no escuro `sel` e foco têm a mesma cor, e só o afastamento os
-   separa; a grade tem 6 px de vão, então o anel de 3–5 px não toca na vizinha).
-   Só no foco: a célula sem foco não muda um pixel. */
-.conq-cel.nova:focus-visible,
-.conq-cel.sel:focus-visible { outline-color: #0891b2; outline-offset: 3px; }
-.dark .conq-cel.nova:focus-visible,
-.dark .conq-cel.sel:focus-visible { outline-color: #22d3ee; outline-offset: 3px; }
 /* O pulso de "olha aqui" quando o app LEVA a pessoa até o que destravou.
    Espelha o `prefHighlight` do Desfazer — mesma forma (sobe rápido, segura,
    some), mesma natureza (só `box-shadow`, zero layout: uma célula da grade que
@@ -3568,138 +2708,11 @@ html.tem-sessao #authScreen { display: none; }
 }
 
 .conq-tag {
-  position: absolute; top: -7px; right: -5px; font-size: calc(9 * var(--conq-px)); font-weight: 700;
+  position: absolute; top: -7px; right: -5px; font-size: 9px; font-weight: 700;
   letter-spacing: .03em; background: #d97706; color: #fff;
   border-radius: 9999px; padding: 1px 6px; box-shadow: 0 0 0 2px #f8fafc;
 }
 .dark .conq-tag { box-shadow: 0 0 0 2px rgb(30 41 59); }
-
-/* ── CONTRASTE ALTO DO SISTEMA (`forced-colors: active`, o "tema de contraste" do
-   Windows) — R21-7-01 ──────────────────────────────────────────────────────────
-   Nesse modo o navegador TROCA as cores do autor por cores do sistema e joga fora
-   `box-shadow`, `text-shadow` e o fundo em gradiente; o que o desenho do app diz
-   só pelo FUNDO some. MEDIDO no Chromium com `forcedColors: 'active'`, nos dois
-   temas do sistema, tela por tela (a entrada, o card e os avisos, os Filtros nas três
-   abas, a folha do autor, a Ajuda, os diálogos, o Resumo, o pareamento e o "Acesso
-   restrito"), contra o `<select>` do idioma e os botões ✕ ↑ ✓, que se desenham com
-   borda e apareciam normalmente. Estava assim:
-   - os interruptores (as Preferências, os dois dos Filtros, o da folha do autor e o
-     da lista de autores) eram `appearance: none` + só `background`: SEM trilho nem
-     botão — a linha parecia texto e o ligado/desligado era invisível;
-   - a barra de progresso da patente (fundo), o pontinho de conquista nova do botão
-     de Filtros (fundo) e a etiqueta "nova" (pílula de fundo);
-   - a aba selecionada (fundo + sombra) não se distinguia das outras, e a célula
-     "ganha" ficava igual à "trancada" (as duas só mudavam de cor);
-   - os botões preenchidos por fundo — Fechar, Aplicar, "Compartilhar meu resumo", o
-     Desfazer — viravam texto solto: o preflight do Tailwind zera a borda deles;
-   - o cartão de todo diálogo (a sombra some e o fundo é o da página) e o aviso
-     passageiro (sem fundo, o texto ficava por cima dos botões do card).
-   A regra de ouro daqui é a do próprio modo: o estado se diz por FORMA, borda e cor
-   DO SISTEMA (`Canvas`, `CanvasText`, `ButtonText`, `Highlight`…), nunca por uma cor
-   que o autor escolheu. Só vale dentro do `@media`: fora do contraste alto este
-   bloco não existe, e o app não muda um pixel (`test/telas2-r21.test.mjs` e o smoke).
-   Três armadilhas, as três silenciosas:
-   - ESPECIFICIDADE: o `.dark` das regras de baixo tem um seletor a mais que o da
-     regra-base, então cada seletor daqui repete a classe (`.x.x`) pra empatar com ele
-     e vencer pela ordem — sem isso o escuro do app continuava ganhando do modo.
-   - O FOCO: o `:focus-visible` (0,1,0) perde pra qualquer contorno de estado, então a
-     aba selecionada usa FUNDO e não contorno: o anel de foco dela segue aparecendo.
-   - O BACKPLATE: texto sobre um fundo `Highlight` ganha, do navegador, uma placa de
-     `Canvas` atrás dele quando o `Highlight` não é opaco (o do emulador do Chromium tem
-     alfa 0,8) — e o `HighlightText` ficava branco sobre branco: a aba selecionada vinha
-     com uma barra branca no lugar do rótulo. `forced-color-adjust: none` na aba
-     (com as cores do SISTEMA, que é o que o modo quer) tira a placa. */
-@media (forced-colors: active) {
-  /* O botão sem borda é texto solto: o Tailwind zera a borda de todo elemento e o
-     fundo some. Seletor de elemento (0,0,1): qualquer botão que já tem borda por
-     classe (✕ ↑ ✓, as células, o `.conq-link` sublinhado) a mantém. */
-  button { border: 1px solid ButtonText; }
-  .undo-banner button { border: 1px solid ButtonText; }
-
-  /* O cartão de cada diálogo e o aviso passageiro: a sombra some e o fundo é o
-     da página, então a borda (e, no aviso, o fundo opaco) é o que os separa do que
-     está atrás. */
-  .modal-root > div { border: 1px solid CanvasText; }
-  .toast { background: Canvas; border: 1px solid CanvasText; }
-
-  /* O interruptor: trilho com borda, botão e, ligado, o trilho em Highlight. A
-     borda de 2 px empurra a origem do botão (posição absoluta é do padding box):
-     `top/left: 1px` mantêm os mesmos 1 px de folga que os 3 px tinham sem borda. */
-  input.ui-switch.ui-switch {
-    forced-color-adjust: none;
-    background: Canvas;
-    border: 2px solid ButtonText;
-  }
-  input.ui-switch.ui-switch::after {
-    top: 1px;
-    left: 1px;
-    background: ButtonText;
-    box-shadow: none;
-  }
-  input.ui-switch.ui-switch:checked { background: Highlight; }
-  input.ui-switch.ui-switch:checked::after { background: HighlightText; }
-  input.ui-switch.ui-switch:disabled { border-color: GrayText; }
-  input.ui-switch.ui-switch:disabled::after { background: GrayText; }
-
-  /* A aba selecionada é a inversão que o sistema usa pra "selecionado". */
-  .seg-tab.seg-tab[aria-selected="true"] {
-    forced-color-adjust: none;
-    background: Highlight;
-    color: HighlightText;
-  }
-
-  /* A barra de progresso da patente, o pontinho e a etiqueta de "nova". */
-  .conq-barra { border: 1px solid CanvasText; }
-  .conq-barra.conq-barra > i {
-    forced-color-adjust: none;
-    background: Highlight;
-  }
-  .conq-selo.conq-selo {
-    forced-color-adjust: none;
-    background: Highlight;
-    border: 1px solid CanvasText;
-  }
-  .conq-tag.conq-tag { border: 1px solid CanvasText; }
-
-  /* "Ganha" e "trancada": a borda diz (cheia e grossa × tracejada), não a cor. */
-  .conq-cel.conq-cel.on { border: 2px solid CanvasText; }
-  .conq-cel.conq-cel.off { border: 1px dashed CanvasText; }
-
-  /* A contagem regressiva do Desfazer. */
-  .undo-progress {
-    forced-color-adjust: none;
-    background: Highlight;
-  }
-
-  /* LOTE 27 (R23-3-01) — OS MARCADORES DO MAPA (o mapa ampliado e o mapinha do card, e a legenda dos dois). O modo joga fora o `background` do autor e
-     todo marcador virava o MESMO ponto branco de borda preta: a FORMA separa três grupos (círculo = o local e a posição proposta, quadrado = as
-     entradas, losango = o duplicado), mas dentro do círculo e dentro do quadrado a COR era o único canal — num pedido que MOVE o local, quem usa o modo
-     não sabia qual círculo era a posição de hoje e qual a proposta (a pergunta do pedido), nem qual entrada sai e qual entra. A regra do modo é a de cima:
-     o estado se diz por FORMA, preenchimento e traço, nunca por cor do autor, e com as cores do SISTEMA (`forced-color-adjust: none` só aqui, porque é ele que
-     deixa o preenchimento e o hachurado existirem). Atual = vazado (Canvas) · proposto e entrada NOVA = cheio (Highlight) · entrada que SAI = hachurado (o
-     traço diagonal é CanvasText sobre Canvas) · entrada atual = vazada · duplicado = vazado, e o losango já o separa. Os pares da legenda usam as mesmas
-     classes, então a legenda acompanha. Seletores com a classe repetida: empatam com os de cor lá de cima, e a ordem decide. */
-  .mapa-marca.mapa-marca {
-    forced-color-adjust: none;
-    background: Canvas;
-    border-color: CanvasText;
-    box-shadow: none;
-  }
-  .mapa-marca.mapa-proposto,
-  .mapa-marca.mapa-e-nova { background: Highlight; }
-  .mapa-marca.mapa-e-saindo {
-    background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px);
-  }
-
-  /* LOTE 27 (R23-5-02) — a bolha da conversa não tem borda: sem o `background` a «minha» e a «dela» só se distinguiam pelo lado em que encostam. A «minha» ganha o
-     traço mais grosso, como a célula de conquista «ganha» (2 px cheio × 1 px). */
-  .conversa-bolha.conversa-bolha { border: 1px solid CanvasText; }
-  .conversa-bolha.minha.minha { border-width: 2px; }
-
-  /* LOTE 27 (R23-8-06) — o fundo da foto e do mapa ampliados (`bg-black bg-opacity-90`) virava Canvas a ~90%, e o placar e o cabeçalho de trás apareciam por baixo da
-     camada, competindo com a pílula do nome e os botões. Opaco, como o cartão de cada diálogo. */
-  #imageLightbox, #mapaLightbox { background: Canvas; }
-}
 
 /* ── "A foto precisa de sinal" ────────────────────────────────────────────
    O pedido de FOTO sem a foto, offline. O app JÁ tinha um "Sem Imagem", e ele

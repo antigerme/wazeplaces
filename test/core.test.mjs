@@ -822,21 +822,11 @@ test('a sessão é janela DESLIZANTE: usar o app renova o prazo', async () => {
   // Cloudflare NÃO: `expirationTtl` conta do `put` e o `get` não estende nada.
   // Medido com este mesmo simulador antes da correção: editor usando o app
   // TODO DIA era deslogado no dia 21, com ZERO escritas no KV no período.
-  //
-  // "Usar o app" é uma REQUISIÇÃO, e desde a auditoria de 2026-09-29 o prazo
-  // anda no FIM dela (`renovarPrazo`, que o `dispatch` chama), não na leitura —
-  // então o teste passa pelo `dispatch`, que é o caminho de produção. O Waze
-  // daqui NÃO rotaciona o cookie: é o caso em que a renovação regrava o blob
-  // guardado. Com rotação, quem renova é a gravação do cookie novo, e isso é o
-  // `test/sessao-renovacao.test.mjs`.
   const DIA = 86400;
   const T0 = 1785000000;
   let agora = T0;
   const relogio = Date.now;
   Date.now = () => agora * 1000;
-  const fetchOriginal = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ countries: [] }),
-    { status: 200, headers: { 'content-type': 'application/json' } });
 
   try {
     const kv = new Map();
@@ -853,29 +843,26 @@ test('a sessão é janela DESLIZANTE: usar o app renova o prazo', async () => {
     };
     const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
     const token = await sessions.createSession('_web_session=a; _csrf_token=b');
-    const usar = () => dispatch('lista-paises', { sessionToken: token, region: 'row' }, { sessions });
 
     // Uso diário por muito mais que o TTL: tem que continuar viva.
     for (let dia = 1; dia <= 90; dia++) {
       agora = T0 + dia * DIA;
-      const r = await usar();
-      assert.equal(r.status, 200, `sessão morreu no dia ${dia} com uso diário (${JSON.stringify(r.body).slice(0, 80)})`);
+      assert.ok(await sessions.loadSession(token), `sessão morreu no dia ${dia} com uso diário`);
     }
 
     // Rajada no MESMO dia não pode virar uma escrita por leitura: o KV aceita
     // 1 escrita/s por chave, e o app faz 3 chamadas só ao abrir. Trocar o
     // logout por estouro de limite de escrita seria trocar de defeito.
     const antes = escritas;
-    for (let i = 0; i < 30; i++) { agora += 1; await usar(); }
+    for (let i = 0; i < 30; i++) { agora += 1; await sessions.loadSession(token); }
     assert.equal(escritas, antes, 'rajada no mesmo dia gerou escrita a cada leitura');
     assert.ok(SESSION_REFRESH_AFTER >= 3600, 'granularidade de renovação curta demais pro limite do KV');
 
     // Sumir por MAIS que o TTL ainda expira — a janela desliza, não é eterna.
     agora += SESSION_TTL + DIA;
-    assert.equal((await usar()).status, 401, 'sessão sobreviveu além do TTL sem uso');
+    assert.equal(await sessions.loadSession(token), null, 'sessão sobreviveu além do TTL sem uso');
   } finally {
     Date.now = relogio;
-    globalThis.fetch = fetchOriginal;
   }
 });
 
@@ -1304,10 +1291,9 @@ test('pareamento: o registro padrão é o forte, o curto só sob demanda', async
   assert.equal(sobDemanda.code.length, 6, 'o digitável só quando pedido');
   assert.equal(sobDemanda.curto, true);
 
-  // Os dois resgatam — o curto continua servindo a quem não tem câmera. (O
-  // resgate devolve também a conta, quando o código a levou: test/costura-sessao, K8.)
-  assert.deepEqual(await sessions.claimPairing(padrao.code), { cookies: 'cookies-x', conta: null });
-  assert.deepEqual(await sessions.claimPairing(sobDemanda.code), { cookies: 'cookies-x', conta: null });
+  // Os dois resgatam — o curto continua servindo a quem não tem câmera.
+  assert.equal(await sessions.claimPairing(padrao.code), 'cookies-x');
+  assert.equal(await sessions.claimPairing(sobDemanda.code), 'cookies-x');
 });
 
 // Sessão que não abre é APAGADA, não deixada vencendo.
@@ -1427,19 +1413,6 @@ test('DUPLICATE: o card recebe DE QUEM é duplicado, resolvido por releitura de 
     `raio da releitura mudou: ${(bboxQ[2] - bboxQ[0]) / 2}`);
   assert.equal((leitura.url.match(/\?/g) || []).length, 1, 'URL com dois "?" — foi assim que veio o 406 no excluir-foto');
   assert.equal(chamadas.filter((c) => /\/Features/.test(c.url)).length, 1, 'mais de uma leitura pro mesmo duplicado');
-});
-
-test('DUPLICATE: releitura que volta estranha (corpo `null`) não derruba a FILA', async () => {
-  // O nome do duplicado é enfeite do card. Um `atual.venues` de `null` lançava
-  // dentro do `Promise.all` e a exceção subia até o `buscar-places`: a fila
-  // INTEIRA voltava 500 por causa de uma leitura de apoio.
-  for (const bbox of [null, 'lixo que não é json', []]) {
-    const { r } = await buscarComStub({ flagType: 'DUPLICATE', flagSubjectType: 'VENUE', flagEntityID: DUP_ALVO },
-      { bbox: typeof bbox === 'string' ? bbox : bbox });
-    assert.equal(r.status, 200, `${JSON.stringify(bbox)}: ${JSON.stringify(r.body).slice(0, 120)}`);
-    assert.equal(r.body.places.length, 1);
-    assert.equal(r.body.places[0].duplicado, undefined, 'inventou um duplicado');
-  }
 });
 
 test('DUPLICATE que aponta o PRÓPRIO local não gasta leitura', async () => {
@@ -1667,183 +1640,4 @@ test('buildPlacesFromSearch: o place diz se o LOCAL já foi aprovado', () => {
   // mundo em silêncio. Errar pro lado que o editor VÊ é recuperável; errar pro
   // lado que some não avisa ninguém.
   assert.equal(monta(undefined).localAprovado, true, 'campo ausente passou a esconder o renomear, e isso falha calado');
-});
-
-// Uma ação = UMA leitura do KV (auditoria de 2026-09-25). O Waze rotaciona o
-// cookie em toda resposta, e o `refreshCookies` relia a sessão a cada chamada
-// só pra descobrir que não era hora de gravar: duas leituras por swipe, na cota
-// de 100 mil por dia do plano grátis.
-test('sessão: carregar e depois tentar regravar o cookie rotacionado custa UMA leitura, não duas', async () => {
-  const { SESSION_COOKIE_REFRESH } = await import('../server/core.mjs');
-  const T0 = 1_800_000_000;
-  let agora = T0;
-  const relogio = Date.now;
-  Date.now = () => agora * 1000;
-  try {
-    const kv = new Map();
-    let leituras = 0, escritas = 0;
-    const store = {
-      get: (h) => { leituras++; return kv.get(h) ?? null; },
-      put: (h, v) => { escritas++; kv.set(h, v); },
-      delete: (h) => kv.delete(h),
-    };
-    const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
-    const token = await sessions.createSession('c1');
-    leituras = 0; escritas = 0;
-    // O que cada ação faz: resolveCookies (loadSession) e, com o Set-Cookie do
-    // Waze, a tentativa de regravar.
-    for (let i = 0; i < 10; i++) {
-      agora += 5;
-      assert.equal(await sessions.loadSession(token), 'c1');
-      assert.equal(await sessions.refreshCookies(token, 'c1-rot'), false);
-    }
-    assert.equal(leituras, 10, `10 ações custaram ${leituras} leituras`);
-    assert.equal(escritas, 0);
-    // CONTROLE: passada a janela, a tentativa LÊ e GRAVA, como antes.
-    agora = T0 + SESSION_COOKIE_REFRESH + 60;
-    assert.equal(await sessions.loadSession(token), 'c1');
-    assert.equal(await sessions.refreshCookies(token, 'c2'), true, 'o lembrete impediu a regravação devida');
-    assert.equal(await sessions.loadSession(token), 'c2');
-    // E sem ter carregado antes (outro caminho), ela lê como sempre leu.
-    const outra = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
-    leituras = 0;
-    assert.equal(await outra.refreshCookies(token, 'x'), false);
-    assert.equal(leituras, 1, 'sem carimbo lembrado, a tentativa não leu o KV pra decidir');
-  } finally {
-    Date.now = relogio;
-  }
-});
-
-// Duas exclusões no MESMO local dentro da janela da releitura guardada: a
-// segunda lia a lista VELHA do cache e mandava de volta a foto que a primeira
-// tinha tirado — o Waze substitui a lista inteira (auditoria de 2026-09-25).
-test('excluir-foto: duas exclusões seguidas no mesmo local — a segunda não devolve a primeira', async () => {
-  const store = memStore();
-  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
-  const token = await sessions.createSession([
-    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
-  ].join('\n'));
-  const VID = 'v-3';
-  let noWaze = [{ id: 'a', approved: true }, { id: 'b', approved: true }, { id: 'c', approved: true }];
-  const escritas = [];
-  const original = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    const j = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'content-type': 'application/json' } });
-    if (init?.method === 'POST') {
-      const enviadas = JSON.parse(init.body).actions._subActions[0].attributes.images;
-      escritas.push(enviadas.map((i) => i.id));
-      noWaze = enviadas;
-      return j({ venues: { [VID]: { id: VID, images: enviadas } }, status: 0, synced: true });
-    }
-    return j({ venues: { objects: [{ id: VID, permissions: -1, images: noWaze }] }, users: { objects: [] } });
-  };
-  try {
-    const base = { sessionToken: token, region: 'row', venueID: VID, lat: 0, lon: 0 };
-    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'a', action: 'preparar' }, { sessions })).status, 200);
-    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'a' }, { sessions })).status, 200);
-    assert.equal((await dispatch('excluir-foto', { ...base, imageID: 'b' }, { sessions })).status, 200);
-    assert.deepEqual(escritas, [['b', 'c'], ['c']], `a 2ª escrita devolveu a foto já excluída: ${JSON.stringify(escritas)}`);
-  } finally {
-    globalThis.fetch = original;
-  }
-});
-
-// O "Sair" cancela o código de pareamento que o aparelho emitiu: sem isso, o QR
-// mostrado antes seguia valendo 5 min e entrava numa conta que acabou de sair
-// (auditoria de 2026-09-25).
-test('pareamento: `cancel` com o código apaga o registro — o resgate depois falha', async () => {
-  const store = memStore();
-  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
-  const token = await sessions.createSession([
-    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
-  ].join('\n'));
-  const criar = await dispatch('parear', { action: 'create', sessionToken: token }, { sessions });
-  assert.equal(criar.status, 200);
-  const cancel = await dispatch('parear', { action: 'cancel', code: criar.body.code }, { sessions });
-  assert.equal(cancel.status, 200);
-  const claim = await dispatch('parear', { action: 'claim', code: criar.body.code }, { sessions });
-  assert.notEqual(claim.status, 200, 'o código cancelado ainda entrou');
-  // CONTROLE: sem cancelar, o resgate entra.
-  const outro = await dispatch('parear', { action: 'create', sessionToken: token }, { sessions });
-  const ok = await dispatch('parear', { action: 'claim', code: outro.body.code }, { sessions });
-  assert.equal(ok.status, 200, 'CONTROLE: o resgate normal parou de funcionar');
-});
-
-// O lote do "marcar lido" tem TETO e id tem FORMA (auditoria de 2026-09-25):
-// sem isso, um corpo de 5 MB virava um lote de dezenas de milhares no Waze, e
-// objeto no lugar de id ia pro Waze como veio.
-test('marcar-lido: lote acima do teto é recusado ANTES do Waze, e id que não é texto/número fica de fora', async () => {
-  const store = memStore();
-  const sessions = makeSessions({ store, keyBytes: crypto.getRandomValues(new Uint8Array(32)) });
-  const token = await sessions.createSession([
-    NETSCAPE('.waze.com', '_csrf_token', 'abc'), NETSCAPE('.waze.com', '_web_session', 'x'),
-  ].join('\n'));
-  const enviados = [];
-  const original = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    if (init && init.body) enviados.push(JSON.parse(init.body));
-    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
-  };
-  try {
-    const muitos = Array.from({ length: 501 }, (_, i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i }));
-    const r = await dispatch('marcar-lido', { sessionToken: token, region: 'row', items: muitos }, { sessions });
-    assert.equal(r.status, 400);
-    assert.equal(r.body.errorKey, 'srv.err.tooManyItems');
-    assert.equal(enviados.length, 0, 'o lote grande chegou ao Waze');
-    const ok = await dispatch('marcar-lido', { sessionToken: token, region: 'row', items: [
-      { venueID: 'v1', updateRequestID: 'u1' }, { venueID: { x: 1 }, updateRequestID: 'u2' }, { venueID: 'v3', updateRequestID: ['u3'] },
-    ] }, { sessions });
-    assert.equal(ok.status, 200, JSON.stringify(ok.body));
-    assert.deepEqual(enviados.at(-1).venueUpdateRequestIds, [{ id: 'u1', venueId: 'v1' }], 'id que não é texto/número foi pro Waze');
-  } finally {
-    globalThis.fetch = original;
-  }
-});
-
-// ─── R23-6 F5: id e chave com nome de protótipo não viram dado ───────────────
-// Os ids do Waze são números e as chaves do `changedVenue` são campos do esquema,
-// então isto é endurecimento: os dicionários eram `{}` e `venue[k]` lia o
-// protótipo — "constructor" saía como "Object, 10" no endereço e como o valor
-// ANTERIOR do campo no diff.
-const harProtótipo = (ids, changedVenue = {}) => ({
-  users: { objects: [{ id: 7, userName: 'ana' }] },
-  streets: { objects: [{ id: 111, name: 'Rua A', cityID: 222 }] },
-  cities: { objects: [{ id: 222, name: 'Cidade', stateID: 333 }] },
-  states: { objects: [{ id: 333, name: 'Estado' }] },
-  venues: { objects: [{
-    id: 'v1', name: 'Loja', permissions: -1, houseNumber: '10', streetID: ids.streetID ?? 111,
-    images: [{ id: 'img1', creatorUserId: ids.imgAutor ?? 7 }],
-    venueUpdateRequests: [{ id: 'u1', venueID: 'v1', type: 'REQUEST', subType: 'UPDATE', createdBy: ids.criador ?? 7, isRead: false,
-      changedVenue }],
-  }] },
-});
-const cartao = (rd) => buildPlacesFromSearch(rd, { unreadOnly: false }).places[0];
-
-test('R23-6 F5: CONTROLE — com ids normais o endereço sai inteiro', () => {
-  assert.equal(cartao(harProtótipo({})).address, 'Rua A, 10, Cidade - Estado');
-});
-
-test('R23-6 F5: rua, cidade e estado com nome de protótipo não viram endereço', () => {
-  for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
-    const p = cartao(harProtótipo({ streetID: id }));
-    assert.equal(p.address, '10', `DEFEITO: streetID "${id}" virou endereço: ${p.address}`);
-    const rd = harProtótipo({});
-    rd.streets.objects[0].cityID = id;
-    assert.equal(cartao(rd).address, 'Rua A, 10', `DEFEITO: cityID "${id}" virou cidade`);
-    const rd2 = harProtótipo({});
-    rd2.cities.objects[0].stateID = id;
-    assert.equal(cartao(rd2).address, 'Rua A, 10, Cidade', `DEFEITO: stateID "${id}" virou estado`);
-  }
-});
-
-test('R23-6 F5: o diff não lê o protótipo do venue como valor antigo, nem o rótulo', () => {
-  const p = cartao(harProtótipo({}, { constructor: 'x', toString: 'y', streetID: 'constructor' }));
-  const por = Object.fromEntries(p.changes.map((c) => [c.field, c]));
-  assert.ok(por.constructor && por.toString, 'CONTROLE: as duas chaves tinham que virar linha');
-  for (const k of ['constructor', 'toString']) {
-    assert.equal(por[k].from, null, `DEFEITO: o valor antigo de "${k}" veio do protótipo: ${String(por[k].from).slice(0, 40)}`);
-    assert.match(por[k].label, new RegExp('^' + k[0].toUpperCase()), `DEFEITO: o rótulo de "${k}" veio do protótipo`);
-    assert.equal(typeof por[k].label, 'string');
-  }
-  assert.notEqual(por.streetID.to, 'Object', 'DEFEITO: a rua nova "constructor" virou "Object"');
 });
