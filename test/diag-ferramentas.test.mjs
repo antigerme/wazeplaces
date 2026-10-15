@@ -659,3 +659,82 @@ test('diag-replay: no treino, a fila guardada do offline que abre no "Sair" e a 
   assert.match(codigo, /^for \(const linha of filaQueVoltaDoTreino\(d\)\) console\.log\(`AVISO: {3}\$\{linha\}`\);$/m,
     'a ferramenta não imprime o que espera o "Sair" do treino');
 });
+
+// R24-4-02: o `--get` do probe aceitava URL ABSOLUTA e mandava o Cookie + o X-CSRF-Token do owner pra QUALQUER
+// host (`http://127.0.0.1:9/x`, `https://example.org/x`); num 302 pra fora o undici corta o Cookie mas reenvia o
+// CSRF. O probe roda DE VERDADE aqui, num processo à parte, com um `fetch` ESPIÃO (nunca o Waze, nunca uma
+// credencial de verdade: o cookies.txt é de mentira) que anota o destino e o que foi mandado, e que SEGUE o
+// redirecionamento como o undici faz quando o `redirect` não é 'manual' — é essa ressalva que a sabotagem usa.
+import { spawn } from 'node:child_process';
+
+const ESPIAO = `
+globalThis.fetch = async (url, opts = {}) => {
+  const ir = async (u, o, n) => {
+    const x = new URL(String(u)); const h = o.headers || {};
+    console.log('ESPIAO ' + JSON.stringify({ proto: x.protocol, host: x.host, path: x.pathname, cookie: !!h.Cookie, csrf: !!h['X-CSRF-Token'], redirect: o.redirect || null }));
+    if (x.pathname.endsWith('/Redirecionador')) {
+      const r = { status: 302, headers: { get: () => 'https://example.org/destino' }, text: async () => '' };
+      if (o.redirect === 'manual' || n > 3) return r;
+      return ir('https://example.org/destino', o, n + 1);
+    }
+    return { status: 200, headers: { get: () => null }, text: async () => '{"userName":"espiao","rank":0}' };
+  };
+  return ir(url, opts, 0);
+};`;
+const COOKIES_DE_MENTIRA = '# Netscape HTTP Cookie File\n'
+  + '.waze.com\tTRUE\t/\tTRUE\t1893456000\t_web_session\tVALOR_DE_MENTIRA\n'
+  + 'www.waze.com\tFALSE\t/\tTRUE\t1893456000\t_csrf_token\tCSRF_DE_MENTIRA\n';
+const dirDoProbe = mkdtempSync(join(tmpdir(), 'probe-espiao-'));
+const cookiesDoProbe = join(dirDoProbe, 'cookies.txt');
+writeFileSync(cookiesDoProbe, COOKIES_DE_MENTIRA);
+
+function rodarProbe(alvo) {
+  return new Promise((ok) => {
+    const filho = spawn(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(ESPIAO),
+      join(ROOT, 'tools/waze-probe.mjs'), cookiesDoProbe, '--get', alvo], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let saida = '';
+    filho.stdout.on('data', (d) => { saida += d; });
+    filho.stderr.on('data', (d) => { saida += d; });
+    filho.on('close', (codigo) => ok({
+      codigo, saida,
+      idas: saida.split('\n').filter((l) => l.startsWith('ESPIAO ')).map((l) => JSON.parse(l.slice(7))),
+    }));
+  });
+}
+
+test('waze-probe: o --get só fala com https no waze.com — o Cookie e o CSRF do owner não saem pra outro destino (R24-4-02)', async () => {
+  const recusados = [
+    'http://127.0.0.1:9/x', 'https://example.org/x', 'http://www.waze.com/x', 'https://www.waze.com.evil.com/x',
+    'https://waze.com.br/x', 'https://evilwaze.com/x', 'https://waze.com/x', 'https://www.waze.com@evil.com/x',
+    'https://usuario:senha@www.waze.com/x', 'https://www.waze.com:8443/x', 'https://evil.com/?https://www.waze.com/',
+  ];
+  const aceitos = [
+    ['https://www.waze.com/row-Descartes/app/Session', 'www.waze.com'],
+    ['https://venue-image.waze.com/x.jpg', 'venue-image.waze.com'],
+    ['/LocationSearch/Countries', 'www.waze.com'],
+  ];
+  const [rs, as] = await Promise.all([Promise.all(recusados.map(rodarProbe)), Promise.all(aceitos.map(([a]) => rodarProbe(a)))]);
+  rs.forEach((r, i) => {
+    assert.equal(r.codigo, 3, `o probe devia RECUSAR ${recusados[i]} (saída 3) e saiu ${r.codigo}`);
+    // Só a sondagem da sessão (fixa, no waze.com) pode ter saído: nada pro destino recusado.
+    assert.ok(r.idas.every((x) => x.host === 'www.waze.com' && x.proto === 'https:'), `${recusados[i]}: saiu pedido para fora do waze.com: ${JSON.stringify(r.idas)}`);
+    assert.equal(r.idas.length, 1, `${recusados[i]}: o destino recusado chegou ao fetch`);
+  });
+  as.forEach((r, i) => {
+    assert.equal(r.codigo, 0, `o probe recusou um destino legítimo (${aceitos[i][0]}): ${r.saida.slice(0, 300)}`);
+    const ida = r.idas[r.idas.length - 1];
+    assert.equal(ida.host, aceitos[i][1]);
+    assert.equal(ida.cookie && ida.csrf, true, 'CONTROLE: a ida legítima leva as credenciais (senão o teste mede um probe mudo)');
+  });
+});
+
+test('waze-probe: um 3xx é RESPOSTA — o redirecionamento pra fora não é seguido e o CSRF não vai junto (R24-4-02)', async () => {
+  const r = await rodarProbe('/Redirecionador');
+  assert.equal(r.codigo, 0);
+  assert.ok(r.idas.length >= 2, `PRÉ-CONDIÇÃO: a ida ao Redirecionador não aconteceu: ${JSON.stringify(r.idas)}`);
+  assert.ok(r.idas.every((x) => x.redirect === 'manual'), `o fetch do probe segue redirecionamento: ${JSON.stringify(r.idas)}`);
+  assert.ok(r.idas.every((x) => x.host === 'www.waze.com'), `o redirecionamento foi seguido pra fora: ${JSON.stringify(r.idas)}`);
+  assert.match(r.saida, /HTTP 302/, 'o 3xx devia aparecer como resposta');
+  // Nenhum valor de credencial na saída.
+  assert.ok(!/VALOR_DE_MENTIRA|CSRF_DE_MENTIRA/.test(r.saida), 'o probe imprimiu valor de cookie');
+});
