@@ -1299,6 +1299,15 @@ input.ui-switch:disabled {
     bottom: 0;
     background: inherit;
   }
+  /* O CORPO do formulário deixa de ser um segundo rolante (R24-7-01): sendo `flex-1
+     overflow-y-auto` ele encolhia até o próprio `py-4` (32 px, 0 de conteúdo) e o
+     cartão só rolava o cabeçalho — 0 de 17 controles à vista, o foco em
+     prefPularGuarda/langSelect ficava sob o cabeçalho. Aqui o cartão é quem rola, e
+     o corpo tem a altura que o conteúdo pede. */
+  #filtersModal > div > .overflow-y-auto {
+    flex: none;
+    overflow: visible;
+  }
 }
 /* O rodapé preso cobre o fim da rolagem, e o foco do teclado não sabe disso: sem o
    `scroll-padding-bottom` os 17 controles do corpo paravam SOB o rodapé quando
