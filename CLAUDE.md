@@ -198,6 +198,7 @@ wazeplaces/
 │   ├── marca-app.mjs        # A MARCA de quem usa o app, gravada nos últimos dígitos da posição da
 │   │                        #   presença do WME (lat mod 100 = 47, lon mod 1000 = país). PURO: quem
 │   │                        #   escreve (fase 2) e quem vai ler a lista (fase 3) importam daqui
+│   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie do Waze de quem pediu); PURA
 │   ├── core.mjs             # Lógica compartilhada: sessões, cripto (AES-GCM), callWaze (fetch),
 │   │                        #   categorizeWazeError/categorizeGrpcError, isUserAllowed, os handlers, dispatch(). ÚNICO lugar de lógica.
 │   └── node.mjs             # Adaptador VM/Node: http server + estáticos + fs sessions + key auto-gen

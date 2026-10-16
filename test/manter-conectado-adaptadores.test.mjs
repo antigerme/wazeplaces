@@ -1,7 +1,7 @@
 // «Manter conectado» nos DOIS adaptadores: o `scheduled` do Worker (importado de
 // verdade, com um KV de mentira que pagina o `list`) e o temporizador da VM (o
 // `server/node.mjs` de verdade, numa porta livre, com um Waze de mentira
-// pré-carregado). O núcleo está em `manter-conectado.test.mjs`.
+// pré-carregado). O núcleo está em `manter-conectado-servidor.test.mjs`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto, createHash } from 'node:crypto';
