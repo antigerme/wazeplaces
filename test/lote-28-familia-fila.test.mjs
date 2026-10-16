@@ -206,5 +206,5 @@ test('R24-6: as migrações `saida-sem-marca` e `fila-guardada-desde` cumpriram 
   }
   assert.ok(!/adotarSaidaSemMarca/.test(APP), '`adotarSaidaSemMarca` voltou');
   assert.ok(!/guardada\.desde : guardada\.t/.test(APP), 'o `: guardada.t` voltou');
-  assert.ok(REG.includes("id: 'regiao-world'"), 'a `regiao-world` é de outro lote e fica');
+  // A `regiao-world` saiu no lote de SW/servidor (R24-4); aqui só importa que as duas da fila não voltaram.
 });

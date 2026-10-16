@@ -8,6 +8,34 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.16-02
+
+Vigésima quarta rodada da auditoria (lote 28). Nada muda de aparência no uso normal; cada conserto tem teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**A fila de saída e o aparelho que não guarda dados**
+- **Aparelho que lê mas não grava** (navegação privada, armazenamento cheio ou bloqueado) tem agora UMA estrutura só para as decisões que já saíram da fila: a mesma decisão não vai duas vezes ao Waze, o placar não conta em dobro, e a troca de conta, o Histórico, o offline e o diagnóstico seguem a mesma regra.
+- **O diagnóstico** abre arquivos com BOM, não imprime mais `undefined`, e diz quantas decisões o aparelho não deixou tirar da fila.
+
+**Ordenar por distância**
+- **"Perto de casa/trabalho/de mim" põe no 1º card o pedido mais perto da fila INTEIRA**, não da primeira página: a troca espera as páginas chegarem e só acontece com a tela livre.
+- **Abrindo o app com casa ou trabalho salvos, a fila espera o perfil** (até 4 s) antes de ordenar; o "Restam" mostra «…» enquanto isso.
+
+**Sem rede e service worker**
+- **Uma resposta lenta do cache do aparelho não vira mais "sem rede"**: cada etapa do service worker tem teto próprio, e a falha 5xx da borda também espera a cópia guardada.
+
+**Telas**
+- **Reduzir movimento:** o card sai e o próximo assume no mesmo quadro (antes levava ~350 ms). A entrada mantém os 350 ms que seguram o toque duplo.
+- **Filtros com zoom de 300–500%:** o formulário deixa de ser uma segunda área rolante.
+- **Títulos de diálogo longos** ("Cole os cookies", "Conectar outro aparelho", "Entrar com um código") quebram a linha em vez de passar da borda.
+- **Presença:** a mensagem que chega com a conversa fechada é dita ao leitor de tela, e o "Tentar de novo" manda uma por vez.
+
+### Segurança e limpeza
+- **`world` como região é recusado** (400) em vez de ser trocado por `na`; a migração `regiao-world` saiu.
+- **As migrações `saida-sem-marca` e `fila-guardada-desde` cumpriram o prazo e saíram.**
+- O servidor trata mapas por id de foto sem protótipo, e o `waze-probe --get` não leva o Cookie nem o CSRF do dono para fora do waze.com.
+
 ## v2026.10.16-01
 
 **«Manter conectado»: a sessão não cai mais por ficar mais de um dia sem abrir o app.**
