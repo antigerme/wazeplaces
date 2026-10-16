@@ -111,3 +111,40 @@ test('ajuda: "Quem está no app" vem logo depois de "Como usar:"', () => {
   assert.equal(chaves.indexOf('help.presenca.title'), chaves.indexOf('help.howToUse.title') + 1,
     `ordem atual: ${chaves.join(' → ')}`);
 });
+
+// A ⭐ do card é a estrela do EDITOR no PEDIDO (o `isStarred` do pedido, a mesma
+// que o "Pular guarda o pedido" põe). A legenda dizia "place favoritado no WME"
+// — outro conceito, que ensinava a ler a ⭐ como marca do local (auditoria de
+// 2026-09-29, A9). Aqui: a legenda liga a estrela à preferência que a põe, não
+// fala do local, e usa o MESMO termo do título da ⭐ no card.
+test('ajuda: a legenda da ⭐ fala do PEDIDO, pelo nome da preferência que a põe e com o termo do card', () => {
+  const TERMO_DO_CARD = { pt: 'favorit', en: 'starred', es: 'destac', fr: 'favori' };
+  for (const lang of Object.keys(DICT)) {
+    const legenda = DICT[lang]['help.legend.starred'];
+    const pref = DICT[lang]['prefs.pularGuarda.label'];
+    assert.ok(legenda.includes(pref), `${lang}: a legenda da ⭐ não liga a estrela ao “${pref}”: ${legenda}`);
+    assert.ok(!/\bplace\b|\blieu\b/i.test(legenda), `${lang}: a legenda da ⭐ fala do LOCAL, e a estrela é do pedido: ${legenda}`);
+    const termo = TERMO_DO_CARD[lang];
+    assert.ok(termo, `${lang}: idioma novo — diga aqui o termo da ⭐ no card`);
+    assert.ok(DICT[lang]['card.starred.title'].toLowerCase().includes(termo),
+      `CONTROLE ${lang}: o título da ⭐ no card não usa mais "${termo}" — atualize o teste junto`);
+    assert.ok(legenda.toLowerCase().includes(termo), `${lang}: a legenda da ⭐ não usa o termo do card ("${termo}")`);
+  }
+});
+
+// O que o app faz com os cookies, na Privacidade da Ajuda: uma ENUMERAÇÃO —
+// vírgula, vírgula… e a conjunção só antes do último. O francês tinha dois "et"
+// seguidos ("marque comme lue et donne une ⭐ à la demande et envoie…";
+// auditoria de 2026-09-29, achado do lote do lightbox).
+test('ajuda: a lista do que o app faz com os cookies tem UMA conjunção, em cada língua', () => {
+  const CONJUNCAO = { pt: 'e', en: 'and', es: 'y', fr: 'et' };
+  for (const lang of Object.keys(DICT)) {
+    const conj = CONJUNCAO[lang];
+    assert.ok(conj, `${lang}: idioma novo — diga aqui a conjunção da enumeração`);
+    const frase = DICT[lang]['help.privacy.credentials'];
+    const lista = frase.slice(frase.indexOf('. ') + 2, frase.indexOf(';'));
+    assert.ok(lista.length > 40 && lista.includes('⭐'), `CONTROLE ${lang}: o recorte da lista falhou: "${lista}"`);
+    const n = lista.split(` ${conj} `).length - 1;
+    assert.equal(n, 1, `${lang}: "${lista}" tem ${n} "${conj}" — numa enumeração, a conjunção vem só antes do último item`);
+  }
+});

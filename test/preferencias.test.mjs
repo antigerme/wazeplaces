@@ -31,6 +31,7 @@ function montar(prefs, agoraMs = Date.UTC(2026, 7, 27, 12)) {
       removeItem: (k) => guardado.delete(k),
     },
     PREFERENCES_KEY: 'waze_places_preferences',
+    MANTER_CONECTADO_PADRAO: true,
     Date: { now: () => agoraMs, UTC: Date.UTC },
   };
   const nomes = Object.keys(escopo);

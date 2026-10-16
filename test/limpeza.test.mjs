@@ -88,3 +88,23 @@ test('o GC da VM poda pareamento pelo TTL dele, sem tocar em sessão viva', () =
   }
   assert.equal(CORTE.test('1785193636|UX2AgQaeqY2uabP'), true, 'o corte deixou de pegar pareamento');
 });
+
+test('o cookies.txt colado sai do campo por QUALQUER caminho de fechamento — não só pelo Cancelar', () => {
+  // Auditoria de 2026-09-25: é o chaveiro do navegador INTEIRO, e fechado por
+  // Esc, pelo fundo ou pelo voltar ele ficava no campo, inclusive depois do
+  // "Sair" — num aparelho compartilhado, a pessoa seguinte reabria e lia tudo.
+  const ini = APP.indexOf('const LIMPEZA_AO_FECHAR = {');
+  const fim = APP.indexOf('\n};', ini) + 3;
+  const campos = { cookiesTextarea: { value: 'CHAVEIRO-INTEIRO' } };
+  const mapa = new Function('document', 'resumoAtual', 'autoresExpandido', 'escadaAberta', 'conquistaTocada',
+    'pararTickerPareamento', 'limparQrPareamento', 'URL', 'window',
+    `${APP.slice(ini, fim)}\nreturn LIMPEZA_AO_FECHAR;`)(
+    { getElementById: (id) => campos[id] || null }, null, false, false, null, () => {}, () => {}, URL, {});
+  assert.equal(typeof mapa.pasteModal, 'function', 'o modal de colar não tem limpeza ao fechar');
+  mapa.pasteModal();
+  assert.equal(campos.cookiesTextarea.value, '', 'o cookies.txt ficou no campo depois de fechar');
+  // E ninguém volta a limpar pelo handler de um botão só (a regra dos modais).
+  const src = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.equal((src.match(/cookiesTextarea'\)\.value = ''/g) || []).length, 0,
+    'a limpeza do campo voltou pro handler de um botão');
+});

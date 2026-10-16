@@ -172,6 +172,13 @@ function base64Emendado(texto) {
 // { dados, status, mensagem }. `status` null quando a resposta não trouxe
 // trailer (quem chama pode achá-lo nos cabeçalhos HTTP — resposta só de
 // trailer, que o Waze usa nos erros, às vezes vem assim).
+//
+// Quadro que declara mais bytes do que chegaram LANÇA, como o `lerCampos` faz
+// com protobuf truncado. O `subarray` não reclama de fim além do fim — devolvia
+// só o pedaço que veio —, e uma resposta cortada no meio, sem trailer e com
+// HTTP 200, era lida como completa: metade da lista de online virava a lista
+// inteira, com sucesso (auditoria de 2026-09-26). Lançando, o `callWazeGrpc`
+// a marca `malformada`, e sem status isso é `transient` — cortar é de rede.
 export function lerRespostaGrpcWeb(texto) {
   const bytes = base64Emendado(texto);
   let dados = null;
@@ -180,6 +187,7 @@ export function lerRespostaGrpcWeb(texto) {
   while (i + 5 <= bytes.length) {
     const flag = bytes[i];
     const tam = new DataView(bytes.buffer, bytes.byteOffset + i + 1, 4).getUint32(0);
+    if (i + 5 + tam > bytes.length) throw new Error('quadro gRPC-web truncado');
     const corpo = bytes.subarray(i + 5, i + 5 + tam);
     i += 5 + tam;
     if (flag & 0x80) trailer += decodificador.decode(corpo);

@@ -21,12 +21,11 @@
 // mesmo arquivo do manifest. Splash com logo diferente do ícone instalado é a
 // regra de ouro de consistência quebrada no primeiro segundo de uso.
 
-import { spawn } from 'node:child_process';
+import { subirServidorLocal } from './servidor-local.mjs';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { paletizar } from './png-palette.mjs';
-import { setTimeout as dormir } from 'node:timers/promises';
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,15 +112,9 @@ for (const tema of TEMAS) {
 }
 console.log(`cores lidas do index.src.html: claro ${CORES.light} · escuro ${CORES.dark}`);
 
-const servidor = spawn(process.execPath, [join(ROOT, 'server', 'node.mjs')], {
-  env: { ...process.env, PORT: String(PORTA), HOST: '127.0.0.1' },
-  stdio: ['ignore', 'ignore', 'inherit'],
-});
-process.on('exit', () => servidor.kill());
-for (let i = 0; i < 60; i++) {
-  try { if ((await fetch(BASE)).ok) break; } catch { /* subindo */ }
-  await dormir(250);
-}
+// Sobe por `tools/servidor-local.mjs`: porta LIVRE antes, e pronto é o próprio
+// processo dizer que a ocupou (senão a splash sairia do servidor de outro).
+const { servidor } = await subirServidorLocal({ porta: PORTA, variavel: 'SPLASH_PORT' });
 
 // A marca fica em texto (é o mesmo `name` do manifest), e "Waze Places" não se
 // traduz — é nome próprio, como manda a seção de i18n. Então UMA imagem serve

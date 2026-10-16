@@ -10,12 +10,15 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
-import { dispatch, makeSessions } from '../server/core.mjs';
+import { dispatch, makeSessions, base64ToBytes } from '../server/core.mjs';
+import { sessaoDeTeste } from './_sessao.mjs';
 import * as g from '../server/wme-grpc.mjs';
 import { temMarcaDaApp, paisDaMarca, marcarPosicao } from '../server/marca-app.mjs';
 
 const NETSCAPE = (name, value) => `.waze.com\tTRUE\t/\tTRUE\t9999999999\t${name}\t${value}`;
 const COOKIES = [NETSCAPE('_csrf_token', 'csrf-de-teste'), NETSCAPE('_web_session', 'sessao-original')].join('\n');
+// Toda rota exige sessão de verdade (ver test/_sessao.mjs e `resolveCookies`).
+const S = await sessaoDeTeste(COOKIES);
 const um = (campos, n) => campos.find((c) => c.n === n)?.v;
 const assinado = (v) => Number(BigInt.asIntN(64, BigInt(v)));
 const b64 = (u8) => btoa(String.fromCharCode(...u8));
@@ -115,7 +118,7 @@ for (const [rota, extra, caminhoDaAcao] of [
 ]) {
   test(`${rota}: com presenca → a ação E a escrita no WME, com a posição MARCADA e o país`, async () => {
     const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
-      () => dispatch(rota, { cookies: COOKIES, region: 'row', ...extra, presenca: PRESENCA }, {}));
+      () => dispatch(rota, { ...S.dados, region: 'row', ...extra, presenca: PRESENCA }, S.ctx));
     assert.equal(resultado.status, 200, JSON.stringify(resultado.body));
     assert.equal(resultado.body.success, true);
     assert.deepEqual(resultado.body.presenca, { ok: true, marca: true });
@@ -144,7 +147,7 @@ for (const [rota, extra, caminhoDaAcao] of [
 
   test(`${rota}: sem presenca → UMA chamada, e a resposta não ganha campo novo`, async () => {
     const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: () => assert.fail('foi ao WME sem carona') },
-      () => dispatch(rota, { cookies: COOKIES, region: 'row', ...extra }, {}));
+      () => dispatch(rota, { ...S.dados, region: 'row', ...extra }, S.ctx));
     assert.equal(resultado.status, 200);
     assert.equal(pedidos.length, 1);
     assert.ok(!('presenca' in resultado.body), 'o contrato de quem não manda presença mudou');
@@ -155,7 +158,7 @@ test('carona: a presença sai JUNTO com a ação (em paralelo), não depois dela
   const { pedidos } = await comWaze({
     acao: async () => { await esperar(250); return ACAO_OK(); },
     presenca: PRESENCA_OK,
-  }, () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+  }, () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   const acao = pedidos.find((p) => p.tipo === 'acao');
   const pres = pedidos.find((p) => p.tipo === 'escrita');
   assert.ok(pres.t < acao.respondidoEm, `a presença só saiu depois da ação (${pres.t} ms × ${acao.respondidoEm} ms)`);
@@ -163,7 +166,7 @@ test('carona: a presença sai JUNTO com a ação (em paralelo), não depois dela
 
 test('carona: pedido de ligar vai junto na MESMA escrita (location + visible)', async () => {
   const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
-    () => dispatch('marcar-lido', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: { ...PRESENCA, visivel: true } }, {}));
+    () => dispatch('marcar-lido', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: { ...PRESENCA, visivel: true } }, S.ctx));
   assert.equal(resultado.body.presenca.ok, true);
   const e = lerEscrita(pedidos.find((p) => p.tipo === 'escrita').corpo);
   assert.deepEqual(e.caminhos, ['location', 'visible']);
@@ -180,7 +183,7 @@ test('carona: presença que FALHA nunca derruba a ação — e diz por quê', as
   ];
   for (const [presenca, categoria] of casos) {
     const { resultado } = await comWaze({ acao: ACAO_OK, presenca },
-      () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+      () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
     assert.equal(resultado.status, 200, categoria);
     assert.equal(resultado.body.success, true, `a ação caiu junto com a presença (${categoria})`);
     assert.deepEqual(resultado.body.presenca, { ok: false, categoria });
@@ -192,7 +195,7 @@ test('carona: a ação falhando segue com o resultado DELA, e a presença vai do
   const { resultado } = await comWaze({
     acao: () => respostaJson(404, JSON.stringify({ errorList: [{ code: 702, details: 'was not found on venue' }] })),
     presenca: PRESENCA_OK,
-  }, () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+  }, () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   assert.equal(resultado.status, 200);
   assert.equal(resultado.body.success, false);
   assert.equal(resultado.body.errorCategory, 'already_processed');
@@ -201,7 +204,7 @@ test('carona: a ação falhando segue com o resultado DELA, e a presença vai do
   const lido = await comWaze({
     acao: () => respostaJson(500, JSON.stringify({ errorList: [{ code: 300, details: 'Failed to handle request' }] })),
     presenca: PRESENCA_OK,
-  }, () => dispatch('marcar-lido', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+  }, () => dispatch('marcar-lido', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   assert.equal(lido.resultado.body.errorCategory, 'already_processed');
   assert.equal(lido.resultado.body.presenca.ok, true);
 });
@@ -223,7 +226,7 @@ test('carona: presença MALFORMADA é ignorada sem ir ao WME — e a ação sai 
   for (const presenca of ruins) {
     const { resultado, pedidos } = await comWaze({ acao: ACAO_OK, presenca: () => assert.fail('foi ao WME com presença ruim'),
       lista: () => assert.fail('leu a lista com presença ruim'), conversas: () => assert.fail('leu as conversas com presença ruim') },
-      () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca }, {}));
+      () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca }, S.ctx));
     assert.equal(resultado.body.success, true, JSON.stringify(presenca));
     assert.equal(pedidos.length, 1, JSON.stringify(presenca));
     assert.deepEqual(resultado.body.presenca, { ok: false, categoria: 'invalida' }, JSON.stringify(presenca));
@@ -232,7 +235,7 @@ test('carona: presença MALFORMADA é ignorada sem ir ao WME — e a ação sai 
 
 test('carona: a validação da AÇÃO vem antes — pedido inválido não move ninguém', async () => {
   const { resultado, pedidos } = await comWaze({ acao: () => assert.fail('foi à ação'), presenca: () => assert.fail('foi à presença') },
-    () => dispatch('validar-place', { cookies: COOKIES, region: 'row', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+    () => dispatch('validar-place', { ...S.dados, region: 'row', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   assert.equal(resultado.status, 400);
   assert.equal(pedidos.length, 0);
 });
@@ -246,11 +249,11 @@ test('carona: o eco do Waze CONFERE a marca — posição arredondada vira marca
       const e = lerEscrita(p.corpo);
       return respostaGrpc({ dados: eco({ lat: Number(e.lat.toFixed(4)), lon: Number(e.lon.toFixed(4)) }) });
     },
-  }, () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+  }, () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   assert.deepEqual(resultado.body.presenca, { ok: true, marca: false });
   // Eco sem posição: não dá pra conferir, e "não sei" não é "perdeu".
   const semPosicao = await comWaze({ acao: ACAO_OK, presenca: () => respostaGrpc({ dados: g.junta(g.campo.inteiro(1, 12444348)) }) },
-    () => dispatch('validar-place', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+    () => dispatch('validar-place', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
   assert.deepEqual(semPosicao.resultado.body.presenca, { ok: true, marca: null });
 });
 
@@ -261,8 +264,8 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
   const { resultado } = await comWaze({
     acao: ACAO_OK,
     presenca: async (p) => { await esperar(4000); concluiu = true; return PRESENCA_OK(p); },
-  }, () => dispatch('marcar-lido', { cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA },
-    { aoFundo: (prom) => fundo.push(prom) }));
+  }, () => dispatch('marcar-lido', { ...S.dados, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA },
+    { ...S.ctx, aoFundo: (prom) => fundo.push(prom) }));
   const levou = Date.now() - t0;
   assert.equal(resultado.body.success, true);
   assert.ok(!('presenca' in resultado.body), 'esperou a presença lenta em vez de responder');
@@ -278,9 +281,9 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
 });
 
 test('carona: a região escolhe o servidor da presença (a lista é separada por servidor)', async () => {
-  for (const [region, prefixo] of [['na', 'na-Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes']]) {
+  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes']]) {
     const { pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
-      () => dispatch('validar-place', { cookies: COOKIES, region, venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, {}));
+      () => dispatch('validar-place', { ...S.dados, region, venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
     assert.equal(pedidos.find((p) => p.tipo === 'escrita').url,
       `https://www.waze.com/${prefixo}/grpc/com.waze.mapeditor.web.api.MapEditorWebServer/updateOnlineEditor`, region);
     // A lista de quem usa o app vem do MESMO servidor da presença.
@@ -326,7 +329,7 @@ test('perfil: devolve a chave "visível" do WME, e null quando o Waze não manda
     [sessao({ onlineEditorDetails: { visible: 'true' } }), null],
   ]) {
     const { resultado } = await comWaze({ acao: () => respostaJson(200, corpo), presenca: () => assert.fail('perfil não vai ao gRPC') },
-      () => dispatch('perfil', { cookies: COOKIES, region: 'row' }, {}));
+      () => dispatch('perfil', { ...S.dados, region: 'row' }, S.ctx));
     assert.equal(resultado.status, 200);
     assert.equal(resultado.body.visivelNoWme, esperado, corpo);
   }
@@ -345,6 +348,16 @@ test('Worker: a escrita que passa do teto vai pro ctx.waitUntil (senão a Cloudf
     SESSIONS: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => { kv.set(k, v); }, delete: async (k) => { kv.delete(k); } },
     ASSETS: { fetch: () => new Response('asset') },
   };
+  // A sessão nasce no MESMO KV e com a MESMA chave que o Worker vai usar (o
+  // prefixo `sess_` é o do adaptador): é o caminho do app, que entra pelo
+  // `testar-cookies` e depois só manda o token.
+  const { sessionToken } = await (async () => {
+    const sessions = makeSessions({
+      store: { get: async (h) => kv.get('sess_' + h) ?? null, put: async (h, v) => { kv.set('sess_' + h, v); }, delete: async (h) => { kv.delete('sess_' + h); } },
+      keyBytes: base64ToBytes(env.ENCRYPTION_KEY),
+    });
+    return { sessionToken: await sessions.createSession(COOKIES) };
+  })();
   const entregues = [];
   const ctx = { waitUntil: (p) => entregues.push(p) };
   let concluiu = false;
@@ -354,7 +367,7 @@ test('Worker: a escrita que passa do teto vai pro ctx.waitUntil (senão a Cloudf
   }, async () => {
     const req = new Request('https://app.exemplo/api/marcar-lido', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookies: COOKIES, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }),
+      body: JSON.stringify({ sessionToken, region: 'row', venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }),
     });
     const res = await worker.fetch(req, env, ctx);
     return { status: res.status, body: await res.json() };

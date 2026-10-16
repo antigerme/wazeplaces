@@ -3,7 +3,7 @@
 // Não depende de plataforma: usa só `fetch` e `crypto.subtle` (Web Crypto),
 // que existem tanto no Cloudflare Workers quanto no Node. Toda I/O de
 // plataforma (armazenamento de sessão, chave de criptografia) é injetada pelos
-// adaptadores (functions/api/[[route]].js no Cloudflare, server/node.mjs na VM).
+// adaptadores (worker/index.mjs no Cloudflare, server/node.mjs na VM).
 //
 // Porte fiel do antigo api/config.php + os 9 endpoints PHP. Diferenças
 // intencionais na migração:
@@ -19,30 +19,39 @@ import {
   lerEnvio, lerConversas, lerMensagens, lerNaoLidas, lerPerfis, lerMarcarLida, lerProvedor,
 } from './wme-grpc.mjs';
 import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-app.mjs';
+import {
+  KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_ESPERA_WAZE_MS, varrerMantidos,
+} from './manter-conectado.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constantes
 // ─────────────────────────────────────────────────────────────────────────
 
+// A América do Norte é o servidor SEM prefixo. `na-Descartes` NÃO EXISTE:
+// MEDIDO em 2026-09-25 com a conta do owner, `Session`, `info/config`,
+// `LocationSearch/Countries` e `Issues/Search/List` dão 404 lá e 200 em
+// `/Descartes/` (8 países, e a fila dos EUA com 512 pedidos). O app mandava
+// todo editor dos EUA e do Canadá pra um servidor inexistente — só a opção
+// "World" funcionava, por acaso, porque apontava pra `/Descartes/`. O WME tem
+// TRÊS servidores (NA, ROW, IL), e o app agora também: `world` virou sinônimo
+// de `na` (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
+// o backend dele é outro (ver `WAZE_WMP`).
 export const WAZE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/v1',
-  na: 'https://www.waze.com/na-Descartes/app/v1',
+  na: 'https://www.waze.com/Descartes/app/v1',
   il: 'https://www.waze.com/il-Descartes/app/v1',
-  world: 'https://www.waze.com/Descartes/app/v1',
 };
 
 const WAZE_BASE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app',
-  na: 'https://www.waze.com/na-Descartes/app',
+  na: 'https://www.waze.com/Descartes/app',
   il: 'https://www.waze.com/il-Descartes/app',
-  world: 'https://www.waze.com/Descartes/app',
 };
 
 const WAZE_FEATURES_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
-  na: 'https://www.waze.com/na-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
+  na: 'https://www.waze.com/Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
   il: 'https://www.waze.com/il-Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
-  world: 'https://www.waze.com/Descartes/app/Features?ignoreWarnings=false&language=pt-BR',
 };
 
 // Presença do WME (gRPC). É SEPARADA POR SERVIDOR — MEDIDO: um WME aberto no
@@ -50,9 +59,8 @@ const WAZE_FEATURES_REGIONS = {
 // a região da fila, como o resto do app.
 const WAZE_GRPC_PRESENCA = {
   row: 'https://www.waze.com/row-Descartes/grpc/' + SERVICO_PRESENCA + '/',
-  na: 'https://www.waze.com/na-Descartes/grpc/' + SERVICO_PRESENCA + '/',
+  na: 'https://www.waze.com/Descartes/grpc/' + SERVICO_PRESENCA + '/',
   il: 'https://www.waze.com/il-Descartes/grpc/' + SERVICO_PRESENCA + '/',
-  world: 'https://www.waze.com/Descartes/grpc/' + SERVICO_PRESENCA + '/',
 };
 // Chat do WME (WMP). O backend é GLOBAL — MEDIDO: `row-wmp`, `na-wmp` e `il-wmp`
 // devolvem a mesma contagem de não lidas para a mesma conta, e `usa-wmp` dá
@@ -61,7 +69,6 @@ const WAZE_WMP = {
   row: 'https://www.waze.com/row-wmp/',
   na: 'https://www.waze.com/na-wmp/',
   il: 'https://www.waze.com/il-wmp/',
-  world: 'https://www.waze.com/row-wmp/',
 };
 
 const WAZE_IMAGE_BASE = 'https://venue-image.waze.com/thumbs/thumb700_';
@@ -140,6 +147,30 @@ export function base64ToBytes(b64) {
   const a = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
   return a;
+}
+
+// O Secret (`ENCRYPTION_KEY`) é a entrada do HKDF que cifra as sessões (ver
+// `derivarChave`), e o HKDF aceita QUALQUER tamanho: uma chave de 3 bytes
+// ("YWJj") ou de 16 funcionava calada nos dois adaptadores (auditoria de
+// 2026-09-29). O mínimo é 32 — o que o README manda gerar (`openssl rand
+// -base64 32`) —, e NÃO "exatamente 32": uma chave maior só é mais forte, e a
+// de produção não pode derrubar o app por ser longa.
+export const CHAVE_MIN_BYTES = 32;
+
+// Decodifica o Secret e diz o que há de errado com ele, pros dois adaptadores
+// recusarem do mesmo jeito: a VM no boot (código 1), o Worker com o 500 de
+// "Backend não configurado". `problema` é `null` quando está tudo certo.
+export function chaveDoSecret(b64) {
+  let keyBytes;
+  try {
+    keyBytes = base64ToBytes(String(b64 ?? '').trim());
+  } catch {
+    return { keyBytes: null, problema: 'ENCRYPTION_KEY não é base64 válido' };
+  }
+  if (keyBytes.length < CHAVE_MIN_BYTES) {
+    return { keyBytes: null, problema: `ENCRYPTION_KEY com ${keyBytes.length} bytes; o mínimo é ${CHAVE_MIN_BYTES} (gere com: openssl rand -base64 32)` };
+  }
+  return { keyBytes, problema: null };
 }
 
 async function sha256hex(str) {
@@ -280,12 +311,19 @@ export function cookieValePraHost(domain, host = WAZE_API_HOST) {
 // (30KB+ vs ~1.7KB só do Waze) → o Waze/Cloudflare rejeita com HTTP 400. Filtramos
 // na entrada pra que o store só persista cookies do Waze. Formato header (sem tabs)
 // não expõe o domínio → devolve como veio (a extensão já coleta só cookies do Waze).
+//
+// `#HttpOnly_` NÃO é comentário: é como o curl, o wget e extensões do Firefox
+// marcam cookie HttpOnly no formato Netscape (`#HttpOnly_.waze.com<TAB>…`). O
+// `_web_session` do Waze é HttpOnly, então tratar a linha como comentário
+// descartava justamente a sessão, e o login dizia "cookies expirados" pra quem
+// exportou certo. O prefixo sai AQUI, na entrada: o que fica guardado já está
+// normalizado, e o resto do core segue lendo `#` como comentário.
 export function filterWazeCookies(cookiesContent) {
   const s = String(cookiesContent).trim();
   if (!s.includes('\t')) return s;
   const kept = new Map();
   for (const line of s.split('\n')) {
-    const t = line.trim();
+    const t = line.trim().replace(/^#HttpOnly_/, '');
     if (!t || t[0] === '#') continue;
     const parts = t.split(/\s+/);
     if (parts.length < 7 || !cookieValePraHost(parts[0])) continue;
@@ -300,6 +338,41 @@ export function filterWazeCookies(cookiesContent) {
   return [...kept.values()].join('\n');
 }
 
+// O formato de CABEÇALHO (`a=b; c=d`, o que se copia do DevTools) vira linhas
+// Netscape na ENTRADA do login, com domínio `.waze.com` e path `/`. Aceitar os
+// dois formatos continua valendo; o que muda é o que fica GUARDADO, e a
+// diferença decide a vida da sessão: a regravação do cookie rotacionado
+// (gotcha #43, `aplicarCookiesRotacionados`) só sabe trocar valor em linha
+// Netscape. Guardada como cabeçalho, a sessão nunca acompanhava o
+// `_web_session` novo e azedava em dias, com o login do WME valendo (auditoria
+// de 2026-09-26). É o mesmo motivo de a extensão mandar Netscape
+// (`formatarNetscape`, em extensao-chrome/background.js).
+//
+// `.waze.com` porque é o domínio dos cookies do WME, e o `cookieValePraHost`
+// o deixa passar pro www. Só converte o que dá pra representar SEM PERDA: par
+// sem `=`, valor vazio, nome ou valor com espaço (o Netscape é lido por
+// `/\s+/`, e a linha com a última coluna vazia é descartada) e nome REPETIDO
+// (o navegador manda os dois de `.waze.com` e `www.waze.com`, e aqui viraria
+// um só) fazem o conteúdo seguir como veio — aceito, só sem a rotação, como
+// sempre foi. Conversão que perde cookie seria o login falhando pelo parser.
+export function cabecalhoParaNetscape(conteudo) {
+  const s = String(conteudo).trim();
+  if (s.includes('\t')) return s;
+  const pares = s.split('\n').map((l) => l.trim()).filter((l) => l && l[0] !== '#')
+    .join(';').split(';').map((p) => p.trim()).filter(Boolean);
+  const nomes = new Set();
+  const linhas = [];
+  for (const par of pares) {
+    const igual = par.indexOf('=');
+    const nome = par.slice(0, igual);
+    const valor = par.slice(igual + 1);
+    if (igual <= 0 || !valor || /\s/.test(nome) || /\s/.test(valor) || nomes.has(nome)) return s;
+    nomes.add(nome);
+    linhas.push(['.waze.com', 'TRUE', '/', 'TRUE', '0', nome, valor].join('\t'));
+  }
+  return linhas.length ? linhas.join('\n') : s;
+}
+
 // Constrói o valor do header `Cookie:` a partir do conteúdo salvo.
 // Aceita formato Netscape (cookies.txt, com tabs) ou header ("a=b; c=d").
 // `porHost` decide se o conjunto ainda é peneirado pelo host aqui dentro.
@@ -311,7 +384,9 @@ export function filterWazeCookies(cookiesContent) {
 // sintoma: `perfil` 200 e `buscar-places` 403, para sempre.
 export function cookieHeaderFrom(cookiesContent, porHost = true) {
   const s = String(cookiesContent).trim();
-  // Normaliza conteúdo que já é `a=b; c=d` (a extensão manda assim).
+  // Normaliza conteúdo que já é `a=b; c=d`: sessão gravada antes de o login
+  // passar a guardar Netscape, ou cabeçalho que não dá pra converter sem perda
+  // (ver `cabecalhoParaNetscape`). A extensão manda Netscape.
   const comoHeader = (txt) => String(txt)
     .split('\n')
     .map((l) => l.trim())
@@ -356,12 +431,20 @@ export function cookieHeaderFrom(cookiesContent, porHost = true) {
 // Chamada ao Waze via fetch (substitui makeCurlRequest/cURL)
 // ─────────────────────────────────────────────────────────────────────────
 
+// Quanto uma chamada ao Waze espera, no máximo, contando a leitura do corpo. O
+// cliente desiste do pedido INTEIRO aos 45 s (`_post`, no api.js), então rota
+// que faz duas chamadas em SÉRIE não cabe com as duas no teto cheio: a leitura
+// que vem antes de uma escrita ganha teto próprio (`RELEITURA_ESPERA_MS`), e a
+// soma é conferida em `test/portao-servidor.test.mjs`.
+export const WAZE_ESPERA_MS = 30000;
+
 // `ctx` (opcional) = { data, sessions, cookies } — o que permite regravar a
 // sessão com os cookies que o Waze rotacionou. Fica AQUI, e não em cada
 // handler, porque o modo de falha deste repo é "o próximo handler nasce sem":
 // são 7 pontos de chamada hoje e o esquecimento seria silencioso — a sessão
 // só azedaria semanas depois, longe de quem escreveu o código.
-async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null) {
+// `tetoMs`: a espera desta chamada, quando ela não pode usar o teto cheio.
+async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = null, { tetoMs = WAZE_ESPERA_MS } = {}) {
   const env = wazeRefererEnv(region);
   const headers = {
     Accept: '*/*',
@@ -390,7 +473,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, response;
     try {
       res = await fetch(url, { ...init, signal: controller.signal });
@@ -417,7 +500,7 @@ async function callWaze(url, cookieHeader, csrfToken, postData, region, ctx = nu
 // O chat vem de outra página do WME (`/chat/embed`) e se identifica com
 // `X-User-Agent`; a presença, não. Os cabeçalhos seguem cada um.
 const WME_CHAT_URL = 'https://www.waze.com/chat/embed?app_id=WAZE_MAP_EDITOR';
-async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false } = {}) {
+async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat = false, tetoMs = WAZE_ESPERA_MS } = {}) {
   const headers = {
     Accept: 'application/grpc-web-text',
     'Content-Type': 'application/grpc-web-text',
@@ -437,7 +520,7 @@ async function callWazeGrpc(url, cookieHeader, corpo, region, ctx = null, { chat
   if (chat) headers['X-User-Agent'] = 'grpc-web-javascript/0.1';
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), tetoMs);
     let res, texto;
     try {
       res = await fetch(url, { method: 'POST', headers, body: quadroGrpcWebTexto(corpo), signal: controller.signal });
@@ -582,6 +665,48 @@ export function aplicarCookiesRotacionados(conteudoAtual, setCookie) {
 // Categorização de erro do Waze (porte 1:1 do PHP — ver comentário histórico)
 // ─────────────────────────────────────────────────────────────────────────
 
+// Corpo do Waze que PRECISA ser um objeto. `JSON.parse('null')` não lança, e o
+// `rd.algo` logo depois virava TypeError: a pessoa via o "Erro interno"
+// genérico em vez da mensagem de resposta inválida, e o diário não distinguia
+// um defeito nosso de uma resposta estranha do Waze.
+function objetoDoWaze(texto) {
+  let v = null;
+  try { v = JSON.parse(texto); } catch { /* cai no erro abaixo */ }
+  if (!v || typeof v !== 'object') respostaInesperadaDoWaze();
+  return v;
+}
+
+// O Waze respondeu 200 com algo que não dá pra usar (página HTML, `null`, um
+// objeto sem o que a rota precisa). É erro inesperado DO WAZE, e sai igual em
+// toda rota: 500, `unknown`. O login dava 400 ("o pedido está errado") e sem
+// `errorCategory` (auditoria de 2026-09-29).
+//
+// A frase crua é a do dicionário pt: ela só aparece pra quem não tem a chave
+// — e pra extensão do Chrome, que decide "não está logado no WME" casando o
+// TEXTO com /expirad|inválid|invalid|csrf/. "Resposta inválida da API" casava,
+// e a extensão desistia dizendo que a pessoa não estava logada quando o Waze é
+// que tinha falhado. O certo é a extensão decidir pela `errorCategory` (ela
+// precisa ser republicada); até lá, a frase não a engana.
+function respostaInesperadaDoWaze() {
+  throw new ApiError({
+    success: false, error: 'Resposta inesperada do Waze', errorKey: 'srv.err.badWazeResponse', errorCategory: 'unknown',
+  }, 500);
+}
+
+// A lista que o Waze manda DENTRO de uma resposta 200 (`areas`, `countries`,
+// `venues.objects`…). Ausente, `null`, `0`, `''` e `false` são "sem nada", como
+// sempre foram; lista que veio como número, texto ou `true`, ou com um elemento
+// que não é objeto, é a mesma resposta inesperada do `objetoDoWaze` — antes
+// estourava um TypeError no laço e saía pelo `catch` do `dispatch` como "Erro
+// interno", sem categoria (auditoria de 2026-10-13, R16-6-08). `objetos: false`
+// só confere que é lista (o laço já tolera elemento estranho).
+function listaDoWaze(v, { objetos = true } = {}) {
+  if (!v) return [];
+  if (!Array.isArray(v)) respostaInesperadaDoWaze();
+  if (objetos) for (const e of v) if (!e || typeof e !== 'object') respostaInesperadaDoWaze();
+  return v;
+}
+
 export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
   if (fetchError) return { category: 'transient', message: 'Erro de conexão: ' + fetchError, messageKey: 'srv.err.connection' };
   if (httpCode === 401 || httpCode === 403) return { category: 'unauthorized', message: 'Cookies expirados ou inválidos', messageKey: 'srv.err.cookiesExpired' };
@@ -612,7 +737,11 @@ export function categorizeWazeError(httpCode, responseBody, fetchError = '') {
     bodyLower.includes('updated by another') ||
     bodyLower.includes('no longer') ||
     bodyLower.includes('has been resolved');
-  if ((httpCode === 200 || httpCode === 400 || httpCode === 422) && hasAlreadyHint) {
+  // A pista pelo TEXTO só vale em resposta de ERRO. Numa resposta 2xx quem
+  // decide é o `errorList` (acima): o corpo de sucesso ECOA o que foi gravado, e
+  // renomear um local para "Duplicate Keys" ou "Already Home" gravava de verdade
+  // e voltava pro app como "já tratado", desfazendo o nome na tela.
+  if ((httpCode === 400 || httpCode === 422) && hasAlreadyHint) {
     return { category: 'already_processed', message: 'Já tratado por outro editor', messageKey: 'srv.err.alreadyHandled' };
   }
 
@@ -671,7 +800,7 @@ function respostaDeErroGrpc(cat, r) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Gate de acesso (Staff OU rank>=2 & Area Manager)
+// Gate de acesso (Staff OU L2+ — rank cru >= MIN_RANK_WAZE — & Area Manager)
 // ─────────────────────────────────────────────────────────────────────────
 
 export function isUserAllowed(profile) {
@@ -730,37 +859,107 @@ export function normalizePairCode(code) {
 }
 
 export function makeSessions({ store, keyBytes }) {
+  // Os adaptadores recusam a chave curta antes de chegar aqui (a VM no boot, o
+  // Worker com o "Backend não configurado", ver `chaveDoSecret`); isto é a
+  // mesma régua pra quem montar um adaptador novo sem ela.
+  if (!keyBytes || !(keyBytes.length >= CHAVE_MIN_BYTES)) {
+    throw new Error(`makeSessions: a chave tem ${keyBytes ? keyBytes.length : 0} bytes, o mínimo é ${CHAVE_MIN_BYTES}`);
+  }
+  // O carimbo MAIS NOVO que esta instância conhece de cada sessão: o que o
+  // `loadSession` acabou de LER, ou o da gravação que ela mesma fez. O Waze
+  // rotaciona o cookie em TODA resposta, então o `refreshCookies` roda a cada
+  // chamada — e cada uma custava uma 2ª LEITURA do KV (cota: 100 mil por dia no
+  // plano grátis) só pra descobrir que ainda não era hora de regravar, cujo teto
+  // é 1/h. Com o carimbo lembrado, a leitura só acontece quando pode gravar
+  // (auditoria de 2026-09-25). Carimbo só CRESCE, então um lembrado recente
+  // prova que o de verdade também é: pular é seguro; um lembrado velho só faz
+  // ler, como antes. No Worker isto vive uma requisição (o `makeSessions` é por
+  // requisição); na VM, o processo inteiro — daí o teto de entradas.
+  //
+  // Só CRESCE também no mapa, e na VM é isso que segura o teto de escrita sob
+  // concorrência: a gravação RESERVA o carimbo novo antes do primeiro `await`
+  // (`reservar`), e a requisição da mesma sessão que chega junto lê a reserva e
+  // não grava. Sem o "só cresce", o `loadSession` dessa outra requisição
+  // trocaria a reserva pelo carimbo VELHO que ainda está no arquivo, e as duas
+  // gravariam. No Worker cada requisição tem o seu mapa, e quem segura o teto é
+  // a RELEITURA antes de gravar: a 2ª requisição da abertura relê e acha o
+  // carimbo que a 1ª acabou de gravar. O KV não tem "compare e grave", então
+  // duas respostas do Waze chegando na MESMA janela de releitura (dezenas de
+  // ms) ainda gravam as duas — as 3 chamadas da abertura têm latências de
+  // centenas de ms entre si.
+  const carimboLido = new Map();
+  const TETO_DE_SESSOES_LEMBRADAS = 5000;
+  const lembrarCarimbo = (hash, carimbo) => {
+    const atual = carimboLido.get(hash);
+    if (atual != null && atual >= carimbo) return;
+    if (atual == null && carimboLido.size >= TETO_DE_SESSOES_LEMBRADAS) carimboLido.clear();
+    carimboLido.set(hash, carimbo);
+  };
+  // Marca a sessão como gravada AGORA, ANTES de gravar, e devolve o desfazer
+  // (pra quando a gravação não acontece). O desfazer só volta atrás se a marca
+  // ainda for a dele.
+  const reservar = (hash, agora) => {
+    const antes = carimboLido.get(hash);
+    lembrarCarimbo(hash, agora);
+    return () => {
+      if (carimboLido.get(hash) !== agora) return;
+      if (antes == null) carimboLido.delete(hash);
+      else carimboLido.set(hash, antes);
+    };
+  };
+  const carimboDoValor = (raw) => {
+    const sep = String(raw).indexOf('|');
+    return { sep, carimbo: sep > 0 ? parseInt(String(raw).slice(0, sep), 10) : NaN };
+  };
+  // A chave da entrada do «Manter conectado»: derivada SÓ do Secret (o salt é
+  // constante), porque a varredura precisa abrir a entrada sem o token — o token
+  // é justamente o que ela guarda. `v1` é a versão do formato.
+  const MANTER_SALT = 'manter-conectado:v1';
+  const abrirKa = async (blob) => {
+    const texto = await decryptCookies(blob, await derivarChave(keyBytes, MANTER_SALT));
+    if (!texto) return null;
+    try {
+      const d = JSON.parse(texto);
+      return d && typeof d === 'object' ? d : null;
+    } catch { return null; }
+  };
   return {
     // Exposto pra quem precisa de cache curto próprio (a releitura do local
     // antes de excluir foto). Quem usar isto escolhe prefixo próprio na chave.
     store,
-    async createSession(cookiesContent) {
+    // `renovarJa`: a sessão nasce COM O CARIMBO DE UMA HORA ATRÁS, para o
+    // `refreshCookies` gravar o cookie rotacionado já na PRIMEIRA resposta. É o
+    // caso do resgate do pareamento: a cópia que o `claim` recebe é do
+    // aparelho de origem, pode ter horas de idade, e esperar 1 h pelo primeiro
+    // cookie novo deixava a sessão nova com o valor velho no primeiro dia. O
+    // limite é EXATO (`agora - SESSION_COOKIE_REFRESH`, e a trava do
+    // `refreshCookies` é `<` estrito): sem margem a mais nem a menos.
+    async createSession(cookiesContent, { renovarJa = false } = {}) {
       const token = randomToken();
       const hash = await sha256hex(token);
       const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, token));
       // Já nasce com carimbo: sem ele a PRIMEIRA leitura de toda sessão nova
       // dispararia uma renovação imediata — uma escrita a mais no KV por login,
       // à toa.
-      await store.put(hash, Math.floor(Date.now() / 1000) + '|' + blob, SESSION_TTL);
+      const agora = Math.floor(Date.now() / 1000);
+      await store.put(hash, (renovarJa === true ? agora - SESSION_COOKIE_REFRESH : agora) + '|' + blob, SESSION_TTL);
       return token;
     },
-    // Renova o prazo A CADA USO — janela deslizante, não prazo fixo.
+    // Lê e abre a sessão, e NÃO grava nada. O prazo é renovado pela própria
+    // requisição: pela regravação do cookie rotacionado (`refreshCookies`), que
+    // renova de carona, ou, sem ela, no FIM da requisição (`renovarPrazo`, que o
+    // `dispatch` chama). Ver o `renovarPrazo` pra janela deslizante em si.
     //
-    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
-    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
-    // nada. Resultado medido com o core de verdade e um KV simulado: editor
-    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
-    // no período. A validade contava do login, não do último uso — e o
-    // CLAUDE.md descrevia os dois adaptadores como se fossem equivalentes.
-    //
-    // O carimbo vai no VALOR, no mesmo formato que `createPairing` já usa
-    // (`ts|blob`), porque o KV não sabe dizer quanto falta do TTL. `|` é seguro
-    // como separador: base64 não o produz.
-    //
-    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
-    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada
-    // chamada (são 3 só ao abrir o app) esbarraria nesse teto — trocaria um
-    // logout por outro.
+    // A renovação morava AQUI, e era o defeito (auditoria de 2026-09-29): ela
+    // regravava o blob VELHO com carimbo novo ANTES de a requisição chamar o
+    // Waze, e a trava de 1 h do `refreshCookies` lê esse carimbo — então o
+    // cookie rotacionado que chegava em seguida era jogado fora, na requisição
+    // da renovação e em toda a hora seguinte. MEDIDO com relógio simulado: quem
+    // usa o app menos de 1 h por abertura e volta 24 h depois NUNCA salvava a
+    // rotação (o `_web_session` do login em todas as chamadas, 6 dias seguidos;
+    // abrindo a cada 2 dias, 14 dias), e o cookie do login é o que azeda
+    // (gotcha #43). De quebra, cada uma das 3 chamadas da abertura renovava por
+    // conta própria: 3 escritas no KV, duas no mesmo segundo.
     async loadSession(token) {
       if (!token) return null;
       const hash = await sha256hex(token);
@@ -785,32 +984,166 @@ export function makeSessions({ store, keyBytes }) {
       // é ROTACIONAR o `ENCRYPTION_KEY`: aí todo blob antigo morre de uma vez.
       const descartar = async () => { try { await store.delete(hash); } catch (e) { /* nunca derruba a resposta */ } };
 
-      const sep = raw.indexOf('|');
-      const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
+      const { sep, carimbo } = carimboDoValor(raw);
       if (!Number.isFinite(carimbo)) { await descartar(); return null; }
       const blob = raw.slice(sep + 1);
 
       const cookies = await decryptCookies(blob, await derivarChave(keyBytes, token));
       if (!cookies) { await descartar(); return null; }
 
-      const agora = Math.floor(Date.now() / 1000);
-      if (agora - carimbo >= SESSION_REFRESH_AFTER) {
-        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
-        // a sessão segue valendo com o prazo antigo. Deixar isto lançar
-        // transformaria uma falha de renovação em 401 — exatamente o defeito
-        // que esta função existe pra corrigir.
-        try {
-          await store.put(hash, agora + '|' + blob, SESSION_TTL);
-        } catch (e) {
-          // silêncio proposital: nada aqui deve derrubar a sessão
-        }
-      }
+      lembrarCarimbo(hash, carimbo);
       return cookies;
     },
+    // Renova o prazo da sessão se ele venceu, no FIM da requisição — janela
+    // DESLIZANTE, não prazo fixo. Quem chama é o `dispatch`, depois do handler.
+    //
+    // O adaptador de arquivo da VM sempre fez isso (mtime + touch). O KV do
+    // Cloudflare NÃO: `expirationTtl` conta do `put`, e o `get` não estende
+    // nada. Resultado medido com o core de verdade e um KV simulado: editor
+    // usando o app TODO DIA era deslogado no dia 21, com ZERO escritas no KV
+    // no período (gotcha #41). O carimbo vai no VALOR (`ts|blob`, o formato do
+    // `createPairing`), porque o KV não sabe dizer quanto falta do TTL; `|` é
+    // seguro como separador, base64 não o produz.
+    //
+    // Só reescreve depois de SESSION_REFRESH_AFTER, e isso não é economia à
+    // toa: o KV limita 1 escrita por segundo por chave, e renovar a cada chamada
+    // esbarraria nesse teto — trocaria um logout por outro.
+    //
+    // No FIM, e não no `loadSession`, porque a gravação do cookie rotacionado
+    // (`refreshCookies`) já renova o prazo: com o Waze mandando cookie novo, é
+    // ELA que grava, uma vez, e aqui não sobra nada a fazer (o carimbo lembrado
+    // já é o de agora). O blob velho só é regravado quando a requisição não
+    // trouxe cookie novo — e o que se regrava é o da RELEITURA, não o que o
+    // `loadSession` leu: outra requisição da mesma sessão pode ter acabado de
+    // gravar a rotação, e regravar o valor antigo por cima a desfaria.
+    //
+    // Só age se ESTA instância leu a sessão (o carimbo lembrado): token que não
+    // foi aberto aqui, ou sessão apagada (`destroySession` esquece o carimbo),
+    // não custa nem a leitura. E nunca lança, nem grava sessão que sumiu.
+    //
+    // O carimbo que ela grava é `agora - SESSION_COOKIE_REFRESH`, e não `agora`:
+    // a renovação do blob velho estende o prazo (o TTL vem do `put`, e na VM do
+    // mtime) SEM fechar a janela da rotação. Com `agora`, a trava de 1 h do
+    // `refreshCookies` lia esse carimbo e jogava fora o cookie novo que chegasse
+    // logo depois — a 1ª resposta do dia sem cookie novo (um 503 do Waze, rápido,
+    // antes das outras chamadas da abertura; ou uma rota que nem chama o Waze,
+    // como o `parear`) custava a rotação do dia inteiro a quem usa menos de 1 h
+    // por dia (auditoria de 2026-09-30, S-1). A RESERVA em memória leva o mesmo
+    // carimbo: na VM o mapa é do processo, e a reserva com `agora` fecharia a
+    // janela do mesmo jeito. O preço: a próxima renovação vence 1 h mais cedo
+    // (23 h depois), e o dia da falha grava duas vezes — a renovação e a rotação.
+    async renovarPrazo(token) {
+      if (typeof token !== 'string' || !token) return false;
+      let desfazer = null;
+      try {
+        const hash = await sha256hex(token);
+        const agora = Math.floor(Date.now() / 1000);
+        const lembrado = carimboLido.get(hash);
+        if (lembrado == null || agora - lembrado < SESSION_REFRESH_AFTER) return false;
+        const carimboNovo = agora - SESSION_COOKIE_REFRESH;
+        desfazer = reservar(hash, carimboNovo);
+        const raw = await store.get(hash);
+        const { sep, carimbo } = raw ? carimboDoValor(raw) : { sep: -1, carimbo: NaN };
+        if (!raw || !Number.isFinite(carimbo)) { desfazer(); return false; }
+        if (agora - carimbo < SESSION_REFRESH_AFTER) {
+          desfazer();
+          lembrarCarimbo(hash, carimbo);
+          return false;
+        }
+        await store.put(hash, carimboNovo + '|' + raw.slice(sep + 1), SESSION_TTL);
+        return true;
+      } catch {
+        // Renovar é melhor-esforço: se o KV recusar (limite de escrita, blip),
+        // a sessão segue valendo com o prazo antigo, e a próxima requisição
+        // tenta de novo.
+        if (desfazer) desfazer();
+        return false;
+      }
+    },
+    // Lê antes de apagar: a rota não exige nada além de um token qualquer, e no
+    // plano grátis do KV o apagamento é a cota curta (1.000 por dia, contra
+    // 100.000 leituras). Sem a leitura, token inventado em série gastava a cota
+    // do dia e o "Sair" de verdade parava de apagar.
     async destroySession(token) {
-      if (!token) return;
+      if (typeof token !== 'string' || !token) return;
       const hash = await sha256hex(token);
+      carimboLido.delete(hash);
+      // A entrada do «Manter conectado» sai JUNTO, com ou sem a sessão (a sessão
+      // pode ter vencido antes do «Sair»): deixá-la guardaria o token cifrado só
+      // com o Secret de quem pediu pra sair. Também lê antes de apagar.
+      const kaChave = KA_PREFIXO + hash;
+      if ((await store.get(kaChave)) != null) await store.delete(kaChave);
+      if ((await store.get(hash)) == null) return;
       await store.delete(hash);
+    },
+
+    // ── «Manter conectado» (ver server/manter-conectado.mjs) ─────────────────
+    // A entrada `ka_<hash>` guarda o TOKEN cifrado com uma chave derivada SÓ do
+    // `ENCRYPTION_KEY` — a exceção, escolhida pela pessoa, à regra de que o
+    // Secret sozinho não abre nada. Formato `carimbo|blob` como a sessão; o
+    // carimbo é a hora em que a pessoa (re)ligou, e é ele que vence em 14 dias.
+    async manterEstado(token) {
+      if (typeof token !== 'string' || !token) return false;
+      const raw = await store.get(KA_PREFIXO + await sha256hex(token));
+      if (raw == null) return false;
+      const { carimbo } = carimboDoValor(raw);
+      // Vencida pelo carimbo (o arquivo da VM não vence pelo TTL do `put`).
+      return !(Number.isFinite(carimbo) && Math.floor(Date.now() / 1000) - carimbo > KA_TTL);
+    },
+    // Liga (ou reafirma). Só REGRAVA se a entrada falta, tem mais de um dia ou
+    // aponta pra outra região: a escrita do KV é escassa, e o app reafirma a cada
+    // abertura. Devolve se está ligada. O chamador já provou que a sessão é válida.
+    async manterLigar(token, region) {
+      if (typeof token !== 'string' || !token) return false;
+      const regiao = Object.hasOwn(WAZE_REGIONS, region) ? region : 'row';
+      const hash = await sha256hex(token);
+      const chave = KA_PREFIXO + hash;
+      const agora = Math.floor(Date.now() / 1000);
+      const raw = await store.get(chave);
+      if (raw != null) {
+        const { sep, carimbo } = carimboDoValor(raw);
+        if (Number.isFinite(carimbo) && agora - carimbo < KA_REGRAVA_APOS && agora - carimbo >= 0) {
+          const dados = await abrirKa(raw.slice(sep + 1));
+          if (dados && dados.token === token && dados.region === regiao) return true;
+        }
+      }
+      const blob = await encryptCookies(JSON.stringify({ token, region: regiao }), await derivarChave(keyBytes, MANTER_SALT));
+      await store.put(chave, agora + '|' + blob, KA_TTL);
+      return true;
+    },
+    // Lê antes de apagar (a cota de apagamento do KV é a curta). Devolve `false`.
+    async manterDesligar(token) {
+      if (typeof token !== 'string' || !token) return false;
+      const chave = KA_PREFIXO + await sha256hex(token);
+      if ((await store.get(chave)) != null) await store.delete(chave);
+      return false;
+    },
+    // Um passo da varredura, numa só leitura da sessão. A chave da sessão é o
+    // mesmo hash da entrada, então "está devida?" se responde pelo CARIMBO da
+    // sessão, sem decifrar nada; a entrada só é lida (e o token só aberto) para
+    // quem está devida. Estados: `semSessao` · `emDia` · `semEntrada` · `vencida`
+    // · `estragada` · `devida` (com `token`, `region`, `cookies`).
+    async manterExaminar(chaveKa, { agora, devidoApos }) {
+      const chave = String(chaveKa);
+      if (!chave.startsWith(KA_PREFIXO)) return { estado: 'estragada' };
+      const hash = chave.slice(KA_PREFIXO.length);
+      const rawSessao = await store.get(hash);
+      if (rawSessao == null) return { estado: 'semSessao' };
+      const { sep, carimbo } = carimboDoValor(rawSessao);
+      if (!Number.isFinite(carimbo)) return { estado: 'semSessao' };
+      if (agora - carimbo < devidoApos) return { estado: 'emDia' };
+
+      const rawKa = await store.get(chave);
+      if (rawKa == null) return { estado: 'semEntrada' };
+      const ka = carimboDoValor(rawKa);
+      if (!Number.isFinite(ka.carimbo)) return { estado: 'estragada' };
+      if (agora - ka.carimbo > KA_TTL) return { estado: 'vencida' };
+      const dados = await abrirKa(rawKa.slice(ka.sep + 1));
+      if (!dados || typeof dados.token !== 'string' || await sha256hex(dados.token) !== hash) return { estado: 'estragada' };
+      const cookies = await decryptCookies(rawSessao.slice(sep + 1), await derivarChave(keyBytes, dados.token));
+      if (!cookies) return { estado: 'estragada' };
+      lembrarCarimbo(hash, carimbo);
+      return { estado: 'devida', token: dados.token, region: Object.hasOwn(WAZE_REGIONS, dados.region) ? dados.region : 'row', cookies };
     },
 
     // Reescreve a sessão com os cookies que o Waze rotacionou.
@@ -824,23 +1157,33 @@ export function makeSessions({ store, keyBytes }) {
     // KV aceita 1 escrita/s por chave. Sem o teto, um editor em ritmo trocaria
     // o logout por estouro de limite de escrita — outro logout, com outro nome.
     // Uma hora é folgado pra qualquer janela de tolerância plausível e mantém a
-    // escrita em no máximo 1/h por sessão ativa.
+    // escrita em no máximo 1/h por sessão ativa. A gravação leva o carimbo de
+    // agora e o TTL cheio, então ela RENOVA o prazo também — é o que deixa o
+    // `renovarPrazo` sem nada a fazer nesta requisição.
     //
     // Nunca lança: falha em renovar não pode derrubar a requisição do editor.
     async refreshCookies(token, conteudoNovo) {
       if (!token || !conteudoNovo) return false;
+      let desfazer = null;
       try {
         const hash = await sha256hex(token);
-        const raw = await store.get(hash);
-        if (!raw) return false;
-        const sep = raw.indexOf('|');
-        const carimbo = sep > 0 ? parseInt(raw.slice(0, sep), 10) : NaN;
         const agora = Math.floor(Date.now() / 1000);
-        if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) return false;
+        const lembrado = carimboLido.get(hash);
+        if (lembrado != null && agora - lembrado < SESSION_COOKIE_REFRESH) return false;
+        desfazer = reservar(hash, agora);
+        const raw = await store.get(hash);
+        if (!raw) { desfazer(); return false; }
+        const { carimbo } = carimboDoValor(raw);
+        if (Number.isFinite(carimbo) && agora - carimbo < SESSION_COOKIE_REFRESH) {
+          desfazer();
+          lembrarCarimbo(hash, carimbo);
+          return false;
+        }
         const blob = await encryptCookies(conteudoNovo, await derivarChave(keyBytes, token));
         await store.put(hash, agora + '|' + blob, SESSION_TTL);
         return true;
       } catch {
+        if (desfazer) desfazer();
         return false;
       }
     },
@@ -863,17 +1206,50 @@ export function makeSessions({ store, keyBytes }) {
     // sessão válida — o carimbo do pareamento é a EXPIRAÇÃO (futuro), o da
     // sessão é o ÚLTIMO USO (sempre passado), então o mesmo teste dava
     // "vencido" pra tudo. Medido: 1 arquivo antes, 0 depois do boot.
-    async createPairing(cookiesContent, { comCodigo = false } = {}) {
-      const segredo = randomPairCode(comCodigo ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
+    // `conta`: de quem é a sessão copiada (o aparelho que gera o código sabe), pra
+    // o que resgata saber na hora do login (K8). Vai CIFRADA com a mesma chave
+    // dos cookies, num terceiro campo: `exp|cookies|conta`.
+    async createPairing(cookiesContent, { comCodigo = false, conta = null } = {}) {
+      const curto = comCodigo === true; // booleano ESTRITO: qualquer outra coisa é o segredo FORTE
+      const segredo = randomPairCode(curto ? PAIR_CODE_LEN : PAIR_SECRET_LEN);
       const hash = 'pair_' + await sha256hex('pair:' + segredo);
       const exp = Math.floor(Date.now() / 1000) + PAIR_TTL;
-      const blob = await encryptCookies(cookiesContent, await derivarChave(keyBytes, segredo));
-      await store.put(hash, exp + '|' + blob, PAIR_TTL);
-      return { code: segredo, curto: comCodigo, expiresIn: PAIR_TTL };
+      const chave = await derivarChave(keyBytes, segredo);
+      const blob = await encryptCookies(cookiesContent, chave);
+      const contaBlob = conta ? '|' + await encryptCookies(String(conta), chave) : '';
+      await store.put(hash, exp + '|' + blob + contaBlob, PAIR_TTL);
+      return { code: segredo, curto, expiresIn: PAIR_TTL };
     },
 
+    // Lê antes de apagar, pelo mesmo motivo do `destroySession`: a rota não
+    // pede sessão (quem cancela é o "Sair", depois de a sessão já ter sido
+    // apagada), e no plano grátis do KV o apagamento é a cota curta — 1.000 por
+    // dia, contra 100.000 leituras. Sem a leitura, cada POST anônimo com um
+    // código qualquer de 6 ou 20 símbolos gastava um apagamento; em série, a
+    // cota do dia acabava, e com ela o "Sair" de verdade e o resgate de um
+    // código válido (os dois apagam). Auditoria de 2026-09-26.
+    async cancelPairing(code) {
+      const limpo = normalizePairCode(code);
+      if (limpo.length !== PAIR_CODE_LEN && limpo.length !== PAIR_SECRET_LEN) return;
+      try {
+        const hash = 'pair_' + await sha256hex('pair:' + limpo);
+        if ((await store.get(hash)) == null) return;
+        await store.delete(hash);
+      } catch (e) { /* vence sozinho em 5 min */ }
+    },
     // Uso único: apaga ANTES de validar a expiração, pra um código não poder
     // ser tentado duas vezes nem virar oráculo de "existe mas venceu".
+    //
+    // O uso único NÃO é atômico, e isso é sabido: `get` e `delete` são dois
+    // passos, e o KV não tem "ler e apagar" numa operação só (nem consistência
+    // imediata entre regiões: um apagamento leva até ~60 s pra valer no mundo
+    // todo). MEDIDO na auditoria de 2026-09-26: dois resgates SIMULTÂNEOS do
+    // mesmo código rendem duas sessões — 20 de 20 com o store de arquivo, 10 de
+    // 10 na VM de verdade; em série, o segundo é recusado. Não é furo, e por
+    // isso não se paga uma trava: o código É a credencial, e quem o tem já pode
+    // entrar por ele. A corrida não deixa entrar ninguém que não tinha o
+    // segredo; só dá uma segunda sessão (da mesma conta, cifrada com o token
+    // dela) a quem já podia ter a primeira.
     async claimPairing(code) {
       const limpo = normalizePairCode(code);
       // Os dois tamanhos são válidos: 6 é o código digitado, 20 é o do QR.
@@ -883,11 +1259,17 @@ export function makeSessions({ store, keyBytes }) {
       const raw = await store.get(hash);
       if (!raw) return null;
       await store.delete(hash);
-      const sep = raw.indexOf('|');
-      if (sep < 0) return null;
-      const exp = parseInt(raw.slice(0, sep), 10);
+      // `exp|cookies` ou `exp|cookies|conta` (o terceiro, desde K8). O blob
+      // cifrado é base64 com `::`, sem `|`.
+      const partes = String(raw).split('|');
+      if (partes.length < 2) return null;
+      const exp = parseInt(partes[0], 10);
       if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-      return decryptCookies(raw.slice(sep + 1), await derivarChave(keyBytes, limpo));
+      const chave = await derivarChave(keyBytes, limpo);
+      const cookies = await decryptCookies(partes[1], chave);
+      if (!cookies) return null;
+      const conta = partes[2] ? await decryptCookies(partes[2], chave) : null;
+      return { cookies, conta: conta && /^\d{1,19}$/.test(conta) ? conta : null };
     },
   };
 }
@@ -897,8 +1279,16 @@ export function makeSessions({ store, keyBytes }) {
 // ─────────────────────────────────────────────────────────────────────────
 
 function requireRegion(data) {
+  // Ausente (ou vazia) segue sendo `row`, como sempre foi. Região que VEIO e não
+  // é nenhuma das três é 400: cair em `row` calado mandava a decisão (rejeitar,
+  // marcar lido, excluir foto) ao servidor errado — que responde "não encontrado",
+  // e o app lê isso como "já tratado" e conta como feito (R17-6-A2).
   let region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
-  if (!WAZE_REGIONS[region]) region = 'row';
+  // MIGRACAO: regiao-world — `world` era a 4ª opção do filtro e sempre foi o
+  // servidor da América do Norte com outro nome (ver `WAZE_REGIONS`).
+  if (region === 'world') region = 'na';
+  // `hasOwn`: `constructor` e cia. são "verdadeiros" num objeto comum.
+  if (!Object.hasOwn(WAZE_REGIONS, region)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
   return region;
 }
 
@@ -915,7 +1305,12 @@ async function resolveCookies(data, sessions) {
     if (!cookies) throw new ApiError({ success: false, error: 'Sessão expirada ou inválida', errorKey: 'srv.err.sessionExpired', errorCategory: 'unauthorized' }, 401);
     return cookies;
   }
-  if (data && data.cookies) return String(data.cookies).trim();
+  // SÓ sessão. Aceitava também `cookies` crus no corpo, em QUALQUER rota, e
+  // isso furava o portão do login: o `isUserAllowed` só roda no
+  // `testar-cookies`, então quem mandasse o próprio cookies.txt direto no
+  // `validar-place` ou no `marcar-lido` rejeitava e lia pedido sem nunca passar
+  // pelo L2+AM. Nenhum cliente usava o atalho (a extensão e o app entram pelo
+  // `testar-cookies`); só os testes, que agora criam uma sessão de verdade.
   throw new ApiError({ success: false, error: 'Sessão ou cookies não fornecidos', errorKey: 'srv.err.sessionMissing', errorCategory: 'unauthorized' }, 401);
 }
 
@@ -1069,9 +1464,18 @@ export const pontoDeGeometria = (geom) => {
 // Vem null quando não há coordenada nenhuma: o card então não monta o slide,
 // em vez de desenhar um mapa do oceano no ponto (0, 0).
 export const montarMapa = (venue, changes) => {
+  // O ponto de entrada/saída: `[lat, lon]`, ou `null` quando o item não traz um
+  // ponto utilizável: ausente, `null`, `[]`, ou que VEIO e não é um par de números
+  // finitos (`[5]`, `[5, null]`, texto). É evidência ACESSÓRIA do mapa do card — o
+  // local e o pedido seguem corretos sem ele —, então um ponto quebrado é IGNORADO
+  // (não entra em `mapa.entradas`) e não derruba a fila do país inteira (R18-8,
+  // revisão do coordenador no lote 22 da decisão do lote 21, que o tratava como
+  // "resposta inesperada"). O que segue sendo forma quebrada é o CAMPO inteiro
+  // (`entryExitPoints` que não é lista: `listaDoWaze`) e a posição do LOCAL.
   const pontoDoEEP = (item) => {
     const c = item && item.point && item.point.coordinates;
-    return Array.isArray(c) && typeof c[0] === 'number' ? [c[1], c[0]] : null;
+    if (!Array.isArray(c) || !Number.isFinite(c[0]) || !Number.isFinite(c[1])) return null;
+    return [c[1], c[0]];
   };
   const centro = pontoDeGeometria(venue && venue.geometry);
   const geo = (changes || []).find((c) => c.field === 'geometry');
@@ -1097,9 +1501,11 @@ export const montarMapa = (venue, changes) => {
   };
   // Os que já existem no mapa hoje. Se o pedido mexe neles, o delta abaixo
   // repõe os mesmos como "saindo" — e é justamente o par que conta a história.
-  if (!eep) for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'atual');
+  // `listaDoWaze`: `entryExitPoints` que veio como número/objeto não é iterável.
+  const eepsDoLocal = listaDoWaze(venue && venue.entryExitPoints, { objetos: false });
+  if (!eep) for (const it of eepsDoLocal) pushEntrada(it, 'atual');
   else {
-    for (const it of (venue && venue.entryExitPoints) || []) pushEntrada(it, 'saindo');
+    for (const it of eepsDoLocal) pushEntrada(it, 'saindo');
     for (const it of (eep.delta && eep.delta.add) || []) pushEntrada(it, 'nova');
   }
 
@@ -1262,6 +1668,45 @@ const contarVertices = (geom) => {
   return n;
 };
 
+// A caixa [lonMin, latMin, lonMax, latMax] de uma geometria GeoJSON, em
+// QUALQUER profundidade — o mesmo desce do `contarVertices`. O `perfil` lia
+// `coordinates[0]` como se toda área fosse Polygon: num MultiPolygon cada
+// "vértice" era um anel, e a caixa saía `[null, null, null, null]` — que o
+// "Minha área" do app manda como filtro. E o mínimo sai em LAÇO, nunca com
+// `Math.min(...lista)`: o espalhamento passa cada vértice como ARGUMENTO, e um
+// anel grande estoura a pilha (medido: com 200 mil vértices o `perfil` caía em
+// 500 — auditoria de 2026-09-26). A recursão só desce no aninhamento (≤ 4
+// níveis no GeoJSON), não nos vértices. `null` sem vértice nenhum.
+//
+// A caixa sai LIMITADA a lon ±180 e lat ±90 (R18-6-04): é o que a busca por área
+// aceita (`caixaDaBusca`) e o que o globo tem. Um vértice além disso — polígono
+// que cruza a linha de data desenhado com longitude contínua (170 → 190), ou erro
+// de ponto flutuante em 180,0000001 — deixaria o "Minha área" em 400 permanente,
+// sem volta. Limitado, a busca funciona; num polígono contínuo a parte além de
+// 180 fica de fora da caixa, que é o menor dos males (a área que cruza a linha de
+// data na representação NORMAL, de -180 a 180, é a questão A4, à parte). Área
+// dentro dos limites sai exatamente como sempre saiu.
+const caixaDaGeometria = (geom) => {
+  let lonMin = Infinity, latMin = Infinity, lonMax = -Infinity, latMax = -Infinity;
+  const desce = (c) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number' && typeof c[1] === 'number') {
+      if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
+      if (c[0] < lonMin) lonMin = c[0];
+      if (c[0] > lonMax) lonMax = c[0];
+      if (c[1] < latMin) latMin = c[1];
+      if (c[1] > latMax) latMax = c[1];
+      return;
+    }
+    for (const item of c) desce(item);
+  };
+  desce(geom && geom.coordinates);
+  if (!(lonMin <= lonMax)) return null;
+  const lon = (v) => Math.max(-180, Math.min(180, v));
+  const lat = (v) => Math.max(-90, Math.min(90, v));
+  return [lon(lonMin), lat(latMin), lon(lonMax), lat(latMax)];
+};
+
 // Mesmo desce-recursivo do buildPlacesFromSearch, mas no escopo do módulo pra
 // o formatGeometry poder usar (lá ele é local a uma função).
 const extractLonLatDeep = (coords) => {
@@ -1279,20 +1724,31 @@ const extractLonLatDeep = (coords) => {
 // Handlers — cada um retorna { status, body }
 // ─────────────────────────────────────────────────────────────────────────
 
+// Só `destroy`. Havia um `create` — e ele era o PADRÃO de quem não mandava
+// `action` — que guardava cookies crus e devolvia um token SEM consultar o Waze
+// nem o `isUserAllowed`: qualquer conta, de qualquer nível, ganhava sessão. O
+// único caminho de entrada é o `testar-cookies` (e o pareamento, que copia uma
+// sessão que já passou por ele).
 async function handleSessao(data, { sessions }) {
-  const action = (data && data.action) || 'create';
-  if (action === 'create') {
-    if (!data.cookies) apiError('Cookies não fornecidos', 400, 'srv.err.cookiesMissing');
-    // Filtra pro domínio do Waze antes de armazenar (ver filterWazeCookies).
-    const cookies = filterWazeCookies(String(data.cookies).trim());
-    if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado', 400, 'srv.err.cookieFormatNoWaze');
-    if (!extractCSRFToken(cookies)) apiError('Token CSRF não encontrado', 400, 'srv.err.csrfMissing');
-    const token = await sessions.createSession(cookies);
-    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
-  }
+  const action = data && data.action;
   if (action === 'destroy') {
     await sessions.destroySession(data && data.sessionToken);
     return { status: 200, body: { success: true } };
+  }
+  // O interruptor «Manter conectado» das Preferências: liga/desliga NA HORA, sem
+  // esperar a próxima abertura do app (que o religaria pelo `perfil`). Sessão
+  // válida primeiro (401 como as outras rotas) — sem isso qualquer POST com
+  // token inventado gastaria escrita de KV —, e `on` é booleano ESTRITO: o
+  // texto "false" é verdadeiro pra quem coage, e ligar por engano guarda o
+  // token cifrado só com o Secret.
+  if (action === 'manter') {
+    await resolveCookies(data, sessions);
+    if (typeof data.on !== 'boolean') apiError('Pedido inválido', 400, 'srv.err.badRequest');
+    const region = requireRegion(data);
+    const manterConectado = data.on === true
+      ? await sessions.manterLigar(data.sessionToken, region)
+      : await sessions.manterDesligar(data.sessionToken);
+    return { status: 200, body: { success: true, manterConectado } };
   }
   apiError('Ação inválida', 400, 'srv.err.badAction');
 }
@@ -1305,17 +1761,30 @@ async function handleParear(data, { sessions }) {
 
   if (action === 'create') {
     const cookies = await resolveCookies(data, sessions); // 401 se não autenticado
-    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!(data && data.comCodigo) });
+    // A conta que o aparelho logado diz ser a dele (K8). Não é prova de nada: só
+    // vale pros dados locais do aparelho que resgatar, e o perfil que chegar lá
+    // confere de novo. Fora do formato, não vai.
+    const conta = data && /^\d{1,19}$/.test(String(data.conta ?? '')) ? String(data.conta) : null;
+    const { code, curto, expiresIn } = await sessions.createPairing(cookies, { comCodigo: !!data && data.comCodigo === true, conta });
     return { status: 200, body: { success: true, code, curto, expiresIn } };
   }
 
+  // CANCELAR um código emitido: o "Sair" do aparelho que o gerou o chama, senão
+  // o QR mostrado antes seguia valendo 5 min e entrava numa conta que acabou
+  // de sair (auditoria de 2026-09-25). Não pede sessão — ela já foi apagada — e
+  // não precisa: saber o código é a prova, e com ele dava pra usá-lo.
+  if (action === 'cancel') {
+    await sessions.cancelPairing(data && data.code);
+    return { status: 200, body: { success: true } };
+  }
+
   if (action === 'claim') {
-    const cookies = await sessions.claimPairing(data && data.code);
+    const resgate = await sessions.claimPairing(data && data.code);
     // Mensagem ÚNICA pros casos "não existe", "já usado" e "expirou": diferenciar
     // transformaria o endpoint num oráculo pra quem estivesse chutando códigos.
-    if (!cookies) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
-    const token = await sessions.createSession(cookies);
-    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL } };
+    if (!resgate) apiError('Código inválido ou expirado. Gere um novo no aparelho logado.', 400, 'srv.err.pairCodeInvalid');
+    const token = await sessions.createSession(resgate.cookies, { renovarJa: true });
+    return { status: 200, body: { success: true, sessionToken: token, expiresIn: SESSION_TTL, conta: resgate.conta } };
   }
 
   apiError('Ação inválida', 400, 'srv.err.badAction');
@@ -1327,24 +1796,45 @@ async function handleTestarCookies(data, { sessions }) {
   // Filtra pro domínio do Waze logo na entrada: o cookies.txt do navegador traz
   // cookies de dezenas de sites — guardar/enviar só os do Waze evita vazar
   // credenciais de terceiros e o HTTP 400 por header gigante. Ver filterWazeCookies.
-  const cookies = filterWazeCookies(String(data.cookies).trim());
+  // E o formato de cabeçalho é guardado como Netscape, senão a sessão não
+  // acompanha a rotação do cookie (ver `cabecalhoParaNetscape`).
+  const cookies = cabecalhoParaNetscape(filterWazeCookies(String(data.cookies).trim()));
   if (!validateCookiesFormat(cookies)) apiError('Formato de cookies inválido ou nenhum cookie do Waze encontrado. Exporte os cookies logado no Waze Map Editor (formato Netscape).', 400, 'srv.err.cookieFormatExport');
   const csrf = extractCSRFToken(cookies);
   if (!csrf) apiError('Token CSRF não encontrado nos cookies. Certifique-se de estar logado no Waze Map Editor.', 400, 'srv.err.csrfMissingLogin');
 
-  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, { data, sessions, cookies });
+  // `ctx` NULO, a exceção deliberada à regra do `callWaze`: aqui a sessão
+  // ainda NÃO existe — ela nasce lá embaixo, depois do portão. Com o contexto
+  // de sempre, um `sessionToken` no corpo fazia o `guardarCookiesRotacionados`
+  // REGRAVAR aquela sessão com os cookies DESTE pedido, mesmo quando o portão
+  // os recusava: uma conta L1 sem área entrava por dentro de uma sessão já
+  // liberada (auditoria de 2026-09-26). Nenhum cliente manda token aqui — nem
+  // o app, nem a extensão —, então quem perde o atalho é só quem o forjava.
+  const result = await callWaze(wazeSessionEndpoint(region), cookieHeaderFrom(cookies), csrf, null, region, null);
   if (result.httpCode === 401 || result.httpCode === 403) {
     apiError('Cookies expirados ou inválidos. Faça login novamente no Waze Map Editor e exporte novos cookies.', 400, 'srv.err.cookiesExpiredRelogin');
   }
-  if (result.httpCode !== 200) apiError(`Erro ao validar cookies (HTTP ${result.httpCode})`);
-
-  let profile;
-  try {
-    profile = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
+  // O resto é falha do WAZE, não dos cookies da pessoa, e sai categorizada como
+  // em toda rota: chave `srv.err.*` (o app traduz; a frase crua era a única
+  // `apiError` sem chave do core, e chegava em português em qualquer idioma),
+  // `errorCategory` e status 5xx — era 400, "o pedido está errado", pra um
+  // Waze fora do ar (auditoria de 2026-09-26). "Já tratado" e "não existe
+  // mais" são categorias de AÇÃO sobre um pedido e não significam nada no
+  // login: o que não é passageiro aqui é erro inesperado do Waze.
+  if (result.httpCode !== 200) {
+    const cat = categorizeWazeError(result.httpCode, result.response, result.error);
+    const c = cat.category === 'transient' ? cat
+      : { category: 'unknown', message: `Erro do Waze (HTTP ${result.httpCode})`, messageKey: 'srv.err.wazeUnknown', messageVars: { code: result.httpCode } };
+    return {
+      status: 500,
+      body: { success: false, error: c.message, errorKey: c.messageKey, errorVars: c.messageVars, errorCategory: c.category, httpCode: result.httpCode },
+    };
   }
-  if (!profile || typeof profile !== 'object' || !profile.userName) apiError('Resposta inválida da API do Waze', 400, 'srv.err.badWazeResponse');
+
+  // 200 com corpo que não é o perfil (HTML de um desafio, `null`, sem nome):
+  // falha do Waze, como qualquer outra — nunca "cookies inválidos".
+  const profile = objetoDoWaze(result.response);
+  if (!profile.userName) respostaInesperadaDoWaze();
 
   const check = isUserAllowed(profile);
   if (!check.allowed) {
@@ -1366,7 +1856,12 @@ async function handleTestarCookies(data, { sessions }) {
     };
   }
 
-  const token = await sessions.createSession(cookies);
+  // O `Session` que acabou de validar o login TROUXE um `_web_session` novo (o
+  // Waze rotaciona em toda resposta), e guardar o do arquivo jogava esse valor
+  // fora: a sessão nascia com a cópia que o editor exportou, possivelmente de
+  // horas atrás, e o relógio de ~24 h do Waze corria desde o export. Aplicar o
+  // da resposta é de graça (zero chamada nova ao Waze) e dá folga no 1º dia.
+  const token = await sessions.createSession(aplicarCookiesRotacionados(cookies, result.setCookie) || cookies);
   return {
     status: 200,
     body: {
@@ -1376,8 +1871,19 @@ async function handleTestarCookies(data, { sessions }) {
       expiresIn: SESSION_TTL,
       // Prazo do WAZE (fixo), não o do app (deslizante). Ver `prazoDaSessaoWaze`.
       sessaoExpiraEm: prazoDaSessaoWaze(result.setCookie),
+      // DE QUEM é a sessão — o portão acabou de ler o perfil. O app sabe a conta
+      // NA HORA do login, sem esperar o `/perfil`: o que a pessoa faz antes de
+      // ele chegar é dela, e não some junto com os dados da conta anterior
+      // quando a troca é detectada (auditoria da costura, 2026-09-26, K8).
+      conta: contaDoPerfil(profile),
     },
   };
+}
+
+// O id da conta como o app o guarda (texto de dígitos), ou `null`.
+function contaDoPerfil(profile) {
+  const id = profile && profile.id;
+  return id !== undefined && id !== null && /^\d{1,19}$/.test(String(id)) ? String(id) : null;
 }
 
 // Um pedido DUPLICATE diz DE QUEM o local é duplicado: o `flagEntityID` carrega
@@ -1408,6 +1914,21 @@ const DUPLICADO_BBOX_GRAUS = 0.004;
 // isso é zero ou um por página —, então o teto nunca é atingido em uso normal:
 // ele existe pra uma página anômala não virar rajada contra o Waze.
 const MAX_DUPLICADOS_POR_BUSCA = 4;
+// Teto PRÓPRIO da releitura do duplicado, contado depois de a busca voltar. O
+// nome do duplicado é enfeite do card, e a fila é o que o editor está
+// esperando; sem teto próprio, a leitura acessória herdava os 30 s do
+// `callWaze`, e busca lenta + releitura presa passavam dos 45 s em que o
+// CLIENTE desiste (`_post`, no api.js) — a fila inteira se perdia pelo enfeite
+// (auditoria de 2026-09-26; medido com um Waze de mentira: releitura de 40 s,
+// busca respondida em 30 s, sem o nome de qualquer jeito).
+//
+// Por que 3 s: é ~3× a leitura mais lenta medida no Waze (977 ms, o
+// `/Session`; a releitura por bbox do excluir-foto anda em ~700 ms), então num
+// dia normal o nome chega; e a pior soma — os 30 s da busca mais este teto —
+// cabe nos 45 s do cliente com folga, o que `test/portao-servidor.test.mjs`
+// confere nas duas fontes. Estourou, a busca sai sem o nome e o card cai na
+// forma isolada ("Duplicado"), a mesma de quando a releitura falha.
+export const DUPLICADO_ESPERA_MS = 3000;
 // Id de local do Waze: três inteiros separados por ponto, o do meio podendo ser
 // negativo (medido). Serve pra não sair fazendo leitura por causa de um
 // `flagEntityID` que na verdade é UUID de foto — o mesmo campo carrega as duas
@@ -1452,31 +1973,132 @@ async function resolverDuplicados(places, cookieHeader, csrf, region, ctx) {
   if (alvos.length === 0) return;
 
   const d = DUPLICADO_BBOX_GRAUS;
-  await Promise.all(alvos.map(async ({ p, centro }) => {
-    const [cLat, cLon] = centro;
-    const q = new URLSearchParams({
-      bbox: [cLon - d, cLat - d, cLon + d, cLat + d].join(','),
-      v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
-    });
-    const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
-    if (lida.httpCode !== 200) return;
-    let atual;
-    try { atual = JSON.parse(lida.response); } catch { return; }
-    const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
-    if (!alvo) return;
-    const ll = pontoDeGeometria(alvo.geometry);
-    // Mesma origem do enquadramento: a distância que o card mostra e o centro
-    // da caixa que achou o alvo são a MESMA conta.
-    const dist = ll ? distanciaEntrePontos(centro, ll) : null;
-    p.duplicado = {
-      id: alvo.id,
-      // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
-      // "(local sem nome)" é o frontend, que é a fonte única de string de UI.
-      nome: String(alvo.name || '').trim() || null,
-      ll,
-      distM: Number.isFinite(dist) ? dist : null,
-    };
-  }));
+  // Melhor-esforço POR ALVO: o nome do duplicado é enfeite do card, e uma
+  // leitura que volte estranha (corpo `null`, venue sem geometria) não pode
+  // derrubar a FILA inteira com um 500 — era o que um `atual.venues` de `null`
+  // fazia, porque a exceção subia pelo `Promise.all` até o `buscar-places`.
+  // E com TETO (`DUPLICADO_ESPERA_MS`): o que não voltou até lá fica sem nome.
+  let timer;
+  const teto = new Promise((resolve) => { timer = setTimeout(resolve, DUPLICADO_ESPERA_MS); });
+  try {
+    await Promise.race([
+      Promise.all(alvos.map(({ p, centro }) => resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx).catch(() => {}))),
+      teto,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resolverUmDuplicado(p, centro, d, cookieHeader, csrf, region, ctx) {
+  const [cLat, cLon] = centro;
+  const q = new URLSearchParams({
+    bbox: [cLon - d, cLat - d, cLon + d, cLat + d].join(','),
+    v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
+  });
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, ctx);
+  if (lida.httpCode !== 200) return;
+  let atual;
+  try { atual = JSON.parse(lida.response); } catch { return; }
+  const alvo = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === p.flagEntityID);
+  if (!alvo) return;
+  const ll = pontoDeGeometria(alvo.geometry);
+  // Mesma origem do enquadramento: a distância que o card mostra e o centro
+  // da caixa que achou o alvo são a MESMA conta.
+  const dist = ll ? distanciaEntrePontos(centro, ll) : null;
+  p.duplicado = {
+    id: alvo.id,
+    // Nome CRU do Waze. `null` = existe e não tem nome — quem escreve
+    // "(local sem nome)" é o frontend, que é a fonte única de string de UI.
+    nome: String(alvo.name || '').trim() || null,
+    ll,
+    distM: Number.isFinite(dist) ? dist : null,
+  };
+}
+
+// A ordem que o cliente pode pedir ao Waze, por LISTA BRANCA (é valor que vai no
+// corpo de uma requisição ao Waze em nome da pessoa). MEDIDO em 2026-09-26, só
+// leitura, conta do owner (Brasil, não lidos): o `SORTING_UPDATE_TIME_ASC` é
+// aceito (HTTP 200) e a página 1 muda — 464 pedidos, o mais novo às 09:20,
+// contra 502 e 12:21 no DESC. O critério é a hora de atualização do LOCAL, não
+// a data do pedido (a página 1 do DESC trouxe também o pedido mais antigo de
+// todos, de um local atualizado há pouco): a ordem fina segue sendo do cliente.
+const ORDENS_DA_BUSCA = new Set(['SORTING_UPDATE_TIME_DESC', 'SORTING_UPDATE_TIME_ASC']);
+
+// O país que o corpo traz, como número: o que o app manda (`number`) ou um texto
+// só de dígitos. O resto (texto, `true`, lista, objeto) é NaN — quem chama o
+// recusa. FONTE ÚNICA das duas rotas que recebem `countryId`.
+function inteiroDoPais(bruto) {
+  return typeof bruto === 'number' ? bruto
+    : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+}
+
+// Os outros campos da busca, na mesma régua do país (R17-6-A2). Todos seguem
+// opcionais: AUSENTE (`undefined`/`null`) é "sem filtro", como sempre foi — e o
+// `''` também, nos dois ids, porque é o que o select "todos" do app carrega. O que
+// VEIO e não presta é 400 (`srv.err.badRequest`), antes do Waze: ler 'abc' como
+// "sem estado" entregava a fila do PAÍS inteiro sem aviso, e `page: 1e12` ia ao
+// Waze como veio.
+const PAGINA_MAX = 1000;          // 500 pedidos por página: meio milhão, muito além de qualquer fila
+const CATEGORIAS_MAX = 200;       // o Waze tem pouco mais de uma centena de categorias
+const CATEGORIA_TAM_MAX = 80;     // o enum mais longo tem ~40 caracteres
+
+// `stateId` / `managedAreaId`: inteiro positivo (número ou texto só de dígitos) ou `null`.
+function idOpcionalDaBusca(bruto) {
+  if (bruto === undefined || bruto === null || bruto === '') return null;
+  const n = inteiroDoPais(bruto);
+  if (!(Number.isSafeInteger(n) && n > 0)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return n;
+}
+
+function paginaDaBusca(bruto) {
+  if (bruto === undefined || bruto === null || bruto === '') return 1;
+  const n = inteiroDoPais(bruto);
+  if (!(Number.isSafeInteger(n) && n >= 1 && n <= PAGINA_MAX)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return n;
+}
+
+// `bbox` = [lonMin, latMin, lonMax, latMax]: quatro números finitos, lat ±90 e lon ±180.
+function caixaDaBusca(bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  const ok = Array.isArray(bruto) && bruto.length === 4
+    && bruto.every((v) => typeof v === 'number' && Number.isFinite(v))
+    && Math.abs(bruto[0]) <= 180 && Math.abs(bruto[2]) <= 180
+    && Math.abs(bruto[1]) <= 90 && Math.abs(bruto[3]) <= 90;
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto;
+}
+
+// `categories`: lista de textos (lista vazia = sem filtro, como sempre), com teto.
+function categoriasDaBusca(bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  const ok = Array.isArray(bruto) && bruto.length <= CATEGORIAS_MAX
+    && bruto.every((c) => typeof c === 'string' && c.length > 0 && c.length <= CATEGORIA_TAM_MAX);
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto.length > 0 ? bruto : null;
+}
+
+// `types`: lista de NOMES dos 7 tipos do WME (as chaves do `PUR_TIPOS`; é o que o
+// app manda, `TYPES_ALL`). Lista vazia e ausente valem "todos", como sempre. Numa
+// LISTA, o que não é um desses nomes é 400 — antes o filtro lia `[1, 5]` (os números
+// do fio do Waze), `['new_place']` e `['FOO']` como "nenhum tipo serve": 200 com zero
+// cards, que a tela lê como "Tudo limpo!" (R18-6-03). O que NÃO é lista (texto solto,
+// número) segue como sempre foi: sem filtro de tipo — o app só manda lista.
+function tiposDaBusca(bruto) {
+  if (!Array.isArray(bruto)) return null;
+  const ok = bruto.every((t) => typeof t === 'string' && Object.hasOwn(PUR_TIPOS, t));
+  if (!ok) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto.length > 0 ? bruto : null;
+}
+
+// `residential` e `unreadOnly`: booleano ESTRITO, como o `value` do `guardar-pedido`.
+// `!!'false'` é `true` — o OPOSTO de "excluir os residenciais" —, e `!!0` é `false`.
+// AUSENTE (`undefined`/`null`) é o `padrao` de sempre: sem filtro de residencial
+// (o app padrão não manda a chave: mandar `true` anonimiza a fila) e só não lidos.
+function booleanoDaBusca(bruto, padrao) {
+  if (bruto === undefined || bruto === null) return padrao;
+  if (typeof bruto !== 'boolean') apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  return bruto;
 }
 
 async function handleBuscarPlaces(data, { sessions }) {
@@ -1484,15 +2106,25 @@ async function handleBuscarPlaces(data, { sessions }) {
   const region = requireRegion(data);
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
-  const page = data.page ? Math.max(1, parseInt(data.page, 10) || 1) : 1;
-  const countryId = data.countryId ? parseInt(data.countryId, 10) || 30 : 30;
-  const stateId = data.stateId !== undefined && data.stateId !== '' && data.stateId !== null ? parseInt(data.stateId, 10) : null;
-  const managedAreaId = data.managedAreaId !== undefined && data.managedAreaId !== '' && data.managedAreaId !== null ? parseInt(data.managedAreaId, 10) : null;
-  const bbox = Array.isArray(data.bbox) && data.bbox.length === 4 ? data.bbox : null;
-  const filterTypes = Array.isArray(data.types) && data.types.length > 0 ? data.types : null;
-  const filterCategories = Array.isArray(data.categories) && data.categories.length > 0 ? data.categories : null;
-  const residential = data.residential !== undefined ? !!data.residential : null;
-  const unreadOnly = data.unreadOnly !== undefined ? !!data.unreadOnly : true;
+  const page = paginaDaBusca(data.page);
+  // O país, quando vem, é um inteiro positivo (a mesma régua do `lista-estados`):
+  // o `parseInt(...) || 30` lia 'abc', 0, '30abc', `true` e `[]` como o Brasil e
+  // '1e400' como 1, e o -5 seguia pro Waze — a fila do Brasil entregue por um
+  // campo mal lido, sem erro nenhum (auditoria da rodada 15, R15-6-03). AUSENTE
+  // (`undefined`/`null`) segue valendo 30: a busca por área (`bbox`) nem o usa.
+  let countryId = 30;
+  if (data.countryId !== undefined && data.countryId !== null) {
+    countryId = inteiroDoPais(data.countryId);
+    if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
+  }
+  const stateId = idOpcionalDaBusca(data.stateId);
+  const managedAreaId = idOpcionalDaBusca(data.managedAreaId);
+  const bbox = caixaDaBusca(data.bbox);
+  const filterTypes = tiposDaBusca(data.types);
+  const filterCategories = categoriasDaBusca(data.categories);
+  const residential = booleanoDaBusca(data.residential, null);
+  const unreadOnly = booleanoDaBusca(data.unreadOnly, true);
+  const orderBy = ORDENS_DA_BUSCA.has(data.orderBy) ? data.orderBy : 'SORTING_UPDATE_TIME_DESC';
 
   const payload = {
     fromCreationTime: null,
@@ -1522,7 +2154,7 @@ async function handleBuscarPlaces(data, { sessions }) {
       // continuaria aqui de qualquer jeito — e um filtro que não filtra tudo
       // sozinho é o tipo de meia-verdade que faz o contador mentir.
       types: null,
-      orderBy: 'SORTING_UPDATE_TIME_DESC',
+      orderBy,
     },
   };
 
@@ -1535,12 +2167,7 @@ async function handleBuscarPlaces(data, { sessions }) {
     };
   }
 
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
+  const rd = objetoDoWaze(result.response);
 
   const { places, blocked } = buildPlacesFromSearch(rd, { filterTypes, unreadOnly });
 
@@ -1548,7 +2175,7 @@ async function handleBuscarPlaces(data, { sessions }) {
   // é RARO (0,24% dos pedidos) e porque a alternativa — resolver no cliente,
   // quando o card aparece — custaria uma requisição ao NOSSO servidor por card
   // visto, e o nome apareceria depois da foto, piscando.
-  // `ctx` sem `cookies`, igual ao `relerLocal`: quem grava o cookie rotacionado
+  // `ctx` sem `cookies`, igual ao `lerLocalNoWaze`: quem grava o cookie rotacionado
   // é a chamada principal ali em cima, e não estas, que correm em paralelo.
   await resolverDuplicados(places, cookieHeader, csrf, region, { data, sessions });
 
@@ -1624,26 +2251,53 @@ function purFiltrado(ur, filterTypes) {
   return t !== 'UNKNOWN' && !filterTypes.includes(t);
 }
 
+// O NOME de quem mandou o pedido ou a foto, como o `users` do Waze o traz — ou
+// `quandoSemNome` quando o usuário não tem um nome que se possa LER. FONTE ÚNICA
+// dos dois lugares que resolvem autor (o `creatorName` do pedido e o
+// `imageAuthors` das fotos): cada um tinha a regra sua, e a das fotos aceitava
+// qualquer valor "verdadeiro" — um `userName` `123`, `{}`, `true` ou `["a"]`
+// chegava ao lightbox, que faz `String(…)`, como "[object Object]" (auditoria da
+// rodada 21, R21-6-04). Nome é TEXTO, e com ao menos UM caractere que se veja:
+// só espaços, ou só caracteres de largura zero, de marca ou de controle (e o
+// quadro em branco do braile, "\u2800"), não é nome — o card mostrava
+// "(desconhecido)" com o id conhecido, e a reincidência gravava o autor com o
+// nome em branco. O `.trim()` sozinho não basta: o espaço de largura zero
+// ("\u200b") e a marca de direção ("\u200e") não são espaço, são caracteres de
+// formato, e passam por ele. O texto devolvido é o ORIGINAL, sem aparar: quem
+// tem nome de verdade o vê como veio. O Waze não manda nada disso (nome de
+// usuário é texto não vazio); é a regra dizendo o que o app aceita como nome.
+const TEM_CARACTERE_VISIVEL = /[^\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cc}\u2800]/u;
+export function nomeDoUsuario(u, quandoSemNome = null) {
+  const nome = u ? u.userName : undefined;
+  return typeof nome === 'string' && TEM_CARACTERE_VISIVEL.test(nome) ? nome : quandoSemNome;
+}
+
 // Expansão pura da resposta do Issues/Search/List em cards (um por PUR).
 // Devolve { places, blocked }: `blocked` são PURs que passariam nos filtros de
 // tipo/leitura mas cujo venue o usuário não tem permissão de editar.
 // Exportada pra suite testar com fixtures de HAR real, sem rede.
 export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = true } = {}) {
-  const usersDict = {};
+  // Os quatro dicionários e o `brandLookup` são SEM protótipo: um id (ou uma
+  // marca) chamado "constructor" ou "toString" achava a função do protótipo e
+  // saía como "Object, 10" no endereço (R23-6 F5; os ids do Waze são números, é
+  // endurecimento).
+  const usersDict = Object.create(null);
   // Guarda o objeto inteiro, não só o nome: o rank de quem PEDIU é sinal de
   // triagem (L1 anônimo × L5 editor) e vinha sendo jogado fora aqui.
-  for (const u of rd?.users?.objects || []) usersDict[u.id] = u;
-  const streetsDict = {};
-  for (const s of rd?.streets?.objects || []) streetsDict[s.id] = s;
-  const citiesDict = {};
-  for (const c of rd?.cities?.objects || []) citiesDict[c.id] = c;
-  const statesDict = {};
-  for (const st of rd?.states?.objects || []) statesDict[st.id] = st.name;
+  for (const u of listaDoWaze(rd?.users?.objects)) usersDict[u.id] = u;
+  const streetsDict = Object.create(null);
+  for (const s of listaDoWaze(rd?.streets?.objects)) streetsDict[s.id] = s;
+  const citiesDict = Object.create(null);
+  for (const c of listaDoWaze(rd?.cities?.objects)) citiesDict[c.id] = c;
+  const statesDict = Object.create(null);
+  for (const st of listaDoWaze(rd?.states?.objects)) statesDict[st.id] = st.name;
 
-  const brandLookup = {};
+  // Sem protótipo: uma marca chamada "constructor" ou "toString" daria
+  // "conhecida" num objeto comum.
+  const brandLookup = Object.create(null);
   const categoryBrands = rd?.venues?.categoryBrands || {};
   for (const cat of Object.keys(categoryBrands)) {
-    for (const b of categoryBrands[cat] || []) {
+    for (const b of listaDoWaze(categoryBrands[cat], { objetos: false })) {
       const k = String(b).trim().toLowerCase();
       if (k) brandLookup[k] = true;
     }
@@ -1678,13 +2332,19 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
 
   const places = [];
   let blocked = 0;
-  for (const venue of rd?.venues?.objects || []) {
+  for (const venue of listaDoWaze(rd?.venues?.objects)) {
     if (!Array.isArray(venue.venueUpdateRequests) || venue.venueUpdateRequests.length === 0) continue;
+    // Um `null` (ou número) no meio da lista de pedidos estourava `ur.isRead` /
+    // `ur.createdBy` e derrubava a fila INTEIRA do país com "Erro interno" — o
+    // mesmo defeito do `venues.objects: [null]` uma lista acima (R17-6-A1).
+    listaDoWaze(venue.venueUpdateRequests);
     // permissions: bitmask signed 32-bit. <0 = pode editar; >=0 = sem permissão.
     // Antes descartávamos o venue aqui. Agora seguimos o laço só pra CONTAR
     // (blocked) os PURs que passariam nos demais filtros — é o que alimenta o
     // "de N na região" (D13). Nenhum card é emitido pra venue não-editável.
-    const editable = !(venue.permissions !== undefined && venue.permissions >= 0);
+    // Só um NÚMERO não-negativo bloqueia: campo ausente (ou `null`, que em JS
+    // `null >= 0` lê como 0) entra, como diz o contrato do filtro (R17-6-A3).
+    const editable = !(typeof venue.permissions === 'number' && venue.permissions >= 0);
     if (!editable) {
       // Só contagem: aplica os MESMOS filtros de leitura/tipo pra que o número
       // seja comparável com places.length, e pula o trabalho caro (endereço,
@@ -1763,21 +2423,20 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // `creatorName`). Conta apagada vem do Waze como "Inactive User", e sai
     // assim mesmo: é o que o WME mostra, e traduzir seria inventar identidade.
     const imageAuthors = {};
-    for (const img of venue.images || []) {
+    for (const img of listaDoWaze(venue.images, { objetos: false })) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
       if (img.approved === true) approvedImageIds.push(img.id);
       if (Number.isFinite(img.date) && img.date > 0) imageDates[img.id] = img.date;
       if (img.creatorUserId != null) {
-        const dono = usersDict[img.creatorUserId];
-        imageAuthors[img.id] = dono && dono.userName ? dono.userName : String(img.creatorUserId);
+        imageAuthors[img.id] = nomeDoUsuario(usersDict[img.creatorUserId], String(img.creatorUserId));
       }
     }
 
     for (const ur of venue.venueUpdateRequests) {
       const creatorId = ur.createdBy ?? null;
       const creatorObj = creatorId ? usersDict[creatorId] : null;
-      const creatorName = creatorObj ? creatorObj.userName : creatorId;
+      const creatorName = nomeDoUsuario(creatorObj, creatorId);
       // Rank CRU do Waze (0-indexed). Quem soma 1 pra exibir é o frontend —
       // regra sagrada do projeto, ver gotcha #15.
       const creatorRank = creatorObj && Number.isInteger(creatorObj.rank) ? creatorObj.rank : null;
@@ -1866,15 +2525,19 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
           for (const k of Object.keys(ur.changedVenue)) {
             if (CAMPOS_ESCRITURACAO.has(k)) continue;
             const newValue = ur.changedVenue[k];
+            // O valor de HOJE do campo: só o que o venue TEM (R23-6 F5). `venue[k]`
+            // com `k` = "constructor" lia a função do protótipo como se fosse o
+            // valor antigo.
+            const valorAtual = Object.hasOwn(venue, k) ? venue[k] : null;
             // Campo que veio no pacote mas não mudou não vira linha. Conta,
             // porém: é a diferença entre "comparamos e nada muda" e "não veio
             // nada pra comparar", e as duas dizem coisas diferentes pro editor.
-            if (mesmoValor(venue[k] ?? null, newValue ?? null)) {
+            if (mesmoValor(valorAtual ?? null, newValue ?? null)) {
               camposSemMudanca++;
               continue;
             }
-            const label = fieldLabels[k] || (k.charAt(0).toUpperCase() + k.slice(1));
-            const resolvedFrom = resolveIdField(k, venue[k] ?? null);
+            const label = (Object.hasOwn(fieldLabels, k) && fieldLabels[k]) || (k.charAt(0).toUpperCase() + k.slice(1));
+            const resolvedFrom = resolveIdField(k, valorAtual ?? null);
             const resolvedTo = resolveIdField(k, newValue);
             // Geometria primeiro: é o campo que chegava como "[object Object]".
             const fmt = k === 'geometry'
@@ -1883,18 +2546,18 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             const mudanca = {
               field: k,
               label,
-              from: resolvedFrom !== null ? resolvedFrom : fmt(venue[k] ?? null),
+              from: resolvedFrom !== null ? resolvedFrom : fmt(valorAtual ?? null),
               to: resolvedTo !== null ? resolvedTo : fmt(newValue),
             };
             // Quanto andou. O frontend formata o número no locale do editor —
             // aqui vai cru, em metros, porque o core não sabe o idioma dele.
             if (k === 'geometry') {
-              const d = distanciaEntreGeometrias(venue[k] ?? null, newValue);
+              const d = distanciaEntreGeometrias(valorAtual ?? null, newValue);
               if (d !== null && Number.isFinite(d)) mudanca.movedM = d;
               // Vértices como NÚMERO, não sufixo de texto: o card precisa saber
               // "ganhou um vértice" pra não anunciar "moveu 0 m" numa forma que
               // mudou. Quem escolhe a frase é o frontend.
-              const vA = contarVertices(venue[k] ?? null);
+              const vA = contarVertices(valorAtual ?? null);
               const vB = contarVertices(newValue);
               if (vA || vB) { mudanca.vertsFrom = vA; mudanca.vertsTo = vB; }
               // As duas posições, pro card poder DESENHAR em vez de só narrar.
@@ -1904,13 +2567,13 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
               // pedido (27 de 83) e o segundo é ponto de entrada (21) — juntos,
               // a maioria do que a caixa de mudanças mostra hoje em coordenada
               // crua. O texto FICA: é o que sobra quando o mapa não carrega.
-              const pDe = pontoDeGeometria(venue[k] ?? null);
+              const pDe = pontoDeGeometria(valorAtual ?? null);
               const pPara = pontoDeGeometria(newValue);
               if (pDe || pPara) mudanca.pontos = { de: pDe, para: pPara };
             }
             // Campo de lista: o que entrou e o que saiu, em vez de duas listas
             // inteiras pro editor comparar de olho.
-            const delta = diffDeLista(venue[k] ?? null, newValue);
+            const delta = diffDeLista(valorAtual ?? null, newValue);
             if (delta) mudanca.delta = delta;
             // Objeto simples (não lista): mostra as folhas que mudaram em vez do
             // JSON inteiro. Se não der, o `from`/`to` do fallback continua lá —
@@ -1920,7 +2583,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
             // devolvendo o editor às coordenadas cruas que o gotcha do
             // `[object Object]` já tinha resolvido. Medido ao introduzir isto.
             else if (k !== 'geometry') {
-              const objDelta = diffDeObjeto(venue[k] ?? null, newValue);
+              const objDelta = diffDeObjeto(valorAtual ?? null, newValue);
               if (objDelta) mudanca.objDelta = objDelta;
             }
             changes.push(mudanca);
@@ -2011,18 +2674,31 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
   return { places, blocked };
 }
 
+// Id de pedido, de local ou de foto: texto ou número curto. Objeto, lista ou
+// texto de quilobytes não é id — ia pro Waze como veio (auditoria de
+// 2026-09-25). Vale em TODO caminho que manda id pro Waze: nasceu só no lote
+// do marcar-lido, e o marcar-lido de um item, o validar-place, o
+// guardar-pedido, o renomear-local e o excluir-foto seguiam mandando um objeto
+// ou um texto de 200 KB como veio (auditoria de 2026-09-26). Id inválido
+// responde o MESMO 400 de id ausente, antes do Waze.
+const idValido = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 64) || (typeof v === 'number' && Number.isFinite(v));
+// O lote tem TETO: o cliente manda pedaços de 25, e a página do Waze é de 500.
+// Sem teto, um corpo de 5 MB virava um lote de dezenas de milhares no Waze.
+const MAX_ITENS_LOTE = 500;
+
 async function handleMarcarLido(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
 
   const ids = [];
   if (Array.isArray(data.items)) {
+    if (data.items.length > MAX_ITENS_LOTE) apiError('Pedidos demais de uma vez', 400, 'srv.err.tooManyItems', { max: MAX_ITENS_LOTE });
     for (const item of data.items) {
-      if (item && item.venueID !== undefined && item.updateRequestID !== undefined) {
+      if (item && idValido(item.venueID) && idValido(item.updateRequestID)) {
         ids.push({ id: item.updateRequestID, venueId: item.venueID });
       }
     }
-  } else if (data.venueID !== undefined && data.updateRequestID !== undefined) {
+  } else if (idValido(data.venueID) && idValido(data.updateRequestID)) {
     ids.push({ id: data.updateRequestID, venueId: data.venueID });
   }
   if (ids.length === 0) apiError('Dados incompletos', 400, 'srv.err.incompleteData');
@@ -2068,7 +2744,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
 async function handleGuardarPedido(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) {
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) {
     apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   }
   // Boolean ESTRITO e sem padrão, pelo mesmo motivo do `approve` (gotcha #59):
@@ -2106,7 +2782,7 @@ async function handleGuardarPedido(data, { sessions }) {
 async function handleValidarPlace(data, { sessions, aoFundo }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  if (data.venueID === undefined || data.updateRequestID === undefined) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(data.venueID) || !idValido(data.updateRequestID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
 
   // `=== true` e não coerção: sem isso, qualquer valor truthy que escapasse
   // (uma string "false", por exemplo) viraria uma aprovação.
@@ -2133,6 +2809,16 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
   };
   const carona = iniciarCarona(data, cookieHeader, region);
   const result = await callWaze(wazeFeaturesEndpoint(region), cookieHeader, csrf, payload, region, { data, sessions, cookies });
+  // Aprovar muda a lista de fotos do LOCAL (a pendente vira aprovada), e a
+  // releitura que o excluir-foto guardou ao tocar numa lixeira ainda a via
+  // pendente. Dentro da janela dela, excluir a foto recém-aprovada dava "só foto
+  // aprovada pode ser excluída", e excluir OUTRA gravava de volta o
+  // `approved: false` velho — o Waze substitui a lista inteira (gotcha #57).
+  // Esquecida, a próxima exclusão relê do Waze. Com qualquer resultado: o que
+  // importa é o Waze PODER ter mudado a lista. E só no aprovar: rejeitar é o
+  // gesto de todo swipe, e uma leitura do KV a mais em cada um pesaria na cota;
+  // aprovar é raro — só foto, só L6+AM (auditoria de 2026-09-26).
+  if (aprovar) await esquecerReleitura(data, sessions);
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
   const extra = await esperarCarona(carona, aoFundo);
 
@@ -2188,16 +2874,37 @@ const RELEITURA_BBOX_GRAUS = 0.0002;
 
 // Quanto tempo a releitura vale antes de o app ter que fazê-la de novo.
 //
-// A releitura é disparada quando o editor TOCA na lixeira, e usada quando ele
-// CONFIRMA — assim os ~700ms dela cabem dentro do tempo em que ele lê o
-// diálogo, e a espera depois do "Excluir" passa a ser só a escrita.
+// A releitura é disparada quando o editor TOCA na lixeira (a foto sai da tela e
+// abre a janela do Desfazer) e usada quando a exclusão sai, no fim da janela —
+// assim os ~700ms dela cabem dentro da janela, e a espera depois dela passa a
+// ser só a escrita. Com o Desfazer desligado não há `preparar`: a exclusão sai
+// na hora e faz releitura e escrita em série.
 //
 // Este número é o TAMANHO DA JANELA DA CORRIDA, e é por isso que ele é curto:
 // se outro editor subir uma foto dentro dela, a nossa escrita a apaga em
 // silêncio. Antes da releitura essa janela era a idade da fila — horas. Com 15s
-// ela cobre a hesitação normal e nada além; quem parar pra pensar mais que isso
-// paga a releitura de novo, que é o certo.
+// ela cobre a janela do Desfazer e a ida da rede, e nada além; o que passar
+// disso paga a releitura de novo, que é o certo.
 const RELEITURA_TTL = 15;
+// O prazo que vai pro STORE é outro número, e não pode ser o de cima: o KV do
+// Cloudflare recusa `expirationTtl` abaixo de 60 s (o `put` lança), e o
+// `catch` logo abaixo engolia isso — no Worker o cache NUNCA era gravado, e
+// toda exclusão pagava a releitura de novo. Quem garante os 15 s é o carimbo
+// no valor, conferido na leitura; o KV só precisa jogar o registro fora depois.
+export const RELEITURA_TTL_STORE = Math.max(60, RELEITURA_TTL);
+// Teto PRÓPRIO da releitura, o orçamento da rota. Sem a lista guardada (o
+// `preparar` falhou ou não houve, ou a lista passou dos 15 s), a exclusão faz
+// releitura e escrita EM SÉRIE, e cada uma herdava os 30 s do `callWaze`: 60 s,
+// contra os 45 s em que o cliente desiste do pedido. O `callWithRetry` refazia,
+// a escrita da 1ª tentativa já tinha saído, e a 2ª voltava `jaExcluida` — a
+// pessoa lia "outro editor já tinha excluído" sobre a exclusão DELA (MEDIDO
+// com um Waze de mentira de 29 s por chamada: 58,1 s; auditoria de 2026-09-29).
+// A escrita segue com o teto cheio: cortá-la cedo é abortar uma gravação que o
+// Waze pode estar fazendo. Quem encolhe é a leitura, e 10 s é ~14× os ~700 ms
+// medidos dela; releitura que não volta até lá é erro de rede, e o cliente
+// tenta de novo — sem escrita no meio, então sem o "já excluída" falso. A soma
+// com o teto da escrita é conferida contra os 45 s em `test/portao-servidor`.
+export const RELEITURA_ESPERA_MS = 10000;
 // Relê o local no Waze e guarda o resultado por RELEITURA_TTL.
 //
 // O cache fica no SERVIDOR de propósito. A alternativa óbvia — o cliente ler,
@@ -2205,39 +2912,166 @@ const RELEITURA_TTL = 15;
 // quem está sendo verificado: bastaria mandar uma lista curta pra apagar tudo.
 // Hoje o cliente só diz QUAL foto quer excluir; quem monta a lista é o
 // servidor, a partir do que o Waze respondeu.
-async function relerLocal(data, sessions, cookieHeader, csrf, region) {
-  const venueID = data.venueID;
-  const chave = 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + venueID));
-  try {
-    const bruto = await sessions.store.get(chave);
-    if (bruto) {
-      const corte = bruto.indexOf('|');
-      const ts = parseInt(bruto.slice(0, corte), 10);
-      if (Number.isFinite(ts) && Math.floor(Date.now() / 1000) - ts <= RELEITURA_TTL) {
-        return { venue: JSON.parse(bruto.slice(corte + 1)), doCache: true };
-      }
-    }
-  } catch (e) { /* cache ilegível é cache ausente */ }
+const chaveDaReleitura = async (data) => 'reler_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
+// A lista do TOQUE na lixeira (o `preparar`) mora numa chave PRÓPRIA — uma por
+// sessão e local —, marcada com o GESTO que a pediu (auditoria da rodada 13,
+// R13-3-02 e R13-3-03). Ela gravava na chave de cima, a que as exclusões releem
+// e regravam, e podia chegar DEPOIS de quem já tinha escrito no local: com a
+// página saindo, a escrita não espera o toque (ver o `vezDasFotosNoLocal` no
+// app), e a leitura dele, feita ANTES da escrita, voltava e guardava a lista de
+// antes por cima. A conferência do lote 16 (só gravar por cima do registro que
+// estava lá quando ela saiu) não via a lista APAGADA por uma aprovação — apagada,
+// ela volta a ser a de antes: nenhuma — e não era atômica: o `get` e o `put` são
+// dois acessos, e a gravação da exclusão cabia entre eles. A exclusão seguinte
+// do local mandava a foto excluída de volta, ou a recém-aprovada como pendente,
+// com tudo `success: true` (MEDIDO de ponta a ponta, com um Waze de mentira).
+// Numa chave própria, a lista do toque não cobre nada: só a exclusão DO MESMO
+// GESTO a usa (`relerLocal`), e só quando a chave de cima não tem lista valendo.
+// O prefixo é o da releitura: a VM a varre pelo mesmo carimbo, e o prazo é o
+// mesmo (`RELEITURA_TTL_STORE`).
+const chaveDoToque = async (data) => 'reler_toque_' + (await sha256hex(String(data.sessionToken) + '|' + data.venueID));
+// O id do gesto que o app manda (`aquecimento`): o toque e a exclusão dele levam o
+// mesmo. Fora do formato, é como se não viesse.
+const gestoDaLixeira = (v) => (typeof v === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null);
 
+// O registro guardado, se ele ainda VALE (`RELEITURA_TTL` contados da leitura):
+// `{ lidoEm, dado }`, ou nulo. Registro ilegível lança — quem chama o trata como
+// ausente.
+function listaQueVale(bruto) {
+  if (!bruto) return null;
+  const corte = bruto.indexOf('|');
+  const ts = parseInt(bruto.slice(0, corte), 10);
+  if (!Number.isFinite(ts) || Math.floor(Date.now() / 1000) - ts > RELEITURA_TTL) return null;
+  return { lidoEm: ts, dado: JSON.parse(bruto.slice(corte + 1)) };
+}
+
+// O ponto onde o local está, como o app o manda (`place.lat` / `place.lon`): dois
+// NÚMEROS finitos, lat ±90 e lon ±180. `Number()` lia `null`, `''`, `true` e `[]`
+// como 0 e a releitura ia ao Waze em (0°, 0°), voltando "local não encontrado" em
+// vez de "parâmetros incompletos" (R18-6-02) — a mesma classe do `countryId`.
+// Ausente ou fora disso é 400, antes do Waze. FONTE ÚNICA das duas leituras.
+function coordenadaDoCorpo(data) {
+  const { lat, lon } = data;
+  const ok = typeof lat === 'number' && typeof lon === 'number'
+    && Number.isFinite(lat) && Number.isFinite(lon)
+    && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+  if (!ok) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  return { lat, lon };
+}
+
+// Lê o local no Waze, pela caixa mínima: `{ venue, lidoEm }` (só o que a escrita
+// precisa), ou o erro.
+async function lerLocalNoWaze(data, cookieHeader, csrf, region, sessions) {
+  const venueID = data.venueID;
   const d = RELEITURA_BBOX_GRAUS;
-  const lat = Number(data.lat), lon = Number(data.lon);
+  const { lat, lon } = coordenadaDoCorpo(data);
   const q = new URLSearchParams({
     bbox: [lon - d, lat - d, lon + d, lat + d].join(','),
     v: '2', apiV2: 'true', venueLevel: '4', venueFilter: '1,1,1,1', zoomLevel: '22',
   });
-  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions });
+  // `lidoEm` é a hora de ANTES da leitura (auditoria da rodada 12, R12-3-01): a
+  // lista é a do Waze em algum instante entre a ida e a volta, e só a ida é um
+  // limite seguro pra idade dela. Com a hora da RESPOSTA, uma leitura lenta (o
+  // teto dela é `RELEITURA_ESPERA_MS`, 10 s) esticava em até 10 s a janela da
+  // corrida de `RELEITURA_TTL` que este arquivo promete.
+  const lidoEm = Math.floor(Date.now() / 1000);
+  const lida = await callWaze(`${wazeFeaturesBase(region)}?${q}`, cookieHeader, csrf, null, region, { data, sessions },
+    { tetoMs: RELEITURA_ESPERA_MS });
   if (lida.httpCode !== 200) return { erro: categorizeWazeError(lida.httpCode, lida.response, lida.error), httpCode: lida.httpCode };
   let atual;
   try { atual = JSON.parse(lida.response); } catch { return { erroParse: true }; }
-  const venue = ((atual.venues && atual.venues.objects) || []).find((v) => v && v.id === venueID);
+  if (!atual || typeof atual !== 'object') return { erroParse: true };
+  // Lista que veio como número/objeto (ou `images` do local assim) é a mesma
+  // forma quebrada do JSON ilegível — `erroParse`, que o `excluir-foto` devolve
+  // como `respostaInesperadaDoWaze()` e o `preparar` como "sem lista pronta".
+  // Antes estourava no `.find`/`.filter` e saía como "Erro interno" (R17-3-03).
+  const objetos = atual.venues && atual.venues.objects;
+  if (objetos && !Array.isArray(objetos)) return { erroParse: true };
+  const venue = (objetos || []).find((v) => v && v.id === venueID);
   if (!venue) return { semLocal: true };
+  if (venue.images && !Array.isArray(venue.images)) return { erroParse: true };
   // Só o que a escrita precisa. Guardar o venue inteiro seria guardar geometria
   // e escrituração à toa.
-  const enxuto = { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) };
+  return { venue: { id: venue.id, images: (venue.images || []).filter((i) => i && i.id) }, lidoEm };
+}
+
+// A lista em que a EXCLUSÃO se baseia: a guardada na chave da releitura, se ela
+// vale; senão a do TOQUE deste gesto (`gesto`, ver `chaveDoToque`), se vale;
+// senão a do Waze, lida agora e guardada na chave da releitura.
+//
+// `lidoEm` viaja junto: é a IDADE da lista, e quem regrava o cache depois de
+// excluir tem que manter esta hora, não a da escrita (ver a regravação logo
+// depois da escrita, no `handleExcluirFoto`). E `bruto`, o registro EXATO da
+// chave da releitura em que esta exclusão se baseia: a regravação depois da
+// escrita só acontece se ele ainda estiver lá (R11-3-01). A lista do TOQUE volta
+// com `bruto` nulo — não há o que regravar: a chave da releitura segue sem lista
+// valendo, e a exclusão seguinte do local relê (ou usa o toque DELA).
+//
+// A releitura da exclusão grava sempre, como antes: é a lista em que a escrita
+// dela se baseia, e a regravação depois da escrita (que tira a foto) só acontece
+// por cima dela.
+async function relerLocal(data, sessions, cookieHeader, csrf, region, { gesto = null } = {}) {
+  const chave = await chaveDaReleitura(data);
   try {
-    await sessions.store.put(chave, Math.floor(Date.now() / 1000) + '|' + JSON.stringify(enxuto), RELEITURA_TTL);
+    const bruto = await sessions.store.get(chave);
+    const vale = listaQueVale(bruto);
+    if (vale) return { venue: vale.dado, doCache: true, lidoEm: vale.lidoEm, bruto };
+  } catch (e) { /* cache ilegível é cache ausente */ }
+  if (gesto) {
+    try {
+      const vale = listaQueVale(await sessions.store.get(await chaveDoToque(data)));
+      if (vale && vale.dado && vale.dado.gesto === gesto && Array.isArray(vale.dado.images)) {
+        return { venue: { id: vale.dado.id, images: vale.dado.images }, doCache: true, lidoEm: vale.lidoEm, bruto: null };
+      }
+    } catch (e) { /* ilegível é ausente */ }
+  }
+  const lida = await lerLocalNoWaze(data, cookieHeader, csrf, region, sessions);
+  if (!lida.venue) return lida;
+  const bruto = lida.lidoEm + '|' + JSON.stringify(lida.venue);
+  let gravou = false;
+  try {
+    await sessions.store.put(chave, bruto, RELEITURA_TTL_STORE);
+    gravou = true;
   } catch (e) { /* sem cache o app só fica mais lento */ }
-  return { venue: enxuto, doCache: false };
+  return { venue: lida.venue, doCache: false, lidoEm: lida.lidoEm, bruto: gravou ? bruto : null };
+}
+
+// O TOQUE na lixeira (`preparar`): lê o local agora, pra a exclusão do gesto não
+// ter de ler depois da janela do Desfazer. Com a lista da releitura valendo, não
+// há o que ler. A lista vai pra chave do TOQUE, marcada com o gesto — nunca pra
+// da releitura (ver `chaveDoToque`). Devolve se a exclusão do gesto vai ter
+// lista pronta.
+async function aquecerReleitura(data, sessions, cookieHeader, csrf, region, gesto) {
+  try {
+    if (listaQueVale(await sessions.store.get(await chaveDaReleitura(data)))) return true;
+  } catch (e) { /* cache ilegível é cache ausente */ }
+  const lida = await lerLocalNoWaze(data, cookieHeader, csrf, region, sessions);
+  if (!lida.venue) return false;
+  try {
+    await sessions.store.put(await chaveDoToque(data), lida.lidoEm + '|' + JSON.stringify({ gesto, ...lida.venue }), RELEITURA_TTL_STORE);
+  } catch (e) { return false; }
+  return true;
+}
+
+// Esquece as listas guardadas de um local — a da releitura e a do toque —: a
+// próxima exclusão relê do Waze. Lê antes de apagar, pelo mesmo motivo do
+// `destroySession` (no KV o apagamento é a cota curta), e o registro quase nunca
+// existe — só no minuto depois de a pessoa tocar numa lixeira daquele local. A
+// do TOQUE também (R13-3-02): ela é da exclusão do mesmo gesto, e a aprovação
+// que pousa entre o toque e essa exclusão (de outra aba da mesma sessão) a deixa
+// velha, com a foto aprovada ainda pendente. Isto só protege quando a aprovação
+// pousa DEPOIS de o toque gravar: pousando no voo da leitura do toque, a gravação
+// dele chega depois deste esquecer, e a exclusão daquele gesto usa a lista velha
+// (R14-3-04, decidido no lote 16: fechar custaria uma marca da aprovação e +1
+// leitura do KV em toda exclusão).
+async function esquecerReleitura(data, sessions) {
+  for (const chaveDe of [chaveDaReleitura, chaveDoToque]) {
+    try {
+      const chave = await chaveDe(data);
+      if ((await sessions.store.get(chave)) == null) continue;
+      await sessions.store.delete(chave);
+    } catch (e) { /* sem apagar, o registro deixa de valer sozinho em RELEITURA_TTL */ }
+  }
 }
 
 async function handleExcluirFoto(data, { sessions }) {
@@ -2245,12 +3079,8 @@ async function handleExcluirFoto(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const imageID = data.imageID;
-  if (!venueID || !imageID) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
-  const lat = Number(data.lat);
-  const lon = Number(data.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
-  }
+  if (!idValido(venueID) || !idValido(imageID)) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  coordenadaDoCorpo(data);
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
@@ -2268,27 +3098,32 @@ async function handleExcluirFoto(data, { sessions }) {
   // perguntar se ela precisa existir.
 
   // MODO PREPARAR: só aquece a releitura e volta. É o que o cliente dispara
-  // quando o editor TOCA na lixeira, pra os ~700ms dela correrem enquanto ele
-  // lê a pergunta do diálogo. Não escreve nada e não devolve a lista — quem
-  // decide o que gravar continua sendo o servidor.
+  // quando o editor TOCA na lixeira, pra os ~700ms dela correrem dentro da
+  // janela do Desfazer. Não escreve nada NO WAZE (a lista vai pro store: até uma
+  // escrita no KV) e não devolve a lista — quem decide o que gravar continua
+  // sendo o servidor. A lista é do GESTO (`aquecimento`, o id que o app manda
+  // no toque e na exclusão dele) e mora na chave do toque, que nenhuma outra
+  // escrita lê (R13-3-02 e R13-3-03, ver `chaveDoToque`). Sem o gesto, não há
+  // pra quem ler: a exclusão relê na hora.
   if (data.action === 'preparar') {
-    const prep = await relerLocal(data, sessions, cookieHeader, csrf, region);
+    const gesto = gestoDaLixeira(data.aquecimento);
     // Falha aqui é silenciosa de propósito: preparar é otimização. Se der
     // errado, o `excluir` faz a releitura na hora e a pessoa só espera mais.
-    return { status: 200, body: { success: true, preparado: !prep.erro && !prep.semLocal && !prep.erroParse } };
+    const preparado = gesto ? await aquecerReleitura(data, sessions, cookieHeader, csrf, region, gesto) : false;
+    return { status: 200, body: { success: true, preparado } };
   }
 
   // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
-  //    Vem do cache quando o cliente já pediu `preparar` ao abrir o diálogo —
-  //    aí os ~700ms dela couberam no tempo de leitura da pergunta.
-  const rel = await relerLocal(data, sessions, cookieHeader, csrf, region);
+  //    Vem do cache quando o cliente já pediu `preparar` ao tocar na lixeira —
+  //    aí os ~700ms dela couberam na janela do Desfazer.
+  const rel = await relerLocal(data, sessions, cookieHeader, csrf, region, { gesto: gestoDaLixeira(data.aquecimento) });
   if (rel.erro) {
     return {
       status: rel.erro.category === 'unauthorized' ? 401 : 500,
       body: { success: false, error: rel.erro.message, errorKey: rel.erro.messageKey, errorVars: rel.erro.messageVars, errorCategory: rel.erro.category, httpCode: rel.httpCode },
     };
   }
-  if (rel.erroParse) apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  if (rel.erroParse) respostaInesperadaDoWaze();
   if (rel.semLocal) apiError('Local não encontrado', 404, 'srv.err.venueGone');
   const venue = rel.venue;
 
@@ -2296,9 +3131,17 @@ async function handleExcluirFoto(data, { sessions }) {
   // Foto já não existe: outro editor chegou primeiro. Isso NÃO é erro — o
   // objetivo de quem tocou na lixeira foi cumprido (mesma lógica que o
   // `already_processed` de rejeitar/marcar lido).
-  if (!imagensAgora.some((i) => i.id === imageID)) {
+  const aExcluir = imagensAgora.find((i) => i.id === imageID);
+  if (!aExcluir) {
     return { status: 200, body: { success: true, jaExcluida: true, restantes: imagensAgora.map((i) => i.id) } };
   }
+  // Só foto APROVADA sai pela lixeira. A pendente (a proposta de um pedido de
+  // foto) ainda não está no mapa: tirá-la da lista apagava a imagem E deixava o
+  // pedido órfão, sem ninguém tratar — o caminho dela é o ✕/✓ do card. O
+  // cliente já só oferece a lixeira em foto aprovada (`idFotoAtual`), mas uma
+  // tela que mentisse sobre isso (como o `.finally` que marcava aprovada a foto
+  // cuja aprovação FALHOU) chegava aqui. `=== false`: sem o campo, segue.
+  if (aExcluir.approved === false) apiError('Só foto já aprovada pode ser excluída', 400, 'srv.err.photoNotApproved');
   const restantes = imagensAgora.filter((i) => i.id !== imageID);
 
   // 3) Escrita. Mesma forma do HAR do WME, byte a byte na estrutura.
@@ -2323,6 +3166,44 @@ async function handleExcluirFoto(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
+
+  // A RELEITURA guardada passa a ser a lista que acabou de ser gravada. Sem
+  //    isto, uma segunda exclusão no mesmo local dentro de RELEITURA_TTL lia a
+  //    lista VELHA do cache e mandava de volta a foto que acabou de sair (o Waze
+  //    substitui a lista inteira). MEDIDO que o Waze não a ressuscita, mas
+  //    depender disso é depender do eco que o próprio passo 4 diz não ser prova
+  //    (auditoria de 2026-09-25).
+  //
+  //    Com o carimbo da LEITURA, nunca o da escrita: o que se regrava é a lista
+  //    lida lá atrás menos uma foto, e ela não fica mais nova por isso. Com a
+  //    hora da escrita, exclusões em série EMPURRAVAM o prazo e a lista
+  //    envelhecia além dos RELEITURA_TTL — MEDIDO: a leitura dos 0 s servia a
+  //    exclusão dos 20 s, e a foto que outro editor subiu aos 16 s era apagada
+  //    (auditoria de 2026-09-26).
+  //
+  //    E SÓ se a releitura guardada ainda é a que esta exclusão LEU (`rel.bruto`).
+  //    No meio da escrita ela pode ter SUMIDO: a aprovação de uma foto do local a
+  //    esquece quando pousa (`esquecerReleitura`, no `handleValidarPlace`), porque
+  //    a lista que ela guardava via a foto como pendente. A exclusão que voltava
+  //    depois a RECRIAVA com essa lista de antes, e a exclusão seguinte, nos
+  //    `RELEITURA_TTL` dela, gravava a foto recém-aprovada de volta como
+  //    `approved: false` — a aprovação se desfazia no Waze sem pedido nenhum
+  //    (auditoria da rodada 11, R11-3-01, MEDIDO no core e de ponta a ponta). O
+  //    mesmo vale pra uma releitura TROCADA no meio (outra exclusão do local, de
+  //    outra aba, já a regravou sem a foto dela): por cima, ela voltaria. Custa
+  //    uma leitura do KV, nenhuma escrita: sumida ou trocada, a próxima exclusão
+  //    relê do Waze (ou usa a que está lá).
+  //
+  //    A exclusão que se baseou na lista do TOQUE (`bruto` nulo, ver o
+  //    `relerLocal`) não regrava nada: a chave da releitura não tinha lista
+  //    valendo, e segue sem — a exclusão seguinte do local relê, ou usa o toque
+  //    dela. Nenhuma leitura nem escrita a mais.
+  try {
+    const chave = await chaveDaReleitura(data);
+    if (rel.bruto && (await sessions.store.get(chave)) === rel.bruto) {
+      await sessions.store.put(chave, rel.lidoEm + '|' + JSON.stringify({ id: venue.id, images: restantes }), RELEITURA_TTL_STORE);
+    }
+  } catch (e) { /* sem cache, a próxima exclusão relê do Waze */ }
 
   // 4) Conferência pelo que o Waze DEVOLVEU — e o eco NÃO É PROVA, então isto
   //    é uma rede a mais, não a garantia.
@@ -2377,7 +3258,7 @@ async function handleRenomearLocal(data, { sessions }) {
   const region = requireRegion(data);
   const venueID = data.venueID;
   const nome = typeof data.nome === 'string' ? data.nome.trim() : '';
-  if (!venueID || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
+  if (!idValido(venueID) || !nome) apiError('Parâmetros incompletos', 400, 'srv.err.incompleteParams');
   if (nome.length > NOME_MAX) apiError('Nome longo demais', 400, 'srv.err.nameTooLong');
 
   const { cookieHeader, csrf } = prepareAuth(cookies);
@@ -2432,26 +3313,38 @@ async function handlePerfil(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+  const rd = objetoDoWaze(result.response);
+
+  // O portão, de novo. A porta de entrada é o `testar-cookies`, mas o nível e a
+  // área mudam no Waze depois do login, e uma sessão de 21 dias DESLIZANTES
+  // nunca mais passaria por lá. O perfil sai uma vez por abertura do app e o
+  // `/Session` que ele já lê traz o que o portão precisa: zero chamada a mais.
+  // Pega também sessão criada pelo atalho que existia no `sessao` (ver
+  // `handleSessao`). Só RECUSA com os três campos presentes e do tipo certo
+  // (MEDIDO nas duas contas do owner: number, boolean, boolean): um `/Session`
+  // que venha sem eles não pode derrubar a sessão de todo mundo de uma vez.
+  if (typeof rd.rank === 'number' && typeof rd.isAreaManager === 'boolean' && typeof rd.isStaff === 'boolean') {
+    const check = isUserAllowed(rd);
+    if (!check.allowed) {
+      try { await sessions.destroySession(data.sessionToken); } catch (e) { /* a resposta sai igual */ }
+      return {
+        status: 403,
+        body: {
+          success: false, error: check.reason, errorKey: check.reasonKey, errorVars: check.reasonVars,
+          errorCategory: 'access_denied',
+          profile: { userName: rd.userName || '', rank: rd.rank, isAreaManager: rd.isAreaManager, isStaff: rd.isStaff },
+        },
+      };
+    }
   }
 
   const areas = [];
-  for (const area of rd.areas || []) {
-    let bbox = null;
-    const coords = area?.geometry?.coordinates?.[0];
-    if (Array.isArray(coords) && coords.length) {
-      const lons = coords.map((c) => c[0]);
-      const lats = coords.map((c) => c[1]);
-      bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
-    }
-    areas.push({ type: area.type ?? null, bbox });
+  for (const area of listaDoWaze(rd.areas, { objetos: false })) {
+    // Polygon e MultiPolygon, de qualquer tamanho (ver `caixaDaGeometria`).
+    areas.push({ type: area?.type ?? null, bbox: caixaDaGeometria(area?.geometry) });
   }
   const managedAreas = [];
-  for (const ma of rd.managedAreas || []) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
+  for (const ma of listaDoWaze(rd.managedAreas)) managedAreas.push({ id: ma.id ?? null, name: ma.name || '' });
 
   // Casa e trabalho, pro "Perto de casa/do trabalho" do filtro. O `/Session`
   // devolve os dois como ponto GeoJSON (MEDIDO com os cookies do owner:
@@ -2478,12 +3371,28 @@ async function handlePerfil(data, { sessions }) {
   const detalhes = rd.onlineEditorDetails || rd.user?.onlineEditorDetails;
   const visivelNoWme = typeof detalhes?.visible === 'boolean' ? detalhes.visible : null;
 
+  // «Manter conectado»: `manter === true` liga, `=== false` desliga, qualquer
+  // outra coisa (ausente, "true", 1) NÃO mexe — o app reafirma a cada abertura, e
+  // o texto "false" não pode ligar nem desligar nada. Só aqui, DEPOIS do 200 do
+  // Waze e do portão: sessão recusada já foi apagada (e a entrada junto). Nunca
+  // derruba o perfil: o app abre mesmo com o KV de mau humor. A resposta traz o
+  // estado REAL depois da mudança.
+  let manterConectado = false;
+  if (typeof sessions.manterEstado === 'function') {
+    try {
+      if (data.manter === true) manterConectado = await sessions.manterLigar(data.sessionToken, region);
+      else if (data.manter === false) manterConectado = await sessions.manterDesligar(data.sessionToken);
+      else manterConectado = await sessions.manterEstado(data.sessionToken);
+    } catch { manterConectado = false; }
+  }
+
   return {
     status: 200,
     body: {
       success: true,
       referencias,
       visivelNoWme,
+      manterConectado,
       profile: {
         id: rd.id ?? null,
         userName: rd.userName || '',
@@ -2518,13 +3427,8 @@ async function handleListaPaises(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
-  const countries = (rd.countries || []).map((c) => ({
+  const rd = objetoDoWaze(result.response);
+  const countries = listaDoWaze(rd.countries).map((c) => ({
     id: c.id ?? null,
     name: c.name || '',
     abbr: c.abbr || '',
@@ -2542,8 +3446,14 @@ async function handleListaPaises(data, { sessions }) {
 async function handleListaEstados(data, { sessions }) {
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
-  const countryId = data.countryId ? parseInt(data.countryId, 10) : 0;
-  if (countryId <= 0) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
+  // O país é um inteiro: o número que o app manda (`parseInt` no `api.js`), ou
+  // um texto só de dígitos. O `parseInt` daqui lia '1e400' como 1 e '30abc'
+  // como 30, e o que não é número virava NaN — e `NaN <= 0` é FALSO: 'abc',
+  // `true`, `[]`, `{}` e 'NaN' passavam e iam ao Waze com countryId=0, voltando
+  // 200 com a lista vazia (auditoria de 2026-09-29). `!(> 0)` pega o NaN; o
+  // mesmo 400 do país ausente, antes do Waze.
+  const countryId = inteiroDoPais(data.countryId);
+  if (!(Number.isSafeInteger(countryId) && countryId > 0)) apiError('countryId obrigatório', 400, 'srv.err.countryRequired');
   const { cookieHeader, csrf } = prepareAuth(cookies);
 
   const result = await callWaze(wazeStatesEndpoint(region, countryId), cookieHeader, csrf, null, region, { data, sessions, cookies });
@@ -2554,14 +3464,9 @@ async function handleListaEstados(data, { sessions }) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: result.httpCode },
     };
   }
-  let rd;
-  try {
-    rd = JSON.parse(result.response);
-  } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
-  }
+  const rd = objetoDoWaze(result.response);
   const states = [];
-  for (const s of rd.states || []) {
+  for (const s of listaDoWaze(rd.states)) {
     if (Number(s.countryId) !== countryId) continue;
     states.push({ id: s.id ?? null, name: s.name || '', countryId: s.countryId ?? null });
   }
@@ -2933,6 +3838,9 @@ async function handlePresencaApp(data, { sessions }) {
       ...(app.contagem ? { contagem: app.contagem } : {}),
       ...(querToken ? { chat } : {}),
       ...(confirmados ? { confirmados } : {}),
+      // A hora do SERVIDOR: o cliente leva pro relógio do aparelho o prazo do
+      // token e a hora das mensagens (ver `Presenca.desvio`).
+      agora: Date.now(),
     },
   };
 }
@@ -2985,7 +3893,7 @@ async function handlePresencaWaze(data, { sessions }) {
     if (escrita) body.eu = escrita.dados ? lerEditorOnline(escrita.dados) : null;
     if (lista) body.editores = lerListaOnline(lista.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return { status: 200, body };
 }
@@ -3115,7 +4023,7 @@ async function handleChat(data, { sessions }) {
   try {
     resultado = ler(r.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
   return comConfirmados({ status: 200, body: { success: true, ...resultado } }, confirmacao);
 }
@@ -3129,39 +4037,103 @@ async function comConfirmados(resposta, confirmacao) {
   return resposta;
 }
 
-// Abrir uma conversa no app: o histórico e o "lida" numa ida só (fase 3). O
-// "lida" é acessório: QUALQUER falha dele vira `recibos: []` e o histórico
-// segue — inclusive a conversa que ainda não existe (status 7 com
-// NO_EXISTING_CONVERSATION, medido), que não é erro nenhum. Marcar como lida
-// já gera, no servidor do Waze, os recibos que o remetente recebe (fase 1).
+// O teto do "lida" do `abrir`, que sai DEPOIS do histórico: o histórico segue
+// com o teto cheio (`WAZE_ESPERA_MS`) e a soma tem que caber nos 45 s do cliente
+// (`test/portao-servidor.test.mjs`). O "lida" é acessório pro histórico: o que
+// não voltou até aqui vira `lida: false`, e o "lida" da rajada tenta de novo.
+export const ABRIR_LIDA_ESPERA_MS = 10000;
+
+// Abrir uma conversa no app: o histórico e o "lida" numa ida só ao nosso
+// servidor (fase 3), um depois do outro ao Waze. O "lida" é acessório: QUALQUER
+// falha dele vira `recibos: []` e o histórico segue — inclusive a conversa que
+// ainda não existe (status 7 com NO_EXISTING_CONVERSATION, medido), que não é
+// erro nenhum. Marcar como lida já gera, no servidor do Waze, os recibos que o
+// remetente recebe (fase 1).
 async function abrirConversa(data, { sessions, cookies, region, cabecalho, instalacao }) {
   const com = idWaze(data.com);
   const antesDe = instante(data.antesDe);
   const { cookieHeader } = prepareAuth(cookies);
   const base = WAZE_WMP[region] || WAZE_WMP.row;
   const cabLida = cabecalhoWmp({ requisicao: crypto.randomUUID(), instalacao: instalacao || crypto.randomUUID() });
-  const [hist, lida] = await Promise.all([
-    callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
-      region, { data, sessions, cookies }, { chat: true }),
-    // Página mais antiga (`antesDe`) é só leitura: quem rola pra trás não está
-    // lendo mensagem nova.
-    antesDe ? null : callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
-      corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true }),
-  ]);
+  const hist = await callWazeGrpc(base + SERVICO_HISTORICO + '/ListMessages', cookieHeader, corpoMensagens({ cabecalho, com, antesDe }),
+    region, { data, sessions, cookies }, { chat: true });
   const cat = categorizeGrpcError(hist);
   if (cat) return respostaDeErroGrpc(cat, hist);
   let resultado;
   try {
     resultado = lerMensagens(hist.dados);
   } catch {
-    apiError('Resposta inválida da API do Waze', 500, 'srv.err.badWazeResponse');
+    respostaInesperadaDoWaze();
   }
+  // O "lida" SÓ sai depois de o histórico voltar bem: o Waze marca a conversa
+  // INTEIRA, e mandado em paralelo o pedido já tinha saído quando o histórico
+  // falhava — a conversa podia ficar marcada no Waze enquanto a tela dizia "Não
+  // deu pra carregar", com mensagem que ninguém viu (auditoria da rodada 16,
+  // R16-5-02; medido que o pedido saía, o que o Waze faz com ele é hipótese).
+  // Custa uma ida a mais ao Waze na abertura, mas nenhuma ao nosso `/api`. Em
+  // SÉRIE com o histórico, ele tem teto próprio (`ABRIR_LIDA_ESPERA_MS`): os
+  // dois no teto cheio passariam dos 45 s em que o cliente desiste. Página mais
+  // antiga (`antesDe`) é só leitura: quem rola pra trás não está lendo mensagem
+  // nova.
+  const lida = antesDe ? null : await callWazeGrpc(base + SERVICO_MENSAGENS + '/MarkConversationRead', cookieHeader,
+    corpoMarcarLida({ cabecalho: cabLida, com }), region, null, { chat: true, tetoMs: ABRIR_LIDA_ESPERA_MS });
+  // O "lida" é acessório pro HISTÓRICO, não pro cliente: ele precisa saber se
+  // a conversa ficou lida no Waze. Com só `recibos: []`, "falhou" e "não havia
+  // o que marcar" eram a mesma resposta, o app dava como lida uma conversa que
+  // o Waze seguia contando, e nada tentava de novo com ela aberta (auditoria de
+  // 2026-09-26). `lida` só vai na primeira página (a antiga não marca nada), e
+  // a conversa que ainda não existe conta como lida: não havia o que marcar.
   let recibos = [];
-  if (lida && !categorizeGrpcError(lida)) {
-    try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+  let lidaOk = false;
+  if (lida) {
+    if (lida.grpcStatus === 7 && lida.grpcMessage === 'NO_EXISTING_CONVERSATION') lidaOk = true;
+    else if (!categorizeGrpcError(lida)) {
+      lidaOk = true;
+      try { recibos = lerMarcarLida(lida.dados).recibos; } catch { recibos = []; }
+    }
   }
-  return { status: 200, body: { success: true, ...resultado, recibos } };
+  return { status: 200, body: { success: true, ...resultado, recibos, ...(lida ? { lida: lidaOk } : {}) } };
 }
+
+// O teto do corpo de uma requisição à API, e a resposta de quem passa dele — os
+// MESMOS nos dois adaptadores, e por isso aqui, no módulo que os dois importam:
+// a VM aplica no `readBody` (`server/corpo.mjs`), o Worker no `lerCorpo` dele.
+// O Worker lia tudo com `request.json()`, e o mesmo corpo de 5,5 MB dava 200
+// lá e 413 na VM (auditoria de 2026-09-29). O maior corpo legítimo do app é o
+// cookies.txt que o aparelho já filtrou, na casa dos KB.
+export const MAX_BODY_BYTES = 5_000_000;
+export const RESPOSTA_CORPO_GRANDE = Object.freeze({
+  success: false, error: 'Corpo da requisição muito grande', errorKey: 'srv.err.bodyTooLarge',
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// «Manter conectado»: a varredura, ligada ao Waze e ao store (o cron do Worker e
+// o temporizador da VM chamam isto). A lógica é do módulo puro
+// `manter-conectado.mjs`; aqui fica o que é do core — o `callWaze`.
+// ─────────────────────────────────────────────────────────────────────────
+
+// UMA leitura barata ao Waze: o `Session` do `perfil`. Não lê o corpo como JSON
+// (só o status e o `Set-Cookie` importam, e CPU é a cota apertada do plano
+// grátis). O cookie novo é gravado pelo `refreshCookies`, via o contexto. 401/403
+// = sessão morta; qualquer outro erro é passageiro e fica pra próxima execução.
+async function renovarNoWaze({ token, region, cookies, sessions }) {
+  let auth;
+  try { auth = prepareAuth(cookies); } catch { return { resultado: 'morta' }; }
+  const r = await callWaze(wazeSessionEndpoint(region), auth.cookieHeader, auth.csrf, null, region,
+    { data: { sessionToken: token }, sessions, cookies }, { tetoMs: MANTER_ESPERA_WAZE_MS });
+  if (r.httpCode === 200) return { resultado: 'ok', rotacionou: aplicarCookiesRotacionados(cookies, r.setCookie) != null };
+  const cat = categorizeWazeError(r.httpCode, r.response, r.error);
+  return { resultado: cat.category === 'unauthorized' ? 'morta' : 'falhou' };
+}
+
+// `sessions`: a VM passa a instância do processo (a memória dos carimbos é dela);
+// o Worker deixa criar uma, como faz a cada requisição.
+export async function varrerMantidosDoStore({ store, keyBytes, sessions = null, ...opcoes }) {
+  return varrerMantidos({
+    store, sessions: sessions || makeSessions({ store, keyBytes }), chamarWaze: renovarNoWaze, ...opcoes,
+  });
+}
+export { varrerMantidos };
 
 const ROUTES = {
   sessao: handleSessao,
@@ -3181,18 +4153,58 @@ const ROUTES = {
   'lista-estados': handleListaEstados,
 };
 
+// O corpo que a conversão pra texto ou número não consegue ler. `JSON.parse` dá
+// objeto com `toString`/`valueOf` PRÓPRIOS a quem mandar a chave no JSON
+// (`{"toString":1}`), e aí `String(v)`, `parseInt(v)` e `Number(v)` LANÇAM —
+// quase todo campo de quase toda rota passa por um deles, e o pedido virava o
+// 500 genérico de "erro interno" em vez de 400 (53 achados no fuzz da
+// auditoria de 2026-09-29). Conferido UMA vez aqui, no corpo inteiro, em vez
+// de campo a campo em cada handler: rota nova nasce coberta. `JSON.parse` não
+// produz outro jeito de a conversão lançar (nem `Symbol.toPrimitive`, nem
+// getter). O teto de profundidade é do próprio exame (sem ele, um corpo de
+// 10 mil níveis estouraria a pilha); nenhum corpo do app passa de 3 níveis.
+const PROFUNDIDADE_MAX_DO_CORPO = 8;
+function corpoLegivel(v, profundidade = 0) {
+  if (v === null || typeof v !== 'object') return true;
+  if (profundidade > PROFUNDIDADE_MAX_DO_CORPO) return false;
+  if (Object.hasOwn(v, 'toString') || Object.hasOwn(v, 'valueOf')) return false;
+  for (const k of Object.keys(v)) {
+    if (!corpoLegivel(v[k], profundidade + 1)) return false;
+  }
+  return true;
+}
+
 /**
  * Executa um endpoint, pelo nome exato da rota.
  * ctx = { sessions }. Sempre resolve — nunca lança (ApiError vira resposta;
  * erro inesperado vira 500 genérico, sem vazar detalhe interno).
  */
 export async function dispatch(name, data, ctx) {
-  const handler = ROUTES[String(name || '')];
+  // `hasOwn`, não `ROUTES[nome]` solto: o objeto herda de Object.prototype, e
+  // `/api/constructor` ou `/api/toString` achavam uma "rota" que não é nossa.
+  const nome = String(name || '');
+  const handler = Object.hasOwn(ROUTES, nome) ? ROUTES[nome] : null;
   if (!handler) return { status: 404, body: { success: false, error: 'Endpoint não encontrado', errorKey: 'srv.err.endpointNotFound' } };
+  if (!corpoLegivel(data)) return { status: 400, body: { success: false, error: 'Pedido inválido', errorKey: 'srv.err.badRequest' } };
   try {
     return await handler(data || {}, ctx);
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: e.body };
     return { status: 500, body: { success: false, error: 'Erro interno', errorKey: 'srv.err.internal' } };
+  } finally {
+    await renovarPrazoNoFim(data, ctx);
   }
+}
+
+// A janela deslizante da sessão anda no FIM da requisição, depois de o handler
+// ter tido a chance de gravar o cookie rotacionado — que renova o prazo junto
+// (ver `renovarPrazo` no `makeSessions`). Aqui, e não em cada handler, pelo
+// motivo do `callWaze`: rota nova nasceria sem, e a sessão de quem só usasse
+// ela venceria em 21 dias sem ninguém ver. Espera de verdade (sem promessa
+// solta): no Worker, o que fica pendurado depois da resposta é cortado.
+async function renovarPrazoNoFim(data, ctx) {
+  const token = data && data.sessionToken;
+  const sessions = ctx && ctx.sessions;
+  if (typeof token !== 'string' || !token || !sessions || typeof sessions.renovarPrazo !== 'function') return;
+  try { await sessions.renovarPrazo(token); } catch { /* renovar é melhor-esforço: a resposta sai igual */ }
 }

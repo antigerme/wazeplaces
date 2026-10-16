@@ -213,3 +213,21 @@ test('protobuf: bytes truncados ou tipo de fio desconhecido LANÇAM (nunca leem 
 test('presença: pedir nada para atualizar é erro de programação, não pedido vazio', () => {
   assert.throws(() => g.corpoAtualizarPresenca({ userId: 1 }), /nada a atualizar/);
 });
+
+test('gRPC-web: quadro que declara mais bytes do que chegaram LANÇA — resposta cortada não vira resposta inteira', () => {
+  // O `subarray` não reclama de fim além do fim: devolvia o pedaço que veio, e
+  // uma resposta cortada no meio, sem trailer e com HTTP 200, era lida como
+  // completa (auditoria de 2026-09-26).
+  const dados = res('atualizarPosicao');
+  const inteiro = quadro(0, dados);
+  const cortado = inteiro.subarray(0, 5 + Math.floor(dados.length / 2));   // cabeçalho diz N, vêm N/2
+  assert.throws(() => g.lerRespostaGrpcWeb(b64(cortado)), /truncado/);
+  // E o corte no TRAILER, depois de um quadro de dados inteiro.
+  const trailer = quadro(0x80, new TextEncoder().encode('grpc-status:0\r\ngrpc-message:\r\n'));
+  assert.throws(() => g.lerRespostaGrpcWeb(b64(inteiro) + b64(trailer.subarray(0, trailer.length - 4))), /truncado/);
+  // CONTROLE: os mesmos quadros inteiros leem, com e sem trailer.
+  assert.equal(hex(g.lerRespostaGrpcWeb(b64(inteiro)).dados), hex(dados));
+  const r = g.lerRespostaGrpcWeb(b64(inteiro) + b64(trailer));
+  assert.equal(r.status, 0);
+  assert.equal(hex(r.dados), hex(dados));
+});

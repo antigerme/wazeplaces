@@ -33,7 +33,9 @@ test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', 
   // Exibição: quem mostra o código não pode formatar por conta própria.
   // Mora em `revelarCodigoPareamento` desde que o código passou a nascer sob
   // demanda (o `abrirPareamento` só desenha o QR, cujo segredo ninguém digita).
-  const revelar = APP.match(/async function revelarCodigoPareamento\(\)[\s\S]*?\n\}/);
+  // A assinatura pode ter parâmetro (o evento do clique, pra saber se veio do
+  // teclado): âncora no NOME, não nos parênteses vazios.
+  const revelar = APP.match(/async function revelarCodigoPareamento\([^)]*\)[\s\S]*?\n\}/);
   assert.ok(revelar, 'sumiu o revelarCodigoPareamento()');
   assert.match(revelar[0], /formatarCodigoPareamento\(/, 'a tela que MOSTRA o código voltou a formatar sozinha');
   assert.doesNotMatch(
@@ -49,11 +51,10 @@ test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', 
     'o segredo do QR não é pra ser digitado — formatá-lo convida a isso');
 
   // Entrada: o campo aplica a mesma função enquanto se digita.
-  assert.match(
-    APP,
-    /pairCodeInput'\)\?\.addEventListener\('input'[\s\S]{0,600}formatarCodigoPareamento\(/,
-    'o campo do código parou de assumir o formato que a tela mostra'
-  );
+  // (O bloco do `input` vai até o `setupFilterTabs()` que o segue: ancorado na estrutura, não numa distância.)
+  const blocoInput = /pairCodeInput'\)\?\.addEventListener\('input'[\s\S]*?setupFilterTabs\(\);/.exec(APP);
+  assert.ok(blocoInput, 'sumiu o ouvinte do `input` do campo do código');
+  assert.match(blocoInput[0], /formatarCodigoPareamento\(/, 'o campo do código parou de assumir o formato que a tela mostra');
 });
 
 test('código de pareamento: o placeholder mostra o mesmo formato que a tela', () => {
@@ -64,11 +65,30 @@ test('código de pareamento: o placeholder mostra o mesmo formato que a tela', (
   for (const v of chaves) {
     assert.match(v, /^[A-Z0-9]{3}-[A-Z0-9]{3}$/, `placeholder "${v}" não segue o formato XXX-XXX mostrado na tela`);
   }
-  // maxlength = 6 caracteres + o separador. Apertar pra 6 trava quem colou da tela.
+  // E o EXEMPLO é um código que o servidor PODE emitir: só símbolos do
+  // alfabeto do pareamento (sem 0/O/1/I). "ABC-123" tinha o 1 — quem copiasse
+  // o exemplo pra entender o formato via um símbolo que nunca aparece num
+  // código de verdade (auditoria de 2026-09-26). O alfabeto do app é o do
+  // servidor, e isso também se confere aqui.
+  const alfabeto = (src, nome) => {
+    const m = new RegExp(`const ${nome} = '([^']+)';`).exec(src);
+    assert.ok(m, `CONTROLE: a constante ${nome} sumiu`);
+    return m[1];
+  };
+  const doApp = alfabeto(APP, 'PAIR_ALFABETO');
+  assert.equal(doApp, alfabeto(read('server/core.mjs'), 'PAIR_ALPHABET'),
+    'o alfabeto do código no app divergiu do que o servidor emite');
+  for (const v of chaves) {
+    const fora = [...v.replace('-', '')].filter((c) => !doApp.includes(c));
+    assert.deepEqual(fora, [], `placeholder "${v}" usa símbolo que nenhum código tem: ${fora.join(' ')}`);
+  }
+  // SEM maxlength: ele corta o texto colado ANTES da formatação — " ABC-123"
+  // virava "ABC-12" e "Código: ABC-123" virava "CDI-GO" (auditoria de
+  // 2026-09-26). Quem corta em 6 é o `formatarCodigoPareamento`, DEPOIS de
+  // limpar; e o colar acha o código dentro do texto (test/entrada.test.mjs).
   const campo = HTML.split('\n').find((l) => l.includes('id="pairCodeInput"'));
   assert.ok(campo, 'sumiu o #pairCodeInput');
-  const max = (campo.match(/maxlength="(\d+)"/) || [])[1];
-  assert.equal(max, '7', 'maxlength precisa caber os 6 caracteres MAIS o separador que a tela mostra');
+  assert.doesNotMatch(campo, /maxlength=/, 'o maxlength voltou: ele corta o código colado antes de o formatador limpar');
 });
 
 test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () => {
@@ -100,13 +120,74 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
   }
 });
 
+test('a condição do Andarilho manda ao filtro com o nome que o FILTRO dá ao estado', () => {
+  // Ela só conta o estado escolhido no filtro, e desde a auditoria de textos
+  // (2026-09-26) diz isso — "(escolhidos no filtro)". Aí o nome tem que ser o do
+  // campo: em francês "régions" mandava a pessoa pro campo "Région", que é o do
+  // SERVIDOR (ROW/NA/IL), e o do estado se chama "État".
+  const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'([^']*)'`, 'g'))].map((m) => m[1]);
+  const como = valores('conq.andarilho.como'), estado = valores('filters.state.label'), regiao = valores('filters.region.label');
+  assert.equal(como.length, N_LINGUAS, 'CONTROLE: a condição do Andarilho não está nas línguas todas');
+  assert.equal(estado.length, N_LINGUAS, 'CONTROLE: o rótulo do estado no filtro não está nas línguas todas');
+  for (let i = 0; i < N_LINGUAS; i++) {
+    const c = como[i].toLowerCase();
+    assert.ok(c.includes(estado[i].toLowerCase()), `${LANGS_DO_DICT[i]}: a condição diz "${como[i]}" e o campo do filtro se chama "${estado[i]}"`);
+    assert.ok(!c.includes(regiao[i].toLowerCase()), `${LANGS_DO_DICT[i]}: a condição aponta pro campo "${regiao[i]}" (a região do servidor)`);
+  }
+});
+
+test('um conceito, um nome — os termos da auditoria de textos (2026-09-26)', () => {
+  // Por PALAVRA inteira e por língua (o teste de cima casa substring): "fila"
+  // é o termo do pt e sinônimo proibido no es; "rapport" é o reporte no fr, mas
+  // "Sans rapport" (motivo UNRELATED) é outra coisa.
+  const valoresDe = (lang) => {
+    const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));
+    assert.ok(m, `CONTROLE: não achei o bloco ${lang} do dicionário`);
+    // Sem os placeholders: `{fila}` é NOME de variável, não palavra da tela (e
+    // casava o /fila/ do espanhol no `autor.sheet.sub`).
+    return Object.fromEntries([...m[1].matchAll(/'([^'\n]+)':\s*'((?:[^'\\\n]|\\.)*)'/g)]
+      .map((x) => [x[1], x[2].replace(/\{\w+\}/g, '')]));
+  };
+  const D = Object.fromEntries(LANGS_DO_DICT.map((l) => [l, valoresDe(l)]));
+  assert.ok(Object.keys(D.pt).length > 500, 'CONTROLE: o recorte do dicionário quebrou');
+  const PARES = [
+    ['es', /\bemparejamiento\b/i, /\bvinculaci[oó]n\b/i, 'o código de pareamento'],
+    ['fr', /\bappairage\b/i, /\bassociation\b/i, 'o código de pareamento'],
+    ['es', /\bcola\b/i, /\bfila\b/i, 'a fila de pedidos'],
+    ['fr', /\bsignalement\b/i, /\bce rapport\b/i, 'o reporte'],
+  ];
+  for (const [lang, termo, sinonimo, conceito] of PARES) {
+    const vals = Object.entries(D[lang]);
+    assert.ok(vals.some(([, v]) => termo.test(v)), `CONTROLE: ${lang} não usa mais ${termo} — o par ficou velho`);
+    const fora = vals.filter(([, v]) => sinonimo.test(v)).map(([k]) => k);
+    assert.deepEqual(fora, [], `${lang}: ${conceito} tem dois nomes — ${sinonimo} em ${fora.join(', ')}`);
+  }
+  // "PUR" é sigla de quem mexe no código; na tela o conceito é pedido, request,
+  // solicitud, demande. O contador do Desfazer era a única frase a usá-la.
+  for (const lang of LANGS_DO_DICT) {
+    const fora = Object.entries(D[lang]).filter(([, v]) => /\bPURs?\b/.test(v)).map(([k]) => k);
+    assert.deepEqual(fora, [], `${lang}: a tela diz "PUR" em ${fora.join(', ')}`);
+  }
+  // O mesmo conceito em duas telas, com o mesmo nome: a conquista "Tudo limpo" e
+  // o "Tudo limpo!" da fila vazia; o "Entendi" do "Como funciona" e o do
+  // "Acesso restrito".
+  const semExclamacao = (s) => s.replace(/[!¡]/g, '').trim();
+  for (const lang of LANGS_DO_DICT) {
+    assert.equal(D[lang]['conq.tudoLimpo.nome'], semExclamacao(D[lang]['states.empty.title']),
+      `${lang}: a conquista "Tudo limpo" e a tela de fila vazia têm nomes diferentes`);
+    assert.equal(D[lang]['modal.accessDenied.dismiss'], D[lang]['common.gotIt'], `${lang}: o "Entendi" tem dois nomes`);
+  }
+});
+
 test('botão de confirmar ecoa o verbo do enunciado', () => {
   // "Marcar como lido os N pedidos?" com botão "Marcar lidos" faz o editor
   // parar pra conferir se é a mesma ação. É.
   for (const [lang, corpo, botao] of [
     ['pt', 'marcar como lido', 'marcar como lidos'],
     ['en', 'as read', 'mark as read'],
-    ['es', 'marcar como leída', 'marcar como leídos'],
+    // es: a SOLICITUD é feminina — o botão "leídos" contradizia o enunciado
+    // ("leídas las N solicitudes"), e este teste o fixava (auditoria de 2026-09-25).
+    ['es', 'marcar como leída', 'marcar como leídas'],
     ['fr', 'marquer comme lue', 'marquer comme lues'],
   ]) {
     const m = I18N.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},?\\n`));
@@ -536,6 +617,75 @@ test('nível mínimo anunciado na entrada == portão do servidor', () => {
     for (const [, valor] of ocorrencias) {
       assert.match(valor, /\{nivelMinimo\}/, `${chave} tem o nível escrito à mão: ${valor}`);
     }
+  }
+});
+
+// Os prazos que a Ajuda, a entrada e o aviso do "Sair" citam (a sessão, em dias;
+// o código de pareamento, em minutos) são os do SERVIDOR. Eram escritos à mão em
+// cinco frases × quatro línguas (auditoria de textos, 2026-09-26): quem mudasse
+// o `SESSION_TTL` deixaria o app prometendo o prazo antigo.
+test('prazos citados na tela (dias da sessão, minutos do código) == os do servidor, e nunca escritos à mão', () => {
+  const valorDe = (src, nome) => {
+    const m = new RegExp(`const ${nome}\\s*=\\s*([^;]+);`).exec(src);
+    assert.ok(m, `sumiu a constante ${nome}`);
+    return Function(`"use strict"; return (${m[1]});`)();
+  };
+  const core = read('server/core.mjs');
+  const dias = valorDe(APP, 'SESSAO_DIAS_EXIBIDO'), min = valorDe(APP, 'PAREAR_MIN_EXIBIDO');
+  assert.equal(dias * 86400, valorDe(core, 'SESSION_TTL'), `a tela diz ${dias} dias e o servidor guarda a sessão por outro prazo`);
+  assert.equal(min * 60, valorDe(core, 'PAIR_TTL'), `a tela diz ${min} minutos e o código de pareamento vale outro prazo`);
+  // As frases estão no plural ("dias", "minutos"), e o projeto não tem ICU: com
+  // 1, sairia "1 dias". Se um prazo virar 1, é hora de chave singular.
+  assert.ok(dias > 1 && min > 1, 'um dos prazos virou 1 — as frases são plurais');
+  // Registrados como FUNÇÃO (reavaliada a cada t()), a partir das constantes.
+  assert.match(APP, /setI18nVars\(\{\s*sessaoDias: \(\) => SESSAO_DIAS_EXIBIDO, parearMin: \(\) => PAREAR_MIN_EXIBIDO \}\)/,
+    'os prazos não estão registrados em setI18nVars — o {sessaoDias}/{parearMin} vazaria cru pra tela');
+  // Nenhuma frase escreve o número à mão, e as que citam os prazos usam as variáveis.
+  const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'((?:[^'\\\\\\n]|\\\\.)*)'`, 'g'))].map((m) => m[1]);
+  const USAM = {
+    sessaoDias: ['auth.securityNote', 'help.security.body', 'help.privacy.retention', 'toast.logoutServerFailed', 'diag.leiame'],
+    parearMin: ['help.privacy.zeroKnowledge', 'help.privacy.retention'],
+  };
+  for (const [v, chaves] of Object.entries(USAM)) {
+    for (const chave of chaves) {
+      const vs = valores(chave);
+      assert.equal(vs.length, N_LINGUAS, `CONTROLE: ${chave} não está nas ${N_LINGUAS} línguas`);
+      for (const valor of vs) assert.ok(valor.includes(`{${v}}`), `${chave} não usa {${v}}: ${valor}`);
+    }
+  }
+  // O aviso que vai DENTRO do diagnostico.json (pt, fora do dicionário) usa a
+  // mesma constante — o LEIA-ME do .zip vem do dicionário, e os dois dizem o mesmo.
+  const leia = APP.slice(APP.indexOf('_leia_isto:'), APP.indexOf('_versaoDoDiag:'));
+  assert.ok(leia.length > 100, 'CONTROLE: o recorte do _leia_isto quebrou');
+  assert.match(leia, /\+ SESSAO_DIAS_EXIBIDO \+/, 'o aviso do diagnostico.json não diz o prazo, ou o escreve à mão');
+  const aMao = [...I18N.matchAll(new RegExp(`\\b(${dias}\\s*(?:dias|days|días|jours)|${min}\\s*(?:minutos|minutes))\\b`, 'g'))].map((m) => m[1]);
+  assert.deepEqual(aMao, [], 'prazo do servidor escrito à mão no dicionário');
+});
+
+// O terceiro prazo do servidor que a Ajuda cita: a lista de fotos da lixeira
+// (`help.privacy.server`). A frase dizia "fica lá por até 1 minuto" contado do
+// toque, escrito à mão nas 4 línguas, e a lista ficava 74 s depois dele: ela é
+// regravada DEPOIS de cada exclusão, e o prazo conta da última gravação
+// (auditoria de 2026-09-29). Hoje o número vem do core, pela variável.
+test('prazo da lista de fotos da lixeira citado na Ajuda == o do servidor, pela variável e no singular', () => {
+  const core = read('server/core.mjs');
+  const ttl = Number((/const RELEITURA_TTL = (\d+);/.exec(core) || [])[1]);
+  const piso = Number((/const RELEITURA_TTL_STORE = Math\.max\((\d+), RELEITURA_TTL\);/.exec(core) || [])[1]);
+  assert.ok(ttl > 0 && piso > 0, 'CONTROLE: não achei o prazo da lista de fotos no core');
+  const doServidor = Math.max(piso, ttl);
+  const m = /^const LISTA_FOTOS_MIN_EXIBIDO = (\d+);/m.exec(APP);
+  assert.ok(m, 'sumiu a constante LISTA_FOTOS_MIN_EXIBIDO do app.js');
+  const min = Number(m[1]);
+  assert.equal(min * 60, doServidor, `a Ajuda diz ${min} minuto(s) e a lista de fotos fica ${doServidor} s no servidor`);
+  // A frase está no SINGULAR ("minuto", "minute"): com 2, sairia "2 minuto".
+  assert.equal(min, 1, 'o prazo da lista passou de 1 minuto — a frase é singular, é hora de chave plural');
+  assert.match(APP, /setI18nVars\(\{\s*listaFotosMin: \(\) => LISTA_FOTOS_MIN_EXIBIDO \}\)/,
+    'o prazo da lista não está registrado em setI18nVars — o {listaFotosMin} vazaria cru pra tela');
+  const vs = [...I18N.matchAll(/'help\.privacy\.server':\s*'((?:[^'\\\n]|\\.)*)'/g)].map((x) => x[1]);
+  assert.equal(vs.length, N_LINGUAS, `CONTROLE: help.privacy.server não está nas ${N_LINGUAS} línguas`);
+  for (const v of vs) {
+    assert.ok(v.includes('{listaFotosMin}'), `help.privacy.server não usa {listaFotosMin}: ${v}`);
+    assert.doesNotMatch(v, /\b\d+\s*(?:minutos?|minutes?)\b/, `help.privacy.server escreve o prazo à mão: ${v}`);
   }
 });
 

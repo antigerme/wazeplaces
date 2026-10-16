@@ -8,7 +8,41 @@ const MAX_TENTATIVAS = 4;
 const ESPERAS_MS = [600, 1500, 2500, 3000];
 const API_BASE = 'https://places.wazebrasil.com';
 
+// O prazo TOTAL do login do botão ACESSAR (`abrirPlaces`), contado do TOQUE e
+// valendo pra TODAS as tentativas (auditoria da rodada 8, R8-6-01 = R8-1-02).
+// O painel desiste em 45 s (`ESPERA_DO_BOTAO_MS`, no content.js), e a conta de
+// lá comparava UMA ida com o prazo do servidor pro Waze (30 s) — só que o login
+// daqui se repete em toda falha passageira: até 4 idas, com 4,6 s de espera
+// entre elas, 4 × 30 + 4,6 = 124,6 s no pior caso. O Waze que estourava os 30 s
+// na 1ª ida e respondia na 2ª abria a aba DEPOIS do aviso de "a extensão não
+// respondeu", e quem obedecia ao "tente de novo" abria a segunda sessão e a
+// segunda aba (MEDIDO com os dois scripts de verdade num relógio virtual).
+// Passado o prazo, nenhuma ida começa, a que está no ar é cancelada e a
+// resposta é a falha, antes do teto do painel e com o aviso do que aconteceu.
+// Maior que os 30 s do servidor: uma ida lenta que dá certo ainda cabe.
+const PRAZO_DO_BOTAO_MS = 40000;
+
+// O prazo do login da PONTE (o app pedindo sessão: na abertura, na volta à aba
+// e na queda) é o de QUEM PERGUNTA (auditoria da rodada 9, R9-1-02 = R9-6-02).
+// O app espera a resposta por `espera` ms depois do `aguarde` da ponte (o
+// `EXT_ESPERA_MS` dele) e então desiste e para de ouvir. O login daqui não tinha
+// prazo nenhum: seguia indo ao /Session do Waze no nome da pessoa depois de o
+// app ter desistido (até 4 idas, 124,6 s com o Waze lento), e a ida que dava
+// certo entregava o token a uma página que já não ouvia — a sessão ficava sem
+// dono no servidor, e a pessoa na tela de entrada (MEDIDO com a extensão e o app
+// de verdade). Agora ele acaba ANTES de o app desistir, com folga pra resposta
+// voltar (background → ponte → app), e é tratado como o do botão: nenhuma ida
+// depois do prazo, e a que está no ar é cancelada. O app que não diz a espera
+// (todos até a v2026.10.06-01) esperava 8 s; e nenhum login da ponte espera mais
+// que o do botão.
+const ESPERA_DO_APP_MS = 8000;
+const FOLGA_DA_PONTE_MS = 1000;
+
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A desistência de quando o prazo acaba sem nenhuma falha pra contar: quem não
+// respondeu a tempo foi o próprio Waze Places.
+const passouDoPrazo = () => ({ success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: o login passou do prazo.' });
 
 const cookiesPorUrl = (url) =>
   new Promise((r) => chrome.cookies.getAll({ url }, (c) => r(c || [])));
@@ -60,64 +94,164 @@ function formatarNetscape(cookies) {
 // — a v0.0.3 mandava 30 (Brasil) e o servidor ignorava. Sai daqui: mandar um
 // país fixo num endpoint que não o lê só sugeria que a extensão é brasileira,
 // e o app atende qualquer país onde o editor tenha permissão.
-async function trocarPorToken(cookiesTxt) {
+//
+// `sinal` cancela a ida, e a leitura do corpo junto (ela também fica no ar).
+async function trocarPorToken(cookiesTxt, sinal) {
   const resp = await fetch(`${API_BASE}/api/testar-cookies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cookies: cookiesTxt, region: 'row' }),
+    signal: sinal,
   });
   return resp.json();
 }
 
-async function autenticar(urlDaAba) {
+// `ate`: a hora (`Date.now()`) em que o login DESISTE — o prazo do botão (ver
+// `PRAZO_DO_BOTAO_MS`) ou o de quem pergunta pela ponte (`ESPERA_DO_APP_MS`).
+// Sem ele, o login vai até a última tentativa; nenhum dos dois o chama assim.
+async function autenticar(urlDaAba, ate = Infinity) {
+  const controle = new AbortController();
+  const teto = ate === Infinity ? null : setTimeout(() => controle.abort(), Math.max(0, ate - Date.now()));
+  try {
+    return await tentarAte(urlDaAba, ate, controle.signal);
+  } finally {
+    clearTimeout(teto);
+  }
+}
+
+// As idas do login, até o prazo `ate`; o `sinal` cancela a que estiver no ar.
+async function tentarAte(urlDaAba, ate, sinal) {
+  // O relógio também conta, e não só o cancelamento: com o prazo já vencido na
+  // chegada, o `setTimeout(…, 0)` só cancelaria depois de a 1ª ida ter saído.
+  const venceu = () => sinal.aborted || Date.now() >= ate;
+  // A falha da ida ANTERIOR é a que sai quando o prazo acaba no meio da
+  // seguinte (o Waze que estourou os 30 s no servidor, por exemplo). Sem
+  // nenhuma, quem não respondeu a tempo foi o próprio Waze Places.
+  let ultima = null;
+  const desistir = () => ultima || passouDoPrazo();
+  // Anota a falha desta ida (é ela que sai se não houver outra) e espera a
+  // próxima — se ainda houver tentativa e a espera acabar DENTRO do prazo: a ida
+  // que começaria depois dele não começa, e esperar pra então desistir só
+  // seguraria o botão à toa.
+  const outraIda = async (tentativa, falha) => {
+    ultima = falha;
+    const espera = ESPERAS_MS[tentativa - 1];
+    if (tentativa >= MAX_TENTATIVAS || venceu() || Date.now() + espera >= ate) return false;
+    await dormir(espera);
+    return !venceu();
+  };
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    if (venceu()) return desistir();
     try {
       // Re-coleta a cada tentativa: o Waze rotaciona o cookie de sessão, então
       // um valor de 3 segundos atrás pode já não valer.
       const cookies = await coletarCookies(urlDaAba);
       if (!cookies.length) {
-        if (tentativa < MAX_TENTATIVAS) { await dormir(ESPERAS_MS[tentativa - 1]); continue; }
-        return { success: false, semLogin: true, error: 'Nenhum cookie do Waze encontrado.' };
+        if (await outraIda(tentativa, { success: false, semLogin: true, errorKey: 'ext.semCookies', error: 'Nenhum cookie do Waze encontrado.' })) continue;
+        return desistir();
       }
 
-      const r = await trocarPorToken(formatarNetscape(cookies));
+      const r = await trocarPorToken(formatarNetscape(cookies), sinal);
+      // A resposta que chega DEPOIS do prazo não vale, nem a que deu certo: o
+      // botão já voltou com o aviso da falha, e a aba aberta agora o desmentiria.
+      if (venceu()) return desistir();
       if (r && r.success && r.sessionToken) return r;
+
+      // O PORTÃO do app recusou esta conta (nível ou área — `isUserAllowed` no
+      // servidor). É resposta DEFINITIVA: tentar de novo não muda o nível de
+      // ninguém, e cada tentativa era uma ida ao /Session do Waze no nome da
+      // pessoa (medido: 4 tentativas em 4,7 s, e a ponte ainda dizia só "erro").
+      // O motivo e o perfil vão junto, pra o app mostrar o MESMO diálogo do
+      // login por arquivo (auditoria de 2026-09-26).
+      if (r && r.errorCategory === 'access_denied') {
+        return { success: false, negado: true, error: r.error, errorKey: r.errorKey, errorVars: r.errorVars, profile: r.profile };
+      }
 
       // 400 com cookie inválido/expirado é "não está logado no WME" — insistir
       // não muda nada e só atrasa a tela. Retry é pra falha de REDE.
+      //
+      // A CHAVE do servidor vai junto da frase, em toda falha: quem mostra é o
+      // painel no WME, na língua dele, e a frase crua é sempre a portuguesa do
+      // servidor — no cookie vencido, mandando "exportar os cookies" a quem usa
+      // a extensão (auditoria da rodada 6, R66-2). As falhas daqui mesmo levam
+      // chave própria (`ext.*`), pelo mesmo motivo.
       if (r && r.error && /expirad|inválid|invalid|csrf/i.test(String(r.error))) {
-        return { success: false, semLogin: true, error: r.error };
+        return { success: false, semLogin: true, error: r.error, errorKey: r.errorKey, errorVars: r.errorVars };
       }
-      if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return r || { success: false, error: 'A API não devolveu token.' };
+      if (await outraIda(tentativa, r || { success: false, errorKey: 'ext.semToken', error: 'A API não devolveu token.' })) continue;
+      return desistir();
     } catch (e) {
-      if (tentativa < MAX_TENTATIVAS) await dormir(ESPERAS_MS[tentativa - 1]);
-      else return { success: false, error: 'Erro de conexão: ' + e.message };
+      // A ida que o PRAZO cancelou não é falha de rede: sai a da ida anterior.
+      if (venceu()) return desistir();
+      if (await outraIda(tentativa, { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: ' + e.message })) continue;
+      return desistir();
     }
   }
+  return desistir();
+}
+
+// O login da PONTE é UM por vez, pra todas as abas do app (R9-1-02). Cada volta
+// à aba, e cada aba do app, pergunta de novo, e cada pergunta começava a sua
+// cadeia de idas ao lado das que já corriam (MEDIDO com a extensão e o app de
+// verdade: 12 idas ao Waze, até 3 ao mesmo tempo, 10 delas depois de o app ter
+// desistido). A pergunta que chega com um login no ar recebe o desfecho DELE — a
+// mesma sessão, que é do mesmo navegador e da mesma conta do WME —, ou a
+// desistência no prazo dela, se ele vier antes do prazo do login no ar: quem
+// perguntou recebe a resposta enquanto ainda ouve, e o login segue pra quem
+// ainda espera.
+let loginDaPonteNoAr = null;
+function loginDaPonte(urlDaAba, ate) {
+  if (!loginDaPonteNoAr) {
+    const login = { ate, desfecho: null };
+    login.desfecho = autenticar(urlDaAba, ate).finally(() => {
+      if (loginDaPonteNoAr === login) loginDaPonteNoAr = null;
+    });
+    loginDaPonteNoAr = login;
+  }
+  const login = loginDaPonteNoAr;
+  if (ate >= login.ate) return login.desfecho;
+  return new Promise((pronto) => {
+    const prazo = setTimeout(() => pronto(passouDoPrazo()), Math.max(0, ate - Date.now()));
+    login.desfecho.then((r) => { clearTimeout(prazo); pronto(r); });
+  });
 }
 
 chrome.runtime.onMessage.addListener((req, sender, responder) => {
   // Pedido vindo da PONTE (o app pediu sessão). Devolve o token pra ela, sem
   // abrir aba nem gravar nada: quem guarda é o próprio app, no localStorage
   // dele. Guardar aqui também era o que obrigava o `location.reload()`.
+  //
+  // O prazo é o de quem pergunta (ver `ESPERA_DO_APP_MS`), contado da PERGUNTA
+  // (`desde`, a hora em que a ponte respondeu o `aguarde`, que é quando a espera
+  // do app começa) e não de quando a mensagem chegou: o service worker adormecido
+  // leva um tempo pra acordar, como no `desde` do botão.
   if (req.action === 'autenticar') {
-    autenticar(sender.tab ? sender.tab.url : null).then(responder);
+    const desde = Number.isFinite(req.desde) ? Math.min(req.desde, Date.now()) : Date.now();
+    const espera = Number.isFinite(req.espera) ? Math.min(req.espera, PRAZO_DO_BOTAO_MS) : ESPERA_DO_APP_MS;
+    loginDaPonte(sender.tab ? sender.tab.url : null, desde + espera - FOLGA_DA_PONTE_MS).then(responder);
     return true;
   }
 
   // Pedido vindo do botão no WME. Mesma autenticação; a diferença é que aqui
   // ainda não existe aba do app, então o token vai por `chrome.storage` e a
-  // ponte o entrega assim que a aba abre.
+  // ponte o entrega quando o app da aba nova pede — com a CONTA, como no login
+  // pela ponte, e com a HORA, porque pendente velho não se entrega (ver a ponte).
+  //
+  // O prazo do login (`PRAZO_DO_BOTAO_MS`) conta do TOQUE, que o painel manda
+  // (`desde`), e não de quando a mensagem chegou: o service worker adormecido
+  // leva um tempo pra acordar, e o teto do painel conta do toque. A mensagem que
+  // chega depois do prazo nem vai ao Waze.
   if (req.action === 'abrirPlaces') {
-    autenticar(sender.tab ? sender.tab.url : null).then((r) => {
+    const desde = Number.isFinite(req.desde) ? Math.min(req.desde, Date.now()) : Date.now();
+    autenticar(sender.tab ? sender.tab.url : null, desde + PRAZO_DO_BOTAO_MS).then((r) => {
       if (r && r.success && r.sessionToken) {
-        chrome.storage.local.set({ token_pendente: r.sessionToken }, () => {
+        const pendente = { token: r.sessionToken, conta: r.conta || null, em: Date.now() };
+        chrome.storage.local.set({ token_pendente: pendente }, () => {
           chrome.tabs.create({ url: API_BASE + '/' });
           responder({ success: true });
         });
       } else {
-        responder(r || { success: false, error: 'Falha desconhecida' });
+        responder(r || { success: false, errorKey: 'ext.desconhecida', error: 'Falha desconhecida' });
       }
     });
     return true;

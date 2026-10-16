@@ -28,6 +28,28 @@ function montar(nome, escopo) {
   return new Function(...nomes, fatiarFuncao(APP, nome) + `\nreturn ${nome};`)(...nomes.map((n) => escopo[n]));
 }
 
+// A marca da sessão de verdade (o teto do desligar é da sessão: ver o R5-5-8).
+const marcaDaSessao = montar('marcaDaSessao', {});
+
+// O que o desligar chama desde a auditoria de 2026-10-01 — gravar e esquecer o
+// "invisível" pendente no aparelho (R6-5-2) e anotar o resultado no diário
+// (R6-5-3) —, as funções DE VERDADE, no mesmo escopo do teste. O armazenamento
+// é de mentira (`guardado`), e `gravacoes` conta os `savePreferences`.
+function comAjudantesDoDesligar(escopo) {
+  const guardado = escopo.guardado || new Map();
+  const e = {
+    savePreferences: () => { e.gravacoes = (e.gravacoes || 0) + 1; guardado.set('prefs', JSON.stringify(e.AppState.preferences)); },
+    safeLS: { get: (k) => (guardado.has(k) ? guardado.get(k) : null) },
+    CONTA_KEY: 'waze_places_conta',
+    ...escopo,
+    guardado,
+  };
+  e.presencaWmeGravarPendente = montar('presencaWmeGravarPendente', e);
+  e.presencaWmeEsquecerGravado = montar('presencaWmeEsquecerGravado', e);
+  e.presencaWmeAnotarDesligar = montar('presencaWmeAnotarDesligar', e);
+  return e;
+}
+
 const CARD = { venueID: 'v1', updateRequestID: 'ur1', mapa: { centro: [-12.597498, -39.511208] } };
 const PROXIMO = { venueID: 'v2', updateRequestID: 'ur2', mapa: { centro: [-22.9, -43.2] } };
 
@@ -60,6 +82,15 @@ test('ação: a posição é a do card NA TELA, [lat, lon] na ordem certa, com o
   // Contraprova da ordem: com o centro invertido o lat viraria -43.2 — e -43.2
   // é uma latitude VÁLIDA, então nada reclamaria. É o defeito sem sintoma.
   assert.notEqual(p.lat, PROXIMO.mapa.centro[1]);
+});
+
+test('ação: o país é o do GESTO — a ação que sai depois da troca de filtro leva o país em que o card estava', () => {
+  // A janela do Desfazer despachada pelo "Aplicar" dos Filtros: o país do
+  // filtro já é o novo, e o card na tela ainda é da fila velha.
+  const e = escopoDaAcao();                                 // API.getCountry() → 30
+  assert.equal(montar('presencaWmeDaAcao', e)(CARD, 73).pais, 73, 'a carona foi com o país de AGORA, não o do gesto');
+  // Sem o país do gesto (nenhum chamador deixa de mandar), vale o do filtro.
+  assert.equal(montar('presencaWmeDaAcao', escopoDaAcao())(CARD).pais, 30);
 });
 
 test('ação: as conversas que o aparelho conhece vão JUNTO — e só quando existem', () => {
@@ -130,8 +161,12 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     const corpo = semComentario(fatiarFuncao(APP, handler));
     const exec = corpo.slice(corpo.indexOf('scheduleAction('));
     assert.ok(exec.length > 50, `${handler}: não achei o executor`);
-    assert.match(exec, /const presenca = presencaWmeDaAcao\(place\);/, `${handler}: a posição não é montada no envio`);
-    assert.match(exec, new RegExp(`API\\.${metodo}\\(place\\.venueID, place\\.updateRequestID, presenca\\)`),
+    // Com o país do GESTO (auditoria de 2026-09-26): a ação pode sair depois
+    // de a pessoa trocar de país, e a marca e a lista de carona são do país em
+    // que o card estava.
+    assert.match(exec, /const presenca = presencaWmeDaAcao\(place, pais\);/, `${handler}: a posição não é montada no envio (com o país do gesto)`);
+    // O 4º argumento é a REGIÃO do gesto (auditoria de 2026-09-25).
+    assert.match(exec, new RegExp(`API\\.${metodo}\\(place\\.venueID, place\\.updateRequestID, presenca, regiao\\)`),
       `${handler}: a posição não vai na ação`);
     const iResp = exec.indexOf('presencaWmeAoResponder(presenca, result)');
     const iAcao = exec.indexOf('handleActionResult(');
@@ -140,6 +175,8 @@ test('ação: a posição é montada DENTRO do executor (na hora do envio), e va
     // do card de 3 s atrás, e iria pra fila de saída junto se a rede caísse.
     const gesto = corpo.slice(0, corpo.indexOf('scheduleAction('));
     assert.doesNotMatch(gesto, /presencaWme/, `${handler}: montou a posição no gesto`);
+    // O da FILA (`paisDaFila`): o do filtro, ou o da área com "Minha área" (R7-6-05).
+    assert.match(gesto, /const pais = paisDaFila\(\);/, `${handler}: o país não é o do GESTO`);
   }
 });
 
@@ -149,7 +186,10 @@ test('ação: fila de saída, lote e lote de lidos NUNCA levam posição', () =>
     const chamadas = corpo.match(/API\.(markAsRead|rejectPlace)\([^)]*\)/g) || [];
     assert.ok(chamadas.length > 0, `${nome}: não achei a chamada da ação (o guard ficaria cego)`);
     for (const c of chamadas) {
-      assert.equal(c.split(',').length, 2, `${nome}: a ação leva mais que os dois ids — ${c}`);
+      // Os dois ids, e depois só `null` no lugar da presença (o 4º é a REGIÃO
+      // do gesto, que viaja com a ação desde a auditoria de 2026-09-25).
+      const args = c.slice(c.indexOf('(') + 1, -1).split(',').map((a) => a.trim());
+      assert.ok(args.length === 2 || args[2] === 'null', `${nome}: a ação leva posição — ${c}`);
     }
     assert.doesNotMatch(corpo, /presencaWme/, `${nome}: mexe na presença`);
   }
@@ -223,8 +263,10 @@ test('resposta: a lista do app que voltou de carona vai pra presença, com o ins
   };
   const f = montar('presencaWmeAoResponder', escopo);
   const lista = { online: [{ id: '1', nome: 'x' }], conversas: [] };
-  f({ userId: '1' }, { success: true, presenca: { ok: true, marca: true }, presencaApp: lista });
-  assert.deepEqual(chamadas, [[lista, 12345]]);
+  f({ userId: '1', pais: 30 }, { success: true, presenca: { ok: true, marca: true }, presencaApp: lista });
+  // O país vai JUNTO: a lista é do país que a carona levou, e a presença a
+  // descarta se o filtro já for outro (auditoria de 2026-09-26).
+  assert.deepEqual(chamadas, [[lista, 12345, 30]]);
   assert.equal(presencaWme.enviadas, 1, 'a escrita deixou de ser contada');
   // Sem carona na ação, uma lista na resposta não é desta ação: não pousa.
   f(null, { success: true, presencaApp: lista });
@@ -307,11 +349,12 @@ test('toggle: desligar some do WME NA HORA (visivel:false); religar pede ligar s
   const fatos = [];
   const presencaWme = { ligarNaProxima: true, ultimaEm: 99 };
   const prefs = {};
-  const escopo = {
-    presencaWme, AppState: { preferences: prefs, profile: { id: 12444348 } },
-    API: { getSession: () => 'tok', presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
-    dfato: (k, o) => fatos.push([k, o]),
-  };
+  const escopo = comAjudantesDoDesligar({
+    presencaWme, AppState: { authenticated: true, preferences: prefs, profile: { id: 12444348 } },
+    API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
+      presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
+    dfato: (k, o) => fatos.push([k, o]), marcaDaSessao,
+  });
   montar('presencaWmeDesligar', escopo)();
   assert.deepEqual(pedidos, [{ userId: '12444348', visivel: false }]);
   assert.equal(presencaWme.ligarNaProxima, false);
@@ -323,7 +366,8 @@ test('toggle: desligar some do WME NA HORA (visivel:false); religar pede ligar s
   assert.equal(presencaWme.ultimaEm, 0, 'quem religou esperaria o freio pra aparecer');
   assert.deepEqual(fatos[1], ['presencaWme.visivel', { religou: true, via: 'interruptor' }]);
   // Sem sessão não há o que desligar no Waze (e nada lança).
-  const semSessao = { ...escopo, API: { getSession: () => null, presencaWaze: () => assert.fail('chamou sem sessão') } };
+  const semSessao = { ...escopo, API: { getSession: () => null, temSessaoNaMemoria: () => false, sessionToken: null,
+    presencaWaze: () => assert.fail('chamou sem sessão') } };
   montar('presencaWmeDesligar', semSessao)();
 });
 
@@ -336,8 +380,11 @@ test('toggle: o interruptor fala com a presença do WME nos dois sentidos', () =
 });
 
 test('perfil e sair: o perfil decide a visibilidade; o "Sair" zera o freio e os contadores', () => {
-  const perfil = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  assert.match(perfil, /presencaWmeAoCarregarPerfil\(profileRes\.visivelNoWme\)/);
+  // O perfil chega pela FONTE ÚNICA (`definirPerfil`), que a carga da abertura
+  // e o alarme falso do 401 usam (auditoria de 2026-09-26).
+  const perfil = semComentario(fatiarFuncao(APP, 'definirPerfil'));
+  assert.match(perfil, /presencaWmeAoCarregarPerfil\(res\.visivelNoWme\)/);
+  assert.match(semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData')), /definirPerfil\(profileRes\)/);
   const sair = semComentario(fatiarFuncao(APP, 'handleLogout'));
   assert.match(sair, /presencaWmeZerar\(\);/, 'o "Sair" deixa o freio de quem saiu pra quem entra');
 });
@@ -360,7 +407,7 @@ test('api.js: a presença vai no corpo SÓ quando existe — sem ela o corpo é 
     const ini = API_JS.indexOf(`async ${metodo}(`);
     assert.ok(ini > 0, metodo);
     const corpo = API_JS.slice(ini, API_JS.indexOf('\n    },', ini));
-    assert.match(corpo, new RegExp(`async ${metodo}\\(venueID, updateRequestID, presenca\\)`));
+    assert.match(corpo, new RegExp(`async ${metodo}\\(venueID, updateRequestID, presenca, regiao\\)`));
     assert.match(corpo, /\.\.\.\(presenca \? \{ presenca \} : \{\}\)/, `${metodo}: a presença vai sempre (ou nunca)`);
   }
   const pw = API_JS.slice(API_JS.indexOf('async presencaWaze('), API_JS.indexOf('async presenca(peer'));
@@ -372,11 +419,234 @@ test('a presença sincroniza quando o PERFIL chega — o `showMainScreen` chama 
   // presença antes de o perfil existir, ela desiste calada (sem o id não há
   // lista nem chat), e ninguém chamava de novo. O smoke injetava o perfil antes
   // e não via (gotcha #52); hoje ele abre pelo `initApp` de verdade.
+  // A chegada do perfil mora em DUAS funções desde 2026-09-26 (a fonte única
+  // `definirPerfil` e o `completarPerfilChegado`, que o alarme falso também usa):
+  // os países entram antes de completar, e a presença sincroniza no fim dele.
   const corpo = semComentario(fatiarFuncao(APP, 'loadProfileAndAuxData'));
-  const iPerfil = corpo.indexOf('AppState.profile = profileRes.profile;');
   const iPaises = corpo.indexOf('AppState.countries = countriesRes.countries;');
-  const iSinc = corpo.indexOf('window.Presenca?.sincronizar?.()');
-  assert.ok(iPerfil > 0, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
-  assert.ok(iSinc > iPerfil, 'a presença não sincroniza depois de o perfil chegar');
-  assert.ok(iSinc > iPaises, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const iPerfil = corpo.indexOf('definirPerfil(profileRes)');
+  const iCompletar = corpo.indexOf('completarPerfilChegado(profileRes.profile, epoca)');
+  assert.ok(iPerfil > 0 && iCompletar > iPerfil, 'o perfil deixou de ser guardado aqui — o guard ficaria cego');
+  assert.ok(iPaises > 0 && iPaises < iCompletar, 'a presença sincroniza antes dos países — o subtítulo da lista sairia sem o país');
+  const completar = semComentario(fatiarFuncao(APP, 'completarPerfilChegado'));
+  const iPais = completar.indexOf('await paisDoPerfil(');
+  const iSinc = completar.indexOf('window.Presenca?.sincronizar?.()');
+  assert.ok(iSinc > iPais && iPais > 0, 'a presença não sincroniza depois de o perfil chegar');
+});
+
+// Desligar o "Ver quem está no app" SEM REDE: o `visivel: false` não saía, e é a
+// MESMA chave do perfil do WME — a pessoa seguia visível lá (auditoria de
+// 2026-09-25). A próxima prova de rede o refaz; recusa de verdade não repete.
+test('desligar sem rede fica pendente, e a próxima prova de rede refaz o "invisível" no WME', async () => {
+  const pedidos = [];
+  // "Sem rede" é SEM RESPOSTA: é o `_motivo` que o `_post` põe quando a
+  // resposta nem chegou (o transiente COM resposta é o Waze fora — ver o teste
+  // do teto, abaixo).
+  let resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+  const presencaWme = { ligarNaProxima: true, desligarPendente: false, desligarEm: 0 };
+  const escopo = comAjudantesDoDesligar({
+    AppState: { authenticated: true, preferences: { presenca: false }, profile: { id: 12444348 } },
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
+    API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
+      presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  });
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, true, 'o desligar que não saiu por rede não ficou pendente');
+  resposta = { success: true };
+  refazer();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pedidos.length, 2, 'a prova de rede não refez o desligar');
+  assert.deepEqual(pedidos[1], { userId: '12444348', visivel: false });
+  assert.equal(presencaWme.desligarPendente, false);
+  // CONTROLE: recusa que não é rede não fica pendente (não repete sozinha)...
+  resposta = { success: false, errorCategory: 'unknown' };
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, false);
+  // ...e quem religou o interruptor no meio não é desligado de novo.
+  presencaWme.desligarPendente = true;
+  escopo.AppState.preferences.presenca = true;
+  refazer();
+  assert.equal(pedidos.length, 3, 'refez um desligar de quem já religou');
+});
+
+// Desligar com o WAZE fora, COM resposta (5xx, gRPC 14 = transiente): cada
+// resposta da nossa API — uma por swipe — refazia o `visivel: false` (MEDIDO:
+// 6 ✕ → 6 pedidos a mais; auditoria de 2026-09-29, R4-1 P4). Fica pendente,
+// mas a repetição tem teto de um minuto; sem resposta (a rede), sai na próxima
+// prova de rede, como o pedido do token do tempo real.
+test('desligar com o Waze fora (COM resposta): pendente, mas refeito no máximo uma vez por minuto — sem resposta, na próxima prova', async () => {
+  const pedidos = [];
+  let agora = 1790200000000;
+  let resposta = { success: false, errorCategory: 'transient', errorKey: 'srv.err.connection' };
+  const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
+  const escopo = comAjudantesDoDesligar({
+    AppState: { authenticated: true, preferences: { presenca: false }, profile: { id: 12444348 } },
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, Date: { now: () => agora }, marcaDaSessao,
+    API: { getSession: () => 'tok', temSessaoNaMemoria: () => true, sessionToken: 'tok',
+      presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  });
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  const vez = async () => { refazer(); await new Promise((r) => setTimeout(r, 0)); };
+  desligar();                                                   // o gesto
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, true, 'o Waze fora (transiente) não deixou o desligar pendente');
+  // Seis ações seguidas, cada resposta uma prova de rede.
+  for (let i = 0; i < 6; i++) { agora += 700; await vez(); }
+  assert.equal(pedidos.length, 1, `cada resposta da API refez o desligar com o Waze fora (${pedidos.length - 1} a mais)`);
+  // Passado um minuto, sai UMA vez.
+  agora += 60000;
+  await vez();
+  await vez();
+  assert.equal(pedidos.length, 2, 'passado o minuto, o desligar pendente não saiu (ou saiu em rajada)');
+  // CONTROLE: SEM resposta (a rede) sai na PRÓXIMA prova, sem esperar o minuto.
+  resposta = { success: false, errorCategory: 'transient', _motivo: 'TypeError' };
+  agora += 60000;
+  await vez();
+  assert.equal(pedidos.length, 3);
+  resposta = { success: true };
+  agora += 1000;
+  await vez();
+  assert.equal(pedidos.length, 4, 'o desligar que falhou por REDE esperou o teto do Waze fora');
+  assert.equal(presencaWme.desligarPendente, false);
+  // E o GESTO sai sempre, com teto nenhum.
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pedidos.length, 5, 'o gesto de desligar esperou o teto');
+});
+
+// Desligar SEM SESSÃO (a janela da renovação pela extensão, com os Filtros
+// abertos) ou com 401: o `visivel: false` era descartado e nunca chegava ao WME
+// (auditoria de 2026-09-30, R5-5-8). Fica pendente, como o sem perfil (K5).
+test('desligar SEM sessão (a renovação) fica pendente, e o perfil que chega com a sessão nova o manda', async () => {
+  const pedidos = [];
+  let sessao = null;
+  const presencaWme = { ligarNaProxima: true, desligarPendente: false, desligarEm: 0 };
+  const escopo = comAjudantesDoDesligar({
+    // Logada é a aba com a sessão na memória: na janela da renovação, nenhuma (R11-1-02).
+    AppState: { get authenticated() { return !!sessao; }, preferences: { presenca: false }, profile: null },
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
+    API: { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, get sessionToken() { return sessao; },
+      presencaWaze: async (c) => { pedidos.push(c); return { success: true }; } },
+  });
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  desligar();                                   // o gesto, na janela
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pedidos.length, 0, 'CONTROLE: sem sessão nada sai');
+  assert.equal(presencaWme.desligarPendente, true, 'o desligar sem sessão foi descartado');
+  // A renovação termina: sessão e perfil de volta; o perfil chegando refaz.
+  sessao = 'token-novo';
+  escopo.AppState.profile = { id: 12444348 };
+  refazer();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(pedidos, [{ userId: '12444348', visivel: false }], 'o perfil chegou e o "invisível" não foi pro WME');
+  assert.equal(presencaWme.desligarPendente, false);
+  // CONTROLE: com o interruptor RELIGADO na janela, nada fica pendente.
+  const religado = { ...escopo, AppState: { preferences: { presenca: true }, profile: null },
+    presencaWme: { desligarPendente: false, desligarEm: 0 }, API: { getSession: () => null, temSessaoNaMemoria: () => false,
+      sessionToken: null, presencaWaze: () => assert.fail('chamou sem sessão') } };
+  montar('presencaWmeDesligar', religado)();
+  assert.equal(religado.presencaWme.desligarPendente, false);
+});
+
+test('desligar com 401: pendente e a sessão conferida — o teto segura o laço com a sessão viva, e numa sessão NOVA ele sai já', async () => {
+  const pedidos = [];
+  let agora = 1790200000000;
+  let sessao = 'token-velho';
+  let resposta = { success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' };
+  let conferidas = 0;
+  const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
+  const escopo = comAjudantesDoDesligar({
+    AppState: { authenticated: true, preferences: { presenca: false }, profile: { id: 12444348 } },
+    presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, Date: { now: () => agora }, marcaDaSessao,
+    handleUnauthorized: () => { conferidas += 1; },
+    API: { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, get sessionToken() { return sessao; },
+      presencaWaze: async (c) => { pedidos.push(c); return resposta; } },
+  });
+  const desligar = montar('presencaWmeDesligar', escopo);
+  const refazer = montar('presencaWmeRefazerDesligar', { ...escopo, presencaWmeDesligar: desligar });
+  const vez = async () => { refazer(); await new Promise((r) => setTimeout(r, 0)); };
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, true, 'o desligar que levou 401 foi descartado');
+  assert.equal(conferidas, 1, 'o 401 do desligar não conferiu a sessão');
+  // Alarme falso (a sessão está viva): a sonda traz o perfil, e o perfil refaz
+  // o desligar. Com a MESMA sessão, o teto segura: sem ele, 401 → sonda →
+  // perfil → desligar → 401… sem fim.
+  agora += 2000;
+  await vez();
+  await vez();
+  assert.equal(pedidos.length, 1, `com a MESMA sessão, o 401 virou um laço de desligar (${pedidos.length - 1} a mais)`);
+  // A sessão estava morta: a renovação traz uma sessão NOVA, e o perfil que chega a manda já.
+  sessao = 'token-novo';
+  resposta = { success: true };
+  await vez();
+  assert.equal(pedidos.length, 2, 'a sessão nova herdou o teto da que levou o 401: o "invisível" esperou um minuto');
+  assert.equal(presencaWme.desligarPendente, false);
+  // CONTROLE: recusa que não é rede nem 401 segue sem repetir.
+  resposta = { success: false, errorCategory: 'unknown' };
+  desligar();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(presencaWme.desligarPendente, false, 'recusa de verdade passou a ficar pendente');
+});
+
+// O 401 da sessão que LEVOU o "invisível" e já se foi — ela caiu e a extensão a
+// renovou com a mesma conta, e a sessão nova está na memória — conferia a de
+// agora, viva: uma sonda do perfil a mais e o "Conexão instável" logo depois do
+// "Acesso renovado" (auditoria da rodada 14, R14-5-02). O pendente fica, e a
+// sessão nova o manda.
+test('desligar: o 401 da sessão ANTERIOR, chegando depois da renovação, não confere a sessão de agora — e o "invisível" segue pendente', async () => {
+  async function tardio({ renovar }) {
+    let sessao = 'token-velho';
+    let soltar = null;
+    let conferidas = 0;
+    const presencaWme = { ligarNaProxima: false, desligarPendente: false, desligarEm: 0 };
+    const API = { getSession: () => sessao, temSessaoNaMemoria: () => !!sessao, get sessionToken() { return sessao; },
+      presencaWaze: () => new Promise((ok) => { soltar = ok; }) };
+    const escopo = comAjudantesDoDesligar({
+      AppState: { authenticated: true, preferences: { presenca: false }, profile: { id: 12444348 } },
+      presencaWme, dfato: () => {}, PRESENCA_WME_DESLIGAR_REPETIR_MS: 60000, marcaDaSessao,
+      // A sessão da MEMÓRIA, a de verdade (`marcaDestaAba`): é ela que diz de quem é o 401.
+      marcaDestaAba: montar('marcaDestaAba', { API, marcaDaSessao }),
+      handleUnauthorized: () => { conferidas += 1; },
+      API,
+    });
+    montar('presencaWmeDesligar', escopo)();
+    assert.equal(typeof soltar, 'function', 'CONTROLE: o "invisível" tinha que estar no ar');
+    if (renovar) sessao = 'token-renovado';
+    soltar({ success: false, errorCategory: 'unauthorized', errorKey: 'srv.err.sessionExpired' });
+    await new Promise((r) => setTimeout(r, 0));
+    return { conferidas, pendente: presencaWme.desligarPendente };
+  }
+  const tarde = await tardio({ renovar: true });
+  assert.equal(tarde.conferidas, 0, 'DEFEITO: o 401 da sessão que já se foi conferiu a sessão renovada — a sonda a mais e o "Conexão instável"');
+  assert.equal(tarde.pendente, true, 'o "invisível" que levou o 401 da sessão anterior deixou de ficar pendente');
+  // CONTROLE: o 401 da sessão de AGORA confere (gotcha #42).
+  const agora = await tardio({ renovar: false });
+  assert.equal(agora.conferidas, 1, 'CONTROLE: o 401 da própria sessão tinha que ser conferido');
+  assert.equal(agora.pendente, true);
+});
+
+// A DESCARGA (a página indo pro fundo com a ação na janela do Desfazer) não leva
+// posição: a regra escrita é "nunca pela fila de saída, lote, recusa automática
+// ou descarga", e ela levava (auditoria de 2026-09-29, R4-1 P12).
+test('ação: a DESCARGA não leva posição — e fora dela a posição vai', () => {
+  const saindo = escopoDaAcao();
+  saindo.API.saindo = true;
+  assert.equal(montar('presencaWmeDaAcao', saindo)(CARD, 30), null, 'a descarga levou a posição de carona');
+  assert.equal(saindo.presencaWme.ultimaEm, 0, 'a descarga gastou o freio sem mandar nada');
+  // CONTROLE: a mesma ação, com a página na tela, leva.
+  const naTela = escopoDaAcao();
+  naTela.API.saindo = false;
+  assert.ok(montar('presencaWmeDaAcao', naTela)(CARD, 30), 'fora da descarga a posição não foi');
+  // E quem liga o `saindo` é a descarga, ANTES de despachar a ação pendente.
+  const desc = semComentario(fatiarFuncao(APP, 'descarregarAcaoPendente'));
+  const iDespacho = desc.indexOf('AppState.pendingAction.descarregar()');
+  assert.ok(iDespacho > 0, 'a descarga não despacha mais pela `descarregar` (o guard ficaria cego)');
+  assert.ok(desc.lastIndexOf('API.setSaindo(true)', iDespacho) > 0, 'a descarga despacha a ação sem ligar o `saindo` antes');
 });

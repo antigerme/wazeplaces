@@ -3,17 +3,56 @@ window.addEventListener('message', (event) => {
     if (event.data && event.data.action === 'AG_WAZE_DATA') {
         // Verifica se a aba já foi criada para evitar duplicidade
         if (!document.getElementById('sidepanel-ag-tool')) {
-            createAGInterface(event.data.userName, event.data.level, event.data.isAM, event.data.language);
+            createAGInterface(event.data.userName, event.data.level, event.data.isAM, event.data.language,
+                event.data.rank, event.data.isStaff);
         }
     }
 });
+
+// O portão do painel é o MESMO do servidor (`isUserAllowed`, em server/core.mjs):
+// Staff, ou Area Manager de nível 2+. O Waze conta o nível do ZERO (`rank`), e a
+// tela mostra rank + 1 — o nível 2 é o rank 1. Quem decide de verdade é o
+// servidor; o painel só não pode dizer "não" a quem ele deixa entrar. Exigia
+// L3+AM ("Requer Nível 3+", e no title "maior que 3"), sem staff, e o mesmo L2+AM
+// que via o botão travado entrava pela ponte (auditoria da rodada 6, R66-1).
+const RANK_MINIMO = 1;                 // o `MIN_RANK_WAZE` do servidor
+const NIVEL_MINIMO = RANK_MINIMO + 1;  // o que a tela mostra
+function podeEntrarNoApp(rank, isAM, isStaff) {
+    if (isStaff) return true;
+    const r = Number.isInteger(rank) ? rank : (rank != null ? parseInt(rank, 10) : -1);
+    return r >= RANK_MINIMO && !!isAM;
+}
+
+// O ACESSAR fica TRAVADO enquanto loga (auditoria da rodada 7, R7-1-06). Cada
+// toque é um `abrirPlaces`: uma ida ao /Session do Waze no nome da pessoa, uma
+// sessão nova no servidor e uma aba nova do app — e o toque duplo abria duas
+// abas, com duas sessões da mesma conta (MEDIDO com a extensão de verdade). Ele
+// volta em QUALQUER desfecho: a resposta do background (deu certo ou não), o
+// `lastError` (o service worker não respondeu), o `sendMessage` que lança (a
+// extensão se atualizou com o WME aberto) e este TETO, pra resposta que nunca
+// chega — MEDIDO com o servidor pendurado: o Chrome não derruba o service
+// worker, e o botão ficava em "LOGANDO..." pra sempre, sem aviso. O teto é o
+// mesmo que o app espera por uma resposta do servidor.
+//
+// O teto se compara com o PIOR caso do login INTEIRO, e não com uma ida só
+// (auditoria da rodada 8, R8-6-01 = R8-1-02). Esta conta dizia "maior que os
+// 30 s do servidor pro Waze", mas o background repete o login em toda falha
+// passageira: até 4 idas e 4,6 s de espera entre elas, 124,6 s sem prazo. O
+// login lento abria a aba DEPOIS do aviso de que a extensão não respondeu, e o
+// "tente de novo" abria a segunda. Hoje o login do botão tem um prazo TOTAL,
+// contado deste toque (`PRAZO_DO_BOTAO_MS`, 40 s, no background.js): nenhuma ida
+// começa depois dele, a que está no ar é cancelada e a resposta atrasada não
+// abre aba. O background responde até lá, e o botão volta com o aviso do que
+// aconteceu; este teto, acima do prazo, só pega a extensão que não responde
+// nada — e aí não há login no ar pra abrir aba depois do "tente de novo".
+const ESPERA_DO_BOTAO_MS = 45000;
 
 const s = document.createElement('script');
 s.src = chrome.runtime.getURL('inject.js');
 s.onload = function() { this.remove(); };
 (document.head || document.documentElement).appendChild(s);
 
-function createAGInterface(userName, level, isAM, language = 'en') {
+function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff) {
     if (document.getElementById('sidepanel-ag-tool')) return;
 
 //----------- monta a aba
@@ -72,11 +111,17 @@ function createAGInterface(userName, level, isAM, language = 'en') {
             loggingBtn: 'LOGANDO...',
             accessWazePlacesBtn: 'Acessar o Waze Places',
             errorLogin: 'Falha no login automático:\n',
-            reqLevel: 'Requer Nível maior que 3 e ser Area Manager (AM).',
-            reqLevelShort: 'Requer Nível 3+ e AM',
-            info1: "Ao tentar acessar o Waze Places, o seu cookie pode estar expirado. Nesse caso, o botão ficará travado com o texto 'logando...'. Se isso ocorrer, recarregue a página e tente novamente.\n\n",
-            info2: "Apos acessar o Waze Places clique no filtro ( icone de funil ) para configurar o seu Estado e Area",
-            infoBox: "No momento, esta função está disponível apenas para usuários Nível 3+ com Area Manager.\nA extensão fará o login automático no WAZE PLACES utilizando o seu cookie (sem a necessidade de extensões adicionais ou de copiar/colar o cookie).",
+            erroSemLogin: 'O seu login no WME não foi encontrado. Recarregue esta página (ou entre de novo no WME) e tente outra vez.',
+            erroNegado: 'O Waze Places é restrito a editores Area Manager de Nível {nivel}+ ou Staff.',
+            erroWaze: 'O Waze não respondeu como esperado. Tente de novo em instantes.',
+            erroConexao: 'Não foi possível falar com o Waze Places. Confira a conexão e tente de novo.',
+            erroExtensao: 'A extensão não respondeu. Recarregue esta página e tente de novo.',
+            erroGenerico: 'Algo deu errado. Tente de novo em instantes.',
+            reqLevel: 'Requer Nível {nivel}+ e ser Area Manager (AM), ou ser Staff.',
+            reqLevelShort: 'Requer Nível {nivel}+ e AM, ou Staff',
+            info1: "Se o login automático falhar (por exemplo, com o seu login no WME expirado), um aviso diz o que fazer.",
+            info2: "Após acessar o Waze Places, clique no filtro (ícone de funil) para configurar o seu Estado e Área",
+            infoBox: "No momento, esta função está disponível apenas para usuários Nível {nivel}+ com Area Manager, ou Staff.\nA extensão fará o login automático no WAZE PLACES utilizando o seu cookie (sem a necessidade de extensões adicionais ou de copiar/colar o cookie).",
             version: "Versão",
             by: "by",
             yes: "Sim",
@@ -91,11 +136,17 @@ function createAGInterface(userName, level, isAM, language = 'en') {
             loggingBtn: 'LOGGING IN...',
             accessWazePlacesBtn: 'Access Waze Places',
             errorLogin: 'Auto login failed:\n',
-            reqLevel: 'Requires Level > 3 and Area Manager (AM).',
-            reqLevelShort: 'Requires Level 3+ and AM',
-            info1: "When trying to access Waze Places, your cookie might be expired. In this case, the button will get stuck with the text 'logging in...'. If this happens, reload the page and try again.\n\n",
+            erroSemLogin: "Couldn't find your WME login. Reload this page (or sign in to WME again) and try once more.",
+            erroNegado: 'Waze Places is restricted to Area Manager editors at Level {nivel}+ or Staff.',
+            erroWaze: "Waze didn't answer as expected. Try again in a moment.",
+            erroConexao: "Couldn't reach Waze Places. Check your connection and try again.",
+            erroExtensao: "The extension didn't respond. Reload this page and try again.",
+            erroGenerico: 'Something went wrong. Try again in a moment.',
+            reqLevel: 'Requires Level {nivel}+ and Area Manager (AM), or Staff.',
+            reqLevelShort: 'Requires Level {nivel}+ and AM, or Staff',
+            info1: "If the auto login fails (for example, when your WME login has expired), a message tells you what to do.",
             info2: "After accessing Waze Places, click on the filter (funnel icon) to set up your State and Area",
-            infoBox: "Currently, this function is only available to Level 3+ users with Area Manager.\nThe extension will automatically log in to WAZE PLACES using your cookie (without the need for extra extensions or copying/pasting the cookie).",
+            infoBox: "Currently, this function is only available to Level {nivel}+ users with Area Manager, or Staff.\nThe extension will automatically log in to WAZE PLACES using your cookie (without the need for extra extensions or copying/pasting the cookie).",
             version: "Version",
             by: "by",
             yes: "Yes",
@@ -110,11 +161,17 @@ function createAGInterface(userName, level, isAM, language = 'en') {
             loggingBtn: 'INICIANDO SESIÓN...',
             accessWazePlacesBtn: 'Acceder a Waze Places',
             errorLogin: 'Fallo en el inicio de sesión automático:\n',
-            reqLevel: 'Requiere Nivel mayor a 3 y ser Area Manager (AM).',
-            reqLevelShort: 'Requiere Nivel 3+ y AM',
-            info1: "Al intentar acceder a Waze Places, su cookie puede haber expirado. En este caso, el botón se quedará atascado con el texto 'iniciando sesión...'. Si esto ocurre, recargue la página e inténtelo de nuevo.\n\n",
+            erroSemLogin: 'No se encontró su inicio de sesión en el WME. Recargue esta página (o vuelva a entrar en el WME) e inténtelo de nuevo.',
+            erroNegado: 'Waze Places está restringido a editores Area Manager de Nivel {nivel}+ o Staff.',
+            erroWaze: 'Waze no respondió como se esperaba. Inténtelo de nuevo en unos instantes.',
+            erroConexao: 'No se pudo conectar con Waze Places. Revise la conexión e inténtelo de nuevo.',
+            erroExtensao: 'La extensión no respondió. Recargue esta página e inténtelo de nuevo.',
+            erroGenerico: 'Algo salió mal. Inténtelo de nuevo en unos instantes.',
+            reqLevel: 'Requiere Nivel {nivel}+ y ser Area Manager (AM), o ser Staff.',
+            reqLevelShort: 'Requiere Nivel {nivel}+ y AM, o Staff',
+            info1: "Si falla el inicio de sesión automático (por ejemplo, si su sesión del WME expiró), un aviso le indica qué hacer.",
             info2: "Después de acceder a Waze Places, haga clic en el filtro (icono de embudo) para configurar su Estado y Área",
-            infoBox: "Actualmente, esta función solo está disponible para usuarios Nivel 3+ con Area Manager.\nLa extensión iniciará sesión automáticamente en WAZE PLACES utilizando su cookie (sin necesidad de extensiones adicionales ni de copiar/pegar la cookie).",
+            infoBox: "Actualmente, esta función solo está disponible para usuarios Nivel {nivel}+ con Area Manager, o Staff.\nLa extensión iniciará sesión automáticamente en WAZE PLACES utilizando su cookie (sin necesidad de extensiones adicionales ni de copiar/pegar la cookie).",
             version: "Versión",
             by: "por",
             yes: "Sí",
@@ -129,11 +186,17 @@ function createAGInterface(userName, level, isAM, language = 'en') {
             loggingBtn: 'CONNEXION...',
             accessWazePlacesBtn: 'Accéder à Waze Places',
             errorLogin: 'Échec de la connexion automatique :\n',
-            reqLevel: 'Nécessite un niveau supérieur à 3 et d\'être Area Manager (AM).',
-            reqLevelShort: 'Nécessite Niveau 3+ et AM',
-            info1: "Lors de la tentative d'accès à Waze Places, votre cookie peut avoir expiré. Dans ce cas, le bouton restera bloqué avec le texte 'connexion...'. Si cela se produit, rechargez la page et réessayez.\n\n",
+            erroSemLogin: 'Impossible de trouver votre connexion au WME. Rechargez cette page (ou reconnectez-vous au WME) et réessayez.',
+            erroNegado: 'Waze Places est réservé aux éditeurs Area Manager de niveau {nivel}+ ou Staff.',
+            erroWaze: "Waze n'a pas répondu comme prévu. Réessayez dans un instant.",
+            erroConexao: 'Impossible de joindre Waze Places. Vérifiez votre connexion et réessayez.',
+            erroExtensao: "L'extension n'a pas répondu. Rechargez cette page et réessayez.",
+            erroGenerico: "Une erreur s'est produite. Réessayez dans un instant.",
+            reqLevel: 'Nécessite le niveau {nivel}+ et d\'être Area Manager (AM), ou d\'être Staff.',
+            reqLevelShort: 'Nécessite Niveau {nivel}+ et AM, ou Staff',
+            info1: "Si la connexion automatique échoue (par exemple, si votre connexion au WME a expiré), un message vous indique quoi faire.",
             info2: "Après avoir accédé à Waze Places, cliquez sur le filtre (icône en entonnoir) pour configurer votre État et votre Zone",
-            infoBox: "Pour le moment, cette fonction n'est disponible que pour les utilisateurs de niveau 3+ avec Area Manager.\nL'extension se connectera automatiquement à WAZE PLACES en utilisant votre cookie (sans avoir besoin d'extensions supplémentaires ou de copier/coller le cookie).",
+            infoBox: "Pour le moment, cette fonction n'est disponible que pour les utilisateurs de niveau {nivel}+ avec Area Manager, ou Staff.\nL'extension se connectera automatiquement à WAZE PLACES en utilisant votre cookie (sans avoir besoin d'extensions supplémentaires ou de copier/coller le cookie).",
             version: "Version",
             by: "par",
             yes: "Oui",
@@ -157,6 +220,27 @@ function createAGInterface(userName, level, isAM, language = 'en') {
     }
     
     const t = translations[langKey];
+    // O nível mínimo vem da constante do portão, nunca escrito à mão em 4 línguas.
+    const comNivel = (frase, nivel = NIVEL_MINIMO) => String(frase).replace(/\{nivel\}/g, String(nivel));
+
+    // A frase do alerta sai do dicionário DESTE painel, na língua do WME. Ia o
+    // `error` cru — a frase do servidor, sempre em português, ou a do próprio
+    // background —, e no cookie vencido ela mandava "exportar os cookies", que não
+    // é o caminho de quem entra pela extensão (auditoria da rodada 6, R66-2). O
+    // background repassa a CHAVE e a categoria que o servidor mandou; a frase
+    // crua fica no FIM da cadeia, pra resposta que não traz nenhuma das duas.
+    function fraseDoErro(r) {
+        if (r.semLogin) return t.erroSemLogin;
+        if (r.negado || r.errorCategory === 'access_denied') {
+            const n = r.errorVars && Number.isInteger(r.errorVars.minLevel) && r.errorVars.minLevel > 0
+                ? r.errorVars.minLevel : NIVEL_MINIMO;
+            return comNivel(t.erroNegado, n);
+        }
+        if (r.errorKey === 'ext.conexao') return t.erroConexao;
+        if (r.errorCategory === 'transient' || r.errorCategory === 'unknown') return t.erroWaze;
+        if (r.errorKey) return t.erroGenerico;
+        return r.error || t.erroGenerico;
+    }
 
 //----------- titulo aba
     const title = document.createElement('h4');
@@ -178,8 +262,8 @@ function createAGInterface(userName, level, isAM, language = 'en') {
     const btn = document.createElement('button');
     btn.innerText = t.accessBtn;
     
-//------------- regra de acesso l3+ com AM
-    const canAccess = (parseInt(level) >= 3) && isAMBoolean;
+//------------- regra de acesso: a do servidor (ver `podeEntrarNoApp`)
+    const canAccess = podeEntrarNoApp(rank, isAMBoolean, isStaff === true || isStaff === 'true');
 
     if (canAccess) {
 //------------- botao OK
@@ -191,22 +275,51 @@ function createAGInterface(userName, level, isAM, language = 'en') {
         `;
         
         btn.addEventListener('click', () => {
+            if (btn.disabled) return;   // um login por vez (ver `ESPERA_DO_BOTAO_MS`)
+            btn.disabled = true;
             btn.innerText = t.loggingBtn;
             btn.style.background = '#ffcc00';
 
-            // "abrirPlaces" (era "getCookies"): o nome agora diz o que o botão
-            // FAZ, e o background tem uma segunda ação ("autenticar") que a
-            // ponte usa sem abrir aba. Dois nomes porque são dois fluxos.
-            chrome.runtime.sendMessage({ action: "abrirPlaces" }, (response) => {
+            // Devolve o botão UMA vez por toque: a resposta que chega depois do
+            // teto não avisa de novo, nem destrava o toque seguinte, que pode
+            // estar com outro login no ar.
+            let terminou = false;
+            let teto = null;
+            const terminar = () => {
+                if (terminou) return false;
+                terminou = true;
+                clearTimeout(teto);
+                btn.disabled = false;
                 btn.innerText = t.accessWazePlacesBtn;
                 btn.style.background = '#33ccff';
+                return true;
+            };
+            teto = setTimeout(() => {
+                if (terminar()) alert(t.errorLogin + t.erroExtensao);
+            }, ESPERA_DO_BOTAO_MS);
 
-                if (chrome.runtime.lastError) {
-                    alert(t.errorLogin + chrome.runtime.lastError.message);
-                } else if (response && response.error) {
-                    alert(t.errorLogin + response.error);
-                }
-            });
+            // "abrirPlaces" (era "getCookies"): o nome agora diz o que o botão
+            // FAZ, e o background tem uma segunda ação ("autenticar") que a
+            // ponte usa sem abrir aba. Dois nomes porque são dois fluxos. O
+            // `desde` é a hora do toque: é dela que o prazo do login conta lá.
+            try {
+                chrome.runtime.sendMessage({ action: "abrirPlaces", desde: Date.now() }, (response) => {
+                    // Lido SEMPRE, antes de tudo: o `lastError` só vale aqui
+                    // dentro, e o Chrome acusa o que ninguém leu.
+                    const semResposta = chrome.runtime.lastError;
+                    if (!terminar()) return;
+                    if (semResposta) {
+                        alert(t.errorLogin + t.erroExtensao);
+                    } else if (response && response.success !== true) {
+                        alert(t.errorLogin + fraseDoErro(response));
+                    }
+                });
+            } catch (e) {
+                // A extensão se atualizou com o WME aberto: o `sendMessage` deste
+                // painel LANÇA ("Extension context invalidated"), e só recarregar
+                // a página traz o painel novo — que é o que o aviso diz.
+                if (terminar()) alert(t.errorLogin + t.erroExtensao);
+            }
         });
     } else {
 // -------------- botao NO
@@ -217,7 +330,7 @@ function createAGInterface(userName, level, isAM, language = 'en') {
             display: flex; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;
         `;
         btn.disabled = true;
-        btn.title = t.reqLevel;
+        btn.title = comNivel(t.reqLevel);
         
 // -------------- botao erro
         const aviso = document.createElement('span');
@@ -225,7 +338,7 @@ function createAGInterface(userName, level, isAM, language = 'en') {
         aviso.style.color = '#d93025';
         aviso.style.textAlign = 'center';
         aviso.style.fontWeight = 'bold';
-        aviso.innerText = t.reqLevelShort;
+        aviso.innerText = comNivel(t.reqLevelShort);
         container.appendChild(aviso);
     }
 
@@ -275,7 +388,7 @@ function createAGInterface(userName, level, isAM, language = 'en') {
     `;
     container.appendChild(infoNews);
     
-    infoBox.innerText = t.infoBox;
+    infoBox.innerText = comNivel(t.infoBox);
     container.appendChild(infoBox);
 
 // -------------- VERSÃO DA EXTENSÃO (NOVO)
