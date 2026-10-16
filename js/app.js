@@ -335,6 +335,13 @@ function filtrosDeFabrica() {
              unreadOnly: true, categories: [], sortOrder: ORDEM_PADRAO };
 }
 
+// O padrão do "Manter conectado" (Preferências): LIGADO, opt-OUT — decisão do
+// dono, ainda a confirmar, e por isso numa constante só: virar o padrão é mudar
+// esta linha. É dela que saem a fábrica (`preferenciasDeFabrica`), a leitura do
+// aparelho (`lerPreferenciasGuardadas`) e o que o `perfil` manda ao servidor
+// (`manterConectadoParaOServidor`); nada mais escreve `true`/`false` à mão.
+const MANTER_CONECTADO_PADRAO = true;
+
 // As preferências DE FÁBRICA, pelo mesmo motivo dos filtros logo acima: o app
 // recém-aberto, o "Sair" e a releitura do que outra aba gravou partem daqui. O
 // "Sair" repunha um literal próprio, SEM `semUndoSeguidas` e SEM `pularGuarda`
@@ -343,7 +350,8 @@ function filtrosDeFabrica() {
 // nasceria diferente depois de sair e entrar de novo. Preferência nova entra
 // AQUI (e a leitura dela, em `lerPreferenciasGuardadas`).
 function preferenciasDeFabrica() {
-    return { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false };
+    return { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false,
+             manterConectado: MANTER_CONECTADO_PADRAO };
 }
 
 const AppState = {
@@ -375,6 +383,12 @@ const AppState = {
     loadError: false,
     filters: filtrosDeFabrica(),
     preferences: preferenciasDeFabrica(),
+    // O que o servidor disse, no `perfil` ou na troca do interruptor, sobre o
+    // "Manter conectado" (booleano; `null` = não se sabe). Só pro diagnóstico e
+    // pro "volta ao estado real"; a preferência é a de cima.
+    manterDoServidor: null,
+    // O que o `perfil` MANDOU na ida que trouxe esse estado (só a resposta ao que a pessoa tem hoje vale).
+    manterEnviado: null,
     devMode: { unlocked: false, active: false },
     profile: null,
     countries: [],
@@ -2743,6 +2757,7 @@ function setupModalListeners() {
         savePreferences();
     });
     $('prefOfflineDisponivel')?.addEventListener('change', (e) => offlineAoMudarInterruptor(e.target.checked));
+    $('prefManterConectado').addEventListener('change', (e) => { aoMudarManterConectado(e.target.checked); });
     $('prefPularGuarda').addEventListener('change', (e) => {
         AppState.preferences.pularGuarda = e.target.checked;
         savePreferences();
@@ -7516,6 +7531,15 @@ function definirPerfil(res) {
     // ANTES do que depende do perfil: se a conta é outra, o que era da
     // anterior sai antes de a recusa automática e a presença rodarem.
     aoConhecerConta(perfil);
+    // Depois da troca de conta: o que o servidor diz do "Manter conectado" é da
+    // sessão que acabou de responder, e a troca zera o da anterior. Não mexe na
+    // preferência (ela é da pessoa, e o `perfil` seguinte a repete); resposta sem
+    // o campo (servidor sem o recurso) não apaga o que se sabia. O relatório
+    // mostra os dois lado a lado e acusa a divergência.
+    if (typeof res.manterConectado === 'boolean') {
+        AppState.manterDoServidor = res.manterConectado;
+        AppState.manterEnviado = typeof res.manterEnviado === 'boolean' ? res.manterEnviado : null;
+    }
     guardarReferencias(res);
     guardarPerfilDoPortao(perfil);
     guardarPrazoDaSessao(res);
@@ -9496,6 +9520,20 @@ function diagSessao() {
         }
     } catch (e) { fora.erro = String((e && e.message) || e); }
     return fora;
+}
+
+// O "Manter conectado" no relatório: o interruptor DO APARELHO e o que o
+// servidor disse dele (`perfil`/troca do interruptor). Só booleanos — sem dado
+// de terceiro e sem credencial. É a primeira pergunta de quem relata "caiu a
+// sessão sem eu fazer nada": ele estava ligado? o servidor concordava?
+function diagManterConectado() {
+    const f = { ligado: null, servidor: null, padrao: null };
+    try {
+        f.ligado = AppState.preferences.manterConectado !== false;
+        f.servidor = typeof AppState.manterDoServidor === 'boolean' ? AppState.manterDoServidor : null;
+        f.padrao = MANTER_CONECTADO_PADRAO;
+    } catch (e) { f.erro = String((e && e.message) || e); }
+    return f;
 }
 
 // ── O AMBIENTE QUE DECIDE SE O ARMAZENAMENTO SOBREVIVE ───────────────────
@@ -12337,6 +12375,7 @@ async function diagCorpo() {
         // A seção que responde o relato "a sessão não dura": ciclos medidos em
         // horas, e o ambiente que decide se o armazenamento sobrevive.
         sessao: diagSessao(),
+        manterConectado: diagManterConectado(),
         armazenamentoDuravel: diagArmazenamentoDuravel(),
         app: { versao: typeof APP_VERSION !== 'undefined' ? APP_VERSION : null,
                rotulo: typeof verLabel === 'function' ? verLabel(APP_VERSION) : null,
@@ -13372,6 +13411,10 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
     // depois da limpeza (ver a função; R8-1-04, L12-1).
     esquecerRegistrosDaPagina();
     AppState.profile = null;
+    // O que o servidor disse do "Manter conectado" era da sessão que saiu (e a
+    // `sessao destroy` apagou o keepalive lá); a resposta em voo não vale.
+    AppState.manterDoServidor = null;
+    AppState.manterEnviado = null;
     // As categorias que a fila de quem saiu mostrou também: o seletor dos Filtros
     // de quem entrar na mesma página oferecia as da conta anterior (R16-6-04).
     AppState.seenCategories = [];
@@ -19755,6 +19798,7 @@ function desenharChavesDePreferencia() {
     marcar('prefPularGuarda', p.pularGuarda === true);
     marcar('prefPresenca', p.presenca !== false);
     marcar('prefOfflineDisponivel', p.offlineDisponivel === true);
+    marcar('prefManterConectado', p.manterConectado !== false);
 }
 
 // A página VOLTOU do cache de voltar/avançar (bfcache: Safari e Chrome do Android, ao voltar a
@@ -23470,6 +23514,13 @@ function esquecerEscolhasDaContaAnterior() {
     // "Quero treinar antes" e voltava ao treino (R11-7-02, MEDIDO no navegador).
     if (typeof Treino !== 'undefined' && Treino.ativo === true) prefs.comoFuncionaVisto = true;
     prefs.semUndoSeguidas = 0;
+    // O "Manter conectado" FICA (decisão): é uma escolha do aparelho sobre a
+    // sessão que está nele, não uma ação no nome de alguém que a conta nova não
+    // tenha pedido — o padrão já é ligado, e desligado herdado erra pro lado da
+    // privacidade (a mesma régua do "Ver quem está no app"). O que o servidor
+    // disse, porém, era da sessão anterior.
+    AppState.manterDoServidor = null;
+    AppState.manterEnviado = null;
     savePreferences();
     safeLS.remove(PERFIL_GATE_KEY);
     // O que MOSTRA as escolhas: o selo do ↑ do card na tela ("Pular ⭐" diria que
@@ -30173,6 +30224,91 @@ function savePreferences() {
     } catch (e) {}
 }
 
+// ── MANTER CONECTADO ──────────────────────────────────────────────────────
+// O Waze invalida o cookie ~24 h depois se ninguém o renova, e o app só o
+// renova quando alguém o abre: quem abre pouco caía e refazia o pareamento. O
+// servidor, com o interruptor ligado, renova a sessão sozinho de poucas em
+// poucas horas (um Cron). O CLIENTE faz duas coisas: manda o interruptor ao
+// servidor no GESTO (`API.manterConectado`) e a cada `perfil` (campo `manter`,
+// que também conserta o servidor quando a troca se perdeu no caminho).
+//
+// O "Sair" não precisa de chamada nova: a `sessao destroy` já apaga o
+// keepalive no servidor, e as preferências voltam ao de fábrica.
+
+// Trocas do interruptor com a resposta ainda por vir (o `desenharChavesDePreferencia`
+// não pode desfazer, por baixo, a escolha que a pessoa acabou de fazer).
+let manterNoAr = 0;
+// Só a resposta da ÚLTIMA troca decide: duas trocas seguidas voltam fora de ordem.
+let manterVez = 0;
+
+// O que o `perfil` manda ao servidor. `undefined` enquanto as preferências não
+// foram lidas do aparelho: a chave só vai quando a preferência está DEFINIDA
+// (mandar o padrão antes de ler o aparelho ligaria, no servidor, o que a pessoa
+// desligou). Booleano ESTRITO: o servidor não faz coerção.
+function manterConectadoParaOServidor() {
+    if (!preferenciasCarregadas) return undefined;
+    return AppState.preferences.manterConectado !== false;
+}
+
+// O gesto do interruptor. Salva, manda ao servidor na hora, e se NÃO deu volta
+// ao estado REAL com um aviso curto — a chave nunca fica ligada sobre um
+// servidor que não ligou. Rede fora não derruba sessão nem nada: é só uma troca
+// que não saiu; e como o `perfil` repete a preferência a cada abertura, o
+// servidor alcança sozinho.
+async function aoMudarManterConectado(ligar) {
+    ligar = ligar === true;
+    const antes = AppState.preferences.manterConectado !== false;
+    const epoca = epocaDaSessao;
+    const vez = ++manterVez;
+    AppState.preferences.manterConectado = ligar;
+    // A resposta de um `perfil` anterior a esta troca não vale mais.
+    AppState.manterEnviado = null;
+    savePreferences();
+    manterNoAr++;
+    let r = null;
+    try { r = await API.manterConectado(ligar); } catch (e) { r = null; }
+    finally { manterNoAr--; }
+    // Saiu (ou trocou de conta) enquanto a resposta vinha: as preferências já
+    // são outras, e a resposta não é desta sessão.
+    if (epoca !== epocaDaSessao) return;
+    // Outra troca, mais nova, decide.
+    if (vez !== manterVez) return;
+    const real = r && r.success === true && typeof r.manterConectado === 'boolean' ? r.manterConectado : null;
+    if (real === ligar) {
+        AppState.manterDoServidor = real;
+        return;
+    }
+    // Não deu: volta ao que o servidor DISSE ou, sem resposta, ao último estado
+    // que se sabia real (o do último `perfil`/troca), senão ao de antes do gesto.
+    const volta = real !== null ? real
+        : typeof AppState.manterDoServidor === 'boolean' ? AppState.manterDoServidor : antes;
+    if (real !== null) AppState.manterDoServidor = real;
+    dfato('manter.falhou', { queria: ligar, volta, categoria: (r && r.errorCategory) || 'semResposta' });
+    if (volta === ligar) return;   // o servidor já está como a pessoa pediu: nada a desfazer
+    AppState.preferences.manterConectado = volta;
+    savePreferences();
+    desenharChavesDePreferencia();
+    showToast(t('toast.manterFalhou'), 'error');
+}
+
+// O interruptor NUNCA mostra um estado que o servidor não tem. O `perfil` manda a
+// preferência e o servidor responde o estado REAL dele; se divergem (ele não
+// conseguiu ligar, ou perdeu a chave), a chave mostra e grava o que o servidor
+// disse — a pessoa vê a verdade, e o `perfil` seguinte já repete o estado certo.
+// Só vale a resposta ao que a pessoa tem HOJE (`manterEnviado`): uma troca feita
+// depois do pedido, ou uma troca no ar, deixa a resposta velha de lado. Roda
+// quando as Preferências abrem (é lá que a chave aparece), sem pedido nenhum.
+function conciliarManterComOServidor() {
+    const servidor = AppState.manterDoServidor;
+    if (typeof servidor !== 'boolean' || manterNoAr !== 0) return;
+    const pref = AppState.preferences.manterConectado !== false;
+    if (servidor === pref || AppState.manterEnviado !== pref) return;
+    dfato('manter.divergiu', { preferencia: pref, servidor });
+    AppState.preferences.manterConectado = servidor;
+    AppState.manterEnviado = servidor;
+    savePreferences();
+}
+
 function loadPreferences() {
     lerPreferenciasGuardadas();
     preferenciasCarregadas = true;
@@ -30195,6 +30331,11 @@ function lerPreferenciasGuardadas() {
             // Opt-IN, ao contrário da presença logo acima: só liga quem DISSE
             // que quer. `undefined` fica desligado, que é o padrão.
             AppState.preferences.pularGuarda = parsed.pularGuarda === true;
+            // O "Manter conectado" segue o padrão da constante: só quem DISSE
+            // outra coisa (booleano) a muda. Quem nunca abriu as Preferências
+            // fica no padrão.
+            AppState.preferences.manterConectado = typeof parsed.manterConectado === 'boolean'
+                ? parsed.manterConectado : MANTER_CONECTADO_PADRAO;
             // Opt-IN estrito tambem: quem nunca marcou nao paga byte nenhum.
             AppState.preferences.offlineDisponivel = parsed.offlineDisponivel === true;
             // undefined = nunca decidido (user antigo ou primeira visita).
@@ -31305,6 +31446,11 @@ function renderPularGuardaPref() {
     // abrir pra conferir encontraria a varredura dormindo.
     const off = document.getElementById('prefOfflineDisponivel');
     if (off) off.checked = AppState.preferences.offlineDisponivel === true;
+    // O "Manter conectado" não trava com a gente no meio de um pedido: se há uma
+    // troca no ar, o que a chave mostra é a escolha dela, não a memória.
+    conciliarManterComOServidor();
+    const manter = document.getElementById('prefManterConectado');
+    if (manter && manterNoAr === 0) manter.checked = AppState.preferences.manterConectado !== false;
     offlineMarcarGesto();
     offlineTalvezVarrer();   // quem veio conferir vê a preparação acontecendo, não um "Pronto" velho
     atualizarLinhaDoOffline(0, 0);

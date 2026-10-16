@@ -542,8 +542,20 @@ function duracaoDaSessao(dur, sessao) {
   return `${conta} · pisos ${sessao.pisos}${pisos.length ? ` (${pisos.join('; ')})` : ''}`;
 }
 
+// O "Manter conectado": o interruptor do aparelho e o que o servidor disse dele.
+// Relatório de antes do recurso não traz a seção: isso é a VERSÃO, não "desligado".
+function manterConectado(m) {
+  if (!m || typeof m !== 'object' || typeof m.ligado !== 'boolean') return AUSENTE;
+  const lig = (b) => (b ? 'ligado' : 'desligado');
+  const servidor = typeof m.servidor === 'boolean' ? lig(m.servidor) : 'não se sabe';
+  const diverge = typeof m.servidor === 'boolean' && m.servidor !== m.ligado
+    ? ' · ATENÇÃO: o servidor não está como o interruptor (a renovação sozinha não está como a pessoa pediu)' : '';
+  return `${lig(m.ligado)} (servidor: ${servidor})${diverge}`;
+}
+
 secao('SESSÃO E ARMAZENAMENTO');
 out(`duração da sessão (h): ${duracaoDaSessao(r.sessaoDuracaoH, d.sessao)} · nascimento ${d.sessao?.nascimento ?? '—'} · idade do armazenamento (h) ${d.sessao?.idadeDoArmazenamentoH ?? '—'}`);
+out(`Manter conectado: ${manterConectado(d.manterConectado)}`);
 out(`risco de apagamento: ${r.riscoDeApagamento ?? '—'}`);
 out(`recursos: ${j(d.recursosInfo)}`);
 
